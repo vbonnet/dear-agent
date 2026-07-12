@@ -45,7 +45,6 @@ type PerformanceReport struct {
 	MemoryUsage          runtime.MemStats
 }
 
-
 // calculateLatencyMetrics computes comprehensive latency statistics
 func calculateLatencyMetrics(latencies []time.Duration) LatencyMetrics {
 	if len(latencies) == 0 {
@@ -102,6 +101,29 @@ func newTestClient(t *testing.T, url string) *websocket.Conn {
 	require.NoError(t, err, "Failed to dial WebSocket")
 
 	return conn
+}
+
+func waitForSubscriptions(t *testing.T, hub *eventbus.Hub, sessionID string, want int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if hub.SubscriptionCount(sessionID) == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("subscription readiness for %s = %d, want %d", sessionID, hub.SubscriptionCount(sessionID), want)
+}
+
+func broadcastWithBackpressure(t *testing.T, hub *eventbus.Hub, event *eventbus.Event) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !hub.TryBroadcast(event) {
+		if time.Now().After(deadline) {
+			t.Fatal("event bus remained backpressured for 5s")
+		}
+		time.Sleep(100 * time.Microsecond)
+	}
 }
 
 // EventWithTimestamp wraps an event with creation timestamp for latency tracking
@@ -175,7 +197,7 @@ func TestBaseline(t *testing.T) {
 
 		sendTime := time.Now()
 		eventTimestamps[sessionID] = sendTime
-		hub.Broadcast(event)
+		broadcastWithBackpressure(t, hub, event)
 	}
 
 	// Wait for all events to be received
@@ -310,9 +332,10 @@ func TestLoad(t *testing.T) {
 		}(conn)
 	}
 
-	// Broadcast events
+	// Each broadcast fans out to every client. eventsPerClient broadcasts
+	// therefore produce totalEvents measured client deliveries.
 	testStart := time.Now()
-	for i := 0; i < totalEvents; i++ {
+	for i := range eventsPerClient {
 		event, err := eventbus.NewEvent(
 			eventbus.EventSessionStuck,
 			fmt.Sprintf("session-%d", i),
@@ -322,7 +345,7 @@ func TestLoad(t *testing.T) {
 			},
 		)
 		require.NoError(t, err)
-		hub.Broadcast(event)
+		broadcastWithBackpressure(t, hub, event)
 	}
 
 	// Wait for all events to be received
@@ -444,9 +467,10 @@ func TestBurst(t *testing.T) {
 		}(conn)
 	}
 
-	// Burst send all events as fast as possible
+	// Burst eventsPerClient broadcasts; each fans out to every client, yielding
+	// totalEvents measured deliveries without silently dropping queue entries.
 	testStart := time.Now()
-	for i := 0; i < totalEvents; i++ {
+	for i := range eventsPerClient {
 		event, _ := eventbus.NewEvent(
 			eventbus.EventSessionStuck,
 			fmt.Sprintf("session-%d", i),
@@ -455,7 +479,7 @@ func TestBurst(t *testing.T) {
 				Duration: 5 * time.Minute,
 			},
 		)
-		hub.Broadcast(event)
+		broadcastWithBackpressure(t, hub, event)
 	}
 
 	// Wait for all events
@@ -572,7 +596,7 @@ func TestSustained(t *testing.T) {
 
 	// Send events continuously
 	testStart := time.Now()
-	eventCount := 0
+	broadcastCount := 0
 	ticker := time.NewTicker(eventInterval)
 	defer ticker.Stop()
 
@@ -584,22 +608,35 @@ loop:
 		case <-timeout:
 			break loop
 		case <-ticker.C:
-			for i := 0; i < numClients; i++ {
-				event, _ := eventbus.NewEvent(
-					eventbus.EventSessionStuck,
-					fmt.Sprintf("session-%d-%d", i, eventCount),
-					eventbus.SessionStuckPayload{
-						Reason:   "Sustained test event",
-						Duration: 5 * time.Minute,
-					},
-				)
-				hub.Broadcast(event)
-				eventCount++
-			}
+			event, err := eventbus.NewEvent(
+				eventbus.EventSessionStuck,
+				fmt.Sprintf("session-%d", broadcastCount),
+				eventbus.SessionStuckPayload{
+					Reason:   "Sustained test event",
+					Duration: 5 * time.Minute,
+				},
+			)
+			require.NoError(t, err)
+			broadcastWithBackpressure(t, hub, event)
+			broadcastCount++
 		}
 	}
 
 	actualDuration := time.Since(testStart)
+	totalDeliveries := broadcastCount * numClients
+	drainDeadline := time.Now().Add(30 * time.Second)
+	for {
+		latMu.Lock()
+		delivered := len(latencies)
+		latMu.Unlock()
+		if delivered == totalDeliveries {
+			break
+		}
+		if time.Now().After(drainDeadline) {
+			t.Fatalf("Timeout draining sustained events: received %d/%d", delivered, totalDeliveries)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	// Close client connections to unblock ReadMessage in receiver goroutines.
 	for _, conn := range clients {
@@ -617,7 +654,7 @@ loop:
 	latMu.Unlock()
 
 	latencyMetrics := calculateLatencyMetrics(latenciesCopy)
-	throughput := float64(eventCount) / actualDuration.Seconds()
+	throughput := float64(totalDeliveries) / actualDuration.Seconds()
 
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
@@ -625,8 +662,8 @@ loop:
 	report := PerformanceReport{
 		TestName:             "Sustained (50 clients, 5 minutes)",
 		NumClients:           numClients,
-		EventsPerClient:      eventCount / numClients,
-		TotalEvents:          eventCount,
+		EventsPerClient:      broadcastCount,
+		TotalEvents:          totalDeliveries,
 		EventDeliveryLatency: latencyMetrics,
 		Throughput:           throughput,
 		TestDuration:         actualDuration,
@@ -741,8 +778,10 @@ func TestFilteredLoad(t *testing.T) {
 	}
 
 	wg.Wait()
-	time.Sleep(100 * time.Millisecond)
 	require.Equal(t, numClients, hub.ClientCount())
+	for session := range numSessions {
+		waitForSubscriptions(t, hub, fmt.Sprintf("session-%d", session), clientsPerSession)
+	}
 
 	// Track latencies
 	latencies := make([]time.Duration, 0, totalDelivered)
@@ -776,9 +815,8 @@ func TestFilteredLoad(t *testing.T) {
 		}(conn)
 	}
 
-	// Broadcast events for each session, paced to avoid overflowing the
-	// 256-deep broadcast channel. Send in rounds: one event per session
-	// per round, with brief pauses between rounds.
+	// Broadcast losslessly: the workload measures filtered delivery, so queue
+	// saturation is retried rather than silently changing the sample size.
 	testStart := time.Now()
 	for i := 0; i < eventsPerSession; i++ {
 		for s := 0; s < numSessions; s++ {
@@ -790,10 +828,7 @@ func TestFilteredLoad(t *testing.T) {
 					Duration: time.Minute,
 				},
 			)
-			hub.Broadcast(event)
-		}
-		if (i+1)%10 == 0 {
-			time.Sleep(5 * time.Millisecond)
+			broadcastWithBackpressure(t, hub, event)
 		}
 	}
 

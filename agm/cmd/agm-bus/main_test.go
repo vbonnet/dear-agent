@@ -83,7 +83,10 @@ func TestCLIServeShutdown(t *testing.T) {
 	}
 
 	// Wait for the socket to show up.
-	deadline := time.Now().Add(3 * time.Second)
+	// Full-suite runs can starve the subprocess briefly while hundreds of Go
+	// packages initialize concurrently. Keep this bounded, but allow enough
+	// time for the already-built binary to be scheduled.
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(sock); err == nil {
 			break

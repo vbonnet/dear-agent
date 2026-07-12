@@ -19,6 +19,8 @@ completion, idle, waiting, and stuck indicators for sentinel recovery.
 
 **STM-05** When pane information is captured, the system shall return the recent content, last command, and derived status indicators for the requested session.
 
+**STM-06** When `CI_SKIP_TMUX=true`, the test suite shall skip sentinel tmux integration tests without suppressing pure sentinel classification tests.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/agm_supervision_recovery_guardrails.feature`

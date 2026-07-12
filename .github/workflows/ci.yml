@@ -242,6 +242,9 @@ jobs:
       #     Our code never invokes csrf.Protect / TrustedOrigins;
       #     symbol-mode confirms (when run on Go ≥1.26 where the SSA
       #     panic is absent).
+      #   GO-2026-5932 — golang.org/x/crypto/openpgp is unmaintained.
+      #     Fixed in: N/A. Package scan reports the required module, while
+      #     govulncheck confirms no affected package or symbol is imported.
       - name: Run govulncheck
         run: |
           set -euo pipefail

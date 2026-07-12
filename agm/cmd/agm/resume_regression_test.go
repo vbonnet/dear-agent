@@ -48,6 +48,9 @@ func TestResumeDecisionLogic_TmuxExistsButClaudeNotRunning(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping tmux integration test in short mode")
 	}
+	if os.Getenv("CI_SKIP_TMUX") == "true" {
+		t.Skip("Skipping tmux integration test because CI_SKIP_TMUX=true")
+	}
 
 	// Skip if tmux not available
 	if _, err := exec.LookPath("tmux"); err != nil {
@@ -91,6 +94,9 @@ func TestResumeDecisionLogic_TmuxExistsButClaudeNotRunning(t *testing.T) {
 func TestResumeDecisionLogic_TmuxDoesNotExist(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping tmux integration test in short mode")
+	}
+	if os.Getenv("CI_SKIP_TMUX") == "true" {
+		t.Skip("Skipping tmux integration test because CI_SKIP_TMUX=true")
 	}
 
 	if _, err := exec.LookPath("tmux"); err != nil {

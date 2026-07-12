@@ -31,6 +31,10 @@ stall event shapes regardless of harness or model family.
 
 **EVENTBUS-10** When stall metrics are emitted, the system shall translate stall detected, recovered, and escalated events into metrics without requiring a harness-specific event schema.
 
+**EVENTBUS-11** When a caller uses nonblocking checked broadcast, the system shall report whether the event entered the hub queue instead of silently hiding backpressure.
+
+**EVENTBUS-12** When subscription readiness is inspected, the system shall report the number of connected clients whose active filter matches the requested session.
+
 ## BDD Traceability
 
 - `agm/test/bdd/features/harness_parity.feature`

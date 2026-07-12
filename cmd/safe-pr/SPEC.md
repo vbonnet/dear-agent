@@ -33,6 +33,8 @@ creation.
 
 **SAFE-PR-09** When safe-pr control flow is tested, the system shall replace the GitHub mutation boundary so unit tests cannot create real pull requests.
 
+**SAFE-PR-10** When safe-pr runs the repository full preflight, the system shall allow at least twenty minutes before terminating the gate.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`

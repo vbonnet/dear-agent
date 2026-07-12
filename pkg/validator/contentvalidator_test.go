@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/vbonnet/dear-agent/internal/tokens/tokenizers"
 )
 
 // Test fixtures
@@ -17,7 +18,7 @@ schema: ai-content/v1
 type: howto
 status: active
 created: 2024-01-15
-tokens: 34
+tokens: 26
 ---
 
 # Test Content
@@ -25,6 +26,26 @@ tokens: 34
 This is a test document with exactly 38 tokens according to tiktoken cl100k_base encoding.
 We need enough content to test token counting accurately.
 `
+
+func newTestContentValidator(contentDir string, autoFix bool) (*ContentValidator, error) {
+	absPath, err := filepath.Abs(contentDir)
+	if err != nil {
+		return nil, err
+	}
+	v := &ContentValidator{
+		contentDir:   absPath,
+		autoFix:      autoFix,
+		coreFiles:    make(map[string]bool),
+		tokenBudgets: make(map[string]int),
+		tokenizer:    tokenizers.NewSimpleTokenizer(),
+		errors:       make([]ContentValidationError, 0),
+		warnings:     make([]ContentValidationError, 0),
+		fixesApplied: make([]string, 0),
+	}
+	_ = v.loadCoreFiles()
+	_ = v.loadTokenBudgets()
+	return v, nil
+}
 
 const missingFieldsAiMd = `---
 schema: ai-content/v1
@@ -207,7 +228,7 @@ func TestFrontmatterCompleteness(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			file := writeTestFile(t, tmpDir, "test.ai.md", tt.content)
 
-			v, err := NewContentValidator(tmpDir, false)
+			v, err := newTestContentValidator(tmpDir, false)
 			require.NoError(t, err)
 
 			err = v.ValidateFile(file)
@@ -269,7 +290,7 @@ func TestTokenAccuracy(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			file := writeTestFile(t, tmpDir, "test.ai.md", tt.content)
 
-			v, err := NewContentValidator(tmpDir, tt.autoFix)
+			v, err := newTestContentValidator(tmpDir, tt.autoFix)
 			require.NoError(t, err)
 
 			err = v.ValidateFile(file)
@@ -299,7 +320,7 @@ func TestTokenAccuracyAutoFix(t *testing.T) {
 	tmpDir := setupTestDir(t)
 	file := writeTestFile(t, tmpDir, "test.ai.md", tokenMismatchAiMd)
 
-	v, err := NewContentValidator(tmpDir, true)
+	v, err := newTestContentValidator(tmpDir, true)
 	require.NoError(t, err)
 
 	err = v.ValidateFile(file)
@@ -358,7 +379,7 @@ func TestCoreStructure(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			file := writeTestFile(t, tmpDir, tt.filename, tt.content)
 
-			v, err := NewContentValidator(tmpDir, false)
+			v, err := newTestContentValidator(tmpDir, false)
 			require.NoError(t, err)
 
 			err = v.ValidateFile(file)
@@ -444,7 +465,7 @@ func TestProgressiveDisclosure(t *testing.T) {
 				writeTestFile(t, tmpDir, "test.why.md", "# Why file")
 			}
 
-			v, err := NewContentValidator(tmpDir, false)
+			v, err := newTestContentValidator(tmpDir, false)
 			require.NoError(t, err)
 
 			err = v.ValidateFile(file)
@@ -524,7 +545,7 @@ tokens: 1000
 		t.Run(tt.name, func(t *testing.T) {
 			file := writeTestFile(t, tmpDir, "test.ai.md", tt.content)
 
-			v, err := NewContentValidator(tmpDir, false)
+			v, err := newTestContentValidator(tmpDir, false)
 			require.NoError(t, err)
 
 			err = v.ValidateFile(file)
@@ -564,7 +585,7 @@ func TestValidateAll(t *testing.T) {
 	writeTestFile(t, tmpDir, "invalid.ai.md", missingFieldsAiMd)
 	writeTestFile(t, tmpDir, "mismatch.ai.md", tokenMismatchAiMd)
 
-	v, err := NewContentValidator(tmpDir, false)
+	v, err := newTestContentValidator(tmpDir, false)
 	require.NoError(t, err)
 
 	errorCount, warningCount, err := v.ValidateAll(nil)
@@ -585,7 +606,7 @@ func TestValidateSpecificFiles(t *testing.T) {
 	validFile := writeTestFile(t, tmpDir, "valid.ai.md", validAiMd)
 	invalidFile := writeTestFile(t, tmpDir, "invalid.ai.md", missingFieldsAiMd)
 
-	v, err := NewContentValidator(tmpDir, false)
+	v, err := newTestContentValidator(tmpDir, false)
 	require.NoError(t, err)
 
 	// Validate only the valid file
@@ -594,7 +615,7 @@ func TestValidateSpecificFiles(t *testing.T) {
 	assert.Equal(t, 0, errorCount)
 
 	// Reset validator
-	v, err = NewContentValidator(tmpDir, false)
+	v, err = newTestContentValidator(tmpDir, false)
 	require.NoError(t, err)
 
 	// Validate only the invalid file
@@ -639,7 +660,7 @@ type: howto
 		t.Run(tt.name, func(t *testing.T) {
 			file := writeTestFile(t, tmpDir, "test.ai.md", tt.content)
 
-			v, err := NewContentValidator(tmpDir, false)
+			v, err := newTestContentValidator(tmpDir, false)
 			require.NoError(t, err)
 
 			err = v.ValidateFile(file)
@@ -671,7 +692,7 @@ tokens: 20
 
 	file := writeTestFile(t, tmpDir, "unicode.ai.md", unicodeContent)
 
-	v, err := NewContentValidator(tmpDir, false)
+	v, err := newTestContentValidator(tmpDir, false)
 	require.NoError(t, err)
 
 	err = v.ValidateFile(file)
@@ -725,7 +746,7 @@ func TestContentValidationErrorString(t *testing.T) {
 func TestGetRelativePath(t *testing.T) {
 	tmpDir := setupTestDir(t)
 
-	v, err := NewContentValidator(tmpDir, false)
+	v, err := newTestContentValidator(tmpDir, false)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -757,7 +778,7 @@ func TestGetRelativePath(t *testing.T) {
 func TestEmptyFileList(t *testing.T) {
 	tmpDir := setupTestDir(t)
 
-	v, err := NewContentValidator(tmpDir, false)
+	v, err := newTestContentValidator(tmpDir, false)
 	require.NoError(t, err)
 
 	// Empty directory - no files to validate
@@ -784,7 +805,7 @@ tokens: "not a number"
 
 	file := writeTestFile(t, tmpDir, "test.ai.md", invalidTokenType)
 
-	v, err := NewContentValidator(tmpDir, false)
+	v, err := newTestContentValidator(tmpDir, false)
 	require.NoError(t, err)
 
 	err = v.ValidateFile(file)

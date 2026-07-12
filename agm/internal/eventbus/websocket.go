@@ -170,10 +170,18 @@ func (h *Hub) Run() {
 
 // Broadcast sends an event to all connected clients
 func (h *Hub) Broadcast(event *Event) {
+	if !h.TryBroadcast(event) {
+		h.logger.Warn("Broadcast channel full, event dropped")
+	}
+}
+
+// TryBroadcast queues an event without blocking and reports whether it was accepted.
+func (h *Hub) TryBroadcast(event *Event) bool {
 	select {
 	case h.broadcast <- event:
+		return true
 	default:
-		h.logger.Warn("Broadcast channel full, event dropped")
+		return false
 	}
 }
 
@@ -187,6 +195,20 @@ func (h *Hub) ClientCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.clients)
+}
+
+// SubscriptionCount reports how many connected clients currently subscribe
+// to sessionID. It is intended for readiness and observability checks.
+func (h *Hub) SubscriptionCount(sessionID string) int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	count := 0
+	for client := range h.clients {
+		if client.sessionFilter == sessionID {
+			count++
+		}
+	}
+	return count
 }
 
 // Client represents a WebSocket connection

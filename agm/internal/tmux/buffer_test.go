@@ -23,9 +23,7 @@ func TestCleanupBuffers_NoServer(t *testing.T) {
 }
 
 func TestCleanupBuffers_WithBuffers(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux not available")
-	}
+	skipIfNoTmux(t)
 
 	// Create isolated socket
 	testSocket := filepath.Join(socketDir(t), "agm.sock")
@@ -77,9 +75,7 @@ func TestBufferCount_NoServer(t *testing.T) {
 
 func TestDeleteBuffer_NoBuffer(t *testing.T) {
 	// deleteBuffer should not panic or block when buffer doesn't exist
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux not available")
-	}
+	skipIfNoTmux(t)
 
 	testSocket := filepath.Join(socketDir(t), "agm.sock")
 	t.Setenv("AGM_TMUX_SOCKET", testSocket)

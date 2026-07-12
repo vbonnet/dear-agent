@@ -2,8 +2,12 @@ package tmux
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCapturePaneContent(t *testing.T) {
@@ -84,6 +88,26 @@ func TestIsTmuxRunning(t *testing.T) {
 
 	// We can't assert a specific value since it depends on the environment
 	// but we can ensure it returns without error
+}
+
+func TestIsTmuxRunningTimesOut(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake tmux executable uses a POSIX shell")
+	}
+	dir := t.TempDir()
+	fakeTmux := filepath.Join(dir, "tmux")
+	if err := os.WriteFile(fakeTmux, []byte("#!/bin/sh\n/bin/sleep 10\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+
+	start := time.Now()
+	if IsTmuxRunning() {
+		t.Fatal("hung tmux probe reported a running server")
+	}
+	if elapsed := time.Since(start); elapsed > tmuxCommandTimeout+time.Second {
+		t.Fatalf("hung tmux probe returned after %s, want at most %s", elapsed, tmuxCommandTimeout+time.Second)
+	}
 }
 
 func TestCapturePaneHistory(t *testing.T) {

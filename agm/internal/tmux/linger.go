@@ -3,8 +3,10 @@ package tmux
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"os/user"
+	"strconv"
 	"strings"
 )
 
@@ -17,17 +19,34 @@ type LingerStatus struct {
 	ErrorMessage   string
 }
 
+type userIdentity struct {
+	Username string
+	UID      string
+}
+
+func currentIdentity() userIdentity {
+	return resolveCurrentIdentity(user.Current, os.Getuid(), os.Getenv("USER"))
+}
+
+func resolveCurrentIdentity(currentUser func() (*user.User, error), uid int, username string) userIdentity {
+	if current, err := currentUser(); err == nil {
+		return userIdentity{Username: current.Username, UID: current.Uid}
+	}
+
+	numericUID := strconv.Itoa(uid)
+	if username == "" {
+		username = numericUID
+	}
+	return userIdentity{Username: username, UID: numericUID}
+}
+
 // CheckLingering verifies if the current user has lingering enabled
 // Lingering prevents systemd from killing user processes (like tmux) on logout
 func CheckLingering() (*LingerStatus, error) {
-	currentUser, err := user.Current()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get current user: %w", err)
-	}
-
+	currentUser := currentIdentity()
 	status := &LingerStatus{
 		Username: currentUser.Username,
-		UID:      currentUser.Uid,
+		UID:      currentUser.UID,
 	}
 
 	// Check if loginctl exists
@@ -58,10 +77,7 @@ func CheckLingering() (*LingerStatus, error) {
 // EnableLingering enables user lingering for the current user
 // This requires either root privileges or polkit authorization
 func EnableLingering() error {
-	currentUser, err := user.Current()
-	if err != nil {
-		return fmt.Errorf("failed to get current user: %w", err)
-	}
+	currentUser := currentIdentity()
 
 	// Check if loginctl exists
 	if _, err := exec.LookPath("loginctl"); err != nil {
@@ -83,10 +99,7 @@ func EnableLingering() error {
 // DisableLingering disables user lingering for the current user
 // This is mainly for testing or cleanup purposes
 func DisableLingering() error {
-	currentUser, err := user.Current()
-	if err != nil {
-		return fmt.Errorf("failed to get current user: %w", err)
-	}
+	currentUser := currentIdentity()
 
 	// Check if loginctl exists
 	if _, err := exec.LookPath("loginctl"); err != nil {
@@ -108,13 +121,10 @@ func DisableLingering() error {
 // GetLingerPath returns the path to the linger file for the current user
 // This file's existence indicates lingering is enabled
 func GetLingerPath() (string, error) {
-	currentUser, err := user.Current()
-	if err != nil {
-		return "", fmt.Errorf("failed to get current user: %w", err)
-	}
+	currentUser := currentIdentity()
 
 	// Linger files are stored at: /var/lib/systemd/linger/$UID
-	return fmt.Sprintf("/var/lib/systemd/linger/%s", currentUser.Uid), nil
+	return fmt.Sprintf("/var/lib/systemd/linger/%s", currentUser.UID), nil
 }
 
 // IsLingerSupported checks if the system supports lingering (has systemd)
@@ -145,13 +155,10 @@ func GetLingerInfo() (*LingerInfo, error) {
 		return info, nil
 	}
 
-	currentUser, err := user.Current()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get current user: %w", err)
-	}
+	currentUser := currentIdentity()
 
 	info.Username = currentUser.Username
-	info.UID = currentUser.Uid
+	info.UID = currentUser.UID
 
 	// Get linger file path
 	lingerPath, err := GetLingerPath()

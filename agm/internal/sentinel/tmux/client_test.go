@@ -152,8 +152,16 @@ func TestHasSession_Integration(t *testing.T) {
 
 // isTmuxAvailable checks if tmux is installed and accessible.
 func isTmuxAvailable() bool {
+	if os.Getenv("CI_SKIP_TMUX") == "true" {
+		return false
+	}
 	cmd := exec.Command("tmux", "-V")
 	return cmd.Run() == nil
+}
+
+func TestIsTmuxAvailableHonorsCISkip(t *testing.T) {
+	t.Setenv("CI_SKIP_TMUX", "true")
+	assert.False(t, isTmuxAvailable())
 }
 
 // createTestSession creates a detached tmux session for testing.

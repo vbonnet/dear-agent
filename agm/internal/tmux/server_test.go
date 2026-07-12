@@ -56,9 +56,7 @@ func TestServerDeadError_Format(t *testing.T) {
 }
 
 func TestServerAlive_WithServer(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux not available")
-	}
+	skipIfNoTmux(t)
 
 	testSocket := filepath.Join(socketDir(t), "agm.sock")
 	t.Setenv("AGM_TMUX_SOCKET", testSocket)
