@@ -599,6 +599,28 @@ func TestHub_BroadcastChannelFull(t *testing.T) {
 	}
 }
 
+func TestHubTryBroadcastReportsBackpressure(t *testing.T) {
+	hub := NewHub()
+	event, err := NewEvent(EventSessionStuck, "session", SessionStuckPayload{Reason: "test"})
+	require.NoError(t, err)
+
+	for range cap(hub.broadcast) {
+		assert.True(t, hub.TryBroadcast(event))
+	}
+	assert.False(t, hub.TryBroadcast(event))
+}
+
+func TestHubSubscriptionCount(t *testing.T) {
+	hub := NewHub()
+	hub.clients[&Client{sessionFilter: "session-a"}] = true
+	hub.clients[&Client{sessionFilter: "session-a"}] = true
+	hub.clients[&Client{sessionFilter: "session-b"}] = true
+
+	assert.Equal(t, 2, hub.SubscriptionCount("session-a"))
+	assert.Equal(t, 1, hub.SubscriptionCount("session-b"))
+	assert.Zero(t, hub.SubscriptionCount("missing"))
+}
+
 func TestHub_SubscribeDefaultSessionID(t *testing.T) {
 	hub := NewHub()
 	go hub.Run()

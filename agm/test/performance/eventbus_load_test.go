@@ -45,7 +45,6 @@ type PerformanceReport struct {
 	MemoryUsage          runtime.MemStats
 }
 
-
 // calculateLatencyMetrics computes comprehensive latency statistics
 func calculateLatencyMetrics(latencies []time.Duration) LatencyMetrics {
 	if len(latencies) == 0 {
@@ -102,6 +101,29 @@ func newTestClient(t *testing.T, url string) *websocket.Conn {
 	require.NoError(t, err, "Failed to dial WebSocket")
 
 	return conn
+}
+
+func waitForSubscriptions(t *testing.T, hub *eventbus.Hub, sessionID string, want int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if hub.SubscriptionCount(sessionID) == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("subscription readiness for %s = %d, want %d", sessionID, hub.SubscriptionCount(sessionID), want)
+}
+
+func broadcastWithBackpressure(t *testing.T, hub *eventbus.Hub, event *eventbus.Event) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !hub.TryBroadcast(event) {
+		if time.Now().After(deadline) {
+			t.Fatal("event bus remained backpressured for 5s")
+		}
+		time.Sleep(100 * time.Microsecond)
+	}
 }
 
 // EventWithTimestamp wraps an event with creation timestamp for latency tracking
@@ -741,8 +763,10 @@ func TestFilteredLoad(t *testing.T) {
 	}
 
 	wg.Wait()
-	time.Sleep(100 * time.Millisecond)
 	require.Equal(t, numClients, hub.ClientCount())
+	for session := range numSessions {
+		waitForSubscriptions(t, hub, fmt.Sprintf("session-%d", session), clientsPerSession)
+	}
 
 	// Track latencies
 	latencies := make([]time.Duration, 0, totalDelivered)
@@ -776,9 +800,8 @@ func TestFilteredLoad(t *testing.T) {
 		}(conn)
 	}
 
-	// Broadcast events for each session, paced to avoid overflowing the
-	// 256-deep broadcast channel. Send in rounds: one event per session
-	// per round, with brief pauses between rounds.
+	// Broadcast losslessly: the workload measures filtered delivery, so queue
+	// saturation is retried rather than silently changing the sample size.
 	testStart := time.Now()
 	for i := 0; i < eventsPerSession; i++ {
 		for s := 0; s < numSessions; s++ {
@@ -790,10 +813,7 @@ func TestFilteredLoad(t *testing.T) {
 					Duration: time.Minute,
 				},
 			)
-			hub.Broadcast(event)
-		}
-		if (i+1)%10 == 0 {
-			time.Sleep(5 * time.Millisecond)
+			broadcastWithBackpressure(t, hub, event)
 		}
 	}
 
