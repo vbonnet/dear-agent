@@ -388,9 +388,9 @@ func UnregisteredParityFeatures(root string) ([]string, error) {
 	return missing, nil
 }
 
-// ValidateChangedGoPackageSpecs requires changed production Go package
-// directories to carry a co-located SPEC.md. It is intentionally diff-based so
-// legacy packages can be burned down incrementally without allowing new drift.
+// ValidateChangedGoPackageSpecs provides a fast, diff-scoped diagnostic for
+// changed production Go packages. ValidateAllImplementationSpecs remains the
+// authoritative repository-wide gate.
 func ValidateChangedGoPackageSpecs(ctx context.Context, root, baseRef string) ([]Finding, error) {
 	files, err := ChangedGoFiles(ctx, root, baseRef)
 	if err != nil {

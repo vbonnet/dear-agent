@@ -1058,11 +1058,14 @@ or unredacted trace content would break parity or privacy for every caller.
 - Every `*_parity.feature` file is registered in the coverage matrix.
 - Changed production Go package directories carry a co-located `SPEC.md`.
 - Changed production Go package `SPEC.md` files pass strict EARS lint.
+- The actual checkout gives every implementation directory strict co-located
+  SPEC and reciprocal executable BDD coverage across supported source formats.
 
 **Why this matters:** Parity work should not land as untraceable test-only or
-doc-only changes. The coverage matrix keeps SPEC and BDD artifacts paired while
-legacy repo-wide SPEC coverage is burned down incrementally. The diff-based
-package guard prevents new feature work from deepening the SPEC backlog.
+doc-only changes. The coverage matrix keeps SPEC and BDD artifacts paired, the
+diff-based package guard gives fast changed-package diagnostics, and the
+actual-checkout gate prevents any implementation directory from remaining
+outside strict SPEC and executable BDD enforcement.
 
 ### VROOM Runtime Guardrails
 
