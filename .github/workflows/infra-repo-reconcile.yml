@@ -42,14 +42,22 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Preflight — token present
+        id: preflight
         env:
           INFRA_GITHUB_TOKEN: ${{ secrets.INFRA_GITHUB_TOKEN }}
         run: |
-          if [ -z "${INFRA_GITHUB_TOKEN}" ]; then
+          if [ -n "${INFRA_GITHUB_TOKEN}" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            # Don't block PRs before the secret is configured — skip neutrally.
+            echo "::notice::INFRA_GITHUB_TOKEN not set — skipping reconciliation on this PR (configure the secret to enable enforcement)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
             echo "::error::missing INFRA_GITHUB_TOKEN (needed to list private repos)"; exit 1
           fi
 
       - name: Reconcile live repos against IaC
+        if: steps.preflight.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.INFRA_GITHUB_TOKEN }}
         run: |
