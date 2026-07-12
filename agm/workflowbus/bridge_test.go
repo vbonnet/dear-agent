@@ -96,12 +96,12 @@ func senderClient(t *testing.T, sockPath, sessionID string) (net.Conn, *bufio.Re
 
 // startBridge wires a Bridge to the test broker + a fakeSignaler.
 // Returns the signaler and a cancel func; cleanup is registered.
-func startBridge(t *testing.T, sockPath, sessionID string) *fakeSignaler {
+func startBridge(t *testing.T, server *bus.Server, sessionID string) *fakeSignaler {
 	t.Helper()
 	fs := &fakeSignaler{}
 	b := &Bridge{
 		SessionID:      sessionID,
-		SocketPath:     sockPath,
+		SocketPath:     server.SocketPath,
 		Signaler:       fs,
 		Logger:         slog.New(slog.NewTextHandler(nullWriter{}, nil)),
 		ReconnectDelay: 100 * time.Millisecond,
@@ -119,8 +119,14 @@ func startBridge(t *testing.T, sockPath, sessionID string) *fakeSignaler {
 		case <-time.After(3 * time.Second):
 		}
 	})
-	// Wait briefly for the bridge to register.
-	time.Sleep(100 * time.Millisecond)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := server.Registry.Route(sessionID); err == nil {
+			return fs
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("bridge session %q did not become routable", sessionID)
 	return fs
 }
 
@@ -133,7 +139,7 @@ func (nullWriter) Write(p []byte) (int, error) { return len(p), nil }
 func TestBridgeSignalsOnGatePrefix(t *testing.T) {
 	testutil.SkipOnCI(t)
 	s := startTestBroker(t)
-	fs := startBridge(t, s.SocketPath, "wf-test")
+	fs := startBridge(t, s, "wf-test")
 
 	// Another session sends "gate:approve" to wf-test.
 	sender, _ := senderClient(t, s.SocketPath, "human")
@@ -144,7 +150,7 @@ func TestBridgeSignalsOnGatePrefix(t *testing.T) {
 	}
 
 	// Wait for the signal to propagate.
-	waitForSignals(t, fs, 1, time.Second)
+	waitForSignals(t, fs, 1, 5*time.Second)
 	if got := fs.snapshot(); len(got) != 1 || got[0] != "approve" {
 		t.Errorf("calls = %v, want [approve]", got)
 	}
@@ -153,7 +159,7 @@ func TestBridgeSignalsOnGatePrefix(t *testing.T) {
 func TestBridgeSignalsOnExtraKind(t *testing.T) {
 	testutil.SkipOnCI(t)
 	s := startTestBroker(t)
-	fs := startBridge(t, s.SocketPath, "wf-test-2")
+	fs := startBridge(t, s, "wf-test-2")
 
 	sender, _ := senderClient(t, s.SocketPath, "human")
 	if err := bus.WriteFrame(sender, &bus.Frame{
@@ -163,7 +169,7 @@ func TestBridgeSignalsOnExtraKind(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	waitForSignals(t, fs, 1, time.Second)
+	waitForSignals(t, fs, 1, 5*time.Second)
 	if got := fs.snapshot(); len(got) != 1 || got[0] != "review-done" {
 		t.Errorf("calls = %v, want [review-done]", got)
 	}
@@ -172,7 +178,7 @@ func TestBridgeSignalsOnExtraKind(t *testing.T) {
 func TestBridgeIgnoresNonGateMessages(t *testing.T) {
 	testutil.SkipOnCI(t)
 	s := startTestBroker(t)
-	fs := startBridge(t, s.SocketPath, "wf-test-3")
+	fs := startBridge(t, s, "wf-test-3")
 
 	sender, _ := senderClient(t, s.SocketPath, "human")
 	// Regular chat-style message — not a gate signal.
@@ -191,7 +197,7 @@ func TestBridgeIgnoresNonGateMessages(t *testing.T) {
 func TestBridgeHandlesMultipleSignalsInSequence(t *testing.T) {
 	testutil.SkipOnCI(t)
 	s := startTestBroker(t)
-	fs := startBridge(t, s.SocketPath, "wf-test-4")
+	fs := startBridge(t, s, "wf-test-4")
 
 	sender, _ := senderClient(t, s.SocketPath, "human")
 	expected := []string{"step-1", "step-2", "step-3"}
@@ -203,7 +209,7 @@ func TestBridgeHandlesMultipleSignalsInSequence(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	waitForSignals(t, fs, len(expected), time.Second)
+	waitForSignals(t, fs, len(expected), 5*time.Second)
 	got := fs.snapshot()
 	if len(got) != len(expected) {
 		t.Fatalf("got %d signals, want %d", len(got), len(expected))
@@ -222,7 +228,7 @@ func TestBridgeReconnectsAfterBrokerDrop(t *testing.T) {
 	// connection via unregister; the broker treats it as a disconnect
 	// and the bridge's read loop errors, triggering reconnect.
 	s := startTestBroker(t)
-	fs := startBridge(t, s.SocketPath, "wf-reconnect")
+	fs := startBridge(t, s, "wf-reconnect")
 
 	// Force-unregister the bridge's session from the broker — mimics a
 	// half-closed socket. The broker Close()s the delivery, which the
@@ -252,7 +258,7 @@ func TestBridgeReconnectsAfterBrokerDrop(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	waitForSignals(t, fs, 1, time.Second)
+	waitForSignals(t, fs, 1, 5*time.Second)
 	calls := fs.snapshot()
 	found := false
 	for _, c := range calls {
