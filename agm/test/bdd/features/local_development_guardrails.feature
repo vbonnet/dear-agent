@@ -71,3 +71,8 @@ Feature: Local development guardrails
       | opencode-cli | deepseek  |
       | opencode-cli | nemotron  |
       | opencode-cli | qwen      |
+
+  Scenario: Safe PR creation allows the repository full gate to finish
+    Given the safe-pr full preflight timeout is configured
+    When AGM validates the safe-pr preflight budget
+    Then safe-pr should allow at least 20 minutes for preflight-full
