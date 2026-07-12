@@ -3,7 +3,10 @@ package steps
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/cucumber/godog"
 
@@ -18,12 +21,13 @@ type vroomRuntimePackageStateKey struct{}
 type vroomRuntimeParityStateKey struct{}
 
 type vroomRuntimeParityState struct {
-	harness      string
-	family       string
-	model        string
-	adjudicator  *escalation.ModelAdjudicator
-	adjudication escalation.Adjudication
-	dispatchArgs []string
+	harness        string
+	family         string
+	model          string
+	adjudicator    *escalation.ModelAdjudicator
+	adjudication   escalation.Adjudication
+	dispatchArgs   []string
+	supervisorSpec string
 }
 
 // RegisterVROOMRuntimeGuardrailSteps registers VROOM package and parity steps.
@@ -49,6 +53,32 @@ func RegisterVROOMRuntimeGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^VROOM harness "([^"]*)" has no explicit model route$`, vroomHarnessHasNoModelRoute)
 	ctx.Step(`^VROOM builds default worker dispatch arguments$`, vroomBuildsDefaultDispatchArguments)
 	ctx.Step(`^VROOM worker dispatch should omit a fixed model route$`, vroomDispatchOmitsFixedModelRoute)
+	ctx.Step(`^AGM validates VROOM queue storage hygiene$`, agmValidatesVROOMQueueStorageHygiene)
+	ctx.Step(`^the VROOM supervisor specification should require cleared backing storage$`, vroomSupervisorSpecificationRequiresClearedBackingStorage)
+}
+
+func agmValidatesVROOMQueueStorageHygiene(ctx context.Context) error {
+	state, err := getVROOMRuntimeParityState(ctx)
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(filepath.Join(packageSpecBDDRepoRoot(), "pkg", "vroom", "supervisor", "SPEC.md"))
+	if err != nil {
+		return fmt.Errorf("read VROOM supervisor SPEC: %w", err)
+	}
+	state.supervisorSpec = string(data)
+	return nil
+}
+
+func vroomSupervisorSpecificationRequiresClearedBackingStorage(ctx context.Context) error {
+	state, err := getVROOMRuntimeParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(state.supervisorSpec, "**VROOM-SUP-27**") || !strings.Contains(state.supervisorSpec, "clear the vacated backing-array slot") {
+		return fmt.Errorf("VROOM supervisor SPEC does not enforce queue storage release")
+	}
+	return nil
 }
 
 func vroomHarnessUsesModelFamily(ctx context.Context, harness, family, model string) error {

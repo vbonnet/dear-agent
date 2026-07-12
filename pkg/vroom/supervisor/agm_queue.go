@@ -150,7 +150,9 @@ func (q *AGMQueue) removePending(taskID string) {
 	defer q.mu.Unlock()
 	for i, t := range q.pending {
 		if t.ID == taskID {
-			q.pending = append(q.pending[:i], q.pending[i+1:]...)
+			copy(q.pending[i:], q.pending[i+1:])
+			q.pending[len(q.pending)-1] = Task{}
+			q.pending = q.pending[:len(q.pending)-1]
 			return
 		}
 	}

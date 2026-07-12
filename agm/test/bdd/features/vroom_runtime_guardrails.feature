@@ -69,3 +69,7 @@ Feature: VROOM runtime guardrails
       | codex-cli   |
       | agy         |
       | opencode-cli |
+
+  Scenario: Removed queue tasks release retained storage
+    When AGM validates VROOM queue storage hygiene
+    Then the VROOM supervisor specification should require cleared backing storage
