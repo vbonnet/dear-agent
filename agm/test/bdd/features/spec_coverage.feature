@@ -47,3 +47,4 @@ Feature: SPEC and BDD coverage
     Given AGM parity coverage requirements
     When AGM validates repository-wide implementation SPEC and BDD coverage
     Then every implementation directory should have strict co-located SPEC and reciprocal BDD coverage
+    And every repository SPEC should have strict EARS and reciprocal executable BDD coverage

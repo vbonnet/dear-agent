@@ -41,6 +41,7 @@ func RegisterSpecCoverageSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^changed production Go package SPEC.md files should pass strict EARS lint$`, changedProductionGoPackageSPECFilesShouldPassStrictEARSLint)
 	ctx.Step(`^AGM validates repository-wide implementation SPEC and BDD coverage$`, agmValidatesRepositoryImplementationCoverage)
 	ctx.Step(`^every implementation directory should have strict co-located SPEC and reciprocal BDD coverage$`, everyImplementationDirectoryShouldHaveStrictCoverage)
+	ctx.Step(`^every repository SPEC should have strict EARS and reciprocal executable BDD coverage$`, everyImplementationDirectoryShouldHaveStrictCoverage)
 }
 
 func agmParityCoverageRequirements(ctx context.Context) error {
@@ -143,7 +144,12 @@ func agmValidatesRepositoryImplementationCoverage(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	repositorySpecFindings, err := speccoverage.ValidateAllRepositorySpecs(specCoverageRepoRoot())
+	if err != nil {
+		return err
+	}
 	state.findings = findings
+	state.findings = append(state.findings, repositorySpecFindings...)
 	return nil
 }
 

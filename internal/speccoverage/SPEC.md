@@ -64,6 +64,8 @@ production, test, support, configuration, service, and executable sources.
 
 **SCB-24** When the repository test suite runs, the system shall validate repository-wide implementation coverage against the actual checkout rather than only synthetic validator fixtures.
 
+**SCB-25** When repository-wide coverage is validated, the system shall require every SPEC.md artifact, including doc-only and hidden policy contracts, to retain strict EARS and reciprocal executable BDD traceability.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/spec_coverage.feature`

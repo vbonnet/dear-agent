@@ -1060,6 +1060,8 @@ or unredacted trace content would break parity or privacy for every caller.
 - Changed production Go package `SPEC.md` files pass strict EARS lint.
 - The actual checkout gives every implementation directory strict co-located
   SPEC and reciprocal executable BDD coverage across supported source formats.
+- Every SPEC artifact, including doc-only and hidden policy contracts, retains
+  strict EARS and reciprocal executable BDD traceability.
 
 **Why this matters:** Parity work should not land as untraceable test-only or
 doc-only changes. The coverage matrix keeps SPEC and BDD artifacts paired, the

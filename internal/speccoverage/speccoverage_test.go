@@ -21,10 +21,16 @@ func TestParitySurfacesHaveSpecAndBDD(t *testing.T) {
 }
 
 func TestRepositoryImplementationSpecsAndBDD(t *testing.T) {
-	findings, err := ValidateAllImplementationSpecs(repoRoot())
+	root := repoRoot()
+	findings, err := ValidateAllImplementationSpecs(root)
 	if err != nil {
 		t.Fatal(err)
 	}
+	repositorySpecFindings, err := ValidateAllRepositorySpecs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings = append(findings, repositorySpecFindings...)
 	for _, finding := range findings {
 		t.Error(finding.Error())
 	}
@@ -633,6 +639,20 @@ func TestValidateAllImplementationSpecsRequiresNonGoSpec(t *testing.T) {
 	}
 	if len(findings) != 1 || findings[0].Path != "services/typescript/SPEC.md" {
 		t.Fatalf("expected missing TypeScript SPEC finding, got %v", findings)
+	}
+}
+
+func TestValidateAllRepositorySpecsIncludesDocOnlyContracts(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCoverageFile(t, root, "docs/policy/SPEC.md", "# Policy\n\n## EARS Requirements\n\n**POL-01** When policy is checked, the system shall require BDD traceability.\n")
+
+	findings, err := ValidateAllRepositorySpecs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].Path != "docs/policy/SPEC.md" || !strings.Contains(findings[0].Message, "executable BDD feature") {
+		t.Fatalf("expected missing doc-only BDD finding, got %v", findings)
 	}
 }
 

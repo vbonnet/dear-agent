@@ -421,6 +421,19 @@ func ValidateAllImplementationSpecs(root string) ([]Finding, error) {
 	return validateAllImplementationDirs(root, implementationDirs)
 }
 
+// ValidateAllRepositorySpecs requires every SPEC.md artifact, including specs
+// in doc-only and hidden policy directories, to retain strict EARS and
+// reciprocal executable BDD traceability.
+func ValidateAllRepositorySpecs(root string) ([]Finding, error) {
+	specDirs, err := allImplementationDirs(root, func(entry os.DirEntry) (bool, error) {
+		return entry.Name() == "SPEC.md", nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return validateAllImplementationDirs(root, specDirs)
+}
+
 func validateAllImplementationDirs(root string, dirs []string) ([]Finding, error) {
 	rootFS, err := os.OpenRoot(root)
 	if err != nil {
