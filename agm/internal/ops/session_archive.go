@@ -51,6 +51,7 @@ type ArchiveSessionResult struct {
 	SandboxCleaned      bool                            `json:"sandbox_cleaned,omitempty"`
 	PendingDelegations  int                             `json:"pending_delegations,omitempty"`
 	PostCleanup         *CleanupResult                  `json:"post_cleanup,omitempty"`
+	ExternalArchives    []ExternalArchiveOutcome        `json:"external_archives,omitempty"`
 }
 
 // ArchiveSession marks a session as archived.
@@ -121,6 +122,12 @@ func ArchiveSession(ctx *OpContext, req *ArchiveSessionRequest) (*ArchiveSession
 	}
 
 	mcpKilled, postCleanup := runArchiveCleanup(ctx, m, req.KeepSandbox)
+	externalArchives := archiveExternalForContext(ctx, m)
+	for _, outcome := range externalArchives {
+		if outcome.Status == ExternalArchiveFailed {
+			slog.Warn("External session archive failed after AGM archival", "session", m.SessionID, "provider", outcome.Provider, "error", outcome.Detail)
+		}
+	}
 
 	return &ArchiveSessionResult{
 		Operation:           "archive_session",
@@ -132,6 +139,7 @@ func ArchiveSession(ctx *OpContext, req *ArchiveSessionRequest) (*ArchiveSession
 		MCPProcessesCleaned: mcpKilled,
 		SandboxCleaned:      postCleanup.SandboxRemoved,
 		PostCleanup:         postCleanup,
+		ExternalArchives:    externalArchives,
 	}, nil
 }
 

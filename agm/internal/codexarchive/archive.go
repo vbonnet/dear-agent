@@ -26,7 +26,18 @@ const (
 	envRemoteToken = "AGM_CODEX_REMOTE_AUTH_TOKEN_ENV"
 )
 
-var archiveCodexThreadFn = archiveCodexThread
+var (
+	archiveCodexThreadFn = archiveCodexThread
+	newThreadArchiver    = func() codexThreadArchiver { return codexcontrol.New() }
+	runCodexArchiveFn    = runCodexArchive
+)
+
+// codexThreadArchiver deliberately exposes only the session-scoped archive
+// operation. In particular, it excludes device-global remote-control methods
+// so archival cannot accidentally enable or disable another session's relay.
+type codexThreadArchiver interface {
+	ArchiveThread(context.Context, string) error
+}
 
 // Result describes the Codex-side archive operation paired with AGM archive.
 type Result struct {
@@ -103,13 +114,10 @@ func Archive(ctx context.Context, req Request) (*Result, error) {
 }
 
 func archiveCodexThread(ctx context.Context, threadID string) error {
-	client := codexcontrol.New()
-	if err := client.StartRemoteControl(ctx); err == nil {
-		if err := client.ArchiveThread(ctx, threadID); err == nil {
-			return nil
-		}
+	if err := newThreadArchiver().ArchiveThread(ctx, threadID); err == nil {
+		return nil
 	}
-	return runCodexArchive(ctx, threadID)
+	return runCodexArchiveFn(ctx, threadID)
 }
 
 func (r Request) candidateDirs() []string {
