@@ -192,9 +192,9 @@ func validateRemoteURL(dir string) error {
 	return nil
 }
 
-// preflightTimeout bounds `make preflight-full` — large enough to cover
-// go test -race plus govulncheck on a warm module cache.
-const preflightTimeout = 10 * time.Minute
+// preflightTimeout bounds `make preflight-full` while covering the repository's
+// cold race suite, long-running SQLite package, and vulnerability scan.
+const preflightTimeout = 30 * time.Minute
 
 // runPreflightFull runs `make -C dir preflight-full` and returns a clear error
 // on failure. Assigned to a var so tests can replace it without spawning make.

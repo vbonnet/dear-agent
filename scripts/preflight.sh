@@ -118,8 +118,10 @@ if [[ "$MODE" == "full" ]]; then
   if ! command -v jq >/dev/null 2>&1; then
     fail "jq not installed. Run: brew install jq"
   fi
-  # Mirror ci.yml: package-scan mode + the GO-2025-3884 allowlist for the
-  # not-called gorilla/csrf finding pulled in via tailscale.com/client/web.
+  # Mirror ci.yml package-scan mode and its reviewed not-called/module-only
+  # findings. GO-2025-3884 is gorilla/csrf pulled in via tailscale.com/client/web.
+  # GO-2026-5932 marks x/crypto/openpgp unmaintained with no fixed release;
+  # govulncheck confirms this repository imports no affected package or symbol.
   # `mktemp` with no arg is portable across macOS BSD and GNU; using a
   # `-t prefix.XXX.json` template tripping GNU mktemp's "must end in XXX"
   # rule is not worth the prettier filename.
@@ -136,7 +138,7 @@ if [[ "$MODE" == "full" ]]; then
     fail "govulncheck failed to run (exit code $VULN_EXIT)"
   fi
   unhandled=$(jq -c \
-    --argjson allow '["GO-2025-3884"]' \
+    --argjson allow '["GO-2025-3884", "GO-2026-5932"]' \
     'select(.finding != null)
      | select(.finding.osv as $id | $allow | index($id) | not)
      | .finding' \

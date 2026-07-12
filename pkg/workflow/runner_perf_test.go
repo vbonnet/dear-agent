@@ -11,14 +11,17 @@ import (
 	"github.com/google/uuid"
 )
 
-// skipPerfOnCI guards P95 perf tests from running on shared CI runners where
-// wall-clock latency is dominated by noisy neighbors rather than the code under
-// test. The ADR targets (status_read < 5ms, audit_append < 1ms, list < 10ms)
-// are floors for production hardware, not for ubuntu-latest VMs.
-func skipPerfOnCI(t *testing.T) {
+// skipUnreliablePerfEnvironment guards P95 tests from environments where
+// wall-clock latency does not represent production execution. The ADR targets
+// are floors for production hardware, not shared runners or race-instrumented
+// binaries.
+func skipUnreliablePerfEnvironment(t *testing.T) {
 	t.Helper()
 	if os.Getenv("CI") != "" {
 		t.Skip("perf P95 test skipped in CI: shared runners produce unreliable latency numbers (set CI= to run)")
+	}
+	if raceEnabled {
+		t.Skip("perf P95 test skipped under race instrumentation: run go test without -race to enforce latency targets")
 	}
 }
 
@@ -38,18 +41,18 @@ func skipPerfOnCI(t *testing.T) {
 // floor every backend must clear.
 
 const (
-	perfSampleCount   = 200
-	statusReadP95     = 5 * time.Millisecond
-	auditAppendP95    = 1 * time.Millisecond
-	listRecentP95     = 10 * time.Millisecond
-	perfNodeCount     = 100
+	perfSampleCount    = 200
+	statusReadP95      = 5 * time.Millisecond
+	auditAppendP95     = 1 * time.Millisecond
+	listRecentP95      = 10 * time.Millisecond
+	perfNodeCount      = 100
 	perfRunsForListing = 50
 )
 
 // TestPerf_StatusReadP95 measures end-to-end run-status reads — runs JOIN
 // nodes — for a synthetic 100-node DAG.
 func TestPerf_StatusReadP95(t *testing.T) {
-	skipPerfOnCI(t)
+	skipUnreliablePerfEnvironment(t)
 	ss := openTestState(t)
 	runID := seedRunWithNodes(t, ss, perfNodeCount)
 
@@ -66,7 +69,7 @@ func TestPerf_StatusReadP95(t *testing.T) {
 // audit_events table. The runner emits one of these per state transition,
 // so they must stay cheap to keep the engine's overhead invisible.
 func TestPerf_AuditAppendP95(t *testing.T) {
-	skipPerfOnCI(t)
+	skipUnreliablePerfEnvironment(t)
 	ss := openTestState(t)
 	runID := seedRun(t, ss)
 
@@ -74,9 +77,9 @@ func TestPerf_AuditAppendP95(t *testing.T) {
 	for i := 0; i < perfSampleCount; i++ {
 		start := time.Now()
 		if err := ss.Emit(context.Background(), AuditEvent{
-			RunID:     runID,
-			ToState:   "running",
-			Actor:     "system",
+			RunID:   runID,
+			ToState: "running",
+			Actor:   "system",
 		}); err != nil {
 			t.Fatalf("Emit: %v", err)
 		}
@@ -88,7 +91,7 @@ func TestPerf_AuditAppendP95(t *testing.T) {
 // TestPerf_ListRecentRunsP95 measures the cost of `workflow list`-style
 // queries: select the 50 most recent runs by started_at.
 func TestPerf_ListRecentRunsP95(t *testing.T) {
-	skipPerfOnCI(t)
+	skipUnreliablePerfEnvironment(t)
 	ss := openTestState(t)
 	for i := 0; i < perfRunsForListing*4; i++ {
 		seedRunNamed(t, ss, fmt.Sprintf("perf-list-%d", i))
@@ -215,4 +218,3 @@ func assertP95(t *testing.T, label string, samples []time.Duration, limit time.D
 			label, p95, limit, median, len(samples))
 	}
 }
-

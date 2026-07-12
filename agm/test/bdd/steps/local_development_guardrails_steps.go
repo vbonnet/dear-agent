@@ -2,10 +2,14 @@ package steps
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/cucumber/godog"
@@ -13,14 +17,17 @@ import (
 )
 
 type localDevGuardrailState struct {
-	command     string
-	commandSpec string
-	library     string
-	librarySpec string
-	traceDir    string
-	trace       safepr.Session
-	harness     string
-	family      string
+	command            string
+	commandSpec        string
+	library            string
+	librarySpec        string
+	traceDir           string
+	trace              safepr.Session
+	harness            string
+	family             string
+	preflightMinutes   int
+	localVulnAllowlist []string
+	ciVulnAllowlist    []string
 }
 
 type localDevGuardrailStateKey struct{}
@@ -49,6 +56,110 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^canonical Wayfinder V2 status for harness "([^"]*)" and model family "([^"]*)"$`, canonicalWayfinderV2StatusForRoute)
 	ctx.Step(`^safe-pr loads the canonical planning trace$`, safePRLoadsCanonicalPlanningTrace)
 	ctx.Step(`^safe-pr should attribute the trace to project "([^"]*)"$`, safePRShouldAttributeTraceToProject)
+	ctx.Step(`^the safe-pr full preflight timeout is configured$`, safePRFullPreflightTimeoutIsConfigured)
+	ctx.Step(`^AGM validates the safe-pr preflight budget$`, agmValidatesSafePRPreflightBudget)
+	ctx.Step(`^safe-pr should allow at least (\d+) minutes for preflight-full$`, safePRShouldAllowAtLeastMinutesForPreflightFull)
+	ctx.Step(`^local and required CI govulncheck allowlists are configured$`, localAndRequiredCIGovulncheckAllowlistsAreConfigured)
+	ctx.Step(`^AGM validates govulncheck policy parity$`, agmValidatesGovulncheckPolicyParity)
+	ctx.Step(`^the local and required CI govulncheck allowlists should match$`, localAndRequiredCIGovulncheckAllowlistsShouldMatch)
+}
+
+func localAndRequiredCIGovulncheckAllowlistsAreConfigured(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	root := localDevBDDRepoRoot()
+	state.localVulnAllowlist, err = readGovulncheckAllowlist(filepath.Join(root, "scripts", "preflight.sh"))
+	if err != nil {
+		return fmt.Errorf("local govulncheck allowlist: %w", err)
+	}
+	state.ciVulnAllowlist, err = readGovulncheckAllowlist(filepath.Join(root, ".github", "workflows", "ci.yml"))
+	if err != nil {
+		return fmt.Errorf("required CI govulncheck allowlist: %w", err)
+	}
+	return nil
+}
+
+func readGovulncheckAllowlist(path string) ([]string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	match := regexp.MustCompile(`--argjson allow '(\[[^']+\])'`).FindSubmatch(content)
+	if len(match) != 2 {
+		return nil, fmt.Errorf("allowlist declaration not found in %s", path)
+	}
+	var ids []string
+	if err := json.Unmarshal(match[1], &ids); err != nil {
+		return nil, fmt.Errorf("parse allowlist in %s: %w", path, err)
+	}
+	return ids, nil
+}
+
+func agmValidatesGovulncheckPolicyParity(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if len(state.localVulnAllowlist) == 0 || len(state.ciVulnAllowlist) == 0 {
+		return fmt.Errorf("govulncheck allowlists are not configured")
+	}
+	return nil
+}
+
+func localAndRequiredCIGovulncheckAllowlistsShouldMatch(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if !slices.Equal(state.localVulnAllowlist, state.ciVulnAllowlist) {
+		return fmt.Errorf("local govulncheck allowlist %v does not match required CI %v", state.localVulnAllowlist, state.ciVulnAllowlist)
+	}
+	return nil
+}
+
+func safePRFullPreflightTimeoutIsConfigured(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	sourcePath := filepath.Join(localDevBDDRepoRoot(), "cmd", "safe-pr", "main.go")
+	source, err := os.ReadFile(sourcePath)
+	if err != nil {
+		return fmt.Errorf("read safe-pr source: %w", err)
+	}
+	match := regexp.MustCompile(`preflightTimeout\s*=\s*(\d+)\s*\*\s*time\.Minute`).FindSubmatch(source)
+	if len(match) != 2 {
+		return fmt.Errorf("safe-pr preflight timeout declaration not found")
+	}
+	state.preflightMinutes, err = strconv.Atoi(string(match[1]))
+	if err != nil {
+		return fmt.Errorf("parse safe-pr preflight timeout: %w", err)
+	}
+	return nil
+}
+
+func agmValidatesSafePRPreflightBudget(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.preflightMinutes <= 0 {
+		return fmt.Errorf("safe-pr preflight timeout is not configured")
+	}
+	return nil
+}
+
+func safePRShouldAllowAtLeastMinutesForPreflightFull(ctx context.Context, minimum int) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.preflightMinutes < minimum {
+		return fmt.Errorf("safe-pr preflight timeout = %dm, want at least %dm", state.preflightMinutes, minimum)
+	}
+	return nil
 }
 
 func canonicalWayfinderV2StatusForRoute(ctx context.Context, harness, family string) error {

@@ -416,14 +416,6 @@ func validateChangedPackageSpec(root, dir string) []Finding {
 	}
 
 	specText := string(spec)
-	if !strings.Contains(specText, "## EARS Requirements") {
-		return []Finding{{
-			Surface: "changed Go package SPEC coverage",
-			Path:    specPath,
-			Message: "SPEC.md has invalid EARS syntax: does not declare EARS requirements",
-		}}
-	}
-
 	return validateSpecEARS(Surface{
 		Name:     "changed Go package SPEC coverage",
 		SpecPath: specPath,

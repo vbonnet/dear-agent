@@ -13,9 +13,7 @@ import (
 // codex script) instead of an interactive shell. Returns the socket path.
 func newCodexTestSession(t *testing.T, sessionName string, cmd ...string) string {
 	t.Helper()
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux not available")
-	}
+	skipIfNoTmux(t)
 	socketPath := GetSocketPath()
 	exec.Command("tmux", "-S", socketPath, "kill-session", "-t", sessionName).Run()
 
@@ -284,9 +282,7 @@ func TestIsCodexIdleWorking(t *testing.T) {
 // session does not exist (so callers can distinguish "can't capture" from
 // "working").
 func TestIsCodexIdleNoSession(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux not available")
-	}
+	skipIfNoTmux(t)
 	idle, err := IsCodexIdle("test-codex-idle-nonexistent")
 	if err == nil {
 		t.Error("IsCodexIdle on a missing session: expected error, got nil")

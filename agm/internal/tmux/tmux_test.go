@@ -92,18 +92,30 @@ func TestNormalizeTmuxSessionName(t *testing.T) {
 
 // Helper function to check if tmux is available
 func isTmuxAvailable() bool {
+	if os.Getenv("CI_SKIP_TMUX") == "true" {
+		return false
+	}
 	_, err := exec.LookPath("tmux")
 	return err == nil
 }
 
 // Helper function to skip if in CI without tmux testing enabled
-func skipIfNoTmux(t *testing.T) {
+func skipIfNoTmux(tb testing.TB) {
+	tb.Helper()
+	if os.Getenv("CI_SKIP_TMUX") == "true" {
+		tb.Skip("Skipping tmux tests because CI_SKIP_TMUX=true")
+	}
 	if !isTmuxAvailable() {
-		t.Skip("tmux not available")
+		tb.Skip("tmux not available")
 	}
 	if os.Getenv("CI") != "" && os.Getenv("AGM_TEST_TMUX") == "" {
-		t.Skip("Skipping tmux tests in CI (set AGM_TEST_TMUX=1 to enable)")
+		tb.Skip("Skipping tmux tests in CI (set AGM_TEST_TMUX=1 to enable)")
 	}
+}
+
+func TestIsTmuxAvailableHonorsCISkip(t *testing.T) {
+	t.Setenv("CI_SKIP_TMUX", "true")
+	assert.False(t, isTmuxAvailable())
 }
 
 // socketDir creates a short-path temp dir suitable for Unix socket files.

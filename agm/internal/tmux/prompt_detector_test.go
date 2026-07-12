@@ -419,9 +419,7 @@ func TestStripANSI(t *testing.T) {
 // TestWaitForClaudePromptPolling tests the capture-pane polling approach
 func TestWaitForClaudePromptPolling(t *testing.T) {
 	// Skip if tmux not available
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux not available")
-	}
+	skipIfNoTmux(t)
 
 	// Create a test session with Claude prompt
 	sessionName := "test-prompt-detection-polling"
@@ -454,9 +452,7 @@ func TestWaitForClaudePromptPolling(t *testing.T) {
 // TestWaitForClaudePromptTimeout tests timeout behavior
 func TestWaitForClaudePromptTimeout(t *testing.T) {
 	// Skip if tmux not available
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux not available")
-	}
+	skipIfNoTmux(t)
 
 	sessionName := "test-prompt-timeout"
 	socketPath := GetSocketPath()
@@ -497,9 +493,7 @@ func TestWaitForClaudePromptTimeout(t *testing.T) {
 // This is the REGRESSION TEST that prevents going back to control mode.
 func TestCapturePaneReadsHistoricalOutput(t *testing.T) {
 	// Skip if tmux not available
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux not available")
-	}
+	skipIfNoTmux(t)
 
 	sessionName := "test-historical-output"
 	socketPath := GetSocketPath()
@@ -550,9 +544,7 @@ func TestCapturePaneReadsHistoricalOutput(t *testing.T) {
 // TestWaitForClaudePromptIgnoresBashPrompts verifies we don't false-positive on bash prompts
 func TestWaitForClaudePromptIgnoresBashPrompts(t *testing.T) {
 	// Skip if tmux not available
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux not available")
-	}
+	skipIfNoTmux(t)
 
 	sessionName := "test-bash-prompt"
 	socketPath := GetSocketPath()
@@ -593,9 +585,7 @@ func TestWaitForClaudePromptIgnoresBashPrompts(t *testing.T) {
 // BenchmarkWaitForClaudePrompt benchmarks the polling performance
 func BenchmarkWaitForClaudePrompt(b *testing.B) {
 	// Skip if tmux not available
-	if _, err := exec.LookPath("tmux"); err != nil {
-		b.Skip("tmux not available")
-	}
+	skipIfNoTmux(b)
 
 	sessionName := "test-prompt-bench"
 	socketPath := GetSocketPath()

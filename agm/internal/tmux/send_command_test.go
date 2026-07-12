@@ -43,9 +43,7 @@ func TestSendCommand_EnterKeyDocumentation(t *testing.T) {
 // TestSendCommand_SpecialCharacters tests that special characters are handled correctly
 func TestSendCommand_SpecialCharacters(t *testing.T) {
 	// Skip if tmux not available
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux not available")
-	}
+	skipIfNoTmux(t)
 
 	if os.Getenv("CI") != "" && os.Getenv("AGM_TEST_TMUX") == "" {
 		t.Skip("Skipping tmux integration test in CI")
@@ -176,9 +174,7 @@ func TestSendCommand_Timeout(t *testing.T) {
 // Benchmark to ensure SendCommand performance hasn't regressed
 func BenchmarkSendCommand(b *testing.B) {
 	// Skip if tmux not available
-	if _, err := exec.LookPath("tmux"); err != nil {
-		b.Skip("tmux not available")
-	}
+	skipIfNoTmux(b)
 
 	// Create test session
 	tmpDir := b.TempDir()

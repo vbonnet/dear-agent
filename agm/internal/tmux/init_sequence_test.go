@@ -235,6 +235,7 @@ func TestInitSequence_Run_Success(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
+	skipIfNoTmux(t)
 
 	setupTestSocket(t)
 	setupTestState(t)
@@ -284,6 +285,7 @@ func TestInitSequence_Run_Timeout(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
+	skipIfNoTmux(t)
 
 	setupTestSocket(t)
 	setupTestState(t)

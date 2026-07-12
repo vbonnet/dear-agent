@@ -20,9 +20,7 @@ import (
 // concurrent send-keys sequences to interleave at the tmux server level,
 // causing cross-session byte leakage and spurious copy-mode activation.
 func TestSendPromptLiteral_AcquiresLock(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux not available")
-	}
+	skipIfNoTmux(t)
 	if os.Getenv("CI") != "" && os.Getenv("AGM_TEST_TMUX") == "" {
 		t.Skip("Skipping tmux integration test in CI")
 	}
@@ -104,9 +102,7 @@ func TestSendKeysToPane_AcquiresLock(t *testing.T) {
 // TestCrossSessionIsolation_Sequential verifies that sequential sends to
 // different sessions do not contaminate each other's pane content.
 func TestCrossSessionIsolation_Sequential(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux not available")
-	}
+	skipIfNoTmux(t)
 	if os.Getenv("CI") != "" && os.Getenv("AGM_TEST_TMUX") == "" {
 		t.Skip("Skipping tmux integration test in CI")
 	}
@@ -166,9 +162,7 @@ func TestCrossSessionIsolation_Sequential(t *testing.T) {
 // into tmux copy-mode "(jump backward)" while typing in one session when AGM
 // runs capture-pane or send-keys on a DIFFERENT session via the same socket.
 func TestCrossSessionLocking_NoCopyMode(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux not available")
-	}
+	skipIfNoTmux(t)
 	if os.Getenv("CI") != "" && os.Getenv("AGM_TEST_TMUX") == "" {
 		t.Skip("Skipping tmux integration test in CI")
 	}

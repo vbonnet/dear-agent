@@ -1,9 +1,11 @@
 package tmux
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"os/user"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -32,11 +34,10 @@ func TestCheckLingering(t *testing.T) {
 	assert.NoError(t, err, "should not error when loginctl exists")
 	assert.NotNil(t, status, "should return status")
 
-	currentUser, err := user.Current()
-	require.NoError(t, err)
+	currentUser := currentIdentity()
 
 	assert.Equal(t, currentUser.Username, status.Username, "should match current username")
-	assert.Equal(t, currentUser.Uid, status.UID, "should match current UID")
+	assert.Equal(t, currentUser.UID, status.UID, "should match current UID")
 	assert.True(t, status.LoginctlExists, "loginctl should exist")
 
 	// We can't assert the exact value of Enabled since it depends on system configuration
@@ -62,11 +63,23 @@ func TestGetLingerPath(t *testing.T) {
 	path, err := GetLingerPath()
 	assert.NoError(t, err, "should not error")
 
-	currentUser, err := user.Current()
-	require.NoError(t, err)
-
-	expectedPath := "/var/lib/systemd/linger/" + currentUser.Uid
+	expectedPath := "/var/lib/systemd/linger/" + strconv.Itoa(os.Getuid())
 	assert.Equal(t, expectedPath, path, "should return correct linger file path")
+}
+
+func TestCurrentIdentity(t *testing.T) {
+	identity := currentIdentity()
+	assert.NotEmpty(t, identity.Username)
+	assert.Equal(t, strconv.Itoa(os.Getuid()), identity.UID)
+}
+
+func TestResolveCurrentIdentityFallback(t *testing.T) {
+	lookup := func() (*user.User, error) {
+		return nil, errors.New("user database unavailable")
+	}
+
+	assert.Equal(t, userIdentity{Username: "codex", UID: "501"}, resolveCurrentIdentity(lookup, 501, "codex"))
+	assert.Equal(t, userIdentity{Username: "501", UID: "501"}, resolveCurrentIdentity(lookup, 501, ""))
 }
 
 func TestGetLingerInfo(t *testing.T) {
@@ -74,14 +87,12 @@ func TestGetLingerInfo(t *testing.T) {
 	assert.NoError(t, err, "should not error")
 	assert.NotNil(t, info, "should return info")
 
-	currentUser, err := user.Current()
-	require.NoError(t, err)
-
 	assert.Equal(t, IsLingerSupported(), info.Supported, "supported flag should match")
 
 	if info.Supported {
+		currentUser := currentIdentity()
 		assert.Equal(t, currentUser.Username, info.Username, "should match current username")
-		assert.Equal(t, currentUser.Uid, info.UID, "should match current UID")
+		assert.Equal(t, currentUser.UID, info.UID, "should match current UID")
 		assert.NotEmpty(t, info.LingerFilePath, "should have linger file path")
 
 		// SystemdVersion should be populated if systemctl exists

@@ -173,6 +173,12 @@ func TestValidateRemoteURL_NonGitDir(t *testing.T) {
 	}
 }
 
+func TestPreflightTimeoutCoversRepositoryFullGate(t *testing.T) {
+	if preflightTimeout < 20*time.Minute {
+		t.Fatalf("preflightTimeout = %s, want at least 20m", preflightTimeout)
+	}
+}
+
 func TestRun_PreflightFail_BlocksPRCreate(t *testing.T) {
 	t.Setenv("WAYFINDER_PROJECT_DIR", "")
 	dir := t.TempDir()
