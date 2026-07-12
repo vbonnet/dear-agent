@@ -596,7 +596,7 @@ func TestSustained(t *testing.T) {
 
 	// Send events continuously
 	testStart := time.Now()
-	eventCount := 0
+	broadcastCount := 0
 	ticker := time.NewTicker(eventInterval)
 	defer ticker.Stop()
 
@@ -608,22 +608,35 @@ loop:
 		case <-timeout:
 			break loop
 		case <-ticker.C:
-			for i := 0; i < numClients; i++ {
-				event, _ := eventbus.NewEvent(
-					eventbus.EventSessionStuck,
-					fmt.Sprintf("session-%d-%d", i, eventCount),
-					eventbus.SessionStuckPayload{
-						Reason:   "Sustained test event",
-						Duration: 5 * time.Minute,
-					},
-				)
-				hub.Broadcast(event)
-				eventCount++
-			}
+			event, err := eventbus.NewEvent(
+				eventbus.EventSessionStuck,
+				fmt.Sprintf("session-%d", broadcastCount),
+				eventbus.SessionStuckPayload{
+					Reason:   "Sustained test event",
+					Duration: 5 * time.Minute,
+				},
+			)
+			require.NoError(t, err)
+			broadcastWithBackpressure(t, hub, event)
+			broadcastCount++
 		}
 	}
 
 	actualDuration := time.Since(testStart)
+	totalDeliveries := broadcastCount * numClients
+	drainDeadline := time.Now().Add(30 * time.Second)
+	for {
+		latMu.Lock()
+		delivered := len(latencies)
+		latMu.Unlock()
+		if delivered == totalDeliveries {
+			break
+		}
+		if time.Now().After(drainDeadline) {
+			t.Fatalf("Timeout draining sustained events: received %d/%d", delivered, totalDeliveries)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	// Close client connections to unblock ReadMessage in receiver goroutines.
 	for _, conn := range clients {
@@ -641,7 +654,7 @@ loop:
 	latMu.Unlock()
 
 	latencyMetrics := calculateLatencyMetrics(latenciesCopy)
-	throughput := float64(eventCount) / actualDuration.Seconds()
+	throughput := float64(totalDeliveries) / actualDuration.Seconds()
 
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
@@ -649,8 +662,8 @@ loop:
 	report := PerformanceReport{
 		TestName:             "Sustained (50 clients, 5 minutes)",
 		NumClients:           numClients,
-		EventsPerClient:      eventCount / numClients,
-		TotalEvents:          eventCount,
+		EventsPerClient:      broadcastCount,
+		TotalEvents:          totalDeliveries,
 		EventDeliveryLatency: latencyMetrics,
 		Throughput:           throughput,
 		TestDuration:         actualDuration,
