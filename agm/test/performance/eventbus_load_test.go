@@ -197,7 +197,7 @@ func TestBaseline(t *testing.T) {
 
 		sendTime := time.Now()
 		eventTimestamps[sessionID] = sendTime
-		hub.Broadcast(event)
+		broadcastWithBackpressure(t, hub, event)
 	}
 
 	// Wait for all events to be received
@@ -332,9 +332,10 @@ func TestLoad(t *testing.T) {
 		}(conn)
 	}
 
-	// Broadcast events
+	// Each broadcast fans out to every client. eventsPerClient broadcasts
+	// therefore produce totalEvents measured client deliveries.
 	testStart := time.Now()
-	for i := 0; i < totalEvents; i++ {
+	for i := 0; i < eventsPerClient; i++ {
 		event, err := eventbus.NewEvent(
 			eventbus.EventSessionStuck,
 			fmt.Sprintf("session-%d", i),
@@ -344,7 +345,7 @@ func TestLoad(t *testing.T) {
 			},
 		)
 		require.NoError(t, err)
-		hub.Broadcast(event)
+		broadcastWithBackpressure(t, hub, event)
 	}
 
 	// Wait for all events to be received
@@ -466,9 +467,10 @@ func TestBurst(t *testing.T) {
 		}(conn)
 	}
 
-	// Burst send all events as fast as possible
+	// Burst eventsPerClient broadcasts; each fans out to every client, yielding
+	// totalEvents measured deliveries without silently dropping queue entries.
 	testStart := time.Now()
-	for i := 0; i < totalEvents; i++ {
+	for i := 0; i < eventsPerClient; i++ {
 		event, _ := eventbus.NewEvent(
 			eventbus.EventSessionStuck,
 			fmt.Sprintf("session-%d", i),
@@ -477,7 +479,7 @@ func TestBurst(t *testing.T) {
 				Duration: 5 * time.Minute,
 			},
 		)
-		hub.Broadcast(event)
+		broadcastWithBackpressure(t, hub, event)
 	}
 
 	// Wait for all events
