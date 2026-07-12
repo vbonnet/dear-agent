@@ -335,7 +335,7 @@ func TestLoad(t *testing.T) {
 	// Each broadcast fans out to every client. eventsPerClient broadcasts
 	// therefore produce totalEvents measured client deliveries.
 	testStart := time.Now()
-	for i := 0; i < eventsPerClient; i++ {
+	for i := range eventsPerClient {
 		event, err := eventbus.NewEvent(
 			eventbus.EventSessionStuck,
 			fmt.Sprintf("session-%d", i),
@@ -470,7 +470,7 @@ func TestBurst(t *testing.T) {
 	// Burst eventsPerClient broadcasts; each fans out to every client, yielding
 	// totalEvents measured deliveries without silently dropping queue entries.
 	testStart := time.Now()
-	for i := 0; i < eventsPerClient; i++ {
+	for i := range eventsPerClient {
 		event, _ := eventbus.NewEvent(
 			eventbus.EventSessionStuck,
 			fmt.Sprintf("session-%d", i),
