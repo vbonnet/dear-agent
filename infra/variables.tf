@@ -24,14 +24,14 @@ variable "active_repos" {
   description = "Non-archived managed repositories, keyed by repo name. Populated from the gitignored repos.auto.tfvars."
   type = map(object({
     visibility      = string
-    default_branch  = string
-    required_checks = list(string)
+    default_branch  = optional(string, "main")
+    required_checks = optional(list(string), [])
   }))
 }
 
 variable "archived_repos" {
   description = "Archived managed repositories (frozen; all changes ignored). From repos.auto.tfvars."
   type = map(object({
-    visibility = string
+    visibility = optional(string, "private")
   }))
 }
