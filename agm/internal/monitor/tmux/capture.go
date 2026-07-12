@@ -1,11 +1,32 @@
 package tmux
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/procguard"
 )
+
+const tmuxCommandTimeout = 2 * time.Second
+
+func runTmuxCommand(args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), tmuxCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "tmux", args...)
+	cmd.SysProcAttr = procguard.ProcessGroupAttr()
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = time.Second
+	return cmd.CombinedOutput()
+}
 
 // CapturePaneContent captures the visible content from a tmux pane for the given session.
 // Returns the pane content as a string, or an error if the session doesn't exist or tmux is not running.
@@ -35,8 +56,7 @@ func CapturePaneContent(sessionName string) (string, error) {
 	// Capture pane content using tmux capture-pane
 	// -p: print to stdout
 	// -t: target session
-	cmd := exec.Command("tmux", "capture-pane", "-p", "-t", sessionName)
-	output, err := cmd.CombinedOutput()
+	output, err := runTmuxCommand("capture-pane", "-p", "-t", sessionName)
 
 	if err != nil {
 		// Parse error type
@@ -59,10 +79,10 @@ func CapturePaneContent(sessionName string) (string, error) {
 
 // IsTmuxRunning checks if the tmux server is currently running.
 func IsTmuxRunning() bool {
-	cmd := exec.Command("tmux", "list-sessions")
 	// A running server with no sessions still exits successfully. Any error,
 	// including "no server running", means capture operations are unavailable.
-	return cmd.Run() == nil
+	_, err := runTmuxCommand("list-sessions")
+	return err == nil
 }
 
 // CapturePaneHistory captures the full scrollback history from a tmux pane.
@@ -94,8 +114,7 @@ func CapturePaneHistory(sessionName string, lines int) (string, error) {
 		args = append(args, "-S", "-")
 	}
 
-	cmd := exec.Command("tmux", args...)
-	output, err := cmd.CombinedOutput()
+	output, err := runTmuxCommand(args...)
 
 	if err != nil {
 		errMsg := string(output)
@@ -134,8 +153,7 @@ func GetSessionInfo(sessionName string) (*SessionInfo, error) {
 	}
 
 	// Get session info using tmux list-sessions
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}|#{session_windows}|#{session_created}|#{session_attached}")
-	output, err := cmd.CombinedOutput()
+	output, err := runTmuxCommand("list-sessions", "-F", "#{session_name}|#{session_windows}|#{session_created}|#{session_attached}")
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to list sessions: %w", err)
@@ -180,8 +198,7 @@ func SessionExists(sessionName string) (bool, error) {
 		return false, nil
 	}
 
-	cmd := exec.Command("tmux", "has-session", "-t", sessionName)
-	err := cmd.Run()
+	_, err := runTmuxCommand("has-session", "-t", sessionName)
 	return err == nil, nil
 }
 
@@ -210,8 +227,7 @@ func CapturePaneLines(sessionName string, lines int) ([]string, error) {
 		args = append(args, "-S", fmt.Sprintf("-%d", lines))
 	}
 
-	cmd := exec.Command("tmux", args...)
-	output, err := cmd.CombinedOutput()
+	output, err := runTmuxCommand(args...)
 
 	if err != nil {
 		errMsg := string(output)
