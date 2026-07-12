@@ -969,26 +969,6 @@ the product runtime itself claims parity.
 
 ---
 
-### Test Support Package Guardrails
-
-**File:** [`test_support_package_guardrails.feature`](../test/bdd/features/test_support_package_guardrails.feature)
-
-**Drives:** strict co-located contracts for all remaining AGM, Engram, shared,
-and Wayfinder test-support package boundaries.
-
-**Key scenarios:**
-- Every residual test and support package retains a co-located strict EARS SPEC.
-- Every SPEC references the executable feature that enforces it.
-- The complete support contract is validated across all four active harnesses
-  and all seven supported model families.
-
-**Why this matters:** Test infrastructure is an enforcement surface. Ungoverned
-helpers and suites can silently skip harnesses, consume the wrong provider
-credentials, touch host state, or stop executing while production code remains
-green.
-
----
-
 ### Legacy Specification Strictness Guardrails
 
 **File:** [`legacy_spec_strictness_guardrails.feature`](../test/bdd/features/legacy_spec_strictness_guardrails.feature)
