@@ -18,11 +18,16 @@ import (
 type ExternalArchiveStatus string
 
 const (
-	ExternalArchiveArchived        ExternalArchiveStatus = "archived"
+	// ExternalArchiveArchived means the provider representation was archived.
+	ExternalArchiveArchived ExternalArchiveStatus = "archived"
+	// ExternalArchiveAlreadyArchived means the provider representation was already archived.
 	ExternalArchiveAlreadyArchived ExternalArchiveStatus = "already_archived"
-	ExternalArchiveNotPresent      ExternalArchiveStatus = "not_present"
-	ExternalArchiveSkipped         ExternalArchiveStatus = "skipped"
-	ExternalArchiveFailed          ExternalArchiveStatus = "failed"
+	// ExternalArchiveNotPresent means no exact provider representation was found.
+	ExternalArchiveNotPresent ExternalArchiveStatus = "not_present"
+	// ExternalArchiveSkipped means the selected harness has no archive adapter.
+	ExternalArchiveSkipped ExternalArchiveStatus = "skipped"
+	// ExternalArchiveFailed means the provider archive attempt did not complete.
+	ExternalArchiveFailed ExternalArchiveStatus = "failed"
 )
 
 // ExternalArchiveOutcome reports one harness-specific archive attempt. The

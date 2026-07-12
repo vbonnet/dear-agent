@@ -655,6 +655,10 @@ func reportExternalArchives(outcomes []ops.ExternalArchiveOutcome) {
 			fmt.Printf("Archived %s external session: %s\n", outcome.Provider, outcome.Target)
 		case ops.ExternalArchiveAlreadyArchived:
 			fmt.Printf("%s external session already archived: %s\n", outcome.Provider, outcome.Target)
+		case ops.ExternalArchiveNotPresent:
+			fmt.Printf("No matching %s external session found: %s\n", outcome.Provider, outcome.Target)
+		case ops.ExternalArchiveSkipped:
+			fmt.Printf("Skipped %s external archive: %s\n", outcome.Provider, outcome.Detail)
 		case ops.ExternalArchiveFailed:
 			ui.PrintWarning(fmt.Sprintf("AGM archived, but %s external archive failed: %s", outcome.Provider, outcome.Detail))
 		}

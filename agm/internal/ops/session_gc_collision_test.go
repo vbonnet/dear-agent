@@ -2,6 +2,7 @@ package ops
 
 import (
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -89,6 +90,10 @@ func TestCheckActiveTmuxBlock_EmptySessionNameFallback(t *testing.T) {
 	}
 
 	const paneName = "agm-cecxjb1-livepane"
+	// Keep the real-tmux regression probe self-contained. In particular, using
+	// the user's AGM socket makes the test depend on a writable home directory
+	// and can silently turn a sandbox-denied probe into a false "stopped" result.
+	t.Setenv("AGM_TMUX_SOCKET", filepath.Join(t.TempDir(), "agm.sock"))
 	socketPath := inttmux.GetSocketPath()
 	// Best-effort cleanup of any leftover from a previous run.
 	_ = exec.Command("tmux", "-S", socketPath, "kill-session", "-t", paneName).Run()
