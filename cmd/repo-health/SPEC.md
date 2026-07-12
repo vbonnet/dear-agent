@@ -8,7 +8,7 @@
 agent hygiene, and configuration drift. It emits Markdown or JSON reports and
 uses a status-derived exit code for CI or scheduled monitoring.
 
-## Requirements
+## EARS Requirements
 
 **REPO-HEALTH-01** When no root is provided, the system shall resolve the repository root from git.
 
@@ -25,6 +25,12 @@ uses a status-derived exit code for CI or scheduled monitoring.
 **REPO-HEALTH-07** When the report status is healthy, degraded, or critical, the system shall map status to exit codes 0, 1, and 2 respectively.
 
 **REPO-HEALTH-08** When `--exit-zero` is provided, the system shall exit 0 regardless of the report verdict.
+
+**REPO-HEALTH-09** When BDD health is collected, the system shall count feature files in `agm/test/bdd/features` as executable without requiring the retired `@implemented` tag.
+
+**REPO-HEALTH-10** If a BDD feature exists outside the canonical executable feature directory, then the system shall report degraded BDD health.
+
+**REPO-HEALTH-11** When SPEC health is collected, the system shall include implementation directories containing supported source, shell, infrastructure, runtime configuration, service, data, and executable files.
 
 ## BDD Traceability
 

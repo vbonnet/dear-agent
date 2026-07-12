@@ -22,3 +22,7 @@ Feature: Quality command guardrails
       | cmd/repo-health       |
       | cmd/structural-health |
       | cmd/src-health        |
+
+  Scenario: Repo health follows tag-free BDD enforcement
+    When repo health measures executable BDD discovery
+    Then repo health should follow the tag-free BDD enforcement policy

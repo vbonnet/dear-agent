@@ -14,8 +14,8 @@ func collectAgentHealth(sc *scanCtx) AgentHealth {
 	ah := AgentHealth{}
 	ah.Worktrees, ah.WorktreeCount = worktreeCount(sc)
 	ah.StaleBranches, ah.StaleBranchCount = staleBranches(sc)
-	ah.BDD, ah.FeaturesTotal, ah.FeaturesImpl = bddCoverage(sc)
-	ah.EARS, ah.PackagesTotal, ah.PackagesWithSpec = earsCoverage(sc)
+	ah.BDD, ah.FeaturesTotal, ah.FeaturesExecutable = bddCoverage(sc)
+	ah.EARS, ah.ImplementationDirsTotal, ah.ImplementationDirsWithSpec = earsCoverage(sc)
 	return ah
 }
 
@@ -74,21 +74,18 @@ func staleBranches(sc *scanCtx) (Metric, int) {
 	return Metric{Available: true}, stale
 }
 
-// bddCoverage counts .feature files and how many carry an @implemented tag,
-// the repo's convention for "this scenario is backed by real code".
+// bddCoverage counts feature files and how many live in the canonical directory
+// executed by the tag-free godog suite. ADR-027 retired @implemented tags.
 func bddCoverage(sc *scanCtx) (Metric, int, int) {
-	var total, impl int
+	canonicalDir := filepath.Clean(filepath.Join(sc.root, "agm", "test", "bdd", "features"))
+	var total, executable int
 	err := walkRepoFiles(sc.root, func(path string) {
 		if !strings.HasSuffix(path, ".feature") {
 			return
 		}
 		total++
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return
-		}
-		if strings.Contains(string(data), "@implemented") {
-			impl++
+		if filepath.Clean(filepath.Dir(path)) == canonicalDir {
+			executable++
 		}
 	})
 	if err != nil {
@@ -97,28 +94,43 @@ func bddCoverage(sc *scanCtx) (Metric, int, int) {
 	if total == 0 {
 		return Metric{Available: false, Note: "no .feature files found"}, 0, 0
 	}
-	return Metric{Available: true}, total, impl
+	return Metric{Available: true}, total, executable
 }
 
-// earsCoverage counts Go package directories and how many ship a SPEC.md
-// (the repo's EARS-format spec convention). A "package directory" is any
-// directory holding at least one non-test .go file.
+// earsCoverage counts implementation directories across supported source and
+// runtime configuration formats and reports how many ship a SPEC.md.
 func earsCoverage(sc *scanCtx) (Metric, int, int) {
-	pkgDirs := map[string]bool{}
-	for _, s := range sc.sources {
-		if s.isTest {
-			continue
+	implementationDirs := map[string]bool{}
+	err := walkRepoFiles(sc.root, func(path string) {
+		if isHealthImplementationSource(path) {
+			implementationDirs[filepath.Dir(path)] = true
 		}
-		pkgDirs[filepath.Dir(s.path)] = true
+	})
+	if err != nil {
+		return Metric{Available: false, Note: "implementation scan failed: " + err.Error()}, 0, 0
 	}
-	if len(pkgDirs) == 0 {
-		return Metric{Available: false, Note: "no Go packages found"}, 0, 0
+	if len(implementationDirs) == 0 {
+		return Metric{Available: false, Note: "no implementation directories found"}, 0, 0
 	}
 	withSpec := 0
-	for dir := range pkgDirs {
+	for dir := range implementationDirs {
 		if _, err := os.Stat(filepath.Join(dir, "SPEC.md")); err == nil {
 			withSpec++
 		}
 	}
-	return Metric{Available: true}, len(pkgDirs), withSpec
+	return Metric{Available: true}, len(implementationDirs), withSpec
+}
+
+func isHealthImplementationSource(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".go", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".rs", ".py",
+		".sh", ".bash", ".zsh", ".bats", ".tf", ".sql", ".yaml", ".yml",
+		".json", ".toml", ".plist", ".service", ".dockerfile":
+		return true
+	}
+	if filepath.Ext(path) != "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
 }

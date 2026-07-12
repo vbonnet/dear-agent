@@ -84,8 +84,8 @@ func renderMarkdown(r Report) string {
 	p("| Metric | Value |\n|---|---|\n")
 	p("| Linked worktrees | %s |\n", availInt(ah.Worktrees, ah.WorktreeCount))
 	p("| Stale branches (>%dd) | %s |\n", 30, availInt(ah.StaleBranches, ah.StaleBranchCount))
-	p("| BDD @implemented | %s |\n", availRatio(ah.BDD, ah.FeaturesImpl, ah.FeaturesTotal))
-	p("| EARS SPEC.md coverage | %s |\n\n", availRatio(ah.EARS, ah.PackagesWithSpec, ah.PackagesTotal))
+	p("| Executable BDD features | %s |\n", availRatio(ah.BDD, ah.FeaturesExecutable, ah.FeaturesTotal))
+	p("| Repository SPEC.md coverage | %s |\n\n", availRatio(ah.EARS, ah.ImplementationDirsWithSpec, ah.ImplementationDirsTotal))
 
 	dr := r.Drift
 	p("## Drift\n\n")

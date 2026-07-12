@@ -19,13 +19,9 @@ Dead/aspirational specs cannot accumulate here again.
 
 ## What's covered
 
-Three feature files, all driven by real implementation code:
-
-| Feature                    | Drives                                              |
-|----------------------------|----------------------------------------------------|
-| `trust_protocol.feature`   | `ops.TrustRecord` / `TrustScore` / `TrustHistory`  |
-| `scan_loop.feature`        | `ops.DefaultCrossCheckConfig`, SLO contract values |
-| `stall_detection.feature`  | stall-type invariants, SLO contract thresholds     |
+Every feature under `features/` is executable and cataloged. The suite spans
+the original trust, scan-loop, and stall contracts plus repository-wide
+harness, model-family, command, package, and SPEC traceability guardrails.
 
 Alongside the godog runner, `spec_invariants_test.go` holds:
 
@@ -39,13 +35,9 @@ Alongside the godog runner, `spec_invariants_test.go` holds:
 ```
 test/bdd/
 ├── features/                 # Gherkin feature files (all of them run)
-│   ├── trust_protocol.feature
-│   ├── scan_loop.feature
-│   └── stall_detection.feature
+│   └── *.feature             # every file is executed
 ├── steps/                    # godog step definitions (one file per feature)
-│   ├── trust_protocol_steps.go
-│   ├── scan_loop_steps.go
-│   └── stall_detection_steps.go
+│   └── *_steps.go            # registered executable step groups
 ├── main_test.go              # godog runner — registers the step groups
 ├── spec_invariants_test.go   # SPEC invariant + contract-drift Go tests
 └── README.md                 # this file

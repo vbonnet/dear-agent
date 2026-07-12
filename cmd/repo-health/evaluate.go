@@ -145,10 +145,14 @@ func (e *evaluator) agentHealth(ah AgentHealth) {
 		e.add("stale-branches", SeverityWarn, "%d branches older than %d days", ah.StaleBranchCount, e.opts.staleDays)
 	}
 	if !e.unavailable("bdd", ah.BDD) {
-		e.add("bdd", SeverityInfo, "%d/%d features tagged @implemented", ah.FeaturesImpl, ah.FeaturesTotal)
+		severity := SeverityInfo
+		if ah.FeaturesExecutable != ah.FeaturesTotal {
+			severity = SeverityWarn
+		}
+		e.add("bdd", severity, "%d/%d features are in the canonical executable suite", ah.FeaturesExecutable, ah.FeaturesTotal)
 	}
 	if !e.unavailable("ears", ah.EARS) {
-		e.add("ears", SeverityInfo, "%d/%d packages have a SPEC.md", ah.PackagesWithSpec, ah.PackagesTotal)
+		e.add("ears", SeverityInfo, "%d/%d implementation directories have a SPEC.md", ah.ImplementationDirsWithSpec, ah.ImplementationDirsTotal)
 	}
 }
 
