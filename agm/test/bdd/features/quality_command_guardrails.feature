@@ -26,3 +26,14 @@ Feature: Quality command guardrails
   Scenario: Repo health follows tag-free BDD enforcement
     When repo health measures executable BDD discovery
     Then repo health should follow the tag-free BDD enforcement policy
+
+  Scenario Outline: Quality command specifications bound external work
+    Given quality command package "<command>" is configured
+    When AGM validates quality command package coverage
+    Then quality command package SPEC should declare requirement "<requirement>" containing "<contract>"
+
+    Examples:
+      | command           | requirement      | contract                  |
+      | cmd/test-affected | TEST-AFFECTED-08 | bounded by a timeout      |
+      | cmd/src-health    | SRC-HEALTH-06    | noninteractive            |
+      | cmd/repo-health   | REPO-HEALTH-05   | bounded by a timeout      |

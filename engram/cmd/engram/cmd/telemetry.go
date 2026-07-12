@@ -364,7 +364,7 @@ func runTelemetryLoaded(cmd *cobra.Command, args []string) error {
 	}
 
 	// Parse JSONL
-	events, errs := analysis.ParseJSONL(telemetryPath)
+	events, errs := analysis.ParseJSONL(cmd.Context(), telemetryPath)
 
 	// Filter and extract loaded engrams
 	engrams := filterLoadedEngrams(events, errs)

@@ -80,8 +80,8 @@ func InitTracer(serviceName string) (shutdown func(context.Context) error) {
 	serviceVersion := "dev"
 	if bi, ok := debug.ReadBuildInfo(); ok {
 		for _, s := range bi.Settings {
-			if s.Key == "vcs.revision" && len(s.Value) >= 7 {
-				serviceVersion = s.Value[:7]
+			if s.Key == "vcs.revision" && s.Value != "" {
+				serviceVersion = shortRevision(s.Value)
 				break
 			}
 		}
@@ -132,4 +132,11 @@ func InitTracer(serviceName string) (shutdown func(context.Context) error) {
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 
 	return tp.Shutdown
+}
+
+func shortRevision(revision string) string {
+	if len(revision) <= 7 {
+		return revision
+	}
+	return revision[:7]
 }

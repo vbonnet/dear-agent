@@ -18,7 +18,7 @@ uses a status-derived exit code for CI or scheduled monitoring.
 
 **REPO-HEALTH-04** When output file paths are provided, the system shall write JSON and Markdown artifacts to those paths.
 
-**REPO-HEALTH-05** When coverage is requested, the system shall run coverage collection as part of code-quality metrics.
+**REPO-HEALTH-05** When coverage is requested, the system shall run coverage collection as part of code-quality metrics bounded by a timeout.
 
 **REPO-HEALTH-06** When metrics cannot be measured because tools or commands are unavailable, the system shall record informational unavailable notes rather than failing the verdict.
 

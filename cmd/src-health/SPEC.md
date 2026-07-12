@@ -20,7 +20,7 @@ ahead-behind state.
 
 **SRC-HEALTH-05** When a repository has staged or unstaged changes, the system shall mark that repository unhealthy.
 
-**SRC-HEALTH-06** When upstream status is available, the system shall report ahead and behind commit counts.
+**SRC-HEALTH-06** When upstream status is checked, the system shall run Git subprocesses with bounded timeouts and noninteractive authentication, and report available ahead and behind commit counts.
 
 **SRC-HEALTH-07** When JSON output is requested, the system shall emit aggregate health and per-repository status as indented JSON.
 

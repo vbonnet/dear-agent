@@ -1,11 +1,25 @@
 package analysis
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestParseJSONLContextCanceledClosesChannels(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	events, errs := ParseJSONL(ctx, filepath.Join(t.TempDir(), "missing.jsonl"))
+	if event, ok := <-events; ok {
+		t.Fatalf("event channel remained open after cancellation: %#v", event)
+	}
+	if err, ok := <-errs; ok {
+		t.Fatalf("error channel remained open after cancellation: %v", err)
+	}
+}
 
 // TestParseJSONL_ValidFile tests parsing a well-formed JSONL file
 func TestParseJSONL_ValidFile(t *testing.T) {
@@ -22,7 +36,7 @@ func TestParseJSONL_ValidFile(t *testing.T) {
 	}
 
 	// Parse file and collect results
-	eventsChan, errsChan := ParseJSONL(testFile)
+	eventsChan, errsChan := ParseJSONL(context.Background(), testFile)
 	events, errors := collectEventsAndErrors(eventsChan, errsChan)
 
 	// Verify results
@@ -57,7 +71,7 @@ func TestParseJSONL_EmptyLines(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	eventsChan, errsChan := ParseJSONL(testFile)
+	eventsChan, errsChan := ParseJSONL(context.Background(), testFile)
 
 	events := make([]*TelemetryEvent, 0)
 	errors := make([]error, 0)
@@ -108,7 +122,7 @@ func TestParseJSONL_MalformedJSON(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	eventsChan, errsChan := ParseJSONL(testFile)
+	eventsChan, errsChan := ParseJSONL(context.Background(), testFile)
 
 	events := make([]*TelemetryEvent, 0)
 	errors := make([]error, 0)
@@ -166,7 +180,7 @@ func TestParseJSONL_MissingSchemaVersion(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	eventsChan, errsChan := ParseJSONL(testFile)
+	eventsChan, errsChan := ParseJSONL(context.Background(), testFile)
 
 	events := make([]*TelemetryEvent, 0)
 
@@ -198,7 +212,7 @@ func TestParseJSONL_FileNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "nonexistent.jsonl")
 
-	eventsChan, errsChan := ParseJSONL(testFile)
+	eventsChan, errsChan := ParseJSONL(context.Background(), testFile)
 
 	events := make([]*TelemetryEvent, 0)
 	errors := make([]error, 0)
@@ -315,7 +329,7 @@ func TestParseJSONL_TimestampParsing(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	eventsChan, errsChan := ParseJSONL(testFile)
+	eventsChan, errsChan := ParseJSONL(context.Background(), testFile)
 
 	var event *TelemetryEvent
 	for e := range eventsChan {
@@ -358,7 +372,7 @@ func TestParseJSONL_LargeFile(t *testing.T) {
 	f.Close()
 
 	// Parse file
-	eventsChan, errsChan := ParseJSONL(testFile)
+	eventsChan, errsChan := ParseJSONL(context.Background(), testFile)
 
 	eventCount := 0
 	for range eventsChan {
@@ -391,7 +405,7 @@ func TestParseJSONL_DataTypes(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	eventsChan, errsChan := ParseJSONL(testFile)
+	eventsChan, errsChan := ParseJSONL(context.Background(), testFile)
 	events, errors := collectEventsAndErrors(eventsChan, errsChan)
 
 	if len(errors) > 0 {

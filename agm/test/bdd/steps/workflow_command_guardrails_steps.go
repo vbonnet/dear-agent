@@ -9,11 +9,12 @@ type workflowCommandGuardrailStateKey struct{}
 // RegisterWorkflowCommandGuardrailSteps registers BDD steps for workflow command packages.
 func RegisterWorkflowCommandGuardrailSteps(ctx *godog.ScenarioContext) {
 	registerPackageSpecGuardrailSteps(ctx, packageSpecGuardrailConfig{
-		stateKey:          workflowCommandGuardrailStateKey{},
-		label:             "workflow command package",
-		featurePath:       workflowCommandFeaturePath,
-		configuredPattern: `^workflow command package "([^"]*)" is configured$`,
-		validatePattern:   `^AGM validates workflow command package coverage$`,
-		colocatedPattern:  `^workflow command package "([^"]*)" should have a co-located SPEC$`,
+		stateKey:           workflowCommandGuardrailStateKey{},
+		label:              "workflow command package",
+		featurePath:        workflowCommandFeaturePath,
+		configuredPattern:  `^workflow command package "([^"]*)" is configured$`,
+		validatePattern:    `^AGM validates workflow command package coverage$`,
+		colocatedPattern:   `^workflow command package "([^"]*)" should have a co-located SPEC$`,
+		requirementPattern: `^workflow command package SPEC should declare requirement "([^"]*)" containing "([^"]*)"$`,
 	})
 }

@@ -36,3 +36,17 @@ Feature: Workflow command guardrails
       | cmd/workflow-roles     |
       | cmd/workflow-run       |
       | cmd/workflow-status    |
+
+  Scenario Outline: Workflow run specification uses canonical long flags
+    Given workflow command package "cmd/workflow-run" is configured
+    When AGM validates workflow command package coverage
+    Then workflow command package SPEC should declare requirement "<requirement>" containing "<flag>"
+
+    Examples:
+      | requirement     | flag          |
+      | WORKFLOW-RUN-01 | --file        |
+      | WORKFLOW-RUN-02 | --dry-run     |
+      | WORKFLOW-RUN-03 | --input       |
+      | WORKFLOW-RUN-05 | --db          |
+      | WORKFLOW-RUN-07 | --roles       |
+      | WORKFLOW-RUN-08 | --trigger     |

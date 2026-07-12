@@ -26,3 +26,14 @@ Feature: Observability package guardrails
       | internal/telemetry/enrichment |
       | internal/telemetry/errors     |
       | pkg/otelsetup                 |
+
+  Scenario Outline: Observability specifications define cancellation and timeout edges
+    Given observability package "<package>" is configured
+    When AGM validates observability package coverage
+    Then observability package SPEC should declare requirement "<requirement>" containing "<contract>"
+
+    Examples:
+      | package                     | requirement    | contract                |
+      | internal/telemetry/analysis | TEL-ANALYSIS-01 | context is canceled     |
+      | pkg/otelsetup               | OTELSETUP-07   | revision is shorter     |
+      | cmd/jaeger-health           | JAEGER-HEALTH-02 | times out              |

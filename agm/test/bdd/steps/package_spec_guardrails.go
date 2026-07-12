@@ -12,12 +12,13 @@ import (
 )
 
 type packageSpecGuardrailConfig struct {
-	stateKey          any
-	label             string
-	featurePath       string
-	configuredPattern string
-	validatePattern   string
-	colocatedPattern  string
+	stateKey           any
+	label              string
+	featurePath        string
+	configuredPattern  string
+	validatePattern    string
+	colocatedPattern   string
+	requirementPattern string
 }
 
 type packageSpecGuardrailState struct {
@@ -73,6 +74,27 @@ func registerPackageSpecGuardrailSteps(ctx *godog.ScenarioContext, cfg packageSp
 		}
 		return nil
 	})
+	if cfg.requirementPattern != "" {
+		ctx.Step(cfg.requirementPattern, func(ctx context.Context, requirement, phrase string) error {
+			state, err := getPackageSpecGuardrailState(ctx, cfg)
+			if err != nil {
+				return err
+			}
+			data, err := os.ReadFile(state.spec)
+			if err != nil {
+				return fmt.Errorf("%s SPEC %s: %w", cfg.label, state.spec, err)
+			}
+			for line := range strings.SplitSeq(string(data), "\n") {
+				if strings.Contains(line, "**"+requirement+"**") {
+					if !strings.Contains(strings.ToLower(line), strings.ToLower(phrase)) {
+						return fmt.Errorf("%s requirement %s does not contain %q", cfg.label, requirement, phrase)
+					}
+					return nil
+				}
+			}
+			return fmt.Errorf("%s SPEC %s does not declare requirement %s", cfg.label, state.spec, requirement)
+		})
+	}
 }
 
 func getPackageSpecGuardrailState(ctx context.Context, cfg packageSpecGuardrailConfig) (*packageSpecGuardrailState, error) {

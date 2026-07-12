@@ -24,7 +24,7 @@ prints or runs the affected test-bearing packages.
 
 **TEST-AFFECTED-07** When `--all` is provided, the system shall include affected non-test-bearing packages in output.
 
-**TEST-AFFECTED-08** When `--run` is provided, the system shall execute `go test -race -count=1` for the selected packages.
+**TEST-AFFECTED-08** When `--run` is provided, the system shall execute `go test -race -count=1` for the selected packages bounded by a timeout.
 
 ## BDD Traceability
 
