@@ -76,3 +76,8 @@ Feature: Local development guardrails
     Given the safe-pr full preflight timeout is configured
     When AGM validates the safe-pr preflight budget
     Then safe-pr should allow at least 20 minutes for preflight-full
+
+  Scenario: Local and required CI vulnerability policy stay aligned
+    Given local and required CI govulncheck allowlists are configured
+    When AGM validates govulncheck policy parity
+    Then the local and required CI govulncheck allowlists should match
