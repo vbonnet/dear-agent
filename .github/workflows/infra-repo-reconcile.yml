@@ -1,0 +1,116 @@
+name: Infra Repo Reconciliation
+
+# Enforces the standing policy that EVERY vbonnet/* and dear-labs/* repo is
+# managed by infra/ IaC. Creating a repo (`gh repo create`, the web UI) does
+# not auto-add it to the fleet, so unmanaged repos accumulate with no
+# IaC-enforced protection and untracked existence. This job lists all live
+# repos and diffs them against the managed inventory; any repo missing from the
+# IaC (or any IaC entry with no live repo) fails the run and opens an alert.
+#
+# Managed set is parsed from the HCL repo-name keys across infra/*.tf and
+# infra/*.tfvars, so it keeps working if the inventory later moves out of
+# locals.tf into a private tfvars (the option-(b) refactor).
+#
+# REQUIRED SECRET:
+#   INFRA_GITHUB_TOKEN  PAT that can LIST private repos for vbonnet + dear-labs
+#                       (the default GITHUB_TOKEN only sees this repo).
+
+on:
+  schedule:
+    - cron: "37 8 * * *" # daily, offset from the drift job
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - "infra/**"
+
+concurrency:
+  group: infra-reconcile-${{ github.event.pull_request.number || 'scheduled' }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  reconcile:
+    name: Infra Repo Reconciliation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Preflight — token present
+        env:
+          INFRA_GITHUB_TOKEN: ${{ secrets.INFRA_GITHUB_TOKEN }}
+        run: |
+          if [ -z "${INFRA_GITHUB_TOKEN}" ]; then
+            echo "::error::missing INFRA_GITHUB_TOKEN (needed to list private repos)"; exit 1
+          fi
+
+      - name: Reconcile live repos against IaC
+        env:
+          GH_TOKEN: ${{ secrets.INFRA_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Live repos (personal + org), excluding forks. One name per line.
+          gh repo list vbonnet   --no-archived --limit 300 --json name,isFork \
+            --jq '.[] | select(.isFork|not) | .name' > /tmp/live.txt
+          gh repo list dear-labs --no-archived --limit 300 --json name,isFork \
+            --jq '.[] | select(.isFork|not) | .name' >> /tmp/live.txt 2>/dev/null || true
+          sort -u -o /tmp/live.txt /tmp/live.txt
+
+          # Managed set: HCL keys `"<repo>" = {` across active_repos AND
+          # archived_repos, wherever they live (locals.tf today, a private
+          # tfvars after the option-(b) refactor).
+          grep -rhoE '^[[:space:]]*"[a-z0-9][a-z0-9._-]+"[[:space:]]*=[[:space:]]*\{' infra/ \
+            | sed -E 's/.*"([a-z0-9][a-z0-9._-]+)".*/\1/' | sort -u > /tmp/managed.txt
+
+          echo "live (non-archived): $(wc -l < /tmp/live.txt) | managed: $(wc -l < /tmp/managed.txt)"
+
+          # (a) live repos absent from the IaC = the real gap.
+          unmanaged="$(comm -23 /tmp/live.txt /tmp/managed.txt || true)"
+          # (b) managed entries with no live non-archived repo = stale/renamed
+          #     (may be an archived_repos entry, which is fine — informational).
+          orphaned="$(comm -13 /tmp/live.txt /tmp/managed.txt || true)"
+
+          {
+            echo "## Infra repo reconciliation"
+            echo ""
+            if [ -n "${unmanaged}" ]; then
+              echo "### ❌ UNMANAGED live repos (not in infra/ IaC):"
+              echo '```'; echo "${unmanaged}"; echo '```'
+            else
+              echo "### ✅ every live repo is in the IaC"
+            fi
+            if [ -n "${orphaned}" ]; then
+              echo ""
+              echo "### ℹ️ IaC entries with no live active repo (archived or renamed — verify):"
+              echo '```'; echo "${orphaned}"; echo '```'
+            fi
+          } > /tmp/report.md
+          cat /tmp/report.md
+
+          if [ -n "${unmanaged}" ]; then
+            if [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
+              existing="$(gh issue list --repo "${GITHUB_REPOSITORY}" --state open --label infra-unmanaged-repo --json number --jq '.[0].number' 2>/dev/null || true)"
+              if [ -n "${existing}" ]; then
+                gh issue comment "${existing}" --repo "${GITHUB_REPOSITORY}" --body-file /tmp/report.md
+              else
+                gh issue create --repo "${GITHUB_REPOSITORY}" --title "Unmanaged repos not in IaC" \
+                  --label infra-unmanaged-repo --body-file /tmp/report.md || \
+                gh issue create --repo "${GITHUB_REPOSITORY}" --title "Unmanaged repos not in IaC" --body-file /tmp/report.md
+              fi
+            fi
+            echo "::error::unmanaged repos found — add them to infra/ (active_repos or archived_repos)"
+            exit 1
+          fi
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request' && always()
+        uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          header: infra-reconcile
+          path: /tmp/report.md
