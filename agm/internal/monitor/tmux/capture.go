@@ -44,7 +44,8 @@ func CapturePaneContent(sessionName string) (string, error) {
 		if strings.Contains(errMsg, "can't find pane") ||
 			strings.Contains(errMsg, "can't find session") ||
 			strings.Contains(errMsg, "no such session") ||
-			strings.Contains(errMsg, "session not found") {
+			strings.Contains(errMsg, "session not found") ||
+			strings.Contains(errMsg, "no current target") {
 			return "", ErrSessionNotFound
 		}
 		if strings.Contains(errMsg, "permission denied") {
@@ -59,10 +60,9 @@ func CapturePaneContent(sessionName string) (string, error) {
 // IsTmuxRunning checks if the tmux server is currently running.
 func IsTmuxRunning() bool {
 	cmd := exec.Command("tmux", "list-sessions")
-	err := cmd.Run()
-	// If tmux is not running, this will return an error
-	// If tmux is running but there are no sessions, it still returns 0
-	return err == nil || strings.Contains(err.Error(), "no server running")
+	// A running server with no sessions still exits successfully. Any error,
+	// including "no server running", means capture operations are unavailable.
+	return cmd.Run() == nil
 }
 
 // CapturePaneHistory captures the full scrollback history from a tmux pane.
@@ -102,7 +102,8 @@ func CapturePaneHistory(sessionName string, lines int) (string, error) {
 		if strings.Contains(errMsg, "can't find pane") ||
 			strings.Contains(errMsg, "can't find session") ||
 			strings.Contains(errMsg, "no such session") ||
-			strings.Contains(errMsg, "session not found") {
+			strings.Contains(errMsg, "session not found") ||
+			strings.Contains(errMsg, "no current target") {
 			return "", ErrSessionNotFound
 		}
 		if strings.Contains(errMsg, "permission denied") {

@@ -15,13 +15,15 @@ tmux servers, and permission failures.
 
 **TMON-02** When tmux is unavailable, the system shall return the tmux-not-running error instead of shelling out to capture panes.
 
-**TMON-03** When a target session or pane cannot be found, the system shall return the session-not-found error.
+**TMON-03** When a target session or pane cannot be found, including when tmux reports `no current target`, the system shall return the session-not-found error.
 
 **TMON-04** When pane history is requested with a line limit, the system shall pass the corresponding scrollback bound to `tmux capture-pane`.
 
 **TMON-05** When session information is requested, the system shall parse tmux session name, window count, creation time, and attached state from formatted session output.
 
 **TMON-06** When executing any tmux subprocess command, the system shall use a timeout-bounded context to prevent the process from hanging indefinitely.
+
+**TMON-07** When `tmux list-sessions` exits unsuccessfully, the system shall classify tmux as unavailable even when stderr says that no server is running.
 
 ## BDD Traceability
 
