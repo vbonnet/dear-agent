@@ -3,16 +3,16 @@
 <!-- Last audited at: 2026-07-01 -->
 
 **Version:** 1.0
-**Status:** Baseline
-**Scope:** Parity-critical SPEC.md and BDD feature coverage.
+**Status:** Enforced
+**Scope:** Repository-wide SPEC.md and executable BDD feature coverage.
 
 ## Overview
 
 `internal/speccoverage` owns the repository governance matrix that links
 parity-critical implementation surfaces to both a co-located `SPEC.md` and an
-executable AGM BDD feature. The matrix is intentionally narrower than the full
-legacy repository: it enforces the harness/model parity surfaces first while
-the larger repo-wide SPEC backlog is burned down incrementally.
+executable AGM BDD feature. It also discovers every implementation directory
+in the checkout and enforces strict EARS and reciprocal BDD traceability across
+production, test, support, configuration, service, and executable sources.
 
 ## EARS Requirements
 
@@ -61,6 +61,8 @@ the larger repo-wide SPEC backlog is burned down incrementally.
 **SCB-22** When repository-wide implementation coverage is validated, the system shall include directories containing executable source or runtime configuration in the repository's supported programming, shell, infrastructure, data, service, and configuration formats.
 
 **SCB-23** When an executable BDD feature declares a `RELATED-SPEC`, the system shall require that specification to exist and reference the executable feature.
+
+**SCB-24** When the repository test suite runs, the system shall validate repository-wide implementation coverage against the actual checkout rather than only synthetic validator fixtures.
 
 ## BDD Traceability
 

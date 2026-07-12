@@ -20,6 +20,16 @@ func TestParitySurfacesHaveSpecAndBDD(t *testing.T) {
 	}
 }
 
+func TestRepositoryImplementationSpecsAndBDD(t *testing.T) {
+	findings, err := ValidateAllImplementationSpecs(repoRoot())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findings {
+		t.Error(finding.Error())
+	}
+}
+
 func TestParitySurfaceRegistryIsNotEmpty(t *testing.T) {
 	t.Parallel()
 	if len(ParitySurfaces()) == 0 {

@@ -39,6 +39,8 @@ func RegisterSpecCoverageSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates changed Go package SPEC coverage$`, agmValidatesChangedGoPackageSPECCoverage)
 	ctx.Step(`^changed production Go packages should have co-located SPEC.md files$`, changedProductionGoPackagesShouldHaveCoLocatedSPECFiles)
 	ctx.Step(`^changed production Go package SPEC.md files should pass strict EARS lint$`, changedProductionGoPackageSPECFilesShouldPassStrictEARSLint)
+	ctx.Step(`^AGM validates repository-wide implementation SPEC and BDD coverage$`, agmValidatesRepositoryImplementationCoverage)
+	ctx.Step(`^every implementation directory should have strict co-located SPEC and reciprocal BDD coverage$`, everyImplementationDirectoryShouldHaveStrictCoverage)
 }
 
 func agmParityCoverageRequirements(ctx context.Context) error {
@@ -130,6 +132,34 @@ func changedProductionGoPackagesShouldHaveCoLocatedSPECFiles(ctx context.Context
 
 func changedProductionGoPackageSPECFilesShouldPassStrictEARSLint(ctx context.Context) error {
 	return specCoverageShouldHaveNoFindings(ctx, "invalid EARS syntax")
+}
+
+func agmValidatesRepositoryImplementationCoverage(ctx context.Context) error {
+	state, err := getSpecCoverageState(ctx)
+	if err != nil {
+		return err
+	}
+	findings, err := speccoverage.ValidateAllImplementationSpecs(specCoverageRepoRoot())
+	if err != nil {
+		return err
+	}
+	state.findings = findings
+	return nil
+}
+
+func everyImplementationDirectoryShouldHaveStrictCoverage(ctx context.Context) error {
+	state, err := getSpecCoverageState(ctx)
+	if err != nil {
+		return err
+	}
+	if len(state.findings) == 0 {
+		return nil
+	}
+	messages := make([]string, 0, len(state.findings))
+	for _, finding := range state.findings {
+		messages = append(messages, finding.Error())
+	}
+	return fmt.Errorf("%s", strings.Join(messages, "\n"))
 }
 
 func specCoverageShouldHaveNoFindings(ctx context.Context, phrase string) error {

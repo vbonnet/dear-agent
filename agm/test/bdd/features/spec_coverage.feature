@@ -1,10 +1,9 @@
 # SPEC: internal/speccoverage/SPEC.md
 # RELATED-SPEC: agm/internal/sandboxgc/SPEC.md
 Feature: SPEC and BDD coverage
-  AGM parity governance should keep SPEC.md files and executable BDD scenarios
-  paired for every parity-critical surface. Legacy packages may still be burned
-  down incrementally, but new parity features should not land without a
-  SPEC-backed implementation surface.
+  AGM governance should keep SPEC.md files and executable BDD scenarios paired
+  for every parity-critical surface and every implementation directory in the
+  repository.
 
   Scenario: Parity-critical surfaces have SPEC and BDD coverage
     Given AGM parity coverage requirements
@@ -43,3 +42,8 @@ Feature: SPEC and BDD coverage
     When AGM validates changed Go package SPEC coverage
     Then changed production Go packages should have co-located SPEC.md files
     And changed production Go package SPEC.md files should pass strict EARS lint
+
+  Scenario: The actual repository enforces implementation coverage
+    Given AGM parity coverage requirements
+    When AGM validates repository-wide implementation SPEC and BDD coverage
+    Then every implementation directory should have strict co-located SPEC and reciprocal BDD coverage
