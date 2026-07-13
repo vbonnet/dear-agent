@@ -29,6 +29,46 @@ into listing tests that do not actually run.
 
 ## Feature Files
 
+### Declarative Runtime Guardrails
+
+**File:** [`declarative_runtime_guardrails.feature`](../test/bdd/features/declarative_runtime_guardrails.feature)
+
+**Drives:** harness and plugin manifests, GitHub automation and rulesets, AGM
+contracts, schemas and schedules, deployment service definitions, workflow
+configuration, and language-specific code-intelligence rules.
+
+**Key scenarios:**
+- Every declarative runtime directory has a co-located strict EARS
+  specification.
+- Every specification retains reciprocal executable BDD traceability.
+- All active harnesses preserve these contracts across all supported model
+  families.
+
+**Why this matters:** Configuration controls executable behavior. Excluding it
+from repository-wide governance would leave CI, plugin loading, protocols,
+schedules, and deployment outside the same parity contract as Go code.
+
+### Declarative Fixture Guardrails
+
+**File:** [`declarative_fixture_guardrails.feature`](../test/bdd/features/declarative_fixture_guardrails.feature)
+
+**Drives:** manifest and provenance testdata, golden configuration and agent
+interactions, archived and corrupt session states, installer images, benchmark
+baselines, configuration loaders, lint contexts, and canonical status fixtures.
+
+**Key scenarios:**
+- Every declarative fixture directory has a co-located strict EARS
+  specification.
+- Every specification retains reciprocal executable BDD traceability.
+- All active harnesses preserve these contracts across all supported model
+  families.
+
+**Why this matters:** Fixtures define the boundary between accepted and
+rejected behavior. Unspecified fixture drift can make tests pass against the
+wrong contract just as readily as implementation drift.
+
+---
+
 ### Trust Protocol
 
 **File:** [`trust_protocol.feature`](../test/bdd/features/trust_protocol.feature)
@@ -118,8 +158,8 @@ generated surface metadata, workflow-bus signaling, and accessible operator UIs.
 
 **File:** [`harness_parity.feature`](../test/bdd/features/harness_parity.feature)
 
-**Drives:** `agm/internal/agent` harness/model registry plus Codex terminal
-state detection contracts.
+**Drives:** `agm/internal/agent` harness/model registry,
+`agm/internal/launchparity` startup contracts, and terminal state detection.
 
 **Key scenarios:**
 - A Codex CLI composer pane is detected as `ready`.
@@ -129,6 +169,7 @@ state detection contracts.
 - Gemini CLI remains deprecated compatibility, not active parity.
 - Active harness factories use canonical names.
 - Active harness adapters satisfy the shared non-I/O conformance suite.
+- Active harness launch commands preserve native startup mode and persistence.
 - AGM runtime helper commands keep co-located SPEC coverage.
 - AGM backend implementations keep co-located SPEC coverage.
 - AGM cleanup and process support packages keep co-located SPEC coverage.
@@ -1134,6 +1175,24 @@ workflow, and safety surfaces.
 **Why this matters:** Strict requirements that are not connected to an
 executable scenario can still drift unnoticed. Reciprocal linkage makes the
 maintained contract discoverable and test-enforced.
+
+### Cross-Language Implementation Guardrails
+
+**File:** [`cross_language_implementation_guardrails.feature`](../test/bdd/features/cross_language_implementation_guardrails.feature)
+
+**Drives:** repository wrappers, harness hooks, AGM and Engram shell/TypeScript
+surfaces, migrations, infrastructure, test suites, and Wayfinder shell support.
+
+**Key scenarios:**
+- Every executable implementation directory has a co-located strict EARS
+  specification.
+- Every specification retains reciprocal executable BDD traceability.
+- Claude Code, Codex, Antigravity, and OpenCode preserve the same contract
+  across Anthropic, OpenAI, Gemini, GLM, DeepSeek, Nemotron, and Qwen families.
+
+**Why this matters:** Repository-wide coverage cannot exclude behavior merely
+because it is implemented outside a Go package. Hooks, installers, migrations,
+infrastructure, and protocol services are part of the shipped control plane.
 
 ---
 

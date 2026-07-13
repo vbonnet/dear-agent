@@ -54,15 +54,22 @@ func TestValidModes(t *testing.T) {
 }
 
 func TestSendModeCodexCLI(t *testing.T) {
-	err := sendModeCodexCLI()
+	err := sendModeRestartFallback("codex-cli", "auto")
 	if err == nil {
 		t.Error("expected error from codex-cli mode switch, got nil")
 	}
 	if !strings.Contains(err.Error(), "codex-cli") {
 		t.Errorf("error should mention codex-cli, got: %s", err.Error())
 	}
-	if !strings.Contains(err.Error(), "--suggest") {
+	if !strings.Contains(err.Error(), "-a never") {
 		t.Errorf("error should include flag alternatives, got: %s", err.Error())
+	}
+}
+
+func TestSendModeAgyFallback(t *testing.T) {
+	err := sendModeRestartFallback("agy", "plan")
+	if err == nil || !strings.Contains(err.Error(), "agy --mode plan") {
+		t.Fatalf("AGY plan fallback error = %v, want restart instruction", err)
 	}
 }
 
@@ -75,6 +82,7 @@ func TestDispatchModeSwitch(t *testing.T) {
 	}{
 		// codex-cli always returns error
 		{"codex-cli returns error", "codex-cli", true, "codex-cli"},
+		{"agy returns restart fallback", "agy", true, "agy"},
 		// unknown harness returns error
 		{"unknown harness returns error", "unknown-harness", true, "unsupported harness"},
 		{"empty harness returns error", "", true, "unsupported harness"},

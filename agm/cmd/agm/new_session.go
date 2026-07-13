@@ -13,6 +13,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/cli"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/interrupt"
+	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/permissionparity"
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
@@ -72,7 +73,15 @@ func createTmuxSessionAndStartClaude(sessionName string) (retErr error) {
 // post-create hooks, and final attach/detach handling for a freshly-prepared
 // tmux session. Split out from createTmuxSessionAndStartClaude purely to keep
 // the orchestrator function simple.
-func startAndFinalizeSession(sessionName, sessionID, workDir string, exists bool, extraAddDirs []string, trustPreConfigured bool, sandboxInfo *manifest.SandboxConfig) error {
+func startAndFinalizeSession(sessionName, sessionID, workDir string, exists bool, extraAddDirs []string, trustPreConfigured bool, sandboxInfo *manifest.SandboxConfig) (retErr error) {
+	registered := false
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		rollbackFailedStartup(sessionID, sessionName, registered, !exists)
+	}()
+
 	modeAppliedAtStartup, harnessDone, err := startHarness(sessionName, workDir, exists, extraAddDirs, trustPreConfigured)
 	if err != nil {
 		return err
@@ -83,15 +92,39 @@ func startAndFinalizeSession(sessionName, sessionID, workDir string, exists bool
 	if err := createAndRegisterManifest(sessionID, sessionName, workDir, sandboxInfo); err != nil {
 		return err
 	}
+	registered = true
 	if err := runHarnessPostCreate(sessionName, modeAppliedAtStartup); err != nil {
 		return err
 	}
 	if modeFlagValue != "" && !modeAppliedAtStartup && (harnessName != "claude-code" || os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "") {
 		applyCreationModeSwitch(sessionName, harnessName, modeFlagValue)
 	}
+	if os.Getenv("AGM_TEST_RUN_ID") == "" && os.Getenv("AGM_TEST_ENV") == "" {
+		verdict, livenessErr := tmux.CheckPaneLiveness(sessionName, tmux.GetSocketPath())
+		if err := launchparity.ValidateFinalLiveness(verdict, livenessErr); err != nil {
+			return err
+		}
+	}
 	updateVSCodeTabTitle(sessionName)
 	attachOrShowDetached(sessionName)
 	return nil
+}
+
+func rollbackFailedStartup(sessionID, sessionName string, registered, removeRuntime bool) {
+	if registered {
+		if adapter, err := getStorage(); err == nil {
+			if deleteErr := adapter.DeleteSession(sessionID); deleteErr != nil {
+				debug.Log("Failed startup rollback could not delete Dolt session %s: %v", sessionID, deleteErr)
+			}
+			_ = adapter.Close()
+		}
+	}
+	if removeRuntime {
+		tmux.KillSession(sessionName)
+		if err := os.RemoveAll(filepath.Join(getSessionsDir(), sessionName)); err != nil {
+			debug.Log("Failed startup rollback could not remove manifest directory: %v", err)
+		}
+	}
 }
 
 // preflight runs the per-session checks that must succeed before we start

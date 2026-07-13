@@ -1,4 +1,5 @@
 # SPEC: engram/cmd/engram/internal/cli/SPEC.md
+# RELATED-SPEC: engram/cmd/engram/cmd/SPEC.md
 # RELATED-SPEC: engram/cmd/engram/internal/validation/SPEC.md
 # RELATED-SPEC: engram/internal/slashcmd/SPEC.md
 # RELATED-SPEC: engram/internal/tableutil/SPEC.md
@@ -14,6 +15,7 @@ Feature: Engram CLI support guardrails
 
     Examples:
       | package                               |
+      | engram/cmd/engram/cmd                 |
       | engram/cmd/engram/internal/cli        |
       | engram/cmd/engram/internal/validation |
       | engram/internal/slashcmd              |

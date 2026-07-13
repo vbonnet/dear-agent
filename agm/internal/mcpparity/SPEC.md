@@ -29,6 +29,8 @@ deprecated compatibility.
 
 **MCP-06** When an MCP client supplies an OpenRouter-style model identifier containing `/` or `:`, the system shall accept it if it passes the shared model validator.
 
+**MCP-11** When MCP validates a priority OpenRouter family default, the system shall accept the same canonical model slug used by the shared agent registry and provider capabilities.
+
 **MCP-07** When an active harness is present in the agent registry, the system shall provide a concrete MCP session startup command for that harness.
 
 **MCP-08** When an MCP client requests operation discovery, the system shall list `create_session` and `send_message` as MCP mutation operations.

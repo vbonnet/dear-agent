@@ -34,8 +34,8 @@ sandbox must point at the host socket).
 
 It captures the target session's pane, classifies the queued input, and:
   - stuck AGM message ([From: ...] header) → sends Enter to submit it
-  - freeform human text                    → sends Ctrl+S to stash it
-    (the stashed text is restored automatically on the worker's next interaction)
+  - freeform human text                    → uses the harness preservation key
+    (Claude is verified; other active harnesses report a best-effort fallback)
   - no queued input                        → no-op
 
 A --reason (min 5 chars) is required and every clear action is appended to
@@ -95,10 +95,18 @@ func runSessionUnstick(cmd *cobra.Command, args []string) error {
 		return nil
 
 	case tmux.QueuedInputHuman:
-		// Freeform human text — stash it (Ctrl+S) so it is preserved and restored
-		// on the worker's next interaction, rather than discarded.
-		if err := tmux.SendKeys(sessionName, "C-s"); err != nil {
-			return fmt.Errorf("failed to send Ctrl+S to session '%s': %w", sessionName, err)
+		// Freeform human text — use the harness preservation mapping rather than
+		// discarding it. Non-Claude mappings remain explicit best-effort fallbacks.
+		harness := "claude-code"
+		if m, findErr := findManifestBySession(sessionName); findErr == nil && m != nil && m.Harness != "" {
+			harness = m.Harness
+		}
+		key, verified := tmux.StashKeyForHarness(harness)
+		if !verified {
+			fmt.Fprintf(os.Stderr, "Warning: harness '%s' uses the best-effort input preservation fallback (%s)\n", harness, key)
+		}
+		if err := tmux.SendKeys(sessionName, key); err != nil {
+			return fmt.Errorf("failed to send preservation key %s to session '%s': %w", key, sessionName, err)
 		}
 		if err := appendUnstickAudit(unstickAuditRecord{
 			Timestamp: time.Now().UTC().Format(time.RFC3339),

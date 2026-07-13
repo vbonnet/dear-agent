@@ -122,7 +122,7 @@ func TestBuildAgyCommand_AutoPermissionMode(t *testing.T) {
 	cmd := buildAgyCommand("/tmp/agy work", []string{"/tmp/extra dir"}, "auto")
 
 	for _, want := range []string{
-		"cd '/tmp/agy work' && agy --dangerously-skip-permissions",
+		"cd '/tmp/agy work' && agy --prompt-interactive --dangerously-skip-permissions",
 		"--add-dir '/tmp/extra dir'",
 		"&& exit",
 	} {
@@ -138,7 +138,38 @@ func TestBuildAgyCommand_DefaultPermissionMode(t *testing.T) {
 	if strings.Contains(cmd, "--dangerously-skip-permissions") {
 		t.Errorf("default AGY command should not skip permissions: %q", cmd)
 	}
-	if !strings.Contains(cmd, "cd '/tmp/agy-work' && agy && exit") {
+	if !strings.Contains(cmd, "cd '/tmp/agy-work' && agy --prompt-interactive && exit") {
 		t.Errorf("unexpected default AGY launch command: %q", cmd)
+	}
+}
+
+func TestActiveHarnessBuildersHonorPersistentStartupContracts(t *testing.T) {
+	savedPersistent := persistent
+	savedMode := modeFlagValue
+	t.Cleanup(func() {
+		persistent = savedPersistent
+		modeFlagValue = savedMode
+	})
+	persistent = true
+	modeFlagValue = "auto"
+
+	tests := []struct {
+		name string
+		cmd  string
+		want string
+	}{
+		{name: "Codex", cmd: buildCodexCommand("worker", "/tmp/work", nil), want: "-a never"},
+		{name: "AGY", cmd: buildAgyCommand("/tmp/work", nil, "auto"), want: "--prompt-interactive --dangerously-skip-permissions"},
+		{name: "OpenCode", cmd: buildOpenCodeCommand(), want: "opencode attach"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !strings.Contains(tt.cmd, tt.want) {
+				t.Fatalf("command %q missing startup contract %q", tt.cmd, tt.want)
+			}
+			if strings.Contains(tt.cmd, "&& exit") {
+				t.Fatalf("persistent command exits pane shell: %q", tt.cmd)
+			}
+		})
 	}
 }

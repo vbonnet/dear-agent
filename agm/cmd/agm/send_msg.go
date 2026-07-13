@@ -518,7 +518,7 @@ func dispatchSendByCanReceive(recipientSession, tmuxName, senderName, messageID,
 		recordDelegation(senderName, recipientSession, messageID, message)
 		return nil
 	case state.CanReceiveOverlay:
-		fmt.Fprintf(os.Stderr, "⚠ Session '%s' has active overlay (Background Tasks) — attempting auto-recovery\n", recipientSession)
+		fmt.Fprintf(os.Stderr, "⚠ Session '%s' has an active dismissible overlay — attempting auto-recovery\n", recipientSession)
 		if err := dismissOverlayAndDeliver(tmuxName, recipientSession, senderName, messageID, formattedMessage, sessionSendPromptFile, adapter); err != nil {
 			return err
 		}
@@ -998,6 +998,17 @@ func recordDelegation(sender, recipient, messageID, message string) {
 //  4. If ready, deliver the message directly
 //  5. If still blocked, queue for later delivery
 func dismissOverlayAndDeliver(tmuxName, recipientSession, senderName, messageID, formattedMessage, promptFile string, adapter *dolt.Adapter) error {
+	if paneContent, err := tmux.CapturePaneOutput(tmuxName, 30); err == nil {
+		if dismissed, dismissErr := tmux.DismissAgySurveyIfPresent(tmuxName, paneContent); dismissErr != nil {
+			return dismissErr
+		} else if dismissed {
+			time.Sleep(200 * time.Millisecond)
+			if session.CheckSessionDelivery(tmuxName) == state.CanReceiveYes {
+				fmt.Fprintf(os.Stderr, "✓ AGY feedback survey skipped on '%s' — delivering message\n", recipientSession)
+				return sendDirectly(recipientSession, senderName, messageID, formattedMessage, promptFile, adapter)
+			}
+		}
+	}
 	// Step 1: Send Left arrow to dismiss the overlay
 	if err := tmux.SendKeys(tmuxName, "Left"); err != nil {
 		return fmt.Errorf("failed to send Left key to dismiss overlay: %w", err)

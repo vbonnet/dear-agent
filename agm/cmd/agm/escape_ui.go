@@ -90,6 +90,17 @@ func runEscapeUI(cmd *cobra.Command, args []string) error {
 
 // attemptOverlayDismissal tries Left arrow, then Escape to dismiss UI overlays.
 func attemptOverlayDismissal(cmd *cobra.Command, sessionName string) error {
+	if paneContent, err := tmux.CapturePaneOutput(sessionName, 30); err == nil {
+		if dismissed, dismissErr := tmux.DismissAgySurveyIfPresent(sessionName, paneContent); dismissErr != nil {
+			return dismissErr
+		} else if dismissed {
+			time.Sleep(200 * time.Millisecond)
+			if session.CheckSessionDelivery(sessionName) == state.CanReceiveYes {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "OK: AGY feedback survey skipped on '%s'\n", sessionName)
+				return nil
+			}
+		}
+	}
 	// Step 1: Send Left arrow key
 	if err := tmux.SendKeys(sessionName, "Left"); err != nil {
 		return fmt.Errorf("failed to send Left key: %w", err)

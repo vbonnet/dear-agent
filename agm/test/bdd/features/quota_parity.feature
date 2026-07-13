@@ -38,3 +38,15 @@ Feature: Quota monitoring parity
       | deepseek  |
       | nemotron  |
       | qwen      |
+
+  Scenario Outline: Priority model families have sourced shared pricing
+    Given model family "<family>" is configured
+    When AGM validates quota model family coverage
+    Then model family "<family>" should have sourced shared pricing
+
+    Examples:
+      | family    |
+      | glm       |
+      | deepseek  |
+      | nemotron  |
+      | qwen      |

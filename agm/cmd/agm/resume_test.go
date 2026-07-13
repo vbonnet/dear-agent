@@ -312,7 +312,7 @@ func TestBuildAgyResumeCommand_FallbacksToNewSession(t *testing.T) {
 
 	cmd := buildAgyResumeCommand(&manifest.Manifest{}, health)
 
-	if !strings.Contains(cmd, "cd '/tmp/agy-work' && agy && exit") {
+	if !strings.Contains(cmd, "cd '/tmp/agy-work' && agy --prompt-interactive && exit") {
 		t.Errorf("expected fallback AGY launch command, got %q", cmd)
 	}
 	if strings.Contains(cmd, "--conversation") {
@@ -327,7 +327,7 @@ func TestBuildAgyResumeCommand_FallbacksToNewSessionWithAutoPermissionMode(t *te
 
 	cmd := buildAgyResumeCommand(&manifest.Manifest{PermissionMode: "auto"}, health)
 
-	if !strings.Contains(cmd, "cd '/tmp/agy-work' && agy --dangerously-skip-permissions && exit") {
+	if !strings.Contains(cmd, "cd '/tmp/agy-work' && agy --prompt-interactive --dangerously-skip-permissions && exit") {
 		t.Errorf("expected fallback AGY launch command with auto permissions, got %q", cmd)
 	}
 }

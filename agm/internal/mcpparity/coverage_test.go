@@ -45,7 +45,7 @@ func TestDeprecatedGeminiHasCompatibilitySurface(t *testing.T) {
 }
 
 func TestValidateModelIdentifierAcceptsOpenRouterIDs(t *testing.T) {
-	for _, model := range []string{"z-ai/glm-5.2", "deepseek/deepseek-v4-pro", "nvidia/nemotron-3-ultra", "qwen/qwen3.6-max"} {
+	for _, model := range []string{"z-ai/glm-5.2", "deepseek/deepseek-v4-pro", "nvidia/nemotron-3-ultra-550b-a55b", "qwen/qwen3.6-max-preview"} {
 		if err := ValidateModelIdentifier("opencode-cli", model); err != nil {
 			t.Errorf("ValidateModelIdentifier(opencode-cli, %q): %v", model, err)
 		}

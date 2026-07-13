@@ -41,6 +41,8 @@ compatibility.
 
 **AGP-08** When AGM exposes OpenRouter-compatible model aliases, the system shall include GLM 5.2, DeepSeek V4, Nemotron, and Qwen family aliases in that priority order.
 
+**AGP-18** When AGM resolves Nemotron or Qwen family defaults, the system shall use the canonical OpenRouter slugs `nvidia/nemotron-3-ultra-550b-a55b` and `qwen/qwen3.6-max-preview`.
+
 **AGP-09** When AGM validates an unknown future model identifier, the system shall allow syntactically safe identifiers and reject shell metacharacters before any value can be interpolated into a tmux command.
 
 ### Cross-Harness Tier Aliases

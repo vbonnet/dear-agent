@@ -1,4 +1,5 @@
 # SPEC: agm/internal/agent/SPEC.md
+# RELATED-SPEC: agm/internal/launchparity/SPEC.md
 # RELATED-SPEC: agm/internal/activity/SPEC.md
 # RELATED-SPEC: agm/internal/agysession/SPEC.md
 # RELATED-SPEC: agm/internal/codexsession/SPEC.md
@@ -7,12 +8,14 @@
 # RELATED-SPEC: agm/internal/monitor/opencode/SPEC.md
 # RELATED-SPEC: agm/internal/monitor/tmux/SPEC.md
 # RELATED-SPEC: agm/cmd/agm/SPEC.md
+# RELATED-SPEC: agm/cmd/agm/parity/SPEC.md
 # RELATED-SPEC: cmd/vroom-dispatch/SPEC.md
 # RELATED-SPEC: agm/internal/tmux/SPEC.md
 # RELATED-SPEC: agm/internal/safety/SPEC.md
 # RELATED-SPEC: agm/internal/cleanup/SPEC.md
 # RELATED-SPEC: agm/internal/procguard/SPEC.md
 # RELATED-SPEC: agm/internal/procreaper/SPEC.md
+# RELATED-SPEC: agm/internal/recovery/SPEC.md
 # RELATED-SPEC: agm/internal/sweeper/SPEC.md
 # RELATED-SPEC: agm/internal/bus/SPEC.md
 # RELATED-SPEC: agm/internal/messages/SPEC.md
@@ -83,6 +86,80 @@ Feature: Harness parity
     Given AGM active harnesses are configured
     When AGM validates active harness adapter conformance
     Then every active harness adapter should satisfy the shared conformance suite
+
+  Scenario Outline: Active harness launch commands preserve startup mode and persistence
+    Given active harness "<harness>" uses startup mode "<mode>"
+    When AGM builds the harness launch command with persistence enabled
+    Then the launch command should use the native interactive startup contract
+    And the launch command should not exit the tmux pane shell
+
+    Examples:
+      | harness      | mode |
+      | claude-code  | auto |
+      | codex-cli    | auto |
+      | agy          | auto |
+      | opencode-cli | plan |
+
+  Scenario Outline: Active harness startup is transactional
+    Given active harness "<harness>" uses startup mode "default"
+    When AGM validates final startup liveness
+    Then startup should require a live tmux session and harness process
+
+    Examples:
+      | harness      |
+      | claude-code  |
+      | codex-cli    |
+      | agy          |
+      | opencode-cli |
+
+  Scenario Outline: Active harness recovery requires process-state evidence
+    Given harness "<harness>" is configured
+    When AGM validates session recovery parity
+    Then recovery should require process-state confirmation
+    And recovery waits should respect context cancellation
+    And harness "<harness>" should have a safe recovery fallback policy
+
+    Examples:
+      | harness      |
+      | claude-code  |
+      | codex-cli    |
+      | agy          |
+      | opencode-cli |
+
+  Scenario Outline: Active harness capture uses the canonical AGM socket
+    Given harness "<harness>" is configured
+    When AGM validates the pane capture invocation
+    Then pane capture should use the canonical AGM tmux socket
+    And pane capture should normalize the session target
+    And pane capture should be bounded and process-group isolated
+
+    Examples:
+      | harness      |
+      | claude-code  |
+      | codex-cli    |
+      | agy          |
+      | opencode-cli |
+
+  Scenario: Every tmux-facing AGM command declares active harness parity
+    Given AGM tmux-facing command sources
+    When AGM validates tmux command parity contracts
+    Then every tmux-facing command should declare all active harness strategies
+    And every tmux-facing Cobra command source should have a parity contract
+
+  Scenario Outline: Model-independent tmux commands cross model families
+    Given model family "<family>" is configured
+    When AGM validates model-independent tmux command parity
+    Then model-independent tmux commands should support model family "<family>"
+
+    Examples:
+      | family    |
+      | anthropic |
+      | openai    |
+      | gemini    |
+      | glm       |
+      | deepseek  |
+      | nemotron  |
+      | qwen      |
 
   Scenario Outline: AGM runtime helper commands declare SPEC coverage
     Given AGM runtime helper command "<command>" is configured
@@ -173,6 +250,11 @@ Feature: Harness parity
     Given an AGY trust prompt
     When AGM checks whether the session can receive input
     Then delivery should be queued
+
+  Scenario: AGY feedback survey owns input focus
+    Given an AGY feedback survey over a ready prompt
+    When AGM checks whether the session can receive input
+    Then delivery should require dismissing an overlay
 
   Scenario: Codex detached session receives startup prompt
     Given Codex CLI is available

@@ -17,6 +17,10 @@ type ModelPrice struct {
 	InputPerMillion float64
 	// OutputPerMillion is USD per 1M output tokens.
 	OutputPerMillion float64
+	// Source identifies the rate-card authority for auditable non-placeholder entries.
+	Source string
+	// AsOf is the YYYY-MM-DD date on which the source price was verified.
+	AsOf string
 }
 
 // UnknownModel is returned for models we have no pricing for. Callers should
@@ -54,6 +58,13 @@ var table = []ModelPrice{
 	{Model: "5.4-mini", InputPerMillion: 2.00, OutputPerMillion: 8.00},
 	{Model: "5.3-codex", InputPerMillion: 3.00, OutputPerMillion: 15.00},
 	{Model: "5.3-codex-spark", InputPerMillion: 3.00, OutputPerMillion: 15.00},
+
+	// OpenRouter routed model-family defaults. These are current displayed
+	// input/output rates, not cache-adjusted rolling effective prices.
+	{Model: "z-ai/glm-5.2", InputPerMillion: 0.93, OutputPerMillion: 3.00, Source: "https://openrouter.ai/z-ai/glm-5.2/api", AsOf: "2026-07-11"},
+	{Model: "deepseek/deepseek-v4-pro", InputPerMillion: 0.435, OutputPerMillion: 0.87, Source: "https://openrouter.ai/deepseek/deepseek-v4-pro", AsOf: "2026-07-11"},
+	{Model: "nvidia/nemotron-3-ultra-550b-a55b", InputPerMillion: 0.50, OutputPerMillion: 2.20, Source: "https://openrouter.ai/nvidia/nemotron-3-ultra-550b-a55b/pricing", AsOf: "2026-07-11"},
+	{Model: "qwen/qwen3.6-max-preview", InputPerMillion: 1.04, OutputPerMillion: 6.24, Source: "https://openrouter.ai/qwen/qwen3.6-max-preview/pricing", AsOf: "2026-07-11"},
 }
 
 // Lookup returns a ModelPrice for model, matching on either the short alias or

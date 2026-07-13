@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,15 +12,19 @@ import (
 
 	"github.com/cucumber/godog"
 
+	commandparity "github.com/vbonnet/dear-agent/agm/cmd/agm/parity"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/configdirparity"
 	"github.com/vbonnet/dear-agent/agm/internal/engramparity"
+	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/marketplaceparity"
 	"github.com/vbonnet/dear-agent/agm/internal/mcpparity"
 	"github.com/vbonnet/dear-agent/agm/internal/permissionparity"
 	"github.com/vbonnet/dear-agent/agm/internal/quotaparity"
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
+	"github.com/vbonnet/dear-agent/agm/internal/recovery"
 	"github.com/vbonnet/dear-agent/agm/internal/state"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/wayfinderparity"
 	"github.com/vbonnet/dear-agent/engram/hippocampus"
 )
@@ -80,6 +85,18 @@ type harnessParityState struct {
 	cleanupSupportPackage      string
 	cleanupSupportSpec         string
 	a2aCoordinationSpecsValid  bool
+	captureInvocationArgs      []string
+	captureSessionName         string
+	commandParityValid         bool
+	commandSourceCoverageValid bool
+	modelCommandParityValid    bool
+	recoveryConfirmationValid  bool
+	recoveryCancellationValid  bool
+	recoveryFallback           recovery.Fallback
+	capturePolicyValid         bool
+	launchMode                 string
+	launchContract             launchparity.Contract
+	startupLivenessValid       bool
 }
 
 type harnessParityStateKey struct{}
@@ -99,6 +116,26 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM active harnesses are configured$`, agmActiveHarnessesAreConfigured)
 	ctx.Step(`^AGM validates active harness adapter conformance$`, agmValidatesActiveHarnessAdapterConformance)
 	ctx.Step(`^every active harness adapter should satisfy the shared conformance suite$`, everyActiveHarnessAdapterShouldSatisfySharedConformanceSuite)
+	ctx.Step(`^AGM validates the pane capture invocation$`, agmValidatesPaneCaptureInvocation)
+	ctx.Step(`^pane capture should use the canonical AGM tmux socket$`, paneCaptureShouldUseCanonicalAGMTmuxSocket)
+	ctx.Step(`^pane capture should normalize the session target$`, paneCaptureShouldNormalizeSessionTarget)
+	ctx.Step(`^pane capture should be bounded and process-group isolated$`, paneCaptureShouldBeBoundedAndProcessGroupIsolated)
+	ctx.Step(`^AGM tmux-facing command sources$`, agmTmuxFacingCommandSources)
+	ctx.Step(`^AGM validates tmux command parity contracts$`, agmValidatesTmuxCommandParityContracts)
+	ctx.Step(`^every tmux-facing command should declare all active harness strategies$`, everyTmuxFacingCommandShouldDeclareAllActiveHarnessStrategies)
+	ctx.Step(`^every tmux-facing Cobra command source should have a parity contract$`, everyTmuxFacingCobraCommandSourceShouldHaveAParityContract)
+	ctx.Step(`^AGM validates model-independent tmux command parity$`, agmValidatesModelIndependentTmuxCommandParity)
+	ctx.Step(`^model-independent tmux commands should support model family "([^"]*)"$`, modelIndependentTmuxCommandsShouldSupportModelFamily)
+	ctx.Step(`^AGM validates session recovery parity$`, agmValidatesSessionRecoveryParity)
+	ctx.Step(`^recovery should require process-state confirmation$`, recoveryShouldRequireProcessStateConfirmation)
+	ctx.Step(`^recovery waits should respect context cancellation$`, recoveryWaitsShouldRespectContextCancellation)
+	ctx.Step(`^harness "([^"]*)" should have a safe recovery fallback policy$`, harnessShouldHaveSafeRecoveryFallbackPolicy)
+	ctx.Step(`^active harness "([^"]*)" uses startup mode "([^"]*)"$`, activeHarnessUsesStartupMode)
+	ctx.Step(`^AGM builds the harness launch command with persistence enabled$`, agmBuildsPersistentHarnessLaunchCommand)
+	ctx.Step(`^the launch command should use the native interactive startup contract$`, launchCommandShouldUseNativeInteractiveContract)
+	ctx.Step(`^the launch command should not exit the tmux pane shell$`, launchCommandShouldNotExitTmuxPaneShell)
+	ctx.Step(`^AGM validates final startup liveness$`, agmValidatesFinalStartupLiveness)
+	ctx.Step(`^startup should require a live tmux session and harness process$`, startupShouldRequireLiveTmuxAndHarness)
 	ctx.Step(`^AGM runtime helper command "([^"]*)" is configured$`, agmRuntimeHelperCommandIsConfigured)
 	ctx.Step(`^AGM validates runtime helper command coverage$`, agmValidatesRuntimeHelperCommandCoverage)
 	ctx.Step(`^runtime helper command "([^"]*)" should have a co-located SPEC$`, runtimeHelperCommandShouldHaveCoLocatedSPEC)
@@ -132,6 +169,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^harness "([^"]*)" should have a cost quota source$`, harnessShouldHaveCostQuotaSource)
 	ctx.Step(`^harness "([^"]*)" should have a rate limit quota policy$`, harnessShouldHaveRateLimitQuotaPolicy)
 	ctx.Step(`^model family "([^"]*)" should have a quota pricing policy$`, modelFamilyShouldHaveQuotaPricingPolicy)
+	ctx.Step(`^model family "([^"]*)" should have sourced shared pricing$`, modelFamilyShouldHaveSourcedSharedPricing)
 	ctx.Step(`^model family "([^"]*)" should have a default quota model route$`, modelFamilyShouldHaveDefaultQuotaModelRoute)
 	ctx.Step(`^AGM validates MCP session creation parity$`, agmValidatesMCPSessionCreationParity)
 	ctx.Step(`^harness "([^"]*)" should have an MCP create-session surface$`, harnessShouldHaveMCPCreateSessionSurface)
@@ -172,9 +210,11 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^a Codex CLI trust prompt$`, aCodexCLITrustPrompt)
 	ctx.Step(`^an AGY ready prompt$`, anAGYReadyPrompt)
 	ctx.Step(`^an AGY trust prompt$`, anAGYTrustPrompt)
+	ctx.Step(`^an AGY feedback survey over a ready prompt$`, anAGYFeedbackSurveyOverAReadyPrompt)
 	ctx.Step(`^AGM checks whether the session can receive input$`, agmChecksWhetherTheSessionCanReceiveInput)
 	ctx.Step(`^delivery should be allowed$`, deliveryShouldBeAllowed)
 	ctx.Step(`^delivery should be queued$`, deliveryShouldBeQueued)
+	ctx.Step(`^delivery should require dismissing an overlay$`, deliveryShouldRequireDismissingAnOverlay)
 	ctx.Step(`^the detected session state should be "([^"]*)"$`, detectedSessionStateShouldBe)
 	ctx.Step(`^Codex CLI is available$`, codexCLIIsAvailable)
 	ctx.Step(`^AGY is available$`, agyIsAvailable)
@@ -216,12 +256,266 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the matching Codex saved session should be archived$`, matchingCodexSavedSessionShouldBeArchived)
 }
 
+func activeHarnessUsesStartupMode(ctx context.Context, harness, mode string) error {
+	state, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	state.configuredHarness = agent.NormalizeHarnessName(harness)
+	state.launchMode = mode
+	return nil
+}
+
+func agmBuildsPersistentHarnessLaunchCommand(ctx context.Context) error {
+	state, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	contract, err := launchparity.Resolve(state.configuredHarness, state.launchMode, true)
+	if err != nil {
+		return err
+	}
+	state.launchContract = contract
+	return nil
+}
+
+func launchCommandShouldUseNativeInteractiveContract(ctx context.Context) error {
+	state, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.launchContract.InteractiveToken == "" {
+		return fmt.Errorf("harness %q has no native interactive startup token", state.configuredHarness)
+	}
+	return nil
+}
+
+func launchCommandShouldNotExitTmuxPaneShell(ctx context.Context) error {
+	state, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.launchContract.ExitSuffix != "" {
+		return fmt.Errorf("persistent harness %q exit suffix = %q", state.configuredHarness, state.launchContract.ExitSuffix)
+	}
+	return nil
+}
+
+func agmValidatesFinalStartupLiveness(ctx context.Context) error {
+	state, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	missingHarness := tmux.PaneLiveness{SessionExists: true, HarnessAlive: false, Evidence: "descendants: zsh"}
+	state.startupLivenessValid = launchparity.ValidateFinalLiveness(missingHarness, nil) != nil &&
+		launchparity.ValidateFinalLiveness(tmux.PaneLiveness{SessionExists: true, HarnessAlive: true}, nil) == nil
+	return nil
+}
+
+func startupShouldRequireLiveTmuxAndHarness(ctx context.Context) error {
+	state, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !state.startupLivenessValid {
+		return fmt.Errorf("startup liveness accepted a session without a harness process")
+	}
+	return nil
+}
+
 func harnessIsConfigured(ctx context.Context, harness string) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
 		return err
 	}
 	harnessState.configuredHarness = agent.NormalizeHarnessName(harness)
+	return nil
+}
+
+func agmValidatesPaneCaptureInvocation(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredHarness == "" {
+		return fmt.Errorf("no harness configured")
+	}
+	harnessState.captureSessionName = harnessState.configuredHarness + ".capture:test"
+	harnessState.captureInvocationArgs = tmux.CapturePaneCommandArgs(harnessState.captureSessionName, 50)
+	policy := tmux.CapturePanePolicy()
+	harnessState.capturePolicyValid = policy.Timeout > 0 && policy.WaitDelay > 0 && policy.IsolateProcessGroup
+	return nil
+}
+
+func paneCaptureShouldUseCanonicalAGMTmuxSocket(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	args := harnessState.captureInvocationArgs
+	if len(args) < 2 || args[0] != "-S" || args[1] != tmux.GetSocketPath() {
+		return fmt.Errorf("capture invocation does not use canonical socket: %q", args)
+	}
+	return nil
+}
+
+func paneCaptureShouldNormalizeSessionTarget(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	args := harnessState.captureInvocationArgs
+	want := tmux.NormalizeTmuxSessionName(harnessState.captureSessionName)
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "-t" && args[i+1] == want {
+			return nil
+		}
+	}
+	return fmt.Errorf("capture invocation target is not normalized to %q: %q", want, args)
+}
+
+func paneCaptureShouldBeBoundedAndProcessGroupIsolated(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.capturePolicyValid {
+		return fmt.Errorf("pane capture policy is not bounded and process-group isolated")
+	}
+	return nil
+}
+
+func agmValidatesSessionRecoveryParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredHarness == "" {
+		return fmt.Errorf("no harness configured")
+	}
+	before := recovery.Snapshot{WorkLeaves: []recovery.Process{{PID: 42}}}
+	after := recovery.Snapshot{Descendants: []recovery.Process{{PID: 42}}}
+	harnessState.recoveryConfirmationValid = !recovery.Confirmed(before, after, true)
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	harnessState.recoveryCancellationValid = errors.Is(recovery.WaitForConfirmation(canceled, time.Minute), context.Canceled)
+	harnessState.recoveryFallback = recovery.FallbackForHarness(harnessState.configuredHarness)
+	return nil
+}
+
+func recoveryShouldRequireProcessStateConfirmation(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.recoveryConfirmationValid {
+		return fmt.Errorf("recovery accepted a ready-looking pane without work-process exit")
+	}
+	return nil
+}
+
+func recoveryWaitsShouldRespectContextCancellation(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.recoveryCancellationValid {
+		return fmt.Errorf("recovery confirmation wait ignored context cancellation")
+	}
+	return nil
+}
+
+func harnessShouldHaveSafeRecoveryFallbackPolicy(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	normalized := agent.NormalizeHarnessName(harness)
+	if normalized != harnessState.configuredHarness {
+		return fmt.Errorf("configured harness = %q, want %q", harnessState.configuredHarness, normalized)
+	}
+	want := recovery.FallbackNone
+	if normalized == "agy" {
+		want = recovery.FallbackLeafInterrupt
+	}
+	if harnessState.recoveryFallback != want {
+		return fmt.Errorf("recovery fallback for %q = %q, want %q", normalized, harnessState.recoveryFallback, want)
+	}
+	return nil
+}
+
+func agmTmuxFacingCommandSources(context.Context) error {
+	return nil
+}
+
+func agmValidatesTmuxCommandParityContracts(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.commandParityValid = commandparity.ValidateContracts() == nil
+	harnessState.commandSourceCoverageValid = commandparity.ValidateSourceCoverage(bddRepoRoot()) == nil
+	return nil
+}
+
+func everyTmuxFacingCommandShouldDeclareAllActiveHarnessStrategies(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.commandParityValid {
+		return commandparity.ValidateContracts()
+	}
+	return nil
+}
+
+func everyTmuxFacingCobraCommandSourceShouldHaveAParityContract(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.commandSourceCoverageValid {
+		return commandparity.ValidateSourceCoverage(bddRepoRoot())
+	}
+	return nil
+}
+
+func agmValidatesModelIndependentTmuxCommandParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredModelFamily == "" {
+		return fmt.Errorf("no model family configured")
+	}
+	if _, ok := agent.DefaultModelForFamily(harnessState.configuredModelFamily); !ok {
+		return fmt.Errorf("model family %q has no default route", harnessState.configuredModelFamily)
+	}
+	for _, contract := range commandparity.Contracts() {
+		if !contract.ModelIndependent {
+			continue
+		}
+		for _, harness := range agent.ActiveHarnesses() {
+			if contract.Strategies[harness] == "" {
+				return fmt.Errorf("model-independent command %q lacks harness %q", contract.Command, harness)
+			}
+		}
+	}
+	harnessState.modelCommandParityValid = true
+	return nil
+}
+
+func modelIndependentTmuxCommandsShouldSupportModelFamily(ctx context.Context, family string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredModelFamily != strings.ToLower(family) {
+		return fmt.Errorf("configured model family = %q, want %q", harnessState.configuredModelFamily, family)
+	}
+	if !harnessState.modelCommandParityValid {
+		return fmt.Errorf("model-independent tmux command parity was not validated")
+	}
 	return nil
 }
 
@@ -714,6 +1008,21 @@ func modelFamilyShouldHaveQuotaPricingPolicy(ctx context.Context, family string)
 	}
 	if harnessState.quotaFamilyCoverage.PricePolicy == "" {
 		return fmt.Errorf("model family %q has empty quota pricing policy", family)
+	}
+	return nil
+}
+
+func modelFamilyShouldHaveSourcedSharedPricing(ctx context.Context, family string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !slices.Contains([]string{"glm", "deepseek", "nemotron", "qwen"}, strings.ToLower(family)) {
+		return fmt.Errorf("model family %q is outside priority sourced-pricing scope", family)
+	}
+	coverage := harnessState.quotaFamilyCoverage
+	if !coverage.Priced || coverage.PriceSource == "" || coverage.PriceAsOf == "" {
+		return fmt.Errorf("model family %q lacks sourced shared pricing: %+v", family, coverage)
 	}
 	return nil
 }
@@ -1296,6 +1605,15 @@ func anAGYTrustPrompt(ctx context.Context) error {
 	return nil
 }
 
+func anAGYFeedbackSurveyOverAReadyPrompt(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.paneOutput = "Task complete\n>\nHow's the CLI experience so far? [1] Good [2] Fine [3] Bad [0] Skip"
+	return nil
+}
+
 func agmChecksWhetherTheSessionCanReceiveInput(ctx context.Context) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
@@ -1325,6 +1643,17 @@ func deliveryShouldBeQueued(ctx context.Context) error {
 	}
 	if harnessState.canReceive != state.CanReceiveQueue {
 		return fmt.Errorf("expected delivery to be queued, got %s", harnessState.canReceive)
+	}
+	return nil
+}
+
+func deliveryShouldRequireDismissingAnOverlay(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.canReceive != state.CanReceiveOverlay {
+		return fmt.Errorf("expected dismissible overlay, got %s", harnessState.canReceive)
 	}
 	return nil
 }
