@@ -186,9 +186,10 @@ func TestAllTmuxCommandsUseSocketPath(t *testing.T) {
 			if strings.Contains(line, `exec.Command("tmux"`) ||
 				strings.Contains(line, "exec.CommandContext(ctx, \"tmux\"") {
 
-				// Check if -S is present in this line or next few lines
-				// (commands may span multiple lines)
-				hasSocketFlag := strings.Contains(line, `"-S"`)
+				// CapturePaneCommandArgs is separately unit- and BDD-tested to
+				// begin with the canonical -S socket arguments.
+				hasSocketFlag := strings.Contains(line, `"-S"`) ||
+					strings.Contains(line, "CapturePaneCommandArgs(")
 
 				// Allow specific exceptions
 				isVersionCheck := strings.Contains(line, "tmux -V") || strings.Contains(line, "\"-V\"")
