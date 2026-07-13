@@ -13,7 +13,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
-// TokenTracker provides the main API for tracking Claude API token usage
+// TokenTracker provides the main API for tracking model response token usage
 // throughout a CLI session. Integrates with P1 Telemetry Foundation when
 // available, operates standalone otherwise.
 //
@@ -55,20 +55,26 @@ func (t *TokenTracker) Initialize(collector *telemetry.Collector) error {
 	return nil
 }
 
-// RecordResponse processes a Claude API response and extracts token usage.
+// RecordResponse processes a model response using schema-based family detection.
 // Automatically records to telemetry if available.
 //
 // Parameters:
 //
-//	responseJSON: Raw JSON response from Claude API
+//	responseJSON: Raw JSON model response
 //
 // Returns:
 //
 //	usage: Extracted token counts (nil on error)
 //	error: Parsing or validation failure
 func (t *TokenTracker) RecordResponse(responseJSON []byte) (*TokenUsage, error) {
+	return t.RecordResponseForFamily(responseJSON, "")
+}
+
+// RecordResponseForFamily processes a model response while preserving the
+// configured model-family attribution in the normalized usage record.
+func (t *TokenTracker) RecordResponseForFamily(responseJSON []byte, family string) (*TokenUsage, error) {
 	// Extract tokens from response
-	usage, err := ExtractTokensFromJSON(responseJSON)
+	usage, err := ExtractTokensFromJSONForFamily(responseJSON, family)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract tokens: %w", err)
 	}
@@ -77,7 +83,7 @@ func (t *TokenTracker) RecordResponse(responseJSON []byte) (*TokenUsage, error) 
 	if !t.telemetryAvail {
 		// Standalone mode: directly notify listener
 		event := &telemetry.Event{
-			Type:      "claude.api.response",
+			Type:      "llm.api.response",
 			Timestamp: time.Now(),
 			Level:     DetermineSeverityLevel(usage.TotalTokens),
 			Agent:     "tokentracker",
@@ -92,14 +98,20 @@ func (t *TokenTracker) RecordResponse(responseJSON []byte) (*TokenUsage, error) 
 	return usage, nil
 }
 
-// RecordResponseCtx processes a Claude API response with OTel span creation.
-// Creates a "claude_api_call" leaf span with gen_ai.* semantic convention attributes.
+// RecordResponseCtx processes a model response with OTel span creation.
+// Creates an "llm.api_call" leaf span with gen_ai.* semantic convention attributes.
 func (t *TokenTracker) RecordResponseCtx(ctx context.Context, responseJSON []byte) (*TokenUsage, error) {
+	return t.RecordResponseCtxForFamily(ctx, responseJSON, "")
+}
+
+// RecordResponseCtxForFamily records a response and preserves explicit model
+// family attribution on the tracing span.
+func (t *TokenTracker) RecordResponseCtxForFamily(ctx context.Context, responseJSON []byte, family string) (*TokenUsage, error) {
 	tracer := otel.Tracer("engram/tokentracking")
-	_, span := tracer.Start(ctx, "claude_api_call")
+	_, span := tracer.Start(ctx, "llm.api_call")
 	defer span.End()
 
-	usage, err := t.RecordResponse(responseJSON)
+	usage, err := t.RecordResponseForFamily(responseJSON, family)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
@@ -108,7 +120,7 @@ func (t *TokenTracker) RecordResponseCtx(ctx context.Context, responseJSON []byt
 	span.SetAttributes(
 		attribute.Int("gen_ai.usage.input_tokens", usage.InputTokens),
 		attribute.Int("gen_ai.usage.output_tokens", usage.OutputTokens),
-		attribute.String("gen_ai.system", "anthropic"),
+		attribute.String("gen_ai.system", usage.Provider),
 	)
 
 	// Try to extract model from the response JSON
@@ -133,7 +145,7 @@ func (t *TokenTracker) RecordResponseFromStruct(response *APIResponse) (*TokenUs
 	// Record to listener (same logic as RecordResponse)
 	if !t.telemetryAvail {
 		event := &telemetry.Event{
-			Type:      "claude.api.response",
+			Type:      "llm.api.response",
 			Timestamp: time.Now(),
 			Level:     DetermineSeverityLevel(usage.TotalTokens),
 			Agent:     "tokentracker",

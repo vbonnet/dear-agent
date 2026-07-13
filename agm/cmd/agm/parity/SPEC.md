@@ -1,5 +1,9 @@
 # AGM Command Harness Parity Specification
 
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
+
 <!-- Last audited at: NEEDS-AUDIT -->
 
 **Version:** 1.0

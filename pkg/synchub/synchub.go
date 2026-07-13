@@ -1,6 +1,5 @@
-// Package synchub coordinates the three surfaces — terminal (AGM/tmux),
-// Desktop / mobile (Claude Code Remote Control), and Discord (agm-bus) —
-// that share a single Claude Code session. Each session owns one Hub.
+// Package synchub coordinates terminal, desktop/mobile, and message-bus
+// surfaces that share a single harness-neutral agent session. Each session owns one Hub.
 // Surfaces talk to the Hub instead of to each other; the Hub provides the
 // two primitives they need to stay coherent:
 //
@@ -37,7 +36,7 @@ const (
 
 // Options tunes a Hub. Zero values use defaults appropriate for AGM.
 type Options struct {
-	// SessionID identifies the Claude Code session this hub belongs to.
+	// SessionID identifies the agent session this hub belongs to.
 	// Required.
 	SessionID string
 

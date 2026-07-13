@@ -82,8 +82,8 @@ func (c *Config) IsWorkspaceRoot(path string) bool {
 
 	for _, root := range c.expandedRoots {
 		rootClean := filepath.Clean(root)
-		// Must match at a path boundary: cleaned starts with root + separator
-		if strings.HasPrefix(cleaned, rootClean+string(filepath.Separator)) {
+		// Match the root itself or a descendant at a path boundary.
+		if cleaned == rootClean || strings.HasPrefix(cleaned, rootClean+string(filepath.Separator)) {
 			return true
 		}
 	}
@@ -102,7 +102,7 @@ func (c *Config) MatchedRoot(path string) string {
 
 	for i, root := range c.expandedRoots {
 		rootClean := filepath.Clean(root)
-		if strings.HasPrefix(cleaned, rootClean+string(filepath.Separator)) {
+		if cleaned == rootClean || strings.HasPrefix(cleaned, rootClean+string(filepath.Separator)) {
 			return c.WorkspaceRoots[i]
 		}
 	}
@@ -130,7 +130,7 @@ func NewConfigForTest(roots []string, worktreeBase string) *Config {
 
 // expandHome replaces a leading ~ with the user's home directory.
 func expandHome(path string) string {
-	if !strings.HasPrefix(path, "~") {
+	if path != "~" && !strings.HasPrefix(path, "~"+string(filepath.Separator)) {
 		return path
 	}
 	home, err := os.UserHomeDir()

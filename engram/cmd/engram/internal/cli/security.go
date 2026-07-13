@@ -93,7 +93,7 @@ func ValidateSafePath(field, path string, allowedPrefixes []string) error {
 			continue // Skip invalid prefix
 		}
 
-		if strings.HasPrefix(cleanPath, absPrefix) {
+		if cleanPath == absPrefix || strings.HasPrefix(cleanPath, absPrefix+string(filepath.Separator)) {
 			allowed = true
 			break
 		}

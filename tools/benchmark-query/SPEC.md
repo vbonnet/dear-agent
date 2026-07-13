@@ -1,5 +1,15 @@
 # benchmark-query — Specification
 
+## Executable EARS Requirements
+
+**BQR-01** When benchmark records are queried, the tool shall apply configured filters and return deterministic ordered results.
+
+**BQR-02** If benchmark input is missing or invalid, then the tool shall return an actionable error without fabricating measurements.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
+
 <!-- Last audited at: NEEDS-AUDIT -->
 
 ## Overview

@@ -3,7 +3,7 @@
 //
 //  1. Run a benchmark to get a baseline.
 //  2. Analyze failures into FailurePatterns.
-//  3. Propose improvement Hypotheses (multi-model: Claude / GPT / Gemini).
+//  3. Propose improvement Hypotheses across configured model families.
 //  4. Apply each Hypothesis as a Patch on the working tree.
 //  5. Re-run the benchmark.
 //  6. Compare. If the regression gate is on and SolveRate dropped, revert.

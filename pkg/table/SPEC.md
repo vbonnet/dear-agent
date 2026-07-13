@@ -1,5 +1,15 @@
 # Table Package Specification
 
+## Executable EARS Requirements
+
+**TABLR-01** When rows are rendered, the table package shall preserve column order and values across supported output formats.
+
+**TABLR-02** When a caller supplies a writer or style, the table package shall apply it without mutating unrelated global output state.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
+
 <!-- Last audited at: NEEDS-AUDIT -->
 
 ## Overview

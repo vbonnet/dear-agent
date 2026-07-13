@@ -1,5 +1,9 @@
 # agm/internal/codexcontrol - Requirements Specification (EARS)
 
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
+
 ## EARS Requirements
 
 **CCTL-01** When a client starts remote control, the package shall invoke `codex remote-control start --json` and return any command failure with stderr context.

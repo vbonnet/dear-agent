@@ -1,5 +1,15 @@
 # cliframe Technical Specification
 
+## Executable EARS Requirements
+
+**CLIFR-01** When a CLI result is rendered, the cliframe package shall preserve equivalent data across human-readable and structured output formats.
+
+**CLIFR-02** When an error is rendered, the cliframe package shall map it to a stable exit code and redact configured credential values.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
+
 <!-- Last audited at: NEEDS-AUDIT -->
 
 **Version**: 0.1.0

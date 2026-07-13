@@ -155,9 +155,8 @@ func TestIsWorkspaceRoot_TmpDir(t *testing.T) {
 func TestIsWorkspaceRoot_ExactRoot(t *testing.T) {
 	cfg := configWithRoots("/workspace/src")
 
-	// The root directory itself (with trailing content) should match
-	if !cfg.IsWorkspaceRoot("/workspace/src/something") {
-		t.Error("Expected path under root to match")
+	if !cfg.IsWorkspaceRoot("/workspace/src") {
+		t.Error("Expected the configured root itself to match")
 	}
 }
 
@@ -211,6 +210,11 @@ func TestMatchedRoot(t *testing.T) {
 	if matched != "" {
 		t.Errorf("Expected empty matched root for /tmp, got '%s'", matched)
 	}
+
+	matched = cfg.MatchedRoot("/workspace/work")
+	if matched != "/workspace/work" {
+		t.Errorf("Expected exact configured root, got %q", matched)
+	}
 }
 
 func TestExpandHome(t *testing.T) {
@@ -228,6 +232,7 @@ func TestExpandHome(t *testing.T) {
 		{"/absolute/path", "/absolute/path"},
 		{"relative/path", "relative/path"},
 		{"~", home},
+		{"~someone/src", "~someone/src"},
 	}
 
 	for _, tt := range tests {

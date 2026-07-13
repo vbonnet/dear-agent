@@ -1,5 +1,15 @@
 # AGM Daemon - Specification
 
+## Executable EARS Requirements
+
+**AGMD-01** When the AGM daemon polls queued messages, the system shall deliver only to the intended session and record the resulting acknowledgment state.
+
+**AGMD-02** When the daemon receives a shutdown signal, the system shall stop polling, close storage, and remove owned process state cleanly.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
+
 <!-- Last audited at: NEEDS-AUDIT -->
 
 ## Overview

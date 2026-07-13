@@ -84,3 +84,13 @@ func TestFindConversationFile_NoHome(t *testing.T) {
 	// This might find files from the actual home dir, so just check it doesn't panic
 	_ = result
 }
+
+func TestFindConversationFile_RejectsPathShapedSessionID(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	for _, sessionID := range []string{"../outside", "nested/session", `nested\\session`} {
+		if got := findConversationFile("", sessionID); got != "" {
+			t.Errorf("findConversationFile(%q) = %q, want empty", sessionID, got)
+		}
+	}
+}

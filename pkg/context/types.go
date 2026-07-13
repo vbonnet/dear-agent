@@ -91,7 +91,7 @@ type Usage struct {
 	LastUpdated time.Time
 
 	// Source indicates how usage was detected
-	// Values: "claude-cli", "gemini-cli", "opencode", "codex", "heuristic"
+	// Values: "claude-cli", "gemini-cli", "opencode-cli", "codex-cli", "agy", "heuristic"
 	Source string
 
 	// ModelID is the model being used (e.g., "claude-sonnet-4.5")
@@ -99,6 +99,10 @@ type Usage struct {
 
 	// SessionID is the CLI session identifier (optional)
 	SessionID string
+
+	// Estimated reports whether usage was inferred because the harness did not
+	// expose exact context counters.
+	Estimated bool
 }
 
 // Zone represents the current context usage zone.
@@ -177,6 +181,9 @@ const (
 
 	// CLICodex represents Codex CLI
 	CLICodex CLI = "codex"
+
+	// CLIAgy represents the Google Antigravity CLI.
+	CLIAgy CLI = "agy"
 
 	// CLIUnknown represents an unknown or unsupported CLI
 	CLIUnknown CLI = "unknown"

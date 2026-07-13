@@ -74,3 +74,21 @@ func TestFormatCSV_DataRows(t *testing.T) {
 		t.Errorf("missing second row in: %q", got)
 	}
 }
+
+func TestFormatCSV_EscapesStructuredValues(t *testing.T) {
+	var sb strings.Builder
+	FormatCSV([]string{"name", "note"}, [][]string{{"alpha,beta", "quoted \"value\""}}, &sb)
+	if got, want := sb.String(), "name,note\n\"alpha,beta\",\"quoted \"\"value\"\"\"\n"; got != want {
+		t.Fatalf("FormatCSV() = %q, want %q", got, want)
+	}
+}
+
+func TestFormatJSON_UsesJSONEncoding(t *testing.T) {
+	got, err := FormatJSON(map[string]string{"name": "engram"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != `{"name":"engram"}` {
+		t.Fatalf("FormatJSON() = %q", got)
+	}
+}

@@ -1,5 +1,15 @@
 # vroom-governor — Specification
 
+## Executable EARS Requirements
+
+**VGOVR-01** When VROOM evaluates worker capacity, the governor shall apply the configured limits before authorizing additional work.
+
+**VGOVR-02** If a governed signal is missing or stale, then the governor shall fail conservatively and expose the reason.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
+
 <!-- Last audited at: NEEDS-AUDIT -->
 
 ## Overview

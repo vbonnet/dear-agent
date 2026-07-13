@@ -107,6 +107,14 @@ func TestValidateSafePath_PathTraversal(t *testing.T) {
 	}
 }
 
+func TestValidateSafePath_RejectsSiblingPrefixCollision(t *testing.T) {
+	base := filepath.Join(t.TempDir(), ".engram")
+	sibling := base + "-evil"
+	if err := ValidateSafePath("path", filepath.Join(sibling, "config.yaml"), []string{base}); err == nil {
+		t.Fatalf("ValidateSafePath accepted sibling prefix %q for allowed root %q", sibling, base)
+	}
+}
+
 // TestValidateMaxLength_DoS tests denial-of-service prevention via length limits
 func TestValidateMaxLength_DoS(t *testing.T) {
 	tests := []struct {

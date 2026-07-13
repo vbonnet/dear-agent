@@ -1,5 +1,9 @@
 # agm/internal/codexarchive - Requirements Specification (EARS)
 
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
+
 ## EARS Requirements
 
 **CAX-01** When the session harness is not `codex-cli`, the archive bridge shall skip Codex-side archival.
