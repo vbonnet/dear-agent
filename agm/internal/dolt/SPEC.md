@@ -6,9 +6,7 @@
 
 **DOLTR-02** When a migration is applied, the Dolt adapter shall preserve existing data and record the migration exactly once.
 
-**DOLTR-03** When an isolated SQLite test store resolves a session by harness
-conversation UUID, it shall use SQLite-compatible JSON extraction and return
-the same matching manifest semantics as production Dolt.
+**DOLTR-03** When an isolated SQLite test store resolves a session by harness conversation UUID, the isolated SQLite test store shall use SQLite-compatible JSON extraction and return the same matching manifest semantics as production Dolt.
 
 ## BDD Traceability
 
