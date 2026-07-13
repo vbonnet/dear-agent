@@ -68,6 +68,8 @@ while a tmux pane is still alive.
 
 **REA-16** When reaper timing constants are evaluated, the system shall preserve the pinned timeout values covered by `TestConstantValues`.
 
+**REA-17** When a reaper inherits `AGM_DB_PATH` from an isolated AGM test environment, the system shall use that persistent SQLite lifecycle store for both its reaping tombstone and final archive, and shall not run production worktree cleanup against the isolated store.
+
 ---
 
 ## Key Invariants

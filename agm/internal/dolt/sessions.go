@@ -522,7 +522,13 @@ func (a *Adapter) GetSessionByUUID(conversationUUID string) (*manifest.Manifest,
 		return nil, fmt.Errorf("failed to apply migrations: %w", err)
 	}
 
-	query := `
+	jsonValue := "JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.%s'))"
+	if a.IsTestStore() {
+		// SQLite's json_extract already returns scalar strings unquoted and does
+		// not provide MySQL's JSON_UNQUOTE function.
+		jsonValue = "json_extract(metadata, '$.%s')"
+	}
+	query := fmt.Sprintf(`
 		SELECT id, created_at, updated_at, status, workspace, model, name, harness,
 			context_project, context_purpose, context_tags, context_notes,
 			claude_uuid, tmux_session_name, metadata,
@@ -532,10 +538,10 @@ func (a *Adapter) GetSessionByUUID(conversationUUID string) (*manifest.Manifest,
 			monitors
 		FROM agm_sessions
 		WHERE claude_uuid = ?
-		   OR JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.codex_session_id')) = ?
-		   OR JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.agy_conversation_id')) = ?
+		   OR `+jsonValue+` = ?
+		   OR `+jsonValue+` = ?
 		LIMIT 1
-	`
+	`, "codex_session_id", "agy_conversation_id")
 
 	row := a.conn.QueryRow(query, conversationUUID, conversationUUID, conversationUUID) //nolint:noctx // TODO(context): plumb ctx through this layer
 	m, err := a.scanSession(row)
