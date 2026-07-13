@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/cucumber/godog"
 
@@ -14,13 +15,14 @@ import (
 type contextManagementParityStateKey struct{}
 
 type contextManagementParityState struct {
-	harness  string
-	family   string
-	model    string
-	cli      agentcontext.CLI
-	detector *agentcontext.Detector
-	usage    *agentcontext.Usage
-	env      map[string]*string
+	harness   string
+	family    string
+	model     string
+	cli       agentcontext.CLI
+	detector  *agentcontext.Detector
+	usage     *agentcontext.Usage
+	detectErr error
+	env       map[string]*string
 }
 
 var contextManagementParityEnvironment = []string{
@@ -56,10 +58,38 @@ func RegisterContextManagementParitySteps(ctx *godog.ScenarioContext) {
 	})
 
 	ctx.Step(`^context route harness "([^"]*)" uses model family "([^"]*)"$`, contextRouteUsesModelFamily)
+	ctx.Step(`^context route harness "([^"]*)" supplies counters outside the platform integer range$`, contextRouteSuppliesOutOfRangeCounters)
 	ctx.Step(`^shared context usage is detected without native counters$`, sharedContextUsageIsDetected)
+	ctx.Step(`^shared context usage detection is attempted$`, sharedContextUsageDetectionIsAttempted)
 	ctx.Step(`^context usage should preserve the configured model family "([^"]*)"$`, contextUsageShouldPreserveModelFamily)
 	ctx.Step(`^context usage should be marked as estimated$`, contextUsageShouldBeMarkedEstimated)
 	ctx.Step(`^context usage should have a positive registered window$`, contextUsageShouldHavePositiveWindow)
+	ctx.Step(`^context detection should reject the out-of-range counters$`, contextDetectionShouldRejectOutOfRangeCounters)
+}
+
+func contextRouteSuppliesOutOfRangeCounters(ctx context.Context, harness string) error {
+	state, err := getContextManagementParityState(ctx)
+	if err != nil {
+		return err
+	}
+	route, ok := map[string]struct {
+		cli agentcontext.CLI
+		env string
+	}{
+		"claude-code":  {agentcontext.CLIClaude, "CLAUDE_CONTEXT_USAGE"},
+		"codex-cli":    {agentcontext.CLICodex, "CODEX_CONTEXT_USAGE"},
+		"agy":          {agentcontext.CLIAgy, "AGY_CONTEXT_USAGE"},
+		"opencode-cli": {agentcontext.CLIOpenCode, "OPENCODE_CONTEXT_USAGE"},
+	}[harness]
+	if !ok {
+		return fmt.Errorf("unsupported context harness %q", harness)
+	}
+	tooLarge := "2147483648"
+	if strconv.IntSize == 64 {
+		tooLarge = "9223372036854775808"
+	}
+	state.harness, state.cli = harness, route.cli
+	return os.Setenv(route.env, fmt.Sprintf(`{"used_tokens":1,"total_tokens":%s}`, tooLarge))
 }
 
 func snapshotContextManagementParityEnvironment() map[string]*string {
@@ -129,6 +159,29 @@ func sharedContextUsageIsDetected(ctx context.Context) error {
 	}
 	state.usage, err = state.detector.DetectFromSession("bdd-session", state.cli)
 	return err
+}
+
+func sharedContextUsageDetectionIsAttempted(ctx context.Context) error {
+	state, err := getContextManagementParityState(ctx)
+	if err != nil {
+		return err
+	}
+	state.usage, state.detectErr = state.detector.DetectFromSession("bdd-session", state.cli)
+	return nil
+}
+
+func contextDetectionShouldRejectOutOfRangeCounters(ctx context.Context) error {
+	state, err := getContextManagementParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.detectErr == nil {
+		return fmt.Errorf("context route %s accepted counters outside the platform integer range", state.harness)
+	}
+	if state.usage != nil {
+		return fmt.Errorf("context route %s returned usage after rejecting counters", state.harness)
+	}
+	return nil
 }
 
 func contextUsageShouldPreserveModelFamily(ctx context.Context, family string) error {

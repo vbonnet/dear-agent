@@ -40,3 +40,15 @@ Feature: Context management parity
       | opencode-cli | deepseek  |
       | opencode-cli | nemotron  |
       | opencode-cli | qwen      |
+
+  Scenario Outline: Every harness rejects context counters outside the platform integer range
+    Given context route harness "<harness>" supplies counters outside the platform integer range
+    When shared context usage detection is attempted
+    Then context detection should reject the out-of-range counters
+
+    Examples:
+      | harness      |
+      | claude-code  |
+      | codex-cli    |
+      | agy          |
+      | opencode-cli |

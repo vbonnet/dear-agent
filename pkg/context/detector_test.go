@@ -1,8 +1,10 @@
 package context
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -477,6 +479,16 @@ func TestPortableContextUsagePayloads(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid gemini-cli context usage")
 	})
+}
+
+func TestParseUsageJSONRejectsCountersOutsidePlatformIntRange(t *testing.T) {
+	tooLarge := "2147483648"
+	if strconv.IntSize == 64 {
+		tooLarge = "9223372036854775808"
+	}
+
+	_, _, _, ok := parseUsageJSON(fmt.Sprintf(`{"used_tokens":1,"total_tokens":%s}`, tooLarge))
+	assert.False(t, ok)
 }
 
 func TestCLIConstants(t *testing.T) {

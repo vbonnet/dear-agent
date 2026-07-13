@@ -143,8 +143,8 @@ func parseUsageJSON(payload string) (used, total int, modelID string, ok bool) {
 	if !usedOK || !totalOK {
 		return 0, 0, "", false
 	}
-	used64, usedErr := strconv.ParseInt(usedNumber.String(), 10, 64)
-	total64, totalErr := strconv.ParseInt(totalNumber.String(), 10, 64)
+	used64, usedErr := strconv.ParseInt(usedNumber.String(), 10, strconv.IntSize)
+	total64, totalErr := strconv.ParseInt(totalNumber.String(), 10, strconv.IntSize)
 	if usedErr != nil || totalErr != nil {
 		return 0, 0, "", false
 	}

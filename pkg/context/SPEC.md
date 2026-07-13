@@ -20,7 +20,7 @@ supported harness has an explicit and visibly estimated fallback.
 
 **CONTEXT-03** When exact portable context counters are supplied as text, the system shall parse comma-separated token usage values across supported harnesses.
 
-**CONTEXT-04** When explicit context counters are malformed, negative, zero-total, or over capacity, the system shall return an error instead of silently estimating replacement values.
+**CONTEXT-04** When explicit context counters are malformed, negative, zero-total, over capacity, or outside the platform integer range, the system shall return an error instead of silently estimating replacement values.
 
 **CONTEXT-05** When a supported harness does not expose exact counters, the system shall return a model-aware heuristic and shall mark the usage as estimated.
 
