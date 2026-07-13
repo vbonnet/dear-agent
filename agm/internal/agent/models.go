@@ -59,7 +59,16 @@ var HarnessModels = map[string][]ModelSpec{
 		{Alias: "2.5-flash-lite", FullName: "gemini-2.5-flash-lite", Description: "Budget multimodal"},
 	},
 	"codex-cli": {
-		{Alias: "5.6", FullName: "gpt-5.6", Description: "Flagship frontier model (latest)"},
+		// GPT-5.6 explicit tiers. "gpt-5.6" alone is a pre-announcement/alias
+		// string codex CLI rejects ("model metadata for gpt-5.6 not found"); the
+		// resolvable IDs are the sol/terra/luna tiers. Verified pricing (in/out
+		// per Mtok, 1.05M ctx): sol $5/$30, terra $2.50/$15, luna $1/$6.
+		{Alias: "5.6-sol", FullName: "gpt-5.6-sol", Description: "5.6 frontier tier ($5/$30) — frontier synthesis only"},
+		{Alias: "5.6-terra", FullName: "gpt-5.6-terra", Description: "5.6 balanced tier ($2.50/$15) — worker/agentic DEFAULT"},
+		{Alias: "5.6-luna", FullName: "gpt-5.6-luna", Description: "5.6 volume tier ($1/$6) — high-volume/cheap"},
+		// Bare "5.6" resolves to the worker default (terra), NOT the expensive
+		// frontier tier — spawns must opt in to sol explicitly.
+		{Alias: "5.6", FullName: "gpt-5.6-terra", Description: "5.6 alias → terra (worker default); use 5.6-sol/-luna for other tiers"},
 		{Alias: "5.5", FullName: "gpt-5.5", Description: "Flagship frontier model (ChatGPT-account default)"},
 		{Alias: "5.4", FullName: "gpt-5.4", Description: "Flagship frontier model"},
 		{Alias: "5.4-mini", FullName: "gpt-5.4-mini", Description: "Fast, efficient"},

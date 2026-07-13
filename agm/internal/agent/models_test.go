@@ -179,9 +179,19 @@ func TestResolveModelFullName_CrossHarness(t *testing.T) {
 	}
 }
 
-func TestCodexRegistryKeepsExplicitGPT56(t *testing.T) {
-	if got := ResolveModelFullName("codex-cli", "5.6"); got != "gpt-5.6" {
-		t.Fatalf("explicit codex 5.6 resolved to %q, want gpt-5.6", got)
+func TestCodexResolves56Tiers(t *testing.T) {
+	// "gpt-5.6" alone is unresolvable in codex CLI; the registry must map to the
+	// explicit sol/terra/luna tier IDs, and bare "5.6" to the worker default.
+	cases := map[string]string{
+		"5.6":       "gpt-5.6-terra", // bare alias → worker default (terra), NOT frontier
+		"5.6-sol":   "gpt-5.6-sol",
+		"5.6-terra": "gpt-5.6-terra",
+		"5.6-luna":  "gpt-5.6-luna",
+	}
+	for in, want := range cases {
+		if got := ResolveModelFullName("codex-cli", in); got != want {
+			t.Errorf("ResolveModelFullName(codex-cli, %q) = %q, want %q", in, got, want)
+		}
 	}
 }
 
