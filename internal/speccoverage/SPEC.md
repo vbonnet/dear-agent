@@ -58,7 +58,7 @@ production, test, support, configuration, service, and executable sources.
 
 **SCB-21** When a repository implementation references an executable BDD feature, the system shall require the feature to exist, declare a `Feature`, and identify the implementation `SPEC.md` through `SPEC` or `RELATED-SPEC` traceability.
 
-**SCB-22** When repository-wide implementation coverage is validated, the system shall include directories containing executable source or runtime configuration in the repository's supported programming, shell, infrastructure, data, service, and configuration formats.
+**SCB-22** When repository-wide implementation coverage is validated, the system shall include directories containing executable source, canonical extensionless `Dockerfile` and `Makefile` build files, or runtime configuration in the repository's supported programming, shell, infrastructure, data, service, and configuration formats.
 
 **SCB-23** When an executable BDD feature declares a `RELATED-SPEC`, the system shall require that specification to exist and reference the executable feature.
 

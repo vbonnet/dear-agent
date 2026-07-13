@@ -491,6 +491,10 @@ func goSourceFile(entry os.DirEntry) (bool, error) {
 }
 
 func implementationSourceFile(entry os.DirEntry) (bool, error) {
+	switch strings.ToLower(entry.Name()) {
+	case "dockerfile", "makefile":
+		return true, nil
+	}
 	switch strings.ToLower(filepath.Ext(entry.Name())) {
 	case ".go", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".rs", ".py",
 		".sh", ".bash", ".zsh", ".bats", ".tf", ".sql", ".yaml", ".yml",

@@ -40,7 +40,7 @@ func RegisterSpecCoverageSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^changed production Go packages should have co-located SPEC.md files$`, changedProductionGoPackagesShouldHaveCoLocatedSPECFiles)
 	ctx.Step(`^changed production Go package SPEC.md files should pass strict EARS lint$`, changedProductionGoPackageSPECFilesShouldPassStrictEARSLint)
 	ctx.Step(`^AGM validates repository-wide implementation SPEC and BDD coverage$`, agmValidatesRepositoryImplementationCoverage)
-	ctx.Step(`^every implementation directory should have strict co-located SPEC and reciprocal BDD coverage$`, everyImplementationDirectoryShouldHaveStrictCoverage)
+	ctx.Step(`^every implementation directory including canonical Dockerfile and Makefile directories should have strict co-located SPEC and reciprocal BDD coverage$`, everyImplementationDirectoryShouldHaveStrictCoverage)
 	ctx.Step(`^every repository SPEC should have strict EARS and reciprocal executable BDD coverage$`, everyImplementationDirectoryShouldHaveStrictCoverage)
 }
 

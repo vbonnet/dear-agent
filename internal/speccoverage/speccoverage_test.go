@@ -614,6 +614,8 @@ func TestValidateAllImplementationSpecsIncludesNonGoAndExecutableSources(t *test
 	writeRepositoryPackageCoverage(t, root, "tools/shell", "deploy.sh")
 	writeRepositoryPackageCoverage(t, root, "tools/rust", "main.rs")
 	writeRepositoryPackageCoverage(t, root, "config/harness", "settings.yaml")
+	writeRepositoryPackageCoverage(t, root, "containers/image", "Dockerfile")
+	writeRepositoryPackageCoverage(t, root, "automation", "Makefile")
 	writeRepositoryPackageCoverage(t, root, "tools/executable", "hook")
 	if err := os.Chmod(filepath.Join(root, "tools", "executable", "hook"), 0o755); err != nil {
 		t.Fatal(err)
