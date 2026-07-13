@@ -2,9 +2,14 @@ package tmux
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
+	"syscall"
+	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/procguard"
 )
 
 // CapturePaneOutput captures the last N lines from a session's active pane.
@@ -46,7 +51,10 @@ func capturePane(sessionName string, lines int) (string, error) {
 		return "", fmt.Errorf("session name cannot be empty")
 	}
 
-	cmd := exec.Command("tmux", CapturePaneCommandArgs(sessionName, lines)...)
+	policy := CapturePanePolicy()
+	ctx, cancel := context.WithTimeout(context.Background(), policy.Timeout)
+	defer cancel()
+	cmd := newCapturePaneCommand(ctx, sessionName, lines, policy)
 
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
@@ -56,6 +64,37 @@ func capturePane(sessionName string, lines int) (string, error) {
 	}
 
 	return stdout.String(), nil
+}
+
+// CapturePolicy describes the subprocess safety contract for pane capture.
+type CapturePolicy struct {
+	Timeout             time.Duration
+	WaitDelay           time.Duration
+	IsolateProcessGroup bool
+}
+
+// CapturePanePolicy returns the safety policy shared by every harness capture.
+func CapturePanePolicy() CapturePolicy {
+	return CapturePolicy{
+		Timeout:             getAdaptiveTimeout(),
+		WaitDelay:           time.Second,
+		IsolateProcessGroup: true,
+	}
+}
+
+func newCapturePaneCommand(ctx context.Context, sessionName string, lines int, policy CapturePolicy) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "tmux", CapturePaneCommandArgs(sessionName, lines)...)
+	if policy.IsolateProcessGroup {
+		cmd.SysProcAttr = procguard.ProcessGroupAttr()
+		cmd.Cancel = func() error {
+			if cmd.Process == nil {
+				return nil
+			}
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+	}
+	cmd.WaitDelay = policy.WaitDelay
+	return cmd
 }
 
 // CapturePaneCommandArgs returns the canonical tmux arguments used for pane

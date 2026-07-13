@@ -163,7 +163,9 @@ func runRecoverCommand(cmd *cobra.Command, args []string) error {
 				fmt.Printf("   Warning: %v\n", interruptErr)
 			}
 			if interrupted > 0 {
-				time.Sleep(5 * time.Second)
+				if err := recovery.WaitForConfirmation(cmd.Context(), 5*time.Second); err != nil {
+					return err
+				}
 				after, afterErr := recovery.SnapshotSession(cmd.Context(), tmuxSessionName)
 				if afterErr == nil && recovery.Confirmed(before, after, false) {
 					fmt.Printf("   Recovery confirmed after interrupting %d AGY work process(es)\n", interrupted)
@@ -225,11 +227,15 @@ func attemptVerifiedRecovery(ctx context.Context, tmuxSessionName string, keys [
 			return false, fmt.Errorf("send %s: %w", key, err)
 		}
 		if i+1 < len(keys) {
-			time.Sleep(500 * time.Millisecond)
+			if err := recovery.WaitForConfirmation(ctx, 500*time.Millisecond); err != nil {
+				return false, err
+			}
 		}
 	}
 	fmt.Println("   Signal sent, waiting 5 seconds for process-state confirmation...")
-	time.Sleep(5 * time.Second)
+	if err := recovery.WaitForConfirmation(ctx, 5*time.Second); err != nil {
+		return false, err
+	}
 	after, err := recovery.SnapshotSession(ctx, tmuxSessionName)
 	if err != nil {
 		return false, fmt.Errorf("snapshot after recovery: %w", err)

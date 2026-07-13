@@ -116,6 +116,7 @@ Feature: Harness parity
     Given harness "<harness>" is configured
     When AGM validates session recovery parity
     Then recovery should require process-state confirmation
+    And recovery waits should respect context cancellation
     And harness "<harness>" should have a safe recovery fallback policy
 
     Examples:
@@ -130,6 +131,7 @@ Feature: Harness parity
     When AGM validates the pane capture invocation
     Then pane capture should use the canonical AGM tmux socket
     And pane capture should normalize the session target
+    And pane capture should be bounded and process-group isolated
 
     Examples:
       | harness      |

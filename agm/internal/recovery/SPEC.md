@@ -24,6 +24,10 @@ from being reported as recovery while a wedged harness child remains alive.
 
 **RECOVERY-07** When Claude Code, Codex CLI, or OpenCode recovery remains unconfirmed, the system shall avoid process-level escalation unless that harness has an explicitly verified fallback.
 
+**RECOVERY-08** When recovery waits between signals or before process-state confirmation, the system shall return promptly if the command context is canceled.
+
+**RECOVERY-09** When AGY process-level fallback signals work leaves, the system shall use the operating system process API and report each signal failure without signaling invalid process identifiers.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

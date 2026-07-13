@@ -90,7 +90,9 @@ type harnessParityState struct {
 	commandSourceCoverageValid bool
 	modelCommandParityValid    bool
 	recoveryConfirmationValid  bool
+	recoveryCancellationValid  bool
 	recoveryFallback           recovery.Fallback
+	capturePolicyValid         bool
 	launchMode                 string
 	launchContract             launchparity.Contract
 	startupLivenessValid       bool
@@ -116,6 +118,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates the pane capture invocation$`, agmValidatesPaneCaptureInvocation)
 	ctx.Step(`^pane capture should use the canonical AGM tmux socket$`, paneCaptureShouldUseCanonicalAGMTmuxSocket)
 	ctx.Step(`^pane capture should normalize the session target$`, paneCaptureShouldNormalizeSessionTarget)
+	ctx.Step(`^pane capture should be bounded and process-group isolated$`, paneCaptureShouldBeBoundedAndProcessGroupIsolated)
 	ctx.Step(`^AGM tmux-facing command sources$`, agmTmuxFacingCommandSources)
 	ctx.Step(`^AGM validates tmux command parity contracts$`, agmValidatesTmuxCommandParityContracts)
 	ctx.Step(`^every tmux-facing command should declare all active harness strategies$`, everyTmuxFacingCommandShouldDeclareAllActiveHarnessStrategies)
@@ -124,6 +127,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^model-independent tmux commands should support model family "([^"]*)"$`, modelIndependentTmuxCommandsShouldSupportModelFamily)
 	ctx.Step(`^AGM validates session recovery parity$`, agmValidatesSessionRecoveryParity)
 	ctx.Step(`^recovery should require process-state confirmation$`, recoveryShouldRequireProcessStateConfirmation)
+	ctx.Step(`^recovery waits should respect context cancellation$`, recoveryWaitsShouldRespectContextCancellation)
 	ctx.Step(`^harness "([^"]*)" should have a safe recovery fallback policy$`, harnessShouldHaveSafeRecoveryFallbackPolicy)
 	ctx.Step(`^active harness "([^"]*)" uses startup mode "([^"]*)"$`, activeHarnessUsesStartupMode)
 	ctx.Step(`^AGM builds the harness launch command with persistence enabled$`, agmBuildsPersistentHarnessLaunchCommand)
@@ -337,6 +341,8 @@ func agmValidatesPaneCaptureInvocation(ctx context.Context) error {
 	}
 	harnessState.captureSessionName = harnessState.configuredHarness + ".capture:test"
 	harnessState.captureInvocationArgs = tmux.CapturePaneCommandArgs(harnessState.captureSessionName, 50)
+	policy := tmux.CapturePanePolicy()
+	harnessState.capturePolicyValid = policy.Timeout > 0 && policy.WaitDelay > 0 && policy.IsolateProcessGroup
 	return nil
 }
 
@@ -367,6 +373,17 @@ func paneCaptureShouldNormalizeSessionTarget(ctx context.Context) error {
 	return fmt.Errorf("capture invocation target is not normalized to %q: %q", want, args)
 }
 
+func paneCaptureShouldBeBoundedAndProcessGroupIsolated(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.capturePolicyValid {
+		return fmt.Errorf("pane capture policy is not bounded and process-group isolated")
+	}
+	return nil
+}
+
 func agmValidatesSessionRecoveryParity(ctx context.Context) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
@@ -378,6 +395,9 @@ func agmValidatesSessionRecoveryParity(ctx context.Context) error {
 	before := recovery.Snapshot{WorkLeaves: []recovery.Process{{PID: 42}}}
 	after := recovery.Snapshot{Descendants: []recovery.Process{{PID: 42}}}
 	harnessState.recoveryConfirmationValid = !recovery.Confirmed(before, after, true)
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	harnessState.recoveryCancellationValid = recovery.WaitForConfirmation(canceled, time.Minute) == context.Canceled
 	harnessState.recoveryFallback = recovery.FallbackForHarness(harnessState.configuredHarness)
 	return nil
 }
@@ -389,6 +409,17 @@ func recoveryShouldRequireProcessStateConfirmation(ctx context.Context) error {
 	}
 	if !harnessState.recoveryConfirmationValid {
 		return fmt.Errorf("recovery accepted a ready-looking pane without work-process exit")
+	}
+	return nil
+}
+
+func recoveryWaitsShouldRespectContextCancellation(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.recoveryCancellationValid {
+		return fmt.Errorf("recovery confirmation wait ignored context cancellation")
 	}
 	return nil
 }

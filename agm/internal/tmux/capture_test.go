@@ -1,8 +1,10 @@
 package tmux
 
 import (
+	"context"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestCapturePaneArgsUseCanonicalSocketAndNormalizedTarget(t *testing.T) {
@@ -34,5 +36,20 @@ func TestCapturePaneRejectsEmptySession(t *testing.T) {
 	}
 	if _, err := CapturePaneHistoryOutput(""); err == nil {
 		t.Fatal("CapturePaneHistoryOutput() error = nil, want empty-session error")
+	}
+}
+
+func TestCapturePaneCommandIsBoundedAndIsolated(t *testing.T) {
+	t.Setenv("AGM_TMUX_SOCKET", "/tmp/agm-capture-test.sock")
+
+	cmd := newCapturePaneCommand(context.Background(), "session", 50, CapturePanePolicy())
+	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setpgid {
+		t.Fatal("capture command must run in an isolated process group")
+	}
+	if cmd.Cancel == nil {
+		t.Fatal("capture command must cancel its process group")
+	}
+	if cmd.WaitDelay != time.Second {
+		t.Fatalf("capture command WaitDelay = %v, want %v", cmd.WaitDelay, time.Second)
 	}
 }

@@ -44,6 +44,8 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-14** When pane output or scrollback is captured for any active harness, the system shall invoke tmux through the canonical AGM socket and normalize the target session name.
 
+**TMUX-15** When pane output or scrollback capture starts, the system shall bound the tmux subprocess with a timeout, isolate its process group, and bound command waiting after cancellation.
+
 **TMUX-20** When the AGY feedback survey is visible with a bare prompt, the system shall classify the session as blocked rather than ready and shall select the survey's Skip option before delivering automated input.
 
 **TMUX-21** When the operating-system user database cannot resolve the current process UID, the system shall use the numeric UID and environment username for linger diagnostics.

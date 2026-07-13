@@ -5,9 +5,10 @@ package recovery
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
+	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/procreaper"
@@ -107,13 +108,17 @@ func FallbackForHarness(harness string) Fallback {
 // InterruptWorkLeaves sends SIGINT to the observed non-harness leaf processes.
 // It never signals the pane root, a harness runtime, or an intermediate shell.
 func InterruptWorkLeaves(snapshot Snapshot) (int, error) {
+	return interruptWorkLeaves(snapshot, signalInterrupt)
+}
+
+func interruptWorkLeaves(snapshot Snapshot, signal func(int) error) (int, error) {
 	interrupted := 0
 	var failures []string
 	for _, process := range snapshot.WorkLeaves {
 		if process.PID <= 1 {
 			continue
 		}
-		if err := syscall.Kill(process.PID, syscall.SIGINT); err != nil {
+		if err := signal(process.PID); err != nil {
 			failures = append(failures, fmt.Sprintf("pid %d: %v", process.PID, err))
 			continue
 		}
@@ -123,6 +128,27 @@ func InterruptWorkLeaves(snapshot Snapshot) (int, error) {
 		return interrupted, fmt.Errorf("interrupt work leaves: %s", strings.Join(failures, "; "))
 	}
 	return interrupted, nil
+}
+
+func signalInterrupt(pid int) error {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return process.Signal(os.Interrupt)
+}
+
+// WaitForConfirmation waits between recovery actions while honoring caller
+// cancellation and deadlines.
+func WaitForConfirmation(ctx context.Context, duration time.Duration) error {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func protectedRuntime(process procreaper.ProcessInfo) bool {
