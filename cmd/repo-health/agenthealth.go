@@ -122,6 +122,10 @@ func earsCoverage(sc *scanCtx) (Metric, int, int) {
 }
 
 func isHealthImplementationSource(path string) bool {
+	switch strings.ToLower(filepath.Base(path)) {
+	case "dockerfile", "makefile":
+		return true
+	}
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".go", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".rs", ".py",
 		".sh", ".bash", ".zsh", ".bats", ".tf", ".sql", ".yaml", ".yml",

@@ -26,6 +26,8 @@ func RegisterQualityCommandGuardrailSteps(ctx *godog.ScenarioContext) {
 	})
 	ctx.Step(`^repo health measures executable BDD discovery$`, repoHealthMeasuresExecutableBDDDiscovery)
 	ctx.Step(`^repo health should follow the tag-free BDD enforcement policy$`, repoHealthShouldFollowTagFreeBDDPolicy)
+	ctx.Step(`^repo health measures implementation source coverage$`, repoHealthMeasuresImplementationSourceCoverage)
+	ctx.Step(`^repo health should recognize canonical Dockerfile and Makefile names$`, repoHealthShouldRecognizeCanonicalBuildFiles)
 }
 
 func repoHealthMeasuresExecutableBDDDiscovery() error {
@@ -39,6 +41,30 @@ func repoHealthShouldFollowTagFreeBDDPolicy() error {
 		"cmd/repo-health/evaluate.go":    {"features are in the canonical executable suite"},
 		"cmd/repo-health/render.go":      {"Executable BDD features"},
 		"cmd/repo-health/types.go":       {"features_executable", "implementation_dirs_with_spec"},
+	}
+	for rel, markers := range checks {
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil {
+			return err
+		}
+		for _, marker := range markers {
+			if !strings.Contains(string(data), marker) {
+				return fmt.Errorf("%s does not enforce %q", rel, marker)
+			}
+		}
+	}
+	return nil
+}
+
+func repoHealthMeasuresImplementationSourceCoverage() error {
+	return nil
+}
+
+func repoHealthShouldRecognizeCanonicalBuildFiles() error {
+	root := packageSpecBDDRepoRoot()
+	checks := map[string][]string{
+		"cmd/repo-health/agenthealth.go":      {`"dockerfile"`, `"makefile"`},
+		"cmd/repo-health/agenthealth_test.go": {"containers/image/Dockerfile", "automation/Makefile"},
 	}
 	for rel, markers := range checks {
 		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))

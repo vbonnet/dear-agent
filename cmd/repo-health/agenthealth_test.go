@@ -48,13 +48,17 @@ func TestEARSCoverageIncludesCrossLanguageImplementationDirs(t *testing.T) {
 	write("web/app/SPEC.md", 0o644)
 	write("ops/hooks/pre-commit", 0o755)
 	write("ops/hooks/SPEC.md", 0o644)
+	write("containers/image/Dockerfile", 0o644)
+	write("containers/image/SPEC.md", 0o644)
+	write("automation/Makefile", 0o644)
+	write("automation/SPEC.md", 0o644)
 	write("docs/readme.md", 0o644)
 
 	metric, total, withSpec := earsCoverage(&scanCtx{root: root})
 	if !metric.Available {
 		t.Fatalf("EARS metric unavailable: %s", metric.Note)
 	}
-	if total != 3 || withSpec != 3 {
-		t.Fatalf("EARS coverage = %d/%d, want 3/3", withSpec, total)
+	if total != 5 || withSpec != 5 {
+		t.Fatalf("EARS coverage = %d/%d, want 5/5", withSpec, total)
 	}
 }

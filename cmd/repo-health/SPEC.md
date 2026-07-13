@@ -30,7 +30,7 @@ uses a status-derived exit code for CI or scheduled monitoring.
 
 **REPO-HEALTH-10** If a BDD feature exists outside the canonical executable feature directory, then the system shall report degraded BDD health.
 
-**REPO-HEALTH-11** When SPEC health is collected, the system shall include implementation directories containing supported source, shell, infrastructure, runtime configuration, service, data, and executable files.
+**REPO-HEALTH-11** When SPEC health is collected, the system shall include implementation directories containing supported source, shell, infrastructure, runtime configuration, service, data, executable files, and canonical extensionless `Dockerfile` and `Makefile` build files.
 
 ## BDD Traceability
 
