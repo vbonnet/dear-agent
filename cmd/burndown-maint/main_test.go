@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -35,23 +38,58 @@ func TestTickResultJSON(t *testing.T) {
 	}
 }
 
-func TestRunCommandHonorsCancellationAndTimeout(t *testing.T) {
+func TestRunAGMCommandHonorsCancellationAndTimeout(t *testing.T) {
+	installTestAGM(t)
+
 	t.Run("parent cancellation", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		_, err := runCommand(ctx, time.Second, os.Args[0], "-test.run=TestBurndownMaintHelperProcess")
+		_, err := runAGMCommand(ctx, time.Second, "-test.run=TestBurndownMaintHelperProcess")
 		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("runCommand error = %v, want context cancellation", err)
+			t.Fatalf("runAGMCommand error = %v, want context cancellation", err)
 		}
 	})
 
 	t.Run("deadline", func(t *testing.T) {
 		t.Setenv("BURNDOWN_MAINT_HELPER_PROCESS", "1")
-		_, err := runCommand(context.Background(), 10*time.Millisecond, os.Args[0], "-test.run=TestBurndownMaintHelperProcess")
+		_, err := runAGMCommand(context.Background(), 10*time.Millisecond, "-test.run=TestBurndownMaintHelperProcess")
 		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("runCommand error = %v, want deadline exceeded", err)
+			t.Fatalf("runAGMCommand error = %v, want deadline exceeded", err)
 		}
 	})
+}
+
+func installTestAGM(t *testing.T) {
+	t.Helper()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "agm"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, name)
+	if err := os.Link(executable, target); err != nil {
+		source, openErr := os.Open(executable)
+		if openErr != nil {
+			t.Fatal(openErr)
+		}
+		defer source.Close()
+		destination, createErr := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0700)
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		if _, copyErr := io.Copy(destination, source); copyErr != nil {
+			_ = destination.Close()
+			t.Fatal(copyErr)
+		}
+		if closeErr := destination.Close(); closeErr != nil {
+			t.Fatal(closeErr)
+		}
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 func TestBurndownMaintHelperProcess(t *testing.T) {

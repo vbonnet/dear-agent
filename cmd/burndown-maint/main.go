@@ -150,7 +150,7 @@ func outputResult(r tickResult, jsonOut bool) error {
 // countActiveBurndownWorkers shells out to `agm session list --json` and
 // counts sessions whose name starts with "burndown-" and are not archived.
 func countActiveBurndownWorkers(ctx context.Context) (int, error) {
-	out, err := runCommand(ctx, agmCommandTimeout, "agm", "session", "list", "--json")
+	out, err := runAGMCommand(ctx, agmCommandTimeout, "session", "list", "--json")
 	if err != nil {
 		return 0, fmt.Errorf("agm session list: %w", err)
 	}
@@ -177,7 +177,7 @@ func countActiveBurndownWorkers(ctx context.Context) (int, error) {
 // spawnWorker creates a new detached AGM session for burndown work.
 func spawnWorker(ctx context.Context, name string, route burndownmaint.Route) (string, error) {
 	args := burndownmaint.BuildSessionArgs(name, route)
-	out, err := runCommand(ctx, agmCommandTimeout, "agm", args...)
+	out, err := runAGMCommand(ctx, agmCommandTimeout, args...)
 	if err != nil {
 		return "", fmt.Errorf("agm session new: %w\n%s", err, out)
 	}
@@ -185,10 +185,10 @@ func spawnWorker(ctx context.Context, name string, route burndownmaint.Route) (s
 	return strings.TrimSpace(string(out)), nil
 }
 
-func runCommand(ctx context.Context, timeout time.Duration, name string, args ...string) ([]byte, error) {
+func runAGMCommand(ctx context.Context, timeout time.Duration, args ...string) ([]byte, error) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	out, err := exec.CommandContext(timeoutCtx, name, args...).CombinedOutput() //#nosec G204
+	out, err := exec.CommandContext(timeoutCtx, "agm", args...).CombinedOutput()
 	if timeoutCtx.Err() != nil {
 		return out, timeoutCtx.Err()
 	}
