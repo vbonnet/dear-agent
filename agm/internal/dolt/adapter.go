@@ -12,6 +12,7 @@ import (
 
 	_ "github.com/go-sql-driver/mysql" // MySQL driver for Dolt
 	"gopkg.in/yaml.v3"
+	_ "modernc.org/sqlite" // Pure-Go SQLite driver for isolated AGM test environments
 )
 
 func init() {
@@ -40,7 +41,85 @@ type Adapter struct {
 	workspace         string
 	port              string
 	migrationsApplied bool
+	testStore         bool
 }
+
+// NewSQLiteAdapter opens the persistent session store used only by an AGM test
+// environment. It deliberately exposes the same Adapter contract as Dolt so
+// lifecycle commands do not gain a second, file-backed manifest path.
+func NewSQLiteAdapter(path string) (*Adapter, error) {
+	if path == "" {
+		return nil, fmt.Errorf("SQLite database path cannot be empty")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return nil, fmt.Errorf("create SQLite database directory: %w", err)
+	}
+
+	conn, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
+	if err != nil {
+		return nil, fmt.Errorf("open SQLite session store: %w", err)
+	}
+	if err := conn.Ping(); err != nil { //nolint:noctx // connection validation
+		_ = conn.Close()
+		return nil, fmt.Errorf("ping SQLite session store: %w", err)
+	}
+
+	if _, err := conn.Exec(sqliteSessionSchema); err != nil { //nolint:noctx // schema initialization
+		_ = conn.Close()
+		return nil, fmt.Errorf("initialize SQLite session store: %w", err)
+	}
+
+	return &Adapter{
+		conn:              conn,
+		workspace:         "test",
+		migrationsApplied: true,
+		testStore:         true,
+	}, nil
+}
+
+// IsTestStore reports whether this adapter backs an isolated AGM test
+// environment rather than a Dolt workspace.
+func (a *Adapter) IsTestStore() bool { return a.testStore }
+
+const sqliteSessionSchema = `
+CREATE TABLE IF NOT EXISTS agm_sessions (
+  id TEXT PRIMARY KEY,
+  created_at TIMESTAMP,
+  updated_at TIMESTAMP,
+  status TEXT,
+  workspace TEXT NOT NULL,
+  model TEXT,
+  name TEXT,
+  harness TEXT,
+  context_project TEXT,
+  context_purpose TEXT,
+  context_tags TEXT,
+  context_notes TEXT,
+  claude_uuid TEXT,
+  tmux_session_name TEXT,
+  metadata TEXT,
+  permission_mode TEXT,
+  permission_mode_updated_at TIMESTAMP,
+  permission_mode_source TEXT,
+  parent_session_id TEXT,
+  is_test BOOLEAN NOT NULL DEFAULT TRUE,
+  access_count INTEGER NOT NULL DEFAULT 0,
+  last_accessed_at TIMESTAMP,
+  context_total_tokens INTEGER,
+  context_used_tokens INTEGER,
+  context_percentage_used REAL,
+  monitors TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_agm_sessions_workspace_updated
+  ON agm_sessions(workspace, updated_at DESC);
+CREATE TABLE IF NOT EXISTS agm_harness_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  switched_at TIMESTAMP NOT NULL,
+  from_harness TEXT NOT NULL,
+  to_harness TEXT NOT NULL
+);
+`
 
 // Config holds Dolt connection configuration
 type Config struct {
