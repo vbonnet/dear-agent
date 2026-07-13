@@ -16,19 +16,20 @@ import (
 )
 
 type localDevGuardrailState struct {
-	command            string
-	commandSpec        string
-	library            string
-	librarySpec        string
-	traceDir           string
-	trace              safepr.Session
-	harness            string
-	family             string
-	preflightMinutes   int
-	localTestTimeout   string
-	ciTestTimeout      string
-	localVulnAllowlist []string
-	ciVulnAllowlist    []string
+	command             string
+	commandSpec         string
+	library             string
+	librarySpec         string
+	traceDir            string
+	trace               safepr.Session
+	harness             string
+	family              string
+	preflightMinutes    int
+	localTestTimeout    string
+	affectedTestTimeout string
+	ciTestTimeout       string
+	localVulnAllowlist  []string
+	ciVulnAllowlist     []string
 }
 
 type localDevGuardrailStateKey struct{}
@@ -60,15 +61,15 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the safe-pr full preflight timeout is configured$`, safePRFullPreflightTimeoutIsConfigured)
 	ctx.Step(`^AGM validates the safe-pr preflight budget$`, agmValidatesSafePRPreflightBudget)
 	ctx.Step(`^safe-pr should allow at least (\d+) minutes for preflight-full$`, safePRShouldAllowAtLeastMinutesForPreflightFull)
-	ctx.Step(`^local and required CI Go test timeouts are configured$`, localAndRequiredCIGoTestTimeoutsAreConfigured)
+	ctx.Step(`^local, affected integration, and required CI Go test timeouts are configured$`, repositoryGoTestTimeoutsAreConfigured)
 	ctx.Step(`^AGM validates Go test timeout parity$`, agmValidatesGoTestTimeoutParity)
-	ctx.Step(`^the local and required CI Go test timeouts should match$`, localAndRequiredCIGoTestTimeoutsShouldMatch)
+	ctx.Step(`^all repository Go test timeouts should match$`, repositoryGoTestTimeoutsShouldMatch)
 	ctx.Step(`^local and required CI govulncheck allowlists are configured$`, localAndRequiredCIGovulncheckAllowlistsAreConfigured)
 	ctx.Step(`^AGM validates govulncheck policy parity$`, agmValidatesGovulncheckPolicyParity)
 	ctx.Step(`^the local and required CI govulncheck allowlists should match$`, localAndRequiredCIGovulncheckAllowlistsShouldMatch)
 }
 
-func localAndRequiredCIGoTestTimeoutsAreConfigured(ctx context.Context) error {
+func repositoryGoTestTimeoutsAreConfigured(ctx context.Context) error {
 	state, err := getLocalDevGuardrailState(ctx)
 	if err != nil {
 		return err
@@ -82,6 +83,10 @@ func localAndRequiredCIGoTestTimeoutsAreConfigured(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("read required CI workflow: %w", err)
 	}
+	affected, err := os.ReadFile(filepath.Join(root, "cmd", "test-affected", "main.go"))
+	if err != nil {
+		return fmt.Errorf("read affected integration test runner: %w", err)
+	}
 	localMatch := regexp.MustCompile(`(?m)^TEST_TIMEOUT="([^"]+)"$`).FindSubmatch(local)
 	if len(localMatch) != 2 {
 		return fmt.Errorf("local Go test timeout declaration not found")
@@ -90,7 +95,12 @@ func localAndRequiredCIGoTestTimeoutsAreConfigured(ctx context.Context) error {
 	if len(ciMatch) != 2 {
 		return fmt.Errorf("required CI Go test timeout declaration not found")
 	}
+	affectedMatch := regexp.MustCompile(`(?m)^\s*goCommandTimeout\s*=\s*(\d+)\s*\*\s*time\.Minute$`).FindSubmatch(affected)
+	if len(affectedMatch) != 2 {
+		return fmt.Errorf("affected integration Go test timeout declaration not found")
+	}
 	state.localTestTimeout = string(localMatch[1])
+	state.affectedTestTimeout = string(affectedMatch[1]) + "m"
 	state.ciTestTimeout = string(ciMatch[1])
 	return nil
 }
@@ -100,19 +110,24 @@ func agmValidatesGoTestTimeoutParity(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if state.localTestTimeout == "" || state.ciTestTimeout == "" {
-		return fmt.Errorf("local and required CI Go test timeouts are not configured")
+	if state.localTestTimeout == "" || state.affectedTestTimeout == "" || state.ciTestTimeout == "" {
+		return fmt.Errorf("repository Go test timeouts are not configured")
 	}
 	return nil
 }
 
-func localAndRequiredCIGoTestTimeoutsShouldMatch(ctx context.Context) error {
+func repositoryGoTestTimeoutsShouldMatch(ctx context.Context) error {
 	state, err := getLocalDevGuardrailState(ctx)
 	if err != nil {
 		return err
 	}
-	if state.localTestTimeout != state.ciTestTimeout {
-		return fmt.Errorf("local Go test timeout %q does not match required CI %q", state.localTestTimeout, state.ciTestTimeout)
+	if state.localTestTimeout != state.ciTestTimeout || state.affectedTestTimeout != state.ciTestTimeout {
+		return fmt.Errorf(
+			"repository Go test timeouts differ: local=%q affected-integration=%q required-CI=%q",
+			state.localTestTimeout,
+			state.affectedTestTimeout,
+			state.ciTestTimeout,
+		)
 	}
 	return nil
 }

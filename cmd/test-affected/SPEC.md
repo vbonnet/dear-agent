@@ -24,8 +24,9 @@ prints or runs the affected test-bearing packages.
 
 **TEST-AFFECTED-07** When `--all` is provided, the system shall include affected non-test-bearing packages in output.
 
-**TEST-AFFECTED-08** When `--run` is provided, the system shall execute `go test -race -count=1` for the selected packages bounded by a timeout.
+**TEST-AFFECTED-08** When `--run` is provided, the system shall execute `go test -race -count=1` for the selected packages bounded by a timeout that matches required CI and local preflight.
 
 ## BDD Traceability
 
 - `agm/test/bdd/features/quality_command_guardrails.feature` enforces that this command keeps co-located SPEC coverage.
+- `agm/test/bdd/features/local_development_guardrails.feature` enforces timeout parity across affected integration tests, required CI, and local preflight.

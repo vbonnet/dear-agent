@@ -49,7 +49,7 @@ import (
 
 const (
 	gitCommandTimeout = 30 * time.Second
-	goCommandTimeout  = 10 * time.Minute
+	goCommandTimeout  = 20 * time.Minute
 )
 
 func main() {
