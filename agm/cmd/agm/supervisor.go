@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/internal/override"
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
@@ -181,8 +182,15 @@ var supervisorCmd = &cobra.Command{
 	Long: `Manage agm supervisor sessions for the three-way supervisor mesh.
 
 Supervisors launch a persistent Claude Code CLI session authenticated with
-CLAUDE_CODE_OAUTH_TOKEN (Max plan) and load the agm-bus channel so they
-can:
+CLAUDE_CODE_OAUTH_TOKEN (Max plan) on a pinned model and in auto permission
+mode so unattended boot cannot block on a model-switch or plan-exit prompt.
+
+The experimental agm-bus channel can be enabled explicitly with
+--load-development-channels. It is off by default because Claude Code's
+development-channel confirmation prompt is harness-level and cannot be safely
+answered by an unattended supervisor during boot.
+
+With the channel enabled, supervisors can:
   - receive A2A messages from worker sessions
   - relay worker permission prompts (claude/channel/permission) to a peer
     or a human via the Discord adapter
@@ -196,7 +204,7 @@ explicitly allowed, so we keep this guard in place even though it's a
 belt-and-suspenders check.
 
 Subcommands:
-  run         Launch a supervisor session (execs ` + "`claude`" + ` with --channels)
+  run         Launch a supervisor session
   status      Report liveness by heartbeat freshness
   heartbeat   Write a heartbeat timestamp for this supervisor (call from /loop)`,
 	Args: cobra.ArbitraryArgs,
@@ -230,8 +238,16 @@ var (
 	supervisorSkipOAuthCheck  bool
 	supervisorSkipOAuthReason string
 	supervisorClaudeBin       string
+	supervisorClaudeModel     string
+	supervisorLoadDevChannels bool
 	supervisorExtraArgs       []string
 )
+
+// supervisorDefaultClaudeModel pins raw `agm supervisor run` sessions to the
+// same non-credit-gated 200k Sonnet default used by vroom-dispatch. Launching
+// without an explicit model lets Claude Code stop at an unattended "Switch
+// model?" dialog before the supervisor's recurring tick loop is installed.
+const supervisorDefaultClaudeModel = "sonnet-200k"
 
 var supervisorHeartbeatCmd = &cobra.Command{
 	Use:   "heartbeat",
@@ -304,6 +320,10 @@ func init() {
 		"justification for --skip-oauth-check, recorded in the override audit log")
 	supervisorRunCmd.Flags().StringVar(&supervisorClaudeBin, "claude-bin", "claude",
 		"path to the claude binary (must be on $PATH by default)")
+	supervisorRunCmd.Flags().StringVar(&supervisorClaudeModel, "model", supervisorDefaultClaudeModel,
+		"Claude model alias for raw supervisor sessions; defaults to a 200k-context model to avoid startup model-switch prompts")
+	supervisorRunCmd.Flags().BoolVar(&supervisorLoadDevChannels, "load-development-channels", false,
+		"opt in to Claude Code development channels for agm-bus; disabled by default because the confirmation prompt blocks unattended boot")
 	supervisorRunCmd.Flags().StringSliceVar(&supervisorExtraArgs, "claude-arg", nil,
 		"extra arg to pass to claude (repeatable)")
 	_ = supervisorRunCmd.MarkFlagRequired("id")
@@ -358,17 +378,7 @@ func runSupervisorRun(cmd *cobra.Command, _ []string) error {
 		"agm supervisor: id=%q primary-for=%q tertiary-for=%q binary=%q\n",
 		supervisorID, supervisorPrimaryFor, supervisorTertiaryFor, bin)
 
-	// Build the claude invocation. The `--channels` flag is the integration
-	// point for the agm-bus channel MCP (lands in a subsequent commit as
-	// part of agm/agm-plugin/channels/agm-bus/). Until that's on the
-	// Anthropic-approved marketplace we pass -dangerously-load-development-
-	// channels too. Worker sessions never get this flag by default.
-	claudeArgs := append([]string{
-		"--dangerously-load-development-channels",
-		"server:agm-bus",
-	}, supervisorExtraArgs...)
-
-	claudeCmd := exec.Command(bin, claudeArgs...)
+	claudeCmd := exec.Command(bin, buildSupervisorClaudeArgs(supervisorClaudeModel, supervisorLoadDevChannels, supervisorExtraArgs)...)
 	claudeCmd.Stdin = os.Stdin
 	claudeCmd.Stdout = cmd.OutOrStdout()
 	claudeCmd.Stderr = cmd.ErrOrStderr()
@@ -394,6 +404,21 @@ func runSupervisorRun(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("supervisor: claude exited: %w", err)
 	}
 	return nil
+}
+
+func buildSupervisorClaudeArgs(model string, loadDevelopmentChannels bool, extraArgs []string) []string {
+	if model == "" {
+		model = supervisorDefaultClaudeModel
+	}
+	args := []string{
+		"--model", agent.ResolveModelFullName("claude-code", model),
+		"--enable-auto-mode",
+		"--permission-mode", "auto",
+	}
+	if loadDevelopmentChannels {
+		args = append(args, "--dangerously-load-development-channels", "server:agm-bus")
+	}
+	return append(args, extraArgs...)
 }
 
 // checkSupervisorEnv runs the two pre-launch guards. Exported for testing
