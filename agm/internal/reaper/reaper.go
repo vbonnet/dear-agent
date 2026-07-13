@@ -276,14 +276,9 @@ func (r *Reaper) markReaping() error {
 		return fmt.Errorf("failed to get sessions directory: %w", err)
 	}
 
-	config, err := dolt.DefaultConfig()
+	adapter, err := openStorage()
 	if err != nil {
-		return fmt.Errorf("failed to get Dolt config: %w", err)
-	}
-
-	adapter, err := dolt.New(config)
-	if err != nil {
-		return fmt.Errorf("failed to connect to Dolt: %w", err)
+		return err
 	}
 	defer adapter.Close()
 
@@ -346,15 +341,10 @@ func (r *Reaper) archiveSession() error {
 		return fmt.Errorf("failed to get sessions directory: %w", err)
 	}
 
-	// Connect to Dolt database (needed for session resolution)
-	config, err := dolt.DefaultConfig()
+	// Connect to lifecycle storage (needed for session resolution).
+	adapter, err := openStorage()
 	if err != nil {
-		return fmt.Errorf("failed to get Dolt config: %w", err)
-	}
-
-	adapter, err := dolt.New(config)
-	if err != nil {
-		return fmt.Errorf("failed to connect to Dolt: %w", err)
+		return err
 	}
 	defer adapter.Close()
 
@@ -416,6 +406,10 @@ func (r *Reaper) archiveSession() error {
 // runReaperResourceCleanup performs best-effort worktree/branch/tmp cleanup
 // during reap and logs the per-category counts.
 func (r *Reaper) runReaperResourceCleanup(adapter *dolt.Adapter) {
+	if adapter.IsTestStore() {
+		r.logger.Info("Skipping worktree cleanup for isolated test store")
+		return
+	}
 	store := &cleanup.DoltWorktreeStore{Adapter: adapter}
 	cleanupResult := cleanup.SessionResources(context.Background(), r.SessionName, store, cleanup.RealGitOps{}, r.logger)
 	if cleanupResult.WorktreesRemoved > 0 {
@@ -427,6 +421,30 @@ func (r *Reaper) runReaperResourceCleanup(adapter *dolt.Adapter) {
 	if cleanupResult.TmpFilesRemoved > 0 {
 		r.logger.Info("Removed tmp files during reap", "count", cleanupResult.TmpFilesRemoved)
 	}
+}
+
+// openStorage selects the same isolated SQLite lifecycle store used by AGM
+// commands when a reaper is spawned from a named test environment. Reapers are
+// separate processes, so ignoring AGM_DB_PATH here would make --async mark and
+// archive operations fall back to production Dolt instead of the test session.
+func openStorage() (*dolt.Adapter, error) {
+	if dbPath := os.Getenv("AGM_DB_PATH"); dbPath != "" {
+		adapter, err := dolt.NewSQLiteAdapter(dbPath)
+		if err != nil {
+			return nil, fmt.Errorf("open test SQLite storage: %w", err)
+		}
+		return adapter, nil
+	}
+
+	config, err := dolt.DefaultConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Dolt config: %w", err)
+	}
+	adapter, err := dolt.New(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to Dolt: %w", err)
+	}
+	return adapter, nil
 }
 
 // cleanupPendingDir removes the pending-message directory for the reaped session.

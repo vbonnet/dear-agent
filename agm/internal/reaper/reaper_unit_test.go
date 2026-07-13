@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
 // --- Constructor tests ---
@@ -44,6 +47,63 @@ func TestNew_EmptySessionsDir(t *testing.T) {
 	r := New("test", "")
 	if r.SessionsDir != "" {
 		t.Errorf("SessionsDir should be empty, got %q", r.SessionsDir)
+	}
+}
+
+func TestOpenStorage_UsesPersistentTestStore(t *testing.T) {
+	t.Setenv("AGM_DB_PATH", filepath.Join(t.TempDir(), "agm.db"))
+
+	adapter, err := openStorage()
+	if err != nil {
+		t.Fatalf("openStorage() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	if !adapter.IsTestStore() {
+		t.Fatal("openStorage() did not select the isolated test store")
+	}
+}
+
+func TestArchiveSession_UsesPersistentTestStore(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "agm.db")
+	sessionsDir := t.TempDir()
+	t.Setenv("AGM_DB_PATH", dbPath)
+
+	adapter, err := dolt.NewSQLiteAdapter(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "test-reaper-session-id",
+		Name:          "test-reaper-session",
+		Harness:       "agy",
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+		Context:       manifest.Context{Project: t.TempDir()},
+		Tmux:          manifest.Tmux{SessionName: "test-reaper-session"},
+	}
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+
+	if err := New(m.Name, sessionsDir).archiveSession(); err != nil {
+		t.Fatalf("archiveSession() error: %v", err)
+	}
+
+	reopened, err := dolt.NewSQLiteAdapter(dbPath)
+	if err != nil {
+		t.Fatalf("reopen test store: %v", err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	stored, err := reopened.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() error: %v", err)
+	}
+	if stored.Lifecycle != manifest.LifecycleArchived {
+		t.Fatalf("Lifecycle = %q, want %q", stored.Lifecycle, manifest.LifecycleArchived)
 	}
 }
 
