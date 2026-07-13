@@ -50,6 +50,12 @@ Provide a production-ready CLI that:
 
 **CLI-12** When `agm capture` reads pane output for any active harness, the system shall use the canonical AGM tmux socket for both session discovery and capture rather than the host default socket.
 
+**CLI-13** When `agm supervisor run` launches Claude Code without an explicit model, the system shall pass the non-credit-gated `sonnet-200k` model alias resolved to its full Claude model name so unattended supervisor boot cannot stop at a model-switch prompt.
+
+**CLI-14** When `agm supervisor run` launches Claude Code, the system shall pass startup auto-mode flags so the persistent supervisor can execute boot and tick-loop setup without a plan-exit approval prompt.
+
+**CLI-15** When `agm supervisor run` launches Claude Code by default, the system shall not pass development-channel flags; it shall load development channels only when the caller explicitly opts in because the Claude Code development-channel confirmation prompt blocks unattended supervisor boot.
+
 ## Requirements
 
 ### Functional Requirements

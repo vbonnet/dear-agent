@@ -114,6 +114,48 @@ func TestCheckSupervisorEnvAcceptsFileToken(t *testing.T) {
 	}
 }
 
+func TestBuildSupervisorClaudeArgsAvoidsBootPromptsByDefault(t *testing.T) {
+	args := buildSupervisorClaudeArgs("", false, nil)
+	joined := strings.Join(args, " ")
+
+	for _, want := range []string{
+		"--model claude-sonnet-4-6",
+		"--enable-auto-mode",
+		"--permission-mode auto",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("supervisor Claude args missing %q: %v", want, args)
+		}
+	}
+
+	for _, blocked := range []string{
+		"--dangerously-load-development-channels",
+		"server:agm-bus",
+		"claude-sonnet-4-6[1m]",
+	} {
+		if strings.Contains(joined, blocked) {
+			t.Errorf("supervisor Claude args include boot-prompt risk %q by default: %v", blocked, args)
+		}
+	}
+}
+
+func TestBuildSupervisorClaudeArgsCanOptIntoDevelopmentChannels(t *testing.T) {
+	args := buildSupervisorClaudeArgs("opus-200k", true, []string{"--verbose"})
+	joined := strings.Join(args, " ")
+
+	for _, want := range []string{
+		"--model claude-opus-4-8",
+		"--permission-mode auto",
+		"--dangerously-load-development-channels",
+		"server:agm-bus",
+		"--verbose",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("supervisor Claude args missing %q: %v", want, args)
+		}
+	}
+}
+
 func TestHeartbeatRoundTrip(t *testing.T) {
 	// Redirect HOME so supervisor state lands in a test-scoped dir.
 	home := t.TempDir()
