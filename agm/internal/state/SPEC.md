@@ -8,7 +8,7 @@
 It recognizes Claude Code, Codex, and Antigravity ready prompts plus blocked,
 active, overlay, waiting, looping, stuck, and unknown states.
 
-## Requirements
+## EARS Requirements
 
 **AGM-STATE-01** When a Claude Code permission prompt is visible, the system shall report `blocked_permission` before considering ready-prompt patterns.
 

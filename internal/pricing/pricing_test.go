@@ -89,6 +89,24 @@ func TestIsKnown(t *testing.T) {
 	}
 }
 
+func TestOpenRouterFamilyDefaultsHaveSourcedPricing(t *testing.T) {
+	models := []string{
+		"z-ai/glm-5.2",
+		"deepseek/deepseek-v4-pro",
+		"nvidia/nemotron-3-ultra-550b-a55b",
+		"qwen/qwen3.6-max-preview",
+	}
+	for _, model := range models {
+		price := Lookup(model)
+		if price == UnknownModel || price.InputPerMillion <= 0 || price.OutputPerMillion <= 0 {
+			t.Errorf("Lookup(%q) = %+v, want priced model", model, price)
+		}
+		if price.Source == "" || price.AsOf == "" {
+			t.Errorf("Lookup(%q) lacks pricing provenance: %+v", model, price)
+		}
+	}
+}
+
 // Opus should be meaningfully more expensive than Sonnet — regression guard
 // for the "flip default to sonnet" decision.
 func TestOpusCostsMoreThanSonnet(t *testing.T) {

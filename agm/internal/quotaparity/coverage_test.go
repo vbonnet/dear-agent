@@ -42,7 +42,7 @@ func TestValidateModelFamilyCoverage(t *testing.T) {
 	}
 }
 
-func TestModelFamilyCoverageDoesNotPretendUnknownFamiliesArePriced(t *testing.T) {
+func TestPriorityModelFamiliesHaveSharedPricing(t *testing.T) {
 	t.Parallel()
 
 	for _, family := range []string{"glm", "deepseek", "nemotron", "qwen"} {
@@ -50,8 +50,8 @@ func TestModelFamilyCoverageDoesNotPretendUnknownFamiliesArePriced(t *testing.T)
 		if !ok {
 			t.Fatalf("ModelFamilyCoverageFor(%q) returned no coverage", family)
 		}
-		if coverage.PricePolicy != "explicitly-unpriced" {
-			t.Fatalf("family %q price policy = %q, want explicitly-unpriced", family, coverage.PricePolicy)
+		if !coverage.Priced || coverage.PricePolicy != "priced" {
+			t.Fatalf("family %q coverage = %+v, want priced", family, coverage)
 		}
 	}
 }

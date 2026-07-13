@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"time"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	"github.com/vbonnet/dear-agent/agm/internal/monitor/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 var (
@@ -88,7 +89,7 @@ func runCapture(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check if tmux session exists
-	exists, err := tmux.SessionExists(tmuxSessionName)
+	exists, err := tmux.HasSession(tmuxSessionName)
 	if err != nil {
 		return fmt.Errorf("failed to check tmux session: %w", err)
 	}
@@ -100,7 +101,7 @@ func runCapture(cmd *cobra.Command, args []string) error {
 	var lines []string
 	switch {
 	case captureHistory:
-		lines, err = tmux.CapturePaneHistoryLines(tmuxSessionName, 0)
+		lines, err = tmux.CapturePaneLines(tmuxSessionName, 0)
 	case captureTail > 0:
 		lines, err = tmux.CapturePaneLines(tmuxSessionName, captureTail)
 		// Get last N lines
@@ -162,7 +163,7 @@ func outputCaptureJSON(sessionName string, lines []string) error {
 		"session":   sessionName,
 		"lines":     lines,
 		"count":     len(lines),
-		"timestamp": tmux.Now(),
+		"timestamp": time.Now().UnixMilli(),
 	}
 
 	encoder := json.NewEncoder(os.Stdout)
@@ -175,7 +176,7 @@ func outputCaptureYAML(sessionName string, lines []string) error {
 		"session":   sessionName,
 		"lines":     lines,
 		"count":     len(lines),
-		"timestamp": tmux.Now(),
+		"timestamp": time.Now().UnixMilli(),
 	}
 
 	encoder := yaml.NewEncoder(os.Stdout)

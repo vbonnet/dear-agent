@@ -29,7 +29,8 @@ Harness-specific behavior:
   claude-code   Uses /plan slash command or Shift+Tab cycling
   gemini-cli    Uses /plan or Ctrl+Y toggle for auto mode
   opencode-cli  Uses Tab to cycle between plan and default
-  codex-cli     Does not support in-session mode switching
+  codex-cli     Reports an explicit restart configuration fallback
+  agy           Reports an explicit restart flag fallback
 
 Examples:
   # Switch to plan mode
@@ -140,7 +141,9 @@ func dispatchModeSwitch(harness, sessionName, targetMode, currentMode string) er
 	case "opencode-cli":
 		return sendModeOpenCode(sessionName, targetMode, currentMode)
 	case "codex-cli":
-		return sendModeCodexCLI()
+		return sendModeRestartFallback("codex-cli", targetMode)
+	case "agy":
+		return sendModeRestartFallback("agy", targetMode)
 	default:
 		return fmt.Errorf("unsupported harness %q for mode switching", harness)
 	}
@@ -225,7 +228,9 @@ func printDryRunDetails(harness, targetMode, currentMode, sessionName string) {
 		fmt.Printf("  Would send: Tab via tmux -S %s send-keys -t %s Tab\n",
 			socketPath, normalizedName)
 	case "codex-cli":
-		fmt.Printf("  Error: codex-cli does not support in-session mode switching\n")
+		fmt.Printf("  Fallback: %s\n", modeRestartInstruction("codex-cli", targetMode))
+	case "agy":
+		fmt.Printf("  Fallback: %s\n", modeRestartInstruction("agy", targetMode))
 	}
 }
 
@@ -310,6 +315,31 @@ func sendModeOpenCode(sessionName, targetMode, currentMode string) error {
 	return nil
 }
 
-func sendModeCodexCLI() error {
-	return fmt.Errorf("codex-cli does not support in-session mode switching.\nRestart with the appropriate flag: codex --suggest | --auto-edit | --full-auto")
+func sendModeRestartFallback(harness, targetMode string) error {
+	return fmt.Errorf("%s does not support verified in-session mode switching; %s", harness, modeRestartInstruction(harness, targetMode))
+}
+
+func modeRestartInstruction(harness, targetMode string) string {
+	switch harness {
+	case "codex-cli":
+		switch targetMode {
+		case "plan":
+			return "restart Codex with read-only sandboxing and untrusted approvals"
+		case "auto":
+			return "restart with codex -a never -s workspace-write"
+		default:
+			return "restart with codex -a on-request -s workspace-write"
+		}
+	case "agy":
+		switch targetMode {
+		case "plan":
+			return "restart with agy --mode plan"
+		case "auto":
+			return "restart with agy --dangerously-skip-permissions"
+		default:
+			return "restart with agy using its default permission mode"
+		}
+	default:
+		return "restart the harness with the requested startup permission mode"
+	}
 }

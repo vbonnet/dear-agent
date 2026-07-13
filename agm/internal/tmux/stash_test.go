@@ -102,9 +102,9 @@ func TestStashKeyForHarness(t *testing.T) {
 		{"something-new", "C-s", false},
 	}
 	for _, tc := range cases {
-		key, verified := stashKeyForHarness(tc.harness)
+		key, verified := StashKeyForHarness(tc.harness)
 		if key != tc.wantKey || verified != tc.wantVerified {
-			t.Errorf("stashKeyForHarness(%q) = (%q,%v), want (%q,%v)",
+			t.Errorf("StashKeyForHarness(%q) = (%q,%v), want (%q,%v)",
 				tc.harness, key, verified, tc.wantKey, tc.wantVerified)
 		}
 	}

@@ -24,6 +24,10 @@ other model families.
 
 **PRICING-06** When model-family quota policy evaluates known models, the system shall preserve relative cost ordering so higher-tier models remain more expensive than lower-tier defaults.
 
+**PRICING-07** When GLM, DeepSeek, Nemotron, or Qwen default-model pricing is recorded, the system shall store a primary rate-card source and as-of date with positive input and output rates.
+
+**PRICING-08** When OpenRouter model-family defaults are selected, the system shall use the provider's current canonical model slug rather than an unverified shorthand identifier.
+
 ## BDD Traceability
 
 - `agm/test/bdd/features/quota_parity.feature`

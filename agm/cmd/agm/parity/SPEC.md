@@ -38,3 +38,26 @@ tmux harnesses. Gemini CLI remains deprecated compatibility.
 **ACP-09** When an active harness is added, the system shall require command parity tests that verify `session new`, `resume`, `send msg`, and `send set-model` have explicit behavior for the new harness.
 
 **ACP-10** When AGM documents or tests command parity, the system shall keep deprecated Gemini CLI coverage separate from the active parity set.
+
+**ACP-11** When a production Cobra command source imports AGM's canonical tmux package, the system shall require that source to declare an executable command parity contract.
+
+**ACP-12** When command parity contracts are validated, the system shall require an explicit strategy for Claude Code, Codex CLI, AGY, and OpenCode for every tmux-facing command.
+
+**ACP-13** When a tmux-facing command does not depend on model behavior, the system shall declare it model-independent so the same command contract applies to Anthropic, OpenAI, Gemini, GLM, DeepSeek, Nemotron, and Qwen families.
+
+**ACP-14** When a harness lacks native runtime mode switching or verified draft preservation, the system shall declare a restart or best-effort fallback rather than silently claiming native parity.
+
+**ACP-15** When `agm send stash` or `agm session unstick` preserves human input, the system shall resolve the session harness and use its declared preservation key while warning when the mapping is not verified.
+
+**ACP-16** When `agm send mode` targets Codex CLI or AGY, the system shall return an actionable harness-specific restart configuration because neither harness exposes a verified in-session mode switch.
+
+**ACP-17** When AGM starts AGY, the system shall request its interactive prompt mode and shall map automatic permission mode to the native startup flag.
+
+**ACP-18** When AGM starts Codex, the system shall map plan and automatic permission modes to native startup flags instead of attempting an unsupported in-session mode switch.
+
+**ACP-19** When an AGM session is created with `--persistent`, the system shall omit the shell exit suffix for Claude Code, Codex, AGY, and OpenCode launch commands.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/harness_parity.feature`
+- Package tests: `agm/cmd/agm/parity/contracts_test.go`
