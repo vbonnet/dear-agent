@@ -11,9 +11,17 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/testutil"
 )
+
+func TestRunSessionCleanup_TypedNilAdapter(t *testing.T) {
+	var adapter *dolt.Adapter
+	if got := runSessionCleanup("typed-nil", &ops.OpContext{Storage: adapter}); got != nil {
+		t.Fatalf("runSessionCleanup() = %#v, want nil", got)
+	}
+}
 
 // setupArchiveTest creates a temporary test environment with a sessions directory
 func setupArchiveTest(t *testing.T) (tmpDir string, sessionsDir string, cleanup func()) {

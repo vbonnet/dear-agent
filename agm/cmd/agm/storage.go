@@ -9,17 +9,20 @@ import (
 
 // getStorage returns a Dolt storage adapter for the current workspace
 // This function handles:
-// - Test sandbox isolation (AGM_DB_PATH skips Dolt, returns nil adapter)
+// - Test sandbox isolation (AGM_DB_PATH selects an isolated SQLite adapter)
 // - Dolt configuration from environment
 // - Connection to Dolt server
 // - Migration application
 func getStorage() (*dolt.Adapter, error) {
-	// Test sandbox isolation: when AGM_DB_PATH is set, skip Dolt entirely.
-	// The test sandbox uses isolated paths and does not need a Dolt server.
-	// TODO(test-sandbox): Implement SQLite adapter for test mode so test
-	// sessions can be persisted and queried within the sandbox.
+	// Test sandbox isolation: when AGM_DB_PATH is set, use its persistent,
+	// local SQLite store. This keeps test lifecycle state out of production Dolt
+	// while allowing a later CLI process to resolve and archive the same session.
 	if dbPath := os.Getenv("AGM_DB_PATH"); dbPath != "" {
-		return nil, fmt.Errorf("test sandbox mode: Dolt skipped (AGM_DB_PATH=%s). SQLite adapter not yet implemented", dbPath)
+		adapter, err := dolt.NewSQLiteAdapter(dbPath)
+		if err != nil {
+			return nil, fmt.Errorf("open test SQLite storage: %w", err)
+		}
+		return adapter, nil
 	}
 
 	// Get Dolt configuration from environment
@@ -46,5 +49,3 @@ func getStorage() (*dolt.Adapter, error) {
 
 	return adapter, nil
 }
-
-
