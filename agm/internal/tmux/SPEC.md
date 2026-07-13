@@ -52,6 +52,12 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-22** When `CI_SKIP_TMUX=true`, the test suite shall skip tmux-dependent integration tests while continuing to execute pure tmux unit tests.
 
+**TMUX-23** When detecting whether a pasted prompt is still unsubmitted, the system shall recognize both the `[Pasted text` indicator and the codex `[Pasted Content` chip as a stuck paste.
+
+**TMUX-24** When delivering a prompt via paste-buffer, the system shall re-send Enter and re-check the pane on an increasing backoff until the paste is observed submitted, rather than sending Enter a fixed number of times.
+
+**TMUX-25** When the pane is still positively observed as an unsubmitted paste after every backoff attempt, the system shall return a submission-not-confirmed error so the caller reports delivery failure instead of a false success.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

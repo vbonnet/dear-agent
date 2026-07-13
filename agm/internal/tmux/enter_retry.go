@@ -68,8 +68,13 @@ func retryEnterAfterPaste(socketPath, normalizedName string, maxRetries int) err
 //  2. Content on the input line after the prompt character — text pasted but
 //     not submitted (only checked when prompt is visible)
 func isPasteStuck(paneContent string) bool {
-	// Signal 1: Explicit paste indicator
-	if strings.Contains(paneContent, "[Pasted text") {
+	// Signal 1: Explicit paste indicator. Different harnesses render a queued
+	// paste differently — tmux/older CLIs show "[Pasted text", while codex
+	// >=0.144.1 collapses a large paste into a "[Pasted Content N chars]" chip.
+	// Missing the codex form was the ce-mjk9 root cause: the chip sat unsubmitted
+	// and the retry never fired because this check didn't recognise it.
+	if strings.Contains(paneContent, "[Pasted text") ||
+		strings.Contains(paneContent, "[Pasted Content") {
 		return true
 	}
 
