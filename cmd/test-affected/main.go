@@ -33,6 +33,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -43,6 +44,12 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
+)
+
+const (
+	gitCommandTimeout = 30 * time.Second
+	goCommandTimeout  = 20 * time.Minute
 )
 
 func main() {
@@ -183,7 +190,9 @@ func runTests(opts options, pkgs []string, stdout, stderr io.Writer) int {
 		args = append(args, "-tags="+opts.tags)
 	}
 	args = append(args, pkgs...)
-	cmd := exec.Command("go", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), goCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = opts.root
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
@@ -247,7 +256,9 @@ func listPackages(root, tags string) ([]*goListPackage, error) {
 		args = append(args, "-tags", tags)
 	}
 	args = append(args, "./...")
-	cmd := exec.Command("go", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), goCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = root
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -289,7 +300,10 @@ func listPackages(root, tags string) ([]*goListPackage, error) {
 }
 
 func gitOutput(root string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if root != "" {
 		cmd.Dir = root
 	}
@@ -346,9 +360,9 @@ func isForceFullPath(p string) bool {
 }
 
 type decision struct {
-	forceFull    bool
-	forceReason  string
-	changedPkgs  map[string]struct{} // ImportPath → present
+	forceFull   bool
+	forceReason string
+	changedPkgs map[string]struct{} // ImportPath → present
 }
 
 func decide(opts options, changed []string, pkgs []*goListPackage) decision {

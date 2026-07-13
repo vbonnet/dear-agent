@@ -12,7 +12,7 @@ drift check found actionable drift, even when the run was clean.
 
 **DRIFT-AUDIT-01** When no home directory is provided, the system shall write audit records under `/tmp`.
 
-**DRIFT-AUDIT-02** When appending a record, the system shall create `$HOME/.local/state/dear-agent` with directory mode `0700` if it does not exist.
+**DRIFT-AUDIT-02** When appending a record and a home directory is provided, the system shall create `$HOME/.local/state/dear-agent` with directory mode `0700` if it does not exist.
 
 **DRIFT-AUDIT-03** When opening the drift audit log, the system shall use append, create, and write-only flags with file mode `0600`.
 

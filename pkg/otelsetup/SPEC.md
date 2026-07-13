@@ -22,7 +22,7 @@ to local Engram JSONL files when a session ID is present.
 
 **OTELSETUP-06** When no service name is configured or provided, the system shall derive the service name from the current binary name.
 
-**OTELSETUP-07** When build metadata includes a VCS revision, the system shall use the first seven characters as the service version.
+**OTELSETUP-07** When build metadata includes a VCS revision, the system shall use the first seven characters as the service version or the full revision when the revision is shorter than seven characters.
 
 **OTELSETUP-08** When OTLP exporter creation fails, the system shall fall back to a no-op tracer provider instead of failing the host binary.
 

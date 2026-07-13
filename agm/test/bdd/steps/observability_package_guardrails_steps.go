@@ -8,11 +8,12 @@ type observabilityPackageGuardrailStateKey struct{}
 // packages keep executable SPEC traceability.
 func RegisterObservabilityPackageGuardrailSteps(ctx *godog.ScenarioContext) {
 	registerPackageSpecGuardrailSteps(ctx, packageSpecGuardrailConfig{
-		stateKey:          observabilityPackageGuardrailStateKey{},
-		label:             "observability package",
-		featurePath:       "agm/test/bdd/features/observability_package_guardrails.feature",
-		configuredPattern: `^observability package "([^"]*)" is configured$`,
-		validatePattern:   `^AGM validates observability package coverage$`,
-		colocatedPattern:  `^observability package "([^"]*)" should have a co-located SPEC$`,
+		stateKey:           observabilityPackageGuardrailStateKey{},
+		label:              "observability package",
+		featurePath:        "agm/test/bdd/features/observability_package_guardrails.feature",
+		configuredPattern:  `^observability package "([^"]*)" is configured$`,
+		validatePattern:    `^AGM validates observability package coverage$`,
+		colocatedPattern:   `^observability package "([^"]*)" should have a co-located SPEC$`,
+		requirementPattern: `^observability package SPEC should declare requirement "([^"]*)" containing "([^"]*)"$`,
 	})
 }

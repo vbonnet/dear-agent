@@ -10,7 +10,7 @@ reported without preventing valid neighboring events from being consumed.
 
 ## Requirements
 
-**TEL-ANALYSIS-01** When a JSONL telemetry file is parsed asynchronously, the system shall return event and error channels and close both after scanning completes.
+**TEL-ANALYSIS-01** When a JSONL telemetry file is parsed asynchronously, the system shall accept a context, return event and error channels, and close both after scanning completes or the context is canceled.
 
 **TEL-ANALYSIS-02** When an input line is empty, the system shall skip it without emitting an event or parse error.
 

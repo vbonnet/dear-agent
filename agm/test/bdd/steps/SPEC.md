@@ -1,6 +1,6 @@
 # AGM BDD Step Definitions Specification
 
-<!-- Last audited at: 2026-07-10 -->
+<!-- Last audited at: 2026-07-11 -->
 
 ## Requirements
 
@@ -12,7 +12,10 @@
 
 **BDDS-04** When harness and model parity is declared, the step definitions shall validate every active harness against every supported model family.
 
+**BDDS-ROOT-01** When BDD steps resolve the repository from a nested package working directory, the system shall find the nearest ancestor containing `go.mod` and `agm` without relying on compiler source paths.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/test_support_package_guardrails.feature`
+- Feature: `agm/test/bdd/features/bdd_root_portability.feature`
 - Package tests: `agm/test/bdd/steps/*_test.go`

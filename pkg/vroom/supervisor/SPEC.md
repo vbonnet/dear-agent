@@ -86,6 +86,10 @@ that can pause or reshape work before resource exhaustion causes data loss.
 
 **VROOM-SUP-26** While VROOM runs under any supported harness, the system shall use the same model-neutral dispatch contract.
 
+### Queue Storage Hygiene
+
+**VROOM-SUP-27** When a pending task is removed, the system shall clear the vacated backing-array slot before shrinking the queue so removed task data is not retained.
+
 ## Test Traceability
 
 - Package tests: `pkg/vroom/supervisor/disk_alert_test.go`

@@ -3,8 +3,6 @@ package steps
 import (
 	"context"
 	"fmt"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -160,9 +158,5 @@ func getSpecCoverageState(ctx context.Context) (*specCoverageState, error) {
 }
 
 func specCoverageRepoRoot() string {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		return "."
-	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "..", ".."))
+	return packageSpecBDDRepoRoot()
 }

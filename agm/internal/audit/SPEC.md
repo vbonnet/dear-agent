@@ -25,7 +25,7 @@ for CLI and automation callers.
 
 **AGM-AUDIT-07** When a workspace filter is provided, the system shall scope session checks to that workspace and skip system-level chezmoi drift checks.
 
-**AGM-AUDIT-08** When no workspace filter is provided and chezmoi is installed, the system shall report managed dotfile drift from `chezmoi diff`.
+**AGM-AUDIT-08** When no workspace filter is provided, the system shall report managed dotfile drift from `chezmoi diff` if chezmoi is installed and skip the check without error if chezmoi is not installed.
 
 **AGM-AUDIT-09** When a severity filter is provided, the system shall keep issues at or above the requested severity.
 

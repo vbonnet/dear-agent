@@ -7,6 +7,8 @@
 # RELATED-SPEC: cmd/safe-merge/SPEC.md
 # RELATED-SPEC: cmd/safe-rebase/SPEC.md
 # RELATED-SPEC: cmd/safe-unlock/SPEC.md
+# RELATED-SPEC: cmd/test-affected/SPEC.md
+# RELATED-SPEC: scripts/SPEC.md
 Feature: Local development guardrails
   Agent development should use audited local wrappers for push, PR, merge,
   rebase, and stale-lock cleanup instead of raw git or GitHub mutation commands.
@@ -76,6 +78,11 @@ Feature: Local development guardrails
     Given the safe-pr full preflight timeout is configured
     When AGM validates the safe-pr preflight budget
     Then safe-pr should allow at least 20 minutes for preflight-full
+
+  Scenario: All repository test runners use the required CI timeout
+    Given local, affected integration, and required CI Go test timeouts are configured
+    When AGM validates Go test timeout parity
+    Then all repository Go test timeouts should match
 
   Scenario: Local and required CI vulnerability policy stay aligned
     Given local and required CI govulncheck allowlists are configured

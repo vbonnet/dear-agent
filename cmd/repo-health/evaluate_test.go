@@ -4,9 +4,9 @@ import "testing"
 
 func TestStatusExitCode(t *testing.T) {
 	cases := map[Status]int{
-		StatusHealthy:  0,
-		StatusDegraded: 1,
-		StatusCritical: 2,
+		StatusHealthy:   0,
+		StatusDegraded:  1,
+		StatusCritical:  2,
 		Status("weird"): 0,
 	}
 	for s, want := range cases {
@@ -39,12 +39,12 @@ func TestVerdict(t *testing.T) {
 func healthyReport() Report {
 	return Report{
 		CodeQuality: CodeQuality{
-			Lint:            Metric{Available: true},
-			LintFindings:    0,
-			SourceFiles:     100,
-			TestFiles:       50,
-			TestSourceRatio: 0.5,
-			AvgComplexity:   4.0,
+			Lint:              Metric{Available: true},
+			LintFindings:      0,
+			SourceFiles:       100,
+			TestFiles:         50,
+			TestSourceRatio:   0.5,
+			AvgComplexity:     4.0,
 			FunctionsAnalyzed: 200,
 		},
 		Architecture: Architecture{
@@ -105,6 +105,16 @@ func TestEvaluateWorktreeCritical(t *testing.T) {
 	iss := evaluate(&r, defaultOptions("/x", "m"))
 	if !hasSeverity(iss, "worktrees", SeverityCritical) {
 		t.Errorf("worktree count over %d should be critical; got %+v", worktreeCritical, iss)
+	}
+}
+
+func TestEvaluateBDDOutsideExecutableSuiteWarns(t *testing.T) {
+	r := healthyReport()
+	r.AgentHealth.FeaturesTotal = 2
+	r.AgentHealth.FeaturesExecutable = 1
+	iss := evaluate(&r, defaultOptions("/x", "m"))
+	if !hasSeverity(iss, "bdd", SeverityWarn) {
+		t.Errorf("feature outside executable suite should warn; got %+v", iss)
 	}
 }
 
