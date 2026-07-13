@@ -16,7 +16,7 @@ supported harness has an explicit and visibly estimated fallback.
 
 **CONTEXT-01** When harness auto-detection runs, the system shall recognize Claude Code, Codex CLI, Antigravity, OpenCode, and deprecated Gemini compatibility session identifiers.
 
-**CONTEXT-02** When exact portable context counters are supplied as structured JSON, the system shall read nested used tokens, total tokens, and model identity without depending on a harness-specific transcript layout.
+**CONTEXT-02** When exact portable context counters are supplied as structured JSON, the system shall deterministically read nested used tokens, total tokens, and model identity without depending on a harness-specific transcript layout.
 
 **CONTEXT-03** When exact portable context counters are supplied as text, the system shall parse comma-separated token usage values across supported harnesses.
 

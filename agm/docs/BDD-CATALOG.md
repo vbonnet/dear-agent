@@ -806,6 +806,7 @@ model-family context windows, and provider-neutral compaction defaults.
 - Fallback usage is visibly estimated and retains the selected model route.
 - Every supported family has a positive registered context window.
 - Every active harness rejects explicit counters outside the platform integer range.
+- Every active harness selects competing nested counter sets deterministically.
 
 **Why this matters:** Quota and compaction policy cannot be parity-complete when
 non-Claude harnesses return not-implemented errors or silently inherit a Claude

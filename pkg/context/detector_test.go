@@ -491,6 +491,18 @@ func TestParseUsageJSONRejectsCountersOutsidePlatformIntRange(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestParseUsageJSONSelectsNestedCountersDeterministically(t *testing.T) {
+	payload := `{"z_route":{"used_tokens":900,"total_tokens":1000,"model_id":"z-model"},"a_route":{"used_tokens":100,"total_tokens":1000,"model_id":"a-model"}}`
+
+	for range 100 {
+		used, total, modelID, ok := parseUsageJSON(payload)
+		require.True(t, ok)
+		assert.Equal(t, 100, used)
+		assert.Equal(t, 1000, total)
+		assert.Equal(t, "a-model", modelID)
+	}
+}
+
 func TestCLIConstants(t *testing.T) {
 	assert.Equal(t, CLI("claude"), CLIClaude)
 	assert.Equal(t, CLI("gemini"), CLIGemini)

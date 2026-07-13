@@ -25,6 +25,11 @@ type contextManagementParityState struct {
 	env       map[string]*string
 }
 
+type contextHarnessRoute struct {
+	cli agentcontext.CLI
+	env string
+}
+
 var contextManagementParityEnvironment = []string{
 	"CLAUDE_CONTEXT_USAGE", "CLAUDE_TOOL_RESULT", "CLAUDE_MODEL", "CLAUDE_MESSAGE_COUNT",
 	"GEMINI_CONTEXT_USAGE", "GEMINI_TOOL_RESULT", "GEMINI_MODEL", "GEMINI_MESSAGE_COUNT",
@@ -59,12 +64,14 @@ func RegisterContextManagementParitySteps(ctx *godog.ScenarioContext) {
 
 	ctx.Step(`^context route harness "([^"]*)" uses model family "([^"]*)"$`, contextRouteUsesModelFamily)
 	ctx.Step(`^context route harness "([^"]*)" supplies counters outside the platform integer range$`, contextRouteSuppliesOutOfRangeCounters)
+	ctx.Step(`^context route harness "([^"]*)" supplies competing nested counters$`, contextRouteSuppliesCompetingNestedCounters)
 	ctx.Step(`^shared context usage is detected without native counters$`, sharedContextUsageIsDetected)
 	ctx.Step(`^shared context usage detection is attempted$`, sharedContextUsageDetectionIsAttempted)
 	ctx.Step(`^context usage should preserve the configured model family "([^"]*)"$`, contextUsageShouldPreserveModelFamily)
 	ctx.Step(`^context usage should be marked as estimated$`, contextUsageShouldBeMarkedEstimated)
 	ctx.Step(`^context usage should have a positive registered window$`, contextUsageShouldHavePositiveWindow)
 	ctx.Step(`^context detection should reject the out-of-range counters$`, contextDetectionShouldRejectOutOfRangeCounters)
+	ctx.Step(`^context detection should select the lexically first nested counter set$`, contextDetectionShouldSelectLexicallyFirstCounters)
 }
 
 func contextRouteSuppliesOutOfRangeCounters(ctx context.Context, harness string) error {
@@ -72,15 +79,7 @@ func contextRouteSuppliesOutOfRangeCounters(ctx context.Context, harness string)
 	if err != nil {
 		return err
 	}
-	route, ok := map[string]struct {
-		cli agentcontext.CLI
-		env string
-	}{
-		"claude-code":  {agentcontext.CLIClaude, "CLAUDE_CONTEXT_USAGE"},
-		"codex-cli":    {agentcontext.CLICodex, "CODEX_CONTEXT_USAGE"},
-		"agy":          {agentcontext.CLIAgy, "AGY_CONTEXT_USAGE"},
-		"opencode-cli": {agentcontext.CLIOpenCode, "OPENCODE_CONTEXT_USAGE"},
-	}[harness]
+	route, ok := contextHarnessRouteForName(harness)
 	if !ok {
 		return fmt.Errorf("unsupported context harness %q", harness)
 	}
@@ -90,6 +89,30 @@ func contextRouteSuppliesOutOfRangeCounters(ctx context.Context, harness string)
 	}
 	state.harness, state.cli = harness, route.cli
 	return os.Setenv(route.env, fmt.Sprintf(`{"used_tokens":1,"total_tokens":%s}`, tooLarge))
+}
+
+func contextRouteSuppliesCompetingNestedCounters(ctx context.Context, harness string) error {
+	state, err := getContextManagementParityState(ctx)
+	if err != nil {
+		return err
+	}
+	route, ok := contextHarnessRouteForName(harness)
+	if !ok {
+		return fmt.Errorf("unsupported context harness %q", harness)
+	}
+	state.harness, state.cli = harness, route.cli
+	payload := `{"z_route":{"used_tokens":900,"total_tokens":1000,"model_id":"z-model"},"a_route":{"used_tokens":100,"total_tokens":1000,"model_id":"a-model"}}`
+	return os.Setenv(route.env, payload)
+}
+
+func contextHarnessRouteForName(harness string) (contextHarnessRoute, bool) {
+	route, ok := map[string]contextHarnessRoute{
+		"claude-code":  {agentcontext.CLIClaude, "CLAUDE_CONTEXT_USAGE"},
+		"codex-cli":    {agentcontext.CLICodex, "CODEX_CONTEXT_USAGE"},
+		"agy":          {agentcontext.CLIAgy, "AGY_CONTEXT_USAGE"},
+		"opencode-cli": {agentcontext.CLIOpenCode, "OPENCODE_CONTEXT_USAGE"},
+	}[harness]
+	return route, ok
 }
 
 func snapshotContextManagementParityEnvironment() map[string]*string {
@@ -180,6 +203,23 @@ func contextDetectionShouldRejectOutOfRangeCounters(ctx context.Context) error {
 	}
 	if state.usage != nil {
 		return fmt.Errorf("context route %s returned usage after rejecting counters", state.harness)
+	}
+	return nil
+}
+
+func contextDetectionShouldSelectLexicallyFirstCounters(ctx context.Context) error {
+	state, err := getContextManagementParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.detectErr != nil {
+		return state.detectErr
+	}
+	if state.usage == nil {
+		return fmt.Errorf("context route %s returned no usage", state.harness)
+	}
+	if state.usage.UsedTokens != 100 || state.usage.TotalTokens != 1000 || state.usage.ModelID != "a-model" {
+		return fmt.Errorf("context route %s selected used=%d total=%d model=%q", state.harness, state.usage.UsedTokens, state.usage.TotalTokens, state.usage.ModelID)
 	}
 	return nil
 }

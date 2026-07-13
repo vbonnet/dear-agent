@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -160,8 +161,8 @@ func findJSONNumber(value any, keys ...string) (json.Number, bool) {
 				return number, true
 			}
 		}
-		for _, child := range typed {
-			if number, ok := findJSONNumber(child, keys...); ok {
+		for _, key := range sortedJSONKeys(typed) {
+			if number, ok := findJSONNumber(typed[key], keys...); ok {
 				return number, true
 			}
 		}
@@ -183,8 +184,8 @@ func findJSONString(value any, keys ...string) (string, bool) {
 				return text, true
 			}
 		}
-		for _, child := range typed {
-			if text, ok := findJSONString(child, keys...); ok {
+		for _, key := range sortedJSONKeys(typed) {
+			if text, ok := findJSONString(typed[key], keys...); ok {
 				return text, true
 			}
 		}
@@ -196,6 +197,15 @@ func findJSONString(value any, keys ...string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func sortedJSONKeys(value map[string]any) []string {
+	keys := make([]string, 0, len(value))
+	for key := range value {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func parseTokenInteger(raw string) (int, error) {

@@ -111,6 +111,9 @@ func scanValidationWorkspacePackage(root, pkg string) error {
 		pattern := regexp.MustCompile(`(?i)(claude|codex|antigravity|opencode|anthropic|openai|gemini|deepseek|nemotron|qwen|(^|[^a-z0-9])glm([^a-z0-9]|$))`)
 		var routeLiteral string
 		ast.Inspect(file, func(node ast.Node) bool {
+			if routeLiteral != "" {
+				return false
+			}
 			literal, ok := node.(*ast.BasicLit)
 			if !ok || literal.Kind != token.STRING {
 				return true
@@ -120,7 +123,7 @@ func scanValidationWorkspacePackage(root, pkg string) error {
 				routeLiteral = value
 				return false
 			}
-			return routeLiteral == ""
+			return true
 		})
 		if routeLiteral != "" {
 			return fmt.Errorf("shared package %s embeds route-specific string literal %q", path, routeLiteral)

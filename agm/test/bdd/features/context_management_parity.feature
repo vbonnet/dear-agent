@@ -52,3 +52,15 @@ Feature: Context management parity
       | codex-cli    |
       | agy          |
       | opencode-cli |
+
+  Scenario Outline: Every harness selects competing nested context counters deterministically
+    Given context route harness "<harness>" supplies competing nested counters
+    When shared context usage detection is attempted
+    Then context detection should select the lexically first nested counter set
+
+    Examples:
+      | harness      |
+      | claude-code  |
+      | codex-cli    |
+      | agy          |
+      | opencode-cli |
