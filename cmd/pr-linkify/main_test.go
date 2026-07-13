@@ -104,6 +104,16 @@ func TestRunHookNoRefsEmitsNothing(t *testing.T) {
 	}
 }
 
+func TestRunHookAcceptsHarnessNeutralTranscript(t *testing.T) {
+	input := `{"transcript":"Merged PR #42"}`
+	got := captureStdio(t, input, func() {
+		runHook(prlinkify.Config{})
+	})
+	if !strings.Contains(got, `"additional_context"`) || !strings.Contains(got, "pull/42") {
+		t.Fatalf("hook output = %q", got)
+	}
+}
+
 func TestRunHookInvalidJSONIsIgnored(t *testing.T) {
 	out := captureStdio(t, "not json at all", func() {
 		runHook(prlinkify.Config{})

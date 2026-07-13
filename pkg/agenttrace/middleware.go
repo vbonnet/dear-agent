@@ -6,7 +6,7 @@ import (
 )
 
 // InstrumentToolCall runs fn as an instrumented tool call. It opens a
-// gen_ai.tool.call span for toolName, records the serialised arguments and the
+// gen_ai.tool.call span for toolName, records redacted serialised arguments and
 // returned output, and closes the span with fn's error — all in one call.
 //
 // This is the middleware form of StartToolCall for the common case of a single

@@ -2,6 +2,7 @@ package intake
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -15,34 +16,44 @@ import (
 func TestIntakeWatcher_DetectsNewItems(t *testing.T) {
 	tmpDir := t.TempDir()
 	queuePath := filepath.Join(tmpDir, "queue.jsonl")
+	require.NoError(t, os.WriteFile(queuePath, nil, 0600))
 
-	var mu sync.Mutex
-	var received []*WorkItem
+	received := make(chan *WorkItem, 1)
 	w := NewIntakeWatcher(IntakeWatcherConfig{
 		FilePath:     queuePath,
 		PollInterval: 10 * time.Millisecond,
 		Handler: func(item *WorkItem) {
-			mu.Lock()
-			received = append(received, item)
-			mu.Unlock()
+			received <- item
 		},
 	})
 
 	go func() { _ = w.Start() }()
-	time.Sleep(20 * time.Millisecond)
+	defer w.Stop()
 
-	item := validTestItem()
-	data, _ := json.Marshal(item)
-	require.NoError(t, os.WriteFile(queuePath, append(data, '\n'), 0600))
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
 
-	time.Sleep(30 * time.Millisecond)
-	w.Stop()
-	time.Sleep(20 * time.Millisecond)
-
-	mu.Lock()
-	defer mu.Unlock()
-	require.Len(t, received, 1)
-	assert.Equal(t, "intake-20260328-001", received[0].ID)
+	for sequence := 1; ; sequence++ {
+		select {
+		case item := <-received:
+			assert.Contains(t, item.ID, "intake-watcher-")
+			return
+		case <-ticker.C:
+			item := validTestItem()
+			item.ID = fmt.Sprintf("intake-watcher-%03d", sequence)
+			data, err := json.Marshal(item)
+			require.NoError(t, err)
+			file, err := os.OpenFile(queuePath, os.O_APPEND|os.O_WRONLY, 0600)
+			require.NoError(t, err)
+			_, writeErr := file.Write(append(data, '\n'))
+			require.NoError(t, file.Close())
+			require.NoError(t, writeErr)
+		case <-deadline.C:
+			t.Fatal("timed out waiting for intake watcher callback")
+		}
+	}
 }
 
 func TestIntakeWatcher_SkipsExistingOnStartup(t *testing.T) {

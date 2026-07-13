@@ -24,13 +24,13 @@ type JudgeVerdict struct {
 // Judge gives an independent verdict on whether a reason justifies an override.
 //
 // The default ([DefaultJudge]) is deterministic: it rejects missing or
-// obviously low-effort reasons. A future AnthropicJudge (bead ce-qx08.4) calls
-// a small model (claude-haiku) as a *separate* classifier — distinct from the
-// agent that is asking for the bypass — to vet P0 overrides. The interface is
-// the seam that lets that be wired in (and faked in tests) without touching any
-// call site.
+// obviously low-effort reasons. [LLMOverrideJudge] can call a small model as a
+// separate classifier, distinct from the agent asking for the bypass, to vet
+// high-risk overrides. The interface keeps that provider choice replaceable
+// and deterministic in tests without changing call sites.
 type Judge interface {
-	// Name identifies the judge in the audit log (e.g. "default", "anthropic").
+	// Name identifies the policy judge in the audit log (e.g. "default",
+	// "llm-override") without exposing provider-specific routing.
 	Name() string
 	// Evaluate returns a verdict. A non-nil error means the judge could not
 	// decide; callers fail closed (refuse the bypass) in that case.

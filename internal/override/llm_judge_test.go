@@ -116,8 +116,20 @@ func TestClaudeHaikuJudge_NilModelIsDeterministicFloor(t *testing.T) {
 }
 
 func TestClaudeHaikuJudge_NameReflectsModelPresence(t *testing.T) {
-	if got := NewClaudeHaikuJudgeWith(&FakeJudge{}).Name(); got != "claude-haiku" {
-		t.Fatalf("with model, name should be claude-haiku, got %q", got)
+	if got := NewClaudeHaikuJudgeWith(&FakeJudge{}).Name(); got != "llm-override" {
+		t.Fatalf("with model, name should be provider-neutral, got %q", got)
+	}
+}
+
+func TestLLMOverrideJudge_CompatibilityConstructor(t *testing.T) {
+	fake := &FakeJudge{Verdict: JudgeVerdict{Allow: true, Explanation: "specific"}}
+	judge := NewLLMOverrideJudgeWith(fake)
+
+	if judge.Name() != "llm-override" {
+		t.Fatalf("provider-neutral judge name = %q", judge.Name())
+	}
+	if _, ok := any(NewClaudeHaikuJudgeWith(fake)).(*LLMOverrideJudge); !ok {
+		t.Fatal("legacy constructor must remain compatible with LLMOverrideJudge")
 	}
 }
 
@@ -163,7 +175,7 @@ func TestRequire_UsesLLMJudgeVerdictForP0(t *testing.T) {
 	if len(captured) != 1 || captured[0].Allowed {
 		t.Fatalf("LLM denial must be audited as not-allowed: %+v", captured)
 	}
-	if captured[0].Judge != "claude-haiku" {
+	if captured[0].Judge != "llm-override" {
 		t.Fatalf("audit must record the LLM judge name, got %q", captured[0].Judge)
 	}
 }
