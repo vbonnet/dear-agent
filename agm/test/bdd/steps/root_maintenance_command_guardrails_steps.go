@@ -3,6 +3,9 @@ package steps
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/cucumber/godog"
 
@@ -39,6 +42,33 @@ func RegisterRootMaintenanceCommandGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the burndown arguments should preserve harness "([^"]*)" and model "([^"]*)"$`, burndownArgumentsShouldPreserveHarnessAndModel)
 	ctx.Step(`^burndown worker model family "([^"]*)" uses model "([^"]*)"$`, burndownWorkerModelFamilyUsesModel)
 	ctx.Step(`^the burndown arguments should preserve model "([^"]*)" for family "([^"]*)"$`, burndownArgumentsShouldPreserveModelForFamily)
+	ctx.Step(`^burndown maintenance subprocess policy is configured$`, burndownMaintenanceSubprocessPolicyIsConfigured)
+	ctx.Step(`^AGM validates burndown subprocess cancellation$`, agmValidatesBurndownSubprocessCancellation)
+	ctx.Step(`^session listing and worker spawning should use timeout-bounded signal context$`, burndownSubprocessesUseBoundedSignalContext)
+}
+
+func burndownMaintenanceSubprocessPolicyIsConfigured() error {
+	_, err := os.Stat(filepath.Join(packageSpecBDDRepoRoot(), "cmd", "burndown-maint", "main.go"))
+	return err
+}
+
+func agmValidatesBurndownSubprocessCancellation() error {
+	return nil
+}
+
+func burndownSubprocessesUseBoundedSignalContext() error {
+	path := filepath.Join(packageSpecBDDRepoRoot(), "cmd", "burndown-maint", "main.go")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	source := string(data)
+	for _, required := range []string{"signal.NotifyContext", "context.WithTimeout", "exec.CommandContext", "30 * time.Second", "countActiveBurndownWorkers(ctx", "spawnWorker(ctx"} {
+		if !strings.Contains(source, required) {
+			return fmt.Errorf("burndown subprocess policy lacks %q", required)
+		}
+	}
+	return nil
 }
 
 func burndownWorkerHarnessUsesModel(ctx context.Context, harness, model string) error {

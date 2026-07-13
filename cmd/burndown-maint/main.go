@@ -27,25 +27,31 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/vbonnet/dear-agent/internal/burndownmaint"
 )
 
 const (
-	exitSuccess = 0
-	exitFailure = 1
-	exitUsage   = 2
+	exitSuccess       = 0
+	exitFailure       = 1
+	exitUsage         = 2
+	agmCommandTimeout = 30 * time.Second
 )
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := run(ctx, os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "burndown-maint: %v\n", err)
 		var code int
 		switch {
@@ -67,7 +73,7 @@ type options struct {
 	dryRun    bool
 }
 
-func run(argv []string) error {
+func run(ctx context.Context, argv []string) error {
 	fs := flag.NewFlagSet("burndown-maint", flag.ContinueOnError)
 	var opts options
 	fs.IntVar(&opts.target, "target", 1, "Desired concurrent burndown workers")
@@ -86,7 +92,7 @@ func run(argv []string) error {
 		fmt.Printf("[%s] %s\n", ts, fmt.Sprintf(format, a...))
 	}
 
-	active, err := countActiveBurndownWorkers()
+	active, err := countActiveBurndownWorkers(ctx)
 	if err != nil {
 		return fmt.Errorf("count active workers: %w", err)
 	}
@@ -111,7 +117,7 @@ func run(argv []string) error {
 
 	logf("below target, spawning 1 worker (harness=%s model=%s)", opts.harness, opts.model)
 	sessionName := fmt.Sprintf("burndown-%s", time.Now().Format("20060102-150405"))
-	sid, err := spawnWorker(sessionName, burndownmaint.Route{
+	sid, err := spawnWorker(ctx, sessionName, burndownmaint.Route{
 		Harness: opts.harness, Model: opts.model, Workspace: opts.workspace,
 	})
 	if err != nil {
@@ -143,8 +149,8 @@ func outputResult(r tickResult, jsonOut bool) error {
 
 // countActiveBurndownWorkers shells out to `agm session list --json` and
 // counts sessions whose name starts with "burndown-" and are not archived.
-func countActiveBurndownWorkers() (int, error) {
-	out, err := exec.Command("agm", "session", "list", "--json").Output() //#nosec G204
+func countActiveBurndownWorkers(ctx context.Context) (int, error) {
+	out, err := runCommand(ctx, agmCommandTimeout, "agm", "session", "list", "--json")
 	if err != nil {
 		return 0, fmt.Errorf("agm session list: %w", err)
 	}
@@ -169,12 +175,22 @@ func countActiveBurndownWorkers() (int, error) {
 }
 
 // spawnWorker creates a new detached AGM session for burndown work.
-func spawnWorker(name string, route burndownmaint.Route) (string, error) {
+func spawnWorker(ctx context.Context, name string, route burndownmaint.Route) (string, error) {
 	args := burndownmaint.BuildSessionArgs(name, route)
-	out, err := exec.Command("agm", args...).CombinedOutput() //#nosec G204
+	out, err := runCommand(ctx, agmCommandTimeout, "agm", args...)
 	if err != nil {
 		return "", fmt.Errorf("agm session new: %w\n%s", err, out)
 	}
 
 	return strings.TrimSpace(string(out)), nil
+}
+
+func runCommand(ctx context.Context, timeout time.Duration, name string, args ...string) ([]byte, error) {
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	out, err := exec.CommandContext(timeoutCtx, name, args...).CombinedOutput() //#nosec G204
+	if timeoutCtx.Err() != nil {
+		return out, timeoutCtx.Err()
+	}
+	return out, err
 }

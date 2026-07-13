@@ -60,3 +60,8 @@ Feature: Session protocol and signal guardrails
       | opencode-cli | deepseek  |
       | opencode-cli | nemotron  |
       | opencode-cli | qwen      |
+
+  Scenario: Trace redaction traverses all nested values with stable normalization
+    Given agent trace redaction policy is configured
+    When AGM validates nested trace redaction traversal
+    Then every nested trace value should be inspected without per-key normalizer allocation

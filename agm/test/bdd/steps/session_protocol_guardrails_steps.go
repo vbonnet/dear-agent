@@ -3,6 +3,8 @@ package steps
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -99,6 +101,37 @@ func RegisterSessionProtocolGuardrailSteps(ctx *godog.ScenarioContext) {
 			}
 			return nil
 		})
+
+	ctx.Step(`^agent trace redaction policy is configured$`, agentTraceRedactionPolicyIsConfigured)
+	ctx.Step(`^AGM validates nested trace redaction traversal$`, agmValidatesNestedTraceRedactionTraversal)
+	ctx.Step(`^every nested trace value should be inspected without per-key normalizer allocation$`, nestedTraceValuesUseStableRedactionTraversal)
+}
+
+func agentTraceRedactionPolicyIsConfigured() error {
+	_, err := os.Stat(filepath.Join(packageSpecBDDRepoRoot(), "pkg", "agenttrace", "redact.go"))
+	return err
+}
+
+func agmValidatesNestedTraceRedactionTraversal() error {
+	return nil
+}
+
+func nestedTraceValuesUseStableRedactionTraversal() error {
+	path := filepath.Join(packageSpecBDDRepoRoot(), "pkg", "agenttrace", "redact.go")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	source := string(data)
+	for _, required := range []string{"keyNormalizer", "if redactJSONValue(child)"} {
+		if !strings.Contains(source, required) {
+			return fmt.Errorf("trace redaction policy lacks %q", required)
+		}
+	}
+	if strings.Contains(source, "redactJSONValue(child) || changed") {
+		return fmt.Errorf("trace redaction traversal relies on short-circuit expression")
+	}
+	return nil
 }
 
 func getA2ACardParityState(ctx context.Context) (*a2aCardParityState, error) {

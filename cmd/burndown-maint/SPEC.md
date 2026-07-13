@@ -25,6 +25,8 @@ workers without embedding a harness or model-family restriction.
 
 **BMC-08** When command-line arguments are invalid, the command shall use the documented usage exit code distinct from runtime failure.
 
+**BMC-09** When the host receives SIGINT or SIGTERM or an AGM subprocess exceeds thirty seconds, the command shall cancel session listing or worker spawning and return a contextual failure instead of hanging.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/root_maintenance_command_guardrails.feature`

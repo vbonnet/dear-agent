@@ -14,6 +14,7 @@ var (
 	credentialAssignment = regexp.MustCompile(`(?i)\b(api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|password|passwd|secret|client[_-]?secret|authorization|cookie|private[_-]?key)\b(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|(?:bearer\s+)?[^\s,;]+)`)
 	bearerCredential     = regexp.MustCompile(`(?i)\bbearer\s+[a-z0-9._~+/=-]+`)
 	standaloneCredential = regexp.MustCompile(`\b(?:sk-(?:ant|proj)-[A-Za-z0-9_-]{12,}|github_pat_[A-Za-z0-9_]{12,}|gh[pousr]_[A-Za-z0-9]{12,}|AIza[A-Za-z0-9_-]{20,})\b`)
+	keyNormalizer        = strings.NewReplacer("_", "", "-", "", ".", "")
 )
 
 func redactAttribute(value string) string {
@@ -60,18 +61,22 @@ func redactJSONValue(value any) bool {
 				changed = true
 				continue
 			}
-			changed = redactJSONValue(child) || changed
+			if redactJSONValue(child) {
+				changed = true
+			}
 		}
 	case []any:
 		for _, child := range typed {
-			changed = redactJSONValue(child) || changed
+			if redactJSONValue(child) {
+				changed = true
+			}
 		}
 	}
 	return changed
 }
 
 func sensitiveJSONKey(key string) bool {
-	normalized := strings.NewReplacer("_", "", "-", "", ".", "").Replace(strings.ToLower(strings.TrimSpace(key)))
+	normalized := keyNormalizer.Replace(strings.ToLower(strings.TrimSpace(key)))
 	switch normalized {
 	case "apikey", "accesstoken", "refreshtoken", "idtoken", "token",
 		"password", "passwd", "secret", "clientsecret", "authorization",

@@ -1,8 +1,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"os"
 	"testing"
+	"time"
 )
 
 func TestTickResultJSON(t *testing.T) {
@@ -29,6 +33,32 @@ func TestTickResultJSON(t *testing.T) {
 	if !decoded.DryRun {
 		t.Error("dry_run should be true")
 	}
+}
+
+func TestRunCommandHonorsCancellationAndTimeout(t *testing.T) {
+	t.Run("parent cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := runCommand(ctx, time.Second, os.Args[0], "-test.run=TestBurndownMaintHelperProcess")
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("runCommand error = %v, want context cancellation", err)
+		}
+	})
+
+	t.Run("deadline", func(t *testing.T) {
+		t.Setenv("BURNDOWN_MAINT_HELPER_PROCESS", "1")
+		_, err := runCommand(context.Background(), 10*time.Millisecond, os.Args[0], "-test.run=TestBurndownMaintHelperProcess")
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("runCommand error = %v, want deadline exceeded", err)
+		}
+	})
+}
+
+func TestBurndownMaintHelperProcess(t *testing.T) {
+	if os.Getenv("BURNDOWN_MAINT_HELPER_PROCESS") != "1" {
+		return
+	}
+	time.Sleep(time.Second)
 }
 
 func TestTickResultOmitsEmptySession(t *testing.T) {

@@ -32,6 +32,8 @@ privacy as a prerequisite for observability.
 
 **TRACE-09** When instrumented work panics, the system shall close the span as an error and re-raise the panic.
 
+**TRACE-10** When structured trace redaction traverses nested objects or arrays, the system shall inspect every child regardless of earlier redactions and shall reuse stable key normalization without retaining credentials.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/session_protocol_guardrails.feature`

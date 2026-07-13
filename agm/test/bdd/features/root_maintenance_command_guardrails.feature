@@ -52,3 +52,8 @@ Feature: Root maintenance command guardrails
       | deepseek  | deepseek-v4 |
       | nemotron  | nemotron    |
       | qwen      | qwen        |
+
+  Scenario: Burndown AGM subprocesses compose signal cancellation and timeouts
+    Given burndown maintenance subprocess policy is configured
+    When AGM validates burndown subprocess cancellation
+    Then session listing and worker spawning should use timeout-bounded signal context
