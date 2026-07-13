@@ -1,12 +1,16 @@
 package tmux
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
+	"syscall"
 	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/procguard"
 )
 
 // ErrPasteNotSubmitted is returned when the submit-Enter could not be confirmed
@@ -97,12 +101,38 @@ func verifyingEnter(sendEnter func() error, capture func() (string, error), cfg 
 // (SendCommand, etc.) call this directly; SendEnterReliable is the exported,
 // lock-acquiring entry point.
 func sendEnterReliable(socketPath, normalizedName string) error {
+	// sendEnter runs `tmux send-keys` under the repo subprocess-safety contract:
+	// timeout context, isolated process group, and a bounded WaitDelay with a
+	// Cancel that SIGKILLs the whole group — a hung tmux can never wedge the loop.
 	sendEnter := func() error {
-		return exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "-H", "0d").Run()
+		timeout := getAdaptiveTimeout()
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "-H", "0d")
+		cmd.SysProcAttr = procguard.ProcessGroupAttr()
+		cmd.Cancel = func() error {
+			if cmd.Process == nil {
+				return nil
+			}
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+		cmd.WaitDelay = time.Second
+		if err := cmd.Run(); err != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				return &TimeoutError{
+					Problem:  fmt.Sprintf("tmux send-keys (Enter) timed out after %v (server may be hung)", timeout),
+					Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  agm session list         # Verify recovery",
+					Duration: timeout,
+				}
+			}
+			return err
+		}
+		return nil
 	}
+	// capture reuses the exported, policy-compliant pane capture (isolated process
+	// group + bounded WaitDelay per CapturePanePolicy).
 	capture := func() (string, error) {
-		out, err := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedName, "-p", "-S", "-5").Output()
-		return string(out), err
+		return CapturePaneOutput(normalizedName, 5)
 	}
 	return verifyingEnter(sendEnter, capture, defaultEnterVerifyConfig())
 }
