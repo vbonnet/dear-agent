@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -397,7 +398,7 @@ func agmValidatesSessionRecoveryParity(ctx context.Context) error {
 	harnessState.recoveryConfirmationValid = !recovery.Confirmed(before, after, true)
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
-	harnessState.recoveryCancellationValid = recovery.WaitForConfirmation(canceled, time.Minute) == context.Canceled
+	harnessState.recoveryCancellationValid = errors.Is(recovery.WaitForConfirmation(canceled, time.Minute), context.Canceled)
 	harnessState.recoveryFallback = recovery.FallbackForHarness(harnessState.configuredHarness)
 	return nil
 }
