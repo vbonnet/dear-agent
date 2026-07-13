@@ -1149,6 +1149,7 @@ and Wayfinder test-support package boundaries.
 - Every SPEC references the executable feature that enforces it.
 - The complete support contract is validated across all four active harnesses
   and all seven supported model families.
+- Live harness contracts use canonical guarded session and message commands.
 
 **Why this matters:** Test infrastructure is an enforcement surface. Ungoverned
 helpers and suites can silently skip harnesses, consume the wrong provider

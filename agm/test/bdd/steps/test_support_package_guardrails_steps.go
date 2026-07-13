@@ -64,6 +64,73 @@ func RegisterTestSupportPackageGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^test support coverage runs through "([^"]*)" with "([^"]*)"$`, configureTestSupportRoute)
 	ctx.Step(`^AGM validates residual support package parity$`, validateTestSupportRoute)
 	ctx.Step(`^every residual support package should retain strict SPEC and BDD traceability$`, validateResidualTestSupportSpecs)
+	ctx.Step(`^live harness contract sources are configured$`, liveHarnessContractSourcesAreConfigured)
+	ctx.Step(`^AGM validates live harness contract command construction$`, agmValidatesLiveHarnessContractCommands)
+	ctx.Step(`^live harness contracts should use canonical session and harness arguments$`, liveHarnessContractsUseCanonicalArguments)
+	ctx.Step(`^unavailable live harness dependencies should be skipped explicitly$`, unavailableLiveHarnessDependenciesAreSkipped)
+}
+
+func liveHarnessContractSourcesAreConfigured() error {
+	root := filepath.Join(packageSpecBDDRepoRoot(), "agm", "test", "contract")
+	for _, name := range []string{"claude_contract_test.go", "gemini_contract_test.go", "opencode_contract_test.go", "cli_helpers_test.go"} {
+		if _, err := os.Stat(filepath.Join(root, name)); err != nil {
+			return fmt.Errorf("live contract source %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func agmValidatesLiveHarnessContractCommands() error {
+	return nil
+}
+
+func liveHarnessContractsUseCanonicalArguments() error {
+	root := filepath.Join(packageSpecBDDRepoRoot(), "agm", "test", "contract")
+	helperData, err := os.ReadFile(filepath.Join(root, "cli_helpers_test.go"))
+	if err != nil {
+		return err
+	}
+	helper := string(helperData)
+	for _, required := range []string{`"session", "new"`, `"--harness"`, `"send", "msg"`} {
+		if !strings.Contains(helper, required) {
+			return fmt.Errorf("live contract CLI helper lacks canonical argument %s", required)
+		}
+	}
+	for _, name := range []string{"claude_contract_test.go", "gemini_contract_test.go", "opencode_contract_test.go"} {
+		data, readErr := os.ReadFile(filepath.Join(root, name))
+		if readErr != nil {
+			return readErr
+		}
+		source := string(data)
+		for _, retired := range []string{`helpers.RunCLI(t, "new"`, `"--agent"`} {
+			if strings.Contains(source, retired) {
+				return fmt.Errorf("live contract %s retains retired CLI form %s", name, retired)
+			}
+		}
+	}
+	return nil
+}
+
+func unavailableLiveHarnessDependenciesAreSkipped() error {
+	root := filepath.Join(packageSpecBDDRepoRoot(), "agm", "test", "contract")
+	helperData, err := os.ReadFile(filepath.Join(root, "cli_helpers_test.go"))
+	if err != nil {
+		return err
+	}
+	helper := string(helperData)
+	for _, required := range []string{"OPENCODE_SERVER_URL", "Skip", "/health", "2 * time.Second"} {
+		if !strings.Contains(helper, required) {
+			return fmt.Errorf("OpenCode live contract guard lacks %q", required)
+		}
+	}
+	opencodeData, err := os.ReadFile(filepath.Join(root, "opencode_contract_test.go"))
+	if err != nil {
+		return err
+	}
+	if count := strings.Count(string(opencodeData), "requireOpenCodeServer(t)"); count != 5 {
+		return fmt.Errorf("OpenCode live contracts guard %d tests, want 5", count)
+	}
+	return nil
 }
 
 func configureTestSupportRoute(ctx context.Context, harness, family string) error {

@@ -35,7 +35,7 @@ func TestGeminiAPI_SessionCreation(t *testing.T) {
 	}
 
 	// Create session with Gemini agent
-	result := helpers.RunCLI(t, "new", "contract-test-gemini", "--detached", "--agent", "gemini")
+	result := runNewSessionCLI(t, "contract-test-gemini", "gemini-cli")
 
 	// Verify session creation succeeded
 	if result.ExitCode != 0 {
@@ -48,7 +48,7 @@ func TestGeminiAPI_SessionCreation(t *testing.T) {
 	}
 
 	// List sessions to verify creation
-	listResult := helpers.RunCLI(t, "list")
+	listResult := runSessionCLI(t, "list")
 	if listResult.ExitCode != 0 {
 		t.Fatalf("List command failed (exit %d): %s", listResult.ExitCode, listResult.Stderr)
 	}
@@ -91,7 +91,7 @@ func TestGeminiAPI_BasicPrompt(t *testing.T) {
 	}
 
 	// Create Gemini session
-	createResult := helpers.RunCLI(t, "new", "contract-test-gemini-prompt", "--detached", "--agent", "gemini")
+	createResult := runNewSessionCLI(t, "contract-test-gemini-prompt", "gemini-cli")
 	if createResult.ExitCode != 0 {
 		t.Fatalf("Gemini session creation failed: %s", createResult.Stderr)
 	}
@@ -102,7 +102,7 @@ func TestGeminiAPI_BasicPrompt(t *testing.T) {
 	}
 
 	// Send simple prompt using AGM send command
-	sendResult := helpers.RunCLI(t, "send", "contract-test-gemini-prompt", "Say 'gemini test successful' and nothing else")
+	sendResult := runMessageCLI(t, "contract-test-gemini-prompt", "Say 'gemini test successful' and nothing else")
 
 	// Verify send succeeded
 	if sendResult.ExitCode != 0 {
@@ -140,19 +140,19 @@ func TestGeminiAPI_SessionArchive(t *testing.T) {
 
 	// Create Gemini session
 	sessionName := "contract-test-gemini-archive"
-	createResult := helpers.RunCLI(t, "new", sessionName, "--detached", "--agent", "gemini")
+	createResult := runNewSessionCLI(t, sessionName, "gemini-cli")
 	if createResult.ExitCode != 0 {
 		t.Fatalf("Gemini session creation failed: %s", createResult.Stderr)
 	}
 
 	// Archive the session
-	archiveResult := helpers.RunCLI(t, "archive", sessionName)
+	archiveResult := runSessionCLI(t, "archive", "--async", sessionName)
 	if archiveResult.ExitCode != 0 {
 		t.Fatalf("Archive command failed (exit %d): %s", archiveResult.ExitCode, archiveResult.Stderr)
 	}
 
 	// Verify session not in default list
-	listResult := helpers.RunCLI(t, "list")
+	listResult := runSessionCLI(t, "list")
 	if listResult.ExitCode != 0 {
 		t.Fatalf("List command failed: %s", listResult.Stderr)
 	}
@@ -162,7 +162,7 @@ func TestGeminiAPI_SessionArchive(t *testing.T) {
 	}
 
 	// Verify session appears with --all flag
-	listAllResult := helpers.RunCLI(t, "list", "--all")
+	listAllResult := runSessionCLI(t, "list", "--all")
 	if listAllResult.ExitCode != 0 {
 		t.Fatalf("List --all command failed: %s", listAllResult.Stderr)
 	}
@@ -196,7 +196,7 @@ func TestGeminiAPI_AgentParity(t *testing.T) {
 
 	// Create Gemini session
 	geminiSession := "contract-test-parity-gemini"
-	geminiResult := helpers.RunCLI(t, "new", geminiSession, "--detached", "--agent", "gemini")
+	geminiResult := runNewSessionCLI(t, geminiSession, "gemini-cli")
 	if geminiResult.ExitCode != 0 {
 		t.Fatalf("Gemini session creation failed: %s", geminiResult.Stderr)
 	}
@@ -213,7 +213,7 @@ func TestGeminiAPI_AgentParity(t *testing.T) {
 	}
 
 	for _, op := range operations {
-		result := helpers.RunCLI(t, op.args...)
+		result := runSessionCLI(t, op.args...)
 		if result.ExitCode != 0 {
 			t.Errorf("Operation %s failed for Gemini session: %s", op.name, result.Stderr)
 		}

@@ -12,6 +12,8 @@
 
 **CTEST-04** If a live credential, binary, server, or quota is unavailable, then the contract suite shall skip with an explicit reason rather than consume another provider's credentials.
 
+**CTEST-05** When a live harness contract invokes AGM, the suite shall use canonical `session` and `send msg` commands with canonical harness identifiers rather than retired root commands or agent aliases.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/test_support_package_guardrails.feature`

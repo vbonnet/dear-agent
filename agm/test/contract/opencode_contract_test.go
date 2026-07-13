@@ -4,11 +4,8 @@
 package contract
 
 import (
-	"os"
 	"strings"
 	"testing"
-
-	"github.com/vbonnet/dear-agent/agm/test/helpers"
 )
 
 // TestOpenCodeAPI_SessionCreation tests creating a session with real OpenCode server.
@@ -25,12 +22,10 @@ func TestOpenCodeAPI_SessionCreation(t *testing.T) {
 	// Check OpenCode server availability
 	// Note: OpenCode is a mock implementation for AGM testing
 	// In production, this would check for real OpenCode server
-	if os.Getenv("OPENCODE_SERVER_URL") == "" {
-		t.Setenv("OPENCODE_SERVER_URL", "http://localhost:4096")
-	}
+	requireOpenCodeServer(t)
 
 	// Create session with OpenCode agent
-	result := helpers.RunCLI(t, "new", "contract-test-opencode", "--detached", "--agent", "opencode")
+	result := runNewSessionCLI(t, "contract-test-opencode", "opencode-cli")
 
 	// Verify session creation succeeded
 	if result.ExitCode != 0 {
@@ -43,7 +38,7 @@ func TestOpenCodeAPI_SessionCreation(t *testing.T) {
 	}
 
 	// List sessions to verify creation
-	listResult := helpers.RunCLI(t, "list")
+	listResult := runSessionCLI(t, "list")
 	if listResult.ExitCode != 0 {
 		t.Fatalf("List command failed (exit %d): %s", listResult.ExitCode, listResult.Stderr)
 	}
@@ -65,18 +60,16 @@ func TestOpenCodeAPI_SessionCreation(t *testing.T) {
 //   - Real tmux session required
 func TestOpenCodeAPI_BasicPrompt(t *testing.T) {
 	// Check OpenCode server availability
-	if os.Getenv("OPENCODE_SERVER_URL") == "" {
-		t.Setenv("OPENCODE_SERVER_URL", "http://localhost:4096")
-	}
+	requireOpenCodeServer(t)
 
 	// Create OpenCode session
-	createResult := helpers.RunCLI(t, "new", "contract-test-opencode-prompt", "--detached", "--agent", "opencode")
+	createResult := runNewSessionCLI(t, "contract-test-opencode-prompt", "opencode-cli")
 	if createResult.ExitCode != 0 {
 		t.Fatalf("OpenCode session creation failed: %s", createResult.Stderr)
 	}
 
 	// Send simple prompt using AGM send command
-	sendResult := helpers.RunCLI(t, "send", "contract-test-opencode-prompt", "Test message to OpenCode")
+	sendResult := runMessageCLI(t, "contract-test-opencode-prompt", "Test message to OpenCode")
 
 	// Verify send succeeded
 	if sendResult.ExitCode != 0 {
@@ -99,25 +92,23 @@ func TestOpenCodeAPI_BasicPrompt(t *testing.T) {
 //   - OpenCode server running on localhost:4096
 func TestOpenCodeAPI_SessionArchive(t *testing.T) {
 	// Check OpenCode server availability
-	if os.Getenv("OPENCODE_SERVER_URL") == "" {
-		t.Setenv("OPENCODE_SERVER_URL", "http://localhost:4096")
-	}
+	requireOpenCodeServer(t)
 
 	// Create OpenCode session
 	sessionName := "contract-test-opencode-archive"
-	createResult := helpers.RunCLI(t, "new", sessionName, "--detached", "--agent", "opencode")
+	createResult := runNewSessionCLI(t, sessionName, "opencode-cli")
 	if createResult.ExitCode != 0 {
 		t.Fatalf("OpenCode session creation failed: %s", createResult.Stderr)
 	}
 
 	// Archive the session
-	archiveResult := helpers.RunCLI(t, "archive", sessionName)
+	archiveResult := runSessionCLI(t, "archive", "--async", sessionName)
 	if archiveResult.ExitCode != 0 {
 		t.Fatalf("Archive command failed (exit %d): %s", archiveResult.ExitCode, archiveResult.Stderr)
 	}
 
 	// Verify session not in default list
-	listResult := helpers.RunCLI(t, "list")
+	listResult := runSessionCLI(t, "list")
 	if listResult.ExitCode != 0 {
 		t.Fatalf("List command failed: %s", listResult.Stderr)
 	}
@@ -127,7 +118,7 @@ func TestOpenCodeAPI_SessionArchive(t *testing.T) {
 	}
 
 	// Verify session appears with --all flag
-	listAllResult := helpers.RunCLI(t, "list", "--all")
+	listAllResult := runSessionCLI(t, "list", "--all")
 	if listAllResult.ExitCode != 0 {
 		t.Fatalf("List --all command failed: %s", listAllResult.Stderr)
 	}
@@ -148,13 +139,11 @@ func TestOpenCodeAPI_SessionArchive(t *testing.T) {
 //   - OpenCode server running on localhost:4096
 func TestOpenCodeAPI_AgentParity(t *testing.T) {
 	// Check OpenCode server availability
-	if os.Getenv("OPENCODE_SERVER_URL") == "" {
-		t.Setenv("OPENCODE_SERVER_URL", "http://localhost:4096")
-	}
+	requireOpenCodeServer(t)
 
 	// Create OpenCode session
 	opencodeSession := "contract-test-parity-opencode"
-	opencodeResult := helpers.RunCLI(t, "new", opencodeSession, "--detached", "--agent", "opencode")
+	opencodeResult := runNewSessionCLI(t, opencodeSession, "opencode-cli")
 	if opencodeResult.ExitCode != 0 {
 		t.Fatalf("OpenCode session creation failed: %s", opencodeResult.Stderr)
 	}
@@ -171,7 +160,7 @@ func TestOpenCodeAPI_AgentParity(t *testing.T) {
 	}
 
 	for _, op := range operations {
-		result := helpers.RunCLI(t, op.args...)
+		result := runSessionCLI(t, op.args...)
 		if result.ExitCode != 0 {
 			t.Errorf("Operation %s failed for OpenCode session: %s", op.name, result.Stderr)
 		}
@@ -189,13 +178,11 @@ func TestOpenCodeAPI_AgentParity(t *testing.T) {
 //   - OpenCode server running on localhost:4096 with SSE endpoint
 func TestOpenCodeAPI_SSEMonitoring(t *testing.T) {
 	// Check OpenCode server availability
-	if os.Getenv("OPENCODE_SERVER_URL") == "" {
-		t.Setenv("OPENCODE_SERVER_URL", "http://localhost:4096")
-	}
+	requireOpenCodeServer(t)
 
 	// Create OpenCode session
 	sessionName := "contract-test-opencode-sse"
-	createResult := helpers.RunCLI(t, "new", sessionName, "--detached", "--agent", "opencode")
+	createResult := runNewSessionCLI(t, sessionName, "opencode-cli")
 	if createResult.ExitCode != 0 {
 		t.Fatalf("OpenCode session creation failed: %s", createResult.Stderr)
 	}
@@ -204,7 +191,7 @@ func TestOpenCodeAPI_SSEMonitoring(t *testing.T) {
 	// This test would verify that SSE events are properly consumed
 	// For now, we verify the session was created with correct agent
 
-	listResult := helpers.RunCLI(t, "list", "--json")
+	listResult := runSessionCLI(t, "list", "--json")
 	if !strings.Contains(listResult.Stdout, sessionName) {
 		t.Errorf("OpenCode session not found in list: %s", listResult.Stdout)
 	}

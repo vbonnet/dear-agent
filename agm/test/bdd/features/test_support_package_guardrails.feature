@@ -89,3 +89,9 @@ Feature: Test support package guardrails
       | opencode-cli | deepseek  |
       | opencode-cli | nemotron  |
       | opencode-cli | qwen      |
+
+  Scenario: Live harness contracts use canonical guarded CLI routes
+    Given live harness contract sources are configured
+    When AGM validates live harness contract command construction
+    Then live harness contracts should use canonical session and harness arguments
+    And unavailable live harness dependencies should be skipped explicitly
