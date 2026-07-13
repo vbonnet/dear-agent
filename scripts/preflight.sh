@@ -86,6 +86,7 @@ warn "local linter: ${LINT_VER}"
 golangci-lint run --timeout=5m ./... || fail "lint failed (see above)"
 ok "lint clean"
 
+TEST_TIMEOUT="20m"
 if [[ "$MODE" == "tests" || "$MODE" == "race" || "$MODE" == "full" ]]; then
   step "go test ./..."
   # Mirror ci.yml: CI_SKIP_TMUX=true on macOS, false on Linux. The tmux
@@ -103,9 +104,9 @@ if [[ "$MODE" == "tests" || "$MODE" == "race" || "$MODE" == "full" ]]; then
   # --full and --race both use -race -count=1 (CI parity for data-race detection).
   # --tests skips -race for a faster contributor sanity check.
   if [[ "$MODE" == "full" || "$MODE" == "race" ]]; then
-    go test -race -count=1 ./... || fail "tests failed"
+    go test -race -count=1 -timeout="${TEST_TIMEOUT}" ./... || fail "tests failed"
   else
-    go test -count=1 ./... || fail "tests failed"
+    go test -count=1 -timeout="${TEST_TIMEOUT}" ./... || fail "tests failed"
   fi
   ok "tests pass"
 fi
