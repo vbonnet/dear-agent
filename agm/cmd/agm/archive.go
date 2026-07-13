@@ -791,7 +791,7 @@ func archiveHarnessDisplayName(harness string) string {
 func runSessionCleanup(sessionName string, opCtx *ops.OpContext) *cleanup.Result {
 	// Type-assert to get concrete dolt.Adapter for worktree operations
 	adapter, ok := opCtx.Storage.(*dolt.Adapter)
-	if !ok {
+	if !ok || adapter.IsTestStore() {
 		return nil
 	}
 	store := &cleanup.DoltWorktreeStore{Adapter: adapter}

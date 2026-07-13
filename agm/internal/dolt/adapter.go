@@ -41,6 +41,7 @@ type Adapter struct {
 	workspace         string
 	port              string
 	migrationsApplied bool
+	testStore         bool
 }
 
 // NewSQLiteAdapter opens the persistent session store used only by an AGM test
@@ -72,8 +73,13 @@ func NewSQLiteAdapter(path string) (*Adapter, error) {
 		conn:              conn,
 		workspace:         "test",
 		migrationsApplied: true,
+		testStore:         true,
 	}, nil
 }
+
+// IsTestStore reports whether this adapter backs an isolated AGM test
+// environment rather than a Dolt workspace.
+func (a *Adapter) IsTestStore() bool { return a.testStore }
 
 const sqliteSessionSchema = `
 CREATE TABLE IF NOT EXISTS agm_sessions (
