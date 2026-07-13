@@ -1,5 +1,6 @@
 # SPEC: agm/internal/agent/SPEC.md
 # RELATED-SPEC: agm/internal/launchparity/SPEC.md
+# RELATED-SPEC: agm/internal/session/SPEC.md
 # RELATED-SPEC: agm/internal/activity/SPEC.md
 # RELATED-SPEC: agm/internal/agysession/SPEC.md
 # RELATED-SPEC: agm/internal/codexsession/SPEC.md

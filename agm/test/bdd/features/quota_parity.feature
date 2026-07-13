@@ -1,4 +1,5 @@
 # SPEC: agm/internal/quotaparity/SPEC.md
+# RELATED-SPEC: agm/internal/manifest/SPEC.md
 # RELATED-SPEC: agm/internal/budget/SPEC.md
 # RELATED-SPEC: agm/internal/usage/SPEC.md
 # RELATED-SPEC: internal/pricing/SPEC.md
