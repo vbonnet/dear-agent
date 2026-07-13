@@ -875,6 +875,116 @@ and Discord/GitHub human approval transport SPEC coverage.
 **Why this matters:** Comparative evidence and human approval decisions must
 not change because a task entered through a different harness or model family.
 
+### Root Lifecycle Command Guardrails
+
+**File:** [`root_lifecycle_command_guardrails.feature`](../test/bdd/features/root_lifecycle_command_guardrails.feature)
+
+**Drives:** PR babysitting, Bead closure and PR synchronization, merge audit,
+and merge-loop command and policy package SPEC coverage.
+
+**Key scenarios:**
+- Every listed lifecycle package has reciprocal co-located SPEC traceability.
+- Merge-loop repair sessions preserve all active harness routes.
+- Anthropic, OpenAI, Gemini, GLM, DeepSeek, Nemotron, and Qwen model routes are passed through AGM's shared validation path.
+
+**Why this matters:** Repository automation must use safe wrappers and shared
+AGM routing rather than embedding Claude-only credentials or model assumptions.
+
+### Root Maintenance Command Guardrails
+
+**File:** [`root_maintenance_command_guardrails.feature`](../test/bdd/features/root_maintenance_command_guardrails.feature)
+
+**Drives:** burndown worker maintenance, merge velocity, PR linkification,
+golden source recovery, post-merge hook installation, and chezmoi deployment
+SPEC coverage.
+
+**Key scenarios:**
+- Every listed maintenance package has reciprocal co-located SPEC traceability.
+- Burndown workers preserve every active AGM harness route.
+- Anthropic, OpenAI, Gemini, GLM, DeepSeek, Nemotron, and Qwen routes reach AGM unchanged.
+
+**Why this matters:** Host maintenance must preserve golden-source and safe-push
+rules while remaining independent of a single harness or model provider.
+
+### Root Safety Command Guardrails
+
+**File:** [`root_safety_command_guardrails.feature`](../test/bdd/features/root_safety_command_guardrails.feature)
+
+**Drives:** native Claude settings and OAuth adapters, deployment drift,
+language-server pressure, log rotation, and shared filesystem-hook adapter SPEC
+coverage.
+
+**Key scenarios:**
+- Every listed safety package has reciprocal co-located SPEC traceability.
+- Claude-native credential/configuration tools declare their adapter boundary.
+- Filesystem guards also point to the active cross-harness hook parity suite.
+
+**Why this matters:** Native harness files are valid adapter details, but shared
+permissions, hooks, and policy must remain in neutral contracts.
+
+### Root Intelligence Command Guardrails
+
+**File:** [`root_intelligence_command_guardrails.feature`](../test/bdd/features/root_intelligence_command_guardrails.feature)
+
+**Drives:** deterministic backlog, code intelligence, source search, signal,
+and trace-to-eval command SPEC coverage.
+
+**Key scenarios:**
+- Every listed intelligence package has reciprocal co-located SPEC traceability.
+- Specs require shared schemas and deterministic behavior across harnesses and models.
+
+**Why this matters:** Search, supervision, dispatch, and evaluation evidence
+must not change meaning based on which model produced or consumed it.
+
+### Root Operations Command Guardrails
+
+**File:** [`root_operations_command_guardrails.feature`](../test/bdd/features/root_operations_command_guardrails.feature)
+
+**Drives:** webhook, benchmark, Bumblebee, flywheel, retrospective, and VROOM
+prompt generation SPEC coverage.
+
+**Key scenarios:**
+- Every listed operations package has reciprocal co-located SPEC traceability.
+- Generated VROOM prompts preserve every active harness route.
+- Anthropic, OpenAI, Gemini, GLM, DeepSeek, Nemotron, and Qwen worker routes remain selectable.
+
+**Why this matters:** Autonomous dispatch prompts are control-plane artifacts;
+they must enforce safety rules without hardcoding one harness or model.
+
+### Internal Foundation Guardrails
+
+**File:** [`internal_foundation_guardrails.feature`](../test/bdd/features/internal_foundation_guardrails.feature)
+
+**Drives:** Shared baseline, benchmark, local CI, drift, EARS, atomic file,
+log rotation, safety override, SQLite, and Engram tracking packages.
+
+**Key scenarios:**
+- Every internal foundation package keeps a co-located executable SPEC.
+- High-risk override policy keeps one provider-neutral identity across the full
+  supported harness and model-family matrix.
+- The deterministic override floor cannot be weakened by a model classifier.
+
+**Why this matters:** Shared host and persistence utilities sit beneath every
+harness. Their behavior must remain explicit, traceable, and independent of the
+agent or model route that invokes them.
+
+### Session Protocol And Signal Guardrails
+
+**File:** [`session_protocol_guardrails.feature`](../test/bdd/features/session_protocol_guardrails.feature)
+
+**Drives:** A2A session transport and client behavior, Wayfinder acceptance
+criteria, privacy-preserving agent traces, and project health signal packages.
+
+**Key scenarios:**
+- Every session-protocol and signal package keeps co-located SPEC coverage.
+- A2A cards advertise the selected harness across all supported harness and
+  model-family routes.
+- A2A transport presentation remains independent of model-provider choice.
+
+**Why this matters:** Delegation protocols, acceptance policy, observability,
+and health signals are shared infrastructure. Hard-coded Claude presentation
+or unredacted trace content would break parity or privacy for every caller.
+
 ### SPEC and BDD Coverage
 
 **File:** [`spec_coverage.feature`](../test/bdd/features/spec_coverage.feature)
@@ -1024,6 +1134,27 @@ workflow, and safety surfaces.
 **Why this matters:** Strict requirements that are not connected to an
 executable scenario can still drift unnoticed. Reciprocal linkage makes the
 maintained contract discoverable and test-enforced.
+
+---
+
+### Test Support Package Guardrails
+
+**File:** [`test_support_package_guardrails.feature`](../test/bdd/features/test_support_package_guardrails.feature)
+
+**Drives:** strict co-located contracts for all remaining AGM, Engram, shared,
+and Wayfinder test-support package boundaries.
+
+**Key scenarios:**
+- Every residual test and support package retains a co-located strict EARS SPEC.
+- Every SPEC references the executable feature that enforces it.
+- The complete support contract is validated across all four active harnesses
+  and all seven supported model families.
+- Live harness contracts use canonical guarded session and message commands.
+
+**Why this matters:** Test infrastructure is an enforcement surface. Ungoverned
+helpers and suites can silently skip harnesses, consume the wrong provider
+credentials, touch host state, or stop executing while production code remains
+green.
 
 ---
 

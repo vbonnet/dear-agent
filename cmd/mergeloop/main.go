@@ -45,6 +45,8 @@ type options struct {
 	stallThreshold time.Duration
 	dryRun         bool
 	enableAgents   bool
+	agentHarness   string
+	agentModel     string
 }
 
 func run(argv []string) error {
@@ -62,15 +64,8 @@ func run(argv []string) error {
 		return fmt.Errorf("unknown mode %q (want tick or run)", mode)
 	}
 
-	fs := flag.NewFlagSet("mergeloop "+mode, flag.ContinueOnError)
 	opts := options{mode: mode}
-	fs.StringVar(&opts.repo, "repo", "", "GitHub repo owner/name (auto-detected if empty)")
-	fs.DurationVar(&opts.interval, "interval", 10*time.Minute, "run mode: delay between ticks")
-	fs.IntVar(&opts.cap, "cap", 50, "backpressure: skip the tick above this many open PRs")
-	fs.IntVar(&opts.maxAttempts, "max-attempts", mergeloop.DefaultMaxAgentAttempts, "max agent fix attempts per PR before escalation")
-	fs.DurationVar(&opts.stallThreshold, "stall-threshold", time.Hour, "a PR actionable but untouched longer than this is counted as stalled")
-	fs.BoolVar(&opts.dryRun, "dry-run", false, "classify and report; perform no rebases/merges/spawns")
-	fs.BoolVar(&opts.enableAgents, "enable-agents", false, "spawn AGM agents to fix CI/conflicts (requires Claude OAuth: ~/.claude/.credentials.json or CLAUDE_CODE_OAUTH_TOKEN); off → defer those PRs")
+	fs := newMergeLoopFlagSet(mode, &opts)
 	if err := fs.Parse(argv[1:]); err != nil {
 		return err
 	}
@@ -112,7 +107,10 @@ func run(argv []string) error {
 		Lister:  &ghLister{},
 		Rebaser: &safeRebaser{dryRun: opts.dryRun},
 		Merger:  &safeMerger{dryRun: opts.dryRun},
-		Spawner: &agmSpawner{dryRun: opts.dryRun, enabled: opts.enableAgents},
+		Spawner: &agmSpawner{
+			dryRun: opts.dryRun, enabled: opts.enableAgents,
+			harness: opts.agentHarness, model: opts.agentModel,
+		},
 		// Threads clears the GREEN→MERGE blocker: bot review threads (Gemini)
 		// left unresolved trip required_conversation_resolution even when CI is
 		// green. The driver resolves them just before the merge attempt.
@@ -136,6 +134,20 @@ func run(argv []string) error {
 		return doRun(driver, repo, opts.interval)
 	}
 	return nil
+}
+
+func newMergeLoopFlagSet(mode string, opts *options) *flag.FlagSet {
+	fs := flag.NewFlagSet("mergeloop "+mode, flag.ContinueOnError)
+	fs.StringVar(&opts.repo, "repo", "", "GitHub repo owner/name (auto-detected if empty)")
+	fs.DurationVar(&opts.interval, "interval", 10*time.Minute, "run mode: delay between ticks")
+	fs.IntVar(&opts.cap, "cap", 50, "backpressure: skip the tick above this many open PRs")
+	fs.IntVar(&opts.maxAttempts, "max-attempts", mergeloop.DefaultMaxAgentAttempts, "max agent fix attempts per PR before escalation")
+	fs.DurationVar(&opts.stallThreshold, "stall-threshold", time.Hour, "a PR actionable but untouched longer than this is counted as stalled")
+	fs.BoolVar(&opts.dryRun, "dry-run", false, "classify and report; perform no rebases/merges/spawns")
+	fs.BoolVar(&opts.enableAgents, "enable-agents", false, "spawn AGM agents to fix CI/conflicts; off → defer those PRs")
+	fs.StringVar(&opts.agentHarness, "agent-harness", "claude-code", "AGM harness for repair agents")
+	fs.StringVar(&opts.agentModel, "agent-model", "", "optional AGM model or model-family alias for repair agents")
+	return fs
 }
 
 func doTick(ctx context.Context, d *mergeloop.Driver, repo string) error {

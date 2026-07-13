@@ -3,24 +3,30 @@
 package a2a
 
 import (
+	"strings"
+
 	"github.com/a2aproject/a2a-go/a2a"
 )
 
 // SessionCard is a convenience builder for the A2A Agent Card a Server
 // publishes. It mirrors the fields callers customise most often when
-// exposing a Claude Code session and applies dear-agent defaults for
-// the rest.
+// exposing an agent session and applies dear-agent defaults for the rest.
 //
 // The Server fills in URL, ProtocolVersion, and PreferredTransport at
 // bind time, so leaving them zero here is fine.
 type SessionCard struct {
+	// Harness is the canonical runtime identifier advertised by the default
+	// card, such as "claude-code", "codex-cli", "agy", or "opencode-cli".
+	// Empty keeps the card harness-neutral.
+	Harness string
+
 	// SessionID uniquely identifies the session. It is appended to the
 	// agent name if Name is empty so each card-document is
 	// distinguishable in a multi-session registry.
 	SessionID string
 
-	// Name overrides the default name. Defaults to
-	// "Claude Code Session <SessionID>".
+	// Name overrides the default name. The default includes the configured
+	// harness display name and SessionID.
 	Name string
 
 	// Description is the human-readable summary advertised in the card.
@@ -45,22 +51,28 @@ type SessionCard struct {
 // ProtocolVersion and PreferredTransport fields are overwritten by the
 // Server once the listener is bound.
 func (c SessionCard) Build() *a2a.AgentCard {
+	harness := strings.TrimSpace(c.Harness)
+	harnessName := harnessDisplayName(harness)
 	name := c.Name
 	if name == "" {
 		if c.SessionID == "" {
-			name = "Claude Code Session"
+			name = harnessName + " Session"
 		} else {
-			name = "Claude Code Session " + c.SessionID
+			name = harnessName + " Session " + c.SessionID
 		}
 	}
 
 	skills := c.Skills
 	if len(skills) == 0 {
+		tags := []string{"general"}
+		if harness != "" {
+			tags = append(tags, harness)
+		}
 		skills = []a2a.AgentSkill{{
 			ID:          "general",
 			Name:        "general",
-			Description: "Drive a Claude Code session as an A2A task.",
-			Tags:        []string{"general", "claude-code"},
+			Description: "Drive a " + harnessName + " session as an A2A task.",
+			Tags:        tags,
 		}}
 	}
 
@@ -82,5 +94,22 @@ func (c SessionCard) Build() *a2a.AgentCard {
 		DefaultOutputModes: []string{"text/plain"},
 		// URL / ProtocolVersion / PreferredTransport intentionally left
 		// zero: NewServer fills them in once the listener is bound.
+	}
+}
+
+func harnessDisplayName(harness string) string {
+	switch harness {
+	case "claude-code":
+		return "Claude Code"
+	case "codex-cli":
+		return "Codex"
+	case "agy":
+		return "Antigravity"
+	case "opencode-cli":
+		return "OpenCode"
+	case "":
+		return "Agent"
+	default:
+		return harness
 	}
 }

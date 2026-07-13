@@ -27,23 +27,31 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/burndownmaint"
 )
 
 const (
-	exitSuccess = 0
-	exitFailure = 1
-	exitUsage   = 2
+	exitSuccess       = 0
+	exitFailure       = 1
+	exitUsage         = 2
+	agmCommandTimeout = 30 * time.Second
 )
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := run(ctx, os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "burndown-maint: %v\n", err)
 		var code int
 		switch {
@@ -58,16 +66,18 @@ func main() {
 
 type options struct {
 	target    int
+	harness   string
 	model     string
 	workspace string
 	jsonOut   bool
 	dryRun    bool
 }
 
-func run(argv []string) error {
+func run(ctx context.Context, argv []string) error {
 	fs := flag.NewFlagSet("burndown-maint", flag.ContinueOnError)
 	var opts options
 	fs.IntVar(&opts.target, "target", 1, "Desired concurrent burndown workers")
+	fs.StringVar(&opts.harness, "harness", "claude-code", "AGM harness for new workers")
 	fs.StringVar(&opts.model, "model", "claude-opus-4-8", "Model for new workers")
 	fs.StringVar(&opts.workspace, "workspace", "oss", "AGM workspace for new sessions")
 	fs.BoolVar(&opts.jsonOut, "json", false, "Output JSON status")
@@ -82,7 +92,7 @@ func run(argv []string) error {
 		fmt.Printf("[%s] %s\n", ts, fmt.Sprintf(format, a...))
 	}
 
-	active, err := countActiveBurndownWorkers()
+	active, err := countActiveBurndownWorkers(ctx)
 	if err != nil {
 		return fmt.Errorf("count active workers: %w", err)
 	}
@@ -100,14 +110,16 @@ func run(argv []string) error {
 	}
 
 	if opts.dryRun {
-		logf("dry-run: would spawn 1 worker (model=%s)", opts.model)
+		logf("dry-run: would spawn 1 worker (harness=%s model=%s)", opts.harness, opts.model)
 		result.DryRun = true
 		return outputResult(result, opts.jsonOut)
 	}
 
-	logf("below target, spawning 1 worker (model=%s)", opts.model)
+	logf("below target, spawning 1 worker (harness=%s model=%s)", opts.harness, opts.model)
 	sessionName := fmt.Sprintf("burndown-%s", time.Now().Format("20060102-150405"))
-	sid, err := spawnWorker(sessionName, opts.model, opts.workspace)
+	sid, err := spawnWorker(ctx, sessionName, burndownmaint.Route{
+		Harness: opts.harness, Model: opts.model, Workspace: opts.workspace,
+	})
 	if err != nil {
 		return fmt.Errorf("spawn worker: %w", err)
 	}
@@ -137,8 +149,8 @@ func outputResult(r tickResult, jsonOut bool) error {
 
 // countActiveBurndownWorkers shells out to `agm session list --json` and
 // counts sessions whose name starts with "burndown-" and are not archived.
-func countActiveBurndownWorkers() (int, error) {
-	out, err := exec.Command("agm", "session", "list", "--json").Output() //#nosec G204
+func countActiveBurndownWorkers(ctx context.Context) (int, error) {
+	out, err := runAGMCommand(ctx, agmCommandTimeout, "session", "list", "--json")
 	if err != nil {
 		return 0, fmt.Errorf("agm session list: %w", err)
 	}
@@ -163,21 +175,22 @@ func countActiveBurndownWorkers() (int, error) {
 }
 
 // spawnWorker creates a new detached AGM session for burndown work.
-func spawnWorker(name, model, workspace string) (string, error) {
-	args := []string{
-		"session", "new", name,
-		"--detached",
-		"--harness", "claude-code",
-		"--model", model,
-	}
-	if workspace != "" {
-		args = append(args, "--workspace", workspace)
-	}
-
-	out, err := exec.Command("agm", args...).CombinedOutput() //#nosec G204
+func spawnWorker(ctx context.Context, name string, route burndownmaint.Route) (string, error) {
+	args := burndownmaint.BuildSessionArgs(name, route)
+	out, err := runAGMCommand(ctx, agmCommandTimeout, args...)
 	if err != nil {
 		return "", fmt.Errorf("agm session new: %w\n%s", err, out)
 	}
 
 	return strings.TrimSpace(string(out)), nil
+}
+
+func runAGMCommand(ctx context.Context, timeout time.Duration, args ...string) ([]byte, error) {
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	out, err := exec.CommandContext(timeoutCtx, "agm", args...).CombinedOutput()
+	if timeoutCtx.Err() != nil {
+		return out, timeoutCtx.Err()
+	}
+	return out, err
 }

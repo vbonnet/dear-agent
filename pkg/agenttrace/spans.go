@@ -2,6 +2,7 @@ package agenttrace
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"time"
 
@@ -17,8 +18,9 @@ func recordError(span trace.Span, err error) {
 	if err == nil {
 		return
 	}
-	span.RecordError(err)
-	span.SetStatus(codes.Error, err.Error())
+	redactedErr := errors.New(redactAttribute(err.Error()))
+	span.RecordError(redactedErr)
+	span.SetStatus(codes.Error, redactedErr.Error())
 	span.SetAttributes(attribute.String(attrErrorType, reflect.TypeOf(err).String()))
 }
 
@@ -52,14 +54,14 @@ func (s *ToolCallSpan) SetCallID(id string) {
 	}
 }
 
-// SetArguments records the (serialised) arguments the tool was called with.
+// SetArguments records redacted serialised arguments for the tool call.
 func (s *ToolCallSpan) SetArguments(args string) {
 	if kv, ok := strAttr(attrToolArguments, args); ok {
 		s.span.SetAttributes(kv)
 	}
 }
 
-// SetOutput records the raw tool output.
+// SetOutput records redacted tool output.
 func (s *ToolCallSpan) SetOutput(output string) {
 	if kv, ok := strAttr(attrToolOutput, output); ok {
 		s.span.SetAttributes(kv)

@@ -13,7 +13,7 @@ import (
 
 func main() {
 	repo := flag.String("repo", "", "default GitHub repo as OWNER/REPO (default: vbonnet/dear-agent)")
-	hookMode := flag.Bool("hook", false, "Claude Code hook mode: read hook JSON from stdin, emit hook JSON")
+	hookMode := flag.Bool("hook", false, "hook adapter mode: read hook JSON from stdin, emit context JSON")
 	summary := flag.Bool("summary", false, "output a summary of found PR refs instead of linkified text")
 	flag.Parse()
 
@@ -49,7 +49,10 @@ func runHook(cfg prlinkify.Config) {
 	}
 
 	var input struct {
-		ToolInput struct {
+		Message    string `json:"message"`
+		Transcript string `json:"transcript"`
+		Output     string `json:"output"`
+		ToolInput  struct {
 			Message    string `json:"message"`
 			Transcript string `json:"transcript"`
 			Output     string `json:"output"`
@@ -59,7 +62,10 @@ func runHook(cfg prlinkify.Config) {
 		return
 	}
 
-	text := firstNonEmpty(input.ToolInput.Transcript, input.ToolInput.Output, input.ToolInput.Message)
+	text := firstNonEmpty(
+		input.Transcript, input.Output, input.Message,
+		input.ToolInput.Transcript, input.ToolInput.Output, input.ToolInput.Message,
+	)
 	if text == "" {
 		return
 	}
@@ -76,6 +82,7 @@ func runHook(cfg prlinkify.Config) {
 	}
 
 	hookOut := map[string]any{
+		"additional_context": sb.String(),
 		"hookSpecificOutput": map[string]any{
 			"hookEventName":     "Stop",
 			"additionalContext": sb.String(),

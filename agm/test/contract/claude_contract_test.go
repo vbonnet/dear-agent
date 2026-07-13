@@ -35,7 +35,7 @@ func TestClaudeAPI_SessionCreation(t *testing.T) {
 	}
 
 	// Create session with Claude agent
-	result := helpers.RunCLI(t, "new", "contract-test-claude", "--detached", "--agent", "claude")
+	result := runNewSessionCLI(t, "contract-test-claude", "claude-code")
 
 	// Verify session creation succeeded
 	if result.ExitCode != 0 {
@@ -48,7 +48,7 @@ func TestClaudeAPI_SessionCreation(t *testing.T) {
 	}
 
 	// List sessions to verify creation
-	listResult := helpers.RunCLI(t, "list")
+	listResult := runSessionCLI(t, "list")
 	if listResult.ExitCode != 0 {
 		t.Fatalf("List command failed (exit %d): %s", listResult.ExitCode, listResult.Stderr)
 	}
@@ -82,7 +82,7 @@ func TestClaudeAPI_BasicPrompt(t *testing.T) {
 	// Consume API quota (need 2: create + prompt)
 	quota := helpers.GetAPIQuota()
 	if quota.Remaining() < 2 {
-		t.Skip("Insufficient API quota (need 2, have %d)", quota.Remaining())
+		t.Skipf("Insufficient API quota (need 2, have %d)", quota.Remaining())
 	}
 
 	// First quota for session creation
@@ -91,7 +91,7 @@ func TestClaudeAPI_BasicPrompt(t *testing.T) {
 	}
 
 	// Create session
-	createResult := helpers.RunCLI(t, "new", "contract-test-prompt", "--detached", "--agent", "claude")
+	createResult := runNewSessionCLI(t, "contract-test-prompt", "claude-code")
 	if createResult.ExitCode != 0 {
 		t.Fatalf("Session creation failed: %s", createResult.Stderr)
 	}
@@ -103,7 +103,7 @@ func TestClaudeAPI_BasicPrompt(t *testing.T) {
 
 	// Send simple prompt using AGM send command
 	// Note: This requires the 'send' command to be implemented in AGM
-	sendResult := helpers.RunCLI(t, "send", "contract-test-prompt", "Say 'test successful' and nothing else")
+	sendResult := runMessageCLI(t, "contract-test-prompt", "Say 'test successful' and nothing else")
 
 	// Verify send succeeded
 	if sendResult.ExitCode != 0 {
@@ -141,19 +141,19 @@ func TestClaudeAPI_SessionArchive(t *testing.T) {
 
 	// Create session
 	sessionName := "contract-test-archive"
-	createResult := helpers.RunCLI(t, "new", sessionName, "--detached", "--agent", "claude")
+	createResult := runNewSessionCLI(t, sessionName, "claude-code")
 	if createResult.ExitCode != 0 {
 		t.Fatalf("Session creation failed: %s", createResult.Stderr)
 	}
 
 	// Archive the session
-	archiveResult := helpers.RunCLI(t, "archive", sessionName)
+	archiveResult := runSessionCLI(t, "archive", "--async", sessionName)
 	if archiveResult.ExitCode != 0 {
 		t.Fatalf("Archive command failed (exit %d): %s", archiveResult.ExitCode, archiveResult.Stderr)
 	}
 
 	// Verify session not in default list
-	listResult := helpers.RunCLI(t, "list")
+	listResult := runSessionCLI(t, "list")
 	if listResult.ExitCode != 0 {
 		t.Fatalf("List command failed: %s", listResult.Stderr)
 	}
@@ -163,7 +163,7 @@ func TestClaudeAPI_SessionArchive(t *testing.T) {
 	}
 
 	// Verify session appears with --all flag
-	listAllResult := helpers.RunCLI(t, "list", "--all")
+	listAllResult := runSessionCLI(t, "list", "--all")
 	if listAllResult.ExitCode != 0 {
 		t.Fatalf("List --all command failed: %s", listAllResult.Stderr)
 	}

@@ -27,6 +27,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/vbonnet/dear-agent/internal/vroomprompt"
 )
 
 // humanGated lists beads that must never be auto-dispatched to a worker: they
@@ -167,6 +169,10 @@ func firstParagraph(desc string) string {
 // the hand-written prompt files already in ~/.agm/vroom/prompts/ and bakes in the
 // standard worker rules (read-only ~/src, bd --db, no --no-verify/--force, etc.).
 func renderPrompt(b bead) string {
+	return renderPromptForRoute(b, vroomprompt.DefaultRoute())
+}
+
+func renderPromptForRoute(b bead, route vroomprompt.Route) string {
 	prio := priorityLabel(b.Priority)
 	summary := firstParagraph(b.Description)
 	if summary == "" {
@@ -194,10 +200,10 @@ Bead %s (%s). %s
 - NEVER use --no-verify or --force
 - NEVER run chezmoi apply
 - ALWAYS use `+"`GIT_TERMINAL_PROMPT=0 gtimeout 30`"+` for git push
-- Workers MUST use claude-opus-4-8, --mode=auto, --workspace=oss
+- %s
 - Do NOT run `+"`pkill -x gopls`"+`
 - STOP after the primary deliverable is done — write a bead note and stop
-`, b.ID, b.Title, b.ID, prio, summary, goal)
+`, b.ID, b.Title, b.ID, prio, summary, goal, vroomprompt.WorkerRule(route))
 }
 
 // candidate is a ready bead paired with the file path its prompt would be
@@ -252,6 +258,10 @@ func main() {
 	db := flag.String("db", "~/beads/context-engine/.beads", "path to the beads database")
 	promptsDir := flag.String("prompts-dir", "~/.agm/vroom/prompts", "directory to write prompt files into")
 	repo := flag.String("repo", "vbonnet/dear-agent", "GitHub repo (owner/name) to check for open PRs")
+	workerHarness := flag.String("worker-harness", "claude-code", "AGM harness for generated worker prompts")
+	workerModel := flag.String("worker-model", "claude-opus-4-8", "model or family alias for generated worker prompts")
+	workerMode := flag.String("worker-mode", "auto", "AGM permission mode for generated worker prompts")
+	workspace := flag.String("workspace", "oss", "AGM workspace for generated worker prompts")
 	dryRun := flag.Bool("dry-run", false, "report what would be written without writing any files")
 	flag.Parse()
 
@@ -284,6 +294,9 @@ func main() {
 	}
 
 	written := 0
+	route := vroomprompt.Route{
+		Harness: *workerHarness, Model: *workerModel, Mode: *workerMode, Workspace: *workspace,
+	}
 	for _, c := range candidates {
 		if *dryRun {
 			fmt.Printf("would write %s\n", c.path)
@@ -293,7 +306,7 @@ func main() {
 		// Write atomically: temp file + rename so a crash mid-write never
 		// leaves the orchestrator a truncated prompt to dispatch.
 		tmp := c.path + ".tmp"
-		if err := os.WriteFile(tmp, []byte(renderPrompt(c.bead)), 0o600); err != nil {
+		if err := os.WriteFile(tmp, []byte(renderPromptForRoute(c.bead, route)), 0o600); err != nil {
 			fmt.Fprintf(os.Stderr, "vroom-prompt-gen: write %s: %v\n", c.path, err)
 			continue
 		}

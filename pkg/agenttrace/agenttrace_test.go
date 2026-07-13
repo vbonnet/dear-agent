@@ -216,6 +216,41 @@ func TestEmptyStringAttributesAreSkipped(t *testing.T) {
 	}
 }
 
+func TestSensitiveTraceDataIsRedacted(t *testing.T) {
+	sr := newRecorder(t)
+	_, span := StartToolCall(context.Background(), "provider_request")
+	span.SetArguments(`{"prompt":"hello","auth":{"api_key":"sk-ant-secretvalue123","nested":{"refresh_token":"refresh-secret"}}}`)
+	span.SetOutput("authorization=Bearer live-access-token and github_pat_abcdefghijklmnop")
+	span.End(errors.New("password=super-secret-value"))
+
+	ended := soleSpan(t, sr)
+	attrs := attrMap(ended.Attributes())
+	args := attrs[attrToolArguments].AsString()
+	output := attrs[attrToolOutput].AsString()
+	for _, secret := range []string{"sk-ant-secretvalue123", "refresh-secret", "live-access-token", "github_pat_abcdefghijklmnop", "super-secret-value"} {
+		if strings.Contains(args, secret) || strings.Contains(output, secret) || strings.Contains(ended.Status().Description, secret) {
+			t.Fatalf("trace retained sensitive value %q", secret)
+		}
+		for _, event := range ended.Events() {
+			for _, attr := range event.Attributes {
+				if strings.Contains(attr.Value.AsString(), secret) {
+					t.Fatalf("trace event retained sensitive value %q", secret)
+				}
+			}
+		}
+	}
+	if !strings.Contains(args, redactedValue) || !strings.Contains(output, redactedValue) {
+		t.Fatalf("redaction marker missing: args=%q output=%q", args, output)
+	}
+}
+
+func TestRedactAttributePreservesNonSensitiveJSON(t *testing.T) {
+	input := `{"pattern":"foo","token_count":42}`
+	if got := redactAttribute(input); got != input {
+		t.Fatalf("non-sensitive JSON changed: %q", got)
+	}
+}
+
 func TestTruncateLongAttribute(t *testing.T) {
 	sr := newRecorder(t)
 	big := strings.Repeat("x", maxAttrLen+500)
