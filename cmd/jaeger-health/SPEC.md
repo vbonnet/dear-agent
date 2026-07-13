@@ -12,7 +12,7 @@ recent trace availability, returning stable exit codes for automation.
 
 **JAEGER-HEALTH-01** When flag parsing fails, the command shall exit with code `3`.
 
-**JAEGER-HEALTH-02** When Jaeger `/api/services` is unreachable or invalid, the command shall report `down` and exit with code `2`.
+**JAEGER-HEALTH-02** When Jaeger `/api/services` is unreachable, invalid, or times out, the command shall report `down` and exit with code `2`.
 
 **JAEGER-HEALTH-03** When Jaeger is alive but no traces are found in the lookback window, the command shall report `degraded` and exit with code `1`.
 

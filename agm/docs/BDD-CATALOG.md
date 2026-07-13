@@ -69,6 +69,21 @@ wrong contract just as readily as implementation drift.
 
 ---
 
+### BDD Repository Root Portability
+
+**File:** [`bdd_root_portability.feature`](../test/bdd/features/bdd_root_portability.feature)
+
+**Drives:** shared BDD checkout discovery used by package, harness, hook,
+workflow, Wayfinder, and SPEC coverage step definitions.
+
+**Key scenarios:**
+- Nested package execution resolves the nearest `go.mod` and `agm` ancestor.
+- Root discovery does not depend on compiler source paths and remains valid
+  for binaries built with `-trimpath`.
+
+**Why this matters:** A BDD gate that only works with absolute build-time source
+paths can silently fail in reproducible CI builds instead of enforcing parity.
+
 ### Trust Protocol
 
 **File:** [`trust_protocol.feature`](../test/bdd/features/trust_protocol.feature)

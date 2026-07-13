@@ -22,3 +22,23 @@ Feature: Quality command guardrails
       | cmd/repo-health       |
       | cmd/structural-health |
       | cmd/src-health        |
+
+  Scenario: Repo health follows tag-free BDD enforcement
+    When repo health measures executable BDD discovery
+    Then repo health should follow the tag-free BDD enforcement policy
+
+  Scenario: Repo health includes canonical extensionless build files
+    When repo health measures implementation source coverage
+    Then repo health should recognize canonical Dockerfile and Makefile names
+
+  Scenario Outline: Quality command specifications bound external work
+    Given quality command package "<command>" is configured
+    When AGM validates quality command package coverage
+    Then quality command package SPEC should declare requirement "<requirement>" containing "<contract>"
+
+    Examples:
+      | command           | requirement      | contract                  |
+      | cmd/test-affected | TEST-AFFECTED-08 | bounded by a timeout      |
+      | cmd/src-health    | SRC-HEALTH-06    | noninteractive            |
+      | cmd/repo-health   | REPO-HEALTH-05   | bounded by a timeout      |
+      | cmd/repo-health   | REPO-HEALTH-11   | canonical extensionless  |

@@ -3,6 +3,7 @@ package supervisor
 import (
 	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -53,6 +54,22 @@ func TestAGMQueue_Pending(t *testing.T) {
 	}
 	if len(tasks) != 2 {
 		t.Errorf("want 2 tasks, got %d", len(tasks))
+	}
+}
+
+func TestAGMQueue_RemovePendingClearsBackingSlot(t *testing.T) {
+	q := &AGMQueue{pending: make([]Task, 2, 4)}
+	q.pending[0] = Task{ID: "drop", Title: strings.Repeat("retained", 128)}
+	q.pending[1] = Task{ID: "keep", Title: "survivor"}
+
+	q.removePending("drop")
+
+	if len(q.pending) != 1 || q.pending[0].ID != "keep" {
+		t.Fatalf("pending after removal = %#v, want only keep", q.pending)
+	}
+	backing := q.pending[:cap(q.pending)]
+	if !reflect.DeepEqual(backing[1], Task{}) {
+		t.Fatalf("removed backing slot retains task data: %#v", backing[1])
 	}
 }
 

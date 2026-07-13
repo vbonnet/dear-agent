@@ -60,16 +60,16 @@ type Metric struct {
 
 // CodeQuality groups the code-quality metrics.
 type CodeQuality struct {
-	Lint              Metric  `json:"lint"`
-	LintFindings      int     `json:"lint_findings"`
-	Coverage          Metric  `json:"coverage"`
-	CoveragePct       float64 `json:"coverage_pct"`
+	Lint              Metric        `json:"lint"`
+	LintFindings      int           `json:"lint_findings"`
+	Coverage          Metric        `json:"coverage"`
+	CoveragePct       float64       `json:"coverage_pct"`
 	PackageCoverage   []PkgCoverage `json:"package_coverage,omitempty"`
-	TestFiles         int     `json:"test_files"`
-	SourceFiles       int     `json:"source_files"`
-	TestSourceRatio   float64 `json:"test_source_ratio"`
-	AvgComplexity     float64 `json:"avg_cyclomatic_complexity"`
-	FunctionsAnalyzed int     `json:"functions_analyzed"`
+	TestFiles         int           `json:"test_files"`
+	SourceFiles       int           `json:"source_files"`
+	TestSourceRatio   float64       `json:"test_source_ratio"`
+	AvgComplexity     float64       `json:"avg_cyclomatic_complexity"`
+	FunctionsAnalyzed int           `json:"functions_analyzed"`
 }
 
 // PkgCoverage is per-package statement coverage.
@@ -80,31 +80,31 @@ type PkgCoverage struct {
 
 // Architecture groups the architecture-health metrics.
 type Architecture struct {
-	DepGraph         Metric   `json:"dep_graph"`
-	MaxDepDepth      int      `json:"max_dependency_depth"`
-	CircularDeps     [][]string `json:"circular_dependencies"`
-	LargeFiles       []SizedItem `json:"large_files"`
-	LongFunctions    []SizedItem `json:"long_functions"`
+	DepGraph      Metric      `json:"dep_graph"`
+	MaxDepDepth   int         `json:"max_dependency_depth"`
+	CircularDeps  [][]string  `json:"circular_dependencies"`
+	LargeFiles    []SizedItem `json:"large_files"`
+	LongFunctions []SizedItem `json:"long_functions"`
 }
 
 // SizedItem is a file or function flagged for exceeding a size threshold.
 type SizedItem struct {
-	Name  string `json:"name"`  // file path, or "path:func"
+	Name  string `json:"name"` // file path, or "path:func"
 	Lines int    `json:"lines"`
 }
 
 // AgentHealth groups the agent-specific health metrics.
 type AgentHealth struct {
-	Worktrees      Metric `json:"worktrees"`
-	WorktreeCount  int    `json:"worktree_count"`
-	StaleBranches  Metric `json:"stale_branches"`
-	StaleBranchCount int  `json:"stale_branch_count"`
-	BDD            Metric `json:"bdd"`
-	FeaturesTotal  int    `json:"features_total"`
-	FeaturesImpl   int    `json:"features_implemented"`
-	EARS           Metric `json:"ears"`
-	PackagesTotal  int    `json:"packages_total"`
-	PackagesWithSpec int  `json:"packages_with_spec"`
+	Worktrees                  Metric `json:"worktrees"`
+	WorktreeCount              int    `json:"worktree_count"`
+	StaleBranches              Metric `json:"stale_branches"`
+	StaleBranchCount           int    `json:"stale_branch_count"`
+	BDD                        Metric `json:"bdd"`
+	FeaturesTotal              int    `json:"features_total"`
+	FeaturesExecutable         int    `json:"features_executable"`
+	EARS                       Metric `json:"ears"`
+	ImplementationDirsTotal    int    `json:"implementation_dirs_total"`
+	ImplementationDirsWithSpec int    `json:"implementation_dirs_with_spec"`
 }
 
 // Drift groups the drift-detection metrics.

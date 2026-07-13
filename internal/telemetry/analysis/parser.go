@@ -7,7 +7,7 @@
 //
 // Example usage:
 //
-//	events, errs := ParseJSONL("~/.engram/telemetry/events.jsonl")
+//	events, errs := ParseJSONL(ctx, "~/.engram/telemetry/events.jsonl")
 //	for event := range events {
 //	    summary := AggregateSanityChecks(event)
 //	    RenderASCIITable(summary)
@@ -16,6 +16,7 @@ package analysis
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -32,7 +33,8 @@ type TelemetryEvent struct {
 	Data          map[string]interface{} `json:"data,omitempty"`
 }
 
-// ParseJSONL parses a JSONL telemetry file and streams events
+// ParseJSONL parses a JSONL telemetry file and streams events until complete
+// or ctx is canceled.
 //
 // Returns two channels:
 //   - events: Stream of successfully parsed events
@@ -43,7 +45,7 @@ type TelemetryEvent struct {
 //   - Truncated last line (skips and continues)
 //   - Empty lines (skips)
 //   - Mixed schema versions (handles via version field)
-func ParseJSONL(path string) (<-chan *TelemetryEvent, <-chan error) {
+func ParseJSONL(ctx context.Context, path string) (<-chan *TelemetryEvent, <-chan error) {
 	events := make(chan *TelemetryEvent, 100)
 	errs := make(chan error, 10)
 
@@ -52,13 +54,17 @@ func ParseJSONL(path string) (<-chan *TelemetryEvent, <-chan error) {
 		defer close(errs)
 		defer func() {
 			if r := recover(); r != nil {
-				errs <- fmt.Errorf("telemetry parser panicked: %v", r)
+				trySendError(ctx, errs, fmt.Errorf("telemetry parser panicked: %v", r))
 			}
 		}()
 
+		if ctx.Err() != nil {
+			return
+		}
+
 		file, err := os.Open(path)
 		if err != nil {
-			errs <- fmt.Errorf("failed to open file: %w", err)
+			trySendError(ctx, errs, fmt.Errorf("failed to open file: %w", err))
 			return
 		}
 		defer file.Close()
@@ -67,6 +73,11 @@ func ParseJSONL(path string) (<-chan *TelemetryEvent, <-chan error) {
 		lineNum := 0
 
 		for scanner.Scan() {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
 			lineNum++
 			line := scanner.Text()
 
@@ -80,11 +91,7 @@ func ParseJSONL(path string) (<-chan *TelemetryEvent, <-chan error) {
 			if err := json.Unmarshal([]byte(line), &event); err != nil {
 				// Log error but continue parsing (resilience)
 				// Non-blocking send to prevent parser from blocking if consumer is slow
-				select {
-				case errs <- fmt.Errorf("line %d: malformed JSON: %w", lineNum, err):
-				default:
-					// Consumer not keeping up with errors, drop this error
-				}
+				trySendError(ctx, errs, fmt.Errorf("line %d: malformed JSON: %w", lineNum, err))
 				continue
 			}
 
@@ -94,19 +101,28 @@ func ParseJSONL(path string) (<-chan *TelemetryEvent, <-chan error) {
 			}
 
 			// Send event to channel
-			events <- &event
+			select {
+			case events <- &event:
+			case <-ctx.Done():
+				return
+			}
 		}
 
 		if err := scanner.Err(); err != nil {
-			select {
-			case errs <- fmt.Errorf("scanner error: %w", err):
-			default:
-				// Consumer not keeping up with errors, drop this error
-			}
+			trySendError(ctx, errs, fmt.Errorf("scanner error: %w", err))
 		}
 	}()
 
 	return events, errs
+}
+
+func trySendError(ctx context.Context, errs chan<- error, err error) {
+	select {
+	case errs <- err:
+	case <-ctx.Done():
+	default:
+		// Error reporting must not block event parsing when consumers fall behind.
+	}
 }
 
 // ParseJSONLSync parses a JSONL file synchronously and returns all events
@@ -115,7 +131,7 @@ func ParseJSONL(path string) (<-chan *TelemetryEvent, <-chan error) {
 // Use ParseJSONLSync for small files or when you need all events at once.
 func ParseJSONLSync(path string) ([]*TelemetryEvent, error) {
 	events := make([]*TelemetryEvent, 0)
-	eventsChan, errsChan := ParseJSONL(path)
+	eventsChan, errsChan := ParseJSONL(context.Background(), path)
 
 	// Collect all errors
 	var parseErrors []error

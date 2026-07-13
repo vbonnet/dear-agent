@@ -39,6 +39,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	steps.RegisterAPIGatewayPackageGuardrailSteps(ctx)
 	steps.RegisterAuditPackageGuardrailSteps(ctx)
 	steps.RegisterCrossLanguageImplementationGuardrailSteps(ctx)
+	steps.RegisterBDDRootPortabilitySteps(ctx)
 	steps.RegisterAGMDiagnosticsPackageGuardrailSteps(ctx)
 	steps.RegisterDBPersistenceGuardrailSteps(ctx)
 	steps.RegisterDeveloperToolPackageGuardrailSteps(ctx)

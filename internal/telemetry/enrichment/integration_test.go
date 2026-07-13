@@ -48,7 +48,7 @@ func TestEndToEndEnrichmentFlow(t *testing.T) {
 
 	writeEventsToJSONL(t, jsonlPath, enrichedPluginEvent, enrichedEcphoryEvent)
 
-	eventsChan, errsChan := analysis.ParseJSONL(jsonlPath)
+	eventsChan, errsChan := analysis.ParseJSONL(context.Background(), jsonlPath)
 	parsedEvents := collectParsedEvents(t, eventsChan, errsChan)
 
 	if len(parsedEvents) != 2 {
@@ -116,7 +116,7 @@ func TestRealJSONLParsing_Performance(t *testing.T) {
 	// Parse JSONL file and measure time
 	startTime := time.Now()
 
-	eventsChan, errsChan := analysis.ParseJSONL(jsonlPath)
+	eventsChan, errsChan := analysis.ParseJSONL(context.Background(), jsonlPath)
 
 	parsedCount := 0
 	errorCount := 0
@@ -178,7 +178,7 @@ func TestTruncatedLastLine(t *testing.T) {
 	}
 
 	// Parse file
-	eventsChan, errsChan := analysis.ParseJSONL(jsonlPath)
+	eventsChan, errsChan := analysis.ParseJSONL(context.Background(), jsonlPath)
 
 	var parsedEvents []*analysis.TelemetryEvent
 	var parseErrors []error
@@ -237,7 +237,7 @@ func TestMixedSchemaVersions(t *testing.T) {
 	}
 
 	// Parse file
-	eventsChan, errsChan := analysis.ParseJSONL(jsonlPath)
+	eventsChan, errsChan := analysis.ParseJSONL(context.Background(), jsonlPath)
 
 	var parsedEvents []*analysis.TelemetryEvent
 	var parseErrors []error

@@ -5,19 +5,19 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/cucumber/godog"
 )
 
 type packageSpecGuardrailConfig struct {
-	stateKey          any
-	label             string
-	featurePath       string
-	configuredPattern string
-	validatePattern   string
-	colocatedPattern  string
+	stateKey           any
+	label              string
+	featurePath        string
+	configuredPattern  string
+	validatePattern    string
+	colocatedPattern   string
+	requirementPattern string
 }
 
 type packageSpecGuardrailState struct {
@@ -73,6 +73,27 @@ func registerPackageSpecGuardrailSteps(ctx *godog.ScenarioContext, cfg packageSp
 		}
 		return nil
 	})
+	if cfg.requirementPattern != "" {
+		ctx.Step(cfg.requirementPattern, func(ctx context.Context, requirement, phrase string) error {
+			state, err := getPackageSpecGuardrailState(ctx, cfg)
+			if err != nil {
+				return err
+			}
+			data, err := os.ReadFile(state.spec)
+			if err != nil {
+				return fmt.Errorf("%s SPEC %s: %w", cfg.label, state.spec, err)
+			}
+			for line := range strings.SplitSeq(string(data), "\n") {
+				if strings.Contains(line, "**"+requirement+"**") {
+					if !strings.Contains(strings.ToLower(line), strings.ToLower(phrase)) {
+						return fmt.Errorf("%s requirement %s does not contain %q", cfg.label, requirement, phrase)
+					}
+					return nil
+				}
+			}
+			return fmt.Errorf("%s SPEC %s does not declare requirement %s", cfg.label, state.spec, requirement)
+		})
+	}
 }
 
 func getPackageSpecGuardrailState(ctx context.Context, cfg packageSpecGuardrailConfig) (*packageSpecGuardrailState, error) {
@@ -84,24 +105,29 @@ func getPackageSpecGuardrailState(ctx context.Context, cfg packageSpecGuardrailC
 }
 
 func packageSpecBDDRepoRoot() string {
-	if dir, err := os.Getwd(); err == nil {
-		for {
-			if _, err := os.Stat(filepath.Join(dir, "engram")); err == nil {
-				if _, err := os.Stat(filepath.Join(dir, "agm")); err == nil {
-					return dir
-				}
-			}
-			parent := filepath.Dir(dir)
-			if parent == dir {
-				break
-			}
-			dir = parent
-		}
+	dir, err := os.Getwd()
+	if err != nil {
+		return "."
 	}
-
-	_, file, _, ok := runtime.Caller(0)
+	root, ok := findBDDRepoRoot(dir)
 	if !ok {
 		return "."
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "..", ".."))
+	return root
+}
+
+func findBDDRepoRoot(start string) (string, bool) {
+	dir := filepath.Clean(start)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			if info, err := os.Stat(filepath.Join(dir, "agm")); err == nil && info.IsDir() {
+				return dir, true
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
 }

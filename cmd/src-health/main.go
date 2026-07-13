@@ -16,6 +16,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -23,7 +24,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
+
+const gitCommandTimeout = 30 * time.Second
 
 // defaultRepos are the 7 primary ~/src repositories monitored by the canary.
 var defaultRepos = []string{
@@ -146,9 +150,9 @@ func checkRepo(nameOrPath, homeDir string) *repoStatus {
 		rs.Healthy = false
 	}
 
-	// Fetch so ahead/behind is current (fast, uses --dry-run to avoid network
-	// on most calls — falls through to the count even on fetch failure).
-	_ = exec.Command("git", "-C", path, "fetch", "--quiet", "--prune").Run() //#nosec G204
+	// Fetch so ahead/behind is current. The bounded, noninteractive command
+	// falls through to the locally available count on fetch failure.
+	_ = runGit(path, "fetch", "--quiet", "--prune") //nolint:errcheck // A local upstream count remains useful when fetch fails.
 
 	// Ahead/behind vs upstream. "git rev-list --count HEAD...@{u}" outputs
 	// "ahead\tbehind"; ignore if no upstream is configured.
@@ -165,12 +169,27 @@ func checkRepo(nameOrPath, homeDir string) *repoStatus {
 }
 
 func gitOutput(repoPath string, args ...string) (string, error) {
-	fullArgs := append([]string{"-C", repoPath}, args...) //#nosec G204
-	out, err := exec.Command("git", fullArgs...).Output() //#nosec G204
+	_, cmd, cancel := newGitCommand(repoPath, args...)
+	defer cancel()
+	out, err := cmd.Output()
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimRight(string(out), "\n"), nil
+}
+
+func runGit(repoPath string, args ...string) error {
+	_, cmd, cancel := newGitCommand(repoPath, args...)
+	defer cancel()
+	return cmd.Run()
+}
+
+func newGitCommand(repoPath string, args ...string) (context.Context, *exec.Cmd, context.CancelFunc) {
+	fullArgs := append([]string{"-C", repoPath}, args...) //#nosec G204
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	cmd := exec.CommandContext(ctx, "git", fullArgs...) //#nosec G204
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	return ctx, cmd, cancel
 }
 
 func printText(results []*repoStatus) {

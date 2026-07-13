@@ -96,3 +96,16 @@ func TestParseOTLPEndpoint(t *testing.T) {
 		}
 	}
 }
+
+func TestShortRevision(t *testing.T) {
+	tests := map[string]string{
+		"abc":        "abc",
+		"1234567":    "1234567",
+		"1234567890": "1234567",
+	}
+	for revision, want := range tests {
+		if got := shortRevision(revision); got != want {
+			t.Errorf("shortRevision(%q) = %q, want %q", revision, got, want)
+		}
+	}
+}

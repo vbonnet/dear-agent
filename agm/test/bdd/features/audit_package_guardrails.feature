@@ -18,3 +18,13 @@ Feature: Audit package guardrails
       | internal/driftaudit |
       | pkg/audit/config    |
       | pkg/audit/verifiers |
+
+  Scenario Outline: Audit specifications define optional host dependencies
+    Given audit package "<package>" is configured
+    When AGM validates audit package coverage
+    Then audit package SPEC should declare requirement "<requirement>" containing "<contract>"
+
+    Examples:
+      | package             | requirement    | contract                 |
+      | internal/driftaudit | DRIFT-AUDIT-02 | home directory is provided |
+      | agm/internal/audit  | AGM-AUDIT-08   | not installed            |
