@@ -9,17 +9,23 @@ func TestReadInput(t *testing.T) {
 	tests := []struct {
 		name    string
 		json    string
+		wantID  string
 		wantCwd string
 		wantErr bool
 	}{
 		{
-			name:    "valid input",
-			json:    `{"session_id":"abc","cwd":"/tmp/proj","stop_reason":"user"}`,
+			name:    "Claude Code input",
+			json:    `{"harness":"claude-code","session_id":"abc","cwd":"/tmp/proj","stop_reason":"user"}`,
+			wantID:  "abc",
 			wantCwd: "/tmp/proj",
 		},
+		{name: "Codex aliases", json: `{"harness":"codex-cli","thread_id":"codex-1","workspace_dir":"/tmp/codex","reason":"complete"}`, wantID: "codex-1", wantCwd: "/tmp/codex"},
+		{name: "Antigravity aliases", json: `{"harness":"agy","conversation_id":"agy-1","project_dir":"/tmp/agy"}`, wantID: "agy-1", wantCwd: "/tmp/agy"},
+		{name: "OpenCode normalized input", json: `{"harness":"opencode-cli","session_id":"oc-1","cwd":"/tmp/opencode"}`, wantID: "oc-1", wantCwd: "/tmp/opencode"},
 		{
 			name:    "empty cwd",
 			json:    `{"session_id":"abc"}`,
+			wantID:  "abc",
 			wantCwd: "",
 		},
 		{
@@ -43,6 +49,9 @@ func TestReadInput(t *testing.T) {
 			}
 			if input.Cwd != tt.wantCwd {
 				t.Errorf("Cwd = %q, want %q", input.Cwd, tt.wantCwd)
+			}
+			if input.SessionID != tt.wantID {
+				t.Errorf("SessionID = %q, want %q", input.SessionID, tt.wantID)
 			}
 		})
 	}

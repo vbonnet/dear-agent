@@ -107,6 +107,30 @@ func ParitySurfaces() []Surface {
 			SpecPath:    "pkg/llm/provider/SPEC.md",
 			FeaturePath: "agm/test/bdd/features/model_family_parity.feature",
 		},
+		{
+			Name:        "context management parity",
+			PackagePath: "pkg/context",
+			SpecPath:    "pkg/context/SPEC.md",
+			FeaturePath: "agm/test/bdd/features/context_management_parity.feature",
+		},
+		{
+			Name:        "agent utility parity",
+			PackagePath: "pkg/promptcache",
+			SpecPath:    "pkg/promptcache/SPEC.md",
+			FeaturePath: "agm/test/bdd/features/agent_utility_parity.feature",
+		},
+		{
+			Name:        "validation and workspace parity",
+			PackagePath: "pkg/security",
+			SpecPath:    "pkg/security/SPEC.md",
+			FeaturePath: "agm/test/bdd/features/validation_workspace_parity.feature",
+		},
+		{
+			Name:        "evaluation and control parity",
+			PackagePath: "pkg/benchmarks",
+			SpecPath:    "pkg/benchmarks/SPEC.md",
+			FeaturePath: "agm/test/bdd/features/evaluation_control_parity.feature",
+		},
 	}
 }
 

@@ -27,6 +27,38 @@ func TestGetCacheControl_Persistent(t *testing.T) {
 	}
 }
 
+func TestPolicyForFamily(t *testing.T) {
+	for _, family := range []ModelFamily{
+		FamilyAnthropic, FamilyOpenAI, FamilyGemini, FamilyGLM,
+		FamilyDeepSeek, FamilyNemotron, FamilyQwen,
+	} {
+		t.Run(string(family), func(t *testing.T) {
+			policy, err := PolicyForFamily(family, TierPersistent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if policy.Family != family {
+				t.Fatalf("family = %q, want %q", policy.Family, family)
+			}
+			if family == FamilyAnthropic {
+				if policy.ProviderDefault || policy.Control == nil || policy.Control.TTL != TTL1Hour {
+					t.Fatalf("Anthropic policy = %+v", policy)
+				}
+				return
+			}
+			if !policy.ProviderDefault || policy.Control != nil {
+				t.Fatalf("provider-default policy = %+v", policy)
+			}
+		})
+	}
+}
+
+func TestPolicyForFamilyRejectsUnknown(t *testing.T) {
+	if _, err := PolicyForFamily("unknown", TierDefault); err == nil {
+		t.Fatal("expected unsupported family error")
+	}
+}
+
 func TestEstimateTokens(t *testing.T) {
 	tests := []struct {
 		input string

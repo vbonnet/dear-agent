@@ -1,5 +1,15 @@
 # Progress Package - Specification
 
+## Executable EARS Requirements
+
+**PROGR-01** When progress output targets an interactive terminal, the package shall render updates without corrupting surrounding output.
+
+**PROGR-02** When progress output targets a noninteractive stream, the package shall emit stable line-oriented status without terminal control sequences.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
+
 <!-- Last audited at: NEEDS-AUDIT -->
 
 **Version**: 1.0.0

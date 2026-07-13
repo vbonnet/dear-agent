@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -109,7 +110,10 @@ func determineJobs(repoRoot string) []string {
 	if len(files) == 0 || (len(files) == 1 && files[0] == "") {
 		return nil
 	}
+	return jobsForFiles(files)
+}
 
+func jobsForFiles(files []string) []string {
 	jobSet := make(map[string]bool)
 
 	for _, f := range files {
@@ -137,5 +141,6 @@ func determineJobs(repoRoot string) []string {
 	for j := range jobSet {
 		jobs = append(jobs, j)
 	}
+	sort.Strings(jobs)
 	return jobs
 }

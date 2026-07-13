@@ -1,5 +1,15 @@
 # Engram — Product Specification
 
+## Executable EARS Requirements
+
+**ENGRR-01** When Engram stores or retrieves memory, the system shall preserve workspace and session isolation.
+
+**ENGRR-02** When a supported harness requests memory context, the Engram system shall return provider-neutral content without requiring a Claude-specific path.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
+
 <!-- Last audited at: NEEDS-AUDIT -->
 
 ## Overview

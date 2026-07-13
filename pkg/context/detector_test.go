@@ -1,8 +1,10 @@
 package context
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -23,6 +25,7 @@ func TestDetectCLI(t *testing.T) {
 		{"Gemini", "GEMINI_SESSION_ID", "test-456", CLIGemini},
 		{"OpenCode", "OPENCODE_SESSION_ID", "test-789", CLIOpenCode},
 		{"Codex", "CODEX_SESSION_ID", "test-abc", CLICodex},
+		{"Antigravity", "AGY_CONVERSATION_ID", "test-agy", CLIAgy},
 		{"Unknown", "", "", CLIUnknown},
 	}
 
@@ -242,51 +245,50 @@ func TestDetectFromClaudeNoSession(t *testing.T) {
 	assert.Contains(t, err.Error(), "CLAUDE_SESSION_ID not set")
 }
 
-func TestDetectFromGeminiReturnsError(t *testing.T) {
+func TestDetectFromGeminiUsesMarkedHeuristic(t *testing.T) {
 	registry := createTestRegistry(t)
 	detector := NewDetector(registry)
 
 	t.Setenv("GEMINI_SESSION_ID", "test-session-123")
-	_, err := detector.Detect()
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not implemented")
+	usage, err := detector.Detect()
+	require.NoError(t, err)
+	assert.Equal(t, "gemini-cli", usage.Source)
+	assert.Equal(t, "gemini-3.5-flash", usage.ModelID)
+	assert.Equal(t, "test-session-123", usage.SessionID)
+	assert.True(t, usage.Estimated)
 }
 
-func TestDetectFromOpenCodeReturnsError(t *testing.T) {
+func TestDetectFromOpenCodeUsesMarkedHeuristic(t *testing.T) {
 	registry := createTestRegistry(t)
 	detector := NewDetector(registry)
 
 	t.Setenv("OPENCODE_SESSION_ID", "test-session-456")
-	_, err := detector.Detect()
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not implemented")
+	usage, err := detector.Detect()
+	require.NoError(t, err)
+	assert.Equal(t, "opencode-cli", usage.Source)
+	assert.Equal(t, "z-ai/glm-5.2", usage.ModelID)
+	assert.True(t, usage.Estimated)
 }
 
-func TestDetectFromCodexReturnsError(t *testing.T) {
+func TestDetectFromCodexUsesMarkedHeuristic(t *testing.T) {
 	registry := createTestRegistry(t)
 	detector := NewDetector(registry)
 
 	t.Setenv("CODEX_SESSION_ID", "test-session-789")
-	_, err := detector.Detect()
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not implemented")
+	usage, err := detector.Detect()
+	require.NoError(t, err)
+	assert.Equal(t, "codex-cli", usage.Source)
+	assert.Equal(t, "gpt-5.5", usage.ModelID)
+	assert.True(t, usage.Estimated)
 }
 
 func TestDetectFromSessionUnsupportedCLI(t *testing.T) {
 	registry := createTestRegistry(t)
 	detector := NewDetector(registry)
 
-	_, err := detector.DetectFromSession("test-session", CLIGemini)
+	_, err := detector.DetectFromSession("test-session", CLIUnknown)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not implemented")
-
-	_, err = detector.DetectFromSession("test-session", CLIOpenCode)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not implemented")
-
-	_, err = detector.DetectFromSession("test-session", CLICodex)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not implemented")
+	assert.Contains(t, err.Error(), "unsupported CLI type")
 }
 
 func TestDetectFromClaudeSessionNoToolResult(t *testing.T) {
@@ -341,23 +343,23 @@ func TestDetectFromSession(t *testing.T) {
 	registry := createTestRegistry(t)
 	detector := NewDetector(registry)
 
-	t.Run("gemini session returns error", func(t *testing.T) {
-		_, err := detector.DetectFromSession("session-1", CLIGemini)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "not implemented")
-	})
-
-	t.Run("opencode session returns error", func(t *testing.T) {
-		_, err := detector.DetectFromSession("session-2", CLIOpenCode)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "not implemented")
-	})
-
-	t.Run("codex session returns error", func(t *testing.T) {
-		_, err := detector.DetectFromSession("session-3", CLICodex)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "not implemented")
-	})
+	for _, tt := range []struct {
+		cli    CLI
+		source string
+	}{
+		{CLIGemini, "gemini-cli"},
+		{CLIOpenCode, "opencode-cli"},
+		{CLICodex, "codex-cli"},
+		{CLIAgy, "agy"},
+	} {
+		t.Run(string(tt.cli), func(t *testing.T) {
+			usage, err := detector.DetectFromSession("session", tt.cli)
+			require.NoError(t, err)
+			assert.Equal(t, tt.source, usage.Source)
+			assert.Equal(t, "session", usage.SessionID)
+			assert.True(t, usage.Estimated)
+		})
+	}
 
 	t.Run("unsupported CLI", func(t *testing.T) {
 		_, err := detector.DetectFromSession("session-4", CLIUnknown)
@@ -365,10 +367,11 @@ func TestDetectFromSession(t *testing.T) {
 		assert.Contains(t, err.Error(), "unsupported CLI type")
 	})
 
-	t.Run("claude session without file", func(t *testing.T) {
+	t.Run("claude session without file uses heuristic", func(t *testing.T) {
 		os.Unsetenv("CLAUDE_TOOL_RESULT")
-		_, err := detector.DetectFromSession("nonexistent-session", CLIClaude)
-		assert.Error(t, err)
+		usage, err := detector.DetectFromSession("nonexistent-session", CLIClaude)
+		require.NoError(t, err)
+		assert.True(t, usage.Estimated)
 	})
 }
 
@@ -420,32 +423,84 @@ func TestDetectDispatchesByCLI(t *testing.T) {
 	t.Setenv("CODEX_SESSION_ID", "") // restored on test cleanup
 	os.Unsetenv("CODEX_SESSION_ID")
 
-	t.Run("dispatches to gemini returns error", func(t *testing.T) {
+	t.Run("dispatches to gemini", func(t *testing.T) {
 		t.Setenv("GEMINI_SESSION_ID", "g-session")
 		defer os.Unsetenv("GEMINI_SESSION_ID")
 
-		_, err := detector.Detect()
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "not implemented")
+		usage, err := detector.Detect()
+		require.NoError(t, err)
+		assert.Equal(t, "gemini-cli", usage.Source)
 	})
 
-	t.Run("dispatches to opencode returns error", func(t *testing.T) {
+	t.Run("dispatches to opencode", func(t *testing.T) {
 		t.Setenv("OPENCODE_SESSION_ID", "oc-session")
 		defer os.Unsetenv("OPENCODE_SESSION_ID")
 
-		_, err := detector.Detect()
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "not implemented")
+		usage, err := detector.Detect()
+		require.NoError(t, err)
+		assert.Equal(t, "opencode-cli", usage.Source)
 	})
 
-	t.Run("dispatches to codex returns error", func(t *testing.T) {
+	t.Run("dispatches to codex", func(t *testing.T) {
 		t.Setenv("CODEX_SESSION_ID", "cx-session")
 		defer os.Unsetenv("CODEX_SESSION_ID")
 
-		_, err := detector.Detect()
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "not implemented")
+		usage, err := detector.Detect()
+		require.NoError(t, err)
+		assert.Equal(t, "codex-cli", usage.Source)
 	})
+}
+
+func TestPortableContextUsagePayloads(t *testing.T) {
+	detector := NewDetector(createTestRegistry(t))
+
+	t.Run("nested JSON", func(t *testing.T) {
+		t.Setenv("CODEX_CONTEXT_USAGE", `{"context_window":{"used_tokens":75000,"total_tokens":200000},"model_id":"gpt-5.5"}`)
+		usage, err := detector.DetectFromSession("codex-session", CLICodex)
+		require.NoError(t, err)
+		assert.Equal(t, 75000, usage.UsedTokens)
+		assert.Equal(t, 200000, usage.TotalTokens)
+		assert.Equal(t, "gpt-5.5", usage.ModelID)
+		assert.False(t, usage.Estimated)
+	})
+
+	t.Run("text counters with commas", func(t *testing.T) {
+		t.Setenv("OPENCODE_CONTEXT_USAGE", "Token usage: 125,000 / 200,000")
+		usage, err := detector.DetectFromSession("opencode-session", CLIOpenCode)
+		require.NoError(t, err)
+		assert.Equal(t, 125000, usage.UsedTokens)
+		assert.InDelta(t, 62.5, usage.PercentageUsed, 0.01)
+		assert.False(t, usage.Estimated)
+	})
+
+	t.Run("invalid explicit counters fail loudly", func(t *testing.T) {
+		t.Setenv("GEMINI_CONTEXT_USAGE", `{"used_tokens":200001,"total_tokens":200000}`)
+		_, err := detector.DetectFromSession("gemini-session", CLIGemini)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid gemini-cli context usage")
+	})
+}
+
+func TestParseUsageJSONRejectsCountersOutsidePlatformIntRange(t *testing.T) {
+	tooLarge := "2147483648"
+	if strconv.IntSize == 64 {
+		tooLarge = "9223372036854775808"
+	}
+
+	_, _, _, ok := parseUsageJSON(fmt.Sprintf(`{"used_tokens":1,"total_tokens":%s}`, tooLarge))
+	assert.False(t, ok)
+}
+
+func TestParseUsageJSONSelectsNestedCountersDeterministically(t *testing.T) {
+	payload := `{"z_route":{"used_tokens":900,"total_tokens":1000,"model_id":"z-model"},"a_route":{"used_tokens":100,"total_tokens":1000,"model_id":"a-model"}}`
+
+	for range 100 {
+		used, total, modelID, ok := parseUsageJSON(payload)
+		require.True(t, ok)
+		assert.Equal(t, 100, used)
+		assert.Equal(t, 1000, total)
+		assert.Equal(t, "a-model", modelID)
+	}
 }
 
 func TestCLIConstants(t *testing.T) {
@@ -453,6 +508,7 @@ func TestCLIConstants(t *testing.T) {
 	assert.Equal(t, CLI("gemini"), CLIGemini)
 	assert.Equal(t, CLI("opencode"), CLIOpenCode)
 	assert.Equal(t, CLI("codex"), CLICodex)
+	assert.Equal(t, CLI("agy"), CLIAgy)
 	assert.Equal(t, CLI("unknown"), CLIUnknown)
 }
 

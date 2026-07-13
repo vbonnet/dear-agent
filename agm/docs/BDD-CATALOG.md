@@ -482,6 +482,21 @@ families. Its trust sources, canonical `AGENTS.md` constitution, Wayfinder
 memory integration, prompt boundaries, and execution sandbox need explicit,
 executable contracts rather than package tests alone.
 
+### Engram CLI Support Guardrails
+
+**File:** [`engram_cli_support_guardrails.feature`](../test/bdd/features/engram_cli_support_guardrails.feature)
+
+**Drives:** Engram CLI errors, security and validation helpers, enhanced slash
+commands, and structured table formatting SPEC coverage.
+
+**Key scenarios:**
+- Engram CLI support packages keep co-located SPEC coverage.
+- Engram CLI support SPECs point back to executable BDD.
+
+**Why this matters:** Every harness ultimately reaches operator-facing command
+surfaces. Their path boundaries, dynamic completion, and machine-readable
+output must remain safe and deterministic.
+
 ### Engram Hook Guardrails
 
 **File:** [`engram_hook_guardrails.feature`](../test/bdd/features/engram_hook_guardrails.feature)
@@ -544,6 +559,21 @@ provider's memory, session, context, and artifact SPEC coverage.
 **Why this matters:** Cross-session learning requires both safe signal
 collection and a complete provider-neutral persistence implementation, not a
 harness-specific or partially implemented memory path.
+
+### Engram Observability Guardrails
+
+**File:** [`engram_observability_guardrails.feature`](../test/bdd/features/engram_observability_guardrails.feature)
+
+**Drives:** Engram provider-neutral token tracking, retrieval metadata, and
+analytics dashboard SPEC coverage.
+
+**Key scenarios:**
+- Engram observability packages keep co-located SPEC coverage.
+- Engram observability SPECs point back to executable BDD.
+
+**Why this matters:** Quota and quality comparisons require normalized evidence
+across Anthropic, OpenAI, Gemini, GLM, DeepSeek, Nemotron, and Qwen routes
+rather than a Claude-only accounting path.
 
 ### Local Development Guardrails
 
@@ -764,6 +794,87 @@ tmux terminal handling, validation, and delegation behavior together. These
 packages need explicit contracts so parity work does not regress into
 harness-specific or Claude-only assumptions.
 
+### Context Management Parity
+
+**File:** [`context_management_parity.feature`](../test/bdd/features/context_management_parity.feature)
+
+**Drives:** `pkg/context` harness detection, explicit heuristic labeling,
+model-family context windows, and provider-neutral compaction defaults.
+
+**Key scenarios:**
+- Every active harness resolves context usage for every supported model family.
+- Fallback usage is visibly estimated and retains the selected model route.
+- Every supported family has a positive registered context window.
+- Every active harness rejects explicit counters outside the platform integer range.
+- Every active harness selects competing nested counter sets deterministically.
+
+**Why this matters:** Quota and compaction policy cannot be parity-complete when
+non-Claude harnesses return not-implemented errors or silently inherit a Claude
+summarizer model.
+
+### Shared Runtime Policy Package Guardrails
+
+**File:** [`shared_runtime_policy_guardrails.feature`](../test/bdd/features/shared_runtime_policy_guardrails.feature)
+
+**Drives:** Co-located strict EARS contracts and route-neutral implementation
+checks for shared configuration, backlog, code generation, code intelligence,
+enforcement, evaluation, event, markdown, graceful-exit, and health packages.
+
+**Key scenarios:**
+- Every shared runtime policy package carries a reciprocal SPEC reference.
+- Every package contract names all four active harnesses and seven model families.
+- Production string literals do not embed a harness or model-family route.
+
+**Why this matters:** Shared policy behavior must remain identical across caller
+routes; hard-coded route defaults in these packages silently break parity above
+the adapter layer.
+
+### Agent Utility Parity
+
+**File:** [`agent_utility_parity.feature`](../test/bdd/features/agent_utility_parity.feature)
+
+**Drives:** Shared agent utility SPEC coverage, model-family cache policy,
+cross-harness hook normalization, and harness-neutral session synchronization.
+
+**Key scenarios:**
+- Eleven shared utility packages carry co-located executable specifications.
+- Every active harness and supported model family resolves a cache policy.
+- Hook and synchronization boundaries preserve the selected route without
+  inheriting Anthropic or Claude Code wire assumptions.
+
+**Why this matters:** Utility packages sit below adapters and are reused by
+every route; a provider-specific default here propagates across the codebase.
+
+### Validation and Workspace Parity
+
+**File:** [`validation_workspace_parity.feature`](../test/bdd/features/validation_workspace_parity.feature)
+
+**Drives:** Co-located contracts and route-neutral implementation checks for
+filesystem safety, content validation, VCS, versioning, W0, and workspace state.
+
+**Key scenarios:**
+- Every validation and workspace package carries a strict EARS specification.
+- Production string literals remain free of harness and model-family defaults.
+- The complete four-harness by seven-family route matrix is exercised.
+
+**Why this matters:** Validation and workspace policy is shared infrastructure;
+route-specific defaults would produce different safety outcomes for identical work.
+
+### Evaluation and Control Parity
+
+**File:** [`evaluation_control_parity.feature`](../test/bdd/features/evaluation_control_parity.feature)
+
+**Drives:** Benchmark orchestration, model-route preservation, Engram migration,
+and Discord/GitHub human approval transport SPEC coverage.
+
+**Key scenarios:**
+- Every benchmark, migration, and HITL package carries a co-located SPEC.
+- Every harness and model family preserves the selected benchmark model route.
+- Engram tier migration remains independent of the invoking harness.
+
+**Why this matters:** Comparative evidence and human approval decisions must
+not change because a task entered through a different harness or model family.
+
 ### SPEC and BDD Coverage
 
 **File:** [`spec_coverage.feature`](../test/bdd/features/spec_coverage.feature)
@@ -840,6 +951,79 @@ and preset package specifications.
 **Why this matters:** Wayfinder support code participates in the same planning
 gate regardless of which harness or model executes a task. Structural package
 coverage prevents migration or tooling helpers from becoming ungoverned paths.
+
+### Developer Tool Package Guardrails
+
+**File:** [`developer_tool_package_guardrails.feature`](../test/bdd/features/developer_tool_package_guardrails.feature)
+
+**Drives:** Session skill extraction, Git hook integration tests, CI drift and
+dead-link checks, devlog command and support packages, the stop quality guard,
+and schema-registry MCP, query, persistence, and validation packages.
+
+**Key scenarios:**
+- Every covered developer-tool package keeps a co-located, audited SPEC.
+- Shared developer-tool contracts remain available across the canonical four
+  harnesses and seven supported model families.
+
+**Why this matters:** Repository automation is part of the agent control plane.
+Provider-specific assumptions in these tools can block one harness even when
+the product runtime itself claims parity.
+
+---
+
+### Legacy Specification Strictness Guardrails
+
+**File:** [`legacy_spec_strictness_guardrails.feature`](../test/bdd/features/legacy_spec_strictness_guardrails.feature)
+
+**Drives:** EARS and BDD convergence for maintained legacy AGM, Engram,
+Wayfinder, shared-package, and developer-tool specifications.
+
+**Key scenarios:**
+- Every selected legacy specification passes strict EARS lint.
+- Every selected specification links reciprocally to its executable feature.
+- The strictness contract is invariant across all active harnesses and all
+  supported model families.
+
+**Why this matters:** Historical prose specifications are not enforceable until
+their maintained requirements can be linted and exercised through the same BDD
+surface as newly governed packages.
+
+---
+
+### Legacy NFR EARS Guardrails
+
+**File:** [`legacy_nfr_ears_guardrails.feature`](../test/bdd/features/legacy_nfr_ears_guardrails.feature)
+
+**Drives:** strict EARS conversion for maintained Ecphory, ranking, monitoring,
+telemetry, and Definition of Done functional and non-functional requirements.
+
+**Key scenarios:**
+- Every converted requirement retains a stable canonical identifier.
+- Every converted specification passes strict EARS lint.
+- Converted contracts remain enforced across all harness and model routes.
+
+**Why this matters:** Uppercase prose `SHALL` bullets looked normative but
+could not be consumed by the repository's deterministic SPEC gate. Canonical
+EARS makes those existing promises executable without discarding them.
+
+---
+
+### Legacy Specification BDD Linkage Guardrails
+
+**File:** [`legacy_spec_bdd_linkage_guardrails.feature`](../test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature)
+
+**Drives:** reciprocal executable BDD linkage for maintained strict legacy
+specifications across AGM, VROOM, Wayfinder, audit, deployment, telemetry,
+workflow, and safety surfaces.
+
+**Key scenarios:**
+- Every listed specification passes strict EARS lint.
+- Every listed specification and feature reference each other.
+- Linkage remains enforced across all active harness and model-family routes.
+
+**Why this matters:** Strict requirements that are not connected to an
+executable scenario can still drift unnoticed. Reciprocal linkage makes the
+maintained contract discoverable and test-enforced.
 
 ---
 

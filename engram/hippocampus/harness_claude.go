@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -36,6 +37,10 @@ func (c *ClaudeCodeAdapter) Name() string {
 // Claude Code derives the project key from the absolute path by replacing
 // / with - and prepending -.
 func (c *ClaudeCodeAdapter) GetMemoryDir(projectPath string) (string, error) {
+	if canonical, err := existingCanonicalMemoryDir(projectPath); err == nil {
+		return canonical, nil
+	}
+
 	absPath, err := filepath.Abs(projectPath)
 	if err != nil {
 		return "", fmt.Errorf("resolve project path: %w", err)
@@ -80,10 +85,6 @@ func (c *ClaudeCodeAdapter) DiscoverSessions(ctx context.Context, projectPath st
 			return nil, err
 		}
 
-		if !entry.IsDir() {
-			continue
-		}
-
 		// Skip special directories
 		name := entry.Name()
 		if name == "memory" || name == "plans" || name == "subagents" {
@@ -100,21 +101,35 @@ func (c *ClaudeCodeAdapter) DiscoverSessions(ctx context.Context, projectPath st
 			continue
 		}
 
-		// Look for JSONL files in this session directory
-		sessionDir := filepath.Join(projectDir, name)
-		jsonlFiles, err := findJSONLFiles(sessionDir)
-		if err != nil || len(jsonlFiles) == 0 {
+		sessionID := name
+		transcriptPath := ""
+		directSessionID, directTranscript := strings.CutSuffix(name, ".jsonl")
+		switch {
+		case entry.IsDir():
+			// Newer Claude releases may group transcript artifacts by session.
+			sessionDir := filepath.Join(projectDir, name)
+			jsonlFiles, err := findJSONLFiles(sessionDir)
+			if err != nil || len(jsonlFiles) == 0 {
+				continue
+			}
+			transcriptPath = jsonlFiles[0]
+		case directTranscript:
+			// Legacy and current installations may store the transcript directly.
+			sessionID = directSessionID
+			transcriptPath = filepath.Join(projectDir, name)
+		default:
 			continue
 		}
 
 		sessions = append(sessions, SessionInfo{
-			ID:        name,
+			ID:        sessionID,
 			StartTime: info.ModTime(), // approximate
 			Project:   projectPath,
-			FilePath:  jsonlFiles[0], // primary transcript
+			FilePath:  transcriptPath,
 		})
 	}
 
+	sort.Slice(sessions, func(i, j int) bool { return sessions[i].StartTime.Before(sessions[j].StartTime) })
 	return sessions, nil
 }
 

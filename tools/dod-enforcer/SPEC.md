@@ -1,5 +1,9 @@
 # Bead Definition of Done (DoD) - Specification
 
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/legacy_nfr_ears_guardrails.feature`
+
 <!-- Last audited at: NEEDS-AUDIT -->
 
 ## Overview
@@ -24,119 +28,119 @@ The bead DoD package provides machine-checkable Definition of Done validation fo
 
 The system SHALL support YAML-based Definition of Done specifications:
 
-- **FR-1.1**: Define required files via `files_must_exist` array
-- **FR-1.2**: Specify test execution requirement via `tests_must_pass` boolean
-- **FR-1.3**: Define custom command validations via `commands_must_succeed` array
-- **FR-1.4**: Support future extension fields (e.g., benchmarks_must_improve)
-- **FR-1.5**: Parse YAML files into structured BeadDoD objects
+- **FR-1-1**: Define required files via `files_must_exist` array
+- **FR-1-2**: Specify test execution requirement via `tests_must_pass` boolean
+- **FR-1-3**: Define custom command validations via `commands_must_succeed` array
+- **FR-1-4**: Support future extension fields (e.g., benchmarks_must_improve)
+- **FR-1-5**: Parse YAML files into structured BeadDoD objects
 
 ### FR-2: File Existence Validation
 
 The system SHALL validate required files exist:
 
-- **FR-2.1**: Check existence of files specified in `files_must_exist`
-- **FR-2.2**: Expand tilde (~/) paths to user home directory
-- **FR-2.3**: Expand environment variables in paths
-- **FR-2.4**: Report missing files with original and expanded paths
-- **FR-2.5**: Pass check if all required files exist
+- **FR-2-1**: Check existence of files specified in `files_must_exist`
+- **FR-2-2**: Expand tilde (~/) paths to user home directory
+- **FR-2-3**: Expand environment variables in paths
+- **FR-2-4**: Report missing files with original and expanded paths
+- **FR-2-5**: Pass check if all required files exist
 
 ### FR-3: Test Execution Validation
 
 The system SHALL validate test execution when required:
 
-- **FR-3.1**: Execute `go test ./...` when `tests_must_pass` is true
-- **FR-3.2**: Skip test validation when `tests_must_pass` is false
-- **FR-3.3**: Apply 60-second timeout for test execution
-- **FR-3.4**: Report timeout failures with clear error message
-- **FR-3.5**: Capture and report test output on failure
-- **FR-3.6**: Pass check if tests complete successfully within timeout
+- **FR-3-1**: Execute `go test ./...` when `tests_must_pass` is true
+- **FR-3-2**: Skip test validation when `tests_must_pass` is false
+- **FR-3-3**: Apply 60-second timeout for test execution
+- **FR-3-4**: Report timeout failures with clear error message
+- **FR-3-5**: Capture and report test output on failure
+- **FR-3-6**: Pass check if tests complete successfully within timeout
 
 ### FR-4: Command Validation
 
 The system SHALL validate custom command execution:
 
-- **FR-4.1**: Execute commands specified in `commands_must_succeed`
-- **FR-4.2**: Validate actual exit code matches expected exit code
-- **FR-4.3**: Apply 30-second timeout per command
-- **FR-4.4**: Report timeout failures with duration
-- **FR-4.5**: Capture and report command output on failure
-- **FR-4.6**: Pass check if exit code matches and completes within timeout
+- **FR-4-1**: Execute commands specified in `commands_must_succeed`
+- **FR-4-2**: Validate actual exit code matches expected exit code
+- **FR-4-3**: Apply 30-second timeout per command
+- **FR-4-4**: Report timeout failures with duration
+- **FR-4-5**: Capture and report command output on failure
+- **FR-4-6**: Pass check if exit code matches and completes within timeout
 
 ### FR-5: Validation Orchestration
 
 The system SHALL orchestrate all validation checks:
 
-- **FR-5.1**: Execute all checks in sequence (files, tests, commands)
-- **FR-5.2**: Aggregate all check results
-- **FR-5.3**: Determine overall success (all checks pass)
-- **FR-5.4**: Measure total validation duration
-- **FR-5.5**: Return structured ValidationResult
-- **FR-5.6**: Include first error message in result summary
+- **FR-5-1**: Execute all checks in sequence (files, tests, commands)
+- **FR-5-2**: Aggregate all check results
+- **FR-5-3**: Determine overall success (all checks pass)
+- **FR-5-4**: Measure total validation duration
+- **FR-5-5**: Return structured ValidationResult
+- **FR-5-6**: Include first error message in result summary
 
 ### FR-6: Validation Results
 
 The system SHALL provide detailed validation results:
 
-- **FR-6.1**: Overall success/failure status
-- **FR-6.2**: Total validation duration
-- **FR-6.3**: Individual check results with:
+- **FR-6-1**: Overall success/failure status
+- **FR-6-2**: Total validation duration
+- **FR-6-3**: Individual check results with:
   - Check type (file, test, command)
   - Check name (path or command)
   - Success status
   - Error message (if failed)
-- **FR-6.4**: Summary error message from first failure
+- **FR-6-4**: Summary error message from first failure
 
 ### FR-7: DoD File Loading
 
 The system SHALL load DoD specifications from files:
 
-- **FR-7.1**: Read YAML files from specified paths
-- **FR-7.2**: Parse YAML into BeadDoD structure
-- **FR-7.3**: Report file read errors with clear messages
-- **FR-7.4**: Report YAML parse errors with details
-- **FR-7.5**: Return validated BeadDoD object
+- **FR-7-1**: Read YAML files from specified paths
+- **FR-7-2**: Parse YAML into BeadDoD structure
+- **FR-7-3**: Report file read errors with clear messages
+- **FR-7-4**: Report YAML parse errors with details
+- **FR-7-5**: Return validated BeadDoD object
 
 ## Non-Functional Requirements
 
 ### NFR-1: Performance
 
-- **NFR-1.1**: File existence checks SHALL complete in < 100ms per file
-- **NFR-1.2**: Test execution SHALL timeout after 60 seconds
-- **NFR-1.3**: Command execution SHALL timeout after 30 seconds
-- **NFR-1.4**: Total validation SHALL report accurate duration
-- **NFR-1.5**: No memory leaks from command execution
+**NFR-1-1** The File existence checks shall complete in < 100ms per file
+**NFR-1-2** The Test execution shall timeout after 60 seconds
+**NFR-1-3** The Command execution shall timeout after 30 seconds
+**NFR-1-4** The Total validation shall report accurate duration
+- **NFR-1-5**: No memory leaks from command execution
 
 ### NFR-2: Reliability
 
-- **NFR-2.1**: Path expansion SHALL handle missing HOME gracefully
-- **NFR-2.2**: Command failures SHALL not crash validation
-- **NFR-2.3**: Timeout mechanisms SHALL reliably cancel execution
-- **NFR-2.4**: Context cancellation SHALL clean up resources
-- **NFR-2.5**: Test failures SHALL capture complete output
+**NFR-2-1** The Path expansion shall handle missing HOME gracefully
+**NFR-2-2** The Command failures shall not crash validation
+**NFR-2-3** The Timeout mechanisms shall reliably cancel execution
+**NFR-2-4** The Context cancellation shall clean up resources
+**NFR-2-5** The Test failures shall capture complete output
 
 ### NFR-3: Usability
 
-- **NFR-3.1**: Error messages SHALL include both original and expanded paths
-- **NFR-3.2**: Timeout errors SHALL specify duration
-- **NFR-3.3**: Command failures SHALL include exit code mismatch details
-- **NFR-3.4**: YAML parse errors SHALL be human-readable
-- **NFR-3.5**: Validation results SHALL be self-explanatory
+**NFR-3-1** The Error messages shall include both original and expanded paths
+**NFR-3-2** The Timeout errors shall specify duration
+**NFR-3-3** The Command failures shall include exit code mismatch details
+**NFR-3-4** The YAML parse errors shall be human-readable
+**NFR-3-5** The Validation results shall be self-explanatory
 
 ### NFR-4: Compatibility
 
-- **NFR-4.1**: Support YAML v3 format
-- **NFR-4.2**: Work on Linux, macOS, and Windows
-- **NFR-4.3**: Support Go 1.18+ for test execution
-- **NFR-4.4**: Execute commands via shell (sh -c)
-- **NFR-4.5**: Handle both Unix and Windows path separators
+- **NFR-4-1**: Support YAML v3 format
+- **NFR-4-2**: Work on Linux, macOS, and Windows
+- **NFR-4-3**: Support Go 1.18+ for test execution
+- **NFR-4-4**: Execute commands via shell (sh -c)
+- **NFR-4-5**: Handle both Unix and Windows path separators
 
 ### NFR-5: Maintainability
 
-- **NFR-5.1**: DoD structure SHALL be extensible without breaking changes
-- **NFR-5.2**: Check types SHALL be easily identifiable in results
-- **NFR-5.3**: Path expansion logic SHALL be isolated and testable
-- **NFR-5.4**: Command execution SHALL be isolated and testable
-- **NFR-5.5**: Validation logic SHALL be testable without actual files
+**NFR-5-1** The DoD structure shall be extensible without breaking changes
+**NFR-5-2** The Check types shall be easily identifiable in results
+**NFR-5-3** The Path expansion logic shall be isolated and testable
+**NFR-5-4** The Command execution shall be isolated and testable
+**NFR-5-5** The Validation logic shall be testable without actual files
 
 ## API Specification
 

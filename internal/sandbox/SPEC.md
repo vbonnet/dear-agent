@@ -1,5 +1,15 @@
 # Sandbox Provider Specification
 
+## Executable EARS Requirements
+
+**SNDBR-01** When a sandbox is created, the provider shall isolate writes from the source workspace and preserve declared read-only inputs.
+
+**SNDBR-02** When sandbox cleanup runs, the provider shall remove only resources owned by that sandbox instance.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
+
 <!-- Last audited at: NEEDS-AUDIT -->
 
 ## Overview

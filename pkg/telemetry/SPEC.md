@@ -1,5 +1,9 @@
 # Telemetry Public API - Specification
 
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/legacy_nfr_ears_guardrails.feature`
+
 <!-- Last audited at: NEEDS-AUDIT -->
 
 ## Overview
@@ -29,7 +33,7 @@ The package SHALL re-export essential types from internal/telemetry:
 
 ### FR-2: EventListener Interface
 
-External modules SHALL be able to implement EventListener:
+The external modules shall be able to implement EventListener:
 
 - **FR-2.1**: OnEvent(event *Event) error - Process incoming events
 - **FR-2.2**: MinLevel() Level - Specify minimum severity level
@@ -39,7 +43,7 @@ External modules SHALL be able to implement EventListener:
 
 ### FR-3: Event Data Access
 
-EventListener implementations SHALL have access to:
+The EventListener implementations shall have access to:
 
 - **FR-3.1**: Event.ID - Unique event identifier
 - **FR-3.2**: Event.Timestamp - Event occurrence time
@@ -51,7 +55,7 @@ EventListener implementations SHALL have access to:
 
 ### FR-4: Severity Level Filtering
 
-EventListener implementations SHALL specify filtering:
+The EventListener implementations shall specify filtering:
 
 - **FR-4.1**: MinLevel() returns minimum accepted severity
 - **FR-4.2**: Events with level < MinLevel() are filtered
@@ -62,7 +66,7 @@ EventListener implementations SHALL specify filtering:
 
 ### FR-5: Asynchronous Notification
 
-EventListener implementations SHALL handle async calls:
+The EventListener implementations shall handle async calls:
 
 - **FR-5.1**: OnEvent() called in separate goroutines
 - **FR-5.2**: No ordering guarantees between events

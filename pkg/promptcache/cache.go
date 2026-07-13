@@ -1,5 +1,5 @@
-// Package promptcache provides Claude API cache control headers for system prompts
-// and cache break detection to identify when prompt caching stops working.
+// Package promptcache provides model-family cache policy and cache break
+// detection to identify when prompt caching stops working.
 //
 // Two-tier caching:
 //   - Default: ephemeral (5-minute TTL, API default)
@@ -19,10 +19,32 @@ import (
 	"time"
 )
 
-// CacheControl represents the cache_control header for Claude API messages.
+// CacheControl represents an explicit Anthropic cache_control header.
 type CacheControl struct {
 	Type string `json:"type"`          // always "ephemeral"
 	TTL  int    `json:"ttl,omitempty"` // optional TTL in seconds (0 = API default ~5min)
+}
+
+// ModelFamily identifies a supported model-family cache route.
+type ModelFamily string
+
+// Supported model-family cache routes.
+const (
+	FamilyAnthropic ModelFamily = "anthropic"
+	FamilyOpenAI    ModelFamily = "openai"
+	FamilyGemini    ModelFamily = "gemini"
+	FamilyGLM       ModelFamily = "glm"
+	FamilyDeepSeek  ModelFamily = "deepseek"
+	FamilyNemotron  ModelFamily = "nemotron"
+	FamilyQwen      ModelFamily = "qwen"
+)
+
+// FamilyPolicy describes whether dear-agent emits explicit cache metadata for
+// a family or leaves cache behavior to the configured provider.
+type FamilyPolicy struct {
+	Family          ModelFamily
+	ProviderDefault bool
+	Control         *CacheControl
 }
 
 // Tier specifies the caching tier for a prompt segment.
@@ -38,7 +60,8 @@ const (
 // TTL1Hour is the TTL value for persistent cache tier (3600 seconds).
 const TTL1Hour = 3600
 
-// GetCacheControl returns the appropriate cache_control header for a prompt segment.
+// GetCacheControl returns the Anthropic cache_control header retained for
+// compatibility. New cross-family code should call PolicyForFamily.
 // TierDefault returns ephemeral with no explicit TTL (API default ~5min).
 // TierPersistent returns ephemeral with 1-hour TTL.
 func GetCacheControl(tier Tier) CacheControl {
@@ -50,6 +73,20 @@ func GetCacheControl(tier Tier) CacheControl {
 	}
 
 	return CacheControl{Type: "ephemeral"}
+}
+
+// PolicyForFamily returns a cache policy without leaking Anthropic wire fields
+// into other model-family requests.
+func PolicyForFamily(family ModelFamily, tier Tier) (FamilyPolicy, error) {
+	switch family {
+	case FamilyAnthropic:
+		control := GetCacheControl(tier)
+		return FamilyPolicy{Family: family, Control: &control}, nil
+	case FamilyOpenAI, FamilyGemini, FamilyGLM, FamilyDeepSeek, FamilyNemotron, FamilyQwen:
+		return FamilyPolicy{Family: family, ProviderDefault: true}, nil
+	default:
+		return FamilyPolicy{}, fmt.Errorf("unsupported prompt cache model family %q", family)
+	}
 }
 
 // PromptSnapshot captures the state of a prompt segment before an API call.
@@ -187,8 +224,8 @@ func (d *Detector) Breaks() []CacheBreakEvent {
 	return result
 }
 
-// EstimateTokens provides a rough token count estimate using the len/4 heuristic
-// with 4/3 padding, matching Claude Code's approach.
+// EstimateTokens provides a conservative model-neutral token count estimate
+// using a byte-length heuristic with 4/3 padding.
 func EstimateTokens(text string) int {
 	if len(text) == 0 {
 		return 0

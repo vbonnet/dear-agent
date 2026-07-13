@@ -1,5 +1,15 @@
 # EDD Framework Specification
 
+## Executable EARS Requirements
+
+**EVALR-01** When evaluation criteria are applied, the framework shall produce deterministic pass, fail, and evidence outcomes.
+
+**EVALR-02** If an external judge fails transiently, then the framework shall apply bounded retries without discarding completed evaluation evidence.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
+
 <!-- Last audited at: NEEDS-AUDIT -->
 
 ## Purpose

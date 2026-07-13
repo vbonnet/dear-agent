@@ -290,22 +290,22 @@ if tokenCount > threshold {
 - ✅ Session archival (full history backup)
 - ✅ Unit tests (5 tests, all passing)
 
-### Phase 5 V2 (Future)
+### Phase 5 V2
 
-**Planned**:
+**Implemented**:
 - LLM-enhanced semantic extraction
-- Wake-up prompt generation
 - Context-aware learning detection
-- Compression and optimization
+- Contradiction detection with validated winner selection
+- Model-neutral side-query callback with pattern-only fallback
 
 ---
 
 ## Engram Dream: Cross-Session Memory Consolidation
 
 The Autodream pipeline extends hippocampus with cross-session memory consolidation,
-inspired by Claude Code's autodream feature. It reads session transcripts, extracts
-signals (corrections, preferences, decisions, learnings), and consolidates them into
-Claude Code's MEMORY.md auto-memory files.
+inspired by auto-memory consolidation systems. It reads session transcripts from
+every active harness, extracts signals (corrections, preferences, decisions, and
+learnings), and consolidates them into shared project `MEMORY.md` files.
 
 ### Components
 
@@ -317,14 +317,20 @@ Claude Code's MEMORY.md auto-memory files.
 | `trigger.go` | Consolidation trigger logic (24h + N sessions threshold) |
 | `harness.go` | HarnessAdapter interface for cross-harness support |
 | `harness_claude.go` | Claude Code JSONL session adapter |
-| `llm.go` | LLMProvider interface + NoopLLM for V1 pattern-only mode |
+| `harness_codex.go` | Codex active and archived rollout adapter |
+| `harness_agy.go` | Antigravity brain transcript adapter |
+| `harness_opencode.go` | OpenCode SQLite session adapter |
+| `llm.go` | Model-neutral LLMProvider and pattern-only fallback |
 
 ### Usage
 
 ```go
-import "github.com/vbonnet/engram/core/hippocampus"
+import "github.com/vbonnet/dear-agent/engram/hippocampus"
 
-adapter := hippocampus.NewClaudeCodeAdapter("")
+adapter, err := hippocampus.NewHarnessAdapter("codex-cli", "")
+if err != nil {
+    return err
+}
 config := hippocampus.DefaultConfig()
 config.DryRun = true // preview changes
 
@@ -333,22 +339,11 @@ report, err := dream.Run(ctx)
 // report.SignalsFound, report.EntriesAdded, report.Diff
 ```
 
-### CLI
-
-```bash
-engram-dream run [--dry-run] [--project PATH]  # run consolidation
-engram-dream status                             # show trigger state
-engram-dream diff                               # preview changes
-```
-
-### SessionEnd Hook
-
-`hooks/cmd/sessionend-memory-consolidation/` triggers consolidation automatically
-when 24h + 5 sessions threshold is met. Fail-open design (always exits 0).
-
 ### Tests
 
-62 tests total (12 memorymd + 9 trigger + 6 autodream + 18 harness + 15 helpers + 3 llm - 1 overlap).
+Run `go test ./engram/hippocampus` from the repository root. The suite includes
+shared adapter conformance, native transcript fixtures, memory security, dry-run,
+atomic persistence, trigger, lineage, relevance, and LLM fallback coverage.
 
 ---
 
@@ -356,12 +351,9 @@ when 24h + 5 sessions threshold is met. Fail-open design (always exits 0).
 
 ### Go Module
 
-```
-module github.com/vbonnet/engram/core/hippocampus
-go 1.25.0
-```
-
-No external dependencies - uses only Go stdlib.
+The package belongs to the root `github.com/vbonnet/dear-agent` module. OpenCode
+transcript discovery uses the repository's pure-Go SQLite dependency; the other
+adapters use the Go standard library.
 
 ---
 

@@ -204,6 +204,26 @@ func TestListModels(t *testing.T) {
 	assert.Contains(t, models, "model-b")
 }
 
+func TestParityModelFamiliesAreRegistered(t *testing.T) {
+	registry, err := loadRegistry("models.yaml")
+	require.NoError(t, err)
+
+	for _, modelID := range []string{
+		"claude-sonnet-4.5",
+		"gpt-5.5",
+		"gemini-3.5-flash",
+		"z-ai/glm-5.2",
+		"deepseek/deepseek-v4-pro",
+		"nvidia/nemotron-3-ultra",
+		"qwen/qwen3.6-max",
+	} {
+		model := registry.GetModel(modelID)
+		require.NotNil(t, model, modelID)
+		assert.Equal(t, modelID, model.ModelID)
+		assert.Positive(t, model.MaxContextTokens)
+	}
+}
+
 func TestGetModelCapabilities(t *testing.T) {
 	tmpDir := t.TempDir()
 	registryPath := filepath.Join(tmpDir, "models.yaml")

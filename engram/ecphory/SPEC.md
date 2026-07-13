@@ -1,5 +1,9 @@
 # Ecphory - Specification
 
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/legacy_nfr_ears_guardrails.feature`
+
 <!-- Last audited at: NEEDS-AUDIT -->
 
 ## Overview
@@ -24,85 +28,85 @@ The ecphory package implements a 3-tier memory retrieval system for the Engram k
 
 The system SHALL provide complete lifecycle management for memory retrieval:
 
-- **FR-1.1**: Initialize ecphory with engram directory path and token budget
-- **FR-1.2**: Build frontmatter index from .ai.md files
-- **FR-1.3**: Execute 3-tier retrieval pipeline (filter, rank, budget)
-- **FR-1.4**: Close and cleanup resources (API clients, index)
+- **FR-1-1**: Initialize ecphory with engram directory path and token budget
+- **FR-1-2**: Build frontmatter index from .ai.md files
+- **FR-1-3**: Execute 3-tier retrieval pipeline (filter, rank, budget)
+- **FR-1-4**: Close and cleanup resources (API clients, index)
 
 ### FR-2: Tier 1 - Fast Filtering
 
 The system SHALL perform fast frontmatter-based filtering:
 
-- **FR-2.1**: Build in-memory index of all engram frontmatter metadata
-- **FR-2.2**: Filter by tags with hierarchical matching (e.g., "languages/python" matches "languages")
-- **FR-2.3**: Filter by agent (specific agent or agent-agnostic)
-- **FR-2.4**: Filter by type (reflection, pattern, strategy, etc.)
-- **FR-2.5**: Return all matching engram paths for ranking
+- **FR-2-1**: Build in-memory index of all engram frontmatter metadata
+- **FR-2-2**: Filter by tags with hierarchical matching (e.g., "languages/python" matches "languages")
+- **FR-2-3**: Filter by agent (specific agent or agent-agnostic)
+- **FR-2-4**: Filter by type (reflection, pattern, strategy, etc.)
+- **FR-2-5**: Return all matching engram paths for ranking
 
 ### FR-3: Tier 2 - Semantic Ranking
 
 The system SHALL rank filtered candidates by semantic relevance:
 
-- **FR-3.1**: Support multiple LLM providers (Anthropic API, Google VertexAI)
-- **FR-3.2**: Auto-detect provider based on environment variables
-- **FR-3.3**: Build ranking prompt with query and candidate paths
-- **FR-3.4**: Parse JSON response with relevance scores (0.0-1.0)
-- **FR-3.5**: Validate ranking results (paths, scores, structure)
-- **FR-3.6**: Apply failure boosting for debugging queries
-- **FR-3.7**: Sort results by relevance (descending)
+- **FR-3-1**: Support multiple LLM providers (Anthropic API, Google VertexAI)
+- **FR-3-2**: Auto-detect provider based on environment variables
+- **FR-3-3**: Build ranking prompt with query and candidate paths
+- **FR-3-4**: Parse JSON response with relevance scores (0.0-1.0)
+- **FR-3-5**: Validate ranking results (paths, scores, structure)
+- **FR-3-6**: Apply failure boosting for debugging queries
+- **FR-3-7**: Sort results by relevance (descending)
 
 ### FR-4: Tier 3 - Token Budget Management
 
 The system SHALL load engrams within token budget constraints:
 
-- **FR-4.1**: Estimate tokens using character count heuristic (char/4)
-- **FR-4.2**: Load engrams in relevance order (highest first)
-- **FR-4.3**: Stop loading when token budget exhausted
-- **FR-4.4**: Return loaded engrams sorted by relevance
+- **FR-4-1**: Estimate tokens using character count heuristic (char/4)
+- **FR-4-2**: Load engrams in relevance order (highest first)
+- **FR-4-3**: Stop loading when token budget exhausted
+- **FR-4-4**: Return loaded engrams sorted by relevance
 
 ### FR-5: Failure Context Detection
 
 The system SHALL detect debugging context and boost relevant failures:
 
-- **FR-5.1**: Detect debugging keywords (error, failed, broken, bug, crash, etc.)
-- **FR-5.2**: Classify error category (syntax, permission, timeout, tool_misuse, other)
-- **FR-5.3**: Boost relevance scores (+25.0) for matching error categories
-- **FR-5.4**: Cap boosted scores at 100.0
-- **FR-5.5**: Leave non-debugging queries unaffected
+- **FR-5-1**: Detect debugging keywords (error, failed, broken, bug, crash, etc.)
+- **FR-5-2**: Classify error category (syntax, permission, timeout, tool_misuse, other)
+- **FR-5-3**: Boost relevance scores (+25.0) for matching error categories
+- **FR-5-4**: Cap boosted scores at 100.0
+- **FR-5-5**: Leave non-debugging queries unaffected
 
 ### FR-6: Frontmatter Index
 
 The system SHALL build and maintain a frontmatter index:
 
-- **FR-6.1**: Walk directory tree to find .ai.md files
-- **FR-6.2**: Parse frontmatter YAML for each engram
-- **FR-6.3**: Index by tags, type, and agent
-- **FR-6.4**: Detect and handle symlink cycles
-- **FR-6.5**: Enforce maximum engram limit (100,000) for DoS protection
-- **FR-6.6**: Thread-safe concurrent access with RWMutex
+- **FR-6-1**: Walk directory tree to find .ai.md files
+- **FR-6-2**: Parse frontmatter YAML for each engram
+- **FR-6-3**: Index by tags, type, and agent
+- **FR-6-4**: Detect and handle symlink cycles
+- **FR-6-5**: Enforce maximum engram limit (100,000) for DoS protection
+- **FR-6-6**: Thread-safe concurrent access with RWMutex
 
 ### FR-7: Rate Limiting
 
 The system SHALL enforce rate limits for API calls:
 
-- **FR-7.1**: Token bucket algorithm with hourly and session limits
-- **FR-7.2**: Hourly limit: 100 requests/hour
-- **FR-7.3**: Session limit: 20 requests/session
-- **FR-7.4**: Minimum interval: 1 second between requests
-- **FR-7.5**: Use monotonic clock to prevent time drift issues
-- **FR-7.6**: Return error with wait time when limit exceeded
+- **FR-7-1**: Token bucket algorithm with hourly and session limits
+- **FR-7-2**: Hourly limit: 100 requests/hour
+- **FR-7-3**: Session limit: 20 requests/session
+- **FR-7-4**: Minimum interval: 1 second between requests
+- **FR-7-5**: Use monotonic clock to prevent time drift issues
+- **FR-7-6**: Return error with wait time when limit exceeded
 
 ### FR-8: Provider Support
 
 The system SHALL support multiple LLM providers:
 
-- **FR-8.1**: Anthropic API provider
+- **FR-8-1**: Anthropic API provider
   - Model: claude-3-5-haiku-20241022
   - API key validation (must start with "sk-ant-")
   - Max tokens: 4096
   - Environment variable: ANTHROPIC_API_KEY
 
-- **FR-8.2**: Google VertexAI provider
+- **FR-8-2**: Google VertexAI provider
   - Model: claude-3-5-sonnet-v2@20241022
   - Access token via gcloud CLI
   - Streaming response parsing
@@ -112,70 +116,70 @@ The system SHALL support multiple LLM providers:
 
 The system SHALL defend against prompt injection attacks:
 
-- **FR-9.1**: Sanitize user queries (reject XML tags, injection patterns)
-- **FR-9.2**: Wrap user query in `<user>` tags
-- **FR-9.3**: Wrap candidate paths in `<untrusted_data>` tags
-- **FR-9.4**: Use XML hierarchy to isolate external data
-- **FR-9.5**: Validate sanitized query before API call
+- **FR-9-1**: Sanitize user queries (reject XML tags, injection patterns)
+- **FR-9-2**: Wrap user query in `<user>` tags
+- **FR-9-3**: Wrap candidate paths in `<untrusted_data>` tags
+- **FR-9-4**: Use XML hierarchy to isolate external data
+- **FR-9-5**: Validate sanitized query before API call
 
 ### FR-10: Telemetry Integration
 
 The system SHALL publish telemetry events:
 
-- **FR-10.1**: Publish ecphory.query events to EventBus
-- **FR-10.2**: Include query, session ID, transcript, tags, agent
-- **FR-10.3**: Include result count, paths, tokens used, duration
-- **FR-10.4**: Use relative paths for privacy
-- **FR-10.5**: Asynchronous publishing (non-blocking)
-- **FR-10.6**: Optional (nil EventBus disables telemetry)
+- **FR-10-1**: Publish ecphory.query events to EventBus
+- **FR-10-2**: Include query, session ID, transcript, tags, agent
+- **FR-10-3**: Include result count, paths, tokens used, duration
+- **FR-10-4**: Use relative paths for privacy
+- **FR-10-5**: Asynchronous publishing (non-blocking)
+- **FR-10-6**: Optional (nil EventBus disables telemetry)
 
 ### FR-11: Frontmatter Metadata Updates
 
 The system SHALL update engram metadata on retrieval:
 
-- **FR-11.1**: Increment retrieval_count field
-- **FR-11.2**: Update last_accessed timestamp
-- **FR-11.3**: Asynchronous updates (non-blocking)
-- **FR-11.4**: Log errors without failing queries
+- **FR-11-1**: Increment retrieval_count field
+- **FR-11-2**: Update last_accessed timestamp
+- **FR-11-3**: Asynchronous updates (non-blocking)
+- **FR-11-4**: Log errors without failing queries
 
 ## Non-Functional Requirements
 
 ### NFR-1: Performance
 
-- **NFR-1.1**: Tier 1 filtering SHALL complete in < 100ms for 10,000 engrams
-- **NFR-1.2**: Index building SHALL use O(n) time where n = number of engrams
-- **NFR-1.3**: Tag filtering SHALL use hierarchical prefix matching
-- **NFR-1.4**: Agent filtering SHALL use pre-cached agent-agnostic engrams (O(1))
+**NFR-1-1** The Tier 1 filtering shall complete in < 100ms for 10,000 engrams
+**NFR-1-2** The Index building shall use O(n) time where n = number of engrams
+**NFR-1-3** The Tag filtering shall use hierarchical prefix matching
+**NFR-1-4** The Agent filtering shall use pre-cached agent-agnostic engrams (O(1))
 
 ### NFR-2: Reliability
 
-- **NFR-2.1**: API failures SHALL fall back to unranked candidates
-- **NFR-2.2**: Parse errors SHALL be logged and skipped
-- **NFR-2.3**: Context cancellation SHALL be checked before expensive operations
-- **NFR-2.4**: Symlink cycles SHALL be detected and skipped
-- **NFR-2.5**: Ranker initialization failures SHALL clean up index resources
+**NFR-2-1** The API failures shall fall back to unranked candidates
+**NFR-2-2** The Parse errors shall be logged and skipped
+**NFR-2-3** The Context cancellation shall be checked before expensive operations
+**NFR-2-4** The Symlink cycles shall be detected and skipped
+**NFR-2-5** The Ranker initialization failures shall clean up index resources
 
 ### NFR-3: Security
 
-- **NFR-3.1**: API keys SHALL be validated before use
-- **NFR-3.2**: API keys SHALL NOT be logged
-- **NFR-3.3**: User queries SHALL be sanitized for prompt injection
-- **NFR-3.4**: Rate limits SHALL prevent API abuse
-- **NFR-3.5**: Telemetry SHALL use relative paths (privacy)
+**NFR-3-1** The API keys shall be validated before use
+**NFR-3-2** The API keys shall NOT be logged
+**NFR-3-3** The User queries shall be sanitized for prompt injection
+**NFR-3-4** The Rate limits shall prevent API abuse
+**NFR-3-5** The Telemetry shall use relative paths (privacy)
 
 ### NFR-4: Scalability
 
-- **NFR-4.1**: Support up to 100,000 engrams per index
-- **NFR-4.2**: Thread-safe concurrent queries (RWMutex)
-- **NFR-4.3**: Rate limiter SHALL be thread-safe
-- **NFR-4.4**: Symlink depth limit (5) SHALL prevent infinite recursion
+- **NFR-4-1**: Support up to 100,000 engrams per index
+- **NFR-4-2**: Thread-safe concurrent queries (RWMutex)
+**NFR-4-3** The Rate limiter shall be thread-safe
+**NFR-4-4** The Symlink depth limit (5) shall prevent infinite recursion
 
 ### NFR-5: Maintainability
 
-- **NFR-5.1**: Provider interface SHALL be extensible
-- **NFR-5.2**: Token budget SHALL be configurable at construction
-- **NFR-5.3**: Rate limits SHALL be configurable via RateLimiter struct
-- **NFR-5.4**: Failure boosting SHALL be toggleable (context detector)
+**NFR-5-1** The Provider interface shall be extensible
+**NFR-5-2** The Token budget shall be configurable at construction
+**NFR-5-3** The Rate limits shall be configurable via RateLimiter struct
+**NFR-5-4** The Failure boosting shall be toggleable (context detector)
 
 ## API Specification
 

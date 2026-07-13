@@ -42,17 +42,21 @@ func (n *NoopLLM) DetectContradictions(_ context.Context, _ []string, _ []string
 	return nil, nil
 }
 
-// SonnetLLM implements LLMProvider using an LLM via SideQueryFunc.
-// This is the V2 implementation that replaces regex-based extraction with
-// LLM-powered signal extraction and contradiction detection.
-type SonnetLLM struct {
+// SideQueryLLM implements LLMProvider using a model-neutral SideQueryFunc.
+type SideQueryLLM struct {
 	SideQuery SideQueryFunc
 }
 
-// NewSonnetLLM creates a new LLM provider backed by a SideQueryFunc.
-func NewSonnetLLM(sideQuery SideQueryFunc) *SonnetLLM {
-	return &SonnetLLM{SideQuery: sideQuery}
+// NewSideQueryLLM creates a model-neutral LLM provider backed by a SideQueryFunc.
+func NewSideQueryLLM(sideQuery SideQueryFunc) *SideQueryLLM {
+	return &SideQueryLLM{SideQuery: sideQuery}
 }
+
+// SonnetLLM is retained as a source-compatible alias for SideQueryLLM.
+type SonnetLLM = SideQueryLLM
+
+// NewSonnetLLM is retained for compatibility. New code should use NewSideQueryLLM.
+func NewSonnetLLM(sideQuery SideQueryFunc) *SideQueryLLM { return NewSideQueryLLM(sideQuery) }
 
 const extractSignalsSystemPrompt = `You are a memory signal extractor. Analyze the conversation transcript and extract memorable signals.
 
@@ -82,7 +86,7 @@ type llmSignalResponse struct {
 
 // ExtractSignals uses an LLM to analyze transcript text and extract structured signals.
 // Falls back gracefully: returns nil signals on LLM error (caller uses V1 regex).
-func (s *SonnetLLM) ExtractSignals(ctx context.Context, transcript string) ([]Signal, error) {
+func (s *SideQueryLLM) ExtractSignals(ctx context.Context, transcript string) ([]Signal, error) {
 	if s.SideQuery == nil {
 		return nil, nil
 	}
@@ -146,7 +150,7 @@ type llmContradictionResponse struct {
 }
 
 // DetectContradictions uses an LLM to compare memory entries for conflicts.
-func (s *SonnetLLM) DetectContradictions(ctx context.Context, existing []string, incoming []string) ([]Contradiction, error) {
+func (s *SideQueryLLM) DetectContradictions(ctx context.Context, existing []string, incoming []string) ([]Contradiction, error) {
 	if s.SideQuery == nil {
 		return nil, nil
 	}

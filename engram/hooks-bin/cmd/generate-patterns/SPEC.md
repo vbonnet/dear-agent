@@ -1,5 +1,15 @@
 # SPEC: generate-patterns
 
+## Executable EARS Requirements
+
+**GPATR-01** When pattern generation reads maintained incidents, the command shall emit deterministic detector patterns.
+
+**GPATR-02** If source incident data is invalid, then the command shall report the invalid record and avoid publishing partial output.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
+
 <!-- Last audited at: NEEDS-AUDIT -->
 
 Code generator that reads the unified YAML pattern database and emits the
