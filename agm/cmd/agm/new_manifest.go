@@ -16,7 +16,7 @@ import (
 )
 
 // createAndRegisterManifest writes the manifest directory, builds the v2
-// manifest, and registers it in Dolt (skipping Dolt only in test sandbox mode).
+// manifest, and registers it in the configured lifecycle store.
 func createAndRegisterManifest(sessionID, sessionName, workDir string, sandboxInfo *manifest.SandboxConfig) error {
 	debug.Phase("Create Manifest")
 	sessionsDir := getSessionsDir()
@@ -123,16 +123,11 @@ func clonePermissionPolicy(policy *manifest.PermissionPolicy) *manifest.Permissi
 	return &clone
 }
 
-// registerSessionInDolt persists m to Dolt. In the test-sandbox env (where Dolt
-// is intentionally unavailable) the failure is swallowed.
+// registerSessionInDolt persists m to the configured lifecycle store. Test
+// environments resolve an isolated SQLite adapter through getStorage.
 func registerSessionInDolt(m *manifest.Manifest) error {
 	adapter, err := getStorage()
 	if err != nil {
-		if os.Getenv("AGM_TEST_RUN_ID") != "" {
-			debug.Log("Test sandbox: Dolt unavailable (expected): %v", err)
-			ui.PrintSuccess("Test sandbox session created (Dolt skipped)")
-			return nil
-		}
 		debug.Log("Failed to connect to Dolt: %v", err)
 		ui.PrintError(err, "Failed to connect to Dolt storage",
 			"  • Ensure Dolt server is running\n"+
@@ -150,7 +145,7 @@ func registerSessionInDolt(m *manifest.Manifest) error {
 	}
 	debug.Log("Session saved to Dolt database: %s", m.SessionID)
 	if testMode {
-		ui.PrintSuccess("Test session registered in database (hidden from default list)")
+		ui.PrintSuccess("Test session registered in isolated database")
 	} else {
 		ui.PrintSuccess("Session registered in database")
 	}

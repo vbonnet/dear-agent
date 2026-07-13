@@ -18,6 +18,7 @@ import (
 	gitpkg "github.com/vbonnet/dear-agent/agm/internal/git"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
+	"github.com/vbonnet/dear-agent/agm/internal/testcontext"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 	"github.com/vbonnet/dear-agent/internal/override"
 	"github.com/vbonnet/dear-agent/internal/telemetry"
@@ -34,6 +35,7 @@ var (
 	keepSandbox        bool   // Preserve sandbox directory for debugging
 	includeSupervisors bool   // Include supervisor sessions in bulk archive
 	archiveOutcome     string // Outcome stamped on the archived record (completed|crashed|killed|gc-stale)
+	archiveTestEnv     string // Named isolated test environment used for cross-process archive validation
 )
 
 // validArchiveOutcomes lists the outcome values accepted by --outcome. Kept in
@@ -159,6 +161,13 @@ Examples:
 }
 
 func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
+	if archiveTestEnv != "" {
+		tc := testcontext.LoadNamed(archiveTestEnv)
+		if err := tc.SetEnv(); err != nil {
+			return fmt.Errorf("failed to activate test environment %q: %w", archiveTestEnv, err)
+		}
+	}
+
 	// Override guard: --force skips pre-archive verification — require a reason.
 	if forceArchive {
 		if gerr := override.Require(context.Background(), override.Guard{
@@ -835,5 +844,6 @@ func init() {
 		"Include supervisor sessions (orchestrator, overseer, meta-*) in bulk archive")
 	archiveCmd.Flags().StringVar(&archiveOutcome, "outcome", "",
 		"Outcome to stamp on the archived record: completed (default), crashed, killed, gc-stale")
+	archiveCmd.Flags().StringVar(&archiveTestEnv, "test-env", "", "Use named test environment created via agm test-env create")
 	sessionCmd.AddCommand(archiveCmd)
 }
