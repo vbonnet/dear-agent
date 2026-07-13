@@ -28,4 +28,3 @@ from being reported as recovery while a wedged harness child remains alive.
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
 - Package tests: `agm/internal/recovery/recovery_test.go`
-
