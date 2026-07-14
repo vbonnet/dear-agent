@@ -121,6 +121,9 @@ var CrossHarnessAliases = map[string]map[string]string{
 		"3.1-pro":   "sonnet", // gemini alias → claude equivalent
 		"3.5-flash": "haiku",  // gemini alias → claude equivalent
 		"5.6":       "opus",   // codex alias → claude equivalent
+		"5.6-sol":   "opus",   // codex tier → claude equivalent (frontier)
+		"5.6-terra": "sonnet", // codex tier → claude equivalent (balanced)
+		"5.6-luna":  "haiku",  // codex tier → claude equivalent (volume)
 		"5.5":       "opus",   // codex alias → claude equivalent
 		"5.4":       "opus",   // codex alias → claude equivalent
 		"5.4-mini":  "haiku",  // codex alias → claude equivalent

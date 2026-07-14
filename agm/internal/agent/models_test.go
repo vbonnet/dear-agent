@@ -165,6 +165,9 @@ func TestResolveModelFullName_CrossHarness(t *testing.T) {
 		{"claude-code", "2.5-pro", "claude-opus-4-8[1m]"},
 		{"claude-code", "3.5-flash", "claude-haiku-4-5"},
 		{"claude-code", "5.5", "claude-opus-4-8[1m]"},
+		{"claude-code", "5.6-sol", "claude-opus-4-8[1m]"},
+		{"claude-code", "5.6-terra", "claude-sonnet-4-6[1m]"},
+		{"claude-code", "5.6-luna", "claude-haiku-4-5"},
 		// Native aliases still work (not affected)
 		{"gemini-cli", "3.5-flash", "gemini-3.5-flash"},
 		{"claude-code", "opus", "claude-opus-4-8[1m]"},
