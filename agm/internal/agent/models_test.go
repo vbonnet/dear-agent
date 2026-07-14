@@ -28,7 +28,7 @@ func TestResolveModelFullName(t *testing.T) {
 		{"claude-code", "haiku", "claude-haiku-4-5"},
 		{"claude-code", "fable", "claude-fable-5"},
 		{"gemini-cli", "3.5-flash", "gemini-3.5-flash"},
-		{"codex-cli", "5.6", "gpt-5.6"},
+		{"codex-cli", "5.6", "gpt-5.6-terra"},
 		{"codex-cli", "5.5", "gpt-5.5"},
 		{"codex-cli", "5.4", "gpt-5.4"},
 		// Unknown alias passthrough
@@ -165,6 +165,9 @@ func TestResolveModelFullName_CrossHarness(t *testing.T) {
 		{"claude-code", "2.5-pro", "claude-opus-4-8[1m]"},
 		{"claude-code", "3.5-flash", "claude-haiku-4-5"},
 		{"claude-code", "5.5", "claude-opus-4-8[1m]"},
+		{"claude-code", "5.6-sol", "claude-opus-4-8[1m]"},
+		{"claude-code", "5.6-terra", "claude-sonnet-4-6[1m]"},
+		{"claude-code", "5.6-luna", "claude-haiku-4-5"},
 		// Native aliases still work (not affected)
 		{"gemini-cli", "3.5-flash", "gemini-3.5-flash"},
 		{"claude-code", "opus", "claude-opus-4-8[1m]"},
@@ -179,9 +182,19 @@ func TestResolveModelFullName_CrossHarness(t *testing.T) {
 	}
 }
 
-func TestCodexRegistryKeepsExplicitGPT56(t *testing.T) {
-	if got := ResolveModelFullName("codex-cli", "5.6"); got != "gpt-5.6" {
-		t.Fatalf("explicit codex 5.6 resolved to %q, want gpt-5.6", got)
+func TestCodexResolves56Tiers(t *testing.T) {
+	// "gpt-5.6" alone is unresolvable in codex CLI; the registry must map to the
+	// explicit sol/terra/luna tier IDs, and bare "5.6" to the worker default.
+	cases := map[string]string{
+		"5.6":       "gpt-5.6-terra", // bare alias → worker default (terra), NOT frontier
+		"5.6-sol":   "gpt-5.6-sol",
+		"5.6-terra": "gpt-5.6-terra",
+		"5.6-luna":  "gpt-5.6-luna",
+	}
+	for in, want := range cases {
+		if got := ResolveModelFullName("codex-cli", in); got != want {
+			t.Errorf("ResolveModelFullName(codex-cli, %q) = %q, want %q", in, got, want)
+		}
 	}
 }
 
