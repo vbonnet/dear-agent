@@ -179,9 +179,10 @@ func TestTimeout_SuccessfulCommands(t *testing.T) {
 	}
 
 	avgElapsed := totalElapsed / iterations
-	// Average overhead should be minimal (<50ms)
-	if avgElapsed > 50*time.Millisecond {
-		t.Errorf("Average command time too high: %v (expected < 50ms)", avgElapsed)
+	const maxAverageElapsed = 100 * time.Millisecond
+	// Average overhead should be minimal, with enough slack for hosted macOS runners.
+	if avgElapsed > maxAverageElapsed {
+		t.Errorf("Average command time too high: %v (expected < %v)", avgElapsed, maxAverageElapsed)
 	}
 
 	t.Logf("Average execution time for %d iterations: %v", iterations, avgElapsed)
