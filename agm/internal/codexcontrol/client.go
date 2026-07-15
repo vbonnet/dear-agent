@@ -67,6 +67,16 @@ func (c *Client) StartRemoteControl(ctx context.Context) error {
 	defer cancel()
 
 	cmd := execCommandContext(timeoutCtx, c.codexPath(), "remote-control", "start", "--json")
+	// WaitDelay bounds how long Output() blocks on the command's I/O pipes after
+	// the process exits or timeoutCtx is cancelled. `codex remote-control start`
+	// daemonizes the app-server, which inherits the stdout pipe and holds its
+	// write-end open indefinitely; without WaitDelay, cmd.Output() blocks reading
+	// that inherited pipe to EOF forever, and the context timeout cannot rescue it
+	// (CommandContext only SIGKILLs the direct child, which has already exited
+	// after forking the daemon). This was ce-fmxv: `agm session new` hung forever
+	// before the harness was ever launched. WaitDelay force-closes the pipes so the
+	// call returns and the caller can fall back to the local Codex CLI.
+	cmd.WaitDelay = 5 * time.Second
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if output, err := cmd.Output(); err != nil {
@@ -150,6 +160,10 @@ func (c *Client) request(ctx context.Context, method string, params any, result 
 	defer cancel()
 
 	cmd := execCommandContext(timeoutCtx, c.codexPath(), "app-server", "proxy")
+	// ce-fmxv: bound the post-exit / post-cancel I/O wait so a proxy child that
+	// leaves an inherited pipe open (e.g. via the shared app-server daemon) cannot
+	// hang cmd.Wait() past the context deadline.
+	cmd.WaitDelay = 5 * time.Second
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("create codex app-server stdin: %w", err)
