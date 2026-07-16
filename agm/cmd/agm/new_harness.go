@@ -31,7 +31,7 @@ const codexRemoteBootTimeout = 45 * time.Second
 // Returns (modeAppliedAtStartup, harnessHandledFullLifecycle, err): when
 // harnessHandledFullLifecycle is true the caller should return immediately —
 // the harness (e.g. gemini-cli wrapper) has already managed attach/detach.
-func startHarness(sessionName, workDir string, exists bool, extraAddDirs []string, trustPreConfigured bool) (bool, bool, error) {
+func startHarness(ctx context.Context, sessionName, workDir string, exists bool, extraAddDirs []string, trustPreConfigured bool) (bool, bool, error) {
 	switch harnessName {
 	case "claude-code":
 		return startClaudeHarness(sessionName, workDir, exists, extraAddDirs, trustPreConfigured)
@@ -39,7 +39,7 @@ func startHarness(sessionName, workDir string, exists bool, extraAddDirs []strin
 		done, err := startGeminiHarness(sessionName, exists)
 		return false, done, err
 	case "codex-cli":
-		modeApplied, err := startCodexHarness(sessionName, workDir, exists, extraAddDirs)
+		modeApplied, err := startCodexHarness(ctx, sessionName, workDir, exists, extraAddDirs)
 		return modeApplied, false, err
 	case "opencode-cli":
 		return false, false, startOpenCodeHarness(sessionName, exists)
@@ -463,7 +463,7 @@ func buildCodexCommandForModel(sessionName, workDir, model string, extraAddDirs 
 // tmux pane, and waits for the prompt to appear. It mirrors startClaudeHarness /
 // startGeminiDirect: send the command, sleep briefly, then poll for readiness,
 // tearing the freshly-created session down on failure.
-func startCodexHarness(sessionName, workDir string, exists bool, extraAddDirs []string) (bool, error) {
+func startCodexHarness(ctx context.Context, sessionName, workDir string, exists bool, extraAddDirs []string) (bool, error) {
 	debug.Phase("Start Codex")
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" && !agent.IsCodexOAuthConfigured() {
@@ -493,7 +493,7 @@ func startCodexHarness(sessionName, workDir string, exists bool, extraAddDirs []
 	// timeouts are defeated (e.g. a daemon holding an inherited pipe), boot fails
 	// loud/fast and falls back to the local Codex CLI rather than hanging forever
 	// before the harness is ever launched.
-	remoteCtx, cancelRemote := context.WithTimeout(context.Background(), codexRemoteBootTimeout)
+	remoteCtx, cancelRemote := context.WithTimeout(ctx, codexRemoteBootTimeout)
 	meta, err := createCodexRemoteThread(remoteCtx, sessionName, workDir)
 	cancelRemote()
 	if err != nil {

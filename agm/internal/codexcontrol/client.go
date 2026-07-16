@@ -11,7 +11,10 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/procguard"
 )
 
 const defaultTimeout = 20 * time.Second
@@ -76,7 +79,19 @@ func (c *Client) StartRemoteControl(ctx context.Context) error {
 	// after forking the daemon). This was ce-fmxv: `agm session new` hung forever
 	// before the harness was ever launched. WaitDelay force-closes the pipes so the
 	// call returns and the caller can fall back to the local Codex CLI.
-	cmd.WaitDelay = 5 * time.Second
+	//
+	// Process-group isolation + group-cancel (per repo subprocess-execution
+	// guidelines) ensures the daemonized app-server the direct child forked is
+	// killed alongside it on cancel, rather than surviving as an orphan holding
+	// the inherited pipe open.
+	cmd.SysProcAttr = procguard.ProcessGroupAttr()
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 1 * time.Second
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if output, err := cmd.Output(); err != nil {
@@ -162,8 +177,17 @@ func (c *Client) request(ctx context.Context, method string, params any, result 
 	cmd := execCommandContext(timeoutCtx, c.codexPath(), "app-server", "proxy")
 	// ce-fmxv: bound the post-exit / post-cancel I/O wait so a proxy child that
 	// leaves an inherited pipe open (e.g. via the shared app-server daemon) cannot
-	// hang cmd.Wait() past the context deadline.
-	cmd.WaitDelay = 5 * time.Second
+	// hang cmd.Wait() past the context deadline. Process-group isolation +
+	// group-cancel matches StartRemoteControl above so no descendant survives
+	// cancellation to keep holding the pipe.
+	cmd.SysProcAttr = procguard.ProcessGroupAttr()
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 1 * time.Second
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("create codex app-server stdin: %w", err)
