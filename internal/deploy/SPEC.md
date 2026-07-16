@@ -39,3 +39,5 @@ broken.
 **DEP-08** Where the ancestry gate passes, the system shall install the binary by renaming the temporary file over the target.
 
 **DEP-09** When any `AtomicInstall` step fails before the rename, the system shall remove the temporary file it created.
+
+**DEP-10** When a clean linked-worktree build succeeds without a `vcs.revision`, the system shall rebuild in a temporary standalone clone and apply the same provenance gate before installation.
