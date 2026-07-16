@@ -127,6 +127,7 @@
       "agm/internal/tmux/output_watcher.go:151",
       "agm/workflowbus/bridge.go:140"
     ],
+    "raw-mem-gate": [],
     "zero-test": [
       "github.com/vbonnet/dear-agent/cmd/agm-job",
       "github.com/vbonnet/dear-agent/cmd/fd-pressure",

@@ -4,7 +4,7 @@
 // drift of the codebase visible and ratchet it down over time, without
 // blocking work on the large pile of pre-existing findings.
 //
-// Five scans run today:
+// Six scans run today:
 //
 //	dead-package       Go packages with zero importers (excludes cmd/ and
 //	                   package main — those are entry points, not dead).
@@ -15,6 +15,14 @@
 //	goroutine-recover  `go func() { ... }()` launches whose body never
 //	                   calls recover() — an unguarded goroutine panic
 //	                   takes down the whole process.
+//	raw-mem-gate       Shell scripts that gate/alert on a raw macOS
+//	                   free-page metric (`vm_stat` free pages,
+//	                   page_free_count) without deferring to
+//	                   `memory_pressure`. macOS parks reclaimable pages off
+//	                   the free list, so raw "free" reads near-zero forever —
+//	                   a spawn/dispatch gate built on it deadlocks the thing
+//	                   it protects. See docs/policies/harness-hygiene and the
+//	                   ce-xj1b over-fit class (re-embedded three times).
 //
 // Each scan emits a set of stable "finding keys". The baseline file is a
 // JSON snapshot of those keys. On every run the tool diffs current findings
@@ -77,6 +85,7 @@ var scanNames = []string{
 	"zero-test",
 	"doc-path",
 	"goroutine-recover",
+	"raw-mem-gate",
 }
 
 // skipDirs are directory names pruned from filesystem walks. These hold
@@ -193,6 +202,12 @@ func runScans(root string) (map[string][]finding, error) {
 		return nil, fmt.Errorf("goroutine-recover scan: %w", err)
 	}
 	out["goroutine-recover"] = gor
+
+	rawMem, err := scanRawMemGate(root)
+	if err != nil {
+		return nil, fmt.Errorf("raw-mem-gate scan: %w", err)
+	}
+	out["raw-mem-gate"] = rawMem
 
 	for _, fs := range out {
 		sort.Slice(fs, func(i, j int) bool { return fs[i].Key < fs[j].Key })
@@ -484,6 +499,101 @@ func walkGoFiles(root string, fn func(path, rel string) error) error {
 		}
 		return fn(path, filepath.ToSlash(rel))
 	})
+}
+
+// walkShellFiles invokes fn for every non-skipped .sh/.bash file under root,
+// passing both the absolute path and the repo-relative path. Shell is where
+// the raw-mem-gate over-fit lives: the ce-xj1b class was hand-typed back into
+// untracked watchdog scripts, not the (carefully written) Go probes.
+func walkShellFiles(root string, fn func(path, rel string) error) error {
+	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if skipDirs[info.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".sh") && !strings.HasSuffix(path, ".bash") {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		return fn(path, filepath.ToSlash(rel))
+	})
+}
+
+// rawFreeMemoryIdioms are lowercased substrings that indicate a script is
+// reading a raw macOS free-page count. On macOS these numbers are near-zero
+// permanently (reclaimable pages are parked off the free list), so gating or
+// alerting on them deadlocks/false-alarms the very thing they protect — the
+// ce-xj1b over-fit class that has been re-embedded three times. `vm_stat`
+// alone is intentionally NOT listed: plenty of scripts pipe vm_stat for
+// legitimate reporting. We flag only the specific free-page idioms.
+var rawFreeMemoryIdioms = []string{
+	"pages free",      // `vm_stat | grep "Pages free"`
+	"page_free_count", // `sysctl vm.page_free_count`
+	"pages_free",
+}
+
+// memoryPressureEscapeHatch is the correct macOS free-headroom source. A shell
+// script that consults it is doing the right thing, so its presence anywhere
+// in the file suppresses a raw-mem-gate finding. This is the deliberate
+// low-noise seam: the fix for a flagged script is to route the decision
+// through `memory_pressure -Q` (as cmd/vroom-governor and the Go
+// circuitbreaker already do).
+var memoryPressureEscapeHatch = []string{
+	"memory_pressure",
+	"pressure_level",
+}
+
+// scanRawMemGate flags shell scripts that read a raw free-page memory metric
+// without also deferring to memory_pressure. Keys are repo-relative paths so
+// the baseline is location-independent. Detail records the first offending
+// idiom and line so the fix is obvious.
+//
+// This is the deterministic enforcement of the harness-hygiene doctrine's
+// "hard requirements need hard checks": the RAM-gate over-fit is caught at
+// authoring time (a red diff) instead of at 3am as a pipeline stall. It is
+// also the reference lint that ce-2vbg asks to run over the (currently
+// untracked) host watchdogs once they are brought under version control.
+func scanRawMemGate(root string) ([]finding, error) {
+	var out []finding
+	err := walkShellFiles(root, func(path, rel string) error {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		lower := strings.ToLower(string(data))
+		for _, hatch := range memoryPressureEscapeHatch {
+			if strings.Contains(lower, hatch) {
+				return nil // careful script: routes through memory_pressure
+			}
+		}
+		for i, line := range strings.Split(string(data), "\n") {
+			ll := strings.ToLower(line)
+			for _, idiom := range rawFreeMemoryIdioms {
+				if strings.Contains(ll, idiom) {
+					out = append(out, finding{
+						Key: rel,
+						Detail: fmt.Sprintf(
+							"gates on raw free-page memory (%q, line %d) without memory_pressure — macOS reports free≈0 permanently (ce-xj1b)",
+							idiom, i+1),
+					})
+					return nil // one finding per file is enough
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // scanReport holds the per-scan diff between current findings and baseline.
