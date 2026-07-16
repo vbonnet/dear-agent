@@ -66,14 +66,14 @@ func createTmuxSessionAndStartClaude(sessionName string) (retErr error) {
 		return createTmuxSessionAndStartClaude(retry)
 	}
 
-	return startAndFinalizeSession(sessionName, sessionID, workDir, exists, extraAddDirs, trustPreConfigured, sandboxInfo)
+	return startAndFinalizeSession(ctx, sessionName, sessionID, workDir, exists, extraAddDirs, trustPreConfigured, sandboxInfo)
 }
 
 // startAndFinalizeSession runs the harness startup, manifest registration,
 // post-create hooks, and final attach/detach handling for a freshly-prepared
 // tmux session. Split out from createTmuxSessionAndStartClaude purely to keep
 // the orchestrator function simple.
-func startAndFinalizeSession(sessionName, sessionID, workDir string, exists bool, extraAddDirs []string, trustPreConfigured bool, sandboxInfo *manifest.SandboxConfig) (retErr error) {
+func startAndFinalizeSession(ctx context.Context, sessionName, sessionID, workDir string, exists bool, extraAddDirs []string, trustPreConfigured bool, sandboxInfo *manifest.SandboxConfig) (retErr error) {
 	registered := false
 	defer func() {
 		if retErr == nil {
@@ -82,7 +82,7 @@ func startAndFinalizeSession(sessionName, sessionID, workDir string, exists bool
 		rollbackFailedStartup(sessionID, sessionName, registered, !exists)
 	}()
 
-	modeAppliedAtStartup, harnessDone, err := startHarness(sessionName, workDir, exists, extraAddDirs, trustPreConfigured)
+	modeAppliedAtStartup, harnessDone, err := startHarness(ctx, sessionName, workDir, exists, extraAddDirs, trustPreConfigured)
 	if err != nil {
 		return err
 	}
