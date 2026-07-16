@@ -92,7 +92,15 @@ func InitTracer(serviceName string) (shutdown func(context.Context) error) {
 	// Build explicit exporter options from the endpoint so a scheme-less
 	// "localhost:4317" exports correctly instead of silently dropping spans.
 	target, insecure := parseOTLPEndpoint(endpoint)
-	exporterOpts := []otlptracegrpc.Option{otlptracegrpc.WithEndpoint(target)}
+	exporterOpts := []otlptracegrpc.Option{
+		otlptracegrpc.WithEndpoint(target),
+		// A dead/unreachable collector must fail the export attempt
+		// immediately rather than retrying with backoff — otherwise
+		// Shutdown/ForceFlush blocks for the retrier's backoff interval
+		// (~5s) on every process exit, even though telemetryShutdownTimeout
+		// bounds each individual attempt (agm/cmd/agm/main.go).
+		otlptracegrpc.WithRetry(otlptracegrpc.RetryConfig{Enabled: false}),
+	}
 	if insecure {
 		exporterOpts = append(exporterOpts, otlptracegrpc.WithInsecure())
 	}

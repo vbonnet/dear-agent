@@ -85,7 +85,13 @@ func InitMeter(serviceName string, opts ...Option) (shutdown func(context.Contex
 	if i := strings.Index(grpcEndpoint, "://"); i >= 0 {
 		grpcEndpoint = grpcEndpoint[i+3:]
 	}
-	exporter, err := otlpmetricgrpc.New(ctx, otlpmetricgrpc.WithEndpoint(grpcEndpoint))
+	exporter, err := otlpmetricgrpc.New(ctx,
+		otlpmetricgrpc.WithEndpoint(grpcEndpoint),
+		// See pkg/otelsetup.InitTracer for why retry must be disabled: a dead
+		// collector should fail export immediately instead of blocking
+		// Shutdown for the retrier's backoff interval on every process exit.
+		otlpmetricgrpc.WithRetry(otlpmetricgrpc.RetryConfig{Enabled: false}),
+	)
 	if err != nil {
 		// Fall back to no-op rather than crashing the host binary; the
 		// exporter error is deliberately swallowed so a missing collector
