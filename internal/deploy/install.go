@@ -53,7 +53,7 @@ func goBuild(repoRoot, pkg, outPath string) error {
 func goBuildFromCleanClone(repoRoot, pkg, outPath string) error {
 	clean, err := gitWorktreeClean(repoRoot)
 	if err != nil {
-		return err
+		return fmt.Errorf("check worktree cleanliness for fallback build: %w", err)
 	}
 	if !clean {
 		return fmt.Errorf("linked worktree is dirty; refusing clone fallback because it would not preserve the exact build input")
@@ -66,10 +66,10 @@ func goBuildFromCleanClone(repoRoot, pkg, outPath string) error {
 	defer os.RemoveAll(cloneDir)
 
 	if err := runGitClone(repoRoot, cloneDir); err != nil {
-		return err
+		return fmt.Errorf("create standalone clone for fallback build: %w", err)
 	}
 	if err := runGitCheckout(cloneDir); err != nil {
-		return err
+		return fmt.Errorf("checkout standalone clone for fallback build: %w", err)
 	}
 	if err := goBuild(cloneDir, pkg, outPath); err != nil {
 		return fmt.Errorf("build from standalone clone: %w", err)
