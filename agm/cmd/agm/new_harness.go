@@ -19,11 +19,19 @@ import (
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
 
+// codexRemoteBootTimeout is the hard outer deadline for the OPTIONAL Codex
+// remote-control bridge during session boot (ce-fmxv). It bounds the whole
+// StartRemoteControl→StartThread→SetThreadName sequence so a wedged app-server
+// can never hang `agm session new` before the harness launches; on expiry the
+// spawn falls back to the local Codex CLI. Sized above codexcontrol's internal
+// per-call timeout (20s) so the client's own errors surface first.
+const codexRemoteBootTimeout = 45 * time.Second
+
 // startHarness dispatches per-harness initialization (Claude/Gemini/Codex/OpenCode/AGY).
 // Returns (modeAppliedAtStartup, harnessHandledFullLifecycle, err): when
 // harnessHandledFullLifecycle is true the caller should return immediately —
 // the harness (e.g. gemini-cli wrapper) has already managed attach/detach.
-func startHarness(sessionName, workDir string, exists bool, extraAddDirs []string, trustPreConfigured bool) (bool, bool, error) {
+func startHarness(ctx context.Context, sessionName, workDir string, exists bool, extraAddDirs []string, trustPreConfigured bool) (bool, bool, error) {
 	switch harnessName {
 	case "claude-code":
 		return startClaudeHarness(sessionName, workDir, exists, extraAddDirs, trustPreConfigured)
@@ -31,7 +39,7 @@ func startHarness(sessionName, workDir string, exists bool, extraAddDirs []strin
 		done, err := startGeminiHarness(sessionName, exists)
 		return false, done, err
 	case "codex-cli":
-		modeApplied, err := startCodexHarness(sessionName, workDir, exists, extraAddDirs)
+		modeApplied, err := startCodexHarness(ctx, sessionName, workDir, exists, extraAddDirs)
 		return modeApplied, false, err
 	case "opencode-cli":
 		return false, false, startOpenCodeHarness(sessionName, exists)
@@ -455,7 +463,7 @@ func buildCodexCommandForModel(sessionName, workDir, model string, extraAddDirs 
 // tmux pane, and waits for the prompt to appear. It mirrors startClaudeHarness /
 // startGeminiDirect: send the command, sleep briefly, then poll for readiness,
 // tearing the freshly-created session down on failure.
-func startCodexHarness(sessionName, workDir string, exists bool, extraAddDirs []string) (bool, error) {
+func startCodexHarness(ctx context.Context, sessionName, workDir string, exists bool, extraAddDirs []string) (bool, error) {
 	debug.Phase("Start Codex")
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" && !agent.IsCodexOAuthConfigured() {
@@ -480,7 +488,15 @@ func startCodexHarness(sessionName, workDir string, exists bool, extraAddDirs []
 	}
 
 	spawnedCodexMetadata = nil
-	if meta, err := createCodexRemoteThread(context.Background(), sessionName, workDir); err != nil {
+	// ce-fmxv: the optional remote-control bridge must never hang session boot.
+	// Give it a hard outer deadline so that even if the codexcontrol client's own
+	// timeouts are defeated (e.g. a daemon holding an inherited pipe), boot fails
+	// loud/fast and falls back to the local Codex CLI rather than hanging forever
+	// before the harness is ever launched.
+	remoteCtx, cancelRemote := context.WithTimeout(ctx, codexRemoteBootTimeout)
+	meta, err := createCodexRemoteThread(remoteCtx, sessionName, workDir)
+	cancelRemote()
+	if err != nil {
 		if os.Getenv("AGM_CODEX_REQUIRE_REMOTE_CONTROL") == "1" {
 			return false, err
 		}
