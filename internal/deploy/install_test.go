@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -116,6 +117,47 @@ func TestAtomicInstall_FailsLoudOnUnstamped(t *testing.T) {
 	}
 	if _, statErr := os.Stat(target); !os.IsNotExist(statErr) {
 		t.Error("target must not exist for an unstamped build")
+	}
+}
+
+func TestAtomicInstall_LinkedWorktreeRetriesCleanCloneForUnstampedBuild(t *testing.T) {
+	repo, _, headSha := gitRepo(t)
+	linked := filepath.Join(t.TempDir(), "linked")
+	if out, err := exec.Command("git", "-C", repo, "worktree", "add", "--detach", linked, "HEAD").CombinedOutput(); err != nil {
+		t.Fatalf("create linked worktree: %v\n%s", err, out)
+	}
+	t.Cleanup(func() { _ = exec.Command("git", "-C", repo, "worktree", "remove", "--force", linked).Run() })
+
+	origBuild, origFallback, origVersion := buildBinary, buildFromCleanClone, readBinaryVersion
+	buildBinary = func(_, _, outPath string) error { return os.WriteFile(outPath, []byte("unstamped"), 0o644) }
+	usedFallback := false
+	buildFromCleanClone = func(_, _, outPath string) error {
+		usedFallback = true
+		return os.WriteFile(outPath, []byte("stamped"), 0o644)
+	}
+	reads := 0
+	readBinaryVersion = func(string) (string, bool, error) {
+		reads++
+		if reads == 1 {
+			return "", false, nil
+		}
+		return headSha, false, nil
+	}
+	t.Cleanup(func() {
+		buildBinary = origBuild
+		buildFromCleanClone = origFallback
+		readBinaryVersion = origVersion
+	})
+
+	target := filepath.Join(t.TempDir(), "agm")
+	if _, err := AtomicInstall("./cmd/agm", target, headSha, Options{RepoRoot: linked}); err != nil {
+		t.Fatalf("AtomicInstall: %v", err)
+	}
+	if !usedFallback {
+		t.Fatal("expected clean-clone fallback for unstamped linked-worktree build")
+	}
+	if got, err := os.ReadFile(target); err != nil || string(got) != "stamped" {
+		t.Fatalf("installed content = %q, %v; want stamped", got, err)
 	}
 }
 
