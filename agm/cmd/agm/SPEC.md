@@ -825,23 +825,28 @@ TECHNICAL IMPLEMENTATION:
 
 ### Archive Session Flow (agm session archive [session-name])
 
-**Storage Backend**: Dolt database (dual-write mode during migration)
+**Storage Backend**: AGM lifecycle storage (`Dolt` in production; isolated
+SQLite when `AGM_DB_PATH` is set by a named test environment)
 
 ```
 1. Connect to Dolt storage adapter
-2. Resolve session identifier (by ID, tmux name, or manifest name)
-   - Uses adapter.ResolveIdentifier() - excludes archived sessions
+2. Resolve session identifier through the shared ops storage contract
 3. Check if already archived (error if yes)
-4. Check if session is active in tmux
+4. Run shared supervisor, active-pane, completion-verification, and pending-
+   delegation guards
    - Active sessions MUST use --async flag (error if omitted)
    - Stopped sessions do NOT use --async (error if included)
-5. For stopped sessions: archive immediately (no confirmation prompt)
-   For active sessions with --async: spawn background reaper process
-6. Update session lifecycle to "archived" in Dolt
-   - Uses adapter.UpdateSession() - single database write
-7. Also update YAML manifest (backward compatibility during migration)
-   - Dolt is source of truth; YAML failures are warnings only
-8. Print success message with restore instructions
+5. For stopped sessions, call ops.ArchiveSession immediately
+6. For active sessions with --async:
+   - preflight through ops.ArchiveSession without mutating
+   - spawn agm-reaper with force/keep-sandbox/outcome options preserved
+   - mark lifecycle=reaping before stopping the pane
+   - after pane death, call ops.ArchiveSession for the final transition
+7. For --all, select inactive candidates and call ops.ArchiveSession once per
+   candidate; aggregate success/failure counts without direct storage updates
+8. The shared operation stamps the outcome, updates lifecycle storage, reports
+   external provider archive outcomes, and performs cleanup
+9. Print success message with restore instructions
 ```
 
 ### Cross-Harness Association Flow (agm session associate [session-name])
@@ -867,15 +872,9 @@ TECHNICAL IMPLEMENTATION:
 `agm session associate ... --harness auto`; Codex/AGY/Gemini/OpenCode association
 must not fail only because no Claude UUID exists.
 
-**Migration Status** (v1.3 - March 2026):
-- ✅ Phase 1-2 Complete: Dual-write mode (YAML + Dolt)
-- ✅ `agm session new` writes to both YAML and Dolt
-- ✅ `agm session list` reads from Dolt only
-- ✅ `agm session archive` reads/writes Dolt, writes YAML (backward compat)
-- 🚧 Phase 3-6: Command layer migration, YAML removal (in progress)
-
-Historical migration notes are archived in `engram-research`; this spec
-describes the current behavior.
+`agm session archive-ui` is intentionally outside this flow: it reconciles
+Claude desktop/UI records through `ops.ArchiveUISessions` per ADR-026 and never
+mutates AGM session lifecycle storage.
 
 ### Doctor Health Check Flow (agm admin doctor)
 

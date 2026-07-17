@@ -11,9 +11,6 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
-// Phase 6 (2026-03-18): YAML archiving tests removed - archiving now done via Dolt adapter.UpdateSession()
-// Tests for archiveSession() deleted as the function uses obsolete YAML manifest read/write.
-
 // TestArchiveSession_SessionNotFound tests error handling when session doesn't exist
 func TestArchiveSession_SessionNotFound(t *testing.T) {
 	// Create temp sessions directory

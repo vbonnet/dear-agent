@@ -71,6 +71,14 @@ surfaces (CLI, MCP server, Skills plugin). Every surface constructs an
 
 **OPS-52** While `ArchiveSession` is executing with `DryRun = true`, the system shall not invoke an external session archive adapter.
 
+**OPS-53** When immediate, bulk, garbage-collection, or asynchronous-reaper archival reaches the durable archive transition, the system shall execute that transition through `ArchiveSession` rather than mutating lifecycle storage in the caller.
+
+**OPS-54** When a bulk archive processes multiple candidates, the system shall preserve per-session `ArchiveSession` guards, outcome stamping, external archive outcomes, and cleanup results while reporting aggregate success and failure counts.
+
+**OPS-55** When an async reaper validates an active session before stopping its pane, the system shall permit that expected active pane only for preflight while preserving supervisor, completion-verification, and pending-delegation guards; the final archive shall enforce pane death again.
+
+**OPS-56** When `ArchiveSession` uses an isolated SQLite test store, the system shall preserve lifecycle and external-archive behavior without deleting host pending messages, worktrees, branches, temporary files, sandboxes, or host configuration.
+
 ### Garbage Collection
 
 **OPS-21** When `GC` is called, the system shall perform a pre-flight health check by listing all sessions; if storage is unreachable it shall abort with a 503-equivalent error before touching any session.
@@ -151,6 +159,12 @@ surfaces (CLI, MCP server, Skills plugin). Every surface constructs an
 - **State field removed.** The `State` field was removed from `SessionSummary`
   because it produced false positives causing cascading bad decisions. Do not
   re-add it without an ADR.
+- **One archive transition.** `ArchiveSession` is the only implementation that
+  writes `lifecycle=archived`. The reaper's `lifecycle=reaping` tombstone is a
+  distinct crash-recovery transition and must not grow a copied finalizer.
+- **UI archival is a separate namespace.** `ArchiveUISessions` reconciles
+  Claude desktop/UI records and is not part of AGM internal session archival
+  (ADR-026).
 
 ## BDD Traceability
 

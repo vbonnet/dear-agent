@@ -19,6 +19,12 @@ lives and how it works.
 > (`install-reap-schedule`) and worktree sweep (`install-sweep-schedule`).
 > The experimental `--via=web-api` escape hatch (Phase 3, below) remains
 > unbuilt and is not needed: V3 validation showed the local flip propagates.
+>
+> **Namespace boundary reaffirmed (2026-07-17).** Consolidating AGM-internal
+> archival under `ops.ArchiveSession` does not merge this capability into that
+> lifecycle. `ArchiveUISessions` still owns only Claude desktop/UI records;
+> `ArchiveSession` owns AGM manifests, reaper completion, and associated
+> provider-extension outcomes. Neither operation calls the other.
 
 Related: [ADR-016 Shared Ops Layer](ADR-016-shared-ops-layer.md),
 [ADR-001 CLI Command Structure](ADR-001-cli-command-structure.md),

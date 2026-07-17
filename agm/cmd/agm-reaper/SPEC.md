@@ -1,6 +1,6 @@
 # AGM Reaper Command Specification
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-07-17 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -8,10 +8,11 @@
 
 ## Overview
 
-`agm-reaper` is the command-line wrapper around `agm/internal/reaper`. It archives
-a named session using the configured sessions directory and optional log file.
-The command is intentionally small but remains a runtime surface because launchd,
-manual recovery, and cleanup automation depend on its flags and exit behavior.
+`agm-reaper` is the command-line wrapper around `agm/internal/reaper`. It stops a
+named session and then completes archival through the shared AGM archive
+operation. The command is intentionally small but remains a runtime surface
+because detached archival, launchd, manual recovery, and cleanup automation
+depend on its flags and exit behavior.
 
 ## EARS Requirements
 
@@ -26,6 +27,10 @@ manual recovery, and cleanup automation depend on its flags and exit behavior.
 **AGM-REAPER-05** When the reaper implementation completes successfully, the system shall log successful completion.
 
 **AGM-REAPER-06** When the command returns an error from `main`, the system shall write the error to stderr and exit nonzero.
+
+**AGM-REAPER-07** When `--force`, `--keep-sandbox`, or `--outcome` is provided, the system shall pass the selected archive options to the reaper implementation unchanged.
+
+**AGM-REAPER-08** When no `--outcome` is provided, the system shall allow the shared archive operation to derive the session's terminal outcome from its persisted state.
 
 ## BDD Traceability
 
