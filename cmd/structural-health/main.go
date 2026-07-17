@@ -564,29 +564,43 @@ var memoryPressureEscapeHatch = []string{
 func scanRawMemGate(root string) ([]finding, error) {
 	var out []finding
 	err := walkShellFiles(root, func(path, rel string) error {
-		data, err := os.ReadFile(path)
+		f, err := os.Open(path)
 		if err != nil {
 			return err
 		}
-		lower := strings.ToLower(string(data))
-		for _, hatch := range memoryPressureEscapeHatch {
-			if strings.Contains(lower, hatch) {
-				return nil // careful script: routes through memory_pressure
-			}
-		}
-		for i, line := range strings.Split(string(data), "\n") {
-			ll := strings.ToLower(line)
-			for _, idiom := range rawFreeMemoryIdioms {
-				if strings.Contains(ll, idiom) {
-					out = append(out, finding{
-						Key: rel,
-						Detail: fmt.Sprintf(
-							"gates on raw free-page memory (%q, line %d) without memory_pressure — macOS reports free≈0 permanently (ce-xj1b)",
-							idiom, i+1),
-					})
-					return nil // one finding per file is enough
+		defer f.Close()
+
+		var (
+			idiomFound string
+			idiomLine  int
+		)
+		sc := bufio.NewScanner(f)
+		for lineNum := 1; sc.Scan(); lineNum++ {
+			line := strings.ToLower(sc.Text())
+			for _, hatch := range memoryPressureEscapeHatch {
+				if strings.Contains(line, hatch) {
+					return nil // careful script: routes through memory_pressure
 				}
 			}
+			if idiomFound == "" {
+				for _, idiom := range rawFreeMemoryIdioms {
+					if strings.Contains(line, idiom) {
+						idiomFound, idiomLine = idiom, lineNum
+						break
+					}
+				}
+			}
+		}
+		if err := sc.Err(); err != nil {
+			return err
+		}
+		if idiomFound != "" {
+			out = append(out, finding{
+				Key: rel,
+				Detail: fmt.Sprintf(
+					"gates on raw free-page memory (%q, line %d) without memory_pressure — macOS reports free≈0 permanently (ce-xj1b)",
+					idiomFound, idiomLine),
+			})
 		}
 		return nil
 	})
