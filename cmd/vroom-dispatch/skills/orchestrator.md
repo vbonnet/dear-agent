@@ -147,7 +147,6 @@ threshold.
 
 ```bash
 agm supervisor heartbeat --id vroom-orchestrator --primary-for vroom-overseer --tertiary-for vroom-meta-orchestrator
-date -u +%Y-%m-%dT%H:%M:%SZ > ~/.agm/vroom/heartbeat/orch.json
 ```
 
 ### Step 3: Beads are the source of truth (no roadmap/dispatched files)

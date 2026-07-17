@@ -788,6 +788,22 @@ func TestHeartbeatFileName(t *testing.T) {
 	}
 }
 
+func TestSupervisorSkillsUseAGMHeartbeatMirror(t *testing.T) {
+	for _, sup := range supervisors {
+		doc, err := skills.ReadFile("skills/" + sup.SkillFile)
+		if err != nil {
+			t.Fatalf("read %s: %v", sup.SkillFile, err)
+		}
+		text := string(doc)
+		if !strings.Contains(text, "agm supervisor heartbeat --id "+sup.ID) {
+			t.Errorf("%s does not write its authoritative AGM heartbeat", sup.SkillFile)
+		}
+		if strings.Contains(text, "date -u +%Y-%m-%dT%H:%M:%SZ > ~/.agm/vroom/heartbeat/") {
+			t.Errorf("%s still writes the flat heartbeat directly; AGM owns the topology-derived mirror", sup.SkillFile)
+		}
+	}
+}
+
 func TestWriteTrail(t *testing.T) {
 	dir := t.TempDir()
 	trailDir := filepath.Join(dir, ".agm", "vroom")

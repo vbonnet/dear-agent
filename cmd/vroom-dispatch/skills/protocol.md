@@ -163,11 +163,12 @@ Each supervisor writes its heartbeat using the existing AGM command:
 agm supervisor heartbeat --id <supervisor-id> --primary-for <peer> --tertiary-for <peer>
 ```
 
-This writes `~/.agm/supervisors/<id>/heartbeat.json`. Additionally, write a
-simpler file for quick peer checks:
-```bash
-date -u +%Y-%m-%dT%H:%M:%SZ > ~/.agm/vroom/heartbeat/<name>.json
-```
+For the canonical VROOM identities, AGM normalizes IDs, compact aliases, and
+role names through `pkg/vroom/supervisor`. Omitted peer flags are derived from
+the canonical graph; contradictory explicit peers are rejected. AGM writes the
+authoritative `~/.agm/supervisors/<canonical-id>/heartbeat.json` record and
+atomically mirrors it to `~/.agm/vroom/heartbeat/<alias>.json` for quick peer
+checks. Do not write the flat file separately.
 
 ## Peer Liveness Check
 

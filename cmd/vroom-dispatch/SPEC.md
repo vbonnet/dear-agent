@@ -1,6 +1,6 @@
 # vroom-dispatch Specification
 
-<!-- Last audited at: 2026-07-09 -->
+<!-- Last audited at: 2026-07-17 -->
 
 ## Purpose
 
@@ -36,6 +36,10 @@ harness when a supervisor is stale.
 **VD-11** When no ready beads remain or an active worker returns, the system shall reset the flow-liveness timer and duplicate-escalation guard.
 
 **VD-12** When the health monitor queries AGM session health or Beads ready work, the system shall derive a timeout-bounded subprocess context from the monitor context and wrap cancellation, command, and decoding failures.
+
+**VD-13** When `vroom-dispatch` materializes supervisor launch policy, the system shall derive session identity, role, and Primary/Tertiary peers from `pkg/vroom/supervisor` while keeping harness, model, skill, tick interval, and tick prompt policy local to the dispatcher.
+
+**VD-14** When `vroom-dispatch` resolves a supervisor heartbeat filename, the system shall use the compact alias from the canonical supervisor topology.
 
 ## BDD Traceability
 

@@ -77,7 +77,6 @@ threshold.
 
 ```bash
 agm supervisor heartbeat --id vroom-overseer --primary-for vroom-meta-orchestrator --tertiary-for vroom-orchestrator
-date -u +%Y-%m-%dT%H:%M:%SZ > ~/.agm/vroom/heartbeat/overseer.json
 ```
 
 ### Step 3: Check Daemon Health

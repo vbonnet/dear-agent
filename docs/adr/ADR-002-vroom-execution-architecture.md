@@ -1,6 +1,6 @@
 # ADR-002: VROOM Execution Architecture
 
-**Status**: Accepted (2026-05-17)
+**Status**: Accepted (2026-05-17; amended 2026-07-17)
 
 **Supersedes** `agm/docs/adr/ADR-020`…`ADR-025`, which described an
 inaccurate five-role mesh (Verifier/Requester/Orchestrator/Overseer/
@@ -19,6 +19,19 @@ Requester roles; no value function over a five-level order.
 | **Meta-Orchestrator** | CTO | Roadmap, prioritization, tech consistency, anti-duplication | Overseer | Orchestrator |
 | **Orchestrator** | COO | Work enqueue/dequeue, worker monitoring, steady progress | Meta-Orchestrator | Overseer |
 | **Overseer** | CRO | Resource usage, leak detection, session cleanup | Orchestrator | Meta-Orchestrator |
+
+### Canonical topology source
+
+`pkg/vroom/supervisor` is the single code source for the exactly three
+supervisor identities, compact aliases, roles, and Primary/Tertiary peer
+relationships. CLI and runtime surfaces resolve topology through that package;
+they do not maintain parallel identity or peer tables.
+
+The topology is intentionally separate from deployment policy. A launcher such
+as `cmd/vroom-dispatch` still owns harness, model, skill, tick interval, and tick
+prompt selection for each role. AGM owns heartbeat persistence and liveness
+checks. Both consume the canonical member identity and peer graph without
+moving those adapter responsibilities into the topology package.
 
 Two load-bearing invariants:
 
@@ -57,6 +70,10 @@ as a CONTEXT.md collision and a follow-up.
 - **Flat peer mesh.** No single roadmap authority means duplicate work.
 - **One ADR per role.** The decision is the mesh shape; per-role text is
   vocabulary and belongs in CONTEXT.md, not five drifting ADRs.
+- **Keep identity and peer tables in each adapter.** Synchronization tests only
+  detect drift after it is introduced. A pure shared topology lets dispatch,
+  AGM heartbeat parsing, and future surfaces use the same identities and graph
+  while keeping their execution policies independent.
 
 ### Vocabulary lives in [/CONTEXT.md](../../CONTEXT.md), not here
 

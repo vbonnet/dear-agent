@@ -313,9 +313,8 @@ func classifySupervisor(home string, sup supervisor) supervisorHealth {
 	return healthAlive
 }
 
-// heartbeatFileName maps a supervisor name to its heartbeat file basename
-// (without extension). The skill files write to meta-o.json, orch.json,
-// overseer.json.
+// heartbeatFileName maps a supervisor identity to the compact heartbeat file
+// basename that AGM mirrors for the peer-check protocol.
 func heartbeatFileName(name string) string {
 	if member, ok := vroomsupervisor.Lookup(name); ok {
 		return member.Alias
