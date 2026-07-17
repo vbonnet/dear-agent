@@ -261,7 +261,7 @@ func TestRenderPromptEmptyDescription(t *testing.T) {
 }
 
 func TestSessionNewArgs(t *testing.T) {
-	args := sessionNewArgs("worker-ce-test", "opus-200k")
+	args := sessionNewArgs("worker-ce-test", "opus-200k", "/repo")
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
 		"session new worker-ce-test",
@@ -271,11 +271,28 @@ func TestSessionNewArgs(t *testing.T) {
 		"--model=opus-200k",
 		"--mode=auto",
 		"--role worker",
+		"--directory /repo",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("session args missing %q: %v", want, args)
 		}
 	}
+}
+
+// TestSessionNewArgsAlwaysPassesDirectory guards against the launchd
+// spawn-hang (ce-fmxv): --directory must always be set explicitly so
+// `agm session new` never falls back to an inherited (or absent) cwd.
+func TestSessionNewArgsAlwaysPassesDirectory(t *testing.T) {
+	args := sessionNewArgs("worker-ce-test", "opus-200k", "/home/user/src/dear-agent")
+	for i, a := range args {
+		if a == "--directory" {
+			if i+1 >= len(args) || args[i+1] != "/home/user/src/dear-agent" {
+				t.Fatalf("--directory not followed by repoDir: %v", args)
+			}
+			return
+		}
+	}
+	t.Fatalf("--directory flag missing from session args: %v", args)
 }
 
 // TestDispatch verifies the spawn-then-send ordering and that a spawn failure
@@ -286,11 +303,11 @@ func TestDispatch(t *testing.T) {
 	defer func() { spawnSession, sendPrompt = origSpawn, origSend }()
 
 	var spawned, sent string
-	spawnSession = func(ctx context.Context, name, model string) error { spawned = name; return nil }
+	spawnSession = func(ctx context.Context, name, model, repoDir string) error { spawned = name; return nil }
 	sendPrompt = func(ctx context.Context, name, prompt string) error { sent = name; return nil }
 
 	b := bead{ID: "ce-test", Title: "T", Priority: 1}
-	if err := dispatch(context.Background(), b, "opus-200k"); err != nil {
+	if err := dispatch(context.Background(), b, "opus-200k", "/repo"); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	if spawned != "worker-ce-test" {
@@ -305,11 +322,11 @@ func TestDispatchSpawnFailureSkipsSend(t *testing.T) {
 	origSpawn, origSend := spawnSession, sendPrompt
 	defer func() { spawnSession, sendPrompt = origSpawn, origSend }()
 
-	spawnSession = func(ctx context.Context, name, model string) error { return errStub }
+	spawnSession = func(ctx context.Context, name, model, repoDir string) error { return errStub }
 	sendCalled := false
 	sendPrompt = func(ctx context.Context, name, prompt string) error { sendCalled = true; return nil }
 
-	if err := dispatch(context.Background(), bead{ID: "ce-x"}, "opus-200k"); err == nil {
+	if err := dispatch(context.Background(), bead{ID: "ce-x"}, "opus-200k", "/repo"); err == nil {
 		t.Error("expected error when spawn fails")
 	}
 	if sendCalled {
@@ -325,14 +342,14 @@ func TestDispatchDottedBeadSpawnsSanitizedName(t *testing.T) {
 	defer func() { spawnSession, sendPrompt = origSpawn, origSend }()
 
 	var spawned, sent, sentPrompt string
-	spawnSession = func(ctx context.Context, name, model string) error { spawned = name; return nil }
+	spawnSession = func(ctx context.Context, name, model, repoDir string) error { spawned = name; return nil }
 	sendPrompt = func(ctx context.Context, name, prompt string) error {
 		sent, sentPrompt = name, prompt
 		return nil
 	}
 
 	b := bead{ID: "ce-xyz.3", Title: "dotted", Priority: 0}
-	if err := dispatch(context.Background(), b, "opus-200k"); err != nil {
+	if err := dispatch(context.Background(), b, "opus-200k", "/repo"); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	if spawned != "worker-ce-xyz-3" {
@@ -384,7 +401,7 @@ func TestDispatchCandidates_SkipsDeterministicSpawnFailure(t *testing.T) {
 	defer func() { spawnSession, sendPrompt = origSpawn, origSend }()
 
 	var spawnedNames []string
-	spawnSession = func(ctx context.Context, name, model string) error {
+	spawnSession = func(ctx context.Context, name, model, repoDir string) error {
 		spawnedNames = append(spawnedNames, name)
 		if name == "worker-ce-2" {
 			return fmt.Errorf("exit status 1\ncould not open a new TTY")
@@ -399,7 +416,7 @@ func TestDispatchCandidates_SkipsDeterministicSpawnFailure(t *testing.T) {
 		{ID: "ce-3", Title: "three", Priority: 1},
 	}
 	var out, errOut bytes.Buffer
-	got := dispatchCandidates(context.Background(), candidates, "opus-200k", false, &out, &errOut)
+	got := dispatchCandidates(context.Background(), candidates, "opus-200k", "/repo", false, &out, &errOut)
 	if got != 2 {
 		t.Errorf("dispatched = %d, want 2 (skip the poisoned bead, keep going)\nstderr:\n%s", got, errOut.String())
 	}
@@ -418,7 +435,7 @@ func TestDispatchCandidates_StopsOnBackpressure(t *testing.T) {
 	defer func() { spawnSession, sendPrompt = origSpawn, origSend }()
 
 	spawnCalls := 0
-	spawnSession = func(ctx context.Context, name, model string) error {
+	spawnSession = func(ctx context.Context, name, model, repoDir string) error {
 		spawnCalls++
 		return fmt.Errorf("circuit breaker: spawn refused")
 	}
@@ -429,7 +446,7 @@ func TestDispatchCandidates_StopsOnBackpressure(t *testing.T) {
 		{ID: "ce-2", Title: "two", Priority: 1},
 	}
 	var out, errOut bytes.Buffer
-	got := dispatchCandidates(context.Background(), candidates, "opus-200k", false, &out, &errOut)
+	got := dispatchCandidates(context.Background(), candidates, "opus-200k", "/repo", false, &out, &errOut)
 	if got != 0 {
 		t.Errorf("dispatched = %d, want 0 on backpressure", got)
 	}
@@ -445,7 +462,7 @@ func TestDispatchCandidates_StopsOnUnknownError(t *testing.T) {
 	defer func() { spawnSession, sendPrompt = origSpawn, origSend }()
 
 	spawnCalls := 0
-	spawnSession = func(ctx context.Context, name, model string) error {
+	spawnSession = func(ctx context.Context, name, model, repoDir string) error {
 		spawnCalls++
 		return fmt.Errorf("exit status 1\nsomething never seen before")
 	}
@@ -456,7 +473,7 @@ func TestDispatchCandidates_StopsOnUnknownError(t *testing.T) {
 		{ID: "ce-2", Title: "two", Priority: 1},
 	}
 	var out, errOut bytes.Buffer
-	got := dispatchCandidates(context.Background(), candidates, "opus-200k", false, &out, &errOut)
+	got := dispatchCandidates(context.Background(), candidates, "opus-200k", "/repo", false, &out, &errOut)
 	if got != 0 {
 		t.Errorf("dispatched = %d, want 0 on unknown error", got)
 	}
@@ -486,7 +503,7 @@ func TestDispatchCandidates_DryRunHasNoWorkerCap(t *testing.T) {
 		{ID: "ce-4", Title: "four", Priority: 1},
 	}
 	var out, errOut bytes.Buffer
-	got := dispatchCandidates(context.Background(), candidates, "opus-200k", true, &out, &errOut)
+	got := dispatchCandidates(context.Background(), candidates, "opus-200k", "/repo", true, &out, &errOut)
 	if got != len(candidates) {
 		t.Fatalf("dry-run dispatched %d candidates, want all %d; output:\n%s", got, len(candidates), out.String())
 	}
@@ -504,7 +521,7 @@ func TestDispatchCandidates_StopsOnCanceledContext(t *testing.T) {
 		{ID: "ce-2", Title: "two", Priority: 1},
 	}
 	var out, errOut bytes.Buffer
-	got := dispatchCandidates(ctx, candidates, "opus-200k", true, &out, &errOut)
+	got := dispatchCandidates(ctx, candidates, "opus-200k", "/repo", true, &out, &errOut)
 	if got != 0 {
 		t.Fatalf("dispatchCandidates dispatched %d candidates after context cancellation; output:\n%s", got, out.String())
 	}
