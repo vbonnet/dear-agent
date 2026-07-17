@@ -153,7 +153,7 @@ func BenchmarkFallback(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				dstDir := filepath.Join(tmpBase, fmt.Sprintf("copy-%d", i))
 
-				err := provider.copyDirectoryRecursive(srcDir, dstDir)
+				err := provider.copyDirectoryRecursive(context.Background(), srcDir, dstDir)
 				if err != nil {
 					b.Fatalf("copyDirectoryRecursive failed: %v", err)
 				}
