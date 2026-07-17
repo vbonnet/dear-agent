@@ -1,6 +1,6 @@
 # EARS Lint Command Specification
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-07-17 -->
 
 ## Overview
 
@@ -12,7 +12,7 @@ are linked to BDD coverage.
 
 **EARS-LINT-01** When no path arguments are provided, the system shall lint `SPEC.md` in the current directory.
 
-**EARS-LINT-02** When a directory path is provided, the system shall recursively discover `SPEC.md` files while skipping `.git`, `node_modules`, and `.worktrees`.
+**EARS-LINT-02** When a directory path is provided, the system shall discover `SPEC.md` files through the shared repository inventory so Git-ignored, VCS, nested-worktree, dependency, generated-output, and test-fixture paths are excluded consistently.
 
 **EARS-LINT-03** When an EARS config path is provided, the system shall load that config before constructing the linter.
 

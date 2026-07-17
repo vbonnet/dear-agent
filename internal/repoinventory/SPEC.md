@@ -1,6 +1,6 @@
 # Repository Inventory Specification
 
-<!-- Last audited at: NEEDS-AUDIT -->
+<!-- Last audited at: 2026-07-17 -->
 
 ## Overview
 
