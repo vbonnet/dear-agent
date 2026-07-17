@@ -180,10 +180,9 @@ func ArchiveSession(ctx *OpContext, req *ArchiveSessionRequest) (*ArchiveSession
 }
 
 func normalizeArchiveOutcome(outcome manifest.SessionOutcome) (manifest.SessionOutcome, error) {
-	if outcome == manifest.OutcomeUnknown {
-		return manifest.OutcomeCompleted, nil
-	}
 	switch outcome {
+	case manifest.OutcomeUnknown:
+		return manifest.OutcomeCompleted, nil
 	case manifest.OutcomeCompleted, manifest.OutcomeCrashed, manifest.OutcomeKilled, manifest.OutcomeGCStale:
 		return outcome, nil
 	default:
