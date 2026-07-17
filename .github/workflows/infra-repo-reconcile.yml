@@ -117,7 +117,7 @@ jobs:
           fi
 
       - name: Comment on PR
-        if: github.event_name == 'pull_request' && always()
+        if: github.event_name == 'pull_request' && always() && steps.preflight.outputs.skip != 'true'
         uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: infra-reconcile
