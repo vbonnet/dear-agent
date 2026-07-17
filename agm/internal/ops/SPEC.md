@@ -13,7 +13,9 @@
 
 `agm/internal/ops` is the shared implementation layer behind all three AGM API
 surfaces (CLI, MCP server, Skills plugin). Every surface constructs an
-`OpContext` and delegates here; no surface may call storage or tmux directly.
+`OpContext` and delegates business lifecycle ordering here. Surface adapters
+may still construct storage dependencies and implement interactive tmux
+readiness or presentation hooks.
 
 ---
 
@@ -127,6 +129,22 @@ surfaces (CLI, MCP server, Skills plugin). Every surface constructs an
 
 **OPS-48** When `CreateSession` creates a `codex-cli` session, the system shall record the session's working directory as a trusted Codex project in `$CODEX_HOME/config.toml` before creating the Codex thread or sending the launch command, so a fresh non-git sandbox directory cannot block Codex startup on its interactive trust prompt (ce-cmsq); if the pre-trust write fails, the system shall warn and still attempt the launch.
 
+### Shared Session Creation Lifecycle
+
+**OPS-53** When the CLI or MCP surface creates a session, the surface shall delegate tmux creation, optional Codex remote setup, launch-command construction, manifest registration, post-create ordering, and rollback to `CreateSessionWithContext`.
+
+**OPS-54** When `CreateSessionWithContext` advances a new session, the system shall order the durable lifecycle as tmux creation, bounded Codex setup when applicable, harness launch, manifest registration, post-create handling, and finalization.
+
+**OPS-55** When a creation request declares a caller surface, the system shall return that caller as result provenance and persist a matching `source:<caller>` manifest tag.
+
+**OPS-56** If any creation step fails after a new tmux session is created, the system shall remove the newly-created tmux session, delete any completed session registration, and remove only the manifest directory created by that operation.
+
+**OPS-57** If creation reuses an existing tmux session or manifest directory, rollback shall preserve those pre-existing artifacts.
+
+**OPS-58** When optional Codex remote setup is attempted, the system shall apply a finite deadline to the complete remote-control setup sequence and shall honor cancellation from the calling surface.
+
+**OPS-59** When any creation adapter or fresh-session resume fallback builds a harness command, it shall use `BuildHarnessLaunchCommand` rather than assemble a surface-specific command variant.
+
 **OPS-36** While a session's state is OFFLINE, READY, or DONE, the stall detector shall skip error-loop detection for that session.
 
 ### Field Mask Projection
@@ -153,8 +171,12 @@ surfaces (CLI, MCP server, Skills plugin). Every surface constructs an
 
 ## Key Invariants
 
-- **No surface bypasses ops.** CLI, MCP, and Skills all go through `OpContext`
-  functions; direct storage or tmux calls from a surface are a violation.
+- **No surface bypasses ops lifecycle ownership.** CLI, MCP, and Skills all go
+  through `OpContext` functions for shared operations; surface hooks are
+  limited to dependency construction, interactive readiness, and presentation.
+- **Creation has one owner.** Surface hooks may implement interactive readiness,
+  presentation, or storage construction, but may not reorder or duplicate the
+  creation lifecycle.
 - **GC skip priority is deterministic.** The `gcSkipReason` function applies
   checks in a fixed order: already-archived → reaping → protected-role →
   active-tmux → active-state → too-recent. The first matching check wins.
