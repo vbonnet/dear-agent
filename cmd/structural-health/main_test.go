@@ -144,6 +144,56 @@ func work() {}
 	}
 }
 
+func TestScanRawMemGateFlagsRawFreeGate(t *testing.T) {
+	root := t.TempDir()
+	// The ce-xj1b anti-pattern: gate a spawn on raw free pages.
+	bad := "#!/bin/bash\nfree=$(vm_stat | awk '/Pages free/ {print $3}')\nif [ \"$free\" -lt 1000 ]; then echo 'spawn-unsafe'; fi\n"
+	if err := os.WriteFile(filepath.Join(root, "resource-watchdog.sh"), []byte(bad), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := scanRawMemGate(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Key != "resource-watchdog.sh" {
+		t.Fatalf("scanRawMemGate = %+v, want single finding resource-watchdog.sh", got)
+	}
+}
+
+func TestScanRawMemGateEscapeHatchSuppresses(t *testing.T) {
+	root := t.TempDir()
+	// Same raw idiom, but the script routes the decision through
+	// memory_pressure — the correct macOS source — so it must NOT be flagged.
+	ok := "#!/bin/bash\n# vm_stat Pages free is misleading on macOS; use the real source\nfree=$(memory_pressure -Q | awk '/percentage/ {print $5}')\nif [ \"$free\" -lt 10 ]; then echo 'spawn-unsafe'; fi\n"
+	if err := os.WriteFile(filepath.Join(root, "procwatch.sh"), []byte(ok), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := scanRawMemGate(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("scanRawMemGate flagged a memory_pressure-based script: %+v", got)
+	}
+}
+
+func TestScanRawMemGateIgnoresPlainVmStat(t *testing.T) {
+	root := t.TempDir()
+	// vm_stat used for reporting, without a free-page gate, is not the
+	// anti-pattern and must not be flagged.
+	neutral := "#!/bin/bash\nvm_stat\necho 'done'\n"
+	if err := os.WriteFile(filepath.Join(root, "report.sh"), []byte(neutral), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := scanRawMemGate(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("scanRawMemGate flagged plain vm_stat reporting: %+v", got)
+	}
+}
+
 func TestDiffDetectsRegressionAndFixed(t *testing.T) {
 	current := map[string][]finding{
 		"dead-package":      {{Key: "pkg/new"}},
