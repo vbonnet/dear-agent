@@ -454,6 +454,21 @@ func TestCreateSessionInputSchemaDocumentsHarnessParity(t *testing.T) {
 	}
 }
 
+func TestCreateSessionRequestFromMCPDeclaresCaller(t *testing.T) {
+	req := createSessionRequestFromMCP(CreateSessionInput{
+		Cwd: "/tmp/work", Prompt: "hello", Title: "worker", Harness: "codex-cli", Model: "5.5",
+	})
+	if req.Caller.Surface != ops.CreateSurfaceMCP {
+		t.Fatalf("caller surface = %q, want %q", req.Caller.Surface, ops.CreateSurfaceMCP)
+	}
+	if !req.ForwardClaudeOAuth {
+		t.Fatal("MCP create request must preserve Claude OAuth forwarding")
+	}
+	if req.Cwd != "/tmp/work" || req.Prompt != "hello" || req.Title != "worker" || req.Harness != "codex-cli" || req.Model != "5.5" {
+		t.Fatalf("request mapping lost fields: %+v", req)
+	}
+}
+
 func TestForwardToEngramMCP_PropagatesTraceparent(t *testing.T) {
 	// When the caller's ctx carries a span, the outbound JSON-RPC
 	// envelope must include `_meta.traceparent` so Engram can stitch

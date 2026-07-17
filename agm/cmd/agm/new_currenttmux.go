@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,10 +10,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/git"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
+	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 )
@@ -40,123 +43,113 @@ func startClaudeInCurrentTmux(sessionName string) error {
 		return err
 	}
 
-	createCurrentTmuxManifest(sessionName, workDir)
-
-	if err := startCurrentTmuxHarness(sessionName, workDir); err != nil {
+	sessionID := uuid.New().String()
+	manifestDir := filepath.Join(getSessionsDir(), sessionName)
+	hooks := &ops.CreateSessionHooks{
+		OpenStorage: func(context.Context) (dolt.Storage, func(), error) {
+			adapter, err := getStorage()
+			if err != nil {
+				ui.PrintWarning(fmt.Sprintf("Failed to connect to session storage: %v", err))
+				return nil, nil, nil
+			}
+			return adapter, func() { _ = adapter.Close() }, nil
+		},
+		Launch: func(_ context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
+			if pwd := os.Getenv("PWD"); pwd != "" {
+				spec.WorkDir = pwd
+			}
+			return ops.CreateSessionLaunchResult{}, startCurrentTmuxHarness(spec)
+		},
+		AfterRegister: func(_ context.Context, _ *manifest.Manifest, manifestPath string) error {
+			if manifestPath != "" {
+				_ = git.CommitManifest(manifestPath, "create", sessionName)
+			}
+			ui.PrintSuccess("Session metadata finalized")
+			return nil
+		},
+		Finalize: func(context.Context, *manifest.Manifest) error {
+			updateVSCodeTabTitle(sessionName)
+			return nil
+		},
+	}
+	_, err = ops.CreateSessionWithContext(context.Background(), &ops.OpContext{Tmux: session.NewRealTmux()}, &ops.CreateSessionRequest{
+		Cwd:                    workDir,
+		Title:                  sessionName,
+		Model:                  modelName,
+		Harness:                harnessName,
+		SessionID:              sessionID,
+		Caller:                 ops.CreateSessionCaller{Surface: ops.CreateSurfaceCLI},
+		PermissionMode:         modeFlagValue,
+		DisableAutoMode:        noAutoMode,
+		MaxBudgetUSD:           maxBudgetUsd,
+		ForwardTelemetry:       true,
+		ForwardClaudeOAuth:     true,
+		AllowEmptyPrompt:       true,
+		AllowUnsafeTitle:       true,
+		ReuseExistingTmux:      true,
+		RegistrationOptional:   true,
+		ManifestDir:            manifestDir,
+		ManifestDirOptional:    true,
+		SkipCodexRemoteControl: true,
+		Hooks:                  hooks,
+		Metadata: ops.CreateSessionMetadata{
+			Workspace:        cfg.Workspace,
+			ModelTier:        modelTierFlag,
+			Tags:             buildSessionTags(roleName, sessionTags),
+			PermissionPolicy: resolvedSessionPermissionPolicy,
+			IsTest:           testMode,
+			PermissionMode:   modeFlagValue,
+			OpenCodeServer:   os.Getenv("OPENCODE_SERVER_URL"),
+		},
+	})
+	if err != nil {
 		return err
 	}
 
 	ui.PrintSuccess(fmt.Sprintf("%s session started in current tmux!", harnessName))
-	updateVSCodeTabTitle(sessionName)
 	return nil
-}
-
-// createCurrentTmuxManifest writes the manifest dir and registers a v2 session
-// in Dolt for the in-place tmux pane Claude case. Failures are non-fatal —
-// they only emit warnings, since the user already has a usable tmux pane.
-func createCurrentTmuxManifest(sessionName, workDir string) {
-	sessionsDir := getSessionsDir()
-	manifestDir := filepath.Join(sessionsDir, sessionName)
-	manifestPath := filepath.Join(manifestDir, "manifest.yaml")
-
-	if err := os.MkdirAll(manifestDir, 0700); err != nil {
-		ui.PrintWarning(fmt.Sprintf("Failed to create manifest directory: %v", err))
-		return
-	}
-	generatedUUID := uuid.New().String()
-	spawnSessionID = generatedUUID // Expose to otelEnvArgs() for OTel injection
-	debug.Log("Generated SessionID: %s", generatedUUID)
-	m := &manifest.Manifest{
-		SchemaVersion: manifest.SchemaVersion,
-		SessionID:     generatedUUID,
-		Name:          sessionName,
-		CreatedAt:     time.Now(),
-		UpdatedAt:     time.Now(),
-		Lifecycle:     "",
-		Workspace:     cfg.Workspace,
-		Context:       manifest.Context{Project: workDir},
-		Tmux:          manifest.Tmux{SessionName: sessionName},
-		Harness:       harnessName,
-		Model:         modelName,
-	}
-	if testMode {
-		m.IsTest = true
-		debug.Log("Marking session as test (is_test=true)")
-	}
-	adapter, err := getStorage()
-	if err != nil {
-		ui.PrintWarning(fmt.Sprintf("Failed to connect to Dolt: %v", err))
-		return
-	}
-	defer func() { _ = adapter.Close() }()
-	if err := adapter.CreateSession(m); err != nil {
-		ui.PrintWarning(fmt.Sprintf("Failed to create session in Dolt: %v", err))
-		return
-	}
-	if testMode {
-		ui.PrintSuccess(fmt.Sprintf("Test session registered in database: %s (hidden from default list)", m.SessionID))
-	} else {
-		ui.PrintSuccess(fmt.Sprintf("Session registered in database: %s", m.SessionID))
-	}
-	_ = git.CommitManifest(manifestPath, "create", sessionName)
 }
 
 // startCurrentTmuxHarness dispatches the per-harness startup flow for the
 // in-place (current tmux pane) Claude/Gemini/OpenCode/AGY cases.
-func startCurrentTmuxHarness(sessionName, workDir string) error {
-	switch harnessName {
+func startCurrentTmuxHarness(spec ops.HarnessLaunchSpec) error {
+	switch spec.Harness {
 	case "claude-code":
-		return startCurrentTmuxClaude(sessionName, workDir)
+		return startCurrentTmuxClaude(spec)
 	case "opencode-cli":
-		return startCurrentTmuxOpenCode(sessionName)
+		return startCurrentTmuxOpenCode(spec)
 	case "gemini-cli":
-		return startCurrentTmuxGemini(sessionName)
+		return startCurrentTmuxGemini(spec)
 	case "agy":
-		return startCurrentTmuxAgy(sessionName, workDir)
+		return startCurrentTmuxAgy(spec)
 	default:
-		debug.Log("Skipping CLI startup for harness: %s (no CLI configured)", harnessName)
-		ui.PrintSuccess(fmt.Sprintf("Session created for %s harness", harnessName))
+		debug.Log("Skipping CLI startup for harness: %s (no CLI configured)", spec.Harness)
+		ui.PrintSuccess(fmt.Sprintf("Session created for %s harness", spec.Harness))
 		return nil
 	}
 }
 
 // startCurrentTmuxClaude runs Claude in the current tmux pane, waits for
 // readiness, and runs the rename/agm-assoc init sequence.
-func startCurrentTmuxClaude(sessionName, workDir string) error {
-	claudeReady := tmux.NewClaudeReadyFile(sessionName)
+func startCurrentTmuxClaude(spec ops.HarnessLaunchSpec) error {
+	claudeReady := tmux.NewClaudeReadyFile(spec.SessionName)
 	if err := claudeReady.Cleanup(); err != nil {
 		debug.Log("Warning: failed to cleanup ready-files: %v", err)
 	}
 	fmt.Println("Starting Claude CLI...")
-	workDirForClaude := os.Getenv("PWD")
-	if workDirForClaude == "" {
-		workDirForClaude = workDir
-	}
-	resolvedModel := agent.ResolveModelFullName("claude-code", modelName)
-	autoModeFlag := " --enable-auto-mode"
-	if noAutoMode {
-		autoModeFlag = ""
-		debug.Log("Auto mode disabled by flag/env var")
-	}
-	claudeCmd := fmt.Sprintf("AGM_SESSION_NAME=%s%s%s claude --model %s --add-dir %s%s && exit", shellQuote(sessionName), otelEnvArgs(), oauthEnvArg(), shellQuote(resolvedModel), shellQuote(workDirForClaude), autoModeFlag)
-	if modeFlagValue == "auto" || modeFlagValue == "plan" || modeFlagValue == "default" {
-		claudeCmd = strings.Replace(claudeCmd, " && exit", fmt.Sprintf(" --permission-mode %s && exit", modeFlagValue), 1)
-	}
-	if maxBudgetUsd > 0 {
-		claudeCmd = strings.Replace(claudeCmd, " && exit", fmt.Sprintf(" --max-budget-usd %.2f && exit", maxBudgetUsd), 1)
-	}
-	if err := tmux.SendCommand(sessionName, claudeCmd); err != nil {
+	claudeCmd := ops.BuildHarnessLaunchCommand(spec).Command
+	if err := tmux.SendCommand(spec.SessionName, claudeCmd); err != nil {
 		ui.PrintError(err,
 			"Failed to start Claude in current tmux pane",
 			"  • Verify Claude is installed: which claude\n"+
 				"  • Test Claude manually: claude --version\n"+
 				"  • Check you're in tmux: echo $TMUX\n"+
-				"  • Exit tmux and try: agmnew "+sessionName)
+				"  • Exit tmux and try: agmnew "+spec.SessionName)
 		return err
 	}
 	time.Sleep(500 * time.Millisecond)
 	fmt.Println("Waiting for Claude to initialize...")
-	if err := tmux.WaitForClaudePrompt(sessionName, 30*time.Second); err != nil {
+	if err := tmux.WaitForClaudePrompt(spec.SessionName, 30*time.Second); err != nil {
 		ui.PrintWarning("Claude ready signal not detected")
 		fmt.Printf("💡 Session may still work, but initialization timing is uncertain.\n")
 	} else {
@@ -173,27 +166,27 @@ func startCurrentTmuxClaude(sessionName, workDir string) error {
 	}
 	// Associate and signal readiness deterministically from Go — no dependency
 	// on the /agm:agm-assoc plugin slash command loading in the pane (ce-o1sg).
-	associateSpawnedClaudeSession(sessionName)
+	associateSpawnedClaudeSession(spec.SessionName)
 	ui.PrintSuccess("Claude is ready and session associated!")
 	return nil
 }
 
 // startCurrentTmuxOpenCode starts OpenCode in the current tmux pane and waits
 // for prompt readiness.
-func startCurrentTmuxOpenCode(sessionName string) error {
+func startCurrentTmuxOpenCode(spec ops.HarnessLaunchSpec) error {
 	fmt.Println("Starting OpenCode...")
-	opencodeCmd := "opencode attach && exit"
-	if err := tmux.SendCommand(sessionName, opencodeCmd); err != nil {
+	opencodeCmd := ops.BuildHarnessLaunchCommand(spec).Command
+	if err := tmux.SendCommand(spec.SessionName, opencodeCmd); err != nil {
 		ui.PrintError(err,
 			"Failed to start OpenCode in current tmux pane",
 			"  • Verify OpenCode server is running: curl http://localhost:4096/health\n"+
 				"  • Start server if needed: opencode serve --port 4096\n"+
 				"  • Check you're in tmux: echo $TMUX\n"+
-				"  • Exit tmux and try: agm new "+sessionName+" --harness opencode-cli")
+				"  • Exit tmux and try: agm new "+spec.SessionName+" --harness opencode-cli")
 		return err
 	}
 	fmt.Println("Waiting for OpenCode to initialize...")
-	if err := tmux.WaitForPromptSimple(sessionName, 30*time.Second); err != nil {
+	if err := tmux.WaitForPromptSimple(spec.SessionName, 30*time.Second); err != nil {
 		ui.PrintWarning("OpenCode ready signal not detected")
 		fmt.Printf("Session may still work, but initialization timing is uncertain.\n")
 	} else {
@@ -204,12 +197,11 @@ func startCurrentTmuxOpenCode(sessionName string) error {
 
 // startCurrentTmuxGemini starts Gemini in the current tmux pane and handles
 // the optional first-run trust prompt.
-func startCurrentTmuxGemini(sessionName string) error {
+func startCurrentTmuxGemini(spec ops.HarnessLaunchSpec) error {
 	fmt.Println("Starting Gemini CLI...")
-	resolvedModel := agent.ResolveModelFullName("gemini-cli", modelName)
-	geminiCmd := fmt.Sprintf("gemini -m %s && exit", shellQuote(resolvedModel))
+	geminiCmd := ops.BuildHarnessLaunchCommand(spec).Command
 	debug.Log("Sending command: %s", geminiCmd)
-	if err := tmux.SendCommand(sessionName, geminiCmd); err != nil {
+	if err := tmux.SendCommand(spec.SessionName, geminiCmd); err != nil {
 		ui.PrintError(err,
 			"Failed to start Gemini in current tmux pane",
 			"  • Verify Gemini is installed: which gemini\n"+
@@ -217,9 +209,9 @@ func startCurrentTmuxGemini(sessionName string) error {
 				"  • Check you're in tmux: echo $TMUX")
 		return err
 	}
-	autoAcceptGeminiTrustPrompt(sessionName)
+	autoAcceptGeminiTrustPrompt(spec.SessionName)
 	fmt.Println("Waiting for Gemini to initialize...")
-	if err := tmux.WaitForPromptSimple(sessionName, 30*time.Second); err != nil {
+	if err := tmux.WaitForPromptSimple(spec.SessionName, 30*time.Second); err != nil {
 		ui.PrintWarning("Gemini ready signal not detected")
 		fmt.Printf("Session may still work, but initialization timing is uncertain.\n")
 	} else {
@@ -228,10 +220,10 @@ func startCurrentTmuxGemini(sessionName string) error {
 	return nil
 }
 
-func startCurrentTmuxAgy(sessionName, workDir string) error {
+func startCurrentTmuxAgy(spec ops.HarnessLaunchSpec) error {
 	fmt.Println("Starting AGY...")
-	agyCmd := buildAgyCommand(workDir, nil, modeFlagValue)
-	if err := tmux.SendCommand(sessionName, agyCmd); err != nil {
+	agyCmd := ops.BuildHarnessLaunchCommand(spec).Command
+	if err := tmux.SendCommand(spec.SessionName, agyCmd); err != nil {
 		ui.PrintError(err,
 			"Failed to start AGY in current tmux pane",
 			"  • Verify AGY is installed: which agy\n"+
@@ -240,13 +232,13 @@ func startCurrentTmuxAgy(sessionName, workDir string) error {
 		return err
 	}
 	fmt.Println("Waiting for AGY to initialize...")
-	if err := tmux.WaitForAgyPrompt(sessionName, 30*time.Second); err != nil {
+	if err := tmux.WaitForAgyPrompt(spec.SessionName, 30*time.Second); err != nil {
 		ui.PrintWarning("AGY ready signal not detected")
 		fmt.Printf("Session may still work, but initialization timing is uncertain.\n")
 	} else {
 		ui.PrintSuccess("AGY is ready!")
 	}
-	associateSpawnedAgySession(sessionName)
+	associateSpawnedAgySession(spec.SessionName)
 	return nil
 }
 

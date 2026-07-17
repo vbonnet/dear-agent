@@ -12,14 +12,20 @@ import (
 	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/cli"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
+	"github.com/vbonnet/dear-agent/agm/internal/git"
 	"github.com/vbonnet/dear-agent/agm/internal/interrupt"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/modelrouter"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/permissionparity"
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
+	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/testcontext"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
+	"github.com/vbonnet/dear-agent/internal/telemetry"
 )
 
 var resolvedSessionPermissionPolicy *manifest.PermissionPolicy
@@ -40,7 +46,6 @@ func createTmuxSessionAndStartClaude(sessionName string) (retErr error) {
 
 	ctx := context.Background()
 	sessionID := uuid.New().String() // Generate session ID early for sandbox
-	spawnSessionID = sessionID       // Expose to otelEnvArgs() for OTel injection
 	var sandboxInfo *manifest.SandboxConfig
 	defer func() {
 		if retErr != nil && sandboxInfo != nil {
@@ -58,7 +63,7 @@ func createTmuxSessionAndStartClaude(sessionName string) (retErr error) {
 		return err
 	}
 
-	exists, retry, err := ensureTmuxSession(sessionName, workDir)
+	exists, retry, err := resolveTmuxSession(sessionName)
 	if err != nil {
 		return err
 	}
@@ -66,65 +71,109 @@ func createTmuxSessionAndStartClaude(sessionName string) (retErr error) {
 		return createTmuxSessionAndStartClaude(retry)
 	}
 
-	return startAndFinalizeSession(ctx, sessionName, sessionID, workDir, exists, extraAddDirs, trustPreConfigured, sandboxInfo)
+	return runCreateSessionLifecycle(ctx, sessionName, sessionID, workDir, exists, extraAddDirs, trustPreConfigured, sandboxInfo)
 }
 
-// startAndFinalizeSession runs the harness startup, manifest registration,
-// post-create hooks, and final attach/detach handling for a freshly-prepared
-// tmux session. Split out from createTmuxSessionAndStartClaude purely to keep
-// the orchestrator function simple.
-func startAndFinalizeSession(ctx context.Context, sessionName, sessionID, workDir string, exists bool, extraAddDirs []string, trustPreConfigured bool, sandboxInfo *manifest.SandboxConfig) (retErr error) {
-	registered := false
-	defer func() {
-		if retErr == nil {
-			return
-		}
-		rollbackFailedStartup(sessionID, sessionName, registered, !exists)
-	}()
-
-	modeAppliedAtStartup, harnessDone, err := startHarness(ctx, sessionName, workDir, exists, extraAddDirs, trustPreConfigured)
-	if err != nil {
-		return err
-	}
-	if harnessDone {
-		return nil
-	}
-	if err := createAndRegisterManifest(sessionID, sessionName, workDir, sandboxInfo); err != nil {
-		return err
-	}
-	registered = true
-	if err := runHarnessPostCreate(sessionName, modeAppliedAtStartup); err != nil {
-		return err
-	}
-	if modeFlagValue != "" && !modeAppliedAtStartup && (harnessName != "claude-code" || os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "") {
-		applyCreationModeSwitch(sessionName, harnessName, modeFlagValue)
-	}
-	if os.Getenv("AGM_TEST_RUN_ID") == "" && os.Getenv("AGM_TEST_ENV") == "" {
-		verdict, livenessErr := tmux.CheckPaneLiveness(sessionName, tmux.GetSocketPath())
-		if err := launchparity.ValidateFinalLiveness(verdict, livenessErr); err != nil {
+// runCreateSessionLifecycle adapts CLI presentation and readiness behavior to
+// the shared ops lifecycle. Business ordering and rollback stay in ops.
+func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, workDir string, exists bool, extraAddDirs []string, trustPreConfigured bool, sandboxInfo *manifest.SandboxConfig) error {
+	if harnessName == "codex-cli" {
+		if err := validateCodexCredentials(); err != nil {
 			return err
 		}
 	}
-	updateVSCodeTabTitle(sessionName)
-	attachOrShowDetached(sessionName)
-	return nil
-}
-
-func rollbackFailedStartup(sessionID, sessionName string, registered, removeRuntime bool) {
-	if registered {
-		if adapter, err := getStorage(); err == nil {
-			if deleteErr := adapter.DeleteSession(sessionID); deleteErr != nil {
-				debug.Log("Failed startup rollback could not delete Dolt session %s: %v", sessionID, deleteErr)
+	manifestDir := filepath.Join(getSessionsDir(), sessionName)
+	hooks := &ops.CreateSessionHooks{
+		OpenStorage: func(context.Context) (dolt.Storage, func(), error) {
+			adapter, err := getStorage()
+			if err != nil {
+				return nil, nil, err
 			}
-			_ = adapter.Close()
-		}
+			return adapter, func() { _ = adapter.Close() }, nil
+		},
+		AfterTmuxReady: func(_ context.Context, name string, existed bool) error {
+			if !existed {
+				ui.PrintSuccess(fmt.Sprintf("Created tmux session: %s", name))
+			}
+			if err := interrupt.Clear(interrupt.DefaultDir(), name); err != nil {
+				debug.Log("Warning: failed to clear stale interrupt flag: %v", err)
+			}
+			return nil
+		},
+		Launch: func(callCtx context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
+			modeApplied, handled, err := startHarness(callCtx, spec, exists, trustPreConfigured)
+			return ops.CreateSessionLaunchResult{ModeAppliedAtStartup: modeApplied, HandledLifecycle: handled}, err
+		},
+		AfterRegister: func(callCtx context.Context, m *manifest.Manifest, manifestPath string) error {
+			if manifestPath != "" {
+				if err := git.CommitManifest(manifestPath, "create", sessionName); err != nil {
+					debug.Log("manifest commit skipped: %v", err)
+				}
+			}
+			if m.ModelTier != "" {
+				d := &modelrouter.Decision{Tier: modelrouter.Tier(m.ModelTier), Model: m.Model, Reason: "recorded at manifest creation", ExplicitTier: modelTierFlag != ""}
+				modelrouter.RecordRoutingDecision(callCtx, m.Harness, d)
+			}
+			telemetry.SessionStarted(callCtx, m.SessionID, m.Model, m.Harness, m.State, roleName)
+			return nil
+		},
+		PostCreate: func(_ context.Context, _ *manifest.Manifest, launch ops.CreateSessionLaunchResult) error {
+			if err := runHarnessPostCreate(sessionName, launch.ModeAppliedAtStartup); err != nil {
+				return err
+			}
+			if modeFlagValue != "" && !launch.ModeAppliedAtStartup && (harnessName != "claude-code" || os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "") {
+				applyCreationModeSwitch(sessionName, harnessName, modeFlagValue)
+			}
+			return nil
+		},
+		Finalize: func(_ context.Context, _ *manifest.Manifest) error {
+			if os.Getenv("AGM_TEST_RUN_ID") == "" && os.Getenv("AGM_TEST_ENV") == "" {
+				verdict, livenessErr := tmux.CheckPaneLiveness(sessionName, tmux.GetSocketPath())
+				if err := launchparity.ValidateFinalLiveness(verdict, livenessErr); err != nil {
+					return err
+				}
+			}
+			updateVSCodeTabTitle(sessionName)
+			attachOrShowDetached(sessionName)
+			return nil
+		},
 	}
-	if removeRuntime {
-		tmux.KillSession(sessionName)
-		if err := os.RemoveAll(filepath.Join(getSessionsDir(), sessionName)); err != nil {
-			debug.Log("Failed startup rollback could not remove manifest directory: %v", err)
-		}
-	}
+	_, err := ops.CreateSessionWithContext(ctx, &ops.OpContext{Tmux: session.NewRealTmux()}, &ops.CreateSessionRequest{
+		Cwd:                 workDir,
+		Prompt:              prompt,
+		Title:               sessionName,
+		Model:               modelName,
+		Harness:             harnessName,
+		Persistent:          persistent,
+		SessionID:           sessionID,
+		Caller:              ops.CreateSessionCaller{Surface: ops.CreateSurfaceCLI},
+		PermissionMode:      modeFlagValue,
+		DisableAutoMode:     noAutoMode,
+		MaxBudgetUSD:        maxBudgetUsd,
+		ExtraAddDirs:        extraAddDirs,
+		ForwardTelemetry:    true,
+		ForwardClaudeOAuth:  true,
+		AllowEmptyPrompt:    true,
+		AllowUnsafeTitle:    true,
+		ReuseExistingTmux:   exists,
+		RequireStorage:      true,
+		ManifestDir:         manifestDir,
+		ManifestDirOptional: true,
+		Hooks:               hooks,
+		Metadata: ops.CreateSessionMetadata{
+			Workspace:        cfg.Workspace,
+			ModelTier:        modelTierFlag,
+			Tags:             buildSessionTags(roleName, sessionTags),
+			PermissionPolicy: resolvedSessionPermissionPolicy,
+			Sandbox:          sandboxInfo,
+			IsTest:           testMode,
+			Disposable:       disposable,
+			DisposableTTL:    disposableTTL,
+			PermissionMode:   modeFlagValue,
+			OpenCodeServer:   os.Getenv("OPENCODE_SERVER_URL"),
+		},
+	})
+	return err
 }
 
 // preflight runs the per-session checks that must succeed before we start
@@ -143,12 +192,12 @@ func preflight(sessionName string) error {
 	return enforceCircuitBreakers()
 }
 
-// ensureTmuxSession checks for an existing tmux session and either creates a
-// new one, prompts to reuse, or signals a retry with a new name. Also clears
-// stale interrupt flags. Returns (existedAlready, retryName, err): when
+// resolveTmuxSession checks for an existing tmux session and either prompts to
+// reuse it or signals a retry with a new name. The shared ops lifecycle owns
+// creation. Returns (existedAlready, retryName, err): when
 // retryName is non-empty the caller should restart with that name; when err
 // is non-nil the operation should be aborted.
-func ensureTmuxSession(sessionName, workDir string) (bool, string, error) {
+func resolveTmuxSession(sessionName string) (bool, string, error) {
 	exists, err := tmux.HasSession(sessionName)
 	if err != nil {
 		ui.PrintError(err,
@@ -168,11 +217,6 @@ func ensureTmuxSession(sessionName, workDir string) (bool, string, error) {
 		case existingActionReuse:
 			// Fall through to clear stale interrupt and proceed with existing session.
 		}
-	} else if err := createNewTmuxSession(sessionName, workDir); err != nil {
-		return exists, "", err
-	}
-	if err := interrupt.Clear(interrupt.DefaultDir(), sessionName); err != nil {
-		debug.Log("Warning: failed to clear stale interrupt flag: %v", err)
 	}
 	return exists, "", nil
 }
@@ -467,26 +511,6 @@ func handleExistingTmuxSession(sessionName string) (string, existingTmuxAction, 
 		fmt.Println("Cancelled.")
 		return sessionName, existingActionCancel, nil
 	}
-}
-
-// createNewTmuxSession creates a fresh tmux session named sessionName rooted at
-// workDir.
-func createNewTmuxSession(sessionName, workDir string) error {
-	debug.Phase("Create Tmux Session")
-	socketPath := tmux.GetSocketPath()
-	debug.Log("Creating tmux session: %s in %s (socket: %s)", sessionName, workDir, socketPath)
-	if err := tmux.NewSession(sessionName, workDir); err != nil {
-		ui.PrintError(err,
-			"Failed to create tmux session",
-			"  • Verify tmux is installed: tmux -V\n"+
-				"  • Check tmux server is running: tmux list-sessions\n"+
-				"  • Verify directory exists: ls -ld "+workDir+"\n"+
-				"  • Try starting tmux server: tmux start-server")
-		return err
-	}
-	debug.Log("Tmux session created successfully")
-	ui.PrintSuccess(fmt.Sprintf("Created tmux session: %s", sessionName))
-	return nil
 }
 
 // checkDuplicateSessionName checks if a non-archived session with the given name already exists in Dolt

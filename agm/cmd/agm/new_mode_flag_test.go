@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 )
 
 func TestModeFlagValidation_ValidModes(t *testing.T) {
@@ -415,7 +417,7 @@ func TestModeAppliedAtStartup(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Reproduce the modeAppliedAtStartup logic:
 			modeAppliedAtStartup := (tt.harness == "claude-code" && tt.modeFlagValue == "auto") ||
-				(tt.harness == "agy" && agyPermissionFlag(tt.modeFlagValue) != "")
+				(tt.harness == "agy" && launchparity.AgyPermissionModeFlag(tt.modeFlagValue) != "")
 
 			if modeAppliedAtStartup != tt.modeAppliedAtStartup {
 				t.Errorf("modeAppliedAtStartup: got %v, want %v",
