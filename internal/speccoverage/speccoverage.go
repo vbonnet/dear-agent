@@ -30,6 +30,7 @@ type Surface struct {
 // paths or messages.
 type FindingKind string
 
+// Finding kinds are stable policy categories consumed by BDD enforcement.
 const (
 	FindingKindUnregisteredParityFeature FindingKind = "unregistered-parity-feature"
 	FindingKindCatalogRead               FindingKind = "catalog-read"
