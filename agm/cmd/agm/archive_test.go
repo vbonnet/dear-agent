@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +16,68 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/testutil"
 )
+
+type recordingExternalArchiver struct {
+	calls []string
+}
+
+func (r *recordingExternalArchiver) ArchiveExternalSession(_ context.Context, m *manifest.Manifest) []ops.ExternalArchiveOutcome {
+	r.calls = append(r.calls, m.SessionID)
+	return []ops.ExternalArchiveOutcome{{
+		Provider: "test",
+		Status:   ops.ExternalArchiveArchived,
+		Target:   m.SessionID,
+	}}
+}
+
+func TestBulkArchiveCandidates_UsesSharedArchiveOperation(t *testing.T) {
+	adapter, err := dolt.NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "bulk-shared-op",
+		Name:          "bulk-shared-op",
+		Harness:       "agy",
+		CreatedAt:     time.Now().Add(-time.Hour),
+		UpdatedAt:     time.Now().Add(-time.Hour),
+		Context:       manifest.Context{Project: t.TempDir()},
+		Tmux:          manifest.Tmux{SessionName: "bulk-shared-op"},
+	}
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+
+	recorder := &recordingExternalArchiver{}
+	opCtx := &ops.OpContext{
+		Storage:                 adapter,
+		ExternalSessionArchiver: recorder,
+	}
+	successCount, failCount := bulkArchiveCandidates([]*manifest.Manifest{m}, opCtx, ops.ArchiveSessionRequest{
+		Force:   true,
+		Outcome: manifest.OutcomeCrashed,
+	})
+	if successCount != 1 || failCount != 0 {
+		t.Fatalf("bulk counts = (%d, %d), want (1, 0)", successCount, failCount)
+	}
+	if len(recorder.calls) != 1 || recorder.calls[0] != m.SessionID {
+		t.Fatalf("shared external archiver calls = %v, want [%s]", recorder.calls, m.SessionID)
+	}
+
+	stored, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() error: %v", err)
+	}
+	if stored.Lifecycle != manifest.LifecycleArchived {
+		t.Fatalf("Lifecycle = %q, want %q", stored.Lifecycle, manifest.LifecycleArchived)
+	}
+	if stored.Outcome != manifest.OutcomeCrashed {
+		t.Fatalf("Outcome = %q, want %q", stored.Outcome, manifest.OutcomeCrashed)
+	}
+}
 
 func TestRunSessionCleanup_TypedNilAdapter(t *testing.T) {
 	var adapter *dolt.Adapter
