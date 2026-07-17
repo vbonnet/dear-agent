@@ -84,3 +84,10 @@ tests/test_helper/
 **/.wayfinder/
 WAYFINDER-STATUS.md
 WAYFINDER-HISTORY.md
+
+# Private infra inventory (repo names + per-repo security posture).
+# The real file must NEVER be committed to this PUBLIC repo; the .example
+# documents the schema. See infra/variables.tf active_repos/archived_repos.
+infra/*.tfvars
+!infra/*.tfvars.example
+!infra/*.auto.tfvars.example
