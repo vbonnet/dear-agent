@@ -33,3 +33,7 @@ can never brick a dispatch run (ce-b1zw).
 **VDD-08** While an `agm session new` spawn is in flight, the system shall bound it with a spawn-specific 180-second timeout, keeping the tighter 60-second bound for bd, gh, and agm-list subprocess calls.
 
 **VDD-09** When a run dispatches zero beads, the system shall exit with status 0, treating a drained or fully in-flight backlog as a normal steady state.
+
+**VDD-10** When `-max-dispatch` is set to a positive N, the system shall dispatch at most N candidates in that run, keeping the highest-priority-ordered candidates and leaving the remainder for a later run.
+
+**VDD-11** When `-max-dispatch` is 0 or unset, the system shall preserve unlimited dispatch (dispatch every eligible candidate, bounded only by spawn backpressure).

@@ -181,6 +181,48 @@ func TestHumanGatedSkipsGmailOAuthBead(t *testing.T) {
 	}
 }
 
+// TestHumanGatedSkipsOvernightSecurityAndCoreInfraBeads verifies the batch of
+// IDs gated for the 2026-07-16 unattended overnight run (core spawn/install
+// infra + security-sensitive surfaces) are excluded from autonomous dispatch.
+func TestHumanGatedSkipsOvernightSecurityAndCoreInfraBeads(t *testing.T) {
+	for _, id := range []string{
+		"ce-nq2r", "ce-zp4c", "ce-24f1", "ce-bz3w", "ce-cknn", "ce-fmxv",
+		"ce-7ep9", "ce-3knl.10", "ce-3knl.3", "ce-3knl.2", "ce-3knl.1",
+		"ce-3knl", "ce-5iv2", "ce-w77v", "ce-2n5j", "ce-ychx", "ce-mazv",
+		"ce-i5ru", "ce-uxju", "ce-q172", "ce-m80x", "ce-93lw.3", "ce-93lw.1",
+		"ce-93lw", "ce-wcmz", "ce-de4v", "ce-77ip", "ce-py3x",
+	} {
+		if !humanGated[id] {
+			t.Errorf("%s must be human-gated for the overnight run", id)
+		}
+	}
+	beads := []bead{{ID: "ce-93lw.3", Title: "fsguard tokenizer", Priority: 0}}
+	if got := selectCandidates(beads, nil, nil, 2); len(got) != 0 {
+		t.Errorf("gated ce-93lw.3 must never be a dispatch candidate, got %+v", got)
+	}
+}
+
+func TestCapCandidates(t *testing.T) {
+	beads := []bead{
+		{ID: "ce-1", Priority: 0}, {ID: "ce-2", Priority: 0}, {ID: "ce-3", Priority: 1},
+	}
+	if got := capCandidates(beads, 0); len(got) != 3 {
+		t.Errorf("max=0 (unlimited): got %d candidates, want 3", len(got))
+	}
+	if got := capCandidates(beads, -1); len(got) != 3 {
+		t.Errorf("max=-1 (unlimited): got %d candidates, want 3", len(got))
+	}
+	if got := capCandidates(beads, 2); len(got) != 2 || got[0].ID != "ce-1" || got[1].ID != "ce-2" {
+		t.Errorf("max=2: got %+v, want the first 2 (already priority-ordered)", got)
+	}
+	if got := capCandidates(beads, 10); len(got) != 3 {
+		t.Errorf("max=10 (exceeds length): got %d candidates, want 3", len(got))
+	}
+	if got := capCandidates(nil, 2); len(got) != 0 {
+		t.Errorf("nil input: got %d candidates, want 0", len(got))
+	}
+}
+
 func TestSelectCandidatesPriorityBand(t *testing.T) {
 	beads := []bead{
 		{ID: "ce-p0", Title: "crit", Priority: 0},

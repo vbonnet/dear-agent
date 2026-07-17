@@ -17,9 +17,11 @@
 //  2. open PRs (the bead is already in flight — its id appears in a PR branch/title)
 //  3. the human-gated skip list (beads a human must drive, never an autonomous worker)
 //
-// Capacity is controlled by real spawn backpressure. This dispatcher does not
-// impose a hard worker-count cap; it dispatches eligible beads until the
-// candidate list is exhausted or `agm session new` refuses a spawn.
+// Capacity is controlled by real spawn backpressure. By default this
+// dispatcher does not impose a hard worker-count cap; it dispatches eligible
+// beads until the candidate list is exhausted or `agm session new` refuses a
+// spawn. -max-dispatch opts into a per-run cap for a scheduled/unattended
+// loop that wants to bound its own blast radius independent of backpressure.
 //
 // Exit status is 0 on success even when zero beads are dispatched — "nothing new
 // to dispatch" (backlog drained, at capacity, or all in flight) is a normal
@@ -75,6 +77,41 @@ var humanGated = map[string]bool{
 	"ce-rrry":    true,
 	"ce-clm6":    true,
 	"ce-6as.10":  true, // interactive Gmail OAuth re-consent — HUMAN-ACTION, needs a human at the browser
+
+	// Gated for the 2026-07-16 overnight unattended dispatch run (operator
+	// decision): each is either core mesh/spawn/install infra whose breakage
+	// would take dispatch itself down, or touches a security-sensitive surface
+	// (fsguard, credentials, write-guard, OAuth) that needs a human review pass
+	// rather than an unattended merge. Revisit and lift individually once a
+	// human has reviewed the fix, rather than clearing the whole batch at once.
+	"ce-nq2r":    true, // dispatch-owner crash detection — architectural, being handled directly tonight
+	"ce-zp4c":    true, // non-atomic install cp — core install tooling
+	"ce-24f1":    true, // find/guard go/bin wipe — core toolchain safety investigation
+	"ce-bz3w":    true, // go/bin wipe incident — same core toolchain surface as ce-24f1
+	"ce-cknn":    true, // mesh OAuth apiKeyHelper auto-refresh — auth/architectural
+	"ce-fmxv":    true, // agm session new hang / spawn path — core spawn infra
+	"ce-7ep9":    true, // agm.sock deletion under running tmux — core spawn infra
+	"ce-3knl.10": true, // fail-closed AI review merge gate — governance/security
+	"ce-3knl.3":  true, // FSGUARD gaps — security
+	"ce-3knl.2":  true, // credential handling in logs/panes — security
+	"ce-3knl.1":  true, // global git hooks / worktree sweep isolation — host-wide safety surface
+	"ce-3knl":    true, // epic wrapper for the above
+	"ce-5iv2":    true, // nightly go-install clobbers agm-mcp-server — core toolchain
+	"ce-w77v":    true, // non-atomic in-place go install SIGKILLs agm — core toolchain
+	"ce-2n5j":    true, // mesh recovery harness/provider selection — architectural
+	"ce-ychx":    true, // control-plane single-provider dependency — architectural
+	"ce-mazv":    true, // post-merge deploy-verify hook — deploy pipeline safety surface
+	"ce-i5ru":    true, // spawn preflight VerifyAncestry — core spawn infra
+	"ce-uxju":    true, // sandbox-dir GC auto-reap — host stability surface (2.3T leak history)
+	"ce-q172":    true, // write-guard vroom carveout — security
+	"ce-m80x":    true, // FD exhaustion crashing Dolt — host stability surface
+	"ce-93lw.3":  true, // fsguard tokenizer fail-open — security
+	"ce-93lw.1":  true, // raw shell-string interpolation — security
+	"ce-93lw":    true, // epic wrapper for the above
+	"ce-wcmz":    true, // safety-guard false positives — core safety-guard logic
+	"ce-de4v":    true, // OAuth token hot-reload — auth
+	"ce-77ip":    true, // unified OAuth lifecycle epic — architectural
+	"ce-py3x":    true, // human_typing pane-state guard invert — core safety-guard logic
 }
 
 // defaultModel is the model alias workers spawn with. opus-200k → claude-opus-4-8:
@@ -397,6 +434,19 @@ func selectCandidates(beads []bead, liveWorkers map[string]bool, prs []pullReque
 	return out
 }
 
+// capCandidates truncates the priority-ordered candidate list to at most max
+// entries (0 or negative means unlimited). Candidates are already sorted P0
+// first, so truncating keeps the highest-priority eligible beads and simply
+// leaves the rest for a later run — this is the per-run blast-radius cap for
+// a scheduled/unattended dispatch loop, distinct from selectCandidates'
+// eligibility filtering.
+func capCandidates(candidates []bead, maxN int) []bead {
+	if maxN <= 0 || len(candidates) <= maxN {
+		return candidates
+	}
+	return candidates[:maxN]
+}
+
 // sessionNewArgs builds the `agm session new` argument list for spawning a worker.
 // Model and mode are pinned (not left to agm defaults) for the same reason as the
 // supervisors: the defaults are credit-gated 1M-context sonnet in non-executable
@@ -517,6 +567,7 @@ func main() {
 	repo := flag.String("repo", "vbonnet/dear-agent", "GitHub repo (owner/name) to check for open PRs")
 	model := flag.String("model", defaultModel, "model alias workers spawn with (avoid bare opus/sonnet — credit-gated 1M)")
 	maxPriority := flag.Int("max-priority", 2, "numeric priority ceiling: 0=P0 only, 1=P0+P1, 2=P0..P2 (orchestrator narrows this as Meta-O goes stale)")
+	maxDispatch := flag.Int("max-dispatch", 0, "cap on beads dispatched in this run (0 = unlimited); bounds blast radius for an unattended/scheduled run")
 	dryRun := flag.Bool("dry-run", false, "report what would be dispatched without spawning any sessions")
 	flag.Parse()
 
@@ -550,7 +601,7 @@ func main() {
 		fatal("query open PRs (failing closed to avoid double-dispatch): %v", err)
 	}
 
-	candidates := selectCandidates(beads, live, prs, *maxPriority)
+	candidates := capCandidates(selectCandidates(beads, live, prs, *maxPriority), *maxDispatch)
 
 	dispatched := dispatchCandidates(ctx, candidates, *model, *dryRun, os.Stdout, os.Stderr)
 
