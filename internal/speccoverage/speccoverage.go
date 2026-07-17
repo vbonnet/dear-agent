@@ -25,8 +25,37 @@ type Surface struct {
 	FeaturePath string
 }
 
+// FindingKind identifies a stable SPEC/BDD coverage violation category.
+// Callers must classify findings by Kind rather than parsing human-readable
+// paths or messages.
+type FindingKind string
+
+const (
+	FindingKindUnregisteredParityFeature FindingKind = "unregistered-parity-feature"
+	FindingKindCatalogRead               FindingKind = "catalog-read"
+	FindingKindFeatureDiscovery          FindingKind = "feature-discovery"
+	FindingKindCatalogUnlistedFeature    FindingKind = "catalog-unlisted-feature"
+	FindingKindCatalogMissingFeature     FindingKind = "catalog-missing-feature"
+	FindingKindFeatureRead               FindingKind = "feature-read"
+	FindingKindFeatureMissingSpec        FindingKind = "feature-missing-spec"
+	FindingKindFeatureMissingSpecRef     FindingKind = "feature-missing-spec-reference"
+	FindingKindSpecMissingFeatureRef     FindingKind = "spec-missing-feature-reference"
+	FindingKindMissingCoLocatedSpec      FindingKind = "missing-co-located-spec"
+	FindingKindSpecMissingBDDRef         FindingKind = "spec-missing-bdd-reference"
+	FindingKindMissingReferencedBDD      FindingKind = "missing-referenced-bdd"
+	FindingKindFeatureMissingDeclaration FindingKind = "feature-missing-declaration"
+	FindingKindMissingPackagePath        FindingKind = "missing-package-path"
+	FindingKindMissingSpecPath           FindingKind = "missing-spec-path"
+	FindingKindMissingFeaturePath        FindingKind = "missing-feature-path"
+	FindingKindSpecRead                  FindingKind = "spec-read"
+	FindingKindMissingEARS               FindingKind = "missing-ears-requirements"
+	FindingKindMissingAudit              FindingKind = "missing-audit-marker"
+	FindingKindInvalidEARS               FindingKind = "invalid-ears"
+)
+
 // Finding describes a SPEC/BDD coverage violation.
 type Finding struct {
+	Kind    FindingKind
 	Surface string
 	Path    string
 	Message string
@@ -152,6 +181,7 @@ func Validate(root string) ([]Finding, error) {
 	}
 	for _, feature := range unregistered {
 		findings = append(findings, Finding{
+			Kind:    FindingKindUnregisteredParityFeature,
 			Surface: "parity feature registry",
 			Path:    feature,
 			Message: "parity feature is not registered in speccoverage.ParitySurfaces",
@@ -171,6 +201,7 @@ func ValidateBDDCatalog(root string) []Finding {
 	catalog, err := os.ReadFile(catalogPath)
 	if err != nil {
 		return []Finding{{
+			Kind:    FindingKindCatalogRead,
 			Surface: "BDD catalog",
 			Path:    "agm/docs/BDD-CATALOG.md",
 			Message: fmt.Sprintf("read BDD catalog: %v", err),
@@ -180,6 +211,7 @@ func ValidateBDDCatalog(root string) []Finding {
 	features, err := bddFeaturePaths(root)
 	if err != nil {
 		return []Finding{{
+			Kind:    FindingKindFeatureDiscovery,
 			Surface: "BDD catalog",
 			Path:    "agm/test/bdd/features",
 			Message: err.Error(),
@@ -197,6 +229,7 @@ func ValidateBDDCatalog(root string) []Finding {
 	for _, feature := range features {
 		if !catalogSet[feature] {
 			findings = append(findings, Finding{
+				Kind:    FindingKindCatalogUnlistedFeature,
 				Surface: "BDD catalog",
 				Path:    feature,
 				Message: "BDD feature is not listed in agm/docs/BDD-CATALOG.md",
@@ -211,6 +244,7 @@ func ValidateBDDCatalog(root string) []Finding {
 	for _, feature := range catalogRefs {
 		if !featureSet[feature] {
 			findings = append(findings, Finding{
+				Kind:    FindingKindCatalogMissingFeature,
 				Surface: "BDD catalog",
 				Path:    feature,
 				Message: "BDD catalog references a missing feature file",
@@ -227,6 +261,7 @@ func ValidateBDDFeatureTraceability(root string) []Finding {
 	features, err := bddFeaturePaths(root)
 	if err != nil {
 		return []Finding{{
+			Kind:    FindingKindFeatureDiscovery,
 			Surface: "BDD feature traceability",
 			Path:    "agm/test/bdd/features",
 			Message: err.Error(),
@@ -238,6 +273,7 @@ func ValidateBDDFeatureTraceability(root string) []Finding {
 		featureData, err := os.ReadFile(filepath.Join(root, feature))
 		if err != nil {
 			findings = append(findings, Finding{
+				Kind:    FindingKindFeatureRead,
 				Surface: "BDD feature traceability",
 				Path:    feature,
 				Message: fmt.Sprintf("read BDD feature: %v", err),
@@ -247,6 +283,7 @@ func ValidateBDDFeatureTraceability(root string) []Finding {
 		specPaths, ok := featureSpecPaths(string(featureData))
 		if !ok {
 			findings = append(findings, Finding{
+				Kind:    FindingKindFeatureMissingSpecRef,
 				Surface: "BDD feature traceability",
 				Path:    feature,
 				Message: "BDD feature does not declare governing SPEC.md",
@@ -257,6 +294,7 @@ func ValidateBDDFeatureTraceability(root string) []Finding {
 			specData, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(specPath)))
 			if err != nil {
 				findings = append(findings, Finding{
+					Kind:    FindingKindFeatureMissingSpec,
 					Surface: "BDD feature traceability",
 					Path:    specPath,
 					Message: fmt.Sprintf("BDD feature references a missing SPEC.md: %v", err),
@@ -265,6 +303,7 @@ func ValidateBDDFeatureTraceability(root string) []Finding {
 			}
 			if !strings.Contains(string(specData), feature) {
 				findings = append(findings, Finding{
+					Kind:    FindingKindSpecMissingFeatureRef,
 					Surface: "BDD feature traceability",
 					Path:    specPath,
 					Message: fmt.Sprintf("governing or related SPEC.md does not reference executable BDD feature: %s", feature),
@@ -500,6 +539,7 @@ func validateRepositoryImplementationSpec(root *os.Root, dir string) []Finding {
 	specData, err := root.ReadFile(filepath.FromSlash(specPath))
 	if err != nil {
 		return []Finding{{
+			Kind:    FindingKindMissingCoLocatedSpec,
 			Surface: "repository implementation SPEC coverage",
 			Path:    specPath,
 			Message: fmt.Sprintf("implementation directory %q does not have a co-located SPEC.md: %v", dir, err),
@@ -517,6 +557,7 @@ func validateRepositoryImplementationSpec(root *os.Root, dir string) []Finding {
 	featurePaths = slices.Compact(featurePaths)
 	if len(featurePaths) == 0 {
 		return append(findings, Finding{
+			Kind:    FindingKindSpecMissingBDDRef,
 			Surface: "repository implementation BDD coverage",
 			Path:    specPath,
 			Message: "SPEC.md does not reference an executable BDD feature",
@@ -527,6 +568,7 @@ func validateRepositoryImplementationSpec(root *os.Root, dir string) []Finding {
 		featureData, err := root.ReadFile(filepath.FromSlash(featurePath))
 		if err != nil {
 			findings = append(findings, Finding{
+				Kind:    FindingKindMissingReferencedBDD,
 				Surface: "repository implementation BDD coverage",
 				Path:    featurePath,
 				Message: fmt.Sprintf("SPEC.md references a missing executable BDD feature: %v", err),
@@ -536,6 +578,7 @@ func validateRepositoryImplementationSpec(root *os.Root, dir string) []Finding {
 		featureText := string(featureData)
 		if !strings.Contains(featureText, "Feature:") {
 			findings = append(findings, Finding{
+				Kind:    FindingKindFeatureMissingDeclaration,
 				Surface: "repository implementation BDD coverage",
 				Path:    featurePath,
 				Message: "referenced BDD feature does not declare a Feature",
@@ -543,6 +586,7 @@ func validateRepositoryImplementationSpec(root *os.Root, dir string) []Finding {
 		}
 		if !bddFeatureReferencesSpec(featureText, specPath) {
 			findings = append(findings, Finding{
+				Kind:    FindingKindFeatureMissingSpecRef,
 				Surface: "repository implementation BDD coverage",
 				Path:    featurePath,
 				Message: fmt.Sprintf("referenced BDD feature does not declare reciprocal SPEC traceability to %s", specPath),
@@ -608,6 +652,7 @@ func ValidateGoPackageSpecsForFiles(root string, files []string) []Finding {
 		specPath := filepath.Join(root, filepath.FromSlash(dir), "SPEC.md")
 		if _, err := os.Stat(specPath); err != nil {
 			findings = append(findings, Finding{
+				Kind:    FindingKindMissingCoLocatedSpec,
 				Surface: "changed Go package SPEC coverage",
 				Path:    filepath.ToSlash(filepath.Join(dir, "SPEC.md")),
 				Message: fmt.Sprintf("changed production Go package %q does not have a co-located SPEC.md", dir),
@@ -624,6 +669,7 @@ func validateChangedPackageSpec(root, dir string) []Finding {
 	spec, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(specPath)))
 	if err != nil {
 		return []Finding{{
+			Kind:    FindingKindSpecRead,
 			Surface: "changed Go package SPEC coverage",
 			Path:    specPath,
 			Message: fmt.Sprintf("read co-located SPEC.md: %v", err),
@@ -662,18 +708,21 @@ func validateSurface(root string, surface Surface) []Finding {
 
 	if surface.PackagePath == "" {
 		findings = append(findings, Finding{
+			Kind:    FindingKindMissingPackagePath,
 			Surface: surface.Name,
 			Message: "package path is empty",
 		})
 	}
 	if surface.SpecPath == "" {
 		findings = append(findings, Finding{
+			Kind:    FindingKindMissingSpecPath,
 			Surface: surface.Name,
 			Message: "SPEC.md path is empty",
 		})
 	}
 	if surface.FeaturePath == "" {
 		findings = append(findings, Finding{
+			Kind:    FindingKindMissingFeaturePath,
 			Surface: surface.Name,
 			Message: "BDD feature path is empty",
 		})
@@ -683,6 +732,7 @@ func validateSurface(root string, surface Surface) []Finding {
 		spec, err := os.ReadFile(filepath.Join(root, surface.SpecPath))
 		if err != nil {
 			findings = append(findings, Finding{
+				Kind:    FindingKindSpecRead,
 				Surface: surface.Name,
 				Path:    surface.SpecPath,
 				Message: fmt.Sprintf("read SPEC.md: %v", err),
@@ -693,6 +743,7 @@ func validateSurface(root string, surface Surface) []Finding {
 			hasEARS := strings.Contains(specText, "## EARS Requirements")
 			if !hasEARS {
 				findings = append(findings, Finding{
+					Kind:    FindingKindMissingEARS,
 					Surface: surface.Name,
 					Path:    surface.SpecPath,
 					Message: "SPEC.md does not declare EARS requirements",
@@ -700,6 +751,7 @@ func validateSurface(root string, surface Surface) []Finding {
 			}
 			if !hasCompletedAuditMarker(specText) {
 				findings = append(findings, Finding{
+					Kind:    FindingKindMissingAudit,
 					Surface: surface.Name,
 					Path:    surface.SpecPath,
 					Message: "SPEC.md audit marker is missing or still NEEDS-AUDIT",
@@ -715,6 +767,7 @@ func validateSurface(root string, surface Surface) []Finding {
 		feature, err := os.ReadFile(filepath.Join(root, surface.FeaturePath))
 		if err != nil {
 			findings = append(findings, Finding{
+				Kind:    FindingKindFeatureRead,
 				Surface: surface.Name,
 				Path:    surface.FeaturePath,
 				Message: fmt.Sprintf("read BDD feature: %v", err),
@@ -724,6 +777,7 @@ func validateSurface(root string, surface Surface) []Finding {
 			featureLoaded = true
 			if !strings.Contains(featureText, "Feature:") {
 				findings = append(findings, Finding{
+					Kind:    FindingKindFeatureMissingDeclaration,
 					Surface: surface.Name,
 					Path:    surface.FeaturePath,
 					Message: "BDD feature does not declare a Feature",
@@ -734,6 +788,7 @@ func validateSurface(root string, surface Surface) []Finding {
 
 	if specLoaded && surface.FeaturePath != "" && !strings.Contains(specText, surface.FeaturePath) {
 		findings = append(findings, Finding{
+			Kind:    FindingKindSpecMissingBDDRef,
 			Surface: surface.Name,
 			Path:    surface.SpecPath,
 			Message: "SPEC.md does not reference its executable BDD feature",
@@ -741,6 +796,7 @@ func validateSurface(root string, surface Surface) []Finding {
 	}
 	if featureLoaded && surface.SpecPath != "" && !strings.Contains(featureText, surface.SpecPath) {
 		findings = append(findings, Finding{
+			Kind:    FindingKindFeatureMissingSpecRef,
 			Surface: surface.Name,
 			Path:    surface.FeaturePath,
 			Message: "BDD feature does not reference its governing SPEC.md",
@@ -754,6 +810,7 @@ func validateSpecEARS(surface Surface, spec string) []Finding {
 	linter, err := earslint.New(earslint.Config{})
 	if err != nil {
 		return []Finding{{
+			Kind:    FindingKindInvalidEARS,
 			Surface: surface.Name,
 			Path:    surface.SpecPath,
 			Message: fmt.Sprintf("initialize EARS linter: %v", err),
@@ -763,6 +820,7 @@ func validateSpecEARS(surface Surface, spec string) []Finding {
 	result, err := linter.Lint(surface.SpecPath, strings.NewReader(spec))
 	if err != nil {
 		return []Finding{{
+			Kind:    FindingKindInvalidEARS,
 			Surface: surface.Name,
 			Path:    surface.SpecPath,
 			Message: fmt.Sprintf("lint SPEC.md EARS requirements: %v", err),
@@ -779,6 +837,7 @@ func validateSpecEARS(surface Surface, spec string) []Finding {
 			detail = fmt.Sprintf("line %d: %s", finding.Line, finding.Message)
 		}
 		findings = append(findings, Finding{
+			Kind:    FindingKindInvalidEARS,
 			Surface: surface.Name,
 			Path:    surface.SpecPath,
 			Message: "SPEC.md has invalid EARS syntax: " + detail,

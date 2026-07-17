@@ -87,6 +87,12 @@ which is already the path `TestFeatures` passes to godog. If a future
 contributor puts a feature file in the wrong directory it would be silently
 skipped; `spec_invariants_test.go` exists precisely to catch this.
 
+Repository-wide discovery for this enforcement uses the shared
+`internal/repoinventory` contract. Git checkouts derive their inventory from
+tracked and unignored files, and non-Git test fixtures use the same canonical
+directory exclusions. Coverage findings expose stable typed kinds so Godog
+steps select policy failures without parsing diagnostic prose.
+
 See `agm/test/bdd/spec_invariants_test.go` for the current invariant suite.
 
 ---
@@ -98,13 +104,16 @@ See `agm/test/bdd/spec_invariants_test.go` for the current invariant suite.
 - No new tooling introduced.
 - `TestFeatures` comment is the single authoritative policy statement.
 - CI (`go test ./agm/test/bdd/...`) catches undefined steps automatically.
+- SPEC, BDD, EARS, and repository-health checks share one ignore-aware file
+  inventory instead of maintaining independent recursive walkers.
+- BDD policy steps classify coverage failures by typed finding kind; paths and
+  messages remain diagnostics only.
 
-### Follow-up work (none required to close ce-1ak)
+### Implemented follow-up safeguards
 
-- If the feature set grows beyond ~10 files and the "wrong directory" risk
-  feels real, add a `filepath.WalkDir` check to `spec_invariants_test.go`
-  that fails if any `.feature` file exists under `agm/test/bdd/` but outside
-  `agm/test/bdd/features/`.
+- Repository invariants and SPEC coverage now discover governed files through
+  `internal/repoinventory`, which avoids generated and ignored artifacts while
+  retaining tracked files as the source of truth.
 - Bazel remains an option if the repo adopts it for other reasons (e.g. a
   multi-language build need). The BDD enforcement benefit would then come for
   free with no additional per-file boilerplate.
