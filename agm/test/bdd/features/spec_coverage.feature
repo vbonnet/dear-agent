@@ -1,5 +1,6 @@
 # SPEC: internal/speccoverage/SPEC.md
 # RELATED-SPEC: agm/internal/sandboxgc/SPEC.md
+# RELATED-SPEC: internal/repoinventory/SPEC.md
 Feature: SPEC and BDD coverage
   AGM governance should keep SPEC.md files and executable BDD scenarios paired
   for every parity-critical surface and every implementation directory in the

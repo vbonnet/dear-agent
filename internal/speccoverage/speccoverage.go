@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/vbonnet/dear-agent/internal/earslint"
+	"github.com/vbonnet/dear-agent/internal/repoinventory"
 )
 
 // Surface maps one parity-critical implementation area to its executable BDD
@@ -425,8 +426,8 @@ func ValidateAllImplementationSpecs(root string) ([]Finding, error) {
 // in doc-only and hidden policy directories, to retain strict EARS and
 // reciprocal executable BDD traceability.
 func ValidateAllRepositorySpecs(root string) ([]Finding, error) {
-	specDirs, err := allImplementationDirs(root, func(entry os.DirEntry) (bool, error) {
-		return entry.Name() == "SPEC.md", nil
+	specDirs, err := allImplementationDirs(root, func(file repoinventory.File) (bool, error) {
+		return file.Name() == "SPEC.md", nil
 	})
 	if err != nil {
 		return nil, err
@@ -448,34 +449,21 @@ func validateAllImplementationDirs(root string, dirs []string) ([]Finding, error
 	return findings, nil
 }
 
-func allImplementationDirs(root string, isSource func(os.DirEntry) (bool, error)) ([]string, error) {
+func allImplementationDirs(root string, isSource func(repoinventory.File) (bool, error)) ([]string, error) {
+	files, err := repoinventory.Scan(root)
+	if err != nil {
+		return nil, fmt.Errorf("discover repository implementation files: %w", err)
+	}
 	seen := map[string]bool{}
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() {
-			if path != root && skippedCoverageDir(entry.Name()) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		include, err := isSource(entry)
+	for _, file := range files {
+		include, err := isSource(file)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if !include {
-			return nil
+			continue
 		}
-		rel, err := filepath.Rel(root, filepath.Dir(path))
-		if err != nil {
-			return err
-		}
-		seen[filepath.ToSlash(rel)] = true
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("discover repository Go packages: %w", err)
+		seen[filepath.ToSlash(filepath.Dir(file.Path))] = true
 	}
 
 	dirs := make([]string, 0, len(seen))
@@ -486,38 +474,25 @@ func allImplementationDirs(root string, isSource func(os.DirEntry) (bool, error)
 	return dirs, nil
 }
 
-func goSourceFile(entry os.DirEntry) (bool, error) {
-	return strings.HasSuffix(entry.Name(), ".go"), nil
+func goSourceFile(file repoinventory.File) (bool, error) {
+	return strings.HasSuffix(file.Name(), ".go"), nil
 }
 
-func implementationSourceFile(entry os.DirEntry) (bool, error) {
-	switch strings.ToLower(entry.Name()) {
+func implementationSourceFile(file repoinventory.File) (bool, error) {
+	switch strings.ToLower(file.Name()) {
 	case "dockerfile", "makefile":
 		return true, nil
 	}
-	switch strings.ToLower(filepath.Ext(entry.Name())) {
+	switch strings.ToLower(filepath.Ext(file.Name())) {
 	case ".go", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".rs", ".py",
 		".sh", ".bash", ".zsh", ".bats", ".tf", ".sql", ".yaml", ".yml",
 		".json", ".toml", ".plist", ".service", ".dockerfile":
 		return true, nil
 	}
-	if filepath.Ext(entry.Name()) != "" {
+	if filepath.Ext(file.Name()) != "" {
 		return false, nil
 	}
-	info, err := entry.Info()
-	if err != nil {
-		return false, err
-	}
-	return info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0, nil
-}
-
-func skippedCoverageDir(name string) bool {
-	switch name {
-	case ".git", ".worktrees", "vendor", "node_modules", "bin", "build":
-		return true
-	default:
-		return false
-	}
+	return file.Mode.IsRegular() && file.Executable(), nil
 }
 
 func validateRepositoryImplementationSpec(root *os.Root, dir string) []Finding {
