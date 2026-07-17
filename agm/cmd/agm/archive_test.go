@@ -79,10 +79,36 @@ func TestBulkArchiveCandidates_UsesSharedArchiveOperation(t *testing.T) {
 	}
 }
 
-func TestRunSessionCleanup_TypedNilAdapter(t *testing.T) {
-	var adapter *dolt.Adapter
-	if got := runSessionCleanup("typed-nil", &ops.OpContext{Storage: adapter}); got != nil {
-		t.Fatalf("runSessionCleanup() = %#v, want nil", got)
+func TestBulkArchiveCandidates_PreservesSharedSupervisorGuard(t *testing.T) {
+	adapter, err := dolt.NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "bulk-supervisor-id",
+		Name:          "vroom-orchestrator",
+		Harness:       "agy",
+		CreatedAt:     time.Now().Add(-time.Hour),
+		UpdatedAt:     time.Now().Add(-time.Hour),
+		Context:       manifest.Context{Project: t.TempDir()},
+		Tmux:          manifest.Tmux{SessionName: "vroom-orchestrator"},
+	}
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+
+	successCount, failCount := bulkArchiveCandidates([]*manifest.Manifest{m}, &ops.OpContext{Storage: adapter}, ops.ArchiveSessionRequest{})
+	if successCount != 0 || failCount != 1 {
+		t.Fatalf("bulk counts = (%d, %d), want (0, 1)", successCount, failCount)
+	}
+	stored, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() error: %v", err)
+	}
+	if stored.Lifecycle != "" {
+		t.Fatalf("Lifecycle = %q, want unchanged", stored.Lifecycle)
 	}
 }
 
@@ -809,7 +835,7 @@ func TestSpawnReaper_SessionNameSanitization(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Note: spawnReaper() will fail because agm-reaper binary doesn't exist
 			// in test environment. We're testing the path sanitization logic.
-			err := spawnReaper(tc.sessionName, "codex-cli")
+			err := spawnReaper(tc.sessionName, "codex-cli", manifest.OutcomeUnknown)
 
 			// Should get error about missing binary (expected in tests)
 			if err == nil {

@@ -1,6 +1,7 @@
 package reaper
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -78,5 +79,83 @@ func TestRun_ArchivePreflightBlocksProtectedSupervisorBeforeTmux(t *testing.T) {
 	}
 	if stored.Lifecycle != "" {
 		t.Fatalf("Lifecycle = %q, want unchanged", stored.Lifecycle)
+	}
+}
+
+func TestArchiveSession_SharedOperationPreservesOutcomeAndLegacyMove(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "agm.db")
+	sessionsDir := t.TempDir()
+	t.Setenv("AGM_DB_PATH", dbPath)
+	t.Setenv("HOME", t.TempDir())
+
+	adapter, err := dolt.NewSQLiteAdapter(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "legacy-shared-op-id",
+		Name:          "legacy-shared-op",
+		Harness:       "agy",
+		CreatedAt:     time.Now().Add(-time.Hour),
+		UpdatedAt:     time.Now().Add(-time.Hour),
+		Context:       manifest.Context{Project: t.TempDir()},
+		Tmux:          manifest.Tmux{SessionName: "legacy-shared-op"},
+	}
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+	legacyDir := filepath.Join(sessionsDir, m.SessionID)
+	if err := os.MkdirAll(legacyDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(legacy) error: %v", err)
+	}
+	if err := manifest.Write(filepath.Join(legacyDir, "manifest.yaml"), m); err != nil {
+		t.Fatalf("manifest.Write() error: %v", err)
+	}
+
+	r := NewWithOptions(m.Name, sessionsDir, ArchiveOptions{Force: true, Outcome: manifest.OutcomeKilled})
+	if err := r.archiveSession(); err != nil {
+		t.Fatalf("archiveSession() error: %v", err)
+	}
+	stored, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() error: %v", err)
+	}
+	if stored.Lifecycle != manifest.LifecycleArchived || stored.Outcome != manifest.OutcomeKilled {
+		t.Fatalf("stored lifecycle/outcome = (%q, %q), want (%q, %q)", stored.Lifecycle, stored.Outcome, manifest.LifecycleArchived, manifest.OutcomeKilled)
+	}
+	archiveDir := filepath.Join(sessionsDir, ".archive-old-format", m.SessionID)
+	if _, err := os.Stat(archiveDir); err != nil {
+		t.Fatalf("legacy archive path missing: %v", err)
+	}
+}
+
+func TestArchiveSession_AlreadyArchivedIsIdempotent(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "agm.db")
+	t.Setenv("AGM_DB_PATH", dbPath)
+	t.Setenv("HOME", t.TempDir())
+	adapter, err := dolt.NewSQLiteAdapter(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "already-archived-reaper-id",
+		Name:          "already-archived-reaper",
+		Harness:       "agy",
+		Lifecycle:     manifest.LifecycleArchived,
+		Outcome:       manifest.OutcomeCompleted,
+		CreatedAt:     time.Now().Add(-time.Hour),
+		UpdatedAt:     time.Now(),
+		Context:       manifest.Context{Project: t.TempDir()},
+		Tmux:          manifest.Tmux{SessionName: "already-archived-reaper"},
+	}
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+	if err := New(m.Name, t.TempDir()).archiveSession(); err != nil {
+		t.Fatalf("archiveSession() idempotent error: %v", err)
 	}
 }

@@ -2,11 +2,14 @@ package reaper
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/safety"
 )
 
@@ -307,9 +310,26 @@ func TestRun_SafetyGuardBlocks(t *testing.T) {
 // invariant: if the pane is still alive after all kill attempts, Run must
 // refuse to archive (returning an error) rather than mark a live session dead.
 func TestRun_RefusesToArchiveWhenPaneAlive(t *testing.T) {
-	// WORKSPACE="" makes markReaping's Dolt lookup fail fast (non-fatal in
-	// Run), so the test stays at the tmux/process boundary without a DB.
-	t.Setenv("WORKSPACE", "")
+	dbPath := filepath.Join(t.TempDir(), "agm.db")
+	t.Setenv("AGM_DB_PATH", dbPath)
+	adapter, err := dolt.NewSQLiteAdapter(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "pane-alive-id",
+		Name:          "sess",
+		Harness:       "agy",
+		CreatedAt:     time.Now().Add(-time.Hour),
+		UpdatedAt:     time.Now().Add(-time.Hour),
+		Context:       manifest.Context{Project: t.TempDir()},
+		Tmux:          manifest.Tmux{SessionName: "sess"},
+	}
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
 
 	f := &fakeBoundary{
 		isPaneActive: true, // pane survives kill-session
@@ -317,7 +337,7 @@ func TestRun_RefusesToArchiveWhenPaneAlive(t *testing.T) {
 	f.install(t)
 
 	r := New("sess", "/tmp/sessions")
-	err := r.Run()
+	err = r.Run()
 	if err == nil {
 		t.Fatal("Run() must not archive while the pane is still alive")
 	}
@@ -326,5 +346,12 @@ func TestRun_RefusesToArchiveWhenPaneAlive(t *testing.T) {
 	}
 	if f.killSessionCalls != 1 {
 		t.Errorf("Run() should attempt kill-session once, got %d", f.killSessionCalls)
+	}
+	stored, getErr := adapter.GetSession(m.SessionID)
+	if getErr != nil {
+		t.Fatalf("GetSession() error: %v", getErr)
+	}
+	if stored.Lifecycle != manifest.LifecycleReaping {
+		t.Fatalf("Lifecycle = %q, want reaping tombstone", stored.Lifecycle)
 	}
 }

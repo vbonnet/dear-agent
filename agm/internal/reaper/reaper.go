@@ -9,13 +9,9 @@ import (
 	"syscall"
 	"time"
 
-	"context"
-
-	"github.com/vbonnet/dear-agent/agm/internal/cleanup"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/logging"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
-	"github.com/vbonnet/dear-agent/agm/internal/mcp"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/safety"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
@@ -78,15 +74,31 @@ type Reaper struct {
 	SessionName string
 	SessionsDir string
 	SocketPath  string
+	Options     ArchiveOptions
 	logger      *slog.Logger
+}
+
+// ArchiveOptions are the lifecycle choices captured by the parent archive
+// command and propagated into the detached reaper process.
+type ArchiveOptions struct {
+	Force       bool
+	KeepSandbox bool
+	Outcome     manifest.SessionOutcome
 }
 
 // New creates a new Reaper for the given session
 func New(sessionName, sessionsDir string) *Reaper {
+	return NewWithOptions(sessionName, sessionsDir, ArchiveOptions{})
+}
+
+// NewWithOptions creates a Reaper with archive options preserved across the
+// detached process boundary.
+func NewWithOptions(sessionName, sessionsDir string, options ArchiveOptions) *Reaper {
 	return &Reaper{
 		SessionName: sessionName,
 		SessionsDir: sessionsDir,
 		SocketPath:  tmux.GetSocketPath(),
+		Options:     options,
 		logger:      logging.DefaultLogger(),
 	}
 }
@@ -118,6 +130,19 @@ func (r *Reaper) Run() error {
 	if !guardResult.Safe {
 		r.logger.Warn("Safety guard blocked reaper", "violations", guardResult.Error())
 		return fmt.Errorf("safety guard blocked reaper on session '%s':\n%s", r.SessionName, guardResult.Error())
+	}
+
+	// Validate the same supervisor, verification, and delegation guards used by
+	// immediate and bulk archive before touching the pane. Active tmux is the
+	// only allowed condition here because stopping that pane is the reaper's
+	// purpose; the final shared operation checks again after pane death.
+	preflight, err := r.preflightArchive()
+	if err != nil {
+		return fmt.Errorf("archive preflight failed: %w", err)
+	}
+	if preflight.AlreadyArchived {
+		r.logger.Info("Session already archived, skipping reaper")
+		return nil
 	}
 
 	// Step 1: Mark session as "reaping" in Dolt BEFORE touching tmux.
@@ -304,6 +329,23 @@ func (r *Reaper) markReaping() error {
 	return nil
 }
 
+func (r *Reaper) preflightArchive() (*ops.ArchiveSessionResult, error) {
+	adapter, err := openStorage()
+	if err != nil {
+		return nil, err
+	}
+	defer adapter.Close()
+	if err := adapter.ApplyMigrations(); err != nil {
+		return nil, fmt.Errorf("failed to apply Dolt migrations: %w", err)
+	}
+
+	opCtx := &ops.OpContext{Storage: adapter, DryRun: true}
+	req := r.archiveRequest()
+	req.AllowActiveTmux = true
+	req.Idempotent = true
+	return ops.ArchiveSession(opCtx, &req)
+}
+
 // waitForPrompt monitors output stream for the agent prompt.
 // Uses tmux control mode to detect when the pane is ready for input.
 func (r *Reaper) waitForPrompt(timeout time.Duration) error {
@@ -333,15 +375,16 @@ func (r *Reaper) waitForPaneClose(timeout time.Duration) error {
 	return waitForPaneCloseFn(r.SessionName, timeout)
 }
 
-// archiveSession updates manifest and moves directory
-// This is based on cmd/agm/archive.go but without interactive prompts
+// archiveSession delegates the durable lifecycle transition and all archive
+// side effects to ops.ArchiveSession. The reaper owns only the preceding
+// process-stop phase and reaping tombstone.
 func (r *Reaper) archiveSession() error {
 	sessionsDir, err := r.getSessionsDir()
 	if err != nil {
 		return fmt.Errorf("failed to get sessions directory: %w", err)
 	}
 
-	// Connect to lifecycle storage (needed for session resolution).
+	// Connect to lifecycle storage for the shared operation.
 	adapter, err := openStorage()
 	if err != nil {
 		return err
@@ -353,73 +396,30 @@ func (r *Reaper) archiveSession() error {
 		return fmt.Errorf("failed to apply Dolt migrations: %w", err)
 	}
 
-	// Resolve session identifier to manifest using Dolt adapter
-	m, manifestPath, err := session.ResolveIdentifier(r.SessionName, sessionsDir, adapter)
+	req := r.archiveRequest()
+	req.Idempotent = true
+	req.LegacySessionsDir = sessionsDir
+	result, err := ops.ArchiveSession(&ops.OpContext{Storage: adapter}, &req)
 	if err != nil {
-		return fmt.Errorf("session not found: %w", err)
+		return err
 	}
-
-	r.logger.Info("Manifest path", "path", manifestPath)
-
-	// Check if already archived
-	if m.Lifecycle == manifest.LifecycleArchived {
-		r.logger.Info("Session already archived, skipping")
-		return nil
-	}
-
-	// Best-effort MCP process cleanup before archiving
-	sandboxPath := ""
-	if m.Sandbox != nil {
-		sandboxPath = m.Sandbox.MergedPath
-	}
-	mcpKilled, mcpErr := mcp.CleanupSessionMCPProcesses(
-		mcp.DefaultProcessFinder(), &mcp.SignalKiller{},
-		m.SessionID, sandboxPath,
-	)
-	if mcpErr != nil {
-		r.logger.Warn("MCP cleanup error during reap", "session", r.SessionName, "error", mcpErr)
-	}
-	if mcpKilled > 0 {
-		r.logger.Info("Cleaned up MCP processes during reap", "session", r.SessionName, "killed", mcpKilled)
-	}
-
-	// Update lifecycle field
-	m.Lifecycle = manifest.LifecycleArchived
-
-	// Update session in Dolt
-	if err := adapter.UpdateSession(m); err != nil {
-		return fmt.Errorf("failed to update session in Dolt: %w", err)
-	}
-	r.logger.Info("Dolt database updated to archived")
-	for _, outcome := range ops.ArchiveExternalSession(context.Background(), m) {
+	for _, outcome := range result.ExternalArchives {
 		if outcome.Status == ops.ExternalArchiveFailed {
-			r.logger.Warn("External session archive failed after AGM archival", "session", m.SessionID, "provider", outcome.Provider, "error", outcome.Detail)
+			r.logger.Warn("External session archive failed after AGM archival", "session", result.SessionID, "provider", outcome.Provider, "error", outcome.Detail)
 		}
 	}
-
-	r.runReaperResourceCleanup(adapter)
-	r.cleanupPendingDir()
-	r.archiveLegacySessionDir(sessionsDir, manifestPath)
+	if result.AlreadyArchived {
+		r.logger.Info("Session already archived, skipping duplicate cleanup")
+	}
 	return nil
 }
 
-// runReaperResourceCleanup performs best-effort worktree/branch/tmp cleanup
-// during reap and logs the per-category counts.
-func (r *Reaper) runReaperResourceCleanup(adapter *dolt.Adapter) {
-	if adapter.IsTestStore() {
-		r.logger.Info("Skipping worktree cleanup for isolated test store")
-		return
-	}
-	store := &cleanup.DoltWorktreeStore{Adapter: adapter}
-	cleanupResult := cleanup.SessionResources(context.Background(), r.SessionName, store, cleanup.RealGitOps{}, r.logger)
-	if cleanupResult.WorktreesRemoved > 0 {
-		r.logger.Info("Cleaned up worktrees during reap", "count", cleanupResult.WorktreesRemoved)
-	}
-	if cleanupResult.BranchesDeleted > 0 {
-		r.logger.Info("Deleted branches during reap", "count", cleanupResult.BranchesDeleted)
-	}
-	if cleanupResult.TmpFilesRemoved > 0 {
-		r.logger.Info("Removed tmp files during reap", "count", cleanupResult.TmpFilesRemoved)
+func (r *Reaper) archiveRequest() ops.ArchiveSessionRequest {
+	return ops.ArchiveSessionRequest{
+		Identifier:  r.SessionName,
+		Force:       r.Options.Force,
+		KeepSandbox: r.Options.KeepSandbox,
+		Outcome:     r.Options.Outcome,
 	}
 }
 
@@ -445,55 +445,6 @@ func openStorage() (*dolt.Adapter, error) {
 		return nil, fmt.Errorf("failed to connect to Dolt: %w", err)
 	}
 	return adapter, nil
-}
-
-// cleanupPendingDir removes the pending-message directory for the reaped session.
-func (r *Reaper) cleanupPendingDir() {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return
-	}
-	pendingDir := filepath.Join(homeDir, ".agm", "pending", r.SessionName)
-	if _, err := os.Stat(pendingDir); err != nil {
-		return
-	}
-	if removeErr := os.RemoveAll(pendingDir); removeErr != nil {
-		r.logger.Warn("Failed to remove pending directory", "path", pendingDir, "error", removeErr)
-		return
-	}
-	r.logger.Info("Cleaned up pending message directory", "path", pendingDir)
-}
-
-// archiveLegacySessionDir moves a session's filesystem directory to
-// .archive-old-format/ when one exists (pure-Dolt sessions skip this).
-func (r *Reaper) archiveLegacySessionDir(sessionsDir, manifestPath string) {
-	sessionDir := filepath.Dir(manifestPath)
-	info, err := os.Stat(sessionDir)
-	if os.IsNotExist(err) {
-		r.logger.Info("No filesystem directory to move (pure-Dolt session)", "path", sessionDir)
-		return
-	}
-	if err != nil {
-		r.logger.Warn("Could not stat session directory, skipping move", "path", sessionDir, "error", err)
-		return
-	}
-	_ = info
-	archiveBaseDir := filepath.Join(sessionsDir, ".archive-old-format")
-	archiveTargetDir := filepath.Join(archiveBaseDir, filepath.Base(sessionDir))
-	if err := os.MkdirAll(archiveBaseDir, 0700); err != nil {
-		r.logger.Warn("Failed to create archive dir, skipping move", "error", err)
-		return
-	}
-	if _, err := os.Stat(archiveTargetDir); err == nil {
-		timestamp := time.Now().Format("20060102T150405Z")
-		archiveTargetDir = archiveTargetDir + "-" + timestamp
-		r.logger.Warn("Archive conflict - renaming", "target", filepath.Base(archiveTargetDir))
-	}
-	if err := os.Rename(sessionDir, archiveTargetDir); err != nil {
-		r.logger.Warn("Failed to move session directory to archive", "error", err)
-		return
-	}
-	r.logger.Info("Session moved to archive", "path", archiveTargetDir)
 }
 
 // getSessionsDir returns the configured sessions directory path
