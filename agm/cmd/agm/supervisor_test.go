@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	vroomsupervisor "github.com/vbonnet/dear-agent/pkg/vroom/supervisor"
 )
 
 // fakeSupervisorEnv is a stub supervisorEnv for unit tests.
@@ -266,6 +267,17 @@ func TestSyncVroomHeartbeatFile(t *testing.T) {
 	if got.TS != wantTS {
 		t.Errorf("ts = %v, want %v", got.TS, wantTS)
 	}
+
+	// Canonical IDs must target the same compact heartbeat file as aliases.
+	if err := syncVroomHeartbeatFile(dir, vroomsupervisor.IDMetaOrchestrator, ts); err != nil {
+		t.Fatalf("sync canonical supervisor ID: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, vroomsupervisor.AliasMetaOrchestrator+".json")); err != nil {
+		t.Errorf("canonical ID did not write compact heartbeat file: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, vroomsupervisor.IDMetaOrchestrator+".json")); !errors.Is(err, os.ErrNotExist) {
+		t.Error("canonical ID created a second heartbeat filename instead of using the topology alias")
+	}
 }
 
 func TestSyncHeartbeatFiles(t *testing.T) {
@@ -333,16 +345,76 @@ func TestSyncHeartbeatFilesNoSupervisors(t *testing.T) {
 	}
 }
 
-func TestSupervisorRole(t *testing.T) {
-	cases := []struct{ id, want string }{
-		{"meta-o", "meta-orchestrator"},
-		{"orch", "orchestrator"},
-		{"overseer", "overseer"},
-		{"custom", "custom"},
+func TestCanonicalizeSupervisorHeartbeatMesh(t *testing.T) {
+	tests := []struct {
+		name                              string
+		id, primary, tertiary             string
+		wantID, wantPrimary, wantTertiary string
+		wantErr                           bool
+	}{
+		{
+			name:         "alias derives canonical graph",
+			id:           vroomsupervisor.AliasMetaOrchestrator,
+			wantID:       vroomsupervisor.IDMetaOrchestrator,
+			wantPrimary:  vroomsupervisor.IDOrchestrator,
+			wantTertiary: vroomsupervisor.IDOverseer,
+		},
+		{
+			name:         "role and peer aliases normalize",
+			id:           string(vroomsupervisor.RoleOrchestrator),
+			primary:      vroomsupervisor.AliasOverseer,
+			tertiary:     vroomsupervisor.AliasMetaOrchestrator,
+			wantID:       vroomsupervisor.IDOrchestrator,
+			wantPrimary:  vroomsupervisor.IDOverseer,
+			wantTertiary: vroomsupervisor.IDMetaOrchestrator,
+		},
+		{
+			name: "custom supervisor passes through",
+			id:   "custom", primary: "peer-a", tertiary: "peer-b",
+			wantID: "custom", wantPrimary: "peer-a", wantTertiary: "peer-b",
+		},
+		{
+			name:    "canonical supervisor rejects a different primary peer",
+			id:      vroomsupervisor.IDOverseer,
+			primary: vroomsupervisor.IDOrchestrator,
+			wantErr: true,
+		},
+		{
+			name:     "canonical supervisor rejects an unknown tertiary peer",
+			id:       vroomsupervisor.IDOverseer,
+			tertiary: "mystery",
+			wantErr:  true,
+		},
 	}
-	for _, c := range cases {
-		if got := supervisorRole(c.id); got != c.want {
-			t.Errorf("supervisorRole(%q) = %q, want %q", c.id, got, c.want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			id, primary, tertiary, err := canonicalizeSupervisorHeartbeatMesh(tt.id, tt.primary, tt.tertiary)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("canonicalizeSupervisorHeartbeatMesh() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("canonicalizeSupervisorHeartbeatMesh(): %v", err)
+			}
+			if id != tt.wantID || primary != tt.wantPrimary || tertiary != tt.wantTertiary {
+				t.Errorf("canonicalizeSupervisorHeartbeatMesh() = (%q, %q, %q), want (%q, %q, %q)",
+					id, primary, tertiary, tt.wantID, tt.wantPrimary, tt.wantTertiary)
+			}
+		})
+	}
+}
+
+func TestHeartbeatSurfaceUsesCanonicalTopology(t *testing.T) {
+	for _, member := range vroomsupervisor.AllMembers() {
+		id, primary, tertiary, err := canonicalizeSupervisorHeartbeatMesh(member.Alias, "", "")
+		if err != nil {
+			t.Fatalf("canonicalize %q: %v", member.Alias, err)
+		}
+		if id != member.ID || primary != member.PrimaryFor || tertiary != member.TertiaryFor {
+			t.Errorf("AGM heartbeat mapping for %q = (%q, %q, %q), want topology %+v",
+				member.Alias, id, primary, tertiary, member)
 		}
 	}
 }
