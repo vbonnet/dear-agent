@@ -402,23 +402,31 @@ func selectCandidates(beads []bead, liveWorkers map[string]bool, prs []pullReque
 // supervisors: the defaults are credit-gated 1M-context sonnet in non-executable
 // plan mode (ce-84l2). Workers run detached in the oss workspace under the worker
 // RBAC role.
-func sessionNewArgs(name, model string) []string {
+//
+// repoDir is passed as an explicit --directory so `agm session new`'s
+// getWorkDir never falls back to $PWD/os.Getwd(). Under launchd
+// (WorkingDirectory=/Users/vbonnet, no $PWD), that fallback resolved to
+// $HOME, which made resolveSandboxLowerDirs clone the entire home directory
+// — the root cause of the spawn-hang fixed alongside this (ce-fmxv). A
+// launchd-driven spawn must never depend on inherited cwd.
+func sessionNewArgs(name, model, repoDir string) []string {
 	return []string{
 		"session", "new", name,
 		"--detached", "--workspace=oss", "--harness=claude-code",
 		"--model=" + model,
 		"--mode=auto",
 		"--role", workerRole,
+		"--directory", repoDir,
 	}
 }
 
 // spawnSession creates the detached worker session. Package var for test stubbing.
 // Uses sessionSpawnTimeout (not the blanket subprocessTimeout): harness boot
 // legitimately exceeds 60s — see the const's comment.
-var spawnSession = func(ctx context.Context, name, model string) error {
+var spawnSession = func(ctx context.Context, name, model, repoDir string) error {
 	ctx, cancel := context.WithTimeout(ctx, sessionSpawnTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "agm", sessionNewArgs(name, model)...)
+	cmd := exec.CommandContext(ctx, "agm", sessionNewArgs(name, model, repoDir)...)
 	// Mark the spawned session tree as unattended so its own `agm send` calls
 	// auto-stash stale input instead of deadlocking as if a human were typing
 	// (ce-v9in), and scrub the API key so workers use the session's own auth.
@@ -497,9 +505,9 @@ func isDeterministicSpawnFailure(err error) bool {
 // so the caller can skip the bead and continue; any other failure (circuit
 // breaker / at capacity / timeout / unknown) is returned as-is and no prompt is
 // sent — the bead is simply retried on a later run.
-func dispatch(ctx context.Context, b bead, model string) error {
+func dispatch(ctx context.Context, b bead, model, repoDir string) error {
 	name := workerSessionName(b.ID)
-	if err := spawnSession(ctx, name, model); err != nil {
+	if err := spawnSession(ctx, name, model, repoDir); err != nil {
 		wrapped := fmt.Errorf("spawn %s: %w", name, err)
 		if isDeterministicSpawnFailure(err) {
 			return &skipBeadError{err: wrapped}
@@ -515,6 +523,7 @@ func dispatch(ctx context.Context, b bead, model string) error {
 func main() {
 	db := flag.String("db", "~/beads/context-engine/.beads", "path to the beads database")
 	repo := flag.String("repo", "vbonnet/dear-agent", "GitHub repo (owner/name) to check for open PRs")
+	repoDir := flag.String("repo-dir", "~/src/dear-agent", "local checkout passed as `agm session new --directory` so a launchd-context spawn never inherits launchd's cwd (ce-fmxv)")
 	model := flag.String("model", defaultModel, "model alias workers spawn with (avoid bare opus/sonnet — credit-gated 1M)")
 	maxPriority := flag.Int("max-priority", 2, "numeric priority ceiling: 0=P0 only, 1=P0+P1, 2=P0..P2 (orchestrator narrows this as Meta-O goes stale)")
 	dryRun := flag.Bool("dry-run", false, "report what would be dispatched without spawning any sessions")
@@ -530,6 +539,7 @@ func main() {
 		fatal("home dir: %v", err)
 	}
 	dbPath := expandHome(*db, home)
+	repoDirPath := expandHome(*repoDir, home)
 
 	beads, err := queryReady(ctx, dbPath)
 	if err != nil {
@@ -552,14 +562,14 @@ func main() {
 
 	candidates := selectCandidates(beads, live, prs, *maxPriority)
 
-	dispatched := dispatchCandidates(ctx, candidates, *model, *dryRun, os.Stdout, os.Stderr)
+	dispatched := dispatchCandidates(ctx, candidates, *model, repoDirPath, *dryRun, os.Stdout, os.Stderr)
 
 	fmt.Fprintf(os.Stderr,
 		"vroom-dispatch-direct: %d ready, %d live worker(s), %d eligible, %d dispatched\n",
 		len(beads), len(live), len(candidates), dispatched)
 }
 
-func dispatchCandidates(ctx context.Context, candidates []bead, model string, dryRun bool, out, errOut io.Writer) int {
+func dispatchCandidates(ctx context.Context, candidates []bead, model, repoDir string, dryRun bool, out, errOut io.Writer) int {
 	dispatched := 0
 	for _, b := range candidates {
 		if ctx.Err() != nil {
@@ -570,7 +580,7 @@ func dispatchCandidates(ctx context.Context, candidates []bead, model string, dr
 			dispatched++
 			continue
 		}
-		if err := dispatch(ctx, b, model); err != nil {
+		if err := dispatch(ctx, b, model, repoDir); err != nil {
 			// Deterministic per-bead failure: it will fail identically on every
 			// retry, so skip this bead and keep dispatching — aborting here is
 			// how one poisoned bead stalled all dispatch every tick (ce-b1zw).
