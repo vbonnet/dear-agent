@@ -96,7 +96,7 @@ that can pause or reshape work before resource exhaustion causes data loss.
 
 **VROOM-SUP-29** When a caller supplies a canonical supervisor ID, compact alias, or role name, the system shall resolve it to the same immutable topology member.
 
-**VROOM-SUP-30** Each topology member shall name distinct canonical Primary and Tertiary peers, and the three members together shall cover the complete cyclic peer graph defined by ADR-002.
+**VROOM-SUP-30** The VROOM supervisor topology shall assign each member distinct canonical Primary and Tertiary peers and shall cover the complete cyclic peer graph defined by ADR-002.
 
 **VROOM-SUP-31** When callers request all topology members, the system shall return a copy that cannot mutate the canonical topology.
 
