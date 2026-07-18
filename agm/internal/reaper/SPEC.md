@@ -4,21 +4,22 @@
 
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-07-17 -->
 
 **Version**: 1.0
 **Last Updated**: 2026-06-07
 **Status**: Baseline (derived from tests + code, not design-forward)
-**Scope**: Two-phase stop-then-archive lifecycle for AGM-managed Claude sessions
+**Scope**: Two-phase stop-then-archive lifecycle for AGM-managed harness sessions
 
 ---
 
 ## Overview
 
 The reaper executes a deterministic, crash-recoverable two-phase sequence to
-terminate a Claude Code session: Phase 0 (safety check) → Phase 1 (stop)
-→ Phase 2 (archive). The invariant is that Dolt is never updated to `archived`
-while a tmux pane is still alive.
+terminate an AGM harness session: Phase 0 (safety and shared archive preflight)
+→ Phase 1 (stop) → Phase 2 (`ops.ArchiveSession`). The invariant is that
+lifecycle storage is never updated to `archived` while a tmux pane is still
+alive.
 
 ---
 
@@ -37,6 +38,8 @@ while a tmux pane is still alive.
 ### Safety Check (Phase 0)
 
 **REA-05** When `Run()` is called and `safety.Check()` detects a human in the session, the system shall abort before taking any other action and return an error.
+
+**REA-18** When archive preflight finds a protected supervisor, critical completion-verification failure, or pending delegation and force is false, the system shall abort before writing the reaping tombstone or touching tmux.
 
 ### Crash-Recovery Tombstone
 
@@ -64,6 +67,12 @@ while a tmux pane is still alive.
 
 **REA-15** When resource cleanup is running and MCP process cleanup fails, the system shall continue the archive sequence.
 
+**REA-19** When pane death is confirmed, the system shall complete archival through `ops.ArchiveSession`, preserving its durable transition, outcome stamping, external archive outcomes, and cleanup contract without a reaper-owned final lifecycle mutation.
+
+**REA-20** When `agm session archive --async` supplies force, keep-sandbox, or outcome options, the system shall propagate those options across the detached `agm-reaper` process boundary and apply them to shared preflight and final archival.
+
+**REA-21** When one reaper run performs preflight, writes the reaping tombstone, and finalizes archival, the system shall reuse one migrated lifecycle-storage connection across those phases.
+
 ### Timing Constants (regression-pinned)
 
 **REA-16** When reaper timing constants are evaluated, the system shall preserve the pinned timeout values covered by `TestConstantValues`.
@@ -80,6 +89,9 @@ while a tmux pane is still alive.
 - **Crash recovery via `reaping` tombstone.** `markReaping()` writes the Dolt
   tombstone before any tmux interaction. A GC startup scan detecting
   `lifecycle=reaping` can finish the interrupted reap.
+- **Shared finalizer.** `markReaping()` is the reaper's only direct lifecycle
+  write. Phase 2 calls `ops.ArchiveSession`; copied archive/update/cleanup code
+  in this package is forbidden.
 - **No retry on permission errors.** If safety.Check blocks or storage is
   unreachable, `Run()` returns immediately. Callers must not retry blindly;
   they must report and escalate.

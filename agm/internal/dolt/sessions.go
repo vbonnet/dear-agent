@@ -106,10 +106,7 @@ func (a *Adapter) CreateSession(session *manifest.Manifest) error {
 		return err
 	}
 	harness := defaultIfEmpty(session.Harness, "claude-code")
-	status := "active"
-	if session.Lifecycle == manifest.LifecycleArchived {
-		status = "archived"
-	}
+	status := lifecycleStorageStatus(session.Lifecycle)
 	permissionMode := defaultIfEmpty(session.PermissionMode, "default")
 	permissionModeSource := defaultIfEmpty(session.PermissionModeSource, "init")
 
@@ -239,11 +236,9 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 		harness = "claude-code"
 	}
 
-	// Determine status from lifecycle
-	status := "active"
-	if session.Lifecycle == manifest.LifecycleArchived {
-		status = "archived"
-	}
+	// Preserve transitional lifecycle values such as "reaping" so detached
+	// reapers can recover across processes in an isolated SQLite test store.
+	status := lifecycleStorageStatus(session.Lifecycle)
 
 	// Update timestamp
 	session.UpdatedAt = time.Now()
@@ -645,11 +640,13 @@ func (a *Adapter) scanSession(row scanner) (*manifest.Manifest, error) {
 		return nil, fmt.Errorf("failed to scan session: %w", err)
 	}
 
-	// Set lifecycle from status
-	if status == "archived" {
-		session.Lifecycle = manifest.LifecycleArchived
-	} else {
-		session.Lifecycle = "" // Active or stopped
+	// Set lifecycle from status. Runtime active/stopped state remains outside the
+	// durable lifecycle field; terminal/transitional lifecycle values round-trip.
+	switch status {
+	case manifest.LifecycleArchived, manifest.LifecycleReaping:
+		session.Lifecycle = status
+	default:
+		session.Lifecycle = ""
 	}
 
 	// Set workspace and model
@@ -673,6 +670,15 @@ func (a *Adapter) scanSession(row scanner) (*manifest.Manifest, error) {
 		return nil, err
 	}
 	return &session, nil
+}
+
+func lifecycleStorageStatus(lifecycle string) string {
+	switch lifecycle {
+	case manifest.LifecycleArchived, manifest.LifecycleReaping:
+		return lifecycle
+	default:
+		return "active"
+	}
 }
 
 // applyNullableScanFields copies the nullable sql.Null* values from a Scan call

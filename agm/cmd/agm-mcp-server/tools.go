@@ -211,7 +211,7 @@ func addArchiveSessionTool(server *mcp.Server, _ *Config) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "agm_archive_session",
 		Description: "Archive an AGM session by marking it as archived. Use when a session is no longer needed and should be hidden from the active list.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, input ArchiveSessionInput) (*mcp.CallToolResult, any, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, input ArchiveSessionInput) (*mcp.CallToolResult, any, error) {
 		if input.Identifier == "" {
 			return mcpError(ops.ErrInvalidInput("identifier", "Session identifier is required.")), nil, nil
 		}
@@ -221,6 +221,7 @@ func addArchiveSessionTool(server *mcp.Server, _ *Config) {
 			return mcpError(err), nil, nil
 		}
 		defer cleanup()
+		opCtx.Context = ctx
 		opCtx.DryRun = input.DryRun
 
 		result, opErr := ops.ArchiveSession(opCtx, &ops.ArchiveSessionRequest{

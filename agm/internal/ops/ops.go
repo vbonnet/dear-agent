@@ -6,6 +6,7 @@
 package ops
 
 import (
+	"context"
 	"encoding/json"
 
 	"github.com/vbonnet/dear-agent/agm/internal/config"
@@ -17,6 +18,9 @@ import (
 // OpContext holds dependencies for all operations.
 // CLI, MCP, and Skills each construct an OpContext and pass it to ops.
 type OpContext struct {
+	// Context carries request cancellation into external I/O performed by an
+	// operation. Nil preserves compatibility for non-request-scoped callers.
+	Context    context.Context
 	Storage    dolt.Storage
 	Tmux       session.TmuxInterface
 	Manager    manager.Backend // New abstraction layer (optional, nil = legacy path)

@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -9,8 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/cleanup"
 	"github.com/vbonnet/dear-agent/agm/internal/contracts"
 	"github.com/vbonnet/dear-agent/agm/internal/delegation"
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/gclog"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/mcp"
@@ -36,6 +39,19 @@ type ArchiveSessionRequest struct {
 	// protected-role orphan that has no live tmux pane; never set for live
 	// supervisor sessions.
 	AllowSupervisorReap bool `json:"allow_supervisor_reap,omitempty"`
+	// AllowActiveTmux permits an async reaper preflight to validate every other
+	// archive guard while the pane is intentionally still alive. The final
+	// archive call does not set this field and still enforces the active-pane
+	// guard. This is internal process coordination, not an API-surface option.
+	AllowActiveTmux bool `json:"-"`
+	// Idempotent treats an already-archived record as a successful no-op. Async
+	// reapers use this for crash recovery; interactive surfaces retain the
+	// existing already-archived error and user guidance.
+	Idempotent bool `json:"-"`
+	// LegacySessionsDir identifies the old filesystem store where a reaper may
+	// need to move the resolved session ID under .archive-old-format. It is
+	// internal process context and intentionally excluded from JSON APIs.
+	LegacySessionsDir string `json:"-"`
 }
 
 // ArchiveSessionResult is the output of ArchiveSession.
@@ -52,6 +68,9 @@ type ArchiveSessionResult struct {
 	PendingDelegations  int                             `json:"pending_delegations,omitempty"`
 	PostCleanup         *CleanupResult                  `json:"post_cleanup,omitempty"`
 	ExternalArchives    []ExternalArchiveOutcome        `json:"external_archives,omitempty"`
+	SessionCleanup      *cleanup.Result                 `json:"session_cleanup,omitempty"`
+	LegacyArchivePath   string                          `json:"legacy_archive_path,omitempty"`
+	AlreadyArchived     bool                            `json:"already_archived,omitempty"`
 }
 
 // ArchiveSession marks a session as archived.
@@ -60,6 +79,9 @@ type ArchiveSessionResult struct {
 func ArchiveSession(ctx *OpContext, req *ArchiveSessionRequest) (*ArchiveSessionResult, error) {
 	if req == nil || req.Identifier == "" {
 		return nil, ErrInvalidInput("identifier", "Session identifier is required. Provide a session ID, name, or UUID prefix.")
+	}
+	if ctx == nil || ctx.Storage == nil {
+		return nil, ErrStorageError("archive_session", fmt.Errorf("storage is required"))
 	}
 
 	// Resolve session
@@ -77,13 +99,23 @@ func ArchiveSession(ctx *OpContext, req *ArchiveSessionRequest) (*ArchiveSession
 
 	// Check if already archived
 	if m.Lifecycle == manifest.LifecycleArchived {
+		if req.Idempotent {
+			return &ArchiveSessionResult{
+				Operation:       "archive_session",
+				SessionID:       m.SessionID,
+				Name:            m.Name,
+				PreviousStatus:  "archived",
+				Outcome:         m.Outcome,
+				AlreadyArchived: true,
+			}, nil
+		}
 		return nil, ErrSessionArchived(m.Name)
 	}
 
 	if err := checkSupervisorProtection(m, req.Force || req.AllowSupervisorReap); err != nil {
 		return nil, err
 	}
-	if err := checkActiveTmuxBlock(m, req.Force); err != nil {
+	if err := checkActiveTmuxBlock(m, req.Force || req.AllowActiveTmux); err != nil {
 		return nil, err
 	}
 
@@ -96,6 +128,11 @@ func ArchiveSession(ctx *OpContext, req *ArchiveSessionRequest) (*ArchiveSession
 		return nil, err
 	}
 
+	outcome, err := normalizeArchiveOutcome(req.Outcome)
+	if err != nil {
+		return nil, err
+	}
+
 	// Dry run: return what would happen
 	if ctx.DryRun {
 		return &ArchiveSessionResult{
@@ -105,23 +142,20 @@ func ArchiveSession(ctx *OpContext, req *ArchiveSessionRequest) (*ArchiveSession
 			PreviousStatus: previousStatus,
 			DryRun:         true,
 			Verification:   verification,
+			Outcome:        outcome,
 		}, nil
 	}
 
 	m.Lifecycle = manifest.LifecycleArchived
 	// Stamp the outcome so the archived record is triage-legible. Default to
 	// "completed" — the common archive path is a session that finished normally.
-	outcome := req.Outcome
-	if outcome == manifest.OutcomeUnknown {
-		outcome = manifest.OutcomeCompleted
-	}
 	m.Outcome = outcome
 	m.UpdatedAt = time.Now()
 	if err := ctx.Storage.UpdateSession(m); err != nil {
 		return nil, ErrStorageError("archive_session", err)
 	}
 
-	mcpKilled, postCleanup := runArchiveCleanup(ctx, m, req.KeepSandbox)
+	mcpKilled, postCleanup, sessionCleanup, legacyArchivePath := runArchiveCleanup(ctx, m, req)
 	externalArchives := archiveExternalForContext(ctx, m)
 	for _, outcome := range externalArchives {
 		if outcome.Status == ExternalArchiveFailed {
@@ -140,13 +174,35 @@ func ArchiveSession(ctx *OpContext, req *ArchiveSessionRequest) (*ArchiveSession
 		SandboxCleaned:      postCleanup.SandboxRemoved,
 		PostCleanup:         postCleanup,
 		ExternalArchives:    externalArchives,
+		SessionCleanup:      sessionCleanup,
+		LegacyArchivePath:   legacyArchivePath,
 	}, nil
+}
+
+func normalizeArchiveOutcome(outcome manifest.SessionOutcome) (manifest.SessionOutcome, error) {
+	switch outcome {
+	case manifest.OutcomeUnknown:
+		return manifest.OutcomeCompleted, nil
+	case manifest.OutcomeCompleted, manifest.OutcomeCrashed, manifest.OutcomeKilled, manifest.OutcomeGCStale:
+		return outcome, nil
+	default:
+		return manifest.OutcomeUnknown, ErrInvalidInput("outcome", "Archive outcome must be one of: completed, crashed, killed, gc-stale.")
+	}
 }
 
 // runArchiveCleanup performs the post-update cleanup steps (trust event,
 // monitor deregister, MCP processes, tmux process group, worktree/sandbox
 // cleanup, additionalDirectories removal). Returns (mcpKilled, postCleanup).
-func runArchiveCleanup(ctx *OpContext, m *manifest.Manifest, keepSandbox bool) (int, *CleanupResult) {
+func runArchiveCleanup(ctx *OpContext, m *manifest.Manifest, req *ArchiveSessionRequest) (int, *CleanupResult, *cleanup.Result, string) {
+	legacyManifestPath := ""
+	if req.LegacySessionsDir != "" {
+		legacyManifestPath = filepath.Join(req.LegacySessionsDir, m.SessionID, "manifest.yaml")
+	}
+	if shouldSkipHostArchiveCleanup(ctx.Storage, m) {
+		slog.Info("Skipping host resource cleanup for test session", "session", m.SessionID)
+		return 0, &CleanupResult{}, nil, archiveLegacySessionDir(req.LegacySessionsDir, legacyManifestPath)
+	}
+
 	recordArchiveTrust(m.Name, m.WorkingDirectory, m.Context.Project, m.SessionID, m.CreatedAt)
 	deregisterMonitor(ctx, m.Name)
 
@@ -170,8 +226,10 @@ func runArchiveCleanup(ctx *OpContext, m *manifest.Manifest, keepSandbox bool) (
 	postCleanup := CleanupAfterArchive(
 		m.SessionID, m.Name,
 		m.WorkingDirectory, m.Context.Project, sandboxPath, m.Name,
-		keepSandbox,
+		req.KeepSandbox,
 	)
+	sessionCleanup := cleanupTrackedSessionResources(ctx, m.Name)
+	cleanupPendingDir(m.Name)
 	if postCleanup.SandboxRemoved {
 		logGCEntry(gclog.Entry{
 			Operation:   "archive_sandbox_cleanup",
@@ -184,7 +242,93 @@ func runArchiveCleanup(ctx *OpContext, m *manifest.Manifest, keepSandbox bool) (
 			slog.Warn("Failed to remove sandbox from additionalDirectories", "session", m.SessionID, "path", sandboxPath, "error", err)
 		}
 	}
-	return mcpKilled, postCleanup
+	legacyArchivePath := archiveLegacySessionDir(req.LegacySessionsDir, legacyManifestPath)
+	return mcpKilled, postCleanup, sessionCleanup, legacyArchivePath
+}
+
+func shouldSkipHostArchiveCleanup(storage dolt.Storage, m *manifest.Manifest) bool {
+	if m != nil && m.IsTest {
+		return true
+	}
+	adapter, ok := storage.(*dolt.Adapter)
+	return ok && adapter != nil && adapter.IsTestStore()
+}
+
+func cleanupTrackedSessionResources(ctx *OpContext, sessionName string) *cleanup.Result {
+	adapter, ok := ctx.Storage.(*dolt.Adapter)
+	if !ok || adapter == nil || adapter.IsTestStore() {
+		return nil
+	}
+	store := &cleanup.DoltWorktreeStore{Adapter: adapter}
+	return cleanup.SessionResources(archiveOperationContext(ctx), sessionName, store, cleanup.RealGitOps{}, slog.Default())
+}
+
+func archiveOperationContext(opCtx *OpContext) context.Context {
+	if opCtx != nil && opCtx.Context != nil {
+		return opCtx.Context
+	}
+	return context.Background()
+}
+
+func cleanupPendingDir(sessionName string) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	pendingDir := filepath.Join(homeDir, ".agm", "pending", sessionName)
+	if _, err := os.Stat(pendingDir); err != nil {
+		return
+	}
+	if err := os.RemoveAll(pendingDir); err != nil {
+		slog.Warn("Failed to remove pending directory", "path", pendingDir, "error", err)
+		return
+	}
+	slog.Info("Cleaned up pending message directory", "path", pendingDir)
+}
+
+func archiveLegacySessionDir(sessionsDir, manifestPath string) string {
+	if sessionsDir == "" || manifestPath == "" {
+		return ""
+	}
+	base, err := filepath.Abs(sessionsDir)
+	if err != nil {
+		slog.Warn("Could not resolve legacy sessions directory", "path", sessionsDir, "error", err)
+		return ""
+	}
+	sessionDir, err := filepath.Abs(filepath.Dir(manifestPath))
+	if err != nil {
+		slog.Warn("Could not resolve legacy session directory", "path", manifestPath, "error", err)
+		return ""
+	}
+	rel, err := filepath.Rel(base, sessionDir)
+	if err != nil || rel == "." || rel == ".archive-old-format" || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || strings.Contains(rel, string(filepath.Separator)) {
+		slog.Warn("Refusing legacy session move outside direct sessions child", "sessions_dir", base, "session_dir", sessionDir)
+		return ""
+	}
+	if _, err := os.Stat(sessionDir); os.IsNotExist(err) {
+		slog.Info("No filesystem directory to move (pure-Dolt session)", "path", sessionDir)
+		return ""
+	} else if err != nil {
+		slog.Warn("Could not stat legacy session directory", "path", sessionDir, "error", err)
+		return ""
+	}
+
+	archiveBaseDir := filepath.Join(base, ".archive-old-format")
+	archiveTargetDir := filepath.Join(archiveBaseDir, filepath.Base(sessionDir))
+	if err := os.MkdirAll(archiveBaseDir, 0o700); err != nil {
+		slog.Warn("Failed to create legacy archive directory", "error", err)
+		return ""
+	}
+	if _, err := os.Stat(archiveTargetDir); err == nil {
+		archiveTargetDir += "-" + time.Now().UTC().Format("20060102T150405Z")
+		slog.Warn("Legacy archive conflict; using timestamped target", "target", filepath.Base(archiveTargetDir))
+	}
+	if err := os.Rename(sessionDir, archiveTargetDir); err != nil {
+		slog.Warn("Failed to move legacy session directory to archive", "error", err)
+		return ""
+	}
+	slog.Info("Moved legacy session directory to archive", "path", archiveTargetDir)
+	return archiveTargetDir
 }
 
 // checkSupervisorProtection blocks archive of supervisor sessions unless force.
