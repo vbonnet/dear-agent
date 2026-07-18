@@ -28,7 +28,7 @@ func TestSessionCommandRegistersCanonicalOperations(t *testing.T) {
 	for _, command := range sessionCmd.Commands() {
 		names = append(names, command.Name())
 	}
-	for _, want := range []string{"start", "status", "next-phase", "start-phase", "complete-phase", "end", "task", "rewind-to", "set-lifecycle-state", "coord", "migrate"} {
+	for _, want := range []string{"start", "status", "next-phase", "start-phase", "complete-phase", "end", "task", "rewind-to", "set-lifecycle-state", "coord"} {
 		if !slices.Contains(names, want) {
 			t.Errorf("session commands = %v, missing %q", names, want)
 		}
@@ -37,7 +37,7 @@ func TestSessionCommandRegistersCanonicalOperations(t *testing.T) {
 
 func writeStatus(t *testing.T, dir string) {
 	t.Helper()
-	content := "---\nschema_version: \"1.0\"\nstatus: in_progress\nphases: []\n---\n"
+	content := "---\nschema_version: \"2.0\"\nproject_name: test\nproject_type: feature\nrisk_level: M\ncurrent_waypoint: CHARTER\nstatus: planning\ncreated_at: 2026-07-17T00:00:00Z\nupdated_at: 2026-07-17T00:00:00Z\nwaypoint_history: []\n---\n"
 	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
