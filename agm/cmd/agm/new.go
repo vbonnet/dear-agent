@@ -747,12 +747,16 @@ func resolveEnvVarDefaults(cmd *cobra.Command) {
 // so the stagger gate works for subsequent spawns.
 func enforceCircuitBreakers() error {
 	cfg := circuitbreaker.DefaultConfig()
-	lr := circuitbreaker.ProcLoadReader{}
+	lr := circuitbreaker.DefaultLoadReader()
 	wc := circuitbreaker.TmuxWorkerCounter{}
 	st := circuitbreaker.NewFileSpawnTimer()
 	mr := circuitbreaker.DefaultMemReader()
+	dr := circuitbreaker.DefaultDiskReader()
+	pc := circuitbreaker.DefaultProcCounter()
 
-	result := circuitbreaker.Check(cfg, lr, wc, st, mr)
+	result := circuitbreaker.Check(cfg, lr, wc, st, mr,
+		circuitbreaker.WithDiskReader(dr),
+		circuitbreaker.WithProcCounter(pc))
 
 	// Log DEAR level regardless of outcome
 	debug.Log("Circuit breaker check: level=%s load=%.1f allowed=%v", result.Level, result.Load, result.Allowed)
