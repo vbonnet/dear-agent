@@ -173,9 +173,12 @@ func resolveSandboxLowerDirs(workDir string) ([]string, error) {
 }
 
 // unsafeSandboxFallbackReason returns a non-empty reason if workDir is unsafe
-// to use as a sandbox lower dir fallback (resolves to $HOME, or is not a git
-// repository), or "" if workDir is safe to clone.
+// to use as a sandbox lower dir fallback (empty, resolves to $HOME, or is not
+// a git repository), or "" if workDir is safe to clone.
 func unsafeSandboxFallbackReason(workDir string) string {
+	if workDir == "" {
+		return "workDir is empty"
+	}
 	if homeDir, err := os.UserHomeDir(); err == nil {
 		resolvedWorkDir, _ := filepath.EvalSymlinks(workDir)
 		resolvedHome, _ := filepath.EvalSymlinks(homeDir)

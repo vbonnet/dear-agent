@@ -172,6 +172,18 @@ func TestResolveSandboxLowerDirs_FailsLoudOnNonRepoWorkDir(t *testing.T) {
 	}
 }
 
+// TestUnsafeSandboxFallbackReason_EmptyWorkDir is the Gemini-review
+// regression test: an empty workDir must never fall through to the
+// os.Stat(filepath.Join("", ".git")) check, which resolves to ".git" in the
+// process's current working directory — if that happens to be a git repo,
+// the empty-workDir case would be misclassified as safe.
+func TestUnsafeSandboxFallbackReason_EmptyWorkDir(t *testing.T) {
+	reason := unsafeSandboxFallbackReason("")
+	if reason == "" {
+		t.Fatal("unsafeSandboxFallbackReason(\"\") = \"\", want a non-empty reason (empty workDir must never be treated as safe)")
+	}
+}
+
 // TestResolveSandboxLowerDirs_FallsBackToWorkDirWhenGitRepo verifies the
 // legitimate fallback still works: a workDir that IS a real git repo (e.g.
 // an explicit --directory pointing at a checkout) is accepted.
