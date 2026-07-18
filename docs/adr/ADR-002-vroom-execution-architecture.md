@@ -16,7 +16,7 @@ Requester roles; no value function over a five-level order.
 
 | Supervisor | Analogy | Owns | Secondary | Tertiary |
 |---|---|---|---|---|
-| **Meta-Orchestrator** | CTO | Roadmap, prioritization, tech consistency, anti-duplication | Overseer | Orchestrator |
+| **Meta-Orchestrator** | CTO | Beads backlog quality, prioritization, tech consistency, anti-duplication | Overseer | Orchestrator |
 | **Orchestrator** | COO | Work enqueue/dequeue, worker monitoring, steady progress | Meta-Orchestrator | Overseer |
 | **Overseer** | CRO | Resource usage, leak detection, session cleanup | Orchestrator | Meta-Orchestrator |
 
@@ -33,15 +33,19 @@ prompt selection for each role. AGM owns heartbeat persistence and liveness
 checks. Both consume the canonical member identity and peer graph without
 moving those adapter responsibilities into the topology package.
 
-Two load-bearing invariants:
+Three load-bearing invariants:
 
-- **Mutual-unblock first.** The first action of every loop iteration is the
-  supervisor-check skill against the other two supervisors, *before* doing
-  the supervisor's own job. This keeps the mesh from deadlocking on a
-  single stuck supervisor (historical failure mode: permission prompts).
-- **Single roadmap authority.** Only the Meta-Orchestrator may add to the
-  roadmap. Everyone else proposes via a Work Order; the Meta-Orchestrator
-  decides. This is the structural defense against duplicate work.
+- **Typed permission recovery.** Every loop checks peers before role work.
+  `agm scan --cross-check` may auto-approve only actions accepted by its RBAC
+  classifier. A prose prompt may report, defer, reject, or escalate a remaining
+  prompt; it may never add a manual approval fallback.
+- **Beads are the roadmap.** Ready Beads, live AGM sessions, and open PRs are the
+  operational sources of truth. VROOM does not maintain roadmap, dispatch,
+  deploy, or prompt-file projections. The Meta-Orchestrator owns priority and
+  scope decisions on the Beads records themselves.
+- **Delivery is end to end.** A delivery bead remains open until its change is
+  merged, deployed when applicable, and verified. PR creation is an intermediate
+  state, not completion.
 
 ### Per-task triad
 
@@ -67,7 +71,7 @@ as a CONTEXT.md collision and a follow-up.
 - **Single orchestrator, no peer supervisors.** A lone supervisor has no
   one to unstick it and no separation between "what to do next", "keep
   work flowing", and "is the system healthy". Mutual-unblock requires ≥3.
-- **Flat peer mesh.** No single roadmap authority means duplicate work.
+- **Flat peer mesh.** No single backlog-priority authority means duplicate work.
 - **One ADR per role.** The decision is the mesh shape; per-role text is
   vocabulary and belongs in CONTEXT.md, not five drifting ADRs.
 - **Keep identity and peer tables in each adapter.** Synchronization tests only
