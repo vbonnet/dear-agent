@@ -71,13 +71,6 @@ func runStartPhase(cmd *cobra.Command, args []string) (retErr error) {
 		}
 	}
 
-	version, err := status.DetectSchemaVersionFromDir(projectDir)
-	if err != nil {
-		return fmt.Errorf("failed to inspect STATUS file: %w (run 'wayfinder-session start' first)", err)
-	}
-	if version != status.SchemaVersionV2 {
-		return fmt.Errorf("legacy Wayfinder status requires explicit migration before start-phase")
-	}
 	st, err := status.ParseV2FromDir(projectDir)
 	if err != nil {
 		return fmt.Errorf("failed to read canonical V2 STATUS file: %w", err)
@@ -155,19 +148,15 @@ func runStartPhase(cmd *cobra.Command, args []string) (retErr error) {
 // follows. Bead tracking lives in the V2 schema (StatusV2.Beads); for any other
 // status version this is a no-op. Failures (bd absent, create error) warn and
 // continue — a missing tracker must never block a phase transition.
-func ensureSessionBead(ctx context.Context, st status.StatusInterface) {
-	v2, ok := st.(*status.StatusV2)
-	if !ok {
-		return
-	}
-	if len(v2.Beads) > 0 {
+func ensureSessionBead(ctx context.Context, st *status.StatusV2) {
+	if len(st.Beads) > 0 {
 		return
 	}
 	if !beads.Available() {
 		fmt.Fprintf(os.Stderr, "Warning: bd CLI not available; skipping auto-bead creation\n")
 		return
 	}
-	title := strings.TrimSpace(v2.ProjectName)
+	title := strings.TrimSpace(st.ProjectName)
 	if title == "" {
 		title = "wayfinder session"
 	}
@@ -176,6 +165,6 @@ func ensureSessionBead(ctx context.Context, st status.StatusInterface) {
 		fmt.Fprintf(os.Stderr, "Warning: failed to auto-create bead: %v\n", err)
 		return
 	}
-	v2.Beads = append(v2.Beads, id)
+	st.Beads = append(st.Beads, id)
 	fmt.Printf("🔗 Auto-created bead %s for this task\n", id)
 }

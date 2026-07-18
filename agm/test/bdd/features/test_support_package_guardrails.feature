@@ -19,7 +19,6 @@
 # RELATED-SPEC: engram/hooks-bin/internal/integration_test/SPEC.md
 # RELATED-SPEC: engram/internal/testutil/SPEC.md
 # RELATED-SPEC: internal/testutil/SPEC.md
-# RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/integration/SPEC.md
 Feature: Test support package guardrails
   Test infrastructure is part of the product's enforcement boundary. Its
   contracts must remain strict, executable, and provider-neutral.
@@ -52,7 +51,6 @@ Feature: Test support package guardrails
       | engram/hooks-bin/internal/integration_test                |
       | engram/internal/testutil                                  |
       | internal/testutil                                         |
-      | wayfinder/cmd/wayfinder-session/internal/integration      |
 
   Scenario Outline: Test enforcement is invariant across active routes
     Given test support coverage runs through "<harness>" with "<family>"

@@ -3,6 +3,7 @@ package status
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -203,6 +204,29 @@ func TestDetectSchemaVersion(t *testing.T) {
 			}
 			if version != tt.want {
 				t.Errorf("DetectSchemaVersion() = %v, want %v", version, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseV2RejectsMissingOrUnsupportedSchema(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		schema  string
+		message string
+	}{
+		{name: "missing", message: "schema_version is required"},
+		{name: "unsupported", schema: "schema_version: \"1.0\"\n", message: "unsupported schema_version"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), StatusFilename)
+			content := "---\n" + tc.schema + "project_name: test\n---\n"
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := ParseV2(path)
+			if err == nil || !strings.Contains(err.Error(), tc.message) {
+				t.Fatalf("ParseV2() error = %v, want %q", err, tc.message)
 			}
 		})
 	}

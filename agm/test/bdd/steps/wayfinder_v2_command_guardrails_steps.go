@@ -159,12 +159,14 @@ func normalWayfinderCommandsParseOnlyV2(ctx context.Context) error {
 		return err
 	}
 	for _, path := range []string{
+		"wayfinder/cmd/wayfinder-session/commands/start.go",
 		"wayfinder/cmd/wayfinder-session/commands/start_phase.go",
 		"wayfinder/cmd/wayfinder-session/commands/complete_phase.go",
 		"wayfinder/cmd/wayfinder-session/commands/next_phase.go",
 		"wayfinder/cmd/wayfinder-session/commands/end.go",
 		"wayfinder/cmd/wayfinder-session/commands/status.go",
 		"wayfinder/cmd/wayfinder-session/commands/set_lifecycle_state.go",
+		"wayfinder/cmd/wayfinder-session/commands/rewind.go",
 	} {
 		data, readErr := os.ReadFile(filepath.Join(state.repoRoot, path))
 		if readErr != nil {
@@ -176,7 +178,7 @@ func normalWayfinderCommandsParseOnlyV2(ctx context.Context) error {
 				return fmt.Errorf("normal command %s retains legacy path %q", path, forbidden)
 			}
 		}
-		if !strings.Contains(text, "ParseV2FromDir") && !strings.Contains(text, "runEndV2") {
+		if !strings.Contains(text, "ParseV2FromDir") && !strings.Contains(text, "ParseV2(") && !strings.Contains(text, "runEndV2") {
 			return fmt.Errorf("normal command %s has no canonical V2 parser path", path)
 		}
 	}
@@ -194,7 +196,7 @@ func nonMigrationRuntimeOmitsRetiredPhases(ctx context.Context) (resultErr error
 		return fmt.Errorf("open Wayfinder source root: %w", err)
 	}
 	defer preserveRootCloseError(rootFS, &resultErr)
-	retired := regexp.MustCompile(`\b(W0|D1|D2|D3|D4|S4|S5|S6|S7|S8|S9|S10|S11)\b|S11-retrospective|discovery\.(problem|solutions|approach|requirements)|design\.(tech-lead|security|qa)|roadmap\.(planning|breakdown|dependencies)`)
+	retired := regexp.MustCompile(`\b(W0|D1|D2|D3|D4|S4|S5|S6|S7|S8|S9|S10|S11|V1)\b|WayfinderV1|discovery\.(problem|solutions|approach|requirements)|design\.(tech-lead|security|qa)|roadmap\.(planning|breakdown|dependencies)`)
 	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -205,13 +207,6 @@ func nonMigrationRuntimeOmitsRetiredPhases(ctx context.Context) (resultErr error
 		rel, relErr := filepath.Rel(root, path)
 		if relErr != nil {
 			return relErr
-		}
-		if strings.Contains(rel, string(filepath.Separator)+"migrate"+string(filepath.Separator)) ||
-			strings.Contains(rel, string(filepath.Separator)+"migration"+string(filepath.Separator)) ||
-			strings.Contains(rel, string(filepath.Separator)+"converter"+string(filepath.Separator)) ||
-			strings.Contains(rel, filepath.Join("internal", "status")+string(filepath.Separator)) ||
-			rel == filepath.Join("cmd", "wayfinder-session", "commands", "migrate.go") {
-			return nil
 		}
 		data, readErr := rootFS.ReadFile(filepath.ToSlash(rel))
 		if readErr != nil {
@@ -235,13 +230,22 @@ func unversionedPhasesDefaultToV2(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	path := filepath.Join(state.repoRoot, "wayfinder/cmd/wayfinder-session/internal/status/types.go")
-	data, err := os.ReadFile(path)
+	typesPath := filepath.Join(state.repoRoot, "wayfinder/cmd/wayfinder-session/internal/status/types.go")
+	data, err := os.ReadFile(typesPath)
 	if err != nil {
 		return err
 	}
-	if !strings.Contains(string(data), "v := WayfinderV2") {
-		return fmt.Errorf("unversioned AllPhases does not default to WayfinderV2")
+	if !strings.Contains(string(data), "func AllPhases() []string") {
+		return fmt.Errorf("canonical AllPhases must not accept a version selector")
+	}
+	phaseData, err := os.ReadFile(filepath.Join(state.repoRoot, "wayfinder/cmd/wayfinder-session/internal/status/types_v2.go"))
+	if err != nil {
+		return err
+	}
+	for _, phase := range []string{"CHARTER", "PROBLEM", "RESEARCH", "DESIGN", "SPEC", "PLAN", "SETUP", "BUILD", "RETRO"} {
+		if !strings.Contains(string(phaseData), `= "`+phase+`"`) {
+			return fmt.Errorf("canonical status does not declare named phase %s", phase)
+		}
 	}
 	return nil
 }

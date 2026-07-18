@@ -55,13 +55,6 @@ Examples:
 			return fmt.Errorf("invalid lifecycle state: %s (valid: working, input-required, dependency-blocked, validating, completed, failed, canceled)", lifecycleState)
 		}
 
-		version, err := status.DetectSchemaVersionFromDir(projectDir)
-		if err != nil {
-			return fmt.Errorf("failed to inspect status: %w", err)
-		}
-		if version != status.SchemaVersionV2 {
-			return fmt.Errorf("legacy Wayfinder status requires explicit migration before set-lifecycle-state")
-		}
 		st, err := status.ParseV2FromDir(projectDir)
 		if err != nil {
 			return fmt.Errorf("failed to read status: %w", err)

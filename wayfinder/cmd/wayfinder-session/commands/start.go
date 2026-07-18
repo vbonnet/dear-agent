@@ -82,12 +82,8 @@ func runStart(cmd *cobra.Command, args []string) error {
 	} else {
 		statusPath := filepath.Join(projectDir, status.StatusFilename)
 		if _, err := os.Stat(statusPath); err == nil {
-			version, detectErr := status.DetectSchemaVersion(statusPath)
-			if detectErr != nil {
-				return fmt.Errorf("failed to inspect existing Wayfinder status: %w", detectErr)
-			}
-			if version != status.SchemaVersionV2 {
-				return fmt.Errorf("legacy Wayfinder status requires explicit migration before start")
+			if _, parseErr := status.ParseV2(statusPath); parseErr != nil {
+				return fmt.Errorf("existing Wayfinder status is not canonical: %w", parseErr)
 			}
 			return fmt.Errorf("canonical Wayfinder session already exists; use status or next-phase instead of start")
 		} else if !os.IsNotExist(err) {

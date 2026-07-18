@@ -2,7 +2,6 @@ package commands
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
@@ -21,13 +20,6 @@ Example:
 
 func runStatus(cmd *cobra.Command, args []string) error {
 	projectDir := GetProjectDirectory()
-	version, err := status.DetectSchemaVersion(filepath.Join(projectDir, status.StatusFilename))
-	if err != nil {
-		return fmt.Errorf("failed to read STATUS file: %w", err)
-	}
-	if version != status.SchemaVersionV2 {
-		return fmt.Errorf("legacy Wayfinder status requires explicit migration before status")
-	}
 	currentStatus, err := status.ParseV2FromDir(projectDir)
 	if err != nil {
 		return fmt.Errorf("failed to read canonical V2 status: %w", err)
@@ -39,7 +31,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Source: %s\n", status.StatusFilename)
 	fmt.Printf("Project: %s\n", currentStatus.ProjectName)
-	fmt.Printf("Version: %s (canonical 9 phases)\n", status.WayfinderV2)
+	fmt.Printf("Schema: %s (canonical 9 phases)\n", status.SchemaVersion)
 	if !currentStatus.CreatedAt.IsZero() {
 		fmt.Printf("Started: %s\n", currentStatus.CreatedAt.Format("2006-01-02 15:04 MST"))
 	}

@@ -36,7 +36,6 @@ var residualTestSupportPackages = []string{
 	"engram/hooks-bin/internal/integration_test",
 	"engram/internal/testutil",
 	"internal/testutil",
-	"wayfinder/cmd/wayfinder-session/internal/integration",
 }
 
 type testSupportPackageGuardrailStateKey struct{}

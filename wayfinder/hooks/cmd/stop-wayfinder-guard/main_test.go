@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/pkg/stophook"
@@ -19,23 +18,22 @@ func writeStatus(t *testing.T, dir, projectStatus, currentPhase string) {
 	}
 }
 
-func writeLegacyStatus(t *testing.T, dir string) {
+func writeUnsupportedStatus(t *testing.T, dir string) {
 	t.Helper()
-	raw := "---\nschema_version: \"1.0\"\ncurrent_phase: D1\nstatus: in-progress\n---\n"
+	raw := "---\nschema_version: \"unsupported\"\ncurrent_waypoint: PROBLEM\nstatus: in-progress\n---\n"
 	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), []byte(raw), 0o600); err != nil {
-		t.Fatalf("write legacy status: %v", err)
+		t.Fatalf("write unsupported status: %v", err)
 	}
 }
 
-func requireBlockedMigration(t *testing.T, r *stophook.Result, check string) {
+func requireBlockedInvalidStatus(t *testing.T, r *stophook.Result, check string) {
 	t.Helper()
 	for _, finding := range r.Findings {
-		if finding.Check == check && finding.Severity == stophook.SeverityBlock &&
-			strings.Contains(finding.Suggestion, "wayfinder session migrate") {
+		if finding.Check == check && finding.Severity == stophook.SeverityBlock {
 			return
 		}
 	}
-	t.Fatalf("expected %s to block with explicit migration guidance, got %+v", check, r.Findings)
+	t.Fatalf("expected %s to block invalid status, got %+v", check, r.Findings)
 }
 
 func newResult() *stophook.Result { return &stophook.Result{HookName: "test"} }
@@ -120,14 +118,14 @@ func TestCheckPhase_NoStatusFile(t *testing.T) {
 	t.Errorf("expected Pass (graceful skip) when no status file, got %+v", r.Findings)
 }
 
-func TestCheckPhase_LegacyStatusRequiresMigration(t *testing.T) {
+func TestCheckPhase_UnsupportedStatusBlocks(t *testing.T) {
 	dir := t.TempDir()
-	writeLegacyStatus(t, dir)
+	writeUnsupportedStatus(t, dir)
 
 	r := newResult()
 	checkPhase(r, dir)
 
-	requireBlockedMigration(t, r, "phase")
+	requireBlockedInvalidStatus(t, r, "phase")
 }
 
 // --- checkRetrospective ---
@@ -218,12 +216,12 @@ func TestCheckRetrospective_ExistsMinimalContent_IsBlock(t *testing.T) {
 	t.Errorf("expected Block when retro is nearly empty, got %+v", r.Findings)
 }
 
-func TestCheckRetrospective_LegacyStatusRequiresMigration(t *testing.T) {
+func TestCheckRetrospective_UnsupportedStatusBlocks(t *testing.T) {
 	dir := t.TempDir()
-	writeLegacyStatus(t, dir)
+	writeUnsupportedStatus(t, dir)
 
 	r := newResult()
 	checkRetrospective(r, dir)
 
-	requireBlockedMigration(t, r, "retrospective")
+	requireBlockedInvalidStatus(t, r, "retrospective")
 }

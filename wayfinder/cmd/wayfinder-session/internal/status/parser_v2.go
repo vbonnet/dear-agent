@@ -28,6 +28,12 @@ func ParseV2(filePath string) (*StatusV2, error) {
 	if err := yaml.Unmarshal([]byte(yamlContent), &status); err != nil {
 		return nil, fmt.Errorf("failed to parse YAML: %w", err)
 	}
+	if status.SchemaVersion == "" {
+		return nil, fmt.Errorf("schema_version is required; expected %s", SchemaVersion)
+	}
+	if status.SchemaVersion != SchemaVersion {
+		return nil, fmt.Errorf("unsupported schema_version %q; expected %s", status.SchemaVersion, SchemaVersion)
+	}
 
 	return &status, nil
 }
@@ -64,7 +70,7 @@ func WriteV2ToDir(status *StatusV2, dir string) error {
 }
 
 // extractV2Frontmatter extracts YAML between --- delimiters
-// Similar to V1 but returns error for missing frontmatter since V2 is pure YAML
+// The canonical status is pure YAML between frontmatter delimiters.
 func extractV2Frontmatter(content string) (string, error) {
 	lines := strings.Split(content, "\n")
 	if len(lines) < 3 {
@@ -96,7 +102,7 @@ func extractV2Frontmatter(content string) (string, error) {
 	return strings.Join(yamlLines, "\n"), nil
 }
 
-// DetectSchemaVersion reads a file and detects whether it's V1 or V2
+// DetectSchemaVersion returns the canonical schema version or fails closed.
 func DetectSchemaVersion(filePath string) (string, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
@@ -105,11 +111,7 @@ func DetectSchemaVersion(filePath string) (string, error) {
 
 	yamlContent, err := extractV2Frontmatter(string(data))
 	if err != nil {
-		// Try V1 format
-		yamlContent, err = extractFrontmatter(string(data))
-		if err != nil {
-			return "", fmt.Errorf("failed to parse frontmatter: %w", err)
-		}
+		return "", fmt.Errorf("failed to parse canonical frontmatter: %w", err)
 	}
 
 	// Parse just the schema_version field
@@ -121,10 +123,18 @@ func DetectSchemaVersion(filePath string) (string, error) {
 	}
 
 	if metadata.SchemaVersion == "" {
-		return "1.0", nil // Default to V1
+		return "", fmt.Errorf("schema_version is required; expected %s", SchemaVersion)
+	}
+	if metadata.SchemaVersion != SchemaVersion {
+		return "", fmt.Errorf("unsupported schema_version %q; expected %s", metadata.SchemaVersion, SchemaVersion)
 	}
 
-	return metadata.SchemaVersion, nil
+	return SchemaVersion, nil
+}
+
+// DetectSchemaVersionFromDir validates the status schema in dir.
+func DetectSchemaVersionFromDir(dir string) (string, error) {
+	return DetectSchemaVersion(filepath.Join(dir, StatusFilename))
 }
 
 // NewStatusV2 creates a new V2 status with default values

@@ -37,9 +37,6 @@ type CodeVerificationCache struct {
 // Returns ValidationError if any verification check fails.
 // This is Gate 9: Working Code Verification.
 func validateCodeDeliverables(phaseName, projectDir string) error {
-	// V1 Simplified: Scan project directory for code files instead of querying bead database
-	// V2 will integrate with bead database via `bd list --phase {phaseName}` command
-
 	// Find all code files in project directory
 	codeFiles, err := findCodeFiles(projectDir)
 	if err != nil {
@@ -65,7 +62,6 @@ func validateCodeDeliverables(phaseName, projectDir string) error {
 	}
 
 	// Check cache (skip validation if files unchanged)
-	// V1: Simplified cache key using "gate9-verification" as bead ID
 	beadID := "gate9-verification"
 	cache, cacheHit := checkCodeVerificationCache(projectDir, beadID, codeFiles, codeFiles)
 	if cacheHit && cache.BuildPassed && cache.TestPassed && cache.ArtifactsPassed {
@@ -103,7 +99,7 @@ func validateCodeDeliverables(phaseName, projectDir string) error {
 	sourceHash, err := calculateFilesHash(codeFiles)
 	if err == nil {
 		newCache.SourceHash = sourceHash
-		newCache.TestHash = sourceHash // V1: same as source hash
+		newCache.TestHash = sourceHash
 	}
 
 	// Update cache (non-critical, don't fail on error)

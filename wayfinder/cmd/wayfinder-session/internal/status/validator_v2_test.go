@@ -180,18 +180,6 @@ func TestValidatePhaseHistory(t *testing.T) {
 			errMsg:  "invalid waypoint name",
 		},
 		{
-			name: "legacy phase S4",
-			history: []PhaseHistory{
-				{
-					Name:      "S4",
-					Status:    PhaseStatusV2Completed,
-					StartedAt: time.Now(),
-				},
-			},
-			wantErr: true,
-			errMsg:  "cannot use legacy waypoint 'S4'",
-		},
-		{
 			name: "completed without completed_at",
 			history: []PhaseHistory{
 				{

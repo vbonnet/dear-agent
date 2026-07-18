@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -39,13 +38,6 @@ func runEnd(cmd *cobra.Command, args []string) error {
 }
 
 func runEndInDir(projectDir, newStatus string) error {
-	version, err := status.DetectSchemaVersion(filepath.Join(projectDir, status.StatusFilename))
-	if err != nil {
-		return fmt.Errorf("failed to read STATUS file: %w", err)
-	}
-	if version != status.SchemaVersionV2 {
-		return fmt.Errorf("legacy Wayfinder status requires explicit migration before end")
-	}
 	return runEndV2(projectDir, newStatus)
 }
 

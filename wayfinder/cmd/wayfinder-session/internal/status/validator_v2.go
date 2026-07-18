@@ -156,11 +156,6 @@ func validateWaypointHistory(status *StatusV2) error {
 			errors = append(errors, err.Error())
 		}
 
-		// Check for legacy waypoints (S4, S5, S9, S10) that were merged
-		legacyWaypoints := []string{"S4", "S5", "S9", "S10"}
-		if contains(legacyWaypoints, waypoint.Name) {
-			errors = append(errors, fmt.Sprintf("waypoint_history[%d]: cannot use legacy waypoint '%s' (merged in V2)", i, waypoint.Name))
-		}
 	}
 
 	if len(errors) > 0 {

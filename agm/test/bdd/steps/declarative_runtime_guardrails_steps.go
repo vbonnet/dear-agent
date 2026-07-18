@@ -39,7 +39,6 @@ var declarativeRuntimeDirs = []string{
 	"pkg/codeintel/rules/python",
 	"pkg/codeintel/rules/typescript",
 	"wayfinder/.claude-plugin",
-	"wayfinder/cmd/wayfinder-session/internal/integration/.github/workflows",
 	"wayfinder/cmd/wayfinder-session/schema",
 }
 

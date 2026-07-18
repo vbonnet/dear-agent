@@ -143,13 +143,13 @@ func isProjectCompleteWithDepth(dir string, depth int) (bool, error) {
 	}
 
 	// Read project status
-	st, err := status.ReadFrom(dir)
+	st, err := status.ParseV2FromDir(dir)
 	if err != nil {
 		return false, fmt.Errorf("failed to read project status: %w", err)
 	}
 
 	// Check 1: Is overall status "completed"?
-	if st.Status == status.StatusCompleted {
+	if st.Status == status.StatusV2Completed {
 		// Still need to verify children are complete
 		if status.HasChildren(dir) {
 			err := checkChildrenCompleteWithDepth(dir, depth)
@@ -165,9 +165,9 @@ func isProjectCompleteWithDepth(dir string, depth int) (bool, error) {
 	}
 
 	// Check 2: Are all phases completed?
-	allPhasesComplete := len(st.Phases) != 0
+	allPhasesComplete := len(st.WaypointHistory) != 0
 
-	for _, phase := range st.Phases {
+	for _, phase := range st.WaypointHistory {
 		if phase.Status != status.PhaseStatusCompleted {
 			allPhasesComplete = false
 			break
