@@ -71,11 +71,10 @@ func documentedShellCommands(t *testing.T, path string) []string {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, "```") {
+		if language, found := strings.CutPrefix(line, "```"); found {
 			if inShellFence {
 				inShellFence = false
 			} else {
-				language := strings.TrimPrefix(line, "```")
 				inShellFence = language == "sh" || language == "bash"
 			}
 			continue
