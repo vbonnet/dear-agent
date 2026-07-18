@@ -1,6 +1,6 @@
 # ADR-002: VROOM Execution Architecture
 
-**Status**: Accepted (2026-05-17; amended 2026-07-17)
+**Status**: Accepted (2026-05-17; amended 2026-07-18)
 
 **Supersedes** `agm/docs/adr/ADR-020`…`ADR-025`, which described an
 inaccurate five-role mesh (Verifier/Requester/Orchestrator/Overseer/
@@ -47,6 +47,19 @@ Three load-bearing invariants:
   merged, deployed when applicable, and verified. PR creation is an intermediate
   state, not completion.
 
+### Alignment and ownership sources
+
+MISSION.md is canonical for project purpose and the VROOM/AGM ownership
+boundary. `VALUES.md` and `GOALS.md` are subordinate, qualitative guidance. No
+runtime evaluates a values hierarchy or weighted goal function; presenting
+those documents as an executable optimization model would reintroduce the
+architecture this ADR supersedes.
+
+The ownership boundary follows the framework/tool split: VROOM decides what to
+prioritize and dispatch, supervises the work, and verifies its output. AGM owns
+the session lifecycle mechanisms VROOM invokes and observes. AGM session state
+is evidence for a VROOM decision, not the decision itself.
+
 ### Per-task triad
 
 Every task is owned by three agents: **Primary** (does it), **Secondary**
@@ -81,18 +94,18 @@ as a CONTEXT.md collision and a follow-up.
 
 ### Vocabulary lives in [/CONTEXT.md](../../CONTEXT.md), not here
 
-CONTEXT.md is normative for role definitions; this ADR records the
-decision and its trade-offs. If they disagree, CONTEXT.md wins for
-definitions, this ADR wins for rationale. Wayfinder plans → VROOM
-executes → AGM is the tool VROOM drives → DEAR (Define/Execute/Audit/
-Retro) is the per-task retrospective loop. See
+CONTEXT.md is normative for vocabulary, MISSION.md for project purpose and
+ownership, and this ADR for the architecture decision and its trade-offs.
+Wayfinder plans → VROOM executes → AGM is the tool VROOM drives → DEAR
+(Define/Execute/Audit/Retro) is the per-task retrospective loop. See
 [/CONTEXT.md § The Four Frameworks](../../CONTEXT.md#the-four-frameworks--and-how-they-relate).
 The "VROOM" backronym is formally retired; it is a proper name.
 
 ### Cross-references
 
 - [/CONTEXT.md](../../CONTEXT.md), [ADR-001](ADR-001-monorepo-consolidation.md)
-- [docs/alignment/MISSION.md](../alignment/MISSION.md),
+- [docs/alignment/MISSION.md](../alignment/MISSION.md) (canonical purpose and
+  ownership),
   [VALUES.md](../alignment/VALUES.md),
   [VISION.md](../alignment/VISION.md),
   [GOALS.md](../alignment/GOALS.md)

@@ -13,13 +13,15 @@ codebase, that collision is documented in
 [§ Known Terminology Collisions](#known-terminology-collisions) and treated as a
 bug to be paid down, not a fact to live with.
 
-> **Status note (2026-05-17):** This file was created alongside a correction of
+> **Status note (2026-07-18):** This file was created alongside a correction of
 > the VROOM architecture docs. Several pre-existing documents described an
 > earlier, inaccurate VROOM model (a five-role "Verifier/Requester/Orchestrator/
 > Overseer/Meta-Orchestrator" mesh with a lexicographic value evaluator). That
-> model is **superseded**. This file and
-> [docs/adr/ADR-002](docs/adr/ADR-002-vroom-execution-architecture.md) are
-> authoritative; anything that disagrees is stale and should be fixed to match.
+> model is **superseded**. This file owns vocabulary,
+> [MISSION.md](docs/alignment/MISSION.md) owns current project purpose and the
+> VROOM/AGM ownership boundary, and
+> [ADR-002](docs/adr/ADR-002-vroom-execution-architecture.md) owns the
+> architecture rationale.
 
 ---
 
@@ -205,6 +207,10 @@ a Worker" is a VROOM statement; "`agm session new` starts a tmux session" is an
 AGM statement. AGM has no opinion about roadmaps, prioritization, or supervisory
 roles — that is all VROOM.
 
+VROOM owns prioritization, dispatch decisions, supervision, and output
+verification. AGM owns session lifecycle mechanics: session creation, process
+execution, messaging, monitoring telemetry, and archival.
+
 AGM has its own internal ADRs under `agm/docs/adr/` and `agm/cmd/.../adr/`. Those
 are legitimately AGM-scoped. **Cross-cutting / above-AGM architecture (like
 VROOM) belongs in the top-level [`docs/adr/`](docs/adr/), not under `agm/`.**
@@ -268,12 +274,16 @@ These are or were **bugs in the vocabulary**, recorded here per the "call
 conflicts out immediately" rule. Some entries are resolved by ADRs and remain
 listed so older docs and identifiers can be interpreted correctly.
 
-1. **"VROOM" — old five-role model vs. corrected model.**
+1. **"VROOM" — old five-role model vs. corrected model — RESOLVED
+   (2026-07-18).**
    Many pre-2026-05-17 docs describe VROOM as Verifier/Requester/Orchestrator/
    Overseer/Meta-Orchestrator with a lexicographic value evaluator. That model
-   is superseded by the one in this file and
-   [docs/adr/ADR-002](docs/adr/ADR-002-vroom-execution-architecture.md). The
-   superseded ADRs (`agm/docs/adr/ADR-020`…`ADR-025`) are stubbed with redirects.
+   is superseded. Current purpose and ownership live in
+   [MISSION.md](docs/alignment/MISSION.md), vocabulary lives in this file, and
+   architecture rationale lives in
+   [ADR-002](docs/adr/ADR-002-vroom-execution-architecture.md). The superseded
+   ADRs (`agm/docs/adr/ADR-020`…`ADR-025`) remain redirect stubs for historical
+   links.
 
 2. **"DEAR" — resolved two-level model plus historical identifiers.**
    - **(a) Process / retrospective loop:** Define → **Execute** → Audit →
