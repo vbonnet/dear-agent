@@ -13,3 +13,4 @@
 ## Test Traceability
 
 - Unit package: `agm/internal/pluginhash`
+- BDD feature: `agm/test/bdd/features/agm_product_surface_guardrails.feature`
