@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
 )
 
 var updatePluginSkills = flag.Bool("update-plugin-skills", false, "rewrite generated AGM plugin skills")
@@ -257,6 +258,30 @@ func TestGeneratedPluginSkillsIncludeBinaryPathAndGovernedPermissions(t *testing
 		}
 		if strings.Contains(text, ":*)") {
 			t.Errorf("%s uses retired colon permission syntax", name)
+		}
+	}
+}
+
+func TestPluginHarnessGuidanceMatchesRegistry(t *testing.T) {
+	commandsDir := filepath.Join("..", "..", "agm-plugin", "commands")
+	for _, filename := range []string{"agm-assoc.md", "agm-new.md"} {
+		content, err := os.ReadFile(filepath.Join(commandsDir, filename))
+		if err != nil {
+			t.Fatalf("read %s: %v", filename, err)
+		}
+		text := string(content)
+		for _, harness := range agent.ActiveHarnesses() {
+			if !strings.Contains(text, "`"+harness+"`") {
+				t.Errorf("%s omits active harness %q", filename, harness)
+			}
+		}
+		for _, harness := range agent.DeprecatedHarnesses() {
+			if !strings.Contains(text, "`"+harness+"`") {
+				t.Errorf("%s omits deprecated compatibility harness %q", filename, harness)
+			}
+			if !strings.Contains(text, "deprecated") {
+				t.Errorf("%s names deprecated harness %q without a deprecation warning", filename, harness)
+			}
 		}
 	}
 }
