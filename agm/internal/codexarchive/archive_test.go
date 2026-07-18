@@ -68,6 +68,31 @@ func TestArchiveCodexThreadUsesOnlyThreadScopedControl(t *testing.T) {
 	}
 }
 
+func TestArchiveCodexThreadFallsBackThroughUnixRemote(t *testing.T) {
+	origArchiver := newThreadArchiver
+	origFallback := runCodexRemoteArchiveFn
+	t.Cleanup(func() {
+		newThreadArchiver = origArchiver
+		runCodexRemoteArchiveFn = origFallback
+	})
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", fakeCodexPath(t, home))
+	newThreadArchiver = func() codexThreadArchiver { return failingThreadArchiver{} }
+	runCodexRemoteArchiveFn = runCodexRemoteArchive
+
+	if err := archiveCodexThread(context.Background(), "thread-456"); err != nil {
+		t.Fatalf("archiveCodexThread() error = %v", err)
+	}
+
+	args := strings.TrimSpace(readFakeCodexArgs(t, home))
+	want := "archive --remote unix:// thread-456"
+	if args != want {
+		t.Fatalf("codex args = %q, want %q", args, want)
+	}
+}
+
 type fakeThreadArchiver struct {
 	threadID string
 }
@@ -75,6 +100,12 @@ type fakeThreadArchiver struct {
 func (f *fakeThreadArchiver) ArchiveThread(_ context.Context, threadID string) error {
 	f.threadID = threadID
 	return nil
+}
+
+type failingThreadArchiver struct{}
+
+func (failingThreadArchiver) ArchiveThread(context.Context, string) error {
+	return os.ErrClosed
 }
 
 func TestArchiveResolvesCodexSessionByWorkingDirectory(t *testing.T) {
