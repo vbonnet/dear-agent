@@ -85,5 +85,7 @@ launch policy.
   lifecycle mutation.
 - A failed creation removes only artifacts created by that attempt; reused tmux
   sessions and pre-existing manifest directories are preserved.
+- Creation rollback reports cleanup failures, and optional manifest-directory
+  failure leaves no path for surface completion to treat as durable.
 - CLI and MCP can retain different user interaction while sharing the same
   state transition order and caller provenance.

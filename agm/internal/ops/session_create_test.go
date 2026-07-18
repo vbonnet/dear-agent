@@ -30,6 +30,15 @@ type createOnlyTmux struct {
 	session.TmuxInterface
 }
 
+type createFailingKillTmux struct {
+	session.TmuxInterface
+	err error
+}
+
+func (t *createFailingKillTmux) KillSession(string) error {
+	return t.err
+}
+
 type createTestRuntime struct {
 	launch   func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error)
 	complete func(context.Context, CreateSessionCompletion) error
@@ -581,6 +590,59 @@ func TestCreateSession_RollsBackEveryPostTmuxFailure(t *testing.T) {
 				t.Fatalf("storage deletes = %d, want %d", got, boolInt(tt.wantRegistration))
 			}
 		})
+	}
+}
+
+func TestPrepareCreateManifestDirOptionalFailureReturnsNoPath(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	manifestPath, registrationAllowed, created, err := prepareCreateManifestDir(&CreateSessionRequest{
+		ManifestDir:         filepath.Join(blocker, "session"),
+		ManifestDirOptional: true,
+	})
+	if err != nil {
+		t.Fatalf("prepareCreateManifestDir: %v", err)
+	}
+	if manifestPath != "" {
+		t.Fatalf("manifest path = %q, want empty path after optional mkdir failure", manifestPath)
+	}
+	if registrationAllowed || created {
+		t.Fatalf("registrationAllowed = %v, created = %v; want both false", registrationAllowed, created)
+	}
+}
+
+func TestRollbackCreateSessionReportsCleanupFailures(t *testing.T) {
+	store := &createMockStorage{deleteErr: errors.New("delete failed")}
+	tmuxMock := &createFailingKillTmux{
+		TmuxInterface: session.NewMockTmux(),
+		err:           errors.New("kill failed"),
+	}
+
+	stderrPath := filepath.Join(t.TempDir(), "stderr")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldStderr := os.Stderr
+	os.Stderr = stderrFile
+	t.Cleanup(func() { os.Stderr = oldStderr })
+
+	rollbackCreateSession(&OpContext{Tmux: tmuxMock}, &CreateSessionRequest{}, store, "rollback", "rollback-id", true, false, true)
+	os.Stderr = oldStderr
+	if err := stderrFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	output, err := os.ReadFile(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"delete session registration", "delete failed", "kill tmux session", "kill failed"} {
+		if !strings.Contains(string(output), want) {
+			t.Fatalf("rollback stderr = %q, want %q", output, want)
+		}
 	}
 }
 

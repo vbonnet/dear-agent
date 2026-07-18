@@ -64,6 +64,8 @@ Provide a production-ready CLI that:
 
 **CLI-19** When the CLI launches a new session or a resume fallback starts a fresh harness, the system shall obtain the shell command from the shared ops command builder so model resolution, permission flags, persistence, telemetry, and credential forwarding do not drift between creation paths.
 
+**CLI-20** When current-tmux session creation cannot commit its manifest, the system shall record the commit failure in the CLI debug log instead of silently discarding it.
+
 ## Requirements
 
 ### Functional Requirements

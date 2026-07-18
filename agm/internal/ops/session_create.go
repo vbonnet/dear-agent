@@ -370,7 +370,7 @@ func prepareCreateManifestDir(req *CreateSessionRequest) (manifestPath string, r
 			return "", false, false, ErrStorageError("manifest.mkdir", mkdirErr)
 		}
 		fmt.Fprintf(os.Stderr, "Warning: failed to create manifest directory: %v; proceeding without manifest registration\n", mkdirErr)
-		return manifestPath, false, false, nil
+		return "", false, false, nil
 	}
 	return manifestPath, true, created, nil
 }
@@ -575,14 +575,20 @@ func createCallerSource(req *CreateSessionRequest) string {
 
 func rollbackCreateSession(opCtx *OpContext, req *CreateSessionRequest, store dolt.Storage, name, sessionID string, createdTmux, createdManifestDir, registered bool) {
 	if registered && store != nil && sessionID != "" {
-		_ = store.DeleteSession(sessionID)
+		if err := store.DeleteSession(sessionID); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to delete session registration %q during create rollback: %v\n", sessionID, err)
+		}
 	}
 	if createdTmux {
 		if killer, ok := opCtx.Tmux.(session.TmuxSessionKiller); ok {
-			_ = killer.KillSession(name)
+			if err := killer.KillSession(name); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to kill tmux session %q during create rollback: %v\n", name, err)
+			}
 		}
 		if createdManifestDir && req.ManifestDir != "" {
-			_ = os.RemoveAll(req.ManifestDir)
+			if err := os.RemoveAll(req.ManifestDir); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to remove manifest directory %q during create rollback: %v\n", req.ManifestDir, err)
+			}
 		}
 	}
 }

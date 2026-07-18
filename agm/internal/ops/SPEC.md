@@ -131,19 +131,23 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 ### Shared Session Creation Lifecycle
 
-**OPS-53** When the CLI or MCP surface creates a session, the surface shall delegate tmux creation, optional Codex remote setup, launch-command construction, manifest registration, completion ordering, and rollback to `CreateSessionWithContext`.
+**OPS-58** When the CLI or MCP surface creates a session, the surface shall delegate tmux creation, optional Codex remote setup, launch-command construction, manifest registration, completion ordering, and rollback to `CreateSessionWithContext`.
 
-**OPS-54** When `CreateSessionWithContext` advances a new session, the system shall order the durable lifecycle as tmux creation, bounded Codex setup when applicable, runtime launch, manifest registration, and runtime completion.
+**OPS-59** When `CreateSessionWithContext` advances a new session, the system shall order the durable lifecycle as tmux creation, bounded Codex setup when applicable, runtime launch, manifest registration, and runtime completion.
 
-**OPS-55** When a creation request declares a caller surface, the system shall return that caller as result provenance and persist a matching `source:<caller>` manifest tag.
+**OPS-60** When a creation request declares a caller surface, the system shall return that caller as result provenance and persist a matching `source:<caller>` manifest tag.
 
-**OPS-56** If any creation step fails after a new tmux session is created, the system shall remove the newly-created tmux session, delete any completed session registration, and remove only the manifest directory created by that operation.
+**OPS-61** If any creation step fails after a new tmux session is created, the system shall remove the newly-created tmux session, delete any completed session registration, and remove only the manifest directory created by that operation.
 
-**OPS-57** If creation reuses an existing tmux session or manifest directory, the system shall preserve those pre-existing artifacts during rollback.
+**OPS-62** If creation reuses an existing tmux session or manifest directory, the system shall preserve those pre-existing artifacts during rollback.
 
-**OPS-58** When optional Codex remote setup is attempted, the system shall apply a finite deadline to the complete remote-control setup sequence and shall honor cancellation from the calling surface.
+**OPS-63** When optional Codex remote setup is attempted, the system shall apply a finite deadline to the complete remote-control setup sequence and shall honor cancellation from the calling surface.
 
-**OPS-59** When any creation adapter or fresh-session resume fallback builds a harness command, the system shall use `BuildHarnessLaunchCommand` rather than assemble a surface-specific command variant.
+**OPS-64** When any creation adapter or fresh-session resume fallback builds a harness command, the system shall use `BuildHarnessLaunchCommand` rather than assemble a surface-specific command variant.
+
+**OPS-65** When create-session rollback cannot delete a registration, stop a newly-created tmux session, or remove its newly-created manifest directory, the system shall report the cleanup failure instead of silently discarding it.
+
+**OPS-66** When an optional manifest directory cannot be created, the system shall continue without registration and shall provide no manifest path to runtime completion.
 
 **OPS-36** While a session's state is OFFLINE, READY, or DONE, the stall detector shall skip error-loop detection for that session.
 

@@ -53,7 +53,7 @@ func startClaudeInCurrentTmux(sessionName string) error {
 		},
 		complete: func(_ context.Context, completion ops.CreateSessionCompletion) error {
 			if completion.ManifestPath != "" {
-				_ = git.CommitManifest(completion.ManifestPath, "create", sessionName)
+				commitCurrentTmuxManifest(completion.ManifestPath, sessionName)
 			}
 			ui.PrintSuccess("Session metadata finalized")
 			updateVSCodeTabTitle(sessionName)
@@ -107,6 +107,12 @@ func startClaudeInCurrentTmux(sessionName string) error {
 
 	ui.PrintSuccess(fmt.Sprintf("%s session started in current tmux!", harnessName))
 	return nil
+}
+
+func commitCurrentTmuxManifest(manifestPath, sessionName string) {
+	if err := git.CommitManifest(manifestPath, "create", sessionName); err != nil {
+		debug.Log("manifest commit skipped: %v", err)
+	}
 }
 
 // startCurrentTmuxHarness dispatches the per-harness startup flow for the
