@@ -80,8 +80,8 @@ func commonDocumentViolations(root, relative string, data []byte, maxLines int) 
 			continue
 		}
 		var targetPath string
-		if strings.HasPrefix(pathPart, "/") {
-			targetPath = filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(pathPart, "/")))
+		if trimmed, ok := strings.CutPrefix(pathPart, "/"); ok {
+			targetPath = filepath.Join(root, filepath.FromSlash(trimmed))
 		} else {
 			targetPath = filepath.Join(root, filepath.Dir(filepath.FromSlash(relative)), filepath.FromSlash(pathPart))
 		}

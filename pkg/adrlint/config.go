@@ -61,20 +61,35 @@ func validatePolicy(policy Policy) error {
 	if len(policy.Scopes) == 0 {
 		return fmt.Errorf("adrlint: adr-governance.scopes must not be empty")
 	}
+	seen, err := validateScopes(policy.Scopes)
+	if err != nil {
+		return err
+	}
+	if err := validateAggregates(policy.Aggregates, seen); err != nil {
+		return err
+	}
+	return validateExclusions(policy.Exclusions)
+}
+
+func validateScopes(scopes []Scope) (map[string]bool, error) {
 	seen := map[string]bool{}
-	for i, scope := range policy.Scopes {
+	for i, scope := range scopes {
 		if !cleanRelativePath(scope.Path) {
-			return fmt.Errorf("adrlint: scopes[%d].path must be a clean repository-relative path", i)
+			return nil, fmt.Errorf("adrlint: scopes[%d].path must be a clean repository-relative path", i)
 		}
 		if seen[scope.Path] {
-			return fmt.Errorf("adrlint: duplicate scope path %q", scope.Path)
+			return nil, fmt.Errorf("adrlint: duplicate scope path %q", scope.Path)
 		}
 		seen[scope.Path] = true
 		if scope.Index == "" || filepath.Base(scope.Index) != scope.Index || filepath.Clean(scope.Index) != scope.Index {
-			return fmt.Errorf("adrlint: scopes[%d].index must be one clean filename", i)
+			return nil, fmt.Errorf("adrlint: scopes[%d].index must be one clean filename", i)
 		}
 	}
-	for i, aggregate := range policy.Aggregates {
+	return seen, nil
+}
+
+func validateAggregates(aggregates []Aggregate, seen map[string]bool) error {
+	for i, aggregate := range aggregates {
 		if !cleanRelativePath(aggregate.Path) || path.Base(aggregate.Path) != "ADR.md" {
 			return fmt.Errorf("adrlint: aggregates[%d].path must be a clean repository-relative ADR.md path", i)
 		}
@@ -83,7 +98,11 @@ func validatePolicy(policy Policy) error {
 		}
 		seen[aggregate.Path] = true
 	}
-	for i, exclusion := range policy.Exclusions {
+	return nil
+}
+
+func validateExclusions(exclusions []Exclusion) error {
+	for i, exclusion := range exclusions {
 		if strings.TrimSpace(exclusion.Match) == "" {
 			return fmt.Errorf("adrlint: exclusions[%d].match must not be empty", i)
 		}
