@@ -86,21 +86,10 @@ jobs:
           go build -o build/dead-links ./tools/dead-links
 
       - name: Check dead relative links in Markdown
-        # Informational — broken external URLs are network-unreliable in CI;
-        # only relative file links are checked. A non-zero exit is surfaced as
-        # a warning annotation, not a job failure, so legitimate CI-skip PRs
-        # (e.g. docs-only rewrites) don't block on broken links until all
-        # existing breakage is cleared. Ratchet path: drop continue-on-error
-        # once the repo is clean.
-        continue-on-error: true
-        run: |
-          ./build/dead-links --root . 2>&1 | tee dead-links-report.txt
-          exit_code=${PIPESTATUS[0]}
-          if [ "${exit_code}" -ne 0 ]; then
-            echo "::warning::dead-links found broken relative links — see the run summary."
-            cat dead-links-report.txt >> "$GITHUB_STEP_SUMMARY"
-          fi
-          exit "${exit_code}"
+        # Network URLs remain out of scope. The checked-in baseline makes
+        # existing local debt explicit while both new findings and stale
+        # exceptions fail this job.
+        run: ./build/dead-links --root . --baseline .dead-links-baseline.txt
 
       - name: Gate on critical verdict
         # Degraded (exit 1) is informational and stays green; only a critical

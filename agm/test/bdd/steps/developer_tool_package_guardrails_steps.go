@@ -3,7 +3,10 @@ package steps
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/cucumber/godog"
 
@@ -37,6 +40,46 @@ func RegisterDeveloperToolPackageGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^developer tooling is invoked by harness "([^"]*)" with model family "([^"]*)"$`, developerToolingIsInvoked)
 	ctx.Step(`^AGM validates the developer tooling parity route$`, agmValidatesDeveloperToolingParityRoute)
 	ctx.Step(`^the developer tooling contract should remain provider neutral$`, developerToolingContractRemainsProviderNeutral)
+	ctx.Step(`^the Markdown link integrity checker is configured$`, markdownLinkIntegrityCheckerIsConfigured)
+	ctx.Step(`^AGM validates the Markdown link integrity route$`, agmValidatesMarkdownLinkIntegrityRoute)
+	ctx.Step(`^fenced code, tracked hidden files, anchors, and baseline debt should be governed$`, markdownLinkIntegrityContractIsGoverned)
+}
+
+func markdownLinkIntegrityCheckerIsConfigured() error {
+	root := packageSpecBDDRepoRoot()
+	for _, rel := range []string{"tools/dead-links/checker.go", "tools/dead-links/SPEC.md", ".dead-links-baseline.txt"} {
+		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
+			return fmt.Errorf("markdown link integrity file %s: %w", rel, err)
+		}
+	}
+	return nil
+}
+
+func agmValidatesMarkdownLinkIntegrityRoute() error {
+	root := packageSpecBDDRepoRoot()
+	workflow, err := os.ReadFile(filepath.Join(root, ".github/workflows/health-check.yml"))
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(string(workflow), "--baseline .dead-links-baseline.txt") {
+		return fmt.Errorf("health check does not enforce the dead-link baseline")
+	}
+	return nil
+}
+
+func markdownLinkIntegrityContractIsGoverned() error {
+	root := packageSpecBDDRepoRoot()
+	source, err := os.ReadFile(filepath.Join(root, "tools/dead-links/checker.go"))
+	if err != nil {
+		return err
+	}
+	text := string(source)
+	for _, marker := range []string{"goldmark", "git\", \"-C\"", "explicitAnchorRe", "applyBaseline"} {
+		if !strings.Contains(text, marker) {
+			return fmt.Errorf("markdown link integrity implementation missing %q", marker)
+		}
+	}
+	return nil
 }
 
 func developerToolingIsInvoked(ctx context.Context, harness, family string) error {

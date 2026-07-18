@@ -76,3 +76,8 @@ Feature: Developer tool package guardrails
       | opencode-cli | deepseek  |
       | opencode-cli | nemotron  |
       | opencode-cli | qwen      |
+
+  Scenario: Markdown link integrity is a tracked-file debt ratchet
+    Given the Markdown link integrity checker is configured
+    When AGM validates the Markdown link integrity route
+    Then fenced code, tracked hidden files, anchors, and baseline debt should be governed
