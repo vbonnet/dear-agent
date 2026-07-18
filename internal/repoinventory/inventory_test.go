@@ -49,6 +49,17 @@ func TestScanFallbackSkipsRepositoryOutputsAndDependencies(t *testing.T) {
 	}
 }
 
+func TestScanDoesNotDiscardGitIgnorePolicyWhenGitFails(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeFile(t, root, ".git", "gitdir: /definitely/missing\n")
+	writeFile(t, root, "generated/uncovered.go", "package generated\n")
+
+	if _, err := Scan(root); err == nil {
+		t.Fatal("Scan succeeded through filesystem fallback after Git inventory failed")
+	}
+}
+
 func TestScanReturnsStableRelativePathsAndExecutableMode(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

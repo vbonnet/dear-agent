@@ -82,12 +82,9 @@ func Scan(root string) ([]File, error) {
 		return nil, fmt.Errorf("inventory root %q is not a directory", root)
 	}
 
-	paths, err := gitFiles(absRoot)
+	paths, err := repositoryFiles(absRoot)
 	if err != nil {
-		paths, err = filesystemFiles(absRoot)
-		if err != nil {
-			return nil, err
-		}
+		return nil, err
 	}
 
 	files := make([]File, 0, len(paths))
@@ -112,6 +109,32 @@ func Scan(root string) ([]File, error) {
 	}
 	slices.SortFunc(files, func(a, b File) int { return strings.Compare(a.Path, b.Path) })
 	return files, nil
+}
+
+func repositoryFiles(root string) ([]string, error) {
+	marker := filepath.Join(root, ".git")
+	markerInfo, markerErr := os.Lstat(marker)
+	switch {
+	case markerErr == nil:
+		if markerInfo.IsDir() {
+			_, headErr := os.Lstat(filepath.Join(marker, "HEAD"))
+			if os.IsNotExist(headErr) {
+				return filesystemFiles(root)
+			}
+			if headErr != nil {
+				return nil, fmt.Errorf("stat Git HEAD marker: %w", headErr)
+			}
+		}
+		paths, err := gitFiles(root)
+		if err != nil {
+			return nil, fmt.Errorf("list Git repository files: %w", err)
+		}
+		return paths, nil
+	case !os.IsNotExist(markerErr):
+		return nil, fmt.Errorf("stat Git worktree marker: %w", markerErr)
+	default:
+		return filesystemFiles(root)
+	}
 }
 
 func gitFiles(root string) ([]string, error) {

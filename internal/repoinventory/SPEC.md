@@ -15,13 +15,15 @@ nested-worktree, and VCS directories.
 
 **REPO-INV-02** When Git marks a repository path ignored, the system shall exclude that path from inventory results.
 
-**REPO-INV-03** When Git inventory is unavailable, the system shall fall back to a filesystem walk using the same excluded-directory policy.
+**REPO-INV-03** When a scan root is not a Git worktree, the system shall fall back to a filesystem walk using the same excluded-directory policy.
 
 **REPO-INV-04** When repository files are returned, the system shall sort their slash-normalized paths relative to the requested scan root.
 
 **REPO-INV-05** When repository files are returned, the system shall retain file-mode metadata needed to distinguish executable sources.
 
 **REPO-INV-06** When inventory traverses repository content, the system shall exclude VCS, nested-worktree, dependency, generated-output, and test-fixture directories.
+
+**REPO-INV-07** When Git inventory fails for a Git worktree, the system shall return the failure instead of silently falling back to a filesystem walk that could include ignored files.
 
 ## BDD Traceability
 
