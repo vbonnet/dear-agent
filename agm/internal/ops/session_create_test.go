@@ -29,6 +29,25 @@ type createOnlyTmux struct {
 	session.TmuxInterface
 }
 
+type createTestRuntime struct {
+	launch   func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error)
+	complete func(context.Context, CreateSessionCompletion) error
+}
+
+func (r *createTestRuntime) Launch(ctx context.Context, spec HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+	if r.launch == nil {
+		return CreateSessionLaunchResult{}, nil
+	}
+	return r.launch(ctx, spec)
+}
+
+func (r *createTestRuntime) Complete(ctx context.Context, completion CreateSessionCompletion) error {
+	if r.complete == nil {
+		return nil
+	}
+	return r.complete(ctx, completion)
+}
+
 func (s *createMockStorage) CreateSession(m *manifest.Manifest) error {
 	if s.createOrder != nil {
 		*s.createOrder = append(*s.createOrder, "register")
@@ -474,41 +493,37 @@ func TestCreateSession_LifecycleOrder(t *testing.T) {
 	manifestDir := filepath.Join(t.TempDir(), "ordered")
 	var order []string
 	store := &createMockStorage{createOrder: &order}
-	hooks := &CreateSessionHooks{
-		AfterTmuxReady: func(context.Context, string, bool) error {
-			order = append(order, "tmux")
-			return nil
-		},
-		Launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+	tmuxMock := session.NewMockTmux()
+	runtime := &createTestRuntime{
+		launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			if !tmuxMock.Sessions["ordered"] {
+				t.Fatal("runtime launch ran before tmux creation")
+			}
 			order = append(order, "launch")
 			return CreateSessionLaunchResult{}, nil
 		},
-		OpenStorage: func(context.Context) (dolt.Storage, func(), error) {
-			order = append(order, "storage")
-			return store, func() { order = append(order, "cleanup") }, nil
-		},
-		AfterRegister: func(context.Context, *manifest.Manifest, string) error {
-			order = append(order, "after-register")
-			return nil
-		},
-		PostCreate: func(context.Context, *manifest.Manifest, CreateSessionLaunchResult) error {
-			order = append(order, "post-create")
-			return nil
-		},
-		Finalize: func(context.Context, *manifest.Manifest) error {
-			order = append(order, "finalize")
+		complete: func(context.Context, CreateSessionCompletion) error {
+			order = append(order, "complete")
 			return nil
 		},
 	}
 
-	_, err := CreateSessionWithContext(context.Background(), &OpContext{Tmux: session.NewMockTmux()}, &CreateSessionRequest{
+	opCtx := &OpContext{
+		Tmux:            tmuxMock,
+		CreationRuntime: runtime,
+		OpenSessionStorage: func(context.Context) (dolt.Storage, func(), error) {
+			order = append(order, "storage")
+			return store, func() { order = append(order, "cleanup") }, nil
+		},
+	}
+	_, err := CreateSessionWithContext(context.Background(), opCtx, &CreateSessionRequest{
 		Cwd: dir, Title: "ordered", Model: "sonnet", Harness: "claude-code",
-		AllowEmptyPrompt: true, RequireStorage: true, ManifestDir: manifestDir, Hooks: hooks,
+		AllowEmptyPrompt: true, RequireStorage: true, ManifestDir: manifestDir,
 	})
 	if err != nil {
 		t.Fatalf("CreateSessionWithContext: %v", err)
 	}
-	want := []string{"tmux", "launch", "storage", "register", "after-register", "post-create", "finalize", "cleanup"}
+	want := []string{"launch", "storage", "register", "complete", "cleanup"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("lifecycle order = %v, want %v", order, want)
 	}
@@ -522,9 +537,7 @@ func TestCreateSession_RollsBackEveryPostTmuxFailure(t *testing.T) {
 	}{
 		{name: "launch", stage: "launch"},
 		{name: "registration", stage: "registration"},
-		{name: "after register", stage: "after-register", wantRegistration: true},
-		{name: "post create", stage: "post-create", wantRegistration: true},
-		{name: "finalize", stage: "finalize", wantRegistration: true},
+		{name: "completion", stage: "completion", wantRegistration: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -536,35 +549,23 @@ func TestCreateSession_RollsBackEveryPostTmuxFailure(t *testing.T) {
 				store.createErr = errors.New("registration failed")
 			}
 			stageErr := errors.New(tt.stage + " failed")
-			hooks := &CreateSessionHooks{
-				Launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			runtime := &createTestRuntime{
+				launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
 					if tt.stage == "launch" {
 						return CreateSessionLaunchResult{}, stageErr
 					}
 					return CreateSessionLaunchResult{}, nil
 				},
-				AfterRegister: func(context.Context, *manifest.Manifest, string) error {
-					if tt.stage == "after-register" {
-						return stageErr
-					}
-					return nil
-				},
-				PostCreate: func(context.Context, *manifest.Manifest, CreateSessionLaunchResult) error {
-					if tt.stage == "post-create" {
-						return stageErr
-					}
-					return nil
-				},
-				Finalize: func(context.Context, *manifest.Manifest) error {
-					if tt.stage == "finalize" {
+				complete: func(context.Context, CreateSessionCompletion) error {
+					if tt.stage == "completion" {
 						return stageErr
 					}
 					return nil
 				},
 			}
-			_, err := CreateSessionWithContext(context.Background(), &OpContext{Tmux: tmuxMock, Storage: store}, &CreateSessionRequest{
+			_, err := CreateSessionWithContext(context.Background(), &OpContext{Tmux: tmuxMock, Storage: store, CreationRuntime: runtime}, &CreateSessionRequest{
 				Cwd: dir, Title: "rollback", Model: "sonnet", Harness: "claude-code", SessionID: "rollback-id",
-				AllowEmptyPrompt: true, RequireStorage: true, ManifestDir: manifestDir, Hooks: hooks,
+				AllowEmptyPrompt: true, RequireStorage: true, ManifestDir: manifestDir,
 			})
 			if err == nil {
 				t.Fatal("expected lifecycle failure")
@@ -594,12 +595,14 @@ func TestCreateSession_FailedReusePreservesExistingArtifacts(t *testing.T) {
 	}
 	tmuxMock := session.NewMockTmux()
 	tmuxMock.Sessions["existing"] = true
-	_, err := CreateSessionWithContext(context.Background(), &OpContext{Tmux: tmuxMock}, &CreateSessionRequest{
-		Cwd: dir, Title: "existing", Model: "sonnet", Harness: "claude-code",
-		AllowEmptyPrompt: true, ReuseExistingTmux: true, ManifestDir: manifestDir,
-		Hooks: &CreateSessionHooks{Launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+	_, err := CreateSessionWithContext(context.Background(), &OpContext{
+		Tmux: tmuxMock,
+		CreationRuntime: &createTestRuntime{launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
 			return CreateSessionLaunchResult{}, errors.New("launch failed")
 		}},
+	}, &CreateSessionRequest{
+		Cwd: dir, Title: "existing", Model: "sonnet", Harness: "claude-code",
+		AllowEmptyPrompt: true, ReuseExistingTmux: true, ManifestDir: manifestDir,
 	})
 	if err == nil {
 		t.Fatal("expected launch failure")
@@ -618,13 +621,15 @@ func TestCreateSession_CodexRemoteBootIsBounded(t *testing.T) {
 	t.Setenv("AGM_CODEX_REQUIRE_REMOTE_CONTROL", "1")
 	tmuxMock := session.NewMockTmux()
 	started := time.Now()
-	_, err := CreateSessionWithContext(context.Background(), &OpContext{Tmux: tmuxMock}, &CreateSessionRequest{
-		Cwd: t.TempDir(), Title: "bounded", Model: "5.4", Harness: "codex-cli",
-		AllowEmptyPrompt: true, CodexRemoteBootTimeout: 20 * time.Millisecond,
-		Hooks: &CreateSessionHooks{CodexThreadCreator: func(ctx context.Context, _, _, _ string) (*manifest.Codex, error) {
+	_, err := CreateSessionWithContext(context.Background(), &OpContext{
+		Tmux: tmuxMock,
+		CodexThreadCreator: func(ctx context.Context, _, _, _ string) (*manifest.Codex, error) {
 			<-ctx.Done()
 			return nil, ctx.Err()
-		}},
+		},
+	}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "bounded", Model: "5.4", Harness: "codex-cli",
+		AllowEmptyPrompt: true, CodexRemoteBootTimeout: 20 * time.Millisecond,
 	})
 	if err == nil {
 		t.Fatal("expected bounded remote-control failure")
@@ -651,14 +656,14 @@ func TestCreateSession_CLIAndMCPShareCoreContract(t *testing.T) {
 		t.Helper()
 		store := &createMockStorage{}
 		var launch HarnessLaunchSpec
-		result, err := CreateSessionWithContext(context.Background(), &OpContext{Tmux: session.NewMockTmux(), Storage: store}, &CreateSessionRequest{
+		runtime := &createTestRuntime{launch: func(_ context.Context, spec HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			launch = spec
+			return CreateSessionLaunchResult{ModeAppliedAtStartup: true}, nil
+		}}
+		result, err := CreateSessionWithContext(context.Background(), &OpContext{Tmux: session.NewMockTmux(), Storage: store, CreationRuntime: runtime}, &CreateSessionRequest{
 			Cwd: sharedDir, Prompt: "same prompt", Title: "parity", Model: "sonnet", Harness: "claude-code",
 			SessionID: "shared-id", Caller: CreateSessionCaller{Surface: surface}, PermissionMode: "plan",
 			Metadata: CreateSessionMetadata{Workspace: "shared", ModelTier: "high", Tags: []string{"role:worker"}},
-			Hooks: &CreateSessionHooks{Launch: func(_ context.Context, spec HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
-				launch = spec
-				return CreateSessionLaunchResult{ModeAppliedAtStartup: true}, nil
-			}},
 		})
 		if err != nil {
 			t.Fatalf("CreateSessionWithContext(%s): %v", surface, err)

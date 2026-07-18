@@ -30,6 +30,19 @@ import (
 
 var resolvedSessionPermissionPolicy *manifest.PermissionPolicy
 
+type cliCreateSessionRuntime struct {
+	launch   func(context.Context, ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error)
+	complete func(context.Context, ops.CreateSessionCompletion) error
+}
+
+func (r *cliCreateSessionRuntime) Launch(ctx context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
+	return r.launch(ctx, spec)
+}
+
+func (r *cliCreateSessionRuntime) Complete(ctx context.Context, completion ops.CreateSessionCompletion) error {
+	return r.complete(ctx, completion)
+}
+
 // createTmuxSessionAndStartClaude creates a new tmux session and starts Claude in it
 func createTmuxSessionAndStartClaude(sessionName string) (retErr error) {
 	if err := preflight(sessionName); err != nil {
@@ -83,30 +96,21 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 		}
 	}
 	manifestDir := filepath.Join(getSessionsDir(), sessionName)
-	hooks := &ops.CreateSessionHooks{
-		OpenStorage: func(context.Context) (dolt.Storage, func(), error) {
-			adapter, err := getStorage()
-			if err != nil {
-				return nil, nil, err
+	runtime := &cliCreateSessionRuntime{
+		launch: func(callCtx context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
+			if !exists {
+				ui.PrintSuccess(fmt.Sprintf("Created tmux session: %s", spec.SessionName))
 			}
-			return adapter, func() { _ = adapter.Close() }, nil
-		},
-		AfterTmuxReady: func(_ context.Context, name string, existed bool) error {
-			if !existed {
-				ui.PrintSuccess(fmt.Sprintf("Created tmux session: %s", name))
-			}
-			if err := interrupt.Clear(interrupt.DefaultDir(), name); err != nil {
+			if err := interrupt.Clear(interrupt.DefaultDir(), spec.SessionName); err != nil {
 				debug.Log("Warning: failed to clear stale interrupt flag: %v", err)
 			}
-			return nil
-		},
-		Launch: func(callCtx context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
 			modeApplied, handled, err := startHarness(callCtx, spec, exists, trustPreConfigured)
 			return ops.CreateSessionLaunchResult{ModeAppliedAtStartup: modeApplied, HandledLifecycle: handled}, err
 		},
-		AfterRegister: func(callCtx context.Context, m *manifest.Manifest, manifestPath string) error {
-			if manifestPath != "" {
-				if err := git.CommitManifest(manifestPath, "create", sessionName); err != nil {
+		complete: func(callCtx context.Context, completion ops.CreateSessionCompletion) error {
+			m := completion.Manifest
+			if completion.ManifestPath != "" {
+				if err := git.CommitManifest(completion.ManifestPath, "create", sessionName); err != nil {
 					debug.Log("manifest commit skipped: %v", err)
 				}
 			}
@@ -115,18 +119,12 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 				modelrouter.RecordRoutingDecision(callCtx, m.Harness, d)
 			}
 			telemetry.SessionStarted(callCtx, m.SessionID, m.Model, m.Harness, m.State, roleName)
-			return nil
-		},
-		PostCreate: func(_ context.Context, _ *manifest.Manifest, launch ops.CreateSessionLaunchResult) error {
-			if err := runHarnessPostCreate(sessionName, launch.ModeAppliedAtStartup); err != nil {
+			if err := runHarnessPostCreate(sessionName, completion.Launch.ModeAppliedAtStartup); err != nil {
 				return err
 			}
-			if modeFlagValue != "" && !launch.ModeAppliedAtStartup && (harnessName != "claude-code" || os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "") {
+			if modeFlagValue != "" && !completion.Launch.ModeAppliedAtStartup && (harnessName != "claude-code" || os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "") {
 				applyCreationModeSwitch(sessionName, harnessName, modeFlagValue)
 			}
-			return nil
-		},
-		Finalize: func(_ context.Context, _ *manifest.Manifest) error {
 			if os.Getenv("AGM_TEST_RUN_ID") == "" && os.Getenv("AGM_TEST_ENV") == "" {
 				verdict, livenessErr := tmux.CheckPaneLiveness(sessionName, tmux.GetSocketPath())
 				if err := launchparity.ValidateFinalLiveness(verdict, livenessErr); err != nil {
@@ -138,7 +136,18 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 			return nil
 		},
 	}
-	_, err := ops.CreateSessionWithContext(ctx, &ops.OpContext{Tmux: session.NewRealTmux()}, &ops.CreateSessionRequest{
+	opCtx := &ops.OpContext{
+		Tmux:            session.NewRealTmux(),
+		CreationRuntime: runtime,
+		OpenSessionStorage: func(context.Context) (dolt.Storage, func(), error) {
+			adapter, err := getStorage()
+			if err != nil {
+				return nil, nil, err
+			}
+			return adapter, func() { _ = adapter.Close() }, nil
+		},
+	}
+	_, err := ops.CreateSessionWithContext(ctx, opCtx, &ops.CreateSessionRequest{
 		Cwd:                 workDir,
 		Prompt:              prompt,
 		Title:               sessionName,
@@ -159,7 +168,6 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 		RequireStorage:      true,
 		ManifestDir:         manifestDir,
 		ManifestDirOptional: true,
-		Hooks:               hooks,
 		Metadata: ops.CreateSessionMetadata{
 			Workspace:        cfg.Workspace,
 			ModelTier:        modelTierFlag,

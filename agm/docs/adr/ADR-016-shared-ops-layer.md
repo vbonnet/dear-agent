@@ -53,10 +53,12 @@ Skills (.md)   →  CLI --json    →  internal/ops  →  Dolt Storage
 Session creation is one ops-owned lifecycle, not merely a shared manifest
 write. `CreateSessionWithContext` owns tmux creation/reuse, bounded Codex remote
 setup, the canonical harness launch contract, manifest registration,
-post-create ordering, finalization, and rollback. CLI and MCP adapters must
-declare caller provenance. They may supply hooks for interactive readiness,
-presentation, and storage construction, but hooks do not become a second
-orchestrator.
+runtime completion ordering, and rollback. CLI and MCP adapters must
+declare caller provenance. Interactive surfaces may supply one
+`CreateSessionRuntime` adapter with `Launch` and `Complete` operations. The ops
+module invokes those operations around registration; adapters cannot insert or
+reorder lifecycle phases, and dependency ports live on `OpContext` rather than
+on the creation request.
 
 Fresh harness commands are built by `BuildHarnessLaunchCommand`. Creation,
 in-place tmux startup, and fresh-session resume fallbacks use this builder so

@@ -614,7 +614,18 @@ func TestBuildSessionManifestPersistsStartupPermissionMode(t *testing.T) {
 func createPermissionManifest(t *testing.T, harness, model, permissionMode string, policy *manifest.PermissionPolicy) *manifest.Manifest {
 	t.Helper()
 	var got *manifest.Manifest
-	_, err := ops.CreateSessionWithContext(context.Background(), &ops.OpContext{Tmux: session.NewMockTmux()}, &ops.CreateSessionRequest{
+	runtime := &cliCreateSessionRuntime{
+		launch: func(context.Context, ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
+			return ops.CreateSessionLaunchResult{}, nil
+		},
+		complete: func(_ context.Context, completion ops.CreateSessionCompletion) error {
+			got = completion.Manifest
+			return nil
+		},
+	}
+	_, err := ops.CreateSessionWithContext(context.Background(), &ops.OpContext{
+		Tmux: session.NewMockTmux(), CreationRuntime: runtime,
+	}, &ops.CreateSessionRequest{
 		Cwd:                    t.TempDir(),
 		Title:                  "session-name",
 		Model:                  model,
@@ -628,12 +639,6 @@ func createPermissionManifest(t *testing.T, harness, model, permissionMode strin
 			Workspace:        "test",
 			PermissionPolicy: policy,
 			PermissionMode:   permissionMode,
-		},
-		Hooks: &ops.CreateSessionHooks{
-			AfterRegister: func(_ context.Context, m *manifest.Manifest, _ string) error {
-				got = m
-				return nil
-			},
 		},
 	})
 	if err != nil {

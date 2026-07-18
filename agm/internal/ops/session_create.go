@@ -51,27 +51,37 @@ type CreateSessionMetadata struct {
 	OpenCodeServer   string
 }
 
-// CreateSessionHooks are surface adapters around the one lifecycle. Hooks may
-// provide interactive readiness, presentation, or storage construction, but
-// tmux creation, Codex setup, manifest registration, post-create ordering, and
-// rollback remain owned by CreateSessionWithContext.
-type CreateSessionHooks struct {
-	OpenStorage        func(context.Context) (dolt.Storage, func(), error)
-	Launch             func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error)
-	AfterRegister      func(context.Context, *manifest.Manifest, string) error
-	PostCreate         func(context.Context, *manifest.Manifest, CreateSessionLaunchResult) error
-	Finalize           func(context.Context, *manifest.Manifest) error
-	AfterTmuxReady     func(context.Context, string, bool) error
-	CodexThreadCreator func(context.Context, string, string, string) (*manifest.Codex, error)
-}
-
-// CreateSessionLaunchResult records launch facts required by post-create
-// policy. HandledLifecycle is used only by the deprecated Gemini wrapper,
+// CreateSessionLaunchResult records launch facts required by runtime
+// completion. HandledLifecycle is used only by the deprecated Gemini wrapper,
 // which exits after managing its own terminal lifecycle.
 type CreateSessionLaunchResult struct {
 	ModeAppliedAtStartup bool
 	HandledLifecycle     bool
 }
+
+// CreateSessionCompletion is the single post-registration input presented to
+// a surface runtime. The ops module decides when completion occurs and owns
+// rollback if it fails.
+type CreateSessionCompletion struct {
+	Manifest     *manifest.Manifest
+	ManifestPath string
+	Launch       CreateSessionLaunchResult
+}
+
+// CreateSessionRuntime is the harness-runtime seam. Implementations adapt
+// interactive startup and surface-specific completion; they cannot insert,
+// reorder, or skip tmux creation, registration, or rollback.
+type CreateSessionRuntime interface {
+	Launch(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error)
+	Complete(context.Context, CreateSessionCompletion) error
+}
+
+// SessionStorageOpener lazily constructs surface-specific storage after the
+// harness has launched. The returned cleanup runs after rollback.
+type SessionStorageOpener func(context.Context) (dolt.Storage, func(), error)
+
+// CodexThreadCreator adapts the external Codex remote-control dependency.
+type CodexThreadCreator func(context.Context, string, string, string) (*manifest.Codex, error)
 
 // CreateSessionRequest defines the input for creating a new AGM session.
 type CreateSessionRequest struct {
@@ -100,7 +110,6 @@ type CreateSessionRequest struct {
 	ManifestDirOptional    bool                  `json:"-"`
 	SkipCodexRemoteControl bool                  `json:"-"`
 	CodexRemoteBootTimeout time.Duration         `json:"-"`
-	Hooks                  *CreateSessionHooks   `json:"-"`
 }
 
 // CreateSessionResult is the output of CreateSession.
@@ -259,13 +268,7 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		}
 		createdTmux = true
 	}
-	if req.Hooks != nil && req.Hooks.AfterTmuxReady != nil {
-		if err := req.Hooks.AfterTmuxReady(callCtx, params.name, exists); err != nil {
-			return nil, err
-		}
-	}
-
-	codexMeta, err := createCodexThread(callCtx, req, params)
+	codexMeta, err := createCodexThread(callCtx, opCtx, req, params)
 	if err != nil {
 		if os.Getenv("AGM_CODEX_REQUIRE_REMOTE_CONTROL") == "1" {
 			return nil, ErrStorageError("codex.thread.start", err)
@@ -338,13 +341,10 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		}
 	}
 
-	if req.Hooks != nil && req.Hooks.AfterRegister != nil {
-		if err := req.Hooks.AfterRegister(callCtx, m, manifestPath); err != nil {
-			return nil, err
-		}
-	}
-	if req.Hooks != nil && req.Hooks.PostCreate != nil {
-		if err := req.Hooks.PostCreate(callCtx, m, launchResult); err != nil {
+	if opCtx.CreationRuntime != nil {
+		if err := opCtx.CreationRuntime.Complete(callCtx, CreateSessionCompletion{
+			Manifest: m, ManifestPath: manifestPath, Launch: launchResult,
+		}); err != nil {
 			return nil, err
 		}
 	} else if req.Prompt != "" {
@@ -352,12 +352,6 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 			return nil, ErrStorageError("tmux.SendKeys(prompt)", err)
 		}
 	}
-	if req.Hooks != nil && req.Hooks.Finalize != nil {
-		if err := req.Hooks.Finalize(callCtx, m); err != nil {
-			return nil, err
-		}
-	}
-
 	return createSessionResult(req, params, sessionID), nil
 }
 
@@ -377,8 +371,8 @@ func sessionExistsError(name string) error {
 }
 
 func launchCreateSession(callCtx context.Context, opCtx *OpContext, req *CreateSessionRequest, spec HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
-	if req.Hooks != nil && req.Hooks.Launch != nil {
-		return req.Hooks.Launch(callCtx, spec)
+	if opCtx.CreationRuntime != nil {
+		return opCtx.CreationRuntime.Launch(callCtx, spec)
 	}
 	cmd := BuildHarnessLaunchCommand(spec)
 	if err := opCtx.Tmux.SendKeys(spec.SessionName, cmd.Command); err != nil {
@@ -388,13 +382,13 @@ func launchCreateSession(callCtx context.Context, opCtx *OpContext, req *CreateS
 }
 
 func openCreateStorage(callCtx context.Context, opCtx *OpContext, req *CreateSessionRequest) (dolt.Storage, func(), error) {
-	if req.Hooks != nil && req.Hooks.OpenStorage != nil {
-		return req.Hooks.OpenStorage(callCtx)
+	if opCtx.OpenSessionStorage != nil {
+		return opCtx.OpenSessionStorage(callCtx)
 	}
 	return opCtx.Storage, nil, nil
 }
 
-func createCodexThread(callCtx context.Context, req *CreateSessionRequest, params *createSessionParams) (*manifest.Codex, error) {
+func createCodexThread(callCtx context.Context, opCtx *OpContext, req *CreateSessionRequest, params *createSessionParams) (*manifest.Codex, error) {
 	if params.harness != "codex-cli" || req.SkipCodexRemoteControl || os.Getenv("AGM_CODEX_REMOTE_CONTROL") == "0" {
 		return nil, nil
 	}
@@ -407,8 +401,8 @@ func createCodexThread(callCtx context.Context, req *CreateSessionRequest, param
 	}
 	remoteCtx, cancel := context.WithTimeout(callCtx, timeout)
 	defer cancel()
-	if req.Hooks != nil && req.Hooks.CodexThreadCreator != nil {
-		return req.Hooks.CodexThreadCreator(remoteCtx, params.name, req.Cwd, params.model)
+	if opCtx.CodexThreadCreator != nil {
+		return opCtx.CodexThreadCreator(remoteCtx, params.name, req.Cwd, params.model)
 	}
 	return createCodexRemoteThread(remoteCtx, params.name, req.Cwd, params.model)
 }

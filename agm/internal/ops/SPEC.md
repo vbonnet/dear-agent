@@ -15,7 +15,7 @@
 surfaces (CLI, MCP server, Skills plugin). Every surface constructs an
 `OpContext` and delegates business lifecycle ordering here. Surface adapters
 may still construct storage dependencies and implement interactive tmux
-readiness or presentation hooks.
+readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 ---
 
@@ -131,9 +131,9 @@ readiness or presentation hooks.
 
 ### Shared Session Creation Lifecycle
 
-**OPS-53** When the CLI or MCP surface creates a session, the surface shall delegate tmux creation, optional Codex remote setup, launch-command construction, manifest registration, post-create ordering, and rollback to `CreateSessionWithContext`.
+**OPS-53** When the CLI or MCP surface creates a session, the surface shall delegate tmux creation, optional Codex remote setup, launch-command construction, manifest registration, completion ordering, and rollback to `CreateSessionWithContext`.
 
-**OPS-54** When `CreateSessionWithContext` advances a new session, the system shall order the durable lifecycle as tmux creation, bounded Codex setup when applicable, harness launch, manifest registration, post-create handling, and finalization.
+**OPS-54** When `CreateSessionWithContext` advances a new session, the system shall order the durable lifecycle as tmux creation, bounded Codex setup when applicable, runtime launch, manifest registration, and runtime completion.
 
 **OPS-55** When a creation request declares a caller surface, the system shall return that caller as result provenance and persist a matching `source:<caller>` manifest tag.
 
@@ -172,11 +172,11 @@ readiness or presentation hooks.
 ## Key Invariants
 
 - **No surface bypasses ops lifecycle ownership.** CLI, MCP, and Skills all go
-  through `OpContext` functions for shared operations; surface hooks are
-  limited to dependency construction, interactive readiness, and presentation.
-- **Creation has one owner.** Surface hooks may implement interactive readiness,
-  presentation, or storage construction, but may not reorder or duplicate the
-  creation lifecycle.
+  through `OpContext` functions for shared operations; adapters are limited to
+  dependency construction and the `CreateSessionRuntime` seam.
+- **Creation has one owner.** A runtime adapter may launch a harness and
+  complete surface-specific work after registration, but cannot insert,
+  reorder, or skip lifecycle phases owned by `CreateSessionWithContext`.
 - **GC skip priority is deterministic.** The `gcSkipReason` function applies
   checks in a fixed order: already-archived → reaping → protected-role →
   active-tmux → active-state → too-recent. The first matching check wins.

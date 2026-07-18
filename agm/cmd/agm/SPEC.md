@@ -60,7 +60,7 @@ Provide a production-ready CLI that:
 
 **CLI-17** When AGM mirrors a canonical supervisor heartbeat into the flat VROOM heartbeat directory, the system shall use the compact alias and role from `pkg/vroom/supervisor` rather than maintaining an AGM-local alias table.
 
-**CLI-18** When `agm session new` starts a session inside or outside tmux, the system shall declare caller provenance and delegate the creation lifecycle to `internal/ops`, while retaining only interactive readiness, presentation, and CLI-specific storage hooks.
+**CLI-18** When `agm session new` starts a session inside or outside tmux, the system shall declare caller provenance and delegate the creation lifecycle to `internal/ops`, while adapting interactive launch and post-registration completion through one `CreateSessionRuntime` implementation.
 
 **CLI-19** When the CLI launches a new session or a resume fallback starts a fresh harness, the system shall obtain the shell command from the shared ops command builder so model resolution, permission flags, persistence, telemetry, and credential forwarding do not drift between creation paths.
 

@@ -13,7 +13,6 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/git"
-	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
@@ -45,8 +44,26 @@ func startClaudeInCurrentTmux(sessionName string) error {
 
 	sessionID := uuid.New().String()
 	manifestDir := filepath.Join(getSessionsDir(), sessionName)
-	hooks := &ops.CreateSessionHooks{
-		OpenStorage: func(context.Context) (dolt.Storage, func(), error) {
+	runtime := &cliCreateSessionRuntime{
+		launch: func(_ context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
+			if pwd := os.Getenv("PWD"); pwd != "" {
+				spec.WorkDir = pwd
+			}
+			return ops.CreateSessionLaunchResult{}, startCurrentTmuxHarness(spec)
+		},
+		complete: func(_ context.Context, completion ops.CreateSessionCompletion) error {
+			if completion.ManifestPath != "" {
+				_ = git.CommitManifest(completion.ManifestPath, "create", sessionName)
+			}
+			ui.PrintSuccess("Session metadata finalized")
+			updateVSCodeTabTitle(sessionName)
+			return nil
+		},
+	}
+	opCtx := &ops.OpContext{
+		Tmux:            session.NewRealTmux(),
+		CreationRuntime: runtime,
+		OpenSessionStorage: func(context.Context) (dolt.Storage, func(), error) {
 			adapter, err := getStorage()
 			if err != nil {
 				ui.PrintWarning(fmt.Sprintf("Failed to connect to session storage: %v", err))
@@ -54,25 +71,8 @@ func startClaudeInCurrentTmux(sessionName string) error {
 			}
 			return adapter, func() { _ = adapter.Close() }, nil
 		},
-		Launch: func(_ context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
-			if pwd := os.Getenv("PWD"); pwd != "" {
-				spec.WorkDir = pwd
-			}
-			return ops.CreateSessionLaunchResult{}, startCurrentTmuxHarness(spec)
-		},
-		AfterRegister: func(_ context.Context, _ *manifest.Manifest, manifestPath string) error {
-			if manifestPath != "" {
-				_ = git.CommitManifest(manifestPath, "create", sessionName)
-			}
-			ui.PrintSuccess("Session metadata finalized")
-			return nil
-		},
-		Finalize: func(context.Context, *manifest.Manifest) error {
-			updateVSCodeTabTitle(sessionName)
-			return nil
-		},
 	}
-	_, err = ops.CreateSessionWithContext(context.Background(), &ops.OpContext{Tmux: session.NewRealTmux()}, &ops.CreateSessionRequest{
+	_, err = ops.CreateSessionWithContext(context.Background(), opCtx, &ops.CreateSessionRequest{
 		Cwd:                    workDir,
 		Title:                  sessionName,
 		Model:                  modelName,
@@ -91,7 +91,6 @@ func startClaudeInCurrentTmux(sessionName string) error {
 		ManifestDir:            manifestDir,
 		ManifestDirOptional:    true,
 		SkipCodexRemoteControl: true,
-		Hooks:                  hooks,
 		Metadata: ops.CreateSessionMetadata{
 			Workspace:        cfg.Workspace,
 			ModelTier:        modelTierFlag,
