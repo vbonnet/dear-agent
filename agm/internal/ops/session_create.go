@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -22,8 +23,11 @@ import (
 const CodexRemoteBootTimeout = 45 * time.Second
 
 const (
-	CreateSurfaceCLI      = "cli"
-	CreateSurfaceMCP      = "mcp"
+	// CreateSurfaceCLI identifies the command-line creation surface.
+	CreateSurfaceCLI = "cli"
+	// CreateSurfaceMCP identifies the MCP creation surface.
+	CreateSurfaceMCP = "mcp"
+	// CreateSurfaceInternal identifies callers within the ops layer.
 	CreateSurfaceInternal = "ops"
 )
 
@@ -131,6 +135,23 @@ type createSessionParams struct {
 	persistent bool
 }
 
+type createSessionState struct {
+	createdTmux        bool
+	createdManifestDir bool
+	registered         bool
+	store              dolt.Storage
+	storageCleanup     func()
+}
+
+func (state *createSessionState) finish(opCtx *OpContext, req *CreateSessionRequest, name, sessionID string, operationErr error) {
+	if operationErr != nil {
+		rollbackCreateSession(opCtx, req, state.store, name, sessionID, state.createdTmux, state.createdManifestDir, state.registered)
+	}
+	if state.storageCleanup != nil {
+		state.storageCleanup()
+	}
+}
+
 func isSafeNameRune(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_'
 }
@@ -231,53 +252,96 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		return nil, err
 	}
 
-	exists, err := opCtx.Tmux.HasSession(params.name)
+	exists, err := prepareCreateTmux(opCtx, req, params.name)
 	if err != nil {
-		return nil, ErrStorageError("tmux.HasSession", err)
+		return nil, err
 	}
-	if exists && !req.ReuseExistingTmux {
-		return nil, sessionExistsError(params.name)
-	}
-	if !exists {
-		if _, ok := opCtx.Tmux.(session.TmuxSessionKiller); !ok {
-			return nil, ErrStorageError("tmux.rollback", fmt.Errorf("tmux backend must support KillSession before creating a rollback-owned session"))
-		}
-	}
+	sessionID := createSessionID(req.SessionID)
+	state := &createSessionState{}
+	defer func() { state.finish(opCtx, req, params.name, sessionID, retErr) }()
 
-	createdTmux := false
-	createdManifestDir := false
-	registered := false
-	var store dolt.Storage
-	var storageCleanup func()
-	sessionID := req.SessionID
-	if sessionID == "" {
-		sessionID = uuid.New().String()
+	if err := createTmuxForSession(opCtx, req, params.name, exists); err != nil {
+		return nil, err
 	}
-	defer func() {
-		if retErr != nil {
-			rollbackCreateSession(opCtx, req, store, params.name, sessionID, createdTmux, createdManifestDir, registered)
-		}
-		if storageCleanup != nil {
-			storageCleanup()
-		}
-	}()
-
-	if !exists {
-		if err := opCtx.Tmux.CreateSession(params.name, req.Cwd); err != nil {
-			return nil, ErrStorageError("tmux.CreateSession", err)
-		}
-		createdTmux = true
-	}
-	codexMeta, err := createCodexThread(callCtx, opCtx, req, params)
+	state.createdTmux = !exists
+	codexMeta, err := optionalCodexMetadata(callCtx, opCtx, req, params)
 	if err != nil {
-		if os.Getenv("AGM_CODEX_REQUIRE_REMOTE_CONTROL") == "1" {
-			return nil, ErrStorageError("codex.thread.start", err)
-		}
-		fmt.Fprintf(os.Stderr, "Warning: Codex remote-control bridge unavailable; falling back to local Codex CLI: %v\n", err)
-		codexMeta = nil
+		return nil, err
+	}
+	launchResult, err := launchCreateSession(callCtx, opCtx, buildHarnessLaunchSpec(req, params, sessionID, codexMeta))
+	if err != nil {
+		return nil, err
+	}
+	if launchResult.HandledLifecycle {
+		return createSessionResult(req, params, sessionID), nil
 	}
 
-	launchSpec := HarnessLaunchSpec{
+	manifestPath, registrationAllowed, createdManifestDir, err := prepareCreateManifestDir(req)
+	if err != nil {
+		return nil, err
+	}
+	state.createdManifestDir = createdManifestDir
+	m := buildCreateSessionManifest(req, params, sessionID, codexMeta)
+	if registrationAllowed {
+		state.store, state.storageCleanup, state.registered, err = registerCreatedSession(callCtx, opCtx, req, m)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := completeCreatedSession(callCtx, opCtx, req, params.name, manifestPath, m, launchResult); err != nil {
+		return nil, err
+	}
+	return createSessionResult(req, params, sessionID), nil
+}
+
+func prepareCreateTmux(opCtx *OpContext, req *CreateSessionRequest, name string) (bool, error) {
+	exists, err := opCtx.Tmux.HasSession(name)
+	if err != nil {
+		return false, ErrStorageError("tmux.HasSession", err)
+	}
+	if exists {
+		if !req.ReuseExistingTmux {
+			return false, sessionExistsError(name)
+		}
+		return true, nil
+	}
+	if _, ok := opCtx.Tmux.(session.TmuxSessionKiller); !ok {
+		return false, ErrStorageError("tmux.rollback", fmt.Errorf("tmux backend must support KillSession before creating a rollback-owned session"))
+	}
+	return false, nil
+}
+
+func createSessionID(requested string) string {
+	if requested != "" {
+		return requested
+	}
+	return uuid.New().String()
+}
+
+func createTmuxForSession(opCtx *OpContext, req *CreateSessionRequest, name string, exists bool) error {
+	if exists {
+		return nil
+	}
+	if err := opCtx.Tmux.CreateSession(name, req.Cwd); err != nil {
+		return ErrStorageError("tmux.CreateSession", err)
+	}
+	return nil
+}
+
+func optionalCodexMetadata(callCtx context.Context, opCtx *OpContext, req *CreateSessionRequest, params *createSessionParams) (*manifest.Codex, error) {
+	meta, err := createCodexThread(callCtx, opCtx, req, params)
+	if err == nil {
+		return meta, nil
+	}
+	if os.Getenv("AGM_CODEX_REQUIRE_REMOTE_CONTROL") == "1" {
+		return nil, ErrStorageError("codex.thread.start", err)
+	}
+	fmt.Fprintf(os.Stderr, "Warning: Codex remote-control bridge unavailable; falling back to local Codex CLI: %v\n", err)
+	return nil, nil
+}
+
+func buildHarnessLaunchSpec(req *CreateSessionRequest, params *createSessionParams, sessionID string, codexMeta *manifest.Codex) HarnessLaunchSpec {
+	return HarnessLaunchSpec{
 		Harness:          params.harness,
 		Model:            params.model,
 		SessionName:      params.name,
@@ -292,67 +356,59 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		ForwardTelemetry: req.ForwardTelemetry,
 		Codex:            codexMeta,
 	}
-	launchResult, err := launchCreateSession(callCtx, opCtx, req, launchSpec)
+}
+
+func prepareCreateManifestDir(req *CreateSessionRequest) (manifestPath string, registrationAllowed, created bool, err error) {
+	if req.ManifestDir == "" {
+		return "", true, false, nil
+	}
+	manifestPath = filepath.Join(req.ManifestDir, "manifest.yaml")
+	_, statErr := os.Stat(req.ManifestDir)
+	created = os.IsNotExist(statErr)
+	if mkdirErr := os.MkdirAll(req.ManifestDir, 0o700); mkdirErr != nil {
+		if !req.ManifestDirOptional {
+			return "", false, false, ErrStorageError("manifest.mkdir", mkdirErr)
+		}
+		fmt.Fprintf(os.Stderr, "Warning: failed to create manifest directory: %v; proceeding without manifest registration\n", mkdirErr)
+		return manifestPath, false, false, nil
+	}
+	return manifestPath, true, created, nil
+}
+
+func registerCreatedSession(callCtx context.Context, opCtx *OpContext, req *CreateSessionRequest, m *manifest.Manifest) (dolt.Storage, func(), bool, error) {
+	store, cleanup, err := openCreateStorage(callCtx, opCtx)
 	if err != nil {
-		return nil, err
+		return store, cleanup, false, ErrStorageError("storage.open", err)
 	}
-	if launchResult.HandledLifecycle {
-		return createSessionResult(req, params, sessionID), nil
+	if store == nil {
+		if req.RequireStorage {
+			return nil, cleanup, false, ErrStorageError("storage.open", fmt.Errorf("session storage is required"))
+		}
+		return nil, cleanup, false, nil
 	}
+	if err := store.CreateSession(m); err != nil {
+		if !req.RegistrationOptional {
+			return store, cleanup, false, ErrStorageError("storage.CreateSession", err)
+		}
+		fmt.Fprintf(os.Stderr, "Warning: failed to register session: %v; the harness remains usable\n", err)
+		return nil, cleanup, false, nil
+	}
+	return store, cleanup, true, nil
+}
 
-	registrationAllowed := true
-	manifestPath := ""
-	if req.ManifestDir != "" {
-		manifestPath = filepath.Join(req.ManifestDir, "manifest.yaml")
-		_, statErr := os.Stat(req.ManifestDir)
-		manifestDirDidNotExist := os.IsNotExist(statErr)
-		if err := os.MkdirAll(req.ManifestDir, 0o700); err != nil {
-			if !req.ManifestDirOptional {
-				return nil, ErrStorageError("manifest.mkdir", err)
-			}
-			registrationAllowed = false
-			fmt.Fprintf(os.Stderr, "Warning: failed to create manifest directory: %v; proceeding without manifest registration\n", err)
-		} else if manifestDirDidNotExist {
-			createdManifestDir = true
-		}
-	}
-
-	m := buildCreateSessionManifest(req, params, sessionID, codexMeta)
-	if registrationAllowed {
-		store, storageCleanup, err = openCreateStorage(callCtx, opCtx, req)
-		if err != nil {
-			return nil, ErrStorageError("storage.open", err)
-		}
-		if store == nil && req.RequireStorage {
-			return nil, ErrStorageError("storage.open", fmt.Errorf("session storage is required"))
-		}
-		if store != nil {
-			if err := store.CreateSession(m); err != nil {
-				if req.RegistrationOptional {
-					fmt.Fprintf(os.Stderr, "Warning: failed to register session: %v; the harness remains usable\n", err)
-					store = nil
-				} else {
-					return nil, ErrStorageError("storage.CreateSession", err)
-				}
-			}
-			if store != nil {
-				registered = true
-			}
-		}
-	}
-
+func completeCreatedSession(callCtx context.Context, opCtx *OpContext, req *CreateSessionRequest, name, manifestPath string, m *manifest.Manifest, launchResult CreateSessionLaunchResult) error {
 	if opCtx.CreationRuntime != nil {
-		if err := opCtx.CreationRuntime.Complete(callCtx, CreateSessionCompletion{
+		return opCtx.CreationRuntime.Complete(callCtx, CreateSessionCompletion{
 			Manifest: m, ManifestPath: manifestPath, Launch: launchResult,
-		}); err != nil {
-			return nil, err
-		}
-	} else if req.Prompt != "" {
-		if err := opCtx.Tmux.SendKeys(params.name, req.Prompt); err != nil {
-			return nil, ErrStorageError("tmux.SendKeys(prompt)", err)
-		}
+		})
 	}
-	return createSessionResult(req, params, sessionID), nil
+	if req.Prompt == "" {
+		return nil
+	}
+	if err := opCtx.Tmux.SendKeys(name, req.Prompt); err != nil {
+		return ErrStorageError("tmux.SendKeys(prompt)", err)
+	}
+	return nil
 }
 
 func sessionExistsError(name string) error {
@@ -370,7 +426,7 @@ func sessionExistsError(name string) error {
 	}
 }
 
-func launchCreateSession(callCtx context.Context, opCtx *OpContext, req *CreateSessionRequest, spec HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+func launchCreateSession(callCtx context.Context, opCtx *OpContext, spec HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
 	if opCtx.CreationRuntime != nil {
 		return opCtx.CreationRuntime.Launch(callCtx, spec)
 	}
@@ -381,7 +437,7 @@ func launchCreateSession(callCtx context.Context, opCtx *OpContext, req *CreateS
 	return CreateSessionLaunchResult{ModeAppliedAtStartup: cmd.ModeAppliedAtStartup}, nil
 }
 
-func openCreateStorage(callCtx context.Context, opCtx *OpContext, req *CreateSessionRequest) (dolt.Storage, func(), error) {
+func openCreateStorage(callCtx context.Context, opCtx *OpContext) (dolt.Storage, func(), error) {
 	if opCtx.OpenSessionStorage != nil {
 		return opCtx.OpenSessionStorage(callCtx)
 	}
@@ -487,10 +543,8 @@ func cloneCreatePermissionPolicy(policy *manifest.PermissionPolicy) *manifest.Pe
 }
 
 func appendUniqueString(values []string, value string) []string {
-	for _, existing := range values {
-		if existing == value {
-			return values
-		}
+	if slices.Contains(values, value) {
+		return values
 	}
 	return append(values, value)
 }

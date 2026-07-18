@@ -44,89 +44,94 @@ func BuildHarnessLaunchCommand(spec HarnessLaunchSpec) HarnessLaunchCommand {
 	exitSuffix := launchparity.ExitSuffix(spec.Persistent)
 	switch agent.NormalizeHarnessName(spec.Harness) {
 	case "claude-code":
-		resolvedModel := agent.ResolveModelFullName("claude-code", spec.Model)
-		oauthToken := spec.OAuthToken
-		if oauthToken == "" && !spec.DisableOAuth {
-			oauthToken = auth.ResolveOAuthToken()
-		}
-		envUnset := "-u CLAUDECODE"
-		oauthArg := ""
-		if oauthToken != "" {
-			envUnset += " -u ANTHROPIC_API_KEY"
-			oauthArg = " CLAUDE_CODE_OAUTH_TOKEN=" + shellQuoteArg(oauthToken)
-		}
-		var b strings.Builder
-		fmt.Fprintf(&b, "env %s AGM_SESSION_NAME=%s", envUnset, shellQuoteArg(spec.SessionName))
-		if spec.ForwardTelemetry {
-			appendTelemetryEnv(&b, spec.SessionID)
-		}
-		b.WriteString(oauthArg)
-		fmt.Fprintf(&b, " claude --model %s --add-dir %s", shellQuoteArg(resolvedModel), shellQuoteArg(spec.WorkDir))
-		if !spec.DisableAutoMode {
-			b.WriteString(" --enable-auto-mode")
-		}
-		for _, dir := range spec.ExtraAddDirs {
-			fmt.Fprintf(&b, " --add-dir %s", shellQuoteArg(dir))
-		}
-		modeApplied := false
-		if spec.PermissionMode == "auto" || spec.PermissionMode == "plan" || spec.PermissionMode == "default" {
-			fmt.Fprintf(&b, " --permission-mode %s", spec.PermissionMode)
-			modeApplied = true
-		}
-		if spec.MaxBudgetUSD > 0 {
-			fmt.Fprintf(&b, " --max-budget-usd %.2f", spec.MaxBudgetUSD)
-		}
-		b.WriteString(exitSuffix)
-		return HarnessLaunchCommand{Command: b.String(), ModeAppliedAtStartup: modeApplied}
-
+		return buildClaudeLaunchCommand(spec, exitSuffix)
 	case "codex-cli":
-		resolvedModel := agent.ResolveModelFullName("codex-cli", spec.Model)
-		sandboxMode := launchparity.CodexSandboxMode(spec.PermissionMode)
-		var b strings.Builder
-		fmt.Fprintf(&b, "env -u CLAUDECODE AGM_SESSION_NAME=%s codex", shellQuoteArg(spec.SessionName))
-		if spec.Codex != nil && spec.Codex.SessionID != "" {
-			b.WriteString(" resume --remote unix://")
-		}
-		fmt.Fprintf(&b, " -m %s -C %s -s %s", shellQuoteArg(resolvedModel), shellQuoteArg(spec.WorkDir), sandboxMode)
-		for _, dir := range spec.ExtraAddDirs {
-			fmt.Fprintf(&b, " --add-dir %s", shellQuoteArg(dir))
-		}
-		modeApplied := false
-		if flag := launchparity.CodexPermissionModeFlag(spec.PermissionMode); flag != "" {
-			b.WriteString(" " + flag)
-			modeApplied = true
-		}
-		if spec.Codex != nil && spec.Codex.SessionID != "" {
-			fmt.Fprintf(&b, " %s", shellQuoteArg(spec.Codex.SessionID))
-		}
-		b.WriteString(exitSuffix)
-		return HarnessLaunchCommand{Command: b.String(), ModeAppliedAtStartup: modeApplied}
-
+		return buildCodexLaunchCommand(spec, exitSuffix)
 	case "agy":
-		var b strings.Builder
-		fmt.Fprintf(&b, "cd %s && agy --prompt-interactive", shellQuoteArg(spec.WorkDir))
-		if flag := launchparity.AgyPermissionModeFlag(spec.PermissionMode); flag != "" {
-			b.WriteString(" " + flag)
-		}
-		for _, dir := range spec.ExtraAddDirs {
-			fmt.Fprintf(&b, " --add-dir %s", shellQuoteArg(dir))
-		}
-		b.WriteString(exitSuffix)
-		return HarnessLaunchCommand{
-			Command:              b.String(),
-			ModeAppliedAtStartup: launchparity.AgyPermissionModeFlag(spec.PermissionMode) != "",
-		}
-
+		return buildAgyLaunchCommand(spec, exitSuffix)
 	case "opencode-cli":
 		return HarnessLaunchCommand{Command: fmt.Sprintf("cd %s && opencode attach%s", shellQuoteArg(spec.WorkDir), exitSuffix)}
-
 	case "gemini-cli":
 		resolvedModel := agent.ResolveModelFullName("gemini-cli", spec.Model)
 		return HarnessLaunchCommand{Command: fmt.Sprintf("gemini -m %s%s", shellQuoteArg(resolvedModel), exitSuffix)}
-
 	default:
 		return HarnessLaunchCommand{Command: fmt.Sprintf("echo %s && exit 1", shellQuoteArg("Unknown harness: "+spec.Harness))}
 	}
+}
+
+func buildClaudeLaunchCommand(spec HarnessLaunchSpec, exitSuffix string) HarnessLaunchCommand {
+	resolvedModel := agent.ResolveModelFullName("claude-code", spec.Model)
+	oauthToken := spec.OAuthToken
+	if oauthToken == "" && !spec.DisableOAuth {
+		oauthToken = auth.ResolveOAuthToken()
+	}
+	envUnset := "-u CLAUDECODE"
+	oauthArg := ""
+	if oauthToken != "" {
+		envUnset += " -u ANTHROPIC_API_KEY"
+		oauthArg = " CLAUDE_CODE_OAUTH_TOKEN=" + shellQuoteArg(oauthToken)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "env %s AGM_SESSION_NAME=%s", envUnset, shellQuoteArg(spec.SessionName))
+	if spec.ForwardTelemetry {
+		appendTelemetryEnv(&b, spec.SessionID)
+	}
+	b.WriteString(oauthArg)
+	fmt.Fprintf(&b, " claude --model %s --add-dir %s", shellQuoteArg(resolvedModel), shellQuoteArg(spec.WorkDir))
+	if !spec.DisableAutoMode {
+		b.WriteString(" --enable-auto-mode")
+	}
+	for _, dir := range spec.ExtraAddDirs {
+		fmt.Fprintf(&b, " --add-dir %s", shellQuoteArg(dir))
+	}
+	modeApplied := false
+	if spec.PermissionMode == "auto" || spec.PermissionMode == "plan" || spec.PermissionMode == "default" {
+		fmt.Fprintf(&b, " --permission-mode %s", spec.PermissionMode)
+		modeApplied = true
+	}
+	if spec.MaxBudgetUSD > 0 {
+		fmt.Fprintf(&b, " --max-budget-usd %.2f", spec.MaxBudgetUSD)
+	}
+	b.WriteString(exitSuffix)
+	return HarnessLaunchCommand{Command: b.String(), ModeAppliedAtStartup: modeApplied}
+}
+
+func buildCodexLaunchCommand(spec HarnessLaunchSpec, exitSuffix string) HarnessLaunchCommand {
+	resolvedModel := agent.ResolveModelFullName("codex-cli", spec.Model)
+	sandboxMode := launchparity.CodexSandboxMode(spec.PermissionMode)
+	var b strings.Builder
+	fmt.Fprintf(&b, "env -u CLAUDECODE AGM_SESSION_NAME=%s codex", shellQuoteArg(spec.SessionName))
+	if spec.Codex != nil && spec.Codex.SessionID != "" {
+		b.WriteString(" resume --remote unix://")
+	}
+	fmt.Fprintf(&b, " -m %s -C %s -s %s", shellQuoteArg(resolvedModel), shellQuoteArg(spec.WorkDir), sandboxMode)
+	for _, dir := range spec.ExtraAddDirs {
+		fmt.Fprintf(&b, " --add-dir %s", shellQuoteArg(dir))
+	}
+	modeApplied := false
+	if flag := launchparity.CodexPermissionModeFlag(spec.PermissionMode); flag != "" {
+		b.WriteString(" " + flag)
+		modeApplied = true
+	}
+	if spec.Codex != nil && spec.Codex.SessionID != "" {
+		fmt.Fprintf(&b, " %s", shellQuoteArg(spec.Codex.SessionID))
+	}
+	b.WriteString(exitSuffix)
+	return HarnessLaunchCommand{Command: b.String(), ModeAppliedAtStartup: modeApplied}
+}
+
+func buildAgyLaunchCommand(spec HarnessLaunchSpec, exitSuffix string) HarnessLaunchCommand {
+	var b strings.Builder
+	fmt.Fprintf(&b, "cd %s && agy --prompt-interactive", shellQuoteArg(spec.WorkDir))
+	modeFlag := launchparity.AgyPermissionModeFlag(spec.PermissionMode)
+	if modeFlag != "" {
+		b.WriteString(" " + modeFlag)
+	}
+	for _, dir := range spec.ExtraAddDirs {
+		fmt.Fprintf(&b, " --add-dir %s", shellQuoteArg(dir))
+	}
+	b.WriteString(exitSuffix)
+	return HarnessLaunchCommand{Command: b.String(), ModeAppliedAtStartup: modeFlag != ""}
 }
 
 func appendTelemetryEnv(b *strings.Builder, sessionID string) {

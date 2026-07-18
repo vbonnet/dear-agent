@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -20,20 +19,20 @@ import (
 // Returns (modeAppliedAtStartup, harnessHandledFullLifecycle, err): when
 // harnessHandledFullLifecycle is true the caller should return immediately —
 // the harness (e.g. gemini-cli wrapper) has already managed attach/detach.
-func startHarness(ctx context.Context, spec ops.HarnessLaunchSpec, exists bool, trustPreConfigured bool) (bool, bool, error) {
+func startHarness(spec ops.HarnessLaunchSpec, trustPreConfigured bool) (bool, bool, error) {
 	switch spec.Harness {
 	case "claude-code":
-		return startClaudeHarness(spec, exists, trustPreConfigured)
+		return startClaudeHarness(spec, trustPreConfigured)
 	case "gemini-cli":
-		done, err := startGeminiHarness(spec, exists)
+		done, err := startGeminiHarness(spec)
 		return false, done, err
 	case "codex-cli":
-		modeApplied, err := startCodexHarness(ctx, spec, exists)
+		modeApplied, err := startCodexHarness(spec)
 		return modeApplied, false, err
 	case "opencode-cli":
-		return false, false, startOpenCodeHarness(spec, exists)
+		return false, false, startOpenCodeHarness(spec)
 	case "agy":
-		modeApplied, err := startAgyHarness(spec, exists)
+		modeApplied, err := startAgyHarness(spec)
 		return modeApplied, false, err
 	default:
 		debug.Phase("Skip CLI Startup")
@@ -54,7 +53,7 @@ func activeHarnessHasTmuxLauncher(harness string) bool {
 
 // startClaudeHarness builds and sends the claude command, waits for the prompt,
 // and answers the trust prompt if needed. Returns (modeAppliedAtStartup, false, err).
-func startClaudeHarness(spec ops.HarnessLaunchSpec, exists bool, trustPreConfigured bool) (bool, bool, error) {
+func startClaudeHarness(spec ops.HarnessLaunchSpec, trustPreConfigured bool) (bool, bool, error) {
 	claudeReady := tmux.NewClaudeReadyFile(spec.SessionName)
 	if err := claudeReady.Cleanup(); err != nil {
 		debug.Log("Warning: failed to cleanup ready-files: %v", err)
@@ -143,11 +142,11 @@ func waitForClaudeReady(sessionName string, claudeReady *tmux.ClaudeReadyFile) e
 // or directly. Returns (handledFullLifecycle, err). When handledFullLifecycle
 // is true the wrapper has already attached/exited and the caller should
 // short-circuit the rest of session setup.
-func startGeminiHarness(spec ops.HarnessLaunchSpec, exists bool) (bool, error) {
+func startGeminiHarness(spec ops.HarnessLaunchSpec) (bool, error) {
 	debug.Phase("Start Gemini")
 	wrapperPath, err := exec.LookPath("agm-agent-wrapper")
 	if err != nil {
-		return false, startGeminiDirect(spec, exists)
+		return false, startGeminiDirect(spec)
 	}
 	debug.Log("Found agm-agent-wrapper at: %s", wrapperPath)
 	debug.Log("Executing wrapper directly (not via tmux): %s --agent=gemini-cli %s", wrapperPath, spec.SessionName)
@@ -169,7 +168,7 @@ func startGeminiHarness(spec ops.HarnessLaunchSpec, exists bool) (bool, error) {
 
 // startGeminiDirect runs gemini directly in the tmux session and handles the
 // optional first-run trust prompt by sending "1<Enter>" if detected.
-func startGeminiDirect(spec ops.HarnessLaunchSpec, exists bool) error {
+func startGeminiDirect(spec ops.HarnessLaunchSpec) error {
 	debug.Log("agm-agent-wrapper not found, falling back to direct gemini")
 	geminiCmd := ops.BuildHarnessLaunchCommand(spec).Command
 	debug.Log("Sending command: %s", geminiCmd)
@@ -210,7 +209,7 @@ func startGeminiDirect(spec ops.HarnessLaunchSpec, exists bool) error {
 	return nil
 }
 
-func startAgyHarness(spec ops.HarnessLaunchSpec, exists bool) (bool, error) {
+func startAgyHarness(spec ops.HarnessLaunchSpec) (bool, error) {
 	debug.Phase("Start AGY")
 	if _, err := exec.LookPath("agy"); err != nil {
 		ui.PrintError(err,
@@ -259,7 +258,7 @@ func startAgyHarness(spec ops.HarnessLaunchSpec, exists bool) (bool, error) {
 // prompt to appear. It mirrors startClaudeHarness /
 // startGeminiDirect: send the command, sleep briefly, then poll for readiness.
 // The shared ops lifecycle owns teardown on failure.
-func startCodexHarness(_ context.Context, spec ops.HarnessLaunchSpec, exists bool) (bool, error) {
+func startCodexHarness(spec ops.HarnessLaunchSpec) (bool, error) {
 	debug.Phase("Start Codex")
 	launch := ops.BuildHarnessLaunchCommand(spec)
 	codexCmd := launch.Command
@@ -314,7 +313,7 @@ func validateCodexCredentials() error {
 
 // startOpenCodeHarness sends the `opencode attach` command into the tmux
 // session and surfaces SSE-based readiness.
-func startOpenCodeHarness(spec ops.HarnessLaunchSpec, exists bool) error {
+func startOpenCodeHarness(spec ops.HarnessLaunchSpec) error {
 	debug.Phase("Start OpenCode")
 	debug.Log("OpenCode server validated (health check passed)")
 	opencodeCmd := ops.BuildHarnessLaunchCommand(spec).Command

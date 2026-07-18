@@ -43,6 +43,57 @@ func (r *cliCreateSessionRuntime) Complete(ctx context.Context, completion ops.C
 	return r.complete(ctx, completion)
 }
 
+func newCLICreateSessionRuntime(sessionName string, existed, trustPreConfigured bool) *cliCreateSessionRuntime {
+	return &cliCreateSessionRuntime{
+		launch: func(_ context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
+			return launchCLICreateSession(spec, existed, trustPreConfigured)
+		},
+		complete: func(ctx context.Context, completion ops.CreateSessionCompletion) error {
+			return completeCLICreateSession(ctx, sessionName, completion)
+		},
+	}
+}
+
+func launchCLICreateSession(spec ops.HarnessLaunchSpec, existed, trustPreConfigured bool) (ops.CreateSessionLaunchResult, error) {
+	if !existed {
+		ui.PrintSuccess(fmt.Sprintf("Created tmux session: %s", spec.SessionName))
+	}
+	if err := interrupt.Clear(interrupt.DefaultDir(), spec.SessionName); err != nil {
+		debug.Log("Warning: failed to clear stale interrupt flag: %v", err)
+	}
+	modeApplied, handled, err := startHarness(spec, trustPreConfigured)
+	return ops.CreateSessionLaunchResult{ModeAppliedAtStartup: modeApplied, HandledLifecycle: handled}, err
+}
+
+func completeCLICreateSession(ctx context.Context, sessionName string, completion ops.CreateSessionCompletion) error {
+	m := completion.Manifest
+	if completion.ManifestPath != "" {
+		if err := git.CommitManifest(completion.ManifestPath, "create", sessionName); err != nil {
+			debug.Log("manifest commit skipped: %v", err)
+		}
+	}
+	if m.ModelTier != "" {
+		d := &modelrouter.Decision{Tier: modelrouter.Tier(m.ModelTier), Model: m.Model, Reason: "recorded at manifest creation", ExplicitTier: modelTierFlag != ""}
+		modelrouter.RecordRoutingDecision(ctx, m.Harness, d)
+	}
+	telemetry.SessionStarted(ctx, m.SessionID, m.Model, m.Harness, m.State, roleName)
+	if err := runHarnessPostCreate(sessionName, completion.Launch.ModeAppliedAtStartup); err != nil {
+		return err
+	}
+	if modeFlagValue != "" && !completion.Launch.ModeAppliedAtStartup && (harnessName != "claude-code" || os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "") {
+		applyCreationModeSwitch(sessionName, harnessName, modeFlagValue)
+	}
+	if os.Getenv("AGM_TEST_RUN_ID") == "" && os.Getenv("AGM_TEST_ENV") == "" {
+		verdict, livenessErr := tmux.CheckPaneLiveness(sessionName, tmux.GetSocketPath())
+		if err := launchparity.ValidateFinalLiveness(verdict, livenessErr); err != nil {
+			return err
+		}
+	}
+	updateVSCodeTabTitle(sessionName)
+	attachOrShowDetached(sessionName)
+	return nil
+}
+
 // createTmuxSessionAndStartClaude creates a new tmux session and starts Claude in it
 func createTmuxSessionAndStartClaude(sessionName string) (retErr error) {
 	if err := preflight(sessionName); err != nil {
@@ -96,46 +147,7 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 		}
 	}
 	manifestDir := filepath.Join(getSessionsDir(), sessionName)
-	runtime := &cliCreateSessionRuntime{
-		launch: func(callCtx context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
-			if !exists {
-				ui.PrintSuccess(fmt.Sprintf("Created tmux session: %s", spec.SessionName))
-			}
-			if err := interrupt.Clear(interrupt.DefaultDir(), spec.SessionName); err != nil {
-				debug.Log("Warning: failed to clear stale interrupt flag: %v", err)
-			}
-			modeApplied, handled, err := startHarness(callCtx, spec, exists, trustPreConfigured)
-			return ops.CreateSessionLaunchResult{ModeAppliedAtStartup: modeApplied, HandledLifecycle: handled}, err
-		},
-		complete: func(callCtx context.Context, completion ops.CreateSessionCompletion) error {
-			m := completion.Manifest
-			if completion.ManifestPath != "" {
-				if err := git.CommitManifest(completion.ManifestPath, "create", sessionName); err != nil {
-					debug.Log("manifest commit skipped: %v", err)
-				}
-			}
-			if m.ModelTier != "" {
-				d := &modelrouter.Decision{Tier: modelrouter.Tier(m.ModelTier), Model: m.Model, Reason: "recorded at manifest creation", ExplicitTier: modelTierFlag != ""}
-				modelrouter.RecordRoutingDecision(callCtx, m.Harness, d)
-			}
-			telemetry.SessionStarted(callCtx, m.SessionID, m.Model, m.Harness, m.State, roleName)
-			if err := runHarnessPostCreate(sessionName, completion.Launch.ModeAppliedAtStartup); err != nil {
-				return err
-			}
-			if modeFlagValue != "" && !completion.Launch.ModeAppliedAtStartup && (harnessName != "claude-code" || os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "") {
-				applyCreationModeSwitch(sessionName, harnessName, modeFlagValue)
-			}
-			if os.Getenv("AGM_TEST_RUN_ID") == "" && os.Getenv("AGM_TEST_ENV") == "" {
-				verdict, livenessErr := tmux.CheckPaneLiveness(sessionName, tmux.GetSocketPath())
-				if err := launchparity.ValidateFinalLiveness(verdict, livenessErr); err != nil {
-					return err
-				}
-			}
-			updateVSCodeTabTitle(sessionName)
-			attachOrShowDetached(sessionName)
-			return nil
-		},
-	}
+	runtime := newCLICreateSessionRuntime(sessionName, exists, trustPreConfigured)
 	opCtx := &ops.OpContext{
 		Tmux:            session.NewRealTmux(),
 		CreationRuntime: runtime,
