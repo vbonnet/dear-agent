@@ -142,11 +142,16 @@ func gitFiles(root string) ([]string, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", "-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", ".")
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
 	if err != nil {
+		if detail := strings.TrimSpace(stderr.String()); detail != "" {
+			return nil, fmt.Errorf("%w: %s", err, detail)
+		}
 		return nil, err
 	}
 
@@ -163,9 +168,17 @@ func gitFiles(root string) ([]string, error) {
 
 func filesystemFiles(root string) ([]string, error) {
 	var paths []string
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+	err := filepath.WalkDir(root, collectFilesystemPath(root, &paths))
+	if err != nil {
+		return nil, fmt.Errorf("walk inventory root %q: %w", root, err)
+	}
+	return paths, nil
+}
+
+func collectFilesystemPath(root string, paths *[]string) fs.WalkDirFunc {
+	return func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			return walkErr
+			return nil //nolint:nilerr // non-Git fallback skips unreadable entries and continues
 		}
 		if entry.IsDir() {
 			if path != root && excludedDirectoryNames[entry.Name()] {
@@ -177,13 +190,9 @@ func filesystemFiles(root string) ([]string, error) {
 		if err != nil {
 			return err
 		}
-		paths = append(paths, filepath.ToSlash(rel))
+		*paths = append(*paths, filepath.ToSlash(rel))
 		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("walk inventory root %q: %w", root, err)
 	}
-	return paths, nil
 }
 
 func excludedPath(path string) bool {

@@ -25,6 +25,10 @@ nested-worktree, and VCS directories.
 
 **REPO-INV-07** When Git inventory fails for a Git worktree, the system shall return the failure instead of silently falling back to a filesystem walk that could include ignored files.
 
+**REPO-INV-08** When the non-Git fallback encounters an unreadable entry, the system shall skip that entry and continue inventorying other reachable files.
+
+**REPO-INV-09** When Git inventory fails with diagnostic output, the system shall include that output in the returned error without permitting an interactive Git prompt.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/spec_coverage.feature`

@@ -1,10 +1,12 @@
 package repoinventory
 
 import (
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -57,6 +59,20 @@ func TestScanDoesNotDiscardGitIgnorePolicyWhenGitFails(t *testing.T) {
 
 	if _, err := Scan(root); err == nil {
 		t.Fatal("Scan succeeded through filesystem fallback after Git inventory failed")
+	} else if !strings.Contains(err.Error(), "fatal:") {
+		t.Fatalf("Scan error = %q, want Git stderr diagnostics", err)
+	}
+}
+
+func TestFallbackSkipsUnreadableEntry(t *testing.T) {
+	t.Parallel()
+	var paths []string
+	collect := collectFilesystemPath(t.TempDir(), &paths)
+	if err := collect("unreadable", nil, fs.ErrPermission); err != nil {
+		t.Fatalf("unreadable fallback entry returned error: %v", err)
+	}
+	if len(paths) != 0 {
+		t.Fatalf("unreadable fallback entry was collected: %v", paths)
 	}
 }
 
