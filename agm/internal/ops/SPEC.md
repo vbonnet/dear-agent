@@ -139,11 +139,11 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-56** If any creation step fails after a new tmux session is created, the system shall remove the newly-created tmux session, delete any completed session registration, and remove only the manifest directory created by that operation.
 
-**OPS-57** If creation reuses an existing tmux session or manifest directory, rollback shall preserve those pre-existing artifacts.
+**OPS-57** If creation reuses an existing tmux session or manifest directory, the system shall preserve those pre-existing artifacts during rollback.
 
 **OPS-58** When optional Codex remote setup is attempted, the system shall apply a finite deadline to the complete remote-control setup sequence and shall honor cancellation from the calling surface.
 
-**OPS-59** When any creation adapter or fresh-session resume fallback builds a harness command, it shall use `BuildHarnessLaunchCommand` rather than assemble a surface-specific command variant.
+**OPS-59** When any creation adapter or fresh-session resume fallback builds a harness command, the system shall use `BuildHarnessLaunchCommand` rather than assemble a surface-specific command variant.
 
 **OPS-36** While a session's state is OFFLINE, READY, or DONE, the stall detector shall skip error-loop detection for that session.
 
