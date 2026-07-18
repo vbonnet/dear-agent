@@ -66,6 +66,12 @@ Provide a production-ready CLI that:
 
 **CLI-20** When current-tmux session creation cannot commit its manifest, the system shall record the commit failure in the CLI debug log instead of silently discarding it.
 
+**CLI-21** When AGM registers its Cobra tree, the system shall reject duplicate active sibling command paths before generating plugin command guidance.
+
+**CLI-22** When `agm wiki query-save` receives user-controlled question or answer text, the system shall accept file-backed inputs, reject conflicting inline and file values, and preserve file content without shell evaluation.
+
+**CLI-23** When installed AGM command guidance is generated, the system shall derive executable paths and supported flags from the live Cobra tree and shall fail if any installed command Markdown is outside the declared inventory.
+
 ## Requirements
 
 ### Functional Requirements
