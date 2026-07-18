@@ -1,6 +1,6 @@
 # Graceful Exit — The No-Overfit Guardrail
 
-> Companion to [ADR-018](../adr/ADR-018-graceful-exit-framework-default.md).
+> Companion to [ADR-018](../adrs/ADR-018-graceful-exit-framework-default.md).
 > This doc is the callsite cookbook: what the guardrail means in
 > practice, when it fires, how to opt out, and how to write a task
 > that benefits from it.
@@ -155,7 +155,7 @@ adding `pkg/audit/checks/gracefulexit.go` and registering it on
 
 ## See also
 
-- [ADR-018](../adr/ADR-018-graceful-exit-framework-default.md) —
+- [ADR-018](../adrs/ADR-018-graceful-exit-framework-default.md) —
   the decision record.
 - [AGENTS.why.md](../../AGENTS.why.md) — the instruction +
   configuration precedent.
