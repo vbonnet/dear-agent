@@ -57,12 +57,12 @@ func markdownLinkIntegrityCheckerIsConfigured() error {
 
 func agmValidatesMarkdownLinkIntegrityRoute() error {
 	root := packageSpecBDDRepoRoot()
-	workflow, err := os.ReadFile(filepath.Join(root, ".github/workflows/health-check.yml"))
+	workflow, err := os.ReadFile(filepath.Join(root, ".github/workflows/link-integrity.yml"))
 	if err != nil {
 		return err
 	}
 	if !strings.Contains(string(workflow), "--baseline .dead-links-baseline.txt") {
-		return fmt.Errorf("health check does not enforce the dead-link baseline")
+		return fmt.Errorf("pull-request workflow does not enforce the dead-link baseline")
 	}
 	return nil
 }
