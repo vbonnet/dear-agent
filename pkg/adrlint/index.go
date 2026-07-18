@@ -1,6 +1,7 @@
 package adrlint
 
 import (
+	"fmt"
 	"strings"
 )
 
@@ -27,7 +28,10 @@ func validateIndex(root, relative string, data []byte, records map[string]record
 			continue
 		}
 		if entry != candidate {
-			violations = append(violations, Violation{Path: relative, Reason: name + ": index identity/title/status differs from record"})
+			violations = append(violations, Violation{Path: relative, Reason: fmt.Sprintf(
+				"%s: index identity/title/status differs from record (got %s / %q / %s, want %s / %q / %s)",
+				name, entry.id, entry.title, entry.status, candidate.id, candidate.title, candidate.status,
+			)})
 		}
 	}
 	for name := range indexed {
