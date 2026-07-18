@@ -76,7 +76,10 @@ func provisionSandbox(ctx context.Context, providerName string, sessionID string
 	}
 	sandboxWorkspace := filepath.Join(homeDir, ".agm", "sandboxes", sessionID)
 
-	lowerDirs := resolveSandboxLowerDirs(workDir)
+	lowerDirs, err := resolveSandboxLowerDirs(workDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve sandbox lower directories: %w", err)
+	}
 
 	// Determine the primary/target repo: prefer a repo that has go.mod at root
 	// (the monorepo) to avoid alphabetical scanning picking the wrong repo.
@@ -134,11 +137,16 @@ func provisionSandbox(ctx context.Context, providerName string, sessionID string
 
 // resolveSandboxLowerDirs returns the OverlayFS lower directories for a new
 // sandbox: prefer cfg.Sandbox.Repos, otherwise scan ~/src/ws/oss/repos for
-// git repos, otherwise fall back to workDir.
-func resolveSandboxLowerDirs(workDir string) []string {
+// git repos, otherwise fall back to workDir — but only if workDir is itself
+// a git repository. If nothing usable is configured or found, resolution
+// fails loud (sandbox.ErrCodeNoLowerDirs) rather than silently cloning
+// workDir: an unset/misresolved workDir (e.g. launchd's default cwd of
+// $HOME, with no --directory or $PWD) would otherwise trigger an unbounded
+// clone of the wrong directory tree.
+func resolveSandboxLowerDirs(workDir string) ([]string, error) {
 	lowerDirs := cfg.Sandbox.Repos
 	if len(lowerDirs) > 0 {
-		return lowerDirs
+		return lowerDirs, nil
 	}
 	wsRoot := filepath.Join(os.Getenv("HOME"), "src", "ws", "oss", "repos")
 	if entries, err := os.ReadDir(wsRoot); err == nil {
@@ -152,12 +160,36 @@ func resolveSandboxLowerDirs(workDir string) []string {
 			}
 		}
 	}
-	if len(lowerDirs) == 0 {
-		debug.Log("No repos found, using workDir as lower dir: %s", workDir)
-		return []string{workDir}
+	if len(lowerDirs) > 0 {
+		debug.Log("Found %d repos in workspace: %v", len(lowerDirs), lowerDirs)
+		return lowerDirs, nil
 	}
-	debug.Log("Found %d repos in workspace: %v", len(lowerDirs), lowerDirs)
-	return lowerDirs
+
+	if reason := unsafeSandboxFallbackReason(workDir); reason != "" {
+		return nil, sandbox.NewNoSandboxLowerDirsError(workDir, reason)
+	}
+	debug.Log("No repos found, using workDir as lower dir: %s", workDir)
+	return []string{workDir}, nil
+}
+
+// unsafeSandboxFallbackReason returns a non-empty reason if workDir is unsafe
+// to use as a sandbox lower dir fallback (empty, resolves to $HOME, or is not
+// a git repository), or "" if workDir is safe to clone.
+func unsafeSandboxFallbackReason(workDir string) string {
+	if workDir == "" {
+		return "workDir is empty"
+	}
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		resolvedWorkDir, _ := filepath.EvalSymlinks(workDir)
+		resolvedHome, _ := filepath.EvalSymlinks(homeDir)
+		if workDir == homeDir || (resolvedWorkDir != "" && resolvedWorkDir == resolvedHome) {
+			return "resolved to $HOME — refusing to clone the entire home directory"
+		}
+	}
+	if _, err := os.Stat(filepath.Join(workDir, ".git")); err != nil {
+		return "not a git repository (no .git directory)"
+	}
+	return ""
 }
 
 // findPrimaryRepo selects the preferred repo from a list of repo paths.
