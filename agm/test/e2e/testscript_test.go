@@ -47,29 +47,31 @@ func runAGM() int {
 	// For this initial implementation, use the mock approach
 	// Tests will validate that commands work with mocked dependencies
 
-	// Try to use installed agm binary first (check actual user home, not test HOME)
-	userHome := os.Getenv("REAL_HOME")
-	if userHome == "" {
-		// Fallback: get HOME before test overrides it
-		userHome = os.Getenv("HOME")
-	}
-	agmPath := userHome + "/go/bin/agm"
+	// Try to use the installed agm binary first (check the actual user home,
+	// not the test HOME).
+	agmPath := installedAGMPath()
 
-	// If not found, build from the local source tree.
-	// "go install <module-path>" is avoided here: the testscript work dir is
-	// outside the module, so Go would try to fetch the private module from the
-	// network and fail. Instead we locate the source relative to this test file
-	// and use "go build" with an explicit output path.
-	if _, err := os.Stat(agmPath); os.IsNotExist(err) {
-		_, testFile, _, _ := runtime.Caller(0)
-		// testFile: agm/test/e2e/testscript_test.go → go up 3 dirs to reach agm/
-		agmModRoot := filepath.Join(filepath.Dir(testFile), "../..")
-		buildCmd := exec.Command("go", "build", "-o", agmPath, "./cmd/agm")
-		buildCmd.Dir = agmModRoot
-		if out, err := buildCmd.CombinedOutput(); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to build agm: %v\n%s\n", err, out)
+	// If it is not installed, build from the local source tree into an
+	// ISOLATED temp cache — never into the live ~/go/bin.
+	//
+	// The previous implementation built with `-o $HOME/go/bin/agm`, writing
+	// straight into the user's real GOBIN as a fallback. That made an
+	// unsandboxed `go test ./...` mutate the live toolchain directory, and was
+	// the mechanism implicated in the 2026-07-15 ~/go/bin wipe (bead ce-24f1):
+	// tests must build into a throwaway location, never the directory the rest
+	// of the system depends on. buildAGMToCache() builds atomically (temp file
+	// + rename) into os.TempDir() and returns that path.
+	if _, err := os.Stat(agmPath); err != nil {
+		if !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "Failed to stat installed agm at %s: %v\n", agmPath, err)
 			return 1
 		}
+		cached, buildErr := buildAGMToCache()
+		if buildErr != nil {
+			fmt.Fprintf(os.Stderr, "Failed to build agm: %v\n", buildErr)
+			return 1
+		}
+		agmPath = cached
 	}
 
 	// Execute the binary with the current args
@@ -95,6 +97,79 @@ func runAGM() int {
 	}
 
 	return 0
+}
+
+// installedAGMPath returns the path to the user's installed agm binary. The
+// testscript Setup preserves the pre-override HOME as REAL_HOME; prefer that so
+// this resolves to the real user home even after a test overrides HOME.
+func installedAGMPath() string {
+	home := os.Getenv("REAL_HOME")
+	if home == "" {
+		home = os.Getenv("HOME")
+	}
+	return filepath.Join(home, "go", "bin", "agm")
+}
+
+// e2eBuildCacheDir is a stable, isolated directory for the fallback agm build.
+// It lives under the OS temp dir — NEVER the real GOBIN — so a testscript run
+// can never create, overwrite, or remove anything in ~/go/bin. A fixed path
+// (rather than a per-process temp dir) lets the many short-lived agmMain
+// subprocesses in a single `go test` run share one build instead of each
+// recompiling agm.
+func e2eBuildCacheDir() string {
+	return filepath.Join(os.TempDir(), "agm-e2e-build")
+}
+
+// buildAGMToCache builds ./cmd/agm into the isolated e2e build cache and
+// returns the path to the built binary. It is safe to call from the many
+// concurrent agmMain subprocesses testscript spawns: the build goes to a
+// unique temp file that is atomically renamed into place, so a partially
+// written binary is never observed, and a lost rename race simply reuses the
+// winner's binary. The output path is always under os.TempDir(); it is never
+// the live ~/go/bin.
+func buildAGMToCache() (string, error) {
+	dir := e2eBuildCacheDir()
+	dest := filepath.Join(dir, "agm")
+
+	// Fast path: a previous subprocess in this run already built it.
+	if _, err := os.Stat(dest); err == nil {
+		return dest, nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create build cache dir: %w", err)
+	}
+
+	_, testFile, _, _ := runtime.Caller(0)
+	// testFile: agm/test/e2e/testscript_test.go → up 3 dirs to reach agm/.
+	// "go install <module-path>" is avoided: the testscript work dir is
+	// outside the module, so Go would try to fetch the private module from the
+	// network and fail. Build the local source with an explicit output path.
+	agmModRoot := filepath.Join(filepath.Dir(testFile), "../..")
+
+	tmp, err := os.CreateTemp(dir, "agm-build-*")
+	if err != nil {
+		return "", fmt.Errorf("create temp build target: %w", err)
+	}
+	tmpPath := tmp.Name()
+	tmp.Close()
+
+	buildCmd := exec.Command("go", "build", "-o", tmpPath, "./cmd/agm")
+	buildCmd.Dir = agmModRoot
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("go build: %v\n%s", err, out)
+	}
+
+	// Atomically publish. If a concurrent builder won the race, reuse its
+	// result rather than failing — both binaries are equivalent.
+	if err := os.Rename(tmpPath, dest); err != nil {
+		os.Remove(tmpPath)
+		if _, statErr := os.Stat(dest); statErr == nil {
+			return dest, nil
+		}
+		return "", fmt.Errorf("publish build: %w", err)
+	}
+	return dest, nil
 }
 
 // TestAGM runs all testscript tests in testdata/
@@ -162,8 +237,7 @@ func TestAGM(t *testing.T) {
 				os.MkdirAll(homeDir+"/sessions", 0755)
 				os.MkdirAll(homeDir+"/.claude", 0755)
 
-				realHome := os.Getenv("HOME")
-				agmPath := realHome + "/go/bin/agm"
+				agmPath := installedAGMPath()
 				if _, err := os.Stat(agmPath); os.IsNotExist(err) {
 					return false, nil
 				}
