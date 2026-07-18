@@ -1,0 +1,43 @@
+# ADR 001: Queue delivery loop
+
+- Status: Accepted
+- Date: 2026-07-17
+
+## Context
+
+AGM needs to deliver persistent inter-session messages without injecting input
+while a target tmux pane is busy or blocked. Earlier ADRs in this directory
+described a different product: a two-second visual session monitor with an HTTP
+status API and mirrored status files. That surface was not the current daemon.
+
+## Decision
+
+`agm-daemon` is a local queue worker. It polls the SQLite message queue on the
+interval owned by `internal/contracts`, resolves the target, and uses
+`CheckSessionDelivery` as the readiness authority. Display-state detection is
+diagnostic only.
+
+Successful delivery uses the safe tmux multiline sender and records session,
+queue, metric, and acknowledgment state. Busy or blocked targets remain pending.
+Resolution or send failures consume configured retry attempts.
+
+The daemon exposes operational state through its PID file, log, queue records,
+and AGM command surfaces. It does not own a session-status HTTP or status-file
+API.
+
+## Consequences
+
+- Delivery latency is bounded by the configured poll interval when a target
+  becomes ready.
+- The queue remains the durable delivery record across daemon restarts.
+- Readiness policy has one owner, reducing divergence between visual labels and
+  delivery behavior.
+- Adding a network status surface requires a separate decision, threat model,
+  implementation, and tests.
+
+## Evidence
+
+- `agm/internal/daemon/daemon.go`
+- `agm/internal/contracts/contracts.go`
+- `agm/internal/messages/queue.go`
+- `agm/internal/session/state_detector.go`

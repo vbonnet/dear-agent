@@ -1,85 +1,30 @@
-# AGM MCP Server
+# AGM MCP server
 
-MCP (Model Context Protocol) server for AGM session management and Wayfinder project tracking.
+Local MCP-over-stdio access to AGM session operations and Wayfinder status.
 
-## Overview
+## Build and verify
 
-The AGM MCP Server bridges Claude Code (and other MCP clients) with AGM session data
-and local Wayfinder project files. It runs as a stdio process and registers eight tools
-across two domains.
+```bash
+make install
+go test ./agm/cmd/agm-mcp-server
+```
 
-## Tools
-
-### AGM session tools
-
-| Tool | Description |
-|------|-------------|
-| `agm_list_sessions` | List sessions with status/type/limit filters |
-| `agm_search_sessions` | Search sessions by partial name match |
-| `agm_get_session_metadata` | Full session metadata by ID or name |
-| `agm_archive_session` | Mark a session archived (dry-run supported) |
-| `agm_kill_session` | Kill the tmux session (dry-run supported) |
-| `agm_list_ops` | List available ops (schema discovery) |
-
-### Wayfinder tools
-
-| Tool | Description |
-|------|-------------|
-| `engram_list_wayfinder_sessions` | List Wayfinder sessions from `wf/` directory |
-| `engram_get_wayfinder_session` | Get full frontmatter for one session by directory name |
-
-Wayfinder tools read `WAYFINDER-STATUS.md` files directly from
-`~/src/engram-research/wf/` (configurable). No external server required.
-
-## Configuration
-
-Default config: `~/.config/agm/mcp-server.yaml`
+The server requires an explicit Dolt workspace through `WORKSPACE` or
+`mcp_server.workspace` in `~/.config/agm/mcp-server.yaml`. Startup fails if the
+selected database cannot be reached.
 
 ```yaml
 mcp_server:
   enabled: true
-  transport: stdio
+  workspace: oss
   auto_register: true
-  sessions_dir: ~/.config/agm/sessions
-  wayfinder_dir: ~/src/engram-research/wf/
-  # engram_mcp_url: reserved for future HTTP transport
+  wayfinder_dir: ~/worktrees/engram-research/evidence/wf
   a2a:
     enabled: false
-    port: 8080
     bind: 127.0.0.1
+    port: 8080
 ```
 
-## Usage
-
-**Build and install**:
-```bash
-make install   # installs agm-mcp-server to GOBIN
-```
-
-**Run directly** (auto-registers with Claude Code on first run):
-```bash
-agm-mcp-server
-```
-
-**Run tests**:
-```bash
-go test ./agm/cmd/agm-mcp-server/...
-```
-
-## Files
-
-```
-agm/cmd/agm-mcp-server/
-├── main.go            # Entry point, tool registration, A2A HTTP server
-├── config.go          # YAML config loading, auto-registration
-├── tools.go           # MCP tool handlers (delegates to agm/internal/ops)
-├── wayfinder.go       # Filesystem-based Wayfinder session reads
-└── a2a_handler.go     # Agent-to-Agent HTTP endpoint
-```
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
-
-## Privacy
-
-Exposes only session metadata. Conversation history, prompts, and API keys
-are never read or returned.
+Use [`ARCHITECTURE.md`](ARCHITECTURE.md) for the current ten-tool inventory and
+runtime boundaries. Use [`SPEC.md`](SPEC.md) for strict behavior requirements.
+The implementation and generated MCP schemas remain authoritative.

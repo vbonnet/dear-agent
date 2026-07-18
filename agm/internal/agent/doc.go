@@ -2,8 +2,8 @@
 //
 // # Architecture
 //
-// AGM (Agent Manager) uses the Agent interface to support multiple AI providers
-// (Claude, Gemini, GPT) with a unified session management experience.
+// AGM uses the Agent interface to present a unified session contract over local
+// AI command-line harnesses.
 //
 //	┌─────────────────┐
 //	│   AGM CLI       │
@@ -19,32 +19,31 @@
 //	│ Agent Interface │ <-- This package
 //	└────────┬────────┘
 //	         │
-//	  ┌──────┴──────┬──────┐
-//	  │             │      │
-//	┌─▼───┐   ┌─────▼──┐  ┌▼────┐
-//	│Claude│  │ Gemini │  │ GPT │
-//	└──────┘  └────────┘  └─────┘
+//	  ┌──────┴──────┬───────────┐
+//	  │             │           │
+//	┌─▼────┐   ┌────▼────┐  ┌───▼────┐
+//	│Claude│   │ Codex   │  │ others │
+//	│ Code │   │ CLI     │  │ in registry
+//	└──────┘   └─────────┘  └────────┘
 //
 // # Usage
 //
-// Agent implementations are in subdirectories:
-//   - internal/agent/gemini/   (Gemini API adapter)
-//   - internal/agent/gpt/      (GPT API adapter)
+// Implementations live in sibling *_adapter.go files. The canonical active and
+// deprecated harness sets are in harnesses.go. Some subdirectories contain
+// compatibility documentation rather than Go implementations.
 //
 // Example:
 //
-//	agent := claude.NewAdapter()
-//	ctx := agent.SessionContext{
-//	    Name:             "my-session",
-//	    WorkingDirectory: "~/project",
-//	}
-//	sessionID, err := agent.CreateSession(ctx)
+//	harness, err := GetHarness("codex-cli")
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
-//
-// # Design References
-//
-//   - ~/src/ai-tools/AGM-MULTI-AGENT-ROADMAP.md (Phase 0, Task 2)
-//   - Bead oss-6tm6 (Priority P1, 480 minutes)
+//	ctx := SessionContext{
+//	    Name:             "my-session",
+//	    WorkingDirectory: "~/project",
+//	}
+//	sessionID, err := harness.CreateSession(ctx)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
 package agent
