@@ -42,7 +42,7 @@ func TestGenerateSkillsPreservesCLIBinaryAndCommandPath(t *testing.T) {
 		t.Fatalf("read generated skill: %v", err)
 	}
 	text := string(content)
-	if !strings.Contains(text, "Run: `agm session search --output json`") {
+	if !strings.Contains(text, "Run: `agm session search <query> --output json`") {
 		t.Fatalf("generated invocation omitted binary or path:\n%s", text)
 	}
 	if !strings.Contains(text, "allowed-tools: Bash(agm session search *)") {
@@ -50,5 +50,26 @@ func TestGenerateSkillsPreservesCLIBinaryAndCommandPath(t *testing.T) {
 	}
 	if strings.Contains(text, "Run: `session search") {
 		t.Fatalf("generated invocation retained bare command path:\n%s", text)
+	}
+	if strings.Contains(text, "$ARGUMENTS --output") {
+		t.Fatalf("generated invocation interpolates raw arguments:\n%s", text)
+	}
+}
+
+func TestGenerateSkillsRequiresBinaryAndGovernedPermissionSyntax(t *testing.T) {
+	base := OpIR{Op: Op{
+		Name: "list_sessions",
+		CLI:  &CLISurface{CommandPath: "session list"},
+		Skill: &SkillSurface{
+			SlashCommand: "agm-list",
+			AllowedTools: "Bash(agm session list *)",
+		},
+	}}
+	if err := GenerateSkills([]OpIR{base}, t.TempDir(), ""); err == nil || !strings.Contains(err.Error(), "CLI binary") {
+		t.Fatalf("expected missing-binary error, got %v", err)
+	}
+	base.Op.Skill.AllowedTools = "Bash(agm session list:*)"
+	if err := GenerateSkills([]OpIR{base}, t.TempDir(), "agm"); err == nil || !strings.Contains(err.Error(), "retired colon") {
+		t.Fatalf("expected retired-permission error, got %v", err)
 	}
 }
