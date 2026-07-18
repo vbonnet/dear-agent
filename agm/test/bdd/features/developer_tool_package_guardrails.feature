@@ -1,7 +1,9 @@
 # SPEC: cmd/session-skill-extractor/SPEC.md
+# RELATED-SPEC: pkg/docaudit/SPEC.md
 # RELATED-SPEC: tests/githooks/SPEC.md
 # RELATED-SPEC: tools/ci-drift-guard/SPEC.md
 # RELATED-SPEC: tools/dead-links/SPEC.md
+# RELATED-SPEC: tools/doc-audit/SPEC.md
 # RELATED-SPEC: tools/devlog/cmd/devlog/SPEC.md
 # RELATED-SPEC: tools/devlog/internal/config/SPEC.md
 # RELATED-SPEC: tools/devlog/internal/errors/SPEC.md
@@ -26,9 +28,11 @@ Feature: Developer tool package guardrails
     Examples:
       | package                                            |
       | cmd/session-skill-extractor                        |
+      | pkg/docaudit                                       |
       | tests/githooks                                     |
       | tools/ci-drift-guard                               |
       | tools/dead-links                                   |
+      | tools/doc-audit                                    |
       | tools/devlog/cmd/devlog                            |
       | tools/devlog/internal/config                       |
       | tools/devlog/internal/errors                       |

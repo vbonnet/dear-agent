@@ -15,3 +15,7 @@
 **DOC-AUDIT-CLI-05** When new findings, stale entries, or baseline additions exist, the command shall exit 1 and print their stable identities.
 
 **DOC-AUDIT-CLI-06** When usage, policy, Git, or file operations fail, the command shall exit 2.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/developer_tool_package_guardrails.feature`

@@ -28,3 +28,7 @@
 - Baseline entries are sorted, unique, and exact; the module never edits them.
 - The injected as-of date is normalized to a UTC calendar day.
 - Git, policy, baseline, and document failures are errors, not freshness debt.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/developer_tool_package_guardrails.feature`
