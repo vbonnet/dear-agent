@@ -21,8 +21,10 @@ past incident). They have OPPOSITE urgency — split the timer.
 - Tell an agent HOW to do its job when WHAT + WHY would do. A narrow set of
   broad, well-scoped tools beats many over-engineered ones with complex routing.
 - Add a safety gate without a **liveness counter-check** — a crash-prevention
-  control with no liveness check becomes a total-work-prevention control (the
-  RAM gate deadlocked the pipeline ~2 days; see [why](harness-hygiene.why.md)).
+  control with no liveness check becomes a total-work-prevention control (a
+  gate keyed on a macOS memory metric that reads near-zero forever never
+  re-opened, deadlocking the pipeline ~2 days; full incident in
+  [why](harness-hygiene.why.md#real-failure-cases-this-repo)).
 - Defer paring an over-fit to a "later cleanup" bead. The later never comes; the
   RAM-gate bug was re-embedded THREE times while its cleanup sat deferred.
 - Enumerate all bad cases in a denylist — invert to allowlist known-safe.

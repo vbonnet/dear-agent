@@ -29,7 +29,10 @@ Define/Enforce/Audit/Resolve hooks; see the DEAR disambiguation in the ADRs.)
 - After any seam, systemic error, or "how did this ship?" moment, write a DEAR
   retro to the knowledge base (`~/src/engram-research`, via a worktree).
 - Name the root cause and a concrete prevention (a test, a gate, a constant, a
-  policy), then file follow-up beads for each prevention.
+  policy), then file follow-up beads for each prevention. Check for an existing
+  bead on the same prevention first — +1/comment it instead of filing a
+  duplicate, so repeat incidents show up as a frequency signal (and can bump
+  its priority) rather than as scattered, uncounted duplicates.
 - **Pare, don't defer.** If the incident touched an over-fit or idle
   scaffolding, assign it one of the six verdicts (Keep / One home / Load later /
   Turn into a check / Probation / Retire) IN the retro — see
