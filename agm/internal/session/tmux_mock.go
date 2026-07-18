@@ -15,6 +15,7 @@ type MockTmux struct {
 	HasSessionError    error
 	ListSessionsError  error
 	CreateSessionError error
+	KillSessionError   error
 	AttachSessionError error
 	SendKeysError      error
 }
@@ -83,6 +84,16 @@ func (m *MockTmux) CreateSession(name, workdir string) error {
 
 	m.Sessions[name] = true
 	m.CreatedSessions = append(m.CreatedSessions, name)
+	return nil
+}
+
+// KillSession removes a mock session. It implements TmuxSessionKiller so
+// creation rollback is contract-testable without a real tmux server.
+func (m *MockTmux) KillSession(name string) error {
+	if m.KillSessionError != nil {
+		return m.KillSessionError
+	}
+	delete(m.Sessions, name)
 	return nil
 }
 

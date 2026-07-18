@@ -48,6 +48,25 @@ Skills (.md)   →  CLI --json    →  internal/ops  →  Dolt Storage
    recovery, but only `ArchiveSession` may complete the transition to
    `lifecycle=archived`.
 
+### Session creation amendment (2026-07-17)
+
+Session creation is one ops-owned lifecycle, not merely a shared manifest
+write. `CreateSessionWithContext` owns tmux creation/reuse, bounded Codex remote
+setup, the canonical harness launch contract, manifest registration,
+runtime completion ordering, and rollback. CLI and MCP adapters must
+declare caller provenance. Interactive surfaces may supply one
+`CreateSessionRuntime` adapter with `Launch` and `Complete` operations. The ops
+module invokes those operations around registration; adapters cannot insert or
+reorder lifecycle phases, and dependency ports live on `OpContext` rather than
+on the creation request.
+
+Fresh harness commands are built by `BuildHarnessLaunchCommand`. Creation,
+in-place tmux startup, and fresh-session resume fallbacks use this builder so
+model resolution, permission mode, persistence, telemetry, and credential
+forwarding share one contract. Resume commands that target a provider-native
+conversation may still add that provider's resume identifier around the shared
+launch policy.
+
 ## Alternatives Considered
 
 1. **gRPC service layer**: Rejected — over-engineered for a single-user CLI tool
@@ -64,3 +83,9 @@ Skills (.md)   →  CLI --json    →  internal/ops  →  Dolt Storage
 - Archive guard and cleanup changes now propagate uniformly to immediate,
   bulk, GC, and reaper paths; callers can no longer silently retain a copied
   lifecycle mutation.
+- A failed creation removes only artifacts created by that attempt; reused tmux
+  sessions and pre-existing manifest directories are preserved.
+- Creation rollback reports cleanup failures, and optional manifest-directory
+  failure leaves no path for surface completion to treat as durable.
+- CLI and MCP can retain different user interaction while sharing the same
+  state transition order and caller provenance.

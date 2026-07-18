@@ -48,6 +48,15 @@ type HarnessLivenessBatchChecker interface {
 	HarnessLivenessBatch(sessionNames []string) (map[string]LivenessInfo, error)
 }
 
+// TmuxSessionKiller is the optional destructive counterpart to
+// TmuxInterface.CreateSession. Creation operations discover this capability
+// during rollback so a failed post-create step cannot strand a fresh tmux
+// session. Keeping it separate preserves compatibility with lightweight tmux
+// implementations that only support the original interface.
+type TmuxSessionKiller interface {
+	KillSession(name string) error
+}
+
 // TmuxInterface provides an abstraction for tmux operations
 // This allows mocking tmux in tests without requiring real tmux to be installed
 type TmuxInterface interface {
