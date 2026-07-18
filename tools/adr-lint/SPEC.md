@@ -11,3 +11,7 @@
 **ADR-LINT-CLI-03** When content violations exist, the command shall exit 1 and print each sorted path and reason.
 
 **ADR-LINT-CLI-04** When usage, policy, Git, or file operations fail, the command shall exit 2.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/audit_package_guardrails.feature`

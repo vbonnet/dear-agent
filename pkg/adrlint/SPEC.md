@@ -26,3 +26,7 @@
 - Indexes are reviewed source, never generated or rewritten by the validator.
 - Number gaps preserve deleted identity and do not require renumbering.
 - The validator is read-only.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/audit_package_guardrails.feature`
