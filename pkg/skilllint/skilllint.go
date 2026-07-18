@@ -231,6 +231,17 @@ func validateCommand(path string, fm *Frontmatter, keys map[string]yaml.Node) []
 
 func validateSkill(path string, fm *Frontmatter, keys map[string]yaml.Node, body, data []byte) []Violation {
 	violations := unsupportedFields(path, "skill", keys, skillFields)
+	violations = append(violations, validateSkillIdentity(path, fm)...)
+
+	bodyText := string(body)
+	violations = append(violations, validateSkillBody(path, bodyText)...)
+	violations = append(violations, validateSkillLength(path, bodyText, data)...)
+	violations = append(violations, validateSkillExecution(path, fm, keys, bodyText)...)
+	return violations
+}
+
+func validateSkillIdentity(path string, fm *Frontmatter) []Violation {
+	var violations []Violation
 	name := strings.TrimSpace(fm.Name)
 	if name == "" {
 		violations = append(violations, Violation{Path: path, Reason: "missing `name:` in frontmatter"})
@@ -244,15 +255,22 @@ func validateSkill(path string, fm *Frontmatter, keys map[string]yaml.Node, body
 	} else if !triggerPattern.MatchString(description) {
 		violations = append(violations, Violation{Path: path, Reason: "description has no activation trigger (expected `Use when` or `Trigger when`)"})
 	}
+	return violations
+}
 
-	bodyText := string(body)
+func validateSkillBody(path, bodyText string) []Violation {
+	var violations []Violation
 	if !workflowHeadingPattern.MatchString(bodyText) && len(orderedStepPattern.FindAllStringIndex(bodyText, 2)) < 2 {
 		violations = append(violations, Violation{Path: path, Reason: "missing procedural workflow (expected a workflow heading or at least two ordered steps)"})
 	}
 	if !verificationPattern.MatchString(bodyText) {
 		violations = append(violations, Violation{Path: path, Reason: "missing verification or completion heading"})
 	}
+	return violations
+}
 
+func validateSkillLength(path, bodyText string, data []byte) []Violation {
+	var violations []Violation
 	lineCount := 1 + strings.Count(string(data), "\n")
 	if lineCount > 100 && !referencesPattern.MatchString(bodyText) {
 		violations = append(violations, Violation{Path: path, Reason: "skill is over 100 lines without a References, Documentation, or Resources section"})
@@ -260,7 +278,11 @@ func validateSkill(path string, fm *Frontmatter, keys map[string]yaml.Node, body
 	if lineCount > 500 {
 		violations = append(violations, Violation{Path: path, Reason: fmt.Sprintf("skill has %d lines and exceeds the 500-line review threshold", lineCount)})
 	}
+	return violations
+}
 
+func validateSkillExecution(path string, fm *Frontmatter, keys map[string]yaml.Node, bodyText string) []Violation {
+	var violations []Violation
 	modelPresent := nonemptyField(keys, "model")
 	effortPresent := nonemptyField(keys, "effort")
 	if modelPresent != effortPresent {
@@ -317,9 +339,10 @@ func nonemptyField(keys map[string]yaml.Node, key string) bool {
 		return strings.TrimSpace(node.Value) != ""
 	case yaml.SequenceNode, yaml.MappingNode:
 		return len(node.Content) > 0
-	default:
+	case yaml.DocumentNode, yaml.AliasNode, 0:
 		return false
 	}
+	return false
 }
 
 func hasProviderExecutionField(keys map[string]yaml.Node) bool {
