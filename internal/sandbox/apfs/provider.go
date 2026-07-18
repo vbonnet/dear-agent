@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/vbonnet/dear-agent/internal/sandbox"
@@ -231,11 +232,22 @@ func (p *Provider) cloneDirectory(ctx context.Context, src, dst string) error {
 	// Try APFS reflink cloning first via cp -c
 	// The -c flag uses clonefile() syscall on APFS for zero-copy CoW
 	cmd := exec.CommandContext(cloneCtx, "cp", "-c", "-R", src, dst)
-	// WaitDelay bounds how long Wait() blocks on the command's I/O pipes after
-	// the context is canceled. CommandContext's SIGKILL alone reaps only the
-	// direct child; without WaitDelay a wedged descendant holding a pipe open
-	// can still block Wait() indefinitely (see PR #915 / ce-fmxv for the same
+	// Process-group isolation + group-cancel + WaitDelay matches the
+	// repo's subprocess-execution convention (see codexcontrol.Client):
+	// SysProcAttr places cp in its own process group so a group-kill on
+	// cancel takes any wedged descendant with it, and WaitDelay bounds how
+	// long Wait() blocks on the command's I/O pipes after the context is
+	// canceled — CommandContext's SIGKILL alone reaps only the direct
+	// child; without WaitDelay a wedged descendant holding a pipe open can
+	// still block Wait() indefinitely (see PR #915 / ce-fmxv for the same
 	// failure mode in the codex boot path).
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
 	cmd.WaitDelay = 1 * time.Second
 	if runErr := cmd.Run(); runErr != nil {
 		if cloneCtx.Err() != nil {
@@ -265,7 +277,11 @@ func isDstNestedInSrc(src, dst string) (bool, error) {
 	resolvedSrc = filepath.Clean(resolvedSrc)
 	resolvedDst := resolvePathBestEffort(dst)
 
-	return resolvedDst == resolvedSrc || strings.HasPrefix(resolvedDst, resolvedSrc+string(filepath.Separator)), nil
+	rel, err := filepath.Rel(resolvedSrc, resolvedDst)
+	if err != nil {
+		return false, fmt.Errorf("failed to compute relative path from %s to %s: %w", resolvedSrc, resolvedDst, err)
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))), nil
 }
 
 // resolvePathBestEffort resolves symlinks on the longest existing ancestor of

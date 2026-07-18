@@ -440,6 +440,20 @@ var spawnSession = func(ctx context.Context, name string, cfg workerLaunchConfig
 	// auto-stash stale input instead of deadlocking as if a human were typing
 	// (ce-v9in), and scrub the API key so workers use the session's own auth.
 	cmd.Env = append(scrubAPIKey(os.Environ()), "AGM_AUTONOMOUS=1")
+	// Process-group isolation + group-cancel + WaitDelay matches the repo's
+	// subprocess-execution convention (see codexcontrol.Client): `agm session
+	// new` boots a harness that can itself wedge a descendant holding a pipe
+	// open (this is the exact ce-fmxv failure mode this PR fixes elsewhere in
+	// the codex boot path); without group-kill on cancel that descendant can
+	// outlive the timeout and keep the worker session half-alive.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 1 * time.Second
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("%w\n%s", err, strings.TrimSpace(string(out)))
 	}
