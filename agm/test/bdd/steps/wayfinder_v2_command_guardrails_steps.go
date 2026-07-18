@@ -114,7 +114,7 @@ func wayfinderHelpOmitsLegacyMigrationCommands(ctx context.Context) error {
 	}
 	for _, command := range []string{"MigrateCmd", "MigrateAllCmd"} {
 		if strings.Contains(string(data), command) {
-			return fmt.Errorf("Wayfinder session command still registers %s", command)
+			return fmt.Errorf("wayfinder session command still registers %s", command)
 		}
 	}
 	return nil
@@ -261,7 +261,7 @@ func wayfinderPluginExposesOneRootSkill(ctx context.Context) error {
 	}
 	for _, duplicateField := range []string{"commands", "skills"} {
 		if _, exists := manifest[duplicateField]; exists {
-			return fmt.Errorf("Wayfinder manifest overrides auto-discovered root skill with %q", duplicateField)
+			return fmt.Errorf("wayfinder manifest overrides auto-discovered root skill with %q", duplicateField)
 		}
 	}
 	return nil

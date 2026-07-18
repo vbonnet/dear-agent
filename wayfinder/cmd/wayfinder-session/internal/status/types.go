@@ -15,6 +15,7 @@ type Phase struct {
 	Outcome     string
 }
 
+// SchemaVersion and StatusFilename define the canonical status-file contract.
 const (
 	SchemaVersion  = "2.0"
 	StatusFilename = "WAYFINDER-STATUS.md"
