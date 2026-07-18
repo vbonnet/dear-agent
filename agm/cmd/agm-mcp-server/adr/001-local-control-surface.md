@@ -1,7 +1,8 @@
-# ADR 001: Verified local AGM control surface
+# ADR-001: Verified local AGM control surface
 
-- Status: Accepted
-- Date: 2026-07-17
+Status: Accepted
+
+Date: 2026-07-17
 
 ## Context
 

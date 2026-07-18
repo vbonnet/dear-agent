@@ -1,7 +1,8 @@
-# ADR 001: Queue delivery loop
+# ADR-001: Queue delivery loop
 
-- Status: Accepted
-- Date: 2026-07-17
+Status: Accepted
+
+Date: 2026-07-17
 
 ## Context
 
