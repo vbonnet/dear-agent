@@ -78,7 +78,7 @@ func provisionSandbox(ctx context.Context, providerName string, sessionID string
 
 	lowerDirs, err := resolveSandboxLowerDirs(workDir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to resolve sandbox lower directories: %w", err)
 	}
 
 	// Determine the primary/target repo: prefer a repo that has go.mod at root

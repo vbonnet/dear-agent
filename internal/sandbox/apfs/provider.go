@@ -252,7 +252,12 @@ func (p *Provider) cloneDirectory(ctx context.Context, src, dst string) error {
 	if runErr := cmd.Run(); runErr != nil {
 		if cloneCtx.Err() != nil {
 			_ = os.RemoveAll(dst)
-			return fmt.Errorf("clone of %s timed out after %s: %w", src, cloneTimeout, cloneCtx.Err())
+			// Distinguish a genuine timeout from a parent-context cancellation
+			// (e.g. caller interrupt): only DeadlineExceeded is a timeout.
+			if cloneCtx.Err() == context.DeadlineExceeded {
+				return fmt.Errorf("clone of %s timed out after %s: %w", src, cloneTimeout, cloneCtx.Err())
+			}
+			return fmt.Errorf("clone of %s canceled: %w", src, cloneCtx.Err())
 		}
 		// Check if error is due to clonefile not supported (non-APFS filesystem)
 		if isClonefileError(runErr) {
@@ -270,12 +275,26 @@ func (p *Provider) cloneDirectory(ctx context.Context, src, dst string) error {
 // would make a directory clone from src to dst grow without bound. dst
 // itself need not exist yet (the caller creates it via this clone).
 func isDstNestedInSrc(src, dst string) (bool, error) {
-	resolvedSrc, err := filepath.EvalSymlinks(src)
+	// Normalize to absolute paths first. filepath.EvalSymlinks preserves a
+	// relative input as relative, and filepath.Rel cannot relate a relative
+	// path to an absolute one (it errors), so a relative src or dst would make
+	// the nesting check fail spuriously. filepath.Abs makes the comparison
+	// well-defined regardless of the caller's cwd.
+	absSrc, err := filepath.Abs(src)
+	if err != nil {
+		return false, fmt.Errorf("failed to make source path %s absolute: %w", src, err)
+	}
+	absDst, err := filepath.Abs(dst)
+	if err != nil {
+		return false, fmt.Errorf("failed to make destination path %s absolute: %w", dst, err)
+	}
+
+	resolvedSrc, err := filepath.EvalSymlinks(absSrc)
 	if err != nil {
 		return false, fmt.Errorf("failed to resolve source %s: %w", src, err)
 	}
 	resolvedSrc = filepath.Clean(resolvedSrc)
-	resolvedDst := resolvePathBestEffort(dst)
+	resolvedDst := resolvePathBestEffort(absDst)
 
 	rel, err := filepath.Rel(resolvedSrc, resolvedDst)
 	if err != nil {
