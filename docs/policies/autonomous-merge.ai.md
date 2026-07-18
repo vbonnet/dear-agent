@@ -18,13 +18,13 @@ boundary that keeps consequential changes in front of a human.
 
 - Autonomously merge a change touching **security**, **product behavior**, or
   **money/billing** — hold those for human merge review.
-- Merge with `--admin`, `--force`, or `--no-verify`, or over red/required checks.
+- Bypass `safe-merge`, its soak time, required checks, or unresolved-thread gate.
 - Merge a PR with unresolved review threads.
 
 ## ALWAYS
 
 - For routine changes, review and merge your own PR once checks are green and
-  threads are resolved — `gh pr merge --squash`, via the normal gate.
+  threads are resolved — `safe-merge --pr <number>`, via the normal gate.
 - Route every PR through Wayfinder V2 + `safe-pr`.
 - When unsure whether something is security/product/money, treat it as yes and
   hold for a human.
