@@ -65,51 +65,70 @@ func agmValidatesParitySpecAndBDDCoverage(ctx context.Context) error {
 }
 
 func everyParitySurfaceShouldHaveSPEC(ctx context.Context) error {
-	return specCoverageShouldHaveNoFindings(ctx, "SPEC.md")
+	return specCoverageShouldHaveNoFindings(ctx,
+		speccoverage.FindingKindMissingSpecPath,
+		speccoverage.FindingKindSpecRead,
+	)
 }
 
 func everyParitySurfaceShouldHaveExecutableBDDFeature(ctx context.Context) error {
-	return specCoverageShouldHaveNoFindings(ctx, "BDD feature")
+	return specCoverageShouldHaveNoFindings(ctx,
+		speccoverage.FindingKindMissingFeaturePath,
+		speccoverage.FindingKindFeatureRead,
+		speccoverage.FindingKindFeatureMissingDeclaration,
+	)
 }
 
 func everyParitySPECShouldDeclareEARSRequirements(ctx context.Context) error {
-	return specCoverageShouldHaveNoFindings(ctx, "EARS requirements")
+	return specCoverageShouldHaveNoFindings(ctx, speccoverage.FindingKindMissingEARS)
 }
 
 func everyParitySPECShouldPassStrictEARSLint(ctx context.Context) error {
-	return specCoverageShouldHaveNoFindings(ctx, "invalid EARS syntax")
+	return specCoverageShouldHaveNoFindings(ctx, speccoverage.FindingKindInvalidEARS)
 }
 
 func everyParitySPECShouldReferenceExecutableBDDFeature(ctx context.Context) error {
-	return specCoverageShouldHaveNoFindings(ctx, "does not reference its executable BDD feature")
+	return specCoverageShouldHaveNoFindings(ctx, speccoverage.FindingKindSpecMissingBDDRef)
 }
 
 func everyParityBDDFeatureShouldReferenceGoverningSPEC(ctx context.Context) error {
-	return specCoverageShouldHaveNoFindings(ctx, "does not reference its governing SPEC.md")
+	return specCoverageShouldHaveNoFindings(ctx, speccoverage.FindingKindFeatureMissingSpecRef)
 }
 
 func everyParitySPECShouldHaveCompletedAuditMarker(ctx context.Context) error {
-	return specCoverageShouldHaveNoFindings(ctx, "audit marker")
+	return specCoverageShouldHaveNoFindings(ctx, speccoverage.FindingKindMissingAudit)
 }
 
 func everyParityBDDFeatureShouldBeRegistered(ctx context.Context) error {
-	return specCoverageShouldHaveNoFindings(ctx, "not registered")
+	return specCoverageShouldHaveNoFindings(ctx, speccoverage.FindingKindUnregisteredParityFeature)
 }
 
 func everyExecutableBDDFeatureShouldBeListedInBDDCatalog(ctx context.Context) error {
-	return specCoverageShouldHaveNoFindings(ctx, "not listed in agm/docs/BDD-CATALOG.md")
+	return specCoverageShouldHaveNoFindings(ctx,
+		speccoverage.FindingKindCatalogRead,
+		speccoverage.FindingKindFeatureDiscovery,
+		speccoverage.FindingKindCatalogUnlistedFeature,
+	)
 }
 
 func everyBDDCatalogFeatureReferenceShouldExist(ctx context.Context) error {
-	return specCoverageShouldHaveNoFindings(ctx, "references a missing feature file")
+	return specCoverageShouldHaveNoFindings(ctx, speccoverage.FindingKindCatalogMissingFeature)
 }
 
 func everyExecutableBDDFeatureShouldReferenceGoverningSPEC(ctx context.Context) error {
-	return specCoverageShouldHaveNoFindings(ctx, "does not declare governing SPEC.md")
+	return specCoverageShouldHaveNoFindings(ctx,
+		speccoverage.FindingKindFeatureDiscovery,
+		speccoverage.FindingKindFeatureRead,
+		speccoverage.FindingKindFeatureMissingSpecRef,
+		speccoverage.FindingKindFeatureMissingSpec,
+	)
 }
 
 func everyGoverningSPECShouldReferenceExecutableBDDFeature(ctx context.Context) error {
-	return specCoverageShouldHaveNoFindings(ctx, "governing SPEC.md does not reference executable BDD feature")
+	return specCoverageShouldHaveNoFindings(ctx,
+		speccoverage.FindingKindFeatureMissingSpec,
+		speccoverage.FindingKindSpecMissingFeatureRef,
+	)
 }
 
 func agmValidatesChangedGoPackageSPECCoverage(ctx context.Context) error {
@@ -128,11 +147,14 @@ func agmValidatesChangedGoPackageSPECCoverage(ctx context.Context) error {
 }
 
 func changedProductionGoPackagesShouldHaveCoLocatedSPECFiles(ctx context.Context) error {
-	return specCoverageShouldHaveNoFindings(ctx, "co-located SPEC.md")
+	return specCoverageShouldHaveNoFindings(ctx,
+		speccoverage.FindingKindMissingCoLocatedSpec,
+		speccoverage.FindingKindSpecRead,
+	)
 }
 
 func changedProductionGoPackageSPECFilesShouldPassStrictEARSLint(ctx context.Context) error {
-	return specCoverageShouldHaveNoFindings(ctx, "invalid EARS syntax")
+	return specCoverageShouldHaveNoFindings(ctx, speccoverage.FindingKindInvalidEARS)
 }
 
 func agmValidatesRepositoryImplementationCoverage(ctx context.Context) error {
@@ -168,14 +190,18 @@ func everyImplementationDirectoryShouldHaveStrictCoverage(ctx context.Context) e
 	return fmt.Errorf("%s", strings.Join(messages, "\n"))
 }
 
-func specCoverageShouldHaveNoFindings(ctx context.Context, phrase string) error {
+func specCoverageShouldHaveNoFindings(ctx context.Context, kinds ...speccoverage.FindingKind) error {
 	state, err := getSpecCoverageState(ctx)
 	if err != nil {
 		return err
 	}
+	selected := make(map[speccoverage.FindingKind]struct{}, len(kinds))
+	for _, kind := range kinds {
+		selected[kind] = struct{}{}
+	}
 	var matches []string
 	for _, finding := range state.findings {
-		if strings.Contains(finding.Message, phrase) || strings.Contains(finding.Path, phrase) {
+		if _, ok := selected[finding.Kind]; ok {
 			matches = append(matches, finding.Error())
 		}
 	}

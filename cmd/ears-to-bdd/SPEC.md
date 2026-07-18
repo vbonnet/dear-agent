@@ -1,6 +1,6 @@
 # EARS to BDD Command Specification
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-07-17 -->
 
 ## Overview
 
@@ -12,7 +12,7 @@ coverage.
 
 **EARS-BDD-01** When no path arguments are provided, the system shall search the current directory for `SPEC.md` files.
 
-**EARS-BDD-02** When a directory path is provided, the system shall recursively discover `SPEC.md` files while skipping `.git`, `node_modules`, and `.worktrees`.
+**EARS-BDD-02** When a directory path is provided, the system shall discover `SPEC.md` files through the shared repository inventory so Git-ignored, VCS, nested-worktree, dependency, generated-output, and test-fixture paths are excluded consistently.
 
 **EARS-BDD-03** When an input path cannot be read, the system shall return a command failure.
 

@@ -1,6 +1,6 @@
 # SPEC and BDD Coverage Specification
 
-<!-- Last audited at: 2026-07-01 -->
+<!-- Last audited at: 2026-07-17 -->
 
 **Version:** 1.0
 **Status:** Enforced
@@ -65,6 +65,10 @@ production, test, support, configuration, service, and executable sources.
 **SCB-24** When the repository test suite runs, the system shall validate repository-wide implementation coverage against the actual checkout rather than only synthetic validator fixtures.
 
 **SCB-25** When repository-wide coverage is validated, the system shall require every SPEC.md artifact, including doc-only and hidden policy contracts, to retain strict EARS and reciprocal executable BDD traceability.
+
+**SCB-26** When repository-wide coverage discovers source or specification files, the system shall use the shared repository inventory so ignored dependencies, generated output, embedded databases, and nested worktrees do not create governance findings.
+
+**SCB-27** When a caller selects a class of SPEC or BDD coverage findings, the system shall use the finding's stable typed kind rather than matching human-readable paths or messages.
 
 ## BDD Traceability
 

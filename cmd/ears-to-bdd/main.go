@@ -21,12 +21,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/vbonnet/dear-agent/internal/earsbdd"
+	"github.com/vbonnet/dear-agent/internal/repoinventory"
 )
 
 func main() {
@@ -116,27 +116,16 @@ func expandPaths(paths []string) ([]string, error) {
 			continue
 		}
 
-		err = filepath.WalkDir(p, func(path string, d fs.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if d.IsDir() {
-				if n := d.Name(); n == ".git" || n == "node_modules" || n == ".worktrees" {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if strings.EqualFold(d.Name(), "SPEC.md") {
-				abs, _ := filepath.Abs(path)
-				if !seen[abs] {
-					seen[abs] = true
-					specs = append(specs, path)
-				}
-			}
-			return nil
-		})
+		inventory, err := repoinventory.Scan(p)
 		if err != nil {
-			return nil, fmt.Errorf("walking %s: %w", p, err)
+			return nil, fmt.Errorf("inventory %s: %w", p, err)
+		}
+		for _, file := range inventory {
+			if !strings.EqualFold(file.Name(), "SPEC.md") || seen[file.Absolute] {
+				continue
+			}
+			seen[file.Absolute] = true
+			specs = append(specs, file.Absolute)
 		}
 	}
 	return specs, nil

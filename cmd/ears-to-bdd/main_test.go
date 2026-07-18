@@ -2,7 +2,9 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -80,6 +82,37 @@ func TestExpandPaths_MissingFile(t *testing.T) {
 	_, err := expandPaths([]string{"/nonexistent/path"})
 	if err == nil {
 		t.Error("expected error for nonexistent path, got nil")
+	}
+}
+
+func TestExpandPathsHonorsRepositoryIgnoreAndGeneratedPolicy(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	cmd := exec.Command("git", "init", "-q")
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("ignored/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{"visible", "ignored", "dist"} {
+		path := filepath.Join(root, dir, "SPEC.md")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("The system shall be deterministic.\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	files, err := expandPaths([]string{root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{filepath.Join(root, "visible", "SPEC.md")}
+	if !slices.Equal(files, want) {
+		t.Fatalf("expanded files = %v, want %v", files, want)
 	}
 }
 
