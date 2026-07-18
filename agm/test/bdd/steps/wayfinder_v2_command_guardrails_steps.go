@@ -42,11 +42,12 @@ func RegisterWayfinderV2CommandGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^Wayfinder help should name all nine canonical phases$`, wayfinderHelpNamesCanonicalPhases)
 	ctx.Step(`^Wayfinder help should expose the V2 session command$`, wayfinderHelpExposesV2Session)
 	ctx.Step(`^Wayfinder help should not expose retired V1 executors$`, wayfinderHelpOmitsRetiredExecutors)
+	ctx.Step(`^Wayfinder help should not expose legacy migration commands$`, wayfinderHelpOmitsLegacyMigrationCommands)
 	ctx.Step(`^AGM audits Wayfinder command source policy$`, agmAuditsWayfinderCommandPolicy)
 	ctx.Step(`^retired V1 root and feature executors should be absent$`, retiredWayfinderExecutorsAreAbsent)
-	ctx.Step(`^normal Wayfinder session commands should parse only V2 status$`, normalWayfinderCommandsParseOnlyV2)
-	ctx.Step(`^non-migration Wayfinder runtime source should omit retired phase identifiers$`, nonMigrationRuntimeOmitsRetiredPhases)
-	ctx.Step(`^unversioned phase enumeration should default to V2$`, unversionedPhasesDefaultToV2)
+	ctx.Step(`^all Wayfinder session commands should parse only schema 2.0 status$`, normalWayfinderCommandsParseOnlyV2)
+	ctx.Step(`^Wayfinder runtime source should omit retired phase identifiers$`, nonMigrationRuntimeOmitsRetiredPhases)
+	ctx.Step(`^Wayfinder phase enumeration should expose the nine named phases$`, unversionedPhasesDefaultToV2)
 }
 
 func agmInspectsWayfinderRootHelp(ctx context.Context) error {
@@ -95,6 +96,23 @@ func wayfinderHelpOmitsRetiredExecutors(ctx context.Context) error {
 	for _, command := range []string{"start", "autopilot", "features", "abort"} {
 		if strings.Contains(state.help, "  "+command+" ") {
 			return fmt.Errorf("wayfinder help exposes retired direct command %q", command)
+		}
+	}
+	return nil
+}
+
+func wayfinderHelpOmitsLegacyMigrationCommands(ctx context.Context) error {
+	state, err := getWayfinderV2CommandState(ctx)
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(filepath.Join(state.repoRoot, "wayfinder/cmd/wayfinder/cmd/session.go"))
+	if err != nil {
+		return err
+	}
+	for _, command := range []string{"MigrateCmd", "MigrateAllCmd"} {
+		if strings.Contains(string(data), command) {
+			return fmt.Errorf("Wayfinder session command still registers %s", command)
 		}
 	}
 	return nil
