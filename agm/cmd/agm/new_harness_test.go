@@ -5,23 +5,28 @@ import (
 	"testing"
 
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
 )
+
+func testLaunchCommand(spec ops.HarnessLaunchSpec) string {
+	spec.DisableOAuth = true
+	return ops.BuildHarnessLaunchCommand(spec).Command
+}
 
 // TestBuildCodexCommand_ModelResolved verifies that a registry alias is resolved
 // to its full Codex model name and passed via the `-m` flag.
 func TestBuildCodexCommand_ModelResolved(t *testing.T) {
-	saved := modelName
-	defer func() { modelName = saved }()
-	modelName = "5.4" // resolves to gpt-5.4
-
-	cmd := buildCodexCommand("test-session", "/tmp/work", nil)
+	cmd := testLaunchCommand(ops.HarnessLaunchSpec{
+		Harness: "codex-cli", Model: "5.4", SessionName: "test-session", WorkDir: "/tmp/work",
+	})
 
 	if !strings.Contains(cmd, "-m 'gpt-5.4'") {
 		t.Errorf("resolved model not present in command: %s", cmd)
 	}
 	// Cross-harness alias should resolve too (opus -> 5.5 -> gpt-5.5).
-	modelName = "opus"
-	cmd = buildCodexCommand("test-session", "/tmp/work", nil)
+	cmd = testLaunchCommand(ops.HarnessLaunchSpec{
+		Harness: "codex-cli", Model: "opus", SessionName: "test-session", WorkDir: "/tmp/work",
+	})
 	if !strings.Contains(cmd, "-m 'gpt-5.5'") {
 		t.Errorf("cross-harness alias not resolved in command: %s", cmd)
 	}
@@ -31,13 +36,12 @@ func TestBuildCodexCommand_ModelResolved(t *testing.T) {
 // shell-special characters is single-quoted so it cannot break out of the command
 // line or trigger word-splitting/globbing when pasted into the pane's shell.
 func TestBuildCodexCommand_ShellQuoting(t *testing.T) {
-	saved := modelName
-	defer func() { modelName = saved }()
-	modelName = "5.4"
-
 	// A path with a space and a single quote (injection attempt).
 	workDir := "/tmp/work dir/'; rm -rf ~ #"
-	cmd := buildCodexCommand("test-session", workDir, []string{"/extra/add dir"})
+	cmd := testLaunchCommand(ops.HarnessLaunchSpec{
+		Harness: "codex-cli", Model: "5.4", SessionName: "test-session", WorkDir: workDir,
+		ExtraAddDirs: []string{"/extra/add dir"},
+	})
 
 	// The -C value must be wrapped in single quotes with the embedded quote escaped.
 	if !strings.Contains(cmd, "-C '/tmp/work dir/'\"'\"'; rm -rf ~ #'") {
@@ -52,7 +56,9 @@ func TestBuildCodexCommand_ShellQuoting(t *testing.T) {
 		t.Errorf("extra add-dir not shell-quoted: %s", cmd)
 	}
 	// Session name with special chars must be quoted in the env assignment.
-	cmd = buildCodexCommand("my session", workDir, nil)
+	cmd = testLaunchCommand(ops.HarnessLaunchSpec{
+		Harness: "codex-cli", Model: "5.4", SessionName: "my session", WorkDir: workDir,
+	})
 	if !strings.Contains(cmd, "AGM_SESSION_NAME='my session'") {
 		t.Errorf("session name not shell-quoted: %s", cmd)
 	}
@@ -62,18 +68,10 @@ func TestBuildCodexCommand_ShellQuoting(t *testing.T) {
 // invariant: the Codex command must never carry Claude OAuth, Anthropic keys, or
 // engram/OTEL telemetry env. Codex authenticates via ~/.codex / OPENAI_API_KEY.
 func TestBuildCodexCommand_NoClaudeEnvLeak(t *testing.T) {
-	saved := modelName
-	savedSpawn := spawnSessionID
-	defer func() {
-		modelName = saved
-		spawnSessionID = savedSpawn
-	}()
-	modelName = "5.4"
-	// Even with a spawn session id set (which would inject ENGRAM_SESSION_ID into
-	// the Claude command), it must not appear in the Codex command.
-	spawnSessionID = "engram-uuid-1234"
-
-	cmd := buildCodexCommand("test-session", "/tmp/work", nil)
+	cmd := testLaunchCommand(ops.HarnessLaunchSpec{
+		Harness: "codex-cli", Model: "5.4", SessionName: "test-session",
+		SessionID: "engram-uuid-1234", WorkDir: "/tmp/work", ForwardTelemetry: true,
+	})
 
 	for _, banned := range []string{
 		"CLAUDE_CODE_OAUTH_TOKEN",
@@ -101,7 +99,10 @@ func TestBuildCodexCommand_NoClaudeEnvLeak(t *testing.T) {
 }
 
 func TestBuildCodexCommand_RemoteThreadResume(t *testing.T) {
-	cmd := buildCodexCommandForModel("codex-session", "/tmp/work", "5.4", []string{"/tmp/extra dir"}, &manifest.Codex{SessionID: "thr_123"})
+	cmd := testLaunchCommand(ops.HarnessLaunchSpec{
+		Harness: "codex-cli", Model: "5.4", SessionName: "codex-session", WorkDir: "/tmp/work",
+		ExtraAddDirs: []string{"/tmp/extra dir"}, Codex: &manifest.Codex{SessionID: "thr_123"},
+	})
 
 	for _, want := range []string{
 		"AGM_SESSION_NAME='codex-session'",
@@ -119,7 +120,10 @@ func TestBuildCodexCommand_RemoteThreadResume(t *testing.T) {
 }
 
 func TestBuildAgyCommand_AutoPermissionMode(t *testing.T) {
-	cmd := buildAgyCommand("/tmp/agy work", []string{"/tmp/extra dir"}, "auto")
+	cmd := testLaunchCommand(ops.HarnessLaunchSpec{
+		Harness: "agy", Model: "2.5-flash", SessionName: "agy", WorkDir: "/tmp/agy work",
+		ExtraAddDirs: []string{"/tmp/extra dir"}, PermissionMode: "auto",
+	})
 
 	for _, want := range []string{
 		"cd '/tmp/agy work' && agy --prompt-interactive --dangerously-skip-permissions",
@@ -133,7 +137,10 @@ func TestBuildAgyCommand_AutoPermissionMode(t *testing.T) {
 }
 
 func TestBuildAgyCommand_DefaultPermissionMode(t *testing.T) {
-	cmd := buildAgyCommand("/tmp/agy-work", nil, "default")
+	cmd := testLaunchCommand(ops.HarnessLaunchSpec{
+		Harness: "agy", Model: "2.5-flash", SessionName: "agy", WorkDir: "/tmp/agy-work",
+		PermissionMode: "default",
+	})
 
 	if strings.Contains(cmd, "--dangerously-skip-permissions") {
 		t.Errorf("default AGY command should not skip permissions: %q", cmd)
@@ -144,23 +151,14 @@ func TestBuildAgyCommand_DefaultPermissionMode(t *testing.T) {
 }
 
 func TestActiveHarnessBuildersHonorPersistentStartupContracts(t *testing.T) {
-	savedPersistent := persistent
-	savedMode := modeFlagValue
-	t.Cleanup(func() {
-		persistent = savedPersistent
-		modeFlagValue = savedMode
-	})
-	persistent = true
-	modeFlagValue = "auto"
-
 	tests := []struct {
 		name string
 		cmd  string
 		want string
 	}{
-		{name: "Codex", cmd: buildCodexCommand("worker", "/tmp/work", nil), want: "-a never"},
-		{name: "AGY", cmd: buildAgyCommand("/tmp/work", nil, "auto"), want: "--prompt-interactive --dangerously-skip-permissions"},
-		{name: "OpenCode", cmd: buildOpenCodeCommand(), want: "opencode attach"},
+		{name: "Codex", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "codex-cli", Model: "5.4", SessionName: "worker", WorkDir: "/tmp/work", Persistent: true, PermissionMode: "auto"}), want: "-a never"},
+		{name: "AGY", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "agy", Model: "2.5-flash", SessionName: "worker", WorkDir: "/tmp/work", Persistent: true, PermissionMode: "auto"}), want: "--prompt-interactive --dangerously-skip-permissions"},
+		{name: "OpenCode", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "opencode-cli", Model: "glm-5.2", SessionName: "worker", WorkDir: "/tmp/work", Persistent: true}), want: "opencode attach"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

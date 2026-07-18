@@ -67,7 +67,7 @@ func associateSpawnedClaudeSession(sessionName string) {
 
 	m, resolvedPath, err := session.ResolveIdentifier(sessionName, getSessionsDir(), adapter)
 	if err != nil {
-		// The manifest is normally created by createAndRegisterManifest before
+		// The manifest is normally created by the shared ops lifecycle before
 		// this runs; if it's somehow missing we still signal readiness so the
 		// spawner doesn't hang, and let `agm sync` reconcile later.
 		debug.Log("Deterministic association: manifest not found for %q (%v); writing ready-file anyway", sessionName, err)

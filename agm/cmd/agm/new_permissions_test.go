@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -8,9 +9,10 @@ import (
 	"testing"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
-	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
+	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
 func TestPermissionProfilesExist(t *testing.T) {
@@ -570,19 +572,7 @@ func TestResolveSessionPermissionPolicyRecordsProfileAndTargets(t *testing.T) {
 }
 
 func TestBuildSessionManifestPersistsPermissionPolicy(t *testing.T) {
-	origPolicy := resolvedSessionPermissionPolicy
-	origHarness := harnessName
-	origModel := modelName
-	origCfg := cfg
-	defer func() {
-		resolvedSessionPermissionPolicy = origPolicy
-		harnessName = origHarness
-		modelName = origModel
-		cfg = origCfg
-	}()
-
-	cfg = &config.Config{Workspace: "test"}
-	resolvedSessionPermissionPolicy = &manifest.PermissionPolicy{
+	policy := &manifest.PermissionPolicy{
 		Profile: "auditor",
 		Sources: []string{"defaults", "profile"},
 		Allow:   []string{"Bash(git status)"},
@@ -594,10 +584,7 @@ func TestBuildSessionManifestPersistsPermissionPolicy(t *testing.T) {
 			NativeEnforcement: "Claude Code allowlist and permission modes",
 		}},
 	}
-	harnessName = "claude-code"
-	modelName = "sonnet"
-
-	m := buildSessionManifest("session-id", "session-name", "/tmp/work", nil, nil)
+	m := createPermissionManifest(t, "claude-code", "sonnet", "", policy)
 	if m.PermissionPolicy == nil {
 		t.Fatal("manifest missing permission policy")
 	}
@@ -605,30 +592,14 @@ func TestBuildSessionManifestPersistsPermissionPolicy(t *testing.T) {
 		t.Fatalf("manifest permission profile = %q, want auditor", m.PermissionPolicy.Profile)
 	}
 
-	resolvedSessionPermissionPolicy.Allow[0] = "Bash(mutated)"
+	policy.Allow[0] = "Bash(mutated)"
 	if m.PermissionPolicy.Allow[0] != "Bash(git status)" {
 		t.Fatalf("manifest permission policy was not cloned: %v", m.PermissionPolicy.Allow)
 	}
 }
 
 func TestBuildSessionManifestPersistsStartupPermissionMode(t *testing.T) {
-	origMode := modeFlagValue
-	origHarness := harnessName
-	origModel := modelName
-	origCfg := cfg
-	defer func() {
-		modeFlagValue = origMode
-		harnessName = origHarness
-		modelName = origModel
-		cfg = origCfg
-	}()
-
-	cfg = &config.Config{Workspace: "test"}
-	harnessName = "agy"
-	modelName = "2.5-flash"
-	modeFlagValue = "auto"
-
-	m := buildSessionManifest("session-id", "session-name", "/tmp/work", nil, nil)
+	m := createPermissionManifest(t, "agy", "2.5-flash", "auto", nil)
 	if m.PermissionMode != "auto" {
 		t.Fatalf("permission mode = %q, want auto", m.PermissionMode)
 	}
@@ -638,4 +609,43 @@ func TestBuildSessionManifestPersistsStartupPermissionMode(t *testing.T) {
 	if m.PermissionModeUpdatedAt == nil {
 		t.Fatal("permission mode updated timestamp was not set")
 	}
+}
+
+func createPermissionManifest(t *testing.T, harness, model, permissionMode string, policy *manifest.PermissionPolicy) *manifest.Manifest {
+	t.Helper()
+	var got *manifest.Manifest
+	runtime := &cliCreateSessionRuntime{
+		launch: func(context.Context, ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
+			return ops.CreateSessionLaunchResult{}, nil
+		},
+		complete: func(_ context.Context, completion ops.CreateSessionCompletion) error {
+			got = completion.Manifest
+			return nil
+		},
+	}
+	_, err := ops.CreateSessionWithContext(context.Background(), &ops.OpContext{
+		Tmux: session.NewMockTmux(), CreationRuntime: runtime,
+	}, &ops.CreateSessionRequest{
+		Cwd:                    t.TempDir(),
+		Title:                  "session-name",
+		Model:                  model,
+		Harness:                harness,
+		SessionID:              "session-id",
+		Caller:                 ops.CreateSessionCaller{Surface: ops.CreateSurfaceCLI},
+		PermissionMode:         permissionMode,
+		AllowEmptyPrompt:       true,
+		SkipCodexRemoteControl: true,
+		Metadata: ops.CreateSessionMetadata{
+			Workspace:        "test",
+			PermissionPolicy: policy,
+			PermissionMode:   permissionMode,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSessionWithContext: %v", err)
+	}
+	if got == nil {
+		t.Fatal("creation lifecycle did not expose a manifest")
+	}
+	return got
 }

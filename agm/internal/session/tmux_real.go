@@ -43,6 +43,13 @@ func (t *RealTmux) CreateSession(name, workdir string) error {
 	return tmux.NewSession(name, workdir)
 }
 
+// KillSession removes a tmux session created by a failed lifecycle operation.
+// It implements TmuxSessionKiller without widening TmuxInterface.
+func (t *RealTmux) KillSession(name string) error {
+	tmux.KillSession(name)
+	return nil
+}
+
 // AttachSession attaches to a tmux session
 func (t *RealTmux) AttachSession(name string) error {
 	return tmux.AttachSession(name)

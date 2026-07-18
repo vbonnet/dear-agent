@@ -3,21 +3,28 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
 )
+
+func telemetryLaunchCommand(sessionID string) string {
+	return testLaunchCommand(ops.HarnessLaunchSpec{
+		Harness: "claude-code", Model: "sonnet", SessionName: "telemetry",
+		SessionID: sessionID, WorkDir: "/tmp/work", ForwardTelemetry: true,
+	})
+}
 
 func TestOtelEnvArgs_NoEndpointNoSession(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
-	spawnSessionID = ""
-	got := otelEnvArgs()
-	if got != "" {
-		t.Errorf("expected empty string when no OTel config, got %q", got)
+	got := telemetryLaunchCommand("")
+	if strings.Contains(got, "OTEL_") || strings.Contains(got, "ENGRAM_SESSION_ID") {
+		t.Errorf("expected no telemetry env when no OTel config, got %q", got)
 	}
 }
 
 func TestOtelEnvArgs_EndpointForwarded(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317")
-	spawnSessionID = ""
-	got := otelEnvArgs()
+	got := telemetryLaunchCommand("")
 	if !strings.Contains(got, "OTEL_EXPORTER_OTLP_ENDPOINT='localhost:4317'") {
 		t.Errorf("expected shell-quoted OTEL_EXPORTER_OTLP_ENDPOINT in args, got %q", got)
 	}
@@ -27,8 +34,7 @@ func TestOtelEnvArgs_EndpointForwarded(t *testing.T) {
 // with shell metacharacters must be shell-quoted to prevent command injection.
 func TestOtelEnvArgs_EndpointShellQuoted(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "evil:4317; rm -rf /")
-	spawnSessionID = ""
-	got := otelEnvArgs()
+	got := telemetryLaunchCommand("")
 	if !strings.Contains(got, "OTEL_EXPORTER_OTLP_ENDPOINT='evil:4317; rm -rf /'") {
 		t.Errorf("expected metacharacters to be shell-quoted, got %q", got)
 	}
@@ -38,8 +44,7 @@ func TestOtelEnvArgs_EndpointShellQuoted(t *testing.T) {
 // CLI's own telemetry — forwarding the endpoint alone is inert (ce-ph5x).
 func TestOtelEnvArgs_ClaudeTelemetryEnabled(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317")
-	spawnSessionID = ""
-	got := otelEnvArgs()
+	got := telemetryLaunchCommand("")
 	for _, want := range []string{
 		"CLAUDE_CODE_ENABLE_TELEMETRY=1",
 		"CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1",
@@ -56,9 +61,7 @@ func TestOtelEnvArgs_ClaudeTelemetryEnabled(t *testing.T) {
 // telemetry with no collector would have the CLI retry-spamming localhost.
 func TestOtelEnvArgs_NoEndpointNoClaudeTelemetry(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
-	spawnSessionID = "only-session"
-	defer func() { spawnSessionID = "" }()
-	got := otelEnvArgs()
+	got := telemetryLaunchCommand("only-session")
 	if strings.Contains(got, "CLAUDE_CODE_ENABLE_TELEMETRY") {
 		t.Errorf("did not expect CLAUDE_CODE_ENABLE_TELEMETRY without endpoint, got %q", got)
 	}
@@ -66,9 +69,7 @@ func TestOtelEnvArgs_NoEndpointNoClaudeTelemetry(t *testing.T) {
 
 func TestOtelEnvArgs_SessionIDInjected(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
-	spawnSessionID = "test-uuid-1234"
-	defer func() { spawnSessionID = "" }()
-	got := otelEnvArgs()
+	got := telemetryLaunchCommand("test-uuid-1234")
 	if !strings.Contains(got, "ENGRAM_SESSION_ID='test-uuid-1234'") {
 		t.Errorf("expected shell-quoted ENGRAM_SESSION_ID in args, got %q", got)
 	}
@@ -76,9 +77,7 @@ func TestOtelEnvArgs_SessionIDInjected(t *testing.T) {
 
 func TestOtelEnvArgs_BothPresent(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "tempo:4317")
-	spawnSessionID = "abc-def"
-	defer func() { spawnSessionID = "" }()
-	got := otelEnvArgs()
+	got := telemetryLaunchCommand("abc-def")
 	if !strings.Contains(got, "OTEL_EXPORTER_OTLP_ENDPOINT='tempo:4317'") {
 		t.Errorf("missing endpoint in %q", got)
 	}

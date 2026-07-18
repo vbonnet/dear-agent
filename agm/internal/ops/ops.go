@@ -33,6 +33,15 @@ type OpContext struct {
 	// with its harness-specific desktop or remote representation. Nil selects
 	// the production dispatcher; tests inject a deterministic implementation.
 	ExternalSessionArchiver ExternalSessionArchiver
+	// CreationRuntime adapts harness-specific interactive startup and
+	// post-registration completion without exposing lifecycle phase hooks.
+	CreationRuntime CreateSessionRuntime
+	// OpenSessionStorage lazily constructs surface-specific session storage.
+	// Nil uses Storage directly.
+	OpenSessionStorage SessionStorageOpener
+	// CodexThreadCreator adapts the external Codex remote-control dependency.
+	// Nil selects the production implementation.
+	CodexThreadCreator CodexThreadCreator
 }
 
 // Result is the base type for all operation results.

@@ -17,7 +17,9 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/discovery"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/git"
+	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/state"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
@@ -606,7 +608,10 @@ func dispatchResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, harnessN
 	var fullCmd string
 	switch agent.NormalizeHarnessName(harnessName) {
 	case "opencode-cli":
-		fullCmd = fmt.Sprintf("cd %s && opencode attach && exit", shellQuote(health.WorktreePath))
+		fullCmd = ops.BuildHarnessLaunchCommand(ops.HarnessLaunchSpec{
+			Harness: "opencode-cli", Model: m.Model, SessionName: health.TmuxSessionName,
+			WorkDir: health.WorktreePath,
+		}).Command
 	case "codex-cli":
 		// Pre-trust the workdir so a Codex relaunch does not block on the
 		// interactive trust prompt in non-git sandbox dirs (ce-cmsq).
@@ -642,27 +647,29 @@ func buildCodexResumeCommand(m *manifest.Manifest, health *HealthStatus) string 
 	if model == "" {
 		model = agent.HarnessDefaults["codex-cli"]
 	}
-	if m.Codex != nil && m.Codex.SessionID != "" {
-		resolvedModel := agent.ResolveModelFullName("codex-cli", model)
-		return fmt.Sprintf("env -u CLAUDECODE AGM_SESSION_NAME=%s codex resume --remote unix:// -m %s -C %s -s workspace-write %s && exit",
-			shellQuote(health.TmuxSessionName),
-			shellQuote(resolvedModel),
-			shellQuote(health.WorktreePath),
-			shellQuote(m.Codex.SessionID))
-	}
-	return buildCodexCommandForModel(health.TmuxSessionName, health.WorktreePath, model, nil, nil)
+	return ops.BuildHarnessLaunchCommand(ops.HarnessLaunchSpec{
+		Harness: "codex-cli", Model: model, SessionName: health.TmuxSessionName,
+		WorkDir: health.WorktreePath, PermissionMode: m.PermissionMode, Codex: m.Codex,
+	}).Command
 }
 
 func buildAgyResumeCommand(m *manifest.Manifest, health *HealthStatus) string {
 	if m.Agy != nil && m.Agy.ConversationID != "" {
+		permissionFlag := launchparity.AgyPermissionModeFlag(m.PermissionMode)
+		if permissionFlag != "" {
+			permissionFlag = " " + permissionFlag
+		}
 		return fmt.Sprintf("cd %s && agy%s --conversation %s --add-dir %s && exit",
 			shellQuote(health.WorktreePath),
-			agyPermissionFlag(m.PermissionMode),
+			permissionFlag,
 			shellQuote(m.Agy.ConversationID),
 			shellQuote(health.WorktreePath))
 	}
 	ui.PrintWarning("No AGY conversation ID found - starting new AGY session")
-	return buildAgyCommand(health.WorktreePath, nil, m.PermissionMode)
+	return ops.BuildHarnessLaunchCommand(ops.HarnessLaunchSpec{
+		Harness: "agy", Model: m.Model, SessionName: health.TmuxSessionName,
+		WorkDir: health.WorktreePath, PermissionMode: m.PermissionMode,
+	}).Command
 }
 
 // buildClaudeResumeCommand assembles `claude --resume <uuid>` (or a bare

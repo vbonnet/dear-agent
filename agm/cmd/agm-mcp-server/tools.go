@@ -307,13 +307,7 @@ func addCreateSessionTool(server *mcp.Server, _ *Config) {
 		}
 		defer cleanup()
 
-		result, opErr := ops.CreateSession(opCtx, &ops.CreateSessionRequest{
-			Cwd:     input.Cwd,
-			Prompt:  input.Prompt,
-			Title:   input.Title,
-			Model:   input.Model,
-			Harness: input.Harness,
-		})
+		result, opErr := ops.CreateSessionWithContext(ctx, opCtx, createSessionRequestFromMCP(input))
 		if opErr != nil {
 			span.RecordError(opErr)
 			return mcpError(opErr), nil, nil
@@ -326,6 +320,18 @@ func addCreateSessionTool(server *mcp.Server, _ *Config) {
 
 		return mcpSuccess(result), result, nil
 	})
+}
+
+func createSessionRequestFromMCP(input CreateSessionInput) *ops.CreateSessionRequest {
+	return &ops.CreateSessionRequest{
+		Cwd:                input.Cwd,
+		Prompt:             input.Prompt,
+		Title:              input.Title,
+		Model:              input.Model,
+		Harness:            input.Harness,
+		Caller:             ops.CreateSessionCaller{Surface: ops.CreateSurfaceMCP},
+		ForwardClaudeOAuth: true,
+	}
 }
 
 func addSendMessageTool(server *mcp.Server, _ *Config) {

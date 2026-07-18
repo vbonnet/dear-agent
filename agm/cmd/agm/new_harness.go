@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,46 +9,35 @@ import (
 
 	"github.com/charmbracelet/huh/spinner"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
-	"github.com/vbonnet/dear-agent/agm/internal/codexcontrol"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
-	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
-	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
-	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
-
-// codexRemoteBootTimeout is the hard outer deadline for the OPTIONAL Codex
-// remote-control bridge during session boot (ce-fmxv). It bounds the whole
-// StartRemoteControl→StartThread→SetThreadName sequence so a wedged app-server
-// can never hang `agm session new` before the harness launches; on expiry the
-// spawn falls back to the local Codex CLI. Sized above codexcontrol's internal
-// per-call timeout (20s) so the client's own errors surface first.
-const codexRemoteBootTimeout = 45 * time.Second
 
 // startHarness dispatches per-harness initialization (Claude/Gemini/Codex/OpenCode/AGY).
 // Returns (modeAppliedAtStartup, harnessHandledFullLifecycle, err): when
 // harnessHandledFullLifecycle is true the caller should return immediately —
 // the harness (e.g. gemini-cli wrapper) has already managed attach/detach.
-func startHarness(ctx context.Context, sessionName, workDir string, exists bool, extraAddDirs []string, trustPreConfigured bool) (bool, bool, error) {
-	switch harnessName {
+func startHarness(spec ops.HarnessLaunchSpec, trustPreConfigured bool) (bool, bool, error) {
+	switch spec.Harness {
 	case "claude-code":
-		return startClaudeHarness(sessionName, workDir, exists, extraAddDirs, trustPreConfigured)
+		return startClaudeHarness(spec, trustPreConfigured)
 	case "gemini-cli":
-		done, err := startGeminiHarness(sessionName, exists)
+		done, err := startGeminiHarness(spec)
 		return false, done, err
 	case "codex-cli":
-		modeApplied, err := startCodexHarness(ctx, sessionName, workDir, exists, extraAddDirs)
+		modeApplied, err := startCodexHarness(spec)
 		return modeApplied, false, err
 	case "opencode-cli":
-		return false, false, startOpenCodeHarness(sessionName, exists)
+		return false, false, startOpenCodeHarness(spec)
 	case "agy":
-		modeApplied, err := startAgyHarness(sessionName, workDir, exists, extraAddDirs)
+		modeApplied, err := startAgyHarness(spec)
 		return modeApplied, false, err
 	default:
 		debug.Phase("Skip CLI Startup")
-		debug.Log("Skipping CLI startup for harness: %s (no CLI configured)", harnessName)
-		ui.PrintSuccess(fmt.Sprintf("Session created for %s harness", sessionName))
+		debug.Log("Skipping CLI startup for harness: %s (no CLI configured)", spec.Harness)
+		ui.PrintSuccess(fmt.Sprintf("Session created for %s harness", spec.SessionName))
 		return false, false, nil
 	}
 }
@@ -65,25 +53,23 @@ func activeHarnessHasTmuxLauncher(harness string) bool {
 
 // startClaudeHarness builds and sends the claude command, waits for the prompt,
 // and answers the trust prompt if needed. Returns (modeAppliedAtStartup, false, err).
-func startClaudeHarness(sessionName, workDir string, exists bool, extraAddDirs []string, trustPreConfigured bool) (bool, bool, error) {
-	claudeReady := tmux.NewClaudeReadyFile(sessionName)
+func startClaudeHarness(spec ops.HarnessLaunchSpec, trustPreConfigured bool) (bool, bool, error) {
+	claudeReady := tmux.NewClaudeReadyFile(spec.SessionName)
 	if err := claudeReady.Cleanup(); err != nil {
 		debug.Log("Warning: failed to cleanup ready-files: %v", err)
 	}
 
 	debug.Phase("Start Claude")
-	claudeCmd, modeAppliedAtStartup := buildClaudeCommand(sessionName, workDir, extraAddDirs)
+	launch := ops.BuildHarnessLaunchCommand(spec)
+	claudeCmd, modeAppliedAtStartup := launch.Command, launch.ModeAppliedAtStartup
 	debug.Log("Sending command: %s", claudeCmd)
-	if err := tmux.SendCommand(sessionName, claudeCmd); err != nil {
+	if err := tmux.SendCommand(spec.SessionName, claudeCmd); err != nil {
 		ui.PrintError(err,
 			"Failed to start Claude in tmux session",
 			"  • Verify Claude is installed: which claude\n"+
 				"  • Test Claude manually: claude --version\n"+
 				"  • Check tmux session exists: tmux list-sessions\n"+
-				"  • Attach and start manually: tmux attach -t "+sessionName)
-		if !exists {
-			_ = tmux.SendCommand(sessionName, "tmux kill-session -t "+sessionName)
-		}
+				"  • Attach and start manually: tmux attach -t "+spec.SessionName)
 		return false, false, err
 	}
 	debug.Log("Claude command sent successfully")
@@ -92,7 +78,7 @@ func startClaudeHarness(sessionName, workDir string, exists bool, extraAddDirs [
 	debug.Log("Initial sleep (500ms) before polling")
 	time.Sleep(500 * time.Millisecond)
 
-	if err := waitForClaudeReady(sessionName, claudeReady); err != nil {
+	if err := waitForClaudeReady(spec.SessionName, claudeReady); err != nil {
 		return modeAppliedAtStartup, false, err
 	}
 
@@ -102,7 +88,7 @@ func startClaudeHarness(sessionName, workDir string, exists bool, extraAddDirs [
 	} else {
 		debug.Phase("Monitor for Trust Prompt")
 		debug.Log("Starting control mode to monitor for trust prompt")
-		if err := monitorAndAnswerTrustPrompt(sessionName, 10*time.Second); err != nil {
+		if err := monitorAndAnswerTrustPrompt(spec.SessionName, 10*time.Second); err != nil {
 			debug.Log("Trust prompt handling: %v", err)
 		}
 	}
@@ -110,120 +96,6 @@ func startClaudeHarness(sessionName, workDir string, exists bool, extraAddDirs [
 	debug.Phase("Skip Explicit SessionStart Hook Wait")
 	debug.Log("SessionStart hooks confirmed complete (ready-file signal received)")
 	return modeAppliedAtStartup, false, nil
-}
-
-// spawnSessionID holds the manifest UUID for the session being created. Set
-// before harness startup so OTel env vars reference the correct session.
-var spawnSessionID string
-
-// otelEnvArgs returns additional env var assignments to inject into the
-// spawned worker's shell command. Forwards OTEL_EXPORTER_OTLP_ENDPOINT from
-// the orchestrator environment (so workers inherit tracing config), and sets
-// ENGRAM_SESSION_ID to the session manifest UUID (so each worker's JSONL
-// exporter writes to its own trace file).
-//
-// When an OTLP endpoint is present we ALSO light up the Claude Code CLI's own
-// OpenTelemetry exporter. The CLI's telemetry is off by default: forwarding
-// OTEL_EXPORTER_OTLP_ENDPOINT alone is inert (ce-ph5x). The CLI requires
-// CLAUDE_CODE_ENABLE_TELEMETRY=1 as a master switch, an explicit exporter
-// selection (OTEL_TRACES_EXPORTER=otlp), and — because per-interaction spans
-// are gated behind a beta flag — CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1, so the
-// worker emits trace spans (not just metrics) to the collector. We pin
-// OTEL_EXPORTER_OTLP_PROTOCOL=grpc to match the engram tracer and the local
-// Jaeger gRPC receiver on :4317 (the OTel SDK would otherwise default to
-// http/protobuf on :4318 and silently drop everything).
-func otelEnvArgs() string {
-	var args strings.Builder
-	if endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); endpoint != "" {
-		// shellQuote the interpolated value: this string is run via tmux in a
-		// shell, so an endpoint containing shell metacharacters would otherwise
-		// allow command injection (matches how sessionName/model/workDir are
-		// quoted at the call site).
-		fmt.Fprintf(&args, " OTEL_EXPORTER_OTLP_ENDPOINT=%s", shellQuote(endpoint))
-		args.WriteString(" CLAUDE_CODE_ENABLE_TELEMETRY=1")
-		args.WriteString(" CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1")
-		args.WriteString(" OTEL_TRACES_EXPORTER=otlp")
-		args.WriteString(" OTEL_EXPORTER_OTLP_PROTOCOL=grpc")
-	}
-	if spawnSessionID != "" {
-		fmt.Fprintf(&args, " ENGRAM_SESSION_ID=%s", shellQuote(spawnSessionID))
-	}
-	return args.String()
-}
-
-// oauthEnvArg returns the CLAUDE_CODE_OAUTH_TOKEN env assignment to inject into
-// a spawned worker session. It resolves the token via auth.ResolveOAuthToken,
-// which prefers the live token from ~/.claude/.credentials.json over the
-// CLAUDE_CODE_OAUTH_TOKEN env var. This propagates Max-plan OAuth auth from the
-// orchestrator into spawned workers (ce-dzhz): the env var goes stale once
-// Claude Code auto-refreshes the credentials file, so a worker that inherited
-// the env token 401s on every turn — reading the file first keeps spawns fresh.
-func oauthEnvArg() string {
-	if token := auth.ResolveOAuthToken(); token != "" {
-		// Single-quote the token (defense in depth; matches
-		// ops.buildHarnessCommand) so an unexpected shell metacharacter can't
-		// break the command line the token is concatenated into.
-		escaped := strings.ReplaceAll(token, "'", `'\''`)
-		return " CLAUDE_CODE_OAUTH_TOKEN='" + escaped + "'"
-	}
-	return ""
-}
-
-// claudeEnvUnsetFlags returns the `env -u` flag list for the spawned claude
-// shell. CLAUDECODE is always unset; ANTHROPIC_API_KEY is additionally unset
-// whenever an OAuth (Max-plan) token is being injected, so a stray metered key
-// inherited from the tmux server's long-lived environment cannot shadow the
-// OAuth token and silently route the session through the metered API instead of
-// the Max plan (ce-84l2 — the "Claude API" symptom).
-func claudeEnvUnsetFlags(haveOAuth bool) string {
-	if haveOAuth {
-		return "-u CLAUDECODE -u ANTHROPIC_API_KEY"
-	}
-	return "-u CLAUDECODE"
-}
-
-// buildClaudeCommand assembles the env+claude shell command line, applying
-// flags for model, --add-dir, --permission-mode, and --max-budget-usd.
-// Returns the command string and whether --permission-mode was applied.
-func buildClaudeCommand(sessionName, workDir string, extraAddDirs []string) (string, bool) {
-	resolvedModel := agent.ResolveModelFullName("claude-code", modelName)
-	autoModeFlag := " --enable-auto-mode"
-	if noAutoMode {
-		autoModeFlag = ""
-		debug.Log("Auto mode disabled by flag/env var")
-	}
-	// exitSuffix is omitted for persistent supervisor sessions so the tmux
-	// pane's shell survives after the Claude process exits (ce-pzca).
-	exitSuffix := " && exit"
-	if persistent {
-		exitSuffix = ""
-	}
-	oauthArg := oauthEnvArg()
-	claudeCmd := fmt.Sprintf("env %s AGM_SESSION_NAME=%s%s%s claude --model %s --add-dir %s%s%s", claudeEnvUnsetFlags(oauthArg != ""), shellQuote(sessionName), otelEnvArgs(), oauthArg, shellQuote(resolvedModel), shellQuote(workDir), autoModeFlag, exitSuffix)
-	for _, dir := range extraAddDirs {
-		if persistent {
-			claudeCmd += fmt.Sprintf(" --add-dir %s", shellQuote(dir))
-		} else {
-			claudeCmd = strings.Replace(claudeCmd, " && exit", fmt.Sprintf(" --add-dir %s && exit", shellQuote(dir)), 1)
-		}
-	}
-	modeAppliedAtStartup := false
-	if modeFlagValue == "auto" || modeFlagValue == "plan" || modeFlagValue == "default" {
-		if persistent {
-			claudeCmd += fmt.Sprintf(" --permission-mode %s", modeFlagValue)
-		} else {
-			claudeCmd = strings.Replace(claudeCmd, " && exit", fmt.Sprintf(" --permission-mode %s && exit", modeFlagValue), 1)
-		}
-		modeAppliedAtStartup = true
-	}
-	if maxBudgetUsd > 0 {
-		if persistent {
-			claudeCmd += fmt.Sprintf(" --max-budget-usd %.2f", maxBudgetUsd)
-		} else {
-			claudeCmd = strings.Replace(claudeCmd, " && exit", fmt.Sprintf(" --max-budget-usd %.2f && exit", maxBudgetUsd), 1)
-		}
-	}
-	return claudeCmd, modeAppliedAtStartup
 }
 
 // waitForClaudeReady waits for the Claude prompt to appear (90s timeout) and
@@ -254,11 +126,6 @@ func waitForClaudeReady(sessionName string, claudeReady *tmux.ClaudeReadyFile) e
 				"    1. Check if Claude started: tmux attach -t "+sessionName+"\n"+
 				"    2. Verify Claude is installed: which claude\n"+
 				"    3. Check for errors in tmux: tmux capture-pane -t "+sessionName+" -p\n")
-		socketPath := tmux.GetSocketPath()
-		killCmd := exec.Command("tmux", "-S", socketPath, "kill-session", "-t", sessionName)
-		if err := killCmd.Run(); err != nil {
-			debug.Log("Failed to clean up session: %v", err)
-		}
 		return fmt.Errorf("claude not ready: %w", waitErr)
 	}
 	debug.Log("✓ Claude prompt detected - Claude is ready")
@@ -275,15 +142,15 @@ func waitForClaudeReady(sessionName string, claudeReady *tmux.ClaudeReadyFile) e
 // or directly. Returns (handledFullLifecycle, err). When handledFullLifecycle
 // is true the wrapper has already attached/exited and the caller should
 // short-circuit the rest of session setup.
-func startGeminiHarness(sessionName string, exists bool) (bool, error) {
+func startGeminiHarness(spec ops.HarnessLaunchSpec) (bool, error) {
 	debug.Phase("Start Gemini")
 	wrapperPath, err := exec.LookPath("agm-agent-wrapper")
 	if err != nil {
-		return false, startGeminiDirect(sessionName, exists)
+		return false, startGeminiDirect(spec)
 	}
 	debug.Log("Found agm-agent-wrapper at: %s", wrapperPath)
-	debug.Log("Executing wrapper directly (not via tmux): %s --agent=gemini-cli %s", wrapperPath, sessionName)
-	cmd := exec.Command(wrapperPath, "--agent=gemini-cli", sessionName)
+	debug.Log("Executing wrapper directly (not via tmux): %s --agent=gemini-cli %s", wrapperPath, spec.SessionName)
+	cmd := exec.Command(wrapperPath, "--agent=gemini-cli", spec.SessionName)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -292,10 +159,7 @@ func startGeminiHarness(sessionName string, exists bool) (bool, error) {
 			"Failed to run agm-agent-wrapper",
 			"  • Check wrapper installed: which agm-agent-wrapper\n"+
 				"  • Try direct mode by temporarily renaming wrapper\n"+
-				"  • Attach and check: tmux attach -t "+sessionName)
-		if !exists {
-			_ = tmux.SendCommand(sessionName, "tmux kill-session -t "+sessionName)
-		}
+				"  • Attach and check: tmux attach -t "+spec.SessionName)
 		return false, err
 	}
 	ui.PrintSuccess("Gemini session ended")
@@ -304,21 +168,17 @@ func startGeminiHarness(sessionName string, exists bool) (bool, error) {
 
 // startGeminiDirect runs gemini directly in the tmux session and handles the
 // optional first-run trust prompt by sending "1<Enter>" if detected.
-func startGeminiDirect(sessionName string, exists bool) error {
+func startGeminiDirect(spec ops.HarnessLaunchSpec) error {
 	debug.Log("agm-agent-wrapper not found, falling back to direct gemini")
-	resolvedModel := agent.ResolveModelFullName("gemini-cli", modelName)
-	geminiCmd := fmt.Sprintf("gemini -m %s && exit", shellQuote(resolvedModel))
+	geminiCmd := ops.BuildHarnessLaunchCommand(spec).Command
 	debug.Log("Sending command: %s", geminiCmd)
-	if err := tmux.SendCommand(sessionName, geminiCmd); err != nil {
+	if err := tmux.SendCommand(spec.SessionName, geminiCmd); err != nil {
 		ui.PrintError(err,
 			"Failed to start Gemini in tmux session",
 			"  • Verify Gemini is installed: which gemini\n"+
 				"  • Test Gemini manually: gemini --version\n"+
 				"  • Check tmux session exists: tmux list-sessions\n"+
-				"  • Attach and start manually: tmux attach -t "+sessionName)
-		if !exists {
-			_ = tmux.SendCommand(sessionName, "tmux kill-session -t "+sessionName)
-		}
+				"  • Attach and start manually: tmux attach -t "+spec.SessionName)
 		return err
 	}
 	debug.Log("Gemini command sent successfully (direct mode)")
@@ -327,7 +187,7 @@ func startGeminiDirect(sessionName string, exists bool) error {
 	debug.Log("Checking for Gemini trust prompt (3s window)...")
 	time.Sleep(2 * time.Second)
 	socketPath := tmux.GetSocketPath()
-	normalizedName := tmux.NormalizeTmuxSessionName(sessionName)
+	normalizedName := tmux.NormalizeTmuxSessionName(spec.SessionName)
 	trustCheckCmd := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedName, "-p", "-S", "-20")
 	trustOutput, err := trustCheckCmd.CombinedOutput()
 	if err != nil {
@@ -349,26 +209,7 @@ func startGeminiDirect(sessionName string, exists bool) error {
 	return nil
 }
 
-func agyPermissionFlag(permissionMode string) string {
-	flag := launchparity.AgyPermissionModeFlag(permissionMode)
-	if flag == "" {
-		return ""
-	}
-	return " " + flag
-}
-
-func buildAgyCommand(workDir string, extraAddDirs []string, permissionMode string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "cd %s && agy --prompt-interactive", shellQuote(workDir))
-	b.WriteString(agyPermissionFlag(permissionMode))
-	for _, dir := range extraAddDirs {
-		fmt.Fprintf(&b, " --add-dir %s", shellQuote(dir))
-	}
-	b.WriteString(launchparity.ExitSuffix(persistent))
-	return b.String()
-}
-
-func startAgyHarness(sessionName, workDir string, exists bool, extraAddDirs []string) (bool, error) {
+func startAgyHarness(spec ops.HarnessLaunchSpec) (bool, error) {
 	debug.Phase("Start AGY")
 	if _, err := exec.LookPath("agy"); err != nil {
 		ui.PrintError(err,
@@ -379,19 +220,17 @@ func startAgyHarness(sessionName, workDir string, exists bool, extraAddDirs []st
 		return false, err
 	}
 
-	agyCmd := buildAgyCommand(workDir, extraAddDirs, modeFlagValue)
-	modeAppliedAtStartup := agyPermissionFlag(modeFlagValue) != ""
+	launch := ops.BuildHarnessLaunchCommand(spec)
+	agyCmd := launch.Command
+	modeAppliedAtStartup := launch.ModeAppliedAtStartup
 	debug.Log("Sending command: %s", agyCmd)
-	if err := tmux.SendCommand(sessionName, agyCmd); err != nil {
+	if err := tmux.SendCommand(spec.SessionName, agyCmd); err != nil {
 		ui.PrintError(err,
 			"Failed to start AGY in tmux session",
 			"  • Verify AGY is installed: which agy\n"+
 				"  • Test AGY manually: agy --help\n"+
 				"  • Check tmux session exists: tmux list-sessions\n"+
-				"  • Attach and start manually: tmux attach -t "+sessionName)
-		if !exists {
-			cleanupCodexTmuxSession(sessionName)
-		}
+				"  • Attach and start manually: tmux attach -t "+spec.SessionName)
 		return modeAppliedAtStartup, err
 	}
 	debug.Log("AGY command sent successfully")
@@ -401,16 +240,13 @@ func startAgyHarness(sessionName, workDir string, exists bool, extraAddDirs []st
 	time.Sleep(500 * time.Millisecond)
 
 	debug.Log("Waiting for AGY prompt readiness (timeout: 90s)")
-	if err := tmux.WaitForAgyPrompt(sessionName, 90*time.Second); err != nil {
+	if err := tmux.WaitForAgyPrompt(spec.SessionName, 90*time.Second); err != nil {
 		debug.Log("AGY prompt readiness wait failed: %v", err)
 		ui.PrintError(err,
 			"AGY did not become ready",
-			"  • Attach to inspect: tmux attach -t "+sessionName+"\n"+
+			"  • Attach to inspect: tmux attach -t "+spec.SessionName+"\n"+
 				"  • Check for trust or authentication prompts\n"+
 				"  • Retry after resolving the prompt")
-		if !exists {
-			cleanupCodexTmuxSession(sessionName)
-		}
 		return modeAppliedAtStartup, err
 	}
 	debug.Log("✓ AGY prompt detected - AGY is ready")
@@ -418,105 +254,22 @@ func startAgyHarness(sessionName, workDir string, exists bool, extraAddDirs []st
 	return modeAppliedAtStartup, nil
 }
 
-// buildCodexCommand assembles the env+codex shell command line launched into the
-// tmux pane. It mirrors buildClaudeCommand's safety invariants — the resolved
-// model, session name, working dir, and any extra writable dirs are all
-// shell-quoted because the result is pasted unquoted into the pane's shell.
-//
-// Deliberately Codex-specific (see DESIGN-agm-codex-harness §3):
-//   - Only CLAUDECODE is unset; NO Claude OAuth token (CLAUDE_CODE_OAUTH_TOKEN),
-//     NO ANTHROPIC_* key, and NO ENGRAM_SESSION_ID/OTEL env is forwarded. Codex
-//     authenticates via its own ChatGPT login (~/.codex) or OPENAI_API_KEY.
-//   - Sandbox defaults to workspace-write. Shared auto mode maps to approval
-//     policy "never"; plan mode maps to read-only plus untrusted approvals.
-//     The dangerous bypass flag remains unwired.
-func buildCodexCommand(sessionName, workDir string, extraAddDirs []string) string {
-	return buildCodexCommandForModel(sessionName, workDir, modelName, extraAddDirs, spawnedCodexMetadata)
-}
-
-func buildCodexCommandForModel(sessionName, workDir, model string, extraAddDirs []string, codexMeta *manifest.Codex) string {
-	resolvedModel := agent.ResolveModelFullName("codex-cli", model)
-	sandboxMode := launchparity.CodexSandboxMode(modeFlagValue)
-	var b strings.Builder
-	fmt.Fprintf(&b, "env -u CLAUDECODE AGM_SESSION_NAME=%s codex", shellQuote(sessionName))
-	if codexMeta != nil && codexMeta.SessionID != "" {
-		fmt.Fprintf(&b, " resume --remote unix:// -m %s -C %s -s %s",
-			shellQuote(resolvedModel), shellQuote(workDir), sandboxMode)
-	} else {
-		fmt.Fprintf(&b, " -m %s -C %s -s %s",
-			shellQuote(resolvedModel), shellQuote(workDir), sandboxMode)
-	}
-	for _, dir := range extraAddDirs {
-		fmt.Fprintf(&b, " --add-dir %s", shellQuote(dir))
-	}
-	if flag := launchparity.CodexPermissionModeFlag(modeFlagValue); flag != "" {
-		b.WriteString(" " + flag)
-	}
-	if codexMeta != nil && codexMeta.SessionID != "" {
-		fmt.Fprintf(&b, " %s", shellQuote(codexMeta.SessionID))
-	}
-	b.WriteString(launchparity.ExitSuffix(persistent))
-	return b.String()
-}
-
-// startCodexHarness verifies Codex credentials, launches the Codex TUI into the
-// tmux pane, and waits for the prompt to appear. It mirrors startClaudeHarness /
-// startGeminiDirect: send the command, sleep briefly, then poll for readiness,
-// tearing the freshly-created session down on failure.
-func startCodexHarness(ctx context.Context, sessionName, workDir string, exists bool, extraAddDirs []string) (bool, error) {
+// startCodexHarness launches the Codex TUI into the tmux pane and waits for the
+// prompt to appear. It mirrors startClaudeHarness /
+// startGeminiDirect: send the command, sleep briefly, then poll for readiness.
+// The shared ops lifecycle owns teardown on failure.
+func startCodexHarness(spec ops.HarnessLaunchSpec) (bool, error) {
 	debug.Phase("Start Codex")
-	apiKey := os.Getenv("OPENAI_API_KEY")
-	if apiKey == "" && !agent.IsCodexOAuthConfigured() {
-		ui.PrintError(fmt.Errorf("no Codex credentials found"),
-			"Codex requires either API key or OAuth login",
-			"  • Login via OAuth: codex login\n"+
-				"  • Or set API key: export OPENAI_API_KEY=sk-...\n"+
-				"  • Get key from: https://platform.openai.com/api-keys")
-		return false, fmt.Errorf("no Codex credentials found (run 'codex login' or set OPENAI_API_KEY)")
-	}
-	if apiKey != "" {
-		debug.Log("Codex initialized with API key")
-	} else {
-		debug.Log("Codex initialized with OAuth credentials (~/.codex/auth.json)")
-	}
-
-	// Pre-trust the workdir so Codex does not block on its interactive trust
-	// prompt (or refuse outright) in fresh non-git sandbox dirs (ce-cmsq).
-	// Best-effort: an already-trusted dir launches fine without it.
-	if err := agent.EnsureCodexWorkdirTrusted(workDir); err != nil {
-		ui.PrintWarning(fmt.Sprintf("Could not pre-trust Codex workdir %s: %v", workDir, err))
-	}
-
-	spawnedCodexMetadata = nil
-	// ce-fmxv: the optional remote-control bridge must never hang session boot.
-	// Give it a hard outer deadline so that even if the codexcontrol client's own
-	// timeouts are defeated (e.g. a daemon holding an inherited pipe), boot fails
-	// loud/fast and falls back to the local Codex CLI rather than hanging forever
-	// before the harness is ever launched.
-	remoteCtx, cancelRemote := context.WithTimeout(ctx, codexRemoteBootTimeout)
-	meta, err := createCodexRemoteThread(remoteCtx, sessionName, workDir)
-	cancelRemote()
-	if err != nil {
-		if os.Getenv("AGM_CODEX_REQUIRE_REMOTE_CONTROL") == "1" {
-			return false, err
-		}
-		ui.PrintWarning(fmt.Sprintf("Codex remote-control bridge unavailable; falling back to local Codex CLI: %v", err))
-	} else {
-		spawnedCodexMetadata = meta
-	}
-
-	codexCmd := buildCodexCommand(sessionName, workDir, extraAddDirs)
+	launch := ops.BuildHarnessLaunchCommand(spec)
+	codexCmd := launch.Command
 	debug.Log("Sending command: %s", codexCmd)
-	if err := tmux.SendCommand(sessionName, codexCmd); err != nil {
+	if err := tmux.SendCommand(spec.SessionName, codexCmd); err != nil {
 		ui.PrintError(err,
 			"Failed to start Codex in tmux session",
 			"  • Verify Codex is installed: which codex\n"+
 				"  • Test Codex manually: codex --version\n"+
 				"  • Check tmux session exists: tmux list-sessions\n"+
-				"  • Attach and start manually: tmux attach -t "+sessionName)
-		if !exists {
-			cleanupCodexTmuxSession(sessionName)
-		}
+				"  • Attach and start manually: tmux attach -t "+spec.SessionName)
 		return false, err
 	}
 	debug.Log("Codex command sent successfully")
@@ -526,84 +279,52 @@ func startCodexHarness(ctx context.Context, sessionName, workDir string, exists 
 	time.Sleep(500 * time.Millisecond)
 
 	debug.Log("Waiting for Codex prompt readiness (timeout: 90s)")
-	if err := tmux.WaitForCodexPrompt(sessionName, 90*time.Second); err != nil {
+	if err := tmux.WaitForCodexPrompt(spec.SessionName, 90*time.Second); err != nil {
 		debug.Log("Codex prompt readiness wait failed: %v", err)
 		ui.PrintError(err,
 			"Codex did not become ready",
-			"  • Attach to inspect: tmux attach -t "+sessionName+"\n"+
+			"  • Attach to inspect: tmux attach -t "+spec.SessionName+"\n"+
 				"  • Check for onboarding, model selection, auth, or permission prompts\n"+
 				"  • Retry after resolving the prompt")
-		if !exists {
-			cleanupCodexTmuxSession(sessionName)
-		}
 		return false, err
 	}
 	debug.Log("✓ Codex prompt detected - Codex is ready")
 	ui.PrintSuccess("Codex adapter ready")
-	return launchparity.CodexPermissionModeFlag(modeFlagValue) != "", nil
+	return launch.ModeAppliedAtStartup, nil
 }
 
-// spawnedCodexMetadata carries the app-server thread created during
-// startCodexHarness into manifest creation.
-var spawnedCodexMetadata *manifest.Codex
-
-func createCodexRemoteThread(ctx context.Context, sessionName, workDir string) (*manifest.Codex, error) {
-	if os.Getenv("AGM_CODEX_REMOTE_CONTROL") == "0" {
-		return nil, nil
+func validateCodexCredentials() error {
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	if apiKey == "" && !agent.IsCodexOAuthConfigured() {
+		ui.PrintError(fmt.Errorf("no Codex credentials found"),
+			"Codex requires either API key or OAuth login",
+			"  • Login via OAuth: codex login\n"+
+				"  • Or set API key: export OPENAI_API_KEY=sk-...\n"+
+				"  • Get key from: https://platform.openai.com/api-keys")
+		return fmt.Errorf("no Codex credentials found (run 'codex login' or set OPENAI_API_KEY)")
 	}
-	client := codexcontrol.New()
-	if err := client.StartRemoteControl(ctx); err != nil {
-		return nil, err
+	if apiKey != "" {
+		debug.Log("Codex initialized with API key")
+	} else {
+		debug.Log("Codex initialized with OAuth credentials (~/.codex/auth.json)")
 	}
-	thread, err := client.StartThread(ctx, codexcontrol.StartThreadOptions{
-		CWD:   workDir,
-		Model: agent.ResolveModelFullName("codex-cli", modelName),
-	})
-	if err != nil {
-		return nil, err
-	}
-	if err := client.SetThreadName(ctx, thread.ID, sessionName); err != nil {
-		return nil, err
-	}
-	return &manifest.Codex{
-		SessionID:      thread.ID,
-		TranscriptPath: thread.Path,
-	}, nil
-}
-
-func cleanupCodexTmuxSession(sessionName string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	normalizedName := tmux.NormalizeTmuxSessionName(sessionName)
-	cmd := exec.CommandContext(ctx, "tmux", "-S", tmux.GetSocketPath(), "kill-session", "-t", normalizedName)
-	output, err := cmd.CombinedOutput()
-	if ctx.Err() != nil {
-		debug.Log("Codex session cleanup timed out or was cancelled: %v", ctx.Err())
-		return
-	}
-	if err != nil {
-		debug.Log("Failed to clean up Codex tmux session: %v (output: %s)", err, strings.TrimSpace(string(output)))
-	}
+	return nil
 }
 
 // startOpenCodeHarness sends the `opencode attach` command into the tmux
 // session and surfaces SSE-based readiness.
-func startOpenCodeHarness(sessionName string, exists bool) error {
+func startOpenCodeHarness(spec ops.HarnessLaunchSpec) error {
 	debug.Phase("Start OpenCode")
 	debug.Log("OpenCode server validated (health check passed)")
-	opencodeCmd := buildOpenCodeCommand()
+	opencodeCmd := ops.BuildHarnessLaunchCommand(spec).Command
 	debug.Log("Sending command: %s", opencodeCmd)
-	if err := tmux.SendCommand(sessionName, opencodeCmd); err != nil {
+	if err := tmux.SendCommand(spec.SessionName, opencodeCmd); err != nil {
 		ui.PrintError(err,
 			"Failed to start OpenCode in tmux session",
 			"  • Verify OpenCode server is running: curl http://localhost:4096/health\n"+
 				"  • Start server if needed: opencode serve --port 4096\n"+
 				"  • Check tmux session exists: tmux list-sessions\n"+
-				"  • Attach and start manually: tmux attach -t "+sessionName)
-		if !exists {
-			_ = tmux.SendCommand(sessionName, "tmux kill-session -t "+sessionName)
-		}
+				"  • Attach and start manually: tmux attach -t "+spec.SessionName)
 		return err
 	}
 	debug.Log("OpenCode attach command sent successfully")
@@ -611,8 +332,4 @@ func startOpenCodeHarness(sessionName string, exists bool) error {
 	debug.Log("OpenCode session ready (SSE monitoring active)")
 	ui.PrintSuccess("OpenCode is ready! (state tracked via SSE)")
 	return nil
-}
-
-func buildOpenCodeCommand() string {
-	return "opencode attach" + launchparity.ExitSuffix(persistent)
 }

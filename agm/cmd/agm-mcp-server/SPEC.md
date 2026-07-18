@@ -23,6 +23,10 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
 
 **MCS-04** When the MCP server starts and the resolved workspace's Dolt database is not reachable, the system shall exit non-zero with an error naming the workspace and shall not register any tools.
 
+**MCS-05** When `agm_create_session` receives a valid request, the MCP adapter shall pass the request context and explicit `mcp` caller provenance to `ops.CreateSessionWithContext` rather than maintain a separate creation sequence.
+
+**MCS-06** When MCP session creation succeeds, the result shall report `source: "mcp"` and the registered manifest shall contain the `source:mcp` provenance tag.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/mcp_parity.feature`
@@ -45,6 +49,11 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
    - User asks an MCP client: "What's the status of session XYZ?"
    - The client retrieves detailed metadata for specific session
    - User sees full session details (status, timestamps, tmux info)
+
+4. **Session Creation**
+   - A client supplies a working directory, initial prompt, and optional title, harness, and model
+   - The server delegates creation to the shared ops lifecycle
+   - The client receives the created session ID, name, resolved harness/model, and caller provenance
 
 ### Secondary Use Cases
 
@@ -182,6 +191,28 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
 - Returns error if session not found
 - No caching (relies on list cache)
 
+### Tool 4: agm_create_session
+
+**Purpose**: Create and register a new AGM session through the same lifecycle used by the CLI
+
+**Input Schema**:
+```json
+{
+  "cwd": "/absolute/project/path",
+  "prompt": "initial task",
+  "title": "optional-session-name",
+  "harness": "claude-code|codex-cli|agy|opencode-cli|gemini-cli",
+  "model": "optional model alias"
+}
+```
+
+**Constraints**:
+- `cwd` must be an existing absolute directory
+- `prompt` is required
+- `title`, when present, must be safe for tmux
+- harness and model validation use the shared agent registry
+- lifecycle ownership, rollback, and Codex setup remain in `internal/ops`
+
 ## Data Model
 
 ### Session Metadata (MCP Format)
@@ -226,6 +257,13 @@ mcp_server:
     - agm_list_sessions
     - agm_search_sessions
     - agm_get_session_metadata
+    - agm_archive_session
+    - agm_kill_session
+    - agm_create_session
+    - agm_send_message
+    - agm_list_ops
+    - agm_list_wayfinder_sessions
+    - agm_get_wayfinder_session
   auto_register: true
   claude_config_path: ~/.config/claude/mcp_servers.json
   sessions_dir: ~/.config/agm/sessions
@@ -241,7 +279,7 @@ mcp_server:
 
 - `enabled`: `true`
 - `transport`: `stdio` (only supported transport)
-- `tools`: All 3 tools enabled
+- `tools`: The configured discovery, lifecycle, messaging, and Wayfinder tools
 - `auto_register`: `true` (placeholder for V2)
 - `claude_config_path`: `~/.config/claude/mcp_servers.json`
 - `sessions_dir`: Auto-detected from `AGM_SESSIONS_DIR` or `~/.config/agm/sessions`
@@ -269,10 +307,10 @@ mcp_server:
 
 ### Security Principles
 
-1. **Metadata Only**: Only expose session metadata from manifest files
+1. **Metadata and Lifecycle Only**: Expose session metadata and explicit lifecycle operations, never conversation content
 2. **No Content Access**: Never read conversation history files
 3. **Local Only**: Server runs locally, no network exposure
-4. **Read-Only**: No session modification capabilities
+4. **Shared Mutation Boundary**: Lifecycle mutations delegate to `internal/ops` validation and rollback
 5. **Isolation**: Runs in separate process from AGM sessions
 
 ## Performance Requirements
@@ -313,7 +351,7 @@ mcp_server:
 1. An MCP client launches `agm-mcp-server` binary
 2. Server writes header to stderr
 3. Server initializes MCP server with stdio transport
-4. Server registers 3 tools
+4. Server registers the configured discovery, lifecycle, messaging, and Wayfinder tools
 5. Server blocks on `server.Run(ctx, transport)`
 6. Client sends JSON-RPC requests via stdin
 7. Server sends JSON-RPC responses via stdout
