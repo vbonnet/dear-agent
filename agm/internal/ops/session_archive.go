@@ -260,7 +260,14 @@ func cleanupTrackedSessionResources(ctx *OpContext, sessionName string) *cleanup
 		return nil
 	}
 	store := &cleanup.DoltWorktreeStore{Adapter: adapter}
-	return cleanup.SessionResources(context.Background(), sessionName, store, cleanup.RealGitOps{}, slog.Default())
+	return cleanup.SessionResources(archiveOperationContext(ctx), sessionName, store, cleanup.RealGitOps{}, slog.Default())
+}
+
+func archiveOperationContext(opCtx *OpContext) context.Context {
+	if opCtx != nil && opCtx.Context != nil {
+		return opCtx.Context
+	}
+	return context.Background()
 }
 
 func cleanupPendingDir(sessionName string) {

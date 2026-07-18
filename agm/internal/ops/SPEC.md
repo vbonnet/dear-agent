@@ -79,6 +79,8 @@ surfaces (CLI, MCP server, Skills plugin). Every surface constructs an
 
 **OPS-56** When `ArchiveSession` uses an isolated SQLite store or archives a manifest marked as a test session, the system shall preserve lifecycle, explicit legacy-directory moves, and injected external-archive behavior without mutating host trust, monitor, process, pending-message, worktree, branch, temporary-file, sandbox, or configuration state.
 
+**OPS-57** When an archive caller supplies a request context, the system shall propagate its cancellation through tracked-worktree storage cleanup instead of replacing it with a background context.
+
 ### Garbage Collection
 
 **OPS-21** When `GC` is called, the system shall perform a pre-flight health check by listing all sessions; if storage is unreachable it shall abort with a 503-equivalent error before touching any session.

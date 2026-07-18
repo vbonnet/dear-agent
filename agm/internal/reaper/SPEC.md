@@ -71,6 +71,8 @@ alive.
 
 **REA-20** When `agm session archive --async` supplies force, keep-sandbox, or outcome options, the system shall propagate those options across the detached `agm-reaper` process boundary and apply them to shared preflight and final archival.
 
+**REA-21** When one reaper run performs preflight, writes the reaping tombstone, and finalizes archival, the system shall reuse one migrated lifecycle-storage connection across those phases.
+
 ### Timing Constants (regression-pinned)
 
 **REA-16** When reaper timing constants are evaluated, the system shall preserve the pinned timeout values covered by `TestConstantValues`.

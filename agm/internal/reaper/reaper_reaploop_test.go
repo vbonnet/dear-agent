@@ -355,3 +355,44 @@ func TestRun_RefusesToArchiveWhenPaneAlive(t *testing.T) {
 		t.Fatalf("Lifecycle = %q, want reaping tombstone", stored.Lifecycle)
 	}
 }
+
+func TestRun_ReusesOneLifecycleStorageConnection(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "agm.db")
+	t.Setenv("AGM_DB_PATH", dbPath)
+	t.Setenv("HOME", t.TempDir())
+	adapter, err := dolt.NewSQLiteAdapter(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "single-connection-id",
+		Name:          "single-connection",
+		Harness:       "agy",
+		IsTest:        true,
+		CreatedAt:     time.Now().Add(-time.Hour),
+		UpdatedAt:     time.Now().Add(-time.Hour),
+		Context:       manifest.Context{Project: t.TempDir()},
+		Tmux:          manifest.Tmux{SessionName: "single-connection"},
+	}
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+
+	originalOpenStorage := openStorageFn
+	openCalls := 0
+	openStorageFn = func() (*dolt.Adapter, error) {
+		openCalls++
+		return originalOpenStorage()
+	}
+	t.Cleanup(func() { openStorageFn = originalOpenStorage })
+	(&fakeBoundary{}).install(t)
+
+	if err := NewWithOptions(m.Name, t.TempDir(), ArchiveOptions{Force: true}).Run(); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	if openCalls != 1 {
+		t.Fatalf("lifecycle storage opened %d times, want 1", openCalls)
+	}
+}

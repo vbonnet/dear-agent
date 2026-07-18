@@ -12,6 +12,20 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
+func TestArchiveOperationContextPropagatesCancellation(t *testing.T) {
+	requestCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	got := archiveOperationContext(&OpContext{Context: requestCtx})
+	select {
+	case <-got.Done():
+	default:
+		t.Fatal("archive operation context lost request cancellation")
+	}
+	if fallback := archiveOperationContext(&OpContext{}); fallback == nil {
+		t.Fatal("archive operation context fallback is nil")
+	}
+}
+
 type testExternalArchiver func(context.Context, *manifest.Manifest) []ExternalArchiveOutcome
 
 func (f testExternalArchiver) ArchiveExternalSession(ctx context.Context, m *manifest.Manifest) []ExternalArchiveOutcome {

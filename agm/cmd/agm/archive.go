@@ -160,6 +160,7 @@ Examples:
 }
 
 func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
+	operationCtx := archiveCommandContext(cmd)
 	if archiveTestEnv != "" {
 		tc := testcontext.LoadNamed(archiveTestEnv)
 		if err := tc.SetEnv(); err != nil {
@@ -195,7 +196,7 @@ func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
 		if asyncArchive {
 			return fmt.Errorf("--async flag is not compatible with --all")
 		}
-		return archiveBulk()
+		return archiveBulk(operationCtx)
 	}
 
 	// Single session archive mode
@@ -215,6 +216,7 @@ func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
 		return fmt.Errorf("failed to connect to Dolt: %w", err)
 	}
 	defer cleanup()
+	opCtx.Context = operationCtx
 
 	getResult, getErr := ops.GetSession(opCtx, &ops.GetSessionRequest{
 		Identifier: sessionName,
@@ -267,6 +269,13 @@ func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
 	}
 
 	return nil
+}
+
+func archiveCommandContext(cmd *cobra.Command) context.Context {
+	if cmd == nil {
+		return context.Background()
+	}
+	return cmd.Context()
 }
 
 // archiveAuditArgs builds the audit arg map for the archive command from the
@@ -416,7 +425,7 @@ func parseDuration(s string) (time.Duration, error) {
 }
 
 // archiveBulk archives multiple sessions based on filters
-func archiveBulk() error {
+func archiveBulk(operationCtx context.Context) error {
 	// Validate --outcome up front so a bad value fails before any work.
 	bulkOutcome, err := parseArchiveOutcome(archiveOutcome)
 	if err != nil {
@@ -490,6 +499,7 @@ func archiveBulk() error {
 
 	// Build OpContext for cleanup operations
 	opCtx := &ops.OpContext{
+		Context: operationCtx,
 		Storage: adapter,
 		Tmux:    tmuxClient,
 	}
@@ -501,7 +511,11 @@ func archiveBulk() error {
 		AllowSupervisorReap: includeSupervisors,
 	})
 
-	// Report results
+	reportBulkArchiveResult(successCount, failCount)
+	return nil
+}
+
+func reportBulkArchiveResult(successCount, failCount int) {
 	fmt.Println()
 	if successCount > 0 {
 		ui.PrintSuccess(fmt.Sprintf("Archived %d session(s)", successCount))
@@ -510,11 +524,8 @@ func archiveBulk() error {
 	if failCount > 0 {
 		ui.PrintWarning(fmt.Sprintf("Failed to archive %d session(s)", failCount))
 	}
-
 	fmt.Printf("\nUse 'agm session list --all' to see archived sessions.\n")
 	fmt.Printf("To restore: edit manifest.yaml and change lifecycle from 'archived' to ''\n")
-
-	return nil
 }
 
 // printArchivePreview prints the per-candidate preview block and the skipped

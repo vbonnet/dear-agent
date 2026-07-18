@@ -66,6 +66,7 @@ var (
 	killSessionFn      = tmux.KillSession
 	getPanePIDFn       = tmux.GetPanePID
 	processKillFn      = syscall.Kill
+	openStorageFn      = openStorage
 )
 
 // Reaper manages the async archival process for a AGM session.
@@ -132,11 +133,17 @@ func (r *Reaper) Run() error {
 		return fmt.Errorf("safety guard blocked reaper on session '%s':\n%s", r.SessionName, guardResult.Error())
 	}
 
+	adapter, sessionsDir, err := r.openLifecycleStorage()
+	if err != nil {
+		return err
+	}
+	defer adapter.Close()
+
 	// Validate the same supervisor, verification, and delegation guards used by
 	// immediate and bulk archive before touching the pane. Active tmux is the
 	// only allowed condition here because stopping that pane is the reaper's
 	// purpose; the final shared operation checks again after pane death.
-	preflight, err := r.preflightArchive()
+	preflight, err := r.preflightArchive(adapter)
 	if err != nil {
 		return fmt.Errorf("archive preflight failed: %w", err)
 	}
@@ -150,7 +157,7 @@ func (r *Reaper) Run() error {
 	// restart), the GC startup scan will find the session in "reaping" state
 	// with a dead tmux and archive it automatically.
 	r.logger.Info("Marking session as reaping in Dolt")
-	if err := r.markReaping(); err != nil {
+	if err := r.markReaping(adapter, sessionsDir); err != nil {
 		// Non-fatal: proceed with reaping even if we can't mark state.
 		// The GC startup scan will catch it as "stopped" anyway.
 		r.logger.Warn("Failed to mark session as reaping (will proceed)", "error", err)
@@ -172,7 +179,7 @@ func (r *Reaper) Run() error {
 	// ── Phase 2: Archive in Dolt (pane is confirmed dead) ──────────────
 
 	r.logger.Info("Archiving session (pane confirmed dead)")
-	if err := r.archiveSession(); err != nil {
+	if err := r.archiveSessionWithStorage(adapter, sessionsDir); err != nil {
 		return fmt.Errorf("archive failed: %w", err)
 	}
 
@@ -295,22 +302,7 @@ func (r *Reaper) forceKillPaneProcess() {
 // markReaping updates the session lifecycle to "reaping" in Dolt.
 // This must happen BEFORE killing tmux so that if the reaper crashes,
 // the GC startup scan can detect and archive the orphaned session.
-func (r *Reaper) markReaping() error {
-	sessionsDir, err := r.getSessionsDir()
-	if err != nil {
-		return fmt.Errorf("failed to get sessions directory: %w", err)
-	}
-
-	adapter, err := openStorage()
-	if err != nil {
-		return err
-	}
-	defer adapter.Close()
-
-	if err := adapter.ApplyMigrations(); err != nil {
-		return fmt.Errorf("failed to apply Dolt migrations: %w", err)
-	}
-
+func (r *Reaper) markReaping(adapter *dolt.Adapter, sessionsDir string) error {
 	m, _, err := session.ResolveIdentifier(r.SessionName, sessionsDir, adapter)
 	if err != nil {
 		return fmt.Errorf("session not found: %w", err)
@@ -329,16 +321,7 @@ func (r *Reaper) markReaping() error {
 	return nil
 }
 
-func (r *Reaper) preflightArchive() (*ops.ArchiveSessionResult, error) {
-	adapter, err := openStorage()
-	if err != nil {
-		return nil, err
-	}
-	defer adapter.Close()
-	if err := adapter.ApplyMigrations(); err != nil {
-		return nil, fmt.Errorf("failed to apply Dolt migrations: %w", err)
-	}
-
+func (r *Reaper) preflightArchive(adapter *dolt.Adapter) (*ops.ArchiveSessionResult, error) {
 	opCtx := &ops.OpContext{Storage: adapter, DryRun: true}
 	req := r.archiveRequest()
 	req.AllowActiveTmux = true
@@ -379,23 +362,31 @@ func (r *Reaper) waitForPaneClose(timeout time.Duration) error {
 // side effects to ops.ArchiveSession. The reaper owns only the preceding
 // process-stop phase and reaping tombstone.
 func (r *Reaper) archiveSession() error {
-	sessionsDir, err := r.getSessionsDir()
-	if err != nil {
-		return fmt.Errorf("failed to get sessions directory: %w", err)
-	}
-
-	// Connect to lifecycle storage for the shared operation.
-	adapter, err := openStorage()
+	adapter, sessionsDir, err := r.openLifecycleStorage()
 	if err != nil {
 		return err
 	}
 	defer adapter.Close()
+	return r.archiveSessionWithStorage(adapter, sessionsDir)
+}
 
-	// Apply migrations
-	if err := adapter.ApplyMigrations(); err != nil {
-		return fmt.Errorf("failed to apply Dolt migrations: %w", err)
+func (r *Reaper) openLifecycleStorage() (*dolt.Adapter, string, error) {
+	sessionsDir, err := r.getSessionsDir()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get sessions directory: %w", err)
 	}
+	adapter, err := openStorageFn()
+	if err != nil {
+		return nil, "", err
+	}
+	if err := adapter.ApplyMigrations(); err != nil {
+		_ = adapter.Close()
+		return nil, "", fmt.Errorf("failed to apply Dolt migrations: %w", err)
+	}
+	return adapter, sessionsDir, nil
+}
 
+func (r *Reaper) archiveSessionWithStorage(adapter *dolt.Adapter, sessionsDir string) error {
 	req := r.archiveRequest()
 	req.Idempotent = true
 	req.LegacySessionsDir = sessionsDir
