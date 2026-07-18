@@ -4,40 +4,24 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/fs"
 	"path/filepath"
 	"strings"
+
+	"github.com/vbonnet/dear-agent/internal/repoinventory"
 )
 
-// excludedDirs are directories never counted toward repo health: build
-// artifacts, vendored third-party code, and the worktree pool (which holds
-// copies of the tree that would otherwise double-count every metric).
-var excludedDirs = map[string]bool{
-	".git":        true,
-	".worktrees":  true,
-	"vendor":      true,
-	"build":       true,
-	"node_modules": true,
-	"testdata":    true,
-}
-
-// walkRepoFiles invokes fn for every non-excluded regular file under root.
+// walkRepoFiles invokes fn for every governed file under root. The shared
+// inventory owns Git-ignore and generated/dependency directory policy so repo
+// health cannot drift from SPEC and EARS tooling.
 func walkRepoFiles(root string, fn func(path string)) error {
-	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			//nolint:nilerr // an unreadable entry is skipped, not fatal: a
-			// single permission error must not blind the whole audit.
-			return nil
-		}
-		if d.IsDir() {
-			if path != root && excludedDirs[d.Name()] {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		fn(path)
-		return nil
-	})
+	files, err := repoinventory.Scan(root)
+	if err != nil {
+		return err
+	}
+	for _, file := range files {
+		fn(file.Absolute)
+	}
+	return nil
 }
 
 // goFileWalk invokes fn for every non-excluded .go file under root.
@@ -51,10 +35,10 @@ func goFileWalk(root string, fn func(path string)) error {
 
 // goSource holds the parsed form of one Go file plus its line count.
 type goSource struct {
-	path  string
-	fset  *token.FileSet
-	file  *ast.File
-	lines int
+	path   string
+	fset   *token.FileSet
+	file   *ast.File
+	lines  int
 	isTest bool
 }
 
