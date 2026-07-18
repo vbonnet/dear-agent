@@ -18,12 +18,15 @@ mcp_server:
   enabled: true
   workspace: oss
   auto_register: true
-  wayfinder_dir: ~/worktrees/engram-research/evidence/wf
+  wayfinder_dir: /absolute/path/to/an/engram-research-worktree/wf
   a2a:
     enabled: false
     bind: 127.0.0.1
     port: 8080
 ```
+
+`wayfinder_dir` must point at a writable Engram Research worktree. Do not point
+it at the dear-agent source tree or a transient, branch-named checkout.
 
 Use [`ARCHITECTURE.md`](ARCHITECTURE.md) for the current ten-tool inventory and
 runtime boundaries. Use [`SPEC.md`](SPEC.md) for strict behavior requirements.
