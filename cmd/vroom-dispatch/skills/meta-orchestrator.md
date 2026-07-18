@@ -72,7 +72,6 @@ threshold.
 
 ```bash
 agm supervisor heartbeat --id vroom-meta-orchestrator --primary-for vroom-orchestrator --tertiary-for vroom-overseer
-date -u +%Y-%m-%dT%H:%M:%SZ > ~/.agm/vroom/heartbeat/meta-o.json
 ```
 
 ### Step 3: Read Open Beads

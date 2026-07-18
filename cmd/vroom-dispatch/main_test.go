@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	vroomsupervisor "github.com/vbonnet/dear-agent/pkg/vroom/supervisor"
 )
 
 // supervisorRoleTokens mirrors the role substrings that AGM's two
@@ -239,20 +241,29 @@ func TestMinSpawnIntervalMatchesAgm(t *testing.T) {
 	}
 }
 
-// TestSupervisorPeerRefsResolve ensures every PrimaryFor/TertiaryFor reference
-// points at a real supervisor ID, so heartbeat verification wiring stays
-// internally consistent after a rename.
-func TestSupervisorPeerRefsResolve(t *testing.T) {
-	ids := make(map[string]bool, len(supervisors))
-	for _, s := range supervisors {
-		ids[s.ID] = true
+// TestSupervisorPoliciesMaterializeCanonicalTopology proves the dispatch
+// adapter owns only launch policy: every identity and peer edge is copied from
+// pkg/vroom/supervisor's canonical topology rather than repeated here.
+func TestSupervisorPoliciesMaterializeCanonicalTopology(t *testing.T) {
+	if len(supervisors) != len(vroomsupervisor.AllMembers()) {
+		t.Fatalf("dispatch policies = %d, topology members = %d", len(supervisors), len(vroomsupervisor.AllMembers()))
 	}
+	seen := make(map[vroomsupervisor.Role]bool, len(supervisors))
 	for _, s := range supervisors {
-		if s.PrimaryFor != "" && !ids[s.PrimaryFor] {
-			t.Errorf("supervisor %q PrimaryFor %q does not match any supervisor ID", s.ID, s.PrimaryFor)
+		member, ok := vroomsupervisor.Lookup(s.ID)
+		if !ok {
+			t.Errorf("dispatch supervisor %q is not in the canonical topology", s.ID)
+			continue
 		}
-		if s.TertiaryFor != "" && !ids[s.TertiaryFor] {
-			t.Errorf("supervisor %q TertiaryFor %q does not match any supervisor ID", s.ID, s.TertiaryFor)
+		seen[member.Role] = true
+		if s.Name != member.ID || s.Role != string(member.Role) ||
+			s.PrimaryFor != member.PrimaryFor || s.TertiaryFor != member.TertiaryFor {
+			t.Errorf("dispatch topology for %q = %+v, want %+v", s.ID, s, member)
+		}
+	}
+	for _, member := range vroomsupervisor.AllMembers() {
+		if !seen[member.Role] {
+			t.Errorf("canonical member %q has no dispatch launch policy", member.ID)
 		}
 	}
 }
@@ -761,7 +772,11 @@ func TestHeartbeatFileName(t *testing.T) {
 		want string
 	}{
 		{"vroom-meta-orchestrator", "meta-o"},
+		{"meta-orchestrator", "meta-o"},
+		{"meta-o", "meta-o"},
 		{"vroom-orchestrator", "orch"},
+		{"orchestrator", "orch"},
+		{"orch", "orch"},
 		{"vroom-overseer", "overseer"},
 		{"unknown", "unknown"},
 	}
@@ -769,6 +784,22 @@ func TestHeartbeatFileName(t *testing.T) {
 		got := heartbeatFileName(tc.name)
 		if got != tc.want {
 			t.Errorf("heartbeatFileName(%q) = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestSupervisorSkillsUseAGMHeartbeatMirror(t *testing.T) {
+	for _, sup := range supervisors {
+		doc, err := skills.ReadFile("skills/" + sup.SkillFile)
+		if err != nil {
+			t.Fatalf("read %s: %v", sup.SkillFile, err)
+		}
+		text := string(doc)
+		if !strings.Contains(text, "agm supervisor heartbeat --id "+sup.ID) {
+			t.Errorf("%s does not write its authoritative AGM heartbeat", sup.SkillFile)
+		}
+		if strings.Contains(text, "date -u +%Y-%m-%dT%H:%M:%SZ > ~/.agm/vroom/heartbeat/") {
+			t.Errorf("%s still writes the flat heartbeat directly; AGM owns the topology-derived mirror", sup.SkillFile)
 		}
 	}
 }

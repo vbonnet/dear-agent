@@ -35,16 +35,17 @@ const (
 // AllRoles returns the three supervisor roles in canonical order.
 // Order is stable so tests and decision-trail records are deterministic.
 func AllRoles() []Role {
-	return []Role{RoleMetaOrchestrator, RoleOrchestrator, RoleOverseer}
+	roles := make([]Role, 0, len(canonicalTopology))
+	for _, member := range canonicalTopology {
+		roles = append(roles, member.Role)
+	}
+	return roles
 }
 
 // Valid reports whether r is one of the three canonical roles.
 func (r Role) Valid() bool {
-	switch r {
-	case RoleMetaOrchestrator, RoleOrchestrator, RoleOverseer:
-		return true
-	}
-	return false
+	_, ok := MemberForRole(r)
+	return ok
 }
 
 // Peers returns the two peers this supervisor watches at the start of every
@@ -65,18 +66,19 @@ func (r Role) Valid() bool {
 // mutual-unblock-first invariant — every supervisor watches both, with a
 // distinguished responsibility for each.
 func (r Role) Peers() (verifies, unsticks Role, err error) {
-	switch r {
-	case RoleMetaOrchestrator:
-		// Meta-O's Secondary is Overseer ⇒ Overseer verifies Meta-O ⇒
-		// inversely, Meta-O verifies whoever has Meta-O as their Secondary,
-		// which is Orchestrator. Same logic for Tertiary.
-		return RoleOrchestrator, RoleOverseer, nil
-	case RoleOrchestrator:
-		return RoleOverseer, RoleMetaOrchestrator, nil
-	case RoleOverseer:
-		return RoleMetaOrchestrator, RoleOrchestrator, nil
+	member, ok := MemberForRole(r)
+	if !ok {
+		return "", "", fmt.Errorf("supervisor: invalid role %q", string(r))
 	}
-	return "", "", fmt.Errorf("supervisor: invalid role %q", string(r))
+	primary, err := member.PrimaryPeer()
+	if err != nil {
+		return "", "", err
+	}
+	tertiary, err := member.TertiaryPeer()
+	if err != nil {
+		return "", "", err
+	}
+	return primary.Role, tertiary.Role, nil
 }
 
 // PeerList returns this supervisor's two peers as a slice, in (verifies,
