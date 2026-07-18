@@ -286,7 +286,7 @@ Examples:
 
 - [BDD Catalog](../../../docs/BDD-CATALOG.md) - Executable behavior and test traceability
 - [Integration Test README](../README.md) - General integration test info
-- [AGM Architecture](../../../docs/architecture.md) - System design
+- [AGM Architecture](../../../docs/ARCHITECTURE.md) - System design
 - [Hook Specification](../../../docs/hooks.md) - Hook system design (future)
 
 ## Maintenance

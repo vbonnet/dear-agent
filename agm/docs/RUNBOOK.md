@@ -521,6 +521,6 @@ agm session daemon restart
 ## Additional Resources
 
 - [Monitoring Documentation](./monitoring.md)
-- [Architecture Documentation](./architecture.md)
+- [Architecture Documentation](./ARCHITECTURE.md)
 - [Message Queue API](./message-queue-api.md)
 - [GitHub Issues](https://github.com/vbonnet/dear-agent/issues)
