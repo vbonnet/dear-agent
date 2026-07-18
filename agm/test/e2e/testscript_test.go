@@ -157,7 +157,7 @@ func buildAGMToCache() (string, error) {
 	buildCmd.Dir = agmModRoot
 	if out, err := buildCmd.CombinedOutput(); err != nil {
 		os.Remove(tmpPath)
-		return "", fmt.Errorf("go build: %v\n%s", err, out)
+		return "", fmt.Errorf("go build: %w\n%s", err, out)
 	}
 
 	// Atomically publish. If a concurrent builder won the race, reuse its
