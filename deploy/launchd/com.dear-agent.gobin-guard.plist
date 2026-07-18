@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd agent for the GOBIN guard (ce-24f1).
+
+  Runs `gobin-guard.sh` every 60 seconds. Each tick verifies that ~/go/bin
+  exists and that a sentinel binary inside it (agm) is executable. If the
+  directory or sentinel has disappeared, it appends one watchdog.gobin.missing
+  record to ~/.agm/vroom/trail.jsonl and exits non-zero, turning "the whole
+  GOBIN directory vanished" into a first-class, near-real-time SENSE condition
+  instead of the reactive, per-binary launchd "No such file or directory"
+  errors that were the only signal when ~/go/bin was wiped on 2026-07-15.
+
+  CRITICAL DESIGN NOTE: the guard is a dependency-free shell script installed
+  OUTSIDE ~/go/bin (at __HOME__/.local/state/dear-agent/bin/gobin-guard.sh). A
+  compiled watchdog living in ~/go/bin would be deleted by the very event it is
+  meant to catch — launchd would then just report the guard itself as missing,
+  with no escalation written. Keeping the guard off the guarded path is what
+  lets it fire on the wipe.
+
+  The plist is a TEMPLATE: the install target
+  (make install-gobin-guard-launchagent) substitutes __HOME__ for the real
+  home directory before staging it into ~/Library/LaunchAgents (launchd does
+  not expand ~ or shell variables).
+
+  Activate (ask-gated host action):
+    launchctl bootstrap gui/$(id -u) \
+      ~/Library/LaunchAgents/com.dear-agent.gobin-guard.plist
+
+  Trigger an immediate run outside the schedule:
+    launchctl kickstart gui/$(id -u)/com.dear-agent.gobin-guard
+
+  Remove:
+    launchctl bootout gui/$(id -u)/com.dear-agent.gobin-guard
+    rm ~/Library/LaunchAgents/com.dear-agent.gobin-guard.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.dear-agent.gobin-guard</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>__HOME__/.local/state/dear-agent/bin/gobin-guard.sh</string>
+    <string>--quiet</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>HOME</key>
+    <string>__HOME__</string>
+  </dict>
+
+  <!-- One cheap check per minute. launchd never starts a second instance of
+       the same label, so ticks cannot overlap. -->
+  <key>StartInterval</key>
+  <integer>60</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/.local/state/dear-agent/gobin-guard.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.local/state/dear-agent/gobin-guard.err.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <!-- Working dir: user's home. launchd otherwise starts jobs with cwd=/ (ce-k414). -->
+  <key>WorkingDirectory</key>
+  <string>__HOME__</string>
+</dict>
+</plist>
