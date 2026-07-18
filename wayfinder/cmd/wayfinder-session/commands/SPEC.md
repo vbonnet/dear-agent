@@ -19,6 +19,8 @@
 
 **WFCMD-06** When help is rendered, the system shall describe only registered commands, flags, and the named phase sequence.
 
+**WFCMD-07** When AI-facing README or skill shell examples are committed, the repository shall parse each Wayfinder invocation against the active Cobra command and flag tree.
+
 **WFCMD-07** When retired compatibility commands are requested, the system shall report that they are unknown.
 
 ## Traceability
