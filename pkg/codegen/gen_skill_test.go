@@ -27,7 +27,7 @@ func TestGenerateSkillsPreservesCLIBinaryAndCommandPath(t *testing.T) {
 		},
 	}
 	ir, err := BuildOpIR(op, map[string]reflect.Type{
-		"GeneratedSkillRequest": reflect.TypeOf(generatedSkillRequest{}),
+		"GeneratedSkillRequest": reflect.TypeFor[generatedSkillRequest](),
 	}, nil)
 	if err != nil {
 		t.Fatalf("BuildOpIR: %v", err)

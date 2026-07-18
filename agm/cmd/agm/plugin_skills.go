@@ -175,7 +175,7 @@ func validateUniqueCommandPaths(root *cobra.Command) error {
 
 func resolveCommand(root *cobra.Command, path string) (*cobra.Command, error) {
 	current := root
-	for _, segment := range strings.Fields(path) {
+	for segment := range strings.FieldsSeq(path) {
 		var matches []*cobra.Command
 		for _, child := range current.Commands() {
 			if child.IsAvailableCommand() && !child.Hidden && child.Name() == segment {

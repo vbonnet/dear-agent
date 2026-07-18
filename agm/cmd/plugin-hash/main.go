@@ -49,6 +49,7 @@ func run(dir string, check bool) error {
 			stale++
 			continue
 		}
+		// #nosec G703 -- every path comes from filepath.Glob within the explicit plugin directory.
 		if writeErr := os.WriteFile(path, stamped, 0o600); writeErr != nil {
 			return fmt.Errorf("write %s: %w", path, writeErr)
 		}
