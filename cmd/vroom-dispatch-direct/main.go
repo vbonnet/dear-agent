@@ -177,16 +177,13 @@ var listSessions = func(ctx context.Context) ([]string, error) {
 // runs to a whitespace or end-of-token boundary so trailing status columns in the
 // `agm session list` output do not bleed into the captured id.
 //
-// "worker-" must sit at the start of a line or field rather than a bare \b word
-// boundary: dispatched sessions are named exactly "worker-<id>", so a
-// hyphen-joined name like "my-worker-x" or "subworker-x" is a different session
-// and must NOT be read as a live worker. The delimiter class [^\w-] matches any
-// non-word, non-hyphen char, so "worker-" is recognized whether it follows
-// whitespace (the legacy text `agm session list`) OR a JSON delimiter like the
-// quote in `"name":"worker-ce-x"` (agent-mode JSON is now the default in the
-// non-TTY dispatch context) — while still excluding the alphanumeric before
-// "subworker" and the hyphen before "my-worker".
-var workerSessionRe = regexp.MustCompile(`(?m)(?:^|[^\w-])worker-([A-Za-z0-9.-]+)`)
+// "worker-" must sit at the start of a line or field (anchored to line-start or
+// preceding whitespace) rather than a bare \b word boundary: dispatched sessions
+// are named exactly "worker-<id>", so a hyphen-joined name like "my-worker-x" or
+// "subworker-x" is a different session and must NOT be read as a live worker.
+// This is the fallback for the legacy plain-text `agm session list`; the
+// default agent-mode JSON output is parsed structurally in liveWorkerIDs.
+var workerSessionRe = regexp.MustCompile(`(?m)(?:^|\s)worker-([A-Za-z0-9.-]+)`)
 
 // normalizeSessionID maps a bead id to its tmux-safe form: dots, colons and
 // spaces become dashes. This mirrors agm's tmux.NormalizeTmuxSessionName
@@ -219,6 +216,32 @@ func workerSessionName(id string) string {
 // match both sanitized session names and legacy dotted ones.
 func liveWorkerIDs(lines []string) map[string]bool {
 	ids := make(map[string]bool)
+
+	// `agm session list` defaults to agent-mode JSON in the non-TTY dispatch
+	// context. Parse it structurally and read ONLY the session name field, so a
+	// "worker-" substring in some other field (e.g. "harness":"worker-harness")
+	// can never be misread as a live worker id. Fall back to the legacy text
+	// regex when the output is not the expected JSON object.
+	joined := strings.TrimSpace(strings.Join(lines, "\n"))
+	if strings.HasPrefix(joined, "{") {
+		var payload struct {
+			Sessions []struct {
+				Name string `json:"name"`
+			} `json:"sessions"`
+		}
+		if err := json.Unmarshal([]byte(joined), &payload); err == nil {
+			for _, s := range payload.Sessions {
+				// Exact prefix on the name field: "subworker-x"/"my-worker-x"
+				// do not start with "worker-", so they are excluded naturally.
+				if rest, ok := strings.CutPrefix(s.Name, "worker-"); ok {
+					ids[normalizeSessionID(rest)] = true
+				}
+			}
+			return ids
+		}
+		// Unmarshal failed: fall through to the text regex (defensive).
+	}
+
 	for _, line := range lines {
 		for _, m := range workerSessionRe.FindAllStringSubmatch(line, -1) {
 			ids[normalizeSessionID(m[1])] = true
