@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -15,7 +16,12 @@ type repositoryConfig struct {
 
 // Policy declares the active instruction surfaces and exact temporary debt.
 type Policy struct {
-	Surfaces   []Surface   `yaml:"surfaces"`
+	Surfaces       []Surface   `yaml:"surfaces"`
+	Exclusions     []Exclusion `yaml:"exclusions"`
+	ExclusionsFile string      `yaml:"exclusions-file"`
+}
+
+type exclusionFile struct {
 	Exclusions []Exclusion `yaml:"exclusions"`
 }
 
@@ -45,10 +51,36 @@ func loadPolicy(configPath string) (Policy, error) {
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return Policy{}, fmt.Errorf("instructionlint: parse policy: %w", err)
 	}
+	if err := loadPolicyExclusions(configPath, &config.InstructionPolicy); err != nil {
+		return Policy{}, err
+	}
 	if err := validatePolicy(config.InstructionPolicy); err != nil {
 		return Policy{}, err
 	}
 	return config.InstructionPolicy, nil
+}
+
+func loadPolicyExclusions(configPath string, policy *Policy) error {
+	if policy.ExclusionsFile == "" {
+		return nil
+	}
+	if len(policy.Exclusions) > 0 {
+		return fmt.Errorf("instructionlint: use exclusions or exclusions-file, not both")
+	}
+	if !cleanRelativePath(policy.ExclusionsFile) {
+		return fmt.Errorf("instructionlint: instruction-policy.exclusions-file must be a clean repository-relative path")
+	}
+	path := filepath.Join(filepath.Dir(configPath), filepath.FromSlash(policy.ExclusionsFile))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("instructionlint: read exclusions: %w", err)
+	}
+	var file exclusionFile
+	if err := yaml.Unmarshal(data, &file); err != nil {
+		return fmt.Errorf("instructionlint: parse exclusions: %w", err)
+	}
+	policy.Exclusions = file.Exclusions
+	return nil
 }
 
 func validatePolicy(policy Policy) error {

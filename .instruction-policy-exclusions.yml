@@ -1,0 +1,166 @@
+# Exact policy debt, deliberately separate from the always-read repository
+# router. The instruction gate reports changed, additional, and stale entries.
+exclusions:
+  # PR #930 replaces the legacy root instructions. These exact excerpts make
+  # that dependency visible without exempting any other AGENTS.md content.
+  - path: AGENTS.md
+    rule: wayfinder-v1
+    excerpt: "- [wayfinder-v2-canonical](docs/policies/wayfinder-v2-canonical.ai.md) — Wayfinder V2 (9 phases) is the only model; V1 is dead."
+    count: 1
+    owner: "#930"
+    reason: root router removes the legacy excerpt
+  - path: AGENTS.md
+    rule: wayfinder-v1
+    excerpt: "artifacts** (`wf/`, W0/problem statements), and the like."
+    count: 1
+    owner: "#930"
+    reason: root router removes the legacy excerpt
+  - path: AGENTS.md
+    rule: wayfinder-v1
+    excerpt: "research, Wayfinder, W0) → write it to the knowledge base"
+    count: 1
+    owner: "#930"
+    reason: root router removes the legacy excerpt
+  - path: AGENTS.md
+    rule: bare-beads
+    excerpt: "bd"
+    count: 5
+    owner: "#930"
+    reason: root router removes the generic Beads block and duplicate tutorial
+  - path: AGENTS.md
+    rule: bare-beads
+    excerpt: "bd status"
+    count: 1
+    owner: "#930"
+    reason: root router removes the duplicate tutorial
+  - path: AGENTS.md
+    rule: bare-beads
+    excerpt: "bd prime"
+    count: 3
+    owner: "#930"
+    reason: root router removes the generic Beads block
+  - path: AGENTS.md
+    rule: bare-beads
+    excerpt: "bd ready              # Find available work"
+    count: 1
+    owner: "#930"
+    reason: root router removes the generic Beads block
+  - path: AGENTS.md
+    rule: bare-beads
+    excerpt: "bd show <id>          # View issue details"
+    count: 1
+    owner: "#930"
+    reason: root router removes the generic Beads block
+  - path: AGENTS.md
+    rule: bare-beads
+    excerpt: "bd update <id> --claim  # Claim work"
+    count: 1
+    owner: "#930"
+    reason: root router removes the generic Beads block
+  - path: AGENTS.md
+    rule: bare-beads
+    excerpt: "bd close <id>         # Complete work"
+    count: 1
+    owner: "#930"
+    reason: root router removes the generic Beads block
+  - path: AGENTS.md
+    rule: bare-beads
+    excerpt: "bd remember"
+    count: 1
+    owner: "#930"
+    reason: root router removes the generic Beads block
+  - path: AGENTS.md
+    rule: bare-beads
+    excerpt: "bd dolt push"
+    count: 1
+    owner: "#930"
+    reason: root router removes the unsafe completion block
+  - path: AGENTS.md
+    rule: raw-git-push
+    excerpt: "git push"
+    count: 5
+    owner: "#930"
+    reason: root router replaces raw delivery guidance with safe-push
+  - path: AGENTS.md
+    rule: raw-git-push
+    excerpt: "git push\n--force"
+    count: 1
+    owner: "#930"
+    reason: root router removes the duplicate wrapper rationale
+  - path: AGENTS.md
+    rule: raw-gh-merge
+    excerpt: "gh pr merge --squash --delete-branch"
+    count: 1
+    owner: "#930"
+    reason: root router replaces raw merge guidance with safe-merge
+  - path: AGENTS.md
+    rule: raw-gh-merge
+    excerpt: "gh pr merge"
+    count: 1
+    owner: "#930"
+    reason: root router replaces raw merge guidance with safe-merge
+  - path: AGENTS.md
+    rule: safe-pr-emergency
+    excerpt: "safe-pr <verb> --emergency --reason \"<why>\""
+    count: 1
+    owner: "#930"
+    reason: root router removes the nonexistent bypass flag
+
+  # The canonical policy must name the retired model to prohibit it. Exact
+  # excerpts keep that permanent negative-reference exception narrow.
+  - path: docs/policies/wayfinder-v2-canonical.ai.md
+    rule: wayfinder-v1
+    excerpt: "description: Wayfinder V2 (9 phases) is the only SDLC model. V1 (13 phases) is dead — do not use or extend it."
+    count: 1
+    owner: wayfinder-policy
+    reason: normative prohibition names the retired model
+  - path: docs/policies/wayfinder-v2-canonical.ai.md
+    rule: wayfinder-v1
+    excerpt: "DESIGN, SPEC, PLAN, SETUP, BUILD (TDD loop), RETRO. V1's 13-phase model is retired."
+    count: 1
+    owner: wayfinder-policy
+    reason: normative prohibition names the retired model
+  - path: docs/policies/wayfinder-v2-canonical.ai.md
+    rule: wayfinder-v1
+    excerpt: "- Use or extend the Wayfinder V1 (13-phase) path."
+    count: 1
+    owner: wayfinder-policy
+    reason: NEVER section names the retired model
+  - path: docs/policies/wayfinder-v2-canonical.ai.md
+    rule: wayfinder-v1
+    excerpt: "- Add new phase logic, validators, or defaults to V1."
+    count: 1
+    owner: wayfinder-policy
+    reason: NEVER section names the retired model
+  - path: docs/policies/wayfinder-v2-canonical.ai.md
+    rule: wayfinder-v1
+    excerpt: "- Leave code defaulting to V1 while calling V2 canonical."
+    count: 1
+    owner: wayfinder-policy
+    reason: NEVER section names the retired model
+  - path: docs/policies/wayfinder-v2-canonical.ai.md
+    rule: wayfinder-v1
+    excerpt: "- When you touch Wayfinder phase logic, make V2 the default and delete the V1"
+    count: 1
+    owner: wayfinder-policy
+    reason: replacement instruction names the retired model
+  - path: docs/policies/wayfinder-v2-canonical.ai.md
+    rule: wayfinder-v1
+    excerpt: "Wayfinder gates PRs. V1/V2 ambiguity means the gate behaves unpredictably. There"
+    count: 1
+    owner: wayfinder-policy
+    reason: invariant explanation names the retired model
+
+  # PR #925 regenerates these two command lines from current Cobra metadata.
+  - path: agm/agm-plugin/commands/agm-status.md
+    rule: agm-root-status
+    excerpt: "agm status --output json"
+    count: 1
+    owner: "#925"
+    reason: generated command parity PR replaces the legacy root form
+  - path: agm/agm-plugin/commands/agm-status.md
+    rule: agm-root-status
+    excerpt: "agm status --output json \"{SESSION_NAME}\""
+    count: 1
+    owner: "#925"
+    reason: generated command parity PR replaces the legacy root form
