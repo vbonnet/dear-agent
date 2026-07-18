@@ -16,7 +16,7 @@
       "name": "wayfinder",
       "source": "./wayfinder",
       "description": "Wayfinder SDLC workflow management: 9-phase methodology (CHARTER through RETRO) with phase-gate validation",
-      "version": "0.2.0"
+      "version": "0.3.0"
     },
     {
       "name": "youtube",
