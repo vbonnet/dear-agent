@@ -30,4 +30,4 @@ workspace: oss
 
 Beads lifecycle hooks for this harness live in `.agents/hooks.json`,
 mirroring the `.codex/hooks.json` pattern. They keep durable project
-task context (`bd`) in sync across the session lifecycle.
+task context through the Beads CLI in sync across the session lifecycle.

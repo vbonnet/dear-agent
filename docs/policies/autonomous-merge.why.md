@@ -21,8 +21,8 @@ a subtle, high-blast-radius mistake lands unreviewed. The carve-out
 ## How to apply
 - Ask: does this touch a security control, user-visible product behavior, or
   money/billing? If yes → open the PR, do NOT merge, flag for human review.
-- Otherwise → merge autonomously once green + threads resolved, via `safe-pr` /
-  `gh pr merge --squash`.
+- Otherwise → merge autonomously once green + threads resolved, through
+  `safe-pr` and `safe-merge`.
 - Never reach for `--admin` / `--force` / `--no-verify` to get past a gate — fix
   the cause or escalate.
 

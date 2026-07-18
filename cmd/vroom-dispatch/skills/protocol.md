@@ -94,9 +94,9 @@ or ambiguous state.
 ## Shared constraints
 
 - Never write to `~/src/**`; use a worktree for repository changes.
-- Never use bare `bd`; always pass the canonical database path.
-- Never use raw `git push`, `gh pr merge`, `--force`, or `--no-verify`; use the
-  repository's safe wrappers.
+- Always pass the canonical database path to the Beads CLI.
+- Use `safe-push` and `safe-merge`; never pass force or verification-bypass
+  flags.
 - Never build JSON or JSONL with shell interpolation. Use typed Go commands and
   their structured output.
 - Do not use Python for repository automation.

@@ -12,14 +12,14 @@ type rule struct {
 	detect      func(string) bool
 }
 
-var retiredWayfinder = regexp.MustCompile(`(?i)(?:\bV1\b|\bW0(?:\b|-)|\bD[1-6](?:\b|-)|\bS(?:1[01]|[1-9])(?:\b|-))`)
+var retiredWayfinder = regexp.MustCompile(`(?:\bV1\b|\bW0(?:\b|-)|\bD[1-6](?:\b|-)|\bS(?:1[01]|[1-9])(?:\b|-))`)
 
 var instructionRules = []rule{
-	{id: "wayfinder-v1", replacement: "use CHARTER, PROBLEM, RESEARCH, DESIGN, SPEC, PLAN, SETUP, BUILD, and RETRO", applies: proseOrShell, detect: retiredWayfinder.MatchString},
+	{id: "wayfinder-v1", replacement: "CHARTER, PROBLEM, RESEARCH, DESIGN, SPEC, PLAN, SETUP, BUILD, and RETRO", applies: proseOrShell, detect: retiredWayfinder.MatchString},
 	{id: "bare-beads", replacement: "bd --db ~/beads/context-engine/.beads --dolt-auto-commit on <subcommand>", applies: commandSegment, detect: bareBeads},
 	{id: "raw-git-push", replacement: "safe-push", applies: commandSegment, detect: func(text string) bool { return strings.Contains(shellText(text), "git push") }},
 	{id: "raw-gh-merge", replacement: "safe-merge", applies: commandSegment, detect: func(text string) bool { return strings.HasPrefix(shellText(text), "gh pr merge") }},
-	{id: "safe-pr-emergency", replacement: "use safe-pr normally or escalate with agm escalate; there is no bypass flag", applies: commandSegment, detect: func(text string) bool {
+	{id: "safe-pr-emergency", replacement: "safe-pr normally or escalate with agm escalate; there is no bypass flag", applies: commandSegment, detect: func(text string) bool {
 		normalized := shellText(text)
 		return strings.Contains(normalized, "safe-pr") && strings.Contains(normalized, "--emergency")
 	}},

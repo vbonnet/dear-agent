@@ -24,7 +24,7 @@ boundary that keeps consequential changes in front of a human.
 ## ALWAYS
 
 - For routine changes, review and merge your own PR once checks are green and
-  threads are resolved — `gh pr merge --squash`, via the normal gate.
+  threads are resolved — use `safe-merge`, which owns the normal gate.
 - Route every PR through Wayfinder V2 + `safe-pr`.
 - When unsure whether something is security/product/money, treat it as yes and
   hold for a human.
