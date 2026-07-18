@@ -49,22 +49,20 @@ pr-policy:
 
 forbidden-paths:
   research:
-    # Research artifacts — analysis docs, transcripts, literature reviews,
-    # findings — belong in ~/src/engram-research, not in this repo.
-    - research/*.md
-    - research/*.txt
-    # TEMPORAL ARTIFACTS — design docs, plans, audits, DEAR retros, research,
-    # and Wayfinder artifacts (W0/problem statements). They capture a moment
-    # of thinking, are NOT maintained with the code, and ALWAYS route to the
-    # knowledge base ~/src/engram-research (projects/<name>/), never this live
-    # coding repo — even when the artifact is about code here.
-    #
-    # LIVING DOCUMENTATION stays in dear-agent, as close to the code as
-    # possible (proximity principle): ARCHITECTURE.md, ADRs (docs/adr/),
-    # inline/API docs, CLAUDE.md — anything kept true as the code changes.
-    # See AGENTS.md "Living Documentation Policy" for the full
-    # policy (Last-audited headers, wrong-fact-triggers-retro, doc audits).
-    #
+    # Temporal artifacts capture a moment of investigation or intent. Route
+    # them to an engram-research worktree and promote any durable result into
+    # policy, SPEC, architecture, ADR, source, or tests beside the owned code.
+    # Matching is recursive and extension-agnostic: ** spans path segments and
+    # path.Match syntax applies within each segment.
+    # See AGENTS.md "Living Documentation Policy" for the full policy.
+    - "**/[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh]/**"
+    - "**/docs/**/*-[Pp][Ll][Aa][Nn].*"
+    - "**/[Rr][Oo][Aa][Dd][Mm][Aa][Pp].*"
+    - "**/*-[Rr][Oo][Aa][Dd][Mm][Aa][Pp].*"
+    - "**/[Bb][Aa][Cc][Kk][Ll][Oo][Gg].*"
+    - "**/*-[Bb][Aa][Cc][Kk][Ll][Oo][Gg].*"
+    - "**/*-[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh].*"
+    - "**/*-[Rr][Ee][Pp][Oo][Rr][Tt].*"
     - docs/retros/**
     - docs/design/**
     - wf/**

@@ -60,9 +60,8 @@ requires a follow-up ADR quoting the decision number.
   an authoring UI is not in scope.
 - **D12. MVS = D2 + D3 + D4 + D5(budget) ships first.** The Minimum
   Viable Substrate is the smallest cut that satisfies all five substrate
-  properties by default. The phased plan tracks in
-  [ROADMAP.md](../../ROADMAP.md) and
-  [docs/workflow-engine/BACKLOG.md](../workflow-engine/BACKLOG.md).
+  properties by default. Completed delivery is visible in Git history and
+  current follow-up work is tracked in Beads.
 
 ### Alternatives rejected
 

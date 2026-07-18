@@ -180,7 +180,7 @@ func FormatResult(r GuardResult, w io.Writer) {
 			}
 			fmt.Fprintf(w, "  ✗ %s — %s (%s)\n", f.Target, label, f.Deployed)
 		}
-		fmt.Fprintf(w, "The fix is on main but never reached the machine (see docs/drift-detection-plan.md).\n")
+		fmt.Fprintln(w, "The fix is on main but never reached the machine; see cmd/drift-check/README.md.")
 		fmt.Fprintf(w, "To fix, redeploy then re-close:\n")
 		for _, cmd := range dedupRemediations(r.DriftFindings) {
 			fmt.Fprintf(w, "  • %s\n", cmd)

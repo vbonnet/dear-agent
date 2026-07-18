@@ -1,12 +1,9 @@
 // Command routing-guard blocks temporal artifacts from this code repo.
 //
-// Wayfinder SDLC runs (W0/D1-D4/S4-S11, WAYFINDER-STATUS.md,
-// WAYFINDER-HISTORY.md, .wayfinder/ runs), retros, designs, and research are
-// temporal: they capture a moment of thinking, are not maintained as the code
-// evolves, and belong in the knowledge base (~/src/engram-research,
-// conventionally wf/<project>/) — never in this code repo. The Wayfinder TOOL
-// SOURCE (wayfinder/, *.go, validator testdata, docs/adr/ADR-035) is living
-// code/docs and is deliberately not matched.
+// Wayfinder runs, retros, designs, research, plans, roadmaps, backlogs, and
+// reports are temporal: they capture a moment of thinking and belong in an
+// engram-research worktree, never in this code repo. Current policy, SPEC,
+// architecture, ADR, source, and tests remain beside their owned code.
 //
 // The forbidden globs are the SINGLE source of truth in .dear-agent.yml >
 // forbidden-paths. This tool reads them at runtime, so the rule can never
@@ -74,6 +71,17 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "routing-guard:", err)
 		os.Exit(2)
+	}
+	if len(exempt) > 0 {
+		tracked, trackedErr := gitLines(root, "ls-files")
+		if trackedErr != nil {
+			fmt.Fprintln(os.Stderr, "routing-guard: baseline validation:", trackedErr)
+			os.Exit(2)
+		}
+		if err := validateBaseline(exempt, tracked); err != nil {
+			fmt.Fprintln(os.Stderr, "routing-guard:", err)
+			os.Exit(2)
+		}
 	}
 
 	var violations []string
@@ -184,37 +192,63 @@ func gatherFiles(root, mode, operand string) ([]string, error) {
 }
 
 // forbidden reports whether a repo-relative path matches any forbidden glob.
-// Supported glob shapes (matching the patterns used in .dear-agent.yml):
-//
-//	prefix/**   → any file under the directory prefix
-//	**/mid/**   → path contains the /mid/ segment
-//	**/NAME     → basename matches NAME (NAME may itself contain *)
-//	plain       → path.Match against the whole path (single-level *)
+// A ** segment consumes zero or more complete path segments. Every other
+// segment uses path.Match syntax, so matching never crosses a slash.
 func forbidden(p string, patterns []string) bool {
 	for _, pat := range patterns {
-		switch {
-		case strings.HasPrefix(pat, "**/") && strings.HasSuffix(pat, "/**"):
-			mid := strings.TrimSuffix(strings.TrimPrefix(pat, "**/"), "/**")
-			if strings.Contains("/"+p+"/", "/"+mid+"/") {
-				return true
-			}
-		case strings.HasSuffix(pat, "/**"):
-			pre := strings.TrimSuffix(pat, "/**")
-			if p == pre || strings.HasPrefix(p, pre+"/") {
-				return true
-			}
-		case strings.HasPrefix(pat, "**/"):
-			name := strings.TrimPrefix(pat, "**/")
-			if ok, _ := path.Match(name, path.Base(p)); ok {
-				return true
-			}
-		default:
-			if ok, _ := path.Match(pat, p); ok {
-				return true
-			}
+		if globPathMatch(pat, p) {
+			return true
 		}
 	}
 	return false
+}
+
+func globPathMatch(pattern, name string) bool {
+	pattern = strings.Trim(path.Clean(pattern), "/")
+	name = strings.Trim(path.Clean(name), "/")
+	patternParts := strings.Split(pattern, "/")
+	nameParts := strings.Split(name, "/")
+	type state struct{ pattern, name int }
+	memo := map[state]bool{}
+	seen := map[state]bool{}
+
+	var match func(int, int) bool
+	match = func(patternIndex, nameIndex int) bool {
+		key := state{pattern: patternIndex, name: nameIndex}
+		if seen[key] {
+			return memo[key]
+		}
+		seen[key] = true
+
+		var result bool
+		switch {
+		case patternIndex == len(patternParts):
+			result = nameIndex == len(nameParts)
+		case patternParts[patternIndex] == "**":
+			result = match(patternIndex+1, nameIndex) ||
+				(nameIndex < len(nameParts) && match(patternIndex, nameIndex+1))
+		case nameIndex < len(nameParts):
+			segmentMatch, _ := path.Match(patternParts[patternIndex], nameParts[nameIndex])
+			result = segmentMatch && match(patternIndex+1, nameIndex+1)
+		}
+		memo[key] = result
+		return result
+	}
+
+	return match(0, 0)
+}
+
+func validateBaseline(exempt map[string]bool, tracked []string) error {
+	trackedSet := make(map[string]bool, len(tracked))
+	for _, name := range tracked {
+		trackedSet[name] = true
+	}
+	for name := range exempt {
+		if !trackedSet[name] {
+			return fmt.Errorf("baseline contains untracked path %q", name)
+		}
+	}
+	return nil
 }
 
 func report(violations []string) {
@@ -228,11 +262,11 @@ func report(violations []string) {
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "These belong in the knowledge base instead:")
-	fmt.Fprintln(w, "  Wayfinder runs / retros / designs  ->  ~/src/engram-research/wf/<project>/")
+	fmt.Fprintln(w, "  Use an engram-research worktree under its audit, project, retro, or wf directory.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "How to fix:")
 	fmt.Fprintln(w, "  1. git rm --cached the file(s) and remove them from this repo.")
-	fmt.Fprintln(w, "  2. Move the content to engram-research (open a PR there).")
+	fmt.Fprintln(w, "  2. Move the content through an engram-research worktree (open a PR there).")
 	fmt.Fprintln(w, "  3. Re-commit here without the artifact.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Why: temporal artifacts rot in code repos — they go stale silently,")

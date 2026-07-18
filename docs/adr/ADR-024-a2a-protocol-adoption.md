@@ -19,9 +19,6 @@ Builds on / aligns with:
 - [agm ADR-019: A2A Agent Cards from Manifests](../../agm/docs/adr/ADR-019-a2a-agent-cards.md)
   — already adopted the A2A *AgentCard* format for session discovery; this
   ADR generalises the choice to the full task protocol.
-- [ADR-023: Friction Reporting and Session Handoff](ADR-023-friction-reporting-and-session-handoff.md)
-  — friction reports and handoff messages travel as A2A artifacts on the
-  same fabric.
 
 ---
 

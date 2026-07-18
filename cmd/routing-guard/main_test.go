@@ -8,8 +8,14 @@ import (
 
 // The forbidden globs as declared in .dear-agent.yml > forbidden-paths.
 var testPatterns = []string{
-	"research/*.md",
-	"research/*.txt",
+	"**/[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh]/**",
+	"**/docs/**/*-[Pp][Ll][Aa][Nn].*",
+	"**/[Rr][Oo][Aa][Dd][Mm][Aa][Pp].*",
+	"**/*-[Rr][Oo][Aa][Dd][Mm][Aa][Pp].*",
+	"**/[Bb][Aa][Cc][Kk][Ll][Oo][Gg].*",
+	"**/*-[Bb][Aa][Cc][Kk][Ll][Oo][Gg].*",
+	"**/*-[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh].*",
+	"**/*-[Rr][Ee][Pp][Oo][Rr][Tt].*",
 	"docs/retros/**",
 	"docs/design/**",
 	"wf/**",
@@ -36,6 +42,12 @@ func TestForbidden(t *testing.T) {
 		{"docs/design/y.md", true},
 		{"research/notes.md", true},
 		{"research/data.txt", true},
+		{"packages/a/Research/raw-data.json", true},
+		{"agm/docs/nested/release-plan.rst", true},
+		{"ROADMAP.yaml", true},
+		{"notes/team-backlog.toml", true},
+		{"reports/incident-research.pdf", true},
+		{"reports/incident-report.html", true},
 		// Wayfinder TOOL SOURCE and living docs — must NOT be blocked.
 		{"wayfinder/SKILL.md", false},
 		{"wayfinder/SPEC.md", false},
@@ -46,10 +58,32 @@ func TestForbidden(t *testing.T) {
 		{"internal/telemetry/wayfinder_roi_logger.go", false},
 		{"README.md", false},
 		{"cmd/routing-guard/main.go", false},
+		{".github/workflows/tofu-plan.yml", false},
+		{"agm/test/integration/plan_continuity_test.go", false},
 	}
 	for _, c := range cases {
 		if got := forbidden(c.path, testPatterns); got != c.want {
 			t.Errorf("forbidden(%q) = %v, want %v", c.path, got, c.want)
+		}
+	}
+}
+
+func TestGlobPathMatch(t *testing.T) {
+	cases := []struct {
+		pattern string
+		path    string
+		want    bool
+	}{
+		{"**/docs/**/*-plan.*", "docs/release-plan.md", true},
+		{"**/docs/**/*-plan.*", "agm/docs/ops/release-plan.rst", true},
+		{"**/docs/**/*-plan.*", "agm/ops/release-plan.rst", false},
+		{"**/research/**", "research/note.any", true},
+		{"**/research/**", "a/research/nested/data.json", true},
+		{"docs/design/**", "docs/design.md", false},
+	}
+	for _, c := range cases {
+		if got := globPathMatch(c.pattern, c.path); got != c.want {
+			t.Errorf("globPathMatch(%q, %q) = %v, want %v", c.pattern, c.path, got, c.want)
 		}
 	}
 }
@@ -99,5 +133,39 @@ func TestLoadBaseline(t *testing.T) {
 	// Empty baseline path → empty (non-nil) set, no error.
 	if g, err := loadBaseline(""); err != nil || g == nil {
 		t.Errorf("loadBaseline(\"\") = (%v, %v), want (non-nil, nil)", g, err)
+	}
+}
+
+func TestValidateBaselineRejectsUntrackedPaths(t *testing.T) {
+	tracked := []string{"docs/design/existing.md"}
+	if err := validateBaseline(map[string]bool{"docs/design/existing.md": true}, tracked); err != nil {
+		t.Fatalf("tracked baseline rejected: %v", err)
+	}
+	if err := validateBaseline(map[string]bool{"docs/design/missing.md": true}, tracked); err == nil {
+		t.Fatal("untracked baseline path accepted")
+	}
+}
+
+func TestRepositoryTreeHasNoTemporalDebt(t *testing.T) {
+	root := filepath.Clean(filepath.Join("..", ".."))
+	patterns, err := loadPatterns(filepath.Join(root, ".dear-agent.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	exempt, err := loadBaseline(filepath.Join(root, ".forbidden-artifacts-baseline.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracked, err := gitLines(root, "ls-files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateBaseline(exempt, tracked); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range tracked {
+		if forbidden(name, patterns) && !exempt[name] {
+			t.Errorf("tracked temporal artifact: %s", name)
+		}
 	}
 }
