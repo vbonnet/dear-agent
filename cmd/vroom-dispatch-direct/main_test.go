@@ -335,7 +335,10 @@ func TestDispatch(t *testing.T) {
 	defer func() { spawnSession, sendPrompt = origSpawn, origSend }()
 
 	var spawned, sent string
-	spawnSession = func(ctx context.Context, name string, cfg workerLaunchConfig, repoDir string) error { spawned = name; return nil }
+	spawnSession = func(ctx context.Context, name string, cfg workerLaunchConfig, repoDir string) error {
+		spawned = name
+		return nil
+	}
 	sendPrompt = func(ctx context.Context, name, prompt string) error { sent = name; return nil }
 
 	b := bead{ID: "ce-test", Title: "T", Priority: 1}
@@ -374,7 +377,10 @@ func TestDispatchDottedBeadSpawnsSanitizedName(t *testing.T) {
 	defer func() { spawnSession, sendPrompt = origSpawn, origSend }()
 
 	var spawned, sent, sentPrompt string
-	spawnSession = func(ctx context.Context, name string, cfg workerLaunchConfig, repoDir string) error { spawned = name; return nil }
+	spawnSession = func(ctx context.Context, name string, cfg workerLaunchConfig, repoDir string) error {
+		spawned = name
+		return nil
+	}
 	sendPrompt = func(ctx context.Context, name, prompt string) error {
 		sent, sentPrompt = name, prompt
 		return nil
