@@ -20,16 +20,18 @@ import (
 )
 
 const (
-	defaultTimeout = 30 * time.Second
-	envRemote      = "AGM_CODEX_REMOTE"
+	defaultTimeout        = 30 * time.Second
+	defaultRemoteEndpoint = "unix://"
+	envRemote             = "AGM_CODEX_REMOTE"
 	// #nosec G101 -- this is the name of an environment variable, not a credential.
 	envRemoteToken = "AGM_CODEX_REMOTE_AUTH_TOKEN_ENV"
 )
 
 var (
-	archiveCodexThreadFn = archiveCodexThread
-	newThreadArchiver    = func() codexThreadArchiver { return codexcontrol.New() }
-	runCodexArchiveFn    = runCodexArchive
+	archiveCodexThreadFn    = archiveCodexThread
+	newThreadArchiver       = func() codexThreadArchiver { return codexcontrol.New() }
+	runCodexArchiveFn       = runCodexArchive
+	runCodexRemoteArchiveFn = runCodexRemoteArchive
 )
 
 // codexThreadArchiver deliberately exposes only the session-scoped archive
@@ -116,8 +118,10 @@ func Archive(ctx context.Context, req Request) (*Result, error) {
 func archiveCodexThread(ctx context.Context, threadID string) error {
 	if err := newThreadArchiver().ArchiveThread(ctx, threadID); err == nil {
 		return nil
+	} else if ctx.Err() != nil {
+		return err
 	}
-	return runCodexArchiveFn(ctx, threadID)
+	return runCodexRemoteArchiveFn(ctx, threadID)
 }
 
 func (r Request) candidateDirs() []string {
@@ -129,11 +133,19 @@ func (r Request) candidateDirs() []string {
 }
 
 func runCodexArchive(ctx context.Context, target string) error {
+	return runCodexArchiveWithRemote(ctx, target, os.Getenv(envRemote))
+}
+
+func runCodexRemoteArchive(ctx context.Context, target string) error {
+	return runCodexArchiveWithRemote(ctx, target, firstNonEmpty(os.Getenv(envRemote), defaultRemoteEndpoint))
+}
+
+func runCodexArchiveWithRemote(ctx context.Context, target, remote string) error {
 	timeoutCtx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 
 	args := []string{"archive"}
-	if remote := os.Getenv(envRemote); remote != "" {
+	if remote != "" {
 		args = append(args, "--remote", remote)
 		if tokenEnv := os.Getenv(envRemoteToken); tokenEnv != "" {
 			args = append(args, "--remote-auth-token-env", tokenEnv)
