@@ -177,11 +177,16 @@ var listSessions = func(ctx context.Context) ([]string, error) {
 // runs to a whitespace or end-of-token boundary so trailing status columns in the
 // `agm session list` output do not bleed into the captured id.
 //
-// "worker-" must sit at the start of a line or field (anchored to line-start or
-// preceding whitespace) rather than a bare \b word boundary: dispatched sessions
-// are named exactly "worker-<id>", so a hyphen-joined name like "my-worker-x" or
-// "subworker-x" is a different session and must NOT be read as a live worker.
-var workerSessionRe = regexp.MustCompile(`(?m)(?:^|\s)worker-([A-Za-z0-9.-]+)`)
+// "worker-" must sit at the start of a line or field rather than a bare \b word
+// boundary: dispatched sessions are named exactly "worker-<id>", so a
+// hyphen-joined name like "my-worker-x" or "subworker-x" is a different session
+// and must NOT be read as a live worker. The delimiter class [^\w-] matches any
+// non-word, non-hyphen char, so "worker-" is recognized whether it follows
+// whitespace (the legacy text `agm session list`) OR a JSON delimiter like the
+// quote in `"name":"worker-ce-x"` (agent-mode JSON is now the default in the
+// non-TTY dispatch context) — while still excluding the alphanumeric before
+// "subworker" and the hyphen before "my-worker".
+var workerSessionRe = regexp.MustCompile(`(?m)(?:^|[^\w-])worker-([A-Za-z0-9.-]+)`)
 
 // normalizeSessionID maps a bead id to its tmux-safe form: dots, colons and
 // spaces become dashes. This mirrors agm's tmux.NormalizeTmuxSessionName
