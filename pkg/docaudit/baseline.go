@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -65,7 +66,8 @@ func loadBaselineAtRef(ctx context.Context, root, ref, baselinePath string) ([]B
 	exists := exec.CommandContext(ctx, "git", "cat-file", "-e", object)
 	exists.Dir = root
 	if err := exists.Run(); err != nil {
-		if _, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			return nil, false, nil
 		}
 		return nil, false, fmt.Errorf("docaudit: inspect baseline at %q: %w", ref, err)

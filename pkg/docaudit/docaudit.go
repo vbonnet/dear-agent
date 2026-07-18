@@ -11,13 +11,20 @@ import (
 type FindingKind string
 
 const (
-	MissingMarker   FindingKind = "missing-marker"
-	NeedsAudit      FindingKind = "needs-audit"
+	// MissingMarker means no audit-marker prefix exists in the document.
+	MissingMarker FindingKind = "missing-marker"
+	// NeedsAudit means the document explicitly carries the debt placeholder.
+	NeedsAudit FindingKind = "needs-audit"
+	// MalformedMarker means the marker is present but not canonical.
 	MalformedMarker FindingKind = "malformed-marker"
+	// DuplicateMarker means the document contains more than one marker.
 	DuplicateMarker FindingKind = "duplicate-marker"
-	InvalidDate     FindingKind = "invalid-date"
-	FutureDate      FindingKind = "future-date"
-	StaleDate       FindingKind = "stale-date"
+	// InvalidDate means the canonical-looking date is not a calendar date.
+	InvalidDate FindingKind = "invalid-date"
+	// FutureDate means the audit date is after the configured as-of date.
+	FutureDate FindingKind = "future-date"
+	// StaleDate means the audit date exceeds its surface maximum age.
+	StaleDate FindingKind = "stale-date"
 )
 
 var knownFindingKinds = map[FindingKind]bool{

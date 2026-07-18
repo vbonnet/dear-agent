@@ -83,7 +83,7 @@ func validatePolicy(policy Policy) error {
 }
 
 func validateGlob(pattern string) error {
-	for _, segment := range strings.Split(strings.Trim(path.Clean(pattern), "/"), "/") {
+	for segment := range strings.SplitSeq(strings.Trim(path.Clean(pattern), "/"), "/") {
 		if segment == "**" {
 			continue
 		}

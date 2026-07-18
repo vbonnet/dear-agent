@@ -12,7 +12,7 @@ var canonicalMarker = regexp.MustCompile(`^<!-- Last audited at: ([0-9]{4}-[0-9]
 
 func classifyMarker(data []byte, maxAgeDays int, asOf time.Time) FindingKind {
 	markerLines := make([]string, 0, 1)
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSuffix(line, "\r")
 		if strings.Contains(line, markerPrefix) {
 			markerLines = append(markerLines, line)
