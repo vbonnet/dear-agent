@@ -41,6 +41,12 @@ harness when a supervisor is stale.
 
 **VD-14** When `vroom-dispatch` resolves a supervisor heartbeat filename, the system shall use the compact alias from the canonical supervisor topology.
 
+**VD-15** When supervisor instructions encounter a permission prompt, the system shall delegate approval only to the typed cross-check classifier and shall not provide a manual approval fallback.
+
+**VD-16** When the Orchestrator selects work, the system shall dispatch directly from Beads through `vroom-dispatch-direct` and shall not consume roadmap, dispatch-ledger, deploy-ledger, or prompt-file projections.
+
+**VD-17** When a supervisor evaluates completion, the system shall require evidence that the change is merged, deployed when applicable, and verified before closing its bead.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

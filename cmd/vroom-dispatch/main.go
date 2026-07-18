@@ -65,35 +65,24 @@ var supervisors = []supervisor{
 		Model:        defaultSupervisorModel,
 		SkillFile:    "meta-orchestrator.md",
 		TickInterval: 180 * time.Second,
-		TickPrompt: "Execute your Meta-Orchestrator tick: " +
-			"1) check peer heartbeats 2) read open beads via bd --db ~/beads/context-engine/.beads list --state=open --format=json " +
-			"3) read current roadmap 4) evaluate new beads for roadmap 5) verify Orch dispatch activity " +
-			"6) write heartbeat.",
+		TickPrompt: "Read ~/.agm/vroom/skills/protocol.md and ~/.agm/vroom/skills/meta-orchestrator.md, " +
+			"then execute exactly one resilient Meta-Orchestrator tick.",
 	}),
 	supervisorForRole(vroomsupervisor.RoleOrchestrator, supervisor{
 		Harness:      "codex-cli",
 		Model:        "gpt-5.5",
 		SkillFile:    "orchestrator.md",
 		TickInterval: 90 * time.Second,
-		TickPrompt: "Execute your Orchestrator tick: " +
-			"1) check peer heartbeats 2) read accepted roadmap items " +
-			"3) dispatch undispatched work to worker sessions via agm session new " +
-			"4) monitor active workers 5) detect stale items " +
-			"6) write heartbeat.",
+		TickPrompt: "Read ~/.agm/vroom/skills/protocol.md and ~/.agm/vroom/skills/orchestrator.md, " +
+			"then execute exactly one resilient Orchestrator tick.",
 	}),
 	supervisorForRole(vroomsupervisor.RoleOverseer, supervisor{
 		Harness:      "agy",
 		Model:        "2.5-flash",
 		SkillFile:    "overseer.md",
 		TickInterval: 60 * time.Second,
-		TickPrompt: "Execute your Overseer tick: " +
-			"1) check peer heartbeats 2) probe system resources by running `agm supervisor probe` " +
-			"(measures disk, memory, swap, FDs, vnodes, gopls and logs kind \"overseer.resource.probe\" to ~/.agm/vroom/trail.jsonl) " +
-			"3) audit session health 4) reconcile stale beads " +
-			"5) audit worktrees 6) verify Meta-O activity " +
-			"7) verify binary freshness (agm admin verify-deployment) " +
-			"8) audit deployed-artifact drift (dear-deploy status --json --repo-root ~/src/dear-agent) " +
-			"9) write heartbeat.",
+		TickPrompt: "Read ~/.agm/vroom/skills/protocol.md and ~/.agm/vroom/skills/overseer.md, " +
+			"then execute exactly one resilient Overseer tick.",
 	}),
 }
 
