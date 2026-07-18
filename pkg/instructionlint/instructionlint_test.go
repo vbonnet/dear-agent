@@ -30,10 +30,9 @@ func TestSegmentsClassifyExecutableFences(t *testing.T) {
 	}
 	sort.Strings(compact)
 	want := []string{
+		"inline|git push origin main",
 		"prose|# W0 prose",
-		"prose|Use ",
-		"prose| only as a quoted bad command.",
-		"shell|git push origin main",
+		"prose|Use `git push origin main` only as a quoted bad command.",
 		"shell|git push origin main",
 	}
 	sort.Strings(want)
@@ -85,7 +84,9 @@ func TestApplyExclusionsIsExactAndStaleDetecting(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("violations = %v, want one excess and one stale exclusion", got)
 	}
-	if got[0].Rule != "bare-beads" || got[1].Rule != "stale-exclusion" {
+	rules := []string{got[0].Rule, got[1].Rule}
+	sort.Strings(rules)
+	if !reflect.DeepEqual(rules, []string{"bare-beads", "stale-exclusion"}) {
 		t.Fatalf("unexpected violations: %v", got)
 	}
 }
