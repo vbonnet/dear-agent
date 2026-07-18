@@ -15,6 +15,8 @@
 #     logs               where conversation logs / session transcripts go
 #   pr-policy            informational map of PR verbs -> sanctioned command
 #                        (mirrors the enforcement in .claude/settings.json)
+#   adr-governance       declared ADR directory scopes, self-contained
+#                        aggregates, review budget, and reasoned exclusions
 #   forbidden-paths      directories where new files of a given kind MUST NOT
 #                        be created in THIS repo. Maps kind -> list of globs
 #                        relative to repo root.
@@ -47,6 +49,54 @@ pr-policy:
   create: safe-pr   # safe-pr create --wayfinder <project-dir> --title … --body …
   close: safe-pr    # safe-pr close  --wayfinder <project-dir> <number|url>
   emergency: "safe-pr <verb> --emergency --reason \"<why>\"  # audited, never silent"
+
+# Architecture decisions have directory-scoped numeric identities. Every
+# numbered scope owns one complete index; aggregate ADR.md files are
+# self-contained. `make lint-adrs` rejects undeclared tracked ADR paths and
+# identity, lifecycle, index, size, supersession, or local-link drift.
+adr-governance:
+  max-record-lines: 250
+  scopes:
+    - path: docs/adr
+      index: README.md
+    - path: agm/docs/adr
+      index: README.md
+    - path: agm/cmd/agm
+      index: ADR-INDEX.md
+    - path: agm/cmd/agm-daemon/adr
+      index: README.md
+    - path: agm/cmd/agm-mcp-server/adr
+      index: README.md
+    - path: agm/internal/dolt/adr
+      index: README.md
+    - path: agm/internal/evaluation/ADR
+      index: README.md
+    - path: agm/internal/tmux
+      index: ADR-INDEX.md
+    - path: engram/cmd/engram
+      index: ADR-INDEX.md
+    - path: engram/retrieval/docs/adrs
+      index: README.md
+    - path: pkg/engram/docs/adrs
+      index: README.md
+    - path: pkg/llm/docs
+      index: ADR-INDEX.md
+    - path: tools/dod-enforcer/adr
+      index: README.md
+  aggregates:
+    - path: engram/ecphory/ADR.md
+    - path: engram/ecphory/ranking/ADR.md
+    - path: pkg/hash/ADR.md
+    - path: pkg/monitoring/ADR.md
+    - path: pkg/telemetry/ADR.md
+    - path: tools/devlog/ADR.md
+  exclusions:
+    - match: "**/testdata/**"
+      reason: generated or parser fixture, not a living architectural decision
+    - match: "**/vendor/**"
+      reason: vendored third-party content is outside repository governance
+    - match: "**/node_modules/**"
+      reason: generated dependency content is outside repository governance
 
 forbidden-paths:
   research:
