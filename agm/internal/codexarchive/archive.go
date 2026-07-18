@@ -118,6 +118,8 @@ func Archive(ctx context.Context, req Request) (*Result, error) {
 func archiveCodexThread(ctx context.Context, threadID string) error {
 	if err := newThreadArchiver().ArchiveThread(ctx, threadID); err == nil {
 		return nil
+	} else if ctx.Err() != nil {
+		return err
 	}
 	return runCodexRemoteArchiveFn(ctx, threadID)
 }

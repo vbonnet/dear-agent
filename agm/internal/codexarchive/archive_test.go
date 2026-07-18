@@ -2,6 +2,7 @@ package codexarchive
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,6 +91,28 @@ func TestArchiveCodexThreadFallsBackThroughUnixRemote(t *testing.T) {
 	want := "archive --remote unix:// thread-456"
 	if args != want {
 		t.Fatalf("codex args = %q, want %q", args, want)
+	}
+}
+
+func TestArchiveCodexThreadDoesNotFallBackAfterContextCancellation(t *testing.T) {
+	origArchiver := newThreadArchiver
+	origFallback := runCodexRemoteArchiveFn
+	t.Cleanup(func() {
+		newThreadArchiver = origArchiver
+		runCodexRemoteArchiveFn = origFallback
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	newThreadArchiver = func() codexThreadArchiver { return failingThreadArchiver{} }
+	runCodexRemoteArchiveFn = func(context.Context, string) error {
+		t.Fatal("CLI fallback must not run after context cancellation")
+		return nil
+	}
+
+	err := archiveCodexThread(ctx, "thread-789")
+	if !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("archiveCodexThread() error = %v, want original archive error", err)
 	}
 }
 
