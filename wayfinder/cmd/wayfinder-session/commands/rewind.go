@@ -21,10 +21,10 @@ var (
 // RewindCmd is the cobra command that rewinds the session to a previous phase.
 var RewindCmd = &cobra.Command{
 	Use:   "rewind-to <phase-name>",
-	Short: "Rewind to a previous phase in V2 sequence",
-	Long: `Rewind the V2 session to a previously completed phase.
+	Short: "Rewind to a previous phase in the canonical sequence",
+	Long: `Rewind the session to a previously completed phase.
 
-V2 Phase Sequence:
+Phase sequence:
   CHARTER → PROBLEM → RESEARCH → DESIGN → SPEC → PLAN → SETUP → BUILD → RETRO
 
 This will:
@@ -54,13 +54,13 @@ func runRewind(cmd *cobra.Command, args []string) error {
 	// Get project directory
 	projectDir := GetProjectDirectory()
 
-	// Read existing V2 STATUS from project directory
+	// Read existing canonical status from the project directory.
 	st, err := status.ParseV2FromDir(projectDir)
 	if err != nil {
-		return fmt.Errorf("failed to read V2 STATUS file: %w", err)
+		return fmt.Errorf("failed to read canonical status file: %w", err)
 	}
 
-	// Get all V2 phases
+	// Get the canonical phase sequence.
 	allPhases := status.AllPhasesV2Schema()
 
 	// Find target phase index
@@ -138,7 +138,7 @@ func runRewind(cmd *cobra.Command, args []string) error {
 	st.CurrentWaypoint = targetPhase
 	st.UpdatedAt = time.Now()
 
-	// Write updated V2 STATUS to project directory
+	// Write updated canonical status to the project directory.
 	if err := status.WriteV2ToDir(st, projectDir); err != nil {
 		return fmt.Errorf("failed to write STATUS file: %w", err)
 	}

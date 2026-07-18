@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,11 +26,11 @@ type wayfinderV2CommandState struct {
 func RegisterWayfinderV2CommandGuardrailSteps(ctx *godog.ScenarioContext) {
 	registerPackageSpecGuardrailSteps(ctx, packageSpecGuardrailConfig{
 		stateKey:          wayfinderV2CommandPackageStateKey{},
-		label:             "Wayfinder V2 command package",
+		label:             "Wayfinder command package",
 		featurePath:       wayfinderV2CommandFeaturePath,
-		configuredPattern: `^Wayfinder V2 command package "([^"]*)" is configured$`,
-		validatePattern:   `^AGM validates Wayfinder V2 command package coverage$`,
-		colocatedPattern:  `^Wayfinder V2 command package "([^"]*)" should have a co-located SPEC$`,
+		configuredPattern: `^Wayfinder command package "([^"]*)" is configured$`,
+		validatePattern:   `^AGM validates Wayfinder command package coverage$`,
+		colocatedPattern:  `^Wayfinder command package "([^"]*)" should have a co-located SPEC$`,
 	})
 
 	ctx.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
@@ -40,14 +41,15 @@ func RegisterWayfinderV2CommandGuardrailSteps(ctx *godog.ScenarioContext) {
 
 	ctx.Step(`^AGM inspects the Wayfinder root help contract$`, agmInspectsWayfinderRootHelp)
 	ctx.Step(`^Wayfinder help should name all nine canonical phases$`, wayfinderHelpNamesCanonicalPhases)
-	ctx.Step(`^Wayfinder help should expose the V2 session command$`, wayfinderHelpExposesV2Session)
-	ctx.Step(`^Wayfinder help should not expose retired V1 executors$`, wayfinderHelpOmitsRetiredExecutors)
-	ctx.Step(`^Wayfinder help should not expose legacy migration commands$`, wayfinderHelpOmitsLegacyMigrationCommands)
+	ctx.Step(`^Wayfinder help should expose the canonical session command$`, wayfinderHelpExposesV2Session)
+	ctx.Step(`^Wayfinder help should not expose retired root executors$`, wayfinderHelpOmitsRetiredExecutors)
+	ctx.Step(`^Wayfinder help should not expose retired compatibility commands$`, wayfinderHelpOmitsLegacyMigrationCommands)
 	ctx.Step(`^AGM audits Wayfinder command source policy$`, agmAuditsWayfinderCommandPolicy)
-	ctx.Step(`^retired V1 root and feature executors should be absent$`, retiredWayfinderExecutorsAreAbsent)
+	ctx.Step(`^retired root and feature executors should be absent$`, retiredWayfinderExecutorsAreAbsent)
 	ctx.Step(`^all Wayfinder session commands should parse only schema 2.0 status$`, normalWayfinderCommandsParseOnlyV2)
-	ctx.Step(`^Wayfinder runtime source should omit retired phase identifiers$`, nonMigrationRuntimeOmitsRetiredPhases)
+	ctx.Step(`^Wayfinder active corpus should omit retired phase identifiers$`, nonMigrationRuntimeOmitsRetiredPhases)
 	ctx.Step(`^Wayfinder phase enumeration should expose the nine named phases$`, unversionedPhasesDefaultToV2)
+	ctx.Step(`^Wayfinder plugin should expose one root skill$`, wayfinderPluginExposesOneRootSkill)
 }
 
 func agmInspectsWayfinderRootHelp(ctx context.Context) error {
@@ -197,11 +199,14 @@ func nonMigrationRuntimeOmitsRetiredPhases(ctx context.Context) (resultErr error
 	}
 	defer preserveRootCloseError(rootFS, &resultErr)
 	retired := regexp.MustCompile(`\b(W0|D1|D2|D3|D4|S4|S5|S6|S7|S8|S9|S10|S11|V1)\b|WayfinderV1|discovery\.(problem|solutions|approach|requirements)|design\.(tech-lead|security|qa)|roadmap\.(planning|breakdown|dependencies)`)
+	activeExtensions := map[string]bool{
+		".go": true, ".md": true, ".json": true, ".yaml": true, ".yml": true,
+	}
 	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+		if entry.IsDir() || !activeExtensions[filepath.Ext(path)] || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
 		rel, relErr := filepath.Rel(root, path)
@@ -213,10 +218,53 @@ func nonMigrationRuntimeOmitsRetiredPhases(ctx context.Context) (resultErr error
 			return readErr
 		}
 		if token := retired.FindString(string(data)); token != "" {
-			return fmt.Errorf("non-migration Wayfinder runtime %s contains retired phase token %s", rel, token)
+			return fmt.Errorf("active Wayfinder corpus %s contains retired phase token %s", rel, token)
 		}
 		return nil
 	})
+}
+
+func wayfinderPluginExposesOneRootSkill(ctx context.Context) error {
+	state, err := getWayfinderV2CommandState(ctx)
+	if err != nil {
+		return err
+	}
+	root := filepath.Join(state.repoRoot, "wayfinder")
+	if _, err := os.Stat(filepath.Join(root, "SKILL.md")); err != nil {
+		return fmt.Errorf("canonical root skill is missing: %w", err)
+	}
+	for _, retiredDir := range []string{"commands", "skills"} {
+		retiredPath := filepath.Join(root, retiredDir)
+		if _, err := os.Stat(retiredPath); os.IsNotExist(err) {
+			continue
+		}
+		if err := filepath.WalkDir(retiredPath, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if !entry.IsDir() {
+				return fmt.Errorf("duplicate or retired plugin surface remains: %s", path)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	manifestPath := filepath.Join(root, ".claude-plugin", "plugin.json")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return err
+	}
+	var manifest map[string]json.RawMessage
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return fmt.Errorf("parse Wayfinder plugin manifest: %w", err)
+	}
+	for _, duplicateField := range []string{"commands", "skills"} {
+		if _, exists := manifest[duplicateField]; exists {
+			return fmt.Errorf("Wayfinder manifest overrides auto-discovered root skill with %q", duplicateField)
+		}
+	}
+	return nil
 }
 
 func preserveRootCloseError(rootFS *os.Root, resultErr *error) {

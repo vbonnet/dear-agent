@@ -41,7 +41,7 @@ func runEndInDir(projectDir, newStatus string) error {
 	return runEndV2(projectDir, newStatus)
 }
 
-// runEndV2 handles V2 WAYFINDER-STATUS.md files (project_name/created_at schema).
+// runEndV2 handles canonical WAYFINDER-STATUS.md files.
 func runEndV2(projectDir, newStatus string) error {
 	validStatuses := map[string]bool{
 		status.StatusV2Completed: true,
@@ -54,7 +54,7 @@ func runEndV2(projectDir, newStatus string) error {
 
 	st, err := status.ParseV2FromDir(projectDir)
 	if err != nil {
-		return fmt.Errorf("failed to read V2 STATUS file: %w", err)
+		return fmt.Errorf("failed to read canonical status file: %w", err)
 	}
 
 	now := time.Now()
@@ -89,7 +89,7 @@ func runEndV2(projectDir, newStatus string) error {
 
 	duration := now.Sub(startedAt)
 
-	fmt.Printf("✅ Wayfinder V2 session ended\n")
+	fmt.Printf("✅ Wayfinder session ended\n")
 	fmt.Printf("Project: %s\n", st.ProjectName)
 	fmt.Printf("Duration: %s\n", formatDuration(duration))
 	fmt.Printf("Status: %s\n", newStatus)

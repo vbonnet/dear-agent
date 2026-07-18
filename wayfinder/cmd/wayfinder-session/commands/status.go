@@ -11,7 +11,7 @@ import (
 var StatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show Wayfinder session status",
-	Long: `Show the canonical Wayfinder V2 session status.
+	Long: `Show the canonical Wayfinder session status.
 
 Example:
 	wayfinder session status`,
@@ -22,7 +22,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	projectDir := GetProjectDirectory()
 	currentStatus, err := status.ParseV2FromDir(projectDir)
 	if err != nil {
-		return fmt.Errorf("failed to read canonical V2 status: %w", err)
+		return fmt.Errorf("failed to read canonical status: %w", err)
 	}
 
 	// Display status

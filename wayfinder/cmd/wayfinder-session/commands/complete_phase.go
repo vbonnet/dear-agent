@@ -67,7 +67,7 @@ func runCompletePhase(cmd *cobra.Command, args []string) (retErr error) {
 
 	st, err := status.ParseV2FromDir(projectDir)
 	if err != nil {
-		return fmt.Errorf("failed to read canonical V2 STATUS file: %w", err)
+		return fmt.Errorf("failed to read canonical status file: %w", err)
 	}
 
 	// Initialize history logger

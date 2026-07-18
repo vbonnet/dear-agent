@@ -13,7 +13,7 @@ var NextPhaseCmd = &cobra.Command{
 	Short: "Get the next phase in the sequence",
 	Long: `Read WAYFINDER-STATUS.md and output the next phase.
 
-Works with the canonical V2 sequence (CHARTER through RETRO).
+Works with the canonical sequence (CHARTER through RETRO).
 Returns the current phase if it is not yet completed.
 Returns an error if already at the final phase.
 

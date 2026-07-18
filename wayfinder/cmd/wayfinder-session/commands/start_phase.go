@@ -73,7 +73,7 @@ func runStartPhase(cmd *cobra.Command, args []string) (retErr error) {
 
 	st, err := status.ParseV2FromDir(projectDir)
 	if err != nil {
-		return fmt.Errorf("failed to read canonical V2 STATUS file: %w", err)
+		return fmt.Errorf("failed to read canonical status file: %w", err)
 	}
 
 	// Initialize history logger
@@ -145,7 +145,7 @@ func runStartPhase(cmd *cobra.Command, args []string) (retErr error) {
 
 // ensureSessionBead files a tracking bead for the session if it has none yet,
 // recording the new id on the status so it is persisted by the WriteTo that
-// follows. Bead tracking lives in the V2 schema (StatusV2.Beads); for any other
+// follows. Bead tracking lives in canonical status (StatusV2.Beads); for any other
 // status version this is a no-op. Failures (bd absent, create error) warn and
 // continue — a missing tracker must never block a phase transition.
 func ensureSessionBead(ctx context.Context, st *status.StatusV2) {

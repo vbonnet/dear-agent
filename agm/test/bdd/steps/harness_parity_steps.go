@@ -201,7 +201,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^harness "([^"]*)" should have a Wayfinder discovery surface$`, harnessShouldHaveWayfinderDiscoverySurface)
 	ctx.Step(`^harness "([^"]*)" should have a Wayfinder execution surface$`, harnessShouldHaveWayfinderExecutionSurface)
 	ctx.Step(`^AGM validates Wayfinder asset parity$`, agmValidatesWayfinderAssetParity)
-	ctx.Step(`^Wayfinder should publish SKILL, plugin, command, and MCP status surfaces$`, wayfinderShouldPublishSkillPluginCommandAndMCPStatusSurfaces)
+	ctx.Step(`^Wayfinder should publish SKILL, plugin, CLI, and MCP status surfaces$`, wayfinderShouldPublishSkillPluginCommandAndMCPStatusSurfaces)
 	ctx.Step(`^AGM validates Wayfinder phase Engram parity$`, agmValidatesWayfinderPhaseEngramParity)
 	ctx.Step(`^Wayfinder should resolve phase Engrams without harness-specific state$`, wayfinderShouldResolvePhaseEngramsWithoutHarnessSpecificState)
 	ctx.Step(`^AGM validates configuration directory parity$`, agmValidatesConfigurationDirectoryParity)

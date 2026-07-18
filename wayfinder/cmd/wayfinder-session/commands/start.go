@@ -28,7 +28,7 @@ Flags:
   --project-type   Project type: feature, research, infrastructure, refactor, bugfix (default: feature)
   --risk-level     Risk level: XS, S, M, L, XL (default: M)
 
-V2 Schema (9 phases):
+Canonical schema (9 phases):
   CHARTER  - Intake & Waypoint
   PROBLEM  - Discovery & Context
   RESEARCH - Investigation & Options
@@ -91,12 +91,12 @@ func runStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Get V2 schema flags
+	// Get canonical schema flags.
 	projectType, _ := cmd.Flags().GetString("project-type")
 	riskLevel, _ := cmd.Flags().GetString("risk-level")
 	skipRoadmap, _ := cmd.Flags().GetBool("skip-roadmap")
 
-	// Create new V2 status
+	// Create canonical status.
 	st := status.NewStatusV2(projectName, projectType, riskLevel)
 	st.SkipRoadmap = skipRoadmap
 
@@ -122,7 +122,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		// Continue anyway - tracking is non-critical
 	}
 
-	// Write V2 STATUS file to project directory
+	// Write canonical status to the project directory.
 	if err := status.WriteV2ToDir(st, projectDir); err != nil {
 		return fmt.Errorf("failed to write STATUS file: %w", err)
 	}
@@ -139,7 +139,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 
 	// Success message
-	fmt.Printf("✅ Wayfinder V2 session started\n")
+	fmt.Printf("✅ Wayfinder session started\n")
 	fmt.Printf("Project: %s\n", projectName)
 	fmt.Printf("Type: %s | Risk: %s | Profile: %s\n", projectType, riskLevel, profile.Profile)
 	if len(st.SkipPhases) > 0 {
