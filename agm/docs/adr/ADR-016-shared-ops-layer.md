@@ -4,6 +4,15 @@
 **Date:** 2026-03-23
 **Context:** AGM API unification (agm-api swarm)
 
+> **Implementation status (2026-07-17).** Internal session archival now has a
+> single durable implementation. Immediate CLI archive, bulk archive, GC, and
+> the asynchronous reaper all call `ops.ArchiveSession`; the bulk command only
+> selects candidates and aggregates results, while the reaper only owns its
+> crash-recovery `reaping` tombstone and process-stop phase before delegating
+> the final transition. `agm session archive-ui` remains a distinct operation
+> and namespace per ADR-026 because it reconciles Claude UI records rather than
+> AGM lifecycle storage.
+
 ## Problem
 
 AGM exposes three API surfaces — CLI (Cobra), MCP (JSON-RPC), and Skills (markdown) — but they had independent implementations with different behavior:
@@ -29,6 +38,15 @@ Skills (.md)   →  CLI --json    →  internal/ops  →  Dolt Storage
 3. **Field masks**: `ApplyFieldMask()` filters JSON output to requested fields, reducing token consumption
 4. **Typed request/result structs**: Every operation has `*Request` input and `*Result` output, both JSON-serializable
 5. **Skills use CLI with `--output json`**: Rather than importing Go directly, skills shell out to `agm --output json` and parse structured output
+6. **One internal archive lifecycle**: `ArchiveSession` owns archive guards,
+   outcome stamping, the durable `archived` transition, harness-specific
+   external archive outcomes, and post-archive cleanup. Bulk and reaper callers
+   pass typed request options and preserve their surface-specific aggregate or
+   asynchronous result semantics without directly mutating lifecycle storage.
+7. **Reaping is preparation, not a second archive implementation**: the async
+   reaper may persist `lifecycle=reaping` before stopping a pane for crash
+   recovery, but only `ArchiveSession` may complete the transition to
+   `lifecycle=archived`.
 
 ## Alternatives Considered
 
@@ -43,3 +61,6 @@ Skills (.md)   →  CLI --json    →  internal/ops  →  Dolt Storage
 - Error codes are stable contracts that agents can match on programmatically
 - MCP server no longer needs separate YAML manifest reading code
 - Slight overhead: each MCP tool call creates a new Dolt connection (acceptable for low-frequency tool use)
+- Archive guard and cleanup changes now propagate uniformly to immediate,
+  bulk, GC, and reaper paths; callers can no longer silently retain a copied
+  lifecycle mutation.

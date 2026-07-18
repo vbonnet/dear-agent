@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/logging"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/reaper"
 )
 
@@ -24,6 +25,9 @@ func run() error {
 	sessionName := flag.String("session", "", "Session name to archive")
 	logFile := flag.String("log-file", "", "Log file path")
 	sessionsDir := flag.String("sessions-dir", "", "Sessions directory")
+	force := flag.Bool("force", false, "Override archive verification guards (propagated from agm session archive --force)")
+	keepSandbox := flag.Bool("keep-sandbox", false, "Preserve the session sandbox")
+	outcome := flag.String("outcome", "", "Archive outcome: completed, crashed, killed, or gc-stale")
 	flag.Parse()
 
 	// Validate required flags
@@ -50,7 +54,11 @@ func run() error {
 	logger.Info("Reaper configuration", "session", *sessionName, "pid", os.Getpid(), "log_file", *logFile, "sessions_dir", *sessionsDir)
 
 	// Create and run reaper
-	r := reaper.New(*sessionName, *sessionsDir)
+	r := reaper.NewWithOptions(*sessionName, *sessionsDir, reaper.ArchiveOptions{
+		Force:       *force,
+		KeepSandbox: *keepSandbox,
+		Outcome:     manifest.SessionOutcome(*outcome),
+	})
 	if err := r.Run(); err != nil {
 		return fmt.Errorf("reaper failed: %w", err)
 	}
