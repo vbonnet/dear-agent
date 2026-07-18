@@ -1,6 +1,6 @@
 # ADR-014: Plugin System for Composable Extensibility
 
-**Status**: Proposed (2026-05-03)
+Status: Accepted (2026-05-03; verified 2026-07-17)
 
 Today's extensibility surfaces — `workflow.Hooks`, `audit.Registry`,
 `eventbus.Bus` — were each added when their consumer needed them and do not

@@ -42,7 +42,7 @@ func TestForbidden(t *testing.T) {
 		{"wayfinder/cmd/wayfinder-session/internal/validator/testdata/d2-valid-100.md", false},
 		{"pkg/validator/wayfinderartifact.go", false},
 		{"agm/internal/a2a/wayfinder/wayfinder.go", false},
-		{"docs/adr/ADR-035-wayfinder-enforcement.md", false},
+		{"docs/adr/ADR-036-wayfinder-enforcement.md", false},
 		{"internal/telemetry/wayfinder_roi_logger.go", false},
 		{"README.md", false},
 		{"cmd/routing-guard/main.go", false},

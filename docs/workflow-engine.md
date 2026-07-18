@@ -3,7 +3,7 @@
 **Status:** Active (Phase 3 shipped 2026-05-03)
 **Audience:** developers running, authoring, or migrating workflows
 **Source of truth for:** how to use the engine end-to-end. Architecture
-lives in [ADR-010](adrs/ADR-010-workflow-engine-architecture.md); the
+lives in [ADR-010](adr/ADR-010-workflow-engine-architecture.md); the
 release plan lives in [ROADMAP.md](../ROADMAP.md).
 
 This guide is the operator manual. If you've never used `dear-agent`

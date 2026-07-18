@@ -63,7 +63,7 @@ before picking up work.
 ## The thesis (one paragraph)
 
 `pkg/workflow` evolves from "a YAML DAG runner" into **the substrate-quality
-work-item layer** that the substrate hypothesis (ADR-009) said was missing.
+work-item layer** defined by the durable workflow decision (ADR-010).
 The engine and the work-item store are the same thing. Every node-execution
 becomes a record: durable, owned, state-machined, audited, permissioned. AGM
 holds process state; Engram holds knowledge state; the workflow engine holds
@@ -877,7 +877,7 @@ implementing against it.
 
 ## References
 
-- [ADR-009 — Work Item as First-Class Substrate](docs/adr/ADR-009-work-item-as-first-class-substrate.md)
+- [ADR-010 — Durable Workflow Execution Substrate](docs/adr/ADR-010-workflow-engine-architecture.md)
 - [ADR-010 — Workflow Engine Architecture](docs/adr/ADR-010-workflow-engine-architecture.md)
 - [BACKLOG — per-ticket tracking](docs/workflow-engine/BACKLOG.md)
 - `~/src/engram-research/WORKFLOW-ENGINE-SYNTHESIS.md` (origin/main, 2026-05-02)

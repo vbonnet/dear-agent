@@ -326,7 +326,7 @@ Provide a production-ready CLI that:
   - BDD scenarios: (future) End-to-end resume-all flows
 - **References:**
   - Implementation: `cmd/agm/resume_all.go`
-  - Architecture Decision: `docs/adr/ADR-010-orchestrator-resume-detection.md`
+  - Implementation: `cmd/agm/resume_all.go`
   - Systemd Service: `systemd/agm-resume-boot.service`
 
 #### FR13: Send Command Reorganization

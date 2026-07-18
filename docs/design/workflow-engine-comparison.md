@@ -4,7 +4,7 @@
 **Date:** 2026-05-04
 **Author:** workflow-engine-comparison session
 **Related:**
-[ADR-010 — Workflow Engine as Substrate-Quality Work-Item Layer](../adrs/ADR-010-workflow-engine-architecture.md),
+[ADR-010 — Durable Workflow Execution Substrate](../adr/ADR-010-workflow-engine-architecture.md),
 [Workflow Engine Operator Guide](../workflow-engine.md)
 
 ## Problem
@@ -34,7 +34,7 @@ solve exactly one of them. The comparison below makes that explicit.
 | C1 | Runs **identically** on macOS and Linux. No "works on my box, fails on the server." | Hard requirement. |
 | C2 | No long-running daemon a user has to install, configure, and babysit. | dear-agent is personal-dev tooling, not a platform team's product. |
 | C3 | State is local-first, file-on-disk, inspectable with normal CLI tools. | ADR-010 D2; existing `runs.db` is `sqlite3`-debuggable. |
-| C4 | Must have an audit trail per state transition (substrate property). | [ADR-009](../adrs/ADR-009-work-item-as-first-class-substrate.md), ADR-010 D3. |
+| C4 | Must have an audit trail per state transition (substrate property). | [ADR-010](../adr/ADR-010-workflow-engine-architecture.md). |
 | C5 | Must be embeddable as a Go library — workflows are authored in YAML, but the runner is `cmd/workflow-run`, not a service. | Project language policy; ADR-010 D1. |
 | C6 | "Good analytics" — the operator can answer *what ran, when, with what cost, why did it fail?* without log-grep archaeology. | Stated requirement (Valentin). |
 | C7 | Right-sized for personal dev automation: nightly audits, periodic signal collection, the occasional multi-step research pipeline. Not 10K-tenant enterprise. | Project scope; see [.dear-agent.yml `audits.schedule`](../../.dear-agent.yml). |
@@ -292,8 +292,8 @@ them shows up; until then the recommendation stands.
 
 ## References
 
-- [ADR-010 — Workflow Engine as Substrate-Quality Work-Item Layer](../adrs/ADR-010-workflow-engine-architecture.md)
-- [ADR-009 — Work Item as First-Class Substrate](../adrs/ADR-009-work-item-as-first-class-substrate.md)
+- [ADR-010 — Durable Workflow Execution Substrate](../adr/ADR-010-workflow-engine-architecture.md)
+- [ADR-010 — Durable Workflow Execution Substrate](../adr/ADR-010-workflow-engine-architecture.md)
 - [Workflow Engine Operator Guide](../workflow-engine.md)
 - [Substrate Diagnostic](substrate-diagnostic.md)
 - [.dear-agent.yml — `audits.schedule`](../../.dear-agent.yml)

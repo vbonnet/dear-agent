@@ -1,4 +1,4 @@
-// tools.go implements the MCP tools (ADR-015 Part B; ADR-016 is a redirect):
+// tools.go implements the MCP tools (ADR-015):
 // get_signals, get_recommendations, get_signal_trends, suggest_backlog.
 //
 // Every tool is read-only. The server never writes; collection is the

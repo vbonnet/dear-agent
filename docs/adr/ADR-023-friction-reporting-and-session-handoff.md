@@ -1,6 +1,6 @@
 # ADR-023: Friction Reporting and Session Handoff
 
-**Status**: Proposed (2026-05-21) — design only, no code ships here.
+Status: Proposed (2026-05-21; design only)
 
 Two practices from external agent engineering — Lovable's `/vent`
 self-report and Matt Pocock's `/handoff` skill — fit gaps dear-agent has:

@@ -5,7 +5,7 @@
 **Source of truth for:** individual tickets within each phase. Phase-level
 status and architecture decisions live in
 [ROADMAP.md](../../ROADMAP.md) and
-[ADR-010](../adrs/ADR-010-workflow-engine-architecture.md). Read both before
+[ADR-010](../adr/ADR-010-workflow-engine-architecture.md). Read both before
 picking up a ticket.
 
 This file is the per-ticket backlog. One row per ticket. Update the `Status`
@@ -204,7 +204,7 @@ phase. Triage as they come up.
 | DEAR-X.6 | ~~Phase 2 wiring for Phase 1 schema fields~~ DONE | done | Wired by Phase 2.* tickets (#40). Runner now exposes `Permissions` and HITL backend hooks (`pkg/workflow/runner.go`) and the audit pipeline emits transition rows for permission denials and HITL approve/reject/timeout. |
 | DEAR-X.7 | ~~`spec.staleness` audit check~~ DONE | done | Shipped in `pkg/audit/checks/spec_staleness.go` (`spec.staleness` check ID). Reads `git log` for the comparison. |
 | DEAR-X.8 | ~~`spec.conformance` audit check (LLM-assisted)~~ DONE | done | Shipped in `pkg/audit/checks/spec_conformance.go` (cheap mode: regex-extract file paths and verify they exist). |
-| DEAR-X.9 | ~~Backlog suggestion system (framework improvement, P2)~~ DONE | done | Task-driven "what to pick up next", complementing the metric-driven ADR-015/016 surface. `pkg/backlog` parses this file + `ROADMAP.md` (header-aware, both table layouts), ranks by the VROOM Orchestrator dispatch rules (dependency+status eligibility, priority, unblocking leverage, effort), and emits `vroom.decision.dispatched` so pickup lands on the decision trail. CLI: `cmd/backlog-suggest list/suggest`. See [ADR-022](../adrs/ADR-022-backlog-suggestion-system.md). |
+| DEAR-X.9 | ~~Backlog suggestion system (framework improvement, P2)~~ DONE | done | Task-driven "what to pick up next", complementing the metric-driven ADR-015 surface. `pkg/backlog` parses this file + `ROADMAP.md` (header-aware, both table layouts), ranks by the VROOM Orchestrator dispatch rules (dependency+status eligibility, priority, unblocking leverage, effort), and emits `vroom.decision.dispatched` so pickup lands on the decision trail. CLI: `cmd/backlog-suggest list/suggest`. See [ADR-022](../adr/ADR-022-backlog-suggestion-system.md). |
 
 ---
 
@@ -283,6 +283,6 @@ substrate-quality and should be rejected at PR review.
 ## References
 
 - [ROADMAP.md](../../ROADMAP.md)
-- [ADR-010](../adrs/ADR-010-workflow-engine-architecture.md)
+- [ADR-010](../adr/ADR-010-workflow-engine-architecture.md)
 - `~/src/engram-research/WORKFLOW-ENGINE-RESEARCH-ENGINEERING.md` §9 (origin/main, 2026-05-02) — original ticket source
 - `~/src/engram-research/WORKFLOW-ENGINE-SYNTHESIS.md` §7 (origin/main, 2026-05-02) — phase rationale

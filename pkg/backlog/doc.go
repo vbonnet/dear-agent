@@ -3,7 +3,7 @@
 // machine-readable work items and suggests the next item to pick up.
 //
 // It is the task-driven counterpart to the metric-driven recommendation
-// surface (ADR-015 aggregator / ADR-016 recommendation MCP): that surface
+// surface (ADR-015 aggregator and recommendation MCP): that surface
 // ranks project-health signals, this one ranks declared tickets. The two
 // are intentionally independent — see ADR-022.
 //

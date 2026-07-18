@@ -256,7 +256,6 @@ agm sessions resume-all --include-archived
 - Batch status computation: O(1) tmux calls vs O(n) for individual checks
 
 **See Also**:
-- [ADR-010: Orchestrator Resume Detection](../docs/adr/ADR-010-orchestrator-resume-detection.md) - Integration with orchestrator v2 for post-resume restart prompts
 - `agm admin enable-auto-resume` - Enable automatic boot-time resume (future)
 
 ---

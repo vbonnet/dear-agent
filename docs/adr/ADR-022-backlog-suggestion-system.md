@@ -1,6 +1,6 @@
 # ADR-022: Backlog Suggestion System
 
-**Status**: Accepted (2026-05-15)
+Status: Accepted (2026-05-15)
 
 [ADR-015](ADR-015-signal-aggregator.md) ranks projects by health metric
 (commits/week, lint count, dep freshness). It cannot rank *declared

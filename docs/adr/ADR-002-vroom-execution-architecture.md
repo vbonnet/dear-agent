@@ -1,6 +1,6 @@
 # ADR-002: VROOM Execution Architecture
 
-**Status**: Accepted (2026-05-17; amended 2026-07-17)
+Status: Accepted (2026-05-17; amended 2026-07-17)
 
 **Supersedes** `agm/docs/adr/ADR-020`…`ADR-025`, which described an
 inaccurate five-role mesh (Verifier/Requester/Orchestrator/Overseer/
