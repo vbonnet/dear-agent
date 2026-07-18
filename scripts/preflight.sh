@@ -73,6 +73,10 @@ go build -ldflags="${LDFLAGS}" -o build/agm-mcp-server ./agm/cmd/agm-mcp-server
 go build ./...
 ok "build clean"
 
+step "make lint-doc-freshness"
+make lint-doc-freshness || fail "living-document freshness ratchet failed"
+ok "living-document freshness ratchet intact"
+
 step "golangci-lint run ./..."
 if ! command -v golangci-lint >/dev/null 2>&1; then
   fail "golangci-lint not installed. Run: brew install golangci-lint"
