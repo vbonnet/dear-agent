@@ -71,10 +71,9 @@ func TestAntiStallSpecExists(t *testing.T) {
 	}
 }
 
-// TestAgentsMdReferencesAntiStallSpec asserts AGENTS.md still points agents at
-// the spec. A dangling or deleted reference means agents stop inheriting the
-// contract even though the spec file still exists — the precise rot this test
-// exists to catch.
+// TestAgentsMdReferencesAntiStallSpec asserts the root router still points
+// agents at the spec and preserves its keep-working default. The detailed
+// directives stay in the spec so AGENTS.md does not become a second copy.
 func TestAgentsMdReferencesAntiStallSpec(t *testing.T) {
 	root := repoRoot(t)
 	raw, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
@@ -82,11 +81,12 @@ func TestAgentsMdReferencesAntiStallSpec(t *testing.T) {
 		t.Fatalf("read AGENTS.md: %v", err)
 	}
 	agents := string(raw)
+	normalized := strings.Join(strings.Fields(agents), " ")
 
 	if !strings.Contains(agents, "docs/design/anti-stall.md") {
 		t.Error("AGENTS.md no longer references docs/design/anti-stall.md — agents will not inherit the anti-stall contract")
 	}
-	if !strings.Contains(agents, "Anti-Stall — Continuous Execution") {
-		t.Error("AGENTS.md is missing the Anti-Stall — Continuous Execution section heading")
+	if !strings.Contains(normalized, "continue through known work") {
+		t.Error("AGENTS.md no longer states the anti-stall keep-working default")
 	}
 }
