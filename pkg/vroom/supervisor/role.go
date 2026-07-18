@@ -35,9 +35,8 @@ const (
 // AllRoles returns the three supervisor roles in canonical order.
 // Order is stable so tests and decision-trail records are deterministic.
 func AllRoles() []Role {
-	members := AllMembers()
-	roles := make([]Role, 0, len(members))
-	for _, member := range members {
+	roles := make([]Role, 0, len(canonicalTopology))
+	for _, member := range canonicalTopology {
 		roles = append(roles, member.Role)
 	}
 	return roles
