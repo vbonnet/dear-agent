@@ -60,7 +60,7 @@ type skillTemplateData struct {
 }
 
 // GenerateSkills produces markdown skill files for all ops with Skill surfaces and ManualSkill=false.
-func GenerateSkills(ops []OpIR, outDir string) error {
+func GenerateSkills(ops []OpIR, outDir, cliBinary string) error {
 	skillOps := filterOps(ops, func(o OpIR) bool {
 		return o.Op.Skill != nil && !o.Op.ManualSkill
 	})
@@ -79,7 +79,7 @@ func GenerateSkills(ops []OpIR, outDir string) error {
 	}
 
 	for _, op := range skillOps {
-		data := buildSkillData(op)
+		data := buildSkillData(op, cliBinary)
 		outPath := filepath.Join(skillsDir, op.Op.Skill.SlashCommand+".md")
 
 		var buf strings.Builder
@@ -94,7 +94,7 @@ func GenerateSkills(ops []OpIR, outDir string) error {
 	return nil
 }
 
-func buildSkillData(op OpIR) skillTemplateData {
+func buildSkillData(op OpIR, cliBinary string) skillTemplateData {
 	fields := op.SkillFields()
 
 	// Build argument hint
@@ -124,6 +124,9 @@ func buildSkillData(op OpIR) skillTemplateData {
 	cliCmd := op.Op.CLI.CommandPath
 	if cliCmd == "" {
 		cliCmd = op.Op.Name
+	}
+	if cliBinary != "" {
+		cliCmd = cliBinary + " " + cliCmd
 	}
 
 	// Capitalize first letter of ActionVerb for description
