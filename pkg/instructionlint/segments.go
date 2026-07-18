@@ -14,9 +14,12 @@ import (
 type SegmentKind string
 
 const (
-	SegmentProse  SegmentKind = "prose"
+	// SegmentProse is ordinary Markdown outside executable fences.
+	SegmentProse SegmentKind = "prose"
+	// SegmentInline is inline code that may contain a command form.
 	SegmentInline SegmentKind = "inline"
-	SegmentShell  SegmentKind = "shell"
+	// SegmentShell is content in a shell-language fenced block.
+	SegmentShell SegmentKind = "shell"
 )
 
 // Segment is one normalized, line-addressable policy input.
@@ -28,6 +31,22 @@ type Segment struct {
 
 func parseSegments(source []byte) []Segment {
 	root := goldmark.New().Parser().Parse(text.NewReader(source))
+	classified, inline := classifyMarkdown(root, source)
+	segments := sourceSegments(source, classified)
+	segments = append(segments, inline...)
+	sort.Slice(segments, func(i, j int) bool {
+		if segments[i].Line != segments[j].Line {
+			return segments[i].Line < segments[j].Line
+		}
+		if segments[i].Kind != segments[j].Kind {
+			return segments[i].Kind < segments[j].Kind
+		}
+		return segments[i].Text < segments[j].Text
+	})
+	return segments
+}
+
+func classifyMarkdown(root ast.Node, source []byte) (map[int]SegmentKind, []Segment) {
 	classified := map[int]SegmentKind{}
 	var inline []Segment
 	_ = ast.Walk(root, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
@@ -36,46 +55,58 @@ func parseSegments(source []byte) []Segment {
 		}
 		switch typed := node.(type) {
 		case *ast.FencedCodeBlock:
-			kind := SegmentKind("skip")
-			if shellLanguage(string(typed.Language(source))) {
-				kind = SegmentShell
-			}
-			for i := 0; i < typed.Lines().Len(); i++ {
-				segment := typed.Lines().At(i)
-				startLine := sourceLine(source, segment.Start)
-				value := segment.Value(source)
-				lineCount := bytes.Count(value, []byte{'\n'})
-				if !bytes.HasSuffix(value, []byte{'\n'}) {
-					lineCount++
-				}
-				for offset := 0; offset < lineCount; offset++ {
-					classified[startLine+offset] = kind
-				}
-			}
+			classifyFence(classified, typed, source)
 			return ast.WalkSkipChildren, nil
 		case *ast.CodeSpan:
-			var value strings.Builder
-			line := 1
-			for child := typed.FirstChild(); child != nil; child = child.NextSibling() {
-				textNode, ok := child.(*ast.Text)
-				if !ok {
-					continue
-				}
-				if value.Len() == 0 {
-					line = sourceLine(source, textNode.Segment.Start)
-				}
-				value.Write(textNode.Segment.Value(source))
-			}
-			if normalized := strings.TrimSpace(value.String()); normalized != "" {
-				inline = append(inline, Segment{Kind: SegmentInline, Line: line, Text: normalized})
+			if segment, ok := codeSpanSegment(typed, source); ok {
+				inline = append(inline, segment)
 			}
 			return ast.WalkSkipChildren, nil
 		}
 		return ast.WalkContinue, nil
 	})
+	return classified, inline
+}
 
+func classifyFence(classified map[int]SegmentKind, block *ast.FencedCodeBlock, source []byte) {
+	kind := SegmentKind("skip")
+	if shellLanguage(string(block.Language(source))) {
+		kind = SegmentShell
+	}
+	for i := 0; i < block.Lines().Len(); i++ {
+		segment := block.Lines().At(i)
+		startLine := sourceLine(source, segment.Start)
+		value := segment.Value(source)
+		lineCount := bytes.Count(value, []byte{'\n'})
+		if !bytes.HasSuffix(value, []byte{'\n'}) {
+			lineCount++
+		}
+		for offset := 0; offset < lineCount; offset++ {
+			classified[startLine+offset] = kind
+		}
+	}
+}
+
+func codeSpanSegment(span *ast.CodeSpan, source []byte) (Segment, bool) {
+	var value strings.Builder
+	line := 1
+	for child := span.FirstChild(); child != nil; child = child.NextSibling() {
+		textNode, ok := child.(*ast.Text)
+		if !ok {
+			continue
+		}
+		if value.Len() == 0 {
+			line = sourceLine(source, textNode.Segment.Start)
+		}
+		value.Write(textNode.Segment.Value(source))
+	}
+	normalized := strings.TrimSpace(value.String())
+	return Segment{Kind: SegmentInline, Line: line, Text: normalized}, normalized != ""
+}
+
+func sourceSegments(source []byte, classified map[int]SegmentKind) []Segment {
 	lines := strings.Split(string(source), "\n")
-	segments := make([]Segment, 0, len(lines)+len(inline))
+	segments := make([]Segment, 0, len(lines))
 	for i, raw := range lines {
 		line := i + 1
 		normalized := strings.TrimSpace(raw)
@@ -93,16 +124,6 @@ func parseSegments(source []byte) []Segment {
 			segments = append(segments, Segment{Kind: kind, Line: line, Text: normalized})
 		}
 	}
-	segments = append(segments, inline...)
-	sort.Slice(segments, func(i, j int) bool {
-		if segments[i].Line != segments[j].Line {
-			return segments[i].Line < segments[j].Line
-		}
-		if segments[i].Kind != segments[j].Kind {
-			return segments[i].Kind < segments[j].Kind
-		}
-		return segments[i].Text < segments[j].Text
-	})
 	return segments
 }
 
