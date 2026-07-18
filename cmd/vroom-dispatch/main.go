@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/otelsetup"
+	vroomsupervisor "github.com/vbonnet/dear-agent/pkg/vroom/supervisor"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -31,6 +32,8 @@ const tracerName = "vroom-dispatch"
 var skills embed.FS
 
 type supervisor struct {
+	// Topology fields are populated only by supervisorForRole. Harness, model,
+	// skill, and tick fields below remain dispatch-owned launch policy.
 	Name         string
 	ID           string
 	Role         string // RBAC role/profile (agm --role); grants the session's permission profile
@@ -43,47 +46,45 @@ type supervisor struct {
 	TickPrompt   string
 }
 
+func supervisorForRole(role vroomsupervisor.Role, policy supervisor) supervisor {
+	member, ok := vroomsupervisor.MemberForRole(role)
+	if !ok {
+		panic(fmt.Sprintf("vroom-dispatch: no canonical topology member for role %q", role))
+	}
+	policy.Name = member.ID
+	policy.ID = member.ID
+	policy.Role = string(member.Role)
+	policy.PrimaryFor = member.PrimaryFor
+	policy.TertiaryFor = member.TertiaryFor
+	return policy
+}
+
 var supervisors = []supervisor{
-	{
-		Name:         "vroom-meta-orchestrator",
-		ID:           "vroom-meta-orchestrator",
-		Role:         "meta-orchestrator",
+	supervisorForRole(vroomsupervisor.RoleMetaOrchestrator, supervisor{
 		Harness:      "claude-code",
 		Model:        defaultSupervisorModel,
 		SkillFile:    "meta-orchestrator.md",
-		PrimaryFor:   "vroom-orchestrator",
-		TertiaryFor:  "vroom-overseer",
 		TickInterval: 180 * time.Second,
 		TickPrompt: "Execute your Meta-Orchestrator tick: " +
 			"1) check peer heartbeats 2) read open beads via bd --db ~/beads/context-engine/.beads list --state=open --format=json " +
 			"3) read current roadmap 4) evaluate new beads for roadmap 5) verify Orch dispatch activity " +
 			"6) write heartbeat.",
-	},
-	{
-		Name:         "vroom-orchestrator",
-		ID:           "vroom-orchestrator",
-		Role:         "orchestrator",
+	}),
+	supervisorForRole(vroomsupervisor.RoleOrchestrator, supervisor{
 		Harness:      "codex-cli",
 		Model:        "gpt-5.5",
 		SkillFile:    "orchestrator.md",
-		PrimaryFor:   "vroom-overseer",
-		TertiaryFor:  "vroom-meta-orchestrator",
 		TickInterval: 90 * time.Second,
 		TickPrompt: "Execute your Orchestrator tick: " +
 			"1) check peer heartbeats 2) read accepted roadmap items " +
 			"3) dispatch undispatched work to worker sessions via agm session new " +
 			"4) monitor active workers 5) detect stale items " +
 			"6) write heartbeat.",
-	},
-	{
-		Name:         "vroom-overseer",
-		ID:           "vroom-overseer",
-		Role:         "overseer",
+	}),
+	supervisorForRole(vroomsupervisor.RoleOverseer, supervisor{
 		Harness:      "agy",
 		Model:        "2.5-flash",
 		SkillFile:    "overseer.md",
-		PrimaryFor:   "vroom-meta-orchestrator",
-		TertiaryFor:  "vroom-orchestrator",
 		TickInterval: 60 * time.Second,
 		TickPrompt: "Execute your Overseer tick: " +
 			"1) check peer heartbeats 2) probe system resources by running `agm supervisor probe` " +
@@ -93,7 +94,7 @@ var supervisors = []supervisor{
 			"7) verify binary freshness (agm admin verify-deployment) " +
 			"8) audit deployed-artifact drift (dear-deploy status --json --repo-root ~/src/dear-agent) " +
 			"9) write heartbeat.",
-	},
+	}),
 }
 
 // sessionState tracks persistent AGM sessions across launcher restarts.
@@ -312,20 +313,13 @@ func classifySupervisor(home string, sup supervisor) supervisorHealth {
 	return healthAlive
 }
 
-// heartbeatFileName maps a supervisor name to its heartbeat file basename
-// (without extension). The skill files write to meta-o.json, orch.json,
-// overseer.json.
+// heartbeatFileName maps a supervisor identity to the compact heartbeat file
+// basename that AGM mirrors for the peer-check protocol.
 func heartbeatFileName(name string) string {
-	switch name {
-	case "vroom-meta-orchestrator":
-		return "meta-o"
-	case "vroom-orchestrator":
-		return "orch"
-	case "vroom-overseer":
-		return "overseer"
-	default:
-		return name
+	if member, ok := vroomsupervisor.Lookup(name); ok {
+		return member.Alias
 	}
+	return name
 }
 
 // trailRecord is a single entry in the dispatch trail JSONL log.

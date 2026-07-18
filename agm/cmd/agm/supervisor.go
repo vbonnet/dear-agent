@@ -16,6 +16,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/internal/override"
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
+	vroomsupervisor "github.com/vbonnet/dear-agent/pkg/vroom/supervisor"
 )
 
 // supervisorStateDir returns the per-supervisor state directory under
@@ -88,16 +89,22 @@ func syncVroomHeartbeatFile(dir, id string, ts time.Time) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", dir, err)
 	}
+	fileID := id
+	role := id
+	if member, ok := vroomsupervisor.Lookup(id); ok {
+		fileID = member.Alias
+		role = string(member.Role)
+	}
 	rec := vroomHeartbeatFile{
 		TS:   float64(ts.UnixMilli()) / 1e3,
 		ISO:  ts.UTC().Format(time.RFC3339),
-		Role: supervisorRole(id),
+		Role: role,
 	}
 	data, err := json.Marshal(rec)
 	if err != nil {
 		return fmt.Errorf("marshal vroom heartbeat: %w", err)
 	}
-	dst := filepath.Join(dir, id+".json")
+	dst := filepath.Join(dir, fileID+".json")
 	tmp := dst + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return fmt.Errorf("write tmp: %w", err)
@@ -146,22 +153,6 @@ func SyncHeartbeatFiles(dir string) error {
 		}
 	}
 	return errors.Join(errs...)
-}
-
-// supervisorRole returns a human-readable role label for a supervisor ID.
-// Used as the "role" field in the VROOM flat heartbeat file so the Overseer
-// SKILL can distinguish supervisors by function, not just opaque ID.
-func supervisorRole(id string) string {
-	switch id {
-	case "meta-o":
-		return "meta-orchestrator"
-	case "orch":
-		return "orchestrator"
-	case "overseer":
-		return "overseer"
-	default:
-		return id
-	}
 }
 
 // supervisorCmd exposes the agm supervisor subcommand group. Supervisor
@@ -482,6 +473,10 @@ func runSupervisorHeartbeat(cmd *cobra.Command, _ []string) error {
 	if tertiary == "" {
 		tertiary = os.Getenv("AGM_SUPERVISOR_TERTIARY_FOR")
 	}
+	id, primary, tertiary, err := canonicalizeSupervisorHeartbeatMesh(id, primary, tertiary)
+	if err != nil {
+		return err
+	}
 
 	now := time.Now().UTC()
 	rec := heartbeatRecord{
@@ -513,6 +508,41 @@ func runSupervisorHeartbeat(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	return nil
+}
+
+// canonicalizeSupervisorHeartbeatMesh applies the canonical VROOM topology to
+// heartbeat input. Canonical IDs, compact aliases, and role names all resolve
+// to the same identity and peer graph. Unknown IDs retain AGM's generic
+// supervisor behavior and pass through unchanged.
+func canonicalizeSupervisorHeartbeatMesh(id, primary, tertiary string) (string, string, string, error) {
+	member, ok := vroomsupervisor.Lookup(id)
+	if !ok {
+		return id, primary, tertiary, nil
+	}
+
+	canonicalPeer := func(flag, value, expected string) (string, error) {
+		if value == "" {
+			return expected, nil
+		}
+		peer, resolved := vroomsupervisor.Lookup(value)
+		if !resolved {
+			return "", fmt.Errorf("supervisor heartbeat: canonical %s %q must name a VROOM supervisor, got %q", flag, member.ID, value)
+		}
+		if peer.ID != expected {
+			return "", fmt.Errorf("supervisor heartbeat: canonical %s %q is %q, got %q", flag, member.ID, expected, peer.ID)
+		}
+		return peer.ID, nil
+	}
+
+	primary, err := canonicalPeer("primary-for", primary, member.PrimaryFor)
+	if err != nil {
+		return "", "", "", err
+	}
+	tertiary, err = canonicalPeer("tertiary-for", tertiary, member.TertiaryFor)
+	if err != nil {
+		return "", "", "", err
+	}
+	return member.ID, primary, tertiary, nil
 }
 
 // writeHeartbeatRecord marshals rec and writes it atomically via a temp
@@ -622,12 +652,8 @@ func supervisorTmuxSession(r supervisorRow) (name string, explicit bool) {
 	if r.Record != nil && r.Record.TmuxSession != "" {
 		return r.Record.TmuxSession, true
 	}
-	if strings.HasPrefix(r.ID, "vroom-") {
-		return r.ID, false
-	}
-	switch r.ID {
-	case "meta-o", "orch", "overseer":
-		return "vroom-" + supervisorRole(r.ID), false
+	if member, ok := vroomsupervisor.Lookup(r.ID); ok {
+		return member.ID, false
 	}
 	return "", false
 }

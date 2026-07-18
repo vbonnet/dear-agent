@@ -110,6 +110,12 @@ under Auto permission mode.) Only after that do they do their own job.
 | **Orchestrator** | COO | Enqueue/dequeue work, monitor active workers, keep steady progress, never sit idle | Meta-Orchestrator | Overseer |
 | **Overseer** | CRO (Reliability) | Resource usage (CPU/disk/memory/quota), leak detection, session cleanup | Orchestrator | Meta-Orchestrator |
 
+The canonical code representation of this table lives in
+`pkg/vroom/supervisor`: it owns the three session identities, compact aliases,
+roles, and peer relationships. Launchers and AGM heartbeat tooling consume that
+topology while retaining their own harness, model, scheduling, and persistence
+policy.
+
 **Roadmap authority:** The **Meta-Orchestrator is the only agent allowed to add
 items to the roadmap.** Every other agent may *propose* work (see
 [Work Order](#work-order)); the Meta-Orchestrator has final say. This is the

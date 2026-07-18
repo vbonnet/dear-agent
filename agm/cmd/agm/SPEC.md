@@ -56,6 +56,10 @@ Provide a production-ready CLI that:
 
 **CLI-15** When `agm supervisor run` launches Claude Code by default, the system shall not pass development-channel flags; it shall load development channels only when the caller explicitly opts in because the Claude Code development-channel confirmation prompt blocks unattended supervisor boot.
 
+**CLI-16** When `agm supervisor heartbeat` receives a canonical VROOM supervisor ID, compact alias, or role name, the system shall normalize it to the canonical identity, derive omitted Primary/Tertiary peers from `pkg/vroom/supervisor`, and reject explicit peer values that contradict that topology.
+
+**CLI-17** When AGM mirrors a canonical supervisor heartbeat into the flat VROOM heartbeat directory, the system shall use the compact alias and role from `pkg/vroom/supervisor` rather than maintaining an AGM-local alias table.
+
 ## Requirements
 
 ### Functional Requirements
