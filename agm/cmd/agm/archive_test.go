@@ -165,6 +165,7 @@ func createArchiveTestSession(t testingTB, sessionsDir, sessionID, name, tmuxNam
 		SchemaVersion: "2",
 		SessionID:     sessionID,
 		Name:          name,
+		IsTest:        true,
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
 		Lifecycle:     lifecycle,

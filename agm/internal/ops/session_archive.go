@@ -194,6 +194,15 @@ func normalizeArchiveOutcome(outcome manifest.SessionOutcome) (manifest.SessionO
 // monitor deregister, MCP processes, tmux process group, worktree/sandbox
 // cleanup, additionalDirectories removal). Returns (mcpKilled, postCleanup).
 func runArchiveCleanup(ctx *OpContext, m *manifest.Manifest, req *ArchiveSessionRequest) (int, *CleanupResult, *cleanup.Result, string) {
+	legacyManifestPath := ""
+	if req.LegacySessionsDir != "" {
+		legacyManifestPath = filepath.Join(req.LegacySessionsDir, m.SessionID, "manifest.yaml")
+	}
+	if shouldSkipHostArchiveCleanup(ctx.Storage, m) {
+		slog.Info("Skipping host resource cleanup for test session", "session", m.SessionID)
+		return 0, &CleanupResult{}, nil, archiveLegacySessionDir(req.LegacySessionsDir, legacyManifestPath)
+	}
+
 	recordArchiveTrust(m.Name, m.WorkingDirectory, m.Context.Project, m.SessionID, m.CreatedAt)
 	deregisterMonitor(ctx, m.Name)
 
@@ -214,19 +223,13 @@ func runArchiveCleanup(ctx *OpContext, m *manifest.Manifest, req *ArchiveSession
 
 	killTmuxAndProcessGroup(m)
 
-	postCleanup := &CleanupResult{}
-	var sessionCleanup *cleanup.Result
-	if !isIsolatedTestStore(ctx.Storage) {
-		postCleanup = CleanupAfterArchive(
-			m.SessionID, m.Name,
-			m.WorkingDirectory, m.Context.Project, sandboxPath, m.Name,
-			req.KeepSandbox,
-		)
-		sessionCleanup = cleanupTrackedSessionResources(ctx, m.Name)
-		cleanupPendingDir(m.Name)
-	} else {
-		slog.Info("Skipping host resource cleanup for isolated test store", "session", m.SessionID)
-	}
+	postCleanup := CleanupAfterArchive(
+		m.SessionID, m.Name,
+		m.WorkingDirectory, m.Context.Project, sandboxPath, m.Name,
+		req.KeepSandbox,
+	)
+	sessionCleanup := cleanupTrackedSessionResources(ctx, m.Name)
+	cleanupPendingDir(m.Name)
 	if postCleanup.SandboxRemoved {
 		logGCEntry(gclog.Entry{
 			Operation:   "archive_sandbox_cleanup",
@@ -234,20 +237,19 @@ func runArchiveCleanup(ctx *OpContext, m *manifest.Manifest, req *ArchiveSession
 			SessionName: m.Name,
 		})
 	}
-	if sandboxPath != "" && !isIsolatedTestStore(ctx.Storage) {
+	if sandboxPath != "" {
 		if err := removeFromAdditionalDirectories(sandboxPath); err != nil {
 			slog.Warn("Failed to remove sandbox from additionalDirectories", "session", m.SessionID, "path", sandboxPath, "error", err)
 		}
-	}
-	legacyManifestPath := ""
-	if req.LegacySessionsDir != "" {
-		legacyManifestPath = filepath.Join(req.LegacySessionsDir, m.SessionID, "manifest.yaml")
 	}
 	legacyArchivePath := archiveLegacySessionDir(req.LegacySessionsDir, legacyManifestPath)
 	return mcpKilled, postCleanup, sessionCleanup, legacyArchivePath
 }
 
-func isIsolatedTestStore(storage dolt.Storage) bool {
+func shouldSkipHostArchiveCleanup(storage dolt.Storage, m *manifest.Manifest) bool {
+	if m != nil && m.IsTest {
+		return true
+	}
 	adapter, ok := storage.(*dolt.Adapter)
 	return ok && adapter != nil && adapter.IsTestStore()
 }

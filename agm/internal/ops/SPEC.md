@@ -77,7 +77,7 @@ surfaces (CLI, MCP server, Skills plugin). Every surface constructs an
 
 **OPS-55** When an async reaper validates an active session before stopping its pane, the system shall permit that expected active pane only for preflight while preserving supervisor, completion-verification, and pending-delegation guards; the final archive shall enforce pane death again.
 
-**OPS-56** When `ArchiveSession` uses an isolated SQLite test store, the system shall preserve lifecycle and external-archive behavior without deleting host pending messages, worktrees, branches, temporary files, sandboxes, or host configuration.
+**OPS-56** When `ArchiveSession` uses an isolated SQLite store or archives a manifest marked as a test session, the system shall preserve lifecycle, explicit legacy-directory moves, and injected external-archive behavior without mutating host trust, monitor, process, pending-message, worktree, branch, temporary-file, sandbox, or configuration state.
 
 ### Garbage Collection
 

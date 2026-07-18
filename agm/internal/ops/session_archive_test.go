@@ -63,6 +63,47 @@ func TestArchiveSession_IsolatedStoreSkipsHostCleanup(t *testing.T) {
 	}
 }
 
+func TestArchiveSession_TestManifestSkipsHostCleanup(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	storage := dolt.NewMockAdapter()
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "test-manifest-cleanup-id",
+		Name:          "test-manifest-cleanup-session",
+		Harness:       "agy",
+		IsTest:        true,
+		CreatedAt:     time.Now().Add(-time.Hour),
+		UpdatedAt:     time.Now().Add(-time.Hour),
+		Context:       manifest.Context{Project: t.TempDir()},
+		Tmux:          manifest.Tmux{SessionName: "test-manifest-cleanup-session"},
+	}
+	if err := storage.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+	pendingDir := filepath.Join(home, ".agm", "pending", m.Name)
+	if err := os.MkdirAll(pendingDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(pending) error: %v", err)
+	}
+	marker := filepath.Join(pendingDir, "message.json")
+	if err := os.WriteFile(marker, []byte("pending"), 0o600); err != nil {
+		t.Fatalf("WriteFile(marker) error: %v", err)
+	}
+
+	ctx := &OpContext{
+		Storage: storage,
+		ExternalSessionArchiver: testExternalArchiver(func(context.Context, *manifest.Manifest) []ExternalArchiveOutcome {
+			return []ExternalArchiveOutcome{{Provider: "test", Status: ExternalArchiveSkipped}}
+		}),
+	}
+	if _, err := ArchiveSession(ctx, &ArchiveSessionRequest{Identifier: m.SessionID, Force: true}); err != nil {
+		t.Fatalf("ArchiveSession() error: %v", err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("test manifest archive removed host pending marker: %v", err)
+	}
+}
+
 func TestArchiveSession_StoppedSession(t *testing.T) {
 	storage := dolt.NewMockAdapter()
 	tmux := session.NewMockTmux()
