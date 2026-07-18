@@ -33,3 +33,9 @@ can never brick a dispatch run (ce-b1zw).
 **VDD-08** While an `agm session new` spawn is in flight, the system shall bound it with a spawn-specific 180-second timeout, keeping the tighter 60-second bound for bd, gh, and agm-list subprocess calls.
 
 **VDD-09** When a run dispatches zero beads, the system shall exit with status 0, treating a drained or fully in-flight backlog as a normal steady state.
+
+**VDD-10** When an operator selects a worker harness, model, mode, or workspace, the system shall pass that configuration to `agm session new` without changing candidate selection or the worker completion contract.
+
+**VDD-11** When the system renders a worker prompt, the prompt shall remain harness-neutral and shall route the worker through the canonical Wayfinder V2 lifecycle.
+
+**VDD-12** When the system renders a worker completion contract, the prompt shall require evidence that the change is merged, deployed when applicable, and verified before the worker closes its bead.

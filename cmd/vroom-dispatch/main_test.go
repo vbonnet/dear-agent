@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -325,269 +324,102 @@ func TestLoopCommandIsErrorTolerant(t *testing.T) {
 	}
 }
 
-// TestWorkerSpawnPinsOpusAndWayfinder guards the worker-side counterpart of the
-// ce-84l2 supervisor fix. Workers are spawned by the Orchestrator from its skill
-// instructions (not by Go code here), so the contract lives in the embedded
-// orchestrator.md. This test pins it: workers must spawn with opus-200k + auto
-// mode and be told to drive their bead through wayfinder, never raw sonnet
-// execution. The same credit-gate / plan-mode reasoning as the supervisors
-// applies — workers run on the same Max-plan OAuth.
-func TestWorkerSpawnPinsOpusAndWayfinder(t *testing.T) {
-	b, err := skills.ReadFile("skills/orchestrator.md")
+func readSupervisorSkill(t *testing.T, name string) string {
+	t.Helper()
+	b, err := skills.ReadFile("skills/" + name)
 	if err != nil {
-		t.Fatalf("read embedded orchestrator.md: %v", err)
+		t.Fatalf("read embedded %s: %v", name, err)
 	}
-	doc := string(b)
-
-	for _, want := range []string{
-		"--model=opus-200k", // Opus, 200k variant (dodges the 1M credit gate)
-		"--mode=auto",       // detached workers can't clear plan-exit prompts
-		"/wayfinder",        // workers drive the bead through the SDLC workflow
-	} {
-		if !strings.Contains(doc, want) {
-			t.Errorf("orchestrator.md worker dispatch missing %q", want)
-		}
-	}
-
-	if slices.Contains(strings.Fields(doc), "--model=opus") {
-		t.Errorf("orchestrator.md must not spawn workers with the 1M-context opus alias (credit-gated)")
-	}
-	if strings.Contains(doc, `"model":"default"`) {
-		t.Errorf(`orchestrator.md still records "model":"default"; dispatch record must say "opus-200k"`)
-	}
+	return string(b)
 }
 
-// TestDeployTaskTypeIsDeterministicAndWorkerless pins the deploy task type
-// (ce-33sy, deploy-worker-vroom Phase 4): a roadmap item tagged
-// `task_type: "deploy"` is executed by the Orchestrator itself via
-// `dear-deploy install`, NOT by spawning a Claude worker — it consumes no worker
-// slot, no Opus quota, and opens no PR. The contract spans three embedded skill
-// docs: protocol.md defines the schema (task_type/deploy_target), Meta-O tags the
-// bead, and the Orchestrator runs the deterministic install. This test asserts
-// all three surfaces so the deterministic path cannot silently regress to a
-// worker spawn.
-func TestDeployTaskTypeIsDeterministicAndWorkerless(t *testing.T) {
-	protocol, err := skills.ReadFile("skills/protocol.md")
-	if err != nil {
-		t.Fatalf("read embedded protocol.md: %v", err)
-	}
-	orch, err := skills.ReadFile("skills/orchestrator.md")
-	if err != nil {
-		t.Fatalf("read embedded orchestrator.md: %v", err)
-	}
-	metao, err := skills.ReadFile("skills/meta-orchestrator.md")
-	if err != nil {
-		t.Fatalf("read embedded meta-orchestrator.md: %v", err)
-	}
-	protocolDoc, orchDoc, metaoDoc := string(protocol), string(orch), string(metao)
-
-	for _, want := range []string{"task_type", "deploy_target", `"deploy"`} {
-		if !strings.Contains(protocolDoc, want) {
-			t.Errorf("protocol.md roadmap schema missing deploy task-type marker %q", want)
+// The classifier owns permission decisions. Free-form supervisor prompts may
+// invoke the classifier, but must never issue a manual approval after it refuses.
+func TestSupervisorInstructionsFailClosedOnPermissions(t *testing.T) {
+	for _, name := range []string{"protocol.md", "meta-orchestrator.md", "orchestrator.md", "overseer.md"} {
+		doc := readSupervisorSkill(t, name)
+		if strings.Contains(doc, "agm send approve") {
+			t.Errorf("%s contains a manual permission approval path", name)
 		}
 	}
-
-	for _, want := range []string{"task_type", "deploy_target"} {
-		if !strings.Contains(metaoDoc, want) {
-			t.Errorf("meta-orchestrator.md missing deploy task-type tagging marker %q", want)
-		}
+	orch := readSupervisorSkill(t, "orchestrator.md")
+	if !strings.Contains(orch, "agm -o json scan --cross-check") {
+		t.Error("orchestrator.md must invoke the typed cross-check classifier")
 	}
-
-	for _, want := range []string{
-		"dear-deploy install",
-		"dear-deploy status",
-		"task_type",
-	} {
-		if !strings.Contains(orchDoc, want) {
-			t.Errorf("orchestrator.md missing deploy dispatch marker %q", want)
+	for _, want := range []string{"remaining", "STUCK", "Never approve"} {
+		if !strings.Contains(orch, want) {
+			t.Errorf("orchestrator.md missing fail-closed marker %q", want)
 		}
 	}
 }
 
-// TestDeployWorkerDispatch pins the deploy-as-worker contract (ce-x9s5): the
-// Orchestrator dispatches an episodic deploy worker to land a finished bead's
-// PR, and that worker's skill drives the merge through the vetted safe-* path.
-// Both halves live in embedded markdown, so guard them here.
-func TestDeployWorkerDispatch(t *testing.T) {
-	orch, err := skills.ReadFile("skills/orchestrator.md")
-	if err != nil {
-		t.Fatalf("read embedded orchestrator.md: %v", err)
-	}
-	od := string(orch)
-	for _, want := range []string{
-		"worker-deploy-",                    // distinct deploy-worker session name
-		"deploy-worker.md",                  // dispatch points at the installed skill
-		"deploy-dispatched.jsonl",           // de-dupe ledger so we don't double-spawn
-		"--model=opus-200k",                 // same credit-gate guardrail as impl workers
-		"--mode=auto",                       // detached deploy worker can't clear prompts
-		"supervisor.orch.deploy_dispatched", // trail event for the dispatch
-	} {
-		if !strings.Contains(od, want) {
-			t.Errorf("orchestrator.md deploy dispatch missing %q", want)
-		}
-	}
-
-	skill, err := skills.ReadFile("skills/deploy-worker.md")
-	if err != nil {
-		t.Fatalf("read embedded deploy-worker.md: %v", err)
-	}
-	sd := string(skill)
-	for _, want := range []string{
-		"safe-rebase",              // rebase onto main (vetted wrapper, never --force)
-		"resolve-review-threads",   // resolve bot threads before merge gate
-		"safe-merge",               // CI-watch + TOCTOU squash-merge via vetted path
-		"--watch",                  // safe-merge --watch is the CI watch
-		"WORKER, not a supervisor", // episodic, finite — not a persistent loop
-	} {
-		if !strings.Contains(sd, want) {
-			t.Errorf("deploy-worker.md missing %q", want)
-		}
-	}
-	// A deploy worker must never use the raw, hook-denied merge path.
-	if strings.Contains(sd, "gh pr merge") {
-		t.Errorf("deploy-worker.md must merge via safe-merge, not raw 'gh pr merge'")
-	}
-}
-
-// TestWorkerPromptRequiresVerificationGate pins the verification-before-completion
-// hard gate (ce-fvsv): the worker dispatch prompt must force ≥1 verification step
-// (go test / make preflight / equivalent) before a worker may declare done. Code
-// written but never run is not done — this guards against ghost completions.
-func TestWorkerPromptRequiresVerificationGate(t *testing.T) {
-	b, err := skills.ReadFile("skills/orchestrator.md")
-	if err != nil {
-		t.Fatalf("read embedded orchestrator.md: %v", err)
-	}
-	doc := string(b)
-
-	for _, want := range []string{
-		"VERIFICATION GATE",
-		"go test",
-		"make preflight",
-	} {
-		if !strings.Contains(doc, want) {
-			t.Errorf("orchestrator.md worker dispatch missing verification-gate marker %q", want)
-		}
-	}
-}
-
-// TestSupervisorSkillsPreauthorizeUnattended guards the ce-4bc1 fix. The
-// Orchestrator (and, by the retro's plural principle, ALL supervisors) ran
-// over-cautious: spawned unattended in a detached session, they defaulted to
-// human-in-the-loop caution and stalled asking "should I proceed? / stand down?"
-// instead of acting. The fix is an explicit "no human is watching" pre-authorization
-// in each supervisor's boot SKILL. This test pins that contract: every supervisor
-// skill must carry the pre-authorization preamble, and the shared protocol must
-// document it once for all roles. Without these tokens the mesh silently regresses
-// to the stall the bead describes.
-func TestSupervisorSkillsPreauthorizeUnattended(t *testing.T) {
-	// Tokens common to all three per-role preambles. Loose enough to survive
-	// wording tweaks, specific enough to fail if the pre-authorization is dropped.
-	preauthTokens := []string{
-		"PRE-AUTHORIZED",            // the core grant
-		"pause to ask",              // ... the anti-pattern it forbids
-		"guardrails, not by asking", // ... and why it is safe to not ask
-		"unattended",                // the operating condition
-	}
-	// Derive the skill-file list from the supervisors slice in main.go rather
-	// than hardcoding it, so the test cannot drift from production as
-	// supervisors are added, removed, or renamed.
-	if len(supervisors) == 0 {
-		t.Fatal("no supervisors defined")
-	}
-	for _, s := range supervisors {
-		b, err := skills.ReadFile("skills/" + s.SkillFile)
-		if err != nil {
-			t.Fatalf("read embedded %s: %v", s.SkillFile, err)
-		}
-		doc := string(b)
-		for _, want := range preauthTokens {
-			if !strings.Contains(doc, want) {
-				t.Errorf("%s missing unattended pre-authorization token %q", s.SkillFile, want)
+// Beads, live sessions, and open PRs are authoritative. Operational role files
+// must not resurrect the retired roadmap, dispatch-ledger, or deploy-worker path.
+func TestSupervisorInstructionsUseDirectBeadsDispatch(t *testing.T) {
+	for _, name := range []string{"meta-orchestrator.md", "orchestrator.md", "overseer.md"} {
+		doc := readSupervisorSkill(t, name)
+		for _, forbidden := range []string{"roadmap.jsonl", "dispatched.jsonl", "deploy-dispatched.jsonl", "deploy-worker.md"} {
+			if strings.Contains(doc, forbidden) {
+				t.Errorf("%s contains retired operational state %q", name, forbidden)
 			}
 		}
 	}
-
-	// The shared protocol carries the canonical "(ALL supervisors)" statement so
-	// the principle is documented once and the per-role preambles can point to it.
-	b, err := skills.ReadFile("skills/protocol.md")
-	if err != nil {
-		t.Fatalf("read embedded protocol.md: %v", err)
+	orch := readSupervisorSkill(t, "orchestrator.md")
+	for _, want := range []string{"vroom-dispatch-direct", "-db ~/beads/context-engine/.beads", "open PR"} {
+		if !strings.Contains(orch, want) {
+			t.Errorf("orchestrator.md missing direct-dispatch marker %q", want)
+		}
 	}
-	if !strings.Contains(string(b), "Unattended Operation (ALL supervisors)") {
-		t.Errorf("protocol.md missing the shared \"Unattended Operation (ALL supervisors)\" section")
+	if _, err := skills.ReadFile("skills/deploy-worker.md"); err == nil {
+		t.Error("retired deploy-worker.md remains embedded")
 	}
 }
 
-// TestOrchestratorCrossChecksPeers pins ce-20p9 Fix 3: the Orchestrator tick
-// must run `agm scan --cross-check` to read the ground-truth (tmux) state of peer
-// supervisors and clear any that are still stuck with `agm send approve`. Without
-// this, a peer blocked on a permission prompt looks `active`/fresh and is never
-// unblocked — the ADR-002 gap this bead closes.
-func TestOrchestratorCrossChecksPeers(t *testing.T) {
-	b, err := skills.ReadFile("skills/orchestrator.md")
-	if err != nil {
-		t.Fatalf("read embedded orchestrator.md: %v", err)
+func TestSupervisorInstructionsUseExecutableAGMCommands(t *testing.T) {
+	for _, name := range []string{"protocol.md", "meta-orchestrator.md", "orchestrator.md", "overseer.md"} {
+		doc := readSupervisorSkill(t, name)
+		for _, forbidden := range []string{"session health --all --json", "session health \"", "2>/dev/null", "python3", "printf '{\""} {
+			if strings.Contains(doc, forbidden) {
+				t.Errorf("%s contains stale or unsafe command form %q", name, forbidden)
+			}
+		}
 	}
-	doc := string(b)
-	for _, want := range []string{
-		"agm scan --cross-check",           // the ground-truth peer sweep
-		"agm send approve",                 // clear anything cross-check couldn't auto-approve
-		"supervisor.orch.peer_cross_check", // trail event for the sweep
-	} {
-		if !strings.Contains(doc, want) {
-			t.Errorf("orchestrator.md missing cross-check marker %q", want)
+	for _, name := range []string{"protocol.md", "orchestrator.md", "overseer.md"} {
+		if doc := readSupervisorSkill(t, name); !strings.Contains(doc, "agm -o json session health --all") {
+			t.Errorf("%s missing canonical structured health command", name)
 		}
 	}
 }
 
-// TestOrchestratorApprovesBlockedWorker pins ce-20p9 Fix 4: a worker stuck in
-// PERMISSION_PROMPT cannot receive `agm send msg` (it is frozen on its prompt),
-// so the Level 2 response must be `agm send approve worker-<id>` — not a defer
-// message that never arrives. Guard both the new behavior and the removal of the
-// old (broken) nudge-by-message so it cannot silently regress.
-func TestOrchestratorApprovesBlockedWorker(t *testing.T) {
-	b, err := skills.ReadFile("skills/orchestrator.md")
-	if err != nil {
-		t.Fatalf("read embedded orchestrator.md: %v", err)
-	}
-	doc := string(b)
-	for _, want := range []string{
-		`agm send approve "worker-<bead-id>"`,        // approve the blocked worker
-		"supervisor.orch.worker_permission_approved", // trail event for the approve
-		"cannot receive", // the reason messaging fails
-	} {
-		if !strings.Contains(doc, want) {
-			t.Errorf("orchestrator.md missing blocked-worker-approve marker %q", want)
+func TestSupervisorInstructionsRequireEndToEndCompletion(t *testing.T) {
+	for _, name := range []string{"protocol.md", "orchestrator.md", "overseer.md"} {
+		doc := strings.ToLower(readSupervisorSkill(t, name))
+		for _, want := range []string{"merged", "deployed", "verified"} {
+			if !strings.Contains(doc, want) {
+				t.Errorf("%s missing completion gate %q", name, want)
+			}
 		}
-	}
-	// The old broken behavior — messaging a permission-blocked worker to defer —
-	// must be gone; that message can never reach a frozen session.
-	if strings.Contains(doc, "supervisor.orch.worker_permission_nudge") {
-		t.Errorf("orchestrator.md still records worker_permission_nudge; a blocked worker can't receive agm send msg (ce-20p9 Fix 4)")
 	}
 }
 
-// TestProtocolDocumentsPermissionModel pins ce-20p9 Fix 5 & Fix 6: the shared
-// protocol must document how supervisors stay unblocked — the pre-approved RBAC
-// profile + auto mode (so prompts are rare), mutual `agm send approve` (so the
-// rare ones clear), and the supervisor-independent watchdog that survives a
-// total-mesh stall (the gap watch-stalled's alert-only recovery cannot cover).
-func TestProtocolDocumentsPermissionModel(t *testing.T) {
-	b, err := skills.ReadFile("skills/protocol.md")
-	if err != nil {
-		t.Fatalf("read embedded protocol.md: %v", err)
+func TestSupervisorSkillsPreauthorizeUnattended(t *testing.T) {
+	for _, s := range supervisors {
+		doc := strings.ToLower(readSupervisorSkill(t, s.SkillFile))
+		for _, want := range []string{"unattended", "pre-authorized", "safety comes from"} {
+			if !strings.Contains(doc, want) {
+				t.Errorf("%s missing unattended-operation marker %q", s.SkillFile, want)
+			}
+		}
 	}
-	doc := string(b)
-	for _, want := range []string{
-		"Permission Model & Mutual Unblock (ALL supervisors)", // the section
-		"--mode=auto",                         // auto mode: no interactive waits
-		"agm send approve",                    // mutual unblock channel
-		"install-supervisor-unblock-schedule", // the external watchdog (Fix 6)
-		"watch-stalled",                       // ... and why it is not enough alone
-	} {
-		if !strings.Contains(doc, want) {
-			t.Errorf("protocol.md missing permission-model marker %q", want)
+}
+
+// Role prompts are scheduling interfaces, not implementations. Keep their
+// context cost bounded and deterministic mechanics in typed commands.
+func TestSupervisorRoleInstructionsStayConcise(t *testing.T) {
+	for _, s := range supervisors {
+		doc := readSupervisorSkill(t, s.SkillFile)
+		if lines := strings.Count(doc, "\n") + 1; lines > 150 {
+			t.Errorf("%s has %d lines; role prompt exceeds 150-line review trigger", s.SkillFile, lines)
 		}
 	}
 }

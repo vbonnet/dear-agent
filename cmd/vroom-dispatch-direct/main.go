@@ -52,7 +52,7 @@ const subprocessTimeout = 60 * time.Second
 
 // sessionSpawnTimeout bounds the `agm session new` call specifically. Unlike
 // the quick bd/gh/agm-list calls under subprocessTimeout, a spawn boots the
-// whole worker harness (tmux session, claude-code startup, workspace checks)
+// whole worker harness (tmux session, harness startup, workspace checks)
 // and legitimately runs past 60s; killing it mid-boot leaves a half-created
 // session AND reads as a spawn failure that stops the run. 180s is generous
 // for a healthy boot while still bounding a truly hung spawn.
@@ -77,10 +77,12 @@ var humanGated = map[string]bool{
 	"ce-6as.10":  true, // interactive Gmail OAuth re-consent — HUMAN-ACTION, needs a human at the browser
 }
 
-// defaultModel is the model alias workers spawn with. opus-200k → claude-opus-4-8:
-// design-phase work needs Opus, and the 200k variant dodges the 1M credit gate
-// that the bare opus/sonnet aliases trip on this Max-plan auth (ce-84l2).
-const defaultModel = "opus-200k"
+const (
+	defaultHarness   = "claude-code"
+	defaultModel     = "opus-200k"
+	defaultMode      = "auto"
+	defaultWorkspace = "oss"
+)
 
 // workerRole is the RBAC profile workers spawn with.
 const workerRole = "worker"
@@ -88,6 +90,16 @@ const workerRole = "worker"
 // dispatchSender is the --sender label on dispatch messages, so the trail
 // attributes them to this tool rather than a human.
 const dispatchSender = "vroom-orchestrator"
+
+// workerLaunchConfig is the harness extension boundary for direct dispatch.
+// Candidate selection and the work contract are harness-neutral; operators may
+// select any AGM-supported harness/model/mode without forking the dispatcher.
+type workerLaunchConfig struct {
+	Harness   string
+	Model     string
+	Mode      string
+	Workspace string
+}
 
 // bead mirrors the fields of a `bd ready --json` array element that we consume.
 type bead struct {
@@ -270,13 +282,8 @@ func firstParagraph(desc string) string {
 	return strings.Join(strings.Fields(desc), " ")
 }
 
-// renderPrompt produces the dispatch prompt sent to a worker session. It is full
-// parity with the manual orchestrator dispatch prompt (the one eliminated with
-// the prompt-file layer): the worker drives the bead through the wayfinder SDLC
-// workflow, works in an isolated worktree off the read-only ~/src checkout, and
-// honours the merged-PR Definition of Done. Dispatching directly from beads must
-// not water the worker's instructions down — hence the wayfinder process and DoD
-// rules live here, not just the terse rule list.
+// renderPrompt produces the harness-neutral work contract sent to a worker.
+// Harness/model selection belongs to workerLaunchConfig, not prompt prose.
 func renderPrompt(b bead) string {
 	prio := priorityLabel(b.Priority)
 	summary := firstParagraph(b.Description)
@@ -292,46 +299,49 @@ func renderPrompt(b bead) string {
 
 You are a worker session assigned to bead %s (%s): %s
 
-**Stop after work complete + bead note written, OR PR created + auto-merge armed. Do NOT close bead. Do NOT create new beads.**
+**Own this bead through every applicable delivery gate. PR creation is not done.**
 
 ## Goal
 
 %s
 
-## Process (MANDATORY — wayfinder SDLC, not raw code-first execution)
+## Process
 
-- Invoke /wayfinder and drive the bead through its phases (CHARTER -> ... -> RETRO).
-  You are running on Opus specifically so the design/audit phases are rigorous —
-  do not shortcut CHARTER/DESIGN/AUDIT to jump straight to code.
-- Wayfinder artifacts (wf/, W0, design docs, audits, retros) are temporal: they go
-  to the knowledge base (~/src/engram-research), NEVER committed into dear-agent.
+- Use the canonical Wayfinder V2 lifecycle: CHARTER, PROBLEM, RESEARCH, DESIGN,
+  SPEC, PLAN, SETUP, BUILD, RETRO. Use the installed command or the harness-native
+  Wayfinder skill; never activate a retired lifecycle.
+- Wayfinder, audit, plan, design-exploration, and retrospective artifacts are
+  temporal. Store them in an engram-research worktree, never in dear-agent.
 - Work in ~/worktrees/dear-agent/%s/ (create the worktree from ~/src/dear-agent;
   ~/src is READ-ONLY).
 - Commit incrementally after each sub-task — uncommitted work is nonexistent work.
-- VERIFICATION GATE (MANDATORY — no ghost completions): Before writing 'done'
-  in a bead note or stopping, run ≥1 verification step (go test ./...,
-  make preflight, deploy-status check, or equivalent) and include the output.
-  Code written but never run is NOT done.
-- When the implementation phase is complete: open a PR via 'safe-pr create --wayfinder <wf-dir>'.
+- Open the PR with: safe-pr create --wayfinder <wf-dir>. Address CI and automated
+  review feedback. Use only the repository's safe rebase/merge wrappers.
 - If stuck after 2 retries on the same error: STOP, report failure with two concrete
   alternatives. Permission/access errors: 0 retries — report immediately.
 
-## Bead closure (DoD — MANDATORY, do NOT skip)
+## Delivery gates
 
-- A bead is Done ONLY when its PR is MERGED to main. 'PR created' / 'PR open' /
-  'PR approved' are NOT done.
-- Before running 'bd ... close %s', you MUST verify the PR is merged:
-    gh pr view <NNN> --repo vbonnet/dear-agent --json state,mergedAt
-- If state is not MERGED (or mergedAt is null): do NOT close the bead. Add a bead
-  note recording the block and leave the bead OPEN.
-- Only close once mergedAt is non-null; put the merged PR reference in the close reason.
+Before closing %s, record evidence for every applicable gate:
+
+1. MERGED — gh pr view <NNN> --repo vbonnet/dear-agent --json state,mergedAt
+   reports MERGED and non-null mergedAt.
+2. DEPLOYED — if a deployable artifact changed, install it from the merged
+   revision and prove its status is clean. Otherwise record "deployment: N/A"
+   with the reason.
+3. VERIFIED — run relevant source checks and, for runtime changes, exercise the
+   installed behavior locally. Include commands and results in the bead note.
+
+If any gate is incomplete, leave the bead open. Human-owned product, security,
+money, legal, destructive, merge, or deployment decisions remain blocked until
+the human acts.
 
 ## Terminal status code (MANDATORY — the first token of your final bead note)
 
 - When you stop working this bead, record exactly one outcome as the FIRST TOKEN
   of a bead note: DONE, DONE_WITH_CONCERNS, or FAILED.
-- DONE — deliverable complete, no reservations.
-- DONE_WITH_CONCERNS — deliverable complete, but you hold a reservation (a risky
+- DONE — all applicable delivery gates passed, no reservations.
+- DONE_WITH_CONCERNS — all delivery gates passed, but you hold a reservation (a risky
   assumption, a shortcut taken, a test you could not run, a design tradeoff you
   are unsure about). Ship the work AND document the concern explicitly — what it
   is and why — so a supervisor can decide whether to act on it. Do NOT downgrade
@@ -344,11 +354,10 @@ You are a worker session assigned to bead %s (%s): %s
 - ALWAYS use `+"`bd --db ~/beads/context-engine/.beads`"+` (never bare bd)
 - NEVER write to ~/src/** (read-only — use worktrees only)
 - NEVER use --no-verify or --force
+- NEVER use raw git push or gh pr merge; use the safe wrappers
 - NEVER run chezmoi apply
-- ALWAYS use `+"`GIT_TERMINAL_PROMPT=0 gtimeout 30`"+` for git push
-- Workers MUST use claude-opus-4-8, --mode=auto, --workspace=oss
 - Do NOT run `+"`pkill -x gopls`"+`
-- STOP after the primary deliverable is done — write a bead note and stop
+- Do NOT create unrelated beads or broaden scope
 
 Bead details: run bd --db ~/beads/context-engine/.beads show %s
 `, b.ID, b.Title, b.ID, prio, summary, goal, b.ID, b.ID, b.ID)
@@ -362,7 +371,7 @@ Bead details: run bd --db ~/beads/context-engine/.beads show %s
 //
 // maxPriority is the numeric priority ceiling (0=P0 only, 1=P0+P1, 2=P0..P2):
 // the orchestrator narrows this band as the Meta-Orchestrator heartbeat goes
-// stale, so a silent roadmap owner restricts new work to the most critical tier
+// stale, so a silent coordination owner restricts new work to the most critical tier
 // rather than pouring speculative P2s into an unmonitored queue.
 func selectCandidates(beads []bead, liveWorkers map[string]bool, prs []pullRequest, maxPriority int) []bead {
 	var out []bead
@@ -397,28 +406,28 @@ func selectCandidates(beads []bead, liveWorkers map[string]bool, prs []pullReque
 	return out
 }
 
-// sessionNewArgs builds the `agm session new` argument list for spawning a worker.
-// Model and mode are pinned (not left to agm defaults) for the same reason as the
-// supervisors: the defaults are credit-gated 1M-context sonnet in non-executable
-// plan mode (ce-84l2). Workers run detached in the oss workspace under the worker
-// RBAC role.
-func sessionNewArgs(name, model string) []string {
-	return []string{
+// sessionNewArgs builds the AGM launch request. The defaults preserve current
+// Claude operation, while explicit flags provide the non-Claude path.
+func sessionNewArgs(name string, cfg workerLaunchConfig) []string {
+	args := []string{
 		"session", "new", name,
-		"--detached", "--workspace=oss", "--harness=claude-code",
-		"--model=" + model,
-		"--mode=auto",
+		"--detached", "--workspace=" + cfg.Workspace, "--harness=" + cfg.Harness,
+		"--model=" + cfg.Model,
 		"--role", workerRole,
 	}
+	if cfg.Mode != "" {
+		args = append(args, "--mode="+cfg.Mode)
+	}
+	return args
 }
 
 // spawnSession creates the detached worker session. Package var for test stubbing.
 // Uses sessionSpawnTimeout (not the blanket subprocessTimeout): harness boot
 // legitimately exceeds 60s — see the const's comment.
-var spawnSession = func(ctx context.Context, name, model string) error {
+var spawnSession = func(ctx context.Context, name string, cfg workerLaunchConfig) error {
 	ctx, cancel := context.WithTimeout(ctx, sessionSpawnTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "agm", sessionNewArgs(name, model)...)
+	cmd := exec.CommandContext(ctx, "agm", sessionNewArgs(name, cfg)...)
 	// Mark the spawned session tree as unattended so its own `agm send` calls
 	// auto-stash stale input instead of deadlocking as if a human were typing
 	// (ce-v9in), and scrub the API key so workers use the session's own auth.
@@ -497,9 +506,9 @@ func isDeterministicSpawnFailure(err error) bool {
 // so the caller can skip the bead and continue; any other failure (circuit
 // breaker / at capacity / timeout / unknown) is returned as-is and no prompt is
 // sent — the bead is simply retried on a later run.
-func dispatch(ctx context.Context, b bead, model string) error {
+func dispatch(ctx context.Context, b bead, cfg workerLaunchConfig) error {
 	name := workerSessionName(b.ID)
-	if err := spawnSession(ctx, name, model); err != nil {
+	if err := spawnSession(ctx, name, cfg); err != nil {
 		wrapped := fmt.Errorf("spawn %s: %w", name, err)
 		if isDeterministicSpawnFailure(err) {
 			return &skipBeadError{err: wrapped}
@@ -515,7 +524,10 @@ func dispatch(ctx context.Context, b bead, model string) error {
 func main() {
 	db := flag.String("db", "~/beads/context-engine/.beads", "path to the beads database")
 	repo := flag.String("repo", "vbonnet/dear-agent", "GitHub repo (owner/name) to check for open PRs")
-	model := flag.String("model", defaultModel, "model alias workers spawn with (avoid bare opus/sonnet — credit-gated 1M)")
+	harness := flag.String("harness", defaultHarness, "AGM harness for workers")
+	model := flag.String("model", defaultModel, "model alias for the selected harness")
+	mode := flag.String("mode", defaultMode, "AGM permission mode; empty omits the flag")
+	workspace := flag.String("workspace", defaultWorkspace, "AGM workspace for workers")
 	maxPriority := flag.Int("max-priority", 2, "numeric priority ceiling: 0=P0 only, 1=P0+P1, 2=P0..P2 (orchestrator narrows this as Meta-O goes stale)")
 	dryRun := flag.Bool("dry-run", false, "report what would be dispatched without spawning any sessions")
 	flag.Parse()
@@ -552,14 +564,15 @@ func main() {
 
 	candidates := selectCandidates(beads, live, prs, *maxPriority)
 
-	dispatched := dispatchCandidates(ctx, candidates, *model, *dryRun, os.Stdout, os.Stderr)
+	launch := workerLaunchConfig{Harness: *harness, Model: *model, Mode: *mode, Workspace: *workspace}
+	dispatched := dispatchCandidates(ctx, candidates, launch, *dryRun, os.Stdout, os.Stderr)
 
 	fmt.Fprintf(os.Stderr,
 		"vroom-dispatch-direct: %d ready, %d live worker(s), %d eligible, %d dispatched\n",
 		len(beads), len(live), len(candidates), dispatched)
 }
 
-func dispatchCandidates(ctx context.Context, candidates []bead, model string, dryRun bool, out, errOut io.Writer) int {
+func dispatchCandidates(ctx context.Context, candidates []bead, cfg workerLaunchConfig, dryRun bool, out, errOut io.Writer) int {
 	dispatched := 0
 	for _, b := range candidates {
 		if ctx.Err() != nil {
@@ -570,7 +583,7 @@ func dispatchCandidates(ctx context.Context, candidates []bead, model string, dr
 			dispatched++
 			continue
 		}
-		if err := dispatch(ctx, b, model); err != nil {
+		if err := dispatch(ctx, b, cfg); err != nil {
 			// Deterministic per-bead failure: it will fail identically on every
 			// retry, so skip this bead and keep dispatching — aborting here is
 			// how one poisoned bead stalled all dispatch every tick (ce-b1zw).

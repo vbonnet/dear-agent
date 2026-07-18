@@ -13,7 +13,7 @@ The operational instructions for each supervisor live in
 
 | File | Supervisor | Tick interval |
 |------|-----------|---------------|
-| `meta-orchestrator.md` | Meta-O (CTO) — roadmap, prioritization | 3 min |
+| `meta-orchestrator.md` | Meta-O (CTO) — Beads backlog quality, prioritization | 3 min |
 | `orchestrator.md` | Orch (COO) — dispatch, worker monitoring | 90s |
 | `overseer.md` | Overseer (CRO) — resources, health, cleanup | 60s |
 | `protocol.md` | Shared state protocol (all three read) | — |
@@ -32,16 +32,19 @@ vroom-dispatch --status         # show mesh health
 
 ## Shared State
 
-All supervisors read/write from `~/.agm/vroom/`:
+The process-isolated mesh uses this local state:
 
 ```
 ~/.agm/vroom/
-├── trail.jsonl          # Append-only decision log (all 3 write)
-├── roadmap.jsonl        # Accepted proposals (Meta-O writes)
-├── dispatched.jsonl     # Dispatch records (Orch writes)
+├── trail.jsonl          # Typed AGM components append decision evidence
 ├── skills/              # Installed SKILL files
 └── heartbeat/           # Per-supervisor heartbeat files
 ```
+
+Beads, live AGM sessions, and open GitHub PRs are the operational sources of
+truth. The retired roadmap, dispatch-ledger, deploy-ledger, and prompt-file
+projections are not part of the process-isolated architecture. Supervisor
+prompts do not hand-build JSONL; typed Go components own encoding and writes.
 
 `agm supervisor heartbeat` stores the authoritative record under
 `~/.agm/supervisors/<canonical-id>/heartbeat.json` and mirrors it to the VROOM
