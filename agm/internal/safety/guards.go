@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
@@ -91,28 +92,59 @@ var permissionPromptPattern = regexp.MustCompile(
 
 // --- Human Typing Guard ---
 
-// CheckHumanTyping detects unsent text in the Claude prompt line.
-// Text after the ❯ prompt without an AGM sender header indicates a human is typing.
-// Uses a single ANSI capture to both detect content and rule out Claude Code
-// ghost/placeholder text (dim attribute \x1b[2m) in one tmux round-trip.
+// CheckHumanTyping reports whether a human is actively typing at the Claude
+// prompt line. It uses a single ANSI capture to both read the composer text and
+// classify the pane's dim/grey ghost-text state in one tmux round-trip.
+//
+// The detection is an ALLOWLIST of known-safe pane states, not a denylist of
+// human-typing patterns (ce-py3x; retro 2026-06-17-vroom-overnight-human-typing-
+// guard; policy docs/policies/harness-hygiene "invert to allowlist known-safe").
+// The historical denylist presumed any text after ❯ was human typing unless it
+// matched a hand-added exemption, so every novel Claude Code UI state read as
+// typing — one such untracked state blocked the Overseer overnight (a crash-
+// prevention control acting as total-work-prevention). The ghost/dim-and-grey
+// state is one allowlist entry, handled here at the ANSI layer via
+// isGhostTextAfterPrompt; the remaining known-safe states and the flipped
+// default (unrecognized ⇒ not typing) live in detectHumanTyping.
 func CheckHumanTyping(sessionName, socketPath string) *Violation {
 	ansiContent, err := capturePaneWithEscape(sessionName, socketPath, 10)
 	if err != nil {
 		return nil // Can't capture = can't detect, allow through
 	}
-	v := detectHumanTyping(stripANSI(ansiContent))
-	if v == nil {
-		return nil
-	}
-	// The plain-text check found content: confirm it is not ghost text.
-	// Ghost text is dim-attributed (\x1b[2m) after ❯ in the ANSI capture.
+	// Ghost/dim/grey text after ❯ is a known-safe state (placeholder, not human
+	// input). Classify it from the ANSI capture before the plain-text pass so
+	// dim-styled content never reaches the human-input signature check.
 	if isGhostTextAfterPrompt(ansiContent) {
 		return nil
 	}
-	return v
+	return detectHumanTyping(stripANSI(ansiContent))
 }
 
 // detectHumanTyping is the pure-logic detection function (testable without tmux).
+//
+// It is an ALLOWLIST classifier: a violation is reported only when the composer
+// positively matches the human-input signature; every other pane state — known
+// or unknown — is treated as not typing. This inverts the previous denylist,
+// whose default was "assume typing" and which therefore misread each new UI
+// state as a human at the keyboard (ce-py3x). Known-safe states (return nil):
+//
+//  1. no ❯ prompt line present;
+//  2. empty / whitespace-only text after ❯;
+//  3. an AGM sender header ([From:/[from:]) after ❯ (automated message);
+//  4. a permission / navigation UI pattern after ❯ (permissionPromptPattern);
+//  5. text after ❯ containing no alphanumeric input rune — the flipped default:
+//     pure UI chrome (box-drawing, braille spinner glyphs, separators, arrows,
+//     symbol-only decoration) is not human typing. Previously this fired.
+//
+// Human-typing signature (fires): text after ❯ that is none of the above and
+// contains at least one Unicode letter or digit — i.e., positively looks like
+// typed input. The check is Unicode-aware so non-ASCII human input still fires
+// while box-drawing/braille/symbol chrome (categories So/Sk) is excluded.
+//
+// Biasing toward "not typing" on ambiguity is safe: the guard is advisory and
+// the send path stashes the composer (Claude Code C-s auto-unstashes on the next
+// submit), so a missed detection is recoverable — a false positive that blocks
+// autonomous work is not.
 func detectHumanTyping(paneContent string) *Violation {
 	lines := strings.Split(paneContent, "\n")
 
@@ -127,16 +159,24 @@ func detectHumanTyping(paneContent string) *Violation {
 		// Extract text after the prompt character
 		after := strings.TrimSpace(line[idx+len("❯"):])
 		if after == "" {
-			return nil // Empty prompt, no one is typing
+			return nil // (2) empty prompt, no one is typing
 		}
 
-		// Check if it's an AGM sender header (automated message, not human)
+		// (3) AGM sender header (automated message, not human)
 		if strings.HasPrefix(after, "[From:") || strings.HasPrefix(after, "[from:") {
 			return nil
 		}
 
-		// Check if it's a permission prompt option (not human typing)
+		// (4) permission / navigation UI pattern (not human typing)
 		if permissionPromptPattern.MatchString(after) {
+			return nil
+		}
+
+		// (5) flipped default: require a positive human-input signature. Content
+		// with no letter or digit is UI chrome (box-drawing, spinner glyphs,
+		// separators, symbols), not typed input — treat it as not typing rather
+		// than assuming the worst about an unrecognized state.
+		if !hasHumanInputRune(after) {
 			return nil
 		}
 
@@ -154,7 +194,20 @@ func detectHumanTyping(paneContent string) *Violation {
 		}
 	}
 
-	return nil // No prompt found = not typing
+	return nil // (1) no prompt found = not typing
+}
+
+// hasHumanInputRune reports whether s contains at least one Unicode letter or
+// digit — the positive signature of typed human input. It is Unicode-aware so
+// non-ASCII keyboard input counts, while pure UI chrome (box-drawing, braille
+// spinner frames, arrows, separators, other symbols) does not.
+func hasHumanInputRune(s string) bool {
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return true
+		}
+	}
+	return false
 }
 
 // --- Session Uninitialized Guard ---

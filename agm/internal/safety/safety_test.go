@@ -115,6 +115,46 @@ func TestDetectHumanTyping(t *testing.T) {
 			paneContent:   "some output\n❯ Use arrows to select",
 			wantViolation: false,
 		},
+		// Allowlist inversion (ce-py3x): unrecognized non-word pane chrome
+		// defaults to NOT typing instead of firing. Each of these previously
+		// tripped the denylist as "a human is typing".
+		{
+			name:          "separator chrome after prompt - not human typing",
+			paneContent:   "some output\n❯ ────────────────────",
+			wantViolation: false,
+		},
+		{
+			name:          "braille spinner glyph leaked after prompt - not human typing",
+			paneContent:   "some output\n❯ ⣾",
+			wantViolation: false,
+		},
+		{
+			name:          "box-drawing border after prompt - not human typing",
+			paneContent:   "some output\n❯ ╭──────────╮",
+			wantViolation: false,
+		},
+		{
+			name:          "arrow/symbol-only UI chrome after prompt - not human typing",
+			paneContent:   "some output\n❯ ⏵⏵ »",
+			wantViolation: false,
+		},
+		{
+			name:          "punctuation-only after prompt - not human typing",
+			paneContent:   "some output\n❯ ...",
+			wantViolation: false,
+		},
+		// The positive human-input signature still fires, including non-ASCII
+		// input (Unicode-aware letters/digits), so the guard stays useful.
+		{
+			name:          "digits-only human input - typing",
+			paneContent:   "some output\n❯ 42",
+			wantViolation: true,
+		},
+		{
+			name:          "non-ASCII human input - typing",
+			paneContent:   "some output\n❯ 修复这个错误",
+			wantViolation: true,
+		},
 	}
 
 	for _, tt := range tests {
