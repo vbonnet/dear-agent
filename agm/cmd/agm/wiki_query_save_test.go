@@ -52,3 +52,14 @@ func TestResolveWikiOutputPathRejectsTraversal(t *testing.T) {
 		t.Fatalf("resolved output = %q, want %q", got, want)
 	}
 }
+
+func TestResolveWikiOutputPathRejectsSymlinkTraversal(t *testing.T) {
+	kb := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(kb, "linked")); err != nil {
+		t.Fatalf("create symlink fixture: %v", err)
+	}
+	if _, err := resolveWikiOutputPath(kb, "linked/nested/topic.md"); err == nil {
+		t.Fatal("resolveWikiOutputPath accepted a path through an escaping symlink")
+	}
+}

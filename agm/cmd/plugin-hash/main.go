@@ -34,7 +34,10 @@ func run(dir string, check bool) error {
 			return fmt.Errorf("read %s: %w", path, readErr)
 		}
 		if !bytes.Contains(content, []byte("content-hash:")) {
-			continue
+			if filepath.Base(path) == "SPEC.md" {
+				continue
+			}
+			return fmt.Errorf("plugin command %s has no content-hash field", path)
 		}
 		stamped, stampErr := pluginhash.Stamp(content)
 		if stampErr != nil {

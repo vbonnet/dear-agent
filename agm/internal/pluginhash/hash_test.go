@@ -50,3 +50,21 @@ func TestStampNormalizesCRLF(t *testing.T) {
 		t.Fatalf("CRLF hash mismatch:\n%s", stamped)
 	}
 }
+
+func TestStampDoesNotRewriteContentHashTextInBody(t *testing.T) {
+	source := []byte("---\ncontent-hash: PLACEHOLDER\n---\n\n# Body\n\ncontent-hash: PLACEHOLDER\n")
+	stamped, err := Stamp(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(string(stamped), "# Body\n\ncontent-hash: PLACEHOLDER\n") {
+		t.Fatalf("Stamp rewrote body content:\n%s", stamped)
+	}
+}
+
+func TestStampRejectsDuplicateFrontmatterHashFields(t *testing.T) {
+	source := []byte("---\ncontent-hash: PLACEHOLDER\ncontent-hash: 0000\n---\n\n# Body\n")
+	if _, err := Stamp(source); err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("expected duplicate-field error, got %v", err)
+	}
+}

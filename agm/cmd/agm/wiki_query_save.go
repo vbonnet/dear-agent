@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -144,7 +145,51 @@ func resolveWikiOutputPath(kbPath, output string) (string, error) {
 	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("--output must stay within the knowledge base")
 	}
+	resolvedKB, err := filepath.EvalSymlinks(absKB)
+	if err != nil {
+		return "", fmt.Errorf("resolve knowledge base symlinks: %w", err)
+	}
+	resolvedOut, err := resolveWikiOutputSymlinks(absOut)
+	if err != nil {
+		return "", fmt.Errorf("resolve --output symlinks: %w", err)
+	}
+	resolvedRel, err := filepath.Rel(resolvedKB, resolvedOut)
+	if err != nil || resolvedRel == "." || resolvedRel == ".." || strings.HasPrefix(resolvedRel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("--output must stay within the knowledge base")
+	}
 	return absOut, nil
+}
+
+// resolveWikiOutputSymlinks resolves the target when it exists, or the nearest
+// existing ancestor when it does not. This prevents an in-tree symlinked
+// directory from redirecting a newly created page outside the knowledge base.
+func resolveWikiOutputSymlinks(path string) (string, error) {
+	if _, err := os.Lstat(path); err == nil {
+		return filepath.EvalSymlinks(path)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+
+	current := filepath.Dir(path)
+	missing := []string{filepath.Base(path)}
+	for {
+		resolved, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			for i := len(missing) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, missing[i])
+			}
+			return resolved, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", err
+		}
+		missing = append(missing, filepath.Base(current))
+		current = parent
+	}
 }
 
 const maxWikiQueryInputBytes = 1024 * 1024
