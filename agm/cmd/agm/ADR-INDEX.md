@@ -1,5 +1,7 @@
 # AGM command architecture decisions
 
+<!-- Last audited: 2026-07-19 -->
+
 Numbering is scoped to this directory. Gaps preserve deleted identities.
 
 | ADR | Decision | Status |

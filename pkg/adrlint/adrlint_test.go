@@ -162,6 +162,7 @@ func TestGlobPathMatch(t *testing.T) {
 
 func policyFixture() string {
 	return `adr-governance:
+  max-lines: 300
   scopes:
     - path: docs/adr
       index: README.md
@@ -180,6 +181,7 @@ func TestCheckRepositoryRejectsMalformedADRInputs(t *testing.T) {
 	writeADRFile(t, repo, ".dear-agent.yml", policyFixture())
 	writeADRFile(t, repo, "docs/adr/ADR-001-example.md", recordFixture("001", "Example decision", "Accepted")+"\nStatus: Draft\n")
 	writeADRFile(t, repo, "docs/adr/ADR-37-malformed.md", "# ADR-37: malformed\n\nStatus: Accepted\n")
+	writeADRFile(t, repo, "docs/adr/001.md", "# ADR-001: malformed bare name\n\nStatus: Accepted\n")
 	writeADRFile(t, repo, "docs/adr/README.md", indexFixture("001", "ADR-001-example.md", "Example decision", "Accepted")+"  | [001](ADR-001-example.md#context) | Duplicate invalid status | Draft |\n")
 	writeADRFile(t, repo, "pkg/hash/ADR.md", "# Hash decisions\n\nStatus: Accepted\n")
 	gitADR(t, repo, "add", ".")
@@ -193,6 +195,24 @@ func TestCheckRepositoryRejectsMalformedADRInputs(t *testing.T) {
 		if !hasReason(report.Violations, want) {
 			t.Errorf("missing %q violation: %#v", want, report.Violations)
 		}
+	}
+}
+
+func TestCheckRepositoryEnforcesADRLineBudget(t *testing.T) {
+	repo := newADRRepo(t)
+	writeADRFile(t, repo, ".dear-agent.yml", policyFixture())
+	writeADRFile(t, repo, "docs/adr/ADR-001-example.md", recordFixture("001", "Example decision", "Accepted")+strings.Repeat("detail\n", 300))
+	writeADRFile(t, repo, "docs/adr/README.md", indexFixture("001", "ADR-001-example.md", "Example decision", "Accepted"))
+	writeADRFile(t, repo, "pkg/hash/ADR.md", "# Hash decisions\n\nStatus: Accepted\n")
+	gitADR(t, repo, "add", ".")
+	gitADR(t, repo, "commit", "-m", "fixture")
+
+	report, err := CheckRepository(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasReason(report.Violations, "ADR review budget") {
+		t.Fatalf("missing line-budget violation: %#v", report.Violations)
 	}
 }
 

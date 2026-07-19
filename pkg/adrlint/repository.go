@@ -51,11 +51,12 @@ func checkRepository(ctx context.Context, root string) (Report, error) {
 			return Report{}, fmt.Errorf("adrlint: read %s: %w", aggregate.Path, readErr)
 		}
 		report.Records++
+		report.Violations = append(report.Violations, sizeViolations(aggregate.Path, data, policy.MaxLines)...)
 		report.Violations = append(report.Violations, parseAggregate(root, aggregate.Path, data, governed)...)
 	}
 
 	for _, scope := range policy.Scopes {
-		records, scopeViolations, scopeErr := validateScope(root, scope, tracked, trackedSet, governed)
+		records, scopeViolations, scopeErr := validateScope(root, scope, tracked, trackedSet, governed, policy.MaxLines)
 		if scopeErr != nil {
 			return Report{}, scopeErr
 		}
@@ -75,7 +76,7 @@ func checkRepository(ctx context.Context, root string) (Report, error) {
 	return report, nil
 }
 
-func validateScope(root string, scope Scope, tracked []string, trackedSet, governed map[string]bool) (map[string]record, []Violation, error) {
+func validateScope(root string, scope Scope, tracked []string, trackedSet, governed map[string]bool, maxLines int) (map[string]record, []Violation, error) {
 	records := map[string]record{}
 	ids := map[string]string{}
 	var violations []Violation
@@ -94,6 +95,7 @@ func validateScope(root string, scope Scope, tracked []string, trackedSet, gover
 		if err != nil {
 			return nil, nil, fmt.Errorf("adrlint: read %s: %w", relative, err)
 		}
+		violations = append(violations, sizeViolations(relative, data, maxLines)...)
 		parsed, recordViolations := parseRecord(root, relative, data, governed)
 		violations = append(violations, recordViolations...)
 		if previous, exists := ids[parsed.id]; exists {
@@ -118,6 +120,17 @@ func validateScope(root string, scope Scope, tracked []string, trackedSet, gover
 	}
 	violations = append(violations, validateIndex(root, indexRelative, indexData, records)...)
 	return records, violations, nil
+}
+
+func sizeViolations(relative string, data []byte, maxLines int) []Violation {
+	lines := bytes.Count(data, []byte{'\n'})
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		lines++
+	}
+	if lines <= maxLines {
+		return nil
+	}
+	return []Violation{{Path: relative, Reason: fmt.Sprintf("%d lines exceeds the %d-line ADR review budget", lines, maxLines)}}
 }
 
 func trackedADRFiles(ctx context.Context, root string) ([]string, error) {

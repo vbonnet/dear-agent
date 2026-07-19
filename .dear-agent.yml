@@ -55,6 +55,7 @@ pr-policy:
 # self-contained. `make lint-adrs` rejects undeclared tracked ADR paths and
 # identity, lifecycle, index, size, supersession, or local-link drift.
 adr-governance:
+  max-lines: 300
   scopes:
     - path: docs/adr
       index: README.md

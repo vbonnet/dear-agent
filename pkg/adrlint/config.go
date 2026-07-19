@@ -19,6 +19,7 @@ type Policy struct {
 	Scopes     []Scope     `yaml:"scopes"`
 	Aggregates []Aggregate `yaml:"aggregates"`
 	Exclusions []Exclusion `yaml:"exclusions"`
+	MaxLines   int         `yaml:"max-lines"`
 }
 
 // Scope declares one directory-local identity sequence and its complete index.
@@ -56,6 +57,9 @@ func loadPolicy(configPath string) (Policy, error) {
 func validatePolicy(policy Policy) error {
 	if len(policy.Scopes) == 0 {
 		return fmt.Errorf("adrlint: adr-governance.scopes must not be empty")
+	}
+	if policy.MaxLines <= 0 {
+		return fmt.Errorf("adrlint: adr-governance.max-lines must be positive")
 	}
 	seen, err := validateScopes(policy.Scopes)
 	if err != nil {

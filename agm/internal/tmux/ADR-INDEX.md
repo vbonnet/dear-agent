@@ -1,5 +1,7 @@
 # AGM tmux architecture decisions
 
+<!-- Last audited: 2026-07-19 -->
+
 Numbering is scoped to this package. Gaps preserve deleted identities.
 
 | ADR | Decision | Status |
