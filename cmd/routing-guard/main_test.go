@@ -29,6 +29,21 @@ var testPatterns = []string{
 	"**/*-[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh].*",
 	"**/*-[Rr][Ee][Pp][Oo][Rr][Tt].*",
 	"**/*_[Tt][Ee][Ss][Tt]_[Rr][Ee][Pp][Oo][Rr][Tt].[Mm][Dd]",
+	"**/[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh][_A-Z]*.*",
+	"**/*_[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh]_*.*",
+	"**/*[a-z]Research*.*",
+	"**/[Rr][Ee][Pp][Oo][Rr][Tt][_A-Z]*.*",
+	"**/*_[Rr][Ee][Pp][Oo][Rr][Tt]_*.*",
+	"**/*[a-z]Report*.*",
+	"**/[Pp][Ll][Aa][Nn][_A-Z]*.*",
+	"**/*_[Pp][Ll][Aa][Nn]_*.*",
+	"**/*[a-z]Plan*.*",
+	"**/[Rr][Oo][Aa][Dd][Mm][Aa][Pp][_A-Z]*.*",
+	"**/*_[Rr][Oo][Aa][Dd][Mm][Aa][Pp]_*.*",
+	"**/*[a-z]Roadmap*.*",
+	"**/[Bb][Aa][Cc][Kk][Ll][Oo][Gg][_A-Z]*.*",
+	"**/*_[Bb][Aa][Cc][Kk][Ll][Oo][Gg]_*.*",
+	"**/*[a-z]Backlog*.*",
 	"docs/retros/**",
 	"docs/design/**",
 	"wf/**",
@@ -76,6 +91,10 @@ func TestForbidden(t *testing.T) {
 		{"research.pdf", true},
 		{"Research.md", true},
 		{"report.html", true},
+		{"docs/RESEARCH_NOTES.md", true},
+		{"docs/researchNotes.md", true},
+		{"docs/sprint_backlog_2026.md", true},
+		{"docs/sprintBacklog2026.md", true},
 		// Wayfinder TOOL SOURCE and living docs — must NOT be blocked.
 		{"wayfinder/SKILL.md", false},
 		{"wayfinder/SPEC.md", false},
@@ -145,9 +164,14 @@ forbidden-paths:
 	if len(got) != 2 {
 		t.Fatalf("loadPatterns returned %d globs, want 2: %v", len(got), got)
 	}
-	// A missing file is not an error (nothing to enforce).
-	if p, err := loadPatterns(filepath.Join(dir, "nope.yml")); err != nil || p != nil {
-		t.Errorf("loadPatterns(missing) = (%v, %v), want (nil, nil)", p, err)
+	if _, err := loadPatterns(filepath.Join(dir, "nope.yml")); err == nil {
+		t.Error("missing policy must fail closed")
+	}
+	if err := os.WriteFile(yml, []byte("version: 1\nforbidden-paths: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadPatterns(yml); err == nil {
+		t.Error("empty forbidden-paths must fail closed")
 	}
 }
 

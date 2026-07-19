@@ -12,8 +12,8 @@
 ## Context
 
 Wayfinder is the declared 9-phase SDLC engine (CHARTER → PROBLEM → RESEARCH →
-DESIGN → SPEC → PLAN → SETUP → BUILD → RETRO). The CLAUDE.md principle 5 says
-"Use `/wayfinder` for all plans and execution." In practice, enforcement was
+DESIGN → SPEC → PLAN → SETUP → BUILD → RETRO). The AGENTS.md guarded-delivery
+policy requires consequential work to carry an approved Wayfinder trace. In practice, enforcement was
 aspirational: a sticky note, not a gate.
 
 Two compounding problems made enforcement impossible until now:
@@ -33,8 +33,8 @@ Two compounding problems made enforcement impossible until now:
    session. Work proceeded, completed, and was merged with zero Wayfinder
    telemetry.
 
-The result: 100% of work ran under emergency bypass. The telemetry flywheel
-(principle 6: "always route through dear-agent / AGM / VROOM") received no
+The result: 100% of work ran under emergency bypass. The AGM/VROOM dogfooding
+telemetry flywheel received no
 data, and the SDLC engine got no real-world runs to improve.
 
 ---
@@ -60,20 +60,14 @@ New logic: when the detected git root is under `~/src/`, the project root is
 redirected to `~/worktrees/{repo}/wf/`. The workspace fallback is changed from
 `~/src/ws/{workspace}/wf/` to `~/worktrees/{workspace}/wf/`.
 
-### 3. Gate `git worktree add` at the Claude Code layer
+### 3. Gate `git worktree add` at the Claude Code layer (reverted)
 
-A new `PreToolUse` hook (`pretool-worktree-guard`) blocks any `Bash` call that
-contains `git worktree add` and exits 2 with a positive-guidance message (CLAUDE.md
-principle 2). The message explains that `agm session new` is the sanctioned
-entry point, and shows the equivalent command.
-
-Rationale for this specific gate: `git worktree add` is the sole programmatic
-path an in-session agent can take to start new parallel work. It is narrow,
-auditable, and does not affect read operations or the worktree list command.
-
-This is a nudge that can be escalated to a hard block per principle 7
-("escalate permission blocks into fixes") if the bypass rate proves persistently
-high.
+The original implementation added a Claude-only `pretool-worktree-guard`, but
+that hook and its settings registration were later removed. The current tree
+does not block `git worktree add` at the harness layer. Wayfinder traceability
+is instead enforced at the guarded `safe-pr` delivery boundary, which applies
+independently of the authoring harness. Reintroducing an earlier worktree gate
+would require a new decision and cross-harness implementation.
 
 ### 4. Tiered enforcement config (tracked, not yet gated)
 
@@ -99,9 +93,8 @@ ad-hoc sessions are Exempt.
 - Phase transitions no longer require a manual commit between each step.
   The worktree is clean after every `start-phase` and `complete-phase`, so
   automation can sequence phases without human intervention.
-- New work sessions touched by the `git worktree add` hook get a visible
-  reminder to use `agm session new`, increasing AGM coverage without
-  breaking existing workflows that run the session creation separately.
+- Pull requests must carry their Wayfinder trace through the guarded delivery
+  path; no current claim is made that raw worktree creation is blocked.
 - `wayfinder start` no longer silently fails inside `~/src/` repos.
 
 ### Negative / Trade-offs
@@ -111,10 +104,8 @@ ad-hoc sessions are Exempt.
   the alternative (uncommitted state that breaks the next phase transition) is
   worse. Phase start commits use the `wayfinder: start <PHASE>` prefix and can
   be filtered with `git log --grep='^wayfinder:'`.
-- The `git worktree add` block will fire on legitimate uses outside an AGM
-  session context (e.g. quick investigation branches). The hook exits 2 with a
-  clear message, so the cost is one extra step (run `agm session new` or add an
-  explicit `--no-wayfinder` flag when the hook is updated to support it).
+- Enforcement occurs later, at delivery, so an untraced worktree can exist
+  temporarily even though it cannot produce a compliant pull request.
 
 ---
 
@@ -146,13 +137,13 @@ then gate the entry point (follow-on).
 
 ## Implementation Plan
 
-Done in this ADR's PR:
+Historically implemented in this ADR's PR:
 
 1. `wayfinder/cmd/wayfinder-session/internal/git/git.go` — `CommitPhaseStart`
 2. `wayfinder/cmd/wayfinder-session/commands/start_phase.go` — call site
 3. `wayfinder/cmd/wayfinder/cmd/start.go` — golden-tree project-dir fix
-4. `.claude/hooks/pretool-worktree-guard` — hook script
-5. `.claude/settings.json` — register the hook
+4. `.claude/hooks/pretool-worktree-guard` — later reverted
+5. `.claude/settings.json` registration — later reverted
 
 Follow-on beads (not in this PR):
 
@@ -161,6 +152,6 @@ Follow-on beads (not in this PR):
 - Implement tiered enforcement at `agm session new` (session manifest carries
   `wayfinder_tier`; strict-tier sessions that lack a wayfinder project dir are
   rejected at creation time).
-- Update `pretool-worktree-guard` to accept `--no-wayfinder` override (with
-  mandatory `--reason`, routed through `internal/override`) for genuine
-  exemptions.
+- If worktree-time enforcement returns, design it as a harness-neutral guard
+  with an audited exemption path rather than reviving the removed Claude-only
+  hook.

@@ -1,10 +1,10 @@
 # internal/earsbdd — Requirements Specification (EARS)
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
-
-<!-- Last audited at: NEEDS-AUDIT -->
 
 **Version**: 1.0
 **Last Updated**: 2026-06-12

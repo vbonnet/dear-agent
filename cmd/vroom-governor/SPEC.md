@@ -1,5 +1,7 @@
 # vroom-governor — Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Executable EARS Requirements
 
 **VGOVR-01** When VROOM evaluates worker capacity, the governor shall apply the configured limits before authorizing additional work.
@@ -9,8 +11,6 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-
-<!-- Last audited at: NEEDS-AUDIT -->
 
 ## Overview
 

@@ -92,7 +92,7 @@ pluggable HITL backend.
 > [ADR-035](ADR-035-dear-terminology-disambiguation.md). No code rename
 > implied.
 
-Storage schema, retention policy, and performance targets are in
-[docs/workflow-engine/](../workflow-engine/); source synthesis lives on
+Storage schema, retention policy, and performance targets are in the
+[workflow engine guide](../workflow-engine.md); source synthesis lives on
 `engram-research/main` (`WORKFLOW-ENGINE-SYNTHESIS.md` and three sibling
 research docs, 2026-05-02).

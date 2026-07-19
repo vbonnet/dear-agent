@@ -1,10 +1,10 @@
 # internal/fsguard — Requirements Specification (EARS)
 
+<!-- Last audited at: 2026-07-03 -->
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
-
-<!-- Last audited at: 2026-07-03 -->
 
 **Version**: 1.1
 **Last Updated**: 2026-06-12

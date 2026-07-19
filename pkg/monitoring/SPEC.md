@@ -1,10 +1,10 @@
 # Agent Monitoring - Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_nfr_ears_guardrails.feature`
-
-<!-- Last audited at: NEEDS-AUDIT -->
 
 ## Overview
 

@@ -1,5 +1,7 @@
 # AGM Daemon - Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Executable EARS Requirements
 
 **AGMD-01** When the AGM daemon polls queued messages, the system shall deliver only to the intended session and record the resulting acknowledgment state.
@@ -9,8 +11,6 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-
-<!-- Last audited at: NEEDS-AUDIT -->
 
 ## Overview
 

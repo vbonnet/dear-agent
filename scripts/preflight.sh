@@ -73,6 +73,10 @@ go build -ldflags="${LDFLAGS}" -o build/agm-mcp-server ./agm/cmd/agm-mcp-server
 go build ./...
 ok "build clean"
 
+step "make lint-doc-freshness"
+make lint-doc-freshness || fail "living-document freshness ratchet failed"
+ok "living-document freshness ratchet intact"
+
 step "make lint-links"
 make lint-links || fail "tracked Markdown link integrity failed"
 ok "tracked Markdown link integrity intact"

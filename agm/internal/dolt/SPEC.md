@@ -1,5 +1,7 @@
 # AGM Dolt Storage - Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Executable EARS Requirements
 
 **DOLTR-01** When AGM stores sessions, messages, or tool calls, the Dolt adapter shall isolate records by configured workspace.
@@ -11,8 +13,6 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-
-<!-- Last audited at: NEEDS-AUDIT -->
 
 **Version**: 2.0
 **Status**: Phase 6 Complete - Dolt-Only Architecture (YAML Backend Removed)

@@ -1,0 +1,54 @@
+name: Document Freshness
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  push:
+    branches: [main, develop]
+  schedule:
+    - cron: "30 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  # PR synchronizations may supersede one another. Push and scheduled ratchet
+  # runs must remain independent so an intervening event cannot hide debt.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  freshness:
+    name: Freshness debt ratchet
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Resolve shrink-only comparison ref
+        id: baseline
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            git fetch --no-tags origin "$BASE_SHA"
+          fi
+          ref="$(scripts/resolve-doc-audit-base-ref.sh)"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Validate living-document freshness
+        run: go run ./tools/doc-audit -repo . -baseline-ref "${{ steps.baseline.outputs.ref }}"

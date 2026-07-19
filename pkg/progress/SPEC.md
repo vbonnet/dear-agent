@@ -1,5 +1,7 @@
 # Progress Package - Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Executable EARS Requirements
 
 **PROGR-01** When progress output targets an interactive terminal, the package shall render updates without corrupting surrounding output.
@@ -9,8 +11,6 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-
-<!-- Last audited at: NEEDS-AUDIT -->
 
 **Version**: 1.0.0
 **Last Updated**: 2026-02-11

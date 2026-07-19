@@ -7,7 +7,7 @@ safety guards, only when a session's project dir is dear-agent.
 
 ## `pretool-spawn-routing`
 
-Dogfooding routing nudge (Beads `ce-qgf`; AGENTS.md §Dogfooding, principle 6).
+Dogfooding routing nudge (Beads `ce-qgf`; AGENTS.md guarded-delivery policy).
 
 **What it does.** Fires `PreToolUse` on `Bash` and the Cowork scheduled-task MCP
 tool. When it detects an attempt to spawn a **new top-level agent session/task**
@@ -16,12 +16,12 @@ session, or `mcp__scheduled-tasks__create_scheduled_task` — it injects a posit
 reminder pointing at the AGM/VROOM path. Every task not on AGM/VROOM is a missing
 data point for the self-improvement flywheel.
 
-**It is a nudge, not a gate** (principle 2). The hook emits *only*
+**It is a nudge, not a gate** (the AGENTS.md positive-enforcement rule). The hook emits *only*
 `additionalContext`; it never returns a `permissionDecision`, so it can neither
 block a call nor auto-approve one. The normal permission flow is untouched, and
 it fails **open** — any unparseable input exits 0 silently.
 
-**Scope is deliberately narrow** (principle 1):
+**Scope is deliberately narrow** (the AGENTS.md one-concern rule):
 - The `agm` command is intentionally *not* matched — it is the right path.
 - The in-session `Agent`/`Task` subagent tool is *not* matched — a subagent runs
   inside the parent AGM session, so it never escapes the mesh.
@@ -41,7 +41,7 @@ approve it once when prompted.
 
 ## `stop-guardrail-feedback`
 
-The WF-A guardrail feedback loop (bead `ce-vrux`; AGENTS.md principle 2,
+The WF-A guardrail feedback loop (bead `ce-vrux`; AGENTS.md positive enforcement,
 anti-stall). The keystone that lets deterministic guardrails close back into the
 *live* agent on the laptop instead of waiting for GitHub CI.
 
@@ -56,7 +56,7 @@ keeps working until the guardrails are green — the "keep going until green" lo
 **It is a block, not a nudge** (the inverse of `pretool-spawn-routing`): a
 failing guardrail at stop-time is exactly when a human reviewer would say "not
 done — fix this first," so letting the agent stop on red would defeat the point.
-But the block is *positive guidance* (principle 2) — the `reason` says what
+But the block is *positive guidance* — the `reason` says what
 failed, how to fix it (root cause, never suppress the check), and how to bow out.
 
 **It cannot wedge a session** — three independent brakes:
@@ -72,7 +72,7 @@ failed, how to fix it (root cause, never suppress the check), and how to bow out
 
 **Opt out** for an interactive session with `export DEAR_GUARDRAIL_LOOP=0`.
 
-**Scope** (principle 1): WF-A owns the *loop mechanism* only. The guardrail
+**Scope** (the one-concern rule): WF-A owns the *loop mechanism* only. The guardrail
 *checks* live behind `scripts/guardrail-bundle.sh`, whose `run_step` list is the
 extension seam WF-B (Semgrep) and WF-C (architectural tests) grow into. The hook
 neither knows nor cares what the bundle runs.

@@ -101,8 +101,8 @@ func TestLint_OptionWithoutThen(t *testing.T) {
 func TestLint_NonConforming(t *testing.T) {
 	l := newDefault(t)
 	doc := strings.Join([]string{
-		"The system shall log requests.",            // valid ubiquitous
-		"Eventually the thing shall work somehow.",  // non-conforming (no "the X shall")
+		"The system shall log requests.",           // valid ubiquitous
+		"Eventually the thing shall work somehow.", // non-conforming (no "the X shall")
 	}, "\n")
 	res, err := l.Lint("SPEC.md", strings.NewReader(doc))
 	if err != nil {
@@ -277,5 +277,24 @@ func TestLint_IDPrefixedRequirements(t *testing.T) {
 				t.Errorf("ID-prefixed %s: want 0 non-conforming, got %d", name, res.NonConforming())
 			}
 		})
+	}
+}
+
+func TestLint_StrictRejectsDuplicateRequirementIDs(t *testing.T) {
+	t.Parallel()
+	l := newDefault(t)
+	doc := strings.Join([]string{
+		"**EXAMPLE-01** When a request arrives, the system shall validate it.",
+		"**EXAMPLE-01** When validation succeeds, the system shall accept it.",
+	}, "\n")
+	res, err := l.Lint("SPEC.md", strings.NewReader(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.DuplicateIDs != 1 || !res.Failed(true) {
+		t.Fatalf("result = %#v, want one strict duplicate-ID failure", res)
+	}
+	if res.Failed(false) {
+		t.Fatal("duplicate IDs should remain advisory outside strict mode")
 	}
 }

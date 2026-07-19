@@ -1,5 +1,7 @@
 # Engram CLI - Technical Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Executable EARS Requirements
 
 **ECLIR-01** When an Engram CLI command succeeds, the command shall emit the requested human-readable or structured result.
@@ -9,8 +11,6 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-
-<!-- Last audited at: NEEDS-AUDIT -->
 
 ## Overview
 

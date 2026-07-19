@@ -33,7 +33,7 @@ that gap; dear-deploy closes it through a single sanctioned, atomic command so
 the redeploy is never a hand-typed `cp` that can half-write a file or be
 forgotten.
 
-## Atomic deploy (AGENTS.md principle 9)
+## Atomic deploy (AGENTS.md guarded-delivery policy)
 
 Every write goes through a deterministic three-step sequence:
 

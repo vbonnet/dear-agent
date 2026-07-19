@@ -1,5 +1,7 @@
 # Gemini Adapter Technical Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Executable EARS Requirements
 
 **GCMP-01** When a deprecated Gemini CLI session is loaded, the compatibility adapter shall preserve its existing manifest and history behavior.
@@ -9,8 +11,6 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-
-<!-- Last audited at: NEEDS-AUDIT -->
 
 **Version:** 1.0
 **Status:** Implemented

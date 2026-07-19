@@ -1,10 +1,10 @@
 # AGM CLI - Technical Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
-
-<!-- Last audited at: NEEDS-AUDIT -->
 
 **Version:** 2.0
 **Status:** Production (Phase 6 Complete - Dolt-Only Architecture, YAML Backend Removed)

@@ -28,6 +28,8 @@ CI regardless of the authoring harness or model family.
 
 **EARSLINT-07** When linter configuration is missing or malformed, the system shall return an explicit configuration diagnostic.
 
+**EARSLINT-08** When strict mode encounters the same explicit requirement identifier more than once in one specification, the system shall report the duplicate and fail the gate.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/internal_foundation_guardrails.feature`
