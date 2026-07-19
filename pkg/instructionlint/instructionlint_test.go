@@ -25,6 +25,10 @@ func TestSegmentsClassifyExecutableFences(t *testing.T) {
 		"```",
 		"env TOKEN=x gh pr merge 123",
 		"```",
+		"```",
+		`gh \`,
+		"  pr merge 456",
+		"```",
 		"",
 		"    bd ready",
 		"    explanatory fixture text",
@@ -42,11 +46,37 @@ func TestSegmentsClassifyExecutableFences(t *testing.T) {
 		"prose|Use `git push origin main` only as a quoted bad command.",
 		"shell|git push origin main",
 		"shell|env TOKEN=x gh pr merge 123",
+		"shell|gh pr merge 456",
 		"shell|bd ready",
 	}
 	sort.Strings(want)
 	if !reflect.DeepEqual(compact, want) {
 		t.Fatalf("segments = %#v, want %#v", compact, want)
+	}
+}
+
+func TestWrappedShellCommandsRemainPolicyVisible(t *testing.T) {
+	source := []byte(strings.Join([]string{
+		"```sh",
+		`gh \`,
+		"  pr merge 123",
+		`git \`,
+		"  push origin branch",
+		`safe-pr create \`,
+		"  --emergency --reason urgent",
+		"```",
+	}, "\n"))
+
+	var got []string
+	for _, segment := range parseSegments(source) {
+		for _, violation := range evaluateSegment("AGENTS.md", segment) {
+			got = append(got, violation.Rule)
+		}
+	}
+	sort.Strings(got)
+	want := []string{"raw-gh-merge", "raw-git-push", "safe-pr-emergency"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("rules = %v, want %v", got, want)
 	}
 }
 
@@ -73,14 +103,18 @@ func TestRuleViolationsTeachCanonicalReplacements(t *testing.T) {
 		{Kind: SegmentShell, Line: 19, Text: "WORKSPACE=oss bd ready"},
 		{Kind: SegmentShell, Line: 20, Text: "env WORKSPACE=oss bd --db ~/beads/context-engine/.beads ready"},
 		{Kind: SegmentShell, Line: 21, Text: "bd -db ~/beads/context-engine/.beads ready"},
+		{Kind: SegmentShell, Line: 22, Text: "sudo gh pr merge --squash 123"},
+		{Kind: SegmentShell, Line: 23, Text: "command bd ready"},
+		{Kind: SegmentShell, Line: 24, Text: "nohup git push origin branch"},
+		{Kind: SegmentShell, Line: 25, Text: "timeout --signal TERM 5s bd ready"},
 	}
 
 	var got []Violation
 	for _, segment := range segments {
 		got = append(got, evaluateSegment("AGENTS.md", segment)...)
 	}
-	if len(got) != 18 {
-		t.Fatalf("violations = %v, want 18", got)
+	if len(got) != 22 {
+		t.Fatalf("violations = %v, want 22", got)
 	}
 	for _, item := range got {
 		if item.Rule == "" || item.Replacement == "" {

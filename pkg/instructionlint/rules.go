@@ -122,12 +122,46 @@ func stripCommandPrefixes(fields []string) []string {
 		case environmentAssignment.MatchString(fields[0]):
 			fields = fields[1:]
 		case fields[0] == "env":
-			fields = fields[1:]
-		case (fields[0] == "timeout" || fields[0] == "gtimeout") && len(fields) >= 2:
-			fields = fields[2:]
+			fields = stripLauncherOptions(fields[1:], map[string]bool{
+				"-C": true, "--chdir": true, "-S": true, "--split-string": true,
+				"-u": true, "--unset": true,
+			})
+		case fields[0] == "timeout" || fields[0] == "gtimeout":
+			fields = stripTimeoutPrefix(fields[1:])
+		case fields[0] == "sudo":
+			fields = stripLauncherOptions(fields[1:], map[string]bool{
+				"-C": true, "--close-from": true, "-D": true, "--chdir": true,
+				"-g": true, "--group": true, "-h": true, "--host": true,
+				"-p": true, "--prompt": true, "-R": true, "--chroot": true,
+				"-T": true, "--command-timeout": true, "-u": true, "--user": true,
+			})
+		case fields[0] == "command" || fields[0] == "nohup":
+			fields = stripLauncherOptions(fields[1:], nil)
 		default:
 			return fields
 		}
+	}
+	return fields
+}
+
+func stripLauncherOptions(fields []string, consumesValue map[string]bool) []string {
+	for len(fields) > 0 && strings.HasPrefix(fields[0], "-") {
+		option := fields[0]
+		fields = fields[1:]
+		name, _, hasInlineValue := strings.Cut(option, "=")
+		if consumesValue[name] && !hasInlineValue && len(fields) > 0 {
+			fields = fields[1:]
+		}
+	}
+	return fields
+}
+
+func stripTimeoutPrefix(fields []string) []string {
+	fields = stripLauncherOptions(fields, map[string]bool{
+		"-k": true, "--kill-after": true, "-s": true, "--signal": true,
+	})
+	if len(fields) > 0 {
+		fields = fields[1:]
 	}
 	return fields
 }

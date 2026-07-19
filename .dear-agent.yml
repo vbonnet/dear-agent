@@ -61,6 +61,10 @@ instruction-policy:
       owner: harness-shims
     - match: GEMINI.md
       owner: harness-shims
+    - match: AGY.md
+      owner: harness-shims
+    - match: OPENCODE.md
+      owner: harness-shims
     - match: .claude/CLAUDE.md
       owner: harness-shims
     - match: .agents/AGENTS.md

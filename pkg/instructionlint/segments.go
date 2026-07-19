@@ -32,7 +32,7 @@ type Segment struct {
 func parseSegments(source []byte) []Segment {
 	root := goldmark.New().Parser().Parse(text.NewReader(source))
 	classified, inline := classifyMarkdown(root, source)
-	segments := sourceSegments(source, classified)
+	segments := joinShellContinuations(sourceSegments(source, classified))
 	segments = append(segments, inline...)
 	sort.Slice(segments, func(i, j int) bool {
 		if segments[i].Line != segments[j].Line {
@@ -72,13 +72,16 @@ func classifyMarkdown(root ast.Node, source []byte) (map[int]SegmentKind, []Segm
 }
 
 func classifyIndentedCodeBlock(classified map[int]SegmentKind, block *ast.CodeBlock, source []byte) {
+	continuing := false
 	for i := 0; i < block.Lines().Len(); i++ {
 		segment := block.Lines().At(i)
+		value := string(segment.Value(source))
 		kind := SegmentKind("skip")
-		if commandShaped(string(segment.Value(source))) {
+		if continuing || commandShaped(value) {
 			kind = SegmentShell
 		}
 		classifySourceLines(classified, segment, source, kind)
+		continuing = kind == SegmentShell && shellContinues(value)
 	}
 }
 
@@ -88,14 +91,16 @@ func classifyFence(classified map[int]SegmentKind, block *ast.FencedCodeBlock, s
 	if shellLanguage(language) {
 		kind = SegmentShell
 	}
+	continuing := false
 	for i := 0; i < block.Lines().Len(); i++ {
 		segment := block.Lines().At(i)
 		value := segment.Value(source)
 		lineKind := kind
-		if language == "" && commandShaped(string(value)) {
+		if language == "" && (continuing || commandShaped(string(value))) {
 			lineKind = SegmentShell
 		}
 		classifySourceLines(classified, segment, source, lineKind)
+		continuing = lineKind == SegmentShell && shellContinues(string(value))
 	}
 }
 
@@ -123,7 +128,7 @@ func commandShaped(value string) bool {
 		return false
 	}
 	switch fields[0] {
-	case "agm", "bd", "env", "gh", "git", "gtimeout", "safe-merge", "safe-pr", "safe-push", "timeout":
+	case "agm", "bd", "command", "env", "gh", "git", "gtimeout", "nohup", "safe-merge", "safe-pr", "safe-push", "sudo", "timeout":
 		return true
 	default:
 		return strings.Contains(value, "&&") || strings.Contains(value, "||")
@@ -168,6 +173,42 @@ func sourceSegments(source []byte, classified map[int]SegmentKind) []Segment {
 		}
 	}
 	return segments
+}
+
+func joinShellContinuations(segments []Segment) []Segment {
+	joined := make([]Segment, 0, len(segments))
+	for i := 0; i < len(segments); i++ {
+		current := segments[i]
+		if current.Kind != SegmentShell || !shellContinues(current.Text) {
+			joined = append(joined, current)
+			continue
+		}
+
+		var command strings.Builder
+		command.WriteString(trimShellContinuation(current.Text))
+		lastLine := current.Line
+		for i+1 < len(segments) && segments[i+1].Kind == SegmentShell && segments[i+1].Line == lastLine+1 {
+			i++
+			next := segments[i]
+			command.WriteByte(' ')
+			command.WriteString(trimShellContinuation(next.Text))
+			lastLine = next.Line
+			if !shellContinues(next.Text) {
+				break
+			}
+		}
+		current.Text = strings.Join(strings.Fields(command.String()), " ")
+		joined = append(joined, current)
+	}
+	return joined
+}
+
+func shellContinues(value string) bool {
+	return strings.HasSuffix(strings.TrimSpace(value), `\`)
+}
+
+func trimShellContinuation(value string) string {
+	return strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(value), `\`))
 }
 
 func shellLanguage(language string) bool {
