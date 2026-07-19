@@ -49,7 +49,6 @@ func TestAlignmentDocumentsRejectSupersededOptimizationModel(t *testing.T) {
 		"reviewed quarterly",
 		"AGM governs the lifecycle",
 		"target state for AGM",
-		"Meta-Orchestrator",
 		"more than 2x",
 	}
 

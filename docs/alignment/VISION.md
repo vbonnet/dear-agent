@@ -17,10 +17,6 @@ MISSION.md is canonical for project purpose and ownership. The target state is
 safe, auditable autonomous delivery in which VROOM makes and verifies work
 decisions while AGM provides dependable session lifecycle mechanics.
 
-VROOM owns prioritization, dispatch decisions, supervision, and output
-verification. AGM owns session lifecycle mechanics: session creation, process
-execution, messaging, monitoring telemetry, and archival.
-
 ## Heuristics
 
 If an agent can complete a task within declared constraints and all quality
