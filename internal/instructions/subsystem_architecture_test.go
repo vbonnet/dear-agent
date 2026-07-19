@@ -51,7 +51,8 @@ func TestAGMHarnessArchitectureMatchesRegistry(t *testing.T) {
 
 func TestAGMMCPArchitectureMatchesRegisteredTools(t *testing.T) {
 	root := repoRoot(t)
-	source := readFile(t, filepath.Join(root, "agm/cmd/agm-mcp-server/tools.go"))
+	mainSource := readFile(t, filepath.Join(root, "agm/cmd/agm-mcp-server/main.go"))
+	toolSource := readFile(t, filepath.Join(root, "agm/cmd/agm-mcp-server/tools.go"))
 	doc := readFile(t, filepath.Join(root, "agm/cmd/agm-mcp-server/ARCHITECTURE.md"))
 	want := []string{
 		"agm_list_sessions",
@@ -65,7 +66,21 @@ func TestAGMMCPArchitectureMatchesRegisteredTools(t *testing.T) {
 		"engram_list_wayfinder_sessions",
 		"engram_get_wayfinder_session",
 	}
-	got := uniqueMatches(source, regexp.MustCompile(`Name:\s+"([^"]+)"`))
+	registrations := uniqueMatches(mainSource, regexp.MustCompile(`add([A-Za-z0-9]+)Tool\(server,\s*cfg\)`))
+	declarations := regexp.MustCompile(`(?s)func add([A-Za-z0-9]+)Tool\([^)]*\)\s*\{\s*mcp\.AddTool\(server,\s*&mcp\.Tool\{\s*Name:\s*"([^"]+)"`).FindAllStringSubmatch(toolSource, -1)
+	toolNameByRegistration := make(map[string]string, len(declarations))
+	for _, declaration := range declarations {
+		toolNameByRegistration[declaration[1]] = declaration[2]
+	}
+	got := make([]string, 0, len(registrations))
+	for _, registration := range registrations {
+		name, ok := toolNameByRegistration[registration]
+		if !ok {
+			t.Errorf("registered helper add%sTool has no MCP tool declaration", registration)
+			continue
+		}
+		got = append(got, name)
+	}
 	assertSameStrings(t, "AGM MCP source tool inventory", got, want)
 	assertDocumentedNames(t, doc, want)
 }

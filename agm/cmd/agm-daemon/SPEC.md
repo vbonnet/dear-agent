@@ -10,7 +10,7 @@
 
 **AGMD-03** When session resolution or tmux delivery fails, the system shall increment the attempt count or mark the message permanently failed at the configured limit.
 
-**AGMD-04** When delivery succeeds, the system shall update session state, mark the queue entry delivered, and record acknowledgment state.
+**AGMD-04** When tmux delivery succeeds, the system shall attempt to update session state, mark the queue entry delivered, and record acknowledgment state; bookkeeping failures shall be logged without reporting the already-delivered message as failed.
 
 **AGMD-05** When the daemon receives a supported shutdown signal, the system shall stop polling and remove its owned PID file.
 
