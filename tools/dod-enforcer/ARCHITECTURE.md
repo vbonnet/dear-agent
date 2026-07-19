@@ -594,67 +594,11 @@ if ctx.Err() == context.DeadlineExceeded {
 **Command Execution**: Support different shells or executors
 **Result Formatters**: Add JSON, XML output formats
 
-## Architectural Decision Records
+## Architecture decisions
 
-### ADR-001: YAML for DoD Specification
-
-**Decision**: Use YAML for DoD files
-
-**Rationale**:
-- Human-readable and writable
-- Supports complex structures (arrays, maps)
-- Standard in DevOps/CI tooling
-- Good library support in Go
-
-**Alternatives Considered**:
-- JSON: Less human-friendly, no comments
-- TOML: Less common, harder arrays
-- Custom DSL: Overkill, poor tooling
-
-### ADR-002: Fail-Fast Validation
-
-**Decision**: Stop validation on first failure (for overall result)
-
-**Rationale**:
-- Quick feedback for CI/CD
-- Clear failure reason
-- Simpler logic
-
-**Trade-off**: Continue all checks for complete feedback (current implementation)
-
-### ADR-003: Zero Validation Errors
-
-**Decision**: Validate() returns (ValidationResult, nil) always
-
-**Rationale**:
-- Validation failures are expected outcomes
-- Go errors for exceptional conditions only
-- Simpler caller logic (check Success field)
-
-**Alternatives**: Return error on validation failure (more Go-idiomatic, but less convenient)
-
-### ADR-004: Sequential Check Execution
-
-**Decision**: Run checks sequentially, not in parallel
-
-**Rationale**:
-- Simpler implementation
-- Predictable ordering
-- Easier debugging
-- Performance not critical
-
-**Future**: May parallelize for large file sets
-
-### ADR-005: Hardcoded Timeouts
-
-**Decision**: Fixed 30s/60s timeouts, not configurable
-
-**Rationale**:
-- Simpler API
-- Sane defaults for most use cases
-- Prevents infinite waits
-
-**Future**: May add timeout configuration fields
+The retained durable choices are indexed in [adr/README.md](adr/README.md):
+YAML criteria and the structured-result/bounded-command boundary. Execution
+order and timeout values are implementation policy covered by tests.
 
 ## References
 

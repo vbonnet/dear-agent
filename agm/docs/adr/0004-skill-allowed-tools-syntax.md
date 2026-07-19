@@ -1,27 +1,22 @@
-# ADR-0004: Skill allowed-tools Syntax Standard
+# ADR-0004: Skill permission pattern syntax
 
-## Status
-Accepted
+Status: Accepted (verified 2026-07-17)
 
 ## Context
-AGM skill files define `allowed-tools` in YAML frontmatter to auto-approve specific Bash commands. Some skills used colon-separated syntax (`Bash(agm session list:*)`), but Claude Code's permission system uses space-separated syntax (`Bash(agm session list *)`).
 
-The mismatch caused permission prompts to appear even though commands should have been auto-approved, blocking session initialization.
-
-Affected files: `agm-assoc.md`, `agm-list.md`, `agm-search.md`, `agm-status.md`, `agm-send.md`, `agm-new.md`, `agm-resume.md`
+Skill permissions are executable configuration. Colon-separated patterns look
+plausible but do not match Claude Code command permission syntax, leaving a
+skill blocked despite declaring the command.
 
 ## Decision
-Standardize on space-separated syntax for all `allowed-tools` patterns:
-- Correct: `Bash(command *)`
-- Incorrect: `Bash(command:*)`
 
-Add a lint test (`allowed_tools_test.go`) to prevent future regressions.
+Generated and hand-written skill permissions use the governed command schema,
+including space-separated command wildcards such as `Bash(agm session list *)`.
+The skill generator owns emitted frontmatter, and permission lint tests reject
+unsupported syntax.
 
 ## Consequences
-**Positive**:
-- Permission prompts no longer block skill execution
-- Lint test prevents regressions
-- Consistent syntax across all skills
 
-**Negative**:
-- None (colon syntax never worked correctly)
+Permission declarations remain harness-specific extensions; the skill body must
+still describe a harness-neutral command path. Generator and skill-lint tests
+own verification.

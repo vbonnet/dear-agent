@@ -30,7 +30,7 @@ Devlog documents two aspects of development workspace organization:
 
 - **[SPEC.md](SPEC.md)** - Complete specification: what devlog is, what problems it solves, and how it works
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** - System architecture: components, navigation, design patterns, and quality mechanisms
-- **[.docs/adr/](.docs/adr/)** - Architecture Decision Records: why devlog is designed the way it is
+- **[Devlog decisions](../ADR.md)** - current durable tool decisions
 
 ### Guides
 

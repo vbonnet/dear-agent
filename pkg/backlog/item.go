@@ -92,7 +92,7 @@ func (e Effort) String() string {
 	return "?"
 }
 
-// Item is one declared backlog ticket. It mirrors the agm ADR-023
+// Item is one declared backlog ticket. It mirrors the ADR-022
 // Orchestrator work-item input contract projected onto what the markdown
 // backlog actually declares.
 type Item struct {

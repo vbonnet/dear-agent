@@ -38,7 +38,7 @@ type Suggestion struct {
 }
 
 // Ranker scores backlog items by the VROOM Orchestrator dispatch rules
-// (agm ADR-023 § Task Dispatch): dependency+status eligibility, priority
+// (ADR-022): dependency+status eligibility, priority
 // ordering, unblocking leverage, then effort.
 type Ranker struct {
 	Weights RankWeights

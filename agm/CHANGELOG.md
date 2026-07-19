@@ -118,7 +118,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Files Modified**: `cmd/agm/kill.go` (killTmuxSession function)
   - **Testing**: Integration tests compile successfully, manual testing confirms fix
   - **Commit**: cd86f12
-  - **See**: internal/tmux/ADR-0002-exact-session-matching.md for tmux exact matching behavior
+  - Exact-session behavior is covered by internal/tmux tests
 
 ### Changed
 

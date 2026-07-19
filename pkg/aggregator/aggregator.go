@@ -8,8 +8,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Aggregator runs a list of Collectors and persists their output via
-// a Store. See ADR-015 §D5.
+// Aggregator runs a list of Collectors and persists their output via a Store.
 type Aggregator struct {
 	Store      Store
 	Collectors []Collector
@@ -27,10 +26,10 @@ type Aggregator struct {
 // first error from each failing collector so a partial run is still
 // observable. A nil Errors entry (or absent key) means success.
 type Report struct {
-	StartedAt  time.Time        `json:"startedAt"`
-	FinishedAt time.Time        `json:"finishedAt"`
-	Collected  map[string]int   `json:"collected"`
-	Errors     map[string]error `json:"-"`            // not JSON-encodable directly
+	StartedAt  time.Time         `json:"startedAt"`
+	FinishedAt time.Time         `json:"finishedAt"`
+	Collected  map[string]int    `json:"collected"`
+	Errors     map[string]error  `json:"-"` // not JSON-encodable directly
 	ErrorMsgs  map[string]string `json:"errors,omitempty"`
 }
 

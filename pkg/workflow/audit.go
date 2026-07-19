@@ -10,7 +10,7 @@ import (
 // NodeState is the canonical lifecycle state of a single node within a
 // run. Mirrors the CHECK constraint on the nodes table in schema.sql.
 //
-// State machine (see ROADMAP.md):
+// State machine (see SPEC.md):
 //
 //	pending → running → succeeded
 //	                  → failed
@@ -85,8 +85,7 @@ type AuditSink interface {
 }
 
 // MultiAuditSink fans out one event to many sinks. A failure on one sink
-// is logged via the optional OnError hook but does not block the rest —
-// per ADR-010 §D3, "failure of one sink doesn't break the run".
+// is logged via the optional OnError hook but does not block the rest.
 type MultiAuditSink struct {
 	Sinks   []AuditSink
 	OnError func(sink AuditSink, event AuditEvent, err error)
@@ -184,9 +183,9 @@ type RunRecorder interface {
 // call recorder methods unconditionally without nil checks.
 type noopRunRecorder struct{}
 
-func (noopRunRecorder) BeginRun(context.Context, RunRecord) error           { return nil }
-func (noopRunRecorder) UpsertNode(context.Context, NodeRecord) error        { return nil }
-func (noopRunRecorder) RecordAttempt(context.Context, AttemptRecord) error  { return nil }
+func (noopRunRecorder) BeginRun(context.Context, RunRecord) error          { return nil }
+func (noopRunRecorder) UpsertNode(context.Context, NodeRecord) error       { return nil }
+func (noopRunRecorder) RecordAttempt(context.Context, AttemptRecord) error { return nil }
 func (noopRunRecorder) FinishRun(context.Context, string, RunState, time.Time, string) error {
 	return nil
 }

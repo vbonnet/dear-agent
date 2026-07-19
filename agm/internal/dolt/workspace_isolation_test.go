@@ -2,6 +2,7 @@ package dolt
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,7 +48,7 @@ func TestWorkspaceIsolation(t *testing.T) {
 	// In production, workspaces would use separate Dolt instances
 	t.Setenv("WORKSPACE", "testacme")
 	t.Setenv("DOLT_PORT", "3307") // Same server, different workspace database
-	os.Unsetenv("DOLT_DATABASE")   // Let it default to workspace name
+	os.Unsetenv("DOLT_DATABASE")  // Let it default to workspace name
 
 	acmeConfig, err := DefaultConfig()
 	if err != nil {
@@ -462,6 +463,17 @@ func TestWorkspaceIsolation(t *testing.T) {
 		// Cleanup
 		acmeAdapter.DeleteSession(deleteTestID)
 	})
+}
+
+func TestDefaultConfigRejectsProductionDatabaseOverrideInTests(t *testing.T) {
+	t.Setenv("ENGRAM_TEST_MODE", "1")
+	t.Setenv("ENGRAM_TEST_WORKSPACE", "test")
+	t.Setenv("WORKSPACE", "test")
+	t.Setenv("DOLT_DATABASE", "oss")
+
+	if _, err := DefaultConfig(); err == nil || !strings.Contains(err.Error(), "TEST POLLUTION BLOCKED") {
+		t.Fatalf("DefaultConfig() error = %v, want production database rejection", err)
+	}
 }
 
 // BenchmarkWorkspaceQueries measures query performance for workspace-isolated operations

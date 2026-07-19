@@ -1,167 +1,132 @@
-<!-- Last audited at: 2026-06-12 ce-dn72 -->
+# AGM MCP server architecture
 
-# AGM MCP Server — Architecture
+<!-- Last audited at: 2026-07-17 -->
 
-## Overview
+`agm-mcp-server` is a local control surface over shared AGM operations and
+Wayfinder status files. Its primary transport is MCP over stdio. An optional
+read-only A2A HTTP endpoint publishes agent cards; it is not an alternate MCP
+transport.
 
-The AGM MCP Server (`agm-mcp-server`) is a lightweight MCP (Model Context
-Protocol) server that bridges Claude Code (and other MCP clients) with AGM
-session management and Wayfinder project tracking. It runs as a single
-stdio process and provides eight tools across three domains:
+## Startup boundary
 
-- **AGM session tools** — list, search, get, archive, and kill AGM sessions
-- **Schema tool** — introspect available ops at runtime
-- **Wayfinder tools** — list and get Wayfinder sessions from the local filesystem
-
-The server delegates all AGM session logic to `agm/internal/ops` (which owns
-the Dolt storage layer) and reads Wayfinder data directly from
-`WAYFINDER-STATUS.md` files on disk.
-
-## Source Files
-
-| File | Responsibility |
-|------|---------------|
-| `main.go` | Entry point, flag parsing, server lifecycle, A2A HTTP |
-| `config.go` | YAML config loading, smart defaults, auto-registration |
-| `tools.go` | MCP tool registration and handler functions |
-| `wayfinder.go` | Filesystem-based Wayfinder session reads |
-| `a2a_handler.go` | Agent-to-Agent HTTP endpoint |
-
-## Registered Tools
-
-| Tool name | Source | Description |
-|-----------|--------|-------------|
-| `agm_list_sessions` | `tools.go` | List AGM sessions with status/type/limit filters |
-| `agm_search_sessions` | `tools.go` | Search sessions by partial name match |
-| `agm_get_session_metadata` | `tools.go` | Full metadata for a session by ID/name |
-| `agm_archive_session` | `tools.go` | Mark a session archived (supports dry-run) |
-| `agm_kill_session` | `tools.go` | Kill the tmux session (supports dry-run) |
-| `agm_list_ops` | `tools.go` | List all available ops (schema discovery) |
-| `engram_list_wayfinder_sessions` | `tools.go` + `wayfinder.go` | List Wayfinder sessions from `wf/` directory |
-| `engram_get_wayfinder_session` | `tools.go` + `wayfinder.go` | Get full frontmatter for one Wayfinder session |
-
-## Configuration (`Config` struct)
-
-```go
-type Config struct {
-    Enabled          bool      // Whether the MCP server is enabled
-    Transport        string    // Transport type (currently only "stdio")
-    Tools            []string  // Tool allowlist (empty = all registered)
-    AutoRegister     bool      // Auto-write to Claude Code MCP config
-    ClaudeConfigPath string    // Path to Claude Code MCP JSON config
-    SessionsDir      string    // AGM sessions directory
-    EngramMCPURL     string    // Reserved for future HTTP transport
-    WayfinderDir     string    // Path to engram-research wf/ directory
-    A2A              A2AConfig // Agent-to-Agent HTTP endpoint config
-}
+```text
+load ~/.config/agm/mcp-server.yaml
+    -> resolve WORKSPACE (environment wins over config)
+    -> verify the selected Dolt database is reachable
+    -> register ten MCP tools
+    -> install optional gateway middleware
+    -> optionally update the Claude Code MCP config
+    -> run stdio MCP transport
+    -> optionally run A2A card endpoint on loopback
 ```
 
-Default config file: `~/.config/agm/mcp-server.yaml` (created if absent).
-Default `WayfinderDir`: `~/src/engram-research/wf/`.
+The server fails before tool registration when no explicit workspace can be
+resolved or its Dolt database is unreachable. This prevents a protocol-valid but
+nonfunctional tool surface.
 
-## Data Flow
+## Registered tools
 
-### AGM session tools
+Tool registration in `main.go` is authoritative.
 
-```
-Claude Code → MCP request
-    ↓
-tools.go handler
-    ↓
-newMCPOpContext()        → opens Dolt DB via agm/internal/dolt
-    ↓
-ops.ListSessions() / ops.SearchSessions() / ops.GetSession() /
-ops.ArchiveSession() / ops.KillSession() / ops.ListOps()
-    ↓
-mcpSuccess(result)       → JSON-encoded CallToolResult
-    ↓
-Claude Code ← MCP response
-```
+| Tool | Operation owner |
+|---|---|
+| `agm_list_sessions` | `ops.ListSessions` |
+| `agm_search_sessions` | `ops.SearchSessions` |
+| `agm_get_session_metadata` | `ops.GetSession` |
+| `agm_archive_session` | `ops.ArchiveSession` |
+| `agm_kill_session` | `ops.KillSession` |
+| `agm_create_session` | `ops.CreateSessionWithContext` |
+| `agm_send_message` | `ops.SendMessage` |
+| `agm_list_ops` | `ops.ListOps` |
+| `engram_list_wayfinder_sessions` | local Wayfinder status reader |
+| `engram_get_wayfinder_session` | local Wayfinder status reader |
 
-Each AGM tool handler creates a fresh Dolt connection per request
-(`newMCPOpContext`) and defers `adapter.Close()`. There is no in-process
-caching — Dolt handles its own connection pooling and reads.
+The first eight tools expose AGM operations. The last two read
+`WAYFINDER-STATUS.md` frontmatter from the configured directory. They do not
+proxy through the separate Engram MCP process.
 
-### Wayfinder tools
+## Request flow
 
-```
-Claude Code → MCP request
-    ↓
-tools.go handler
-    ↓
-wayfinder.go: listWayfinderSessions() / getWayfinderSessionDetail()
-    ↓
-os.ReadDir(wayfinderDir)
-    ↓
-for each session dir: parseFrontmatter(WAYFINDER-STATUS.md)
-    ↓
-mcpSuccess(result)       → JSON-encoded CallToolResult
-    ↓
-Claude Code ← MCP response
+```text
+MCP request
+   -> gateway middleware when enabled
+   -> typed handler in tools.go
+   -> new operation context
+      -> fresh Dolt adapter per request
+      -> tmux dependency for create/send operations
+   -> shared internal/ops function
+   -> JSON result in MCP text content
 ```
 
-Wayfinder tools read `WAYFINDER-STATUS.md` files directly from the local
-`engram-research/wf/` directory. No HTTP proxy or network call is involved.
-Both schema v2.0 (`project_name`, `current_phase`) and legacy schemas
-(`project`, `current_waypoint`) are supported via `fmString()` key-fallback.
+There is no in-process session-manifest cache. Storage freshness, connection
+behavior, validation, dry-run semantics, and lifecycle rollback belong to the
+shared operation and storage layers.
 
-## Key Invariants
+Known `ops.OpError` values are returned as RFC 7807 JSON in an MCP error result.
+Other errors are returned as error text. Tool errors do not crash the server.
 
-- **Path traversal protection**: `getWayfinderSessionDetail` rejects session
-  IDs containing `/`, `\`, `.`.
-- **Dry-run support**: `ArchiveSession` and `KillSession` respect
-  `opCtx.DryRun` when the `dry_run` input field is set.
-- **Tool errors are non-fatal**: All handler errors return an MCP error
-  response (with `IsError: true`) rather than crashing the server.
-- **OpError → RFC 7807 JSON**: `mcpError()` unwraps `*ops.OpError` and
-  returns the structured JSON body rather than a plain string.
+## Mutation boundary
 
-## Optional Features
+Archive and kill accept `dry_run`. Create requires a working directory and
+prompt and records MCP caller provenance. Send requires a target session and
+message. Create and send operation contexts include tmux; read operations do
+not.
 
-### MCP Gateway
+The server exposes session metadata and lifecycle operations, not conversation
+history. Any future content-reading tool requires a separate privacy and
+authorization decision.
 
-If `~/.config/agm/gateway.yaml` exists and `enabled: true`, the gateway
-middleware is installed via `agm/internal/gateway` before the server runs.
-The `--no-gateway` flag bypasses it. Gateway config defaults are permissive.
+## Wayfinder boundary
 
-### A2A HTTP Server
+`wayfinder.go` lists directories under `wayfinder_dir`, reads frontmatter from
+`WAYFINDER-STATUS.md`, and supports current plus selected legacy field names.
+Single-session reads reject path traversal characters. The default directory is
+`~/src/engram-research/wf`, but deployments should configure the actual evidence
+checkout rather than rely on that development-oriented default.
 
-The Agent-to-Agent HTTP endpoint is enabled via `a2a.enabled: true` in the
-config or `--a2a-port <n>`. It binds to `127.0.0.1:<port>` (default 8080)
-and handles A2A protocol payloads via `a2a_handler.go`. It runs in a
-goroutine alongside the stdio transport and shuts down when the MCP server
-exits.
+## Optional surfaces
 
-### Process Lifecycle & Orphan Prevention
+### Gateway
 
-Two mechanisms prevent orphaned server processes when the parent Claude Code
-session exits:
+`internal/gateway` middleware is installed when its separate configuration is
+enabled. `--no-gateway` bypasses it for controlled diagnostics.
 
-1. **stdin EOF (belt 1)** — the go-sdk `StdioTransport` goroutine detects EOF
-   on stdin and cancels the root context. This handles normal termination and
-   clean process-exit.
+### A2A agent cards
 
-2. **Parent PID poll (belt 2)** — a goroutine polling every 5 seconds calls
-   `os.Getppid()` and compares it to the PID captured at startup. If the
-   parent is reparented to PID 1 (the OOM-kill scenario where stdin EOF may
-   not arrive before the OS reparents the child), it calls `stop()`. Both
-   goroutines carry `defer recover()` per the goroutine-recover structural
-   health policy.
+When enabled, an HTTP server publishes an aggregate card and per-session cards
+at `/.well-known/...`. It reads active manifests through the Dolt storage
+boundary and accepts only GET requests. The server binds the configured
+`mcp_server.a2a.bind` address verbatim, so a non-loopback value exposes this
+surface to that network. The flag port overrides configuration; an enabled
+endpoint without a port uses 8080.
 
 ### Auto-registration
 
-When `auto_register: true` (default), the server writes or updates an `agm`
-entry in the Claude Code MCP config file on startup. The write is atomic
-(tmp + rename) and idempotent — it is a no-op when the `command` field
-already matches the current executable.
+When enabled, the server atomically updates the configured Claude Code MCP JSON
+entry with its current executable path while preserving unrelated entries and
+existing per-server fields.
 
-## Dependencies
+## Process and transport invariants
 
-| Dependency | Purpose |
-|-----------|---------|
-| `github.com/modelcontextprotocol/go-sdk/mcp` | MCP protocol SDK (stdio transport, tool registration) |
-| `gopkg.in/yaml.v3` | Config file and Wayfinder frontmatter parsing |
-| `agm/internal/ops` | AGM session business logic |
-| `agm/internal/dolt` | Dolt storage adapter |
-| `agm/internal/gateway` | MCP gateway middleware |
-| `go.opentelemetry.io/otel` | W3C trace context injection for downstream propagation |
+- JSON-RPC is written only through the stdio transport; diagnostics go to
+  stderr.
+- stdin EOF and parent-process reparenting both stop the server.
+- the optional A2A server shuts down with the MCP process.
+- W3C trace context is propagated where downstream calls support it.
+- workspace selection is explicit and verified before the surface becomes
+  visible.
+
+## Source owners and verification
+
+| Concern | Owner |
+|---|---|
+| Lifecycle and registrations | `main.go` |
+| Tool schemas and handlers | `tools.go` |
+| Configuration and auto-registration | `config.go` |
+| Wayfinder file reads | `wayfinder.go` |
+| A2A cards | `a2a_handler.go` |
+| Shared AGM behavior | `agm/internal/ops` |
+
+Run `go test ./agm/cmd/agm-mcp-server` and the relevant `internal/ops` tests.
+Strict requirements are in [`SPEC.md`](SPEC.md); the durable surface decision is
+indexed in [`adr/README.md`](adr/README.md).

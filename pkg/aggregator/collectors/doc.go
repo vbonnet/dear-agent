@@ -1,5 +1,5 @@
 // Package collectors implements the Phase 1 first-party Collectors for
-// the signal aggregator (ADR-015 §D7).
+// the signal aggregator described by ADR-015.
 //
 // Each collector is independent and testable: it depends only on a small
 // Exec indirection, so unit tests can fake out the external command

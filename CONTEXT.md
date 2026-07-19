@@ -108,7 +108,7 @@ under Auto permission mode.) Only after that do they do their own job.
 
 | Supervisor | "C-suite" analogy | Owns | Secondary | Tertiary |
 |------------|-------------------|------|-----------|----------|
-| **Meta-Orchestrator** | CTO | Roadmap, prioritization, technology consistency, not reinventing the wheel | Overseer | Orchestrator |
+| **Meta-Orchestrator** | CTO | Roadmap, prioritization, technology consistency, anti-duplication | Overseer | Orchestrator |
 | **Orchestrator** | COO | Enqueue/dequeue work, monitor active workers, keep steady progress, never sit idle | Meta-Orchestrator | Overseer |
 | **Overseer** | CRO (Reliability) | Resource usage (CPU/disk/memory/quota), leak detection, session cleanup | Orchestrator | Meta-Orchestrator |
 
@@ -282,9 +282,7 @@ listed so older docs and identifiers can be interpreted correctly.
    [MISSION.md](docs/alignment/MISSION.md), vocabulary lives in this file, and
    architecture rationale lives in
    [ADR-002](docs/adr/ADR-002-vroom-execution-architecture.md). The superseded
-   identities `agm/docs/adr/ADR-020`…`ADR-025` are historical only; redirect
-   stubs, when present in a transitional branch, are not authority and may be
-   removed by the governed ADR lifecycle.
+   AGM ADRs 020–025 were removed; ADR-002 is the retained decision.
 
 2. **"DEAR" — resolved two-level model plus historical identifiers.**
    - **(a) Process / retrospective loop:** Define → **Execute** → Audit →
@@ -294,9 +292,9 @@ listed so older docs and identifiers can be interpreted correctly.
      `OnDefine/OnEnforce/OnAudit/OnResolve` callbacks. This is a *code concept*
      with a different "E" and "R"; docs call it "workflow lifecycle hooks", not
      "DEAR hooks". Exported Go names stay unchanged.
-   - **(c) Backlog phase prefix:** `DEAR-X.*` identifiers in
-     `docs/workflow-engine/BACKLOG.md` / ROADMAP are a numbering convention for
-     framework-improvement items, unrelated to either loop.
+   - **(c) Archived backlog prefix:** legacy `DEAR-X.*` identifiers were a
+     numbering convention for framework-improvement items, unrelated to either
+     loop. Current work uses Beads IDs.
    Canonical authority: [ADR-035](docs/adr/ADR-035-dear-terminology-disambiguation.md).
 
 3. **`pkg/vroom` code encodes the superseded model.**

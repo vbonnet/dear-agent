@@ -43,7 +43,7 @@ const defaultACLPath = "~/.agm/bus-acl.yaml"
 // means ops sees all the mesh's durable state in one dir.
 const defaultSupervisorsDir = "~/.agm/supervisors"
 
-// defaultDiscordAgentsPath is the multi-bot portal config (ADR-026). Holds
+// defaultDiscordAgentsPath is the multi-bot portal config (ADR-028). Holds
 // per-agent bot tokens; must be chmod 600 and is gitignored.
 const defaultDiscordAgentsPath = "~/.agm/discord-agents.yaml"
 
@@ -106,7 +106,7 @@ func cmdServe(args []string) error {
 	discordEnabled := fs.Bool("discord", false, "enable Discord adapter (requires -discord-token or DISCORD_BOT_TOKEN)")
 	discordToken := fs.String("discord-token", "", "Discord bot token (default: DISCORD_BOT_TOKEN env var)")
 	discordAllowlist := fs.String("discord-allowlist", "", "comma-separated Discord user IDs allowed to DM the bot")
-	discordMultibot := fs.Bool("discord-multibot", false, "enable the multi-bot Discord portal (ADR-026; requires -discord-agents config)")
+	discordMultibot := fs.Bool("discord-multibot", false, "enable the multi-bot Discord portal (ADR-028; requires -discord-agents config)")
 	discordAgentsPath := fs.String("discord-agents", "", "multi-bot portal config path (default ~/.agm/discord-agents.yaml)")
 	matrixEnabled := fs.Bool("matrix", false, "enable Matrix adapter (requires -matrix-homeserver, -matrix-token, -matrix-room)")
 	matrixHomeserver := fs.String("matrix-homeserver", "", "Matrix homeserver URL (default: MATRIX_HOMESERVER env var)")
@@ -234,7 +234,7 @@ func cmdServe(args []string) error {
 		logger.Info("discord adapter disabled (pass -discord to enable)")
 	}
 
-	// Multi-bot Discord portal — opt-in via -discord-multibot (ADR-026).
+	// Multi-bot Discord portal — opt-in via -discord-multibot (ADR-028).
 	// Independent of the single-bot DM adapter above; can run alongside it.
 	if *discordMultibot {
 		path := *discordAgentsPath

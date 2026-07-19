@@ -1,8 +1,8 @@
 // Command drift-check detects deployment drift: artifacts whose source of
 // truth in this repo no longer matches the copy deployed on the host.
 //
-// It is the Phase 0 manual check of the deployment-drift system
-// (docs/drift-detection-plan.md). It only hashes files — no builds, no network
+// It is the manual check documented in cmd/drift-check/README.md. It only
+// hashes files — no builds, no network
 // beyond an optional `git show` — so it is cheap enough to run on every daily
 // ops audit and as the "deployed" gate of the bead lifecycle.
 //

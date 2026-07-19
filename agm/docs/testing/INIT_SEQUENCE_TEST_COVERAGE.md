@@ -262,7 +262,7 @@ Before modifying InitSequence code, verify:
 ## Related Documentation
 
 - **Bug Fix Commit**: `d8f1a61` - fix: resolve InitSequence double-lock and command queueing issues
-- **ADR**: `docs/adr/0001-init-sequence-capture-pane.md` - Why capture-pane vs control mode
+- **Architecture owner**: `internal/tmux/init_sequence.go` - capture-pane initialization
 - **Implementation**: `internal/tmux/init_sequence.go` - InitSequence code
 - **Test Files**:
   - `internal/tmux/init_sequence_test.go` - Unit & integration tests

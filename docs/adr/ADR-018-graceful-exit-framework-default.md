@@ -1,6 +1,6 @@
 # ADR-018: Graceful Exit as a Framework Default
 
-**Status**: Accepted (2026-05-12)
+Status: Accepted (2026-05-12)
 
 Agents asked to search, research, or pattern-match overshoot when evidence
 is weak. A literature review invents marginal citations. A code-review sweep
@@ -14,8 +14,7 @@ propagates as if it were strong.
 Per-prompt opt-ins ("report nothing if nothing fits") and CLAUDE.md guidance
 both fail: the next prompt forgets, sub-agents do not inherit, and the fix
 only holds while someone remembers to apply it. Defaults that depend on
-remembering do not hold — the same lesson [AGENTS.why.md](../../AGENTS.why.md)
-recorded for output routing.
+remembering do not hold; copied per-prompt guidance has the same failure mode.
 
 Adopt **graceful exit** ("nothing fits" is a first-class valid outcome) as
 a **framework-level default**, two-tier like output routing:
@@ -29,7 +28,7 @@ a **framework-level default**, two-tier like output routing:
 - **Configuration.** A repo whose task genuinely requires a non-empty result
   (a synthetic data generator) opts out under `framework-defaults.graceful-exit`
   in `.dear-agent.yml` and **must** supply `why:`. The validator rejects an
-  opt-out without one — same discipline as AGENTS.why.md.
+  opt-out without one so exceptions remain auditable.
 - **Enforcement is deferred.** A future `gracefulexit` audit check
   ([ADR-011](ADR-011-dear-audit-subsystem.md)) would flag findings with
   too-wide evidence-to-conclusion gaps. We want to see whether
