@@ -65,8 +65,6 @@ forbidden-paths:
     # See AGENTS.md "Living Documentation Policy" for the full
     # policy (Last-audited headers, wrong-fact-triggers-retro, doc audits).
     #
-    # Existing normative behavior specs under docs/design/ remain living docs.
-    # New temporal design work follows this rule without exception.
     - docs/retros/**
     - docs/design/**
     - wf/**

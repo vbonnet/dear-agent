@@ -11,8 +11,9 @@
 // The wayfinder project dir (or WAYFINDER_PROJECT_DIR) must contain a
 // active WAYFINDER-STATUS.md; its project_name (or legacy session_id) is
 // stamped into the PR body (create) or close comment (close). On create, squash
-// auto-merge is armed on the new PR so it merges itself once required checks
-// and reviews pass. Every invocation is audit-logged to
+// auto-merge is armed on a new non-draft PR so it merges itself once required
+// checks and reviews pass. Draft PRs remain unarmed for a human to advance.
+// Every invocation is audit-logged to
 // ~/.local/state/dear-agent/safe-pr.log and emits an OTel span (safepr.<verb>)
 // when a collector is configured.
 package main
@@ -281,14 +282,17 @@ func execGh(req *safepr.Request, timeout time.Duration, verifyCI bool) error {
 		fmt.Fprintf(os.Stderr, "safe-pr: WARNING: audit log write failed: %v\n", auditErr)
 	}
 
-	// Arm squash auto-merge on a freshly created PR so it merges itself once
-	// required checks and reviews pass — every safe-pr PR is hands-off by
-	// construction. Best-effort: the PR already exists, so a failure here
-	// (auto-merge disabled on the repo, branch not yet pushed) must not fail
-	// the run; it is surfaced as a warning and can be armed manually.
+	// Arm squash auto-merge on a freshly created, non-draft PR so routine PRs
+	// merge once required checks and reviews pass. Drafts are the explicit
+	// handoff boundary for human-required changes and must remain unarmed.
+	// Best-effort: the PR already exists, so a failure here (auto-merge disabled
+	// on the repo, branch not yet pushed) must not fail the run; it is surfaced
+	// as a warning and can be armed manually.
 	if runErr == nil && req.Verb == "create" && prURL != "" {
-		if mergeErr := armAutoMerge(prURL, timeout); mergeErr != nil {
-			fmt.Fprintf(os.Stderr, "safe-pr: WARNING: could not arm auto-merge on %s: %v\n", prURL, mergeErr)
+		if !requestsDraft(req.GhArgs) {
+			if mergeErr := armAutoMerge(prURL, timeout); mergeErr != nil {
+				fmt.Fprintf(os.Stderr, "safe-pr: WARNING: could not arm auto-merge on %s: %v\n", prURL, mergeErr)
+			}
 		}
 		// Opt-in safety net for the push-then-PR-open race (bead ce-np2s): an
 		// armed PR whose head SHA never gets check-runs would wait on auto-merge
@@ -309,6 +313,22 @@ func execGh(req *safepr.Request, timeout time.Duration, verifyCI bool) error {
 		return fmt.Errorf("gh pr %s failed: %w", req.Verb, runErr)
 	}
 	return nil
+}
+
+// requestsDraft reports whether the pass-through GitHub CLI arguments request
+// draft creation. GitHub's boolean flags accept both --draft and
+// --draft=<bool>; an explicit false must not disable routine auto-merge.
+func requestsDraft(args []string) bool {
+	for _, arg := range args {
+		if arg == "--draft" {
+			return true
+		}
+		if value, ok := strings.CutPrefix(arg, "--draft="); ok {
+			draft, err := strconv.ParseBool(value)
+			return err == nil && draft
+		}
+	}
+	return false
 }
 
 // verifyCIPollWindow bounds how long warnIfNoCI waits for the first check-run
@@ -454,8 +474,9 @@ The session trace is stamped into the PR body (create) or comment (close).
 On create, 'make preflight-full' is run first to ensure local build/test/lint
 health before the PR hits CI (shift-left gate). Use --skip-preflight only for
 emergencies; prefer fixing the underlying issues instead.
-On create, squash auto-merge is armed on the new PR (best-effort) so it merges
-itself once required checks and reviews pass.
+On create, squash auto-merge is armed on a new non-draft PR (best-effort) so it
+merges itself once required checks and reviews pass. A PR created with --draft
+remains unarmed for a human to advance.
 Refused for create: --web, --fill*, --body-file/-F, --editor (interactive or
 unstampable); --title is required. Every run appends a JSONL audit record to
 ~/.local/state/dear-agent/safe-pr.log.

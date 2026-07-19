@@ -75,6 +75,23 @@ func TestParseArgs_VerifyCI(t *testing.T) {
 	}
 }
 
+func TestRequestsDraft(t *testing.T) {
+	tests := []struct {
+		args []string
+		want bool
+	}{
+		{args: []string{"--draft"}, want: true},
+		{args: []string{"--draft=true"}, want: true},
+		{args: []string{"--draft=false"}, want: false},
+		{args: []string{"--title", "draft"}, want: false},
+	}
+	for _, tc := range tests {
+		if got := requestsDraft(tc.args); got != tc.want {
+			t.Errorf("requestsDraft(%v) = %t, want %t", tc.args, got, tc.want)
+		}
+	}
+}
+
 func TestShortSHA(t *testing.T) {
 	if got := shortSHA("cebb82eb05bea83"); got != "cebb82e" {
 		t.Errorf("shortSHA = %q, want cebb82e", got)

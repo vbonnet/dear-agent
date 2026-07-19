@@ -110,9 +110,10 @@ example, `agm --help`, `agm session --help`, `agm acceptance show`,
   mode.
 - Read PR state and checks with the read-only GitHub commands. Resolve review
   threads with `resolve-review-threads` after addressing the underlying issue.
-- Merge eligible routine PRs with `safe-merge`. Hold the human-required
-  categories named by the autonomous-merge policy in draft or ready-for-review
-  state for a human.
+- Merge eligible routine PRs with `safe-merge`. Create the human-required
+  categories named by the autonomous-merge policy with `safe-pr create --draft`;
+  do not mark them ready or arm auto-merge. A human owns that transition and
+  the merge.
 - Keep the Bead `in_progress` while its PR is open. Close it only after the
   merged commit is deployed where applicable and verified against the real
   surface.
