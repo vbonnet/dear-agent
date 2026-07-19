@@ -17,14 +17,15 @@ func TestAGMHarnessArchitectureMatchesRegistry(t *testing.T) {
 	deprecated := []string{"gemini-cli"}
 	assertStringSliceDeclaration(t, source, "activeHarnesses", active)
 	assertStringSliceDeclaration(t, source, "deprecatedHarnesses", deprecated)
-	for _, harness := range append(active, deprecated...) {
-		if !strings.Contains(doc, "`"+harness+"`") {
-			t.Errorf("AGM architecture omits registered harness %q", harness)
+	for _, harness := range active {
+		if !strings.Contains(doc, "| `"+harness+"` | active |") {
+			t.Errorf("AGM architecture does not mark active harness %q active", harness)
 		}
 	}
-	if !strings.Contains(doc, "deprecated: `gemini-cli`") &&
-		!strings.Contains(doc, "`gemini-cli` | deprecated") {
-		t.Error("AGM architecture does not mark gemini-cli deprecated")
+	for _, harness := range deprecated {
+		if !strings.Contains(doc, "| `"+harness+"` | deprecated") {
+			t.Errorf("AGM architecture does not mark deprecated harness %q deprecated", harness)
+		}
 	}
 }
 

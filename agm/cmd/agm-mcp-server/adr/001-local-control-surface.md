@@ -21,8 +21,10 @@ mutations, schema discovery, and two local Wayfinder status readers. Do not read
 conversation history. Write diagnostics to stderr so stdout remains owned by the
 protocol transport.
 
-An optional loopback A2A endpoint may publish read-only agent cards, but it is a
-separate protocol surface and does not change the MCP transport decision.
+An optional A2A endpoint may publish read-only agent cards, but it is a separate
+protocol surface and does not change the MCP transport decision. It binds the
+configured `mcp_server.a2a.bind` address verbatim; non-loopback configuration is
+network exposure and must be treated as such.
 
 ## Consequences
 

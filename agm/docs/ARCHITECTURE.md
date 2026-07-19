@@ -34,7 +34,9 @@ operator / automation / MCP client
 
 The CLI and MCP server share lifecycle operations through `internal/ops`.
 Surfaces may add presentation or transport concerns, but they must not maintain
-independent create, archive, kill, or message-delivery semantics.
+independent create, archive, or kill semantics. Message delivery is not yet a
+shared invariant: the CLI owns readiness, formatting, rate limiting, and queue
+behavior that the MCP operation does not reproduce.
 
 ## Source owners
 
