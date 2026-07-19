@@ -23,7 +23,7 @@ type record struct {
 	status   string
 }
 
-func parseRecord(root, relative string, data []byte, maxLines int) (record, []Violation) {
+func parseRecord(root, relative string, data []byte, governed map[string]bool) (record, []Violation) {
 	name := filepath.Base(relative)
 	fileMatch := adrFilePattern.FindStringSubmatch(name)
 	record := record{filename: name}
@@ -46,31 +46,28 @@ func parseRecord(root, relative string, data []byte, maxLines int) (record, []Vi
 	} else {
 		record.status = statuses[0][1]
 	}
-	violations = append(violations, commonDocumentViolations(root, relative, data, maxLines)...)
-	if record.status == "Superseded" && !hasADRSuccessorLink(root, relative, data) {
+	violations = append(violations, commonDocumentViolations(root, relative, data)...)
+	if record.status == "Superseded" && !hasADRSuccessorLink(root, relative, data, governed) {
 		violations = append(violations, Violation{Path: relative, Reason: "Superseded record must link to another governed ADR"})
 	}
 	return record, violations
 }
 
-func parseAggregate(root, relative string, data []byte, maxLines int) []Violation {
+func parseAggregate(root, relative string, data []byte, governed map[string]bool) []Violation {
 	statuses := adrStatusPattern.FindAllStringSubmatch(string(data), -1)
 	var violations []Violation
 	if len(statuses) != 1 {
 		violations = append(violations, Violation{Path: relative, Reason: fmt.Sprintf("want one normalized Status line, got %d", len(statuses))})
 	}
-	violations = append(violations, commonDocumentViolations(root, relative, data, maxLines)...)
-	if len(statuses) == 1 && statuses[0][1] == "Superseded" && !hasADRSuccessorLink(root, relative, data) {
+	violations = append(violations, commonDocumentViolations(root, relative, data)...)
+	if len(statuses) == 1 && statuses[0][1] == "Superseded" && !hasADRSuccessorLink(root, relative, data, governed) {
 		violations = append(violations, Violation{Path: relative, Reason: "Superseded record must link to another governed ADR"})
 	}
 	return violations
 }
 
-func commonDocumentViolations(root, relative string, data []byte, maxLines int) []Violation {
+func commonDocumentViolations(root, relative string, data []byte) []Violation {
 	var violations []Violation
-	if lines := strings.Count(strings.TrimSuffix(string(data), "\n"), "\n") + 1; lines > maxLines {
-		violations = append(violations, Violation{Path: relative, Reason: fmt.Sprintf("%d lines exceeds the ADR line budget of %d", lines, maxLines)})
-	}
 	for _, target := range markdownTargets(data) {
 		if !relativeLink(target) {
 			continue
@@ -106,7 +103,7 @@ func relativeLink(target string) bool {
 	return !strings.Contains(lower, "://") && !strings.HasPrefix(lower, "mailto:") && !strings.HasPrefix(lower, "#")
 }
 
-func hasADRSuccessorLink(root, relative string, data []byte) bool {
+func hasADRSuccessorLink(root, relative string, data []byte, governed map[string]bool) bool {
 	for _, target := range markdownTargets(data) {
 		if !relativeLink(target) {
 			continue
@@ -134,7 +131,8 @@ func hasADRSuccessorLink(root, relative string, data []byte) bool {
 		if err != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
 			continue
 		}
-		if _, err := os.Stat(successor); err == nil {
+		governedPath, err := filepath.Rel(root, successor)
+		if err == nil && governed[filepath.ToSlash(governedPath)] {
 			return true
 		}
 	}

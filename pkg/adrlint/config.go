@@ -16,10 +16,9 @@ type repositoryConfig struct {
 
 // Policy is the ADR governance slice of .dear-agent.yml.
 type Policy struct {
-	MaxRecordLines int         `yaml:"max-record-lines"`
-	Scopes         []Scope     `yaml:"scopes"`
-	Aggregates     []Aggregate `yaml:"aggregates"`
-	Exclusions     []Exclusion `yaml:"exclusions"`
+	Scopes     []Scope     `yaml:"scopes"`
+	Aggregates []Aggregate `yaml:"aggregates"`
+	Exclusions []Exclusion `yaml:"exclusions"`
 }
 
 // Scope declares one directory-local identity sequence and its complete index.
@@ -55,9 +54,6 @@ func loadPolicy(configPath string) (Policy, error) {
 }
 
 func validatePolicy(policy Policy) error {
-	if policy.MaxRecordLines <= 0 {
-		return fmt.Errorf("adrlint: adr-governance.max-record-lines must be positive")
-	}
 	if len(policy.Scopes) == 0 {
 		return fmt.Errorf("adrlint: adr-governance.scopes must not be empty")
 	}

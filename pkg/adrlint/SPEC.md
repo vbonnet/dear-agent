@@ -4,7 +4,7 @@
 
 ## EARS Requirements
 
-**ADRLINT-01** When repository policy is loaded, the system shall require a positive line budget, unique scoped paths and indexes, unique aggregate paths, and reasoned exclusions.
+**ADRLINT-01** When repository policy is loaded, the system shall require unique scoped paths and indexes, unique aggregate paths, and reasoned exclusions.
 
 **ADRLINT-02** When ADR inventory is built, the system shall inspect every Git-tracked numbered record and aggregate path through the caller's context without allowing an interactive Git prompt.
 
@@ -16,7 +16,11 @@
 
 **ADRLINT-06** When a record is Superseded, the system shall require a resolving repository-local link to another governed ADR and shall reject self-links, external ADR-shaped URLs, and missing targets.
 
-**ADRLINT-07** When a record, aggregate, or index exceeds the configured line budget or contains an unresolved relative link, the system shall report a violation.
+**ADRLINT-07** When a record, aggregate, or index contains an unresolved relative link, the system shall report a violation.
+
+**ADRLINT-10** When a tracked ADR-like filename in a declared scope is malformed, the system shall report it rather than silently omitting it from governance.
+
+**ADRLINT-11** When a declared scope index is not Git-tracked or contains an ADR-like row outside the supported schema, the system shall report a violation.
 
 **ADRLINT-08** When validation completes, the system shall return path/reason violations sorted deterministically and shall keep operational errors distinct.
 

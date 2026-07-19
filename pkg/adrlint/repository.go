@@ -33,6 +33,15 @@ func checkRepository(ctx context.Context, root string) (Report, error) {
 	governed := map[string]bool{}
 	for _, aggregate := range policy.Aggregates {
 		governed[aggregate.Path] = true
+	}
+	for _, scope := range policy.Scopes {
+		for _, name := range tracked {
+			if filepath.ToSlash(filepath.Dir(name)) == scope.Path && adrLikeFilename(filepath.Base(name)) && filepath.Base(name) != scope.Index {
+				governed[name] = true
+			}
+		}
+	}
+	for _, aggregate := range policy.Aggregates {
 		if !trackedSet[aggregate.Path] {
 			report.Violations = append(report.Violations, Violation{Path: aggregate.Path, Reason: "declared aggregate is not tracked"})
 			continue
@@ -42,11 +51,11 @@ func checkRepository(ctx context.Context, root string) (Report, error) {
 			return Report{}, fmt.Errorf("adrlint: read %s: %w", aggregate.Path, readErr)
 		}
 		report.Records++
-		report.Violations = append(report.Violations, parseAggregate(root, aggregate.Path, data, policy.MaxRecordLines)...)
+		report.Violations = append(report.Violations, parseAggregate(root, aggregate.Path, data, governed)...)
 	}
 
 	for _, scope := range policy.Scopes {
-		records, scopeViolations, scopeErr := validateScope(root, scope, tracked, policy.MaxRecordLines)
+		records, scopeViolations, scopeErr := validateScope(root, scope, tracked, trackedSet, governed)
 		if scopeErr != nil {
 			return Report{}, scopeErr
 		}
@@ -66,19 +75,26 @@ func checkRepository(ctx context.Context, root string) (Report, error) {
 	return report, nil
 }
 
-func validateScope(root string, scope Scope, tracked []string, maxLines int) (map[string]record, []Violation, error) {
+func validateScope(root string, scope Scope, tracked []string, trackedSet, governed map[string]bool) (map[string]record, []Violation, error) {
 	records := map[string]record{}
 	ids := map[string]string{}
 	var violations []Violation
 	for _, relative := range tracked {
-		if filepath.ToSlash(filepath.Dir(relative)) != scope.Path || !adrFilePattern.MatchString(filepath.Base(relative)) {
+		if filepath.ToSlash(filepath.Dir(relative)) != scope.Path {
+			continue
+		}
+		base := filepath.Base(relative)
+		if !adrFilePattern.MatchString(base) {
+			if base != scope.Index && adrLikeFilename(base) {
+				violations = append(violations, Violation{Path: relative, Reason: "malformed ADR filename; want ADR-NNN-slug.md or NNNN-slug.md"})
+			}
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relative)))
 		if err != nil {
 			return nil, nil, fmt.Errorf("adrlint: read %s: %w", relative, err)
 		}
-		parsed, recordViolations := parseRecord(root, relative, data, maxLines)
+		parsed, recordViolations := parseRecord(root, relative, data, governed)
 		violations = append(violations, recordViolations...)
 		if previous, exists := ids[parsed.id]; exists {
 			violations = append(violations, Violation{Path: relative, Reason: fmt.Sprintf("duplicate ADR-%s: %s and %s", parsed.id, previous, parsed.filename)})
@@ -88,6 +104,10 @@ func validateScope(root string, scope Scope, tracked []string, maxLines int) (ma
 		records[parsed.filename] = parsed
 	}
 	indexRelative := filepath.ToSlash(filepath.Join(scope.Path, scope.Index))
+	if !trackedSet[indexRelative] {
+		violations = append(violations, Violation{Path: indexRelative, Reason: "declared ADR index is not tracked"})
+		return records, violations, nil
+	}
 	indexData, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(indexRelative)))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -96,7 +116,7 @@ func validateScope(root string, scope Scope, tracked []string, maxLines int) (ma
 		}
 		return nil, nil, fmt.Errorf("adrlint: read %s: %w", indexRelative, err)
 	}
-	violations = append(violations, validateIndex(root, indexRelative, indexData, records, maxLines)...)
+	violations = append(violations, validateIndex(root, indexRelative, indexData, records)...)
 	return records, violations, nil
 }
 
@@ -126,7 +146,12 @@ func trackedADRFiles(ctx context.Context, root string) ([]string, error) {
 
 func adrShapedPath(name string) bool {
 	base := filepath.Base(name)
-	return base == "ADR.md" || adrFilePattern.MatchString(base)
+	return base == "ADR.md" || adrLikeFilename(base)
+}
+
+func adrLikeFilename(name string) bool {
+	lower := strings.ToLower(name)
+	return lower != "adr-index.md" && strings.HasSuffix(lower, ".md") && strings.HasPrefix(strings.ToUpper(name), "ADR-")
 }
 
 func excluded(name string, exclusions []Exclusion) bool {

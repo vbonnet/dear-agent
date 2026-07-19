@@ -5,10 +5,17 @@ import (
 	"strings"
 )
 
-func validateIndex(root, relative string, data []byte, records map[string]record, maxLines int) []Violation {
-	violations := commonDocumentViolations(root, relative, data, maxLines)
+func validateIndex(root, relative string, data []byte, records map[string]record) []Violation {
+	violations := commonDocumentViolations(root, relative, data)
 	indexed := map[string]record{}
-	for _, match := range adrIndexPattern.FindAllStringSubmatch(string(data), -1) {
+	for _, line := range strings.Split(string(data), "\n") {
+		match := adrIndexPattern.FindStringSubmatch(line)
+		if len(match) == 0 {
+			if strings.HasPrefix(line, "| [") && strings.Contains(line, "](") && strings.Contains(line, ".md)") {
+				violations = append(violations, Violation{Path: relative, Reason: "malformed ADR index row: " + line})
+			}
+			continue
+		}
 		name := match[2]
 		if _, exists := indexed[name]; exists {
 			violations = append(violations, Violation{Path: relative, Reason: "index contains duplicate row for " + name})

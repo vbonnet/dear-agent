@@ -85,26 +85,6 @@ Status: Accepted
 	}
 }
 
-func TestCheckRepositoryReportsLineBudget(t *testing.T) {
-	t.Parallel()
-
-	repo := newADRRepo(t)
-	writeADRFile(t, repo, ".dear-agent.yml", strings.Replace(policyFixture(), "max-record-lines: 40", "max-record-lines: 5", 1))
-	writeADRFile(t, repo, "docs/adr/ADR-001-example.md", recordFixture("001", "Example decision", "Accepted"))
-	writeADRFile(t, repo, "docs/adr/README.md", indexFixture("001", "ADR-001-example.md", "Example decision", "Accepted"))
-	writeADRFile(t, repo, "pkg/hash/ADR.md", "# Hash decisions\n\nStatus: Accepted\n\nextra\nextra\n")
-	gitADR(t, repo, "add", ".")
-	gitADR(t, repo, "commit", "-m", "fixture")
-
-	report, err := CheckRepository(context.Background(), repo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !hasReason(report.Violations, "line budget") {
-		t.Fatalf("missing line-budget violation: %#v", report.Violations)
-	}
-}
-
 func TestADRSuccessorLinkMustResolveToAnotherLocalRecord(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "docs", "adr")
@@ -115,14 +95,16 @@ func TestADRSuccessorLinkMustResolveToAnotherLocalRecord(t *testing.T) {
 		body string
 		want bool
 	}{
-		"local successor": {body: "[new](ADR-002-new.md)", want: true},
-		"self link":       {body: "[self](ADR-001-old.md)"},
-		"external shape":  {body: "[remote](https://example.com/ADR-999-missing.md)"},
-		"missing local":   {body: "[missing](ADR-999-missing.md)"},
+		"local successor":  {body: "[new](ADR-002-new.md)", want: true},
+		"self link":        {body: "[self](ADR-001-old.md)"},
+		"external shape":   {body: "[remote](https://example.com/ADR-999-missing.md)"},
+		"missing local":    {body: "[missing](ADR-999-missing.md)"},
+		"ungoverned local": {body: "[fixture](../../fixtures/testdata/ADR-999-fixture.md)"},
 	}
+	governed := map[string]bool{"docs/adr/ADR-001-old.md": true, "docs/adr/ADR-002-new.md": true}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			got := hasADRSuccessorLink(root, filepath.ToSlash(filepath.Join("docs", "adr", "ADR-001-old.md")), []byte(tt.body))
+			got := hasADRSuccessorLink(root, filepath.ToSlash(filepath.Join("docs", "adr", "ADR-001-old.md")), []byte(tt.body), governed)
 			if got != tt.want {
 				t.Fatalf("hasADRSuccessorLink from %s = %v, want %v", dir, got, tt.want)
 			}
@@ -137,9 +119,8 @@ func TestLoadPolicyRejectsInvalidDeclarations(t *testing.T) {
 		name string
 		body string
 	}{
-		{name: "missing budget", body: "adr-governance:\n  scopes: []\n"},
+		{name: "missing scopes", body: "adr-governance:\n  scopes: []\n"},
 		{name: "duplicate scope", body: `adr-governance:
-  max-record-lines: 40
   scopes:
     - path: docs/adr
       index: README.md
@@ -147,7 +128,6 @@ func TestLoadPolicyRejectsInvalidDeclarations(t *testing.T) {
       index: OTHER.md
 `},
 		{name: "reasonless exclusion", body: `adr-governance:
-  max-record-lines: 40
   scopes:
     - path: docs/adr
       index: README.md
@@ -181,7 +161,6 @@ func TestGlobPathMatch(t *testing.T) {
 
 func policyFixture() string {
 	return `adr-governance:
-  max-record-lines: 40
   scopes:
     - path: docs/adr
       index: README.md
@@ -191,6 +170,49 @@ func policyFixture() string {
     - match: "**/testdata/**"
       reason: generated fixtures
 `
+}
+
+func TestCheckRepositoryRejectsMalformedADRInputs(t *testing.T) {
+	t.Parallel()
+
+	repo := newADRRepo(t)
+	writeADRFile(t, repo, ".dear-agent.yml", policyFixture())
+	writeADRFile(t, repo, "docs/adr/ADR-001-example.md", recordFixture("001", "Example decision", "Accepted"))
+	writeADRFile(t, repo, "docs/adr/ADR-37-malformed.md", "# ADR-37: malformed\n\nStatus: Accepted\n")
+	writeADRFile(t, repo, "docs/adr/README.md", indexFixture("001", "ADR-001-example.md", "Example decision", "Accepted")+"| [001](ADR-001-example.md) | Duplicate invalid status | Draft |\n")
+	writeADRFile(t, repo, "pkg/hash/ADR.md", "# Hash decisions\n\nStatus: Accepted\n")
+	gitADR(t, repo, "add", ".")
+	gitADR(t, repo, "commit", "-m", "fixture")
+
+	report, err := CheckRepository(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"malformed ADR filename", "malformed ADR index row"} {
+		if !hasReason(report.Violations, want) {
+			t.Errorf("missing %q violation: %#v", want, report.Violations)
+		}
+	}
+}
+
+func TestCheckRepositoryRequiresTrackedIndex(t *testing.T) {
+	t.Parallel()
+
+	repo := newADRRepo(t)
+	writeADRFile(t, repo, ".dear-agent.yml", policyFixture())
+	writeADRFile(t, repo, "docs/adr/ADR-001-example.md", recordFixture("001", "Example decision", "Accepted"))
+	writeADRFile(t, repo, "docs/adr/README.md", indexFixture("001", "ADR-001-example.md", "Example decision", "Accepted"))
+	writeADRFile(t, repo, "pkg/hash/ADR.md", "# Hash decisions\n\nStatus: Accepted\n")
+	gitADR(t, repo, "add", ".dear-agent.yml", "docs/adr/ADR-001-example.md", "pkg/hash/ADR.md")
+	gitADR(t, repo, "commit", "-m", "fixture")
+
+	report, err := CheckRepository(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasReason(report.Violations, "declared ADR index is not tracked") {
+		t.Fatalf("missing untracked-index violation: %#v", report.Violations)
+	}
 }
 
 func recordFixture(id, title, status string) string {
