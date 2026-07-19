@@ -100,6 +100,7 @@ func TestADRSuccessorLinkMustResolveToAnotherLocalRecord(t *testing.T) {
 		want bool
 	}{
 		"local live successor":   {body: "Status: Superseded by [new](ADR-002-new.md)", want: true},
+		"titled live successor":  {body: `Status: Superseded by [new](ADR-002-new.md "successor")`, want: true},
 		"self link":              {body: "Status: Superseded by [self](ADR-001-old.md)"},
 		"external shape":         {body: "Status: Superseded by [remote](https://example.com/ADR-999-missing.md)"},
 		"missing local":          {body: "Status: Superseded by [missing](ADR-999-missing.md)"},
@@ -123,7 +124,10 @@ func TestADRSuccessorLinkMustResolveToAnotherLocalRecord(t *testing.T) {
 }
 
 func TestMarkdownTargetsIncludeReferenceDefinitions(t *testing.T) {
-	targets := markdownTargets([]byte("[decision][successor]\n\n[successor]: <missing.md> \"title\"\n"))
+	targets := markdownTargets([]byte("[inline](ADR-002-live.md \"successor\")\n[decision][successor]\n\n[successor]: <missing.md> \"title\"\n"))
+	if !slices.Contains(targets, "ADR-002-live.md") {
+		t.Fatalf("markdownTargets() = %v, want titled inline-link target", targets)
+	}
 	if !slices.Contains(targets, "missing.md") {
 		t.Fatalf("markdownTargets() = %v, want reference-definition target", targets)
 	}

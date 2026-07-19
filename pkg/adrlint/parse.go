@@ -99,9 +99,22 @@ func markdownTargets(data []byte) []string {
 	matches = append(matches, markdownReferenceDefinition.FindAllStringSubmatch(string(data), -1)...)
 	targets := make([]string, 0, len(matches))
 	for _, match := range matches {
-		targets = append(targets, match[1])
+		targets = append(targets, markdownLinkDestination(match[1]))
 	}
 	return targets
+}
+
+func markdownLinkDestination(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(raw, "<") {
+		if end := strings.Index(raw, ">"); end > 0 {
+			return raw[1:end]
+		}
+	}
+	if end := strings.IndexAny(raw, " \t\r\n"); end >= 0 {
+		return raw[:end]
+	}
+	return raw
 }
 
 func relativeLink(target string) bool {
