@@ -15,6 +15,9 @@ choices. Beads now owns task identity, status, dependencies, and assignment.
 snapshots. `cmd/backlog-suggest` is read-only and requires `--files`; it has no
 repository default and no VROOM emission path.
 
+The legacy `agm task` commands and their `.agm/backlog.md` writer have been
+removed. The orchestrator dashboard no longer reads that retired store.
+
 ### Ranking rules, in order
 
 1. **Eligibility.** `Pending` plus every dep resolves to `Done`. A `N.*`

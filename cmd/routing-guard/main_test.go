@@ -11,7 +11,8 @@ var testPatterns = []string{
 	"**/[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh]/**",
 	"**/[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh].[Mm][Dd]",
 	"**/[Rr][Ee][Pp][Oo][Rr][Tt].[Mm][Dd]",
-	"**/docs/**/[Pp][Ll][Aa][Nn].[Mm][Dd]",
+	"**/[Pp][Ll][Aa][Nn].[Mm][Dd]",
+	"**/*-[Pp][Ll][Aa][Nn].[Mm][Dd]",
 	"**/docs/**/*-[Pp][Ll][Aa][Nn].*",
 	"**/[Rr][Oo][Aa][Dd][Mm][Aa][Pp].*",
 	"**/*-[Rr][Oo][Aa][Dd][Mm][Aa][Pp].*",
@@ -57,6 +58,9 @@ func TestForbidden(t *testing.T) {
 		{"reports/REPORT.md", true},
 		{"docs/PLAN.md", true},
 		{"agm/docs/ops/PLAN.md", true},
+		{"agm/TEST-PLAN.md", true},
+		{"agm/CENTRALIZED-STORAGE-TEST-PLAN.md", true},
+		{"engram/hooks-bin/GO-MIGRATION-PLAN.md", true},
 		// Wayfinder TOOL SOURCE and living docs — must NOT be blocked.
 		{"wayfinder/SKILL.md", false},
 		{"wayfinder/SPEC.md", false},
@@ -83,9 +87,9 @@ func TestGlobPathMatch(t *testing.T) {
 		path    string
 		want    bool
 	}{
-		{"**/docs/**/*-plan.*", "docs/release-plan.md", true},
-		{"**/docs/**/*-plan.*", "agm/docs/ops/release-plan.rst", true},
-		{"**/docs/**/*-plan.*", "agm/ops/release-plan.rst", false},
+		{"**/*-plan.md", "docs/release-plan.md", true},
+		{"**/*-plan.md", "agm/docs/ops/release-plan.rst", false},
+		{"**/*-plan.md", "agm/ops/release-plan.md", true},
 		{"**/research/**", "research/note.any", true},
 		{"**/research/**", "a/research/nested/data.json", true},
 		{"docs/design/**", "docs/design.md", false},
