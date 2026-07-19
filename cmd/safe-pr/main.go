@@ -27,6 +27,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -289,7 +290,8 @@ func execGh(req *safepr.Request, timeout time.Duration, verifyCI bool) error {
 	// on the repo, branch not yet pushed) must not fail the run; it is surfaced
 	// as a warning and can be armed manually.
 	if runErr == nil && req.Verb == "create" && prURL != "" {
-		if !requestsDraft(req.GhArgs) {
+		draft := requestsDraft(req.GhArgs)
+		if !draft {
 			if mergeErr := armAutoMerge(prURL, timeout); mergeErr != nil {
 				fmt.Fprintf(os.Stderr, "safe-pr: WARNING: could not arm auto-merge on %s: %v\n", prURL, mergeErr)
 			}
@@ -299,7 +301,7 @@ func execGh(req *safepr.Request, timeout time.Duration, verifyCI bool) error {
 		// forever with no signal. When asked, confirm CI actually started and
 		// warn loudly if it did not — a warning only, since the PR exists and
 		// the `agm pr scan-no-checks` sweep is the durable backstop.
-		if verifyCI {
+		if verifyCI && !draft {
 			warnIfNoCI(prURL)
 		}
 	}
@@ -320,7 +322,12 @@ func execGh(req *safepr.Request, timeout time.Duration, verifyCI bool) error {
 // Boolean values; the final occurrence wins, matching gh argument parsing.
 func requestsDraft(args []string) bool {
 	draft := false
-	for _, arg := range args {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if ghCreateFlagConsumesNext(arg) {
+			i++
+			continue
+		}
 		if arg == "--draft" || arg == "-d" {
 			draft = true
 			continue
@@ -336,31 +343,46 @@ func requestsDraft(args []string) bool {
 			}
 			continue
 		}
-		if draftInShorthandCluster(arg) {
+		clusterDraft, consumesNext := draftInShorthandCluster(arg)
+		if clusterDraft {
 			draft = true
+		}
+		if consumesNext {
+			i++
 		}
 	}
 	return draft
+}
+
+func ghCreateFlagConsumesNext(arg string) bool {
+	longValueFlags := []string{
+		"--assignee", "--base", "--body", "--body-file", "--head", "--label",
+		"--milestone", "--project", "--recover", "--reviewer", "--template", "--title",
+	}
+	shortValueFlags := []string{"-a", "-B", "-b", "-H", "-l", "-m", "-p", "-r", "-T", "-t"}
+	return slices.Contains(longValueFlags, arg) || slices.Contains(shortValueFlags, arg)
 }
 
 // draftInShorthandCluster follows pflag's shorthand-cluster rule: Boolean
 // shorthands may be combined, while the first value-taking shorthand consumes
 // the rest of the token. For example, -dt requests draft and then a title from
 // the next argument, while -td gives title the value "d" and is not draft.
-func draftInShorthandCluster(arg string) bool {
+func draftInShorthandCluster(arg string) (draft bool, consumesNext bool) {
 	if len(arg) < 3 || !strings.HasPrefix(arg, "-") || strings.HasPrefix(arg, "--") {
-		return false
+		return false, false
 	}
 	valueTaking := "aBbHlmprTt"
-	for _, shorthand := range strings.TrimPrefix(arg, "-") {
+	cluster := []rune(strings.TrimPrefix(arg, "-"))
+	for i, shorthand := range cluster {
 		if shorthand == 'd' {
-			return true
+			draft = true
+			continue
 		}
 		if strings.ContainsRune(valueTaking, shorthand) {
-			return false
+			return draft, i == len(cluster)-1
 		}
 	}
-	return false
+	return draft, false
 }
 
 // verifyCIPollWindow bounds how long warnIfNoCI waits for the first check-run

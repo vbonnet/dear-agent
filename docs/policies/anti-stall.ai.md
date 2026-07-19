@@ -1,3 +1,14 @@
+---
+schema: ai.md/v1
+type: guide
+status: active
+created: 2026-07-19
+tokens: 340
+title: Anti-stall
+description: Continue through known work while stopping at explicit safety, authority, failure, redirect, and completion boundaries.
+tags: [policy, agents, execution, safety]
+---
+
 # Anti-stall policy
 
 Use this policy when an agent is executing a multi-step request, backlog, or
