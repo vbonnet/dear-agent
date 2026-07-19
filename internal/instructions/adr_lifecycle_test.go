@@ -76,7 +76,7 @@ func TestADRDirectoriesHaveUniqueIndexedLifecycle(t *testing.T) {
 					if len(successor) != 2 {
 						t.Errorf("%s: superseded status must link to its live successor", entry.Name())
 					} else {
-						assertLiveADRSuccessor(t, dir, entry.Name(), successor[1])
+						assertLiveADRSuccessor(t, root, dir, entry.Name(), successor[1])
 					}
 				}
 				assertRelativeMarkdownLinksResolve(t, dir, entry.Name(), content)
@@ -96,7 +96,7 @@ func TestADRDirectoriesHaveUniqueIndexedLifecycle(t *testing.T) {
 	}
 }
 
-func assertLiveADRSuccessor(t *testing.T, dir, source, target string) {
+func assertLiveADRSuccessor(t *testing.T, root, dir, source, target string) {
 	t.Helper()
 	targetPath := filepath.Clean(filepath.Join(dir, filepath.FromSlash(target)))
 	if targetPath == filepath.Join(dir, source) {
@@ -105,6 +105,24 @@ func assertLiveADRSuccessor(t *testing.T, dir, source, target string) {
 	}
 	if match := adrFilePattern.FindStringSubmatch(filepath.Base(targetPath)); len(match) != 3 {
 		t.Errorf("%s: successor %q is not an ADR record", source, target)
+		return
+	}
+	targetDir := filepath.Dir(targetPath)
+	if !governedADRDirectory(root, targetDir) {
+		t.Errorf("%s: successor %q is outside the governed ADR inventories", source, target)
+		return
+	}
+	index := readFile(t, filepath.Join(targetDir, "README.md"))
+	indexed := false
+	for _, entry := range adrIndexPattern.FindAllStringSubmatch(index, -1) {
+		indexedPath := filepath.Clean(filepath.Join(targetDir, filepath.FromSlash(entry[2])))
+		if indexedPath == targetPath {
+			indexed = true
+			break
+		}
+	}
+	if !indexed {
+		t.Errorf("%s: successor %q is not indexed by its governed ADR inventory", source, target)
 		return
 	}
 	content, err := os.ReadFile(targetPath)
@@ -116,6 +134,15 @@ func assertLiveADRSuccessor(t *testing.T, dir, source, target string) {
 	if len(statuses) != 1 || (statuses[0][1] != "Accepted" && statuses[0][1] != "Proposed") {
 		t.Errorf("%s: successor %q must be one live Accepted or Proposed ADR", source, target)
 	}
+}
+
+func governedADRDirectory(root, candidate string) bool {
+	for _, relative := range []string{"docs/adr", "agm/docs/adr"} {
+		if filepath.Clean(candidate) == filepath.Clean(filepath.Join(root, filepath.FromSlash(relative))) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestADRFilenamePatternAcceptsOnlyCanonicalWidth(t *testing.T) {
