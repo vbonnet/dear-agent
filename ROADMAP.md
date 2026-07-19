@@ -878,7 +878,6 @@ implementing against it.
 ## References
 
 - [ADR-010 — Durable Workflow Execution Substrate](docs/adr/ADR-010-workflow-engine-architecture.md)
-- [ADR-010 — Workflow Engine Architecture](docs/adr/ADR-010-workflow-engine-architecture.md)
 - [BACKLOG — per-ticket tracking](docs/workflow-engine/BACKLOG.md)
 - `~/src/engram-research/WORKFLOW-ENGINE-SYNTHESIS.md` (origin/main, 2026-05-02)
 - `~/src/engram-research/WORKFLOW-ENGINE-RESEARCH-ENGINEERING.md` (origin/main, 2026-05-02)
