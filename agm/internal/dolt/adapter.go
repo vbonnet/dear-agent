@@ -20,18 +20,23 @@ func init() {
 	lookupEnv = os.LookupEnv
 }
 
-// isRunningInTest detects if code is executing within a test context
-// This is determined by checking if the executable name contains ".test"
-// which is characteristic of binaries compiled by `go test`
+// isRunningInTest detects both go test binaries and built subprocesses whose
+// caller explicitly enables the test protocol.
 func isRunningInTest() bool {
-	// Get the executable path
+	testMode := getEnv("ENGRAM_TEST_MODE", "")
 	executable, err := os.Executable()
 	if err != nil {
-		return false
+		executable = ""
 	}
+	return testExecution(executable, testMode)
+}
 
-	// Check if executable name contains ".test" (characteristic of go test binaries)
-	return strings.Contains(executable, ".test")
+func testExecution(executable, testMode string) bool {
+	return testModeEnabled(testMode) || strings.Contains(executable, ".test")
+}
+
+func testModeEnabled(value string) bool {
+	return value == "1" || value == "true"
 }
 
 // Adapter provides Dolt-based storage for AGM sessions
@@ -181,7 +186,7 @@ func DefaultConfig() (*Config, error) {
 		testWorkspace := getEnv("ENGRAM_TEST_WORKSPACE", "")
 
 		// Require explicit test mode
-		if testMode != "1" && testMode != "true" {
+		if !testModeEnabled(testMode) {
 			return nil, fmt.Errorf("TEST POLLUTION BLOCKED: Tests must set ENGRAM_TEST_MODE=1\n\n"+
 				"Why: Without test isolation, tests write to production databases causing data pollution.\n\n"+
 				"Fix: Run tests with proper isolation:\n"+
@@ -190,25 +195,8 @@ func DefaultConfig() (*Config, error) {
 				"Current workspace: %s (attempted during test)", workspace)
 		}
 
-		// Block production workspace names during tests
-		// Production workspaces include: oss, acme, prod, production, main, etc.
-		isProductionWorkspace := productionWorkspace(workspace) || productionWorkspace(database)
-
-		if isProductionWorkspace {
-			//nolint:staticcheck // multi-line CLI-facing help text
-			return nil, fmt.Errorf("TEST POLLUTION BLOCKED: Tests cannot write to production workspace '%s'\n\n"+
-				"Why: Production workspaces contain real data that tests would corrupt.\n\n"+
-				"Fix: Set ENGRAM_TEST_WORKSPACE to a test-specific value:\n"+
-				"  ENGRAM_TEST_MODE=1 ENGRAM_TEST_WORKSPACE=test go test ./...\n\n"+
-				"Or use testutil.SetupTestEnvironment(t) which auto-sets workspace='test'.\n\n"+
-				"Note: WORKSPACE env var is set to '%s' - this is a production workspace.\n"+
-				"      Tests detected production name, blocking to prevent pollution.", workspace, workspace)
-		}
-
-		// Warn if ENGRAM_TEST_WORKSPACE is not set (using inherited WORKSPACE)
-		if testWorkspace == "" {
-			fmt.Fprintf(os.Stderr, "WARNING: ENGRAM_TEST_WORKSPACE not set, using WORKSPACE=%s\n", workspace)
-			fmt.Fprintf(os.Stderr, "         Set ENGRAM_TEST_WORKSPACE=test for explicit test isolation\n")
+		if err := validateTestTarget(workspace, database, testWorkspace); err != nil {
+			return nil, err
 		}
 	}
 
@@ -242,9 +230,17 @@ func DefaultConfig() (*Config, error) {
 	}, nil
 }
 
-func productionWorkspace(value string) bool {
-	return value == "oss" || value == "acme" || value == "prod" ||
-		value == "production" || value == "main"
+func validateTestTarget(workspace, database, testWorkspace string) error {
+	if testWorkspace == "" {
+		return fmt.Errorf("TEST POLLUTION BLOCKED: ENGRAM_TEST_WORKSPACE must explicitly select the isolated test workspace")
+	}
+	if workspace != testWorkspace {
+		return fmt.Errorf("TEST POLLUTION BLOCKED: resolved workspace %q does not match ENGRAM_TEST_WORKSPACE %q", workspace, testWorkspace)
+	}
+	if database != testWorkspace && database != "agm_test" {
+		return fmt.Errorf("TEST POLLUTION BLOCKED: resolved database %q is not the selected test workspace %q or the shared agm_test database", database, testWorkspace)
+	}
+	return nil
 }
 
 // New creates a new Dolt adapter with the given configuration
