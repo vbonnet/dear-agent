@@ -4,7 +4,6 @@ on:
   push:
     branches: [main, develop]
   pull_request:
-    branches: [main, develop]
   schedule:
     # Daily 06:00 UTC — catches dependency CVEs and drift between PRs.
     - cron: "0 6 * * *"
