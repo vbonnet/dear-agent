@@ -335,25 +335,24 @@ func commandShaped(value string) bool {
 	if embeddedCommandStart.MatchString(strings.TrimSpace(value)) {
 		return true
 	}
-	fields := strings.Fields(strings.TrimSpace(value))
-	if len(fields) == 0 {
-		return false
+	commands := splitShellCommands(value)
+	for _, candidate := range commands {
+		fields := strings.Fields(candidate)
+		if len(fields) > 1 && fields[0] == "$" {
+			fields = fields[1:]
+		}
+		if len(fields) == 0 {
+			continue
+		}
+		command := strings.TrimLeft(fields[0], "(")
+		switch command {
+		case "agm", "bd", "command", "env", "gh", "git", "gtimeout", "nohup", "safe-merge", "safe-pr", "safe-push", "sudo", "timeout":
+			return true
+		case "if", "while", "until", "then", "do", "!":
+			return true
+		}
 	}
-	if fields[0] == "$" && len(fields) > 1 {
-		fields = fields[1:]
-	}
-	if len(fields) == 0 {
-		return false
-	}
-	command := strings.TrimLeft(fields[0], "(")
-	switch command {
-	case "agm", "bd", "command", "env", "gh", "git", "gtimeout", "nohup", "safe-merge", "safe-pr", "safe-push", "sudo", "timeout":
-		return true
-	case "if", "while", "until", "then", "do", "!":
-		return true
-	default:
-		return strings.Contains(value, "&&") || strings.Contains(value, "||")
-	}
+	return strings.Contains(value, "&&") || strings.Contains(value, "||")
 }
 
 var embeddedCommandStart = regexp.MustCompile(`(?:^|["':=\[(][[:space:]]*)((?:agm|bd|gh|git|safe-merge|safe-pr|safe-push)\b.*)$`)

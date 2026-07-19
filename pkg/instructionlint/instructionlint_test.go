@@ -213,6 +213,26 @@ func TestRuleViolationsTeachCanonicalReplacements(t *testing.T) {
 	}
 }
 
+func TestBackgroundShellCommandsRemainPolicyVisible(t *testing.T) {
+	segments := parseSegments([]byte("```\necho preparing & gh pr merge 123\n```\n"))
+	var rules []string
+	for _, segment := range segments {
+		for _, violation := range evaluateSegment("AGENTS.md", segment) {
+			rules = append(rules, violation.Rule)
+		}
+	}
+	if !reflect.DeepEqual(rules, []string{"raw-gh-merge"}) {
+		t.Fatalf("background command rules = %v, want raw-gh-merge", rules)
+	}
+
+	want := []string{"echo preparing 2>&1", `printf 'a & b'`}
+	for _, input := range want {
+		if got := splitShellCommands(input); !reflect.DeepEqual(got, []string{input}) {
+			t.Errorf("splitShellCommands(%q) = %v, want one unsplit command", input, got)
+		}
+	}
+}
+
 func TestCheckRepositoryGovernsAgentReadableYAML(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init", "-q")

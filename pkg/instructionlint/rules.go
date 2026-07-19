@@ -14,7 +14,6 @@ type rule struct {
 }
 
 var retiredWayfinder = regexp.MustCompile(`(?:\bV1\b|\bW0(?:\b|-)|\bD[1-6](?:\b|-)|\bS(?:1[01]|[1-9])(?:\b|-))`)
-var shellBoundary = regexp.MustCompile(`(?:&&|\|\||[;|])`)
 var environmentAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 var embeddedShellCommand = regexp.MustCompile("\\$\\(([^()]*)\\)|`([^`]*)`")
 
@@ -142,13 +141,75 @@ func commandFields(text string) [][]string {
 		}
 	}
 	for _, input := range inputs {
-		for _, command := range shellBoundary.Split(input, -1) {
+		for _, command := range splitShellCommands(input) {
 			fields := normalizeAGMCommand(stripCommandPrefixes(strings.Fields(strings.TrimSpace(command))))
 			if len(fields) > 0 {
 				commands = append(commands, fields)
 			}
 		}
 	}
+	return commands
+}
+
+func splitShellCommands(input string) []string {
+	commands := make([]string, 0, 2)
+	start := 0
+	var quote byte
+	escaped := false
+	appendCommand := func(end int) {
+		if command := strings.TrimSpace(input[start:end]); command != "" {
+			commands = append(commands, command)
+		}
+	}
+	for i := 0; i < len(input); i++ {
+		current := input[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if current == '\\' {
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			if current == quote {
+				quote = 0
+			}
+			continue
+		}
+		if current == '\'' || current == '"' {
+			quote = current
+			continue
+		}
+		width := 0
+		switch current {
+		case ';':
+			width = 1
+		case '|':
+			if i > 0 && input[i-1] == '>' {
+				continue
+			}
+			width = 1
+			if i+1 < len(input) && input[i+1] == '|' {
+				width = 2
+			}
+		case '&':
+			if (i > 0 && (input[i-1] == '>' || input[i-1] == '<')) || (i+1 < len(input) && input[i+1] == '>') {
+				continue
+			}
+			width = 1
+			if i+1 < len(input) && input[i+1] == '&' {
+				width = 2
+			}
+		}
+		if width == 0 {
+			continue
+		}
+		appendCommand(i)
+		i += width - 1
+		start = i + 1
+	}
+	appendCommand(len(input))
 	return commands
 }
 
