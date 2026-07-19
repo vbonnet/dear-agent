@@ -163,7 +163,7 @@ func FormatResult(r GuardResult, w io.Writer) {
 	if blockedByPR {
 		fmt.Fprintf(w, "\nDefinition of Done requires all referenced PRs to be merged to main.\n")
 		fmt.Fprintf(w, "Unmerged PR(s): %s\n", prListString(r.UnmergedPR))
-		fmt.Fprintf(w, "See AGENTS.md §Agent Delegation Enforcement §6.\n")
+		fmt.Fprintf(w, "See docs/policies/definition-of-done.ai.md.\n")
 		fmt.Fprintf(w, "To fix:\n")
 		for _, pr := range r.UnmergedPR {
 			fmt.Fprintf(w, "  • Merge PR #%d first, then close the bead\n", pr.Number)

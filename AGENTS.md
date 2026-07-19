@@ -13,6 +13,8 @@ older subsystem documentation:
   the retired path, flags, tests, and documentation in the same change.
 - [Harness Hygiene](docs/policies/harness-hygiene.ai.md): keep one owner per
   rule, turn hard requirements into checks, and continuously earn complexity.
+- [Anti-stall](docs/policies/anti-stall.ai.md): continue through known work and
+  stop only at explicit safety, authority, failure, or completion boundaries.
 - [DEAR retrospectives](docs/policies/dear-retro.ai.md): systemic defects get a
   short prevention-focused retro in the configured research repository.
 - [Definition of Done](docs/policies/definition-of-done.ai.md): done means
@@ -57,7 +59,7 @@ current code, and repair or quarantine the stale living document in scope.
 - A permission or access denial gets no retry or workaround. Defer or escalate
   it and continue only with independent safe work.
 - After the same approach fails twice, switch approaches or report the block.
-- Follow the [anti-stall contract](docs/design/anti-stall.md): continue through
+- Follow the [anti-stall contract](docs/policies/anti-stall.ai.md): continue through
   known work, accept empty results, and stop only at its explicit boundaries.
 - Supervisor and user redirects are commands. Acknowledge promptly, preserve
   work in a commit, and comply.
@@ -137,4 +139,4 @@ This repository contains current, normative documentation only:
   test-count, or cost claims without dated reproducible evidence.
 
 Harness-specific root files are import shims. Shared policy changes belong here
-or in the six canonical policy files, not in a harness shim.
+or in the seven canonical policy files, not in a harness shim.

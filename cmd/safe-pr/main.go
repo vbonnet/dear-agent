@@ -334,9 +334,33 @@ func requestsDraft(args []string) bool {
 			if err == nil {
 				draft = parsed
 			}
+			continue
+		}
+		if draftInShorthandCluster(arg) {
+			draft = true
 		}
 	}
 	return draft
+}
+
+// draftInShorthandCluster follows pflag's shorthand-cluster rule: Boolean
+// shorthands may be combined, while the first value-taking shorthand consumes
+// the rest of the token. For example, -dt requests draft and then a title from
+// the next argument, while -td gives title the value "d" and is not draft.
+func draftInShorthandCluster(arg string) bool {
+	if len(arg) < 3 || !strings.HasPrefix(arg, "-") || strings.HasPrefix(arg, "--") {
+		return false
+	}
+	valueTaking := "aBbHlmprTt"
+	for _, shorthand := range strings.TrimPrefix(arg, "-") {
+		if shorthand == 'd' {
+			return true
+		}
+		if strings.ContainsRune(valueTaking, shorthand) {
+			return false
+		}
+	}
+	return false
 }
 
 // verifyCIPollWindow bounds how long warnIfNoCI waits for the first check-run
