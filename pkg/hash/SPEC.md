@@ -1,5 +1,7 @@
 # hash Package Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Executable EARS Requirements
 
 **HASHR-01** When a file hash is requested, the package shall compute SHA-256 over the file contents and return the canonical encoded value.
@@ -9,8 +11,6 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-
-<!-- Last audited at: NEEDS-AUDIT -->
 
 **Version:** 0.1.0
 **Status:** Production-ready

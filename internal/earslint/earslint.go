@@ -51,10 +51,11 @@ func (f Finding) String() string {
 
 // Result is the outcome of linting a single file.
 type Result struct {
-	File             string    `json:"file"`
-	TotalRequirements int      `json:"total_requirements"` // candidate requirements detected
-	ValidRequirements int      `json:"valid_requirements"`
-	Findings         []Finding `json:"findings"`
+	File              string    `json:"file"`
+	TotalRequirements int       `json:"total_requirements"` // candidate requirements detected
+	ValidRequirements int       `json:"valid_requirements"`
+	DuplicateIDs      int       `json:"duplicate_ids"`
+	Findings          []Finding `json:"findings"`
 }
 
 // NonConforming returns the number of candidate requirements that matched no
@@ -73,7 +74,7 @@ func (r Result) Failed(strict bool) bool {
 	if r.ValidRequirements == 0 {
 		return true
 	}
-	if strict && r.NonConforming() > 0 {
+	if strict && (r.NonConforming() > 0 || r.DuplicateIDs > 0) {
 		return true
 	}
 	return false
@@ -157,6 +158,7 @@ func (l *Linter) matches(line string) (string, bool) {
 // those are reported as Findings; it only errors on I/O failure.
 func (l *Linter) Lint(name string, r io.Reader) (Result, error) {
 	res := Result{File: name}
+	firstIDLine := make(map[string]int)
 	scanner := bufio.NewScanner(r)
 	// Allow long lines (SPEC requirements can be verbose).
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -186,6 +188,20 @@ func (l *Linter) Lint(name string, r io.Reader) (Result, error) {
 		res.TotalRequirements++
 		if _, ok := l.matches(candidate); ok {
 			res.ValidRequirements++
+			if match := requirementID.FindStringSubmatch(candidate); match != nil {
+				if firstLine, duplicate := firstIDLine[match[1]]; duplicate {
+					res.DuplicateIDs++
+					res.Findings = append(res.Findings, Finding{
+						File:     name,
+						Line:     lineNo,
+						Severity: SeverityError,
+						Message:  fmt.Sprintf("duplicate requirement ID %s (first declared at line %d)", match[1], firstLine),
+						Text:     candidate,
+					})
+				} else {
+					firstIDLine[match[1]] = lineNo
+				}
+			}
 			continue
 		}
 
@@ -212,6 +228,8 @@ func (l *Linter) Lint(name string, r io.Reader) (Result, error) {
 
 	return res, nil
 }
+
+var requirementID = regexp.MustCompile(`^([A-Z][A-Z0-9-]*[0-9]+)\s+`)
 
 // LintFile lints the file at path.
 func (l *Linter) LintFile(path string) (Result, error) {

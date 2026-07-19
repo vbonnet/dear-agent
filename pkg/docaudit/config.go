@@ -21,13 +21,12 @@ type Policy struct {
 	Surfaces []Surface `yaml:"surfaces"`
 }
 
-// Surface declares ownership, verification, and age policy for one path set.
+// Surface declares ownership and age policy for one path set.
 type Surface struct {
-	Name                string `yaml:"name"`
-	Match               string `yaml:"match"`
-	Owner               string `yaml:"owner"`
-	VerificationCommand string `yaml:"verification-command"`
-	MaxAgeDays          int    `yaml:"max-age-days"`
+	Name       string `yaml:"name"`
+	Match      string `yaml:"match"`
+	Owner      string `yaml:"owner"`
+	MaxAgeDays int    `yaml:"max-age-days"`
 }
 
 func loadPolicy(configPath string) (Policy, error) {
@@ -95,9 +94,6 @@ func validatePolicy(policy Policy) error {
 		}
 		if strings.TrimSpace(surface.Owner) == "" {
 			return fmt.Errorf("docaudit: %s.owner must not be empty", label)
-		}
-		if strings.TrimSpace(surface.VerificationCommand) == "" {
-			return fmt.Errorf("docaudit: %s.verification-command must not be empty", label)
 		}
 		if surface.MaxAgeDays <= 0 {
 			return fmt.Errorf("docaudit: %s.max-age-days must be positive", label)

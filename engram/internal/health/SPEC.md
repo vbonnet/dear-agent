@@ -1,5 +1,7 @@
 # Health Check & Auto-Fix System - Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Executable EARS Requirements
 
 **HLTHR-01** When Engram health checks run, the system shall report hook, path, and marketplace configuration findings without mutating state.
@@ -9,8 +11,6 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-
-<!-- Last audited at: NEEDS-AUDIT -->
 
 **Version**: 1.0
 **Date**: 2026-03-14

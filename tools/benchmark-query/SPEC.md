@@ -1,5 +1,7 @@
 # benchmark-query — Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Executable EARS Requirements
 
 **BQR-01** When benchmark records are queried, the tool shall apply configured filters and return deterministic ordered results.
@@ -9,8 +11,6 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-
-<!-- Last audited at: NEEDS-AUDIT -->
 
 ## Overview
 

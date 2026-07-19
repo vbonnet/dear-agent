@@ -1,5 +1,7 @@
 # CI Pipeline Executor Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Executable EARS Requirements
 
 **CIPER-01** When a pipeline is requested, the CI executor shall run the configured workflow with bounded context and captured output.
@@ -9,8 +11,6 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-
-<!-- Last audited at: NEEDS-AUDIT -->
 
 ## Overview
 

@@ -1,5 +1,7 @@
 # EDD Framework Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Executable EARS Requirements
 
 **EVALR-01** When evaluation criteria are applied, the framework shall produce deterministic pass, fail, and evidence outcomes.
@@ -9,8 +11,6 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-
-<!-- Last audited at: NEEDS-AUDIT -->
 
 ## Purpose
 

@@ -4,7 +4,7 @@
 
 ## EARS Requirements
 
-**DOCAUDIT-01** When repository policy is loaded, the system shall require each declared living-document surface to have a unique name, valid glob, owner, verification command, and positive maximum age.
+**DOCAUDIT-01** When repository policy is loaded, the system shall require each declared living-document surface to have a unique name, valid glob, owner, and positive maximum age.
 
 **DOCAUDIT-02** When repository documents are discovered, the system shall inspect every Git-tracked path matching exactly one declared surface through context-cancellable, non-interactive Git commands with diagnostic stderr.
 
@@ -12,7 +12,7 @@
 
 **DOCAUDIT-04** When a baseline revision is supplied, the system shall reject policy changes that remove governed coverage from a surviving tracked document or increase its maximum audit age.
 
-**DOCAUDIT-04** When a declared document lacks exactly one canonical audit marker, the system shall classify the marker as missing, placeholder, malformed, or duplicate.
+**DOCAUDIT-10** When a declared document lacks exactly one canonical audit marker in the document header, the system shall classify the marker as missing, placeholder, malformed, or duplicate.
 
 **DOCAUDIT-05** When a canonical audit date is impossible, future-dated, or older than the declared maximum age, the system shall classify the corresponding date finding.
 
@@ -23,6 +23,8 @@
 **DOCAUDIT-08** When a base ref has no baseline, the system shall permit the initial reviewed bootstrap.
 
 **DOCAUDIT-09** When the repository is intact, the system shall return a nonblocking report that still exposes all baselined findings.
+
+**DOCAUDIT-11** When a governed tracked document is a symlink, the system shall reject it before reading any target content.
 
 ## Invariants
 

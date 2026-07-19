@@ -1,5 +1,7 @@
 # Engram CLI Commands - Technical Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## EARS Requirements
 
 **ECMDR-01** When the Engram root command is built, the command package shall register the maintained context, memory, retrieval, and governance subcommands.
@@ -10,8 +12,6 @@
 
 - Feature: `agm/test/bdd/features/engram_cli_support_guardrails.feature`
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-
-<!-- Last audited at: NEEDS-AUDIT -->
 
 **Status:** Living documentation
 **Scope:** `engram/cmd/engram/cmd`

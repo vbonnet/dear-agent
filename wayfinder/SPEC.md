@@ -1,10 +1,10 @@
 # Wayfinder Plugin - Specification
 
+<!-- Last audited at: 2026-07-01 -->
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
-
-<!-- Last audited at: 2026-07-01 -->
 
 **Version**: 0.1.0
 **Last Updated**: 2026-02-11

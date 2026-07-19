@@ -1,5 +1,7 @@
 # Engram Package - Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Executable EARS Requirements
 
 **PENGR-01** When an engram document is parsed, the package shall validate frontmatter while preserving compatible legacy records.
@@ -9,8 +11,6 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-
-<!-- Last audited at: NEEDS-AUDIT -->
 
 **Version**: 1.0.0
 **Last Updated**: 2026-02-11

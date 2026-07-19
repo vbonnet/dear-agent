@@ -38,31 +38,17 @@ jobs:
       - name: Resolve shrink-only comparison ref
         id: baseline
         env:
-          EVENT_NAME: ${{ github.event_name }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           BEFORE_SHA: ${{ github.event.before }}
           CURRENT_SHA: ${{ github.sha }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
             git fetch --no-tags origin "$BASE_SHA"
-            echo "ref=$BASE_SHA" >> "$GITHUB_OUTPUT"
-          elif [[ "$EVENT_NAME" == "push" ]]; then
-            if [[ "$BEFORE_SHA" =~ ^0+$ ]]; then
-              if git rev-parse "$CURRENT_SHA^" >/dev/null 2>&1; then
-                git rev-parse "$CURRENT_SHA^" | sed 's/^/ref=/' >> "$GITHUB_OUTPUT"
-              else
-                git fetch --no-tags origin "$DEFAULT_BRANCH"
-                ref="$(git merge-base "$CURRENT_SHA" "origin/$DEFAULT_BRANCH")"
-                test -n "$ref"
-                echo "ref=$ref" >> "$GITHUB_OUTPUT"
-              fi
-            else
-              echo "ref=$BEFORE_SHA" >> "$GITHUB_OUTPUT"
-            fi
-          else
-            echo "ref=" >> "$GITHUB_OUTPUT"
           fi
+          ref="$(scripts/resolve-doc-audit-base-ref.sh)"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
       - name: Validate living-document freshness
         run: go run ./tools/doc-audit -repo . -baseline-ref "${{ steps.baseline.outputs.ref }}"

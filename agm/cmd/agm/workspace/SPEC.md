@@ -1,5 +1,7 @@
 # Workspace-Aware Session Management - Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Executable EARS Requirements
 
 **WSR-01** When AGM discovers or lists sessions, the workspace command shall preserve each session's workspace identity.
@@ -9,8 +11,6 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-
-<!-- Last audited at: NEEDS-AUDIT -->
 
 **Version**: 1.0
 **Status**: Implemented

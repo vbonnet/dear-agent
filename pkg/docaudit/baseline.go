@@ -66,6 +66,9 @@ func loadBaselineAtRef(ctx context.Context, root, ref, baselinePath string) ([]B
 }
 
 func loadFileAtRef(ctx context.Context, root, ref, filePath string) ([]byte, bool, error) {
+	if ref != strings.TrimSpace(ref) || ref == "" || strings.HasPrefix(ref, "-") {
+		return nil, false, fmt.Errorf("docaudit: invalid baseline ref %q", ref)
+	}
 	verify := exec.CommandContext(ctx, "git", "rev-parse", "--verify", ref+"^{commit}")
 	verify.Dir = root
 	verify.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")

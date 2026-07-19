@@ -16,7 +16,7 @@
 #   pr-policy            informational map of PR verbs -> sanctioned command
 #                        (mirrors the enforcement in .claude/settings.json)
 #   living-docs          declared living-document surfaces, their owners,
-#                        verification commands, maximum audit age, and the
+#                        maximum audit age, and the
 #                        checked-in freshness-debt baseline
 #   forbidden-paths      directories where new files of a given kind MUST NOT
 #                        be created in THIS repo. Maps kind -> list of globs
@@ -50,7 +50,8 @@ pr-policy:
   create: safe-pr   # safe-pr create --wayfinder <project-dir> --title … --body …
   close: safe-pr    # safe-pr close  --wayfinder <project-dir> <number|url>
 
-# Living AI-facing contracts use one exact, standalone freshness marker:
+# Living AI-facing contracts use one exact, standalone freshness marker as
+# either the first nonblank line or immediately after the top-level title:
 #   <!-- Last audited at: YYYY-MM-DD -->
 # A date is evidence of an actual review, never a mechanical timestamp. Known
 # missing/placeholder/malformed markers live in the exact shrink-only baseline;
@@ -61,12 +62,10 @@ living-docs:
     - name: specifications
       match: "**/SPEC.md"
       owner: CODEOWNERS
-      verification-command: make lint-specs STRICT=1
       max-age-days: 90
     - name: architectures
       match: "**/ARCHITECTURE.md"
       owner: CODEOWNERS
-      verification-command: make preflight
       max-age-days: 90
 
 forbidden-paths:

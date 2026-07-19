@@ -127,11 +127,10 @@ lint-specs:
 
 # Validate declared, tracked living-document audit markers and the exact,
 # shrink-only debt baseline from .dear-agent.yml.
-DOC_AUDIT_BASE_REF ?= origin/main
+DOC_AUDIT_BASE_REF ?=
 lint-doc-freshness:
-	@comparison_ref="$(DOC_AUDIT_BASE_REF)"; \
-	if ! base_ref=$$(git merge-base HEAD "$$comparison_ref"); then \
-		echo "lint-doc-freshness: comparison ref '$$comparison_ref' is unavailable or has no merge base" >&2; \
+	@if ! base_ref=$$(scripts/resolve-doc-audit-base-ref.sh "$(DOC_AUDIT_BASE_REF)"); then \
+		echo "lint-doc-freshness: set DOC_AUDIT_BASE_REF to the actual target branch or commit when no GitHub PR is available" >&2; \
 		exit 1; \
 	fi; \
 	go run ./tools/doc-audit -repo . -baseline-ref "$$base_ref"

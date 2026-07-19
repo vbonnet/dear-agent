@@ -1,5 +1,7 @@
 # Retrieval Package - Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Executable EARS Requirements
 
 **RETRR-01** When a retrieval query is valid, the package shall resolve configured paths, rank matching memories, and return bounded results.
@@ -9,8 +11,6 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-
-<!-- Last audited at: NEEDS-AUDIT -->
 
 **Version**: 1.0.0
 **Last Updated**: 2026-02-11

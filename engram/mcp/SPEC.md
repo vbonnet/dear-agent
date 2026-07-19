@@ -1,5 +1,7 @@
 # Engram MCP Server - Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Executable EARS Requirements
 
 **EMCPR-01** When an MCP client invokes an Engram tool, the server shall validate the request and route it through the maintained Engram operation.
@@ -9,8 +11,6 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-
-<!-- Last audited at: NEEDS-AUDIT -->
 
 ## Document Information
 

@@ -12,7 +12,8 @@ clicking merge are 100% agent work; the only legitimate human escalation is a
 mode for foreground use. It performs merge *mechanics* in-process through the
 vetted `safe-*` packages (`safegit.SafeMerge`, `safe-rebase`) and *spawns AGM
 agent sessions* for code-requiring states (CI failing, conflicts). The
-deterministic, irreversible merge stays in a vetted wrapper (principle 9); only
+deterministic, irreversible merge stays in a vetted wrapper, as required by
+the AGENTS.md guarded-delivery policy; only
 code edits run in a sandboxed agent worktree.
 
 **Rejected.** GitHub Actions (Option A) can't run our host-bound agent
@@ -23,7 +24,7 @@ durable and lets an LLM do merge mechanics — kept as an optional operator
 overlay. Webhooks (Option D) need public ingress we don't have — deferred as a
 latency optimization.
 
-"Never stop" (persistent loop) and "2-retry max" (principle 3) reconcile via
+"Never stop" (persistent loop) and the anti-stall two-attempt limit reconcile via
 *abandonment*: after N failed agent attempts on the same failure a PR is
 escalated with a concrete diagnosis, while the loop keeps driving every other
 PR. Verified by OTel: `time_to_merge`, `pr.stall`, `human_escalation`.

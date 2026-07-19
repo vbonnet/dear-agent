@@ -1,10 +1,10 @@
 # agm/internal/reaper — Requirements Specification (EARS)
 
+<!-- Last audited at: 2026-07-17 -->
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
-
-<!-- Last audited at: 2026-07-17 -->
 
 **Version**: 1.0
 **Last Updated**: 2026-06-07

@@ -1,5 +1,7 @@
 # AGM v4 — Technical Specification
 
+<!-- Last audited at: 2026-06-28 -->
+
 ## Executable EARS Requirements
 
 **AGMR-01** When AGM starts or resumes an active harness, the system shall preserve the canonical session lifecycle independently of the selected provider.
@@ -9,8 +11,6 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-
-<!-- Last audited at: 2026-06-28 -->
 
 **Version:** 4.0-reviewed
 **Status:** Reviewed (5-persona review complete)

@@ -12,8 +12,8 @@
 ## Context
 
 Wayfinder is the declared 9-phase SDLC engine (CHARTER → PROBLEM → RESEARCH →
-DESIGN → SPEC → PLAN → SETUP → BUILD → RETRO). The CLAUDE.md principle 5 says
-"Use `/wayfinder` for all plans and execution." In practice, enforcement was
+DESIGN → SPEC → PLAN → SETUP → BUILD → RETRO). The AGENTS.md guarded-delivery
+policy requires consequential work to carry an approved Wayfinder trace. In practice, enforcement was
 aspirational: a sticky note, not a gate.
 
 Two compounding problems made enforcement impossible until now:
@@ -33,8 +33,8 @@ Two compounding problems made enforcement impossible until now:
    session. Work proceeded, completed, and was merged with zero Wayfinder
    telemetry.
 
-The result: 100% of work ran under emergency bypass. The telemetry flywheel
-(principle 6: "always route through dear-agent / AGM / VROOM") received no
+The result: 100% of work ran under emergency bypass. The AGM/VROOM dogfooding
+telemetry flywheel received no
 data, and the SDLC engine got no real-world runs to improve.
 
 ---
@@ -63,16 +63,16 @@ redirected to `~/worktrees/{repo}/wf/`. The workspace fallback is changed from
 ### 3. Gate `git worktree add` at the Claude Code layer
 
 A new `PreToolUse` hook (`pretool-worktree-guard`) blocks any `Bash` call that
-contains `git worktree add` and exits 2 with a positive-guidance message (CLAUDE.md
-principle 2). The message explains that `agm session new` is the sanctioned
+contains `git worktree add` and exits 2 with the positive guidance required by
+AGENTS.md. The message explains that `agm session new` is the sanctioned
 entry point, and shows the equivalent command.
 
 Rationale for this specific gate: `git worktree add` is the sole programmatic
 path an in-session agent can take to start new parallel work. It is narrow,
 auditable, and does not affect read operations or the worktree list command.
 
-This is a nudge that can be escalated to a hard block per principle 7
-("escalate permission blocks into fixes") if the bypass rate proves persistently
+This is a nudge that can be escalated to a hard block under the AGENTS.md
+permission-block rule if the bypass rate proves persistently
 high.
 
 ### 4. Tiered enforcement config (tracked, not yet gated)

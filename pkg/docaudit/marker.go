@@ -11,20 +11,21 @@ const markerPrefix = "<!-- Last audited at:"
 var canonicalMarker = regexp.MustCompile(`^<!-- Last audited at: ([0-9]{4}-[0-9]{2}-[0-9]{2}) -->$`)
 
 func classifyMarker(data []byte, maxAgeDays int, asOf time.Time) FindingKind {
+	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
 	markerLines := make([]string, 0, 1)
-	for line := range strings.SplitSeq(string(data), "\n") {
-		line = strings.TrimSuffix(line, "\r")
+	for _, line := range lines {
 		if strings.Contains(line, markerPrefix) {
 			markerLines = append(markerLines, line)
 		}
 	}
-	if len(markerLines) == 0 {
+	candidate, present := headerMarkerCandidate(lines)
+	if !present || !strings.Contains(candidate, markerPrefix) {
 		return MissingMarker
 	}
 	if len(markerLines) > 1 {
 		return DuplicateMarker
 	}
-	line := markerLines[0]
+	line := candidate
 	if line == "<!-- Last audited at: NEEDS-AUDIT -->" {
 		return NeedsAudit
 	}
@@ -44,6 +45,29 @@ func classifyMarker(data []byte, maxAgeDays int, asOf time.Time) FindingKind {
 		return StaleDate
 	}
 	return ""
+}
+
+func headerMarkerCandidate(lines []string) (string, bool) {
+	nonblank := make([]string, 0, 2)
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		nonblank = append(nonblank, line)
+		if len(nonblank) == 2 {
+			break
+		}
+	}
+	if len(nonblank) == 0 {
+		return "", false
+	}
+	if strings.HasPrefix(strings.TrimSpace(nonblank[0]), markerPrefix) {
+		return nonblank[0], true
+	}
+	if strings.HasPrefix(strings.TrimSpace(nonblank[0]), "# ") && len(nonblank) == 2 {
+		return nonblank[1], true
+	}
+	return "", false
 }
 
 func dateOnly(value time.Time) time.Time {

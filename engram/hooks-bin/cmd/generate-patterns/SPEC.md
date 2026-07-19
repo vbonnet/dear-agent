@@ -1,5 +1,7 @@
 # SPEC: generate-patterns
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Executable EARS Requirements
 
 **GPATR-01** When pattern generation reads maintained incidents, the command shall emit deterministic detector patterns.
@@ -9,8 +11,6 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-
-<!-- Last audited at: NEEDS-AUDIT -->
 
 Code generator that reads the unified YAML pattern database and emits the
 `internal/validator/patterns.go` Go source file consumed by `pretool-bash-blocker`.

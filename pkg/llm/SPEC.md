@@ -1,5 +1,7 @@
 # pkg/llm - Unified LLM Agent Execution Library
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Executable EARS Requirements
 
 **LLMR-01** When an LLM route is selected, the package shall preserve the configured provider, model family, authentication source, and delegation policy.
@@ -9,8 +11,6 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-
-<!-- Last audited at: NEEDS-AUDIT -->
 
 **Status**: Phase 6 Complete (All Phases)
 **Version**: 0.4.0

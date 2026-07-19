@@ -1,5 +1,7 @@
 # SPEC: core/errormemory
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Executable EARS Requirements
 
 **EMEMR-01** When an error record is stored, the error-memory package shall append a bounded valid JSONL record to the configured workspace path.
@@ -9,8 +11,6 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-
-<!-- Last audited at: NEEDS-AUDIT -->
 
 ## Purpose
 

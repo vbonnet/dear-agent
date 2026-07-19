@@ -1,5 +1,7 @@
 # devlog-cli Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Executable EARS Requirements
 
 **DVLR-01** When devlog initializes or inspects a workspace, the tool shall preserve configured repositories, worktrees, and local-only entries.
@@ -9,8 +11,6 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-
-<!-- Last audited at: NEEDS-AUDIT -->
 
 **Version:** 0.1.0
 **Status:** Production-ready

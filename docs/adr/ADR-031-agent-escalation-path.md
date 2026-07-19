@@ -10,8 +10,8 @@
 
 ## Context
 
-Wrappers like `safe-pr` and `safe-merge` enforce safety gates by construction
-(CLAUDE.md principle 9). Their original designs included bypass flags
+Wrappers like `safe-pr` and `safe-merge` enforce the AGENTS.md guarded-delivery
+policy by construction. Their original designs included bypass flags
 (`--emergency`, `--skip-bot-review`) that allowed an agent to skip the gate
 when "necessary." In practice, these bypasses:
 
@@ -44,7 +44,7 @@ are removed from `safe-merge`. No replacement flags are provided. The
 require `--reason` and route through the override guard) are out of scope — they
 are not raw bypasses.
 
-Every future tool built under CLAUDE.md principle 9 MUST NOT include a bypass
+Every future tool built under the guarded-delivery policy MUST NOT include a bypass
 flag. If the situation is genuinely exceptional, the escalation path (below) is
 the right mechanism.
 
@@ -82,7 +82,7 @@ agm escalate --action "<what the agent needs to do>" --reason "<why it cannot us
 
 Every approval becomes a mini DEAR retro entry and, where appropriate, a new
 approved path committed to the codebase — so the class of situation is resolved
-for all future agents, not just the current one (CLAUDE.md principle 7).
+for all future agents, not just the current one (the AGENTS.md permission-block rule).
 
 ### 4. Error message contract
 

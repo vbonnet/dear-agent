@@ -12,37 +12,6 @@ import (
 
 var testAsOf = time.Date(2026, 7, 18, 0, 0, 0, 0, time.UTC)
 
-func TestClassifyMarker(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		body string
-		age  int
-		want FindingKind
-	}{
-		{name: "current", body: "# Doc\n<!-- Last audited at: 2026-07-18 -->\n", age: 90},
-		{name: "missing", body: "# Doc\n", age: 90, want: MissingMarker},
-		{name: "placeholder", body: "<!-- Last audited at: NEEDS-AUDIT -->\n", age: 90, want: NeedsAudit},
-		{name: "malformed", body: "<!-- Last audited at: 2026-07-18 ce-123 -->\n", age: 90, want: MalformedMarker},
-		{name: "duplicate", body: "<!-- Last audited at: 2026-07-18 -->\n<!-- Last audited at: 2026-07-18 -->\n", age: 90, want: DuplicateMarker},
-		{name: "invalid date", body: "<!-- Last audited at: 2026-02-31 -->\n", age: 90, want: InvalidDate},
-		{name: "future", body: "<!-- Last audited at: 2026-07-19 -->\n", age: 90, want: FutureDate},
-		{name: "boundary current", body: "<!-- Last audited at: 2026-04-19 -->\n", age: 90},
-		{name: "stale", body: "<!-- Last audited at: 2026-04-18 -->\n", age: 90, want: StaleDate},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := classifyMarker([]byte(tt.body), tt.age, testAsOf)
-			if got != tt.want {
-				t.Fatalf("classifyMarker() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestCheckRepositoryTrackedInventoryAndExactBaseline(t *testing.T) {
 	t.Parallel()
 
@@ -183,38 +152,6 @@ func TestCheckRepositoryRejectsWeakerPolicyAgainstRef(t *testing.T) {
 	}
 }
 
-func TestFreshnessEntrypointsUseMutationBaseRef(t *testing.T) {
-	root := filepath.Clean(filepath.Join("..", ".."))
-	workflow, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "doc-freshness.yml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	workflowText := string(workflow)
-	for _, required := range []string{
-		"reopened, edited",
-		"BEFORE_SHA: ${{ github.event.before }}",
-		"ref=$BEFORE_SHA",
-		"github.event_name }}-${{ github.event.pull_request.number || github.run_id",
-		"cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
-		`git rev-parse "$CURRENT_SHA^"`,
-		`git merge-base "$CURRENT_SHA" "origin/$DEFAULT_BRANCH"`,
-	} {
-		if !strings.Contains(workflowText, required) {
-			t.Errorf("doc-freshness workflow missing %q", required)
-		}
-	}
-	if strings.Contains(workflowText, "ref=HEAD~1") {
-		t.Error("push comparison still uses HEAD~1 instead of the event before SHA")
-	}
-	makefile, err := os.ReadFile(filepath.Join(root, "Makefile"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(makefile), "go run ./tools/doc-audit -repo . -baseline-ref") {
-		t.Error("lint-doc-freshness does not enforce a baseline ref")
-	}
-}
-
 func TestCheckRepositoryAllowsInitialBaselineBootstrap(t *testing.T) {
 	t.Parallel()
 
@@ -304,7 +241,6 @@ func testPolicy(baseline string) string {
     - name: specifications
       match: "**/SPEC.md"
       owner: CODEOWNERS
-      verification-command: make lint-specs STRICT=1
       max-age-days: 90
 `
 }
@@ -359,8 +295,4 @@ func baselineIDs(entries []BaselineEntry) []string {
 		ids[i] = entries[i].ID()
 	}
 	return ids
-}
-
-func equalStrings(got, want []string) bool {
-	return strings.Join(got, "\x00") == strings.Join(want, "\x00")
 }

@@ -1,5 +1,7 @@
 # cliframe Technical Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Executable EARS Requirements
 
 **CLIFR-01** When a CLI result is rendered, the cliframe package shall preserve equivalent data across human-readable and structured output formats.
@@ -9,8 +11,6 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-
-<!-- Last audited at: NEEDS-AUDIT -->
 
 **Version**: 0.1.0
 **Status**: Stable

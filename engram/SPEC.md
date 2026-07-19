@@ -1,5 +1,7 @@
 # Engram — Product Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Executable EARS Requirements
 
 **ENGRR-01** When Engram stores or retrieves memory, the system shall preserve workspace and session isolation.
@@ -9,8 +11,6 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
-
-<!-- Last audited at: NEEDS-AUDIT -->
 
 ## Overview
 

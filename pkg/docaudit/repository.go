@@ -34,9 +34,9 @@ func checkRepository(ctx context.Context, root string, opts Options) (Report, er
 		if surface == nil {
 			continue
 		}
-		data, readErr := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
+		data, readErr := readGovernedDocument(root, name)
 		if readErr != nil {
-			return Report{}, fmt.Errorf("docaudit: read %s: %w", name, readErr)
+			return Report{}, readErr
 		}
 		report.Documents++
 		kind := classifyMarker(data, surface.MaxAgeDays, opts.AsOf)
@@ -68,6 +68,22 @@ func checkRepository(ctx context.Context, root string, opts Options) (Report, er
 		}
 	}
 	return report, nil
+}
+
+func readGovernedDocument(root, name string) ([]byte, error) {
+	documentPath := filepath.Join(root, filepath.FromSlash(name))
+	info, err := os.Lstat(documentPath)
+	if err != nil {
+		return nil, fmt.Errorf("docaudit: inspect %s: %w", name, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("docaudit: governed document %s must not be a symlink", name)
+	}
+	data, err := os.ReadFile(documentPath)
+	if err != nil {
+		return nil, fmt.Errorf("docaudit: read %s: %w", name, err)
+	}
+	return data, nil
 }
 
 func validatePolicyRatchet(base, current Policy, tracked []string) error {
