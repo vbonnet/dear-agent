@@ -34,11 +34,11 @@ errors.
 
 **SKILLLINT-PKG-11** When a skill declares optional `model` or `effort` metadata, the system shall require both fields and validate their values against the command tiers.
 
-**SKILLLINT-PKG-12** When a skill declares a provider execution extension, the system shall require explicit non-provider fallback language.
+**SKILLLINT-PKG-12** When a skill declares a provider execution extension, the system shall require explicit actionable non-provider fallback language rather than accepting an unavailable-state phrase alone.
 
 **SKILLLINT-PKG-13** When a surface declares an unsupported frontmatter key, the system shall return a surface-specific unsupported-field violation.
 
-**SKILLLINT-PKG-14** When checking a repository, the system shall use Git's tracked inventory to discover every `SKILL.md` and direct `commands/*.md` prompt while excluding README and SPEC contracts.
+**SKILLLINT-PKG-14** When checking a repository, the system shall use timeout-bounded, non-interactive Git tracked inventory to discover every `SKILL.md` and direct `commands/*.md` prompt while excluding README and SPEC contracts.
 
 **SKILLLINT-PKG-15** When checking a repository, the system shall ignore untracked files and return repository-relative violation paths.
 

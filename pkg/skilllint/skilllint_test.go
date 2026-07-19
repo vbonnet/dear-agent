@@ -153,6 +153,16 @@ func TestCheckFileSkillSchema(t *testing.T) {
 			want:    []string{"provider execution extension requires a non-provider fallback"},
 		},
 		{
+			name: "provider extension with non-actionable unavailable text",
+			content: strings.Replace(
+				strings.Replace(validSkill("example-skill"), "description:", "allowed-tools: [Bash]\ndescription:", 1),
+				"Confirm the expected result exists.",
+				"Stop when credentials are unavailable.",
+				1,
+			),
+			want: []string{"provider execution extension requires a non-provider fallback"},
+		},
+		{
 			name: "provider extension with fallback",
 			content: strings.Replace(
 				strings.Replace(validSkill("example-skill"), "description:", "allowed-tools: [Bash]\ndescription:", 1),
@@ -183,6 +193,13 @@ func TestCheckFileSkillSchema(t *testing.T) {
 			}
 			assertReasons(t, violations, tt.want)
 		})
+	}
+}
+
+func TestValidateSkillLengthDoesNotCountTerminalNewline(t *testing.T) {
+	data := []byte(strings.Repeat("line\n", 100))
+	if violations := validateSkillLength("SKILL.md", "", data); len(violations) != 0 {
+		t.Fatalf("100-line skill with terminal newline produced violations: %v", violations)
 	}
 }
 

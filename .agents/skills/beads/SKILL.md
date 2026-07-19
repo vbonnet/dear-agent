@@ -12,13 +12,13 @@ Use Beads as the shared project task system. Local plans, scratch files, and per
 Run:
 
 ```bash
-bd --db /Users/vbonnet/beads/context-engine/.beads prime
+bd --db ~/beads/context-engine/.beads prime
 ```
 
 If that prints nothing, check whether the repository has an active Beads workspace:
 
 ```bash
-bd --db /Users/vbonnet/beads/context-engine/.beads where
+bd --db ~/beads/context-engine/.beads where
 ```
 
 ## Preferred Route
@@ -30,33 +30,33 @@ Use the `bd` CLI when shell access is available. It is the most compact and dire
 1. Find work:
 
 ```bash
-bd --db /Users/vbonnet/beads/context-engine/.beads ready
-bd --db /Users/vbonnet/beads/context-engine/.beads list --status=open
-bd --db /Users/vbonnet/beads/context-engine/.beads list --status=in_progress
+bd --db ~/beads/context-engine/.beads ready
+bd --db ~/beads/context-engine/.beads list --status=open
+bd --db ~/beads/context-engine/.beads list --status=in_progress
 ```
 
 2. Inspect before editing:
 
 ```bash
-bd --db /Users/vbonnet/beads/context-engine/.beads show <id>
+bd --db ~/beads/context-engine/.beads show <id>
 ```
 
 3. Claim work atomically:
 
 ```bash
-bd --db /Users/vbonnet/beads/context-engine/.beads --dolt-auto-commit on update <id> --claim
+bd --db ~/beads/context-engine/.beads --dolt-auto-commit on update <id> --claim
 ```
 
 4. Create durable follow-up work when implementation reveals new tasks:
 
 ```bash
-bd --db /Users/vbonnet/beads/context-engine/.beads --dolt-auto-commit on create "Short title" --description="Why this exists and what needs to be done" --type=task --priority=2
+bd --db ~/beads/context-engine/.beads --dolt-auto-commit on create "Short title" --description="Why this exists and what needs to be done" --type=task --priority=2
 ```
 
 5. Close completed work:
 
 ```bash
-bd --db /Users/vbonnet/beads/context-engine/.beads --dolt-auto-commit on close <id> --reason="Completed"
+bd --db ~/beads/context-engine/.beads --dolt-auto-commit on close <id> --reason="Completed"
 ```
 
 ## What Belongs In Beads
@@ -84,7 +84,7 @@ Use agent-local planning tools only for the current turn's execution checklist. 
 After a mutation, re-read the task from the same canonical database:
 
 ```bash
-bd --db /Users/vbonnet/beads/context-engine/.beads show <id>
+bd --db ~/beads/context-engine/.beads show <id>
 ```
 
 Confirm its status, dependencies, and recorded context match the intended

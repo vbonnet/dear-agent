@@ -4,6 +4,7 @@
 package skilllint
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -60,7 +62,7 @@ var (
 	orderedStepPattern     = regexp.MustCompile(`(?m)^[ \t]*[0-9]+[.)][ \t]+`)
 	verificationPattern    = regexp.MustCompile(`(?im)^#{1,6}[ \t]+(?:verify|verification|completion|complete|finish|close|end|rewind and close)\b`)
 	referencesPattern      = regexp.MustCompile(`(?im)^#{1,6}[ \t]+(?:references|documentation|resources)\b`)
-	fallbackPattern        = regexp.MustCompile(`(?i)(?:non[- ]claude|other harness(?:es)?|skill activation is unavailable|without (?:the |this )?skill|shell access|when [^\n]{0,40} unavailable)`)
+	fallbackPattern        = regexp.MustCompile(`(?i)(?:(?:when|if) [^\n.]{0,80}(?:unavailable|unsupported|not available)[^\n.]{0,120}\b(?:use|run|invoke|follow|continue|fall back)\b|(?:for|on) (?:non[- ]claude|other harness(?:es)?)[^\n.]{0,120}\b(?:use|run|invoke|follow|continue)\b|\b(?:use|run|invoke|follow|continue)\b[^\n.]{0,120}\bwithout (?:the |this )?skill\b)`)
 )
 
 var commandFields = map[string]bool{
@@ -165,9 +167,16 @@ func CheckRepository(root string) ([]Violation, error) {
 }
 
 func gitOutput(dir string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
 	cmdArgs := append([]string{"-C", dir}, args...)
-	output, err := exec.Command("git", cmdArgs...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, "git", cmdArgs...)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	output, err := cmd.CombinedOutput()
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		message := strings.TrimSpace(string(output))
 		if message == "" {
 			return nil, err
@@ -271,7 +280,7 @@ func validateSkillBody(path, bodyText string) []Violation {
 
 func validateSkillLength(path, bodyText string, data []byte) []Violation {
 	var violations []Violation
-	lineCount := 1 + strings.Count(string(data), "\n")
+	lineCount := strings.Count(strings.TrimSuffix(string(data), "\n"), "\n") + 1
 	if lineCount > 100 && !referencesPattern.MatchString(bodyText) {
 		violations = append(violations, Violation{Path: path, Reason: "skill is over 100 lines without a References, Documentation, or Resources section"})
 	}
