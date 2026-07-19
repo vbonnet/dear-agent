@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -36,7 +37,7 @@ func checkRepository(ctx context.Context, root string) (Report, error) {
 	}
 
 	for _, scope := range policy.Scopes {
-		records, scopeViolations, scopeErr := validateScope(root, scope, tracked, trackedSet, governed, policy.MaxLines)
+		records, scopeViolations, scopeErr := validateScope(root, scope, tracked, trackedSet, governed, effectiveMaxLines(policy.MaxLines, scope.MaxLines))
 		if scopeErr != nil {
 			return Report{}, scopeErr
 		}
@@ -79,7 +80,7 @@ func checkAggregates(root string, policy Policy, trackedSet, governed map[string
 			return Report{}, fmt.Errorf("adrlint: read %s: %w", aggregate.Path, err)
 		}
 		report.Records++
-		report.Violations = append(report.Violations, sizeViolations(aggregate.Path, data, policy.MaxLines)...)
+		report.Violations = append(report.Violations, sizeViolations(aggregate.Path, data, effectiveMaxLines(policy.MaxLines, aggregate.MaxLines))...)
 		report.Violations = append(report.Violations, parseAggregate(root, aggregate.Path, data, governed)...)
 	}
 	return report, nil
@@ -117,10 +118,15 @@ func validateScope(root string, scope Scope, tracked []string, trackedSet, gover
 		violations = append(violations, sizeViolations(relative, data, maxLines)...)
 		parsed, recordViolations := parseRecord(root, relative, data, governed)
 		violations = append(violations, recordViolations...)
-		if previous, exists := ids[parsed.id]; exists {
-			violations = append(violations, Violation{Path: relative, Reason: fmt.Sprintf("duplicate ADR-%s: %s and %s", parsed.id, previous, parsed.filename)})
+		identity, identityErr := strconv.Atoi(parsed.id)
+		if identityErr != nil {
+			return nil, nil, fmt.Errorf("adrlint: normalize ADR identity %q: %w", parsed.id, identityErr)
+		}
+		identityKey := strconv.Itoa(identity)
+		if previous, exists := ids[identityKey]; exists {
+			violations = append(violations, Violation{Path: relative, Reason: fmt.Sprintf("duplicate ADR identity %d: %s and %s", identity, previous, parsed.filename)})
 		} else {
-			ids[parsed.id] = parsed.filename
+			ids[identityKey] = parsed.filename
 		}
 		records[parsed.filename] = parsed
 	}
@@ -184,8 +190,14 @@ func adrShapedPath(name string) bool {
 
 func adrLikeFilename(name string) bool {
 	lower := strings.ToLower(name)
-	return lower != "adr-index.md" && strings.HasSuffix(lower, ".md") &&
-		(strings.HasPrefix(strings.ToUpper(name), "ADR-") || bareADRLike.MatchString(name))
+	return lower != "adr-index.md" && strings.HasSuffix(lower, ".md") && adrLikePrefix.MatchString(name)
+}
+
+func effectiveMaxLines(fallback, override int) int {
+	if override > 0 {
+		return override
+	}
+	return fallback
 }
 
 func excluded(name string, exclusions []Exclusion) bool {

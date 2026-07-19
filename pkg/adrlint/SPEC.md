@@ -20,6 +20,10 @@
 
 **ADRLINT-10** When a tracked ADR-like filename in a declared scope is malformed, the system shall report it rather than silently omitting it from governance.
 
+**ADRLINT-12** When ADR identities use different zero-padding widths within one scope, the system shall compare their numeric values and report a collision.
+
+**ADRLINT-13** When a scope or aggregate declares a positive `max-lines` override, the system shall enforce that tighter review budget instead of the repository default.
+
 **ADRLINT-11** When a declared scope index is not Git-tracked or contains an ADR-like row outside the supported schema, the system shall report a violation.
 
 **ADRLINT-08** When validation completes, the system shall return path/reason violations sorted deterministically and shall keep operational errors distinct.

@@ -24,13 +24,15 @@ type Policy struct {
 
 // Scope declares one directory-local identity sequence and its complete index.
 type Scope struct {
-	Path  string `yaml:"path"`
-	Index string `yaml:"index"`
+	Path     string `yaml:"path"`
+	Index    string `yaml:"index"`
+	MaxLines int    `yaml:"max-lines,omitempty"`
 }
 
 // Aggregate declares one self-contained ADR.md record.
 type Aggregate struct {
-	Path string `yaml:"path"`
+	Path     string `yaml:"path"`
+	MaxLines int    `yaml:"max-lines,omitempty"`
 }
 
 // Exclusion removes generated ADR-shaped paths for a documented reason.
@@ -84,6 +86,9 @@ func validateScopes(scopes []Scope) (map[string]bool, error) {
 		if scope.Index == "" || filepath.Base(scope.Index) != scope.Index || filepath.Clean(scope.Index) != scope.Index {
 			return nil, fmt.Errorf("adrlint: scopes[%d].index must be one clean filename", i)
 		}
+		if scope.MaxLines < 0 {
+			return nil, fmt.Errorf("adrlint: scopes[%d].max-lines must not be negative", i)
+		}
 	}
 	return seen, nil
 }
@@ -92,6 +97,9 @@ func validateAggregates(aggregates []Aggregate, seen map[string]bool) error {
 	for i, aggregate := range aggregates {
 		if !cleanRelativePath(aggregate.Path) || path.Base(aggregate.Path) != "ADR.md" {
 			return fmt.Errorf("adrlint: aggregates[%d].path must be a clean repository-relative ADR.md path", i)
+		}
+		if aggregate.MaxLines < 0 {
+			return fmt.Errorf("adrlint: aggregates[%d].max-lines must not be negative", i)
 		}
 		if seen[aggregate.Path] {
 			return fmt.Errorf("adrlint: duplicate governed path %q", aggregate.Path)

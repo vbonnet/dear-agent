@@ -68,7 +68,7 @@ Status: Accepted
 	}
 	wantReasons := []string{
 		"heading ID",
-		"duplicate ADR-001",
+		"duplicate ADR identity 1",
 		"one normalized Status",
 		"relative link",
 		"Superseded record must link",
@@ -150,6 +150,22 @@ func TestLoadPolicyRejectsInvalidDeclarations(t *testing.T) {
   exclusions:
     - match: "**/testdata/**"
 `},
+		{name: "negative scope budget", body: `adr-governance:
+  max-lines: 300
+  scopes:
+    - path: docs/adr
+      index: README.md
+      max-lines: -1
+`},
+		{name: "negative aggregate budget", body: `adr-governance:
+  max-lines: 300
+  scopes:
+    - path: docs/adr
+      index: README.md
+  aggregates:
+    - path: pkg/hash/ADR.md
+      max-lines: -1
+`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -197,6 +213,8 @@ func TestCheckRepositoryRejectsMalformedADRInputs(t *testing.T) {
 	writeADRFile(t, repo, "docs/adr/ADR-001-example.md", recordFixture("001", "Example decision", "Accepted")+"\nStatus: Draft\n")
 	writeADRFile(t, repo, "docs/adr/ADR-37-malformed.md", "# ADR-37: malformed\n\nStatus: Accepted\n")
 	writeADRFile(t, repo, "docs/adr/001.md", "# ADR-001: malformed bare name\n\nStatus: Accepted\n")
+	writeADRFile(t, repo, "docs/adr/ADR042-sneaky.md", "# ADR-042: malformed missing separator\n\nStatus: Accepted\n")
+	writeADRFile(t, repo, "docs/adr/042sneaky.md", "# ADR-042: malformed bare separator\n\nStatus: Accepted\n")
 	writeADRFile(t, repo, "docs/adr/README.md", indexFixture("001", "ADR-001-example.md", "Example decision", "Accepted")+"  | [ADR-001](ADR-001-example.md#context) | Duplicate invalid status | Draft |\n")
 	writeADRFile(t, repo, "pkg/hash/ADR.md", "# Hash decisions\n\nStatus: Accepted\n")
 	gitADR(t, repo, "add", ".")
@@ -210,6 +228,46 @@ func TestCheckRepositoryRejectsMalformedADRInputs(t *testing.T) {
 		if !hasReason(report.Violations, want) {
 			t.Errorf("missing %q violation: %#v", want, report.Violations)
 		}
+	}
+}
+
+func TestCheckRepositoryNormalizesNumericIdentityWidth(t *testing.T) {
+	t.Parallel()
+
+	repo := newADRRepo(t)
+	writeADRFile(t, repo, ".dear-agent.yml", policyFixture())
+	writeADRFile(t, repo, "docs/adr/ADR-016-first.md", recordFixture("016", "First", "Accepted"))
+	writeADRFile(t, repo, "docs/adr/ADR-0016-second.md", recordFixture("0016", "Second", "Accepted"))
+	writeADRFile(t, repo, "docs/adr/README.md", indexFixture("016", "ADR-016-first.md", "First", "Accepted")+indexFixture("0016", "ADR-0016-second.md", "Second", "Accepted"))
+	writeADRFile(t, repo, "pkg/hash/ADR.md", "# Hash decisions\n\nStatus: Accepted\n")
+	gitADR(t, repo, "add", ".")
+	gitADR(t, repo, "commit", "-m", "fixture")
+
+	report, err := CheckRepository(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasReason(report.Violations, "duplicate ADR identity 16") {
+		t.Fatalf("missing normalized identity collision: %#v", report.Violations)
+	}
+}
+
+func TestCheckRepositoryHonorsPerRecordBudget(t *testing.T) {
+	repo := newADRRepo(t)
+	policy := strings.Replace(policyFixture(), "index: README.md", "index: README.md\n      max-lines: 5", 1)
+	writeADRFile(t, repo, ".dear-agent.yml", policy)
+	writeADRFile(t, repo, "docs/adr/ADR-001-example.md", recordFixture("001", "Example decision", "Accepted"))
+	writeADRFile(t, repo, "docs/adr/README.md", indexFixture("001", "ADR-001-example.md", "Example decision", "Accepted"))
+	writeADRFile(t, repo, "pkg/hash/ADR.md", "# Hash decisions\n\nStatus: Accepted\n")
+	gitADR(t, repo, "add", ".")
+	gitADR(t, repo, "commit", "-m", "fixture")
+
+	report, err := CheckRepository(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasReason(report.Violations, "5-line ADR review budget") {
+		t.Fatalf("missing per-scope line-budget violation: %#v", report.Violations)
 	}
 }
 

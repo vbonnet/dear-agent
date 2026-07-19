@@ -63,33 +63,50 @@ adr-governance:
       index: README.md
     - path: agm/cmd/agm
       index: ADR-INDEX.md
+      max-lines: 120
     - path: agm/cmd/agm-daemon/adr
       index: README.md
+      max-lines: 120
     - path: agm/cmd/agm-mcp-server/adr
       index: README.md
+      max-lines: 120
     - path: agm/internal/dolt/adr
       index: README.md
+      max-lines: 120
     - path: agm/internal/evaluation/ADR
       index: README.md
+      max-lines: 120
     - path: agm/internal/tmux
       index: ADR-INDEX.md
+      max-lines: 120
     - path: engram/cmd/engram
       index: ADR-INDEX.md
+      max-lines: 120
     - path: engram/retrieval/docs/adrs
       index: README.md
+      max-lines: 120
     - path: pkg/engram/docs/adrs
       index: README.md
+      max-lines: 120
     - path: pkg/llm/docs
       index: ADR-INDEX.md
+      max-lines: 120
     - path: tools/dod-enforcer/adr
       index: README.md
+      max-lines: 120
   aggregates:
     - path: engram/ecphory/ADR.md
+      max-lines: 120
     - path: engram/ecphory/ranking/ADR.md
+      max-lines: 120
     - path: pkg/hash/ADR.md
+      max-lines: 120
     - path: pkg/monitoring/ADR.md
+      max-lines: 120
     - path: pkg/telemetry/ADR.md
+      max-lines: 120
     - path: tools/devlog/ADR.md
+      max-lines: 120
   exclusions:
     - match: "**/testdata/**"
       reason: generated or parser fixture, not a living architectural decision
