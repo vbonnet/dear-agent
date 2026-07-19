@@ -5,6 +5,7 @@ package instructionlint
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"os/exec"
@@ -26,6 +27,7 @@ type Violation struct {
 	Line        int
 	Rule        string
 	Excerpt     string
+	Context     string
 	Replacement string
 }
 
@@ -82,14 +84,16 @@ func CheckRepository(ctx context.Context, root string) (Result, []Violation, err
 			return Result{}, nil, fmt.Errorf("instructionlint: read %s: %w", relative, err)
 		}
 		files++
-		findings = append(findings, importViolations(relative, data, policy.Surfaces, tracked)...)
+		var fileFindings []Violation
+		fileFindings = append(fileFindings, importViolations(relative, data, policy.Surfaces, tracked)...)
 		segments, err := instructionSegments(relative, data)
 		if err != nil {
 			return Result{}, nil, fmt.Errorf("instructionlint: parse %s: %w", relative, err)
 		}
 		for _, segment := range segments {
-			findings = append(findings, evaluateSegment(relative, segment)...)
+			fileFindings = append(fileFindings, evaluateSegment(relative, segment)...)
 		}
+		findings = append(findings, bindFindingContexts(fileFindings, data)...)
 	}
 	for _, surface := range policy.Surfaces {
 		if matchedSurface[surface.Match] == 0 {
@@ -99,6 +103,36 @@ func CheckRepository(ctx context.Context, root string) (Result, []Violation, err
 	findings = applyExclusions(findings, policy.Exclusions)
 	sortViolations(findings)
 	return Result{Files: files, Exclusions: len(policy.Exclusions)}, findings, nil
+}
+
+func bindFindingContexts(findings []Violation, data []byte) []Violation {
+	for i := range findings {
+		findings[i].Context = contextFingerprint(data, findings[i].Line)
+	}
+	return findings
+}
+
+func contextFingerprint(data []byte, line int) string {
+	lines := strings.Split(string(data), "\n")
+	if line < 1 || line > len(lines) {
+		return ""
+	}
+	index := line - 1
+	window := []string{strings.TrimSpace(lines[index])}
+	for before := index - 1; before >= 0; before-- {
+		if value := strings.TrimSpace(lines[before]); value != "" {
+			window = append([]string{value}, window...)
+			break
+		}
+	}
+	for after := index + 1; after < len(lines); after++ {
+		if value := strings.TrimSpace(lines[after]); value != "" {
+			window = append(window, value)
+			break
+		}
+	}
+	digest := sha256.Sum256([]byte(strings.Join(window, "\n")))
+	return fmt.Sprintf("%x", digest)
 }
 
 func inspectGovernedPath(root, absolute, relative string, surfaces []Surface, tracked map[string]bool) (bool, error) {
@@ -209,7 +243,7 @@ func applyExclusions(findings []Violation, exclusions []Exclusion) []Violation {
 	for _, finding := range findings {
 		suppressed := false
 		for i, exclusion := range exclusions {
-			if exclusionKey(finding.Path, finding.Rule, finding.Excerpt) != exclusionKey(exclusion.Path, exclusion.Rule, exclusion.Excerpt) || used[i] >= exclusion.Count {
+			if exclusionKey(finding.Path, finding.Rule, finding.Excerpt, finding.Context) != exclusionKey(exclusion.Path, exclusion.Rule, exclusion.Excerpt, exclusion.Context) || used[i] >= exclusion.Count {
 				continue
 			}
 			used[i]++
@@ -235,8 +269,8 @@ func applyExclusions(findings []Violation, exclusions []Exclusion) []Violation {
 	return remaining
 }
 
-func exclusionKey(path, rule, excerpt string) string {
-	return path + "\x00" + rule + "\x00" + strings.TrimSpace(excerpt)
+func exclusionKey(path, rule, excerpt, context string) string {
+	return path + "\x00" + rule + "\x00" + strings.TrimSpace(excerpt) + "\x00" + context
 }
 
 func sortViolations(violations []Violation) {

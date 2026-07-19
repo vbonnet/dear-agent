@@ -148,6 +148,10 @@ func rawGHPRLifecycle(text string) bool {
 }
 
 func commandFields(text string) [][]string {
+	return commandFieldsDepth(text, 0)
+}
+
+func commandFieldsDepth(text string, depth int) [][]string {
 	var commands [][]string
 	inputs := []string{shellText(text)}
 	for _, match := range embeddedCommandStart.FindAllStringSubmatch(text, -1) {
@@ -164,13 +168,87 @@ func commandFields(text string) [][]string {
 	}
 	for _, input := range inputs {
 		for _, command := range splitShellCommands(input) {
-			fields := normalizeAGMCommand(stripCommandPrefixes(strings.Fields(strings.TrimSpace(command))))
+			fields := normalizeAGMCommand(stripCommandPrefixes(parseShellWords(strings.TrimSpace(command))))
 			if len(fields) > 0 {
 				commands = append(commands, fields)
+			}
+			if payload, ok := shellCommandPayload(fields); ok && depth < 4 {
+				commands = append(commands, commandFieldsDepth(payload, depth+1)...)
 			}
 		}
 	}
 	return commands
+}
+
+func parseShellWords(input string) []string {
+	var fields []string
+	var word strings.Builder
+	var quote byte
+	escaped := false
+	started := false
+	flush := func() {
+		if started {
+			fields = append(fields, word.String())
+			word.Reset()
+			started = false
+		}
+	}
+	for i := 0; i < len(input); i++ {
+		current := input[i]
+		if escaped {
+			word.WriteByte(current)
+			escaped = false
+			started = true
+			continue
+		}
+		if current == '\\' && quote != '\'' {
+			escaped = true
+			started = true
+			continue
+		}
+		if quote != 0 {
+			if current == quote {
+				quote = 0
+			} else {
+				word.WriteByte(current)
+			}
+			started = true
+			continue
+		}
+		if current == '\'' || current == '"' {
+			quote = current
+			started = true
+			continue
+		}
+		if current == ' ' || current == '\t' || current == '\r' || current == '\n' {
+			flush()
+			continue
+		}
+		word.WriteByte(current)
+		started = true
+	}
+	if escaped {
+		word.WriteByte('\\')
+	}
+	flush()
+	return fields
+}
+
+func shellCommandPayload(fields []string) (string, bool) {
+	if len(fields) < 3 || !slices.Contains([]string{"bash", "dash", "ksh", "sh", "zsh"}, fields[0]) {
+		return "", false
+	}
+	for index := 1; index+1 < len(fields); index++ {
+		option := fields[index]
+		if option == "-c" || option == "--command" ||
+			(strings.HasPrefix(option, "-") && !strings.HasPrefix(option, "--") && strings.Contains(option[1:], "c")) {
+			return fields[index+1], true
+		}
+		if !strings.HasPrefix(option, "-") {
+			return "", false
+		}
+	}
+	return "", false
 }
 
 func splitShellCommands(input string) []string {

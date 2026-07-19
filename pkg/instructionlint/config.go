@@ -1,6 +1,8 @@
 package instructionlint
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path"
@@ -31,12 +33,13 @@ type Surface struct {
 	Owner string `yaml:"owner"`
 }
 
-// Exclusion suppresses an exact number of one known finding until its owner
-// removes the underlying legacy text. Changed or missing text is reported.
+// Exclusion suppresses an exact number of one known finding while its local
+// source context remains unchanged. Changed, moved, or missing text is reported.
 type Exclusion struct {
 	Path    string `yaml:"path"`
 	Rule    string `yaml:"rule"`
 	Excerpt string `yaml:"excerpt"`
+	Context string `yaml:"context"`
 	Count   int    `yaml:"count"`
 	Owner   string `yaml:"owner"`
 	Reason  string `yaml:"reason"`
@@ -116,17 +119,22 @@ func validatePolicy(policy Policy) error {
 		if !knownRule(exclusion.Rule) {
 			return fmt.Errorf("instructionlint: exclusions[%d].rule %q is unknown", i, exclusion.Rule)
 		}
-		if strings.TrimSpace(exclusion.Excerpt) == "" || exclusion.Count <= 0 ||
+		if strings.TrimSpace(exclusion.Excerpt) == "" || !validContextFingerprint(exclusion.Context) || exclusion.Count <= 0 ||
 			strings.TrimSpace(exclusion.Owner) == "" || strings.TrimSpace(exclusion.Reason) == "" {
-			return fmt.Errorf("instructionlint: exclusions[%d] requires excerpt, positive count, owner, and reason", i)
+			return fmt.Errorf("instructionlint: exclusions[%d] requires excerpt, SHA-256 context, positive count, owner, and reason", i)
 		}
-		key := exclusionKey(exclusion.Path, exclusion.Rule, exclusion.Excerpt)
+		key := exclusionKey(exclusion.Path, exclusion.Rule, exclusion.Excerpt, exclusion.Context)
 		if seenExclusions[key] {
 			return fmt.Errorf("instructionlint: duplicate exclusion %q", key)
 		}
 		seenExclusions[key] = true
 	}
 	return nil
+}
+
+func validContextFingerprint(value string) bool {
+	decoded, err := hex.DecodeString(value)
+	return err == nil && len(decoded) == sha256.Size
 }
 
 func cleanPattern(value string) bool {

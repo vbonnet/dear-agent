@@ -347,7 +347,7 @@ func commandShaped(value string) bool {
 	}
 	commands := splitShellCommands(value)
 	for _, candidate := range commands {
-		fields := strings.Fields(candidate)
+		fields := parseShellWords(candidate)
 		if len(fields) > 1 && fields[0] == "$" {
 			fields = fields[1:]
 		}
@@ -356,7 +356,7 @@ func commandShaped(value string) bool {
 		}
 		command := executableBase(strings.TrimLeft(fields[0], "("))
 		switch command {
-		case "agm", "bd", "command", "env", "gh", "git", "gtimeout", "nohup", "safe-merge", "safe-pr", "safe-push", "sudo", "timeout":
+		case "agm", "bash", "bd", "command", "dash", "env", "gh", "git", "gtimeout", "ksh", "nohup", "safe-merge", "safe-pr", "safe-push", "sh", "sudo", "timeout", "zsh":
 			return true
 		case "if", "while", "until", "then", "do", "!":
 			return true

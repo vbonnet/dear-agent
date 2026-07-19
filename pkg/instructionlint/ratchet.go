@@ -13,10 +13,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// CheckExclusionRatchet rejects new or enlarged instruction-policy exclusions
-// relative to a Git commit. A missing baseline exclusions file is an explicit
-// bootstrap: the first policy introduction is reviewable, while later growth
-// is blocked.
+// CheckExclusionRatchet rejects removed instruction surfaces and new or
+// enlarged exclusions relative to a Git commit. A missing baseline policy is
+// an explicit bootstrap; after that, governed inventory and debt only ratchet
+// toward stricter coverage.
 func CheckExclusionRatchet(ctx context.Context, root, baselineRef string) ([]Violation, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
@@ -32,25 +32,39 @@ func CheckExclusionRatchet(ctx context.Context, root, baselineRef string) ([]Vio
 	if err := verifyCommit(ctx, root, baselineRef); err != nil {
 		return nil, err
 	}
-	baseline, exists, err := baselineExclusions(ctx, root, baselineRef)
+	baseline, exists, err := loadBaselinePolicy(ctx, root, baselineRef)
 	if err != nil {
 		return nil, err
 	}
 	if !exists {
 		return nil, nil
 	}
+	violations := ratchetViolations(policy, baseline)
+	sortViolations(violations)
+	return violations, nil
+}
 
-	previous := make(map[string]Exclusion, len(baseline))
-	for _, exclusion := range baseline {
-		previous[exclusionKey(exclusion.Path, exclusion.Rule, exclusion.Excerpt)] = exclusion
+func ratchetViolations(policy, baseline Policy) []Violation {
+	previous := make(map[string]Exclusion, len(baseline.Exclusions))
+	for _, exclusion := range baseline.Exclusions {
+		previous[exclusionKey(exclusion.Path, exclusion.Rule, exclusion.Excerpt, exclusion.Context)] = exclusion
 	}
 	var violations []Violation
+	currentSurfaces := make(map[string]bool, len(policy.Surfaces))
+	for _, surface := range policy.Surfaces {
+		currentSurfaces[surface.Match] = true
+	}
+	for _, surface := range baseline.Surfaces {
+		if !currentSurfaces[surface.Match] {
+			violations = append(violations, surfaceRemovalViolation(surface))
+		}
+	}
 	violationPath := policy.ExclusionsFile
 	if violationPath == "" {
 		violationPath = ".dear-agent.yml"
 	}
 	for _, exclusion := range policy.Exclusions {
-		key := exclusionKey(exclusion.Path, exclusion.Rule, exclusion.Excerpt)
+		key := exclusionKey(exclusion.Path, exclusion.Rule, exclusion.Excerpt, exclusion.Context)
 		before, ok := previous[key]
 		if !ok {
 			violations = append(violations, exclusionGrowthViolation(violationPath, exclusion, "new exclusion"))
@@ -60,51 +74,56 @@ func CheckExclusionRatchet(ctx context.Context, root, baselineRef string) ([]Vio
 			violations = append(violations, exclusionGrowthViolation(violationPath, exclusion, fmt.Sprintf("count increased from %d to %d", before.Count, exclusion.Count)))
 		}
 	}
-	sortViolations(violations)
-	return violations, nil
+	return violations
 }
 
-func baselineExclusions(ctx context.Context, root, ref string) ([]Exclusion, bool, error) {
+func loadBaselinePolicy(ctx context.Context, root, ref string) (Policy, bool, error) {
 	data, exists, err := readGitBlob(ctx, root, ref, ".dear-agent.yml")
 	if err != nil || !exists {
-		return nil, false, err
+		return Policy{}, false, err
 	}
 	var config repositoryConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, false, fmt.Errorf("instructionlint: parse baseline policy: %w", err)
+		return Policy{}, false, fmt.Errorf("instructionlint: parse baseline policy: %w", err)
 	}
 	policy := config.InstructionPolicy
 	if policy.ExclusionsFile == "" {
 		if len(policy.Surfaces) == 0 && len(policy.Exclusions) == 0 {
-			return nil, false, nil
+			return Policy{}, false, nil
 		}
-		if err := validateExclusionsOnly(policy.Exclusions); err != nil {
-			return nil, false, fmt.Errorf("instructionlint: invalid baseline exclusions: %w", err)
+		if err := validatePolicy(policy); err != nil {
+			return Policy{}, false, fmt.Errorf("instructionlint: invalid baseline policy: %w", err)
 		}
-		return policy.Exclusions, true, nil
+		return policy, true, nil
 	}
 	if len(policy.Exclusions) > 0 {
-		return nil, false, fmt.Errorf("instructionlint: baseline uses exclusions and exclusions-file together")
+		return Policy{}, false, fmt.Errorf("instructionlint: baseline uses exclusions and exclusions-file together")
 	}
 	if !cleanRelativePath(policy.ExclusionsFile) {
-		return nil, false, fmt.Errorf("instructionlint: baseline exclusions-file must be a clean repository-relative path")
+		return Policy{}, false, fmt.Errorf("instructionlint: baseline exclusions-file must be a clean repository-relative path")
 	}
 	data, exists, err = readGitBlob(ctx, root, ref, policy.ExclusionsFile)
 	if err != nil || !exists {
-		return nil, false, err
+		return Policy{}, false, err
 	}
 	exclusions, err := parseExclusions(data)
 	if err != nil {
-		return nil, false, fmt.Errorf("instructionlint: parse baseline exclusions: %w", err)
+		return Policy{}, false, fmt.Errorf("instructionlint: parse baseline exclusions: %w", err)
 	}
-	if err := validateExclusionsOnly(exclusions); err != nil {
-		return nil, false, fmt.Errorf("instructionlint: invalid baseline exclusions: %w", err)
+	policy.Exclusions = exclusions
+	if err := validatePolicy(policy); err != nil {
+		return Policy{}, false, fmt.Errorf("instructionlint: invalid baseline policy: %w", err)
 	}
-	return exclusions, true, nil
+	return policy, true, nil
 }
 
-func validateExclusionsOnly(exclusions []Exclusion) error {
-	return validatePolicy(Policy{Surfaces: []Surface{{Match: "bootstrap", Owner: "ratchet"}}, Exclusions: exclusions})
+func surfaceRemovalViolation(surface Surface) Violation {
+	return Violation{
+		Path:        ".dear-agent.yml",
+		Rule:        "surface-removal",
+		Excerpt:     fmt.Sprintf("%s owned by %s", surface.Match, surface.Owner),
+		Replacement: "restore the baseline instruction surface; governed inventory may only expand after bootstrap",
+	}
 }
 
 func exclusionGrowthViolation(path string, exclusion Exclusion, detail string) Violation {

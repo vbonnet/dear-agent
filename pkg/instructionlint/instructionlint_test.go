@@ -2,6 +2,7 @@ package instructionlint
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"testing"
 )
+
+const testContextFingerprint = "0000000000000000000000000000000000000000000000000000000000000000"
 
 func TestSegmentsClassifyExecutableFences(t *testing.T) {
 	source := []byte(strings.Join([]string{
@@ -254,6 +257,27 @@ func TestExecutablePathsRemainPolicyVisible(t *testing.T) {
 	}
 }
 
+func TestShellCommandPayloadsRemainPolicyVisible(t *testing.T) {
+	segments := parseSegments([]byte(strings.Join([]string{
+		"```",
+		`bash -c 'git push origin main'`,
+		`/bin/sh -c "gh pr merge 123"`,
+		`env /opt/homebrew/bin/bash -lc 'bd ready'`,
+		"```",
+	}, "\n")))
+	var rules []string
+	for _, segment := range segments {
+		for _, violation := range evaluateSegment("AGENTS.md", segment) {
+			rules = append(rules, violation.Rule)
+		}
+	}
+	sort.Strings(rules)
+	want := []string{"bare-beads", "raw-gh-merge", "raw-git-push"}
+	if !reflect.DeepEqual(rules, want) {
+		t.Fatalf("shell -c rules = %v, want %v", rules, want)
+	}
+}
+
 func TestRetiredWayfinderVocabularyIsCaseInsensitive(t *testing.T) {
 	for _, token := range []string{"v1", "v1.", "w0", "d1", "s1"} {
 		if !retiredWayfinderToken(token) {
@@ -461,6 +485,7 @@ func TestExclusionRatchetRejectsNewAndIncreasedDebt(t *testing.T) {
   - path: AGENTS.md
     rule: bare-beads
     excerpt: bd ready
+    context: "0000000000000000000000000000000000000000000000000000000000000000"
     count: 1
     owner: test
     reason: fixture
@@ -473,12 +498,14 @@ func TestExclusionRatchetRejectsNewAndIncreasedDebt(t *testing.T) {
   - path: AGENTS.md
     rule: bare-beads
     excerpt: bd ready
+    context: "0000000000000000000000000000000000000000000000000000000000000000"
     count: 2
     owner: test
     reason: fixture
   - path: AGENTS.md
     rule: raw-git-push
     excerpt: git push
+    context: "0000000000000000000000000000000000000000000000000000000000000000"
     count: 1
     owner: test
     reason: fixture
@@ -494,6 +521,36 @@ func TestExclusionRatchetRejectsNewAndIncreasedDebt(t *testing.T) {
 		if violation.Rule != "exclusion-growth" {
 			t.Fatalf("unexpected ratchet violation: %+v", violation)
 		}
+	}
+}
+
+func TestExclusionRatchetRejectsSurfaceRemoval(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	writeTestFile(t, repo, ".dear-agent.yml", `instruction-policy:
+  surfaces:
+    - match: AGENTS.md
+      owner: root
+    - match: CODEX.md
+      owner: codex
+`)
+	writeTestFile(t, repo, "AGENTS.md", "# Root instructions\n")
+	writeTestFile(t, repo, "CODEX.md", "# Codex instructions\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "baseline")
+	baseline := strings.TrimSpace(runGitOutput(t, repo, "rev-parse", "HEAD"))
+
+	writeTestFile(t, repo, ".dear-agent.yml", `instruction-policy:
+  surfaces:
+    - match: AGENTS.md
+      owner: root
+`)
+	violations, err := CheckExclusionRatchet(context.Background(), repo, baseline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(violations) != 1 || violations[0].Rule != "surface-removal" || !strings.Contains(violations[0].Excerpt, "CODEX.md") {
+		t.Fatalf("violations = %v, want removed CODEX.md surface", violations)
 	}
 }
 
@@ -514,6 +571,7 @@ func TestExclusionRatchetAllowsBootstrapAndShrink(t *testing.T) {
   - path: AGENTS.md
     rule: bare-beads
     excerpt: bd ready
+    context: "0000000000000000000000000000000000000000000000000000000000000000"
     count: 2
     owner: test
     reason: fixture
@@ -528,6 +586,7 @@ func TestExclusionRatchetAllowsBootstrapAndShrink(t *testing.T) {
   - path: AGENTS.md
     rule: bare-beads
     excerpt: bd ready
+    context: "0000000000000000000000000000000000000000000000000000000000000000"
     count: 1
     owner: test
     reason: fixture
@@ -542,12 +601,12 @@ func TestExclusionRatchetComparesFileBaselineWithInlineCurrentPolicy(t *testing.
 	runGit(t, repo, "init", "-q")
 	writeTestFile(t, repo, ".dear-agent.yml", "instruction-policy:\n  surfaces:\n    - match: AGENTS.md\n      owner: root\n  exclusions-file: .instruction-policy-exclusions.yml\n")
 	writeTestFile(t, repo, "AGENTS.md", "# Instructions\n")
-	writeTestFile(t, repo, ".instruction-policy-exclusions.yml", "exclusions:\n  - path: AGENTS.md\n    rule: bare-beads\n    excerpt: bd ready\n    count: 1\n    owner: test\n    reason: fixture\n")
+	writeTestFile(t, repo, ".instruction-policy-exclusions.yml", "exclusions:\n  - path: AGENTS.md\n    rule: bare-beads\n    excerpt: bd ready\n    context: \""+testContextFingerprint+"\"\n    count: 1\n    owner: test\n    reason: fixture\n")
 	runGit(t, repo, "add", ".")
 	runGit(t, repo, "commit", "-m", "baseline")
 	baseline := strings.TrimSpace(runGitOutput(t, repo, "rev-parse", "HEAD"))
 
-	writeTestFile(t, repo, ".dear-agent.yml", "instruction-policy:\n  surfaces:\n    - match: AGENTS.md\n      owner: root\n  exclusions:\n    - path: AGENTS.md\n      rule: bare-beads\n      excerpt: bd ready\n      count: 2\n      owner: test\n      reason: fixture\n    - path: AGENTS.md\n      rule: raw-git-push\n      excerpt: git push\n      count: 1\n      owner: test\n      reason: fixture\n")
+	writeTestFile(t, repo, ".dear-agent.yml", "instruction-policy:\n  surfaces:\n    - match: AGENTS.md\n      owner: root\n  exclusions:\n    - path: AGENTS.md\n      rule: bare-beads\n      excerpt: bd ready\n      context: \""+testContextFingerprint+"\"\n      count: 2\n      owner: test\n      reason: fixture\n    - path: AGENTS.md\n      rule: raw-git-push\n      excerpt: git push\n      context: \""+testContextFingerprint+"\"\n      count: 1\n      owner: test\n      reason: fixture\n")
 	violations, err := CheckExclusionRatchet(context.Background(), repo, baseline)
 	if err != nil {
 		t.Fatal(err)
@@ -587,12 +646,12 @@ func TestCheckRepositoryRejectsUntrackedImportMatchingBroadSurface(t *testing.T)
 
 func TestApplyExclusionsIsExactAndStaleDetecting(t *testing.T) {
 	findings := []Violation{
-		{Path: "AGENTS.md", Line: 3, Rule: "bare-beads", Excerpt: "bd ready", Replacement: "canonical bd"},
-		{Path: "AGENTS.md", Line: 4, Rule: "bare-beads", Excerpt: "bd ready", Replacement: "canonical bd"},
+		{Path: "AGENTS.md", Line: 3, Rule: "bare-beads", Excerpt: "bd ready", Context: testContextFingerprint, Replacement: "canonical bd"},
+		{Path: "AGENTS.md", Line: 4, Rule: "bare-beads", Excerpt: "bd ready", Context: "1111111111111111111111111111111111111111111111111111111111111111", Replacement: "canonical bd"},
 	}
 	exclusions := []Exclusion{
-		{Path: "AGENTS.md", Rule: "bare-beads", Excerpt: "bd ready", Count: 1, Owner: "#930", Reason: "root router"},
-		{Path: "AGENTS.md", Rule: "raw-git-push", Excerpt: "git push", Count: 1, Owner: "#930", Reason: "root router"},
+		{Path: "AGENTS.md", Rule: "bare-beads", Excerpt: "bd ready", Context: testContextFingerprint, Count: 1, Owner: "#930", Reason: "root router"},
+		{Path: "AGENTS.md", Rule: "raw-git-push", Excerpt: "git push", Context: testContextFingerprint, Count: 1, Owner: "#930", Reason: "root router"},
 	}
 
 	got := applyExclusions(findings, exclusions)
@@ -609,7 +668,9 @@ func TestApplyExclusionsIsExactAndStaleDetecting(t *testing.T) {
 func TestCheckRepositoryUsesTrackedGovernedInventory(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init", "-q")
-	writeTestFile(t, repo, ".dear-agent.yml", `instruction-policy:
+	legacy := []byte("# Instructions\n\n```bash\nbd ready\n```\n")
+	legacyContext := contextFingerprint(legacy, 4)
+	writeTestFile(t, repo, ".dear-agent.yml", fmt.Sprintf(`instruction-policy:
   surfaces:
     - match: AGENTS.md
       owner: root
@@ -617,11 +678,12 @@ func TestCheckRepositoryUsesTrackedGovernedInventory(t *testing.T) {
     - path: AGENTS.md
       rule: bare-beads
       excerpt: bd ready
+      context: %q
       count: 1
       owner: "#930"
       reason: root router owns the exact legacy line
-`)
-	writeTestFile(t, repo, "AGENTS.md", "# Instructions\n\n```bash\nbd ready\n```\n")
+`, legacyContext))
+	writeTestFile(t, repo, "AGENTS.md", string(legacy))
 	writeTestFile(t, repo, "untracked.md", "Create W0-charter.md.\n")
 	runGit(t, repo, "add", ".dear-agent.yml", "AGENTS.md")
 
@@ -640,6 +702,44 @@ func TestCheckRepositoryUsesTrackedGovernedInventory(t *testing.T) {
 	}
 	if len(violations) != 1 || violations[0].Rule != "wayfinder-v1" {
 		t.Fatalf("violations = %v, want unexcluded Wayfinder V1 token", violations)
+	}
+}
+
+func TestExclusionContextDoesNotSuppressMovedGuidance(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	legacy := []byte("# Safety\n\nNever run `git push` directly.\n")
+	writeTestFile(t, repo, ".dear-agent.yml", fmt.Sprintf(`instruction-policy:
+  surfaces:
+    - match: AGENTS.md
+      owner: root
+  exclusions:
+    - path: AGENTS.md
+      rule: raw-git-push
+      excerpt: git push
+      context: %q
+      count: 1
+      owner: test
+      reason: negative reference fixture
+`, contextFingerprint(legacy, 3)))
+	writeTestFile(t, repo, "AGENTS.md", string(legacy))
+	runGit(t, repo, "add", ".")
+
+	if _, violations, err := CheckRepository(context.Background(), repo); err != nil || len(violations) != 0 {
+		t.Fatalf("legacy violations=%v err=%v", violations, err)
+	}
+	writeTestFile(t, repo, "AGENTS.md", "# Delivery\n\nRun `git push` now.\n")
+	_, violations, err := CheckRepository(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rules []string
+	for _, violation := range violations {
+		rules = append(rules, violation.Rule)
+	}
+	sort.Strings(rules)
+	if !reflect.DeepEqual(rules, []string{"raw-git-push", "stale-exclusion"}) {
+		t.Fatalf("moved guidance rules = %v, want new finding plus stale exclusion", rules)
 	}
 }
 
