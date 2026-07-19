@@ -16,8 +16,8 @@ func indexByID(items []Item) map[string]Item {
 }
 
 func TestMarkdownSourceItems(t *testing.T) {
-	src := NewMarkdownSource(filepath.Join("testdata", "sample_backlog.md"))
-	if !strings.Contains(src.Name(), "sample_backlog.md") {
+	src := NewMarkdownSource(filepath.Join("testdata", "sample.md"))
+	if !strings.Contains(src.Name(), "sample.md") {
 		t.Errorf("Name() = %q", src.Name())
 	}
 	items, err := src.Items(context.Background())
@@ -66,7 +66,7 @@ func TestMarkdownSourceItems(t *testing.T) {
 }
 
 func TestMarkdownSourceRejectsMissingExplicitFile(t *testing.T) {
-	real := filepath.Join("testdata", "sample_backlog.md")
+	real := filepath.Join("testdata", "sample.md")
 	src := NewMarkdownSource("does/not/exist.md", real)
 	if items, err := src.Items(context.Background()); err == nil || items != nil {
 		t.Fatalf("mixed missing source: items=%v err=%v, want nil items and error", items, err)
