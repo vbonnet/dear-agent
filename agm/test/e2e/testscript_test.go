@@ -1,6 +1,8 @@
 package e2e
 
 import (
+	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -9,6 +11,7 @@ import (
 	"runtime"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/rogpeppe/go-internal/testscript"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
@@ -110,14 +113,28 @@ func installedAGMPath() string {
 	return filepath.Join(home, "go", "bin", "agm")
 }
 
+// e2eBuildCacheKey returns an 8-hex-char fingerprint of the module's go.sum.
+// Different git worktrees or dependency revisions produce different keys so a
+// cached binary from another worktree is never silently reused.
+func e2eBuildCacheKey() string {
+	_, testFile, _, _ := runtime.Caller(0)
+	goSum := filepath.Join(filepath.Dir(testFile), "../../go.sum")
+	if data, err := os.ReadFile(goSum); err == nil {
+		h := sha256.Sum256(data)
+		return fmt.Sprintf("%x", h[:4])
+	}
+	return "unknown"
+}
+
 // e2eBuildCacheDir is a stable, isolated directory for the fallback agm build.
 // It lives under the OS temp dir — NEVER the real GOBIN — so a testscript run
-// can never create, overwrite, or remove anything in ~/go/bin. A fixed path
-// (rather than a per-process temp dir) lets the many short-lived agmMain
-// subprocesses in a single `go test` run share one build instead of each
-// recompiling agm.
+// can never create, overwrite, or remove anything in ~/go/bin. The directory is
+// keyed by the go.sum fingerprint so different worktrees or dependency versions
+// cannot share a stale binary. A fixed path (rather than a per-process temp
+// dir) lets the many short-lived agmMain subprocesses in a single `go test` run
+// share one build instead of each recompiling agm.
 func e2eBuildCacheDir() string {
-	return filepath.Join(os.TempDir(), "agm-e2e-build")
+	return filepath.Join(os.TempDir(), "agm-e2e-build-"+e2eBuildCacheKey())
 }
 
 // buildAGMToCache builds ./cmd/agm into the isolated e2e build cache and
@@ -153,7 +170,9 @@ func buildAGMToCache() (string, error) {
 	tmpPath := tmp.Name()
 	tmp.Close()
 
-	buildCmd := exec.Command("go", "build", "-o", tmpPath, "./cmd/agm")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	buildCmd := exec.CommandContext(ctx, "go", "build", "-o", tmpPath, "./cmd/agm")
 	buildCmd.Dir = agmModRoot
 	if out, err := buildCmd.CombinedOutput(); err != nil {
 		os.Remove(tmpPath)

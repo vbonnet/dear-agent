@@ -116,14 +116,20 @@ escalate() {
 		echo "$PROG: warning: cannot create trail dir $trail_dir" >&2
 		return 0
 	fi
+	# Mirror pkg/vroom/decisiontrail.OpenJSONL: create the trail file with 0600
+	# (owner-read/write only) if it does not yet exist.
+	if [ ! -f "$trail_path" ]; then
+		(umask 0177 && : >"$trail_path") 2>/dev/null || true
+	fi
 	event_id=$(new_event_id)
 	ts=$(now_utc)
 	esc_dir=$(json_escape "$gobin_dir")
 	esc_sentinel=$(json_escape "$sentinel_path")
 	esc_reason=$(json_escape "$reason")
 	esc_status=$(json_escape "$status")
+	esc_role=$(json_escape "$role")
 	if ! printf '{"event_id":"%s","timestamp":"%s","role":"%s","kind":"watchdog.gobin.missing","payload":{"status":"%s","gobin_dir":"%s","sentinel":"%s","reason":"%s"}}\n' \
-		"$event_id" "$ts" "$role" "$esc_status" "$esc_dir" "$esc_sentinel" "$esc_reason" \
+		"$event_id" "$ts" "$esc_role" "$esc_status" "$esc_dir" "$esc_sentinel" "$esc_reason" \
 		>>"$trail_path" 2>/dev/null; then
 		echo "$PROG: warning: trail append failed: $trail_path" >&2
 	fi

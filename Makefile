@@ -887,8 +887,7 @@ uninstall-disk-watchdog-launchagent:
 # everything else.
 install-gobin-guard:
 	@mkdir -p $(HOME)/.local/state/dear-agent/bin
-	cp scripts/gobin-guard.sh $(HOME)/.local/state/dear-agent/bin/gobin-guard.sh
-	@chmod +x $(HOME)/.local/state/dear-agent/bin/gobin-guard.sh
+	install -m 0755 scripts/gobin-guard.sh $(HOME)/.local/state/dear-agent/bin/gobin-guard.sh
 	@echo "Installed: $(HOME)/.local/state/dear-agent/bin/gobin-guard.sh"
 
 install-gobin-guard-launchagent: install-gobin-guard
