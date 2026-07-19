@@ -3,6 +3,7 @@ package instructions_test
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -11,6 +12,8 @@ type localADRScope struct {
 	dir       string
 	indexName string
 }
+
+var localADRFilePattern = regexp.MustCompile(`^(?:ADR-)?([0-9]{3,4})-[a-z0-9-]+\.md$`)
 
 func TestCodeLocalADRsHaveCompleteConciseLifecycle(t *testing.T) {
 	root := repoRoot(t)
@@ -76,34 +79,43 @@ func validateLocalADRScope(t *testing.T, root string, scope localADRScope, gover
 		if entry.IsDir() {
 			continue
 		}
-		match := adrFilePattern.FindStringSubmatch(entry.Name())
+		match := localADRFilePattern.FindStringSubmatch(entry.Name())
 		if len(match) != 2 {
 			if entry.Name() != scope.indexName && isADRLikeFilename(entry.Name()) {
 				t.Errorf("malformed ADR filename: %s", entry.Name())
 			}
 			continue
 		}
+		id := match[1]
 		content := readFile(t, filepath.Join(dir, entry.Name()))
 		titles := adrTitlePattern.FindAllStringSubmatch(content, -1)
 		if len(titles) != 1 {
 			t.Errorf("%s: want one ADR heading, got %d", entry.Name(), len(titles))
 			continue
 		}
-		if titles[0][1] != match[1] {
-			t.Errorf("%s: heading ID %s does not match filename ID %s", entry.Name(), titles[0][1], match[1])
+		if titles[0][1] != id {
+			t.Errorf("%s: heading ID %s does not match filename ID %s", entry.Name(), titles[0][1], id)
 		}
-		if previous, exists := ids[match[1]]; exists {
-			t.Errorf("duplicate ADR-%s: %s and %s", match[1], previous, entry.Name())
+		if previous, exists := ids[id]; exists {
+			t.Errorf("duplicate ADR-%s: %s and %s", id, previous, entry.Name())
 		} else {
-			ids[match[1]] = entry.Name()
+			ids[id] = entry.Name()
 		}
 		statuses := adrStatusPattern.FindAllStringSubmatch(content, -1)
 		if len(statuses) != 1 {
 			t.Errorf("%s: want one normalized Status line, got %d", entry.Name(), len(statuses))
 			continue
 		}
+		if statuses[0][1] == "Superseded" {
+			successor := successorPattern.FindStringSubmatch(statuses[0][0])
+			if len(successor) != 2 {
+				t.Errorf("%s: superseded status must link to its live successor", entry.Name())
+			} else {
+				assertLiveLocalADRSuccessor(t, dir, entry.Name(), successor[1])
+			}
+		}
 		assertRelativeMarkdownLinksResolve(t, dir, entry.Name(), content)
-		records[entry.Name()] = adrRecord{id: match[1], status: statuses[0][1]}
+		records[entry.Name()] = adrRecord{id: id, status: statuses[0][1]}
 		governed[filepath.ToSlash(filepath.Join(scope.dir, entry.Name()))] = true
 	}
 
@@ -123,6 +135,28 @@ func validateLocalADRScope(t *testing.T, root string, scope localADRScope, gover
 		indexed[match[2]] = adrRecord{id: match[1], status: match[3]}
 	}
 	assertSameADRRecords(t, records, indexed)
+}
+
+func assertLiveLocalADRSuccessor(t *testing.T, dir, source, target string) {
+	t.Helper()
+	targetPath := filepath.Clean(filepath.Join(dir, filepath.FromSlash(target)))
+	if targetPath == filepath.Join(dir, source) {
+		t.Errorf("%s: superseded status must point to a different ADR", source)
+		return
+	}
+	if !localADRFilePattern.MatchString(filepath.Base(targetPath)) {
+		t.Errorf("%s: successor %q is not a code-local ADR record", source, target)
+		return
+	}
+	content, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Errorf("%s: successor %q cannot be read: %v", source, target, err)
+		return
+	}
+	statuses := adrStatusPattern.FindAllStringSubmatch(string(content), -1)
+	if len(statuses) != 1 || (statuses[0][1] != "Accepted" && statuses[0][1] != "Proposed") {
+		t.Errorf("%s: successor %q must be one live Accepted or Proposed ADR", source, target)
+	}
 }
 
 func assertEveryCodeLocalADRIsGoverned(t *testing.T, root string, governed map[string]bool) {
@@ -148,7 +182,7 @@ func assertEveryCodeLocalADRIsGoverned(t *testing.T, root string, governed map[s
 			return nil
 		}
 		base := filepath.Base(relative)
-		if base != "ADR.md" && !adrFilePattern.MatchString(base) {
+		if base != "ADR.md" && !localADRFilePattern.MatchString(base) {
 			if base != "ADR-INDEX.md" && isADRLikeFilename(base) {
 				t.Errorf("malformed code-local ADR filename: %s", relative)
 			}
