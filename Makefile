@@ -134,7 +134,8 @@ lint-skills:
 	@go run ./tools/skill-lint -repo .
 
 verify-surface-codegen:
-	@before="$$(git hash-object agm/internal/surface/codegen_cli.go agm/internal/surface/codegen_mcp.go agm/internal/surface/codegen_parity_test.go)"; \
+	@set -e; \
+		before="$$(git hash-object agm/internal/surface/codegen_cli.go agm/internal/surface/codegen_mcp.go agm/internal/surface/codegen_parity_test.go)"; \
 		cd agm && go run ./internal/surface/cmd/generate; \
 		cd ..; \
 		after="$$(git hash-object agm/internal/surface/codegen_cli.go agm/internal/surface/codegen_mcp.go agm/internal/surface/codegen_parity_test.go)"; \
