@@ -9,7 +9,7 @@ ranking for human and VROOM dispatch consumers.
 
 ## EARS Requirements
 
-**BSC-01** When no source files are supplied, the command shall read the documented backlog and roadmap files.
+**BSC-01** When no source files are supplied, the command shall use an empty source and shall not read temporal files from dear-agent.
 
 **BSC-02** When custom files are supplied, the command shall trim comma-separated paths and ignore empty entries.
 
