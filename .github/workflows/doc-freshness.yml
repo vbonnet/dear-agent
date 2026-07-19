@@ -10,8 +10,10 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # PR synchronizations may supersede one another. Push and scheduled ratchet
+  # runs must remain independent so an intervening event cannot hide debt.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -39,13 +41,22 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           if [[ "$EVENT_NAME" == "pull_request" ]]; then
             git fetch --no-tags origin "$BASE_SHA"
             echo "ref=$BASE_SHA" >> "$GITHUB_OUTPUT"
           elif [[ "$EVENT_NAME" == "push" ]]; then
             if [[ "$BEFORE_SHA" =~ ^0+$ ]]; then
-              echo "ref=" >> "$GITHUB_OUTPUT"
+              if git rev-parse "$CURRENT_SHA^" >/dev/null 2>&1; then
+                git rev-parse "$CURRENT_SHA^" | sed 's/^/ref=/' >> "$GITHUB_OUTPUT"
+              else
+                git fetch --no-tags origin "$DEFAULT_BRANCH"
+                ref="$(git merge-base "$CURRENT_SHA" "origin/$DEFAULT_BRANCH")"
+                test -n "$ref"
+                echo "ref=$ref" >> "$GITHUB_OUTPUT"
+              fi
             else
               echo "ref=$BEFORE_SHA" >> "$GITHUB_OUTPUT"
             fi

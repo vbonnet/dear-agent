@@ -190,7 +190,15 @@ func TestFreshnessEntrypointsUseMutationBaseRef(t *testing.T) {
 		t.Fatal(err)
 	}
 	workflowText := string(workflow)
-	for _, required := range []string{"reopened, edited", "BEFORE_SHA: ${{ github.event.before }}", "ref=$BEFORE_SHA"} {
+	for _, required := range []string{
+		"reopened, edited",
+		"BEFORE_SHA: ${{ github.event.before }}",
+		"ref=$BEFORE_SHA",
+		"github.event_name }}-${{ github.event.pull_request.number || github.run_id",
+		"cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
+		`git rev-parse "$CURRENT_SHA^"`,
+		`git merge-base "$CURRENT_SHA" "origin/$DEFAULT_BRANCH"`,
+	} {
 		if !strings.Contains(workflowText, required) {
 			t.Errorf("doc-freshness workflow missing %q", required)
 		}
