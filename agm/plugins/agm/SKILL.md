@@ -16,7 +16,7 @@ root-form commands or copy a flag catalog into the response.
 - List: `agm session list --output json [--all]`
 - Aggregate status: `agm session status --format json [--workspace <name>]`
 - Inspect one session: `agm session get <identifier> --output json`
-- Resume: `agm session resume [identifier]`
+- Resume: `agm session resume <identifier>`
 - Send: `agm send msg <identifier> --prompt-file <path>`
 - Archive: `agm session archive <identifier>`; follow the command's active
   versus stopped guidance and never bypass a refusal with `--force`.
@@ -30,7 +30,11 @@ For the richer Claude plugin workflows, read only the relevant file under
 - Treat Claude Code, Codex CLI, AGY, and OpenCode as active harnesses. Mention
   Gemini only as deprecated compatibility when an existing command accepts it.
 - Pass user-controlled message or wiki content through a file input. Never
-  interpolate it into shell syntax.
+  interpolate it into shell syntax. For send, create a unique
+  `/tmp/agm-send-<random>.txt`, pass it with `--prompt-file`, and remove it
+  immediately after the command returns on success or failure.
+- Resume requires an identifier. If none was provided, list all sessions and
+  ask the user to choose; the interactive picker is not implemented.
 - Use global `--output json` or the command's documented structured-output flag;
   do not invent `--json` on subcommands.
 - Keep stderr visible and stop on typed command errors.

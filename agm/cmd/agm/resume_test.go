@@ -223,6 +223,28 @@ func TestSendPostResumePrompt_FileTooLarge(t *testing.T) {
 	}
 }
 
+func TestSendPostResumePrompt_RemovesManagedFileBeforeValidation(t *testing.T) {
+	file, err := os.CreateTemp("/tmp", "agm-resume-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := file.Name()
+	if _, err := file.Write(make([]byte, 11*1024)); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	err = sendPostResumePrompt("any-session", "", path)
+	if err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("sendPostResumePrompt() error = %v, want size error", err)
+	}
+	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+		t.Fatalf("managed prompt file remains after read: %v", statErr)
+	}
+}
+
 func TestBuildCodexResumeCommand(t *testing.T) {
 	m := &manifest.Manifest{
 		Model: "5.4",

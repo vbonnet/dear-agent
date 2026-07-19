@@ -440,6 +440,11 @@ func sendPostResumePrompt(sessionName, promptText, promptFile string) error {
 		if err != nil {
 			return fmt.Errorf("failed to read prompt file %s: %w", promptFile, err)
 		}
+		if managedResumePromptFile(promptFile) {
+			if err := os.Remove(promptFile); err != nil {
+				return fmt.Errorf("failed to remove consumed prompt file %s: %w", promptFile, err)
+			}
+		}
 		// Enforce size limit (10KB) consistent with send_msg
 		const maxSize = 10 * 1024
 		if len(content) > maxSize {
@@ -453,6 +458,11 @@ func sendPostResumePrompt(sessionName, promptText, promptFile string) error {
 		return fmt.Errorf("failed to send prompt: %w", err)
 	}
 	return nil
+}
+
+func managedResumePromptFile(path string) bool {
+	clean := filepath.Clean(path)
+	return filepath.Dir(clean) == "/tmp" && strings.HasPrefix(filepath.Base(clean), "agm-resume-")
 }
 
 // resumeResolvedSession runs the full resume workflow (harness detection,
