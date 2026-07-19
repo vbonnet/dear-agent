@@ -22,7 +22,7 @@ func TestSubsystemArchitectureLineBudgets(t *testing.T) {
 	for _, file := range files {
 		t.Run(file, func(t *testing.T) {
 			content := readFile(t, filepath.Join(root, filepath.FromSlash(file)))
-			if lines := strings.Count(content, "\n") + 1; lines > 300 {
+			if lines := strings.Count(strings.TrimSuffix(content, "\n"), "\n") + 1; lines > 300 {
 				t.Fatalf("%s has %d lines; living architecture budget is 300", file, lines)
 			}
 		})
@@ -161,8 +161,10 @@ func TestRetiredSubsystemDesignsStayRetired(t *testing.T) {
 		"engram/mcp/test_basic_tools.sh",
 	}
 	for _, file := range retiredFiles {
-		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(file))); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(file))); err == nil {
 			t.Errorf("retired artifact still exists: %s", file)
+		} else if !os.IsNotExist(err) {
+			t.Errorf("inspect retired artifact %s: %v", file, err)
 		}
 	}
 }
