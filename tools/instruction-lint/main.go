@@ -3,10 +3,12 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/instructionlint"
 )
@@ -31,7 +33,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	result, violations, err := instructionlint.CheckRepository(*repository)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	result, violations, err := instructionlint.CheckRepository(ctx, *repository)
 	if err != nil {
 		fmt.Fprintln(stderr, "instruction-lint:", err)
 		return 2

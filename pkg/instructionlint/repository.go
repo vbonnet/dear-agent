@@ -4,6 +4,7 @@ package instructionlint
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -37,7 +38,7 @@ func (v Violation) Error() string {
 
 // CheckRepository validates every tracked Markdown path matched by the policy
 // in root/.dear-agent.yml. It never mutates source or policy files.
-func CheckRepository(root string) (Result, []Violation, error) {
+func CheckRepository(ctx context.Context, root string) (Result, []Violation, error) {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return Result{}, nil, fmt.Errorf("instructionlint: absolute repository root: %w", err)
@@ -46,7 +47,7 @@ func CheckRepository(root string) (Result, []Violation, error) {
 	if err != nil {
 		return Result{}, nil, err
 	}
-	paths, err := trackedMarkdown(absRoot)
+	paths, err := trackedMarkdown(ctx, absRoot)
 	if err != nil {
 		return Result{}, nil, err
 	}
@@ -74,11 +75,17 @@ func CheckRepository(root string) (Result, []Violation, error) {
 	return Result{Files: files, Exclusions: len(policy.Exclusions)}, findings, nil
 }
 
-func trackedMarkdown(root string) ([]string, error) {
-	cmd := exec.Command("git", "-C", root, "ls-files", "-z", "--")
+func trackedMarkdown(ctx context.Context, root string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", root, "ls-files", "-z", "--")
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	output, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("instructionlint: git ls-files: %w", err)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, fmt.Errorf("instructionlint: git ls-files: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	var paths []string
 	for raw := range bytes.SplitSeq(output, []byte{0}) {

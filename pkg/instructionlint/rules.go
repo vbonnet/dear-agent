@@ -13,12 +13,13 @@ type rule struct {
 }
 
 var retiredWayfinder = regexp.MustCompile(`(?:\bV1\b|\bW0(?:\b|-)|\bD[1-6](?:\b|-)|\bS(?:1[01]|[1-9])(?:\b|-))`)
+var shellBoundary = regexp.MustCompile(`(?:&&|\|\||[;|])`)
 
 var instructionRules = []rule{
 	{id: "wayfinder-v1", replacement: "CHARTER, PROBLEM, RESEARCH, DESIGN, SPEC, PLAN, SETUP, BUILD, and RETRO", applies: proseOrShell, detect: retiredWayfinder.MatchString},
 	{id: "bare-beads", replacement: "bd --db ~/beads/context-engine/.beads --dolt-auto-commit on <subcommand>", applies: commandSegment, detect: bareBeads},
 	{id: "raw-git-push", replacement: "safe-push", applies: commandSegment, detect: func(text string) bool { return strings.Contains(shellText(text), "git push") }},
-	{id: "raw-gh-merge", replacement: "safe-merge", applies: commandSegment, detect: func(text string) bool { return strings.HasPrefix(shellText(text), "gh pr merge") }},
+	{id: "raw-gh-merge", replacement: "safe-merge", applies: commandSegment, detect: rawGHMerge},
 	{id: "safe-pr-emergency", replacement: "safe-pr normally or escalate with agm escalate; there is no bypass flag", applies: commandSegment, detect: func(text string) bool {
 		normalized := shellText(text)
 		return strings.Contains(normalized, "safe-pr") && strings.Contains(normalized, "--emergency")
@@ -74,7 +75,41 @@ func shellText(text string) string {
 
 func bareBeads(text string) bool {
 	fields := strings.Fields(shellText(text))
-	return len(fields) > 0 && fields[0] == "bd" && (len(fields) == 1 || fields[1] != "--db")
+	if len(fields) == 0 || fields[0] != "bd" {
+		return false
+	}
+	const canonical = "~/beads/context-engine/.beads"
+	if len(fields) >= 3 && fields[1] == "--db" {
+		return strings.Trim(fields[2], `"'`) != canonical
+	}
+	if len(fields) >= 2 {
+		if value, ok := strings.CutPrefix(fields[1], "--db="); ok {
+			return strings.Trim(value, `"'`) != canonical
+		}
+	}
+	return true
+}
+
+func rawGHMerge(text string) bool {
+	for _, command := range shellBoundary.Split(shellText(text), -1) {
+		fields := strings.Fields(strings.TrimSpace(command))
+		for len(fields) > 0 && strings.Contains(fields[0], "=") {
+			fields = fields[1:]
+		}
+		if len(fields) > 0 && fields[0] == "env" {
+			fields = fields[1:]
+			for len(fields) > 0 && strings.Contains(fields[0], "=") {
+				fields = fields[1:]
+			}
+		}
+		if len(fields) >= 2 && (fields[0] == "timeout" || fields[0] == "gtimeout") {
+			fields = fields[2:]
+		}
+		if len(fields) >= 3 && fields[0] == "gh" && fields[1] == "pr" && fields[2] == "merge" {
+			return true
+		}
+	}
+	return false
 }
 
 func positionalAGMSearch(text string) bool {

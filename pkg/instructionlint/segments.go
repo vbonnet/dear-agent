@@ -70,7 +70,8 @@ func classifyMarkdown(root ast.Node, source []byte) (map[int]SegmentKind, []Segm
 
 func classifyFence(classified map[int]SegmentKind, block *ast.FencedCodeBlock, source []byte) {
 	kind := SegmentKind("skip")
-	if shellLanguage(string(block.Language(source))) {
+	language := strings.TrimSpace(string(block.Language(source)))
+	if shellLanguage(language) {
 		kind = SegmentShell
 	}
 	for i := 0; i < block.Lines().Len(); i++ {
@@ -81,9 +82,32 @@ func classifyFence(classified map[int]SegmentKind, block *ast.FencedCodeBlock, s
 		if !bytes.HasSuffix(value, []byte{'\n'}) {
 			lineCount++
 		}
-		for offset := 0; offset < lineCount; offset++ {
-			classified[startLine+offset] = kind
+		lineKind := kind
+		if language == "" && commandShaped(string(value)) {
+			lineKind = SegmentShell
 		}
+		for offset := 0; offset < lineCount; offset++ {
+			classified[startLine+offset] = lineKind
+		}
+	}
+}
+
+func commandShaped(value string) bool {
+	fields := strings.Fields(strings.TrimSpace(value))
+	if len(fields) == 0 {
+		return false
+	}
+	if fields[0] == "$" && len(fields) > 1 {
+		fields = fields[1:]
+	}
+	if len(fields) == 0 {
+		return false
+	}
+	switch fields[0] {
+	case "agm", "bd", "env", "gh", "git", "gtimeout", "safe-merge", "safe-pr", "safe-push", "timeout":
+		return true
+	default:
+		return strings.Contains(value, "&&") || strings.Contains(value, "||")
 	}
 }
 

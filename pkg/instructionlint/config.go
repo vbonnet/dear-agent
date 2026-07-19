@@ -70,8 +70,8 @@ func loadPolicyExclusions(configPath string, policy *Policy) error {
 	if !cleanRelativePath(policy.ExclusionsFile) {
 		return fmt.Errorf("instructionlint: instruction-policy.exclusions-file must be a clean repository-relative path")
 	}
-	path := filepath.Join(filepath.Dir(configPath), filepath.FromSlash(policy.ExclusionsFile))
-	data, err := os.ReadFile(path)
+	exclusionsPath := filepath.Join(filepath.Dir(configPath), filepath.FromSlash(policy.ExclusionsFile))
+	data, err := os.ReadFile(exclusionsPath)
 	if err != nil {
 		return fmt.Errorf("instructionlint: read exclusions: %w", err)
 	}

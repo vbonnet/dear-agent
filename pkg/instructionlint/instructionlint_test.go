@@ -1,6 +1,7 @@
 package instructionlint
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +22,9 @@ func TestSegmentsClassifyExecutableFences(t *testing.T) {
 		"```bash",
 		"git push origin main",
 		"```",
+		"```",
+		"env TOKEN=x gh pr merge 123",
+		"```",
 	}, "\n"))
 
 	got := parseSegments(source)
@@ -34,6 +38,7 @@ func TestSegmentsClassifyExecutableFences(t *testing.T) {
 		"prose|# W0 prose",
 		"prose|Use `git push origin main` only as a quoted bad command.",
 		"shell|git push origin main",
+		"shell|env TOKEN=x gh pr merge 123",
 	}
 	sort.Strings(want)
 	if !reflect.DeepEqual(compact, want) {
@@ -54,14 +59,18 @@ func TestRuleViolationsTeachCanonicalReplacements(t *testing.T) {
 		{Kind: SegmentShell, Line: 9, Text: "agm new --workspace oss"},
 		{Kind: SegmentShell, Line: 10, Text: "agm session send worker hello"},
 		{Kind: SegmentShell, Line: 11, Text: "bd --db ~/beads/context-engine/.beads --dolt-auto-commit on ready"},
+		{Kind: SegmentShell, Line: 12, Text: "bd --db=/tmp/wrong ready"},
+		{Kind: SegmentShell, Line: 13, Text: "bd --db=~/beads/context-engine/.beads ready"},
+		{Kind: SegmentShell, Line: 14, Text: "env TOKEN=x gh pr merge --squash 123"},
+		{Kind: SegmentShell, Line: 15, Text: "echo ok && gh pr merge --squash 123"},
 	}
 
 	var got []Violation
 	for _, segment := range segments {
 		got = append(got, evaluateSegment("AGENTS.md", segment)...)
 	}
-	if len(got) != 10 {
-		t.Fatalf("violations = %v, want 10", got)
+	if len(got) != 13 {
+		t.Fatalf("violations = %v, want 13", got)
 	}
 	for _, item := range got {
 		if item.Rule == "" || item.Replacement == "" {
@@ -110,7 +119,7 @@ func TestCheckRepositoryUsesTrackedGovernedInventory(t *testing.T) {
 	writeTestFile(t, repo, "untracked.md", "Create W0-charter.md.\n")
 	runGit(t, repo, "add", ".dear-agent.yml", "AGENTS.md")
 
-	result, violations, err := CheckRepository(repo)
+	result, violations, err := CheckRepository(context.Background(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +128,7 @@ func TestCheckRepositoryUsesTrackedGovernedInventory(t *testing.T) {
 	}
 
 	writeTestFile(t, repo, "AGENTS.md", "# Instructions\n\nCreate W0-charter.md.\n\n```bash\nbd ready\n```\n")
-	_, violations, err = CheckRepository(repo)
+	_, violations, err = CheckRepository(context.Background(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,14 +149,14 @@ func TestCheckRepositoryRejectsOverlappingSurfaces(t *testing.T) {
 `)
 	writeTestFile(t, repo, "AGENTS.md", "# Instructions\n")
 	runGit(t, repo, "add", ".dear-agent.yml", "AGENTS.md")
-	if _, _, err := CheckRepository(repo); err == nil || !strings.Contains(err.Error(), "multiple instruction surfaces") {
+	if _, _, err := CheckRepository(context.Background(), repo); err == nil || !strings.Contains(err.Error(), "multiple instruction surfaces") {
 		t.Fatalf("overlapping surfaces error = %v", err)
 	}
 }
 
 func TestRepositoryInstructionPolicyIsConformant(t *testing.T) {
 	root := repositoryRoot(t)
-	result, violations, err := CheckRepository(root)
+	result, violations, err := CheckRepository(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
