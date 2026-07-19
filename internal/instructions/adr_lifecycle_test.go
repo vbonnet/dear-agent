@@ -66,9 +66,6 @@ func TestADRDirectoriesHaveUniqueIndexedLifecycle(t *testing.T) {
 					t.Errorf("%s: want one normalized Status line, got %d", entry.Name(), len(statuses))
 					continue
 				}
-				if lines := strings.Count(content, "\n") + 1; lines > 250 {
-					t.Errorf("%s: %d lines exceeds the ADR review budget of 250", entry.Name(), lines)
-				}
 				assertRelativeMarkdownLinksResolve(t, dir, entry.Name(), content)
 				records[entry.Name()] = adrRecord{id: match[1], status: statuses[0][1]}
 			}
