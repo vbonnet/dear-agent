@@ -28,7 +28,9 @@
 
 **DEAD-LINKS-10** When a baseline entry has no current finding, the system shall report the stale exception and exit with status 1.
 
-**DEAD-LINKS-11** When discovery, document reading, or baseline parsing fails, the system shall exit with operational-error status 2.
+**DEAD-LINKS-11** When a baseline revision is supplied, the system shall reject entries added to the current baseline after that revision.
+
+**DEAD-LINKS-12** When discovery, document reading, baseline parsing, or revision lookup fails, the system shall exit with operational-error status 2.
 
 **DEAD-LINKS-12** When multiple links target one Markdown document, the system shall reuse that document's parsed anchor inventory.
 

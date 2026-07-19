@@ -4,7 +4,7 @@
 //
 // Usage:
 //
-//	dead-links [--root <dir>] [--baseline <file>] [--verbose]
+//	dead-links [--root <dir>] [--baseline <file>] [--baseline-ref <git-ref>] [--verbose]
 //
 // Exit codes: 0=clean, 1=integrity findings, 2=usage or operational error.
 package main
@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -39,6 +40,7 @@ func run() int {
 
 	root := flag.String("root", "", "repo root to scan (default: git toplevel of cwd)")
 	baselinePath := flag.String("baseline", "", "shrink-only baseline of source<TAB>target findings")
+	baselineRef := flag.String("baseline-ref", "", "reject baseline entries added since this git ref")
 	verbose := flag.Bool("verbose", false, "print each checked link")
 	flag.Parse()
 
@@ -78,7 +80,7 @@ func run() int {
 		findings = append(findings, bk...)
 	}
 
-	var stale []string
+	var stale, addedBaseline []string
 	baselined := 0
 	if *baselinePath != "" {
 		path := *baselinePath
@@ -91,9 +93,27 @@ func run() int {
 			return 2
 		}
 		findings, stale, baselined = applyBaseline(findings, baseline)
+		if strings.TrimSpace(*baselineRef) != "" {
+			relativeBaseline, relErr := filepath.Rel(dir, path)
+			if relErr != nil || relativeBaseline == ".." || strings.HasPrefix(relativeBaseline, ".."+string(filepath.Separator)) {
+				fmt.Fprintln(os.Stderr, "error: baseline must be inside the repository when --baseline-ref is used")
+				return 2
+			}
+			base, present, loadErr := loadBaselineAtRef(ctx, dir, *baselineRef, relativeBaseline)
+			if loadErr != nil {
+				fmt.Fprintf(os.Stderr, "error loading baseline ref: %v\n", loadErr)
+				return 2
+			}
+			if present {
+				addedBaseline = addedBaselineEntries(baseline, base)
+			}
+		}
+	} else if strings.TrimSpace(*baselineRef) != "" {
+		fmt.Fprintln(os.Stderr, "error: --baseline-ref requires --baseline")
+		return 2
 	}
 
-	if len(findings) == 0 && len(stale) == 0 {
+	if len(findings) == 0 && len(stale) == 0 && len(addedBaseline) == 0 {
 		fmt.Printf("ok: %d tracked markdown file(s) checked — no new broken local links", len(mdFiles))
 		if baselined > 0 {
 			fmt.Printf(" (%d baselined relationship(s))", baselined)
@@ -102,12 +122,15 @@ func run() int {
 		return 0
 	}
 
-	fmt.Printf("dead-links: %d new broken local link(s), %d stale baseline entries\n\n", len(findings), len(stale))
+	fmt.Printf("dead-links: %d new broken local link(s), %d stale baseline entries, %d prohibited baseline additions\n\n", len(findings), len(stale), len(addedBaseline))
 	for _, f := range findings {
 		fmt.Printf("  %s:%d: broken link → %s\n", f.file, f.line, f.target)
 	}
 	for _, entry := range stale {
 		fmt.Printf("  stale baseline → %s\n", entry)
+	}
+	for _, entry := range addedBaseline {
+		fmt.Printf("  added baseline → %s\n", entry)
 	}
 	return 1
 }

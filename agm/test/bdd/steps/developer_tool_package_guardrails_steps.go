@@ -74,7 +74,7 @@ func markdownLinkIntegrityContractIsGoverned() error {
 		return err
 	}
 	text := string(source)
-	for _, marker := range []string{"goldmark", "git\", \"-C\"", "explicitAnchorRe", "applyBaseline"} {
+	for _, marker := range []string{"goldmark", "git\", \"-C\"", "collectExplicitAnchors", "html.NewTokenizer", "applyBaseline"} {
 		if !strings.Contains(text, marker) {
 			return fmt.Errorf("markdown link integrity implementation missing %q", marker)
 		}

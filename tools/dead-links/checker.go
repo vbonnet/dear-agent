@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -321,6 +322,10 @@ func loadBaseline(path string) (map[string]bool, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parseBaseline(content, path)
+}
+
+func parseBaseline(content []byte, source string) (map[string]bool, error) {
 	baseline := map[string]bool{}
 	for lineNumber, raw := range strings.Split(string(content), "\n") {
 		line := strings.TrimSpace(raw)
@@ -329,15 +334,61 @@ func loadBaseline(path string) (map[string]bool, error) {
 		}
 		parts := strings.SplitN(raw, "\t", 2)
 		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
-			return nil, fmt.Errorf("%s:%d: expected source<TAB>target", path, lineNumber+1)
+			return nil, fmt.Errorf("%s:%d: expected source<TAB>target", source, lineNumber+1)
 		}
 		key := findingKey(strings.TrimSpace(parts[0]), parts[1])
 		if baseline[key] {
-			return nil, fmt.Errorf("%s:%d: duplicate entry %q", path, lineNumber+1, key)
+			return nil, fmt.Errorf("%s:%d: duplicate entry %q", source, lineNumber+1, key)
 		}
 		baseline[key] = true
 	}
 	return baseline, nil
+}
+
+func loadBaselineAtRef(ctx context.Context, root, ref, baselinePath string) (map[string]bool, bool, error) {
+	verify := exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "--verify", ref+"^{commit}")
+	verify.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if output, err := verify.CombinedOutput(); err != nil {
+		if ctx.Err() != nil {
+			return nil, false, ctx.Err()
+		}
+		return nil, false, fmt.Errorf("resolve baseline ref %q: %w: %s", ref, err, strings.TrimSpace(string(output)))
+	}
+	object := ref + ":" + filepath.ToSlash(baselinePath)
+	exists := exec.CommandContext(ctx, "git", "-C", root, "cat-file", "-e", object)
+	exists.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if err := exists.Run(); err != nil {
+		if ctx.Err() != nil {
+			return nil, false, ctx.Err()
+		}
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("inspect baseline at %q: %w", ref, err)
+	}
+	show := exec.CommandContext(ctx, "git", "-C", root, "show", object)
+	show.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	content, err := show.Output()
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, false, ctx.Err()
+		}
+		return nil, false, fmt.Errorf("read baseline at %q: %w", ref, err)
+	}
+	baseline, err := parseBaseline(content, object)
+	return baseline, true, err
+}
+
+func addedBaselineEntries(current, base map[string]bool) []string {
+	var added []string
+	for key := range current {
+		if !base[key] {
+			added = append(added, key)
+		}
+	}
+	sort.Strings(added)
+	return added
 }
 
 func applyBaseline(findings []finding, baseline map[string]bool) ([]finding, []string, int) {

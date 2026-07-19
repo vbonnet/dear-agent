@@ -206,6 +206,36 @@ func TestLoadAndApplyBaseline(t *testing.T) {
 	}
 }
 
+func TestBaselineAdditionsAgainstRef(t *testing.T) {
+	repo := t.TempDir()
+	if output, err := exec.Command("git", "-C", repo, "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, output)
+	}
+	mustWrite(t, filepath.Join(repo, ".dead-links-baseline.txt"), "a.md\tmissing.md\n")
+	for _, args := range [][]string{{"-C", repo, "add", "."}, {"-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "base"}} {
+		if output, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, output)
+		}
+	}
+	baseOutput, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseRef := strings.TrimSpace(string(baseOutput))
+	mustWrite(t, filepath.Join(repo, ".dead-links-baseline.txt"), "a.md\tmissing.md\nb.md\tnew.md\n")
+	current, err := loadBaseline(filepath.Join(repo, ".dead-links-baseline.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, present, err := loadBaselineAtRef(context.Background(), repo, baseRef, ".dead-links-baseline.txt")
+	if err != nil || !present {
+		t.Fatalf("load base: present=%t err=%v", present, err)
+	}
+	if got, want := addedBaselineEntries(current, base), []string{"b.md\tnew.md"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("added baseline = %v, want %v", got, want)
+	}
+}
+
 func TestLoadBaselineRejectsMalformedAndDuplicateEntries(t *testing.T) {
 	for name, content := range map[string]string{
 		"malformed": "missing-tab\n",
