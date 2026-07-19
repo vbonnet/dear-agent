@@ -57,6 +57,8 @@ tmux harnesses. Gemini CLI remains deprecated compatibility.
 
 **ACP-19** When an AGM session is created with `--persistent`, the system shall omit the shell exit suffix for Claude Code, Codex, AGY, and OpenCode launch commands.
 
+**ACP-20** When AGM creates a `codex-cli` session inside an existing current tmux pane, the system shall validate Codex authentication, dispatch through the canonical Codex launcher, and observe the Codex composer before registering success; if launch or readiness fails, the system shall preserve the pre-existing tmux session and remove only registration artifacts created by the attempt.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

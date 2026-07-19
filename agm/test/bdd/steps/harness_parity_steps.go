@@ -97,6 +97,7 @@ type harnessParityState struct {
 	launchMode                 string
 	launchContract             launchparity.Contract
 	startupLivenessValid       bool
+	currentTmuxSource          string
 }
 
 type harnessParityStateKey struct{}
@@ -114,6 +115,10 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^harness "([^"]*)" should not be deprecated$`, harnessShouldNotBeDeprecated)
 	ctx.Step(`^harness "([^"]*)" should be deprecated$`, harnessShouldBeDeprecated)
 	ctx.Step(`^AGM active harnesses are configured$`, agmActiveHarnessesAreConfigured)
+	ctx.Step(`^current-tmux creation selects Codex CLI$`, currentTmuxCreationSelectsCodexCLI)
+	ctx.Step(`^AGM validates current-tmux Codex launch wiring$`, agmValidatesCurrentTmuxCodexLaunchWiring)
+	ctx.Step(`^Codex credential validation should precede the canonical launcher$`, codexCredentialValidationShouldPrecedeCanonicalLauncher)
+	ctx.Step(`^Codex launcher failures should propagate to shared creation rollback$`, codexLauncherFailuresShouldPropagateToSharedCreationRollback)
 	ctx.Step(`^AGM validates active harness adapter conformance$`, agmValidatesActiveHarnessAdapterConformance)
 	ctx.Step(`^every active harness adapter should satisfy the shared conformance suite$`, everyActiveHarnessAdapterShouldSatisfySharedConformanceSuite)
 	ctx.Step(`^AGM validates the pane capture invocation$`, agmValidatesPaneCaptureInvocation)
@@ -254,6 +259,52 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM archives the stopped session$`, agmArchivesTheStoppedSession)
 	ctx.Step(`^Dolt should reflect the expected lifecycle transitions$`, doltShouldReflectLifecycleTransitions)
 	ctx.Step(`^the matching Codex saved session should be archived$`, matchingCodexSavedSessionShouldBeArchived)
+}
+
+func currentTmuxCreationSelectsCodexCLI(ctx context.Context) error {
+	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	harnessState.configuredHarness = "codex-cli"
+	return nil
+}
+
+func agmValidatesCurrentTmuxCodexLaunchWiring(ctx context.Context) error {
+	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if harnessState.configuredHarness != "codex-cli" {
+		return fmt.Errorf("configured harness = %q, want codex-cli", harnessState.configuredHarness)
+	}
+	path := filepath.Join(bddRepoRoot(), "agm", "cmd", "agm", "new_currenttmux.go")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read current-tmux production source: %w", err)
+	}
+	harnessState.currentTmuxSource = string(data)
+	return nil
+}
+
+func codexCredentialValidationShouldPrecedeCanonicalLauncher(ctx context.Context) error {
+	source := ctx.Value(harnessParityStateKey{}).(*harnessParityState).currentTmuxSource
+	caseIndex := strings.Index(source, `case "codex-cli":`)
+	validateIndex := strings.Index(source, "runtime.validateCodex()")
+	launchIndex := strings.Index(source, "runtime.startCodex(spec)")
+	if caseIndex < 0 || validateIndex < caseIndex || launchIndex < validateIndex {
+		return fmt.Errorf("current-tmux Codex path must validate credentials before calling the canonical launcher")
+	}
+	return nil
+}
+
+func codexLauncherFailuresShouldPropagateToSharedCreationRollback(ctx context.Context) error {
+	source := ctx.Value(harnessParityStateKey{}).(*harnessParityState).currentTmuxSource
+	for _, required := range []string{
+		"return ops.CreateSessionLaunchResult{}, startCurrentTmuxHarness(spec)",
+		"_, err := runtime.startCodex(spec)",
+		"return err",
+		"ops.CreateSessionWithContext",
+	} {
+		if !strings.Contains(source, required) {
+			return fmt.Errorf("current-tmux Codex production path missing rollback wiring %q", required)
+		}
+	}
+	return nil
 }
 
 func activeHarnessUsesStartupMode(ctx context.Context, harness, mode string) error {

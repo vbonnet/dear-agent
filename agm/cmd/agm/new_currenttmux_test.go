@@ -1,14 +1,121 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
 )
+
+func TestActiveHarnessesHaveCurrentTmuxLauncher(t *testing.T) {
+	t.Parallel()
+
+	for _, harness := range agent.ActiveHarnesses() {
+		t.Run(harness, func(t *testing.T) {
+			t.Parallel()
+
+			calls := 0
+			record := func(ops.HarnessLaunchSpec) error {
+				calls++
+				return nil
+			}
+			runtime := currentTmuxHarnessRuntime{
+				startClaude:   record,
+				startCodex:    func(ops.HarnessLaunchSpec) (bool, error) { calls++; return false, nil },
+				startOpenCode: record,
+				startGemini:   record,
+				startAgy:      record,
+				validateCodex: func() error { return nil },
+			}
+
+			if err := startCurrentTmuxHarnessWithRuntime(ops.HarnessLaunchSpec{Harness: harness}, runtime); err != nil {
+				t.Fatalf("current-tmux dispatch for %q failed: %v", harness, err)
+			}
+			if calls != 1 {
+				t.Fatalf("current-tmux dispatch for %q called %d launchers, want 1", harness, calls)
+			}
+		})
+	}
+}
+
+func TestStartCurrentTmuxHarnessCodexUsesRealLauncherContract(t *testing.T) {
+	t.Parallel()
+
+	var validated bool
+	var launched *ops.HarnessLaunchSpec
+	runtime := currentTmuxHarnessRuntime{
+		validateCodex: func() error {
+			validated = true
+			return nil
+		},
+		startCodex: func(spec ops.HarnessLaunchSpec) (bool, error) {
+			launched = &spec
+			return true, nil
+		},
+	}
+	spec := ops.HarnessLaunchSpec{
+		Harness: "codex-cli", Model: "5.5", SessionName: "codex-current", WorkDir: "/tmp/codex-current",
+	}
+
+	if err := startCurrentTmuxHarnessWithRuntime(spec, runtime); err != nil {
+		t.Fatalf("startCurrentTmuxHarnessWithRuntime() error = %v", err)
+	}
+	if !validated {
+		t.Fatal("Codex credentials were not validated")
+	}
+	if launched == nil {
+		t.Fatal("Codex launcher was not called; current-tmux creation would report false success")
+	}
+	if !reflect.DeepEqual(*launched, spec) {
+		t.Fatalf("Codex launch spec = %#v, want %#v", *launched, spec)
+	}
+}
+
+func TestStartCurrentTmuxHarnessCodexStopsAfterCredentialFailure(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("missing Codex authentication")
+	launched := false
+	runtime := currentTmuxHarnessRuntime{
+		validateCodex: func() error { return wantErr },
+		startCodex: func(ops.HarnessLaunchSpec) (bool, error) {
+			launched = true
+			return false, nil
+		},
+	}
+
+	err := startCurrentTmuxHarnessWithRuntime(ops.HarnessLaunchSpec{Harness: "codex-cli"}, runtime)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want %v", err, wantErr)
+	}
+	if launched {
+		t.Fatal("Codex launcher ran after credential validation failed")
+	}
+}
+
+func TestStartCurrentTmuxHarnessCodexPropagatesReadinessFailure(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("Codex composer not ready")
+	runtime := currentTmuxHarnessRuntime{
+		validateCodex: func() error { return nil },
+		startCodex: func(ops.HarnessLaunchSpec) (bool, error) {
+			return false, wantErr
+		},
+	}
+
+	err := startCurrentTmuxHarnessWithRuntime(ops.HarnessLaunchSpec{Harness: "codex-cli"}, runtime)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want readiness failure %v", err, wantErr)
+	}
+}
 
 func TestCommitCurrentTmuxManifestLogsFailure(t *testing.T) {
 	home := t.TempDir()

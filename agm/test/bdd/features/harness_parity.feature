@@ -270,6 +270,12 @@ Feature: Harness parity
     Then AGM should auto-accept the Codex trust prompt before prompt delivery
     And AGM should wait for the Codex composer
 
+  Scenario: Codex current-tmux creation launches before registration
+    Given current-tmux creation selects Codex CLI
+    When AGM validates current-tmux Codex launch wiring
+    Then Codex credential validation should precede the canonical launcher
+    And Codex launcher failures should propagate to shared creation rollback
+
   Scenario: Codex send safety is harness-specific
     Given Codex CLI is available
     And a Codex CLI composer pane

@@ -115,18 +115,53 @@ func commitCurrentTmuxManifest(manifestPath, sessionName string) {
 	}
 }
 
+// currentTmuxHarnessRuntime is the narrow interactive boundary used by
+// current-pane creation. Keeping the dispatcher parameterized makes active
+// harness coverage and failure propagation deterministic without replacing the
+// shared creation lifecycle or mutating package-global test hooks.
+type currentTmuxHarnessRuntime struct {
+	startClaude   func(ops.HarnessLaunchSpec) error
+	startCodex    func(ops.HarnessLaunchSpec) (bool, error)
+	startOpenCode func(ops.HarnessLaunchSpec) error
+	startGemini   func(ops.HarnessLaunchSpec) error
+	startAgy      func(ops.HarnessLaunchSpec) error
+	validateCodex func() error
+}
+
+func realCurrentTmuxHarnessRuntime() currentTmuxHarnessRuntime {
+	return currentTmuxHarnessRuntime{
+		startClaude:   startCurrentTmuxClaude,
+		startCodex:    startCodexHarness,
+		startOpenCode: startCurrentTmuxOpenCode,
+		startGemini:   startCurrentTmuxGemini,
+		startAgy:      startCurrentTmuxAgy,
+		validateCodex: validateCodexCredentials,
+	}
+}
+
 // startCurrentTmuxHarness dispatches the per-harness startup flow for the
-// in-place (current tmux pane) Claude/Gemini/OpenCode/AGY cases.
+// in-place (current tmux pane) active harnesses and deprecated Gemini
+// compatibility path.
 func startCurrentTmuxHarness(spec ops.HarnessLaunchSpec) error {
+	return startCurrentTmuxHarnessWithRuntime(spec, realCurrentTmuxHarnessRuntime())
+}
+
+func startCurrentTmuxHarnessWithRuntime(spec ops.HarnessLaunchSpec, runtime currentTmuxHarnessRuntime) error {
 	switch spec.Harness {
 	case "claude-code":
-		return startCurrentTmuxClaude(spec)
+		return runtime.startClaude(spec)
+	case "codex-cli":
+		if err := runtime.validateCodex(); err != nil {
+			return err
+		}
+		_, err := runtime.startCodex(spec)
+		return err
 	case "opencode-cli":
-		return startCurrentTmuxOpenCode(spec)
+		return runtime.startOpenCode(spec)
 	case "gemini-cli":
-		return startCurrentTmuxGemini(spec)
+		return runtime.startGemini(spec)
 	case "agy":
-		return startCurrentTmuxAgy(spec)
+		return runtime.startAgy(spec)
 	default:
 		debug.Log("Skipping CLI startup for harness: %s (no CLI configured)", spec.Harness)
 		ui.PrintSuccess(fmt.Sprintf("Session created for %s harness", spec.Harness))
