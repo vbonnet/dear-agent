@@ -57,6 +57,13 @@ func TestDocumentedWayfinderExamplesMatchCobra(t *testing.T) {
 	}
 }
 
+func TestDocumentedInvocationRejectsUnknownSessionSubcommand(t *testing.T) {
+	err := validateDocumentedInvocation(rootCmd, "wayfinder session migrate")
+	if err == nil || !strings.Contains(err.Error(), "unknown subcommand") {
+		t.Fatalf("validateDocumentedInvocation() error = %v, want unknown subcommand", err)
+	}
+}
+
 func TestClaudePluginExposesCanonicalSkill(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
 	manifest, err := os.ReadFile(filepath.Join(root, ".claude-plugin", "plugin.json"))
@@ -126,6 +133,8 @@ func validateDocumentedInvocation(root *cobra.Command, invocation string) error 
 
 	current := root
 	resolved := 0
+	helpRequested := false
+	var positionals []string
 	for index := 1; index < len(tokens); {
 		token := strings.Trim(tokens[index], "[](),.;\"")
 		if strings.HasPrefix(token, "-") {
@@ -133,6 +142,7 @@ func validateDocumentedInvocation(root *cobra.Command, invocation string) error 
 			if !ok {
 				return fmt.Errorf("%s has no %s flag", current.CommandPath(), token)
 			}
+			helpRequested = helpRequested || flag.Name == "help"
 			index++
 			if !strings.Contains(token, "=") && flag.NoOptDefVal == "" && index < len(tokens) {
 				index++
@@ -148,15 +158,25 @@ func validateDocumentedInvocation(root *cobra.Command, invocation string) error 
 			}
 		}
 		if child == nil {
-			index++ // positional argument or placeholder
+			if current.HasAvailableSubCommands() {
+				return fmt.Errorf("%s has unknown subcommand %q", current.CommandPath(), token)
+			}
+			positionals = append(positionals, token)
+			index++
 			continue
 		}
 		current = child
 		resolved++
+		positionals = nil
 		index++
 	}
 	if resolved == 0 {
 		return fmt.Errorf("does not resolve to an active command")
+	}
+	if current.Args != nil && !helpRequested {
+		if err := current.Args(current, positionals); err != nil {
+			return fmt.Errorf("%s arguments: %w", current.CommandPath(), err)
+		}
 	}
 	return nil
 }
