@@ -281,13 +281,41 @@ func validateSkillIdentity(path string, fm *Frontmatter) []Violation {
 
 func validateSkillBody(path, bodyText string) []Violation {
 	var violations []Violation
-	if !workflowHeadingPattern.MatchString(bodyText) && len(orderedStepPattern.FindAllStringIndex(bodyText, 2)) < 2 {
+	structuralText := markdownOutsideFences(bodyText)
+	if !workflowHeadingPattern.MatchString(structuralText) && len(orderedStepPattern.FindAllStringIndex(structuralText, 2)) < 2 {
 		violations = append(violations, Violation{Path: path, Reason: "missing procedural workflow (expected a workflow heading or at least two ordered steps)"})
 	}
-	if !verificationPattern.MatchString(bodyText) {
+	if !verificationPattern.MatchString(structuralText) {
 		violations = append(violations, Violation{Path: path, Reason: "missing verification or completion heading"})
 	}
 	return violations
+}
+
+func markdownOutsideFences(body string) string {
+	var visible strings.Builder
+	var fence string
+	for line := range strings.SplitSeq(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		marker := ""
+		if strings.HasPrefix(trimmed, "```") {
+			marker = "```"
+		} else if strings.HasPrefix(trimmed, "~~~") {
+			marker = "~~~"
+		}
+		if marker != "" {
+			if fence == "" {
+				fence = marker
+			} else if fence == marker {
+				fence = ""
+			}
+			continue
+		}
+		if fence == "" {
+			visible.WriteString(line)
+			visible.WriteByte('\n')
+		}
+	}
+	return visible.String()
 }
 
 func validateSkillLength(path, bodyText string, data []byte) []Violation {

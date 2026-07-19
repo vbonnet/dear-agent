@@ -14,7 +14,8 @@ root-form commands or copy a flag catalog into the response.
 - Create: `agm session new [name] --harness <type> --workspace <name>`
 - Associate: `agm session associate <name> --create --harness auto`
 - List: `agm session list --output json [--all]`
-- Aggregate status: `agm session status --format json [--workspace <name>]`
+- Aggregate status: `agm session status --format json`. Do not combine JSON
+  output with `--workspace`; that filter currently applies only to table output.
 - Inspect one session: `agm session get <identifier> --output json`
 - Resume: `agm session resume [identifier]`
 - Send: `agm send msg <identifier> --prompt-file <path>`; outside an

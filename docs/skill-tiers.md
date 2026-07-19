@@ -1,5 +1,7 @@
 # Skill Model/Effort Tiers
 
+<!-- Last audited: 2026-07-19 -->
+
 Every provider command (`agm/agm-plugin/commands/*.md` and
 `wayfinder/**/commands/*.md`) must declare `model:` and `effort:` in its YAML
 frontmatter. Portable `SKILL.md` files may omit both fields so the active

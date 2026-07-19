@@ -157,6 +157,24 @@ func TestCheckFileSkillSchema(t *testing.T) {
 			want:    []string{"missing verification or completion heading"},
 		},
 		{
+			name: "fenced examples do not satisfy structure",
+			content: `---
+name: example-skill
+description: Use when an agent needs an example.
+---
+
+# Example
+
+~~~markdown
+## Workflow
+1. Example step.
+2. Example step.
+## Verify
+~~~
+`,
+			want: []string{"missing procedural workflow", "missing verification or completion heading"},
+		},
+		{
 			name:    "unknown extension",
 			content: strings.Replace(validSkill("example-skill"), "description:", "arguments: none\ndescription:", 1),
 			want:    []string{"unsupported skill frontmatter field `arguments`"},
