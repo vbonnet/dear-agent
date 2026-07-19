@@ -32,11 +32,16 @@
 #     gdoc-sync
 #     vbonnet.ai
 #
-#   PII / private-research repos (opt-in only — enabling ships code to
-#   Anthropic's API for review; that's a data-handling decision for a human,
-#   not a default this IaC should make):
-#     engram-kb
+#   Deliberate private-repo opt-in (enable_claude_review = true; owner
+#   sign-off recorded 2026-07-19 — code from this repo ships to Anthropic's
+#   API on every PR, same as the public repos above, but the repo itself is
+#   private):
 #     engram-research
+#
+#   PII repos (opt-in only, still OFF — enabling ships code to Anthropic's
+#   API for review; that's a data-handling decision for a human, not a
+#   default this IaC should make):
+#     engram-kb
 #     brain-v2
 #     ai-conversation-logs
 #   Leave `enable_claude_review` unset (defaults to false) for these until a

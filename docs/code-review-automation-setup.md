@@ -54,11 +54,14 @@ everything else is codified (workflow files + OpenTofu).
 
 5. **Roll out to other repos** — see `infra/claude_review.tf` for the default
    split. Non-PII repos default to `enable_claude_review = true`
-   (ai-tools, codebase-analyzer, gdoc-sync, vbonnet.ai); PII/private-research
-   repos (engram-kb, engram-research, brain-v2, ai-conversation-logs) are
-   listed as a commented opt-in block — enabling review on those ships their
-   code to Anthropic's API, a data-handling call this IaC deliberately does
-   not make for you. Once `repos.auto.tfvars` reflects your choice:
+   (ai-tools, codebase-analyzer, gdoc-sync, vbonnet.ai).
+   **`engram-research` is also enabled** — a deliberate private-repo opt-in
+   (owner sign-off 2026-07-19), not part of the default non-PII set: it's
+   private, and enabling review still ships its code to Anthropic's API on
+   every PR, same as the public repos. The remaining PII repos (engram-kb,
+   brain-v2, ai-conversation-logs) stay a commented opt-in block —
+   enabling review on those is a data-handling call this IaC deliberately
+   does not make for you. Once `repos.auto.tfvars` reflects your choice:
    ```
    cd infra
    export GITHUB_TOKEN="$(gh auth token)"
