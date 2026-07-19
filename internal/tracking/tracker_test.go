@@ -186,7 +186,7 @@ tags: [test]
 func TestMetadataUpdater_PreservesExplicitZeroEncodingStrength(t *testing.T) {
 	updater := NewMetadataUpdater()
 	testFile := filepath.Join(t.TempDir(), "zero.ai.md")
-	content := []byte("---\ntype: pattern\ntitle: Zero strength\nencoding_strength: 0\n---\n\n# Content\n")
+	content := []byte("---\ntype: pattern\ntitle: Zero strength\nencoding_strength: 0\nprovider_hint: preserve-me\n---\n\n# Content\n")
 	if err := os.WriteFile(testFile, content, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -202,6 +202,9 @@ func TestMetadataUpdater_PreservesExplicitZeroEncodingStrength(t *testing.T) {
 	}
 	if !contains(string(data), "encoding_strength: 0") {
 		t.Fatalf("explicit zero was not preserved:\n%s", data)
+	}
+	if !contains(string(data), "provider_hint: preserve-me") {
+		t.Fatalf("unknown frontmatter was not preserved:\n%s", data)
 	}
 	parsed, err := updater.parser.Parse(testFile)
 	if err != nil {

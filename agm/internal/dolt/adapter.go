@@ -168,6 +168,7 @@ func DefaultConfig() (*Config, error) {
 		// or Cowork where WORKSPACE is not set in the environment).
 		workspace = readDefaultWorkspaceFromConfig()
 	}
+	database := getEnv("DOLT_DATABASE", workspace)
 	if workspace == "" {
 		return nil, fmt.Errorf("WORKSPACE environment variable not set (workspace protocol not activated)\n" +
 			"Hint: Set WORKSPACE=<name> or configure default_workspace in ~/.agm/config.yaml")
@@ -191,11 +192,7 @@ func DefaultConfig() (*Config, error) {
 
 		// Block production workspace names during tests
 		// Production workspaces include: oss, acme, prod, production, main, etc.
-		isProductionWorkspace := workspace == "oss" ||
-			workspace == "acme" ||
-			workspace == "prod" ||
-			workspace == "production" ||
-			workspace == "main"
+		isProductionWorkspace := productionWorkspace(workspace) || productionWorkspace(database)
 
 		if isProductionWorkspace {
 			//nolint:staticcheck // multi-line CLI-facing help text
@@ -220,7 +217,6 @@ func DefaultConfig() (*Config, error) {
 	// Default database name to workspace name for proper workspace isolation
 	// In production: oss → database "oss", acme → database "acme"
 	// In tests: test → database "test"
-	database := getEnv("DOLT_DATABASE", workspace)
 	user := getEnv("DOLT_USER", "root")
 	password := getEnv("DOLT_PASSWORD", "")
 
@@ -244,6 +240,11 @@ func DefaultConfig() (*Config, error) {
 		Password:    password,
 		StartScript: startScript,
 	}, nil
+}
+
+func productionWorkspace(value string) bool {
+	return value == "oss" || value == "acme" || value == "prod" ||
+		value == "production" || value == "main"
 }
 
 // New creates a new Dolt adapter with the given configuration

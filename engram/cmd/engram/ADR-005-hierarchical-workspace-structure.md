@@ -15,14 +15,15 @@ workspace through its configuration and repository context. Commands pass that
 scope into storage and retrieval boundaries. Cross-workspace aggregation is an
 explicit operation rather than a default query behavior.
 
-Filesystem paths are configuration details; documents and memories retain
-logical workspace identity independent of their physical provider.
+Workspace identity is enforced by the selected storage path/provider. Records
+do not currently persist a second logical-workspace field, so providers must
+not mix workspace data under one selected path.
 
 ## Consequences
 
 - Retrieval has a predictable context boundary.
 - Shared knowledge requires an intentional scope.
-- Moves between physical providers do not change logical ownership.
+- Moving data between providers requires preserving the workspace boundary.
 
 ## Evidence
 

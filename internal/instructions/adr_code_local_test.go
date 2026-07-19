@@ -13,7 +13,8 @@ type localADRScope struct {
 	indexName string
 }
 
-var localADRFilePattern = regexp.MustCompile(`^(?:ADR-)?([0-9]{3,4})-[a-z0-9-]+\.md$`)
+var localADRFilePattern = regexp.MustCompile(`^(?:ADR-[0-9]{3}|[0-9]{4})-[a-z0-9-]+\.md$`)
+var localADRIDPattern = regexp.MustCompile(`[0-9]{3,4}`)
 
 const localADRMaxLines = 120
 
@@ -50,7 +51,7 @@ func TestCodeLocalADRsHaveCompleteConciseLifecycle(t *testing.T) {
 	for _, name := range aggregates {
 		t.Run(name, func(t *testing.T) {
 			content := readFile(t, filepath.Join(root, filepath.FromSlash(name)))
-			if lines := strings.Count(content, "\n") + 1; lines > localADRMaxLines {
+			if lines := markdownLineCount(content); lines > localADRMaxLines {
 				t.Errorf("%s: %d lines exceeds the %d-line aggregate ADR budget", name, lines, localADRMaxLines)
 			}
 			statuses := adrStatusPattern.FindAllStringSubmatch(content, -1)
@@ -84,16 +85,15 @@ func validateLocalADRScope(t *testing.T, root string, scope localADRScope, gover
 		if entry.IsDir() {
 			continue
 		}
-		match := localADRFilePattern.FindStringSubmatch(entry.Name())
-		if len(match) != 2 {
+		if !localADRFilePattern.MatchString(entry.Name()) {
 			if entry.Name() != scope.indexName && isADRLikeFilename(entry.Name()) {
 				t.Errorf("malformed ADR filename: %s", entry.Name())
 			}
 			continue
 		}
-		id := match[1]
+		id := localADRIDPattern.FindString(entry.Name())
 		content := readFile(t, filepath.Join(dir, entry.Name()))
-		if lines := strings.Count(content, "\n") + 1; lines > localADRMaxLines {
+		if lines := markdownLineCount(content); lines > localADRMaxLines {
 			t.Errorf("%s: %d lines exceeds the %d-line code-local ADR budget", entry.Name(), lines, localADRMaxLines)
 		}
 		titles := adrTitlePattern.FindAllStringSubmatch(content, -1)
@@ -143,6 +143,17 @@ func validateLocalADRScope(t *testing.T, root string, scope localADRScope, gover
 		indexed[match[2]] = adrRecord{id: match[1], status: match[3]}
 	}
 	assertSameADRRecords(t, records, indexed)
+}
+
+func markdownLineCount(content string) int {
+	if content == "" {
+		return 0
+	}
+	lines := strings.Count(content, "\n")
+	if !strings.HasSuffix(content, "\n") {
+		lines++
+	}
+	return lines
 }
 
 func assertLiveLocalADRSuccessor(t *testing.T, dir, source, target string) {

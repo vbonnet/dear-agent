@@ -103,6 +103,10 @@ type Frontmatter struct {
 
 	// Triggers defines event-driven injection rules (optional).
 	Triggers []TriggerSpec `yaml:"triggers,omitempty"`
+
+	// Extra preserves newer or provider-specific frontmatter across tracking
+	// updates without making every extension part of the core schema.
+	Extra map[string]any `yaml:",inline"`
 }
 
 // EngramType constants
