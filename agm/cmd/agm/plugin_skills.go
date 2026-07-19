@@ -70,7 +70,7 @@ var pluginCommandInventory = []pluginCommandOwner{
 			Description:   "Show aggregate live status for AGM sessions. Use when the user needs session state, branch, worktree, workspace, or uncommitted-change information.",
 			ArgumentFlags: []string{"workspace"},
 			FixedArgs:     []string{"--format", "json"},
-			OutputColumns: []string{"Sessions[].Name", "Sessions[].State", "Sessions[].Branch", "Sessions[].Workspace", "Sessions[].WorktreePath", "Sessions[].Uncommitted"},
+			OutputColumns: []string{"sessions[].name", "sessions[].state", "sessions[].branch", "sessions[].workspace", "sessions[].worktree_path", "sessions[].uncommitted"},
 		},
 		Commands: []pluginCommandContract{{Path: "session status", Flags: []string{"workspace", "format"}}},
 	},

@@ -94,6 +94,11 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Verify generated AGM surfaces and plugin hashes
+        run: |
+          make verify-surface-codegen
+          make plugin-verify-hashes
+
       - name: Test
         run: go test ${{ matrix.race }} -count=1 -timeout=20m ./...
         env:

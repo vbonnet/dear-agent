@@ -1,7 +1,7 @@
 ---
 model: haiku
 effort: low
-content-hash: d539ec5b1f412b18d1433434192f069b2d4b73dcda8ff9c79a1df381288ca835
+content-hash: c6d30fbd2a903a820ea00aad719af54031c354579db8419accacc92a7a3d238f
 description: >-
   Show aggregate live status for AGM sessions. Use when the user needs session state, branch, worktree, workspace, or uncommitted-change information.
 argument-hint: "[--workspace VALUE]"
@@ -20,5 +20,5 @@ allowed-tools: Bash(agm session status *)
 ## Report
 
 - If AGM exits non-zero, show its stderr and stop. Do not invent a fallback command.
-- Present successful structured output with these useful fields when available: Sessions[].Name, Sessions[].State, Sessions[].Branch, Sessions[].Workspace, Sessions[].WorktreePath, Sessions[].Uncommitted.
+- Present successful structured output with these useful fields when available: sessions[].name, sessions[].state, sessions[].branch, sessions[].workspace, sessions[].worktree_path, sessions[].uncommitted.
 - If no sessions match, say so without treating the empty result as an error.

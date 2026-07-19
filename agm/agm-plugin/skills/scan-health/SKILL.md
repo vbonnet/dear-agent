@@ -1,6 +1,7 @@
 ---
 name: scan-health
 description: Check AGM-managed session health. Use when the user asks whether one or all AGM sessions are healthy, responsive, or resource-constrained, or when an orchestration loop needs typed health evidence before dispatch.
+content-hash: 9388373dfdd4ad3b1ba3dad675374b36f0ca6ab72f5d22c5d083eef44a52c421
 ---
 
 # Scan AGM session health

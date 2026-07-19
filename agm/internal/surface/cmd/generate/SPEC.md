@@ -17,6 +17,8 @@ metadata from AGM's canonical operation registry.
 
 **SGN-04** While installed plugin commands are owned by the live Cobra tree, this generator shall not emit a second plugin Markdown source.
 
+**SGN-05** When repository preflight or CI runs, the system shall regenerate the checked-in ignored surface artifacts and fail if their bytes change.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/agm_product_surface_guardrails.feature`

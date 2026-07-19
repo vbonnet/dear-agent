@@ -1,6 +1,7 @@
 ---
 name: agm
 description: Manage AGM sessions across Claude Code, Codex CLI, AGY, and OpenCode. Use when an agent needs to create, associate, list, inspect, resume, message, archive, or troubleshoot AGM-managed sessions; when a user mentions AGM session lifecycle; or when another workflow needs current session state. Do not use for task tracking or orchestration policy.
+content-hash: 89d78fc01ea41ee9e12901f51eb442c9ae8cf164d8051aef6a0b85b927d3b075
 ---
 
 # AGM session management
@@ -33,6 +34,10 @@ For the richer Claude plugin workflows, read only the relevant file under
   interpolate it into shell syntax. For send, create a unique
   `/tmp/agm-send-<random>.txt`, pass it with `--prompt-file`, and remove it
   immediately after the command returns on success or failure.
+- Resolve session identifiers from AGM's structured list/get output before
+  invoking a lifecycle command. Session identifiers are typed AGM data, not
+  arbitrary user text; never splice an unverified user-provided token into a
+  shell command.
 - Resume requires an identifier. If none was provided, list all sessions and
   ask the user to choose; the interactive picker is not implemented.
 - For a disposable recovery prompt, create a unique file, pass both

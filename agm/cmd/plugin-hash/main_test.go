@@ -68,3 +68,30 @@ func TestRunAllowsExplicitlyUnhashedSpec(t *testing.T) {
 		t.Fatalf("verify directory containing SPEC.md: %v", err)
 	}
 }
+
+func TestRunTargetsRecursesAcrossCommandAndSkillTrees(t *testing.T) {
+	root := t.TempDir()
+	commandDir := filepath.Join(root, "commands")
+	skillDir := filepath.Join(root, "skills", "scan-health")
+	for _, dir := range []string{commandDir, skillDir} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatalf("create fixture directory %s: %v", dir, err)
+		}
+	}
+	for _, path := range []string{
+		filepath.Join(commandDir, "agm-list.md"),
+		filepath.Join(skillDir, "SKILL.md"),
+	} {
+		source := "---\ncontent-hash: PLACEHOLDER\n---\n\n# Plugin document\n"
+		if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+			t.Fatalf("write fixture %s: %v", path, err)
+		}
+	}
+
+	if err := runTargets([]string{commandDir, filepath.Join(root, "skills")}, false); err != nil {
+		t.Fatalf("update recursive targets: %v", err)
+	}
+	if err := runTargets([]string{commandDir, filepath.Join(root, "skills")}, true); err != nil {
+		t.Fatalf("verify recursive targets: %v", err)
+	}
+}
