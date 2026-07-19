@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -94,14 +95,16 @@ func parseScriptSegments(source []byte) []Segment {
 			}
 			continue
 		}
-		for _, prefix := range []string{"echo ", "printf ", "emit "} {
-			if strings.HasPrefix(value, prefix) {
-				segments = append(segments, Segment{Kind: SegmentShell, Line: index + 1, Text: value})
-				break
-			}
+		if agentVisibleScriptCommand(value) {
+			segments = append(segments, Segment{Kind: SegmentShell, Line: index + 1, Text: value})
 		}
 	}
 	return segments
+}
+
+func agentVisibleScriptCommand(value string) bool {
+	fields := stripCommandPrefixes(parseShellWords(value))
+	return len(fields) > 0 && slices.Contains([]string{"echo", "emit", "jq", "printf"}, fields[0])
 }
 
 var shellAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)

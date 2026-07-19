@@ -168,7 +168,7 @@ func commandFieldsDepth(text string, depth int) [][]string {
 	}
 	for _, input := range inputs {
 		for _, command := range splitShellCommands(input) {
-			fields := normalizeAGMCommand(stripCommandPrefixes(parseShellWords(strings.TrimSpace(command))))
+			fields := normalizeCommand(stripCommandPrefixes(parseShellWords(strings.TrimSpace(command))))
 			if len(fields) > 0 {
 				commands = append(commands, fields)
 			}
@@ -178,6 +178,11 @@ func commandFieldsDepth(text string, depth int) [][]string {
 		}
 	}
 	return commands
+}
+
+func normalizeCommand(fields []string) []string {
+	fields = normalizeAGMCommand(fields)
+	return normalizeGitCommand(fields)
 }
 
 func parseShellWords(input string) []string {
@@ -337,6 +342,17 @@ func normalizeAGMCommand(fields []string) []string {
 		"-o": true, "--output": true, "--fields": true,
 	})
 	return append([]string{"agm"}, args...)
+}
+
+func normalizeGitCommand(fields []string) []string {
+	if len(fields) == 0 || fields[0] != "git" {
+		return fields
+	}
+	args := stripLauncherOptions(fields[1:], map[string]bool{
+		"-C": true, "-c": true, "--config-env": true, "--exec-path": true,
+		"--git-dir": true, "--namespace": true, "--super-prefix": true, "--work-tree": true,
+	})
+	return append([]string{"git"}, args...)
 }
 
 func stripCommandPrefixes(fields []string) []string {

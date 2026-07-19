@@ -501,7 +501,7 @@ After a successful merge to `main`:
 ```
 git -C ~/src/dear-agent worktree remove <worktree-path>
 git -C ~/src/dear-agent branch -D <branch>   # local
-git -C ~/src/dear-agent push origin --delete <branch>   # remote, if pushed
+safe-push -C ~/src/dear-agent origin --delete <branch>   # remote, if pushed
 ```
 
 If `gh pr merge --squash --delete-branch` was used, the remote branch is

@@ -165,6 +165,19 @@ func TestScriptDeclarationAssignmentsRemainPolicyVisible(t *testing.T) {
 	}
 }
 
+func TestScriptJQGuidanceRemainsPolicyVisible(t *testing.T) {
+	source := []byte(`jq -cn --arg msg "Use the standard form 'bd --db <path> close <id>'." '{additionalContext:$msg}'`)
+	var rules []string
+	for _, segment := range parseScriptSegments(source) {
+		for _, violation := range evaluateSegment("hook", segment) {
+			rules = append(rules, violation.Rule)
+		}
+	}
+	if !reflect.DeepEqual(rules, []string{"bare-beads"}) {
+		t.Fatalf("jq guidance rules = %v, want bare-beads", rules)
+	}
+}
+
 func TestRuleViolationsTeachCanonicalReplacements(t *testing.T) {
 	segments := []Segment{
 		{Kind: SegmentProse, Line: 1, Text: "Create W0-charter.md before D1."},
@@ -275,6 +288,19 @@ func TestShellCommandPayloadsRemainPolicyVisible(t *testing.T) {
 	want := []string{"bare-beads", "raw-gh-merge", "raw-git-push"}
 	if !reflect.DeepEqual(rules, want) {
 		t.Fatalf("shell -c rules = %v, want %v", rules, want)
+	}
+}
+
+func TestGitGlobalOptionsRemainPolicyVisible(t *testing.T) {
+	for _, command := range []string{
+		"git -C ~/src/dear-agent push origin main",
+		"/usr/bin/git --git-dir=.git push origin main",
+		"git -c credential.helper= push origin main",
+	} {
+		violations := evaluateSegment("AGENTS.md", Segment{Kind: SegmentShell, Text: command})
+		if len(violations) != 1 || violations[0].Rule != "raw-git-push" {
+			t.Errorf("%q violations = %v, want raw-git-push", command, violations)
+		}
 	}
 }
 
