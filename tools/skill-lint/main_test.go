@@ -57,6 +57,15 @@ func TestRunUsageErrors(t *testing.T) {
 	}
 }
 
+func TestRunHelpSucceeds(t *testing.T) {
+	for _, arg := range []string{"-h", "-help"} {
+		var stderr bytes.Buffer
+		if code := run(context.Background(), []string{arg}, &stderr); code != 0 {
+			t.Errorf("run(%q) = %d, want 0; stderr=%s", arg, code, stderr.String())
+		}
+	}
+}
+
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)

@@ -30,7 +30,7 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 # Targets:
 #   lint-specs              Validate EARS requirements in SPEC.md files
 #   lint-skills             Validate every tracked skill and command prompt
-#   preflight               Fast local CI-parity gates: vet + build + lint  (~25s)
+#   preflight               Fast local CI-parity gates: vet + build + AI skills + lint
 #   preflight-tests         preflight + go test (no -race) — quick sanity
 #   preflight-race          preflight + go test -race — catch data races before push
 #   preflight-full          preflight + go test -race + govulncheck (full parity)
