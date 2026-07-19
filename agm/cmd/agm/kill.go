@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"syscall"
 	"time"
 
@@ -13,7 +12,6 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/deadlock"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
-	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 	"github.com/vbonnet/dear-agent/internal/override"
 	"go.opentelemetry.io/otel"
@@ -182,6 +180,11 @@ func runKillCommand(cmd *cobra.Command, args []string) (retErr error) {
 		return fmt.Errorf("failed to connect to storage: %w", err)
 	}
 	defer cleanup()
+	interactiveSoftKill := !hardKill && !forceKill && !isJSONOutput()
+	// Interactive soft kill and hard-kill detection need a side-effect-free
+	// shared preflight. All non-interactive soft-kill paths execute the shared
+	// mutation immediately so no surface can report success without it.
+	opCtx.DryRun = hardKill || interactiveSoftKill
 
 	killResult, killErr := ops.KillSession(opCtx, &ops.KillSessionRequest{
 		Identifier:     sessionName,
@@ -196,25 +199,36 @@ func runKillCommand(cmd *cobra.Command, args []string) (retErr error) {
 		}
 	}
 
-	// For hard kill, use the tmux session name from ops result
+	// Hard kill is a process-level recovery flow, so the shared kill operation
+	// remains a dry-run preflight and supplies the exact tmux target.
 	if hardKill {
-		return runHardKill(sessionName, killResult.Name)
+		return runHardKill(sessionName, killResult.TmuxSessionName)
 	}
 
-	// Soft kill: confirm (unless --force) and terminate tmux session.
+	// Soft kill: confirm before executing the shared mutation.
 	// JSON mode is treated as non-interactive: the confirmation prompt is
 	// skipped (the ops layer still enforces --confirmed-stuck for active
 	// sessions, so this stays safe).
-	if !forceKill && !isJSONOutput() {
-		confirmed, confirmErr := confirmKill(sessionName, killResult.Name)
+	if interactiveSoftKill {
+		if killResult.RecentlyActive {
+			ui.PrintWarning(fmt.Sprintf("Session '%s' was recently active", sessionName))
+		}
+		confirmed, confirmErr := confirmKill(sessionName, killResult.TmuxSessionName)
 		if confirmErr != nil || !confirmed {
 			fmt.Println("Cancelled")
 			return nil
 		}
-	}
 
-	// Kill tmux session (idempotent)
-	killTmuxSession(killResult.Name)
+		opCtx.DryRun = false
+		killResult, killErr = ops.KillSession(opCtx, &ops.KillSessionRequest{
+			Identifier:     sessionName,
+			Force:          true,
+			ConfirmedStuck: confirmedStuck,
+		})
+		if killErr != nil {
+			return killErr
+		}
+	}
 
 	// Success message
 	if isJSONOutput() {
@@ -499,24 +513,6 @@ Resume with: agm session resume %s`, sessionName, tmuxName, sessionName)
 		Run()
 
 	return confirmed, err
-}
-
-func killTmuxSession(tmuxName string) {
-	socketPath := tmux.GetSocketPath()
-	ctx := context.Background()
-
-	// Normalize session name (dots/colons → dashes)
-	// This matches tmux's actual normalization behavior
-	normalizedName := tmux.NormalizeTmuxSessionName(tmuxName)
-
-	// Use exact matching (= prefix) to prevent prefix-matching bugs
-	// This is critical: without =prefix, "astrocyte" could match "astrocyte-improvements"
-	// See ADR-0002 for details on tmux exact matching behavior
-	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "kill-session", "-t", tmux.FormatSessionTarget(normalizedName))
-
-	// Execute and ignore errors (idempotent behavior)
-	// Session may already be dead, which is OK
-	_ = cmd.Run()
 }
 
 func renderSessionNotFoundError(sessionName string) error {

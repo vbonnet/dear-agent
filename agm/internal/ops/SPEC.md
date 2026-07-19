@@ -177,6 +177,12 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-46** When session status is computed and the tmux backend can verify process liveness, a session whose tmux session exists but whose harness process is dead shall report status `zombie` rather than `active`.
 
+**OPS-47** When `KillSession` returns success outside dry-run mode, the shared operation shall have removed the exact resolved tmux session and verified that the target no longer exists.
+
+**OPS-48** If the tmux existence probe, kill command, or post-kill absence check fails, `KillSession` shall return the backend or verification error and shall not report a successful kill.
+
+**OPS-49** When `KillSession` runs in dry-run mode, the system shall evaluate the active-session guard and report the resolved tmux target without invoking the kill mutation.
+
 **OPS-47** When a process-liveness scan fails or the tmux backend cannot verify process liveness, status and kill decisions shall fall back to tmux session existence (fail-safe: an unverifiable session is treated as active).
 
 ---

@@ -68,6 +68,8 @@ type harnessParityState struct {
 	mcpModelAccepted           bool
 	mcpLifecycleOpsExposed     bool
 	mcpServerStartupGuard      bool
+	mcpKillSource              string
+	opsKillSource              string
 	marketplaceCatalog         marketplaceparity.Catalog
 	marketplaceSurface         marketplaceparity.HarnessSurface
 	marketplaceMirrorValid     bool
@@ -204,6 +206,9 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the MCP operation registry should expose lifecycle mutations$`, mcpOperationRegistryShouldExposeLifecycleMutations)
 	ctx.Step(`^AGM validates MCP server startup guard coverage$`, agmValidatesMCPServerStartupGuardCoverage)
 	ctx.Step(`^the MCP server SPEC should cover loud workspace and database failures$`, mcpServerSPECShouldCoverLoudWorkspaceAndDatabaseFailures)
+	ctx.Step(`^AGM validates MCP kill mutation wiring$`, agmValidatesMCPKillMutationWiring)
+	ctx.Step(`^MCP kill should provide a real tmux dependency to shared operations$`, mcpKillShouldProvideARealTmuxDependencyToSharedOperations)
+	ctx.Step(`^shared kill success should require exact target absence$`, sharedKillSuccessShouldRequireExactTargetAbsence)
 	ctx.Step(`^AGM validates marketplace parity$`, agmValidatesMarketplaceParity)
 	ctx.Step(`^harness "([^"]*)" should have a marketplace discovery surface$`, harnessShouldHaveMarketplaceDiscoverySurface)
 	ctx.Step(`^the marketplace discovery surface should use the expected mode$`, marketplaceDiscoverySurfaceShouldUseExpectedMode)
@@ -1466,6 +1471,56 @@ func mcpOperationRegistryShouldExposeLifecycleMutations(ctx context.Context) err
 	}
 	if !harnessState.mcpLifecycleOpsExposed {
 		return fmt.Errorf("MCP operation registry does not expose lifecycle mutations")
+	}
+	return nil
+}
+
+func agmValidatesMCPKillMutationWiring(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	mcpPath := filepath.Join(bddRepoRoot(), "agm", "cmd", "agm-mcp-server", "tools.go")
+	mcpData, err := os.ReadFile(mcpPath)
+	if err != nil {
+		return fmt.Errorf("read MCP tools source %s: %w", mcpPath, err)
+	}
+	opsPath := filepath.Join(bddRepoRoot(), "agm", "internal", "ops", "session_kill.go")
+	opsData, err := os.ReadFile(opsPath)
+	if err != nil {
+		return fmt.Errorf("read shared kill source %s: %w", opsPath, err)
+	}
+	harnessState.mcpKillSource = string(mcpData)
+	harnessState.opsKillSource = string(opsData)
+	return nil
+}
+
+func mcpKillShouldProvideARealTmuxDependencyToSharedOperations(ctx context.Context) error {
+	source := ctx.Value(harnessParityStateKey{}).(*harnessParityState).mcpKillSource
+	start := strings.Index(source, "func addKillSessionTool")
+	if start < 0 {
+		return fmt.Errorf("could not find MCP kill tool implementation")
+	}
+	end := strings.Index(source[start:], "// --- Session lifecycle tools ---")
+	if end < 0 {
+		return fmt.Errorf("could not isolate MCP kill tool implementation")
+	}
+	killTool := source[start : start+end]
+	contextIndex := strings.Index(killTool, "newMCPOpContextWithTmux()")
+	opIndex := strings.Index(killTool, "ops.KillSession")
+	if contextIndex < 0 || opIndex < contextIndex {
+		return fmt.Errorf("MCP kill must construct a real tmux context before calling shared kill")
+	}
+	return nil
+}
+
+func sharedKillSuccessShouldRequireExactTargetAbsence(ctx context.Context) error {
+	source := ctx.Value(harnessParityStateKey{}).(*harnessParityState).opsKillSource
+	killIndex := strings.Index(source, "killer.KillSession(tmuxName)")
+	verifyIndex := strings.Index(source, "ctx.Tmux.HasSession(tmuxName)")
+	remainsIndex := strings.Index(source, "target still exists")
+	if killIndex < 0 || verifyIndex < killIndex || remainsIndex < verifyIndex {
+		return fmt.Errorf("shared kill must mutate the exact tmux target and reject a surviving target")
 	}
 	return nil
 }

@@ -246,7 +246,7 @@ func addKillSessionTool(server *mcp.Server, _ *Config) {
 			return mcpError(ops.ErrInvalidInput("identifier", "Session identifier is required.")), nil, nil
 		}
 
-		opCtx, cleanup, err := newMCPOpContext()
+		opCtx, cleanup, err := newMCPOpContextWithTmux()
 		if err != nil {
 			return mcpError(err), nil, nil
 		}

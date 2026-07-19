@@ -176,6 +176,15 @@ func TestArchiveSession_ForceBypassesVerification(t *testing.T) {
 
 // --- KillSession tests ---
 
+type stubbornKillTmux struct {
+	*mockTmux
+}
+
+func (m *stubbornKillTmux) KillSession(name string) error {
+	m.killed = append(m.killed, name)
+	return nil
+}
+
 func TestKillSession_RunningSession(t *testing.T) {
 	sessions := []*manifest.Manifest{
 		newManifest("id-1", "my-session", "~/project"),
@@ -209,6 +218,13 @@ func TestKillSession_RunningSession(t *testing.T) {
 	if !result.WasRunning {
 		t.Error("expected WasRunning=true for session with active tmux")
 	}
+	tm := ctx.Tmux.(*mockTmux)
+	if tm.sessions["my-session"] {
+		t.Error("successful kill left the tmux session present")
+	}
+	if len(tm.killed) != 1 || tm.killed[0] != "my-session" {
+		t.Fatalf("killed targets = %v, want [my-session]", tm.killed)
+	}
 }
 
 func TestKillSession_StoppedSession(t *testing.T) {
@@ -223,6 +239,90 @@ func TestKillSession_StoppedSession(t *testing.T) {
 	}
 	if result.WasRunning {
 		t.Error("expected WasRunning=false for session without active tmux")
+	}
+	if killed := ctx.Tmux.(*mockTmux).killed; len(killed) != 0 {
+		t.Fatalf("absent tmux target triggered kill calls: %v", killed)
+	}
+}
+
+func TestKillSession_RemovesExactTmuxTarget(t *testing.T) {
+	m := newManifest("id-1", "display-name", "~/project")
+	m.Tmux.SessionName = "exact-target"
+	tm := newMockTmux("exact-target", "exact-target-child")
+	ctx := testCtx([]*manifest.Manifest{m})
+	ctx.Tmux = tm
+
+	result, err := KillSession(ctx, &KillSessionRequest{Identifier: "display-name", ConfirmedStuck: true})
+	if err != nil {
+		t.Fatalf("KillSession() error = %v", err)
+	}
+	if result.TmuxSessionName != "exact-target" {
+		t.Fatalf("TmuxSessionName = %q, want exact-target", result.TmuxSessionName)
+	}
+	if len(tm.killed) != 1 || tm.killed[0] != "exact-target" {
+		t.Fatalf("killed targets = %v, want [exact-target]", tm.killed)
+	}
+	if tm.sessions["exact-target"] {
+		t.Error("exact target still exists")
+	}
+	if !tm.sessions["exact-target-child"] {
+		t.Error("prefix-related non-target session was removed")
+	}
+}
+
+func TestKillSession_PropagatesBackendFailure(t *testing.T) {
+	wantErr := errors.New("tmux kill denied")
+	tm := newMockTmux("my-session")
+	tm.killErr = wantErr
+	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")})
+	ctx.Tmux = tm
+
+	result, err := KillSession(ctx, &KillSessionRequest{Identifier: "id-1", ConfirmedStuck: true})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("KillSession() error = %v, want backend failure %v", err, wantErr)
+	}
+	if result == nil || result.TmuxSessionName != "my-session" {
+		t.Fatalf("result = %#v, want resolved target for failed mutation", result)
+	}
+}
+
+func TestKillSession_FailsWhenTargetRemains(t *testing.T) {
+	tm := &stubbornKillTmux{mockTmux: newMockTmux("my-session")}
+	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")})
+	ctx.Tmux = tm
+
+	_, err := KillSession(ctx, &KillSessionRequest{Identifier: "id-1", ConfirmedStuck: true})
+	if err == nil {
+		t.Fatal("KillSession() returned success while the exact tmux target remained")
+	}
+	if !tm.sessions["my-session"] {
+		t.Fatal("stubborn backend fixture unexpectedly removed the target")
+	}
+}
+
+func TestKillSession_PropagatesProbeFailure(t *testing.T) {
+	wantErr := errors.New("tmux socket unavailable")
+	tm := newMockTmux("my-session")
+	tm.hasErr = wantErr
+	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")})
+	ctx.Tmux = tm
+
+	_, err := KillSession(ctx, &KillSessionRequest{Identifier: "id-1", ConfirmedStuck: true})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("KillSession() error = %v, want probe failure %v", err, wantErr)
+	}
+	if len(tm.killed) != 0 {
+		t.Fatalf("probe failure must not mutate tmux, killed = %v", tm.killed)
+	}
+}
+
+func TestKillSession_RequiresTmuxBackend(t *testing.T) {
+	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")})
+	ctx.Tmux = nil
+
+	_, err := KillSession(ctx, &KillSessionRequest{Identifier: "id-1"})
+	if err == nil {
+		t.Fatal("KillSession() returned success without a tmux backend")
 	}
 }
 
@@ -278,6 +378,10 @@ func TestKillSession_DryRun(t *testing.T) {
 	}
 	if !result.WasRunning {
 		t.Error("expected WasRunning=true")
+	}
+	tm := ctx.Tmux.(*mockTmux)
+	if !tm.sessions["my-session"] || len(tm.killed) != 0 {
+		t.Fatalf("dry run mutated tmux: sessions=%v killed=%v", tm.sessions, tm.killed)
 	}
 }
 
