@@ -27,6 +27,7 @@ func TestParseDocumentUsesMarkdownAST(t *testing.T) {
 		"# Repeat",
 		"# Repeat",
 		"# [Linked](target.md) `Code` **Bold**",
+		"# See <https://example.com>",
 		"# Foo",
 		"# Foo-1",
 		"# Foo",
@@ -41,7 +42,7 @@ func TestParseDocumentUsesMarkdownAST(t *testing.T) {
 		"[target]: target.md#repeat",
 	}, "\n"))
 	doc := parseDocument(markdown, source)
-	for _, anchor := range []string{"repeat", "repeat-1", "linked-code-bold", "foo", "foo-1", "foo-2", "explicit"} {
+	for _, anchor := range []string{"repeat", "repeat-1", "linked-code-bold", "see-httpsexamplecom", "foo", "foo-1", "foo-2", "explicit"} {
 		if !doc.anchors[anchor] {
 			t.Errorf("missing anchor %q: %v", anchor, doc.anchors)
 		}
@@ -53,6 +54,22 @@ func TestParseDocumentUsesMarkdownAST(t *testing.T) {
 	sort.Strings(targets)
 	if want := []string{"asset.png", "target.md", "target.md#repeat"}; !reflect.DeepEqual(targets, want) {
 		t.Fatalf("targets = %v, want %v", targets, want)
+	}
+}
+
+func TestHeadingSuffixesIgnoreExplicitAnchorReservations(t *testing.T) {
+	markdown := newLinkChecker(".", false).markdown
+	doc := parseDocument(markdown, []byte("<a id=foo></a>\n\n# Foo\n# Foo\n"))
+	if !doc.anchors["foo"] || !doc.anchors["foo-1"] || doc.anchors["foo-2"] {
+		t.Fatalf("anchors = %v, want explicit foo plus heading foo and foo-1", doc.anchors)
+	}
+}
+
+func TestExplicitAnchorsUseActualHTMLAttributes(t *testing.T) {
+	markdown := newLinkChecker(".", false).markdown
+	doc := parseDocument(markdown, []byte("<div data-id=ghost></div>\n<a id=install></a>\n<a name='legacy'></a>\n"))
+	if doc.anchors["ghost"] || !doc.anchors["install"] || !doc.anchors["legacy"] {
+		t.Fatalf("explicit anchors = %v", doc.anchors)
 	}
 }
 

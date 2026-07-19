@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"unicode"
@@ -17,6 +17,7 @@ import (
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/text"
+	"golang.org/x/net/html"
 )
 
 type linkRef struct {
@@ -66,6 +67,7 @@ func (c *linkChecker) loadDocument(path string) (*document, error) {
 func parseDocument(markdown goldmark.Markdown, source []byte) *document {
 	root := markdown.Parser().Parse(text.NewReader(source))
 	doc := &document{anchors: map[string]bool{}}
+	headingAnchors := map[string]bool{}
 
 	_ = ast.Walk(root, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
 		if !entering {
@@ -75,9 +77,10 @@ func parseDocument(markdown goldmark.Markdown, source []byte) *document {
 		case *ast.Heading:
 			base := githubSlug(headingText(n, source))
 			id := base
-			for suffix := 1; doc.anchors[id]; suffix++ {
+			for suffix := 1; headingAnchors[id]; suffix++ {
 				id = fmt.Sprintf("%s-%d", base, suffix)
 			}
+			headingAnchors[id] = true
 			doc.anchors[id] = true
 		case *ast.Link:
 			doc.links = append(doc.links, linkRef{target: string(n.Destination), line: nodeLine(source, n)})
@@ -99,22 +102,39 @@ func headingText(heading *ast.Heading, source []byte) string {
 		if !entering {
 			return ast.WalkContinue, nil
 		}
-		if textNode, ok := node.(*ast.Text); ok {
-			content.Write(textNode.Value(source))
-			if textNode.SoftLineBreak() || textNode.HardLineBreak() {
+		switch n := node.(type) {
+		case *ast.Text:
+			content.Write(n.Value(source))
+			if n.SoftLineBreak() || n.HardLineBreak() {
 				content.WriteByte(' ')
 			}
+		case *ast.AutoLink:
+			content.Write(n.Label(source))
 		}
 		return ast.WalkContinue, nil
 	})
 	return content.String()
 }
 
-var explicitAnchorRe = regexp.MustCompile(`(?i)\b(?:id|name)\s*=\s*["']([^"']+)["']`)
-
 func collectExplicitAnchors(anchors map[string]bool, raw []byte) {
-	for _, match := range explicitAnchorRe.FindAllSubmatch(raw, -1) {
-		anchors[string(match[1])] = true
+	tokenizer := html.NewTokenizer(bytes.NewReader(raw))
+	for {
+		switch tokenizer.Next() {
+		case html.ErrorToken:
+			if tokenizer.Err() == io.EOF {
+				return
+			}
+			return
+		case html.StartTagToken, html.SelfClosingTagToken:
+			_, more := tokenizer.TagName()
+			for more {
+				key, value, next := tokenizer.TagAttr()
+				if (bytes.EqualFold(key, []byte("id")) || bytes.EqualFold(key, []byte("name"))) && len(value) > 0 {
+					anchors[string(value)] = true
+				}
+				more = next
+			}
+		}
 	}
 }
 
