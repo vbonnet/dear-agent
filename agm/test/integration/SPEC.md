@@ -14,6 +14,8 @@
 
 **INTG-05** When an integration scenario claims CLI lifecycle behavior, the suite shall execute an AGM binary built from the checkout under test rather than whichever installed binary appears on PATH.
 
+**INTG-06** When the integration-tagged adapter parity suite runs without host credentials or services, the system shall execute the portable contract for every active harness, including Codex, and scope prerequisite skips to individual host-dependent harness tests.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/test_support_package_guardrails.feature`

@@ -532,10 +532,9 @@ Feature: Harness parity
     And each session row should include the requested fields
     And the output should not collapse to an empty object
 
-  Scenario: Codex lifecycle commands work end to end
+  Scenario: Codex shared lifecycle operations use production state transitions
     Given a Codex CLI session created by AGM
     When AGM sends a message to the session
-    And AGM resumes the session
     And AGM kills the session
     And AGM archives the stopped session
     Then Dolt should reflect the expected lifecycle transitions
