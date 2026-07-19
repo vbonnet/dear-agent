@@ -76,6 +76,24 @@ forbidden-paths:
     - "**/*-[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh].*"
     - "**/*-[Rr][Ee][Pp][Oo][Rr][Tt].*"
     - "**/*_[Tt][Ee][Ss][Tt]_[Rr][Ee][Pp][Oo][Rr][Tt].[Mm][Dd]"
+    # Underscore and camelCase variants without treating every substring as a
+    # temporal token. Source-code extensions remain exempt outside explicitly
+    # temporal directories.
+    - "**/[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh][_A-Z]*.*"
+    - "**/*_[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh]_*.*"
+    - "**/*[a-z]Research*.*"
+    - "**/[Rr][Ee][Pp][Oo][Rr][Tt][_A-Z]*.*"
+    - "**/*_[Rr][Ee][Pp][Oo][Rr][Tt]_*.*"
+    - "**/*[a-z]Report*.*"
+    - "**/[Pp][Ll][Aa][Nn][_A-Z]*.*"
+    - "**/*_[Pp][Ll][Aa][Nn]_*.*"
+    - "**/*[a-z]Plan*.*"
+    - "**/[Rr][Oo][Aa][Dd][Mm][Aa][Pp][_A-Z]*.*"
+    - "**/*_[Rr][Oo][Aa][Dd][Mm][Aa][Pp]_*.*"
+    - "**/*[a-z]Roadmap*.*"
+    - "**/[Bb][Aa][Cc][Kk][Ll][Oo][Gg][_A-Z]*.*"
+    - "**/*_[Bb][Aa][Cc][Kk][Ll][Oo][Gg]_*.*"
+    - "**/*[a-z]Backlog*.*"
     - docs/retros/**
     - docs/design/**
     - wf/**
