@@ -6,7 +6,9 @@
 
 **GCMP-01** When an existing `gemini-cli` manifest is loaded, the system shall route it to the CLI/tmux compatibility adapter.
 
-**GCMP-02** When the Gemini compatibility adapter launches or resumes a session, the system shall invoke the local `gemini` CLI through tmux.
+**GCMP-02** When the Gemini compatibility adapter is called directly to launch
+or resume a session, it shall invoke the local `gemini` CLI through tmux. The
+top-level AGM resume dispatcher does not restart this deprecated harness.
 
 **GCMP-03** When active harness parity is evaluated, the system shall exclude the deprecated `gemini-cli` harness.
 
