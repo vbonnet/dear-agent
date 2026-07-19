@@ -70,15 +70,9 @@ func CheckRepository(ctx context.Context, root string) (Result, []Violation, err
 		}
 		files++
 		findings = append(findings, importViolations(relative, data, policy.Surfaces)...)
-		segments := parseSegments(data)
-		if strings.Contains(filepath.ToSlash(relative), "/hooks/") && filepath.Ext(relative) == "" {
-			segments = parseScriptSegments(data)
-		}
-		if extension := strings.ToLower(filepath.Ext(relative)); extension == ".yml" || extension == ".yaml" {
-			segments, err = parseYAMLSegments(data)
-			if err != nil {
-				return Result{}, nil, fmt.Errorf("instructionlint: parse %s: %w", relative, err)
-			}
+		segments, err := instructionSegments(relative, data)
+		if err != nil {
+			return Result{}, nil, fmt.Errorf("instructionlint: parse %s: %w", relative, err)
 		}
 		for _, segment := range segments {
 			findings = append(findings, evaluateSegment(relative, segment)...)
@@ -92,6 +86,17 @@ func CheckRepository(ctx context.Context, root string) (Result, []Violation, err
 	findings = applyExclusions(findings, policy.Exclusions)
 	sortViolations(findings)
 	return Result{Files: files, Exclusions: len(policy.Exclusions)}, findings, nil
+}
+
+func instructionSegments(relative string, data []byte) ([]Segment, error) {
+	extension := strings.ToLower(filepath.Ext(relative))
+	if extension == ".yml" || extension == ".yaml" {
+		return parseYAMLSegments(data)
+	}
+	if strings.Contains(filepath.ToSlash(relative), "/hooks/") && extension == "" {
+		return parseScriptSegments(data), nil
+	}
+	return parseSegments(data), nil
 }
 
 var instructionImport = regexp.MustCompile(`(?m)^\s*@import\s+(\S+)\s*$`)

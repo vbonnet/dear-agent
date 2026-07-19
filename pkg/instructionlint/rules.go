@@ -207,12 +207,7 @@ func positionalAGMSearch(text string) bool {
 }
 
 func anyCommand(text string, predicate func([]string) bool) bool {
-	for _, fields := range commandFields(text) {
-		if predicate(fields) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(commandFields(text), predicate)
 }
 
 func commandHasPrefix(fields []string, prefix ...string) bool {
