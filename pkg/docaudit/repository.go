@@ -58,7 +58,11 @@ func checkRepository(ctx context.Context, root string, opts Options) (Report, er
 			return Report{}, policyErr
 		}
 		if policyPresent {
-			if policyErr := validatePolicyRatchet(basePolicy, policy, tracked); policyErr != nil {
+			baseTracked, trackedErr := trackedFilesAtRef(ctx, root, opts.BaselineRef)
+			if trackedErr != nil {
+				return Report{}, trackedErr
+			}
+			if policyErr := validatePolicyRatchet(basePolicy, policy, mergeTrackedFiles(tracked, baseTracked)); policyErr != nil {
 				return Report{}, policyErr
 			}
 		}
@@ -133,6 +137,18 @@ func baselineAdditionsAtRef(ctx context.Context, root, ref string, currentPolicy
 
 func trackedFiles(ctx context.Context, root string) ([]string, error) {
 	cmd := exec.CommandContext(ctx, "git", "ls-files", "-z", "--full-name")
+	return trackedFilesFromCommand(ctx, root, cmd, "discover tracked files")
+}
+
+func trackedFilesAtRef(ctx context.Context, root, ref string) ([]string, error) {
+	if ref != strings.TrimSpace(ref) || ref == "" || strings.HasPrefix(ref, "-") {
+		return nil, fmt.Errorf("docaudit: invalid baseline ref %q", ref)
+	}
+	cmd := exec.CommandContext(ctx, "git", "ls-tree", "-r", "-z", "--name-only", ref)
+	return trackedFilesFromCommand(ctx, root, cmd, "discover baseline tracked files")
+}
+
+func trackedFilesFromCommand(ctx context.Context, root string, cmd *exec.Cmd, operation string) ([]string, error) {
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	var stderr bytes.Buffer
@@ -142,7 +158,7 @@ func trackedFiles(ctx context.Context, root string) ([]string, error) {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, fmt.Errorf("docaudit: discover tracked files: %w: %s", err, strings.TrimSpace(stderr.String()))
+		return nil, fmt.Errorf("docaudit: %s: %w: %s", operation, err, strings.TrimSpace(stderr.String()))
 	}
 	parts := bytes.Split(output, []byte{0})
 	files := make([]string, 0, len(parts))
@@ -153,6 +169,21 @@ func trackedFiles(ctx context.Context, root string) ([]string, error) {
 	}
 	sort.Strings(files)
 	return files, nil
+}
+
+func mergeTrackedFiles(inventories ...[]string) []string {
+	seen := make(map[string]bool)
+	for _, inventory := range inventories {
+		for _, name := range inventory {
+			seen[name] = true
+		}
+	}
+	files := make([]string, 0, len(seen))
+	for name := range seen {
+		files = append(files, name)
+	}
+	sort.Strings(files)
+	return files
 }
 
 func sortFindings(findings []Finding) {

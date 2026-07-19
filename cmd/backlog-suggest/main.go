@@ -2,8 +2,8 @@
 // It is a read-only CLI surface over pkg/backlog. Beads owns Dear Agent's live
 // work and VROOM dispatches directly from Beads.
 //
-//	backlog-suggest list                     # every parsed item
-//	backlog-suggest suggest                   # top-N eligible + blocked
+//	backlog-suggest list --files ./snapshot.md                    # every parsed item
+//	backlog-suggest suggest --files ./snapshot.md                 # top-N eligible + blocked
 //	backlog-suggest suggest --files ./snapshot.md --phase 6 --top 1
 //
 // Exit codes: 0 success, 1 runtime error, 2 usage error.
