@@ -81,6 +81,9 @@ func (cb *CircuitBreaker) Capabilities() Capabilities {
 func (cb *CircuitBreaker) Generate(ctx context.Context, req *GenerateRequest) (*GenerateResponse, error) {
 	if cb.canProceed() {
 		resp, err := cb.primary.Generate(ctx, req)
+		if err == nil && resp == nil {
+			err = fmt.Errorf("provider %q returned a nil response", cb.primary.Name())
+		}
 		if err != nil {
 			cb.recordFailure()
 			// If circuit just opened and we have a fallback, try it
