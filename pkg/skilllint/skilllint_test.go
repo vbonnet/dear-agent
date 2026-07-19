@@ -204,6 +204,25 @@ description: Deterministic example skill.
 			want: []string{"missing procedural workflow", "missing nonempty verification or completion section"},
 		},
 		{
+			name: "comment-only headings do not satisfy structure",
+			content: `---
+name: example-skill
+description: Deterministic example skill.
+---
+
+# Example
+
+## Workflow
+
+<!-- TODO: write the workflow -->
+
+## Verify
+
+<!-- TODO: write completion checks -->
+`,
+			want: []string{"missing procedural workflow", "missing nonempty verification or completion section"},
+		},
+		{
 			name:    "unknown extension",
 			content: strings.Replace(validSkill("example-skill"), "description:", "arguments: none\ndescription:", 1),
 			want:    []string{"unsupported skill frontmatter field `arguments`"},
@@ -212,6 +231,16 @@ description: Deterministic example skill.
 			name:    "incomplete provider tier pair",
 			content: strings.Replace(validSkill("example-skill"), "description:", "model: haiku\ndescription:", 1),
 			want:    []string{"`model:` and `effort:` must be declared together"},
+		},
+		{
+			name:    "empty provider tier pair",
+			content: strings.Replace(validSkill("example-skill"), "description:", "model: \"\"\neffort: \"\"\ndescription:", 1),
+			want:    []string{"model=\\"\\" not allowed", "effort=\\"\\" not allowed"},
+		},
+		{
+			name:    "null provider tier remains declared",
+			content: strings.Replace(validSkill("example-skill"), "description:", "model: null\ndescription:", 1),
+			want:    []string{"`model:` and `effort:` must be declared together", "model=\\"\\" not allowed"},
 		},
 		{
 			name:    "provider extension without fallback",
@@ -244,6 +273,15 @@ description: Deterministic example skill.
 				strings.Replace(validSkill("example-skill"), "description:", "allowed-tools: [Bash]\ndescription:", 1),
 				"Confirm the expected result exists.",
 				"When skill activation is unavailable, use the same CLI steps. Confirm the expected result exists.",
+				1,
+			),
+		},
+		{
+			name: "provider path and neutral fallback share a paragraph",
+			content: strings.Replace(
+				strings.Replace(validSkill("example-skill"), "description:", "allowed-tools: [Bash]\ndescription:", 1),
+				"Confirm the expected result exists.",
+				"Use Bash to run checks. If Bash is unavailable, run the command-line program directly.",
 				1,
 			),
 		},
