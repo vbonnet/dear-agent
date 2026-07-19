@@ -127,7 +127,8 @@ lint-specs:
 	@go run ./cmd/ears-lint $(if $(STRICT),--strict) $(if $(PATHS),$(PATHS),.)
 
 verify-surface-codegen:
-	@before="$$(git hash-object agm/internal/surface/codegen_cli.go agm/internal/surface/codegen_mcp.go agm/internal/surface/codegen_parity_test.go)"; \
+	@set -e; \
+		before="$$(git hash-object agm/internal/surface/codegen_cli.go agm/internal/surface/codegen_mcp.go agm/internal/surface/codegen_parity_test.go)"; \
 		cd agm && go run ./internal/surface/cmd/generate; \
 		cd ..; \
 		after="$$(git hash-object agm/internal/surface/codegen_cli.go agm/internal/surface/codegen_mcp.go agm/internal/surface/codegen_parity_test.go)"; \
