@@ -5,13 +5,14 @@
 //   - Sessions dir:  /tmp/agm-test-{id}/sessions/
 //   - Home dir:      /tmp/agm-test-{id}/home/
 //   - SQLite DB:     /tmp/agm-test-{id}/agm.db
+//   - State dir:     /tmp/agm-test-{id}/state/
 //   - Lock file:     /tmp/agm-test-{id}/agm.lock
 //
 // Environment variables are propagated to child commands so all AGM
 // components use the isolated paths:
 //
 //	AGM_TEST_RUN_ID, AGM_TEST_ENV, AGM_TMUX_SOCKET, AGM_SESSIONS_DIR,
-//	AGM_DB_PATH, AGM_LOCK_PATH
+//	AGM_DB_PATH, AGM_STATE_DIR, AGM_LOCK_PATH
 package testcontext
 
 import (
@@ -29,6 +30,7 @@ const (
 	EnvTmuxSocket  = "AGM_TMUX_SOCKET"
 	EnvSessionsDir = "AGM_SESSIONS_DIR"
 	EnvDBPath      = "AGM_DB_PATH"
+	EnvStateDir    = "AGM_STATE_DIR"
 	EnvLockPath    = "AGM_LOCK_PATH"
 )
 
@@ -63,6 +65,7 @@ type TestContext struct {
 	SocketPath  string
 	SessionsDir string
 	DBPath      string
+	StateDir    string
 	LockPath    string
 }
 
@@ -79,14 +82,18 @@ func NewNamed(name string) *TestContext {
 
 // newWithID is the shared constructor for New and NewNamed.
 func newWithID(id string) *TestContext {
-	baseDir := filepath.Join(os.TempDir(), fmt.Sprintf("agm-test-%s", id))
+	// Keep tmux socket paths below macOS's Unix-domain socket limit. os.TempDir
+	// expands to a much longer /var/folders path there, while /tmp is stable on
+	// every Unix platform on which AGM's tmux integration runs.
+	baseDir := filepath.Join("/tmp", fmt.Sprintf("agm-test-%s", id))
 	return &TestContext{
 		RunID:       id,
 		BaseDir:     baseDir,
 		HomeDir:     filepath.Join(baseDir, "home"),
-		SocketPath:  filepath.Join(os.TempDir(), fmt.Sprintf("agm-test-%s.sock", id)),
+		SocketPath:  filepath.Join("/tmp", fmt.Sprintf("agm-test-%s.sock", id)),
 		SessionsDir: filepath.Join(baseDir, "sessions"),
 		DBPath:      filepath.Join(baseDir, "agm.db"),
+		StateDir:    filepath.Join(baseDir, "state"),
 		LockPath:    filepath.Join(baseDir, "agm.lock"),
 	}
 }
@@ -110,7 +117,11 @@ func FromEnv() (*TestContext, bool) {
 	sessionsDir := os.Getenv(EnvSessionsDir)
 	baseDir := filepath.Dir(sessionsDir)
 	if sessionsDir == "" {
-		baseDir = filepath.Join(os.TempDir(), fmt.Sprintf("agm-test-%s", runID))
+		baseDir = filepath.Join("/tmp", fmt.Sprintf("agm-test-%s", runID))
+	}
+	stateDir := os.Getenv(EnvStateDir)
+	if stateDir == "" {
+		stateDir = filepath.Join(baseDir, "state")
 	}
 	return &TestContext{
 		RunID:       runID,
@@ -119,6 +130,7 @@ func FromEnv() (*TestContext, bool) {
 		SocketPath:  os.Getenv(EnvTmuxSocket),
 		SessionsDir: sessionsDir,
 		DBPath:      os.Getenv(EnvDBPath),
+		StateDir:    stateDir,
 		LockPath:    os.Getenv(EnvLockPath),
 	}, true
 }
@@ -132,6 +144,7 @@ func (tc *TestContext) SetEnv() error {
 		EnvTmuxSocket:  tc.SocketPath,
 		EnvSessionsDir: tc.SessionsDir,
 		EnvDBPath:      tc.DBPath,
+		EnvStateDir:    tc.StateDir,
 		EnvLockPath:    tc.LockPath,
 		"HOME":         tc.HomeDir,
 	}
@@ -147,7 +160,7 @@ func (tc *TestContext) SetEnv() error {
 func (tc *TestContext) UnsetEnv() {
 	for _, k := range []string{
 		EnvTestRunID, EnvTestEnv, EnvTmuxSocket,
-		EnvSessionsDir, EnvDBPath, EnvLockPath,
+		EnvSessionsDir, EnvDBPath, EnvStateDir, EnvLockPath,
 	} {
 		os.Unsetenv(k)
 	}
@@ -164,6 +177,7 @@ func (tc *TestContext) Environ() []string {
 		fmt.Sprintf("%s=%s", EnvTmuxSocket, tc.SocketPath),
 		fmt.Sprintf("%s=%s", EnvSessionsDir, tc.SessionsDir),
 		fmt.Sprintf("%s=%s", EnvDBPath, tc.DBPath),
+		fmt.Sprintf("%s=%s", EnvStateDir, tc.StateDir),
 		fmt.Sprintf("%s=%s", EnvLockPath, tc.LockPath),
 		fmt.Sprintf("HOME=%s", tc.HomeDir),
 	}
@@ -172,6 +186,9 @@ func (tc *TestContext) Environ() []string {
 // EnsureDirs creates the base directory, home directory, and sessions subdirectory.
 func (tc *TestContext) EnsureDirs() error {
 	if err := os.MkdirAll(tc.SessionsDir, 0700); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(tc.StateDir, 0700); err != nil {
 		return err
 	}
 	return os.MkdirAll(tc.HomeDir, 0700)

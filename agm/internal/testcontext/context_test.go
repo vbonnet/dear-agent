@@ -21,16 +21,18 @@ func TestNew(t *testing.T) {
 	assert.Contains(t, tc.SocketPath, tc.RunID)
 	assert.Contains(t, tc.SessionsDir, tc.RunID)
 	assert.Contains(t, tc.DBPath, tc.RunID)
+	assert.Contains(t, tc.StateDir, tc.RunID)
 	assert.Contains(t, tc.LockPath, tc.RunID)
 
 	// Socket should be at /tmp/agm-test-{id}.sock (outside baseDir)
-	assert.Equal(t, filepath.Join(os.TempDir(), "agm-test-"+tc.RunID+".sock"), tc.SocketPath)
+	assert.Equal(t, filepath.Join("/tmp", "agm-test-"+tc.RunID+".sock"), tc.SocketPath)
 
 	// SessionsDir should be under baseDir
 	assert.Equal(t, filepath.Join(tc.BaseDir, "sessions"), tc.SessionsDir)
 
 	// DB and lock should be under baseDir
 	assert.Equal(t, filepath.Join(tc.BaseDir, "agm.db"), tc.DBPath)
+	assert.Equal(t, filepath.Join(tc.BaseDir, "state"), tc.StateDir)
 	assert.Equal(t, filepath.Join(tc.BaseDir, "agm.lock"), tc.LockPath)
 }
 
@@ -80,6 +82,7 @@ func TestSetEnvAndFromEnv(t *testing.T) {
 	assert.Equal(t, tc.SocketPath, os.Getenv(EnvTmuxSocket))
 	assert.Equal(t, tc.SessionsDir, os.Getenv(EnvSessionsDir))
 	assert.Equal(t, tc.DBPath, os.Getenv(EnvDBPath))
+	assert.Equal(t, tc.StateDir, os.Getenv(EnvStateDir))
 	assert.Equal(t, tc.LockPath, os.Getenv(EnvLockPath))
 	assert.Equal(t, tc.HomeDir, os.Getenv("HOME"))
 
@@ -90,6 +93,7 @@ func TestSetEnvAndFromEnv(t *testing.T) {
 	assert.Equal(t, tc.SocketPath, tc2.SocketPath)
 	assert.Equal(t, tc.SessionsDir, tc2.SessionsDir)
 	assert.Equal(t, tc.DBPath, tc2.DBPath)
+	assert.Equal(t, tc.StateDir, tc2.StateDir)
 	assert.Equal(t, tc.LockPath, tc2.LockPath)
 	assert.Equal(t, tc.BaseDir, tc2.BaseDir)
 	assert.Equal(t, tc.HomeDir, tc2.HomeDir)
@@ -139,6 +143,7 @@ func TestUnsetEnv(t *testing.T) {
 	assert.Empty(t, os.Getenv(EnvTmuxSocket))
 	assert.Empty(t, os.Getenv(EnvSessionsDir))
 	assert.Empty(t, os.Getenv(EnvDBPath))
+	assert.Empty(t, os.Getenv(EnvStateDir))
 	assert.Empty(t, os.Getenv(EnvLockPath))
 }
 
@@ -146,7 +151,7 @@ func TestEnviron(t *testing.T) {
 	tc := New()
 	env := tc.Environ()
 
-	assert.Len(t, env, 7, "should return 7 environment variables (5 original + AGM_TEST_ENV + HOME)")
+	assert.Len(t, env, 8, "should return all isolated paths, run markers, and HOME")
 
 	// Check each var is present as KEY=VALUE
 	found := map[string]bool{}
@@ -160,6 +165,7 @@ func TestEnviron(t *testing.T) {
 	assert.True(t, found[EnvTmuxSocket])
 	assert.True(t, found[EnvSessionsDir])
 	assert.True(t, found[EnvDBPath])
+	assert.True(t, found[EnvStateDir])
 	assert.True(t, found[EnvLockPath])
 	assert.True(t, found["HOME"])
 }
@@ -187,6 +193,11 @@ func TestEnsureDirs(t *testing.T) {
 	assert.True(t, info.IsDir())
 
 	// Permissions should be 0700
+	assert.Equal(t, os.FileMode(0700), info.Mode().Perm())
+
+	info, err = os.Stat(tc.StateDir)
+	require.NoError(t, err)
+	assert.True(t, info.IsDir())
 	assert.Equal(t, os.FileMode(0700), info.Mode().Perm())
 }
 

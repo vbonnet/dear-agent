@@ -12,6 +12,8 @@
 
 **TCTX-04** When a test context is cleaned up, the system shall remove its socket and run-specific directory tree without affecting unrelated test runs.
 
+**TCTX-05** When a test context exports its environment, the system shall route runtime readiness and lock state through its run-specific state directory instead of the user's AGM state directory.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/test_support_package_guardrails.feature`

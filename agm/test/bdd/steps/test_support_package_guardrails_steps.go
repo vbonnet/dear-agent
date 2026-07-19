@@ -81,6 +81,10 @@ func RegisterTestSupportPackageGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates performance client readiness$`, agmValidatesPerformanceClientReadiness)
 	ctx.Step(`^performance workloads should use bounded hub client readiness$`, performanceWorkloadsUseBoundedHubClientReadiness)
 	ctx.Step(`^churn cleanup should be observed before stable clients disconnect$`, churnCleanupIsObservedBeforeStableClientsDisconnect)
+	ctx.Step(`^isolated Codex lifecycle test sources are configured$`, isolatedCodexLifecycleTestSourcesAreConfigured)
+	ctx.Step(`^AGM validates real lifecycle isolation$`, agmValidatesRealLifecycleIsolation)
+	ctx.Step(`^the lifecycle should use a source-built AGM and unique tmux socket$`, lifecycleUsesSourceBuiltAGMAndUniqueTmuxSocket)
+	ctx.Step(`^cleanup should target only owned test resources$`, cleanupTargetsOnlyOwnedTestResources)
 }
 
 func trustProtocolSetupShouldBeScoped(ctx context.Context) error {
@@ -196,6 +200,72 @@ func churnCleanupIsObservedBeforeStableClientsDisconnect() error {
 	if registered < 0 || closed < 0 || unregistered < 0 || stableClosed < 0 ||
 		registered >= closed || closed >= unregistered || unregistered >= stableClosed {
 		return fmt.Errorf("connection churn does not observe ephemeral registration and cleanup before stable disconnect")
+	}
+	return nil
+}
+
+func isolatedCodexLifecycleTestSourcesAreConfigured() error {
+	root := packageSpecBDDRepoRoot()
+	for _, path := range []string{
+		"agm/test/integration/helpers/isolated_environment.go",
+		"agm/test/integration/lifecycle/codex_isolated_lifecycle_test.go",
+	} {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(path))); err != nil {
+			return fmt.Errorf("isolated lifecycle source %s: %w", path, err)
+		}
+	}
+	return nil
+}
+
+func agmValidatesRealLifecycleIsolation() error {
+	return nil
+}
+
+func lifecycleUsesSourceBuiltAGMAndUniqueTmuxSocket() error {
+	root := packageSpecBDDRepoRoot()
+	helperData, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "helpers", "isolated_environment.go"))
+	if err != nil {
+		return err
+	}
+	helper := string(helperData)
+	for _, required := range []string{
+		`testcontext.New()`, `"go", "build"`, `e.AGMBinary`,
+		`"-S", e.TmuxSocket`, `SessionPrefix`,
+	} {
+		if !strings.Contains(helper, required) {
+			return fmt.Errorf("isolated environment lacks source/socket guard %s", required)
+		}
+	}
+
+	lifecycleData, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "lifecycle", "codex_isolated_lifecycle_test.go"))
+	if err != nil {
+		return err
+	}
+	lifecycle := string(lifecycleData)
+	for _, required := range []string{`NewIsolatedEnvironment(t)`, `env.Command(`, `env.StartTmuxServer(`} {
+		if !strings.Contains(lifecycle, required) {
+			return fmt.Errorf("codex lifecycle bypasses isolated environment guard %s", required)
+		}
+	}
+	return nil
+}
+
+func cleanupTargetsOnlyOwnedTestResources() error {
+	root := packageSpecBDDRepoRoot()
+	data, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "helpers", "isolated_environment.go"))
+	if err != nil {
+		return err
+	}
+	source := string(data)
+	for _, required := range []string{`RegisterSession`, `e.owned`, `"kill-session", "-t", name`, `"kill-server"`} {
+		if !strings.Contains(source, required) {
+			return fmt.Errorf("isolated cleanup lacks exact ownership guard %s", required)
+		}
+	}
+	for _, banned := range []string{`ListTmuxSessions(`, `"test-"`, `"agm-test-*"`} {
+		if strings.Contains(source, banned) {
+			return fmt.Errorf("isolated cleanup retains broad target %s", banned)
+		}
 	}
 	return nil
 }

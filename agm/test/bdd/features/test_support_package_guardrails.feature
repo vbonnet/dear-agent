@@ -112,3 +112,9 @@ Feature: Test support package guardrails
     When AGM validates performance client readiness
     Then performance workloads should use bounded hub client readiness
     And churn cleanup should be observed before stable clients disconnect
+
+  Scenario: Real Codex lifecycle tests own their complete runtime
+    Given isolated Codex lifecycle test sources are configured
+    When AGM validates real lifecycle isolation
+    Then the lifecycle should use a source-built AGM and unique tmux socket
+    And cleanup should target only owned test resources

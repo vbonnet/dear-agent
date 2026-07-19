@@ -12,6 +12,10 @@
 
 **IHELP-04** When integration cleanup runs, the helpers shall tolerate already-removed resources without masking other failures.
 
+**IHELP-05** When a real AGM integration environment is created, the helper shall own a temporary HOME, state directory, SQLite database, manifest directory, short unique tmux socket, session prefix, working directory, and AGM binary built from the checkout under test.
+
+**IHELP-06** When isolated integration cleanup runs, the helper shall target only exact registered session names and its owned tmux server and paths; it shall not scan or mutate the user's default tmux server.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/test_support_package_guardrails.feature`
