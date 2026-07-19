@@ -52,7 +52,7 @@ func TestCheckFile_Clean(t *testing.T) {
 	if err := os.WriteFile(mdFile, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	findings, err := checkFile(mdFile, dir, false)
+	findings, err := checkFile(mdFile, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestCheckFile_BrokenLink(t *testing.T) {
 	if err := os.WriteFile(mdFile, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	findings, err := checkFile(mdFile, dir, false)
+	findings, err := checkFile(mdFile, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestCheckFile_ExternalLinksSkipped(t *testing.T) {
 	if err := os.WriteFile(mdFile, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	findings, err := checkFile(mdFile, dir, false)
+	findings, err := checkFile(mdFile, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestCheckFile_PureAnchorValidated(t *testing.T) {
 	if err := os.WriteFile(mdFile, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	findings, err := checkFile(mdFile, dir, false)
+	findings, err := checkFile(mdFile, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestCheckFile_LinkWithAnchor(t *testing.T) {
 	if err := os.WriteFile(mdFile, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	findings, err := checkFile(mdFile, dir, false)
+	findings, err := checkFile(mdFile, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestCheckFile_RootRelativeLink(t *testing.T) {
 	if err := os.WriteFile(mdFile, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	findings, err := checkFile(mdFile, root, false)
+	findings, err := checkFile(mdFile, root)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestCheckFile_LongLine(t *testing.T) {
 	if err := os.WriteFile(mdFile, b, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	findings, err := checkFile(mdFile, dir, false)
+	findings, err := checkFile(mdFile, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -130,7 +130,7 @@ func collectExplicitAnchors(anchors map[string]bool, raw []byte) {
 	for {
 		switch tokenizer.Next() {
 		case html.ErrorToken:
-			if tokenizer.Err() == io.EOF {
+			if errors.Is(tokenizer.Err(), io.EOF) {
 				return
 			}
 			return
@@ -144,6 +144,8 @@ func collectExplicitAnchors(anchors map[string]bool, raw []byte) {
 				}
 				more = next
 			}
+		case html.TextToken, html.EndTagToken, html.CommentToken, html.DoctypeToken:
+			continue
 		}
 	}
 }

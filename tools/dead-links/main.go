@@ -137,6 +137,6 @@ func run() int {
 
 // checkFile preserves the small test-facing helper while the command reuses a
 // checker across files so parsed target documents are cached.
-func checkFile(mdFile, root string, verbose bool) ([]finding, error) {
-	return newLinkChecker(root, verbose).checkFile(mdFile)
+func checkFile(mdFile, root string) ([]finding, error) {
+	return newLinkChecker(root, false).checkFile(mdFile)
 }

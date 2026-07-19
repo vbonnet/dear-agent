@@ -118,7 +118,7 @@ func TestCheckFileValidatesMissingAnchors(t *testing.T) {
 		"[explicit ok](target.md#legacy)",
 		"[cross missing](target.md#not-here)",
 	}, "\n"))
-	findings, err := checkFile(source, root, false)
+	findings, err := checkFile(source, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestCheckFileSkipsSchemedDestinations(t *testing.T) {
 		"[editor](vscode://file/tmp/example)",
 		"[network](//cdn.example.test/a.png)",
 	}, "\n"))
-	findings, err := checkFile(source, root, false)
+	findings, err := checkFile(source, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestCheckFileRejectsExistingPathOutsideRoot(t *testing.T) {
 	mustWrite(t, filepath.Join(parent, "outside.md"), "# Outside\n")
 	source := filepath.Join(root, "source.md")
 	mustWrite(t, source, "[escape](../outside.md)\n")
-	findings, err := checkFile(source, root, false)
+	findings, err := checkFile(source, root)
 	if err != nil {
 		t.Fatal(err)
 	}
