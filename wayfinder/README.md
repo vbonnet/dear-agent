@@ -7,6 +7,12 @@ Wayfinder is a Go CLI for a gated nine-phase development workflow:
 The executable interface is `wayfinder session`; session state lives in the
 YAML frontmatter of `WAYFINDER-STATUS.md`.
 
+Install the executable before installing or invoking the companion agent skill:
+
+```sh
+go install github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder@latest
+```
+
 ## Quick start
 
 ```sh
