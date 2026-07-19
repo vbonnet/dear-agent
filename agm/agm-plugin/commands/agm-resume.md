@@ -1,10 +1,10 @@
 ---
 model: haiku
 effort: low
-content-hash: c01af4e73e6156d359246d644de19b43b3f985638e5b1a9142d2a863e74b694f
+content-hash: e1811a5da26fec1fc00cd63f18f5c62f9f85f6f6f24bdec798881c5e565457a1
 description: Resume an AGM-managed harness session by name, ID prefix, or project match. Use when the user wants to continue an existing session.
 argument-hint: "<identifier> [--detached]"
-allowed-tools: Bash(agm session resume *), Bash(agm session list *), Bash(rm -f -- /tmp/agm-resume-*), Write(/tmp/agm-resume-*)
+allowed-tools: Bash(agm session resume *), Bash(agm session list *), Write(/tmp/agm-resume-*)
 ---
 
 # Resume an AGM session
@@ -17,8 +17,8 @@ allowed-tools: Bash(agm session resume *), Bash(agm session list *), Bash(rm -f 
 3. If the session is not found, run `agm session list --all --output json` and
    present likely identifiers. Do not guess or rewrite the resume command.
 4. For a recovery prompt, write the prompt to a unique
-   `/tmp/agm-resume-<random>.txt` file and use the typed `--prompt-file` flag;
-   never interpolate prompt text into shell syntax. Always run
-   `rm -f -- <path>` immediately after `agm session resume` returns, before
-   reporting success or failure.
+	`/tmp/agm-resume-<random>.txt` file and use the typed `--prompt-file` flag;
+	never interpolate prompt text into shell syntax. Also pass
+	`--delete-prompt-file` so AGM removes the disposable file after it passes
+	validation and before attaching. Omit that flag for caller-owned files.
 5. Report the resumed session and harness. On failure, show stderr and stop.

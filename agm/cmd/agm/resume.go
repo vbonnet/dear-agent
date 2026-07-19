@@ -28,10 +28,11 @@ import (
 )
 
 var (
-	resumeDetached    bool
-	resumeForceParent bool
-	resumePrompt      string
-	resumePromptFile  string
+	resumeDetached         bool
+	resumeForceParent      bool
+	resumePrompt           string
+	resumePromptFile       string
+	resumeDeletePromptFile bool
 )
 
 var resumeCmd = &cobra.Command{
@@ -56,6 +57,7 @@ Flags:
   --detached     Create/resume session without attaching (session runs in background)
   --prompt       Send a prompt to the session after resume (useful for crash recovery)
   --prompt-file  Send file contents as prompt after resume (useful for crash recovery)
+  --delete-prompt-file  Delete the prompt file after a successful read and validation
 
 Examples:
   agmresume c4eb298c              # By ID prefix
@@ -67,6 +69,9 @@ Examples:
   agmresume worker-1 --prompt-file /path/to/recovery.txt  # Resume with prompt from file
   agmresume                       # Interactive picker (TODO)`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if resumeDeletePromptFile && resumePromptFile == "" {
+			return fmt.Errorf("--delete-prompt-file requires --prompt-file")
+		}
 		// Get identifier from args or prompt
 		var identifier string
 		if len(args) > 0 {
@@ -431,26 +436,16 @@ func shouldSendResumeCommands(tmuxExists bool) bool {
 // sendPostResumePrompt delivers a prompt to the session after it is ready.
 // It reads the prompt from promptText (inline) or promptFile, then uses
 // SendMultiLinePromptSafe which waits for the Claude prompt before sending.
-func sendPostResumePrompt(sessionName, promptText, promptFile string) error {
+func sendPostResumePrompt(sessionName, promptText, promptFile string, deletePromptFile bool) error {
 	var message string
 	if promptText != "" {
 		message = promptText
 	} else {
-		content, err := os.ReadFile(promptFile)
+		var err error
+		message, err = readResumePromptFile(promptFile, deletePromptFile)
 		if err != nil {
-			return fmt.Errorf("failed to read prompt file %s: %w", promptFile, err)
+			return err
 		}
-		if managedResumePromptFile(promptFile) {
-			if err := os.Remove(promptFile); err != nil {
-				return fmt.Errorf("failed to remove consumed prompt file %s: %w", promptFile, err)
-			}
-		}
-		// Enforce size limit (10KB) consistent with send_msg
-		const maxSize = 10 * 1024
-		if len(content) > maxSize {
-			return fmt.Errorf("prompt file too large: %d bytes (max 10KB)", len(content))
-		}
-		message = string(content)
 	}
 
 	ui.PrintSuccess("Sending post-resume prompt...")
@@ -460,9 +455,21 @@ func sendPostResumePrompt(sessionName, promptText, promptFile string) error {
 	return nil
 }
 
-func managedResumePromptFile(path string) bool {
-	clean := filepath.Clean(path)
-	return filepath.Dir(clean) == "/tmp" && strings.HasPrefix(filepath.Base(clean), "agm-resume-")
+func readResumePromptFile(promptFile string, deletePromptFile bool) (string, error) {
+	content, err := os.ReadFile(promptFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to read prompt file %s: %w", promptFile, err)
+	}
+	const maxSize = 10 * 1024
+	if len(content) > maxSize {
+		return "", fmt.Errorf("prompt file too large: %d bytes (max 10KB)", len(content))
+	}
+	if deletePromptFile {
+		if err := os.Remove(promptFile); err != nil {
+			return "", fmt.Errorf("failed to remove consumed prompt file %s: %w", promptFile, err)
+		}
+	}
+	return string(content), nil
 }
 
 // resumeResolvedSession runs the full resume workflow (harness detection,
@@ -578,7 +585,7 @@ func resumeSession(adapter *dolt.Adapter, sessionID, manifestPath, harnessName s
 	// This happens after the harness is ready, before attach.
 	// Works for both new sessions (sendCommands=true) and existing sessions.
 	if resumePrompt != "" || resumePromptFile != "" {
-		if err := sendPostResumePrompt(health.TmuxSessionName, resumePrompt, resumePromptFile); err != nil {
+		if err := sendPostResumePrompt(health.TmuxSessionName, resumePrompt, resumePromptFile, resumeDeletePromptFile); err != nil {
 			// Non-fatal: warn but continue so the user can still attach and type manually
 			ui.PrintWarning(fmt.Sprintf("Failed to send post-resume prompt: %v", err))
 		} else {
@@ -1103,6 +1110,7 @@ func init() {
 	resumeCmd.Flags().BoolVar(&resumeForceParent, "force-parent", false, "Resume planning session instead of execution session")
 	resumeCmd.Flags().StringVar(&resumePrompt, "prompt", "", "Prompt to send to session after resume (for crash recovery)")
 	resumeCmd.Flags().StringVar(&resumePromptFile, "prompt-file", "", "File containing prompt to send after resume (max 10KB)")
+	resumeCmd.Flags().BoolVar(&resumeDeletePromptFile, "delete-prompt-file", false, "Delete --prompt-file after a successful read and validation")
 	resumeCmd.MarkFlagsMutuallyExclusive("prompt", "prompt-file")
 	sessionCmd.AddCommand(resumeCmd)
 }

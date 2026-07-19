@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -190,7 +191,7 @@ func TestResumeHelpMentionsPromptFlags(t *testing.T) {
 // TestSendPostResumePrompt_FileNotFound verifies an error is returned when the
 // prompt file does not exist, before any tmux operations occur.
 func TestSendPostResumePrompt_FileNotFound(t *testing.T) {
-	err := sendPostResumePrompt("any-session", "", "/nonexistent/path/prompt.txt")
+	err := sendPostResumePrompt("any-session", "", "/nonexistent/path/prompt.txt", false)
 	if err == nil {
 		t.Fatal("expected error for missing prompt file, got nil")
 		return
@@ -213,7 +214,7 @@ func TestSendPostResumePrompt_FileTooLarge(t *testing.T) {
 		t.Fatalf("failed to write temp file: %v", err)
 	}
 
-	err := sendPostResumePrompt("any-session", "", tmp)
+	err := sendPostResumePrompt("any-session", "", tmp, false)
 	if err == nil {
 		t.Fatal("expected error for oversized prompt file, got nil")
 		return
@@ -223,7 +224,7 @@ func TestSendPostResumePrompt_FileTooLarge(t *testing.T) {
 	}
 }
 
-func TestSendPostResumePrompt_RemovesManagedFileBeforeValidation(t *testing.T) {
+func TestReadResumePromptFilePreservesRejectedDisposableFile(t *testing.T) {
 	file, err := os.CreateTemp("/tmp", "agm-resume-")
 	if err != nil {
 		t.Fatal(err)
@@ -236,12 +237,32 @@ func TestSendPostResumePrompt_RemovesManagedFileBeforeValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = sendPostResumePrompt("any-session", "", path)
+	_, err = readResumePromptFile(path, true)
 	if err == nil || !strings.Contains(err.Error(), "too large") {
-		t.Fatalf("sendPostResumePrompt() error = %v, want size error", err)
+		t.Fatalf("readResumePromptFile() error = %v, want size error", err)
 	}
-	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
-		t.Fatalf("managed prompt file remains after read: %v", statErr)
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("rejected prompt file was removed: %v", statErr)
+	}
+}
+
+func TestReadResumePromptFileDeletesOnlyWithExplicitOptIn(t *testing.T) {
+	for _, deleteFile := range []bool{false, true} {
+		path := filepath.Join(t.TempDir(), fmt.Sprintf("prompt-%t.txt", deleteFile))
+		if err := os.WriteFile(path, []byte("resume safely"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		message, err := readResumePromptFile(path, deleteFile)
+		if err != nil || message != "resume safely" {
+			t.Fatalf("readResumePromptFile(delete=%t) = (%q, %v)", deleteFile, message, err)
+		}
+		_, statErr := os.Stat(path)
+		if deleteFile && !os.IsNotExist(statErr) {
+			t.Fatalf("opted-in prompt remains: %v", statErr)
+		}
+		if !deleteFile && statErr != nil {
+			t.Fatalf("caller-owned prompt was removed: %v", statErr)
+		}
 	}
 }
 

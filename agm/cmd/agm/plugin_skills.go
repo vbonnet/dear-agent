@@ -70,7 +70,7 @@ var pluginCommandInventory = []pluginCommandOwner{
 			Description:   "Show aggregate live status for AGM sessions. Use when the user needs session state, branch, worktree, workspace, or uncommitted-change information.",
 			ArgumentFlags: []string{"workspace"},
 			FixedArgs:     []string{"--format", "json"},
-			OutputColumns: []string{"Session", "State", "Branch", "Workspace", "Worktree"},
+			OutputColumns: []string{"Sessions[].Name", "Sessions[].State", "Sessions[].Branch", "Sessions[].Workspace", "Sessions[].WorktreePath", "Sessions[].Uncommitted"},
 		},
 		Commands: []pluginCommandContract{{Path: "session status", Flags: []string{"workspace", "format"}}},
 	},
@@ -85,7 +85,7 @@ var pluginCommandInventory = []pluginCommandOwner{
 	}},
 	{Filename: "agm-new.md", Commands: []pluginCommandContract{{Path: "session new", Flags: []string{"harness", "workspace", "output"}}}},
 	{Filename: "agm-resume.md", Commands: []pluginCommandContract{
-		{Path: "session resume", Flags: []string{"detached", "prompt-file", "output"}},
+		{Path: "session resume", Flags: []string{"delete-prompt-file", "detached", "prompt-file", "output"}},
 		{Path: "session list", Flags: []string{"all", "output"}},
 	}},
 	{Filename: "agm-send.md", Commands: []pluginCommandContract{

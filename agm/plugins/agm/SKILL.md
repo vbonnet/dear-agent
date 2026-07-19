@@ -35,6 +35,10 @@ For the richer Claude plugin workflows, read only the relevant file under
   immediately after the command returns on success or failure.
 - Resume requires an identifier. If none was provided, list all sessions and
   ask the user to choose; the interactive picker is not implemented.
+- For a disposable recovery prompt, create a unique file, pass both
+  `--prompt-file <path>` and `--delete-prompt-file`, and let AGM delete it
+  after the prompt passes validation. Omit the delete flag for caller-owned
+  files.
 - Use global `--output json` or the command's documented structured-output flag;
   do not invent `--json` on subcommands.
 - Keep stderr visible and stop on typed command errors.
