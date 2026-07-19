@@ -14,6 +14,7 @@ type rule struct {
 
 var retiredWayfinder = regexp.MustCompile(`(?:\bV1\b|\bW0(?:\b|-)|\bD[1-6](?:\b|-)|\bS(?:1[01]|[1-9])(?:\b|-))`)
 var shellBoundary = regexp.MustCompile(`(?:&&|\|\||[;|])`)
+var environmentAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 
 var instructionRules = []rule{
 	{id: "wayfinder-v1", replacement: "CHARTER, PROBLEM, RESEARCH, DESIGN, SPEC, PLAN, SETUP, BUILD, and RETRO", applies: proseOrShell, detect: retiredWayfinder.MatchString},
@@ -74,10 +75,15 @@ func shellText(text string) string {
 }
 
 func bareBeads(text string) bool {
-	fields := strings.Fields(shellText(text))
-	if len(fields) == 0 || fields[0] != "bd" {
-		return false
+	for _, fields := range commandFields(text) {
+		if len(fields) > 0 && fields[0] == "bd" && beadsCommandIsBare(fields) {
+			return true
+		}
 	}
+	return false
+}
+
+func beadsCommandIsBare(fields []string) bool {
 	const canonical = "~/beads/context-engine/.beads"
 	if len(fields) >= 3 && fields[1] == "--db" {
 		return strings.Trim(fields[2], `"'`) != canonical
@@ -91,25 +97,39 @@ func bareBeads(text string) bool {
 }
 
 func rawGHMerge(text string) bool {
-	for _, command := range shellBoundary.Split(shellText(text), -1) {
-		fields := strings.Fields(strings.TrimSpace(command))
-		for len(fields) > 0 && strings.Contains(fields[0], "=") {
-			fields = fields[1:]
-		}
-		if len(fields) > 0 && fields[0] == "env" {
-			fields = fields[1:]
-			for len(fields) > 0 && strings.Contains(fields[0], "=") {
-				fields = fields[1:]
-			}
-		}
-		if len(fields) >= 2 && (fields[0] == "timeout" || fields[0] == "gtimeout") {
-			fields = fields[2:]
-		}
+	for _, fields := range commandFields(text) {
 		if len(fields) >= 3 && fields[0] == "gh" && fields[1] == "pr" && fields[2] == "merge" {
 			return true
 		}
 	}
 	return false
+}
+
+func commandFields(text string) [][]string {
+	var commands [][]string
+	for _, command := range shellBoundary.Split(shellText(text), -1) {
+		fields := stripCommandPrefixes(strings.Fields(strings.TrimSpace(command)))
+		if len(fields) > 0 {
+			commands = append(commands, fields)
+		}
+	}
+	return commands
+}
+
+func stripCommandPrefixes(fields []string) []string {
+	for len(fields) > 0 {
+		switch {
+		case environmentAssignment.MatchString(fields[0]):
+			fields = fields[1:]
+		case fields[0] == "env":
+			fields = fields[1:]
+		case (fields[0] == "timeout" || fields[0] == "gtimeout") && len(fields) >= 2:
+			fields = fields[2:]
+		default:
+			return fields
+		}
+	}
+	return fields
 }
 
 func positionalAGMSearch(text string) bool {

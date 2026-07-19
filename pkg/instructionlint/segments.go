@@ -57,6 +57,9 @@ func classifyMarkdown(root ast.Node, source []byte) (map[int]SegmentKind, []Segm
 		case *ast.FencedCodeBlock:
 			classifyFence(classified, typed, source)
 			return ast.WalkSkipChildren, nil
+		case *ast.CodeBlock:
+			classifyIndentedCodeBlock(classified, typed, source)
+			return ast.WalkSkipChildren, nil
 		case *ast.CodeSpan:
 			if segment, ok := codeSpanSegment(typed, source); ok {
 				inline = append(inline, segment)
@@ -68,6 +71,17 @@ func classifyMarkdown(root ast.Node, source []byte) (map[int]SegmentKind, []Segm
 	return classified, inline
 }
 
+func classifyIndentedCodeBlock(classified map[int]SegmentKind, block *ast.CodeBlock, source []byte) {
+	for i := 0; i < block.Lines().Len(); i++ {
+		segment := block.Lines().At(i)
+		kind := SegmentKind("skip")
+		if commandShaped(string(segment.Value(source))) {
+			kind = SegmentShell
+		}
+		classifySourceLines(classified, segment, source, kind)
+	}
+}
+
 func classifyFence(classified map[int]SegmentKind, block *ast.FencedCodeBlock, source []byte) {
 	kind := SegmentKind("skip")
 	language := strings.TrimSpace(string(block.Language(source)))
@@ -76,19 +90,24 @@ func classifyFence(classified map[int]SegmentKind, block *ast.FencedCodeBlock, s
 	}
 	for i := 0; i < block.Lines().Len(); i++ {
 		segment := block.Lines().At(i)
-		startLine := sourceLine(source, segment.Start)
 		value := segment.Value(source)
-		lineCount := bytes.Count(value, []byte{'\n'})
-		if !bytes.HasSuffix(value, []byte{'\n'}) {
-			lineCount++
-		}
 		lineKind := kind
 		if language == "" && commandShaped(string(value)) {
 			lineKind = SegmentShell
 		}
-		for offset := 0; offset < lineCount; offset++ {
-			classified[startLine+offset] = lineKind
-		}
+		classifySourceLines(classified, segment, source, lineKind)
+	}
+}
+
+func classifySourceLines(classified map[int]SegmentKind, segment text.Segment, source []byte, kind SegmentKind) {
+	startLine := sourceLine(source, segment.Start)
+	value := segment.Value(source)
+	lineCount := bytes.Count(value, []byte{'\n'})
+	if !bytes.HasSuffix(value, []byte{'\n'}) {
+		lineCount++
+	}
+	for offset := 0; offset < lineCount; offset++ {
+		classified[startLine+offset] = kind
 	}
 }
 

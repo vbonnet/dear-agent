@@ -4,15 +4,15 @@
 
 ## EARS Requirements
 
-**INSPOL-01** When repository policy is loaded, the system shall require each instruction surface to declare one clean tracked-path pattern and a nonempty owner.
+**INSPOL-01** When repository policy is loaded, the system shall require each instruction surface to declare one clean tracked-path pattern and a nonempty owner, and validation shall fail when a declaration matches no tracked Markdown path.
 
 **INSPOL-02** When governed instruction files are discovered, the system shall use context-bounded, non-interactive Git-tracked inventory and shall reject paths matched by multiple surface declarations.
 
-**INSPOL-03** When Markdown is parsed, the system shall classify prose, inline code, shell-language fences, command-shaped unlabeled fences, and non-executable labeled fences without line-oriented fence leakage.
+**INSPOL-03** When Markdown is parsed, the system shall classify prose, inline code, shell-language fences, command-shaped unlabeled fences, command-shaped indented code blocks, and non-executable code without line-oriented leakage.
 
 **INSPOL-04** When active prose or executable guidance contains a retired Wayfinder phase token, the system shall report the token and the nine-phase V2 replacement contract.
 
-**INSPOL-05** When executable guidance invokes Beads without the canonical `~/beads/context-engine/.beads` database, raw git push, raw GitHub merge including prefixed or chained forms, or removed safe-pr emergency forms, the system shall report the rule and canonical wrapper.
+**INSPOL-05** When executable guidance invokes Beads without the canonical `--db ~/beads/context-engine/.beads` database, including prefixed or chained forms, raw git push, raw GitHub merge, or removed safe-pr emergency forms, the system shall report the rule and canonical wrapper.
 
 **INSPOL-06** When executable guidance uses a known-invalid AGM command or output flag, the system shall report the current command form.
 

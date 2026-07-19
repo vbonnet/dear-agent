@@ -65,6 +65,10 @@ instruction-policy:
       owner: harness-shims
     - match: .agents/AGENTS.md
       owner: harness-shims
+    - match: .deepsec/AGENTS.md
+      owner: deepsec
+    - match: .deepsec/data/**/SETUP.md
+      owner: deepsec
     - match: docs/policies/*.ai.md
       owner: repository-policy
     - match: cmd/vroom-dispatch/skills/*.md

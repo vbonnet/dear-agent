@@ -53,6 +53,7 @@ func CheckRepository(ctx context.Context, root string) (Result, []Violation, err
 	}
 	var findings []Violation
 	files := 0
+	matchedSurface := make(map[string]int, len(policy.Surfaces))
 	for _, relative := range paths {
 		matches := matchingSurfaces(policy.Surfaces, relative)
 		if len(matches) == 0 {
@@ -61,6 +62,7 @@ func CheckRepository(ctx context.Context, root string) (Result, []Violation, err
 		if len(matches) > 1 {
 			return Result{}, nil, fmt.Errorf("instructionlint: %s matches multiple instruction surfaces: %s", relative, strings.Join(matches, ", "))
 		}
+		matchedSurface[matches[0]]++
 		data, err := os.ReadFile(filepath.Join(absRoot, filepath.FromSlash(relative)))
 		if err != nil {
 			return Result{}, nil, fmt.Errorf("instructionlint: read %s: %w", relative, err)
@@ -68,6 +70,11 @@ func CheckRepository(ctx context.Context, root string) (Result, []Violation, err
 		files++
 		for _, segment := range parseSegments(data) {
 			findings = append(findings, evaluateSegment(relative, segment)...)
+		}
+	}
+	for _, surface := range policy.Surfaces {
+		if matchedSurface[surface.Match] == 0 {
+			return Result{}, nil, fmt.Errorf("instructionlint: instruction surface %q owned by %q matches no tracked Markdown paths", surface.Match, surface.Owner)
 		}
 	}
 	findings = applyExclusions(findings, policy.Exclusions)

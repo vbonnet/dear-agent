@@ -25,6 +25,9 @@ func TestSegmentsClassifyExecutableFences(t *testing.T) {
 		"```",
 		"env TOKEN=x gh pr merge 123",
 		"```",
+		"",
+		"    bd ready",
+		"    explanatory fixture text",
 	}, "\n"))
 
 	got := parseSegments(source)
@@ -39,6 +42,7 @@ func TestSegmentsClassifyExecutableFences(t *testing.T) {
 		"prose|Use `git push origin main` only as a quoted bad command.",
 		"shell|git push origin main",
 		"shell|env TOKEN=x gh pr merge 123",
+		"shell|bd ready",
 	}
 	sort.Strings(want)
 	if !reflect.DeepEqual(compact, want) {
@@ -63,14 +67,20 @@ func TestRuleViolationsTeachCanonicalReplacements(t *testing.T) {
 		{Kind: SegmentShell, Line: 13, Text: "bd --db=~/beads/context-engine/.beads ready"},
 		{Kind: SegmentShell, Line: 14, Text: "env TOKEN=x gh pr merge --squash 123"},
 		{Kind: SegmentShell, Line: 15, Text: "echo ok && gh pr merge --squash 123"},
+		{Kind: SegmentShell, Line: 16, Text: "env WORKSPACE=oss bd ready"},
+		{Kind: SegmentShell, Line: 17, Text: "echo ok && bd ready"},
+		{Kind: SegmentShell, Line: 18, Text: "timeout 5s bd ready"},
+		{Kind: SegmentShell, Line: 19, Text: "WORKSPACE=oss bd ready"},
+		{Kind: SegmentShell, Line: 20, Text: "env WORKSPACE=oss bd --db ~/beads/context-engine/.beads ready"},
+		{Kind: SegmentShell, Line: 21, Text: "bd -db ~/beads/context-engine/.beads ready"},
 	}
 
 	var got []Violation
 	for _, segment := range segments {
 		got = append(got, evaluateSegment("AGENTS.md", segment)...)
 	}
-	if len(got) != 13 {
-		t.Fatalf("violations = %v, want 13", got)
+	if len(got) != 18 {
+		t.Fatalf("violations = %v, want 18", got)
 	}
 	for _, item := range got {
 		if item.Rule == "" || item.Replacement == "" {
@@ -151,6 +161,23 @@ func TestCheckRepositoryRejectsOverlappingSurfaces(t *testing.T) {
 	runGit(t, repo, "add", ".dear-agent.yml", "AGENTS.md")
 	if _, _, err := CheckRepository(context.Background(), repo); err == nil || !strings.Contains(err.Error(), "multiple instruction surfaces") {
 		t.Fatalf("overlapping surfaces error = %v", err)
+	}
+}
+
+func TestCheckRepositoryRejectsSurfaceWithNoTrackedMatches(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	writeTestFile(t, repo, ".dear-agent.yml", `instruction-policy:
+  surfaces:
+    - match: AGENTS.md
+      owner: root
+    - match: CODEX.md
+      owner: codex
+`)
+	writeTestFile(t, repo, "AGENTS.md", "# Instructions\n")
+	runGit(t, repo, "add", ".dear-agent.yml", "AGENTS.md")
+	if _, _, err := CheckRepository(context.Background(), repo); err == nil || !strings.Contains(err.Error(), "CODEX.md") {
+		t.Fatalf("zero-match surface error = %v", err)
 	}
 }
 
