@@ -19,6 +19,7 @@ func TestCheckRepositoryClean(t *testing.T) {
 	writeADRFile(t, repo, "docs/adr/README.md", indexFixture("001", "001-example.md", "Example decision", "Accepted"))
 	writeADRFile(t, repo, "pkg/hash/ADR.md", "# Hash decisions\n\nStatus: Accepted\n\n## Context\n\nStable hashes.\n")
 	writeADRFile(t, repo, "fixtures/testdata/ADR-999-fixture.md", "fixture\n")
+	writeADRFile(t, repo, "docs/releases/2026-notes.md", "# 2026 release notes\n")
 	writeADRFile(t, repo, "untracked/ADR-777-ignore.md", "not tracked\n")
 	gitADR(t, repo, "add", ".dear-agent.yml", "docs", "pkg", "fixtures")
 	gitADR(t, repo, "commit", "-m", "fixture")
@@ -215,6 +216,7 @@ func TestCheckRepositoryRejectsMalformedADRInputs(t *testing.T) {
 	writeADRFile(t, repo, "docs/adr/001.md", "# ADR-001: malformed bare name\n\nStatus: Accepted\n")
 	writeADRFile(t, repo, "docs/adr/ADR042-sneaky.md", "# ADR-042: malformed missing separator\n\nStatus: Accepted\n")
 	writeADRFile(t, repo, "docs/adr/042sneaky.md", "# ADR-042: malformed bare separator\n\nStatus: Accepted\n")
+	writeADRFile(t, repo, "docs/adr/ADR 043-spaced.md", "# ADR-043: malformed spaced separator\n\nStatus: Accepted\n")
 	writeADRFile(t, repo, "docs/adr/README.md", indexFixture("001", "ADR-001-example.md", "Example decision", "Accepted")+"  | [ADR-001](ADR-001-example.md#context) | Duplicate invalid status | Draft |\n")
 	writeADRFile(t, repo, "pkg/hash/ADR.md", "# Hash decisions\n\nStatus: Accepted\n")
 	gitADR(t, repo, "add", ".")
@@ -227,6 +229,24 @@ func TestCheckRepositoryRejectsMalformedADRInputs(t *testing.T) {
 	for _, want := range []string{"malformed ADR filename", "malformed ADR index row"} {
 		if !hasReason(report.Violations, want) {
 			t.Errorf("missing %q violation: %#v", want, report.Violations)
+		}
+	}
+}
+
+func TestADRLikeFilenameBoundaries(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]bool{
+		"ADR042-sneaky.md":        true,
+		"042sneaky.md":            true,
+		"ADR 001-new-decision.md": true,
+		"0001_sneaky.md":          true,
+		"2026-notes.md":           false,
+		"v2-release.md":           false,
+	}
+	for name, want := range tests {
+		if got := adrLikeFilename(name); got != want {
+			t.Errorf("adrLikeFilename(%q) = %t, want %t", name, got, want)
 		}
 	}
 }
