@@ -26,6 +26,13 @@ variable "active_repos" {
     visibility      = string
     default_branch  = optional(string, "main")
     required_checks = optional(list(string), [])
+    # Installs .github/workflows/claude-code-review.yml (content sourced from
+    # dear-agent's own hand-maintained copy, the reference implementation —
+    # see claude_review.tf) plus the CLAUDE_CODE_OAUTH_TOKEN secret. Advisory
+    # review only; never added to required_checks. dear-agent itself is
+    # deliberately excluded from this flag (see claude_review.tf) since it
+    # hand-maintains its own workflow files as the source of truth.
+    enable_claude_review = optional(bool, false)
   }))
 }
 
@@ -34,4 +41,20 @@ variable "archived_repos" {
   type = map(object({
     visibility = optional(string, "private")
   }))
+}
+
+# Claude Code OAuth token (from `claude setup-token`, a Pro/Max subscription
+# credential — NOT an Anthropic Console API key). Shared across every repo
+# that has enable_claude_review = true; GitHub secrets are per-repo (these are
+# personal-account repos, so no org-level secret is available to share it
+# fleet-wide — see the "No merge_queue" note in modules/managed-repo for the
+# same personal-account constraint). Supply via TF_VAR_claude_code_oauth_token
+# in the environment — never in a committed *.tfvars file. Sensitive: still
+# lands in the OpenTofu state file (github_actions_secret has no encrypted-only
+# write mode), so the R2 state bucket must stay private (see backend.tf).
+variable "claude_code_oauth_token" {
+  description = "Claude Code OAuth token applied to every repo with enable_claude_review = true. Null-safe: repos without the flag never reference it."
+  type        = string
+  default     = null
+  sensitive   = true
 }

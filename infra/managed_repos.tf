@@ -18,9 +18,13 @@ module "managed_repos" {
   source   = "./modules/managed-repo"
   for_each = var.active_repos
 
-  name            = each.key
-  visibility      = each.value.visibility
-  required_checks = try(each.value.required_checks, [])
+  name                           = each.key
+  visibility                     = each.value.visibility
+  default_branch                 = try(each.value.default_branch, "main")
+  required_checks                = try(each.value.required_checks, [])
+  enable_claude_review           = try(each.value.enable_claude_review, false)
+  claude_review_workflow_content = local.claude_review_workflow_content
+  claude_code_oauth_token        = var.claude_code_oauth_token
 
   providers = {
     github = github

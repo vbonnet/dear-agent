@@ -124,3 +124,32 @@ resource "github_repository_ruleset" "branch_protection" {
     }
   }
 }
+
+# -----------------------------------------------------------------------------
+# Claude Code PR review (opt-in via var.enable_claude_review) — advisory only,
+# deliberately absent from required_status_checks above. Pushes the same
+# workflow content dear-agent hand-maintains at
+# .github/workflows/claude-code-review.yml (see ../../claude_review.tf, which
+# reads that file as the single source of truth) plus the OAuth secret it
+# needs. Not applied to dear-agent itself — it owns that file directly in git.
+# -----------------------------------------------------------------------------
+resource "github_repository_file" "claude_code_review_workflow" {
+  count = var.enable_claude_review ? 1 : 0
+
+  repository          = github_repository.this.name
+  branch              = var.default_branch
+  file                = ".github/workflows/claude-code-review.yml"
+  content             = var.claude_review_workflow_content
+  commit_message      = "chore(claude-review): sync claude-code-review.yml (IaC, dear-agent#infra)"
+  commit_author       = "OpenTofu"
+  commit_email        = "opentofu@users.noreply.github.com"
+  overwrite_on_create = true
+}
+
+resource "github_actions_secret" "claude_code_oauth_token" {
+  count = var.enable_claude_review ? 1 : 0
+
+  repository      = github_repository.this.name
+  secret_name     = "CLAUDE_CODE_OAUTH_TOKEN"
+  plaintext_value = var.claude_code_oauth_token
+}
