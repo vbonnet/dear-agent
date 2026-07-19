@@ -335,7 +335,6 @@ agm/
 │   └── integration/   # Integration tests
 ├── .github/
 │   └── workflows/     # CI/CD pipelines
-├── TEST-PLAN.md       # Testing roadmap
 └── CONTRIBUTING.md    # This file
 ```
 
@@ -345,7 +344,8 @@ agm/
 - [testscript Documentation](https://pkg.go.dev/github.com/rogpeppe/go-internal/testscript)
 - [Table-Driven Tests](https://go.dev/wiki/TableDrivenTests)
 - [Effective Go](https://go.dev/doc/effective_go)
-- [TEST-PLAN.md](./TEST-PLAN.md) - Comprehensive testing strategy
+- Historical testing plans are preserved in the
+  [temporal documentation archive](https://github.com/vbonnet/engram-research/tree/main/audits/dear-agent-temporal-docs-2026-07-18).
 
 ## Questions?
 
