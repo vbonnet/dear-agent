@@ -195,9 +195,10 @@ AGM_DEBUG=true          # Debug mode
 22. **unified-storage-migration.md** - Unified storage migration spec
 23. **tmux-lock-refactoring.md** - Tmux lock refactoring documentation
 24. **lock-improvements.md** - Lock improvements documentation
+25. **benchmarking.md** - Benchmark operator guide
 
 ### Agent-Specific
-25. **AGENTS.md.example** - Example AGENTS.md configuration
+26. **AGENTS.md.example** - Example AGENTS.md configuration
 
 ---
 
