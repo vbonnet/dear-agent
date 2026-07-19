@@ -284,7 +284,7 @@ Examples:
 
 ## Related Documentation
 
-- [Test Plan](../../../TEST-PLAN.md) - Overall testing strategy
+- [Historical test plans](https://github.com/vbonnet/engram-research/tree/main/audits/dear-agent-temporal-docs-2026-07-18) - archived testing strategy
 - [Integration Test README](../README.md) - General integration test info
 - [AGM Architecture](../../../docs/architecture.md) - System design
 - [Hook Specification](../../../docs/hooks.md) - Hook system design (future)
@@ -309,5 +309,5 @@ Examples:
 
 For questions or issues with these tests:
 - File issue: [AGM Issues](https://github.com/vbonnet/dear-agent/issues)
-- Check TEST-PLAN.md for testing strategy
+- Check the [temporal documentation archive](https://github.com/vbonnet/engram-research/tree/main/audits/dear-agent-temporal-docs-2026-07-18) for historical testing strategy
 - See CONTRIBUTING.md for development guidelines

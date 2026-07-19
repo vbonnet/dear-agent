@@ -1,5 +1,4 @@
-// Package backlog turns the repo's declared backlog (the markdown ticket
-// tables in docs/workflow-engine/BACKLOG.md and ROADMAP.md) into ranked,
+// Package backlog turns operator-supplied markdown ticket tables into ranked,
 // machine-readable work items and suggests the next item to pick up.
 //
 // It is the task-driven counterpart to the metric-driven recommendation
@@ -11,7 +10,7 @@
 //
 //  1. A Source yields []Item. MarkdownSource parses GitHub-flavored table
 //     rows, resolving column meaning by header name so it reads both the
-//     7-column BACKLOG.md layout and the 4-column ROADMAP.md layout.
+//     common 7-column and 4-column layouts.
 //  2. A Ranker computes eligibility (status==Pending and every dependency
 //     Done) and a blended Score from priority, dependency leverage, and
 //     effort — reproducing the VROOM Orchestrator dispatch rules (agm

@@ -23,7 +23,7 @@ RUN_BENCHMARKS=true ./scripts/test-workspace-isolation.sh
 | `workspace_isolation_test.go` | Core test suite | 651 |
 | `scripts/test-workspace-isolation.sh` | Automated test runner | 257 |
 | `scripts/create-test-data.go` | Test data generator | 324 |
-| `WORKSPACE_ISOLATION_TEST_REPORT.md` | Detailed test report | ~2,500 words |
+| [Historical workspace isolation test report](https://github.com/vbonnet/engram-research/blob/main/audits/dear-agent-temporal-docs-2026-07-18/agm/internal/dolt/WORKSPACE_ISOLATION_TEST_REPORT.md) | Detailed test report | ~2,500 words |
 
 ## Test Coverage
 
@@ -302,7 +302,7 @@ benchstat baseline.txt benchmark-results.txt
 
 ## Documentation
 
-- **Test Report**: `WORKSPACE_ISOLATION_TEST_REPORT.md` - Comprehensive test documentation
+- **Historical test report**: [workspace isolation test report](https://github.com/vbonnet/engram-research/blob/main/audits/dear-agent-temporal-docs-2026-07-18/agm/internal/dolt/WORKSPACE_ISOLATION_TEST_REPORT.md)
 - **Dolt Setup**: `SETUP.md` - Dolt installation and configuration
 - **Storage README**: `README.md` - AGM Dolt storage implementation
 
@@ -311,7 +311,7 @@ benchstat baseline.txt benchmark-results.txt
 For issues or questions:
 
 1. Check logs: `/tmp/dolt-oss.log`, `/tmp/dolt-acme.log`
-2. Review documentation: `WORKSPACE_ISOLATION_TEST_REPORT.md`
+2. Review the [historical test report](https://github.com/vbonnet/engram-research/blob/main/audits/dear-agent-temporal-docs-2026-07-18/agm/internal/dolt/WORKSPACE_ISOLATION_TEST_REPORT.md)
 3. Run verbose tests: `go test -v ./internal/dolt`
 4. Check Dolt status: `dolt status`, `dolt sql -q "SHOW TABLES"`
 
