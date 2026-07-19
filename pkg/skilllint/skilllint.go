@@ -338,7 +338,7 @@ func validateSkillIdentity(path string, fm *Frontmatter) []Violation {
 
 func validateSkillBody(path, bodyText string) []Violation {
 	var violations []Violation
-	structuralText := markdownOutsideFences(bodyText)
+	structuralText := markdownComment.ReplaceAllString(markdownOutsideFences(bodyText), "")
 	if !sectionHasContent(structuralText, workflowHeadingPattern) && len(orderedStepPattern.FindAllStringIndex(structuralText, 2)) < 2 {
 		violations = append(violations, Violation{Path: path, Reason: "missing procedural workflow (expected a nonempty workflow section or at least two ordered steps)"})
 	}
@@ -426,15 +426,15 @@ func validateSkillLength(path, bodyText string, data []byte) []Violation {
 
 func validateSkillExecution(path string, fm *Frontmatter, keys map[string]yaml.Node, bodyText string) []Violation {
 	var violations []Violation
-	modelPresent := nonemptyField(keys, "model")
-	effortPresent := nonemptyField(keys, "effort")
-	if modelPresent != effortPresent {
+	_, modelDeclared := keys["model"]
+	_, effortDeclared := keys["effort"]
+	if modelDeclared != effortDeclared {
 		violations = append(violations, Violation{Path: path, Reason: "optional `model:` and `effort:` must be declared together"})
 	}
-	if modelPresent {
+	if modelDeclared {
 		violations = append(violations, validateOptionalTier(path, "model", fm.Model, allowedModels, "haiku, sonnet, opus")...)
 	}
-	if effortPresent {
+	if effortDeclared {
 		violations = append(violations, validateOptionalTier(path, "effort", fm.Effort, allowedEfforts, "low, medium, high")...)
 	}
 	if _, declared := keys["allowed-tools"]; declared && !validAllowedTools(keys) {
@@ -449,9 +449,13 @@ func validateSkillExecution(path string, fm *Frontmatter, keys map[string]yaml.N
 func hasActionableNonProviderFallback(body string) bool {
 	visible := markdownOutsideFences(body)
 	for paragraph := range strings.SplitSeq(visible, "\n\n") {
-		if fallbackPattern.MatchString(paragraph) &&
-			fallbackRoutePattern.MatchString(paragraph) &&
-			!providerToolAction.MatchString(paragraph) {
+		location := fallbackPattern.FindStringIndex(paragraph)
+		if location == nil {
+			continue
+		}
+		fallbackAction := paragraph[location[0]:]
+		if fallbackRoutePattern.MatchString(fallbackAction) &&
+			!providerToolAction.MatchString(fallbackAction) {
 			return true
 		}
 	}
@@ -526,22 +530,6 @@ func validateVerificationCriteria(path string, keys map[string]yaml.Node) []Viol
 		}
 	}
 	return nil
-}
-
-func nonemptyField(keys map[string]yaml.Node, key string) bool {
-	node, ok := keys[key]
-	if !ok || node.Tag == "!!null" {
-		return false
-	}
-	switch node.Kind {
-	case yaml.ScalarNode:
-		return strings.TrimSpace(node.Value) != ""
-	case yaml.SequenceNode, yaml.MappingNode:
-		return len(node.Content) > 0
-	case yaml.DocumentNode, yaml.AliasNode, 0:
-		return false
-	}
-	return false
 }
 
 func hasProviderExecutionField(keys map[string]yaml.Node) bool {
