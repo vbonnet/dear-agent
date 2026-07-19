@@ -494,7 +494,7 @@ Feature: Harness parity
 
   Scenario: AGY auto permission mode is preserved on resume
     Given an imported AGY session with permission mode "auto"
-    When AGM resumes the session
+    When AGM resumes the AGY session
     Then AGM should launch a tmux pane that resumes the AGY conversation
     And the AGY resume command should include "--dangerously-skip-permissions"
 

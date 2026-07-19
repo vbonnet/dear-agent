@@ -6,7 +6,6 @@
 # RELATED-SPEC: agm/test/bdd/SPEC.md
 # RELATED-SPEC: agm/test/bdd/steps/SPEC.md
 # RELATED-SPEC: agm/test/contract/SPEC.md
-# RELATED-SPEC: agm/test/contracts/SPEC.md
 # RELATED-SPEC: agm/test/e2e/SPEC.md
 # RELATED-SPEC: agm/test/helpers/SPEC.md
 # RELATED-SPEC: agm/test/integration/SPEC.md
@@ -38,7 +37,6 @@ Feature: Test support package guardrails
       | agm/test/bdd                                              |
       | agm/test/bdd/steps                                        |
       | agm/test/contract                                         |
-      | agm/test/contracts                                        |
       | agm/test/e2e                                              |
       | agm/test/helpers                                          |
       | agm/test/integration                                      |
@@ -100,6 +98,8 @@ Feature: Test support package guardrails
     When AGM validates live harness contract command construction
     Then live harness contracts should use canonical session and harness arguments
     And unavailable live harness dependencies should be skipped explicitly
+    And the credential-free active registry contract should always remain runnable
+    And mock-only Pact tests should not be reported as adapter coverage
 
   Scenario: Trust protocol hooks restore process state and owned storage
     When AGM validates trust protocol scenario isolation

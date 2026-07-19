@@ -409,6 +409,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the record should preserve the Codex session UUID$`, recordShouldPreserveCodexSessionUUID)
 	ctx.Step(`^the record should preserve the AGY conversation ID$`, recordShouldPreserveAGYConversationID)
 	ctx.Step(`^an imported AGY session with permission mode "([^"]*)"$`, anImportedAGYSessionWithPermissionMode)
+	ctx.Step(`^AGM resumes the AGY session$`, agmResumesTheAGYSession)
 	ctx.Step(`^AGM should launch a tmux pane that resumes the Codex conversation$`, agmShouldLaunchTmuxPaneResumingCodexConversation)
 	ctx.Step(`^AGM should launch a tmux pane that resumes the AGY conversation$`, agmShouldLaunchTmuxPaneResumingAGYConversation)
 	ctx.Step(`^the AGY resume command should include "([^"]*)"$`, theAGYResumeCommandShouldInclude)
@@ -3992,6 +3993,18 @@ func anImportedAGYSessionWithPermissionMode(ctx context.Context, mode string) er
 		Harness: "agy", Model: "claude-sonnet-4.6-thinking", WorkDir: "/tmp/agy-import",
 		PermissionMode: mode,
 	}, harnessState.agyConversationID).Command
+	return nil
+}
+
+func agmResumesTheAGYSession(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.harness != "agy" {
+		return fmt.Errorf("cannot resume AGY session for harness %q", harnessState.harness)
+	}
+	harnessState.tmuxResumeLaunched = true
 	return nil
 }
 

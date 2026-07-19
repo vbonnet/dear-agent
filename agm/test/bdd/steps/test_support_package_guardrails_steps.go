@@ -28,7 +28,6 @@ var residualTestSupportPackages = []string{
 	"agm/test/bdd",
 	"agm/test/bdd/steps",
 	"agm/test/contract",
-	"agm/test/contracts",
 	"agm/test/e2e",
 	"agm/test/helpers",
 	"agm/test/integration",
@@ -84,6 +83,8 @@ func RegisterTestSupportPackageGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates performance client readiness$`, agmValidatesPerformanceClientReadiness)
 	ctx.Step(`^performance workloads should use bounded hub client readiness$`, performanceWorkloadsUseBoundedHubClientReadiness)
 	ctx.Step(`^churn cleanup should be observed before stable clients disconnect$`, churnCleanupIsObservedBeforeStableClientsDisconnect)
+	ctx.Step(`^the credential-free active registry contract should always remain runnable$`, activeRegistryContractRemainsRunnable)
+	ctx.Step(`^mock-only Pact tests should not be reported as adapter coverage$`, mockOnlyPactTestsAreAbsent)
 	ctx.Step(`^isolated Codex lifecycle test sources are configured$`, isolatedCodexLifecycleTestSourcesAreConfigured)
 	ctx.Step(`^AGM validates real lifecycle isolation$`, agmValidatesRealLifecycleIsolation)
 	ctx.Step(`^the lifecycle should use a source-built AGM and unique tmux socket$`, lifecycleUsesSourceBuiltAGMAndUniqueTmuxSocket)
@@ -590,6 +591,33 @@ func unavailableLiveHarnessDependenciesAreSkipped() error {
 	}
 	if count := strings.Count(string(opencodeData), "requireOpenCodeServer(t)"); count != 5 {
 		return fmt.Errorf("OpenCode live contracts guard %d tests, want 5", count)
+	}
+	return nil
+}
+
+func activeRegistryContractRemainsRunnable() error {
+	path := filepath.Join(packageSpecBDDRepoRoot(), "agm", "test", "contract", "active_harness_contract_test.go")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	source := string(data)
+	for _, required := range []string{"TestActiveHarnessRegistryContract", "agent.ActiveHarnesses()", `"codex-cli"`} {
+		if !strings.Contains(source, required) {
+			return fmt.Errorf("active registry contract lacks %s", required)
+		}
+	}
+	return nil
+}
+
+func mockOnlyPactTestsAreAbsent() error {
+	pattern := filepath.Join(packageSpecBDDRepoRoot(), "agm", "test", "contracts", "*_test.go")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return err
+	}
+	if len(matches) != 0 {
+		return fmt.Errorf("retired mock-only Pact tests still exist: %v", matches)
 	}
 	return nil
 }

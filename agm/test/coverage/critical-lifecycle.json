@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "packages": [
+    {
+      "name": "backend capability forwarding",
+      "package": "./agm/internal/backend",
+      "minimum_statements": 70.0
+    },
+    {
+      "name": "shared lifecycle operations",
+      "package": "./agm/internal/ops",
+      "minimum_statements": 73.0
+    },
+    {
+      "name": "session state detection",
+      "package": "./agm/internal/state",
+      "minimum_statements": 94.0
+    },
+    {
+      "name": "delivery safety guards",
+      "package": "./agm/internal/safety",
+      "minimum_statements": 54.0
+    }
+  ]
+}

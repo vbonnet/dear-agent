@@ -52,6 +52,7 @@ func composer() {
 	fmt.Println("│ >_ OpenAI Codex (v0.144.0) │")
 	fmt.Println("│ model: gpt-5.4 /model to change │")
 	fmt.Println("›")
+	fmt.Println("  gpt-5.4 high · /isolated-workdir")
 }
 
 func main() {

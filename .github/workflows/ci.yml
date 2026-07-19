@@ -187,6 +187,88 @@ jobs:
           git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
           go run ./cmd/test-affected --base="origin/${BASE_REF}" --tags=integration --run
 
+  agm-codex-contracts:
+    name: AGM Codex Contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+          cache-dependency-path: "go.sum"
+
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run credential-free active harness parity
+        run: >-
+          go test -race -count=1 -tags=integration
+          ./agm/test/integration
+          -run 'TestActiveHarnessParityContract|TestHarnessPrerequisitesAreScoped'
+
+      - name: Run active harness registry contract
+        run: >-
+          go test -race -count=1 -tags=contract
+          ./agm/test/contract
+          -run '^TestActiveHarnessRegistryContract$'
+
+      - name: Run isolated source-built Codex lifecycle
+        run: >-
+          go test -race -count=1 -tags=integration
+          ./agm/test/integration/lifecycle
+          -run '^TestCodexLifecycleUsesIsolatedSourceEnvironment$'
+
+      - name: Enforce critical lifecycle coverage ratchet
+        run: >-
+          go run ./cmd/coverage-ratchet
+          --race
+          --policy agm/test/coverage/critical-lifecycle.json
+
+  agm-tagged-sweep:
+    name: AGM Tagged Sweep
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+          cache-dependency-path: "go.sum"
+
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Install source AGM for legacy host-dependent packages
+        run: go install ./agm/cmd/agm
+
+      - name: Run credential-free contract graph
+        run: go test -race -count=1 -timeout=20m -tags=contract ./agm/test/contract/...
+
+      - name: Run full credential-free integration graph
+        env:
+          # Legacy provider-hosted Ginkgo scenarios remain explicit opt-in;
+          # portable tests and the isolated source-built Codex lifecycle run.
+          SKIP_E2E: "1"
+        run: go test -race -count=1 -timeout=20m -tags=integration ./agm/test/integration/...
+
   engram-storage-hardening:
     name: Engram Storage Hardening
     runs-on: ubuntu-latest
