@@ -23,5 +23,6 @@ use exact targets.
 
 ## Evidence
 
-- `monitor.go`, `output.go`, and tmux package tests
-- `../monitor/` prompt detectors
+- `capture.go` and `capture_test.go`
+- `prompt_detector.go`, `prompt.go`, and their tests
+- `pane_monitor.go` and `output_watcher.go`
