@@ -100,7 +100,7 @@ func (DefaultPermissionEnforcer) CheckHost(perm *Permissions, host string) error
 			return nil
 		}
 		// Bare "domain.com" also matches subdomains, matching the
-		// expectations of the example YAML in docs/workflow-engine.md.
+		// expectations of the example YAML in pkg/workflow/SPEC.md.
 		if !strings.HasPrefix(p, "*.") && strings.HasSuffix(host, "."+p) {
 			return nil
 		}
