@@ -1,4 +1,4 @@
-# ADR-001: Use Dolt for adapter-owned AGM state
+# ADR-001: Use Dolt as the authoritative AGM store
 
 Status: Accepted
 

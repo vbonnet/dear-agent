@@ -1,4 +1,4 @@
-# ADR-001: Separate provider credentials from harness OAuth delegation
+# ADR-001: Use supported provider credentials without OAuth extraction
 
 Status: Accepted
 
