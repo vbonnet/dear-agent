@@ -10,10 +10,10 @@ import (
 )
 
 var (
-	adrFilePattern   = regexp.MustCompile(`^(?:ADR-)?([0-9]{3,4})-[a-z0-9-]+\.md$`)
+	adrFilePattern   = regexp.MustCompile(`^(?:ADR-([0-9]{3})|([0-9]{4}))-[a-z0-9-]+\.md$`)
 	adrTitlePattern  = regexp.MustCompile(`(?m)^# ADR-([0-9]{3,4}): .+$`)
 	adrStatusPattern = regexp.MustCompile(`(?m)^Status: (Accepted|Proposed|Deprecated|Superseded)(?: .*)?$`)
-	successorPattern = regexp.MustCompile(`^Status: Superseded .*\[[^]]+\]\([^)]+\.md\).*$`)
+	successorPattern = regexp.MustCompile(`^Status: Superseded .*\[[^]]+\]\(([^)#]+\.md)(?:#[^)]*)?\).*$`)
 	adrIndexPattern  = regexp.MustCompile(`(?m)^\| \[([0-9]{3,4})\]\(([^)]+\.md)\) \| [^|]+ \| (Accepted|Proposed|Deprecated|Superseded) \|$`)
 	markdownLink     = regexp.MustCompile(`\[[^]]+\]\(([^)]+)\)`)
 )
@@ -43,9 +43,13 @@ func TestADRDirectoriesHaveUniqueIndexedLifecycle(t *testing.T) {
 					continue
 				}
 				match := adrFilePattern.FindStringSubmatch(entry.Name())
-				if len(match) != 2 {
+				if len(match) != 3 {
 					t.Errorf("%s: malformed ADR filename; want ADR-NNN-slug.md or NNNN-slug.md", entry.Name())
 					continue
+				}
+				id := match[1]
+				if id == "" {
+					id = match[2]
 				}
 				content := readFile(t, filepath.Join(dir, entry.Name()))
 				titles := adrTitlePattern.FindAllStringSubmatch(content, -1)
@@ -53,13 +57,13 @@ func TestADRDirectoriesHaveUniqueIndexedLifecycle(t *testing.T) {
 					t.Errorf("%s: want one ADR heading, got %d", entry.Name(), len(titles))
 					continue
 				}
-				if titles[0][1] != match[1] {
-					t.Errorf("%s: heading ID %s does not match filename ID %s", entry.Name(), titles[0][1], match[1])
+				if titles[0][1] != id {
+					t.Errorf("%s: heading ID %s does not match filename ID %s", entry.Name(), titles[0][1], id)
 				}
-				if previous, exists := ids[match[1]]; exists {
-					t.Errorf("duplicate ADR-%s: %s and %s", match[1], previous, entry.Name())
+				if previous, exists := ids[id]; exists {
+					t.Errorf("duplicate ADR-%s: %s and %s", id, previous, entry.Name())
 				} else {
-					ids[match[1]] = entry.Name()
+					ids[id] = entry.Name()
 				}
 
 				statuses := adrStatusPattern.FindAllStringSubmatch(content, -1)
@@ -67,11 +71,16 @@ func TestADRDirectoriesHaveUniqueIndexedLifecycle(t *testing.T) {
 					t.Errorf("%s: want one normalized Status line, got %d", entry.Name(), len(statuses))
 					continue
 				}
-				if statuses[0][1] == "Superseded" && !successorPattern.MatchString(statuses[0][0]) {
-					t.Errorf("%s: superseded status must link to its live successor", entry.Name())
+				if statuses[0][1] == "Superseded" {
+					successor := successorPattern.FindStringSubmatch(statuses[0][0])
+					if len(successor) != 2 {
+						t.Errorf("%s: superseded status must link to its live successor", entry.Name())
+					} else {
+						assertLiveADRSuccessor(t, dir, entry.Name(), successor[1])
+					}
 				}
 				assertRelativeMarkdownLinksResolve(t, dir, entry.Name(), content)
-				records[entry.Name()] = adrRecord{id: match[1], status: statuses[0][1]}
+				records[entry.Name()] = adrRecord{id: id, status: statuses[0][1]}
 			}
 
 			index := readFile(t, filepath.Join(dir, "README.md"))
@@ -84,6 +93,42 @@ func TestADRDirectoriesHaveUniqueIndexedLifecycle(t *testing.T) {
 			}
 			assertSameADRRecords(t, records, indexed)
 		})
+	}
+}
+
+func assertLiveADRSuccessor(t *testing.T, dir, source, target string) {
+	t.Helper()
+	targetPath := filepath.Clean(filepath.Join(dir, filepath.FromSlash(target)))
+	if targetPath == filepath.Join(dir, source) {
+		t.Errorf("%s: superseded status must point to a different ADR", source)
+		return
+	}
+	if match := adrFilePattern.FindStringSubmatch(filepath.Base(targetPath)); len(match) != 3 {
+		t.Errorf("%s: successor %q is not an ADR record", source, target)
+		return
+	}
+	content, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Errorf("%s: successor %q cannot be read: %v", source, target, err)
+		return
+	}
+	statuses := adrStatusPattern.FindAllStringSubmatch(string(content), -1)
+	if len(statuses) != 1 || (statuses[0][1] != "Accepted" && statuses[0][1] != "Proposed") {
+		t.Errorf("%s: successor %q must be one live Accepted or Proposed ADR", source, target)
+	}
+}
+
+func TestADRFilenamePatternAcceptsOnlyCanonicalWidth(t *testing.T) {
+	tests := map[string]bool{
+		"ADR-001-example.md":  true,
+		"0001-example.md":     true,
+		"001-example.md":      false,
+		"ADR-0001-example.md": false,
+	}
+	for name, want := range tests {
+		if got := adrFilePattern.MatchString(name); got != want {
+			t.Errorf("adrFilePattern.MatchString(%q) = %t, want %t", name, got, want)
+		}
 	}
 }
 
