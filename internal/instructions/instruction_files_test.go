@@ -45,6 +45,64 @@ func TestCanonicalAgentsIsNotImportShim(t *testing.T) {
 	}
 }
 
+func TestCanonicalAgentsIsConciseRouter(t *testing.T) {
+	root := repoRoot(t)
+	content := readFile(t, filepath.Join(root, "AGENTS.md"))
+
+	if lines := strings.Count(strings.TrimSuffix(content, "\n"), "\n") + 1; lines > 180 {
+		t.Fatalf("AGENTS.md is %d lines; router budget is 180", lines)
+	}
+
+	policyPaths := []string{
+		"docs/policies/broken-windows.ai.md",
+		"docs/policies/harness-hygiene.ai.md",
+		"docs/policies/anti-stall.ai.md",
+		"docs/policies/dear-retro.ai.md",
+		"docs/policies/definition-of-done.ai.md",
+		"docs/policies/wayfinder-v2-canonical.ai.md",
+		"docs/policies/autonomous-merge.ai.md",
+	}
+	for _, path := range policyPaths {
+		if !strings.Contains(content, path) {
+			t.Errorf("AGENTS.md router missing %q", path)
+		}
+		readFile(t, filepath.Join(root, filepath.FromSlash(path)))
+	}
+
+	for _, required := range []string{
+		"safe-push",
+		"safe-pr",
+		"safe-merge",
+		"agm acceptance show",
+	} {
+		if !strings.Contains(content, required) {
+			t.Errorf("AGENTS.md router missing %q", required)
+		}
+	}
+
+	for _, retired := range []string{
+		"safe-pr <verb> --emergency",
+		"there is no `agm acceptance` subcommand",
+		"codegen/` — code generation framework",
+		"Definition of Done = PR MERGED to main",
+		"GIT_TERMINAL_PROMPT=0 gtimeout 30 git push",
+	} {
+		if strings.Contains(content, retired) {
+			t.Errorf("AGENTS.md retains retired instruction %q", retired)
+		}
+	}
+}
+
+func TestDearAgentConfigHasNoSafePREmergencyBypass(t *testing.T) {
+	root := repoRoot(t)
+	content := readFile(t, filepath.Join(root, ".dear-agent.yml"))
+	for _, retired := range []string{"safe-pr <verb> --emergency", "emergency: \"safe-pr"} {
+		if strings.Contains(content, retired) {
+			t.Errorf(".dear-agent.yml retains unsupported safe-pr bypass %q", retired)
+		}
+	}
+}
+
 func assertNoSharedPolicyDuplication(t *testing.T, file, content string) {
 	t.Helper()
 	lines := nonEmptyLines(content)

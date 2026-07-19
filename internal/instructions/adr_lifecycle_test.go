@@ -1,6 +1,7 @@
 package instructions_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -99,23 +100,29 @@ func TestADRDirectoriesHaveUniqueIndexedLifecycle(t *testing.T) {
 
 func assertLiveADRSuccessor(t *testing.T, root, dir, source, target string) {
 	t.Helper()
+	if err := validateLiveADRSuccessor(root, dir, source, target); err != nil {
+		t.Errorf("%s: %v", source, err)
+	}
+}
+
+func validateLiveADRSuccessor(root, dir, source, target string) error {
 	targetPath := filepath.Clean(filepath.Join(dir, filepath.FromSlash(target)))
 	if targetPath == filepath.Join(dir, source) {
-		t.Errorf("%s: superseded status must point to a different ADR", source)
-		return
+		return fmt.Errorf("superseded status must point to a different ADR")
 	}
 	if match := adrFilePattern.FindStringSubmatch(filepath.Base(targetPath)); len(match) != 3 {
-		t.Errorf("%s: successor %q is not an ADR record", source, target)
-		return
+		return fmt.Errorf("successor %q is not an ADR record", target)
 	}
 	targetDir := filepath.Dir(targetPath)
 	if !governedADRDirectory(root, targetDir) {
-		t.Errorf("%s: successor %q is outside the governed ADR inventories", source, target)
-		return
+		return fmt.Errorf("successor %q is outside the governed ADR inventories", target)
 	}
-	index := readFile(t, filepath.Join(targetDir, "README.md"))
+	indexData, err := os.ReadFile(filepath.Join(targetDir, "README.md"))
+	if err != nil {
+		return fmt.Errorf("read successor inventory: %w", err)
+	}
 	indexed := false
-	for _, entry := range adrIndexPattern.FindAllStringSubmatch(index, -1) {
+	for _, entry := range adrIndexPattern.FindAllStringSubmatch(string(indexData), -1) {
 		indexedPath := filepath.Clean(filepath.Join(targetDir, filepath.FromSlash(entry[2])))
 		if indexedPath == targetPath {
 			indexed = true
@@ -123,18 +130,17 @@ func assertLiveADRSuccessor(t *testing.T, root, dir, source, target string) {
 		}
 	}
 	if !indexed {
-		t.Errorf("%s: successor %q is not indexed by its governed ADR inventory", source, target)
-		return
+		return fmt.Errorf("successor %q is not indexed by its governed ADR inventory", target)
 	}
 	content, err := os.ReadFile(targetPath)
 	if err != nil {
-		t.Errorf("%s: successor %q cannot be read: %v", source, target, err)
-		return
+		return fmt.Errorf("successor %q cannot be read: %w", target, err)
 	}
 	statuses := adrStatusPattern.FindAllStringSubmatch(string(content), -1)
 	if len(statuses) != 1 || (statuses[0][1] != "Accepted" && statuses[0][1] != "Proposed") {
-		t.Errorf("%s: successor %q must be one live Accepted or Proposed ADR", source, target)
+		return fmt.Errorf("successor %q must be one live Accepted or Proposed ADR", target)
 	}
+	return nil
 }
 
 func governedADRDirectory(root, candidate string) bool {
@@ -157,6 +163,46 @@ func TestADRFilenamePatternAcceptsOnlyCanonicalWidth(t *testing.T) {
 		if got := adrFilePattern.MatchString(name); got != want {
 			t.Errorf("adrFilePattern.MatchString(%q) = %t, want %t", name, got, want)
 		}
+	}
+}
+
+func TestValidateLiveADRSuccessor(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "docs", "adr")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"README.md":            "| [002](ADR-002-live.md) | Live | Accepted |\n| [003](ADR-003-retired.md) | Retired | Deprecated |\n",
+		"ADR-002-live.md":      "# ADR-002: Live\n\nStatus: Accepted\n",
+		"ADR-003-retired.md":   "# ADR-003: Retired\n\nStatus: Deprecated\n",
+		"ADR-004-unindexed.md": "# ADR-004: Unindexed\n\nStatus: Accepted\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tests := []struct {
+		name   string
+		target string
+		want   string
+	}{
+		{name: "live indexed successor", target: "ADR-002-live.md"},
+		{name: "invalid record", target: "README.md", want: "not an ADR record"},
+		{name: "not indexed", target: "ADR-004-unindexed.md", want: "not indexed"},
+		{name: "not live", target: "ADR-003-retired.md", want: "must be one live"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateLiveADRSuccessor(root, dir, "ADR-001-old.md", tt.target)
+			if tt.want == "" && err != nil {
+				t.Fatal(err)
+			}
+			if tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
 	}
 }
 

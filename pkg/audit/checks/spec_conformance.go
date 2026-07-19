@@ -18,8 +18,7 @@ import (
 // no longer exists has rotted — it may describe an API, design doc, or
 // acceptance-criteria location that has been moved or deleted.
 //
-// This is tier 3 (cheap mode) of the Outcomes framework spec-compliance
-// outcome (docs/design/outcomes-framework.md):
+// This is the third cheap spec-compliance check:
 //   - Tier 1 (spec.coverage):   detect missing SPECs
 //   - Tier 2 (spec.staleness):  detect stale SPECs
 //   - Tier 3 (spec.conformance): detect broken path references in SPECs

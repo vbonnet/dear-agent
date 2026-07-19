@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// TestRecorderRunsNodesAttempts verifies the BACKLOG ticket 0.3 acceptance:
+// TestRecorderRunsNodesAttempts verifies the persisted-attempt contract:
 // after a 5-node run with one retry, the nodes table holds 5 rows and the
 // node_attempts table holds 6 rows.
 func TestRecorderRunsNodesAttempts(t *testing.T) {
@@ -118,7 +118,7 @@ func TestRecorderRunsNodesAttempts(t *testing.T) {
 	}
 }
 
-// TestAuditEventsEveryTransition verifies the BACKLOG ticket 0.4 acceptance:
+// TestAuditEventsEveryTransition verifies the transition-audit contract:
 // every state transition produces an audit_events row. For a 2-node bash
 // workflow we expect:
 //   - run-level: pending→running, running→succeeded (2 rows)

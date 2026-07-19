@@ -283,9 +283,9 @@ listed so older docs and identifiers can be interpreted correctly.
      `OnDefine/OnEnforce/OnAudit/OnResolve` callbacks. This is a *code concept*
      with a different "E" and "R"; docs call it "workflow lifecycle hooks", not
      "DEAR hooks". Exported Go names stay unchanged.
-   - **(c) Backlog phase prefix:** `DEAR-X.*` identifiers in
-     `docs/workflow-engine/BACKLOG.md` / ROADMAP are a numbering convention for
-     framework-improvement items, unrelated to either loop.
+   - **(c) Archived backlog prefix:** legacy `DEAR-X.*` identifiers were a
+     numbering convention for framework-improvement items, unrelated to either
+     loop. Current work uses Beads IDs.
    Canonical authority: [ADR-035](docs/adr/ADR-035-dear-terminology-disambiguation.md).
 
 3. **`pkg/vroom` code encodes the superseded model.**

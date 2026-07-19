@@ -70,7 +70,7 @@ func TestMCP_Initialize(t *testing.T) {
 	}
 }
 
-func TestMCP_ToolsList_HasFourTools(t *testing.T) {
+func TestMCP_ToolsList_HasThreeTools(t *testing.T) {
 	srv, _ := newTestServer(t)
 	resp := srv.HandleRequest(context.Background(), rpcRequest{
 		JSONRPC: "2.0", ID: 1, Method: "tools/list",
@@ -79,14 +79,13 @@ func TestMCP_ToolsList_HasFourTools(t *testing.T) {
 		t.Fatalf("tools/list error: %+v", resp.Error)
 	}
 	tools := resp.Result.(map[string]any)["tools"].([]map[string]any)
-	if len(tools) != 4 {
-		t.Fatalf("got %d tools, want 4", len(tools))
+	if len(tools) != 3 {
+		t.Fatalf("got %d tools, want 3", len(tools))
 	}
 	want := map[string]bool{
 		"get_signals":         false,
 		"get_recommendations": false,
 		"get_signal_trends":   false,
-		"suggest_backlog":     false,
 	}
 	for _, tool := range tools {
 		want[tool["name"].(string)] = true
@@ -126,9 +125,9 @@ func TestMCP_UnknownMethod(t *testing.T) {
 	}
 }
 
-func TestMCP_UnknownTool(t *testing.T) {
+func TestMCP_RetiredBacklogToolIsUnknown(t *testing.T) {
 	srv, _ := newTestServer(t)
-	resp := callTool(t, srv, "no_such_tool", nil)
+	resp := callTool(t, srv, "suggest_backlog", nil)
 	if resp.Error == nil {
 		t.Fatal("expected error for unknown tool")
 	}

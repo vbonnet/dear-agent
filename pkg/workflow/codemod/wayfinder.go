@@ -187,7 +187,7 @@ func taskSummary(tasks []WayfinderTask) string {
 }
 
 // buildWorkflowDoc constructs a yaml.v3 document for the synthesised
-// workflow. Fields appear in the order ROADMAP.md prescribes:
+// workflow. Fields appear in canonical schema order:
 // schema_version, name, version, description, nodes.
 func buildWorkflowDoc(name string, s WayfinderSession, nodes []synthNode) *yaml.Node {
 	mapping := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}

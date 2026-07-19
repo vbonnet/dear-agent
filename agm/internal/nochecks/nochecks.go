@@ -4,9 +4,10 @@
 //
 // # Why this matters
 //
-// safe-pr arms squash auto-merge on every PR it creates, on the assumption that
-// CI will run, report the required checks, and let the PR merge itself once
-// green. A push-then-PR-open race can drop the CI trigger: the head SHA ends up
+// safe-pr arms squash auto-merge on every non-draft PR it creates, on the
+// assumption that CI will run, report the required checks, and let the PR
+// merge itself once green. Drafts are human handoffs and remain unarmed. A
+// push-then-PR-open race can drop the CI trigger: the head SHA ends up
 // with no check-runs at all, so the required checks never report. Auto-merge
 // then waits forever and the safe-merge babysit loop skips the PR as "pending"
 // on every pass — there is no red, no green, and no signal. The PR ages

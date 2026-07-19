@@ -404,7 +404,7 @@ Now that you're up and running:
 
 4. **Contributing:**
    - [Contributing Guide](../CONTRIBUTING.md) - Development setup and testing
-   - [Test Plan](../TEST-PLAN.md) - Comprehensive testing strategy
+   - [BDD Catalog](BDD-CATALOG.md) - Executable behavior and test traceability
 
 ## Getting Help
 
