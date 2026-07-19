@@ -12,6 +12,7 @@ var (
 	adrFilePattern   = regexp.MustCompile(`^(?:ADR-)?([0-9]{3,4})-[a-z0-9-]+\.md$`)
 	adrTitlePattern  = regexp.MustCompile(`(?m)^# ADR-([0-9]{3,4}): (.+)$`)
 	adrStatusPattern = regexp.MustCompile(`(?m)^Status: (Accepted|Proposed|Deprecated|Superseded)(?: .*)?$`)
+	adrStatusLine    = regexp.MustCompile(`(?m)^Status:.*$`)
 	adrIndexPattern  = regexp.MustCompile(`(?m)^\| \[([0-9]{3,4})\]\(([^)]+\.md)\) \| ([^|]+) \| (Accepted|Proposed|Deprecated|Superseded) \|$`)
 	bareADRLike      = regexp.MustCompile(`^[0-9]+(?:-|$).*\.md$`)
 	markdownLink     = regexp.MustCompile(`\[[^]]+\]\(([^)]+)\)`)
@@ -42,8 +43,9 @@ func parseRecord(root, relative string, data []byte, governed map[string]bool) (
 		}
 	}
 	statuses := adrStatusPattern.FindAllStringSubmatch(string(data), -1)
-	if len(statuses) != 1 {
-		violations = append(violations, Violation{Path: relative, Reason: fmt.Sprintf("want one normalized Status line, got %d", len(statuses))})
+	statusLines := adrStatusLine.FindAll(data, -1)
+	if len(statusLines) != 1 || len(statuses) != 1 {
+		violations = append(violations, Violation{Path: relative, Reason: fmt.Sprintf("want one normalized Status line, got %d status-like line(s)", len(statusLines))})
 	} else {
 		record.status = statuses[0][1]
 	}
@@ -56,9 +58,10 @@ func parseRecord(root, relative string, data []byte, governed map[string]bool) (
 
 func parseAggregate(root, relative string, data []byte, governed map[string]bool) []Violation {
 	statuses := adrStatusPattern.FindAllStringSubmatch(string(data), -1)
+	statusLines := adrStatusLine.FindAll(data, -1)
 	var violations []Violation
-	if len(statuses) != 1 {
-		violations = append(violations, Violation{Path: relative, Reason: fmt.Sprintf("want one normalized Status line, got %d", len(statuses))})
+	if len(statusLines) != 1 || len(statuses) != 1 {
+		violations = append(violations, Violation{Path: relative, Reason: fmt.Sprintf("want one normalized Status line, got %d status-like line(s)", len(statusLines))})
 	}
 	violations = append(violations, commonDocumentViolations(root, relative, data)...)
 	if len(statuses) == 1 && statuses[0][1] == "Superseded" && !hasADRSuccessorLink(root, relative, data, governed) {

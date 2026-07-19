@@ -2,8 +2,11 @@ package adrlint
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
+
+var adrIndexLikeRow = regexp.MustCompile(`(?i)^\|\s*\[[0-9]{3,4}\]\([^)]*\.md(?:#[^)]*)?\)`)
 
 func validateIndex(root, relative string, data []byte, records map[string]record) []Violation {
 	violations := commonDocumentViolations(root, relative, data)
@@ -12,7 +15,7 @@ func validateIndex(root, relative string, data []byte, records map[string]record
 		trimmed := strings.TrimSpace(line)
 		match := adrIndexPattern.FindStringSubmatch(trimmed)
 		if len(match) == 0 {
-			if strings.HasPrefix(trimmed, "| [") && strings.Contains(trimmed, "](") && strings.Contains(trimmed, ".md)") {
+			if adrIndexLikeRow.MatchString(trimmed) {
 				violations = append(violations, Violation{Path: relative, Reason: "malformed ADR index row: " + line})
 			}
 			continue

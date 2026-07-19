@@ -178,9 +178,9 @@ func TestCheckRepositoryRejectsMalformedADRInputs(t *testing.T) {
 
 	repo := newADRRepo(t)
 	writeADRFile(t, repo, ".dear-agent.yml", policyFixture())
-	writeADRFile(t, repo, "docs/adr/ADR-001-example.md", recordFixture("001", "Example decision", "Accepted"))
+	writeADRFile(t, repo, "docs/adr/ADR-001-example.md", recordFixture("001", "Example decision", "Accepted")+"\nStatus: Draft\n")
 	writeADRFile(t, repo, "docs/adr/ADR-37-malformed.md", "# ADR-37: malformed\n\nStatus: Accepted\n")
-	writeADRFile(t, repo, "docs/adr/README.md", indexFixture("001", "ADR-001-example.md", "Example decision", "Accepted")+"  | [001](ADR-001-example.md) | Duplicate invalid status | Draft |\n")
+	writeADRFile(t, repo, "docs/adr/README.md", indexFixture("001", "ADR-001-example.md", "Example decision", "Accepted")+"  | [001](ADR-001-example.md#context) | Duplicate invalid status | Draft |\n")
 	writeADRFile(t, repo, "pkg/hash/ADR.md", "# Hash decisions\n\nStatus: Accepted\n")
 	gitADR(t, repo, "add", ".")
 	gitADR(t, repo, "commit", "-m", "fixture")
