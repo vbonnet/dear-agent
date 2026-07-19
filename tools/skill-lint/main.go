@@ -21,9 +21,13 @@ import (
 )
 
 func main() {
+	os.Exit(mainExitCode())
+}
+
+func mainExitCode() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	os.Exit(run(ctx, os.Args[1:], os.Stderr))
+	return run(ctx, os.Args[1:], os.Stderr)
 }
 
 func run(ctx context.Context, args []string, stderr io.Writer) int {
