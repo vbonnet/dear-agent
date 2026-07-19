@@ -511,7 +511,7 @@ func killTmuxSession(tmuxName string) {
 
 	// Use exact matching (= prefix) to prevent prefix-matching bugs
 	// This is critical: without =prefix, "astrocyte" could match "astrocyte-improvements"
-	// See ADR-0002 for details on tmux exact matching behavior
+	// See agm/internal/tmux/ADR-001-capture-pane-vs-control-mode.md for the tmux safety rationale.
 	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "kill-session", "-t", tmux.FormatSessionTarget(normalizedName))
 
 	// Execute and ignore errors (idempotent behavior)
