@@ -4,7 +4,7 @@
 **Date:** 2026-05-04
 **Author:** workflow-engine-comparison session
 **Related:**
-[ADR-010 — Durable workflow execution substrate](../adr/ADR-010-workflow-engine-architecture.md),
+[ADR-010 — Workflow Engine as Substrate-Quality Work-Item Layer](../adrs/ADR-010-workflow-engine-architecture.md),
 [Workflow Engine Operator Guide](../workflow-engine.md)
 
 ## Problem
@@ -33,9 +33,9 @@ solve exactly one of them. The comparison below makes that explicit.
 |---|------------|--------|
 | C1 | Runs **identically** on macOS and Linux. No "works on my box, fails on the server." | Hard requirement. |
 | C2 | No long-running daemon a user has to install, configure, and babysit. | dear-agent is personal-dev tooling, not a platform team's product. |
-| C3 | State is local-first, file-on-disk, inspectable with normal CLI tools. | ADR-010; existing `runs.db` is `sqlite3`-debuggable. |
-| C4 | Must have an audit trail per state transition (substrate property). | ADR-010 durable-state decision. |
-| C5 | Must be embeddable as a Go library — workflows are authored in YAML, but the runner is `cmd/workflow-run`, not a service. | Project language policy and ADR-010. |
+| C3 | State is local-first, file-on-disk, inspectable with normal CLI tools. | ADR-010 D2; existing `runs.db` is `sqlite3`-debuggable. |
+| C4 | Must have an audit trail per state transition (substrate property). | [ADR-009](../adrs/ADR-009-work-item-as-first-class-substrate.md), ADR-010 D3. |
+| C5 | Must be embeddable as a Go library — workflows are authored in YAML, but the runner is `cmd/workflow-run`, not a service. | Project language policy; ADR-010 D1. |
 | C6 | "Good analytics" — the operator can answer *what ran, when, with what cost, why did it fail?* without log-grep archaeology. | Stated requirement (Valentin). |
 | C7 | Right-sized for personal dev automation: nightly audits, periodic signal collection, the occasional multi-step research pipeline. Not 10K-tenant enterprise. | Project scope; see [.dear-agent.yml `audits.schedule`](../../.dear-agent.yml). |
 
@@ -58,7 +58,7 @@ HITL is a first-class state, not a callback.
 | Mac + Linux parity (C1) | ✅ Pure Go + `modernc.org/sqlite` (cgo-free). Same binary, same `runs.db`. |
 | Operational burden (C2) | ✅ Zero daemons. `workflow-run` is a one-shot process; `runs.db` is a file. |
 | Local-first state (C3) | ✅ Single SQLite file. `sqlite3 runs.db` is the debugger. |
-| Audit trail (C4) | ✅ Every transition is a row in `audit_events`, as required by ADR-010. |
+| Audit trail (C4) | ✅ Every transition is a row in `audit_events`. ADR-010 §5. |
 | Embeddable (C5) | ✅ `pkg/workflow` is the API; CLIs are thin shells over it. |
 | Analytics (C6) | ✅ SQL is the query language. Cost, latency, failure-class, model-mix breakdowns are all `SELECT` queries. FTS5 covers free-text. |
 | Right-sized (C7) | ✅ Designed for this use case. SQLite ceiling (~10 concurrent writers) is well past personal-dev demand. |
@@ -83,7 +83,7 @@ history and replays it on failure to provide deterministic execution.
 | Embeddable (C5) | ⚠️ The SDK is a library, but the runtime is a service. You don't run "a Temporal" inline. |
 | Analytics (C6) | ✅ Temporal Web + tctl. Excellent — arguably best-in-class for workflow analytics. |
 | Right-sized (C7) | ❌ Built for "long-running orchestration at scale." For a nightly DAG of five nodes, the operational overhead dwarfs the work. |
-| Determinism contract | ⚠️ Workflows must be deterministic for replay. AI nodes are non-deterministic; ADR-010 rejects hosted workflow services for this local-first boundary. |
+| Determinism contract | ⚠️ Workflows must be deterministic for replay. AI nodes are non-deterministic. ADR-010 D10 explicitly rejects this contract. |
 | Migration cost | ❌ ~2700 LOC of `pkg/workflow` plus the YAML schema, role registry, exit gates, and audit sinks would all be reframed against Temporal's primitives. Months of work. |
 
 **Verdict.** Disqualified by C2 (daemon) and C7 (overkill), with the
@@ -245,13 +245,13 @@ concern that's already solved by the OS layer.
 Switch *away* from the built-in engine if any of these become true:
 
 1. **Concurrency > ~10 simultaneous writers.** SQLite WAL stops being
-   comfortable beyond that. The `State` interface preserves a future
-   Postgres-adapter seam; that's the first move, not "adopt
+   comfortable beyond that. ADR-010 D2 already plans a Postgres adapter
+   behind the same `State` interface; that's the first move, not "adopt
    Temporal."
 2. **Multi-tenant or shared-team operation becomes a goal.** The current
-   design is one-user-one-`runs.db`.
+   design is one-user-one-`runs.db`. ADR-010 open question §2.
 3. **Deterministic replay becomes a product requirement.** Currently
-   the engine does not promise it. If a use case forces
+   ADR-010 D10 explicitly disclaims it. If a use case forces
    determinism (compliance? regulated workloads?), Temporal becomes a
    serious candidate again.
 
@@ -264,8 +264,8 @@ them shows up; until then the recommendation stands.
 |---|---|
 | Keep the built-in engine for DAG orchestration. | Only candidate that passes all of C1–C7 simultaneously. |
 | Use cron (or its OS-equivalent) for the trigger layer. | DAG engines and time schedulers are different layers; cron is the portable common denominator. |
-| Preserve the `State` interface as the future-proofing seam. | The realistic upgrade path under load is "swap SQLite for Postgres," not "swap dear-agent for Temporal." |
-| Do not promise deterministic replay. | Audit completeness is the substitute. |
+| Preserve the `State` interface as the future-proofing seam. | The realistic upgrade path under load is "swap SQLite for Postgres," not "swap dear-agent for Temporal." Already in ADR-010 D2. |
+| Do not promise deterministic replay. | Reaffirms ADR-010 D10. Audit completeness is the substitute. |
 | Do not adopt a Python-based engine (Airflow, Prefect, LangGraph). | Cross-language boundary on every node is unjustifiable for personal-dev tooling. |
 | Do not adopt a container-based engine (Dagger, Argo, `act`). | Forces a Docker/K8s dependency on every user. Violates C2. |
 
@@ -286,13 +286,14 @@ them shows up; until then the recommendation stands.
 3. **Does the analytics story need a richer surface than SQL?** The
    built-in engine's "good analytics" answer today is "every question is
    a `SELECT`." That's powerful but unfriendly to non-SQL users. A
-   a read-only web inspector may eventually help. Worth
+   read-only web inspector is mentioned in ADR-010 Phase 5. Worth
    prototyping when the data volume justifies it; not a reason to switch
    engines.
 
 ## References
 
-- [ADR-010 — Durable workflow execution substrate](../adr/ADR-010-workflow-engine-architecture.md)
+- [ADR-010 — Workflow Engine as Substrate-Quality Work-Item Layer](../adrs/ADR-010-workflow-engine-architecture.md)
+- [ADR-009 — Work Item as First-Class Substrate](../adrs/ADR-009-work-item-as-first-class-substrate.md)
 - [Workflow Engine Operator Guide](../workflow-engine.md)
 - [Substrate Diagnostic](substrate-diagnostic.md)
 - [.dear-agent.yml — `audits.schedule`](../../.dear-agent.yml)
