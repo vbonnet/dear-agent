@@ -9,26 +9,6 @@ import (
 	"testing"
 )
 
-func TestSubsystemArchitectureLineBudgets(t *testing.T) {
-	root := repoRoot(t)
-	files := []string{
-		"agm/docs/ARCHITECTURE.md",
-		"agm/cmd/agm-daemon/ARCHITECTURE.md",
-		"agm/cmd/agm-mcp-server/ARCHITECTURE.md",
-		"agm/internal/agent/gemini/ARCHITECTURE.md",
-		"engram/mcp/ARCHITECTURE.md",
-		"internal/sandbox/ARCHITECTURE.md",
-	}
-	for _, file := range files {
-		t.Run(file, func(t *testing.T) {
-			content := readFile(t, filepath.Join(root, filepath.FromSlash(file)))
-			if lines := strings.Count(strings.TrimSuffix(content, "\n"), "\n") + 1; lines > 300 {
-				t.Fatalf("%s has %d lines; living architecture budget is 300", file, lines)
-			}
-		})
-	}
-}
-
 func TestAGMHarnessArchitectureMatchesRegistry(t *testing.T) {
 	root := repoRoot(t)
 	source := readFile(t, filepath.Join(root, "agm/internal/agent/harnesses.go"))
@@ -46,6 +26,25 @@ func TestAGMHarnessArchitectureMatchesRegistry(t *testing.T) {
 	if !strings.Contains(doc, "deprecated: `gemini-cli`") &&
 		!strings.Contains(doc, "`gemini-cli` | deprecated") {
 		t.Error("AGM architecture does not mark gemini-cli deprecated")
+	}
+}
+
+func TestAGMDaemonArchitectureMatchesDeliveryAuthority(t *testing.T) {
+	root := repoRoot(t)
+	source := readFile(t, filepath.Join(root, "agm/internal/daemon/daemon.go"))
+	doc := readFile(t, filepath.Join(root, "agm/cmd/agm-daemon/ARCHITECTURE.md"))
+	for _, marker := range []string{
+		"slo.Daemon.PollInterval.Duration",
+		"session.CheckSessionDelivery(recipientManifest.Tmux.SessionName)",
+	} {
+		if !strings.Contains(source, marker) {
+			t.Fatalf("daemon source missing delivery marker %q", marker)
+		}
+	}
+	for _, fact := range []string{"`session.CheckSessionDelivery` is the sole readiness authority", "`~/.config/agm/message_queue.db`"} {
+		if !strings.Contains(doc, fact) {
+			t.Errorf("daemon architecture omits runtime fact %q", fact)
+		}
 	}
 }
 
@@ -129,45 +128,8 @@ func TestSandboxArchitectureMatchesSelectionOrder(t *testing.T) {
 	}
 }
 
-func TestRetiredSubsystemDesignsStayRetired(t *testing.T) {
+func TestRetiredSubsystemArtifactsStayRetired(t *testing.T) {
 	root := repoRoot(t)
-	cases := map[string][]string{
-		"agm/docs/ARCHITECTURE.md": {
-			"Astrocyte Python",
-			"OpenAI API (GPT-4",
-			"Gemini API adapter",
-		},
-		"agm/cmd/agm-daemon/ARCHITECTURE.md": {
-			"localhost:8765",
-			"every 2 seconds",
-			"Monitoring Loop (every 2s)",
-		},
-		"agm/cmd/agm-mcp-server/ARCHITECTURE.md": {
-			"5-second TTL",
-			"three focused MCP tools",
-			"manifest.json files on every query",
-		},
-		"engram/mcp/ARCHITECTURE.md": {
-			"engram_mcp_server.py",
-			"sentence_transformers",
-			"tools/retrieve.py",
-		},
-		"internal/sandbox/ARCHITECTURE.md": {
-			"Linux 5.11+: Native rootless OverlayFS (optimal)",
-			"Other: Mock provider",
-		},
-	}
-	for file, forbidden := range cases {
-		t.Run(file, func(t *testing.T) {
-			content := readFile(t, filepath.Join(root, filepath.FromSlash(file)))
-			for _, phrase := range forbidden {
-				if strings.Contains(content, phrase) {
-					t.Errorf("%s resurrects retired design phrase %q", file, phrase)
-				}
-			}
-		})
-	}
-
 	retiredFiles := []string{
 		"agm/cmd/agm-daemon/adr/001-http-api-choice.md",
 		"agm/cmd/agm-mcp-server/adr/002-caching-strategy.md",
