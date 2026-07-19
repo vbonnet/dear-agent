@@ -4,13 +4,15 @@ These records capture durable AGM trade-offs. Current source and tests outrank
 the prose. Routine Go patterns, one-time migrations, bug-fix diaries, and VROOM
 role descriptions do not belong in this subsystem decision set.
 
-Numbers are scoped to this directory. Gaps preserve deleted identity. Numeric
-identity is independent of zero padding, so records use the three-digit form.
+Numbers are scoped to this directory. Gaps preserve deleted identity. The
+four-digit `0004` record predates the three-digit sequence and remains unchanged
+for inbound-link stability.
 
 ## Index
 
 | ADR | Decision | Status |
 | --- | --- | --- |
+| [0004](0004-skill-allowed-tools-syntax.md) | Skill permission pattern syntax | Accepted |
 | [001](ADR-001-multi-agent-architecture.md) | CLI harness adapter boundary | Accepted |
 | [003](ADR-003-environment-validation-philosophy.md) | Validate harness prerequisites without owning them | Accepted |
 | [004](ADR-004-tmux-integration-strategy.md) | Tmux as the local CLI session runtime | Accepted |
@@ -26,7 +28,6 @@ identity is independent of zero padding, so records use the three-digit form.
 | [026](ADR-026-claude-ui-session-archival.md) | Reconcile Claude UI session archival locally | Accepted |
 | [027](ADR-027-bdd-enforcement-policy.md) | Go-native BDD enforcement | Accepted |
 | [028](ADR-028-multi-bot-discord-portal.md) | Multi-bot Discord portal | Accepted |
-| [029](ADR-029-skill-allowed-tools-syntax.md) | Skill permission pattern syntax | Accepted |
 
 VROOM decisions live in the root decision set; daemon and MCP decisions live
 with their command packages.

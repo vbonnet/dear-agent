@@ -24,8 +24,6 @@ func TestWorkspaceIsolation(t *testing.T) {
 	// OSS workspace: port 3307, Acme Corp workspace: port 3308
 
 	// OSS Workspace Adapter
-	t.Setenv("ENGRAM_TEST_MODE", "1")
-	t.Setenv("ENGRAM_TEST_WORKSPACE", "testoss")
 	t.Setenv("WORKSPACE", "testoss")
 	t.Setenv("DOLT_PORT", "3307")
 	os.Unsetenv("DOLT_DATABASE") // Let it default to workspace name
@@ -48,7 +46,6 @@ func TestWorkspaceIsolation(t *testing.T) {
 	// Acme Corp Workspace Adapter
 	// Note: For testing, we use the same Dolt server (3307) but different database name
 	// In production, workspaces would use separate Dolt instances
-	t.Setenv("ENGRAM_TEST_WORKSPACE", "testacme")
 	t.Setenv("WORKSPACE", "testacme")
 	t.Setenv("DOLT_PORT", "3307") // Same server, different workspace database
 	os.Unsetenv("DOLT_DATABASE")  // Let it default to workspace name
