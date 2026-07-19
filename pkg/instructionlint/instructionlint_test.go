@@ -86,6 +86,29 @@ func TestWrappedShellCommandsRemainPolicyVisible(t *testing.T) {
 	}
 }
 
+func TestScriptGuidanceAndCommandSubstitutionsRemainPolicyVisible(t *testing.T) {
+	source := []byte(strings.Join([]string{
+		"#!/usr/bin/env bash",
+		"# raw gh pr create is discussed here, not instructed",
+		"AGM_HELP='Use `agm new worker`.'",
+		"guidance='Use `safe-pr create --emergency --reason urgent`.'",
+		"merged=$(gh pr merge 42)",
+		"ready=$(bd ready)",
+	}, "\n"))
+
+	var got []string
+	for _, segment := range parseScriptSegments(source) {
+		for _, violation := range evaluateSegment("hook", segment) {
+			got = append(got, violation.Rule)
+		}
+	}
+	sort.Strings(got)
+	want := []string{"agm-root-new", "bare-beads", "raw-gh-merge", "safe-pr-emergency"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("rules = %v, want %v", got, want)
+	}
+}
+
 func TestRuleViolationsTeachCanonicalReplacements(t *testing.T) {
 	segments := []Segment{
 		{Kind: SegmentProse, Line: 1, Text: "Create W0-charter.md before D1."},
@@ -116,14 +139,19 @@ func TestRuleViolationsTeachCanonicalReplacements(t *testing.T) {
 		{Kind: SegmentShell, Line: 26, Text: "env WORKSPACE=oss agm status --output json"},
 		{Kind: SegmentShell, Line: 27, Text: "cd repo && agm session send worker hello"},
 		{Kind: SegmentShell, Line: 28, Text: "if gh pr merge 123; then"},
+		{Kind: SegmentShell, Line: 29, Text: "gh pr create --title test"},
+		{Kind: SegmentShell, Line: 30, Text: "gh pr close 123"},
+		{Kind: SegmentShell, Line: 31, Text: "gh pr reopen 123"},
+		{Kind: SegmentShell, Line: 32, Text: "merged=$(gh pr merge 123)"},
+		{Kind: SegmentShell, Line: 33, Text: "ready=$(bd ready)"},
 	}
 
 	var got []Violation
 	for _, segment := range segments {
 		got = append(got, evaluateSegment("AGENTS.md", segment)...)
 	}
-	if len(got) != 25 {
-		t.Fatalf("violations = %v, want 25", got)
+	if len(got) != 30 {
+		t.Fatalf("violations = %v, want 30", got)
 	}
 	for _, item := range got {
 		if item.Rule == "" || item.Replacement == "" {

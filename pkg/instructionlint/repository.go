@@ -71,6 +71,9 @@ func CheckRepository(ctx context.Context, root string) (Result, []Violation, err
 		files++
 		findings = append(findings, importViolations(relative, data, policy.Surfaces)...)
 		segments := parseSegments(data)
+		if strings.Contains(filepath.ToSlash(relative), "/hooks/") && filepath.Ext(relative) == "" {
+			segments = parseScriptSegments(data)
+		}
 		if extension := strings.ToLower(filepath.Ext(relative)); extension == ".yml" || extension == ".yaml" {
 			segments, err = parseYAMLSegments(data)
 			if err != nil {

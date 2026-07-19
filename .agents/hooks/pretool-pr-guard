@@ -48,8 +48,8 @@ else
   guidance="  safe-pr create --wayfinder <wayfinder-project-dir> --title \"...\" --body \"...\" [gh flags]
   safe-pr close  --wayfinder <wayfinder-project-dir> <number|url>
 
-(or set WAYFINDER_PROJECT_DIR; in a genuine emergency with no session, use
-\`safe-pr $verb --emergency --reason \"<why>\"\` — it is audited, not blocked).
+(or set WAYFINDER_PROJECT_DIR; if no session is available, use \`agm escalate\`
+and ask the supervisor/user for the required lifecycle action).
 Install once with \`make install-safe-pr\` if not on PATH."
 fi
 

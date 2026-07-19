@@ -16,12 +16,14 @@ type rule struct {
 var retiredWayfinder = regexp.MustCompile(`(?:\bV1\b|\bW0(?:\b|-)|\bD[1-6](?:\b|-)|\bS(?:1[01]|[1-9])(?:\b|-))`)
 var shellBoundary = regexp.MustCompile(`(?:&&|\|\||[;|])`)
 var environmentAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+var embeddedShellCommand = regexp.MustCompile("\\$\\(([^()]*)\\)|`([^`]*)`")
 
 var instructionRules = []rule{
 	{id: "wayfinder-v1", replacement: "CHARTER, PROBLEM, RESEARCH, DESIGN, SPEC, PLAN, SETUP, BUILD, and RETRO", applies: proseOrShell, detect: retiredWayfinder.MatchString},
 	{id: "bare-beads", replacement: "bd --db ~/beads/context-engine/.beads --dolt-auto-commit on <subcommand>", applies: commandSegment, detect: bareBeads},
 	{id: "raw-git-push", replacement: "safe-push", applies: commandSegment, detect: func(text string) bool { return strings.Contains(shellText(text), "git push") }},
 	{id: "raw-gh-merge", replacement: "safe-merge", applies: commandSegment, detect: rawGHMerge},
+	{id: "raw-gh-pr-lifecycle", replacement: "safe-pr create or safe-pr close; ask a human to reopen", applies: shellSegment, detect: rawGHPRLifecycle},
 	{id: "safe-pr-emergency", replacement: "safe-pr normally or escalate with agm escalate; there is no bypass flag", applies: commandSegment, detect: func(text string) bool {
 		normalized := shellText(text)
 		return strings.Contains(normalized, "safe-pr") && strings.Contains(normalized, "--emergency")
@@ -76,6 +78,10 @@ func commandSegment(kind SegmentKind) bool {
 	return kind == SegmentInline || kind == SegmentShell
 }
 
+func shellSegment(kind SegmentKind) bool {
+	return kind == SegmentShell
+}
+
 func shellText(text string) string {
 	normalized := strings.TrimSpace(text)
 	normalized = strings.TrimPrefix(normalized, "$ ")
@@ -113,12 +119,29 @@ func rawGHMerge(text string) bool {
 	return false
 }
 
+func rawGHPRLifecycle(text string) bool {
+	return anyCommand(text, func(fields []string) bool {
+		return len(fields) >= 3 && fields[0] == "gh" && fields[1] == "pr" &&
+			slices.Contains([]string{"create", "close", "reopen"}, fields[2])
+	})
+}
+
 func commandFields(text string) [][]string {
 	var commands [][]string
-	for _, command := range shellBoundary.Split(shellText(text), -1) {
-		fields := stripCommandPrefixes(strings.Fields(strings.TrimSpace(command)))
-		if len(fields) > 0 {
-			commands = append(commands, fields)
+	inputs := []string{shellText(text)}
+	for _, match := range embeddedShellCommand.FindAllStringSubmatch(text, -1) {
+		if match[1] != "" {
+			inputs = append(inputs, match[1])
+		} else if match[2] != "" {
+			inputs = append(inputs, match[2])
+		}
+	}
+	for _, input := range inputs {
+		for _, command := range shellBoundary.Split(input, -1) {
+			fields := stripCommandPrefixes(strings.Fields(strings.TrimSpace(command)))
+			if len(fields) > 0 {
+				commands = append(commands, fields)
+			}
 		}
 	}
 	return commands

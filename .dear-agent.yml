@@ -69,8 +69,20 @@ instruction-policy:
       owner: harness-shims
     - match: .claude/CLAUDE.md
       owner: harness-shims
+    - match: .claude/hooks/pretool-*
+      owner: harness-hooks
+    - match: .claude/hooks/stop-*
+      owner: harness-hooks
     - match: .agents/AGENTS.md
       owner: harness-shims
+    - match: .agents/hooks/pretool-*
+      owner: harness-hooks
+    - match: .agents/hooks/stop-*
+      owner: harness-hooks
+    - match: .codex/hooks/pretool-*
+      owner: harness-hooks
+    - match: .codex/hooks/stop-*
+      owner: harness-hooks
     - match: .deepsec/AGENTS.md
       owner: deepsec
     - match: .deepsec/data/**/SETUP.md

@@ -49,6 +49,98 @@ func parseSegments(source []byte) []Segment {
 	return segments
 }
 
+func parseScriptSegments(source []byte) []Segment {
+	var segments []Segment
+	var quote byte
+	heredoc := ""
+	for index, raw := range strings.Split(string(source), "\n") {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
+		if heredoc != "" {
+			if value == heredoc {
+				heredoc = ""
+				continue
+			}
+			segments = append(segments, Segment{Kind: SegmentShell, Line: index + 1, Text: value})
+			continue
+		}
+		if quote != 0 {
+			segments = append(segments, Segment{Kind: SegmentShell, Line: index + 1, Text: value})
+			if unescapedByteCount(raw, quote)%2 == 1 {
+				quote = 0
+			}
+			continue
+		}
+		if strings.HasPrefix(value, "#") {
+			segments = append(segments, Segment{Kind: SegmentProse, Line: index + 1, Text: value})
+			continue
+		}
+		if marker := scriptHeredocMarker(value); marker != "" {
+			heredoc = marker
+			continue
+		}
+		if shellAssignment.MatchString(value) && strings.Contains(value, "$(") {
+			segments = append(segments, Segment{Kind: SegmentShell, Line: index + 1, Text: value})
+			continue
+		}
+		if assignmentQuote := scriptAssignmentQuote(value); assignmentQuote != 0 {
+			segments = append(segments, Segment{Kind: SegmentShell, Line: index + 1, Text: value})
+			if unescapedByteCount(raw, assignmentQuote)%2 == 1 {
+				quote = assignmentQuote
+			}
+			continue
+		}
+		for _, prefix := range []string{"echo ", "printf ", "emit "} {
+			if strings.HasPrefix(value, prefix) {
+				segments = append(segments, Segment{Kind: SegmentShell, Line: index + 1, Text: value})
+				break
+			}
+		}
+	}
+	return segments
+}
+
+var shellAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+var heredocMarker = regexp.MustCompile(`<<-?['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
+
+func scriptAssignmentQuote(value string) byte {
+	if !shellAssignment.MatchString(value) {
+		return 0
+	}
+	for index := strings.IndexByte(value, '=') + 1; index < len(value); index++ {
+		if value[index] == '\'' || value[index] == '"' {
+			return value[index]
+		}
+	}
+	return 0
+}
+
+func scriptHeredocMarker(value string) string {
+	match := heredocMarker.FindStringSubmatch(value)
+	if len(match) == 2 {
+		return match[1]
+	}
+	return ""
+}
+
+func unescapedByteCount(value string, target byte) int {
+	count := 0
+	escaped := false
+	for index := 0; index < len(value); index++ {
+		if value[index] == '\\' && !escaped {
+			escaped = true
+			continue
+		}
+		if value[index] == target && !escaped {
+			count++
+		}
+		escaped = false
+	}
+	return count
+}
+
 var allowedBashTool = regexp.MustCompile(`Bash\(([^)]*)\)`)
 
 func markdownFrontmatterCommands(source []byte) []Segment {
@@ -175,6 +267,9 @@ func classifySourceLines(classified map[int]SegmentKind, segment text.Segment, s
 }
 
 func commandShaped(value string) bool {
+	if strings.Contains(value, "$(") {
+		return true
+	}
 	fields := strings.Fields(strings.TrimSpace(value))
 	if len(fields) == 0 {
 		return false
