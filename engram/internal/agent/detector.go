@@ -10,7 +10,7 @@
 //   - Aider: Terminal-based AI pair programming
 //   - Unknown: Fallback for unsupported or manual usage
 //
-// Detection strategy (see ADR-008):
+// Detection strategy (see SPEC.md):
 //  1. Check environment variables (primary detection method)
 //  2. Check for agent-specific files in working directory (fallback)
 //  3. Return AgentUnknown if no agent detected
@@ -61,7 +61,7 @@ func NewDetector() *Detector {
 
 // Detect identifies the current AI agent platform
 //
-// Detection strategy (see ADR-008):
+// Detection strategy (see SPEC.md):
 // 1. Check environment variables (primary)
 // 2. Check for agent-specific files (fallback)
 //

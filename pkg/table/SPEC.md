@@ -242,6 +242,6 @@ All dependencies from trusted source (Charmbracelet ecosystem, 8,900+ stars).
 
 ## References
 
-- ADR-002: Table Formatting Enhancement
+- [Package architecture](ARCHITECTURE.md)
 - Lipgloss docs: https://github.com/charmbracelet/lipgloss
 - Migrated commands: analytics_usage.go, telemetry.go, main.go (benchmark), list.go (invariants)
