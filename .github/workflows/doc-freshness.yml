@@ -37,12 +37,12 @@ jobs:
         id: baseline
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           BEFORE_SHA: ${{ github.event.before }}
         run: |
           if [[ "$EVENT_NAME" == "pull_request" ]]; then
-            git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
-            echo "ref=origin/${BASE_REF}" >> "$GITHUB_OUTPUT"
+            git fetch --no-tags origin "$BASE_SHA"
+            echo "ref=$BASE_SHA" >> "$GITHUB_OUTPUT"
           elif [[ "$EVENT_NAME" == "push" ]]; then
             if [[ "$BEFORE_SHA" =~ ^0+$ ]]; then
               echo "ref=" >> "$GITHUB_OUTPUT"
