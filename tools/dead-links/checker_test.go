@@ -28,6 +28,7 @@ func TestParseDocumentUsesMarkdownAST(t *testing.T) {
 		"# Repeat",
 		"# [Linked](target.md) `Code` **Bold**",
 		"# See <https://example.com>",
+		"# Version &#50;",
 		"# Foo",
 		"# Foo-1",
 		"# Foo",
@@ -42,7 +43,7 @@ func TestParseDocumentUsesMarkdownAST(t *testing.T) {
 		"[target]: target.md#repeat",
 	}, "\n"))
 	doc := parseDocument(markdown, source)
-	for _, anchor := range []string{"repeat", "repeat-1", "linked-code-bold", "see-httpsexamplecom", "foo", "foo-1", "foo-2", "explicit"} {
+	for _, anchor := range []string{"repeat", "repeat-1", "linked-code-bold", "see-httpsexamplecom", "version-2", "foo", "foo-1", "foo-2", "explicit"} {
 		if !doc.anchors[anchor] {
 			t.Errorf("missing anchor %q: %v", anchor, doc.anchors)
 		}

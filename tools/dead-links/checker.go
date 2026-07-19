@@ -18,6 +18,7 @@ import (
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/text"
+	"github.com/yuin/goldmark/util"
 	"golang.org/x/net/html"
 )
 
@@ -112,12 +113,16 @@ func headingText(heading *ast.Heading, source []byte) string {
 			if n.SoftLineBreak() || n.HardLineBreak() {
 				content.WriteByte(' ')
 			}
+		case *ast.String:
+			content.Write(n.Value)
 		case *ast.AutoLink:
 			content.Write(n.Label(source))
 		}
 		return ast.WalkContinue, nil
 	})
-	return content.String()
+	resolved := util.ResolveNumericReferences([]byte(content.String()))
+	resolved = util.ResolveEntityNames(resolved)
+	return string(resolved)
 }
 
 func collectExplicitAnchors(anchors map[string]bool, raw []byte) {
