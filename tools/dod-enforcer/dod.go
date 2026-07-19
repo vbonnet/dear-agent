@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"time"
@@ -58,6 +59,12 @@ func LoadDoD(path string) (*BeadDoD, error) {
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&dod); err != nil {
+		return nil, fmt.Errorf("failed to parse DoD YAML: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err == nil {
+		return nil, fmt.Errorf("failed to parse DoD YAML: multiple YAML documents are not supported")
+	} else if !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("failed to parse DoD YAML: %w", err)
 	}
 

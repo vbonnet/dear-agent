@@ -15,6 +15,8 @@ type localADRScope struct {
 
 var localADRFilePattern = regexp.MustCompile(`^(?:ADR-)?([0-9]{3,4})-[a-z0-9-]+\.md$`)
 
+const localADRMaxLines = 120
+
 func TestCodeLocalADRsHaveCompleteConciseLifecycle(t *testing.T) {
 	root := repoRoot(t)
 	governed := map[string]bool{}
@@ -48,6 +50,9 @@ func TestCodeLocalADRsHaveCompleteConciseLifecycle(t *testing.T) {
 	for _, name := range aggregates {
 		t.Run(name, func(t *testing.T) {
 			content := readFile(t, filepath.Join(root, filepath.FromSlash(name)))
+			if lines := strings.Count(content, "\n") + 1; lines > localADRMaxLines {
+				t.Errorf("%s: %d lines exceeds the %d-line aggregate ADR budget", name, lines, localADRMaxLines)
+			}
 			statuses := adrStatusPattern.FindAllStringSubmatch(content, -1)
 			if len(statuses) != 1 {
 				t.Errorf("want one normalized Status line, got %d", len(statuses))
@@ -88,6 +93,9 @@ func validateLocalADRScope(t *testing.T, root string, scope localADRScope, gover
 		}
 		id := match[1]
 		content := readFile(t, filepath.Join(dir, entry.Name()))
+		if lines := strings.Count(content, "\n") + 1; lines > localADRMaxLines {
+			t.Errorf("%s: %d lines exceeds the %d-line code-local ADR budget", entry.Name(), lines, localADRMaxLines)
+		}
 		titles := adrTitlePattern.FindAllStringSubmatch(content, -1)
 		if len(titles) != 1 {
 			t.Errorf("%s: want one ADR heading, got %d", entry.Name(), len(titles))

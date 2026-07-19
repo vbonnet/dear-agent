@@ -52,6 +52,17 @@ func TestLoadDoDRejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestLoadDoDRejectsTrailingYAMLDocument(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "multiple.dod.yaml")
+	content := "files_must_exist: []\n---\ntests_must_pass: true\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadDoD(path); err == nil || !strings.Contains(err.Error(), "multiple YAML documents") {
+		t.Fatalf("expected multiple-document error, got %v", err)
+	}
+}
+
 func TestCheckFilesExist(t *testing.T) {
 	// Create a temporary file
 	tmpDir := t.TempDir()

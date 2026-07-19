@@ -18,8 +18,9 @@ the filesystem boundary.
    workspace. An optional local file extends it additively without replacing
    base repositories.
 4. **Validate before mutation.** Configuration loading bounds input size and
-   validates names, URLs, paths, duplicates, and worktree relationships before
-   Git operations run.
+   validates URLs, explicit paths, duplicates, and worktree relationships before
+   Git operations run. Repository names are required but are trusted
+   configuration; they are not currently a path-containment boundary.
 
 Ordinary Cobra usage and idempotent command implementation are coding patterns,
 not separate architecture decisions.
@@ -28,7 +29,8 @@ not separate architecture decisions.
 
 - Git semantics come from the host CLI and are isolated behind one interface.
 - Local configuration cannot silently remove team configuration.
-- Unsupported or unsafe repository inputs fail before mutation.
+- Invalid governed URL, path, duplicate, or worktree relationships fail before
+  mutation; repository names must come from a trusted configuration source.
 
 ## Evidence
 
