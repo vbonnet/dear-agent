@@ -242,21 +242,21 @@ func wayfinderPluginExposesOneRootSkill(ctx context.Context) error {
 	skillLink := filepath.Join(root, "skills", "wayfinder", "SKILL.md")
 	info, err := os.Lstat(skillLink)
 	if err != nil {
-		return fmt.Errorf("canonical Claude skill link is missing: %w", err)
+		return fmt.Errorf("canonical claude skill link is missing: %w", err)
 	}
 	if info.Mode()&os.ModeSymlink == 0 {
-		return fmt.Errorf("Claude skill surface must be a symlink to canonical SKILL.md: %s", skillLink)
+		return fmt.Errorf("claude skill surface must be a symlink to canonical SKILL.md: %s", skillLink)
 	}
 	resolvedSkill, err := filepath.EvalSymlinks(skillLink)
 	if err != nil {
-		return fmt.Errorf("resolve canonical Claude skill link: %w", err)
+		return fmt.Errorf("resolve canonical claude skill link: %w", err)
 	}
 	canonicalSkill, err := filepath.EvalSymlinks(filepath.Join(root, "SKILL.md"))
 	if err != nil {
 		return fmt.Errorf("resolve canonical root skill: %w", err)
 	}
 	if resolvedSkill != canonicalSkill {
-		return fmt.Errorf("Claude skill link resolves to %s, want %s", resolvedSkill, canonicalSkill)
+		return fmt.Errorf("claude skill link resolves to %s, want %s", resolvedSkill, canonicalSkill)
 	}
 	manifestPath := filepath.Join(root, ".claude-plugin", "plugin.json")
 	data, err := os.ReadFile(manifestPath)
