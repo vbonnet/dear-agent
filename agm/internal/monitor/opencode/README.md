@@ -18,10 +18,10 @@ adapter, err := opencode.NewAdapter(bus, cfg)
 if err != nil {
     return err
 }
+defer adapter.Stop(shutdownCtx)
 if err := adapter.Start(ctx); err != nil {
     return err
 }
-defer adapter.Stop(shutdownCtx)
 ```
 
 `NewAdapter` requires a non-nil EventBus publisher, server URL, and AGM session

@@ -8,7 +8,7 @@
 
 **HASHR-02** When a relative or absolute non-tilde path is expanded, the package shall return its absolute path.
 
-**HASHR-03** When `~` or `~/...` is expanded, the package shall resolve it beneath the current user's home directory.
+**HASHR-03** When `~` or `~/...` is expanded, the package shall replace the tilde prefix with the current user's home directory and clean the resulting path. Expansion is not a containment boundary; traversal segments may resolve outside the home directory.
 
 **HASHR-04** If a path begins with unsupported `~user` syntax, then the package shall return an error.
 
