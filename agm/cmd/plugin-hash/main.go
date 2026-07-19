@@ -37,11 +37,32 @@ func run(dir string, check bool) error {
 }
 
 func runTargets(targets []string, check bool) error {
+	paths, err := pluginMarkdownPaths(targets)
+	if err != nil {
+		return err
+	}
+	stale := 0
+	for _, path := range paths {
+		isStale, stampErr := stampPluginMarkdown(path, check)
+		if stampErr != nil {
+			return stampErr
+		}
+		if isStale {
+			stale++
+		}
+	}
+	if stale > 0 {
+		return fmt.Errorf("%d plugin Markdown hash(es) are stale", stale)
+	}
+	return nil
+}
+
+func pluginMarkdownPaths(targets []string) ([]string, error) {
 	var paths []string
 	for _, target := range targets {
 		info, err := os.Stat(target)
 		if err != nil {
-			return fmt.Errorf("stat plugin Markdown target %s: %w", target, err)
+			return nil, fmt.Errorf("stat plugin Markdown target %s: %w", target, err)
 		}
 		if !info.IsDir() {
 			paths = append(paths, target)
@@ -58,43 +79,40 @@ func runTargets(targets []string, check bool) error {
 			return nil
 		})
 		if walkErr != nil {
-			return fmt.Errorf("walk plugin Markdown target %s: %w", target, walkErr)
+			return nil, fmt.Errorf("walk plugin Markdown target %s: %w", target, walkErr)
 		}
 	}
 	sort.Strings(paths)
-	stale := 0
-	for _, path := range paths {
-		content, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return fmt.Errorf("read %s: %w", path, readErr)
-		}
-		if !bytes.Contains(content, []byte("content-hash:")) {
-			if filepath.Base(path) == "SPEC.md" {
-				continue
-			}
-			return fmt.Errorf("plugin Markdown %s has no content-hash field", path)
-		}
-		stamped, stampErr := pluginhash.Stamp(content)
-		if stampErr != nil {
-			return fmt.Errorf("hash %s: %w", path, stampErr)
-		}
-		if bytes.Equal(content, stamped) {
-			fmt.Printf("OK %s\n", path)
-			continue
-		}
-		if check {
-			fmt.Printf("STALE %s\n", path)
-			stale++
-			continue
-		}
-		// #nosec G703 -- every path comes from filepath.Glob within the explicit plugin directory.
-		if writeErr := os.WriteFile(path, stamped, 0o600); writeErr != nil {
-			return fmt.Errorf("write %s: %w", path, writeErr)
-		}
-		fmt.Printf("UPDATED %s\n", path)
+	return paths, nil
+}
+
+func stampPluginMarkdown(path string, check bool) (bool, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return false, fmt.Errorf("read %s: %w", path, err)
 	}
-	if stale > 0 {
-		return fmt.Errorf("%d plugin Markdown hash(es) are stale", stale)
+	if !bytes.Contains(content, []byte("content-hash:")) {
+		if filepath.Base(path) == "SPEC.md" {
+			return false, nil
+		}
+		return false, fmt.Errorf("plugin Markdown %s has no content-hash field", path)
 	}
-	return nil
+	stamped, err := pluginhash.Stamp(content)
+	if err != nil {
+		return false, fmt.Errorf("hash %s: %w", path, err)
+	}
+	if bytes.Equal(content, stamped) {
+		fmt.Printf("OK %s\n", path)
+		return false, nil
+	}
+	if check {
+		fmt.Printf("STALE %s\n", path)
+		return true, nil
+	}
+	// #nosec G703 -- every path is an explicit target or was discovered below one.
+	if err := os.WriteFile(path, stamped, 0o600); err != nil {
+		return false, fmt.Errorf("write %s: %w", path, err)
+	}
+	fmt.Printf("UPDATED %s\n", path)
+	return false, nil
 }
