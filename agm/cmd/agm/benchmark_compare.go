@@ -23,7 +23,7 @@ The convention is --baseline raw --test dear-agent so a positive
 solve_rate_delta means dear-agent improved over the raw model+harness.
 
 Examples:
-  agm benchmark compare --baseline docs/benchmarks/raw.json --test docs/benchmarks/dear.json`,
+  agm benchmark compare --baseline .dear-agent/benchmarks/raw.json --test .dear-agent/benchmarks/dear.json`,
 	Args: cobra.NoArgs,
 	RunE: runBenchmarkCompare,
 }

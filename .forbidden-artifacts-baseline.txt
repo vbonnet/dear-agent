@@ -9,9 +9,10 @@
 # violation must be fixed, not baselined. See the 2026-06-19 Wayfinder
 # leak DEAR retro (engram-research) and .dear-agent.yml forbidden-paths.
 #
-# NOTE: docs/design/{anti-stall,graceful-exit,substrate-diagnostic}.md are
+# NOTE: docs/design/{anti-stall,graceful-exit,outcomes-framework,substrate-diagnostic}.md are
 # the documented living-doc exception (see CLAUDE.md / .dear-agent.yml).
 
 docs/design/anti-stall.md
 docs/design/graceful-exit.md
+docs/design/outcomes-framework.md
 docs/design/substrate-diagnostic.md

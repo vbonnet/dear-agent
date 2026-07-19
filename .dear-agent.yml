@@ -66,8 +66,9 @@ forbidden-paths:
     # See .claude/CLAUDE.md "Documentation & Artifact Routing" for the full
     # policy (Last-audited headers, wrong-fact-triggers-retro, doc audits).
     #
-    # (Pre-existing specs in docs/design/ that CLAUDE.md and code reference as
-    # authoritative — anti-stall.md, graceful-exit.md, substrate-diagnostic.md —
+    # (Pre-existing specs in docs/design/ that AGENTS.md and code reference as
+    # authoritative — anti-stall.md, graceful-exit.md, outcomes-framework.md,
+    # substrate-diagnostic.md —
     # behave like living docs and remain in-repo. New design docs follow this
     # rule without exception.)
     - docs/retros/**
