@@ -35,6 +35,10 @@ creation.
 
 **SAFE-PR-10** When safe-pr runs the repository full preflight, the system shall allow at least twenty minutes before terminating the gate.
 
+**SAFE-PR-11** When `create --draft` succeeds, the system shall leave the pull request unarmed for a human to advance.
+
+**SAFE-PR-12** When non-draft PR creation succeeds, the system shall attempt to arm squash auto-merge.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`

@@ -11,8 +11,9 @@
 // The wayfinder project dir (or WAYFINDER_PROJECT_DIR) must contain a
 // active WAYFINDER-STATUS.md; its project_name (or legacy session_id) is
 // stamped into the PR body (create) or close comment (close). On create, squash
-// auto-merge is armed on the new PR so it merges itself once required checks
-// and reviews pass. Every invocation is audit-logged to
+// auto-merge is armed on a new non-draft PR so it merges itself once required
+// checks and reviews pass. Draft PRs remain unarmed for a human to advance.
+// Every invocation is audit-logged to
 // ~/.local/state/dear-agent/safe-pr.log and emits an OTel span (safepr.<verb>)
 // when a collector is configured.
 package main
@@ -26,6 +27,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -281,21 +283,25 @@ func execGh(req *safepr.Request, timeout time.Duration, verifyCI bool) error {
 		fmt.Fprintf(os.Stderr, "safe-pr: WARNING: audit log write failed: %v\n", auditErr)
 	}
 
-	// Arm squash auto-merge on a freshly created PR so it merges itself once
-	// required checks and reviews pass — every safe-pr PR is hands-off by
-	// construction. Best-effort: the PR already exists, so a failure here
-	// (auto-merge disabled on the repo, branch not yet pushed) must not fail
-	// the run; it is surfaced as a warning and can be armed manually.
+	// Arm squash auto-merge on a freshly created, non-draft PR so routine PRs
+	// merge once required checks and reviews pass. Drafts are the explicit
+	// handoff boundary for human-required changes and must remain unarmed.
+	// Best-effort: the PR already exists, so a failure here (auto-merge disabled
+	// on the repo, branch not yet pushed) must not fail the run; it is surfaced
+	// as a warning and can be armed manually.
 	if runErr == nil && req.Verb == "create" && prURL != "" {
-		if mergeErr := armAutoMerge(prURL, timeout); mergeErr != nil {
-			fmt.Fprintf(os.Stderr, "safe-pr: WARNING: could not arm auto-merge on %s: %v\n", prURL, mergeErr)
+		draft := requestsDraft(req.GhArgs)
+		if !draft {
+			if mergeErr := armAutoMerge(prURL, timeout); mergeErr != nil {
+				fmt.Fprintf(os.Stderr, "safe-pr: WARNING: could not arm auto-merge on %s: %v\n", prURL, mergeErr)
+			}
 		}
 		// Opt-in safety net for the push-then-PR-open race (bead ce-np2s): an
 		// armed PR whose head SHA never gets check-runs would wait on auto-merge
 		// forever with no signal. When asked, confirm CI actually started and
 		// warn loudly if it did not — a warning only, since the PR exists and
 		// the `agm pr scan-no-checks` sweep is the durable backstop.
-		if verifyCI {
+		if verifyCI && !draft {
 			warnIfNoCI(prURL)
 		}
 	}
@@ -309,6 +315,74 @@ func execGh(req *safepr.Request, timeout time.Duration, verifyCI bool) error {
 		return fmt.Errorf("gh pr %s failed: %w", req.Verb, runErr)
 	}
 	return nil
+}
+
+// requestsDraft reports whether the pass-through GitHub CLI arguments request
+// draft creation. GitHub's boolean flags accept -d/--draft and explicit
+// Boolean values; the final occurrence wins, matching gh argument parsing.
+func requestsDraft(args []string) bool {
+	draft := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if ghCreateFlagConsumesNext(arg) {
+			i++
+			continue
+		}
+		if arg == "--draft" || arg == "-d" {
+			draft = true
+			continue
+		}
+		value, longForm := strings.CutPrefix(arg, "--draft=")
+		if !longForm {
+			value, longForm = strings.CutPrefix(arg, "-d=")
+		}
+		if longForm {
+			parsed, err := strconv.ParseBool(value)
+			if err == nil {
+				draft = parsed
+			}
+			continue
+		}
+		clusterDraft, consumesNext := draftInShorthandCluster(arg)
+		if clusterDraft {
+			draft = true
+		}
+		if consumesNext {
+			i++
+		}
+	}
+	return draft
+}
+
+func ghCreateFlagConsumesNext(arg string) bool {
+	longValueFlags := []string{
+		"--assignee", "--base", "--body", "--body-file", "--head", "--label",
+		"--milestone", "--project", "--recover", "--reviewer", "--template", "--title",
+	}
+	shortValueFlags := []string{"-a", "-B", "-b", "-H", "-l", "-m", "-p", "-r", "-T", "-t"}
+	return slices.Contains(longValueFlags, arg) || slices.Contains(shortValueFlags, arg)
+}
+
+// draftInShorthandCluster follows pflag's shorthand-cluster rule: Boolean
+// shorthands may be combined, while the first value-taking shorthand consumes
+// the rest of the token. For example, -dt requests draft and then a title from
+// the next argument, while -td gives title the value "d" and is not draft.
+func draftInShorthandCluster(arg string) (draft bool, consumesNext bool) {
+	if len(arg) < 3 || !strings.HasPrefix(arg, "-") || strings.HasPrefix(arg, "--") {
+		return false, false
+	}
+	valueTaking := "aBbHlmprTt"
+	cluster := []rune(strings.TrimPrefix(arg, "-"))
+	for i, shorthand := range cluster {
+		if shorthand == 'd' {
+			draft = true
+			continue
+		}
+		if strings.ContainsRune(valueTaking, shorthand) {
+			return draft, i == len(cluster)-1
+		}
+	}
+	return draft, false
 }
 
 // verifyCIPollWindow bounds how long warnIfNoCI waits for the first check-run
@@ -454,8 +528,9 @@ The session trace is stamped into the PR body (create) or comment (close).
 On create, 'make preflight-full' is run first to ensure local build/test/lint
 health before the PR hits CI (shift-left gate). Use --skip-preflight only for
 emergencies; prefer fixing the underlying issues instead.
-On create, squash auto-merge is armed on the new PR (best-effort) so it merges
-itself once required checks and reviews pass.
+On create, squash auto-merge is armed on a new non-draft PR (best-effort) so it
+merges itself once required checks and reviews pass. A PR created with --draft
+remains unarmed for a human to advance.
 Refused for create: --web, --fill*, --body-file/-F, --editor (interactive or
 unstampable); --title is required. Every run appends a JSONL audit record to
 ~/.local/state/dear-agent/safe-pr.log.

@@ -480,7 +480,7 @@ mv ~/.agm.manual-backup ~/.agm
 ## References
 
 - **Spec**: `SPEC.md`
-- **ROADMAP**: `ROADMAP.md`
+- **Current work**: the Beads task graph (`bd list`)
 - **Config schema**: `CONFIG-SCHEMA.md`
 - **Symlink bootstrap**: `SYMLINK-BOOTSTRAP.md`
 - **Workspace detection**: `docs/workspace-detection.md`
