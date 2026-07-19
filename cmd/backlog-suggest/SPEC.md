@@ -24,7 +24,7 @@ this command is a read-only inspection utility, not a dispatcher.
 
 **BSC-07** When no suggestions exist, the command shall return an empty result without manufacturing a work item.
 
-**BSC-08** When source loading, ranking, encoding, or event persistence fails, the command shall return a runtime error distinct from usage failure.
+**BSC-08** When source loading, ranking, or encoding fails, the command shall return a runtime error distinct from usage failure.
 
 ## BDD Traceability
 
