@@ -53,26 +53,34 @@ func checkRepository(ctx context.Context, root string, opts Options) (Report, er
 	}
 	report.NewFindings, report.StaleBaseline = compareFindings(report.Findings, baseline)
 	if strings.TrimSpace(opts.BaselineRef) != "" {
-		basePolicy, policyPresent, policyErr := loadPolicyAtRef(ctx, root, opts.BaselineRef)
-		if policyErr != nil {
-			return Report{}, policyErr
-		}
-		baseBaselinePath := policy.Baseline
-		if policyPresent {
-			baseBaselinePath = basePolicy.Baseline
-		}
-		base, present, baseErr := loadBaselineAtRef(ctx, root, opts.BaselineRef, baseBaselinePath)
-		if baseErr != nil {
-			return Report{}, baseErr
-		}
-		// Bootstrap is allowed only when the base revision had no living-docs
-		// policy and no baseline at the current path. Renaming the configured
-		// baseline therefore cannot disguise additions as a first-time setup.
-		if policyPresent || present {
-			report.AddedBaseline = addedEntries(baseline, base)
+		report.AddedBaseline, err = baselineAdditionsAtRef(ctx, root, opts.BaselineRef, policy, baseline)
+		if err != nil {
+			return Report{}, err
 		}
 	}
 	return report, nil
+}
+
+func baselineAdditionsAtRef(ctx context.Context, root, ref string, currentPolicy Policy, current []BaselineEntry) ([]BaselineEntry, error) {
+	basePolicy, policyPresent, err := loadPolicyAtRef(ctx, root, ref)
+	if err != nil {
+		return nil, err
+	}
+	baseBaselinePath := currentPolicy.Baseline
+	if policyPresent {
+		baseBaselinePath = basePolicy.Baseline
+	}
+	base, baselinePresent, err := loadBaselineAtRef(ctx, root, ref, baseBaselinePath)
+	if err != nil {
+		return nil, err
+	}
+	// Bootstrap is allowed only when the base revision had no living-docs
+	// policy and no baseline at the current path. Renaming the configured
+	// baseline therefore cannot disguise additions as a first-time setup.
+	if !policyPresent && !baselinePresent {
+		return nil, nil
+	}
+	return addedEntries(current, base), nil
 }
 
 func trackedFiles(ctx context.Context, root string) ([]string, error) {
