@@ -45,8 +45,9 @@ func loadPolicy(configPath string) (Policy, error) {
 }
 
 func validatePolicy(policy Policy) error {
-	baseline := filepath.ToSlash(filepath.Clean(strings.TrimSpace(policy.Baseline)))
-	if baseline == "." || baseline == "" || path.IsAbs(baseline) || baseline == ".." || strings.HasPrefix(baseline, "../") {
+	baselineValue := strings.TrimSpace(policy.Baseline)
+	baseline := filepath.ToSlash(filepath.Clean(baselineValue))
+	if baseline == "." || baseline == "" || filepath.IsAbs(baselineValue) || baseline == ".." || strings.HasPrefix(baseline, "../") {
 		return fmt.Errorf("docaudit: living-docs.baseline must be a repository-relative path")
 	}
 	if len(policy.Surfaces) == 0 {
@@ -113,14 +114,12 @@ func globPathMatch(pattern, name string) bool {
 	nameParts := strings.Split(strings.Trim(path.Clean(name), "/"), "/")
 	type state struct{ pattern, name int }
 	memo := map[state]bool{}
-	seen := map[state]bool{}
 	var match func(int, int) bool
 	match = func(patternIndex, nameIndex int) bool {
 		key := state{pattern: patternIndex, name: nameIndex}
-		if seen[key] {
-			return memo[key]
+		if result, ok := memo[key]; ok {
+			return result
 		}
-		seen[key] = true
 		var result bool
 		switch {
 		case patternIndex == len(patternParts):
@@ -129,7 +128,10 @@ func globPathMatch(pattern, name string) bool {
 			result = match(patternIndex+1, nameIndex) ||
 				(nameIndex < len(nameParts) && match(patternIndex, nameIndex+1))
 		case nameIndex < len(nameParts):
-			segmentMatch, _ := path.Match(patternParts[patternIndex], nameParts[nameIndex])
+			segmentMatch, err := path.Match(patternParts[patternIndex], nameParts[nameIndex])
+			if err != nil {
+				return false
+			}
 			result = segmentMatch && match(patternIndex+1, nameIndex+1)
 		}
 		memo[key] = result

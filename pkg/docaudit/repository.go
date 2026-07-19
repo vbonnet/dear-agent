@@ -67,9 +67,15 @@ func checkRepository(ctx context.Context, root string, opts Options) (Report, er
 func trackedFiles(ctx context.Context, root string) ([]string, error) {
 	cmd := exec.CommandContext(ctx, "git", "ls-files", "-z", "--full-name")
 	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	output, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("docaudit: discover tracked files: %w", err)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, fmt.Errorf("docaudit: discover tracked files: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	parts := bytes.Split(output, []byte{0})
 	files := make([]string, 0, len(parts))

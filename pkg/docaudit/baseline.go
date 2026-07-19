@@ -59,13 +59,21 @@ func validBaselinePath(name string) bool {
 func loadBaselineAtRef(ctx context.Context, root, ref, baselinePath string) ([]BaselineEntry, bool, error) {
 	verify := exec.CommandContext(ctx, "git", "rev-parse", "--verify", ref+"^{commit}")
 	verify.Dir = root
+	verify.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if output, err := verify.CombinedOutput(); err != nil {
+		if ctx.Err() != nil {
+			return nil, false, ctx.Err()
+		}
 		return nil, false, fmt.Errorf("docaudit: resolve baseline ref %q: %w: %s", ref, err, strings.TrimSpace(string(output)))
 	}
 	object := ref + ":" + filepath.ToSlash(baselinePath)
 	exists := exec.CommandContext(ctx, "git", "cat-file", "-e", object)
 	exists.Dir = root
+	exists.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if err := exists.Run(); err != nil {
+		if ctx.Err() != nil {
+			return nil, false, ctx.Err()
+		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			return nil, false, nil
@@ -74,8 +82,12 @@ func loadBaselineAtRef(ctx context.Context, root, ref, baselinePath string) ([]B
 	}
 	show := exec.CommandContext(ctx, "git", "show", object)
 	show.Dir = root
+	show.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	data, err := show.Output()
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, false, ctx.Err()
+		}
 		return nil, false, fmt.Errorf("docaudit: read baseline at %q: %w", ref, err)
 	}
 	entries, err := parseBaseline(data)

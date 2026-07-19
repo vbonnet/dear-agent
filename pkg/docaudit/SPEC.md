@@ -6,7 +6,7 @@
 
 **DOCAUDIT-01** When repository policy is loaded, the system shall require each declared living-document surface to have a unique name, valid glob, owner, verification command, and positive maximum age.
 
-**DOCAUDIT-02** When repository documents are discovered, the system shall inspect every Git-tracked path matching exactly one declared surface.
+**DOCAUDIT-02** When repository documents are discovered, the system shall inspect every Git-tracked path matching exactly one declared surface through context-cancellable, non-interactive Git commands with diagnostic stderr.
 
 **DOCAUDIT-03** If a tracked document matches multiple declared surfaces, the system shall return an operational error.
 
