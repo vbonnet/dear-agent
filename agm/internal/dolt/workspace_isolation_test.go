@@ -476,6 +476,17 @@ func TestDefaultConfigRejectsProductionDatabaseOverrideInTests(t *testing.T) {
 	}
 }
 
+func TestDefaultConfigRejectsUnselectedDatabaseInTests(t *testing.T) {
+	t.Setenv("ENGRAM_TEST_MODE", "1")
+	t.Setenv("ENGRAM_TEST_WORKSPACE", "test")
+	t.Setenv("WORKSPACE", "test")
+	t.Setenv("DOLT_DATABASE", "customer")
+
+	if _, err := DefaultConfig(); err == nil || !strings.Contains(err.Error(), "TEST POLLUTION BLOCKED") {
+		t.Fatalf("DefaultConfig() error = %v, want arbitrary database rejection", err)
+	}
+}
+
 // BenchmarkWorkspaceQueries measures query performance for workspace-isolated operations
 // Target: <10ms per operation (acceptable vs SQLite ~1ms)
 func BenchmarkWorkspaceQueries(b *testing.B) {
