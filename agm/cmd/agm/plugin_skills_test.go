@@ -260,6 +260,11 @@ func TestGeneratedPluginSkillsIncludeBinaryPathAndGovernedPermissions(t *testing
 			t.Errorf("%s uses retired colon permission syntax", name)
 		}
 	}
+	search := string(files["agm-search.md"])
+	if !strings.Contains(search, "because its extension or credentials are unavailable") ||
+		!strings.Contains(search, "run the documented fallback `agm session list --all --output json`") {
+		t.Fatal("agm-search.md does not preserve its declared fallback after a credential or extension failure")
+	}
 }
 
 func TestPluginHarnessGuidanceMatchesRegistry(t *testing.T) {

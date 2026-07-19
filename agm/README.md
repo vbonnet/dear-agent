@@ -731,19 +731,23 @@ count: 2
 - Automation: Parse structured output in scripts
 - Multi-session coordination: Capture responses from multiple sessions
 
-## Claude Code Skills
+## Claude Code Commands
 
-AGM provides Claude Code skills for common workflow automation. Skills are installed to `~/.claude/skills/agm/` and invoked using slash commands.
+AGM provides legacy global Claude Code command files for common workflow
+automation. They are installed to `~/.claude/commands/` and invoked as slash
+commands. The tracked plugin surfaces remain canonical.
 
 ### Installation
 
 ```bash
-# Install AGM skills
+# Install AGM global commands (compatibility alias)
 cd ~/path/to/agm
 make install-skills
 ```
 
-This copies skill scripts to `~/.claude/skills/agm/` and makes them executable.
+This copies command Markdown to `~/.claude/commands/`. `make install-skills` is
+a compatibility alias for `make install-commands`; it does not create portable
+`SKILL.md` directories.
 
 ### Available Skills
 

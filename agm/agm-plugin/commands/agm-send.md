@@ -1,10 +1,10 @@
 ---
 model: haiku
 effort: low
-content-hash: 36733137005790f757e72cdd65351da887fc8af2542600ca927f6f79261c9296
+content-hash: 55b4029ad1eb07449435dec710cb5d3916bbe10c4c51db27df8e6bba2869c927
 description: Send a message to one or more active AGM sessions. Use when the user wants to contact, redirect, or delegate to an AGM-managed agent.
 argument-hint: "<session> <message> [--priority LEVEL]"
-allowed-tools: Bash(agm send msg *), Bash(agm session list *), Write(/private/tmp/agm-send-*)
+allowed-tools: Bash(agm send msg *), Bash(agm session list *), Bash(rm -f -- /private/tmp/agm-send-*), Write(/private/tmp/agm-send-*)
 ---
 
 # Send an AGM message
@@ -17,7 +17,9 @@ allowed-tools: Bash(agm send msg *), Bash(agm session list *), Write(/private/tm
 3. Run `agm send msg <session> --prompt-file <path> --priority <level> --output json`.
    Pass the recipient and path as separate argv values. Add `--sender` only
    when AGM says the external caller must identify itself.
-4. If the session is missing, run `agm session list --output json` and present
+4. Always run `rm -f -- <path>` immediately after AGM exits, before reporting
+   success or failure. The temporary message file must not survive either path.
+5. If the session is missing, run `agm session list --output json` and present
    current names. Do not select a different recipient automatically.
-5. Report AGM's delivery status and message ID. On failure, show stderr and
+6. Report AGM's delivery status and message ID. On failure, show stderr and
    stop; never fall back to direct tmux input.

@@ -24,6 +24,10 @@ branching, safety, and completion guidance.
 
 **APC-07** When a plugin command names active harnesses, the system shall include Claude Code, Codex CLI, AGY, and OpenCode and shall identify Gemini as deprecated compatibility only.
 
+**APC-08** When a plugin command creates private temporary files for untrusted text, the system shall remove every owned temporary file after the typed AGM command returns, before reporting either success or failure.
+
+**APC-09** When a generated command declares a fallback, the system shall preserve that fallback for unavailable-extension or missing-credential failures while stopping on unrelated non-zero exits.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/agm_product_surface_guardrails.feature`

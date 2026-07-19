@@ -251,7 +251,11 @@ func renderPluginSkill(owner pluginCommandOwner, cmd *cobra.Command) ([]byte, er
 	fmt.Fprintln(&body)
 	fmt.Fprintln(&body, "## Report")
 	fmt.Fprintln(&body)
-	fmt.Fprintln(&body, "- If AGM exits non-zero, show its stderr and stop. Do not invent a fallback command.")
+	if fallback != "" {
+		fmt.Fprintf(&body, "- If the primary command exits non-zero because its extension or credentials are unavailable, show its stderr and run the documented fallback `%s`. For any other non-zero exit, show stderr and stop. Do not invent another fallback command.\n", fallback)
+	} else {
+		fmt.Fprintln(&body, "- If AGM exits non-zero, show its stderr and stop. Do not invent a fallback command.")
+	}
 	if len(spec.OutputColumns) > 0 {
 		fmt.Fprintf(&body, "- Present successful structured output with these useful fields when available: %s.\n", strings.Join(spec.OutputColumns, ", "))
 	} else {

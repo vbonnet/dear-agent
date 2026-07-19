@@ -203,8 +203,8 @@ func TestPluginCommandsUseFileInputsForUntrustedText(t *testing.T) {
 		required  []string
 		forbidden []string
 	}{
-		{file: "agm-send.md", required: []string{"--prompt-file", "Write(/private/tmp/agm-send-*"}, forbidden: []string{`--prompt "{MESSAGE}"`, "properly escape quotes"}},
-		{file: "wiki-query-save.md", required: []string{"--query-file", "--answer-file", "Write(/private/tmp/agm-wiki-*"}, forbidden: []string{`--query "{QUESTION}"`, `--answer "{ANSWER}"`}},
+		{file: "agm-send.md", required: []string{"--prompt-file", "Write(/private/tmp/agm-send-*", "rm -f -- <path>"}, forbidden: []string{`--prompt "{MESSAGE}"`, "properly escape quotes"}},
+		{file: "wiki-query-save.md", required: []string{"--query-file", "--answer-file", "Write(/private/tmp/agm-wiki-*", "rm -f -- <question-file> <answer-file>"}, forbidden: []string{`--query "{QUESTION}"`, `--answer "{ANSWER}"`}},
 	}
 	for _, test := range tests {
 		content, readErr := os.ReadFile(filepath.Join(testDir, test.file))

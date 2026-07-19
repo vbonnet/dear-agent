@@ -437,12 +437,12 @@ Provide a production-ready CLI that:
   - **Automation:** Parse structured output in scripts
   - **Multi-session coordination:** Capture responses from multiple sessions
 
-#### FR17: Claude Code Skills
+#### FR17: Claude Code Commands
 - **ID:** FR17
 - **Priority:** P2 (Medium)
-- **Description:** CLI MUST provide Claude Code skills for workflow automation
+- **Description:** CLI MUST provide legacy global Claude Code command files for workflow automation
 - **Installation:**
-  - `make install-skills` - Install to `~/.claude/skills/agm/`
+  - `make install-skills` - Compatibility alias that installs Markdown commands to `~/.claude/commands/`
 - **Skills:**
   - `/agm:new [name] [--agent TYPE] [--project PATH]` - Smart session creation
   - `/agm:send <session> --prompt "..." [--capture-response]` - Message sending with capture

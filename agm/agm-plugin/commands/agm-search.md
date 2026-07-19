@@ -1,7 +1,7 @@
 ---
 model: haiku
 effort: low
-content-hash: c3e414ad73b1fec31493e793dcb3159faff6d1d0953435a6cd36f2375bdf9d6f
+content-hash: c877679811ff323b69d6b951e9d4bf9bfeaab3ce14d7a0cfb68d07ed0913dd36
 description: >-
   Search archived Claude conversation history semantically. Use for a remembered topic when the Claude and Vertex AI extension is available; otherwise use the harness-neutral list fallback.
 argument-hint: "<query> [--max-results N]"
@@ -21,6 +21,6 @@ allowed-tools: Bash(agm session search *), Bash(agm session list *)
 
 ## Report
 
-- If AGM exits non-zero, show its stderr and stop. Do not invent a fallback command.
+- If the primary command exits non-zero because its extension or credentials are unavailable, show its stderr and run the documented fallback `agm session list --all --output json`. For any other non-zero exit, show stderr and stop. Do not invent another fallback command.
 - Present AGM's result and any confirmation request without changing its meaning.
 - If no sessions match, say so without treating the empty result as an error.
