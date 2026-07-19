@@ -491,6 +491,8 @@ func (e *E2EEnvironment) RunStatusLine(sessionName string) (string, error) {
 	// Set environment variables to connect to test Dolt database and tmux socket
 	// Must match GetTestAdapter() configuration and test tmux socket
 	cmd.Env = append(os.Environ(),
+		"ENGRAM_TEST_MODE=1",
+		"ENGRAM_TEST_WORKSPACE=test",
 		"WORKSPACE=test",
 		"DOLT_DATABASE=agm_test",
 		"DOLT_PORT=3307",
@@ -510,6 +512,8 @@ func (e *E2EEnvironment) RunStatusLineJSON(sessionName string) (string, error) {
 	// Set environment variables to connect to test Dolt database and tmux socket
 	// Must match GetTestAdapter() configuration and test tmux socket
 	cmd.Env = append(os.Environ(),
+		"ENGRAM_TEST_MODE=1",
+		"ENGRAM_TEST_WORKSPACE=test",
 		"WORKSPACE=test",
 		"DOLT_DATABASE=agm_test",
 		"DOLT_PORT=3307",

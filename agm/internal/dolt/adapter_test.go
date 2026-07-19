@@ -58,6 +58,8 @@ func TestDefaultConfig(t *testing.T) {
 		switch key {
 		case "ENGRAM_TEST_MODE":
 			return "1", true
+		case "ENGRAM_TEST_WORKSPACE":
+			return "config-workspace", true
 		default:
 			return "", false
 		}
@@ -80,6 +82,8 @@ func TestDefaultConfig(t *testing.T) {
 			return "3307", true
 		case "ENGRAM_TEST_MODE":
 			return "1", true
+		case "ENGRAM_TEST_WORKSPACE":
+			return "test-workspace", true
 		default:
 			return "", false
 		}
@@ -100,6 +104,48 @@ func TestDefaultConfig(t *testing.T) {
 
 	if config2.Host != "127.0.0.1" {
 		t.Errorf("Expected default host '127.0.0.1', got '%s'", config2.Host)
+	}
+}
+
+func TestTestExecutionRecognizesBuiltTestSubprocess(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		executable string
+		mode       string
+		want       bool
+	}{
+		{name: "go test binary", executable: "/tmp/dolt.test", want: true},
+		{name: "built subprocess with explicit mode", executable: "/tmp/agm", mode: "1", want: true},
+		{name: "ordinary binary", executable: "/tmp/agm", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := testExecution(tc.executable, tc.mode); got != tc.want {
+				t.Fatalf("testExecution(%q, %q) = %t, want %t", tc.executable, tc.mode, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidateTestTargetUsesPositiveAllowlist(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		workspace     string
+		database      string
+		testWorkspace string
+		wantError     bool
+	}{
+		{name: "workspace database", workspace: "test-e2e", database: "test-e2e", testWorkspace: "test-e2e"},
+		{name: "shared test database", workspace: "test", database: "agm_test", testWorkspace: "test"},
+		{name: "missing selection", workspace: "test", database: "test", wantError: true},
+		{name: "workspace mismatch", workspace: "customer", database: "customer", testWorkspace: "test", wantError: true},
+		{name: "unselected database", workspace: "test", database: "customer", testWorkspace: "test", wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateTestTarget(tc.workspace, tc.database, tc.testWorkspace)
+			if (err != nil) != tc.wantError {
+				t.Fatalf("validateTestTarget(%q, %q, %q) error = %v, wantError=%t", tc.workspace, tc.database, tc.testWorkspace, err, tc.wantError)
+			}
+		})
 	}
 }
 
