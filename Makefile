@@ -130,12 +130,11 @@ lint-specs:
 DOC_AUDIT_BASE_REF ?= origin/main
 lint-doc-freshness:
 	@comparison_ref="$(DOC_AUDIT_BASE_REF)"; \
-	base_ref=$$(git merge-base HEAD "$$comparison_ref" 2>/dev/null || git rev-parse HEAD^ 2>/dev/null || true); \
-	if [ -n "$$base_ref" ]; then \
-		go run ./tools/doc-audit -repo . -baseline-ref "$$base_ref"; \
-	else \
-		go run ./tools/doc-audit -repo .; \
-	fi
+	if ! base_ref=$$(git merge-base HEAD "$$comparison_ref"); then \
+		echo "lint-doc-freshness: comparison ref '$$comparison_ref' is unavailable or has no merge base" >&2; \
+		exit 1; \
+	fi; \
+	go run ./tools/doc-audit -repo . -baseline-ref "$$base_ref"
 
 # Fast local CI-parity gates. Runs the same go vet / go build / golangci-lint
 # CI does, no Docker needed. Catches ~all lint failures in ~25s on a warm
