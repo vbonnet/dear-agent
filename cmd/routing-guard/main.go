@@ -147,10 +147,13 @@ func gatherFiles(root, mode, operand string) ([]string, error) {
 // A ** segment consumes zero or more complete path segments. Every other
 // segment uses path.Match syntax, so matching never crosses a slash.
 func forbidden(p string, patterns []string) bool {
-	if livingSourceFile(p) {
-		return false
-	}
 	for _, pat := range patterns {
+		// Source extensions disambiguate filename-based patterns such as
+		// backlog.go. They do not exempt files placed inside an explicitly
+		// temporal directory such as wf/** or **/.wayfinder/**.
+		if livingSourceFile(p) && !strings.HasSuffix(strings.TrimSpace(pat), "/**") {
+			continue
+		}
 		if globPathMatch(pat, p) {
 			return true
 		}

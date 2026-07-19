@@ -381,7 +381,7 @@ Potential future improvements (not in scope for v1.0):
 
 ## References
 
-- **ROADMAP**: `ROADMAP.md`
+- **Current work**: the Beads task graph (`bd list`)
 - **Retrospective**: `SWARM-RETROSPECTIVE.md`
 - **Documentation**: `main/agm/docs/workspace-detection.md`
 - **AGM README**: `main/agm/README.md`

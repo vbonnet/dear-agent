@@ -86,6 +86,8 @@ func TestForbidden(t *testing.T) {
 		{"internal/telemetry/wayfinder_roi_logger.go", false},
 		{"README.md", false},
 		{"cmd/routing-guard/main.go", false},
+		{"wf/run/repro.sh", true},
+		{"pkg/demo/.wayfinder/session/generated.go", true},
 		{".github/workflows/tofu-plan.yml", false},
 		{"agm/test/integration/plan_continuity_test.go", false},
 		{"pkg/backlog.go", false},
