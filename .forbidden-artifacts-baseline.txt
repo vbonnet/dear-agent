@@ -9,11 +9,10 @@
 # violation must be fixed, not baselined. See the 2026-06-19 Wayfinder
 # leak DEAR retro (engram-research) and .dear-agent.yml forbidden-paths.
 #
-# NOTE: docs/design/{anti-stall,graceful-exit,outcomes-framework}.md are
+# NOTE: docs/design/{graceful-exit,outcomes-framework}.md are
 # the documented living-doc exception (see CLAUDE.md / .dear-agent.yml).
 
 docs/design/2026-05-23-security-pipeline-bumblebee-deepsec.md
-docs/design/anti-stall.md
 docs/design/graceful-exit.md
 docs/design/outcomes-framework.md
 docs/design/resource-management.md
