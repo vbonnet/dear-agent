@@ -19,6 +19,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/configdirparity"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/engramparity"
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/marketplaceparity"
@@ -141,6 +142,10 @@ type harnessParityState struct {
 	startupReadinessTestOutput string
 	startupReadinessTestErr    error
 	gracefulExitCommand        string
+	privateLaunchCommand       string
+	privateChildEnvironment    []string
+	privateAllowedCanaries     []string
+	privateRejectedCanaries    []string
 }
 
 type harnessParityStateKey struct{}
@@ -356,6 +361,10 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^shared Gemini readiness should advance first-run trust on the verified pane$`, sharedGeminiReadinessShouldAdvanceFirstRunTrustOnTheVerifiedPane)
 	ctx.Step(`^legacy AGY names should reach canonical shared send readiness$`, legacyAgyNamesShouldReachCanonicalSharedSendReadiness)
 	ctx.Step(`^the Pi alias should reach canonical shared send readiness$`, piAliasShouldReachCanonicalSharedSendReadiness)
+	ctx.Step(`^synthetic ambient credentials from multiple harnesses$`, syntheticAmbientCredentialsFromMultipleHarnesses)
+	ctx.Step(`^AGM builds the Codex private launch boundary$`, agmBuildsTheCodexPrivateLaunchBoundary)
+	ctx.Step(`^the launch command should contain no credential values$`, launchCommandShouldContainNoCredentialValues)
+	ctx.Step(`^the Codex child should receive only allowlisted credentials$`, codexChildShouldReceiveOnlyAllowlistedCredentials)
 	ctx.Step(`^an existing tmux session running Codex CLI$`, anExistingTmuxSessionRunningCodexCLI)
 	ctx.Step(`^an existing tmux session running AGY$`, anExistingTmuxSessionRunningAGY)
 	ctx.Step(`^/agm:agm-assoc runs in that session$`, agmAssocRunsInThatSession)
@@ -935,6 +944,17 @@ func agmValidatesSlowHarnessStartupReadiness(ctx context.Context) error {
 	return nil
 }
 
+func syntheticAmbientCredentialsFromMultipleHarnesses(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	state.privateAllowedCanaries = []string{"openai-bdd-canary", "codex-bdd-canary"}
+	state.privateRejectedCanaries = []string{
+		"claude-bdd-canary", "anthropic-bdd-canary", "github-bdd-canary",
+		"google-bdd-canary", "engram-bdd-canary", "otel-bdd-canary",
+		"ssh-bdd-canary", "arbitrary-bdd-canary",
+	}
+	return nil
+}
+
 func sharedStartupReadinessShouldHonorTheTotalDeadline(ctx context.Context) error {
 	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
 	if harnessState.startupReadinessTestErr != nil {
@@ -986,6 +1006,57 @@ func sharedInputReadinessShouldRejectStaleClaudeComposerAndUnrelatedNodeProcess(
 	} {
 		if !realTmuxReadinessBehaviorSatisfied(harnessState.startupReadinessTestOutput, behavior) {
 			return fmt.Errorf("shared real-tmux readiness behavior %s did not pass or use the configured CI skip:\n%s", behavior, harnessState.startupReadinessTestOutput)
+		}
+	}
+	return nil
+}
+
+func agmBuildsTheCodexPrivateLaunchBoundary(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	state.privateLaunchCommand = ops.BuildHarnessLaunchCommand(ops.HarnessLaunchSpec{
+		Harness: "codex-cli", Model: "5.4", SessionName: "bdd-private-codex", WorkDir: "/tmp/bdd-work",
+	}).Command
+	state.privateChildEnvironment = harnessexec.CodexEnvironment([]string{
+		"PATH=/usr/bin:/bin",
+		"HOME=/tmp/bdd-home",
+		"OPENAI_API_KEY=openai-bdd-canary",
+		"CODEX_ACCESS_TOKEN=codex-bdd-canary",
+		"CLAUDE_CODE_OAUTH_TOKEN=claude-bdd-canary",
+		"ANTHROPIC_API_KEY=anthropic-bdd-canary",
+		"GITHUB_TOKEN=github-bdd-canary",
+		"GOOGLE_API_KEY=google-bdd-canary",
+		"ENGRAM_TOKEN=engram-bdd-canary",
+		"OTEL_EXPORTER_OTLP_HEADERS=otel-bdd-canary",
+		"SSH_AUTH_SOCK=ssh-bdd-canary",
+		"ARBITRARY_SECRET=arbitrary-bdd-canary",
+	}, "bdd-private-codex")
+	return nil
+}
+
+func launchCommandShouldContainNoCredentialValues(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	for _, canary := range append(append([]string{}, state.privateAllowedCanaries...), state.privateRejectedCanaries...) {
+		if strings.Contains(state.privateLaunchCommand, canary) {
+			return fmt.Errorf("private launch command exposed credential canary %q", canary)
+		}
+	}
+	if !strings.Contains(state.privateLaunchCommand, "agm "+harnessexec.CodexProtocol) {
+		return fmt.Errorf("Codex launch bypassed the private executor: %s", state.privateLaunchCommand)
+	}
+	return nil
+}
+
+func codexChildShouldReceiveOnlyAllowlistedCredentials(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	joined := strings.Join(state.privateChildEnvironment, "\n")
+	for _, canary := range state.privateAllowedCanaries {
+		if !strings.Contains(joined, canary) {
+			return fmt.Errorf("Codex child environment omitted allowlisted canary %q", canary)
+		}
+	}
+	for _, canary := range state.privateRejectedCanaries {
+		if strings.Contains(joined, canary) {
+			return fmt.Errorf("Codex child environment inherited rejected canary %q", canary)
 		}
 	}
 	return nil

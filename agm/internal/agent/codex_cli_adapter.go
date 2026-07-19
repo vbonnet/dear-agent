@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
@@ -84,8 +85,12 @@ func (a *CodexCLIAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	if err := ensureCodexTrusted(workDir); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not pre-trust Codex workdir %s: %v\n", workDir, err)
 	}
-	cmd := fmt.Sprintf("env -u CLAUDECODE AGM_SESSION_NAME=%s codex -m %s -C %s -s workspace-write && exit",
-		shellQuote(tmuxName), shellQuote(resolvedModel), shellQuote(workDir))
+	cmd := harnessexec.BuildCodexCommand(harnessexec.CodexLaunch{
+		SessionName: tmuxName,
+		Model:       resolvedModel,
+		WorkDir:     workDir,
+		Sandbox:     "workspace-write",
+	})
 	if err := codexSendCommand(tmuxName, cmd); err != nil {
 		if !exists {
 			if cleanupErr := codexSendCommand(tmuxName, "exit\r"); cleanupErr != nil {
@@ -147,13 +152,14 @@ func (a *CodexCLIAdapter) ResumeSession(sessionID SessionID) error {
 		if err := ensureCodexTrusted(metadata.WorkingDir); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not pre-trust Codex workdir %s: %v\n", metadata.WorkingDir, err)
 		}
-		cmd := fmt.Sprintf("env -u CLAUDECODE AGM_SESSION_NAME=%s codex -m %s -C %s -s workspace-write",
-			shellQuote(metadata.TmuxName), shellQuote(resolvedModel), shellQuote(metadata.WorkingDir))
-		if metadata.UUID != "" {
-			cmd = fmt.Sprintf("env -u CLAUDECODE AGM_SESSION_NAME=%s codex -m %s -C %s -s workspace-write resume %s",
-				shellQuote(metadata.TmuxName), shellQuote(resolvedModel), shellQuote(metadata.WorkingDir), shellQuote(metadata.UUID))
-		}
-		if err := codexSendCommand(metadata.TmuxName, cmd+" && exit"); err != nil {
+		cmd := harnessexec.BuildCodexCommand(harnessexec.CodexLaunch{
+			SessionName: metadata.TmuxName,
+			Model:       resolvedModel,
+			WorkDir:     metadata.WorkingDir,
+			Sandbox:     "workspace-write",
+			ResumeID:    metadata.UUID,
+		})
+		if err := codexSendCommand(metadata.TmuxName, cmd); err != nil {
 			return fmt.Errorf("failed to send Codex resume command: %w", err)
 		}
 		if err := codexWaitForPrompt(metadata.TmuxName, 5*time.Second); err != nil {

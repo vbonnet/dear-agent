@@ -5,6 +5,7 @@
 # RELATED-SPEC: agm/internal/agysession/SPEC.md
 # RELATED-SPEC: agm/internal/codexsession/SPEC.md
 # RELATED-SPEC: agm/internal/agent/openai/SPEC.md
+# RELATED-SPEC: agm/internal/harnessexec/SPEC.md
 # RELATED-SPEC: agm/internal/command/SPEC.md
 # RELATED-SPEC: agm/internal/monitor/opencode/SPEC.md
 # RELATED-SPEC: agm/internal/monitor/tmux/SPEC.md
@@ -400,6 +401,12 @@ Feature: Harness parity
     When AGM sends a message through shared operations
     Then the shared send result should be "cancelled"
     And shared send should emit 0 tmux commands
+
+  Scenario: Codex launch excludes ambient provider credentials
+    Given synthetic ambient credentials from multiple harnesses
+    When AGM builds the Codex private launch boundary
+    Then the launch command should contain no credential values
+    And the Codex child should receive only allowlisted credentials
 
   Scenario: AGY detached session receives startup prompt
     Given AGY is available

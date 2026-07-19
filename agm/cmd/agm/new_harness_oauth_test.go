@@ -7,31 +7,28 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 )
 
-// TestClaudeEnvUnsetFlags verifies the ce-84l2 fix: when an OAuth (Max-plan)
-// token is injected into a spawned session, ANTHROPIC_API_KEY must also be
-// unset so a stray metered key inherited from the long-lived tmux server
-// environment cannot shadow the OAuth token and route the session through the
-// metered API. CLAUDECODE is always unset regardless.
-func TestClaudeEnvUnsetFlags(t *testing.T) {
+// TestClaudePrivateExecutorProtocol verifies that OAuth is resolved only after
+// the token-free tmux command reaches AGM's private executor.
+func TestClaudePrivateExecutorProtocol(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-command-canary")
+	t.Setenv("ANTHROPIC_API_KEY", "anthropic-command-canary")
 	withOAuth := ops.BuildHarnessLaunchCommand(ops.HarnessLaunchSpec{
 		Harness: "claude-code", Model: "sonnet", SessionName: "oauth", WorkDir: "/tmp/work",
-		OAuthToken: "test-oauth-token",
 	}).Command
-	if !strings.Contains(withOAuth, "-u CLAUDECODE") {
-		t.Errorf("with OAuth: %q missing -u CLAUDECODE", withOAuth)
+	if !strings.Contains(withOAuth, "agm __exec-claude") {
+		t.Errorf("with OAuth: %q missing private executor", withOAuth)
 	}
-	if !strings.Contains(withOAuth, "-u ANTHROPIC_API_KEY") {
-		t.Errorf("with OAuth: %q must unset ANTHROPIC_API_KEY so the metered key can't shadow OAuth", withOAuth)
+	for _, secret := range []string{"oauth-command-canary", "anthropic-command-canary"} {
+		if strings.Contains(withOAuth, secret) {
+			t.Errorf("with OAuth: command exposed %q: %q", secret, withOAuth)
+		}
 	}
 
 	withoutOAuth := ops.BuildHarnessLaunchCommand(ops.HarnessLaunchSpec{
 		Harness: "claude-code", Model: "sonnet", SessionName: "no-oauth", WorkDir: "/tmp/work",
 		DisableOAuth: true,
 	}).Command
-	if !strings.Contains(withoutOAuth, "-u CLAUDECODE") {
-		t.Errorf("without OAuth: %q missing -u CLAUDECODE", withoutOAuth)
-	}
-	if strings.Contains(withoutOAuth, "ANTHROPIC_API_KEY") {
-		t.Errorf("without OAuth: %q must not unset ANTHROPIC_API_KEY (no OAuth token to protect)", withoutOAuth)
+	if !strings.Contains(withoutOAuth, "--disable-oauth") {
+		t.Errorf("without OAuth: %q missing private disable-oauth instruction", withoutOAuth)
 	}
 }

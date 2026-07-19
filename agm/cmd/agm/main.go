@@ -18,6 +18,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/freshness"
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/manager"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
@@ -682,6 +683,13 @@ func executeWithSignalContext(parent context.Context, execute func(context.Conte
 }
 
 func main() {
+	if len(os.Args) > 1 && harnessexec.IsProtocol(os.Args[1]) {
+		if err := harnessexec.Run(os.Args[1], os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "agm private harness executor: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	exitCode := run()
 	os.Exit(exitCode)
 }

@@ -340,11 +340,11 @@ func TestBuildCodexResumeCommand(t *testing.T) {
 	cmd := buildCodexResumeCommand(m, health)
 
 	for _, want := range []string{
-		"env -u CLAUDECODE",
-		"AGM_SESSION_NAME='codex-session'",
-		"codex -m 'gpt-5.4'",
-		"-C '/tmp/work'",
-		"-s workspace-write",
+		"agm __exec-codex",
+		"--session 'codex-session'",
+		"--model 'gpt-5.4'",
+		"--workdir '/tmp/work'",
+		"--sandbox 'workspace-write'",
 		"&& exit",
 	} {
 		if !strings.Contains(cmd, want) {
@@ -363,7 +363,7 @@ func TestBuildCodexResumeCommand_DefaultModel(t *testing.T) {
 	}
 
 	cmd := buildCodexResumeCommand(&manifest.Manifest{}, health)
-	if !strings.Contains(cmd, "codex -m 'gpt-5.5'") {
+	if !strings.Contains(cmd, "--model 'gpt-5.5'") {
 		t.Errorf("default Codex model not resolved: %s", cmd)
 	}
 }
@@ -666,21 +666,21 @@ func TestBuildCodexResumeCommand_ImportedSessionUsesCodexResume(t *testing.T) {
 	cmd := buildCodexResumeCommand(m, health)
 
 	for _, want := range []string{
-		"env -u CLAUDECODE",
-		"AGM_SESSION_NAME='codex-session'",
-		"codex resume",
-		"-m 'gpt-5.4'",
-		"-C '/tmp/work'",
-		"-s workspace-write",
-		"'" + sessionID + "'",
+		"agm __exec-codex",
+		"--session 'codex-session'",
+		"--resume-id '" + sessionID + "'",
+		"--remote",
+		"--model 'gpt-5.4'",
+		"--workdir '/tmp/work'",
+		"--sandbox 'workspace-write'",
 		"&& exit",
 	} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("command %q missing %q", cmd, want)
 		}
 	}
-	if strings.Contains(cmd, "codex -m") {
-		t.Errorf("imported Codex session started a new conversation instead of resuming: %s", cmd)
+	if !strings.Contains(cmd, "--resume-id") {
+		t.Errorf("imported Codex session did not preserve the saved session id: %s", cmd)
 	}
 }
 
