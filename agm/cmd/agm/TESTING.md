@@ -233,7 +233,7 @@ test:
 
 ## References
 
-- ADR-0001: Capture-Pane vs Control Mode
+- ADR-001: Capture-Pane vs Control Mode
 - ADR-001: Normalize Rename Search
 - ADR-005: Unified Init Sequence
 - SPEC.md: Session Initialization Sequence

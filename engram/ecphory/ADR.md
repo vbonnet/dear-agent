@@ -4,28 +4,27 @@ Status: Accepted
 
 ## Context
 
-Ecphory must retrieve useful context with predictable local behavior while
-allowing optional model-assisted ranking. Source collections can change between
-queries, and remote ranking can be unavailable.
+Ecphory retrieves context through a constructor-scoped index and a configured
+model ranker. Provider calls may fail after construction, and source
+collections may change while an instance remains alive.
 
 ## Decisions
 
-1. **Candidate pipeline.** Build deterministic candidates from the current
-   searchable source, then rank the bounded set. Do not make a remote provider
-   the source of record.
-2. **Per-query index.** Construct the in-memory frontmatter index for the
-   current search input. This favors correctness and isolation over a hidden
-   long-lived cache.
-3. **Local fallback.** A local ranker remains available when no configured
-   model provider succeeds.
-4. **Bounded provider use.** Provider calls use explicit time and rate limits;
-   a provider failure returns to the local path rather than failing retrieval.
+1. **Candidate pipeline.** Build deterministic candidates from the indexed
+   source, then rank the bounded set. The provider is not the source of record.
+2. **Instance-scoped index.** `NewEcphory` builds the frontmatter index once;
+   callers create a new instance to observe later source changes.
+3. **Required configured ranker.** Construction fails unless Vertex AI or a
+   valid Anthropic credential can initialize the ranker.
+4. **Unranked fallback after construction.** If a later provider call fails,
+   `Query` returns the existing candidates in index order rather than invoking
+   a separate local ranker.
 
 ## Consequences
 
-- Retrieval works offline and does not depend on one vendor.
-- Repeated searches pay index construction cost.
-- Provider-specific ranking is optional and may change result order.
+- Repeated queries reuse one index and may not observe source changes.
+- Missing provider configuration prevents construction.
+- Provider-call failures can reduce ordering quality without losing candidates.
 
 ## Evidence
 

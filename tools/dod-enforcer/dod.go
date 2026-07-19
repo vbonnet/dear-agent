@@ -2,6 +2,7 @@
 package dod
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -54,7 +55,9 @@ func LoadDoD(path string) (*BeadDoD, error) {
 	}
 
 	var dod BeadDoD
-	if err := yaml.Unmarshal(data, &dod); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&dod); err != nil {
 		return nil, fmt.Errorf("failed to parse DoD YAML: %w", err)
 	}
 

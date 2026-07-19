@@ -3,6 +3,7 @@ package dod
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -37,6 +38,17 @@ commands_must_succeed:
 
 	if len(dod.CommandsMustSucceed) != 1 {
 		t.Errorf("Expected 1 command, got %d", len(dod.CommandsMustSucceed))
+	}
+}
+
+func TestLoadDoDRejectsUnknownFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "unknown.dod.yaml")
+	content := "files_must_exist: []\nbenchmarks_must_improve: true\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadDoD(path); err == nil || !strings.Contains(err.Error(), "field benchmarks_must_improve not found") {
+		t.Fatalf("expected unknown-field error, got %v", err)
 	}
 }
 

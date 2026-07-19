@@ -156,3 +156,14 @@ This engram has only retrieval_count set.
 		t.Error("expected created_at to be set from file mtime")
 	}
 }
+
+func TestParserPreservesExplicitZeroEncodingStrength(t *testing.T) {
+	content := []byte("---\ntype: pattern\ntitle: Zero strength\nencoding_strength: 0\n---\nbody\n")
+	eng, err := NewParser().ParseBytes("zero.ai.md", content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eng.Frontmatter.EncodingStrength != 0 {
+		t.Fatalf("encoding_strength = %v, want explicit zero", eng.Frontmatter.EncodingStrength)
+	}
+}

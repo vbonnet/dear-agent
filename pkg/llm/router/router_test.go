@@ -25,7 +25,7 @@ type fakeProvider struct {
 	errOnce bool
 }
 
-func (f *fakeProvider) Name() string                  { return f.name }
+func (f *fakeProvider) Name() string                        { return f.name }
 func (f *fakeProvider) Capabilities() provider.Capabilities { return provider.Capabilities{} }
 
 func (f *fakeProvider) Generate(_ context.Context, req *provider.GenerateRequest) (*provider.GenerateResponse, error) {
@@ -94,6 +94,9 @@ func TestRouter_Generate_PrimarySucceeds(t *testing.T) {
 	if resp.Model != "claude-opus-4-7" {
 		t.Errorf("response model = %q, want claude-opus-4-7", resp.Model)
 	}
+	if resp.Metadata["router_provider"] != "anthropic" || resp.Metadata["router_model"] != "claude-opus-4-7" || resp.Metadata["router_role"] != "research" {
+		t.Errorf("response routing metadata = %#v", resp.Metadata)
+	}
 	if primary.calls != 1 {
 		t.Errorf("primary calls = %d, want 1", primary.calls)
 	}
@@ -126,6 +129,9 @@ func TestRouter_Generate_FallsThroughOnError(t *testing.T) {
 	}
 	if resp.Model != "gemini-2.5-flash" {
 		t.Errorf("response model = %q, want gemini-2.5-flash", resp.Model)
+	}
+	if resp.Metadata["router_provider"] != "gemini" {
+		t.Errorf("response provider = %v, want gemini", resp.Metadata["router_provider"])
 	}
 	if primary.calls != 1 || secondary.calls != 1 || tertiary.calls != 1 {
 		t.Errorf("call counts = primary:%d secondary:%d tertiary:%d (want 1,1,1)",
@@ -236,6 +242,9 @@ func TestRouter_GenerateForModel_RoutesDirectly(t *testing.T) {
 	if resp.Model != "gpt-4o" {
 		t.Errorf("model = %q, want gpt-4o", resp.Model)
 	}
+	if resp.Metadata["router_provider"] != "openai" || resp.Metadata["router_model"] != "gpt-4o" {
+		t.Errorf("response routing metadata = %#v", resp.Metadata)
+	}
 	if prov.calls != 1 {
 		t.Errorf("calls = %d, want 1", prov.calls)
 	}
@@ -276,8 +285,8 @@ func TestRouter_ProviderCachedAcrossCalls(t *testing.T) {
 
 func TestRouter_HasRoleAndDefaultRole(t *testing.T) {
 	cfg := &Config{Version: 1, DefaultRole: "research", Roles: map[string]RoleSpec{
-		"research":     {Primary: "gpt-4o"},
-		"implementer":  {Primary: "claude-opus-4-7"},
+		"research":    {Primary: "gpt-4o"},
+		"implementer": {Primary: "claude-opus-4-7"},
 	}}
 	r, err := New(Options{Config: cfg, Factory: func(_, _ string) (provider.Provider, error) {
 		return &fakeProvider{}, nil

@@ -1,4 +1,4 @@
-# ADR-0001: Use bounded capture-pane polling for prompt detection
+# ADR-001: Use bounded capture-pane polling for prompt detection
 
 Status: Accepted
 

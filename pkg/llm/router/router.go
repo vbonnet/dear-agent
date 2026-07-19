@@ -125,6 +125,11 @@ func (r *Router) Generate(ctx context.Context, role string, req *provider.Genera
 
 		resp, callErr := prov.Generate(ctx, &callReq)
 		if callErr == nil {
+			resp.Metadata = mergeMetadata(resp.Metadata, map[string]any{
+				"router_provider": family,
+				"router_model":    modelID,
+				"router_role":     resolvedRole,
+			})
 			return resp, nil
 		}
 
@@ -165,7 +170,15 @@ func (r *Router) GenerateForModel(ctx context.Context, modelID string, req *prov
 	callReq.Metadata = mergeMetadata(callReq.Metadata, map[string]any{
 		"router_model": modelID,
 	})
-	return prov.Generate(ctx, &callReq)
+	resp, err := prov.Generate(ctx, &callReq)
+	if err != nil {
+		return nil, err
+	}
+	resp.Metadata = mergeMetadata(resp.Metadata, map[string]any{
+		"router_provider": family,
+		"router_model":    modelID,
+	})
+	return resp, nil
 }
 
 // HasRole reports whether a role name is defined in the config.
@@ -245,4 +258,3 @@ func mergeMetadata(base, extra map[string]any) map[string]any {
 	}
 	return out
 }
-

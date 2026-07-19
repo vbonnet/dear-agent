@@ -23,7 +23,8 @@ or current model.
 - Model policy changes independently of tool logic.
 - Invalid or unavailable candidates can fall through to a configured
   alternative.
-- The chosen provider and model remain part of response metadata.
+- The chosen provider family, configured model ID, and role (when applicable)
+  are normalized into response metadata by the router.
 
 ## Evidence
 

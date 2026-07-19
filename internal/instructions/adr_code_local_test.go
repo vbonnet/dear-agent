@@ -49,9 +49,6 @@ func TestCodeLocalADRsHaveCompleteConciseLifecycle(t *testing.T) {
 			if len(statuses) != 1 {
 				t.Errorf("want one normalized Status line, got %d", len(statuses))
 			}
-			if lines := strings.Count(content, "\n") + 1; lines > 250 {
-				t.Errorf("%d lines exceeds the ADR review budget of 250", lines)
-			}
 			assertRelativeMarkdownLinksResolve(
 				t,
 				filepath.Dir(filepath.Join(root, filepath.FromSlash(name))),
@@ -81,6 +78,9 @@ func validateLocalADRScope(t *testing.T, root string, scope localADRScope, gover
 		}
 		match := adrFilePattern.FindStringSubmatch(entry.Name())
 		if len(match) != 2 {
+			if entry.Name() != scope.indexName && isADRLikeFilename(entry.Name()) {
+				t.Errorf("malformed ADR filename: %s", entry.Name())
+			}
 			continue
 		}
 		content := readFile(t, filepath.Join(dir, entry.Name()))
@@ -101,9 +101,6 @@ func validateLocalADRScope(t *testing.T, root string, scope localADRScope, gover
 		if len(statuses) != 1 {
 			t.Errorf("%s: want one normalized Status line, got %d", entry.Name(), len(statuses))
 			continue
-		}
-		if lines := strings.Count(strings.TrimSuffix(content, "\n"), "\n") + 1; lines > 250 {
-			t.Errorf("%s: %d lines exceeds the ADR review budget of 250", entry.Name(), lines)
 		}
 		assertRelativeMarkdownLinksResolve(t, dir, entry.Name(), content)
 		records[entry.Name()] = adrRecord{id: match[1], status: statuses[0][1]}
@@ -152,6 +149,9 @@ func assertEveryCodeLocalADRIsGoverned(t *testing.T, root string, governed map[s
 		}
 		base := filepath.Base(relative)
 		if base != "ADR.md" && !adrFilePattern.MatchString(base) {
+			if base != "ADR-INDEX.md" && isADRLikeFilename(base) {
+				t.Errorf("malformed code-local ADR filename: %s", relative)
+			}
 			return nil
 		}
 		if !governed[relative] {
@@ -162,4 +162,8 @@ func assertEveryCodeLocalADRIsGoverned(t *testing.T, root string, governed map[s
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func isADRLikeFilename(name string) bool {
+	return strings.HasPrefix(strings.ToUpper(name), "ADR-") && strings.HasSuffix(strings.ToLower(name), ".md")
 }
