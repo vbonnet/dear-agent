@@ -40,7 +40,7 @@ func ExpandPath(path string) (string, error) {
 
 	// Replace ~ with home directory
 	if path == "~" {
-		return home, nil
+		return filepath.Clean(home), nil
 	}
 	if strings.HasPrefix(path, "~/") {
 		return filepath.Join(home, path[2:]), nil

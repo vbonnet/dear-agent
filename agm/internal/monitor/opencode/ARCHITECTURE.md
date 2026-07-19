@@ -47,7 +47,10 @@ original event-type fields are retained when present.
 ## Connection and lifecycle semantics
 
 `NewSSEAdapter` configures a streaming HTTP client with dial, TLS handshake,
-response-header, keep-alive, and idle-connection timeouts. `Start` attempts
+response-header, and idle-connection timeouts, plus a 30-second TCP keep-alive
+probe interval. The keep-alive value is not a 30-second liveness deadline; an
+otherwise healthy stream with no application heartbeat is not disconnected on
+that schedule. `Start` attempts
 `GET <ServerURL>/event`; a failed first connection returns an error and starts
 the reconnect loop. Reconnect delay grows from `InitialDelay` by `Multiplier`
 and is capped at `MaxDelay`. A positive `MaxRetries` stops further connection
