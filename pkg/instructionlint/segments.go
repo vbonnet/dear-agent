@@ -2,6 +2,7 @@ package instructionlint
 
 import (
 	"bytes"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -35,6 +36,7 @@ func parseSegments(source []byte) []Segment {
 	classified, inline := classifyMarkdown(root, source)
 	segments := joinShellContinuations(sourceSegments(source, classified))
 	segments = append(segments, inline...)
+	segments = append(segments, markdownFrontmatterCommands(source)...)
 	sort.Slice(segments, func(i, j int) bool {
 		if segments[i].Line != segments[j].Line {
 			return segments[i].Line < segments[j].Line
@@ -44,6 +46,38 @@ func parseSegments(source []byte) []Segment {
 		}
 		return segments[i].Text < segments[j].Text
 	})
+	return segments
+}
+
+var allowedBashTool = regexp.MustCompile(`Bash\(([^)]*)\)`)
+
+func markdownFrontmatterCommands(source []byte) []Segment {
+	if !bytes.HasPrefix(source, []byte("---\n")) {
+		return nil
+	}
+	end := bytes.Index(source[4:], []byte("\n---\n"))
+	if end < 0 {
+		return nil
+	}
+	var root yaml.Node
+	if err := yaml.Unmarshal(source[4:4+end], &root); err != nil || len(root.Content) == 0 {
+		return nil
+	}
+	mapping := root.Content[0]
+	if mapping.Kind != yaml.MappingNode {
+		return nil
+	}
+	var segments []Segment
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value != "allowed-tools" {
+			continue
+		}
+		value := mapping.Content[i+1]
+		for _, match := range allowedBashTool.FindAllStringSubmatch(value.Value, -1) {
+			command := strings.ReplaceAll(match[1], ":*", " *")
+			segments = append(segments, Segment{Kind: SegmentShell, Line: value.Line + 1, Text: command})
+		}
+	}
 	return segments
 }
 

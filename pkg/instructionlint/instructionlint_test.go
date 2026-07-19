@@ -153,6 +153,41 @@ pr-policy:
 	}
 }
 
+func TestMarkdownFrontmatterCommandsRemainPolicyVisible(t *testing.T) {
+	segments := parseSegments([]byte("---\nallowed-tools: Bash(gh pr merge:*), Bash(agm status *)\n---\n\n# Command\n"))
+	var rules []string
+	for _, segment := range segments {
+		for _, violation := range evaluateSegment("command.md", segment) {
+			rules = append(rules, violation.Rule)
+		}
+	}
+	sort.Strings(rules)
+	if !reflect.DeepEqual(rules, []string{"agm-root-status", "raw-gh-merge"}) {
+		t.Fatalf("frontmatter command rules = %v", rules)
+	}
+}
+
+func TestCheckRepositoryRejectsImportOutsideGovernedInventory(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	writeTestFile(t, repo, ".dear-agent.yml", `instruction-policy:
+  surfaces:
+    - match: AGENTS.md
+      owner: root
+`)
+	writeTestFile(t, repo, "AGENTS.md", "@import hidden.md\n")
+	writeTestFile(t, repo, "hidden.md", "# Hidden instructions\n")
+	runGit(t, repo, "add", ".")
+
+	_, violations, err := CheckRepository(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(violations) != 1 || violations[0].Rule != "ungoverned-import" {
+		t.Fatalf("violations = %v, want ungoverned import", violations)
+	}
+}
+
 func TestApplyExclusionsIsExactAndStaleDetecting(t *testing.T) {
 	findings := []Violation{
 		{Path: "AGENTS.md", Line: 3, Rule: "bare-beads", Excerpt: "bd ready", Replacement: "canonical bd"},

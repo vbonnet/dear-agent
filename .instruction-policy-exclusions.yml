@@ -164,3 +164,9 @@ exclusions:
     count: 1
     owner: "#925"
     reason: generated command parity PR replaces the legacy root form
+  - path: agm/agm-plugin/commands/agm-status.md
+    rule: agm-root-status
+    excerpt: "agm status *"
+    count: 1
+    owner: "#925"
+    reason: generated command parity PR replaces the legacy allowed-tools grant

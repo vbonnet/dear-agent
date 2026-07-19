@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -68,6 +69,7 @@ func CheckRepository(ctx context.Context, root string) (Result, []Violation, err
 			return Result{}, nil, fmt.Errorf("instructionlint: read %s: %w", relative, err)
 		}
 		files++
+		findings = append(findings, importViolations(relative, data, policy.Surfaces)...)
 		segments := parseSegments(data)
 		if extension := strings.ToLower(filepath.Ext(relative)); extension == ".yml" || extension == ".yaml" {
 			segments, err = parseYAMLSegments(data)
@@ -87,6 +89,24 @@ func CheckRepository(ctx context.Context, root string) (Result, []Violation, err
 	findings = applyExclusions(findings, policy.Exclusions)
 	sortViolations(findings)
 	return Result{Files: files, Exclusions: len(policy.Exclusions)}, findings, nil
+}
+
+var instructionImport = regexp.MustCompile(`(?m)^\s*@import\s+(\S+)\s*$`)
+
+func importViolations(relative string, data []byte, surfaces []Surface) []Violation {
+	var violations []Violation
+	for _, match := range instructionImport.FindAllSubmatch(data, -1) {
+		target := filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(relative), filepath.FromSlash(string(match[1])))))
+		if target == "." || target == ".." || strings.HasPrefix(target, "../") || len(matchingSurfaces(surfaces, target)) != 1 {
+			violations = append(violations, Violation{
+				Path:        relative,
+				Rule:        "ungoverned-import",
+				Excerpt:     strings.TrimSpace(string(match[0])),
+				Replacement: "import exactly one declared instruction-policy surface",
+			})
+		}
+	}
+	return violations
 }
 
 func trackedFiles(ctx context.Context, root string) ([]string, error) {
