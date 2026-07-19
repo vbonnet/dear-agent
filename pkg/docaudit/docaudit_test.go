@@ -147,6 +147,42 @@ func TestCheckRepositoryRejectsBaselineGrowthAfterPathRename(t *testing.T) {
 	}
 }
 
+func TestCheckRepositoryRejectsWeakerPolicyAgainstRef(t *testing.T) {
+	tests := []struct {
+		name      string
+		baseMatch string
+		baseAge   string
+		newMatch  string
+		newAge    string
+		wantError string
+	}{
+		{name: "narrowed coverage", baseMatch: "**/SPEC.md", baseAge: "90", newMatch: "pkg/**/SPEC.md", newAge: "90", wantError: "weakens governed coverage"},
+		{name: "raised maximum age", baseMatch: "**/SPEC.md", baseAge: "90", newMatch: "**/SPEC.md", newAge: "180", wantError: "raises max-age-days"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newTestRepo(t)
+			policy := func(match, age string) string {
+				return strings.ReplaceAll(strings.ReplaceAll(testPolicy("baseline.txt"), `"**/SPEC.md"`, `"`+match+`"`), "max-age-days: 90", "max-age-days: "+age)
+			}
+			writeTestFile(t, repo, ".dear-agent.yml", policy(tt.baseMatch, tt.baseAge))
+			writeTestFile(t, repo, "other/SPEC.md", "<!-- Last audited at: 2026-07-18 -->\n")
+			writeTestFile(t, repo, "baseline.txt", "")
+			gitTest(t, repo, "add", ".")
+			gitTest(t, repo, "commit", "-m", "base")
+			base := strings.TrimSpace(gitTestOutput(t, repo, "rev-parse", "HEAD"))
+
+			writeTestFile(t, repo, ".dear-agent.yml", policy(tt.newMatch, tt.newAge))
+			gitTest(t, repo, "add", ".")
+			gitTest(t, repo, "commit", "-m", "weaken")
+			_, err := CheckRepository(context.Background(), repo, Options{AsOf: testAsOf, BaselineRef: base})
+			if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("error = %v, want %q", err, tt.wantError)
+			}
+		})
+	}
+}
+
 func TestFreshnessEntrypointsUseMutationBaseRef(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", ".."))
 	workflow, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "doc-freshness.yml"))

@@ -10,6 +10,8 @@
 
 **DOCAUDIT-03** If a tracked document matches multiple declared surfaces, the system shall return an operational error.
 
+**DOCAUDIT-04** When a baseline revision is supplied, the system shall reject policy changes that remove governed coverage from a surviving tracked document or increase its maximum audit age.
+
 **DOCAUDIT-04** When a declared document lacks exactly one canonical audit marker, the system shall classify the marker as missing, placeholder, malformed, or duplicate.
 
 **DOCAUDIT-05** When a canonical audit date is impossible, future-dated, or older than the declared maximum age, the system shall classify the corresponding date finding.

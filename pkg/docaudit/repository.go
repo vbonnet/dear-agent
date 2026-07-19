@@ -53,12 +53,44 @@ func checkRepository(ctx context.Context, root string, opts Options) (Report, er
 	}
 	report.NewFindings, report.StaleBaseline = compareFindings(report.Findings, baseline)
 	if strings.TrimSpace(opts.BaselineRef) != "" {
+		basePolicy, policyPresent, policyErr := loadPolicyAtRef(ctx, root, opts.BaselineRef)
+		if policyErr != nil {
+			return Report{}, policyErr
+		}
+		if policyPresent {
+			if policyErr := validatePolicyRatchet(basePolicy, policy, tracked); policyErr != nil {
+				return Report{}, policyErr
+			}
+		}
 		report.AddedBaseline, err = baselineAdditionsAtRef(ctx, root, opts.BaselineRef, policy, baseline)
 		if err != nil {
 			return Report{}, err
 		}
 	}
 	return report, nil
+}
+
+func validatePolicyRatchet(base, current Policy, tracked []string) error {
+	for _, name := range tracked {
+		baseSurface, err := matchingSurface(name, base.Surfaces)
+		if err != nil {
+			return err
+		}
+		if baseSurface == nil {
+			continue
+		}
+		currentSurface, err := matchingSurface(name, current.Surfaces)
+		if err != nil {
+			return err
+		}
+		if currentSurface == nil {
+			return fmt.Errorf("docaudit: policy weakens governed coverage for tracked path %q", name)
+		}
+		if currentSurface.MaxAgeDays > baseSurface.MaxAgeDays {
+			return fmt.Errorf("docaudit: policy raises max-age-days for %q from %d to %d", name, baseSurface.MaxAgeDays, currentSurface.MaxAgeDays)
+		}
+	}
+	return nil
 }
 
 func baselineAdditionsAtRef(ctx context.Context, root, ref string, currentPolicy Policy, current []BaselineEntry) ([]BaselineEntry, error) {
