@@ -210,15 +210,13 @@ func globPathMatch(pattern, name string) bool {
 	nameParts := strings.Split(name, "/")
 	type state struct{ pattern, name int }
 	memo := map[state]bool{}
-	seen := map[state]bool{}
 
 	var match func(int, int) bool
 	match = func(patternIndex, nameIndex int) bool {
 		key := state{pattern: patternIndex, name: nameIndex}
-		if seen[key] {
-			return memo[key]
+		if result, ok := memo[key]; ok {
+			return result
 		}
-		seen[key] = true
 
 		var result bool
 		switch {

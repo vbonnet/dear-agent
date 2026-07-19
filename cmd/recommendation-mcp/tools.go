@@ -1,5 +1,5 @@
 // tools.go implements the MCP tools (ADR-015 Part B; ADR-016 is a redirect):
-// get_signals, get_recommendations, get_signal_trends, suggest_backlog.
+// get_signals, get_recommendations, get_signal_trends.
 //
 // Every tool is read-only. The server never writes; collection is the
 // aggregator's job.
@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/aggregator"
-	"github.com/vbonnet/dear-agent/pkg/backlog"
 )
 
 // Per-tool caps prevent a misconfigured client from over-fetching. See
@@ -38,35 +37,6 @@ const (
 // kept conservative so the same tool shape works across MCP versions.
 func toolDescriptors() []map[string]any {
 	return []map[string]any{
-		{
-			"name": "suggest_backlog",
-			"description": "Rank and suggest the next backlog items to pick up. " +
-				"Reads one or more markdown BACKLOG.md files and applies the VROOM " +
-				"dispatch ranking (priority × leverage × effort). " +
-				"Returns a shortlist of eligible items and a list of blocked items.",
-			"inputSchema": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"paths": map[string]any{
-						"type":        "array",
-						"items":       map[string]any{"type": "string"},
-						"description": "paths to markdown backlog files (default: [\"BACKLOG.md\"])",
-					},
-					"capacity": map[string]any{
-						"type":        "integer",
-						"description": "max items to suggest (default 3)",
-					},
-					"phase": map[string]any{
-						"type":        "integer",
-						"description": "restrict to items whose ID prefix matches this phase number; -1 = any (default -1)",
-					},
-					"max_effort": map[string]any{
-						"type":        "string",
-						"description": "drop items larger than this effort: small, medium, large (default: no cap)",
-					},
-				},
-			},
-		},
 		{
 			"name": "get_signals",
 			"description": "Query collected signals. Filter by kind, subject (substring), and " +
@@ -528,88 +498,4 @@ func (s *Server) toolGetSignalTrends(ctx context.Context, id any, args json.RawM
 		"bucket":  parsed.Bucket.String(),
 		"buckets": wireBuckets,
 	}}
-}
-
-// ----- suggest_backlog -----
-
-type suggestBacklogArgs struct {
-	Paths     []string `json:"paths"`
-	Capacity  int      `json:"capacity"`
-	Phase     int      `json:"phase"`
-	MaxEffort string   `json:"max_effort"`
-}
-
-func (s *Server) toolSuggestBacklog(ctx context.Context, id any, args json.RawMessage) rpcResponse {
-	var a suggestBacklogArgs
-	if err := json.Unmarshal(args, &a); err != nil {
-		return errResponse(id, -32602, "invalid arguments", err.Error())
-	}
-
-	paths := a.Paths
-	if len(paths) == 0 {
-		paths = []string{"BACKLOG.md"}
-	}
-
-	src := backlog.NewMarkdownSource(paths...)
-	suggester := backlog.NewSuggester(src)
-
-	phase := a.Phase
-	if phase == 0 {
-		phase = -1 // 0 is not a valid phase; -1 means any
-	}
-
-	var maxEffort backlog.Effort
-	switch strings.ToLower(strings.TrimSpace(a.MaxEffort)) {
-	case "small", "s", "xs":
-		maxEffort = backlog.EffortSmall
-	case "medium", "m":
-		maxEffort = backlog.EffortMedium
-	case "large", "l", "xl":
-		maxEffort = backlog.EffortLarge
-	default:
-		maxEffort = backlog.EffortUnknown // no cap
-	}
-
-	c := backlog.Context{
-		Phase:     phase,
-		Capacity:  a.Capacity,
-		MaxEffort: maxEffort,
-	}
-
-	result, err := suggester.Suggest(ctx, c)
-	if err != nil {
-		return errResponse(id, -32000, "suggest", err.Error())
-	}
-
-	suggested := make([]map[string]any, 0, len(result.Suggested))
-	for _, sg := range result.Suggested {
-		suggested = append(suggested, suggestionToWire(sg))
-	}
-	blocked := make([]map[string]any, 0, len(result.Blocked))
-	for _, sg := range result.Blocked {
-		blocked = append(blocked, suggestionToWire(sg))
-	}
-
-	return rpcResponse{JSONRPC: "2.0", ID: id, Result: map[string]any{
-		"suggested": suggested,
-		"blocked":   blocked,
-		"total":     result.Total,
-	}}
-}
-
-// suggestionToWire converts a backlog.Suggestion to the wire shape.
-func suggestionToWire(sg backlog.Suggestion) map[string]any {
-	m := map[string]any{
-		"id":      sg.Item.ID,
-		"title":   sg.Item.Title,
-		"status":  sg.Item.Status.String(),
-		"effort":  sg.Item.Effort.String(),
-		"score":   sg.Score,
-		"reason":  sg.Reason,
-		"section": sg.Item.Section,
-	}
-	if len(sg.Blockers) > 0 {
-		m["blockers"] = sg.Blockers
-	}
-	return m
 }

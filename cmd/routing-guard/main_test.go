@@ -9,6 +9,9 @@ import (
 // The forbidden globs as declared in .dear-agent.yml > forbidden-paths.
 var testPatterns = []string{
 	"**/[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh]/**",
+	"**/[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh].[Mm][Dd]",
+	"**/[Rr][Ee][Pp][Oo][Rr][Tt].[Mm][Dd]",
+	"**/docs/**/[Pp][Ll][Aa][Nn].[Mm][Dd]",
 	"**/docs/**/*-[Pp][Ll][Aa][Nn].*",
 	"**/[Rr][Oo][Aa][Dd][Mm][Aa][Pp].*",
 	"**/*-[Rr][Oo][Aa][Dd][Mm][Aa][Pp].*",
@@ -48,6 +51,10 @@ func TestForbidden(t *testing.T) {
 		{"notes/team-backlog.toml", true},
 		{"reports/incident-research.pdf", true},
 		{"reports/incident-report.html", true},
+		{"RESEARCH.md", true},
+		{"reports/REPORT.md", true},
+		{"docs/PLAN.md", true},
+		{"agm/docs/ops/PLAN.md", true},
 		// Wayfinder TOOL SOURCE and living docs — must NOT be blocked.
 		{"wayfinder/SKILL.md", false},
 		{"wayfinder/SPEC.md", false},
