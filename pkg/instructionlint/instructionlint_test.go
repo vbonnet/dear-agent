@@ -394,6 +394,59 @@ func TestCheckRepositoryRejectsImportOutsideGovernedInventory(t *testing.T) {
 	}
 }
 
+func TestCheckRepositoryValidatesGovernedSymlinkTargets(t *testing.T) {
+	t.Run("governed target", func(t *testing.T) {
+		repo := t.TempDir()
+		runGit(t, repo, "init", "-q")
+		writeTestFile(t, repo, ".dear-agent.yml", `instruction-policy:
+  surfaces:
+    - match: wayfinder/SKILL.md
+      owner: wayfinder
+    - match: wayfinder/skills/wayfinder/SKILL.md
+      owner: plugin
+`)
+		writeTestFile(t, repo, "wayfinder/SKILL.md", "# Governed skill\n")
+		if err := os.MkdirAll(filepath.Join(repo, "wayfinder", "skills", "wayfinder"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("../../SKILL.md", filepath.Join(repo, "wayfinder", "skills", "wayfinder", "SKILL.md")); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, repo, "add", ".")
+
+		result, violations, err := CheckRepository(context.Background(), repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Files != 2 || len(violations) != 0 {
+			t.Fatalf("result=%+v violations=%v, want two governed paths", result, violations)
+		}
+	})
+
+	t.Run("ungoverned target", func(t *testing.T) {
+		repo := t.TempDir()
+		runGit(t, repo, "init", "-q")
+		writeTestFile(t, repo, ".dear-agent.yml", `instruction-policy:
+  surfaces:
+    - match: skills/current/SKILL.md
+      owner: plugin
+`)
+		writeTestFile(t, repo, "hidden.md", "# Hidden instructions\n")
+		if err := os.MkdirAll(filepath.Join(repo, "skills", "current"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("../../hidden.md", filepath.Join(repo, "skills", "current", "SKILL.md")); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, repo, "add", ".")
+
+		_, _, err := CheckRepository(context.Background(), repo)
+		if err == nil || !strings.Contains(err.Error(), "must be tracked and match exactly one instruction surface") {
+			t.Fatalf("error = %v, want ungoverned symlink target rejection", err)
+		}
+	})
+}
+
 func TestExclusionRatchetRejectsNewAndIncreasedDebt(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init", "-q")

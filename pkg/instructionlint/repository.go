@@ -68,7 +68,16 @@ func CheckRepository(ctx context.Context, root string) (Result, []Violation, err
 			return Result{}, nil, fmt.Errorf("instructionlint: %s matches multiple instruction surfaces: %s", relative, strings.Join(matches, ", "))
 		}
 		matchedSurface[matches[0]]++
-		data, err := os.ReadFile(filepath.Join(absRoot, filepath.FromSlash(relative)))
+		absolute := filepath.Join(absRoot, filepath.FromSlash(relative))
+		symlink, err := inspectGovernedPath(absRoot, absolute, relative, policy.Surfaces, tracked)
+		if err != nil {
+			return Result{}, nil, err
+		}
+		if symlink {
+			files++
+			continue
+		}
+		data, err := os.ReadFile(absolute)
 		if err != nil {
 			return Result{}, nil, fmt.Errorf("instructionlint: read %s: %w", relative, err)
 		}
@@ -90,6 +99,44 @@ func CheckRepository(ctx context.Context, root string) (Result, []Violation, err
 	findings = applyExclusions(findings, policy.Exclusions)
 	sortViolations(findings)
 	return Result{Files: files, Exclusions: len(policy.Exclusions)}, findings, nil
+}
+
+func inspectGovernedPath(root, absolute, relative string, surfaces []Surface, tracked map[string]bool) (bool, error) {
+	info, err := os.Lstat(absolute)
+	if err != nil {
+		return false, fmt.Errorf("instructionlint: inspect %s: %w", relative, err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return false, nil
+	}
+	if err := validateGovernedSymlink(root, absolute, relative, surfaces, tracked); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func validateGovernedSymlink(root, absolute, relative string, surfaces []Surface, tracked map[string]bool) error {
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return fmt.Errorf("instructionlint: resolve repository root for instruction symlink %s: %w", relative, err)
+	}
+	resolved, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		return fmt.Errorf("instructionlint: resolve instruction symlink %s: %w", relative, err)
+	}
+	targetRelative, err := filepath.Rel(resolvedRoot, resolved)
+	if err != nil {
+		return fmt.Errorf("instructionlint: locate instruction symlink target %s: %w", relative, err)
+	}
+	if targetRelative == ".." || filepath.IsAbs(targetRelative) || strings.HasPrefix(targetRelative, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("instructionlint: instruction symlink %s resolves outside repository", relative)
+	}
+	target := filepath.ToSlash(targetRelative)
+	matches := matchingSurfaces(surfaces, target)
+	if !tracked[target] || len(matches) != 1 {
+		return fmt.Errorf("instructionlint: instruction symlink %s target %s must be tracked and match exactly one instruction surface", relative, target)
+	}
+	return nil
 }
 
 func instructionSegments(relative string, data []byte) ([]Segment, error) {

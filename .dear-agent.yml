@@ -107,6 +107,8 @@ instruction-policy:
       owner: vroom
     - match: wayfinder/SKILL.md
       owner: wayfinder
+    - match: wayfinder/skills/wayfinder/SKILL.md
+      owner: wayfinder-plugin
     - match: wayfinder/PHASES.md
       owner: wayfinder
     - match: wayfinder/SPEC.md
