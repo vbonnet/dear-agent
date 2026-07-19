@@ -230,6 +230,26 @@ description: Use when an agent needs an example.
 			),
 		},
 		{
+			name: "empty provider tool list remains invalid with fallback",
+			content: strings.Replace(
+				strings.Replace(validSkill("example-skill"), "description:", "allowed-tools: []\ndescription:", 1),
+				"Confirm the expected result exists.",
+				"When the provider is unavailable, use the same CLI steps. Confirm the expected result exists.",
+				1,
+			),
+			want: []string{"invalid `allowed-tools:` value"},
+		},
+		{
+			name: "boolean provider tool declaration remains invalid with fallback",
+			content: strings.Replace(
+				strings.Replace(validSkill("example-skill"), "description:", "allowed-tools: false\ndescription:", 1),
+				"Confirm the expected result exists.",
+				"When the provider is unavailable, use the same CLI steps. Confirm the expected result exists.",
+				1,
+			),
+			want: []string{"invalid `allowed-tools:` value"},
+		},
+		{
 			name: "provider extension with dotted fallback command",
 			content: strings.Replace(
 				strings.Replace(validSkill("example-skill"), "description:", "allowed-tools: [Bash]\ndescription:", 1),

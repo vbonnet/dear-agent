@@ -344,6 +344,9 @@ func validateSkillExecution(path string, fm *Frontmatter, keys map[string]yaml.N
 	if effortPresent {
 		violations = append(violations, validateOptionalTier(path, "effort", fm.Effort, allowedEfforts, "low, medium, high")...)
 	}
+	if _, declared := keys["allowed-tools"]; declared && !validAllowedTools(keys) {
+		violations = append(violations, Violation{Path: path, Reason: "invalid `allowed-tools:` value (expected a nonempty string or nonempty string list)"})
+	}
 	if hasProviderExecutionField(keys) && !hasActionableNonProviderFallback(bodyText) {
 		violations = append(violations, Violation{Path: path, Reason: "provider execution extension requires a non-provider fallback in the skill body"})
 	}
@@ -450,7 +453,7 @@ func nonemptyField(keys map[string]yaml.Node, key string) bool {
 
 func hasProviderExecutionField(keys map[string]yaml.Node) bool {
 	for _, field := range providerExecutionFields {
-		if nonemptyField(keys, field) {
+		if _, present := keys[field]; present {
 			return true
 		}
 	}
