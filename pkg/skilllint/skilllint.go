@@ -82,6 +82,7 @@ var skillFields = map[string]bool{
 	"allowed-tools":            true,
 	"argument-hint":            true,
 	"compatibility":            true,
+	"content-hash":             true,
 	"description":              true,
 	"disable-model-invocation": true,
 	"effort":                   true,
@@ -257,6 +258,9 @@ func semanticSkillDigest(data []byte) [sha256.Size]byte {
 		if closing >= 0 {
 			var frontmatter map[string]any
 			if yaml.Unmarshal([]byte(canonical[4:4+closing]), &frontmatter) == nil {
+				// Integrity stamps describe the current bytes; they are not part of
+				// the skill's semantic identity for duplicate detection.
+				delete(frontmatter, "content-hash")
 				if encoded, marshalErr := json.Marshal(frontmatter); marshalErr == nil {
 					canonical = string(encoded) + "\n" + normalizeSkillBody(string(body))
 				}

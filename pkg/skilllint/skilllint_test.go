@@ -139,6 +139,10 @@ func TestCheckFileSkillSchema(t *testing.T) {
 	}{
 		{name: "compliant", content: validSkill("example-skill")},
 		{
+			name:    "content hash accepted",
+			content: strings.Replace(validSkill("example-skill"), "description:", "content-hash: 0123456789abcdef\ndescription:", 1),
+		},
+		{
 			name:    "verification criteria accepted",
 			content: strings.Replace(validSkill("example-skill"), "description:", "verification_criteria:\n  - output file exists\ndescription:", 1),
 		},
@@ -399,12 +403,18 @@ func TestCheckRepositoryUsesTrackedInventoryAndDetectsDuplicates(t *testing.T) {
 func TestCheckRepositoryDetectsNormalizedSkillDuplicates(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init", "-q")
-	first := validSkill("duplicate-skill")
-	second := strings.Replace(first,
+	first := strings.Replace(
+		validSkill("duplicate-skill"),
+		"description:",
+		"content-hash: aaaaaaaaaaaaaaaa\ndescription:",
+		1,
+	)
+	second := strings.Replace(validSkill("duplicate-skill"),
 		"name: duplicate-skill\ndescription: Use when an agent needs a deterministic test workflow.",
 		"description: Use when an agent needs a deterministic test workflow.\nname: duplicate-skill",
 		1,
 	)
+	second = strings.Replace(second, "description:", "content-hash: bbbbbbbbbbbbbbbb\ndescription:", 1)
 	second = strings.Replace(second, "# duplicate-skill", "<!-- discovery note -->\n# duplicate-skill", 1)
 	writeFile(t, repo, "first/SKILL.md", first)
 	writeFile(t, repo, "second/SKILL.md", second)
