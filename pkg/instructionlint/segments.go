@@ -2,6 +2,7 @@ package instructionlint
 
 import (
 	"bytes"
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -188,6 +189,7 @@ func parseYAMLSegments(source []byte) ([]Segment, error) {
 		return nil, err
 	}
 	var segments []Segment
+	seenComments := map[string]bool{}
 	var visit func(*yaml.Node)
 	visit = func(node *yaml.Node) {
 		if node.Kind == yaml.ScalarNode && node.Tag == "!!str" {
@@ -197,12 +199,57 @@ func parseYAMLSegments(source []byte) ([]Segment, error) {
 			}
 			segments = append(segments, Segment{Kind: kind, Line: node.Line, Text: node.Value})
 		}
+		segments = appendYAMLCommentSegments(segments, seenComments, node.HeadComment, node.Line-commentLineCount(node.HeadComment))
+		segments = appendYAMLCommentSegments(segments, seenComments, node.LineComment, node.Line)
+		segments = appendYAMLCommentSegments(segments, seenComments, node.FootComment, node.Line+1)
 		for _, child := range node.Content {
 			visit(child)
 		}
 	}
 	visit(&root)
 	return segments, nil
+}
+
+func appendYAMLCommentSegments(segments []Segment, seen map[string]bool, comment string, startLine int) []Segment {
+	if strings.TrimSpace(comment) == "" {
+		return segments
+	}
+	if startLine < 1 {
+		startLine = 1
+	}
+	for offset, raw := range strings.Split(comment, "\n") {
+		value := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(raw), "#"))
+		if value == "" {
+			continue
+		}
+		line := startLine + offset
+		key := fmt.Sprintf("%d\x00%s", line, value)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		segments = append(segments, Segment{Kind: SegmentProse, Line: line, Text: value})
+		if commandShaped(value) {
+			segments = append(segments, Segment{Kind: SegmentShell, Line: line, Text: value})
+		}
+		for _, match := range embeddedShellCommand.FindAllStringSubmatch(value, -1) {
+			command := match[1]
+			if command == "" {
+				command = match[2]
+			}
+			if strings.TrimSpace(command) != "" {
+				segments = append(segments, Segment{Kind: SegmentInline, Line: line, Text: command})
+			}
+		}
+	}
+	return segments
+}
+
+func commentLineCount(comment string) int {
+	if comment == "" {
+		return 0
+	}
+	return strings.Count(comment, "\n") + 1
 }
 
 func classifyMarkdown(root ast.Node, source []byte) (map[int]SegmentKind, []Segment) {

@@ -181,6 +181,23 @@ pr-policy:
 	}
 }
 
+func TestYAMLCommentsRemainPolicyVisible(t *testing.T) {
+	segments, err := parseYAMLSegments([]byte("# Do not instruct agents to run `safe-pr create --emergency --reason bypass`.\npolicy: active # `agm status` is retired\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rules []string
+	for _, segment := range segments {
+		for _, violation := range evaluateSegment(".dear-agent.yml", segment) {
+			rules = append(rules, violation.Rule)
+		}
+	}
+	sort.Strings(rules)
+	if !reflect.DeepEqual(rules, []string{"agm-root-status", "safe-pr-emergency"}) {
+		t.Fatalf("YAML comment rules = %v", rules)
+	}
+}
+
 func TestMarkdownFrontmatterCommandsRemainPolicyVisible(t *testing.T) {
 	segments := parseSegments([]byte("---\nallowed-tools: Bash(gh pr merge:*), Bash(agm status *)\n---\n\n# Command\n"))
 	var rules []string

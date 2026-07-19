@@ -83,6 +83,10 @@ instruction-policy:
       owner: harness-hooks
     - match: .codex/hooks/stop-*
       owner: harness-hooks
+    - match: .opencode/hooks/pretool-*
+      owner: harness-hooks
+    - match: .opencode/hooks/stop-*
+      owner: harness-hooks
     - match: .deepsec/AGENTS.md
       owner: deepsec
     - match: .deepsec/data/**/SETUP.md
@@ -115,7 +119,7 @@ forbidden-paths:
     - research/*.md
     - research/*.txt
     # TEMPORAL ARTIFACTS — design docs, plans, audits, DEAR retros, research,
-    # and Wayfinder artifacts (W0/problem statements). They capture a moment
+    # and Wayfinder artifacts (CHARTER/problem statements). They capture a moment
     # of thinking, are NOT maintained with the code, and ALWAYS route to the
     # knowledge base ~/src/engram-research (projects/<name>/), never this live
     # coding repo — even when the artifact is about code here.
