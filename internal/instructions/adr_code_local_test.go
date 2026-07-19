@@ -15,6 +15,7 @@ type localADRScope struct {
 
 var localADRFilePattern = regexp.MustCompile(`^(?:ADR-[0-9]{3}|[0-9]{4})-[a-z0-9-]+\.md$`)
 var localADRIDPattern = regexp.MustCompile(`[0-9]{3,4}`)
+var numericLocalADRLikePattern = regexp.MustCompile(`^[0-9]{3}-.+\.md$`)
 
 const localADRMaxLines = 120
 
@@ -218,5 +219,17 @@ func assertEveryCodeLocalADRIsGoverned(t *testing.T, root string, governed map[s
 }
 
 func isADRLikeFilename(name string) bool {
-	return strings.HasPrefix(strings.ToUpper(name), "ADR-") && strings.HasSuffix(strings.ToLower(name), ".md")
+	return (strings.HasPrefix(strings.ToUpper(name), "ADR-") || numericLocalADRLikePattern.MatchString(name)) &&
+		strings.HasSuffix(strings.ToLower(name), ".md")
+}
+
+func TestADRLikeFilenameIncludesMalformedThreeDigitRecords(t *testing.T) {
+	for _, name := range []string{"ADR-01-short.md", "001-choice.md"} {
+		if !isADRLikeFilename(name) {
+			t.Errorf("isADRLikeFilename(%q) = false, want malformed ADR candidate", name)
+		}
+	}
+	if isADRLikeFilename("2026-report.md") {
+		t.Error("temporal report must not be classified as an ADR filename")
+	}
 }

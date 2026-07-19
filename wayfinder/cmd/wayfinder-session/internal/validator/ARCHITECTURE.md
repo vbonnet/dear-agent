@@ -749,7 +749,7 @@ func loadCustomCommands(projectDir string) (*CustomCommands, error) {
 ## References
 
 - **SPEC.md**: Detailed technical specification
-- **ADR-001**: Architectural decision record for Gate 9
+- **Implementation**: `code_verification_gate.go`
 - **Implementation**: `code_verification_gate.go` (632 lines)
 - **Tests**: `code_verification_gate_test.go` (437 lines, 65.8% coverage)
 - **Wayfinder Project**: `the git history/`

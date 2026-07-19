@@ -39,16 +39,17 @@ func (p *Parser) ParseBytes(path string, data []byte) (*Engram, error) {
 	if err := yaml.Unmarshal(frontmatter, &fm); err != nil {
 		return nil, fmt.Errorf("failed to parse frontmatter: %w", err)
 	}
-	var presence struct {
-		EncodingStrength *float64 `yaml:"encoding_strength"`
-	}
-	if err := yaml.Unmarshal(frontmatter, &presence); err != nil {
+	var rawFields map[string]yaml.Node
+	if err := yaml.Unmarshal(frontmatter, &rawFields); err != nil {
 		return nil, fmt.Errorf("failed to inspect frontmatter defaults: %w", err)
 	}
 
 	// Apply defaults for missing metadata fields (backward compatibility)
-	if presence.EncodingStrength == nil {
+	strength, strengthPresent := rawFields["encoding_strength"]
+	if !strengthPresent {
 		fm.EncodingStrength = 1.0 // Default neutral strength
+	} else if strength.Tag == "!!null" {
+		return nil, fmt.Errorf("encoding_strength must be a number, not null")
 	}
 
 	// RetrievalCount defaults to 0 (zero value is correct)

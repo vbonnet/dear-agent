@@ -3,6 +3,7 @@ package engram
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -165,5 +166,14 @@ func TestParserPreservesExplicitZeroEncodingStrength(t *testing.T) {
 	}
 	if eng.Frontmatter.EncodingStrength != 0 {
 		t.Fatalf("encoding_strength = %v, want explicit zero", eng.Frontmatter.EncodingStrength)
+	}
+}
+
+func TestParserRejectsNullEncodingStrength(t *testing.T) {
+	for _, nullValue := range []string{"null", "~"} {
+		content := []byte("---\ntype: pattern\ntitle: Null strength\nencoding_strength: " + nullValue + "\n---\nbody\n")
+		if _, err := NewParser().ParseBytes("null.ai.md", content); err == nil || !strings.Contains(err.Error(), "not null") {
+			t.Fatalf("ParseBytes(encoding_strength=%s) error = %v, want null rejection", nullValue, err)
+		}
 	}
 }
