@@ -299,6 +299,12 @@ Feature: Harness parity
     Then AGM should wait for the Codex composer
     And AGM should deliver the startup prompt even though the session is detached
 
+  Scenario: Shared Codex creation rolls back when the composer is absent
+    Given shared Codex creation cannot observe the composer
+    When AGM creates Codex through shared operations
+    Then shared creation should fail before registration and prompt delivery
+    And shared creation should remove its newly created tmux session
+
   Scenario: Codex detached startup clears first-run trust before delivery
     Given Codex CLI is available
     And a Codex CLI trust prompt
@@ -324,6 +330,20 @@ Feature: Harness parity
     And a Codex CLI composer pane
     When AGM runs send safety for the configured harness
     Then send safety should not require a Claude process
+
+  Scenario Outline: Shared send gates delivery on pane readiness
+    Given a shared Codex send target with readiness "<readiness>"
+    When AGM sends a message through shared operations
+    Then the shared send result should be "<outcome>"
+    And shared send should emit <commands> tmux commands
+
+    Examples:
+      | readiness | outcome       | commands |
+      | YES       | delivered     | 1        |
+      | NO        | not_delivered | 0        |
+      | QUEUE     | not_delivered | 0        |
+      | OVERLAY   | not_delivered | 0        |
+      | NOT_FOUND | not_delivered | 0        |
 
   Scenario: AGY detached session receives startup prompt
     Given AGY is available

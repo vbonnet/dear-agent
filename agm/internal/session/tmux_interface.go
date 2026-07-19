@@ -1,6 +1,9 @@
 package session
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // SessionInfo holds information about a tmux session
 type SessionInfo struct {
@@ -64,6 +67,27 @@ type TmuxSessionKiller interface {
 // use this capability so backend failure cannot be mistaken for absence.
 type StrictSessionExistenceChecker interface {
 	HasSessionStrict(ctx context.Context, name string) (bool, error)
+}
+
+// HarnessReadinessWaiter is the optional startup capability used by shared
+// lifecycle operations that launch a harness without a surface runtime. A nil
+// error means the named harness has reached its interactive prompt/composer.
+type HarnessReadinessWaiter interface {
+	WaitForHarnessReady(sessionName, harness string, timeout time.Duration) error
+}
+
+// InputReadiness is the observable result of inspecting a tmux pane before
+// message delivery. State is the detector verdict (for example YES, NO,
+// QUEUE, OVERLAY, or NOT_FOUND).
+type InputReadiness struct {
+	Ready bool
+	State string
+}
+
+// InputReadinessChecker is the optional pre-delivery capability used by
+// shared message operations. Delivery is safe only when Ready is true.
+type InputReadinessChecker interface {
+	CheckInputReadiness(sessionName, harness string) (InputReadiness, error)
 }
 
 // TmuxInterface provides an abstraction for tmux operations

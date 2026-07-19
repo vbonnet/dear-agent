@@ -19,16 +19,22 @@ type sentKey struct {
 
 // mockTmux implements the tmux interfaces needed by ops.
 type mockTmux struct {
-	sessions map[string]bool
-	sent     []sentKey
-	sendErr  error
-	killed   []string
-	killErr  error
-	hasErr   error
+	sessions        map[string]bool
+	sent            []sentKey
+	sendErr         error
+	killed          []string
+	killErr         error
+	hasErr          error
+	readiness       session.InputReadiness
+	readinessErr    error
+	readinessChecks []string
 }
 
 func newMockTmux(sessions ...string) *mockTmux {
-	m := &mockTmux{sessions: make(map[string]bool)}
+	m := &mockTmux{
+		sessions:  make(map[string]bool),
+		readiness: session.InputReadiness{Ready: true, State: "YES"},
+	}
 	for _, s := range sessions {
 		m.sessions[s] = true
 	}
@@ -81,6 +87,14 @@ func (m *mockTmux) SendKeys(session, keys string) error {
 	}
 	m.sent = append(m.sent, sentKey{session: session, keys: keys})
 	return nil
+}
+
+func (m *mockTmux) CheckInputReadiness(sessionName, harness string) (session.InputReadiness, error) {
+	m.readinessChecks = append(m.readinessChecks, sessionName+":"+harness)
+	if m.readinessErr != nil {
+		return session.InputReadiness{}, m.readinessErr
+	}
+	return m.readiness, nil
 }
 
 // mockTmuxWithLiveness wraps mockTmux with the optional

@@ -16,8 +16,10 @@ import (
 	commandparity "github.com/vbonnet/dear-agent/agm/cmd/agm/parity"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/configdirparity"
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/engramparity"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/marketplaceparity"
 	"github.com/vbonnet/dear-agent/agm/internal/mcpparity"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
@@ -25,6 +27,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/quotaparity"
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
 	"github.com/vbonnet/dear-agent/agm/internal/recovery"
+	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/state"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/wayfinderparity"
@@ -118,6 +121,13 @@ type harnessParityState struct {
 	agyLifecycleTestOutput     string
 	agyLifecycleTestErr        error
 	resumeSource               string
+	sharedSendReadiness        string
+	sharedSendResult           *ops.SendMessageResult
+	sharedSendErr              error
+	sharedSendTmux             *session.MockTmux
+	sharedCreateErr            error
+	sharedCreateTmux           *session.MockTmux
+	sharedCreateStore          *dolt.MockAdapter
 }
 
 type harnessParityStateKey struct{}
@@ -280,6 +290,14 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGY bootstrap failures should preserve transactional rollback$`, agyBootstrapFailuresShouldPreserveTransactionalRollback)
 	ctx.Step(`^the AGY adapter should preserve canonical launch and resume policy$`, agyAdapterShouldPreserveCanonicalLaunchAndResumePolicy)
 	ctx.Step(`^the AGY adapter should require AGY process and transcript truth$`, agyAdapterShouldRequireAgyProcessAndTranscriptTruth)
+	ctx.Step(`^a shared Codex send target with readiness "([^"]*)"$`, aSharedCodexSendTargetWithReadiness)
+	ctx.Step(`^AGM sends a message through shared operations$`, agmSendsAMessageThroughSharedOperations)
+	ctx.Step(`^the shared send result should be "([^"]*)"$`, theSharedSendResultShouldBe)
+	ctx.Step(`^shared send should emit (\d+) tmux commands$`, sharedSendShouldEmitTmuxCommands)
+	ctx.Step(`^shared Codex creation cannot observe the composer$`, sharedCodexCreationCannotObserveTheComposer)
+	ctx.Step(`^AGM creates Codex through shared operations$`, agmCreatesCodexThroughSharedOperations)
+	ctx.Step(`^shared creation should fail before registration and prompt delivery$`, sharedCreationShouldFailBeforeRegistrationAndPromptDelivery)
+	ctx.Step(`^shared creation should remove its newly created tmux session$`, sharedCreationShouldRemoveItsNewlyCreatedTmuxSession)
 	ctx.Step(`^an existing tmux session running Codex CLI$`, anExistingTmuxSessionRunningCodexCLI)
 	ctx.Step(`^an existing tmux session running AGY$`, anExistingTmuxSessionRunningAGY)
 	ctx.Step(`^/agm:agm-assoc runs in that session$`, agmAssocRunsInThatSession)
@@ -611,6 +629,145 @@ func agmValidatesCurrentTmuxAGYSafety(ctx context.Context) error {
 func currentTmuxAGYCreationShouldFailBeforeLaunchWithDetachedGuidance(ctx context.Context) error {
 	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
 	return requireAgyLifecycleBehaviors(harnessState, "TestStartNewSessionForContextRejectsCurrentTmuxAgyBeforeLaunch")
+}
+
+func aSharedCodexSendTargetWithReadiness(ctx context.Context, readiness string) error {
+	if slices.Contains([]string{"YES", "NO", "QUEUE", "OVERLAY", "NOT_FOUND"}, readiness) {
+		ctx.Value(harnessParityStateKey{}).(*harnessParityState).sharedSendReadiness = readiness
+		return nil
+	}
+	return fmt.Errorf("unsupported shared-send readiness %q", readiness)
+}
+
+func agmSendsAMessageThroughSharedOperations(ctx context.Context) error {
+	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	store := dolt.NewMockAdapter()
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "bdd-shared-codex-id",
+		Name:          "bdd-shared-codex",
+		Harness:       "codex-cli",
+		Tmux:          manifest.Tmux{SessionName: "bdd-shared-codex"},
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+	if err := store.CreateSession(m); err != nil {
+		return fmt.Errorf("arrange shared-send session: %w", err)
+	}
+	tmuxMock := session.NewMockTmux()
+	tmuxMock.Sessions[m.Tmux.SessionName] = true
+	tmuxMock.InputReadiness = session.InputReadiness{
+		Ready: harnessState.sharedSendReadiness == "YES",
+		State: harnessState.sharedSendReadiness,
+	}
+	harnessState.sharedSendTmux = tmuxMock
+	harnessState.sharedSendResult, harnessState.sharedSendErr = ops.SendMessage(
+		&ops.OpContext{Storage: store, Tmux: tmuxMock},
+		&ops.SendMessageRequest{Recipient: m.SessionID, Message: "BDD readiness message"},
+	)
+	return nil
+}
+
+func theSharedSendResultShouldBe(ctx context.Context, expected string) error {
+	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if harnessState.sharedSendResult == nil {
+		return fmt.Errorf("shared send returned no result")
+	}
+	switch expected {
+	case "delivered":
+		if harnessState.sharedSendErr != nil {
+			return fmt.Errorf("shared send failed instead of delivering: %w", harnessState.sharedSendErr)
+		}
+		if !harnessState.sharedSendResult.Delivered {
+			return fmt.Errorf("shared send result = %#v, want delivery", harnessState.sharedSendResult)
+		}
+	case "not_delivered":
+		if harnessState.sharedSendResult.Delivered {
+			return fmt.Errorf("shared send unexpectedly reported delivery")
+		}
+		opErr := &ops.OpError{}
+		if !errors.As(harnessState.sharedSendErr, &opErr) || opErr.Code != ops.ErrCodeSessionNotReady {
+			if harnessState.sharedSendErr == nil {
+				return errors.New("shared send returned no typed not-ready error")
+			}
+			return fmt.Errorf("shared send returned an unexpected not-ready error: %w", harnessState.sharedSendErr)
+		}
+	default:
+		return fmt.Errorf("unsupported shared-send outcome %q", expected)
+	}
+	return nil
+}
+
+func sharedSendShouldEmitTmuxCommands(ctx context.Context, expected int) error {
+	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if harnessState.sharedSendTmux == nil {
+		return fmt.Errorf("shared send tmux recorder is missing")
+	}
+	if got := len(harnessState.sharedSendTmux.SentCommands); got != expected {
+		return fmt.Errorf("shared send emitted %d tmux commands, want %d", got, expected)
+	}
+	return nil
+}
+
+func sharedCodexCreationCannotObserveTheComposer(ctx context.Context) error {
+	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	harnessState.configuredHarness = "codex-cli"
+	return nil
+}
+
+func agmCreatesCodexThroughSharedOperations(ctx context.Context) error {
+	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if harnessState.configuredHarness != "codex-cli" {
+		return fmt.Errorf("shared creation scenario requires codex-cli")
+	}
+	workDir, err := os.MkdirTemp("", "agm-bdd-shared-create")
+	if err != nil {
+		return fmt.Errorf("create shared-create workdir: %w", err)
+	}
+	defer os.RemoveAll(workDir)
+
+	tmuxMock := session.NewMockTmux()
+	tmuxMock.WaitForHarnessReadyError = errors.New("codex composer was not observed")
+	store := dolt.NewMockAdapter()
+	harnessState.sharedCreateTmux = tmuxMock
+	harnessState.sharedCreateStore = store
+	_, harnessState.sharedCreateErr = ops.CreateSession(
+		&ops.OpContext{Storage: store, Tmux: tmuxMock},
+		&ops.CreateSessionRequest{
+			Cwd: workDir, Prompt: "must not send", Title: "bdd-shared-create",
+			Harness: "codex-cli", Model: "5.5", SkipCodexRemoteControl: true,
+		},
+	)
+	return nil
+}
+
+func sharedCreationShouldFailBeforeRegistrationAndPromptDelivery(ctx context.Context) error {
+	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if harnessState.sharedCreateErr == nil {
+		return fmt.Errorf("shared creation reported success without a Codex composer")
+	}
+	if harnessState.sharedCreateTmux == nil || len(harnessState.sharedCreateTmux.SentCommands) != 1 {
+		return fmt.Errorf("shared creation commands = %v, want launch only", harnessState.sharedCreateTmux)
+	}
+	registered, err := harnessState.sharedCreateStore.ListSessions(&dolt.SessionFilter{})
+	if err != nil {
+		return fmt.Errorf("list shared-create registrations: %w", err)
+	}
+	if len(registered) != 0 {
+		return fmt.Errorf("shared creation registered %d sessions before readiness", len(registered))
+	}
+	return nil
+}
+
+func sharedCreationShouldRemoveItsNewlyCreatedTmuxSession(ctx context.Context) error {
+	tmuxMock := ctx.Value(harnessParityStateKey{}).(*harnessParityState).sharedCreateTmux
+	if tmuxMock == nil {
+		return fmt.Errorf("shared creation tmux recorder is missing")
+	}
+	if tmuxMock.Sessions["bdd-shared-create"] {
+		return fmt.Errorf("new tmux session survived failed shared readiness")
+	}
+	return nil
 }
 
 func activeHarnessUsesStartupMode(ctx context.Context, harness, mode string) error {

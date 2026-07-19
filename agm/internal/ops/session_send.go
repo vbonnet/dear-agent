@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/vbonnet/dear-agent/agm/internal/manager"
+	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
 // SendMessageRequest defines the input for sending a message to a session.
@@ -68,6 +69,13 @@ func SendMessage(ctx *OpContext, req *SendMessageRequest) (*SendMessageResult, e
 
 	// Preferred path: deliver through the manager.Backend abstraction.
 	if ctx.Manager != nil {
+		readiness, readinessErr := ctx.Manager.CheckDelivery(context.Background(), manager.SessionID(tmuxName))
+		if readinessErr != nil {
+			return newResult(false), ErrStorageError("manager.CheckDelivery", readinessErr)
+		}
+		if readiness != manager.CanReceiveYes {
+			return newResult(false), ErrSessionNotReady(m.Name, managerReadinessName(readiness))
+		}
 		result, sendErr := ctx.Manager.SendMessage(context.Background(), manager.SessionID(tmuxName), req.Message)
 		return newResult(sendErr == nil && result.Delivered), sendErr
 	}
@@ -79,6 +87,17 @@ func SendMessage(ctx *OpContext, req *SendMessageRequest) (*SendMessageResult, e
 	// recipient instead of silently dropping the message. This closes the
 	// long-standing "AGM message delivery is undeliverable" gap (ce-6as.36).
 	if ctx.Tmux != nil {
+		checker, ok := ctx.Tmux.(session.InputReadinessChecker)
+		if !ok {
+			return newResult(false), ErrSessionNotReady(m.Name, "UNVERIFIED")
+		}
+		readiness, readinessErr := checker.CheckInputReadiness(tmuxName, m.Harness)
+		if readinessErr != nil {
+			return newResult(false), ErrStorageError("tmux.CheckInputReadiness", readinessErr)
+		}
+		if !readiness.Ready {
+			return newResult(false), ErrSessionNotReady(m.Name, readiness.State)
+		}
 		if err := ctx.Tmux.SendKeys(tmuxName, req.Message); err != nil {
 			return newResult(false), err
 		}
@@ -90,4 +109,19 @@ func SendMessage(ctx *OpContext, req *SendMessageRequest) (*SendMessageResult, e
 	// such as stall recovery rely on this to surface "could not send" via the
 	// Delivered flag rather than failing the whole operation.
 	return newResult(false), nil
+}
+
+func managerReadinessName(readiness manager.CanReceive) string {
+	switch readiness {
+	case manager.CanReceiveYes:
+		return "YES"
+	case manager.CanReceiveNo:
+		return "NO"
+	case manager.CanReceiveQueue:
+		return "QUEUE"
+	case manager.CanReceiveNotFound:
+		return "NOT_FOUND"
+	default:
+		return "UNKNOWN"
+	}
 }

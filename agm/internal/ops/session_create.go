@@ -26,6 +26,8 @@ import (
 // StartRemoteControl->StartThread->SetThreadName sequence for every surface.
 const CodexRemoteBootTimeout = 45 * time.Second
 
+const sharedHarnessReadyTimeout = 60 * time.Second
+
 const (
 	// CreateSurfaceCLI identifies the command-line creation surface.
 	CreateSurfaceCLI = "cli"
@@ -370,6 +372,11 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		}
 		launchResult.PromptDelivered = true
 	}
+	if opCtx.CreationRuntime == nil {
+		if err := waitForCreatedHarnessReady(opCtx, params.name, params.harness); err != nil {
+			return nil, err
+		}
+	}
 
 	manifestPath, registrationAllowed, createdManifestDir, err := prepareCreateManifestDir(req)
 	if err != nil {
@@ -459,6 +466,17 @@ func applyAgyCreateIdentity(m *manifest.Manifest, metadata *agysession.Metadata)
 		ConversationDB: metadata.ConversationDBPath,
 		TranscriptPath: metadata.TranscriptPath,
 	}
+}
+
+func waitForCreatedHarnessReady(opCtx *OpContext, sessionName, harness string) error {
+	waiter, ok := opCtx.Tmux.(session.HarnessReadinessWaiter)
+	if !ok {
+		return ErrStorageError("tmux.WaitForHarnessReady", fmt.Errorf("tmux backend does not expose harness readiness"))
+	}
+	if err := waiter.WaitForHarnessReady(sessionName, harness, sharedHarnessReadyTimeout); err != nil {
+		return ErrStorageError("tmux.WaitForHarnessReady", err)
+	}
+	return nil
 }
 
 func prepareCreateTmux(opCtx *OpContext, req *CreateSessionRequest, name string) (bool, error) {

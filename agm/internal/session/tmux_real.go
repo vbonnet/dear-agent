@@ -2,7 +2,10 @@ package session
 
 import (
 	"context"
+	"fmt"
+	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/state"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
@@ -67,6 +70,41 @@ func (t *RealTmux) AttachSession(name string) error {
 // SendKeys sends keys to a tmux session
 func (t *RealTmux) SendKeys(session, keys string) error {
 	return tmux.SendCommand(session, keys)
+}
+
+// WaitForHarnessReady observes the harness-specific interactive boundary used
+// by shared creation before registration or prompt delivery.
+func (t *RealTmux) WaitForHarnessReady(sessionName, harness string, timeout time.Duration) error {
+	switch harness {
+	case "claude-code":
+		return tmux.WaitForClaudePrompt(sessionName, timeout)
+	case "codex-cli":
+		return tmux.WaitForCodexPrompt(sessionName, timeout)
+	case "agy":
+		return tmux.WaitForAgyPrompt(sessionName, timeout)
+	case "opencode-cli", "gemini-cli":
+		return tmux.WaitForPromptSimple(sessionName, timeout)
+	default:
+		return fmt.Errorf("unsupported harness readiness check %q", harness)
+	}
+}
+
+// CheckInputReadiness captures the current pane and classifies whether an
+// interactive harness composer can safely receive input.
+func (t *RealTmux) CheckInputReadiness(sessionName, _ string) (InputReadiness, error) {
+	exists, err := tmux.HasSession(sessionName)
+	if err != nil {
+		return InputReadiness{}, err
+	}
+	if !exists {
+		return InputReadiness{State: string(state.CanReceiveNotFound)}, nil
+	}
+	content, err := tmux.CapturePaneOutput(sessionName, 30)
+	if err != nil {
+		return InputReadiness{}, err
+	}
+	verdict := state.NewDetector().CheckCanReceive(content)
+	return InputReadiness{Ready: verdict == state.CanReceiveYes, State: string(verdict)}, nil
 }
 
 // HarnessLiveness scans the session's pane process tree for a live harness

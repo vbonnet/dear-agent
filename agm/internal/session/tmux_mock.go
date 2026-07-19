@@ -1,5 +1,7 @@
 package session
 
+import "time"
+
 // MockTmux provides an in-memory mock implementation of TmuxInterface for testing
 type MockTmux struct {
 	// Sessions maps session name to whether it exists
@@ -10,14 +12,20 @@ type MockTmux struct {
 
 	// SentCommands tracks commands sent via SendKeys
 	SentCommands []string
+	// Readiness checks track shared lifecycle gating in tests.
+	WaitedHarnesses      []string
+	CheckedInputSessions []string
+	InputReadiness       InputReadiness
 
 	// Errors can be set to simulate tmux failures
-	HasSessionError    error
-	ListSessionsError  error
-	CreateSessionError error
-	KillSessionError   error
-	AttachSessionError error
-	SendKeysError      error
+	HasSessionError          error
+	ListSessionsError        error
+	CreateSessionError       error
+	KillSessionError         error
+	AttachSessionError       error
+	SendKeysError            error
+	WaitForHarnessReadyError error
+	InputReadinessError      error
 }
 
 // NewMockTmux creates a new MockTmux instance
@@ -26,6 +34,7 @@ func NewMockTmux() *MockTmux {
 		Sessions:        make(map[string]bool),
 		CreatedSessions: []string{},
 		SentCommands:    []string{},
+		InputReadiness:  InputReadiness{Ready: true, State: "YES"},
 	}
 }
 
@@ -113,6 +122,21 @@ func (m *MockTmux) SendKeys(session, keys string) error {
 
 	m.SentCommands = append(m.SentCommands, keys)
 	return nil
+}
+
+// WaitForHarnessReady records the requested harness and returns the configured error.
+func (m *MockTmux) WaitForHarnessReady(sessionName, harness string, _ time.Duration) error {
+	m.WaitedHarnesses = append(m.WaitedHarnesses, sessionName+":"+harness)
+	return m.WaitForHarnessReadyError
+}
+
+// CheckInputReadiness records the target and returns the configured readiness result.
+func (m *MockTmux) CheckInputReadiness(sessionName, harness string) (InputReadiness, error) {
+	m.CheckedInputSessions = append(m.CheckedInputSessions, sessionName+":"+harness)
+	if m.InputReadinessError != nil {
+		return InputReadiness{}, m.InputReadinessError
+	}
+	return m.InputReadiness, nil
 }
 
 // ListClients returns empty list in the mock (clients not tracked)
