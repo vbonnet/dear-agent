@@ -30,3 +30,7 @@ fails when matching paths are introduced outside their knowledge-base home.
 **ROUTE-07** When an unsupported argument is supplied, the system shall return a usage error.
 
 **ROUTE-08** When the Dear Agent tracked tree is tested, the system shall require zero temporal-artifact violations.
+
+**ROUTE-09** If `.dear-agent.yml` is missing or declares no forbidden path patterns, the system shall fail closed with a policy error.
+
+**ROUTE-10** When a temporal artifact name uses underscore or camelCase token boundaries, the system shall apply the same routing policy as the canonical hyphenated form.

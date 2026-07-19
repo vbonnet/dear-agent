@@ -57,7 +57,8 @@ func main() {
 		os.Exit(2)
 	}
 	if len(patterns) == 0 {
-		os.Exit(0) // nothing declared forbidden
+		fmt.Fprintln(os.Stderr, "routing-guard: forbidden-paths policy is empty")
+		os.Exit(2)
 	}
 
 	files, err := gatherFiles(root, mode, operand)
@@ -112,10 +113,7 @@ func parseArgs(args []string) (mode, operand string, err error) {
 func loadPatterns(ymlPath string) ([]string, error) {
 	data, err := os.ReadFile(ymlPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil // no policy file → nothing to enforce
-		}
-		return nil, err
+		return nil, fmt.Errorf("read policy %s: %w", ymlPath, err)
 	}
 	var c config
 	if err := yaml.Unmarshal(data, &c); err != nil {
@@ -124,6 +122,9 @@ func loadPatterns(ymlPath string) ([]string, error) {
 	var out []string
 	for _, globs := range c.ForbiddenPaths {
 		out = append(out, globs...)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%s: forbidden-paths must contain at least one pattern", ymlPath)
 	}
 	return out, nil
 }

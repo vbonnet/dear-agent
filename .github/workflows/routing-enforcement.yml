@@ -41,16 +41,18 @@ jobs:
 
       - name: Check routing (new files in this PR + whole-tree regression)
         id: check
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
           set -o pipefail
-          git fetch origin "${{ github.base_ref }}" --depth=1
+          git fetch origin "$BASE_REF" --depth=1
           go build -o /tmp/routing-guard ./cmd/routing-guard
 
           : > report.txt
           rc=0
 
           # 1) Block any forbidden file ADDED/renamed in this PR.
-          if ! /tmp/routing-guard --diff "origin/${{ github.base_ref }}" >>report.txt 2>&1; then
+          if ! /tmp/routing-guard --diff "origin/$BASE_REF" >>report.txt 2>&1; then
             rc=1
           fi
 
