@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -14,10 +15,11 @@ import (
 type fakeProvider struct {
 	name string
 
-	mu    sync.Mutex
-	calls int
-	resp  *provider.GenerateResponse
-	err   error
+	mu          sync.Mutex
+	calls       int
+	resp        *provider.GenerateResponse
+	err         error
+	nilResponse bool
 
 	// errOnce, if true, fails the first call and succeeds afterwards.
 	// Useful for checking that the router falls through to the next
@@ -44,6 +46,9 @@ func (f *fakeProvider) Generate(_ context.Context, req *provider.GenerateRequest
 		clone := *f.resp
 		clone.Model = req.Model
 		return &clone, nil
+	}
+	if f.nilResponse {
+		return nil, nil
 	}
 	return &provider.GenerateResponse{Text: f.name + " ok", Model: req.Model}, nil
 }
@@ -255,6 +260,26 @@ func TestRouter_GenerateForModel_RejectsEmptyID(t *testing.T) {
 	r := newRouter(t, cfg, nil)
 	if _, err := r.GenerateForModel(context.Background(), "", &provider.GenerateRequest{Prompt: "hi"}); err == nil {
 		t.Fatal("expected error on empty model id")
+	}
+}
+
+func TestRouter_NilResponseFallsThroughAndDirectRouteRejectsIt(t *testing.T) {
+	cfg := &Config{Version: 1, Roles: map[string]RoleSpec{
+		"research": {Primary: "gpt-4o", Secondary: "claude-sonnet-4-6"},
+	}}
+	r := newRouter(t, cfg, map[string]provider.Provider{
+		"openai|gpt-4o":               &fakeProvider{name: "openai", nilResponse: true},
+		"anthropic|claude-sonnet-4-6": &fakeProvider{name: "anthropic"},
+	})
+	resp, err := r.Generate(context.Background(), "research", &provider.GenerateRequest{Prompt: "hi"})
+	if err != nil || resp == nil || resp.Metadata["router_provider"] != "anthropic" {
+		t.Fatalf("Generate() = (%v, %v), want healthy fallback", resp, err)
+	}
+	direct := newRouter(t, &Config{Version: 1, Roles: map[string]RoleSpec{}}, map[string]provider.Provider{
+		"openai|gpt-4o": &fakeProvider{name: "openai", nilResponse: true},
+	})
+	if _, err := direct.GenerateForModel(context.Background(), "gpt-4o", &provider.GenerateRequest{Prompt: "hi"}); err == nil || !strings.Contains(err.Error(), "nil response") {
+		t.Fatalf("GenerateForModel() error = %v, want nil-response error", err)
 	}
 }
 
