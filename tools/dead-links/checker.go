@@ -109,7 +109,12 @@ func headingText(heading *ast.Heading, source []byte) string {
 		}
 		switch n := node.(type) {
 		case *ast.Text:
-			content.Write(n.Value(source))
+			value := n.Value(source)
+			if n.Parent() == nil || n.Parent().Kind() != ast.KindCodeSpan {
+				value = util.ResolveNumericReferences(value)
+				value = util.ResolveEntityNames(value)
+			}
+			content.Write(value)
 			if n.SoftLineBreak() || n.HardLineBreak() {
 				content.WriteByte(' ')
 			}
@@ -120,9 +125,10 @@ func headingText(heading *ast.Heading, source []byte) string {
 		}
 		return ast.WalkContinue, nil
 	})
-	resolved := util.ResolveNumericReferences([]byte(content.String()))
-	resolved = util.ResolveEntityNames(resolved)
-	return string(resolved)
+	// Resolve source-backed entity/reference text exactly once while preserving
+	// code-span text and concrete ast.String values. Decoding the combined text
+	// would decode a rendered literal such as `&copy;` a second time.
+	return content.String()
 }
 
 func collectExplicitAnchors(anchors map[string]bool, raw []byte) {
