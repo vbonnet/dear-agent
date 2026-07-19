@@ -75,6 +75,13 @@ func TestCommandsRequireExplicitFiles(t *testing.T) {
 	if got := cmdSuggest(nil); got != 2 {
 		t.Errorf("cmdSuggest without --files = %d, want 2", got)
 	}
+	missing := filepath.Join(t.TempDir(), "missing.md")
+	if got := cmdList([]string{"--files", missing}); got != 1 {
+		t.Errorf("cmdList with missing explicit file = %d, want 1", got)
+	}
+	if got := cmdSuggest([]string{"--files", missing}); got != 1 {
+		t.Errorf("cmdSuggest with missing explicit file = %d, want 1", got)
+	}
 }
 
 func TestCmdList(t *testing.T) {

@@ -36,16 +36,13 @@ func (m *MarkdownSource) Name() string {
 	return "markdown(" + strings.Join(m.Paths, ",") + ")"
 }
 
-// Items implements Source. Missing explicitly supplied files are skipped; a
-// file that exists but cannot be read is an error.
+// Items implements Source. Every explicitly supplied path must exist and be
+// readable; an empty parsed document is still a valid source.
 func (m *MarkdownSource) Items(_ context.Context) ([]Item, error) {
 	var all []Item
 	for _, p := range m.Paths {
 		f, err := os.Open(p) //nolint:gosec // paths are operator-supplied CLI args
 		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
 			return nil, fmt.Errorf("open %s: %w", p, err)
 		}
 		items, perr := parseMarkdown(f)
