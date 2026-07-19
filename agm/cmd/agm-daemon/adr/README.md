@@ -1,5 +1,7 @@
 # AGM daemon ADRs
 
+<!-- Last audited at: 2026-07-18 -->
+
 | ADR | Decision | Status |
 | --- | --- | --- |
 | [001](ADR-001-queue-delivery-loop.md) | State-aware persistent queue delivery | Accepted |

@@ -1,5 +1,7 @@
 # AGM MCP server ADRs
 
+<!-- Last audited at: 2026-07-18 -->
+
 | ADR | Decision | Status |
 | --- | --- | --- |
 | [001](ADR-001-local-control-surface.md) | Verified local stdio control surface | Accepted |

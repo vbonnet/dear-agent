@@ -137,6 +137,7 @@ func validateScope(root string, scope Scope, tracked []string, trackedSet, gover
 		}
 		return nil, nil, fmt.Errorf("adrlint: read %s: %w", indexRelative, err)
 	}
+	violations = append(violations, sizeViolations(indexRelative, indexData, maxLines)...)
 	violations = append(violations, validateIndex(root, indexRelative, indexData, records)...)
 	return records, violations, nil
 }

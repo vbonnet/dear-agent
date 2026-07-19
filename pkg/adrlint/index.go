@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-var adrIndexLikeRow = regexp.MustCompile(`(?i)^\|\s*\[[0-9]{3,4}\]\([^)]*\.md(?:#[^)]*)?\)`)
+var adrIndexLikeRow = regexp.MustCompile(`(?i)^\|\s*\[(?:ADR-)?[0-9]{3,4}\]\([^)]*\.md(?:#[^)]*)?\)`)
 
 func validateIndex(root, relative string, data []byte, records map[string]record) []Violation {
 	violations := commonDocumentViolations(root, relative, data)

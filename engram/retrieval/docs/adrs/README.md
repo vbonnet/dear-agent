@@ -1,5 +1,7 @@
 # Engram retrieval decisions
 
+<!-- Last audited at: 2026-07-18 -->
+
 | ADR | Decision | Status |
 | --- | --- | --- |
 | [001](ADR-001-per-search-index-building.md) | Build retrieval indexes per search | Accepted |

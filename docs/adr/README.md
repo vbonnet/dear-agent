@@ -1,5 +1,7 @@
 # Architecture decisions
 
+<!-- Last audited at: 2026-07-18 -->
+
 This directory records current, durable Dear Agent trade-offs. Keep a record
 only when the choice is hard to reverse, surprising without context, and the
 result of a real alternative. `CONTEXT.md` owns vocabulary and conventions;
