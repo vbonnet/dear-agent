@@ -84,7 +84,7 @@ func CheckRepository(ctx context.Context, root string) (Result, []Violation, err
 	}
 	for _, surface := range policy.Surfaces {
 		if matchedSurface[surface.Match] == 0 {
-			return Result{}, nil, fmt.Errorf("instructionlint: instruction surface %q owned by %q matches no tracked Markdown paths", surface.Match, surface.Owner)
+			return Result{}, nil, fmt.Errorf("instructionlint: instruction surface %q owned by %q matches no tracked paths", surface.Match, surface.Owner)
 		}
 	}
 	findings = applyExclusions(findings, policy.Exclusions)
@@ -94,7 +94,7 @@ func CheckRepository(ctx context.Context, root string) (Result, []Violation, err
 
 func instructionSegments(relative string, data []byte) ([]Segment, error) {
 	extension := strings.ToLower(filepath.Ext(relative))
-	if extension == ".yml" || extension == ".yaml" {
+	if extension == ".yml" || extension == ".yaml" || extension == ".json" {
 		return parseYAMLSegments(data)
 	}
 	if strings.Contains(filepath.ToSlash(relative), "/hooks/") && extension == "" {

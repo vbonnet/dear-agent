@@ -233,6 +233,68 @@ func TestBackgroundShellCommandsRemainPolicyVisible(t *testing.T) {
 	}
 }
 
+func TestExecutablePathsRemainPolicyVisible(t *testing.T) {
+	segments := []Segment{
+		{Kind: SegmentShell, Text: "/usr/bin/env bd ready"},
+		{Kind: SegmentShell, Text: "/opt/homebrew/bin/bd ready"},
+		{Kind: SegmentShell, Text: "/usr/local/bin/gh pr merge 123"},
+		{Kind: SegmentShell, Text: "/usr/local/bin/git push origin main"},
+		{Kind: SegmentShell, Text: "/usr/local/bin/agm status --output json"},
+	}
+	var rules []string
+	for _, segment := range segments {
+		for _, violation := range evaluateSegment("AGENTS.md", segment) {
+			rules = append(rules, violation.Rule)
+		}
+	}
+	sort.Strings(rules)
+	want := []string{"agm-root-status", "bare-beads", "bare-beads", "raw-gh-merge", "raw-git-push"}
+	if !reflect.DeepEqual(rules, want) {
+		t.Fatalf("path-qualified command rules = %v, want %v", rules, want)
+	}
+}
+
+func TestRetiredWayfinderVocabularyIsCaseInsensitive(t *testing.T) {
+	for _, token := range []string{"v1", "v1.", "w0", "d1", "s1"} {
+		if !retiredWayfinderToken(token) {
+			t.Errorf("retiredWayfinderToken does not match %q", token)
+		}
+	}
+	for _, currentVersion := range []string{"ai.md/v1", "v1.2"} {
+		if retiredWayfinderToken(currentVersion) {
+			t.Errorf("retiredWayfinderToken unexpectedly matches %q", currentVersion)
+		}
+	}
+}
+
+func TestCheckRepositoryGovernsJSONManifests(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	writeTestFile(t, repo, ".dear-agent.yml", `instruction-policy:
+  surfaces:
+    - match: hooks.json
+      owner: harness-policy
+`)
+	writeTestFile(t, repo, "hooks.json", `{
+  "permissions": {"allow": ["Bash(git push *)"]},
+  "hooks": [{"command": "/usr/local/bin/gh pr merge 123"}]
+}`)
+	runGit(t, repo, "add", ".dear-agent.yml", "hooks.json")
+
+	result, violations, err := CheckRepository(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rules []string
+	for _, violation := range violations {
+		rules = append(rules, violation.Rule)
+	}
+	sort.Strings(rules)
+	if result.Files != 1 || !reflect.DeepEqual(rules, []string{"raw-gh-merge", "raw-git-push"}) {
+		t.Fatalf("result=%+v rules=%v, want governed JSON commands", result, rules)
+	}
+}
+
 func TestCheckRepositoryGovernsAgentReadableYAML(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init", "-q")

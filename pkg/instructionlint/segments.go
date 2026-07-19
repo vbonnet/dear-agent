@@ -200,10 +200,11 @@ func parseYAMLSegments(source []byte) ([]Segment, error) {
 	visit = func(node *yaml.Node) {
 		if node.Kind == yaml.ScalarNode && node.Tag == "!!str" {
 			kind := SegmentProse
-			if commandShaped(node.Value) {
+			if !allowedBashTool.MatchString(node.Value) && commandShaped(node.Value) {
 				kind = SegmentShell
 			}
 			segments = append(segments, Segment{Kind: kind, Line: node.Line, Text: node.Value})
+			segments = append(segments, bashToolSegments(node.Value, node.Line)...)
 		}
 		segments = appendYAMLCommentSegments(segments, seenComments, node.HeadComment, node.Line-commentLineCount(node.HeadComment))
 		segments = appendYAMLCommentSegments(segments, seenComments, node.LineComment, node.Line)
@@ -214,6 +215,15 @@ func parseYAMLSegments(source []byte) ([]Segment, error) {
 	}
 	visit(&root)
 	return segments, nil
+}
+
+func bashToolSegments(value string, line int) []Segment {
+	var segments []Segment
+	for _, match := range allowedBashTool.FindAllStringSubmatch(value, -1) {
+		command := strings.ReplaceAll(match[1], ":*", " *")
+		segments = append(segments, Segment{Kind: SegmentShell, Line: line, Text: command})
+	}
+	return segments
 }
 
 func appendYAMLCommentSegments(segments []Segment, seen map[string]bool, comment string, startLine int) []Segment {
@@ -344,7 +354,7 @@ func commandShaped(value string) bool {
 		if len(fields) == 0 {
 			continue
 		}
-		command := strings.TrimLeft(fields[0], "(")
+		command := executableBase(strings.TrimLeft(fields[0], "("))
 		switch command {
 		case "agm", "bd", "command", "env", "gh", "git", "gtimeout", "nohup", "safe-merge", "safe-pr", "safe-push", "sudo", "timeout":
 			return true

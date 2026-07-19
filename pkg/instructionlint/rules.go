@@ -1,6 +1,7 @@
 package instructionlint
 
 import (
+	"path"
 	"regexp"
 	"slices"
 	"strings"
@@ -13,14 +14,17 @@ type rule struct {
 	detect      func(string) bool
 }
 
-var retiredWayfinder = regexp.MustCompile(`(?:\bV1\b|\bW0(?:\b|-)|\bD[1-6](?:\b|-)|\bS(?:1[01]|[1-9])(?:\b|-))`)
+var retiredWayfinderPhase = regexp.MustCompile(`(?i)(?:\bW0(?:\b|-)|\bD[1-6](?:\b|-)|\bS(?:1[01]|[1-9])(?:\b|-))`)
+var retiredWayfinderV1 = regexp.MustCompile(`(?i)\bV1\b`)
 var environmentAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 var embeddedShellCommand = regexp.MustCompile("\\$\\(([^()]*)\\)|`([^`]*)`")
 
 var instructionRules = []rule{
-	{id: "wayfinder-v1", replacement: "CHARTER, PROBLEM, RESEARCH, DESIGN, SPEC, PLAN, SETUP, BUILD, and RETRO", applies: proseOrShell, detect: retiredWayfinder.MatchString},
+	{id: "wayfinder-v1", replacement: "CHARTER, PROBLEM, RESEARCH, DESIGN, SPEC, PLAN, SETUP, BUILD, and RETRO", applies: proseOrShell, detect: retiredWayfinderToken},
 	{id: "bare-beads", replacement: "bd --db ~/beads/context-engine/.beads --dolt-auto-commit on <subcommand>", applies: commandSegment, detect: bareBeads},
-	{id: "raw-git-push", replacement: "safe-push", applies: commandSegment, detect: func(text string) bool { return strings.Contains(shellText(text), "git push") }},
+	{id: "raw-git-push", replacement: "safe-push", applies: commandSegment, detect: func(text string) bool {
+		return anyCommand(text, func(fields []string) bool { return commandHasPrefix(fields, "git", "push") })
+	}},
 	{id: "raw-gh-merge", replacement: "safe-merge", applies: commandSegment, detect: rawGHMerge},
 	{id: "raw-gh-pr-lifecycle", replacement: "safe-pr create or safe-pr close; ask a human to reopen", applies: shellSegment, detect: rawGHPRLifecycle},
 	{id: "safe-pr-emergency", replacement: "safe-pr normally or run agm escalate ask <question>; there is no bypass flag", applies: commandSegment, detect: func(text string) bool {
@@ -42,6 +46,24 @@ var instructionRules = []rule{
 	{id: "agm-session-send", replacement: "agm send <session> <message>", applies: commandSegment, detect: func(text string) bool {
 		return anyCommand(text, func(fields []string) bool { return commandHasPrefix(fields, "agm", "session", "send") })
 	}},
+}
+
+func retiredWayfinderToken(text string) bool {
+	if retiredWayfinderPhase.MatchString(text) {
+		return true
+	}
+	for _, location := range retiredWayfinderV1.FindAllStringIndex(text, -1) {
+		precededBySlash := location[0] > 0 && text[location[0]-1] == '/'
+		followedByVersionSuffix := location[1]+1 < len(text) && text[location[1]] == '.' && isVersionSuffix(text[location[1]+1])
+		if !precededBySlash && !followedByVersionSuffix {
+			return true
+		}
+	}
+	return false
+}
+
+func isVersionSuffix(value byte) bool {
+	return value >= '0' && value <= '9' || value == 'x' || value == 'X'
 }
 
 func knownRule(id string) bool {
@@ -242,6 +264,7 @@ func normalizeAGMCommand(fields []string) []string {
 func stripCommandPrefixes(fields []string) []string {
 	for len(fields) > 0 {
 		fields[0] = strings.TrimLeft(fields[0], "(")
+		fields[0] = executableBase(fields[0])
 		switch {
 		case fields[0] == "if" || fields[0] == "while" || fields[0] == "until" || fields[0] == "then" || fields[0] == "do" || fields[0] == "!":
 			fields = fields[1:]
@@ -268,6 +291,10 @@ func stripCommandPrefixes(fields []string) []string {
 		}
 	}
 	return fields
+}
+
+func executableBase(value string) string {
+	return path.Base(strings.Trim(value, `"'`))
 }
 
 func stripLauncherOptions(fields []string, consumesValue map[string]bool) []string {
