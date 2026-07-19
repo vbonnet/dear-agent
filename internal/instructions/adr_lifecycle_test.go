@@ -14,10 +14,10 @@ var (
 	adrFilePattern              = regexp.MustCompile(`^(?:ADR-([0-9]{3})|([0-9]{4}))-[a-z0-9-]+\.md$`)
 	adrTitlePattern             = regexp.MustCompile(`(?m)^# ADR-([0-9]{3,4}): .+$`)
 	adrStatusPattern            = regexp.MustCompile(`(?m)^Status: (Accepted|Proposed|Deprecated|Superseded)(?: .*)?$`)
-	successorPattern            = regexp.MustCompile(`^Status: Superseded .*\[[^]]+\]\(([^)#]+\.md)(?:#[^)]*)?\).*$`)
 	adrIndexPattern             = regexp.MustCompile(`(?m)^\| \[([0-9]{3,4})\]\(([^)]+\.md)\) \| [^|]+ \| (Accepted|Proposed|Deprecated|Superseded) \|$`)
 	markdownLink                = regexp.MustCompile(`\[[^]]+\]\(([^)]+)\)`)
-	markdownReferenceDefinition = regexp.MustCompile(`(?m)^[ \t]{0,3}\[[^]]+\]:[ \t]+<?([^> \t]+)>?(?:[ \t]+.*)?$`)
+	markdownReferenceLink       = regexp.MustCompile(`\[[^]]+\]\[([^]]+)\]`)
+	markdownReferenceDefinition = regexp.MustCompile(`(?m)^[ \t]{0,3}\[([^]]+)\]:[ \t]+<?([^> \t]+)>?(?:[ \t]+.*)?$`)
 )
 
 type adrRecord struct {
@@ -74,11 +74,11 @@ func TestADRDirectoriesHaveUniqueIndexedLifecycle(t *testing.T) {
 					continue
 				}
 				if statuses[0][1] == "Superseded" {
-					successor := successorPattern.FindStringSubmatch(statuses[0][0])
-					if len(successor) != 2 {
+					successor, ok := adrSuccessorTarget(statuses[0][0], content)
+					if !ok {
 						t.Errorf("%s: superseded status must link to its live successor", entry.Name())
 					} else {
-						assertLiveADRSuccessor(t, root, dir, entry.Name(), successor[1])
+						assertLiveADRSuccessor(t, root, dir, entry.Name(), successor)
 					}
 				}
 				assertRelativeMarkdownLinksResolve(t, dir, entry.Name(), content)
@@ -208,16 +208,22 @@ func TestValidateLiveADRSuccessor(t *testing.T) {
 
 func assertRelativeMarkdownLinksResolve(t *testing.T, dir, name, content string) {
 	t.Helper()
-	matches := markdownLink.FindAllStringSubmatch(content, -1)
-	matches = append(matches, markdownReferenceDefinition.FindAllStringSubmatch(content, -1)...)
-	for _, match := range matches {
-		target := strings.SplitN(markdownLinkDestination(match[1]), "#", 2)[0]
-		if target == "" || strings.Contains(target, "://") || strings.HasPrefix(target, "mailto:") {
-			continue
-		}
-		if _, err := os.Stat(filepath.Clean(filepath.Join(dir, filepath.FromSlash(target)))); err != nil {
-			t.Errorf("%s: relative link %q does not resolve: %v", name, match[1], err)
-		}
+	for _, match := range markdownLink.FindAllStringSubmatch(content, -1) {
+		assertRelativeMarkdownTargetResolves(t, dir, name, markdownLinkDestination(match[1]))
+	}
+	for _, match := range markdownReferenceDefinition.FindAllStringSubmatch(content, -1) {
+		assertRelativeMarkdownTargetResolves(t, dir, name, match[2])
+	}
+}
+
+func assertRelativeMarkdownTargetResolves(t *testing.T, dir, name, rawTarget string) {
+	t.Helper()
+	target := strings.SplitN(rawTarget, "#", 2)[0]
+	if target == "" || strings.Contains(target, "://") || strings.HasPrefix(target, "mailto:") {
+		return
+	}
+	if _, err := os.Stat(filepath.Clean(filepath.Join(dir, filepath.FromSlash(target)))); err != nil {
+		t.Errorf("%s: relative link %q does not resolve: %v", name, rawTarget, err)
 	}
 }
 
@@ -234,12 +240,36 @@ func markdownLinkDestination(raw string) string {
 	return raw
 }
 
+func adrSuccessorTarget(statusLine, content string) (string, bool) {
+	if match := markdownLink.FindStringSubmatch(statusLine); len(match) == 2 {
+		return markdownLinkDestination(match[1]), true
+	}
+	definitions := make(map[string]string)
+	for _, match := range markdownReferenceDefinition.FindAllStringSubmatch(content, -1) {
+		definitions[strings.ToLower(strings.TrimSpace(match[1]))] = match[2]
+	}
+	for _, match := range markdownReferenceLink.FindAllStringSubmatch(statusLine, -1) {
+		if target, ok := definitions[strings.ToLower(strings.TrimSpace(match[1]))]; ok {
+			return target, true
+		}
+	}
+	return "", false
+}
+
 func TestRelativeMarkdownLinkWithTitleResolves(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ADR-002-live.md"), []byte("# Live\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	assertRelativeMarkdownLinksResolve(t, dir, "ADR-001-old.md", `[decision](ADR-002-live.md "successor")`)
+}
+
+func TestReferenceStyleADRSuccessorResolves(t *testing.T) {
+	content := "Status: Superseded by [ADR-002][successor]\n\n[successor]: ADR-002-live.md \"live decision\"\n"
+	target, ok := adrSuccessorTarget("Status: Superseded by [ADR-002][successor]", content)
+	if !ok || target != "ADR-002-live.md" {
+		t.Fatalf("adrSuccessorTarget() = %q, %t, want ADR-002-live.md, true", target, ok)
+	}
 }
 
 func assertSameADRRecords(t *testing.T, records, indexed map[string]adrRecord) {
