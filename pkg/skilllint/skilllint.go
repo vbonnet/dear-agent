@@ -303,9 +303,10 @@ func markdownOutsideFences(body string) string {
 			marker = "~~~"
 		}
 		if marker != "" {
-			if fence == "" {
+			switch fence {
+			case "":
 				fence = marker
-			} else if fence == marker {
+			case marker:
 				fence = ""
 			}
 			continue
