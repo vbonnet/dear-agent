@@ -8,7 +8,7 @@
 
 **INSPOL-02** When governed instruction files are discovered, the system shall use context-bounded, non-interactive Git-tracked inventory and shall reject paths matched by multiple surface declarations.
 
-**INSPOL-03** When Markdown is parsed, the system shall classify prose, inline code, shell-language fences, command-shaped unlabeled fences, command-shaped indented code blocks, and non-executable code without line-oriented leakage.
+**INSPOL-03** When Markdown is parsed, the system shall classify prose, inline code, every fenced language, command-shaped fenced or indented code, and non-executable code without trusting a language label as a policy exemption.
 
 **INSPOL-04** When active prose or executable guidance contains a retired Wayfinder phase token, the system shall report the token and the nine-phase V2 replacement contract.
 
@@ -25,6 +25,10 @@
 **INSPOL-10** When configuration, Git inventory, Markdown reading, or parsing fails, the system shall return an operational error distinct from content findings.
 
 **INSPOL-11** When local or hosted policy checks run, the system shall invoke the same read-only repository interface.
+
+**INSPOL-12** When governed hook scripts assign guidance through shell declaration forms such as `local`, `export`, `readonly`, `typeset`, or `declare`, the system shall inspect the assigned text and continuations.
+
+**INSPOL-13** When a baseline commit already contains an exclusions file, the system shall reject new exclusion identities and increased exact-match counts while allowing removal or count reduction.
 
 ## BDD Traceability
 

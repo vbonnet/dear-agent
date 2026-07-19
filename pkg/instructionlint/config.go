@@ -75,12 +75,20 @@ func loadPolicyExclusions(configPath string, policy *Policy) error {
 	if err != nil {
 		return fmt.Errorf("instructionlint: read exclusions: %w", err)
 	}
-	var file exclusionFile
-	if err := yaml.Unmarshal(data, &file); err != nil {
+	exclusions, err := parseExclusions(data)
+	if err != nil {
 		return fmt.Errorf("instructionlint: parse exclusions: %w", err)
 	}
-	policy.Exclusions = file.Exclusions
+	policy.Exclusions = exclusions
 	return nil
+}
+
+func parseExclusions(data []byte) ([]Exclusion, error) {
+	var file exclusionFile
+	if err := yaml.Unmarshal(data, &file); err != nil {
+		return nil, err
+	}
+	return file.Exclusions, nil
 }
 
 func validatePolicy(policy Policy) error {

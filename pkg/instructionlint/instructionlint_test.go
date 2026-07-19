@@ -49,6 +49,10 @@ func TestSegmentsClassifyExecutableFences(t *testing.T) {
 		"inline|git push origin main",
 		"prose|# W0 prose",
 		"prose|Use `git push origin main` only as a quoted bad command.",
+		"prose|W0 fixture",
+		"prose|echo merged",
+		"prose|fi",
+		"shell|git push origin fixture",
 		"shell|git push origin main",
 		"shell|env TOKEN=x gh pr merge 123",
 		"shell|gh pr merge 456",
@@ -58,6 +62,32 @@ func TestSegmentsClassifyExecutableFences(t *testing.T) {
 	sort.Strings(want)
 	if !reflect.DeepEqual(compact, want) {
 		t.Fatalf("segments = %#v, want %#v", compact, want)
+	}
+}
+
+func TestNonShellFencesRemainPolicyVisible(t *testing.T) {
+	source := []byte(strings.Join([]string{
+		"```json",
+		`"command": "gh pr merge --squash 123"`,
+		"```",
+		"```yaml",
+		"command: git push --force origin main",
+		"```",
+		"```text",
+		"bd ready",
+		"```",
+	}, "\n"))
+
+	var got []string
+	for _, segment := range parseSegments(source) {
+		for _, violation := range evaluateSegment("AGENTS.md", segment) {
+			got = append(got, violation.Rule)
+		}
+	}
+	sort.Strings(got)
+	want := []string{"bare-beads", "raw-gh-merge", "raw-git-push"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("rules = %v, want %v", got, want)
 	}
 }
 
@@ -104,6 +134,29 @@ func TestScriptGuidanceAndCommandSubstitutionsRemainPolicyVisible(t *testing.T) 
 	}
 	sort.Strings(got)
 	want := []string{"agm-root-new", "bare-beads", "raw-gh-merge", "safe-pr-emergency"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("rules = %v, want %v", got, want)
+	}
+}
+
+func TestScriptDeclarationAssignmentsRemainPolicyVisible(t *testing.T) {
+	source := []byte(strings.Join([]string{
+		"#!/usr/bin/env bash",
+		`local msg="BLOCKED: use safe-pr create --emergency --reason bypass`,
+		`instead"`,
+		`export STATUS="agm status --output json"`,
+		`declare -r MERGE="gh pr merge --squash 42"`,
+		`readonly READY="bd ready"`,
+	}, "\n"))
+
+	var got []string
+	for _, segment := range parseScriptSegments(source) {
+		for _, violation := range evaluateSegment("hook", segment) {
+			got = append(got, violation.Rule)
+		}
+	}
+	sort.Strings(got)
+	want := []string{"agm-root-status", "bare-beads", "raw-gh-merge", "safe-pr-emergency"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("rules = %v, want %v", got, want)
 	}
@@ -259,6 +312,96 @@ func TestCheckRepositoryRejectsImportOutsideGovernedInventory(t *testing.T) {
 	}
 }
 
+func TestExclusionRatchetRejectsNewAndIncreasedDebt(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	writeTestFile(t, repo, ".dear-agent.yml", `instruction-policy:
+  surfaces:
+    - match: AGENTS.md
+      owner: root
+  exclusions-file: .instruction-policy-exclusions.yml
+`)
+	writeTestFile(t, repo, "AGENTS.md", "# Instructions\n")
+	writeTestFile(t, repo, ".instruction-policy-exclusions.yml", `exclusions:
+  - path: AGENTS.md
+    rule: bare-beads
+    excerpt: bd ready
+    count: 1
+    owner: test
+    reason: fixture
+`)
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "baseline")
+	baseline := strings.TrimSpace(runGitOutput(t, repo, "rev-parse", "HEAD"))
+
+	writeTestFile(t, repo, ".instruction-policy-exclusions.yml", `exclusions:
+  - path: AGENTS.md
+    rule: bare-beads
+    excerpt: bd ready
+    count: 2
+    owner: test
+    reason: fixture
+  - path: AGENTS.md
+    rule: raw-git-push
+    excerpt: git push
+    count: 1
+    owner: test
+    reason: fixture
+`)
+	violations, err := CheckExclusionRatchet(context.Background(), repo, baseline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(violations) != 2 {
+		t.Fatalf("violations = %v, want one increased and one new exclusion", violations)
+	}
+	for _, violation := range violations {
+		if violation.Rule != "exclusion-growth" {
+			t.Fatalf("unexpected ratchet violation: %+v", violation)
+		}
+	}
+}
+
+func TestExclusionRatchetAllowsBootstrapAndShrink(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	writeTestFile(t, repo, ".dear-agent.yml", `instruction-policy:
+  surfaces:
+    - match: AGENTS.md
+      owner: root
+  exclusions-file: .instruction-policy-exclusions.yml
+`)
+	writeTestFile(t, repo, "AGENTS.md", "# Instructions\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "pre-policy")
+	bootstrap := strings.TrimSpace(runGitOutput(t, repo, "rev-parse", "HEAD"))
+	writeTestFile(t, repo, ".instruction-policy-exclusions.yml", `exclusions:
+  - path: AGENTS.md
+    rule: bare-beads
+    excerpt: bd ready
+    count: 2
+    owner: test
+    reason: fixture
+`)
+	if violations, err := CheckExclusionRatchet(context.Background(), repo, bootstrap); err != nil || len(violations) != 0 {
+		t.Fatalf("bootstrap violations=%v err=%v", violations, err)
+	}
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "policy")
+	baseline := strings.TrimSpace(runGitOutput(t, repo, "rev-parse", "HEAD"))
+	writeTestFile(t, repo, ".instruction-policy-exclusions.yml", `exclusions:
+  - path: AGENTS.md
+    rule: bare-beads
+    excerpt: bd ready
+    count: 1
+    owner: test
+    reason: fixture
+`)
+	if violations, err := CheckExclusionRatchet(context.Background(), repo, baseline); err != nil || len(violations) != 0 {
+		t.Fatalf("shrink violations=%v err=%v", violations, err)
+	}
+}
+
 func TestCheckRepositoryRejectsUntrackedImportMatchingBroadSurface(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init", "-q")
@@ -405,6 +548,16 @@ func runGit(t *testing.T, root string, args ...string) {
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, output)
 	}
+}
+
+func runGitOutput(t *testing.T, root string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+	return string(output)
 }
 
 func repositoryRoot(t *testing.T) string {

@@ -82,11 +82,12 @@ func parseScriptSegments(source []byte) []Segment {
 			heredoc = marker
 			continue
 		}
-		if shellAssignment.MatchString(value) && strings.Contains(value, "$(") {
+		assignment := stripShellDeclaration(value)
+		if shellAssignment.MatchString(assignment) && strings.Contains(assignment, "$(") {
 			segments = append(segments, Segment{Kind: SegmentShell, Line: index + 1, Text: value})
 			continue
 		}
-		if assignmentQuote := scriptAssignmentQuote(value); assignmentQuote != 0 {
+		if assignmentQuote := scriptAssignmentQuote(assignment); assignmentQuote != 0 {
 			segments = append(segments, Segment{Kind: SegmentShell, Line: index + 1, Text: value})
 			if unescapedByteCount(raw, assignmentQuote)%2 == 1 {
 				quote = assignmentQuote
@@ -104,7 +105,12 @@ func parseScriptSegments(source []byte) []Segment {
 }
 
 var shellAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+var shellDeclaration = regexp.MustCompile(`^(?:local|export|readonly|typeset|declare)(?:\s+-[A-Za-z]+)*\s+`)
 var heredocMarker = regexp.MustCompile(`<<-?['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
+
+func stripShellDeclaration(value string) string {
+	return shellDeclaration.ReplaceAllString(value, "")
+}
 
 func scriptAssignmentQuote(value string) byte {
 	if !shellAssignment.MatchString(value) {
@@ -292,7 +298,7 @@ func classifyIndentedCodeBlock(classified map[int]SegmentKind, block *ast.CodeBl
 }
 
 func classifyFence(classified map[int]SegmentKind, block *ast.FencedCodeBlock, source []byte) {
-	kind := SegmentKind("skip")
+	kind := SegmentProse
 	language := strings.TrimSpace(string(block.Language(source)))
 	if shellLanguage(language) {
 		kind = SegmentShell
@@ -302,7 +308,7 @@ func classifyFence(classified map[int]SegmentKind, block *ast.FencedCodeBlock, s
 		segment := block.Lines().At(i)
 		value := segment.Value(source)
 		lineKind := kind
-		if language == "" && (continuing || commandShaped(string(value))) {
+		if kind != SegmentShell && (continuing || commandShaped(string(value))) {
 			lineKind = SegmentShell
 		}
 		classifySourceLines(classified, segment, source, lineKind)
@@ -326,6 +332,9 @@ func commandShaped(value string) bool {
 	if strings.Contains(value, "$(") {
 		return true
 	}
+	if embeddedCommandStart.MatchString(strings.TrimSpace(value)) {
+		return true
+	}
 	fields := strings.Fields(strings.TrimSpace(value))
 	if len(fields) == 0 {
 		return false
@@ -346,6 +355,8 @@ func commandShaped(value string) bool {
 		return strings.Contains(value, "&&") || strings.Contains(value, "||")
 	}
 }
+
+var embeddedCommandStart = regexp.MustCompile(`(?:^|["':=\[(][[:space:]]*)((?:agm|bd|gh|git|safe-merge|safe-pr|safe-push)\b.*)$`)
 
 func codeSpanSegment(span *ast.CodeSpan, source []byte) (Segment, bool) {
 	var value strings.Builder

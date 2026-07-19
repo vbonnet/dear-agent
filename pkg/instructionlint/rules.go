@@ -129,6 +129,11 @@ func rawGHPRLifecycle(text string) bool {
 func commandFields(text string) [][]string {
 	var commands [][]string
 	inputs := []string{shellText(text)}
+	for _, match := range embeddedCommandStart.FindAllStringSubmatch(text, -1) {
+		if len(match) == 2 {
+			inputs = append(inputs, match[1])
+		}
+	}
 	for _, match := range embeddedShellCommand.FindAllStringSubmatch(text, -1) {
 		if match[1] != "" {
 			inputs = append(inputs, match[1])

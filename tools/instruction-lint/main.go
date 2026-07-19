@@ -21,6 +21,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("instruction-lint", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	repository := flags.String("repo", "", "validate one Git repository")
+	baselineRef := flags.String("baseline-ref", "", "reject exclusion growth relative to this Git commit or ref")
 	flags.Usage = func() {
 		fmt.Fprintln(stderr, "Usage: instruction-lint -repo <root>")
 		flags.PrintDefaults()
@@ -39,6 +40,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintln(stderr, "instruction-lint:", err)
 		return 2
+	}
+	if *baselineRef != "" {
+		ratchetViolations, ratchetErr := instructionlint.CheckExclusionRatchet(ctx, *repository, *baselineRef)
+		if ratchetErr != nil {
+			fmt.Fprintln(stderr, "instruction-lint:", ratchetErr)
+			return 2
+		}
+		violations = append(violations, ratchetViolations...)
 	}
 	if len(violations) > 0 {
 		for _, violation := range violations {
