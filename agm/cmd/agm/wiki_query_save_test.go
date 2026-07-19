@@ -36,6 +36,17 @@ func TestResolveWikiTextInputRejectsEmptyInput(t *testing.T) {
 	}
 }
 
+func TestResolveWikiTextInputBoundsFileReads(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "oversized.txt")
+	data := strings.Repeat("x", maxWikiQueryInputBytes+1)
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	if _, err := resolveWikiTextInput("answer", "", path); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("expected bounded-input error, got %v", err)
+	}
+}
+
 func TestResolveWikiOutputPathRejectsTraversal(t *testing.T) {
 	kb := t.TempDir()
 	for _, output := range []string{"../outside.md", "nested/../../outside.md", filepath.Join(string(filepath.Separator), "tmp", "outside.md"), "."} {

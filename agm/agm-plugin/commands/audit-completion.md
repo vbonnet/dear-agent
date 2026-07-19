@@ -1,7 +1,7 @@
 ---
 model: haiku
 effort: low
-content-hash: 5b9c1901eeb32bcdcde255df1ef6d2cea87195b9f5d3af4d2b557a5c2f360fc8
+content-hash: a089d7a29d1a3aeae0fe890b2fa1a94f22b7b8784c57bdb71a5c57159d596f3b
 description: Audit delivery evidence for an AGM worker before archival. Use when a reviewer needs to distinguish committed, merged, deployed, and verified state without changing anything.
 argument-hint: "<session-name>"
 allowed-tools: Bash(agm session get *), Bash(agm acceptance show *), Bash(git -C *), Bash(gh repo view *), Bash(gh pr view *)
@@ -13,7 +13,8 @@ allowed-tools: Bash(agm session get *), Bash(agm acceptance show *), Bash(git -C
    Extract the project/worktree path and stated purpose; stop if the path is
    missing or is not a git worktree.
 2. Run `agm acceptance show -C <project-path> --output json` for the repository's
-   declared acceptance criteria.
+   declared acceptance criteria. The global `-C` is the lookup root; do not use
+   the reviewer's current directory as a substitute.
 3. Read only delivery evidence:
    - `git -C <project-path> status --porcelain`
    - `git -C <project-path> branch --show-current`

@@ -440,24 +440,12 @@ Provide a production-ready CLI that:
 #### FR17: Claude Code Commands
 - **ID:** FR17
 - **Priority:** P2 (Medium)
-- **Description:** CLI MUST provide legacy global Claude Code command files for workflow automation
+- **Description:** CLI MUST provide verified global Claude Code command files for the tracked AGM plugin command inventory
 - **Installation:**
   - `make install-skills` - Compatibility alias that installs Markdown commands to `~/.claude/commands/`
-- **Skills:**
-  - `/agm:new [name] [--agent TYPE] [--project PATH]` - Smart session creation
-  - `/agm:send <session> --prompt "..." [--capture-response]` - Message sending with capture
-  - `/agm:status [session] [--all] [--watch]` - Health monitoring
-  - `/agm:resume <session> [--fuzzy] [--last]` - Intelligent resume
-- **Features:**
-  - **Auto-generated names:** Format `agm-YYYYMMDD-HHMMSS` if not provided
-  - **Response capture:** `--capture-response` flag captures and returns output
-  - **Watch mode:** Continuous status monitoring (refreshes every 2s)
-  - **Fuzzy matching:** Typo-tolerant session name resolution
-  - **Last session:** Resume most recently active session
 - **Implementation:**
-  - Simple bash scripts wrapping AGM CLI commands
-  - Easy to maintain and extend
-  - Well-documented with examples in `skills/README.md`
+  - `agm/agm-plugin/commands/*.md` defines the complete command and argument contracts
+  - Per-file `content-hash` fields and inventory tests detect stale or missing command surfaces
 
 #### FR18: Test Session Isolation and Management
 - **ID:** FR18

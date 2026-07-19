@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -200,9 +201,17 @@ func resolveWikiTextInput(name, inline, filePath string) (string, error) {
 	}
 	value := inline
 	if filePath != "" {
-		data, err := os.ReadFile(filePath)
+		file, err := os.Open(filePath)
 		if err != nil {
 			return "", fmt.Errorf("read --%s-file: %w", name, err)
+		}
+		data, readErr := io.ReadAll(io.LimitReader(file, maxWikiQueryInputBytes+1))
+		closeErr := file.Close()
+		if readErr != nil {
+			return "", fmt.Errorf("read --%s-file: %w", name, readErr)
+		}
+		if closeErr != nil {
+			return "", fmt.Errorf("close --%s-file: %w", name, closeErr)
 		}
 		if len(data) > maxWikiQueryInputBytes {
 			return "", fmt.Errorf("--%s-file exceeds %d bytes", name, maxWikiQueryInputBytes)
