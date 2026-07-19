@@ -15,6 +15,10 @@ stable requirement IDs; feature files link to their owning SPEC and source, and
 reciprocal-link checks reject orphaned coverage. CI invokes the Go test package
 directly.
 
+Every feature lives under `agm/test/bdd/features/` and runs without an
+`@implemented` or similar selection filter. Discovery and execution therefore
+cover the complete tracked feature catalog rather than an opt-in subset.
+
 ## Alternatives
 
 Bazel adds substantial tooling for a Go monorepo already built by `go test`.
