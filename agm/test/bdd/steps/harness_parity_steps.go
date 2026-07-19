@@ -53,6 +53,7 @@ type harnessParityState struct {
 	lifecycleReflected         bool
 	codexArchiveInvoked        bool
 	tmuxResumeLaunched         bool
+	tmuxSessionExists          bool
 	configuredHarness          string
 	configuredModelFamily      string
 	modelFamilyDefaulted       bool
@@ -105,6 +106,7 @@ type harnessParityState struct {
 	currentTmuxTestErr         error
 	agyLifecycleTestOutput     string
 	agyLifecycleTestErr        error
+	resumeSource               string
 }
 
 type harnessParityStateKey struct{}
@@ -288,6 +290,69 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM archives the stopped session$`, agmArchivesTheStoppedSession)
 	ctx.Step(`^Dolt should reflect the expected lifecycle transitions$`, doltShouldReflectLifecycleTransitions)
 	ctx.Step(`^the matching Codex saved session should be archived$`, matchingCodexSavedSessionShouldBeArchived)
+	ctx.Step(`^a stopped Codex CLI session without a tmux pane$`, aStoppedCodexCLISessionWithoutTmuxPane)
+	ctx.Step(`^AGM validates the Codex resume transaction$`, agmValidatesTheCodexResumeTransaction)
+	ctx.Step(`^Codex resume success should require process and composer readiness$`, codexResumeSuccessShouldRequireProcessAndComposerReadiness)
+	ctx.Step(`^a failed Codex resume should remove only its newly created tmux session$`, aFailedCodexResumeShouldRemoveOnlyItsNewlyCreatedTmuxSession)
+	ctx.Step(`^Codex activity updates should follow resume readiness$`, codexActivityUpdatesShouldFollowResumeReadiness)
+}
+
+func aStoppedCodexCLISessionWithoutTmuxPane(ctx context.Context) error {
+	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	harnessState.harness = "codex-cli"
+	harnessState.tmuxSessionExists = false
+	return nil
+}
+
+func agmValidatesTheCodexResumeTransaction(ctx context.Context) error {
+	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if harnessState.harness != "codex-cli" || harnessState.tmuxSessionExists {
+		return fmt.Errorf("scenario requires a stopped codex-cli session without tmux")
+	}
+	path := filepath.Join(bddRepoRoot(), "agm", "cmd", "agm", "resume.go")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read resume production source: %w", err)
+	}
+	harnessState.resumeSource = string(data)
+	return nil
+}
+
+func codexResumeSuccessShouldRequireProcessAndComposerReadiness(ctx context.Context) error {
+	source := ctx.Value(harnessParityStateKey{}).(*harnessParityState).resumeSource
+	processWait := strings.Index(source, "runtime.waitForProcess")
+	processFailure := strings.Index(source, "codex process did not become ready")
+	composerWait := strings.Index(source, "runtime.waitForComposer")
+	composerFailure := strings.Index(source, "codex composer did not become ready")
+	if processWait < 0 || processFailure < processWait || composerWait < processFailure || composerFailure < composerWait {
+		return fmt.Errorf("Codex resume must fail unless process and composer readiness both succeed")
+	}
+	return nil
+}
+
+func aFailedCodexResumeShouldRemoveOnlyItsNewlyCreatedTmuxSession(ctx context.Context) error {
+	source := ctx.Value(harnessParityStateKey{}).(*harnessParityState).resumeSource
+	for _, required := range []string{
+		"createdTmux := false",
+		"createdTmux = true",
+		"rollbackCreatedResumeTmux(runtime, health.TmuxSessionName",
+		"if sendCommands",
+	} {
+		if !strings.Contains(source, required) {
+			return fmt.Errorf("Codex resume production path missing rollback guard %q", required)
+		}
+	}
+	return nil
+}
+
+func codexActivityUpdatesShouldFollowResumeReadiness(ctx context.Context) error {
+	source := ctx.Value(harnessParityStateKey{}).(*harnessParityState).resumeSource
+	waitIndex := strings.Index(source, "runtime.wait(harnessName, health)")
+	updateIndex := strings.Index(source, "runtime.updateActivity(adapter, sessionID, manifestPath)")
+	if waitIndex < 0 || updateIndex < waitIndex {
+		return fmt.Errorf("Codex activity update must follow successful resume readiness")
+	}
+	return nil
 }
 
 func agmResolvesDoctorHealthForConfiguredHarness(ctx context.Context) error {

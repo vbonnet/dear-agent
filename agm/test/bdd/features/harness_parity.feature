@@ -350,6 +350,13 @@ Feature: Harness parity
     And the record should preserve the Codex session UUID
     And AGM should launch a tmux pane that resumes the Codex conversation
 
+  Scenario: Failed Codex resume is rolled back before success effects
+    Given a stopped Codex CLI session without a tmux pane
+    When AGM validates the Codex resume transaction
+    Then Codex resume success should require process and composer readiness
+    And a failed Codex resume should remove only its newly created tmux session
+    And Codex activity updates should follow resume readiness
+
   Scenario: Orphaned AGY conversation can be imported and resumed
     Given an AGY saved conversation exists outside AGM
     When AGM imports the AGY conversation ID with harness "agy"

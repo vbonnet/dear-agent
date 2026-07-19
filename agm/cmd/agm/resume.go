@@ -541,19 +541,83 @@ func resumeResolvedSession(ctx context.Context, adapter *dolt.Adapter, sessionID
 	return nil
 }
 
-// resumeSession performs the complete resume workflow
-func resumeSession(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath, harnessName string, health *HealthStatus) error {
-	return resumeSessionWithRuntime(ctx, adapter, sessionID, manifestPath, harnessName, health, resumeSessionRuntime{
-		loadManifest: getResumeManifest,
-		newSession:   tmux.NewSession,
-		attach:       tmux.AttachSession,
-	})
+// resumeSessionRuntime is the narrow impure boundary for the resume
+// transaction. Production keeps the existing tmux and manifest behavior;
+// tests can make ordering, compensation, and post-readiness effects
+// deterministic without mutating package-global function hooks.
+type resumeSessionRuntime struct {
+	loadManifest      func(context.Context, *dolt.Adapter, string, string) (*manifest.Manifest, error)
+	createTmux        func(string, string) error
+	newSession        func(string, string) error
+	killTmux          func(string) error
+	dispatch          func(*dolt.Adapter, *manifest.Manifest, string, *HealthStatus) error
+	wait              func(string, *HealthStatus) error
+	persistTmuxName   func(*dolt.Adapter, *manifest.Manifest, string) error
+	restorePermission func(string, *manifest.Manifest, *HealthStatus)
+	updateActivity    func(*dolt.Adapter, string, string) error
+	updateTabTitle    func(string)
+	deliverPrompt     func(string, string, string, bool) error
+	attachTmux        func(string) error
+	attach            func(string) error
 }
 
-type resumeSessionRuntime struct {
-	loadManifest func(context.Context, *dolt.Adapter, string, string) (*manifest.Manifest, error)
-	newSession   func(string, string) error
-	attach       func(string) error
+func realResumeSessionRuntime(ctx context.Context) resumeSessionRuntime {
+	return resumeSessionRuntime{
+		loadManifest: getResumeManifest,
+		createTmux:   tmux.NewSession,
+		killTmux:     killCreatedResumeTmux,
+		dispatch:     dispatchResumeCommand,
+		wait: func(harnessName string, health *HealthStatus) error {
+			return waitForResumedHarness(ctx, harnessName, health)
+		},
+		persistTmuxName:   persistResumeTmuxName,
+		restorePermission: restorePermissionMode,
+		updateActivity:    updateManifestActivity,
+		updateTabTitle:    updateVSCodeTabTitle,
+		deliverPrompt: func(sessionName, promptText, promptFile string, deletePromptFile bool) error {
+			return sendPostResumePrompt(ctx, sessionName, promptText, promptFile, deletePromptFile)
+		},
+		attachTmux: tmux.AttachSession,
+	}
+}
+
+// killCreatedResumeTmux compensates a failed resume and verifies that the
+// exact session created by this attempt is gone. tmux.KillSession is currently
+// idempotent and does not return its command error, so the postcondition check
+// is also the observable cleanup result.
+func killCreatedResumeTmux(sessionName string) error {
+	tmux.KillSession(sessionName)
+	exists, err := tmux.HasSession(sessionName)
+	if err != nil {
+		return fmt.Errorf("verify tmux session cleanup: %w", err)
+	}
+	if exists {
+		return fmt.Errorf("tmux session %q still exists after cleanup", sessionName)
+	}
+	return nil
+}
+
+func rollbackCreatedResumeTmux(runtime resumeSessionRuntime, sessionName string, primaryErr error) error {
+	if cleanupErr := runtime.killTmux(sessionName); cleanupErr != nil {
+		return errors.Join(primaryErr, fmt.Errorf("failed to clean up newly created tmux session %q: %w", sessionName, cleanupErr))
+	}
+	return primaryErr
+}
+
+func persistResumeTmuxName(adapter *dolt.Adapter, m *manifest.Manifest, sessionName string) error {
+	if m.Tmux.SessionName == sessionName {
+		return nil
+	}
+	m.Tmux.SessionName = sessionName
+	if err := adapter.UpdateSession(m); err != nil {
+		return fmt.Errorf("persist canonical tmux session name %q: %w", sessionName, err)
+	}
+	return nil
+}
+
+// resumeSession performs the complete resume workflow.
+func resumeSession(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath, harnessName string, health *HealthStatus) error {
+	return resumeSessionWithRuntime(ctx, adapter, sessionID, manifestPath, harnessName, health, realResumeSessionRuntime(ctx))
 }
 
 func resumeSessionWithRuntime(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath, harnessName string, health *HealthStatus, runtime resumeSessionRuntime) error {
@@ -561,12 +625,24 @@ func resumeSessionWithRuntime(ctx context.Context, adapter *dolt.Adapter, sessio
 	if err != nil {
 		return err
 	}
-	if err := ensureResumeTmuxSession(ctx, health, runtime); err != nil {
+	createdTmux, err := ensureResumeTmuxSession(ctx, health, runtime)
+	if err != nil {
 		return err
 	}
 	sendCommands := shouldSendResumeCommands(health.TmuxExists)
-	if err := runHarnessResume(ctx, adapter, m, harnessName, health, sendCommands); err != nil {
+	if err := runHarnessResume(ctx, adapter, m, harnessName, health, sendCommands, runtime); err != nil {
+		if createdTmux {
+			return rollbackCreatedResumeTmux(runtime, health.TmuxSessionName, err)
+		}
 		return err
+	}
+	if createdTmux {
+		if err := persistCreatedResumeTmuxName(runtime, adapter, m, health); err != nil {
+			return rollbackCreatedResumeTmux(runtime, health.TmuxSessionName, err)
+		}
+	}
+	if sendCommands {
+		runtime.restorePermission(harnessName, m, health)
 	}
 	return finalizeResumeSession(ctx, adapter, sessionID, manifestPath, health, sendCommands, runtime)
 }
@@ -575,7 +651,11 @@ func loadResumeSessionManifest(ctx context.Context, adapter *dolt.Adapter, sessi
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	m, err := runtime.loadManifest(ctx, adapter, sessionID, harnessName)
+	loadManifest := runtime.loadManifest
+	if loadManifest == nil {
+		loadManifest = getResumeManifest
+	}
+	m, err := loadManifest(ctx, adapter, sessionID, harnessName)
 	if err != nil {
 		return nil, err
 	}
@@ -585,22 +665,43 @@ func loadResumeSessionManifest(ctx context.Context, adapter *dolt.Adapter, sessi
 	return m, nil
 }
 
-func ensureResumeTmuxSession(ctx context.Context, health *HealthStatus, runtime resumeSessionRuntime) error {
+func ensureResumeTmuxSession(ctx context.Context, health *HealthStatus, runtime resumeSessionRuntime) (bool, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return false, err
 	}
 	if health.TmuxExists {
 		ui.PrintSuccess(fmt.Sprintf("Attaching to existing tmux session: %s", health.TmuxSessionName))
-		return nil
+		return false, nil
 	}
-	ui.PrintSuccess(fmt.Sprintf("Creating tmux session: %s", health.TmuxSessionName))
-	if err := runtime.newSession(health.TmuxSessionName, health.WorktreePath); err != nil {
-		return fmt.Errorf("failed to create tmux session: %w", err)
+	createdName := tmux.SanitizeSessionName(health.TmuxSessionName)
+	ui.PrintSuccess(fmt.Sprintf("Creating tmux session: %s", createdName))
+	createTmux := runtime.createTmux
+	if createTmux == nil {
+		createTmux = runtime.newSession
 	}
-	return nil
+	if createTmux == nil {
+		return false, fmt.Errorf("resume runtime does not provide tmux creation")
+	}
+	if err := createTmux(createdName, health.WorktreePath); err != nil {
+		return false, fmt.Errorf("failed to create tmux session: %w", err)
+	}
+	// NewSession creates the sanitized name. Carry that exact identity through
+	// dispatch, readiness, rollback, prompt delivery, and attach.
+	health.TmuxSessionName = createdName
+	return true, nil
 }
 
-func runHarnessResume(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest, harnessName string, health *HealthStatus, sendCommands bool) error {
+func persistCreatedResumeTmuxName(runtime resumeSessionRuntime, adapter *dolt.Adapter, m *manifest.Manifest, health *HealthStatus) error {
+	if m.Tmux.SessionName == health.TmuxSessionName {
+		return nil
+	}
+	if runtime.persistTmuxName == nil {
+		return fmt.Errorf("resume runtime does not provide tmux-name persistence")
+	}
+	return runtime.persistTmuxName(adapter, m, health.TmuxSessionName)
+}
+
+func runHarnessResume(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest, harnessName string, health *HealthStatus, sendCommands bool, runtime resumeSessionRuntime) error {
 	if !sendCommands {
 		return nil
 	}
@@ -608,16 +709,18 @@ func runHarnessResume(ctx context.Context, adapter *dolt.Adapter, m *manifest.Ma
 		return err
 	}
 	return withAgyResumeWorkspaceLock(ctx, harnessName, health.WorktreePath, func() error {
-		if err := dispatchResumeCommand(adapter, m, harnessName, health); err != nil {
-			return err
-		}
-		if err := waitForResumedHarness(ctx, harnessName, health); err != nil {
+		if err := runtime.dispatch(adapter, m, harnessName, health); err != nil {
 			return err
 		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		restorePermissionMode(harnessName, m, health)
+		if err := runtime.wait(harnessName, health); err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		return nil
 	})
 }
@@ -643,7 +746,7 @@ func finalizeResumeSession(ctx context.Context, adapter *dolt.Adapter, sessionID
 	}
 
 	// Update manifest last_activity (best effort - don't fail if this errors)
-	if err := updateManifestActivity(adapter, sessionID, manifestPath); err != nil {
+	if err := runtime.updateActivity(adapter, sessionID, manifestPath); err != nil {
 		ui.PrintWarning(fmt.Sprintf("Failed to update manifest activity: %v", err))
 	}
 	if err := ctx.Err(); err != nil {
@@ -651,21 +754,21 @@ func finalizeResumeSession(ctx context.Context, adapter *dolt.Adapter, sessionID
 	}
 
 	// Update VS Code tab title if running in VS Code
-	updateVSCodeTabTitle(health.TmuxSessionName)
-	if err := deliverPostResumePrompt(ctx, health.TmuxSessionName); err != nil {
+	runtime.updateTabTitle(health.TmuxSessionName)
+	if err := deliverPostResumePrompt(ctx, health.TmuxSessionName, runtime); err != nil {
 		return err
 	}
 	return attachResumedSession(ctx, sessionID, health, sendCommands, runtime)
 }
 
-func deliverPostResumePrompt(ctx context.Context, sessionName string) error {
+func deliverPostResumePrompt(ctx context.Context, sessionName string, runtime resumeSessionRuntime) error {
 	// Send post-resume prompt if --prompt or --prompt-file was specified.
 	// This happens after the harness is ready, before attach.
 	// Works for both new sessions (sendCommands=true) and existing sessions.
 	if resumePrompt == "" && resumePromptFile == "" {
 		return nil
 	}
-	if err := sendPostResumePrompt(ctx, sessionName, resumePrompt, resumePromptFile, resumeDeletePromptFile); err != nil {
+	if err := runtime.deliverPrompt(sessionName, resumePrompt, resumePromptFile, resumeDeletePromptFile); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -696,7 +799,14 @@ func attachResumedSession(ctx context.Context, sessionID string, health *HealthS
 		fmt.Println("\nNote: You will be attached to the tmux session. Press Ctrl+B then D to detach.")
 	}
 	fmt.Println()
-	if err := runtime.attach(health.TmuxSessionName); err != nil {
+	attachTmux := runtime.attachTmux
+	if attachTmux == nil {
+		attachTmux = runtime.attach
+	}
+	if attachTmux == nil {
+		return fmt.Errorf("resume runtime does not provide tmux attachment")
+	}
+	if err := attachTmux(health.TmuxSessionName); err != nil {
 		return fmt.Errorf("failed to attach to tmux session: %w", err)
 	}
 	return nil
@@ -974,13 +1084,32 @@ func waitForResumedAgyWithWait(ctx context.Context, health *HealthStatus, wait f
 	return nil
 }
 
+type codexResumeReadinessRuntime struct {
+	waitForProcess  func(string, string, time.Duration) error
+	waitForComposer func(string, time.Duration) error
+}
+
 func waitForResumedCodex(ctx context.Context, health *HealthStatus) error {
+	return waitForResumedCodexWithRuntime(ctx, health, codexResumeReadinessRuntime{
+		waitForProcess: func(sessionName, processName string, timeout time.Duration) error {
+			return tmux.WaitForProcessReadyContext(ctx, sessionName, processName, timeout)
+		},
+		waitForComposer: func(sessionName string, timeout time.Duration) error {
+			return tmux.WaitForCodexPromptContext(ctx, sessionName, timeout)
+		},
+	})
+}
+
+func waitForResumedCodexWithRuntime(ctx context.Context, health *HealthStatus, runtime codexResumeReadinessRuntime) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	var processWaitErr error
 	spinErr := spinner.New().
 		Title("Waiting for Codex process to start...").
 		Accessible(true).
 		Action(func() {
-			processWaitErr = tmux.WaitForProcessReadyContext(ctx, health.TmuxSessionName, "codex", 15*time.Second)
+			processWaitErr = runtime.waitForProcess(health.TmuxSessionName, "codex", 15*time.Second)
 		}).
 		Run()
 	if spinErr != nil {
@@ -991,18 +1120,16 @@ func waitForResumedCodex(ctx context.Context, health *HealthStatus) error {
 	}
 	fmt.Println()
 	if processWaitErr != nil {
-		ui.PrintWarning("Codex process is taking longer than expected")
-		fmt.Println("  Continuing to wait for Codex to render...")
-	} else {
-		ui.PrintSuccess("Codex process started!")
+		return fmt.Errorf("codex process did not become ready: %w", processWaitErr)
 	}
+	ui.PrintSuccess("Codex process started!")
 
 	var promptWaitErr error
 	spinErr = spinner.New().
 		Title("Waiting for Codex composer to load...").
 		Accessible(true).
 		Action(func() {
-			promptWaitErr = tmux.WaitForCodexPromptContext(ctx, health.TmuxSessionName, 60*time.Second)
+			promptWaitErr = runtime.waitForComposer(health.TmuxSessionName, 60*time.Second)
 		}).
 		Run()
 	if spinErr != nil {
@@ -1013,11 +1140,9 @@ func waitForResumedCodex(ctx context.Context, health *HealthStatus) error {
 	}
 	fmt.Println()
 	if promptWaitErr != nil {
-		ui.PrintWarning("Codex is taking longer than expected to load")
-		fmt.Println("  Attaching now - composer should appear shortly")
-	} else {
-		ui.PrintSuccess("Codex loaded and ready!")
+		return fmt.Errorf("codex composer did not become ready: %w", promptWaitErr)
 	}
+	ui.PrintSuccess("Codex loaded and ready!")
 	return nil
 }
 
