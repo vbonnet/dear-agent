@@ -180,13 +180,6 @@ exclusions:
     owner: "#930"
     reason: root router replaces raw merge guidance with safe-merge
   - path: AGENTS.md
-    rule: raw-gh-merge
-    excerpt: "gh pr merge"
-    context: c88f0fc0db50ccd2a12fd9a4732a54d182c551d0a6add7388faad753fcf74a55
-    count: 1
-    owner: "#930"
-    reason: root router replaces raw merge guidance with safe-merge
-  - path: AGENTS.md
     rule: safe-pr-emergency
     excerpt: "safe-pr <verb> --emergency --reason \"<why>\""
     context: 8f8dff81b0641aa84111dfb2aa9b05b916425b2e6e89c3043f26a44a2549321a

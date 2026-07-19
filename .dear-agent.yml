@@ -42,7 +42,7 @@ output-dirs:
 # Agents read this file at session start: PR open/close in this repo goes
 # through the safe-pr wrapper, which requires an active wayfinder session
 # (WAYFINDER-STATUS.md status: in_progress) and stamps the session trace on
-# the PR. Raw `gh pr create|close|reopen` in Bash is denied with exit 2.
+# the PR. Direct GitHub CLI lifecycle mutations in Bash are denied with exit 2.
 pr-policy:
   create: safe-pr   # safe-pr create --wayfinder <project-dir> --title … --body …
   close: safe-pr    # safe-pr close  --wayfinder <project-dir> <number|url>

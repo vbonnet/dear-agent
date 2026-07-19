@@ -304,6 +304,61 @@ func TestGitGlobalOptionsRemainPolicyVisible(t *testing.T) {
 	}
 }
 
+func TestGitHubGlobalOptionsRemainPolicyVisible(t *testing.T) {
+	segments := []Segment{
+		{Kind: SegmentShell, Text: "gh -R owner/repo pr merge 123"},
+		{Kind: SegmentShell, Text: "gh --repo=owner/repo pr create --title test"},
+	}
+	var rules []string
+	for _, segment := range segments {
+		for _, violation := range evaluateSegment("AGENTS.md", segment) {
+			rules = append(rules, violation.Rule)
+		}
+	}
+	sort.Strings(rules)
+	if !reflect.DeepEqual(rules, []string{"raw-gh-merge", "raw-gh-pr-lifecycle"}) {
+		t.Fatalf("GitHub global-option rules = %v", rules)
+	}
+}
+
+func TestInlinePRLifecycleGuidanceRemainsPolicyVisible(t *testing.T) {
+	var violations []Violation
+	for _, segment := range parseSegments([]byte("Run `gh pr create --title test` after review.\n")) {
+		violations = append(violations, evaluateSegment("AGENTS.md", segment)...)
+	}
+	if len(violations) != 1 || violations[0].Rule != "raw-gh-pr-lifecycle" {
+		t.Fatalf("inline PR lifecycle violations = %v, want raw-gh-pr-lifecycle", violations)
+	}
+}
+
+func TestShellBraceGroupsRemainPolicyVisible(t *testing.T) {
+	segments := parseSegments([]byte("```\n{ gh pr merge 123; }\n{ git push origin main; }\n```\n"))
+	var rules []string
+	for _, segment := range segments {
+		for _, violation := range evaluateSegment("AGENTS.md", segment) {
+			rules = append(rules, violation.Rule)
+		}
+	}
+	sort.Strings(rules)
+	if !reflect.DeepEqual(rules, []string{"raw-gh-merge", "raw-git-push"}) {
+		t.Fatalf("brace-group rules = %v", rules)
+	}
+}
+
+func TestOrdinaryProseCommandsRemainPolicyVisible(t *testing.T) {
+	segments := parseSegments([]byte("Run gh pr merge 123 after review.\nUse git push origin main for delivery.\nExecute bd ready next.\n"))
+	var rules []string
+	for _, segment := range segments {
+		for _, violation := range evaluateSegment("AGENTS.md", segment) {
+			rules = append(rules, violation.Rule)
+		}
+	}
+	sort.Strings(rules)
+	if !reflect.DeepEqual(rules, []string{"bare-beads", "raw-gh-merge", "raw-git-push"}) {
+		t.Fatalf("ordinary prose rules = %v", rules)
+	}
+}
+
 func TestRetiredWayfinderVocabularyIsCaseInsensitive(t *testing.T) {
 	for _, token := range []string{"v1", "v1.", "w0", "d1", "s1"} {
 		if !retiredWayfinderToken(token) {

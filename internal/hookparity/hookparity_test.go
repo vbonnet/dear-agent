@@ -139,6 +139,27 @@ func TestSpawnRoutingCreatesWorkersDetachedWithInitialPrompt(t *testing.T) {
 	}
 }
 
+func TestPRGuardEscalationWorksOutsideAGM(t *testing.T) {
+	root := repoRoot(t)
+	for _, script := range []string{
+		".claude/hooks/pretool-pr-guard",
+		".codex/hooks/pretool-pr-guard",
+		".agents/hooks/pretool-pr-guard",
+		".opencode/hooks/pretool-pr-guard",
+	} {
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(script)))
+		if err != nil {
+			t.Fatalf("read %s: %v", script, err)
+		}
+		guidance := string(data)
+		for _, required := range []string{"agm escalate ask --session <registered-session>", "ask the current user directly"} {
+			if !strings.Contains(guidance, required) {
+				t.Errorf("%s escalation guidance missing %q", script, required)
+			}
+		}
+	}
+}
+
 func TestOpenCodeHookParserRegressions(t *testing.T) {
 	root := repoRoot(t)
 	tests := []struct {

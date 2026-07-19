@@ -26,7 +26,7 @@ var instructionRules = []rule{
 		return anyCommand(text, func(fields []string) bool { return commandHasPrefix(fields, "git", "push") })
 	}},
 	{id: "raw-gh-merge", replacement: "safe-merge", applies: commandSegment, detect: rawGHMerge},
-	{id: "raw-gh-pr-lifecycle", replacement: "safe-pr create or safe-pr close; ask a human to reopen", applies: shellSegment, detect: rawGHPRLifecycle},
+	{id: "raw-gh-pr-lifecycle", replacement: "safe-pr create or safe-pr close; ask a human to reopen", applies: commandSegment, detect: rawGHPRLifecycle},
 	{id: "safe-pr-emergency", replacement: "safe-pr normally or run agm escalate ask <question>; there is no bypass flag", applies: commandSegment, detect: func(text string) bool {
 		normalized := shellText(text)
 		return strings.Contains(normalized, "safe-pr") && strings.Contains(normalized, "--emergency")
@@ -97,10 +97,6 @@ func proseOrShell(kind SegmentKind) bool {
 
 func commandSegment(kind SegmentKind) bool {
 	return kind == SegmentInline || kind == SegmentShell
-}
-
-func shellSegment(kind SegmentKind) bool {
-	return kind == SegmentShell
 }
 
 func shellText(text string) string {
@@ -182,7 +178,8 @@ func commandFieldsDepth(text string, depth int) [][]string {
 
 func normalizeCommand(fields []string) []string {
 	fields = normalizeAGMCommand(fields)
-	return normalizeGitCommand(fields)
+	fields = normalizeGitCommand(fields)
+	return normalizeGHCommand(fields)
 }
 
 func parseShellWords(input string) []string {
@@ -355,9 +352,19 @@ func normalizeGitCommand(fields []string) []string {
 	return append([]string{"git"}, args...)
 }
 
+func normalizeGHCommand(fields []string) []string {
+	if len(fields) == 0 || fields[0] != "gh" {
+		return fields
+	}
+	args := stripLauncherOptions(fields[1:], map[string]bool{
+		"-R": true, "--hostname": true, "--repo": true,
+	})
+	return append([]string{"gh"}, args...)
+}
+
 func stripCommandPrefixes(fields []string) []string {
 	for len(fields) > 0 {
-		fields[0] = strings.TrimLeft(fields[0], "(")
+		fields = trimShellGroupPrefixes(fields)
 		fields[0] = executableBase(fields[0])
 		switch {
 		case fields[0] == "if" || fields[0] == "while" || fields[0] == "until" || fields[0] == "then" || fields[0] == "do" || fields[0] == "!":
@@ -384,6 +391,18 @@ func stripCommandPrefixes(fields []string) []string {
 			return fields
 		}
 	}
+	return fields
+}
+
+func trimShellGroupPrefixes(fields []string) []string {
+	for len(fields) > 1 {
+		fields[0] = strings.TrimLeft(fields[0], "({")
+		if fields[0] != "" {
+			return fields
+		}
+		fields = fields[1:]
+	}
+	fields[0] = strings.TrimLeft(fields[0], "({")
 	return fields
 }
 

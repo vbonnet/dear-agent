@@ -38,7 +38,14 @@ func parseSegments(source []byte) []Segment {
 	classified, inline := classifyMarkdown(root, source)
 	segments := joinShellContinuations(sourceSegments(source, classified))
 	segments = append(segments, inline...)
-	segments = append(segments, markdownFrontmatterCommands(source)...)
+	segments = append(segments, proseCommandSegments(source, classified)...)
+	frontmatter := markdownFrontmatterCommands(source)
+	for _, command := range frontmatter {
+		segments = slices.DeleteFunc(segments, func(segment Segment) bool {
+			return segment.Line == command.Line && segment.Kind == SegmentShell && allowedBashTool.MatchString(segment.Text)
+		})
+	}
+	segments = append(segments, frontmatter...)
 	sort.Slice(segments, func(i, j int) bool {
 		if segments[i].Line != segments[j].Line {
 			return segments[i].Line < segments[j].Line
@@ -48,7 +55,9 @@ func parseSegments(source []byte) []Segment {
 		}
 		return segments[i].Text < segments[j].Text
 	})
-	return segments
+	return slices.CompactFunc(segments, func(left, right Segment) bool {
+		return left.Kind == right.Kind && left.Line == right.Line && left.Text == right.Text
+	})
 }
 
 func parseScriptSegments(source []byte) []Segment {
@@ -350,7 +359,7 @@ func commandShaped(value string) bool {
 	}
 	commands := splitShellCommands(value)
 	for _, candidate := range commands {
-		fields := parseShellWords(candidate)
+		fields := trimShellGroupPrefixes(parseShellWords(candidate))
 		if len(fields) > 1 && fields[0] == "$" {
 			fields = fields[1:]
 		}
@@ -369,6 +378,23 @@ func commandShaped(value string) bool {
 }
 
 var embeddedCommandStart = regexp.MustCompile(`(?:^|["':=\[(][[:space:]]*)((?:agm|bd|gh|git|safe-merge|safe-pr|safe-push)\b.*)$`)
+var embeddedProseCommand = regexp.MustCompile(`(?i)\b(?:run|use|execute|invoke|call|try)\s+((?:agm|bd|gh|git|safe-merge|safe-pr|safe-push)\b.*)$`)
+
+func proseCommandSegments(source []byte, classified map[int]SegmentKind) []Segment {
+	var segments []Segment
+	for index, raw := range strings.Split(string(source), "\n") {
+		line := index + 1
+		if _, ok := classified[line]; ok {
+			continue
+		}
+		for _, match := range embeddedProseCommand.FindAllStringSubmatch(raw, -1) {
+			if len(match) == 2 {
+				segments = append(segments, Segment{Kind: SegmentInline, Line: line, Text: strings.TrimSpace(match[1])})
+			}
+		}
+	}
+	return segments
+}
 
 func codeSpanSegment(span *ast.CodeSpan, source []byte) (Segment, bool) {
 	var value strings.Builder
@@ -402,6 +428,9 @@ func sourceSegments(source []byte, classified map[int]SegmentKind) []Segment {
 		}
 		if !classifiedLine {
 			kind = SegmentProse
+			if commandShaped(normalized) {
+				kind = SegmentShell
+			}
 		}
 		if normalized != "" {
 			segments = append(segments, Segment{Kind: kind, Line: line, Text: normalized})

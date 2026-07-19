@@ -122,7 +122,7 @@ Documents that conflate them are stale.
 - **Version injection**: binaries use ldflags `-X main.Version/GitCommit/BuildDate/BuiltBy`.
 - **Go memory envelope**: `env/go-baseline.env` exports `GOMEMLIMIT=512MiB`, `GOMAXPROCS`, `GOGC` — all build/test/daemon targets inherit it.
 - **Atomic wrappers**: unsafe command chains are wrapped in Go binaries that enforce safety by construction (e.g. `safe-push`, `safe-merge`, `safe-rebase`, `safe-pr`). Raw forms are denied via PreToolUse hooks.
-- **PR creation**: `safe-pr create --wayfinder <dir>` only — raw `gh pr create` is denied by hook.
+- **PR creation**: `safe-pr create --wayfinder <dir>` only — the direct GitHub CLI mutation is denied by hook.
 - **Temporal artifacts** (designs, retros, wayfinder runs) go to the configured research/knowledge-base destination, never committed to this repo. Living docs (`ARCHITECTURE.md`, ADRs, `AGENTS.md`) stay here.
 - **Beads tracker**: always use `bd --db ~/beads/context-engine/.beads <subcommand>` — never bare `bd`.
 
@@ -421,7 +421,7 @@ makes the blocked item visible.
 
 **What counts as an ask-gated operation:** Any `Bash` command that the
 current permission model would surface to the user (e.g. `kill` of foreign
-processes, `git commit --no-verify`, raw `gh pr create/close` without the
+processes, `git commit --no-verify`, direct GitHub CLI lifecycle mutations without the
 safe-pr wrapper, write to a chezmoi-managed path). If in doubt, treat it as
 ask-gated.
 
@@ -542,7 +542,7 @@ that is a defect — reopen the bead and let the reconciler catch the class.
 
 ## PR Lifecycle — Wayfinder-Only (MANDATORY)
 
-Raw `gh pr create|close|reopen` in Bash is **denied** in this repo; PR open
+Direct GitHub CLI open, close, and reopen mutations in Bash are **denied** in this repo; PR open
 and close are allowed only through the `safe-pr` wrapper, which requires a
 wayfinder session trace. This is the enforcement tier of principles 5 (use
 Wayfinder) and 9 (atomic action wrappers): the PreToolUse hook
@@ -578,8 +578,8 @@ safe-pr close  --wayfinder <wayfinder-project-dir> <number|url>
 - **Emergency hatch** (no session exists and the work genuinely cannot wait):
   `safe-pr <verb> --emergency --reason "<why>"` — audited and stamped on the
   PR, never silent. Do not use it to skip starting a wayfinder session.
-- Unchanged: read-only `gh pr view|list|checks|diff`, and `gh pr merge`
-  (already governed by required checks + review gates). `gh pr reopen` has
+- Unchanged: read-only GitHub PR inspection and merge operations
+  (already governed by required checks + review gates). Reopening has
   no sanctioned automated path — reopening is a human decision; ask the
   supervisor/user.
 
