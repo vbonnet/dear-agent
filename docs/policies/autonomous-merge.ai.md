@@ -17,20 +17,23 @@ boundary that keeps consequential changes in front of a human.
 ## NEVER
 
 - Autonomously merge a change touching **security**, **product behavior**, or
-  **money/billing** — hold those for human merge review.
-- Merge with `--admin`, `--force`, or `--no-verify`, or over red/required checks.
+  **money/billing** — create those PRs as drafts and hold them for a human to
+  mark ready and merge.
+- Use `safe-merge --skip-review-check` or `safe-merge break-glass` in an agent
+  or routine merge flow. The audited, TTY-only break-glass path is reserved for
+  an explicit human emergency action.
 - Merge a PR with unresolved review threads.
 
 ## ALWAYS
 
 - For routine changes, review and merge your own PR once checks are green and
-  threads are resolved — `gh pr merge --squash`, via the normal gate.
+  threads are resolved — `safe-merge --pr <number>`, via the normal gate.
 - Route every PR through Wayfinder V2 + `safe-pr`.
 - When unsure whether something is security/product/money, treat it as yes and
-  hold for a human.
+  create the PR as a draft for a human.
 
 ## REMINDER
 
 The carve-out exists because the changes that most need eyes — a guard, an auth
 path, a price — are exactly the ones an over-eager agent will wave through. When
-in doubt, open the PR and stop. Autonomy is a default, not an obligation.
+in doubt, open a draft PR and stop. Autonomy is a default, not an obligation.

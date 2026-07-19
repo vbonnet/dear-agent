@@ -9,11 +9,14 @@ Three changes landed together to form a new merge pipeline:
 2. **Squash-only enforced via IaC** (ce-kf6j.5) — rebase and merge-commit strategies
    are blocked by the `modules/managed-repo` branch-protection ruleset; only squash
    merges land on `main`.
-3. **Auto-merge armed on every `safe-pr create`** (ce-r81r) — `cmd/safe-pr` runs
-   `gh pr merge --auto --squash <url>` immediately after opening a PR, so the PR
-   merges itself once required checks and reviews pass with no human touch.
+3. **Auto-merge armed on routine `safe-pr create`** (ce-r81r) — `cmd/safe-pr`
+   runs `gh pr merge --auto --squash <url>` after opening a non-draft PR, so it
+   merges once required checks and reviews pass. Drafts are an explicit human
+   handoff and remain unarmed.
 
-**The new pipeline:** push branch → open PR via `safe-pr` → CI green → auto-merge fires.
+**The routine pipeline:** push branch → open a non-draft PR via `safe-pr` → CI
+green → auto-merge fires. Human-required work stays draft until explicitly
+advanced.
 
 **Supervisor contract (what changed for burndown workers):**
 

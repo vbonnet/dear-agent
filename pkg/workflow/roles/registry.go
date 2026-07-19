@@ -6,7 +6,7 @@
 // is a one-line edit to roles.yaml.
 //
 // The registry is loaded with one of three sources, in precedence order
-// (matching ROADMAP.md "Role-based model mapping"):
+// (matching the role precedence contract in ../SPEC.md):
 //
 //  1. Path passed to LoadFile (typically $DEAR_AGENT_ROLES).
 //  2. ./.dear-agent/roles.yaml in the current directory.

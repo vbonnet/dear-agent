@@ -343,7 +343,7 @@ func ensureScalarField(m *yaml.Node, key, value, tag string) bool {
 		return false
 	}
 	// Insert at the top so schema_version reads first in the file —
-	// matches the canonical example in ROADMAP.md.
+	// matches the canonical workflow schema ordering.
 	keyNode := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}
 	valNode := &yaml.Node{Kind: yaml.ScalarNode, Tag: tag, Value: value}
 	m.Content = append([]*yaml.Node{keyNode, valNode}, m.Content...)

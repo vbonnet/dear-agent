@@ -70,7 +70,6 @@ agm/
 ├── test/
 │   ├── e2e/                    # End-to-end tests (testscript)
 │   └── integration/            # Integration tests
-└── TEST-PLAN.md                # Comprehensive testing roadmap
 ```
 
 ### Running Tests
@@ -335,7 +334,6 @@ agm/
 │   └── integration/   # Integration tests
 ├── .github/
 │   └── workflows/     # CI/CD pipelines
-├── TEST-PLAN.md       # Testing roadmap
 └── CONTRIBUTING.md    # This file
 ```
 
@@ -345,7 +343,7 @@ agm/
 - [testscript Documentation](https://pkg.go.dev/github.com/rogpeppe/go-internal/testscript)
 - [Table-Driven Tests](https://go.dev/wiki/TableDrivenTests)
 - [Effective Go](https://go.dev/doc/effective_go)
-- [TEST-PLAN.md](./TEST-PLAN.md) - Comprehensive testing strategy
+- [BDD Catalog](docs/BDD-CATALOG.md) - Executable behavior and test traceability
 
 ## Questions?
 

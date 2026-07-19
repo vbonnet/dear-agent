@@ -284,7 +284,7 @@ Examples:
 
 ## Related Documentation
 
-- [Test Plan](../../../TEST-PLAN.md) - Overall testing strategy
+- [BDD Catalog](../../../docs/BDD-CATALOG.md) - Executable behavior and test traceability
 - [Integration Test README](../README.md) - General integration test info
 - [AGM Architecture](../../../docs/architecture.md) - System design
 - [Hook Specification](../../../docs/hooks.md) - Hook system design (future)
@@ -309,5 +309,5 @@ Examples:
 
 For questions or issues with these tests:
 - File issue: [AGM Issues](https://github.com/vbonnet/dear-agent/issues)
-- Check TEST-PLAN.md for testing strategy
+- Check the [BDD Catalog](../../../docs/BDD-CATALOG.md) for behavior and test traceability
 - See CONTRIBUTING.md for development guidelines

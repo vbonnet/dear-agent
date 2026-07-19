@@ -6,12 +6,8 @@ Detects **deployment drift**: deployed artifacts on the host whose source of
 truth in this repo no longer matches the copy that was actually installed — a
 fix that merged to main but never reached the machine.
 
-This is Phase 0 of the deployment-drift system. The full phased plan
-(daily-audit integration, the bead-close-guard "deployed" gate, the OTel
-"verified" gate, auto-remediation) is in
-[`docs/drift-detection-plan.md`](../../docs/drift-detection-plan.md).
 [`bead-close-guard`](../bead-close-guard) consumes this tool's `targets.yaml`
-as the "deployed" gate (Phase 2): a bead whose merged change touches a target's
+as the deployed-file gate: a bead whose merged change touches a target's
 `source` cannot close until that target is current on the host.
 
 ## Why
@@ -39,7 +35,7 @@ source-of-truth file and reports a status:
 | `error`            | could not evaluate (read failure)                              |
 
 The check is **just file hashing** — no builds, no network beyond an optional
-`git show`. Cheap enough for the daily ops audit and the bead-close gate.
+`git show`. It is cheap enough for an audit or the bead-close gate.
 
 ## Usage
 
@@ -64,7 +60,7 @@ comments in `targets.yaml`.
 
 ## Output
 
-The JSON report (`--json`) is the contract for monitoring/OTel and for the
-later lifecycle gates: a `summary` tally plus a per-target list carrying the
+The JSON report (`--json`) is the contract for monitoring and lifecycle gates:
+a `summary` tally plus a per-target list carrying the
 hashes, a human-readable `diff`, and the `remediation` command. `--audit`
 writes one JSONL line per run to `~/.local/state/dear-agent/drift-check.log`.

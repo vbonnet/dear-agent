@@ -162,7 +162,7 @@ them here so they version-control alongside the protocol.
 
 ## 7. References
 
-- [AGENTS.why.md](AGENTS.why.md) — why autonomous review is the default.
+- [Autonomous merge policy](docs/policies/autonomous-merge.ai.md) — merge boundaries after review.
 - `vbonnet/engram-research` `retrospectives/` — past incidents that shaped this protocol.
 - `.github/workflows/review.yml` — CI wiring (when present).
 - Chezmoi `docs/REVIEW.md` — the *dotfiles* review protocol (different bar,
