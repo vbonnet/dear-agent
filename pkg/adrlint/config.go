@@ -86,6 +86,9 @@ func validateScopes(scopes []Scope) (map[string]bool, error) {
 		if scope.Index == "" || filepath.Base(scope.Index) != scope.Index || filepath.Clean(scope.Index) != scope.Index {
 			return nil, fmt.Errorf("adrlint: scopes[%d].index must be one clean filename", i)
 		}
+		if adrLikeFilename(scope.Index) {
+			return nil, fmt.Errorf("adrlint: scopes[%d].index must not use an ADR-shaped filename", i)
+		}
 		if scope.MaxLines < 0 {
 			return nil, fmt.Errorf("adrlint: scopes[%d].max-lines must not be negative", i)
 		}

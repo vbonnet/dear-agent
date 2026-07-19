@@ -101,6 +101,7 @@ func TestADRSuccessorLinkMustResolveToAnotherLocalRecord(t *testing.T) {
 	}{
 		"local live successor":   {body: "Status: Superseded by [new](ADR-002-new.md)", want: true},
 		"titled live successor":  {body: `Status: Superseded by [new](ADR-002-new.md "successor")`, want: true},
+		"reference successor":    {body: "Status: Superseded by [new][successor]\n\n[successor]: ADR-002-new.md \"live\"", want: true},
 		"self link":              {body: "Status: Superseded by [self](ADR-001-old.md)"},
 		"external shape":         {body: "Status: Superseded by [remote](https://example.com/ADR-999-missing.md)"},
 		"missing local":          {body: "Status: Superseded by [missing](ADR-999-missing.md)"},
@@ -115,7 +116,8 @@ func TestADRSuccessorLinkMustResolveToAnotherLocalRecord(t *testing.T) {
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			got := hasADRSuccessorLink(root, filepath.ToSlash(filepath.Join("docs", "adr", "ADR-001-old.md")), []byte(tt.body), governed)
+			status := adrStatusLine.Find([]byte(tt.body))
+			got := hasADRSuccessorLink(root, filepath.ToSlash(filepath.Join("docs", "adr", "ADR-001-old.md")), status, []byte(tt.body), governed)
 			if got != tt.want {
 				t.Fatalf("hasADRSuccessorLink from %s = %v, want %v", dir, got, tt.want)
 			}
@@ -147,6 +149,12 @@ func TestLoadPolicyRejectsInvalidDeclarations(t *testing.T) {
       index: README.md
     - path: docs/adr
       index: OTHER.md
+`},
+		{name: "ADR-shaped scope index", body: `adr-governance:
+  max-lines: 300
+  scopes:
+    - path: docs/adr
+      index: ADR-001-index.md
 `},
 		{name: "reasonless exclusion", body: `adr-governance:
   scopes:
@@ -242,6 +250,7 @@ func TestADRLikeFilenameBoundaries(t *testing.T) {
 
 	tests := map[string]bool{
 		"ADR042-sneaky.md":        true,
+		"ADR-12345-new.md":        true,
 		"042sneaky.md":            true,
 		"ADR 001-new-decision.md": true,
 		"0001_sneaky.md":          true,

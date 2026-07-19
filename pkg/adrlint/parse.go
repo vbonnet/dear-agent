@@ -14,9 +14,10 @@ var (
 	adrStatusPattern            = regexp.MustCompile(`(?m)^Status: (Accepted|Proposed|Deprecated|Superseded)(?: .*)?$`)
 	adrStatusLine               = regexp.MustCompile(`(?m)^Status:.*$`)
 	adrIndexPattern             = regexp.MustCompile(`(?m)^\| \[([0-9]{3,4})\]\(([^)]+\.md)\) \| ([^|]+) \| (Accepted|Proposed|Deprecated|Superseded) \|$`)
-	adrLikePrefix               = regexp.MustCompile(`(?i)^(?:adr[-_ ]?[0-9]{1,4}(?:[^0-9]|$)|(?:[0-9]{1,3}|0[0-9]{3})(?:[^0-9]|$))`)
+	adrLikePrefix               = regexp.MustCompile(`(?i)^(?:adr[-_ ]?[0-9]+(?:[^0-9]|$)|(?:[0-9]{1,3}|0[0-9]{3})(?:[^0-9]|$))`)
 	markdownLink                = regexp.MustCompile(`\[[^]]+\]\(([^)]+)\)`)
-	markdownReferenceDefinition = regexp.MustCompile(`(?m)^[ \t]{0,3}\[[^]]+\]:[ \t]+<?([^> \t]+)>?(?:[ \t]+.*)?$`)
+	markdownReferenceLink       = regexp.MustCompile(`\[[^]]+\]\[([^]]+)\]`)
+	markdownReferenceDefinition = regexp.MustCompile(`(?m)^[ \t]{0,3}\[([^]]+)\]:[ \t]+<?([^> \t]+)>?(?:[ \t]+.*)?$`)
 )
 
 type record struct {
@@ -51,7 +52,7 @@ func parseRecord(root, relative string, data []byte, governed map[string]bool) (
 		record.status = statuses[0][1]
 	}
 	violations = append(violations, commonDocumentViolations(root, relative, data)...)
-	if record.status == "Superseded" && !hasADRSuccessorLink(root, relative, []byte(statuses[0][0]), governed) {
+	if record.status == "Superseded" && !hasADRSuccessorLink(root, relative, []byte(statuses[0][0]), data, governed) {
 		violations = append(violations, Violation{Path: relative, Reason: "Superseded record must link to another governed ADR"})
 	}
 	return record, violations
@@ -65,7 +66,7 @@ func parseAggregate(root, relative string, data []byte, governed map[string]bool
 		violations = append(violations, Violation{Path: relative, Reason: fmt.Sprintf("want one normalized Status line, got %d status-like line(s)", len(statusLines))})
 	}
 	violations = append(violations, commonDocumentViolations(root, relative, data)...)
-	if len(statuses) == 1 && statuses[0][1] == "Superseded" && !hasADRSuccessorLink(root, relative, []byte(statuses[0][0]), governed) {
+	if len(statuses) == 1 && statuses[0][1] == "Superseded" && !hasADRSuccessorLink(root, relative, []byte(statuses[0][0]), data, governed) {
 		violations = append(violations, Violation{Path: relative, Reason: "Superseded record must link to another governed ADR"})
 	}
 	return violations
@@ -95,11 +96,14 @@ func commonDocumentViolations(root, relative string, data []byte) []Violation {
 }
 
 func markdownTargets(data []byte) []string {
-	matches := markdownLink.FindAllStringSubmatch(string(data), -1)
-	matches = append(matches, markdownReferenceDefinition.FindAllStringSubmatch(string(data), -1)...)
-	targets := make([]string, 0, len(matches))
-	for _, match := range matches {
+	inlineMatches := markdownLink.FindAllStringSubmatch(string(data), -1)
+	referenceDefinitions := markdownReferenceDefinition.FindAllStringSubmatch(string(data), -1)
+	targets := make([]string, 0, len(inlineMatches)+len(referenceDefinitions))
+	for _, match := range inlineMatches {
 		targets = append(targets, markdownLinkDestination(match[1]))
+	}
+	for _, match := range referenceDefinitions {
+		targets = append(targets, match[2])
 	}
 	return targets
 }
@@ -122,17 +126,31 @@ func relativeLink(target string) bool {
 	return !strings.Contains(lower, "://") && !strings.HasPrefix(lower, "mailto:") && !strings.HasPrefix(lower, "#")
 }
 
-func hasADRSuccessorLink(root, relative string, statusLine []byte, governed map[string]bool) bool {
+func hasADRSuccessorLink(root, relative string, statusLine, document []byte, governed map[string]bool) bool {
 	statuses := adrStatusPattern.FindAllStringSubmatch(string(statusLine), -1)
 	if len(statuses) != 1 || statuses[0][1] != "Superseded" {
 		return false
 	}
-	for _, target := range markdownTargets(statusLine) {
+	for _, target := range successorTargets(statusLine, document) {
 		if isLiveADRSuccessor(root, relative, target, governed) {
 			return true
 		}
 	}
 	return false
+}
+
+func successorTargets(statusLine, document []byte) []string {
+	targets := markdownTargets(statusLine)
+	definitions := make(map[string]string)
+	for _, match := range markdownReferenceDefinition.FindAllStringSubmatch(string(document), -1) {
+		definitions[strings.ToLower(strings.TrimSpace(match[1]))] = match[2]
+	}
+	for _, match := range markdownReferenceLink.FindAllStringSubmatch(string(statusLine), -1) {
+		if target, ok := definitions[strings.ToLower(strings.TrimSpace(match[1]))]; ok {
+			targets = append(targets, target)
+		}
+	}
+	return targets
 }
 
 func isLiveADRSuccessor(root, relative, target string, governed map[string]bool) bool {
