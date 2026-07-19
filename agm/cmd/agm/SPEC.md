@@ -66,6 +66,8 @@ Provide a production-ready CLI that:
 
 **CLI-20** When current-tmux session creation cannot commit its manifest, the system shall record the commit failure in the CLI debug log instead of silently discarding it.
 
+**CLI-21** When `agm sessions resume-all` successfully resumes a session, the system shall write `.agm/resume-timestamp` for supervisor coordination; failure to write that advisory timestamp shall warn without failing the resumed session.
+
 ## Requirements
 
 ### Functional Requirements

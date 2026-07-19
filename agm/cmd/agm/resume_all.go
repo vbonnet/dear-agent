@@ -203,7 +203,7 @@ func resumeSessionsBatch(adapter *dolt.Adapter, sessions []*manifest.Manifest) {
 		} else {
 			successCount++
 
-			// Write resume timestamp for orchestrator coordination (ADR-010)
+			// Write resume timestamp for orchestrator coordination (CLI-21)
 			// Non-critical: Log warning but don't fail if timestamp write fails
 			if err := writeResumeTimestamp(m.SessionID); err != nil {
 				ui.PrintWarning(fmt.Sprintf("Warning: failed to write resume timestamp for %s: %v", m.Name, err))
