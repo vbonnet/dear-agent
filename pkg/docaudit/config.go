@@ -1,6 +1,7 @@
 package docaudit
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path"
@@ -11,7 +12,7 @@ import (
 )
 
 type repositoryConfig struct {
-	LivingDocs Policy `yaml:"living-docs"`
+	LivingDocs *Policy `yaml:"living-docs"`
 }
 
 // Policy is the living-docs slice of .dear-agent.yml.
@@ -34,14 +35,36 @@ func loadPolicy(configPath string) (Policy, error) {
 	if err != nil {
 		return Policy{}, fmt.Errorf("docaudit: read policy: %w", err)
 	}
-	var cfg repositoryConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return Policy{}, fmt.Errorf("docaudit: parse policy: %w", err)
-	}
-	if err := validatePolicy(cfg.LivingDocs); err != nil {
+	policy, present, err := parsePolicy(data)
+	if err != nil {
 		return Policy{}, err
 	}
-	return cfg.LivingDocs, nil
+	if !present {
+		return Policy{}, fmt.Errorf("docaudit: living-docs policy is missing")
+	}
+	return policy, nil
+}
+
+func loadPolicyAtRef(ctx context.Context, root, ref string) (Policy, bool, error) {
+	data, present, err := loadFileAtRef(ctx, root, ref, ".dear-agent.yml")
+	if err != nil || !present {
+		return Policy{}, present, err
+	}
+	return parsePolicy(data)
+}
+
+func parsePolicy(data []byte) (Policy, bool, error) {
+	var cfg repositoryConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return Policy{}, false, fmt.Errorf("docaudit: parse policy: %w", err)
+	}
+	if cfg.LivingDocs == nil {
+		return Policy{}, false, nil
+	}
+	if err := validatePolicy(*cfg.LivingDocs); err != nil {
+		return Policy{}, false, err
+	}
+	return *cfg.LivingDocs, true, nil
 }
 
 func validatePolicy(policy Policy) error {

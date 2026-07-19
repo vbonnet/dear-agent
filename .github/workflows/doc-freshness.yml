@@ -2,7 +2,7 @@ name: Document Freshness
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, edited]
   push:
     branches: [main, develop]
   schedule:
@@ -38,12 +38,17 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_REF: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           if [[ "$EVENT_NAME" == "pull_request" ]]; then
             git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
             echo "ref=origin/${BASE_REF}" >> "$GITHUB_OUTPUT"
           elif [[ "$EVENT_NAME" == "push" ]]; then
-            echo "ref=HEAD~1" >> "$GITHUB_OUTPUT"
+            if [[ "$BEFORE_SHA" =~ ^0+$ ]]; then
+              echo "ref=" >> "$GITHUB_OUTPUT"
+            else
+              echo "ref=$BEFORE_SHA" >> "$GITHUB_OUTPUT"
+            fi
           else
             echo "ref=" >> "$GITHUB_OUTPUT"
           fi

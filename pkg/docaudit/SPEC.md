@@ -16,7 +16,7 @@
 
 **DOCAUDIT-06** When current findings differ from the checked-in baseline, the system shall report both new findings and stale baseline entries.
 
-**DOCAUDIT-07** When a base ref has an existing baseline, the system shall report every current baseline identity absent from that base baseline.
+**DOCAUDIT-07** When a base ref has a living-document policy, the system shall compare against the baseline path declared by that base policy and report every current baseline identity absent there, including after a baseline-path rename.
 
 **DOCAUDIT-08** When a base ref has no baseline, the system shall permit the initial reviewed bootstrap.
 

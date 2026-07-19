@@ -57,6 +57,15 @@ func validBaselinePath(name string) bool {
 }
 
 func loadBaselineAtRef(ctx context.Context, root, ref, baselinePath string) ([]BaselineEntry, bool, error) {
+	data, present, err := loadFileAtRef(ctx, root, ref, baselinePath)
+	if err != nil || !present {
+		return nil, present, err
+	}
+	entries, err := parseBaseline(data)
+	return entries, true, err
+}
+
+func loadFileAtRef(ctx context.Context, root, ref, filePath string) ([]byte, bool, error) {
 	verify := exec.CommandContext(ctx, "git", "rev-parse", "--verify", ref+"^{commit}")
 	verify.Dir = root
 	verify.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
@@ -66,7 +75,7 @@ func loadBaselineAtRef(ctx context.Context, root, ref, baselinePath string) ([]B
 		}
 		return nil, false, fmt.Errorf("docaudit: resolve baseline ref %q: %w: %s", ref, err, strings.TrimSpace(string(output)))
 	}
-	object := ref + ":" + filepath.ToSlash(baselinePath)
+	object := ref + ":" + filepath.ToSlash(filePath)
 	exists := exec.CommandContext(ctx, "git", "cat-file", "-e", object)
 	exists.Dir = root
 	exists.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
@@ -90,8 +99,7 @@ func loadBaselineAtRef(ctx context.Context, root, ref, baselinePath string) ([]B
 		}
 		return nil, false, fmt.Errorf("docaudit: read baseline at %q: %w", ref, err)
 	}
-	entries, err := parseBaseline(data)
-	return entries, true, err
+	return data, true, nil
 }
 
 func compareFindings(findings []Finding, baseline []BaselineEntry) (newFindings []Finding, stale []BaselineEntry) {

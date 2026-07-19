@@ -121,6 +121,56 @@ func TestCheckRepositoryRejectsBaselineGrowthAgainstRef(t *testing.T) {
 	}
 }
 
+func TestCheckRepositoryRejectsBaselineGrowthAfterPathRename(t *testing.T) {
+	t.Parallel()
+
+	repo := newTestRepo(t)
+	writeTestFile(t, repo, ".dear-agent.yml", testPolicy("old-baseline.txt"))
+	writeTestFile(t, repo, "pkg/old/SPEC.md", "<!-- Last audited at: NEEDS-AUDIT -->\n")
+	writeTestFile(t, repo, "old-baseline.txt", "needs-audit\tpkg/old/SPEC.md\n")
+	gitTest(t, repo, "add", ".")
+	gitTest(t, repo, "commit", "-m", "base")
+	base := strings.TrimSpace(gitTestOutput(t, repo, "rev-parse", "HEAD"))
+
+	writeTestFile(t, repo, ".dear-agent.yml", testPolicy("new-baseline.txt"))
+	writeTestFile(t, repo, "pkg/new/SPEC.md", "# Missing marker\n")
+	writeTestFile(t, repo, "new-baseline.txt", "missing-marker\tpkg/new/SPEC.md\nneeds-audit\tpkg/old/SPEC.md\n")
+	gitTest(t, repo, "add", ".")
+	gitTest(t, repo, "commit", "-m", "rename and grow")
+
+	report, err := CheckRepository(context.Background(), repo, Options{AsOf: testAsOf, BaselineRef: base})
+	if err != nil {
+		t.Fatalf("CheckRepository: %v", err)
+	}
+	if got := baselineIDs(report.AddedBaseline); !equalStrings(got, []string{"missing-marker\tpkg/new/SPEC.md"}) {
+		t.Fatalf("AddedBaseline = %v", got)
+	}
+}
+
+func TestFreshnessEntrypointsUseMutationBaseRef(t *testing.T) {
+	root := filepath.Clean(filepath.Join("..", ".."))
+	workflow, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "doc-freshness.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflowText := string(workflow)
+	for _, required := range []string{"reopened, edited", "BEFORE_SHA: ${{ github.event.before }}", "ref=$BEFORE_SHA"} {
+		if !strings.Contains(workflowText, required) {
+			t.Errorf("doc-freshness workflow missing %q", required)
+		}
+	}
+	if strings.Contains(workflowText, "ref=HEAD~1") {
+		t.Error("push comparison still uses HEAD~1 instead of the event before SHA")
+	}
+	makefile, err := os.ReadFile(filepath.Join(root, "Makefile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(makefile), "go run ./tools/doc-audit -repo . -baseline-ref") {
+		t.Error("lint-doc-freshness does not enforce a baseline ref")
+	}
+}
+
 func TestCheckRepositoryAllowsInitialBaselineBootstrap(t *testing.T) {
 	t.Parallel()
 

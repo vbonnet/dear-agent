@@ -53,11 +53,22 @@ func checkRepository(ctx context.Context, root string, opts Options) (Report, er
 	}
 	report.NewFindings, report.StaleBaseline = compareFindings(report.Findings, baseline)
 	if strings.TrimSpace(opts.BaselineRef) != "" {
-		base, present, baseErr := loadBaselineAtRef(ctx, root, opts.BaselineRef, policy.Baseline)
+		basePolicy, policyPresent, policyErr := loadPolicyAtRef(ctx, root, opts.BaselineRef)
+		if policyErr != nil {
+			return Report{}, policyErr
+		}
+		baseBaselinePath := policy.Baseline
+		if policyPresent {
+			baseBaselinePath = basePolicy.Baseline
+		}
+		base, present, baseErr := loadBaselineAtRef(ctx, root, opts.BaselineRef, baseBaselinePath)
 		if baseErr != nil {
 			return Report{}, baseErr
 		}
-		if present {
+		// Bootstrap is allowed only when the base revision had no living-docs
+		// policy and no baseline at the current path. Renaming the configured
+		// baseline therefore cannot disguise additions as a first-time setup.
+		if policyPresent || present {
 			report.AddedBaseline = addedEntries(baseline, base)
 		}
 	}
