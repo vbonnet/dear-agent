@@ -195,6 +195,32 @@ func TestMarkdownFrontmatterCommandsRemainPolicyVisible(t *testing.T) {
 	}
 }
 
+func TestMarkdownFrontmatterSequenceCommandsRemainPolicyVisible(t *testing.T) {
+	segments := parseSegments([]byte("---\nallowed-tools:\n  - Bash(gh pr merge:*)\n  - Bash(agm status *)\n---\n\n# Command\n"))
+	var rules []string
+	for _, segment := range segments {
+		for _, violation := range evaluateSegment("command.md", segment) {
+			rules = append(rules, violation.Rule)
+		}
+	}
+	sort.Strings(rules)
+	if !reflect.DeepEqual(rules, []string{"agm-root-status", "raw-gh-merge"}) {
+		t.Fatalf("sequence frontmatter command rules = %v", rules)
+	}
+}
+
+func TestAGMPersistentFlagsDoNotHideLegacyRootCommands(t *testing.T) {
+	for _, input := range []string{"agm -o json status", "agm -C repo new worker"} {
+		var rules []string
+		for _, violation := range evaluateSegment("AGENTS.md", Segment{Kind: SegmentShell, Text: input}) {
+			rules = append(rules, violation.Rule)
+		}
+		if len(rules) != 1 {
+			t.Fatalf("%q rules = %v, want one legacy AGM finding", input, rules)
+		}
+	}
+}
+
 func TestCheckRepositoryRejectsImportOutsideGovernedInventory(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init", "-q")
@@ -213,6 +239,29 @@ func TestCheckRepositoryRejectsImportOutsideGovernedInventory(t *testing.T) {
 	}
 	if len(violations) != 1 || violations[0].Rule != "ungoverned-import" {
 		t.Fatalf("violations = %v, want ungoverned import", violations)
+	}
+}
+
+func TestCheckRepositoryRejectsUntrackedImportMatchingBroadSurface(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	writeTestFile(t, repo, ".dear-agent.yml", `instruction-policy:
+  surfaces:
+    - match: AGENTS.md
+      owner: root
+    - match: skills/**/SKILL.md
+      owner: skills
+`)
+	writeTestFile(t, repo, "AGENTS.md", "@import skills/missing/SKILL.md\n")
+	writeTestFile(t, repo, "skills/existing/SKILL.md", "# Existing\n")
+	runGit(t, repo, "add", ".")
+
+	_, violations, err := CheckRepository(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(violations) != 1 || violations[0].Rule != "ungoverned-import" {
+		t.Fatalf("violations = %v, want untracked import finding", violations)
 	}
 }
 

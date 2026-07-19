@@ -24,7 +24,7 @@ var instructionRules = []rule{
 	{id: "raw-git-push", replacement: "safe-push", applies: commandSegment, detect: func(text string) bool { return strings.Contains(shellText(text), "git push") }},
 	{id: "raw-gh-merge", replacement: "safe-merge", applies: commandSegment, detect: rawGHMerge},
 	{id: "raw-gh-pr-lifecycle", replacement: "safe-pr create or safe-pr close; ask a human to reopen", applies: shellSegment, detect: rawGHPRLifecycle},
-	{id: "safe-pr-emergency", replacement: "safe-pr normally or escalate with agm escalate; there is no bypass flag", applies: commandSegment, detect: func(text string) bool {
+	{id: "safe-pr-emergency", replacement: "safe-pr normally or run agm escalate ask <question>; there is no bypass flag", applies: commandSegment, detect: func(text string) bool {
 		normalized := shellText(text)
 		return strings.Contains(normalized, "safe-pr") && strings.Contains(normalized, "--emergency")
 	}},
@@ -138,13 +138,25 @@ func commandFields(text string) [][]string {
 	}
 	for _, input := range inputs {
 		for _, command := range shellBoundary.Split(input, -1) {
-			fields := stripCommandPrefixes(strings.Fields(strings.TrimSpace(command)))
+			fields := normalizeAGMCommand(stripCommandPrefixes(strings.Fields(strings.TrimSpace(command))))
 			if len(fields) > 0 {
 				commands = append(commands, fields)
 			}
 		}
 	}
 	return commands
+}
+
+func normalizeAGMCommand(fields []string) []string {
+	if len(fields) == 0 || fields[0] != "agm" {
+		return fields
+	}
+	args := stripLauncherOptions(fields[1:], map[string]bool{
+		"-C": true, "--directory": true, "--config": true, "--sessions-dir": true,
+		"--log-level": true, "--timeout": true, "--workspace": true,
+		"-o": true, "--output": true, "--fields": true,
+	})
+	return append([]string{"agm"}, args...)
 }
 
 func stripCommandPrefixes(fields []string) []string {

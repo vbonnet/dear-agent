@@ -165,10 +165,19 @@ func markdownFrontmatterCommands(source []byte) []Segment {
 			continue
 		}
 		value := mapping.Content[i+1]
-		for _, match := range allowedBashTool.FindAllStringSubmatch(value.Value, -1) {
-			command := strings.ReplaceAll(match[1], ":*", " *")
-			segments = append(segments, Segment{Kind: SegmentShell, Line: value.Line + 1, Text: command})
+		var visit func(*yaml.Node)
+		visit = func(node *yaml.Node) {
+			if node.Kind == yaml.ScalarNode {
+				for _, match := range allowedBashTool.FindAllStringSubmatch(node.Value, -1) {
+					command := strings.ReplaceAll(match[1], ":*", " *")
+					segments = append(segments, Segment{Kind: SegmentShell, Line: node.Line + 1, Text: command})
+				}
+			}
+			for _, child := range node.Content {
+				visit(child)
+			}
 		}
+		visit(value)
 	}
 	return segments
 }

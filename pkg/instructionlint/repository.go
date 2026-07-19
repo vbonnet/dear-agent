@@ -52,6 +52,10 @@ func CheckRepository(ctx context.Context, root string) (Result, []Violation, err
 	if err != nil {
 		return Result{}, nil, err
 	}
+	tracked := make(map[string]bool, len(paths))
+	for _, relative := range paths {
+		tracked[relative] = true
+	}
 	var findings []Violation
 	files := 0
 	matchedSurface := make(map[string]int, len(policy.Surfaces))
@@ -69,7 +73,7 @@ func CheckRepository(ctx context.Context, root string) (Result, []Violation, err
 			return Result{}, nil, fmt.Errorf("instructionlint: read %s: %w", relative, err)
 		}
 		files++
-		findings = append(findings, importViolations(relative, data, policy.Surfaces)...)
+		findings = append(findings, importViolations(relative, data, policy.Surfaces, tracked)...)
 		segments, err := instructionSegments(relative, data)
 		if err != nil {
 			return Result{}, nil, fmt.Errorf("instructionlint: parse %s: %w", relative, err)
@@ -101,11 +105,12 @@ func instructionSegments(relative string, data []byte) ([]Segment, error) {
 
 var instructionImport = regexp.MustCompile(`(?m)^\s*@import\s+(\S+)\s*$`)
 
-func importViolations(relative string, data []byte, surfaces []Surface) []Violation {
+func importViolations(relative string, data []byte, surfaces []Surface, tracked map[string]bool) []Violation {
 	var violations []Violation
 	for _, match := range instructionImport.FindAllSubmatch(data, -1) {
 		target := filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(relative), filepath.FromSlash(string(match[1])))))
-		if target == "." || target == ".." || strings.HasPrefix(target, "../") || len(matchingSurfaces(surfaces, target)) != 1 {
+		if target == "." || target == ".." || strings.HasPrefix(target, "../") ||
+			!tracked[target] || len(matchingSurfaces(surfaces, target)) != 1 {
 			violations = append(violations, Violation{
 				Path:        relative,
 				Rule:        "ungoverned-import",
