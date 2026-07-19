@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -95,6 +96,9 @@ func runStart(cmd *cobra.Command, args []string) error {
 	projectType, _ := cmd.Flags().GetString("project-type")
 	riskLevel, _ := cmd.Flags().GetString("risk-level")
 	skipRoadmap, _ := cmd.Flags().GetBool("skip-roadmap")
+	if err := validateStartMetadata(projectType, riskLevel); err != nil {
+		return err
+	}
 
 	// Create canonical status.
 	st := status.NewStatusV2(projectName, projectType, riskLevel)
@@ -154,5 +158,15 @@ func runStart(cmd *cobra.Command, args []string) error {
 	fmt.Printf("End session:\n")
 	fmt.Printf("  wayfinder-session end --status completed\n")
 
+	return nil
+}
+
+func validateStartMetadata(projectType, riskLevel string) error {
+	if !slices.Contains(status.ValidProjectTypes(), projectType) {
+		return fmt.Errorf("invalid project type %q (valid: %s)", projectType, strings.Join(status.ValidProjectTypes(), ", "))
+	}
+	if !slices.Contains(status.ValidRiskLevels(), riskLevel) {
+		return fmt.Errorf("invalid risk level %q (valid: %s)", riskLevel, strings.Join(status.ValidRiskLevels(), ", "))
+	}
 	return nil
 }

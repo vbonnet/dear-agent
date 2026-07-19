@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -46,6 +47,9 @@ func init() {
 
 func runCompletePhase(cmd *cobra.Command, args []string) (retErr error) {
 	phaseName := args[0]
+	if !validPhaseOutcome(phaseOutcome) {
+		return fmt.Errorf("invalid outcome %q (valid: success, partial, skipped)", phaseOutcome)
+	}
 
 	// Trace the phase transition. cmd.Context() is always non-nil (cobra
 	// defaults to context.Background()); the span is a no-op unless a collector
@@ -137,6 +141,10 @@ func runCompletePhase(cmd *cobra.Command, args []string) (retErr error) {
 
 	fmt.Printf("✅ Phase %s completed (%s)\n", phaseName, phaseOutcome)
 	return nil
+}
+
+func validPhaseOutcome(outcome string) bool {
+	return slices.Contains([]string{status.OutcomeSuccess, status.OutcomePartial, status.OutcomeSkipped}, outcome)
 }
 
 // countCodeFiles recursively counts source code files in the project directory.

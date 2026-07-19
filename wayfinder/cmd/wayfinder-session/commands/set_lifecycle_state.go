@@ -39,6 +39,9 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		projectDir := GetProjectDirectory()
 		lifecycleState := args[0]
+		blockedOn, _ := cmd.Flags().GetString("blocked-on")
+		errorMessage, _ := cmd.Flags().GetString("error-message")
+		inputNeeded, _ := cmd.Flags().GetString("input-needed")
 
 		// Validate lifecycle state
 		validStates := []string{
@@ -53,6 +56,9 @@ Examples:
 
 		if !slices.Contains(validStates, lifecycleState) {
 			return fmt.Errorf("invalid lifecycle state: %s (valid: working, input-required, dependency-blocked, validating, completed, failed, canceled)", lifecycleState)
+		}
+		if err := validateLifecycleMetadata(lifecycleState, blockedOn, errorMessage, inputNeeded); err != nil {
+			return err
 		}
 
 		st, err := status.ParseV2FromDir(projectDir)
@@ -71,17 +77,14 @@ Examples:
 		st.LifecycleState = lifecycleState
 
 		// Update optional metadata fields
-		blockedOn, _ := cmd.Flags().GetString("blocked-on")
 		if blockedOn != "" {
 			st.BlockedOn = blockedOn
 		}
 
-		errorMessage, _ := cmd.Flags().GetString("error-message")
 		if errorMessage != "" {
 			st.ErrorMessage = errorMessage
 		}
 
-		inputNeeded, _ := cmd.Flags().GetString("input-needed")
 		if inputNeeded != "" {
 			st.InputNeeded = inputNeeded
 		}
@@ -123,6 +126,24 @@ Examples:
 
 		return nil
 	},
+}
+
+func validateLifecycleMetadata(state, blockedOn, errorMessage, inputNeeded string) error {
+	switch state {
+	case status.LifecycleInputRequired:
+		if inputNeeded == "" {
+			return fmt.Errorf("input-required requires --input-needed")
+		}
+	case status.LifecycleDependencyBlocked:
+		if blockedOn == "" {
+			return fmt.Errorf("dependency-blocked requires --blocked-on")
+		}
+	case status.LifecycleFailed:
+		if errorMessage == "" {
+			return fmt.Errorf("failed requires --error-message")
+		}
+	}
+	return nil
 }
 
 // GetLifecycleStateCmd returns the lifecycle-state command for registration.
