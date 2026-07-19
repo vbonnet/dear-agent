@@ -29,30 +29,10 @@ func checkRepository(ctx context.Context, root string) (Report, error) {
 		trackedSet[name] = true
 	}
 
-	report := Report{}
-	governed := map[string]bool{}
-	for _, aggregate := range policy.Aggregates {
-		governed[aggregate.Path] = true
-	}
-	for _, scope := range policy.Scopes {
-		for _, name := range tracked {
-			if filepath.ToSlash(filepath.Dir(name)) == scope.Path && adrLikeFilename(filepath.Base(name)) && filepath.Base(name) != scope.Index {
-				governed[name] = true
-			}
-		}
-	}
-	for _, aggregate := range policy.Aggregates {
-		if !trackedSet[aggregate.Path] {
-			report.Violations = append(report.Violations, Violation{Path: aggregate.Path, Reason: "declared aggregate is not tracked"})
-			continue
-		}
-		data, readErr := os.ReadFile(filepath.Join(root, filepath.FromSlash(aggregate.Path)))
-		if readErr != nil {
-			return Report{}, fmt.Errorf("adrlint: read %s: %w", aggregate.Path, readErr)
-		}
-		report.Records++
-		report.Violations = append(report.Violations, sizeViolations(aggregate.Path, data, policy.MaxLines)...)
-		report.Violations = append(report.Violations, parseAggregate(root, aggregate.Path, data, governed)...)
+	governed := governedADRPaths(policy, tracked)
+	report, err := checkAggregates(root, policy, trackedSet, governed)
+	if err != nil {
+		return Report{}, err
 	}
 
 	for _, scope := range policy.Scopes {
@@ -67,13 +47,52 @@ func checkRepository(ctx context.Context, root string) (Report, error) {
 		}
 	}
 
-	for _, name := range tracked {
-		if !adrShapedPath(name) || governed[name] || excluded(name, policy.Exclusions) {
+	report.Violations = append(report.Violations, ungovernedADRViolations(tracked, governed, policy.Exclusions)...)
+	return report, nil
+}
+
+func governedADRPaths(policy Policy, tracked []string) map[string]bool {
+	governed := make(map[string]bool, len(policy.Aggregates))
+	for _, aggregate := range policy.Aggregates {
+		governed[aggregate.Path] = true
+	}
+	for _, scope := range policy.Scopes {
+		for _, name := range tracked {
+			base := filepath.Base(name)
+			if filepath.ToSlash(filepath.Dir(name)) == scope.Path && adrLikeFilename(base) && base != scope.Index {
+				governed[name] = true
+			}
+		}
+	}
+	return governed
+}
+
+func checkAggregates(root string, policy Policy, trackedSet, governed map[string]bool) (Report, error) {
+	report := Report{}
+	for _, aggregate := range policy.Aggregates {
+		if !trackedSet[aggregate.Path] {
+			report.Violations = append(report.Violations, Violation{Path: aggregate.Path, Reason: "declared aggregate is not tracked"})
 			continue
 		}
-		report.Violations = append(report.Violations, Violation{Path: name, Reason: "ungoverned ADR path; declare a scope, aggregate, or reasoned exclusion"})
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(aggregate.Path)))
+		if err != nil {
+			return Report{}, fmt.Errorf("adrlint: read %s: %w", aggregate.Path, err)
+		}
+		report.Records++
+		report.Violations = append(report.Violations, sizeViolations(aggregate.Path, data, policy.MaxLines)...)
+		report.Violations = append(report.Violations, parseAggregate(root, aggregate.Path, data, governed)...)
 	}
 	return report, nil
+}
+
+func ungovernedADRViolations(tracked []string, governed map[string]bool, exclusions []Exclusion) []Violation {
+	var violations []Violation
+	for _, name := range tracked {
+		if adrShapedPath(name) && !governed[name] && !excluded(name, exclusions) {
+			violations = append(violations, Violation{Path: name, Reason: "ungoverned ADR path; declare a scope, aggregate, or reasoned exclusion"})
+		}
+	}
+	return violations
 }
 
 func validateScope(root string, scope Scope, tracked []string, trackedSet, governed map[string]bool, maxLines int) (map[string]record, []Violation, error) {

@@ -113,44 +113,40 @@ func hasADRSuccessorLink(root, relative string, statusLine []byte, governed map[
 		return false
 	}
 	for _, target := range markdownTargets(statusLine) {
-		if !relativeLink(target) {
-			continue
-		}
-		pathPart, _, _ := strings.Cut(target, "#")
-		if pathPart == "" {
-			continue
-		}
-		base := filepath.Base(pathPart)
-		if base != "ADR.md" && !adrFilePattern.MatchString(base) {
-			continue
-		}
-		var successor string
-		if trimmed, ok := strings.CutPrefix(pathPart, "/"); ok {
-			successor = filepath.Join(root, filepath.FromSlash(trimmed))
-		} else {
-			successor = filepath.Join(root, filepath.Dir(filepath.FromSlash(relative)), filepath.FromSlash(pathPart))
-		}
-		successor = filepath.Clean(successor)
-		current := filepath.Clean(filepath.Join(root, filepath.FromSlash(relative)))
-		if successor == current {
-			continue
-		}
-		inside, err := filepath.Rel(root, successor)
-		if err != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
-			continue
-		}
-		governedPath, err := filepath.Rel(root, successor)
-		if err != nil || !governed[filepath.ToSlash(governedPath)] {
-			continue
-		}
-		data, err := os.ReadFile(successor)
-		if err != nil {
-			continue
-		}
-		targetStatuses := adrStatusPattern.FindAllStringSubmatch(string(data), -1)
-		if len(targetStatuses) == 1 && (targetStatuses[0][1] == "Accepted" || targetStatuses[0][1] == "Proposed") {
+		if isLiveADRSuccessor(root, relative, target, governed) {
 			return true
 		}
 	}
 	return false
+}
+
+func isLiveADRSuccessor(root, relative, target string, governed map[string]bool) bool {
+	if !relativeLink(target) {
+		return false
+	}
+	pathPart, _, _ := strings.Cut(target, "#")
+	base := filepath.Base(pathPart)
+	if pathPart == "" || (base != "ADR.md" && !adrFilePattern.MatchString(base)) {
+		return false
+	}
+	successor := filepath.Join(root, filepath.Dir(filepath.FromSlash(relative)), filepath.FromSlash(pathPart))
+	if trimmed, ok := strings.CutPrefix(pathPart, "/"); ok {
+		successor = filepath.Join(root, filepath.FromSlash(trimmed))
+	}
+	successor = filepath.Clean(successor)
+	current := filepath.Clean(filepath.Join(root, filepath.FromSlash(relative)))
+	inside, err := filepath.Rel(root, successor)
+	if err != nil || successor == current || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
+		return false
+	}
+	governedPath := filepath.ToSlash(inside)
+	if !governed[governedPath] {
+		return false
+	}
+	data, err := os.ReadFile(successor)
+	if err != nil {
+		return false
+	}
+	statuses := adrStatusPattern.FindAllStringSubmatch(string(data), -1)
+	return len(statuses) == 1 && (statuses[0][1] == "Accepted" || statuses[0][1] == "Proposed")
 }

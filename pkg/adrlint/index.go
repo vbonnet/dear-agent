@@ -11,7 +11,7 @@ var adrIndexLikeRow = regexp.MustCompile(`(?i)^\|\s*\[[0-9]{3,4}\]\([^)]*\.md(?:
 func validateIndex(root, relative string, data []byte, records map[string]record) []Violation {
 	violations := commonDocumentViolations(root, relative, data)
 	indexed := map[string]record{}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		trimmed := strings.TrimSpace(line)
 		match := adrIndexPattern.FindStringSubmatch(trimmed)
 		if len(match) == 0 {
