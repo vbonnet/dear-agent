@@ -102,7 +102,7 @@ func validateLocalADRScope(t *testing.T, root string, scope localADRScope, gover
 			t.Errorf("%s: want one normalized Status line, got %d", entry.Name(), len(statuses))
 			continue
 		}
-		if lines := strings.Count(content, "\n") + 1; lines > 250 {
+		if lines := strings.Count(strings.TrimSuffix(content, "\n"), "\n") + 1; lines > 250 {
 			t.Errorf("%s: %d lines exceeds the ADR review budget of 250", entry.Name(), lines)
 		}
 		assertRelativeMarkdownLinksResolve(t, dir, entry.Name(), content)
@@ -116,6 +116,10 @@ func validateLocalADRScope(t *testing.T, root string, scope localADRScope, gover
 	index := readFile(t, filepath.Join(dir, scope.indexName))
 	indexed := map[string]adrRecord{}
 	for _, match := range adrIndexPattern.FindAllStringSubmatch(index, -1) {
+		if len(match) < 4 {
+			t.Errorf("%s: invalid index entry format", scope.indexName)
+			continue
+		}
 		if _, exists := indexed[match[2]]; exists {
 			t.Errorf("%s indexes %s more than once", scope.indexName, match[2])
 		}
