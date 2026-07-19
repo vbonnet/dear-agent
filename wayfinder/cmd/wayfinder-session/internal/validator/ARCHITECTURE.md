@@ -41,7 +41,7 @@ bounded build/test checks for discovered code.
 ## Extension rule
 
 Add a gate only for an observable phase invariant. Put its behavior in
-`SPEC.md`, implement it as a focused function, and cover both accept and
+`SPEC-solution-requirements.md`, implement it as a focused function, and cover both accept and
 reject paths. Do not add prose-only thresholds or a second state machine.
 
 ## Verification

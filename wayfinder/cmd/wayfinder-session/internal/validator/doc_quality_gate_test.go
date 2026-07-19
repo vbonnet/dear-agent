@@ -15,7 +15,7 @@ func TestValidateDocQuality_MissingFile(t *testing.T) {
 
 	err := validateDocQuality("SPEC", tempDir)
 	if err == nil {
-		t.Fatal("expected error for missing SPEC.md, got nil")
+		t.Fatal("expected error for missing SPEC-solution-requirements.md, got nil")
 	}
 
 	verr := &ValidationError{}
@@ -27,7 +27,7 @@ func TestValidateDocQuality_MissingFile(t *testing.T) {
 	if verr.Phase != "complete SPEC" {
 		t.Errorf("expected Phase='complete SPEC', got '%s'", verr.Phase)
 	}
-	if !containsString(verr.Reason, "SPEC.md does not exist") {
+	if !containsString(verr.Reason, "SPEC-solution-requirements.md does not exist") {
 		t.Errorf("expected Reason to mention missing file, got '%s'", verr.Reason)
 	}
 }
@@ -50,7 +50,7 @@ func TestValidateDocQuality_NonValidatedPhase(t *testing.T) {
 // TestValidateDocQuality_FileTooLarge tests validation fails for oversized files
 func TestValidateDocQuality_FileTooLarge(t *testing.T) {
 	tempDir := t.TempDir()
-	docPath := filepath.Join(tempDir, "SPEC.md")
+	docPath := filepath.Join(tempDir, "SPEC-solution-requirements.md")
 
 	// Create file larger than 10MB limit
 	largeContent := make([]byte, maxDocFileSizeBytes+1)

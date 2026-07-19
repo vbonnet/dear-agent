@@ -53,7 +53,7 @@ func validateDocQuality(phaseName, projectDir string) error {
 	case "DESIGN":
 		return validateDesignDocuments(projectDir)
 	case "SPEC":
-		// SPEC.md is gated by the deterministic EARS linter (replaces the
+		// The SPEC phase deliverable is gated by the deterministic EARS linter (replaces the
 		// former Python LLM "review-spec" rubric). See spec_ears_gate.go.
 		return validateSpecEARS(projectDir, phaseName)
 	case "PLAN":
