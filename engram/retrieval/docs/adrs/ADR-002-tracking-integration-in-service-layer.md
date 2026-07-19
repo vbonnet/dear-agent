@@ -9,16 +9,16 @@ in CLI commands misses non-CLI callers.
 
 ## Decision
 
-The retrieval service records query and result metadata after the retrieval
-outcome is known. Providers and rankers remain unaware of tracking. Tracking
-failure does not change the retrieval result, but it is observable to the
-service.
+The retrieval service records an access timestamp for each successfully parsed
+engram path returned by search. It does not record query text, ranking metadata,
+empty outcomes, or failed outcomes. Providers and rankers remain unaware of
+tracking. Tracking failure does not change the retrieval result.
 
 ## Consequences
 
 - All callers share one tracking boundary.
 - Provider implementations remain focused on ranking.
-- Telemetry remains best effort and cannot be used as retrieval authority.
+- Access tracking remains best effort and cannot be used as retrieval authority.
 
 ## Evidence
 

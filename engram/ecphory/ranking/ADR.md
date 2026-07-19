@@ -12,9 +12,10 @@ operation.
 
 1. **Narrow provider boundary.** Ranking depends on the package provider
    interface; construction and credential detection stay in the factory.
-2. **Explicit precedence.** Configuration selects a provider when present.
-   Auto-detection follows the precedence encoded in `detection.go` and never
-   treats an unavailable credential as success.
+2. **Factory precedence.** `AutoDetect` follows the hard-coded precedence in
+   `factory.go` and `detection.go`; the stored `Config.Ecphory.Ranking.Provider`
+   and `Fallback` fields do not currently alter that selection. Callers that
+   require an explicit provider use `GetProvider`.
 3. **Local baseline.** The local provider uses token-set similarity as a
    deterministic, dependency-free baseline.
 4. **No credential extraction.** Provider adapters consume supported
@@ -24,7 +25,8 @@ operation.
 
 - Tests can use the local implementation without network access.
 - Provider addition does not change Ecphory's retrieval boundary.
-- Auto-detection order is behavior and therefore covered by tests.
+- Auto-detection order and explicit `GetProvider` selection are behavior and
+  therefore covered by tests.
 
 ## Evidence
 
