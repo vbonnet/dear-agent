@@ -32,8 +32,8 @@ func writeBacklog(t *testing.T) string {
 }
 
 func TestParseFiles(t *testing.T) {
-	if got := parseFiles(""); len(got) != 2 {
-		t.Errorf("default files = %v, want 2 entries", got)
+	if got := parseFiles(""); len(got) != 0 {
+		t.Errorf("default files = %v, want no implicit source", got)
 	}
 	got := parseFiles(" a.md , , b.md ")
 	if len(got) != 2 || got[0] != "a.md" || got[1] != "b.md" {

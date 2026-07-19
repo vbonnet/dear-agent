@@ -70,7 +70,7 @@ agm/
 ├── test/
 │   ├── e2e/                    # End-to-end tests (testscript)
 │   └── integration/            # Integration tests
-└── TEST-PLAN.md                # Comprehensive testing roadmap
+└── test/                       # Integration and end-to-end tests
 ```
 
 ### Running Tests

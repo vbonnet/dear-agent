@@ -1,5 +1,5 @@
-// Command backlog-suggest ranks the declared backlog (BACKLOG.md +
-// ROADMAP.md) and suggests what to pick up next. It is the CLI surface of
+// Command backlog-suggest ranks operator-supplied backlog files and suggests
+// what to pick up next. It is the CLI surface of
 // pkg/backlog and the executable form of the VROOM Orchestrator's
 // deterministic dispatch scan (agm ADR-023). See docs/adr/ADR-022.
 //
@@ -24,7 +24,10 @@ import (
 
 // defaultFiles is the standard backlog source set, resolved relative to the
 // current working directory.
-var defaultFiles = []string{"docs/workflow-engine/BACKLOG.md", "ROADMAP.md"}
+// There is intentionally no implicit file source: backlog and roadmap files
+// are temporal artifacts maintained outside dear-agent. Callers must provide
+// --files when they want to rank one.
+var defaultFiles []string
 
 func main() {
 	os.Exit(run())
@@ -58,7 +61,7 @@ Run "%s <subcommand> -h" for subcommand flags.
 }
 
 // parseFiles splits a comma-separated --files value, falling back to the
-// default set when empty.
+// no implicit set when empty.
 func parseFiles(v string) []string {
 	if strings.TrimSpace(v) == "" {
 		return defaultFiles
@@ -75,7 +78,7 @@ func parseFiles(v string) []string {
 
 func cmdList(args []string) int {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
-	files := fs.String("files", "", "comma-separated markdown files (default: BACKLOG.md,ROADMAP.md)")
+	files := fs.String("files", "", "comma-separated markdown files (required for suggestions)")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -100,7 +103,7 @@ func cmdList(args []string) int {
 
 func cmdSuggest(args []string) int {
 	fs := flag.NewFlagSet("suggest", flag.ContinueOnError)
-	files := fs.String("files", "", "comma-separated markdown files (default: BACKLOG.md,ROADMAP.md)")
+	files := fs.String("files", "", "comma-separated markdown files (required for suggestions)")
 	phase := fs.Int("phase", -1, "restrict to one phase (-1 = any)")
 	top := fs.Int("top", backlog.DefaultCapacity, "max suggestions")
 	maxEffort := fs.String("max-effort", "", "drop items larger than this size (S|M|L)")

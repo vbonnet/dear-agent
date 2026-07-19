@@ -192,12 +192,12 @@ AGM_DEBUG=true          # Debug mode
 19. **engram-integration.md** - Engram integration guide
 20. **UX_PATTERNS.md** - User experience patterns
 21. **ux-style-guide.md** - UX style guide
-23. **unified-storage-migration.md** - Unified storage migration spec
-24. **tmux-lock-refactoring.md** - Tmux lock refactoring documentation
-25. **lock-improvements.md** - Lock improvements documentation
+22. **unified-storage-migration.md** - Unified storage migration spec
+23. **tmux-lock-refactoring.md** - Tmux lock refactoring documentation
+24. **lock-improvements.md** - Lock improvements documentation
 
 ### Agent-Specific
-27. **AGENTS.md.example** - Example AGENTS.md configuration
+25. **AGENTS.md.example** - Example AGENTS.md configuration
 
 ---
 

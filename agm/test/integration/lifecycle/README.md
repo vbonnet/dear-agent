@@ -309,5 +309,5 @@ Examples:
 
 For questions or issues with these tests:
 - File issue: [AGM Issues](https://github.com/vbonnet/dear-agent/issues)
-- Check the temporal documentation archive for historical testing strategy
+- Check the [temporal documentation archive](https://github.com/vbonnet/engram-research/tree/main/audits/dear-agent-temporal-docs-2026-07-18) for historical testing strategy
 - See CONTRIBUTING.md for development guidelines
