@@ -1,9 +1,9 @@
 ---
 model: haiku
 effort: low
-content-hash: 25c0f71158fb69ac12d4f7f49356f8692790fe0e9ed334d7f0c49ade832546ef
+content-hash: e329aed9a1a2b0694593f1528e40fe1686e600a194b444a946fcd31d88b17ac3
 description: Resume an AGM-managed harness session by name, ID prefix, or project match. Use when the user wants to continue an existing session.
-argument-hint: "[identifier] [--detached]"
+argument-hint: "<identifier> [--detached]"
 allowed-tools: Bash(agm session resume *), Bash(agm session list *)
 ---
 
@@ -11,7 +11,9 @@ allowed-tools: Bash(agm session resume *), Bash(agm session list *)
 
 1. Run `agm session resume <identifier> --output json`, adding `--detached` only
    when requested. Pass the identifier as one argv value.
-2. With no identifier, allow AGM's current interactive selection behavior.
+2. Require an identifier. If none was provided, run
+   `agm session list --all --output json` and ask the user to choose; AGM does
+   not currently provide an interactive picker.
 3. If the session is not found, run `agm session list --all --output json` and
    present likely identifiers. Do not guess or rewrite the resume command.
 4. For a recovery prompt, write the prompt to a file and use the typed

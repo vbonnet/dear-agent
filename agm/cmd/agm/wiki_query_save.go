@@ -89,7 +89,10 @@ func runWikiQuerySave(cmd *cobra.Command, _ []string) error {
 	if outRel == "" {
 		outRel = deriveOutputPath(query, wikiQuerySaveCategory)
 	}
-	absOut := filepath.Join(kbPath, outRel)
+	absOut, err := resolveWikiOutputPath(kbPath, outRel)
+	if err != nil {
+		return err
+	}
 
 	// Check for collision
 	if _, statErr := os.Stat(absOut); statErr == nil {
@@ -123,6 +126,25 @@ func runWikiQuerySave(cmd *cobra.Command, _ []string) error {
 	}
 
 	return nil
+}
+
+func resolveWikiOutputPath(kbPath, output string) (string, error) {
+	if strings.TrimSpace(output) == "" || filepath.IsAbs(output) {
+		return "", fmt.Errorf("--output must be a repository-relative file path")
+	}
+	absKB, err := filepath.Abs(kbPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve knowledge base path: %w", err)
+	}
+	absOut, err := filepath.Abs(filepath.Join(absKB, filepath.FromSlash(output)))
+	if err != nil {
+		return "", fmt.Errorf("resolve --output: %w", err)
+	}
+	rel, err := filepath.Rel(absKB, absOut)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("--output must stay within the knowledge base")
+	}
+	return absOut, nil
 }
 
 const maxWikiQueryInputBytes = 1024 * 1024

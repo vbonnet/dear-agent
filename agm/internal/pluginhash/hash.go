@@ -8,7 +8,11 @@ import (
 	"regexp"
 )
 
-var contentHashLine = regexp.MustCompile(`(?m)^content-hash: [0-9a-fA-F]+|^content-hash: PLACEHOLDER$`)
+var contentHashLine = regexp.MustCompile(`(?m)^content-hash: (?:[0-9a-fA-F]+|PLACEHOLDER)\r?$`)
+
+func normalizeLineEndings(data []byte) []byte {
+	return bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
+}
 
 // SumBody returns the lowercase SHA-256 for a plugin Markdown body.
 func SumBody(body []byte) string {
@@ -18,6 +22,7 @@ func SumBody(body []byte) string {
 
 // Compute returns the hash of everything after the closing YAML delimiter.
 func Compute(markdown []byte) (string, error) {
+	markdown = normalizeLineEndings(markdown)
 	if !bytes.HasPrefix(markdown, []byte("---\n")) {
 		return "", fmt.Errorf("plugin Markdown has no opening YAML delimiter")
 	}
@@ -31,6 +36,7 @@ func Compute(markdown []byte) (string, error) {
 
 // Stamp replaces the existing content-hash field with the computed body hash.
 func Stamp(markdown []byte) ([]byte, error) {
+	markdown = normalizeLineEndings(markdown)
 	hash, err := Compute(markdown)
 	if err != nil {
 		return nil, err

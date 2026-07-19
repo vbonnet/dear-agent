@@ -35,3 +35,20 @@ func TestResolveWikiTextInputRejectsEmptyInput(t *testing.T) {
 		t.Fatalf("expected required-input error, got %v", err)
 	}
 }
+
+func TestResolveWikiOutputPathRejectsTraversal(t *testing.T) {
+	kb := t.TempDir()
+	for _, output := range []string{"../outside.md", "nested/../../outside.md", filepath.Join(string(filepath.Separator), "tmp", "outside.md"), "."} {
+		if _, err := resolveWikiOutputPath(kb, output); err == nil {
+			t.Errorf("resolveWikiOutputPath accepted %q", output)
+		}
+	}
+	got, err := resolveWikiOutputPath(kb, "02-research-index/topic.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(kb, "02-research-index", "topic.md")
+	if got != want {
+		t.Fatalf("resolved output = %q, want %q", got, want)
+	}
+}

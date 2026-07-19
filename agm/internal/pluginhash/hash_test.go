@@ -32,3 +32,21 @@ func TestComputeRejectsMissingFrontmatter(t *testing.T) {
 		t.Fatal("expected missing-frontmatter error")
 	}
 }
+
+func TestStampNormalizesCRLF(t *testing.T) {
+	source := []byte("---\r\ncontent-hash: PLACEHOLDER\r\n---\r\n\r\n# Body\r\n")
+	stamped, err := Stamp(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(stamped), "\r") {
+		t.Fatalf("Stamp retained CRLF bytes: %q", stamped)
+	}
+	hash, err := Compute(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(stamped), "content-hash: "+hash) {
+		t.Fatalf("CRLF hash mismatch:\n%s", stamped)
+	}
+}

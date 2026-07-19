@@ -1,10 +1,10 @@
 ---
 model: haiku
 effort: low
-content-hash: 55b4029ad1eb07449435dec710cb5d3916bbe10c4c51db27df8e6bba2869c927
+content-hash: 71a942c0418c8e63f4c72a01a786ced9f34e3f0fc979655168a04b42d88d4385
 description: Send a message to one or more active AGM sessions. Use when the user wants to contact, redirect, or delegate to an AGM-managed agent.
 argument-hint: "<session> <message> [--priority LEVEL]"
-allowed-tools: Bash(agm send msg *), Bash(agm session list *), Bash(rm -f -- /private/tmp/agm-send-*), Write(/private/tmp/agm-send-*)
+allowed-tools: Bash(agm send msg *), Bash(agm session list *), Bash(rm -f -- /tmp/agm-send-*), Write(/tmp/agm-send-*)
 ---
 
 # Send an AGM message
@@ -12,7 +12,7 @@ allowed-tools: Bash(agm send msg *), Bash(agm session list *), Bash(rm -f -- /pr
 1. Require a recipient and message. Accept priority only from `fyi`,
    `background`, `normal`, `urgent`, or `critical`.
 2. Use the Write tool to place the exact message in a unique
-   `/private/tmp/agm-send-<unique>.txt` file. Do not put message text in a shell
+   `/tmp/agm-send-<unique>.txt` file. Do not put message text in a shell
    command, even when it appears safely quoted.
 3. Run `agm send msg <session> --prompt-file <path> --priority <level> --output json`.
    Pass the recipient and path as separate argv values. Add `--sender` only

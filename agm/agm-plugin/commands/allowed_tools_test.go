@@ -203,8 +203,8 @@ func TestPluginCommandsUseFileInputsForUntrustedText(t *testing.T) {
 		required  []string
 		forbidden []string
 	}{
-		{file: "agm-send.md", required: []string{"--prompt-file", "Write(/private/tmp/agm-send-*", "rm -f -- <path>"}, forbidden: []string{`--prompt "{MESSAGE}"`, "properly escape quotes"}},
-		{file: "wiki-query-save.md", required: []string{"--query-file", "--answer-file", "Write(/private/tmp/agm-wiki-*", "rm -f -- <question-file> <answer-file>"}, forbidden: []string{`--query "{QUESTION}"`, `--answer "{ANSWER}"`}},
+		{file: "agm-send.md", required: []string{"--prompt-file", "Write(/tmp/agm-send-*", "rm -f -- <path>"}, forbidden: []string{`--prompt "{MESSAGE}"`, "properly escape quotes", "/private/tmp"}},
+		{file: "wiki-query-save.md", required: []string{"--query-file", "--answer-file", "Write(/tmp/agm-wiki-*", "rm -f -- <question-file> <answer-file>"}, forbidden: []string{`--query "{QUESTION}"`, `--answer "{ANSWER}"`, "/private/tmp"}},
 	}
 	for _, test := range tests {
 		content, readErr := os.ReadFile(filepath.Join(testDir, test.file))
@@ -222,6 +222,27 @@ func TestPluginCommandsUseFileInputsForUntrustedText(t *testing.T) {
 				t.Errorf("%s contains unsafe-input contract %q", test.file, forbidden)
 			}
 		}
+	}
+}
+
+func TestPluginCommandsMatchCurrentReadOnlyAndResumeBehavior(t *testing.T) {
+	testDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resume, err := os.ReadFile(filepath.Join(testDir, "agm-resume.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(resume), "interactive selection behavior") || !strings.Contains(string(resume), "Require an identifier") {
+		t.Fatal("agm-resume.md still promises the unimplemented interactive picker")
+	}
+	lint, err := os.ReadFile(filepath.Join(testDir, "wiki-lint.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(lint), "agm wiki lint --no-append") {
+		t.Fatal("wiki-lint.md does not preserve its read-only contract")
 	}
 }
 

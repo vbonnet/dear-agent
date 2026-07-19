@@ -1,10 +1,10 @@
 ---
 model: sonnet
 effort: medium
-content-hash: a8490ec66af2d6aa6de32a23b5a84c46af448451063536161e3b7912803b491e
+content-hash: 0701307a13b8f3810098ac58583446f14b3184980a38b70b4ad378d156203407
 description: Synthesize an answer from engram-kb and optionally save it as a wiki page. Use when the user wants a source-grounded wiki answer or to persist that answer.
 argument-hint: "<question> [--save] [--category research|decisions]"
-allowed-tools: Bash(agm wiki query-save *), Bash(rm -f -- /private/tmp/agm-wiki-*), Read, Glob, Grep, Write(/private/tmp/agm-wiki-*)
+allowed-tools: Bash(agm wiki query-save *), Bash(rm -f -- /tmp/agm-wiki-*), Read, Glob, Grep, Write(/tmp/agm-wiki-*)
 ---
 
 # Query and optionally save the wiki
@@ -14,7 +14,7 @@ allowed-tools: Bash(agm wiki query-save *), Bash(rm -f -- /private/tmp/agm-wiki-
    is not supported by the wiki.
 2. Save only when the user requested or confirms persistence.
 3. Write the exact question and synthesized answer to unique, private temporary
-   files under `/private/tmp/agm-wiki-*`. Never interpolate either value into
+   files under `/tmp/agm-wiki-*`. Never interpolate either value into
    shell syntax.
 4. Run `agm wiki query-save --query-file <question-file> --answer-file <answer-file> --category <category>`.
    Add an explicit `--output` only when the user selected a path. Pass every

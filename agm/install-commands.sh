@@ -6,6 +6,7 @@ COMMANDS_DST="$HOME/.claude/commands"
 echo "Installing AGM slash commands..."
 mkdir -p "$COMMANDS_DST"
 for cmd in "$COMMANDS_SRC"/agm-*.md "$COMMANDS_SRC"/audit-completion.md "$COMMANDS_SRC"/wiki-*.md; do
+    [[ -f "$cmd" ]] || continue
     cmd_name=$(basename "$cmd")
     echo "  Installing /$cmd_name"
     cp "$cmd" "$COMMANDS_DST/$cmd_name"
