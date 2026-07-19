@@ -402,6 +402,31 @@ func TestExclusionRatchetAllowsBootstrapAndShrink(t *testing.T) {
 	}
 }
 
+func TestExclusionRatchetComparesFileBaselineWithInlineCurrentPolicy(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	writeTestFile(t, repo, ".dear-agent.yml", "instruction-policy:\n  surfaces:\n    - match: AGENTS.md\n      owner: root\n  exclusions-file: .instruction-policy-exclusions.yml\n")
+	writeTestFile(t, repo, "AGENTS.md", "# Instructions\n")
+	writeTestFile(t, repo, ".instruction-policy-exclusions.yml", "exclusions:\n  - path: AGENTS.md\n    rule: bare-beads\n    excerpt: bd ready\n    count: 1\n    owner: test\n    reason: fixture\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "baseline")
+	baseline := strings.TrimSpace(runGitOutput(t, repo, "rev-parse", "HEAD"))
+
+	writeTestFile(t, repo, ".dear-agent.yml", "instruction-policy:\n  surfaces:\n    - match: AGENTS.md\n      owner: root\n  exclusions:\n    - path: AGENTS.md\n      rule: bare-beads\n      excerpt: bd ready\n      count: 2\n      owner: test\n      reason: fixture\n    - path: AGENTS.md\n      rule: raw-git-push\n      excerpt: git push\n      count: 1\n      owner: test\n      reason: fixture\n")
+	violations, err := CheckExclusionRatchet(context.Background(), repo, baseline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(violations) != 2 {
+		t.Fatalf("violations = %v, want one increased and one new inline exclusion", violations)
+	}
+	for _, violation := range violations {
+		if violation.Path != ".dear-agent.yml" || violation.Rule != "exclusion-growth" {
+			t.Fatalf("unexpected inline ratchet violation: %+v", violation)
+		}
+	}
+}
+
 func TestCheckRepositoryRejectsUntrackedImportMatchingBroadSurface(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init", "-q")
