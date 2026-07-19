@@ -12,6 +12,11 @@ type generatedSkillRequest struct {
 	Query string `json:"query" ef:"query,pos=0,required" desc:"Search query"`
 }
 
+type outOfOrderGeneratedSkillRequest struct {
+	Second string `json:"second" ef:"second,pos=1,required" desc:"Second value"`
+	First  string `json:"first" ef:"first,pos=0,required" desc:"First value"`
+}
+
 func TestGenerateSkillsPreservesCLIBinaryAndCommandPath(t *testing.T) {
 	op := Op{
 		Name:        "search_sessions",
@@ -53,6 +58,41 @@ func TestGenerateSkillsPreservesCLIBinaryAndCommandPath(t *testing.T) {
 	}
 	if strings.Contains(text, "$ARGUMENTS --output") {
 		t.Fatalf("generated invocation interpolates raw arguments:\n%s", text)
+	}
+}
+
+func TestGenerateSkillsSortsPositionalArgumentsByDeclaredPosition(t *testing.T) {
+	op := Op{
+		Name:        "ordered",
+		Description: "Use ordered arguments",
+		RequestType: "OutOfOrderGeneratedSkillRequest",
+		CLI:         &CLISurface{CommandPath: "ordered"},
+		Skill: &SkillSurface{
+			SlashCommand: "agm-ordered",
+			AllowedTools: "Bash(agm ordered *)",
+		},
+	}
+	ir, err := BuildOpIR(op, map[string]reflect.Type{
+		"OutOfOrderGeneratedSkillRequest": reflect.TypeFor[outOfOrderGeneratedSkillRequest](),
+	}, nil)
+	if err != nil {
+		t.Fatalf("BuildOpIR: %v", err)
+	}
+
+	outDir := t.TempDir()
+	if err := GenerateSkills([]OpIR{*ir}, outDir, "agm"); err != nil {
+		t.Fatalf("GenerateSkills: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(outDir, "skills", "agm-ordered.md"))
+	if err != nil {
+		t.Fatalf("read generated skill: %v", err)
+	}
+	text := string(content)
+	if !strings.Contains(text, "argument-hint: \"<first> <second>\"") {
+		t.Fatalf("generated hint does not follow declared positions:\n%s", text)
+	}
+	if !strings.Contains(text, "Run: `agm ordered <first> <second> --output json`") {
+		t.Fatalf("generated invocation does not follow declared positions:\n%s", text)
 	}
 }
 

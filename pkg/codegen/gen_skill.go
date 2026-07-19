@@ -117,11 +117,16 @@ func buildSkillData(op OpIR, cliBinary string) skillTemplateData {
 
 	// Build argument hint
 	var hints []string
+	for _, f := range op.PositionalFields() {
+		if f.OmitSkill || f.Hidden {
+			continue
+		}
+		positional := "<" + f.FlagName + ">"
+		hints = append(hints, positional)
+		positionalArgs = append(positionalArgs, positional)
+	}
 	for _, f := range fields {
 		if f.IsPositional {
-			positional := "<" + f.FlagName + ">"
-			hints = append(hints, positional)
-			positionalArgs = append(positionalArgs, positional)
 			continue
 		}
 		hint := "--" + f.FlagName
