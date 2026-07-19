@@ -17,7 +17,9 @@ root-form commands or copy a flag catalog into the response.
 - Aggregate status: `agm session status --format json [--workspace <name>]`
 - Inspect one session: `agm session get <identifier> --output json`
 - Resume: `agm session resume [identifier]`
-- Send: `agm send msg <identifier> --prompt-file <path>`
+- Send: `agm send msg <identifier> --prompt-file <path>`; outside an
+  AGM-managed session, also pass `--sender <identity>` because no sender can be
+  inferred from session context.
 - Archive: `agm session archive <identifier>`; follow the command's active
   versus stopped guidance and never bypass a refusal with `--force`.
 - Diagnose: `agm admin doctor`

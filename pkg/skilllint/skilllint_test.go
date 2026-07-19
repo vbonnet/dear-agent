@@ -78,6 +78,11 @@ func TestCheckFileCommandSchema(t *testing.T) {
 			want:        []string{"must be a nonempty list of strings"},
 		},
 		{
+			name:        "verification criteria entries must be strings",
+			frontmatter: strings.Replace(validCommand, "description:", "verification_criteria:\n  - false\ndescription:", 1),
+			want:        []string{"verification_criteria[0] must be a nonempty string"},
+		},
+		{
 			name: "missing required fields",
 			frontmatter: `---
 description: incomplete

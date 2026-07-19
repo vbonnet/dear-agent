@@ -372,7 +372,7 @@ func validateVerificationCriteria(path string, keys map[string]yaml.Node) []Viol
 		return []Violation{{Path: path, Reason: "`verification_criteria:` must be a nonempty list of strings"}}
 	}
 	for i, item := range node.Content {
-		if item.Kind != yaml.ScalarNode || strings.TrimSpace(item.Value) == "" {
+		if item.Kind != yaml.ScalarNode || item.Tag != "!!str" || strings.TrimSpace(item.Value) == "" {
 			return []Violation{{Path: path, Reason: fmt.Sprintf("verification_criteria[%d] must be a nonempty string", i)}}
 		}
 	}
