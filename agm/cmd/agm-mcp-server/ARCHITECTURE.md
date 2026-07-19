@@ -93,10 +93,12 @@ enabled. `--no-gateway` bypasses it for controlled diagnostics.
 
 ### A2A agent cards
 
-When enabled, a loopback HTTP server publishes an aggregate card and per-session
-cards at `/.well-known/...`. It reads active manifests through the Dolt storage
-boundary and accepts only GET requests. The flag port overrides configuration;
-an enabled endpoint without a port uses 8080.
+When enabled, an HTTP server publishes an aggregate card and per-session cards
+at `/.well-known/...`. It reads active manifests through the Dolt storage
+boundary and accepts only GET requests. The server binds the configured
+`mcp_server.a2a.bind` address verbatim, so a non-loopback value exposes this
+surface to that network. The flag port overrides configuration; an enabled
+endpoint without a port uses 8080.
 
 ### Auto-registration
 

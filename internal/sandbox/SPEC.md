@@ -10,7 +10,7 @@
 
 **SNDBR-03** When automatic selection recommends an unregistered provider, the system shall return an unsupported-provider error rather than claim isolation succeeded.
 
-**SNDBR-04** When provider creation fails after allocating owned resources, the system shall attempt to remove only those partial resources.
+**SNDBR-04** When provider creation fails, the system shall return the creation error; cleanup of provider-internal allocations that were not returned as a tracked sandbox is best-effort rather than guaranteed.
 
 **SNDBR-05** When a tracked sandbox is destroyed, the system shall remove only resources owned by that sandbox instance.
 
