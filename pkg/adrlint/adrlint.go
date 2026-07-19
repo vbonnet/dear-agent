@@ -2,7 +2,10 @@
 // corpus as one repository contract.
 package adrlint
 
-import "sort"
+import (
+	"context"
+	"sort"
+)
 
 // Violation is one deterministic ADR contract defect.
 type Violation struct {
@@ -20,8 +23,8 @@ type Report struct {
 func (r Report) Blocking() bool { return len(r.Violations) > 0 }
 
 // CheckRepository validates the complete declared ADR corpus below root.
-func CheckRepository(root string) (Report, error) {
-	report, err := checkRepository(root)
+func CheckRepository(ctx context.Context, root string) (Report, error) {
+	report, err := checkRepository(ctx, root)
 	if err == nil {
 		sort.Slice(report.Violations, func(i, j int) bool {
 			if report.Violations[i].Path != report.Violations[j].Path {

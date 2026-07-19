@@ -3,10 +3,12 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/adrlint"
 )
@@ -26,7 +28,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "adr-lint: unexpected arguments: %v\n", flags.Args())
 		return 2
 	}
-	report, err := adrlint.CheckRepository(*repo)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	report, err := adrlint.CheckRepository(ctx, *repo)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2

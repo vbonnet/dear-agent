@@ -1,6 +1,7 @@
 package adrlint
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,7 +22,7 @@ func TestCheckRepositoryClean(t *testing.T) {
 	gitADR(t, repo, "add", ".dear-agent.yml", "docs", "pkg", "fixtures")
 	gitADR(t, repo, "commit", "-m", "fixture")
 
-	report, err := CheckRepository(repo)
+	report, err := CheckRepository(context.Background(), repo)
 	if err != nil {
 		t.Fatalf("CheckRepository: %v", err)
 	}
@@ -59,7 +60,7 @@ Status: Accepted
 	gitADR(t, repo, "add", ".")
 	gitADR(t, repo, "commit", "-m", "broken fixture")
 
-	report, err := CheckRepository(repo)
+	report, err := CheckRepository(context.Background(), repo)
 	if err != nil {
 		t.Fatalf("CheckRepository: %v", err)
 	}
@@ -95,12 +96,37 @@ func TestCheckRepositoryReportsLineBudget(t *testing.T) {
 	gitADR(t, repo, "add", ".")
 	gitADR(t, repo, "commit", "-m", "fixture")
 
-	report, err := CheckRepository(repo)
+	report, err := CheckRepository(context.Background(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !hasReason(report.Violations, "line budget") {
 		t.Fatalf("missing line-budget violation: %#v", report.Violations)
+	}
+}
+
+func TestADRSuccessorLinkMustResolveToAnotherLocalRecord(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "docs", "adr")
+	writeADRFile(t, root, "docs/adr/ADR-001-old.md", "old\n")
+	writeADRFile(t, root, "docs/adr/ADR-002-new.md", "new\n")
+
+	tests := map[string]struct {
+		body string
+		want bool
+	}{
+		"local successor": {body: "[new](ADR-002-new.md)", want: true},
+		"self link":       {body: "[self](ADR-001-old.md)"},
+		"external shape":  {body: "[remote](https://example.com/ADR-999-missing.md)"},
+		"missing local":   {body: "[missing](ADR-999-missing.md)"},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := hasADRSuccessorLink(root, filepath.ToSlash(filepath.Join("docs", "adr", "ADR-001-old.md")), []byte(tt.body))
+			if got != tt.want {
+				t.Fatalf("hasADRSuccessorLink from %s = %v, want %v", dir, got, tt.want)
+			}
+		})
 	}
 }
 

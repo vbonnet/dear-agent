@@ -2,14 +2,16 @@ package adrlint
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
-func checkRepository(root string) (Report, error) {
+func checkRepository(ctx context.Context, root string) (Report, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return Report{}, fmt.Errorf("adrlint: resolve repository root: %w", err)
@@ -18,7 +20,7 @@ func checkRepository(root string) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
-	tracked, err := trackedADRFiles(root)
+	tracked, err := trackedADRFiles(ctx, root)
 	if err != nil {
 		return Report{}, err
 	}
@@ -98,12 +100,18 @@ func validateScope(root string, scope Scope, tracked []string, maxLines int) (ma
 	return records, violations, nil
 }
 
-func trackedADRFiles(root string) ([]string, error) {
-	cmd := exec.Command("git", "ls-files", "-z", "--full-name")
+func trackedADRFiles(ctx context.Context, root string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "git", "ls-files", "-z", "--full-name")
 	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	output, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("adrlint: discover tracked files: %w", err)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, fmt.Errorf("adrlint: discover tracked files: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	parts := bytes.Split(output, []byte{0})
 	files := make([]string, 0, len(parts))

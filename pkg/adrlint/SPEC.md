@@ -6,7 +6,7 @@
 
 **ADRLINT-01** When repository policy is loaded, the system shall require a positive line budget, unique scoped paths and indexes, unique aggregate paths, and reasoned exclusions.
 
-**ADRLINT-02** When ADR inventory is built, the system shall inspect every Git-tracked numbered record and aggregate path.
+**ADRLINT-02** When ADR inventory is built, the system shall inspect every Git-tracked numbered record and aggregate path through the caller's context without allowing an interactive Git prompt.
 
 **ADRLINT-03** If an ADR-shaped path is neither governed nor excluded, the system shall report an ungoverned-path violation.
 
@@ -14,7 +14,7 @@
 
 **ADRLINT-05** When a scope index is validated, the system shall require an exact one-to-one match of record identity, filename, title, and primary status.
 
-**ADRLINT-06** When a record is Superseded, the system shall require a link to another ADR.
+**ADRLINT-06** When a record is Superseded, the system shall require a resolving repository-local link to another governed ADR and shall reject self-links, external ADR-shaped URLs, and missing targets.
 
 **ADRLINT-07** When a record, aggregate, or index exceeds the configured line budget or contains an unresolved relative link, the system shall report a violation.
 

@@ -47,7 +47,7 @@ func parseRecord(root, relative string, data []byte, maxLines int) (record, []Vi
 		record.status = statuses[0][1]
 	}
 	violations = append(violations, commonDocumentViolations(root, relative, data, maxLines)...)
-	if record.status == "Superseded" && !hasADRSuccessorLink(data) {
+	if record.status == "Superseded" && !hasADRSuccessorLink(root, relative, data) {
 		violations = append(violations, Violation{Path: relative, Reason: "Superseded record must link to another governed ADR"})
 	}
 	return record, violations
@@ -60,7 +60,7 @@ func parseAggregate(root, relative string, data []byte, maxLines int) []Violatio
 		violations = append(violations, Violation{Path: relative, Reason: fmt.Sprintf("want one normalized Status line, got %d", len(statuses))})
 	}
 	violations = append(violations, commonDocumentViolations(root, relative, data, maxLines)...)
-	if len(statuses) == 1 && statuses[0][1] == "Superseded" && !hasADRSuccessorLink(data) {
+	if len(statuses) == 1 && statuses[0][1] == "Superseded" && !hasADRSuccessorLink(root, relative, data) {
 		violations = append(violations, Violation{Path: relative, Reason: "Superseded record must link to another governed ADR"})
 	}
 	return violations
@@ -68,7 +68,7 @@ func parseAggregate(root, relative string, data []byte, maxLines int) []Violatio
 
 func commonDocumentViolations(root, relative string, data []byte, maxLines int) []Violation {
 	var violations []Violation
-	if lines := strings.Count(string(data), "\n") + 1; lines > maxLines {
+	if lines := strings.Count(strings.TrimSuffix(string(data), "\n"), "\n") + 1; lines > maxLines {
 		violations = append(violations, Violation{Path: relative, Reason: fmt.Sprintf("%d lines exceeds the ADR line budget of %d", lines, maxLines)})
 	}
 	for _, target := range markdownTargets(data) {
@@ -106,11 +106,35 @@ func relativeLink(target string) bool {
 	return !strings.Contains(lower, "://") && !strings.HasPrefix(lower, "mailto:") && !strings.HasPrefix(lower, "#")
 }
 
-func hasADRSuccessorLink(data []byte) bool {
+func hasADRSuccessorLink(root, relative string, data []byte) bool {
 	for _, target := range markdownTargets(data) {
+		if !relativeLink(target) {
+			continue
+		}
 		pathPart, _, _ := strings.Cut(target, "#")
+		if pathPart == "" {
+			continue
+		}
 		base := filepath.Base(pathPart)
-		if base == "ADR.md" || adrFilePattern.MatchString(base) {
+		if base != "ADR.md" && !adrFilePattern.MatchString(base) {
+			continue
+		}
+		var successor string
+		if trimmed, ok := strings.CutPrefix(pathPart, "/"); ok {
+			successor = filepath.Join(root, filepath.FromSlash(trimmed))
+		} else {
+			successor = filepath.Join(root, filepath.Dir(filepath.FromSlash(relative)), filepath.FromSlash(pathPart))
+		}
+		successor = filepath.Clean(successor)
+		current := filepath.Clean(filepath.Join(root, filepath.FromSlash(relative)))
+		if successor == current {
+			continue
+		}
+		inside, err := filepath.Rel(root, successor)
+		if err != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
+			continue
+		}
+		if _, err := os.Stat(successor); err == nil {
 			return true
 		}
 	}
