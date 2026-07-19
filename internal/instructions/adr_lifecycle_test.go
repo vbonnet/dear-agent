@@ -38,8 +38,12 @@ func TestADRDirectoriesHaveUniqueIndexedLifecycle(t *testing.T) {
 				if entry.IsDir() || entry.Name() == "README.md" {
 					continue
 				}
+				if filepath.Ext(entry.Name()) != ".md" {
+					continue
+				}
 				match := adrFilePattern.FindStringSubmatch(entry.Name())
 				if len(match) != 2 {
+					t.Errorf("%s: malformed ADR filename; want ADR-NNN-slug.md or NNNN-slug.md", entry.Name())
 					continue
 				}
 				content := readFile(t, filepath.Join(dir, entry.Name()))

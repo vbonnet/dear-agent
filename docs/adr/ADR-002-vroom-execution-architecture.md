@@ -6,7 +6,7 @@ Status: Accepted (2026-05-17; amended 2026-07-17)
 inaccurate five-role mesh (Verifier/Requester/Orchestrator/Overseer/
 Meta-Orchestrator) governed by a five-level lexicographic value evaluator,
 and were misfiled under `agm/` (VROOM is above AGM, not an AGM-internal
-concept). Those files now redirect here.
+concept). Those superseded files were removed; this is the retained decision.
 
 VROOM is the supervisory mesh **above AGM** that governs how agents do
 work. Three supervisors plus a per-task triad; no standing Verifier or
@@ -96,4 +96,4 @@ The "VROOM" backronym is formally retired; it is a proper name.
   [VALUES.md](../alignment/VALUES.md),
   [VISION.md](../alignment/VISION.md),
   [GOALS.md](../alignment/GOALS.md)
-- Superseded: `agm/docs/adr/ADR-020`…`ADR-025` (redirect stubs)
+- Supersedes removed `agm/docs/adr/ADR-020`…`ADR-025` records.

@@ -243,7 +243,7 @@ agm sessions resume-all --include-archived
 3. Resumes sessions sequentially with 500ms delays (prevents tmux overload)
 4. Displays progress indicators (spinner + progress bar)
 5. Collects errors and shows summary report
-6. Writes `.agm/resume-timestamp` for orchestrator coordination (ADR-010)
+6. Writes `.agm/resume-timestamp` for supervisor coordination
 
 **Use Cases**:
 - **Post-reboot recovery**: Restore all sessions after machine restart

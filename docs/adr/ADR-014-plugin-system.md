@@ -33,7 +33,7 @@ registration).
   Phase 1 trust model: "code is trusted iff linked into the binary."
   Subprocess RPC is its own ADR.
 - **Permissions are advertised in the manifest, enforced by the substrate**
-  ([ADR-010](ADR-010-workflow-engine-architecture.md) §D5). The plugin
+  (the bounded-execution decision in [ADR-010](ADR-010-workflow-engine-architecture.md)). The plugin
   package is the declaration site; `PermissionEnforcer` is the enforcer.
 
 Builds on [ADR-010](ADR-010-workflow-engine-architecture.md) and

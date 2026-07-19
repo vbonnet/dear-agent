@@ -16,9 +16,8 @@ import (
 	"github.com/vbonnet/dear-agent/pkg/backlog"
 )
 
-// Per-tool caps prevent a misconfigured client from over-fetching. See
-// ADR-015 §D-MCP-1 / §D-MCP-2 / §D-MCP-3 for the rationale (one
-// JSON-RPC envelope per response, stdio buffer + client render budgets).
+// Per-tool caps prevent a misconfigured client from over-fetching one JSON-RPC
+// response beyond practical stdio and client-render budgets.
 const (
 	defaultSignalsLimit = 100
 	maxSignalsLimit     = 1000

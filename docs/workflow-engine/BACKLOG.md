@@ -46,7 +46,7 @@ is an audit event. Existing workflows run unchanged.
 
 | # | Title | Files | Acceptance criteria | Dep | Size | Status |
 |---|---|---|---|---|---|---|
-| 0.1 | Add `SQLiteState` implementing existing `State` interface | `pkg/workflow/state_sqlite.go`, `state_sqlite_test.go` | Pass existing `state_test.go` semantics; new `runner_perf_test.go` passes targets in ADR-010 §6 | — | M | `done (#38)` |
+| 0.1 | Add `SQLiteState` implementing existing `State` interface | `pkg/workflow/state_sqlite.go`, `state_sqlite_test.go` | Pass existing `state_test.go` semantics and `runner_perf_test.go` targets | — | M | `done (#38)` |
 | 0.2 | Migrate `Snapshot` representation to relational schema | `pkg/workflow/types.go`, `state_sqlite.go` | All existing snapshot fields representable; backward-compatible JSON dump retained for `workflow migrate` | 0.1 | S | `done (#38)` |
 | 0.3 | Add `runs` + `nodes` + `node_attempts` tables; runner writes per-attempt rows | `pkg/workflow/runner.go`, `state_sqlite.go`, schema migration | After a 5-node run with one retry, `SELECT * FROM nodes` shows 5 rows and `SELECT * FROM node_attempts` shows 6 rows | 0.2 | M | `done (#38)` |
 | 0.4 | Add `audit_events` table + `AuditSink` interface; runner emits transitions | `pkg/workflow/audit.go`, `runner.go` | Every state transition produces an `audit_events` row; replayable from sink | 0.3 | M | `done (#38)` |
@@ -71,10 +71,10 @@ per-run.
 
 | # | Title | Files | Acceptance criteria | Dep | Size | Status |
 |---|---|---|---|---|---|---|
-| 1.1 | Schema additions: `role`, `permissions`, `budget`, `exit_gate`, `hitl`, `context_policy`, `outputs[]` | `pkg/workflow/types.go`, `load.go`, `load_test.go` | YAML round-trips; `Validate` accepts/rejects per ADR-010 §D; existing workflows still pass | 0.* | M | `done` |
+| 1.1 | Schema additions: `role`, `permissions`, `budget`, `exit_gate`, `hitl`, `context_policy`, `outputs[]` | `pkg/workflow/types.go`, `load.go`, `load_test.go` | YAML round-trips; `Validate` enforces the ADR-010 execution boundary; existing workflows still pass | 0.* | M | `done` |
 | 1.2 | Role registry + resolver | `pkg/workflow/roles/registry.go`, `roles/resolver.go`, `roles/registry_test.go` | Resolves correctly for primary/secondary/tertiary; capacity, cost, capability filters per ROADMAP "Resolution algorithm" | 1.1 | M | `done` |
 | 1.3 | Budget enforcement at `AIExecutor` wrapper | `pkg/workflow/budget.go`, `budget_test.go` | Run hitting ceiling triggers `on_overrun` policy (escalate/fail/truncate); live `$` printout in CLI | 1.2 | S | `done` |
-| 1.4 | Permission enforcer interface; bash + ai check tool/path allowlists | `pkg/workflow/permissions.go`, `permissions_test.go` | Rejected tool call produces audit row + node failure; allowlist semantics match ADR-010 §D5 | 1.1 | M | `done` |
+| 1.4 | Permission enforcer interface; bash + ai check tool/path allowlists | `pkg/workflow/permissions.go`, `permissions_test.go` | Rejected tool call produces audit row + node failure; allowlist semantics match ADR-010 bounded execution | 1.1 | M | `done` |
 | 1.5 | Exit-gate evaluator (5 kinds: bash, regex_match, json_schema, test_cmd, confidence_score) | `pkg/workflow/exit_gate.go`, `exit_gate_test.go` | Each kind has unit tests; gate failure short-circuits and transitions node to `failed`; gates evaluated in declared order | 1.1 | M | `done` |
 | 1.6 | `outputs[]` map-shape + path resolution + durability tier writer | `pkg/workflow/outputs.go`, `outputs_test.go` | Files materialize at declared paths; `git_committed` writes a commit; node refuses `succeeded` if a declared output is missing | 1.1 | M | `done` |
 | 1.7 | `workflow lint` + `workflow roles` commands | `cmd/workflow-lint/main.go`, `cmd/workflow-roles/main.go` | `--check-deprecated-models` lists every node with hardcoded `model:` or `model_override:` pointing at a deprecated model; `workflow-roles list/describe/validate` matches ROADMAP "Role-based model mapping" | 1.2 | S | `done` |
@@ -125,7 +125,7 @@ their work-items.
 
 | # | Title | Files | Acceptance criteria | Dep | Size | Status |
 |---|---|---|---|---|---|---|
-| 3.1 | `pkg/source` adapter interface | `pkg/source/adapter.go` | Interface matches ADR-010 §D9 contract; documented godoc | — | S | `done` |
+| 3.1 | `pkg/source` adapter interface | `pkg/source/adapter.go` | Interface is documented in godoc and covered by adapter tests | — | S | `done` |
 | 3.2 | SQLite + FTS5 adapter | `pkg/source/sqlite/adapter.go`, `adapter_test.go` | FTS round-trip; 10K-row Fetch P95 < 50 ms | 3.1 | M | `done` |
 | 3.3 | MCP tools `FetchSource` / `AddSource` | `cmd/dear-agent-mcp/source.go` | Tools call through adapter; reject backend mismatch with clear error | 3.2 | S | `done` |
 | 3.4 | Wire `outputs.durability=engram_indexed` to `AddSource` | `pkg/workflow/outputs.go` (extends 1.6) | Run produces a row in `sources` table per node-output declared `engram_indexed` | 3.3, 1.6 | S | `done` |

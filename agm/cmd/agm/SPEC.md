@@ -303,7 +303,7 @@ Provide a production-ready CLI that:
   - **Workspace Isolation:** `agm sessions resume-all --workspace-filter=alpha` resumes only alpha workspace sessions
   - **Preview Changes:** `agm sessions resume-all --dry-run` shows which sessions would be resumed
 - **Integration:**
-  - **Orchestrator Coordination:** Writes `.agm/resume-timestamp` file for orchestrator v2 detection (see ADR-010)
+  - **Orchestrator Coordination:** Writes `.agm/resume-timestamp` for supervisor detection
   - **Boot Automation:** Works with systemd service (`agm-resume-boot.service`) for automatic boot recovery
   - **Admin Commands:** Future `agm admin enable-auto-resume` and `disable-auto-resume` for opt-in boot automation
 - **Performance:**
@@ -510,7 +510,7 @@ Provide a production-ready CLI that:
   - **CHANGELOG:** v2.4 release notes with feature details
 - **Related:**
   - **ADR-006:** Test Isolation Enforcement (original PreToolUse hook rationale)
-  - **ADR-012:** Test Infrastructure Dolt Migration (test isolation patterns)
+  - **Dolt test isolation:** `agm/internal/dolt/testing.go`
   - **NFR4:** Testability requirements (original `--test` flag purpose)
 
 ### Non-Functional Requirements
@@ -785,11 +785,10 @@ ERROR HANDLING:
   - User can run `agm sync` to fix
 
 TECHNICAL IMPLEMENTATION:
-- Uses capture-pane polling (not control mode) - See ADR-0001
+- Uses capture-pane polling (not control mode)
 - Both code paths (detached and in-tmux) use identical InitSequence
 - Fixed bug (2026-02-17): startClaudeInCurrentTmux now uses InitSequence.Run()
 - Proven approach from prompt_detector.go:WaitForClaudePrompt()
-- See ADR-0001 for architectural decision rationale
 ```
 
 **Expected Behavior** (from BDD scenarios):
@@ -803,7 +802,7 @@ TECHNICAL IMPLEMENTATION:
 **Reference**:
 - BDD Tests: `test/bdd/features/session_initialization.feature`
 - Implementation: `internal/tmux/init_sequence.go`
-- Architecture Decision: `docs/adr/0001-init-sequence-capture-pane.md`
+- Architecture owner: `internal/tmux/init_sequence.go`
 
 ### Resume Session Flow (agm resume [identifier])
 

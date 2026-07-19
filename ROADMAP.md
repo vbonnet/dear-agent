@@ -190,8 +190,8 @@ an audit event. Existing workflows run unchanged.
 - Migration tool: old JSON snapshot → SQLite row.
 
 **Ship criterion:** existing workflows run unchanged; `SELECT * FROM
-audit_events WHERE run_id = ?` returns every transition; perf targets met
-(see [ADR-010 §6](docs/adr/ADR-010-workflow-engine-architecture.md#6-performance-targets)):
+audit_events WHERE run_id = ?` returns every transition; the regression targets
+in `pkg/workflow/runner_perf_test.go` pass:
 read run status for 100-node DAG P95 < 5 ms; append audit event P95 < 1 ms.
 
 ### Phase 1 — Roles + budget (MVS pt. 2)
@@ -816,7 +816,7 @@ Every transition emits an `audit_events` row. Every retry adds a
 
 ## SQLite tables (canonical)
 
-Full DDL: see [ADR-010 §5](docs/adr/ADR-010-workflow-engine-architecture.md#5-storage-schema-canonical-sqlite).
+Full DDL: see `pkg/workflow/schema.sql`.
 
 | Table | Purpose |
 |---|---|

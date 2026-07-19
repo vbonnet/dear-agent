@@ -273,7 +273,7 @@ listed so older docs and identifiers can be interpreted correctly.
    Overseer/Meta-Orchestrator with a lexicographic value evaluator. That model
    is superseded by the one in this file and
    [docs/adr/ADR-002](docs/adr/ADR-002-vroom-execution-architecture.md). The
-   superseded ADRs (`agm/docs/adr/ADR-020`…`ADR-025`) are stubbed with redirects.
+   superseded AGM ADRs 020–025 were removed; ADR-002 is the retained decision.
 
 2. **"DEAR" — resolved two-level model plus historical identifiers.**
    - **(a) Process / retrospective loop:** Define → **Execute** → Audit →
