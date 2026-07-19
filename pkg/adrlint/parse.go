@@ -50,7 +50,7 @@ func parseRecord(root, relative string, data []byte, governed map[string]bool) (
 		record.status = statuses[0][1]
 	}
 	violations = append(violations, commonDocumentViolations(root, relative, data)...)
-	if record.status == "Superseded" && !hasADRSuccessorLink(root, relative, data, governed) {
+	if record.status == "Superseded" && !hasADRSuccessorLink(root, relative, []byte(statuses[0][0]), governed) {
 		violations = append(violations, Violation{Path: relative, Reason: "Superseded record must link to another governed ADR"})
 	}
 	return record, violations
@@ -64,7 +64,7 @@ func parseAggregate(root, relative string, data []byte, governed map[string]bool
 		violations = append(violations, Violation{Path: relative, Reason: fmt.Sprintf("want one normalized Status line, got %d status-like line(s)", len(statusLines))})
 	}
 	violations = append(violations, commonDocumentViolations(root, relative, data)...)
-	if len(statuses) == 1 && statuses[0][1] == "Superseded" && !hasADRSuccessorLink(root, relative, data, governed) {
+	if len(statuses) == 1 && statuses[0][1] == "Superseded" && !hasADRSuccessorLink(root, relative, []byte(statuses[0][0]), governed) {
 		violations = append(violations, Violation{Path: relative, Reason: "Superseded record must link to another governed ADR"})
 	}
 	return violations
@@ -107,8 +107,12 @@ func relativeLink(target string) bool {
 	return !strings.Contains(lower, "://") && !strings.HasPrefix(lower, "mailto:") && !strings.HasPrefix(lower, "#")
 }
 
-func hasADRSuccessorLink(root, relative string, data []byte, governed map[string]bool) bool {
-	for _, target := range markdownTargets(data) {
+func hasADRSuccessorLink(root, relative string, statusLine []byte, governed map[string]bool) bool {
+	statuses := adrStatusPattern.FindAllStringSubmatch(string(statusLine), -1)
+	if len(statuses) != 1 || statuses[0][1] != "Superseded" {
+		return false
+	}
+	for _, target := range markdownTargets(statusLine) {
 		if !relativeLink(target) {
 			continue
 		}
@@ -136,7 +140,15 @@ func hasADRSuccessorLink(root, relative string, data []byte, governed map[string
 			continue
 		}
 		governedPath, err := filepath.Rel(root, successor)
-		if err == nil && governed[filepath.ToSlash(governedPath)] {
+		if err != nil || !governed[filepath.ToSlash(governedPath)] {
+			continue
+		}
+		data, err := os.ReadFile(successor)
+		if err != nil {
+			continue
+		}
+		targetStatuses := adrStatusPattern.FindAllStringSubmatch(string(data), -1)
+		if len(targetStatuses) == 1 && (targetStatuses[0][1] == "Accepted" || targetStatuses[0][1] == "Proposed") {
 			return true
 		}
 	}

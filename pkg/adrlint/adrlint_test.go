@@ -89,20 +89,27 @@ Status: Accepted
 func TestADRSuccessorLinkMustResolveToAnotherLocalRecord(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "docs", "adr")
-	writeADRFile(t, root, "docs/adr/ADR-001-old.md", "old\n")
-	writeADRFile(t, root, "docs/adr/ADR-002-new.md", "new\n")
+	writeADRFile(t, root, "docs/adr/ADR-001-old.md", recordFixture("001", "Old", "Superseded"))
+	writeADRFile(t, root, "docs/adr/ADR-002-new.md", recordFixture("002", "New", "Accepted"))
+	writeADRFile(t, root, "docs/adr/ADR-003-retired.md", recordFixture("003", "Retired", "Deprecated"))
 
 	tests := map[string]struct {
 		body string
 		want bool
 	}{
-		"local successor":  {body: "[new](ADR-002-new.md)", want: true},
-		"self link":        {body: "[self](ADR-001-old.md)"},
-		"external shape":   {body: "[remote](https://example.com/ADR-999-missing.md)"},
-		"missing local":    {body: "[missing](ADR-999-missing.md)"},
-		"ungoverned local": {body: "[fixture](../../fixtures/testdata/ADR-999-fixture.md)"},
+		"local live successor":   {body: "Status: Superseded by [new](ADR-002-new.md)", want: true},
+		"self link":              {body: "Status: Superseded by [self](ADR-001-old.md)"},
+		"external shape":         {body: "Status: Superseded by [remote](https://example.com/ADR-999-missing.md)"},
+		"missing local":          {body: "Status: Superseded by [missing](ADR-999-missing.md)"},
+		"ungoverned local":       {body: "Status: Superseded by [fixture](../../fixtures/testdata/ADR-999-fixture.md)"},
+		"retired successor":      {body: "Status: Superseded by [retired](ADR-003-retired.md)"},
+		"unrelated context link": {body: "[new](ADR-002-new.md)"},
 	}
-	governed := map[string]bool{"docs/adr/ADR-001-old.md": true, "docs/adr/ADR-002-new.md": true}
+	governed := map[string]bool{
+		"docs/adr/ADR-001-old.md":     true,
+		"docs/adr/ADR-002-new.md":     true,
+		"docs/adr/ADR-003-retired.md": true,
+	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			got := hasADRSuccessorLink(root, filepath.ToSlash(filepath.Join("docs", "adr", "ADR-001-old.md")), []byte(tt.body), governed)
