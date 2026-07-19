@@ -13,6 +13,7 @@ var (
 	adrFilePattern   = regexp.MustCompile(`^(?:ADR-)?([0-9]{3,4})-[a-z0-9-]+\.md$`)
 	adrTitlePattern  = regexp.MustCompile(`(?m)^# ADR-([0-9]{3,4}): .+$`)
 	adrStatusPattern = regexp.MustCompile(`(?m)^Status: (Accepted|Proposed|Deprecated|Superseded)(?: .*)?$`)
+	successorPattern = regexp.MustCompile(`^Status: Superseded .*\[[^]]+\]\([^)]+\.md\).*$`)
 	adrIndexPattern  = regexp.MustCompile(`(?m)^\| \[([0-9]{3,4})\]\(([^)]+\.md)\) \| [^|]+ \| (Accepted|Proposed|Deprecated|Superseded) \|$`)
 	markdownLink     = regexp.MustCompile(`\[[^]]+\]\(([^)]+)\)`)
 )
@@ -65,6 +66,9 @@ func TestADRDirectoriesHaveUniqueIndexedLifecycle(t *testing.T) {
 				if len(statuses) != 1 {
 					t.Errorf("%s: want one normalized Status line, got %d", entry.Name(), len(statuses))
 					continue
+				}
+				if statuses[0][1] == "Superseded" && !successorPattern.MatchString(statuses[0][0]) {
+					t.Errorf("%s: superseded status must link to its live successor", entry.Name())
 				}
 				assertRelativeMarkdownLinksResolve(t, dir, entry.Name(), content)
 				records[entry.Name()] = adrRecord{id: match[1], status: statuses[0][1]}

@@ -6,7 +6,7 @@ import (
 )
 
 // Context describes the situation a suggestion is made in — the inputs the
-// VROOM Orchestrator weighs before dispatch (agm ADR-023 § Task Dispatch).
+// the ranking policy weighs before a suggestion is returned (ADR-022).
 type Context struct {
 	// Phase restricts suggestions to one phase. -1 means any phase.
 	Phase int

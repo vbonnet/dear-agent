@@ -15,7 +15,7 @@
 //  2. A Ranker computes eligibility (status==Pending and every dependency
 //     Done) and a blended Score from priority, dependency leverage, and
 //     effort — reproducing the VROOM Orchestrator dispatch rules (agm
-//     ADR-023 § Task Dispatch) as code.
+//     ADR-022) as code.
 //  3. A Suggester applies the current Context (phase, capacity, effort cap)
 //     and returns the next items plus an explanation of what is blocked.
 //  4. An OrchestratorNotifier records the pickup as a VROOM

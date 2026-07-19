@@ -11,7 +11,7 @@ A user driving Claude Code can interact through three surfaces simultaneously:
 
 - **Terminal** — `claude` CLI running in a tmux pane managed by AGM.
 - **Desktop / mobile** — claude.ai surfaces with Claude Code's *Remote Control* feature.
-- **Discord** — bot messages routed through agm-bus channels (ADR-026 / discord-portal).
+- **Discord** — bot messages routed through agm-bus channels (AGM ADR-028 / discord-portal).
 
 These surfaces are bridged today by ad-hoc forwarding: tmux output is mirrored
 to Discord, Desktop "remote control" is enabled per-session, AGM drives the

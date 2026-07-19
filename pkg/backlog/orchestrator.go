@@ -14,7 +14,7 @@ const DefaultOrchestratorRole = "orchestrator"
 
 // OrchestratorNotifier records a backlog pickup as a VROOM
 // decision.dispatched event so the choice lands on the decision trail
-// (agm ADR-020) and the Overseer/Meta-Orchestrator can see it.
+// (ADR-022) so decision-trail consumers can see it.
 //
 // It publishes synchronously and deliberately does NOT use vroom.Emitter:
 // Emitter.emit spawns a goroutine and a short-lived CLI would os.Exit
