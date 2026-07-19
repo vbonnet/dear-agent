@@ -34,6 +34,7 @@ type document struct {
 
 type linkChecker struct {
 	root      string
+	realRoot  string
 	verbose   bool
 	markdown  goldmark.Markdown
 	documents map[string]*document
@@ -44,8 +45,13 @@ func newLinkChecker(root string, verbose bool) *linkChecker {
 	if err != nil {
 		absRoot = filepath.Clean(root)
 	}
+	realRoot, err := filepath.EvalSymlinks(absRoot)
+	if err != nil {
+		realRoot = absRoot
+	}
 	return &linkChecker{
 		root:      absRoot,
+		realRoot:  realRoot,
 		verbose:   verbose,
 		markdown:  goldmark.New(goldmark.WithExtensions(extension.GFM)),
 		documents: map[string]*document{},
@@ -57,7 +63,14 @@ func (c *linkChecker) loadDocument(path string) (*document, error) {
 	if doc, ok := c.documents[path]; ok {
 		return doc, nil
 	}
-	source, err := os.ReadFile(path)
+	resolved, exists, inside, err := resolveExistingPath(c.realRoot, path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve %s: %w", path, err)
+	}
+	if !exists || !inside {
+		return nil, fmt.Errorf("document %s does not resolve to a file inside the repository", path)
+	}
+	source, err := os.ReadFile(resolved)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
@@ -217,7 +230,15 @@ func findMarkdown(ctx context.Context, root string) ([]string, error) {
 		if len(raw) == 0 || !strings.EqualFold(filepath.Ext(string(raw)), ".md") {
 			continue
 		}
-		files = append(files, filepath.Join(absRoot, filepath.FromSlash(string(raw))))
+		candidate := filepath.Join(absRoot, filepath.FromSlash(string(raw)))
+		info, statErr := os.Lstat(candidate)
+		if statErr != nil {
+			return nil, fmt.Errorf("inspect tracked Markdown %s: %w", candidate, statErr)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		files = append(files, candidate)
 	}
 	sort.Strings(files)
 	return files, nil
@@ -238,7 +259,18 @@ func repositoryRoot(ctx context.Context, dir string) (string, error) {
 
 func isExternalLink(target string) bool {
 	parsed, err := url.Parse(strings.TrimSpace(target))
-	return err == nil && (parsed.Scheme != "" || parsed.Host != "")
+	if err != nil {
+		return false
+	}
+	if parsed.Host != "" || strings.HasPrefix(strings.TrimSpace(target), "//") {
+		return true
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https", "mailto", "tel", "data", "ftp", "ftps", "ssh", "git", "vscode":
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *linkChecker) checkFile(mdFile string) ([]finding, error) {
@@ -273,17 +305,9 @@ func (c *linkChecker) checkFile(mdFile string) ([]finding, error) {
 }
 
 func (c *linkChecker) brokenLocalLink(sourcePath, target string) (bool, error) {
-	parsed, err := url.Parse(target)
+	pathPart, fragment, err := parseLocalTarget(target)
 	if err != nil {
-		return false, fmt.Errorf("parse target: %w", err)
-	}
-	pathPart, err := url.PathUnescape(parsed.Path)
-	if err != nil {
-		return false, fmt.Errorf("unescape target path: %w", err)
-	}
-	fragment, err := url.PathUnescape(parsed.Fragment)
-	if err != nil {
-		return false, fmt.Errorf("unescape target fragment: %w", err)
+		return false, err
 	}
 
 	targetPath := sourcePath
@@ -302,21 +326,59 @@ func (c *linkChecker) brokenLocalLink(sourcePath, target string) (bool, error) {
 	if !inside {
 		return true, nil
 	}
-	info, err := os.Stat(targetPath)
+	resolved, exists, resolvedInside, err := resolveExistingPath(c.realRoot, targetPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return true, nil
-		}
+		return false, fmt.Errorf("resolve target: %w", err)
+	}
+	if !exists || !resolvedInside {
+		return true, nil
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
 		return false, fmt.Errorf("stat target: %w", err)
 	}
 	if fragment == "" || info.IsDir() || !strings.EqualFold(filepath.Ext(targetPath), ".md") {
 		return false, nil
 	}
-	targetDoc, err := c.loadDocument(targetPath)
+	targetDoc, err := c.loadDocument(resolved)
 	if err != nil {
 		return false, err
 	}
 	return !targetDoc.anchors[fragment], nil
+}
+
+func parseLocalTarget(target string) (string, string, error) {
+	parsed, err := url.Parse(target)
+	if err != nil {
+		return "", "", fmt.Errorf("parse target: %w", err)
+	}
+	encodedPath := parsed.Path
+	encodedFragment := parsed.Fragment
+	if parsed.Scheme != "" && !isExternalLink(target) {
+		encodedPath, encodedFragment, _ = strings.Cut(target, "#")
+		encodedPath, _, _ = strings.Cut(encodedPath, "?")
+	}
+	pathPart, err := url.PathUnescape(encodedPath)
+	if err != nil {
+		return "", "", fmt.Errorf("unescape target path: %w", err)
+	}
+	fragment, err := url.PathUnescape(encodedFragment)
+	if err != nil {
+		return "", "", fmt.Errorf("unescape target fragment: %w", err)
+	}
+	return pathPart, fragment, nil
+}
+
+func resolveExistingPath(realRoot, target string) (resolved string, exists, inside bool, err error) {
+	resolved, err = filepath.EvalSymlinks(target)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", false, false, nil
+		}
+		return "", false, false, err
+	}
+	inside, err = pathInside(realRoot, resolved)
+	return resolved, true, inside, err
 }
 
 func pathInside(root, target string) (bool, error) {

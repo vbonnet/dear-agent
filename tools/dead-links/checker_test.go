@@ -147,6 +147,19 @@ func TestCheckFileSkipsSchemedDestinations(t *testing.T) {
 	}
 }
 
+func TestCheckFileTreatsUnknownColonPrefixAsLocalPath(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source.md")
+	mustWrite(t, source, "[local colon filename](note:important-nonexistent.md)\n")
+	findings, err := checkFile(source, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].target != "note:important-nonexistent.md" {
+		t.Fatalf("colon-prefixed local findings = %v, want one", findings)
+	}
+}
+
 func TestCheckFileRejectsExistingPathOutsideRoot(t *testing.T) {
 	parent := t.TempDir()
 	root := filepath.Join(parent, "repo")
@@ -159,6 +172,53 @@ func TestCheckFileRejectsExistingPathOutsideRoot(t *testing.T) {
 	}
 	if len(findings) != 1 {
 		t.Fatalf("outside-root link findings = %v, want one", findings)
+	}
+}
+
+func TestCheckFileRejectsSymlinkEscapes(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "repo")
+	mustWrite(t, filepath.Join(parent, "outside.md"), "# Outside\n")
+	mustWrite(t, filepath.Join(parent, "outside", "target.md"), "# Outside directory\n")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(parent, "outside.md"), filepath.Join(root, "file-link.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(parent, "outside"), filepath.Join(root, "dir-link")); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(root, "source.md")
+	mustWrite(t, source, "[file](file-link.md#outside)\n[directory](dir-link/target.md)\n")
+	findings, err := checkFile(source, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 2 {
+		t.Fatalf("symlink escape findings = %v, want two", findings)
+	}
+}
+
+func TestFindMarkdownSkipsTrackedSymlink(t *testing.T) {
+	repo := t.TempDir()
+	if output, err := exec.Command("git", "-C", repo, "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, output)
+	}
+	target := filepath.Join(t.TempDir(), "outside.md")
+	mustWrite(t, target, "# Outside\n")
+	if err := os.Symlink(target, filepath.Join(repo, "linked.md")); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command("git", "-C", repo, "add", "linked.md").CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v: %s", err, output)
+	}
+	files, err := findMarkdown(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("tracked Markdown symlink entered inventory: %v", files)
 	}
 }
 

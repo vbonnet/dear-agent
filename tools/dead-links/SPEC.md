@@ -8,7 +8,7 @@
 
 ## EARS Requirements
 
-**DEAD-LINKS-01** When Markdown files are discovered, the system shall analyze every tracked Markdown file including files under hidden directories.
+**DEAD-LINKS-01** When Markdown files are discovered, the system shall analyze every tracked regular Markdown file including files under hidden directories without reading tracked Markdown symlinks as first-party documents.
 
 **DEAD-LINKS-02** When Markdown contains fenced or indented code, the system shall not interpret link-like code text as a reference.
 
@@ -18,7 +18,7 @@
 
 **DEAD-LINKS-05** When a pure fragment destination is encountered, the system shall validate it against the source document.
 
-**DEAD-LINKS-06** When a destination uses a URI scheme, the system shall exclude it from deterministic local validation.
+**DEAD-LINKS-06** When a destination uses an explicitly supported external URI scheme, the system shall exclude it from deterministic local validation without treating arbitrary colon-bearing filenames as schemes.
 
 **DEAD-LINKS-07** When a local link target or anchor does not exist, the system shall report its source file, line, and target.
 
@@ -39,6 +39,8 @@
 **DEAD-LINKS-15** When generated heading anchors collide across base names or suffixes, the system shall reserve every emitted identifier and choose the next unused suffix.
 
 **DEAD-LINKS-16** When no root is supplied, the command shall resolve Git's top-level directory from the current working directory before discovering tracked Markdown.
+
+**DEAD-LINKS-17** When a local destination resolves through a symlink outside the repository, the system shall report the link as broken without reading the external target.
 
 ## Test Traceability
 
