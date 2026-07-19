@@ -262,7 +262,6 @@ ps aux | grep gemini | grep defunct
 
 ### 6.3 ADRs (Architecture Decision Records)
 
-- [x] **ADR-001**: Multi-agent architecture updated with Gemini
 - [x] **ADR-001**: CLI harness adapter boundary
   - File: `docs/adr/ADR-001-multi-agent-architecture.md`
 
