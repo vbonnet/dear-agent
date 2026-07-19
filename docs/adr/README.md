@@ -27,8 +27,7 @@ to close them.
 | [015](ADR-015-signal-aggregator.md) | Signal aggregator and recommendation MCP | Accepted |
 | [017](ADR-017-gateway-platform-adapters.md) | Transport-neutral gateway handlers | Accepted |
 | [018](ADR-018-graceful-exit-framework-default.md) | Graceful Exit as a Framework Default | Accepted |
-| [022](ADR-022-backlog-suggestion-system.md) | Backlog Suggestion System | Accepted |
-| [023](ADR-023-friction-reporting-and-session-handoff.md) | Friction Reporting and Session Handoff | Proposed |
+| [022](ADR-022-backlog-suggestion-system.md) | Backlog Suggestion System | Deprecated |
 | [024](ADR-024-a2a-protocol-adoption.md) | A2A supervisor protocol | Accepted |
 | [027](ADR-027-bumblebee-endpoint-scanner.md) | Pinned endpoint inventory scanner | Accepted |
 | [028](ADR-028-smart-integration-test-selection.md) | Dependency-aware integration test selection | Accepted |

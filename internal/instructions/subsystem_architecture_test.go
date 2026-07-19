@@ -8,6 +8,26 @@ import (
 	"testing"
 )
 
+func TestSubsystemArchitectureLineBudgets(t *testing.T) {
+	root := repoRoot(t)
+	files := []string{
+		"agm/docs/ARCHITECTURE.md",
+		"agm/cmd/agm-daemon/ARCHITECTURE.md",
+		"agm/cmd/agm-mcp-server/ARCHITECTURE.md",
+		"agm/internal/agent/gemini/ARCHITECTURE.md",
+		"engram/mcp/ARCHITECTURE.md",
+		"internal/sandbox/ARCHITECTURE.md",
+	}
+	for _, file := range files {
+		t.Run(file, func(t *testing.T) {
+			content := readFile(t, filepath.Join(root, filepath.FromSlash(file)))
+			if lines := strings.Count(content, "\n") + 1; lines > 300 {
+				t.Fatalf("%s has %d lines; living architecture budget is 300", file, lines)
+			}
+		})
+	}
+}
+
 func TestAGMHarnessArchitectureMatchesRegistry(t *testing.T) {
 	root := repoRoot(t)
 	source := readFile(t, filepath.Join(root, "agm/internal/agent/harnesses.go"))

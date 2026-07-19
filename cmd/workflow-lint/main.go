@@ -1,6 +1,6 @@
 // Command workflow-lint validates workflow YAML files and surfaces
-// schema and migration issues. Phase 1 ships --check-deprecated-models
-// (the role-migration aid called out in ROADMAP.md) plus a default
+// schema and migration issues. --check-deprecated-models provides the
+// role-migration aid; the default
 // pass that runs Workflow.Validate over each input file.
 //
 // Usage:
