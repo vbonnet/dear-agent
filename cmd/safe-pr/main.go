@@ -372,14 +372,22 @@ func draftInShorthandCluster(arg string) (draft bool, consumesNext bool) {
 		return false, false
 	}
 	valueTaking := "aBbHlmprTt"
-	cluster := []rune(strings.TrimPrefix(arg, "-"))
+	clusterText, explicitValue, hasExplicitValue := strings.Cut(strings.TrimPrefix(arg, "-"), "=")
+	cluster := []rune(clusterText)
 	for i, shorthand := range cluster {
 		if shorthand == 'd' {
+			if i == len(cluster)-1 && hasExplicitValue {
+				parsed, err := strconv.ParseBool(explicitValue)
+				if err == nil {
+					draft = parsed
+				}
+				return draft, false
+			}
 			draft = true
 			continue
 		}
 		if strings.ContainsRune(valueTaking, shorthand) {
-			return draft, i == len(cluster)-1
+			return draft, i == len(cluster)-1 && !hasExplicitValue
 		}
 	}
 	return draft, false

@@ -26,9 +26,10 @@ Two earlier mitigations failed in practice:
   protect only the prompt that contains them. A sub-agent spawned
   by that prompt does not inherit the line, and the next sibling
   prompt forgets it entirely.
-- **CLAUDE.md guidance** reaches the worker only if the worker
-  reads carefully. The same failure mode shows up in the routing
-  history captured in `AGENTS.why.md`.
+- **Harness instruction guidance** reaches the worker only if the worker
+  reads carefully. The same failure mode is why
+  [the root router](../../AGENTS.md) points to concise canonical policies
+  instead of copying their mutable details.
 
 The fix is structural: publish the contract once, at session
 start, where every sub-prompt will see it. The worker reads it,
@@ -118,9 +119,7 @@ The `why:` field is **required**. The loader rejects an opt-out
 without one, both to force a moment of deliberation at the time
 the opt-out is added and to leave a breadcrumb for a future
 reader who is wondering whether the override is still load-
-bearing. The pattern mirrors the
-[AGENTS.why.md](../../AGENTS.why.md) tier model: every override
-carries its rationale.
+bearing. Every override therefore carries its rationale beside the setting.
 
 ## Interaction with handoff confidence
 
@@ -157,7 +156,7 @@ adding `pkg/audit/checks/gracefulexit.go` and registering it on
 
 - [ADR-018](../adrs/ADR-018-graceful-exit-framework-default.md) —
   the decision record.
-- [AGENTS.why.md](../../AGENTS.why.md) — the instruction +
-  configuration precedent.
+- [`.dear-agent.yml`](../../.dear-agent.yml) — repository configuration and
+  the required opt-out rationale.
 - `pkg/gracefulexit` — the canonical guardrail text and loader.
 - `pkg/acceptance` — the `graceful-exit` criterion type.
