@@ -68,13 +68,14 @@ var (
 )
 
 var commandFields = map[string]bool{
-	"allowed-tools": true,
-	"argument-hint": true,
-	"content-hash":  true,
-	"description":   true,
-	"effort":        true,
-	"model":         true,
-	"name":          true,
+	"allowed-tools":         true,
+	"argument-hint":         true,
+	"content-hash":          true,
+	"description":           true,
+	"effort":                true,
+	"model":                 true,
+	"name":                  true,
+	"verification_criteria": true,
 }
 
 var skillFields = map[string]bool{
@@ -89,6 +90,7 @@ var skillFields = map[string]bool{
 	"model":                    true,
 	"name":                     true,
 	"user-invocable":           true,
+	"verification_criteria":    true,
 }
 
 var providerExecutionFields = []string{
@@ -235,6 +237,7 @@ func checkData(path string, data []byte, kind surfaceKind) []Violation {
 
 func validateCommand(path string, fm *Frontmatter, keys map[string]yaml.Node) []Violation {
 	violations := unsupportedFields(path, "command", keys, commandFields)
+	violations = append(violations, validateVerificationCriteria(path, keys)...)
 	violations = append(violations, validateRequiredTier(path, "model", fm.Model, allowedModels, "haiku, sonnet, opus")...)
 	violations = append(violations, validateRequiredTier(path, "effort", fm.Effort, allowedEfforts, "low, medium, high")...)
 	if strings.TrimSpace(fm.Description) == "" {
@@ -248,6 +251,7 @@ func validateCommand(path string, fm *Frontmatter, keys map[string]yaml.Node) []
 
 func validateSkill(path string, fm *Frontmatter, keys map[string]yaml.Node, body, data []byte) []Violation {
 	violations := unsupportedFields(path, "skill", keys, skillFields)
+	violations = append(violations, validateVerificationCriteria(path, keys)...)
 	violations = append(violations, validateSkillIdentity(path, fm)...)
 
 	bodyText := string(body)
@@ -357,6 +361,22 @@ func unsupportedFields(path, surface string, keys map[string]yaml.Node, allowed 
 		violations = append(violations, Violation{Path: path, Reason: fmt.Sprintf("unsupported %s frontmatter field `%s`", surface, key)})
 	}
 	return violations
+}
+
+func validateVerificationCriteria(path string, keys map[string]yaml.Node) []Violation {
+	node, exists := keys["verification_criteria"]
+	if !exists {
+		return nil
+	}
+	if node.Kind != yaml.SequenceNode || len(node.Content) == 0 {
+		return []Violation{{Path: path, Reason: "`verification_criteria:` must be a nonempty list of strings"}}
+	}
+	for i, item := range node.Content {
+		if item.Kind != yaml.ScalarNode || strings.TrimSpace(item.Value) == "" {
+			return []Violation{{Path: path, Reason: fmt.Sprintf("verification_criteria[%d] must be a nonempty string", i)}}
+		}
+	}
+	return nil
 }
 
 func nonemptyField(keys map[string]yaml.Node, key string) bool {

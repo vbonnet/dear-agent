@@ -69,6 +69,15 @@ func TestCheckFileCommandSchema(t *testing.T) {
 	}{
 		{name: "compliant", frontmatter: validCommand},
 		{
+			name:        "verification criteria accepted",
+			frontmatter: strings.Replace(validCommand, "description:", "verification_criteria:\n  - command exits 0\ndescription:", 1),
+		},
+		{
+			name:        "verification criteria must be a list",
+			frontmatter: strings.Replace(validCommand, "description:", "verification_criteria: command exits 0\ndescription:", 1),
+			want:        []string{"must be a nonempty list of strings"},
+		},
+		{
 			name: "missing required fields",
 			frontmatter: `---
 description: incomplete
@@ -113,6 +122,10 @@ func TestCheckFileSkillSchema(t *testing.T) {
 		want    []string
 	}{
 		{name: "compliant", content: validSkill("example-skill")},
+		{
+			name:    "verification criteria accepted",
+			content: strings.Replace(validSkill("example-skill"), "description:", "verification_criteria:\n  - output file exists\ndescription:", 1),
+		},
 		{
 			name:    "missing name",
 			content: strings.Replace(validSkill("example-skill"), "name: example-skill\n", "", 1),
