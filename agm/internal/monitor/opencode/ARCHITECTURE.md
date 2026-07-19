@@ -55,8 +55,10 @@ attempts after the failure counter reaches that value.
 
 `Stop` cancels the lifecycle context, closes the active response body, and
 waits for reader/reconnect goroutines until the caller's context expires.
-Health reports connection state plus the last event and heartbeat. A connected
-stream with no heartbeat for five minutes reports an error.
+Health reports connection state plus the last event and heartbeat. After the
+first heartbeat, more than five minutes without another reports an error. A
+connected stream that has never emitted a heartbeat remains healthy based on
+connection state alone.
 
 The top-level startup probe is not a tmux failover implementation.
 `FallbackTmux` changes the returned error context only; the caller remains
