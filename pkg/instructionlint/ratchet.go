@@ -3,6 +3,7 @@ package instructionlint
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -133,7 +134,11 @@ func readGitBlob(ctx context.Context, root, ref, path string) ([]byte, bool, err
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if err := cmd.Run(); err != nil {
-		return nil, false, nil
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("instructionlint: inspect baseline exclusions %s: %w", object, err)
 	}
 	cmd = exec.CommandContext(ctx, "git", "show", object)
 	cmd.Dir = root

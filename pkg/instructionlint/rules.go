@@ -154,54 +154,14 @@ func commandFields(text string) [][]string {
 func splitShellCommands(input string) []string {
 	commands := make([]string, 0, 2)
 	start := 0
-	var quote byte
-	escaped := false
+	scanner := shellScanState{}
 	appendCommand := func(end int) {
 		if command := strings.TrimSpace(input[start:end]); command != "" {
 			commands = append(commands, command)
 		}
 	}
 	for i := 0; i < len(input); i++ {
-		current := input[i]
-		if escaped {
-			escaped = false
-			continue
-		}
-		if current == '\\' {
-			escaped = true
-			continue
-		}
-		if quote != 0 {
-			if current == quote {
-				quote = 0
-			}
-			continue
-		}
-		if current == '\'' || current == '"' {
-			quote = current
-			continue
-		}
-		width := 0
-		switch current {
-		case ';':
-			width = 1
-		case '|':
-			if i > 0 && input[i-1] == '>' {
-				continue
-			}
-			width = 1
-			if i+1 < len(input) && input[i+1] == '|' {
-				width = 2
-			}
-		case '&':
-			if (i > 0 && (input[i-1] == '>' || input[i-1] == '<')) || (i+1 < len(input) && input[i+1] == '>') {
-				continue
-			}
-			width = 1
-			if i+1 < len(input) && input[i+1] == '&' {
-				width = 2
-			}
-		}
+		width := scanner.boundaryWidth(input, i)
 		if width == 0 {
 			continue
 		}
@@ -211,6 +171,60 @@ func splitShellCommands(input string) []string {
 	}
 	appendCommand(len(input))
 	return commands
+}
+
+type shellScanState struct {
+	quote   byte
+	escaped bool
+}
+
+func (state *shellScanState) boundaryWidth(input string, index int) int {
+	current := input[index]
+	if state.escaped {
+		state.escaped = false
+		return 0
+	}
+	if current == '\\' {
+		state.escaped = true
+		return 0
+	}
+	if state.quote != 0 {
+		if current == state.quote {
+			state.quote = 0
+		}
+		return 0
+	}
+	if current == '\'' || current == '"' {
+		state.quote = current
+		return 0
+	}
+	return shellOperatorWidth(input, index)
+}
+
+func shellOperatorWidth(input string, index int) int {
+	current := input[index]
+	switch current {
+	case ';':
+		return 1
+	case '|':
+		if index > 0 && input[index-1] == '>' {
+			return 0
+		}
+		if index+1 < len(input) && input[index+1] == '|' {
+			return 2
+		}
+		return 1
+	case '&':
+		if (index > 0 && (input[index-1] == '>' || input[index-1] == '<')) || (index+1 < len(input) && input[index+1] == '>') {
+			return 0
+		}
+		if index+1 < len(input) && input[index+1] == '&' {
+			return 2
+		}
+		return 1
+	default:
+		return 0
+	}
 }
 
 func normalizeAGMCommand(fields []string) []string {
