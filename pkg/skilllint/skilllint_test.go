@@ -235,12 +235,12 @@ description: Deterministic example skill.
 		{
 			name:    "empty provider tier pair",
 			content: strings.Replace(validSkill("example-skill"), "description:", "model: \"\"\neffort: \"\"\ndescription:", 1),
-			want:    []string{"model=\\"\\" not allowed", "effort=\\"\\" not allowed"},
+			want:    []string{"model=\"\" not allowed", "effort=\"\" not allowed"},
 		},
 		{
 			name:    "null provider tier remains declared",
 			content: strings.Replace(validSkill("example-skill"), "description:", "model: null\ndescription:", 1),
-			want:    []string{"`model:` and `effort:` must be declared together", "model=\\"\\" not allowed"},
+			want:    []string{"`model:` and `effort:` must be declared together", "model=\"\" not allowed"},
 		},
 		{
 			name:    "provider extension without fallback",
