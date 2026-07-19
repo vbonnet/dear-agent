@@ -319,16 +319,20 @@ func execGh(req *safepr.Request, timeout time.Duration, verifyCI bool) error {
 // draft creation. GitHub's boolean flags accept both --draft and
 // --draft=<bool>; an explicit false must not disable routine auto-merge.
 func requestsDraft(args []string) bool {
+	draft := false
 	for _, arg := range args {
 		if arg == "--draft" {
-			return true
+			draft = true
+			continue
 		}
 		if value, ok := strings.CutPrefix(arg, "--draft="); ok {
-			draft, err := strconv.ParseBool(value)
-			return err == nil && draft
+			value, err := strconv.ParseBool(value)
+			if err == nil {
+				draft = value
+			}
 		}
 	}
-	return false
+	return draft
 }
 
 // verifyCIPollWindow bounds how long warnIfNoCI waits for the first check-run

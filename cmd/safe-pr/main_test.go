@@ -83,6 +83,8 @@ func TestRequestsDraft(t *testing.T) {
 		{args: []string{"--draft"}, want: true},
 		{args: []string{"--draft=true"}, want: true},
 		{args: []string{"--draft=false"}, want: false},
+		{args: []string{"--draft", "--draft=false"}, want: false},
+		{args: []string{"--draft=false", "--draft"}, want: true},
 		{args: []string{"--title", "draft"}, want: false},
 	}
 	for _, tc := range tests {
