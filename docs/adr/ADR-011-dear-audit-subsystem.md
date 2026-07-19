@@ -16,6 +16,13 @@ Operators schedule `workflow-audit run` through cron, CI, or workflow wrappers.
 Finding and remediation remain separate stages, and finding fingerprints prevent
 the same unresolved problem from inflating counts across runs.
 
+The v1 storage schema is additive and owns exactly `audit_findings`,
+`audit_runs`, and `audit_proposals`. It does not modify workflow tables,
+columns, or indexes. Operators may apply those tables to `runs.db`, but
+`workflow-audit` defaults to `.dear-agent/audit.db` and does not require
+co-location with workflow state. Later schema changes require explicit
+migrations; `pkg/audit/schema.sql` remains the canonical v1 snapshot.
+
 This is repository audit, not the Process DEAR lifecycle defined by
 [ADR-035](ADR-035-dear-terminology-disambiguation.md).
 
