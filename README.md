@@ -44,11 +44,10 @@ go install github.com/vbonnet/dear-agent/agm/cmd/agm@latest
 go install github.com/vbonnet/dear-agent/engram/cmd/engram@latest
 ```
 
-### Install the Claude Code plugins (`/agm:*`, `/wayfinder:*`, `/youtube`)
+### Install the Claude Code plugins (`/agm:*`, Wayfinder skill, `/youtube`)
 
 This repo also ships as a Claude Code plugin marketplace. To install the
-namespaced slash commands and skills (`/agm:agm-assoc`, `/wayfinder:validate-phase`,
-etc.), run:
+namespaced AGM/YouTube commands and the Wayfinder skill, run:
 
 ```bash
 ./scripts/install-claude-plugins.sh             # from a local clone (default)

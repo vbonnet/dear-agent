@@ -233,22 +233,30 @@ func wayfinderPluginExposesOneRootSkill(ctx context.Context) error {
 	if _, err := os.Stat(filepath.Join(root, "SKILL.md")); err != nil {
 		return fmt.Errorf("canonical root skill is missing: %w", err)
 	}
-	for _, retiredDir := range []string{"commands", "skills"} {
-		retiredPath := filepath.Join(root, retiredDir)
-		if _, err := os.Stat(retiredPath); os.IsNotExist(err) {
-			continue
-		}
-		if err := filepath.WalkDir(retiredPath, func(path string, entry os.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if !entry.IsDir() {
-				return fmt.Errorf("duplicate or retired plugin surface remains: %s", path)
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
+	commandsPath := filepath.Join(root, "commands")
+	if _, err := os.Stat(commandsPath); err == nil {
+		return fmt.Errorf("retired Wayfinder command directory remains: %s", commandsPath)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	skillLink := filepath.Join(root, "skills", "wayfinder", "SKILL.md")
+	info, err := os.Lstat(skillLink)
+	if err != nil {
+		return fmt.Errorf("canonical Claude skill link is missing: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return fmt.Errorf("Claude skill surface must be a symlink to canonical SKILL.md: %s", skillLink)
+	}
+	resolvedSkill, err := filepath.EvalSymlinks(skillLink)
+	if err != nil {
+		return fmt.Errorf("resolve canonical Claude skill link: %w", err)
+	}
+	canonicalSkill, err := filepath.EvalSymlinks(filepath.Join(root, "SKILL.md"))
+	if err != nil {
+		return fmt.Errorf("resolve canonical root skill: %w", err)
+	}
+	if resolvedSkill != canonicalSkill {
+		return fmt.Errorf("Claude skill link resolves to %s, want %s", resolvedSkill, canonicalSkill)
 	}
 	manifestPath := filepath.Join(root, ".claude-plugin", "plugin.json")
 	data, err := os.ReadFile(manifestPath)
@@ -259,10 +267,11 @@ func wayfinderPluginExposesOneRootSkill(ctx context.Context) error {
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return fmt.Errorf("parse Wayfinder plugin manifest: %w", err)
 	}
-	for _, duplicateField := range []string{"commands", "skills"} {
-		if _, exists := manifest[duplicateField]; exists {
-			return fmt.Errorf("wayfinder manifest overrides auto-discovered root skill with %q", duplicateField)
-		}
+	if _, exists := manifest["commands"]; exists {
+		return fmt.Errorf("wayfinder manifest still declares retired commands")
+	}
+	if _, exists := manifest["skills"]; !exists {
+		return fmt.Errorf("wayfinder manifest does not expose its canonical Claude skill link")
 	}
 	return nil
 }
