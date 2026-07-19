@@ -10,12 +10,13 @@ import (
 )
 
 var (
-	adrFilePattern   = regexp.MustCompile(`^(?:ADR-([0-9]{3})|([0-9]{4}))-[a-z0-9-]+\.md$`)
-	adrTitlePattern  = regexp.MustCompile(`(?m)^# ADR-([0-9]{3,4}): .+$`)
-	adrStatusPattern = regexp.MustCompile(`(?m)^Status: (Accepted|Proposed|Deprecated|Superseded)(?: .*)?$`)
-	successorPattern = regexp.MustCompile(`^Status: Superseded .*\[[^]]+\]\(([^)#]+\.md)(?:#[^)]*)?\).*$`)
-	adrIndexPattern  = regexp.MustCompile(`(?m)^\| \[([0-9]{3,4})\]\(([^)]+\.md)\) \| [^|]+ \| (Accepted|Proposed|Deprecated|Superseded) \|$`)
-	markdownLink     = regexp.MustCompile(`\[[^]]+\]\(([^)]+)\)`)
+	adrFilePattern              = regexp.MustCompile(`^(?:ADR-([0-9]{3})|([0-9]{4}))-[a-z0-9-]+\.md$`)
+	adrTitlePattern             = regexp.MustCompile(`(?m)^# ADR-([0-9]{3,4}): .+$`)
+	adrStatusPattern            = regexp.MustCompile(`(?m)^Status: (Accepted|Proposed|Deprecated|Superseded)(?: .*)?$`)
+	successorPattern            = regexp.MustCompile(`^Status: Superseded .*\[[^]]+\]\(([^)#]+\.md)(?:#[^)]*)?\).*$`)
+	adrIndexPattern             = regexp.MustCompile(`(?m)^\| \[([0-9]{3,4})\]\(([^)]+\.md)\) \| [^|]+ \| (Accepted|Proposed|Deprecated|Superseded) \|$`)
+	markdownLink                = regexp.MustCompile(`\[[^]]+\]\(([^)]+)\)`)
+	markdownReferenceDefinition = regexp.MustCompile(`(?m)^[ \t]{0,3}\[[^]]+\]:[ \t]+<?([^> \t]+)>?(?:[ \t]+.*)?$`)
 )
 
 type adrRecord struct {
@@ -161,7 +162,9 @@ func TestADRFilenamePatternAcceptsOnlyCanonicalWidth(t *testing.T) {
 
 func assertRelativeMarkdownLinksResolve(t *testing.T, dir, name, content string) {
 	t.Helper()
-	for _, match := range markdownLink.FindAllStringSubmatch(content, -1) {
+	matches := markdownLink.FindAllStringSubmatch(content, -1)
+	matches = append(matches, markdownReferenceDefinition.FindAllStringSubmatch(content, -1)...)
+	for _, match := range matches {
 		target := strings.SplitN(match[1], "#", 2)[0]
 		if target == "" || strings.Contains(target, "://") || strings.HasPrefix(target, "mailto:") {
 			continue
