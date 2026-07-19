@@ -56,8 +56,8 @@ forbidden-paths:
     # path.Match syntax applies within each segment.
     # See AGENTS.md "Living Documentation Policy" for the full policy.
     - "**/[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh]/**"
-    - "**/[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh].[Mm][Dd]"
-    - "**/[Rr][Ee][Pp][Oo][Rr][Tt].[Mm][Dd]"
+    - "**/RESEARCH.*"
+    - "**/REPORT.*"
     - "**/[Pp][Ll][Aa][Nn].[Mm][Dd]"
     - "**/*-[Pp][Ll][Aa][Nn].[Mm][Dd]"
     - "**/docs/**/*-[Pp][Ll][Aa][Nn].*"

@@ -9,8 +9,8 @@ import (
 // The forbidden globs as declared in .dear-agent.yml > forbidden-paths.
 var testPatterns = []string{
 	"**/[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh]/**",
-	"**/[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh].[Mm][Dd]",
-	"**/[Rr][Ee][Pp][Oo][Rr][Tt].[Mm][Dd]",
+	"**/RESEARCH.*",
+	"**/REPORT.*",
 	"**/[Pp][Ll][Aa][Nn].[Mm][Dd]",
 	"**/*-[Pp][Ll][Aa][Nn].[Mm][Dd]",
 	"**/docs/**/*-[Pp][Ll][Aa][Nn].*",
@@ -55,7 +55,9 @@ func TestForbidden(t *testing.T) {
 		{"reports/incident-report.html", true},
 		{"agm/internal/dolt/WORKSPACE_ISOLATION_TEST_REPORT.md", true},
 		{"RESEARCH.md", true},
+		{"RESEARCH.pdf", true},
 		{"reports/REPORT.md", true},
+		{"reports/REPORT.html", true},
 		{"docs/PLAN.md", true},
 		{"agm/docs/ops/PLAN.md", true},
 		{"agm/TEST-PLAN.md", true},
