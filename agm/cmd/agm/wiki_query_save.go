@@ -1,9 +1,12 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -13,11 +16,13 @@ import (
 )
 
 var (
-	wikiQuerySaveQuery    string
-	wikiQuerySaveAnswer   string
-	wikiQuerySaveOutput   string
-	wikiQuerySaveCategory string
-	wikiQuerySaveNoIngest bool
+	wikiQuerySaveQuery      string
+	wikiQuerySaveQueryFile  string
+	wikiQuerySaveAnswer     string
+	wikiQuerySaveAnswerFile string
+	wikiQuerySaveOutput     string
+	wikiQuerySaveCategory   string
+	wikiQuerySaveNoIngest   bool
 )
 
 var wikiQuerySaveCmd = &cobra.Command{
@@ -34,28 +39,37 @@ The page is placed under:
   01-decisions/ADR-NNN-<slug>.md      (if --category decisions)
 
 Examples:
-  agm wiki query-save --query "How does ecphory retrieval work?" \
+  agm wiki query-save --query-file /tmp/question.txt \
       --answer-file /tmp/answer.txt
 
-  agm wiki query-save --query "..." --answer "..." --output 02-research-index/topic-foo.md
+  agm wiki query-save --query-file /tmp/question.txt \
+      --answer-file /tmp/answer.txt --output 02-research-index/topic-foo.md
 
-  agm wiki query-save --query "..." --answer "..." --category decisions`,
+  agm wiki query-save --query-file /tmp/question.txt \
+      --answer-file /tmp/answer.txt --category decisions`,
 	RunE: runWikiQuerySave,
 }
 
 func init() {
 	wikiCmd.AddCommand(wikiQuerySaveCmd)
 	wikiQuerySaveCmd.Flags().StringVar(&wikiQuerySaveQuery, "query", "",
-		"the question that was asked (required)")
+		"the question that was asked (use --query-file for untrusted or long text)")
+	wikiQuerySaveCmd.Flags().StringVar(&wikiQuerySaveQueryFile, "query-file", "",
+		"file containing the question that was asked")
 	wikiQuerySaveCmd.Flags().StringVar(&wikiQuerySaveAnswer, "answer", "",
 		"the synthesised answer text (use --answer-file for long answers)")
+	wikiQuerySaveCmd.Flags().StringVar(&wikiQuerySaveAnswerFile, "answer-file", "",
+		"file containing the synthesised answer text")
 	wikiQuerySaveCmd.Flags().StringVar(&wikiQuerySaveOutput, "output", "",
 		"explicit output path (repo-relative); auto-derived from query if omitted")
 	wikiQuerySaveCmd.Flags().StringVar(&wikiQuerySaveCategory, "category", "research",
 		"output category: research | decisions")
 	wikiQuerySaveCmd.Flags().BoolVar(&wikiQuerySaveNoIngest, "no-ingest", false,
 		"skip backlink audit and index update after saving")
-	_ = wikiQuerySaveCmd.MarkFlagRequired("query")
+	wikiQuerySaveCmd.MarkFlagsMutuallyExclusive("query", "query-file")
+	wikiQuerySaveCmd.MarkFlagsOneRequired("query", "query-file")
+	wikiQuerySaveCmd.MarkFlagsMutuallyExclusive("answer", "answer-file")
+	wikiQuerySaveCmd.MarkFlagsOneRequired("answer", "answer-file")
 }
 
 func runWikiQuerySave(cmd *cobra.Command, _ []string) error {
@@ -64,23 +78,31 @@ func runWikiQuerySave(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	if wikiQuerySaveAnswer == "" {
-		return fmt.Errorf("--answer is required (or pipe answer text via --answer-file)")
+	query, err := resolveWikiTextInput("query", wikiQuerySaveQuery, wikiQuerySaveQueryFile)
+	if err != nil {
+		return err
+	}
+	answer, err := resolveWikiTextInput("answer", wikiQuerySaveAnswer, wikiQuerySaveAnswerFile)
+	if err != nil {
+		return err
 	}
 
 	// Derive output path
 	outRel := wikiQuerySaveOutput
 	if outRel == "" {
-		outRel = deriveOutputPath(wikiQuerySaveQuery, wikiQuerySaveCategory)
+		outRel = deriveOutputPath(query, wikiQuerySaveCategory)
 	}
-	absOut := filepath.Join(kbPath, outRel)
+	absOut, err := resolveWikiOutputPath(kbPath, outRel)
+	if err != nil {
+		return err
+	}
 
 	// Check for collision
 	if _, statErr := os.Stat(absOut); statErr == nil {
 		return fmt.Errorf("page already exists: %s — choose a different output path", outRel)
 	}
 
-	content := buildQueryPage(wikiQuerySaveQuery, wikiQuerySaveAnswer, outRel)
+	content := buildQueryPage(query, answer, outRel)
 
 	if mkdirErr := os.MkdirAll(filepath.Dir(absOut), 0o700); mkdirErr != nil {
 		return fmt.Errorf("cannot create directory: %w", mkdirErr)
@@ -91,7 +113,7 @@ func runWikiQuerySave(cmd *cobra.Command, _ []string) error {
 	fmt.Printf("✅ Saved: %s\n", outRel)
 
 	now := time.Now()
-	if appendErr := appendToLog(kbPath, wikibrain.FormatQuerySaveLogEntry(wikiQuerySaveQuery, outRel, now)); appendErr != nil {
+	if appendErr := appendToLog(kbPath, wikibrain.FormatQuerySaveLogEntry(query, outRel, now)); appendErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not append to log.md: %v\n", appendErr)
 	}
 
@@ -107,6 +129,100 @@ func runWikiQuerySave(cmd *cobra.Command, _ []string) error {
 	}
 
 	return nil
+}
+
+func resolveWikiOutputPath(kbPath, output string) (string, error) {
+	if strings.TrimSpace(output) == "" || filepath.IsAbs(output) {
+		return "", fmt.Errorf("--output must be a repository-relative file path")
+	}
+	absKB, err := filepath.Abs(kbPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve knowledge base path: %w", err)
+	}
+	absOut, err := filepath.Abs(filepath.Join(absKB, filepath.FromSlash(output)))
+	if err != nil {
+		return "", fmt.Errorf("resolve --output: %w", err)
+	}
+	rel, err := filepath.Rel(absKB, absOut)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("--output must stay within the knowledge base")
+	}
+	resolvedKB, err := filepath.EvalSymlinks(absKB)
+	if err != nil {
+		return "", fmt.Errorf("resolve knowledge base symlinks: %w", err)
+	}
+	resolvedOut, err := resolveWikiOutputSymlinks(absOut)
+	if err != nil {
+		return "", fmt.Errorf("resolve --output symlinks: %w", err)
+	}
+	resolvedRel, err := filepath.Rel(resolvedKB, resolvedOut)
+	if err != nil || resolvedRel == "." || resolvedRel == ".." || strings.HasPrefix(resolvedRel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("--output must stay within the knowledge base")
+	}
+	return absOut, nil
+}
+
+// resolveWikiOutputSymlinks resolves the target when it exists, or the nearest
+// existing ancestor when it does not. This prevents an in-tree symlinked
+// directory from redirecting a newly created page outside the knowledge base.
+func resolveWikiOutputSymlinks(path string) (string, error) {
+	if _, err := os.Lstat(path); err == nil {
+		return filepath.EvalSymlinks(path)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+
+	current := filepath.Dir(path)
+	missing := []string{filepath.Base(path)}
+	for {
+		resolved, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			for _, component := range slices.Backward(missing) {
+				resolved = filepath.Join(resolved, component)
+			}
+			return resolved, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", err
+		}
+		missing = append(missing, filepath.Base(current))
+		current = parent
+	}
+}
+
+const maxWikiQueryInputBytes = 1024 * 1024
+
+func resolveWikiTextInput(name, inline, filePath string) (string, error) {
+	if inline != "" && filePath != "" {
+		return "", fmt.Errorf("--%s and --%s-file are mutually exclusive", name, name)
+	}
+	value := inline
+	if filePath != "" {
+		file, err := os.Open(filePath)
+		if err != nil {
+			return "", fmt.Errorf("read --%s-file: %w", name, err)
+		}
+		data, readErr := io.ReadAll(io.LimitReader(file, maxWikiQueryInputBytes+1))
+		closeErr := file.Close()
+		if readErr != nil {
+			return "", fmt.Errorf("read --%s-file: %w", name, readErr)
+		}
+		if closeErr != nil {
+			return "", fmt.Errorf("close --%s-file: %w", name, closeErr)
+		}
+		if len(data) > maxWikiQueryInputBytes {
+			return "", fmt.Errorf("--%s-file exceeds %d bytes", name, maxWikiQueryInputBytes)
+		}
+		value = string(data)
+	}
+	if strings.TrimSpace(value) == "" {
+		return "", fmt.Errorf("--%s or --%s-file is required", name, name)
+	}
+	return value, nil
 }
 
 // deriveOutputPath builds a safe repo-relative path from the query text.

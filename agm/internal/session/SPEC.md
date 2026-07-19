@@ -23,6 +23,8 @@ directly, including the optional harness-process liveness capability
 
 **SESS-05** When a tmux backend does not implement `HarnessLivenessChecker`, the system shall let callers discover the capability by type assertion so existing `TmuxInterface` implementations keep compiling and fall back to session-existence semantics.
 
+**SESS-06** When aggregate workspace status is encoded as JSON, the system shall expose stable lower-snake-case keys for the workspace, summary counts, and detailed session fields rather than Go field names.
+
 ## Key Invariants
 
 - **Capability, not contract widening.** `HarnessLivenessChecker` is a
