@@ -1,6 +1,7 @@
 package adrlint
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path"
@@ -9,10 +10,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
-
-type repositoryConfig struct {
-	ADRGovernance Policy `yaml:"adr-governance"`
-}
 
 // Policy is the ADR governance slice of .dear-agent.yml.
 type Policy struct {
@@ -46,14 +43,25 @@ func loadPolicy(configPath string) (Policy, error) {
 	if err != nil {
 		return Policy{}, fmt.Errorf("adrlint: read policy: %w", err)
 	}
-	var config repositoryConfig
-	if err := yaml.Unmarshal(data, &config); err != nil {
+	var sections map[string]yaml.Node
+	if err := yaml.Unmarshal(data, &sections); err != nil {
 		return Policy{}, fmt.Errorf("adrlint: parse policy: %w", err)
 	}
-	if err := validatePolicy(config.ADRGovernance); err != nil {
+	governance := sections["adr-governance"]
+	encoded, err := yaml.Marshal(&governance)
+	if err != nil {
+		return Policy{}, fmt.Errorf("adrlint: encode adr-governance policy: %w", err)
+	}
+	var policy Policy
+	decoder := yaml.NewDecoder(bytes.NewReader(encoded))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&policy); err != nil {
+		return Policy{}, fmt.Errorf("adrlint: parse adr-governance policy: %w", err)
+	}
+	if err := validatePolicy(policy); err != nil {
 		return Policy{}, err
 	}
-	return config.ADRGovernance, nil
+	return policy, nil
 }
 
 func validatePolicy(policy Policy) error {

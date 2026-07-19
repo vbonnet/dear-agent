@@ -179,6 +179,39 @@ func TestLoadPolicyRejectsInvalidDeclarations(t *testing.T) {
     - path: pkg/hash/ADR.md
       max-lines: -1
 `},
+		{name: "unknown governance key", body: `adr-governance:
+  max-lines: 300
+  max-line: 120
+  scopes:
+    - path: docs/adr
+      index: README.md
+`},
+		{name: "unknown scope key", body: `adr-governance:
+  max-lines: 300
+  scopes:
+    - path: docs/adr
+      index: README.md
+      max-line: 120
+`},
+		{name: "unknown aggregate key", body: `adr-governance:
+  max-lines: 300
+  scopes:
+    - path: docs/adr
+      index: README.md
+  aggregates:
+    - path: pkg/hash/ADR.md
+      max-line: 120
+`},
+		{name: "unknown exclusion key", body: `adr-governance:
+  max-lines: 300
+  scopes:
+    - path: docs/adr
+      index: README.md
+  exclusions:
+    - match: "**/testdata/**"
+      reason: generated fixtures
+      because: typo
+`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -191,6 +224,22 @@ func TestLoadPolicyRejectsInvalidDeclarations(t *testing.T) {
 				t.Fatal("expected policy error")
 			}
 		})
+	}
+}
+
+func TestLoadPolicyAllowsUnrelatedTopLevelKeys(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), ".dear-agent.yml")
+	body := "version: 1\nrepo: dear-agent\n" + policyFixture()
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	policy, err := loadPolicy(path)
+	if err != nil {
+		t.Fatalf("loadPolicy() error = %v", err)
+	}
+	if policy.MaxLines != 300 || len(policy.Scopes) != 1 {
+		t.Fatalf("loadPolicy() = %+v, want ADR governance subtree", policy)
 	}
 }
 

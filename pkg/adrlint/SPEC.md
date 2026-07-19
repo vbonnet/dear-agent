@@ -4,7 +4,7 @@
 
 ## EARS Requirements
 
-**ADRLINT-01** When repository policy is loaded, the system shall require unique scoped paths and indexes, unique aggregate paths, and reasoned exclusions.
+**ADRLINT-01** When repository policy is loaded, the system shall reject unknown keys inside `adr-governance` while allowing unrelated top-level repository configuration, and shall require unique scoped paths and indexes, unique aggregate paths, and reasoned exclusions.
 
 **ADRLINT-02** When ADR inventory is built, the system shall inspect every Git-tracked numbered record and aggregate path through the caller's context without allowing an interactive Git prompt.
 
