@@ -22,14 +22,13 @@ adapters:
     enabled: true
     server_url: http://localhost:4096
     reconnect:
-      enabled: true
       initial_delay: 5s
       max_delay: 5m
-      backoff_multiplier: 2
-    fallback_tmux: true
+      multiplier: 2
+    fallback_to_tmux: true
 ```
 
-`fallback_tmux: true` changes the error context returned after a failed startup
+`fallback_to_tmux: true` changes the error context returned after a failed startup
 probe. It does not start Astrocyte or any other tmux monitor. The caller must
 select and start a fallback explicitly.
 
@@ -52,7 +51,8 @@ metadata.
 
 `Start` probes the configured health endpoint and then connects to
 `GET <server_url>/event`. The SSE reader reconnects with configured exponential
-backoff. A positive maximum retry count stops retries after that many failures.
+backoff whenever the OpenCode adapter is enabled. The daemon currently retries
+without a configured attempt limit; there is no separate reconnect toggle.
 
 Health reports connection state plus the last event and heartbeat. After the
 first heartbeat, more than five minutes without another is unhealthy. A stream
