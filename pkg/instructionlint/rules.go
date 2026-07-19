@@ -2,6 +2,7 @@ package instructionlint
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -26,13 +27,20 @@ var instructionRules = []rule{
 		return strings.Contains(normalized, "safe-pr") && strings.Contains(normalized, "--emergency")
 	}},
 	{id: "agm-health-json", replacement: "agm -o json session health <name>", applies: commandSegment, detect: func(text string) bool {
-		normalized := shellText(text)
-		return strings.HasPrefix(normalized, "agm session health") && strings.Contains(normalized, "--json")
+		return anyCommand(text, func(fields []string) bool {
+			return commandHasPrefix(fields, "agm", "session", "health") && slices.Contains(fields, "--json")
+		})
 	}},
-	{id: "agm-root-status", replacement: "agm session status --format json", applies: commandSegment, detect: func(text string) bool { return strings.HasPrefix(shellText(text), "agm status") }},
+	{id: "agm-root-status", replacement: "agm session status --format json", applies: commandSegment, detect: func(text string) bool {
+		return anyCommand(text, func(fields []string) bool { return commandHasPrefix(fields, "agm", "status") })
+	}},
 	{id: "agm-positional-search", replacement: "agm search --query <text>", applies: commandSegment, detect: positionalAGMSearch},
-	{id: "agm-root-new", replacement: "agm session new --workspace <name>", applies: commandSegment, detect: func(text string) bool { return strings.HasPrefix(shellText(text), "agm new") }},
-	{id: "agm-session-send", replacement: "agm send <session> <message>", applies: commandSegment, detect: func(text string) bool { return strings.HasPrefix(shellText(text), "agm session send") }},
+	{id: "agm-root-new", replacement: "agm session new --workspace <name>", applies: commandSegment, detect: func(text string) bool {
+		return anyCommand(text, func(fields []string) bool { return commandHasPrefix(fields, "agm", "new") })
+	}},
+	{id: "agm-session-send", replacement: "agm send <session> <message>", applies: commandSegment, detect: func(text string) bool {
+		return anyCommand(text, func(fields []string) bool { return commandHasPrefix(fields, "agm", "session", "send") })
+	}},
 }
 
 func knownRule(id string) bool {
@@ -118,7 +126,10 @@ func commandFields(text string) [][]string {
 
 func stripCommandPrefixes(fields []string) []string {
 	for len(fields) > 0 {
+		fields[0] = strings.TrimLeft(fields[0], "(")
 		switch {
+		case fields[0] == "if" || fields[0] == "while" || fields[0] == "until" || fields[0] == "then" || fields[0] == "do" || fields[0] == "!":
+			fields = fields[1:]
 		case environmentAssignment.MatchString(fields[0]):
 			fields = fields[1:]
 		case fields[0] == "env":
@@ -167,6 +178,28 @@ func stripTimeoutPrefix(fields []string) []string {
 }
 
 func positionalAGMSearch(text string) bool {
-	fields := strings.Fields(shellText(text))
-	return len(fields) > 2 && fields[0] == "agm" && fields[1] == "search" && !strings.HasPrefix(fields[2], "-")
+	return anyCommand(text, func(fields []string) bool {
+		return len(fields) > 2 && commandHasPrefix(fields, "agm", "search") && !strings.HasPrefix(fields[2], "-")
+	})
+}
+
+func anyCommand(text string, predicate func([]string) bool) bool {
+	for _, fields := range commandFields(text) {
+		if predicate(fields) {
+			return true
+		}
+	}
+	return false
+}
+
+func commandHasPrefix(fields []string, prefix ...string) bool {
+	if len(fields) < len(prefix) {
+		return false
+	}
+	for i, want := range prefix {
+		if strings.Trim(fields[i], "()") != want {
+			return false
+		}
+	}
+	return true
 }

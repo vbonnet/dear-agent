@@ -8,6 +8,7 @@ import (
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/text"
+	"gopkg.in/yaml.v3"
 )
 
 // SegmentKind distinguishes prose from command-shaped Markdown content.
@@ -44,6 +45,29 @@ func parseSegments(source []byte) []Segment {
 		return segments[i].Text < segments[j].Text
 	})
 	return segments
+}
+
+func parseYAMLSegments(source []byte) ([]Segment, error) {
+	var root yaml.Node
+	if err := yaml.Unmarshal(source, &root); err != nil {
+		return nil, err
+	}
+	var segments []Segment
+	var visit func(*yaml.Node)
+	visit = func(node *yaml.Node) {
+		if node.Kind == yaml.ScalarNode && node.Tag == "!!str" {
+			kind := SegmentProse
+			if commandShaped(node.Value) {
+				kind = SegmentShell
+			}
+			segments = append(segments, Segment{Kind: kind, Line: node.Line, Text: node.Value})
+		}
+		for _, child := range node.Content {
+			visit(child)
+		}
+	}
+	visit(&root)
+	return segments, nil
 }
 
 func classifyMarkdown(root ast.Node, source []byte) (map[int]SegmentKind, []Segment) {
@@ -127,8 +151,11 @@ func commandShaped(value string) bool {
 	if len(fields) == 0 {
 		return false
 	}
-	switch fields[0] {
+	command := strings.TrimLeft(fields[0], "(")
+	switch command {
 	case "agm", "bd", "command", "env", "gh", "git", "gtimeout", "nohup", "safe-merge", "safe-pr", "safe-push", "sudo", "timeout":
+		return true
+	case "if", "while", "until", "then", "do", "!":
 		return true
 	default:
 		return strings.Contains(value, "&&") || strings.Contains(value, "||")

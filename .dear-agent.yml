@@ -53,6 +53,8 @@ pr-policy:
 # silent path exemption.
 instruction-policy:
   surfaces:
+    - match: .dear-agent.yml
+      owner: repository-policy
     - match: AGENTS.md
       owner: repository-policy
     - match: CLAUDE.md

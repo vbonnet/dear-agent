@@ -36,7 +36,7 @@ func (v Violation) Error() string {
 	return fmt.Sprintf("%s: %s: %q; use %s", location, v.Rule, v.Excerpt, v.Replacement)
 }
 
-// CheckRepository validates every tracked Markdown path matched by the policy
+// CheckRepository validates every tracked path matched by the policy
 // in root/.dear-agent.yml. It never mutates source or policy files.
 func CheckRepository(ctx context.Context, root string) (Result, []Violation, error) {
 	absRoot, err := filepath.Abs(root)
@@ -47,7 +47,7 @@ func CheckRepository(ctx context.Context, root string) (Result, []Violation, err
 	if err != nil {
 		return Result{}, nil, err
 	}
-	paths, err := trackedMarkdown(ctx, absRoot)
+	paths, err := trackedFiles(ctx, absRoot)
 	if err != nil {
 		return Result{}, nil, err
 	}
@@ -68,7 +68,14 @@ func CheckRepository(ctx context.Context, root string) (Result, []Violation, err
 			return Result{}, nil, fmt.Errorf("instructionlint: read %s: %w", relative, err)
 		}
 		files++
-		for _, segment := range parseSegments(data) {
+		segments := parseSegments(data)
+		if extension := strings.ToLower(filepath.Ext(relative)); extension == ".yml" || extension == ".yaml" {
+			segments, err = parseYAMLSegments(data)
+			if err != nil {
+				return Result{}, nil, fmt.Errorf("instructionlint: parse %s: %w", relative, err)
+			}
+		}
+		for _, segment := range segments {
 			findings = append(findings, evaluateSegment(relative, segment)...)
 		}
 	}
@@ -82,7 +89,7 @@ func CheckRepository(ctx context.Context, root string) (Result, []Violation, err
 	return Result{Files: files, Exclusions: len(policy.Exclusions)}, findings, nil
 }
 
-func trackedMarkdown(ctx context.Context, root string) ([]string, error) {
+func trackedFiles(ctx context.Context, root string) ([]string, error) {
 	cmd := exec.CommandContext(ctx, "git", "-C", root, "ls-files", "-z", "--")
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	var stderr bytes.Buffer
@@ -96,7 +103,7 @@ func trackedMarkdown(ctx context.Context, root string) ([]string, error) {
 	}
 	var paths []string
 	for raw := range bytes.SplitSeq(output, []byte{0}) {
-		if len(raw) == 0 || !strings.EqualFold(filepath.Ext(string(raw)), ".md") {
+		if len(raw) == 0 {
 			continue
 		}
 		paths = append(paths, filepath.ToSlash(string(raw)))

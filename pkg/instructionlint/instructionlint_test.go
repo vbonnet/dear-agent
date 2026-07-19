@@ -19,6 +19,11 @@ func TestSegmentsClassifyExecutableFences(t *testing.T) {
 		"W0 fixture",
 		"git push origin fixture",
 		"```",
+		"```",
+		"if gh pr merge 789; then",
+		"  echo merged",
+		"fi",
+		"```",
 		"```bash",
 		"git push origin main",
 		"```",
@@ -47,6 +52,7 @@ func TestSegmentsClassifyExecutableFences(t *testing.T) {
 		"shell|git push origin main",
 		"shell|env TOKEN=x gh pr merge 123",
 		"shell|gh pr merge 456",
+		"shell|if gh pr merge 789; then",
 		"shell|bd ready",
 	}
 	sort.Strings(want)
@@ -107,19 +113,43 @@ func TestRuleViolationsTeachCanonicalReplacements(t *testing.T) {
 		{Kind: SegmentShell, Line: 23, Text: "command bd ready"},
 		{Kind: SegmentShell, Line: 24, Text: "nohup git push origin branch"},
 		{Kind: SegmentShell, Line: 25, Text: "timeout --signal TERM 5s bd ready"},
+		{Kind: SegmentShell, Line: 26, Text: "env WORKSPACE=oss agm status --output json"},
+		{Kind: SegmentShell, Line: 27, Text: "cd repo && agm session send worker hello"},
+		{Kind: SegmentShell, Line: 28, Text: "if gh pr merge 123; then"},
 	}
 
 	var got []Violation
 	for _, segment := range segments {
 		got = append(got, evaluateSegment("AGENTS.md", segment)...)
 	}
-	if len(got) != 22 {
-		t.Fatalf("violations = %v, want 22", got)
+	if len(got) != 25 {
+		t.Fatalf("violations = %v, want 25", got)
 	}
 	for _, item := range got {
 		if item.Rule == "" || item.Replacement == "" {
 			t.Fatalf("violation lacks actionable rule/replacement: %+v", item)
 		}
+	}
+}
+
+func TestCheckRepositoryGovernsAgentReadableYAML(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	writeTestFile(t, repo, ".dear-agent.yml", `instruction-policy:
+  surfaces:
+    - match: .dear-agent.yml
+      owner: repository-policy
+pr-policy:
+  emergency: safe-pr create --emergency --reason bypass
+`)
+	runGit(t, repo, "add", ".dear-agent.yml")
+
+	result, violations, err := CheckRepository(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Files != 1 || len(violations) != 1 || violations[0].Rule != "safe-pr-emergency" {
+		t.Fatalf("result=%+v violations=%v, want governed YAML emergency violation", result, violations)
 	}
 }
 
