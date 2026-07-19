@@ -285,6 +285,25 @@ func TestCheckRepositoryNormalizesNumericIdentityWidth(t *testing.T) {
 	}
 }
 
+func TestCheckRepositorySeedsCanonicalFourDigitSuccessor(t *testing.T) {
+	repo := newADRRepo(t)
+	writeADRFile(t, repo, ".dear-agent.yml", policyFixture())
+	writeADRFile(t, repo, "docs/adr/ADR-001-old.md", recordFixture("001", "Old", "Superseded by [replacement](1234-replacement.md)"))
+	writeADRFile(t, repo, "docs/adr/1234-replacement.md", recordFixture("1234", "Replacement", "Accepted"))
+	writeADRFile(t, repo, "docs/adr/README.md", indexFixture("001", "ADR-001-old.md", "Old", "Superseded")+indexFixture("1234", "1234-replacement.md", "Replacement", "Accepted"))
+	writeADRFile(t, repo, "pkg/hash/ADR.md", "# Hash decisions\n\nStatus: Accepted\n")
+	gitADR(t, repo, "add", ".")
+	gitADR(t, repo, "commit", "-m", "fixture")
+
+	report, err := CheckRepository(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasReason(report.Violations, "lacks a live governed same-scope successor") {
+		t.Fatalf("canonical four-digit successor was not seeded: %#v", report.Violations)
+	}
+}
+
 func TestCheckRepositoryHonorsPerRecordBudget(t *testing.T) {
 	repo := newADRRepo(t)
 	policy := strings.Replace(policyFixture(), "index: README.md", "index: README.md\n      max-lines: 5", 1)

@@ -60,12 +60,16 @@ func governedADRPaths(policy Policy, tracked []string) map[string]bool {
 	for _, scope := range policy.Scopes {
 		for _, name := range tracked {
 			base := filepath.Base(name)
-			if filepath.ToSlash(filepath.Dir(name)) == scope.Path && adrLikeFilename(base) && base != scope.Index {
+			if filepath.ToSlash(filepath.Dir(name)) == scope.Path && governedRecordFilename(base) && base != scope.Index {
 				governed[name] = true
 			}
 		}
 	}
 	return governed
+}
+
+func governedRecordFilename(name string) bool {
+	return adrFilePattern.MatchString(name) || adrLikeFilename(name)
 }
 
 func checkAggregates(root string, policy Policy, trackedSet, governed map[string]bool) (Report, error) {
