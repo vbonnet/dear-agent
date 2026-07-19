@@ -14,7 +14,7 @@ func classifyMarker(data []byte, maxAgeDays int, asOf time.Time) FindingKind {
 	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
 	markerLines := make([]string, 0, 1)
 	for _, line := range lines {
-		if strings.Contains(line, markerPrefix) {
+		if isStandaloneMarker(line) {
 			markerLines = append(markerLines, line)
 		}
 	}
@@ -45,6 +45,11 @@ func classifyMarker(data []byte, maxAgeDays int, asOf time.Time) FindingKind {
 		return StaleDate
 	}
 	return ""
+}
+
+func isStandaloneMarker(line string) bool {
+	line = strings.TrimSpace(line)
+	return strings.HasPrefix(line, markerPrefix) && strings.HasSuffix(line, "-->")
 }
 
 func headerMarkerCandidate(lines []string) (string, bool) {

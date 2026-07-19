@@ -152,6 +152,29 @@ func TestCheckRepositoryRejectsWeakerPolicyAgainstRef(t *testing.T) {
 	}
 }
 
+func TestCheckRepositoryRejectsPolicyWeakeningForRenamedBaseDocument(t *testing.T) {
+	repo := newTestRepo(t)
+	policy := func(match string) string {
+		return strings.ReplaceAll(testPolicy("baseline.txt"), `"**/SPEC.md"`, `"`+match+`"`)
+	}
+	writeTestFile(t, repo, ".dear-agent.yml", policy("**/SPEC.md"))
+	writeTestFile(t, repo, "other/SPEC.md", "<!-- Last audited at: 2026-07-18 -->\n")
+	writeTestFile(t, repo, "baseline.txt", "")
+	gitTest(t, repo, "add", ".")
+	gitTest(t, repo, "commit", "-m", "base")
+	base := strings.TrimSpace(gitTestOutput(t, repo, "rev-parse", "HEAD"))
+
+	gitTest(t, repo, "mv", "other/SPEC.md", "other/README.md")
+	writeTestFile(t, repo, ".dear-agent.yml", policy("pkg/**/SPEC.md"))
+	gitTest(t, repo, "add", ".")
+	gitTest(t, repo, "commit", "-m", "rename and weaken")
+
+	_, err := CheckRepository(context.Background(), repo, Options{AsOf: testAsOf, BaselineRef: base})
+	if err == nil || !strings.Contains(err.Error(), `weakens governed coverage for tracked path "other/SPEC.md"`) {
+		t.Fatalf("error = %v, want base-inventory policy weakening", err)
+	}
+}
+
 func TestCheckRepositoryAllowsInitialBaselineBootstrap(t *testing.T) {
 	t.Parallel()
 

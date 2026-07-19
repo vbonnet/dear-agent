@@ -20,6 +20,7 @@ func TestClassifyMarker(t *testing.T) {
 	}{
 		{name: "current", body: "# Doc\n<!-- Last audited at: 2026-07-18 -->\n", age: 90},
 		{name: "marker first", body: "<!-- Last audited at: 2026-07-18 -->\n# Doc\n", age: 90},
+		{name: "inline marker example is not duplicate", body: "# Doc\n<!-- Last audited at: 2026-07-18 -->\n\nExample: `<!-- Last audited at: YYYY-MM-DD -->`\n", age: 90},
 		{name: "missing", body: "# Doc\n", age: 90, want: MissingMarker},
 		{name: "body example is not marker", body: "# Doc\n\nExplains the convention.\n\n<!-- Last audited at: 2026-07-18 -->\n", age: 90, want: MissingMarker},
 		{name: "placeholder", body: "<!-- Last audited at: NEEDS-AUDIT -->\n", age: 90, want: NeedsAudit},
