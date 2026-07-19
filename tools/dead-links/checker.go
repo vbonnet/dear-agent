@@ -77,6 +77,9 @@ func parseDocument(markdown goldmark.Markdown, source []byte) *document {
 		switch n := node.(type) {
 		case *ast.Heading:
 			base := githubSlug(headingText(n, source))
+			if base == "" {
+				break
+			}
 			id := base
 			for suffix := 1; headingAnchors[id]; suffix++ {
 				id = fmt.Sprintf("%s-%d", base, suffix)
@@ -127,10 +130,11 @@ func collectExplicitAnchors(anchors map[string]bool, raw []byte) {
 			}
 			return
 		case html.StartTagToken, html.SelfClosingTagToken:
-			_, more := tokenizer.TagName()
+			tag, more := tokenizer.TagName()
+			legacyNamedAnchor := bytes.EqualFold(tag, []byte("a"))
 			for more {
 				key, value, next := tokenizer.TagAttr()
-				if (bytes.EqualFold(key, []byte("id")) || bytes.EqualFold(key, []byte("name"))) && len(value) > 0 {
+				if (bytes.EqualFold(key, []byte("id")) || (legacyNamedAnchor && bytes.EqualFold(key, []byte("name")))) && len(value) > 0 {
 					anchors[string(value)] = true
 				}
 				more = next
@@ -173,9 +177,6 @@ func githubSlug(heading string) string {
 		case r == '-' || r == '_':
 			slug.WriteRune(r)
 		}
-	}
-	if slug.Len() == 0 {
-		return "section"
 	}
 	return slug.String()
 }

@@ -67,9 +67,17 @@ func TestHeadingSuffixesIgnoreExplicitAnchorReservations(t *testing.T) {
 
 func TestExplicitAnchorsUseActualHTMLAttributes(t *testing.T) {
 	markdown := newLinkChecker(".", false).markdown
-	doc := parseDocument(markdown, []byte("<div data-id=ghost></div>\n<a id=install></a>\n<a name='legacy'></a>\n"))
-	if doc.anchors["ghost"] || !doc.anchors["install"] || !doc.anchors["legacy"] {
+	doc := parseDocument(markdown, []byte("<div data-id=ghost></div>\n<a id=install></a>\n<a name='legacy'></a>\n<input name='email'>\n<meta name='description'>\n"))
+	if doc.anchors["ghost"] || doc.anchors["email"] || doc.anchors["description"] || !doc.anchors["install"] || !doc.anchors["legacy"] {
 		t.Fatalf("explicit anchors = %v", doc.anchors)
+	}
+}
+
+func TestEmptyHeadingSlugDoesNotInventSectionAnchor(t *testing.T) {
+	markdown := newLinkChecker(".", false).markdown
+	doc := parseDocument(markdown, []byte("# !!!\n"))
+	if doc.anchors["section"] || len(doc.anchors) != 0 {
+		t.Fatalf("empty heading anchors = %v, want none", doc.anchors)
 	}
 }
 
