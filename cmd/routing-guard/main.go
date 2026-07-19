@@ -237,6 +237,9 @@ func globPathMatch(pattern, name string) bool {
 }
 
 func validateBaseline(exempt map[string]bool, tracked []string) error {
+	if len(exempt) != 0 {
+		return fmt.Errorf("baseline must remain empty; migrate temporal artifacts instead of adding exemptions")
+	}
 	trackedSet := make(map[string]bool, len(tracked))
 	for _, name := range tracked {
 		trackedSet[name] = true

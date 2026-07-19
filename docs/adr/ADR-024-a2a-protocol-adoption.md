@@ -177,7 +177,7 @@ can be exposed in pkg/a2a later without breaking the v1 callers.
   developer's machine" topology sketched in ADR-002.
 - **Free observability.** Every `TaskStatusUpdateEvent` is a structured
   record of the conversation, suitable for the VROOM decision trail and
-  for the friction-reporting stream of ADR-023 without bespoke
+  for the VROOM friction-reporting stream without bespoke
   serialisation.
 
 ### Negative

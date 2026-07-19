@@ -33,7 +33,6 @@ For orchestrators, use --orchestrator to show:
   - Alerts for threshold violations
   - Top 5 and bottom 5 sessions by trust score
   - Throughput metrics (commits/hour, workers/hour)
-  - Next 3 backlog tasks
 
 Examples:
   agm session dashboard                    # Show active sessions

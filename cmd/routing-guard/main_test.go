@@ -153,8 +153,11 @@ func TestLoadBaseline(t *testing.T) {
 
 func TestValidateBaselineRejectsUntrackedPaths(t *testing.T) {
 	tracked := []string{"docs/design/existing.md"}
-	if err := validateBaseline(map[string]bool{"docs/design/existing.md": true}, tracked); err != nil {
-		t.Fatalf("tracked baseline rejected: %v", err)
+	if err := validateBaseline(map[string]bool{}, tracked); err != nil {
+		t.Fatalf("empty baseline rejected: %v", err)
+	}
+	if err := validateBaseline(map[string]bool{"docs/design/existing.md": true}, tracked); err == nil {
+		t.Fatal("non-empty baseline accepted")
 	}
 	if err := validateBaseline(map[string]bool{"docs/design/missing.md": true}, tracked); err == nil {
 		t.Fatal("untracked baseline path accepted")
@@ -177,6 +180,9 @@ func TestRepositoryTreeHasNoTemporalDebt(t *testing.T) {
 	}
 	if err := validateBaseline(exempt, tracked); err != nil {
 		t.Fatal(err)
+	}
+	if len(exempt) != 0 {
+		t.Fatalf("temporal artifact baseline has %d entries, want zero", len(exempt))
 	}
 	for _, name := range tracked {
 		if forbidden(name, patterns) && !exempt[name] {
