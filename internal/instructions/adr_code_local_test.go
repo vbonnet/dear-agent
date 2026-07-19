@@ -116,11 +116,11 @@ func validateLocalADRScope(t *testing.T, root string, scope localADRScope, gover
 			continue
 		}
 		if statuses[0][1] == "Superseded" {
-			successor := successorPattern.FindStringSubmatch(statuses[0][0])
-			if len(successor) != 2 {
+			successor, ok := adrSuccessorTarget(statuses[0][0], content)
+			if !ok {
 				t.Errorf("%s: superseded status must link to its live successor", entry.Name())
 			} else {
-				assertLiveLocalADRSuccessor(t, dir, entry.Name(), successor[1])
+				assertLiveLocalADRSuccessor(t, dir, entry.Name(), successor)
 			}
 		}
 		assertRelativeMarkdownLinksResolve(t, dir, entry.Name(), content)
