@@ -62,7 +62,7 @@ var (
 	orderedStepPattern     = regexp.MustCompile(`(?m)^[ \t]*[0-9]+[.)][ \t]+`)
 	verificationPattern    = regexp.MustCompile(`(?im)^#{1,6}[ \t]+(?:verify|verification|completion|complete|finish|close|end|rewind and close)\b`)
 	referencesPattern      = regexp.MustCompile(`(?im)^#{1,6}[ \t]+(?:references|documentation|resources)\b`)
-	fallbackPattern        = regexp.MustCompile(`(?i)(?:(?:when|if) [^\n.]{0,80}(?:unavailable|unsupported|not available)[^\n.]{0,120}\b(?:use|run|invoke|follow|continue|fall back)\b|(?:for|on) (?:non[- ]claude|other harness(?:es)?)[^\n.]{0,120}\b(?:use|run|invoke|follow|continue)\b|\b(?:use|run|invoke|follow|continue)\b[^\n.]{0,120}\bwithout (?:the |this )?skill\b)`)
+	fallbackPattern        = regexp.MustCompile(`(?i)(?:(?:when|if) [^\n]{0,80}(?:unavailable|unsupported|not available)[^\n]{0,120}\b(?:use|run|invoke|follow|continue|fall back)\b|(?:for|on) (?:non[- ]claude|other harness(?:es)?)[^\n]{0,120}\b(?:use|run|invoke|follow|continue)\b|\b(?:use|run|invoke|follow|continue)\b[^\n]{0,120}\bwithout (?:the |this )?skill\b)`)
 	fallbackRoutePattern   = regexp.MustCompile(`(?i)\b(?:cli|command[- ]line|terminal|shell|browser|https?|api|mcp|manual(?:ly)?|direct(?:ly)?|artifacts?|files?)\b`)
 	providerToolAction     = regexp.MustCompile(`(?i)\b(?:use|run|invoke|fall back to)\s+(?:the\s+)?(?:bash|read|write|edit|glob|grep|task|webfetch|websearch)\b`)
 )
@@ -243,8 +243,8 @@ func validateCommand(path string, fm *Frontmatter, keys map[string]yaml.Node) []
 	if strings.TrimSpace(fm.Description) == "" {
 		violations = append(violations, Violation{Path: path, Reason: "missing nonempty `description:` in frontmatter"})
 	}
-	if !nonemptyField(keys, "allowed-tools") {
-		violations = append(violations, Violation{Path: path, Reason: "missing `allowed-tools:` in frontmatter"})
+	if !validAllowedTools(keys) {
+		violations = append(violations, Violation{Path: path, Reason: "missing `allowed-tools:` or invalid value (expected a string or string list)"})
 	}
 	return violations
 }
@@ -322,7 +322,7 @@ func markdownOutsideFences(body string) string {
 func validateSkillLength(path, bodyText string, data []byte) []Violation {
 	var violations []Violation
 	lineCount := strings.Count(strings.TrimSuffix(string(data), "\n"), "\n") + 1
-	if lineCount > 100 && !referencesPattern.MatchString(bodyText) {
+	if lineCount > 100 && !referencesPattern.MatchString(markdownOutsideFences(bodyText)) {
 		violations = append(violations, Violation{Path: path, Reason: "skill is over 100 lines without a References, Documentation, or Resources section"})
 	}
 	if lineCount > 500 {
@@ -351,16 +351,40 @@ func validateSkillExecution(path string, fm *Frontmatter, keys map[string]yaml.N
 }
 
 func hasActionableNonProviderFallback(body string) bool {
-	for _, sentence := range strings.FieldsFunc(body, func(r rune) bool {
-		return r == '.' || r == '!' || r == '?'
-	}) {
-		if fallbackPattern.MatchString(sentence) &&
-			fallbackRoutePattern.MatchString(sentence) &&
-			!providerToolAction.MatchString(sentence) {
+	visible := markdownOutsideFences(body)
+	for paragraph := range strings.SplitSeq(visible, "\n\n") {
+		if fallbackPattern.MatchString(paragraph) &&
+			fallbackRoutePattern.MatchString(paragraph) &&
+			!providerToolAction.MatchString(paragraph) {
 			return true
 		}
 	}
 	return false
+}
+
+func validAllowedTools(keys map[string]yaml.Node) bool {
+	value, ok := keys["allowed-tools"]
+	if !ok {
+		return false
+	}
+	switch value.Kind {
+	case yaml.ScalarNode:
+		return value.Tag == "!!str" && strings.TrimSpace(value.Value) != ""
+	case yaml.SequenceNode:
+		if len(value.Content) == 0 {
+			return false
+		}
+		for _, item := range value.Content {
+			if item.Kind != yaml.ScalarNode || item.Tag != "!!str" || strings.TrimSpace(item.Value) == "" {
+				return false
+			}
+		}
+		return true
+	case yaml.DocumentNode, yaml.MappingNode, yaml.AliasNode:
+		return false
+	default:
+		return false
+	}
 }
 
 func validateRequiredTier(path, field, value string, allowed map[string]bool, expected string) []Violation {

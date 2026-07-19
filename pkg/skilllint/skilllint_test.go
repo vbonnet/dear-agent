@@ -101,6 +101,17 @@ allowed-tools: Read
 `,
 			want: []string{"model=\"banana\"", "effort=\"extreme\""},
 		},
+		{
+			name: "allowed tools must be strings",
+			frontmatter: `---
+model: haiku
+effort: low
+description: invalid tools
+allowed-tools: false
+---
+`,
+			want: []string{"invalid value"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -219,9 +230,24 @@ description: Use when an agent needs an example.
 			),
 		},
 		{
+			name: "provider extension with dotted fallback command",
+			content: strings.Replace(
+				strings.Replace(validSkill("example-skill"), "description:", "allowed-tools: [Bash]\ndescription:", 1),
+				"Confirm the expected result exists.",
+				"When the provider is unavailable, run `./bin/tool` directly from a terminal.",
+				1,
+			),
+		},
+		{
 			name:    "long skill without disclosure",
 			content: validSkill("example-skill") + longBody,
 			want:    []string{"over 100 lines without a References, Documentation, or Resources section"},
+		},
+		{
+			name: "long skill with fenced-only references",
+			content: validSkill("example-skill") +
+				"\n```markdown\n## References\n```\n" + longBody,
+			want: []string{"over 100 lines without a References, Documentation, or Resources section"},
 		},
 		{
 			name:    "very long skill crosses review threshold",
