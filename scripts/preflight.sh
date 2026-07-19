@@ -94,6 +94,11 @@ warn "local linter: ${LINT_VER}"
 golangci-lint run --timeout=5m ./... || fail "lint failed (see above)"
 ok "lint clean"
 
+step "verify generated AGM surfaces and plugin hashes"
+make verify-surface-codegen || fail "generated AGM surface artifacts are stale"
+make plugin-verify-hashes || fail "AGM plugin content hashes are stale"
+ok "generated AGM surfaces and plugin hashes verified"
+
 TEST_TIMEOUT="20m"
 if [[ "$MODE" == "tests" || "$MODE" == "race" || "$MODE" == "full" ]]; then
   step "go test ./..."

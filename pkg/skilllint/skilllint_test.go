@@ -139,6 +139,10 @@ func TestCheckFileSkillSchema(t *testing.T) {
 	}{
 		{name: "compliant", content: validSkill("example-skill")},
 		{
+			name:    "content hash accepted",
+			content: strings.Replace(validSkill("example-skill"), "description:", "content-hash: 0123456789abcdef\ndescription:", 1),
+		},
+		{
 			name:    "verification criteria accepted",
 			content: strings.Replace(validSkill("example-skill"), "description:", "verification_criteria:\n  - output file exists\ndescription:", 1),
 		},
@@ -153,9 +157,8 @@ func TestCheckFileSkillSchema(t *testing.T) {
 			want:    []string{"not kebab-case"},
 		},
 		{
-			name:    "weak trigger",
+			name:    "harness-neutral description",
 			content: strings.Replace(validSkill("example-skill"), "Use when an agent needs", "Helps an agent with", 1),
-			want:    []string{"expected `Use when` or `Trigger when`"},
 		},
 		{
 			name:    "missing workflow",
@@ -165,7 +168,7 @@ func TestCheckFileSkillSchema(t *testing.T) {
 		{
 			name:    "missing verification",
 			content: strings.Replace(validSkill("example-skill"), "## Verify", "## Notes", 1),
-			want:    []string{"missing verification or completion heading"},
+			want:    []string{"missing nonempty verification or completion section"},
 		},
 		{
 			name: "fenced examples do not satisfy structure",
@@ -183,7 +186,22 @@ description: Use when an agent needs an example.
 ## Verify
 ~~~
 `,
-			want: []string{"missing procedural workflow", "missing verification or completion heading"},
+			want: []string{"missing procedural workflow", "missing nonempty verification or completion section"},
+		},
+		{
+			name: "empty headings do not satisfy structure",
+			content: `---
+name: example-skill
+description: Deterministic example skill.
+---
+
+# Example
+
+## Use Cases
+
+## End
+`,
+			want: []string{"missing procedural workflow", "missing nonempty verification or completion section"},
 		},
 		{
 			name:    "unknown extension",
@@ -228,6 +246,11 @@ description: Use when an agent needs an example.
 				"When skill activation is unavailable, use the same CLI steps. Confirm the expected result exists.",
 				1,
 			),
+		},
+		{
+			name:    "provider loader field without fallback",
+			content: strings.Replace(validSkill("example-skill"), "description:", "disable-model-invocation: true\ndescription:", 1),
+			want:    []string{"provider execution extension requires a non-provider fallback"},
 		},
 		{
 			name: "empty provider tool list remains invalid with fallback",
@@ -341,7 +364,7 @@ func TestCheckDirScansEverySurfaceShape(t *testing.T) {
 		"missing `model:`",
 		"missing `effort:`",
 		"missing `allowed-tools:`",
-		"missing verification or completion heading",
+		"missing nonempty verification or completion section",
 	})
 }
 
@@ -365,7 +388,7 @@ func TestCheckRepositoryUsesTrackedInventoryAndDetectsDuplicates(t *testing.T) {
 		"missing `model:`",
 		"missing `effort:`",
 		"missing `allowed-tools:`",
-		"byte-identical to .agents/skills/first/SKILL.md",
+		"content-equivalent to .agents/skills/first/SKILL.md",
 	})
 	for _, violation := range violations {
 		if strings.Contains(violation.Path, "untracked") {
@@ -375,6 +398,33 @@ func TestCheckRepositoryUsesTrackedInventoryAndDetectsDuplicates(t *testing.T) {
 			t.Fatalf("repository violation path should be relative: %v", violation)
 		}
 	}
+}
+
+func TestCheckRepositoryDetectsNormalizedSkillDuplicates(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	first := strings.Replace(
+		validSkill("duplicate-skill"),
+		"description:",
+		"content-hash: aaaaaaaaaaaaaaaa\ndescription:",
+		1,
+	)
+	second := strings.Replace(validSkill("duplicate-skill"),
+		"name: duplicate-skill\ndescription: Use when an agent needs a deterministic test workflow.",
+		"description: Use when an agent needs a deterministic test workflow.\nname: duplicate-skill",
+		1,
+	)
+	second = strings.Replace(second, "description:", "content-hash: bbbbbbbbbbbbbbbb\ndescription:", 1)
+	second = strings.Replace(second, "# duplicate-skill", "<!-- discovery note -->\n# duplicate-skill", 1)
+	writeFile(t, repo, "first/SKILL.md", first)
+	writeFile(t, repo, "second/SKILL.md", second)
+	runGit(t, repo, "add", ".")
+
+	violations, err := CheckRepository(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertReasons(t, violations, []string{"content-equivalent to first/SKILL.md"})
 }
 
 func TestCheckRepositoryDoesNotTreatSymlinkAliasAsDuplicate(t *testing.T) {
@@ -396,6 +446,26 @@ func TestCheckRepositoryDoesNotTreatSymlinkAliasAsDuplicate(t *testing.T) {
 	if len(violations) != 0 {
 		t.Fatalf("symlink alias produced violations: %v", violations)
 	}
+}
+
+func TestCheckRepositoryRejectsSymlinkOutsideRoot(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	outside := writeFile(t, t.TempDir(), "SKILL.md", validSkill("outside"))
+	aliasDir := filepath.Join(repo, "plugin", "skills", "outside")
+	if err := os.MkdirAll(aliasDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(aliasDir, "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "plugin/skills/outside/SKILL.md")
+
+	violations, err := CheckRepository(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertReasons(t, violations, []string{"resolves outside the validation root"})
 }
 
 func TestCheckRepositoryRequiresGitRepository(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/agm/internal/cli"
 	"github.com/vbonnet/dear-agent/pkg/acceptance"
 	"github.com/vbonnet/dear-agent/pkg/gracefulexit"
 )
@@ -48,8 +49,8 @@ func init() {
 }
 
 func runAcceptanceShow(_ *cobra.Command, _ []string) error {
-	root, err := findDearAgentRoot()
-	if err != nil {
+	root := findDearAgentRootFrom(cli.GetProjectDirectory())
+	if root == "" {
 		// No .dear-agent.yml found anywhere. That's not a hard error —
 		// the worker is told there are no criteria and can proceed.
 		return printAcceptance(nil, "")

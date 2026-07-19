@@ -30,6 +30,8 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 # Targets:
 #   lint-specs              Validate EARS requirements in SPEC.md files
 #   lint-skills             Validate every tracked skill and command prompt
+#   verify-surface-codegen  Regenerate ignored AGM surface artifacts and fail on drift
+#   plugin-verify-hashes    Verify AGM plugin command and skill content hashes
 #   preflight               Fast local CI-parity gates: vet + build + AI skills + lint
 #   preflight-tests         preflight + go test (no -race) — quick sanity
 #   preflight-race          preflight + go test -race — catch data races before push
@@ -136,6 +138,16 @@ lint-skills:
 # active instruction surfaces.
 lint-instructions:
 	@go run ./tools/instruction-lint -repo .
+
+verify-surface-codegen:
+	@before="$$(git hash-object agm/internal/surface/codegen_cli.go agm/internal/surface/codegen_mcp.go agm/internal/surface/codegen_parity_test.go)"; \
+		cd agm && go run ./internal/surface/cmd/generate; \
+		cd ..; \
+		after="$$(git hash-object agm/internal/surface/codegen_cli.go agm/internal/surface/codegen_mcp.go agm/internal/surface/codegen_parity_test.go)"; \
+		test "$$before" = "$$after" || { echo "generated AGM surface artifacts are stale" >&2; exit 1; }
+
+plugin-verify-hashes:
+	@cd agm && go run ./cmd/plugin-hash -check
 
 # Fast local CI-parity gates. Runs the same go vet / go build / golangci-lint
 # CI does, no Docker needed. Catches ~all lint failures in ~25s on a warm

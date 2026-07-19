@@ -6,6 +6,7 @@ package skilllint
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -57,10 +58,9 @@ var (
 	allowedEfforts = map[string]bool{"low": true, "medium": true, "high": true}
 
 	skillNamePattern       = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
-	triggerPattern         = regexp.MustCompile(`(?i)\b(?:use|trigger)\s+when\b`)
-	workflowHeadingPattern = regexp.MustCompile(`(?im)^#{1,6}[ \t]+(?:start|workflow|process|steps?|procedure|route(?: the request)?|how to|use)\b`)
+	workflowHeadingPattern = regexp.MustCompile(`(?i)^(?:start|workflow|process|steps?|procedure|route(?: the request)?|how to)\b`)
 	orderedStepPattern     = regexp.MustCompile(`(?m)^[ \t]*[0-9]+[.)][ \t]+`)
-	verificationPattern    = regexp.MustCompile(`(?im)^#{1,6}[ \t]+(?:verify|verification|completion|complete|finish|close|end|rewind and close)\b`)
+	verificationPattern    = regexp.MustCompile(`(?i)^(?:verify|verification|completion|complete|finish|close|rewind and close)\b`)
 	referencesPattern      = regexp.MustCompile(`(?im)^#{1,6}[ \t]+(?:references|documentation|resources)\b`)
 	fallbackPattern        = regexp.MustCompile(`(?i)(?:(?:when|if) [^\n]{0,80}(?:unavailable|unsupported|not available)[^\n]{0,120}\b(?:use|run|invoke|follow|continue|fall back)\b|(?:for|on) (?:non[- ]claude|other harness(?:es)?)[^\n]{0,120}\b(?:use|run|invoke|follow|continue)\b|\b(?:use|run|invoke|follow|continue)\b[^\n]{0,120}\bwithout (?:the |this )?skill\b)`)
 	fallbackRoutePattern   = regexp.MustCompile(`(?i)\b(?:cli|command[- ]line|terminal|shell|browser|https?|api|mcp|manual(?:ly)?|direct(?:ly)?|artifacts?|files?)\b`)
@@ -82,6 +82,7 @@ var skillFields = map[string]bool{
 	"allowed-tools":            true,
 	"argument-hint":            true,
 	"compatibility":            true,
+	"content-hash":             true,
 	"description":              true,
 	"disable-model-invocation": true,
 	"effort":                   true,
@@ -95,6 +96,10 @@ var skillFields = map[string]bool{
 
 var providerExecutionFields = []string{
 	"allowed-tools",
+	"compatibility",
+	"disable-model-invocation",
+	"metadata",
+	"user-invocable",
 }
 
 // CheckFile validates one recognized skill or command Markdown file. Content
@@ -131,7 +136,7 @@ func CheckDir(root string) ([]Violation, error) {
 	if err != nil {
 		return nil, err
 	}
-	return checkDocuments(documents)
+	return checkDocuments(root, documents)
 }
 
 // CheckRepository validates every tracked skill and command surface in the Git
@@ -167,7 +172,7 @@ func CheckRepository(ctx context.Context, root string) ([]Violation, error) {
 			kind:        kind,
 		})
 	}
-	return checkDocuments(documents)
+	return checkDocuments(repoRoot, documents)
 }
 
 func gitOutput(ctx context.Context, dir string, args ...string) ([]byte, error) {
@@ -190,13 +195,21 @@ func gitOutput(ctx context.Context, dir string, args ...string) ([]byte, error) 
 	return output, nil
 }
 
-func checkDocuments(documents []document) ([]Violation, error) {
+func checkDocuments(containmentRoot string, documents []document) ([]Violation, error) {
 	var violations []Violation
 	firstByDigest := make(map[[sha256.Size]byte]string)
 	for _, doc := range documents {
 		info, err := os.Lstat(doc.readPath)
 		if err != nil {
 			return nil, fmt.Errorf("%s: stat: %w", doc.displayPath, err)
+		}
+		inside, containmentErr := resolvedInside(containmentRoot, doc.readPath)
+		if containmentErr != nil {
+			return nil, fmt.Errorf("%s: resolve: %w", doc.displayPath, containmentErr)
+		}
+		if !inside {
+			violations = append(violations, Violation{Path: doc.displayPath, Reason: "tracked skill or command resolves outside the validation root"})
+			continue
 		}
 		data, err := os.ReadFile(doc.readPath)
 		if err != nil {
@@ -208,17 +221,64 @@ func checkDocuments(documents []document) ([]Violation, error) {
 		if doc.kind != surfaceSkill || info.Mode()&os.ModeSymlink != 0 {
 			continue
 		}
-		digest := sha256.Sum256(data)
+		digest := semanticSkillDigest(data)
 		if first, exists := firstByDigest[digest]; exists {
 			violations = append(violations, Violation{
 				Path:   doc.displayPath,
-				Reason: fmt.Sprintf("byte-identical to %s", first),
+				Reason: fmt.Sprintf("content-equivalent to %s after frontmatter and whitespace normalization", first),
 			})
 			continue
 		}
 		firstByDigest[digest] = doc.displayPath
 	}
 	return violations, nil
+}
+
+func resolvedInside(root, path string) (bool, error) {
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return false, err
+	}
+	resolvedPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return false, err
+	}
+	relative, err := filepath.Rel(resolvedRoot, resolvedPath)
+	if err != nil {
+		return false, err
+	}
+	return relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)), nil
+}
+
+func semanticSkillDigest(data []byte) [sha256.Size]byte {
+	canonical := strings.ReplaceAll(string(data), "\r\n", "\n")
+	_, _, body, present, err := extractDocument([]byte(canonical))
+	if err == nil && present {
+		closing := strings.Index(canonical[4:], "\n---\n")
+		if closing >= 0 {
+			var frontmatter map[string]any
+			if yaml.Unmarshal([]byte(canonical[4:4+closing]), &frontmatter) == nil {
+				// Integrity stamps describe the current bytes; they are not part of
+				// the skill's semantic identity for duplicate detection.
+				delete(frontmatter, "content-hash")
+				if encoded, marshalErr := json.Marshal(frontmatter); marshalErr == nil {
+					canonical = string(encoded) + "\n" + normalizeSkillBody(string(body))
+				}
+			}
+		}
+	}
+	return sha256.Sum256([]byte(canonical))
+}
+
+var markdownComment = regexp.MustCompile(`(?s)<!--.*?-->`)
+
+func normalizeSkillBody(body string) string {
+	body = markdownComment.ReplaceAllString(body, "")
+	lines := strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " \t")
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 func checkData(path string, data []byte, kind surfaceKind) []Violation {
@@ -270,11 +330,8 @@ func validateSkillIdentity(path string, fm *Frontmatter) []Violation {
 		violations = append(violations, Violation{Path: path, Reason: fmt.Sprintf("name=%q is not kebab-case with at most 64 characters", fm.Name)})
 	}
 
-	description := strings.TrimSpace(fm.Description)
-	if description == "" {
+	if strings.TrimSpace(fm.Description) == "" {
 		violations = append(violations, Violation{Path: path, Reason: "missing nonempty `description:` in frontmatter"})
-	} else if !triggerPattern.MatchString(description) {
-		violations = append(violations, Violation{Path: path, Reason: "description has no activation trigger (expected `Use when` or `Trigger when`)"})
 	}
 	return violations
 }
@@ -282,13 +339,49 @@ func validateSkillIdentity(path string, fm *Frontmatter) []Violation {
 func validateSkillBody(path, bodyText string) []Violation {
 	var violations []Violation
 	structuralText := markdownOutsideFences(bodyText)
-	if !workflowHeadingPattern.MatchString(structuralText) && len(orderedStepPattern.FindAllStringIndex(structuralText, 2)) < 2 {
-		violations = append(violations, Violation{Path: path, Reason: "missing procedural workflow (expected a workflow heading or at least two ordered steps)"})
+	if !sectionHasContent(structuralText, workflowHeadingPattern) && len(orderedStepPattern.FindAllStringIndex(structuralText, 2)) < 2 {
+		violations = append(violations, Violation{Path: path, Reason: "missing procedural workflow (expected a nonempty workflow section or at least two ordered steps)"})
 	}
-	if !verificationPattern.MatchString(structuralText) {
-		violations = append(violations, Violation{Path: path, Reason: "missing verification or completion heading"})
+	if !sectionHasContent(structuralText, verificationPattern) {
+		violations = append(violations, Violation{Path: path, Reason: "missing nonempty verification or completion section"})
 	}
 	return violations
+}
+
+func sectionHasContent(markdown string, headingPattern *regexp.Regexp) bool {
+	lines := strings.Split(markdown, "\n")
+	for index, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		level := headingLevel(trimmed)
+		if level == 0 || !headingPattern.MatchString(strings.TrimSpace(trimmed[level:])) {
+			continue
+		}
+		for _, candidate := range lines[index+1:] {
+			candidate = strings.TrimSpace(candidate)
+			if candidate == "" {
+				continue
+			}
+			candidateLevel := headingLevel(candidate)
+			if candidateLevel > 0 && candidateLevel <= level {
+				break
+			}
+			if candidateLevel == 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func headingLevel(line string) int {
+	level := 0
+	for level < len(line) && line[level] == '#' {
+		level++
+	}
+	if level == 0 || level > 6 || level == len(line) || (line[level] != ' ' && line[level] != '\t') {
+		return 0
+	}
+	return level
 }
 
 func markdownOutsideFences(body string) string {

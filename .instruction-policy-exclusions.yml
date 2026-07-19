@@ -150,23 +150,3 @@ exclusions:
     count: 1
     owner: wayfinder-policy
     reason: invariant explanation names the retired model
-
-  # PR #925 regenerates these two command lines from current Cobra metadata.
-  - path: agm/agm-plugin/commands/agm-status.md
-    rule: agm-root-status
-    excerpt: "agm status --output json"
-    count: 1
-    owner: "#925"
-    reason: generated command parity PR replaces the legacy root form
-  - path: agm/agm-plugin/commands/agm-status.md
-    rule: agm-root-status
-    excerpt: "agm status --output json \"{SESSION_NAME}\""
-    count: 1
-    owner: "#925"
-    reason: generated command parity PR replaces the legacy root form
-  - path: agm/agm-plugin/commands/agm-status.md
-    rule: agm-root-status
-    excerpt: "agm status *"
-    count: 1
-    owner: "#925"
-    reason: generated command parity PR replaces the legacy allowed-tools grant
