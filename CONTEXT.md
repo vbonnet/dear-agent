@@ -106,7 +106,7 @@ under Auto permission mode.) Only after that do they do their own job.
 
 | Supervisor | "C-suite" analogy | Owns | Secondary | Tertiary |
 |------------|-------------------|------|-----------|----------|
-| **Meta-Orchestrator** | CTO | Roadmap, prioritization, technology consistency, not reinventing the wheel | Overseer | Orchestrator |
+| **Meta-Orchestrator** | CTO | Roadmap, prioritization, technology consistency, anti-duplication | Overseer | Orchestrator |
 | **Orchestrator** | COO | Enqueue/dequeue work, monitor active workers, keep steady progress, never sit idle | Meta-Orchestrator | Overseer |
 | **Overseer** | CRO (Reliability) | Resource usage (CPU/disk/memory/quota), leak detection, session cleanup | Orchestrator | Meta-Orchestrator |
 

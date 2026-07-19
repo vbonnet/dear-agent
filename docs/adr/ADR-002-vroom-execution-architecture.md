@@ -16,7 +16,7 @@ Requester roles; no value function over a five-level order.
 
 | Supervisor | Analogy | Owns | Secondary | Tertiary |
 |---|---|---|---|---|
-| **Meta-Orchestrator** | CTO | Beads backlog quality, prioritization, tech consistency, anti-duplication | Overseer | Orchestrator |
+| **Meta-Orchestrator** | CTO | Roadmap, prioritization, technology consistency, anti-duplication | Overseer | Orchestrator |
 | **Orchestrator** | COO | Work enqueue/dequeue, worker monitoring, steady progress | Meta-Orchestrator | Overseer |
 | **Overseer** | CRO | Resource usage, leak detection, session cleanup | Orchestrator | Meta-Orchestrator |
 
