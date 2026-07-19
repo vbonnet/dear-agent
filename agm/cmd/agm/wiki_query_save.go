@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -176,8 +177,8 @@ func resolveWikiOutputSymlinks(path string) (string, error) {
 	for {
 		resolved, err := filepath.EvalSymlinks(current)
 		if err == nil {
-			for i := len(missing) - 1; i >= 0; i-- {
-				resolved = filepath.Join(resolved, missing[i])
+			for _, component := range slices.Backward(missing) {
+				resolved = filepath.Join(resolved, component)
 			}
 			return resolved, nil
 		}
