@@ -109,7 +109,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Session Kill Exact Matching** (2026-03-21):
   - Fixed `agm session kill` prefix-matching bug causing wrong sessions to be killed
-  - Applied exact matching pattern from ADR-0002 using `=` prefix for tmux session-level commands
+  - Applied the exact matching pattern from the [tmux safety decision](internal/tmux/ADR-001-capture-pane-vs-control-mode.md) using `=` prefix for tmux session-level commands
   - Normalized session names (dots/colons → dashes) via `tmux.NormalizeTmuxSessionName()`
   - Added `tmux.FormatSessionTarget()` to prepend `=` for exact session matching
   - **Impact**: Prevents scenarios where killing "astrocyte" could match "astrocyte-improvements"
