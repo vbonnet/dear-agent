@@ -316,19 +316,23 @@ func execGh(req *safepr.Request, timeout time.Duration, verifyCI bool) error {
 }
 
 // requestsDraft reports whether the pass-through GitHub CLI arguments request
-// draft creation. GitHub's boolean flags accept both --draft and
-// --draft=<bool>; an explicit false must not disable routine auto-merge.
+// draft creation. GitHub's boolean flags accept -d/--draft and explicit
+// Boolean values; the final occurrence wins, matching gh argument parsing.
 func requestsDraft(args []string) bool {
 	draft := false
 	for _, arg := range args {
-		if arg == "--draft" {
+		if arg == "--draft" || arg == "-d" {
 			draft = true
 			continue
 		}
-		if value, ok := strings.CutPrefix(arg, "--draft="); ok {
-			value, err := strconv.ParseBool(value)
+		value, longForm := strings.CutPrefix(arg, "--draft=")
+		if !longForm {
+			value, longForm = strings.CutPrefix(arg, "-d=")
+		}
+		if longForm {
+			parsed, err := strconv.ParseBool(value)
 			if err == nil {
-				draft = value
+				draft = parsed
 			}
 		}
 	}
