@@ -155,6 +155,11 @@ func commandFieldsDepth(text string, depth int) [][]string {
 			inputs = append(inputs, match[1])
 		}
 	}
+	for _, match := range embeddedProseCommand.FindAllStringSubmatch(text, -1) {
+		if len(match) == 2 {
+			inputs = append(inputs, match[1])
+		}
+	}
 	for _, match := range embeddedShellCommand.FindAllStringSubmatch(text, -1) {
 		if match[1] != "" {
 			inputs = append(inputs, match[1])

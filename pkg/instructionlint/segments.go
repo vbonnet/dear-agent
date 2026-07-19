@@ -64,6 +64,7 @@ func parseScriptSegments(source []byte) []Segment {
 	var segments []Segment
 	var quote byte
 	heredoc := ""
+	visibleHelpers := agentVisibleScriptHelpers(source)
 	for index, raw := range strings.Split(string(source), "\n") {
 		value := strings.TrimSpace(raw)
 		if value == "" {
@@ -104,21 +105,122 @@ func parseScriptSegments(source []byte) []Segment {
 			}
 			continue
 		}
-		if agentVisibleScriptCommand(value) {
+		if agentVisibleScriptCommand(value, visibleHelpers) {
 			segments = append(segments, Segment{Kind: SegmentShell, Line: index + 1, Text: value})
+			if commandQuote := unclosedScriptQuote(value); commandQuote != 0 {
+				quote = commandQuote
+			}
 		}
 	}
 	return segments
 }
 
-func agentVisibleScriptCommand(value string) bool {
-	fields := stripCommandPrefixes(parseShellWords(value))
-	return len(fields) > 0 && slices.Contains([]string{"echo", "emit", "jq", "printf"}, fields[0])
+func agentVisibleScriptCommand(value string, helpers map[string]bool) bool {
+	for _, command := range splitShellCommands(value) {
+		fields := stripCommandPrefixes(parseShellWords(command))
+		if len(fields) > 0 && (slices.Contains([]string{"echo", "emit", "jq", "printf"}, fields[0]) || helpers[fields[0]]) {
+			return true
+		}
+	}
+	return false
 }
 
 var shellAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 var shellDeclaration = regexp.MustCompile(`^(?:local|export|readonly|typeset|declare)(?:\s+-[A-Za-z]+)*\s+`)
 var heredocMarker = regexp.MustCompile(`<<-?['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
+var shellFunction = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\s*\(\)\s*\{`)
+
+func agentVisibleScriptHelpers(source []byte) map[string]bool {
+	functions := scriptFunctions(source)
+	visible := map[string]bool{}
+	changed := true
+	for changed {
+		changed = false
+		for name, body := range functions {
+			if visible[name] {
+				continue
+			}
+			for _, line := range body {
+				if agentVisibleScriptCommand(line, visible) {
+					visible[name] = true
+					changed = true
+					break
+				}
+			}
+		}
+	}
+	return visible
+}
+
+func scriptFunctions(source []byte) map[string][]string {
+	lines := strings.Split(string(source), "\n")
+	functions := map[string][]string{}
+	for index := 0; index < len(lines); index++ {
+		value := strings.TrimSpace(lines[index])
+		match := shellFunction.FindStringSubmatchIndex(value)
+		if len(match) == 0 {
+			continue
+		}
+		name := value[match[2]:match[3]]
+		body := []string{strings.TrimSpace(value[match[1]:])}
+		depth := shellBraceDelta(value)
+		for depth > 0 && index+1 < len(lines) {
+			index++
+			line := strings.TrimSpace(lines[index])
+			body = append(body, line)
+			depth += shellBraceDelta(line)
+		}
+		functions[name] = body
+	}
+	return functions
+}
+
+func shellBraceDelta(value string) int {
+	delta := 0
+	var quote byte
+	escaped := false
+	for index := 0; index < len(value); index++ {
+		current := value[index]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if current == '\\' && quote != '\'' {
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			if current == quote {
+				quote = 0
+			}
+			continue
+		}
+		if current == '\'' || current == '"' {
+			quote = current
+			continue
+		}
+		if current == '#' && (index == 0 || value[index-1] == ' ' || value[index-1] == '\t') {
+			break
+		}
+		switch current {
+		case '{':
+			delta++
+		case '}':
+			delta--
+		}
+	}
+	return delta
+}
+
+func unclosedScriptQuote(value string) byte {
+	state := shellScanState{}
+	for index := 0; index < len(value); index++ {
+		if width := state.boundaryWidth(value, index); width > 1 {
+			index += width - 1
+		}
+	}
+	return state.quote
+}
 
 func stripShellDeclaration(value string) string {
 	return shellDeclaration.ReplaceAllString(value, "")
@@ -211,12 +313,7 @@ func parseYAMLSegments(source []byte) ([]Segment, error) {
 	var visit func(*yaml.Node)
 	visit = func(node *yaml.Node) {
 		if node.Kind == yaml.ScalarNode && node.Tag == "!!str" {
-			kind := SegmentProse
-			if !allowedBashTool.MatchString(node.Value) && commandShaped(node.Value) {
-				kind = SegmentShell
-			}
-			segments = append(segments, Segment{Kind: kind, Line: node.Line, Text: node.Value})
-			segments = append(segments, bashToolSegments(node.Value, node.Line)...)
+			segments = append(segments, yamlScalarSegments(node)...)
 		}
 		segments = appendYAMLCommentSegments(segments, seenComments, node.HeadComment, node.Line-commentLineCount(node.HeadComment))
 		segments = appendYAMLCommentSegments(segments, seenComments, node.LineComment, node.Line)
@@ -227,6 +324,25 @@ func parseYAMLSegments(source []byte) ([]Segment, error) {
 	}
 	visit(&root)
 	return segments, nil
+}
+
+func yamlScalarSegments(node *yaml.Node) []Segment {
+	var segments []Segment
+	for offset, raw := range strings.Split(node.Value, "\n") {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
+		line := node.Line + offset
+		kind := SegmentProse
+		if !allowedBashTool.MatchString(value) && commandShaped(value) {
+			kind = SegmentShell
+		}
+		segments = append(segments, Segment{Kind: kind, Line: line, Text: value})
+		segments = append(segments, bashToolSegments(value, line)...)
+		segments = appendEmbeddedProseSegments(segments, value, line)
+	}
+	return segments
 }
 
 func bashToolSegments(value string, line int) []Segment {
@@ -260,6 +376,7 @@ func appendYAMLCommentSegments(segments []Segment, seen map[string]bool, comment
 		if commandShaped(value) {
 			segments = append(segments, Segment{Kind: SegmentShell, Line: line, Text: value})
 		}
+		segments = appendEmbeddedProseSegments(segments, value, line)
 		for _, match := range embeddedShellCommand.FindAllStringSubmatch(value, -1) {
 			command := match[1]
 			if command == "" {
@@ -268,6 +385,15 @@ func appendYAMLCommentSegments(segments []Segment, seen map[string]bool, comment
 			if strings.TrimSpace(command) != "" {
 				segments = append(segments, Segment{Kind: SegmentInline, Line: line, Text: command})
 			}
+		}
+	}
+	return segments
+}
+
+func appendEmbeddedProseSegments(segments []Segment, value string, line int) []Segment {
+	for _, match := range embeddedProseCommand.FindAllStringSubmatch(value, -1) {
+		if len(match) == 2 {
+			segments = append(segments, Segment{Kind: SegmentInline, Line: line, Text: strings.TrimSpace(match[1])})
 		}
 	}
 	return segments

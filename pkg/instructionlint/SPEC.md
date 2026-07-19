@@ -8,7 +8,7 @@
 
 **INSPOL-02** When governed instruction files are discovered, the system shall use context-bounded, non-interactive Git-tracked inventory, reject paths matched by multiple declarations, and require a governed symlink to resolve inside the repository to one tracked, governed target.
 
-**INSPOL-03** When governed Markdown, YAML, JSON, or hook scripts are parsed, the system shall inspect command guidance in ordinary prose, inline code, every fenced language, shell groups, structured strings, and agent-visible shell or `jq` output without trusting formatting or container syntax as a policy exemption.
+**INSPOL-03** When governed Markdown, YAML, JSON, or hook scripts are parsed, the system shall inspect command guidance in ordinary prose, inline code, every fenced language, shell groups, each structured-string line, and agent-visible output emitted directly or through a local shell helper without trusting formatting or container syntax as a policy exemption.
 
 **INSPOL-04** When active prose or executable guidance contains a retired Wayfinder phase token in any letter case, the system shall report the token and the nine-phase V2 replacement contract without misclassifying schema paths or semantic versions.
 

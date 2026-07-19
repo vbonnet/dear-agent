@@ -117,6 +117,8 @@ instruction-policy:
       owner: wayfinder
     - match: .agents/skills/**/SKILL.md
       owner: repository-skills
+    - match: .agents/skills/**/agents/*.yaml
+      owner: repository-skill-agents
     - match: agm/**/SKILL.md
       owner: agm-skills
     - match: agm/agm-plugin/commands/*.md

@@ -178,6 +178,60 @@ func TestScriptJQGuidanceRemainsPolicyVisible(t *testing.T) {
 	}
 }
 
+func TestScriptOutputHelpersRemainPolicyVisible(t *testing.T) {
+	source := []byte(strings.Join([]string{
+		"emit_json() {",
+		`  jq -cn --arg message "$1" '{additionalContext:$message}'`,
+		"}",
+		"emit_context() {",
+		`  emit_json "$1"`,
+		"}",
+		`emit_context "Run gh pr merge 123 after review.`,
+		`Use git push origin main for delivery."`,
+	}, "\n"))
+
+	var rules []string
+	for _, segment := range parseScriptSegments(source) {
+		for _, violation := range evaluateSegment("hook", segment) {
+			rules = append(rules, violation.Rule)
+		}
+	}
+	sort.Strings(rules)
+	if !reflect.DeepEqual(rules, []string{"raw-gh-merge", "raw-git-push"}) {
+		t.Fatalf("helper-emitted guidance rules = %v", rules)
+	}
+}
+
+func TestCheckRepositoryGovernsSkillAgentMetadata(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	writeTestFile(t, repo, ".dear-agent.yml", `instruction-policy:
+  surfaces:
+    - match: .agents/skills/**/agents/*.yaml
+      owner: skill-agents
+`)
+	writeTestFile(t, repo, ".agents/skills/example/agents/openai.yaml", `interface:
+  default_prompt: |
+    Review the current state first.
+    gh pr merge 123
+  followup_prompt: "Run git push origin main for delivery."
+`)
+	runGit(t, repo, "add", ".")
+
+	result, violations, err := CheckRepository(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rules []string
+	for _, violation := range violations {
+		rules = append(rules, violation.Rule)
+	}
+	sort.Strings(rules)
+	if result.Files != 1 || !reflect.DeepEqual(rules, []string{"raw-gh-merge", "raw-git-push"}) {
+		t.Fatalf("result=%+v rules=%v, want governed skill-agent prompts", result, rules)
+	}
+}
+
 func TestRuleViolationsTeachCanonicalReplacements(t *testing.T) {
 	segments := []Segment{
 		{Kind: SegmentProse, Line: 1, Text: "Create W0-charter.md before D1."},
