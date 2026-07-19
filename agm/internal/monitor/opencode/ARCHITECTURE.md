@@ -54,7 +54,9 @@ and is capped at `MaxDelay`. A positive `MaxRetries` stops further connection
 attempts after the failure counter reaches that value.
 
 `Stop` cancels the lifecycle context, closes the active response body, and
-waits for reader/reconnect goroutines until the caller's context expires.
+waits for work currently registered in the adapter wait group until the
+caller's context expires. A reconnect loop entered after a reader unregisters
+is cancellation-aware but is not covered by that wait guarantee.
 Health reports connection state plus the last event and heartbeat. After the
 first heartbeat, more than five minutes without another reports an error. A
 connected stream that has never emitted a heartbeat remains healthy based on

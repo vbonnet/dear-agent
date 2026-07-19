@@ -26,8 +26,9 @@ if err := adapter.Start(ctx); err != nil {
 
 `NewAdapter` requires a non-nil EventBus publisher, server URL, and AGM session
 ID. `Start` probes the configured health endpoint before opening the SSE
-stream. `Stop` cancels the stream and waits for its goroutines within the
-caller's context.
+stream. `Stop` cancels the stream and waits for currently registered adapter
+work within the caller's context; a cancellation-aware reconnect entered after
+the reader unregisters may finish after `Stop` returns.
 
 ## What downstream consumers receive
 
