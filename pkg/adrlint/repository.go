@@ -151,7 +151,8 @@ func adrShapedPath(name string) bool {
 
 func adrLikeFilename(name string) bool {
 	lower := strings.ToLower(name)
-	return lower != "adr-index.md" && strings.HasSuffix(lower, ".md") && strings.HasPrefix(strings.ToUpper(name), "ADR-")
+	return lower != "adr-index.md" && strings.HasSuffix(lower, ".md") &&
+		(strings.HasPrefix(strings.ToUpper(name), "ADR-") || bareADRLike.MatchString(name))
 }
 
 func excluded(name string, exclusions []Exclusion) bool {

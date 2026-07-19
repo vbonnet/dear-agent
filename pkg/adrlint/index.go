@@ -9,9 +9,10 @@ func validateIndex(root, relative string, data []byte, records map[string]record
 	violations := commonDocumentViolations(root, relative, data)
 	indexed := map[string]record{}
 	for _, line := range strings.Split(string(data), "\n") {
-		match := adrIndexPattern.FindStringSubmatch(line)
+		trimmed := strings.TrimSpace(line)
+		match := adrIndexPattern.FindStringSubmatch(trimmed)
 		if len(match) == 0 {
-			if strings.HasPrefix(line, "| [") && strings.Contains(line, "](") && strings.Contains(line, ".md)") {
+			if strings.HasPrefix(trimmed, "| [") && strings.Contains(trimmed, "](") && strings.Contains(trimmed, ".md)") {
 				violations = append(violations, Violation{Path: relative, Reason: "malformed ADR index row: " + line})
 			}
 			continue

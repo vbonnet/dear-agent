@@ -13,6 +13,7 @@ var (
 	adrTitlePattern  = regexp.MustCompile(`(?m)^# ADR-([0-9]{3,4}): (.+)$`)
 	adrStatusPattern = regexp.MustCompile(`(?m)^Status: (Accepted|Proposed|Deprecated|Superseded)(?: .*)?$`)
 	adrIndexPattern  = regexp.MustCompile(`(?m)^\| \[([0-9]{3,4})\]\(([^)]+\.md)\) \| ([^|]+) \| (Accepted|Proposed|Deprecated|Superseded) \|$`)
+	bareADRLike      = regexp.MustCompile(`^[0-9]+(?:-|$).*\.md$`)
 	markdownLink     = regexp.MustCompile(`\[[^]]+\]\(([^)]+)\)`)
 )
 

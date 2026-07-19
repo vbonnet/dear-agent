@@ -14,8 +14,8 @@ func TestCheckRepositoryClean(t *testing.T) {
 
 	repo := newADRRepo(t)
 	writeADRFile(t, repo, ".dear-agent.yml", policyFixture())
-	writeADRFile(t, repo, "docs/adr/ADR-001-example.md", recordFixture("001", "Example decision", "Accepted"))
-	writeADRFile(t, repo, "docs/adr/README.md", indexFixture("001", "ADR-001-example.md", "Example decision", "Accepted"))
+	writeADRFile(t, repo, "docs/adr/001-example.md", recordFixture("001", "Example decision", "Accepted"))
+	writeADRFile(t, repo, "docs/adr/README.md", indexFixture("001", "001-example.md", "Example decision", "Accepted"))
 	writeADRFile(t, repo, "pkg/hash/ADR.md", "# Hash decisions\n\nStatus: Accepted\n\n## Context\n\nStable hashes.\n")
 	writeADRFile(t, repo, "fixtures/testdata/ADR-999-fixture.md", "fixture\n")
 	writeADRFile(t, repo, "untracked/ADR-777-ignore.md", "not tracked\n")
@@ -57,6 +57,7 @@ Status: Accepted
 `)
 	writeADRFile(t, repo, "pkg/hash/ADR.md", "# Hash decisions\n\nStatus: Accepted\n")
 	writeADRFile(t, repo, "other/ADR-007-undeclared.md", recordFixture("007", "Ungoverned", "Accepted"))
+	writeADRFile(t, repo, "other/008-bare-undeclared.md", recordFixture("008", "Bare ungoverned", "Accepted"))
 	gitADR(t, repo, "add", ".")
 	gitADR(t, repo, "commit", "-m", "broken fixture")
 
@@ -179,7 +180,7 @@ func TestCheckRepositoryRejectsMalformedADRInputs(t *testing.T) {
 	writeADRFile(t, repo, ".dear-agent.yml", policyFixture())
 	writeADRFile(t, repo, "docs/adr/ADR-001-example.md", recordFixture("001", "Example decision", "Accepted"))
 	writeADRFile(t, repo, "docs/adr/ADR-37-malformed.md", "# ADR-37: malformed\n\nStatus: Accepted\n")
-	writeADRFile(t, repo, "docs/adr/README.md", indexFixture("001", "ADR-001-example.md", "Example decision", "Accepted")+"| [001](ADR-001-example.md) | Duplicate invalid status | Draft |\n")
+	writeADRFile(t, repo, "docs/adr/README.md", indexFixture("001", "ADR-001-example.md", "Example decision", "Accepted")+"  | [001](ADR-001-example.md) | Duplicate invalid status | Draft |\n")
 	writeADRFile(t, repo, "pkg/hash/ADR.md", "# Hash decisions\n\nStatus: Accepted\n")
 	gitADR(t, repo, "add", ".")
 	gitADR(t, repo, "commit", "-m", "fixture")
