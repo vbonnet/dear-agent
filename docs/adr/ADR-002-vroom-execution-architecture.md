@@ -6,7 +6,9 @@
 inaccurate five-role mesh (Verifier/Requester/Orchestrator/Overseer/
 Meta-Orchestrator) governed by a five-level lexicographic value evaluator,
 and were misfiled under `agm/` (VROOM is above AGM, not an AGM-internal
-concept). Those files now redirect here.
+concept). Those identities are historical and non-authoritative; a redirect
+stub may exist in a transitional branch, but the governed lifecycle may remove
+it without changing this decision.
 
 VROOM is the supervisory mesh **above AGM** that governs how agents do
 work. Three supervisors plus a per-task triad; no standing Verifier or
@@ -16,7 +18,7 @@ Requester roles; no value function over a five-level order.
 
 | Supervisor | Analogy | Owns | Secondary | Tertiary |
 |---|---|---|---|---|
-| **Meta-Orchestrator** | CTO | Beads backlog quality, prioritization, tech consistency, anti-duplication | Overseer | Orchestrator |
+| **Meta-Orchestrator** | CTO | Roadmap, prioritization, technology consistency, anti-duplication | Overseer | Orchestrator |
 | **Orchestrator** | COO | Work enqueue/dequeue, worker monitoring, steady progress | Meta-Orchestrator | Overseer |
 | **Overseer** | CRO | Resource usage, leak detection, session cleanup | Orchestrator | Meta-Orchestrator |
 

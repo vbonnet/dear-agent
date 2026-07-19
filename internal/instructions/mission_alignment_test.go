@@ -9,7 +9,7 @@ import (
 
 const ownershipContract = "VROOM owns prioritization, dispatch decisions, supervision, and output verification. AGM owns session lifecycle mechanics: session creation, process execution, messaging, monitoring telemetry, and archival."
 
-func TestAlignmentDocumentsUseCanonicalMissionContract(t *testing.T) {
+func TestAlignmentDocumentsUseCanonicalMissionLanguage(t *testing.T) {
 	root := repoRoot(t)
 	mission := readFile(t, filepath.Join(root, "docs", "alignment", "MISSION.md"))
 	if !strings.Contains(normalizeWhitespace(mission), ownershipContract) {
@@ -30,6 +30,10 @@ func TestAlignmentDocumentsUseCanonicalMissionContract(t *testing.T) {
 	context := readFile(t, filepath.Join(root, "CONTEXT.md"))
 	if !strings.Contains(normalizeWhitespace(context), ownershipContract) {
 		t.Fatal("CONTEXT.md must use the canonical VROOM/AGM ownership contract")
+	}
+	rootGoal := readFile(t, filepath.Join(root, "GOAL.md"))
+	if !strings.Contains(rootGoal, "docs/alignment/MISSION.md") || !strings.Contains(rootGoal, "canonical") {
+		t.Fatal("root GOAL.md must defer project purpose to the canonical mission")
 	}
 }
 
@@ -65,7 +69,7 @@ func TestAlignmentDocumentsRejectSupersededOptimizationModel(t *testing.T) {
 	}
 }
 
-func TestAlignmentDocumentsStayFreshAndFocused(t *testing.T) {
+func TestAlignmentDocumentsCarryAuditMarker(t *testing.T) {
 	root := repoRoot(t)
 	auditMarker := regexp.MustCompile(`<!-- Last audited at: \d{4}-\d{2}-\d{2} -->`)
 	for _, file := range []string{"MISSION.md", "VISION.md", "VALUES.md", "GOALS.md"} {

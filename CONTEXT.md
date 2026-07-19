@@ -282,8 +282,9 @@ listed so older docs and identifiers can be interpreted correctly.
    [MISSION.md](docs/alignment/MISSION.md), vocabulary lives in this file, and
    architecture rationale lives in
    [ADR-002](docs/adr/ADR-002-vroom-execution-architecture.md). The superseded
-   ADRs (`agm/docs/adr/ADR-020`…`ADR-025`) remain redirect stubs for historical
-   links.
+   identities `agm/docs/adr/ADR-020`…`ADR-025` are historical only; redirect
+   stubs, when present in a transitional branch, are not authority and may be
+   removed by the governed ADR lifecycle.
 
 2. **"DEAR" — resolved two-level model plus historical identifiers.**
    - **(a) Process / retrospective loop:** Define → **Execute** → Audit →
