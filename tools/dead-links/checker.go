@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/url"
 	"os"
@@ -65,7 +66,6 @@ func (c *linkChecker) loadDocument(path string) (*document, error) {
 func parseDocument(markdown goldmark.Markdown, source []byte) *document {
 	root := markdown.Parser().Parse(text.NewReader(source))
 	doc := &document{anchors: map[string]bool{}}
-	headingCounts := map[string]int{}
 
 	_ = ast.Walk(root, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
 		if !entering {
@@ -73,12 +73,11 @@ func parseDocument(markdown goldmark.Markdown, source []byte) *document {
 		}
 		switch n := node.(type) {
 		case *ast.Heading:
-			base := githubSlug(string(n.Lines().Value(source)))
+			base := githubSlug(headingText(n, source))
 			id := base
-			if count := headingCounts[base]; count > 0 {
-				id = fmt.Sprintf("%s-%d", base, count)
+			for suffix := 1; doc.anchors[id]; suffix++ {
+				id = fmt.Sprintf("%s-%d", base, suffix)
 			}
-			headingCounts[base]++
 			doc.anchors[id] = true
 		case *ast.Link:
 			doc.links = append(doc.links, linkRef{target: string(n.Destination), line: nodeLine(source, n)})
@@ -92,6 +91,23 @@ func parseDocument(markdown goldmark.Markdown, source []byte) *document {
 		return ast.WalkContinue, nil
 	})
 	return doc
+}
+
+func headingText(heading *ast.Heading, source []byte) string {
+	var content strings.Builder
+	_ = ast.Walk(heading, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		if textNode, ok := node.(*ast.Text); ok {
+			content.Write(textNode.Value(source))
+			if textNode.SoftLineBreak() || textNode.HardLineBreak() {
+				content.WriteByte(' ')
+			}
+		}
+		return ast.WalkContinue, nil
+	})
+	return content.String()
 }
 
 var explicitAnchorRe = regexp.MustCompile(`(?i)\b(?:id|name)\s*=\s*["']([^"']+)["']`)
@@ -145,15 +161,21 @@ func githubSlug(heading string) string {
 
 // findMarkdown returns every tracked Markdown file, including files under
 // hidden directories. Git is the repository inventory authority.
-func findMarkdown(root string) ([]string, error) {
+func findMarkdown(ctx context.Context, root string) ([]string, error) {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return nil, fmt.Errorf("absolute repository root: %w", err)
 	}
-	cmd := exec.Command("git", "-C", absRoot, "ls-files", "-z", "--")
+	cmd := exec.CommandContext(ctx, "git", "-C", absRoot, "ls-files", "-z", "--")
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("git ls-files: %w", err)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, fmt.Errorf("git ls-files: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	var files []string
 	for raw := range bytes.SplitSeq(out, []byte{0}) {
@@ -164,6 +186,19 @@ func findMarkdown(root string) ([]string, error) {
 	}
 	sort.Strings(files)
 	return files, nil
+}
+
+func repositoryRoot(ctx context.Context, dir string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--show-toplevel")
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		return "", fmt.Errorf("git repository root: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return filepath.Clean(strings.TrimSpace(string(output))), nil
 }
 
 func isExternalLink(target string) bool {

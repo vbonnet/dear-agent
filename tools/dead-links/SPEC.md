@@ -32,6 +32,12 @@
 
 **DEAD-LINKS-12** When multiple links target one Markdown document, the system shall reuse that document's parsed anchor inventory.
 
+**DEAD-LINKS-13** When a heading contains inline Markdown, the system shall derive its anchor from rendered heading text rather than raw markup.
+
+**DEAD-LINKS-14** When generated heading anchors collide across base names or suffixes, the system shall reserve every emitted identifier and choose the next unused suffix.
+
+**DEAD-LINKS-15** When no root is supplied, the command shall resolve Git's top-level directory from the current working directory before discovering tracked Markdown.
+
 ## Test Traceability
 
 - Package tests: `tools/dead-links/main_test.go`

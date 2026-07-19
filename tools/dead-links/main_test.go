@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -191,7 +192,7 @@ func TestFindMarkdown_DotRootNotSkipped(t *testing.T) {
 	// default-invocation bug where the root's base name "." triggered
 	// SkipDir and scanned zero files.
 	t.Chdir(dir)
-	found, err := findMarkdown(".")
+	found, err := findMarkdown(context.Background(), ".")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -229,7 +230,7 @@ func TestFindMarkdown(t *testing.T) {
 			gitCommand(t, dir, "add", f.path)
 		}
 	}
-	found, err := findMarkdown(dir)
+	found, err := findMarkdown(context.Background(), dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

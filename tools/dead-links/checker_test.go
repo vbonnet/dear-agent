@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,6 +26,10 @@ func TestParseDocumentUsesMarkdownAST(t *testing.T) {
 	source := []byte(strings.Join([]string{
 		"# Repeat",
 		"# Repeat",
+		"# [Linked](target.md) `Code` **Bold**",
+		"# Foo",
+		"# Foo-1",
+		"# Foo",
 		`<a id="explicit"></a>`,
 		"```md",
 		"[not live](missing.md)",
@@ -36,7 +41,7 @@ func TestParseDocumentUsesMarkdownAST(t *testing.T) {
 		"[target]: target.md#repeat",
 	}, "\n"))
 	doc := parseDocument(markdown, source)
-	for _, anchor := range []string{"repeat", "repeat-1", "explicit"} {
+	for _, anchor := range []string{"repeat", "repeat-1", "linked-code-bold", "foo", "foo-1", "foo-2", "explicit"} {
 		if !doc.anchors[anchor] {
 			t.Errorf("missing anchor %q: %v", anchor, doc.anchors)
 		}
@@ -46,8 +51,31 @@ func TestParseDocumentUsesMarkdownAST(t *testing.T) {
 		targets = append(targets, link.target)
 	}
 	sort.Strings(targets)
-	if want := []string{"asset.png", "target.md#repeat"}; !reflect.DeepEqual(targets, want) {
+	if want := []string{"asset.png", "target.md", "target.md#repeat"}; !reflect.DeepEqual(targets, want) {
 		t.Fatalf("targets = %v, want %v", targets, want)
+	}
+}
+
+func TestRepositoryRootAndInventoryFromSubdirectory(t *testing.T) {
+	repo := t.TempDir()
+	if output, err := exec.Command("git", "-C", repo, "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, output)
+	}
+	mustWrite(t, filepath.Join(repo, "README.md"), "# Root\n")
+	mustWrite(t, filepath.Join(repo, "docs", "nested", "README.md"), "# Nested\n")
+	if output, err := exec.Command("git", "-C", repo, "add", ".").CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v: %s", err, output)
+	}
+	root, err := repositoryRoot(context.Background(), filepath.Join(repo, "docs", "nested"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := findMarkdown(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("findMarkdown from nested root found %d files, want 2: %v", len(files), files)
 	}
 }
 
@@ -183,7 +211,7 @@ func TestRepositoryBaselineHasNoNewOrStaleDebt(t *testing.T) {
 		t.Skipf("not in a Git worktree: %v", err)
 	}
 	root := strings.TrimSpace(string(out))
-	files, err := findMarkdown(root)
+	files, err := findMarkdown(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}

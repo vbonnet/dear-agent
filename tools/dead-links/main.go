@@ -10,10 +10,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
+	"time"
 )
 
 // finding is a broken-link report entry.
@@ -28,6 +32,11 @@ func main() {
 }
 
 func run() int {
+	baseCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithTimeout(baseCtx, 2*time.Minute)
+	defer cancel()
+
 	root := flag.String("root", "", "repo root to scan (default: git toplevel of cwd)")
 	baselinePath := flag.String("baseline", "", "shrink-only baseline of source<TAB>target findings")
 	verbose := flag.Bool("verbose", false, "print each checked link")
@@ -35,8 +44,12 @@ func run() int {
 
 	dir := *root
 	if dir == "" {
-		var err error
-		dir, err = os.Getwd()
+		cwd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 2
+		}
+		dir, err = repositoryRoot(ctx, cwd)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 2
@@ -47,7 +60,7 @@ func run() int {
 		return 2
 	}
 
-	mdFiles, err := findMarkdown(dir)
+	mdFiles, err := findMarkdown(ctx, dir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error scanning markdown files: %v\n", err)
 		return 2
