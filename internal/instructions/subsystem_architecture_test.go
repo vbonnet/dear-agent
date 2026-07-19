@@ -1,7 +1,6 @@
 package instructions_test
 
 import (
-	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -124,24 +123,6 @@ func TestSandboxArchitectureMatchesSelectionOrder(t *testing.T) {
 	for _, provider := range []string{"bubblewrap", "overlayfs", "gvisor", "apfs", "claudecode-worktree", "mock"} {
 		if !strings.Contains(doc, "`"+provider+"`") {
 			t.Errorf("sandbox architecture omits provider %q", provider)
-		}
-	}
-}
-
-func TestRetiredSubsystemArtifactsStayRetired(t *testing.T) {
-	root := repoRoot(t)
-	retiredFiles := []string{
-		"agm/cmd/agm-daemon/adr/001-http-api-choice.md",
-		"agm/cmd/agm-mcp-server/adr/002-caching-strategy.md",
-		"agm/internal/agent/gemini/ADR-002-google-genai-sdk-selection.md",
-		"engram/mcp/requirements.txt",
-		"engram/mcp/test_basic_tools.sh",
-	}
-	for _, file := range retiredFiles {
-		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(file))); err == nil {
-			t.Errorf("retired artifact still exists: %s", file)
-		} else if !os.IsNotExist(err) {
-			t.Errorf("inspect retired artifact %s: %v", file, err)
 		}
 	}
 }

@@ -17,9 +17,11 @@ interval owned by `internal/contracts`, resolves the target, and uses
 `CheckSessionDelivery` as the readiness authority. Display-state detection is
 diagnostic only.
 
-Successful delivery uses the safe tmux multiline sender and records session,
-queue, metric, and acknowledgment state. Busy or blocked targets remain pending.
-Resolution or send failures consume configured retry attempts.
+Successful tmux delivery uses the safe multiline sender, then attempts session,
+queue, metric, and acknowledgment bookkeeping. Those post-send writes are
+best-effort and failures are logged; a failed queue update can leave an entry
+pending for redelivery. Busy or blocked targets remain pending. Resolution or
+send failures consume configured retry attempts.
 
 The daemon exposes operational state through its PID file, log, queue records,
 and AGM command surfaces. It does not own a session-status HTTP or status-file

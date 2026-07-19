@@ -25,7 +25,7 @@ mcp_server:
     port: 8080
 ```
 
-`wayfinder_dir` must point at a writable Engram Research worktree. Do not point
+`wayfinder_dir` must point at a readable Engram Research worktree. Do not point
 it at the dear-agent source tree or a transient, branch-named checkout.
 
 Use [`ARCHITECTURE.md`](ARCHITECTURE.md) for the current ten-tool inventory and
