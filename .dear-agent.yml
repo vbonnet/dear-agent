@@ -66,6 +66,7 @@ forbidden-paths:
     - "**/*-[Bb][Aa][Cc][Kk][Ll][Oo][Gg].*"
     - "**/*-[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh].*"
     - "**/*-[Rr][Ee][Pp][Oo][Rr][Tt].*"
+    - "**/*_[Tt][Ee][Ss][Tt]_[Rr][Ee][Pp][Oo][Rr][Tt].[Mm][Dd]"
     - docs/retros/**
     - docs/design/**
     - wf/**
