@@ -100,7 +100,7 @@ func (DefaultPermissionEnforcer) CheckHost(perm *Permissions, host string) error
 			return nil
 		}
 		// Bare "domain.com" also matches subdomains, matching the
-		// expectations of the example YAML in ROADMAP.md.
+		// workflow permission contract for domain suffixes.
 		if !strings.HasPrefix(p, "*.") && strings.HasSuffix(host, "."+p) {
 			return nil
 		}
