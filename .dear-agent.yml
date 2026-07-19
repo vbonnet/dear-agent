@@ -38,7 +38,7 @@ output-dirs:
 
 # PR lifecycle policy (informational mirror of the enforcement in
 # .claude/settings.json + .claude/hooks/pretool-pr-guard; the authoritative
-# rationale lives in .claude/CLAUDE.md §"PR Lifecycle — Wayfinder-Only").
+# rationale lives in AGENTS.md "Guarded delivery" and the canonical policies).
 # Agents read this file at session start: PR open/close in this repo goes
 # through the safe-pr wrapper, which requires an active Wayfinder session
 # (planning or in-progress) and stamps the session trace on
@@ -62,7 +62,7 @@ forbidden-paths:
     # LIVING DOCUMENTATION stays in dear-agent, as close to the code as
     # possible (proximity principle): ARCHITECTURE.md, ADRs (docs/adr/),
     # inline/API docs, CLAUDE.md — anything kept true as the code changes.
-    # See .claude/CLAUDE.md "Documentation & Artifact Routing" for the full
+    # See AGENTS.md "Living Documentation Policy" for the full
     # policy (Last-audited headers, wrong-fact-triggers-retro, doc audits).
     #
     # Existing normative behavior specs under docs/design/ remain living docs.

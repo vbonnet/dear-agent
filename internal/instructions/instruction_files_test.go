@@ -49,7 +49,7 @@ func TestCanonicalAgentsIsConciseRouter(t *testing.T) {
 	root := repoRoot(t)
 	content := readFile(t, filepath.Join(root, "AGENTS.md"))
 
-	if lines := strings.Count(content, "\n") + 1; lines > 180 {
+	if lines := strings.Count(strings.TrimSuffix(content, "\n"), "\n") + 1; lines > 180 {
 		t.Fatalf("AGENTS.md is %d lines; router budget is 180", lines)
 	}
 
