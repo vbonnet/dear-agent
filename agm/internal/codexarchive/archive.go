@@ -30,7 +30,6 @@ const (
 var (
 	archiveCodexThreadFn    = archiveCodexThread
 	newThreadArchiver       = func() codexThreadArchiver { return codexcontrol.New() }
-	runCodexArchiveFn       = runCodexArchive
 	runCodexRemoteArchiveFn = runCodexRemoteArchive
 )
 
