@@ -211,7 +211,7 @@ func assertRelativeMarkdownLinksResolve(t *testing.T, dir, name, content string)
 	matches := markdownLink.FindAllStringSubmatch(content, -1)
 	matches = append(matches, markdownReferenceDefinition.FindAllStringSubmatch(content, -1)...)
 	for _, match := range matches {
-		target := strings.SplitN(match[1], "#", 2)[0]
+		target := strings.SplitN(markdownLinkDestination(match[1]), "#", 2)[0]
 		if target == "" || strings.Contains(target, "://") || strings.HasPrefix(target, "mailto:") {
 			continue
 		}
@@ -219,6 +219,27 @@ func assertRelativeMarkdownLinksResolve(t *testing.T, dir, name, content string)
 			t.Errorf("%s: relative link %q does not resolve: %v", name, match[1], err)
 		}
 	}
+}
+
+func markdownLinkDestination(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(raw, "<") {
+		if end := strings.Index(raw, ">"); end > 0 {
+			return raw[1:end]
+		}
+	}
+	if end := strings.IndexAny(raw, " \t\r\n"); end >= 0 {
+		return raw[:end]
+	}
+	return raw
+}
+
+func TestRelativeMarkdownLinkWithTitleResolves(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ADR-002-live.md"), []byte("# Live\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	assertRelativeMarkdownLinksResolve(t, dir, "ADR-001-old.md", `[decision](ADR-002-live.md "successor")`)
 }
 
 func assertSameADRRecords(t *testing.T, records, indexed map[string]adrRecord) {
