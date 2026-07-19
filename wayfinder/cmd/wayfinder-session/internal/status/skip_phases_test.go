@@ -50,6 +50,25 @@ func TestNextWaypoint_StandardKeepsDesign(t *testing.T) {
 	}
 }
 
+func TestNextWaypointSkipRoadmapAdvancesFromPlanToBuild(t *testing.T) {
+	s := &StatusV2{
+		SchemaVersion:   SchemaVersionV2,
+		CurrentWaypoint: WaypointV2Plan,
+		SkipRoadmap:     true,
+		WaypointHistory: []WaypointHistory{
+			{Name: WaypointV2Plan, Status: WaypointStatusV2Completed},
+		},
+	}
+
+	next, err := s.NextWaypoint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next != WaypointV2Build {
+		t.Fatalf("next waypoint = %q, want BUILD when SETUP is skipped", next)
+	}
+}
+
 // TestNextWaypoint_LiteFullProgression walks an entire lite session and asserts the
 // skipped phases never surface and the sequence terminates correctly at RETRO.
 func TestNextWaypoint_LiteFullProgression(t *testing.T) {
@@ -115,5 +134,13 @@ func TestIsPhaseSkipped(t *testing.T) {
 	empty := &StatusV2{}
 	if empty.IsPhaseSkipped(WaypointV2Design) {
 		t.Error("empty SkipPhases should skip nothing")
+	}
+
+	skipRoadmap := &StatusV2{SkipRoadmap: true}
+	if !skipRoadmap.IsPhaseSkipped(WaypointV2Setup) {
+		t.Error("SkipRoadmap should skip SETUP")
+	}
+	if skipRoadmap.IsPhaseSkipped(WaypointV2Build) {
+		t.Error("SkipRoadmap must not skip BUILD")
 	}
 }

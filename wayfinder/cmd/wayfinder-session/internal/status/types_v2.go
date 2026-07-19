@@ -379,9 +379,10 @@ func (s *StatusV2) GetSkipPhases() []string {
 	return s.SkipPhases
 }
 
-// IsPhaseSkipped reports whether the given phase is skipped by this session's profile.
+// IsPhaseSkipped reports whether the phase is skipped by the session's profile
+// or by the explicit roadmap override.
 func (s *StatusV2) IsPhaseSkipped(phase string) bool {
-	return slices.Contains(s.SkipPhases, phase)
+	return slices.Contains(s.SkipPhases, phase) || (s.SkipRoadmap && phase == WaypointV2Setup)
 }
 
 // SetCurrentWaypoint sets the current named phase.
