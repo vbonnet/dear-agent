@@ -14,7 +14,7 @@ usage, content, and operational outcomes distinct.
 
 **SKILL-LINT-CMD-02** When more than one of repository, file, or directory mode is selected, the system shall print usage and exit with code 2.
 
-**SKILL-LINT-CMD-03** When `-repo <root>` is provided, the system shall call `pkg/skilllint.CheckRepository` for that root.
+**SKILL-LINT-CMD-03** When `-repo <root>` is provided, the system shall call `pkg/skilllint.CheckRepository` with the signal-aware command context for that root.
 
 **SKILL-LINT-CMD-04** When `-file <path>` is provided, the system shall call `pkg/skilllint.CheckFile` only for that path.
 

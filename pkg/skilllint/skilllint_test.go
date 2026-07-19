@@ -1,6 +1,7 @@
 package skilllint
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -163,6 +164,16 @@ func TestCheckFileSkillSchema(t *testing.T) {
 			want: []string{"provider execution extension requires a non-provider fallback"},
 		},
 		{
+			name: "provider extension with provider-only fallback",
+			content: strings.Replace(
+				strings.Replace(validSkill("example-skill"), "description:", "allowed-tools: [Bash]\ndescription:", 1),
+				"Confirm the expected result exists.",
+				"When Bash is unavailable, use Bash on another host.",
+				1,
+			),
+			want: []string{"provider execution extension requires a non-provider fallback"},
+		},
+		{
 			name: "provider extension with fallback",
 			content: strings.Replace(
 				strings.Replace(validSkill("example-skill"), "description:", "allowed-tools: [Bash]\ndescription:", 1),
@@ -264,7 +275,7 @@ func TestCheckRepositoryUsesTrackedInventoryAndDetectsDuplicates(t *testing.T) {
 	writeFile(t, repo, "untracked/SKILL.md", "# intentionally invalid and untracked\n")
 	runGit(t, repo, "add", ".agents/skills/first/SKILL.md", "unusual/second/SKILL.md", "plugin/commands/bad.md")
 
-	violations, err := CheckRepository(repo)
+	violations, err := CheckRepository(context.Background(), repo)
 	if err != nil {
 		t.Fatalf("CheckRepository: %v", err)
 	}
@@ -284,10 +295,31 @@ func TestCheckRepositoryUsesTrackedInventoryAndDetectsDuplicates(t *testing.T) {
 	}
 }
 
+func TestCheckRepositoryDoesNotTreatSymlinkAliasAsDuplicate(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	writeFile(t, repo, "canonical/SKILL.md", validSkill("canonical"))
+	aliasDir := filepath.Join(repo, "plugin", "skills", "canonical")
+	if err := os.MkdirAll(aliasDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("..", "..", "..", "canonical", "SKILL.md"), filepath.Join(aliasDir, "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "canonical/SKILL.md", "plugin/skills/canonical/SKILL.md")
+	violations, err := CheckRepository(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("symlink alias produced violations: %v", violations)
+	}
+}
+
 func TestCheckRepositoryRequiresGitRepository(t *testing.T) {
 	t.Parallel()
 
-	if _, err := CheckRepository(t.TempDir()); err == nil {
+	if _, err := CheckRepository(context.Background(), t.TempDir()); err == nil {
 		t.Fatal("expected operational error outside a Git repository")
 	}
 }
@@ -298,7 +330,7 @@ func TestRepositorySkillSurfacesAreCompliant(t *testing.T) {
 		t.Skipf("cannot find repo root: %v", err)
 		return
 	}
-	violations, err := CheckRepository(root)
+	violations, err := CheckRepository(context.Background(), root)
 	if err != nil {
 		t.Fatalf("CheckRepository: %v", err)
 	}
@@ -307,6 +339,16 @@ func TestRepositorySkillSurfacesAreCompliant(t *testing.T) {
 		for _, violation := range violations {
 			t.Errorf("  %s", violation)
 		}
+	}
+}
+
+func TestCheckRepositoryHonorsCallerCancellation(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := CheckRepository(ctx, repo); err == nil || !strings.Contains(err.Error(), context.Canceled.Error()) {
+		t.Fatalf("CheckRepository with canceled context = %v, want context canceled", err)
 	}
 }
 

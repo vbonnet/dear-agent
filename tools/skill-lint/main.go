@@ -9,19 +9,24 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/vbonnet/dear-agent/pkg/skilllint"
 )
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stderr))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	os.Exit(run(ctx, os.Args[1:], os.Stderr))
 }
 
-func run(args []string, stderr io.Writer) int {
+func run(ctx context.Context, args []string, stderr io.Writer) int {
 	flags := flag.NewFlagSet("skill-lint", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	var singleFile, repository string
@@ -59,7 +64,7 @@ func run(args []string, stderr io.Writer) int {
 	)
 	switch {
 	case repository != "":
-		violations, err = skilllint.CheckRepository(repository)
+		violations, err = skilllint.CheckRepository(ctx, repository)
 	case singleFile != "":
 		violations, err = skilllint.CheckFile(singleFile)
 	default:

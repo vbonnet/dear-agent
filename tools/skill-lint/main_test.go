@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,7 +38,7 @@ Confirm the output.
 	runGit(t, repo, "add", "skills/example/SKILL.md")
 
 	var stderr bytes.Buffer
-	if code := run([]string{"-repo", repo}, &stderr); code != 0 {
+	if code := run(context.Background(), []string{"-repo", repo}, &stderr); code != 0 {
 		t.Fatalf("run returned %d: %s", code, stderr.String())
 	}
 }
@@ -50,7 +51,7 @@ func TestRunUsageErrors(t *testing.T) {
 	}
 	for _, args := range tests {
 		var stderr bytes.Buffer
-		if code := run(args, &stderr); code != 2 {
+		if code := run(context.Background(), args, &stderr); code != 2 {
 			t.Errorf("run(%v) = %d, want 2; stderr=%s", args, code, stderr.String())
 		}
 	}

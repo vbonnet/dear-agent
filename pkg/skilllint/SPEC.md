@@ -34,15 +34,15 @@ errors.
 
 **SKILLLINT-PKG-11** When a skill declares optional `model` or `effort` metadata, the system shall require both fields and validate their values against the command tiers.
 
-**SKILLLINT-PKG-12** When a skill declares a provider execution extension, the system shall require explicit actionable non-provider fallback language rather than accepting an unavailable-state phrase alone.
+**SKILLLINT-PKG-12** When a skill declares a provider execution extension, the system shall require explicit actionable fallback through a harness-neutral route and shall reject fallback to another invocation of the same provider tool.
 
 **SKILLLINT-PKG-13** When a surface declares an unsupported frontmatter key, the system shall return a surface-specific unsupported-field violation.
 
-**SKILLLINT-PKG-14** When checking a repository, the system shall use timeout-bounded, non-interactive Git tracked inventory to discover every `SKILL.md` and direct `commands/*.md` prompt while excluding README and SPEC contracts.
+**SKILLLINT-PKG-14** When checking a repository, the system shall use caller-cancelable, timeout-bounded, non-interactive Git tracked inventory to discover every `SKILL.md` and direct `commands/*.md` prompt while excluding README and SPEC contracts.
 
 **SKILLLINT-PKG-15** When checking a repository, the system shall ignore untracked files and return repository-relative violation paths.
 
-**SKILLLINT-PKG-16** When two tracked skills are byte-identical, the system shall report the later path and the first tracked owner.
+**SKILLLINT-PKG-16** When two tracked regular-file skills are byte-identical, the system shall report the later path and the first tracked owner; a tracked symlink to a canonical skill shall remain a validated discovery alias rather than count as a copy.
 
 **SKILLLINT-PKG-17** When checking one file or a directory, the system shall route recognized surfaces through the same validators used by repository checks.
 

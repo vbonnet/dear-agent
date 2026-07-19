@@ -63,6 +63,8 @@ var (
 	verificationPattern    = regexp.MustCompile(`(?im)^#{1,6}[ \t]+(?:verify|verification|completion|complete|finish|close|end|rewind and close)\b`)
 	referencesPattern      = regexp.MustCompile(`(?im)^#{1,6}[ \t]+(?:references|documentation|resources)\b`)
 	fallbackPattern        = regexp.MustCompile(`(?i)(?:(?:when|if) [^\n.]{0,80}(?:unavailable|unsupported|not available)[^\n.]{0,120}\b(?:use|run|invoke|follow|continue|fall back)\b|(?:for|on) (?:non[- ]claude|other harness(?:es)?)[^\n.]{0,120}\b(?:use|run|invoke|follow|continue)\b|\b(?:use|run|invoke|follow|continue)\b[^\n.]{0,120}\bwithout (?:the |this )?skill\b)`)
+	fallbackRoutePattern   = regexp.MustCompile(`(?i)\b(?:cli|command[- ]line|terminal|shell|browser|https?|api|mcp|manual(?:ly)?|direct(?:ly)?|artifacts?|files?)\b`)
+	providerToolAction     = regexp.MustCompile(`(?i)\b(?:use|run|invoke|fall back to)\s+(?:the\s+)?(?:bash|read|write|edit|glob|grep|task|webfetch|websearch)\b`)
 )
 
 var commandFields = map[string]bool{
@@ -133,8 +135,8 @@ func CheckDir(root string) ([]Violation, error) {
 // CheckRepository validates every tracked skill and command surface in the Git
 // repository containing root. Violation paths are relative to the repository
 // top level so local and CI output is stable.
-func CheckRepository(root string) ([]Violation, error) {
-	top, err := gitOutput(root, "rev-parse", "--show-toplevel")
+func CheckRepository(ctx context.Context, root string) ([]Violation, error) {
+	top, err := gitOutput(ctx, root, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return nil, fmt.Errorf("resolve repository root: %w", err)
 	}
@@ -143,7 +145,7 @@ func CheckRepository(root string) ([]Violation, error) {
 		return nil, fmt.Errorf("resolve repository root: git returned an empty path")
 	}
 
-	tracked, err := gitOutput(repoRoot, "ls-files", "-z", "--full-name")
+	tracked, err := gitOutput(ctx, repoRoot, "ls-files", "-z", "--full-name")
 	if err != nil {
 		return nil, fmt.Errorf("list tracked files: %w", err)
 	}
@@ -166,8 +168,8 @@ func CheckRepository(root string) ([]Violation, error) {
 	return checkDocuments(documents)
 }
 
-func gitOutput(dir string, args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+func gitOutput(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cmdArgs := append([]string{"-C", dir}, args...)
 	cmd := exec.CommandContext(ctx, "git", cmdArgs...)
@@ -190,12 +192,18 @@ func checkDocuments(documents []document) ([]Violation, error) {
 	var violations []Violation
 	firstByDigest := make(map[[sha256.Size]byte]string)
 	for _, doc := range documents {
+		info, err := os.Lstat(doc.readPath)
+		if err != nil {
+			return nil, fmt.Errorf("%s: stat: %w", doc.displayPath, err)
+		}
 		data, err := os.ReadFile(doc.readPath)
 		if err != nil {
 			return nil, fmt.Errorf("%s: read: %w", doc.displayPath, err)
 		}
 		violations = append(violations, checkData(doc.displayPath, data, doc.kind)...)
-		if doc.kind != surfaceSkill {
+		// A tracked symlink is a discovery alias, not a byte-for-byte copy. Its
+		// target is still validated above, but only regular files own content.
+		if doc.kind != surfaceSkill || info.Mode()&os.ModeSymlink != 0 {
 			continue
 		}
 		digest := sha256.Sum256(data)
@@ -303,10 +311,23 @@ func validateSkillExecution(path string, fm *Frontmatter, keys map[string]yaml.N
 	if effortPresent {
 		violations = append(violations, validateOptionalTier(path, "effort", fm.Effort, allowedEfforts, "low, medium, high")...)
 	}
-	if hasProviderExecutionField(keys) && !fallbackPattern.MatchString(bodyText) {
+	if hasProviderExecutionField(keys) && !hasActionableNonProviderFallback(bodyText) {
 		violations = append(violations, Violation{Path: path, Reason: "provider execution extension requires a non-provider fallback in the skill body"})
 	}
 	return violations
+}
+
+func hasActionableNonProviderFallback(body string) bool {
+	for _, sentence := range strings.FieldsFunc(body, func(r rune) bool {
+		return r == '.' || r == '!' || r == '?'
+	}) {
+		if fallbackPattern.MatchString(sentence) &&
+			fallbackRoutePattern.MatchString(sentence) &&
+			!providerToolAction.MatchString(sentence) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateRequiredTier(path, field, value string, allowed map[string]bool, expected string) []Violation {
