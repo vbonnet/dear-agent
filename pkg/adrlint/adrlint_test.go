@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -117,6 +118,13 @@ func TestADRSuccessorLinkMustResolveToAnotherLocalRecord(t *testing.T) {
 				t.Fatalf("hasADRSuccessorLink from %s = %v, want %v", dir, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestMarkdownTargetsIncludeReferenceDefinitions(t *testing.T) {
+	targets := markdownTargets([]byte("[decision][successor]\n\n[successor]: <missing.md> \"title\"\n"))
+	if !slices.Contains(targets, "missing.md") {
+		t.Fatalf("markdownTargets() = %v, want reference-definition target", targets)
 	}
 }
 

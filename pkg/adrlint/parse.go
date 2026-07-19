@@ -9,13 +9,14 @@ import (
 )
 
 var (
-	adrFilePattern   = regexp.MustCompile(`^(?:ADR-)?([0-9]{3,4})-[a-z0-9-]+\.md$`)
-	adrTitlePattern  = regexp.MustCompile(`(?m)^# ADR-([0-9]{3,4}): (.+)$`)
-	adrStatusPattern = regexp.MustCompile(`(?m)^Status: (Accepted|Proposed|Deprecated|Superseded)(?: .*)?$`)
-	adrStatusLine    = regexp.MustCompile(`(?m)^Status:.*$`)
-	adrIndexPattern  = regexp.MustCompile(`(?m)^\| \[([0-9]{3,4})\]\(([^)]+\.md)\) \| ([^|]+) \| (Accepted|Proposed|Deprecated|Superseded) \|$`)
-	bareADRLike      = regexp.MustCompile(`^[0-9]+(?:-[a-z0-9-]+)?\.md$`)
-	markdownLink     = regexp.MustCompile(`\[[^]]+\]\(([^)]+)\)`)
+	adrFilePattern              = regexp.MustCompile(`^(?:ADR-)?([0-9]{3,4})-[a-z0-9-]+\.md$`)
+	adrTitlePattern             = regexp.MustCompile(`(?m)^# ADR-([0-9]{3,4}): (.+)$`)
+	adrStatusPattern            = regexp.MustCompile(`(?m)^Status: (Accepted|Proposed|Deprecated|Superseded)(?: .*)?$`)
+	adrStatusLine               = regexp.MustCompile(`(?m)^Status:.*$`)
+	adrIndexPattern             = regexp.MustCompile(`(?m)^\| \[([0-9]{3,4})\]\(([^)]+\.md)\) \| ([^|]+) \| (Accepted|Proposed|Deprecated|Superseded) \|$`)
+	bareADRLike                 = regexp.MustCompile(`^[0-9]+(?:-[a-z0-9-]+)?\.md$`)
+	markdownLink                = regexp.MustCompile(`\[[^]]+\]\(([^)]+)\)`)
+	markdownReferenceDefinition = regexp.MustCompile(`(?m)^[ \t]{0,3}\[[^]]+\]:[ \t]+<?([^> \t]+)>?(?:[ \t]+.*)?$`)
 )
 
 type record struct {
@@ -95,6 +96,7 @@ func commonDocumentViolations(root, relative string, data []byte) []Violation {
 
 func markdownTargets(data []byte) []string {
 	matches := markdownLink.FindAllStringSubmatch(string(data), -1)
+	matches = append(matches, markdownReferenceDefinition.FindAllStringSubmatch(string(data), -1)...)
 	targets := make([]string, 0, len(matches))
 	for _, match := range matches {
 		targets = append(targets, match[1])
