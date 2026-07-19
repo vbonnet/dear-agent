@@ -9,10 +9,18 @@ import (
 // The forbidden globs as declared in .dear-agent.yml > forbidden-paths.
 var testPatterns = []string{
 	"**/[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh]/**",
-	"**/RESEARCH.*",
-	"**/REPORT.*",
+	"**/[Rr][Ee][Ss][Ee][Aa][Rr][Cc][Hh].*",
+	"**/[Rr][Ee][Pp][Oo][Rr][Tt].*",
 	"**/[Pp][Ll][Aa][Nn].[Mm][Dd]",
 	"**/*-[Pp][Ll][Aa][Nn].[Mm][Dd]",
+	"**/[Pp][Ll][Aa][Nn].[Tt][Xx][Tt]",
+	"**/*-[Pp][Ll][Aa][Nn].[Tt][Xx][Tt]",
+	"**/[Pp][Ll][Aa][Nn].[Rr][Ss][Tt]",
+	"**/*-[Pp][Ll][Aa][Nn].[Rr][Ss][Tt]",
+	"**/[Pp][Ll][Aa][Nn].[Pp][Dd][Ff]",
+	"**/*-[Pp][Ll][Aa][Nn].[Pp][Dd][Ff]",
+	"**/[Pp][Ll][Aa][Nn].[Hh][Tt][Mm][Ll]",
+	"**/*-[Pp][Ll][Aa][Nn].[Hh][Tt][Mm][Ll]",
 	"**/docs/**/*-[Pp][Ll][Aa][Nn].*",
 	"**/[Rr][Oo][Aa][Dd][Mm][Aa][Pp].*",
 	"**/*-[Rr][Oo][Aa][Dd][Mm][Aa][Pp].*",
@@ -63,6 +71,11 @@ func TestForbidden(t *testing.T) {
 		{"agm/TEST-PLAN.md", true},
 		{"agm/CENTRALIZED-STORAGE-TEST-PLAN.md", true},
 		{"engram/hooks-bin/GO-MIGRATION-PLAN.md", true},
+		{"engram/release-plan.rst", true},
+		{"agm/TEST-PLAN.txt", true},
+		{"research.pdf", true},
+		{"Research.md", true},
+		{"report.html", true},
 		// Wayfinder TOOL SOURCE and living docs — must NOT be blocked.
 		{"wayfinder/SKILL.md", false},
 		{"wayfinder/SPEC.md", false},
@@ -75,6 +88,8 @@ func TestForbidden(t *testing.T) {
 		{"cmd/routing-guard/main.go", false},
 		{".github/workflows/tofu-plan.yml", false},
 		{"agm/test/integration/plan_continuity_test.go", false},
+		{"pkg/backlog.go", false},
+		{"cmd/audit-report.go", false},
 	}
 	for _, c := range cases {
 		if got := forbidden(c.path, testPatterns); got != c.want {
@@ -103,6 +118,12 @@ func TestGlobPathMatch(t *testing.T) {
 	}
 }
 
+func TestParseArgsRejectsRetiredBaselineFlag(t *testing.T) {
+	if _, _, err := parseArgs([]string{"--all", "--baseline", "old.txt"}); err == nil {
+		t.Fatal("retired --baseline flag accepted")
+	}
+}
+
 func TestLoadPatterns(t *testing.T) {
 	dir := t.TempDir()
 	yml := filepath.Join(dir, ".dear-agent.yml")
@@ -128,49 +149,9 @@ forbidden-paths:
 	}
 }
 
-func TestLoadBaseline(t *testing.T) {
-	dir := t.TempDir()
-	f := filepath.Join(dir, "baseline.txt")
-	content := "# comment\n\ndocs/design/anti-stall.md\n  docs/retros/x.md  # trailing\n"
-	if err := os.WriteFile(f, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	got, err := loadBaseline(f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !got["docs/design/anti-stall.md"] || !got["docs/retros/x.md"] {
-		t.Errorf("baseline missing expected entries: %v", got)
-	}
-	if len(got) != 2 {
-		t.Errorf("baseline has %d entries, want 2: %v", len(got), got)
-	}
-	// Empty baseline path → empty (non-nil) set, no error.
-	if g, err := loadBaseline(""); err != nil || g == nil {
-		t.Errorf("loadBaseline(\"\") = (%v, %v), want (non-nil, nil)", g, err)
-	}
-}
-
-func TestValidateBaselineRejectsUntrackedPaths(t *testing.T) {
-	tracked := []string{"docs/design/existing.md"}
-	if err := validateBaseline(map[string]bool{}, tracked); err != nil {
-		t.Fatalf("empty baseline rejected: %v", err)
-	}
-	if err := validateBaseline(map[string]bool{"docs/design/existing.md": true}, tracked); err == nil {
-		t.Fatal("non-empty baseline accepted")
-	}
-	if err := validateBaseline(map[string]bool{"docs/design/missing.md": true}, tracked); err == nil {
-		t.Fatal("untracked baseline path accepted")
-	}
-}
-
 func TestRepositoryTreeHasNoTemporalDebt(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", ".."))
 	patterns, err := loadPatterns(filepath.Join(root, ".dear-agent.yml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	exempt, err := loadBaseline(filepath.Join(root, ".forbidden-artifacts-baseline.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,14 +159,8 @@ func TestRepositoryTreeHasNoTemporalDebt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := validateBaseline(exempt, tracked); err != nil {
-		t.Fatal(err)
-	}
-	if len(exempt) != 0 {
-		t.Fatalf("temporal artifact baseline has %d entries, want zero", len(exempt))
-	}
 	for _, name := range tracked {
-		if forbidden(name, patterns) && !exempt[name] {
+		if forbidden(name, patterns) {
 			t.Errorf("tracked temporal artifact: %s", name)
 		}
 	}

@@ -17,7 +17,6 @@
 //	routing-guard --staged                    # scan staged files (pre-commit)
 //	routing-guard --diff <base-ref>           # scan files added/renamed vs base
 //	routing-guard --files <file|->            # scan paths from a file or stdin
-//	routing-guard ... --baseline <file>       # exempt grandfathered violations
 //
 // Exit 0 = clean, 1 = violations found, 2 = usage/internal error.
 package main
@@ -39,7 +38,7 @@ type config struct {
 }
 
 func main() {
-	mode, operand, baseline, err := parseArgs(os.Args[1:])
+	mode, operand, err := parseArgs(os.Args[1:])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "routing-guard:", err)
 		os.Exit(2)
@@ -61,35 +60,17 @@ func main() {
 		os.Exit(0) // nothing declared forbidden
 	}
 
-	exempt, err := loadBaseline(baseline)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "routing-guard:", err)
-		os.Exit(2)
-	}
-
 	files, err := gatherFiles(root, mode, operand)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "routing-guard:", err)
 		os.Exit(2)
 	}
-	if len(exempt) > 0 {
-		tracked, trackedErr := gitLines(root, "ls-files")
-		if trackedErr != nil {
-			fmt.Fprintln(os.Stderr, "routing-guard: baseline validation:", trackedErr)
-			os.Exit(2)
-		}
-		if err := validateBaseline(exempt, tracked); err != nil {
-			fmt.Fprintln(os.Stderr, "routing-guard:", err)
-			os.Exit(2)
-		}
-	}
-
 	var violations []string
 	for _, f := range files {
 		if f == "" {
 			continue
 		}
-		if forbidden(f, patterns) && !exempt[f] {
+		if forbidden(f, patterns) {
 			violations = append(violations, f)
 		}
 	}
@@ -101,20 +82,14 @@ func main() {
 	os.Exit(1)
 }
 
-func parseArgs(args []string) (mode, operand, baseline string, err error) {
+func parseArgs(args []string) (mode, operand string, err error) {
 	for i := 0; i < len(args); i++ {
 		switch a := args[i]; a {
-		case "--baseline":
-			if i+1 >= len(args) {
-				return "", "", "", fmt.Errorf("--baseline requires a file")
-			}
-			i++
-			baseline = args[i]
 		case "--all", "--staged":
 			mode = a
 		case "--diff", "--files":
 			if i+1 >= len(args) {
-				return "", "", "", fmt.Errorf("%s requires an argument", a)
+				return "", "", fmt.Errorf("%s requires an argument", a)
 			}
 			mode = a
 			i++
@@ -123,13 +98,13 @@ func parseArgs(args []string) (mode, operand, baseline string, err error) {
 			fmt.Println(strings.TrimSpace(usage))
 			os.Exit(0)
 		default:
-			return "", "", "", fmt.Errorf("unknown arg %q (see --help)", a)
+			return "", "", fmt.Errorf("unknown arg %q (see --help)", a)
 		}
 	}
 	if mode == "" {
 		mode = "--all"
 	}
-	return mode, operand, baseline, nil
+	return mode, operand, nil
 }
 
 // loadPatterns reads every forbidden glob (across all artifact kinds) from
@@ -153,29 +128,6 @@ func loadPatterns(ymlPath string) ([]string, error) {
 	return out, nil
 }
 
-func loadBaseline(file string) (map[string]bool, error) {
-	exempt := map[string]bool{}
-	if file == "" {
-		return exempt, nil
-	}
-	f, err := os.Open(file)
-	if err != nil {
-		return nil, fmt.Errorf("baseline: %w", err)
-	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := sc.Text()
-		if i := strings.IndexByte(line, '#'); i >= 0 {
-			line = line[:i]
-		}
-		if line = strings.TrimSpace(line); line != "" {
-			exempt[line] = true
-		}
-	}
-	return exempt, sc.Err()
-}
-
 func gatherFiles(root, mode, operand string) ([]string, error) {
 	switch mode {
 	case "--all":
@@ -195,12 +147,25 @@ func gatherFiles(root, mode, operand string) ([]string, error) {
 // A ** segment consumes zero or more complete path segments. Every other
 // segment uses path.Match syntax, so matching never crosses a slash.
 func forbidden(p string, patterns []string) bool {
+	if livingSourceFile(p) {
+		return false
+	}
 	for _, pat := range patterns {
 		if globPathMatch(pat, p) {
 			return true
 		}
 	}
 	return false
+}
+
+func livingSourceFile(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".go", ".c", ".cc", ".cpp", ".h", ".hpp", ".java", ".js", ".jsx",
+		".py", ".rb", ".rs", ".sh", ".ts", ".tsx", ".zsh":
+		return true
+	default:
+		return false
+	}
 }
 
 func globPathMatch(pattern, name string) bool {
@@ -234,22 +199,6 @@ func globPathMatch(pattern, name string) bool {
 	}
 
 	return match(0, 0)
-}
-
-func validateBaseline(exempt map[string]bool, tracked []string) error {
-	if len(exempt) != 0 {
-		return fmt.Errorf("baseline must remain empty; migrate temporal artifacts instead of adding exemptions")
-	}
-	trackedSet := make(map[string]bool, len(tracked))
-	for _, name := range tracked {
-		trackedSet[name] = true
-	}
-	for name := range exempt {
-		if !trackedSet[name] {
-			return fmt.Errorf("baseline contains untracked path %q", name)
-		}
-	}
-	return nil
 }
 
 func report(violations []string) {
@@ -324,6 +273,4 @@ research) from this code repo. Forbidden globs come from .dear-agent.yml.
   routing-guard --staged              scan staged files (pre-commit)
   routing-guard --diff <base-ref>     scan files added/renamed vs a base ref
   routing-guard --files <file|->      scan paths from a file or stdin
-  routing-guard ... --baseline <f>    exempt a shrink-only grandfathered set
-
 Exit 0 = clean, 1 = violations, 2 = usage/internal error.`

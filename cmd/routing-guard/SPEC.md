@@ -21,12 +21,12 @@ fails when matching paths are introduced outside their knowledge-base home.
 
 **ROUTE-03** When routing-guard runs in `--staged`, `--diff`, or `--files` mode, the system shall evaluate only the requested file set and preserve repo-relative path matching.
 
-**ROUTE-04** When a tracked forbidden path is listed in the baseline file, the system shall exempt that path from the reported violation set.
+**ROUTE-04** The system shall not provide a baseline or grandfathered-exception interface.
 
 **ROUTE-05** When one or more non-exempt forbidden paths are found, the system shall print the violating paths and exit with a policy-failure status.
 
 **ROUTE-06** When a configured pattern contains `**`, the system shall match zero or more complete path segments while applying standard glob syntax within each segment.
 
-**ROUTE-07** When a baseline names an untracked path, the system shall return an internal-policy error instead of retaining a stale exception.
+**ROUTE-07** When an unsupported argument is supplied, the system shall return a usage error.
 
-**ROUTE-08** When the Dear Agent tracked tree is tested, the system shall require zero temporal-artifact violations and zero baseline entries.
+**ROUTE-08** When the Dear Agent tracked tree is tested, the system shall require zero temporal-artifact violations.

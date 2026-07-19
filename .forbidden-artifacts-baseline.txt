@@ -1,6 +1,0 @@
-# Forbidden-artifact baseline - intentionally empty.
-#
-# The CI invocation retains this file as an explicit assertion that there are
-# no grandfathered violations. routing-guard rejects untracked baseline paths,
-# so stale exceptions cannot accumulate silently.
-#
