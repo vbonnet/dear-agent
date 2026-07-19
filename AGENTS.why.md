@@ -4,7 +4,7 @@
 part of the repository interface. It contains only repository routing,
 invariants, source-of-truth pointers, and verified entry commands.
 
-Durable rules live in the six `docs/policies/*.ai.md` files. Command flags live
+Durable rules live in the canonical `docs/policies/*.ai.md` files. Command flags live
 in the owning Cobra command or safe wrapper. Architecture facts live beside the
 implementation. Temporal rationale, incident history, audits, and
 retrospectives live in the configured `engram-research` worktree.
