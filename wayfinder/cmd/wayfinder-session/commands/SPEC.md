@@ -21,7 +21,7 @@
 
 **WFCMD-07** When AI-facing README or skill shell examples are committed, the repository shall parse each Wayfinder invocation against the active Cobra command and flag tree.
 
-**WFCMD-07** When retired compatibility commands are requested, the system shall report that they are unknown.
+**WFCMD-08** When retired compatibility commands are requested, the system shall report that they are unknown.
 
 ## Traceability
 

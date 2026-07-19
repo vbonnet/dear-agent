@@ -4,5 +4,6 @@
   "description": "Wayfinder SDLC workflow management: 9-phase methodology (CHARTER through RETRO) with phase-gate validation",
   "author": {
     "name": "dear-agent"
-  }
+  },
+  "skills": ["./skills/"]
 }

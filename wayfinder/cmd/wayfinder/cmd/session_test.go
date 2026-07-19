@@ -57,6 +57,25 @@ func TestDocumentedWayfinderExamplesMatchCobra(t *testing.T) {
 	}
 }
 
+func TestClaudePluginExposesCanonicalSkill(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+	manifest, err := os.ReadFile(filepath.Join(root, ".claude-plugin", "plugin.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(manifest), `"skills": ["./skills/"]`) {
+		t.Fatal("Claude plugin manifest does not register its skill directory")
+	}
+	link := filepath.Join(root, "skills", "wayfinder", "SKILL.md")
+	target, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("canonical Claude skill link: %v", err)
+	}
+	if target != "../../SKILL.md" {
+		t.Fatalf("Claude skill link = %q, want ../../SKILL.md", target)
+	}
+}
+
 func documentedShellCommands(t *testing.T, path string) []string {
 	t.Helper()
 	file, err := os.Open(path)
