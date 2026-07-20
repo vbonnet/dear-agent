@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -305,10 +306,80 @@ func TestSessionMonitor_StopMonitoring(t *testing.T) {
 
 	// Stop monitoring
 	monitor.StopMonitoring()
-
-	// Wait for graceful shutdown
-	time.Sleep(100 * time.Millisecond)
 	assert.False(t, monitor.IsRunning())
+}
+
+func TestSessionMonitor_StopMonitoringIsConcurrentAndIdempotent(t *testing.T) {
+	cfg := createTestConfig(t)
+	monitor, err := NewSessionMonitor(cfg)
+	require.NoError(t, err)
+
+	go func() {
+		_ = monitor.StartMonitoring()
+	}()
+	require.Eventually(t, monitor.IsRunning, time.Second, 10*time.Millisecond)
+
+	const callers = 8
+	var wg sync.WaitGroup
+	wg.Add(callers)
+	for range callers {
+		go func() {
+			defer wg.Done()
+			monitor.StopMonitoring()
+		}()
+	}
+	stopped := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("concurrent stop calls did not return")
+	}
+
+	monitor.StopMonitoring()
+	assert.False(t, monitor.IsRunning())
+}
+
+func TestSessionMonitor_StopMonitoringHasBoundedWait(t *testing.T) {
+	cfg := createTestConfig(t)
+	monitor, err := NewSessionMonitor(cfg)
+	require.NoError(t, err)
+
+	monitor.mu.Lock()
+	monitor.running = true
+	monitor.stopChan = make(chan struct{})
+	monitor.doneChan = make(chan struct{})
+	monitor.stopOnce = sync.Once{}
+	monitor.shutdownTimeout = 20 * time.Millisecond
+	monitor.mu.Unlock()
+
+	started := time.Now()
+	monitor.StopMonitoring()
+	assert.Less(t, time.Since(started), 500*time.Millisecond)
+	assert.True(t, monitor.IsRunning(), "a timed-out stop must not claim the loop exited")
+
+	monitor.mu.Lock()
+	monitor.running = false
+	close(monitor.doneChan)
+	monitor.mu.Unlock()
+}
+
+func TestSessionMonitor_CanRestartAfterStop(t *testing.T) {
+	cfg := createTestConfig(t)
+	monitor, err := NewSessionMonitor(cfg)
+	require.NoError(t, err)
+
+	for range 2 {
+		go func() {
+			_ = monitor.StartMonitoring()
+		}()
+		require.Eventually(t, monitor.IsRunning, time.Second, 10*time.Millisecond)
+		monitor.StopMonitoring()
+		assert.False(t, monitor.IsRunning())
+	}
 }
 
 // Helper functions
