@@ -140,9 +140,9 @@ func TestWithWorktreeLockPreservesReplacementOwner(t *testing.T) {
 	}
 }
 
-func TestWithWorktreeLockReclaimsStaleSafePROwner(t *testing.T) {
+func TestWithWorktreeLockReclaimsStaleSafePROwnerDespiteLivePID(t *testing.T) {
 	_, worktree := initLinkedWorktree(t)
-	staleReason := "safe-pr-owned:2147483647:0011223344556677:interrupted transaction"
+	staleReason := fmt.Sprintf("safe-pr-owned:%d:0011223344556677:interrupted transaction", os.Getpid())
 	gitTestRun(t, "-C", worktree, "worktree", "lock", "--reason", staleReason, worktree)
 
 	called := false
