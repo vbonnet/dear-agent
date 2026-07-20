@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/vbonnet/dear-agent/agm/internal/eventbus"
@@ -115,6 +114,36 @@ func waitForSubscriptions(t *testing.T, hub *eventbus.Hub, sessionID string, wan
 	t.Fatalf("subscription readiness for %s = %d, want %d", sessionID, hub.SubscriptionCount(sessionID), want)
 }
 
+func waitForClientCount(t *testing.T, hub *eventbus.Hub, want int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if hub.ClientCount() == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("client readiness = %d, want %d", hub.ClientCount(), want)
+}
+
+func waitForLatencyCount(t *testing.T, mu *sync.Mutex, latencies *[]time.Duration, want int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		got := len(*latencies)
+		mu.Unlock()
+		if got == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	mu.Lock()
+	got := len(*latencies)
+	mu.Unlock()
+	t.Fatalf("observed event deliveries = %d, want %d", got, want)
+}
+
 func broadcastWithBackpressure(t *testing.T, hub *eventbus.Hub, event *eventbus.Event) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -149,7 +178,7 @@ func TestBaseline(t *testing.T) {
 	conn := newTestClient(t, server.URL)
 	defer conn.Close()
 
-	time.Sleep(50 * time.Millisecond) // Let client register
+	waitForClientCount(t, hub, 1)
 
 	const numEvents = 100
 	latencies := make([]time.Duration, 0, numEvents)
@@ -287,10 +316,7 @@ func TestLoad(t *testing.T) {
 	}
 
 	wg.Wait()
-	time.Sleep(100 * time.Millisecond) // Let all clients register
-
-	// Verify all clients connected
-	require.Equal(t, numClients, hub.ClientCount(), "Not all clients connected")
+	waitForClientCount(t, hub, numClients)
 
 	// Track event latencies
 	latencies := make([]time.Duration, 0, totalEvents)
@@ -428,9 +454,7 @@ func TestBurst(t *testing.T) {
 	}
 
 	wg.Wait()
-	time.Sleep(100 * time.Millisecond)
-
-	require.Equal(t, numClients, hub.ClientCount())
+	waitForClientCount(t, hub, numClients)
 
 	// Track latencies
 	latencies := make([]time.Duration, 0, totalEvents)
@@ -559,9 +583,7 @@ func TestSustained(t *testing.T) {
 	}
 
 	wg.Wait()
-	time.Sleep(100 * time.Millisecond)
-
-	require.Equal(t, numClients, hub.ClientCount())
+	waitForClientCount(t, hub, numClients)
 
 	// Track latencies
 	var latencies []time.Duration
@@ -778,7 +800,7 @@ func TestFilteredLoad(t *testing.T) {
 	}
 
 	wg.Wait()
-	require.Equal(t, numClients, hub.ClientCount())
+	waitForClientCount(t, hub, numClients)
 	for session := range numSessions {
 		waitForSubscriptions(t, hub, fmt.Sprintf("session-%d", session), clientsPerSession)
 	}
@@ -898,8 +920,7 @@ func TestConnectionChurn(t *testing.T) {
 	for i := 0; i < stableClients; i++ {
 		stableConns[i] = newTestClient(t, server.URL)
 	}
-	time.Sleep(100 * time.Millisecond)
-	require.Equal(t, stableClients, hub.ClientCount())
+	waitForClientCount(t, hub, stableClients)
 
 	// Collect latencies from stable clients
 	latencies := make([]time.Duration, 0, stableClients*totalEvents)
@@ -931,6 +952,7 @@ func TestConnectionChurn(t *testing.T) {
 	for cycle := 0; cycle < churnCycles; cycle++ {
 		// Connect ephemeral client
 		ephConn := newTestClient(t, server.URL)
+		waitForClientCount(t, hub, stableClients+1)
 
 		// Broadcast events
 		for i := 0; i < eventsPerCycle; i++ {
@@ -941,18 +963,24 @@ func TestConnectionChurn(t *testing.T) {
 					OldState: "active", NewState: "idle", Reason: "churn",
 				},
 			)
-			hub.Broadcast(event)
+			broadcastWithBackpressure(t, hub, event)
 		}
 
-		// Disconnect ephemeral client
+		// Disconnect the ephemeral client and wait until the hub observes the
+		// unregister before beginning the next cycle. Dial completion and hub
+		// registration are deliberately asynchronous.
 		ephConn.Close()
-		time.Sleep(5 * time.Millisecond) // brief pause between cycles
+		waitForClientCount(t, hub, stableClients)
 	}
+
+	// Wait for every stable client to observe every broadcast. Verify ephemeral
+	// cleanup while all stable clients are still connected so a stable
+	// disconnect cannot mask a leaked ephemeral client.
+	waitForLatencyCount(t, &latMu, &latencies, stableClients*totalEvents)
+	waitForClientCount(t, hub, stableClients)
 	testDuration := time.Since(testStart)
 
-	// Give stable clients time to receive remaining events, then close
-	// connections to unblock ReadMessage in receiver goroutines.
-	time.Sleep(500 * time.Millisecond)
+	// Close stable connections to unblock ReadMessage in receiver goroutines.
 	for _, conn := range stableConns {
 		conn.Close()
 	}
@@ -985,11 +1013,6 @@ func TestConnectionChurn(t *testing.T) {
 	if latencyMetrics.P99 > time.Second {
 		t.Errorf("Connection churn p99 latency %v exceeds 1s", latencyMetrics.P99)
 	}
-
-	// Verify hub cleaned up ephemeral clients
-	time.Sleep(200 * time.Millisecond)
-	assert.LessOrEqual(t, hub.ClientCount(), stableClients,
-		"hub should have cleaned up all ephemeral clients")
 }
 
 // BenchmarkEventBusLoad is a standard Go benchmark
