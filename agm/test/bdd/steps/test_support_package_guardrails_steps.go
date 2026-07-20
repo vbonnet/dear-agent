@@ -18,8 +18,6 @@ import (
 
 const testSupportFeaturePath = "agm/test/bdd/features/test_support_package_guardrails.feature"
 
-const trustIsolationTestTimeout = 90 * time.Second
-
 var residualTestSupportPackages = []string{
 	"agm/examples",
 	"agm/internal/testcontext",
