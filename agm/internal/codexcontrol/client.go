@@ -104,9 +104,11 @@ func (c *Client) StartRemoteControl(ctx context.Context) error {
 		// A daemonized app-server can keep the stdout pipe open after it has
 		// already emitted its successful machine-readable status. In that case
 		// WaitDelay makes Output return an error even though startup succeeded.
-		// Treat only a complete daemon-status response as success; stderr-only
-		// and malformed responses still surface as command failures.
-		if isRemoteControlDaemonStatus(output) {
+		// ErrWaitDelay is the narrow, non-cancellation case in which the direct
+		// child succeeded but a daemon retained its stdout pipe. Treat only that
+		// complete daemon-status response as success; other command failures,
+		// stderr-only responses, and malformed responses still surface.
+		if errors.Is(err, exec.ErrWaitDelay) && isRemoteControlDaemonStatus(output) {
 			return nil
 		}
 		msg := strings.TrimSpace(stderr.String())
