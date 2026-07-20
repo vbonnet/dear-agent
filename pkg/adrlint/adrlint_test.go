@@ -146,6 +146,13 @@ func TestUndefinedReferenceStyleLinksAreViolations(t *testing.T) {
 	}
 }
 
+func TestUndefinedReferenceStyleLinksDetectCollapsedLabels(t *testing.T) {
+	violations := commonDocumentViolations(t.TempDir(), "docs/adr/ADR-001-example.md", []byte("See [replacement][].\n"))
+	if !hasReason(violations, `undefined reference-style link label "replacement"`) {
+		t.Fatalf("missing collapsed-reference violation: %#v", violations)
+	}
+}
+
 func TestMarkdownCodeExamplesAreNotLinks(t *testing.T) {
 	root := t.TempDir()
 	data := []byte("`[inline](missing-inline.md)`\n\n```markdown\n[fenced](missing-fenced.md)\n[decision][missing]\n[unused]: missing-definition.md\n```\n\n[real](missing-real.md)\n")

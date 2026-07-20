@@ -28,6 +28,10 @@ type ListSessionsRequest struct {
 
 	// Offset for pagination.
 	Offset int `json:"offset,omitempty"`
+
+	// StableOrder uses an immutable creation key so offset pagination is not
+	// perturbed when an existing session's updated_at changes.
+	StableOrder bool `json:"stable_order,omitempty"`
 }
 
 // SessionSummary is the per-session output for list operations.
@@ -81,10 +85,11 @@ func ListSessions(ctx *OpContext, req *ListSessionsRequest) (*ListSessionsResult
 
 	// Build storage filter
 	filter := &dolt.SessionFilter{
-		Harness: req.Harness,
-		Tags:    req.Tags,
-		Limit:   limit,
-		Offset:  req.Offset,
+		Harness:     req.Harness,
+		Tags:        req.Tags,
+		Limit:       limit,
+		Offset:      req.Offset,
+		StableOrder: req.StableOrder,
 	}
 
 	switch req.Status {

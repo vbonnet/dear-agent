@@ -12,6 +12,10 @@ func TestSessionListPaginationFlags(t *testing.T) {
 			t.Errorf("--%s default = %q, want %q", name, flag.DefValue, defaultValue)
 		}
 	}
+	flag := listCmdDolt.Flags().Lookup("stable-order")
+	if flag == nil || flag.DefValue != "false" {
+		t.Fatalf("--stable-order flag = %#v, want registered with false default", flag)
+	}
 }
 
 func TestValidateListPagination(t *testing.T) {

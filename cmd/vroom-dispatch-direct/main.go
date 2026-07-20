@@ -172,8 +172,7 @@ type sessionListPayload struct {
 var listSessionPage = func(ctx context.Context, offset int) (sessionListPayload, error) {
 	ctx, cancel := context.WithTimeout(ctx, subprocessTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "agm", "session", "list", "--all", "--output", "json",
-		"--limit", fmt.Sprint(sessionListPageSize), "--offset", fmt.Sprint(offset))
+	cmd := exec.CommandContext(ctx, "agm", sessionListArgs(offset)...)
 	out, err := cmd.Output()
 	if err != nil {
 		return sessionListPayload{}, fmt.Errorf("agm session list: %w", err)
@@ -183,6 +182,11 @@ var listSessionPage = func(ctx context.Context, offset int) (sessionListPayload,
 		return sessionListPayload{}, fmt.Errorf("parse agm session list: %w", err)
 	}
 	return payload, nil
+}
+
+func sessionListArgs(offset int) []string {
+	return []string{"session", "list", "--all", "--stable-order", "--output", "json",
+		"--limit", fmt.Sprint(sessionListPageSize), "--offset", fmt.Sprint(offset)}
 }
 
 // listSessions retrieves every page before candidate selection. Archived rows

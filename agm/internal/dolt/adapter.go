@@ -433,6 +433,7 @@ type SessionFilter struct {
 	ExcludeArchived bool     // Exclude archived sessions (status != 'archived')
 	ExcludeTest     bool     // Exclude test sessions (is_test != true)
 	Tags            []string // Filter by context tags (all must match)
+	StableOrder     bool     // Order by immutable creation key for offset pagination
 	Limit           int      // Max number of results (0 = no limit)
 	Offset          int      // Number of results to skip
 }

@@ -21,14 +21,15 @@ import (
 )
 
 var (
-	listJSON    bool
-	listAll     bool
-	listTrust   bool
-	listTestEnv string
-	listTags    []string
-	listFilters []string
-	listLimit   int
-	listOffset  int
+	listJSON        bool
+	listAll         bool
+	listTrust       bool
+	listTestEnv     string
+	listTags        []string
+	listFilters     []string
+	listLimit       int
+	listOffset      int
+	listStableOrder bool
 )
 
 // listCmdDolt is the Dolt-backed version of the list command
@@ -90,6 +91,7 @@ Examples:
 			Tags:           tags,
 			Limit:          listLimit,
 			Offset:         listOffset,
+			StableOrder:    listStableOrder,
 			ExcludeStopped: !listAll,
 		})
 		if err != nil {
@@ -249,6 +251,7 @@ func init() {
 	listCmdDolt.Flags().StringVar(&listTestEnv, "test-env", "", "Use named test environment")
 	listCmdDolt.Flags().IntVar(&listLimit, "limit", 1000, "maximum sessions to return (1-1000)")
 	listCmdDolt.Flags().IntVar(&listOffset, "offset", 0, "sessions to skip for pagination")
+	listCmdDolt.Flags().BoolVar(&listStableOrder, "stable-order", false, "order by immutable creation key for reliable offset pagination")
 }
 
 // shortStatus maps session status and attachment to compact display icons.

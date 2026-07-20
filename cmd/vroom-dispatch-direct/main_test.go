@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -211,6 +212,13 @@ func TestListSessionsRetrievesEveryPage(t *testing.T) {
 	}
 	if !ids["ce-first"] || !ids["ce-second"] {
 		t.Fatalf("occupied ids = %v, want workers from both pages", ids)
+	}
+}
+
+func TestSessionListArgsRequestStablePagination(t *testing.T) {
+	args := sessionListArgs(sessionListPageSize)
+	if !slices.Contains(args, "--stable-order") {
+		t.Fatalf("session list args = %v, want --stable-order", args)
 	}
 }
 

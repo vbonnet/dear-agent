@@ -21,7 +21,7 @@ var (
 	adrIndexPattern             = regexp.MustCompile(`(?m)^\| \[([0-9]{3,4})\]\(([^)]+\.md)\) \| ([^|]+) \| (Accepted|Proposed|Deprecated|Superseded) \|$`)
 	adrLikePrefix               = regexp.MustCompile(`(?i)^(?:adr[-_ ]?[0-9]+(?:[^0-9]|$)|(?:[0-9]{1,3}|0[0-9]{3})(?:[^0-9]|$))`)
 	markdownLink                = regexp.MustCompile(`\[[^]]+\]\(([^)]+)\)`)
-	markdownReferenceLink       = regexp.MustCompile(`\[[^]]+\]\[([^]]+)\]`)
+	markdownReferenceLink       = regexp.MustCompile(`\[([^]]+)\]\[([^]]*)\]`)
 	markdownReferenceDefinition = regexp.MustCompile(`(?m)^[ \t]{0,3}\[([^]]+)\]:[ \t]+<?([^> \t]+)>?(?:[ \t]+.*)?$`)
 )
 
@@ -119,9 +119,10 @@ func undefinedMarkdownReferences(data []byte) []string {
 	}
 	missing := make(map[string]string)
 	for _, match := range markdownReferenceLink.FindAllStringSubmatch(string(data), -1) {
-		label := normalizeReferenceLabel(match[1])
+		rawLabel := referenceLinkLabel(match)
+		label := normalizeReferenceLabel(rawLabel)
 		if !definitions[label] {
-			missing[label] = strings.TrimSpace(match[1])
+			missing[label] = strings.TrimSpace(rawLabel)
 		}
 	}
 	labels := make([]string, 0, len(missing))
@@ -130,6 +131,13 @@ func undefinedMarkdownReferences(data []byte) []string {
 	}
 	slices.Sort(labels)
 	return labels
+}
+
+func referenceLinkLabel(match []string) string {
+	if match[2] != "" {
+		return match[2]
+	}
+	return match[1]
 }
 
 func normalizeReferenceLabel(label string) string {
@@ -231,7 +239,7 @@ func successorTargets(statusLine, document []byte) []string {
 		definitions[normalizeReferenceLabel(match[1])] = match[2]
 	}
 	for _, match := range markdownReferenceLink.FindAllStringSubmatch(string(statusLine), -1) {
-		if target, ok := definitions[normalizeReferenceLabel(match[1])]; ok {
+		if target, ok := definitions[normalizeReferenceLabel(referenceLinkLabel(match))]; ok {
 			targets = append(targets, target)
 		}
 	}
