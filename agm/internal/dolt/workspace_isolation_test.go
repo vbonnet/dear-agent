@@ -499,6 +499,8 @@ func BenchmarkWorkspaceQueries(b *testing.B) {
 
 	// Setup
 	lookupEnv = os.LookupEnv
+	b.Setenv("ENGRAM_TEST_MODE", "1")
+	b.Setenv("ENGRAM_TEST_WORKSPACE", "benchmark")
 	b.Setenv("WORKSPACE", "benchmark")
 	b.Setenv("DOLT_PORT", "3307")
 
@@ -598,6 +600,8 @@ func TestWorkspaceFilterEdgeCases(t *testing.T) {
 	}
 
 	lookupEnv = os.LookupEnv
+	t.Setenv("ENGRAM_TEST_MODE", "1")
+	t.Setenv("ENGRAM_TEST_WORKSPACE", "testedgecase")
 	t.Setenv("WORKSPACE", "testedgecase")
 	t.Setenv("DOLT_PORT", "3307")
 	os.Unsetenv("DOLT_DATABASE") // Let it default to workspace name
