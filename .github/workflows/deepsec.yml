@@ -62,7 +62,7 @@ jobs:
           # Need history so `--diff origin/main` can resolve the base.
           fetch-depth: 0
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
 

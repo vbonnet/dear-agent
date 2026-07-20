@@ -22,6 +22,13 @@ func newTestSweeper(cfg Config, sessions []string) *Sweeper {
 	return s
 }
 
+func TestNewDefaultsNilLogger(t *testing.T) {
+	s := New(Config{}, &mockTmux{}, nil)
+	if s.logger == nil {
+		t.Fatal("New() logger = nil, want slog.Default()")
+	}
+}
+
 func TestSweep_DisabledReturnsNil(t *testing.T) {
 	s := newTestSweeper(Config{Enabled: false}, nil)
 	if result := s.Sweep(); result != nil {

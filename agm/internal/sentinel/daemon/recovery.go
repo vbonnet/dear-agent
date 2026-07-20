@@ -2,10 +2,8 @@
 package daemon
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -178,11 +176,18 @@ func (h *RecoveryHistory) RecordAttempt(strategy RecoveryStrategy, success bool,
 // (non-destructive) and only escalates to tmux key injection after
 // FlagEscalationTimeout (60s) has passed without recovery.
 func ApplyRecovery(sessionName string, strategy RecoveryStrategy, client *tmux.Client) (*RecoveryResult, error) {
+	runner := newSocketCommandRunner("")
+	return applyRecoveryWithRunner(sessionName, strategy, client, func(args ...string) ([]byte, error) {
+		return runner("agm", args...)
+	})
+}
+
+func applyRecoveryWithRunner(sessionName string, strategy RecoveryStrategy, client *tmux.Client, runAGM func(args ...string) ([]byte, error)) (*RecoveryResult, error) {
 	startTime := time.Now()
 
 	// Safety check: don't send ESC/Ctrl-C/restart if a human is present
 	if strategy != RecoveryManual {
-		if humanPresent := isHumanPresent(sessionName); humanPresent {
+		if humanPresent := isHumanPresentWithRunner(sessionName, runAGM); humanPresent {
 			// Downgrade to manual — log but don't act
 			return &RecoveryResult{
 				Strategy:   RecoveryManual,
@@ -293,7 +298,7 @@ func dispatchRecoveryStrategy(strategy RecoveryStrategy, sessionName string, cli
 		result.DurationMs = flagResult.DurationMs
 		return true, nil
 	case RecoveryRestart:
-		return false, restartSession(sessionName)
+		return false, restartSession(sessionName, client)
 	case RecoveryManual:
 		result.Success = false
 		return false, nil
@@ -304,10 +309,11 @@ func dispatchRecoveryStrategy(strategy RecoveryStrategy, sessionName string, cli
 
 // restartSession kills and restarts a tmux session.
 // Most aggressive recovery - last resort for completely frozen sessions.
-func restartSession(sessionName string) error {
-	// Kill session
-	killCmd := exec.CommandContext(context.Background(), "tmux", "kill-session", "-t", sessionName)
-	if err := killCmd.Run(); err != nil {
+func restartSession(sessionName string, client *tmux.Client) error {
+	if client == nil {
+		return fmt.Errorf("cannot restart session: tmux client is nil")
+	}
+	if err := client.KillSession(sessionName); err != nil {
 		return fmt.Errorf("failed to kill session: %w", err)
 	}
 
@@ -319,28 +325,24 @@ func restartSession(sessionName string) error {
 
 // SendRejectionMessage sends a violation rejection message to the session.
 // This uses tmux send-keys to inject the message into the session pane.
-func SendRejectionMessage(sessionName string, message string, pattern *enforcement.Pattern) error {
+func SendRejectionMessage(sessionName string, message string, pattern *enforcement.Pattern, client *tmux.Client) error {
+	if client == nil {
+		return fmt.Errorf("cannot send rejection message: tmux client is nil")
+	}
 	// Create formatted rejection message
 	fullMessage := formatRejectionForTmux(message, pattern)
 
 	// Verify session state via capture-pane before sending rejection message.
 	// Bug fix: must confirm session is reachable before injecting keys.
-	checkCmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p")
-	if checkErr := checkCmd.Run(); checkErr != nil {
+	if _, checkErr := client.GetPaneContent(sessionName); checkErr != nil {
 		return fmt.Errorf("capture-pane failed before sending rejection: %w (session may be down)", checkErr)
 	}
 
-	// Send message via tmux send-keys
-	// Note: In production, this would use AGM's messaging system instead.
-	// For now, we use tmux directly as a fallback.
-	cmd := exec.Command("tmux", "send-keys", "-t", sessionName, "-l", fullMessage)
-	if err := cmd.Run(); err != nil {
+	if err := client.SendLiteral(sessionName, fullMessage); err != nil {
 		return fmt.Errorf("failed to send rejection message: %w", err)
 	}
 
-	// Send Enter to submit message (hex 0x0d avoids paste coalescing)
-	enterCmd := exec.Command("tmux", "send-keys", "-t", sessionName, "-H", "0d")
-	return enterCmd.Run()
+	return client.SendKeys(sessionName, "Enter")
 }
 
 // formatRejectionForTmux formats rejection message for tmux injection.
@@ -377,8 +379,14 @@ func formatRejectionForTmux(message string, pattern *enforcement.Pattern) string
 // observe it without blocking on it. Fails open (returns false) if the agm
 // binary is unavailable or the check fails.
 func isHumanPresent(sessionName string) bool {
-	output, err := exec.Command("agm", "safety", "check", sessionName, "--json",
-		"--skip-init", "--skip-mid-response").CombinedOutput()
+	runner := newSocketCommandRunner("")
+	return isHumanPresentWithRunner(sessionName, func(args ...string) ([]byte, error) {
+		return runner("agm", args...)
+	})
+}
+
+func isHumanPresentWithRunner(sessionName string, runAGM func(args ...string) ([]byte, error)) bool {
+	output, err := runAGM("safety", "check", sessionName, "--json", "--skip-init", "--skip-mid-response")
 	if err != nil {
 		// Try to parse even on exit code 1 (violations found)
 		var result safetyCheckResult
