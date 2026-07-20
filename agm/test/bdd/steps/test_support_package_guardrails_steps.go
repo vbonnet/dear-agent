@@ -7,14 +7,18 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/cucumber/godog"
 
+	"github.com/vbonnet/dear-agent/agm/internal/procguard"
 	"github.com/vbonnet/dear-agent/internal/earslint"
 )
 
 const testSupportFeaturePath = "agm/test/bdd/features/test_support_package_guardrails.feature"
+
+const trustIsolationTestTimeout = 90 * time.Second
 
 var residualTestSupportPackages = []string{
 	"agm/examples",
@@ -93,12 +97,25 @@ func agmValidatesTrustProtocolScenarioIsolation(ctx context.Context) error {
 	}
 	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/test/bdd/steps", "-run", `^TestTrustProtocol`, "-count=1", "-v")
+	cmd := newTrustIsolationTestCommand(testCtx)
 	cmd.Dir = packageSpecBDDRepoRoot()
 	output, runErr := cmd.CombinedOutput()
 	state.trustIsolationOutput = string(output)
 	state.trustIsolationErr = runErr
 	return nil
+}
+
+func newTrustIsolationTestCommand(ctx context.Context) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "go", "test", "./agm/test/bdd/steps", "-run", `^TestTrustProtocol`, "-count=1", "-timeout=90s", "-v")
+	cmd.SysProcAttr = procguard.ProcessGroupAttr()
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = time.Second
+	return cmd
 }
 
 func trustProtocolHooksShouldRestoreEnvironment(ctx context.Context) error {

@@ -963,7 +963,7 @@ func TestConnectionChurn(t *testing.T) {
 					OldState: "active", NewState: "idle", Reason: "churn",
 				},
 			)
-			hub.Broadcast(event)
+			broadcastWithBackpressure(t, hub, event)
 		}
 
 		// Disconnect the ephemeral client and wait until the hub observes the
