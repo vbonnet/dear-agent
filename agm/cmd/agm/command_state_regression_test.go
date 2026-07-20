@@ -88,7 +88,7 @@ func TestCobraCommandFactoriesIsolateFlagValues(t *testing.T) {
 	}
 }
 
-func TestRestoreCommandTreeFlagsForTestPreservesEmptyStringSlice(t *testing.T) {
+func TestRestoreCommandTreeFlagsForTestPreservesNilStringSlice(t *testing.T) {
 	var fields []string
 	cmd := &cobra.Command{Use: "test"}
 	cmd.Flags().StringSliceVar(&fields, "fields", nil, "field mask")
@@ -101,8 +101,8 @@ func TestRestoreCommandTreeFlagsForTestPreservesEmptyStringSlice(t *testing.T) {
 	})
 
 	flag := cmd.Flags().Lookup("fields")
-	if len(fields) != 0 {
-		t.Errorf("restored fields = %v, want empty", fields)
+	if fields != nil {
+		t.Errorf("restored fields = %#v, want nil", fields)
 	}
 	if flag.Changed {
 		t.Error("restored --fields should not be marked changed")
