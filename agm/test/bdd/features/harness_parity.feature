@@ -340,6 +340,7 @@ Feature: Harness parity
     When AGM validates AGY model compatibility
     Then retired AGY manifest models should map to current public labels
     And exact AGY public labels should remain unchanged
+    And cross-harness AGY aliases should normalize case-insensitively
 
   Scenario: MCP waits for AGY before delivering its startup prompt
     Given AGY is available
@@ -349,7 +350,7 @@ Feature: Harness parity
   Scenario: AGY creation signals preserve rollback
     Given AGY is available
     When AGM validates AGY root cancellation plumbing
-    Then root signal cancellation should reach AGY readiness waits
+    Then root signal cancellation should reach every AGY readiness wait
 
   Scenario: Session list fields can target session rows
     Given AGM has Codex session records in Dolt

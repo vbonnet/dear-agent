@@ -254,6 +254,7 @@ func ValidateModel(harnessName, modelAlias string) error {
 // while preserving exact public labels and unknown forward-compatible model
 // identifiers. Public labels can be case-sensitive and must not be lowercased.
 func NormalizeModelInput(harnessName, input string) string {
+	harnessName = NormalizeHarnessName(harnessName)
 	models := GetModelsForHarness(harnessName)
 	for _, model := range models {
 		if model.FullName == input || model.Alias == input {
@@ -265,7 +266,14 @@ func NormalizeModelInput(harnessName, input string) string {
 			return model.Alias
 		}
 	}
-	if legacy, ok := legacyModelAliases[NormalizeHarnessName(harnessName)]; ok {
+	if crossMap, ok := CrossHarnessAliases[harnessName]; ok {
+		for alias := range crossMap {
+			if strings.EqualFold(alias, input) {
+				return alias
+			}
+		}
+	}
+	if legacy, ok := legacyModelAliases[harnessName]; ok {
 		for old := range legacy {
 			if strings.EqualFold(old, input) {
 				return old

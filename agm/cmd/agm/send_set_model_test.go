@@ -114,6 +114,19 @@ func TestResolveSetModelInstruction_PreservesAgyPublicLabel(t *testing.T) {
 	}
 }
 
+func TestResolveSetModelInstruction_NormalizesCrossHarnessAliasCase(t *testing.T) {
+	instruction, err := resolveSetModelInstruction("agy", "OPUS")
+	if err != nil {
+		t.Fatalf("resolveSetModelInstruction returned error: %v", err)
+	}
+	if instruction.ResolvedModel != "Claude Opus 4.6 (Thinking)" {
+		t.Fatalf("resolved model = %q, want AGY Opus public label", instruction.ResolvedModel)
+	}
+	if instruction.Command != "/model Claude Opus 4.6 (Thinking)" {
+		t.Fatalf("command = %q, want normalized cross-harness model", instruction.Command)
+	}
+}
+
 func TestVerifyModelSetParsing(t *testing.T) {
 	// Test the line-matching logic used by verifyModelSet
 	tests := []struct {

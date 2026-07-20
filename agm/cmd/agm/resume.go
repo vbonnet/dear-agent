@@ -100,7 +100,7 @@ Examples:
 
 		ui.PrintSuccess(fmt.Sprintf("Resolved identifier %q to session: %s", identifier, sessionID))
 
-		return resumeResolvedSession(adapter, sessionID, manifestPath)
+		return resumeResolvedSession(cmd.Context(), adapter, sessionID, manifestPath)
 	},
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		// Only complete first argument (session identifier)
@@ -471,7 +471,7 @@ func readResumePromptFile(promptFile string, deletePromptFile bool) (string, err
 // already been resolved to a sessionID and manifestPath. It is shared by the
 // `agm session resume` command and the bare `agm` default-command resume path,
 // so both routes perform a real resume instead of a no-op placeholder.
-func resumeResolvedSession(adapter *dolt.Adapter, sessionID, manifestPath string) error {
+func resumeResolvedSession(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath string) error {
 	// Read manifest from Dolt to check lifecycle
 	m, err := adapter.GetSession(sessionID)
 	if err != nil {
@@ -524,7 +524,7 @@ func resumeResolvedSession(adapter *dolt.Adapter, sessionID, manifestPath string
 	}
 
 	// Resume the session
-	if err := resumeSession(adapter, sessionID, manifestPath, harnessName, health); err != nil {
+	if err := resumeSession(ctx, adapter, sessionID, manifestPath, harnessName, health); err != nil {
 		ui.PrintError(err,
 			"Failed to resume session",
 			"  • Check tmux is running: tmux list-sessions\n"+
@@ -538,7 +538,7 @@ func resumeResolvedSession(adapter *dolt.Adapter, sessionID, manifestPath string
 }
 
 // resumeSession performs the complete resume workflow
-func resumeSession(adapter *dolt.Adapter, sessionID, manifestPath, harnessName string, health *HealthStatus) error {
+func resumeSession(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath, harnessName string, health *HealthStatus) error {
 	sendCommands := shouldSendResumeCommands(health.TmuxExists)
 
 	// Ensure tmux session exists
@@ -561,7 +561,7 @@ func resumeSession(adapter *dolt.Adapter, sessionID, manifestPath, harnessName s
 		if err := dispatchResumeCommand(adapter, m, harnessName, health); err != nil {
 			return err
 		}
-		if err := waitForResumedHarness(harnessName, health); err != nil {
+		if err := waitForResumedHarness(ctx, harnessName, health); err != nil {
 			return err
 		}
 		restorePermissionMode(harnessName, m, health)
@@ -742,14 +742,14 @@ func resolveResumeDir(resumeUUID, worktreePath string) string {
 	return cwd
 }
 
-func waitForResumedHarness(harnessName string, health *HealthStatus) error {
+func waitForResumedHarness(ctx context.Context, harnessName string, health *HealthStatus) error {
 	switch agent.NormalizeHarnessName(harnessName) {
 	case "claude-code":
 		return waitForResumedClaude(health)
 	case "codex-cli":
 		return waitForResumedCodex(health)
 	case "agy":
-		return waitForResumedAgy(health)
+		return waitForResumedAgy(ctx, health)
 	default:
 		return nil
 	}
@@ -807,13 +807,17 @@ func waitForResumedClaude(health *HealthStatus) error {
 	return nil
 }
 
-func waitForResumedAgy(health *HealthStatus) error {
+func waitForResumedAgy(ctx context.Context, health *HealthStatus) error {
+	return waitForResumedAgyWithWait(ctx, health, tmux.WaitForAgyPrompt)
+}
+
+func waitForResumedAgyWithWait(ctx context.Context, health *HealthStatus, wait func(context.Context, string, time.Duration) error) error {
 	var promptWaitErr error
 	spinErr := spinner.New().
 		Title("Waiting for AGY conversation to load...").
 		Accessible(true).
 		Action(func() {
-			promptWaitErr = tmux.WaitForAgyPrompt(context.Background(), health.TmuxSessionName, 60*time.Second)
+			promptWaitErr = wait(ctx, health.TmuxSessionName, 60*time.Second)
 		}).
 		Run()
 	if spinErr != nil {
@@ -821,6 +825,9 @@ func waitForResumedAgy(health *HealthStatus) error {
 	}
 	fmt.Println()
 	if promptWaitErr != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		ui.PrintWarning("AGY conversation is taking longer than expected to load")
 		fmt.Println("  Attaching now - AGY should appear shortly")
 	} else {

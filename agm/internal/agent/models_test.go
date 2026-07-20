@@ -62,6 +62,14 @@ func TestNormalizeModelInputPreservesAgyPublicLabels(t *testing.T) {
 	}
 }
 
+func TestNormalizeModelInputCanonicalizesCrossHarnessAliases(t *testing.T) {
+	for _, harness := range []string{"agy", "codex-cli"} {
+		if got := NormalizeModelInput(harness, "OPUS"); got != "opus" {
+			t.Errorf("NormalizeModelInput(%s, OPUS) = %q, want opus", harness, got)
+		}
+	}
+}
+
 func TestDefaultModelForHarness(t *testing.T) {
 	// Has default — claude-code defaults to sonnet (opus is opt-in, it costs ~5× more).
 	model, ok := DefaultModelForHarness("claude-code")

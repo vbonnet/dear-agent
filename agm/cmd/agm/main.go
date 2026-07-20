@@ -564,7 +564,7 @@ func runDefaultCommand(cmd *cobra.Command, args []string) error {
 
 	// Case 1: No arguments provided - smart picker behavior
 	if len(args) == 0 {
-		return handleNoArgs(adapter, matchingSessions, projectDir, uiCfg)
+		return handleNoArgs(cmd.Context(), adapter, matchingSessions, projectDir, uiCfg)
 	}
 
 	// Case 2: Arguments provided - this is an error (removed 'agm <name>' shortcut)
@@ -581,7 +581,7 @@ func runDefaultCommand(cmd *cobra.Command, args []string) error {
 	return fmt.Errorf("unknown command: %q", sessionName)
 }
 
-func handleNoArgs(adapter *dolt.Adapter, matchingSessions []*manifest.Manifest, projectDir string, uiCfg *ui.Config) error {
+func handleNoArgs(ctx context.Context, adapter *dolt.Adapter, matchingSessions []*manifest.Manifest, projectDir string, uiCfg *ui.Config) error {
 	if len(matchingSessions) == 0 {
 		// No sessions - offer to create new
 		fmt.Println("No sessions found in current directory.")
@@ -602,17 +602,17 @@ func handleNoArgs(adapter *dolt.Adapter, matchingSessions []*manifest.Manifest, 
 	if len(matchingSessions) == 1 {
 		// Single session - resume it directly
 		fmt.Printf("Resuming session: %s\n", matchingSessions[0].Name)
-		return performResume(adapter, matchingSessions[0])
+		return performResume(ctx, adapter, matchingSessions[0])
 	}
 
 	// Multiple sessions - show picker
-	return showSessionPicker(adapter, matchingSessions, uiCfg)
+	return showSessionPicker(ctx, adapter, matchingSessions, uiCfg)
 }
 
 // handleNamedSession removed - 'agm <name>' shortcut no longer supported
 // Use 'agm session resume <name>' or 'agm session new <name>' instead
 
-func showSessionPicker(adapter *dolt.Adapter, sessions []*manifest.Manifest, uiCfg *ui.Config) error {
+func showSessionPicker(ctx context.Context, adapter *dolt.Adapter, sessions []*manifest.Manifest, uiCfg *ui.Config) error {
 	// Convert to UI sessions with status
 	uiSessions := make([]*ui.Session, len(sessions))
 
@@ -634,18 +634,18 @@ func showSessionPicker(adapter *dolt.Adapter, sessions []*manifest.Manifest, uiC
 	}
 
 	fmt.Printf("Resuming session: %s\n", selected.Name)
-	return performResume(adapter, selected.Manifest)
+	return performResume(ctx, adapter, selected.Manifest)
 }
 
 // performResume runs the full resume workflow for an already-selected session.
 // The bare `agm` default command resolved the session from the current directory
 // (or the interactive picker), so we delegate to the same resumeResolvedSession
 // helper that backs `agm session resume` rather than reimplementing the workflow.
-func performResume(adapter *dolt.Adapter, m *manifest.Manifest) error {
+func performResume(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest) error {
 	// Reconstruct the manifest path the same way resolveSessionIdentifier does,
 	// so resumeResolvedSession can update last-activity and auto-commit.
 	manifestPath := filepath.Join(cfg.SessionsDir, m.SessionID, "manifest.yaml")
-	return resumeResolvedSession(adapter, m.SessionID, manifestPath)
+	return resumeResolvedSession(ctx, adapter, m.SessionID, manifestPath)
 }
 
 func runNewSessionFlow(suggestedName *string) error {
