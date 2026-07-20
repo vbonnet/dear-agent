@@ -18,9 +18,12 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
+	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 )
@@ -147,6 +150,52 @@ func TestInjectTraceContext_PropagatesTraceparent(t *testing.T) {
 	meta := injectTraceContext(ctx)
 	if got := meta["traceparent"]; got != want {
 		t.Errorf("traceparent = %v, want %s", got, want)
+	}
+}
+
+func TestMCPCreateSessionRuntimeWaitsForAgyBeforePrompt(t *testing.T) {
+	type callerContextKey struct{}
+	tmuxMock := session.NewMockTmux()
+	callerCtx := context.WithValue(t.Context(), callerContextKey{}, "caller")
+	var waited bool
+	runtime := &mcpCreateSessionRuntime{
+		tmux:     tmuxMock,
+		lookPath: func(string) (string, error) { return "/usr/local/bin/agy", nil },
+		sleep:    func(time.Duration) {},
+		waitForAgyPrompt: func(ctx context.Context, sessionName string, timeout time.Duration) error {
+			if ctx != callerCtx {
+				t.Fatalf("readiness context identity changed")
+			}
+			if sessionName != "mcp-agy" || timeout != 90*time.Second {
+				t.Fatalf("readiness wait = %q/%s, want mcp-agy/90s", sessionName, timeout)
+			}
+			if len(tmuxMock.SentCommands) != 1 || strings.Contains(tmuxMock.SentCommands[0], "startup prompt") {
+				t.Fatalf("commands before readiness = %v, want launch only", tmuxMock.SentCommands)
+			}
+			waited = true
+			return nil
+		},
+	}
+
+	result, err := runtime.Launch(callerCtx, ops.HarnessLaunchSpec{
+		Harness: "agy", Model: "3.5-flash-low", SessionName: "mcp-agy", WorkDir: "/tmp/mcp-agy",
+	})
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if !waited {
+		t.Fatal("AGY readiness wait was not called")
+	}
+	if result.ModeAppliedAtStartup {
+		t.Fatal("default AGY launch unexpectedly applied auto mode")
+	}
+	if err := runtime.Complete(callerCtx, ops.CreateSessionCompletion{
+		Manifest: &manifest.Manifest{Name: "mcp-agy"}, Prompt: "startup prompt",
+	}); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if len(tmuxMock.SentCommands) != 2 || tmuxMock.SentCommands[1] != "startup prompt" {
+		t.Fatalf("commands after completion = %v, want launch then startup prompt", tmuxMock.SentCommands)
 	}
 }
 

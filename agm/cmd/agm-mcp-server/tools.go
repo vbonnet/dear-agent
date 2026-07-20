@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os/exec"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
@@ -273,7 +275,52 @@ func newMCPOpContextWithTmux() (*ops.OpContext, func(), error) {
 		return nil, cleanup, err
 	}
 	opCtx.Tmux = session.NewRealTmux()
+	opCtx.CreationRuntime = newMCPCreateSessionRuntime(opCtx.Tmux)
 	return opCtx, cleanup, nil
+}
+
+type mcpCreateSessionRuntime struct {
+	tmux             session.TmuxInterface
+	lookPath         func(string) (string, error)
+	waitForAgyPrompt func(context.Context, string, time.Duration) error
+	sleep            func(time.Duration)
+}
+
+func newMCPCreateSessionRuntime(tmuxClient session.TmuxInterface) *mcpCreateSessionRuntime {
+	return &mcpCreateSessionRuntime{
+		tmux:             tmuxClient,
+		lookPath:         exec.LookPath,
+		waitForAgyPrompt: tmux.WaitForAgyPrompt,
+		sleep:            time.Sleep,
+	}
+}
+
+func (r *mcpCreateSessionRuntime) Launch(ctx context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
+	if spec.Harness == "agy" {
+		if _, err := r.lookPath("agy"); err != nil {
+			return ops.CreateSessionLaunchResult{}, fmt.Errorf("find AGY executable: %w", err)
+		}
+	}
+	launch := ops.BuildHarnessLaunchCommand(spec)
+	result := ops.CreateSessionLaunchResult{ModeAppliedAtStartup: launch.ModeAppliedAtStartup}
+	if err := r.tmux.SendKeys(spec.SessionName, launch.Command); err != nil {
+		return result, err
+	}
+	if spec.Harness != "agy" {
+		return result, nil
+	}
+	r.sleep(500 * time.Millisecond)
+	if err := r.waitForAgyPrompt(ctx, spec.SessionName, 90*time.Second); err != nil {
+		return result, fmt.Errorf("wait for AGY readiness: %w", err)
+	}
+	return result, nil
+}
+
+func (r *mcpCreateSessionRuntime) Complete(_ context.Context, completion ops.CreateSessionCompletion) error {
+	if completion.Prompt == "" {
+		return nil
+	}
+	return r.tmux.SendKeys(completion.Manifest.Name, completion.Prompt)
 }
 
 // mcpTracer is the OTel tracer for MCP tool handlers.

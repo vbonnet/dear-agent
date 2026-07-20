@@ -57,6 +57,10 @@ compatibility.
 
 **AGP-24** When AGM resumes an AGY manifest containing a retired `2.5-flash`, `2.5-pro`, or `2.0-flash-lite` alias or its former full identifier, the system shall translate it to the closest current AGY public model label before constructing the resume command.
 
+**AGP-25** When MCP creates an AGY session, the system shall wait through first-run trust and initialization until the AGY composer is ready before delivering the required startup prompt; cancellation or readiness failure shall enter the shared creation rollback path.
+
+**AGP-26** When the AGM process receives SIGINT or SIGTERM, the root command context shall cancel so in-flight AGY readiness waits return through shared creation rollback instead of terminating before cleanup.
+
 ### Codex Workdir Trust (ce-cmsq)
 
 **AGP-14** When a Codex CLI session is created or resumed through the codex-cli adapter, the system shall record the working directory as a trusted Codex project in `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`) before sending the launch command, so a fresh non-git sandbox directory cannot block Codex startup on its interactive trust prompt.

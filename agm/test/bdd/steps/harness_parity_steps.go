@@ -257,6 +257,10 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates AGY model compatibility$`, agmValidatesAGYModelCompatibility)
 	ctx.Step(`^retired AGY manifest models should map to current public labels$`, retiredAGYManifestModelsShouldMapToCurrentPublicLabels)
 	ctx.Step(`^exact AGY public labels should remain unchanged$`, exactAGYPublicLabelsShouldRemainUnchanged)
+	ctx.Step(`^AGM validates AGY MCP creation readiness$`, agmValidatesAGYMCPCreateReadiness)
+	ctx.Step(`^MCP creation should wait for the AGY composer before prompt delivery$`, mcpCreationShouldWaitForAGYComposerBeforePromptDelivery)
+	ctx.Step(`^AGM validates AGY root cancellation plumbing$`, agmValidatesAGYRootCancellationPlumbing)
+	ctx.Step(`^root signal cancellation should reach AGY readiness waits$`, rootSignalCancellationShouldReachAGYReadinessWaits)
 	ctx.Step(`^AGM has Codex session records in Dolt$`, agmHasCodexSessionRecordsInDolt)
 	ctx.Step(`^an agent lists sessions as JSON with fields "([^"]*)"$`, agentListsSessionsAsJSONWithFields)
 	ctx.Step(`^the output should include a "sessions" array$`, outputShouldIncludeSessionsArray)
@@ -1826,12 +1830,13 @@ func runAgyLifecycleBehaviorSuite(ctx context.Context, harnessState *harnessPari
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test",
 		"./agm/cmd/agm",
+		"./agm/cmd/agm-mcp-server",
 		"./agm/internal/agent",
 		"./agm/internal/importer",
 		"./agm/internal/ops",
 		"./agm/internal/safety",
 		"./agm/internal/tmux",
-		"-run", `^(Test(StartAgyHarness(UsesCanonicalLaunchAndWaits|PropagatesReadinessFailure)|BuildAgyCommand_(AutoPermissionMode|DefaultPermissionMode)|AgyModelCatalogMatchesPublicCLI|BuildAgyImportedManifestPreservesConversationAndCurrentDefaults|CreateSession_AgyDetachedPromptUsesCanonicalCommand|BuildAgyResumeCommandPreservesModelConversationAndMode|BuildAgyResumeCommand_TranslatesLegacyModels|NormalizeModelInputPreservesAgyPublicLabels|ResolveSetModelInstruction_PreservesAgyPublicLabel|DetectAgySessionUninitialized|NormalizeHarnessForSafety|WaitForAgyPrompt(AcceptsTrustBeforeReady|DismissesSurveyBeforeReady)))$`,
+		"-run", `^(Test(StartAgyHarness(UsesCanonicalLaunchAndWaits|PropagatesReadinessFailure)|BuildAgyCommand_(AutoPermissionMode|DefaultPermissionMode)|AgyModelCatalogMatchesPublicCLI|BuildAgyImportedManifestPreservesConversationAndCurrentDefaults|CreateSession_AgyDetachedPromptUsesCanonicalCommand|BuildAgyResumeCommandPreservesModelConversationAndMode|BuildAgyResumeCommand_TranslatesLegacyModels|NormalizeModelInputPreservesAgyPublicLabels|ResolveSetModelInstruction_PreservesAgyPublicLabel|MCPCreateSessionRuntimeWaitsForAgyBeforePrompt|ExecuteWithSignalContextPropagatesCancellation|DetectAgySessionUninitialized|NormalizeHarnessForSafety|WaitForAgyPrompt(AcceptsTrustBeforeReady|DismissesSurveyBeforeReady)))$`,
 		"-count=1", "-v",
 	)
 	cmd.Dir = bddRepoRoot()
@@ -1884,6 +1889,44 @@ func exactAGYPublicLabelsShouldRemainUnchanged(ctx context.Context) error {
 		"TestNormalizeModelInputPreservesAgyPublicLabels",
 		"TestResolveSetModelInstruction_PreservesAgyPublicLabel",
 	)
+}
+
+func agmValidatesAGYMCPCreateReadiness(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.harness != "agy" {
+		return fmt.Errorf("configured harness = %q, want agy", harnessState.harness)
+	}
+	return runAgyLifecycleBehaviorSuite(ctx, harnessState)
+}
+
+func mcpCreationShouldWaitForAGYComposerBeforePromptDelivery(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	return requireAgyLifecycleBehaviors(harnessState, "TestMCPCreateSessionRuntimeWaitsForAgyBeforePrompt")
+}
+
+func agmValidatesAGYRootCancellationPlumbing(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.harness != "agy" {
+		return fmt.Errorf("configured harness = %q, want agy", harnessState.harness)
+	}
+	return runAgyLifecycleBehaviorSuite(ctx, harnessState)
+}
+
+func rootSignalCancellationShouldReachAGYReadinessWaits(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	return requireAgyLifecycleBehaviors(harnessState, "TestExecuteWithSignalContextPropagatesCancellation")
 }
 
 func agmShouldWaitForTheCodexComposer(ctx context.Context) error {

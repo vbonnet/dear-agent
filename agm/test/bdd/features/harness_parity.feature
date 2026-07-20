@@ -341,6 +341,16 @@ Feature: Harness parity
     Then retired AGY manifest models should map to current public labels
     And exact AGY public labels should remain unchanged
 
+  Scenario: MCP waits for AGY before delivering its startup prompt
+    Given AGY is available
+    When AGM validates AGY MCP creation readiness
+    Then MCP creation should wait for the AGY composer before prompt delivery
+
+  Scenario: AGY creation signals preserve rollback
+    Given AGY is available
+    When AGM validates AGY root cancellation plumbing
+    Then root signal cancellation should reach AGY readiness waits
+
   Scenario: Session list fields can target session rows
     Given AGM has Codex session records in Dolt
     When an agent lists sessions as JSON with fields "name,status,harness,workspace,tags"

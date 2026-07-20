@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -670,7 +672,13 @@ func runNewSessionFlow(suggestedName *string) error {
 //	error - Command execution error (nil on success)
 func ExecuteWithDeps(tmux session.TmuxInterface) error {
 	tmuxClient = tmux
-	return rootCmd.Execute()
+	return executeWithSignalContext(context.Background(), rootCmd.ExecuteContext, os.Interrupt, syscall.SIGTERM)
+}
+
+func executeWithSignalContext(parent context.Context, execute func(context.Context) error, signals ...os.Signal) error {
+	ctx, stop := signal.NotifyContext(parent, signals...)
+	defer stop()
+	return execute(ctx)
 }
 
 func main() {
