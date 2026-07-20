@@ -75,6 +75,43 @@ func TestParseArgs_VerifyCI(t *testing.T) {
 	}
 }
 
+func TestRequestsDraft(t *testing.T) {
+	tests := []struct {
+		args []string
+		want bool
+	}{
+		{args: []string{"--draft"}, want: true},
+		{args: []string{"-d"}, want: true},
+		{args: []string{"--draft=true"}, want: true},
+		{args: []string{"-d=true"}, want: true},
+		{args: []string{"--draft=false"}, want: false},
+		{args: []string{"-d=false"}, want: false},
+		{args: []string{"--draft", "--draft=false"}, want: false},
+		{args: []string{"-d", "--draft=false"}, want: false},
+		{args: []string{"--draft=false", "--draft"}, want: true},
+		{args: []string{"--draft=false", "-d"}, want: true},
+		{args: []string{"-dt", "title"}, want: true},
+		{args: []string{"-fd"}, want: true},
+		{args: []string{"-fd=false"}, want: false},
+		{args: []string{"-fd=true"}, want: true},
+		{args: []string{"-df=false"}, want: true},
+		{args: []string{"-dt", "title", "--draft=false"}, want: false},
+		{args: []string{"-td"}, want: false},
+		{args: []string{"-Rfoo/docs"}, want: false},
+		{args: []string{"-R", "foo/docs"}, want: false},
+		{args: []string{"-Rd"}, want: false},
+		{args: []string{"-dRfoo/docs"}, want: true},
+		{args: []string{"--draft", "--title", "--draft=false", "--body", "body"}, want: true},
+		{args: []string{"--draft", "-t", "--draft=false", "--body", "body"}, want: true},
+		{args: []string{"--title", "draft"}, want: false},
+	}
+	for _, tc := range tests {
+		if got := requestsDraft(tc.args); got != tc.want {
+			t.Errorf("requestsDraft(%v) = %t, want %t", tc.args, got, tc.want)
+		}
+	}
+}
+
 func TestShortSHA(t *testing.T) {
 	if got := shortSHA("cebb82eb05bea83"); got != "cebb82e" {
 		t.Errorf("shortSHA = %q, want cebb82e", got)

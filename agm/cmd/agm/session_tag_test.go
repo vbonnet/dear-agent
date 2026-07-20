@@ -41,8 +41,7 @@ func TestSessionTagCmd_RemoveFlag(t *testing.T) {
 }
 
 func TestSessionTagCmd_NoArgs(t *testing.T) {
-	sessionTagCmd.SetArgs([]string{})
-	err := sessionTagCmd.Execute()
+	err := executeFreshCommandForTest(t, newSessionTagCommand, []string{})
 	if err == nil {
 		t.Error("expected error when no session specified")
 	}
@@ -50,10 +49,7 @@ func TestSessionTagCmd_NoArgs(t *testing.T) {
 
 func TestSessionTagCmd_NoTagAndNoRemove(t *testing.T) {
 	// Provide session name only without tag or --remove — should error
-	// Reset flag state
-	tagRemove = ""
-	sessionTagCmd.SetArgs([]string{"some-session"})
-	err := sessionTagCmd.Execute()
+	err := executeFreshCommandForTest(t, newSessionTagCommand, []string{"some-session"})
 	if err == nil {
 		t.Error("expected error when no tag and no --remove provided")
 	}

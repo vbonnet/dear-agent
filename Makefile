@@ -532,7 +532,7 @@ install-bead-close-guard: build-bead-close-guard
 # Detects deployment drift: deployed artifacts (Claude Code hooks, launchd
 # plists, chezmoi files) whose source of truth in main no longer matches the
 # copy on the host — a fix merged to git but never redeployed (PR #456). Cheap
-# hash compare, no builds. See docs/drift-detection-plan.md.
+# hash compare, no builds. See cmd/drift-check/README.md.
 build-drift-check:
 	@echo "Building drift-check..."
 	@mkdir -p bin

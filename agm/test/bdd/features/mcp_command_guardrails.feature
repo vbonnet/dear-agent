@@ -2,7 +2,7 @@
 # RELATED-SPEC: cmd/recommendation-mcp/SPEC.md
 Feature: MCP command guardrails
   MCP command binaries should carry executable SPEC traceability so workflow,
-  source, recommendation, and backlog surfaces do not drift away from the
+  source, recommendation, and signal surfaces do not drift away from the
   shared JSON-RPC contract.
 
   Scenario Outline: MCP command packages declare SPEC coverage
@@ -14,4 +14,3 @@ Feature: MCP command guardrails
       | package                |
       | cmd/dear-agent-mcp     |
       | cmd/recommendation-mcp |
-

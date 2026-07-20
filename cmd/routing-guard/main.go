@@ -1,12 +1,9 @@
 // Command routing-guard blocks temporal artifacts from this code repo.
 //
-// Wayfinder SDLC runs (W0/D1-D4/S4-S11, WAYFINDER-STATUS.md,
-// WAYFINDER-HISTORY.md, .wayfinder/ runs), retros, designs, and research are
-// temporal: they capture a moment of thinking, are not maintained as the code
-// evolves, and belong in the knowledge base (~/src/engram-research,
-// conventionally wf/<project>/) — never in this code repo. The Wayfinder TOOL
-// SOURCE (wayfinder/, *.go, validator testdata, docs/adr/ADR-035) is living
-// code/docs and is deliberately not matched.
+// Wayfinder runs, retros, designs, research, plans, roadmaps, backlogs, and
+// reports are temporal: they capture a moment of thinking and belong in an
+// engram-research worktree, never in this code repo. Current policy, SPEC,
+// architecture, ADR, source, and tests remain beside their owned code.
 //
 // The forbidden globs are the SINGLE source of truth in .dear-agent.yml >
 // forbidden-paths. This tool reads them at runtime, so the rule can never
@@ -20,7 +17,6 @@
 //	routing-guard --staged                    # scan staged files (pre-commit)
 //	routing-guard --diff <base-ref>           # scan files added/renamed vs base
 //	routing-guard --files <file|->            # scan paths from a file or stdin
-//	routing-guard ... --baseline <file>       # exempt grandfathered violations
 //
 // Exit 0 = clean, 1 = violations found, 2 = usage/internal error.
 package main
@@ -42,7 +38,7 @@ type config struct {
 }
 
 func main() {
-	mode, operand, baseline, err := parseArgs(os.Args[1:])
+	mode, operand, err := parseArgs(os.Args[1:])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "routing-guard:", err)
 		os.Exit(2)
@@ -61,12 +57,7 @@ func main() {
 		os.Exit(2)
 	}
 	if len(patterns) == 0 {
-		os.Exit(0) // nothing declared forbidden
-	}
-
-	exempt, err := loadBaseline(baseline)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "routing-guard:", err)
+		fmt.Fprintln(os.Stderr, "routing-guard: forbidden-paths policy is empty")
 		os.Exit(2)
 	}
 
@@ -75,13 +66,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, "routing-guard:", err)
 		os.Exit(2)
 	}
-
 	var violations []string
 	for _, f := range files {
 		if f == "" {
 			continue
 		}
-		if forbidden(f, patterns) && !exempt[f] {
+		if forbidden(f, patterns) {
 			violations = append(violations, f)
 		}
 	}
@@ -93,20 +83,14 @@ func main() {
 	os.Exit(1)
 }
 
-func parseArgs(args []string) (mode, operand, baseline string, err error) {
+func parseArgs(args []string) (mode, operand string, err error) {
 	for i := 0; i < len(args); i++ {
 		switch a := args[i]; a {
-		case "--baseline":
-			if i+1 >= len(args) {
-				return "", "", "", fmt.Errorf("--baseline requires a file")
-			}
-			i++
-			baseline = args[i]
 		case "--all", "--staged":
 			mode = a
 		case "--diff", "--files":
 			if i+1 >= len(args) {
-				return "", "", "", fmt.Errorf("%s requires an argument", a)
+				return "", "", fmt.Errorf("%s requires an argument", a)
 			}
 			mode = a
 			i++
@@ -115,13 +99,13 @@ func parseArgs(args []string) (mode, operand, baseline string, err error) {
 			fmt.Println(strings.TrimSpace(usage))
 			os.Exit(0)
 		default:
-			return "", "", "", fmt.Errorf("unknown arg %q (see --help)", a)
+			return "", "", fmt.Errorf("unknown arg %q (see --help)", a)
 		}
 	}
 	if mode == "" {
 		mode = "--all"
 	}
-	return mode, operand, baseline, nil
+	return mode, operand, nil
 }
 
 // loadPatterns reads every forbidden glob (across all artifact kinds) from
@@ -129,10 +113,7 @@ func parseArgs(args []string) (mode, operand, baseline string, err error) {
 func loadPatterns(ymlPath string) ([]string, error) {
 	data, err := os.ReadFile(ymlPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil // no policy file → nothing to enforce
-		}
-		return nil, err
+		return nil, fmt.Errorf("read policy %s: %w", ymlPath, err)
 	}
 	var c config
 	if err := yaml.Unmarshal(data, &c); err != nil {
@@ -142,30 +123,10 @@ func loadPatterns(ymlPath string) ([]string, error) {
 	for _, globs := range c.ForbiddenPaths {
 		out = append(out, globs...)
 	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%s: forbidden-paths must contain at least one pattern", ymlPath)
+	}
 	return out, nil
-}
-
-func loadBaseline(file string) (map[string]bool, error) {
-	exempt := map[string]bool{}
-	if file == "" {
-		return exempt, nil
-	}
-	f, err := os.Open(file)
-	if err != nil {
-		return nil, fmt.Errorf("baseline: %w", err)
-	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := sc.Text()
-		if i := strings.IndexByte(line, '#'); i >= 0 {
-			line = line[:i]
-		}
-		if line = strings.TrimSpace(line); line != "" {
-			exempt[line] = true
-		}
-	}
-	return exempt, sc.Err()
 }
 
 func gatherFiles(root, mode, operand string) ([]string, error) {
@@ -184,37 +145,68 @@ func gatherFiles(root, mode, operand string) ([]string, error) {
 }
 
 // forbidden reports whether a repo-relative path matches any forbidden glob.
-// Supported glob shapes (matching the patterns used in .dear-agent.yml):
-//
-//	prefix/**   → any file under the directory prefix
-//	**/mid/**   → path contains the /mid/ segment
-//	**/NAME     → basename matches NAME (NAME may itself contain *)
-//	plain       → path.Match against the whole path (single-level *)
+// A ** segment consumes zero or more complete path segments. Every other
+// segment uses path.Match syntax, so matching never crosses a slash.
 func forbidden(p string, patterns []string) bool {
 	for _, pat := range patterns {
-		switch {
-		case strings.HasPrefix(pat, "**/") && strings.HasSuffix(pat, "/**"):
-			mid := strings.TrimSuffix(strings.TrimPrefix(pat, "**/"), "/**")
-			if strings.Contains("/"+p+"/", "/"+mid+"/") {
-				return true
-			}
-		case strings.HasSuffix(pat, "/**"):
-			pre := strings.TrimSuffix(pat, "/**")
-			if p == pre || strings.HasPrefix(p, pre+"/") {
-				return true
-			}
-		case strings.HasPrefix(pat, "**/"):
-			name := strings.TrimPrefix(pat, "**/")
-			if ok, _ := path.Match(name, path.Base(p)); ok {
-				return true
-			}
-		default:
-			if ok, _ := path.Match(pat, p); ok {
-				return true
-			}
+		// Source extensions disambiguate filename-based patterns such as
+		// backlog.go. They do not exempt files placed inside an explicitly
+		// temporal directory such as wf/** or **/.wayfinder/**.
+		if livingSourceFile(p) && !strings.HasSuffix(strings.TrimSpace(pat), "/**") {
+			continue
+		}
+		if globPathMatch(pat, p) {
+			return true
 		}
 	}
 	return false
+}
+
+func livingSourceFile(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".bash", ".bats", ".c", ".cc", ".cjs", ".cpp", ".cs", ".cts",
+		".d2", ".dart", ".ex", ".exs", ".fs", ".fsx", ".go", ".h", ".hpp",
+		".hs", ".java", ".js", ".jsx", ".kt", ".kts", ".lua", ".mjs", ".ml",
+		".mli", ".mts", ".php", ".pl", ".pm", ".proto", ".py", ".r", ".rb",
+		".rs", ".scala", ".sh", ".sol", ".sql", ".swift", ".tf", ".tfvars",
+		".ts", ".tsx", ".vue", ".zsh":
+		return true
+	default:
+		return false
+	}
+}
+
+func globPathMatch(pattern, name string) bool {
+	pattern = strings.Trim(path.Clean(pattern), "/")
+	name = strings.Trim(path.Clean(name), "/")
+	patternParts := strings.Split(pattern, "/")
+	nameParts := strings.Split(name, "/")
+	type state struct{ pattern, name int }
+	memo := map[state]bool{}
+
+	var match func(int, int) bool
+	match = func(patternIndex, nameIndex int) bool {
+		key := state{pattern: patternIndex, name: nameIndex}
+		if result, ok := memo[key]; ok {
+			return result
+		}
+
+		var result bool
+		switch {
+		case patternIndex == len(patternParts):
+			result = nameIndex == len(nameParts)
+		case patternParts[patternIndex] == "**":
+			result = match(patternIndex+1, nameIndex) ||
+				(nameIndex < len(nameParts) && match(patternIndex, nameIndex+1))
+		case nameIndex < len(nameParts):
+			segmentMatch, _ := path.Match(patternParts[patternIndex], nameParts[nameIndex])
+			result = segmentMatch && match(patternIndex+1, nameIndex+1)
+		}
+		memo[key] = result
+		return result
+	}
+
+	return match(0, 0)
 }
 
 func report(violations []string) {
@@ -228,11 +220,11 @@ func report(violations []string) {
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "These belong in the knowledge base instead:")
-	fmt.Fprintln(w, "  Wayfinder runs / retros / designs  ->  ~/src/engram-research/wf/<project>/")
+	fmt.Fprintln(w, "  Use an engram-research worktree under its audit, project, retro, or wf directory.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "How to fix:")
 	fmt.Fprintln(w, "  1. git rm --cached the file(s) and remove them from this repo.")
-	fmt.Fprintln(w, "  2. Move the content to engram-research (open a PR there).")
+	fmt.Fprintln(w, "  2. Move the content through an engram-research worktree (open a PR there).")
 	fmt.Fprintln(w, "  3. Re-commit here without the artifact.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Why: temporal artifacts rot in code repos — they go stale silently,")
@@ -289,6 +281,4 @@ research) from this code repo. Forbidden globs come from .dear-agent.yml.
   routing-guard --staged              scan staged files (pre-commit)
   routing-guard --diff <base-ref>     scan files added/renamed vs a base ref
   routing-guard --files <file|->      scan paths from a file or stdin
-  routing-guard ... --baseline <f>    exempt a shrink-only grandfathered set
-
 Exit 0 = clean, 1 = violations, 2 = usage/internal error.`

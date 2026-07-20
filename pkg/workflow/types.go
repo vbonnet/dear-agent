@@ -74,7 +74,7 @@ type Workflow struct {
 	Env         map[string]string `yaml:"env,omitempty"`
 
 	// Constitutional opts the workflow into "humans declare invariants,
-	// agents implement" mode (ROADMAP §6.4). Nil means "off" — the
+	// agents implement" mode. Nil means "off" — the
 	// workflow runs without the contract. When non-nil and Enforce is
 	// true, the Define hook fails the run unless Invariants is
 	// non-empty. The block plays into adversarial review (§6.5):

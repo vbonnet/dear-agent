@@ -9,7 +9,7 @@ import (
 
 func fixtureItems(t *testing.T) []Item {
 	t.Helper()
-	src := NewMarkdownSource(filepath.Join("testdata", "sample_backlog.md"))
+	src := NewMarkdownSource(filepath.Join("testdata", "sample.md"))
 	items, err := src.Items(context.Background())
 	if err != nil {
 		t.Fatalf("load fixture: %v", err)
