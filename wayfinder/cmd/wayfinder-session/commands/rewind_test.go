@@ -28,14 +28,17 @@ func TestResetForRewindResetsTargetAndLaterPhases(t *testing.T) {
 	if got := st.WaypointHistory[0].Status; got != status.PhaseStatusV2Completed {
 		t.Fatalf("earlier phase status = %q, want completed", got)
 	}
-	for _, phase := range st.WaypointHistory[1:] {
-		if phase.Status != status.PhaseStatusV2Pending || !phase.StartedAt.IsZero() || phase.CompletedAt != nil || phase.Outcome != nil {
-			t.Errorf("rewound waypoint = %+v, want clean pending state", phase)
-		}
+	if got := len(st.WaypointHistory); got != 1 {
+		t.Fatalf("waypoint history length = %d, want only the earlier completed entry", got)
 	}
 	for _, phase := range st.Roadmap.Phases[1:] {
 		if phase.Status != status.PhaseStatusV2Pending || phase.StartedAt != nil || phase.CompletedAt != nil {
 			t.Errorf("rewound roadmap phase = %+v, want clean pending state", phase)
 		}
+	}
+	st.UpdatePhase(status.WaypointV2Design, status.PhaseStatusV2InProgress, "")
+	restarted := st.GetPhaseHistory(status.WaypointV2Design)
+	if restarted == nil || restarted.StartedAt.IsZero() {
+		t.Fatalf("restarted target history = %+v, want a valid start timestamp", restarted)
 	}
 }

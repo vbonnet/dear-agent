@@ -125,16 +125,13 @@ func resetForRewind(st *status.StatusV2, allPhases []string, targetIdx int) {
 	for index, phase := range allPhases {
 		positions[phase] = index
 	}
-	for index := range st.WaypointHistory {
-		phase := &st.WaypointHistory[index]
+	retainedHistory := st.WaypointHistory[:0]
+	for _, phase := range st.WaypointHistory {
 		if positions[phase.Name] < targetIdx {
-			continue
+			retainedHistory = append(retainedHistory, phase)
 		}
-		phase.Status = status.PhaseStatusV2Pending
-		phase.StartedAt = time.Time{}
-		phase.CompletedAt = nil
-		phase.Outcome = nil
 	}
+	st.WaypointHistory = retainedHistory
 	if st.Roadmap == nil {
 		return
 	}
