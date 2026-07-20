@@ -142,7 +142,6 @@ jobs:
           ./engram/internal/tokens
           ./engram/internal/tokens/tokenizers
           ./engram/internal/tokentracking
-          ./engram/internal/tracking
           ./engram/retrieval
 
       - name: Unit tests — benchmarks scaffolding
