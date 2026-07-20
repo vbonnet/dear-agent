@@ -454,6 +454,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 type bddLifecycleTmux struct {
 	sessions map[string]bool
 	sent     []string
+	events   []string
 }
 
 func newBDDLifecycleTmux() *bddLifecycleTmux {
@@ -481,10 +482,21 @@ func (t *bddLifecycleTmux) CreateSession(name, _ string) error {
 	return nil
 }
 func (t *bddLifecycleTmux) AttachSession(string) error { return nil }
+func (t *bddLifecycleTmux) CheckInputReadiness(name, harness string) (session.InputReadiness, error) {
+	t.events = append(t.events, "readiness:"+name+":"+harness)
+	if !t.sessions[name] {
+		return session.InputReadiness{State: "NOT_FOUND"}, nil
+	}
+	if harness != "codex-cli" {
+		return session.InputReadiness{}, fmt.Errorf("unexpected lifecycle harness %q", harness)
+	}
+	return session.InputReadiness{Ready: true, State: "YES"}, nil
+}
 func (t *bddLifecycleTmux) SendKeys(name, keys string) error {
 	if !t.sessions[name] {
 		return fmt.Errorf("tmux target %q does not exist", name)
 	}
+	t.events = append(t.events, "send:"+name)
 	t.sent = append(t.sent, name+"\x00"+keys)
 	return nil
 }
@@ -4242,6 +4254,13 @@ func agmSendsMessageToTheSession(ctx context.Context) error {
 	want := harnessState.lifecycleSessionName + "\x00" + message
 	if !result.Delivered || len(harnessState.lifecycleTmux.sent) != 1 || harnessState.lifecycleTmux.sent[0] != want {
 		return fmt.Errorf("send did not reach exact tmux target: result=%+v calls=%q", result, harnessState.lifecycleTmux.sent)
+	}
+	wantEvents := []string{
+		"readiness:" + harnessState.lifecycleSessionName + ":codex-cli",
+		"send:" + harnessState.lifecycleSessionName,
+	}
+	if !slices.Equal(harnessState.lifecycleTmux.events, wantEvents) {
+		return fmt.Errorf("send lifecycle events = %q, want %q", harnessState.lifecycleTmux.events, wantEvents)
 	}
 	harnessState.lifecycleTransitions = append(harnessState.lifecycleTransitions, "message-delivered")
 	return nil
