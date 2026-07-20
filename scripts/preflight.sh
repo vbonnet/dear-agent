@@ -73,6 +73,10 @@ go build -ldflags="${LDFLAGS}" -o build/agm-mcp-server ./agm/cmd/agm-mcp-server
 go build ./...
 ok "build clean"
 
+step "make lint-adrs"
+make lint-adrs || fail "ADR identity/index/lifecycle contract failed"
+ok "ADR identity/index/lifecycle contract intact"
+
 step "golangci-lint run ./..."
 if ! command -v golangci-lint >/dev/null 2>&1; then
   fail "golangci-lint not installed. Run: brew install golangci-lint"
@@ -85,6 +89,11 @@ LINT_VER="$(golangci-lint version 2>&1 | head -n 1 || true)"
 warn "local linter: ${LINT_VER}"
 golangci-lint run --timeout=5m ./... || fail "lint failed (see above)"
 ok "lint clean"
+
+step "verify generated AGM surfaces and plugin hashes"
+make verify-surface-codegen || fail "generated AGM surface artifacts are stale"
+make plugin-verify-hashes || fail "AGM plugin content hashes are stale"
+ok "generated AGM surfaces and plugin hashes verified"
 
 TEST_TIMEOUT="20m"
 if [[ "$MODE" == "tests" || "$MODE" == "race" || "$MODE" == "full" ]]; then

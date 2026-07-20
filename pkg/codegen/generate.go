@@ -37,7 +37,7 @@ func Generate(cfg GenerateConfig) error {
 		return fmt.Errorf("generating MCP: %w", err)
 	}
 
-	if err := GenerateSkills(irs, cfg.OutDir); err != nil {
+	if err := GenerateSkills(irs, cfg.OutDir, cfg.CLIBinary); err != nil {
 		return fmt.Errorf("generating Skills: %w", err)
 	}
 

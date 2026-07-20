@@ -101,13 +101,18 @@ func runStatus(cmd *cobra.Command, args []string) error {
 			printOpsStatusTable(cmd, statusResult)
 		}
 	case "json":
-		// Use cliframe JSON formatter with ops result
+		// Preserve the workspace filter and detailed session fields in structured
+		// output. The ops summary does not carry branch/worktree details.
+		workspaceStatus, wsErr := session.AggregateWorkspaceStatus(opCtx.Storage, statusWorkspace)
+		if wsErr != nil {
+			return fmt.Errorf("aggregate workspace status: %w", wsErr)
+		}
 		formatter, fmtErr := cliframe.NewFormatter(cliframe.FormatJSON, cliframe.WithPrettyPrint(true))
 		if fmtErr != nil {
 			return fmtErr
 		}
 		writer = writer.WithFormatter(formatter)
-		return writer.Output(statusResult)
+		return writer.Output(workspaceStatus)
 	default:
 		return fmt.Errorf("invalid format '%s'. Valid formats: table, json", statusFormat)
 	}
