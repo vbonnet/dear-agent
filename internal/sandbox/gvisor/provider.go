@@ -105,8 +105,12 @@ func (p *Provider) Create(ctx context.Context, req sandbox.SandboxRequest) (*san
 		}
 	}
 
+	cleanupState := sandbox.NewWorktreeCleanup(worktreeCreated)
 	cleanupFn := func() error {
-		return p.cleanupSandbox(worktreeRepo, upperDir, workDir, mergedDir, worktreeCreated)
+		return cleanupState.Run(
+			func() error { return p.removeWorktree(worktreeRepo, mergedDir) },
+			func() error { return p.cleanup(upperDir, workDir, mergedDir) },
+		)
 	}
 
 	sb := &sandbox.Sandbox{
@@ -319,17 +323,6 @@ func (p *Provider) removeWorktree(repoPath, worktreePath string) error {
 		return fmt.Errorf("git worktree remove failed: %w\nOutput: %s", err, string(output))
 	}
 	return nil
-}
-
-func (p *Provider) cleanupSandbox(worktreeRepo, upperDir, workDir, mergedDir string, worktreeCreated bool) error {
-	if worktreeCreated {
-		if err := p.removeWorktree(worktreeRepo, mergedDir); err != nil {
-			// Preserve the worktree and all provider state when Git refuses an
-			// active lock. Destroy retains the registry entry for a safe retry.
-			return err
-		}
-	}
-	return p.cleanup(upperDir, workDir, mergedDir)
 }
 
 // populateMergedDir creates symlinks in mergedDir pointing to each top-level

@@ -138,13 +138,17 @@ func TestProvider_DestroyPreservesLockedWorktreeForRetry(t *testing.T) {
 	repo, mergedDir, upperDir, workDir := newLockedBubblewrapWorktree(t)
 	p := NewProvider()
 	const id = "locked-destroy"
+	cleanupState := sandbox.NewWorktreeCleanup(true)
 	p.sandboxes[id] = &sandbox.Sandbox{
 		ID:         id,
 		MergedPath: mergedDir,
 		UpperPath:  upperDir,
 		WorkPath:   workDir,
 		CleanupFunc: func() error {
-			return p.cleanupSandbox(repo, upperDir, workDir, mergedDir, true)
+			return cleanupState.Run(
+				func() error { return p.removeWorktree(repo, mergedDir) },
+				func() error { return p.cleanup(upperDir, workDir, mergedDir) },
+			)
 		},
 	}
 

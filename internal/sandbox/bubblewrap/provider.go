@@ -115,9 +115,13 @@ func (p *Provider) Create(ctx context.Context, req sandbox.SandboxRequest) (*san
 		}
 	}
 
-	// Build cleanup function that removes the worktree before cleaning dirs
+	// Build retryable cleanup that removes the worktree before cleaning dirs.
+	cleanupState := sandbox.NewWorktreeCleanup(worktreeCreated)
 	cleanupFn := func() error {
-		return p.cleanupSandbox(worktreeRepo, upperDir, workDir, mergedDir, worktreeCreated)
+		return cleanupState.Run(
+			func() error { return p.removeWorktree(worktreeRepo, mergedDir) },
+			func() error { return p.cleanup(upperDir, workDir, mergedDir) },
+		)
 	}
 
 	// Create sandbox metadata
@@ -409,18 +413,6 @@ func (p *Provider) removeWorktree(repoPath, worktreePath string) error {
 		return fmt.Errorf("git worktree remove failed: %w\nOutput: %s", err, string(output))
 	}
 	return nil
-}
-
-func (p *Provider) cleanupSandbox(worktreeRepo, upperDir, workDir, mergedDir string, worktreeCreated bool) error {
-	if worktreeCreated {
-		if err := p.removeWorktree(worktreeRepo, mergedDir); err != nil {
-			// Git deliberately refuses a single-force removal of a locked
-			// worktree. Preserve every sandbox directory so an active owner is
-			// not bypassed and Destroy can retry after the owner unlocks it.
-			return err
-		}
-	}
-	return p.cleanup(upperDir, workDir, mergedDir)
 }
 
 // Destroy tears down the sandbox and cleans up resources.

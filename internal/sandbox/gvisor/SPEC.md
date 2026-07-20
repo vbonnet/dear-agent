@@ -33,6 +33,8 @@ gVisor.
 
 **GVISOR-11** When Git refuses to remove a locked sandbox worktree during destruction, the system shall preserve the worktree, sandbox directories, and provider registry entry, return the removal error, and allow destruction to be retried after the owner unlocks the worktree.
 
+**GVISOR-12** When Git worktree removal succeeds but sandbox directory cleanup fails during destruction, the system shall retain the provider registry entry and retry only the unfinished directory cleanup phase.
+
 ## BDD Traceability
 
 - `agm/test/bdd/features/sandbox_provider_guardrails.feature` enforces that this

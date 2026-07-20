@@ -31,29 +31,29 @@ func RegisterSandboxProviderGuardrailSteps(ctx *godog.ScenarioContext) {
 		validatePattern:   `^AGM validates sandbox provider package coverage$`,
 		colocatedPattern:  `^sandbox provider package "([^"]*)" should have a co-located SPEC$`,
 	})
-	ctx.Step(`^AGM runs the sandbox provider locked-destroy regressions$`, agmRunsSandboxProviderLockedDestroyRegressions)
-	ctx.Step(`^failed destruction should remain retryable until the worktree is unlocked$`, failedSandboxDestructionShouldRemainRetryable)
+	ctx.Step(`^AGM runs the sandbox provider cleanup retry regressions$`, agmRunsSandboxProviderCleanupRetryRegressions)
+	ctx.Step(`^failed destruction should resume at the unfinished cleanup phase$`, failedSandboxDestructionShouldResumeAtUnfinishedPhase)
 }
 
-func agmRunsSandboxProviderLockedDestroyRegressions(ctx context.Context) error {
+func agmRunsSandboxProviderCleanupRetryRegressions(ctx context.Context) error {
 	state, ok := ctx.Value(sandboxProviderCleanupStateKey{}).(*sandboxProviderCleanupState)
 	if !ok || state == nil {
 		return fmt.Errorf("sandbox provider cleanup state not initialized")
 	}
 	state.output, state.err = runLocalGuardrailGoTest(ctx,
-		`^TestProvider_DestroyPreservesLockedWorktreeForRetry$`,
-		"./internal/sandbox/bubblewrap", "./internal/sandbox/gvisor",
+		`^(TestWorktreeCleanupRetriesOnlyIncompletePhase|TestProvider_DestroyPreservesLockedWorktreeForRetry)$`,
+		"./internal/sandbox", "./internal/sandbox/bubblewrap", "./internal/sandbox/gvisor",
 	)
 	return nil
 }
 
-func failedSandboxDestructionShouldRemainRetryable(ctx context.Context) error {
+func failedSandboxDestructionShouldResumeAtUnfinishedPhase(ctx context.Context) error {
 	state, ok := ctx.Value(sandboxProviderCleanupStateKey{}).(*sandboxProviderCleanupState)
 	if !ok || state == nil {
 		return fmt.Errorf("sandbox provider cleanup state not initialized")
 	}
 	if state.err != nil {
-		return fmt.Errorf("sandbox provider locked-destroy regressions: %w: %s", state.err, state.output)
+		return fmt.Errorf("sandbox provider cleanup retry regressions: %w: %s", state.err, state.output)
 	}
 	return nil
 }

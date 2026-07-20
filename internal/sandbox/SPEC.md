@@ -6,11 +6,14 @@
 
 **SNDBR-02** When sandbox cleanup runs, the provider shall remove only resources owned by that sandbox instance.
 
+**SNDBR-03** When Git worktree removal succeeds but subsequent sandbox directory cleanup fails, the system shall resume a retry at directory cleanup without repeating the completed Git removal phase.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
+- Feature: `agm/test/bdd/features/sandbox_provider_guardrails.feature`
 
-<!-- Last audited at: NEEDS-AUDIT -->
+<!-- Last audited at: 2026-07-20 -->
 
 ## Overview
 

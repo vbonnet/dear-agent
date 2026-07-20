@@ -1,4 +1,5 @@
-# SPEC: internal/sandbox/bubblewrap/SPEC.md
+# SPEC: internal/sandbox/SPEC.md
+# RELATED-SPEC: internal/sandbox/bubblewrap/SPEC.md
 # RELATED-SPEC: internal/sandbox/apfs/SPEC.md
 # RELATED-SPEC: internal/sandbox/gvisor/SPEC.md
 # RELATED-SPEC: internal/sandbox/overlayfs/SPEC.md
@@ -21,6 +22,6 @@ Feature: Sandbox provider guardrails
       | internal/sandbox/overlayfs  |
       | wayfinder/pkg/sandbox       |
 
-  Scenario: Sandbox provider destruction preserves active worktree locks
-    When AGM runs the sandbox provider locked-destroy regressions
-    Then failed destruction should remain retryable until the worktree is unlocked
+  Scenario: Sandbox provider destruction preserves retryable cleanup state
+    When AGM runs the sandbox provider cleanup retry regressions
+    Then failed destruction should resume at the unfinished cleanup phase
