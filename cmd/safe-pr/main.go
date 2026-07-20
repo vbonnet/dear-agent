@@ -151,25 +151,35 @@ func run(argv []string) error {
 		return err
 	}
 
-	if p.req.Verb == "create" && !p.skipPreflight {
-		if err := runPreflightFull(cwd); err != nil {
-			return err
+	execute := func() error {
+		if p.req.Verb == "create" && !p.skipPreflight {
+			if err := runPreflightFull(cwd); err != nil {
+				return err
+			}
 		}
+
+		shutdown := otelsetup.InitTracer("safe-pr")
+		defer func() {
+			if err := shutdown(context.Background()); err != nil {
+				fmt.Fprintf(os.Stderr, "safe-pr: otel shutdown: %v\n", err)
+			}
+		}()
+
+		return executeGitHub(&p.req, p.timeout, p.verifyCI)
 	}
-
-	shutdown := otelsetup.InitTracer("safe-pr")
-	defer func() {
-		if err := shutdown(context.Background()); err != nil {
-			fmt.Fprintf(os.Stderr, "safe-pr: otel shutdown: %v\n", err)
-		}
-	}()
-
-	return executeGitHub(&p.req, p.timeout, p.verifyCI)
+	if p.req.Verb == "create" {
+		return protectCreateWorktree(cwd, "safe-pr create", execute)
+	}
+	return execute()
 }
 
 // executeGitHub is the external PR mutation boundary. Tests replace it so a
 // unit test can prove control flow without creating a real GitHub pull request.
 var executeGitHub = execGh
+
+// protectCreateWorktree owns the worktree lock across both preflight and the
+// GitHub mutation. Tests replace it to prove the command's transaction scope.
+var protectCreateWorktree = safepr.WithWorktreeLock
 
 // expectedRemotePrefix is the required GitHub org prefix for origin remotes.
 // Any URL that does not start with this string is rejected by validateRemoteURL.

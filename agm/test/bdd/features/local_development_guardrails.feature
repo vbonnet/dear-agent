@@ -79,6 +79,19 @@ Feature: Local development guardrails
     When AGM validates the safe-pr preflight budget
     Then safe-pr should allow at least 20 minutes for preflight-full
 
+  Scenario Outline: Safe PR creation preserves worktree lock ownership
+    Given a safe-pr linked worktree with "<initial_lock>" lock ownership
+    When safe-pr protects a "<outcome>" preflight and PR creation transaction
+    Then the worktree should be protected during preflight and PR creation
+    And the "<final_lock>" lock ownership should remain after the transaction
+
+    Examples:
+      | initial_lock | outcome | final_lock   |
+      | absent       | success | absent       |
+      | absent       | failure | absent       |
+      | pre-existing | success | pre-existing |
+      | pre-existing | failure | pre-existing |
+
   Scenario: All repository test runners use the required CI timeout
     Given local, affected integration, and required CI Go test timeouts are configured
     When AGM validates Go test timeout parity

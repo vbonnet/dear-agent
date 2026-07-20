@@ -143,6 +143,15 @@ func writeWayfinderStatus(t *testing.T, dir, sessionID, status string) {
 	}
 }
 
+func bypassCreateWorktreeProtection(t *testing.T) {
+	t.Helper()
+	original := protectCreateWorktree
+	t.Cleanup(func() { protectCreateWorktree = original })
+	protectCreateWorktree = func(_ string, _ string, action func() error) error {
+		return action()
+	}
+}
+
 func TestParseArgs_SkipPreflight(t *testing.T) {
 	p, err := parseArgs([]string{"create", "--skip-preflight", "--title", "t"})
 	if err != nil {
@@ -217,6 +226,7 @@ func TestPreflightTimeoutCoversRepositoryFullGate(t *testing.T) {
 }
 
 func TestRun_PreflightFail_BlocksPRCreate(t *testing.T) {
+	bypassCreateWorktreeProtection(t)
 	t.Setenv("WAYFINDER_PROJECT_DIR", "")
 	dir := t.TempDir()
 	writeWayfinderStatus(t, dir, "test-session", "in_progress")
@@ -234,6 +244,7 @@ func TestRun_PreflightFail_BlocksPRCreate(t *testing.T) {
 }
 
 func TestRun_PreflightPass_ProceedsToPRCreate(t *testing.T) {
+	bypassCreateWorktreeProtection(t)
 	t.Setenv("WAYFINDER_PROJECT_DIR", "")
 	dir := t.TempDir()
 	writeWayfinderStatus(t, dir, "test-session", "in_progress")
@@ -258,6 +269,7 @@ func TestRun_PreflightPass_ProceedsToPRCreate(t *testing.T) {
 }
 
 func TestRun_SkipPreflight_NoPreflightRun(t *testing.T) {
+	bypassCreateWorktreeProtection(t)
 	t.Setenv("WAYFINDER_PROJECT_DIR", "")
 	dir := t.TempDir()
 	writeWayfinderStatus(t, dir, "test-session", "in_progress")
@@ -286,5 +298,53 @@ func TestRun_SkipPreflight_NoPreflightRun(t *testing.T) {
 	}
 	if !ghCalled {
 		t.Error("GitHub boundary was not called with --skip-preflight")
+	}
+}
+
+func TestRun_CreateProtectsPreflightAndGitHubMutation(t *testing.T) {
+	t.Setenv("WAYFINDER_PROJECT_DIR", "")
+	dir := t.TempDir()
+	writeWayfinderStatus(t, dir, "test-session", "in_progress")
+
+	originalProtect := protectCreateWorktree
+	originalPreflight := runPreflightFull
+	originalGitHub := executeGitHub
+	t.Cleanup(func() {
+		protectCreateWorktree = originalProtect
+		runPreflightFull = originalPreflight
+		executeGitHub = originalGitHub
+	})
+
+	events := make([]string, 0, 4)
+	protected := false
+	protectCreateWorktree = func(_ string, _ string, action func() error) error {
+		events = append(events, "protect-start")
+		protected = true
+		err := action()
+		protected = false
+		events = append(events, "protect-end")
+		return err
+	}
+	runPreflightFull = func(string) error {
+		if !protected {
+			t.Fatal("preflight ran outside worktree protection")
+		}
+		events = append(events, "preflight")
+		return nil
+	}
+	executeGitHub = func(*safepr.Request, time.Duration, bool) error {
+		if !protected {
+			t.Fatal("GitHub mutation ran outside worktree protection")
+		}
+		events = append(events, "github")
+		return nil
+	}
+
+	if err := run([]string{"create", "--wayfinder", dir, "--title", "t"}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"protect-start", "preflight", "github", "protect-end"}
+	if strings.Join(events, ",") != strings.Join(want, ",") {
+		t.Fatalf("transaction events = %v, want %v", events, want)
 	}
 }

@@ -41,6 +41,8 @@ creation.
 
 **SAFE-PR-13** When draft detection scans GitHub CLI arguments, the system shall treat `-R` and every other value-taking shorthand as consuming its repository value rather than interpreting that value as Boolean flags.
 
+**SAFE-PR-14** When pull request creation runs, the system shall protect the linked worktree across both the full preflight and GitHub mutation boundaries.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`

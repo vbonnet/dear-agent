@@ -1,6 +1,6 @@
 # Safe PR Specification
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-07-20 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -36,6 +36,16 @@ cost and intent remain traceable.
 **SAFEPR-10** When Wayfinder status is `blocked`, `completed`, or `abandoned`, the system shall reject PR operations as inactive.
 
 **SAFEPR-11** When any supported harness or model family creates canonical Wayfinder V2 status, the system shall apply the same provider-neutral attribution policy.
+
+**SAFEPR-12** When safe-pr creates a pull request from a linked worktree, the system shall hold a worktree lock across the complete preflight and GitHub mutation transaction.
+
+**SAFEPR-13** When a linked worktree is already locked, the system shall preserve the existing lock and its exact reason after a successful or failed transaction.
+
+**SAFEPR-14** When safe-pr acquires a worktree lock, the system shall release only that owned lock after a successful or failed transaction.
+
+**SAFEPR-15** When safe-pr create runs from a primary checkout that cannot be worktree-locked, the system shall reject the operation before preflight or GitHub mutation.
+
+**SAFEPR-16** When safe-pr invokes git to manage worktree protection, the system shall use a bounded context, isolated process group, group-wide cancellation, and bounded pipe-drain delay.
 
 ## BDD Traceability
 
