@@ -150,6 +150,17 @@ func TestValidateTestTargetUsesPositiveAllowlist(t *testing.T) {
 	}
 }
 
+func TestSharedDoltTestConfigEstablishesGuardedTarget(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	lookupEnv = os.LookupEnv
+	t.Cleanup(func() { lookupEnv = originalLookupEnv })
+
+	config := sharedDoltTestConfig(t)
+	if err := validateTestExecutionTarget(config.Workspace, config.Database); err != nil {
+		t.Fatalf("sharedDoltTestConfig target rejected: %v", err)
+	}
+}
+
 func TestNewRejectsDirectProductionTargetInTests(t *testing.T) {
 	originalLookupEnv := lookupEnv
 	lookupEnv = os.LookupEnv

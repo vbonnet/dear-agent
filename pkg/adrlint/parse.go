@@ -7,6 +7,10 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/text"
 )
 
 var (
@@ -100,6 +104,7 @@ func commonDocumentViolations(root, relative string, data []byte) []Violation {
 }
 
 func undefinedMarkdownReferences(data []byte) []string {
+	data = markdownOutsideCode(data)
 	definitions := make(map[string]bool)
 	for _, match := range markdownReferenceDefinition.FindAllStringSubmatch(string(data), -1) {
 		definitions[normalizeReferenceLabel(match[1])] = true
@@ -124,6 +129,7 @@ func normalizeReferenceLabel(label string) string {
 }
 
 func markdownTargets(data []byte) []string {
+	data = markdownOutsideCode(data)
 	inlineMatches := markdownLink.FindAllStringSubmatch(string(data), -1)
 	referenceDefinitions := markdownReferenceDefinition.FindAllStringSubmatch(string(data), -1)
 	targets := make([]string, 0, len(inlineMatches)+len(referenceDefinitions))
@@ -134,6 +140,48 @@ func markdownTargets(data []byte) []string {
 		targets = append(targets, match[2])
 	}
 	return targets
+}
+
+func markdownOutsideCode(data []byte) []byte {
+	masked := append([]byte(nil), data...)
+	document := goldmark.DefaultParser().Parse(text.NewReader(data))
+	_ = ast.Walk(document, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		switch current := node.(type) {
+		case *ast.CodeBlock:
+			maskMarkdownSegments(masked, current.Lines())
+			return ast.WalkSkipChildren, nil
+		case *ast.FencedCodeBlock:
+			maskMarkdownSegments(masked, current.Lines())
+			return ast.WalkSkipChildren, nil
+		case *ast.CodeSpan:
+			for child := current.FirstChild(); child != nil; child = child.NextSibling() {
+				if textNode, ok := child.(*ast.Text); ok {
+					maskMarkdownSegment(masked, textNode.Segment)
+				}
+			}
+			return ast.WalkSkipChildren, nil
+		default:
+			return ast.WalkContinue, nil
+		}
+	})
+	return masked
+}
+
+func maskMarkdownSegments(data []byte, segments *text.Segments) {
+	for index := 0; index < segments.Len(); index++ {
+		maskMarkdownSegment(data, segments.At(index))
+	}
+}
+
+func maskMarkdownSegment(data []byte, segment text.Segment) {
+	for index := segment.Start; index < segment.Stop && index < len(data); index++ {
+		if data[index] != '\n' && data[index] != '\r' {
+			data[index] = ' '
+		}
+	}
 }
 
 func markdownLinkDestination(raw string) string {
@@ -169,6 +217,7 @@ func hasADRSuccessorLink(root, relative string, statusLine, document []byte, gov
 
 func successorTargets(statusLine, document []byte) []string {
 	targets := markdownTargets(statusLine)
+	document = markdownOutsideCode(document)
 	definitions := make(map[string]string)
 	for _, match := range markdownReferenceDefinition.FindAllStringSubmatch(string(document), -1) {
 		definitions[normalizeReferenceLabel(match[1])] = match[2]
