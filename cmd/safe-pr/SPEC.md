@@ -45,6 +45,10 @@ creation.
 
 **SAFE-PR-15** When pull request creation manages safe-pr lock ownership, the system shall hold a per-worktree operating-system serialization lock across the transaction so process termination releases liveness ownership without relying on reusable numeric process IDs.
 
+**SAFE-PR-16** When pull request creation launches preflight, GitHub mutation, auto-merge, or CI-discovery commands, the system shall attach the active worktree transaction guard so child process lifetime remains part of the protected transaction after abrupt parent termination.
+
+**SAFE-PR-17** When a protected safe-pr child command is canceled or times out, the system shall terminate its isolated process group and bound pipe draining before the parent releases Git worktree ownership.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`

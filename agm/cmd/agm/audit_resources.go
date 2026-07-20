@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -340,11 +341,14 @@ func printOrphanReport(orphans []orphanedWorktree) {
 }
 
 func removeOrphanWorktree(o orphanedWorktree) error {
+	var removalErrs []error
 	// Try git worktree remove first (cleanest)
 	if o.Repo != "" {
-		if err := gitpkg.RemoveWorktree(o.Repo, o.Path, true); err == nil {
+		err := gitpkg.RemoveWorktree(o.Repo, o.Path, true)
+		if err == nil {
 			return nil
 		}
+		removalErrs = append(removalErrs, err)
 	}
 	// Fallback: find the repo from the .git file and remove via git
 	if gitDir, err := resolveGitDir(o.Path); err == nil && gitDir != "" {
@@ -352,13 +356,21 @@ func removeOrphanWorktree(o orphanedWorktree) error {
 		// Format: <repo>/.git/worktrees/<name>
 		repoPath := repoFromGitDir(gitDir)
 		if repoPath != "" {
-			if err := gitpkg.RemoveWorktree(repoPath, o.Path, true); err == nil {
+			err := gitpkg.RemoveWorktree(repoPath, o.Path, true)
+			if err == nil {
 				return nil
 			}
+			removalErrs = append(removalErrs, err)
 		}
 	}
-	// Last resort: remove directory directly (leaves stale git refs, prune will clean)
-	return os.RemoveAll(o.Path)
+	// Never bypass Git with direct filesystem deletion. A one-force Git removal
+	// deliberately refuses a locked worktree, including one protected by an
+	// active safe-pr transaction whose AGM session lookup was inconclusive.
+	cause := errors.Join(removalErrs...)
+	if cause == nil {
+		cause = errors.New("no owning Git repository could be resolved")
+	}
+	return fmt.Errorf("refusing direct removal of worktree %s after Git rejected cleanup: %w", o.Path, cause)
 }
 
 func pruneWorktreeRefs(repoPath string) error {

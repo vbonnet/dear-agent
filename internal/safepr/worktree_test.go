@@ -200,7 +200,7 @@ func TestWithWorktreeLockSerializesConcurrentOwners(t *testing.T) {
 		t.Fatal("first transaction did not acquire worktree protection")
 	}
 	secondCalled := false
-	err = withWorktreeTransactionLock(identity.gitDir, 50*time.Millisecond, func() error {
+	err = withWorktreeTransactionLock(identity.gitDir, 50*time.Millisecond, func(*WorktreeTransaction) error {
 		secondCalled = true
 		return nil
 	})
@@ -332,5 +332,122 @@ func TestWorktreeGitCommandIsBoundedAndGroupCancelable(t *testing.T) {
 	}
 	if err := cmd.Cancel(); err != nil {
 		t.Fatalf("cancel before start = %v", err)
+	}
+}
+
+func TestWorktreeTransactionHelper(t *testing.T) {
+	if os.Getenv("SAFEPR_TRANSACTION_HELPER") != "1" {
+		return
+	}
+	worktree := os.Getenv("SAFEPR_TRANSACTION_WORKTREE")
+	marker := os.Getenv("SAFEPR_TRANSACTION_MARKER")
+	if err := WithWorktreeTransaction(worktree, "parent-death helper", func(transaction *WorktreeTransaction) error {
+		cmd := exec.Command("sh", "-c", `touch "$SAFEPR_TRANSACTION_MARKER"; sleep 2`)
+		cmd.Env = os.Environ()
+		if err := transaction.ProtectCommand(cmd); err != nil {
+			return err
+		}
+		return cmd.Run()
+	}); err != nil {
+		t.Fatalf("transaction helper: %v (marker %s)", err, marker)
+	}
+}
+
+func TestWorktreeTransactionLockOutlivesKilledParentForProtectedChild(t *testing.T) {
+	_, worktree := initLinkedWorktree(t)
+	identity, err := resolveLinkedWorktree(worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "child-started")
+	helper := exec.Command(os.Args[0], "-test.run=^TestWorktreeTransactionHelper$")
+	helper.Env = append(os.Environ(),
+		"SAFEPR_TRANSACTION_HELPER=1",
+		"SAFEPR_TRANSACTION_WORKTREE="+worktree,
+		"SAFEPR_TRANSACTION_MARKER="+marker,
+	)
+	if err := helper.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if helper.ProcessState == nil {
+			_ = helper.Process.Kill()
+			_ = helper.Wait()
+		}
+	})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat(marker); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("protected child did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := helper.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = helper.Wait()
+	state, inspectErr := inspectWorktreeLock(worktree)
+	if inspectErr != nil {
+		t.Fatal(inspectErr)
+	}
+	if !state.locked || !strings.Contains(state.reason, "parent-death helper") {
+		t.Fatalf("Git lock after parent death = %+v, want inherited transaction protection", state)
+	}
+
+	entered := false
+	err = withWorktreeTransactionLock(identity.gitDir, 100*time.Millisecond, func(*WorktreeTransaction) error {
+		entered = true
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "another safe-pr transaction") {
+		t.Fatalf("replacement while protected child lives = %v, want serialization rejection", err)
+	}
+	if entered {
+		t.Fatal("replacement entered while killed parent child retained transaction")
+	}
+
+	releaseDeadline := time.Now().Add(4 * time.Second)
+	for {
+		err = withWorktreeTransactionLock(identity.gitDir, 100*time.Millisecond, func(*WorktreeTransaction) error {
+			entered = true
+			return nil
+		})
+		if err == nil {
+			break
+		}
+		if time.Now().After(releaseDeadline) {
+			t.Fatalf("transaction remained locked after protected child exit: %v", err)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if !entered {
+		t.Fatal("replacement did not enter after protected child exit")
+	}
+	entered = false
+	if err := WithWorktreeTransaction(worktree, "replacement after child exit", func(*WorktreeTransaction) error {
+		entered = true
+		return nil
+	}); err != nil {
+		t.Fatalf("replacement transaction after child exit = %v", err)
+	}
+	if !entered {
+		t.Fatal("replacement transaction did not reclaim the interrupted Git lock")
+	}
+	state, inspectErr = inspectWorktreeLock(worktree)
+	if inspectErr != nil {
+		t.Fatal(inspectErr)
+	}
+	if state.locked {
+		t.Fatalf("replacement owned Git lock survived release: %+v", state)
+	}
+}
+
+func TestWorktreeTransactionGuardUsesNonGitLockName(t *testing.T) {
+	if strings.HasSuffix(worktreeTransactionLockFile, ".lock") {
+		t.Fatalf("transaction guard %q is eligible for stale Git-lock cleanup", worktreeTransactionLockFile)
 	}
 }

@@ -20,7 +20,7 @@ const (
 	worktreeCommandTimeout      = 10 * time.Second
 	worktreeLockAttempts        = 3
 	safePROwnedLockPrefix       = "safe-pr-owned:"
-	worktreeTransactionLockFile = "safe-pr-transaction.lock"
+	worktreeTransactionLockFile = "safe-pr-transaction.guard"
 	worktreeLockRetryInterval   = 10 * time.Millisecond
 )
 
@@ -34,12 +34,49 @@ type linkedWorktree struct {
 	gitDir string
 }
 
+// WorktreeTransaction holds the operating-system lock that serializes safe-pr
+// ownership. Commands protected with ProtectCommand inherit the open lock file,
+// so the kernel keeps the transaction live if the safe-pr parent is killed
+// while a preflight or GitHub child is still running.
+type WorktreeTransaction struct {
+	lockFile *os.File
+}
+
+// ProtectCommand makes cmd inherit the transaction lock. It is safe to call on
+// a nil transaction for command paths, such as `safe-pr close`, that do not own
+// a linked-worktree transaction.
+func (t *WorktreeTransaction) ProtectCommand(cmd *exec.Cmd) error {
+	if cmd == nil {
+		return fmt.Errorf("protect safe-pr child command: command is required")
+	}
+	if t == nil {
+		return nil
+	}
+	if t.lockFile == nil {
+		return fmt.Errorf("protect safe-pr child command: transaction lock is unavailable")
+	}
+	cmd.ExtraFiles = append(cmd.ExtraFiles, t.lockFile)
+	return nil
+}
+
 // WithWorktreeLock runs action while dir's linked worktree is protected from
 // cleanup. A pre-existing lock is preserved exactly. Otherwise, the function
 // acquires a uniquely owned lock and releases it on both success and failure.
 func WithWorktreeLock(dir, reason string, action func() error) error {
 	if action == nil {
 		return fmt.Errorf("protect safe-pr worktree: action is required")
+	}
+	return WithWorktreeTransaction(dir, reason, func(_ *WorktreeTransaction) error {
+		return action()
+	})
+}
+
+// WithWorktreeTransaction runs action while dir's linked worktree is protected
+// and exposes the transaction to child commands that must outlive a killed
+// parent without releasing worktree ownership prematurely.
+func WithWorktreeTransaction(dir, reason string, action func(*WorktreeTransaction) error) error {
+	if action == nil {
+		return fmt.Errorf("protect safe-pr worktree: transaction action is required")
 	}
 	worktree, err := resolveLinkedWorktree(dir)
 	if err != nil {
@@ -48,12 +85,12 @@ func WithWorktreeLock(dir, reason string, action func() error) error {
 	// Acquisition, the caller's action, ownership verification, and release all
 	// execute inside this operating-system critical section. A second safe-pr
 	// owner cannot replace the Git lock between release inspection and unlock.
-	return withWorktreeTransactionLock(worktree.gitDir, worktreeCommandTimeout, func() error {
-		return withGitWorktreeLock(worktree.root, reason, action)
+	return withWorktreeTransactionLock(worktree.gitDir, worktreeCommandTimeout, func(transaction *WorktreeTransaction) error {
+		return withGitWorktreeLock(worktree.root, reason, transaction, action)
 	})
 }
 
-func withGitWorktreeLock(root, reason string, action func() error) error {
+func withGitWorktreeLock(root, reason string, transaction *WorktreeTransaction, action func(*WorktreeTransaction) error) error {
 	var ownedReason string
 	var lastErr error
 	for range worktreeLockAttempts {
@@ -63,7 +100,7 @@ func withGitWorktreeLock(root, reason string, action func() error) error {
 		}
 		if current.locked {
 			if !isSafePROwnedLockReason(current.reason) {
-				return runWithPreservedLock(root, current, action)
+				return runWithPreservedLock(root, current, func() error { return action(transaction) })
 			}
 			if _, reclaimErr := runWorktreeGit(root, "worktree", "unlock", root); reclaimErr != nil {
 				lastErr = errors.Join(lastErr, fmt.Errorf("protect safe-pr worktree: reclaim stale owned lock: %w", reclaimErr))
@@ -82,7 +119,7 @@ func withGitWorktreeLock(root, reason string, action func() error) error {
 			lastErr = errors.Join(lastErr, fmt.Errorf("protect safe-pr worktree: acquire lock: %w", lockErr))
 			continue
 		}
-		return runWithOwnedLock(root, ownedReason, action)
+		return runWithOwnedLock(root, ownedReason, transaction, action)
 	}
 	return errors.Join(lastErr, fmt.Errorf("protect safe-pr worktree: lock ownership did not stabilize after %d attempts", worktreeLockAttempts))
 }
@@ -128,7 +165,7 @@ func parseLinkedWorktree(out string) (linkedWorktree, error) {
 	return linkedWorktree{root: root, gitDir: gitDir}, nil
 }
 
-func withWorktreeTransactionLock(gitDir string, timeout time.Duration, action func() error) (err error) {
+func withWorktreeTransactionLock(gitDir string, timeout time.Duration, action func(*WorktreeTransaction) error) (err error) {
 	path := filepath.Join(gitDir, worktreeTransactionLockFile)
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
@@ -158,12 +195,10 @@ func withWorktreeTransactionLock(gitDir string, timeout time.Duration, action fu
 		case <-ticker.C:
 		}
 	}
-	defer func() {
-		if unlockErr := syscall.Flock(int(file.Fd()), syscall.LOCK_UN); unlockErr != nil {
-			err = errors.Join(err, fmt.Errorf("protect safe-pr worktree: release transaction lock: %w", unlockErr))
-		}
-	}()
-	return action()
+	// Do not call LOCK_UN explicitly. Protected children inherit this open-file
+	// description, so closing the parent descriptor releases the flock only
+	// after the last surviving child descriptor closes as well.
+	return action(&WorktreeTransaction{lockFile: file})
 }
 
 func inspectWorktreeLock(root string) (worktreeLock, error) {
@@ -219,11 +254,11 @@ func runWithPreservedLock(root string, initial worktreeLock, action func() error
 	return errors.Join(actionErr, err)
 }
 
-func runWithOwnedLock(root, ownedReason string, action func() error) (err error) {
+func runWithOwnedLock(root, ownedReason string, transaction *WorktreeTransaction, action func(*WorktreeTransaction) error) (err error) {
 	defer func() {
 		err = errors.Join(err, releaseOwnedWorktreeLock(root, ownedReason))
 	}()
-	return action()
+	return action(transaction)
 }
 
 func releaseOwnedWorktreeLock(root, ownedReason string) error {
@@ -271,6 +306,7 @@ func runWorktreeGit(dir string, args ...string) (string, error) {
 }
 
 func newWorktreeGitCommand(ctx context.Context, dir string, args ...string) *exec.Cmd {
+	// #nosec G702 -- callers supply fixed internal Git subcommands and exec does not invoke a shell.
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {

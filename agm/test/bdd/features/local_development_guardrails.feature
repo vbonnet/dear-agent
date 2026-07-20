@@ -10,6 +10,7 @@
 # RELATED-SPEC: cmd/test-affected/SPEC.md
 # RELATED-SPEC: scripts/SPEC.md
 # RELATED-SPEC: wayfinder/pkg/sandbox/SPEC.md
+# RELATED-SPEC: agm/cmd/agm/SPEC.md
 Feature: Local development guardrails
   Agent development should use audited local wrappers for push, PR, merge,
   rebase, and stale-lock cleanup instead of raw git or GitHub mutation commands.
@@ -99,6 +100,14 @@ Feature: Local development guardrails
     When Wayfinder cleanup overlaps a protected safe-pr transaction
     Then Wayfinder should preserve the protected worktree and reject cleanup
     And Wayfinder should remove the worktree after the safe-pr transaction
+
+  Scenario: Automated cleanup preserves active Git worktree locks
+    When AGM runs the protected cleanup regressions
+    Then Wayfinder and AGM cleanup should preserve Git-locked checkouts
+
+  Scenario: Safe PR child lifetime survives abrupt parent termination
+    When AGM runs the safe-pr abrupt-parent regression
+    Then the child should retain transaction ownership until it exits
 
   Scenario: All repository test runners use the required CI timeout
     Given local, affected integration, and required CI Go test timeouts are configured

@@ -22,30 +22,34 @@ import (
 )
 
 type localDevGuardrailState struct {
-	command             string
-	commandSpec         string
-	library             string
-	librarySpec         string
-	traceDir            string
-	trace               safepr.Session
-	harness             string
-	family              string
-	preflightMinutes    int
-	localTestTimeout    string
-	affectedTestTimeout string
-	ciTestTimeout       string
-	localVulnAllowlist  []string
-	ciVulnAllowlist     []string
-	worktreeBase        string
-	worktreeRepo        string
-	worktreePath        string
-	initialLockReason   string
-	transactionOutcome  string
-	transactionErr      error
-	lockedInPreflight   bool
-	lockedInPRCreate    bool
-	wayfinderCleanupErr error
-	worktreePreserved   bool
+	command              string
+	commandSpec          string
+	library              string
+	librarySpec          string
+	traceDir             string
+	trace                safepr.Session
+	harness              string
+	family               string
+	preflightMinutes     int
+	localTestTimeout     string
+	affectedTestTimeout  string
+	ciTestTimeout        string
+	localVulnAllowlist   []string
+	ciVulnAllowlist      []string
+	worktreeBase         string
+	worktreeRepo         string
+	worktreePath         string
+	initialLockReason    string
+	transactionOutcome   string
+	transactionErr       error
+	lockedInPreflight    bool
+	lockedInPRCreate     bool
+	wayfinderCleanupErr  error
+	worktreePreserved    bool
+	cleanupRegression    string
+	cleanupRegressionErr error
+	childRegression      string
+	childRegressionErr   error
 }
 
 type localDevGuardrailStateKey struct{}
@@ -89,6 +93,10 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^Wayfinder cleanup overlaps a protected safe-pr transaction$`, wayfinderCleanupOverlapsProtectedTransaction)
 	ctx.Step(`^Wayfinder should preserve the protected worktree and reject cleanup$`, wayfinderShouldPreserveProtectedWorktree)
 	ctx.Step(`^Wayfinder should remove the worktree after the safe-pr transaction$`, wayfinderShouldRemoveWorktreeAfterTransaction)
+	ctx.Step(`^AGM runs the protected cleanup regressions$`, agmRunsProtectedCleanupRegressions)
+	ctx.Step(`^Wayfinder and AGM cleanup should preserve Git-locked checkouts$`, cleanupShouldPreserveGitLockedCheckouts)
+	ctx.Step(`^AGM runs the safe-pr abrupt-parent regression$`, agmRunsSafePRAbruptParentRegression)
+	ctx.Step(`^the child should retain transaction ownership until it exits$`, childShouldRetainTransactionOwnershipUntilExit)
 	ctx.Step(`^local, affected integration, and required CI Go test timeouts are configured$`, repositoryGoTestTimeoutsAreConfigured)
 	ctx.Step(`^AGM validates Go test timeout parity$`, agmValidatesGoTestTimeoutParity)
 	ctx.Step(`^all repository Go test timeouts should match$`, repositoryGoTestTimeoutsShouldMatch)
@@ -186,6 +194,74 @@ func wayfinderShouldRemoveWorktreeAfterTransaction(ctx context.Context) error {
 		return fmt.Errorf("wayfinder worktree after cleanup: %w; want not exist", err)
 	}
 	return nil
+}
+
+func agmRunsProtectedCleanupRegressions(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	state.cleanupRegression, state.cleanupRegressionErr = runLocalGuardrailGoTest(ctx,
+		`^(TestRemoveOrphanWorktreePreservesGitLockedCheckout|TestCleanupSandboxPreservesLockedWorktreeAndMetadata)$`,
+		"./agm/cmd/agm", "./wayfinder/pkg/sandbox",
+	)
+	return nil
+}
+
+func cleanupShouldPreserveGitLockedCheckouts(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.cleanupRegressionErr != nil {
+		return fmt.Errorf("protected cleanup regressions: %w: %s", state.cleanupRegressionErr, state.cleanupRegression)
+	}
+	return nil
+}
+
+func agmRunsSafePRAbruptParentRegression(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	state.childRegression, state.childRegressionErr = runLocalGuardrailGoTest(ctx,
+		`^TestWorktreeTransactionLockOutlivesKilledParentForProtectedChild$`,
+		"./internal/safepr",
+	)
+	return nil
+}
+
+func childShouldRetainTransactionOwnershipUntilExit(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.childRegressionErr != nil {
+		return fmt.Errorf("safe-pr abrupt-parent regression: %w: %s", state.childRegressionErr, state.childRegression)
+	}
+	return nil
+}
+
+func runLocalGuardrailGoTest(parent context.Context, pattern string, packages ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
+	defer cancel()
+	commandArgs := []string{"test", "-count=1", "-timeout=90s", "-run", pattern}
+	commandArgs = append(commandArgs, packages...)
+	cmd := exec.CommandContext(ctx, "go", commandArgs...)
+	cmd.Dir = localDevBDDRepoRoot()
+	cmd.SysProcAttr = procguard.ProcessGroupAttr()
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = time.Second
+	out, err := cmd.CombinedOutput()
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return string(out), fmt.Errorf("go test timed out after 2m")
+	}
+	return string(out), err
 }
 
 func safePRBDDInitialLockReason(initial string) (string, error) {

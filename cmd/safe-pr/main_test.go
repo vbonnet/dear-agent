@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -147,8 +148,8 @@ func bypassCreateWorktreeProtection(t *testing.T) {
 	t.Helper()
 	original := protectCreateWorktree
 	t.Cleanup(func() { protectCreateWorktree = original })
-	protectCreateWorktree = func(_ string, _ string, action func() error) error {
-		return action()
+	protectCreateWorktree = func(_ string, _ string, action func(*safepr.WorktreeTransaction) error) error {
+		return action(nil)
 	}
 }
 
@@ -225,6 +226,25 @@ func TestPreflightTimeoutCoversRepositoryFullGate(t *testing.T) {
 	}
 }
 
+func TestProtectTransactionCommandIsGroupCancelable(t *testing.T) {
+	cmd := exec.CommandContext(context.Background(), "true")
+	if err := protectTransactionCommand(nil, cmd); err != nil {
+		t.Fatal(err)
+	}
+	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setpgid {
+		t.Fatal("protected child must run in an isolated process group")
+	}
+	if cmd.Cancel == nil {
+		t.Fatal("protected child must cancel its process group")
+	}
+	if cmd.WaitDelay != time.Second {
+		t.Fatalf("protected child WaitDelay = %v, want %v", cmd.WaitDelay, time.Second)
+	}
+	if err := cmd.Cancel(); err != nil {
+		t.Fatalf("cancel before start = %v", err)
+	}
+}
+
 func TestRun_PreflightFail_BlocksPRCreate(t *testing.T) {
 	bypassCreateWorktreeProtection(t)
 	t.Setenv("WAYFINDER_PROJECT_DIR", "")
@@ -233,7 +253,7 @@ func TestRun_PreflightFail_BlocksPRCreate(t *testing.T) {
 
 	orig := runPreflightFull
 	t.Cleanup(func() { runPreflightFull = orig })
-	runPreflightFull = func(string) error {
+	runPreflightFull = func(string, *safepr.WorktreeTransaction) error {
 		return fmt.Errorf("preflight-full failed — fix issues before creating PR")
 	}
 
@@ -251,11 +271,11 @@ func TestRun_PreflightPass_ProceedsToPRCreate(t *testing.T) {
 
 	orig := runPreflightFull
 	t.Cleanup(func() { runPreflightFull = orig })
-	runPreflightFull = func(string) error { return nil }
+	runPreflightFull = func(string, *safepr.WorktreeTransaction) error { return nil }
 	ghCalled := false
 	origGitHub := executeGitHub
 	t.Cleanup(func() { executeGitHub = origGitHub })
-	executeGitHub = func(*safepr.Request, time.Duration, bool) error {
+	executeGitHub = func(*safepr.Request, time.Duration, bool, *safepr.WorktreeTransaction) error {
 		ghCalled = true
 		return nil
 	}
@@ -278,14 +298,14 @@ func TestRun_SkipPreflight_NoPreflightRun(t *testing.T) {
 	orig := runPreflightFull
 	t.Cleanup(func() { runPreflightFull = orig })
 	// Mock would fail if called — proves --skip-preflight prevents the call.
-	runPreflightFull = func(string) error {
+	runPreflightFull = func(string, *safepr.WorktreeTransaction) error {
 		preflightCalled = true
 		return fmt.Errorf("preflight-full failed — should not have been called")
 	}
 	ghCalled := false
 	origGitHub := executeGitHub
 	t.Cleanup(func() { executeGitHub = origGitHub })
-	executeGitHub = func(*safepr.Request, time.Duration, bool) error {
+	executeGitHub = func(*safepr.Request, time.Duration, bool, *safepr.WorktreeTransaction) error {
 		ghCalled = true
 		return nil
 	}
@@ -317,22 +337,22 @@ func TestRun_CreateProtectsPreflightAndGitHubMutation(t *testing.T) {
 
 	events := make([]string, 0, 4)
 	protected := false
-	protectCreateWorktree = func(_ string, _ string, action func() error) error {
+	protectCreateWorktree = func(_ string, _ string, action func(*safepr.WorktreeTransaction) error) error {
 		events = append(events, "protect-start")
 		protected = true
-		err := action()
+		err := action(nil)
 		protected = false
 		events = append(events, "protect-end")
 		return err
 	}
-	runPreflightFull = func(string) error {
+	runPreflightFull = func(string, *safepr.WorktreeTransaction) error {
 		if !protected {
 			t.Fatal("preflight ran outside worktree protection")
 		}
 		events = append(events, "preflight")
 		return nil
 	}
-	executeGitHub = func(*safepr.Request, time.Duration, bool) error {
+	executeGitHub = func(*safepr.Request, time.Duration, bool, *safepr.WorktreeTransaction) error {
 		if !protected {
 			t.Fatal("GitHub mutation ran outside worktree protection")
 		}
