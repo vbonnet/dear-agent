@@ -58,7 +58,7 @@ a gate.
 
 ## How a worker is told
 
-When `agm new` creates a session it prints, before any prompt is
+When `agm session new` creates a session it prints, before any prompt is
 sent:
 
 ```
@@ -138,7 +138,7 @@ a *signal*, not a *failure*.
 
 ## Future work — the Enforcement tier
 
-ADR-018 §D5 records the deferred Enforcement tier: an Audit-phase
+ADR-018 records the deferred Enforcement tier: an Audit-phase
 check that compares findings against the criterion and flags
 findings whose evidence-to-conclusion gap exceeds a threshold. It
 is deferred because:

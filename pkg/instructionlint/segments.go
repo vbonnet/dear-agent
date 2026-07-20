@@ -544,6 +544,7 @@ func classifySourceLines(classified map[int]SegmentKind, segment text.Segment, s
 }
 
 func commandShaped(value string) bool {
+	value = stripMarkdownContainerPrefixes(value)
 	if strings.Contains(value, "$(") {
 		return true
 	}

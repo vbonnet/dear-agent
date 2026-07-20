@@ -103,6 +103,10 @@ instruction-policy:
       owner: deepsec
     - match: docs/policies/*.ai.md
       owner: repository-policy
+    - match: docs/design/anti-stall.md
+      owner: repository-policy
+    - match: docs/design/graceful-exit.md
+      owner: repository-policy
     - match: cmd/vroom-dispatch/skills/*.md
       owner: vroom
     - match: wayfinder/SKILL.md

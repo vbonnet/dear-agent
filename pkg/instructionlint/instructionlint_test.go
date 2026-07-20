@@ -267,6 +267,26 @@ func TestQuotedAndPlainYAMLScalarsPreservePhysicalCommandLines(t *testing.T) {
 	}
 }
 
+func TestMarkdownContainerCommandsRemainPolicyVisible(t *testing.T) {
+	source := []byte(strings.Join([]string{
+		"- git push origin main",
+		"1. gh pr merge 123",
+		"> bd ready",
+		"- [ ] agm status --output json",
+	}, "\n"))
+	var rules []string
+	for _, segment := range parseSegments(source) {
+		for _, violation := range evaluateSegment("AGENTS.md", segment) {
+			rules = append(rules, violation.Rule)
+		}
+	}
+	sort.Strings(rules)
+	want := []string{"agm-root-status", "bare-beads", "raw-gh-merge", "raw-git-push"}
+	if !reflect.DeepEqual(rules, want) {
+		t.Fatalf("Markdown container rules = %v, want %v", rules, want)
+	}
+}
+
 func TestRuleViolationsTeachCanonicalReplacements(t *testing.T) {
 	segments := []Segment{
 		{Kind: SegmentProse, Line: 1, Text: "Create W0-charter.md before D1."},

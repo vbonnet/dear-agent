@@ -18,6 +18,8 @@ var retiredWayfinderPhase = regexp.MustCompile(`(?i)(?:\bW0(?:\b|-)|\bD[1-6](?:\
 var retiredWayfinderV1 = regexp.MustCompile(`(?i)\bV1\b`)
 var environmentAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 var embeddedShellCommand = regexp.MustCompile("\\$\\(([^()]*)\\)|`([^`]*)`")
+var markdownListPrefix = regexp.MustCompile(`^(?:[-+*]|[0-9]+[.)])[ \t]+`)
+var markdownTaskPrefix = regexp.MustCompile(`^\[[ xX]\][ \t]+`)
 
 var instructionRules = []rule{
 	{id: "wayfinder-v1", replacement: "CHARTER, PROBLEM, RESEARCH, DESIGN, SPEC, PLAN, SETUP, BUILD, and RETRO", applies: proseOrShell, detect: retiredWayfinderToken},
@@ -108,9 +110,25 @@ func commandSegment(kind SegmentKind) bool {
 }
 
 func shellText(text string) string {
-	normalized := strings.TrimSpace(text)
+	normalized := stripMarkdownContainerPrefixes(text)
 	normalized = strings.TrimPrefix(normalized, "$ ")
 	return strings.TrimSpace(normalized)
+}
+
+func stripMarkdownContainerPrefixes(text string) string {
+	normalized := strings.TrimSpace(text)
+	for {
+		previous := normalized
+		if strings.HasPrefix(normalized, ">") {
+			normalized = strings.TrimSpace(strings.TrimPrefix(normalized, ">"))
+		}
+		normalized = markdownListPrefix.ReplaceAllString(normalized, "")
+		normalized = markdownTaskPrefix.ReplaceAllString(normalized, "")
+		normalized = strings.TrimSpace(normalized)
+		if normalized == previous {
+			return normalized
+		}
+	}
 }
 
 func bareBeads(text string) bool {
