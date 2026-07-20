@@ -164,14 +164,6 @@ Examples:
 			debug.Log("Using test environment: %s", testEnvName)
 		}
 
-		// FAIL FAST: Cannot run from within tmux unless --detached
-		if os.Getenv("TMUX") != "" && !detached {
-			return fmt.Errorf("cannot run 'agm new' from within tmux session\n\n" +
-				"Solutions:\n" +
-				"  • Use --detached flag: agm new --detached\n" +
-				"  • Exit tmux first: Press Ctrl+B then D to detach")
-		}
-
 		inTmux := os.Getenv("TMUX") != ""
 		var sessionName string
 		var err error
@@ -684,12 +676,27 @@ Examples:
 		// 1. Inside tmux + not detached: start Claude in current session
 		// 2. Outside tmux OR detached: create tmux session, start Claude, attach (or not if detached)
 
-		if inTmux && !detached {
-			return startClaudeInCurrentTmux(sessionName)
-		}
-
-		return createTmuxSessionAndStartClaude(sessionName)
+		return startNewSessionForContext(inTmux, detached, sessionName, realNewSessionStartRuntime())
 	},
+}
+
+type newSessionStartRuntime struct {
+	currentTmux  func(sessionName string) error
+	separateTmux func(sessionName string) error
+}
+
+func realNewSessionStartRuntime() newSessionStartRuntime {
+	return newSessionStartRuntime{
+		currentTmux:  startClaudeInCurrentTmux,
+		separateTmux: createTmuxSessionAndStartClaude,
+	}
+}
+
+func startNewSessionForContext(inTmux, detached bool, sessionName string, runtime newSessionStartRuntime) error {
+	if inTmux && !detached {
+		return runtime.currentTmux(sessionName)
+	}
+	return runtime.separateTmux(sessionName)
 }
 
 // applyCreationModeSwitch dispatches a mode switch during session creation.

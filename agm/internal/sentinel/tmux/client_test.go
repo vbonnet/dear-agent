@@ -3,6 +3,7 @@ package tmux
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -17,6 +18,49 @@ func TestNewClient(t *testing.T) {
 	assert.NotNil(t, client)
 	assert.NotNil(t, client.socketPaths)
 	assert.Greater(t, len(client.socketPaths), 0, "should have at least one socket path")
+}
+
+func TestNewClientWithSocketUsesOnlyConfiguredSocket(t *testing.T) {
+	socketPath := "/tmp/sentinel-owned.sock"
+	client := NewClientWithSocket(socketPath)
+
+	assert.Equal(t, []string{socketPath}, client.socketPaths)
+}
+
+func TestBoundedCommandUsesSubprocessSafetyPolicy(t *testing.T) {
+	cmd, cancel := boundedCommand("-V")
+	defer cancel()
+
+	assert.NotNil(t, cmd.SysProcAttr)
+	assert.True(t, cmd.SysProcAttr.Setpgid)
+	assert.NotNil(t, cmd.Cancel)
+	assert.Equal(t, commandWaitDelay, cmd.WaitDelay)
+}
+
+func TestConfiguredClientActionsUseOnlyConfiguredSocket(t *testing.T) {
+	binDir := t.TempDir()
+	invocationsPath := filepath.Join(t.TempDir(), "tmux-invocations")
+	fakeTmux := filepath.Join(binDir, "tmux")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SENTINEL_TMUX_LOG\"\ncase \"$*\" in *list-panes*) printf '123\\n';; esac\nexit 0\n"
+	require.NoError(t, os.WriteFile(fakeTmux, []byte(script), 0o700))
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("SENTINEL_TMUX_LOG", invocationsPath)
+
+	socketPath := filepath.Join(t.TempDir(), "owned.sock")
+	client := NewClientWithSocket(socketPath)
+	_, err := client.GetPanePID("worker")
+	require.NoError(t, err)
+	require.NoError(t, client.SendLiteral("worker", "recovery message"))
+	require.NoError(t, client.SendKeys("worker", "C-c"))
+	require.NoError(t, client.KillSession("worker"))
+
+	invocations, err := os.ReadFile(invocationsPath)
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimSpace(string(invocations)), "\n")
+	require.Len(t, lines, 8)
+	for _, line := range lines {
+		assert.True(t, strings.HasPrefix(line, "-S "+socketPath+" "), line)
+	}
 }
 
 // TestGetReadSocketPaths verifies socket path detection.

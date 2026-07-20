@@ -2,14 +2,22 @@
 package tmux
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/procguard"
 	agmtmux "github.com/vbonnet/dear-agent/agm/internal/tmux"
+)
+
+const (
+	commandTimeout   = 5 * time.Second
+	commandWaitDelay = time.Second
 )
 
 // Client wraps tmux command execution for session monitoring.
@@ -20,6 +28,23 @@ type Client struct {
 	socketPaths []string
 }
 
+// boundedCommand applies AGM's subprocess safety contract to every tmux
+// invocation in this client: deadline, isolated process group, group-wide
+// cancellation, and bounded pipe-drain waiting.
+func boundedCommand(args ...string) (*exec.Cmd, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	cmd := exec.CommandContext(ctx, "tmux", args...)
+	cmd.SysProcAttr = procguard.ProcessGroupAttr()
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = commandWaitDelay
+	return cmd, cancel
+}
+
 // NewClient creates a new tmux client.
 // Automatically detects available tmux sockets (AGM + system default).
 func NewClient() *Client {
@@ -27,6 +52,13 @@ func NewClient() *Client {
 	return &Client{
 		socketPaths: socketPaths,
 	}
+}
+
+// NewClientWithSocket creates a client restricted to one explicitly configured
+// tmux socket. Unlike NewClient, it never auto-discovers AGM, legacy, or system
+// sockets. This is the safety boundary for callers that own an isolated socket.
+func NewClientWithSocket(socketPath string) *Client {
+	return &Client{socketPaths: []string{socketPath}}
 }
 
 // getReadSocketPaths returns all tmux socket paths to check for sessions.
@@ -83,10 +115,12 @@ func (c *Client) findSessionSocket(sessionName string) (string, error) {
 		}
 		args = append(args, "has-session", "-t", exactTarget)
 
-		cmd := exec.Command("tmux", args...)
+		cmd, cancel := boundedCommand(args...)
 		if err := cmd.Run(); err == nil {
+			cancel()
 			return socketPath, nil
 		}
+		cancel()
 	}
 
 	return "", fmt.Errorf("session %s not found on any tmux socket", sessionName)
@@ -104,8 +138,9 @@ func (c *Client) ListSessions() ([]string, error) {
 		}
 		args = append(args, "list-sessions", "-F", "#{session_name}")
 
-		cmd := exec.Command("tmux", args...)
+		cmd, cancel := boundedCommand(args...)
 		output, err := cmd.Output()
+		cancel()
 		if err != nil {
 			// Socket may not have any sessions, continue to next
 			continue
@@ -145,7 +180,8 @@ func (c *Client) GetPaneContent(sessionName string) (string, error) {
 	}
 	args = append(args, "capture-pane", "-t", sessionName, "-p", "-S", "-500")
 
-	cmd := exec.Command("tmux", args...)
+	cmd, cancel := boundedCommand(args...)
+	defer cancel()
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to capture pane for session %s: %w", sessionName, err)
@@ -168,7 +204,8 @@ func (c *Client) GetCursorPosition(sessionName string) (int, int, error) {
 	}
 	args = append(args, "display-message", "-t", sessionName, "-p", "#{cursor_x},#{cursor_y}")
 
-	cmd := exec.Command("tmux", args...)
+	cmd, cancel := boundedCommand(args...)
+	defer cancel()
 	output, err := cmd.Output()
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to get cursor position for session %s: %w", sessionName, err)
@@ -204,11 +241,77 @@ func (c *Client) SendKeys(sessionName, keys string) error {
 		args = append(args, "send-keys", "-t", sessionName, keys)
 	}
 
-	cmd := exec.Command("tmux", args...)
+	cmd, cancel := boundedCommand(args...)
+	defer cancel()
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to send keys to session %s: %w", sessionName, err)
 	}
 
+	return nil
+}
+
+// SendLiteral sends text without interpreting it as tmux key names.
+func (c *Client) SendLiteral(sessionName, text string) error {
+	socketPath, err := c.findSessionSocket(sessionName)
+	if err != nil {
+		return err
+	}
+
+	args := []string{}
+	if socketPath != "" {
+		args = append(args, "-S", socketPath)
+	}
+	args = append(args, "send-keys", "-t", sessionName, "-l", text)
+	cmd, cancel := boundedCommand(args...)
+	defer cancel()
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to send literal text to session %s: %w", sessionName, err)
+	}
+	return nil
+}
+
+// GetPanePID returns the first pane PID for an exact session target.
+func (c *Client) GetPanePID(sessionName string) (int, error) {
+	socketPath, err := c.findSessionSocket(sessionName)
+	if err != nil {
+		return 0, err
+	}
+
+	args := []string{}
+	if socketPath != "" {
+		args = append(args, "-S", socketPath)
+	}
+	args = append(args, "list-panes", "-t", "="+sessionName, "-F", "#{pane_pid}")
+	cmd, cancel := boundedCommand(args...)
+	defer cancel()
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get pane PID for session %s: %w", sessionName, err)
+	}
+	var pid int
+	if _, err := fmt.Sscanf(strings.Split(strings.TrimSpace(string(output)), "\n")[0], "%d", &pid); err != nil {
+		return 0, fmt.Errorf("failed to parse pane PID for session %s: %w", sessionName, err)
+	}
+	return pid, nil
+}
+
+// KillSession kills an exact session on the socket where it was discovered.
+func (c *Client) KillSession(sessionName string) error {
+	socketPath, err := c.findSessionSocket(sessionName)
+	if err != nil {
+		return err
+	}
+
+	args := []string{}
+	if socketPath != "" {
+		args = append(args, "-S", socketPath)
+	}
+	args = append(args, "kill-session", "-t", "="+sessionName)
+	cmd, cancel := boundedCommand(args...)
+	defer cancel()
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to kill session %s: %w", sessionName, err)
+	}
 	return nil
 }
 

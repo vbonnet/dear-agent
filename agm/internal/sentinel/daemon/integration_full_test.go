@@ -52,7 +52,7 @@ func TestFullDaemonWorkflow(t *testing.T) {
 			StuckThresholdDuration: 10 * time.Second,
 		},
 		Tmux: config.TmuxConfig{
-			Socket: "",
+			Socket: filepath.Join(tmpDir, "sentinel-test.sock"),
 		},
 		Recovery: config.RecoveryConfig{
 			Enabled:     true,
@@ -349,7 +349,7 @@ func createTestConfigForIntegration(t *testing.T, tmpDir string) *config.Config 
 			StuckThresholdDuration: 10 * time.Second,
 		},
 		Tmux: config.TmuxConfig{
-			Socket: "",
+			Socket: filepath.Join(tmpDir, "sentinel-test.sock"),
 		},
 		Recovery: config.RecoveryConfig{
 			Enabled:     true,

@@ -35,6 +35,63 @@ func TestNewSessionMonitor(t *testing.T) {
 	assert.False(t, monitor.IsRunning())
 }
 
+func TestNewSessionMonitorUsesOnlyConfiguredTmuxSocket(t *testing.T) {
+	binDir := t.TempDir()
+	invocationsPath := filepath.Join(t.TempDir(), "tmux-invocations")
+	fakeTmux := filepath.Join(binDir, "tmux")
+	require.NoError(t, os.WriteFile(fakeTmux, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SENTINEL_TMUX_LOG\"\nexit 1\n"), 0o700))
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("SENTINEL_TMUX_LOG", invocationsPath)
+
+	cfg := createTestConfig(t)
+	cfg.Tmux.Socket = filepath.Join(t.TempDir(), "owned.sock")
+	monitor, err := NewSessionMonitor(cfg)
+	require.NoError(t, err)
+	require.NoError(t, monitor.CheckAllSessions())
+
+	invocations, err := os.ReadFile(invocationsPath)
+	require.NoError(t, err)
+	want := "-S " + cfg.Tmux.Socket + " list-sessions -F #{session_name}"
+	lines := strings.Split(strings.TrimSpace(string(invocations)), "\n")
+	require.NotEmpty(t, lines)
+	for _, line := range lines {
+		assert.Equal(t, want, line)
+	}
+}
+
+func TestNewSessionMonitorPropagatesConfiguredSocketToNestedCommands(t *testing.T) {
+	binDir := t.TempDir()
+	fakeAGM := filepath.Join(binDir, "agm")
+	require.NoError(t, os.WriteFile(fakeAGM, []byte("#!/bin/sh\nprintf '%s' \"$AGM_TMUX_SOCKET\"\n"), 0o700))
+	t.Setenv("AGM_TMUX_SOCKET", "/tmp/ambient.sock")
+
+	cfg := createTestConfig(t)
+	cfg.Escalation.AgmBinary = fakeAGM
+	monitor, err := NewSessionMonitor(cfg)
+	require.NoError(t, err)
+
+	runners := []struct {
+		name string
+		run  func() ([]byte, error)
+	}{
+		{name: "monitor", run: func() ([]byte, error) { return monitor.executeAGM("probe") }},
+		{name: "escalation", run: func() ([]byte, error) { return monitor.escalation.executor.Execute(fakeAGM, "probe") }},
+		{name: "heartbeat", run: func() ([]byte, error) {
+			return monitor.sessionHeartbeatMonitor.runCommand(monitor.sessionHeartbeatMonitor.agmBinary, "probe")
+		}},
+		{name: "loop", run: func() ([]byte, error) {
+			return monitor.loopMonitor.runCommand(monitor.loopMonitor.agmBinary, "probe")
+		}},
+	}
+	for _, runner := range runners {
+		t.Run(runner.name, func(t *testing.T) {
+			output, runErr := runner.run()
+			require.NoError(t, runErr)
+			assert.Equal(t, cfg.Tmux.Socket, string(output))
+		})
+	}
+}
+
 func TestIncidentLogger_LogIncident(t *testing.T) {
 	tmpDir := t.TempDir()
 	incidentsFile := filepath.Join(tmpDir, "incidents.jsonl")
@@ -428,7 +485,7 @@ patterns:
 			StuckThresholdDuration: 10 * time.Minute,
 		},
 		Tmux: config.TmuxConfig{
-			Socket: "",
+			Socket: filepath.Join(tmpDir, "sentinel-test.sock"),
 		},
 		Recovery: config.RecoveryConfig{
 			Enabled:     true,
