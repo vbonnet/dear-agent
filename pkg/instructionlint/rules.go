@@ -142,24 +142,37 @@ func bareBeads(text string) bool {
 
 func beadsCommandIsBare(fields []string) bool {
 	const canonical = "~/beads/context-engine/.beads"
-	if len(fields) >= 3 && fields[1] == "--db" {
-		return strings.Trim(fields[2], `"'`) != canonical
-	}
-	if len(fields) >= 2 {
-		if value, ok := strings.CutPrefix(fields[1], "--db="); ok {
-			return strings.Trim(value, `"'`) != canonical
-		}
-	}
-	return true
+	return len(fields) < 5 ||
+		fields[1] != "--db" || strings.Trim(fields[2], `"'`) != canonical ||
+		fields[3] != "--dolt-auto-commit" || fields[4] != "on"
 }
 
 func rawGHMerge(text string) bool {
-	for _, fields := range commandFields(text) {
-		if len(fields) >= 3 && fields[0] == "gh" && fields[1] == "pr" && fields[2] == "merge" {
-			return true
-		}
+	return anyCommand(text, rawGHMergeFields)
+}
+
+func rawGHMergeFields(fields []string) bool {
+	if commandHasPrefix(fields, "gh", "pr", "merge") {
+		return true
 	}
-	return false
+	if !commandHasPrefix(fields, "gh", "api") {
+		return false
+	}
+	apiArgs := stripLauncherOptions(fields[2:], map[string]bool{
+		"-X": true, "--method": true, "-H": true, "--header": true,
+		"-q": true, "--jq": true, "-F": true, "--field": true,
+		"-f": true, "--raw-field": true, "--input": true,
+		"--template": true, "-t": true, "--preview": true,
+	})
+	if len(apiArgs) == 0 {
+		return false
+	}
+	if strings.HasSuffix(strings.TrimSuffix(apiArgs[0], "/"), "/merge") {
+		return true
+	}
+	return apiArgs[0] == "graphql" &&
+		(strings.Contains(strings.Join(fields, " "), "mergePullRequest") ||
+			strings.Contains(strings.Join(fields, " "), "enablePullRequestAutoMerge"))
 }
 
 func rawGHPRLifecycle(text string) bool {

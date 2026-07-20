@@ -149,7 +149,7 @@ func agentVisibleScriptCommand(value string, helpers map[string]bool) bool {
 var shellAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 var shellDeclaration = regexp.MustCompile(`^(?:local|export|readonly|typeset|declare)(?:\s+-[A-Za-z]+)*\s+`)
 var heredocMarker = regexp.MustCompile(`<<-?['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
-var shellFunction = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\s*\(\)\s*\{`)
+var shellFunction = regexp.MustCompile(`^(?:function\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*\(\))?|([A-Za-z_][A-Za-z0-9_]*)\s*\(\))\s*\{`)
 
 func agentVisibleScriptHelpers(source []byte) map[string]bool {
 	functions := scriptFunctions(source)
@@ -182,7 +182,11 @@ func scriptFunctions(source []byte) map[string][]string {
 		if len(match) == 0 {
 			continue
 		}
-		name := value[match[2]:match[3]]
+		nameStart, nameEnd := match[2], match[3]
+		if nameStart < 0 {
+			nameStart, nameEnd = match[4], match[5]
+		}
+		name := value[nameStart:nameEnd]
 		body := []string{strings.TrimSpace(value[match[1]:])}
 		depth := shellBraceDelta(value)
 		for depth > 0 && index+1 < len(lines) {

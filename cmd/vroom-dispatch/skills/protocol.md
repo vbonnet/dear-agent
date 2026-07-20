@@ -5,7 +5,7 @@ Overseer. Role files define only the work unique to that role.
 
 ## Sources of truth
 
-- **Work:** Beads, read with `bd --db ~/beads/context-engine/.beads`.
+- **Work:** Beads at `~/beads/context-engine/.beads`, read with `bd --db ~/beads/context-engine/.beads --dolt-auto-commit on <subcommand>`.
 - **Execution:** live AGM sessions and their health records.
 - **Delivery:** GitHub PR state, deployed-artifact state, and verification
   evidence recorded on the bead.
@@ -26,7 +26,7 @@ agm supervisor status
 agm -o json session health --all
 agm -o json scan --cross-check
 agm supervisor probe
-bd --db ~/beads/context-engine/.beads ready --json
+bd --db ~/beads/context-engine/.beads --dolt-auto-commit on ready --json
 ```
 
 The Orchestrator dispatches only through the typed direct dispatcher:

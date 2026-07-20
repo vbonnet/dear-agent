@@ -183,7 +183,7 @@ func TestScriptOutputHelpersRemainPolicyVisible(t *testing.T) {
 		"emit_json() {",
 		`  jq -cn --arg message "$1" '{additionalContext:$message}'`,
 		"}",
-		"emit_context() {",
+		"function emit_context {",
 		`  emit_json "$1"`,
 		"}",
 		`emit_context "Run gh pr merge 123 after review.`,
@@ -349,12 +349,26 @@ func TestRuleViolationsTeachCanonicalReplacements(t *testing.T) {
 	for _, segment := range segments {
 		got = append(got, evaluateSegment("AGENTS.md", segment)...)
 	}
-	if len(got) != 31 {
-		t.Fatalf("violations = %v, want 31", got)
+	if len(got) != 33 {
+		t.Fatalf("violations = %v, want 33", got)
 	}
 	for _, item := range got {
 		if item.Rule == "" || item.Replacement == "" {
 			t.Fatalf("violation lacks actionable rule/replacement: %+v", item)
+		}
+	}
+}
+
+func TestGitHubAPIMergesRemainPolicyVisible(t *testing.T) {
+	commands := []string{
+		"gh api -X PUT repos/owner/repo/pulls/1/merge",
+		`gh api graphql -f query='mutation { mergePullRequest(input:{pullRequestId:"PR_id"}) { pullRequest { state } } }'`,
+		`gh api graphql -f query='mutation { enablePullRequestAutoMerge(input:{pullRequestId:"PR_id"}) { pullRequest { state } } }'`,
+	}
+	for _, command := range commands {
+		violations := evaluateSegment("AGENTS.md", Segment{Kind: SegmentShell, Text: command})
+		if len(violations) != 1 || violations[0].Rule != "raw-gh-merge" {
+			t.Errorf("%q violations = %v, want raw-gh-merge", command, violations)
 		}
 	}
 }
