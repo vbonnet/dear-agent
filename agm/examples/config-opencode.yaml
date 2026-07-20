@@ -25,8 +25,8 @@ adapters:
       max_delay: 5m                # Maximum backoff delay
       backoff_multiplier: 2        # Exponential backoff factor
 
-    # Fallback to Astrocyte tmux monitoring if SSE fails
-    # Recommended: true (provides safety net during outages)
+    # Annotate startup failures so the caller can select a tmux fallback.
+    # This flag does not start Astrocyte or another monitor by itself.
     fallback_tmux: true
 
   # Future adapters can be added here:
@@ -230,7 +230,7 @@ advanced:
 # adapters:
 #   opencode:
 #     enabled: true
-#     fallback_tmux: true  # Recommended for resilience
+#     fallback_tmux: true  # Caller receives fallback-aware error context
 #
 # multi_agent:
 #   default_agent: claude
@@ -287,7 +287,7 @@ advanced:
 
 # 5. Troubleshooting:
 #    - Check logs: journalctl --user -u agm-daemon -f
-#    - Verify adapter: agm status
+#    - Verify aggregate state: agm session status
 #    - Test connectivity: curl http://localhost:4096/health
 #    - See docs/OPENCODE-INTEGRATION.md for common issues
 

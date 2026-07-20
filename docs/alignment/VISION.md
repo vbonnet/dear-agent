@@ -1,18 +1,21 @@
 ---
 title: Vision
-version: "1.0"
+version: "2.0"
 status: active
-date: "2026-04-05"
+date: "2026-07-18"
+mission_ref: docs/alignment/MISSION.md
 adr_ref: docs/adr/ADR-002-vroom-execution-architecture
 context_ref: CONTEXT.md
 horizon: "6-12 months"
-heuristic_style: if_then
 ---
 
 # Vision
 
-The target state for AGM: a system where multi-agent orchestration is
-trustworthy by default and autonomous where appropriate.
+<!-- Last audited at: 2026-07-18 -->
+
+MISSION.md is canonical for project purpose and ownership. The target state is
+safe, auditable autonomous delivery in which VROOM makes and verifies work
+decisions while AGM provides dependable session lifecycle mechanics.
 
 ## Heuristics
 
@@ -29,21 +32,23 @@ session's outputs should be treated as unverified until the trail is repaired.
 If a VROOM role's interface contract changes, then all downstream roles must
 be re-validated before the change is deployed.
 
-If the system detects value drift --- actions that technically pass quality
-gates but trend away from declared values --- then an Auditor should flag the
-pattern (findings route to the roadmap via the Meta-Orchestrator; see
-[CONTEXT.md](../../CONTEXT.md)).
+If repeated outcomes conflict with declared values, then VROOM should record a
+DEAR finding and route a durable fix through the project tracker.
 
 If a new capability is added to an agent, then its scope boundary in the
 Orchestrator's dispatch table must be updated before the capability is used
 in production.
 
-If resource usage for a task exceeds the historical baseline by more than 2x,
-then the Orchestrator should pause and request justification before continuing.
+If resource use becomes materially higher than the task warrants, then VROOM
+should preserve safety and correctness while choosing a cheaper route or
+escalating with evidence.
 
 If an operator overrides a HITL gate, then the override must be logged with
 the operator's rationale and treated as an exception, not a precedent.
 
-If retrospective analysis reveals a recurring failure mode, then the
-Meta-Orchestrator should propose a structural fix rather than adding another
-ad-hoc check.
+If retrospective analysis reveals a recurring failure mode, then VROOM should
+propose a structural fix rather than adding another ad-hoc check.
+
+See [MISSION.md](MISSION.md),
+[ADR-002](../adr/ADR-002-vroom-execution-architecture.md), and
+[CONTEXT.md](../../CONTEXT.md).

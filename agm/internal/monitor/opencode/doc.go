@@ -16,11 +16,11 @@
 //
 // Event Mapping:
 //   - permission.asked     → AWAITING_PERMISSION
-//   - tool.execute.before  → THINKING
+//   - tool.execute.before  → WORKING
 //   - tool.execute.after   → IDLE
-//   - session.created      → READY
+//   - session.created      → DONE
 //   - session.closed       → TERMINATED
-//   - unknown event types  → THINKING (safe default)
+//   - unknown event types  → WORKING (safe default)
 //
 // Example usage:
 //
