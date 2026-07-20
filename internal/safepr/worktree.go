@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -102,7 +103,12 @@ func linkedWorktreeRoot(dir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("protect safe-pr worktree: resolve repository: %w", err)
 	}
-	lines := strings.Split(strings.TrimSpace(out), "\n")
+	return parseLinkedWorktreeRoot(out)
+}
+
+func parseLinkedWorktreeRoot(out string) (string, error) {
+	out = strings.ReplaceAll(out, "\r", "")
+	lines := slices.Collect(strings.SplitSeq(strings.TrimSpace(out), "\n"))
 	if len(lines) != 3 {
 		return "", fmt.Errorf("protect safe-pr worktree: unexpected git directory output %q", out)
 	}
@@ -118,6 +124,11 @@ func inspectWorktreeLock(root string) (worktreeLock, error) {
 	if err != nil {
 		return worktreeLock{}, fmt.Errorf("protect safe-pr worktree: inspect lock: %w", err)
 	}
+	return parseWorktreeLock(root, out)
+}
+
+func parseWorktreeLock(root, out string) (worktreeLock, error) {
+	out = strings.ReplaceAll(out, "\r", "")
 	want := canonicalWorktreePath(root)
 	for record := range strings.SplitSeq(strings.TrimSpace(out), "\n\n") {
 		var path string

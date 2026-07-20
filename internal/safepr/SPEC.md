@@ -51,6 +51,8 @@ cost and intent remain traceable.
 
 **SAFEPR-18** When a worktree lock has valid safe-pr ownership metadata and its owner process remains live, the system shall reject an overlapping transaction and preserve the active owner's exact lock.
 
+**SAFEPR-19** When Git returns linked-worktree or lock metadata with LF or CRLF line endings, the system shall parse the same canonical paths, lock state, and ownership reason.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`

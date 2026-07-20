@@ -249,7 +249,12 @@ func safePRBDDLockState(ctx context.Context, state *localDevGuardrailState) (boo
 	if err != nil {
 		return false, "", err
 	}
-	want := canonicalSafePRBDDPath(state.worktreePath)
+	return parseSafePRBDDLockState(state.worktreePath, out)
+}
+
+func parseSafePRBDDLockState(worktreePath, out string) (bool, string, error) {
+	out = strings.ReplaceAll(out, "\r", "")
+	want := canonicalSafePRBDDPath(worktreePath)
 	for record := range strings.SplitSeq(strings.TrimSpace(out), "\n\n") {
 		path := ""
 		locked := false
@@ -269,7 +274,7 @@ func safePRBDDLockState(ctx context.Context, state *localDevGuardrailState) (boo
 			return locked, reason, nil
 		}
 	}
-	return false, "", fmt.Errorf("BDD worktree %s is not registered", state.worktreePath)
+	return false, "", fmt.Errorf("BDD worktree %s is not registered", worktreePath)
 }
 
 func cleanupSafePRBDDWorktree(state *localDevGuardrailState) error {

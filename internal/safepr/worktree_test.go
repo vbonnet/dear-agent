@@ -214,6 +214,38 @@ func TestSafePROwnerPIDRequiresGeneratedOwnershipShape(t *testing.T) {
 	}
 }
 
+func TestWorktreeParsersAcceptUnixAndWindowsLineEndings(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "worktree")
+	directories := root + "\n" + filepath.Join(root, ".git", "worktrees", "feature") + "\n" + filepath.Join(root, ".git") + "\n"
+	porcelain := "worktree " + filepath.Join(filepath.Dir(root), "repo") + "\nHEAD abc\n\n" +
+		"worktree " + root + "\nHEAD def\nlocked safe-pr-owned:123:0011223344556677:test\n"
+
+	for _, test := range []struct {
+		name       string
+		lineEnding string
+	}{
+		{name: "LF", lineEnding: "\n"},
+		{name: "CRLF", lineEnding: "\r\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			gotRoot, err := parseLinkedWorktreeRoot(strings.ReplaceAll(directories, "\n", test.lineEnding))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if gotRoot != root {
+				t.Fatalf("linked root = %q, want %q", gotRoot, root)
+			}
+			state, err := parseWorktreeLock(root, strings.ReplaceAll(porcelain, "\n", test.lineEnding))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !state.locked || state.reason != "safe-pr-owned:123:0011223344556677:test" {
+				t.Fatalf("worktree lock = %+v", state)
+			}
+		})
+	}
+}
+
 func TestWithWorktreeLockReleasesOwnedLockAfterPanic(t *testing.T) {
 	_, worktree := initLinkedWorktree(t)
 	func() {
