@@ -34,8 +34,7 @@ func runHarnessPostCreate(ctx context.Context, sessionName string, modeAppliedAt
 		runCodexPostCreate(sessionName)
 		return nil
 	case harnessName == "agy":
-		runAgyPostCreate(ctx, sessionName)
-		return nil
+		return runAgyPostCreate(ctx, sessionName)
 	default:
 		debug.Log("Skipping initialization sequence for harness: %s", harnessName)
 		return nil
@@ -158,7 +157,27 @@ func runCodexPostCreate(sessionName string) {
 // runAgyPostCreate waits for the AGY prompt, captures the spawned AGY
 // conversation ID, and delivers --prompt / --prompt-file even in detached mode
 // once the interactive prompt is ready.
-func runAgyPostCreate(ctx context.Context, sessionName string) {
+type agyPostCreateRuntime struct {
+	wait               func(context.Context, string, time.Duration) error
+	associate          func(string)
+	deliver            func(string, bool, bool)
+	associateWithRetry func(string, int, time.Duration)
+}
+
+func realAgyPostCreateRuntime() agyPostCreateRuntime {
+	return agyPostCreateRuntime{
+		wait:               tmux.WaitForAgyPrompt,
+		associate:          associateSpawnedAgySession,
+		deliver:            deliverInitialPrompt,
+		associateWithRetry: associateSpawnedAgySessionWithRetry,
+	}
+}
+
+func runAgyPostCreate(ctx context.Context, sessionName string) error {
+	return runAgyPostCreateWithRuntime(ctx, sessionName, realAgyPostCreateRuntime())
+}
+
+func runAgyPostCreateWithRuntime(ctx context.Context, sessionName string, runtime agyPostCreateRuntime) error {
 	debug.Phase("AGY Post-Create")
 	switch {
 	case os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "":
@@ -166,20 +185,27 @@ func runAgyPostCreate(ctx context.Context, sessionName string) {
 		ui.PrintSuccess("AGY test session ready (init sequence skipped)")
 	default:
 		debug.Log("Waiting for AGY prompt readiness before metadata capture and prompt delivery")
-		if err := tmux.WaitForAgyPrompt(ctx, sessionName, 30*time.Second); err != nil {
+		if err := runtime.wait(ctx, sessionName, 30*time.Second); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			debug.Log("AGY prompt readiness wait failed (non-fatal): %v", err)
 		} else {
 			debug.Log("AGY prompt detected, session ready")
 		}
-		associateSpawnedAgySession(sessionName)
-		deliverInitialPrompt(sessionName, false, false)
+		runtime.associate(sessionName)
+		runtime.deliver(sessionName, false, false)
 		if prompt != "" || promptFile != "" {
-			if err := tmux.WaitForAgyPrompt(ctx, sessionName, 60*time.Second); err != nil {
+			if err := runtime.wait(ctx, sessionName, 60*time.Second); err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
 				debug.Log("AGY post-prompt readiness wait failed (non-fatal): %v", err)
 			}
-			associateSpawnedAgySessionWithRetry(sessionName, 20, 500*time.Millisecond)
+			runtime.associateWithRetry(sessionName, 20, 500*time.Millisecond)
 		}
 	}
+	return nil
 }
 
 // runOpenCodePostCreate waits for the OpenCode prompt and delivers

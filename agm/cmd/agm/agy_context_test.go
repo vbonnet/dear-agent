@@ -44,3 +44,32 @@ func TestWaitForAgyMetadataBackfillUsesCallerContext(t *testing.T) {
 		t.Fatalf("waitForAgyMetadataBackfill error = %v, want context.Canceled", err)
 	}
 }
+
+func TestRunAgyPostCreateReturnsCancellationBeforeSideEffects(t *testing.T) {
+	t.Setenv("AGM_TEST_RUN_ID", "")
+	t.Setenv("AGM_TEST_ENV", "")
+	callerCtx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	var associated, delivered, retried bool
+	err := runAgyPostCreateWithRuntime(callerCtx, "agy-create", agyPostCreateRuntime{
+		wait: func(ctx context.Context, sessionName string, timeout time.Duration) error {
+			if ctx != callerCtx {
+				t.Fatalf("post-create wait context identity changed")
+			}
+			if sessionName != "agy-create" || timeout != 30*time.Second {
+				t.Fatalf("post-create wait = %q/%s, want agy-create/30s", sessionName, timeout)
+			}
+			return ctx.Err()
+		},
+		associate:          func(string) { associated = true },
+		deliver:            func(string, bool, bool) { delivered = true },
+		associateWithRetry: func(string, int, time.Duration) { retried = true },
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("runAgyPostCreateWithRuntime error = %v, want context.Canceled", err)
+	}
+	if associated || delivered || retried {
+		t.Fatalf("post-cancellation side effects: associated=%t delivered=%t retried=%t", associated, delivered, retried)
+	}
+}
