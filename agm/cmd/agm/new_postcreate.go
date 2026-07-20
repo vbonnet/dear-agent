@@ -25,14 +25,11 @@ func runHarnessPostCreate(ctx context.Context, sessionName string, modeAppliedAt
 		ui.PrintSuccess("Test session ready (association skipped)")
 		return nil
 	case harnessName == "gemini-cli":
-		runGeminiPostCreate(sessionName)
-		return nil
+		return runGeminiPostCreate(ctx, sessionName)
 	case harnessName == "opencode-cli":
-		runOpenCodePostCreate(sessionName)
-		return nil
+		return runOpenCodePostCreate(ctx, sessionName)
 	case harnessName == "codex-cli":
-		runCodexPostCreate(sessionName)
-		return nil
+		return runCodexPostCreate(ctx, sessionName)
 	case harnessName == "agy":
 		return runAgyPostCreate(ctx, sessionName)
 	default:
@@ -108,7 +105,7 @@ func deliverInitialPrompt(sessionName string, multiLine, verifyDelivery bool) {
 
 // runGeminiPostCreate waits for the Gemini prompt and delivers --prompt /
 // --prompt-file in non-test, non-detached mode.
-func runGeminiPostCreate(sessionName string) {
+func runGeminiPostCreate(ctx context.Context, sessionName string) error {
 	debug.Phase("Gemini Post-Create")
 	switch {
 	case os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "":
@@ -116,15 +113,22 @@ func runGeminiPostCreate(sessionName string) {
 		ui.PrintSuccess("Gemini test session ready (init sequence skipped)")
 	case !detached:
 		debug.Log("Waiting for Gemini prompt readiness before prompt delivery")
-		if err := tmux.WaitForPromptSimple(sessionName, 30*time.Second); err != nil {
+		if err := tmux.WaitForPromptSimpleContext(ctx, sessionName, 30*time.Second); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			debug.Log("Gemini prompt readiness wait failed (non-fatal): %v", err)
 		} else {
 			debug.Log("Gemini prompt detected, session ready")
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
 		deliverInitialPrompt(sessionName, false, true)
 	default:
 		debug.Log("Detached mode: skipping Gemini prompt wait and prompt delivery")
 	}
+	return nil
 }
 
 // runCodexPostCreate waits for the Codex prompt and delivers --prompt /
@@ -135,7 +139,7 @@ func runGeminiPostCreate(sessionName string) {
 // WaitForPromptSimple) so readiness keys on Codex's composer signals and any
 // first-run trust/onboarding prompt is auto-accepted inside the wait, ensuring
 // prompt delivery never races the consent dialog or a not-yet-ready TUI.
-func runCodexPostCreate(sessionName string) {
+func runCodexPostCreate(ctx context.Context, sessionName string) error {
 	debug.Phase("Codex Post-Create")
 	switch {
 	case os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "":
@@ -145,13 +149,20 @@ func runCodexPostCreate(sessionName string) {
 		debug.Log("Detached mode with no prompt: skipping Codex prompt wait")
 	default:
 		debug.Log("Waiting for Codex prompt readiness before prompt delivery")
-		if err := tmux.WaitForCodexPrompt(sessionName, 30*time.Second); err != nil {
+		if err := tmux.WaitForCodexPromptContext(ctx, sessionName, 30*time.Second); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			debug.Log("Codex prompt readiness wait failed (non-fatal): %v", err)
 		} else {
 			debug.Log("Codex prompt detected, session ready")
 		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		deliverInitialPrompt(sessionName, false, false)
 	}
+	return nil
 }
 
 // runAgyPostCreate waits for the AGY prompt, captures the spawned AGY
@@ -210,7 +221,7 @@ func runAgyPostCreateWithRuntime(ctx context.Context, sessionName string, runtim
 
 // runOpenCodePostCreate waits for the OpenCode prompt and delivers
 // --prompt / --prompt-file in non-test, non-detached mode.
-func runOpenCodePostCreate(sessionName string) {
+func runOpenCodePostCreate(ctx context.Context, sessionName string) error {
 	debug.Phase("OpenCode Post-Create")
 	switch {
 	case os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "":
@@ -218,13 +229,20 @@ func runOpenCodePostCreate(sessionName string) {
 		ui.PrintSuccess("OpenCode test session ready (init sequence skipped)")
 	case !detached:
 		debug.Log("Waiting for OpenCode prompt readiness before prompt delivery")
-		if err := tmux.WaitForPromptSimple(sessionName, 30*time.Second); err != nil {
+		if err := tmux.WaitForPromptSimpleContext(ctx, sessionName, 30*time.Second); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			debug.Log("OpenCode prompt readiness wait failed (non-fatal): %v", err)
 		} else {
 			debug.Log("OpenCode prompt detected, session ready")
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
 		deliverInitialPrompt(sessionName, false, true)
 	default:
 		debug.Log("Detached mode: skipping OpenCode prompt wait and prompt delivery")
 	}
+	return nil
 }

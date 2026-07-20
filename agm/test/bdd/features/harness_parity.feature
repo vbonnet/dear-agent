@@ -348,10 +348,10 @@ Feature: Harness parity
     When AGM validates AGY MCP creation readiness
     Then MCP creation should wait for the AGY composer before prompt delivery
 
-  Scenario: AGY creation signals preserve rollback
+  Scenario: Active-harness creation signals preserve rollback
     Given AGY is available
     When AGM validates AGY root cancellation plumbing
-    Then root signal cancellation should reach every AGY readiness wait
+    Then root signal cancellation should reach every command-scoped readiness wait
 
   Scenario: Session list fields can target session rows
     Given AGM has Codex session records in Dolt

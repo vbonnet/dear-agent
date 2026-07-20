@@ -24,7 +24,7 @@ func TestActiveHarnessesHaveCurrentTmuxLauncher(t *testing.T) {
 			t.Parallel()
 
 			calls := 0
-			record := func(ops.HarnessLaunchSpec) error {
+			record := func(context.Context, ops.HarnessLaunchSpec) error {
 				calls++
 				return nil
 			}

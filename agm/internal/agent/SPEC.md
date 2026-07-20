@@ -59,7 +59,7 @@ compatibility.
 
 **AGP-25** When MCP creates an AGY session, the system shall wait through first-run trust and initialization until the AGY composer is ready before delivering the required startup prompt; cancellation or readiness failure shall enter the shared creation rollback path.
 
-**AGP-26** When the AGM process receives SIGINT or SIGTERM, the root command context shall cancel and every command-scoped AGY readiness wait, including create, cold resume, and send metadata backfill, shall return without continuing into prompt delivery, attach, or metadata mutation.
+**AGP-26** When the AGM process receives SIGINT or SIGTERM, the root command context shall cancel and every command-scoped active-harness readiness wait, including create, cold resume, post-create prompt delivery, and AGY send metadata backfill, shall return without continuing into prompt delivery, attach, or metadata mutation.
 
 **AGP-27** When a user supplies a cross-harness tier alias with different letter case, the system shall canonicalize the alias key case-insensitively while preserving any exact case-sensitive public model label.
 

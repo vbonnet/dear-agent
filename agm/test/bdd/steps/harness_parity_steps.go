@@ -263,7 +263,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates AGY MCP creation readiness$`, agmValidatesAGYMCPCreateReadiness)
 	ctx.Step(`^MCP creation should wait for the AGY composer before prompt delivery$`, mcpCreationShouldWaitForAGYComposerBeforePromptDelivery)
 	ctx.Step(`^AGM validates AGY root cancellation plumbing$`, agmValidatesAGYRootCancellationPlumbing)
-	ctx.Step(`^root signal cancellation should reach every AGY readiness wait$`, rootSignalCancellationShouldReachEveryAGYReadinessWait)
+	ctx.Step(`^root signal cancellation should reach every command-scoped readiness wait$`, rootSignalCancellationShouldReachEveryCommandScopedReadinessWait)
 	ctx.Step(`^AGM has Codex session records in Dolt$`, agmHasCodexSessionRecordsInDolt)
 	ctx.Step(`^an agent lists sessions as JSON with fields "([^"]*)"$`, agentListsSessionsAsJSONWithFields)
 	ctx.Step(`^the output should include a "sessions" array$`, outputShouldIncludeSessionsArray)
@@ -1839,7 +1839,7 @@ func runAgyLifecycleBehaviorSuite(ctx context.Context, harnessState *harnessPari
 		"./agm/internal/ops",
 		"./agm/internal/safety",
 		"./agm/internal/tmux",
-		"-run", `^(Test(StartAgyHarness(UsesCanonicalLaunchAndWaits|PropagatesReadinessFailure)|StartCurrentTmuxAgyStopsAfterCallerCancellation|BuildAgyCommand_(AutoPermissionMode|DefaultPermissionMode)|AgyModelCatalogMatchesPublicCLI|BuildAgyImportedManifestLeavesUnknownModelUnset|CreateSession_AgyDetachedPromptUsesCanonicalCommand|CreateSession_CancellationAfterRegistrationRollsBackBeforeCompletion|BuildAgyResumeCommandPreservesModelConversationAndMode|BuildAgyResumeCommand_(TranslatesLegacyModels|PreservesImportedConversationModel)|NormalizeModelInput(PreservesAgyPublicLabels|CanonicalizesCrossHarnessAliases)|ResolveSetModelInstruction_(PreservesAgyPublicLabel|NormalizesCrossHarnessAliasCase)|MCPCreateSessionRuntime(WaitsForAgyBeforePrompt|StopsBeforePromptAfterCancellation)|ExecuteWithSignalContextPropagatesCancellation|WaitForResumedAgyUsesCallerContext|WaitForAgyMetadataBackfillUsesCallerContext|RunAgyPostCreateReturnsCancellationBeforeSideEffects|NewNonClaudeAssociationManifestLeavesAgyModelUnknown|UpdateNonClaudeAssociationManifestLeavesAgyModelUnknown|DetectAgySessionUninitialized|NormalizeHarnessForSafety|WaitForAgyPrompt(AcceptsTrustBeforeReady|DismissesSurveyBeforeReady)))$`,
+		"-run", `^(Test(StartAgyHarness(UsesCanonicalLaunchAndWaits|PropagatesReadinessFailure)|StartCurrentTmuxAgyStopsAfterCallerCancellation|BuildAgyCommand_(AutoPermissionMode|DefaultPermissionMode)|AgyModelCatalogMatchesPublicCLI|BuildAgyImportedManifestLeavesUnknownModelUnset|CreateSession_AgyDetachedPromptUsesCanonicalCommand|CreateSession_CancellationAfterRegistrationRollsBackBeforeCompletion|BuildAgyResumeCommandPreservesModelConversationAndMode|BuildAgyResumeCommand_(TranslatesLegacyModels|PreservesImportedConversationModel)|NormalizeModelInput(PreservesAgyPublicLabels|CanonicalizesCrossHarnessAliases)|ResolveSetModelInstruction_(PreservesAgyPublicLabel|NormalizesCrossHarnessAliasCase)|MCPCreateSessionRuntime(WaitsForAgyBeforePrompt|StopsBeforePromptAfterCancellation)|ExecuteWithSignalContextPropagatesCancellation|WaitForResumed(Agy|Claude|Codex)UsesCallerContext|WaitForAgyMetadataBackfillUsesCallerContext|Run(AgyPostCreateReturnsCancellationBeforeSideEffects|CodexPostCreateReturnsCancellationBeforePromptDelivery)|CommandScopedReadinessWaitsReturnCallerCancellation|NewNonClaudeAssociationManifestLeavesAgyModelUnknown|UpdateNonClaudeAssociationManifestLeavesAgyModelUnknown|DetectAgySessionUninitialized|NormalizeHarnessForSafety|WaitForAgyPrompt(AcceptsTrustBeforeReady|DismissesSurveyBeforeReady)))$`,
 		"-count=1", "-v",
 	)
 	cmd.Dir = bddRepoRoot()
@@ -1948,7 +1948,7 @@ func agmValidatesAGYRootCancellationPlumbing(ctx context.Context) error {
 	return runAgyLifecycleBehaviorSuite(ctx, harnessState)
 }
 
-func rootSignalCancellationShouldReachEveryAGYReadinessWait(ctx context.Context) error {
+func rootSignalCancellationShouldReachEveryCommandScopedReadinessWait(ctx context.Context) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
 		return err
@@ -1961,6 +1961,10 @@ func rootSignalCancellationShouldReachEveryAGYReadinessWait(ctx context.Context)
 		"TestWaitForResumedAgyUsesCallerContext",
 		"TestWaitForAgyMetadataBackfillUsesCallerContext",
 		"TestRunAgyPostCreateReturnsCancellationBeforeSideEffects",
+		"TestCommandScopedReadinessWaitsReturnCallerCancellation",
+		"TestWaitForResumedClaudeUsesCallerContext",
+		"TestWaitForResumedCodexUsesCallerContext",
+		"TestRunCodexPostCreateReturnsCancellationBeforePromptDelivery",
 	)
 }
 

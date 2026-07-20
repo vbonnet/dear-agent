@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -31,12 +32,21 @@ var ClaudePromptPatterns = []string{
 // critical when starting Claude in a sandbox where --add-dir does not pre-trust
 // the workspace path.
 func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
+	return WaitForClaudePromptContext(context.Background(), sessionName, timeout)
+}
+
+// WaitForClaudePromptContext is the command-scoped variant of
+// WaitForClaudePrompt. It stops readiness polling when the caller cancels.
+//
+//nolint:gocyclo // Readiness is a stateful polling protocol with trust and harness-liveness transitions.
+func WaitForClaudePromptContext(parent context.Context, sessionName string, timeout time.Duration) error {
 	debug.Log("\n🔍 Starting prompt detection for session: %s (using capture-pane polling)", sessionName)
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
 
 	// Find which socket the session is on
 	socketPath := findSessionSocket(sessionName)
 
-	deadline := time.Now().Add(timeout)
 	pollInterval := 500 * time.Millisecond
 	checksPerformed := 0
 	lastLog := time.Now()
@@ -52,7 +62,13 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 	captureFailures := 0
 	lastContent := ""
 
-	for time.Now().Before(deadline) {
+	for {
+		if err := ctx.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return fmt.Errorf("timeout waiting for Claude prompt (waited %v, checked %d times)", timeout, checksPerformed)
+			}
+			return err
+		}
 		checksPerformed++
 
 		// Log progress every 10 seconds
@@ -62,9 +78,12 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 		}
 
 		// Capture last 50 lines from pane
-		cmd := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", sessionName, "-p", "-S", "-50")
+		cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "capture-pane", "-t", sessionName, "-p", "-S", "-50")
 		output, err := cmd.CombinedOutput()
 		if err != nil {
+			if ctx.Err() != nil {
+				continue
+			}
 			debug.Log("⚠️  capture-pane failed (attempt %d): %v", checksPerformed, err)
 			// Repeated capture failures usually mean the session itself is
 			// gone (harness exited and closed the pane) — check and fail fast
@@ -77,7 +96,9 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 				}
 				captureFailures = 0
 			}
-			time.Sleep(pollInterval)
+			if err := sleepWithContext(ctx, pollInterval); err != nil {
+				continue
+			}
 			continue
 		}
 		captureFailures = 0
@@ -104,7 +125,9 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 			} else {
 				debug.Log("✓ Claude prompt detected after %d checks", checksPerformed)
 				// Brief sleep to ensure prompt is stable
-				time.Sleep(500 * time.Millisecond)
+				if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+					return err
+				}
 				return nil
 			}
 		}
@@ -122,7 +145,9 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 				trustAnsweredAt = time.Now()
 				debug.Log("✓ Trust prompt answered, continuing to wait for ❯")
 				// Brief sleep so Claude can transition past the trust UI
-				time.Sleep(1 * time.Second)
+				if err := sleepWithContext(ctx, time.Second); err != nil {
+					continue
+				}
 				continue
 			}
 		}
@@ -132,7 +157,7 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 		// foreground process should exec into the harness almost immediately
 		// and stay there; a shell in the foreground means the harness either
 		// failed to start or died (ce-5zbg: instant Bun ENOENT in deleted cwd).
-		if fg, ok := paneForegroundCommand(socketPath, sessionName); ok {
+		if fg, ok := paneForegroundCommand(ctx, socketPath, sessionName); ok {
 			if isShellCommand(fg) {
 				consecutiveShell++
 				if sawHarness && consecutiveShell >= harnessExitedChecks {
@@ -150,10 +175,10 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 		}
 
 		// Sleep before next poll
-		time.Sleep(pollInterval)
+		if err := sleepWithContext(ctx, pollInterval); err != nil {
+			continue
+		}
 	}
-
-	return fmt.Errorf("timeout waiting for Claude prompt (waited %v, checked %d times)", timeout, checksPerformed)
 }
 
 // Fast-fail thresholds for WaitForClaudePrompt, in units of poll iterations
@@ -175,8 +200,8 @@ var (
 // foreground of the session's active pane (#{pane_current_command}). The
 // boolean is false when the value could not be determined. The tmux call is
 // timeout-bounded so a wedged server cannot stall the caller's poll loop.
-func paneForegroundCommand(socketPath, sessionName string) (string, bool) {
-	output, err := RunWithTimeout(context.Background(), globalTimeout, "tmux", "-S", socketPath,
+func paneForegroundCommand(ctx context.Context, socketPath, sessionName string) (string, bool) {
+	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath,
 		"display-message", "-p", "-t", sessionName, "#{pane_current_command}")
 	if err != nil {
 		return "", false
@@ -388,27 +413,45 @@ func containsPromptPattern(content string) bool {
 // It periodically captures the pane content and checks for prompt patterns.
 // Detects both Claude (❯) and Gemini (">   Type your message") prompts.
 func WaitForPromptSimple(sessionName string, timeout time.Duration) error {
+	return WaitForPromptSimpleContext(context.Background(), sessionName, timeout)
+}
+
+// WaitForPromptSimpleContext is the command-scoped variant of
+// WaitForPromptSimple. It stops polling when the caller cancels.
+func WaitForPromptSimpleContext(parent context.Context, sessionName string, timeout time.Duration) error {
 	debug.Log("\n🔍 Starting simple prompt detection for session: %s", sessionName)
 
-	deadline := time.Now().Add(timeout)
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
 	checkCount := 0
 
-	for time.Now().Before(deadline) {
+	for {
+		if err := ctx.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return fmt.Errorf("timeout waiting for harness prompt (waited %v, performed %d checks)", timeout, checkCount)
+			}
+			return err
+		}
 		checkCount++
 
 		// Capture enough of the visible pane to include multi-line TUI
 		// composers. Codex's stable readiness marker ("OpenAI Codex") can sit
 		// well above the footer line after previous prompts/responses.
-		cmdCtx, cmdCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		cmdCtx, cmdCancel := context.WithTimeout(ctx, 5*time.Second)
 		output, err := exec.CommandContext(cmdCtx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-S", "-30").Output()
 		cmdErr := cmdCtx.Err()
 		cmdCancel()
 		if cmdErr != nil {
+			if ctx.Err() != nil {
+				continue
+			}
 			return fmt.Errorf("tmux capture-pane timed out while waiting for prompt: %w", cmdErr)
 		}
 		if err != nil {
 			// Session might not exist or not accessible
-			time.Sleep(500 * time.Millisecond)
+			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+				continue
+			}
 			continue
 		}
 
@@ -419,7 +462,9 @@ func WaitForPromptSimple(sessionName string, timeout time.Duration) error {
 			if containsAnyHarnessPromptPattern(line) {
 				debug.Log("✓ Harness prompt detected in line %d (check #%d): %q", i, checkCount, strings.TrimSpace(line))
 				// Found prompt - wait a bit to ensure it's stable
-				time.Sleep(500 * time.Millisecond)
+				if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+					return err
+				}
 				return nil
 			}
 		}
@@ -430,10 +475,10 @@ func WaitForPromptSimple(sessionName string, timeout time.Duration) error {
 		}
 
 		// Wait before next check
-		time.Sleep(500 * time.Millisecond)
+		if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+			continue
+		}
 	}
-
-	return fmt.Errorf("timeout waiting for harness prompt (waited %v, performed %d checks)", timeout, checkCount)
 }
 
 // ResumeFailurePatterns are substrings that indicate `claude --resume` failed
@@ -482,20 +527,35 @@ func containsResumeFailurePattern(line string) (string, bool) {
 // prompt never renders. Without this check the caller would block for the
 // full timeout and then attach to a broken pane.
 func WaitForPromptOrResumeFailure(sessionName string, timeout time.Duration) error {
+	return WaitForPromptOrResumeFailureContext(context.Background(), sessionName, timeout)
+}
+
+// WaitForPromptOrResumeFailureContext is the command-scoped variant of
+// WaitForPromptOrResumeFailure. It stops polling when the caller cancels.
+func WaitForPromptOrResumeFailureContext(parent context.Context, sessionName string, timeout time.Duration) error {
 	debug.Log("\n🔍 Starting resume-aware prompt detection for session: %s", sessionName)
 
-	deadline := time.Now().Add(timeout)
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
 	checkCount := 0
 
-	for time.Now().Before(deadline) {
+	for {
+		if err := ctx.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return fmt.Errorf("timeout waiting for harness prompt (waited %v, performed %d checks)", timeout, checkCount)
+			}
+			return err
+		}
 		checkCount++
 
 		// Capture the recent pane tail (from 10 lines into scrollback through
 		// the visible region) so a multi-line failure message - the error plus
 		// the returned shell prompt - is visible in a single check.
-		output, err := exec.Command("tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-S", "-10").Output()
+		output, err := exec.CommandContext(ctx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-S", "-10").Output()
 		if err != nil {
-			time.Sleep(500 * time.Millisecond)
+			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+				continue
+			}
 			continue
 		}
 
@@ -513,7 +573,9 @@ func WaitForPromptOrResumeFailure(sessionName string, timeout time.Duration) err
 		for i, line := range lines {
 			if containsAnyHarnessPromptPattern(line) {
 				debug.Log("✓ Harness prompt detected in line %d (check #%d): %q", i, checkCount, strings.TrimSpace(line))
-				time.Sleep(500 * time.Millisecond)
+				if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+					return err
+				}
 				return nil
 			}
 		}
@@ -522,10 +584,10 @@ func WaitForPromptOrResumeFailure(sessionName string, timeout time.Duration) err
 			debug.Log("⏳ Still waiting for prompt... (check #%d)", checkCount)
 		}
 
-		time.Sleep(500 * time.Millisecond)
+		if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+			continue
+		}
 	}
-
-	return fmt.Errorf("timeout waiting for harness prompt (waited %v, performed %d checks)", timeout, checkCount)
 }
 
 // WaitForClaudeReady waits for Claude to be fully ready, handling trust prompts if needed

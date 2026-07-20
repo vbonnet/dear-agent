@@ -745,9 +745,9 @@ func resolveResumeDir(resumeUUID, worktreePath string) string {
 func waitForResumedHarness(ctx context.Context, harnessName string, health *HealthStatus) error {
 	switch agent.NormalizeHarnessName(harnessName) {
 	case "claude-code":
-		return waitForResumedClaude(health)
+		return waitForResumedClaude(ctx, health)
 	case "codex-cli":
-		return waitForResumedCodex(health)
+		return waitForResumedCodex(ctx, health)
 	case "agy":
 		return waitForResumedAgy(ctx, health)
 	default:
@@ -757,17 +757,20 @@ func waitForResumedHarness(ctx context.Context, harnessName string, health *Heal
 
 // waitForResumedClaude waits first for the claude process to appear, then for
 // the conversation prompt to render (60s timeout each behind a spinner).
-func waitForResumedClaude(health *HealthStatus) error {
+func waitForResumedClaude(ctx context.Context, health *HealthStatus) error {
 	var processWaitErr error
 	spinErr := spinner.New().
 		Title("Waiting for Claude process to start...").
 		Accessible(true).
 		Action(func() {
-			processWaitErr = tmux.WaitForProcessReady(health.TmuxSessionName, "claude", 15*time.Second)
+			processWaitErr = tmux.WaitForProcessReadyContext(ctx, health.TmuxSessionName, "claude", 15*time.Second)
 		}).
 		Run()
 	if spinErr != nil {
 		return fmt.Errorf("spinner error: %w", spinErr)
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 	fmt.Println()
 	if processWaitErr != nil {
@@ -781,11 +784,14 @@ func waitForResumedClaude(health *HealthStatus) error {
 		Title("Waiting for conversation to load...").
 		Accessible(true).
 		Action(func() {
-			promptWaitErr = tmux.WaitForPromptOrResumeFailure(health.TmuxSessionName, 60*time.Second)
+			promptWaitErr = tmux.WaitForPromptOrResumeFailureContext(ctx, health.TmuxSessionName, 60*time.Second)
 		}).
 		Run()
 	if spinErr != nil {
 		return fmt.Errorf("spinner error: %w", spinErr)
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 	fmt.Println()
 	// A fatal resume failure (e.g. "No conversation found") means the harness
@@ -836,17 +842,20 @@ func waitForResumedAgyWithWait(ctx context.Context, health *HealthStatus, wait f
 	return nil
 }
 
-func waitForResumedCodex(health *HealthStatus) error {
+func waitForResumedCodex(ctx context.Context, health *HealthStatus) error {
 	var processWaitErr error
 	spinErr := spinner.New().
 		Title("Waiting for Codex process to start...").
 		Accessible(true).
 		Action(func() {
-			processWaitErr = tmux.WaitForProcessReady(health.TmuxSessionName, "codex", 15*time.Second)
+			processWaitErr = tmux.WaitForProcessReadyContext(ctx, health.TmuxSessionName, "codex", 15*time.Second)
 		}).
 		Run()
 	if spinErr != nil {
 		return fmt.Errorf("spinner error: %w", spinErr)
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 	fmt.Println()
 	if processWaitErr != nil {
@@ -861,11 +870,14 @@ func waitForResumedCodex(health *HealthStatus) error {
 		Title("Waiting for Codex composer to load...").
 		Accessible(true).
 		Action(func() {
-			promptWaitErr = tmux.WaitForCodexPrompt(health.TmuxSessionName, 60*time.Second)
+			promptWaitErr = tmux.WaitForCodexPromptContext(ctx, health.TmuxSessionName, 60*time.Second)
 		}).
 		Run()
 	if spinErr != nil {
 		return fmt.Errorf("spinner error: %w", spinErr)
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 	fmt.Println()
 	if promptWaitErr != nil {
