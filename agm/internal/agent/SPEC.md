@@ -51,7 +51,7 @@ compatibility.
 
 **AGP-11** When a user selects an active harness's test mode, the system shall choose a low-cost test model for `claude-code`, `codex-cli`, `agy`, and `opencode-cli`.
 
-### AGY Model Lifecycle
+### AGY Model and Adapter Lifecycle
 
 **AGP-20** When AGM resolves an AGY model alias or accepts an AGY public model label, the system shall pass an exact label exposed by the installed AGY public model catalog through `--model`, including labels containing spaces or parentheses.
 
@@ -66,6 +66,12 @@ compatibility.
 **AGP-28** When an imported or manually associated AGY conversation has no observable native model, the system shall leave its manifest model unset and cold-resume without `--model` so AGY retains the saved conversation selection; when a pre-provenance saved-conversation record contains the ambiguous former default `2.5-flash` or `gemini-2.5-flash`, the resume path shall clear that stored override before command construction.
 
 **AGP-29** When `send set-model` changes a running AGY conversation, the system shall persist the selection only after observing a new confirmation that exactly names the requested public model; a stale, mismatched, or unavailable confirmation shall clear the stored model override so a later cold resume cannot force an unselected model.
+
+**AGP-21** When the AGY adapter creates or cold-resumes a session, the system shall use the shared canonical AGY command builder and preserve the selected model, permission mode, authorized directories, native conversation ID, quoting, and process-exit policy.
+
+**AGP-22** When an AGY adapter cold resume requires a new process, the system shall require the captured native AGY conversation ID and shall not substitute AGM's internal session ID.
+
+**AGP-23** When the AGY adapter reports status or reads history, the system shall require an actual `agy` process for live status and shall read user/model messages from the native Antigravity brain transcript rather than a synthetic harness path.
 
 ### Codex Workdir Trust (ce-cmsq)
 
@@ -88,3 +94,4 @@ compatibility.
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
+- Package tests: `agm/internal/agent/agy_adapter_test.go`

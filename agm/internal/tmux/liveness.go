@@ -333,26 +333,34 @@ func CheckPaneLivenessBatch(sessionNames []string, socketPath string) (map[strin
 	return results, nil
 }
 
-// IsProcessInPaneTree reports whether a process named processName (exact comm
-// or comm base-name match) is running anywhere in the descendant process tree
-// of sessionName's panes. This is the generalized, full-tree successor of the
-// direct-children-only scan that previously lived in internal/safety.
-// Any failure (timeout, tmux error, missing session) reports false — callers
-// use this as a "prove it is running" check.
-func IsProcessInPaneTree(sessionName, socketPath, processName string) bool {
+// CheckProcessInPaneTree reports whether a process named processName (exact
+// comm or comm base-name match) is running anywhere in the descendant process
+// tree of sessionName's panes. It preserves scan errors so lifecycle callers
+// can fail safe instead of injecting a command when liveness is unknown.
+func CheckProcessInPaneTree(sessionName, socketPath, processName string) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), livenessScanTimeout)
 	defer cancel()
 
 	pids, err := listPanePIDs(ctx, sessionName, socketPath)
-	if err != nil || len(pids) == 0 {
-		return false
+	if err != nil {
+		return false, err
+	}
+	if len(pids) == 0 {
+		return false, nil
 	}
 	procs, err := readProcessTable(ctx)
 	if err != nil {
-		return false
+		return false, err
 	}
 	verdict := ClassifyPaneLiveness(pids, procs, func(comm string) bool {
 		return comm == processName || filepath.Base(comm) == processName
 	})
-	return verdict.HarnessAlive
+	return verdict.HarnessAlive, nil
+}
+
+// IsProcessInPaneTree is the fail-closed compatibility wrapper used by callers
+// that only need a boolean proof of liveness.
+func IsProcessInPaneTree(sessionName, socketPath, processName string) bool {
+	alive, err := CheckProcessInPaneTree(sessionName, socketPath, processName)
+	return err == nil && alive
 }

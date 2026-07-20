@@ -320,6 +320,12 @@ Feature: Harness parity
     When AGM runs send safety for the configured harness
     Then send safety should not require a Claude process
 
+  Scenario: AGY adapter uses native lifecycle truth
+    Given AGY is available
+    When AGM validates the AGY adapter lifecycle
+    Then the AGY adapter should preserve canonical launch and resume policy
+    And the AGY adapter should require AGY process and transcript truth
+
   Scenario: Current harness session can be associated with AGM
     Given an existing tmux session running Codex CLI
     When /agm:agm-assoc runs in that session

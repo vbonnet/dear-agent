@@ -66,6 +66,8 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-30** When command-scoped harness liveness validation runs, the system shall derive the tmux and process-table subprocess timeout from the caller context and return cancellation instead of allowing later completion or attach.
 
+**TMUX-26** When a caller requests liveness for a named harness process, the system shall scan the full pane descendant tree for that exact process and shall return scan failures separately from a proven dead result.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
