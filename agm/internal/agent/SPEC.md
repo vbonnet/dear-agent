@@ -51,6 +51,10 @@ compatibility.
 
 **AGP-11** When a user selects an active harness's test mode, the system shall choose a low-cost test model for `claude-code`, `codex-cli`, `agy`, and `opencode-cli`.
 
+### AGY Model Lifecycle
+
+**AGP-20** When AGM resolves an AGY model alias or accepts an AGY public model label, the system shall pass an exact label exposed by the installed AGY public model catalog through `--model`, including labels containing spaces or parentheses.
+
 ### Codex Workdir Trust (ce-cmsq)
 
 **AGP-14** When a Codex CLI session is created or resumed through the codex-cli adapter, the system shall record the working directory as a trusted Codex project in `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`) before sending the launch command, so a fresh non-git sandbox directory cannot block Codex startup on its interactive trust prompt.
@@ -60,8 +64,6 @@ compatibility.
 **AGP-16** When appending a trust entry, the system shall preserve the existing config bytes, escape the directory path as a TOML basic-string key, and replace the file atomically; if the existing config fails to parse, the system shall leave the file untouched and report an error rather than risk a duplicate-table append that would break every subsequent Codex launch.
 
 **AGP-17** If pre-trusting the working directory fails, the codex-cli adapter shall warn and still attempt the launch.
-
-**AGP-18** When AGM resolves an AGY model alias or accepts an AGY public model label, the system shall pass an exact label exposed by the installed AGY public model catalog through `--model`, including labels containing spaces or parentheses.
 
 ### BDD Enforcement
 
