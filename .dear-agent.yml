@@ -15,6 +15,8 @@
 #     logs               where conversation logs / session transcripts go
 #   pr-policy            informational map of PR verbs -> sanctioned command
 #                        (mirrors the enforcement in .claude/settings.json)
+#   adr-governance       declared ADR directory scopes, self-contained
+#                        aggregates, review budget, and reasoned exclusions
 #   forbidden-paths      directories where new files of a given kind MUST NOT
 #                        be created in THIS repo. Maps kind -> list of globs
 #                        relative to repo root.
@@ -46,6 +48,71 @@ output-dirs:
 pr-policy:
   create: safe-pr   # safe-pr create --wayfinder <project-dir> --title … --body …
   close: safe-pr    # safe-pr close  --wayfinder <project-dir> <number|url>
+
+# Architecture decisions have directory-scoped numeric identities. Every
+# numbered scope owns one complete index; aggregate ADR.md files are
+# self-contained. `make lint-adrs` rejects undeclared tracked ADR paths and
+# identity, lifecycle, index, size, supersession, or local-link drift.
+adr-governance:
+  max-lines: 300
+  scopes:
+    - path: docs/adr
+      index: README.md
+    - path: agm/docs/adr
+      index: README.md
+    - path: agm/cmd/agm
+      index: ADR-INDEX.md
+      max-lines: 120
+    - path: agm/cmd/agm-daemon/adr
+      index: README.md
+      max-lines: 120
+    - path: agm/cmd/agm-mcp-server/adr
+      index: README.md
+      max-lines: 120
+    - path: agm/internal/dolt/adr
+      index: README.md
+      max-lines: 120
+    - path: agm/internal/evaluation/ADR
+      index: README.md
+      max-lines: 120
+    - path: agm/internal/tmux
+      index: ADR-INDEX.md
+      max-lines: 120
+    - path: engram/cmd/engram
+      index: ADR-INDEX.md
+      max-lines: 120
+    - path: engram/retrieval/docs/adrs
+      index: README.md
+      max-lines: 120
+    - path: pkg/engram/docs/adrs
+      index: README.md
+      max-lines: 120
+    - path: pkg/llm/docs
+      index: ADR-INDEX.md
+      max-lines: 120
+    - path: tools/dod-enforcer/adr
+      index: README.md
+      max-lines: 120
+  aggregates:
+    - path: engram/ecphory/ADR.md
+      max-lines: 120
+    - path: engram/ecphory/ranking/ADR.md
+      max-lines: 120
+    - path: pkg/hash/ADR.md
+      max-lines: 120
+    - path: pkg/monitoring/ADR.md
+      max-lines: 120
+    - path: pkg/telemetry/ADR.md
+      max-lines: 120
+    - path: tools/devlog/ADR.md
+      max-lines: 120
+  exclusions:
+    - match: "**/testdata/**"
+      reason: generated or parser fixture, not a living architectural decision
+    - match: "**/vendor/**"
+      reason: vendored third-party content is outside repository governance
+    - match: "**/node_modules/**"
+      reason: generated dependency content is outside repository governance
 
 forbidden-paths:
   research:

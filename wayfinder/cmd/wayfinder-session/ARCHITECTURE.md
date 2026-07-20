@@ -625,7 +625,6 @@ wayfinder-session roadmap --json | swarm-coordinator parse
 
 - [SPEC.md](./SPEC.md) - Complete V2 specification
 - [Validator ARCHITECTURE.md](./internal/validator/ARCHITECTURE.md) - Gate system architecture
-- [ADR-001](./internal/validator/ADR-001-gate-9-working-code-verification.md) - Code verification gate
 
 ---
 

@@ -73,6 +73,10 @@ go build -ldflags="${LDFLAGS}" -o build/agm-mcp-server ./agm/cmd/agm-mcp-server
 go build ./...
 ok "build clean"
 
+step "make lint-adrs"
+make lint-adrs || fail "ADR identity/index/lifecycle contract failed"
+ok "ADR identity/index/lifecycle contract intact"
+
 step "golangci-lint run ./..."
 if ! command -v golangci-lint >/dev/null 2>&1; then
   fail "golangci-lint not installed. Run: brew install golangci-lint"

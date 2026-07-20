@@ -20,18 +20,23 @@ func init() {
 	lookupEnv = os.LookupEnv
 }
 
-// isRunningInTest detects if code is executing within a test context
-// This is determined by checking if the executable name contains ".test"
-// which is characteristic of binaries compiled by `go test`
+// isRunningInTest detects both go test binaries and built subprocesses whose
+// caller explicitly enables the test protocol.
 func isRunningInTest() bool {
-	// Get the executable path
+	testMode := getEnv("ENGRAM_TEST_MODE", "")
 	executable, err := os.Executable()
 	if err != nil {
-		return false
+		executable = ""
 	}
+	return testExecution(executable, testMode)
+}
 
-	// Check if executable name contains ".test" (characteristic of go test binaries)
-	return strings.Contains(executable, ".test")
+func testExecution(executable, testMode string) bool {
+	return testModeEnabled(testMode) || strings.Contains(executable, ".test")
+}
+
+func testModeEnabled(value string) bool {
+	return value == "1" || value == "true"
 }
 
 // Adapter provides Dolt-based storage for AGM sessions
@@ -162,12 +167,18 @@ func readDefaultWorkspaceFromConfig() string {
 // DefaultConfig returns default configuration from environment
 func DefaultConfig() (*Config, error) {
 	workspace := getEnv("WORKSPACE", "")
+	if testModeEnabled(getEnv("ENGRAM_TEST_MODE", "")) {
+		if testWorkspace := getEnv("ENGRAM_TEST_WORKSPACE", ""); testWorkspace != "" {
+			workspace = testWorkspace
+		}
+	}
 	if workspace == "" {
 		// Fall back to default_workspace from ~/.agm/config.yaml so the MCP
 		// server works when invoked outside a workspace context (e.g. Dispatch
 		// or Cowork where WORKSPACE is not set in the environment).
 		workspace = readDefaultWorkspaceFromConfig()
 	}
+	database := getEnv("DOLT_DATABASE", workspace)
 	if workspace == "" {
 		return nil, fmt.Errorf("WORKSPACE environment variable not set (workspace protocol not activated)\n" +
 			"Hint: Set WORKSPACE=<name> or configure default_workspace in ~/.agm/config.yaml")
@@ -176,42 +187,8 @@ func DefaultConfig() (*Config, error) {
 	// CRITICAL: Fail-fast enforcement to prevent test pollution
 	// Tests MUST set ENGRAM_TEST_MODE=1 and use a test-specific workspace
 	if isRunningInTest() {
-		testMode := getEnv("ENGRAM_TEST_MODE", "")
-		testWorkspace := getEnv("ENGRAM_TEST_WORKSPACE", "")
-
-		// Require explicit test mode
-		if testMode != "1" && testMode != "true" {
-			return nil, fmt.Errorf("TEST POLLUTION BLOCKED: Tests must set ENGRAM_TEST_MODE=1\n\n"+
-				"Why: Without test isolation, tests write to production databases causing data pollution.\n\n"+
-				"Fix: Run tests with proper isolation:\n"+
-				"  ENGRAM_TEST_MODE=1 ENGRAM_TEST_WORKSPACE=test go test ./...\n\n"+
-				"Or use testutil.SetupTestEnvironment(t) in your test setup function.\n\n"+
-				"Current workspace: %s (attempted during test)", workspace)
-		}
-
-		// Block production workspace names during tests
-		// Production workspaces include: oss, acme, prod, production, main, etc.
-		isProductionWorkspace := workspace == "oss" ||
-			workspace == "acme" ||
-			workspace == "prod" ||
-			workspace == "production" ||
-			workspace == "main"
-
-		if isProductionWorkspace {
-			//nolint:staticcheck // multi-line CLI-facing help text
-			return nil, fmt.Errorf("TEST POLLUTION BLOCKED: Tests cannot write to production workspace '%s'\n\n"+
-				"Why: Production workspaces contain real data that tests would corrupt.\n\n"+
-				"Fix: Set ENGRAM_TEST_WORKSPACE to a test-specific value:\n"+
-				"  ENGRAM_TEST_MODE=1 ENGRAM_TEST_WORKSPACE=test go test ./...\n\n"+
-				"Or use testutil.SetupTestEnvironment(t) which auto-sets workspace='test'.\n\n"+
-				"Note: WORKSPACE env var is set to '%s' - this is a production workspace.\n"+
-				"      Tests detected production name, blocking to prevent pollution.", workspace, workspace)
-		}
-
-		// Warn if ENGRAM_TEST_WORKSPACE is not set (using inherited WORKSPACE)
-		if testWorkspace == "" {
-			fmt.Fprintf(os.Stderr, "WARNING: ENGRAM_TEST_WORKSPACE not set, using WORKSPACE=%s\n", workspace)
-			fmt.Fprintf(os.Stderr, "         Set ENGRAM_TEST_WORKSPACE=test for explicit test isolation\n")
+		if err := validateTestExecutionTarget(workspace, database); err != nil {
+			return nil, err
 		}
 	}
 
@@ -220,7 +197,6 @@ func DefaultConfig() (*Config, error) {
 	// Default database name to workspace name for proper workspace isolation
 	// In production: oss → database "oss", acme → database "acme"
 	// In tests: test → database "test"
-	database := getEnv("DOLT_DATABASE", workspace)
 	user := getEnv("DOLT_USER", "root")
 	password := getEnv("DOLT_PASSWORD", "")
 
@@ -246,6 +222,31 @@ func DefaultConfig() (*Config, error) {
 	}, nil
 }
 
+func validateTestExecutionTarget(workspace, database string) error {
+	if !testModeEnabled(getEnv("ENGRAM_TEST_MODE", "")) {
+		return fmt.Errorf("TEST POLLUTION BLOCKED: Tests must set ENGRAM_TEST_MODE=1\n\n"+
+			"Why: Without test isolation, tests write to production databases causing data pollution.\n\n"+
+			"Fix: Run tests with proper isolation:\n"+
+			"  ENGRAM_TEST_MODE=1 ENGRAM_TEST_WORKSPACE=test go test ./...\n\n"+
+			"Or use testutil.SetupTestEnvironment(t) in your test setup function.\n\n"+
+			"Current workspace: %s (attempted during test)", workspace)
+	}
+	return validateTestTarget(workspace, database, getEnv("ENGRAM_TEST_WORKSPACE", ""))
+}
+
+func validateTestTarget(workspace, database, testWorkspace string) error {
+	if testWorkspace == "" {
+		return fmt.Errorf("TEST POLLUTION BLOCKED: ENGRAM_TEST_WORKSPACE must explicitly select the isolated test workspace")
+	}
+	if workspace != testWorkspace {
+		return fmt.Errorf("TEST POLLUTION BLOCKED: resolved workspace %q does not match ENGRAM_TEST_WORKSPACE %q", workspace, testWorkspace)
+	}
+	if database != testWorkspace && database != "agm_test" {
+		return fmt.Errorf("TEST POLLUTION BLOCKED: resolved database %q is not the selected test workspace %q or the shared agm_test database", database, testWorkspace)
+	}
+	return nil
+}
+
 // New creates a new Dolt adapter with the given configuration
 func New(config *Config) (*Adapter, error) {
 	if config == nil {
@@ -256,6 +257,11 @@ func New(config *Config) (*Adapter, error) {
 	}
 	if config.Port == "" {
 		return nil, fmt.Errorf("port cannot be empty")
+	}
+	if isRunningInTest() {
+		if err := validateTestExecutionTarget(config.Workspace, config.Database); err != nil {
+			return nil, err
+		}
 	}
 
 	// Build MySQL DSN for Dolt connection

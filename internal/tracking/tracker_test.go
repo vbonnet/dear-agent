@@ -183,6 +183,38 @@ tags: [test]
 	}
 }
 
+func TestMetadataUpdater_PreservesExplicitZeroEncodingStrength(t *testing.T) {
+	updater := NewMetadataUpdater()
+	testFile := filepath.Join(t.TempDir(), "zero.ai.md")
+	content := []byte("---\ntype: pattern\ntitle: Zero strength\nencoding_strength: 0\nprovider_hint: preserve-me\n---\n\n# Content\n")
+	if err := os.WriteFile(testFile, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	record := &AccessRecord{Count: 1, LastAccess: time.Now()}
+	if err := updater.UpdateMetadata(testFile, record); err != nil {
+		t.Fatalf("UpdateMetadata failed: %v", err)
+	}
+
+	data, err := os.ReadFile(testFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(data), "encoding_strength: 0") {
+		t.Fatalf("explicit zero was not preserved:\n%s", data)
+	}
+	if !contains(string(data), "provider_hint: preserve-me") {
+		t.Fatalf("unknown frontmatter was not preserved:\n%s", data)
+	}
+	parsed, err := updater.parser.Parse(testFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Frontmatter.EncodingStrength != 0 {
+		t.Fatalf("encoding_strength = %v, want zero", parsed.Frontmatter.EncodingStrength)
+	}
+}
+
 // Helper function
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && findSubstring(s, substr)

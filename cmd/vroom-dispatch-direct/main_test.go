@@ -50,7 +50,7 @@ func TestInFlightInPR(t *testing.T) {
 	}
 }
 
-func TestLiveWorkerIDs(t *testing.T) {
+func TestOccupiedWorkerIDs(t *testing.T) {
 	// Mimics `agm session list` output: arbitrary columns after the session name.
 	// worker-ce-cd14.2 is a legacy pre-sanitization session (dotted name); the
 	// returned set holds NORMALIZED ids, so it appears as ce-cd14-2.
@@ -62,7 +62,7 @@ func TestLiveWorkerIDs(t *testing.T) {
 		"some-other-session         idle     -",
 		"", // trailing blank from the split
 	}
-	ids := liveWorkerIDs(lines)
+	ids := occupiedWorkerIDs(lines)
 	if !ids["ce-bi19"] {
 		t.Error("expected ce-bi19 to be live")
 	}
@@ -77,18 +77,18 @@ func TestLiveWorkerIDs(t *testing.T) {
 	}
 }
 
-// TestLiveWorkerIDsJSONFormat guards the dedup against `agm session list`'s
+// TestOccupiedWorkerIDsJSONFormat guards dedup against `agm session list`'s
 // agent-mode JSON output (the default in the non-TTY dispatch context), where a
 // worker name follows a quote — `"name":"worker-ce-24f1"` — not whitespace. A
-// regex anchored only to whitespace saw 0 live workers, so the dispatcher
+// regex anchored only to whitespace saw 0 occupied workers, so the dispatcher
 // re-selected already-live beads and collision-aborted every tick.
-func TestLiveWorkerIDsJSONFormat(t *testing.T) {
+func TestOccupiedWorkerIDsJSONFormat(t *testing.T) {
 	// One line, as agm emits it: worker names embedded in JSON, alongside a
 	// supervisor session (vroom-overseer), a "subworker-" that must NOT match,
 	// and a non-name field ("harness":"worker-harness") that must NOT be misread
 	// as a live worker id (the structural parse reads only the name field).
-	line := `{"operation":"list_sessions","sessions":[{"name":"worker-ce-24f1","status":"active","harness":"worker-harness"},{"name":"worker-ce-py3x","status":"active"},{"name":"vroom-overseer","status":"active"},{"name":"subworker-ce-nope","status":"active"}]}`
-	ids := liveWorkerIDs([]string{line})
+	line := `{"operation":"list_sessions","sessions":[{"name":"worker-ce-24f1","status":"active","harness":"worker-harness"},{"name":"worker-ce-py3x","status":"active"},{"name":"worker-ce-dead","status":"zombie"},{"name":"worker-ce-stopped","status":"stopped"},{"name":"worker-ce-archived","status":"archived"},{"name":"vroom-overseer","status":"active"},{"name":"subworker-ce-nope","status":"active"}]}`
+	ids := occupiedWorkerIDs([]string{line})
 	if !ids["ce-24f1"] {
 		t.Error("expected ce-24f1 to be live from JSON output")
 	}
@@ -98,11 +98,32 @@ func TestLiveWorkerIDsJSONFormat(t *testing.T) {
 	if ids["ce-nope"] {
 		t.Error("subworker-ce-nope must NOT be read as a live worker")
 	}
+	if !ids["ce-dead"] {
+		t.Error("zombie worker-ce-dead must occupy its non-archived session name")
+	}
+	if !ids["ce-stopped"] {
+		t.Error("stopped worker-ce-stopped must occupy its non-archived session name")
+	}
+	if ids["ce-archived"] {
+		t.Error("archived worker-ce-archived must release its session name")
+	}
 	if ids["harness"] {
 		t.Error(`"harness":"worker-harness" is a non-name field and must NOT be read as a live worker`)
 	}
-	if len(ids) != 2 {
-		t.Errorf("expected exactly 2 live worker ids from JSON, got %d: %v", len(ids), ids)
+	if len(ids) != 4 {
+		t.Errorf("expected exactly 4 occupied worker ids from JSON, got %d: %v", len(ids), ids)
+	}
+}
+
+func TestOccupiedWorkerIDsLegacyTextIncludesZombie(t *testing.T) {
+	ids := occupiedWorkerIDs([]string{
+		"worker-ce-live running opus-200k",
+		"worker-ce-dead zombie opus-200k",
+		"worker-ce-stopped stopped opus-200k",
+		"worker-ce-archived archived opus-200k",
+	})
+	if !ids["ce-live"] || !ids["ce-dead"] || !ids["ce-stopped"] || ids["ce-archived"] {
+		t.Fatalf("occupied worker ids = %v, want every non-archived name", ids)
 	}
 }
 
@@ -140,13 +161,13 @@ func TestDottedIDDedupBothDirections(t *testing.T) {
 	beads := []bead{{ID: "ce-xyz.3", Title: "dotted sub-bead", Priority: 0}}
 
 	// Direction 1: live session already uses the sanitized name.
-	live := liveWorkerIDs([]string{"worker-ce-xyz-3   running  opus-200k"})
+	live := occupiedWorkerIDs([]string{"worker-ce-xyz-3   running  opus-200k"})
 	if got := selectCandidates(beads, live, nil, 2); len(got) != 0 {
 		t.Errorf("sanitized session worker-ce-xyz-3 must dedup bead ce-xyz.3, got candidates %+v", got)
 	}
 
 	// Direction 2: legacy live session still carries the dotted name.
-	live = liveWorkerIDs([]string{"worker-ce-xyz.3   running  opus-200k"})
+	live = occupiedWorkerIDs([]string{"worker-ce-xyz.3   running  opus-200k"})
 	if got := selectCandidates(beads, live, nil, 2); len(got) != 0 {
 		t.Errorf("legacy dotted session worker-ce-xyz.3 must dedup bead ce-xyz.3, got candidates %+v", got)
 	}
@@ -157,9 +178,39 @@ func TestDottedIDDedupBothDirections(t *testing.T) {
 	}
 }
 
-func TestLiveWorkerIDsEmpty(t *testing.T) {
-	if ids := liveWorkerIDs(nil); len(ids) != 0 {
+func TestOccupiedWorkerIDsEmpty(t *testing.T) {
+	if ids := occupiedWorkerIDs(nil); len(ids) != 0 {
 		t.Errorf("nil input should yield empty set, got %v", ids)
+	}
+}
+
+func TestListSessionsRetrievesEveryPage(t *testing.T) {
+	original := listSessionPage
+	t.Cleanup(func() { listSessionPage = original })
+	var offsets []int
+	listSessionPage = func(_ context.Context, offset int) (sessionListPayload, error) {
+		offsets = append(offsets, offset)
+		if offset == 0 {
+			sessions := make([]sessionNameStatus, sessionListPageSize)
+			for index := range sessions {
+				sessions[index] = sessionNameStatus{Name: fmt.Sprintf("archived-%d", index), Status: "archived"}
+			}
+			sessions[sessionListPageSize-1] = sessionNameStatus{Name: "worker-ce-first", Status: "stopped"}
+			return sessionListPayload{Sessions: sessions}, nil
+		}
+		return sessionListPayload{Sessions: []sessionNameStatus{{Name: "worker-ce-second", Status: "zombie"}}}, nil
+	}
+
+	lines, err := listSessions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := occupiedWorkerIDs(lines)
+	if len(offsets) != 2 || offsets[0] != 0 || offsets[1] != sessionListPageSize {
+		t.Fatalf("page offsets = %v, want [0 %d]", offsets, sessionListPageSize)
+	}
+	if !ids["ce-first"] || !ids["ce-second"] {
+		t.Fatalf("occupied ids = %v, want workers from both pages", ids)
 	}
 }
 

@@ -3,6 +3,7 @@ package dod
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -37,6 +38,33 @@ commands_must_succeed:
 
 	if len(dod.CommandsMustSucceed) != 1 {
 		t.Errorf("Expected 1 command, got %d", len(dod.CommandsMustSucceed))
+	}
+}
+
+func TestLoadDoDPreservesExtensionFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "unknown.dod.yaml")
+	content := "files_must_exist: []\nbenchmarks_must_improve: true\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dod, err := LoadDoD(path)
+	if err != nil {
+		t.Fatalf("LoadDoD rejected extension field: %v", err)
+	}
+	extension, ok := dod.Extensions["benchmarks_must_improve"]
+	if !ok || extension.Value != "true" {
+		t.Fatalf("extension = %#v, want preserved true value", extension)
+	}
+}
+
+func TestLoadDoDRejectsTrailingYAMLDocument(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "multiple.dod.yaml")
+	content := "files_must_exist: []\n---\ntests_must_pass: true\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadDoD(path); err == nil || !strings.Contains(err.Error(), "multiple YAML documents") {
+		t.Fatalf("expected multiple-document error, got %v", err)
 	}
 }
 
