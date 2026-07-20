@@ -148,6 +148,20 @@ func realCurrentTmuxCodexQueueRuntime() currentTmuxCodexQueueRuntime {
 	return currentTmuxCodexQueueRuntime{sendCommand: tmux.SendCommand, lookPath: exec.LookPath}
 }
 
+type currentTmuxAgyRuntime struct {
+	sendCommand   func(sessionName, command string) error
+	waitForPrompt func(context.Context, string, time.Duration) error
+	associate     func(string)
+}
+
+func realCurrentTmuxAgyRuntime() currentTmuxAgyRuntime {
+	return currentTmuxAgyRuntime{
+		sendCommand:   tmux.SendCommand,
+		waitForPrompt: tmux.WaitForAgyPrompt,
+		associate:     associateSpawnedAgySession,
+	}
+}
+
 // queueCurrentTmuxCodex queues Codex behind the AGM process currently owning
 // the pane. It deliberately does not wait for composer readiness: the shell
 // cannot consume the queued command until AGM finishes metadata registration
@@ -296,9 +310,13 @@ func startCurrentTmuxGemini(spec ops.HarnessLaunchSpec) error {
 }
 
 func startCurrentTmuxAgy(ctx context.Context, spec ops.HarnessLaunchSpec) error {
+	return startCurrentTmuxAgyWithRuntime(ctx, spec, realCurrentTmuxAgyRuntime())
+}
+
+func startCurrentTmuxAgyWithRuntime(ctx context.Context, spec ops.HarnessLaunchSpec, runtime currentTmuxAgyRuntime) error {
 	fmt.Println("Starting AGY...")
 	agyCmd := ops.BuildHarnessLaunchCommand(spec).Command
-	if err := tmux.SendCommand(spec.SessionName, agyCmd); err != nil {
+	if err := runtime.sendCommand(spec.SessionName, agyCmd); err != nil {
 		ui.PrintError(err,
 			"Failed to start AGY in current tmux pane",
 			"  • Verify AGY is installed: which agy\n"+
@@ -307,13 +325,16 @@ func startCurrentTmuxAgy(ctx context.Context, spec ops.HarnessLaunchSpec) error 
 		return err
 	}
 	fmt.Println("Waiting for AGY to initialize...")
-	if err := tmux.WaitForAgyPrompt(ctx, spec.SessionName, 30*time.Second); err != nil {
+	if err := runtime.waitForPrompt(ctx, spec.SessionName, 30*time.Second); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		ui.PrintWarning("AGY ready signal not detected")
 		fmt.Printf("Session may still work, but initialization timing is uncertain.\n")
 	} else {
 		ui.PrintSuccess("AGY is ready!")
 	}
-	associateSpawnedAgySession(spec.SessionName)
+	runtime.associate(spec.SessionName)
 	return nil
 }
 

@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
@@ -187,6 +188,57 @@ func TestStartCurrentTmuxHarnessCodexPropagatesQueueFailure(t *testing.T) {
 	err := startCurrentTmuxHarnessWithRuntime(t.Context(), ops.HarnessLaunchSpec{Harness: "codex-cli"}, runtime)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("error = %v, want queue failure %v", err, wantErr)
+	}
+}
+
+func TestStartCurrentTmuxAgyStopsAfterCallerCancellation(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	associated := false
+	err := startCurrentTmuxAgyWithRuntime(ctx, ops.HarnessLaunchSpec{
+		Harness: "agy", SessionName: "agy-current",
+	}, currentTmuxAgyRuntime{
+		sendCommand: func(string, string) error { return nil },
+		waitForPrompt: func(context.Context, string, time.Duration) error {
+			cancel()
+			return context.Canceled
+		},
+		associate: func(string) { associated = true },
+	})
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context cancellation", err)
+	}
+	if associated {
+		t.Fatal("AGY session was associated after caller cancellation")
+	}
+}
+
+func TestStartCurrentTmuxAgyAssociatesAfterReadinessTimeout(t *testing.T) {
+	t.Parallel()
+
+	associated := false
+	err := startCurrentTmuxAgyWithRuntime(t.Context(), ops.HarnessLaunchSpec{
+		Harness: "agy", SessionName: "agy-current",
+	}, currentTmuxAgyRuntime{
+		sendCommand: func(string, string) error { return nil },
+		waitForPrompt: func(context.Context, string, time.Duration) error {
+			return errors.New("readiness timed out")
+		},
+		associate: func(sessionName string) {
+			if sessionName != "agy-current" {
+				t.Fatalf("associated session = %q, want agy-current", sessionName)
+			}
+			associated = true
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("startCurrentTmuxAgyWithRuntime() error = %v", err)
+	}
+	if !associated {
+		t.Fatal("AGY session was not associated after a non-cancellation readiness timeout")
 	}
 }
 
