@@ -1,0 +1,51 @@
+name: Markdown Link Integrity
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  integrity:
+    name: Tracked Markdown link debt ratchet
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Resolve shrink-only comparison ref
+        id: baseline
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+            echo "ref=origin/${BASE_REF}" >> "$GITHUB_OUTPUT"
+          elif [[ "$EVENT_NAME" == "push" && ! "$BEFORE_SHA" =~ ^0+$ ]]; then
+            echo "ref=$BEFORE_SHA" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate tracked Markdown links
+        run: go run ./tools/dead-links --root . --baseline .dead-links-baseline.txt --baseline-ref "${{ steps.baseline.outputs.ref }}"

@@ -1,10 +1,20 @@
 package main
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
+
+func gitCommand(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
 
 func TestIsExternalLink(t *testing.T) {
 	cases := []struct {
@@ -38,11 +48,11 @@ func TestCheckFile_Clean(t *testing.T) {
 		t.Fatal(err)
 	}
 	mdFile := filepath.Join(dir, "source.md")
-	content := "[Other](./other.md)\n[External](https://example.com)\n[Anchor](#section)\n"
+	content := "# Source\n\n## Section\n\n[Other](./other.md)\n[External](https://example.com)\n[Anchor](#section)\n"
 	if err := os.WriteFile(mdFile, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	findings, err := checkFile(mdFile, dir, false)
+	findings, err := checkFile(mdFile, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -58,7 +68,7 @@ func TestCheckFile_BrokenLink(t *testing.T) {
 	if err := os.WriteFile(mdFile, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	findings, err := checkFile(mdFile, dir, false)
+	findings, err := checkFile(mdFile, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -74,7 +84,7 @@ func TestCheckFile_ExternalLinksSkipped(t *testing.T) {
 	if err := os.WriteFile(mdFile, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	findings, err := checkFile(mdFile, dir, false)
+	findings, err := checkFile(mdFile, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -83,40 +93,40 @@ func TestCheckFile_ExternalLinksSkipped(t *testing.T) {
 	}
 }
 
-func TestCheckFile_PureAnchorSkipped(t *testing.T) {
+func TestCheckFile_PureAnchorValidated(t *testing.T) {
 	dir := t.TempDir()
 	mdFile := filepath.Join(dir, "source.md")
-	content := "[Section](#some-section)\n"
+	content := "## Some Section\n\n[Section](#some-section)\n"
 	if err := os.WriteFile(mdFile, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	findings, err := checkFile(mdFile, dir, false)
+	findings, err := checkFile(mdFile, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(findings) != 0 {
-		t.Errorf("expected 0 findings (anchors skipped), got %d: %v", len(findings), findings)
+		t.Errorf("expected 0 findings (same-file anchor exists), got %d: %v", len(findings), findings)
 	}
 }
 
 func TestCheckFile_LinkWithAnchor(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "other.md")
-	if err := os.WriteFile(target, []byte("# Other"), 0o644); err != nil {
+	if err := os.WriteFile(target, []byte("# Other\n\n## Section\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	mdFile := filepath.Join(dir, "source.md")
-	// Link to a real file with an anchor fragment — should pass (file exists).
+	// Link to a real file with an existing anchor fragment.
 	content := "[Other Section](./other.md#section)\n"
 	if err := os.WriteFile(mdFile, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	findings, err := checkFile(mdFile, dir, false)
+	findings, err := checkFile(mdFile, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(findings) != 0 {
-		t.Errorf("expected 0 findings (file exists, anchor is not checked), got %d: %v", len(findings), findings)
+		t.Errorf("expected 0 findings (file and anchor exist), got %d: %v", len(findings), findings)
 	}
 }
 
@@ -139,7 +149,7 @@ func TestCheckFile_RootRelativeLink(t *testing.T) {
 	if err := os.WriteFile(mdFile, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	findings, err := checkFile(mdFile, root, false)
+	findings, err := checkFile(mdFile, root)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -162,7 +172,7 @@ func TestCheckFile_LongLine(t *testing.T) {
 	if err := os.WriteFile(mdFile, b, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	findings, err := checkFile(mdFile, dir, false)
+	findings, err := checkFile(mdFile, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -176,11 +186,13 @@ func TestFindMarkdown_DotRootNotSkipped(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte(""), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	gitCommand(t, dir, "init", "-q")
+	gitCommand(t, dir, "add", "README.md")
 	// Invoke from inside the temp dir with root ".", reproducing the
 	// default-invocation bug where the root's base name "." triggered
 	// SkipDir and scanned zero files.
 	t.Chdir(dir)
-	found, err := findMarkdown(".")
+	found, err := findMarkdown(context.Background(), ".")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -199,8 +211,9 @@ func TestFindMarkdown(t *testing.T) {
 		{"README.md", true},
 		{"docs/SPEC.md", true},
 		{"code.go", false},
-		{".hidden/secret.md", false}, // hidden dir excluded
-		{"vendor/dep/README.md", false},
+		{".hidden/secret.md", true},
+		{"vendor/dep/README.md", true},
+		{"notes/untracked.md", false},
 	}
 	for _, f := range files {
 		full := filepath.Join(dir, f.path)
@@ -211,7 +224,13 @@ func TestFindMarkdown(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	found, err := findMarkdown(dir)
+	gitCommand(t, dir, "init", "-q")
+	for _, f := range files {
+		if f.include {
+			gitCommand(t, dir, "add", f.path)
+		}
+	}
+	found, err := findMarkdown(context.Background(), dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

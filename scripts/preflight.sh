@@ -77,6 +77,10 @@ step "make lint-doc-freshness"
 make lint-doc-freshness || fail "living-document freshness ratchet failed"
 ok "living-document freshness ratchet intact"
 
+step "make lint-links"
+make lint-links || fail "tracked Markdown link integrity failed"
+ok "tracked Markdown link integrity intact"
+
 step "golangci-lint run ./..."
 if ! command -v golangci-lint >/dev/null 2>&1; then
   fail "golangci-lint not installed. Run: brew install golangci-lint"
