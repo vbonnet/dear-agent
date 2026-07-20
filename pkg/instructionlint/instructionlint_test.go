@@ -1040,6 +1040,14 @@ func runGit(t *testing.T, root string, args ...string) {
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, output)
 	}
+	if len(args) > 0 && args[0] == "init" {
+		for _, identity := range [][2]string{{"user.name", "instructionlint tests"}, {"user.email", "instructionlint@example.invalid"}} {
+			configCmd := exec.Command("git", "-C", root, "config", "--local", identity[0], identity[1])
+			if output, err := configCmd.CombinedOutput(); err != nil {
+				t.Fatalf("git config %s: %v\n%s", identity[0], err, output)
+			}
+		}
+	}
 }
 
 func runGitOutput(t *testing.T, root string, args ...string) string {
