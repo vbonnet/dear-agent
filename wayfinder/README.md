@@ -25,6 +25,8 @@ printf '# Charter\n\n## Objective\nDefine the user-visible outcome.\n\n## Scope\
 wayfinder -C <project-dir> session complete-phase CHARTER --outcome success
 wayfinder -C <project-dir> session next-phase
 wayfinder -C <project-dir> session start-phase PROBLEM
+printf '# Problem Statement\n\n## Current behavior\nDescribe the observable user problem and who experiences it.\n\n## Desired outcome\nState the behavior that should replace it.\n\n## Evidence\nRecord the source, reproduction, or constraint that makes this problem real.\n' \
+  > <project-dir>/PROBLEM-statement.md
 wayfinder -C <project-dir> session complete-phase PROBLEM --outcome success
 ```
 

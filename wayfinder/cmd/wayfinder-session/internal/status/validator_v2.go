@@ -168,36 +168,16 @@ func validateWaypointHistory(status *StatusV2) error {
 func validateWaypointMetadata(waypoint WaypointHistory, index int) error {
 	var errors []string
 
-	// SPEC validation
-	if waypoint.Name == WaypointV2Spec {
-		if waypoint.StakeholderApproved == nil {
-			errors = append(errors, fmt.Sprintf("waypoint_history[%d] (SPEC): stakeholder_approved field is recommended", index))
-		}
-	}
-
-	// PLAN validation
-	if waypoint.Name == WaypointV2Plan {
-		if waypoint.TestsFeatureCreated == nil {
-			errors = append(errors, fmt.Sprintf("waypoint_history[%d] (PLAN): tests_feature_created field is recommended", index))
-		}
-	}
-
-	// BUILD validation
+	// Phase-specific metadata is optional. start-phase writes an in-progress
+	// history entry before these values are known, so structural parsing must
+	// accept their absence and validate only values that are present.
+	// BUILD enum validation
 	if waypoint.Name == WaypointV2Build {
-		if waypoint.ValidationStatus == "" {
-			errors = append(errors, fmt.Sprintf("waypoint_history[%d] (BUILD): validation_status field is recommended", index))
-		}
-		if waypoint.DeploymentStatus == "" {
-			errors = append(errors, fmt.Sprintf("waypoint_history[%d] (BUILD): deployment_status field is recommended", index))
-		}
-
-		// Validate validation_status values
 		validValidationStatuses := []string{ValidationStatusPending, ValidationStatusInProgress, ValidationStatusPassed, ValidationStatusFailed}
 		if waypoint.ValidationStatus != "" && !contains(validValidationStatuses, waypoint.ValidationStatus) {
 			errors = append(errors, fmt.Sprintf("waypoint_history[%d] (BUILD): invalid validation_status '%s'", index, waypoint.ValidationStatus))
 		}
 
-		// Validate deployment_status values
 		validDeploymentStatuses := []string{DeploymentStatusPending, DeploymentStatusInProgress, DeploymentStatusDeployed, DeploymentStatusRolledBack}
 		if waypoint.DeploymentStatus != "" && !contains(validDeploymentStatuses, waypoint.DeploymentStatus) {
 			errors = append(errors, fmt.Sprintf("waypoint_history[%d] (BUILD): invalid deployment_status '%s'", index, waypoint.DeploymentStatus))

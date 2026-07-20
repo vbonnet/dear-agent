@@ -240,6 +240,10 @@ func TestParseV2RejectsInvalidCanonicalStatus(t *testing.T) {
 	}{
 		{name: "missing required field", mutate: func(status *StatusV2) { status.ProjectName = "" }, message: "project_name is required"},
 		{name: "invalid enum", mutate: func(status *StatusV2) { status.RiskLevel = "UNKNOWN" }, message: "invalid risk_level"},
+		{name: "invalid optional build metadata", mutate: func(status *StatusV2) {
+			status.UpdatePhase(PhaseV2Build, PhaseStatusV2InProgress, "")
+			status.FindWaypointHistory(PhaseV2Build).ValidationStatus = "unknown"
+		}, message: "invalid validation_status"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			status := NewStatusV2("test", ProjectTypeFeature, RiskLevelM)
@@ -251,6 +255,25 @@ func TestParseV2RejectsInvalidCanonicalStatus(t *testing.T) {
 			_, err := ParseV2(path)
 			if err == nil || !strings.Contains(err.Error(), tc.message) {
 				t.Fatalf("ParseV2() error = %v, want %q", err, tc.message)
+			}
+		})
+	}
+}
+
+func TestParseV2AcceptsStatusWrittenAtPhaseStart(t *testing.T) {
+	for _, phase := range []string{PhaseV2Spec, PhaseV2Plan, PhaseV2Build} {
+		t.Run(phase, func(t *testing.T) {
+			st := NewStatusV2("test", ProjectTypeFeature, RiskLevelM)
+			st.Status = StatusV2InProgress
+			st.SetCurrentPhase(phase)
+			st.UpdatePhase(phase, PhaseStatusV2InProgress, "")
+
+			path := filepath.Join(t.TempDir(), StatusFilename)
+			if err := WriteV2(st, path); err != nil {
+				t.Fatalf("WriteV2: %v", err)
+			}
+			if _, err := ParseV2(path); err != nil {
+				t.Fatalf("ParseV2 rejected start-phase output: %v", err)
 			}
 		})
 	}
