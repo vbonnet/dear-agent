@@ -24,9 +24,10 @@ Never falsify, omit, or rewrite records to make an outcome look better.
 Preserve data integrity, permission boundaries, session isolation, and the
 operator's declared scope. Human approval gates remain binding.
 
-Never store secrets, credentials, access tokens, or personally identifiable
-information (PII) in session metadata, agent messages, logs, or retrospective
-artifacts.
+Treat session metadata, agent messages, logs, and retrospective artifacts as
+persistent records. Callers must redact or omit secrets, credentials, access
+tokens, and personally identifiable information (PII) before sending or
+recording them; AGM message transport does not provide automatic redaction.
 
 ## Correctness and verification
 

@@ -207,12 +207,10 @@ a Worker" is a VROOM statement; "`agm session new` starts a tmux session" is an
 AGM statement. AGM has no opinion about roadmaps, prioritization, or supervisory
 roles — that is all VROOM.
 
-VROOM owns prioritization, dispatch decisions, supervision, acceptance
-criteria, and the final decision that work is acceptable. AGM owns session
-lifecycle and verification mechanics: session creation, process execution,
-messaging, monitoring telemetry, requested check execution, and archival.
-AGM's `session verify` and `batch verify` commands report whether supplied
-assertions pass; VROOM interprets that evidence and owns final acceptance.
+The exact VROOM/AGM ownership contract lives in the canonical
+[`MISSION.md`](docs/alignment/MISSION.md); this vocabulary guide does not restate
+it. AGM's `session verify` and `batch verify` commands report whether supplied
+assertions pass, and the mission defines how VROOM uses that evidence.
 
 AGM has its own internal ADRs under `agm/docs/adr/` and `agm/cmd/.../adr/`. Those
 are legitimately AGM-scoped. **Cross-cutting / above-AGM architecture (like

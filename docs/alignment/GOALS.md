@@ -12,7 +12,8 @@ mission_ref: docs/alignment/MISSION.md
 
 MISSION.md is canonical for project purpose and ownership. These goals describe
 qualitative outcomes; they carry no fixed weights, invented targets, or review
-schedule. Current priority and acceptance criteria live on tracked work.
+schedule. Task-specific priority and acceptance criteria live on tracked work;
+repository-wide gates are inherited from `.dear-agent.yml`.
 
 ## Reliable delivery
 

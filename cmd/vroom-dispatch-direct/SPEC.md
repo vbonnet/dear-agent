@@ -39,3 +39,5 @@ can never brick a dispatch run (ce-b1zw).
 **VDD-11** When the system renders a worker prompt, the prompt shall remain harness-neutral and shall route the worker through the canonical Wayfinder V2 lifecycle.
 
 **VDD-12** When the system renders a worker completion contract, the prompt shall require evidence that the change is merged, deployed when applicable, and verified before the worker closes its bead.
+
+**VDD-13** When live-worker deduplication reads session state, the system shall treat only active or running worker sessions as live so stopped or zombie sessions do not suppress dispatch.
