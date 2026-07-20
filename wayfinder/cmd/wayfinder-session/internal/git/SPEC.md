@@ -16,6 +16,8 @@
 
 **WAYFINDER-GIT-04** When uncommitted files are queried, the system shall report only files contained by the project directory.
 
+**WAYFINDER-GIT-05** When a rewind changes canonical status, history, or retrospective markers in a Git repository, the system shall commit those files without sweeping unrelated staged changes.
+
 **WAYFINDER-GIT-05** When modified source files are queried, the system shall distinguish source code from Wayfinder artifacts and unrelated paths.
 
 **WAYFINDER-GIT-06** When a worktree lifecycle is exercised, the system shall prevent conflicting paths and preserve repository integrity.

@@ -123,6 +123,15 @@ func TestCommitPhaseCompletion(t *testing.T) {
 	if err := os.WriteFile(historyPath, []byte("{}\n"), 0644); err != nil {
 		t.Fatalf("failed to write HISTORY: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(repoDir, "PROBLEM-evidence.md"), []byte("# Evidence\n"), 0644); err != nil {
+		t.Fatalf("failed to write phase artifact: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "user-notes.md"), []byte("private notes\n"), 0644); err != nil {
+		t.Fatalf("failed to write unrelated file: %v", err)
+	}
+	if err := exec.Command("git", "-C", repoDir, "add", "user-notes.md").Run(); err != nil {
+		t.Fatalf("stage unrelated file: %v", err)
+	}
 
 	// Commit phase completion
 	err := g.CommitPhaseCompletion("PROBLEM", "success", "Completed discovery phase")
@@ -161,6 +170,67 @@ func TestCommitPhaseCompletion(t *testing.T) {
 	}
 	if !strings.Contains(commitMsg, "Wayfinder-Outcome: success") {
 		t.Errorf("commit message missing outcome metadata: %q", commitMsg)
+	}
+	showCmd := exec.Command("git", "-C", repoDir, "show", "--name-only", "--format=")
+	showOutput, err := showCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git show: %v", err)
+	}
+	committed := string(showOutput)
+	if !strings.Contains(committed, "PROBLEM-evidence.md") {
+		t.Errorf("phase artifact was not committed:\n%s", committed)
+	}
+	if strings.Contains(committed, "user-notes.md") {
+		t.Errorf("unrelated staged file was swept into phase commit:\n%s", committed)
+	}
+	stagedOutput, err := exec.Command("git", "-C", repoDir, "diff", "--cached", "--name-only").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git diff --cached: %v", err)
+	}
+	if !strings.Contains(string(stagedOutput), "user-notes.md") {
+		t.Errorf("unrelated file no longer staged after scoped commit: %s", stagedOutput)
+	}
+}
+
+func TestCommitRewindCommitsCanonicalMarkersOnly(t *testing.T) {
+	repoDir := setupGitRepo(t)
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("git", "-C", repoDir, "add", "README.md").Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("git", "-C", repoDir, "commit", "-m", "Initial").Run(); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"WAYFINDER-STATUS.md":    "status: in-progress\n",
+		"WAYFINDER-HISTORY.md":   "{}\n",
+		"RETRO-retrospective.md": "# Retro\n",
+		"user-notes.md":          "private\n",
+	} {
+		if err := os.WriteFile(filepath.Join(repoDir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := exec.Command("git", "-C", repoDir, "add", "user-notes.md").Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := New(repoDir).CommitRewind("BUILD", "DESIGN"); err != nil {
+		t.Fatalf("CommitRewind: %v", err)
+	}
+	showOutput, err := exec.Command("git", "-C", repoDir, "show", "--name-only", "--format=").CombinedOutput()
+	if err != nil {
+		t.Fatal(err)
+	}
+	committed := string(showOutput)
+	for _, name := range []string{"WAYFINDER-STATUS.md", "WAYFINDER-HISTORY.md", "RETRO-retrospective.md"} {
+		if !strings.Contains(committed, name) {
+			t.Errorf("rewind commit missing %s:\n%s", name, committed)
+		}
+	}
+	if strings.Contains(committed, "user-notes.md") {
+		t.Errorf("rewind swept unrelated staged file:\n%s", committed)
 	}
 }
 

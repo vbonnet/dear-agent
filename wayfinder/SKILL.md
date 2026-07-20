@@ -58,6 +58,10 @@ wayfinder -C <project-dir> session start-phase <PHASE>
 wayfinder -C <project-dir> session complete-phase <PHASE> --outcome success
 ```
 
+In a Git repository, `complete-phase` commits the canonical status, history,
+and phase Markdown artifacts as one scoped commit. It preserves unrelated
+staged and unstaged changes.
+
 Do not bypass a failed gate. Read the error, repair the artifact or
 implementation, rerun the relevant verification, and complete the phase again.
 Use `--reason` only for the explicit hash-mismatch override described by
@@ -90,6 +94,9 @@ When new evidence invalidates earlier work, rewind explicitly and record why:
 ```sh
 wayfinder -C <project-dir> session rewind-to <PHASE> --reason "<reason>"
 ```
+
+In a Git repository, `rewind-to` commits its status, history, and retrospective
+updates before returning, so the target phase can be started immediately.
 
 End only after the requested outcome is implemented and its required delivery
 state is verified:

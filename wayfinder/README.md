@@ -33,6 +33,10 @@ printf '# Problem Statement\n\n## Current behavior\nDescribe the observable user
 wayfinder -C <project-dir> session complete-phase PROBLEM --outcome success
 ```
 
+In Git repositories, phase completion commits its canonical marker files and
+`<PHASE>-*.md` artifacts as a scoped commit. Rewinds similarly commit their
+status, history, and retrospective updates before the target is restarted.
+
 Run `wayfinder session --help` for the current command surface. Do not edit
 the status file manually or rely on retired phase identifiers.
 

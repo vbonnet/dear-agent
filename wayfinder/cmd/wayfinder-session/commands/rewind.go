@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/archive"
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/git"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/retrospective"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
@@ -32,6 +33,7 @@ This will:
 2. Mark all phases after the target phase as pending
 3. Set the current phase to the target phase
 4. Log rewind event to retrospective (with optional prompting)
+5. Commit canonical rewind markers when the project is a Git repository
 
 Examples:
   wayfinder session rewind-to RESEARCH
@@ -113,6 +115,13 @@ func runRewind(cmd *cobra.Command, args []string) error {
 	}
 	if err := retrospective.LogRewindEvent(projectDir, fromPhase, targetPhase, flags); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: retrospective logging failed: %v\n", err)
+	}
+	gitIntegrator := git.New(projectDir)
+	if gitIntegrator.IsGitRepo() {
+		if err := gitIntegrator.CommitRewind(fromPhase, targetPhase); err != nil {
+			return fmt.Errorf("commit rewind state before restarting %s: %w", targetPhase, err)
+		}
+		fmt.Println("📝 Rewind state committed")
 	}
 
 	fmt.Printf("⏪ Rewound to phase %s\n", targetPhase)
