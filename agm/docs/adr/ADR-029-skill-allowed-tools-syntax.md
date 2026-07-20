@@ -1,4 +1,4 @@
-# ADR-0004: Skill permission pattern syntax
+# ADR-029: Skill permission pattern syntax
 
 Status: Accepted (verified 2026-07-17)
 
@@ -14,6 +14,9 @@ Generated and hand-written skill permissions use the governed command schema,
 including space-separated command wildcards such as `Bash(agm session list *)`.
 The skill generator owns emitted frontmatter, and permission lint tests reject
 unsupported syntax.
+
+This record was renumbered from `0004` because numeric ADR identity is scoped
+to this directory and `ADR-004` already owns identity 4.
 
 ## Consequences
 
