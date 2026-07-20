@@ -10,15 +10,18 @@ and commands with expected exit codes.
 
 ## Decision
 
-The enforcer loads a typed YAML document into `BeadDoD`. Unknown future check
-families require an explicit schema and implementation change; comments in the
-Go type are not accepted configuration.
+The enforcer loads exactly one YAML document into `BeadDoD`. Known check
+families remain typed; unknown future families are preserved as extension nodes
+so older binaries can read newer files without claiming to execute those
+checks. Implementing an extension still requires an explicit schema and
+validator change.
 
 ## Consequences
 
 - Criteria can be version-controlled and reviewed without compiling code.
 - YAML parsing errors fail loading before any check runs.
-- Schema evolution must preserve or migrate existing files deliberately.
+- Schema evolution can add fields without breaking older readers, while new
+  checks remain inactive until their validator ships.
 
 ## Evidence
 

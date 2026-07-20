@@ -3,6 +3,7 @@ name: ADR Integrity
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  merge_group:
   push:
     branches: [main, develop]
   workflow_dispatch:
