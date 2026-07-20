@@ -115,8 +115,8 @@ criteria in frontmatter form:
 ```yaml
 verification_criteria:
   - "WAYFINDER-STATUS.md exists in the designated wayfinder session directory"
-  - "status field in WAYFINDER-STATUS.md is 'complete' or 'in_progress' (not 'unknown')"
-  - "At least one phase artifact (W0-charter.md or later) exists in the session dir"
+  - "status in WAYFINDER-STATUS.md is a canonical value such as 'in-progress' or 'completed'"
+  - "At least one canonical phase artifact (for example, CHARTER-charter.md) exists in the session dir"
   - "No '{{TODO}}' or '[[fill me in]]' placeholders remain in any phase artifact"
   - "Session directory is non-empty (at least one .md file present)"
 ```
