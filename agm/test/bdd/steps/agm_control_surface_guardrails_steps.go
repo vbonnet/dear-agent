@@ -58,7 +58,11 @@ func agmAuditsCobraCommandTestIsolation(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	// Cold CI runners may compile the command package while the integration
+	// graph is already saturating the host. Keep the behavioral gate bounded,
+	// but allow enough time for that first build instead of turning contention
+	// into a false contract failure.
+	testCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "-run", `^Test(CobraCommandValidationIsOrderIndependent|CobraCommandFactoriesIsolateFlagValues|RestoreCommandTreeFlagsForTestPreservesStringSliceParseState)$`, "-count=1", "-v")
 	cmd.Dir = packageSpecBDDRepoRoot()
