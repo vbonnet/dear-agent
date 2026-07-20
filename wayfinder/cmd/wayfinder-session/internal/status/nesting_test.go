@@ -18,9 +18,9 @@ session_id: test-session
 project_path: .
 started_at: 2026-01-29T12:00:00Z
 status: ` + status + `
-current_phase: D1
+current_phase: PROBLEM
 phases:
-  - name: D1
+  - name: PROBLEM
     status: in_progress
 ---
 

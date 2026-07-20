@@ -26,7 +26,7 @@ func TestAppendEvent(t *testing.T) {
 		"key": "value",
 		"num": 42,
 	}
-	err := h.AppendEvent(EventTypePhaseStarted, "D1", data)
+	err := h.AppendEvent(EventTypePhaseStarted, "PROBLEM", data)
 	if err != nil {
 		t.Fatalf("AppendEvent() error = %v", err)
 	}
@@ -50,8 +50,8 @@ func TestAppendEvent(t *testing.T) {
 	if event.Type != EventTypePhaseStarted {
 		t.Errorf("event.Type = %q, want %q", event.Type, EventTypePhaseStarted)
 	}
-	if event.Phase != "D1" {
-		t.Errorf("event.Phase = %q, want %q", event.Phase, "D1")
+	if event.Phase != "PROBLEM" {
+		t.Errorf("event.Phase = %q, want %q", event.Phase, "PROBLEM")
 	}
 	if event.Data["key"] != "value" {
 		t.Errorf("event.Data[key] = %v, want %q", event.Data["key"], "value")
@@ -72,9 +72,9 @@ func TestAppendEvent_Multiple(t *testing.T) {
 		phase     string
 	}{
 		{EventTypeSessionStarted, ""},
-		{EventTypePhaseStarted, "D1"},
-		{EventTypePhaseCompleted, "D1"},
-		{EventTypePhaseStarted, "D2"},
+		{EventTypePhaseStarted, "PROBLEM"},
+		{EventTypePhaseCompleted, "PROBLEM"},
+		{EventTypePhaseStarted, "RESEARCH"},
 	}
 
 	for _, e := range events {
@@ -124,7 +124,7 @@ func TestRead_CorruptedLine(t *testing.T) {
 	h := New(tmpDir)
 
 	// Write valid event
-	if err := h.AppendEvent(EventTypePhaseStarted, "D1", nil); err != nil {
+	if err := h.AppendEvent(EventTypePhaseStarted, "PROBLEM", nil); err != nil {
 		t.Fatalf("AppendEvent() error = %v", err)
 	}
 
@@ -137,7 +137,7 @@ func TestRead_CorruptedLine(t *testing.T) {
 	file.Close()
 
 	// Write another valid event
-	if err := h.AppendEvent(EventTypePhaseCompleted, "D1", nil); err != nil {
+	if err := h.AppendEvent(EventTypePhaseCompleted, "PROBLEM", nil); err != nil {
 		t.Fatalf("AppendEvent() error = %v", err)
 	}
 
@@ -172,7 +172,7 @@ func TestAppendEvent_Concurrent(t *testing.T) {
 					"goroutine": id,
 					"event":     j,
 				}
-				if err := h.AppendEvent(EventTypePhaseStarted, "D1", data); err != nil {
+				if err := h.AppendEvent(EventTypePhaseStarted, "PROBLEM", data); err != nil {
 					t.Errorf("AppendEvent() error in goroutine %d: %v", id, err)
 				}
 			}
@@ -198,26 +198,26 @@ func TestGetEventsByPhase(t *testing.T) {
 	h := New(tmpDir)
 
 	// Add events for different phases
-	h.AppendEvent(EventTypePhaseStarted, "D1", nil)
-	h.AppendEvent(EventTypePhaseCompleted, "D1", nil)
-	h.AppendEvent(EventTypePhaseStarted, "D2", nil)
-	h.AppendEvent(EventTypePhaseCompleted, "D2", nil)
-	h.AppendEvent(EventTypePhaseStarted, "D3", nil)
+	h.AppendEvent(EventTypePhaseStarted, "PROBLEM", nil)
+	h.AppendEvent(EventTypePhaseCompleted, "PROBLEM", nil)
+	h.AppendEvent(EventTypePhaseStarted, "RESEARCH", nil)
+	h.AppendEvent(EventTypePhaseCompleted, "RESEARCH", nil)
+	h.AppendEvent(EventTypePhaseStarted, "DESIGN", nil)
 
-	// Get events for D2
-	events, err := h.GetEventsByPhase("D2")
+	// Get events for RESEARCH
+	events, err := h.GetEventsByPhase("RESEARCH")
 	if err != nil {
 		t.Fatalf("GetEventsByPhase() error = %v", err)
 	}
 
 	if len(events) != 2 {
-		t.Fatalf("GetEventsByPhase(D2) returned %d events, want 2", len(events))
+		t.Fatalf("GetEventsByPhase(RESEARCH) returned %d events, want 2", len(events))
 	}
 
-	// Verify all events are for D2
+	// Verify all events are for RESEARCH
 	for i, event := range events {
-		if event.Phase != "D2" {
-			t.Errorf("event[%d].Phase = %q, want %q", i, event.Phase, "D2")
+		if event.Phase != "RESEARCH" {
+			t.Errorf("event[%d].Phase = %q, want %q", i, event.Phase, "RESEARCH")
 		}
 	}
 }
@@ -228,10 +228,10 @@ func TestGetEventsByType(t *testing.T) {
 
 	// Add events of different types
 	h.AppendEvent(EventTypeSessionStarted, "", nil)
-	h.AppendEvent(EventTypePhaseStarted, "D1", nil)
-	h.AppendEvent(EventTypePhaseCompleted, "D1", nil)
-	h.AppendEvent(EventTypePhaseStarted, "D2", nil)
-	h.AppendEvent(EventTypeValidationFailed, "D3", nil)
+	h.AppendEvent(EventTypePhaseStarted, "PROBLEM", nil)
+	h.AppendEvent(EventTypePhaseCompleted, "PROBLEM", nil)
+	h.AppendEvent(EventTypePhaseStarted, "RESEARCH", nil)
+	h.AppendEvent(EventTypeValidationFailed, "DESIGN", nil)
 
 	// Get all phase.started events
 	events, err := h.GetEventsByType(EventTypePhaseStarted)
@@ -258,7 +258,7 @@ func TestEvent_Timestamp(t *testing.T) {
 	before := time.Now()
 	time.Sleep(1 * time.Millisecond) // Ensure timestamp is after 'before'
 
-	if err := h.AppendEvent(EventTypePhaseStarted, "D1", nil); err != nil {
+	if err := h.AppendEvent(EventTypePhaseStarted, "PROBLEM", nil); err != nil {
 		t.Fatalf("AppendEvent() error = %v", err)
 	}
 

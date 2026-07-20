@@ -290,7 +290,7 @@ func nonMigrationRuntimeOmitsRetiredPhases(ctx context.Context) (resultErr error
 		if walkErr != nil {
 			return walkErr
 		}
-		if entry.IsDir() || !activeExtensions[filepath.Ext(path)] || strings.HasSuffix(path, "_test.go") {
+		if entry.IsDir() || !activeExtensions[filepath.Ext(path)] {
 			return nil
 		}
 		rel, relErr := filepath.Rel(root, path)

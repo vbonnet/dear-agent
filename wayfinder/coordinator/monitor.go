@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Monitor provides hybrid monitoring (events + polling)
@@ -258,10 +260,19 @@ func parseWayfinderStatus(projectDir, content string) *ProjectStatus {
 		LastUpdate: time.Now(),
 	}
 
-	// Parse current phase from the human-readable status summary.
-	phaseRe := regexp.MustCompile(`\*\*Current Phase\*\*:\s*([A-Z]\d+)`)
-	if match := phaseRe.FindStringSubmatch(content); len(match) > 1 {
-		status.CurrentPhase = match[1]
+	if frontmatter, found := canonicalStatusFrontmatter(content); found {
+		var canonical struct {
+			CurrentWaypoint string    `yaml:"current_waypoint"`
+			Status          string    `yaml:"status"`
+			UpdatedAt       time.Time `yaml:"updated_at"`
+		}
+		if err := yaml.Unmarshal([]byte(frontmatter), &canonical); err == nil {
+			status.CurrentPhase = canonical.CurrentWaypoint
+			status.Message = canonical.Status
+			if !canonical.UpdatedAt.IsZero() {
+				status.LastUpdate = canonical.UpdatedAt
+			}
+		}
 	}
 
 	// Parse progress: Look for percentage like "50%" or "Phase Progress: 50%"
@@ -269,12 +280,6 @@ func parseWayfinderStatus(projectDir, content string) *ProjectStatus {
 	if match := progressRe.FindStringSubmatch(content); len(match) > 1 {
 		progress, _ := strconv.Atoi(match[1])
 		status.Progress = progress
-	}
-
-	// Parse status message: Look for "**Status**: ..." pattern
-	messageRe := regexp.MustCompile(`\*\*Status\*\*:\s*(.+)`)
-	if match := messageRe.FindStringSubmatch(content); len(match) > 1 {
-		status.Message = strings.TrimSpace(match[1])
 	}
 
 	// Fallback defaults
@@ -286,6 +291,16 @@ func parseWayfinderStatus(projectDir, content string) *ProjectStatus {
 	}
 
 	return status
+}
+
+func canonicalStatusFrontmatter(content string) (string, bool) {
+	trimmed := strings.TrimSpace(content)
+	afterOpen, found := strings.CutPrefix(trimmed, "---")
+	if !found {
+		return "", false
+	}
+	frontmatter, _, found := strings.Cut(afterOpen, "\n---")
+	return frontmatter, found
 }
 
 // Close closes all open log files

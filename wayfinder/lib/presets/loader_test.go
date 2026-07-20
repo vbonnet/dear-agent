@@ -79,7 +79,7 @@ func TestPresetDifferentiation(t *testing.T) {
 		t.Errorf("fast-iteration should have higher coverage than research-heavy")
 	}
 
-	// Verify S9 validation depth differentiation
+	// Verify RETRO validation depth differentiation
 	if highQuality.PhaseGates.S9ValidationDepth != "comprehensive" {
 		t.Errorf("high-quality should have comprehensive validation")
 	}

@@ -242,7 +242,7 @@ func TestMonitorGetStatus(t *testing.T) {
 	monitor.statusPoller.mu.Lock()
 	monitor.statusPoller.projects["/test/project"] = &ProjectStatus{
 		ProjectDir:   "/test/project",
-		CurrentPhase: "S8",
+		CurrentPhase: "BUILD",
 		Progress:     50,
 	}
 	monitor.statusPoller.mu.Unlock()
@@ -252,8 +252,8 @@ func TestMonitorGetStatus(t *testing.T) {
 		t.Fatalf("GetStatus failed: %v", err)
 	}
 
-	if status.CurrentPhase != "S8" {
-		t.Errorf("Expected phase=S8, got %s", status.CurrentPhase)
+	if status.CurrentPhase != "BUILD" {
+		t.Errorf("Expected phase=BUILD, got %s", status.CurrentPhase)
 	}
 
 	if status.Progress != 50 {
@@ -293,23 +293,30 @@ func TestEventSubscriptionAndEmit(t *testing.T) {
 
 func TestParseWayfinderStatus(t *testing.T) {
 	content := `---
-**Current Phase**: S8 - Implementation
-**Status**: In progress
+schema_version: "2.0"
+project_name: test
+project_type: feature
+risk_level: M
+current_waypoint: BUILD
+status: in-progress
+created_at: 2026-07-20T12:00:00Z
+updated_at: 2026-07-20T12:30:00Z
+---
 **Progress**: 75%
----`
+`
 
 	status := parseWayfinderStatus("/test/project", content)
 
-	if status.CurrentPhase != "S8" {
-		t.Errorf("Expected phase=S8, got %s", status.CurrentPhase)
+	if status.CurrentPhase != "BUILD" {
+		t.Errorf("Expected phase=BUILD, got %s", status.CurrentPhase)
 	}
 
 	if status.Progress != 75 {
 		t.Errorf("Expected progress=75, got %d", status.Progress)
 	}
 
-	if status.Message != "In progress" {
-		t.Errorf("Expected message='In progress', got %s", status.Message)
+	if status.Message != "in-progress" {
+		t.Errorf("Expected message='in-progress', got %s", status.Message)
 	}
 }
 

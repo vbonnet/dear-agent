@@ -30,7 +30,7 @@ func TestIntegrationV2Workflow(t *testing.T) {
 			Status:       PhaseStatusV2Completed,
 			StartedAt:    now.Add(-2 * time.Hour),
 			CompletedAt:  &completed,
-			Deliverables: []string{"W0-intake.md"},
+			Deliverables: []string{"CHARTER-intake.md"},
 		},
 	}
 

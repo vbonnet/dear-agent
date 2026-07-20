@@ -125,7 +125,7 @@ func TestCommitPhaseCompletion(t *testing.T) {
 	}
 
 	// Commit phase completion
-	err := g.CommitPhaseCompletion("D1", "success", "Completed discovery phase")
+	err := g.CommitPhaseCompletion("PROBLEM", "success", "Completed discovery phase")
 	if err != nil {
 		t.Fatalf("CommitPhaseCompletion() error = %v", err)
 	}
@@ -139,7 +139,7 @@ func TestCommitPhaseCompletion(t *testing.T) {
 	}
 
 	subject := strings.TrimSpace(string(output))
-	expectedSubject := "wayfinder: complete D1 (success)"
+	expectedSubject := "wayfinder: complete PROBLEM (success)"
 	if subject != expectedSubject {
 		t.Errorf("commit subject = %q, want %q", subject, expectedSubject)
 	}
@@ -156,7 +156,7 @@ func TestCommitPhaseCompletion(t *testing.T) {
 	if !strings.Contains(commitMsg, "Completed discovery phase") {
 		t.Errorf("commit message missing context: %q", commitMsg)
 	}
-	if !strings.Contains(commitMsg, "Wayfinder-Phase: D1") {
+	if !strings.Contains(commitMsg, "Wayfinder-Phase: PROBLEM") {
 		t.Errorf("commit message missing phase metadata: %q", commitMsg)
 	}
 	if !strings.Contains(commitMsg, "Wayfinder-Outcome: success") {
@@ -401,7 +401,7 @@ func TestCommitPhaseCompletion_NonGitRepo(t *testing.T) {
 	tmpDir := t.TempDir()
 	g := New(tmpDir)
 
-	err := g.CommitPhaseCompletion("D1", "success", "")
+	err := g.CommitPhaseCompletion("PROBLEM", "success", "")
 	if err == nil {
 		t.Error("CommitPhaseCompletion() on non-git repo should return error")
 	}
@@ -440,7 +440,7 @@ func TestCommitPhaseCompletion_NothingToCommit(t *testing.T) {
 	commitCmd2.Run()
 
 	// Try to commit again without changes (should not error)
-	err := g.CommitPhaseCompletion("D1", "success", "")
+	err := g.CommitPhaseCompletion("PROBLEM", "success", "")
 	if err != nil {
 		t.Errorf("CommitPhaseCompletion() with nothing to commit should not error, got: %v", err)
 	}
@@ -458,24 +458,24 @@ func TestFormatCommitMessage(t *testing.T) {
 	}{
 		{
 			name:    "with context",
-			phase:   "D1",
+			phase:   "PROBLEM",
 			outcome: "success",
 			context: "Completed user interviews",
 			contains: []string{
-				"wayfinder: complete D1 (success)",
+				"wayfinder: complete PROBLEM (success)",
 				"Completed user interviews",
-				"Wayfinder-Phase: D1",
+				"Wayfinder-Phase: PROBLEM",
 				"Wayfinder-Outcome: success",
 			},
 		},
 		{
 			name:    "without context",
-			phase:   "S5",
+			phase:   "PLAN",
 			outcome: "partial",
 			context: "",
 			contains: []string{
-				"wayfinder: complete S5 (partial)",
-				"Wayfinder-Phase: S5",
+				"wayfinder: complete PLAN (partial)",
+				"Wayfinder-Phase: PLAN",
 				"Wayfinder-Outcome: partial",
 			},
 		},
@@ -674,13 +674,13 @@ func TestGetUncommittedFilesInProjectDir(t *testing.T) {
 				exec.Command("git", "-C", repoDir, "commit", "-m", "Initial").Run()
 
 				// Create uncommitted deliverable files
-				os.WriteFile(filepath.Join(repoDir, "W0-charter.md"), []byte("# Charter\n"), 0644)
-				os.WriteFile(filepath.Join(repoDir, "D1-problem.md"), []byte("# Problem\n"), 0644)
+				os.WriteFile(filepath.Join(repoDir, "CHARTER-charter.md"), []byte("# Charter\n"), 0644)
+				os.WriteFile(filepath.Join(repoDir, "PROBLEM-problem.md"), []byte("# Problem\n"), 0644)
 				os.WriteFile(filepath.Join(repoDir, "WAYFINDER-STATUS.md"), []byte("# Status\n"), 0644)
 
 				return repoDir
 			},
-			wantFiles: []string{"D1-problem.md", "W0-charter.md", "WAYFINDER-STATUS.md"},
+			wantFiles: []string{"PROBLEM-problem.md", "CHARTER-charter.md", "WAYFINDER-STATUS.md"},
 			wantErr:   false,
 		},
 		{
@@ -699,11 +699,11 @@ func TestGetUncommittedFilesInProjectDir(t *testing.T) {
 				os.WriteFile(filepath.Join(wayfinderDir, "archive.json"), []byte("{}"), 0644)
 
 				// Create uncommitted deliverable
-				os.WriteFile(filepath.Join(repoDir, "S8-implementation.md"), []byte("# Implementation\n"), 0644)
+				os.WriteFile(filepath.Join(repoDir, "BUILD-implementation.md"), []byte("# Implementation\n"), 0644)
 
 				return repoDir
 			},
-			wantFiles: []string{"S8-implementation.md"},
+			wantFiles: []string{"BUILD-implementation.md"},
 			wantErr:   false,
 		},
 		{
@@ -731,19 +731,19 @@ func TestGetUncommittedFilesInProjectDir(t *testing.T) {
 			setup: func(t *testing.T) string {
 				repoDir := setupGitRepo(t)
 				// Create and commit initial files
-				os.WriteFile(filepath.Join(repoDir, "W0-charter.md"), []byte("# Charter v1\n"), 0644)
+				os.WriteFile(filepath.Join(repoDir, "CHARTER-charter.md"), []byte("# Charter v1\n"), 0644)
 				exec.Command("git", "-C", repoDir, "add", ".").Run()
 				exec.Command("git", "-C", repoDir, "commit", "-m", "Initial").Run()
 
 				// Modify committed file
-				os.WriteFile(filepath.Join(repoDir, "W0-charter.md"), []byte("# Charter v2\n"), 0644)
+				os.WriteFile(filepath.Join(repoDir, "CHARTER-charter.md"), []byte("# Charter v2\n"), 0644)
 
 				// Add untracked file
-				os.WriteFile(filepath.Join(repoDir, "D1-problem.md"), []byte("# Problem\n"), 0644)
+				os.WriteFile(filepath.Join(repoDir, "PROBLEM-problem.md"), []byte("# Problem\n"), 0644)
 
 				return repoDir
 			},
-			wantFiles: []string{"D1-problem.md", "W0-charter.md"},
+			wantFiles: []string{"PROBLEM-problem.md", "CHARTER-charter.md"},
 			wantErr:   false,
 		},
 	}

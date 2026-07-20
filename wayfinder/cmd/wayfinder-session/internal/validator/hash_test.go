@@ -215,8 +215,8 @@ func TestCalculatePhaseEngramHash_Consistency(t *testing.T) {
 func TestValidateMethodologyFreshness(t *testing.T) {
 	// Create engram file
 	tmpDir := t.TempDir()
-	engramFile := filepath.Join(tmpDir, "d1-problem-validation.ai.md")
-	engramContent := "# D1 Phase Methodology\n\nSome methodology content.\n"
+	engramFile := filepath.Join(tmpDir, "problem-validation.ai.md")
+	engramContent := "# PROBLEM Phase Methodology\n\nSome methodology content.\n"
 	if err := os.WriteFile(engramFile, []byte(engramContent), 0600); err != nil {
 		t.Fatalf("failed to create engram file: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestValidateMethodologyFreshness(t *testing.T) {
 		{
 			name: "matching hash - validation passes",
 			deliverableContent: `---
-phase: "D1"
+phase: "PROBLEM"
 phase_name: "Problem Validation"
 wayfinder_session_id: "test-123"
 created_at: "2026-01-05T12:00:00Z"
@@ -245,7 +245,7 @@ phase_engram_hash: "` + expectedHash + `"
 phase_engram_path: "` + engramFile + `"
 ---
 
-# D1: Problem Validation
+# PROBLEM: Problem Validation
 
 Content here.
 `,
@@ -255,7 +255,7 @@ Content here.
 		{
 			name: "hash mismatch - no reason - blocks",
 			deliverableContent: `---
-phase: "D1"
+phase: "PROBLEM"
 phase_name: "Problem Validation"
 wayfinder_session_id: "test-123"
 created_at: "2026-01-05T12:00:00Z"
@@ -263,7 +263,7 @@ phase_engram_hash: "sha256:outdatedhash123"
 phase_engram_path: "` + engramFile + `"
 ---
 
-# D1: Problem Validation
+# PROBLEM: Problem Validation
 
 Content here.
 `,
@@ -274,7 +274,7 @@ Content here.
 		{
 			name: "hash mismatch - with reason - allows",
 			deliverableContent: `---
-phase: "D1"
+phase: "PROBLEM"
 phase_name: "Problem Validation"
 wayfinder_session_id: "test-123"
 created_at: "2026-01-05T12:00:00Z"
@@ -282,7 +282,7 @@ phase_engram_hash: "sha256:outdatedhash123"
 phase_engram_path: "` + engramFile + `"
 ---
 
-# D1: Problem Validation
+# PROBLEM: Problem Validation
 
 Content here.
 `,
@@ -291,7 +291,7 @@ Content here.
 		},
 		{
 			name: "missing frontmatter - blocks",
-			deliverableContent: `# D1: Problem Validation
+			deliverableContent: `# PROBLEM: Problem Validation
 
 No frontmatter here.
 `,
@@ -302,7 +302,7 @@ No frontmatter here.
 		{
 			name: "invalid engram path - blocks",
 			deliverableContent: `---
-phase: "D1"
+phase: "PROBLEM"
 phase_name: "Problem Validation"
 wayfinder_session_id: "test-123"
 created_at: "2026-01-05T12:00:00Z"
@@ -324,13 +324,13 @@ Content
 			projectDir := t.TempDir()
 
 			// Create deliverable file
-			deliverableFile := filepath.Join(projectDir, "D1-problem-validation.md")
+			deliverableFile := filepath.Join(projectDir, "PROBLEM-problem-validation.md")
 			if err := os.WriteFile(deliverableFile, []byte(tt.deliverableContent), 0600); err != nil {
 				t.Fatalf("failed to create deliverable file: %v", err)
 			}
 
 			// Validate
-			err := validateMethodologyFreshness(projectDir, "D1", tt.hashMismatchReason)
+			err := validateMethodologyFreshness(projectDir, "PROBLEM", tt.hashMismatchReason)
 
 			if tt.wantErr {
 				if err == nil {
@@ -353,7 +353,7 @@ func TestValidateMethodologyFreshness_NoDeliverable(t *testing.T) {
 	// No deliverable file created
 
 	// Should not error (validateDeliverableExists catches this case)
-	err := validateMethodologyFreshness(tmpDir, "D1", "")
+	err := validateMethodologyFreshness(tmpDir, "PROBLEM", "")
 	if err != nil {
 		t.Errorf("validateMethodologyFreshness() with no deliverable should return nil, got %v", err)
 	}

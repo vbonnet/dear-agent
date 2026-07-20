@@ -135,9 +135,35 @@ func validateEnums(status *StatusV2) error {
 	if !contains(ValidStatuses(), status.Status) {
 		errors = append(errors, fmt.Sprintf("invalid status '%s', must be one of: %s", status.Status, strings.Join(ValidStatuses(), ", ")))
 	}
+	if err := validateLifecycleState(status); err != nil {
+		errors = append(errors, err.Error())
+	}
 
 	if len(errors) > 0 {
 		return fmt.Errorf("enum validation failed: %s", strings.Join(errors, "; "))
+	}
+	return nil
+}
+
+func validateLifecycleState(status *StatusV2) error {
+	if status.LifecycleState == "" {
+		return nil
+	}
+	expectedStatuses := map[string]string{
+		LifecycleWorking:           StatusV2InProgress,
+		LifecycleInputRequired:     StatusV2Blocked,
+		LifecycleDependencyBlocked: StatusV2Blocked,
+		LifecycleValidating:        StatusV2InProgress,
+		LifecycleCompleted:         StatusV2Completed,
+		LifecycleFailed:            StatusV2Blocked,
+		LifecycleCanceled:          StatusV2Abandoned,
+	}
+	expectedStatus, valid := expectedStatuses[status.LifecycleState]
+	if !valid {
+		return fmt.Errorf("invalid lifecycle_state %q", status.LifecycleState)
+	}
+	if status.Status != expectedStatus {
+		return fmt.Errorf("lifecycle_state %q requires status %q, got %q", status.LifecycleState, expectedStatus, status.Status)
 	}
 	return nil
 }

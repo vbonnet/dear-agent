@@ -264,7 +264,7 @@ func TestPublishProject_GracefulDegradation(t *testing.T) {
 func TestPublishPhase_GracefulDegradation(t *testing.T) {
 	phase := map[string]interface{}{
 		"session_id": "test-session",
-		"phase_name": "D1",
+		"phase_name": "PROBLEM",
 		"status":     "completed",
 	}
 
@@ -278,7 +278,7 @@ func TestPublishPhase_GracefulDegradation(t *testing.T) {
 func TestPublishValidation_GracefulDegradation(t *testing.T) {
 	validation := map[string]interface{}{
 		"session_id":      "test-session",
-		"phase_name":      "D1",
+		"phase_name":      "PROBLEM",
 		"validation_type": "frontmatter",
 		"status":          "passed",
 	}
