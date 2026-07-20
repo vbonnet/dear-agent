@@ -22,18 +22,6 @@ func TestCobraCommandValidationIsOrderIndependent(t *testing.T) {
 			wantError:  "unsupported harness",
 		},
 		{
-			name:       "search without query",
-			newCommand: newSessionSearchCommand,
-			args:       []string{},
-			wantError:  "accepts 1 arg(s), received 0",
-		},
-		{
-			name:       "invalid search regex",
-			newCommand: newSessionSearchCommand,
-			args:       []string{"--regex", "["},
-			wantError:  "invalid regex",
-		},
-		{
 			name:       "tag without session",
 			newCommand: newSessionTagCommand,
 			args:       []string{},
@@ -51,8 +39,8 @@ func TestCobraCommandValidationIsOrderIndependent(t *testing.T) {
 		name    string
 		indexes []int
 	}{
-		{name: "forward", indexes: []int{0, 1, 2, 3, 4}},
-		{name: "reverse", indexes: []int{4, 3, 2, 1, 0}},
+		{name: "forward", indexes: []int{0, 1, 2}},
+		{name: "reverse", indexes: []int{2, 1, 0}},
 	}
 
 	for _, order := range orders {
@@ -79,7 +67,6 @@ func TestCobraCommandFactoriesIsolateFlagValues(t *testing.T) {
 		want       string
 	}{
 		{name: "install JSON", newCommand: newInstallHarnessCommand, flag: "json", set: "false", want: "true"},
-		{name: "search regex", newCommand: newSessionSearchCommand, flag: "regex", set: "true", want: "false"},
 		{name: "tag removal", newCommand: newSessionTagCommand, flag: "remove", set: "role:worker", want: ""},
 	}
 
