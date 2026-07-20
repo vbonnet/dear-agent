@@ -77,6 +77,35 @@ func TestLiveWorkerIDs(t *testing.T) {
 	}
 }
 
+// TestLiveWorkerIDsJSONFormat guards the dedup against `agm session list`'s
+// agent-mode JSON output (the default in the non-TTY dispatch context), where a
+// worker name follows a quote — `"name":"worker-ce-24f1"` — not whitespace. A
+// regex anchored only to whitespace saw 0 live workers, so the dispatcher
+// re-selected already-live beads and collision-aborted every tick.
+func TestLiveWorkerIDsJSONFormat(t *testing.T) {
+	// One line, as agm emits it: worker names embedded in JSON, alongside a
+	// supervisor session (vroom-overseer), a "subworker-" that must NOT match,
+	// and a non-name field ("harness":"worker-harness") that must NOT be misread
+	// as a live worker id (the structural parse reads only the name field).
+	line := `{"operation":"list_sessions","sessions":[{"name":"worker-ce-24f1","status":"active","harness":"worker-harness"},{"name":"worker-ce-py3x","status":"active"},{"name":"vroom-overseer","status":"active"},{"name":"subworker-ce-nope","status":"active"}]}`
+	ids := liveWorkerIDs([]string{line})
+	if !ids["ce-24f1"] {
+		t.Error("expected ce-24f1 to be live from JSON output")
+	}
+	if !ids["ce-py3x"] {
+		t.Error("expected ce-py3x to be live from JSON output")
+	}
+	if ids["ce-nope"] {
+		t.Error("subworker-ce-nope must NOT be read as a live worker")
+	}
+	if ids["harness"] {
+		t.Error(`"harness":"worker-harness" is a non-name field and must NOT be read as a live worker`)
+	}
+	if len(ids) != 2 {
+		t.Errorf("expected exactly 2 live worker ids from JSON, got %d: %v", len(ids), ids)
+	}
+}
+
 func TestNormalizeSessionID(t *testing.T) {
 	tests := []struct {
 		in   string

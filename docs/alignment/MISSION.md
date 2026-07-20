@@ -1,47 +1,61 @@
 ---
 title: Mission
-version: "1.0"
+version: "2.0"
 status: active
-date: "2026-04-05"
+date: "2026-07-19"
 adr_ref: docs/adr/ADR-002-vroom-execution-architecture
 context_ref: CONTEXT.md
 scope: dear-agent
-supervisors:
-  meta_orchestrator: "roadmap, prioritization, tech consistency (CTO); sole roadmap-add authority"
-  orchestrator: "work enqueue/dequeue, worker monitoring, steady progress (COO)"
-  overseer: "resource usage, leak detection, session cleanup (CRO)"
-task_ownership: "Primary (does it) / Secondary (verifies it) / Tertiary (unsticks them)"
 ---
 
 # Mission
 
-This project exists to make autonomous multi-agent orchestration **safe,
-auditable, and aligned** with its operator's intent.
+<!-- Last audited at: 2026-07-19 -->
+
+`MISSION.md` is the canonical source for this project's purpose and the
+VROOM/AGM ownership boundary.
 
 ## Purpose
 
-Provide a supervisory **execution framework — VROOM** (see
-[CONTEXT.md](../../CONTEXT.md) and
-[docs/adr/ADR-002](../adr/ADR-002-vroom-execution-architecture.md)) — where AI
-agents collaborate on software engineering tasks under structured governance.
-VROOM drives **AGM** (a tool) to run agent sessions. Every consequential
-decision is evaluated against declared values, traced in an append-only log,
-and subject to human-in-the-loop gates when confidence is insufficient.
+Make autonomous multi-agent software delivery safe, auditable, and aligned
+with the operator's intent. VROOM supplies the supervisory execution framework;
+AGM supplies the session runtime VROOM drives.
 
-## Scope
+## Ownership
 
-AGM governs the lifecycle of agent sessions: creation, dispatch, monitoring,
-verification, and archival. It does not own the work products themselves; it owns
-the process by which agents produce and validate those products.
+VROOM owns prioritization, dispatch decisions, supervision, acceptance
+criteria, and the final decision that work is acceptable. AGM owns session
+lifecycle and verification mechanics: session creation, process execution,
+messaging, monitoring telemetry, requested check execution, and archival.
 
-## Operating Principle
+This boundary separates decisions about **what work should happen and whether
+its result is acceptable** from mechanisms that **run and observe agent
+sessions**. AGM may report session or batch checks as `VERIFIED` when supplied
+assertions pass. That status is evidence for VROOM; it is not an independent
+acceptance decision.
 
-Prefer to ask a human rather than violate a higher-priority concern. Autonomy is
-valuable only after values compliance, goal alignment, safety invariants, and
-resource efficiency are satisfied --- in that lexicographic order.
+## Operating principles
 
-## Success Criterion
+- Preserve safety, permission boundaries, data integrity, and operator intent.
+- Record consequential decisions so another person can reconstruct the outcome.
+- Verify delivered work against explicit acceptance criteria.
+- Escalate when authority, evidence, or confidence is insufficient.
+- Prefer the least costly approach that preserves the preceding constraints.
 
-An operator can delegate a multi-step engineering task to AGM and trust that the
-system will either complete it within declared constraints or escalate clearly,
-with a full decision trail explaining why.
+These principles guide judgment; they are not a runtime scoring function or an
+ordered value evaluator. Executable guarantees belong in code, tests, and
+enforced policies.
+
+## Success
+
+An operator can delegate a multi-step engineering outcome and trust VROOM to
+either deliver it within declared constraints or escalate an actionable
+blocker, with AGM providing an auditable session lifecycle underneath.
+
+## Supporting documents
+
+- [VALUES.md](VALUES.md) — non-ranked decision constraints.
+- [GOALS.md](GOALS.md) — qualitative outcomes to improve.
+- [ADR-002](../adr/ADR-002-vroom-execution-architecture.md) — architecture and
+  trade-offs.
+- [CONTEXT.md](../../CONTEXT.md) — canonical vocabulary.
