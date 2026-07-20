@@ -325,7 +325,7 @@ func codexResumeSuccessShouldRequireProcessAndComposerReadiness(ctx context.Cont
 	composerWait := strings.Index(source, "runtime.waitForComposer")
 	composerFailure := strings.Index(source, "codex composer did not become ready")
 	if processWait < 0 || processFailure < processWait || composerWait < processFailure || composerFailure < composerWait {
-		return fmt.Errorf("Codex resume must fail unless process and composer readiness both succeed")
+		return fmt.Errorf("codex resume must fail unless process and composer readiness both succeed")
 	}
 	return nil
 }
@@ -339,7 +339,7 @@ func aFailedCodexResumeShouldRemoveOnlyItsNewlyCreatedTmuxSession(ctx context.Co
 		"if sendCommands",
 	} {
 		if !strings.Contains(source, required) {
-			return fmt.Errorf("Codex resume production path missing rollback guard %q", required)
+			return fmt.Errorf("codex resume production path missing rollback guard %q", required)
 		}
 	}
 	return nil
@@ -350,7 +350,7 @@ func codexActivityUpdatesShouldFollowResumeReadiness(ctx context.Context) error 
 	waitIndex := strings.Index(source, "runtime.wait(harnessName, health)")
 	updateIndex := strings.Index(source, "runtime.updateActivity(adapter, sessionID, manifestPath)")
 	if waitIndex < 0 || updateIndex < waitIndex {
-		return fmt.Errorf("Codex activity update must follow successful resume readiness")
+		return fmt.Errorf("codex activity update must follow successful resume readiness")
 	}
 	return nil
 }
