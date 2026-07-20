@@ -125,7 +125,7 @@ opencode:
 - Go watcher polls incidents and publishes to EventBus
 
 **Why Keep Scraping**:
-- Proven 0% failure rate in production (per ADR-0001)
+- Uses bounded, stateless capture-pane polling (per the tmux ADR-001)
 - Detects emergent behaviors (stuck states, crashes) that hooks don't cover
 - Resilient to Claude Code version changes
 
@@ -802,7 +802,7 @@ EventBus:
 - **AGM v4 Spec**: `research/sessions/2026-03-06-agm-v4-spec-review-8OX1U/AGM-V4-SPEC.md`
 - **Gemini Research**: `research/sessions/2026-03-06-agm-multi-agent-integration/GEMINI-RESEARCH.md`
 - **Analysis Document**: `research/sessions/2026-03-06-agm-multi-agent-integration/ANALYSIS.md`
-- **ADR-0001**: `main/agm/internal/tmux/ADR-0001-capture-pane-vs-control-mode.md`
+- **Tmux ADR-001**: `../internal/tmux/ADR-001-capture-pane-vs-control-mode.md`
 - **ADR-007**: `main/agm/docs/adr/ADR-007-hook-based-state-detection.md`
 - **OpenCode GitHub**: https://github.com/anomaly/opencode
 - **SSE Specification**: https://html.spec.whatwg.org/multipage/server-sent-events.html

@@ -149,6 +149,7 @@ Provide a production-ready CLI that:
   - `agm search [query]` - Search sessions by name/project path
   - `agm session list --all` - Include archived sessions
   - `agm session list --json` - Machine-readable output
+  - `agm session list --limit <n> --offset <n>` - Deterministic pagination for large inventories
   - `agm admin get-uuid [identifier]` - Get session UUID
   - `agm admin get-session-name [identifier]` - Get session name
 - **Search Features:**
@@ -503,7 +504,7 @@ Provide a production-ready CLI that:
   - Hook tests: 18 sub-tests covering all patterns and edge cases
 - **Documentation:**
   - **User guide:** `docs/TEST-SESSION-GUIDE.md` (comprehensive examples, comparison table)
-  - **ADR:** `cmd/agm/ADR-007-test-session-isolation.md` (architectural decisions)
+  - **ADR:** `cmd/agm/ADR-006-test-isolation-enforcement.md` (isolation boundary)
   - **Retrospective:** `vbonnet/engram-research` `retrospectives/RETROSPECTIVE-TEST-SESSION-CLEANUP.md` (implementation learnings)
   - **README:** Updated with test session quick start section
   - **CHANGELOG:** v2.4 release notes with feature details

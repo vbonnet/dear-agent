@@ -80,12 +80,12 @@ func (cb *CircuitBreaker) Capabilities() Capabilities {
 // Generate routes requests based on circuit state.
 func (cb *CircuitBreaker) Generate(ctx context.Context, req *GenerateRequest) (*GenerateResponse, error) {
 	if cb.canProceed() {
-		resp, err := cb.primary.Generate(ctx, req)
+		resp, err := generateNonNil(ctx, cb.primary, req)
 		if err != nil {
 			cb.recordFailure()
 			// If circuit just opened and we have a fallback, try it
 			if cb.fallback != nil && cb.State() == CBOpen {
-				return cb.fallback.Generate(ctx, req)
+				return generateNonNil(ctx, cb.fallback, req)
 			}
 			return nil, err
 		}
@@ -95,11 +95,19 @@ func (cb *CircuitBreaker) Generate(ctx context.Context, req *GenerateRequest) (*
 
 	// Circuit is open
 	if cb.fallback != nil {
-		return cb.fallback.Generate(ctx, req)
+		return generateNonNil(ctx, cb.fallback, req)
 	}
 
 	return nil, fmt.Errorf("circuit breaker open for provider %q: %d consecutive failures, cooldown %s",
 		cb.primary.Name(), cb.failureThreshold, cb.cooldown)
+}
+
+func generateNonNil(ctx context.Context, provider Provider, req *GenerateRequest) (*GenerateResponse, error) {
+	response, err := provider.Generate(ctx, req)
+	if err == nil && response == nil {
+		return nil, fmt.Errorf("provider %q returned a nil response", provider.Name())
+	}
+	return response, err
 }
 
 func (cb *CircuitBreaker) canProceed() bool {

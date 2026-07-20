@@ -23,6 +23,8 @@ callers.
 
 **LLMP-06** When OpenRouter capabilities advertise Nemotron or Qwen defaults, the system shall publish provider-canonical model identifiers that correspond to routable model pages.
 
+**LLMP-07** When a circuit-breaker primary or fallback provider returns a nil response without an error, the system shall convert it to an explicit provider error rather than returning a successful nil response.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/model_family_parity.feature`

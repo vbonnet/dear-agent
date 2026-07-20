@@ -18,6 +18,8 @@ func getTestAdapter(t *testing.T) *dolt.Adapter {
 	}
 
 	// Set up test environment
+	t.Setenv("ENGRAM_TEST_MODE", "1")
+	t.Setenv("ENGRAM_TEST_WORKSPACE", "test")
 	t.Setenv("WORKSPACE", "test")
 	t.Setenv("DOLT_PORT", "3307")
 	os.Unsetenv("DOLT_DATABASE") // Let it default to workspace name
