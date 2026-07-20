@@ -42,6 +42,10 @@ func Init(enabled bool, sessionName string) error {
 	if err := os.MkdirAll(debugDir, 0700); err != nil {
 		return fmt.Errorf("failed to create debug dir: %w", err)
 	}
+	// #nosec G302 -- an owner-only directory needs traversal permission.
+	if err := os.Chmod(debugDir, 0700); err != nil {
+		return fmt.Errorf("failed to secure debug dir: %w", err)
+	}
 
 	// Create log file with timestamp
 	timestamp := time.Now().Format("20060102-150405")
