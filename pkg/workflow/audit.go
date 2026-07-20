@@ -10,7 +10,7 @@ import (
 // NodeState is the canonical lifecycle state of a single node within a
 // run. Mirrors the CHECK constraint on the nodes table in schema.sql.
 //
-// State machine (see ROADMAP.md):
+// State machine (see docs/workflow-engine.md):
 //
 //	pending → running → succeeded
 //	                  → failed

@@ -31,6 +31,10 @@ const (
 	ErrCodeOrphanedMount
 	// ErrCodeFileSystemNotSupported indicates the filesystem type is not supported
 	ErrCodeFileSystemNotSupported
+	// ErrCodeNoLowerDirs indicates sandbox lower-dir resolution found no
+	// configured repos and fell back to an unsafe directory (e.g. $HOME or
+	// a non-git-repo) instead of a real workspace.
+	ErrCodeNoLowerDirs
 )
 
 // ErrorCategory categorizes errors for recovery strategies.
@@ -135,7 +139,7 @@ func errorCodeCategory(code ErrorCode) ErrorCategory {
 		return CategoryPermission
 	case ErrCodeRepoNotFound, ErrCodeSandboxNotFound, ErrCodeOrphanedMount:
 		return CategoryState
-	case ErrCodeInvalidConfig:
+	case ErrCodeInvalidConfig, ErrCodeNoLowerDirs:
 		return CategoryConfiguration
 	case ErrCodeResourceExhausted, ErrCodeCleanupFailed:
 		return CategoryResource
@@ -234,6 +238,19 @@ func NewSandboxNotFoundError(sandboxID string) *Error {
 	return WithRecoveryHint(
 		WithDiagnostic(err, "mount | grep overlay"),
 		fmt.Sprintf("The sandbox '%s' does not exist or has already been destroyed. List active sandboxes to verify.", sandboxID),
+	)
+}
+
+// NewNoSandboxLowerDirsError creates an error for when sandbox lower-dir
+// resolution finds no configured repos and would otherwise silently fall
+// back to cloning an unsafe directory (workDir), such as $HOME or a
+// non-git-repo. reason describes why workDir was rejected as a fallback.
+func NewNoSandboxLowerDirsError(workDir, reason string) *Error {
+	err := NewError(ErrCodeNoLowerDirs,
+		fmt.Sprintf("refusing to clone %s as sandbox lower dir: %s", workDir, reason))
+	return WithRecoveryHint(
+		WithDiagnostic(err, "agm config get sandbox.repos"),
+		fmt.Sprintf("Configure sandbox.repos in agm config, or run agm session new with an explicit --directory pointing at a real repository. Refusing to clone %s prevents an unbounded copy of the wrong directory tree.", workDir),
 	)
 }
 

@@ -20,9 +20,9 @@ type Source interface {
 }
 
 // MarkdownSource parses GitHub-flavored markdown table rows from one or
-// more files. Column meaning is resolved by normalized header name, not
-// position, so it reads both the 7-column BACKLOG.md layout and the
-// 4-column ROADMAP.md "| id | Priority | Title | Slot |" layout.
+// more operator-supplied files. Column meaning is resolved by normalized
+// header name, not position, so it reads common 7-column and 4-column table
+// layouts.
 type MarkdownSource struct {
 	Paths []string
 }
@@ -38,8 +38,8 @@ func (m *MarkdownSource) Name() string {
 }
 
 // Items implements Source. Missing files are skipped (not an error) so a
-// caller can pass both BACKLOG.md and ROADMAP.md and still work in a repo
-// that only has one. A file that exists but cannot be read is an error.
+// caller can pass multiple files and still work when one is absent. A file
+// that exists but cannot be read is an error.
 func (m *MarkdownSource) Items(_ context.Context) ([]Item, error) {
 	var all []Item
 	for _, p := range m.Paths {

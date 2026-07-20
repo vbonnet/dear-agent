@@ -7,7 +7,7 @@
 //	workflow-status -db ./runs.db --json <run-id>
 //	workflow-status -db ./runs.db --watch 2 <run-id>
 //
-// Output matches the spec in ROADMAP.md ("workflow status answers
+// Output matches the spec in docs/workflow-engine.md ("workflow status answers
 // 'what happened?' in under a second"). Phase 0 ships the read path; the
 // renderer is intentionally plain text — a future TUI is out of scope.
 package main

@@ -346,6 +346,6 @@ All tests are documented, maintainable, and follow Go best practices.
 
 ## Related Documentation
 
-- [TEST-PLAN.md](../../../TEST-PLAN.md) - Overall testing strategy
+- [Historical test plans](https://github.com/vbonnet/engram-research/tree/main/audits/dear-agent-temporal-docs-2026-07-18) - archived testing strategy
 - [README.md](./README.md) - Lifecycle test suite overview
 - [QUICK_START.md](./QUICK_START.md) - Quick start guide

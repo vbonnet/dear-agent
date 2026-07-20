@@ -7,6 +7,7 @@ as `*.ai.md` (the policy) + `*.why.md` (reasoning + real failure cases) pairs.
 They are the source of truth for how every agent — on every harness — works here:
 
 - [broken-windows](docs/policies/broken-windows.ai.md) — delete deprecated code completely, in the same change; never leave two versions coexisting.
+- [harness-hygiene](docs/policies/harness-hygiene.ai.md) — earn every mechanism continuously; tell agents WHAT+WHY not HOW; page over-fits now, defer over-harness consolidation; pare with the six verdicts, never "delete because it's long".
 - [dear-retro](docs/policies/dear-retro.ai.md) — every systemic defect gets a DEAR retrospective; a fix without a retro recurs.
 - [definition-of-done](docs/policies/definition-of-done.ai.md) — done = merged to main, deployed, verified. Not "PR open".
 - [wayfinder-v2-canonical](docs/policies/wayfinder-v2-canonical.ai.md) — Wayfinder V2 (9 phases) is the only model; V1 is dead.
