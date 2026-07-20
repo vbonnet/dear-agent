@@ -8,7 +8,7 @@
 
 **ADRLINT-02** When ADR inventory is built, the system shall inspect every Git-tracked numbered record and aggregate path through the caller's context without allowing an interactive Git prompt.
 
-**ADRLINT-03** If an ADR-shaped path is neither governed nor excluded, the system shall report an ungoverned-path violation.
+**ADRLINT-03** If an ADR-shaped path, including a canonical three- or four-digit record, is neither governed nor excluded, the system shall report an ungoverned-path violation.
 
 **ADRLINT-04** When a numbered record is validated, the system shall require matching filename and H1 identities, one normalized primary status, and a scope-unique identity.
 

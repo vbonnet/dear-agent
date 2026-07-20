@@ -189,7 +189,7 @@ func trackedADRFiles(ctx context.Context, root string) ([]string, error) {
 
 func adrShapedPath(name string) bool {
 	base := filepath.Base(name)
-	return base == "ADR.md" || adrLikeFilename(base)
+	return base == "ADR.md" || governedRecordFilename(base)
 }
 
 func adrLikeFilename(name string) bool {

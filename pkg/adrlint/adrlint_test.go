@@ -60,6 +60,7 @@ Status: Accepted
 	writeADRFile(t, repo, "pkg/hash/ADR.md", "# Hash decisions\n\nStatus: Accepted\n")
 	writeADRFile(t, repo, "other/ADR-007-undeclared.md", recordFixture("007", "Ungoverned", "Accepted"))
 	writeADRFile(t, repo, "other/008-bare-undeclared.md", recordFixture("008", "Bare ungoverned", "Accepted"))
+	writeADRFile(t, repo, "other/1234-choice.md", recordFixture("1234", "Four digit ungoverned", "Accepted"))
 	gitADR(t, repo, "add", ".")
 	gitADR(t, repo, "commit", "-m", "broken fixture")
 
@@ -85,6 +86,9 @@ Status: Accepted
 	}
 	if !report.Blocking() {
 		t.Fatal("broken report should block")
+	}
+	if !hasPathReason(report.Violations, "other/1234-choice.md", "ungoverned ADR path") {
+		t.Fatalf("canonical four-digit record escaped ungoverned detection: %#v", report.Violations)
 	}
 }
 
@@ -271,6 +275,8 @@ func policyFixture() string {
   exclusions:
     - match: "**/testdata/**"
       reason: generated fixtures
+    - match: "docs/releases/**"
+      reason: dated release notes are not architectural decisions
 `
 }
 
@@ -460,6 +466,15 @@ func gitADR(t *testing.T, repo string, args ...string) {
 func hasReason(violations []Violation, fragment string) bool {
 	for _, violation := range violations {
 		if strings.Contains(violation.Reason, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasPathReason(violations []Violation, path, fragment string) bool {
+	for _, violation := range violations {
+		if violation.Path == path && strings.Contains(violation.Reason, fragment) {
 			return true
 		}
 	}
