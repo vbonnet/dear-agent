@@ -16,8 +16,8 @@ func indexByID(items []Item) map[string]Item {
 }
 
 func TestMarkdownSourceItems(t *testing.T) {
-	src := NewMarkdownSource(filepath.Join("testdata", "sample_backlog.md"))
-	if !strings.Contains(src.Name(), "sample_backlog.md") {
+	src := NewMarkdownSource(filepath.Join("testdata", "sample.md"))
+	if !strings.Contains(src.Name(), "sample.md") {
 		t.Errorf("Name() = %q", src.Name())
 	}
 	items, err := src.Items(context.Background())
@@ -65,21 +65,16 @@ func TestMarkdownSourceItems(t *testing.T) {
 	}
 }
 
-func TestMarkdownSourceMissingFileSkipped(t *testing.T) {
-	real := filepath.Join("testdata", "sample_backlog.md")
+func TestMarkdownSourceRejectsMissingExplicitFile(t *testing.T) {
+	real := filepath.Join("testdata", "sample.md")
 	src := NewMarkdownSource("does/not/exist.md", real)
-	items, err := src.Items(context.Background())
-	if err != nil {
-		t.Fatalf("missing file should be skipped, got err: %v", err)
-	}
-	if len(items) != 12 {
-		t.Errorf("len = %d, want 12 (missing file ignored)", len(items))
+	if items, err := src.Items(context.Background()); err == nil || items != nil {
+		t.Fatalf("mixed missing source: items=%v err=%v, want nil items and error", items, err)
 	}
 
 	only := NewMarkdownSource("nope.md")
-	items, err = only.Items(context.Background())
-	if err != nil || len(items) != 0 {
-		t.Errorf("all-missing: items=%d err=%v, want 0 items nil err", len(items), err)
+	if items, err := only.Items(context.Background()); err == nil || items != nil {
+		t.Fatalf("all-missing source: items=%v err=%v, want nil items and error", items, err)
 	}
 }
 

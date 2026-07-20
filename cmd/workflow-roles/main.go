@@ -1,5 +1,4 @@
-// Command workflow-roles inspects the role registry. Three subcommands
-// matching the docs/workflow-engine.md "roles list / describe / validate" surface:
+// Command workflow-roles inspects the role registry through three subcommands:
 //
 //	workflow-roles list                         # one role per line
 //	workflow-roles describe research            # full JSON dump of one role

@@ -24,7 +24,7 @@
 // The check is deliberately just file hashing — no builds, no network beyond
 // an optional `git show`. It is fast enough to run on every daily ops audit
 // and as the "deployed" gate of the bead lifecycle (see
-// docs/drift-detection-plan.md).
+// cmd/drift-check/README.md).
 package drift
 
 import (
