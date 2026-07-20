@@ -133,7 +133,6 @@ func TestSubsystemADRDirectoriesHaveUniqueIndexedLifecycle(t *testing.T) {
 
 	root := repoRoot(t)
 	for _, scope := range scopes {
-		scope := scope
 		t.Run(scope.relativeDir, func(t *testing.T) {
 			assertSubsystemADRScope(t, root, scope)
 		})
