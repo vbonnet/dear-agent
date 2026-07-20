@@ -228,6 +228,23 @@ func TestWithWorktreeLockSerializesConcurrentOwners(t *testing.T) {
 	if state.locked {
 		t.Fatalf("first transaction lock survived release: %+v", state)
 	}
+	secondEntered := false
+	if err := WithWorktreeLock(worktree, "second transaction", func() error {
+		secondEntered = true
+		state, inspectErr := inspectWorktreeLock(worktree)
+		if inspectErr != nil {
+			return inspectErr
+		}
+		if !state.locked || !strings.Contains(state.reason, "second transaction") {
+			t.Fatalf("second owner lock after serialized release = %+v", state)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("second transaction after release = %v", err)
+	}
+	if !secondEntered {
+		t.Fatal("second transaction did not enter after serialized release")
+	}
 }
 
 func TestSafePROwnedReasonRequiresGeneratedOwnershipShape(t *testing.T) {

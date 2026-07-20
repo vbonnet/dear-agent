@@ -53,6 +53,8 @@ cost and intent remain traceable.
 
 **SAFEPR-19** When Git returns linked-worktree or lock metadata with LF or CRLF line endings, the system shall parse the same canonical paths, lock state, and ownership reason.
 
+**SAFEPR-20** When safe-pr releases an owned Git worktree lock, the system shall perform the ownership inspection and unlock while still holding the per-worktree operating-system transaction lock.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`

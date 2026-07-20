@@ -45,6 +45,9 @@ func WithWorktreeLock(dir, reason string, action func() error) error {
 	if err != nil {
 		return err
 	}
+	// Acquisition, the caller's action, ownership verification, and release all
+	// execute inside this operating-system critical section. A second safe-pr
+	// owner cannot replace the Git lock between release inspection and unlock.
 	return withWorktreeTransactionLock(worktree.gitDir, worktreeCommandTimeout, func() error {
 		return withGitWorktreeLock(worktree.root, reason, action)
 	})

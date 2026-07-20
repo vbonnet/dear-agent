@@ -18,6 +18,7 @@ import (
 	"github.com/cucumber/godog"
 	"github.com/vbonnet/dear-agent/agm/internal/procguard"
 	"github.com/vbonnet/dear-agent/internal/safepr"
+	wayfindersandbox "github.com/vbonnet/dear-agent/wayfinder/pkg/sandbox"
 )
 
 type localDevGuardrailState struct {
@@ -43,6 +44,8 @@ type localDevGuardrailState struct {
 	transactionErr      error
 	lockedInPreflight   bool
 	lockedInPRCreate    bool
+	wayfinderCleanupErr error
+	worktreePreserved   bool
 }
 
 type localDevGuardrailStateKey struct{}
@@ -83,6 +86,9 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^safe-pr protects a "([^"]*)" preflight and PR creation transaction$`, safePRProtectsTransaction)
 	ctx.Step(`^the worktree should be protected during preflight and PR creation$`, worktreeShouldBeProtectedDuringTransaction)
 	ctx.Step(`^the "([^"]*)" lock ownership should remain after the transaction$`, lockOwnershipShouldRemainAfterTransaction)
+	ctx.Step(`^Wayfinder cleanup overlaps a protected safe-pr transaction$`, wayfinderCleanupOverlapsProtectedTransaction)
+	ctx.Step(`^Wayfinder should preserve the protected worktree and reject cleanup$`, wayfinderShouldPreserveProtectedWorktree)
+	ctx.Step(`^Wayfinder should remove the worktree after the safe-pr transaction$`, wayfinderShouldRemoveWorktreeAfterTransaction)
 	ctx.Step(`^local, affected integration, and required CI Go test timeouts are configured$`, repositoryGoTestTimeoutsAreConfigured)
 	ctx.Step(`^AGM validates Go test timeout parity$`, agmValidatesGoTestTimeoutParity)
 	ctx.Step(`^all repository Go test timeouts should match$`, repositoryGoTestTimeoutsShouldMatch)
@@ -106,7 +112,7 @@ func safePRLinkedWorktreeWithLockOwnership(ctx context.Context, initial string) 
 	}
 	state.worktreeBase = base
 	state.worktreeRepo = filepath.Join(base, "repo")
-	state.worktreePath = filepath.Join(base, "worktree")
+	state.worktreePath = filepath.Join(state.worktreeRepo, ".worktrees", "safe-pr-bdd")
 	state.initialLockReason = initialReason
 	for _, args := range [][]string{
 		{"init", "-q", "-b", "main", state.worktreeRepo},
@@ -133,6 +139,53 @@ func safePRLinkedWorktreeWithLockOwnership(ctx context.Context, initial string) 
 		_, err = runSafePRBDDGit(ctx, "-C", state.worktreeRepo, "worktree", "lock", "--reason", state.initialLockReason, state.worktreePath)
 	}
 	return err
+}
+
+func wayfinderCleanupOverlapsProtectedTransaction(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	state.transactionErr = safepr.WithWorktreeLock(state.worktreePath, "BDD cleanup overlap", func() error {
+		state.wayfinderCleanupErr = wayfindersandbox.NewGitWorktreeManager().RemoveWorktree("safe-pr-bdd", state.worktreeRepo)
+		_, statErr := os.Stat(state.worktreePath)
+		state.worktreePreserved = statErr == nil
+		return nil
+	})
+	return state.transactionErr
+}
+
+func wayfinderShouldPreserveProtectedWorktree(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.wayfinderCleanupErr == nil {
+		return errors.New("wayfinder cleanup unexpectedly succeeded for a protected worktree")
+	}
+	if !strings.Contains(state.wayfinderCleanupErr.Error(), "preserving") {
+		return fmt.Errorf("wayfinder cleanup: %w; want protected-worktree rejection", state.wayfinderCleanupErr)
+	}
+	if !state.worktreePreserved {
+		return errors.New("wayfinder removed the safe-pr-protected worktree")
+	}
+	return nil
+}
+
+func wayfinderShouldRemoveWorktreeAfterTransaction(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if err := wayfindersandbox.NewGitWorktreeManager().RemoveWorktree("safe-pr-bdd", state.worktreeRepo); err != nil {
+		return fmt.Errorf("wayfinder cleanup after safe-pr release: %w", err)
+	}
+	if _, err := os.Stat(state.worktreePath); err == nil {
+		return errors.New("wayfinder worktree still exists after cleanup")
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("wayfinder worktree after cleanup: %w; want not exist", err)
+	}
+	return nil
 }
 
 func safePRBDDInitialLockReason(initial string) (string, error) {
@@ -254,6 +307,9 @@ func parseSafePRBDDLockState(worktreePath, out string) (bool, string, error) {
 }
 
 func cleanupSafePRBDDWorktree(state *localDevGuardrailState) error {
+	if _, err := os.Stat(state.worktreePath); os.IsNotExist(err) {
+		return os.RemoveAll(state.worktreeBase)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	locked, _, inspectErr := safePRBDDLockState(ctx, state)
