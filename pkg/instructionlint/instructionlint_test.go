@@ -232,6 +232,23 @@ func TestCheckRepositoryGovernsSkillAgentMetadata(t *testing.T) {
 	}
 }
 
+func TestFoldedYAMLScalarsPreservePhysicalCommandLines(t *testing.T) {
+	source := []byte("interface:\n  default_prompt: >\n    Review the current state first.\n    gh pr merge 123\n")
+	segments, err := parseYAMLSegments(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rules []string
+	for _, segment := range segments {
+		for _, violation := range evaluateSegment("agent.yaml", segment) {
+			rules = append(rules, violation.Rule)
+		}
+	}
+	if !reflect.DeepEqual(rules, []string{"raw-gh-merge"}) {
+		t.Fatalf("folded scalar rules = %v, want raw-gh-merge", rules)
+	}
+}
+
 func TestRuleViolationsTeachCanonicalReplacements(t *testing.T) {
 	segments := []Segment{
 		{Kind: SegmentProse, Line: 1, Text: "Create W0-charter.md before D1."},
@@ -267,19 +284,41 @@ func TestRuleViolationsTeachCanonicalReplacements(t *testing.T) {
 		{Kind: SegmentShell, Line: 31, Text: "gh pr reopen 123"},
 		{Kind: SegmentShell, Line: 32, Text: "merged=$(gh pr merge 123)"},
 		{Kind: SegmentShell, Line: 33, Text: "ready=$(bd ready)"},
+		{Kind: SegmentShell, Line: 34, Text: `agm escalate --action="create PR" --reason blocked`},
 	}
 
 	var got []Violation
 	for _, segment := range segments {
 		got = append(got, evaluateSegment("AGENTS.md", segment)...)
 	}
-	if len(got) != 30 {
-		t.Fatalf("violations = %v, want 30", got)
+	if len(got) != 31 {
+		t.Fatalf("violations = %v, want 31", got)
 	}
 	for _, item := range got {
 		if item.Rule == "" || item.Replacement == "" {
 			t.Fatalf("violation lacks actionable rule/replacement: %+v", item)
 		}
+	}
+}
+
+func TestExecLaunchedCommandsRemainPolicyVisible(t *testing.T) {
+	commands := []string{
+		"exec gh pr merge 123",
+		"exec -a delivery git push origin main",
+		"exec -cl bd ready",
+	}
+	var rules []string
+	for _, command := range commands {
+		for _, segment := range parseSegments([]byte("```text\n" + command + "\n```\n")) {
+			for _, violation := range evaluateSegment("AGENTS.md", segment) {
+				rules = append(rules, violation.Rule)
+			}
+		}
+	}
+	sort.Strings(rules)
+	want := []string{"bare-beads", "raw-gh-merge", "raw-git-push"}
+	if !reflect.DeepEqual(rules, want) {
+		t.Fatalf("exec-launched rules = %v, want %v", rules, want)
 	}
 }
 

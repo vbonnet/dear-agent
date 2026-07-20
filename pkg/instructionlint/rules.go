@@ -31,6 +31,14 @@ var instructionRules = []rule{
 		normalized := shellText(text)
 		return strings.Contains(normalized, "safe-pr") && strings.Contains(normalized, "--emergency")
 	}},
+	{id: "agm-escalate-obsolete-flags", replacement: "agm escalate ask --kind blocked-action --context <reason> <question>", applies: commandSegment, detect: func(text string) bool {
+		return anyCommand(text, func(fields []string) bool {
+			return commandHasPrefix(fields, "agm", "escalate") && slices.ContainsFunc(fields, func(field string) bool {
+				return field == "--action" || strings.HasPrefix(field, "--action=") ||
+					field == "--reason" || strings.HasPrefix(field, "--reason=")
+			})
+		})
+	}},
 	{id: "agm-health-json", replacement: "agm -o json session health <name>", applies: commandSegment, detect: func(text string) bool {
 		return anyCommand(text, func(fields []string) bool {
 			return commandHasPrefix(fields, "agm", "session", "health") && slices.Contains(fields, "--json")
@@ -392,6 +400,8 @@ func stripCommandPrefixes(fields []string) []string {
 			})
 		case fields[0] == "command" || fields[0] == "nohup":
 			fields = stripLauncherOptions(fields[1:], nil)
+		case fields[0] == "exec":
+			fields = stripLauncherOptions(fields[1:], map[string]bool{"-a": true})
 		default:
 			return fields
 		}

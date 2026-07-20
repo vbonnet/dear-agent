@@ -461,5 +461,5 @@ unstampable); --title is required. Every run appends a JSONL audit record to
 ~/.local/state/dear-agent/safe-pr.log.
 
 If no wayfinder session exists and no approved path is available, escalate:
-  agm escalate --action "create PR" --reason "<why no session exists>"
+  agm escalate ask --kind blocked-action --context "<why no session exists>" "create PR"
 `

@@ -26,7 +26,7 @@ You are trying to bypass a safety gate with ${flag}.
 Approved path: ${approved_path}
 
 If no approved path exists for your situation, escalate via:
-  agm escalate --action \"<describe what you need>\" --reason \"<why this flag was needed>\"
+  agm escalate ask --kind blocked-action --context \"<why this flag was needed>\" \"<describe what you need>\"
 Every escalation creates a bead and routes up the VROOM chain for human review."
   jq -cn --arg m "$msg" \
     '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:$m},permissionDecision:"deny",denialReason:$m}'

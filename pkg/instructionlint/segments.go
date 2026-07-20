@@ -313,7 +313,7 @@ func parseYAMLSegments(source []byte) ([]Segment, error) {
 	var visit func(*yaml.Node)
 	visit = func(node *yaml.Node) {
 		if node.Kind == yaml.ScalarNode && node.Tag == "!!str" {
-			segments = append(segments, yamlScalarSegments(node)...)
+			segments = append(segments, yamlScalarSegments(source, node)...)
 		}
 		segments = appendYAMLCommentSegments(segments, seenComments, node.HeadComment, node.Line-commentLineCount(node.HeadComment))
 		segments = appendYAMLCommentSegments(segments, seenComments, node.LineComment, node.Line)
@@ -326,7 +326,10 @@ func parseYAMLSegments(source []byte) ([]Segment, error) {
 	return segments, nil
 }
 
-func yamlScalarSegments(node *yaml.Node) []Segment {
+func yamlScalarSegments(source []byte, node *yaml.Node) []Segment {
+	if node.Style == yaml.FoldedStyle || node.Style == yaml.LiteralStyle {
+		return yamlBlockScalarSegments(source, node)
+	}
 	var segments []Segment
 	for offset, raw := range strings.Split(node.Value, "\n") {
 		value := strings.TrimSpace(raw)
@@ -343,6 +346,39 @@ func yamlScalarSegments(node *yaml.Node) []Segment {
 		segments = appendEmbeddedProseSegments(segments, value, line)
 	}
 	return segments
+}
+
+func yamlBlockScalarSegments(source []byte, node *yaml.Node) []Segment {
+	lines := strings.Split(string(source), "\n")
+	header := node.Line - 1
+	if header < 0 || header >= len(lines) {
+		return nil
+	}
+	headerIndent := leadingSpaces(lines[header])
+	var segments []Segment
+	for index := header + 1; index < len(lines); index++ {
+		raw := lines[index]
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
+		if leadingSpaces(raw) <= headerIndent {
+			break
+		}
+		line := index + 1
+		kind := SegmentProse
+		if !allowedBashTool.MatchString(value) && commandShaped(value) {
+			kind = SegmentShell
+		}
+		segments = append(segments, Segment{Kind: kind, Line: line, Text: value})
+		segments = append(segments, bashToolSegments(value, line)...)
+		segments = appendEmbeddedProseSegments(segments, value, line)
+	}
+	return segments
+}
+
+func leadingSpaces(value string) int {
+	return len(value) - len(strings.TrimLeft(value, " "))
 }
 
 func bashToolSegments(value string, line int) []Segment {
@@ -494,7 +530,7 @@ func commandShaped(value string) bool {
 		}
 		command := executableBase(strings.TrimLeft(fields[0], "("))
 		switch command {
-		case "agm", "bash", "bd", "command", "dash", "env", "gh", "git", "gtimeout", "ksh", "nohup", "safe-merge", "safe-pr", "safe-push", "sh", "sudo", "timeout", "zsh":
+		case "agm", "bash", "bd", "command", "dash", "env", "exec", "gh", "git", "gtimeout", "ksh", "nohup", "safe-merge", "safe-pr", "safe-push", "sh", "sudo", "timeout", "zsh":
 			return true
 		case "if", "while", "until", "then", "do", "!":
 			return true
