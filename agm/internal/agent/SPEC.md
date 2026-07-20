@@ -33,6 +33,8 @@ compatibility.
 
 **AGP-13** When AGM validates active harness adapter conformance, the system shall run the same non-I/O adapter contract across every active harness and require canonical identity, non-empty version, sane capabilities, default model coverage, test model coverage, model aliases, and model family coverage.
 
+**AGP-39** When AGM resolves the `codex-cli` harness, the system shall use `CodexCLIAdapter` and shall not route Codex terminal status through the OpenAI API adapter.
+
 ### Model Families
 
 **AGP-06** When AGM enumerates supported model families, the system shall return Anthropic, OpenAI, Gemini, GLM, DeepSeek, Nemotron, and Qwen in priority order.

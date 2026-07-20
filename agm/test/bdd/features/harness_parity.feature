@@ -125,6 +125,12 @@ Feature: Harness parity
     When AGM validates active harness adapter conformance
     Then every active harness adapter should satisfy the shared conformance suite
 
+  Scenario: Codex CLI and the OpenAI API adapter remain separate
+    Given AGM Codex and OpenAI adapter sources
+    When AGM validates Codex adapter routing
+    Then Codex factory should use the Codex CLI adapter
+    And OpenAI API status should not inspect Codex tmux state
+
   Scenario Outline: Active harness launch commands preserve startup mode and persistence
     Given active harness "<harness>" uses startup mode "<mode>"
     When AGM builds the harness launch command with persistence enabled

@@ -297,6 +297,8 @@ creation, and terminal state detection.
 - Gemini CLI remains deprecated compatibility, not active parity.
 - Active harness factories use canonical names.
 - Active harness adapters satisfy the shared non-I/O conformance suite.
+- The Codex factory uses `CodexCLIAdapter`, while the OpenAI API adapter
+  remains independent of Codex tmux state.
 - Active harness launch commands preserve native startup mode and persistence.
 - Imported AGY conversations preserve unknown native-model provenance through
   the real storage adapter instead of acquiring Claude's legacy default, and

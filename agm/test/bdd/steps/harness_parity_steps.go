@@ -225,6 +225,10 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^current-tmux AGY creation should fail before launch with detached guidance$`, currentTmuxAGYCreationShouldFailBeforeLaunchWithDetachedGuidance)
 	ctx.Step(`^AGM validates active harness adapter conformance$`, agmValidatesActiveHarnessAdapterConformance)
 	ctx.Step(`^every active harness adapter should satisfy the shared conformance suite$`, everyActiveHarnessAdapterShouldSatisfySharedConformanceSuite)
+	ctx.Step(`^AGM Codex and OpenAI adapter sources$`, agmCodexAndOpenAIAdapterSources)
+	ctx.Step(`^AGM validates Codex adapter routing$`, agmValidatesCodexAdapterRouting)
+	ctx.Step(`^Codex factory should use the Codex CLI adapter$`, codexFactoryShouldUseCodexCLIAdapter)
+	ctx.Step(`^OpenAI API status should not inspect Codex tmux state$`, openAIAPIStatusShouldNotInspectCodexTmuxState)
 	ctx.Step(`^AGM validates the pane capture invocation$`, agmValidatesPaneCaptureInvocation)
 	ctx.Step(`^pane capture should use the canonical AGM tmux socket$`, paneCaptureShouldUseCanonicalAGMTmuxSocket)
 	ctx.Step(`^pane capture should normalize the session target$`, paneCaptureShouldNormalizeSessionTarget)
@@ -1917,6 +1921,41 @@ func everyActiveHarnessAdapterShouldSatisfySharedConformanceSuite(ctx context.Co
 		messages = append(messages, finding.Error())
 	}
 	return fmt.Errorf("active harness conformance failed:\n%s", strings.Join(messages, "\n"))
+}
+
+func agmCodexAndOpenAIAdapterSources() error {
+	return nil
+}
+
+func agmValidatesCodexAdapterRouting() error {
+	return nil
+}
+
+func codexFactoryShouldUseCodexCLIAdapter() error {
+	data, err := os.ReadFile(filepath.Join(packageSpecBDDRepoRoot(), "agm", "internal", "agent", "factory.go"))
+	if err != nil {
+		return fmt.Errorf("read agent factory: %w", err)
+	}
+	source := string(data)
+	if !strings.Contains(source, `"codex-cli": func() (Agent, error) {`) ||
+		!strings.Contains(source, "return NewCodexCLIAdapter(nil)") {
+		return fmt.Errorf("codex-cli factory does not use CodexCLIAdapter")
+	}
+	return nil
+}
+
+func openAIAPIStatusShouldNotInspectCodexTmuxState() error {
+	data, err := os.ReadFile(filepath.Join(packageSpecBDDRepoRoot(), "agm", "internal", "agent", "openai_adapter.go"))
+	if err != nil {
+		return fmt.Errorf("read OpenAI adapter: %w", err)
+	}
+	source := string(data)
+	for _, forbidden := range []string{"internal/tmux", "IsCodexIdle"} {
+		if strings.Contains(source, forbidden) {
+			return fmt.Errorf("OpenAI API adapter still depends on Codex tmux state through %q", forbidden)
+		}
+	}
+	return nil
 }
 
 func agmRuntimeHelperCommandIsConfigured(ctx context.Context, command string) error {

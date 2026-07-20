@@ -57,4 +57,4 @@ reported as adapter-contract coverage.
 
 - [Contract specification](SPEC.md)
 - [Integration parity suite](../integration/AGENT_PARITY_TEST_SUITE.md)
-- [Test helpers](../helpers/README.md)
+- [Integration test guide](../integration/README.md)
