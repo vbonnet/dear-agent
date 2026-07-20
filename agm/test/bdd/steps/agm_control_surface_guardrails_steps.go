@@ -1,10 +1,13 @@
 package steps
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/cucumber/godog"
 )
@@ -12,6 +15,12 @@ import (
 const agmControlSurfaceFeaturePath = "agm/test/bdd/features/agm_control_surface_guardrails.feature"
 
 type agmControlSurfaceGuardrailStateKey struct{}
+type agmCobraIsolationStateKey struct{}
+
+type agmCobraIsolationState struct {
+	output string
+	err    error
+}
 
 // RegisterAGMControlSurfaceGuardrailSteps registers BDD steps for AGM control-plane packages.
 func RegisterAGMControlSurfaceGuardrailSteps(ctx *godog.ScenarioContext) {
@@ -23,6 +32,9 @@ func RegisterAGMControlSurfaceGuardrailSteps(ctx *godog.ScenarioContext) {
 		validatePattern:   `^AGM validates control surface package coverage$`,
 		colocatedPattern:  `^AGM control surface package "([^"]*)" should have a co-located SPEC$`,
 	})
+	ctx.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
+		return context.WithValue(ctx, agmCobraIsolationStateKey{}, &agmCobraIsolationState{}), nil
+	})
 	ctx.Step(`^AGM Cobra commands with mutable execution state$`, agmCobraCommandsWithMutableExecutionState)
 	ctx.Step(`^AGM audits Cobra command test isolation$`, agmAuditsCobraCommandTestIsolation)
 	ctx.Step(`^mutable command flags should belong to fresh command instances$`, mutableCommandFlagsShouldBelongToFreshCommandInstances)
@@ -30,69 +42,45 @@ func RegisterAGMControlSurfaceGuardrailSteps(ctx *godog.ScenarioContext) {
 }
 
 func agmCobraCommandsWithMutableExecutionState() error {
-	root := packageSpecBDDRepoRoot()
-	for _, name := range []string{
-		"agm/cmd/agm/admin_install_harness.go",
-		"agm/cmd/agm/session_search.go",
-		"agm/cmd/agm/session_tag.go",
-	} {
-		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(name))); err != nil {
-			return fmt.Errorf("locate Cobra command source %s: %w", name, err)
-		}
-	}
-	return nil
-}
-
-func agmAuditsCobraCommandTestIsolation() error {
-	root := packageSpecBDDRepoRoot()
-	data, err := os.ReadFile(filepath.Join(root, "agm", "cmd", "agm", "command_state_regression_test.go"))
+	path := filepath.Join(packageSpecBDDRepoRoot(), "agm", "cmd", "agm")
+	info, err := os.Stat(path)
 	if err != nil {
-		return fmt.Errorf("read Cobra command-state regression: %w", err)
+		return fmt.Errorf("locate AGM command package: %w", err)
 	}
-	if !strings.Contains(string(data), "TestCobraCommandValidationIsOrderIndependent") {
-		return fmt.Errorf("cobra command-state regression does not declare its order-independence contract")
-	}
-	return nil
-}
-
-func mutableCommandFlagsShouldBelongToFreshCommandInstances() error {
-	root := packageSpecBDDRepoRoot()
-	requirements := map[string][]string{
-		"agm/cmd/agm/admin_install_harness.go": {"func newInstallHarnessCommand()", "func newInstallCodexCommand()"},
-		"agm/cmd/agm/session_search.go":        {"func newSessionSearchCommand()"},
-		"agm/cmd/agm/session_tag.go":           {"func newSessionTagCommand()"},
-	}
-	for name, markers := range requirements {
-		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
-		if err != nil {
-			return fmt.Errorf("read %s: %w", name, err)
-		}
-		text := string(data)
-		for _, marker := range markers {
-			if !strings.Contains(text, marker) {
-				return fmt.Errorf("%s does not define fresh command factory %q", name, marker)
-			}
-		}
-		if strings.Contains(text, ".BoolVar(") || strings.Contains(text, ".StringVar(") {
-			return fmt.Errorf("%s binds mutable Cobra flags to package globals", name)
-		}
+	if !info.IsDir() {
+		return fmt.Errorf("AGM command package path %s is not a directory", path)
 	}
 	return nil
 }
 
-func commandValidationTestsShouldExerciseRepeatableExecutionOrders() error {
-	root := packageSpecBDDRepoRoot()
-	data, err := os.ReadFile(filepath.Join(root, "agm", "cmd", "agm", "command_state_regression_test.go"))
+func agmAuditsCobraCommandTestIsolation(ctx context.Context) error {
+	state, err := getAGMCobraIsolationState(ctx)
 	if err != nil {
-		return fmt.Errorf("read Cobra command-state regression: %w", err)
+		return err
 	}
-	text := string(data)
-	for _, marker := range []string{"newInstallHarnessCommand", "newSessionSearchCommand", "newSessionTagCommand", `name: "forward"`, `name: "reverse"`, "for repeat := range 3"} {
-		if !strings.Contains(text, marker) {
-			return fmt.Errorf("cobra command-state regression is missing %q", marker)
-		}
+	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "-run", `^Test(CobraCommandValidationIsOrderIndependent|CobraCommandFactoriesIsolateFlagValues|RestoreCommandTreeFlagsForTestPreservesStringSliceParseState)$`, "-count=1", "-v")
+	cmd.Dir = packageSpecBDDRepoRoot()
+	output, runErr := cmd.CombinedOutput()
+	state.output = string(output)
+	state.err = runErr
+	if testCtx.Err() != nil {
+		return fmt.Errorf("cobra isolation behavior suite timed out: %w", testCtx.Err())
+	}
+	return nil
+}
+
+func mutableCommandFlagsShouldBelongToFreshCommandInstances(ctx context.Context) error {
+	return requireAGMCobraIsolationBehavior(ctx)
+}
+
+func commandValidationTestsShouldExerciseRepeatableExecutionOrders(ctx context.Context) error {
+	if err := requireAGMCobraIsolationBehavior(ctx); err != nil {
+		return err
 	}
 
+	root := packageSpecBDDRepoRoot()
 	spec, err := os.ReadFile(filepath.Join(root, "agm", "cmd", "agm", "SPEC.md"))
 	if err != nil {
 		return fmt.Errorf("read AGM CLI SPEC: %w", err)
@@ -101,4 +89,32 @@ func commandValidationTestsShouldExerciseRepeatableExecutionOrders() error {
 		return fmt.Errorf("AGM CLI SPEC does not require command-state isolation and pre-storage regex validation")
 	}
 	return nil
+}
+
+func requireAGMCobraIsolationBehavior(ctx context.Context) error {
+	state, err := getAGMCobraIsolationState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.err != nil {
+		return fmt.Errorf("cobra isolation behavior suite failed: %w\n%s", state.err, state.output)
+	}
+	for _, behavior := range []string{
+		"TestCobraCommandValidationIsOrderIndependent",
+		"TestCobraCommandFactoriesIsolateFlagValues",
+		"TestRestoreCommandTreeFlagsForTestPreservesStringSliceParseState",
+	} {
+		if !strings.Contains(state.output, "--- PASS: "+behavior) {
+			return fmt.Errorf("cobra isolation behavior %s did not pass:\n%s", behavior, state.output)
+		}
+	}
+	return nil
+}
+
+func getAGMCobraIsolationState(ctx context.Context) (*agmCobraIsolationState, error) {
+	state, ok := ctx.Value(agmCobraIsolationStateKey{}).(*agmCobraIsolationState)
+	if !ok || state == nil {
+		return nil, fmt.Errorf("cobra isolation behavior state not initialized")
+	}
+	return state, nil
 }

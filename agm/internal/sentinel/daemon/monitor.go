@@ -19,6 +19,8 @@ import (
 	"github.com/vbonnet/dear-agent/pkg/enforcement"
 )
 
+const monitorShutdownTimeout = 5 * time.Second
+
 // MonitorConfig contains configuration for session monitoring.
 type MonitorConfig struct {
 	CheckInterval       time.Duration    // How often to check sessions
@@ -60,6 +62,7 @@ type SessionMonitor struct {
 	stopChan                chan struct{}
 	doneChan                chan struct{}
 	stopOnce                sync.Once
+	shutdownTimeout         time.Duration
 	mu                      sync.Mutex // Protects running field
 
 	// CrossSessionThreshold is the number of distinct sessions that must
@@ -223,6 +226,7 @@ func NewSessionMonitor(cfg *config.Config) (*SessionMonitor, error) {
 		loopMonitor:             loopMon,
 		sessionSweeper:          sessionSweeper,
 		logger:                  logger,
+		shutdownTimeout:         monitorShutdownTimeout,
 		CrossSessionThreshold:   3,
 	}, nil
 }
@@ -272,8 +276,9 @@ func (m *SessionMonitor) StartMonitoring() error {
 	}
 }
 
-// StopMonitoring stops the monitoring loop gracefully and waits for it to exit.
-// It is safe to call concurrently or more than once.
+// StopMonitoring stops the monitoring loop gracefully and waits up to the
+// configured shutdown bound for it to exit. It is safe to call concurrently
+// or more than once.
 func (m *SessionMonitor) StopMonitoring() {
 	m.mu.Lock()
 	if !m.running {
@@ -285,7 +290,14 @@ func (m *SessionMonitor) StopMonitoring() {
 	m.stopOnce.Do(func() { close(stopChan) })
 	m.mu.Unlock()
 
-	<-doneChan
+	timer := time.NewTimer(m.shutdownTimeout)
+	defer timer.Stop()
+	select {
+	case <-doneChan:
+	case <-timer.C:
+		m.logger.Warn("Timed out waiting for session monitor shutdown",
+			"timeout", m.shutdownTimeout)
+	}
 }
 
 // IsRunning returns whether the monitor is currently running (thread-safe).

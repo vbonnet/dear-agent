@@ -56,7 +56,10 @@ func runInstallHarness(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx := context.Background()
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	jsonOutput, err := cmd.Flags().GetBool("json")
 	if err != nil {
 		return fmt.Errorf("read --json: %w", err)
@@ -137,7 +140,10 @@ func init() {
 }
 
 func runInstallCodex(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	jsonOutput, err := cmd.Flags().GetBool("json")
 	if err != nil {
 		return fmt.Errorf("read --json: %w", err)

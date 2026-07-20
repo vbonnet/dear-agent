@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -15,7 +16,7 @@ func executeFreshCommandForTest(t *testing.T, newCommand func() *cobra.Command, 
 	cmd := newCommand()
 	cmd.SilenceErrors = true
 	cmd.SilenceUsage = true
-	cmd.SetArgs(append(make([]string, 0, len(args)), args...))
+	cmd.SetArgs(slices.Clone(args))
 	t.Cleanup(func() {
 		cmd.SetArgs(nil)
 		cmd.SetOut(nil)
@@ -50,6 +51,7 @@ func restoreCommandTreeFlagsForTest(t *testing.T, root *cobra.Command) {
 		flag    *pflag.Flag
 		value   string
 		slice   []string
+		clone   pflag.Value
 		changed bool
 	}
 	seen := make(map[*pflag.Flag]bool)
@@ -63,7 +65,8 @@ func restoreCommandTreeFlagsForTest(t *testing.T, root *cobra.Command) {
 			seen[flag] = true
 			state := flagState{flag: flag, value: flag.Value.String(), changed: flag.Changed}
 			if sliceValue, ok := flag.Value.(pflag.SliceValue); ok {
-				state.slice = append([]string(nil), sliceValue.GetSlice()...)
+				state.slice = slices.Clone(sliceValue.GetSlice())
+				state.clone = cloneFlagValueForTest(t, flag.Value)
 			}
 			states = append(states, state)
 		})
@@ -78,6 +81,7 @@ func restoreCommandTreeFlagsForTest(t *testing.T, root *cobra.Command) {
 			var err error
 			if sliceValue, ok := state.flag.Value.(pflag.SliceValue); ok {
 				err = sliceValue.Replace(state.slice)
+				state.flag.Value = state.clone
 			} else {
 				err = state.flag.Value.Set(state.value)
 			}
@@ -87,4 +91,23 @@ func restoreCommandTreeFlagsForTest(t *testing.T, root *cobra.Command) {
 			state.flag.Changed = state.changed
 		}
 	})
+}
+
+// cloneFlagValueForTest preserves private parse state held by pflag slice
+// values. Restoring only Flag.Changed is insufficient: a slice value also
+// remembers whether its first Set should replace or append to defaults.
+func cloneFlagValueForTest(t *testing.T, value pflag.Value) pflag.Value {
+	t.Helper()
+
+	original := reflect.ValueOf(value)
+	if original.Kind() != reflect.Pointer || original.IsNil() {
+		t.Fatalf("clone pflag value %T: expected non-nil pointer", value)
+	}
+	clone := reflect.New(original.Elem().Type())
+	clone.Elem().Set(original.Elem())
+	cloned, ok := clone.Interface().(pflag.Value)
+	if !ok {
+		t.Fatalf("clone pflag value %T: clone does not implement pflag.Value", value)
+	}
+	return cloned
 }

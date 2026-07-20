@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -118,5 +119,30 @@ func TestRestoreCommandTreeFlagsForTestPreservesEmptyStringSlice(t *testing.T) {
 	}
 	if flag.Changed {
 		t.Error("restored --fields should not be marked changed")
+	}
+}
+
+func TestRestoreCommandTreeFlagsForTestPreservesStringSliceParseState(t *testing.T) {
+	defaults := []string{"worktrees", "sandboxes"}
+	var targets []string
+	cmd := &cobra.Command{Use: "test"}
+	cmd.Flags().StringSliceVar(&targets, "targets", defaults, "cleanup targets")
+
+	t.Run("mutate and restore", func(t *testing.T) {
+		restoreCommandTreeFlagsForTest(t, cmd)
+		if err := cmd.Flags().Set("targets", "sessions"); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	flag := cmd.Flags().Lookup("targets")
+	if flag.Changed {
+		t.Error("restored --targets should not be marked changed")
+	}
+	if err := cmd.Flags().Set("targets", "processes"); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"processes"}; !slices.Equal(targets, want) {
+		t.Errorf("first parse after restore = %v, want replacement %v", targets, want)
 	}
 }
