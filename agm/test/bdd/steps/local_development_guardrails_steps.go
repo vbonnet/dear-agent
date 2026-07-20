@@ -173,8 +173,11 @@ func worktreeShouldBeProtectedDuringTransaction(ctx context.Context) error {
 	if state.transactionOutcome == "success" && state.transactionErr != nil {
 		return fmt.Errorf("successful transaction returned %w", state.transactionErr)
 	}
-	if state.transactionOutcome == "failure" && (state.transactionErr == nil || !strings.Contains(state.transactionErr.Error(), "simulated PR creation failure")) {
-		return fmt.Errorf("failed transaction error = %v", state.transactionErr)
+	if state.transactionOutcome == "failure" && state.transactionErr == nil {
+		return errors.New("failed transaction returned no error")
+	}
+	if state.transactionOutcome == "failure" && !strings.Contains(state.transactionErr.Error(), "simulated PR creation failure") {
+		return fmt.Errorf("failed transaction error: %w", state.transactionErr)
 	}
 	return nil
 }
@@ -234,9 +237,13 @@ func safePRBDDLockState(ctx context.Context, state *localDevGuardrailState) (boo
 func cleanupSafePRBDDWorktree(state *localDevGuardrailState) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, _ = runSafePRBDDGit(ctx, "-C", state.worktreeRepo, "worktree", "unlock", state.worktreePath)
+	locked, _, inspectErr := safePRBDDLockState(ctx, state)
+	var unlockErr error
+	if inspectErr == nil && locked {
+		_, unlockErr = runSafePRBDDGit(ctx, "-C", state.worktreeRepo, "worktree", "unlock", state.worktreePath)
+	}
 	_, removeErr := runSafePRBDDGit(ctx, "-C", state.worktreeRepo, "worktree", "remove", "--force", state.worktreePath)
-	return errors.Join(removeErr, os.RemoveAll(state.worktreeBase))
+	return errors.Join(inspectErr, unlockErr, removeErr, os.RemoveAll(state.worktreeBase))
 }
 
 func canonicalSafePRBDDPath(path string) string {
