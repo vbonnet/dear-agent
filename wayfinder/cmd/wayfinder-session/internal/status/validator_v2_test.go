@@ -140,6 +140,39 @@ func TestValidateV2(t *testing.T) {
 	}
 }
 
+func TestValidateV2RejectsUnsafeOrDuplicateSkipPhases(t *testing.T) {
+	newValid := func() *StatusV2 {
+		now := time.Now()
+		return &StatusV2{
+			SchemaVersion:   SchemaVersionV2,
+			ProjectName:     "test",
+			ProjectType:     ProjectTypeFeature,
+			RiskLevel:       RiskLevelM,
+			CurrentWaypoint: WaypointV2Charter,
+			Status:          StatusV2Planning,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+	}
+	for _, test := range []struct {
+		name   string
+		phases []string
+		want   string
+	}{
+		{name: "build", phases: []string{WaypointV2Build}, want: "unsafe phase"},
+		{name: "empty", phases: []string{""}, want: "unsafe phase"},
+		{name: "duplicate", phases: []string{WaypointV2Design, WaypointV2Design}, want: "duplicate phase"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			st := newValid()
+			st.SkipPhases = test.phases
+			if err := ValidateV2(st); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ValidateV2() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestValidatePhaseHistory(t *testing.T) {
 	tests := []struct {
 		name    string

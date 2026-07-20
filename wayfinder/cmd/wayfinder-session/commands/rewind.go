@@ -93,46 +93,7 @@ func runRewind(cmd *cobra.Command, args []string) error {
 	// Capture fromPhase BEFORE updating (needed for retrospective logging)
 	fromPhase := st.CurrentWaypoint
 
-	// Mark all phases after target as pending in phase history
-	for i := range st.WaypointHistory {
-		phaseData := &st.WaypointHistory[i]
-		// Find this phase's index in allPhases
-		phaseIdx := -1
-		for j, p := range allPhases {
-			if p == phaseData.Name {
-				phaseIdx = j
-				break
-			}
-		}
-
-		// If phase is after target, mark as pending
-		if phaseIdx > targetIdx {
-			phaseData.Status = status.PhaseStatusV2Pending
-			phaseData.CompletedAt = nil
-			phaseData.Outcome = nil
-		}
-	}
-
-	// Update roadmap phases if present
-	if st.Roadmap != nil {
-		for i := range st.Roadmap.Phases {
-			roadmapPhase := &st.Roadmap.Phases[i]
-			// Find this phase's index in allPhases
-			phaseIdx := -1
-			for j, p := range allPhases {
-				if p == roadmapPhase.ID {
-					phaseIdx = j
-					break
-				}
-			}
-
-			// If phase is after target, mark as pending
-			if phaseIdx > targetIdx {
-				roadmapPhase.Status = status.PhaseStatusV2Pending
-				roadmapPhase.CompletedAt = nil
-			}
-		}
-	}
+	resetForRewind(st, allPhases, targetIdx)
 
 	// Update current phase
 	st.CurrentWaypoint = targetPhase
@@ -157,4 +118,33 @@ func runRewind(cmd *cobra.Command, args []string) error {
 	fmt.Printf("⏪ Rewound to phase %s\n", targetPhase)
 	fmt.Println("ℹ️  Phases after", targetPhase, "have been reset to pending")
 	return nil
+}
+
+func resetForRewind(st *status.StatusV2, allPhases []string, targetIdx int) {
+	positions := make(map[string]int, len(allPhases))
+	for index, phase := range allPhases {
+		positions[phase] = index
+	}
+	for index := range st.WaypointHistory {
+		phase := &st.WaypointHistory[index]
+		if positions[phase.Name] < targetIdx {
+			continue
+		}
+		phase.Status = status.PhaseStatusV2Pending
+		phase.StartedAt = time.Time{}
+		phase.CompletedAt = nil
+		phase.Outcome = nil
+	}
+	if st.Roadmap == nil {
+		return
+	}
+	for index := range st.Roadmap.Phases {
+		phase := &st.Roadmap.Phases[index]
+		if positions[phase.ID] < targetIdx {
+			continue
+		}
+		phase.Status = status.PhaseStatusV2Pending
+		phase.StartedAt = nil
+		phase.CompletedAt = nil
+	}
 }

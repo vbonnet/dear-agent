@@ -13,6 +13,9 @@ Install the executable before installing or invoking the companion agent skill:
 go install github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder@latest
 ```
 
+All phase validators are compiled into this executable; no separate review
+scripts, Python environment, or Engram checkout is required.
+
 ## Quick start
 
 ```sh

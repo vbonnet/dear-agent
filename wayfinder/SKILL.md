@@ -70,15 +70,16 @@ Use `--reason` only for the explicit hash-mismatch override described by
 | CHARTER | Objective, scope, constraints, success conditions |
 | PROBLEM | Evidence that the problem and affected users are understood |
 | RESEARCH | Existing-solution search and build/adapt/reuse decision |
-| DESIGN | Current architecture, seams, invariants, and trade-offs |
+| DESIGN | Current architecture, seams, invariants, and trade-offs in both `DESIGN-<name>.md` and `ARCHITECTURE.md` |
 | SPEC | Observable requirements and acceptance criteria |
 | PLAN | Ordered implementation and verification steps |
 | SETUP | Ready workspace and task breakdown, unless explicitly skipped |
 | BUILD | Real changes plus reproducible test, review, and delivery evidence |
 | RETRO | Outcomes, deviations, lessons, and remaining work |
 
-`RESEARCH-existing-solutions.md`, `SPEC-solution-requirements.md`,
-`PLAN-design.md`, and `SETUP-plan.md` have additional deterministic checks.
+`RESEARCH-existing-solutions.md`, `ARCHITECTURE.md`,
+`SPEC-solution-requirements.md`, `PLAN-design.md`, and `SETUP-plan.md` have
+additional deterministic checks.
 Use `wayfinder session complete-phase --help` and the returned errors as the
 authoritative gate contract.
 

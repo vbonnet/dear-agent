@@ -47,6 +47,22 @@ func TestValidateDocQuality_NonValidatedPhase(t *testing.T) {
 	}
 }
 
+func TestRunReviewSkillUsesContainedDeterministicChecks(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ARCHITECTURE.md")
+	content := "# Architecture\n\n## Context\nThis section records the current system boundaries and constraints.\n\n## Design\nThis section records the chosen seams, invariants, and trade-offs in enough detail for implementation.\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	score, issues, err := runReviewSkill("review-architecture", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if score != 10 || len(issues) != 0 {
+		t.Fatalf("contained review = score %.1f, issues %v; want 10 with no issues", score, issues)
+	}
+}
+
 // TestValidateDocQuality_FileTooLarge tests validation fails for oversized files
 func TestValidateDocQuality_FileTooLarge(t *testing.T) {
 	tempDir := t.TempDir()

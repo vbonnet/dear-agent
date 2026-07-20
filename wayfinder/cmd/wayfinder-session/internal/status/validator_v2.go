@@ -22,6 +22,9 @@ func ValidateV2(status *StatusV2) error {
 	if err := validateEnums(status); err != nil {
 		errors = append(errors, err.Error())
 	}
+	if err := validateSkipPhases(status.SkipPhases); err != nil {
+		errors = append(errors, err.Error())
+	}
 
 	// Validate waypoint history
 	if err := validateWaypointHistory(status); err != nil {
@@ -47,6 +50,25 @@ func ValidateV2(status *StatusV2) error {
 		return fmt.Errorf("validation failed:\n  - %s", strings.Join(errors, "\n  - "))
 	}
 
+	return nil
+}
+
+func validateSkipPhases(phases []string) error {
+	allowed := map[string]bool{
+		WaypointV2Design: true,
+		WaypointV2Spec:   true,
+		WaypointV2Plan:   true,
+	}
+	seen := make(map[string]bool, len(phases))
+	for _, phase := range phases {
+		if !allowed[phase] {
+			return fmt.Errorf("skip_phases contains unsafe phase %q; only DESIGN, SPEC, and PLAN may be skipped", phase)
+		}
+		if seen[phase] {
+			return fmt.Errorf("skip_phases contains duplicate phase %q", phase)
+		}
+		seen[phase] = true
+	}
 	return nil
 }
 
