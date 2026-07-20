@@ -43,7 +43,7 @@ creation.
 
 **SAFE-PR-14** When pull request creation runs, the system shall protect the linked worktree across both the full preflight and GitHub mutation boundaries.
 
-**SAFE-PR-15** When pull request creation encounters safe-pr lock ownership, the system shall use owner-process liveness to reclaim a stale lock or reject an overlapping live transaction.
+**SAFE-PR-15** When pull request creation manages safe-pr lock ownership, the system shall hold a per-worktree operating-system serialization lock across the transaction so process termination releases liveness ownership without relying on reusable numeric process IDs.
 
 ## BDD Traceability
 

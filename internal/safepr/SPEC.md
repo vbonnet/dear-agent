@@ -47,9 +47,9 @@ cost and intent remain traceable.
 
 **SAFEPR-16** When safe-pr invokes git to manage worktree protection, the system shall use a bounded context, isolated process group, group-wide cancellation, and bounded pipe-drain delay.
 
-**SAFEPR-17** When a worktree lock has valid safe-pr ownership metadata and its owner process is no longer live, the system shall reclaim the stale lock before acquiring protection for a new transaction.
+**SAFEPR-17** When safe-pr holds the per-worktree operating-system transaction lock and finds valid safe-pr ownership metadata left in Git, the system shall reclaim that provably stale Git lock before acquiring protection for the new transaction.
 
-**SAFEPR-18** When a worktree lock has valid safe-pr ownership metadata and its owner process remains live, the system shall reject an overlapping transaction and preserve the active owner's exact lock.
+**SAFEPR-18** When another safe-pr process holds the per-worktree operating-system transaction lock, the system shall reject the overlapping transaction before it can inspect, reclaim, or replace the active owner's Git lock.
 
 **SAFEPR-19** When Git returns linked-worktree or lock metadata with LF or CRLF line endings, the system shall parse the same canonical paths, lock state, and ownership reason.
 

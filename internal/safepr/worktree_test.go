@@ -171,36 +171,69 @@ func TestWithWorktreeLockReclaimsStaleSafePROwner(t *testing.T) {
 	}
 }
 
-func TestWithWorktreeLockRejectsActiveSafePROwner(t *testing.T) {
+func TestWithWorktreeLockSerializesConcurrentOwners(t *testing.T) {
 	_, worktree := initLinkedWorktree(t)
-	activeReason := fmt.Sprintf("safe-pr-owned:%d:0011223344556677:active transaction", os.Getpid())
-	gitTestRun(t, "-C", worktree, "worktree", "lock", "--reason", activeReason, worktree)
+	identity, err := resolveLinkedWorktree(worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan string, 1)
+	release := make(chan struct{})
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- WithWorktreeLock(worktree, "first transaction", func() error {
+			state, inspectErr := inspectWorktreeLock(worktree)
+			if inspectErr != nil {
+				return inspectErr
+			}
+			entered <- state.reason
+			<-release
+			return nil
+		})
+	}()
 
-	called := false
-	err := WithWorktreeLock(worktree, "overlapping transaction", func() error {
-		called = true
+	var firstReason string
+	select {
+	case firstReason = <-entered:
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("first transaction did not acquire worktree protection")
+	}
+	secondCalled := false
+	err = withWorktreeTransactionLock(identity.gitDir, 50*time.Millisecond, func() error {
+		secondCalled = true
 		return nil
 	})
-	if err == nil || !strings.Contains(err.Error(), "active safe-pr transaction") {
-		t.Fatalf("WithWorktreeLock(active owner) = %v, want active-owner rejection", err)
+	if err == nil || !strings.Contains(err.Error(), "another safe-pr transaction") {
+		t.Fatalf("concurrent transaction = %v, want serialization rejection", err)
 	}
-	if called {
-		t.Fatal("overlapping transaction ran while safe-pr owner was live")
+	if secondCalled {
+		t.Fatal("concurrent transaction ran while the first owner was live")
 	}
 	state, inspectErr := inspectWorktreeLock(worktree)
 	if inspectErr != nil {
 		t.Fatal(inspectErr)
 	}
-	if !state.locked || state.reason != activeReason {
-		t.Fatalf("active safe-pr lock changed: %+v", state)
+	if !state.locked || state.reason != firstReason {
+		t.Fatalf("first transaction lock changed during contention: %+v", state)
+	}
+	close(release)
+	if err := <-firstDone; err != nil {
+		t.Fatal(err)
+	}
+	state, inspectErr = inspectWorktreeLock(worktree)
+	if inspectErr != nil {
+		t.Fatal(inspectErr)
+	}
+	if state.locked {
+		t.Fatalf("first transaction lock survived release: %+v", state)
 	}
 }
 
-func TestSafePROwnerPIDRequiresGeneratedOwnershipShape(t *testing.T) {
+func TestSafePROwnedReasonRequiresGeneratedOwnershipShape(t *testing.T) {
 	valid := fmt.Sprintf("safe-pr-owned:%d:0011223344556677:transaction", os.Getpid())
-	pid, ok := safePROwnerPID(valid)
-	if !ok || pid != os.Getpid() {
-		t.Fatalf("safePROwnerPID(%q) = %d, %t", valid, pid, ok)
+	if !isSafePROwnedLockReason(valid) {
+		t.Fatalf("isSafePROwnedLockReason(%q) = false", valid)
 	}
 	for _, reason := range []string{
 		"manual-owner",
@@ -208,8 +241,8 @@ func TestSafePROwnerPIDRequiresGeneratedOwnershipShape(t *testing.T) {
 		"safe-pr-owned:1:short:transaction",
 		"safe-pr-owned:1:0011223344556677",
 	} {
-		if pid, ok := safePROwnerPID(reason); ok {
-			t.Errorf("safePROwnerPID(%q) = %d, true; want malformed ownership rejected", reason, pid)
+		if isSafePROwnedLockReason(reason) {
+			t.Errorf("isSafePROwnedLockReason(%q) = true; want malformed ownership rejected", reason)
 		}
 	}
 }
@@ -228,12 +261,12 @@ func TestWorktreeParsersAcceptUnixAndWindowsLineEndings(t *testing.T) {
 		{name: "CRLF", lineEnding: "\r\n"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			gotRoot, err := parseLinkedWorktreeRoot(strings.ReplaceAll(directories, "\n", test.lineEnding))
+			identity, err := parseLinkedWorktree(strings.ReplaceAll(directories, "\n", test.lineEnding))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if gotRoot != root {
-				t.Fatalf("linked root = %q, want %q", gotRoot, root)
+			if identity.root != root {
+				t.Fatalf("linked root = %q, want %q", identity.root, root)
 			}
 			state, err := parseWorktreeLock(root, strings.ReplaceAll(porcelain, "\n", test.lineEnding))
 			if err != nil {

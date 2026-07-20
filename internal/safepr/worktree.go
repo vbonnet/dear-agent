@@ -17,14 +17,21 @@ import (
 )
 
 const (
-	worktreeCommandTimeout = 10 * time.Second
-	worktreeLockAttempts   = 3
-	safePROwnedLockPrefix  = "safe-pr-owned:"
+	worktreeCommandTimeout      = 10 * time.Second
+	worktreeLockAttempts        = 3
+	safePROwnedLockPrefix       = "safe-pr-owned:"
+	worktreeTransactionLockFile = "safe-pr-transaction.lock"
+	worktreeLockRetryInterval   = 10 * time.Millisecond
 )
 
 type worktreeLock struct {
 	locked bool
 	reason string
+}
+
+type linkedWorktree struct {
+	root   string
+	gitDir string
 }
 
 // WithWorktreeLock runs action while dir's linked worktree is protected from
@@ -34,10 +41,16 @@ func WithWorktreeLock(dir, reason string, action func() error) error {
 	if action == nil {
 		return fmt.Errorf("protect safe-pr worktree: action is required")
 	}
-	root, err := linkedWorktreeRoot(dir)
+	worktree, err := resolveLinkedWorktree(dir)
 	if err != nil {
 		return err
 	}
+	return withWorktreeTransactionLock(worktree.gitDir, worktreeCommandTimeout, func() error {
+		return withGitWorktreeLock(worktree.root, reason, action)
+	})
+}
+
+func withGitWorktreeLock(root, reason string, action func() error) error {
 	var ownedReason string
 	var lastErr error
 	for range worktreeLockAttempts {
@@ -46,24 +59,21 @@ func WithWorktreeLock(dir, reason string, action func() error) error {
 			return errors.Join(lastErr, inspectErr)
 		}
 		if current.locked {
-			ownerPID, safePROwned := safePROwnerPID(current.reason)
-			if !safePROwned {
+			if !isSafePROwnedLockReason(current.reason) {
 				return runWithPreservedLock(root, current, action)
 			}
-			if safePROwnerAlive(ownerPID) {
-				return fmt.Errorf("protect safe-pr worktree: active safe-pr transaction owns %s (pid %d)", root, ownerPID)
-			}
 			if _, reclaimErr := runWorktreeGit(root, "worktree", "unlock", root); reclaimErr != nil {
-				lastErr = errors.Join(lastErr, fmt.Errorf("protect safe-pr worktree: reclaim stale owner pid %d: %w", ownerPID, reclaimErr))
+				lastErr = errors.Join(lastErr, fmt.Errorf("protect safe-pr worktree: reclaim stale owned lock: %w", reclaimErr))
 			}
 			continue
 		}
 
 		if ownedReason == "" {
-			ownedReason, err = worktreeLockReason(reason)
-			if err != nil {
-				return fmt.Errorf("protect safe-pr worktree: generate lock owner: %w", err)
+			generated, reasonErr := worktreeLockReason(reason)
+			if reasonErr != nil {
+				return fmt.Errorf("protect safe-pr worktree: generate lock owner: %w", reasonErr)
 			}
+			ownedReason = generated
 		}
 		if _, lockErr := runWorktreeGit(root, "worktree", "lock", "--reason", ownedReason, root); lockErr != nil {
 			lastErr = errors.Join(lastErr, fmt.Errorf("protect safe-pr worktree: acquire lock: %w", lockErr))
@@ -74,49 +84,83 @@ func WithWorktreeLock(dir, reason string, action func() error) error {
 	return errors.Join(lastErr, fmt.Errorf("protect safe-pr worktree: lock ownership did not stabilize after %d attempts", worktreeLockAttempts))
 }
 
-func safePROwnerPID(reason string) (int, bool) {
+func isSafePROwnedLockReason(reason string) bool {
 	if !strings.HasPrefix(reason, safePROwnedLockPrefix) {
-		return 0, false
+		return false
 	}
 	parts := strings.SplitN(strings.TrimPrefix(reason, safePROwnedLockPrefix), ":", 3)
 	if len(parts) != 3 {
-		return 0, false
+		return false
 	}
 	pid, err := strconv.Atoi(parts[0])
 	if err != nil || pid <= 0 {
-		return 0, false
+		return false
 	}
 	owner, err := hex.DecodeString(parts[1])
 	if err != nil || len(owner) != 8 {
-		return 0, false
+		return false
 	}
-	return pid, true
+	return true
 }
 
-func safePROwnerAlive(pid int) bool {
-	err := syscall.Kill(pid, 0)
-	return err == nil || !errors.Is(err, syscall.ESRCH)
-}
-
-func linkedWorktreeRoot(dir string) (string, error) {
+func resolveLinkedWorktree(dir string) (linkedWorktree, error) {
 	out, err := runWorktreeGit(dir, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir")
 	if err != nil {
-		return "", fmt.Errorf("protect safe-pr worktree: resolve repository: %w", err)
+		return linkedWorktree{}, fmt.Errorf("protect safe-pr worktree: resolve repository: %w", err)
 	}
-	return parseLinkedWorktreeRoot(out)
+	return parseLinkedWorktree(out)
 }
 
-func parseLinkedWorktreeRoot(out string) (string, error) {
+func parseLinkedWorktree(out string) (linkedWorktree, error) {
 	out = strings.ReplaceAll(out, "\r", "")
 	lines := slices.Collect(strings.SplitSeq(strings.TrimSpace(out), "\n"))
 	if len(lines) != 3 {
-		return "", fmt.Errorf("protect safe-pr worktree: unexpected git directory output %q", out)
+		return linkedWorktree{}, fmt.Errorf("protect safe-pr worktree: unexpected git directory output %q", out)
 	}
 	root := canonicalWorktreePath(lines[0])
-	if canonicalWorktreePath(lines[1]) == canonicalWorktreePath(lines[2]) {
-		return "", fmt.Errorf("safe-pr create requires a linked worktree that can be locked; %s is the primary checkout", root)
+	gitDir := canonicalWorktreePath(lines[1])
+	if gitDir == canonicalWorktreePath(lines[2]) {
+		return linkedWorktree{}, fmt.Errorf("safe-pr create requires a linked worktree that can be locked; %s is the primary checkout", root)
 	}
-	return root, nil
+	return linkedWorktree{root: root, gitDir: gitDir}, nil
+}
+
+func withWorktreeTransactionLock(gitDir string, timeout time.Duration, action func() error) (err error) {
+	path := filepath.Join(gitDir, worktreeTransactionLockFile)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return fmt.Errorf("protect safe-pr worktree: open transaction lock: %w", err)
+	}
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("protect safe-pr worktree: close transaction lock: %w", closeErr))
+		}
+	}()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	ticker := time.NewTicker(worktreeLockRetryInterval)
+	defer ticker.Stop()
+	for {
+		lockErr := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if lockErr == nil {
+			break
+		}
+		if !errors.Is(lockErr, syscall.EWOULDBLOCK) && !errors.Is(lockErr, syscall.EAGAIN) {
+			return fmt.Errorf("protect safe-pr worktree: acquire transaction lock: %w", lockErr)
+		}
+		select {
+		case <-timer.C:
+			return fmt.Errorf("protect safe-pr worktree: another safe-pr transaction remained active after %s", timeout)
+		case <-ticker.C:
+		}
+	}
+	defer func() {
+		if unlockErr := syscall.Flock(int(file.Fd()), syscall.LOCK_UN); unlockErr != nil {
+			err = errors.Join(err, fmt.Errorf("protect safe-pr worktree: release transaction lock: %w", unlockErr))
+		}
+	}()
+	return action()
 }
 
 func inspectWorktreeLock(root string) (worktreeLock, error) {
