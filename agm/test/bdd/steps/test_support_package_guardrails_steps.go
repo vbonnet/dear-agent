@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/cucumber/godog"
 
@@ -43,8 +45,10 @@ type testSupportPackageGuardrailStateKey struct{}
 type testSupportRouteStateKey struct{}
 
 type testSupportRouteState struct {
-	harness string
-	family  string
+	harness              string
+	family               string
+	trustIsolationOutput string
+	trustIsolationErr    error
 }
 
 // RegisterTestSupportPackageGuardrailSteps registers residual package coverage steps.
@@ -68,6 +72,59 @@ func RegisterTestSupportPackageGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates live harness contract command construction$`, agmValidatesLiveHarnessContractCommands)
 	ctx.Step(`^live harness contracts should use canonical session and harness arguments$`, liveHarnessContractsUseCanonicalArguments)
 	ctx.Step(`^unavailable live harness dependencies should be skipped explicitly$`, unavailableLiveHarnessDependenciesAreSkipped)
+	ctx.Step(`^AGM validates trust protocol scenario isolation$`, agmValidatesTrustProtocolScenarioIsolation)
+	ctx.Step(`^trust protocol setup should run only for trust scenarios$`, trustProtocolSetupShouldBeScoped)
+	ctx.Step(`^trust protocol hooks should restore HOME and shared Go cache variables$`, trustProtocolHooksShouldRestoreEnvironment)
+	ctx.Step(`^trust protocol cleanup should remove read-only owned module trees$`, trustProtocolCleanupShouldRemoveReadOnlyModuleTrees)
+}
+
+func trustProtocolSetupShouldBeScoped(ctx context.Context) error {
+	return requireTrustProtocolIsolationTests(ctx, "TestTrustProtocolHookScope")
+}
+
+func agmValidatesTrustProtocolScenarioIsolation(ctx context.Context) error {
+	state, err := getTestSupportRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/test/bdd/steps", "-run", `^TestTrustProtocol`, "-count=1", "-v")
+	cmd.Dir = packageSpecBDDRepoRoot()
+	output, runErr := cmd.CombinedOutput()
+	state.trustIsolationOutput = string(output)
+	state.trustIsolationErr = runErr
+	return nil
+}
+
+func trustProtocolHooksShouldRestoreEnvironment(ctx context.Context) error {
+	return requireTrustProtocolIsolationTests(ctx,
+		"TestTrustProtocolEnvironmentRoundTrip",
+		"TestTrustProtocolResolveGoCachesUsesExplicitEnvironment",
+	)
+}
+
+func trustProtocolCleanupShouldRemoveReadOnlyModuleTrees(ctx context.Context) error {
+	return requireTrustProtocolIsolationTests(ctx,
+		"TestTrustProtocolCleanupRemovesReadOnlyModuleTree",
+		"TestTrustProtocolCleanupRejectsUnownedDirectory",
+	)
+}
+
+func requireTrustProtocolIsolationTests(ctx context.Context, tests ...string) error {
+	state, err := getTestSupportRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.trustIsolationErr != nil {
+		return fmt.Errorf("trust protocol isolation tests failed: %w\n%s", state.trustIsolationErr, state.trustIsolationOutput)
+	}
+	for _, test := range tests {
+		if !strings.Contains(state.trustIsolationOutput, "--- PASS: "+test) {
+			return fmt.Errorf("trust protocol isolation test %s did not pass:\n%s", test, state.trustIsolationOutput)
+		}
+	}
+	return nil
 }
 
 func liveHarnessContractSourcesAreConfigured() error {

@@ -95,3 +95,9 @@ Feature: Test support package guardrails
     When AGM validates live harness contract command construction
     Then live harness contracts should use canonical session and harness arguments
     And unavailable live harness dependencies should be skipped explicitly
+
+  Scenario: Trust protocol hooks restore process state and owned storage
+    When AGM validates trust protocol scenario isolation
+    Then trust protocol setup should run only for trust scenarios
+    And trust protocol hooks should restore HOME and shared Go cache variables
+    And trust protocol cleanup should remove read-only owned module trees
