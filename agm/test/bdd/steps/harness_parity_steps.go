@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -97,6 +98,8 @@ type harnessParityState struct {
 	launchMode                 string
 	launchContract             launchparity.Contract
 	startupLivenessValid       bool
+	currentTmuxTestOutput      string
+	currentTmuxTestErr         error
 }
 
 type harnessParityStateKey struct{}
@@ -114,6 +117,12 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^harness "([^"]*)" should not be deprecated$`, harnessShouldNotBeDeprecated)
 	ctx.Step(`^harness "([^"]*)" should be deprecated$`, harnessShouldBeDeprecated)
 	ctx.Step(`^AGM active harnesses are configured$`, agmActiveHarnessesAreConfigured)
+	ctx.Step(`^current-tmux creation selects Codex CLI$`, currentTmuxCreationSelectsCodexCLI)
+	ctx.Step(`^AGM validates current-tmux Codex launch wiring$`, agmValidatesCurrentTmuxCodexLaunchWiring)
+	ctx.Step(`^Codex credential validation should precede the canonical launcher$`, codexCredentialValidationShouldPrecedeCanonicalLauncher)
+	ctx.Step(`^the top-level new command should route into current tmux$`, topLevelNewCommandShouldRouteIntoCurrentTmux)
+	ctx.Step(`^Codex current-tmux launch should require the executable without waiting behind its own AGM process$`, codexCurrentTmuxLaunchShouldRequireExecutableWithoutWaiting)
+	ctx.Step(`^Codex queue failures should propagate to shared creation rollback$`, codexQueueFailuresShouldPropagateToSharedCreationRollback)
 	ctx.Step(`^AGM validates active harness adapter conformance$`, agmValidatesActiveHarnessAdapterConformance)
 	ctx.Step(`^every active harness adapter should satisfy the shared conformance suite$`, everyActiveHarnessAdapterShouldSatisfySharedConformanceSuite)
 	ctx.Step(`^AGM validates the pane capture invocation$`, agmValidatesPaneCaptureInvocation)
@@ -254,6 +263,88 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM archives the stopped session$`, agmArchivesTheStoppedSession)
 	ctx.Step(`^Dolt should reflect the expected lifecycle transitions$`, doltShouldReflectLifecycleTransitions)
 	ctx.Step(`^the matching Codex saved session should be archived$`, matchingCodexSavedSessionShouldBeArchived)
+}
+
+func currentTmuxCreationSelectsCodexCLI(ctx context.Context) error {
+	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	harnessState.configuredHarness = "codex-cli"
+	return nil
+}
+
+func agmValidatesCurrentTmuxCodexLaunchWiring(ctx context.Context) error {
+	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if harnessState.configuredHarness != "codex-cli" {
+		return fmt.Errorf("configured harness = %q, want codex-cli", harnessState.configuredHarness)
+	}
+	// Keep the nested behavioral gate bounded while allowing a cold CI runner
+	// to compile both production packages under integration-graph contention.
+	testCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/ops", "-run", `^(Test(StartCurrentTmuxHarnessCodex(UsesRealLauncherContract|StopsAfterCredentialFailure|PropagatesQueueFailure)|QueueCurrentTmuxCodex(DoesNotWaitForReadiness|RejectsMissingExecutable)|StartNewSessionForContextRoutesCurrentTmux)|TestCreateSession_RollsBackEveryPostTmuxFailure)$`, "-count=1", "-v")
+	cmd.Dir = bddRepoRoot()
+	output, runErr := cmd.CombinedOutput()
+	harnessState.currentTmuxTestOutput = string(output)
+	harnessState.currentTmuxTestErr = runErr
+	if testCtx.Err() != nil {
+		return fmt.Errorf("current-tmux Codex behavior suite timed out: %w", testCtx.Err())
+	}
+	return nil
+}
+
+func codexCredentialValidationShouldPrecedeCanonicalLauncher(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if state.currentTmuxTestErr != nil {
+		return fmt.Errorf("current-tmux Codex behavior suite failed: %w\n%s", state.currentTmuxTestErr, state.currentTmuxTestOutput)
+	}
+	for _, behavior := range []string{
+		"TestStartCurrentTmuxHarnessCodexUsesRealLauncherContract",
+		"TestStartCurrentTmuxHarnessCodexStopsAfterCredentialFailure",
+	} {
+		if !strings.Contains(state.currentTmuxTestOutput, "--- PASS: "+behavior) {
+			return fmt.Errorf("current-tmux Codex behavior %s did not pass:\n%s", behavior, state.currentTmuxTestOutput)
+		}
+	}
+	return nil
+}
+
+func topLevelNewCommandShouldRouteIntoCurrentTmux(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if state.currentTmuxTestErr != nil {
+		return fmt.Errorf("current-tmux Codex behavior suite failed: %w\n%s", state.currentTmuxTestErr, state.currentTmuxTestOutput)
+	}
+	if behavior := "TestStartNewSessionForContextRoutesCurrentTmux"; !strings.Contains(state.currentTmuxTestOutput, "--- PASS: "+behavior) {
+		return fmt.Errorf("current-tmux Codex behavior %s did not pass:\n%s", behavior, state.currentTmuxTestOutput)
+	}
+	return nil
+}
+
+func codexCurrentTmuxLaunchShouldRequireExecutableWithoutWaiting(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if state.currentTmuxTestErr != nil {
+		return fmt.Errorf("current-tmux Codex behavior suite failed: %w\n%s", state.currentTmuxTestErr, state.currentTmuxTestOutput)
+	}
+	for _, behavior := range []string{"TestQueueCurrentTmuxCodexDoesNotWaitForReadiness", "TestQueueCurrentTmuxCodexRejectsMissingExecutable"} {
+		if !strings.Contains(state.currentTmuxTestOutput, "--- PASS: "+behavior) {
+			return fmt.Errorf("current-tmux Codex behavior %s did not pass:\n%s", behavior, state.currentTmuxTestOutput)
+		}
+	}
+	return nil
+}
+
+func codexQueueFailuresShouldPropagateToSharedCreationRollback(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if state.currentTmuxTestErr != nil {
+		return fmt.Errorf("current-tmux Codex behavior suite failed: %w\n%s", state.currentTmuxTestErr, state.currentTmuxTestOutput)
+	}
+	for _, behavior := range []string{
+		"TestStartCurrentTmuxHarnessCodexPropagatesQueueFailure",
+		"TestCreateSession_RollsBackEveryPostTmuxFailure/launch",
+	} {
+		if !strings.Contains(state.currentTmuxTestOutput, "--- PASS: "+behavior) {
+			return fmt.Errorf("current-tmux Codex behavior %s did not pass:\n%s", behavior, state.currentTmuxTestOutput)
+		}
+	}
+	return nil
 }
 
 func activeHarnessUsesStartupMode(ctx context.Context, harness, mode string) error {

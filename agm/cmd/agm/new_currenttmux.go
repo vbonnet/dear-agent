@@ -115,18 +115,88 @@ func commitCurrentTmuxManifest(manifestPath, sessionName string) {
 	}
 }
 
+// currentTmuxHarnessRuntime is the narrow interactive boundary used by
+// current-pane creation. Keeping the dispatcher parameterized makes active
+// harness coverage and failure propagation deterministic without replacing the
+// shared creation lifecycle or mutating package-global test hooks.
+type currentTmuxHarnessRuntime struct {
+	startClaude   func(ops.HarnessLaunchSpec) error
+	startCodex    func(ops.HarnessLaunchSpec) (bool, error)
+	startOpenCode func(ops.HarnessLaunchSpec) error
+	startGemini   func(ops.HarnessLaunchSpec) error
+	startAgy      func(ops.HarnessLaunchSpec) error
+	validateCodex func() error
+}
+
+func realCurrentTmuxHarnessRuntime() currentTmuxHarnessRuntime {
+	return currentTmuxHarnessRuntime{
+		startClaude:   startCurrentTmuxClaude,
+		startCodex:    queueCurrentTmuxCodex,
+		startOpenCode: startCurrentTmuxOpenCode,
+		startGemini:   startCurrentTmuxGemini,
+		startAgy:      startCurrentTmuxAgy,
+		validateCodex: validateCodexCredentials,
+	}
+}
+
+type currentTmuxCodexQueueRuntime struct {
+	sendCommand func(sessionName, command string) error
+	lookPath    func(file string) (string, error)
+}
+
+func realCurrentTmuxCodexQueueRuntime() currentTmuxCodexQueueRuntime {
+	return currentTmuxCodexQueueRuntime{sendCommand: tmux.SendCommand, lookPath: exec.LookPath}
+}
+
+// queueCurrentTmuxCodex queues Codex behind the AGM process currently owning
+// the pane. It deliberately does not wait for composer readiness: the shell
+// cannot consume the queued command until AGM finishes metadata registration
+// and returns control of the pane.
+func queueCurrentTmuxCodex(spec ops.HarnessLaunchSpec) (bool, error) {
+	return queueCurrentTmuxCodexWithRuntime(spec, realCurrentTmuxCodexQueueRuntime())
+}
+
+func queueCurrentTmuxCodexWithRuntime(spec ops.HarnessLaunchSpec, runtime currentTmuxCodexQueueRuntime) (bool, error) {
+	if _, err := runtime.lookPath("codex"); err != nil {
+		return false, fmt.Errorf("codex executable is unavailable: %w", err)
+	}
+	launch := ops.BuildHarnessLaunchCommand(spec)
+	if err := runtime.sendCommand(spec.SessionName, launch.Command); err != nil {
+		ui.PrintError(err,
+			"Failed to queue Codex in current tmux pane",
+			"  • Verify Codex is installed: which codex\n"+
+				"  • Test Codex manually: codex --version\n"+
+				"  • Check you're in tmux: echo $TMUX")
+		return false, err
+	}
+	debug.Log("Codex command queued; metadata will finalize before the current shell launches it")
+	ui.PrintSuccess("Queued Codex CLI in current tmux session")
+	return launch.ModeAppliedAtStartup, nil
+}
+
 // startCurrentTmuxHarness dispatches the per-harness startup flow for the
-// in-place (current tmux pane) Claude/Gemini/OpenCode/AGY cases.
+// in-place (current tmux pane) active harnesses and deprecated Gemini
+// compatibility path.
 func startCurrentTmuxHarness(spec ops.HarnessLaunchSpec) error {
+	return startCurrentTmuxHarnessWithRuntime(spec, realCurrentTmuxHarnessRuntime())
+}
+
+func startCurrentTmuxHarnessWithRuntime(spec ops.HarnessLaunchSpec, runtime currentTmuxHarnessRuntime) error {
 	switch spec.Harness {
 	case "claude-code":
-		return startCurrentTmuxClaude(spec)
+		return runtime.startClaude(spec)
+	case "codex-cli":
+		if err := runtime.validateCodex(); err != nil {
+			return err
+		}
+		_, err := runtime.startCodex(spec)
+		return err
 	case "opencode-cli":
-		return startCurrentTmuxOpenCode(spec)
+		return runtime.startOpenCode(spec)
 	case "gemini-cli":
-		return startCurrentTmuxGemini(spec)
+		return runtime.startGemini(spec)
 	case "agy":
-		return startCurrentTmuxAgy(spec)
+		return runtime.startAgy(spec)
 	default:
 		debug.Log("Skipping CLI startup for harness: %s (no CLI configured)", spec.Harness)
 		ui.PrintSuccess(fmt.Sprintf("Session created for %s harness", spec.Harness))

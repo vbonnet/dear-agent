@@ -61,6 +61,14 @@ type TmuxLister interface {
 	ListSessions() ([]string, error)
 }
 
+type tmuxPanePIDGetter interface {
+	GetPanePID(sessionName string) (int, error)
+}
+
+type tmuxSessionKiller interface {
+	KillSession(sessionName string) error
+}
+
 // PanePIDGetter returns the pane PID for a tmux session. Returns 0 and an
 // error if the session or pane doesn't exist.
 type PanePIDGetter func(sessionName string) (int, error)
@@ -109,7 +117,10 @@ type Sweeper struct {
 
 // New creates a Sweeper with the given dependencies.
 func New(cfg Config, tmux TmuxLister, logger *slog.Logger) *Sweeper {
-	return &Sweeper{
+	if logger == nil {
+		logger = slog.Default()
+	}
+	s := &Sweeper{
 		cfg:            cfg,
 		tmux:           tmux,
 		getPanePID:     defaultGetPanePID,
@@ -121,6 +132,17 @@ func New(cfg Config, tmux TmuxLister, logger *slog.Logger) *Sweeper {
 			"orchestrator", "overseer", "meta-", "human",
 		},
 	}
+	if getter, ok := tmux.(tmuxPanePIDGetter); ok {
+		s.getPanePID = getter.GetPanePID
+	}
+	if killer, ok := tmux.(tmuxSessionKiller); ok {
+		s.killSession = func(sessionName string) {
+			if err := killer.KillSession(sessionName); err != nil {
+				logger.Error("[sweeper] kill tmux session failed", "session", sessionName, "error", err)
+			}
+		}
+	}
+	return s
 }
 
 // Sweep runs one sweep pass. It is safe to call from the sentinel daemon's
