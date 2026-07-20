@@ -92,7 +92,6 @@ func TestResumeSessionCodexCommitsEffectsOnlyAfterReadiness(t *testing.T) {
 func TestResumeSessionCodexRollsBackNewTmuxBeforeActivityUpdate(t *testing.T) {
 	setDetachedResumeTestGlobals(t, true)
 	for _, failurePoint := range []string{"dispatch", "wait"} {
-		failurePoint := failurePoint
 		t.Run(failurePoint, func(t *testing.T) {
 			adapter, m, health := setupCodexResumeTransaction(t)
 			storedBefore, err := adapter.GetSession(m.SessionID)
