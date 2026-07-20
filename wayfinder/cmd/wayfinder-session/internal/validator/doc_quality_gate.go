@@ -306,7 +306,7 @@ func builtinReviewIssues(skillName, content string) ([]string, error) {
 }
 
 func hasADRStatusLine(content string) bool {
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		normalized := strings.TrimSpace(strings.ReplaceAll(line, "**", ""))
 		value, found := strings.CutPrefix(normalized, "Status:")
 		if found && strings.TrimSpace(value) != "" {
