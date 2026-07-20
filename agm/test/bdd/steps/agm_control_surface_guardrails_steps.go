@@ -50,7 +50,7 @@ func agmAuditsCobraCommandTestIsolation() error {
 		return fmt.Errorf("read Cobra command-state regression: %w", err)
 	}
 	if !strings.Contains(string(data), "TestCobraCommandValidationIsOrderIndependent") {
-		return fmt.Errorf("Cobra command-state regression does not declare its order-independence contract")
+		return fmt.Errorf("cobra command-state regression does not declare its order-independence contract")
 	}
 	return nil
 }
@@ -87,9 +87,9 @@ func commandValidationTestsShouldExerciseRepeatableExecutionOrders() error {
 		return fmt.Errorf("read Cobra command-state regression: %w", err)
 	}
 	text := string(data)
-	for _, marker := range []string{"newInstallHarnessCommand", "newSessionSearchCommand", "newSessionTagCommand", `name: "forward"`, `name: "reverse"`, "repeat < 3"} {
+	for _, marker := range []string{"newInstallHarnessCommand", "newSessionSearchCommand", "newSessionTagCommand", `name: "forward"`, `name: "reverse"`, "for repeat := range 3"} {
 		if !strings.Contains(text, marker) {
-			return fmt.Errorf("Cobra command-state regression is missing %q", marker)
+			return fmt.Errorf("cobra command-state regression is missing %q", marker)
 		}
 	}
 

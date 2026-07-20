@@ -56,7 +56,7 @@ func TestCobraCommandValidationIsOrderIndependent(t *testing.T) {
 
 	for _, order := range orders {
 		t.Run(order.name, func(t *testing.T) {
-			for repeat := 0; repeat < 3; repeat++ {
+			for repeat := range 3 {
 				for _, index := range order.indexes {
 					test := tests[index]
 					err := executeFreshCommandForTest(t, test.newCommand, test.args)

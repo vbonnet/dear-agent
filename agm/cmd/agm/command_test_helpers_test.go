@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -73,8 +74,7 @@ func restoreCommandTreeFlagsForTest(t *testing.T, root *cobra.Command) {
 	visit(root)
 
 	t.Cleanup(func() {
-		for i := len(states) - 1; i >= 0; i-- {
-			state := states[i]
+		for _, state := range slices.Backward(states) {
 			var err error
 			if sliceValue, ok := state.flag.Value.(pflag.SliceValue); ok {
 				err = sliceValue.Replace(state.slice)
