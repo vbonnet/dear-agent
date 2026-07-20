@@ -101,3 +101,9 @@ Feature: Test support package guardrails
     Then trust protocol setup should run only for trust scenarios
     And trust protocol hooks should restore HOME and shared Go cache variables
     And trust protocol cleanup should remove read-only owned module trees
+
+  Scenario: Performance workloads wait for observed client readiness
+    Given AGM performance workload sources are configured
+    When AGM validates performance client readiness
+    Then performance workloads should use bounded hub client readiness
+    And churn cleanup should be observed before stable clients disconnect

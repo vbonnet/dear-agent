@@ -76,6 +76,10 @@ func RegisterTestSupportPackageGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^trust protocol setup should run only for trust scenarios$`, trustProtocolSetupShouldBeScoped)
 	ctx.Step(`^trust protocol hooks should restore HOME and shared Go cache variables$`, trustProtocolHooksShouldRestoreEnvironment)
 	ctx.Step(`^trust protocol cleanup should remove read-only owned module trees$`, trustProtocolCleanupShouldRemoveReadOnlyModuleTrees)
+	ctx.Step(`^AGM performance workload sources are configured$`, agmPerformanceWorkloadSourcesAreConfigured)
+	ctx.Step(`^AGM validates performance client readiness$`, agmValidatesPerformanceClientReadiness)
+	ctx.Step(`^performance workloads should use bounded hub client readiness$`, performanceWorkloadsUseBoundedHubClientReadiness)
+	ctx.Step(`^churn cleanup should be observed before stable clients disconnect$`, churnCleanupIsObservedBeforeStableClientsDisconnect)
 }
 
 func trustProtocolSetupShouldBeScoped(ctx context.Context) error {
@@ -123,6 +127,61 @@ func requireTrustProtocolIsolationTests(ctx context.Context, tests ...string) er
 		if !strings.Contains(state.trustIsolationOutput, "--- PASS: "+test) {
 			return fmt.Errorf("trust protocol isolation test %s did not pass:\n%s", test, state.trustIsolationOutput)
 		}
+	}
+	return nil
+}
+
+func agmPerformanceWorkloadSourcesAreConfigured() error {
+	_, err := os.Stat(filepath.Join(packageSpecBDDRepoRoot(), "agm", "test", "performance", "eventbus_load_test.go"))
+	return err
+}
+
+func agmValidatesPerformanceClientReadiness() error {
+	return nil
+}
+
+func performanceWorkloadsUseBoundedHubClientReadiness() error {
+	data, err := os.ReadFile(filepath.Join(packageSpecBDDRepoRoot(), "agm", "test", "performance", "eventbus_load_test.go"))
+	if err != nil {
+		return err
+	}
+	source := string(data)
+	for _, required := range []string{
+		"func waitForClientCount(",
+		"deadline := time.Now().Add(5 * time.Second)",
+		"waitForClientCount(t, hub, 1)",
+		"waitForClientCount(t, hub, numClients)",
+	} {
+		if !strings.Contains(source, required) {
+			return fmt.Errorf("performance workload lacks bounded client readiness %q", required)
+		}
+	}
+	return nil
+}
+
+func churnCleanupIsObservedBeforeStableClientsDisconnect() error {
+	data, err := os.ReadFile(filepath.Join(packageSpecBDDRepoRoot(), "agm", "test", "performance", "eventbus_load_test.go"))
+	if err != nil {
+		return err
+	}
+	source := string(data)
+	churnStart := strings.Index(source, "func TestConnectionChurn(")
+	if churnStart < 0 {
+		return fmt.Errorf("connection churn workload is missing")
+	}
+	churn := source[churnStart:]
+	registered := strings.Index(churn, "waitForClientCount(t, hub, stableClients+1)")
+	closed := strings.Index(churn, "ephConn.Close()")
+	unregistered := -1
+	if closed >= 0 {
+		if relative := strings.Index(churn[closed:], "waitForClientCount(t, hub, stableClients)"); relative >= 0 {
+			unregistered = closed + relative
+		}
+	}
+	stableClosed := strings.Index(churn, "// Close stable connections to unblock ReadMessage in receiver goroutines.")
+	if registered < 0 || closed < 0 || unregistered < 0 || stableClosed < 0 ||
+		registered >= closed || closed >= unregistered || unregistered >= stableClosed {
+		return fmt.Errorf("connection churn does not observe ephemeral registration and cleanup before stable disconnect")
 	}
 	return nil
 }
