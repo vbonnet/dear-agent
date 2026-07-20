@@ -18,10 +18,8 @@ import (
 // package area documents itself with a SPEC.md; this check makes the
 // convention enforceable.
 //
-// The check is the first concrete slice of the Outcomes framework
-// (docs/design/outcomes-framework.md) — the spec-compliance outcome
-// decomposes into coverage / staleness / conformance, and this is
-// the cheapest tier.
+// Spec compliance decomposes into coverage, staleness, and conformance; this
+// is the cheapest check.
 //
 // Config knobs:
 //   - roots: []string — directories whose direct children must each

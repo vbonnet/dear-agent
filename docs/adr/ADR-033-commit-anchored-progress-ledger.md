@@ -1,11 +1,10 @@
 # ADR-033: Commit-Anchored Progress Ledger for Long-Running Workers
 
-Status: Accepted (2026-06-21) · Bead ce-ek4f · advisory 2026-06-21 ID-002 · relates [018](ADR-018-graceful-exit-framework-default.md), [023](ADR-023-friction-reporting-and-session-handoff.md)
+Status: Accepted (2026-06-21) · Bead ce-ek4f · advisory 2026-06-21 ID-002 · relates [018](ADR-018-graceful-exit-framework-default.md)
 
 A long-running Worker that compacts or restarts loses its in-flight progress:
-the context window is lossy, the bead note is written once at the end, and the
-[ADR-023](ADR-023-friction-reporting-and-session-handoff.md) handoff manifest is
-for a *deliberate cut* to a new session, not for resuming the same one. Between
+the context window is lossy, the bead note is written once at the end, and a
+deliberate handoff to a new session does not resume the same one. Between
 those, a Worker mid-task has no durable, granular record of "what's done, what's
 next." It re-derives state from a summary — and re-derivation drifts.
 
@@ -25,8 +24,8 @@ Ledger-Bead: ce-xxxx
 ```
 
 Why a commit and not a file: a commit binds the progress claim to an actual tree
-SHA, so the ledger **cannot lie about what code exists** — it is immune to the
-stale-manifest failure mode ([ADR-023 §H6](ADR-023-friction-reporting-and-session-handoff.md)).
+SHA, so the ledger **cannot lie about what code exists** — it is immune to a
+stale prose-manifest failure mode.
 A prose ledger drifts from the tree; a commit *is* the tree.
 
 The noise cost is bounded by the existing workflow: per-milestone WIP commits

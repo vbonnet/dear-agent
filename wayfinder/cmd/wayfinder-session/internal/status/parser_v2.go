@@ -34,6 +34,9 @@ func ParseV2(filePath string) (*StatusV2, error) {
 	if status.SchemaVersion != SchemaVersion {
 		return nil, fmt.Errorf("unsupported schema_version %q; expected %s", status.SchemaVersion, SchemaVersion)
 	}
+	if err := ValidateV2(&status); err != nil {
+		return nil, fmt.Errorf("invalid Wayfinder V2 status: %w", err)
+	}
 
 	return &status, nil
 }

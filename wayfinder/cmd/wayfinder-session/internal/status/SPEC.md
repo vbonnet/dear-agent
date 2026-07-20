@@ -7,7 +7,7 @@
 
 ## EARS requirements
 
-**WFSTATUS-01** When status is parsed, the system shall require `schema_version: "2.0"`.
+**WFSTATUS-01** When status is parsed, the system shall require the complete canonical V2 schema, including `schema_version: "2.0"`, required fields, valid enums, consistent phase history, and valid conditional state.
 
 **WFSTATUS-02** When status contains an unsupported schema version, the system shall return an error without normalization or fallback.
 

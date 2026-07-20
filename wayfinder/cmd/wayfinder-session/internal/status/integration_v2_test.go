@@ -261,14 +261,9 @@ func TestInvalidExampleFiles(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			status, err := ParseV2(tt.file)
-			if err != nil {
-				t.Fatalf("Failed to parse %s: %v", tt.file, err)
-			}
-
-			err = ValidateV2(status)
+			_, err := ParseV2(tt.file)
 			if err == nil {
-				t.Errorf("Expected validation to fail for %s", tt.file)
+				t.Errorf("Expected canonical parse to reject %s", tt.file)
 				return
 			}
 

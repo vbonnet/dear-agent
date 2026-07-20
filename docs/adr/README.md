@@ -31,8 +31,7 @@ of truth; an ADR loses to it for definitions.
 | [016](ADR-016-recommendation-mcp-server.md) | _Recommendation MCP Server_ | **Superseded by [015](ADR-015-signal-aggregator.md)** |
 | [017](ADR-017-gateway-platform-adapters.md) | Gateway and Platform Adapters | Proposed |
 | [018](ADR-018-graceful-exit-framework-default.md) | Graceful Exit as a Framework Default | Accepted |
-| [022](ADR-022-backlog-suggestion-system.md) | Backlog Suggestion System | Accepted |
-| [023](ADR-023-friction-reporting-and-session-handoff.md) | Friction Reporting & Session Handoff | Proposed (design) |
+| [022](ADR-022-backlog-suggestion-system.md) | Backlog Suggestion System | Deprecated |
 | [029](ADR-029-ralph-wiggum-merge-loop.md) | Ralph Wiggum — host-tick persistent merge loop | Accepted |
 | [030](ADR-030-dependabot-auto-merge.md) | Dependabot Auto-Merge via GitHub Actions | Accepted |
 | [033](ADR-033-commit-anchored-progress-ledger.md) | Commit-Anchored Progress Ledger for Long-Running Workers | Accepted |

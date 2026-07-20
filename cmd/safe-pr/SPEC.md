@@ -1,6 +1,6 @@
 # safe-pr Command Specification
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-07-19 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -34,6 +34,12 @@ creation.
 **SAFE-PR-09** When safe-pr control flow is tested, the system shall replace the GitHub mutation boundary so unit tests cannot create real pull requests.
 
 **SAFE-PR-10** When safe-pr runs the repository full preflight, the system shall allow at least twenty minutes before terminating the gate.
+
+**SAFE-PR-11** When `create --draft` succeeds, the system shall leave the pull request unarmed for a human to advance.
+
+**SAFE-PR-12** When non-draft PR creation succeeds, the system shall attempt to arm squash auto-merge.
+
+**SAFE-PR-13** When draft detection scans GitHub CLI arguments, the system shall treat `-R` and every other value-taking shorthand as consuming its repository value rather than interpreting that value as Boolean flags.
 
 ## BDD Traceability
 
