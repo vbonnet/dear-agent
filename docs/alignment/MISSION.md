@@ -2,7 +2,7 @@
 title: Mission
 version: "2.0"
 status: active
-date: "2026-07-18"
+date: "2026-07-19"
 adr_ref: docs/adr/ADR-002-vroom-execution-architecture
 context_ref: CONTEXT.md
 scope: dear-agent
@@ -10,7 +10,7 @@ scope: dear-agent
 
 # Mission
 
-<!-- Last audited at: 2026-07-18 -->
+<!-- Last audited at: 2026-07-19 -->
 
 `MISSION.md` is the canonical source for this project's purpose and the
 VROOM/AGM ownership boundary.
@@ -23,14 +23,16 @@ AGM supplies the session runtime VROOM drives.
 
 ## Ownership
 
-VROOM owns prioritization, dispatch decisions, supervision, and output
-verification. AGM owns session lifecycle mechanics: session creation, process
-execution, messaging, monitoring telemetry, and archival.
+VROOM owns prioritization, dispatch decisions, supervision, acceptance
+criteria, and the final decision that work is acceptable. AGM owns session
+lifecycle and verification mechanics: session creation, process execution,
+messaging, monitoring telemetry, requested check execution, and archival.
 
 This boundary separates decisions about **what work should happen and whether
 its result is acceptable** from mechanisms that **run and observe agent
-sessions**. AGM reports session state; it does not set priorities or declare a
-work product correct.
+sessions**. AGM may report session or batch checks as `VERIFIED` when supplied
+assertions pass. That status is evidence for VROOM; it is not an independent
+acceptance decision.
 
 ## Operating principles
 

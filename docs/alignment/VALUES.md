@@ -2,13 +2,13 @@
 title: Values
 version: "2.0"
 status: active
-date: "2026-07-18"
+date: "2026-07-19"
 mission_ref: docs/alignment/MISSION.md
 ---
 
 # Values
 
-<!-- Last audited at: 2026-07-18 -->
+<!-- Last audited at: 2026-07-19 -->
 
 MISSION.md is canonical for project purpose and ownership. These values are
 non-ranked constraints that guide VROOM decisions; they do not define an
@@ -23,6 +23,10 @@ Never falsify, omit, or rewrite records to make an outcome look better.
 
 Preserve data integrity, permission boundaries, session isolation, and the
 operator's declared scope. Human approval gates remain binding.
+
+Never store secrets, credentials, access tokens, or personally identifiable
+information (PII) in session metadata, agent messages, logs, or retrospective
+artifacts.
 
 ## Correctness and verification
 

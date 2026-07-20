@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-const ownershipContract = "VROOM owns prioritization, dispatch decisions, supervision, and output verification. AGM owns session lifecycle mechanics: session creation, process execution, messaging, monitoring telemetry, and archival."
+const ownershipContract = "VROOM owns prioritization, dispatch decisions, supervision, acceptance criteria, and the final decision that work is acceptable. AGM owns session lifecycle and verification mechanics: session creation, process execution, messaging, monitoring telemetry, requested check execution, and archival."
 
 func TestAlignmentDocumentsUseCanonicalMissionLanguage(t *testing.T) {
 	root := repoRoot(t)
@@ -34,6 +34,23 @@ func TestAlignmentDocumentsUseCanonicalMissionLanguage(t *testing.T) {
 	rootGoal := readFile(t, filepath.Join(root, "GOAL.md"))
 	if !strings.Contains(rootGoal, "docs/alignment/MISSION.md") || !strings.Contains(rootGoal, "canonical") {
 		t.Fatal("root GOAL.md must defer project purpose to the canonical mission")
+	}
+}
+
+func TestAlignmentDocumentsPreservePrivacyAndVerificationBoundaries(t *testing.T) {
+	root := repoRoot(t)
+	values := normalizeWhitespace(readFile(t, filepath.Join(root, "docs", "alignment", "VALUES.md")))
+	for _, required := range []string{"secrets", "personally identifiable information (PII)", "session metadata", "retrospective artifacts"} {
+		if !strings.Contains(values, required) {
+			t.Fatalf("VALUES.md must preserve privacy boundary %q", required)
+		}
+	}
+
+	mission := normalizeWhitespace(readFile(t, filepath.Join(root, "docs", "alignment", "MISSION.md")))
+	for _, required := range []string{"session or batch checks as `VERIFIED`", "evidence for VROOM", "not an independent acceptance decision"} {
+		if !strings.Contains(mission, required) {
+			t.Fatalf("MISSION.md must distinguish AGM verification mechanics from VROOM acceptance: missing %q", required)
+		}
 	}
 }
 

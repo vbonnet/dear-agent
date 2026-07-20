@@ -13,7 +13,7 @@ codebase, that collision is documented in
 [§ Known Terminology Collisions](#known-terminology-collisions) and treated as a
 bug to be paid down, not a fact to live with.
 
-> **Status note (2026-07-18):** This file was created alongside a correction of
+> **Status note (2026-07-19):** This file was created alongside a correction of
 > the VROOM architecture docs. Several pre-existing documents described an
 > earlier, inaccurate VROOM model (a five-role "Verifier/Requester/Orchestrator/
 > Overseer/Meta-Orchestrator" mesh with a lexicographic value evaluator). That
@@ -207,9 +207,12 @@ a Worker" is a VROOM statement; "`agm session new` starts a tmux session" is an
 AGM statement. AGM has no opinion about roadmaps, prioritization, or supervisory
 roles — that is all VROOM.
 
-VROOM owns prioritization, dispatch decisions, supervision, and output
-verification. AGM owns session lifecycle mechanics: session creation, process
-execution, messaging, monitoring telemetry, and archival.
+VROOM owns prioritization, dispatch decisions, supervision, acceptance
+criteria, and the final decision that work is acceptable. AGM owns session
+lifecycle and verification mechanics: session creation, process execution,
+messaging, monitoring telemetry, requested check execution, and archival.
+AGM's `session verify` and `batch verify` commands report whether supplied
+assertions pass; VROOM interprets that evidence and owns final acceptance.
 
 AGM has its own internal ADRs under `agm/docs/adr/` and `agm/cmd/.../adr/`. Those
 are legitimately AGM-scoped. **Cross-cutting / above-AGM architecture (like
