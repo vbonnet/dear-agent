@@ -8,7 +8,7 @@
 
 **DOLTR-03** When an isolated SQLite test store resolves a session by harness conversation UUID, the isolated SQLite test store shall use SQLite-compatible JSON extraction and return the same matching manifest semantics as production Dolt.
 
-**DOLTR-04** When a Go test or explicitly marked built test subprocess resolves Dolt configuration, the system shall require its workspace to equal `ENGRAM_TEST_WORKSPACE` and its database to equal that workspace or the shared `agm_test` target before connecting.
+**DOLTR-04** When a Go test or explicitly marked built test subprocess resolves Dolt configuration or constructs an adapter directly, the system shall require its workspace to equal `ENGRAM_TEST_WORKSPACE` and its database to equal that workspace or the shared `agm_test` target before connecting.
 
 ## BDD Traceability
 

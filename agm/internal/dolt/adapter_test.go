@@ -2,6 +2,7 @@ package dolt
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -149,6 +150,25 @@ func TestValidateTestTargetUsesPositiveAllowlist(t *testing.T) {
 	}
 }
 
+func TestNewRejectsDirectProductionTargetInTests(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	lookupEnv = os.LookupEnv
+	t.Cleanup(func() { lookupEnv = originalLookupEnv })
+	t.Setenv("ENGRAM_TEST_MODE", "1")
+	t.Setenv("ENGRAM_TEST_WORKSPACE", "test")
+
+	_, err := New(&Config{
+		Workspace: "oss",
+		Database:  "oss",
+		Host:      "127.0.0.1",
+		Port:      "3307",
+		User:      "root",
+	})
+	if err == nil || !strings.Contains(err.Error(), "TEST POLLUTION BLOCKED") {
+		t.Fatalf("New() error = %v, want direct production target rejection", err)
+	}
+}
+
 func TestBuildDSN(t *testing.T) {
 	config := &Config{
 		User:     "testuser",
@@ -175,6 +195,8 @@ func getTestAdapter(t *testing.T) *Adapter {
 	}
 
 	// Set up test environment
+	t.Setenv("ENGRAM_TEST_MODE", "1")
+	t.Setenv("ENGRAM_TEST_WORKSPACE", "test")
 	t.Setenv("WORKSPACE", "test")
 	t.Setenv("DOLT_PORT", "3307")
 	os.Unsetenv("DOLT_DATABASE") // Let it default to workspace name
