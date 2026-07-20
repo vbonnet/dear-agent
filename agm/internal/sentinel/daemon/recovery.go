@@ -4,7 +4,6 @@ package daemon
 import (
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -177,11 +176,18 @@ func (h *RecoveryHistory) RecordAttempt(strategy RecoveryStrategy, success bool,
 // (non-destructive) and only escalates to tmux key injection after
 // FlagEscalationTimeout (60s) has passed without recovery.
 func ApplyRecovery(sessionName string, strategy RecoveryStrategy, client *tmux.Client) (*RecoveryResult, error) {
+	runner := newSocketCommandRunner("")
+	return applyRecoveryWithRunner(sessionName, strategy, client, func(args ...string) ([]byte, error) {
+		return runner("agm", args...)
+	})
+}
+
+func applyRecoveryWithRunner(sessionName string, strategy RecoveryStrategy, client *tmux.Client, runAGM func(args ...string) ([]byte, error)) (*RecoveryResult, error) {
 	startTime := time.Now()
 
 	// Safety check: don't send ESC/Ctrl-C/restart if a human is present
 	if strategy != RecoveryManual {
-		if humanPresent := isHumanPresent(sessionName); humanPresent {
+		if humanPresent := isHumanPresentWithRunner(sessionName, runAGM); humanPresent {
 			// Downgrade to manual — log but don't act
 			return &RecoveryResult{
 				Strategy:   RecoveryManual,
@@ -373,8 +379,14 @@ func formatRejectionForTmux(message string, pattern *enforcement.Pattern) string
 // observe it without blocking on it. Fails open (returns false) if the agm
 // binary is unavailable or the check fails.
 func isHumanPresent(sessionName string) bool {
-	output, err := exec.Command("agm", "safety", "check", sessionName, "--json",
-		"--skip-init", "--skip-mid-response").CombinedOutput()
+	runner := newSocketCommandRunner("")
+	return isHumanPresentWithRunner(sessionName, func(args ...string) ([]byte, error) {
+		return runner("agm", args...)
+	})
+}
+
+func isHumanPresentWithRunner(sessionName string, runAGM func(args ...string) ([]byte, error)) bool {
+	output, err := runAGM("safety", "check", sessionName, "--json", "--skip-init", "--skip-mid-response")
 	if err != nil {
 		// Try to parse even on exit code 1 (violations found)
 		var result safetyCheckResult

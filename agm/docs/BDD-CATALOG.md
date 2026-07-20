@@ -134,6 +134,8 @@ verification-skip recovery policies.
 - Every package SPEC points back to the executable guardrail feature.
 - Sentinel discovery and lifecycle tests stay on the exact configured tmux
   socket rather than inspecting ambient user sessions.
+- Nested AGM recovery commands inherit the exact configured socket instead of
+  falling back to the ambient default server.
 - Unknown cleanup evidence remains conservative rather than destructive.
 
 ---
@@ -184,8 +186,10 @@ creation, and terminal state detection.
 - A Codex CLI composer pane is detected as `ready`.
 - An idle Codex composer allows direct delivery.
 - A Codex trust prompt is queued rather than treated as a sendable prompt.
-- Codex current-pane creation validates credentials and queues the canonical
-  launch command without waiting behind the AGM process that owns the pane.
+- The top-level new command routes in-tmux, non-detached Codex creation into
+  the current pane, validates credentials and the executable, and queues the
+  canonical launch command without waiting behind the AGM process that owns
+  the pane.
 - Active harnesses are exactly Claude Code, Codex CLI, AGY, and OpenCode.
 - Gemini CLI remains deprecated compatibility, not active parity.
 - Active harness factories use canonical names.

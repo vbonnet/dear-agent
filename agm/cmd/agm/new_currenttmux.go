@@ -141,10 +141,11 @@ func realCurrentTmuxHarnessRuntime() currentTmuxHarnessRuntime {
 
 type currentTmuxCodexQueueRuntime struct {
 	sendCommand func(sessionName, command string) error
+	lookPath    func(file string) (string, error)
 }
 
 func realCurrentTmuxCodexQueueRuntime() currentTmuxCodexQueueRuntime {
-	return currentTmuxCodexQueueRuntime{sendCommand: tmux.SendCommand}
+	return currentTmuxCodexQueueRuntime{sendCommand: tmux.SendCommand, lookPath: exec.LookPath}
 }
 
 // queueCurrentTmuxCodex queues Codex behind the AGM process currently owning
@@ -156,6 +157,9 @@ func queueCurrentTmuxCodex(spec ops.HarnessLaunchSpec) (bool, error) {
 }
 
 func queueCurrentTmuxCodexWithRuntime(spec ops.HarnessLaunchSpec, runtime currentTmuxCodexQueueRuntime) (bool, error) {
+	if _, err := runtime.lookPath("codex"); err != nil {
+		return false, fmt.Errorf("Codex executable is unavailable: %w", err)
+	}
 	launch := ops.BuildHarnessLaunchCommand(spec)
 	if err := runtime.sendCommand(spec.SessionName, launch.Command); err != nil {
 		ui.PrintError(err,

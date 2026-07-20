@@ -33,4 +33,5 @@ Feature: AGM supervision and recovery guardrails
     Given sentinel monitoring owns an explicit tmux socket
     When AGM validates sentinel tmux isolation
     Then sentinel discovery should use only the configured socket
+    And nested AGM recovery commands should inherit the configured socket
     And sentinel lifecycle tests should not inspect ambient tmux sessions

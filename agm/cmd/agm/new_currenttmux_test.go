@@ -87,6 +87,7 @@ func TestQueueCurrentTmuxCodexDoesNotWaitForReadiness(t *testing.T) {
 	}
 	wantCommand := ops.BuildHarnessLaunchCommand(spec).Command
 	modeApplied, err := queueCurrentTmuxCodexWithRuntime(spec, currentTmuxCodexQueueRuntime{
+		lookPath: func(string) (string, error) { return "/usr/local/bin/codex", nil },
 		sendCommand: func(sessionName, command string) error {
 			gotSession, gotCommand = sessionName, command
 			return nil
@@ -100,6 +101,48 @@ func TestQueueCurrentTmuxCodexDoesNotWaitForReadiness(t *testing.T) {
 	}
 	if gotSession != spec.SessionName || gotCommand != wantCommand {
 		t.Fatalf("queued (%q, %q), want (%q, %q)", gotSession, gotCommand, spec.SessionName, wantCommand)
+	}
+}
+
+func TestQueueCurrentTmuxCodexRejectsMissingExecutable(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("codex not found")
+	sent := false
+	_, err := queueCurrentTmuxCodexWithRuntime(ops.HarnessLaunchSpec{Harness: "codex-cli"}, currentTmuxCodexQueueRuntime{
+		lookPath: func(string) (string, error) { return "", wantErr },
+		sendCommand: func(string, string) error {
+			sent = true
+			return nil
+		},
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want executable lookup error %v", err, wantErr)
+	}
+	if sent {
+		t.Fatal("Codex command was queued after executable preflight failed")
+	}
+}
+
+func TestStartNewSessionForContextRoutesCurrentTmux(t *testing.T) {
+	t.Parallel()
+
+	var current, separate int
+	err := startNewSessionForContext(true, false, "current", newSessionStartRuntime{
+		currentTmux: func(sessionName string) error {
+			current++
+			if sessionName != "current" {
+				t.Fatalf("session name = %q, want current", sessionName)
+			}
+			return nil
+		},
+		separateTmux: func(string) error { separate++; return nil },
+	})
+	if err != nil {
+		t.Fatalf("startNewSessionForContext() error = %v", err)
+	}
+	if current != 1 || separate != 0 {
+		t.Fatalf("route calls current=%d separate=%d, want 1/0", current, separate)
 	}
 }
 

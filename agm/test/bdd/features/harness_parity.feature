@@ -274,7 +274,8 @@ Feature: Harness parity
     Given current-tmux creation selects Codex CLI
     When AGM validates current-tmux Codex launch wiring
     Then Codex credential validation should precede the canonical launcher
-    And Codex current-tmux launch should not wait behind its own AGM process
+    And the top-level new command should route into current tmux
+    And Codex current-tmux launch should require the executable without waiting behind its own AGM process
     And Codex queue failures should propagate to shared creation rollback
 
   Scenario: Codex send safety is harness-specific

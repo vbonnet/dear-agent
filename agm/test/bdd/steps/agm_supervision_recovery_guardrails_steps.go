@@ -36,6 +36,7 @@ func RegisterAGMSupervisionRecoveryGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^sentinel monitoring owns an explicit tmux socket$`, sentinelMonitoringOwnsAnExplicitTmuxSocket)
 	ctx.Step(`^AGM validates sentinel tmux isolation$`, agmValidatesSentinelTmuxIsolation)
 	ctx.Step(`^sentinel discovery should use only the configured socket$`, sentinelDiscoveryShouldUseOnlyTheConfiguredSocket)
+	ctx.Step(`^nested AGM recovery commands should inherit the configured socket$`, nestedAGMRecoveryCommandsShouldInheritTheConfiguredSocket)
 	ctx.Step(`^sentinel lifecycle tests should not inspect ambient tmux sessions$`, sentinelLifecycleTestsShouldNotInspectAmbientTmuxSessions)
 }
 
@@ -56,7 +57,7 @@ func agmValidatesSentinelTmuxIsolation(ctx context.Context) error {
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test",
 		"./agm/internal/sentinel/tmux", "./agm/internal/sentinel/daemon",
-		"-run", `^Test(NewClientWithSocketUsesOnlyConfiguredSocket|ConfiguredClientActionsUseOnlyConfiguredSocket|NewSessionMonitorUsesOnlyConfiguredTmuxSocket|MonitorStability)$`,
+		"-run", `^Test(NewClientWithSocketUsesOnlyConfiguredSocket|ConfiguredClientActionsUseOnlyConfiguredSocket|NewSessionMonitor(UsesOnlyConfiguredTmuxSocket|PropagatesConfiguredSocketToNestedCommands)|MonitorStability)$`,
 		"-count=1", "-v")
 	cmd.Dir = packageSpecBDDRepoRoot()
 	output, runErr := cmd.CombinedOutput()
@@ -86,6 +87,10 @@ func sentinelLifecycleTestsShouldNotInspectAmbientTmuxSessions(ctx context.Conte
 	return requireSentinelTmuxIsolationBehavior(ctx)
 }
 
+func nestedAGMRecoveryCommandsShouldInheritTheConfiguredSocket(ctx context.Context) error {
+	return requireSentinelTmuxIsolationBehavior(ctx)
+}
+
 func requireSentinelTmuxIsolationBehavior(ctx context.Context) error {
 	state, err := getSentinelTmuxIsolationState(ctx)
 	if err != nil {
@@ -98,6 +103,7 @@ func requireSentinelTmuxIsolationBehavior(ctx context.Context) error {
 		"TestNewClientWithSocketUsesOnlyConfiguredSocket",
 		"TestConfiguredClientActionsUseOnlyConfiguredSocket",
 		"TestNewSessionMonitorUsesOnlyConfiguredTmuxSocket",
+		"TestNewSessionMonitorPropagatesConfiguredSocketToNestedCommands",
 		"TestMonitorStability",
 	} {
 		if !strings.Contains(state.output, "--- PASS: "+behavior) {

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -40,7 +39,9 @@ type SessionMonitor struct {
 	gitDetector   *enforcement.ViolationDetector
 
 	// Configuration
-	config *config.Config
+	config     *config.Config
+	agmBinary  string
+	runCommand combinedOutputRunner
 
 	// State
 	recoveryHistories       map[string]*RecoveryHistory
@@ -136,7 +137,8 @@ func NewSessionMonitor(cfg *config.Config) (*SessionMonitor, error) {
 	logger := logging.DefaultLogger()
 
 	// Create escalation pipeline
-	escalationExecutor := &ExecCommandExecutor{}
+	commandRunner := newSocketCommandRunner(cfg.Tmux.Socket)
+	escalationExecutor := &ExecCommandExecutor{socketPath: cfg.Tmux.Socket}
 	escalationLogger := logging.DefaultLogger()
 	agmBinary := "agm"
 	maxPerHour := 5
@@ -184,6 +186,8 @@ func NewSessionMonitor(cfg *config.Config) (*SessionMonitor, error) {
 		logger.Warn("Failed to create session heartbeat monitor", "error", err)
 	}
 	if sessionHBMonitor != nil {
+		sessionHBMonitor.agmBinary = agmBinary
+		sessionHBMonitor.runCommand = commandRunner
 		sessionHBMonitor.SetTmuxSessionLister(tmuxClient.ListSessions)
 		sessionHBMonitor.SetExemptSessions(cfg.Recovery.ExemptSessions)
 	}
@@ -194,6 +198,8 @@ func NewSessionMonitor(cfg *config.Config) (*SessionMonitor, error) {
 		logger.Warn("Failed to create loop monitor", "error", err)
 	}
 	if loopMon != nil {
+		loopMon.agmBinary = agmBinary
+		loopMon.runCommand = commandRunner
 		loopMon.SetExemptSessions(cfg.Recovery.ExemptSessions)
 		if cfg.LoopMonitoring.EscalationCommand != "" {
 			loopMon.SetEscalationCommand(cfg.LoopMonitoring.EscalationCommand)
@@ -219,6 +225,8 @@ func NewSessionMonitor(cfg *config.Config) (*SessionMonitor, error) {
 		beadsDetector:           beadsDetector,
 		gitDetector:             gitDetector,
 		config:                  cfg,
+		agmBinary:               agmBinary,
+		runCommand:              commandRunner,
 		recoveryHistories:       make(map[string]*RecoveryHistory),
 		incidentLogger:          incidentLogger,
 		dedup:                   NewIncidentDeduplicator(dedupCooldown),
@@ -237,6 +245,22 @@ func NewSessionMonitor(cfg *config.Config) (*SessionMonitor, error) {
 		shutdownTimeout:         monitorShutdownTimeout,
 		CrossSessionThreshold:   3,
 	}, nil
+}
+
+func (m *SessionMonitor) executeAGM(args ...string) ([]byte, error) {
+	binary := m.agmBinary
+	if binary == "" {
+		binary = "agm"
+	}
+	runner := m.runCommand
+	if runner == nil {
+		runner = newSocketCommandRunner("")
+	}
+	return runner(binary, args...)
+}
+
+func (m *SessionMonitor) humanPresent(sessionName string) bool {
+	return isHumanPresentWithRunner(sessionName, m.executeAGM)
 }
 
 // StartMonitoring begins the main daemon monitoring loop.
@@ -479,8 +503,7 @@ func (m *SessionMonitor) autoDenyPermissionPrompt(sessionName string) error {
 
 	// Auto-reject via agm send reject
 	reason := fmt.Sprintf("[sentinel] denied: %s. Logged for investigation. Use agm escape-ui or agm send msg instead of raw tmux commands.", command)
-	rejectCmd := exec.Command("agm", "send", "reject", sessionName, "--reason", reason)
-	output, rejectErr := rejectCmd.CombinedOutput()
+	output, rejectErr := m.executeAGM("send", "reject", sessionName, "--reason", reason)
 	if rejectErr != nil {
 		m.logger.Error("[sentinel] auto-deny failed",
 			"session", sessionName,
@@ -687,7 +710,7 @@ func (m *SessionMonitor) RecoverSession(sessionName string, stuckInfo *SessionSt
 	}
 
 	// Safety check: don't inject messages or apply recovery if a human is present
-	if isHumanPresent(sessionName) {
+	if m.humanPresent(sessionName) {
 		m.logger.Info("Safety guard: human detected, skipping automated recovery",
 			"session", sessionName, "symptom", stuckInfo.Reason)
 		return nil
@@ -747,7 +770,7 @@ func (m *SessionMonitor) RecoverSession(sessionName string, stuckInfo *SessionSt
 	var recoveryResult *RecoveryResult
 	if m.config.Recovery.Enabled {
 		var err error
-		recoveryResult, err = ApplyRecovery(sessionName, strategy, m.tmuxClient)
+		recoveryResult, err = applyRecoveryWithRunner(sessionName, strategy, m.tmuxClient, m.executeAGM)
 		if err != nil {
 			m.logger.Error("Recovery failed for session", "session", sessionName, "error", err)
 		}

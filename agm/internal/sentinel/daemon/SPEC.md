@@ -28,4 +28,4 @@ automation inside explicit circuit-breaker limits.
 
 **SENTD-06** When monitor shutdown is requested, the system shall signal the active monitoring run exactly once and wait no longer than five seconds for completion so an unresponsive external probe cannot block daemon shutdown indefinitely.
 
-**SENTD-07** When a tmux socket is explicitly configured, the system shall restrict sentinel discovery and recovery actions to that exact socket without auto-discovering AGM, legacy, or system tmux sockets.
+**SENTD-07** When a tmux socket is explicitly configured, the system shall restrict sentinel discovery and direct recovery actions to that exact socket and shall pass it as `AGM_TMUX_SOCKET` to nested AGM recovery commands without auto-discovering or targeting AGM, legacy, or system tmux sockets.
