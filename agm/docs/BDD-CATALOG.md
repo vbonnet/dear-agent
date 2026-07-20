@@ -29,6 +29,22 @@ into listing tests that do not actually run.
 
 ## Feature Files
 
+### AGY Saved-Session Discovery
+
+**File:** [`agy_saved_session_discovery.feature`](../test/bdd/features/agy_saved_session_discovery.feature)
+
+**Drives:** `agm/internal/agysession` cache-first metadata lookup and bounded
+newest-first Antigravity log fallback.
+
+**Key scenarios:**
+- Cache hits never enter provider log discovery.
+- Log candidates are ordered by modification time and limited to the newest 64 files.
+- Each candidate read is limited to 2 MiB, while matches inside that budget remain valid.
+- Candidate or byte exhaustion is distinguishable from a complete miss, and oversized lines fail explicitly.
+
+**Why this matters:** Import, association, and post-create metadata capture must
+not inherit unbounded latency from a large or stale provider log directory.
+
 ### Declarative Runtime Guardrails
 
 **File:** [`declarative_runtime_guardrails.feature`](../test/bdd/features/declarative_runtime_guardrails.feature)

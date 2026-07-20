@@ -5,7 +5,9 @@ package agysession
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,9 +16,21 @@ import (
 )
 
 const (
-	workspaceMarker = "Initializing CLI store manager for workspace "
-	maxLogLineSize  = 1024 * 1024
+	workspaceMarker    = "Initializing CLI store manager for workspace "
+	maxLogLineSize     = 1024 * 1024
+	maxAgyLogFiles     = 64
+	maxAgyLogScanBytes = 2 * 1024 * 1024
 )
+
+// ErrLogDiscoveryBudgetExhausted means AGY metadata was not found inside the
+// deterministic newest-first log budget. Callers can distinguish this from a
+// complete bounded search that simply found no matching metadata.
+var ErrLogDiscoveryBudgetExhausted = errors.New("AGY log discovery budget exhausted")
+
+type agyLogCandidates struct {
+	paths   []string
+	omitted int
+}
 
 // Metadata describes a saved AGY conversation discovered from the local AGY
 // app-data directory.
@@ -136,99 +150,151 @@ func workspaceFromLastConversations(appDir, conversationID string) string {
 }
 
 func workspaceFromLogs(appDir, conversationID string) (string, string, error) {
-	logPaths, err := agyLogPaths(appDir)
+	candidates, err := agyLogPaths(appDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", "", fmt.Errorf("no AGY log directory found for conversation %s", conversationID)
 		}
 		return "", "", err
 	}
-	for _, logPath := range logPaths {
-		workspacePath, matched, err := scanLogForConversation(logPath, conversationID)
+	truncatedFiles := 0
+	for _, logPath := range candidates.paths {
+		workspacePath, matched, truncated, err := scanLogForConversation(logPath, conversationID)
 		if err != nil {
 			return "", "", err
+		}
+		if truncated {
+			truncatedFiles++
 		}
 		if matched && workspacePath != "" {
 			return workspacePath, logPath, nil
 		}
 	}
+	if candidates.omitted > 0 || truncatedFiles > 0 {
+		return "", "", logDiscoveryBudgetError("conversation "+conversationID, len(candidates.paths), candidates.omitted, truncatedFiles)
+	}
 	return "", "", fmt.Errorf("failed to determine AGY workspace for conversation %s", conversationID)
 }
 
 func latestConversationForWorkspaceFromLogs(appDir, workspacePath string) (string, string, error) {
-	logPaths, err := agyLogPaths(appDir)
+	candidates, err := agyLogPaths(appDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", "", fmt.Errorf("no AGY log directory found for workspace %s", workspacePath)
 		}
 		return "", "", err
 	}
-	for _, logPath := range logPaths {
-		conversationID, matched, err := scanLogForWorkspace(logPath, workspacePath)
+	truncatedFiles := 0
+	for _, logPath := range candidates.paths {
+		conversationID, matched, truncated, err := scanLogForWorkspace(logPath, workspacePath)
 		if err != nil {
 			return "", "", err
+		}
+		if truncated {
+			truncatedFiles++
 		}
 		if matched && conversationID != "" {
 			return conversationID, logPath, nil
 		}
 	}
+	if candidates.omitted > 0 || truncatedFiles > 0 {
+		return "", "", logDiscoveryBudgetError("workspace "+workspacePath, len(candidates.paths), candidates.omitted, truncatedFiles)
+	}
 	return "", "", fmt.Errorf("no AGY conversation recorded for workspace: %s", workspacePath)
 }
 
-func agyLogPaths(appDir string) ([]string, error) {
+func agyLogPaths(appDir string) (agyLogCandidates, error) {
 	logDir := filepath.Join(appDir, "log")
 	entries, err := os.ReadDir(logDir)
 	if err != nil {
-		return nil, fmt.Errorf("read AGY log directory: %w", err)
+		return agyLogCandidates{}, fmt.Errorf("read AGY log directory: %w", err)
 	}
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].Name() > entries[j].Name()
-	})
-	logPaths := make([]string, 0, len(entries))
+	type candidate struct {
+		path    string
+		name    string
+		modTime time.Time
+	}
+	logs := make([]candidate, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
-		logPaths = append(logPaths, filepath.Join(logDir, entry.Name()))
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			return agyLogCandidates{}, fmt.Errorf("stat AGY log %s: %w", entry.Name(), infoErr)
+		}
+		if !info.Mode().IsRegular() {
+			continue
+		}
+		logs = append(logs, candidate{
+			path: filepath.Join(logDir, entry.Name()), name: entry.Name(), modTime: info.ModTime(),
+		})
 	}
-	return logPaths, nil
+	sort.Slice(logs, func(i, j int) bool {
+		if logs[i].modTime.Equal(logs[j].modTime) {
+			return logs[i].name > logs[j].name
+		}
+		return logs[i].modTime.After(logs[j].modTime)
+	})
+	omitted := 0
+	if len(logs) > maxAgyLogFiles {
+		omitted = len(logs) - maxAgyLogFiles
+		logs = logs[:maxAgyLogFiles]
+	}
+	paths := make([]string, len(logs))
+	for i, log := range logs {
+		paths[i] = log.path
+	}
+	return agyLogCandidates{paths: paths, omitted: omitted}, nil
 }
 
-func scanLogForConversation(logPath, conversationID string) (workspacePath string, matched bool, err error) {
+func scanLogForConversation(logPath, conversationID string) (workspacePath string, matched, truncated bool, err error) {
 	file, err := os.Open(logPath)
 	if err != nil {
-		return "", false, fmt.Errorf("open AGY log %s: %w", logPath, err)
+		return "", false, false, fmt.Errorf("open AGY log %s: %w", logPath, err)
 	}
 	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return "", false, false, fmt.Errorf("stat AGY log %s: %w", logPath, err)
+	}
+	truncated = info.Size() > maxAgyLogScanBytes
 
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(io.LimitReader(file, maxAgyLogScanBytes))
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLogLineSize)
+	currentWorkspace := ""
 	for scanner.Scan() {
 		line := scanner.Text()
 		if detectedWorkspacePath, ok := workspaceFromLogLine(line); ok {
-			workspacePath = detectedWorkspacePath
+			currentWorkspace = detectedWorkspacePath
 		}
 		if strings.Contains(line, "Created conversation "+conversationID) ||
 			strings.Contains(line, "Resuming conversation "+conversationID) ||
 			strings.Contains(line, "GetConversationDetail: found conversation "+conversationID) {
 			matched = true
+			workspacePath = currentWorkspace
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return "", false, fmt.Errorf("scan AGY log %s: %w", logPath, err)
+		return "", false, truncated, fmt.Errorf("scan AGY log %s: %w", logPath, err)
 	}
-	return workspacePath, matched, nil
+	return workspacePath, matched, truncated, nil
 }
 
-func scanLogForWorkspace(logPath, workspacePath string) (conversationID string, matched bool, err error) {
+func scanLogForWorkspace(logPath, workspacePath string) (conversationID string, matched, truncated bool, err error) {
 	file, err := os.Open(logPath)
 	if err != nil {
-		return "", false, fmt.Errorf("open AGY log %s: %w", logPath, err)
+		return "", false, false, fmt.Errorf("open AGY log %s: %w", logPath, err)
 	}
 	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return "", false, false, fmt.Errorf("stat AGY log %s: %w", logPath, err)
+	}
+	truncated = info.Size() > maxAgyLogScanBytes
 
 	currentWorkspace := ""
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(io.LimitReader(file, maxAgyLogScanBytes))
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLogLineSize)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -256,9 +322,14 @@ func scanLogForWorkspace(logPath, workspacePath string) (conversationID string, 
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return "", false, fmt.Errorf("scan AGY log %s: %w", logPath, err)
+		return "", false, truncated, fmt.Errorf("scan AGY log %s: %w", logPath, err)
 	}
-	return conversationID, matched, nil
+	return conversationID, matched, truncated, nil
+}
+
+func logDiscoveryBudgetError(target string, scanned, omitted, truncated int) error {
+	return fmt.Errorf("%w for %s: scanned %d newest logs (max %d), at most %d bytes each; omitted %d older logs and truncated %d oversized logs",
+		ErrLogDiscoveryBudgetExhausted, target, scanned, maxAgyLogFiles, maxAgyLogScanBytes, omitted, truncated)
 }
 
 func extractConversationID(line, marker string) string {

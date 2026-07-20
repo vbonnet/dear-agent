@@ -60,6 +60,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	steps.RegisterScanLoopSteps(ctx)
 	steps.RegisterStallDetectionSteps(ctx)
 	steps.RegisterTestSupportPackageGuardrailSteps(ctx)
+	steps.RegisterAgySavedSessionDiscoverySteps(ctx)
 	steps.RegisterHarnessParitySteps(ctx)
 	steps.RegisterHarnessConfigSurfaceGuardrailSteps(ctx)
 	steps.RegisterInstructionParitySteps(ctx)
