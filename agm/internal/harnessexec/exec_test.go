@@ -341,7 +341,9 @@ func TestExecutorRejectsUnvalidatedArguments(t *testing.T) {
 	}{
 		{name: "unknown flag", protocol: CodexProtocol, args: []string{"--unknown", "value"}},
 		{name: "positionals", protocol: CodexProtocol, args: []string{"--session", "s", "extra"}},
-		{name: "control character", protocol: CodexProtocol, args: []string{"--session", "s\nnext", "--model", "m", "--workdir", "/tmp", "--sandbox", "workspace-write"}},
+		{name: "newline control character", protocol: CodexProtocol, args: []string{"--session", "s\nnext", "--model", "m", "--workdir", "/tmp", "--sandbox", "workspace-write"}},
+		{name: "tab control character", protocol: CodexProtocol, args: []string{"--session", "s\tnext", "--model", "m", "--workdir", "/tmp", "--sandbox", "workspace-write"}},
+		{name: "escape control character", protocol: ClaudeProtocol, args: []string{"--session", "s\x1bnext", "--model", "m"}},
 		{name: "sandbox", protocol: CodexProtocol, args: []string{"--session", "s", "--model", "m", "--workdir", "/tmp", "--sandbox", "unsafe"}},
 		{name: "permission", protocol: ClaudeProtocol, args: []string{"--session", "s", "--model", "m", "--permission", "unsafe"}},
 		{name: "non-finite budget", protocol: ClaudeProtocol, args: []string{"--session", "s", "--model", "m", "--max-budget-usd", "NaN"}},

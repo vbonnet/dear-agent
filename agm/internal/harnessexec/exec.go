@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"unicode"
 
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
@@ -373,7 +374,7 @@ func validateText(name, value string) error {
 	if value == "" {
 		return fmt.Errorf("invalid harness launch request: %s is required", name)
 	}
-	if strings.ContainsAny(value, "\x00\r\n") {
+	if strings.IndexFunc(value, unicode.IsControl) >= 0 {
 		return fmt.Errorf("invalid harness launch request: %s contains control characters", name)
 	}
 	return nil
