@@ -3,6 +3,7 @@ package launchparity
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
@@ -13,6 +14,48 @@ type Contract struct {
 	InteractiveToken string
 	ModeToken        string
 	ExitSuffix       string
+}
+
+// AgyCommandSpec is the complete native AGY launch/resume contract. Callers
+// resolve model aliases before crossing this boundary; command ordering,
+// permission mapping, quoting, and persistence stay centralized here.
+type AgyCommandSpec struct {
+	WorkDir        string
+	ResolvedModel  string
+	PermissionMode string
+	ConversationID string
+	ExtraAddDirs   []string
+	Persistent     bool
+}
+
+// AgyCommand is the shell command plus the permission-policy outcome needed
+// by lifecycle callers.
+type AgyCommand struct {
+	Command              string
+	ModeAppliedAtStartup bool
+}
+
+// BuildAgyCommand constructs one canonical AGY interactive command for both
+// fresh launches and cold resumes.
+func BuildAgyCommand(spec AgyCommandSpec) AgyCommand {
+	var b strings.Builder
+	fmt.Fprintf(&b, "cd %s && agy --model %s", shellQuote(spec.WorkDir), shellQuote(spec.ResolvedModel))
+	modeFlag := AgyPermissionModeFlag(spec.PermissionMode)
+	if modeFlag != "" {
+		b.WriteString(" " + modeFlag)
+	}
+	if spec.ConversationID != "" {
+		fmt.Fprintf(&b, " --conversation %s", shellQuote(spec.ConversationID))
+	}
+	for _, dir := range spec.ExtraAddDirs {
+		fmt.Fprintf(&b, " --add-dir %s", shellQuote(dir))
+	}
+	b.WriteString(ExitSuffix(spec.Persistent))
+	return AgyCommand{Command: b.String(), ModeAppliedAtStartup: modeFlag != ""}
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 // Resolve returns the startup contract for an active harness.

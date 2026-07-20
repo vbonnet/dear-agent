@@ -120,32 +120,27 @@ func buildCodexLaunchCommand(spec HarnessLaunchSpec, exitSuffix string) HarnessL
 	return HarnessLaunchCommand{Command: b.String(), ModeAppliedAtStartup: modeApplied}
 }
 
-func buildAgyLaunchCommand(spec HarnessLaunchSpec, exitSuffix string) HarnessLaunchCommand {
-	return buildAgyCommand(spec, "", exitSuffix)
+func buildAgyLaunchCommand(spec HarnessLaunchSpec, _ string) HarnessLaunchCommand {
+	return buildAgyCommand(spec, "")
 }
 
 // BuildAgyResumeCommand builds AGY's native cold-resume command from the same
 // model, permission, directory, quoting, and persistence policy used at create.
 func BuildAgyResumeCommand(spec HarnessLaunchSpec, conversationID string) HarnessLaunchCommand {
-	return buildAgyCommand(spec, conversationID, launchparity.ExitSuffix(spec.Persistent))
+	return buildAgyCommand(spec, conversationID)
 }
 
-func buildAgyCommand(spec HarnessLaunchSpec, conversationID, exitSuffix string) HarnessLaunchCommand {
+func buildAgyCommand(spec HarnessLaunchSpec, conversationID string) HarnessLaunchCommand {
 	resolvedModel := agent.ResolveModelFullName("agy", spec.Model)
-	var b strings.Builder
-	fmt.Fprintf(&b, "cd %s && agy --model %s", shellQuoteArg(spec.WorkDir), shellQuoteArg(resolvedModel))
-	modeFlag := launchparity.AgyPermissionModeFlag(spec.PermissionMode)
-	if modeFlag != "" {
-		b.WriteString(" " + modeFlag)
-	}
-	if conversationID != "" {
-		fmt.Fprintf(&b, " --conversation %s", shellQuoteArg(conversationID))
-	}
-	for _, dir := range spec.ExtraAddDirs {
-		fmt.Fprintf(&b, " --add-dir %s", shellQuoteArg(dir))
-	}
-	b.WriteString(exitSuffix)
-	return HarnessLaunchCommand{Command: b.String(), ModeAppliedAtStartup: modeFlag != ""}
+	command := launchparity.BuildAgyCommand(launchparity.AgyCommandSpec{
+		WorkDir:        spec.WorkDir,
+		ResolvedModel:  resolvedModel,
+		PermissionMode: spec.PermissionMode,
+		ConversationID: conversationID,
+		ExtraAddDirs:   spec.ExtraAddDirs,
+		Persistent:     spec.Persistent,
+	})
+	return HarnessLaunchCommand{Command: command.Command, ModeAppliedAtStartup: command.ModeAppliedAtStartup}
 }
 
 func appendTelemetryEnv(b *strings.Builder, sessionID string) {
