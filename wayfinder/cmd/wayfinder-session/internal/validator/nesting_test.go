@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
@@ -23,6 +24,17 @@ func createStatusFile(t *testing.T, dir string, projectStatus string, allPhasesC
 		for _, phase := range status.AllPhases() {
 			st.UpdatePhase(phase, status.PhaseStatusV2Completed, status.OutcomeSuccess)
 		}
+		approved := true
+		testsCreated := true
+		st.FindWaypointHistory(status.WaypointV2Spec).StakeholderApproved = &approved
+		st.FindWaypointHistory(status.WaypointV2Plan).TestsFeatureCreated = &testsCreated
+		build := st.FindWaypointHistory(status.WaypointV2Build)
+		build.ValidationStatus = status.ValidationStatusPassed
+		build.DeploymentStatus = status.DeploymentStatusDeployed
+	}
+	if projectStatus == status.StatusV2Completed {
+		completedAt := time.Now()
+		st.CompletionDate = &completedAt
 	}
 	if err := status.WriteV2ToDir(st, dir); err != nil {
 		t.Fatal(err)

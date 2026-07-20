@@ -13,7 +13,8 @@ func makeV2StatusFileWithCreatedAt(t *testing.T, dir string, createdAt time.Time
 	var sb strings.Builder
 	for range completedWaypoints {
 		sb.WriteString("\n  - name: CHARTER\n    status: completed\n    started_at: " +
-			createdAt.UTC().Format(time.RFC3339) + "\n")
+			createdAt.UTC().Format(time.RFC3339) + "\n    completed_at: " +
+			createdAt.Add(time.Minute).UTC().Format(time.RFC3339) + "\n")
 	}
 	waypoints := sb.String()
 	content := `---
@@ -53,10 +54,10 @@ func TestRunEndV2_UpdatesStatusFile(t *testing.T) {
 	}
 }
 
-func TestRunEndV2_ZeroCreatedAt(t *testing.T) {
+func TestRunEndV2_RejectsZeroCreatedAt(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	// Write a V2 file with zero/missing created_at — should not panic or produce huge duration.
+	// Write malformed canonical state with zero timestamps.
 	content := `---
 schema_version: "2.0"
 project_name: zero-date-test
@@ -72,9 +73,8 @@ updated_at: 0001-01-01T00:00:00Z
 		t.Fatal(err)
 	}
 
-	// Should not error; zero CreatedAt falls back to now so duration is ~0.
-	if err := runEndV2(dir, "completed"); err != nil {
-		t.Fatalf("runEndV2 with zero created_at: %v", err)
+	if err := runEndV2(dir, "completed"); err == nil || !strings.Contains(err.Error(), "created_at is required") {
+		t.Fatalf("runEndV2 with zero created_at error = %v, want validation failure", err)
 	}
 }
 

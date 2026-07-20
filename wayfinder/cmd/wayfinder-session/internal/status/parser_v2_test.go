@@ -232,6 +232,30 @@ func TestParseV2RejectsMissingOrUnsupportedSchema(t *testing.T) {
 	}
 }
 
+func TestParseV2RejectsInvalidCanonicalStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		mutate  func(*StatusV2)
+		message string
+	}{
+		{name: "missing required field", mutate: func(status *StatusV2) { status.ProjectName = "" }, message: "project_name is required"},
+		{name: "invalid enum", mutate: func(status *StatusV2) { status.RiskLevel = "UNKNOWN" }, message: "invalid risk_level"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			status := NewStatusV2("test", ProjectTypeFeature, RiskLevelM)
+			tc.mutate(status)
+			path := filepath.Join(t.TempDir(), StatusFilename)
+			if err := WriteV2(status, path); err != nil {
+				t.Fatalf("WriteV2: %v", err)
+			}
+			_, err := ParseV2(path)
+			if err == nil || !strings.Contains(err.Error(), tc.message) {
+				t.Fatalf("ParseV2() error = %v, want %q", err, tc.message)
+			}
+		})
+	}
+}
+
 func TestNewStatusV2(t *testing.T) {
 	status := NewStatusV2("Test Project", ProjectTypeResearch, RiskLevelXS)
 

@@ -388,18 +388,34 @@ waypoint_history:
     completed_at: "2024-01-01T13:00:00Z"
   - name: RESEARCH
     status: completed
+    started_at: "2024-01-02T10:00:00Z"
+    completed_at: "2024-01-02T11:00:00Z"
   - name: DESIGN
     status: completed
+    started_at: "2024-01-03T10:00:00Z"
+    completed_at: "2024-01-03T11:00:00Z"
   - name: SPEC
     status: completed
+    started_at: "2024-01-04T10:00:00Z"
+    completed_at: "2024-01-04T11:00:00Z"
+    stakeholder_approved: true
   - name: PLAN
     status: completed
+    started_at: "2024-01-05T10:00:00Z"
+    completed_at: "2024-01-05T11:00:00Z"
+    tests_feature_created: true
   - name: SETUP
     status: completed
+    started_at: "2024-01-05T12:00:00Z"
+    completed_at: "2024-01-05T13:00:00Z"
   - name: BUILD
     status: completed
+    started_at: "2024-01-06T10:00:00Z"
+    completed_at: "2024-01-06T11:00:00Z"
+    validation_status: passed
+    deployment_status: deployed
   - name: RETRO
-    status: in_progress
+    status: in-progress
     started_at: "2024-01-07T10:00:00Z"
 ---
 `

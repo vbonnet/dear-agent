@@ -15,7 +15,7 @@ The current product surface is the code that exists today:
 - **AGM (`agm`)** — session lifecycle, tmux-backed harness management, loops,
   message delivery, sandbox setup, health checks, and PR/process guardrails.
 - **Engram (`engram`)** — persistent memory and retrieval for agent work.
-- **Wayfinder (`wayfinder session` and plugin commands)** — structured SDLC
+- **Wayfinder (`wayfinder session` and the companion agent skill)** — structured SDLC
   phases, validation gates, task tracking, review, and retrospectives.
 - **Workflow and LLM packages (`pkg/workflow`, `pkg/llm`)** — reusable DAG,
   audit, budget, human-in-the-loop, provider, routing, and authentication
