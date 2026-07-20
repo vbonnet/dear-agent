@@ -137,9 +137,12 @@ func (a *Adapter) CreateSession(session *manifest.Manifest) error {
 		ctxPercentageUsed = session.ContextUsage.PercentageUsed
 	}
 
-	// Determine model (use session model if set, otherwise default)
+	// Legacy manifests without a harness are Claude Code sessions, so retain the
+	// historical Claude default for that route. Other harnesses use an empty
+	// model to mean that the provider-native selection is unknown and must not be
+	// replaced with an Anthropic model.
 	model := session.Model
-	if model == "" {
+	if model == "" && harness == "claude-code" {
 		model = "claude-sonnet-4-5"
 	}
 

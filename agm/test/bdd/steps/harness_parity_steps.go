@@ -259,7 +259,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^retired AGY manifest models should map to current public labels$`, retiredAGYManifestModelsShouldMapToCurrentPublicLabels)
 	ctx.Step(`^exact AGY public labels should remain unchanged$`, exactAGYPublicLabelsShouldRemainUnchanged)
 	ctx.Step(`^cross-harness AGY aliases should normalize case-insensitively$`, crossHarnessAGYAliasesShouldNormalizeCaseInsensitively)
-	ctx.Step(`^imported AGY conversations should retain their saved model$`, importedAGYConversationsShouldRetainTheirSavedModel)
+	ctx.Step(`^imported AGY conversations should preserve unknown model provenance$`, importedAGYConversationsShouldPreserveUnknownModelProvenance)
 	ctx.Step(`^AGY runtime model switches should not leave a stale resume override$`, agyRuntimeModelSwitchesShouldNotLeaveAStaleResumeOverride)
 	ctx.Step(`^AGM validates AGY MCP creation readiness$`, agmValidatesAGYMCPCreateReadiness)
 	ctx.Step(`^MCP creation should wait for the AGY composer before prompt delivery$`, mcpCreationShouldWaitForAGYComposerBeforePromptDelivery)
@@ -1841,7 +1841,7 @@ func runAgyLifecycleBehaviorSuite(ctx context.Context, harnessState *harnessPari
 		"./agm/internal/ops",
 		"./agm/internal/safety",
 		"./agm/internal/tmux",
-		"-run", `^(Test(StartAgyHarness(UsesCanonicalLaunchAndWaits|PropagatesReadinessFailure)|StartCurrentTmuxAgyStopsAfterCallerCancellation|BuildAgyCommand_(AutoPermissionMode|DefaultPermissionMode)|AgyModelCatalogMatchesPublicCLI|BuildAgyImportedManifestLeavesUnknownModelUnset|CreateSession_AgyDetachedPromptUsesCanonicalCommand|CreateSession_CancellationAfterRegistrationRollsBackBeforeCompletion|BuildAgyResumeCommandPreservesModelConversationAndMode|BuildAgyResumeCommand_(TranslatesLegacyModels|PreservesImportedConversationModel)|NormalizeModelInput(PreservesAgyPublicLabels|CanonicalizesCrossHarnessAliases)|ResolveSetModelInstruction_(PreservesAgyPublicLabel|NormalizesCrossHarnessAliasCase)|PersistAgyModelSwitchPreservesOnlyConfirmedProvenance|SQLiteUpdateSessionRoundTripsModel|MCPCreateSessionRuntime(WaitsForAgyBeforePrompt|StopsBeforePromptAfterCancellation)|ExecuteWithSignalContextPropagatesCancellation|WaitForResumed(Agy|Claude|Codex)UsesCallerContext|WaitForAgyMetadataBackfillUsesCallerContext|Run(AgyPostCreateReturnsCancellationBeforeSideEffects|CodexPostCreateReturnsCancellationBeforePromptDelivery)|CommandScopedReadinessWaitsReturnCallerCancellation|NewNonClaudeAssociationManifestLeavesAgyModelUnknown|UpdateNonClaudeAssociationManifestLeavesAgyModelUnknown|DetectAgySessionUninitialized|NormalizeHarnessForSafety|WaitForAgyPrompt(AcceptsTrustBeforeReady|DismissesSurveyBeforeReady)))$`,
+		"-run", `^(Test(StartAgyHarness(UsesCanonicalLaunchAndWaits|PropagatesReadinessFailure)|StartCurrentTmuxAgyStopsAfterCallerCancellation|BuildAgyCommand_(AutoPermissionMode|DefaultPermissionMode)|AgyModelCatalogMatchesPublicCLI|BuildAgyImportedManifestLeavesUnknownModelUnset|CreateSession_AgyDetachedPromptUsesCanonicalCommand|CreateSession_CancellationAfterRegistrationRollsBackBeforeCompletion|BuildAgyResumeCommandPreservesModelConversationAndMode|BuildAgyResumeCommand_(TranslatesLegacyModels|PreservesImportedConversationModel)|NormalizeModelInput(PreservesAgyPublicLabels|CanonicalizesCrossHarnessAliases)|ResolveSetModelInstruction_(PreservesAgyPublicLabel|NormalizesCrossHarnessAliasCase)|PersistAgyModelSwitchPreservesOnlyConfirmedProvenance|SQLite(CreateSessionDefaultsModelOnlyForClaude|UpdateSessionRoundTripsModel)|MCPCreateSessionRuntime(WaitsForAgyBeforePrompt|StopsBeforePromptAfterCancellation)|ExecuteWithSignalContextPropagatesCancellation|WaitForResumed(Agy|Claude|Codex)UsesCallerContext|WaitForAgyMetadataBackfillUsesCallerContext|Run(AgyPostCreateReturnsCancellationBeforeSideEffects|CodexPostCreateReturnsCancellationBeforePromptDelivery)|CommandScopedReadinessWaitsReturnCallerCancellation|NewNonClaudeAssociationManifestLeavesAgyModelUnknown|UpdateNonClaudeAssociationManifestLeavesAgyModelUnknown|DetectAgySessionUninitialized|NormalizeHarnessForSafety|WaitForAgyPrompt(AcceptsTrustBeforeReady|DismissesSurveyBeforeReady)))$`,
 		"-count=1", "-v",
 	)
 	cmd.Dir = bddRepoRoot()
@@ -1907,7 +1907,7 @@ func crossHarnessAGYAliasesShouldNormalizeCaseInsensitively(ctx context.Context)
 	)
 }
 
-func importedAGYConversationsShouldRetainTheirSavedModel(ctx context.Context) error {
+func importedAGYConversationsShouldPreserveUnknownModelProvenance(ctx context.Context) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
 		return err
@@ -1917,6 +1917,7 @@ func importedAGYConversationsShouldRetainTheirSavedModel(ctx context.Context) er
 		"TestNewNonClaudeAssociationManifestLeavesAgyModelUnknown",
 		"TestUpdateNonClaudeAssociationManifestLeavesAgyModelUnknown",
 		"TestBuildAgyResumeCommand_PreservesImportedConversationModel",
+		"TestSQLiteCreateSessionDefaultsModelOnlyForClaude",
 	)
 }
 

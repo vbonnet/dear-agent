@@ -195,6 +195,8 @@ creation, and terminal state detection.
 - Active harness factories use canonical names.
 - Active harness adapters satisfy the shared non-I/O conformance suite.
 - Active harness launch commands preserve native startup mode and persistence.
+- Imported AGY conversations preserve unknown native-model provenance through
+  the real storage adapter instead of acquiring Claude's legacy default.
 - AGM runtime helper commands keep co-located SPEC coverage.
 - AGM backend implementations keep co-located SPEC coverage.
 - AGM cleanup and process support packages keep co-located SPEC coverage.

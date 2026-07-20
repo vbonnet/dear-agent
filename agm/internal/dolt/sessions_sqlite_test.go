@@ -130,3 +130,48 @@ func TestSQLiteUpdateSessionRoundTripsModel(t *testing.T) {
 		t.Fatalf("Model = %q, want cleared unknown provenance", stored.Model)
 	}
 }
+
+func TestSQLiteCreateSessionDefaultsModelOnlyForClaude(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		harness     string
+		wantHarness string
+		wantModel   string
+	}{
+		{name: "legacy manifest", wantHarness: "claude-code", wantModel: "claude-sonnet-4-5"},
+		{name: "Claude Code", harness: "claude-code", wantHarness: "claude-code", wantModel: "claude-sonnet-4-5"},
+		{name: "Antigravity", harness: "agy", wantHarness: "agy"},
+		{name: "Codex", harness: "codex-cli", wantHarness: "codex-cli"},
+		{name: "OpenCode", harness: "opencode-cli", wantHarness: "opencode-cli"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+			if err != nil {
+				t.Fatalf("NewSQLiteAdapter() error: %v", err)
+			}
+			t.Cleanup(func() { _ = adapter.Close() })
+
+			m := &manifest.Manifest{
+				SchemaVersion: manifest.SchemaVersion,
+				SessionID:     "sqlite-create-model-session",
+				Name:          "sqlite-create-model-session",
+				Harness:       tc.harness,
+				CreatedAt:     time.Now(),
+				UpdatedAt:     time.Now(),
+				Context:       manifest.Context{Project: t.TempDir()},
+				Tmux:          manifest.Tmux{SessionName: "sqlite-create-model-session"},
+			}
+			if err := adapter.CreateSession(m); err != nil {
+				t.Fatalf("CreateSession() error: %v", err)
+			}
+
+			stored, err := adapter.GetSession(m.SessionID)
+			if err != nil {
+				t.Fatalf("GetSession() error: %v", err)
+			}
+			if stored.Harness != tc.wantHarness || stored.Model != tc.wantModel {
+				t.Fatalf("Harness/Model = %q/%q, want %q/%q", stored.Harness, stored.Model, tc.wantHarness, tc.wantModel)
+			}
+		})
+	}
+}
