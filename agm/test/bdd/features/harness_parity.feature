@@ -224,7 +224,7 @@ Feature: Harness parity
       | harness      | model     |
       | claude-code  | sonnet    |
       | codex-cli    | 5.4-mini  |
-      | agy          | 2.5-flash |
+      | agy          | 3.5-flash |
       | opencode-cli | glm-5.2   |
       | opencode-cli | deepseek-v4 |
       | opencode-cli | nemotron  |

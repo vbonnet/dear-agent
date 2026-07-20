@@ -80,6 +80,10 @@ Provide a production-ready CLI that:
 
 **CLI-26** When `agm audit resources --fix` cannot remove a linked worktree through a one-force Git operation, including when the worktree is locked, the system shall preserve the checkout and report the cleanup error instead of deleting the directory directly.
 
+**CLI-27** When AGM creates or cold-resumes an AGY session, the system shall resolve and pass the selected AGY model rather than silently launching AGY's default model.
+
+**CLI-28** When AGM launches AGY and a startup prompt must be delivered, the system shall wait through first-run trust and feedback-survey prompts until AGY is ready before sending that prompt, and shall propagate readiness failure.
+
 ## Requirements
 
 ### Functional Requirements

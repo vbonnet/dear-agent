@@ -209,9 +209,29 @@ func startGeminiDirect(spec ops.HarnessLaunchSpec) error {
 	return nil
 }
 
+type agyHarnessRuntime struct {
+	lookPath      func(string) (string, error)
+	sendCommand   func(string, string) error
+	waitForPrompt func(string, time.Duration) error
+	sleep         func(time.Duration)
+}
+
+func realAgyHarnessRuntime() agyHarnessRuntime {
+	return agyHarnessRuntime{
+		lookPath:      exec.LookPath,
+		sendCommand:   tmux.SendCommand,
+		waitForPrompt: tmux.WaitForAgyPrompt,
+		sleep:         time.Sleep,
+	}
+}
+
 func startAgyHarness(spec ops.HarnessLaunchSpec) (bool, error) {
+	return startAgyHarnessWithRuntime(spec, realAgyHarnessRuntime())
+}
+
+func startAgyHarnessWithRuntime(spec ops.HarnessLaunchSpec, runtime agyHarnessRuntime) (bool, error) {
 	debug.Phase("Start AGY")
-	if _, err := exec.LookPath("agy"); err != nil {
+	if _, err := runtime.lookPath("agy"); err != nil {
 		ui.PrintError(err,
 			"Failed to find AGY on PATH",
 			"  • Verify AGY is installed: which agy\n"+
@@ -224,7 +244,7 @@ func startAgyHarness(spec ops.HarnessLaunchSpec) (bool, error) {
 	agyCmd := launch.Command
 	modeAppliedAtStartup := launch.ModeAppliedAtStartup
 	debug.Log("Sending command: %s", agyCmd)
-	if err := tmux.SendCommand(spec.SessionName, agyCmd); err != nil {
+	if err := runtime.sendCommand(spec.SessionName, agyCmd); err != nil {
 		ui.PrintError(err,
 			"Failed to start AGY in tmux session",
 			"  • Verify AGY is installed: which agy\n"+
@@ -237,10 +257,10 @@ func startAgyHarness(spec ops.HarnessLaunchSpec) (bool, error) {
 	ui.PrintSuccess("Started AGY in tmux session")
 
 	debug.Log("Initial sleep (500ms) before polling")
-	time.Sleep(500 * time.Millisecond)
+	runtime.sleep(500 * time.Millisecond)
 
 	debug.Log("Waiting for AGY prompt readiness (timeout: 90s)")
-	if err := tmux.WaitForAgyPrompt(spec.SessionName, 90*time.Second); err != nil {
+	if err := runtime.waitForPrompt(spec.SessionName, 90*time.Second); err != nil {
 		debug.Log("AGY prompt readiness wait failed: %v", err)
 		ui.PrintError(err,
 			"AGY did not become ready",

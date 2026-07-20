@@ -12,7 +12,7 @@ func TestActiveHarnessContracts(t *testing.T) {
 	}{
 		{harness: "claude-code", mode: "auto", interactive: "claude", modeToken: "--permission-mode auto"},
 		{harness: "codex-cli", mode: "auto", interactive: "codex", modeToken: "-a never"},
-		{harness: "agy", mode: "auto", interactive: "--prompt-interactive", modeToken: "--dangerously-skip-permissions"},
+		{harness: "agy", mode: "auto", interactive: "agy", modeToken: "--dangerously-skip-permissions"},
 		{harness: "opencode-cli", mode: "plan", interactive: "opencode attach"},
 	}
 	for _, tt := range tests {

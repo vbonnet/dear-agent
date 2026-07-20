@@ -35,7 +35,7 @@ func TestResolveSetModelInstruction_ActiveHarnesses(t *testing.T) {
 	tests := map[string]string{
 		"claude-code":  "opus",
 		"codex-cli":    "5.4-mini",
-		"agy":          "2.5-flash",
+		"agy":          "3.5-flash",
 		"opencode-cli": "glm-5.2",
 	}
 	for _, harness := range agent.ActiveHarnesses() {
@@ -91,7 +91,7 @@ func TestResolveSetModelInstruction_RejectsUnsafeModel(t *testing.T) {
 }
 
 func TestResolveSetModelInstruction_NormalizesAgyAliases(t *testing.T) {
-	instruction, err := resolveSetModelInstruction("antigravity", "2.5-flash")
+	instruction, err := resolveSetModelInstruction("antigravity", "3.5-flash")
 	if err != nil {
 		t.Fatalf("resolveSetModelInstruction returned error: %v", err)
 	}

@@ -28,7 +28,10 @@ func Resolve(harness, mode string, persistent bool) (Contract, error) {
 		contract.InteractiveToken = "codex"
 		contract.ModeToken = CodexPermissionModeFlag(mode)
 	case "agy":
-		contract.InteractiveToken = "--prompt-interactive"
+		// AGY's --prompt-interactive flag is string-valued and requires an
+		// initial prompt. AGM starts a bare interactive process and delivers
+		// detached startup prompts only after native readiness is observed.
+		contract.InteractiveToken = "agy"
 		contract.ModeToken = AgyPermissionModeFlag(mode)
 	case "opencode-cli":
 		contract.InteractiveToken = "opencode attach"

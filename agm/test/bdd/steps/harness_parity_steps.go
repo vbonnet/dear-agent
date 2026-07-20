@@ -20,6 +20,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/marketplaceparity"
 	"github.com/vbonnet/dear-agent/agm/internal/mcpparity"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/permissionparity"
 	"github.com/vbonnet/dear-agent/agm/internal/quotaparity"
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
@@ -39,7 +40,7 @@ type harnessParityState struct {
 	agyConversationID          string
 	preservedCodexUUID         bool
 	preservedAgyConversationID bool
-	agyResumeAutoPermissions   bool
+	agyResumeCommand           string
 	readyFileCreated           bool
 	waitedForComposer          bool
 	waitedForAgyPrompt         bool
@@ -100,6 +101,8 @@ type harnessParityState struct {
 	startupLivenessValid       bool
 	currentTmuxTestOutput      string
 	currentTmuxTestErr         error
+	agyLifecycleTestOutput     string
+	agyLifecycleTestErr        error
 }
 
 type harnessParityStateKey struct{}
@@ -1796,12 +1799,57 @@ func agmCreatesDetachedAGYSessionWithStartupPrompt(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if strings.Contains(harnessState.paneOutput, "trust this folder") ||
-		strings.Contains(harnessState.paneOutput, "trust the contents") {
-		harnessState.trustAutoAccepted = true
+	if err := runAgyLifecycleBehaviorSuite(ctx, harnessState); err != nil {
+		return err
 	}
+	if err := requireAgyLifecycleBehaviors(harnessState,
+		"TestStartAgyHarnessUsesCanonicalLaunchAndWaits",
+		"TestCreateSession_AgyDetachedPromptUsesCanonicalCommand",
+		"TestWaitForAgyPromptAcceptsTrustBeforeReady",
+	); err != nil {
+		return err
+	}
+	harnessState.trustAutoAccepted = true
 	harnessState.waitedForAgyPrompt = true
 	harnessState.startupDelivered = true
+	return nil
+}
+
+func runAgyLifecycleBehaviorSuite(ctx context.Context, harnessState *harnessParityState) error {
+	if harnessState.agyLifecycleTestOutput != "" || harnessState.agyLifecycleTestErr != nil {
+		return nil
+	}
+	testCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, "go", "test",
+		"./agm/cmd/agm",
+		"./agm/internal/agent",
+		"./agm/internal/importer",
+		"./agm/internal/ops",
+		"./agm/internal/safety",
+		"./agm/internal/tmux",
+		"-run", `^(Test(StartAgyHarness(UsesCanonicalLaunchAndWaits|PropagatesReadinessFailure)|BuildAgyCommand_(AutoPermissionMode|DefaultPermissionMode)|AgyModelCatalogMatchesPublicCLI|BuildAgyImportedManifestPreservesConversationAndCurrentDefaults|CreateSession_AgyDetachedPromptUsesCanonicalCommand|BuildAgyResumeCommandPreservesModelConversationAndMode|DetectAgySessionUninitialized|NormalizeHarnessForSafety|WaitForAgyPrompt(AcceptsTrustBeforeReady|DismissesSurveyBeforeReady)))$`,
+		"-count=1", "-v",
+	)
+	cmd.Dir = bddRepoRoot()
+	output, runErr := cmd.CombinedOutput()
+	harnessState.agyLifecycleTestOutput = string(output)
+	harnessState.agyLifecycleTestErr = runErr
+	if testCtx.Err() != nil {
+		return fmt.Errorf("AGY lifecycle behavior suite timed out: %w", testCtx.Err())
+	}
+	return nil
+}
+
+func requireAgyLifecycleBehaviors(harnessState *harnessParityState, behaviors ...string) error {
+	if harnessState.agyLifecycleTestErr != nil {
+		return fmt.Errorf("AGY lifecycle behavior suite failed: %w\n%s", harnessState.agyLifecycleTestErr, harnessState.agyLifecycleTestOutput)
+	}
+	for _, behavior := range behaviors {
+		if !strings.Contains(harnessState.agyLifecycleTestOutput, "--- PASS: "+behavior) {
+			return fmt.Errorf("AGY lifecycle behavior %s did not pass:\n%s", behavior, harnessState.agyLifecycleTestOutput)
+		}
+	}
 	return nil
 }
 
@@ -1824,7 +1872,10 @@ func agmShouldWaitForTheAGYPrompt(ctx context.Context) error {
 	if !harnessState.waitedForAgyPrompt {
 		return fmt.Errorf("expected AGM to wait for the AGY prompt")
 	}
-	return nil
+	return requireAgyLifecycleBehaviors(harnessState,
+		"TestStartAgyHarnessUsesCanonicalLaunchAndWaits",
+		"TestStartAgyHarnessPropagatesReadinessFailure",
+	)
 }
 
 func agmShouldDeliverStartupPromptDetached(ctx context.Context) error {
@@ -1863,7 +1914,7 @@ func agmShouldAutoAcceptAGYTrustPromptBeforePromptDelivery(ctx context.Context) 
 	if !harnessState.trustAutoAccepted || !harnessState.startupDelivered {
 		return fmt.Errorf("expected AGY trust prompt to be auto-accepted before startup prompt delivery")
 	}
-	return nil
+	return requireAgyLifecycleBehaviors(harnessState, "TestWaitForAgyPromptAcceptsTrustBeforeReady")
 }
 
 func agmRunsSendSafetyForTheConfiguredHarness(ctx context.Context) error {
@@ -1872,7 +1923,18 @@ func agmRunsSendSafetyForTheConfiguredHarness(ctx context.Context) error {
 		return err
 	}
 	switch harnessState.harness {
-	case "codex-cli", "agy":
+	case "codex-cli":
+		harnessState.sendSafetyRequiresClaude = false
+	case "agy":
+		if err := runAgyLifecycleBehaviorSuite(ctx, harnessState); err != nil {
+			return err
+		}
+		if err := requireAgyLifecycleBehaviors(harnessState,
+			"TestDetectAgySessionUninitialized",
+			"TestNormalizeHarnessForSafety",
+		); err != nil {
+			return err
+		}
 		harnessState.sendSafetyRequiresClaude = false
 	case "":
 		return fmt.Errorf("no harness configured")
@@ -1999,8 +2061,20 @@ func agmImportsAGYConversationIDWithHarness(ctx context.Context, harness string)
 	if harnessState.agyConversationID == "" {
 		return fmt.Errorf("no AGY conversation ID arranged")
 	}
+	if err := runAgyLifecycleBehaviorSuite(ctx, harnessState); err != nil {
+		return err
+	}
+	if err := requireAgyLifecycleBehaviors(harnessState,
+		"TestBuildAgyImportedManifestPreservesConversationAndCurrentDefaults",
+		"TestBuildAgyResumeCommandPreservesModelConversationAndMode",
+	); err != nil {
+		return err
+	}
 	harnessState.harness = harness
 	harnessState.preservedAgyConversationID = true
+	harnessState.agyResumeCommand = ops.BuildAgyResumeCommand(ops.HarnessLaunchSpec{
+		Harness: "agy", Model: "3.5-flash", WorkDir: "/tmp/agy-import",
+	}, harnessState.agyConversationID).Command
 	harnessState.tmuxResumeLaunched = true
 	return nil
 }
@@ -2024,8 +2098,10 @@ func anImportedAGYSessionWithPermissionMode(ctx context.Context, mode string) er
 	harnessState.harness = "agy"
 	harnessState.agyConversationID = "117ff898-a964-4a9f-b460-1be4a8a49b17"
 	harnessState.preservedAgyConversationID = true
-	harnessState.tmuxResumeLaunched = true
-	harnessState.agyResumeAutoPermissions = mode == "auto"
+	harnessState.agyResumeCommand = ops.BuildAgyResumeCommand(ops.HarnessLaunchSpec{
+		Harness: "agy", Model: "claude-sonnet-4.6-thinking", WorkDir: "/tmp/agy-import",
+		PermissionMode: mode,
+	}, harnessState.agyConversationID).Command
 	return nil
 }
 
@@ -2048,6 +2124,14 @@ func agmShouldLaunchTmuxPaneResumingAGYConversation(ctx context.Context) error {
 	if !harnessState.tmuxResumeLaunched {
 		return fmt.Errorf("expected AGM to launch a tmux pane with agy resume")
 	}
+	for _, want := range []string{"agy --model ", "--conversation '" + harnessState.agyConversationID + "'"} {
+		if !strings.Contains(harnessState.agyResumeCommand, want) {
+			return fmt.Errorf("AGY resume command %q missing %q", harnessState.agyResumeCommand, want)
+		}
+	}
+	if strings.Contains(harnessState.agyResumeCommand, "--prompt-interactive") {
+		return fmt.Errorf("AGY resume command used prompt-valued flag: %q", harnessState.agyResumeCommand)
+	}
 	return nil
 }
 
@@ -2056,7 +2140,7 @@ func theAGYResumeCommandShouldInclude(ctx context.Context, expected string) erro
 	if err != nil {
 		return err
 	}
-	if expected == "--dangerously-skip-permissions" && !harnessState.agyResumeAutoPermissions {
+	if !strings.Contains(harnessState.agyResumeCommand, expected) {
 		return fmt.Errorf("expected AGM to include %q in the AGY resume command", expected)
 	}
 	return nil
@@ -2129,6 +2213,11 @@ func agmResumesTheSession(ctx context.Context) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
 		return err
+	}
+	if harnessState.harness == "agy" {
+		if harnessState.agyResumeCommand == "" {
+			return fmt.Errorf("AGY resume command was not built from the imported session")
+		}
 	}
 	harnessState.tmuxResumeLaunched = true
 	return nil

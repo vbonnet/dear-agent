@@ -17,7 +17,6 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/discovery"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/git"
-	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
@@ -671,20 +670,20 @@ func buildCodexResumeCommand(m *manifest.Manifest, health *HealthStatus) string 
 }
 
 func buildAgyResumeCommand(m *manifest.Manifest, health *HealthStatus) string {
+	model := m.Model
+	if model == "" {
+		model = agent.HarnessDefaults["agy"]
+	}
 	if m.Agy != nil && m.Agy.ConversationID != "" {
-		permissionFlag := launchparity.AgyPermissionModeFlag(m.PermissionMode)
-		if permissionFlag != "" {
-			permissionFlag = " " + permissionFlag
-		}
-		return fmt.Sprintf("cd %s && agy%s --conversation %s --add-dir %s && exit",
-			shellQuote(health.WorktreePath),
-			permissionFlag,
-			shellQuote(m.Agy.ConversationID),
-			shellQuote(health.WorktreePath))
+		return ops.BuildAgyResumeCommand(ops.HarnessLaunchSpec{
+			Harness: "agy", Model: model, SessionName: health.TmuxSessionName,
+			WorkDir: health.WorktreePath, PermissionMode: m.PermissionMode,
+			ExtraAddDirs: []string{health.WorktreePath},
+		}, m.Agy.ConversationID).Command
 	}
 	ui.PrintWarning("No AGY conversation ID found - starting new AGY session")
 	return ops.BuildHarnessLaunchCommand(ops.HarnessLaunchSpec{
-		Harness: "agy", Model: m.Model, SessionName: health.TmuxSessionName,
+		Harness: "agy", Model: model, SessionName: health.TmuxSessionName,
 		WorkDir: health.WorktreePath, PermissionMode: m.PermissionMode,
 	}).Command
 }

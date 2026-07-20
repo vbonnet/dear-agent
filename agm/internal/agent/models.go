@@ -76,9 +76,15 @@ var HarnessModels = map[string][]ModelSpec{
 		{Alias: "5.3-codex-spark", FullName: "gpt-5.3-codex-spark", Description: "Research preview"},
 	},
 	"agy": {
-		{Alias: "2.5-pro", FullName: "gemini-2.5-pro", Description: "Highest-capability Gemini model (opus tier)"},
-		{Alias: "2.5-flash", FullName: "gemini-2.5-flash", Description: "Balanced speed/quality Gemini model (sonnet tier)"},
-		{Alias: "2.0-flash-lite", FullName: "gemini-2.0-flash-lite", Description: "Fastest, cheapest Gemini model (haiku tier)"},
+		{Alias: "3.5-flash", FullName: "Gemini 3.5 Flash (Medium)", Description: "AGY default; balanced Gemini 3.5 Flash reasoning"},
+		{Alias: "3.5-flash-medium", FullName: "Gemini 3.5 Flash (Medium)", Description: "Balanced Gemini 3.5 Flash reasoning"},
+		{Alias: "3.5-flash-high", FullName: "Gemini 3.5 Flash (High)", Description: "Higher-reasoning Gemini 3.5 Flash"},
+		{Alias: "3.5-flash-low", FullName: "Gemini 3.5 Flash (Low)", Description: "Fast, low-reasoning Gemini 3.5 Flash"},
+		{Alias: "3.1-pro-low", FullName: "Gemini 3.1 Pro (Low)", Description: "Gemini 3.1 Pro with lower reasoning"},
+		{Alias: "3.1-pro-high", FullName: "Gemini 3.1 Pro (High)", Description: "Gemini 3.1 Pro with higher reasoning"},
+		{Alias: "claude-sonnet-4.6-thinking", FullName: "Claude Sonnet 4.6 (Thinking)", Description: "Claude Sonnet 4.6 with thinking"},
+		{Alias: "claude-opus-4.6-thinking", FullName: "Claude Opus 4.6 (Thinking)", Description: "Claude Opus 4.6 with thinking"},
+		{Alias: "gpt-oss-120b-medium", FullName: "GPT-OSS 120B (Medium)", Description: "GPT-OSS 120B with medium reasoning"},
 	},
 	// openrouter: cheap-tier models accessed via OpenRouter API proxy.
 	// Configure OPENROUTER_API_KEY to enable. These are the default cheap-tier
@@ -129,10 +135,10 @@ var CrossHarnessAliases = map[string]map[string]string{
 		"5.4-mini":  "haiku",  // codex alias → claude equivalent
 	},
 	"agy": {
-		"fable":  "2.5-pro",        // mythos-tier → gemini-2.5-pro (best available)
-		"opus":   "2.5-pro",        // highest-tier → gemini-2.5-pro
-		"sonnet": "2.5-flash",      // mid-tier → gemini-2.5-flash
-		"haiku":  "2.0-flash-lite", // fast-tier → gemini-2.0-flash-lite (cheapest)
+		"fable":  "claude-opus-4.6-thinking", // mythos-tier → highest available AGY catalog model
+		"opus":   "claude-opus-4.6-thinking", // highest-tier → Claude Opus 4.6 (Thinking)
+		"sonnet": "3.5-flash",                // mid-tier → Gemini 3.5 Flash (Medium)
+		"haiku":  "3.5-flash-low",            // fast-tier → Gemini 3.5 Flash (Low)
 	},
 }
 
@@ -145,7 +151,7 @@ var CrossHarnessAliases = map[string]map[string]string{
 var HarnessDefaults = map[string]string{
 	"claude-code":  "sonnet",
 	"codex-cli":    "5.5",
-	"agy":          "2.5-flash",
+	"agy":          "3.5-flash",
 	"opencode-cli": "glm-5.2",
 }
 
@@ -160,7 +166,7 @@ var HarnessModeDefaults = map[string]string{
 var TestModelDefaults = map[string]string{
 	"claude-code":  "haiku",
 	"codex-cli":    "5.4-mini",
-	"agy":          "2.0-flash-lite",
+	"agy":          "3.5-flash-low",
 	"opencode-cli": "haiku", // opencode supports Claude models via providers
 }
 
@@ -176,6 +182,7 @@ var HarnessModelFlag = map[string]string{
 	"claude-code": "--model",
 	"gemini-cli":  "-m",
 	"codex-cli":   "-m",
+	"agy":         "--model",
 	// opencode-cli uses config/env var, not a CLI flag
 }
 
@@ -245,7 +252,7 @@ func ResolveModelFullName(harnessName, aliasOrFull string) string {
 		return safeModelPassthrough(aliasOrFull)
 	}
 	for _, m := range models {
-		if m.Alias == aliasOrFull {
+		if m.Alias == aliasOrFull || m.FullName == aliasOrFull {
 			return m.FullName
 		}
 	}

@@ -61,6 +61,8 @@ compatibility.
 
 **AGP-17** If pre-trusting the working directory fails, the codex-cli adapter shall warn and still attempt the launch.
 
+**AGP-18** When AGM resolves an AGY model alias or accepts an AGY public model label, the system shall pass an exact label exposed by the installed AGY public model catalog through `--model`, including labels containing spaces or parentheses.
+
 ### BDD Enforcement
 
 **AGP-12** When a new active harness or model family is added, the system shall require BDD scenarios and registry tests that cross-cut the active parity matrix before the change is complete.

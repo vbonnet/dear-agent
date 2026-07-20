@@ -149,6 +149,10 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-66** When an optional manifest directory cannot be created, the system shall continue without registration and shall provide no manifest path to runtime completion.
 
+**OPS-67** When AGM creates an AGY session, the shared launch-command owner shall preserve the selected model, permission mode, work directory, additional directories, and persistence policy while using AGY's native bare interactive entry point.
+
+**OPS-68** When AGM cold-resumes an AGY conversation, the shared AGY command owner shall preserve the stored model and permission mode, include the canonical conversation ID, and apply the same quoting, directory, and persistence policy used by creation.
+
 **OPS-36** While a session's state is OFFLINE, READY, or DONE, the stall detector shall skip error-loop detection for that session.
 
 ### Field Mask Projection

@@ -121,11 +121,25 @@ func buildCodexLaunchCommand(spec HarnessLaunchSpec, exitSuffix string) HarnessL
 }
 
 func buildAgyLaunchCommand(spec HarnessLaunchSpec, exitSuffix string) HarnessLaunchCommand {
+	return buildAgyCommand(spec, "", exitSuffix)
+}
+
+// BuildAgyResumeCommand builds AGY's native cold-resume command from the same
+// model, permission, directory, quoting, and persistence policy used at create.
+func BuildAgyResumeCommand(spec HarnessLaunchSpec, conversationID string) HarnessLaunchCommand {
+	return buildAgyCommand(spec, conversationID, launchparity.ExitSuffix(spec.Persistent))
+}
+
+func buildAgyCommand(spec HarnessLaunchSpec, conversationID, exitSuffix string) HarnessLaunchCommand {
+	resolvedModel := agent.ResolveModelFullName("agy", spec.Model)
 	var b strings.Builder
-	fmt.Fprintf(&b, "cd %s && agy --prompt-interactive", shellQuoteArg(spec.WorkDir))
+	fmt.Fprintf(&b, "cd %s && agy --model %s", shellQuoteArg(spec.WorkDir), shellQuoteArg(resolvedModel))
 	modeFlag := launchparity.AgyPermissionModeFlag(spec.PermissionMode)
 	if modeFlag != "" {
 		b.WriteString(" " + modeFlag)
+	}
+	if conversationID != "" {
+		fmt.Fprintf(&b, " --conversation %s", shellQuoteArg(conversationID))
 	}
 	for _, dir := range spec.ExtraAddDirs {
 		fmt.Fprintf(&b, " --add-dir %s", shellQuoteArg(dir))

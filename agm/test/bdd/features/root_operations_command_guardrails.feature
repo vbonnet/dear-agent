@@ -33,7 +33,7 @@ Feature: Root operations command guardrails
       | harness      | model   |
       | claude-code  | sonnet  |
       | codex-cli    | 5.5     |
-      | agy          | 2.5-pro |
+      | agy          | 3.1-pro-high |
       | opencode-cli | glm-5.2 |
 
   Scenario Outline: VROOM prompts preserve supported model families

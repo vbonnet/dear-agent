@@ -180,6 +180,64 @@ func TestCreateSession_HappyPath(t *testing.T) {
 	}
 }
 
+func TestCreateSession_AgyDetachedPromptUsesCanonicalCommand(t *testing.T) {
+	dir := t.TempDir()
+	tmuxMock := session.NewMockTmux()
+	store := &createMockStorage{}
+
+	result, err := CreateSession(&OpContext{Tmux: tmuxMock, Storage: store}, &CreateSessionRequest{
+		Cwd: dir, Prompt: "detached AGY prompt", Title: "agy-detached",
+		Harness: "agy", Model: "3.5-flash-low", PermissionMode: "auto",
+		ExtraAddDirs: []string{"/tmp/extra dir"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if result.Harness != "agy" || result.Model != "3.5-flash-low" {
+		t.Fatalf("result harness/model = %q/%q", result.Harness, result.Model)
+	}
+	if len(tmuxMock.SentCommands) != 2 {
+		t.Fatalf("tmux commands = %v, want launch then detached prompt", tmuxMock.SentCommands)
+	}
+	launch := tmuxMock.SentCommands[0]
+	for _, want := range []string{
+		"agy --model 'Gemini 3.5 Flash (Low)'",
+		"--dangerously-skip-permissions",
+		"--add-dir '/tmp/extra dir'",
+	} {
+		if !strings.Contains(launch, want) {
+			t.Errorf("AGY launch %q missing %q", launch, want)
+		}
+	}
+	if strings.Contains(launch, "--prompt-interactive") {
+		t.Errorf("AGY launch used prompt flag without a prompt: %q", launch)
+	}
+	if tmuxMock.SentCommands[1] != "detached AGY prompt" {
+		t.Fatalf("startup prompt = %q", tmuxMock.SentCommands[1])
+	}
+	if len(store.created) != 1 || store.created[0].Harness != "agy" || store.created[0].Model != "3.5-flash-low" {
+		t.Fatalf("stored AGY manifest = %+v", store.created)
+	}
+}
+
+func TestBuildAgyResumeCommandPreservesModelConversationAndMode(t *testing.T) {
+	command := BuildAgyResumeCommand(HarnessLaunchSpec{
+		Harness: "agy", Model: "claude-sonnet-4.6-thinking", WorkDir: "/tmp/agy resume",
+		PermissionMode: "auto", ExtraAddDirs: []string{"/tmp/agy resume"},
+	}, "117ff898-a964-4a9f-b460-1be4a8a49b17").Command
+	for _, want := range []string{
+		"cd '/tmp/agy resume' && agy --model 'Claude Sonnet 4.6 (Thinking)'",
+		"--dangerously-skip-permissions",
+		"--conversation '117ff898-a964-4a9f-b460-1be4a8a49b17'",
+		"--add-dir '/tmp/agy resume'",
+		"&& exit",
+	} {
+		if !strings.Contains(command, want) {
+			t.Errorf("resume command %q missing %q", command, want)
+		}
+	}
+}
+
 func TestCreateSession_DefaultsModelAndHarness(t *testing.T) {
 	dir := t.TempDir()
 	tmuxMock := session.NewMockTmux()
@@ -210,7 +268,7 @@ func TestCreateSession_DefaultsModelPerHarness(t *testing.T) {
 		want    string
 	}{
 		{"codex-cli", "5.5"},
-		{"agy", "2.5-flash"},
+		{"agy", "3.5-flash"},
 		{"opencode-cli", "glm-5.2"},
 	}
 	for _, tt := range tests {
