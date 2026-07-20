@@ -23,7 +23,7 @@ harness-neutral manifest store while preserving harness-specific resume metadata
 
 **IMP-07** When history metadata is unavailable but the saved conversation is discoverable, the system shall preserve importability using filesystem metadata rather than discarding the conversation.
 
-**IMP-08** When importing an AGY conversation, the system shall persist its conversation ID, native conversation database, transcript path, discovered working directory, and current AGY default model so a subsequent cold resume can reproduce the native conversation.
+**IMP-08** When importing an AGY conversation, the system shall persist its conversation ID, native conversation database, transcript path, and discovered working directory while leaving the model unset because AGY's public saved-conversation metadata does not expose the native selection.
 
 ## BDD Traceability
 

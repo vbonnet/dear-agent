@@ -341,6 +341,7 @@ Feature: Harness parity
     Then retired AGY manifest models should map to current public labels
     And exact AGY public labels should remain unchanged
     And cross-harness AGY aliases should normalize case-insensitively
+    And imported AGY conversations should retain their saved model
 
   Scenario: MCP waits for AGY before delivering its startup prompt
     Given AGY is available

@@ -199,6 +199,25 @@ func TestMCPCreateSessionRuntimeWaitsForAgyBeforePrompt(t *testing.T) {
 	}
 }
 
+func TestMCPCreateSessionRuntimeStopsBeforePromptAfterCancellation(t *testing.T) {
+	t.Parallel()
+
+	tmuxMock := session.NewMockTmux()
+	runtime := &mcpCreateSessionRuntime{tmux: tmuxMock}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err := runtime.Complete(ctx, ops.CreateSessionCompletion{
+		Manifest: &manifest.Manifest{Name: "mcp-agy"}, Prompt: "must not run",
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Complete error = %v, want context.Canceled", err)
+	}
+	if len(tmuxMock.SentCommands) != 0 {
+		t.Fatalf("commands after cancellation = %v, want none", tmuxMock.SentCommands)
+	}
+}
+
 // fakeEngramMCP returns a handler that records the incoming JSON-RPC
 // envelope and replies with the given content text (or an error).
 func fakeEngramMCP(t *testing.T, responseText string, status int) (*httptest.Server, *[]map[string]any) {

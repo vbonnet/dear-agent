@@ -39,7 +39,10 @@ type AgyCommand struct {
 // fresh launches and cold resumes.
 func BuildAgyCommand(spec AgyCommandSpec) AgyCommand {
 	var b strings.Builder
-	fmt.Fprintf(&b, "cd %s && agy --model %s", ShellQuote(spec.WorkDir), ShellQuote(spec.ResolvedModel))
+	fmt.Fprintf(&b, "cd %s && agy", ShellQuote(spec.WorkDir))
+	if spec.ResolvedModel != "" {
+		fmt.Fprintf(&b, " --model %s", ShellQuote(spec.ResolvedModel))
+	}
 	modeFlag := AgyPermissionModeFlag(spec.PermissionMode)
 	if modeFlag != "" {
 		b.WriteString(" " + modeFlag)

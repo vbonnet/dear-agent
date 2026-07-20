@@ -289,6 +289,9 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 			return nil, err
 		}
 	}
+	if err := callCtx.Err(); err != nil {
+		return nil, err
+	}
 	if err := completeCreatedSession(callCtx, opCtx, req, params.name, manifestPath, m, launchResult); err != nil {
 		return nil, err
 	}

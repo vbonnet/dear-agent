@@ -316,7 +316,10 @@ func (r *mcpCreateSessionRuntime) Launch(ctx context.Context, spec ops.HarnessLa
 	return result, nil
 }
 
-func (r *mcpCreateSessionRuntime) Complete(_ context.Context, completion ops.CreateSessionCompletion) error {
+func (r *mcpCreateSessionRuntime) Complete(ctx context.Context, completion ops.CreateSessionCompletion) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if completion.Prompt == "" {
 		return nil
 	}

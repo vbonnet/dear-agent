@@ -352,8 +352,24 @@ func TestBuildAgyResumeCommand_TranslatesLegacyModels(t *testing.T) {
 	}
 }
 
+func TestBuildAgyResumeCommand_PreservesImportedConversationModel(t *testing.T) {
+	health := &HealthStatus{WorktreePath: "/tmp/agy-work"}
+	m := &manifest.Manifest{
+		Agy: &manifest.Agy{ConversationID: "imported-conversation"},
+	}
+
+	command := buildAgyResumeCommand(m, health)
+	if strings.Contains(command, "--model") {
+		t.Fatalf("imported AGY resume command forced an unknown model: %q", command)
+	}
+	if !strings.Contains(command, "agy --conversation 'imported-conversation'") {
+		t.Fatalf("imported AGY resume command = %q, want native conversation resume", command)
+	}
+}
+
 func TestBuildAgyResumeCommand_AutoPermissionMode(t *testing.T) {
 	m := &manifest.Manifest{
+		Model:          "3.5-flash",
 		PermissionMode: "auto",
 		Agy: &manifest.Agy{
 			ConversationID: "117ff898-a964-4a9f-b460-1be4a8a49b17",

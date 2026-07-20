@@ -665,18 +665,18 @@ func buildCodexResumeCommand(m *manifest.Manifest, health *HealthStatus) string 
 }
 
 func buildAgyResumeCommand(m *manifest.Manifest, health *HealthStatus) string {
-	model := m.Model
-	if model == "" {
-		model = agent.HarnessDefaults["agy"]
-	}
 	if m.Agy != nil && m.Agy.ConversationID != "" {
 		return ops.BuildAgyResumeCommand(ops.HarnessLaunchSpec{
-			Harness: "agy", Model: model, SessionName: health.TmuxSessionName,
+			Harness: "agy", Model: m.Model, SessionName: health.TmuxSessionName,
 			WorkDir: health.WorktreePath, PermissionMode: m.PermissionMode,
 			ExtraAddDirs: []string{health.WorktreePath},
 		}, m.Agy.ConversationID).Command
 	}
 	ui.PrintWarning("No AGY conversation ID found - starting new AGY session")
+	model := m.Model
+	if model == "" {
+		model = agent.HarnessDefaults["agy"]
+	}
 	return ops.BuildHarnessLaunchCommand(ops.HarnessLaunchSpec{
 		Harness: "agy", Model: model, SessionName: health.TmuxSessionName,
 		WorkDir: health.WorktreePath, PermissionMode: m.PermissionMode,

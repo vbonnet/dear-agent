@@ -248,7 +248,6 @@ func buildAgyImportedManifest(agyMeta *agysession.Metadata, sessionName, workspa
 		Lifecycle:        "",
 		Workspace:        workspace,
 		Harness:          "agy",
-		Model:            agent.HarnessDefaults["agy"],
 		WorkingDirectory: agyMeta.WorkspacePath,
 		Context: manifest.Context{
 			Project: agyMeta.WorkspacePath,

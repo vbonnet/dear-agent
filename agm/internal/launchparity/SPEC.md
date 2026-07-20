@@ -20,6 +20,8 @@
 
 **LAUNCH-PARITY-08** When AGM starts AGY interactively, the system shall invoke bare `agy` and shall not emit `--prompt-interactive` or `--print` unless it also supplies the prompt argument required by those string-valued flags.
 
+**LAUNCH-PARITY-09** When an AGY launch specification has no resolved model, the system shall omit `--model` rather than emitting an empty value, allowing a saved conversation to retain its native selection.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

@@ -25,6 +25,7 @@ type createMockStorage struct {
 	createErr   error
 	deleteErr   error
 	createOrder *[]string
+	onCreate    func()
 }
 
 type createOnlyTmux struct {
@@ -64,6 +65,9 @@ func (s *createMockStorage) CreateSession(m *manifest.Manifest) error {
 		*s.createOrder = append(*s.createOrder, "register")
 	}
 	s.created = append(s.created, m)
+	if s.onCreate != nil {
+		s.onCreate()
+	}
 	return s.createErr
 }
 func (s *createMockStorage) GetSession(string) (*manifest.Manifest, error) { return nil, nil }
@@ -595,6 +599,41 @@ func TestCreateSession_LifecycleOrder(t *testing.T) {
 	want := []string{"launch", "storage", "register", "complete", "cleanup"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("lifecycle order = %v, want %v", order, want)
+	}
+}
+
+func TestCreateSession_CancellationAfterRegistrationRollsBackBeforeCompletion(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	ctx, cancel := context.WithCancel(t.Context())
+	store := &createMockStorage{onCreate: cancel}
+	tmuxMock := session.NewMockTmux()
+	completed := false
+	runtime := &createTestRuntime{
+		complete: func(context.Context, CreateSessionCompletion) error {
+			completed = true
+			return nil
+		},
+	}
+
+	_, err := CreateSessionWithContext(ctx, &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+	}, &CreateSessionRequest{
+		Cwd: dir, Title: "cancel-after-register", Harness: "agy", Model: "3.5-flash-low",
+		Prompt: "must not run", SessionID: "cancel-after-register-id", RequireStorage: true,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("CreateSessionWithContext error = %v, want context.Canceled", err)
+	}
+	if completed {
+		t.Fatal("runtime completion ran after registration canceled the request context")
+	}
+	if tmuxMock.Sessions["cancel-after-register"] {
+		t.Fatal("new tmux session survived cancellation rollback")
+	}
+	if !slices.Contains(store.deleted, "cancel-after-register-id") {
+		t.Fatalf("deleted registrations = %v, want canceled session ID", store.deleted)
 	}
 }
 

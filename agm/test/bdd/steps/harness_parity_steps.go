@@ -41,6 +41,7 @@ type harnessParityState struct {
 	preservedCodexUUID         bool
 	preservedAgyConversationID bool
 	agyResumeCommand           string
+	agyModelKnown              bool
 	readyFileCreated           bool
 	waitedForComposer          bool
 	waitedForAgyPrompt         bool
@@ -258,6 +259,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^retired AGY manifest models should map to current public labels$`, retiredAGYManifestModelsShouldMapToCurrentPublicLabels)
 	ctx.Step(`^exact AGY public labels should remain unchanged$`, exactAGYPublicLabelsShouldRemainUnchanged)
 	ctx.Step(`^cross-harness AGY aliases should normalize case-insensitively$`, crossHarnessAGYAliasesShouldNormalizeCaseInsensitively)
+	ctx.Step(`^imported AGY conversations should retain their saved model$`, importedAGYConversationsShouldRetainTheirSavedModel)
 	ctx.Step(`^AGM validates AGY MCP creation readiness$`, agmValidatesAGYMCPCreateReadiness)
 	ctx.Step(`^MCP creation should wait for the AGY composer before prompt delivery$`, mcpCreationShouldWaitForAGYComposerBeforePromptDelivery)
 	ctx.Step(`^AGM validates AGY root cancellation plumbing$`, agmValidatesAGYRootCancellationPlumbing)
@@ -1837,7 +1839,7 @@ func runAgyLifecycleBehaviorSuite(ctx context.Context, harnessState *harnessPari
 		"./agm/internal/ops",
 		"./agm/internal/safety",
 		"./agm/internal/tmux",
-		"-run", `^(Test(StartAgyHarness(UsesCanonicalLaunchAndWaits|PropagatesReadinessFailure)|StartCurrentTmuxAgyStopsAfterCallerCancellation|BuildAgyCommand_(AutoPermissionMode|DefaultPermissionMode)|AgyModelCatalogMatchesPublicCLI|BuildAgyImportedManifestPreservesConversationAndCurrentDefaults|CreateSession_AgyDetachedPromptUsesCanonicalCommand|BuildAgyResumeCommandPreservesModelConversationAndMode|BuildAgyResumeCommand_TranslatesLegacyModels|NormalizeModelInput(PreservesAgyPublicLabels|CanonicalizesCrossHarnessAliases)|ResolveSetModelInstruction_(PreservesAgyPublicLabel|NormalizesCrossHarnessAliasCase)|MCPCreateSessionRuntimeWaitsForAgyBeforePrompt|ExecuteWithSignalContextPropagatesCancellation|WaitForResumedAgyUsesCallerContext|WaitForAgyMetadataBackfillUsesCallerContext|RunAgyPostCreateReturnsCancellationBeforeSideEffects|DetectAgySessionUninitialized|NormalizeHarnessForSafety|WaitForAgyPrompt(AcceptsTrustBeforeReady|DismissesSurveyBeforeReady)))$`,
+		"-run", `^(Test(StartAgyHarness(UsesCanonicalLaunchAndWaits|PropagatesReadinessFailure)|StartCurrentTmuxAgyStopsAfterCallerCancellation|BuildAgyCommand_(AutoPermissionMode|DefaultPermissionMode)|AgyModelCatalogMatchesPublicCLI|BuildAgyImportedManifestLeavesUnknownModelUnset|CreateSession_AgyDetachedPromptUsesCanonicalCommand|CreateSession_CancellationAfterRegistrationRollsBackBeforeCompletion|BuildAgyResumeCommandPreservesModelConversationAndMode|BuildAgyResumeCommand_(TranslatesLegacyModels|PreservesImportedConversationModel)|NormalizeModelInput(PreservesAgyPublicLabels|CanonicalizesCrossHarnessAliases)|ResolveSetModelInstruction_(PreservesAgyPublicLabel|NormalizesCrossHarnessAliasCase)|MCPCreateSessionRuntime(WaitsForAgyBeforePrompt|StopsBeforePromptAfterCancellation)|ExecuteWithSignalContextPropagatesCancellation|WaitForResumedAgyUsesCallerContext|WaitForAgyMetadataBackfillUsesCallerContext|RunAgyPostCreateReturnsCancellationBeforeSideEffects|NewNonClaudeAssociationManifestLeavesAgyModelUnknown|UpdateNonClaudeAssociationManifestLeavesAgyModelUnknown|DetectAgySessionUninitialized|NormalizeHarnessForSafety|WaitForAgyPrompt(AcceptsTrustBeforeReady|DismissesSurveyBeforeReady)))$`,
 		"-count=1", "-v",
 	)
 	cmd.Dir = bddRepoRoot()
@@ -1903,6 +1905,19 @@ func crossHarnessAGYAliasesShouldNormalizeCaseInsensitively(ctx context.Context)
 	)
 }
 
+func importedAGYConversationsShouldRetainTheirSavedModel(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	return requireAgyLifecycleBehaviors(harnessState,
+		"TestBuildAgyImportedManifestLeavesUnknownModelUnset",
+		"TestNewNonClaudeAssociationManifestLeavesAgyModelUnknown",
+		"TestUpdateNonClaudeAssociationManifestLeavesAgyModelUnknown",
+		"TestBuildAgyResumeCommand_PreservesImportedConversationModel",
+	)
+}
+
 func agmValidatesAGYMCPCreateReadiness(ctx context.Context) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
@@ -1941,6 +1956,8 @@ func rootSignalCancellationShouldReachEveryAGYReadinessWait(ctx context.Context)
 	return requireAgyLifecycleBehaviors(harnessState,
 		"TestExecuteWithSignalContextPropagatesCancellation",
 		"TestStartCurrentTmuxAgyStopsAfterCallerCancellation",
+		"TestCreateSession_CancellationAfterRegistrationRollsBackBeforeCompletion",
+		"TestMCPCreateSessionRuntimeStopsBeforePromptAfterCancellation",
 		"TestWaitForResumedAgyUsesCallerContext",
 		"TestWaitForAgyMetadataBackfillUsesCallerContext",
 		"TestRunAgyPostCreateReturnsCancellationBeforeSideEffects",
@@ -2159,15 +2176,15 @@ func agmImportsAGYConversationIDWithHarness(ctx context.Context, harness string)
 		return err
 	}
 	if err := requireAgyLifecycleBehaviors(harnessState,
-		"TestBuildAgyImportedManifestPreservesConversationAndCurrentDefaults",
-		"TestBuildAgyResumeCommandPreservesModelConversationAndMode",
+		"TestBuildAgyImportedManifestLeavesUnknownModelUnset",
+		"TestBuildAgyResumeCommand_PreservesImportedConversationModel",
 	); err != nil {
 		return err
 	}
 	harnessState.harness = harness
 	harnessState.preservedAgyConversationID = true
 	harnessState.agyResumeCommand = ops.BuildAgyResumeCommand(ops.HarnessLaunchSpec{
-		Harness: "agy", Model: "3.5-flash", WorkDir: "/tmp/agy-import",
+		Harness: "agy", WorkDir: "/tmp/agy-import",
 	}, harnessState.agyConversationID).Command
 	harnessState.tmuxResumeLaunched = true
 	return nil
@@ -2192,6 +2209,7 @@ func anImportedAGYSessionWithPermissionMode(ctx context.Context, mode string) er
 	harnessState.harness = "agy"
 	harnessState.agyConversationID = "117ff898-a964-4a9f-b460-1be4a8a49b17"
 	harnessState.preservedAgyConversationID = true
+	harnessState.agyModelKnown = true
 	harnessState.agyResumeCommand = ops.BuildAgyResumeCommand(ops.HarnessLaunchSpec{
 		Harness: "agy", Model: "claude-sonnet-4.6-thinking", WorkDir: "/tmp/agy-import",
 		PermissionMode: mode,
@@ -2218,10 +2236,16 @@ func agmShouldLaunchTmuxPaneResumingAGYConversation(ctx context.Context) error {
 	if !harnessState.tmuxResumeLaunched {
 		return fmt.Errorf("expected AGM to launch a tmux pane with agy resume")
 	}
-	for _, want := range []string{"agy --model ", "--conversation '" + harnessState.agyConversationID + "'"} {
+	for _, want := range []string{"agy ", "--conversation '" + harnessState.agyConversationID + "'"} {
 		if !strings.Contains(harnessState.agyResumeCommand, want) {
 			return fmt.Errorf("AGY resume command %q missing %q", harnessState.agyResumeCommand, want)
 		}
+	}
+	if harnessState.agyModelKnown && !strings.Contains(harnessState.agyResumeCommand, "--model ") {
+		return fmt.Errorf("AGY resume command %q omitted a known model", harnessState.agyResumeCommand)
+	}
+	if !harnessState.agyModelKnown && strings.Contains(harnessState.agyResumeCommand, "--model ") {
+		return fmt.Errorf("AGY resume command %q overrode an unknown native model", harnessState.agyResumeCommand)
 	}
 	if strings.Contains(harnessState.agyResumeCommand, "--prompt-interactive") {
 		return fmt.Errorf("AGY resume command used prompt-valued flag: %q", harnessState.agyResumeCommand)

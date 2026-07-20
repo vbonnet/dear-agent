@@ -10,7 +10,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 )
 
-func TestBuildAgyImportedManifestPreservesConversationAndCurrentDefaults(t *testing.T) {
+func TestBuildAgyImportedManifestLeavesUnknownModelUnset(t *testing.T) {
 	now := time.Date(2026, time.July, 20, 12, 30, 0, 0, time.UTC)
 	createdAt := now.Add(-time.Hour)
 	meta := &agysession.Metadata{
@@ -25,7 +25,7 @@ func TestBuildAgyImportedManifestPreservesConversationAndCurrentDefaults(t *test
 	if m.SessionID != "agm-session-id" || m.Name != "AGY imported session" || m.Workspace != "oss" {
 		t.Fatalf("manifest identity = %+v", m)
 	}
-	if m.Harness != "agy" || m.Model != "3.5-flash" {
+	if m.Harness != "agy" || m.Model != "" {
 		t.Fatalf("manifest harness/model = %q/%q", m.Harness, m.Model)
 	}
 	if m.WorkingDirectory != meta.WorkspacePath || m.Context.Project != meta.WorkspacePath {
@@ -75,8 +75,8 @@ func TestImportOrphanedSessionWithOptions_Agy(t *testing.T) {
 	if m.Harness != "agy" {
 		t.Fatalf("harness = %q, want agy", m.Harness)
 	}
-	if m.Model != "3.5-flash" {
-		t.Fatalf("model = %q, want 3.5-flash", m.Model)
+	if m.Model != "" {
+		t.Fatalf("model = %q, want unknown model left unset", m.Model)
 	}
 	if m.WorkingDirectory != workspacePath {
 		t.Fatalf("working directory = %q, want %q", m.WorkingDirectory, workspacePath)

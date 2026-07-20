@@ -151,7 +151,9 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-67** When AGM creates an AGY session, the shared launch-command owner shall preserve the selected model, permission mode, work directory, additional directories, and persistence policy while using AGY's native bare interactive entry point.
 
-**OPS-68** When AGM cold-resumes an AGY conversation, the shared AGY command owner shall preserve the stored model and permission mode, include the canonical conversation ID, and apply the same quoting, directory, and persistence policy used by creation.
+**OPS-68** When AGM cold-resumes an AGY conversation, the shared AGY command owner shall preserve a known stored model and permission mode, include the canonical conversation ID, and apply the same quoting, directory, and persistence policy used by creation; if the native model is unknown, the command shall omit `--model` so AGY retains the conversation's saved selection.
+
+**OPS-69** When a creation request is canceled after registration but before runtime completion, the shared lifecycle shall skip completion and enter rollback before a startup prompt or other completion side effect can run.
 
 **OPS-36** While a session's state is OFFLINE, READY, or DONE, the stall detector shall skip error-loop detection for that session.
 

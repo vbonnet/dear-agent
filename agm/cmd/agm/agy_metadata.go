@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
@@ -38,9 +37,6 @@ func enrichManifestWithAgyConversation(m *manifest.Manifest) error {
 		return fmt.Errorf("discover AGY conversation metadata: %s", strings.Join(lookupErrs, "; "))
 	}
 	m.Harness = "agy"
-	if m.Model == "" {
-		m.Model = agent.HarnessDefaults["agy"]
-	}
 	m.WorkingDirectory = meta.WorkspacePath
 	if m.Context.Project == "" {
 		m.Context.Project = meta.WorkspacePath
