@@ -149,6 +149,7 @@ Provide a production-ready CLI that:
   - `agm search [query]` - Search sessions by name/project path
   - `agm session list --all` - Include archived sessions
   - `agm session list --json` - Machine-readable output
+  - `agm session list --limit <n> --offset <n>` - Deterministic pagination for large inventories
   - `agm admin get-uuid [identifier]` - Get session UUID
   - `agm admin get-session-name [identifier]` - Get session name
 - **Search Features:**

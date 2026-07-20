@@ -184,6 +184,36 @@ func TestOccupiedWorkerIDsEmpty(t *testing.T) {
 	}
 }
 
+func TestListSessionsRetrievesEveryPage(t *testing.T) {
+	original := listSessionPage
+	t.Cleanup(func() { listSessionPage = original })
+	var offsets []int
+	listSessionPage = func(_ context.Context, offset int) (sessionListPayload, error) {
+		offsets = append(offsets, offset)
+		if offset == 0 {
+			sessions := make([]sessionNameStatus, sessionListPageSize)
+			for index := range sessions {
+				sessions[index] = sessionNameStatus{Name: fmt.Sprintf("archived-%d", index), Status: "archived"}
+			}
+			sessions[sessionListPageSize-1] = sessionNameStatus{Name: "worker-ce-first", Status: "stopped"}
+			return sessionListPayload{Sessions: sessions}, nil
+		}
+		return sessionListPayload{Sessions: []sessionNameStatus{{Name: "worker-ce-second", Status: "zombie"}}}, nil
+	}
+
+	lines, err := listSessions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := occupiedWorkerIDs(lines)
+	if len(offsets) != 2 || offsets[0] != 0 || offsets[1] != sessionListPageSize {
+		t.Fatalf("page offsets = %v, want [0 %d]", offsets, sessionListPageSize)
+	}
+	if !ids["ce-first"] || !ids["ce-second"] {
+		t.Fatalf("occupied ids = %v, want workers from both pages", ids)
+	}
+}
+
 func TestFirstParagraph(t *testing.T) {
 	tests := []struct {
 		in   string

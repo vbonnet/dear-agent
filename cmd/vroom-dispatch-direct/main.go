@@ -157,22 +157,54 @@ var queryOpenPRs = func(ctx context.Context, repo string) ([]pullRequest, error)
 	return prs, nil
 }
 
-// listSessions runs `agm session list --all --output json` and returns its raw
-// lines. Archived sessions are included in the source so dedup can distinguish
-// them from stopped but still non-archived names that AGM will reject as
-// duplicates. It is a package variable so tests can stub the agm invocation. A
-// failure is returned as an error so
-// the caller can fail closed: without the session list we cannot tell which beads
-// are already being worked, and must not risk double-dispatching them.
-var listSessions = func(ctx context.Context) ([]string, error) {
+const sessionListPageSize = 1000
+
+type sessionNameStatus struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+}
+
+type sessionListPayload struct {
+	Sessions []sessionNameStatus `json:"sessions"`
+}
+
+// listSessionPage reads one explicit page. The CLI caps a page at 1,000 rows.
+var listSessionPage = func(ctx context.Context, offset int) (sessionListPayload, error) {
 	ctx, cancel := context.WithTimeout(ctx, subprocessTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "agm", "session", "list", "--all", "--output", "json")
+	cmd := exec.CommandContext(ctx, "agm", "session", "list", "--all", "--output", "json",
+		"--limit", fmt.Sprint(sessionListPageSize), "--offset", fmt.Sprint(offset))
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("agm session list: %w", err)
+		return sessionListPayload{}, fmt.Errorf("agm session list: %w", err)
 	}
-	return strings.Split(string(out), "\n"), nil
+	var payload sessionListPayload
+	if err := json.Unmarshal(out, &payload); err != nil {
+		return sessionListPayload{}, fmt.Errorf("parse agm session list: %w", err)
+	}
+	return payload, nil
+}
+
+// listSessions retrieves every page before candidate selection. Archived rows
+// are included so status can release those names while retaining stopped and
+// zombie non-archived names. A partial inventory would make dedup fail open.
+func listSessions(ctx context.Context) ([]string, error) {
+	all := sessionListPayload{Sessions: []sessionNameStatus{}}
+	for offset := 0; ; offset += sessionListPageSize {
+		page, err := listSessionPage(ctx, offset)
+		if err != nil {
+			return nil, err
+		}
+		all.Sessions = append(all.Sessions, page.Sessions...)
+		if len(page.Sessions) < sessionListPageSize {
+			break
+		}
+	}
+	data, err := json.Marshal(all)
+	if err != nil {
+		return nil, fmt.Errorf("encode complete agm session list: %w", err)
+	}
+	return []string{string(data)}, nil
 }
 
 // normalizeSessionID maps a bead id to its tmux-safe form: dots, colons and
@@ -217,12 +249,7 @@ func occupiedWorkerIDs(lines []string) map[string]bool {
 	// regex when the output is not the expected JSON object.
 	joined := strings.TrimSpace(strings.Join(lines, "\n"))
 	if strings.HasPrefix(joined, "{") {
-		var payload struct {
-			Sessions []struct {
-				Name   string `json:"name"`
-				Status string `json:"status"`
-			} `json:"sessions"`
-		}
+		var payload sessionListPayload
 		if err := json.Unmarshal([]byte(joined), &payload); err == nil {
 			for _, s := range payload.Sessions {
 				if !workerStatusOccupiesName(s.Status) {

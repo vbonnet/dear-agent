@@ -155,11 +155,39 @@ func TestMarkdownCodeExamplesAreNotLinks(t *testing.T) {
 	}
 }
 
+func TestRelativeLinksCannotEscapeRepository(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "repo")
+	if err := os.MkdirAll(filepath.Join(root, "docs", "adr"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parent, "outside.md"), []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	violations := commonDocumentViolations(root, "docs/adr/ADR-001-example.md", []byte("[outside](../../../outside.md)\n"))
+	if len(violations) != 1 || !strings.Contains(violations[0].Reason, "escapes repository") {
+		t.Fatalf("escaping link violations = %#v", violations)
+	}
+}
+
 func TestMarkdownCodeExamplesAreNotLifecycleFields(t *testing.T) {
 	data := []byte(recordFixture("001", "Example", "Accepted") + "\n```markdown\n# ADR-999: Example\n\nStatus: Proposed\n```\n")
 	record, violations := parseRecord(t.TempDir(), "docs/adr/ADR-001-example.md", data, map[string]bool{"docs/adr/ADR-001-example.md": true})
 	if record.id != "001" || record.status != "Accepted" || len(violations) != 0 {
 		t.Fatalf("code examples changed lifecycle parsing: record=%+v violations=%#v", record, violations)
+	}
+}
+
+func TestMarkdownCodeExamplesAreNotADRIndexRows(t *testing.T) {
+	root := t.TempDir()
+	writeADRFile(t, root, "docs/adr/ADR-001-example.md", recordFixture("001", "Example", "Accepted"))
+	data := []byte(indexFixture("001", "ADR-001-example.md", "Example", "Accepted") +
+		"\n```markdown\n| [999](ADR-999-example.md) | Example row | Accepted |\n```\n")
+	records := map[string]record{
+		"ADR-001-example.md": {id: "001", filename: "ADR-001-example.md", title: "Example", status: "Accepted"},
+	}
+	if violations := validateIndex(root, "docs/adr/README.md", data, records); len(violations) != 0 {
+		t.Fatalf("code example changed index parsing: %#v", violations)
 	}
 }
 

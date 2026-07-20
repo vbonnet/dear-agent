@@ -41,3 +41,5 @@ dotted bead id can never brick a dispatch run (ce-b1zw).
 **VDD-12** When the system renders a worker completion contract, the prompt shall require evidence that the change is merged, deployed when applicable, and verified before the worker closes its bead.
 
 **VDD-13** When worker-name deduplication reads session state, the system shall treat active, running, zombie, and stopped worker sessions as occupied because AGM rejects duplicate non-archived names; archived sessions shall not suppress dispatch.
+
+**VDD-14** When session inventory exceeds one AGM list page, the system shall retrieve every page before candidate selection so an older occupied worker name cannot fall outside deduplication.

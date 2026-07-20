@@ -98,7 +98,13 @@ func commonDocumentViolations(root, relative string, data []byte) []Violation {
 		} else {
 			targetPath = filepath.Join(root, filepath.Dir(filepath.FromSlash(relative)), filepath.FromSlash(pathPart))
 		}
-		if _, err := os.Stat(filepath.Clean(targetPath)); err != nil {
+		targetPath = filepath.Clean(targetPath)
+		inside, err := filepath.Rel(root, targetPath)
+		if err != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
+			violations = append(violations, Violation{Path: relative, Reason: fmt.Sprintf("relative link %q escapes repository", target)})
+			continue
+		}
+		if _, err := os.Stat(targetPath); err != nil {
 			violations = append(violations, Violation{Path: relative, Reason: fmt.Sprintf("relative link %q does not resolve", target)})
 		}
 	}

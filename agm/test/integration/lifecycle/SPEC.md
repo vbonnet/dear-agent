@@ -12,6 +12,8 @@
 
 **LIFEI-04** If a session fixture is missing, corrupt, or already archived, then the suite shall verify a deterministic error outcome without damaging other sessions.
 
+**LIFEI-05** When the integration test binary or a child AGM command opens Dolt storage, the suite shall select explicit test mode, test workspace, and test database values before adapter construction.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/test_support_package_guardrails.feature`
