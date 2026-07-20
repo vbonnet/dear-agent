@@ -1,16 +1,20 @@
 # Skill Model/Effort Tiers
 
-Every Claude Code skill (`agm/agm-plugin/commands/*.md`, `wayfinder/**/commands/*.md`,
-and any `SKILL.md`) must declare `model:` and `effort:` in its YAML frontmatter.
-The `skill-lint` tool and `pkg/skilllint` test enforce this in CI.
+<!-- Last audited: 2026-07-19 -->
+
+Every provider command (`agm/agm-plugin/commands/*.md` and
+`wayfinder/**/commands/*.md`) must declare `model:` and `effort:` in its YAML
+frontmatter. Portable `SKILL.md` files may omit both fields so the active
+harness can select its own tier; if either field is present, both are required.
+The `skill-lint` tool and `pkg/skilllint` tests enforce this contract in CI.
 
 ## Why
 
-Skills run inside the parent Claude Code session. Without an explicit tier,
-they inherit the parent's model — which is Sonnet by default but often Opus
-in practice. A bulk refactor of docs running on Opus costs ~5× what it would
-on Sonnet, silently. Pinning every skill to the cheapest tier that still
-works prevents that drift.
+Provider commands run inside the parent Claude Code session. Without an
+explicit tier, they inherit the parent's model and can silently spend more than
+their task warrants. Pinning commands to the cheapest sufficient tier prevents
+that drift. Portable skills serve multiple harnesses, so provider-neutral
+metadata is preferable unless a compatible model/effort pair is intentional.
 
 ## Allowed values
 
@@ -35,6 +39,7 @@ mechanical skills (string formatting, data extraction, simple CLI wrappers).
 
 ## Lint
 
-CI runs `go test ./pkg/skilllint/...` which walks the skill directories and
-fails the build on any skill missing tier metadata. The same check is
-available as a CLI: `go run ./tools/skill-lint agm/agm-plugin/commands`.
+CI runs `go test ./pkg/skilllint/...` and the repository-mode linter. It rejects
+provider commands missing tier metadata and portable skills with incomplete or
+invalid optional tier pairs. The same check is available as a CLI:
+`go run ./tools/skill-lint -repo .`.

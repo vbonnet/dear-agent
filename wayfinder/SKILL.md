@@ -106,6 +106,6 @@ the same CLI commands and artifacts directly.
 
 ## References
 
-- Phase contract: `wayfinder/PHASES.md`
-- Current architecture: `wayfinder/ARCHITECTURE.md`
-- Observable requirements: `wayfinder/SPEC.md`
+- Phase contract: `PHASES.md`
+- Current architecture: `ARCHITECTURE.md`
+- Observable requirements: `SPEC.md`

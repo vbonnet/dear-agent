@@ -1,7 +1,7 @@
 ---
 name: scan-health
 description: Check AGM-managed session health. Use when the user asks whether one or all AGM sessions are healthy, responsive, or resource-constrained, or when an orchestration loop needs typed health evidence before dispatch.
-content-hash: 9388373dfdd4ad3b1ba3dad675374b36f0ca6ab72f5d22c5d083eef44a52c421
+content-hash: 0fe3468299a28c56a4c33fef196eb4e5c5298bdba8262c556477dc7a150e29b3
 ---
 
 # Scan AGM session health
@@ -14,3 +14,8 @@ content-hash: 9388373dfdd4ad3b1ba3dad675374b36f0ca6ab72f5d22c5d083eef44a52c421
    unhealthy sessions from a failed health command.
 4. If the command fails, show stderr and stop. Do not claim host disk or CPU
    health from session evidence.
+
+## Verify
+
+Verification is complete when every returned session is accounted for and a
+command failure remains a failure rather than being reported as a health result.

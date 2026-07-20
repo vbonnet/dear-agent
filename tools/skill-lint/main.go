@@ -1,63 +1,100 @@
-// Command skill-lint validates model/effort frontmatter on Claude Code
-// skill markdown files. Exits with status 1 if any file is non-compliant.
+// Command skill-lint validates AI skill and command Markdown surfaces.
+// Content violations exit 1; usage and operational errors exit 2.
 //
 // Usage:
 //
+//	skill-lint -repo <root>
 //	skill-lint <dir> [<dir>...]
 //	skill-lint -file <path>
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/vbonnet/dear-agent/pkg/skilllint"
 )
 
 func main() {
-	var (
-		singleFile string
-	)
-	flag.StringVar(&singleFile, "file", "", "lint a single file instead of directories")
-	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: skill-lint <dir> [<dir>...]")
-		fmt.Fprintln(os.Stderr, "       skill-lint -file <path>")
-		flag.PrintDefaults()
+	os.Exit(mainExitCode())
+}
+
+func mainExitCode() int {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return run(ctx, os.Args[1:], os.Stderr)
+}
+
+func run(ctx context.Context, args []string, stderr io.Writer) int {
+	flags := flag.NewFlagSet("skill-lint", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	var singleFile, repository string
+	flags.StringVar(&singleFile, "file", "", "lint a single recognized surface")
+	flags.StringVar(&repository, "repo", "", "lint every tracked surface in a Git repository")
+	flags.Usage = func() {
+		fmt.Fprintln(stderr, "Usage: skill-lint -repo <root>")
+		fmt.Fprintln(stderr, "       skill-lint <dir> [<dir>...]")
+		fmt.Fprintln(stderr, "       skill-lint -file <path>")
+		flags.PrintDefaults()
 	}
-	flag.Parse()
+	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
 
-	var violations []skilllint.Violation
-
+	dirs := flags.Args()
+	selectedModes := 0
+	if repository != "" {
+		selectedModes++
+	}
 	if singleFile != "" {
-		vs, err := skilllint.CheckFile(singleFile)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "skill-lint:", err)
-			os.Exit(2)
-		}
-		violations = append(violations, vs...)
-	} else {
-		dirs := flag.Args()
-		if len(dirs) == 0 {
-			flag.Usage()
-			os.Exit(2)
-		}
-		for _, d := range dirs {
-			vs, err := skilllint.CheckDir(d)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "skill-lint: %s: %v\n", d, err)
-				os.Exit(2)
-			}
-			violations = append(violations, vs...)
-		}
+		selectedModes++
+	}
+	if len(dirs) > 0 {
+		selectedModes++
+	}
+	if selectedModes != 1 {
+		flags.Usage()
+		return 2
 	}
 
+	var (
+		violations []skilllint.Violation
+		err        error
+	)
+	switch {
+	case repository != "":
+		violations, err = skilllint.CheckRepository(ctx, repository)
+	case singleFile != "":
+		violations, err = skilllint.CheckFile(singleFile)
+	default:
+		for _, dir := range dirs {
+			var found []skilllint.Violation
+			found, err = skilllint.CheckDir(dir)
+			if err != nil {
+				break
+			}
+			violations = append(violations, found...)
+		}
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, "skill-lint:", err)
+		return 2
+	}
 	if len(violations) == 0 {
-		return
+		return 0
 	}
-	for _, v := range violations {
-		fmt.Fprintln(os.Stderr, v)
+	for _, violation := range violations {
+		fmt.Fprintln(stderr, violation)
 	}
-	fmt.Fprintf(os.Stderr, "\n%d violation(s)\n", len(violations))
-	os.Exit(1)
+	fmt.Fprintf(stderr, "\n%d violation(s)\n", len(violations))
+	return 1
 }

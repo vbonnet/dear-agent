@@ -148,9 +148,9 @@ framework). Enforcement tiers today:
 
 | State | Behavior |
 |-------|----------|
-| Criteria absent | Advisory warning (no CI failure today; future: hard gate) |
-| Criteria present, vague item | Lint warning |
-| Criteria present, well-formed | No finding |
+| Criteria absent | Accepted; the Markdown verification section remains required for portable skills |
+| Criteria present, not a nonempty string list | Hard lint failure |
+| Criteria present, structurally valid | No finding; reviewers assess whether each statement is falsifiable |
 
 Future: `cmd/bead-close-guard` may gate bead closure on the Auditor having
 checked each declared criterion. This doc will be updated when that gate lands.
