@@ -1,0 +1,76 @@
+package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"time"
+)
+
+// deathSentinelName marks an in-progress token-family death. Its presence means
+// the operator has already been alerted for this episode, so the 30-minute
+// cadence does not re-notify every tick; a successful refresh clears it.
+const deathSentinelName = "token-family-dead"
+
+// cadenceExit adapts a run's exit code for the unattended launchd cadence job.
+//
+// Two problems it solves, both observed on 2026-07-19 (ce-77ip):
+//
+//  1. A dead token family was invisible. The launchd job wrote "token family is
+//     dead" to a log file nobody tails, so the operator discovered the outage
+//     by failing to authenticate hours later. Now it raises a desktop
+//     notification the moment the family dies.
+//
+//  2. The job removed itself from the schedule. launchd throttles a
+//     StartInterval job that exits non-zero quickly and repeatedly; after the
+//     family died, this job exited 2 every 30 minutes until launchd stopped
+//     running it entirely -- so when the operator did re-authenticate, nothing
+//     was refreshing the credentials any more and the next death was
+//     guaranteed. Reporting success keeps the cadence alive so it resumes
+//     automatically after the next `claude /login`.
+//
+// The real exit code still reaches the audit log and stderr; only the process
+// status is flattened, and only for the cadence caller.
+func cadenceExit(code int, stateDir string, stderr io.Writer) int {
+	sentinel := filepath.Join(stateDir, deathSentinelName)
+
+	switch code {
+	case exitTokenFamilyDead:
+		if _, err := os.Stat(sentinel); err != nil {
+			// First tick of this death episode: alert, then record that we did.
+			notifyOperator("Claude auth DOWN", "OAuth token family is dead. Run: claude /login")
+			if err := os.MkdirAll(stateDir, 0o700); err == nil {
+				stamp := time.Now().UTC().Format(time.RFC3339)
+				_ = os.WriteFile(sentinel, []byte(stamp+"\n"), 0o600)
+			}
+		}
+		fmt.Fprintf(stderr, "token-refresher: cadence mode — reporting success so launchd keeps the schedule.\n")
+		return exitOK
+
+	case exitOK:
+		// Family is healthy again; arm the alert for the next episode.
+		_ = os.Remove(sentinel)
+		return exitOK
+	}
+
+	return code
+}
+
+// notifyOperator raises a macOS notification. Alerting is best-effort: a
+// refresh must never fail because the notification did not render.
+func notifyOperator(title, message string) {
+	script := fmt.Sprintf("display notification %q with title %q sound name \"Basso\"", message, title)
+	cmd := exec.Command("osascript", "-e", script)
+	_ = cmd.Run()
+}
+
+// defaultStateDir is where the sentinel lives, alongside the audit log.
+func defaultStateDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return os.TempDir()
+	}
+	return filepath.Join(home, ".local", "state", "dear-agent")
+}
