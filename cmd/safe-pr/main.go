@@ -359,7 +359,7 @@ func ghCreateFlagConsumesNext(arg string) bool {
 		"--assignee", "--base", "--body", "--body-file", "--head", "--label",
 		"--milestone", "--project", "--recover", "--reviewer", "--template", "--title",
 	}
-	shortValueFlags := []string{"-a", "-B", "-b", "-H", "-l", "-m", "-p", "-r", "-T", "-t"}
+	shortValueFlags := []string{"-a", "-B", "-b", "-H", "-l", "-m", "-p", "-R", "-r", "-T", "-t"}
 	return slices.Contains(longValueFlags, arg) || slices.Contains(shortValueFlags, arg)
 }
 
@@ -371,7 +371,7 @@ func draftInShorthandCluster(arg string) (draft bool, consumesNext bool) {
 	if len(arg) < 3 || !strings.HasPrefix(arg, "-") || strings.HasPrefix(arg, "--") {
 		return false, false
 	}
-	valueTaking := "aBbHlmprTt"
+	valueTaking := "aBbHlmpRrTt"
 	clusterText, explicitValue, hasExplicitValue := strings.Cut(strings.TrimPrefix(arg, "-"), "=")
 	cluster := []rune(clusterText)
 	for i, shorthand := range cluster {
