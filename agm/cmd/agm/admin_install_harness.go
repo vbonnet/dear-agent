@@ -9,10 +9,11 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 )
 
-var installHarnessCmd = &cobra.Command{
-	Use:   "install-harness <harness>",
-	Short: "Install a coding agent harness (codex, gemini, or opencode)",
-	Long: `Install a coding agent harness CLI.
+func newInstallHarnessCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "install-harness <harness>",
+		Short: "Install a coding agent harness (codex, gemini, or opencode)",
+		Long: `Install a coding agent harness CLI.
 
 Supports:
   codex     - OpenAI Codex CLI (installed via npm)
@@ -27,20 +28,19 @@ Examples:
   agm admin install-harness gemini
   agm admin install-harness opencode
   agm admin install-harness codex --json`,
-	Args:      cobra.ExactArgs(1),
-	RunE:      runInstallHarness,
-	ValidArgs: []string{"codex", "gemini", "opencode"},
+		Args:      cobra.ExactArgs(1),
+		RunE:      runInstallHarness,
+		ValidArgs: []string{"codex", "gemini", "opencode"},
+	}
+	cmd.Flags().Bool("json", true, "Output result as JSON (default: true)")
+	cmd.Flags().Bool("quiet", false, "Suppress output (only valid with --json)")
+	return cmd
 }
 
-var installHarnessJSON bool
-var installHarnessQuiet bool
+var installHarnessCmd = newInstallHarnessCommand()
 
 func init() {
 	adminCmd.AddCommand(installHarnessCmd)
-	installHarnessCmd.Flags().BoolVar(&installHarnessJSON, "json", true,
-		"Output result as JSON (default: true)")
-	installHarnessCmd.Flags().BoolVar(&installHarnessQuiet, "quiet", false,
-		"Suppress output (only valid with --json)")
 }
 
 func runInstallHarness(cmd *cobra.Command, args []string) error {
@@ -56,7 +56,18 @@ func runInstallHarness(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx := context.Background()
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	jsonOutput, err := cmd.Flags().GetBool("json")
+	if err != nil {
+		return fmt.Errorf("read --json: %w", err)
+	}
+	quiet, err := cmd.Flags().GetBool("quiet")
+	if err != nil {
+		return fmt.Errorf("read --quiet: %w", err)
+	}
 
 	// Install the harness
 	result, err := ops.Install(ctx, harness)
@@ -65,13 +76,13 @@ func runInstallHarness(cmd *cobra.Command, args []string) error {
 	}
 
 	// Output result
-	if installHarnessJSON {
+	if jsonOutput {
 		jsonOutput, err := ops.ResultToJSON(result)
 		if err != nil {
 			return fmt.Errorf("failed to marshal result to JSON: %w", err)
 		}
 
-		if !installHarnessQuiet {
+		if !quiet {
 			fmt.Println(jsonOutput)
 		}
 
@@ -102,31 +113,45 @@ func runInstallHarness(cmd *cobra.Command, args []string) error {
 }
 
 // installCodexCmd is a convenience command for installing just Codex
-var installCodexCmd = &cobra.Command{
-	Use:   "install-codex",
-	Short: "Install Codex CLI (shorthand for install-harness codex)",
-	Long: `Install OpenAI's Codex CLI.
+func newInstallCodexCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "install-codex",
+		Short: "Install Codex CLI (shorthand for install-harness codex)",
+		Long: `Install OpenAI's Codex CLI.
 
 The Codex CLI will be installed via npm (npm install -g @openai/codex).
 Output is in JSON format.
 
 Example:
   agm admin install-codex`,
-	Args:  cobra.NoArgs,
-	RunE:  runInstallCodex,
-	Hidden: true, // Hidden since install-harness is the canonical command
+		Args:   cobra.NoArgs,
+		RunE:   runInstallCodex,
+		Hidden: true, // Hidden since install-harness is the canonical command
+	}
+	cmd.Flags().Bool("json", true, "Output result as JSON (default: true)")
+	cmd.Flags().Bool("quiet", false, "Suppress output (only valid with --json)")
+	return cmd
 }
+
+var installCodexCmd = newInstallCodexCommand()
 
 func init() {
 	adminCmd.AddCommand(installCodexCmd)
-	installCodexCmd.Flags().BoolVar(&installHarnessJSON, "json", true,
-		"Output result as JSON (default: true)")
-	installCodexCmd.Flags().BoolVar(&installHarnessQuiet, "quiet", false,
-		"Suppress output (only valid with --json)")
 }
 
 func runInstallCodex(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	jsonOutput, err := cmd.Flags().GetBool("json")
+	if err != nil {
+		return fmt.Errorf("read --json: %w", err)
+	}
+	quiet, err := cmd.Flags().GetBool("quiet")
+	if err != nil {
+		return fmt.Errorf("read --quiet: %w", err)
+	}
 
 	result := ops.InstallCodex(ctx)
 	if result == nil {
@@ -134,13 +159,13 @@ func runInstallCodex(cmd *cobra.Command, args []string) error {
 	}
 
 	// Output result
-	if installHarnessJSON {
+	if jsonOutput {
 		jsonOutput, err := ops.ResultToJSON(result)
 		if err != nil {
 			return fmt.Errorf("failed to marshal result to JSON: %w", err)
 		}
 
-		if !installHarnessQuiet {
+		if !quiet {
 			fmt.Println(jsonOutput)
 		}
 
