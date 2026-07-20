@@ -11,7 +11,7 @@ The `contract` build tag contains two distinct boundaries:
 
 Codex lifecycle behavior is CLI/tmux-backed rather than OpenAI-API-backed. Its
 real source-binary coverage therefore lives in
-`agm/test/integration/lifecycle/codex_isolated_lifecycle_test.go`, not in a
+`agm/test/integration/isolated/codex_lifecycle_test.go`, not in a
 mock HTTP Pact.
 
 ## Running

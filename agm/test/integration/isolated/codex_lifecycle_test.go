@@ -1,6 +1,6 @@
 //go:build integration
 
-package lifecycle_test
+package isolated_test
 
 import (
 	"fmt"

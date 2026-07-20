@@ -11,6 +11,8 @@
 # RELATED-SPEC: agm/test/integration/SPEC.md
 # RELATED-SPEC: agm/test/integration/helpers/SPEC.md
 # RELATED-SPEC: agm/test/integration/lifecycle/SPEC.md
+# RELATED-SPEC: agm/test/integration/isolated/SPEC.md
+# RELATED-SPEC: agm/test/integration/portable/SPEC.md
 # RELATED-SPEC: agm/test/performance/SPEC.md
 # RELATED-SPEC: agm/test/regression/SPEC.md
 # RELATED-SPEC: agm/test/unit/SPEC.md
@@ -41,7 +43,9 @@ Feature: Test support package guardrails
       | agm/test/helpers                                          |
       | agm/test/integration                                      |
       | agm/test/integration/helpers                              |
+      | agm/test/integration/isolated                             |
       | agm/test/integration/lifecycle                            |
+      | agm/test/integration/portable                             |
       | agm/test/performance                                      |
       | agm/test/regression                                       |
       | agm/test/unit                                             |
@@ -120,6 +124,7 @@ Feature: Test support package guardrails
     And the lifecycle should exercise send kill resume and archive through the source-built AGM
     And unexpected lifecycle setup failures should fail the test
     And cleanup should target only owned test resources
+    And legacy suite opt-outs should not suppress required integration contracts
 
   Scenario: Named test environments remain inside one owned root
     Given named test environment lifecycle sources are configured

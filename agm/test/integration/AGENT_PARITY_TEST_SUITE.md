@@ -2,7 +2,7 @@
 
 The integration-tagged parity boundary has two layers:
 
-1. `agent_parity_portable_test.go` always checks the shared non-I/O adapter
+1. `portable/active_harness_test.go` always checks the shared non-I/O adapter
    contract for every active harness: `claude-code`, `codex-cli`, `agy`, and
    `opencode-cli`.
 2. Host-dependent lifecycle tests live beside their isolated harness fixtures.
@@ -28,6 +28,6 @@ go test -tags=integration ./agm/test/integration/...
 Run the portable parity contract alone with:
 
 ```bash
-go test -tags=integration ./agm/test/integration \
+go test -tags=integration ./agm/test/integration/portable \
   -run 'TestActiveHarnessParityContract|TestHarnessPrerequisitesAreScoped'
 ```

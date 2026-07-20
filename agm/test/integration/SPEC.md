@@ -16,6 +16,8 @@
 
 **INTG-06** When the integration-tagged adapter parity suite runs without host credentials or services, the system shall execute the portable contract for every active harness, including Codex, and scope prerequisite skips to individual host-dependent harness tests.
 
+**INTG-07** When legacy integration scenarios are disabled by package-level opt-out, the system shall keep required portable parity and isolated lifecycle tests in independently executable child packages.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/test_support_package_guardrails.feature`

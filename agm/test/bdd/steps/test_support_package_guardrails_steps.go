@@ -32,7 +32,9 @@ var residualTestSupportPackages = []string{
 	"agm/test/helpers",
 	"agm/test/integration",
 	"agm/test/integration/helpers",
+	"agm/test/integration/isolated",
 	"agm/test/integration/lifecycle",
+	"agm/test/integration/portable",
 	"agm/test/performance",
 	"agm/test/regression",
 	"agm/test/unit",
@@ -91,6 +93,7 @@ func RegisterTestSupportPackageGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the lifecycle should exercise send kill resume and archive through the source-built AGM$`, lifecycleExercisesCompleteCodexLifecycle)
 	ctx.Step(`^unexpected lifecycle setup failures should fail the test$`, unexpectedLifecycleSetupFailuresFail)
 	ctx.Step(`^cleanup should target only owned test resources$`, cleanupTargetsOnlyOwnedTestResources)
+	ctx.Step(`^legacy suite opt-outs should not suppress required integration contracts$`, legacySuiteOptOutsDoNotSuppressRequiredIntegrationContracts)
 	ctx.Step(`^named test environment lifecycle sources are configured$`, namedTestEnvironmentLifecycleSourcesAreConfigured)
 	ctx.Step(`^AGM validates named test environment ownership$`, agmValidatesNamedTestEnvironmentOwnership)
 	ctx.Step(`^canonical creation reconstruction discovery and cleanup should share one root$`, namedTestEnvironmentLifecycleSharesOneRoot)
@@ -223,7 +226,7 @@ func isolatedCodexLifecycleTestSourcesAreConfigured() error {
 	root := packageSpecBDDRepoRoot()
 	for _, path := range []string{
 		"agm/test/integration/helpers/isolated_environment.go",
-		"agm/test/integration/lifecycle/codex_isolated_lifecycle_test.go",
+		"agm/test/integration/isolated/codex_lifecycle_test.go",
 	} {
 		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(path))); err != nil {
 			return fmt.Errorf("isolated lifecycle source %s: %w", path, err)
@@ -252,7 +255,7 @@ func lifecycleUsesSourceBuiltAGMAndUniqueTmuxSocket() error {
 		}
 	}
 
-	lifecycleData, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "lifecycle", "codex_isolated_lifecycle_test.go"))
+	lifecycleData, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "isolated", "codex_lifecycle_test.go"))
 	if err != nil {
 		return err
 	}
@@ -527,6 +530,34 @@ func requireNamedTestEnvironmentTests(ctx context.Context, tests ...string) erro
 	for _, test := range tests {
 		if !strings.Contains(state.testEnvOutput, "--- PASS: "+test) {
 			return fmt.Errorf("named test environment ownership test %s did not pass:\n%s", test, state.testEnvOutput)
+		}
+	}
+	return nil
+}
+
+func legacySuiteOptOutsDoNotSuppressRequiredIntegrationContracts() error {
+	root := packageSpecBDDRepoRoot()
+	for _, path := range []string{
+		"agm/test/integration/portable/active_harness_test.go",
+		"agm/test/integration/isolated/codex_lifecycle_test.go",
+	} {
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+		if err != nil {
+			return fmt.Errorf("read required integration contract %s: %w", path, err)
+		}
+		if strings.Contains(string(data), "func TestMain(") || strings.Contains(string(data), `os.Getenv("SKIP_E2E")`) {
+			return fmt.Errorf("required integration contract %s is shadowed by a legacy suite opt-out", path)
+		}
+	}
+
+	workflow, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "ci.yml"))
+	if err != nil {
+		return fmt.Errorf("read CI workflow: %w", err)
+	}
+	ci := string(workflow)
+	for _, required := range []string{"./agm/test/integration/portable", "./agm/test/integration/isolated"} {
+		if !strings.Contains(ci, required) {
+			return fmt.Errorf("CI does not invoke required integration package %s", required)
 		}
 	}
 	return nil

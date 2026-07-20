@@ -18,6 +18,8 @@
 
 **LIFEI-07** When a required process-table or tmux prerequisite cannot start, the isolated Codex lifecycle shall skip only for a missing executable or an explicit permission denial and shall fail for every other setup error.
 
+**LIFEI-06** When the legacy lifecycle package skips unavailable end-to-end infrastructure, the system shall not suppress the independently packaged isolated Codex lifecycle.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/test_support_package_guardrails.feature`

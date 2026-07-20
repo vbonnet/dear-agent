@@ -212,7 +212,7 @@ jobs:
       - name: Run credential-free active harness parity
         run: >-
           go test -race -count=1 -tags=integration
-          ./agm/test/integration
+          ./agm/test/integration/portable
           -run 'TestActiveHarnessParityContract|TestHarnessPrerequisitesAreScoped'
 
       - name: Run active harness registry contract
@@ -224,7 +224,7 @@ jobs:
       - name: Run isolated source-built Codex lifecycle
         run: >-
           go test -race -count=1 -tags=integration
-          ./agm/test/integration/lifecycle
+          ./agm/test/integration/isolated
           -run '^TestCodexLifecycleUsesIsolatedSourceEnvironment$'
 
       - name: Enforce critical lifecycle coverage ratchet
