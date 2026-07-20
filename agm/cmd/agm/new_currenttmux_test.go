@@ -78,6 +78,31 @@ func TestStartCurrentTmuxHarnessCodexUsesRealLauncherContract(t *testing.T) {
 	}
 }
 
+func TestQueueCurrentTmuxCodexDoesNotWaitForReadiness(t *testing.T) {
+	t.Parallel()
+
+	var gotSession, gotCommand string
+	spec := ops.HarnessLaunchSpec{
+		Harness: "codex-cli", SessionName: "codex-current", WorkDir: "/tmp/codex-current",
+	}
+	wantCommand := ops.BuildHarnessLaunchCommand(spec).Command
+	modeApplied, err := queueCurrentTmuxCodexWithRuntime(spec, currentTmuxCodexQueueRuntime{
+		sendCommand: func(sessionName, command string) error {
+			gotSession, gotCommand = sessionName, command
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("queueCurrentTmuxCodexWithRuntime() error = %v", err)
+	}
+	if modeApplied {
+		t.Fatal("mode applied at startup = true, want false for default launch spec")
+	}
+	if gotSession != spec.SessionName || gotCommand != wantCommand {
+		t.Fatalf("queued (%q, %q), want (%q, %q)", gotSession, gotCommand, spec.SessionName, wantCommand)
+	}
+}
+
 func TestStartCurrentTmuxHarnessCodexStopsAfterCredentialFailure(t *testing.T) {
 	t.Parallel()
 
@@ -100,10 +125,10 @@ func TestStartCurrentTmuxHarnessCodexStopsAfterCredentialFailure(t *testing.T) {
 	}
 }
 
-func TestStartCurrentTmuxHarnessCodexPropagatesReadinessFailure(t *testing.T) {
+func TestStartCurrentTmuxHarnessCodexPropagatesQueueFailure(t *testing.T) {
 	t.Parallel()
 
-	wantErr := errors.New("Codex composer not ready")
+	wantErr := errors.New("Codex command could not be queued")
 	runtime := currentTmuxHarnessRuntime{
 		validateCodex: func() error { return nil },
 		startCodex: func(ops.HarnessLaunchSpec) (bool, error) {
@@ -113,7 +138,7 @@ func TestStartCurrentTmuxHarnessCodexPropagatesReadinessFailure(t *testing.T) {
 
 	err := startCurrentTmuxHarnessWithRuntime(ops.HarnessLaunchSpec{Harness: "codex-cli"}, runtime)
 	if !errors.Is(err, wantErr) {
-		t.Fatalf("error = %v, want readiness failure %v", err, wantErr)
+		t.Fatalf("error = %v, want queue failure %v", err, wantErr)
 	}
 }
 

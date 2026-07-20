@@ -105,9 +105,11 @@ func NewSessionMonitor(cfg *config.Config) (*SessionMonitor, error) {
 	// Respect an explicit socket as an isolation boundary. Auto-discovery is
 	// appropriate only when no socket was configured; otherwise the sentinel
 	// could inspect or recover sessions outside the caller-owned tmux server.
-	tmuxClient := tmux.NewClient()
+	var tmuxClient *tmux.Client
 	if cfg.Tmux.Socket != "" {
 		tmuxClient = tmux.NewClientWithSocket(cfg.Tmux.Socket)
+	} else {
+		tmuxClient = tmux.NewClient()
 	}
 
 	// Create stuck session detector

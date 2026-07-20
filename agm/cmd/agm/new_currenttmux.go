@@ -131,12 +131,43 @@ type currentTmuxHarnessRuntime struct {
 func realCurrentTmuxHarnessRuntime() currentTmuxHarnessRuntime {
 	return currentTmuxHarnessRuntime{
 		startClaude:   startCurrentTmuxClaude,
-		startCodex:    startCodexHarness,
+		startCodex:    queueCurrentTmuxCodex,
 		startOpenCode: startCurrentTmuxOpenCode,
 		startGemini:   startCurrentTmuxGemini,
 		startAgy:      startCurrentTmuxAgy,
 		validateCodex: validateCodexCredentials,
 	}
+}
+
+type currentTmuxCodexQueueRuntime struct {
+	sendCommand func(sessionName, command string) error
+}
+
+func realCurrentTmuxCodexQueueRuntime() currentTmuxCodexQueueRuntime {
+	return currentTmuxCodexQueueRuntime{sendCommand: tmux.SendCommand}
+}
+
+// queueCurrentTmuxCodex queues Codex behind the AGM process currently owning
+// the pane. It deliberately does not wait for composer readiness: the shell
+// cannot consume the queued command until AGM finishes metadata registration
+// and returns control of the pane.
+func queueCurrentTmuxCodex(spec ops.HarnessLaunchSpec) (bool, error) {
+	return queueCurrentTmuxCodexWithRuntime(spec, realCurrentTmuxCodexQueueRuntime())
+}
+
+func queueCurrentTmuxCodexWithRuntime(spec ops.HarnessLaunchSpec, runtime currentTmuxCodexQueueRuntime) (bool, error) {
+	launch := ops.BuildHarnessLaunchCommand(spec)
+	if err := runtime.sendCommand(spec.SessionName, launch.Command); err != nil {
+		ui.PrintError(err,
+			"Failed to queue Codex in current tmux pane",
+			"  • Verify Codex is installed: which codex\n"+
+				"  • Test Codex manually: codex --version\n"+
+				"  • Check you're in tmux: echo $TMUX")
+		return false, err
+	}
+	debug.Log("Codex command queued; metadata will finalize before the current shell launches it")
+	ui.PrintSuccess("Queued Codex CLI in current tmux session")
+	return launch.ModeAppliedAtStartup, nil
 }
 
 // startCurrentTmuxHarness dispatches the per-harness startup flow for the

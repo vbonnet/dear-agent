@@ -177,12 +177,15 @@ generated surface metadata, workflow-bus signaling, and accessible operator UIs.
 **File:** [`harness_parity.feature`](../test/bdd/features/harness_parity.feature)
 
 **Drives:** `agm/internal/agent` harness/model registry,
-`agm/internal/launchparity` startup contracts, and terminal state detection.
+`agm/internal/launchparity` startup contracts, `agm/cmd/agm` current-pane
+creation, and terminal state detection.
 
 **Key scenarios:**
 - A Codex CLI composer pane is detected as `ready`.
 - An idle Codex composer allows direct delivery.
 - A Codex trust prompt is queued rather than treated as a sendable prompt.
+- Codex current-pane creation validates credentials and queues the canonical
+  launch command without waiting behind the AGM process that owns the pane.
 - Active harnesses are exactly Claude Code, Codex CLI, AGY, and OpenCode.
 - Gemini CLI remains deprecated compatibility, not active parity.
 - Active harness factories use canonical names.

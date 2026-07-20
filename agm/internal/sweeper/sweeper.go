@@ -117,6 +117,9 @@ type Sweeper struct {
 
 // New creates a Sweeper with the given dependencies.
 func New(cfg Config, tmux TmuxLister, logger *slog.Logger) *Sweeper {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	s := &Sweeper{
 		cfg:            cfg,
 		tmux:           tmux,

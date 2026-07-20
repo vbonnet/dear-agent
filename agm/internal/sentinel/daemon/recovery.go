@@ -304,6 +304,9 @@ func dispatchRecoveryStrategy(strategy RecoveryStrategy, sessionName string, cli
 // restartSession kills and restarts a tmux session.
 // Most aggressive recovery - last resort for completely frozen sessions.
 func restartSession(sessionName string, client *tmux.Client) error {
+	if client == nil {
+		return fmt.Errorf("cannot restart session: tmux client is nil")
+	}
 	if err := client.KillSession(sessionName); err != nil {
 		return fmt.Errorf("failed to kill session: %w", err)
 	}
@@ -317,6 +320,9 @@ func restartSession(sessionName string, client *tmux.Client) error {
 // SendRejectionMessage sends a violation rejection message to the session.
 // This uses tmux send-keys to inject the message into the session pane.
 func SendRejectionMessage(sessionName string, message string, pattern *enforcement.Pattern, client *tmux.Client) error {
+	if client == nil {
+		return fmt.Errorf("cannot send rejection message: tmux client is nil")
+	}
 	// Create formatted rejection message
 	fullMessage := formatRejectionForTmux(message, pattern)
 

@@ -27,6 +27,16 @@ func TestNewClientWithSocketUsesOnlyConfiguredSocket(t *testing.T) {
 	assert.Equal(t, []string{socketPath}, client.socketPaths)
 }
 
+func TestBoundedCommandUsesSubprocessSafetyPolicy(t *testing.T) {
+	cmd, cancel := boundedCommand("-V")
+	defer cancel()
+
+	assert.NotNil(t, cmd.SysProcAttr)
+	assert.True(t, cmd.SysProcAttr.Setpgid)
+	assert.NotNil(t, cmd.Cancel)
+	assert.Equal(t, commandWaitDelay, cmd.WaitDelay)
+}
+
 func TestConfiguredClientActionsUseOnlyConfiguredSocket(t *testing.T) {
 	binDir := t.TempDir()
 	invocationsPath := filepath.Join(t.TempDir(), "tmux-invocations")

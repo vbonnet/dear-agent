@@ -120,7 +120,8 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^current-tmux creation selects Codex CLI$`, currentTmuxCreationSelectsCodexCLI)
 	ctx.Step(`^AGM validates current-tmux Codex launch wiring$`, agmValidatesCurrentTmuxCodexLaunchWiring)
 	ctx.Step(`^Codex credential validation should precede the canonical launcher$`, codexCredentialValidationShouldPrecedeCanonicalLauncher)
-	ctx.Step(`^Codex launcher failures should propagate to shared creation rollback$`, codexLauncherFailuresShouldPropagateToSharedCreationRollback)
+	ctx.Step(`^Codex current-tmux launch should not wait behind its own AGM process$`, codexCurrentTmuxLaunchShouldNotWaitBehindOwnProcess)
+	ctx.Step(`^Codex queue failures should propagate to shared creation rollback$`, codexQueueFailuresShouldPropagateToSharedCreationRollback)
 	ctx.Step(`^AGM validates active harness adapter conformance$`, agmValidatesActiveHarnessAdapterConformance)
 	ctx.Step(`^every active harness adapter should satisfy the shared conformance suite$`, everyActiveHarnessAdapterShouldSatisfySharedConformanceSuite)
 	ctx.Step(`^AGM validates the pane capture invocation$`, agmValidatesPaneCaptureInvocation)
@@ -278,7 +279,7 @@ func agmValidatesCurrentTmuxCodexLaunchWiring(ctx context.Context) error {
 	// to compile both production packages under integration-graph contention.
 	testCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/ops", "-run", `^(TestStartCurrentTmuxHarnessCodex(UsesRealLauncherContract|StopsAfterCredentialFailure|PropagatesReadinessFailure)|TestCreateSession_RollsBackEveryPostTmuxFailure)$`, "-count=1", "-v")
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/ops", "-run", `^(Test(StartCurrentTmuxHarnessCodex(UsesRealLauncherContract|StopsAfterCredentialFailure|PropagatesQueueFailure)|QueueCurrentTmuxCodexDoesNotWaitForReadiness)|TestCreateSession_RollsBackEveryPostTmuxFailure)$`, "-count=1", "-v")
 	cmd.Dir = bddRepoRoot()
 	output, runErr := cmd.CombinedOutput()
 	harnessState.currentTmuxTestOutput = string(output)
@@ -305,13 +306,24 @@ func codexCredentialValidationShouldPrecedeCanonicalLauncher(ctx context.Context
 	return nil
 }
 
-func codexLauncherFailuresShouldPropagateToSharedCreationRollback(ctx context.Context) error {
+func codexCurrentTmuxLaunchShouldNotWaitBehindOwnProcess(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if state.currentTmuxTestErr != nil {
+		return fmt.Errorf("current-tmux Codex behavior suite failed: %w\n%s", state.currentTmuxTestErr, state.currentTmuxTestOutput)
+	}
+	if behavior := "TestQueueCurrentTmuxCodexDoesNotWaitForReadiness"; !strings.Contains(state.currentTmuxTestOutput, "--- PASS: "+behavior) {
+		return fmt.Errorf("current-tmux Codex behavior %s did not pass:\n%s", behavior, state.currentTmuxTestOutput)
+	}
+	return nil
+}
+
+func codexQueueFailuresShouldPropagateToSharedCreationRollback(ctx context.Context) error {
 	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
 	if state.currentTmuxTestErr != nil {
 		return fmt.Errorf("current-tmux Codex behavior suite failed: %w\n%s", state.currentTmuxTestErr, state.currentTmuxTestOutput)
 	}
 	for _, behavior := range []string{
-		"TestStartCurrentTmuxHarnessCodexPropagatesReadinessFailure",
+		"TestStartCurrentTmuxHarnessCodexPropagatesQueueFailure",
 		"TestCreateSession_RollsBackEveryPostTmuxFailure/launch",
 	} {
 		if !strings.Contains(state.currentTmuxTestOutput, "--- PASS: "+behavior) {
