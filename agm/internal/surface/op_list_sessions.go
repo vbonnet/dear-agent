@@ -20,12 +20,6 @@ var ListSessions = codegen.Op{
 		ToolName:    "agm_list_sessions",
 		Description: "List AGM sessions. Use when you need to see all active sessions or find sessions by status/type.",
 	},
-	Skill: &codegen.SkillSurface{
-		SlashCommand: "agm-list",
-		AllowedTools: "Bash(agm session list:*)",
-		ActionVerb:   "list all AGM sessions",
-		OutputTable:  []string{"Name", "Status", "Harness", "Project", "Updated"},
-	},
 }
 
 // ListSessionsRequest mirrors ops.ListSessionsRequest with ef tags for generation.

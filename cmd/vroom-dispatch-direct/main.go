@@ -181,6 +181,8 @@ var listSessions = func(ctx context.Context) ([]string, error) {
 // preceding whitespace) rather than a bare \b word boundary: dispatched sessions
 // are named exactly "worker-<id>", so a hyphen-joined name like "my-worker-x" or
 // "subworker-x" is a different session and must NOT be read as a live worker.
+// This is the fallback for the legacy plain-text `agm session list`; the
+// default agent-mode JSON output is parsed structurally in liveWorkerIDs.
 var workerSessionRe = regexp.MustCompile(`(?m)(?:^|\s)worker-([A-Za-z0-9.-]+)`)
 
 // normalizeSessionID maps a bead id to its tmux-safe form: dots, colons and
@@ -214,6 +216,32 @@ func workerSessionName(id string) string {
 // match both sanitized session names and legacy dotted ones.
 func liveWorkerIDs(lines []string) map[string]bool {
 	ids := make(map[string]bool)
+
+	// `agm session list` defaults to agent-mode JSON in the non-TTY dispatch
+	// context. Parse it structurally and read ONLY the session name field, so a
+	// "worker-" substring in some other field (e.g. "harness":"worker-harness")
+	// can never be misread as a live worker id. Fall back to the legacy text
+	// regex when the output is not the expected JSON object.
+	joined := strings.TrimSpace(strings.Join(lines, "\n"))
+	if strings.HasPrefix(joined, "{") {
+		var payload struct {
+			Sessions []struct {
+				Name string `json:"name"`
+			} `json:"sessions"`
+		}
+		if err := json.Unmarshal([]byte(joined), &payload); err == nil {
+			for _, s := range payload.Sessions {
+				// Exact prefix on the name field: "subworker-x"/"my-worker-x"
+				// do not start with "worker-", so they are excluded naturally.
+				if rest, ok := strings.CutPrefix(s.Name, "worker-"); ok {
+					ids[normalizeSessionID(rest)] = true
+				}
+			}
+			return ids
+		}
+		// Unmarshal failed: fall through to the text regex (defensive).
+	}
+
 	for _, line := range lines {
 		for _, m := range workerSessionRe.FindAllStringSubmatch(line, -1) {
 			ids[normalizeSessionID(m[1])] = true
@@ -408,12 +436,20 @@ func selectCandidates(beads []bead, liveWorkers map[string]bool, prs []pullReque
 
 // sessionNewArgs builds the AGM launch request. The defaults preserve current
 // Claude operation, while explicit flags provide the non-Claude path.
-func sessionNewArgs(name string, cfg workerLaunchConfig) []string {
+//
+// repoDir is passed as an explicit --directory so `agm session new`'s
+// getWorkDir never falls back to $PWD/os.Getwd(). Under launchd
+// (WorkingDirectory=/Users/vbonnet, no $PWD), that fallback resolved to
+// $HOME, which made resolveSandboxLowerDirs clone the entire home directory
+// — the root cause of the spawn-hang fixed alongside this (ce-fmxv). A
+// launchd-driven spawn must never depend on inherited cwd.
+func sessionNewArgs(name string, cfg workerLaunchConfig, repoDir string) []string {
 	args := []string{
 		"session", "new", name,
 		"--detached", "--workspace=" + cfg.Workspace, "--harness=" + cfg.Harness,
 		"--model=" + cfg.Model,
 		"--role", workerRole,
+		"--directory", repoDir,
 	}
 	if cfg.Mode != "" {
 		args = append(args, "--mode="+cfg.Mode)
@@ -424,14 +460,28 @@ func sessionNewArgs(name string, cfg workerLaunchConfig) []string {
 // spawnSession creates the detached worker session. Package var for test stubbing.
 // Uses sessionSpawnTimeout (not the blanket subprocessTimeout): harness boot
 // legitimately exceeds 60s — see the const's comment.
-var spawnSession = func(ctx context.Context, name string, cfg workerLaunchConfig) error {
+var spawnSession = func(ctx context.Context, name string, cfg workerLaunchConfig, repoDir string) error {
 	ctx, cancel := context.WithTimeout(ctx, sessionSpawnTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "agm", sessionNewArgs(name, cfg)...)
+	cmd := exec.CommandContext(ctx, "agm", sessionNewArgs(name, cfg, repoDir)...)
 	// Mark the spawned session tree as unattended so its own `agm send` calls
 	// auto-stash stale input instead of deadlocking as if a human were typing
 	// (ce-v9in), and scrub the API key so workers use the session's own auth.
 	cmd.Env = append(scrubAPIKey(os.Environ()), "AGM_AUTONOMOUS=1")
+	// Process-group isolation + group-cancel + WaitDelay matches the repo's
+	// subprocess-execution convention (see codexcontrol.Client): `agm session
+	// new` boots a harness that can itself wedge a descendant holding a pipe
+	// open (this is the exact ce-fmxv failure mode this PR fixes elsewhere in
+	// the codex boot path); without group-kill on cancel that descendant can
+	// outlive the timeout and keep the worker session half-alive.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 1 * time.Second
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("%w\n%s", err, strings.TrimSpace(string(out)))
 	}
@@ -506,9 +556,9 @@ func isDeterministicSpawnFailure(err error) bool {
 // so the caller can skip the bead and continue; any other failure (circuit
 // breaker / at capacity / timeout / unknown) is returned as-is and no prompt is
 // sent — the bead is simply retried on a later run.
-func dispatch(ctx context.Context, b bead, cfg workerLaunchConfig) error {
+func dispatch(ctx context.Context, b bead, cfg workerLaunchConfig, repoDir string) error {
 	name := workerSessionName(b.ID)
-	if err := spawnSession(ctx, name, cfg); err != nil {
+	if err := spawnSession(ctx, name, cfg, repoDir); err != nil {
 		wrapped := fmt.Errorf("spawn %s: %w", name, err)
 		if isDeterministicSpawnFailure(err) {
 			return &skipBeadError{err: wrapped}
@@ -528,6 +578,7 @@ func main() {
 	model := flag.String("model", defaultModel, "model alias for the selected harness")
 	mode := flag.String("mode", defaultMode, "AGM permission mode; empty omits the flag")
 	workspace := flag.String("workspace", defaultWorkspace, "AGM workspace for workers")
+	repoDir := flag.String("repo-dir", "~/src/dear-agent", "local checkout passed as `agm session new --directory` so a launchd-context spawn never inherits launchd's cwd (ce-fmxv)")
 	maxPriority := flag.Int("max-priority", 2, "numeric priority ceiling: 0=P0 only, 1=P0+P1, 2=P0..P2 (orchestrator narrows this as Meta-O goes stale)")
 	dryRun := flag.Bool("dry-run", false, "report what would be dispatched without spawning any sessions")
 	flag.Parse()
@@ -542,6 +593,7 @@ func main() {
 		fatal("home dir: %v", err)
 	}
 	dbPath := expandHome(*db, home)
+	repoDirPath := expandHome(*repoDir, home)
 
 	beads, err := queryReady(ctx, dbPath)
 	if err != nil {
@@ -565,14 +617,14 @@ func main() {
 	candidates := selectCandidates(beads, live, prs, *maxPriority)
 
 	launch := workerLaunchConfig{Harness: *harness, Model: *model, Mode: *mode, Workspace: *workspace}
-	dispatched := dispatchCandidates(ctx, candidates, launch, *dryRun, os.Stdout, os.Stderr)
+	dispatched := dispatchCandidates(ctx, candidates, launch, repoDirPath, *dryRun, os.Stdout, os.Stderr)
 
 	fmt.Fprintf(os.Stderr,
 		"vroom-dispatch-direct: %d ready, %d live worker(s), %d eligible, %d dispatched\n",
 		len(beads), len(live), len(candidates), dispatched)
 }
 
-func dispatchCandidates(ctx context.Context, candidates []bead, cfg workerLaunchConfig, dryRun bool, out, errOut io.Writer) int {
+func dispatchCandidates(ctx context.Context, candidates []bead, cfg workerLaunchConfig, repoDir string, dryRun bool, out, errOut io.Writer) int {
 	dispatched := 0
 	for _, b := range candidates {
 		if ctx.Err() != nil {
@@ -583,7 +635,7 @@ func dispatchCandidates(ctx context.Context, candidates []bead, cfg workerLaunch
 			dispatched++
 			continue
 		}
-		if err := dispatch(ctx, b, cfg); err != nil {
+		if err := dispatch(ctx, b, cfg, repoDir); err != nil {
 			// Deterministic per-bead failure: it will fail identically on every
 			// retry, so skip this bead and keep dispatching — aborting here is
 			// how one poisoned bead stalled all dispatch every tick (ce-b1zw).

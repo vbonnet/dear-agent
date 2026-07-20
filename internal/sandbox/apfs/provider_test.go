@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -243,7 +244,7 @@ func TestCloneDirectory_APFS(t *testing.T) {
 
 	// Clone to destination
 	dstDir := filepath.Join(tmpDir, "destination")
-	if err := p.cloneDirectory(srcDir, dstDir); err != nil {
+	if err := p.cloneDirectory(context.Background(), srcDir, dstDir); err != nil {
 		t.Fatalf("cloneDirectory() failed: %v", err)
 	}
 
@@ -287,7 +288,7 @@ func TestCloneDirectory_NonAPFS(t *testing.T) {
 
 	// Clone (will use cp -c on APFS, but tests recursive copy logic)
 	dstDir := filepath.Join(tmpDir, "destination-fallback")
-	if err := p.cloneDirectory(srcDir, dstDir); err != nil {
+	if err := p.cloneDirectory(context.Background(), srcDir, dstDir); err != nil {
 		t.Fatalf("cloneDirectory() failed: %v", err)
 	}
 
@@ -295,6 +296,75 @@ func TestCloneDirectory_NonAPFS(t *testing.T) {
 	clonedNestedFile := filepath.Join(dstDir, "nested", "nested.txt")
 	if _, err := os.Stat(clonedNestedFile); os.IsNotExist(err) {
 		t.Errorf("nested file was not cloned: %s", clonedNestedFile)
+	}
+}
+
+// TestCloneDirectory_RejectsNestedDst is the ce-fmxv defense-in-depth
+// regression test: the leaked home-dir clones had dst
+// (~/.agm/sandboxes/<id>/upper/repo0) nested inside src ($HOME) — an
+// unbounded clone, since every byte cloneDirectory writes becomes new input
+// for its own walk. cloneDirectory must refuse this shape outright rather
+// than relying solely on resolveSandboxLowerDirs upstream.
+func TestCloneDirectory_RejectsNestedDst(t *testing.T) {
+	p := NewProvider()
+	tmpDir := t.TempDir()
+
+	src := tmpDir // dst will be created underneath src
+	dst := filepath.Join(tmpDir, "sandboxes", "id", "upper", "repo0")
+
+	err := p.cloneDirectory(context.Background(), src, dst)
+	if err == nil {
+		t.Fatal("cloneDirectory() = nil error, want a rejection (dst is nested inside src)")
+	}
+	if !strings.Contains(err.Error(), "nested inside the source") {
+		t.Errorf("cloneDirectory() error = %v, want a nested-dst rejection message", err)
+	}
+	if _, statErr := os.Stat(dst); !os.IsNotExist(statErr) {
+		t.Errorf("cloneDirectory() should not have created dst %s after rejecting it", dst)
+	}
+}
+
+// TestCloneDirectory_AllowsSiblingDst is the negative case for the nested-dst
+// guard: a dst that lives alongside (not inside) src must still clone
+// normally.
+func TestCloneDirectory_AllowsSiblingDst(t *testing.T) {
+	p := NewProvider()
+	tmpDir := t.TempDir()
+
+	src := filepath.Join(tmpDir, "source")
+	if err := os.MkdirAll(src, 0755); err != nil {
+		t.Fatalf("failed to create source dir: %v", err)
+	}
+	dst := filepath.Join(tmpDir, "destination")
+
+	if err := p.cloneDirectory(context.Background(), src, dst); err != nil {
+		t.Fatalf("cloneDirectory() failed for sibling dst: %v", err)
+	}
+}
+
+// TestCloneDirectory_ContextCanceled verifies a canceled/expired context
+// aborts the clone quickly instead of letting `cp -c -R` run unbounded — the
+// direct mechanism behind the 180s SIGKILL that used to leak partial
+// home-dir clones with no cleanup.
+func TestCloneDirectory_ContextCanceled(t *testing.T) {
+	p := NewProvider()
+	tmpDir := t.TempDir()
+
+	src := filepath.Join(tmpDir, "source")
+	if err := os.MkdirAll(src, 0755); err != nil {
+		t.Fatalf("failed to create source dir: %v", err)
+	}
+	dst := filepath.Join(tmpDir, "destination")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already canceled before the clone even starts
+
+	err := p.cloneDirectory(ctx, src, dst)
+	if err == nil {
+		t.Fatal("cloneDirectory() = nil error, want an error for an already-canceled context")
+	}
+	if _, statErr := os.Stat(dst); !os.IsNotExist(statErr) {
+		t.Errorf("cloneDirectory() should clean up dst %s after a canceled clone", dst)
 	}
 }
 
