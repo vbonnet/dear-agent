@@ -138,7 +138,7 @@ func TestExpandPath(t *testing.T) {
 		{
 			name:    "tilde only",
 			path:    "~",
-			want:    home,
+			want:    filepath.Clean(home),
 			wantErr: false,
 		},
 		{

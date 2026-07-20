@@ -48,15 +48,15 @@ func TestArchiveUsesPersistedCodexSessionID(t *testing.T) {
 
 func TestArchiveCodexThreadUsesOnlyThreadScopedControl(t *testing.T) {
 	origArchiver := newThreadArchiver
-	origFallback := runCodexArchiveFn
+	origFallback := runCodexRemoteArchiveFn
 	t.Cleanup(func() {
 		newThreadArchiver = origArchiver
-		runCodexArchiveFn = origFallback
+		runCodexRemoteArchiveFn = origFallback
 	})
 
 	fake := &fakeThreadArchiver{}
 	newThreadArchiver = func() codexThreadArchiver { return fake }
-	runCodexArchiveFn = func(context.Context, string) error {
+	runCodexRemoteArchiveFn = func(context.Context, string) error {
 		t.Fatal("CLI fallback must not run when the thread archive succeeds")
 		return nil
 	}
