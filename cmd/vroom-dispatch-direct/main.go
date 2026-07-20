@@ -9,11 +9,11 @@
 // file lingers after its worker dies, and a fresh file is no guarantee a worker
 // ever spawned. This tool eliminates the layer: it reads `bd ready`, renders the
 // worker prompt in memory, and dispatches the worker directly. Dispatch state is
-// derived from ground truth — live `worker-<id>` sessions and open PRs — not from
-// a directory of files that can drift.
+// derived from ground truth — occupied non-archived `worker-<id>` names and open
+// PRs — not from a directory of files that can drift.
 //
 // Deduplication is layered so re-running is idempotent and never double-dispatches:
-//  1. live worker sessions (a `worker-<id>` session already exists)
+//  1. occupied worker names (a non-archived `worker-<id>` session exists)
 //  2. open PRs (the bead is already in flight — its id appears in a PR branch/title)
 //  3. the human-gated skip list (beads a human must drive, never an autonomous worker)
 //
@@ -157,14 +157,17 @@ var queryOpenPRs = func(ctx context.Context, repo string) ([]pullRequest, error)
 	return prs, nil
 }
 
-// listSessions runs `agm session list` and returns its raw lines. It is a package
-// var so tests can stub the agm invocation. A failure is returned as an error so
+// listSessions runs `agm session list --all --output json` and returns its raw
+// lines. Archived sessions are included in the source so dedup can distinguish
+// them from stopped but still non-archived names that AGM will reject as
+// duplicates. It is a package variable so tests can stub the agm invocation. A
+// failure is returned as an error so
 // the caller can fail closed: without the session list we cannot tell which beads
 // are already being worked, and must not risk double-dispatching them.
 var listSessions = func(ctx context.Context) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, subprocessTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "agm", "session", "list")
+	cmd := exec.CommandContext(ctx, "agm", "session", "list", "--all", "--output", "json")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("agm session list: %w", err)
@@ -195,13 +198,16 @@ func workerSessionName(id string) string {
 	return "worker-" + normalizeSessionID(id)
 }
 
-// liveWorkerIDs scans `agm session list` output for `worker-<id>` session names
-// and returns the set of NORMALIZED bead ids that already have a live worker.
-// This is the ground-truth replacement for vroom-prompt-gen's "already has a
-// prompt file" check: a session exists iff a worker is actually running the
-// bead. Ids are normalized (dots→dashes) so lookups with normalizeSessionID
-// match both sanitized session names and legacy dotted ones.
-func liveWorkerIDs(lines []string) map[string]bool {
+// occupiedWorkerIDs scans `agm session list` output for `worker-<id>` session names
+// and returns the set of NORMALIZED bead ids whose non-archived session name is
+// occupied. Zombie workers remain in the set because AGM rejects a new session
+// with the same non-archived name; excluding them would make every dispatch
+// retry fail before later candidates are considered.
+// This replaces vroom-prompt-gen's "already has a prompt file" proxy with the
+// session-name ownership invariant enforced by AGM. Ids are normalized
+// (dots→dashes) so lookups with normalizeSessionID match both sanitized session
+// names and legacy dotted ones.
+func occupiedWorkerIDs(lines []string) map[string]bool {
 	ids := make(map[string]bool)
 
 	// `agm session list` defaults to agent-mode JSON in the non-TTY dispatch
@@ -219,7 +225,7 @@ func liveWorkerIDs(lines []string) map[string]bool {
 		}
 		if err := json.Unmarshal([]byte(joined), &payload); err == nil {
 			for _, s := range payload.Sessions {
-				if !activeWorkerStatus(s.Status) {
+				if !workerStatusOccupiesName(s.Status) {
 					continue
 				}
 				// Exact prefix on the name field: "subworker-x"/"my-worker-x"
@@ -235,7 +241,7 @@ func liveWorkerIDs(lines []string) map[string]bool {
 
 	for _, line := range lines {
 		fields := strings.Fields(line)
-		if len(fields) < 2 || !activeWorkerStatus(fields[1]) {
+		if len(fields) < 2 || !workerStatusOccupiesName(fields[1]) {
 			continue
 		}
 		if rest, ok := strings.CutPrefix(fields[0], "worker-"); ok {
@@ -245,8 +251,11 @@ func liveWorkerIDs(lines []string) map[string]bool {
 	return ids
 }
 
-func activeWorkerStatus(value string) bool {
-	return strings.EqualFold(value, "active") || strings.EqualFold(value, "running")
+func workerStatusOccupiesName(value string) bool {
+	return strings.EqualFold(value, "active") ||
+		strings.EqualFold(value, "running") ||
+		strings.EqualFold(value, "zombie") ||
+		strings.EqualFold(value, "stopped")
 }
 
 // mentionsID reports whether text references the bead id as a whole token rather
@@ -400,7 +409,7 @@ Bead details: run bd --db ~/beads/context-engine/.beads show %s
 // the orchestrator narrows this band as the Meta-Orchestrator heartbeat goes
 // stale, so a silent coordination owner restricts new work to the most critical tier
 // rather than pouring speculative P2s into an unmonitored queue.
-func selectCandidates(beads []bead, liveWorkers map[string]bool, prs []pullRequest, maxPriority int) []bead {
+func selectCandidates(beads []bead, occupiedWorkers map[string]bool, prs []pullRequest, maxPriority int) []bead {
 	var out []bead
 	for _, b := range beads {
 		if b.ID == "" {
@@ -412,11 +421,11 @@ func selectCandidates(beads []bead, liveWorkers map[string]bool, prs []pullReque
 		if humanGated[b.ID] {
 			continue
 		}
-		// Live-worker dedup compares normalized ids: liveWorkerIDs normalizes
+		// Worker-name dedup compares normalized ids: occupiedWorkerIDs normalizes
 		// what it reads from `agm session list`, and the bead id is normalized
-		// here, so the match holds whether the live session was spawned with
+		// here, so the match holds whether the occupied name was sanitized or
 		// the sanitized name or a legacy dotted one (ce-b1zw).
-		if liveWorkers[normalizeSessionID(b.ID)] {
+		if occupiedWorkers[normalizeSessionID(b.ID)] {
 			continue
 		}
 		if inFlightInPR(b.ID, prs) {
@@ -600,12 +609,12 @@ func main() {
 	}
 
 	// Fail closed on a session-list failure: without it we cannot tell which
-	// beads already have a live worker and must not risk double-dispatching.
+	// worker names are already occupied, so we must not risk a rejected duplicate.
 	sessions, err := listSessions(ctx)
 	if err != nil {
 		fatal("list sessions (failing closed to avoid double-dispatch): %v", err)
 	}
-	live := liveWorkerIDs(sessions)
+	occupied := occupiedWorkerIDs(sessions)
 
 	// Fail closed on a PR-list failure for the same reason.
 	prs, err := queryOpenPRs(ctx, *repo)
@@ -613,14 +622,14 @@ func main() {
 		fatal("query open PRs (failing closed to avoid double-dispatch): %v", err)
 	}
 
-	candidates := selectCandidates(beads, live, prs, *maxPriority)
+	candidates := selectCandidates(beads, occupied, prs, *maxPriority)
 
 	launch := workerLaunchConfig{Harness: *harness, Model: *model, Mode: *mode, Workspace: *workspace}
 	dispatched := dispatchCandidates(ctx, candidates, launch, repoDirPath, *dryRun, os.Stdout, os.Stderr)
 
 	fmt.Fprintf(os.Stderr,
-		"vroom-dispatch-direct: %d ready, %d live worker(s), %d eligible, %d dispatched\n",
-		len(beads), len(live), len(candidates), dispatched)
+		"vroom-dispatch-direct: %d ready, %d occupied worker name(s), %d eligible, %d dispatched\n",
+		len(beads), len(occupied), len(candidates), dispatched)
 }
 
 func dispatchCandidates(ctx context.Context, candidates []bead, cfg workerLaunchConfig, repoDir string, dryRun bool, out, errOut io.Writer) int {

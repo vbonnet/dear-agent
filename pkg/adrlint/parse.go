@@ -259,6 +259,7 @@ func isLiveADRSuccessor(root, relative, target string, governed map[string]bool)
 	if err != nil {
 		return false
 	}
+	data = markdownOutsideCode(data)
 	statuses := adrStatusPattern.FindAllStringSubmatch(string(data), -1)
 	return len(statuses) == 1 && (statuses[0][1] == "Accepted" || statuses[0][1] == "Proposed")
 }

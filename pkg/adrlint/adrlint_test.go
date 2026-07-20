@@ -96,7 +96,7 @@ func TestADRSuccessorLinkMustResolveToAnotherLocalRecord(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "docs", "adr")
 	writeADRFile(t, root, "docs/adr/ADR-001-old.md", recordFixture("001", "Old", "Superseded"))
-	writeADRFile(t, root, "docs/adr/ADR-002-new.md", recordFixture("002", "New", "Accepted"))
+	writeADRFile(t, root, "docs/adr/ADR-002-new.md", recordFixture("002", "New", "Accepted")+"\n```markdown\nStatus: Proposed\n```\n")
 	writeADRFile(t, root, "docs/adr/ADR-003-retired.md", recordFixture("003", "Retired", "Deprecated"))
 
 	tests := map[string]struct {
