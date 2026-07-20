@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -18,9 +19,13 @@ import (
 )
 
 const (
-	// CodexProtocol and ClaudeProtocol are intercepted by agm before Cobra,
-	// configuration, telemetry, or debug logging starts.
-	CodexProtocol  = "__exec-codex"
+	// CodexProtocol is the launch protocol token intercepted by agm before Cobra,
+	// configuration, telemetry, or debug logging starts. It carries only
+	// non-secret Codex metadata; credentials are resolved inside the executor.
+	CodexProtocol = "__exec-codex"
+	// ClaudeProtocol is the launch protocol token intercepted by agm before Cobra,
+	// configuration, telemetry, or debug logging starts. It carries only
+	// non-secret Claude metadata; OAuth is resolved inside the executor.
 	ClaudeProtocol = "__exec-claude"
 )
 
@@ -297,33 +302,40 @@ func parseClaude(args []string) (claudeRequest, error) {
 	if set.NArg() != 0 {
 		return claudeRequest{}, errors.New("invalid Claude launch request: positional arguments are not allowed")
 	}
-	if err := validateText("session", request.SessionName); err != nil {
+	if err := validateClaudeRequest(&request, maxBudget); err != nil {
 		return claudeRequest{}, err
 	}
-	if err := validateText("model", request.Model); err != nil {
-		return claudeRequest{}, err
+	return request, nil
+}
+
+func validateClaudeRequest(r *claudeRequest, maxBudget string) error {
+	if err := validateText("session", r.SessionName); err != nil {
+		return err
 	}
-	if request.SessionID != "" {
-		if err := validateText("session-id", request.SessionID); err != nil {
-			return claudeRequest{}, err
+	if err := validateText("model", r.Model); err != nil {
+		return err
+	}
+	if r.SessionID != "" {
+		if err := validateText("session-id", r.SessionID); err != nil {
+			return err
 		}
 	}
-	for _, dir := range request.AddDirs {
+	for _, dir := range r.AddDirs {
 		if err := validateText("add-dir", dir); err != nil {
-			return claudeRequest{}, err
+			return err
 		}
 	}
-	if request.Permission != "" && !oneOf(request.Permission, "auto", "plan", "default") {
-		return claudeRequest{}, fmt.Errorf("invalid Claude permission mode %q", request.Permission)
+	if r.Permission != "" && !oneOf(r.Permission, "auto", "plan", "default") {
+		return fmt.Errorf("invalid Claude permission mode %q", r.Permission)
 	}
 	if maxBudget != "" {
 		budget, err := strconv.ParseFloat(maxBudget, 64)
 		if err != nil || budget <= 0 || math.IsNaN(budget) || math.IsInf(budget, 0) {
-			return claudeRequest{}, fmt.Errorf("invalid Claude max budget %q", maxBudget)
+			return fmt.Errorf("invalid Claude max budget %q", maxBudget)
 		}
-		request.MaxBudgetUSD = budget
+		r.MaxBudgetUSD = budget
 	}
-	return request, nil
+	return nil
 }
 
 func (r claudeRequest) argv() []string {
@@ -368,12 +380,7 @@ func validateText(name, value string) error {
 }
 
 func oneOf(value string, allowed ...string) bool {
-	for _, candidate := range allowed {
-		if value == candidate {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(allowed, value)
 }
 
 // CodexEnvironment applies the deny-by-default environment contract for the

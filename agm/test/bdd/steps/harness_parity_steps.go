@@ -1041,7 +1041,7 @@ func launchCommandShouldContainNoCredentialValues(ctx context.Context) error {
 		}
 	}
 	if !strings.Contains(state.privateLaunchCommand, "agm "+harnessexec.CodexProtocol) {
-		return fmt.Errorf("Codex launch bypassed the private executor: %s", state.privateLaunchCommand)
+		return fmt.Errorf("codex launch bypassed the private executor: %s", state.privateLaunchCommand)
 	}
 	return nil
 }
@@ -1051,12 +1051,12 @@ func codexChildShouldReceiveOnlyAllowlistedCredentials(ctx context.Context) erro
 	joined := strings.Join(state.privateChildEnvironment, "\n")
 	for _, canary := range state.privateAllowedCanaries {
 		if !strings.Contains(joined, canary) {
-			return fmt.Errorf("Codex child environment omitted allowlisted canary %q", canary)
+			return fmt.Errorf("codex child environment omitted allowlisted canary %q", canary)
 		}
 	}
 	for _, canary := range state.privateRejectedCanaries {
 		if strings.Contains(joined, canary) {
-			return fmt.Errorf("Codex child environment inherited rejected canary %q", canary)
+			return fmt.Errorf("codex child environment inherited rejected canary %q", canary)
 		}
 	}
 	return nil
