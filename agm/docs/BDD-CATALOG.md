@@ -839,16 +839,21 @@ traceability as the features they guard.
 
 **Drives:** `agm/internal/api`, `agm/internal/cli`,
 `agm/internal/delegation`, `agm/internal/discovery`, `agm/internal/surface`,
-`agm/internal/terminal`, and `agm/internal/validate` SPEC coverage.
+`agm/internal/terminal`, `agm/internal/validate`, and `agm/cmd/agm` command-test
+isolation.
 
 **Key scenarios:**
 - AGM control-plane packages keep co-located SPEC coverage.
 - AGM control-plane package SPECs point back to their executable BDD feature.
+- Cobra validation tests use fresh commands or restore every mutated flag and
+  remain stable across repeated execution orders.
 
 **Why this matters:** The AGM control plane ties CLI, MCP, status, discovery,
 tmux terminal handling, validation, and delegation behavior together. These
 packages need explicit contracts so parity work does not regress into
-harness-specific or Claude-only assumptions.
+harness-specific or Claude-only assumptions. The CLI also keeps global Cobra
+objects for production registration, so its tests must isolate command state
+to avoid order-dependent false passes and failures.
 
 ### Context Management Parity
 

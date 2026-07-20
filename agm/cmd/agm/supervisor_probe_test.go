@@ -29,6 +29,11 @@ func TestRunSupervisorProbe_WritesTrailRecord(t *testing.T) {
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	cmd.SetContext(context.Background())
+	t.Cleanup(func() {
+		cmd.SetOut(nil)
+		cmd.SetErr(nil)
+		cmd.SetContext(context.Background())
+	})
 
 	if err := runSupervisorProbe(cmd, nil); err != nil {
 		t.Fatalf("runSupervisorProbe: %v", err)

@@ -11,6 +11,8 @@ import (
 // TestCompletion_ZshOutput checks that the zsh completion subcommand produces
 // a valid zsh completion script (starts with the expected #compdef header).
 func TestCompletion_ZshOutput(t *testing.T) {
+	restoreCommandTreeFlagsForTest(t, rootCmd)
+
 	orig := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -45,6 +47,8 @@ func TestCompletion_ZshOutput(t *testing.T) {
 // TestCompletion_CacheFlag checks that --cache writes the completion script
 // to ~/.cache/agm-completion.zsh (respecting XDG_CACHE_HOME if set).
 func TestCompletion_CacheFlag(t *testing.T) {
+	restoreCommandTreeFlagsForTest(t, rootCmd)
+
 	cacheDir := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheDir)
 
@@ -70,6 +74,8 @@ func TestCompletion_CacheFlag(t *testing.T) {
 // initialisation). We detect this by checking that the config is NOT loaded
 // (cfg remains nil after running completion).
 func TestCompletion_NoPersistentPreRunE(t *testing.T) {
+	restoreCommandTreeFlagsForTest(t, rootCmd)
+
 	// Save and restore global cfg so we don't pollute other tests.
 	savedCfg := cfg
 	t.Cleanup(func() { cfg = savedCfg })
