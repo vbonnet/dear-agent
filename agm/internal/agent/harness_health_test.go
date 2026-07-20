@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -64,6 +65,52 @@ func TestCheckHarnessHealth_OpenCodeBinaryTracked(t *testing.T) {
 	}
 }
 
+func TestCheckHarnessHealth_AgyPresent(t *testing.T) {
+	clearClaudeEnv(t)
+	t.Setenv("GEMINI_API_KEY", "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configDir := filepath.Join(home, ".gemini", "antigravity-cli")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("create AGY config directory: %v", err)
+	}
+	mockLookPath(t, map[string]bool{"agy": true})
+
+	h := CheckHarnessHealth("agy")
+	if !h.Known || h.BinaryName != "agy" || !h.BinaryPresent {
+		t.Fatalf("AGY binary health = %+v", h)
+	}
+	if !h.AuthConfigured || !h.IsHealthy() {
+		t.Fatalf("installed AGY should manage its own auth: %+v", h)
+	}
+	if h.ConfigDir != configDir || !h.ConfigDirFound {
+		t.Fatalf("AGY config health = path %q found %v, want %q true", h.ConfigDir, h.ConfigDirFound, configDir)
+	}
+}
+
+func TestCheckHarnessHealth_AgyAbsent(t *testing.T) {
+	clearClaudeEnv(t)
+	t.Setenv("GEMINI_API_KEY", "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	mockLookPath(t, map[string]bool{})
+
+	h := CheckHarnessHealth("agy")
+	if !h.Known || h.BinaryName != "agy" {
+		t.Fatalf("AGY should remain a known harness when absent: %+v", h)
+	}
+	if h.BinaryPresent || h.AuthConfigured || h.IsHealthy() {
+		t.Fatalf("absent unauthenticated AGY should be unhealthy: %+v", h)
+	}
+	if h.AuthHint == "" {
+		t.Fatal("absent AGY should include an auth remediation hint")
+	}
+	wantConfigDir := filepath.Join(home, ".gemini", "antigravity-cli")
+	if h.ConfigDir != wantConfigDir || h.ConfigDirFound {
+		t.Fatalf("AGY absent config health = path %q found %v, want %q false", h.ConfigDir, h.ConfigDirFound, wantConfigDir)
+	}
+}
+
 func TestCheckHarnessHealth_UnknownHarness(t *testing.T) {
 	clearClaudeEnv(t)
 	mockLookPath(t, map[string]bool{})
@@ -104,6 +151,7 @@ func TestHarnessConfigDir(t *testing.T) {
 		"claude-code":  filepath.Join(home, ".claude"),
 		"gemini-cli":   filepath.Join(home, ".gemini"),
 		"codex-cli":    filepath.Join(home, ".codex"),
+		"agy":          filepath.Join(home, ".gemini", "antigravity-cli"),
 		"opencode-cli": "", // server-based, no local dir
 		"unknown":      "",
 	}

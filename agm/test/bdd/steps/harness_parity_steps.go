@@ -81,6 +81,7 @@ type harnessParityState struct {
 	wayfinderPhaseEngrams      bool
 	configDirSurface           configdirparity.DirectorySurface
 	conformanceFindings        []agent.HarnessConformanceFinding
+	harnessHealth              agent.HarnessHealth
 	runtimeHelperCommand       string
 	runtimeHelperSpec          string
 	backendImplementation      string
@@ -120,6 +121,9 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^harness "([^"]*)" should be active for parity$`, harnessShouldBeActiveForParity)
 	ctx.Step(`^harness "([^"]*)" should not be deprecated$`, harnessShouldNotBeDeprecated)
 	ctx.Step(`^harness "([^"]*)" should be deprecated$`, harnessShouldBeDeprecated)
+	ctx.Step(`^AGM resolves doctor health for the configured harness$`, agmResolvesDoctorHealthForConfiguredHarness)
+	ctx.Step(`^doctor should recognize CLI binary "([^"]*)"$`, doctorShouldRecognizeCLIBinary)
+	ctx.Step(`^doctor should recognize config directory suffix "([^"]*)"$`, doctorShouldRecognizeConfigDirectorySuffix)
 	ctx.Step(`^AGM active harnesses are configured$`, agmActiveHarnessesAreConfigured)
 	ctx.Step(`^current-tmux creation selects Codex CLI$`, currentTmuxCreationSelectsCodexCLI)
 	ctx.Step(`^AGM validates current-tmux Codex launch wiring$`, agmValidatesCurrentTmuxCodexLaunchWiring)
@@ -277,6 +281,41 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM archives the stopped session$`, agmArchivesTheStoppedSession)
 	ctx.Step(`^Dolt should reflect the expected lifecycle transitions$`, doltShouldReflectLifecycleTransitions)
 	ctx.Step(`^the matching Codex saved session should be archived$`, matchingCodexSavedSessionShouldBeArchived)
+}
+
+func agmResolvesDoctorHealthForConfiguredHarness(ctx context.Context) error {
+	state, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.configuredHarness == "" {
+		return fmt.Errorf("no harness configured")
+	}
+	state.harnessHealth = agent.CheckHarnessHealth(state.configuredHarness)
+	return nil
+}
+
+func doctorShouldRecognizeCLIBinary(ctx context.Context, binary string) error {
+	state, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !state.harnessHealth.Known || state.harnessHealth.BinaryName != binary {
+		return fmt.Errorf("doctor health = known %v binary %q, want true %q", state.harnessHealth.Known, state.harnessHealth.BinaryName, binary)
+	}
+	return nil
+}
+
+func doctorShouldRecognizeConfigDirectorySuffix(ctx context.Context, suffix string) error {
+	state, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	wantSuffix := filepath.FromSlash(suffix)
+	if !strings.HasSuffix(state.harnessHealth.ConfigDir, wantSuffix) {
+		return fmt.Errorf("doctor config directory = %q, want suffix %q", state.harnessHealth.ConfigDir, wantSuffix)
+	}
+	return nil
 }
 
 func currentTmuxCreationSelectsCodexCLI(ctx context.Context) error {

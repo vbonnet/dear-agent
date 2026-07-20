@@ -7,8 +7,8 @@ import (
 
 // HarnessHealth is a per-harness health summary produced for `agm admin doctor`.
 //
-// AGM officially supports more than one harness (claude-code, gemini-cli,
-// codex-cli, opencode-cli), but the doctor's session checks have historically
+// AGM officially supports more than one harness (claude-code, codex-cli, AGY,
+// opencode-cli, plus deprecated gemini-cli), but the doctor's session checks have historically
 // been Claude-centric. HarnessHealth separates the concerns that can fail
 // independently for any harness — the CLI binary, the auth/config, and the
 // on-disk config directory — so the doctor can render every harness in use in
@@ -42,6 +42,7 @@ var harnessCLIBinary = map[string]string{
 	"claude-code":  "claude",
 	"gemini-cli":   "gemini",
 	"codex-cli":    "codex",
+	"agy":          "agy",
 	"opencode-cli": "opencode",
 }
 
@@ -58,6 +59,8 @@ func harnessConfigDir(home, harness string) string {
 		return filepath.Join(home, ".gemini")
 	case "codex-cli":
 		return filepath.Join(home, ".codex")
+	case "agy":
+		return filepath.Join(home, ".gemini", "antigravity-cli")
 	default:
 		// opencode-cli is server-based; unknown harnesses have no known dir.
 		return ""
