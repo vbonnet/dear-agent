@@ -130,57 +130,19 @@ test-all: test-unit test-bdd test-e2e-docker
 	@echo ""
 	@echo "✓ All tests passed"
 
-.PHONY: install-skills
-install-skills: ## Install Claude Code skills
-	@echo "Installing AGM skills to $(HOME)/.claude/skills/agm/"
-	@mkdir -p $(HOME)/.claude/skills/agm
-	@cp skills/*.sh $(HOME)/.claude/skills/agm/
-	@chmod +x $(HOME)/.claude/skills/agm/*.sh
-	@cp skills/README.md $(HOME)/.claude/skills/agm/
-	@echo "✓ Skills installed successfully"
-	@echo ""
-	@echo "Available skills:"
-	@echo "  /agm:new      - Create new session"
-	@echo "  /agm:send     - Send messages"
-	@echo "  /agm:status   - Check session status"
-	@echo "  /agm:resume   - Resume session"
+.PHONY: install-commands install-skills
+install-commands: ## Install legacy global Claude command files
+	@./install-commands.sh
+
+install-skills: install-commands ## Compatibility alias for install-commands
 
 .PHONY: plugin-hashes
 plugin-hashes: ## Generate content hashes for AGM plugin skills
-	@for file in agm-plugin/commands/*.md; do \
-		body=$$(awk 'BEGIN{p=0} /^---$$/{p++; next} p>=2' "$$file"); \
-		hash=$$(printf '%s' "$$body" | sha256sum | awk '{print $$1}'); \
-		current=$$(grep '^content-hash:' "$$file" | awk '{print $$2}'); \
-		if [ "$$current" != "$$hash" ]; then \
-			sed -i "s/^content-hash: .*/content-hash: $$hash/" "$$file"; \
-			echo "  updated $$file -> $$hash"; \
-		else \
-			echo "  unchanged $$file"; \
-		fi; \
-	done
+	@go run ./cmd/plugin-hash --dir agm-plugin/commands
 
 .PHONY: plugin-verify-hashes
 plugin-verify-hashes: ## Verify content hashes match current skill content
-	@failed=0; \
-	for file in agm-plugin/commands/*.md; do \
-		current=$$(grep '^content-hash:' "$$file" | awk '{print $$2}'); \
-		body=$$(awk 'BEGIN{p=0} /^---$$/{p++; next} p>=2' "$$file"); \
-		expected=$$(printf '%s' "$$body" | sha256sum | awk '{print $$1}'); \
-		if [ "$$current" = "PLACEHOLDER" ]; then \
-			echo "  FAIL $$file: still has PLACEHOLDER hash"; \
-			failed=$$((failed + 1)); \
-		elif [ "$$current" != "$$expected" ]; then \
-			echo "  FAIL $$file: hash mismatch"; \
-			failed=$$((failed + 1)); \
-		else \
-			echo "  OK $$file"; \
-		fi; \
-	done; \
-	if [ $$failed -gt 0 ]; then \
-		echo ""; \
-		echo "$$failed file(s) have stale hashes. Run 'make plugin-hashes' to fix."; \
-		exit 1; \
-	fi
+	@go run ./cmd/plugin-hash --dir agm-plugin/commands --check
 
 init: ## Configure git hooks (test enforcement + post-commit auto-build)
 	git config core.hooksPath claude-session-manager/.githooks

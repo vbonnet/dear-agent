@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,7 +26,9 @@ I'll {{.ActionVerb}}.
 
 **Step 2: Run command**
 
-- Run: ` + "`" + `{{.CLICommand}} --output json` + "`" + `
+- Run: ` + "`" + `{{.CLICommand}}{{range .PositionalArgs}} {{.}}{{end}} --output json` + "`" + `
+- Forward supplied optional flags as separate argv values. Never construct shell
+  syntax by concatenating or interpolating user-controlled text.
 
 **Step 3: Handle result**
 
@@ -49,23 +52,27 @@ I'll {{.ActionVerb}}.
 `
 
 type skillTemplateData struct {
-	Description  string
-	ArgumentHint string
-	AllowedTools string
-	Title        string
-	ActionVerb   string
-	CLICommand   string
-	Fields       []FieldIR
-	OutputTable  []string
+	Description    string
+	ArgumentHint   string
+	AllowedTools   string
+	Title          string
+	ActionVerb     string
+	CLICommand     string
+	PositionalArgs []string
+	Fields         []FieldIR
+	OutputTable    []string
 }
 
 // GenerateSkills produces markdown skill files for all ops with Skill surfaces and ManualSkill=false.
-func GenerateSkills(ops []OpIR, outDir string) error {
+func GenerateSkills(ops []OpIR, outDir, cliBinary string) error {
 	skillOps := filterOps(ops, func(o OpIR) bool {
 		return o.Op.Skill != nil && !o.Op.ManualSkill
 	})
 	if len(skillOps) == 0 {
 		return nil
+	}
+	if cliBinary == "" {
+		return fmt.Errorf("CLI binary is required when generating skill invocations")
 	}
 
 	skillsDir := filepath.Join(outDir, "skills")
@@ -79,7 +86,10 @@ func GenerateSkills(ops []OpIR, outDir string) error {
 	}
 
 	for _, op := range skillOps {
-		data := buildSkillData(op)
+		if err := validateSkillAllowedTools(op.Op.Skill.AllowedTools); err != nil {
+			return fmt.Errorf("skill %s: %w", op.Op.Skill.SlashCommand, err)
+		}
+		data := buildSkillData(op, cliBinary)
 		outPath := filepath.Join(skillsDir, op.Op.Skill.SlashCommand+".md")
 
 		var buf strings.Builder
@@ -94,14 +104,29 @@ func GenerateSkills(ops []OpIR, outDir string) error {
 	return nil
 }
 
-func buildSkillData(op OpIR) skillTemplateData {
+func validateSkillAllowedTools(allowedTools string) error {
+	if strings.Contains(allowedTools, ":*)") {
+		return fmt.Errorf("allowed-tools uses retired colon command syntax")
+	}
+	return nil
+}
+
+func buildSkillData(op OpIR, cliBinary string) skillTemplateData {
 	fields := op.SkillFields()
+	var positionalArgs []string
 
 	// Build argument hint
 	var hints []string
+	for _, f := range op.PositionalFields() {
+		if f.OmitSkill || f.Hidden {
+			continue
+		}
+		positional := "<" + f.FlagName + ">"
+		hints = append(hints, positional)
+		positionalArgs = append(positionalArgs, positional)
+	}
 	for _, f := range fields {
 		if f.IsPositional {
-			hints = append(hints, "<"+f.FlagName+">")
 			continue
 		}
 		hint := "--" + f.FlagName
@@ -125,6 +150,9 @@ func buildSkillData(op OpIR) skillTemplateData {
 	if cliCmd == "" {
 		cliCmd = op.Op.Name
 	}
+	if cliBinary != "" {
+		cliCmd = cliBinary + " " + cliCmd
+	}
 
 	// Capitalize first letter of ActionVerb for description
 	desc := op.Op.Skill.ActionVerb
@@ -133,13 +161,14 @@ func buildSkillData(op OpIR) skillTemplateData {
 	}
 
 	return skillTemplateData{
-		Description:  desc,
-		ArgumentHint: strings.Join(hints, " "),
-		AllowedTools: op.Op.Skill.AllowedTools,
-		Title:        op.Op.Description,
-		ActionVerb:   op.Op.Skill.ActionVerb,
-		CLICommand:   cliCmd,
-		Fields:       fields,
-		OutputTable:  op.Op.Skill.OutputTable,
+		Description:    desc,
+		ArgumentHint:   strings.Join(hints, " "),
+		AllowedTools:   op.Op.Skill.AllowedTools,
+		Title:          op.Op.Description,
+		ActionVerb:     op.Op.Skill.ActionVerb,
+		CLICommand:     cliCmd,
+		PositionalArgs: positionalArgs,
+		Fields:         fields,
+		OutputTable:    op.Op.Skill.OutputTable,
 	}
 }

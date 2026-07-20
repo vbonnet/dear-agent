@@ -5,9 +5,9 @@
 ## Overview
 
 `agm/internal/surface` defines AGM operations once and uses those definitions to
-generate CLI, MCP, and SKILL surfaces. It is the shared control-plane contract
-for session listing, lookup, search, status, archive, kill, and operation
-discovery.
+generate CLI and MCP surfaces. It is the shared control-plane contract for
+session listing, lookup, search, status, archive, kill, and operation discovery.
+Installed plugin Markdown is owned separately by the live Cobra tree.
 
 ## Requirements
 
@@ -24,6 +24,8 @@ discovery.
 **AGM-SURFACE-06** When active harness filters are exposed, the system shall include Claude Code, Codex CLI, AGY, OpenCode, deprecated Gemini compatibility, and all-harness filtering.
 
 **AGM-SURFACE-07** When operation definitions change, the system shall keep generated CLI and MCP code derived from the registry rather than hand-maintained divergent schemas.
+
+**AGM-SURFACE-08** While the Cobra tree owns installed plugin command contracts, the operation registry shall not declare a second Skill surface for those commands.
 
 ## BDD Traceability
 

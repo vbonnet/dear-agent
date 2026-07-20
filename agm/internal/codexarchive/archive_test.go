@@ -2,6 +2,7 @@ package codexarchive
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,6 +69,53 @@ func TestArchiveCodexThreadUsesOnlyThreadScopedControl(t *testing.T) {
 	}
 }
 
+func TestArchiveCodexThreadFallsBackThroughUnixRemote(t *testing.T) {
+	origArchiver := newThreadArchiver
+	origFallback := runCodexRemoteArchiveFn
+	t.Cleanup(func() {
+		newThreadArchiver = origArchiver
+		runCodexRemoteArchiveFn = origFallback
+	})
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", fakeCodexPath(t, home))
+	newThreadArchiver = func() codexThreadArchiver { return failingThreadArchiver{} }
+	runCodexRemoteArchiveFn = runCodexRemoteArchive
+
+	if err := archiveCodexThread(context.Background(), "thread-456"); err != nil {
+		t.Fatalf("archiveCodexThread() error = %v", err)
+	}
+
+	args := strings.TrimSpace(readFakeCodexArgs(t, home))
+	want := "archive --remote unix:// thread-456"
+	if args != want {
+		t.Fatalf("codex args = %q, want %q", args, want)
+	}
+}
+
+func TestArchiveCodexThreadDoesNotFallBackAfterContextCancellation(t *testing.T) {
+	origArchiver := newThreadArchiver
+	origFallback := runCodexRemoteArchiveFn
+	t.Cleanup(func() {
+		newThreadArchiver = origArchiver
+		runCodexRemoteArchiveFn = origFallback
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	newThreadArchiver = func() codexThreadArchiver { return failingThreadArchiver{} }
+	runCodexRemoteArchiveFn = func(context.Context, string) error {
+		t.Fatal("CLI fallback must not run after context cancellation")
+		return nil
+	}
+
+	err := archiveCodexThread(ctx, "thread-789")
+	if !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("archiveCodexThread() error = %v, want original archive error", err)
+	}
+}
+
 type fakeThreadArchiver struct {
 	threadID string
 }
@@ -75,6 +123,12 @@ type fakeThreadArchiver struct {
 func (f *fakeThreadArchiver) ArchiveThread(_ context.Context, threadID string) error {
 	f.threadID = threadID
 	return nil
+}
+
+type failingThreadArchiver struct{}
+
+func (failingThreadArchiver) ArchiveThread(context.Context, string) error {
+	return os.ErrClosed
 }
 
 func TestArchiveResolvesCodexSessionByWorkingDirectory(t *testing.T) {
