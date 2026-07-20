@@ -11,7 +11,8 @@
 // coordination is out of scope (we federate via A2A topics instead, which
 // is built in pkg/a2a).
 //
-// See docs/design/three-way-sync.md for the full design.
+// See SPEC.md for the maintained contract; the historical design is archived
+// at https://github.com/vbonnet/engram-research/blob/main/audits/dear-agent-temporal-docs-2026-07-18/docs/design/three-way-sync.md.
 package synchub
 
 import (

@@ -32,7 +32,7 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 #   lint-skills             Validate every tracked skill and command prompt
 #   verify-surface-codegen  Regenerate ignored AGM surface artifacts and fail on drift
 #   plugin-verify-hashes    Verify AGM plugin command and skill content hashes
-#   preflight               Fast local CI-parity gates: vet + build + AI skills + lint
+#   preflight               Fast local CI-parity gates: vet + build + AI skills + lint (~25s)
 #   preflight-tests         preflight + go test (no -race) — quick sanity
 #   preflight-race          preflight + go test -race — catch data races before push
 #   preflight-full          preflight + go test -race + govulncheck (full parity)

@@ -61,8 +61,8 @@ requires a follow-up ADR quoting the decision number.
 - **D12. MVS = D2 + D3 + D4 + D5(budget) ships first.** The Minimum
   Viable Substrate is the smallest cut that satisfies all five substrate
   properties by default. The phased plan tracks in
-  [ROADMAP.md](../../ROADMAP.md) and
-  [docs/workflow-engine/BACKLOG.md](../workflow-engine/BACKLOG.md).
+  [the historical roadmap](https://github.com/vbonnet/engram-research/blob/main/audits/dear-agent-temporal-docs-2026-07-18/ROADMAP.md)
+  and [historical backlog](https://github.com/vbonnet/engram-research/blob/main/audits/dear-agent-temporal-docs-2026-07-18/docs/workflow-engine/BACKLOG.md).
 
 ### Alternatives rejected
 

@@ -97,4 +97,4 @@ rm -rf /tmp/csm-test-*
 
 - Read [README.md](./README.md) for detailed documentation
 - See [SESSION_LIFECYCLE_TESTS.md](../../../docs/SESSION_LIFECYCLE_TESTS.md) for implementation summary
-- Check [TEST-PLAN.md](../../../TEST-PLAN.md) for overall testing strategy
+- Check the [historical test plans](https://github.com/vbonnet/engram-research/tree/main/audits/dear-agent-temporal-docs-2026-07-18) for archived strategy

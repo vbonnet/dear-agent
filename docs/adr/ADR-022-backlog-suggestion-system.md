@@ -11,7 +11,7 @@ The VROOM Orchestrator (COO supervisor;
 [ADR-002](ADR-002-vroom-execution-architecture.md),
 [/CONTEXT.md](../../CONTEXT.md)) needs the task-driven counterpart.
 Today the backlog is markdown tables in two files
-(`docs/workflow-engine/BACKLOG.md` and `ROADMAP.md`) with two different
+(`--files` inputs) with two different
 column layouts. "Pick the lowest-numbered `pending` whose deps are
 `done`" is stated as a human instruction; wildcard deps (`0.*`, `1.*`)
 make it error-prone by hand. Worse, when work is picked up, no
@@ -49,7 +49,7 @@ importing it. The two "what next?" surfaces stay independent on purpose.
 
 - **Header-aware markdown parser.** Column meaning resolves by
   normalized header name, not position, so the same code reads BACKLOG.md's
-  7-column layout and ROADMAP.md's 4-column layout.
+  7-column and 4-column layouts.
 - **`Source` is an interface with one implementation.** Anticipated
   extension point (Asana, issue trackers), not speculative generality —
   no second adapter ships until something needs it.
@@ -80,4 +80,4 @@ heuristic; a genuinely urgent late-phase ticket needs an explicit
 - [ADR-015: Signal Aggregator + Recommendation MCP](ADR-015-signal-aggregator.md)
 - [ADR-002: VROOM Execution Architecture](ADR-002-vroom-execution-architecture.md)
 - [/CONTEXT.md](../../CONTEXT.md) — Orchestrator role, decision trail
-- `docs/workflow-engine/BACKLOG.md`, `ROADMAP.md` — the parsed sources
+- operator-supplied Markdown files — the parsed sources

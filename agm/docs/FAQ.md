@@ -869,7 +869,7 @@ cp ~/.claude/history.jsonl ~/.claude/history.jsonl.backup
 
 **For developers:**
 - [Contributing](../CONTRIBUTING.md) - Development setup
-- [Test Plan](../TEST-PLAN.md) - Testing strategy
+- [Historical test plans](https://github.com/vbonnet/engram-research/tree/main/audits/dear-agent-temporal-docs-2026-07-18) - archived testing strategy
 - [Command Translation Design](COMMAND-TRANSLATION-DESIGN.md) - Architecture
 
 ### How do I get support?

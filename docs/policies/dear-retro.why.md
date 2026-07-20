@@ -27,4 +27,18 @@ prevention portable across harnesses and machines.
   `~/src` is read-only golden.
 - Output: Define / Execute / Audit / Retro, then one bead per prevention.
 
-See also: [broken-windows](broken-windows.why.md).
+## Pare over-fits in the retro, not "later"
+A retro that touches an over-fit must pare it *there*, because the deferred
+cleanup demonstrably never arrives: a spawn-throttle keyed on a macOS memory
+metric that reads structurally near-zero forever (so the gate never
+re-opened — full incident in
+[harness-hygiene](harness-hygiene.why.md#real-failure-cases-this-repo)) was
+re-embedded a THIRD time while its cleanup bead sat open, and
+`daily-ops-audit` shipped two days *after* a retro named its pattern broken.
+Folding the six-verdict paring rubric into the retro itself is the fix for
+"the deferred 'then' never comes." Prefer the "Turn it into a check" verdict —
+a deterministic gate (like the `raw-mem-gate` scan) outlives any prose
+reminder.
+
+See also: [broken-windows](broken-windows.why.md),
+[harness-hygiene](harness-hygiene.why.md).
