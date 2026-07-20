@@ -6,7 +6,7 @@
 
 ## EARS Requirements
 
-**CCTL-01** When a client starts remote control, the package shall invoke `codex remote-control start --json` and return any command failure with stderr context.
+**CCTL-01** When a client starts remote control, the package shall invoke `codex remote-control start --json`, accept a valid daemon-status JSON response even when inherited stdout delays process completion, and otherwise return command failures with stderr context.
 
 **CCTL-02** When a client sends an app-server request, the package shall initialize the JSON-RPC proxy before sending thread operations.
 

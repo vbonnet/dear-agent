@@ -95,6 +95,14 @@ func (c *Client) StartRemoteControl(ctx context.Context) error {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if output, err := cmd.Output(); err != nil {
+		// A daemonized app-server can keep the stdout pipe open after it has
+		// already emitted its successful machine-readable status. In that case
+		// WaitDelay makes Output return an error even though startup succeeded.
+		// Treat only a complete daemon-status response as success; stderr-only
+		// and malformed responses still surface as command failures.
+		if isRemoteControlDaemonStatus(output) {
+			return nil
+		}
 		if timeoutCtx.Err() != nil {
 			return fmt.Errorf("codex remote-control start timed out after %s", c.timeout())
 		}
@@ -111,6 +119,17 @@ func (c *Client) StartRemoteControl(ctx context.Context) error {
 		return fmt.Errorf("codex remote-control start failed: %w", err)
 	}
 	return nil
+}
+
+func isRemoteControlDaemonStatus(output []byte) bool {
+	var status struct {
+		Mode   string          `json:"mode"`
+		Daemon json.RawMessage `json:"daemon"`
+	}
+	if err := json.Unmarshal(output, &status); err != nil {
+		return false
+	}
+	return status.Mode == "daemon" && len(status.Daemon) > 0 && string(status.Daemon) != "null"
 }
 
 // StartThread creates a new Codex thread.
