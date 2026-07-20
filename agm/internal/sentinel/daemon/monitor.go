@@ -102,8 +102,13 @@ func loadViolationDetectors(cfg *config.Config) (*enforcement.ViolationDetector,
 
 // NewSessionMonitor creates a new session monitor with given configuration.
 func NewSessionMonitor(cfg *config.Config) (*SessionMonitor, error) {
-	// Create tmux client
+	// Respect an explicit socket as an isolation boundary. Auto-discovery is
+	// appropriate only when no socket was configured; otherwise the sentinel
+	// could inspect or recover sessions outside the caller-owned tmux server.
 	tmuxClient := tmux.NewClient()
+	if cfg.Tmux.Socket != "" {
+		tmuxClient = tmux.NewClientWithSocket(cfg.Tmux.Socket)
+	}
 
 	// Create stuck session detector
 	detector := NewStuckSessionDetector()
@@ -177,6 +182,7 @@ func NewSessionMonitor(cfg *config.Config) (*SessionMonitor, error) {
 		logger.Warn("Failed to create session heartbeat monitor", "error", err)
 	}
 	if sessionHBMonitor != nil {
+		sessionHBMonitor.SetTmuxSessionLister(tmuxClient.ListSessions)
 		sessionHBMonitor.SetExemptSessions(cfg.Recovery.ExemptSessions)
 	}
 
@@ -694,7 +700,7 @@ func (m *SessionMonitor) RecoverSession(sessionName string, stuckInfo *SessionSt
 		rejectionMessage = enforcement.GenerateRejectionMessage(pattern, command)
 
 		// Send rejection message to session
-		if err := SendRejectionMessage(sessionName, rejectionMessage, pattern); err != nil {
+		if err := SendRejectionMessage(sessionName, rejectionMessage, pattern, m.tmuxClient); err != nil {
 			m.logger.Error("Failed to send rejection message", "error", err)
 		}
 

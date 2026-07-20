@@ -3,6 +3,7 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
+- Feature: `agm/test/bdd/features/agm_supervision_recovery_guardrails.feature`
 
 <!-- Last audited at: 2026-07-19 -->
 
@@ -26,3 +27,5 @@ automation inside explicit circuit-breaker limits.
 **SENTD-05** When a recovery attempt is recorded, the system shall persist the strategy, success value, reason, timestamp, and total-attempt count in the recovery history.
 
 **SENTD-06** When monitor shutdown is requested, the system shall signal the active monitoring run exactly once and wait no longer than five seconds for completion so an unresponsive external probe cannot block daemon shutdown indefinitely.
+
+**SENTD-07** When a tmux socket is explicitly configured, the system shall restrict sentinel discovery and recovery actions to that exact socket without auto-discovering AGM, legacy, or system tmux sockets.

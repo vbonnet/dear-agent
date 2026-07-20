@@ -29,6 +29,13 @@ func NewClient() *Client {
 	}
 }
 
+// NewClientWithSocket creates a client restricted to one explicitly configured
+// tmux socket. Unlike NewClient, it never auto-discovers AGM, legacy, or system
+// sockets. This is the safety boundary for callers that own an isolated socket.
+func NewClientWithSocket(socketPath string) *Client {
+	return &Client{socketPaths: []string{socketPath}}
+}
+
 // getReadSocketPaths returns all tmux socket paths to check for sessions.
 // Returns AGM socket (~/.agm/agm.sock) if it exists, plus legacy and system default.
 func getReadSocketPaths() []string {
@@ -209,6 +216,65 @@ func (c *Client) SendKeys(sessionName, keys string) error {
 		return fmt.Errorf("failed to send keys to session %s: %w", sessionName, err)
 	}
 
+	return nil
+}
+
+// SendLiteral sends text without interpreting it as tmux key names.
+func (c *Client) SendLiteral(sessionName, text string) error {
+	socketPath, err := c.findSessionSocket(sessionName)
+	if err != nil {
+		return err
+	}
+
+	args := []string{}
+	if socketPath != "" {
+		args = append(args, "-S", socketPath)
+	}
+	args = append(args, "send-keys", "-t", sessionName, "-l", text)
+	if err := exec.Command("tmux", args...).Run(); err != nil {
+		return fmt.Errorf("failed to send literal text to session %s: %w", sessionName, err)
+	}
+	return nil
+}
+
+// GetPanePID returns the first pane PID for an exact session target.
+func (c *Client) GetPanePID(sessionName string) (int, error) {
+	socketPath, err := c.findSessionSocket(sessionName)
+	if err != nil {
+		return 0, err
+	}
+
+	args := []string{}
+	if socketPath != "" {
+		args = append(args, "-S", socketPath)
+	}
+	args = append(args, "list-panes", "-t", "="+sessionName, "-F", "#{pane_pid}")
+	output, err := exec.Command("tmux", args...).Output()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get pane PID for session %s: %w", sessionName, err)
+	}
+	var pid int
+	if _, err := fmt.Sscanf(strings.Split(strings.TrimSpace(string(output)), "\n")[0], "%d", &pid); err != nil {
+		return 0, fmt.Errorf("failed to parse pane PID for session %s: %w", sessionName, err)
+	}
+	return pid, nil
+}
+
+// KillSession kills an exact session on the socket where it was discovered.
+func (c *Client) KillSession(sessionName string) error {
+	socketPath, err := c.findSessionSocket(sessionName)
+	if err != nil {
+		return err
+	}
+
+	args := []string{}
+	if socketPath != "" {
+		args = append(args, "-S", socketPath)
+	}
+	args = append(args, "kill-session", "-t", "="+sessionName)
+	if err := exec.Command("tmux", args...).Run(); err != nil {
+		return fmt.Errorf("failed to kill session %s: %w", sessionName, err)
+	}
 	return nil
 }
 

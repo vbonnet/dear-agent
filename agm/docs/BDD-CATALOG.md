@@ -126,11 +126,14 @@ awareness; its safety (allowlist) and cadence (SLO thresholds) must be pinned.
 **File:** [`agm_supervision_recovery_guardrails.feature`](../test/bdd/features/agm_supervision_recovery_guardrails.feature)
 
 **Drives:** co-located SPEC coverage for conservative PR, process, worktree,
-sentinel intake, tmux inspection, and verification-skip recovery policies.
+sentinel intake, configured-socket isolation, tmux inspection, and
+verification-skip recovery policies.
 
 **Key scenarios:**
 - Every listed supervision and recovery package has a co-located `SPEC.md`.
 - Every package SPEC points back to the executable guardrail feature.
+- Sentinel discovery and lifecycle tests stay on the exact configured tmux
+  socket rather than inspecting ambient user sessions.
 - Unknown cleanup evidence remains conservative rather than destructive.
 
 ---

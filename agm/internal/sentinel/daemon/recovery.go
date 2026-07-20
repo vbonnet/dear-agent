@@ -2,7 +2,6 @@
 package daemon
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -293,7 +292,7 @@ func dispatchRecoveryStrategy(strategy RecoveryStrategy, sessionName string, cli
 		result.DurationMs = flagResult.DurationMs
 		return true, nil
 	case RecoveryRestart:
-		return false, restartSession(sessionName)
+		return false, restartSession(sessionName, client)
 	case RecoveryManual:
 		result.Success = false
 		return false, nil
@@ -304,10 +303,8 @@ func dispatchRecoveryStrategy(strategy RecoveryStrategy, sessionName string, cli
 
 // restartSession kills and restarts a tmux session.
 // Most aggressive recovery - last resort for completely frozen sessions.
-func restartSession(sessionName string) error {
-	// Kill session
-	killCmd := exec.CommandContext(context.Background(), "tmux", "kill-session", "-t", sessionName)
-	if err := killCmd.Run(); err != nil {
+func restartSession(sessionName string, client *tmux.Client) error {
+	if err := client.KillSession(sessionName); err != nil {
 		return fmt.Errorf("failed to kill session: %w", err)
 	}
 
@@ -319,28 +316,21 @@ func restartSession(sessionName string) error {
 
 // SendRejectionMessage sends a violation rejection message to the session.
 // This uses tmux send-keys to inject the message into the session pane.
-func SendRejectionMessage(sessionName string, message string, pattern *enforcement.Pattern) error {
+func SendRejectionMessage(sessionName string, message string, pattern *enforcement.Pattern, client *tmux.Client) error {
 	// Create formatted rejection message
 	fullMessage := formatRejectionForTmux(message, pattern)
 
 	// Verify session state via capture-pane before sending rejection message.
 	// Bug fix: must confirm session is reachable before injecting keys.
-	checkCmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p")
-	if checkErr := checkCmd.Run(); checkErr != nil {
+	if _, checkErr := client.GetPaneContent(sessionName); checkErr != nil {
 		return fmt.Errorf("capture-pane failed before sending rejection: %w (session may be down)", checkErr)
 	}
 
-	// Send message via tmux send-keys
-	// Note: In production, this would use AGM's messaging system instead.
-	// For now, we use tmux directly as a fallback.
-	cmd := exec.Command("tmux", "send-keys", "-t", sessionName, "-l", fullMessage)
-	if err := cmd.Run(); err != nil {
+	if err := client.SendLiteral(sessionName, fullMessage); err != nil {
 		return fmt.Errorf("failed to send rejection message: %w", err)
 	}
 
-	// Send Enter to submit message (hex 0x0d avoids paste coalescing)
-	enterCmd := exec.Command("tmux", "send-keys", "-t", sessionName, "-H", "0d")
-	return enterCmd.Run()
+	return client.SendKeys(sessionName, "Enter")
 }
 
 // formatRejectionForTmux formats rejection message for tmux injection.
