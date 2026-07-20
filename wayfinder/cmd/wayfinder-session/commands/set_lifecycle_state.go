@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
@@ -73,39 +74,9 @@ Examples:
 			}
 		}
 
-		// Update lifecycle state
-		st.LifecycleState = lifecycleState
-
-		// Update optional metadata fields
-		if blockedOn != "" {
-			st.BlockedOn = blockedOn
-		}
-
-		if errorMessage != "" {
-			st.ErrorMessage = errorMessage
-		}
-
-		if inputNeeded != "" {
-			st.InputNeeded = inputNeeded
-		}
-
-		// Clear metadata if transitioning to working/completed/canceled
-		if lifecycleState == status.LifecycleWorking || lifecycleState == status.LifecycleCompleted || lifecycleState == status.LifecycleCanceled {
-			st.BlockedOn = ""
-			st.ErrorMessage = ""
-			st.InputNeeded = ""
-		}
-
-		// Update high-level status field to match lifecycle state
-		switch lifecycleState {
-		case status.LifecycleWorking, status.LifecycleValidating:
-			st.Status = status.StatusV2InProgress
-		case status.LifecycleInputRequired, status.LifecycleDependencyBlocked, status.LifecycleFailed:
-			st.Status = status.StatusV2Blocked
-		case status.LifecycleCompleted:
-			st.Status = status.StatusV2Completed
-		case status.LifecycleCanceled:
-			st.Status = status.StatusV2Abandoned
+		applyLifecycleState(st, lifecycleState, blockedOn, errorMessage, inputNeeded, time.Now())
+		if err := status.ValidateV2(st); err != nil {
+			return fmt.Errorf("invalid lifecycle update: %w", err)
 		}
 
 		// Write updated status
@@ -126,6 +97,41 @@ Examples:
 
 		return nil
 	},
+}
+
+func applyLifecycleState(st *status.StatusV2, lifecycleState, blockedOn, errorMessage, inputNeeded string, now time.Time) {
+	st.LifecycleState = lifecycleState
+	st.BlockedOn = blockedOn
+	st.ErrorMessage = errorMessage
+	st.InputNeeded = inputNeeded
+	st.BlockedReason = ""
+	st.CompletionDate = nil
+	st.UpdatedAt = now
+
+	switch lifecycleState {
+	case status.LifecycleWorking, status.LifecycleValidating:
+		st.Status = status.StatusV2InProgress
+	case status.LifecycleInputRequired:
+		st.Status = status.StatusV2Blocked
+		st.BlockedReason = inputNeeded
+	case status.LifecycleDependencyBlocked:
+		st.Status = status.StatusV2Blocked
+		st.BlockedReason = "blocked on " + blockedOn
+	case status.LifecycleFailed:
+		st.Status = status.StatusV2Blocked
+		st.BlockedReason = errorMessage
+	case status.LifecycleCompleted:
+		st.Status = status.StatusV2Completed
+		st.CompletionDate = &now
+	case status.LifecycleCanceled:
+		st.Status = status.StatusV2Abandoned
+	}
+
+	if lifecycleState == status.LifecycleWorking || lifecycleState == status.LifecycleCompleted || lifecycleState == status.LifecycleCanceled {
+		st.BlockedOn = ""
+		st.ErrorMessage = ""
+		st.InputNeeded = ""
+	}
 }
 
 func validateLifecycleMetadata(state, blockedOn, errorMessage, inputNeeded string) error {

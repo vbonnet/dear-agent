@@ -136,7 +136,7 @@ func validateWaypointHistory(status *StatusV2) error {
 		}
 
 		// Validate waypoint status
-		validWaypointStatuses := []string{WaypointStatusV2Completed, WaypointStatusV2InProgress, WaypointStatusV2Blocked, WaypointStatusV2Skipped}
+		validWaypointStatuses := []string{WaypointStatusV2Pending, WaypointStatusV2Completed, WaypointStatusV2InProgress, WaypointStatusV2Blocked, WaypointStatusV2Skipped}
 		if !contains(validWaypointStatuses, waypoint.Status) {
 			errors = append(errors, fmt.Sprintf("waypoint_history[%d]: invalid status '%s'", i, waypoint.Status))
 		}
@@ -416,7 +416,7 @@ func validateConditionalRequirements(status *StatusV2) error {
 		errors = append(errors, "status is 'completed' but completion_date is missing")
 	}
 
-	// If status = blocked, blocked_reason should be present (warning only)
+	// If status = blocked, blocked_reason must be present.
 	if status.Status == StatusV2Blocked && status.BlockedReason == "" {
 		errors = append(errors, "status is 'blocked' but blocked_reason is empty (recommended)")
 	}

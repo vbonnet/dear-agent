@@ -1,6 +1,11 @@
 package commands
 
-import "testing"
+import (
+	"testing"
+	"time"
+
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
+)
 
 func TestValidateStartMetadataRejectsInvalidEnums(t *testing.T) {
 	for _, test := range []struct {
@@ -44,5 +49,33 @@ func TestLifecycleMetadataRequiresActionableDetails(t *testing.T) {
 		if (err != nil) != test.wantErr {
 			t.Fatalf("validateLifecycleMetadata(%q) error = %v, wantErr=%v", test.state, err, test.wantErr)
 		}
+	}
+}
+
+func TestApplyLifecycleStateKeepsCanonicalStatusValid(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	for _, test := range []struct {
+		state, blockedOn, errorMessage, inputNeeded string
+		wantStatus, wantBlockedReason               string
+		wantCompletion                              bool
+	}{
+		{state: status.LifecycleInputRequired, inputNeeded: "choose API", wantStatus: status.StatusV2Blocked, wantBlockedReason: "choose API"},
+		{state: status.LifecycleDependencyBlocked, blockedOn: "worker-1", wantStatus: status.StatusV2Blocked, wantBlockedReason: "blocked on worker-1"},
+		{state: status.LifecycleFailed, errorMessage: "build failed", wantStatus: status.StatusV2Blocked, wantBlockedReason: "build failed"},
+		{state: status.LifecycleCompleted, wantStatus: status.StatusV2Completed, wantCompletion: true},
+	} {
+		t.Run(test.state, func(t *testing.T) {
+			st := status.NewStatusV2("test", status.ProjectTypeFeature, status.RiskLevelS)
+			applyLifecycleState(st, test.state, test.blockedOn, test.errorMessage, test.inputNeeded, now)
+			if err := status.ValidateV2(st); err != nil {
+				t.Fatalf("ValidateV2 after %s: %v", test.state, err)
+			}
+			if st.Status != test.wantStatus || st.BlockedReason != test.wantBlockedReason {
+				t.Fatalf("status=%q blocked_reason=%q, want %q and %q", st.Status, st.BlockedReason, test.wantStatus, test.wantBlockedReason)
+			}
+			if (st.CompletionDate != nil) != test.wantCompletion {
+				t.Fatalf("completion_date present=%v, want %v", st.CompletionDate != nil, test.wantCompletion)
+			}
+		})
 	}
 }

@@ -40,7 +40,7 @@ func TestRunEndV2_UpdatesStatusFile(t *testing.T) {
 	createdAt := time.Now().Add(-30 * time.Minute)
 	makeV2StatusFileWithCreatedAt(t, dir, createdAt, 1)
 
-	if err := runEndV2(dir, "completed"); err != nil {
+	if err := runEndV2(dir, "completed", ""); err != nil {
 		t.Fatalf("runEndV2: %v", err)
 	}
 
@@ -73,8 +73,30 @@ updated_at: 0001-01-01T00:00:00Z
 		t.Fatal(err)
 	}
 
-	if err := runEndV2(dir, "completed"); err == nil || !strings.Contains(err.Error(), "created_at is required") {
+	if err := runEndV2(dir, "completed", ""); err == nil || !strings.Contains(err.Error(), "created_at is required") {
 		t.Fatalf("runEndV2 with zero created_at error = %v, want validation failure", err)
+	}
+}
+
+func TestRunEndV2_BlockedRequiresAndPersistsReason(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	createdAt := time.Now().Add(-30 * time.Minute)
+	makeV2StatusFileWithCreatedAt(t, dir, createdAt, 1)
+
+	if err := runEndV2(dir, "blocked", ""); err == nil || !strings.Contains(err.Error(), "requires --reason") {
+		t.Fatalf("runEndV2 without blocked reason error = %v, want required reason", err)
+	}
+	if err := runEndV2(dir, "blocked", "waiting for reviewer"); err != nil {
+		t.Fatalf("runEndV2 blocked: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "WAYFINDER-STATUS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "blocked_reason: waiting for reviewer") {
+		t.Fatalf("blocked reason missing from status:\n%s", data)
 	}
 }
 
