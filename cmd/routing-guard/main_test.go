@@ -121,6 +121,11 @@ func TestForbidden(t *testing.T) {
 		{"agm/test/integration/plan_continuity_test.go", false},
 		{"pkg/backlog.go", false},
 		{"cmd/audit-report.go", false},
+		{"infra/plan.tf", false},
+		{"web/research.mjs", false},
+		{"scripts/report.bats", false},
+		{"schema/team_backlog.sql", false},
+		{"docs/plan.d2", false},
 	}
 	for _, c := range cases {
 		if got := forbidden(c.path, testPatterns); got != c.want {

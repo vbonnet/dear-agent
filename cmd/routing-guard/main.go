@@ -164,8 +164,12 @@ func forbidden(p string, patterns []string) bool {
 
 func livingSourceFile(name string) bool {
 	switch strings.ToLower(filepath.Ext(name)) {
-	case ".go", ".c", ".cc", ".cpp", ".h", ".hpp", ".java", ".js", ".jsx",
-		".py", ".rb", ".rs", ".sh", ".ts", ".tsx", ".zsh":
+	case ".bash", ".bats", ".c", ".cc", ".cjs", ".cpp", ".cs", ".cts",
+		".d2", ".dart", ".ex", ".exs", ".fs", ".fsx", ".go", ".h", ".hpp",
+		".hs", ".java", ".js", ".jsx", ".kt", ".kts", ".lua", ".mjs", ".ml",
+		".mli", ".mts", ".php", ".pl", ".pm", ".proto", ".py", ".r", ".rb",
+		".rs", ".scala", ".sh", ".sol", ".sql", ".swift", ".tf", ".tfvars",
+		".ts", ".tsx", ".vue", ".zsh":
 		return true
 	default:
 		return false
