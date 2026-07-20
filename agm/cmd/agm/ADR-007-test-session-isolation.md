@@ -252,7 +252,7 @@ The `oss` workspace accumulated 98 sessions, including many ephemeral test sessi
 ## Related Decisions
 
 - **ADR-006:** Test Isolation Enforcement (PreToolUse hooks)
-- **ADR-012:** Test Infrastructure Dolt Migration (test isolation patterns)
+- **Dolt test isolation:** `../../internal/dolt/testing.go`
 - **NFR4:** Testability requirements (--test flag original purpose)
 
 ---

@@ -10,8 +10,8 @@ import (
 // Cadence names the recommended schedule bucket for a Check. It is a
 // recommendation, not a contract — operators override per-check in
 // .dear-agent.yml > audits.schedule. The buckets exist so the
-// ecosystem agrees on what "daily" or "monthly" *means* in
-// cost-vs-value terms (see ADR-011 §D2).
+// ecosystem agrees on what "daily" or "monthly" means in
+// cost-vs-value terms.
 type Cadence string
 
 // Recommended cadence buckets. Ordered cheap → expensive.
@@ -31,8 +31,8 @@ func (c Cadence) IsValid() bool {
 	return false
 }
 
-// Severity ranks a Finding. The values are fixed at four levels per
-// ADR-011 §D3. Adding a fifth requires an ADR amendment because the
+// Severity ranks a Finding. The values are fixed at four levels. Adding a
+// fifth requires an ADR amendment because the
 // default-action tables in every consumer are keyed on this enum.
 type Severity string
 
@@ -115,7 +115,7 @@ func (m CheckMeta) Validate() error {
 // Env carries the per-run context every Check receives. RepoRoot is
 // the absolute path to the working tree under audit; WorkingDir is
 // the subtree the check should operate on (used for monorepo per-tree
-// configs — see ADR-011 §5 trees: block). The two are equal for
+// configs). The two are equal for
 // single-tree audits.
 //
 // Config carries check-specific knobs from .dear-agent.yml. Checks

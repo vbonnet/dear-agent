@@ -5,8 +5,8 @@ import (
 	"fmt"
 )
 
-// Strategy names how a Finding's Remediation should be applied. See
-// ADR-011 §D4. The default for a finding without an explicit
+// Strategy names how a Finding's Remediation should be applied. The default
+// for a finding without an explicit
 // Remediation is determined by the severity-policy in
 // .dear-agent.yml > audits.severity-policy; the runner consults the
 // policy when Strategy is the zero value StrategyUnspecified.
@@ -14,11 +14,11 @@ type Strategy string
 
 // Remediation strategies.
 const (
-	StrategyUnspecified Strategy = ""        // fall through to severity-policy default
-	StrategyAuto        Strategy = "auto"    // runner executes Command directly
-	StrategyPR          Strategy = "pr"      // runner produces a patch + opens a draft PR
-	StrategyIssue       Strategy = "issue"   // runner files a tracked issue
-	StrategyNoop        Strategy = "noop"    // runner records and stops
+	StrategyUnspecified Strategy = ""      // fall through to severity-policy default
+	StrategyAuto        Strategy = "auto"  // runner executes Command directly
+	StrategyPR          Strategy = "pr"    // runner produces a patch + opens a draft PR
+	StrategyIssue       Strategy = "issue" // runner files a tracked issue
+	StrategyNoop        Strategy = "noop"  // runner records and stops
 )
 
 // IsValid reports whether s names a known strategy. The zero value

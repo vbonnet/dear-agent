@@ -233,13 +233,6 @@ else
     fail "Missing documentation files"
 fi
 
-echo -n "6.3 Checking for ADR-011... "
-if [ -f "docs/adr/ADR-011-gemini-cli-adapter-strategy.md" ]; then
-    pass "ADR-011 exists"
-else
-    fail "ADR-011 not found"
-fi
-
 # ==================== Section 7: Resource Cleanup ====================
 
 section "7. Resource Cleanup"

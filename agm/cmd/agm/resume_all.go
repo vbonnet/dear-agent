@@ -203,7 +203,7 @@ func resumeSessionsBatch(adapter *dolt.Adapter, sessions []*manifest.Manifest) {
 		} else {
 			successCount++
 
-			// Write resume timestamp for orchestrator coordination (ADR-010)
+			// Write resume timestamp for orchestrator coordination (CLI-21)
 			// Non-critical: Log warning but don't fail if timestamp write fails
 			if err := writeResumeTimestamp(m.SessionID); err != nil {
 				ui.PrintWarning(fmt.Sprintf("Warning: failed to write resume timestamp for %s: %v", m.Name, err))
@@ -235,7 +235,6 @@ func resumeSessionsBatch(adapter *dolt.Adapter, sessions []*manifest.Manifest) {
 
 // writeResumeTimestamp creates .agm/resume-timestamp file for orchestrator coordination
 // This enables orchestrator v2 to detect recently resumed sessions and send restart prompts
-// See ADR-010 for integration details: docs/adr/ADR-010-orchestrator-resume-detection.md
 func writeResumeTimestamp(sessionID string) error {
 	// Create .agm directory if it doesn't exist
 	agmDir := filepath.Join(cfg.SessionsDir, sessionID, ".agm")

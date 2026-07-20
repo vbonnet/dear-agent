@@ -3,7 +3,7 @@ package aggregator
 import "sort"
 
 // DefaultWeights are the per-Kind weights the scorer uses when none
-// are configured. See ADR-015 §D6 for the rationale; in short,
+// are configured. As ADR-015 summarizes,
 // security dominates and git_activity is a tiebreaker.
 var DefaultWeights = map[Kind]float64{
 	KindSecurityAlerts: 1.0,
@@ -15,7 +15,7 @@ var DefaultWeights = map[Kind]float64{
 
 // kindCeilings are the per-Kind "this many is plenty" ceilings used to
 // normalize a raw value into 0..1. They live here as constants so v1
-// tuning is a one-file change; ADR-015 §D6 commits to revisiting them
+// tuning is a one-file change; revisit them
 // once we have real-world signals.
 var kindCeilings = map[Kind]float64{
 	KindGitActivity:    100, // 100 commits/week saturates "active"

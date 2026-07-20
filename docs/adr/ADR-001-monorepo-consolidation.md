@@ -1,6 +1,6 @@
 # ADR-001: Monorepo Consolidation
 
-**Status**: Accepted (2026-04-24)
+Status: Accepted (2026-04-24)
 
 `ai-tools` and `engram` lived in two repositories with `replace` directives
 pointing at absolute local paths. Every coordinated change wanted two PRs,
