@@ -23,8 +23,8 @@ Flags:
   --force    Skip confirmation prompt
 
 Example:
-  wayfinder-session cleanup-sandboxes
-  wayfinder-session cleanup-sandboxes --force`,
+  wayfinder session cleanup-sandboxes
+  wayfinder session cleanup-sandboxes --force`,
 	Args: cobra.NoArgs,
 	RunE: runCleanupSandboxes,
 }

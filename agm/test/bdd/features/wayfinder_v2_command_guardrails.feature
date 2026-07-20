@@ -44,5 +44,7 @@ Feature: Canonical Wayfinder command guardrails
     Then retired root and feature executors should be absent
     And all Wayfinder session commands should parse only schema 2.0 status
     And Wayfinder active corpus should omit retired phase identifiers
+    And retired external Wayfinder validators should be absent
+    And active command guidance should use the canonical entrypoint
     And Wayfinder phase enumeration should expose the nine named phases
     And Wayfinder plugin should expose one root skill

@@ -30,8 +30,8 @@ var StartPhaseCmd = &cobra.Command{
 	Long: `Update WAYFINDER-STATUS.md and publish phase.started event.
 
 Example:
-  wayfinder-session start-phase PROBLEM
-  wayfinder-session start-phase BUILD --allow-dirty`,
+  wayfinder session start-phase PROBLEM
+  wayfinder session start-phase BUILD --allow-dirty`,
 	Args: cobra.ExactArgs(1),
 	RunE: runStartPhase,
 }

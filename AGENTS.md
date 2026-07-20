@@ -169,7 +169,7 @@ them.
 5. **Use Wayfinder for all plans and execution.** Plan and drive
    consequential work through the Wayfinder SDLC workflow rather than ad-hoc.
    Use the native entrypoint for your harness: Claude slash commands such as
-   `/wayfinder:*`, the `wayfinder-session` CLI where available, or AGM/VROOM
+   `/wayfinder:*`, the `wayfinder session` CLI, or AGM/VROOM
    orchestration for non-Claude workers.
    *Why:* dogfooding Wayfinder feeds the self-improvement flywheel — every
    real run surfaces gaps before users hit them. (This is the planning-side

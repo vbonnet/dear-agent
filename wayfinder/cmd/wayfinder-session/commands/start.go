@@ -42,13 +42,13 @@ Canonical schema (9 phases):
 
 Examples:
   # Start feature project with medium risk
-  wayfinder-session start myproject
+  wayfinder session start myproject
 
   # Start research project with low risk
-  wayfinder-session start myproject --project-type research --risk-level S
+  wayfinder session start myproject --project-type research --risk-level S
 
   # Force overwrite
-  wayfinder-session start myproject --force`,
+  wayfinder session start myproject --force`,
 	Args: cobra.ExactArgs(1),
 	RunE: runStart,
 }
@@ -72,7 +72,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	if forceFlag {
 		startReason, _ := cmd.Flags().GetString("reason")
 		if gerr := override.Require(context.Background(), override.Guard{
-			Tool: "wayfinder-session start",
+			Tool: "wayfinder session start",
 			Flag: "--force",
 			Gate: "overwrite-existing wayfinder session",
 			Risk: override.RiskP2,
@@ -154,9 +154,9 @@ func runStart(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Created: %s\n\n", status.StatusFilename)
 	fmt.Printf("Next steps:\n\n")
 	fmt.Printf("Run phases manually:\n")
-	fmt.Printf("  wayfinder-session next-phase\n\n")
+	fmt.Printf("  wayfinder session next-phase\n\n")
 	fmt.Printf("End session:\n")
-	fmt.Printf("  wayfinder-session end --status completed\n")
+	fmt.Printf("  wayfinder session end --status completed\n")
 
 	return nil
 }

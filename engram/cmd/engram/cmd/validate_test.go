@@ -29,16 +29,6 @@ func TestDetectValidatorType(t *testing.T) {
 			want:     ValidatorContent,
 		},
 		{
-			name:     "retrospective file",
-			filePath: "/path/to/project-retrospective.md",
-			want:     ValidatorRetrospective,
-		},
-		{
-			name:     "wayfinder artifact",
-			filePath: "/path/to/wayfinder-artifact.yaml",
-			want:     ValidatorWayfinder,
-		},
-		{
 			name:     "yaml file",
 			filePath: "/path/to/config.yaml",
 			want:     ValidatorYAMLTokenCounter,
@@ -121,8 +111,8 @@ func TestValidationResult(t *testing.T) {
 // TestValidationSummary tests ValidationSummary structure
 func TestValidationSummary(t *testing.T) {
 	summary := ValidationSummary{
-		TotalFiles:     3,
-		FilesValidated: 3,
+		TotalFiles:     2,
+		FilesValidated: 2,
 		ErrorCount:     2,
 		WarningCount:   1,
 		FixesApplied:   1,
@@ -145,15 +135,11 @@ func TestValidationSummary(t *testing.T) {
 				},
 				FixesApplied: []string{"Fix 1"},
 			},
-			{
-				ValidatorType: ValidatorWayfinder,
-				FilePath:      "wayfinder-artifact.yaml",
-			},
 		},
 	}
 
-	if summary.TotalFiles != 3 {
-		t.Errorf("Expected 3 total files, got %d", summary.TotalFiles)
+	if summary.TotalFiles != 2 {
+		t.Errorf("Expected 2 total files, got %d", summary.TotalFiles)
 	}
 
 	if summary.ErrorCount != 2 {
@@ -164,8 +150,8 @@ func TestValidationSummary(t *testing.T) {
 		t.Errorf("Expected 1 warning, got %d", summary.WarningCount)
 	}
 
-	if len(summary.Results) != 3 {
-		t.Errorf("Expected 3 results, got %d", len(summary.Results))
+	if len(summary.Results) != 2 {
+		t.Errorf("Expected 2 results, got %d", len(summary.Results))
 	}
 }
 
@@ -183,8 +169,8 @@ func TestFindAllValidatableFilesInDir(t *testing.T) {
 		{"config.yaml", true},
 		{"README.md", false},
 		{"test.txt", false},
-		{"project-retrospective.md", true},
-		{"wayfinder-artifact.yaml", true},
+		{"project-retrospective.md", false},
+		{"wayfinder-artifact.yaml", true}, // ordinary YAML uses the token counter
 		{"core/howto.ai.md", true},
 	}
 
@@ -408,8 +394,6 @@ func BenchmarkDetectValidatorType(t *testing.B) {
 	filePaths := []string{
 		"/path/to/example.ai.md",
 		"/path/to/core/example.ai.md",
-		"/path/to/project-retrospective.md",
-		"/path/to/wayfinder-artifact.yaml",
 		"/path/to/config.yaml",
 	}
 
@@ -426,10 +410,8 @@ func TestValidatorTypeConstants(t *testing.T) {
 	expected := map[ValidatorType]string{
 		ValidatorEngram:           "engram",
 		ValidatorContent:          "content",
-		ValidatorWayfinder:        "wayfinder",
 		ValidatorLinkChecker:      "linkchecker",
 		ValidatorYAMLTokenCounter: "yamltokencounter",
-		ValidatorRetrospective:    "retrospective",
 	}
 
 	for vType, expectedStr := range expected {
