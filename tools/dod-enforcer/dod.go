@@ -22,8 +22,9 @@ type BeadDoD struct {
 	FilesMustExist      []string       `yaml:"files_must_exist"`
 	TestsMustPass       bool           `yaml:"tests_must_pass"`
 	CommandsMustSucceed []CommandCheck `yaml:"commands_must_succeed"`
-	// Phase 2 placeholder for benchmarking:
-	// BenchmarksMustImprove []BenchmarkCheck `yaml:"benchmarks_must_improve,omitempty"`
+	// Extensions preserves future check families so older binaries can load
+	// and round-trip newer DoD files without claiming to execute those checks.
+	Extensions map[string]yaml.Node `yaml:",inline"`
 }
 
 // CommandCheck represents a command that must succeed with a specific exit code.
