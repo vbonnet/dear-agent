@@ -869,7 +869,6 @@ cp ~/.claude/history.jsonl ~/.claude/history.jsonl.backup
 
 **For developers:**
 - [Contributing](../CONTRIBUTING.md) - Development setup
-- [Test Plan](../TEST-PLAN.md) - Testing strategy
 - [Command Translation Design](COMMAND-TRANSLATION-DESIGN.md) - Architecture
 
 ### How do I get support?

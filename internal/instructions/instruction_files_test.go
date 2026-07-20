@@ -56,6 +56,7 @@ func TestCanonicalAgentsIsConciseRouter(t *testing.T) {
 	policyPaths := []string{
 		"docs/policies/broken-windows.ai.md",
 		"docs/policies/harness-hygiene.ai.md",
+		"docs/policies/anti-stall.ai.md",
 		"docs/policies/dear-retro.ai.md",
 		"docs/policies/definition-of-done.ai.md",
 		"docs/policies/wayfinder-v2-canonical.ai.md",

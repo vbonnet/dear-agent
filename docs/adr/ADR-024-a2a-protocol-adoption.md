@@ -19,9 +19,6 @@ Builds on / aligns with:
 - [agm ADR-019: A2A Agent Cards from Manifests](../../agm/docs/adr/ADR-019-a2a-agent-cards.md)
   — already adopted the A2A *AgentCard* format for session discovery; this
   ADR generalises the choice to the full task protocol.
-- [ADR-023: Friction Reporting and Session Handoff](ADR-023-friction-reporting-and-session-handoff.md)
-  — friction reports and handoff messages travel as A2A artifacts on the
-  same fabric.
 
 ---
 
@@ -180,7 +177,7 @@ can be exposed in pkg/a2a later without breaking the v1 callers.
   developer's machine" topology sketched in ADR-002.
 - **Free observability.** Every `TaskStatusUpdateEvent` is a structured
   record of the conversation, suitable for the VROOM decision trail and
-  for the friction-reporting stream of ADR-023 without bespoke
+  for the VROOM friction-reporting stream without bespoke
   serialisation.
 
 ### Negative
