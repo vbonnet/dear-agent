@@ -94,10 +94,10 @@ func runRewind(cmd *cobra.Command, args []string) error {
 	fromPhase := st.CurrentWaypoint
 
 	resetForRewind(st, allPhases, targetIdx)
+	resetLifecycleForRewind(st, time.Now())
 
 	// Update current phase
 	st.CurrentWaypoint = targetPhase
-	st.UpdatedAt = time.Now()
 
 	// Write updated canonical status to the project directory.
 	if err := status.WriteV2ToDir(st, projectDir); err != nil {
@@ -118,6 +118,10 @@ func runRewind(cmd *cobra.Command, args []string) error {
 	fmt.Printf("⏪ Rewound to phase %s\n", targetPhase)
 	fmt.Println("ℹ️  Phases after", targetPhase, "have been reset to pending")
 	return nil
+}
+
+func resetLifecycleForRewind(st *status.StatusV2, now time.Time) {
+	applyLifecycleState(st, status.LifecycleWorking, "", "", "", now)
 }
 
 func resetForRewind(st *status.StatusV2, allPhases []string, targetIdx int) {

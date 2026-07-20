@@ -42,3 +42,29 @@ func TestResetForRewindResetsTargetAndLaterPhases(t *testing.T) {
 		t.Fatalf("restarted target history = %+v, want a valid start timestamp", restarted)
 	}
 }
+
+func TestResetLifecycleForRewindReopensTerminalStatus(t *testing.T) {
+	completedAt := time.Now().Add(-time.Hour)
+	rewoundAt := time.Now()
+	st := &status.StatusV2{
+		Status:         status.StatusV2Completed,
+		LifecycleState: status.LifecycleCompleted,
+		CompletionDate: &completedAt,
+		BlockedReason:  "stale block",
+		BlockedOn:      "stale-dependency",
+		ErrorMessage:   "stale error",
+		InputNeeded:    "stale input",
+	}
+
+	resetLifecycleForRewind(st, rewoundAt)
+
+	if st.Status != status.StatusV2InProgress || st.LifecycleState != status.LifecycleWorking {
+		t.Fatalf("rewound lifecycle = %q/%q, want in-progress/working", st.Status, st.LifecycleState)
+	}
+	if st.CompletionDate != nil || st.BlockedReason != "" || st.BlockedOn != "" || st.ErrorMessage != "" || st.InputNeeded != "" {
+		t.Fatalf("rewound lifecycle retained terminal metadata: %+v", st)
+	}
+	if !st.UpdatedAt.Equal(rewoundAt) {
+		t.Fatalf("updated_at = %s, want %s", st.UpdatedAt, rewoundAt)
+	}
+}
