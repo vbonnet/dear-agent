@@ -79,10 +79,12 @@ authorization decision.
 ## Wayfinder boundary
 
 `wayfinder.go` lists directories under `wayfinder_dir`, reads frontmatter from
-`WAYFINDER-STATUS.md`, and supports current plus selected legacy field names.
-Single-session reads reject path traversal characters. The default directory is
-`~/src/engram-research/wf`, but deployments should configure the actual evidence
-checkout rather than rely on that development-oriented default.
+`WAYFINDER-STATUS.md`, and accepts only the V2 `schema_version`, `project_name`,
+`status`, and `current_waypoint` contract. Legacy V1 status files are ignored by
+list reads and rejected by single-session reads. Single-session reads also reject
+path traversal characters. The default directory is `~/src/engram-research/wf`,
+but deployments should configure the actual evidence checkout rather than rely
+on that development-oriented default.
 
 ## Optional surfaces
 
