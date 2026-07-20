@@ -95,6 +95,12 @@ func (c *Client) StartRemoteControl(ctx context.Context) error {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if output, err := cmd.Output(); err != nil {
+		if timeoutErr := timeoutCtx.Err(); timeoutErr != nil {
+			if errors.Is(timeoutErr, context.DeadlineExceeded) {
+				return fmt.Errorf("codex remote-control start timed out after %s", c.timeout())
+			}
+			return fmt.Errorf("codex remote-control start canceled: %w", timeoutErr)
+		}
 		// A daemonized app-server can keep the stdout pipe open after it has
 		// already emitted its successful machine-readable status. In that case
 		// WaitDelay makes Output return an error even though startup succeeded.
@@ -102,9 +108,6 @@ func (c *Client) StartRemoteControl(ctx context.Context) error {
 		// and malformed responses still surface as command failures.
 		if isRemoteControlDaemonStatus(output) {
 			return nil
-		}
-		if timeoutCtx.Err() != nil {
-			return fmt.Errorf("codex remote-control start timed out after %s", c.timeout())
 		}
 		msg := strings.TrimSpace(stderr.String())
 		if out := strings.TrimSpace(string(output)); out != "" {

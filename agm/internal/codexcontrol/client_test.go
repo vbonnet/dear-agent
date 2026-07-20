@@ -32,6 +32,28 @@ printf '%s\n' '{"mode":"daemon","daemon":{"status":"alreadyRunning"}}'
 	}
 }
 
+func TestStartRemoteControlRejectsDaemonStatusAfterContextDeadline(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "codex")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+printf '%s\n' '{"mode":"daemon","daemon":{"status":"alreadyRunning"}}'
+sleep 2
+`), 0o700); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+
+	originalExec := execCommandContext
+	execCommandContext = func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, script)
+	}
+	t.Cleanup(func() { execCommandContext = originalExec })
+
+	client := &Client{Timeout: 50 * time.Millisecond}
+	err := client.StartRemoteControl(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("StartRemoteControl error = %v, want timeout", err)
+	}
+}
+
 func TestIsRemoteControlDaemonStatus(t *testing.T) {
 	tests := []struct {
 		name   string
