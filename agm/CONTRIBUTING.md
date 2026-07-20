@@ -70,7 +70,6 @@ agm/
 ├── test/
 │   ├── e2e/                    # End-to-end tests (testscript)
 │   └── integration/            # Integration tests
-└── test/                       # Integration and end-to-end tests
 ```
 
 ### Running Tests
@@ -344,8 +343,7 @@ agm/
 - [testscript Documentation](https://pkg.go.dev/github.com/rogpeppe/go-internal/testscript)
 - [Table-Driven Tests](https://go.dev/wiki/TableDrivenTests)
 - [Effective Go](https://go.dev/doc/effective_go)
-- Historical testing plans are preserved in the
-  [temporal documentation archive](https://github.com/vbonnet/engram-research/tree/main/audits/dear-agent-temporal-docs-2026-07-18).
+- [BDD Catalog](docs/BDD-CATALOG.md) - Executable behavior and test traceability
 
 ## Questions?
 

@@ -42,6 +42,6 @@ dear-agent-local IDs or use provider-native IDs.
 
 This ADR captures intent; the [workflow engine](ADR-010-workflow-engine-architecture.md)
 is the natural home for the implementation (every node-execution is a
-work-item record, every state transition is an audit event). The substrate
-hypothesis ([docs/design/substrate-diagnostic.md](../design/substrate-diagnostic.md))
-gives the per-component diagnostic this derives from.
+work-item record, every state transition is an audit event). The durable
+criterion is that work has stable identity, explicit state and ownership,
+structural verbs, and queryable history.

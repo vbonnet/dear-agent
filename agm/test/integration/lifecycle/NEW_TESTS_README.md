@@ -335,17 +335,12 @@ Concurrent Writes:  Last-write-wins
 
 ## Conclusion
 
-This test suite adds comprehensive coverage for AGM session lifecycle operations:
-- **27 new tests** covering state transitions, concurrency, and edge cases
-- **~1500 lines** of production-quality test code
-- **100% of critical paths** tested (creation, archive, transitions)
-- **Race condition detection** via concurrent stress tests
-- **Edge case documentation** for unusual scenarios
-
-All tests are documented, maintainable, and follow Go best practices.
+This suite covers AGM session lifecycle state transitions, concurrent
+operations, and edge cases. The test source is the authority for current
+coverage; this guide does not freeze counts or completeness claims.
 
 ## Related Documentation
 
-- [Historical test plans](https://github.com/vbonnet/engram-research/tree/main/audits/dear-agent-temporal-docs-2026-07-18) - archived testing strategy
+- [BDD Catalog](../../../docs/BDD-CATALOG.md) - Executable behavior and test traceability
 - [README.md](./README.md) - Lifecycle test suite overview
 - [QUICK_START.md](./QUICK_START.md) - Quick start guide

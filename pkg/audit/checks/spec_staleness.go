@@ -16,8 +16,7 @@ import (
 // falls far behind the code it documents stops being useful — new behaviour
 // is undocumented and old invariants may have been removed.
 //
-// This is tier 2 of the Outcomes framework spec-compliance outcome
-// (docs/design/outcomes-framework.md). Tier 1 (spec.coverage) detects
+// This is the second spec-compliance check. spec.coverage detects
 // missing SPECs; this check detects SPECs that exist but have gone stale.
 //
 // Config knobs:

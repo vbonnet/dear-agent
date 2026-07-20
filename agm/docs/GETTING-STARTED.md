@@ -404,7 +404,7 @@ Now that you're up and running:
 
 4. **Contributing:**
    - [Contributing Guide](../CONTRIBUTING.md) - Development setup and testing
-   - [Historical test plans](https://github.com/vbonnet/engram-research/tree/main/audits/dear-agent-temporal-docs-2026-07-18) - archived testing strategy
+   - [BDD Catalog](BDD-CATALOG.md) - Executable behavior and test traceability
 
 ## Getting Help
 
