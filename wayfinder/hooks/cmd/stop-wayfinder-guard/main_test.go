@@ -12,7 +12,11 @@ import (
 // writeStatus writes a minimal WAYFINDER-STATUS.md with the given status value.
 func writeStatus(t *testing.T, dir, projectStatus, currentPhase string) {
 	t.Helper()
-	raw := fmt.Sprintf("---\nschema_version: \"2.0\"\nproject_name: test\nproject_type: feature\nrisk_level: M\ncurrent_waypoint: %s\nstatus: %s\ncreated_at: 2026-01-01T00:00:00Z\nupdated_at: 2026-01-01T00:00:00Z\nwaypoint_history: []\n---\n", currentPhase, projectStatus)
+	completionDate := ""
+	if projectStatus == statusCompleted {
+		completionDate = "completion_date: 2026-01-01T00:00:00Z\n"
+	}
+	raw := fmt.Sprintf("---\nschema_version: \"2.0\"\nproject_name: test\nproject_type: feature\nrisk_level: M\ncurrent_waypoint: %s\nstatus: %s\ncreated_at: 2026-01-01T00:00:00Z\nupdated_at: 2026-01-01T00:00:00Z\n%swaypoint_history: []\n---\n", currentPhase, projectStatus, completionDate)
 	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), []byte(raw), 0o600); err != nil {
 		t.Fatalf("write status: %v", err)
 	}
@@ -72,7 +76,7 @@ func TestCheckPhase_Completed(t *testing.T) {
 
 func TestCheckPhase_Abandoned(t *testing.T) {
 	dir := t.TempDir()
-	writeStatus(t, dir, statusAbandoned, "")
+	writeStatus(t, dir, statusAbandoned, "RETRO")
 
 	r := newResult()
 	checkPhase(r, dir)
@@ -83,6 +87,19 @@ func TestCheckPhase_Abandoned(t *testing.T) {
 		}
 	}
 	t.Errorf("expected Pass for abandoned project, got %+v", r.Findings)
+}
+
+func TestCheckPhase_IncompleteCompletedStatusBlocks(t *testing.T) {
+	dir := t.TempDir()
+	raw := "---\nschema_version: \"2.0\"\nstatus: completed\ncurrent_waypoint: RETRO\n---\n"
+	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newResult()
+	checkPhase(r, dir)
+
+	requireBlockedInvalidStatus(t, r, "phase")
 }
 
 // B14 regression: "blocked" is not a valid status and must NOT be treated as Pass.

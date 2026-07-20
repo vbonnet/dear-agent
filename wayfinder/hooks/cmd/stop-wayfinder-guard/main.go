@@ -3,7 +3,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,19 +13,13 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/stophook"
-	"gopkg.in/yaml.v3"
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/statusread"
 )
 
 const (
 	statusCompleted = "completed"
 	statusAbandoned = "abandoned"
 )
-
-type wayfinderStatus struct {
-	SchemaVersion   string `yaml:"schema_version"`
-	Status          string `yaml:"status"`
-	CurrentWaypoint string `yaml:"current_waypoint"`
-}
 
 func main() {
 	os.Exit(stophook.RunWithTimeout(10*time.Second, run))
@@ -102,7 +98,7 @@ func checkRetrospective(r *stophook.Result, dir string) {
 	// Parse WAYFINDER-STATUS.md to detect project completion.
 	s, err := readCanonicalStatus(dir)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			r.Pass("retrospective", "no WAYFINDER-STATUS.md, skipped")
 			return
 		}
@@ -121,7 +117,7 @@ func checkRetrospective(r *stophook.Result, dir string) {
 func checkPhase(r *stophook.Result, dir string) {
 	s, err := readCanonicalStatus(dir)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			r.Pass("phase", "no WAYFINDER-STATUS.md, skipped")
 			return
 		}
@@ -143,21 +139,6 @@ func checkPhase(r *stophook.Result, dir string) {
 	}
 }
 
-func readCanonicalStatus(dir string) (*wayfinderStatus, error) {
-	data, err := os.ReadFile(filepath.Join(dir, "WAYFINDER-STATUS.md"))
-	if err != nil {
-		return nil, err
-	}
-	parts := strings.SplitN(string(data), "---", 3)
-	if len(parts) != 3 || strings.TrimSpace(parts[0]) != "" {
-		return nil, fmt.Errorf("invalid WAYFINDER-STATUS.md frontmatter")
-	}
-	var parsed wayfinderStatus
-	if err := yaml.Unmarshal([]byte(parts[1]), &parsed); err != nil {
-		return nil, fmt.Errorf("parse WAYFINDER-STATUS.md: %w", err)
-	}
-	if parsed.SchemaVersion != "2.0" {
-		return nil, fmt.Errorf("unsupported schema_version %q; expected 2.0", parsed.SchemaVersion)
-	}
-	return &parsed, nil
+func readCanonicalStatus(dir string) (*statusread.Summary, error) {
+	return statusread.ParseFromDir(dir)
 }
