@@ -168,6 +168,13 @@ forbidden-paths:
     - "**/*[a-z]Backlog*.*"
     - docs/retros/**
     - docs/design/**
+    - docs/benchmarks/**
+    - docs/workflow-engine/BACKLOG.md
+    - ROADMAP.md
+    - "**/*-PLAN.md"
+    - "**/*-REPORT.md"
+    - "**/*-SUMMARY.md"
+    - "**/*-BASELINE.md"
     - wf/**
     # Wayfinder SDLC run artifacts (phase outputs). These are temporal: a
     # moment-in-time record of a Wayfinder run, NOT maintained with the code.

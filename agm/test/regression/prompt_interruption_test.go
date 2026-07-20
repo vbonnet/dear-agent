@@ -202,7 +202,7 @@ func TestRegression_BothBugsDocumented(t *testing.T) {
 	t.Log("PREVENTION:")
 	t.Log("  - These regression tests run on every test suite execution")
 	t.Log("  - Manual verification required for end-to-end tmux integration")
-	t.Log("  - See ROADMAP.md Phase 4 for manual test procedures")
+	t.Log("  - See the maintained workflow documentation for manual test procedures")
 	t.Log("")
 	t.Log("RELATED FILES:")
 	t.Log("  - cmd/agm/new_integration_test.go (Bug 1 tests)")

@@ -68,6 +68,12 @@ Provide a production-ready CLI that:
 
 **CLI-21** When `agm sessions resume-all` successfully resumes a session, the system shall write `.agm/resume-timestamp` for supervisor coordination; failure to write that advisory timestamp shall warn without failing the resumed session.
 
+**CLI-22** When AGM registers its Cobra tree, the system shall reject duplicate active sibling command paths before generating plugin command guidance.
+
+**CLI-23** When `agm wiki query-save` receives user-controlled question or answer text, the system shall accept file-backed inputs, reject conflicting inline and file values, and preserve file content without shell evaluation.
+
+**CLI-24** When installed AGM command guidance is generated, the system shall derive executable paths and supported flags from the live Cobra tree and shall fail if any installed command Markdown is outside the declared inventory.
+
 ## Requirements
 
 ### Functional Requirements
@@ -432,27 +438,15 @@ Provide a production-ready CLI that:
   - **Automation:** Parse structured output in scripts
   - **Multi-session coordination:** Capture responses from multiple sessions
 
-#### FR17: Claude Code Skills
+#### FR17: Claude Code Commands
 - **ID:** FR17
 - **Priority:** P2 (Medium)
-- **Description:** CLI MUST provide Claude Code skills for workflow automation
+- **Description:** CLI MUST provide verified global Claude Code command files for the tracked AGM plugin command inventory
 - **Installation:**
-  - `make install-skills` - Install to `~/.claude/skills/agm/`
-- **Skills:**
-  - `/agm:new [name] [--agent TYPE] [--project PATH]` - Smart session creation
-  - `/agm:send <session> --prompt "..." [--capture-response]` - Message sending with capture
-  - `/agm:status [session] [--all] [--watch]` - Health monitoring
-  - `/agm:resume <session> [--fuzzy] [--last]` - Intelligent resume
-- **Features:**
-  - **Auto-generated names:** Format `agm-YYYYMMDD-HHMMSS` if not provided
-  - **Response capture:** `--capture-response` flag captures and returns output
-  - **Watch mode:** Continuous status monitoring (refreshes every 2s)
-  - **Fuzzy matching:** Typo-tolerant session name resolution
-  - **Last session:** Resume most recently active session
+  - `make install-skills` - Compatibility alias that installs Markdown commands to `~/.claude/commands/`
 - **Implementation:**
-  - Simple bash scripts wrapping AGM CLI commands
-  - Easy to maintain and extend
-  - Well-documented with examples in `skills/README.md`
+  - `agm/agm-plugin/commands/*.md` defines the complete command and argument contracts
+  - Per-file `content-hash` fields and inventory tests detect stale or missing command surfaces
 
 #### FR18: Test Session Isolation and Management
 - **ID:** FR18
