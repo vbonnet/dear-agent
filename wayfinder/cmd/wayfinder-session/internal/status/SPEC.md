@@ -23,6 +23,8 @@
 
 **WFSTATUS-08** When status is invalid, the system shall return field-specific validation errors.
 
+**WFSTATUS-09** When lifecycle state is input-required, dependency-blocked, or failed, the system shall require input-needed, blocked-on, or error-message diagnostics respectively in addition to a blocked reason.
+
 ## Traceability
 
 - Parser tests: `parser_v2_test.go`

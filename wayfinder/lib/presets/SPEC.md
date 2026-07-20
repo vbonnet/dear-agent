@@ -18,6 +18,8 @@
 
 **WAYFINDER-PRESET-05** When a custom preset directory is configured, the system shall contain lookup to that directory and reject path traversal.
 
+**WAYFINDER-PRESET-06** When phase-gate settings are decoded, the system shall accept only canonical descriptive field names and reject unknown or retired phase-numbered keys.
+
 ## Test Traceability
 
 - Package tests: `wayfinder/lib/presets/loader_test.go`

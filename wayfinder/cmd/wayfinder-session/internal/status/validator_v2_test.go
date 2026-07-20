@@ -172,6 +172,57 @@ func TestValidateV2(t *testing.T) {
 	}
 }
 
+func TestValidateV2LifecycleMetadata(t *testing.T) {
+	newStatus := func(state string) *StatusV2 {
+		now := time.Now()
+		return &StatusV2{
+			SchemaVersion:   SchemaVersionV2,
+			ProjectName:     "Test",
+			ProjectType:     ProjectTypeFeature,
+			RiskLevel:       RiskLevelM,
+			CurrentWaypoint: WaypointV2Build,
+			Status:          StatusV2Blocked,
+			LifecycleState:  state,
+			BlockedReason:   "generic reason",
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+	}
+
+	tests := []struct {
+		name      string
+		state     string
+		configure func(*StatusV2)
+		wantErr   string
+	}{
+		{name: "input-required missing input", state: LifecycleInputRequired, wantErr: "requires input_needed"},
+		{name: "input-required with input", state: LifecycleInputRequired, configure: func(st *StatusV2) { st.InputNeeded = "choose a database" }},
+		{name: "dependency-blocked missing dependency", state: LifecycleDependencyBlocked, wantErr: "requires blocked_on"},
+		{name: "dependency-blocked with dependency", state: LifecycleDependencyBlocked, configure: func(st *StatusV2) { st.BlockedOn = "ce-123" }},
+		{name: "failed missing error", state: LifecycleFailed, wantErr: "requires error_message"},
+		{name: "failed with error", state: LifecycleFailed, configure: func(st *StatusV2) { st.ErrorMessage = "tests failed" }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			st := newStatus(tt.state)
+			if tt.configure != nil {
+				tt.configure(st)
+			}
+			err := ValidateV2(st)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ValidateV2() error = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("ValidateV2() error = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidateV2RejectsUnsafeOrDuplicateSkipPhases(t *testing.T) {
 	newValid := func() *StatusV2 {
 		now := time.Now()

@@ -165,6 +165,20 @@ func validateLifecycleState(status *StatusV2) error {
 	if status.Status != expectedStatus {
 		return fmt.Errorf("lifecycle_state %q requires status %q, got %q", status.LifecycleState, expectedStatus, status.Status)
 	}
+	switch status.LifecycleState {
+	case LifecycleInputRequired:
+		if strings.TrimSpace(status.InputNeeded) == "" {
+			return fmt.Errorf("lifecycle_state %q requires input_needed", status.LifecycleState)
+		}
+	case LifecycleDependencyBlocked:
+		if strings.TrimSpace(status.BlockedOn) == "" {
+			return fmt.Errorf("lifecycle_state %q requires blocked_on", status.LifecycleState)
+		}
+	case LifecycleFailed:
+		if strings.TrimSpace(status.ErrorMessage) == "" {
+			return fmt.Errorf("lifecycle_state %q requires error_message", status.LifecycleState)
+		}
+	}
 	return nil
 }
 
@@ -465,8 +479,8 @@ func validateConditionalRequirements(status *StatusV2) error {
 	}
 
 	// If status = blocked, blocked_reason must be present.
-	if status.Status == StatusV2Blocked && status.BlockedReason == "" {
-		errors = append(errors, "status is 'blocked' but blocked_reason is empty (recommended)")
+	if status.Status == StatusV2Blocked && strings.TrimSpace(status.BlockedReason) == "" {
+		errors = append(errors, "status is 'blocked' but blocked_reason is empty")
 	}
 
 	if len(errors) > 0 {

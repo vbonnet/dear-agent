@@ -801,7 +801,7 @@ func TestGetUncommittedFilesInProjectDir(t *testing.T) {
 			setup: func(t *testing.T) string {
 				repoDir := setupGitRepo(t)
 				// Create and commit initial files
-				os.WriteFile(filepath.Join(repoDir, "CHARTER-charter.md"), []byte("# Charter v1\n"), 0644)
+				os.WriteFile(filepath.Join(repoDir, "CHARTER-charter.md"), []byte("# Charter revision one\n"), 0644)
 				exec.Command("git", "-C", repoDir, "add", ".").Run()
 				exec.Command("git", "-C", repoDir, "commit", "-m", "Initial").Run()
 

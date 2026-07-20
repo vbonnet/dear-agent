@@ -12,6 +12,8 @@ import (
 	"github.com/cucumber/godog"
 )
 
+var retiredWayfinderPattern = regexp.MustCompile(`\b(?:W0|D1|D2|D3|D4|S4|S5|S6|S7|S8|S9|S10|S11|V1)(?:\b|[A-Z_])|\b(?:w0|d1|d2|d3|d4|s4|s5|s6|s7|s8|s9|s10|s11|v1)_|WayfinderV1|discovery\.(problem|solutions|approach|requirements)|design\.(tech-lead|security|qa)|roadmap\.(planning|breakdown|dependencies)`)
+
 const wayfinderV2CommandFeaturePath = "agm/test/bdd/features/wayfinder_v2_command_guardrails.feature"
 
 type wayfinderV2CommandPackageStateKey struct{}
@@ -276,7 +278,6 @@ func nonMigrationRuntimeOmitsRetiredPhases(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	retired := regexp.MustCompile(`\b(W0|D1|D2|D3|D4|S4|S5|S6|S7|S8|S9|S10|S11|V1)\b|WayfinderV1|discovery\.(problem|solutions|approach|requirements)|design\.(tech-lead|security|qa)|roadmap\.(planning|breakdown|dependencies)`)
 	for _, root := range []struct {
 		path       string
 		extensions map[string]bool
@@ -288,7 +289,7 @@ func nonMigrationRuntimeOmitsRetiredPhases(ctx context.Context) error {
 		{path: "cmd/safe-pr", extensions: map[string]bool{".go": true}},
 		{path: "pkg/phaseengram", extensions: map[string]bool{".go": true}},
 	} {
-		if err := scanActiveWayfinderRoot(state.repoRoot, root.path, root.extensions, retired); err != nil {
+		if err := scanActiveWayfinderRoot(state.repoRoot, root.path, root.extensions, retiredWayfinderPattern); err != nil {
 			return err
 		}
 	}
