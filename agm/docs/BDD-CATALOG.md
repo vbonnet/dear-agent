@@ -1244,6 +1244,9 @@ and Wayfinder test-support package boundaries.
 - The complete support contract is validated across all four active harnesses
   and all seven supported model families.
 - Live harness contracts use canonical guarded session and message commands.
+- Trust hooks run only for trust scenarios, restore process environment, reuse
+  shared Go caches, and remove only their exact owned temporary directory,
+  including read-only module trees.
 
 **Why this matters:** Test infrastructure is an enforcement surface. Ungoverned
 helpers and suites can silently skip harnesses, consume the wrong provider
