@@ -76,6 +76,7 @@ func recordingResumeRuntime(calls *[]string) resumeSessionRuntime {
 
 func TestResumeSessionCodexCommitsEffectsOnlyAfterReadiness(t *testing.T) {
 	setDetachedResumeTestGlobals(t, true)
+	resumePrompt = "continue after readiness"
 	adapter, m, health := setupCodexResumeTransaction(t)
 	var calls []string
 	runtime := recordingResumeRuntime(&calls)
@@ -83,7 +84,7 @@ func TestResumeSessionCodexCommitsEffectsOnlyAfterReadiness(t *testing.T) {
 	if err := resumeSessionWithRuntime(t.Context(), adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime); err != nil {
 		t.Fatalf("resumeSessionWithRuntime() error = %v", err)
 	}
-	want := []string{"create", "dispatch", "wait", "restore", "update", "tab"}
+	want := []string{"create", "dispatch", "wait", "restore", "update", "tab", "prompt"}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("resume calls = %v, want %v", calls, want)
 	}
