@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 )
 
 func TestNormalizeClaudeSetModelAlias(t *testing.T) {
@@ -167,5 +168,43 @@ func TestRunSendSetModelInvalidModel(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "gpt-4;rm") {
 		t.Errorf("error should include the invalid model name, got: %s", err.Error())
+	}
+}
+
+func TestPersistAgyModelSwitchPreservesOnlyConfirmedProvenance(t *testing.T) {
+	adapter := dolt.NewMockAdapter()
+	t.Cleanup(func() { _ = adapter.Close() })
+	m := dolt.NewTestManifest("agy-model-switch", "agy-model-switch")
+	m.Harness = "agy"
+	m.Model = "Gemini 3.5 Flash (Medium)"
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+	instruction := setModelInstruction{
+		Harness:       "agy",
+		ResolvedModel: "Gemini 3.5 Flash (Low)",
+		Command:       "/model Gemini 3.5 Flash (Low)",
+	}
+
+	if err := persistAgyModelSwitch(adapter, m, instruction, false); err != nil {
+		t.Fatalf("persist unverified switch: %v", err)
+	}
+	stored, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after unverified switch: %v", err)
+	}
+	if stored.Model != "" {
+		t.Fatalf("unverified model = %q, want unknown so resume omits --model", stored.Model)
+	}
+
+	if err := persistAgyModelSwitch(adapter, stored, instruction, true); err != nil {
+		t.Fatalf("persist confirmed switch: %v", err)
+	}
+	stored, err = adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after confirmed switch: %v", err)
+	}
+	if stored.Model != instruction.ResolvedModel {
+		t.Fatalf("confirmed model = %q, want %q", stored.Model, instruction.ResolvedModel)
 	}
 }

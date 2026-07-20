@@ -65,6 +65,8 @@ compatibility.
 
 **AGP-28** When an imported or manually associated AGY conversation has no observable native model, the system shall leave its manifest model unset and cold-resume without `--model` so AGY retains the saved conversation selection.
 
+**AGP-29** When `send set-model` changes a running AGY conversation, the system shall persist an exact confirmed model selection; if AGM cannot confirm the switch, it shall clear the stored model override so a later cold resume cannot force the stale creation-time model.
+
 ### Codex Workdir Trust (ce-cmsq)
 
 **AGP-14** When a Codex CLI session is created or resumed through the codex-cli adapter, the system shall record the working directory as a trusted Codex project in `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`) before sending the launch command, so a fresh non-git sandbox directory cannot block Codex startup on its interactive trust prompt.

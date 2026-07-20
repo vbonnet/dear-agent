@@ -95,3 +95,38 @@ func TestSQLiteSessionLifecycle_RoundTripsReapingTombstone(t *testing.T) {
 		t.Fatalf("Lifecycle = %q, want %q", stored.Lifecycle, manifest.LifecycleReaping)
 	}
 }
+
+func TestSQLiteUpdateSessionRoundTripsModel(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "sqlite-model-session",
+		Name:          "sqlite-model-session",
+		Harness:       "agy",
+		Model:         "Gemini 3.5 Flash (Medium)",
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+		Context:       manifest.Context{Project: t.TempDir()},
+		Tmux:          manifest.Tmux{SessionName: "sqlite-model-session"},
+	}
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+	m.Model = ""
+	if err := adapter.UpdateSession(m); err != nil {
+		t.Fatalf("UpdateSession() error: %v", err)
+	}
+
+	stored, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() error: %v", err)
+	}
+	if stored.Model != "" {
+		t.Fatalf("Model = %q, want cleared unknown provenance", stored.Model)
+	}
+}

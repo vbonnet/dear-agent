@@ -7,6 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 )
@@ -132,6 +135,51 @@ func verifyModelSet(sessionName string, timeout time.Duration) (bool, string) {
 	return false, ""
 }
 
+// persistAgyModelSwitch records only model provenance AGM can defend. A
+// confirmed switch stores the exact resolved public label; an unverified
+// switch clears the creation-time override so cold resume lets AGY retain the
+// saved conversation's native selection instead of silently reverting it.
+func persistAgyModelSwitch(storage dolt.Storage, m *manifest.Manifest, instruction setModelInstruction, verified bool) error {
+	if storage == nil || m == nil {
+		return fmt.Errorf("AGY model switch persistence requires session storage and a manifest")
+	}
+	if instruction.Harness != "agy" {
+		return nil
+	}
+	if verified {
+		m.Model = instruction.ResolvedModel
+	} else {
+		m.Model = ""
+	}
+	if err := storage.UpdateSession(m); err != nil {
+		return fmt.Errorf("update AGY model provenance: %w", err)
+	}
+	return nil
+}
+
+func persistAgyModelSwitchForSession(sessionName string, instruction setModelInstruction, verified bool) error {
+	if instruction.Harness != "agy" {
+		return nil
+	}
+	adapter, err := getStorage()
+	if err != nil {
+		// An explicit --harness supports raw tmux sessions with no AGM record.
+		if setModelHarness != "" {
+			return nil
+		}
+		return fmt.Errorf("AGY model command was sent but session storage could not be opened: %w", err)
+	}
+	defer func() { _ = adapter.Close() }()
+	m, _, err := session.ResolveIdentifier(sessionName, cfg.SessionsDir, adapter)
+	if err != nil {
+		if setModelHarness != "" {
+			return nil
+		}
+		return fmt.Errorf("AGY model command was sent but its session manifest could not be resolved: %w", err)
+	}
+	return persistAgyModelSwitch(adapter, m, instruction, verified)
+}
+
 func runSendSetModel(_ *cobra.Command, args []string) error {
 	sessionName := args[0]
 	modelInput := args[1]
@@ -163,6 +211,9 @@ func runSendSetModel(_ *cobra.Command, args []string) error {
 
 	// Verify model was set
 	verified, confirmation := verifyModelSet(sessionName, 5*time.Second)
+	if err := persistAgyModelSwitchForSession(sessionName, instruction, verified); err != nil {
+		return err
+	}
 	if verified {
 		ui.PrintSuccess(fmt.Sprintf("Model changed for session '%s': %s", sessionName, confirmation))
 	} else {

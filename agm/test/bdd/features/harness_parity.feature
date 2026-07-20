@@ -342,6 +342,7 @@ Feature: Harness parity
     And exact AGY public labels should remain unchanged
     And cross-harness AGY aliases should normalize case-insensitively
     And imported AGY conversations should retain their saved model
+    And AGY runtime model switches should not leave a stale resume override
 
   Scenario: MCP waits for AGY before delivering its startup prompt
     Given AGY is available

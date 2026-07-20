@@ -264,7 +264,7 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 
 	query := `
 		UPDATE agm_sessions
-		SET updated_at = ?, status = ?, name = ?, harness = ?,
+		SET updated_at = ?, status = ?, name = ?, harness = ?, model = ?,
 			context_project = ?, context_purpose = ?, context_tags = ?,
 			context_notes = ?, claude_uuid = ?, tmux_session_name = ?,
 			metadata = ?,
@@ -280,6 +280,7 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 		status,
 		session.Name,
 		harness,
+		session.Model,
 		session.Context.Project,
 		session.Context.Purpose,
 		contextTags,
