@@ -3,11 +3,8 @@ package tmux
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
-	"os/signal"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
@@ -102,12 +99,9 @@ func realAgyPromptRuntime() agyPromptRuntime {
 
 // WaitForAgyPrompt polls the pane until AGY shows its idle prompt. If the
 // first-run trust prompt appears, it is auto-accepted with Enter.
-func WaitForAgyPrompt(sessionName string, timeout time.Duration) error {
+func WaitForAgyPrompt(ctx context.Context, sessionName string, timeout time.Duration) error {
 	debug.Log("\n🔍 Starting AGY prompt detection for session: %s", sessionName)
-
-	baseCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	return waitForAgyPromptWithRuntime(baseCtx, sessionName, timeout, realAgyPromptRuntime())
+	return waitForAgyPromptWithRuntime(ctx, sessionName, timeout, realAgyPromptRuntime())
 }
 
 func waitForAgyPromptWithRuntime(baseCtx context.Context, sessionName string, timeout time.Duration, runtime agyPromptRuntime) error {

@@ -20,7 +20,7 @@ import (
 )
 
 // startClaudeInCurrentTmux starts a fresh Claude session in the current tmux session
-func startClaudeInCurrentTmux(sessionName string) error {
+func startClaudeInCurrentTmux(ctx context.Context, sessionName string) error {
 	if !testMode {
 		if dupErr := checkDuplicateSessionName(sessionName); dupErr != nil {
 			return dupErr
@@ -45,11 +45,11 @@ func startClaudeInCurrentTmux(sessionName string) error {
 	sessionID := uuid.New().String()
 	manifestDir := filepath.Join(getSessionsDir(), sessionName)
 	runtime := &cliCreateSessionRuntime{
-		launch: func(_ context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
+		launch: func(ctx context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
 			if pwd := os.Getenv("PWD"); pwd != "" {
 				spec.WorkDir = pwd
 			}
-			return ops.CreateSessionLaunchResult{}, startCurrentTmuxHarness(spec)
+			return ops.CreateSessionLaunchResult{}, startCurrentTmuxHarness(ctx, spec)
 		},
 		complete: func(_ context.Context, completion ops.CreateSessionCompletion) error {
 			if completion.ManifestPath != "" {
@@ -72,7 +72,7 @@ func startClaudeInCurrentTmux(sessionName string) error {
 			return adapter, func() { _ = adapter.Close() }, nil
 		},
 	}
-	_, err = ops.CreateSessionWithContext(context.Background(), opCtx, &ops.CreateSessionRequest{
+	_, err = ops.CreateSessionWithContext(ctx, opCtx, &ops.CreateSessionRequest{
 		Cwd:                    workDir,
 		Title:                  sessionName,
 		Model:                  modelName,
@@ -124,7 +124,7 @@ type currentTmuxHarnessRuntime struct {
 	startCodex    func(ops.HarnessLaunchSpec) (bool, error)
 	startOpenCode func(ops.HarnessLaunchSpec) error
 	startGemini   func(ops.HarnessLaunchSpec) error
-	startAgy      func(ops.HarnessLaunchSpec) error
+	startAgy      func(context.Context, ops.HarnessLaunchSpec) error
 	validateCodex func() error
 }
 
@@ -177,11 +177,11 @@ func queueCurrentTmuxCodexWithRuntime(spec ops.HarnessLaunchSpec, runtime curren
 // startCurrentTmuxHarness dispatches the per-harness startup flow for the
 // in-place (current tmux pane) active harnesses and deprecated Gemini
 // compatibility path.
-func startCurrentTmuxHarness(spec ops.HarnessLaunchSpec) error {
-	return startCurrentTmuxHarnessWithRuntime(spec, realCurrentTmuxHarnessRuntime())
+func startCurrentTmuxHarness(ctx context.Context, spec ops.HarnessLaunchSpec) error {
+	return startCurrentTmuxHarnessWithRuntime(ctx, spec, realCurrentTmuxHarnessRuntime())
 }
 
-func startCurrentTmuxHarnessWithRuntime(spec ops.HarnessLaunchSpec, runtime currentTmuxHarnessRuntime) error {
+func startCurrentTmuxHarnessWithRuntime(ctx context.Context, spec ops.HarnessLaunchSpec, runtime currentTmuxHarnessRuntime) error {
 	switch spec.Harness {
 	case "claude-code":
 		return runtime.startClaude(spec)
@@ -196,7 +196,7 @@ func startCurrentTmuxHarnessWithRuntime(spec ops.HarnessLaunchSpec, runtime curr
 	case "gemini-cli":
 		return runtime.startGemini(spec)
 	case "agy":
-		return runtime.startAgy(spec)
+		return runtime.startAgy(ctx, spec)
 	default:
 		debug.Log("Skipping CLI startup for harness: %s (no CLI configured)", spec.Harness)
 		ui.PrintSuccess(fmt.Sprintf("Session created for %s harness", spec.Harness))
@@ -295,7 +295,7 @@ func startCurrentTmuxGemini(spec ops.HarnessLaunchSpec) error {
 	return nil
 }
 
-func startCurrentTmuxAgy(spec ops.HarnessLaunchSpec) error {
+func startCurrentTmuxAgy(ctx context.Context, spec ops.HarnessLaunchSpec) error {
 	fmt.Println("Starting AGY...")
 	agyCmd := ops.BuildHarnessLaunchCommand(spec).Command
 	if err := tmux.SendCommand(spec.SessionName, agyCmd); err != nil {
@@ -307,7 +307,7 @@ func startCurrentTmuxAgy(spec ops.HarnessLaunchSpec) error {
 		return err
 	}
 	fmt.Println("Waiting for AGY to initialize...")
-	if err := tmux.WaitForAgyPrompt(spec.SessionName, 30*time.Second); err != nil {
+	if err := tmux.WaitForAgyPrompt(ctx, spec.SessionName, 30*time.Second); err != nil {
 		ui.PrintWarning("AGY ready signal not detected")
 		fmt.Printf("Session may still work, but initialization timing is uncertain.\n")
 	} else {

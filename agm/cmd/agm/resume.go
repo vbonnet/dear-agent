@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/discovery"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/git"
+	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
@@ -416,13 +418,6 @@ func displayHealthStatus(health *HealthStatus) {
 	}
 }
 
-// shellQuote quotes a string for safe use in shell commands
-// This prevents command injection by escaping special characters
-func shellQuote(s string) string {
-	// Simple but secure: wrap in single quotes and escape any single quotes
-	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
-}
-
 // shouldSendResumeCommands determines whether resume should send commands to the tmux session.
 // Fix (commit e7cacf8): NEVER send commands to existing tmux sessions.
 // Sending resume commands to an active session injects text into the running agent.
@@ -640,7 +635,7 @@ func dispatchResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, harnessN
 	case "claude-code":
 		fullCmd = buildClaudeResumeCommand(adapter, m, health)
 	default:
-		fullCmd = fmt.Sprintf("cd %s && exit", shellQuote(health.WorktreePath))
+		fullCmd = fmt.Sprintf("cd %s && exit", launchparity.ShellQuote(health.WorktreePath))
 		ui.PrintWarning(fmt.Sprintf("Harness '%s' does not support resume - starting in working directory", harnessName))
 	}
 	if err := tmux.SendCommand(health.TmuxSessionName, fullCmd); err != nil {
@@ -719,11 +714,11 @@ func buildClaudeResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, healt
 		// conversation's actual cwd when it can be located.
 		resumeDir := resolveResumeDir(resumeUUID, health.WorktreePath)
 		return fmt.Sprintf("cd %s && claude --resume %s && exit",
-			shellQuote(resumeDir),
-			shellQuote(resumeUUID))
+			launchparity.ShellQuote(resumeDir),
+			launchparity.ShellQuote(resumeUUID))
 	}
 	ui.PrintWarning("No Claude UUID found - starting new Claude session")
-	return fmt.Sprintf("cd %s && claude && exit", shellQuote(health.WorktreePath))
+	return fmt.Sprintf("cd %s && claude && exit", launchparity.ShellQuote(health.WorktreePath))
 }
 
 // resolveResumeDir returns the directory `claude --resume` should run from for
@@ -818,7 +813,7 @@ func waitForResumedAgy(health *HealthStatus) error {
 		Title("Waiting for AGY conversation to load...").
 		Accessible(true).
 		Action(func() {
-			promptWaitErr = tmux.WaitForAgyPrompt(health.TmuxSessionName, 60*time.Second)
+			promptWaitErr = tmux.WaitForAgyPrompt(context.Background(), health.TmuxSessionName, 60*time.Second)
 		}).
 		Run()
 	if spinErr != nil {

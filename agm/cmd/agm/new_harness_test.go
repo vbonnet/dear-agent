@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -16,6 +17,7 @@ func testLaunchCommand(spec ops.HarnessLaunchSpec) string {
 }
 
 func TestStartAgyHarnessUsesCanonicalLaunchAndWaits(t *testing.T) {
+	callerCtx := t.Context()
 	var sentCommand string
 	var waitedSession string
 	var waitedTimeout time.Duration
@@ -33,14 +35,17 @@ func TestStartAgyHarnessUsesCanonicalLaunchAndWaits(t *testing.T) {
 			sentCommand = command
 			return nil
 		},
-		waitForPrompt: func(sessionName string, timeout time.Duration) error {
+		waitForPrompt: func(ctx context.Context, sessionName string, timeout time.Duration) error {
+			if ctx != callerCtx {
+				t.Fatal("readiness wait did not receive the caller context")
+			}
 			waitedSession, waitedTimeout = sessionName, timeout
 			return nil
 		},
 		sleep: func(time.Duration) {},
 	}
 
-	modeApplied, err := startAgyHarnessWithRuntime(ops.HarnessLaunchSpec{
+	modeApplied, err := startAgyHarnessWithRuntime(callerCtx, ops.HarnessLaunchSpec{
 		Harness: "agy", Model: "3.5-flash-low", SessionName: "agy-production-seam",
 		WorkDir: "/tmp/agy work", ExtraAddDirs: []string{"/tmp/extra dir"}, PermissionMode: "auto",
 	}, runtime)
@@ -73,10 +78,10 @@ func TestStartAgyHarnessPropagatesReadinessFailure(t *testing.T) {
 	runtime := agyHarnessRuntime{
 		lookPath:      func(string) (string, error) { return "/fixture/agy", nil },
 		sendCommand:   func(string, string) error { return nil },
-		waitForPrompt: func(string, time.Duration) error { return wantErr },
+		waitForPrompt: func(context.Context, string, time.Duration) error { return wantErr },
 		sleep:         func(time.Duration) {},
 	}
-	_, err := startAgyHarnessWithRuntime(ops.HarnessLaunchSpec{
+	_, err := startAgyHarnessWithRuntime(t.Context(), ops.HarnessLaunchSpec{
 		Harness: "agy", Model: "3.5-flash", SessionName: "agy-not-ready", WorkDir: "/tmp",
 	}, runtime)
 	if !errors.Is(err, wantErr) {

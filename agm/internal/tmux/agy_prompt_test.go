@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -84,5 +85,27 @@ func TestWaitForAgyPromptDismissesSurveyBeforeReady(t *testing.T) {
 	}
 	if len(sent) != 1 || sent[0] != "0" {
 		t.Fatalf("survey keys = %v, want [0]", sent)
+	}
+}
+
+func TestWaitForAgyPromptHonorsCallerCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	captured := false
+	runtime := agyPromptRuntime{
+		capture: func(context.Context, string) ([]byte, error) {
+			captured = true
+			return nil, nil
+		},
+		sendKeys: func(string, string) error { return nil },
+		sleep:    func(time.Duration) {},
+	}
+
+	err := waitForAgyPromptWithRuntime(ctx, "agy-cancelled", time.Second, runtime)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+	if captured {
+		t.Fatal("pane capture ran after caller cancellation")
 	}
 }

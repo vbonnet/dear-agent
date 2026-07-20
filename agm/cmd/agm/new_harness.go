@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -19,7 +20,7 @@ import (
 // Returns (modeAppliedAtStartup, harnessHandledFullLifecycle, err): when
 // harnessHandledFullLifecycle is true the caller should return immediately —
 // the harness (e.g. gemini-cli wrapper) has already managed attach/detach.
-func startHarness(spec ops.HarnessLaunchSpec, trustPreConfigured bool) (bool, bool, error) {
+func startHarness(ctx context.Context, spec ops.HarnessLaunchSpec, trustPreConfigured bool) (bool, bool, error) {
 	switch spec.Harness {
 	case "claude-code":
 		return startClaudeHarness(spec, trustPreConfigured)
@@ -32,7 +33,7 @@ func startHarness(spec ops.HarnessLaunchSpec, trustPreConfigured bool) (bool, bo
 	case "opencode-cli":
 		return false, false, startOpenCodeHarness(spec)
 	case "agy":
-		modeApplied, err := startAgyHarness(spec)
+		modeApplied, err := startAgyHarness(ctx, spec)
 		return modeApplied, false, err
 	default:
 		debug.Phase("Skip CLI Startup")
@@ -212,7 +213,7 @@ func startGeminiDirect(spec ops.HarnessLaunchSpec) error {
 type agyHarnessRuntime struct {
 	lookPath      func(string) (string, error)
 	sendCommand   func(string, string) error
-	waitForPrompt func(string, time.Duration) error
+	waitForPrompt func(context.Context, string, time.Duration) error
 	sleep         func(time.Duration)
 }
 
@@ -225,11 +226,11 @@ func realAgyHarnessRuntime() agyHarnessRuntime {
 	}
 }
 
-func startAgyHarness(spec ops.HarnessLaunchSpec) (bool, error) {
-	return startAgyHarnessWithRuntime(spec, realAgyHarnessRuntime())
+func startAgyHarness(ctx context.Context, spec ops.HarnessLaunchSpec) (bool, error) {
+	return startAgyHarnessWithRuntime(ctx, spec, realAgyHarnessRuntime())
 }
 
-func startAgyHarnessWithRuntime(spec ops.HarnessLaunchSpec, runtime agyHarnessRuntime) (bool, error) {
+func startAgyHarnessWithRuntime(ctx context.Context, spec ops.HarnessLaunchSpec, runtime agyHarnessRuntime) (bool, error) {
 	debug.Phase("Start AGY")
 	if _, err := runtime.lookPath("agy"); err != nil {
 		ui.PrintError(err,
@@ -260,7 +261,7 @@ func startAgyHarnessWithRuntime(spec ops.HarnessLaunchSpec, runtime agyHarnessRu
 	runtime.sleep(500 * time.Millisecond)
 
 	debug.Log("Waiting for AGY prompt readiness (timeout: 90s)")
-	if err := runtime.waitForPrompt(spec.SessionName, 90*time.Second); err != nil {
+	if err := runtime.waitForPrompt(ctx, spec.SessionName, 90*time.Second); err != nil {
 		debug.Log("AGY prompt readiness wait failed: %v", err)
 		ui.PrintError(err,
 			"AGY did not become ready",

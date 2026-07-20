@@ -45,8 +45,8 @@ func (r *cliCreateSessionRuntime) Complete(ctx context.Context, completion ops.C
 
 func newCLICreateSessionRuntime(sessionName string, existed, trustPreConfigured bool) *cliCreateSessionRuntime {
 	return &cliCreateSessionRuntime{
-		launch: func(_ context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
-			return launchCLICreateSession(spec, existed, trustPreConfigured)
+		launch: func(ctx context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
+			return launchCLICreateSession(ctx, spec, existed, trustPreConfigured)
 		},
 		complete: func(ctx context.Context, completion ops.CreateSessionCompletion) error {
 			return completeCLICreateSession(ctx, sessionName, completion)
@@ -54,14 +54,14 @@ func newCLICreateSessionRuntime(sessionName string, existed, trustPreConfigured 
 	}
 }
 
-func launchCLICreateSession(spec ops.HarnessLaunchSpec, existed, trustPreConfigured bool) (ops.CreateSessionLaunchResult, error) {
+func launchCLICreateSession(ctx context.Context, spec ops.HarnessLaunchSpec, existed, trustPreConfigured bool) (ops.CreateSessionLaunchResult, error) {
 	if !existed {
 		ui.PrintSuccess(fmt.Sprintf("Created tmux session: %s", spec.SessionName))
 	}
 	if err := interrupt.Clear(interrupt.DefaultDir(), spec.SessionName); err != nil {
 		debug.Log("Warning: failed to clear stale interrupt flag: %v", err)
 	}
-	modeApplied, handled, err := startHarness(spec, trustPreConfigured)
+	modeApplied, handled, err := startHarness(ctx, spec, trustPreConfigured)
 	return ops.CreateSessionLaunchResult{ModeAppliedAtStartup: modeApplied, HandledLifecycle: handled}, err
 }
 
@@ -77,7 +77,7 @@ func completeCLICreateSession(ctx context.Context, sessionName string, completio
 		modelrouter.RecordRoutingDecision(ctx, m.Harness, d)
 	}
 	telemetry.SessionStarted(ctx, m.SessionID, m.Model, m.Harness, m.State, roleName)
-	if err := runHarnessPostCreate(sessionName, completion.Launch.ModeAppliedAtStartup); err != nil {
+	if err := runHarnessPostCreate(ctx, sessionName, completion.Launch.ModeAppliedAtStartup); err != nil {
 		return err
 	}
 	if modeFlagValue != "" && !completion.Launch.ModeAppliedAtStartup && (harnessName != "claude-code" || os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "") {
@@ -95,7 +95,7 @@ func completeCLICreateSession(ctx context.Context, sessionName string, completio
 }
 
 // createTmuxSessionAndStartClaude creates a new tmux session and starts Claude in it
-func createTmuxSessionAndStartClaude(sessionName string) (retErr error) {
+func createTmuxSessionAndStartClaude(ctx context.Context, sessionName string) (retErr error) {
 	if err := preflight(sessionName); err != nil {
 		return err
 	}
@@ -108,7 +108,6 @@ func createTmuxSessionAndStartClaude(sessionName string) (retErr error) {
 	announceFrameworkGuardrails(workDir)
 	announceAcceptanceCriteria(workDir)
 
-	ctx := context.Background()
 	sessionID := uuid.New().String() // Generate session ID early for sandbox
 	var sandboxInfo *manifest.SandboxConfig
 	defer func() {
@@ -132,7 +131,7 @@ func createTmuxSessionAndStartClaude(sessionName string) (retErr error) {
 		return err
 	}
 	if retry != "" {
-		return createTmuxSessionAndStartClaude(retry)
+		return createTmuxSessionAndStartClaude(ctx, retry)
 	}
 
 	return runCreateSessionLifecycle(ctx, sessionName, sessionID, workDir, exists, extraAddDirs, trustPreConfigured, sandboxInfo)

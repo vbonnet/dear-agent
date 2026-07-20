@@ -13,6 +13,7 @@ import (
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
+	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
@@ -955,9 +956,9 @@ func TestBuildHarnessCommand_NonPersistentHasExit(t *testing.T) {
 	}
 }
 
-func TestShellQuoteArg(t *testing.T) {
-	got := shellQuoteArg("a'b")
+func TestSharedShellQuote(t *testing.T) {
+	got := launchparity.ShellQuote("a'b")
 	if got != `'a'"'"'b'` {
-		t.Errorf("shellQuoteArg = %q", got)
+		t.Errorf("ShellQuote = %q", got)
 	}
 }

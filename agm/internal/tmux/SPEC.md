@@ -1,6 +1,6 @@
 # AGM tmux Delivery Specification
 
-<!-- Last audited at: 2026-07-04 -->
+<!-- Last audited at: 2026-07-20 -->
 
 ## Purpose
 
@@ -57,6 +57,8 @@ because the tmux server's own cwd has been deleted.
 **TMUX-24** When delivering a prompt via paste-buffer, the system shall re-send Enter and re-check the pane on an increasing backoff until the paste is observed submitted, rather than sending Enter a fixed number of times.
 
 **TMUX-25** When the pane is still positively observed as an unsubmitted paste after every backoff attempt, the system shall return a submission-not-confirmed error so the caller reports delivery failure instead of a false success.
+
+**TMUX-27** When an AGY prompt wait is invoked, the system shall derive cancellation from the caller-supplied context and shall not install process-global signal handling inside the tmux helper.
 
 ## BDD Traceability
 

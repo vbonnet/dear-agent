@@ -629,7 +629,7 @@ func sendDirectly(recipientSession, senderName, messageID, formattedMessage, pro
 		return err
 	}
 	if harnessType == "agy" && (m.Agy == nil || m.Agy.ConversationID == "") {
-		if err := tmux.WaitForAgyPrompt(recipientSession, 60*time.Second); err != nil {
+		if err := tmux.WaitForAgyPrompt(context.Background(), recipientSession, 60*time.Second); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: AGY metadata backfill wait failed: %v\n", err)
 		}
 		associateSpawnedAgySessionWithRetry(m.Name, 20, 500*time.Millisecond)

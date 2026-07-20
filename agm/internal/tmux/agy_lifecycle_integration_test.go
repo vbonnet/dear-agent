@@ -20,7 +20,7 @@ func TestAgyLifecycleThroughIsolatedTmuxFixture(t *testing.T) {
 	}
 
 	fixtureDir := t.TempDir()
-	socketDir, err := os.MkdirTemp("/tmp", "agm-agy-tmux-")
+	socketDir, err := os.MkdirTemp("", "agm-agy-tmux-")
 	if err != nil {
 		t.Fatalf("create short tmux socket directory: %v", err)
 	}
@@ -72,7 +72,7 @@ done
 	if err := tmux.SendCommand(sessionName, launch); err != nil {
 		t.Fatalf("send canonical AGY launch command: %v", err)
 	}
-	if err := tmux.WaitForAgyPrompt(sessionName, 10*time.Second); err != nil {
+	if err := tmux.WaitForAgyPrompt(t.Context(), sessionName, 10*time.Second); err != nil {
 		output, _ := tmux.CapturePaneOutput(sessionName, 30)
 		t.Fatalf("wait through AGY trust prompt: %v\npane output:\n%s\nlaunch: %s", err, output, launch)
 	}

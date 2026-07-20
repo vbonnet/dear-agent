@@ -39,22 +39,23 @@ type AgyCommand struct {
 // fresh launches and cold resumes.
 func BuildAgyCommand(spec AgyCommandSpec) AgyCommand {
 	var b strings.Builder
-	fmt.Fprintf(&b, "cd %s && agy --model %s", shellQuote(spec.WorkDir), shellQuote(spec.ResolvedModel))
+	fmt.Fprintf(&b, "cd %s && agy --model %s", ShellQuote(spec.WorkDir), ShellQuote(spec.ResolvedModel))
 	modeFlag := AgyPermissionModeFlag(spec.PermissionMode)
 	if modeFlag != "" {
 		b.WriteString(" " + modeFlag)
 	}
 	if spec.ConversationID != "" {
-		fmt.Fprintf(&b, " --conversation %s", shellQuote(spec.ConversationID))
+		fmt.Fprintf(&b, " --conversation %s", ShellQuote(spec.ConversationID))
 	}
 	for _, dir := range spec.ExtraAddDirs {
-		fmt.Fprintf(&b, " --add-dir %s", shellQuote(dir))
+		fmt.Fprintf(&b, " --add-dir %s", ShellQuote(dir))
 	}
 	b.WriteString(ExitSuffix(spec.Persistent))
 	return AgyCommand{Command: b.String(), ModeAppliedAtStartup: modeFlag != ""}
 }
 
-func shellQuote(value string) string {
+// ShellQuote wraps a value for safe interpolation into a POSIX shell command.
+func ShellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 

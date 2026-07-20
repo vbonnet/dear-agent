@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -676,13 +677,13 @@ Examples:
 		// 1. Inside tmux + not detached: start Claude in current session
 		// 2. Outside tmux OR detached: create tmux session, start Claude, attach (or not if detached)
 
-		return startNewSessionForContext(inTmux, detached, sessionName, realNewSessionStartRuntime())
+		return startNewSessionForContext(cmd.Context(), inTmux, detached, sessionName, realNewSessionStartRuntime())
 	},
 }
 
 type newSessionStartRuntime struct {
-	currentTmux  func(sessionName string) error
-	separateTmux func(sessionName string) error
+	currentTmux  func(context.Context, string) error
+	separateTmux func(context.Context, string) error
 }
 
 func realNewSessionStartRuntime() newSessionStartRuntime {
@@ -692,11 +693,11 @@ func realNewSessionStartRuntime() newSessionStartRuntime {
 	}
 }
 
-func startNewSessionForContext(inTmux, detached bool, sessionName string, runtime newSessionStartRuntime) error {
+func startNewSessionForContext(ctx context.Context, inTmux, detached bool, sessionName string, runtime newSessionStartRuntime) error {
 	if inTmux && !detached {
-		return runtime.currentTmux(sessionName)
+		return runtime.currentTmux(ctx, sessionName)
 	}
-	return runtime.separateTmux(sessionName)
+	return runtime.separateTmux(ctx, sessionName)
 }
 
 // applyCreationModeSwitch dispatches a mode switch during session creation.
