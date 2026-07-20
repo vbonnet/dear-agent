@@ -182,20 +182,7 @@ func DefaultConfig() (*Config, error) {
 	// CRITICAL: Fail-fast enforcement to prevent test pollution
 	// Tests MUST set ENGRAM_TEST_MODE=1 and use a test-specific workspace
 	if isRunningInTest() {
-		testMode := getEnv("ENGRAM_TEST_MODE", "")
-		testWorkspace := getEnv("ENGRAM_TEST_WORKSPACE", "")
-
-		// Require explicit test mode
-		if !testModeEnabled(testMode) {
-			return nil, fmt.Errorf("TEST POLLUTION BLOCKED: Tests must set ENGRAM_TEST_MODE=1\n\n"+
-				"Why: Without test isolation, tests write to production databases causing data pollution.\n\n"+
-				"Fix: Run tests with proper isolation:\n"+
-				"  ENGRAM_TEST_MODE=1 ENGRAM_TEST_WORKSPACE=test go test ./...\n\n"+
-				"Or use testutil.SetupTestEnvironment(t) in your test setup function.\n\n"+
-				"Current workspace: %s (attempted during test)", workspace)
-		}
-
-		if err := validateTestTarget(workspace, database, testWorkspace); err != nil {
+		if err := validateTestExecutionTarget(workspace, database); err != nil {
 			return nil, err
 		}
 	}
@@ -230,6 +217,18 @@ func DefaultConfig() (*Config, error) {
 	}, nil
 }
 
+func validateTestExecutionTarget(workspace, database string) error {
+	if !testModeEnabled(getEnv("ENGRAM_TEST_MODE", "")) {
+		return fmt.Errorf("TEST POLLUTION BLOCKED: Tests must set ENGRAM_TEST_MODE=1\n\n"+
+			"Why: Without test isolation, tests write to production databases causing data pollution.\n\n"+
+			"Fix: Run tests with proper isolation:\n"+
+			"  ENGRAM_TEST_MODE=1 ENGRAM_TEST_WORKSPACE=test go test ./...\n\n"+
+			"Or use testutil.SetupTestEnvironment(t) in your test setup function.\n\n"+
+			"Current workspace: %s (attempted during test)", workspace)
+	}
+	return validateTestTarget(workspace, database, getEnv("ENGRAM_TEST_WORKSPACE", ""))
+}
+
 func validateTestTarget(workspace, database, testWorkspace string) error {
 	if testWorkspace == "" {
 		return fmt.Errorf("TEST POLLUTION BLOCKED: ENGRAM_TEST_WORKSPACE must explicitly select the isolated test workspace")
@@ -253,6 +252,11 @@ func New(config *Config) (*Adapter, error) {
 	}
 	if config.Port == "" {
 		return nil, fmt.Errorf("port cannot be empty")
+	}
+	if isRunningInTest() {
+		if err := validateTestExecutionTarget(config.Workspace, config.Database); err != nil {
+			return nil, err
+		}
 	}
 
 	// Build MySQL DSN for Dolt connection
