@@ -10,7 +10,6 @@ var GetSession = codegen.Op{
 	RequestType:  "GetSessionRequest",
 	ResponseType: "GetSessionResult",
 	HandlerFunc:  "GetSession",
-	ManualSkill:  true,
 	CLI: &codegen.CLISurface{
 		CommandPath:   "session get",
 		Use:           "get <identifier>",
@@ -19,12 +18,6 @@ var GetSession = codegen.Op{
 	MCP: &codegen.MCPSurface{
 		ToolName:    "agm_get_session",
 		Description: "Get detailed metadata for an AGM session. Use when you need full session details by ID or name.",
-	},
-	Skill: &codegen.SkillSurface{
-		SlashCommand: "agm-status",
-		AllowedTools: "Bash(agm session get:*)",
-		ActionVerb:   "get the session details",
-		OutputTable:  []string{"Field", "Value"},
 	},
 }
 
