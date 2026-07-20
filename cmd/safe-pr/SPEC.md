@@ -1,6 +1,6 @@
 # safe-pr Command Specification
 
-<!-- Last audited at: 2026-07-19 -->
+<!-- Last audited at: 2026-07-20 -->
 
 **Version:** 1.0
 **Status:** Baseline
