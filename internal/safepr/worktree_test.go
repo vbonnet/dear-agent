@@ -446,6 +446,91 @@ func TestWorktreeTransactionLockOutlivesKilledParentForProtectedChild(t *testing
 	}
 }
 
+func TestWorktreeGitTransactionHelper(t *testing.T) {
+	if os.Getenv("SAFEPR_GIT_TRANSACTION_HELPER") != "1" {
+		return
+	}
+	gitDir := os.Getenv("SAFEPR_GIT_TRANSACTION_DIR")
+	if err := withWorktreeTransactionLock(gitDir, time.Second, func(transaction *WorktreeTransaction) error {
+		_, err := runWorktreeGitProtected(transaction, gitDir, "worktree", "list", "--porcelain")
+		return err
+	}); err != nil {
+		t.Fatalf("protected Git helper: %v", err)
+	}
+}
+
+func TestWorktreeTransactionLockOutlivesKilledParentForGitHelper(t *testing.T) {
+	gitDir := t.TempDir()
+	binDir := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "git-helper-started")
+	fakeGit := filepath.Join(binDir, "git")
+	if err := os.WriteFile(fakeGit, []byte("#!/bin/sh\n: > \"$SAFEPR_GIT_HELPER_MARKER\"\nsleep 2\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	helper := exec.Command(os.Args[0], "-test.run=^TestWorktreeGitTransactionHelper$")
+	helper.Env = append(os.Environ(),
+		"SAFEPR_GIT_TRANSACTION_HELPER=1",
+		"SAFEPR_GIT_TRANSACTION_DIR="+gitDir,
+		"SAFEPR_GIT_HELPER_MARKER="+marker,
+		"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+	)
+	if err := helper.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if helper.ProcessState == nil {
+			_ = helper.Process.Kill()
+			_ = helper.Wait()
+		}
+	})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat(marker); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("protected Git helper did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := helper.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = helper.Wait()
+
+	entered := false
+	err := withWorktreeTransactionLock(gitDir, 100*time.Millisecond, func(*WorktreeTransaction) error {
+		entered = true
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "another safe-pr transaction") {
+		t.Fatalf("replacement while Git helper lives = %v, want serialization rejection", err)
+	}
+	if entered {
+		t.Fatal("replacement entered while killed parent's Git helper retained the transaction")
+	}
+
+	releaseDeadline := time.Now().Add(4 * time.Second)
+	for {
+		err = withWorktreeTransactionLock(gitDir, 100*time.Millisecond, func(*WorktreeTransaction) error {
+			entered = true
+			return nil
+		})
+		if err == nil {
+			break
+		}
+		if time.Now().After(releaseDeadline) {
+			t.Fatalf("transaction remained locked after Git helper exit: %v", err)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if !entered {
+		t.Fatal("replacement did not enter after protected Git helper exit")
+	}
+}
+
 func TestWorktreeTransactionGuardUsesNonGitLockName(t *testing.T) {
 	if strings.HasSuffix(worktreeTransactionLockFile, ".lock") {
 		t.Fatalf("transaction guard %q is eligible for stale Git-lock cleanup", worktreeTransactionLockFile)

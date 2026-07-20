@@ -225,7 +225,7 @@ func agmRunsSafePRAbruptParentRegression(ctx context.Context) error {
 		return err
 	}
 	state.childRegression, state.childRegressionErr = runLocalGuardrailGoTest(ctx,
-		`^TestWorktreeTransactionLockOutlivesKilledParentForProtectedChild$`,
+		`^TestWorktreeTransactionLockOutlivesKilledParentFor(ProtectedChild|GitHelper)$`,
 		"./internal/safepr",
 	)
 	return nil

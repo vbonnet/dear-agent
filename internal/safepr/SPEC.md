@@ -59,6 +59,8 @@ cost and intent remain traceable.
 
 **SAFEPR-22** When safe-pr persists its operating-system transaction guard in a linked-worktree Git directory, the system shall use a non-`.lock` name that stale Git-lock cleanup does not collect.
 
+**SAFEPR-23** When safe-pr invokes Git to inspect, acquire, reclaim, or release worktree protection inside a transaction, the system shall make the Git helper inherit the operating-system transaction lock so killing the parent cannot expose an incomplete lock-management operation to a replacement owner.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`

@@ -94,15 +94,15 @@ func withGitWorktreeLock(root, reason string, transaction *WorktreeTransaction, 
 	var ownedReason string
 	var lastErr error
 	for range worktreeLockAttempts {
-		current, inspectErr := inspectWorktreeLock(root)
+		current, inspectErr := inspectWorktreeLockProtected(transaction, root)
 		if inspectErr != nil {
 			return errors.Join(lastErr, inspectErr)
 		}
 		if current.locked {
 			if !isSafePROwnedLockReason(current.reason) {
-				return runWithPreservedLock(root, current, func() error { return action(transaction) })
+				return runWithPreservedLock(root, current, transaction, func() error { return action(transaction) })
 			}
-			if _, reclaimErr := runWorktreeGit(root, "worktree", "unlock", root); reclaimErr != nil {
+			if _, reclaimErr := runWorktreeGitProtected(transaction, root, "worktree", "unlock", root); reclaimErr != nil {
 				lastErr = errors.Join(lastErr, fmt.Errorf("protect safe-pr worktree: reclaim stale owned lock: %w", reclaimErr))
 			}
 			continue
@@ -115,7 +115,7 @@ func withGitWorktreeLock(root, reason string, transaction *WorktreeTransaction, 
 			}
 			ownedReason = generated
 		}
-		if _, lockErr := runWorktreeGit(root, "worktree", "lock", "--reason", ownedReason, root); lockErr != nil {
+		if _, lockErr := runWorktreeGitProtected(transaction, root, "worktree", "lock", "--reason", ownedReason, root); lockErr != nil {
 			lastErr = errors.Join(lastErr, fmt.Errorf("protect safe-pr worktree: acquire lock: %w", lockErr))
 			continue
 		}
@@ -167,6 +167,7 @@ func parseLinkedWorktree(out string) (linkedWorktree, error) {
 
 func withWorktreeTransactionLock(gitDir string, timeout time.Duration, action func(*WorktreeTransaction) error) (err error) {
 	path := filepath.Join(gitDir, worktreeTransactionLockFile)
+	// #nosec G703 -- gitDir is the canonical linked-worktree administrative directory returned by Git.
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return fmt.Errorf("protect safe-pr worktree: open transaction lock: %w", err)
@@ -202,7 +203,11 @@ func withWorktreeTransactionLock(gitDir string, timeout time.Duration, action fu
 }
 
 func inspectWorktreeLock(root string) (worktreeLock, error) {
-	out, err := runWorktreeGit(root, "worktree", "list", "--porcelain")
+	return inspectWorktreeLockProtected(nil, root)
+}
+
+func inspectWorktreeLockProtected(transaction *WorktreeTransaction, root string) (worktreeLock, error) {
+	out, err := runWorktreeGitProtected(transaction, root, "worktree", "list", "--porcelain")
 	if err != nil {
 		return worktreeLock{}, fmt.Errorf("protect safe-pr worktree: inspect lock: %w", err)
 	}
@@ -242,9 +247,9 @@ func canonicalWorktreePath(path string) string {
 	return path
 }
 
-func runWithPreservedLock(root string, initial worktreeLock, action func() error) error {
+func runWithPreservedLock(root string, initial worktreeLock, transaction *WorktreeTransaction, action func() error) error {
 	actionErr := action()
-	current, err := inspectWorktreeLock(root)
+	current, err := inspectWorktreeLockProtected(transaction, root)
 	if err != nil {
 		return errors.Join(actionErr, err)
 	}
@@ -256,13 +261,13 @@ func runWithPreservedLock(root string, initial worktreeLock, action func() error
 
 func runWithOwnedLock(root, ownedReason string, transaction *WorktreeTransaction, action func(*WorktreeTransaction) error) (err error) {
 	defer func() {
-		err = errors.Join(err, releaseOwnedWorktreeLock(root, ownedReason))
+		err = errors.Join(err, releaseOwnedWorktreeLock(transaction, root, ownedReason))
 	}()
 	return action(transaction)
 }
 
-func releaseOwnedWorktreeLock(root, ownedReason string) error {
-	current, err := inspectWorktreeLock(root)
+func releaseOwnedWorktreeLock(transaction *WorktreeTransaction, root, ownedReason string) error {
+	current, err := inspectWorktreeLockProtected(transaction, root)
 	if err != nil {
 		return err
 	}
@@ -272,7 +277,7 @@ func releaseOwnedWorktreeLock(root, ownedReason string) error {
 	if current.reason != ownedReason {
 		return fmt.Errorf("protect safe-pr worktree: lock ownership changed to %q; preserving it", current.reason)
 	}
-	if _, err := runWorktreeGit(root, "worktree", "unlock", root); err != nil {
+	if _, err := runWorktreeGitProtected(transaction, root, "worktree", "unlock", root); err != nil {
 		return fmt.Errorf("protect safe-pr worktree: release owned lock: %w", err)
 	}
 	return nil
@@ -291,10 +296,17 @@ func worktreeLockReason(reason string) (string, error) {
 }
 
 func runWorktreeGit(dir string, args ...string) (string, error) {
+	return runWorktreeGitProtected(nil, dir, args...)
+}
+
+func runWorktreeGitProtected(transaction *WorktreeTransaction, dir string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), worktreeCommandTimeout)
 	defer cancel()
 	cmd := newWorktreeGitCommand(ctx, dir, args...)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if err := transaction.ProtectCommand(cmd); err != nil {
+		return "", err
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {

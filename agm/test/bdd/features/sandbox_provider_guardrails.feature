@@ -20,3 +20,7 @@ Feature: Sandbox provider guardrails
       | internal/sandbox/gvisor     |
       | internal/sandbox/overlayfs  |
       | wayfinder/pkg/sandbox       |
+
+  Scenario: Sandbox provider destruction preserves active worktree locks
+    When AGM runs the sandbox provider locked-destroy regressions
+    Then failed destruction should remain retryable until the worktree is unlocked

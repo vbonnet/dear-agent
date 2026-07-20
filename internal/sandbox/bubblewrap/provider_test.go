@@ -1,9 +1,14 @@
 package bubblewrap
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -127,6 +132,76 @@ func TestProvider_checkBubblewrapInstalled(t *testing.T) {
 	} else {
 		assert.NoError(t, err)
 	}
+}
+
+func TestProvider_DestroyPreservesLockedWorktreeForRetry(t *testing.T) {
+	repo, mergedDir, upperDir, workDir := newLockedBubblewrapWorktree(t)
+	p := NewProvider()
+	const id = "locked-destroy"
+	p.sandboxes[id] = &sandbox.Sandbox{
+		ID:         id,
+		MergedPath: mergedDir,
+		UpperPath:  upperDir,
+		WorkPath:   workDir,
+		CleanupFunc: func() error {
+			return p.cleanupSandbox(repo, upperDir, workDir, mergedDir, true)
+		},
+	}
+
+	err := p.Destroy(context.Background(), id)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "git worktree remove failed")
+	for _, path := range []string{mergedDir, upperDir, workDir} {
+		require.DirExists(t, path, "failed destroy removed retryable provider path")
+	}
+	require.NoError(t, p.Validate(context.Background(), id), "failed destroy removed provider registry state")
+	out := runBubblewrapGit(t, repo, "worktree", "list", "--porcelain")
+	assert.Contains(t, out, "locked provider-active-owner", "failed destroy changed the exact Git lock reason")
+
+	runBubblewrapGit(t, repo, "worktree", "unlock", mergedDir)
+	require.NoError(t, p.Destroy(context.Background(), id), "destroy retry after unlock")
+	for _, path := range []string{mergedDir, upperDir, workDir} {
+		_, statErr := os.Stat(path)
+		assert.True(t, os.IsNotExist(statErr), "successful destroy retained %s: %v", path, statErr)
+	}
+	require.Error(t, p.Validate(context.Background(), id), "successful destroy retained provider registry state")
+}
+
+func newLockedBubblewrapWorktree(t *testing.T) (repo, mergedDir, upperDir, workDir string) {
+	t.Helper()
+	base := t.TempDir()
+	repo = filepath.Join(base, "repo")
+	workspace := filepath.Join(base, "sandbox")
+	mergedDir = filepath.Join(workspace, "merged")
+	upperDir = filepath.Join(workspace, "upper")
+	workDir = filepath.Join(workspace, "work")
+	runBubblewrapGit(t, "", "init", "-q", "-b", "main", repo)
+	runBubblewrapGit(t, repo, "config", "user.name", "Bubblewrap Test")
+	runBubblewrapGit(t, repo, "config", "user.email", "bubblewrap@example.invalid")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("locked provider cleanup\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runBubblewrapGit(t, repo, "add", "README.md")
+	runBubblewrapGit(t, repo, "commit", "-q", "-m", "initial")
+	runBubblewrapGit(t, repo, "worktree", "add", "-q", "-b", "locked-destroy", mergedDir)
+	require.NoError(t, os.MkdirAll(upperDir, 0o755))
+	require.NoError(t, os.MkdirAll(workDir, 0o755))
+	runBubblewrapGit(t, repo, "worktree", "lock", "--reason", "provider-active-owner", mergedDir)
+	return repo, mergedDir, upperDir, workDir
+}
+
+func runBubblewrapGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	commandArgs := slices.Clone(args)
+	if dir != "" {
+		commandArgs = append([]string{"-C", dir}, commandArgs...)
+	}
+	cmd := exec.Command("git", commandArgs...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v: %s", strings.Join(commandArgs, " "), err, strings.TrimSpace(string(out)))
+	}
+	return string(out)
 }
 
 // ---- buildBwrapArgs unit tests (cross-platform, no exec) ----

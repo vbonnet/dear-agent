@@ -21,8 +21,9 @@ import (
 // Bubblewrap creates isolated namespaces using bind mounts and user namespaces.
 // Works without root privileges or kernel-specific features.
 type Provider struct {
-	mu        sync.RWMutex
-	sandboxes map[string]*sandbox.Sandbox
+	mu         sync.RWMutex
+	sandboxes  map[string]*sandbox.Sandbox
+	destroying map[string]chan struct{}
 	// ShareNetwork controls whether the sandbox shares the host network namespace.
 	// Default is false (network is isolated via --unshare-net).
 	ShareNetwork bool
@@ -31,7 +32,8 @@ type Provider struct {
 // NewProvider creates a new Bubblewrap provider.
 func NewProvider() *Provider {
 	return &Provider{
-		sandboxes: make(map[string]*sandbox.Sandbox),
+		sandboxes:  make(map[string]*sandbox.Sandbox),
+		destroying: make(map[string]chan struct{}),
 	}
 }
 
@@ -115,12 +117,7 @@ func (p *Provider) Create(ctx context.Context, req sandbox.SandboxRequest) (*san
 
 	// Build cleanup function that removes the worktree before cleaning dirs
 	cleanupFn := func() error {
-		if worktreeCreated {
-			if err := p.removeWorktree(worktreeRepo, mergedDir); err != nil {
-				fmt.Fprintf(os.Stderr, "bubblewrap: warning: failed to remove worktree: %v\n", err)
-			}
-		}
-		return p.cleanup(upperDir, workDir, mergedDir)
+		return p.cleanupSandbox(worktreeRepo, upperDir, workDir, mergedDir, worktreeCreated)
 	}
 
 	// Create sandbox metadata
@@ -414,24 +411,53 @@ func (p *Provider) removeWorktree(repoPath, worktreePath string) error {
 	return nil
 }
 
-// Destroy tears down the sandbox and cleans up resources.
-func (p *Provider) Destroy(ctx context.Context, id string) error {
-	p.mu.Lock()
-	sb, exists := p.sandboxes[id]
-	if !exists {
-		p.mu.Unlock()
-		return nil // Idempotent
-	}
-	delete(p.sandboxes, id)
-	p.mu.Unlock()
-
-	if sb.CleanupFunc != nil {
-		if err := sb.CleanupFunc(); err != nil {
+func (p *Provider) cleanupSandbox(worktreeRepo, upperDir, workDir, mergedDir string, worktreeCreated bool) error {
+	if worktreeCreated {
+		if err := p.removeWorktree(worktreeRepo, mergedDir); err != nil {
+			// Git deliberately refuses a single-force removal of a locked
+			// worktree. Preserve every sandbox directory so an active owner is
+			// not bypassed and Destroy can retry after the owner unlocks it.
 			return err
 		}
 	}
+	return p.cleanup(upperDir, workDir, mergedDir)
+}
 
-	return nil
+// Destroy tears down the sandbox and cleans up resources.
+func (p *Provider) Destroy(ctx context.Context, id string) error {
+	for {
+		p.mu.Lock()
+		sb, exists := p.sandboxes[id]
+		if !exists {
+			p.mu.Unlock()
+			return nil // Idempotent
+		}
+		if done, active := p.destroying[id]; active {
+			p.mu.Unlock()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-done:
+				continue
+			}
+		}
+		done := make(chan struct{})
+		p.destroying[id] = done
+		p.mu.Unlock()
+
+		var cleanupErr error
+		if sb.CleanupFunc != nil {
+			cleanupErr = sb.CleanupFunc()
+		}
+		p.mu.Lock()
+		if cleanupErr == nil && p.sandboxes[id] == sb {
+			delete(p.sandboxes, id)
+		}
+		delete(p.destroying, id)
+		close(done)
+		p.mu.Unlock()
+		return cleanupErr
+	}
 }
 
 // Validate checks if a sandbox exists and is healthy.
