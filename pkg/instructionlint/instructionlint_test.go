@@ -249,6 +249,24 @@ func TestFoldedYAMLScalarsPreservePhysicalCommandLines(t *testing.T) {
 	}
 }
 
+func TestQuotedAndPlainYAMLScalarsPreservePhysicalCommandLines(t *testing.T) {
+	source := []byte("quoted: \"Review the current state first.\n  gh pr merge 123\"\nplain: Review the current state first.\n  git push origin main\n")
+	segments, err := parseYAMLSegments(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rules []string
+	for _, segment := range segments {
+		for _, violation := range evaluateSegment("agent.yaml", segment) {
+			rules = append(rules, violation.Rule)
+		}
+	}
+	sort.Strings(rules)
+	if !reflect.DeepEqual(rules, []string{"raw-gh-merge", "raw-git-push"}) {
+		t.Fatalf("multiline scalar rules = %v, want physical command lines", rules)
+	}
+}
+
 func TestRuleViolationsTeachCanonicalReplacements(t *testing.T) {
 	segments := []Segment{
 		{Kind: SegmentProse, Line: 1, Text: "Create W0-charter.md before D1."},

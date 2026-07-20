@@ -310,19 +310,19 @@ func parseYAMLSegments(source []byte) ([]Segment, error) {
 	}
 	var segments []Segment
 	seenComments := map[string]bool{}
-	var visit func(*yaml.Node)
-	visit = func(node *yaml.Node) {
-		if node.Kind == yaml.ScalarNode && node.Tag == "!!str" {
+	var visit func(*yaml.Node, bool)
+	visit = func(node *yaml.Node, mappingKey bool) {
+		if !mappingKey && node.Kind == yaml.ScalarNode && node.Tag == "!!str" {
 			segments = append(segments, yamlScalarSegments(source, node)...)
 		}
 		segments = appendYAMLCommentSegments(segments, seenComments, node.HeadComment, node.Line-commentLineCount(node.HeadComment))
 		segments = appendYAMLCommentSegments(segments, seenComments, node.LineComment, node.Line)
 		segments = appendYAMLCommentSegments(segments, seenComments, node.FootComment, node.Line+1)
-		for _, child := range node.Content {
-			visit(child)
+		for index, child := range node.Content {
+			visit(child, node.Kind == yaml.MappingNode && index%2 == 0)
 		}
 	}
-	visit(&root)
+	visit(&root, false)
 	return segments, nil
 }
 
@@ -330,22 +330,59 @@ func yamlScalarSegments(source []byte, node *yaml.Node) []Segment {
 	if node.Style == yaml.FoldedStyle || node.Style == yaml.LiteralStyle {
 		return yamlBlockScalarSegments(source, node)
 	}
+	if physical := yamlFlowScalarLines(source, node); len(physical) > 1 {
+		var segments []Segment
+		for _, line := range physical {
+			segments = append(segments, yamlValueSegments(line.text, line.number)...)
+		}
+		return segments
+	}
 	var segments []Segment
 	for offset, raw := range strings.Split(node.Value, "\n") {
-		value := strings.TrimSpace(raw)
-		if value == "" {
-			continue
-		}
-		line := node.Line + offset
-		kind := SegmentProse
-		if !allowedBashTool.MatchString(value) && commandShaped(value) {
-			kind = SegmentShell
-		}
-		segments = append(segments, Segment{Kind: kind, Line: line, Text: value})
-		segments = append(segments, bashToolSegments(value, line)...)
-		segments = appendEmbeddedProseSegments(segments, value, line)
+		segments = append(segments, yamlValueSegments(raw, node.Line+offset)...)
 	}
 	return segments
+}
+
+type yamlPhysicalLine struct {
+	number int
+	text   string
+}
+
+func yamlFlowScalarLines(source []byte, node *yaml.Node) []yamlPhysicalLine {
+	lines := strings.Split(string(source), "\n")
+	start := node.Line - 1
+	column := node.Column - 1
+	if start < 0 || start >= len(lines) || column < 0 || column >= len(lines[start]) {
+		return nil
+	}
+	headerIndent := leadingSpaces(lines[start])
+	physical := []yamlPhysicalLine{{number: node.Line, text: strings.Trim(lines[start][column:], " '\"")}}
+	for index := start + 1; index < len(lines); index++ {
+		raw := lines[index]
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		if leadingSpaces(raw) <= headerIndent {
+			break
+		}
+		physical = append(physical, yamlPhysicalLine{number: index + 1, text: strings.Trim(strings.TrimSpace(raw), "'\"")})
+	}
+	return physical
+}
+
+func yamlValueSegments(raw string, line int) []Segment {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return nil
+	}
+	kind := SegmentProse
+	if !allowedBashTool.MatchString(value) && commandShaped(value) {
+		kind = SegmentShell
+	}
+	segments := []Segment{{Kind: kind, Line: line, Text: value}}
+	segments = append(segments, bashToolSegments(value, line)...)
+	return appendEmbeddedProseSegments(segments, value, line)
 }
 
 func yamlBlockScalarSegments(source []byte, node *yaml.Node) []Segment {
@@ -366,13 +403,7 @@ func yamlBlockScalarSegments(source []byte, node *yaml.Node) []Segment {
 			break
 		}
 		line := index + 1
-		kind := SegmentProse
-		if !allowedBashTool.MatchString(value) && commandShaped(value) {
-			kind = SegmentShell
-		}
-		segments = append(segments, Segment{Kind: kind, Line: line, Text: value})
-		segments = append(segments, bashToolSegments(value, line)...)
-		segments = appendEmbeddedProseSegments(segments, value, line)
+		segments = append(segments, yamlValueSegments(value, line)...)
 	}
 	return segments
 }

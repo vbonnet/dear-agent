@@ -111,10 +111,9 @@ Every PR must carry a wayfinder trace. If no approved path exists, escalate via:
 
 **Negative / trade-offs:**
 
-- Until `agm escalate` is implemented (ce-m3ya), a blocked agent has no
-  machine-readable path to surface the gap. In the interim, agents must file a
-  bead manually (`bd --db ~/beads/context-engine/.beads create ...`) and
-  report the block in their end-of-run summary.
+- Escalation adds a durable decision record and supervisory hop instead of an
+  immediate local exception. Agents may continue independent work or use the
+  command's blocking wait when the exceptional action is truly required.
 - The bot-review gate in `safe-merge` was occasionally hit due to Gemini quota
   exhaustion. Without `--skip-bot-review`, the only options are `--watch` (poll
   until the bot posts) or escalation. This is intentional: quota exhaustion is a
