@@ -43,7 +43,7 @@ Implemented enhanced Engram MCP Server integrating both Task 3.2 (basic) and Tas
 - Active/inactive status tracking
 
 **File**: `tools/wayfinder_status.py` (180 lines)
-- Wayfinder phase detection (D1-D4, S4-S6, S8)
+- Canonical Wayfinder phase detection (CHARTER through RETRO)
 - Deliverable file scanning
 - Completion status heuristics
 - Next phase recommendation
@@ -121,7 +121,7 @@ Implemented enhanced Engram MCP Server integrating both Task 3.2 (basic) and Tas
 - Core and user plugin scanning
 
 ✅ **wayfinder.phase.status() tool functional**
-- Phase detection (D1-S8)
+- Canonical named-phase detection
 - Deliverables listing
 - Next phase recommendation
 - Completion status heuristics

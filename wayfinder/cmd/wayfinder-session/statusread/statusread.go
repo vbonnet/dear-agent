@@ -4,10 +4,12 @@ package statusread
 
 import "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 
-// Summary contains the lifecycle fields needed by read-only policy hooks.
+// Summary contains the validated fields needed by read-only policy consumers.
 type Summary struct {
+	ProjectName     string
 	Status          string
 	CurrentWaypoint string
+	Beads           []string
 }
 
 // ParseFromDir reads and fully validates the canonical status file in dir.
@@ -17,7 +19,9 @@ func ParseFromDir(dir string) (*Summary, error) {
 		return nil, err
 	}
 	return &Summary{
+		ProjectName:     parsed.ProjectName,
 		Status:          parsed.Status,
 		CurrentWaypoint: parsed.CurrentWaypoint,
+		Beads:           append([]string(nil), parsed.Beads...),
 	}, nil
 }

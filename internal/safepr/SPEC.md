@@ -17,7 +17,7 @@ cost and intent remain traceable.
 
 **SAFEPR-01** When no Wayfinder directory is provided by flag or environment, the system shall reject PR operations with escalation guidance.
 
-**SAFEPR-02** When `WAYFINDER-STATUS.md` is missing or lacks YAML frontmatter, the system shall reject PR operations.
+**SAFEPR-02** When `WAYFINDER-STATUS.md` is missing, malformed, or incomplete under the complete canonical schema, the system shall reject PR operations.
 
 **SAFEPR-03** When canonical Wayfinder V2 status is `planning` or `in-progress`, the system shall accept the project name as active PR attribution.
 

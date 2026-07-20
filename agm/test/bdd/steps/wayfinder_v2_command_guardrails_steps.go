@@ -13,6 +13,10 @@ import (
 )
 
 var retiredWayfinderPattern = regexp.MustCompile(`\b(?:W0|D1|D2|D3|D4|S4|S5|S6|S7|S8|S9|S10|S11|V1)(?:\b|[A-Z_])|\b(?:w0|d1|d2|d3|d4|s4|s5|s6|s7|s8|s9|s10|s11|v1)_|WayfinderV1|discovery\.(problem|solutions|approach|requirements)|design\.(tech-lead|security|qa)|roadmap\.(planning|breakdown|dependencies)`)
+var retiredWayfinderDocW0Pattern = regexp.MustCompile(`\bW0(?:\.[0-9]+)?\b`)
+var retiredWayfinderDocForwardPattern = regexp.MustCompile(`(?i)\b(?:current[_ ]phase|next[_ ]phase|phase)\b[^A-Za-z0-9]{0,12}(?:W0|D1|D2|D3|D4|S4|S5|S6|S7|S8|S9|S10|S11|V1)\b`)
+var retiredWayfinderDocReversePattern = regexp.MustCompile(`(?i)\b(?:W0|D1|D2|D3|D4|S4|S5|S6|S7|S8|S9|S10|S11|V1)(?:/(?:W0|D1|D2|D3|D4|S4|S5|S6|S7|S8|S9|S10|S11|V1))*\b[^A-Za-z0-9]{0,12}(?:phase|retrospective)\b`)
+var retiredWayfinderDocArtifactPattern = regexp.MustCompile(`(?i)\b(?:W0|D1|D2|D3|D4|S4|S5|S6|S7|S8|S9|S10|S11)-(?:charter|problem|research|design|spec|plan|setup|implementation|validation|retrospective)[A-Za-z0-9_-]*\.md\b`)
 
 const wayfinderV2CommandFeaturePath = "agm/test/bdd/features/wayfinder_v2_command_guardrails.feature"
 
@@ -293,7 +297,81 @@ func nonMigrationRuntimeOmitsRetiredPhases(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := scanLivingWayfinderDocumentation(state.repoRoot); err != nil {
+		return err
+	}
 	return validateCanonicalWayfinderConsumers(state.repoRoot)
+}
+
+func scanLivingWayfinderDocumentation(repoRoot string) (resultErr error) {
+	rootFS, err := os.OpenRoot(repoRoot)
+	if err != nil {
+		return fmt.Errorf("open repository root: %w", err)
+	}
+	defer preserveRootCloseError(rootFS, &resultErr)
+	return filepath.WalkDir(repoRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(repoRoot, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if entry.IsDir() {
+			if rel != "." && skipLivingDocumentationDir(rel) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Ext(path) != ".md" || strings.EqualFold(filepath.Base(path), "CHANGELOG.md") {
+			return nil
+		}
+		data, err := rootFS.ReadFile(rel)
+		if err != nil {
+			return err
+		}
+		contextLines := 0
+		for lineNumber, line := range strings.Split(string(data), "\n") {
+			hasWayfinderContext := contextLines > 0 || strings.Contains(strings.ToLower(line), "wayfinder")
+			if token := retiredWayfinderDocToken(line, hasWayfinderContext); token != "" {
+				return fmt.Errorf("living documentation %s:%d contains retired Wayfinder token %s", rel, lineNumber+1, token)
+			}
+			if strings.Contains(strings.ToLower(line), "wayfinder") {
+				contextLines = 2
+			} else if contextLines > 0 {
+				contextLines--
+			}
+		}
+		return nil
+	})
+}
+
+func skipLivingDocumentationDir(relativePath string) bool {
+	for part := range strings.SplitSeq(relativePath, "/") {
+		switch strings.ToLower(part) {
+		case ".git", ".worktrees", "worktrees", "node_modules", "vendor", "archive", "archives", "adr", "adrs":
+			return true
+		}
+	}
+	return relativePath == "docs/policies" || strings.HasPrefix(relativePath, "docs/policies/")
+}
+
+func retiredWayfinderDocToken(line string, hasWayfinderContext bool) string {
+	for _, pattern := range []*regexp.Regexp{
+		retiredWayfinderDocW0Pattern,
+		retiredWayfinderDocForwardPattern,
+		retiredWayfinderDocReversePattern,
+		retiredWayfinderDocArtifactPattern,
+	} {
+		if token := pattern.FindString(line); token != "" {
+			return token
+		}
+	}
+	if hasWayfinderContext {
+		return retiredWayfinderPattern.FindString(line)
+	}
+	return ""
 }
 
 func scanActiveWayfinderRoot(repoRoot, relativeRoot string, activeExtensions map[string]bool, retired *regexp.Regexp) (resultErr error) {
@@ -341,7 +419,7 @@ func validateCanonicalWayfinderConsumers(repoRoot string) error {
 		{path: "wayfinder/coordinator/monitor.go", required: []string{`yaml:"current_waypoint"`}, forbidden: []string{"Current Phase:"}},
 		{path: "engram/cmd/engram-mcp/readtools.go", required: []string{`fields["current_waypoint"]`, `fields["status"]`}, forbidden: []string{"rePhase", "Current Phase:"}},
 		{path: "agm/cmd/agm-mcp-server/wayfinder.go", required: []string{`fmString(fm, "current_waypoint")`, `fmString(fm, "project_name")`}, forbidden: []string{`fmString(fm, "current_phase"`, `fmString(fm, "project_name",`}},
-		{path: "internal/safepr/safepr.go", required: []string{`yaml:"schema_version"`, `yaml:"project_name"`}, forbidden: []string{`yaml:"session_id"`, "st.SessionID"}},
+		{path: "internal/safepr/safepr.go", required: []string{`statusread.ParseFromDir(dir)`, "st.ProjectName", "st.Beads"}, forbidden: []string{`yaml:"schema_version"`, `yaml:"project_name"`, `yaml:"session_id"`, "st.SessionID"}},
 		{path: "engram/internal/config/config.go", forbidden: []string{"WayfinderConfig", "W0Config", `yaml:"w0"`}},
 		{path: "engram/internal/config/loader.go", forbidden: []string{"mergeWayfinder", "mergeW0", "hasW0"}},
 		{path: "engram/cmd/engram/cmd/config_show.go", forbidden: []string{"Wayfinder", "w0."}},

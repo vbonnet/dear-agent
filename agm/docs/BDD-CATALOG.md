@@ -1117,7 +1117,7 @@ persistence.
 - The active runtime cannot reintroduce retired phase identifiers or migration
   commands.
 
-**Why this matters:** Wayfinder is the repository's planning gate. A V1 default
+**Why this matters:** Wayfinder is the repository's planning gate. A numeric-phase default
 or hidden legacy executor makes phase enforcement ambiguous and violates the
 canonical V2 and broken-windows policies.
 

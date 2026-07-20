@@ -143,7 +143,7 @@ if !forceArchive {
 
 ### Fix Applied
 
-**Commit:** (batch commit during S6/S7 phase)
+**Commit:** (batch commit during the implementation phase)
 **Files Modified:** `cmd/agm/archive.go`
 
 **Solution:** Changed to `ListClients()` check - only prevents archiving if clients actively attached.
@@ -297,7 +297,7 @@ agm new test-session
 
 ### Fix Applied
 
-**Commits:** Multiple (S6/S7 batch commits)
+**Commits:** Multiple implementation batch commits
 **Files Modified:** 13 files total
 
 **Documentation Files Updated:**

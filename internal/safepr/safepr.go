@@ -30,7 +30,7 @@ import (
 	"strings"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/statusread"
 )
 
 // DefaultTimeout bounds a gh invocation so a wedged network call or an
@@ -47,16 +47,6 @@ type Session struct {
 	// "Closes <bead>" line into the create body so the PR auto-closes its bead
 	// on merge (bead-pr-sync scans the body for this reference).
 	BeadID string
-}
-
-// statusFrontmatter is the subset of WAYFINDER-STATUS.md frontmatter safe-pr
-// consumes. Unknown fields are ignored on purpose: the schema belongs to
-// wayfinder, not to us.
-type statusFrontmatter struct {
-	SchemaVersion string   `yaml:"schema_version"`
-	ProjectName   string   `yaml:"project_name"`
-	Status        string   `yaml:"status"`
-	Beads         []string `yaml:"beads"`
 }
 
 // ResolveSessionDir picks the wayfinder project directory: the --wayfinder
@@ -82,24 +72,10 @@ func ResolveSessionDir(flagDir string) (string, error) {
 // are not valid attribution targets for new PRs.
 func LoadSession(dir string) (Session, error) {
 	path := filepath.Join(dir, "WAYFINDER-STATUS.md")
-	raw, err := os.ReadFile(path)
+	st, err := statusread.ParseFromDir(dir)
 	if err != nil {
-		return Session{}, fmt.Errorf("cannot read %s: %w — point --wayfinder/WAYFINDER_PROJECT_DIR "+
+		return Session{}, fmt.Errorf("cannot load validated status from %s: %w — point --wayfinder/WAYFINDER_PROJECT_DIR "+
 			"at a wayfinder project directory (the one holding WAYFINDER-STATUS.md)", path, err)
-	}
-	fm, err := frontmatter(string(raw))
-	if err != nil {
-		return Session{}, fmt.Errorf("%s: %w", path, err)
-	}
-	var st statusFrontmatter
-	if err := yaml.Unmarshal([]byte(fm), &st); err != nil {
-		return Session{}, fmt.Errorf("%s: cannot parse YAML frontmatter: %w", path, err)
-	}
-	if st.SchemaVersion != "2.0" {
-		return Session{}, fmt.Errorf("%s has schema_version %q; expected 2.0", path, st.SchemaVersion)
-	}
-	if st.ProjectName == "" {
-		return Session{}, fmt.Errorf("%s has no project_name in its frontmatter", path)
 	}
 	if !isActiveStatus(st.Status) {
 		return Session{}, fmt.Errorf("wayfinder session %s is %q, not active — start or resume "+
@@ -124,21 +100,6 @@ func isActiveStatus(status string) bool {
 	default:
 		return false
 	}
-}
-
-// frontmatter extracts the YAML between the leading "---" fence pair.
-func frontmatter(content string) (string, error) {
-	content = strings.ReplaceAll(content, "\r\n", "\n")
-	if !strings.HasPrefix(content, "---\n") {
-		return "", fmt.Errorf("file does not start with YAML frontmatter (---)")
-	}
-	lines := strings.Split(content, "\n")
-	for i := 1; i < len(lines); i++ {
-		if lines[i] == "---" {
-			return strings.Join(lines[1:i], "\n"), nil
-		}
-	}
-	return "", fmt.Errorf("unterminated YAML frontmatter (no closing ---)")
 }
 
 // Request is one validated safe-pr invocation.

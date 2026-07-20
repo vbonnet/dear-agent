@@ -2,6 +2,7 @@ package safepr
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,14 +16,24 @@ func writeStatus(t *testing.T, dir, content string) {
 	}
 }
 
-const inProgressStatus = `---
+func canonicalTestStatus(project, status, extra string) string {
+	return fmt.Sprintf(`---
 schema_version: "2.0"
-project_name: safepr-test
-status: in-progress
+project_name: %s
+project_type: feature
+risk_level: S
+current_waypoint: CHARTER
+status: %s
+created_at: 2026-07-20T00:00:00Z
+updated_at: 2026-07-20T00:00:00Z
+%s
 ---
 
 # Wayfinder Session
-`
+`, project, status, extra)
+}
+
+var inProgressStatus = canonicalTestStatus("safepr-test", "in-progress", "")
 
 func TestLoadSession_InProgress(t *testing.T) {
 	dir := t.TempDir()
@@ -40,15 +51,17 @@ func TestLoadSession_InProgress(t *testing.T) {
 }
 
 func TestLoadSession_Failures(t *testing.T) {
+	missingSchema := strings.Replace(canonicalTestStatus("foo", "in-progress", ""), "schema_version: \"2.0\"\n", "", 1)
 	cases := []struct {
 		name, content, wantErr string
 	}{
-		{"missing file", "", "cannot read"},
-		{"completed session", "---\nschema_version: \"2.0\"\nproject_name: x\nstatus: completed\n---\n", "not active"},
-		{"no project name", "---\nschema_version: \"2.0\"\nstatus: in-progress\n---\n", "no project_name"},
-		{"abandoned", "---\nschema_version: \"2.0\"\nproject_name: foo\nstatus: abandoned\n---\n", "not active"},
-		{"blocked", "---\nschema_version: \"2.0\"\nproject_name: foo\nstatus: blocked\n---\n", "not active"},
-		{"missing schema", "---\nproject_name: foo\nstatus: in-progress\n---\n", "expected 2.0"},
+		{"missing file", "", "cannot load"},
+		{"partial canonical status", "---\nschema_version: \"2.0\"\nproject_name: x\nstatus: in-progress\n---\n", "project_type is required"},
+		{"completed session", canonicalTestStatus("x", "completed", "completion_date: 2026-07-20T00:00:00Z"), "not active"},
+		{"no project name", canonicalTestStatus("", "in-progress", ""), "project_name is required"},
+		{"abandoned", canonicalTestStatus("foo", "abandoned", ""), "not active"},
+		{"blocked", canonicalTestStatus("foo", "blocked", "blocked_reason: waiting"), "not active"},
+		{"missing schema", missingSchema, "schema_version is required"},
 		{"no frontmatter", "# just markdown\n", "frontmatter"},
 		{"unterminated frontmatter", "---\nschema_version: \"2.0\"\nproject_name: x\n", "unterminated"},
 	}
@@ -183,17 +196,10 @@ func TestStampedArgs(t *testing.T) {
 	})
 }
 
-const beadStatus = `---
-schema_version: "2.0"
-project_name: safepr-bead-test
-status: in-progress
-beads:
+var beadStatus = canonicalTestStatus("safepr-bead-test", "in-progress", `beads:
   - ce-5vje
   - ce-9999
----
-
-# Wayfinder Session
-`
+`)
 
 func TestLoadSession_Bead(t *testing.T) {
 	t.Run("first bead populates BeadID", func(t *testing.T) {

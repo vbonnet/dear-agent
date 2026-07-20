@@ -192,7 +192,7 @@ These tests are suitable for CI/CD pipelines:
 The integration tests validate against actual engram repository files:
 
 ### .ai.md Files (100+)
-- `core/cortex/engrams/workflows/*.ai.md` (S11, D1-D4, S4-S10)
+- `core/cortex/engrams/workflows/*.ai.md` (canonical CHARTER-through-RETRO guidance)
 - `core/persona/library/**/*.ai.md` (personas)
 - `engrams/patterns/**/*.ai.md` (patterns)
 - `engrams/references/**/*.ai.md` (references)
@@ -207,8 +207,7 @@ The integration tests validate against actual engram repository files:
 - `core/**/*.ai.md` (content files requiring token counts)
 
 ### Retrospective Files (2+)
-- `core/cortex/engrams/workflows/s11-retrospective.ai.md`
-- `core/cortex/engrams/workflows/s11-enhanced-retrospective.ai.md`
+- RETRO workflow files under `core/cortex/engrams/workflows/`
 
 ## Test Output Examples
 

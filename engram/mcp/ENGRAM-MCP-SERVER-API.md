@@ -182,7 +182,7 @@ Returns JSON with phase information.
   content: [
     {
       type: "text",
-      text: string    // JSON-formatted phase status
+      text: string    // JSON-formatted waypoint status
     }
   ]
 }
@@ -192,7 +192,7 @@ Returns JSON with phase information.
 ```json
 {
   "project": "/absolute/path/to/project",
-  "phase": "S6: Design",
+  "current_waypoint": "DESIGN",
   "progress": "60%",
   "status": "In Progress"
 }
@@ -223,17 +223,16 @@ Returns JSON with phase information.
 
 Reads `WAYFINDER-STATUS.md` from project directory:
 
-Expected format:
+Expected canonical frontmatter fields:
 ```markdown
-Current Phase: **S6: Design**
-Progress: 60%
-Status: In Progress
+---
+schema_version: "2.0"
+current_waypoint: DESIGN
+status: in-progress
+---
 ```
 
-Parses with regex:
-- `Current Phase: **<phase>**`
-- `Progress: <progress>`
-- `Status: <status>`
+Parses the canonical schema and returns `current_waypoint` plus `status`.
 
 #### Error Handling
 

@@ -94,7 +94,7 @@ Returns:
 ### Example 3: Check Wayfinder Status
 
 ```
-You: What's the current phase of the batch-edit project?
+You: What's the current waypoint of the batch-edit project?
 
 Claude Code uses wayfinder_phase_status:
 {
@@ -103,10 +103,9 @@ Claude Code uses wayfinder_phase_status:
 
 Returns:
 {
-  "current_phase": "S6",
-  "phase_name": "Implementation Spec",
-  "completion_status": "in_progress",
-  "next_phase": "S8"
+  "current_waypoint": "DESIGN",
+  "status": "in-progress",
+  "next_waypoint": "BUILD"
 }
 ```
 
