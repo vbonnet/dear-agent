@@ -64,6 +64,7 @@ func parseScriptSegments(source []byte) []Segment {
 	var segments []Segment
 	var quote byte
 	heredoc := ""
+	visibleContinuation := false
 	visibleHelpers := agentVisibleScriptHelpers(source)
 	for index, raw := range strings.Split(string(source), "\n") {
 		value := strings.TrimSpace(raw)
@@ -76,6 +77,16 @@ func parseScriptSegments(source []byte) []Segment {
 				continue
 			}
 			segments = append(segments, Segment{Kind: SegmentShell, Line: index + 1, Text: value})
+			continue
+		}
+		if visibleContinuation {
+			segments = append(segments, Segment{Kind: SegmentShell, Line: index + 1, Text: value})
+			if commandQuote := unclosedScriptQuote(value); commandQuote != 0 {
+				quote = commandQuote
+				visibleContinuation = false
+			} else {
+				visibleContinuation = hasShellLineContinuation(raw)
+			}
 			continue
 		}
 		if quote != 0 {
@@ -109,10 +120,20 @@ func parseScriptSegments(source []byte) []Segment {
 			segments = append(segments, Segment{Kind: SegmentShell, Line: index + 1, Text: value})
 			if commandQuote := unclosedScriptQuote(value); commandQuote != 0 {
 				quote = commandQuote
+			} else {
+				visibleContinuation = hasShellLineContinuation(raw)
 			}
 		}
 	}
 	return segments
+}
+
+func hasShellLineContinuation(value string) bool {
+	backslashes := 0
+	for index := len(value) - 1; index >= 0 && value[index] == '\\'; index-- {
+		backslashes++
+	}
+	return backslashes%2 == 1
 }
 
 func agentVisibleScriptCommand(value string, helpers map[string]bool) bool {

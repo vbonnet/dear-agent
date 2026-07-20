@@ -202,6 +202,26 @@ func TestScriptOutputHelpersRemainPolicyVisible(t *testing.T) {
 	}
 }
 
+func TestScriptOutputContinuationsRemainPolicyVisible(t *testing.T) {
+	source := []byte(strings.Join([]string{
+		`printf '%s\n' \`,
+		`  'git push origin main'`,
+		`echo \`,
+		`  "gh pr merge 123"`,
+	}, "\n"))
+
+	var rules []string
+	for _, segment := range parseScriptSegments(source) {
+		for _, violation := range evaluateSegment("hook", segment) {
+			rules = append(rules, violation.Rule)
+		}
+	}
+	sort.Strings(rules)
+	if !reflect.DeepEqual(rules, []string{"raw-gh-merge", "raw-git-push"}) {
+		t.Fatalf("continued output guidance rules = %v", rules)
+	}
+}
+
 func TestCheckRepositoryGovernsSkillAgentMetadata(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init", "-q")
