@@ -86,11 +86,18 @@ Feature: Local development guardrails
     And the "<final_lock>" lock ownership should remain after the transaction
 
     Examples:
-      | initial_lock | outcome | final_lock   |
-      | absent       | success | absent       |
-      | absent       | failure | absent       |
-      | pre-existing | success | pre-existing |
-      | pre-existing | failure | pre-existing |
+      | initial_lock  | outcome | final_lock   |
+      | absent        | success | absent       |
+      | absent        | failure | absent       |
+      | pre-existing  | success | pre-existing |
+      | pre-existing  | failure | pre-existing |
+      | stale-safe-pr | success | absent       |
+
+  Scenario: Safe PR creation refuses a live safe-pr lock owner
+    Given a safe-pr linked worktree with "active-safe-pr" lock ownership
+    When safe-pr protects a "blocked" preflight and PR creation transaction
+    Then safe-pr should reject overlapping transaction ownership
+    And the "active-safe-pr" lock ownership should remain after the transaction
 
   Scenario: All repository test runners use the required CI timeout
     Given local, affected integration, and required CI Go test timeouts are configured

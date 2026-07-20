@@ -38,7 +38,7 @@ type localDevGuardrailState struct {
 	worktreeBase        string
 	worktreeRepo        string
 	worktreePath        string
-	initialLock         string
+	initialLockReason   string
 	transactionOutcome  string
 	transactionErr      error
 	lockedInPreflight   bool
@@ -82,6 +82,7 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^a safe-pr linked worktree with "([^"]*)" lock ownership$`, safePRLinkedWorktreeWithLockOwnership)
 	ctx.Step(`^safe-pr protects a "([^"]*)" preflight and PR creation transaction$`, safePRProtectsTransaction)
 	ctx.Step(`^the worktree should be protected during preflight and PR creation$`, worktreeShouldBeProtectedDuringTransaction)
+	ctx.Step(`^safe-pr should reject overlapping transaction ownership$`, safePRShouldRejectOverlappingTransactionOwnership)
 	ctx.Step(`^the "([^"]*)" lock ownership should remain after the transaction$`, lockOwnershipShouldRemainAfterTransaction)
 	ctx.Step(`^local, affected integration, and required CI Go test timeouts are configured$`, repositoryGoTestTimeoutsAreConfigured)
 	ctx.Step(`^AGM validates Go test timeout parity$`, agmValidatesGoTestTimeoutParity)
@@ -96,8 +97,9 @@ func safePRLinkedWorktreeWithLockOwnership(ctx context.Context, initial string) 
 	if err != nil {
 		return err
 	}
-	if initial != "absent" && initial != "pre-existing" {
-		return fmt.Errorf("unsupported initial worktree lock %q", initial)
+	initialReason, err := safePRBDDInitialLockReason(initial)
+	if err != nil {
+		return err
 	}
 	base, err := os.MkdirTemp("", "safe-pr-worktree-bdd-*")
 	if err != nil {
@@ -106,7 +108,7 @@ func safePRLinkedWorktreeWithLockOwnership(ctx context.Context, initial string) 
 	state.worktreeBase = base
 	state.worktreeRepo = filepath.Join(base, "repo")
 	state.worktreePath = filepath.Join(base, "worktree")
-	state.initialLock = initial
+	state.initialLockReason = initialReason
 	for _, args := range [][]string{
 		{"init", "-q", "-b", "main", state.worktreeRepo},
 		{"-C", state.worktreeRepo, "config", "user.name", "Safe PR BDD"},
@@ -128,10 +130,25 @@ func safePRLinkedWorktreeWithLockOwnership(ctx context.Context, initial string) 
 			return err
 		}
 	}
-	if initial == "pre-existing" {
-		_, err = runSafePRBDDGit(ctx, "-C", state.worktreeRepo, "worktree", "lock", "--reason", "bdd-existing-owner", state.worktreePath)
+	if state.initialLockReason != "" {
+		_, err = runSafePRBDDGit(ctx, "-C", state.worktreeRepo, "worktree", "lock", "--reason", state.initialLockReason, state.worktreePath)
 	}
 	return err
+}
+
+func safePRBDDInitialLockReason(initial string) (string, error) {
+	switch initial {
+	case "absent":
+		return "", nil
+	case "pre-existing":
+		return "bdd-existing-owner", nil
+	case "stale-safe-pr":
+		return "safe-pr-owned:2147483647:0011223344556677:stale BDD transaction", nil
+	case "active-safe-pr":
+		return fmt.Sprintf("safe-pr-owned:%d:0011223344556677:active BDD transaction", os.Getpid()), nil
+	default:
+		return "", fmt.Errorf("unsupported initial worktree lock %q", initial)
+	}
 }
 
 func safePRProtectsTransaction(ctx context.Context, outcome string) error {
@@ -139,7 +156,7 @@ func safePRProtectsTransaction(ctx context.Context, outcome string) error {
 	if err != nil {
 		return err
 	}
-	if outcome != "success" && outcome != "failure" {
+	if outcome != "success" && outcome != "failure" && outcome != "blocked" {
 		return fmt.Errorf("unsupported safe-pr transaction outcome %q", outcome)
 	}
 	state.transactionOutcome = outcome
@@ -182,6 +199,23 @@ func worktreeShouldBeProtectedDuringTransaction(ctx context.Context) error {
 	return nil
 }
 
+func safePRShouldRejectOverlappingTransactionOwnership(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.lockedInPreflight || state.lockedInPRCreate {
+		return fmt.Errorf("overlapping transaction ran = preflight:%t PR-create:%t", state.lockedInPreflight, state.lockedInPRCreate)
+	}
+	if state.transactionErr == nil {
+		return errors.New("overlapping transaction returned no error")
+	}
+	if !strings.Contains(state.transactionErr.Error(), "active safe-pr transaction") {
+		return fmt.Errorf("overlapping transaction error: %w", state.transactionErr)
+	}
+	return nil
+}
+
 func lockOwnershipShouldRemainAfterTransaction(ctx context.Context, final string) error {
 	state, err := getLocalDevGuardrailState(ctx)
 	if err != nil {
@@ -199,6 +233,10 @@ func lockOwnershipShouldRemainAfterTransaction(ctx context.Context, final string
 	case "pre-existing":
 		if !locked || reason != "bdd-existing-owner" {
 			return fmt.Errorf("pre-existing lock after transaction = locked:%t reason:%q", locked, reason)
+		}
+	case "active-safe-pr":
+		if !locked || reason != state.initialLockReason {
+			return fmt.Errorf("active safe-pr lock after rejection = locked:%t reason:%q", locked, reason)
 		}
 	default:
 		return fmt.Errorf("unsupported final worktree lock %q", final)

@@ -3,6 +3,7 @@ package safepr
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -136,6 +137,80 @@ func TestWithWorktreeLockPreservesReplacementOwner(t *testing.T) {
 	}
 	if !state.locked || state.reason != "replacement-owner" {
 		t.Fatalf("replacement lock was changed: %+v", state)
+	}
+}
+
+func TestWithWorktreeLockReclaimsStaleSafePROwner(t *testing.T) {
+	_, worktree := initLinkedWorktree(t)
+	staleReason := "safe-pr-owned:2147483647:0011223344556677:interrupted transaction"
+	gitTestRun(t, "-C", worktree, "worktree", "lock", "--reason", staleReason, worktree)
+
+	called := false
+	if err := WithWorktreeLock(worktree, "replacement transaction", func() error {
+		called = true
+		state, inspectErr := inspectWorktreeLock(worktree)
+		if inspectErr != nil {
+			return inspectErr
+		}
+		if !state.locked || state.reason == staleReason || !strings.Contains(state.reason, "replacement transaction") {
+			t.Fatalf("reclaimed lock during transaction = %+v", state)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("transaction did not run after reclaiming stale safe-pr owner")
+	}
+	state, err := inspectWorktreeLock(worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.locked {
+		t.Fatalf("replacement owned lock survived transaction: %+v", state)
+	}
+}
+
+func TestWithWorktreeLockRejectsActiveSafePROwner(t *testing.T) {
+	_, worktree := initLinkedWorktree(t)
+	activeReason := fmt.Sprintf("safe-pr-owned:%d:0011223344556677:active transaction", os.Getpid())
+	gitTestRun(t, "-C", worktree, "worktree", "lock", "--reason", activeReason, worktree)
+
+	called := false
+	err := WithWorktreeLock(worktree, "overlapping transaction", func() error {
+		called = true
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "active safe-pr transaction") {
+		t.Fatalf("WithWorktreeLock(active owner) = %v, want active-owner rejection", err)
+	}
+	if called {
+		t.Fatal("overlapping transaction ran while safe-pr owner was live")
+	}
+	state, inspectErr := inspectWorktreeLock(worktree)
+	if inspectErr != nil {
+		t.Fatal(inspectErr)
+	}
+	if !state.locked || state.reason != activeReason {
+		t.Fatalf("active safe-pr lock changed: %+v", state)
+	}
+}
+
+func TestSafePROwnerPIDRequiresGeneratedOwnershipShape(t *testing.T) {
+	valid := fmt.Sprintf("safe-pr-owned:%d:0011223344556677:transaction", os.Getpid())
+	pid, ok := safePROwnerPID(valid)
+	if !ok || pid != os.Getpid() {
+		t.Fatalf("safePROwnerPID(%q) = %d, %t", valid, pid, ok)
+	}
+	for _, reason := range []string{
+		"manual-owner",
+		"safe-pr-owned:not-a-pid:0011223344556677:transaction",
+		"safe-pr-owned:1:short:transaction",
+		"safe-pr-owned:1:0011223344556677",
+	} {
+		if pid, ok := safePROwnerPID(reason); ok {
+			t.Errorf("safePROwnerPID(%q) = %d, true; want malformed ownership rejected", reason, pid)
+		}
 	}
 }
 

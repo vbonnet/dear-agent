@@ -9,12 +9,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 )
 
-const worktreeCommandTimeout = 10 * time.Second
+const (
+	worktreeCommandTimeout = 10 * time.Second
+	worktreeLockAttempts   = 3
+	safePROwnedLockPrefix  = "safe-pr-owned:"
+)
 
 type worktreeLock struct {
 	locked bool
@@ -32,29 +37,64 @@ func WithWorktreeLock(dir, reason string, action func() error) error {
 	if err != nil {
 		return err
 	}
-	initial, err := inspectWorktreeLock(root)
-	if err != nil {
-		return err
-	}
-	if initial.locked {
-		return runWithPreservedLock(root, initial, action)
-	}
-
-	ownedReason, err := worktreeLockReason(reason)
-	if err != nil {
-		return fmt.Errorf("protect safe-pr worktree: generate lock owner: %w", err)
-	}
-	if _, err := runWorktreeGit(root, "worktree", "lock", "--reason", ownedReason, root); err != nil {
-		// Another owner may have won the check-to-lock race. Preserve that lock
-		// instead of treating it as ours or unlocking it after the transaction.
+	var ownedReason string
+	var lastErr error
+	for range worktreeLockAttempts {
 		current, inspectErr := inspectWorktreeLock(root)
-		if inspectErr == nil && current.locked {
-			return runWithPreservedLock(root, current, action)
+		if inspectErr != nil {
+			return errors.Join(lastErr, inspectErr)
 		}
-		return errors.Join(fmt.Errorf("protect safe-pr worktree: acquire lock: %w", err), inspectErr)
-	}
+		if current.locked {
+			ownerPID, safePROwned := safePROwnerPID(current.reason)
+			if !safePROwned {
+				return runWithPreservedLock(root, current, action)
+			}
+			if safePROwnerAlive(ownerPID) {
+				return fmt.Errorf("protect safe-pr worktree: active safe-pr transaction owns %s (pid %d)", root, ownerPID)
+			}
+			if _, reclaimErr := runWorktreeGit(root, "worktree", "unlock", root); reclaimErr != nil {
+				lastErr = errors.Join(lastErr, fmt.Errorf("protect safe-pr worktree: reclaim stale owner pid %d: %w", ownerPID, reclaimErr))
+			}
+			continue
+		}
 
-	return runWithOwnedLock(root, ownedReason, action)
+		if ownedReason == "" {
+			ownedReason, err = worktreeLockReason(reason)
+			if err != nil {
+				return fmt.Errorf("protect safe-pr worktree: generate lock owner: %w", err)
+			}
+		}
+		if _, lockErr := runWorktreeGit(root, "worktree", "lock", "--reason", ownedReason, root); lockErr != nil {
+			lastErr = errors.Join(lastErr, fmt.Errorf("protect safe-pr worktree: acquire lock: %w", lockErr))
+			continue
+		}
+		return runWithOwnedLock(root, ownedReason, action)
+	}
+	return errors.Join(lastErr, fmt.Errorf("protect safe-pr worktree: lock ownership did not stabilize after %d attempts", worktreeLockAttempts))
+}
+
+func safePROwnerPID(reason string) (int, bool) {
+	if !strings.HasPrefix(reason, safePROwnedLockPrefix) {
+		return 0, false
+	}
+	parts := strings.SplitN(strings.TrimPrefix(reason, safePROwnedLockPrefix), ":", 3)
+	if len(parts) != 3 {
+		return 0, false
+	}
+	pid, err := strconv.Atoi(parts[0])
+	if err != nil || pid <= 0 {
+		return 0, false
+	}
+	owner, err := hex.DecodeString(parts[1])
+	if err != nil || len(owner) != 8 {
+		return 0, false
+	}
+	return pid, true
+}
+
+func safePROwnerAlive(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil || !errors.Is(err, syscall.ESRCH)
 }
 
 func linkedWorktreeRoot(dir string) (string, error) {
@@ -154,7 +194,7 @@ func worktreeLockReason(reason string) (string, error) {
 	if reason == "" {
 		reason = "safe-pr transaction"
 	}
-	return fmt.Sprintf("safe-pr-owned:%d:%s:%s", os.Getpid(), hex.EncodeToString(owner), reason), nil
+	return fmt.Sprintf("%s%d:%s:%s", safePROwnedLockPrefix, os.Getpid(), hex.EncodeToString(owner), reason), nil
 }
 
 func runWorktreeGit(dir string, args ...string) (string, error) {
