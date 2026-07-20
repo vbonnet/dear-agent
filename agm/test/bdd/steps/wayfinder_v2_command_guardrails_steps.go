@@ -82,11 +82,16 @@ func retiredExternalWayfinderValidatorsAreAbsent(ctx context.Context) error {
 	return nil
 }
 
-func activeCommandGuidanceUsesCanonicalEntrypoint(ctx context.Context) error {
+func activeCommandGuidanceUsesCanonicalEntrypoint(ctx context.Context) (resultErr error) {
 	state, err := getWayfinderV2CommandState(ctx)
 	if err != nil {
 		return err
 	}
+	rootFS, err := os.OpenRoot(state.repoRoot)
+	if err != nil {
+		return fmt.Errorf("open repository root: %w", err)
+	}
+	defer preserveRootCloseError(rootFS, &resultErr)
 	retiredBinary := regexp.MustCompile(`wayfinder-session(?:[ \t]|$)`)
 	for _, rel := range []string{
 		"AGENTS.md",
@@ -111,7 +116,11 @@ func activeCommandGuidanceUsesCanonicalEntrypoint(ctx context.Context) error {
 			if strings.HasSuffix(path, "_test.go") {
 				return nil
 			}
-			data, readErr := os.ReadFile(path)
+			relPath, relErr := filepath.Rel(state.repoRoot, path)
+			if relErr != nil {
+				return relErr
+			}
+			data, readErr := rootFS.ReadFile(filepath.ToSlash(relPath))
 			if readErr != nil {
 				return readErr
 			}

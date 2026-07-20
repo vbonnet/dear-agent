@@ -45,7 +45,7 @@ type StatusV2 struct {
 // WaypointHistory represents a waypoint in the history with build metrics
 type WaypointHistory struct {
 	Name         string     `yaml:"name"`   // CHARTER, PROBLEM, RESEARCH, DESIGN, SPEC, PLAN, SETUP, BUILD, RETRO
-	Status       string     `yaml:"status"` // completed, in-progress, blocked, skipped
+	Status       string     `yaml:"status"` // pending, completed, in-progress, blocked, skipped
 	StartedAt    time.Time  `yaml:"started_at"`
 	CompletedAt  *time.Time `yaml:"completed_at,omitempty"`
 	Deliverables []string   `yaml:"deliverables,omitempty"`

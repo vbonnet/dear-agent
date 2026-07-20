@@ -260,6 +260,22 @@ func TestParseV2RejectsInvalidCanonicalStatus(t *testing.T) {
 	}
 }
 
+func TestParseV2AcceptsPendingWaypointHistoryAfterRewind(t *testing.T) {
+	st := NewStatusV2("test", ProjectTypeFeature, RiskLevelM)
+	st.WaypointHistory = []WaypointHistory{{
+		Name:      WaypointV2Problem,
+		Status:    WaypointStatusV2Pending,
+		StartedAt: time.Now().Add(-time.Hour),
+	}}
+	path := filepath.Join(t.TempDir(), StatusFilename)
+	if err := WriteV2(st, path); err != nil {
+		t.Fatalf("WriteV2: %v", err)
+	}
+	if _, err := ParseV2(path); err != nil {
+		t.Fatalf("ParseV2 rejected rewind-produced pending history: %v", err)
+	}
+}
+
 func TestParseV2AcceptsStatusWrittenAtPhaseStart(t *testing.T) {
 	for _, phase := range []string{PhaseV2Spec, PhaseV2Plan, PhaseV2Build} {
 		t.Run(phase, func(t *testing.T) {

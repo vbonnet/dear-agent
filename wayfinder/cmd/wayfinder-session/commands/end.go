@@ -11,7 +11,10 @@ import (
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/tracker"
 )
 
-var sessionStatus string
+var (
+	sessionStatus        string
+	sessionBlockedReason string
+)
 
 // EndCmd is the cobra command that ends the current Wayfinder session.
 var EndCmd = &cobra.Command{
@@ -22,7 +25,7 @@ var EndCmd = &cobra.Command{
 Supported statuses:
   completed  - Project achieved its goals
   abandoned  - Stopped before completion
-  blocked    - Paused, may resume later
+  blocked    - Paused, may resume later; requires --reason
 
 Example:
   wayfinder session end --status completed`,
@@ -31,18 +34,19 @@ Example:
 
 func init() {
 	EndCmd.Flags().StringVar(&sessionStatus, "status", "completed", "Session status (completed|abandoned|blocked)")
+	EndCmd.Flags().StringVar(&sessionBlockedReason, "reason", "", "Reason the session is blocked (required with --status blocked)")
 }
 
 func runEnd(cmd *cobra.Command, args []string) error {
-	return runEndInDir(GetProjectDirectory(), sessionStatus)
+	return runEndV2(GetProjectDirectory(), sessionStatus, sessionBlockedReason)
 }
 
 func runEndInDir(projectDir, newStatus string) error {
-	return runEndV2(projectDir, newStatus)
+	return runEndV2(projectDir, newStatus, "")
 }
 
 // runEndV2 handles canonical WAYFINDER-STATUS.md files.
-func runEndV2(projectDir, newStatus string) error {
+func runEndV2(projectDir, newStatus, blockedReason string) error {
 	validStatuses := map[string]bool{
 		status.StatusV2Completed: true,
 		status.StatusV2Abandoned: true,
@@ -51,6 +55,9 @@ func runEndV2(projectDir, newStatus string) error {
 	if !validStatuses[newStatus] {
 		return fmt.Errorf("invalid status: %s (must be completed, abandoned, or blocked)", newStatus)
 	}
+	if newStatus == status.StatusV2Blocked && blockedReason == "" {
+		return fmt.Errorf("blocked status requires --reason")
+	}
 
 	st, err := status.ParseV2FromDir(projectDir)
 	if err != nil {
@@ -58,9 +65,16 @@ func runEndV2(projectDir, newStatus string) error {
 	}
 
 	now := time.Now()
-	st.CompletionDate = &now
 	st.Status = newStatus
 	st.UpdatedAt = now
+	st.BlockedReason = ""
+	st.CompletionDate = nil
+	if newStatus == status.StatusV2Blocked {
+		st.BlockedReason = blockedReason
+	}
+	if newStatus == status.StatusV2Completed {
+		st.CompletionDate = &now
+	}
 
 	// Guard against zero CreatedAt — use UpdatedAt as the session start if unset.
 	startedAt := st.CreatedAt
@@ -80,7 +94,7 @@ func runEndV2(projectDir, newStatus string) error {
 	}
 
 	if err := status.ValidateV2(st); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: validation errors found:\n%v\n", err)
+		return fmt.Errorf("invalid completed session status: %w", err)
 	}
 
 	if err := status.WriteV2ToDir(st, projectDir); err != nil {
