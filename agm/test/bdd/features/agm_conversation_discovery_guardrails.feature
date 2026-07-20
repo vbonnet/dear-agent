@@ -30,3 +30,9 @@ Feature: AGM conversation and discovery package guardrails
       | agm/internal/search       |
       | agm/internal/transcript   |
       | agm/internal/uuid         |
+
+  Scenario: AGY history uses native conversation storage
+    Given an AGY native conversation ID
+    When AGM resolves AGY conversation history paths
+    Then AGY history should include the native conversation database
+    And AGY history should include compact and full transcripts
