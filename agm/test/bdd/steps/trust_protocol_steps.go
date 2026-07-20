@@ -8,12 +8,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/cucumber/godog"
 
 	"github.com/vbonnet/dear-agent/agm/internal/contracts"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
+	"github.com/vbonnet/dear-agent/agm/internal/procguard"
 )
 
 // trustTestState holds per-scenario trust test state.
@@ -32,6 +36,8 @@ type trustEnvironmentValue struct {
 type trustTestStateKey struct{}
 
 const trustProtocolFeatureName = "trust_protocol.feature"
+
+const trustGoEnvTimeout = 10 * time.Second
 
 // RegisterTrustProtocolSteps registers step definitions for trust protocol features.
 func RegisterTrustProtocolSteps(ctx *godog.ScenarioContext) {
@@ -225,11 +231,13 @@ func resolveTrustGoCaches() (string, string, error) {
 	if goCacheSet && goCache != "" && goModCacheSet && goModCache != "" {
 		return goCache, goModCache, nil
 	}
-	output, err := exec.Command("go", "env", "GOCACHE", "GOMODCACHE").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), trustGoEnvTimeout)
+	defer cancel()
+	output, err := newTrustGoEnvCommand(ctx).Output()
 	if err != nil {
 		return "", "", fmt.Errorf("resolve shared Go caches for trust BDD: %w", err)
 	}
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	lines := parseTrustGoEnv(output)
 	if len(lines) != 2 || lines[0] == "" || lines[1] == "" {
 		return "", "", fmt.Errorf("resolve shared Go caches for trust BDD: unexpected go env output %q", output)
 	}
@@ -240,6 +248,24 @@ func resolveTrustGoCaches() (string, string, error) {
 		goModCache = lines[1]
 	}
 	return goCache, goModCache, nil
+}
+
+func newTrustGoEnvCommand(ctx context.Context) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "go", "env", "GOCACHE", "GOMODCACHE")
+	cmd.SysProcAttr = procguard.ProcessGroupAttr()
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = time.Second
+	return cmd
+}
+
+func parseTrustGoEnv(output []byte) []string {
+	normalized := strings.ReplaceAll(string(output), "\r", "")
+	return slices.Collect(strings.SplitSeq(strings.TrimSpace(normalized), "\n"))
 }
 
 func snapshotTrustEnvironment() map[string]trustEnvironmentValue {

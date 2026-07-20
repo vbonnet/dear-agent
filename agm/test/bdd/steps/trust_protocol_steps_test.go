@@ -1,9 +1,12 @@
 package steps
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/cucumber/godog"
 )
@@ -109,5 +112,39 @@ func TestTrustProtocolResolveGoCachesUsesExplicitEnvironment(t *testing.T) {
 	}
 	if goCache != "/explicit/buildcache" || goModCache != "/explicit/modcache" {
 		t.Fatalf("resolved caches = %q, %q", goCache, goModCache)
+	}
+}
+
+func TestTrustGoEnvCommandIsBoundedAndGroupCancelable(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), trustGoEnvTimeout)
+	defer cancel()
+	cmd := newTrustGoEnvCommand(ctx)
+
+	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setpgid {
+		t.Fatal("go env command must run in an isolated process group")
+	}
+	if cmd.Cancel == nil {
+		t.Fatal("go env command must cancel its process group")
+	}
+	if cmd.WaitDelay != time.Second {
+		t.Fatalf("go env command WaitDelay = %v, want %v", cmd.WaitDelay, time.Second)
+	}
+	if cmd.Process != nil {
+		t.Fatal("command unexpectedly started during policy inspection")
+	}
+	if err := cmd.Cancel(); err != nil {
+		t.Fatalf("cancel before start = %v", err)
+	}
+}
+
+func TestParseTrustGoEnvAcceptsUnixAndWindowsLineEndings(t *testing.T) {
+	want := []string{"/cache/build", "/cache/mod"}
+	for _, output := range [][]byte{
+		[]byte("/cache/build\n/cache/mod\n"),
+		[]byte("/cache/build\r\n/cache/mod\r\n"),
+	} {
+		if got := parseTrustGoEnv(output); !slices.Equal(got, want) {
+			t.Fatalf("parseTrustGoEnv(%q) = %q, want %q", output, got, want)
+		}
 	}
 }

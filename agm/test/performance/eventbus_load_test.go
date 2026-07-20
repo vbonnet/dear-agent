@@ -126,6 +126,24 @@ func waitForClientCount(t *testing.T, hub *eventbus.Hub, want int) {
 	t.Fatalf("client readiness = %d, want %d", hub.ClientCount(), want)
 }
 
+func waitForLatencyCount(t *testing.T, mu *sync.Mutex, latencies *[]time.Duration, want int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		got := len(*latencies)
+		mu.Unlock()
+		if got == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	mu.Lock()
+	got := len(*latencies)
+	mu.Unlock()
+	t.Fatalf("observed event deliveries = %d, want %d", got, want)
+}
+
 func broadcastWithBackpressure(t *testing.T, hub *eventbus.Hub, event *eventbus.Event) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -954,13 +972,13 @@ func TestConnectionChurn(t *testing.T) {
 		ephConn.Close()
 		waitForClientCount(t, hub, stableClients)
 	}
-	testDuration := time.Since(testStart)
 
-	// Give stable clients time to receive remaining events. Verify ephemeral
+	// Wait for every stable client to observe every broadcast. Verify ephemeral
 	// cleanup while all stable clients are still connected so a stable
 	// disconnect cannot mask a leaked ephemeral client.
-	time.Sleep(500 * time.Millisecond)
+	waitForLatencyCount(t, &latMu, &latencies, stableClients*totalEvents)
 	waitForClientCount(t, hub, stableClients)
+	testDuration := time.Since(testStart)
 
 	// Close stable connections to unblock ReadMessage in receiver goroutines.
 	for _, conn := range stableConns {
