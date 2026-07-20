@@ -126,7 +126,7 @@ func TestSubsystemADRDirectoriesHaveUniqueIndexedLifecycle(t *testing.T) {
 			relativeDir: "agm/internal/evaluation/ADR",
 			file:        regexp.MustCompile(`^ADR-([0-9]{3})-[a-z0-9-]+\.md$`),
 			title:       regexp.MustCompile(`(?m)^# ADR-([0-9]{3}): .+$`),
-			status:      regexp.MustCompile(`(?m)^## Status[ \t]*\n+[ \t]*(Accepted|Proposed|Deprecated|Superseded)[ \t]*$`),
+			status:      regexp.MustCompile(`(?m)^## Status[ \t]*\n+[ \t]*(Accepted|Proposed|Deprecated|Superseded)(?:[ \t]+.*)?$`),
 			index:       adrIndexPattern,
 		},
 	}
@@ -175,6 +175,14 @@ func assertSubsystemADRScope(t *testing.T, root string, scope subsystemADRScope)
 		} else {
 			ids[filename[1]] = entry.Name()
 		}
+		if statuses[0][1] == "Superseded" {
+			successor, ok := adrSuccessorTarget(statuses[0][0], content)
+			if !ok {
+				t.Errorf("%s: superseded status must link to its live successor", entry.Name())
+			} else {
+				assertLiveSubsystemADRSuccessor(t, dir, entry.Name(), successor, scope)
+			}
+		}
 		assertRelativeMarkdownLinksResolve(t, dir, entry.Name(), content)
 		records[entry.Name()] = adrRecord{id: filename[1], status: statuses[0][1]}
 	}
@@ -188,6 +196,47 @@ func assertSubsystemADRScope(t *testing.T, root string, scope subsystemADRScope)
 		indexed[match[2]] = adrRecord{id: match[1], status: match[3]}
 	}
 	assertSameADRRecords(t, records, indexed)
+}
+
+func assertLiveSubsystemADRSuccessor(t *testing.T, dir, source, target string, scope subsystemADRScope) {
+	t.Helper()
+	if err := validateLiveSubsystemADRSuccessor(dir, source, target, scope); err != nil {
+		t.Errorf("%s: %v", source, err)
+	}
+}
+
+func validateLiveSubsystemADRSuccessor(dir, source, target string, scope subsystemADRScope) error {
+	targetPath := filepath.Clean(filepath.Join(dir, filepath.FromSlash(target)))
+	if targetPath == filepath.Join(dir, source) {
+		return fmt.Errorf("superseded status must point to a different ADR")
+	}
+	if filepath.Dir(targetPath) != filepath.Clean(dir) || !scope.file.MatchString(filepath.Base(targetPath)) {
+		return fmt.Errorf("successor %q is not an ADR record in the local inventory", target)
+	}
+	indexData, err := os.ReadFile(filepath.Join(dir, "README.md"))
+	if err != nil {
+		return fmt.Errorf("read successor inventory: %w", err)
+	}
+	indexed := false
+	for _, entry := range scope.index.FindAllStringSubmatch(string(indexData), -1) {
+		indexedPath := filepath.Clean(filepath.Join(dir, filepath.FromSlash(entry[2])))
+		if indexedPath == targetPath {
+			indexed = true
+			break
+		}
+	}
+	if !indexed {
+		return fmt.Errorf("successor %q is not indexed by its local ADR inventory", target)
+	}
+	content, err := os.ReadFile(targetPath)
+	if err != nil {
+		return fmt.Errorf("successor %q cannot be read: %w", target, err)
+	}
+	statuses := scope.status.FindAllStringSubmatch(string(content), -1)
+	if len(statuses) != 1 || (statuses[0][1] != "Accepted" && statuses[0][1] != "Proposed") {
+		return fmt.Errorf("successor %q must be one live Accepted or Proposed ADR", target)
+	}
+	return nil
 }
 
 func assertLiveADRSuccessor(t *testing.T, root, dir, source, target string) {
@@ -294,6 +343,47 @@ func TestValidateLiveADRSuccessor(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := validateLiveADRSuccessor(root, dir, "ADR-001-old.md", tt.target)
+			if tt.want == "" && err != nil {
+				t.Fatal(err)
+			}
+			if tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateLiveSubsystemADRSuccessor(t *testing.T) {
+	dir := t.TempDir()
+	scope := subsystemADRScope{
+		file:   regexp.MustCompile(`^([0-9]{3})-[a-z0-9-]+\.md$`),
+		status: regexp.MustCompile(`(?m)^- Status: (Accepted|Proposed|Deprecated|Superseded)(?: .*)?$`),
+		index:  regexp.MustCompile(`(?m)^\| \[([0-9]{3})\]\(([^)]+\.md)\) \| (Accepted|Proposed|Deprecated|Superseded) \| [^|]+ \|$`),
+	}
+	files := map[string]string{
+		"README.md":       "| [002](002-live.md) | Accepted | Live |\n| [003](003-retired.md) | Deprecated | Retired |\n",
+		"002-live.md":     "# ADR 002: Live\n\n- Status: Accepted\n",
+		"003-retired.md":  "# ADR 003: Retired\n\n- Status: Deprecated\n",
+		"004-unlisted.md": "# ADR 004: Unlisted\n\n- Status: Accepted\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tests := []struct {
+		name   string
+		target string
+		want   string
+	}{
+		{name: "live indexed successor", target: "002-live.md"},
+		{name: "outside local inventory", target: "../002-live.md", want: "local inventory"},
+		{name: "not indexed", target: "004-unlisted.md", want: "not indexed"},
+		{name: "not live", target: "003-retired.md", want: "must be one live"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateLiveSubsystemADRSuccessor(dir, "001-old.md", tt.target, scope)
 			if tt.want == "" && err != nil {
 				t.Fatal(err)
 			}
