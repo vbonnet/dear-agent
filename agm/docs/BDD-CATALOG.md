@@ -921,7 +921,7 @@ every route; a provider-specific default here propagates across the codebase.
 **File:** [`validation_workspace_parity.feature`](../test/bdd/features/validation_workspace_parity.feature)
 
 **Drives:** Co-located contracts and route-neutral implementation checks for
-filesystem safety, content validation, VCS, versioning, W0, and workspace state.
+filesystem safety, content validation, VCS, versioning, and workspace state.
 
 **Key scenarios:**
 - Every validation and workspace package carries a strict EARS specification.

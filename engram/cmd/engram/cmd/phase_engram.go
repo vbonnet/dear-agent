@@ -19,7 +19,7 @@ This replaces hardcoded hashes in skill templates. Instead of embedding a
 stale hash, call this command at runtime to get the current path and hash.
 
 Supported phases: CHARTER, PROBLEM, RESEARCH, DECISION, SPEC, DESIGN, PLAN,
-BUILD, RETRO (and their numeric aliases W0, D1-D4, S4-S11).
+BUILD, RETRO.
 
 Examples:
   # Get path and hash for CHARTER phase

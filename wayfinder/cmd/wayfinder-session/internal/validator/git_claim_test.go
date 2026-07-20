@@ -25,12 +25,12 @@ func TestValidateGitCommitStatus(t *testing.T) {
 			wantErr:   false,
 		},
 		{
-			name:        "BUILD - deliverable untracked (VIOLATION - oss-55e)",
+			name:        "BUILD - current deliverable allowed but code untracked",
 			phaseName:   "BUILD",
 			files:       []string{"BUILD-implementation.md", "main.go"},
 			gitCommit:   false,
 			wantErr:     true,
-			errContains: "deliverable files exist but are not committed to git",
+			errContains: "main.go",
 		},
 		{
 			name:      "RETRO - deliverables committed",
@@ -40,12 +40,11 @@ func TestValidateGitCommitStatus(t *testing.T) {
 			wantErr:   false,
 		},
 		{
-			name:        "RETRO - retro doc untracked (VIOLATION - Instance 1 from today)",
-			phaseName:   "RETRO",
-			files:       []string{"RETRO-retrospective.md"},
-			gitCommit:   false,
-			wantErr:     true,
-			errContains: "RETRO-retrospective.md",
+			name:      "RETRO - current deliverable remains reachable for scoped commit",
+			phaseName: "RETRO",
+			files:     []string{"RETRO-retrospective.md"},
+			gitCommit: false,
+			wantErr:   false,
 		},
 		{
 			name:      "RETRO - all phase deliverables committed",
@@ -55,12 +54,12 @@ func TestValidateGitCommitStatus(t *testing.T) {
 			wantErr:   false,
 		},
 		{
-			name:        "RETRO - retrospective untracked (VIOLATION - Instance 2 from today)",
+			name:        "RETRO - earlier deliverable untracked",
 			phaseName:   "RETRO",
-			files:       []string{"RETRO-retrospective.md"},
+			files:       []string{"BUILD-implementation.md", "RETRO-retrospective.md"},
 			gitCommit:   false,
 			wantErr:     true,
-			errContains: "RETRO-retrospective.md",
+			errContains: "BUILD-implementation.md",
 		},
 		{
 			name:      "PROBLEM - planning phase (no git validation)",
@@ -85,12 +84,11 @@ func TestValidateGitCommitStatus(t *testing.T) {
 			errContains: "server.py",
 		},
 		{
-			name:        "BUILD - wayfinder internal files ignored",
-			phaseName:   "BUILD",
-			files:       []string{"BUILD-implementation.md", ".wayfinder/session.json"},
-			gitCommit:   false, // .wayfinder/session.json is untracked but should be ignored
-			wantErr:     true,  // Only BUILD-implementation.md causes error
-			errContains: "BUILD-implementation.md",
+			name:      "BUILD - current deliverable and wayfinder internal files allowed",
+			phaseName: "BUILD",
+			files:     []string{"BUILD-implementation.md", ".wayfinder/session.json"},
+			gitCommit: false,
+			wantErr:   false,
 		},
 	}
 
@@ -198,14 +196,15 @@ func TestValidateGitCommitStatus_PartiallyCommitted(t *testing.T) {
 	// This simulates Instance 2: CLI committed WAYFINDER-STATUS.md
 	// but left ~76 phase deliverables uncommitted
 
-	// Validation should FAIL for RETRO
+	// Validation should fail for the uncommitted earlier-phase deliverables;
+	// RETRO-retrospective.md itself remains reachable for the scoped commit.
 	err := validateGitCommitStatus(tmpDir, "RETRO")
 	if err == nil {
 		t.Fatalf("expected error for partially committed files, got nil")
 		return
 	}
-	if !strings.Contains(err.Error(), "RETRO-retrospective.md") {
-		t.Errorf("error should mention RETRO-retrospective.md, got: %v", err)
+	if !strings.Contains(err.Error(), "BUILD-implementation.md") {
+		t.Errorf("error should mention BUILD-implementation.md, got: %v", err)
 	}
 }
 

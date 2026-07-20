@@ -325,6 +325,13 @@ func scanActiveWayfinderRoot(repoRoot, relativeRoot string, activeExtensions map
 }
 
 func validateCanonicalWayfinderConsumers(repoRoot string) error {
+	retiredPackage := filepath.Join(repoRoot, "pkg/w0")
+	if _, err := os.Stat(retiredPackage); err == nil {
+		return fmt.Errorf("retired Wayfinder package still exists: pkg/w0")
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("inspect retired Wayfinder package: %w", err)
+	}
+
 	checks := []struct {
 		path      string
 		required  []string
@@ -334,6 +341,10 @@ func validateCanonicalWayfinderConsumers(repoRoot string) error {
 		{path: "engram/cmd/engram-mcp/readtools.go", required: []string{`fields["current_waypoint"]`, `fields["status"]`}, forbidden: []string{"rePhase", "Current Phase:"}},
 		{path: "agm/cmd/agm-mcp-server/wayfinder.go", required: []string{`fmString(fm, "current_waypoint")`, `fmString(fm, "project_name")`}, forbidden: []string{`fmString(fm, "current_phase"`, `fmString(fm, "project_name",`}},
 		{path: "internal/safepr/safepr.go", required: []string{`yaml:"schema_version"`, `yaml:"project_name"`}, forbidden: []string{`yaml:"session_id"`, "st.SessionID"}},
+		{path: "engram/internal/config/config.go", forbidden: []string{"WayfinderConfig", "W0Config", `yaml:"w0"`}},
+		{path: "engram/internal/config/loader.go", forbidden: []string{"mergeWayfinder", "mergeW0", "hasW0"}},
+		{path: "engram/cmd/engram/cmd/config_show.go", forbidden: []string{"Wayfinder", "w0."}},
+		{path: "engram/cmd/engram/cmd/phase_engram.go", forbidden: []string{"numeric aliases", "W0", "D1-D4", "S4-S11"}},
 	}
 	for _, check := range checks {
 		data, err := os.ReadFile(filepath.Join(repoRoot, check.path))

@@ -36,7 +36,7 @@ func validateGitCommitStatus(projectDir, phaseName string) error {
 	}
 
 	// Collect all violations
-	violations := checkDeliverableMarkdown(projectDir, untrackedFiles)
+	violations := checkDeliverableMarkdown(projectDir, phaseName, untrackedFiles)
 	violations = append(violations, checkCodeFiles(projectDir, phaseName, untrackedFiles)...)
 
 	if len(violations) > 0 {
@@ -50,12 +50,18 @@ func validateGitCommitStatus(projectDir, phaseName string) error {
 	return nil
 }
 
-// checkDeliverableMarkdown checks for untracked deliverable markdown files
-func checkDeliverableMarkdown(projectDir string, untrackedFiles []string) []string {
+// checkDeliverableMarkdown checks for untracked deliverable markdown files.
+// The current phase artifact is committed by CommitPhaseCompletion after all
+// validation gates pass, so it must remain reachable here. Artifacts from any
+// other phase still prove that an earlier deliverable was never committed.
+func checkDeliverableMarkdown(projectDir, currentPhase string, untrackedFiles []string) []string {
 	violations := []string{}
 	allPhases := []string{"CHARTER", "PROBLEM", "RESEARCH", "DESIGN", "SPEC", "PLAN", "SETUP", "BUILD", "RETRO"}
 
 	for _, phase := range allPhases {
+		if phase == currentPhase {
+			continue
+		}
 		pattern := fmt.Sprintf("%s-*.md", phase)
 		matches, err := filepath.Glob(filepath.Join(projectDir, pattern))
 		if err != nil {
