@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -60,6 +61,37 @@ func TestRunReviewSkillUsesContainedDeterministicChecks(t *testing.T) {
 	}
 	if score != 10 || len(issues) != 0 {
 		t.Fatalf("contained review = score %.1f, issues %v; want 10 with no issues", score, issues)
+	}
+}
+
+func TestBuiltinReviewIssuesAcceptsCanonicalADRStatusFormatting(t *testing.T) {
+	formats := []string{
+		"Status: Accepted",
+		"**Status**: Accepted",
+		"**Status:** Accepted",
+	}
+	for _, statusLine := range formats {
+		t.Run(statusLine, func(t *testing.T) {
+			content := "# ADR-001 Example\n\n" + statusLine + "\n\n## Context\nThis context records enough substantive detail to make the decision reviewable.\n\n## Decision\nThis decision records the selected approach and its important trade-offs.\n"
+			issues, err := builtinReviewIssues("review-adr", content)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(issues) != 0 {
+				t.Fatalf("status line %q produced issues %v", statusLine, issues)
+			}
+		})
+	}
+}
+
+func TestBuiltinReviewIssuesRejectsMissingADRStatusValue(t *testing.T) {
+	content := "# ADR-001 Example\n\n**Status:**\n\n## Context\nThis context records enough substantive detail to make the decision reviewable.\n\n## Decision\nThis decision records the selected approach and its important trade-offs.\n"
+	issues, err := builtinReviewIssues("review-adr", content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsString(strings.Join(issues, "; "), "ADR must contain a Status line") {
+		t.Fatalf("issues = %v, want missing Status line finding", issues)
 	}
 }
 

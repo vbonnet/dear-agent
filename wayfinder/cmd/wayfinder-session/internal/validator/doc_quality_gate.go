@@ -296,13 +296,24 @@ func builtinReviewIssues(skillName, content string) ([]string, error) {
 	if skillName == "review-adr" && !strings.HasPrefix(trimmed, "# ADR-") {
 		issues = append(issues, "ADR must begin with a canonical # ADR- heading")
 	}
-	if skillName == "review-adr" && !strings.Contains("\n"+trimmed, "\nStatus: ") {
+	if skillName == "review-adr" && !hasADRStatusLine(trimmed) {
 		issues = append(issues, "ADR must contain a Status line")
 	}
 	if skillName != "review-adr" && skillName != "review-architecture" {
 		return nil, fmt.Errorf("unknown built-in document review %q", skillName)
 	}
 	return issues, nil
+}
+
+func hasADRStatusLine(content string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		normalized := strings.TrimSpace(strings.ReplaceAll(line, "**", ""))
+		value, found := strings.CutPrefix(normalized, "Status:")
+		if found && strings.TrimSpace(value) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // formatDesignValidationError creates a detailed error message for DESIGN validation failures.
