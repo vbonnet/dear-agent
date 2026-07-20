@@ -25,6 +25,14 @@ type adrRecord struct {
 	status string
 }
 
+type subsystemADRScope struct {
+	relativeDir string
+	file        *regexp.Regexp
+	title       *regexp.Regexp
+	status      *regexp.Regexp
+	index       *regexp.Regexp
+}
+
 func TestADRDirectoriesHaveUniqueIndexedLifecycle(t *testing.T) {
 	root := repoRoot(t)
 	for _, relativeDir := range []string{"docs/adr", "agm/docs/adr"} {
@@ -98,6 +106,90 @@ func TestADRDirectoriesHaveUniqueIndexedLifecycle(t *testing.T) {
 	}
 }
 
+func TestSubsystemADRDirectoriesHaveUniqueIndexedLifecycle(t *testing.T) {
+	scopes := []subsystemADRScope{
+		{
+			relativeDir: "agm/cmd/agm-daemon/adr",
+			file:        regexp.MustCompile(`^([0-9]{3})-[a-z0-9-]+\.md$`),
+			title:       regexp.MustCompile(`(?m)^# ADR ([0-9]{3}): .+$`),
+			status:      regexp.MustCompile(`(?m)^- Status: (Accepted|Proposed|Deprecated|Superseded)(?: .*)?$`),
+			index:       regexp.MustCompile(`(?m)^\| \[([0-9]{3})\]\(([^)]+\.md)\) \| (Accepted|Proposed|Deprecated|Superseded) \| [^|]+ \|$`),
+		},
+		{
+			relativeDir: "agm/cmd/agm-mcp-server/adr",
+			file:        regexp.MustCompile(`^([0-9]{3})-[a-z0-9-]+\.md$`),
+			title:       regexp.MustCompile(`(?m)^# ADR ([0-9]{3}): .+$`),
+			status:      regexp.MustCompile(`(?m)^- Status: (Accepted|Proposed|Deprecated|Superseded)(?: .*)?$`),
+			index:       regexp.MustCompile(`(?m)^\| \[([0-9]{3})\]\(([^)]+\.md)\) \| (Accepted|Proposed|Deprecated|Superseded) \| [^|]+ \|$`),
+		},
+		{
+			relativeDir: "agm/internal/evaluation/ADR",
+			file:        regexp.MustCompile(`^ADR-([0-9]{3})-[a-z0-9-]+\.md$`),
+			title:       regexp.MustCompile(`(?m)^# ADR-([0-9]{3}): .+$`),
+			status:      regexp.MustCompile(`(?m)^## Status[ \t]*\n+[ \t]*(Accepted|Proposed|Deprecated|Superseded)[ \t]*$`),
+			index:       adrIndexPattern,
+		},
+	}
+
+	root := repoRoot(t)
+	for _, scope := range scopes {
+		scope := scope
+		t.Run(scope.relativeDir, func(t *testing.T) {
+			assertSubsystemADRScope(t, root, scope)
+		})
+	}
+}
+
+func assertSubsystemADRScope(t *testing.T, root string, scope subsystemADRScope) {
+	t.Helper()
+	dir := filepath.Join(root, filepath.FromSlash(scope.relativeDir))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	records := map[string]adrRecord{}
+	ids := map[string]string{}
+	for _, entry := range entries {
+		if entry.IsDir() || entry.Name() == "README.md" || filepath.Ext(entry.Name()) != ".md" {
+			continue
+		}
+		filename := scope.file.FindStringSubmatch(entry.Name())
+		if len(filename) != 2 {
+			t.Errorf("%s: malformed ADR filename for local inventory", entry.Name())
+			continue
+		}
+		content := readFile(t, filepath.Join(dir, entry.Name()))
+		titles := scope.title.FindAllStringSubmatch(content, -1)
+		statuses := scope.status.FindAllStringSubmatch(content, -1)
+		if len(titles) != 1 || titles[0][1] != filename[1] {
+			t.Errorf("%s: filename and single ADR heading must share identity %s", entry.Name(), filename[1])
+			continue
+		}
+		if len(statuses) != 1 {
+			t.Errorf("%s: want one local lifecycle status, got %d", entry.Name(), len(statuses))
+			continue
+		}
+		if previous, exists := ids[filename[1]]; exists {
+			t.Errorf("duplicate ADR-%s: %s and %s", filename[1], previous, entry.Name())
+		} else {
+			ids[filename[1]] = entry.Name()
+		}
+		assertRelativeMarkdownLinksResolve(t, dir, entry.Name(), content)
+		records[entry.Name()] = adrRecord{id: filename[1], status: statuses[0][1]}
+	}
+
+	index := readFile(t, filepath.Join(dir, "README.md"))
+	indexed := map[string]adrRecord{}
+	for _, match := range scope.index.FindAllStringSubmatch(index, -1) {
+		if _, exists := indexed[match[2]]; exists {
+			t.Errorf("README indexes %s more than once", match[2])
+		}
+		indexed[match[2]] = adrRecord{id: match[1], status: match[3]}
+	}
+	assertSameADRRecords(t, records, indexed)
+}
+
 func assertLiveADRSuccessor(t *testing.T, root, dir, source, target string) {
 	t.Helper()
 	if err := validateLiveADRSuccessor(root, dir, source, target); err != nil {
@@ -144,7 +236,13 @@ func validateLiveADRSuccessor(root, dir, source, target string) error {
 }
 
 func governedADRDirectory(root, candidate string) bool {
-	for _, relative := range []string{"docs/adr", "agm/docs/adr"} {
+	for _, relative := range []string{
+		"docs/adr",
+		"agm/docs/adr",
+		"agm/cmd/agm-daemon/adr",
+		"agm/cmd/agm-mcp-server/adr",
+		"agm/internal/evaluation/ADR",
+	} {
 		if filepath.Clean(candidate) == filepath.Clean(filepath.Join(root, filepath.FromSlash(relative))) {
 			return true
 		}
