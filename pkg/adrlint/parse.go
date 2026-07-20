@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -74,6 +75,9 @@ func parseAggregate(root, relative string, data []byte, governed map[string]bool
 
 func commonDocumentViolations(root, relative string, data []byte) []Violation {
 	var violations []Violation
+	for _, label := range undefinedMarkdownReferences(data) {
+		violations = append(violations, Violation{Path: relative, Reason: fmt.Sprintf("undefined reference-style link label %q", label)})
+	}
 	for _, target := range markdownTargets(data) {
 		if !relativeLink(target) {
 			continue
@@ -93,6 +97,30 @@ func commonDocumentViolations(root, relative string, data []byte) []Violation {
 		}
 	}
 	return violations
+}
+
+func undefinedMarkdownReferences(data []byte) []string {
+	definitions := make(map[string]bool)
+	for _, match := range markdownReferenceDefinition.FindAllStringSubmatch(string(data), -1) {
+		definitions[normalizeReferenceLabel(match[1])] = true
+	}
+	missing := make(map[string]string)
+	for _, match := range markdownReferenceLink.FindAllStringSubmatch(string(data), -1) {
+		label := normalizeReferenceLabel(match[1])
+		if !definitions[label] {
+			missing[label] = strings.TrimSpace(match[1])
+		}
+	}
+	labels := make([]string, 0, len(missing))
+	for _, label := range missing {
+		labels = append(labels, label)
+	}
+	slices.Sort(labels)
+	return labels
+}
+
+func normalizeReferenceLabel(label string) string {
+	return strings.ToLower(strings.Join(strings.Fields(label), " "))
 }
 
 func markdownTargets(data []byte) []string {
@@ -143,10 +171,10 @@ func successorTargets(statusLine, document []byte) []string {
 	targets := markdownTargets(statusLine)
 	definitions := make(map[string]string)
 	for _, match := range markdownReferenceDefinition.FindAllStringSubmatch(string(document), -1) {
-		definitions[strings.ToLower(strings.TrimSpace(match[1]))] = match[2]
+		definitions[normalizeReferenceLabel(match[1])] = match[2]
 	}
 	for _, match := range markdownReferenceLink.FindAllStringSubmatch(string(statusLine), -1) {
-		if target, ok := definitions[strings.ToLower(strings.TrimSpace(match[1]))]; ok {
+		if target, ok := definitions[normalizeReferenceLabel(match[1])]; ok {
 			targets = append(targets, target)
 		}
 	}

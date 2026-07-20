@@ -135,6 +135,13 @@ func TestMarkdownTargetsIncludeReferenceDefinitions(t *testing.T) {
 	}
 }
 
+func TestUndefinedReferenceStyleLinksAreViolations(t *testing.T) {
+	violations := commonDocumentViolations(t.TempDir(), "docs/adr/ADR-001-example.md", []byte("[decision][ Missing  Label ]\n"))
+	if !hasReason(violations, `undefined reference-style link label "Missing  Label"`) {
+		t.Fatalf("missing undefined-reference violation: %#v", violations)
+	}
+}
+
 func TestLoadPolicyRejectsInvalidDeclarations(t *testing.T) {
 	t.Parallel()
 
@@ -278,7 +285,7 @@ func TestCheckRepositoryRejectsMalformedADRInputs(t *testing.T) {
 	writeADRFile(t, repo, "docs/adr/ADR042-sneaky.md", "# ADR-042: malformed missing separator\n\nStatus: Accepted\n")
 	writeADRFile(t, repo, "docs/adr/042sneaky.md", "# ADR-042: malformed bare separator\n\nStatus: Accepted\n")
 	writeADRFile(t, repo, "docs/adr/ADR 043-spaced.md", "# ADR-043: malformed spaced separator\n\nStatus: Accepted\n")
-	writeADRFile(t, repo, "docs/adr/README.md", indexFixture("001", "ADR-001-example.md", "Example decision", "Accepted")+"  | [ADR-001](ADR-001-example.md#context) | Duplicate invalid status | Draft |\n")
+	writeADRFile(t, repo, "docs/adr/README.md", indexFixture("001", "ADR-001-example.md", "Example decision", "Accepted")+"  | [ADR-001](ADR-001-example.md#context) | Duplicate invalid status | Draft |\n| [01](ADR-001-example.md) | Alias | Accepted |\n")
 	writeADRFile(t, repo, "pkg/hash/ADR.md", "# Hash decisions\n\nStatus: Accepted\n")
 	gitADR(t, repo, "add", ".")
 	gitADR(t, repo, "commit", "-m", "fixture")
@@ -291,6 +298,9 @@ func TestCheckRepositoryRejectsMalformedADRInputs(t *testing.T) {
 		if !hasReason(report.Violations, want) {
 			t.Errorf("missing %q violation: %#v", want, report.Violations)
 		}
+	}
+	if !hasReason(report.Violations, "[01](ADR-001-example.md)") {
+		t.Errorf("missing noncanonical-width index violation: %#v", report.Violations)
 	}
 }
 

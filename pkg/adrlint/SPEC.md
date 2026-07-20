@@ -1,6 +1,6 @@
 # ADR Integrity Specification
 
-<!-- Last audited at: 2026-07-18 -->
+<!-- Last audited at: 2026-07-19 -->
 
 ## EARS Requirements
 
@@ -16,7 +16,7 @@
 
 **ADRLINT-06** When a record is Superseded, the system shall require a resolving repository-local link to another governed ADR and shall reject self-links, external ADR-shaped URLs, and missing targets.
 
-**ADRLINT-07** When a record, aggregate, or index contains an unresolved relative link, the system shall report a violation.
+**ADRLINT-07** When a record, aggregate, or index contains an unresolved relative link or an undefined reference-style link label, the system shall report a violation.
 
 **ADRLINT-10** When a tracked ADR-like filename in a declared scope is malformed, the system shall report it rather than silently omitting it from governance.
 
@@ -24,7 +24,7 @@
 
 **ADRLINT-13** When a scope or aggregate declares a positive `max-lines` override, the system shall enforce that tighter review budget instead of the repository default.
 
-**ADRLINT-11** When a declared scope index is not Git-tracked or contains an ADR-like row outside the supported schema, the system shall report a violation.
+**ADRLINT-11** When a declared scope index is not Git-tracked or contains any numeric ADR-like row outside the supported identity width or row schema, the system shall report a violation.
 
 **ADRLINT-08** When validation completes, the system shall return path/reason violations sorted deterministically and shall keep operational errors distinct.
 
