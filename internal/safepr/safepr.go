@@ -16,8 +16,8 @@
 //   - Only the verbs `create` and `close` exist; everything else is refused.
 //   - A PR carries a wayfinder session trace: the caller names an active
 //     wayfinder project (--wayfinder flag or WAYFINDER_PROJECT_DIR env) whose
-//     WAYFINDER-STATUS.md is active, and its canonical project name (or legacy
-//     session id) is stamped into the PR body (create) or close comment (close).
+//     WAYFINDER-STATUS.md is active, and its canonical project name is stamped
+//     into the PR body (create) or close comment (close).
 //   - Interactive and unstampable forms (--web, --fill, --body-file, missing
 //     --title) are refused so the run is deterministic and headless-safe.
 package safepr
@@ -53,10 +53,10 @@ type Session struct {
 // consumes. Unknown fields are ignored on purpose: the schema belongs to
 // wayfinder, not to us.
 type statusFrontmatter struct {
-	SessionID   string   `yaml:"session_id"`
-	ProjectName string   `yaml:"project_name"` // V2 schema: fallback when session_id absent
-	Status      string   `yaml:"status"`
-	Beads       []string `yaml:"beads"`
+	SchemaVersion string   `yaml:"schema_version"`
+	ProjectName   string   `yaml:"project_name"`
+	Status        string   `yaml:"status"`
+	Beads         []string `yaml:"beads"`
 }
 
 // ResolveSessionDir picks the wayfinder project directory: the --wayfinder
@@ -77,8 +77,8 @@ func ResolveSessionDir(flagDir string) (string, error) {
 
 // LoadSession reads <dir>/WAYFINDER-STATUS.md and returns the session it
 // describes. It fails unless the file exists, parses, carries a project_name
-// (or legacy session_id), and has an active status. Canonical V2 planning and
-// in-progress sessions are active; completed, abandoned, and blocked sessions
+// and has schema 2.0 plus an active status. Canonical planning and in-progress
+// sessions are active; completed, abandoned, and blocked sessions
 // are not valid attribution targets for new PRs.
 func LoadSession(dir string) (Session, error) {
 	path := filepath.Join(dir, "WAYFINDER-STATUS.md")
@@ -95,18 +95,16 @@ func LoadSession(dir string) (Session, error) {
 	if err := yaml.Unmarshal([]byte(fm), &st); err != nil {
 		return Session{}, fmt.Errorf("%s: cannot parse YAML frontmatter: %w", path, err)
 	}
-	// V2 sessions carry project_name instead of session_id.
-	sessionID := st.SessionID
-	if sessionID == "" {
-		sessionID = st.ProjectName
+	if st.SchemaVersion != "2.0" {
+		return Session{}, fmt.Errorf("%s has schema_version %q; expected 2.0", path, st.SchemaVersion)
 	}
-	if sessionID == "" {
-		return Session{}, fmt.Errorf("%s has no session_id or project_name in its frontmatter", path)
+	if st.ProjectName == "" {
+		return Session{}, fmt.Errorf("%s has no project_name in its frontmatter", path)
 	}
 	if !isActiveStatus(st.Status) {
 		return Session{}, fmt.Errorf("wayfinder session %s is %q, not active — start or resume "+
 			"a session (wayfinder start / wayfinder session) before opening PRs against it",
-			sessionID, st.Status)
+			st.ProjectName, st.Status)
 	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
@@ -116,11 +114,11 @@ func LoadSession(dir string) (Session, error) {
 	if len(st.Beads) > 0 {
 		beadID = strings.TrimSpace(st.Beads[0])
 	}
-	return Session{ID: sessionID, ProjectPath: abs, BeadID: beadID}, nil
+	return Session{ID: st.ProjectName, ProjectPath: abs, BeadID: beadID}, nil
 }
 
 func isActiveStatus(status string) bool {
-	switch strings.ReplaceAll(strings.ToLower(strings.TrimSpace(status)), "_", "-") {
+	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "planning", "in-progress":
 		return true
 	default:

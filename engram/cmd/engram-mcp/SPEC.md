@@ -48,7 +48,7 @@ four P0 disk-retro action items on 2026-07-03 (bead ce-ctsi).
 | `beads_reconcile` | write | Idempotent backfill from a legacy JSONL store (EMC-06..08) |
 | `engram_retrieve` | read | Wraps `engram retrieve --format json` |
 | `engram_plugins_list` | read | Scans `$ENGRAM_ROOT/{core,user}/plugins/*/plugin.yaml` |
-| `wayfinder_phase_status` | read | Parses `WAYFINDER-STATUS.md` in a project directory |
+| `wayfinder_phase_status` | read | Parses schema 2.0 `current_waypoint` and `status` from `WAYFINDER-STATUS.md`; reports progress as unknown because the canonical schema has no percentage field |
 
 ## Configuration
 

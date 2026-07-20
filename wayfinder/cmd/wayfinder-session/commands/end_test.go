@@ -24,6 +24,7 @@ project_type: feature
 risk_level: S
 current_waypoint: PROBLEM
 status: in-progress
+lifecycle_state: working
 created_at: ` + createdAt.UTC().Format(time.RFC3339) + `
 updated_at: ` + createdAt.UTC().Format(time.RFC3339) + `
 waypoint_history:` + waypoints + `
@@ -51,6 +52,9 @@ func TestRunEndV2_UpdatesStatusFile(t *testing.T) {
 	content := string(data)
 	if !strings.Contains(content, "status: completed") {
 		t.Errorf("expected status: completed in output, got:\n%s", content)
+	}
+	if !strings.Contains(content, "lifecycle_state: completed") {
+		t.Errorf("expected completed lifecycle in output, got:\n%s", content)
 	}
 }
 
@@ -97,6 +101,9 @@ func TestRunEndV2_BlockedRequiresAndPersistsReason(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "blocked_reason: waiting for reviewer") {
 		t.Fatalf("blocked reason missing from status:\n%s", data)
+	}
+	if strings.Contains(string(data), "lifecycle_state:") {
+		t.Fatalf("generic blocked end retained a conflicting lifecycle state:\n%s", data)
 	}
 }
 

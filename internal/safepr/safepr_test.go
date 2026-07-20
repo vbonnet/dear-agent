@@ -17,8 +17,8 @@ func writeStatus(t *testing.T, dir, content string) {
 
 const inProgressStatus = `---
 schema_version: "2.0"
-session_id: 87a5378c-2398-412c-af48-094287b11b79
-status: in_progress
+project_name: safepr-test
+status: in-progress
 ---
 
 # Wayfinder Session
@@ -31,7 +31,7 @@ func TestLoadSession_InProgress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSession: %v", err)
 	}
-	if s.ID != "87a5378c-2398-412c-af48-094287b11b79" {
+	if s.ID != "safepr-test" {
 		t.Errorf("session id = %q", s.ID)
 	}
 	if s.ProjectPath == "" || !filepath.IsAbs(s.ProjectPath) {
@@ -44,12 +44,13 @@ func TestLoadSession_Failures(t *testing.T) {
 		name, content, wantErr string
 	}{
 		{"missing file", "", "cannot read"},
-		{"completed session", "---\nsession_id: x\nstatus: completed\n---\n", "not active"},
-		{"no session id", "---\nstatus: in_progress\n---\n", "no session_id or project_name"},
-		{"v2 abandoned", "---\nproject_name: foo\nstatus: abandoned\n---\n", "not active"},
-		{"v2 blocked", "---\nproject_name: foo\nstatus: blocked\n---\n", "not active"},
+		{"completed session", "---\nschema_version: \"2.0\"\nproject_name: x\nstatus: completed\n---\n", "not active"},
+		{"no project name", "---\nschema_version: \"2.0\"\nstatus: in-progress\n---\n", "no project_name"},
+		{"abandoned", "---\nschema_version: \"2.0\"\nproject_name: foo\nstatus: abandoned\n---\n", "not active"},
+		{"blocked", "---\nschema_version: \"2.0\"\nproject_name: foo\nstatus: blocked\n---\n", "not active"},
+		{"missing schema", "---\nproject_name: foo\nstatus: in-progress\n---\n", "expected 2.0"},
 		{"no frontmatter", "# just markdown\n", "frontmatter"},
-		{"unterminated frontmatter", "---\nsession_id: x\n", "unterminated"},
+		{"unterminated frontmatter", "---\nschema_version: \"2.0\"\nproject_name: x\n", "unterminated"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -184,8 +185,8 @@ func TestStampedArgs(t *testing.T) {
 
 const beadStatus = `---
 schema_version: "2.0"
-session_id: 87a5378c-2398-412c-af48-094287b11b79
-status: in_progress
+project_name: safepr-bead-test
+status: in-progress
 beads:
   - ce-5vje
   - ce-9999
@@ -265,7 +266,7 @@ func TestLoadSession_V2Planning(t *testing.T) {
 
 func TestIsActiveStatus(t *testing.T) {
 	cases := map[string]bool{
-		"planning": true, "in-progress": true, "in_progress": true,
+		"planning": true, "in-progress": true, "in_progress": false,
 		"blocked": false, "completed": false, "abandoned": false, "": false,
 	}
 	for status, want := range cases {

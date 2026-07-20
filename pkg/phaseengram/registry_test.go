@@ -14,7 +14,7 @@ func TestResolveEngramPath_KnownPhases(t *testing.T) {
 		t.Skipf("engram repo not found, skipping: %v", err)
 	}
 
-	phases := []string{"CHARTER", "W0", "PROBLEM", "D1", "RESEARCH", "D2", "DESIGN", "S6", "PLAN", "S7", "BUILD", "S8", "RETRO", "S11"}
+	phases := []string{"CHARTER", "PROBLEM", "RESEARCH", "DESIGN", "SPEC", "PLAN", "SETUP", "BUILD", "RETRO"}
 
 	for _, phase := range phases {
 		t.Run(phase, func(t *testing.T) {

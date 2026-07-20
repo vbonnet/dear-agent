@@ -51,14 +51,11 @@ func parseFrontmatter(content []byte) (map[string]any, error) {
 	return fm, nil
 }
 
-// fmString extracts a string field from a parsed frontmatter map, trying
-// multiple key names (newer schema first, then legacy names).
-func fmString(fm map[string]any, keys ...string) string {
-	for _, k := range keys {
-		if v, ok := fm[k]; ok {
-			if s, ok := v.(string); ok {
-				return s
-			}
+// fmString extracts one canonical string field from parsed frontmatter.
+func fmString(fm map[string]any, key string) string {
+	if value, ok := fm[key]; ok {
+		if text, ok := value.(string); ok {
+			return text
 		}
 	}
 	return ""
@@ -76,6 +73,14 @@ func readWayfinderSession(sessionDir string) (string, map[string]any, error) {
 	fm, err := parseFrontmatter(data)
 	if err != nil {
 		return id, nil, err
+	}
+	if fmString(fm, "schema_version") != "2.0" {
+		return id, nil, fmt.Errorf("schema_version must be 2.0")
+	}
+	for _, field := range []string{"project_name", "status", "current_waypoint"} {
+		if fmString(fm, field) == "" {
+			return id, nil, fmt.Errorf("%s is required", field)
+		}
 	}
 	return id, fm, nil
 }
@@ -117,11 +122,11 @@ func listWayfinderSessions(wayfinderDir, statusFilter string, limit int) ([]Wayf
 
 		sessions = append(sessions, WayfinderSession{
 			ID:           id,
-			ProjectName:  fmString(fm, "project_name", "project"),
+			ProjectName:  fmString(fm, "project_name"),
 			Status:       status,
-			CurrentPhase: fmString(fm, "current_phase", "current_waypoint"),
-			CreatedAt:    fmString(fm, "created_at", "created"),
-			UpdatedAt:    fmString(fm, "updated_at", "updated"),
+			CurrentPhase: fmString(fm, "current_waypoint"),
+			CreatedAt:    fmString(fm, "created_at"),
+			UpdatedAt:    fmString(fm, "updated_at"),
 			Repository:   fmString(fm, "repository"),
 		})
 	}

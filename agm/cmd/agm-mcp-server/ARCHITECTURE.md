@@ -102,8 +102,8 @@ Claude Code ← MCP response
 
 Wayfinder tools read `WAYFINDER-STATUS.md` files directly from the local
 `engram-research/wf/` directory. No HTTP proxy or network call is involved.
-Both schema v2.0 (`project_name`, `current_phase`) and legacy schemas
-(`project`, `current_waypoint`) are supported via `fmString()` key-fallback.
+Only schema 2.0 status is accepted; consumers read `project_name`, `status`,
+and `current_waypoint` from canonical YAML frontmatter.
 
 ## Key Invariants
 

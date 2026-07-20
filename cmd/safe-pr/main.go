@@ -9,8 +9,8 @@
 //	safe-pr close  --wayfinder <project-dir> <number|url> [gh flags...]
 //
 // The wayfinder project dir (or WAYFINDER_PROJECT_DIR) must contain a
-// active WAYFINDER-STATUS.md; its project_name (or legacy session_id) is
-// stamped into the PR body (create) or close comment (close). On create, squash
+// active WAYFINDER-STATUS.md; its canonical project_name is stamped into the
+// PR body (create) or close comment (close). On create, squash
 // auto-merge is armed on a new non-draft PR so it merges itself once required
 // checks and reviews pass. Draft PRs remain unarmed for a human to advance.
 // Every invocation is audit-logged to
@@ -519,7 +519,7 @@ Usage:
 
 Flags:
   --wayfinder <dir>   wayfinder project dir holding WAYFINDER-STATUS.md
-                      (default: $WAYFINDER_PROJECT_DIR); session must be in_progress
+                      (default: $WAYFINDER_PROJECT_DIR); session must be in-progress
   --bead <id>         bead this PR closes; folds "Closes <id>" into the create
                       body (default: $BEAD, then the session's first bead)
   --timeout <dur>     kill gh after this long (default 60s)

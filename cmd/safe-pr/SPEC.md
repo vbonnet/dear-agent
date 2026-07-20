@@ -29,7 +29,7 @@ creation.
 
 **SAFE-PR-07** When a PR URL is returned, the system shall parse owner, repository, and PR number from GitHub URLs.
 
-**SAFE-PR-08** When the canonical Wayfinder V2 writer creates a `planning` session with `project_name`, the system shall accept that trace without requiring a legacy `session_id`.
+**SAFE-PR-08** When the canonical Wayfinder writer creates a schema 2.0 `planning` session with `project_name`, the system shall accept that trace as the sole attribution identity.
 
 **SAFE-PR-09** When safe-pr control flow is tested, the system shall replace the GitHub mutation boundary so unit tests cannot create real pull requests.
 

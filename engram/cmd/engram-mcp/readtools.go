@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -227,12 +226,6 @@ type WayfinderStatusResult struct {
 	SourceFile string `json:"source_file"`
 }
 
-var (
-	rePhase    = regexp.MustCompile(`Current Phase:\s*\*\*(.+?)\*\*`)
-	reProgress = regexp.MustCompile(`(?m)Progress:\s*(.+?)$`)
-	reStatus   = regexp.MustCompile(`(?m)Status:\s*(.+?)$`)
-)
-
 func wayfinderStatus(projectPath string) (*WayfinderStatusResult, error) {
 	if strings.TrimSpace(projectPath) == "" {
 		return nil, errors.New("project_path must be a non-empty string")
@@ -254,19 +247,37 @@ func wayfinderStatus(projectPath string) (*WayfinderStatusResult, error) {
 		return nil, fmt.Errorf("WAYFINDER-STATUS.md not found in %s", abs)
 	}
 
-	text := string(data)
+	fields, err := canonicalWayfinderFields(string(data))
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", statusFile, err)
+	}
 	return &WayfinderStatusResult{
 		Project:    abs,
-		Phase:      firstMatch(rePhase, text),
-		Progress:   firstMatch(reProgress, text),
-		Status:     firstMatch(reStatus, text),
+		Phase:      fields["current_waypoint"],
+		Progress:   "Unknown",
+		Status:     fields["status"],
 		SourceFile: statusFile,
 	}, nil
 }
 
-func firstMatch(re *regexp.Regexp, text string) string {
-	if m := re.FindStringSubmatch(text); m != nil {
-		return strings.TrimSpace(m[1])
+func canonicalWayfinderFields(content string) (map[string]string, error) {
+	trimmed := strings.TrimSpace(content)
+	afterOpen, found := strings.CutPrefix(trimmed, "---")
+	if !found {
+		return nil, errors.New("canonical YAML frontmatter is required")
 	}
-	return "Unknown"
+	frontmatter, _, found := strings.Cut(afterOpen, "\n---")
+	if !found {
+		return nil, errors.New("unterminated YAML frontmatter")
+	}
+	fields := parseFlatYAML(frontmatter)
+	if fields["schema_version"] != "2.0" {
+		return nil, fmt.Errorf("schema_version must be 2.0, got %q", fields["schema_version"])
+	}
+	for _, field := range []string{"current_waypoint", "status"} {
+		if fields[field] == "" {
+			return nil, fmt.Errorf("%s is required", field)
+		}
+	}
+	return fields, nil
 }

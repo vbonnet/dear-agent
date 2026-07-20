@@ -135,9 +135,9 @@ func initGitRepo(t *testing.T, dir, remoteURL string) {
 }
 
 // writeWayfinderStatus creates a minimal WAYFINDER-STATUS.md in dir.
-func writeWayfinderStatus(t *testing.T, dir, sessionID, status string) {
+func writeWayfinderStatus(t *testing.T, dir, projectName, status string) {
 	t.Helper()
-	content := fmt.Sprintf("---\nsession_id: %s\nstatus: %s\n---\n", sessionID, status)
+	content := fmt.Sprintf("---\nschema_version: \"2.0\"\nproject_name: %s\nstatus: %s\n---\n", projectName, status)
 	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), []byte(content), 0o600); err != nil {
 		t.Fatalf("writeWayfinderStatus: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestPreflightTimeoutCoversRepositoryFullGate(t *testing.T) {
 func TestRun_PreflightFail_BlocksPRCreate(t *testing.T) {
 	t.Setenv("WAYFINDER_PROJECT_DIR", "")
 	dir := t.TempDir()
-	writeWayfinderStatus(t, dir, "test-session", "in_progress")
+	writeWayfinderStatus(t, dir, "test-session", "in-progress")
 
 	orig := runPreflightFull
 	t.Cleanup(func() { runPreflightFull = orig })
@@ -236,7 +236,7 @@ func TestRun_PreflightFail_BlocksPRCreate(t *testing.T) {
 func TestRun_PreflightPass_ProceedsToPRCreate(t *testing.T) {
 	t.Setenv("WAYFINDER_PROJECT_DIR", "")
 	dir := t.TempDir()
-	writeWayfinderStatus(t, dir, "test-session", "in_progress")
+	writeWayfinderStatus(t, dir, "test-session", "in-progress")
 
 	orig := runPreflightFull
 	t.Cleanup(func() { runPreflightFull = orig })
@@ -260,7 +260,7 @@ func TestRun_PreflightPass_ProceedsToPRCreate(t *testing.T) {
 func TestRun_SkipPreflight_NoPreflightRun(t *testing.T) {
 	t.Setenv("WAYFINDER_PROJECT_DIR", "")
 	dir := t.TempDir()
-	writeWayfinderStatus(t, dir, "test-session", "in_progress")
+	writeWayfinderStatus(t, dir, "test-session", "in-progress")
 
 	preflightCalled := false
 	orig := runPreflightFull

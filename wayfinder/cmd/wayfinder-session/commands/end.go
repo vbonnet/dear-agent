@@ -65,15 +65,20 @@ func runEndV2(projectDir, newStatus, blockedReason string) error {
 	}
 
 	now := time.Now()
-	st.Status = newStatus
-	st.UpdatedAt = now
-	st.BlockedReason = ""
-	st.CompletionDate = nil
-	if newStatus == status.StatusV2Blocked {
+	switch newStatus {
+	case status.StatusV2Completed:
+		applyLifecycleState(st, status.LifecycleCompleted, "", "", "", now)
+	case status.StatusV2Abandoned:
+		applyLifecycleState(st, status.LifecycleCanceled, "", "", "", now)
+	case status.StatusV2Blocked:
+		st.Status = status.StatusV2Blocked
+		st.LifecycleState = ""
 		st.BlockedReason = blockedReason
-	}
-	if newStatus == status.StatusV2Completed {
-		st.CompletionDate = &now
+		st.BlockedOn = ""
+		st.ErrorMessage = ""
+		st.InputNeeded = ""
+		st.CompletionDate = nil
+		st.UpdatedAt = now
 	}
 
 	// Guard against zero CreatedAt — use UpdatedAt as the session start if unset.

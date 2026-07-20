@@ -271,21 +271,37 @@ func normalWayfinderCommandsParseOnlyV2(ctx context.Context) error {
 	return nil
 }
 
-func nonMigrationRuntimeOmitsRetiredPhases(ctx context.Context) (resultErr error) {
+func nonMigrationRuntimeOmitsRetiredPhases(ctx context.Context) error {
 	state, err := getWayfinderV2CommandState(ctx)
 	if err != nil {
 		return err
 	}
-	root := filepath.Join(state.repoRoot, "wayfinder")
+	retired := regexp.MustCompile(`\b(W0|D1|D2|D3|D4|S4|S5|S6|S7|S8|S9|S10|S11|V1)\b|WayfinderV1|discovery\.(problem|solutions|approach|requirements)|design\.(tech-lead|security|qa)|roadmap\.(planning|breakdown|dependencies)`)
+	for _, root := range []struct {
+		path       string
+		extensions map[string]bool
+	}{
+		{path: "wayfinder", extensions: map[string]bool{".go": true, ".md": true, ".json": true, ".yaml": true, ".yml": true}},
+		{path: "agm/cmd/agm-mcp-server", extensions: map[string]bool{".go": true}},
+		{path: "engram/cmd/engram-mcp", extensions: map[string]bool{".go": true}},
+		{path: "internal/safepr", extensions: map[string]bool{".go": true}},
+		{path: "cmd/safe-pr", extensions: map[string]bool{".go": true}},
+		{path: "pkg/phaseengram", extensions: map[string]bool{".go": true}},
+	} {
+		if err := scanActiveWayfinderRoot(state.repoRoot, root.path, root.extensions, retired); err != nil {
+			return err
+		}
+	}
+	return validateCanonicalWayfinderConsumers(state.repoRoot)
+}
+
+func scanActiveWayfinderRoot(repoRoot, relativeRoot string, activeExtensions map[string]bool, retired *regexp.Regexp) (resultErr error) {
+	root := filepath.Join(repoRoot, relativeRoot)
 	rootFS, err := os.OpenRoot(root)
 	if err != nil {
-		return fmt.Errorf("open Wayfinder source root: %w", err)
+		return fmt.Errorf("open active Wayfinder corpus root %s: %w", relativeRoot, err)
 	}
 	defer preserveRootCloseError(rootFS, &resultErr)
-	retired := regexp.MustCompile(`\b(W0|D1|D2|D3|D4|S4|S5|S6|S7|S8|S9|S10|S11|V1)\b|WayfinderV1|discovery\.(problem|solutions|approach|requirements)|design\.(tech-lead|security|qa)|roadmap\.(planning|breakdown|dependencies)`)
-	activeExtensions := map[string]bool{
-		".go": true, ".md": true, ".json": true, ".yaml": true, ".yml": true,
-	}
 	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -302,10 +318,41 @@ func nonMigrationRuntimeOmitsRetiredPhases(ctx context.Context) (resultErr error
 			return readErr
 		}
 		if token := retired.FindString(string(data)); token != "" {
-			return fmt.Errorf("active Wayfinder corpus %s contains retired phase token %s", rel, token)
+			return fmt.Errorf("active Wayfinder corpus %s contains retired phase token %s", filepath.Join(relativeRoot, rel), token)
 		}
 		return nil
 	})
+}
+
+func validateCanonicalWayfinderConsumers(repoRoot string) error {
+	checks := []struct {
+		path      string
+		required  []string
+		forbidden []string
+	}{
+		{path: "wayfinder/coordinator/monitor.go", required: []string{`yaml:"current_waypoint"`}, forbidden: []string{"Current Phase:"}},
+		{path: "engram/cmd/engram-mcp/readtools.go", required: []string{`fields["current_waypoint"]`, `fields["status"]`}, forbidden: []string{"rePhase", "Current Phase:"}},
+		{path: "agm/cmd/agm-mcp-server/wayfinder.go", required: []string{`fmString(fm, "current_waypoint")`, `fmString(fm, "project_name")`}, forbidden: []string{`fmString(fm, "current_phase"`, `fmString(fm, "project_name",`}},
+		{path: "internal/safepr/safepr.go", required: []string{`yaml:"schema_version"`, `yaml:"project_name"`}, forbidden: []string{`yaml:"session_id"`, "st.SessionID"}},
+	}
+	for _, check := range checks {
+		data, err := os.ReadFile(filepath.Join(repoRoot, check.path))
+		if err != nil {
+			return err
+		}
+		content := string(data)
+		for _, required := range check.required {
+			if !strings.Contains(content, required) {
+				return fmt.Errorf("wayfinder consumer %s lacks canonical status syntax %q", check.path, required)
+			}
+		}
+		for _, forbidden := range check.forbidden {
+			if strings.Contains(content, forbidden) {
+				return fmt.Errorf("wayfinder consumer %s retains retired status syntax %q", check.path, forbidden)
+			}
+		}
+	}
+	return nil
 }
 
 func wayfinderPluginExposesOneRootSkill(ctx context.Context) error {
