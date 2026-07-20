@@ -1,6 +1,6 @@
 # AGM Daemon Specification
 
-<!-- Last audited at: 2026-07-04 -->
+<!-- Last audited at: 2026-07-19 -->
 
 ## Purpose
 
@@ -33,6 +33,8 @@ to receive queued work.
 **DAEMON-10** When a queued message is delivered successfully, the system shall acknowledge it when an acknowledgment manager is configured.
 
 **DAEMON-11** When standalone health status is requested, the system shall report daemon running state, PID when available, queue statistics when a queue is provided, and an overall health level derived from configured queue-depth thresholds.
+
+**DAEMON-12** When retry accounting or terminal-state persistence fails, the system shall log the failure and leave the durable queue record eligible for later processing rather than claiming that the configured attempt bound was recorded.
 
 ## BDD Traceability
 

@@ -22,7 +22,9 @@ Successful tmux delivery uses the safe multiline sender, then attempts session,
 queue, metric, and acknowledgment bookkeeping. Those post-send writes are
 best-effort and failures are logged; a failed queue update can leave an entry
 pending for redelivery. Busy or blocked targets remain pending. Resolution or
-send failures consume configured retry attempts.
+send failures request a configured retry attempt, but retry bookkeeping is also
+best-effort: if the counter or terminal-state write fails, the durable entry can
+remain eligible for another attempt.
 
 The daemon exposes operational state through its PID file, log, queue records,
 and AGM command surfaces. It does not own a session-status HTTP or status-file
