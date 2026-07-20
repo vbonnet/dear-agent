@@ -58,6 +58,8 @@ type SessionMonitor struct {
 	logger                  *slog.Logger // Structured logger
 	running                 bool
 	stopChan                chan struct{}
+	doneChan                chan struct{}
+	stopOnce                sync.Once
 	mu                      sync.Mutex // Protects running field
 
 	// CrossSessionThreshold is the number of distinct sessions that must
@@ -221,7 +223,6 @@ func NewSessionMonitor(cfg *config.Config) (*SessionMonitor, error) {
 		loopMonitor:             loopMon,
 		sessionSweeper:          sessionSweeper,
 		logger:                  logger,
-		stopChan:                make(chan struct{}),
 		CrossSessionThreshold:   3,
 	}, nil
 }
@@ -236,7 +237,18 @@ func (m *SessionMonitor) StartMonitoring() error {
 		return fmt.Errorf("monitor is already running")
 	}
 	m.running = true
+	m.stopChan = make(chan struct{})
+	m.doneChan = make(chan struct{})
+	m.stopOnce = sync.Once{}
+	stopChan := m.stopChan
+	doneChan := m.doneChan
 	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		m.running = false
+		close(doneChan)
+		m.mu.Unlock()
+	}()
 
 	m.logger.Info("Starting Astrocyte session monitor",
 		"interval", m.config.Monitoring.IntervalDuration,
@@ -253,25 +265,27 @@ func (m *SessionMonitor) StartMonitoring() error {
 				m.logger.Error("Error checking sessions", "error", err)
 			}
 
-		case <-m.stopChan:
+		case <-stopChan:
 			m.logger.Info("Stopping session monitor")
-			m.mu.Lock()
-			m.running = false
-			m.mu.Unlock()
 			return nil
 		}
 	}
 }
 
-// StopMonitoring stops the monitoring loop gracefully.
+// StopMonitoring stops the monitoring loop gracefully and waits for it to exit.
+// It is safe to call concurrently or more than once.
 func (m *SessionMonitor) StopMonitoring() {
 	m.mu.Lock()
-	if m.running {
+	if !m.running {
 		m.mu.Unlock()
-		close(m.stopChan)
-	} else {
-		m.mu.Unlock()
+		return
 	}
+	stopChan := m.stopChan
+	doneChan := m.doneChan
+	m.stopOnce.Do(func() { close(stopChan) })
+	m.mu.Unlock()
+
+	<-doneChan
 }
 
 // IsRunning returns whether the monitor is currently running (thread-safe).
