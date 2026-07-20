@@ -33,8 +33,8 @@ var CompletePhaseCmd = &cobra.Command{
 	Long: `Update WAYFINDER-STATUS.md, publish phase.completed event, and optionally commit to git.
 
 Example:
-  wayfinder-session complete-phase PROBLEM --outcome success
-  wayfinder-session complete-phase PROBLEM --outcome success --context "Completed user research interviews"`,
+  wayfinder session complete-phase PROBLEM --outcome success
+  wayfinder session complete-phase PROBLEM --outcome success --context "Completed user research interviews"`,
 	Args: cobra.ExactArgs(1),
 	RunE: runCompletePhase,
 }

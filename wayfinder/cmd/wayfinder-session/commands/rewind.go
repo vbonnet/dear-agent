@@ -34,9 +34,9 @@ This will:
 4. Log rewind event to retrospective (with optional prompting)
 
 Examples:
-  wayfinder-session rewind-to RESEARCH
-  wayfinder-session rewind-to PLAN --no-prompt
-  wayfinder-session rewind-to DESIGN --reason "Design was too complex"`,
+  wayfinder session rewind-to RESEARCH
+  wayfinder session rewind-to PLAN --no-prompt
+  wayfinder session rewind-to DESIGN --reason "Design was too complex"`,
 	Args: cobra.ExactArgs(1),
 	RunE: runRewind,
 }

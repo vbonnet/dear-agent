@@ -19,6 +19,10 @@ go install github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder@latest
 wayfinder -C <project-dir> session start <project-name> \
   --project-type feature --risk-level M
 wayfinder -C <project-dir> session status
+wayfinder -C <project-dir> session start-phase CHARTER
+printf '# Charter\n\nObjective, scope, constraints, and success conditions.\n' \
+  > <project-dir>/CHARTER-charter.md
+wayfinder -C <project-dir> session complete-phase CHARTER --outcome success
 wayfinder -C <project-dir> session next-phase
 wayfinder -C <project-dir> session start-phase PROBLEM
 wayfinder -C <project-dir> session complete-phase PROBLEM --outcome success

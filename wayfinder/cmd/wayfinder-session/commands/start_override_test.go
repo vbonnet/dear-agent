@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/internal/override"
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
 
 // newStartCmdWithFlags builds a minimal cobra.Command that has all the flags
@@ -46,5 +47,27 @@ func TestStartForce_GoodReason(t *testing.T) {
 	}, "session file is corrupted and needs to be re-created from scratch")
 	if err != nil {
 		t.Fatalf("guard should allow a valid reason, got: %v", err)
+	}
+}
+
+func TestShouldEnsureSessionBead(t *testing.T) {
+	tests := []struct {
+		name  string
+		st    *status.StatusV2
+		phase string
+		want  bool
+	}{
+		{name: "setup", st: &status.StatusV2{}, phase: status.WaypointV2Setup, want: true},
+		{name: "build after skipped setup", st: &status.StatusV2{SkipRoadmap: true}, phase: status.WaypointV2Build, want: true},
+		{name: "ordinary build", st: &status.StatusV2{}, phase: status.WaypointV2Build, want: false},
+		{name: "earlier phase", st: &status.StatusV2{SkipRoadmap: true}, phase: status.WaypointV2Plan, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldEnsureSessionBead(tt.st, tt.phase); got != tt.want {
+				t.Fatalf("shouldEnsureSessionBead(%q) = %v, want %v", tt.phase, got, tt.want)
+			}
+		})
 	}
 }

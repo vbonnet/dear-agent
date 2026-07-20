@@ -25,7 +25,7 @@ Supported statuses:
   blocked    - Paused, may resume later
 
 Example:
-  wayfinder-session end --status completed`,
+  wayfinder session end --status completed`,
 	RunE: runEnd,
 }
 

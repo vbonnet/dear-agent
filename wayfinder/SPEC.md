@@ -1,6 +1,6 @@
 # Wayfinder requirements specification
 
-<!-- Last audited at: 2026-07-17 -->
+<!-- Last audited at: 2026-07-19 -->
 
 **Status:** Active
 **Scope:** The canonical Wayfinder session lifecycle and its AI-facing contract.
@@ -38,6 +38,10 @@
 **WAY-15** When no Wayfinder status exists, the stop hook shall allow the unrelated session to stop.
 
 **WAY-16** When a documented Wayfinder command or skill is changed, the system shall validate it against the registered Cobra surface and reject retired phase vocabulary.
+
+**WAY-17** When active command guidance names the Wayfinder executable, the system shall use the canonical `wayfinder session` entrypoint and reject the retired standalone binary.
+
+**WAY-18** When repository validation surfaces are inventoried, the system shall reject validators built for retired Wayfinder artifact or retrospective schemas.
 
 ## Traceability
 

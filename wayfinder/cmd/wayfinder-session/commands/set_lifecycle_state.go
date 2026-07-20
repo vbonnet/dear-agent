@@ -29,11 +29,11 @@ Optional flags:
   --input-needed     - Description of needed input (for input-required state)
 
 Examples:
-  wayfinder-session set-lifecycle-state working
-  wayfinder-session set-lifecycle-state input-required --input-needed "Design decision needed"
-  wayfinder-session set-lifecycle-state dependency-blocked --blocked-on oss-vnfl
-  wayfinder-session set-lifecycle-state failed --error-message "Compilation failed: undefined variable"
-  wayfinder-session set-lifecycle-state completed
+  wayfinder session set-lifecycle-state working
+  wayfinder session set-lifecycle-state input-required --input-needed "Design decision needed"
+  wayfinder session set-lifecycle-state dependency-blocked --blocked-on oss-vnfl
+  wayfinder session set-lifecycle-state failed --error-message "Compilation failed: undefined variable"
+  wayfinder session set-lifecycle-state completed
 `,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

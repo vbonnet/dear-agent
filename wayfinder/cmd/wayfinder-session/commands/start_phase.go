@@ -30,8 +30,8 @@ var StartPhaseCmd = &cobra.Command{
 	Long: `Update WAYFINDER-STATUS.md and publish phase.started event.
 
 Example:
-  wayfinder-session start-phase PROBLEM
-  wayfinder-session start-phase BUILD --allow-dirty`,
+  wayfinder session start-phase PROBLEM
+  wayfinder session start-phase BUILD --allow-dirty`,
 	Args: cobra.ExactArgs(1),
 	RunE: runStartPhase,
 }
@@ -96,11 +96,10 @@ func runStartPhase(cmd *cobra.Command, args []string) (retErr error) {
 	st.UpdatePhase(phaseName, status.PhaseStatusInProgress, "")
 	st.SetCurrentPhase(phaseName)
 
-	// At SETUP — where task breakdown begins — guarantee the session is backed
-	// by a tracking bead so every task has one from the start and its PR can
-	// auto-close it on merge. No-op if a bead already exists (e.g. the caller
-	// passed one in) so re-running SETUP never files duplicates.
-	if strings.EqualFold(phaseName, "SETUP") {
+	// Guarantee the session is backed by a tracking bead when task execution
+	// begins. SETUP normally owns this transition; --skip-roadmap and explicit
+	// phase profiles may skip SETUP, so BUILD must cover that path as well.
+	if shouldEnsureSessionBead(st, phaseName) {
 		ensureSessionBead(cmd.Context(), st)
 	}
 
@@ -141,6 +140,13 @@ func runStartPhase(cmd *cobra.Command, args []string) (retErr error) {
 
 	fmt.Printf("✅ Phase %s started\n", phaseName)
 	return nil
+}
+
+func shouldEnsureSessionBead(st *status.StatusV2, phaseName string) bool {
+	if strings.EqualFold(phaseName, status.WaypointV2Setup) {
+		return true
+	}
+	return strings.EqualFold(phaseName, status.WaypointV2Build) && st.IsPhaseSkipped(status.WaypointV2Setup)
 }
 
 // ensureSessionBead files a tracking bead for the session if it has none yet,

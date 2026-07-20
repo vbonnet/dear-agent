@@ -366,7 +366,7 @@ func findReviewSkillScript(skillName string) (string, error) {
 	// to land `skills/review-spec/review_spec.py` in any repo and get
 	// arbitrary Python execution (with the reviewer's ambient creds —
 	// ANTHROPIC_API_KEY is intentionally NOT stripped from the env) the
-	// moment the reviewer ran `cd <project> && wayfinder-session
+	// moment the reviewer ran `cd <project> && wayfinder session
 	// complete-phase DESIGN/SPEC/PLAN`. Skills now resolve only from install-time
 	// locations under the user's home or system prefixes, plus an explicit
 	// opt-in via WAYFINDER_SKILLS_DIR.

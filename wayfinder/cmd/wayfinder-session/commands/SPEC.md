@@ -23,6 +23,8 @@
 
 **WFCMD-08** When retired compatibility commands are requested, the system shall report that they are unknown.
 
+**WFCMD-09** When SETUP starts, or when BUILD starts after SETUP was skipped, the system shall create a tracking bead if none exists and shall preserve the phase transition when tracker creation is unavailable.
+
 ## Traceability
 
 - Command tests: `wayfinder/cmd/wayfinder-session/commands/*_test.go`

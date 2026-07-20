@@ -87,6 +87,21 @@ func TestIsProjectComplete(t *testing.T) {
 			wantErr:  false,
 		},
 		{
+			name: "partial completed history is incomplete",
+			setup: func(t *testing.T) string {
+				tmpDir := t.TempDir()
+				st := status.NewStatusV2("test", status.ProjectTypeFeature, status.RiskLevelM)
+				st.Status = status.StatusV2InProgress
+				st.UpdatePhase(status.WaypointV2Charter, status.WaypointStatusV2Completed, status.OutcomeSuccess)
+				if err := status.WriteV2ToDir(st, tmpDir); err != nil {
+					t.Fatal(err)
+				}
+				return tmpDir
+			},
+			expected: false,
+			wantErr:  false,
+		},
+		{
 			name: "missing STATUS file",
 			setup: func(t *testing.T) string {
 				tmpDir := t.TempDir()

@@ -48,8 +48,83 @@ func RegisterWayfinderV2CommandGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^retired root and feature executors should be absent$`, retiredWayfinderExecutorsAreAbsent)
 	ctx.Step(`^all Wayfinder session commands should parse only schema 2.0 status$`, normalWayfinderCommandsParseOnlyV2)
 	ctx.Step(`^Wayfinder active corpus should omit retired phase identifiers$`, nonMigrationRuntimeOmitsRetiredPhases)
+	ctx.Step(`^retired external Wayfinder validators should be absent$`, retiredExternalWayfinderValidatorsAreAbsent)
+	ctx.Step(`^active command guidance should use the canonical entrypoint$`, activeCommandGuidanceUsesCanonicalEntrypoint)
 	ctx.Step(`^Wayfinder phase enumeration should expose the nine named phases$`, unversionedPhasesDefaultToV2)
 	ctx.Step(`^Wayfinder plugin should expose one root skill$`, wayfinderPluginExposesOneRootSkill)
+}
+
+func retiredExternalWayfinderValidatorsAreAbsent(ctx context.Context) error {
+	state, err := getWayfinderV2CommandState(ctx)
+	if err != nil {
+		return err
+	}
+	for _, path := range []string{
+		"pkg/validator/wayfinderartifact.go",
+		"pkg/validator/retrospectivevalidator.go",
+	} {
+		if _, statErr := os.Stat(filepath.Join(state.repoRoot, path)); statErr == nil {
+			return fmt.Errorf("retired external Wayfinder validator still exists: %s", path)
+		} else if !os.IsNotExist(statErr) {
+			return statErr
+		}
+	}
+	validatePath := filepath.Join(state.repoRoot, "engram/cmd/engram/cmd/validate.go")
+	data, err := os.ReadFile(validatePath)
+	if err != nil {
+		return err
+	}
+	for _, retired := range []string{"ValidatorWayfinder", "ValidatorRetrospective", "wayfinder-artifact", "S11 retrospective"} {
+		if strings.Contains(string(data), retired) {
+			return fmt.Errorf("engram validate still exposes retired Wayfinder surface %q", retired)
+		}
+	}
+	return nil
+}
+
+func activeCommandGuidanceUsesCanonicalEntrypoint(ctx context.Context) error {
+	state, err := getWayfinderV2CommandState(ctx)
+	if err != nil {
+		return err
+	}
+	retiredBinary := regexp.MustCompile(`wayfinder-session(?:[ \t]|$)`)
+	for _, rel := range []string{
+		"AGENTS.md",
+		"GOAL.md",
+		"wayfinder/README.md",
+		"wayfinder/internal/project/detect.go",
+		"wayfinder/cmd/wayfinder-session/commands",
+		"wayfinder/cmd/wayfinder-session/internal/retrospective/appender.go",
+		"wayfinder/cmd/wayfinder-session/internal/validator",
+	} {
+		root := filepath.Join(state.repoRoot, rel)
+		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				if entry.Name() == "testdata" {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			data, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return readErr
+			}
+			if retiredBinary.Match(data) {
+				return fmt.Errorf("active guidance still names retired wayfinder-session binary: %s", path)
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func agmInspectsWayfinderRootHelp(ctx context.Context) error {

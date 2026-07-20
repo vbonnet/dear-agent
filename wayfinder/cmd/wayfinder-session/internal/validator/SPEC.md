@@ -29,6 +29,8 @@
 
 **WFVALID-11** When a provider review is unavailable, the system shall report that boundary without manufacturing a passing result.
 
+**WFVALID-12** When a project without a completed lifecycle state is evaluated for parent completion, the system shall require every canonical non-skipped waypoint to be present and completed.
+
 ## Traceability
 
 - Tests: `wayfinder/cmd/wayfinder-session/internal/validator/*_test.go`
