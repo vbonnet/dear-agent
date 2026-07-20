@@ -100,6 +100,20 @@ func TestResolveSetModelInstruction_NormalizesAgyAliases(t *testing.T) {
 	}
 }
 
+func TestResolveSetModelInstruction_PreservesAgyPublicLabel(t *testing.T) {
+	const publicLabel = "Gemini 3.5 Flash (Low)"
+	instruction, err := resolveSetModelInstruction("agy", publicLabel)
+	if err != nil {
+		t.Fatalf("resolveSetModelInstruction returned error: %v", err)
+	}
+	if instruction.ResolvedModel != publicLabel {
+		t.Fatalf("resolved model = %q, want %q", instruction.ResolvedModel, publicLabel)
+	}
+	if instruction.Command != "/model "+publicLabel {
+		t.Fatalf("command = %q, want exact public label", instruction.Command)
+	}
+}
+
 func TestVerifyModelSetParsing(t *testing.T) {
 	// Test the line-matching logic used by verifyModelSet
 	tests := []struct {

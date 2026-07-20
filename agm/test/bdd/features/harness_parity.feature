@@ -335,6 +335,12 @@ Feature: Harness parity
     Then AGM should launch a tmux pane that resumes the AGY conversation
     And the AGY resume command should include "--dangerously-skip-permissions"
 
+  Scenario: AGY model compatibility survives catalog migrations
+    Given AGY is available
+    When AGM validates AGY model compatibility
+    Then retired AGY manifest models should map to current public labels
+    And exact AGY public labels should remain unchanged
+
   Scenario: Session list fields can target session rows
     Given AGM has Codex session records in Dolt
     When an agent lists sessions as JSON with fields "name,status,harness,workspace,tags"

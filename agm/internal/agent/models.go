@@ -105,6 +105,20 @@ var HarnessModels = map[string][]ModelSpec{
 	// opencode-cli: aggregated from all other harnesses (built dynamically)
 }
 
+// legacyModelAliases preserves resumability for manifests written before a
+// harness replaced its public model catalog. Values point to current aliases
+// so every caller still crosses the normal registry and exact-label boundary.
+var legacyModelAliases = map[string]map[string]string{
+	"agy": {
+		"2.5-flash":             "3.5-flash",
+		"gemini-2.5-flash":      "3.5-flash",
+		"2.5-pro":               "3.1-pro-high",
+		"gemini-2.5-pro":        "3.1-pro-high",
+		"2.0-flash-lite":        "3.5-flash-low",
+		"gemini-2.0-flash-lite": "3.5-flash-low",
+	},
+}
+
 // CrossHarnessAliases maps abstract tier names to harness-specific aliases.
 // When an abstract tier alias is passed to a harness, this table maps it to
 // that harness's closest available native model alias.
@@ -216,6 +230,7 @@ func modelCharOK(r rune) bool {
 // reachable from CLI flags, AGM_DEFAULT_MODEL, or any automation that sets
 // these from untrusted input.
 func ValidateModel(harnessName, modelAlias string) error {
+	modelAlias = NormalizeModelInput(harnessName, modelAlias)
 	models := GetModelsForHarness(harnessName)
 	for _, m := range models {
 		if m.Alias == modelAlias || m.FullName == modelAlias {
@@ -235,6 +250,31 @@ func ValidateModel(harnessName, modelAlias string) error {
 	return nil
 }
 
+// NormalizeModelInput canonicalizes registered aliases case-insensitively
+// while preserving exact public labels and unknown forward-compatible model
+// identifiers. Public labels can be case-sensitive and must not be lowercased.
+func NormalizeModelInput(harnessName, input string) string {
+	models := GetModelsForHarness(harnessName)
+	for _, model := range models {
+		if model.FullName == input || model.Alias == input {
+			return input
+		}
+	}
+	for _, model := range models {
+		if strings.EqualFold(model.Alias, input) {
+			return model.Alias
+		}
+	}
+	if legacy, ok := legacyModelAliases[NormalizeHarnessName(harnessName)]; ok {
+		for old := range legacy {
+			if strings.EqualFold(old, input) {
+				return old
+			}
+		}
+	}
+	return input
+}
+
 // ResolveModelFullName resolves an alias to a full model name.
 // If the alias is not found natively, checks CrossHarnessAliases for a mapping
 // from another harness's tier name (e.g., "opus" → "2.5-pro" for gemini-cli).
@@ -247,6 +287,8 @@ func ValidateModel(harnessName, modelAlias string) error {
 // character allowlist here so a caller that forgot to call ValidateModel
 // still can't smuggle a payload through.
 func ResolveModelFullName(harnessName, aliasOrFull string) string {
+	harnessName = NormalizeHarnessName(harnessName)
+	aliasOrFull = NormalizeModelInput(harnessName, aliasOrFull)
 	models := GetModelsForHarness(harnessName)
 	if len(models) == 0 {
 		return safeModelPassthrough(aliasOrFull)
@@ -254,6 +296,17 @@ func ResolveModelFullName(harnessName, aliasOrFull string) string {
 	for _, m := range models {
 		if m.Alias == aliasOrFull || m.FullName == aliasOrFull {
 			return m.FullName
+		}
+	}
+	if legacy, ok := legacyModelAliases[harnessName]; ok {
+		if mapped, ok := legacy[aliasOrFull]; ok {
+			fmt.Fprintf(os.Stderr, "Note: mapping legacy model '%s' → '%s' for %s\n", aliasOrFull, mapped, harnessName)
+			for _, model := range models {
+				if model.Alias == mapped {
+					return model.FullName
+				}
+			}
+			return safeModelPassthrough(mapped)
 		}
 	}
 

@@ -331,6 +331,27 @@ func TestBuildAgyResumeCommand(t *testing.T) {
 	}
 }
 
+func TestBuildAgyResumeCommand_TranslatesLegacyModels(t *testing.T) {
+	health := &HealthStatus{WorktreePath: "/tmp/agy-work"}
+	tests := map[string]string{
+		"2.5-flash":      "Gemini 3.5 Flash (Medium)",
+		"2.5-pro":        "Gemini 3.1 Pro (High)",
+		"2.0-flash-lite": "Gemini 3.5 Flash (Low)",
+	}
+	for legacy, current := range tests {
+		t.Run(legacy, func(t *testing.T) {
+			m := &manifest.Manifest{Model: legacy, Agy: &manifest.Agy{ConversationID: "legacy-conversation"}}
+			command := buildAgyResumeCommand(m, health)
+			if !strings.Contains(command, "--model '"+current+"'") {
+				t.Fatalf("legacy model %q command = %q, want current label %q", legacy, command, current)
+			}
+			if strings.Contains(command, "--model '"+legacy+"'") {
+				t.Fatalf("legacy model %q leaked into resume command %q", legacy, command)
+			}
+		})
+	}
+}
+
 func TestBuildAgyResumeCommand_AutoPermissionMode(t *testing.T) {
 	m := &manifest.Manifest{
 		PermissionMode: "auto",

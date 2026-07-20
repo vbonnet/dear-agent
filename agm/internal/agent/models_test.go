@@ -30,6 +30,12 @@ func TestResolveModelFullName(t *testing.T) {
 		{"gemini-cli", "3.5-flash", "gemini-3.5-flash"},
 		{"agy", "3.5-flash", "Gemini 3.5 Flash (Medium)"},
 		{"agy", "Gemini 3.5 Flash (Low)", "Gemini 3.5 Flash (Low)"},
+		{"agy", "2.5-flash", "Gemini 3.5 Flash (Medium)"},
+		{"agy", "gemini-2.5-flash", "Gemini 3.5 Flash (Medium)"},
+		{"agy", "2.5-pro", "Gemini 3.1 Pro (High)"},
+		{"agy", "gemini-2.5-pro", "Gemini 3.1 Pro (High)"},
+		{"agy", "2.0-flash-lite", "Gemini 3.5 Flash (Low)"},
+		{"agy", "gemini-2.0-flash-lite", "Gemini 3.5 Flash (Low)"},
 		{"codex-cli", "5.6", "gpt-5.6-terra"},
 		{"codex-cli", "5.5", "gpt-5.5"},
 		{"codex-cli", "5.4", "gpt-5.4"},
@@ -43,6 +49,16 @@ func TestResolveModelFullName(t *testing.T) {
 		if got != tt.expected {
 			t.Errorf("ResolveModelFullName(%q, %q) = %q, want %q", tt.harness, tt.input, got, tt.expected)
 		}
+	}
+}
+
+func TestNormalizeModelInputPreservesAgyPublicLabels(t *testing.T) {
+	const publicLabel = "Gemini 3.5 Flash (Low)"
+	if got := NormalizeModelInput("agy", publicLabel); got != publicLabel {
+		t.Fatalf("NormalizeModelInput(agy, public label) = %q, want %q", got, publicLabel)
+	}
+	if got := NormalizeModelInput("agy", "3.5-FLASH-LOW"); got != "3.5-flash-low" {
+		t.Fatalf("NormalizeModelInput(agy, alias) = %q, want 3.5-flash-low", got)
 	}
 }
 

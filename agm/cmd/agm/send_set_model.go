@@ -66,7 +66,7 @@ func resolveSetModelInstruction(harnessName, modelInput string) (setModelInstruc
 		return setModelInstruction{}, err
 	}
 
-	alias := strings.ToLower(modelInput)
+	alias := agent.NormalizeModelInput(normalized, modelInput)
 	if normalized == "claude-code" {
 		alias = normalizeClaudeSetModelAlias(alias)
 	}
@@ -87,7 +87,7 @@ func resolveSetModelInstruction(harnessName, modelInput string) (setModelInstruc
 }
 
 func normalizeClaudeSetModelAlias(alias string) string {
-	switch alias {
+	switch strings.ToLower(alias) {
 	case "default":
 		return "sonnet"
 	case "sonnet-1m":

@@ -1,6 +1,6 @@
 # Agent Harness and Model Parity Specification
 
-<!-- Last audited at: 2026-07-01 -->
+<!-- Last audited at: 2026-07-20 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -54,6 +54,8 @@ compatibility.
 ### AGY Model Lifecycle
 
 **AGP-20** When AGM resolves an AGY model alias or accepts an AGY public model label, the system shall pass an exact label exposed by the installed AGY public model catalog through `--model`, including labels containing spaces or parentheses.
+
+**AGP-24** When AGM resumes an AGY manifest containing a retired `2.5-flash`, `2.5-pro`, or `2.0-flash-lite` alias or its former full identifier, the system shall translate it to the closest current AGY public model label before constructing the resume command.
 
 ### Codex Workdir Trust (ce-cmsq)
 
