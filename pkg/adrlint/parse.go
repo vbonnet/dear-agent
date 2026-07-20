@@ -40,7 +40,8 @@ func parseRecord(root, relative string, data []byte, governed map[string]bool) (
 		record.id = fileMatch[1]
 	}
 	var violations []Violation
-	titles := adrTitlePattern.FindAllStringSubmatch(string(data), -1)
+	rendered := markdownOutsideCode(data)
+	titles := adrTitlePattern.FindAllStringSubmatch(string(rendered), -1)
 	if len(titles) != 1 {
 		violations = append(violations, Violation{Path: relative, Reason: fmt.Sprintf("want one ADR heading, got %d", len(titles))})
 	} else {
@@ -49,8 +50,8 @@ func parseRecord(root, relative string, data []byte, governed map[string]bool) (
 			violations = append(violations, Violation{Path: relative, Reason: fmt.Sprintf("heading ID %s does not match filename ID %s", titles[0][1], record.id)})
 		}
 	}
-	statuses := adrStatusPattern.FindAllStringSubmatch(string(data), -1)
-	statusLines := adrStatusLine.FindAll(data, -1)
+	statuses := adrStatusPattern.FindAllStringSubmatch(string(rendered), -1)
+	statusLines := adrStatusLine.FindAll(rendered, -1)
 	if len(statusLines) != 1 || len(statuses) != 1 {
 		violations = append(violations, Violation{Path: relative, Reason: fmt.Sprintf("want one normalized Status line, got %d status-like line(s)", len(statusLines))})
 	} else {
@@ -64,8 +65,9 @@ func parseRecord(root, relative string, data []byte, governed map[string]bool) (
 }
 
 func parseAggregate(root, relative string, data []byte, governed map[string]bool) []Violation {
-	statuses := adrStatusPattern.FindAllStringSubmatch(string(data), -1)
-	statusLines := adrStatusLine.FindAll(data, -1)
+	rendered := markdownOutsideCode(data)
+	statuses := adrStatusPattern.FindAllStringSubmatch(string(rendered), -1)
+	statusLines := adrStatusLine.FindAll(rendered, -1)
 	var violations []Violation
 	if len(statusLines) != 1 || len(statuses) != 1 {
 		violations = append(violations, Violation{Path: relative, Reason: fmt.Sprintf("want one normalized Status line, got %d status-like line(s)", len(statusLines))})

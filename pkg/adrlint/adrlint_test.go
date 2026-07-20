@@ -155,6 +155,14 @@ func TestMarkdownCodeExamplesAreNotLinks(t *testing.T) {
 	}
 }
 
+func TestMarkdownCodeExamplesAreNotLifecycleFields(t *testing.T) {
+	data := []byte(recordFixture("001", "Example", "Accepted") + "\n```markdown\n# ADR-999: Example\n\nStatus: Proposed\n```\n")
+	record, violations := parseRecord(t.TempDir(), "docs/adr/ADR-001-example.md", data, map[string]bool{"docs/adr/ADR-001-example.md": true})
+	if record.id != "001" || record.status != "Accepted" || len(violations) != 0 {
+		t.Fatalf("code examples changed lifecycle parsing: record=%+v violations=%#v", record, violations)
+	}
+}
+
 func TestLoadPolicyRejectsInvalidDeclarations(t *testing.T) {
 	t.Parallel()
 

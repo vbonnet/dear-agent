@@ -108,6 +108,33 @@ func TestDefaultConfig(t *testing.T) {
 	}
 }
 
+func TestDefaultConfigSelectsExplicitTestWorkspace(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	originalAgmConfigPath := agmConfigPath
+	t.Cleanup(func() {
+		lookupEnv = originalLookupEnv
+		agmConfigPath = originalAgmConfigPath
+	})
+	agmConfigPath = "/nonexistent/path/config.yaml"
+	lookupEnv = func(key string) (string, bool) {
+		values := map[string]string{
+			"WORKSPACE":             "oss",
+			"ENGRAM_TEST_MODE":      "1",
+			"ENGRAM_TEST_WORKSPACE": "test",
+		}
+		value, ok := values[key]
+		return value, ok
+	}
+
+	config, err := DefaultConfig()
+	if err != nil {
+		t.Fatalf("DefaultConfig: %v", err)
+	}
+	if config.Workspace != "test" || config.Database != "test" {
+		t.Fatalf("DefaultConfig target = %s/%s, want test/test", config.Workspace, config.Database)
+	}
+}
+
 func TestTestExecutionRecognizesBuiltTestSubprocess(t *testing.T) {
 	for _, tc := range []struct {
 		name       string

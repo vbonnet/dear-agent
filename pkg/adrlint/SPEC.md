@@ -10,7 +10,7 @@
 
 **ADRLINT-03** If an ADR-shaped path, including a canonical three- or four-digit record, is neither governed nor excluded, the system shall report an ungoverned-path violation.
 
-**ADRLINT-04** When a numbered record is validated, the system shall require matching filename and H1 identities, one normalized primary status, and a scope-unique identity.
+**ADRLINT-04** When a numbered record is validated, the system shall require matching filename and rendered H1 identities, one rendered normalized primary status, and a scope-unique identity while ignoring code examples.
 
 **ADRLINT-05** When a scope index is validated, the system shall require an exact one-to-one match of record identity, filename, title, and primary status.
 

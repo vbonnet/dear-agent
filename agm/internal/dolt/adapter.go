@@ -167,6 +167,11 @@ func readDefaultWorkspaceFromConfig() string {
 // DefaultConfig returns default configuration from environment
 func DefaultConfig() (*Config, error) {
 	workspace := getEnv("WORKSPACE", "")
+	if testModeEnabled(getEnv("ENGRAM_TEST_MODE", "")) {
+		if testWorkspace := getEnv("ENGRAM_TEST_WORKSPACE", ""); testWorkspace != "" {
+			workspace = testWorkspace
+		}
+	}
 	if workspace == "" {
 		// Fall back to default_workspace from ~/.agm/config.yaml so the MCP
 		// server works when invoked outside a workspace context (e.g. Dispatch
