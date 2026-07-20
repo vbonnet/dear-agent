@@ -119,8 +119,8 @@ func stripMarkdownContainerPrefixes(text string) string {
 	normalized := strings.TrimSpace(text)
 	for {
 		previous := normalized
-		if strings.HasPrefix(normalized, ">") {
-			normalized = strings.TrimSpace(strings.TrimPrefix(normalized, ">"))
+		if withoutQuote, found := strings.CutPrefix(normalized, ">"); found {
+			normalized = strings.TrimSpace(withoutQuote)
 		}
 		normalized = markdownListPrefix.ReplaceAllString(normalized, "")
 		normalized = markdownTaskPrefix.ReplaceAllString(normalized, "")
@@ -410,34 +410,43 @@ func stripCommandPrefixes(fields []string) []string {
 	for len(fields) > 0 {
 		fields = trimShellGroupPrefixes(fields)
 		fields[0] = executableBase(fields[0])
-		switch {
-		case fields[0] == "if" || fields[0] == "while" || fields[0] == "until" || fields[0] == "then" || fields[0] == "do" || fields[0] == "!":
-			fields = fields[1:]
-		case environmentAssignment.MatchString(fields[0]):
-			fields = fields[1:]
-		case fields[0] == "env":
-			fields = stripLauncherOptions(fields[1:], map[string]bool{
-				"-C": true, "--chdir": true, "-S": true, "--split-string": true,
-				"-u": true, "--unset": true,
-			})
-		case fields[0] == "timeout" || fields[0] == "gtimeout":
-			fields = stripTimeoutPrefix(fields[1:])
-		case fields[0] == "sudo":
-			fields = stripLauncherOptions(fields[1:], map[string]bool{
-				"-C": true, "--close-from": true, "-D": true, "--chdir": true,
-				"-g": true, "--group": true, "-h": true, "--host": true,
-				"-p": true, "--prompt": true, "-R": true, "--chroot": true,
-				"-T": true, "--command-timeout": true, "-u": true, "--user": true,
-			})
-		case fields[0] == "command" || fields[0] == "nohup":
-			fields = stripLauncherOptions(fields[1:], nil)
-		case fields[0] == "exec":
-			fields = stripLauncherOptions(fields[1:], map[string]bool{"-a": true})
-		default:
+		var stripped bool
+		fields, stripped = stripCommandPrefix(fields)
+		if !stripped {
 			return fields
 		}
 	}
 	return fields
+}
+
+func stripCommandPrefix(fields []string) ([]string, bool) {
+	command := fields[0]
+	switch {
+	case command == "if" || command == "while" || command == "until" || command == "then" || command == "do" || command == "!":
+		return fields[1:], true
+	case environmentAssignment.MatchString(command):
+		return fields[1:], true
+	case command == "env":
+		return stripLauncherOptions(fields[1:], map[string]bool{
+			"-C": true, "--chdir": true, "-S": true, "--split-string": true,
+			"-u": true, "--unset": true,
+		}), true
+	case command == "timeout" || command == "gtimeout":
+		return stripTimeoutPrefix(fields[1:]), true
+	case command == "sudo":
+		return stripLauncherOptions(fields[1:], map[string]bool{
+			"-C": true, "--close-from": true, "-D": true, "--chdir": true,
+			"-g": true, "--group": true, "-h": true, "--host": true,
+			"-p": true, "--prompt": true, "-R": true, "--chroot": true,
+			"-T": true, "--command-timeout": true, "-u": true, "--user": true,
+		}), true
+	case command == "command" || command == "nohup":
+		return stripLauncherOptions(fields[1:], nil), true
+	case command == "exec":
+		return stripLauncherOptions(fields[1:], map[string]bool{"-a": true}), true
+	default:
+		return fields, false
+	}
 }
 
 func trimShellGroupPrefixes(fields []string) []string {

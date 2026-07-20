@@ -62,70 +62,83 @@ func parseSegments(source []byte) []Segment {
 
 func parseScriptSegments(source []byte) []Segment {
 	var segments []Segment
-	var quote byte
-	heredoc := ""
-	visibleContinuation := false
-	visibleHelpers := agentVisibleScriptHelpers(source)
-	for index, raw := range strings.Split(string(source), "\n") {
+	state := scriptParseState{visibleHelpers: agentVisibleScriptHelpers(source)}
+	line := 0
+	for raw := range strings.SplitSeq(string(source), "\n") {
+		line++
 		value := strings.TrimSpace(raw)
 		if value == "" {
 			continue
 		}
-		if heredoc != "" {
-			if value == heredoc {
-				heredoc = ""
-				continue
-			}
-			segments = append(segments, Segment{Kind: SegmentShell, Line: index + 1, Text: value})
-			continue
-		}
-		if visibleContinuation {
-			segments = append(segments, Segment{Kind: SegmentShell, Line: index + 1, Text: value})
-			if commandQuote := unclosedScriptQuote(value); commandQuote != 0 {
-				quote = commandQuote
-				visibleContinuation = false
-			} else {
-				visibleContinuation = hasShellLineContinuation(raw)
-			}
-			continue
-		}
-		if quote != 0 {
-			segments = append(segments, Segment{Kind: SegmentShell, Line: index + 1, Text: value})
-			if unescapedByteCount(raw, quote)%2 == 1 {
-				quote = 0
+		if include, handled := state.consumeOngoing(raw, value); handled {
+			if include {
+				segments = append(segments, Segment{Kind: SegmentShell, Line: line, Text: value})
 			}
 			continue
 		}
 		if strings.HasPrefix(value, "#") {
-			segments = append(segments, Segment{Kind: SegmentProse, Line: index + 1, Text: value})
+			segments = append(segments, Segment{Kind: SegmentProse, Line: line, Text: value})
 			continue
 		}
 		if marker := scriptHeredocMarker(value); marker != "" {
-			heredoc = marker
+			state.heredoc = marker
 			continue
 		}
 		assignment := stripShellDeclaration(value)
 		if shellAssignment.MatchString(assignment) && strings.Contains(assignment, "$(") {
-			segments = append(segments, Segment{Kind: SegmentShell, Line: index + 1, Text: value})
+			segments = append(segments, Segment{Kind: SegmentShell, Line: line, Text: value})
 			continue
 		}
 		if assignmentQuote := scriptAssignmentQuote(assignment); assignmentQuote != 0 {
-			segments = append(segments, Segment{Kind: SegmentShell, Line: index + 1, Text: value})
+			segments = append(segments, Segment{Kind: SegmentShell, Line: line, Text: value})
 			if unescapedByteCount(raw, assignmentQuote)%2 == 1 {
-				quote = assignmentQuote
+				state.quote = assignmentQuote
 			}
 			continue
 		}
-		if agentVisibleScriptCommand(value, visibleHelpers) {
-			segments = append(segments, Segment{Kind: SegmentShell, Line: index + 1, Text: value})
+		if agentVisibleScriptCommand(value, state.visibleHelpers) {
+			segments = append(segments, Segment{Kind: SegmentShell, Line: line, Text: value})
 			if commandQuote := unclosedScriptQuote(value); commandQuote != 0 {
-				quote = commandQuote
+				state.quote = commandQuote
 			} else {
-				visibleContinuation = hasShellLineContinuation(raw)
+				state.visibleContinuation = hasShellLineContinuation(raw)
 			}
 		}
 	}
 	return segments
+}
+
+type scriptParseState struct {
+	quote               byte
+	heredoc             string
+	visibleContinuation bool
+	visibleHelpers      map[string]bool
+}
+
+func (state *scriptParseState) consumeOngoing(raw, value string) (include, handled bool) {
+	if state.heredoc != "" {
+		if value == state.heredoc {
+			state.heredoc = ""
+			return false, true
+		}
+		return true, true
+	}
+	if state.visibleContinuation {
+		if commandQuote := unclosedScriptQuote(value); commandQuote != 0 {
+			state.quote = commandQuote
+			state.visibleContinuation = false
+		} else {
+			state.visibleContinuation = hasShellLineContinuation(raw)
+		}
+		return true, true
+	}
+	if state.quote != 0 {
+		if unescapedByteCount(raw, state.quote)%2 == 1 {
+			state.quote = 0
+		}
+		return true, true
+	}
+	return false, false
 }
 
 func hasShellLineContinuation(value string) bool {
