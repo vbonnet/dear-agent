@@ -6,6 +6,7 @@
 # RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/taskmanager/SPEC.md
 # RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/retrospective/SPEC.md
 # RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/validator/SPEC.md
+# RELATED-SPEC: wayfinder/cmd/wayfinder-session/statusread/SPEC.md
 # RELATED-SPEC: wayfinder/hooks/cmd/stop-wayfinder-guard/SPEC.md
 # RELATED-SPEC: wayfinder/coordinator/SPEC.md
 # RELATED-SPEC: wayfinder/internal/analytics/SPEC.md
@@ -27,6 +28,7 @@ Feature: Canonical Wayfinder command guardrails
       | wayfinder/cmd/wayfinder-session/internal/taskmanager       |
       | wayfinder/cmd/wayfinder-session/internal/retrospective     |
       | wayfinder/cmd/wayfinder-session/internal/validator         |
+      | wayfinder/cmd/wayfinder-session/statusread                 |
       | wayfinder/hooks/cmd/stop-wayfinder-guard                   |
       | wayfinder/coordinator                                      |
       | wayfinder/internal/analytics                               |

@@ -1,0 +1,19 @@
+# Wayfinder status reader requirements specification
+
+<!-- Last audited at: 2026-07-20 -->
+
+**Status:** Active
+**Scope:** Validated, read-only canonical status summaries for external consumers.
+
+## EARS requirements
+
+**WFREAD-01** When a consumer requests status from a project directory, the system shall parse and validate the complete canonical schema 2.0 status.
+
+**WFREAD-02** When canonical status is missing, unreadable, or invalid, the system shall return an error without a partial summary or compatibility fallback.
+
+**WFREAD-03** When canonical status is valid, the system shall expose only the lifecycle status and current waypoint required by read-only policy consumers.
+
+## Traceability
+
+- Tests: `wayfinder/cmd/wayfinder-session/statusread/statusread_test.go`
+- BDD: `agm/test/bdd/features/wayfinder_v2_command_guardrails.feature`
