@@ -24,6 +24,19 @@
 // Exit status is 0 on success even when zero beads are dispatched — "nothing new
 // to dispatch" (backlog drained, at capacity, or all in flight) is a normal
 // steady state, not an error.
+//
+// The three ground-truth queries (bd ready, agm session list, gh pr list) fail
+// closed: any error there aborts the run rather than risk double-dispatching.
+// That's correct for the individual tick, but the dispatch loop wrapper reruns
+// this binary every INTERVAL forever, so a transient failure (a gh token
+// mid-rotation, a momentary dolt lock) can silently stall the whole flywheel
+// tick after tick while the loop still looks "alive" in its log. See
+// degraded.go: each query is retried before it's treated as fatal, and a
+// persisted failure streak (~/.agm/vroom/heartbeat/dispatch-direct.json,
+// overridable via -heartbeat-file) escalates past a threshold — a loud stderr
+// banner plus a best-effort desktop notification — instead of degrading
+// invisibly (incident: 2026-07-20, gh auth rotation, ~20 minutes of dead
+// ticks discoverable only by reading dispatch-loop.log line by line).
 package main
 
 import (
@@ -125,7 +138,7 @@ var queryReady = func(ctx context.Context, db string) ([]bead, error) {
 	cmd := exec.CommandContext(ctx, "bd", "--db", db, "ready", "--json")
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("bd ready: %w", err)
+		return nil, wrapExecErr("bd ready", err)
 	}
 	var beads []bead
 	if err := json.Unmarshal(out, &beads); err != nil {
@@ -148,7 +161,7 @@ var queryOpenPRs = func(ctx context.Context, repo string) ([]pullRequest, error)
 		"--json", "number,headRefName,title")
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("gh pr list: %w", err)
+		return nil, wrapExecErr("gh pr list", err)
 	}
 	var prs []pullRequest
 	if err := json.Unmarshal(out, &prs); err != nil {
@@ -167,7 +180,7 @@ var listSessions = func(ctx context.Context) ([]string, error) {
 	cmd := exec.CommandContext(ctx, "agm", "session", "list")
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("agm session list: %w", err)
+		return nil, wrapExecErr("agm session list", err)
 	}
 	return strings.Split(string(out), "\n"), nil
 }
@@ -581,6 +594,7 @@ func main() {
 	repoDir := flag.String("repo-dir", "~/src/dear-agent", "local checkout passed as `agm session new --directory` so a launchd-context spawn never inherits launchd's cwd (ce-fmxv)")
 	maxPriority := flag.Int("max-priority", 2, "numeric priority ceiling: 0=P0 only, 1=P0+P1, 2=P0..P2 (orchestrator narrows this as Meta-O goes stale)")
 	dryRun := flag.Bool("dry-run", false, "report what would be dispatched without spawning any sessions")
+	heartbeatFile := flag.String("heartbeat-file", "~/.agm/vroom/heartbeat/dispatch-direct.json", "path to the persisted control-plane health state (consecutive fail-closed streak, last error)")
 	flag.Parse()
 
 	// Cancel in-flight subprocesses if the dispatcher is interrupted (SIGINT/
@@ -594,30 +608,53 @@ func main() {
 	}
 	dbPath := expandHome(*db, home)
 	repoDirPath := expandHome(*repoDir, home)
+	statePath := expandHome(*heartbeatFile, home)
 
-	beads, err := queryReady(ctx, dbPath)
-	if err != nil {
-		fatal("query ready beads: %v", err)
+	var beads []bead
+	if err := withRetry(ctx, func() error {
+		var qErr error
+		beads, qErr = queryReady(ctx, dbPath)
+		return qErr
+	}); err != nil {
+		wrapped := fmt.Errorf("query ready beads: %w", err)
+		recordFailure(ctx, statePath, wrapped)
+		fatal("%v", wrapped)
 	}
 
 	// Fail closed on a session-list failure: without it we cannot tell which
 	// beads already have a live worker and must not risk double-dispatching.
-	sessions, err := listSessions(ctx)
-	if err != nil {
-		fatal("list sessions (failing closed to avoid double-dispatch): %v", err)
+	var sessions []string
+	if err := withRetry(ctx, func() error {
+		var qErr error
+		sessions, qErr = listSessions(ctx)
+		return qErr
+	}); err != nil {
+		wrapped := fmt.Errorf("list sessions (failing closed to avoid double-dispatch): %w", err)
+		recordFailure(ctx, statePath, wrapped)
+		fatal("%v", wrapped)
 	}
 	live := liveWorkerIDs(sessions)
 
-	// Fail closed on a PR-list failure for the same reason.
-	prs, err := queryOpenPRs(ctx, *repo)
-	if err != nil {
-		fatal("query open PRs (failing closed to avoid double-dispatch): %v", err)
+	// Fail closed on a PR-list failure for the same reason. Retried first: a
+	// gh token mid-rotation (or any other transient gh failure) is exactly the
+	// case retryAttempts exists for — see degraded.go.
+	var prs []pullRequest
+	if err := withRetry(ctx, func() error {
+		var qErr error
+		prs, qErr = queryOpenPRs(ctx, *repo)
+		return qErr
+	}); err != nil {
+		wrapped := fmt.Errorf("query open PRs (failing closed to avoid double-dispatch): %w", err)
+		recordFailure(ctx, statePath, wrapped)
+		fatal("%v", wrapped)
 	}
 
 	candidates := selectCandidates(beads, live, prs, *maxPriority)
 
 	launch := workerLaunchConfig{Harness: *harness, Model: *model, Mode: *mode, Workspace: *workspace}
 	dispatched := dispatchCandidates(ctx, candidates, launch, repoDirPath, *dryRun, os.Stdout, os.Stderr)
+
+	recordSuccess(statePath)
 
 	fmt.Fprintf(os.Stderr,
 		"vroom-dispatch-direct: %d ready, %d live worker(s), %d eligible, %d dispatched\n",
