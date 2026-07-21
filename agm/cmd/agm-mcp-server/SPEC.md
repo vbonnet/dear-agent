@@ -27,6 +27,8 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
 
 **MCS-06** When MCP session creation succeeds, the result shall report `source: "mcp"` and the registered manifest shall contain the `source:mcp` provenance tag.
 
+**MCS-07** When a Wayfinder MCP tool lists or retrieves a status file, the server shall accept it only after complete canonical schema 2.0 validation.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/mcp_parity.feature`

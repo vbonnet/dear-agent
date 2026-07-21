@@ -17,7 +17,11 @@ func ParseV2(filePath string) (*StatusV2, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
+	return ParseV2Content(data)
+}
 
+// ParseV2Content parses and fully validates canonical V2 status bytes.
+func ParseV2Content(data []byte) (*StatusV2, error) {
 	// Extract YAML frontmatter
 	yamlContent, err := extractV2Frontmatter(string(data))
 	if err != nil {

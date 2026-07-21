@@ -20,10 +20,12 @@ var phaseToEngram = map[string]string{
 	"DESIGN":   "s6-design.ai.md",
 	"SPEC":     "d4-solution-requirements.ai.md",
 	"PLAN":     "s7-plan.ai.md",
-	"SETUP":    "s4-stakeholder-alignment.ai.md",
+	"SETUP":    "s7-plan.ai.md",
 	"BUILD":    "s8-build.ai.md",
 	"RETRO":    "s11-retrospective.ai.md",
 }
+
+var canonicalPhases = []string{"CHARTER", "PROBLEM", "RESEARCH", "DESIGN", "SPEC", "PLAN", "SETUP", "BUILD", "RETRO"}
 
 // ResolveEngramPath returns the absolute path to the engram file for a given phase.
 // It searches for the engram repo root by looking for the workflow directory
@@ -71,15 +73,7 @@ func ResolveEngramPathAndHash(phase string) (path, hashValue string, err error) 
 
 // KnownPhases returns all known phase identifiers.
 func KnownPhases() []string {
-	seen := make(map[string]bool)
-	var phases []string
-	for k := range phaseToEngram {
-		if !seen[k] {
-			seen[k] = true
-			phases = append(phases, k)
-		}
-	}
-	return phases
+	return append([]string(nil), canonicalPhases...)
 }
 
 func knownPhases() string {

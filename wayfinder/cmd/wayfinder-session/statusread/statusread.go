@@ -12,16 +12,29 @@ type Summary struct {
 	Beads           []string
 }
 
+// Parse fully validates canonical status bytes and returns consumer fields.
+func Parse(content []byte) (*Summary, error) {
+	parsed, err := status.ParseV2Content(content)
+	if err != nil {
+		return nil, err
+	}
+	return summary(parsed), nil
+}
+
 // ParseFromDir reads and fully validates the canonical status file in dir.
 func ParseFromDir(dir string) (*Summary, error) {
 	parsed, err := status.ParseV2FromDir(dir)
 	if err != nil {
 		return nil, err
 	}
+	return summary(parsed), nil
+}
+
+func summary(parsed *status.StatusV2) *Summary {
 	return &Summary{
 		ProjectName:     parsed.ProjectName,
 		Status:          parsed.Status,
 		CurrentWaypoint: parsed.CurrentWaypoint,
 		Beads:           append([]string(nil), parsed.Beads...),
-	}, nil
+	}
 }

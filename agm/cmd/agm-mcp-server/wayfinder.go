@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/statusread"
 	"gopkg.in/yaml.v3"
 )
 
@@ -70,17 +71,12 @@ func readWayfinderSession(sessionDir string) (string, map[string]any, error) {
 	if err != nil {
 		return id, nil, err
 	}
+	if _, err := statusread.Parse(data); err != nil {
+		return id, nil, fmt.Errorf("invalid canonical status: %w", err)
+	}
 	fm, err := parseFrontmatter(data)
 	if err != nil {
 		return id, nil, err
-	}
-	if fmString(fm, "schema_version") != "2.0" {
-		return id, nil, fmt.Errorf("schema_version must be 2.0")
-	}
-	for _, field := range []string{"project_name", "status", "current_waypoint"} {
-		if fmString(fm, field) == "" {
-			return id, nil, fmt.Errorf("%s is required", field)
-		}
 	}
 	return id, fm, nil
 }

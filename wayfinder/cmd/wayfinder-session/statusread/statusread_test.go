@@ -55,3 +55,29 @@ beads:
 		t.Fatalf("ParseFromDir() beads = %v", summary.Beads)
 	}
 }
+
+func TestParseValidatesExactStatusBytes(t *testing.T) {
+	contents := []byte(`---
+schema_version: "2.0"
+project_name: byte-reader
+project_type: feature
+risk_level: S
+current_waypoint: SETUP
+status: in-progress
+created_at: 2026-07-20T00:00:00Z
+updated_at: 2026-07-20T00:00:00Z
+---
+`)
+	summary, err := Parse(contents)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if summary.ProjectName != "byte-reader" || summary.CurrentWaypoint != "SETUP" {
+		t.Fatalf("Parse() summary = %+v", summary)
+	}
+
+	invalid := []byte(strings.Replace(string(contents), "risk_level: S", "risk_level: impossible", 1))
+	if _, err := Parse(invalid); err == nil || !strings.Contains(err.Error(), "invalid risk_level") {
+		t.Fatalf("Parse() error = %v, want invalid risk_level", err)
+	}
+}

@@ -13,6 +13,8 @@
 
 **WFREAD-03** When canonical status is valid, the system shall expose only the project name, lifecycle status, current waypoint, and bead references required by read-only policy consumers.
 
+**WFREAD-04** When a consumer already holds status bytes, the system shall fully validate those exact bytes without requiring a second filesystem read.
+
 ## Traceability
 
 - Tests: `wayfinder/cmd/wayfinder-session/statusread/statusread_test.go`
