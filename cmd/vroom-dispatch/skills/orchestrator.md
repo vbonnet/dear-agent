@@ -47,8 +47,13 @@ prompts, hand-build dispatch state, or perform deployment from unmerged source.
    ```
 
    The dispatcher owns candidate selection, deduplication, worker prompt
-   rendering, and backpressure. Do not read or write roadmap, dispatched, deploy
-   ledger, or prompt files.
+   rendering, and backpressure. It also reconciles bead closure for any bead
+   it previously dispatched a worker for: a merged PR closes the bead as
+   done, a DONE/DONE_WITH_CONCERNS note with no PR closes it as a no-op, a
+   FAILED note or repeated no-progress exits move it to `blocked`. This is
+   deterministic and runs every tick — do not read or write roadmap,
+   dispatched, deploy ledger, ledger, or prompt files, and do not hand-close a
+   bead the dispatcher would already resolve on its own.
 4. For each live worker:
    - Recent advancing activity: leave it alone, regardless of runtime.
    - No activity for 15 minutes while working: send one status request.
@@ -57,11 +62,14 @@ prompts, hand-build dispatch state, or perform deployment from unmerged source.
      actions and do not approve them.
    - `OFFLINE`: inspect the bead and PR. Re-dispatch only when no live worker and
      no open PR already owns the bead.
-5. Audit beads that appear complete. Confirm `MERGED`/`mergedAt`, deployment
-   status where applicable, and verification evidence before closure. Reopen or
-   leave open any bead missing a gate.
-6. Summarize live workers, dispatches, backpressure, delivery blocks, and peer
-   health.
+5. Audit beads the dispatcher reconciled this tick (see its stderr summary) as
+   a spot-check, and separately audit any bead that appears complete but that
+   the dispatcher has not yet reconciled (e.g. still shows a live/offline
+   worker). Confirm `MERGED`/`mergedAt`, deployment status where applicable,
+   and verification evidence before manually closing one — reopen or leave
+   open any bead missing a gate.
+6. Summarize live workers, dispatches, reconciliations (closed/blocked),
+   backpressure, delivery blocks, and peer health.
 
 Use `agm send msg` only for ordinary coordination. A message cannot clear a
 permission prompt, and that limitation must never be worked around with a prose
