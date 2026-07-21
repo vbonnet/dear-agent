@@ -211,6 +211,8 @@ creation, and terminal state detection.
   consume its Cobra context and return promptly when canceled.
 - Structured verify-result, work-request, and wake-loop sends preserve the same
   root context through multiline composer readiness and delivery.
+- Resume rechecks the root context after metadata lookup and before tmux
+  creation, command delivery, metadata updates, or warm-session attach.
 - AGY feedback survey handling dismisses once and recognizes the subsequent
   composer even while stale survey text remains in captured pane history;
   downstream state, direct-delivery, and idle predicates use the same

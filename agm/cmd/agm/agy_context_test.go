@@ -5,6 +5,9 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
 func TestWaitForResumedAgyUsesCallerContext(t *testing.T) {
@@ -23,6 +26,40 @@ func TestWaitForResumedAgyUsesCallerContext(t *testing.T) {
 	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("waitForResumedAgyWithWait error = %v, want context.Canceled", err)
+	}
+}
+
+func TestResumeSessionStopsCancellationAfterManifestRead(t *testing.T) {
+	for _, tmuxExists := range []bool{false, true} {
+		t.Run(map[bool]string{false: "cold-resume", true: "warm-resume"}[tmuxExists], func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			t.Cleanup(cancel)
+			mutatedTmux := false
+
+			err := resumeSessionWithRuntime(ctx, nil, "agy-session", "", "agy", &HealthStatus{
+				TmuxExists:      tmuxExists,
+				TmuxSessionName: "agy-resume",
+			}, resumeSessionRuntime{
+				loadManifest: func(context.Context, *dolt.Adapter, string, string) (*manifest.Manifest, error) {
+					cancel()
+					return &manifest.Manifest{}, nil
+				},
+				newSession: func(string, string) error {
+					mutatedTmux = true
+					return nil
+				},
+				attach: func(string) error {
+					mutatedTmux = true
+					return nil
+				},
+			})
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("resumeSessionWithRuntime() error = %v, want context.Canceled", err)
+			}
+			if mutatedTmux {
+				t.Fatal("resume mutated tmux after the manifest read canceled its caller")
+			}
+		})
 	}
 }
 

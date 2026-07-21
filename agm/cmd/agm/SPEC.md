@@ -90,6 +90,8 @@ Provide a production-ready CLI that:
 
 **CLI-31** When `agm send verify`, `agm send work-request`, or `agm send wake-loop` performs structured multiline delivery, the system shall pass the Cobra command context through composer readiness and delivery so cancellation cannot later send the payload.
 
+**CLI-32** When session resume metadata lookup returns after the Cobra command context has been canceled, the system shall stop before creating, commanding, updating, or attaching to a tmux session.
+
 ## Requirements
 
 ### Functional Requirements

@@ -541,86 +541,155 @@ func resumeResolvedSession(ctx context.Context, adapter *dolt.Adapter, sessionID
 
 // resumeSession performs the complete resume workflow
 func resumeSession(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath, harnessName string, health *HealthStatus) error {
-	sendCommands := shouldSendResumeCommands(health.TmuxExists)
+	return resumeSessionWithRuntime(ctx, adapter, sessionID, manifestPath, harnessName, health, resumeSessionRuntime{
+		loadManifest: getResumeManifest,
+		newSession:   tmux.NewSession,
+		attach:       tmux.AttachSession,
+	})
+}
 
-	// Read and migrate harness-specific resume metadata before mutating tmux.
-	m, err := getResumeManifest(adapter, sessionID, harnessName)
+type resumeSessionRuntime struct {
+	loadManifest func(context.Context, *dolt.Adapter, string, string) (*manifest.Manifest, error)
+	newSession   func(string, string) error
+	attach       func(string) error
+}
+
+func resumeSessionWithRuntime(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath, harnessName string, health *HealthStatus, runtime resumeSessionRuntime) error {
+	m, err := loadResumeSessionManifest(ctx, adapter, sessionID, harnessName, runtime)
 	if err != nil {
 		return err
 	}
-
-	// Ensure tmux session exists
-	if !health.TmuxExists {
-		ui.PrintSuccess(fmt.Sprintf("Creating tmux session: %s", health.TmuxSessionName))
-		if err := tmux.NewSession(health.TmuxSessionName, health.WorktreePath); err != nil {
-			return fmt.Errorf("failed to create tmux session: %w", err)
-		}
-	} else {
-		ui.PrintSuccess(fmt.Sprintf("Attaching to existing tmux session: %s", health.TmuxSessionName))
+	if err := ensureResumeTmuxSession(ctx, health, runtime); err != nil {
+		return err
 	}
+	sendCommands := shouldSendResumeCommands(health.TmuxExists)
+	if err := runHarnessResume(ctx, adapter, m, harnessName, health, sendCommands); err != nil {
+		return err
+	}
+	return finalizeResumeSession(ctx, adapter, sessionID, manifestPath, health, sendCommands, runtime)
+}
 
-	if sendCommands {
-		if err := dispatchResumeCommand(adapter, m, harnessName, health); err != nil {
-			return err
-		}
-		if err := waitForResumedHarness(ctx, harnessName, health); err != nil {
-			return err
-		}
-		restorePermissionMode(harnessName, m, health)
+func loadResumeSessionManifest(ctx context.Context, adapter *dolt.Adapter, sessionID, harnessName string, runtime resumeSessionRuntime) (*manifest.Manifest, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	m, err := runtime.loadManifest(ctx, adapter, sessionID, harnessName)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func ensureResumeTmuxSession(ctx context.Context, health *HealthStatus, runtime resumeSessionRuntime) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if health.TmuxExists {
+		ui.PrintSuccess(fmt.Sprintf("Attaching to existing tmux session: %s", health.TmuxSessionName))
+		return nil
+	}
+	ui.PrintSuccess(fmt.Sprintf("Creating tmux session: %s", health.TmuxSessionName))
+	if err := runtime.newSession(health.TmuxSessionName, health.WorktreePath); err != nil {
+		return fmt.Errorf("failed to create tmux session: %w", err)
+	}
+	return nil
+}
+
+func runHarnessResume(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest, harnessName string, health *HealthStatus, sendCommands bool) error {
+	if !sendCommands {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := dispatchResumeCommand(adapter, m, harnessName, health); err != nil {
+		return err
+	}
+	if err := waitForResumedHarness(ctx, harnessName, health); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	restorePermissionMode(harnessName, m, health)
+	return nil
+}
+
+func finalizeResumeSession(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath string, health *HealthStatus, sendCommands bool, runtime resumeSessionRuntime) error {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	// Update manifest last_activity (best effort - don't fail if this errors)
 	if err := updateManifestActivity(adapter, sessionID, manifestPath); err != nil {
 		ui.PrintWarning(fmt.Sprintf("Failed to update manifest activity: %v", err))
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	// Update VS Code tab title if running in VS Code
 	updateVSCodeTabTitle(health.TmuxSessionName)
+	if err := deliverPostResumePrompt(ctx, health.TmuxSessionName); err != nil {
+		return err
+	}
+	return attachResumedSession(ctx, sessionID, health, sendCommands, runtime)
+}
 
+func deliverPostResumePrompt(ctx context.Context, sessionName string) error {
 	// Send post-resume prompt if --prompt or --prompt-file was specified.
 	// This happens after the harness is ready, before attach.
 	// Works for both new sessions (sendCommands=true) and existing sessions.
-	if resumePrompt != "" || resumePromptFile != "" {
-		if err := sendPostResumePrompt(ctx, health.TmuxSessionName, resumePrompt, resumePromptFile, resumeDeletePromptFile); err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			// Non-fatal: warn but continue so the user can still attach and type manually
-			ui.PrintWarning(fmt.Sprintf("Failed to send post-resume prompt: %v", err))
-		} else {
-			ui.PrintSuccess("Post-resume prompt delivered.")
-		}
+	if resumePrompt == "" && resumePromptFile == "" {
+		return nil
 	}
-
-	// NOTE: No need to release global lock before attach - using fine-grained locks
-	// AttachSession never holds any lock, so it can block indefinitely without issues
-
-	// Attach to tmux session (unless --detached)
-	if !resumeDetached {
-		socketPath := tmux.GetSocketPath()
-		debug.Log("Attaching to tmux session: %s (socket: %s)", health.TmuxSessionName, socketPath)
-		ui.PrintSuccess(fmt.Sprintf("Attaching to tmux session: %s", health.TmuxSessionName))
-		if sendCommands {
-			fmt.Println("\nNote: You will be attached to the tmux session. Press Ctrl+B then D to detach.")
+	if err := sendPostResumePrompt(ctx, sessionName, resumePrompt, resumePromptFile, resumeDeletePromptFile); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
-		fmt.Println()
-
-		if err := tmux.AttachSession(health.TmuxSessionName); err != nil {
-			return fmt.Errorf("failed to attach to tmux session: %w", err)
-		}
-	} else {
-		ui.PrintSuccess(fmt.Sprintf("Session '%s' resumed (detached)", health.TmuxSessionName))
-		fmt.Printf("  • To attach later: tmux attach -t %s\n", health.TmuxSessionName)
-		fmt.Printf("  • To view logs: agm logs %s\n", sessionID)
+		// Non-fatal: warn but continue so the user can still attach and type manually
+		ui.PrintWarning(fmt.Sprintf("Failed to send post-resume prompt: %v", err))
+		return nil
 	}
-
+	ui.PrintSuccess("Post-resume prompt delivered.")
 	return nil
 }
 
-func getResumeManifest(adapter *dolt.Adapter, sessionID, harnessName string) (*manifest.Manifest, error) {
+func attachResumedSession(ctx context.Context, sessionID string, health *HealthStatus, sendCommands bool, runtime resumeSessionRuntime) error {
+	// NOTE: No need to release global lock before attach - using fine-grained locks
+	// AttachSession never holds any lock, so it can block indefinitely without issues
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if resumeDetached {
+		ui.PrintSuccess(fmt.Sprintf("Session '%s' resumed (detached)", health.TmuxSessionName))
+		fmt.Printf("  • To attach later: tmux attach -t %s\n", health.TmuxSessionName)
+		fmt.Printf("  • To view logs: agm logs %s\n", sessionID)
+		return nil
+	}
+	socketPath := tmux.GetSocketPath()
+	debug.Log("Attaching to tmux session: %s (socket: %s)", health.TmuxSessionName, socketPath)
+	ui.PrintSuccess(fmt.Sprintf("Attaching to tmux session: %s", health.TmuxSessionName))
+	if sendCommands {
+		fmt.Println("\nNote: You will be attached to the tmux session. Press Ctrl+B then D to detach.")
+	}
+	fmt.Println()
+	if err := runtime.attach(health.TmuxSessionName); err != nil {
+		return fmt.Errorf("failed to attach to tmux session: %w", err)
+	}
+	return nil
+}
+
+func getResumeManifest(ctx context.Context, adapter *dolt.Adapter, sessionID, harnessName string) (*manifest.Manifest, error) {
 	m, err := adapter.GetSession(sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read session from Dolt: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	if err := migrateAmbiguousLegacyAgyModel(adapter, m, harnessName); err != nil {
 		return nil, err

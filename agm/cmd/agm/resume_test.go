@@ -401,6 +401,35 @@ func TestMigrateAmbiguousLegacyAgyModelClearsStoredOverride(t *testing.T) {
 	}
 }
 
+func TestGetResumeManifestStopsCanceledMigration(t *testing.T) {
+	adapter, err := dolt.NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	m := dolt.NewTestManifest("canceled-legacy-agy", "canceled-legacy-agy")
+	m.Harness = "agy"
+	m.Model = "2.5-flash"
+	m.Agy = &manifest.Agy{ConversationID: "native-conversation"}
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := getResumeManifest(ctx, adapter, m.SessionID, "agy"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("getResumeManifest() error = %v, want context.Canceled", err)
+	}
+	stored, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if stored.Model != "2.5-flash" {
+		t.Fatalf("stored model = %q, want canceled migration to preserve provenance", stored.Model)
+	}
+}
+
 func TestBuildAgyResumeCommand_PreservesImportedConversationModel(t *testing.T) {
 	health := &HealthStatus{WorktreePath: "/tmp/agy-work"}
 	m := &manifest.Manifest{
