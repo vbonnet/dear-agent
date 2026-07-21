@@ -134,3 +134,42 @@ waypoint_history:
 		t.Fatalf("Parse() progress = %d, want 77", summary.Progress)
 	}
 }
+
+func TestParseCountsConfiguredSkippedPhasesInProgress(t *testing.T) {
+	contents := []byte(`---
+schema_version: "2.0"
+project_name: lite-progress-reader
+project_type: feature
+risk_level: XS
+current_waypoint: BUILD
+status: in-progress
+created_at: 2026-07-20T00:00:00Z
+updated_at: 2026-07-20T00:00:00Z
+skip_roadmap: true
+skip_phases:
+  - DESIGN
+  - SPEC
+  - PLAN
+waypoint_history:
+  - name: CHARTER
+    status: completed
+    started_at: 2026-07-20T00:00:00Z
+    completed_at: 2026-07-20T00:01:00Z
+  - name: PROBLEM
+    status: completed
+    started_at: 2026-07-20T00:01:00Z
+    completed_at: 2026-07-20T00:02:00Z
+  - name: RESEARCH
+    status: completed
+    started_at: 2026-07-20T00:02:00Z
+    completed_at: 2026-07-20T00:03:00Z
+---
+`)
+	summary, err := Parse(contents)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if summary.Progress != 77 {
+		t.Fatalf("Parse() progress = %d, want 77", summary.Progress)
+	}
+}

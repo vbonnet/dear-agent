@@ -57,5 +57,11 @@ func canonicalProgress(parsed *status.StatusV2) int {
 			complete[waypoint.Name] = true
 		}
 	}
+	for _, waypoint := range parsed.SkipPhases {
+		complete[waypoint] = true
+	}
+	if parsed.SkipRoadmap {
+		complete[status.WaypointV2Setup] = true
+	}
 	return len(complete) * 100 / len(status.AllWaypointsV2Schema())
 }
