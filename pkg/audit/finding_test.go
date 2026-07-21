@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestFingerprintStability is the core de-dup contract from ADR-011 §D9:
+// TestFingerprintStability covers ADR-011's finding de-duplication contract:
 // the same parts (in the same order) produce the same fingerprint
 // across calls. This is the only thing standing between us and "every
 // audit run looks like 100 new findings".
@@ -55,9 +55,9 @@ func TestFindingValidate(t *testing.T) {
 	}
 
 	cases := []Finding{
-		{Fingerprint: "fp", Severity: SeverityP1, Title: "t"},   // missing CheckID
-		{CheckID: "x", Severity: SeverityP1, Title: "t"},        // missing Fingerprint
-		{CheckID: "x", Fingerprint: "fp", Title: "t"},           // missing Severity
+		{Fingerprint: "fp", Severity: SeverityP1, Title: "t"}, // missing CheckID
+		{CheckID: "x", Severity: SeverityP1, Title: "t"},      // missing Fingerprint
+		{CheckID: "x", Fingerprint: "fp", Title: "t"},         // missing Severity
 		{CheckID: "x", Fingerprint: "fp", Severity: "P9", Title: "t"},
 		{CheckID: "x", Fingerprint: "fp", Severity: SeverityP1}, // missing Title
 	}

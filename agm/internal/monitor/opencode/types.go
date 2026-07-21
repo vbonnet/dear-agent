@@ -12,7 +12,7 @@ import (
 
 // AGMEvent represents a parsed OpenCode event ready for publishing to EventBus
 type AGMEvent struct {
-	State     string                 // AGM state (IDLE, THINKING, AWAITING_PERMISSION, etc.)
+	State     string                 // AGM state (IDLE, WORKING, AWAITING_PERMISSION, etc.)
 	Timestamp int64                  // Unix timestamp from OpenCode event
 	Metadata  map[string]interface{} // Event-specific metadata
 }

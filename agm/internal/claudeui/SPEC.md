@@ -1,6 +1,6 @@
 # Claude UI Session Store Specification
 
-<!-- Last audited at: 2026-07-09 -->
+<!-- Last audited at: 2026-07-18 -->
 
 ## Overview
 
@@ -25,6 +25,8 @@ archive or lifecycle contract.
 **CUI-07** When AGM archives a Claude session with a persisted UUID, the system shall select only desktop records whose `cliSessionId` exactly equals that UUID, including across multiple local device/account stores.
 
 **CUI-08** When an individual Claude desktop device or account store cannot be read, the system shall record that store as a load error and continue scanning the remaining stores.
+
+**CUI-09** When store discovery finds zero or multiple candidate device or account directories without an explicit selector, the system shall refuse the operation rather than select an arbitrary store.
 
 ## BDD Traceability
 

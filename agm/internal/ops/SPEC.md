@@ -1,9 +1,9 @@
 # agm/internal/ops — Requirements Specification (EARS)
 
-<!-- Last audited at: 2026-07-03 -->
+<!-- Last audited at: 2026-07-18 -->
 
 **Version**: 1.0
-**Last Updated**: 2026-06-07
+**Last Updated**: 2026-07-18
 **Status**: Baseline (derived from tests + code, not design-forward)
 **Scope**: Shared business-logic layer for AGM CLI, MCP, and Skills surfaces
 
@@ -82,6 +82,14 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 **OPS-56** When `ArchiveSession` uses an isolated SQLite store or archives a manifest marked as a test session, the system shall preserve lifecycle, explicit legacy-directory moves, and injected external-archive behavior without mutating host trust, monitor, process, pending-message, worktree, branch, temporary-file, sandbox, or configuration state.
 
 **OPS-57** When an archive caller supplies a request context, the system shall propagate its cancellation through tracked-worktree storage cleanup instead of replacing it with a background context.
+
+### Claude UI Archive Reconciliation
+
+**OPS-67** When `ArchiveUISessions` evaluates a desktop record whose `cliSessionId` or `sessionId` belongs to a running process, the system shall skip that record regardless of the requested status; working-directory equality shall not be treated as session liveness because multiple historical sessions may share one directory.
+
+**OPS-68** When `ArchiveUISessions` uses the default `idle` status, the system shall mutate only records that differ from the requested archive state, have no matching live session identity, and are older than the configured threshold.
+
+**OPS-69** When Claude UI storage has an unknown schema or ambiguous device or account selection, the system shall refuse or skip the affected record without rewriting it.
 
 ### Garbage Collection
 

@@ -2,7 +2,7 @@
 // aggregator (ADR-015) over JSON-RPC so any MCP client can ask
 // "what should we work on next?" without knowing the SQLite schema.
 //
-// Three tools ship in v1 (ADR-015 Part B; ADR-016 is a redirect):
+// Three tools ship in v1 (ADR-015):
 //
 //	get_signals         — filtered query against the signals store
 //	get_recommendations — ranked priority list (top-N weighted scores)

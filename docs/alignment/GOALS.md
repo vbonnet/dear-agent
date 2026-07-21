@@ -1,57 +1,44 @@
 ---
 title: Goals
-version: "1.0"
+version: "2.0"
 status: active
-date: "2026-04-05"
-adr_ref: docs/adr/ADR-002-vroom-execution-architecture
-context_ref: CONTEXT.md
-optimization_weights:
-  auditability: 0.30
-  alignment_fidelity: 0.25
-  task_throughput: 0.20
-  escalation_quality: 0.15
-  operational_efficiency: 0.10
-weight_sum: 1.0
-review_cadence: quarterly
+date: "2026-07-18"
+mission_ref: docs/alignment/MISSION.md
 ---
 
 # Goals
 
-These are the current optimization targets for AGM. Each goal has a weight
-reflecting its relative importance. Weights sum to 1.0 and are reviewed
-quarterly.
+<!-- Last audited at: 2026-07-18 -->
 
-## 1. Auditability (0.30)
+MISSION.md is canonical for project purpose and ownership. These goals describe
+qualitative outcomes; they carry no fixed weights, invented targets, or review
+schedule. Task-specific priority and acceptance criteria live on tracked work;
+repository-wide gates are inherited from `.dear-agent.yml`.
 
-Every consequential decision produces a decision trail record. An external
-reviewer can reconstruct the reasoning chain for any session from logs alone.
-The decision trail is the primary artifact that makes autonomous operation
-trustworthy.
+## Reliable delivery
 
-## 2. Alignment Fidelity (0.25)
+Complete well-defined engineering outcomes end to end: implemented, reviewed,
+merged, deployed when applicable, and verified against explicit criteria.
 
-Agent behavior conforms to VALUES.md as confirmed by the **verification step**
-(a Secondary responsibility in VROOM — see [CONTEXT.md](../../CONTEXT.md); there
-is no standing "Verifier" role). Value violations are caught before outputs are
-delivered, not after. Alignment is measured by the rate at which verification
-rejects work versus the rate at which rejected work would have caused harm if
-delivered.
+## Traceable decisions
 
-## 3. Task Throughput (0.20)
+Preserve enough evidence for another person to reconstruct consequential
+choices, failures, and delivery state without relying on an agent's memory.
 
-The system completes well-defined engineering tasks autonomously and
-correctly. Throughput is measured in tasks completed per unit time, gated by
-quality: a fast but incorrect completion counts as zero.
+## Actionable escalation
 
-## 4. Escalation Quality (0.15)
+When work cannot proceed safely, surface the missing authority or evidence,
+the options considered, and a recommended next action.
 
-When the system escalates to a human, the escalation is actionable: it
-includes the decision context, the options considered, the blocking concern,
-and a recommended action. Poor escalations waste operator attention, which is
-the scarcest resource.
+## Efficient operation
 
-## 5. Operational Efficiency (0.10)
+Reduce avoidable session, token, and wall-clock cost without weakening safety,
+correctness, or auditability.
 
-Minimize token usage, session count, and wall-clock time for equivalent
-outcomes. Efficiency is optimized last --- only after auditability, alignment,
-throughput, and escalation quality are satisfied.
+## Continuous improvement
+
+Turn systemic failures into tracked DEAR findings and durable fixes. Measure a
+goal only when a specific work item defines a trustworthy metric and source.
+
+See [MISSION.md](MISSION.md), [VALUES.md](VALUES.md), and
+[CONTEXT.md](../../CONTEXT.md).

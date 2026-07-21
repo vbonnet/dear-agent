@@ -118,6 +118,7 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 .PHONY: build-session-skill-extractor install-session-skill-extractor
 .PHONY: lint-skills
 .PHONY: lint-instructions
+.PHONY: lint-adrs
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -138,6 +139,11 @@ lint-skills:
 # active instruction surfaces.
 lint-instructions:
 	@go run ./tools/instruction-lint -repo .
+
+# Validate every declared, Git-tracked ADR scope, aggregate, and index through
+# the repository contract in .dear-agent.yml.
+lint-adrs:
+	@go run ./tools/adr-lint -repo .
 
 verify-surface-codegen:
 	@set -e; \

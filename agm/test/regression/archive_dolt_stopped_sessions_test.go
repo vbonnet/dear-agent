@@ -32,6 +32,8 @@ func TestArchiveStoppedSessionsFromDolt(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
+	t.Setenv("ENGRAM_TEST_MODE", "1")
+	t.Setenv("ENGRAM_TEST_WORKSPACE", "test")
 
 	// Setup: Create Dolt adapter
 	config := &dolt.Config{
@@ -164,6 +166,8 @@ func TestDoltStorageBackendConsistency(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
+	t.Setenv("ENGRAM_TEST_MODE", "1")
+	t.Setenv("ENGRAM_TEST_WORKSPACE", "test")
 
 	// This test is more of a code structure validation
 	// The mere existence of adapter.ResolveIdentifier() and its usage

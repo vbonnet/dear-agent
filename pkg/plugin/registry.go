@@ -50,8 +50,8 @@ func NewRegistry() *Registry {
 //     implement (e.g. CapabilityHooks but no HookProvider).
 //   - A plugin with the same Manifest.Name is already registered.
 //
-// Registration order is preserved and used as the hook fan-out order
-// (ADR-014 §D3): two HookProviders register A then B → A's OnEnforce
+// Registration order is preserved and used as the hook fan-out order:
+// two HookProviders register A then B → A's OnEnforce
 // runs first.
 func (r *Registry) Register(p Plugin) error {
 	if p == nil {
@@ -253,8 +253,8 @@ func composeShortCircuit[P any](
 
 // composeAccumulate returns a callback that runs every provider
 // unconditionally and joins their errors via errors.Join. Used for
-// OnAudit and OnResolve, where the substrate guarantee (audit emission
-// is unconditional, ADR-010 §D3) and the already-failing-run shape
+// OnAudit and OnResolve, where audit fan-out is unconditional and the
+// already-failing-run shape
 // (resolve runs after a terminal failure) make short-circuiting
 // strictly worse than continuing.
 func composeAccumulate[P any](

@@ -843,7 +843,11 @@ func (a *Adapter) ListSessions(filter *SessionFilter) ([]*manifest.Manifest, err
 	args := []any{a.workspace}
 
 	query, args = applyListSessionsFilter(query, args, filter)
-	query += " ORDER BY updated_at DESC"
+	if filter != nil && filter.StableOrder {
+		query += " ORDER BY created_at ASC, id ASC"
+	} else {
+		query += " ORDER BY updated_at DESC, id ASC"
+	}
 	query, args = applyListSessionsLimit(query, args, filter)
 
 	rows, err := a.conn.Query(query, args...) //nolint:noctx // TODO(context): plumb ctx through this layer

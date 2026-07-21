@@ -46,8 +46,7 @@ type Plugin interface {
 //   - OnAudit: every provider's OnAudit runs unconditionally even if
 //     earlier ones errored. Errors are accumulated with errors.Join
 //     and returned; the runner logs but never blocks. This preserves
-//     the substrate guarantee that audit emission is unconditional
-//     (ADR-010 §D3).
+//     unconditional audit fan-out after a transition is recorded.
 //   - OnResolve: same accumulation as OnAudit — the run is already
 //     failing, so reporting every plugin's resolve attempt is more
 //     useful than short-circuiting.
