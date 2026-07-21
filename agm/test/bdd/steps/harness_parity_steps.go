@@ -65,6 +65,10 @@ type harnessParityState struct {
 	piPermissionMode           string
 	piPermissionPolicy         []string
 	piPermissionDecision       permissionparity.PiDecision
+	piExactProcess             bool
+	piPaneLiveness             tmux.PaneLiveness
+	piPaneResumeAction         agent.PiPaneResumeAction
+	piPaneResumeErr            error
 	quotaSurfaces              []quotaparity.HarnessSurface
 	quotaFamilyCoverage        quotaparity.ModelFamilyCoverage
 	mcpSurface                 mcpparity.CreateSessionSurface
@@ -194,6 +198,9 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^Pi permission mode "([^"]*)" with policy "([^"]*)"$`, piPermissionModeWithPolicy)
 	ctx.Step(`^Pi requests tool "([^"]*)" with input "([^"]*)" in an interactive session$`, piRequestsToolInteractively)
 	ctx.Step(`^the Pi permission decision should be "([^"]*)"$`, piPermissionDecisionShouldBe)
+	ctx.Step(`^an existing Pi pane with exact process "([^"]*)" and liveness "([^"]*)"$`, existingPiPaneWithLiveness)
+	ctx.Step(`^AGM evaluates Pi cold resume safety$`, agmEvaluatesPiColdResumeSafety)
+	ctx.Step(`^Pi resume should "([^"]*)"$`, piResumeShould)
 	ctx.Step(`^AGM validates quota monitoring parity$`, agmValidatesQuotaMonitoringParity)
 	ctx.Step(`^AGM validates quota model family coverage$`, agmValidatesQuotaModelFamilyCoverage)
 	ctx.Step(`^harness "([^"]*)" should have a context quota source$`, harnessShouldHaveContextQuotaSource)
@@ -1200,6 +1207,61 @@ func piPermissionDecisionShouldBe(ctx context.Context, want string) error {
 	}
 	if got := string(harnessState.piPermissionDecision.Action); got != want {
 		return fmt.Errorf("pi permission decision = %q, want %q (%s)", got, want, harnessState.piPermissionDecision.Reason)
+	}
+	return nil
+}
+
+func existingPiPaneWithLiveness(ctx context.Context, exact, liveness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.piExactProcess = exact == "true"
+	switch liveness {
+	case "unknown":
+		harnessState.piPaneLiveness = tmux.PaneLiveness{}
+	case "shell":
+		harnessState.piPaneLiveness = tmux.PaneLiveness{SessionExists: true, RestartableShell: true, Evidence: "zsh"}
+	case "harness":
+		harnessState.piPaneLiveness = tmux.PaneLiveness{SessionExists: true, HarnessAlive: true, Evidence: "zsh,claude"}
+	case "foreground":
+		harnessState.piPaneLiveness = tmux.PaneLiveness{SessionExists: true, Evidence: "zsh,vim"}
+	case "missing":
+		harnessState.piPaneLiveness = tmux.PaneLiveness{}
+	default:
+		return fmt.Errorf("unknown Pi pane liveness %q", liveness)
+	}
+	return nil
+}
+
+func agmEvaluatesPiColdResumeSafety(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.piPaneResumeAction, harnessState.piPaneResumeErr = agent.DecidePiPaneResume(
+		harnessState.piExactProcess,
+		harnessState.piPaneLiveness,
+	)
+	return nil
+}
+
+func piResumeShould(ctx context.Context, want string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if want == "reject" {
+		if harnessState.piPaneResumeErr == nil {
+			return fmt.Errorf("pi resume action = %q, want rejection", harnessState.piPaneResumeAction)
+		}
+		return nil
+	}
+	if harnessState.piPaneResumeErr != nil {
+		return fmt.Errorf("pi resume decision error, want %q: %w", want, harnessState.piPaneResumeErr)
+	}
+	if got := string(harnessState.piPaneResumeAction); got != want {
+		return fmt.Errorf("pi resume action = %q, want %q", got, want)
 	}
 	return nil
 }

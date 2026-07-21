@@ -77,6 +77,12 @@ func PolicyAllows(allow []string, call ToolCall) bool {
 	if category == "" {
 		return false
 	}
+	// A prefix allowlist entry must never authorize a second shell program.
+	// Keep compound commands on Pi's interactive/default decision path instead
+	// of trying to partially interpret shell syntax here.
+	if category == "Bash" && containsUnquotedShellControl(value) {
+		return false
+	}
 	for _, entry := range allow {
 		entryCategory, pattern, ok := parsePermissionEntry(entry)
 		if !ok || entryCategory != category {
@@ -87,6 +93,77 @@ func PolicyAllows(allow []string, call ToolCall) bool {
 		}
 	}
 	return false
+}
+
+type shellQuoteState uint8
+
+const (
+	unquoted shellQuoteState = iota
+	singleQuoted
+	doubleQuoted
+)
+
+func containsUnquotedShellControl(command string) bool {
+	quote := unquoted
+	escaped := false
+	for index := 0; index < len(command); index++ {
+		current := command[index]
+		if escaped {
+			escaped = false
+			continue
+		}
+		switch quote {
+		case singleQuoted:
+			if current == '\'' {
+				quote = unquoted
+			}
+		case doubleQuoted:
+			var control bool
+			quote, escaped, control = scanDoubleQuotedShellByte(command, index)
+			if control {
+				return true
+			}
+		case unquoted:
+			var control bool
+			quote, escaped, control = scanUnquotedShellByte(command, index)
+			if control {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func scanDoubleQuotedShellByte(command string, index int) (shellQuoteState, bool, bool) {
+	switch command[index] {
+	case '\\':
+		return doubleQuoted, true, false
+	case '"':
+		return unquoted, false, false
+	case '`':
+		return doubleQuoted, false, true
+	case '$':
+		return doubleQuoted, false, index+1 < len(command) && command[index+1] == '('
+	default:
+		return doubleQuoted, false, false
+	}
+}
+
+func scanUnquotedShellByte(command string, index int) (shellQuoteState, bool, bool) {
+	switch command[index] {
+	case '\\':
+		return unquoted, true, false
+	case '\'':
+		return singleQuoted, false, false
+	case '"':
+		return doubleQuoted, false, false
+	case ';', '&', '|', '<', '>', '`', '\n', '\r':
+		return unquoted, false, true
+	case '$':
+		return unquoted, false, index+1 < len(command) && command[index+1] == '('
+	default:
+		return unquoted, false, false
+	}
 }
 
 func isPiPlanTool(tool string) bool {

@@ -31,6 +31,8 @@ dependency-free extension installed in AGM-private storage.
 
 **PI-AUTH-11** When the extension publishes managed status for an AGM launch, the system shall append the caller-provided unique launch ID so lifecycle readiness can distinguish current process output from stale pane history.
 
+**PI-AUTH-12** When a Pi Bash call contains unquoted shell control, redirection, command-substitution, or command-chaining syntax, the adapter shall not pre-approve the call from an AGM allowlist pattern and shall route it through the interactive or fail-closed unmatched decision.
+
 ## Traceability
 
 - Package tests: `agm/internal/permissionparity/pi_test.go`

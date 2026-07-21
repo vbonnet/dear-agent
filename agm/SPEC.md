@@ -134,6 +134,8 @@ For `pi-cli`, AGM treats Pi as a real interactive CLI harness:
   apply AGM allowlists and ask only with an interactive UI; non-interactive
   unmatched calls MUST fail closed; auto mode MAY enable all native tools but
   MUST NOT bypass repository guardrails
+- Pi Bash allowlists MUST NOT pre-approve compound commands containing
+  unquoted shell control, redirection, or command-substitution syntax
 - Pi MUST load the root `AGENTS.md` directly, discover living AGM and Wayfinder
   skills through `.pi/settings.json`, and project trusted repository hooks
   through `.pi/hooks.json` without allowing repository code to replace the

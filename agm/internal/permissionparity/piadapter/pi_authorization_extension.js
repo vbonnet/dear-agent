@@ -142,9 +142,36 @@ function patternMatches(pattern, value) {
 	return new RegExp("^" + escaped + "$").test(value);
 }
 
+function containsUnquotedShellControl(command) {
+	let quote = "";
+	let escaped = false;
+	for (let index = 0; index < command.length; index++) {
+		const current = command[index];
+		if (escaped) {
+			escaped = false;
+			continue;
+		}
+		if (quote === "'") {
+			if (current === "'") quote = "";
+			continue;
+		}
+		if (quote === '"') {
+			if (current === "\\") escaped = true;
+			else if (current === '"') quote = "";
+			else if (current === "`" || (current === "$" && command[index + 1] === "(")) return true;
+			continue;
+		}
+		if (current === "\\") escaped = true;
+		else if (current === "'" || current === '"') quote = current;
+		else if (";&|<>`\n\r".includes(current) || (current === "$" && command[index + 1] === "(")) return true;
+	}
+	return false;
+}
+
 export function policyAllows(allow, call) {
 	const [category, value] = permissionTarget(call);
 	if (!category) return false;
+	if (category === "Bash" && containsUnquotedShellControl(value)) return false;
 	for (const raw of allow || []) {
 		const entry = parseEntry(raw);
 		if (!entry || entry[0] !== category) continue;

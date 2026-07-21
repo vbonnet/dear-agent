@@ -993,6 +993,97 @@ func TestResumeSessionPreservesPreexistingTmuxOnLaterFailure(t *testing.T) {
 	}
 }
 
+func TestResumeSessionPiRelaunchesOnlyInExistingRestartableShell(t *testing.T) {
+	setDetachedResumeTestGlobals(t, true)
+	adapter, m, health := setupCodexResumeTransaction(t)
+	m.Harness = "pi-cli"
+	health.TmuxExists = true
+	var calls []string
+	runtime := recordingResumeRuntime(&calls)
+	runtime.loadManifest = func(context.Context, *dolt.Adapter, string, string) (*manifest.Manifest, error) {
+		return m, nil
+	}
+	runtime.checkProcess = func(session, _ string, process string) (bool, error) {
+		calls = append(calls, "check-process")
+		if session != health.TmuxSessionName || process != "pi" {
+			t.Fatalf("exact process check = (%q, %q)", session, process)
+		}
+		return false, nil
+	}
+	runtime.checkLiveness = func(session, _ string) (tmux.PaneLiveness, error) {
+		calls = append(calls, "check-liveness")
+		if session != health.TmuxSessionName {
+			t.Fatalf("liveness session = %q", session)
+		}
+		return tmux.PaneLiveness{SessionExists: true, RestartableShell: true, Evidence: "zsh"}, nil
+	}
+
+	if err := resumeSessionWithRuntime(t.Context(), adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime); err != nil {
+		t.Fatalf("resumeSessionWithRuntime() error = %v", err)
+	}
+	want := []string{"check-process", "check-liveness", "dispatch", "wait", "restore", "update", "tab"}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("Pi shell resume calls = %v, want %v", calls, want)
+	}
+}
+
+func TestResumeSessionPiPreservesExactExistingProcess(t *testing.T) {
+	setDetachedResumeTestGlobals(t, true)
+	adapter, m, health := setupCodexResumeTransaction(t)
+	m.Harness = "pi-cli"
+	health.TmuxExists = true
+	var calls []string
+	runtime := recordingResumeRuntime(&calls)
+	runtime.loadManifest = func(context.Context, *dolt.Adapter, string, string) (*manifest.Manifest, error) {
+		return m, nil
+	}
+	runtime.checkProcess = func(string, string, string) (bool, error) {
+		calls = append(calls, "check-process")
+		return true, nil
+	}
+	runtime.checkLiveness = func(string, string) (tmux.PaneLiveness, error) {
+		t.Fatal("generic liveness ran after exact Pi proof")
+		return tmux.PaneLiveness{}, nil
+	}
+
+	if err := resumeSessionWithRuntime(t.Context(), adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime); err != nil {
+		t.Fatalf("resumeSessionWithRuntime() error = %v", err)
+	}
+	want := []string{"check-process", "update", "tab"}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("exact Pi resume calls = %v, want %v", calls, want)
+	}
+}
+
+func TestResumeSessionPiFailsBeforeMutationWhenExistingPaneScanFails(t *testing.T) {
+	setDetachedResumeTestGlobals(t, true)
+	adapter, m, health := setupCodexResumeTransaction(t)
+	m.Harness = "pi-cli"
+	health.TmuxExists = true
+	wantErr := errors.New("process scan unavailable")
+	var calls []string
+	runtime := recordingResumeRuntime(&calls)
+	runtime.loadManifest = func(context.Context, *dolt.Adapter, string, string) (*manifest.Manifest, error) {
+		return m, nil
+	}
+	runtime.checkProcess = func(string, string, string) (bool, error) {
+		calls = append(calls, "check-process")
+		return false, wantErr
+	}
+	runtime.checkLiveness = func(string, string) (tmux.PaneLiveness, error) {
+		t.Fatal("generic liveness ran after exact-process scan failure")
+		return tmux.PaneLiveness{}, nil
+	}
+
+	err := resumeSessionWithRuntime(t.Context(), adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("resumeSessionWithRuntime() error = %v, want %v", err, wantErr)
+	}
+	if want := []string{"check-process"}; !reflect.DeepEqual(calls, want) {
+		t.Fatalf("failed Pi scan calls = %v, want %v", calls, want)
+	}
+}
+
 func TestWaitForResumedCodexRequiresProcessAndComposer(t *testing.T) {
 	health := &HealthStatus{TmuxSessionName: "codex-resume"}
 	processErr := errors.New("process missing")

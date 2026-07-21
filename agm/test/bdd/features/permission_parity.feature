@@ -32,8 +32,22 @@ Feature: Agent permission parity
       | mode    | policy          | tool  | input      | decision |
       | plan    | Bash(git status)| bash  | git status | block    |
       | default | Bash(git status)| bash  | git status | allow    |
+      | default | Bash(git:*)     | bash  | git status; rm -rf /tmp/nope | ask |
       | default |                  | write | /tmp/x     | ask      |
       | auto    |                  | write | /tmp/x     | allow    |
+
+  Scenario Outline: Pi existing pane resume is exact and fail closed
+    Given an existing Pi pane with exact process "<exact>" and liveness "<liveness>"
+    When AGM evaluates Pi cold resume safety
+    Then Pi resume should "<decision>"
+
+    Examples:
+      | exact | liveness  | decision |
+      | true  | unknown   | preserve |
+      | false | shell     | relaunch |
+      | false | harness   | reject   |
+      | false | foreground | reject   |
+      | false | missing   | reject   |
 
   Scenario: Permission profiles resolve across the active harness set
     Given permission profile "worker" is configured

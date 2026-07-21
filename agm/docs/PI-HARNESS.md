@@ -73,7 +73,10 @@ The extension maps Pi's `bash`, `read`, `edit`, `write`, `grep`, `find`, and
 `ls` calls to AGM permission categories. Extension tools receive a stable
 PascalCase category (for example, `plugin_deploy` becomes `PluginDeploy`) so
 they can be pre-approved without weakening plan mode. Patterns are anchored;
-wildcards must be explicit. Runtime transitions use `agm session send mode`,
+wildcards must be explicit. Bash calls containing unquoted command chaining,
+redirection, or command substitution are never pre-approved by an allowlist;
+default mode asks interactively and a non-interactive caller fails closed.
+Runtime transitions use `agm session send mode`,
 which sends the managed `/agm-mode plan|default|auto` command. Model transitions use
 `/agm-model provider/model` and are persisted only after AGM observes the
 managed transition result.
@@ -81,7 +84,10 @@ managed transition result.
 The stable footer token `AGM <mode>/ready <launch-id>` is AGM's send-safety
 boundary. Create and cold resume require the current launch ID before they can
 report readiness, so an older footer retained in tmux history cannot authorize
-a new process. Routine sends use the latest managed mode/state; `working`,
+a new process. Every cold-resume entry point also proves an exact live `pi`
+process before attaching; when Pi has exited, AGM relaunches only in a
+positively classified bare shell and rejects any other foreground process.
+Routine sends use the latest managed mode/state; `working`,
 permission, model-selection, and other overlays are not ready.
 
 ## Repository instructions, skills, and hooks
