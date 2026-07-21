@@ -17,6 +17,8 @@ const PROJECT_STATUSES = ['planning', 'in-progress', 'blocked', 'completed', 'ab
 const WAYPOINT_STATUSES = ['pending', 'completed', 'in-progress', 'blocked', 'skipped'] as const;
 const TASK_STATUSES = ['pending', 'in-progress', 'completed', 'blocked'] as const;
 const TASK_PRIORITIES = ['P0', 'P1', 'P2'] as const;
+const VALIDATION_STATUSES = ['pending', 'in-progress', 'passed', 'failed'] as const;
+const DEPLOYMENT_STATUSES = ['pending', 'in-progress', 'deployed', 'rolled-back'] as const;
 const SKIPPABLE_WAYPOINTS = ['DESIGN', 'SPEC', 'PLAN'] as const;
 const LIFECYCLE_STATUSES: Record<string, string> = {
   working: 'in-progress',
@@ -101,9 +103,28 @@ function requireEnum(record: RecordValue, key: string, allowed: readonly string[
   return value;
 }
 
+function isCanonicalTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|([+-])(\d{2}):(\d{2}))$/.exec(value);
+  if (match === null) return false;
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, , offsetHourText, offsetMinuteText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (month < 1 || month > 12 || day < 1 || day > daysInMonth[month - 1]) return false;
+  if (hour > 23 || minute > 59 || second > 59) return false;
+  if (offsetHourText !== undefined && (Number(offsetHourText) > 23 || Number(offsetMinuteText) > 59)) return false;
+  return true;
+}
+
 function requireTimestamp(record: RecordValue, key: string): void {
   const value = record[key];
-  if (!(typeof value === 'string' || value instanceof Date) || Number.isNaN(new Date(value).getTime())) {
+  if (!isCanonicalTimestamp(value)) {
     throw new Error(`invalid Wayfinder V2 status: ${key} is required`);
   }
 }
@@ -136,7 +157,7 @@ function optionalString(record: RecordValue, key: string, path: string): void {
 function optionalTimestamp(record: RecordValue, key: string, path: string): void {
   const value = record[key];
   if (value === undefined || value === null) return;
-  if (!(typeof value === 'string' || value instanceof Date) || Number.isNaN(new Date(value).getTime())) {
+  if (!isCanonicalTimestamp(value)) {
     throw new Error(`invalid Wayfinder V2 status: ${path}.${key} must be a timestamp`);
   }
 }
@@ -349,6 +370,16 @@ function completedWaypoints(record: RecordValue): Set<string> {
     validateStringArray(waypoint, 'deliverables', path);
     for (const key of ['notes', 'outcome', 'stakeholder_notes', 'research_notes', 'validation_status', 'deployment_status']) {
       optionalString(waypoint, key, path);
+    }
+    if (name === 'BUILD') {
+      const validationStatus = waypoint.validation_status;
+      if (validationStatus !== undefined && validationStatus !== null && validationStatus !== '' && !VALIDATION_STATUSES.includes(validationStatus as never)) {
+        throw new Error(`invalid Wayfinder V2 status: ${path}.validation_status is invalid`);
+      }
+      const deploymentStatus = waypoint.deployment_status;
+      if (deploymentStatus !== undefined && deploymentStatus !== null && deploymentStatus !== '' && !DEPLOYMENT_STATUSES.includes(deploymentStatus as never)) {
+        throw new Error(`invalid Wayfinder V2 status: ${path}.deployment_status is invalid`);
+      }
     }
     optionalBoolean(waypoint, 'stakeholder_approved', path);
     optionalBoolean(waypoint, 'tests_feature_created', path);

@@ -137,18 +137,27 @@ func getUncommittedFilesInProjectDir(projectDir string) ([]string, error) {
 
 		statusCode := entry[0:2]
 		filePath := entry[3:]
-		if !strings.HasPrefix(filePath, ".wayfinder/") && !strings.Contains(filePath, "/.wayfinder/") {
+		if !isWayfinderInternalPath(filePath) {
 			uncommittedFiles = append(uncommittedFiles, filePath)
 		}
 
 		// Porcelain v1 -z emits a second NUL-delimited source path after a
-		// rename or copy. The destination above is the path relevant to gates.
+		// rename or copy. Both source and destination are relevant: a BUILD can
+		// rename a source file to a non-source extension and still be dirty.
 		if strings.ContainsAny(statusCode, "RC") && index+1 < len(entries) {
 			index++
+			sourcePath := entries[index]
+			if sourcePath != "" && !isWayfinderInternalPath(sourcePath) {
+				uncommittedFiles = append(uncommittedFiles, sourcePath)
+			}
 		}
 	}
 
 	return uncommittedFiles, nil
+}
+
+func isWayfinderInternalPath(filePath string) bool {
+	return strings.HasPrefix(filePath, ".wayfinder/") || strings.Contains(filePath, "/.wayfinder/")
 }
 
 // isFileUncommitted checks if filename is in the uncommitted files list.

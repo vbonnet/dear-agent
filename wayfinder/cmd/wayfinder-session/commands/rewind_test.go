@@ -68,3 +68,18 @@ func TestResetLifecycleForRewindReopensTerminalStatus(t *testing.T) {
 		t.Fatalf("updated_at = %s, want %s", st.UpdatedAt, rewoundAt)
 	}
 }
+
+func TestValidateRewindTargetRejectsConfiguredSkip(t *testing.T) {
+	now := time.Now()
+	st := &status.StatusV2{
+		SkipPhases: []string{status.WaypointV2Design},
+		WaypointHistory: []status.WaypointHistory{
+			{Name: status.WaypointV2Design, Status: status.PhaseStatusV2Skipped, StartedAt: now},
+		},
+	}
+
+	err := validateRewindTarget(st, status.WaypointV2Design)
+	if err == nil || err.Error() != "cannot rewind to phase DESIGN: phase is configured to be skipped" {
+		t.Fatalf("validateRewindTarget() error = %v, want configured-skip rejection", err)
+	}
+}

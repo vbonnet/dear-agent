@@ -63,6 +63,19 @@ describe('parseWayfinderStatus', () => {
     assert.throws(() => parseWayfinderStatus(invalid), /deliverables must be a string array/);
   });
 
+  it('rejects non-RFC3339 and impossible timestamps', () => {
+    assert.throws(() => parseWayfinderStatus(canonical.replace('2026-07-20T00:00:00Z', '"1"')), /created_at is required/);
+    assert.throws(() => parseWayfinderStatus(canonical.replace('2026-07-20T00:00:00Z', '2026-02-30T00:00:00Z')), /created_at is required/);
+  });
+
+  it('rejects invalid BUILD metadata enums', () => {
+    const invalid = canonical.replace(
+      '  - {name: CHARTER,',
+      '  - {name: BUILD, validation_status: typo, deployment_status: typo,',
+    );
+    assert.throws(() => parseWayfinderStatus(invalid), /validation_status is invalid/);
+  });
+
   it('requires blocked_reason for blocked status', () => {
     assert.throws(
       () => parseWayfinderStatus(canonical.replace('status: in-progress', 'status: blocked')),

@@ -78,10 +78,8 @@ func runRewind(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid target phase: %s (valid phases: CHARTER, PROBLEM, RESEARCH, DESIGN, SPEC, PLAN, SETUP, BUILD, RETRO)", targetPhase)
 	}
 
-	// Validate that target phase has been completed
-	targetHistory := st.GetPhaseHistory(targetPhase)
-	if targetHistory == nil || (targetHistory.Status != status.PhaseStatusV2Completed && targetHistory.Status != status.PhaseStatusV2Skipped) {
-		return fmt.Errorf("cannot rewind to phase %s: phase has not been completed yet", targetPhase)
+	if err := validateRewindTarget(st, targetPhase); err != nil {
+		return err
 	}
 
 	// Archive current state before rewinding
@@ -126,6 +124,17 @@ func runRewind(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("⏪ Rewound to phase %s\n", targetPhase)
 	fmt.Println("ℹ️  Phases after", targetPhase, "have been reset to pending")
+	return nil
+}
+
+func validateRewindTarget(st *status.StatusV2, targetPhase string) error {
+	targetHistory := st.GetPhaseHistory(targetPhase)
+	if targetHistory == nil || (targetHistory.Status != status.PhaseStatusV2Completed && targetHistory.Status != status.PhaseStatusV2Skipped) {
+		return fmt.Errorf("cannot rewind to phase %s: phase has not been completed yet", targetPhase)
+	}
+	if st.IsPhaseSkipped(targetPhase) {
+		return fmt.Errorf("cannot rewind to phase %s: phase is configured to be skipped", targetPhase)
+	}
 	return nil
 }
 

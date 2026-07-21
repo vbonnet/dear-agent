@@ -243,6 +243,32 @@ func TestValidateGitCommitStatus_ModifiedTrackedSource(t *testing.T) {
 	}
 }
 
+func TestValidateGitCommitStatus_RenamedTrackedSource(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	exec.Command("git", "init", tmpDir).Run()
+	exec.Command("git", "-C", tmpDir, "config", "user.email", "test@example.com").Run()
+	exec.Command("git", "-C", tmpDir, "config", "user.name", "Test User").Run()
+
+	sourcePath := filepath.Join(tmpDir, "src", "foo.go")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("package src\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	exec.Command("git", "-C", tmpDir, "add", "src/foo.go").Run()
+	exec.Command("git", "-C", tmpDir, "commit", "-m", "initial source").Run()
+	if output, err := exec.Command("git", "-C", tmpDir, "mv", "src/foo.go", "README.txt").CombinedOutput(); err != nil {
+		t.Fatalf("git mv failed: %v: %s", err, output)
+	}
+
+	err := validateGitCommitStatus(tmpDir, "BUILD")
+	if err == nil || !strings.Contains(err.Error(), "src/foo.go") {
+		t.Fatalf("expected renamed tracked source violation for src/foo.go, got %v", err)
+	}
+}
+
 func TestGetUncommittedFilesInProjectDir(t *testing.T) {
 	tmpDir := t.TempDir()
 
