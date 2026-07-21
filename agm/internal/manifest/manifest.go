@@ -164,7 +164,8 @@ type Agy struct {
 
 // Tmux represents tmux session metadata
 type Tmux struct {
-	SessionName string `yaml:"session_name"`
+	SessionName     string `yaml:"session_name"`
+	SessionRevision string `yaml:"-" json:"-"` // Internal optimistic-write token; never part of the manifest surface.
 }
 
 // OpenCode represents OpenCode session metadata

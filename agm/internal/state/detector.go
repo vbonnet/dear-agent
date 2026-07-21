@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 // State represents Claude Code session states
@@ -60,7 +62,6 @@ type Detector struct {
 	blockedInputPattern      *regexp.Regexp
 	blockedPermissionPattern *regexp.Regexp
 	readyPattern             *regexp.Regexp
-	codexReadyPattern        *regexp.Regexp
 	agyReadyPattern          *regexp.Regexp
 	agySurveyPattern         *regexp.Regexp
 	waitingAgentPattern      *regexp.Regexp
@@ -112,14 +113,6 @@ func NewDetector() *Detector {
 		// Includes \x{00a0} (NBSP) because Claude Code renders ❯ followed by NBSP.
 		// The pane may have a status bar (━━━) and trailing blank lines after the prompt.
 		readyPattern: regexp.MustCompile(`(?m)❯[\s\x{00a0}]*$`),
-
-		// Codex Ready: Codex CLI composer/footer chrome. Keep this specific to
-		// Codex text so generic box-drawing UI or menu selectors do not become
-		// sendable prompts.
-		// After the first exchange the bordered composer box ("OpenAI Codex" /
-		// "/model to change") scrolls off; only the footer "gpt-X.Y quality ·
-		// /path" remains. "gpt-\d" covers both the initial and post-exchange state.
-		codexReadyPattern: regexp.MustCompile(`(?ms)(?:>_\s+OpenAI Codex|OpenAI Codex[\s\S]*?/model to change|gpt-\d)`),
 
 		// AGY Ready: the live AGY interactive prompt is a bare ">" line after
 		// the last response. Keep it line-anchored so trust/menu lines like
@@ -221,7 +214,7 @@ func (d *Detector) DetectState(output string, lastOutputTime time.Time) Detectio
 		}
 	}
 
-	if d.codexReadyPattern.MatchString(output) {
+	if tmux.IsCodexComposerReady(output) {
 		return DetectionResult{
 			State:      StateReady,
 			Timestamp:  now,
@@ -407,8 +400,8 @@ func (d *Detector) CheckCanReceive(output string) CanReceive {
 		return CanReceiveYes
 	}
 
-	// Codex composer/footer visible = session is at idle prompt, can receive.
-	if d.codexReadyPattern.MatchString(output) {
+	// Complete Codex composer visible = session is at idle prompt, can receive.
+	if tmux.IsCodexComposerReady(output) {
 		return CanReceiveYes
 	}
 

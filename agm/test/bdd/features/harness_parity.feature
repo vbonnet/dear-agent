@@ -33,6 +33,8 @@
 # RELATED-SPEC: agm/internal/readiness/SPEC.md
 # RELATED-SPEC: agm/internal/send/SPEC.md
 # RELATED-SPEC: agm/internal/manifest/SPEC.md
+# RELATED-SPEC: agm/internal/dolt/SPEC.md
+# RELATED-SPEC: agm/internal/dolt/migrations/SPEC.md
 # RELATED-SPEC: agm/internal/statusline/SPEC.md
 # RELATED-SPEC: agm/cmd/agm-bus/SPEC.md
 # RELATED-SPEC: agm/cmd/agm-aware-reaper/SPEC.md
@@ -258,6 +260,11 @@ Feature: Harness parity
     When AGM checks whether the session can receive input
     Then delivery should be queued
 
+  Scenario: Stale Codex composer above shell output is not treated as ready
+    Given a stale Codex CLI composer followed by shell output
+    When AGM checks whether the session can receive input
+    Then delivery should be queued
+
   Scenario: AGY prompt is ready to receive input
     Given an AGY ready prompt
     When AGM checks whether the session can receive input
@@ -349,6 +356,18 @@ Feature: Harness parity
     Then AGM should create or update a Dolt session record with harness "codex-cli"
     And the record should preserve the Codex session UUID
     And AGM should launch a tmux pane that resumes the Codex conversation
+
+  Scenario: Failed Codex resume is rolled back before success effects
+    Given a stopped Codex CLI session without a tmux pane
+    When AGM validates the Codex resume transaction
+    Then Codex resume success should require process and composer readiness
+    And a failed Codex resume should serialize concurrent attempts through every production entry point, release the session lock before attachment, preserve canonical tmux identity from stale full-session updates, reconcile ambiguous metadata commits, compensate owned provisional metadata before removing its creation-specific tmux identity even when tmux ID output is lost, and preserve tmux whenever metadata cleanup is unproven
+    And authoritative session renames should serialize with cold resume, fence ambiguous storage writes, preserve both identity names from stale writers, preserve claimed tmux identity across lost replies and server restarts, reject stale identity revisions, and compensate tmux after storage conflicts
+    And administrative hierarchy repairs should atomically link parents and inherited names through the observed identity revision
+    And successful Codex prompt delivery should remain successful after later caller cancellation
+    And ambiguous final Codex prompt submission should preserve work that may have started
+    And failed Codex prompt delivery should not suppress a later attach failure
+    And Codex activity updates should follow resume readiness
 
   Scenario: Orphaned AGY conversation can be imported and resumed
     Given an AGY saved conversation exists outside AGM

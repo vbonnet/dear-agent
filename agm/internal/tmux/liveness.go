@@ -350,15 +350,30 @@ func CheckPaneLivenessBatch(sessionNames []string, socketPath string) (map[strin
 // tree of sessionName's panes. It preserves scan errors so lifecycle callers
 // can fail safe instead of injecting a command when liveness is unknown.
 func CheckProcessInPaneTree(sessionName, socketPath, processName string) (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), livenessScanTimeout)
+	return IsProcessInPaneTreeContext(context.Background(), sessionName, socketPath, processName)
+}
+
+// IsProcessInPaneTree reports whether a process named processName (exact comm
+// or comm base-name match) is running anywhere in the descendant process tree
+// of sessionName's panes. Any failure reports false for compatibility with
+// existing best-effort liveness callers.
+func IsProcessInPaneTree(sessionName, socketPath, processName string) bool {
+	running, err := IsProcessInPaneTreeContext(context.Background(), sessionName, socketPath, processName)
+	if err != nil {
+		return false
+	}
+	return running
+}
+
+// IsProcessInPaneTreeContext is the cancellation-aware process-tree scan used
+// by command transactions that must not outlive their caller.
+func IsProcessInPaneTreeContext(parent context.Context, sessionName, socketPath, processName string) (bool, error) {
+	ctx, cancel := context.WithTimeout(parent, livenessScanTimeout)
 	defer cancel()
 
 	pids, err := listPanePIDs(ctx, sessionName, socketPath)
-	if err != nil {
+	if err != nil || len(pids) == 0 {
 		return false, err
-	}
-	if len(pids) == 0 {
-		return false, nil
 	}
 	procs, err := readProcessTable(ctx)
 	if err != nil {
@@ -368,11 +383,4 @@ func CheckProcessInPaneTree(sessionName, socketPath, processName string) (bool, 
 		return comm == processName || filepath.Base(comm) == processName
 	})
 	return verdict.HarnessAlive, nil
-}
-
-// IsProcessInPaneTree is the fail-closed compatibility wrapper used by callers
-// that only need a boolean proof of liveness.
-func IsProcessInPaneTree(sessionName, socketPath, processName string) bool {
-	alive, err := CheckProcessInPaneTree(sessionName, socketPath, processName)
-	return err == nil && alive
 }

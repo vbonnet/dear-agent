@@ -96,7 +96,7 @@ func (a *Adapter) GetByFrecency(limit int) ([]FrecencyResult, error) {
 	query := `
 		SELECT id, created_at, updated_at, status, workspace, model, name, harness,
 			context_project, context_purpose, context_tags, context_notes,
-			claude_uuid, tmux_session_name, metadata,
+			claude_uuid, tmux_session_name, tmux_session_revision, metadata,
 			permission_mode, permission_mode_updated_at, permission_mode_source,
 			is_test,
 			context_total_tokens, context_used_tokens, context_percentage_used,
@@ -159,6 +159,7 @@ func scanSessionFrecency(row scanner) (*manifest.Manifest, int, *time.Time, erro
 	var status string
 	var workspace string
 	var model string
+	var tmuxSessionRevision sql.NullString
 	var permissionMode sql.NullString
 	var permissionModeUpdatedAt sql.NullTime
 	var permissionModeSource sql.NullString
@@ -184,6 +185,7 @@ func scanSessionFrecency(row scanner) (*manifest.Manifest, int, *time.Time, erro
 		&m.Context.Notes,
 		&m.Claude.UUID,
 		&m.Tmux.SessionName,
+		&tmuxSessionRevision,
 		&metadataJSON,
 		&permissionMode,
 		&permissionModeUpdatedAt,
@@ -204,6 +206,9 @@ func scanSessionFrecency(row scanner) (*manifest.Manifest, int, *time.Time, erro
 	}
 	m.Workspace = workspace
 	m.Model = model
+	if tmuxSessionRevision.Valid {
+		m.Tmux.SessionRevision = tmuxSessionRevision.String
+	}
 	m.SchemaVersion = "2.0"
 
 	applyNullableScanFields(&m, permissionMode, permissionModeUpdatedAt, permissionModeSource, isTest, ctxTotalTokens, ctxUsedTokens, ctxPercentageUsed)
