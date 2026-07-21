@@ -25,7 +25,7 @@ var ListSessions = codegen.Op{
 // ListSessionsRequest mirrors ops.ListSessionsRequest with ef tags for generation.
 type ListSessionsRequest struct {
 	Status  string `json:"status,omitempty"  ef:"status,short=s,default=active,enum=active|archived|all" desc:"Filter by session status"`
-	Harness string `json:"harness,omitempty" ef:"harness,short=H,enum=claude-code|codex-cli|agy|opencode-cli|gemini-cli|all" desc:"Filter by harness; gemini-cli is deprecated"`
+	Harness string `json:"harness,omitempty" ef:"harness,short=H,enum=claude-code|codex-cli|agy|opencode-cli|pi-cli|gemini-cli|all" desc:"Filter by harness; gemini-cli is deprecated"`
 	Limit   int    `json:"limit,omitempty"   ef:"limit,short=n,default=100" desc:"Maximum sessions to return (1-1000)"`
 	Offset  int    `json:"offset,omitempty"  ef:"offset,default=0" desc:"Pagination offset"`
 }

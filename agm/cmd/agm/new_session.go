@@ -396,8 +396,10 @@ func collectExtraAddDirs(sandboxInfo *manifest.SandboxConfig) ([]string, bool) {
 	return extraAddDirs, true
 }
 
-// configureProjectPermissions resolves and writes the project-level allow-list
-// for the new session's working directory.
+// configureProjectPermissions resolves the shared session policy, persists it
+// through the manifest path, and maintains the Claude project compatibility
+// surface. Other harnesses consume the same resolved policy through their
+// launch adapters.
 func configureProjectPermissions(workDir string) error {
 	debug.Phase("Configure Permissions")
 	policy, allowList, err := resolveSessionPermissionPolicy()

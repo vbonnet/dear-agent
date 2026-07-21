@@ -1,6 +1,8 @@
 # AI/Agent Session Manager (AGM)
 
-Smart session management for AI agents (Claude, Gemini, Codex) with interactive TUI, multi-agent support, and automatic session tracking.
+Smart session management for AI coding harnesses (Claude Code, Codex CLI,
+Antigravity, OpenCode, and Pi) with interactive TUI, multi-agent support, and
+automatic session tracking.
 
 ## Architecture
 
@@ -11,7 +13,7 @@ Smart session management for AI agents (Claude, Gemini, Codex) with interactive 
 **Component Architecture** showing the multi-CLI session coordination system:
 
 - **CommandTranslator**: Translates AGM commands to CLI-specific syntax
-- **AdapterRegistry**: Manages adapters for Claude, Gemini, Codex, and OpenCode
+- **AdapterRegistry**: Manages active adapters for Claude Code, Codex CLI, Antigravity, OpenCode, and Pi
 - **Dolt Storage**: Persists session metadata in versioned SQL database (Git-like commits)
 - **CoordinationDaemon**: Background process for session lifecycle management
 - **MessageQueue**: Inter-session communication and event routing
@@ -24,9 +26,10 @@ Smart session management for AI agents (Claude, Gemini, Codex) with interactive 
 ```bash
 # Create session with specific harness
 agm new --harness claude-code my-coding-session   # Claude Code: code, reasoning
-agm new --harness gemini-cli research-task        # Gemini CLI: research, 1M context
-agm new --harness codex-cli chat-session          # Codex CLI: OpenAI API (GPT-4, GPT-3.5)
+agm new --harness agy research-task               # Antigravity: interactive native conversation
+agm new --harness codex-cli chat-session          # Codex CLI: native interactive CLI and OAuth
 agm new --harness opencode-cli dev-session        # OpenCode CLI: native SSE monitoring
+agm new --harness pi-cli pi-session               # Pi: native JSONL sessions and managed tool authorization
 
 # Resume any session (agent auto-detected)
 agm resume my-coding-session
@@ -36,6 +39,9 @@ agm list
 ```
 
 **Session Naming:** Use alphanumeric, dashes, and underscores only. Avoid dots (`.`), colons (`:`), and spaces - they cause lookup failures. See [Session Naming Guide](docs/SESSION-NAMING-GUIDE.md).
+
+Pi setup, native session identity, permissions, hooks, and known telemetry
+boundaries are documented in [Pi Harness](docs/PI-HARNESS.md).
 
 ## Test Sessions
 

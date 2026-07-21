@@ -5,7 +5,7 @@
 Feature: SKILL and plugin marketplace parity
   AGM should publish one marketplace contract that every active harness can
   consume. Claude Code uses the native plugin marketplace, while Codex CLI, AGY,
-  and OpenCode use the harness-neutral catalog with AGENTS.md/SKILL fallback.
+  OpenCode and Pi use the harness-neutral catalog with AGENTS.md/SKILL fallback.
 
   Scenario Outline: Active harnesses have marketplace discovery surfaces
     Given harness "<harness>" is configured
@@ -19,6 +19,7 @@ Feature: SKILL and plugin marketplace parity
       | codex-cli    |
       | agy          |
       | opencode-cli |
+      | pi-cli       |
 
   Scenario: Claude marketplace mirrors the neutral catalog
     When AGM validates marketplace catalog mirrors

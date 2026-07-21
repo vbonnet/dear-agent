@@ -105,6 +105,8 @@ func NewDetector() *Detector {
 				`Do you want to proceed\?` + // Claude Code permission question
 				`|` +
 				`❯\s+\d+\.\s+(?:Yes|No|Allow|Deny|Approve|Reject)` + // ❯ selector on Yes/No option
+				`|` +
+				`AGM permission required` + // Pi managed extension confirmation
 				`)`,
 		),
 
@@ -202,6 +204,13 @@ func (d *Detector) DetectState(output string, lastOutputTime time.Time) Detectio
 	if d.agySurveyOverlayActive(output) {
 		evidence := d.extractEvidence(output, d.agySurveyPattern, 80)
 		return DetectionResult{State: StateBackgroundTasksView, Timestamp: now, Evidence: evidence, Confidence: "high"}
+	}
+
+	if piState := latestPiManagedState(output); piState != "" {
+		if piState == "ready" {
+			return DetectionResult{State: StateReady, Timestamp: now, Evidence: "managed Pi ready status", Confidence: "high"}
+		}
+		return DetectionResult{State: StateThinking, Timestamp: now, Evidence: "managed Pi working status", Confidence: "high"}
 	}
 
 	// 2. Check for ready (Claude prompt at end — highest priority after permission)
@@ -394,6 +403,12 @@ func (d *Detector) CheckCanReceive(output string) CanReceive {
 	if d.agySurveyOverlayActive(output) {
 		return CanReceiveOverlay
 	}
+	if piState := latestPiManagedState(output); piState != "" {
+		if piState == "ready" {
+			return CanReceiveYes
+		}
+		return CanReceiveQueue
+	}
 
 	// Prompt chevron at end of output = session is at idle prompt, can receive
 	if d.readyPattern.MatchString(output) {
@@ -412,6 +427,28 @@ func (d *Detector) CheckCanReceive(output string) CanReceive {
 
 	// No prompt visible = session is busy, queue for later
 	return CanReceiveQueue
+}
+
+func latestPiManagedState(output string) string {
+	index := strings.LastIndex(output, "AGM ")
+	if index < 0 {
+		return ""
+	}
+	fields := strings.Fields(output[index:])
+	if len(fields) < 2 {
+		return ""
+	}
+	parts := strings.SplitN(fields[1], "/", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+	if parts[0] != "plan" && parts[0] != "default" && parts[0] != "auto" {
+		return ""
+	}
+	if parts[1] != "ready" && parts[1] != "working" {
+		return ""
+	}
+	return parts[1]
 }
 
 // agySurveyOverlayActive distinguishes a live survey from stale survey text

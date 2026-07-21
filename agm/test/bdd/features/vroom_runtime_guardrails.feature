@@ -57,6 +57,13 @@ Feature: VROOM runtime guardrails
       | opencode-cli | deepseek  | deepseek-v4         |
       | opencode-cli | nemotron  | nemotron-4          |
       | opencode-cli | qwen      | qwen3-coder         |
+      | pi-cli       | anthropic | claude-sonnet-4-6   |
+      | pi-cli       | openai    | gpt-5.6-terra       |
+      | pi-cli       | gemini    | gemini-3.5-flash    |
+      | pi-cli       | glm       | glm-5.2             |
+      | pi-cli       | deepseek  | deepseek-v4         |
+      | pi-cli       | nemotron  | nemotron            |
+      | pi-cli       | qwen      | qwen                |
 
   Scenario Outline: Harnesses delegate unspecified model selection
     Given VROOM harness "<harness>" has no explicit model route
@@ -69,6 +76,7 @@ Feature: VROOM runtime guardrails
       | codex-cli   |
       | agy         |
       | opencode-cli |
+      | pi-cli       |
 
   Scenario: Removed queue tasks release retained storage
     When AGM validates VROOM queue storage hygiene

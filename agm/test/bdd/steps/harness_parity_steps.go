@@ -62,6 +62,9 @@ type harnessParityState struct {
 	permissionProfile          string
 	permissionSurfaces         []permissionparity.Surface
 	permissionAllowList        []string
+	piPermissionMode           string
+	piPermissionPolicy         []string
+	piPermissionDecision       permissionparity.PiDecision
 	quotaSurfaces              []quotaparity.HarnessSurface
 	quotaFamilyCoverage        quotaparity.ModelFamilyCoverage
 	mcpSurface                 mcpparity.CreateSessionSurface
@@ -188,6 +191,9 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^every active harness should have a permission policy target$`, everyActiveHarnessShouldHavePermissionPolicyTarget)
 	ctx.Step(`^the resolved permission policy should include default permissions$`, resolvedPermissionPolicyShouldIncludeDefaultPermissions)
 	ctx.Step(`^the resolved permission policy should include profile permissions$`, resolvedPermissionPolicyShouldIncludeProfilePermissions)
+	ctx.Step(`^Pi permission mode "([^"]*)" with policy "([^"]*)"$`, piPermissionModeWithPolicy)
+	ctx.Step(`^Pi requests tool "([^"]*)" with input "([^"]*)" in an interactive session$`, piRequestsToolInteractively)
+	ctx.Step(`^the Pi permission decision should be "([^"]*)"$`, piPermissionDecisionShouldBe)
 	ctx.Step(`^AGM validates quota monitoring parity$`, agmValidatesQuotaMonitoringParity)
 	ctx.Step(`^AGM validates quota model family coverage$`, agmValidatesQuotaModelFamilyCoverage)
 	ctx.Step(`^harness "([^"]*)" should have a context quota source$`, harnessShouldHaveContextQuotaSource)
@@ -1154,6 +1160,47 @@ func agmValidatesPermissionParitySupport(ctx context.Context) error {
 		return err
 	}
 	harnessState.permissionSurfaces = permissionparity.ActiveHarnessSurfaces()
+	return nil
+}
+
+func piPermissionModeWithPolicy(ctx context.Context, mode, policy string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.piPermissionMode = mode
+	if policy != "" {
+		harnessState.piPermissionPolicy = []string{policy}
+	}
+	return nil
+}
+
+func piRequestsToolInteractively(ctx context.Context, tool, input string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	key := "path"
+	if tool == "bash" {
+		key = "command"
+	}
+	harnessState.piPermissionDecision = permissionparity.DecidePiToolCall(
+		harnessState.piPermissionMode,
+		harnessState.piPermissionPolicy,
+		permissionparity.PiToolCall{ToolName: tool, Input: map[string]any{key: input}},
+		true,
+	)
+	return nil
+}
+
+func piPermissionDecisionShouldBe(ctx context.Context, want string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if got := string(harnessState.piPermissionDecision.Action); got != want {
+		return fmt.Errorf("pi permission decision = %q, want %q (%s)", got, want, harnessState.piPermissionDecision.Reason)
+	}
 	return nil
 }
 
@@ -2492,8 +2539,13 @@ func agmRunsSendSafetyForTheConfiguredHarness(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	switch harnessState.harness {
-	case "codex-cli":
+	harness := harnessState.harness
+	if harness == "" {
+		harness = harnessState.configuredHarness
+		harnessState.harness = harness
+	}
+	switch harness {
+	case "codex-cli", "opencode-cli", "pi-cli":
 		harnessState.sendSafetyRequiresClaude = false
 	case "agy":
 		if err := runAgyLifecycleBehaviorSuite(ctx, harnessState); err != nil {

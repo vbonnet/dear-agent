@@ -32,6 +32,7 @@ func TestHookHarnessesExposeRequiredGuardrails(t *testing.T) {
 		"codex-cli":    filepath.Join(root, ".codex", "hooks.json"),
 		"agy":          filepath.Join(root, ".agents", "hooks.json"),
 		"opencode-cli": filepath.Join(root, ".opencode", "hooks.json"),
+		"pi-cli":       filepath.Join(root, ".pi", "hooks.json"),
 	}
 
 	for harness, manifestPath := range harnesses {
@@ -68,6 +69,9 @@ func TestNonClaudeHookHarnessesExposeBeadsLifecycleHooks(t *testing.T) {
 		"codex-cli":    {path: filepath.Join(root, ".codex", "hooks.json"), prefix: "codex"},
 		"agy":          {path: filepath.Join(root, ".agents", "hooks.json"), prefix: "antigravity"},
 		"opencode-cli": {path: filepath.Join(root, ".opencode", "hooks.json"), prefix: "opencode"},
+		// Beads does not yet publish pi-hook; the managed Pi extension projects
+		// the same lifecycle events through the stable Codex adapter.
+		"pi-cli": {path: filepath.Join(root, ".pi", "hooks.json"), prefix: "codex"},
 	}
 
 	for harness, cfg := range harnesses {
@@ -95,14 +99,16 @@ func TestHookManifestLocalScriptsExistAndAreExecutable(t *testing.T) {
 		filepath.Join(root, ".codex", "hooks.json"),
 		filepath.Join(root, ".agents", "hooks.json"),
 		filepath.Join(root, ".opencode", "hooks.json"),
+		filepath.Join(root, ".pi", "hooks.json"),
 	} {
 		t.Run(filepath.ToSlash(strings.TrimPrefix(manifestPath, root+string(os.PathSeparator))), func(t *testing.T) {
 			settings := readHookSettings(t, manifestPath)
 			for _, command := range allCommands(settings) {
-				if !strings.Contains(command, "${CLAUDE_PROJECT_DIR}/.") {
+				if !strings.Contains(command, "${CLAUDE_PROJECT_DIR}/.") && !strings.Contains(command, "${PI_PROJECT_DIR}/.") {
 					continue
 				}
 				localPath := strings.Replace(command, "${CLAUDE_PROJECT_DIR}", root, 1)
+				localPath = strings.Replace(localPath, "${PI_PROJECT_DIR}", root, 1)
 				info, err := os.Stat(localPath)
 				if err != nil {
 					t.Fatalf("hook command %q points to missing script %s: %v", command, localPath, err)

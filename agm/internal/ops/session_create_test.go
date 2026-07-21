@@ -250,6 +250,60 @@ func TestCreateSession_AgyDetachedPromptUsesCanonicalCommand(t *testing.T) {
 	}
 }
 
+func TestCreateSessionPiPreparesExactNativeIdentityPolicyAndManifest(t *testing.T) {
+	root := t.TempDir()
+	extensionRoot := t.TempDir()
+	t.Setenv("AGM_PI_SESSION_ROOT", root)
+	t.Setenv("AGM_PI_EXTENSION_ROOT", extensionRoot)
+	workDir := t.TempDir()
+	store := &createMockStorage{}
+	tmuxMock := session.NewMockTmux()
+	var launched HarnessLaunchSpec
+	var completed *manifest.Manifest
+	runtime := &createTestRuntime{
+		launch: func(_ context.Context, spec HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			launched = spec
+			return CreateSessionLaunchResult{ModeAppliedAtStartup: true}, nil
+		},
+		complete: func(_ context.Context, completion CreateSessionCompletion) error {
+			completed = completion.Manifest
+			return nil
+		},
+	}
+	result, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+	}, &CreateSessionRequest{
+		Cwd: workDir, Prompt: "hello", Title: "pi-worker", Harness: "pi", Model: "sonnet",
+		SessionID: "pi-native-id", PermissionMode: "plan",
+		Metadata: CreateSessionMetadata{PermissionPolicy: &manifest.PermissionPolicy{Allow: []string{"Read(/work/**)"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Harness != "pi-cli" || launched.Pi == nil {
+		t.Fatalf("result/spec = %#v / %#v", result, launched)
+	}
+	if launched.Pi.SessionID != "pi-native-id" || launched.Pi.SessionDir != root {
+		t.Fatalf("Pi identity = %#v", launched.Pi)
+	}
+	if launched.PiLaunchID == "" {
+		t.Fatal("Pi creation omitted process launch identity")
+	}
+	if launched.PiPolicyJSON != `{"allow":["Read(/work/**)"]}` {
+		t.Fatalf("Pi policy JSON = %q", launched.PiPolicyJSON)
+	}
+	policyData, readErr := os.ReadFile(launched.PiPolicyFile)
+	if readErr != nil || string(policyData) != launched.PiPolicyJSON {
+		t.Fatalf("Pi policy file = %q, read=%v data=%q", launched.PiPolicyFile, readErr, policyData)
+	}
+	if info, statErr := os.Stat(launched.PiExtension); statErr != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("Pi extension = %q, stat=%v info=%v", launched.PiExtension, statErr, info)
+	}
+	if completed == nil || completed.Pi == nil || completed.Pi.SessionID != "pi-native-id" || completed.WorkingDirectory != workDir {
+		t.Fatalf("Pi manifest = %#v", completed)
+	}
+}
+
 func TestBuildAgyResumeCommandPreservesModelConversationAndMode(t *testing.T) {
 	command := BuildAgyResumeCommand(HarnessLaunchSpec{
 		Harness: "agy", Model: "claude-sonnet-4.6-thinking", WorkDir: "/tmp/agy resume",

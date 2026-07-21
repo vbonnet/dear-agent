@@ -17,6 +17,21 @@ func TestDispatchModeSwitchContextStopsBeforeSlashCommandDelivery(t *testing.T) 
 	}
 }
 
+func TestDispatchPiModeUsesManagedCommandWithCallerContext(t *testing.T) {
+	original := sendPiModeCommand
+	t.Cleanup(func() { sendPiModeCommand = original })
+	callerCtx := t.Context()
+	sendPiModeCommand = func(ctx context.Context, session, command string) error {
+		if ctx != callerCtx || session != "pi-worker" || command != "/agm-mode plan" {
+			t.Fatalf("Pi mode delivery = ctx %v session %q command %q", ctx == callerCtx, session, command)
+		}
+		return nil
+	}
+	if err := dispatchModeSwitchContext(callerCtx, "pi-cli", "pi-worker", "plan", "default"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCalculateShiftTabPresses(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -20,7 +20,8 @@ var agentRegistry = map[string]func() (Agent, error){
 	"opencode-cli": func() (Agent, error) {
 		return NewOpenCodeAdapter(nil)
 	},
-	"agy": func() (Agent, error) { return NewAgyAdapter(nil) },
+	"agy":    func() (Agent, error) { return NewAgyAdapter(nil) },
+	"pi-cli": func() (Agent, error) { return NewPiAdapter(nil) },
 }
 
 // GetHarness returns a harness adapter instance by name

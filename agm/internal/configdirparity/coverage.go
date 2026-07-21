@@ -30,6 +30,8 @@ func SurfaceForHarness(harness string) (DirectorySurface, bool) {
 		return DirectorySurface{Harness: "agy", Directory: ".agents", Purpose: "AGY/Antigravity hooks, skills, and instructions"}, true
 	case "opencode-cli":
 		return DirectorySurface{Harness: "opencode-cli", Directory: ".opencode", Purpose: "OpenCode hooks and fallback metadata"}, true
+	case "pi-cli":
+		return DirectorySurface{Harness: "pi-cli", Directory: ".pi", Purpose: "Pi skill discovery and project-local settings"}, true
 	case "gemini-cli":
 		return DirectorySurface{Harness: "gemini-cli", Directory: ".gemini", Deprecated: true, Purpose: "Gemini Code Assist compatibility"}, true
 	default:

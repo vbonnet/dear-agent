@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/pisession"
 )
 
 // ConversationEntry represents a single entry in conversation.jsonl
@@ -305,6 +306,10 @@ func DetectContextFromManifestOrLog(m *manifest.Manifest) (*manifest.ContextUsag
 		return m.ContextUsage, nil
 	}
 
+	if m.Pi != nil {
+		return detectPiContext(m.Pi)
+	}
+
 	// Try statusline file
 	if m.Claude.UUID != "" {
 		if usage, err := DetectContextFromStatusLine(m.Claude.UUID); err == nil {
@@ -320,6 +325,64 @@ func DetectContextFromManifestOrLog(m *manifest.Manifest) (*manifest.ContextUsag
 	}
 
 	return nil, fmt.Errorf("context usage unavailable from manifest or conversation log")
+}
+
+func detectPiContext(pi *manifest.Pi) (*manifest.ContextUsage, error) {
+	if pi.SessionID == "" || pi.SessionDir == "" {
+		return nil, fmt.Errorf("pi context usage requires native session metadata")
+	}
+	path, err := pisession.FindTranscript(pi.SessionDir, pi.SessionID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve Pi context transcript: %w", err)
+	}
+	if pi.TranscriptPath != "" {
+		want, absErr := filepath.Abs(pi.TranscriptPath)
+		if absErr != nil || filepath.Clean(want) != filepath.Clean(path) {
+			return nil, fmt.Errorf("pi context transcript does not match persisted path")
+		}
+	}
+	usage, err := pisession.ReadUsage(path)
+	if err != nil {
+		return nil, err
+	}
+	contextWindow := piModelContextWindow(usage.Model)
+	percentage := math.Min(100, float64(usage.ContextTokens)/float64(contextWindow)*100)
+	return &manifest.ContextUsage{
+		TotalTokens:    contextWindow,
+		UsedTokens:     usage.ContextTokens,
+		PercentageUsed: percentage,
+		LastUpdated:    usage.LastAssistantAt,
+		Source:         "pi_jsonl",
+		ModelID:        usage.Model,
+		EstimatedCost:  usage.CumulativeCost,
+	}, nil
+}
+
+func piModelContextWindow(model string) int {
+	model = strings.TrimPrefix(strings.ToLower(model), "anthropic/")
+	model = strings.TrimPrefix(model, "openai/")
+	model = strings.TrimPrefix(model, "google/")
+	model = strings.TrimPrefix(model, "openrouter/")
+	switch model {
+	case "claude-fable-5", "claude-opus-4-8", "claude-sonnet-4-6":
+		return 1000000
+	case "gpt-5.3-chat-latest", "gpt-5.3-codex-spark":
+		return 128000
+	case "gpt-5.3-codex", "gpt-5.4-mini", "gpt-5.4-nano":
+		return 400000
+	case "gpt-5.4", "gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna":
+		return 272000
+	case "gpt-5.4-pro", "gpt-5.5-pro":
+		return 1050000
+	case "gemini-3.5-flash", "gemini-3.1-flash-lite", "z-ai/glm-5.2", "deepseek/deepseek-v4-pro":
+		return 1048576
+	case "nvidia/nemotron-3-ultra-550b-a55b":
+		return 512288
+	case "qwen/qwen3.6-max-preview":
+		return 262144
+	default:
+		return 200000
+	}
 }
 
 // findConversationLog locates the conversation log file for a session.

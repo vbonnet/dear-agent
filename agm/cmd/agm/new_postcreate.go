@@ -32,10 +32,22 @@ func runHarnessPostCreate(ctx context.Context, sessionName string, modeAppliedAt
 		return runCodexPostCreate(ctx, sessionName)
 	case harnessName == "agy":
 		return runAgyPostCreate(ctx, sessionName)
+	case harnessName == "pi-cli":
+		return runPiPostCreate(ctx, sessionName)
 	default:
 		debug.Log("Skipping initialization sequence for harness: %s", harnessName)
 		return nil
 	}
+}
+
+func runPiPostCreate(ctx context.Context, sessionName string) error {
+	if err := tmux.WaitForPiPromptContext(ctx, sessionName, 30*time.Second); err != nil {
+		return fmt.Errorf("pi did not reach managed readiness after creation: %w", err)
+	}
+	ui.PrintSuccess("Pi is ready with AGM authorization controls")
+	// The managed footer is the delivery acknowledgement. Pi does not expose
+	// Claude's echoed-composer signals, so the Claude retry verifier is not used.
+	return deliverInitialPrompt(ctx, sessionName, false, false)
 }
 
 // runClaudePostCreate associates the freshly-spawned Claude session and signals

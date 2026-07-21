@@ -31,6 +31,12 @@ func TestValidateHarness(t *testing.T) {
 			shouldErr: false,
 		},
 		{
+			name:      "valid pi",
+			harness:   "pi",
+			expected:  HarnessPi,
+			shouldErr: false,
+		},
+		{
 			name:      "case insensitive",
 			harness:   "CODEX",
 			expected:  HarnessCodex,
@@ -160,6 +166,21 @@ func TestInstallOpenCode_AlreadyInstalled(t *testing.T) {
 	}
 }
 
+func TestInstallPi_AlreadyInstalled(t *testing.T) {
+	ctx := context.Background()
+	result := InstallPi(ctx)
+
+	if result == nil {
+		t.Fatal("InstallPi() returned nil")
+	}
+	if result.Harness != string(HarnessPi) {
+		t.Fatalf("InstallPi() harness = %s, expected %s", result.Harness, HarnessPi)
+	}
+	if result.Message == "" {
+		t.Fatal("InstallPi() message is empty")
+	}
+}
+
 func TestInstall_InvalidHarness(t *testing.T) {
 	ctx := context.Background()
 	_, err := Install(ctx, HarnessType("invalid"))
@@ -172,7 +193,7 @@ func TestInstall_InvalidHarness(t *testing.T) {
 func TestInstall_ValidHarness(t *testing.T) {
 	ctx := context.Background()
 
-	harnessTypes := []HarnessType{HarnessCodex, HarnessGemini, HarnessOpenCode}
+	harnessTypes := []HarnessType{HarnessCodex, HarnessGemini, HarnessOpenCode, HarnessPi}
 
 	for _, harness := range harnessTypes {
 		t.Run(string(harness), func(t *testing.T) {

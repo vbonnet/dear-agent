@@ -4,7 +4,7 @@
 for an AGM session. The session's **harness**, not its model, determines those
 locations.
 
-Active harnesses are Claude Code, Codex CLI, Antigravity (`agy`), and OpenCode.
+Active harnesses are Claude Code, Codex CLI, Antigravity (`agy`), OpenCode, and Pi.
 Gemini CLI remains available as a deprecated compatibility harness.
 
 ## Usage
@@ -25,7 +25,7 @@ agm session get-history-path my-session --verify
 
 Without a session argument, the command uses the current tmux session. Outside
 tmux, its fallback discovery is Claude-specific. Pass an AGM session name when
-requesting AGY, Codex, OpenCode, or deprecated Gemini history outside that
+requesting AGY, Codex, OpenCode, Pi, or deprecated Gemini history outside that
 session's tmux pane.
 
 ## Harness storage
@@ -77,6 +77,20 @@ ${OPENCODE_DATA_DIR}/storage/session/
 
 When `OPENCODE_DATA_DIR` is unset, the base directory is
 `~/.local/share/opencode`.
+
+### Pi
+
+AGM persists Pi sessions under an owner-only directory and records the exact
+native session ID and JSONL path in the manifest. The command verifies that the
+transcript header matches that identity before returning either path:
+
+```text
+<manifest.pi.session_dir>/
+<manifest.pi.transcript_path>
+```
+
+AGM does not choose the newest Pi transcript. A missing identity, header
+mismatch, duplicate native ID, or unverified path is an error.
 
 ### Gemini CLI (deprecated compatibility)
 

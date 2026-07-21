@@ -151,9 +151,11 @@ internal/
 ├── agent/              # Agent abstraction and adapters
 │   ├── interface.go    # Agent interface definition
 │   ├── claude_adapter.go   # Claude-specific implementation
-│   ├── gemini_cli_adapter.go  # Gemini CLI-specific implementation
-│   ├── openai_adapter.go   # Legacy OpenAI API implementation
-│   └── opencode_adapter.go # OpenCode SSE-based implementation
+│   ├── codex_cli_adapter.go # Native interactive Codex CLI
+│   ├── agy_adapter.go      # Native Antigravity CLI
+│   ├── opencode_adapter.go # OpenCode SSE-based implementation
+│   ├── pi_adapter.go       # Native interactive Pi CLI
+│   └── gemini_cli_adapter.go  # Deprecated compatibility
 │
 ├── command/            # Command translation layer
 │   ├── translator.go   # CommandTranslator interface
@@ -841,39 +843,13 @@ func (a *GeminiCLIAdapter) ExecuteCommand(cmd Command) error {
 }
 ```
 
-#### 3. Codex Adapter (`codex_adapter.go`)
+#### 3. Codex CLI Adapter (`codex_cli_adapter.go`)
 
-**Provider**: OpenAI API (Codex models)
-**Architecture**: API-based with OpenAI SDK
-**Session Model**: API conversation history
-
-**Key Characteristics**:
-- **Session Resume**: API-based (conversation_id tracking)
-- **State Detection**: API polling
-- **Working Directory**: Manual context injection
-- **Persistence**: Server-side (OpenAI maintains history)
-- **Multi-session**: Yes (multiple conversation IDs)
-
-**Unique Features**:
-- Code completion specialized models
-- Function calling support
-- Fine-tuned model support
-- Temperature/top-p control
-- Max tokens configuration
-
-**State Detection Strategy**:
-```go
-// API-based polling (similar to Gemini)
-func (a *CodexAdapter) detectState(sessionID string) State {
-    // Query OpenAI API for conversation status
-    completion, err := a.client.GetCompletion(sessionID)
-    if err != nil {
-        return StateOffline
-    }
-
-    return completion.State  // DONE, WORKING, etc.
-}
-```
+Codex is a real interactive CLI harness, not an OpenAI API adapter. AGM starts
+`codex` in tmux with an explicit working directory, model, approval policy, and
+sandbox. Resume targets the persisted native Codex session ID. State and send
+safety come from native composer detection plus process-tree liveness; imported
+history comes from exact rollout metadata under `~/.codex/sessions`.
 
 #### 4. OpenCode Adapter (`opencode_adapter.go`)
 
@@ -917,7 +893,16 @@ func (a *OpenCodeAdapter) detectState(sessionID string) State {
 **SSE Integration**:
 - Monitor implementation: `internal/monitor/opencode/`
 - Event schema: `{"type": "state_change", "state": "DONE", "sessionID": "..."}`
-- Coverage: 88.1% (production-ready)
+
+#### 5. Pi Adapter (`pi_adapter.go`)
+
+Pi is a native interactive CLI with JSONL session persistence. AGM assigns the
+exact native ID, uses a private session directory, and loads an AGM-owned
+authorization extension. The extension publishes a stable mode/readiness
+token, projects repository hooks, and enforces plan/default/auto tool policy.
+Resume, history, import, Engram, and quota paths validate exact JSONL header
+identity rather than selecting recent files. See
+[`PI-HARNESS.md`](PI-HARNESS.md).
 
 ### Session Management Patterns
 
@@ -937,19 +922,16 @@ agent.ResumeSession("abc-123")  // Uses: claude --resume abc-123
 **Benefits**: Native conversation restoration, full history replay
 **Limitations**: Requires local history.jsonl file
 
-#### API-Based Resume (Gemini, Codex)
+#### Native CLI Resume (Codex, AGY, Pi)
 
 ```go
-// Gemini/Codex: API conversation tracking
+// AGM persists the provider-native identifier in the manifest.
 session, _ := agent.CreateSession(ctx)
-// Returns: SessionID{ConversationID: "conv-456", TmuxName: "my-session"}
-
-// Later:
-agent.ResumeSession("conv-456")  // API call to fetch history
+agent.ResumeSession(session.ID) // native resume command in managed tmux
 ```
 
-**Benefits**: Server-side persistence, cross-device access
-**Limitations**: Network dependency, no offline resume
+**Benefits**: Exact native history, interactive auth, provider-owned model routing
+**Limitations**: Native runtime and provider configuration must be installed
 
 #### Server-Managed State (OpenCode)
 
@@ -967,32 +949,28 @@ agent.ResumeSession("sess-789")  // opencode attach (server routing)
 
 ### State Detection Strategies
 
-| Strategy | Harnesses | Latency | Reliability | Overhead |
-|----------|-----------|---------|-------------|----------|
-| **Hook-based** | Claude | <100ms | 95% | Low (hooks run async) |
-| **Tmux scraping** | Claude (fallback) | ~200ms | 80% | Medium (regex parsing) |
-| **API polling** | Gemini, Codex | 500ms-2s | 90% | High (network calls) |
-| **SSE push** | OpenCode | <50ms | 98% | Low (event-driven) |
+| Strategy | Harnesses | Observable source |
+|----------|-----------|-------------------|
+| **Hook-based** | Claude | Native lifecycle hooks |
+| **Tmux fallback** | Claude | Pane prompt plus process liveness |
+| **Native composer/status** | Codex, AGY, Pi | Harness-specific pane/status plus process liveness |
+| **SSE push** | OpenCode | Server events with tmux fallback |
 
 **Best Practices**:
-- Use hooks when available (fastest, most reliable)
+- Use native structured state when available
 - Fall back to tmux scraping for legacy support
 - Prefer SSE over polling for real-time requirements
-- Cache state for 10-30s to reduce overhead
 
 ### Harness Comparison Matrix
 
-| Feature | Claude | Gemini | Codex | OpenCode |
-|---------|--------|--------|-------|----------|
-| **Session Resume** | UUID-based | API-based | API-based | Server-based |
-| **State Detection** | Hooks + Scraping | API poll | API poll | SSE push |
-| **Working Directory** | Native | Manual | Manual | Native |
-| **Offline Mode** | Yes | No | No | No |
-| **Multi-session** | Yes | Yes | Yes | Yes |
-| **Slash Commands** | Yes | No | No | No |
-| **Function Calling** | Yes | Yes | Yes | No |
-| **Conversation Export** | JSONL | API format | API format | Server format |
-| **Parity Score** | 100% (baseline) | ~92% | ~93% | ~95% |
+| Feature | Claude | Codex CLI | AGY | OpenCode | Pi |
+|---------|--------|-----------|-----|----------|----|
+| **Session Resume** | UUID | Native ID | Native ID | Server session | Native ID |
+| **State Detection** | Hooks + pane | Composer + pane | Composer + pane | SSE + pane | Managed status + pane |
+| **Working Directory** | Native | Native `-C` | Native cwd | Native | Native cwd |
+| **Tool authorization** | Native settings | Approval + sandbox | Native mode | Server policy | AGM extension + native tools |
+| **Conversation Export** | JSONL | Rollout JSONL | Native DB/JSONL | Server format | Native JSONL/HTML |
+| **Wayfinder** | Plugin + CLI | Skill + CLI | Skill + CLI | Command/CLI | Native skill + CLI |
 
 ### Harness-Specific Differences
 
@@ -1003,29 +981,32 @@ agent.ResumeSession("sess-789")  // opencode attach (server routing)
 claude --add-dir ~/projects/myapp --resume abc-123
 ```
 
-**Gemini/Codex**: Manual context injection (copy file contents to conversation)
-```bash
-# AGM abstracts this via adapter:
-agent.SendMessage(sessionID, "I'm working in " + workingDir + ". Files: ...")
-```
+**Codex**: Native `-C` plus Codex project trust and workspace sandbox.
+
+**AGY**: Native working directory with an explicit trust prompt handled before
+detached delivery.
 
 **OpenCode**: Native support via `-C` flag
 ```bash
 opencode attach -C ~/projects/myapp
 ```
 
+**Pi**: Native process cwd plus explicit project approval. Project trust is
+separate from managed tool authorization and repository guardrails.
+
 #### Error Handling
 
 **Claude**: Detailed error messages, exit codes, stderr parsing
-**Gemini/Codex**: API error responses (HTTP status codes, JSON error bodies)
+**Codex/AGY/Pi**: Native CLI exit, readiness, model, and transcript errors
 **OpenCode**: HTTP status codes + SSE error events
 
 #### Configuration
 
 **Claude**: `~/.claude/config.yaml`, environment variables (`ANTHROPIC_API_KEY`)
 **Gemini**: Environment variables (`GOOGLE_API_KEY`, `GEMINI_MODEL`)
-**Codex**: Environment variables (`OPENAI_API_KEY`, `OPENAI_MODEL`)
+**Codex**: Native Codex config/OAuth and `.codex/`
 **OpenCode**: Environment variables (`OPENCODE_SERVER_URL`, defaults to `http://localhost:4096`)
+**Pi**: Pi-owned providers plus `.pi/`; AGM does not inspect provider credentials
 
 ### Adding New Harnesses
 

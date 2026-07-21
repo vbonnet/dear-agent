@@ -30,6 +30,7 @@ var harnessBinaries = map[string][]string{
 	"gemini-cli":  {"gemini"},
 	"codex-cli":   {"codex"},
 	"agy":         {"agy"},
+	"pi-cli":      {"pi"},
 }
 
 // lookPath is a variable for testing
@@ -41,6 +42,7 @@ var harnessHelpURLs = map[string]string{
 	"gemini-cli":  "https://ai.google.dev/",
 	"codex-cli":   "https://platform.openai.com/api-keys",
 	"agy":         "https://ultraai.app/",
+	"pi-cli":      "https://github.com/earendil-works/pi",
 }
 
 // NormalizeHarnessName maps legacy or shorthand harness spellings onto AGM's
@@ -49,6 +51,8 @@ func NormalizeHarnessName(name string) string {
 	switch name {
 	case "agy-cli", "antigravity":
 		return "agy"
+	case "pi":
+		return "pi-cli"
 	default:
 		return name
 	}
@@ -78,6 +82,12 @@ func ValidateHarnessName(name string) error {
 // or if the appropriate API key / auth environment is configured.
 func ValidateHarnessAvailability(name string) error {
 	name = NormalizeHarnessName(name)
+	if name == "pi-cli" {
+		if isHarnessBinaryOnPath(name) {
+			return nil
+		}
+		return fmt.Errorf("pi CLI executable not found on PATH; install it with: npm install -g @earendil-works/pi-coding-agent")
+	}
 	// Special case: OpenCode availability = server reachable (not API key based)
 	if name == "opencode-cli" {
 		return validateOpenCodeServerAvailable()

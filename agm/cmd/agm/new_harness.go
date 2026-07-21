@@ -11,12 +11,13 @@ import (
 	"github.com/charmbracelet/huh/spinner"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
+	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 )
 
-// startHarness dispatches per-harness initialization (Claude/Gemini/Codex/OpenCode/AGY).
+// startHarness dispatches per-harness initialization.
 // Returns (modeAppliedAtStartup, harnessHandledFullLifecycle, err): when
 // harnessHandledFullLifecycle is true the caller should return immediately —
 // the harness (e.g. gemini-cli wrapper) has already managed attach/detach.
@@ -35,6 +36,9 @@ func startHarness(ctx context.Context, spec ops.HarnessLaunchSpec, trustPreConfi
 	case "agy":
 		modeApplied, err := startAgyHarness(ctx, spec)
 		return modeApplied, false, err
+	case "pi-cli":
+		modeApplied, err := startPiHarness(ctx, spec)
+		return modeApplied, false, err
 	default:
 		debug.Phase("Skip CLI Startup")
 		debug.Log("Skipping CLI startup for harness: %s (no CLI configured)", spec.Harness)
@@ -45,11 +49,49 @@ func startHarness(ctx context.Context, spec ops.HarnessLaunchSpec, trustPreConfi
 
 func activeHarnessHasTmuxLauncher(harness string) bool {
 	switch agent.NormalizeHarnessName(harness) {
-	case "claude-code", "codex-cli", "agy", "opencode-cli":
+	case "claude-code", "codex-cli", "agy", "opencode-cli", "pi-cli":
 		return true
 	default:
 		return false
 	}
+}
+
+type piHarnessRuntime struct {
+	lookPath      func(string) (string, error)
+	sendCommand   func(string, string) error
+	waitForPrompt func(context.Context, string, string, time.Duration) error
+	sleep         func(time.Duration)
+}
+
+func realPiHarnessRuntime() piHarnessRuntime {
+	return piHarnessRuntime{
+		lookPath: exec.LookPath, sendCommand: tmux.SendCommand,
+		waitForPrompt: tmux.WaitForPiLaunchPromptContext, sleep: time.Sleep,
+	}
+}
+
+func startPiHarness(ctx context.Context, spec ops.HarnessLaunchSpec) (bool, error) {
+	return startPiHarnessWithRuntime(ctx, spec, realPiHarnessRuntime())
+}
+
+func startPiHarnessWithRuntime(ctx context.Context, spec ops.HarnessLaunchSpec, runtime piHarnessRuntime) (bool, error) {
+	debug.Phase("Start Pi")
+	if _, err := runtime.lookPath("pi"); err != nil {
+		return false, fmt.Errorf("pi executable is unavailable: %w", err)
+	}
+	if spec.PiLaunchID == "" {
+		spec.PiLaunchID = launchparity.NewPiLaunchID()
+	}
+	launch := ops.BuildHarnessLaunchCommand(spec)
+	if err := runtime.sendCommand(spec.SessionName, launch.Command); err != nil {
+		return launch.ModeAppliedAtStartup, fmt.Errorf("start Pi in tmux: %w", err)
+	}
+	runtime.sleep(500 * time.Millisecond)
+	if err := runtime.waitForPrompt(ctx, spec.SessionName, spec.PiLaunchID, 90*time.Second); err != nil {
+		return launch.ModeAppliedAtStartup, fmt.Errorf("pi managed readiness: %w", err)
+	}
+	ui.PrintSuccess("Pi adapter ready")
+	return launch.ModeAppliedAtStartup, nil
 }
 
 // startClaudeHarness builds and sends the claude command, waits for the prompt,

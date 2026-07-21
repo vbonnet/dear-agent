@@ -4,7 +4,7 @@ This package implements the Agent interface abstraction for supporting multiple 
 
 ## Overview
 
-The Agent interface provides a unified API for managing AI harness sessions. The active parity harnesses are `claude-code`, `codex-cli`, `agy`, and `opencode-cli`, with Claude Code as the reference implementation. `gemini-cli` remains deprecated compatibility for old sessions.
+The Agent interface provides a unified API for managing AI harness sessions. The active parity harnesses are `claude-code`, `codex-cli`, `agy`, `opencode-cli`, and `pi-cli`, with Claude Code as the reference implementation. `gemini-cli` remains deprecated compatibility for old sessions.
 
 ## Architecture
 

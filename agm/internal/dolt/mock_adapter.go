@@ -437,7 +437,8 @@ func (m *MockAdapter) GetSessionByUUID(conversationUUID string) (*manifest.Manif
 	for _, s := range m.sessions {
 		if s.Claude.UUID == conversationUUID ||
 			(s.Codex != nil && s.Codex.SessionID == conversationUUID) ||
-			(s.Agy != nil && s.Agy.ConversationID == conversationUUID) {
+			(s.Agy != nil && s.Agy.ConversationID == conversationUUID) ||
+			(s.Pi != nil && s.Pi.SessionID == conversationUUID) {
 			return m.copyManifest(s), nil
 		}
 	}

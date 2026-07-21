@@ -226,7 +226,7 @@ creation, and terminal state detection.
   the current pane, validates credentials and the executable, and queues the
   canonical launch command without waiting behind the AGM process that owns
   the pane.
-- Active harnesses are exactly Claude Code, Codex CLI, AGY, and OpenCode.
+- Active harnesses are exactly Claude Code, Codex CLI, AGY, OpenCode, and Pi.
 - Gemini CLI remains deprecated compatibility, not active parity.
 - Active harness factories use canonical names.
 - Active harness adapters satisfy the shared non-I/O conformance suite.
@@ -413,7 +413,7 @@ entrypoints should only add model/harness-specific guidance.
 **Drives:** repository hook manifests and `internal/hookparity`.
 
 **Key scenarios:**
-- Claude Code, Codex CLI, AGY, and OpenCode expose the required PreToolUse
+- Claude Code, Codex CLI, AGY, OpenCode, and Pi expose the required PreToolUse
   guardrails.
 - Stop and SubagentStop feedback hooks are configured.
 - Non-Claude harnesses expose Beads lifecycle hooks through their native hook
@@ -582,7 +582,7 @@ review gates staying explicit and executable.
 `agm/internal/configdirparity`.
 
 **Key scenarios:**
-- Active harnesses have `.claude`, `.codex`, `.agents`, and `.opencode`
+- Active harnesses have `.claude`, `.codex`, `.agents`, `.opencode`, and `.pi`
   directory surfaces.
 - Deprecated Gemini compatibility keeps `.gemini` available without making it
   active parity.
@@ -880,6 +880,8 @@ history adapters, UUID detection, orphan import, transcript context, and search.
 - Every listed conversation and discovery package has a co-located `SPEC.md`.
 - Every package SPEC points back to the executable guardrail feature.
 - Claude-only storage details remain explicit adapters rather than shared contracts.
+- Pi imports preserve provider-qualified native model provenance and leave the
+  model override empty when the native transcript does not record one.
 
 ---
 
@@ -1014,7 +1016,7 @@ enforcement, evaluation, event, markdown, graceful-exit, and health packages.
 
 **Key scenarios:**
 - Every shared runtime policy package carries a reciprocal SPEC reference.
-- Every package contract names all four active harnesses and seven model families.
+- Every package contract names all five active harnesses and seven model families.
 - Production string literals do not embed a harness or model-family route.
 
 **Why this matters:** Shared policy behavior must remain identical across caller
@@ -1362,7 +1364,7 @@ and Wayfinder test-support package boundaries.
 **Key scenarios:**
 - Every residual test and support package retains a co-located strict EARS SPEC.
 - Every SPEC references the executable feature that enforces it.
-- The complete support contract is validated across all four active harnesses
+- The complete support contract is validated across all five active harnesses
   and all seven supported model families.
 - Live harness contracts use canonical guarded session and message commands.
 - Trust hooks run only for trust scenarios, restore process environment, reuse

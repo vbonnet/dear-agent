@@ -1,6 +1,6 @@
 # agm/internal/session — Requirements Specification (EARS)
 
-<!-- Last audited at: 2026-07-03 -->
+<!-- Last audited at: 2026-07-21 -->
 
 ## Purpose
 
@@ -24,6 +24,10 @@ directly, including the optional harness-process liveness capability
 **SESS-05** When a tmux backend does not implement `HarnessLivenessChecker`, the system shall let callers discover the capability by type assertion so existing `TmuxInterface` implementations keep compiling and fall back to session-existence semantics.
 
 **SESS-06** When aggregate workspace status is encoded as JSON, the system shall expose stable lower-snake-case keys for the workspace, summary counts, and detailed session fields rather than Go field names.
+
+**SESS-07** When AGM detects context for a Pi manifest, the system shall resolve the exact persisted native transcript identity and reject a transcript-path mismatch.
+
+**SESS-08** When AGM converts Pi native usage into context percentage, the system shall use the exact Pi 0.81 model-catalog window for known provider-qualified models and a conservative documented fallback for unknown models.
 
 ## Key Invariants
 

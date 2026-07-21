@@ -14,7 +14,7 @@ import (
 // ListSessionsMCPInput is the MCP input schema for list_sessions.
 type ListSessionsMCPInput struct {
 	Status  string `json:"status,omitempty" jsonschema:"description=Filter by session status,enum=active, archived, all"`
-	Harness string `json:"harness,omitempty" jsonschema:"description=Filter by harness; gemini-cli is deprecated,enum=claude-code, codex-cli, agy, opencode-cli, gemini-cli, all"`
+	Harness string `json:"harness,omitempty" jsonschema:"description=Filter by harness; gemini-cli is deprecated,enum=claude-code, codex-cli, agy, opencode-cli, pi-cli, gemini-cli, all"`
 	Limit   int    `json:"limit,omitempty" jsonschema:"description=Maximum sessions to return (1-1000)"`
 	Offset  int    `json:"offset,omitempty" jsonschema:"description=Pagination offset"`
 }

@@ -35,6 +35,7 @@ var contextManagementParityEnvironment = []string{
 	"GEMINI_CONTEXT_USAGE", "GEMINI_TOOL_RESULT", "GEMINI_MODEL", "GEMINI_MESSAGE_COUNT",
 	"OPENCODE_CONTEXT_USAGE", "OPENCODE_TOOL_RESULT", "OPENCODE_MODEL", "OPENCODE_MESSAGE_COUNT",
 	"CODEX_CONTEXT_USAGE", "CODEX_TOOL_RESULT", "CODEX_MODEL", "CODEX_MESSAGE_COUNT",
+	"PI_CONTEXT_USAGE", "PI_TOOL_RESULT", "PI_MODEL", "PI_MESSAGE_COUNT",
 	"AGY_CONTEXT_USAGE", "ANTIGRAVITY_CONTEXT_USAGE", "AGY_MODEL", "ANTIGRAVITY_MODEL",
 	"AGY_MESSAGE_COUNT", "ANTIGRAVITY_MESSAGE_COUNT", "DEAR_AGENT_MODEL", "DEAR_AGENT_MESSAGE_COUNT",
 }
@@ -109,6 +110,7 @@ func contextHarnessRouteForName(harness string) (contextHarnessRoute, bool) {
 	route, ok := map[string]contextHarnessRoute{
 		"claude-code":  {agentcontext.CLIClaude, "CLAUDE_CONTEXT_USAGE"},
 		"codex-cli":    {agentcontext.CLICodex, "CODEX_CONTEXT_USAGE"},
+		"pi-cli":       {agentcontext.CLIPi, "PI_CONTEXT_USAGE"},
 		"agy":          {agentcontext.CLIAgy, "AGY_CONTEXT_USAGE"},
 		"opencode-cli": {agentcontext.CLIOpenCode, "OPENCODE_CONTEXT_USAGE"},
 	}[harness]
@@ -153,6 +155,7 @@ func contextRouteUsesModelFamily(ctx context.Context, harness, family string) er
 	cli, ok := map[string]agentcontext.CLI{
 		"claude-code":  agentcontext.CLIClaude,
 		"codex-cli":    agentcontext.CLICodex,
+		"pi-cli":       agentcontext.CLIPi,
 		"agy":          agentcontext.CLIAgy,
 		"opencode-cli": agentcontext.CLIOpenCode,
 	}[harness]

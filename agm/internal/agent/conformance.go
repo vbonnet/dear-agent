@@ -182,6 +182,8 @@ func newConformanceAdapter(harness string) (Agent, error) {
 		return NewAgyAdapter(store)
 	case "opencode-cli":
 		return NewOpenCodeAdapter(&OpenCodeConfig{SessionStore: store})
+	case "pi-cli":
+		return NewPiAdapter(store)
 	default:
 		return nil, fmt.Errorf("no conformance adapter constructor for %q", harness)
 	}

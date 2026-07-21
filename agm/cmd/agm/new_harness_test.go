@@ -89,6 +89,64 @@ func TestStartAgyHarnessPropagatesReadinessFailure(t *testing.T) {
 	}
 }
 
+func TestStartPiHarnessUsesManagedExtensionAndFatalReadiness(t *testing.T) {
+	callerCtx := t.Context()
+	var sent, waitedLaunchID string
+	runtime := piHarnessRuntime{
+		lookPath: func(file string) (string, error) {
+			if file != "pi" {
+				t.Fatalf("lookPath(%q), want pi", file)
+			}
+			return "/fixture/pi", nil
+		},
+		sendCommand: func(session, command string) error {
+			if session != "pi-worker" {
+				t.Fatalf("session = %q", session)
+			}
+			sent = command
+			return nil
+		},
+		waitForPrompt: func(ctx context.Context, session, launchID string, timeout time.Duration) error {
+			if ctx != callerCtx || session != "pi-worker" || timeout != 90*time.Second {
+				t.Fatalf("readiness = ctx %v session %q timeout %s", ctx == callerCtx, session, timeout)
+			}
+			waitedLaunchID = launchID
+			return nil
+		},
+		sleep: func(time.Duration) {},
+	}
+	modeApplied, err := startPiHarnessWithRuntime(callerCtx, ops.HarnessLaunchSpec{
+		Harness: "pi-cli", Model: "sonnet", SessionName: "pi-worker", WorkDir: "/tmp/work",
+		PermissionMode: "plan", Pi: &manifest.Pi{SessionID: "native-id", SessionDir: "/tmp/pi"},
+		PiExtension: "/tmp/agm-auth.js", PiPolicyFile: "/tmp/pi-policy.json",
+	}, runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !modeApplied || !strings.Contains(sent, "--extension '/tmp/agm-auth.js'") || !strings.Contains(sent, "--tools 'read,grep,find,ls'") {
+		t.Fatalf("Pi launch = mode %v command %q", modeApplied, sent)
+	}
+	if waitedLaunchID == "" || !strings.Contains(sent, "AGM_PI_LAUNCH_ID='"+waitedLaunchID+"'") {
+		t.Fatalf("Pi launch/readiness correlation = command %q launch %q", sent, waitedLaunchID)
+	}
+}
+
+func TestStartPiHarnessPropagatesManagedReadinessFailure(t *testing.T) {
+	wantErr := errors.New("authorization extension failed")
+	runtime := piHarnessRuntime{
+		lookPath:      func(string) (string, error) { return "/fixture/pi", nil },
+		sendCommand:   func(string, string) error { return nil },
+		waitForPrompt: func(context.Context, string, string, time.Duration) error { return wantErr },
+		sleep:         func(time.Duration) {},
+	}
+	_, err := startPiHarnessWithRuntime(t.Context(), ops.HarnessLaunchSpec{
+		Harness: "pi-cli", SessionName: "pi-fail", WorkDir: "/tmp", Pi: &manifest.Pi{SessionID: "id", SessionDir: "/tmp/pi"},
+	}, runtime)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want %v", err, wantErr)
+	}
+}
+
 // TestBuildCodexCommand_ModelResolved verifies that a registry alias is resolved
 // to its full Codex model name and passed via the `-m` flag.
 func TestBuildCodexCommand_ModelResolved(t *testing.T) {
@@ -229,6 +287,28 @@ func TestBuildAgyCommand_DefaultPermissionMode(t *testing.T) {
 	}
 }
 
+func TestBuildPiCommandCarriesExactNativeIdentityAndAuthorization(t *testing.T) {
+	cmd := testLaunchCommand(ops.HarnessLaunchSpec{
+		Harness: "pi-cli", Model: "sonnet", SessionName: "pi-worker", SessionID: "agm-id",
+		WorkDir: "/tmp/pi work", PermissionMode: "plan", Persistent: true,
+		Pi:          &manifest.Pi{SessionID: "native-id", SessionDir: "/tmp/pi sessions"},
+		PiExtension: "/tmp/agm auth.js", PiPolicyFile: "/tmp/pi policy.json",
+	})
+	for _, want := range []string{
+		"cd '/tmp/pi work'", "pi --session-id 'native-id'", "--session-dir '/tmp/pi sessions'",
+		"--name 'pi-worker'", "--model 'anthropic/claude-sonnet-4-6'",
+		"--extension '/tmp/agm auth.js'", "AGM_PI_PERMISSION_MODE='plan'",
+		"AGM_PI_PERMISSION_POLICY_FILE='/tmp/pi policy.json'", "--tools 'read,grep,find,ls'",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("Pi launch %q missing %q", cmd, want)
+		}
+	}
+	if strings.Contains(cmd, "&& exit") {
+		t.Fatalf("persistent Pi command exits pane shell: %q", cmd)
+	}
+}
+
 func TestActiveHarnessBuildersHonorPersistentStartupContracts(t *testing.T) {
 	tests := []struct {
 		name string
@@ -238,6 +318,7 @@ func TestActiveHarnessBuildersHonorPersistentStartupContracts(t *testing.T) {
 		{name: "Codex", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "codex-cli", Model: "5.4", SessionName: "worker", WorkDir: "/tmp/work", Persistent: true, PermissionMode: "auto"}), want: "-a never"},
 		{name: "AGY", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "agy", Model: "3.5-flash", SessionName: "worker", WorkDir: "/tmp/work", Persistent: true, PermissionMode: "auto"}), want: "agy --model 'Gemini 3.5 Flash (Medium)' --dangerously-skip-permissions"},
 		{name: "OpenCode", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "opencode-cli", Model: "glm-5.2", SessionName: "worker", WorkDir: "/tmp/work", Persistent: true}), want: "opencode attach"},
+		{name: "Pi", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "pi-cli", Model: "sonnet", SessionName: "worker", SessionID: "native", WorkDir: "/tmp/work", Persistent: true, Pi: &manifest.Pi{SessionID: "native", SessionDir: "/tmp/pi"}}), want: "pi --session-id 'native'"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

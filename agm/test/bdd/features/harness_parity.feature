@@ -57,7 +57,7 @@
 Feature: Harness parity
   AGM should use one harness-neutral delivery contract for interactive CLI
   harnesses. Claude Code is the reference implementation. Codex CLI, AGY, and
-  OpenCode have different terminal chrome and control surfaces than Claude
+  OpenCode and Pi have different terminal chrome and control surfaces than Claude
   Code, but their idle prompts must still be sendable and their trust/menu
   prompts must not be treated as ready. Gemini CLI is deprecated compatibility
   and is not part of active parity enforcement.
@@ -79,6 +79,7 @@ Feature: Harness parity
       | codex-cli    |
       | agy          |
       | opencode-cli |
+      | pi-cli       |
 
   Scenario: Gemini CLI is deprecated compatibility
     Given harness "gemini-cli" is configured
@@ -119,6 +120,7 @@ Feature: Harness parity
       | codex-cli    | auto |
       | agy          | auto |
       | opencode-cli | plan |
+      | pi-cli       | plan |
 
   Scenario Outline: Active harness startup is transactional
     Given active harness "<harness>" uses startup mode "default"
@@ -131,6 +133,7 @@ Feature: Harness parity
       | codex-cli    |
       | agy          |
       | opencode-cli |
+      | pi-cli       |
 
   Scenario Outline: Active harness recovery requires process-state evidence
     Given harness "<harness>" is configured
@@ -145,6 +148,7 @@ Feature: Harness parity
       | codex-cli    |
       | agy          |
       | opencode-cli |
+      | pi-cli       |
 
   Scenario Outline: Active harness capture uses the canonical AGM socket
     Given harness "<harness>" is configured
@@ -159,6 +163,7 @@ Feature: Harness parity
       | codex-cli    |
       | agy          |
       | opencode-cli |
+      | pi-cli       |
 
   Scenario: Every tmux-facing AGM command declares active harness parity
     Given AGM tmux-facing command sources
@@ -248,6 +253,13 @@ Feature: Harness parity
       | opencode-cli | deepseek-v4 |
       | opencode-cli | nemotron  |
       | opencode-cli | qwen      |
+      | pi-cli       | sonnet    |
+      | pi-cli       | gpt       |
+      | pi-cli       | gemini-flash |
+      | pi-cli       | glm-5.2   |
+      | pi-cli       | deepseek-v4 |
+      | pi-cli       | nemotron  |
+      | pi-cli       | qwen      |
 
   Scenario: Codex composer is ready to receive input
     Given a Codex CLI composer pane
@@ -331,6 +343,16 @@ Feature: Harness parity
     And an AGY ready prompt
     When AGM runs send safety for the configured harness
     Then send safety should not require a Claude process
+
+  Scenario Outline: Pi and OpenCode send safety is harness-specific
+    Given harness "<harness>" is configured
+    When AGM runs send safety for the configured harness
+    Then send safety should not require a Claude process
+
+    Examples:
+      | harness      |
+      | opencode-cli |
+      | pi-cli       |
 
   Scenario: AGY adapter uses safe concurrent native lifecycle truth
     Given AGY is available
