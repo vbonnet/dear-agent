@@ -3,6 +3,7 @@ package tmux
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -26,6 +27,22 @@ type Client struct {
 	// socketPaths contains all tmux socket paths to check.
 	// Includes AGM socket (~/.agm/agm.sock), legacy (/tmp/agm.sock), and system default.
 	socketPaths []string
+	runCommand  tmuxCommandRunner
+}
+
+type tmuxCommandRunner func(args ...string) ([]byte, error)
+
+func runBoundedTmuxCommand(args ...string) ([]byte, error) {
+	cmd, cancel := boundedCommand(args...)
+	defer cancel()
+	return cmd.Output()
+}
+
+func (c *Client) run(args ...string) ([]byte, error) {
+	if c.runCommand != nil {
+		return c.runCommand(args...)
+	}
+	return runBoundedTmuxCommand(args...)
 }
 
 // boundedCommand applies AGM's subprocess safety contract to every tmux
@@ -51,6 +68,7 @@ func NewClient() *Client {
 	socketPaths := getReadSocketPaths()
 	return &Client{
 		socketPaths: socketPaths,
+		runCommand:  runBoundedTmuxCommand,
 	}
 }
 
@@ -58,7 +76,20 @@ func NewClient() *Client {
 // tmux socket. Unlike NewClient, it never auto-discovers AGM, legacy, or system
 // sockets. This is the safety boundary for callers that own an isolated socket.
 func NewClientWithSocket(socketPath string) *Client {
-	return &Client{socketPaths: []string{socketPath}}
+	return newClientWithSocketAndRunner(socketPath, runBoundedTmuxCommand)
+}
+
+func newClientWithSocketAndRunner(socketPath string, runner tmuxCommandRunner) *Client {
+	return &Client{socketPaths: []string{socketPath}, runCommand: runner}
+}
+
+// ConfiguredSocket reports the single explicit socket owned by this client.
+// Auto-discovery clients and the system-default empty socket are not explicit.
+func (c *Client) ConfiguredSocket() (string, bool) {
+	if len(c.socketPaths) != 1 || c.socketPaths[0] == "" {
+		return "", false
+	}
+	return c.socketPaths[0], true
 }
 
 // getReadSocketPaths returns all tmux socket paths to check for sessions.
@@ -108,6 +139,7 @@ func (c *Client) findSessionSocket(sessionName string) (string, error) {
 	// Use = prefix for exact session name matching (prevents prefix matching).
 	// Without this, "tmux has-session -t test" matches "test-something".
 	exactTarget := "=" + sessionName
+	var probeErrors []error
 	for _, socketPath := range c.socketPaths {
 		args := []string{}
 		if socketPath != "" {
@@ -115,14 +147,16 @@ func (c *Client) findSessionSocket(sessionName string) (string, error) {
 		}
 		args = append(args, "has-session", "-t", exactTarget)
 
-		cmd, cancel := boundedCommand(args...)
-		if err := cmd.Run(); err == nil {
-			cancel()
+		_, err := c.run(args...)
+		if err == nil {
 			return socketPath, nil
 		}
-		cancel()
+		probeErrors = append(probeErrors, fmt.Errorf("probe socket %q: %w", socketPath, err))
 	}
 
+	if probeErr := errors.Join(probeErrors...); probeErr != nil {
+		return "", fmt.Errorf("session %s not found on any tmux socket: %w", sessionName, probeErr)
+	}
 	return "", fmt.Errorf("session %s not found on any tmux socket", sessionName)
 }
 
@@ -138,9 +172,7 @@ func (c *Client) ListSessions() ([]string, error) {
 		}
 		args = append(args, "list-sessions", "-F", "#{session_name}")
 
-		cmd, cancel := boundedCommand(args...)
-		output, err := cmd.Output()
-		cancel()
+		output, err := c.run(args...)
 		if err != nil {
 			// Socket may not have any sessions, continue to next
 			continue
@@ -180,9 +212,7 @@ func (c *Client) GetPaneContent(sessionName string) (string, error) {
 	}
 	args = append(args, "capture-pane", "-t", sessionName, "-p", "-S", "-500")
 
-	cmd, cancel := boundedCommand(args...)
-	defer cancel()
-	output, err := cmd.Output()
+	output, err := c.run(args...)
 	if err != nil {
 		return "", fmt.Errorf("failed to capture pane for session %s: %w", sessionName, err)
 	}
@@ -204,9 +234,7 @@ func (c *Client) GetCursorPosition(sessionName string) (int, int, error) {
 	}
 	args = append(args, "display-message", "-t", sessionName, "-p", "#{cursor_x},#{cursor_y}")
 
-	cmd, cancel := boundedCommand(args...)
-	defer cancel()
-	output, err := cmd.Output()
+	output, err := c.run(args...)
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to get cursor position for session %s: %w", sessionName, err)
 	}
@@ -241,9 +269,7 @@ func (c *Client) SendKeys(sessionName, keys string) error {
 		args = append(args, "send-keys", "-t", sessionName, keys)
 	}
 
-	cmd, cancel := boundedCommand(args...)
-	defer cancel()
-	if err := cmd.Run(); err != nil {
+	if _, err := c.run(args...); err != nil {
 		return fmt.Errorf("failed to send keys to session %s: %w", sessionName, err)
 	}
 
@@ -262,9 +288,7 @@ func (c *Client) SendLiteral(sessionName, text string) error {
 		args = append(args, "-S", socketPath)
 	}
 	args = append(args, "send-keys", "-t", sessionName, "-l", text)
-	cmd, cancel := boundedCommand(args...)
-	defer cancel()
-	if err := cmd.Run(); err != nil {
+	if _, err := c.run(args...); err != nil {
 		return fmt.Errorf("failed to send literal text to session %s: %w", sessionName, err)
 	}
 	return nil
@@ -282,9 +306,7 @@ func (c *Client) GetPanePID(sessionName string) (int, error) {
 		args = append(args, "-S", socketPath)
 	}
 	args = append(args, "list-panes", "-t", "="+sessionName, "-F", "#{pane_pid}")
-	cmd, cancel := boundedCommand(args...)
-	defer cancel()
-	output, err := cmd.Output()
+	output, err := c.run(args...)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get pane PID for session %s: %w", sessionName, err)
 	}
@@ -307,9 +329,7 @@ func (c *Client) KillSession(sessionName string) error {
 		args = append(args, "-S", socketPath)
 	}
 	args = append(args, "kill-session", "-t", "="+sessionName)
-	cmd, cancel := boundedCommand(args...)
-	defer cancel()
-	if err := cmd.Run(); err != nil {
+	if _, err := c.run(args...); err != nil {
 		return fmt.Errorf("failed to kill session %s: %w", sessionName, err)
 	}
 	return nil

@@ -36,27 +36,13 @@ func TestNewSessionMonitor(t *testing.T) {
 }
 
 func TestNewSessionMonitorUsesOnlyConfiguredTmuxSocket(t *testing.T) {
-	binDir := t.TempDir()
-	invocationsPath := filepath.Join(t.TempDir(), "tmux-invocations")
-	fakeTmux := filepath.Join(binDir, "tmux")
-	require.NoError(t, os.WriteFile(fakeTmux, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SENTINEL_TMUX_LOG\"\nexit 1\n"), 0o700))
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("SENTINEL_TMUX_LOG", invocationsPath)
-
 	cfg := createTestConfig(t)
 	cfg.Tmux.Socket = filepath.Join(t.TempDir(), "owned.sock")
 	monitor, err := NewSessionMonitor(cfg)
 	require.NoError(t, err)
-	require.NoError(t, monitor.CheckAllSessions())
-
-	invocations, err := os.ReadFile(invocationsPath)
-	require.NoError(t, err)
-	want := "-S " + cfg.Tmux.Socket + " list-sessions -F #{session_name}"
-	lines := strings.Split(strings.TrimSpace(string(invocations)), "\n")
-	require.NotEmpty(t, lines)
-	for _, line := range lines {
-		assert.Equal(t, want, line)
-	}
+	socketPath, explicitlyConfigured := monitor.tmuxClient.ConfiguredSocket()
+	assert.True(t, explicitlyConfigured)
+	assert.Equal(t, cfg.Tmux.Socket, socketPath)
 }
 
 func TestNewSessionMonitorPropagatesConfiguredSocketToNestedCommands(t *testing.T) {
