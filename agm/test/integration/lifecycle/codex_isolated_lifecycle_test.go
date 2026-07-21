@@ -4,6 +4,7 @@ package lifecycle_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,6 +20,9 @@ import (
 func TestCodexLifecycleUsesIsolatedSourceEnvironment(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping real-tmux Codex lifecycle in short mode")
+	}
+	if err := exec.Command("/bin/ps", "-axo", "command=").Run(); err != nil {
+		t.Skipf("process-table inspection is unavailable to the fail-closed spawn guard: %v", err)
 	}
 
 	env := helpers.NewIsolatedEnvironment(t)
