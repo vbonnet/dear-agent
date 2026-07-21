@@ -59,8 +59,8 @@ type Metadata struct {
 
 // FindByID resolves a saved AGY conversation by its conversation UUID.
 func FindByID(homeDir, conversationID string) (*Metadata, error) {
-	if conversationID == "" {
-		return nil, fmt.Errorf("conversation ID cannot be empty")
+	if err := ValidateConversationID(conversationID); err != nil {
+		return nil, err
 	}
 	appDir := filepath.Join(homeDir, ".gemini", "antigravity-cli")
 	conversationDBPath := filepath.Join(appDir, "conversations", conversationID+".db")
@@ -91,6 +91,23 @@ func FindByID(homeDir, conversationID string) (*Metadata, error) {
 	meta.WorkspacePath = workspacePath
 	meta.LogPath = logPath
 	return meta, nil
+}
+
+// ValidateConversationID rejects values that are unsafe as both an AGY CLI
+// argument and a provider-owned path component. Current AGY IDs are UUIDs, but
+// the bounded identifier grammar preserves compatibility with future formats.
+func ValidateConversationID(conversationID string) error {
+	if len(conversationID) == 0 || len(conversationID) > 128 {
+		return fmt.Errorf("invalid AGY native conversation ID: expected 1-128 safe identifier characters")
+	}
+	for i := 0; i < len(conversationID); i++ {
+		c := conversationID[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || (i > 0 && (c == '-' || c == '_')) {
+			continue
+		}
+		return fmt.Errorf("invalid AGY native conversation ID: expected an alphanumeric identifier containing only letters, digits, hyphens, or underscores")
+	}
+	return nil
 }
 
 // FindLatestForWorkspace resolves the latest AGY conversation recorded for the

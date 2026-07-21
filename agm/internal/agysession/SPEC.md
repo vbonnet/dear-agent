@@ -10,7 +10,7 @@ conversations with their workspace, transcript, and permission-mode context.
 
 ## EARS Requirements
 
-**AGYS-01** When resolving an AGY conversation by ID, the system shall require a non-empty conversation ID and locate the matching conversation database under the AGY app-data directory.
+**AGYS-01** When resolving an AGY conversation by ID, the system shall require a bounded safe path-component identifier before filesystem lookup and locate the matching conversation database under the AGY app-data directory.
 
 **AGYS-02** When transcript files exist for the conversation, the system shall expose their paths and use their modification time when it is newer than the database file.
 

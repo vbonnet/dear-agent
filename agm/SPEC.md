@@ -99,6 +99,9 @@ For `agy`, AGM treats Antigravity as a real interactive CLI harness:
 - AGM MUST capture and persist the spawned AGY conversation ID after `agm
   session new --harness agy` so later `resume`, `list`, and `archive`
   operations target the same saved conversation
+- AGM adapter creation MUST normalize the workspace to an absolute path,
+  serialize provider identity snapshot and discovery per workspace, and reject
+  unsafe native conversation identifiers before command or transcript-path use
 - AGY sessions with AGM `permission_mode=auto` MUST launch and resume with
   `--dangerously-skip-permissions`; AGY does not expose Claude-style in-pane
   permission-mode cycling, so non-auto modes remain the AGY default behavior

@@ -37,6 +37,8 @@ into listing tests that do not actually run.
 newest-first Antigravity log fallback.
 
 **Key scenarios:**
+- Native conversation IDs are validated as bounded safe path components before
+  saved-session database or transcript lookup.
 - Cache hits never enter provider log discovery.
 - Log discovery inspects at most 257 directory entries, using the 257th only as
   an exhaustion sentinel and processing at most 256; it then orders regular
@@ -252,6 +254,10 @@ creation, and terminal state detection.
   snapshot is unreadable or incomplete, preserves known model provenance on
   cold resume, and omits a model override when an imported conversation's
   native selection is unknown.
+- AGY adapter create normalizes relative workspaces and serializes native
+  identity snapshot-through-discovery per workspace; launch, resume, and
+  history reject unsafe provider identifiers before external mutation or path
+  lookup.
 - AGY adapter create and cold resume require native readiness, roll back tmux
   sessions created by a failed operation, and use exact AGY process and native
   transcript truth for status and history.

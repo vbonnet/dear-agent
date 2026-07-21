@@ -71,7 +71,8 @@ AgyAdapter implementation:
 - Implements Agent interface for Antigravity/AGY
 - Uses tmux-backed interactive sessions
 - Uses the same model-aware launch command policy as the production lifecycle
-- Snapshots provider identity before create, fails closed on unreadable metadata, then captures native AGY conversation IDs for cold resume and history
+- Normalizes workspaces and serializes provider identity snapshot-through-discovery per workspace so concurrent creates cannot exchange native IDs
+- Fails closed on unreadable metadata and rejects unsafe native AGY conversation IDs before launch, resume, or history path use
 - Requires readiness before reporting create or cold-resume success
 - Uses exact AGY process-tree liveness and native brain transcripts
 

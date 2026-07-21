@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
+	"github.com/vbonnet/dear-agent/agm/internal/lock"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
@@ -46,7 +48,8 @@ var (
 		}
 		return metadata.ConversationID, nil
 	}
-	agyDiscoverySleep = time.Sleep
+	agyDiscoverySleep    = time.Sleep
+	agyAcquireCreateLock = acquireAgyCreateLock
 )
 
 const (
@@ -93,9 +96,9 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	if tmuxName == "" {
 		tmuxName = fmt.Sprintf("agy-%s", time.Now().Format("20060102-150405"))
 	}
-	workDir := ctx.WorkingDirectory
-	if workDir == "" {
-		workDir = "."
+	workDir, err := canonicalAgyWorkDir(ctx.WorkingDirectory)
+	if err != nil {
+		return "", err
 	}
 	model := ctx.Model
 	if model == "" {
@@ -110,6 +113,24 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	}
 	permissionMode := ctx.Environment["AGM_PERMISSION_MODE"]
 	conversationID := ctx.Environment["AGY_CONVERSATION_ID"]
+	if conversationID != "" {
+		if err := agysession.ValidateConversationID(conversationID); err != nil {
+			return "", err
+		}
+	}
+
+	// AGY exposes only the latest conversation for a workspace. Serialize the
+	// snapshot, launch, and discovery sequence so concurrent AGM creates cannot
+	// persist one another's provider-native identity.
+	releaseCreateLock, err := agyAcquireCreateLock(workDir)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		if unlockErr := releaseCreateLock(); unlockErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to release AGY workspace lock: %v\n", unlockErr)
+		}
+	}()
 
 	// Check if tmux session already exists
 	exists, err := agyHasSession(tmuxName)
@@ -127,6 +148,11 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 		previousConversationID, err = agyFindConversation(workDir)
 		if err != nil && !errors.Is(err, agysession.ErrConversationNotFound) {
 			return "", fmt.Errorf("failed to snapshot AGY conversation before create: %w", err)
+		}
+		if err == nil {
+			if validateErr := agysession.ValidateConversationID(previousConversationID); validateErr != nil {
+				return "", fmt.Errorf("failed to snapshot AGY conversation before create: %w", validateErr)
+			}
 		}
 	}
 	if err := agyNewSession(tmuxName, workDir); err != nil {
@@ -180,20 +206,48 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	return sessionID, nil
 }
 
+func canonicalAgyWorkDir(workDir string) (string, error) {
+	if workDir == "" {
+		workDir = "."
+	}
+	absolute, err := filepath.Abs(workDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve AGY working directory: %w", err)
+	}
+	return filepath.Clean(absolute), nil
+}
+
+func acquireAgyCreateLock(workDir string) (func() error, error) {
+	stateDir := os.Getenv("AGM_STATE_DIR")
+	if stateDir == "" {
+		stateDir = fmt.Sprintf("/tmp/agm-%d", os.Getuid())
+	}
+	digest := sha256.Sum256([]byte(workDir))
+	fileLock, err := lock.New(filepath.Join(stateDir, fmt.Sprintf("agy-create-%x.lock", digest[:16])))
+	if err != nil {
+		return nil, fmt.Errorf("create AGY workspace lock: %w", err)
+	}
+	if err := fileLock.Lock(); err != nil {
+		_ = fileLock.Unlock()
+		return nil, fmt.Errorf("acquire AGY workspace lock: %w", err)
+	}
+	return fileLock.Unlock, nil
+}
+
 func discoverAgyConversationID(workDir, previousConversationID string) (string, error) {
 	var lastErr error
 	for attempt := 1; attempt <= agyConversationDiscoveryAttempts; attempt++ {
 		conversationID, err := agyFindConversation(workDir)
-		if err == nil && conversationID != "" && conversationID != previousConversationID {
-			return conversationID, nil
-		}
-		switch {
-		case err != nil:
+		if err == nil {
+			if validateErr := agysession.ValidateConversationID(conversationID); validateErr != nil {
+				lastErr = validateErr
+			} else if conversationID != previousConversationID {
+				return conversationID, nil
+			} else {
+				lastErr = fmt.Errorf("provider still reports pre-create conversation %q", previousConversationID)
+			}
+		} else {
 			lastErr = err
-		case conversationID == "":
-			lastErr = fmt.Errorf("provider returned an empty conversation ID")
-		default:
-			lastErr = fmt.Errorf("provider still reports pre-create conversation %q", previousConversationID)
 		}
 		if attempt < agyConversationDiscoveryAttempts {
 			agyDiscoverySleep(agyConversationDiscoveryDelay)
@@ -231,6 +285,9 @@ func (a *AgyAdapter) ResumeSession(sessionID SessionID) error {
 	if sendCommands {
 		if metadata.UUID == "" {
 			return fmt.Errorf("AGY session %q has no native conversation ID; capture or reassociate it before cold resume", sessionID)
+		}
+		if err := agysession.ValidateConversationID(metadata.UUID); err != nil {
+			return err
 		}
 		resolvedModel := ""
 		if metadata.Model != "" {
@@ -357,6 +414,9 @@ func (a *AgyAdapter) GetHistory(sessionID SessionID) ([]Message, error) {
 
 	if metadata.UUID == "" {
 		return nil, fmt.Errorf("AGY session %q has no native conversation ID; history cannot be resolved", sessionID)
+	}
+	if err := agysession.ValidateConversationID(metadata.UUID); err != nil {
+		return nil, err
 	}
 	logsDir := filepath.Join(homeDir, ".gemini", "antigravity-cli", "brain", metadata.UUID, ".system_generated", "logs")
 	historyPath := filepath.Join(logsDir, "transcript.jsonl")

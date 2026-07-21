@@ -35,6 +35,13 @@ func TestFindByID_UsesLastConversationsCache(t *testing.T) {
 	}
 }
 
+func TestFindByID_RejectsUnsafeConversationIDBeforePathLookup(t *testing.T) {
+	_, err := FindByID(t.TempDir(), "../../escape; touch /tmp/no")
+	if err == nil || !strings.Contains(err.Error(), "invalid AGY native conversation ID") {
+		t.Fatalf("FindByID error = %v, want unsafe native ID rejection", err)
+	}
+}
+
 func TestFindByID_CacheHitDoesNotReadInvalidLogDirectory(t *testing.T) {
 	homeDir := t.TempDir()
 	appDir := filepath.Join(homeDir, ".gemini", "antigravity-cli")

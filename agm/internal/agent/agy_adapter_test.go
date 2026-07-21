@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,6 +26,10 @@ func preserveAgyAdapterSeams(t *testing.T) {
 	origKillSession := agyKillSession
 	origFindConversation := agyFindConversation
 	origDiscoverySleep := agyDiscoverySleep
+	origAcquireCreateLock := agyAcquireCreateLock
+	agyAcquireCreateLock = func(string) (func() error, error) {
+		return func() error { return nil }, nil
+	}
 	t.Cleanup(func() {
 		agyHasSession = origHasSession
 		agyNewSession = origNewSession
@@ -36,6 +41,7 @@ func preserveAgyAdapterSeams(t *testing.T) {
 		agyKillSession = origKillSession
 		agyFindConversation = origFindConversation
 		agyDiscoverySleep = origDiscoverySleep
+		agyAcquireCreateLock = origAcquireCreateLock
 	})
 }
 
@@ -230,6 +236,147 @@ func TestAgyCreateSessionCapturesNativeConversationIdentity(t *testing.T) {
 	}
 }
 
+func TestAgyCreateSessionNormalizesWorkingDirectoryForLaunchAndDiscovery(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	currentWorkDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	relativeWorkDir, err := filepath.Rel(currentWorkDir, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantWorkDir, err := filepath.Abs(relativeWorkDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	agyHasSession = func(string) (bool, error) { return false, nil }
+	launchedWorkDir := ""
+	agyNewSession = func(_ string, workDir string) error {
+		launchedWorkDir = workDir
+		return nil
+	}
+	command := ""
+	agySendCommand = func(_ string, value string) error { command = value; return nil }
+	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return nil }
+	discoveredWorkDirs := []string{}
+	agyFindConversation = func(workDir string) (string, error) {
+		discoveredWorkDirs = append(discoveredWorkDirs, workDir)
+		if len(discoveredWorkDirs) == 1 {
+			return "", agysession.ErrConversationNotFound
+		}
+		return "provider-conversation-id", nil
+	}
+
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	sessionID, err := (&AgyAdapter{sessionStore: store}).CreateSession(SessionContext{
+		Name: "agy-relative", WorkingDirectory: relativeWorkDir, Model: "3.5-flash-low",
+	})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	metadata, err := store.Get(sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if launchedWorkDir != wantWorkDir || metadata.WorkingDir != wantWorkDir {
+		t.Fatalf("launch/stored workdir = %q/%q, want %q", launchedWorkDir, metadata.WorkingDir, wantWorkDir)
+	}
+	if len(discoveredWorkDirs) != 2 || discoveredWorkDirs[0] != wantWorkDir || discoveredWorkDirs[1] != wantWorkDir {
+		t.Fatalf("discovery workdirs = %v, want normalized %q", discoveredWorkDirs, wantWorkDir)
+	}
+	if !strings.Contains(command, "cd '"+wantWorkDir+"' && agy") {
+		t.Fatalf("launch command %q does not use normalized workdir %q", command, wantWorkDir)
+	}
+}
+
+func TestAgyCreateSessionSerializesWorkspaceIdentityDiscovery(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	agyAcquireCreateLock = acquireAgyCreateLock
+
+	var providerMu sync.Mutex
+	providerConversationID := "pre-existing-conversation-id"
+	agyFindConversation = func(string) (string, error) {
+		providerMu.Lock()
+		defer providerMu.Unlock()
+		return providerConversationID, nil
+	}
+	secondReachedLifecycle := make(chan struct{})
+	var secondReachedOnce sync.Once
+	agyHasSession = func(name string) (bool, error) {
+		if name == "agy-second" {
+			secondReachedOnce.Do(func() { close(secondReachedLifecycle) })
+		}
+		return false, nil
+	}
+	agyNewSession = func(string, string) error { return nil }
+	agySendCommand = func(string, string) error { return nil }
+	firstWaiting := make(chan struct{})
+	allowFirst := make(chan struct{})
+	agyWaitForPrompt = func(_ context.Context, name string, _ time.Duration) error {
+		if name == "agy-first" {
+			close(firstWaiting)
+			<-allowFirst
+			providerMu.Lock()
+			providerConversationID = "first-conversation-id"
+			providerMu.Unlock()
+			return nil
+		}
+		providerMu.Lock()
+		providerConversationID = "second-conversation-id"
+		providerMu.Unlock()
+		return nil
+	}
+
+	type createResult struct {
+		id    SessionID
+		store *MockSessionStore
+		err   error
+	}
+	create := func(name string, result chan<- createResult) {
+		store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+		id, err := (&AgyAdapter{sessionStore: store}).CreateSession(SessionContext{
+			Name: name, WorkingDirectory: "/shared/work", Model: "3.5-flash-low",
+		})
+		result <- createResult{id: id, store: store, err: err}
+	}
+	firstResult := make(chan createResult, 1)
+	secondResult := make(chan createResult, 1)
+	go create("agy-first", firstResult)
+	<-firstWaiting
+	secondStarted := make(chan struct{})
+	go func() {
+		close(secondStarted)
+		create("agy-second", secondResult)
+	}()
+	<-secondStarted
+	select {
+	case <-secondReachedLifecycle:
+		t.Fatal("second create entered the workspace lifecycle while the first identity discovery was active")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(allowFirst)
+
+	first := <-firstResult
+	second := <-secondResult
+	if first.err != nil || second.err != nil {
+		t.Fatalf("serialized creates returned errors: first=%v second=%v", first.err, second.err)
+	}
+	firstMetadata, err := first.store.Get(first.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondMetadata, err := second.store.Get(second.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstMetadata.UUID != "first-conversation-id" || secondMetadata.UUID != "second-conversation-id" {
+		t.Fatalf("serialized native IDs = %q/%q", firstMetadata.UUID, secondMetadata.UUID)
+	}
+}
+
 func TestAgyCreateSessionRollsBackWhenNativeIdentityCannotBeCaptured(t *testing.T) {
 	preserveAgyAdapterSeams(t)
 	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
@@ -336,6 +483,17 @@ func TestAgyCreateSessionRejectsExistingTmuxAndUnsafeModelBeforeMutation(t *test
 	}
 	if created || sent {
 		t.Fatalf("rejected create mutated tmux: created=%v sent=%v", created, sent)
+	}
+
+	_, err = adapter.CreateSession(SessionContext{
+		Name: "unsafe-native-id", WorkingDirectory: "/work", Model: "3.5-flash-low",
+		Environment: map[string]string{"AGY_CONVERSATION_ID": "../../escape; touch /tmp/no"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid AGY native conversation ID") {
+		t.Fatalf("unsafe native ID error = %v", err)
+	}
+	if created || sent {
+		t.Fatalf("unsafe native ID mutated tmux: created=%v sent=%v", created, sent)
 	}
 
 	wantErr := errors.New("fixture provider metadata is corrupt")
@@ -462,6 +620,30 @@ func TestAgyResumeSessionDoesNotInventNativeIdentity(t *testing.T) {
 	}
 	if created || sent {
 		t.Fatalf("missing native ID mutated tmux: created=%v sent=%v", created, sent)
+	}
+}
+
+func TestAgyResumeSessionRejectsUnsafeNativeIdentityBeforeMutation(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	t.Setenv("TMUX", "fixture")
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	sessionID := SessionID("unsafe-native-id")
+	if err := store.Set(sessionID, &SessionMetadata{
+		TmuxName: "agy-unsafe", WorkingDir: "/work", UUID: "../../escape; touch /tmp/no",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	agyHasSession = func(string) (bool, error) { return false, nil }
+	created, sent := false, false
+	agyNewSession = func(string, string) error { created = true; return nil }
+	agySendCommand = func(string, string) error { sent = true; return nil }
+
+	err := (&AgyAdapter{sessionStore: store}).ResumeSession(sessionID)
+	if err == nil || !strings.Contains(err.Error(), "invalid AGY native conversation ID") {
+		t.Fatalf("ResumeSession error = %v, want unsafe native ID rejection", err)
+	}
+	if created || sent {
+		t.Fatalf("unsafe native ID mutated tmux: created=%v sent=%v", created, sent)
 	}
 }
 
@@ -639,6 +821,21 @@ func TestAgyGetHistoryRequiresNativeIdentity(t *testing.T) {
 	_, err := (&AgyAdapter{sessionStore: store}).GetHistory(sessionID)
 	if err == nil || !strings.Contains(err.Error(), "no native conversation ID") {
 		t.Fatalf("GetHistory error = %v, want missing native ID", err)
+	}
+}
+
+func TestAgyGetHistoryRejectsUnsafeNativeIdentity(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	sessionID := SessionID("unsafe-history")
+	if err := store.Set(sessionID, &SessionMetadata{UUID: "../../escape"}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := (&AgyAdapter{sessionStore: store}).GetHistory(sessionID)
+	if err == nil || !strings.Contains(err.Error(), "invalid AGY native conversation ID") {
+		t.Fatalf("GetHistory error = %v, want unsafe native ID rejection", err)
 	}
 }
 
