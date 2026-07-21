@@ -3,9 +3,165 @@ package tmux
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestWaitForAgyPromptRejectsFirstRunOnboardingWithoutInput(t *testing.T) {
+	tests := map[string]string{
+		"theme":         "Welcome to Antigravity CLI!\nChoose your color scheme:\n> terminal",
+		"terms":         "Terms of Service & Data Use\n[ ] Yes, I agree to help improve Antigravity CLI\nPrevious  Done",
+		"wrapped terms": "Terms of Service & Data\nUse\n[ ] Yes, I agree to help improve Antigravity\nCLI\nPrevious  Done",
+	}
+	for name, content := range tests {
+		t.Run(name, func(t *testing.T) {
+			captures := 0
+			sends := 0
+			runtime := agyPromptRuntime{
+				capture: func(context.Context, string) ([]byte, error) {
+					captures++
+					return []byte(content), nil
+				},
+				sendKeys: func(string, string) error {
+					sends++
+					return nil
+				},
+				sleep: func(context.Context, time.Duration) {},
+			}
+
+			err := waitForAgyPromptWithRuntime(t.Context(), "agy-onboarding", time.Second, runtime)
+			if !errors.Is(err, ErrAgyOnboardingRequired) {
+				t.Fatalf("error = %v, want ErrAgyOnboardingRequired", err)
+			}
+			if !strings.Contains(err.Error(), "will not accept legal or data-use choices automatically") {
+				t.Fatalf("error lacks non-consent guidance: %v", err)
+			}
+			if captures != 1 || sends != 0 {
+				t.Fatalf("onboarding I/O = %d capture(s), %d send(s); want one capture and no input", captures, sends)
+			}
+		})
+	}
+}
+
+func TestAgyOnboardingDetectionRequiresActiveScreen(t *testing.T) {
+	tests := map[string]struct {
+		content string
+		want    bool
+	}{
+		"active theme": {
+			content: "Welcome to Antigravity CLI!\nChoose your color scheme:\n> terminal",
+			want:    true,
+		},
+		"active terms": {
+			content: "Terms of Service & Data Use\n[x] Yes, I agree to help improve Antigravity CLI\nPrevious  Done",
+			want:    true,
+		},
+		"active wrapped terms": {
+			content: "Terms of Service & Data\nUse\n[x] Yes, I agree to help improve Antigravity\nCLI\nPrevious  Done",
+			want:    true,
+		},
+		"stale theme before composer": {
+			content: "Welcome to Antigravity CLI!\nChoose your color scheme:\n> terminal\nsetup complete\n>",
+		},
+		"stale terms before composer": {
+			content: "Terms of Service & Data Use\n[x] Yes, I agree to help improve Antigravity CLI\nPrevious  Done\nsetup complete\n>",
+		},
+		"conversational marker": {
+			content: "I can explain Terms of Service & Data Use.\n>",
+		},
+		"incomplete active marker": {
+			content: "Terms of Service & Data Use",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := containsAgyOnboardingPrompt(test.content); got != test.want {
+				t.Fatalf("containsAgyOnboardingPrompt() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestWaitForAgyPromptAfterInputIgnoresQuotedOnboarding(t *testing.T) {
+	captures := 0
+	sends := 0
+	runtime := agyPromptRuntime{
+		capture: func(context.Context, string) ([]byte, error) {
+			captures++
+			return []byte("previous composer\n>\n> you: quote this screen\nWelcome to Antigravity CLI!\nChoose your color scheme:\n> terminal\nresponse complete\n>"), nil
+		},
+		sendKeys: func(string, string) error {
+			sends++
+			return nil
+		},
+		sleep: func(context.Context, time.Duration) {},
+	}
+
+	if err := waitForAgyPromptAfterInputWithRuntime(t.Context(), "agy-transcript", time.Second, runtime); err != nil {
+		t.Fatalf("post-input wait rejected quoted onboarding text: %v", err)
+	}
+	if captures != 1 || sends != 0 {
+		t.Fatalf("post-input I/O = %d capture(s), %d send(s); want one capture and no input", captures, sends)
+	}
+}
+
+func TestWaitForAgyPromptOnResumeIgnoresTransientQuotedOnboarding(t *testing.T) {
+	outputs := [][]byte{
+		[]byte("previous composer\n>\n> you: quote this screen\nWelcome to Antigravity CLI!\nChoose your color scheme:\n> terminal"),
+		[]byte("previous composer\n>\n> you: quote this screen\nWelcome to Antigravity CLI!\nChoose your color scheme:\n> terminal\nresume complete\n>"),
+	}
+	captureIndex := 0
+	captures := 0
+	sends := 0
+	runtime := agyPromptRuntime{
+		capture: func(context.Context, string) ([]byte, error) {
+			output := outputs[captureIndex]
+			captures++
+			if captureIndex < len(outputs)-1 {
+				captureIndex++
+			}
+			return output, nil
+		},
+		sendKeys: func(string, string) error {
+			sends++
+			return nil
+		},
+		sleep: func(context.Context, time.Duration) {},
+	}
+
+	if err := waitForAgyPromptOnResumeWithRuntime(t.Context(), "agy-resume-transcript", time.Second, runtime); err != nil {
+		t.Fatalf("resume wait rejected transient quoted onboarding text: %v", err)
+	}
+	if captures != len(outputs) || sends != 0 {
+		t.Fatalf("resume transcript I/O = %d capture(s), %d send(s); want %d captures and no input", captures, sends, len(outputs))
+	}
+}
+
+func TestWaitForAgyPromptOnResumeConfirmsPersistentOnboardingWithoutInput(t *testing.T) {
+	captures := 0
+	sends := 0
+	runtime := agyPromptRuntime{
+		capture: func(context.Context, string) ([]byte, error) {
+			captures++
+			return []byte("Welcome to Antigravity CLI!\nChoose your color scheme:\n> terminal"), nil
+		},
+		sendKeys: func(string, string) error {
+			sends++
+			return nil
+		},
+		sleep: func(context.Context, time.Duration) {},
+	}
+
+	err := waitForAgyPromptOnResumeWithRuntime(t.Context(), "agy-resume-onboarding", time.Second, runtime)
+	if !errors.Is(err, ErrAgyOnboardingRequired) {
+		t.Fatalf("resume wait error = %v, want ErrAgyOnboardingRequired", err)
+	}
+	if captures != agyResumeOnboardingConfirmationChecks || sends != 0 {
+		t.Fatalf("persistent onboarding I/O = %d capture(s), %d send(s); want %d captures and no input", captures, sends, agyResumeOnboardingConfirmationChecks)
+	}
+}
 
 func TestAgySurveyOverridesReadyPrompt(t *testing.T) {
 	content := "Task complete\n>\nHow's the CLI experience so far? [1] Good [2] Fine [3] Bad [0] Skip"
