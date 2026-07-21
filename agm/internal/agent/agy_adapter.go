@@ -27,17 +27,18 @@ type AgyAdapter struct {
 }
 
 var (
-	agyHasSession        = tmux.HasSession
-	agyNewSession        = tmux.NewSession
-	agySendCommand       = tmux.SendCommand
-	agyWaitForPrompt     = tmux.WaitForAgyPrompt
-	agyCheckProcess      = tmux.CheckProcessInPaneTree
-	agyCheckHarness      = tmux.CheckPaneLiveness
-	agyIsIdle            = tmux.IsAgyIdle
-	agyAttachSession     = tmux.AttachSession
-	agyKillSession       = tmux.KillSessionWithError
-	agyIdentityTracker   = agysession.NewCreateIdentityTracker
-	agyAcquireCreateLock = func(workDir string) (func() error, error) {
+	agyHasSession          = tmux.HasSession
+	agyNewSession          = tmux.NewSession
+	agySendCommand         = tmux.SendCommand
+	agyWaitForPrompt       = tmux.WaitForAgyPrompt
+	agyWaitForResumePrompt = tmux.WaitForAgyPromptOnResume
+	agyCheckProcess        = tmux.CheckProcessInPaneTree
+	agyCheckHarness        = tmux.CheckPaneLiveness
+	agyIsIdle              = tmux.IsAgyIdle
+	agyAttachSession       = tmux.AttachSession
+	agyKillSession         = tmux.KillSessionWithError
+	agyIdentityTracker     = agysession.NewCreateIdentityTracker
+	agyAcquireCreateLock   = func(workDir string) (func() error, error) {
 		return agysession.AcquireWorkspaceCreateLock(context.Background(), workDir)
 	}
 )
@@ -288,7 +289,7 @@ func resumeAgyAdapterProcess(sessionID SessionID, metadata *SessionMetadata) err
 		return primaryErr
 	}
 
-	if err := agyWaitForPrompt(context.Background(), metadata.TmuxName, agyResumeReadinessTimeout); err != nil {
+	if err := agyWaitForResumePrompt(context.Background(), metadata.TmuxName, agyResumeReadinessTimeout); err != nil {
 		primaryErr := fmt.Errorf("AGY did not become ready after resume: %w", err)
 		if created {
 			return rollbackAgyAdapterSession(metadata.TmuxName, primaryErr)

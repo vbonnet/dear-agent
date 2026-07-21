@@ -1322,7 +1322,7 @@ func waitForResumedClaude(ctx context.Context, health *HealthStatus) error {
 }
 
 func waitForResumedAgy(ctx context.Context, health *HealthStatus) error {
-	return waitForResumedAgyWithWait(ctx, health, tmux.WaitForAgyPrompt)
+	return waitForResumedAgyWithWait(ctx, health, tmux.WaitForAgyPromptOnResume)
 }
 
 func waitForResumedAgyWithWait(ctx context.Context, health *HealthStatus, wait func(context.Context, string, time.Duration) error) error {
@@ -1341,6 +1341,9 @@ func waitForResumedAgyWithWait(ctx context.Context, health *HealthStatus, wait f
 	if promptWaitErr != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if errors.Is(promptWaitErr, tmux.ErrAgyOnboardingRequired) {
+			return promptWaitErr
 		}
 		ui.PrintWarning("AGY conversation is taking longer than expected to load")
 		fmt.Println("  Attaching now - AGY should appear shortly")

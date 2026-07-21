@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -27,6 +28,24 @@ func TestWaitForResumedAgyUsesCallerContext(t *testing.T) {
 	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("waitForResumedAgyWithWait error = %v, want context.Canceled", err)
+	}
+}
+
+func TestWaitForResumedAgyPropagatesOnboardingRequired(t *testing.T) {
+	err := waitForResumedAgyWithWait(t.Context(), &HealthStatus{TmuxSessionName: "agy-resume"}, func(context.Context, string, time.Duration) error {
+		return fmt.Errorf("onboarding: %w", tmux.ErrAgyOnboardingRequired)
+	})
+	if !errors.Is(err, tmux.ErrAgyOnboardingRequired) {
+		t.Fatalf("waitForResumedAgyWithWait error = %v, want ErrAgyOnboardingRequired", err)
+	}
+}
+
+func TestWaitForResumedAgyToleratesSlowStartup(t *testing.T) {
+	err := waitForResumedAgyWithWait(t.Context(), &HealthStatus{TmuxSessionName: "agy-resume"}, func(context.Context, string, time.Duration) error {
+		return errors.New("readiness timeout")
+	})
+	if err != nil {
+		t.Fatalf("waitForResumedAgyWithWait error = %v, want slow startup to remain non-fatal", err)
 	}
 }
 
@@ -222,15 +241,17 @@ func TestRunAgyPostCreatePropagatesPostPromptReadinessFailure(t *testing.T) {
 	prompt, promptFile = "startup prompt", ""
 	t.Cleanup(func() { prompt, promptFile = originalPrompt, originalPromptFile })
 	wantErr := errors.New("AGY response readiness unavailable")
-	waits := 0
+	startupWaits := 0
+	postInputWaits := 0
 	retried := false
 
 	err := runAgyPostCreateWithRuntime(t.Context(), "agy-create", agyPostCreateRuntime{
 		wait: func(context.Context, string, time.Duration) error {
-			waits++
-			if waits == 1 {
-				return nil
-			}
+			startupWaits++
+			return nil
+		},
+		waitAfterInput: func(context.Context, string, time.Duration) error {
+			postInputWaits++
 			return wantErr
 		},
 		associate: func(string) {},
@@ -245,6 +266,9 @@ func TestRunAgyPostCreatePropagatesPostPromptReadinessFailure(t *testing.T) {
 	}
 	if retried {
 		t.Fatal("metadata retry ran after post-prompt readiness failure")
+	}
+	if startupWaits != 1 || postInputWaits != 1 {
+		t.Fatalf("readiness waits = startup %d/post-input %d, want 1/1", startupWaits, postInputWaits)
 	}
 }
 
