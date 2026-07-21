@@ -20,6 +20,7 @@ func preserveAgyAdapterSeams(t *testing.T) {
 	origCheckProcess := agyCheckProcess
 	origIsIdle := agyIsIdle
 	origAttachSession := agyAttachSession
+	origKillSession := agyKillSession
 	t.Cleanup(func() {
 		agyHasSession = origHasSession
 		agyNewSession = origNewSession
@@ -28,6 +29,7 @@ func preserveAgyAdapterSeams(t *testing.T) {
 		agyCheckProcess = origCheckProcess
 		agyIsIdle = origIsIdle
 		agyAttachSession = origAttachSession
+		agyKillSession = origKillSession
 	})
 }
 
@@ -185,6 +187,31 @@ func TestAgyCreateSessionUsesCanonicalModelAwareCommand(t *testing.T) {
 	}
 	if len(metadata.AuthorizedDirs) != 1 || metadata.AuthorizedDirs[0] != "/extra dir" {
 		t.Fatalf("stored authorized dirs = %v", metadata.AuthorizedDirs)
+	}
+}
+
+func TestAgyCreateSessionPropagatesReadinessFailureAndRollsBack(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	agyHasSession = func(string) (bool, error) { return false, nil }
+	agyNewSession = func(string, string) error { return nil }
+	agySendCommand = func(string, string) error { return nil }
+	wantErr := errors.New("fixture readiness failed")
+	agyWaitForPrompt = func(string, time.Duration) error { return wantErr }
+	killed := ""
+	agyKillSession = func(name string) { killed = name }
+
+	sessionID, err := (&AgyAdapter{sessionStore: store}).CreateSession(SessionContext{
+		Name: "agy-create", WorkingDirectory: "/work", Model: "3.5-flash-low",
+	})
+	if !errors.Is(err, wantErr) || sessionID != "" {
+		t.Fatalf("CreateSession = %q, %v; want empty ID and readiness failure", sessionID, err)
+	}
+	if killed != "agy-create" {
+		t.Fatalf("readiness rollback killed %q, want agy-create", killed)
+	}
+	if sessions, listErr := store.List(); listErr != nil || len(sessions) != 0 {
+		t.Fatalf("failed create persisted sessions = %v, %v", sessions, listErr)
 	}
 }
 
@@ -391,6 +418,8 @@ func TestAgyResumeSessionPropagatesReadinessFailureBeforeAttach(t *testing.T) {
 	agyWaitForPrompt = func(string, time.Duration) error { return wantErr }
 	attached := false
 	agyAttachSession = func(string) error { attached = true; return nil }
+	killed := ""
+	agyKillSession = func(name string) { killed = name }
 
 	err := (&AgyAdapter{sessionStore: store}).ResumeSession(sessionID)
 	if !errors.Is(err, wantErr) {
@@ -398,6 +427,9 @@ func TestAgyResumeSessionPropagatesReadinessFailureBeforeAttach(t *testing.T) {
 	}
 	if attached {
 		t.Fatal("readiness failure continued into tmux attach")
+	}
+	if killed != "agy-resume" {
+		t.Fatalf("readiness rollback killed %q, want agy-resume", killed)
 	}
 }
 
@@ -427,6 +459,7 @@ func TestAgyGetSessionStatusRequiresAgyProcess(t *testing.T) {
 func TestAgyGetHistoryReadsNativeTranscript(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	conversationID := "native-conversation-id"
 	logsDir := filepath.Join(home, ".gemini", "antigravity-cli", "brain", conversationID, ".system_generated", "logs")
 	if err := os.MkdirAll(logsDir, 0o755); err != nil {
@@ -462,6 +495,7 @@ func TestAgyGetHistoryReadsNativeTranscript(t *testing.T) {
 func TestAgyGetHistoryFallsBackToFullTranscript(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	conversationID := "native-full-id"
 	logsDir := filepath.Join(home, ".gemini", "antigravity-cli", "brain", conversationID, ".system_generated", "logs")
 	if err := os.MkdirAll(logsDir, 0o755); err != nil {
@@ -483,7 +517,9 @@ func TestAgyGetHistoryFallsBackToFullTranscript(t *testing.T) {
 }
 
 func TestAgyGetHistoryRequiresNativeIdentity(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
 	sessionID := SessionID("adapter-session")
 	if err := store.Set(sessionID, &SessionMetadata{}); err != nil {

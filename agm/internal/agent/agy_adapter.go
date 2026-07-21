@@ -32,6 +32,7 @@ var (
 	agyCheckProcess  = tmux.CheckProcessInPaneTree
 	agyIsIdle        = tmux.IsAgyIdle
 	agyAttachSession = tmux.AttachSession
+	agyKillSession   = tmux.KillSession
 )
 
 // NewAgyAdapter creates a new Agy adapter instance.
@@ -110,17 +111,14 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 
 	// Start Agy in the tmux session
 	if err := agySendCommand(tmuxName, agyCmd); err != nil {
-		// Clean up tmux session on error if we created it
-		if cleanupErr := agySendCommand(tmuxName, "exit\r"); cleanupErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to clean up Agy tmux session: %v\n", cleanupErr)
-		}
+		agyKillSession(tmuxName)
 		return "", fmt.Errorf("failed to start Agy in tmux session: %w", err)
 	}
 
 	// Wait for Agy to be ready
 	if err := agyWaitForPrompt(context.Background(), tmuxName, 30*time.Second); err != nil {
-		// Non-fatal warning
-		fmt.Fprintf(os.Stderr, "Warning: Agy prompt not detected (still initializing)\n")
+		agyKillSession(tmuxName)
+		return "", fmt.Errorf("AGY did not become ready after create: %w", err)
 	}
 
 	// Store session metadata
@@ -137,10 +135,7 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	}
 
 	if err := a.sessionStore.Set(sessionID, metadata); err != nil {
-		// Clean up tmux session on error
-		if cleanupErr := agySendCommand(tmuxName, "exit\r"); cleanupErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to clean up Agy tmux session: %v\n", cleanupErr)
-		}
+		agyKillSession(tmuxName)
 		return "", fmt.Errorf("failed to store session metadata: %w", err)
 	}
 
@@ -185,10 +180,12 @@ func (a *AgyAdapter) ResumeSession(sessionID SessionID) error {
 				return modelErr
 			}
 		}
+		created := false
 		if !exists {
 			if err := agyNewSession(metadata.TmuxName, metadata.WorkingDir); err != nil {
 				return fmt.Errorf("failed to create tmux session: %w", err)
 			}
+			created = true
 		}
 		fullCmd := launchparity.BuildAgyCommand(launchparity.AgyCommandSpec{
 			WorkDir:        metadata.WorkingDir,
@@ -199,10 +196,16 @@ func (a *AgyAdapter) ResumeSession(sessionID SessionID) error {
 		}).Command
 
 		if err := agySendCommand(metadata.TmuxName, fullCmd); err != nil {
+			if created {
+				agyKillSession(metadata.TmuxName)
+			}
 			return fmt.Errorf("failed to send resume command: %w", err)
 		}
 
 		if err := agyWaitForPrompt(context.Background(), metadata.TmuxName, 5*time.Second); err != nil {
+			if created {
+				agyKillSession(metadata.TmuxName)
+			}
 			return fmt.Errorf("AGY did not become ready after resume: %w", err)
 		}
 	}
