@@ -625,6 +625,12 @@ func scriptRedirectDestination(target string, descriptors map[int]scriptOutputDe
 	case "/dev/stderr", "/dev/stdout":
 		return scriptOutputDestination{visible: true}
 	}
+	// A shell-expanded target cannot be proven file-only without executing the
+	// script. It may resolve to /dev/stdout, /dev/stderr, or a visible descriptor,
+	// so the hard policy gate must classify it conservatively as visible.
+	if strings.ContainsAny(target, "$`") {
+		return scriptOutputDestination{visible: true}
+	}
 	if descriptor, ok := strings.CutPrefix(target, "&"); ok {
 		number, err := strconv.Atoi(descriptor)
 		if err == nil {
@@ -645,7 +651,10 @@ func scriptCommandPrintsPath(command, path string, descriptors map[int]scriptOut
 		return false
 	}
 	fields := stripCommandPrefixes(parseShellWords(command))
-	if len(fields) == 0 || !slices.Contains([]string{"cat", "jq"}, fields[0]) {
+	if len(fields) == 0 || !slices.Contains([]string{
+		"awk", "base64", "cat", "cut", "grep", "head", "jq", "less", "more",
+		"nl", "od", "rg", "sed", "sort", "strings", "tail", "uniq", "wc", "xxd",
+	}, executableBase(fields[0])) {
 		return false
 	}
 	for _, field := range fields[1:] {

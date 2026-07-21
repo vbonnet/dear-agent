@@ -366,6 +366,14 @@ func TestScriptHeredocVisibilityPreservesQuotesDescriptorsAndFileModes(t *testin
 		"gh pr close 456",
 		"APPEND_SECOND",
 		"cat appended-fixture",
+		"out=/dev/stderr",
+		"cat >\"$out\" <<'DYNAMIC_VISIBLE'",
+		"bd ready",
+		"DYNAMIC_VISIBLE",
+		"cat >head-fixture <<'HEAD_REPLAY'",
+		"gh pr reopen 789",
+		"HEAD_REPLAY",
+		"head -n 1 head-fixture",
 	}, "\n"))
 
 	var text []string
@@ -377,6 +385,8 @@ func TestScriptHeredocVisibilityPreservesQuotesDescriptorsAndFileModes(t *testin
 		"gh pr merge 123",
 		"git push origin append-first",
 		"gh pr close 456",
+		"bd ready",
+		"gh pr reopen 789",
 	} {
 		if !slices.Contains(text, visible) {
 			t.Errorf("visible heredoc line %q was hidden: %v", visible, text)
