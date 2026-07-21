@@ -53,13 +53,6 @@ func PromptSubmissionMayHaveOccurred(err error) bool {
 	return errors.As(err, &uncertain)
 }
 
-func classifyPromptSubmissionError(err error) error {
-	if err == nil || errors.Is(err, ErrPasteNotSubmitted) {
-		return err
-	}
-	return MarkPromptSubmissionUncertain(err)
-}
-
 // enterVerifyConfig controls the submit-verify backoff loop.
 type enterVerifyConfig struct {
 	initialSettle time.Duration   // wait before the first Enter (let the paste land)
@@ -157,17 +150,7 @@ func sendEnterReliable(socketPath, normalizedName string) error {
 			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		}
 		cmd.WaitDelay = time.Second
-		if err := cmd.Run(); err != nil {
-			if ctx.Err() == context.DeadlineExceeded {
-				return &TimeoutError{
-					Problem:  fmt.Sprintf("tmux send-keys (Enter) timed out after %v (server may be hung)", timeout),
-					Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  agm session list         # Verify recovery",
-					Duration: timeout,
-				}
-			}
-			return err
-		}
-		return nil
+		return runPromptEnterCommand(ctx, cmd, timeout)
 	}
 	// capture reuses the exported, policy-compliant pane capture (isolated process
 	// group + bounded WaitDelay per CapturePanePolicy).
@@ -175,6 +158,38 @@ func sendEnterReliable(socketPath, normalizedName string) error {
 		return CapturePaneOutput(normalizedName, 5)
 	}
 	return verifyingEnter(sendEnter, capture, defaultEnterVerifyConfig())
+}
+
+// runPromptEnterCommand distinguishes definite failures from a lost reply
+// after the tmux client process started. Failure to start and an ordinary
+// non-zero exit are explicit rejection before submission. A timeout,
+// cancellation, signal, or other indeterminate wait failure may occur after
+// the tmux server accepted the Enter and therefore crosses the irreversible
+// prompt-submission boundary.
+func runPromptEnterCommand(ctx context.Context, cmd *exec.Cmd, timeout time.Duration) error {
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	waitErr := cmd.Wait()
+	if waitErr == nil {
+		return nil
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		cause := errors.Join(waitErr, ctxErr)
+		if errors.Is(ctxErr, context.DeadlineExceeded) {
+			cause = &TimeoutError{
+				Problem:  fmt.Sprintf("tmux send-keys (Enter) timed out after %v (server may be hung)", timeout),
+				Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  agm session list         # Verify recovery",
+				Duration: timeout,
+			}
+		}
+		return MarkPromptSubmissionUncertain(cause)
+	}
+	var exitErr *exec.ExitError
+	if errors.As(waitErr, &exitErr) && exitErr.ExitCode() >= 0 {
+		return waitErr
+	}
+	return MarkPromptSubmissionUncertain(waitErr)
 }
 
 // SendEnterReliable is the exported entry point for code outside the tmux

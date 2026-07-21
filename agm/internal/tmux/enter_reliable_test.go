@@ -1,7 +1,11 @@
 package tmux
 
 import (
+	"context"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -95,16 +99,45 @@ func TestVerifyingEnter_SendError(t *testing.T) {
 	}
 }
 
-func TestClassifyPromptSubmissionErrorDistinguishesParkedFromUncertain(t *testing.T) {
-	lostReply := errors.New("tmux reply lost")
-	uncertain := classifyPromptSubmissionError(lostReply)
-	if !PromptSubmissionMayHaveOccurred(uncertain) || !errors.Is(uncertain, lostReply) {
-		t.Fatalf("classified lost reply = %v, want uncertain wrapper preserving cause", uncertain)
+func TestPromptEnterCommandHelperProcess(t *testing.T) {
+	if os.Getenv("AGM_PROMPT_ENTER_HELPER") != "1" {
+		return
 	}
+	switch os.Getenv("AGM_PROMPT_ENTER_HELPER_MODE") {
+	case "reject":
+		os.Exit(17)
+	case "block":
+		time.Sleep(30 * time.Second)
+	}
+}
 
-	parked := classifyPromptSubmissionError(ErrPasteNotSubmitted)
-	if PromptSubmissionMayHaveOccurred(parked) || !errors.Is(parked, ErrPasteNotSubmitted) {
-		t.Fatalf("classified parked prompt = %v, want definite unsubmitted failure", parked)
+func promptEnterHelperCommand(ctx context.Context, mode string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestPromptEnterCommandHelperProcess$")
+	cmd.Env = append(os.Environ(), "AGM_PROMPT_ENTER_HELPER=1", "AGM_PROMPT_ENTER_HELPER_MODE="+mode)
+	return cmd
+}
+
+func TestRunPromptEnterCommandStartFailureIsDefinite(t *testing.T) {
+	cmd := exec.CommandContext(t.Context(), filepath.Join(t.TempDir(), "missing-tmux"))
+	err := runPromptEnterCommand(t.Context(), cmd, time.Second)
+	if err == nil || PromptSubmissionMayHaveOccurred(err) {
+		t.Fatalf("start failure = %v, want definite pre-submission error", err)
+	}
+}
+
+func TestRunPromptEnterCommandExplicitRejectionIsDefinite(t *testing.T) {
+	err := runPromptEnterCommand(t.Context(), promptEnterHelperCommand(t.Context(), "reject"), time.Second)
+	if err == nil || PromptSubmissionMayHaveOccurred(err) {
+		t.Fatalf("explicit command rejection = %v, want definite pre-submission error", err)
+	}
+}
+
+func TestRunPromptEnterCommandTimeoutAfterStartIsUncertain(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	err := runPromptEnterCommand(ctx, promptEnterHelperCommand(ctx, "block"), 20*time.Millisecond)
+	if err == nil || !PromptSubmissionMayHaveOccurred(err) {
+		t.Fatalf("post-start timeout = %v, want submission-uncertain error", err)
 	}
 }
 
