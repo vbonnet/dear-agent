@@ -31,6 +31,11 @@ func TestParseOutcome(t *testing.T) {
 		{"negated no approval", "no approval — see findings", NeedsHumanReview},
 		{"negated unable to approve", "unable to be approved", NeedsHumanReview},
 		{"approve stem alone is not a token", "I would approve this", NeedsHumanReview},
+		// Regression: negation outside a fixed lookback window must still fail
+		// closed — approval is positional, not merely "not obviously negated".
+		{"far negation prose", "This cannot currently be considered safe or approved", NeedsHumanReview},
+		{"trailing approved in prose", "after review the change looks approved", NeedsHumanReview},
+		{"hedged prose mentioning approval", "I am inclined to say this is approved", NeedsHumanReview},
 		{"unknown token fails closed", "looks-fine", NeedsHumanReview},
 		{"markdown bold approved", "**approved**", Approved},
 		{"backticked approved", "`approved`", Approved},

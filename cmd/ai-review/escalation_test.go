@@ -17,6 +17,10 @@ func TestEscalationTriggers_Paths(t *testing.T) {
 		{"codeowners", []string{"CODEOWNERS"}, true},
 		{"pii manifest", []string{".config/dear-agent/pii-manifest.yaml"}, true},
 		{"terraform", []string{"infra/modules/managed-repo/main.tf"}, true},
+		// REVIEW.md §3 lists database schema changes explicitly.
+		{"sql migration", []string{"agm/internal/dolt/migrations/0007_add_col.sql"}, true},
+		{"schema.sql", []string{"agm/internal/db/schema.sql"}, true},
+		{"migrations dir go file", []string{"internal/store/migrations/002_users.go"}, true},
 		{"launchd plist", []string{"deploy/launchd/com.example.plist"}, true},
 		{"systemd service", []string{"agm/systemd/git-auto-sync.service"}, true},
 		{"ordinary go file", []string{"pkg/foo/bar.go"}, false},

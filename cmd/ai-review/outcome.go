@@ -73,38 +73,43 @@ func outcomeWords(s string) []string {
 	})
 }
 
-// ParseOutcome maps a synthesis model's first line to an Outcome using exact
-// token matching. Substring matching is deliberately NOT used: a line such as
-// "not approved due to blocking findings" or "approval cannot be given"
-// contains the substring "approve" and would otherwise be classified as
-// Approved, punching a fail-open hole straight through the gate.
+// labelWords may precede the outcome token ("Outcome: approved") and are
+// skipped when locating the leading token.
+var labelWords = map[string]bool{
+	"outcome": true, "result": true, "verdict": true, "status": true,
+	"decision": true,
+}
+
+// ParseOutcome maps a synthesis model's first line to an Outcome.
+//
+// Approval is *positional*, not merely present: `approved` is honoured only
+// when it is the LEADING outcome token of the line (after an optional
+// "Outcome:"-style label), which is exactly the contract the synthesis prompt
+// demands. Anything else fails closed.
+//
+// Substring matching and negation heuristics are both deliberately avoided.
+// Substring matching let "not approved due to blocking findings" read as
+// Approved; a negation-window heuristic still let prose like "this cannot
+// currently be considered safe or approved" slip through, because the negation
+// sat outside the window. A positional rule has no such tail: prose that merely
+// mentions approval never leads with the bare token.
 //
 // Rules:
 //   - only the exact canonical tokens are recognised;
 //   - when several outcome tokens appear, the most severe wins (REVIEW.md §1:
 //     "ambiguous findings always resolve down");
-//   - `approved` is honoured only when it is the sole outcome token present and
-//     is not negated ("not approved", "cannot be approved");
-//   - anything else — no token, an unknown token, or a negated approval —
-//     resolves to NeedsHumanReview, which blocks the merge (SPEC R7).
+//   - `approved` requires the leading-token position and no more-severe token;
+//   - anything else resolves to NeedsHumanReview, blocking the merge (SPEC R7).
 func ParseOutcome(s string) Outcome {
 	words := outcomeWords(s)
 
+	// Most severe wins, regardless of position.
 	found := map[Outcome]bool{}
-	approvedNegated := false
-	for i, w := range words {
-		o, ok := outcomeTokens[w]
-		if !ok {
-			continue
+	for _, w := range words {
+		if o, ok := outcomeTokens[w]; ok {
+			found[o] = true
 		}
-		if o == Approved && negatedBefore(words, i) {
-			approvedNegated = true
-			continue
-		}
-		found[o] = true
 	}
-
-	// Resolve down: most severe outcome present wins.
 	switch {
 	case found[NeedsHumanReview]:
 		return NeedsHumanReview
@@ -112,34 +117,27 @@ func ParseOutcome(s string) Outcome {
 		return Rejected
 	case found[NeedsWork]:
 		return NeedsWork
-	case found[Approved]:
+	}
+
+	// Approval only from the leading token position.
+	if leadingOutcomeToken(words) == "approved" {
 		return Approved
-	case approvedNegated:
-		// "not approved" with no explicit follow-up state — block.
-		return NeedsHumanReview
-	default:
-		// No recognisable outcome token — fail closed.
-		return NeedsHumanReview
 	}
+	// No token, prose, or a non-leading "approved" — fail closed.
+	return NeedsHumanReview
 }
 
-// negationWords are the tokens that invert an adjacent "approved".
-var negationWords = map[string]bool{
-	"not": true, "no": true, "cannot": true, "cant": true, "can": true,
-	"never": true, "without": true, "isnt": true, "wasnt": true,
-	"dont": true, "doesnt": true, "wont": true, "unable": true, "fails": true,
-}
-
-// negatedBefore reports whether an "approved" token at index i is negated by a
-// nearby preceding word (e.g. "not approved", "cannot be approved").
-func negatedBefore(words []string, i int) bool {
-	start := max(i-3, 0)
-	for _, w := range words[start:i] {
-		if negationWords[w] {
-			return true
+// leadingOutcomeToken returns the first meaningful token, skipping an optional
+// label word such as "outcome" in "Outcome: approved". It returns "" when the
+// line has no tokens.
+func leadingOutcomeToken(words []string) string {
+	for _, w := range words {
+		if labelWords[w] {
+			continue
 		}
+		return w
 	}
-	return false
+	return ""
 }
 
 // ExitFor is the enforcement contract: it maps an outcome (and whether a human

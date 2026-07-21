@@ -61,6 +61,18 @@ var escalationRules = []escalationRule{
 		},
 	},
 	{
+		reason: "database schema or migration change",
+		match: func(p string) bool {
+			lower := strings.ToLower(p)
+			base := basename(lower)
+			return strings.HasSuffix(lower, ".sql") ||
+				strings.Contains(lower, "/migrations/") ||
+				strings.Contains(lower, "/migration/") ||
+				base == "schema.sql" || base == "schema.go" ||
+				strings.HasSuffix(lower, "_schema.sql")
+		},
+	},
+	{
 		reason: "infrastructure that is expensive to reverse (IaC, launchd, systemd)",
 		match: func(p string) bool {
 			lower := strings.ToLower(p)
