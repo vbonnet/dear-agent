@@ -21,7 +21,11 @@ func setupCodexResumeTransaction(t *testing.T) (*dolt.Adapter, *manifest.Manifes
 	if err != nil {
 		t.Fatalf("NewSQLiteAdapter() error: %v", err)
 	}
-	t.Cleanup(func() { _ = adapter.Close() })
+	t.Cleanup(func() {
+		if err := adapter.Close(); err != nil {
+			t.Errorf("close adapter: %v", err)
+		}
+	})
 
 	now := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
 	m := &manifest.Manifest{
