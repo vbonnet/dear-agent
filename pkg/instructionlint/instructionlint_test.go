@@ -477,6 +477,33 @@ func TestScriptHeredocVisibilityHandlesQueuesArithmeticAndAttachedRedirects(t *t
 	}
 }
 
+func TestScriptHeredocVisibilityTracksTeeFilesAndDynamicReplay(t *testing.T) {
+	source := []byte(strings.Join([]string{
+		"tee tee-fixture >/dev/null <<'TEE_SUPPRESSED_STDOUT'",
+		"gh pr reopen 765",
+		"TEE_SUPPRESSED_STDOUT",
+		"cat tee-fixture",
+		"cat >dynamic-replay-fixture <<'DYNAMIC_REPLAY'",
+		"safe-pr create --emergency --reason dynamic-replay",
+		"DYNAMIC_REPLAY",
+		"file=dynamic-replay-fixture",
+		`cat "$file"`,
+	}, "\n"))
+
+	var text []string
+	for _, segment := range parseScriptSegments(source) {
+		text = append(text, segment.Text)
+	}
+	for _, visible := range []string{
+		"gh pr reopen 765",
+		"safe-pr create --emergency --reason dynamic-replay",
+	} {
+		if !slices.Contains(text, visible) {
+			t.Errorf("visible replay line %q was hidden: %v", visible, text)
+		}
+	}
+}
+
 func TestCheckRepositoryGovernsSkillAgentMetadata(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init", "-q")

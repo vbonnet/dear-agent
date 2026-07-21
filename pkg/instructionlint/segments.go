@@ -152,16 +152,7 @@ func parseScriptSegments(source []byte) []Segment {
 		if len(state.heredocs) > 0 {
 			heredoc := &state.heredocs[0]
 			if value == heredoc.marker {
-				if heredoc.output.visible {
-					segments = append(segments, heredoc.body...)
-				} else if heredoc.output.path != "" {
-					if heredoc.output.append {
-						state.pendingHeredocs[heredoc.output.path] = append(
-							state.pendingHeredocs[heredoc.output.path], heredoc.body...)
-					} else {
-						state.pendingHeredocs[heredoc.output.path] = slices.Clone(heredoc.body)
-					}
-				}
+				segments = state.commitHeredoc(segments, *heredoc)
 				state.heredocs = state.heredocs[1:]
 				continue
 			}
@@ -239,9 +230,26 @@ type scriptParseState struct {
 }
 
 type scriptHeredoc struct {
-	marker string
-	body   []Segment
-	output scriptOutputDestination
+	marker  string
+	body    []Segment
+	outputs []scriptOutputDestination
+}
+
+func (state *scriptParseState) commitHeredoc(segments []Segment, heredoc scriptHeredoc) []Segment {
+	if slices.ContainsFunc(heredoc.outputs, func(output scriptOutputDestination) bool { return output.visible }) {
+		return append(segments, heredoc.body...)
+	}
+	for _, output := range heredoc.outputs {
+		if output.path == "" {
+			continue
+		}
+		if output.append {
+			state.pendingHeredocs[output.path] = append(state.pendingHeredocs[output.path], heredoc.body...)
+		} else {
+			state.pendingHeredocs[output.path] = slices.Clone(heredoc.body)
+		}
+	}
+	return segments
 }
 
 func (state *scriptParseState) updatePersistentDescriptors(value string) {
@@ -589,12 +597,44 @@ func scriptHeredocSpecs(value string, descriptors map[int]scriptOutputDestinatio
 			// The shell consumes every heredoc body in lexical order, but only
 			// the last stdin redirect on a command supplies that command's input.
 			if markerIndex == len(markers)-1 {
-				heredoc.output = scriptHeredocCommandOutputDestination(commands, index, descriptors)
+				heredoc.outputs = append(heredoc.outputs,
+					scriptHeredocCommandOutputDestination(commands, index, descriptors))
+				heredoc.outputs = append(heredoc.outputs, scriptTeeFileDestinations(command.text)...)
 			}
 			heredocs = append(heredocs, heredoc)
 		}
 	}
 	return heredocs
+}
+
+func scriptTeeFileDestinations(command string) []scriptOutputDestination {
+	fields := stripCommandPrefixes(parseShellWords(command))
+	if len(fields) == 0 || executableBase(fields[0]) != "tee" {
+		return nil
+	}
+	appendMode := false
+	options := true
+	var destinations []scriptOutputDestination
+	for _, field := range fields[1:] {
+		if options && field == "--" {
+			options = false
+			continue
+		}
+		if options && strings.HasPrefix(field, "-") {
+			appendMode = appendMode || field == "--append" ||
+				(!strings.HasPrefix(field, "--") && strings.Contains(field, "a"))
+			continue
+		}
+		redirect := strings.TrimLeft(field, "0123456789")
+		if strings.HasPrefix(redirect, "<") || strings.HasPrefix(redirect, ">") {
+			continue
+		}
+		if strings.ContainsAny(field, "$`") {
+			return []scriptOutputDestination{{visible: true}}
+		}
+		destinations = append(destinations, scriptOutputDestination{path: filepath.Clean(field), append: appendMode})
+	}
+	return destinations
 }
 
 func scriptHeredocCommandOutputDestination(
@@ -920,6 +960,11 @@ func scriptCommandPrintsPath(command, path string, descriptors map[int]scriptOut
 		return false
 	}
 	for _, field := range fields[1:] {
+		// A dynamic reader argument may resolve to any pending fixture. Treat it
+		// conservatively so agent-visible output cannot evade the hard gate.
+		if strings.ContainsAny(field, "$`") {
+			return true
+		}
 		if sameScriptPath(field, path) {
 			return true
 		}
