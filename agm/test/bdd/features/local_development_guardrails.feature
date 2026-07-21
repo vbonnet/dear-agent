@@ -109,6 +109,10 @@ Feature: Local development guardrails
     When AGM runs the safe-pr abrupt-parent regression
     Then the child should retain transaction ownership until it exits
 
+  Scenario: Safe PR audit records the final transaction outcome
+    When AGM runs the safe-pr final transaction audit regression
+    Then each safe-pr transaction should have one accurate audit record
+
   Scenario: All repository test runners use the required CI timeout
     Given local, affected integration, and required CI Go test timeouts are configured
     When AGM validates Go test timeout parity

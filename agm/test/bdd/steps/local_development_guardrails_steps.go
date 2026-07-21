@@ -50,6 +50,8 @@ type localDevGuardrailState struct {
 	cleanupRegressionErr error
 	childRegression      string
 	childRegressionErr   error
+	auditRegression      string
+	auditRegressionErr   error
 }
 
 type localDevGuardrailStateKey struct{}
@@ -97,6 +99,8 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^Wayfinder and AGM cleanup should preserve Git-locked checkouts$`, cleanupShouldPreserveGitLockedCheckouts)
 	ctx.Step(`^AGM runs the safe-pr abrupt-parent regression$`, agmRunsSafePRAbruptParentRegression)
 	ctx.Step(`^the child should retain transaction ownership until it exits$`, childShouldRetainTransactionOwnershipUntilExit)
+	ctx.Step(`^AGM runs the safe-pr final transaction audit regression$`, agmRunsSafePRFinalTransactionAuditRegression)
+	ctx.Step(`^each safe-pr transaction should have one accurate audit record$`, eachSafePRTransactionShouldHaveOneAccurateAuditRecord)
 	ctx.Step(`^local, affected integration, and required CI Go test timeouts are configured$`, repositoryGoTestTimeoutsAreConfigured)
 	ctx.Step(`^AGM validates Go test timeout parity$`, agmValidatesGoTestTimeoutParity)
 	ctx.Step(`^all repository Go test timeouts should match$`, repositoryGoTestTimeoutsShouldMatch)
@@ -238,6 +242,29 @@ func childShouldRetainTransactionOwnershipUntilExit(ctx context.Context) error {
 	}
 	if state.childRegressionErr != nil {
 		return fmt.Errorf("safe-pr abrupt-parent regression: %w: %s", state.childRegressionErr, state.childRegression)
+	}
+	return nil
+}
+
+func agmRunsSafePRFinalTransactionAuditRegression(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	state.auditRegression, state.auditRegressionErr = runLocalGuardrailGoTest(ctx,
+		`^TestRun_CreateAuditsFinalTransactionOutcome$`,
+		"./cmd/safe-pr",
+	)
+	return nil
+}
+
+func eachSafePRTransactionShouldHaveOneAccurateAuditRecord(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.auditRegressionErr != nil {
+		return fmt.Errorf("safe-pr final transaction audit regression: %w: %s", state.auditRegressionErr, state.auditRegression)
 	}
 	return nil
 }

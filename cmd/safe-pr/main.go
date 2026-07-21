@@ -152,6 +152,7 @@ func run(argv []string) error {
 		return err
 	}
 
+	var githubOutcome githubExecution
 	execute := func(transaction *safepr.WorktreeTransaction) error {
 		if p.req.Verb == "create" && !p.skipPreflight {
 			if err := runPreflightFull(cwd, transaction); err != nil {
@@ -166,17 +167,32 @@ func run(argv []string) error {
 			}
 		}()
 
-		return executeGitHub(&p.req, p.timeout, p.verifyCI, transaction)
+		var executeErr error
+		githubOutcome, executeErr = executeGitHub(&p.req, p.timeout, p.verifyCI, transaction)
+		return executeErr
 	}
+	var runErr error
 	if p.req.Verb == "create" {
-		return protectCreateWorktree(cwd, "safe-pr create", execute)
+		runErr = protectCreateWorktree(cwd, "safe-pr create", execute)
+	} else {
+		runErr = execute(nil)
 	}
-	return execute(nil)
+	appendFinalAudit(&p.req, cwd, githubOutcome, runErr)
+	return runErr
+}
+
+type githubExecution struct {
+	prURL    string
+	exitCode int
 }
 
 // executeGitHub is the external PR mutation boundary. Tests replace it so a
 // unit test can prove control flow without creating a real GitHub pull request.
 var executeGitHub = execGh
+
+// appendSafePRAudit is the durable audit boundary. Tests replace it so command
+// control-flow regressions cannot write to the developer's real audit log.
+var appendSafePRAudit = safepr.AppendAudit
 
 // protectCreateWorktree owns the worktree lock across both preflight and the
 // GitHub mutation. Tests replace it to prove the command's transaction scope.
@@ -234,9 +250,9 @@ var runPreflightFull = func(dir string, transaction *safepr.WorktreeTransaction)
 var prURLRe = regexp.MustCompile(`\bhttps://github\.com/[^\s]+/pull/\d+\b`)
 
 // execGh runs the stamped gh command, bounded by timeout and with
-// GIT_TERMINAL_PROMPT=0, then writes the audit record and span. The audit
-// line is written on every outcome, success or failure.
-func execGh(req *safepr.Request, timeout time.Duration, verifyCI bool, transaction *safepr.WorktreeTransaction) error {
+// GIT_TERMINAL_PROMPT=0, and returns the GitHub outcome used by the final
+// transaction audit boundary.
+func execGh(req *safepr.Request, timeout time.Duration, verifyCI bool, transaction *safepr.WorktreeTransaction) (githubExecution, error) {
 	if timeout <= 0 {
 		timeout = safepr.DefaultTimeout
 	}
@@ -250,7 +266,7 @@ func execGh(req *safepr.Request, timeout time.Duration, verifyCI bool, transacti
 	cmd.Stderr = io.MultiWriter(os.Stderr, &out)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1")
 	if err := protectTransactionCommand(transaction, cmd); err != nil {
-		return err
+		return githubExecution{}, err
 	}
 
 	_, span := otel.Tracer("safe-pr").Start(ctx, "safepr."+req.Verb)
@@ -258,14 +274,12 @@ func execGh(req *safepr.Request, timeout time.Duration, verifyCI bool, transacti
 	prURL := prURLRe.FindString(out.String())
 
 	exitCode := 0
-	errText := ""
 	if runErr != nil {
 		exitCode = 1
 		var ee *exec.ExitError
 		if errors.As(runErr, &ee) {
 			exitCode = ee.ExitCode()
 		}
-		errText = runErr.Error()
 	}
 
 	sessionID := ""
@@ -279,27 +293,6 @@ func execGh(req *safepr.Request, timeout time.Duration, verifyCI bool, transacti
 	)
 	span.End()
 
-	cwd, cwdErr := os.Getwd()
-	if cwdErr != nil {
-		cwd = ""
-		fmt.Fprintf(os.Stderr, "safe-pr: WARNING: could not determine current directory for audit log: %v\n", cwdErr)
-	}
-	home, homeErr := os.UserHomeDir()
-	if homeErr != nil {
-		home = ""
-		fmt.Fprintf(os.Stderr, "safe-pr: WARNING: could not determine home directory for audit log: %v\n", homeErr)
-	}
-	rec := safepr.AuditRecord{
-		Time: time.Now().UTC().Format(time.RFC3339), Verb: req.Verb, Dir: cwd,
-		Args: args, SessionID: sessionID,
-		PRURL: prURL, ExitCode: exitCode, Error: errText,
-	}
-	if auditErr := safepr.AppendAudit(home, rec); auditErr != nil {
-		// The PR action already happened; a failed audit write must not fail
-		// the run, but it must be visible.
-		fmt.Fprintf(os.Stderr, "safe-pr: WARNING: audit log write failed: %v\n", auditErr)
-	}
-
 	// Arm squash auto-merge on a freshly created, non-draft PR so routine PRs
 	// merge once required checks and reviews pass. Drafts are the explicit
 	// handoff boundary for human-required changes and must remain unarmed.
@@ -309,14 +302,44 @@ func execGh(req *safepr.Request, timeout time.Duration, verifyCI bool, transacti
 	handlePostCreate(req, prURL, runErr, timeout, verifyCI, transaction)
 
 	if ctx.Err() == context.DeadlineExceeded {
-		return fmt.Errorf("gh exceeded %s and was killed — gh may have been waiting on an "+
+		return githubExecution{prURL: prURL, exitCode: exitCode}, fmt.Errorf("gh exceeded %s and was killed — gh may have been waiting on an "+
 			"interactive prompt; pass all required flags explicitly (safe-pr requires --title/--body "+
 			"for create) and retry", timeout)
 	}
 	if runErr != nil {
-		return fmt.Errorf("gh pr %s failed: %w", req.Verb, runErr)
+		return githubExecution{prURL: prURL, exitCode: exitCode}, fmt.Errorf("gh pr %s failed: %w", req.Verb, runErr)
 	}
-	return nil
+	return githubExecution{prURL: prURL, exitCode: exitCode}, nil
+}
+
+func appendFinalAudit(req *safepr.Request, cwd string, outcome githubExecution, finalErr error) {
+	exitCode := outcome.exitCode
+	errText := ""
+	if finalErr != nil {
+		if exitCode == 0 {
+			exitCode = 1
+		}
+		errText = finalErr.Error()
+	}
+	sessionID := ""
+	if req.Session != nil {
+		sessionID = req.Session.ID
+	}
+	home, homeErr := os.UserHomeDir()
+	if homeErr != nil {
+		home = ""
+		fmt.Fprintf(os.Stderr, "safe-pr: WARNING: could not determine home directory for audit log: %v\n", homeErr)
+	}
+	rec := safepr.AuditRecord{
+		Time: time.Now().UTC().Format(time.RFC3339), Verb: req.Verb, Dir: cwd,
+		Args: req.StampedArgs(), SessionID: sessionID,
+		PRURL: outcome.prURL, ExitCode: exitCode, Error: errText,
+	}
+	if auditErr := appendSafePRAudit(home, rec); auditErr != nil {
+		// The PR action may already have happened; a failed audit write must not
+		// change the command outcome, but it must be visible.
+		fmt.Fprintf(os.Stderr, "safe-pr: WARNING: audit log write failed: %v\n", auditErr)
+	}
 }
 
 func handlePostCreate(req *safepr.Request, prURL string, runErr error, timeout time.Duration, verifyCI bool, transaction *safepr.WorktreeTransaction) {

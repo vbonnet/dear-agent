@@ -49,6 +49,8 @@ creation.
 
 **SAFE-PR-17** When a protected safe-pr child command is canceled or times out, the system shall terminate its isolated process group and bound pipe draining before the parent releases Git worktree ownership.
 
+**SAFE-PR-18** When an attributed safe-pr transaction finishes, the system shall append exactly one audit record whose exit code and error reflect the final acquisition, GitHub mutation, and worktree release outcome.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`
