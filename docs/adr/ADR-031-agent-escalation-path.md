@@ -78,6 +78,10 @@ agm escalate ask --kind blocked-action --context "<why the normal path is unavai
 3. Supports asynchronous questions or a blocking wait by the asking worker.
 4. Preserves answers, forwards, and VROOM votes in the Dispatch decision trail.
 
+Outside an AGM-launched session, the caller must pass
+`--session <registered-session>`. If no registered session exists, the agent
+must ask the current user directly; escalation does not create or update a Bead.
+
 ADR-032 defines the implemented command family and routing contract.
 
 ### 4. Error message contract
@@ -106,7 +110,7 @@ Every PR must carry a wayfinder trace. If no approved path exists, escalate via:
 
 - Safety gates are now unconditional; no bypass path exists inside the tools.
 - Every situation where an agent is genuinely blocked becomes a visible signal
-  (a bead, a retro, a resolved approved path).
+  (a durable escalation, a retro, or a resolved approved path).
 - The escalation path turns one-off human decisions into durable policy.
 
 **Negative / trade-offs:**

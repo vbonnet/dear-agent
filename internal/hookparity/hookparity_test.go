@@ -160,6 +160,35 @@ func TestPRGuardEscalationWorksOutsideAGM(t *testing.T) {
 	}
 }
 
+func TestBypassGuardEscalationIsRunnableAndTruthful(t *testing.T) {
+	root := repoRoot(t)
+	for _, script := range []string{
+		".claude/hooks/pretool-bypass-guard",
+		".codex/hooks/pretool-bypass-guard",
+		".agents/hooks/pretool-bypass-guard",
+		".opencode/hooks/pretool-bypass-guard",
+	} {
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(script)))
+		if err != nil {
+			t.Fatalf("read %s: %v", script, err)
+		}
+		guidance := string(data)
+		for _, required := range []string{
+			"agm escalate ask --kind blocked-action --context",
+			"--session <registered-session>",
+			"ask the current user directly",
+			"does not create or update a Bead",
+		} {
+			if !strings.Contains(guidance, required) {
+				t.Errorf("%s escalation guidance missing %q", script, required)
+			}
+		}
+		if strings.Contains(guidance, "Every escalation creates a bead") {
+			t.Errorf("%s promises unimplemented Beads creation", script)
+		}
+	}
+}
+
 func TestOpenCodeHookParserRegressions(t *testing.T) {
 	root := repoRoot(t)
 	tests := []struct {
