@@ -202,8 +202,13 @@ func TestAgyCreateSessionCapturesNativeConversationIdentity(t *testing.T) {
 	agySendCommand = func(string, string) error { return nil }
 	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return nil }
 	var discoveredWorkDir string
+	discoveryCalls := 0
 	agyFindConversation = func(workDir string) (string, error) {
+		discoveryCalls++
 		discoveredWorkDir = workDir
+		if discoveryCalls == 1 {
+			return "pre-existing-conversation-id", nil
+		}
 		return "provider-conversation-id", nil
 	}
 
@@ -218,8 +223,8 @@ func TestAgyCreateSessionCapturesNativeConversationIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stored session metadata: %v", err)
 	}
-	if discoveredWorkDir != "/work" || metadata.UUID != "provider-conversation-id" {
-		t.Fatalf("discovered workdir/native ID = %q/%q", discoveredWorkDir, metadata.UUID)
+	if discoveredWorkDir != "/work" || discoveryCalls != 2 || metadata.UUID != "provider-conversation-id" {
+		t.Fatalf("discovered workdir/calls/native ID = %q/%d/%q", discoveredWorkDir, discoveryCalls, metadata.UUID)
 	}
 }
 
@@ -243,11 +248,37 @@ func TestAgyCreateSessionRollsBackWhenNativeIdentityCannotBeCaptured(t *testing.
 	if !errors.Is(err, wantErr) || sessionID != "" {
 		t.Fatalf("CreateSession = %q, %v; want empty ID and discovery failure", sessionID, err)
 	}
-	if attempts != agyConversationDiscoveryAttempts || killed != "agy-no-identity" {
+	if attempts != agyConversationDiscoveryAttempts+1 || killed != "agy-no-identity" {
 		t.Fatalf("discovery attempts/rollback = %d/%q", attempts, killed)
 	}
 	if sessions, listErr := store.List(); listErr != nil || len(sessions) != 0 {
 		t.Fatalf("failed create persisted sessions = %v, %v", sessions, listErr)
+	}
+}
+
+func TestAgyCreateSessionDoesNotReuseStaleNativeConversationIdentity(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	agyHasSession = func(string) (bool, error) { return false, nil }
+	agyNewSession = func(string, string) error { return nil }
+	agySendCommand = func(string, string) error { return nil }
+	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return nil }
+	agyFindConversation = func(string) (string, error) { return "stale-conversation-id", nil }
+	agyDiscoverySleep = func(time.Duration) {}
+	killed := ""
+	agyKillSession = func(name string) { killed = name }
+
+	sessionID, err := (&AgyAdapter{sessionStore: store}).CreateSession(SessionContext{
+		Name: "agy-stale-identity", WorkingDirectory: "/work", Model: "3.5-flash-low",
+	})
+	if err == nil || !strings.Contains(err.Error(), "pre-create conversation") || sessionID != "" {
+		t.Fatalf("CreateSession = %q, %v; want stale identity failure", sessionID, err)
+	}
+	if killed != "agy-stale-identity" {
+		t.Fatalf("stale identity rollback killed %q", killed)
+	}
+	if sessions, listErr := store.List(); listErr != nil || len(sessions) != 0 {
+		t.Fatalf("stale identity persisted sessions = %v, %v", sessions, listErr)
 	}
 }
 

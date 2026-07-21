@@ -69,7 +69,7 @@ compatibility.
 
 **AGP-21** When the AGY adapter creates or cold-resumes a session, the system shall use the shared canonical AGY command builder, preserve the selected model, permission mode, authorized directories, native conversation ID, quoting, and process-exit policy, require native readiness before returning success or attaching, and roll back any tmux session it created when command delivery, readiness, or metadata persistence fails; when an imported conversation has no defensible model provenance, cold resume shall omit `--model` so AGY retains the saved native selection.
 
-**AGP-22** When the AGY adapter creates a fresh session, the system shall capture and persist its provider-native conversation ID after readiness and before reporting success. When cold resume requires a new process, the system shall require that captured native ID and shall not substitute AGM's internal session ID.
+**AGP-22** When the AGY adapter creates a fresh session, the system shall capture and persist its provider-native conversation ID after readiness and before reporting success without reusing the pre-launch workspace conversation. When cold resume requires a new process, the system shall require that captured native ID and shall not substitute AGM's internal session ID.
 
 **AGP-23** When the AGY adapter reports status or reads history, the system shall require an actual `agy` process for live status and shall read user/model messages from the native Antigravity brain transcript rather than a synthetic harness path.
 

@@ -109,6 +109,13 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	}
 	permissionMode := ctx.Environment["AGM_PERMISSION_MODE"]
 	conversationID := ctx.Environment["AGY_CONVERSATION_ID"]
+	previousConversationID := ""
+	if conversationID == "" {
+		// A bare AGY launch creates a fresh conversation. Snapshot the current
+		// workspace mapping so delayed provider metadata cannot make us persist
+		// a pre-existing conversation as the newly created session identity.
+		previousConversationID, _ = agyFindConversation(workDir)
+	}
 
 	// Check if tmux session already exists
 	exists, err := agyHasSession(tmuxName)
@@ -141,7 +148,7 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 		return "", fmt.Errorf("AGY did not become ready after create: %w", err)
 	}
 	if conversationID == "" {
-		conversationID, err = discoverAgyConversationID(workDir)
+		conversationID, err = discoverAgyConversationID(workDir, previousConversationID)
 		if err != nil {
 			agyKillSession(tmuxName)
 			return "", err
@@ -169,17 +176,21 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	return sessionID, nil
 }
 
-func discoverAgyConversationID(workDir string) (string, error) {
+func discoverAgyConversationID(workDir, previousConversationID string) (string, error) {
 	var lastErr error
 	for attempt := 1; attempt <= agyConversationDiscoveryAttempts; attempt++ {
 		conversationID, err := agyFindConversation(workDir)
-		if err == nil && conversationID != "" {
+		if err == nil && conversationID != "" && conversationID != previousConversationID {
 			return conversationID, nil
 		}
-		if err == nil {
-			err = fmt.Errorf("provider returned an empty conversation ID")
+		switch {
+		case err != nil:
+			lastErr = err
+		case conversationID == "":
+			lastErr = fmt.Errorf("provider returned an empty conversation ID")
+		default:
+			lastErr = fmt.Errorf("provider still reports pre-create conversation %q", previousConversationID)
 		}
-		lastErr = err
 		if attempt < agyConversationDiscoveryAttempts {
 			agyDiscoverySleep(agyConversationDiscoveryDelay)
 		}
