@@ -2097,7 +2097,7 @@ func sharedCreationShouldPersistNewAGYIdentityBeforeRegistration(ctx context.Con
 		return err
 	}
 	return requireAgyLifecycleBehaviors(harnessState,
-		"TestCreateSession_AgyWorkspaceLockCoversSharedLifecycle",
+		"TestCreateSession_AgyWorkspaceLockReleasesBeforeSurfaceCompletion",
 		"TestCreateSession_AgyIdentitySnapshotFailsBeforeTmuxMutation",
 		"TestCreateSession_AgyIdentityDiscoveryFailureRollsBackBeforeRegistration",
 	)
