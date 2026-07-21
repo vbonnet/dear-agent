@@ -63,6 +63,9 @@ func init() {
 
 func runStart(cmd *cobra.Command, args []string) error {
 	projectName := args[0]
+	if strings.TrimSpace(projectName) == "" {
+		return fmt.Errorf("project name is required")
+	}
 
 	// Get project directory
 	projectDir := GetProjectDirectory()
