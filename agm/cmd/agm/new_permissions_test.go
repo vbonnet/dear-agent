@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
@@ -284,6 +285,9 @@ func TestPermissionsAllowFlagRegistered(t *testing.T) {
 	}
 	if flag.Value.Type() != "stringSlice" {
 		t.Errorf("--permissions-allow should be stringSlice type, got %q", flag.Value.Type())
+	}
+	if !strings.Contains(flag.Usage, "shared policy") || strings.Contains(flag.Usage, "written to project .claude") {
+		t.Errorf("--permissions-allow usage is not harness-neutral: %q", flag.Usage)
 	}
 }
 

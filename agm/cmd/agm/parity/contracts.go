@@ -103,6 +103,7 @@ func modeContract() Contract {
 			"codex-cli":    StrategyRestartFallback,
 			"agy":          StrategyRestartFallback,
 			"opencode-cli": StrategyNative,
+			"pi-cli":       StrategyNative,
 		},
 	}
 }
@@ -122,6 +123,7 @@ func stashContract(source, command string) Contract {
 			"codex-cli":    StrategyBestEffort,
 			"agy":          StrategyBestEffort,
 			"opencode-cli": StrategyBestEffort,
+			"pi-cli":       StrategyBestEffort,
 		},
 	}
 }

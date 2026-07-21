@@ -68,6 +68,14 @@ func SurfaceForHarness(harness string) (Surface, bool) {
 			RuntimeSurface:    "Tab plan/default where supported",
 			NativeEnforcement: "OpenCode server policy plus AGM manifest",
 		}, true
+	case "pi-cli":
+		return Surface{
+			Harness:           "pi-cli",
+			PolicySurface:     "AGM manifest permission_policy and managed Pi extension allowlist",
+			StartupSurface:    "pi --tools plus AGM authorization extension",
+			RuntimeSurface:    "/agm-mode plan|default|auto",
+			NativeEnforcement: "Pi tool_call blocking, interactive confirmation, and active-tool restriction",
+		}, true
 	default:
 		return Surface{}, false
 	}

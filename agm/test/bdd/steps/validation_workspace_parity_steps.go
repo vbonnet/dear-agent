@@ -51,7 +51,7 @@ func validationWorkspaceHarnessUsesFamily(ctx context.Context, harness, family s
 	if err != nil {
 		return err
 	}
-	if !slices.Contains([]string{"claude-code", "codex-cli", "agy", "opencode-cli"}, harness) {
+	if !slices.Contains([]string{"claude-code", "codex-cli", "agy", "opencode-cli", "pi-cli"}, harness) {
 		return fmt.Errorf("unsupported validation workspace harness %q", harness)
 	}
 	if !slices.Contains([]string{"anthropic", "openai", "gemini", "glm", "deepseek", "nemotron", "qwen"}, family) {

@@ -6,7 +6,8 @@
 //
 // The guards detect:
 //   - HumanTyping: unsent text in the prompt line (ADVISORY, non-blocking).
-//   - SessionUninitialized: Claude hasn't started or is showing welcome screen.
+//   - SessionUninitialized: the selected harness has not reached a managed
+//     interactive or working state.
 //   - ClaudeMidResponse: Claude is actively generating a response (spinner visible).
 //
 // HumanTyping is ADVISORY only and never sets CheckResult.Safe=false. It is

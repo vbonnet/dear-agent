@@ -90,6 +90,7 @@ func TestIsAPIBasedAgent(t *testing.T) {
 		{"claude-code", false},
 		{"gemini-cli", false},
 		{"opencode-cli", false},
+		{"pi-cli", false},
 		{"openai", true},
 		{"gpt", true},
 		{"unknown", false},

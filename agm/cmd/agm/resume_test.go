@@ -345,6 +345,83 @@ func TestBuildCodexResumeCommand_DefaultModel(t *testing.T) {
 	}
 }
 
+func TestBuildPiResumeCommandPreservesExactIdentityModelModeAndPolicy(t *testing.T) {
+	t.Setenv("AGM_PI_EXTENSION_ROOT", t.TempDir())
+	sessionDir := t.TempDir()
+	m := &manifest.Manifest{
+		Model: "gpt", PermissionMode: "auto",
+		Pi:               &manifest.Pi{SessionID: "native.pi-id", SessionDir: sessionDir},
+		PermissionPolicy: &manifest.PermissionPolicy{Allow: []string{"Bash(git:*)"}},
+	}
+	command, err := buildPiResumeCommand(m, &HealthStatus{TmuxSessionName: "pi-worker", WorktreePath: "/tmp/work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"--session-id 'native.pi-id'", "--session-dir '" + sessionDir + "'", "--name 'pi-worker'",
+		"PI_SESSION_ID='native.pi-id'", "AGM_PI_PROJECT_DIR='/tmp/work'",
+		"--model 'openai/gpt-5.6-terra'", "AGM_PI_PERMISSION_MODE='auto'", "AGM_PI_PERMISSION_POLICY_FILE=", "policy-", "--extension",
+	} {
+		if !strings.Contains(command, want) {
+			t.Errorf("Pi resume %q missing %q", command, want)
+		}
+	}
+	if strings.Contains(command, "Bash(git:*)") {
+		t.Fatalf("Pi resume inlined permission policy: %s", command)
+	}
+}
+
+func TestBuildPiResumeCommandRejectsMissingNativeIdentity(t *testing.T) {
+	_, err := buildPiResumeCommand(&manifest.Manifest{}, &HealthStatus{TmuxSessionName: "pi-worker", WorktreePath: "/tmp/work"})
+	if err == nil || !strings.Contains(err.Error(), "exact native") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestBuildPiResumeCommandWithoutModelProvenancePreservesNativeSelection(t *testing.T) {
+	t.Setenv("AGM_PI_EXTENSION_ROOT", t.TempDir())
+	sessionDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sessionDir, "native.jsonl"), []byte(`{"type":"session","id":"native-id","cwd":"/tmp/work"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := &manifest.Manifest{Pi: &manifest.Pi{SessionID: "native-id", SessionDir: sessionDir}}
+	command, err := buildPiResumeCommand(m, &HealthStatus{TmuxSessionName: "pi-worker", WorktreePath: "/tmp/work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(command, " --model ") {
+		t.Fatalf("Pi resume fabricated model override: %s", command)
+	}
+}
+
+func TestBuildPiResumeCommandWithoutTranscriptUsesHarnessDefault(t *testing.T) {
+	t.Setenv("AGM_PI_EXTENSION_ROOT", t.TempDir())
+	m := &manifest.Manifest{Pi: &manifest.Pi{SessionID: "native-id", SessionDir: t.TempDir()}}
+	command, err := buildPiResumeCommand(m, &HealthStatus{TmuxSessionName: "pi-worker", WorktreePath: "/tmp/work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(command, "--model 'anthropic/claude-sonnet-4-6'") {
+		t.Fatalf("Pi unpersisted resume omitted the harness default model: %s", command)
+	}
+}
+
+func TestBuildPiResumeCommandRejectsTranscriptIdentityMismatch(t *testing.T) {
+	t.Setenv("AGM_PI_EXTENSION_ROOT", t.TempDir())
+	dir := t.TempDir()
+	path := filepath.Join(dir, "native.jsonl")
+	if err := os.WriteFile(path, []byte(`{"type":"session","id":"native-id","cwd":"/work"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := &manifest.Manifest{Pi: &manifest.Pi{
+		SessionID: "native-id", SessionDir: dir, TranscriptPath: filepath.Join(dir, "different.jsonl"),
+	}}
+	_, err := buildPiResumeCommand(m, &HealthStatus{TmuxSessionName: "pi-worker", WorktreePath: "/tmp/work"})
+	if err == nil || !strings.Contains(err.Error(), "persisted native identity") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestBuildAgyResumeCommand(t *testing.T) {
 	m := &manifest.Manifest{
 		Model: "3.1-pro-high",

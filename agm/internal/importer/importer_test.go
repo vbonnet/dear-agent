@@ -10,6 +10,7 @@ import (
 
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/pisession"
 )
 
 func TestInferProjectPath(t *testing.T) {
@@ -163,6 +164,25 @@ func TestValidateNotDuplicate_EmptyDatabase(t *testing.T) {
 	err := ValidateNotDuplicateWithAdapter("any-uuid", adapter)
 	if err != nil {
 		t.Errorf("ValidateNotDuplicateWithAdapter() with empty database should not error, got: %v", err)
+	}
+}
+
+func TestBuildPiImportedManifestPreservesNativeResumeMetadata(t *testing.T) {
+	created := time.Date(2026, 7, 20, 1, 2, 3, 0, time.UTC)
+	now := created.Add(time.Hour)
+	m := buildPiImportedManifest(
+		pisession.Metadata{ID: "native-pi", CWD: "/work/pi"},
+		"/private/pi/native.jsonl", "/private/pi", "openai/gpt-5.6-terra", "recovered-pi", "oss", "agm-id", created, now,
+	)
+	if m.Harness != "pi-cli" || m.Pi == nil || m.Pi.SessionID != "native-pi" ||
+		m.Pi.SessionDir != "/private/pi" || m.Pi.TranscriptPath != "/private/pi/native.jsonl" {
+		t.Fatalf("Pi import manifest = %#v", m)
+	}
+	if m.WorkingDirectory != "/work/pi" || m.Context.Project != "/work/pi" || m.CreatedAt != created {
+		t.Fatalf("Pi import working metadata = %#v", m)
+	}
+	if m.Model != "openai/gpt-5.6-terra" {
+		t.Fatalf("Pi import model = %q", m.Model)
 	}
 }
 

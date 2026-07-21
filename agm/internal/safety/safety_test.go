@@ -377,6 +377,57 @@ func TestDetectAgySessionUninitialized(t *testing.T) {
 	}
 }
 
+func TestDetectPiSessionUninitialized(t *testing.T) {
+	tests := []struct {
+		name          string
+		paneContent   string
+		wantViolation bool
+	}{
+		{name: "managed ready", paneContent: "AGM plan/ready"},
+		{name: "managed working", paneContent: "AGM auto/working"},
+		{name: "permission overlay", paneContent: "AGM default/permission", wantViolation: true},
+		{name: "stale ready before permission overlay", paneContent: "AGM default/ready\nAGM default/permission", wantViolation: true},
+		{name: "unmanaged Pi chrome", paneContent: "pi v0.81.0\n~/work • session", wantViolation: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := detectPiSessionUninitialized(tt.paneContent)
+			if tt.wantViolation && v == nil {
+				t.Fatal("expected Pi uninitialized violation")
+			}
+			if !tt.wantViolation && v != nil {
+				t.Fatalf("unexpected Pi uninitialized violation: %s", v.Message)
+			}
+		})
+	}
+}
+
+func TestDetectOpenCodeSessionUninitialized(t *testing.T) {
+	tests := []struct {
+		name          string
+		paneContent   string
+		wantViolation bool
+	}{
+		{name: "composer", paneContent: "session ready\n> "},
+		{name: "product chrome", paneContent: "OpenCode\nworkspace"},
+		{name: "active work", paneContent: "Running..."},
+		{name: "shell only", paneContent: "vbonnet@mac work %", wantViolation: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := detectOpenCodeSessionUninitialized(tt.paneContent)
+			if tt.wantViolation && v == nil {
+				t.Fatal("expected OpenCode uninitialized violation")
+			}
+			if !tt.wantViolation && v != nil {
+				t.Fatalf("unexpected OpenCode uninitialized violation: %s", v.Message)
+			}
+		})
+	}
+}
+
 func TestNormalizeHarnessForSafety(t *testing.T) {
 	tests := []struct {
 		input string
@@ -388,6 +439,8 @@ func TestNormalizeHarnessForSafety(t *testing.T) {
 		{"antigravity", "agy"},
 		{"opencode", "opencode-cli"},
 		{"opencode-cli", "opencode-cli"},
+		{"pi", "pi-cli"},
+		{"pi-cli", "pi-cli"},
 		{"claude", "claude-code"},
 		{"claude-code", "claude-code"},
 		{"", "claude-code"},

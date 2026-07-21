@@ -29,6 +29,10 @@ type HarnessLaunchSpec struct {
 	ExtraAddDirs     []string
 	ForwardTelemetry bool
 	Codex            *manifest.Codex
+	Pi               *manifest.Pi
+	PiExtension      string
+	PiPolicyJSON     string
+	PiPolicyFile     string
 }
 
 // HarnessLaunchCommand is the command plus the startup-policy outcome needed
@@ -49,6 +53,8 @@ func BuildHarnessLaunchCommand(spec HarnessLaunchSpec) HarnessLaunchCommand {
 		return buildCodexLaunchCommand(spec, exitSuffix)
 	case "agy":
 		return buildAgyLaunchCommand(spec, exitSuffix)
+	case "pi-cli":
+		return buildPiLaunchCommand(spec)
 	case "opencode-cli":
 		return HarnessLaunchCommand{Command: fmt.Sprintf("cd %s && opencode attach%s", launchparity.ShellQuote(spec.WorkDir), exitSuffix)}
 	case "gemini-cli":
@@ -57,6 +63,24 @@ func BuildHarnessLaunchCommand(spec HarnessLaunchSpec) HarnessLaunchCommand {
 	default:
 		return HarnessLaunchCommand{Command: fmt.Sprintf("echo %s && exit 1", launchparity.ShellQuote("Unknown harness: "+spec.Harness))}
 	}
+}
+
+func buildPiLaunchCommand(spec HarnessLaunchSpec) HarnessLaunchCommand {
+	nativeID := spec.SessionID
+	sessionDir := ""
+	if spec.Pi != nil {
+		if spec.Pi.SessionID != "" {
+			nativeID = spec.Pi.SessionID
+		}
+		sessionDir = spec.Pi.SessionDir
+	}
+	command := launchparity.BuildPiCommand(launchparity.PiCommandSpec{
+		WorkDir: spec.WorkDir, ResolvedModel: agent.ResolveModelFullName("pi-cli", spec.Model),
+		SessionName: spec.SessionName, SessionID: nativeID, SessionDir: sessionDir,
+		PermissionMode: spec.PermissionMode, PermissionExtension: spec.PiExtension,
+		PermissionPolicyFile: spec.PiPolicyFile, Persistent: spec.Persistent,
+	})
+	return HarnessLaunchCommand{Command: command.Command, ModeAppliedAtStartup: command.ModeAppliedAtStartup}
 }
 
 func buildClaudeLaunchCommand(spec HarnessLaunchSpec, exitSuffix string) HarnessLaunchCommand {

@@ -109,6 +109,7 @@ func hookHarnessShouldIncludeBeadsLifecycleHook(ctx context.Context, harness, ev
 		"codex-cli":    "codex",
 		"agy":          "antigravity",
 		"opencode-cli": "opencode",
+		"pi-cli":       "codex",
 	}[state.harness]
 	if !ok {
 		return fmt.Errorf("harness %q is not expected to have Beads lifecycle hooks", state.harness)
@@ -231,6 +232,8 @@ func hookManifestPath(harness string) (string, bool) {
 		return filepath.Join(root, ".agents", "hooks.json"), true
 	case "opencode-cli":
 		return filepath.Join(root, ".opencode", "hooks.json"), true
+	case "pi-cli":
+		return filepath.Join(root, ".pi", "hooks.json"), true
 	default:
 		return "", false
 	}

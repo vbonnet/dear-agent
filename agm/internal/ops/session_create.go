@@ -15,6 +15,8 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/codexcontrol"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/permissionparity/piadapter"
+	"github.com/vbonnet/dear-agent/agm/internal/pisession"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
@@ -54,6 +56,10 @@ type CreateSessionMetadata struct {
 	DisposableTTL    string
 	PermissionMode   string
 	OpenCodeServer   string
+	Pi               *manifest.Pi
+	PiExtension      string
+	PiPolicyJSON     string
+	PiPolicyFile     string
 }
 
 // CreateSessionLaunchResult records launch facts required by runtime
@@ -313,6 +319,13 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		return nil, err
 	}
 	sessionID := createSessionID(req.SessionID)
+	if params.harness == "pi-cli" {
+		prepared, prepareErr := preparePiCreateRequest(req, sessionID)
+		if prepareErr != nil {
+			return nil, prepareErr
+		}
+		req = prepared
+	}
 	state := &createSessionState{}
 	defer func() { state.finish(opCtx, req, params.name, sessionID, retErr) }()
 
@@ -369,6 +382,41 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		return nil, err
 	}
 	return createSessionResult(req, params, sessionID), nil
+}
+
+func preparePiCreateRequest(req *CreateSessionRequest, sessionID string) (*CreateSessionRequest, error) {
+	if err := pisession.ValidateID(sessionID); err != nil {
+		return nil, ErrInvalidInput("session_id", err.Error())
+	}
+	sessionRoot, err := pisession.EnsureRoot(os.Getenv("AGM_PI_SESSION_ROOT"))
+	if err != nil {
+		return nil, ErrStorageError("pi.session-root", err)
+	}
+	extensionPath, err := piadapter.EnsureExtension(os.Getenv("AGM_PI_EXTENSION_ROOT"))
+	if err != nil {
+		return nil, ErrStorageError("pi.authorization-extension", err)
+	}
+	policyJSON, err := piadapter.MarshalPolicy(req.Metadata.permissionPolicyAllow())
+	if err != nil {
+		return nil, ErrStorageError("pi.permission-policy", err)
+	}
+	prepared := *req
+	prepared.Metadata = req.Metadata
+	prepared.Metadata.Pi = &manifest.Pi{SessionID: sessionID, SessionDir: sessionRoot}
+	prepared.Metadata.PiExtension = extensionPath
+	prepared.Metadata.PiPolicyJSON = policyJSON
+	prepared.Metadata.PiPolicyFile, err = piadapter.EnsurePolicyFile(os.Getenv("AGM_PI_EXTENSION_ROOT"), sessionID, policyJSON)
+	if err != nil {
+		return nil, ErrStorageError("pi.permission-policy-file", err)
+	}
+	return &prepared, nil
+}
+
+func (metadata CreateSessionMetadata) permissionPolicyAllow() []string {
+	if metadata.PermissionPolicy == nil {
+		return nil
+	}
+	return metadata.PermissionPolicy.Allow
 }
 
 func applyAgyCreateIdentity(m *manifest.Manifest, metadata *agysession.Metadata) {
@@ -448,6 +496,10 @@ func buildHarnessLaunchSpec(req *CreateSessionRequest, params *createSessionPara
 		ExtraAddDirs:     append([]string{}, req.ExtraAddDirs...),
 		ForwardTelemetry: req.ForwardTelemetry,
 		Codex:            codexMeta,
+		Pi:               req.Metadata.Pi,
+		PiExtension:      req.Metadata.PiExtension,
+		PiPolicyJSON:     req.Metadata.PiPolicyJSON,
+		PiPolicyFile:     req.Metadata.PiPolicyFile,
 	}
 }
 
@@ -603,6 +655,11 @@ func buildCreateSessionManifest(req *CreateSessionRequest, params *createSession
 	if codexMeta != nil {
 		meta := *codexMeta
 		m.Codex = &meta
+	}
+	if req.Metadata.Pi != nil {
+		meta := *req.Metadata.Pi
+		m.Pi = &meta
+		m.WorkingDirectory = req.Cwd
 	}
 	mode := req.Metadata.PermissionMode
 	if mode == "" {

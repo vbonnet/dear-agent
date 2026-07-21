@@ -213,6 +213,28 @@ func CheckSessionUninitialized(sessionName, socketPath, harness string) *Violati
 		}
 		return detectAgySessionUninitialized(content)
 	}
+	if harness == "pi-cli" {
+		if !isHarnessProcessRunning(sessionName, socketPath, "pi") {
+			return &Violation{
+				Guard:      ViolationSessionUninitialized,
+				Message:    "Pi process is not running in this session.",
+				Suggestion: "Wait for Pi to start, or verify the session: agm session list",
+				Evidence:   "no pi process",
+			}
+		}
+		return detectPiSessionUninitialized(content)
+	}
+	if harness == "opencode-cli" {
+		if !isHarnessProcessRunning(sessionName, socketPath, "opencode") {
+			return &Violation{
+				Guard:      ViolationSessionUninitialized,
+				Message:    "OpenCode process is not running in this session.",
+				Suggestion: "Wait for OpenCode to start, or verify the session: agm session list",
+				Evidence:   "no opencode process",
+			}
+		}
+		return detectOpenCodeSessionUninitialized(content)
+	}
 
 	// Also check if Claude process is running
 	claudeRunning, procErr := tmux.IsClaudeRunning(sessionName)
@@ -231,6 +253,8 @@ func normalizeHarnessForSafety(harness string) string {
 		return "agy"
 	case "opencode", "opencode-cli":
 		return "opencode-cli"
+	case "pi", "pi-cli":
+		return "pi-cli"
 	case "claude", "claude-code", "":
 		return "claude-code"
 	default:
@@ -305,6 +329,39 @@ func detectAgySessionUninitialized(paneContent string) *Violation {
 		Message:    "No AGY prompt (>) detected. AGY may not have started yet.",
 		Suggestion: "Wait for AGY to initialize, or attach to verify.",
 		Evidence:   "no agy prompt",
+	}
+}
+
+func detectPiSessionUninitialized(paneContent string) *Violation {
+	switch tmux.PiManagedState(paneContent) {
+	case "ready", "working":
+		return nil
+	}
+	return &Violation{
+		Guard:      ViolationSessionUninitialized,
+		Message:    "Pi has not reached an AGM-managed ready or working state.",
+		Suggestion: "Wait for AGM Pi authorization controls to become ready, or attach to inspect the active overlay.",
+		Evidence:   "no managed pi ready state",
+	}
+}
+
+func detectOpenCodeSessionUninitialized(paneContent string) *Violation {
+	for _, pattern := range tmux.OpenCodePromptPatterns {
+		if strings.Contains(paneContent, pattern) {
+			return nil
+		}
+	}
+	if strings.Contains(strings.ToLower(paneContent), "opencode") ||
+		strings.Contains(paneContent, "Running...") ||
+		strings.Contains(paneContent, "●") ||
+		strings.Contains(paneContent, "▸") {
+		return nil
+	}
+	return &Violation{
+		Guard:      ViolationSessionUninitialized,
+		Message:    "No OpenCode composer or active-work indicator detected.",
+		Suggestion: "Wait for OpenCode to initialize, or attach to verify.",
+		Evidence:   "no opencode composer",
 	}
 }
 

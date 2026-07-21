@@ -19,6 +19,7 @@ const (
 	HarnessCodex    HarnessType = "codex"
 	HarnessGemini   HarnessType = "gemini"
 	HarnessOpenCode HarnessType = "opencode"
+	HarnessPi       HarnessType = "pi"
 )
 
 // ValidateHarness checks if the harness type is supported
@@ -30,20 +31,22 @@ func ValidateHarness(harness string) (HarnessType, error) {
 		return HarnessGemini, nil
 	case "opencode":
 		return HarnessOpenCode, nil
+	case "pi":
+		return HarnessPi, nil
 	default:
-		return "", fmt.Errorf("unsupported harness: %s (supported: codex, gemini, opencode)", harness)
+		return "", fmt.Errorf("unsupported harness: %s (supported: codex, gemini, opencode, pi)", harness)
 	}
 }
 
 // HarnessInstallResult represents the result of an installation attempt
 type HarnessInstallResult struct {
-	Success       bool   `json:"success"`
-	Harness       string `json:"harness"`
-	Message       string `json:"message"`
-	Version       string `json:"version,omitempty"`
-	Path          string `json:"path,omitempty"`
-	SkipReason    string `json:"skip_reason,omitempty"`
-	ErrorDetails  string `json:"error_details,omitempty"`
+	Success      bool   `json:"success"`
+	Harness      string `json:"harness"`
+	Message      string `json:"message"`
+	Version      string `json:"version,omitempty"`
+	Path         string `json:"path,omitempty"`
+	SkipReason   string `json:"skip_reason,omitempty"`
+	ErrorDetails string `json:"error_details,omitempty"`
 }
 
 // IsInstalled checks if a harness is available in the system PATH
@@ -56,6 +59,8 @@ func IsInstalled(ctx context.Context, harness HarnessType) (bool, string, error)
 		cmd = "gemini"
 	case HarnessOpenCode:
 		cmd = "opencode"
+	case HarnessPi:
+		cmd = "pi"
 	default:
 		return false, "", fmt.Errorf("unknown harness: %s", harness)
 	}
@@ -81,6 +86,9 @@ func GetVersion(ctx context.Context, harness HarnessType) (string, error) {
 		args = []string{"--version"}
 	case HarnessOpenCode:
 		cmd = "opencode"
+		args = []string{"--version"}
+	case HarnessPi:
+		cmd = "pi"
 		args = []string{"--version"}
 	default:
 		return "", fmt.Errorf("unknown harness: %s", harness)
@@ -302,6 +310,55 @@ func InstallOpenCode(ctx context.Context) *HarnessInstallResult {
 	return result
 }
 
+// InstallPi installs the Pi coding agent CLI via its canonical npm package.
+func InstallPi(ctx context.Context) *HarnessInstallResult {
+	result := &HarnessInstallResult{Harness: string(HarnessPi)}
+
+	installed, path, err := IsInstalled(ctx, HarnessPi)
+	if err != nil {
+		result.Message = fmt.Sprintf("Error checking installation: %v", err)
+		result.ErrorDetails = err.Error()
+		return result
+	}
+	if installed {
+		result.Success = true
+		result.Message = "Pi CLI is already installed"
+		result.Path = path
+		result.SkipReason = "already_installed"
+		if version, versionErr := GetVersion(ctx, HarnessPi); versionErr == nil {
+			result.Version = version
+		}
+		return result
+	}
+
+	installCmd := exec.CommandContext(ctx, "npm", "install", "-g", "@earendil-works/pi-coding-agent")
+	var stdOut, stdErr bytes.Buffer
+	installCmd.Stdout = &stdOut
+	installCmd.Stderr = &stdErr
+	if err := installCmd.Run(); err != nil {
+		result.Message = fmt.Sprintf("Failed to install Pi CLI via npm: %v", err)
+		result.ErrorDetails = stdErr.String()
+		return result
+	}
+
+	installed, path, verifyErr := IsInstalled(ctx, HarnessPi)
+	if verifyErr != nil || !installed {
+		result.Message = "Installation completed but pi binary not found in PATH"
+		if verifyErr != nil {
+			result.ErrorDetails = verifyErr.Error()
+		}
+		return result
+	}
+
+	result.Success = true
+	result.Message = "Pi CLI installed successfully via npm"
+	result.Path = path
+	if version, versionErr := GetVersion(ctx, HarnessPi); versionErr == nil {
+		result.Version = version
+	}
+	return result
+}
+
 // Install installs a harness and returns the result as JSON
 func Install(ctx context.Context, harness HarnessType) (*HarnessInstallResult, error) {
 	switch harness {
@@ -311,6 +368,8 @@ func Install(ctx context.Context, harness HarnessType) (*HarnessInstallResult, e
 		return InstallGemini(ctx), nil
 	case HarnessOpenCode:
 		return InstallOpenCode(ctx), nil
+	case HarnessPi:
+		return InstallPi(ctx), nil
 	default:
 		return nil, fmt.Errorf("unknown harness: %s", harness)
 	}

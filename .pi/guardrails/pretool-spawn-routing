@@ -1,0 +1,2 @@
+#!/bin/sh
+exec "${PI_PROJECT_DIR:?}/.opencode/hooks/pretool-spawn-routing"

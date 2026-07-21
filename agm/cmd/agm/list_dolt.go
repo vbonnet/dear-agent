@@ -271,6 +271,8 @@ func shortHarness(harness string) string {
 		return "oc"
 	case "agy", "antigravity", "agy-cli":
 		return "agy"
+	case "pi-cli", "pi":
+		return "pi"
 	default:
 		return harness
 	}

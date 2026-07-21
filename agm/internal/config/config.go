@@ -159,7 +159,8 @@ type BudgetConfig struct {
 	StateFile string `yaml:"state_file,omitempty"`
 
 	// SessionTokenCaps maps harness name → max tokens per individual session.
-	// Keys: "claude-code", "codex-cli", "gemini-cli", "opencode-cli"
+	// Keys: "claude-code", "codex-cli", "agy", "opencode-cli", "pi-cli",
+	// plus deprecated "gemini-cli" compatibility.
 	// 0 means no per-session cap for that harness.
 	SessionTokenCaps map[string]int64 `yaml:"session_token_caps,omitempty"`
 
@@ -232,6 +233,7 @@ func Default() *Config {
 				"gemini-cli":   "✨",
 				"codex-cli":    "🧠",
 				"opencode-cli": "💻",
+				"pi-cli":       "π",
 			},
 			CustomFormats: map[string]string{
 				"minimal":     "{{.AgentIcon}} {{.State}} | {{if ge .ContextPercent 0.0}}{{printf \"%.0f\" .ContextPercent}}%{{else}}--{{end}}",
@@ -258,6 +260,7 @@ func Default() *Config {
 				"codex-cli":    0,
 				"gemini-cli":   0,
 				"opencode-cli": 0,
+				"pi-cli":       0,
 			},
 			FallbackChain: []string{"sonnet", "haiku"},
 		},

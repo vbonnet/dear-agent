@@ -35,6 +35,57 @@ type AgyCommand struct {
 	ModeAppliedAtStartup bool
 }
 
+// PiCommandSpec is the complete native Pi create/resume command contract.
+type PiCommandSpec struct {
+	WorkDir              string
+	ResolvedModel        string
+	SessionName          string
+	SessionID            string
+	SessionDir           string
+	PermissionMode       string
+	PermissionExtension  string
+	PermissionPolicyFile string
+	Persistent           bool
+}
+
+// PiCommand is the Pi command plus its startup mode outcome.
+type PiCommand struct {
+	Command              string
+	ModeAppliedAtStartup bool
+}
+
+// BuildPiCommand constructs one canonical Pi command for create and resume.
+func BuildPiCommand(spec PiCommandSpec) PiCommand {
+	var b strings.Builder
+	fmt.Fprintf(&b, "cd %s && env -u CLAUDECODE AGM_SESSION_NAME=%s PI_SESSION_ID=%s AGM_PI_PROJECT_DIR=%s", ShellQuote(spec.WorkDir), ShellQuote(spec.SessionName), ShellQuote(spec.SessionID), ShellQuote(spec.WorkDir))
+	fmt.Fprintf(&b, " AGM_PI_PERMISSION_MODE=%s AGM_PI_PERMISSION_POLICY_FILE=%s pi", ShellQuote(defaultPiMode(spec.PermissionMode)), ShellQuote(spec.PermissionPolicyFile))
+	fmt.Fprintf(&b, " --session-id %s --session-dir %s --name %s", ShellQuote(spec.SessionID), ShellQuote(spec.SessionDir), ShellQuote(spec.SessionName))
+	if spec.ResolvedModel != "" {
+		fmt.Fprintf(&b, " --model %s", ShellQuote(spec.ResolvedModel))
+	}
+	if spec.PermissionExtension != "" {
+		fmt.Fprintf(&b, " --extension %s", ShellQuote(spec.PermissionExtension))
+	}
+	fmt.Fprintf(&b, " --approve --tools %s", ShellQuote(PiToolsForMode(spec.PermissionMode)))
+	b.WriteString(ExitSuffix(spec.Persistent))
+	return PiCommand{Command: b.String(), ModeAppliedAtStartup: true}
+}
+
+func defaultPiMode(mode string) string {
+	if mode == "" {
+		return "default"
+	}
+	return mode
+}
+
+// PiToolsForMode removes mutating tools completely in plan mode.
+func PiToolsForMode(mode string) string {
+	if mode == "plan" {
+		return "read,grep,find,ls"
+	}
+	return "read,bash,edit,write,grep,find,ls"
+}
+
 // BuildAgyCommand constructs one canonical AGY interactive command for both
 // fresh launches and cold resumes.
 func BuildAgyCommand(spec AgyCommandSpec) AgyCommand {
@@ -82,6 +133,9 @@ func Resolve(harness, mode string, persistent bool) (Contract, error) {
 		contract.ModeToken = AgyPermissionModeFlag(mode)
 	case "opencode-cli":
 		contract.InteractiveToken = "opencode attach"
+	case "pi-cli":
+		contract.InteractiveToken = "pi"
+		contract.ModeToken = "--tools " + PiToolsForMode(mode)
 	default:
 		return Contract{}, fmt.Errorf("unsupported active harness %q", harness)
 	}

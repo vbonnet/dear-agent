@@ -86,7 +86,7 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
 {
   "filters": {
     "status": "active|archived|all",
-    "agent_type": "claude-code|codex-cli|agy|opencode-cli|gemini-cli|all",
+    "agent_type": "claude-code|codex-cli|agy|opencode-cli|pi-cli|gemini-cli|all",
     "limit": 100
   }
 }
@@ -209,7 +209,7 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
   "cwd": "/absolute/project/path",
   "prompt": "initial task",
   "title": "optional-session-name",
-  "harness": "claude-code|codex-cli|agy|opencode-cli|gemini-cli",
+  "harness": "claude-code|codex-cli|agy|opencode-cli|pi-cli|gemini-cli",
   "model": "optional model alias"
 }
 ```
@@ -232,7 +232,7 @@ type MCPSessionMetadata struct {
     CreatedAt      string  `json:"created_at"`       // RFC3339 timestamp
     UpdatedAt      string  `json:"updated_at"`       // RFC3339 timestamp
     Status         string  `json:"status"`           // active|archived
-    Harness        string  `json:"harness"`          // claude-code, codex-cli, agy, opencode-cli, gemini-cli
+    Harness        string  `json:"harness"`          // claude-code, codex-cli, agy, opencode-cli, pi-cli, gemini-cli
     TmuxSession    string  `json:"tmux_session"`     // Tmux session name
     RelevanceScore float64 `json:"relevance_score"`  // Optional (search only)
 }

@@ -17,6 +17,7 @@ func TestActiveHarnessContracts(t *testing.T) {
 		{harness: "codex-cli", mode: "auto", interactive: "codex", modeToken: "-a never"},
 		{harness: "agy", mode: "auto", interactive: "agy", modeToken: "--dangerously-skip-permissions"},
 		{harness: "opencode-cli", mode: "plan", interactive: "opencode attach"},
+		{harness: "pi-cli", mode: "plan", interactive: "pi", modeToken: "--tools read,grep,find,ls"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.harness, func(t *testing.T) {

@@ -1,6 +1,6 @@
 # Agent Harness and Model Parity Specification
 
-<!-- Last audited at: 2026-07-20 -->
+<!-- Last audited at: 2026-07-21 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -13,7 +13,7 @@ resume, send to, inspect, export, import, and terminate AI agent sessions. It
 also owns the model alias registry used by CLI creation flows, OpenCode model
 selection, and cross-harness tier aliases.
 
-Claude Code is the reference implementation. Codex CLI, AGY, and OpenCode are
+Claude Code is the reference implementation. Codex CLI, AGY, OpenCode, and Pi are
 active parity harnesses. Gemini CLI is accepted only for deprecated
 compatibility.
 
@@ -21,7 +21,7 @@ compatibility.
 
 ### Harness Parity
 
-**AGP-01** When AGM enumerates active harnesses, the system shall return `claude-code`, `codex-cli`, `agy`, and `opencode-cli` in canonical parity order.
+**AGP-01** When AGM enumerates active harnesses, the system shall return `claude-code`, `codex-cli`, `agy`, `opencode-cli`, and `pi-cli` in canonical parity order.
 
 **AGP-02** When AGM validates a deprecated compatibility harness, the system shall accept `gemini-cli` without adding it to the active parity set.
 
@@ -49,7 +49,27 @@ compatibility.
 
 **AGP-10** When a user selects a Claude tier alias for another active harness, the system shall resolve the tier to that harness's closest native model alias.
 
-**AGP-11** When a user selects an active harness's test mode, the system shall choose a low-cost test model for `claude-code`, `codex-cli`, `agy`, and `opencode-cli`.
+**AGP-11** When a user selects an active harness's test mode, the system shall choose a low-cost test model for `claude-code`, `codex-cli`, `agy`, `opencode-cli`, and `pi-cli`.
+
+### Pi Native Session Lifecycle
+
+**AGP-39** When AGM creates a Pi session, the system shall invoke `pi` with AGM's session ID as Pi's exact `--session-id`, an AGM-owned private `--session-dir`, the managed authorization `--extension`, explicit project approval, and the resolved model and active-tool set.
+
+**AGP-40** When AGM resumes a Pi session, the system shall use the persisted Pi session ID and session directory and shall reject unsafe or ambiguous native identity rather than substitute newest-file discovery.
+
+**AGP-41** When AGM sends a prompt, mode transition, or model transition to a running Pi session, the system shall wait for the managed `AGM <mode>/ready` status and shall route the operation through Pi's native composer or AGM extension commands.
+
+**AGP-42** When AGM reads, imports, exports, or resumes Pi history, the system shall resolve the transcript whose header contains the exact persisted Pi session ID, bound every file and tree walk, reject duplicate native IDs, and preserve the identity in both manifest and Dolt metadata.
+
+**AGP-43** When AGM evaluates Pi capabilities, the system shall expose native AGENTS.md loading, project skills, exact model routing, resumable JSONL sessions, managed hooks, and bridged tool authorization without claiming native quota or rate-limit telemetry that Pi does not provide.
+
+**AGP-44** When AGM exports Pi history through the shared Agent message model, the system shall include user and assistant text without mislabeling tool results as assistant speech, while native export shall preserve the original JSONL.
+
+**AGP-45** When OpenCode resolves an alias aggregated from multiple harness catalogs, the system shall use stable explicit precedence and prefer provider-qualified routes instead of depending on map iteration order.
+
+**AGP-46** When the Pi adapter imports a native transcript, the system shall preserve an established provider-qualified model and shall not fabricate a default override when native model provenance is absent.
+
+**AGP-47** When AGM cold-resumes a Pi session before Pi has persisted a native transcript, the system shall preserve the configured model or use the Pi harness default; when a persisted transcript exists without model provenance, the system shall omit `--model` so Pi retains native session truth.
 
 ### AGY Model and Adapter Lifecycle
 
@@ -112,4 +132,4 @@ compatibility.
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
-- Package tests: `agm/internal/agent/agy_adapter_test.go`
+- Package tests: `agm/internal/agent/agy_adapter_test.go`, `agm/internal/agent/pi_adapter_test.go`

@@ -54,6 +54,13 @@ func SurfaceForHarness(harness string) (HarnessSurface, bool) {
 			ExecutionSurface: "wayfinder session CLI",
 			StatusSurface:    "MCP Wayfinder tools and WAYFINDER-STATUS.md",
 		}, true
+	case "pi-cli":
+		return HarnessSurface{
+			Harness:          "pi-cli",
+			DiscoverySurface: ".pi/settings.json native skill discovery plus AGENTS.md",
+			ExecutionSurface: "Wayfinder skill and wayfinder-session CLI",
+			StatusSurface:    "MCP Wayfinder tools and WAYFINDER-STATUS.md",
+		}, true
 	default:
 		return HarnessSurface{}, false
 	}

@@ -45,7 +45,8 @@ type PaneLiveness struct {
 	// scan can prove nothing about a session it cannot see.
 	SessionExists bool
 	// HarnessAlive reports whether a harness process (claude, codex, agy,
-	// node, …) is running anywhere in a pane's descendant process tree.
+	// opencode, pi, node, …) is running anywhere in a pane's descendant process
+	// tree.
 	// This is the only signal that proves the session is genuinely alive.
 	HarnessAlive bool
 	// ZombieWriter reports the ce-qkf7 failure mode: no harness process is
@@ -71,6 +72,7 @@ var harnessComms = map[string]bool{
 	"node":     true,
 	"gemini":   true,
 	"opencode": true,
+	"pi":       true,
 }
 
 // IsHarnessComm reports whether a process comm value names a known harness
@@ -375,6 +377,15 @@ func IsProcessInPaneTreeContext(parent context.Context, sessionName, socketPath,
 	if err != nil || len(pids) == 0 {
 		return false, err
 	}
+	// A matching pane foreground command is already exact positive evidence and
+	// avoids requiring an OS-wide process-table scan for the common case. This
+	// also keeps delivery checks usable in nested sandboxes where tmux is visible
+	// but `ps -axo` is intentionally unavailable. A miss still falls through to
+	// the full descendant-tree scan so wrapper shells and crash-resume trees work.
+	command := exec.CommandContext(ctx, "tmux", "-S", socketPath, "list-panes", "-s", "-t", FormatSessionTarget(NormalizeTmuxSessionName(sessionName)), "-F", "#{pane_current_command}")
+	if output, commandErr := command.Output(); commandErr == nil && paneCommandMatchesProcess(string(output), processName) {
+		return true, nil
+	}
 	procs, err := readProcessTable(ctx)
 	if err != nil {
 		return false, err
@@ -383,4 +394,14 @@ func IsProcessInPaneTreeContext(parent context.Context, sessionName, socketPath,
 		return comm == processName || filepath.Base(comm) == processName
 	})
 	return verdict.HarnessAlive, nil
+}
+
+func paneCommandMatchesProcess(output, processName string) bool {
+	for line := range strings.SplitSeq(output, "\n") {
+		command := strings.TrimSpace(line)
+		if command == processName || filepath.Base(command) == processName {
+			return true
+		}
+	}
+	return false
 }

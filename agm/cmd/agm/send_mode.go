@@ -32,6 +32,7 @@ Harness-specific behavior:
   opencode-cli  Uses Tab to cycle between plan and default
   codex-cli     Reports an explicit restart configuration fallback
   agy           Reports an explicit restart flag fallback
+  pi-cli        Uses the managed /agm-mode command and native tool interception
 
 Examples:
   # Switch to plan mode
@@ -65,6 +66,8 @@ var validModes = map[string]bool{
 	"auto":    true,
 	"default": true,
 }
+
+var sendPiModeCommand = tmux.SendSlashCommandSafeContext
 
 // calculateShiftTabPresses computes how many Shift+Tab presses are needed
 // to cycle from currentMode to targetMode in Claude Code.
@@ -152,6 +155,8 @@ func dispatchModeSwitchContext(ctx context.Context, harness, sessionName, target
 		return sendModeRestartFallback("codex-cli", targetMode)
 	case "agy":
 		return sendModeRestartFallback("agy", targetMode)
+	case "pi-cli":
+		return sendModePiContext(ctx, sessionName, targetMode)
 	default:
 		return fmt.Errorf("unsupported harness %q for mode switching", harness)
 	}
@@ -239,7 +244,16 @@ func printDryRunDetails(harness, targetMode, currentMode, sessionName string) {
 		fmt.Printf("  Fallback: %s\n", modeRestartInstruction("codex-cli", targetMode))
 	case "agy":
 		fmt.Printf("  Fallback: %s\n", modeRestartInstruction("agy", targetMode))
+	case "pi-cli":
+		fmt.Printf("  Would send: /agm-mode %s\n", targetMode)
 	}
+}
+
+func sendModePiContext(ctx context.Context, sessionName, targetMode string) error {
+	if err := sendPiModeCommand(ctx, sessionName, "/agm-mode "+targetMode); err != nil {
+		return fmt.Errorf("failed to switch Pi mode: %w", err)
+	}
+	return nil
 }
 
 func sendModeClaudeCode(sessionName, targetMode, currentMode string) error {

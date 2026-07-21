@@ -44,7 +44,7 @@ source of truth.
 
 ### Harness parity without harness denial
 
-AGM supports Claude Code, Codex CLI, AGY, and OpenCode as active harnesses;
+AGM supports Claude Code, Codex CLI, AGY, OpenCode, and Pi as active harnesses;
 Gemini CLI remains deprecated compatibility. Harness-specific behavior exists
 and must be made explicit where it leaks. The goal is parity through shared
 contracts, adapters, tests, and honest fallback paths, not documentation that

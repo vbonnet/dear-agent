@@ -94,3 +94,10 @@ Feature: Declarative runtime guardrails
       | opencode-cli  | deepseek  |
       | opencode-cli  | nemotron  |
       | opencode-cli  | qwen      |
+      | pi-cli        | anthropic |
+      | pi-cli        | openai    |
+      | pi-cli        | gemini    |
+      | pi-cli        | glm       |
+      | pi-cli        | deepseek  |
+      | pi-cli        | nemotron  |
+      | pi-cli        | qwen      |

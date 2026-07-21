@@ -122,6 +122,7 @@ func commitCurrentTmuxManifest(manifestPath, sessionName string) {
 type currentTmuxHarnessRuntime struct {
 	startClaude   func(context.Context, ops.HarnessLaunchSpec) error
 	startCodex    func(ops.HarnessLaunchSpec) (bool, error)
+	startPi       func(ops.HarnessLaunchSpec) (bool, error)
 	startOpenCode func(context.Context, ops.HarnessLaunchSpec) error
 	startGemini   func(context.Context, ops.HarnessLaunchSpec) error
 	validateCodex func() error
@@ -131,10 +132,44 @@ func realCurrentTmuxHarnessRuntime() currentTmuxHarnessRuntime {
 	return currentTmuxHarnessRuntime{
 		startClaude:   startCurrentTmuxClaude,
 		startCodex:    queueCurrentTmuxCodex,
+		startPi:       queueCurrentTmuxPi,
 		startOpenCode: startCurrentTmuxOpenCode,
 		startGemini:   startCurrentTmuxGemini,
 		validateCodex: validateCodexCredentials,
 	}
+}
+
+type currentTmuxPiQueueRuntime struct {
+	sendCommand func(sessionName, command string) error
+	lookPath    func(file string) (string, error)
+}
+
+func queueCurrentTmuxPi(spec ops.HarnessLaunchSpec) (bool, error) {
+	return queueCurrentTmuxPiWithRuntime(spec, currentTmuxPiQueueRuntime{
+		sendCommand: tmux.SendCommand,
+		lookPath:    exec.LookPath,
+	})
+}
+
+// queueCurrentTmuxPi mirrors Codex's in-pane lifecycle: AGM must finish
+// registering metadata before the shell can consume the queued foreground Pi
+// command. Detached creation performs the managed-ready wait instead.
+func queueCurrentTmuxPiWithRuntime(spec ops.HarnessLaunchSpec, runtime currentTmuxPiQueueRuntime) (bool, error) {
+	if _, err := runtime.lookPath("pi"); err != nil {
+		return false, fmt.Errorf("pi executable is unavailable: %w", err)
+	}
+	launch := ops.BuildHarnessLaunchCommand(spec)
+	if err := runtime.sendCommand(spec.SessionName, launch.Command); err != nil {
+		ui.PrintError(err,
+			"Failed to queue Pi in current tmux pane",
+			"  • Verify Pi is installed: which pi\n"+
+				"  • Test Pi manually: pi --version\n"+
+				"  • Check you're in tmux: echo $TMUX")
+		return false, err
+	}
+	debug.Log("Pi command queued; metadata will finalize before the current shell launches it")
+	ui.PrintSuccess("Queued Pi in current tmux session")
+	return launch.ModeAppliedAtStartup, nil
 }
 
 type currentTmuxCodexQueueRuntime struct {
@@ -194,6 +229,9 @@ func startCurrentTmuxHarnessWithRuntime(ctx context.Context, spec ops.HarnessLau
 			return err
 		}
 		_, err := runtime.startCodex(spec)
+		return err
+	case "pi-cli":
+		_, err := runtime.startPi(spec)
 		return err
 	case "opencode-cli":
 		return runtime.startOpenCode(ctx, spec)
