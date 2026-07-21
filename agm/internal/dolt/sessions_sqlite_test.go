@@ -508,6 +508,7 @@ func TestSQLiteTmuxSessionNameStaleFullUpdatePreservesOwnership(t *testing.T) {
 	if err != nil || change == nil {
 		t.Fatalf("BeginTmuxSessionNameChange() = (%v, %v), want non-nil change", change, err)
 	}
+	stale.Name = "stale-display-name"
 	stale.Context.Notes = "unrelated stale-writer update"
 	if err := adapter.UpdateSession(stale); err != nil {
 		t.Fatalf("UpdateSession() from stale snapshot: %v", err)
@@ -516,13 +517,14 @@ func TestSQLiteTmuxSessionNameStaleFullUpdatePreservesOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSession() after stale update: %v", err)
 	}
-	if stored.Tmux.SessionName != change.CurrentName || stored.Tmux.SessionRevision == "" || stored.Tmux.SessionRevision == change.CurrentRevision {
-		t.Fatalf("tmux state after stale update = (%q, %q), want canonical name with advanced revision", stored.Tmux.SessionName, stored.Tmux.SessionRevision)
+	if stored.Name != m.Name || stored.Tmux.SessionName != change.CurrentName || stored.Tmux.SessionRevision == "" || stored.Tmux.SessionRevision == change.CurrentRevision {
+		t.Fatalf("identity after stale update = (%q, %q, %q), want original display name, canonical tmux name, and advanced revision", stored.Name, stored.Tmux.SessionName, stored.Tmux.SessionRevision)
 	}
 	if stored.Context.Notes != stale.Context.Notes {
 		t.Fatalf("unrelated notes = %q, want %q", stored.Context.Notes, stale.Context.Notes)
 	}
 	firstSupersedingRevision := stored.Tmux.SessionRevision
+	secondStale.Name = "second-stale-display-name"
 	secondStale.Context.Notes = "second unrelated stale-writer update"
 	if err := adapter.UpdateSession(secondStale); err != nil {
 		t.Fatalf("UpdateSession() from second stale snapshot: %v", err)
@@ -531,8 +533,8 @@ func TestSQLiteTmuxSessionNameStaleFullUpdatePreservesOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSession() after second stale update: %v", err)
 	}
-	if stored.Tmux.SessionName != change.CurrentName || stored.Tmux.SessionRevision == "" || stored.Tmux.SessionRevision == firstSupersedingRevision {
-		t.Fatalf("tmux state after second stale update = (%q, %q), want canonical name with another advanced revision", stored.Tmux.SessionName, stored.Tmux.SessionRevision)
+	if stored.Name != m.Name || stored.Tmux.SessionName != change.CurrentName || stored.Tmux.SessionRevision == "" || stored.Tmux.SessionRevision == firstSupersedingRevision {
+		t.Fatalf("identity after second stale update = (%q, %q, %q), want original display name, canonical tmux name, and another advanced revision", stored.Name, stored.Tmux.SessionName, stored.Tmux.SessionRevision)
 	}
 	if stored.Context.Notes != secondStale.Context.Notes {
 		t.Fatalf("second unrelated notes = %q, want %q", stored.Context.Notes, secondStale.Context.Notes)

@@ -278,9 +278,11 @@ creation, and terminal state detection.
   while preserving existing sessions before those lifecycle mutations run;
   compensation restores the prior activity timestamp with the prior name.
 - Authoritative `agm session rename` updates both stored names through the
-  exact revision it observed; a concurrent identity advance returns a conflict
-  and compensates the already-moved tmux name even after caller cancellation,
-  joining rollback failures. Lost tmux responses are reconciled through a
+  exact revision it observed and holds the same stable-ID lifecycle lock as
+  cold resume across all rename effects. A concurrent identity advance returns
+  a conflict and compensates the already-moved tmux name even after caller
+  cancellation, joining rollback failures. Stale broad writers preserve both
+  current identity names while applying unrelated metadata. Lost tmux responses are reconciled through a
   server-local ID plus random option marker so name or ID reuse cannot adopt a
   replacement. Lost storage responses first fence the observed revision with
   a competing compare-and-swap before the prior identity can authorize rollback.

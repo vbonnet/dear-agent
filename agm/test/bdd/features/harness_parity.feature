@@ -362,7 +362,7 @@ Feature: Harness parity
     When AGM validates the Codex resume transaction
     Then Codex resume success should require process and composer readiness
     And a failed Codex resume should serialize concurrent attempts through every production entry point, release the session lock before attachment, preserve canonical tmux identity from stale full-session updates, reconcile ambiguous metadata commits, compensate owned provisional metadata before removing its creation-specific tmux identity even when tmux ID output is lost, and preserve tmux whenever metadata cleanup is unproven
-    And authoritative session renames should fence ambiguous storage writes, preserve claimed tmux identity across lost replies and server restarts, reject stale identity revisions, and compensate tmux after storage conflicts
+    And authoritative session renames should serialize with cold resume, fence ambiguous storage writes, preserve both identity names from stale writers, preserve claimed tmux identity across lost replies and server restarts, reject stale identity revisions, and compensate tmux after storage conflicts
     And successful Codex prompt delivery should remain successful after later caller cancellation
     And failed Codex prompt delivery should not suppress a later attach failure
     And Codex activity updates should follow resume readiness

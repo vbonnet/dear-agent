@@ -3,12 +3,16 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
@@ -21,6 +25,61 @@ type recordingSessionIdentityRenamer struct {
 func (r *recordingSessionIdentityRenamer) RenameSessionIdentity(context.Context, string, string, string, string, string) (dolt.RenameSessionIdentityResult, error) {
 	r.calls++
 	return r.result, r.err
+}
+
+func TestSessionRenameSerializesWithResumeByStableID(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	const sessionID = "stable-session-id"
+	lockHeld := make(chan struct{})
+	release := make(chan struct{})
+	lockerDone := make(chan error, 1)
+	go func() {
+		lockerDone <- ops.WithSessionLock(sessionID, func() error {
+			close(lockHeld)
+			<-release
+			return nil
+		})
+	}()
+	<-lockHeld
+
+	transactionStarted := make(chan struct{})
+	renameReachedLock := make(chan struct{})
+	renameDone := make(chan error, 1)
+	var closeRelease sync.Once
+	t.Cleanup(func() {
+		closeRelease.Do(func() { close(release) })
+	})
+	go func() {
+		renameDone <- runSessionRenameTransactionWithLock(sessionID, func(gotSessionID string, transaction func() error) error {
+			if gotSessionID != sessionID {
+				return fmt.Errorf("rename lock key = %q, want %q", gotSessionID, sessionID)
+			}
+			close(renameReachedLock)
+			return ops.WithSessionLock(gotSessionID, transaction)
+		}, func() error {
+			close(transactionStarted)
+			return nil
+		})
+	}()
+	<-renameReachedLock
+
+	select {
+	case <-transactionStarted:
+		t.Fatal("rename transaction entered while the resume lock was held")
+	case <-time.After(100 * time.Millisecond):
+	}
+	closeRelease.Do(func() { close(release) })
+	if err := <-lockerDone; err != nil {
+		t.Fatalf("holding session lock: %v", err)
+	}
+	select {
+	case err := <-renameDone:
+		if err != nil {
+			t.Fatalf("rename transaction after lock release: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("rename transaction did not acquire the released session lock")
+	}
 }
 
 func TestPersistRenamedSessionIdentityRollsBackTmuxAfterStorageConflict(t *testing.T) {

@@ -48,6 +48,7 @@ func TestDoltTmuxSessionNameChangeUsesCrossDialectOwnership(t *testing.T) {
 	if !provisionalRevision.Valid || provisionalRevision.String != change.CurrentRevision {
 		t.Fatalf("provisional revision = %#v, want %q", provisionalRevision, change.CurrentRevision)
 	}
+	stale.Name = "stale-production-display-name"
 	stale.Context.Notes = "stale production writer"
 	if err := adapter.UpdateSession(stale); err != nil {
 		t.Fatalf("UpdateSession() from pre-revision snapshot: %v", err)
@@ -56,10 +57,11 @@ func TestDoltTmuxSessionNameChangeUsesCrossDialectOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSession() after stale full update: %v", err)
 	}
-	if preserved.Tmux.SessionName != change.CurrentName || preserved.Tmux.SessionRevision == "" || preserved.Tmux.SessionRevision == change.CurrentRevision || preserved.Context.Notes != stale.Context.Notes {
-		t.Fatalf("stale full update state = (name=%q revision=%q notes=%q), want canonical name, advanced revision, and unrelated note", preserved.Tmux.SessionName, preserved.Tmux.SessionRevision, preserved.Context.Notes)
+	if preserved.Name != m.Name || preserved.Tmux.SessionName != change.CurrentName || preserved.Tmux.SessionRevision == "" || preserved.Tmux.SessionRevision == change.CurrentRevision || preserved.Context.Notes != stale.Context.Notes {
+		t.Fatalf("stale full update state = (display=%q tmux=%q revision=%q notes=%q), want original display name, canonical tmux name, advanced revision, and unrelated note", preserved.Name, preserved.Tmux.SessionName, preserved.Tmux.SessionRevision, preserved.Context.Notes)
 	}
 	firstSupersedingRevision := preserved.Tmux.SessionRevision
+	secondStale.Name = "second-stale-production-display-name"
 	secondStale.Context.Notes = "second stale production writer"
 	if err := adapter.UpdateSession(secondStale); err != nil {
 		t.Fatalf("UpdateSession() from second pre-revision snapshot: %v", err)
@@ -68,8 +70,8 @@ func TestDoltTmuxSessionNameChangeUsesCrossDialectOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSession() after second stale full update: %v", err)
 	}
-	if preserved.Tmux.SessionName != change.CurrentName || preserved.Tmux.SessionRevision == "" || preserved.Tmux.SessionRevision == firstSupersedingRevision || preserved.Context.Notes != secondStale.Context.Notes {
-		t.Fatalf("second stale full update state = (name=%q revision=%q notes=%q), want canonical name, another advanced revision, and second unrelated note", preserved.Tmux.SessionName, preserved.Tmux.SessionRevision, preserved.Context.Notes)
+	if preserved.Name != m.Name || preserved.Tmux.SessionName != change.CurrentName || preserved.Tmux.SessionRevision == "" || preserved.Tmux.SessionRevision == firstSupersedingRevision || preserved.Context.Notes != secondStale.Context.Notes {
+		t.Fatalf("second stale full update state = (display=%q tmux=%q revision=%q notes=%q), want original display name, canonical tmux name, another advanced revision, and second unrelated note", preserved.Name, preserved.Tmux.SessionName, preserved.Tmux.SessionRevision, preserved.Context.Notes)
 	}
 	completed, err := adapter.CompleteTmuxSessionNameChange(t.Context(), *change)
 	if err != nil || completed {
