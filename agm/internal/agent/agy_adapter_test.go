@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,6 +16,28 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
+type stubAgyIdentityTracker struct {
+	snapshot func(context.Context, string) (string, error)
+	discover func(context.Context, string, string) (*agysession.Metadata, error)
+}
+
+func (tracker *stubAgyIdentityTracker) Snapshot(ctx context.Context, workDir string) (string, error) {
+	return tracker.snapshot(ctx, workDir)
+}
+
+func (tracker *stubAgyIdentityTracker) Discover(ctx context.Context, workDir, previousConversationID string) (*agysession.Metadata, error) {
+	return tracker.discover(ctx, workDir, previousConversationID)
+}
+
+func useStubAgyIdentityTracker(
+	snapshot func(context.Context, string) (string, error),
+	discover func(context.Context, string, string) (*agysession.Metadata, error),
+) {
+	agyIdentityTracker = func() agysession.CreateIdentityTracker {
+		return &stubAgyIdentityTracker{snapshot: snapshot, discover: discover}
+	}
+}
+
 func preserveAgyAdapterSeams(t *testing.T) {
 	t.Helper()
 	origHasSession := agyHasSession
@@ -26,8 +49,7 @@ func preserveAgyAdapterSeams(t *testing.T) {
 	origIsIdle := agyIsIdle
 	origAttachSession := agyAttachSession
 	origKillSession := agyKillSession
-	origFindConversation := agyFindConversation
-	origDiscoverySleep := agyDiscoverySleep
+	origIdentityTracker := agyIdentityTracker
 	origAcquireCreateLock := agyAcquireCreateLock
 	agyAcquireCreateLock = func(string) (func() error, error) {
 		return func() error { return nil }, nil
@@ -42,8 +64,7 @@ func preserveAgyAdapterSeams(t *testing.T) {
 		agyIsIdle = origIsIdle
 		agyAttachSession = origAttachSession
 		agyKillSession = origKillSession
-		agyFindConversation = origFindConversation
-		agyDiscoverySleep = origDiscoverySleep
+		agyIdentityTracker = origIdentityTracker
 		agyAcquireCreateLock = origAcquireCreateLock
 	})
 }
@@ -242,15 +263,22 @@ func TestAgyCreateSessionCapturesNativeConversationIdentity(t *testing.T) {
 	agySendCommand = func(string, string) error { return nil }
 	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return nil }
 	var discoveredWorkDir string
-	discoveryCalls := 0
-	agyFindConversation = func(workDir string) (string, error) {
-		discoveryCalls++
-		discoveredWorkDir = workDir
-		if discoveryCalls == 1 {
+	snapshotCalls, discoveryCalls := 0, 0
+	useStubAgyIdentityTracker(
+		func(_ context.Context, workDir string) (string, error) {
+			snapshotCalls++
+			discoveredWorkDir = workDir
 			return "pre-existing-conversation-id", nil
-		}
-		return "provider-conversation-id", nil
-	}
+		},
+		func(_ context.Context, workDir, previousConversationID string) (*agysession.Metadata, error) {
+			discoveryCalls++
+			discoveredWorkDir = workDir
+			if previousConversationID != "pre-existing-conversation-id" {
+				t.Fatalf("previous conversation ID = %q", previousConversationID)
+			}
+			return &agysession.Metadata{ConversationID: "provider-conversation-id", WorkspacePath: workDir}, nil
+		},
+	)
 
 	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
 	sessionID, err := (&AgyAdapter{sessionStore: store}).CreateSession(SessionContext{
@@ -263,8 +291,8 @@ func TestAgyCreateSessionCapturesNativeConversationIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stored session metadata: %v", err)
 	}
-	if discoveredWorkDir != "/work" || discoveryCalls != 2 || metadata.UUID != "provider-conversation-id" {
-		t.Fatalf("discovered workdir/calls/native ID = %q/%d/%q", discoveredWorkDir, discoveryCalls, metadata.UUID)
+	if discoveredWorkDir != "/work" || snapshotCalls != 1 || discoveryCalls != 1 || metadata.UUID != "provider-conversation-id" {
+		t.Fatalf("discovered workdir/snapshot/discovery calls/native ID = %q/%d/%d/%q", discoveredWorkDir, snapshotCalls, discoveryCalls, metadata.UUID)
 	}
 }
 
@@ -293,13 +321,16 @@ func TestAgyCreateSessionNormalizesWorkingDirectoryForLaunchAndDiscovery(t *test
 	agySendCommand = func(_ string, value string) error { command = value; return nil }
 	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return nil }
 	discoveredWorkDirs := []string{}
-	agyFindConversation = func(workDir string) (string, error) {
-		discoveredWorkDirs = append(discoveredWorkDirs, workDir)
-		if len(discoveredWorkDirs) == 1 {
-			return "", agysession.ErrConversationNotFound
-		}
-		return "provider-conversation-id", nil
-	}
+	useStubAgyIdentityTracker(
+		func(_ context.Context, workDir string) (string, error) {
+			discoveredWorkDirs = append(discoveredWorkDirs, workDir)
+			return "", nil
+		},
+		func(_ context.Context, workDir, _ string) (*agysession.Metadata, error) {
+			discoveredWorkDirs = append(discoveredWorkDirs, workDir)
+			return &agysession.Metadata{ConversationID: "provider-conversation-id", WorkspacePath: workDir}, nil
+		},
+	)
 
 	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
 	sessionID, err := (&AgyAdapter{sessionStore: store}).CreateSession(SessionContext{
@@ -332,11 +363,21 @@ func TestAgyCreateSessionSerializesWorkspaceIdentityDiscovery(t *testing.T) {
 
 	var providerMu sync.Mutex
 	providerConversationID := "pre-existing-conversation-id"
-	agyFindConversation = func(string) (string, error) {
-		providerMu.Lock()
-		defer providerMu.Unlock()
-		return providerConversationID, nil
-	}
+	useStubAgyIdentityTracker(
+		func(context.Context, string) (string, error) {
+			providerMu.Lock()
+			defer providerMu.Unlock()
+			return providerConversationID, nil
+		},
+		func(_ context.Context, workDir, previousConversationID string) (*agysession.Metadata, error) {
+			providerMu.Lock()
+			defer providerMu.Unlock()
+			if providerConversationID == previousConversationID {
+				return nil, fmt.Errorf("provider still reports pre-create conversation %q", previousConversationID)
+			}
+			return &agysession.Metadata{ConversationID: providerConversationID, WorkspacePath: workDir}, nil
+		},
+	)
 	secondReachedLifecycle := make(chan struct{})
 	var secondReachedOnce sync.Once
 	agyHasSession = func(name string) (bool, error) {
@@ -419,15 +460,14 @@ func TestAgyCreateSessionRollsBackWhenNativeIdentityCannotBeCaptured(t *testing.
 	agySendCommand = func(string, string) error { return nil }
 	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return nil }
 	wantErr := errors.New("fixture provider metadata unavailable")
-	attempts := 0
-	agyFindConversation = func(string) (string, error) {
-		attempts++
-		if attempts == 1 {
-			return "", agysession.ErrConversationNotFound
-		}
-		return "", wantErr
-	}
-	agyDiscoverySleep = func(time.Duration) {}
+	discoveryCalls := 0
+	useStubAgyIdentityTracker(
+		func(context.Context, string) (string, error) { return "", nil },
+		func(context.Context, string, string) (*agysession.Metadata, error) {
+			discoveryCalls++
+			return nil, wantErr
+		},
+	)
 	killed := ""
 	agyKillSession = func(name string) error { killed = name; return nil }
 
@@ -437,8 +477,8 @@ func TestAgyCreateSessionRollsBackWhenNativeIdentityCannotBeCaptured(t *testing.
 	if !errors.Is(err, wantErr) || sessionID != "" {
 		t.Fatalf("CreateSession = %q, %v; want empty ID and discovery failure", sessionID, err)
 	}
-	if attempts != agyConversationDiscoveryAttempts+1 || killed != "agy-no-identity" {
-		t.Fatalf("discovery attempts/rollback = %d/%q", attempts, killed)
+	if discoveryCalls != 1 || killed != "agy-no-identity" {
+		t.Fatalf("canonical tracker calls/rollback = %d/%q", discoveryCalls, killed)
 	}
 	if sessions, listErr := store.List(); listErr != nil || len(sessions) != 0 {
 		t.Fatalf("failed create persisted sessions = %v, %v", sessions, listErr)
@@ -452,8 +492,12 @@ func TestAgyCreateSessionDoesNotReuseStaleNativeConversationIdentity(t *testing.
 	agyNewSession = func(string, string) error { return nil }
 	agySendCommand = func(string, string) error { return nil }
 	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return nil }
-	agyFindConversation = func(string) (string, error) { return "stale-conversation-id", nil }
-	agyDiscoverySleep = func(time.Duration) {}
+	useStubAgyIdentityTracker(
+		func(context.Context, string) (string, error) { return "stale-conversation-id", nil },
+		func(context.Context, string, string) (*agysession.Metadata, error) {
+			return nil, fmt.Errorf("provider still reports pre-create conversation %q", "stale-conversation-id")
+		},
+	)
 	killed := ""
 	agyKillSession = func(name string) error { killed = name; return nil }
 
@@ -477,7 +521,12 @@ func TestAgyCreateSessionPropagatesReadinessFailureAndRollsBack(t *testing.T) {
 	agyHasSession = func(string) (bool, error) { return false, nil }
 	agyNewSession = func(string, string) error { return nil }
 	agySendCommand = func(string, string) error { return nil }
-	agyFindConversation = func(string) (string, error) { return "", agysession.ErrConversationNotFound }
+	useStubAgyIdentityTracker(
+		func(context.Context, string) (string, error) { return "", nil },
+		func(context.Context, string, string) (*agysession.Metadata, error) {
+			return &agysession.Metadata{ConversationID: "unused"}, nil
+		},
+	)
 	wantErr := errors.New("fixture readiness failed")
 	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return wantErr }
 	killed := ""
@@ -503,7 +552,12 @@ func TestAgyCreateSessionReportsRollbackFailure(t *testing.T) {
 	agyHasSession = func(string) (bool, error) { return false, nil }
 	agyNewSession = func(string, string) error { return nil }
 	agySendCommand = func(string, string) error { return nil }
-	agyFindConversation = func(string) (string, error) { return "", agysession.ErrConversationNotFound }
+	useStubAgyIdentityTracker(
+		func(context.Context, string) (string, error) { return "", nil },
+		func(context.Context, string, string) (*agysession.Metadata, error) {
+			return &agysession.Metadata{ConversationID: "unused"}, nil
+		},
+	)
 	readinessErr := errors.New("fixture readiness failed")
 	cleanupErr := errors.New("fixture tmux cleanup failed")
 	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return readinessErr }
@@ -554,7 +608,12 @@ func TestAgyCreateSessionRejectsExistingTmuxAndUnsafeModelBeforeMutation(t *test
 	}
 
 	wantErr := errors.New("fixture provider metadata is corrupt")
-	agyFindConversation = func(string) (string, error) { return "", wantErr }
+	useStubAgyIdentityTracker(
+		func(context.Context, string) (string, error) { return "", wantErr },
+		func(context.Context, string, string) (*agysession.Metadata, error) {
+			return nil, errors.New("unexpected discovery")
+		},
+	)
 	_, err = adapter.CreateSession(SessionContext{Name: "snapshot-failure", WorkingDirectory: "/work", Model: "3.5-flash-low"})
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("snapshot failure error = %v, want provider metadata error", err)

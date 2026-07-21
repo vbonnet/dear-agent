@@ -26,6 +26,10 @@ conversations with their workspace, transcript, and permission-mode context.
 
 **AGYS-08** When AGM correlates a freshly created AGY conversation, the system shall snapshot the workspace's provider-native conversation before launch, fail closed on corrupt or incomplete snapshot metadata, and after readiness accept only a safe new conversation identifier while honoring caller cancellation during bounded discovery retries.
 
+**AGYS-09** When AGM correlates an AGY conversation through direct adapter or shared operations creation, the system shall delegate snapshot, bounded retry, validation, and metadata selection to the canonical `CreateIdentityTracker` rather than implement a surface-specific discovery loop.
+
+**AGYS-10** When the canonical AGY workspace lock attempts acquisition, the system shall retry with caller cancellation only for contention and shall stop after the first attempt and return the cause for any other flock error.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/agy_saved_session_discovery.feature`

@@ -39,6 +39,15 @@ var ErrConversationNotFound = errors.New("AGY conversation not found")
 
 const workspaceCreateLockRetryDelay = 25 * time.Millisecond
 
+type workspaceFileLock interface {
+	TryLock() error
+	Unlock() error
+}
+
+var newWorkspaceFileLock = func(path string) (workspaceFileLock, error) {
+	return lock.New(path)
+}
+
 type agyLogCandidates struct {
 	paths              []string
 	omitted            int
@@ -133,7 +142,7 @@ func AcquireWorkspaceCreateLock(ctx context.Context, workDir string) (func() err
 		stateDir = fmt.Sprintf("/tmp/agm-%d", os.Getuid())
 	}
 	digest := sha256.Sum256([]byte(filepath.Clean(absoluteWorkDir)))
-	fileLock, err := lock.New(filepath.Join(stateDir, fmt.Sprintf("agy-create-%x.lock", digest[:16])))
+	fileLock, err := newWorkspaceFileLock(filepath.Join(stateDir, fmt.Sprintf("agy-create-%x.lock", digest[:16])))
 	if err != nil {
 		return nil, fmt.Errorf("create AGY workspace lock: %w", err)
 	}
@@ -142,8 +151,14 @@ func AcquireWorkspaceCreateLock(ctx context.Context, workDir string) (func() err
 			_ = fileLock.Unlock()
 			return nil, fmt.Errorf("acquire AGY workspace lock: %w", err)
 		}
-		if err := fileLock.TryLock(); err == nil {
+		lockErr := fileLock.TryLock()
+		if lockErr == nil {
 			return fileLock.Unlock, nil
+		}
+		var contention *lock.LockError
+		if !errors.As(lockErr, &contention) {
+			_ = fileLock.Unlock()
+			return nil, fmt.Errorf("acquire AGY workspace lock: %w", lockErr)
 		}
 		timer := time.NewTimer(workspaceCreateLockRetryDelay)
 		select {

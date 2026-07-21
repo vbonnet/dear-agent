@@ -27,36 +27,23 @@ type AgyAdapter struct {
 }
 
 var (
-	agyHasSession       = tmux.HasSession
-	agyNewSession       = tmux.NewSession
-	agySendCommand      = tmux.SendCommand
-	agyWaitForPrompt    = tmux.WaitForAgyPrompt
-	agyCheckProcess     = tmux.CheckProcessInPaneTree
-	agyCheckHarness     = tmux.CheckPaneLiveness
-	agyIsIdle           = tmux.IsAgyIdle
-	agyAttachSession    = tmux.AttachSession
-	agyKillSession      = tmux.KillSessionWithError
-	agyFindConversation = func(workDir string) (string, error) {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("determine home directory: %w", err)
-		}
-		metadata, err := agysession.FindLatestForWorkspace(homeDir, workDir)
-		if err != nil {
-			return "", err
-		}
-		return metadata.ConversationID, nil
-	}
-	agyDiscoverySleep    = time.Sleep
+	agyHasSession        = tmux.HasSession
+	agyNewSession        = tmux.NewSession
+	agySendCommand       = tmux.SendCommand
+	agyWaitForPrompt     = tmux.WaitForAgyPrompt
+	agyCheckProcess      = tmux.CheckProcessInPaneTree
+	agyCheckHarness      = tmux.CheckPaneLiveness
+	agyIsIdle            = tmux.IsAgyIdle
+	agyAttachSession     = tmux.AttachSession
+	agyKillSession       = tmux.KillSessionWithError
+	agyIdentityTracker   = agysession.NewCreateIdentityTracker
 	agyAcquireCreateLock = func(workDir string) (func() error, error) {
 		return agysession.AcquireWorkspaceCreateLock(context.Background(), workDir)
 	}
 )
 
 const (
-	agyConversationDiscoveryAttempts = 20
-	agyConversationDiscoveryDelay    = 500 * time.Millisecond
-	agyResumeReadinessTimeout        = 60 * time.Second
+	agyResumeReadinessTimeout = 60 * time.Second
 )
 
 // NewAgyAdapter creates a new Agy adapter instance.
@@ -146,18 +133,15 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 		return "", fmt.Errorf("refusing to create AGY session %q: tmux session already exists", tmuxName)
 	}
 	previousConversationID := ""
+	var identityTracker agysession.CreateIdentityTracker
 	if conversationID == "" {
-		// A bare AGY launch creates a fresh conversation. Snapshot the current
-		// workspace mapping so delayed provider metadata cannot make us persist
-		// a pre-existing conversation as the newly created session identity.
-		previousConversationID, err = agyFindConversation(workDir)
-		if err != nil && !errors.Is(err, agysession.ErrConversationNotFound) {
-			return "", fmt.Errorf("failed to snapshot AGY conversation before create: %w", err)
+		identityTracker = agyIdentityTracker()
+		if identityTracker == nil {
+			return "", fmt.Errorf("create AGY identity tracker: provider returned nil tracker")
 		}
-		if err == nil {
-			if validateErr := agysession.ValidateConversationID(previousConversationID); validateErr != nil {
-				return "", fmt.Errorf("failed to snapshot AGY conversation before create: %w", validateErr)
-			}
+		previousConversationID, err = identityTracker.Snapshot(context.Background(), workDir)
+		if err != nil {
+			return "", fmt.Errorf("failed to snapshot AGY conversation before create: %w", err)
 		}
 	}
 	if err := agyNewSession(tmuxName, workDir); err != nil {
@@ -181,9 +165,16 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 		return "", rollbackAgyAdapterSession(tmuxName, fmt.Errorf("AGY did not become ready after create: %w", err))
 	}
 	if conversationID == "" {
-		conversationID, err = discoverAgyConversationID(workDir, previousConversationID)
-		if err != nil {
-			return "", rollbackAgyAdapterSession(tmuxName, err)
+		metadata, identityErr := identityTracker.Discover(context.Background(), workDir, previousConversationID)
+		if identityErr != nil {
+			return "", rollbackAgyAdapterSession(tmuxName, fmt.Errorf("failed to capture native AGY conversation after create: %w", identityErr))
+		}
+		if metadata == nil {
+			return "", rollbackAgyAdapterSession(tmuxName, fmt.Errorf("failed to capture native AGY conversation after create: provider returned empty metadata"))
+		}
+		conversationID = metadata.ConversationID
+		if err := agysession.ValidateConversationID(conversationID); err != nil {
+			return "", rollbackAgyAdapterSession(tmuxName, fmt.Errorf("failed to capture native AGY conversation after create: %w", err))
 		}
 	}
 
@@ -223,28 +214,6 @@ func canonicalAgyWorkDir(workDir string) (string, error) {
 		return "", fmt.Errorf("resolve AGY working directory: %w", err)
 	}
 	return filepath.Clean(absolute), nil
-}
-
-func discoverAgyConversationID(workDir, previousConversationID string) (string, error) {
-	var lastErr error
-	for attempt := 1; attempt <= agyConversationDiscoveryAttempts; attempt++ {
-		conversationID, err := agyFindConversation(workDir)
-		if err == nil {
-			if validateErr := agysession.ValidateConversationID(conversationID); validateErr != nil {
-				lastErr = validateErr
-			} else if conversationID != previousConversationID {
-				return conversationID, nil
-			} else {
-				lastErr = fmt.Errorf("provider still reports pre-create conversation %q", previousConversationID)
-			}
-		} else {
-			lastErr = err
-		}
-		if attempt < agyConversationDiscoveryAttempts {
-			agyDiscoverySleep(agyConversationDiscoveryDelay)
-		}
-	}
-	return "", fmt.Errorf("failed to capture native AGY conversation after create: %w", lastErr)
 }
 
 // ResumeSession resumes an existing Agy session.

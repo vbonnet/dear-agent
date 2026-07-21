@@ -1905,6 +1905,7 @@ func runAgyLifecycleBehaviorSuite(ctx context.Context, harnessState *harnessPari
 		"./agm/internal/agent",
 		"./agm/internal/dolt",
 		"./agm/internal/importer",
+		"./agm/internal/lock",
 		"./agm/internal/ops",
 		"./agm/internal/safety",
 		"./agm/internal/send",
@@ -1915,7 +1916,16 @@ func runAgyLifecycleBehaviorSuite(ctx context.Context, harnessState *harnessPari
 	)
 	cmd.Dir = bddRepoRoot()
 	output, runErr := cmd.CombinedOutput()
-	harnessState.agyLifecycleTestOutput = string(output)
+	lockCmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/lock", "./agm/internal/agysession",
+		"-run", `^Test(FileLockTryLockPreservesPermanentFlockError|AcquireWorkspaceCreateLockStopsOnPermanentFlockError)$`,
+		"-count=1", "-v",
+	)
+	lockCmd.Dir = bddRepoRoot()
+	lockOutput, lockErr := lockCmd.CombinedOutput()
+	harnessState.agyLifecycleTestOutput = string(output) + "\n" + string(lockOutput)
+	if runErr == nil {
+		runErr = lockErr
+	}
 	harnessState.agyLifecycleTestErr = runErr
 	if testCtx.Err() != nil {
 		return fmt.Errorf("AGY lifecycle behavior suite timed out: %w", testCtx.Err())
@@ -1948,6 +1958,8 @@ func agyAdapterShouldPreserveCanonicalLaunchAndResumePolicy(ctx context.Context)
 		"TestAgyCreateSessionRollsBackWhenNativeIdentityCannotBeCaptured",
 		"TestAgyCreateSessionDoesNotReuseStaleNativeConversationIdentity",
 		"TestAgyCreateSessionReportsRollbackFailure",
+		"TestFileLockTryLockPreservesPermanentFlockError",
+		"TestAcquireWorkspaceCreateLockStopsOnPermanentFlockError",
 		"TestWithAgyResumeWorkspaceLockCoversLifecycle",
 		"TestAgyResumePolicyPersistsInJSONSessionStore",
 		"TestAgyResumeSessionPreservesNativeIdentityModelAndMode",

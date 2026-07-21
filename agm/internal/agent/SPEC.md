@@ -85,6 +85,8 @@ compatibility.
 
 **AGP-35** When the AGY adapter rolls back a tmux session it created after command delivery, readiness, identity discovery, or metadata persistence fails, the system shall preserve the primary failure and also report any tmux cleanup failure.
 
+**AGP-36** When the AGY adapter creates a fresh conversation, the system shall route pre-launch snapshot and post-readiness identity correlation through the shared `agysession.CreateIdentityTracker` used by the operations lifecycle.
+
 ### Codex Workdir Trust (ce-cmsq)
 
 **AGP-14** When a Codex CLI session is created or resumed through the codex-cli adapter, the system shall record the working directory as a trusted Codex project in `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`) before sending the launch command, so a fresh non-git sandbox directory cannot block Codex startup on its interactive trust prompt.

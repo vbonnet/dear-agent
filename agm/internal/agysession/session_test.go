@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -80,6 +81,32 @@ func TestAcquireWorkspaceCreateLockSerializesAndHonorsCancellation(t *testing.T)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("contending workspace lock ignored caller cancellation")
+	}
+}
+
+type permanentWorkspaceFileLock struct {
+	attempts int
+}
+
+func (fileLock *permanentWorkspaceFileLock) TryLock() error {
+	fileLock.attempts++
+	return syscall.EIO
+}
+
+func (*permanentWorkspaceFileLock) Unlock() error { return nil }
+
+func TestAcquireWorkspaceCreateLockStopsOnPermanentFlockError(t *testing.T) {
+	original := newWorkspaceFileLock
+	t.Cleanup(func() { newWorkspaceFileLock = original })
+	fileLock := &permanentWorkspaceFileLock{}
+	newWorkspaceFileLock = func(string) (workspaceFileLock, error) { return fileLock, nil }
+
+	_, err := AcquireWorkspaceCreateLock(t.Context(), t.TempDir())
+	if !errors.Is(err, syscall.EIO) {
+		t.Fatalf("AcquireWorkspaceCreateLock error = %v, want permanent EIO", err)
+	}
+	if fileLock.attempts != 1 {
+		t.Fatalf("permanent flock attempts = %d, want exactly one", fileLock.attempts)
 	}
 }
 
