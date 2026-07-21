@@ -215,6 +215,47 @@ func TestFindLatestForWorkspace_FallsBackFromDanglingCacheToLogs(t *testing.T) {
 	}
 }
 
+func TestFindLatestForWorkspace_SkipsDeletedConversationsWhileScanningLogs(t *testing.T) {
+	homeDir := t.TempDir()
+	appDir := filepath.Join(homeDir, ".gemini", "antigravity-cli")
+	workspace := "/tmp/agy-deleted-newest-log"
+	danglingID := "deleted-newest-conversation"
+	currentID := "usable-older-conversation"
+
+	writeAgyFixture(t, appDir, danglingID, workspace, "")
+	if err := os.Remove(filepath.Join(appDir, "conversations", danglingID+".db")); err != nil {
+		t.Fatalf("remove stale conversation DB: %v", err)
+	}
+	writeAgyFixture(t, appDir, currentID, "", "")
+	cachePath := filepath.Join(appDir, "cache", "last_conversations.json")
+	if err := os.WriteFile(cachePath, []byte(`{"`+workspace+`":"`+danglingID+`"}`), 0o644); err != nil {
+		t.Fatalf("restore dangling cache entry: %v", err)
+	}
+	olderLog := writeAgyLog(t, appDir, "older-usable.log", []string{
+		workspaceMarker + workspace,
+		"Created conversation " + currentID,
+	})
+	newerLog := writeAgyLog(t, appDir, "newer-deleted.log", []string{
+		workspaceMarker + workspace,
+		"Created conversation " + danglingID,
+	})
+	base := time.Date(2026, time.July, 21, 12, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(olderLog, base, base); err != nil {
+		t.Fatalf("set older log time: %v", err)
+	}
+	if err := os.Chtimes(newerLog, base.Add(time.Minute), base.Add(time.Minute)); err != nil {
+		t.Fatalf("set newer log time: %v", err)
+	}
+
+	meta, err := FindLatestForWorkspace(homeDir, workspace)
+	if err != nil {
+		t.Fatalf("FindLatestForWorkspace: %v", err)
+	}
+	if meta.ConversationID != currentID {
+		t.Fatalf("conversation ID = %q, want older usable %q", meta.ConversationID, currentID)
+	}
+}
+
 func TestFindLatestForWorkspace_ClassifiesDanglingCacheWithoutLogsAsAbsent(t *testing.T) {
 	homeDir := t.TempDir()
 	appDir := filepath.Join(homeDir, ".gemini", "antigravity-cli")

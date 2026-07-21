@@ -259,6 +259,7 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 	}
 	var agyIdentityTracker agysession.CreateIdentityTracker
 	var previousAgyConversationID string
+	var releaseAgyWorkspaceLock func() error
 	if params.harness == "agy" {
 		locker := opCtx.AgyWorkspaceCreateLocker
 		if locker == nil {
@@ -268,8 +269,12 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		if lockErr != nil {
 			return nil, ErrStorageError("agy.workspace-lock", lockErr)
 		}
+		releaseAgyWorkspaceLock = release
 		defer func() {
-			if unlockErr := release(); unlockErr != nil {
+			if releaseAgyWorkspaceLock == nil {
+				return
+			}
+			if unlockErr := releaseAgyWorkspaceLock(); unlockErr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: failed to release AGY workspace lock: %v\n", unlockErr)
 			}
 		}()
@@ -324,6 +329,17 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		state.store, state.storageCleanup, state.registered, err = registerCreatedSession(callCtx, opCtx, req, m)
 		if err != nil {
 			return nil, err
+		}
+	}
+	// Native identity is now persisted in registration. Release before runtime
+	// completion because CLI completion may block for the entire interactive
+	// tmux attachment; holding the workspace lock there would deadlock every
+	// create or cold resume for the same workspace until the user detaches.
+	if releaseAgyWorkspaceLock != nil {
+		release := releaseAgyWorkspaceLock
+		releaseAgyWorkspaceLock = nil
+		if unlockErr := release(); unlockErr != nil {
+			return nil, ErrStorageError("agy.workspace-lock.release", unlockErr)
 		}
 	}
 	if err := callCtx.Err(); err != nil {

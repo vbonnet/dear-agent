@@ -195,11 +195,7 @@ func FindLatestForWorkspace(homeDir, workspacePath string) (*Metadata, error) {
 		// that one entry as stale and continue through the bounded log lookup;
 		// corrupt, unreadable, and budget-exhausted metadata still fails closed.
 	}
-	conversationID, _, err = latestConversationForWorkspaceFromLogs(appDir, workspacePath)
-	if err != nil {
-		return nil, err
-	}
-	return FindByID(homeDir, conversationID)
+	return latestUsableConversationForWorkspaceFromLogs(homeDir, appDir, workspacePath)
 }
 
 func populateTranscriptPaths(appDir string, meta *Metadata) {
@@ -295,7 +291,46 @@ func latestConversationForWorkspaceFromLogs(appDir, workspacePath string) (strin
 	return latestConversationForWorkspaceFromLogCandidates(candidates, workspacePath)
 }
 
+func latestUsableConversationForWorkspaceFromLogs(homeDir, appDir, workspacePath string) (*Metadata, error) {
+	candidates, err := agyLogPaths(appDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("%w: no AGY log directory found for workspace %s", ErrConversationNotFound, workspacePath)
+		}
+		return nil, err
+	}
+	var selected *Metadata
+	_, _, err = latestUsableConversationForWorkspaceFromLogCandidates(candidates, workspacePath, func(conversationID string) (bool, error) {
+		metadata, findErr := FindByID(homeDir, conversationID)
+		if findErr != nil {
+			if errors.Is(findErr, ErrConversationNotFound) {
+				return false, nil
+			}
+			return false, findErr
+		}
+		selected = metadata
+		return true, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if selected == nil {
+		return nil, fmt.Errorf("resolve AGY workspace conversation: provider returned empty metadata")
+	}
+	return selected, nil
+}
+
 func latestConversationForWorkspaceFromLogCandidates(candidates agyLogCandidates, workspacePath string) (string, string, error) {
+	return latestUsableConversationForWorkspaceFromLogCandidates(candidates, workspacePath, func(string) (bool, error) {
+		return true, nil
+	})
+}
+
+func latestUsableConversationForWorkspaceFromLogCandidates(
+	candidates agyLogCandidates,
+	workspacePath string,
+	usable func(string) (bool, error),
+) (string, string, error) {
 	if candidates.unprocessedEntries > 0 {
 		// Directory order does not establish recency, so an unprocessed entry
 		// could be newer than every bounded candidate. Unlike known-ID lookup,
@@ -318,7 +353,13 @@ func latestConversationForWorkspaceFromLogCandidates(candidates agyLogCandidates
 			return "", "", logDiscoveryBudgetError("workspace "+workspacePath, index+1, 0, candidates.omitted, 1)
 		}
 		if matched && conversationID != "" {
-			return conversationID, logPath, nil
+			isUsable, usableErr := usable(conversationID)
+			if usableErr != nil {
+				return "", "", usableErr
+			}
+			if isUsable {
+				return conversationID, logPath, nil
+			}
 		}
 	}
 	if candidates.omitted > 0 {

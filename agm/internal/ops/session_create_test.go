@@ -631,7 +631,7 @@ func TestCreateSession_LifecycleOrder(t *testing.T) {
 	}
 }
 
-func TestCreateSession_AgyWorkspaceLockCoversSharedLifecycle(t *testing.T) {
+func TestCreateSession_AgyWorkspaceLockReleasesBeforeSurfaceCompletion(t *testing.T) {
 	dir := t.TempDir()
 	var order []string
 	locked := false
@@ -654,8 +654,8 @@ func TestCreateSession_AgyWorkspaceLockCoversSharedLifecycle(t *testing.T) {
 			return CreateSessionLaunchResult{}, nil
 		},
 		complete: func(context.Context, CreateSessionCompletion) error {
-			if !locked {
-				t.Fatal("AGY workspace lock was not held during provider identity completion")
+			if locked {
+				t.Fatal("AGY workspace lock remained held during surface completion")
 			}
 			order = append(order, "complete")
 			return nil
@@ -707,7 +707,7 @@ func TestCreateSession_AgyWorkspaceLockCoversSharedLifecycle(t *testing.T) {
 	if locked {
 		t.Fatal("AGY workspace lock was not released after lifecycle completion")
 	}
-	want := []string{"lock", "snapshot", "launch", "discover", "complete", "unlock"}
+	want := []string{"lock", "snapshot", "launch", "discover", "unlock", "complete"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("AGY lock lifecycle order = %v, want %v", order, want)
 	}
