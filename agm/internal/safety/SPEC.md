@@ -25,7 +25,7 @@ consistent across Claude Code, Codex CLI, AGY, OpenCode, and Pi.
 
 **SAFE-07** When Codex CLI liveness is checked, the system shall treat either a `codex` process or a `node` wrapper process in the pane tree as evidence that the harness is running.
 
-**SAFE-08** When Pi delivery safety is checked, the system shall require an exact `pi` process in the pane tree and the latest AGM-managed Pi state to be `ready` or `working` rather than requiring Claude process or prompt evidence.
+**SAFE-08** When Pi delivery safety is checked, the system shall require Pi-specific process identity, including the canonical npm Node entrypoint without accepting generic Node, in the pane tree and the latest AGM-managed Pi state to be `ready` or `working` rather than requiring Claude process or prompt evidence.
 
 **SAFE-09** When OpenCode delivery safety is checked, the system shall require an exact `opencode` process and OpenCode composer, product, or active-work evidence rather than requiring Claude process or prompt evidence.
 

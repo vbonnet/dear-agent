@@ -37,6 +37,15 @@ type ProcEntry struct {
 	Comm string
 }
 
+// procCommandEntry is one process-table row with the full command line. Pi's
+// npm entrypoint is a Node script, so comm alone is not always sufficient to
+// distinguish it from another Node-hosted harness.
+type procCommandEntry struct {
+	PID     int
+	PPID    int
+	Command string
+}
+
 // PaneLiveness is the verdict of a harness-process liveness scan for one
 // tmux session.
 type PaneLiveness struct {
@@ -253,6 +262,128 @@ func readProcessTable(ctx context.Context) ([]ProcEntry, error) {
 	return ParsePSTable(string(out)), nil
 }
 
+func readProcessCommandTable(ctx context.Context) ([]procCommandEntry, error) {
+	cmd := exec.CommandContext(ctx, "ps", "-ww", "-axo", "pid=,ppid=,command=")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("ps command table: %w", err)
+	}
+	return parsePSCommandTable(string(out)), nil
+}
+
+func parsePSCommandTable(out string) []procCommandEntry {
+	var entries []procCommandEntry
+	for line := range strings.SplitSeq(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		first := strings.IndexAny(line, " \t")
+		if first < 0 {
+			continue
+		}
+		pid, err := strconv.Atoi(line[:first])
+		if err != nil {
+			continue
+		}
+		rest := strings.TrimSpace(line[first:])
+		second := strings.IndexAny(rest, " \t")
+		if second < 0 {
+			continue
+		}
+		ppid, err := strconv.Atoi(rest[:second])
+		if err != nil {
+			continue
+		}
+		command := strings.TrimSpace(rest[second:])
+		if command == "" {
+			continue
+		}
+		entries = append(entries, procCommandEntry{PID: pid, PPID: ppid, Command: command})
+	}
+	return entries
+}
+
+func isPiProcessCommand(command string) bool {
+	return isPiProcessCommandWithResolver(command, filepath.EvalSymlinks)
+}
+
+func isPiProcessCommandWithResolver(command string, resolve func(string) (string, error)) bool {
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return false
+	}
+	executable := 0
+	if filepath.Base(strings.Trim(fields[0], "'\"")) == "env" {
+		executable++
+		for executable < len(fields) && strings.Contains(fields[executable], "=") {
+			executable++
+		}
+	}
+	if executable >= len(fields) {
+		return false
+	}
+	base := filepath.Base(strings.Trim(fields[executable], "'\""))
+	if base == "pi" {
+		return true
+	}
+	if base != "node" {
+		return false
+	}
+	for _, raw := range fields[executable+1:] {
+		if strings.HasPrefix(raw, "-") {
+			continue
+		}
+		script := strings.Trim(raw, "'\"")
+		if isPiPackageEntry(script) {
+			return true
+		}
+		resolved, err := resolve(script)
+		return err == nil && isPiPackageEntry(resolved)
+	}
+	return false
+}
+
+// IsPiProcessCommand is the pure process-identity contract used by BDD. A
+// direct Pi executable is accepted; a generic Node process is accepted only
+// when its entry script is the installed Pi package CLI.
+func IsPiProcessCommand(command string) bool {
+	return isPiProcessCommand(command)
+}
+
+func isPiPackageEntry(path string) bool {
+	normalized := filepath.ToSlash(filepath.Clean(path))
+	return strings.HasSuffix(normalized, "/@earendil-works/pi-coding-agent/dist/cli.js")
+}
+
+func piProcessInPaneTree(panePIDs []int, procs []procCommandEntry) bool {
+	children := make(map[int][]int, len(procs))
+	byPID := make(map[int]procCommandEntry, len(procs))
+	for _, process := range procs {
+		children[process.PPID] = append(children[process.PPID], process.PID)
+		byPID[process.PID] = process
+	}
+	queue := append([]int(nil), panePIDs...)
+	seen := make(map[int]bool, len(procs))
+	for len(queue) > 0 {
+		pid := queue[0]
+		queue = queue[1:]
+		if seen[pid] {
+			continue
+		}
+		seen[pid] = true
+		process, ok := byPID[pid]
+		if !ok {
+			continue
+		}
+		if isPiProcessCommand(process.Command) {
+			return true
+		}
+		queue = append(queue, children[pid]...)
+	}
+	return false
+}
+
 // CheckPaneLiveness runs the real harness-liveness scan for sessionName on
 // socketPath: pane PIDs via tmux, one ps snapshot, then the pure classifier
 // with the standard harness set. A missing session returns
@@ -353,6 +484,40 @@ func CheckPaneLivenessBatch(sessionNames []string, socketPath string) (map[strin
 // can fail safe instead of injecting a command when liveness is unknown.
 func CheckProcessInPaneTree(sessionName, socketPath, processName string) (bool, error) {
 	return IsProcessInPaneTreeContext(context.Background(), sessionName, socketPath, processName)
+}
+
+// IsPiProcessInPaneTree reports whether the pane tree contains Pi's native
+// executable or its documented npm Node entrypoint.
+func IsPiProcessInPaneTree(sessionName, socketPath string) (bool, error) {
+	return IsPiProcessInPaneTreeContext(context.Background(), sessionName, socketPath)
+}
+
+// IsPiProcessInPaneTreeContext distinguishes Pi from other Node-hosted
+// harnesses by inspecting the pane commands and descendant argv values under
+// the caller's lifetime. A generic node comm is never sufficient proof.
+func IsPiProcessInPaneTreeContext(parent context.Context, sessionName, socketPath string) (bool, error) {
+	ctx, cancel := context.WithTimeout(parent, livenessScanTimeout)
+	defer cancel()
+
+	pids, err := listPanePIDs(ctx, sessionName, socketPath)
+	if err != nil || len(pids) == 0 {
+		return false, err
+	}
+	command := exec.CommandContext(ctx, "tmux", "-S", socketPath, "list-panes", "-s", "-t", FormatSessionTarget(NormalizeTmuxSessionName(sessionName)), "-F", "#{pane_current_command}\t#{pane_start_command}")
+	if output, commandErr := command.Output(); commandErr == nil {
+		for line := range strings.SplitSeq(string(output), "\n") {
+			for paneCommand := range strings.SplitSeq(line, "\t") {
+				if isPiProcessCommand(strings.TrimSpace(paneCommand)) {
+					return true, nil
+				}
+			}
+		}
+	}
+	procs, err := readProcessCommandTable(ctx)
+	if err != nil {
+		return false, err
+	}
+	return piProcessInPaneTree(pids, procs), nil
 }
 
 // IsProcessInPaneTree reports whether a process named processName (exact comm

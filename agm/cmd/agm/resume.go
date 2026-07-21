@@ -604,8 +604,8 @@ type resumeSessionRuntime struct {
 	deliverPrompt     func(string, string, string, bool) error
 	attachTmux        func(string) error
 	attach            func(string) error
-	checkProcess      func(string, string, string) (bool, error)
-	checkLiveness     func(string, string) (tmux.PaneLiveness, error)
+	checkPiProcess    func(context.Context, string, string) (bool, error)
+	checkLiveness     func(context.Context, string, string) (tmux.PaneLiveness, error)
 }
 
 type createdResumeTmux struct {
@@ -640,9 +640,9 @@ func realResumeSessionRuntime(ctx context.Context) resumeSessionRuntime {
 		deliverPrompt: func(sessionName, promptText, promptFile string, deletePromptFile bool) error {
 			return sendPostResumePrompt(ctx, sessionName, promptText, promptFile, deletePromptFile)
 		},
-		attachTmux:    tmux.AttachSession,
-		checkProcess:  tmux.CheckProcessInPaneTree,
-		checkLiveness: tmux.CheckPaneLiveness,
+		attachTmux:     tmux.AttachSession,
+		checkPiProcess: tmux.IsPiProcessInPaneTreeContext,
+		checkLiveness:  tmux.CheckPaneLivenessContext,
 	}
 }
 
@@ -865,32 +865,32 @@ func prepareHarnessResumeCommandDelivery(
 	health *HealthStatus,
 	createdTmux createdResumeTmux,
 ) (bool, error) {
-	sendCommands, err := shouldSendHarnessResumeCommands(harnessName, health, runtime)
+	sendCommands, err := shouldSendHarnessResumeCommands(ctx, harnessName, health, runtime)
 	if err != nil && createdTmux.owned() {
 		return false, rollbackCreatedResumeTmux(ctx, runtime, adapter, m, createdTmux, resumeTmuxNameChange{}, err)
 	}
 	return sendCommands, err
 }
 
-func shouldSendHarnessResumeCommands(harnessName string, health *HealthStatus, runtime resumeSessionRuntime) (bool, error) {
+func shouldSendHarnessResumeCommands(ctx context.Context, harnessName string, health *HealthStatus, runtime resumeSessionRuntime) (bool, error) {
 	if shouldSendResumeCommands(health.TmuxExists) {
 		return true, nil
 	}
 	if agent.NormalizeHarnessName(harnessName) != "pi-cli" {
 		return false, nil
 	}
-	if runtime.checkProcess == nil || runtime.checkLiveness == nil {
+	if runtime.checkPiProcess == nil || runtime.checkLiveness == nil {
 		return false, fmt.Errorf("resume runtime does not provide Pi pane liveness classification")
 	}
 	socketPath := tmux.GetSocketPath()
-	exactPi, err := runtime.checkProcess(health.TmuxSessionName, socketPath, "pi")
+	exactPi, err := runtime.checkPiProcess(ctx, health.TmuxSessionName, socketPath)
 	if err != nil {
 		return false, fmt.Errorf("check exact Pi process liveness: %w", err)
 	}
 	if exactPi {
 		return false, nil
 	}
-	verdict, err := runtime.checkLiveness(health.TmuxSessionName, socketPath)
+	verdict, err := runtime.checkLiveness(ctx, health.TmuxSessionName, socketPath)
 	if err != nil {
 		return false, fmt.Errorf("classify Pi resume pane: %w", err)
 	}

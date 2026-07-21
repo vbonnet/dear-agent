@@ -1003,14 +1003,14 @@ func TestResumeSessionPiRelaunchesOnlyInExistingRestartableShell(t *testing.T) {
 	runtime.loadManifest = func(context.Context, *dolt.Adapter, string, string) (*manifest.Manifest, error) {
 		return m, nil
 	}
-	runtime.checkProcess = func(session, _ string, process string) (bool, error) {
+	runtime.checkPiProcess = func(_ context.Context, session, _ string) (bool, error) {
 		calls = append(calls, "check-process")
-		if session != health.TmuxSessionName || process != "pi" {
-			t.Fatalf("exact process check = (%q, %q)", session, process)
+		if session != health.TmuxSessionName {
+			t.Fatalf("exact process session = %q", session)
 		}
 		return false, nil
 	}
-	runtime.checkLiveness = func(session, _ string) (tmux.PaneLiveness, error) {
+	runtime.checkLiveness = func(_ context.Context, session, _ string) (tmux.PaneLiveness, error) {
 		calls = append(calls, "check-liveness")
 		if session != health.TmuxSessionName {
 			t.Fatalf("liveness session = %q", session)
@@ -1037,11 +1037,11 @@ func TestResumeSessionPiPreservesExactExistingProcess(t *testing.T) {
 	runtime.loadManifest = func(context.Context, *dolt.Adapter, string, string) (*manifest.Manifest, error) {
 		return m, nil
 	}
-	runtime.checkProcess = func(string, string, string) (bool, error) {
+	runtime.checkPiProcess = func(context.Context, string, string) (bool, error) {
 		calls = append(calls, "check-process")
 		return true, nil
 	}
-	runtime.checkLiveness = func(string, string) (tmux.PaneLiveness, error) {
+	runtime.checkLiveness = func(context.Context, string, string) (tmux.PaneLiveness, error) {
 		t.Fatal("generic liveness ran after exact Pi proof")
 		return tmux.PaneLiveness{}, nil
 	}
@@ -1066,11 +1066,11 @@ func TestResumeSessionPiFailsBeforeMutationWhenExistingPaneScanFails(t *testing.
 	runtime.loadManifest = func(context.Context, *dolt.Adapter, string, string) (*manifest.Manifest, error) {
 		return m, nil
 	}
-	runtime.checkProcess = func(string, string, string) (bool, error) {
+	runtime.checkPiProcess = func(context.Context, string, string) (bool, error) {
 		calls = append(calls, "check-process")
 		return false, wantErr
 	}
-	runtime.checkLiveness = func(string, string) (tmux.PaneLiveness, error) {
+	runtime.checkLiveness = func(context.Context, string, string) (tmux.PaneLiveness, error) {
 		t.Fatal("generic liveness ran after exact-process scan failure")
 		return tmux.PaneLiveness{}, nil
 	}
@@ -1081,6 +1081,45 @@ func TestResumeSessionPiFailsBeforeMutationWhenExistingPaneScanFails(t *testing.
 	}
 	if want := []string{"check-process"}; !reflect.DeepEqual(calls, want) {
 		t.Fatalf("failed Pi scan calls = %v, want %v", calls, want)
+	}
+}
+
+func TestPiResumeLivenessChecksUseCommandContext(t *testing.T) {
+	health := &HealthStatus{TmuxExists: true, TmuxSessionName: "pi-resume"}
+	for _, test := range []struct {
+		name             string
+		wantProcessCheck bool
+		wantLiveness     bool
+	}{
+		{name: "exact process scan", wantProcessCheck: true},
+		{name: "pane classification", wantProcessCheck: true, wantLiveness: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			processChecked := false
+			livenessChecked := false
+			runtime := resumeSessionRuntime{
+				checkPiProcess: func(got context.Context, _, _ string) (bool, error) {
+					processChecked = true
+					if !test.wantLiveness {
+						return false, got.Err()
+					}
+					return false, nil
+				},
+				checkLiveness: func(got context.Context, _, _ string) (tmux.PaneLiveness, error) {
+					livenessChecked = true
+					return tmux.PaneLiveness{}, got.Err()
+				},
+			}
+			_, err := shouldSendHarnessResumeCommands(ctx, "pi-cli", health, runtime)
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("shouldSendHarnessResumeCommands() error = %v, want context.Canceled", err)
+			}
+			if processChecked != test.wantProcessCheck || livenessChecked != test.wantLiveness {
+				t.Fatalf("checks = process:%v liveness:%v, want process:%v liveness:%v", processChecked, livenessChecked, test.wantProcessCheck, test.wantLiveness)
+			}
+		})
 	}
 }
 

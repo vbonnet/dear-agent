@@ -49,7 +49,7 @@ func withPiAdapterRuntime(t *testing.T) {
 	piSendPromptLiteral = func(string, string, bool) error { return nil }
 	piWaitForPrompt = func(context.Context, string, string, time.Duration) error { return nil }
 	piKillSession = func(string) error { return nil }
-	piCheckProcess = func(string, string, string) (bool, error) { return false, nil }
+	piCheckProcess = func(string, string) (bool, error) { return false, nil }
 	piCheckHarness = func(string, string) (tmux.PaneLiveness, error) {
 		return tmux.PaneLiveness{SessionExists: true, RestartableShell: true, Evidence: "zsh"}, nil
 	}
@@ -185,9 +185,9 @@ func TestPiAdapterResumeUsesExactProcessLivenessAndFailsSafe(t *testing.T) {
 	t.Setenv("TMUX", "fixture")
 	store := piResumeFixtureStore(t, "pi-live")
 	piHasSession = func(string) (bool, error) { return true, nil }
-	var processName string
-	piCheckProcess = func(_, _, process string) (bool, error) {
-		processName = process
+	checked := false
+	piCheckProcess = func(_, _ string) (bool, error) {
+		checked = true
 		return false, errors.New("fixture liveness unavailable")
 	}
 	sent := false
@@ -198,8 +198,8 @@ func TestPiAdapterResumeUsesExactProcessLivenessAndFailsSafe(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "liveness unavailable") {
 		t.Fatalf("ResumeSession error = %v, want liveness failure", err)
 	}
-	if processName != "pi" || sent {
-		t.Fatalf("process=%q sent=%v, want exact Pi fail-safe check", processName, sent)
+	if !checked || sent {
+		t.Fatalf("checked=%v sent=%v, want exact Pi fail-safe check", checked, sent)
 	}
 }
 
@@ -208,7 +208,7 @@ func TestPiAdapterResumeRejectsAnotherLiveHarnessBeforeMutation(t *testing.T) {
 	t.Setenv("TMUX", "fixture")
 	store := piResumeFixtureStore(t, "pi-collision")
 	piHasSession = func(string) (bool, error) { return true, nil }
-	piCheckProcess = func(string, string, string) (bool, error) { return false, nil }
+	piCheckProcess = func(string, string) (bool, error) { return false, nil }
 	piCheckHarness = func(string, string) (tmux.PaneLiveness, error) {
 		return tmux.PaneLiveness{SessionExists: true, HarnessAlive: true, Evidence: "zsh,claude"}, nil
 	}
@@ -230,7 +230,7 @@ func TestPiAdapterResumeRejectsNonShellForegroundBeforeMutation(t *testing.T) {
 	t.Setenv("TMUX", "fixture")
 	store := piResumeFixtureStore(t, "pi-editor")
 	piHasSession = func(string) (bool, error) { return true, nil }
-	piCheckProcess = func(string, string, string) (bool, error) { return false, nil }
+	piCheckProcess = func(string, string) (bool, error) { return false, nil }
 	piCheckHarness = func(string, string) (tmux.PaneLiveness, error) {
 		return tmux.PaneLiveness{SessionExists: true, Evidence: "zsh,vim"}, nil
 	}
@@ -252,7 +252,7 @@ func TestPiAdapterResumeRestartsOnlyInProvenBareShell(t *testing.T) {
 	t.Setenv("TMUX", "fixture")
 	store := piResumeFixtureStore(t, "pi-shell")
 	piHasSession = func(string) (bool, error) { return true, nil }
-	piCheckProcess = func(string, string, string) (bool, error) { return false, nil }
+	piCheckProcess = func(string, string) (bool, error) { return false, nil }
 	piCheckHarness = func(string, string) (tmux.PaneLiveness, error) {
 		return tmux.PaneLiveness{SessionExists: true, RestartableShell: true, Evidence: "zsh"}, nil
 	}
@@ -273,7 +273,7 @@ func TestPiAdapterResumeLeavesLivePiUntouched(t *testing.T) {
 	t.Setenv("TMUX", "fixture")
 	store := piResumeFixtureStore(t, "pi-live")
 	piHasSession = func(string) (bool, error) { return true, nil }
-	piCheckProcess = func(_, _, process string) (bool, error) { return process == "pi", nil }
+	piCheckProcess = func(string, string) (bool, error) { return true, nil }
 	sent := false
 	piSendShellCommand = func(string, string) error { sent = true; return nil }
 
