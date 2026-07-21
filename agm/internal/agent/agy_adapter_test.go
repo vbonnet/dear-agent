@@ -288,6 +288,7 @@ func TestAgyCreateSessionPropagatesReadinessFailureAndRollsBack(t *testing.T) {
 	agyHasSession = func(string) (bool, error) { return false, nil }
 	agyNewSession = func(string, string) error { return nil }
 	agySendCommand = func(string, string) error { return nil }
+	agyFindConversation = func(string) (string, error) { return "", errors.New("no prior conversation") }
 	wantErr := errors.New("fixture readiness failed")
 	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return wantErr }
 	killed := ""

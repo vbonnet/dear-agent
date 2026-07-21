@@ -109,13 +109,6 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	}
 	permissionMode := ctx.Environment["AGM_PERMISSION_MODE"]
 	conversationID := ctx.Environment["AGY_CONVERSATION_ID"]
-	previousConversationID := ""
-	if conversationID == "" {
-		// A bare AGY launch creates a fresh conversation. Snapshot the current
-		// workspace mapping so delayed provider metadata cannot make us persist
-		// a pre-existing conversation as the newly created session identity.
-		previousConversationID, _ = agyFindConversation(workDir)
-	}
 
 	// Check if tmux session already exists
 	exists, err := agyHasSession(tmuxName)
@@ -124,6 +117,13 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	}
 	if exists {
 		return "", fmt.Errorf("refusing to create AGY session %q: tmux session already exists", tmuxName)
+	}
+	previousConversationID := ""
+	if conversationID == "" {
+		// A bare AGY launch creates a fresh conversation. Snapshot the current
+		// workspace mapping so delayed provider metadata cannot make us persist
+		// a pre-existing conversation as the newly created session identity.
+		previousConversationID, _ = agyFindConversation(workDir)
 	}
 	if err := agyNewSession(tmuxName, workDir); err != nil {
 		return "", fmt.Errorf("failed to create tmux session: %w", err)
