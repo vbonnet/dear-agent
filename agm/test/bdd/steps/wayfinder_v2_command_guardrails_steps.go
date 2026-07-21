@@ -442,6 +442,8 @@ func validateCanonicalWayfinderConsumers(repoRoot string) error {
 		{path: "wayfinder/internal/corpus/query.go", required: []string{`"project_name": projectName`, `"status": "in-progress"`, `status == "in-progress"`}, forbidden: []string{"GetProjectBySession", `"status": "in_progress"`, `status == "in_progress"`}},
 		{path: "agm/cmd/agm-mcp-server/wayfinder.go", required: []string{"statusread.Parse(data)", `fmString(fm, "current_waypoint")`, `fmString(fm, "project_name")`}, forbidden: []string{`fmString(fm, "current_phase"`, `fmString(fm, "project_name",`}},
 		{path: "agm/internal/a2a/wayfinder/wayfinder.go", required: []string{"ProjectName", "CurrentWaypoint", `case "in-progress"`}, forbidden: []string{"SessionID", "CurrentPhase", `"in_progress"`, `"design"`, `"planning"`, `"delivery"`}},
+		{path: "internal/telemetry/wayfinder_roi_logger.go", required: []string{`"phase_name": "DESIGN"`, `"wayfinder-" + phaseName`}, forbidden: []string{`"phase_name": "D3"`}},
+		{path: "pkg/costtrack/sink.go", required: []string{`"wayfinder-BUILD"`}, forbidden: []string{`"wayfinder-D1"`}},
 		{path: "internal/safepr/safepr.go", required: []string{`statusread.ParseFromDir(dir)`, "st.ProjectName", "st.Beads"}, forbidden: []string{`yaml:"schema_version"`, `yaml:"project_name"`, `yaml:"session_id"`, "st.SessionID"}},
 		{path: "engram/internal/config/config.go", forbidden: []string{"WayfinderConfig", "W0Config", `yaml:"w0"`}},
 		{path: "engram/internal/config/loader.go", forbidden: []string{"mergeWayfinder", "mergeW0", "hasW0"}},

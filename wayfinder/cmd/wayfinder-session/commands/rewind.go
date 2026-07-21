@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -115,16 +116,27 @@ func runRewind(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: retrospective logging failed: %v\n", err)
 	}
 	gitIntegrator := git.New(projectDir)
-	if gitIntegrator.IsGitRepo() {
-		if err := gitIntegrator.CommitRewind(fromPhase, targetPhase); err != nil {
-			return fmt.Errorf("commit rewind state before restarting %s: %w", targetPhase, err)
-		}
-		fmt.Println("📝 Rewind state committed")
-	}
+	commitRewindState(gitIntegrator, fromPhase, targetPhase, os.Stdout, os.Stderr)
 
 	fmt.Printf("⏪ Rewound to phase %s\n", targetPhase)
 	fmt.Println("ℹ️  Phases after", targetPhase, "have been reset to pending")
 	return nil
+}
+
+type rewindCommitter interface {
+	IsGitRepo() bool
+	CommitRewind(fromPhase, toPhase string) error
+}
+
+func commitRewindState(integrator rewindCommitter, fromPhase, targetPhase string, stdout, stderr io.Writer) {
+	if !integrator.IsGitRepo() {
+		return
+	}
+	if err := integrator.CommitRewind(fromPhase, targetPhase); err != nil {
+		fmt.Fprintf(stderr, "Warning: rewind persisted, but its Git commit failed: %v\n", err)
+		return
+	}
+	fmt.Fprintln(stdout, "📝 Rewind state committed")
 }
 
 func validateRewindTarget(st *status.StatusV2, targetPhase string) error {

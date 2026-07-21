@@ -25,6 +25,8 @@
 
 **WFCMD-09** When SETUP starts, or when BUILD starts after SETUP was skipped, the system shall create a tracking bead if none exists and shall preserve the phase transition when tracker creation is unavailable.
 
+**WFCMD-10** When a rewind has been persisted and its Git commit fails, the system shall report a warning without reporting the rewind operation as failed.
+
 ## Traceability
 
 - Command tests: `wayfinder/cmd/wayfinder-session/commands/*_test.go`

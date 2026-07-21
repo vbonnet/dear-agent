@@ -1,11 +1,44 @@
 package commands
 
 import (
+	"bytes"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
+
+type fakeRewindCommitter struct {
+	isRepo bool
+	err    error
+	called bool
+}
+
+func (f *fakeRewindCommitter) IsGitRepo() bool { return f.isRepo }
+
+func (f *fakeRewindCommitter) CommitRewind(_, _ string) error {
+	f.called = true
+	return f.err
+}
+
+func TestCommitRewindStateTreatsCommitFailureAsWarning(t *testing.T) {
+	integrator := &fakeRewindCommitter{isRepo: true, err: errors.New("hook rejected commit")}
+	var stdout, stderr bytes.Buffer
+
+	commitRewindState(integrator, status.WaypointV2Build, status.WaypointV2Plan, &stdout, &stderr)
+
+	if !integrator.called {
+		t.Fatal("CommitRewind was not called")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty output", stdout.String())
+	}
+	if got := stderr.String(); !strings.Contains(got, "rewind persisted") || !strings.Contains(got, "hook rejected commit") {
+		t.Fatalf("stderr = %q, want persisted-state warning", got)
+	}
+}
 
 func TestResetForRewindResetsTargetAndLaterPhases(t *testing.T) {
 	now := time.Now()
