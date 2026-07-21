@@ -86,7 +86,8 @@ the tmux session must be recreated, AGM starts Codex with the same launch
 invariants as session creation and waits for both the Codex process and a
 structured idle composer to render. The complete resolved resume, including
 its health read and rollback or commit, is serialized by stable AGM session ID
-so a concurrent resume cannot adopt an uncommitted pane. AGM retains a
+across direct, last-session, and bulk resume commands so a concurrent resume
+cannot adopt an uncommitted pane. AGM retains a
 creation-specific identity for the attempt: tmux's server-local session ID plus
 a random token embedded in
 a provisional creation name before being stored on that session. It then
