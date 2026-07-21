@@ -1,11 +1,11 @@
 # Harness History Specification
 
-<!-- Last audited at: 2026-07-09 -->
+<!-- Last audited at: 2026-07-20 -->
 
 ## Overview
 
 `agm/internal/history` parses conversation history and resolves harness-specific
-history locations for Claude Code, Codex CLI, Gemini compatibility, and OpenCode.
+history locations for Claude Code, Codex CLI, AGY, OpenCode, and Gemini compatibility.
 
 ## Requirements
 
@@ -18,6 +18,8 @@ history locations for Claude Code, Codex CLI, Gemini compatibility, and OpenCode
 **HIS-04** When resolving history for a supported harness, the system shall use that harness's canonical filesystem layout rather than assuming Claude paths.
 
 **HIS-05** When path verification is requested, the system shall report missing history or conversation locations instead of returning an unverified path.
+
+**HIS-06** When resolving AGY history, the system shall use the manifest's native conversation ID to return the Antigravity conversation database, compact transcript, and full transcript paths without entering Claude UUID discovery.
 
 ## BDD Traceability
 
