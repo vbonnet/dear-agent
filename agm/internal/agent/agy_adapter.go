@@ -202,7 +202,9 @@ func (a *AgyAdapter) ResumeSession(sessionID SessionID) error {
 			return fmt.Errorf("failed to send resume command: %w", err)
 		}
 
-		_ = agyWaitForPrompt(context.Background(), metadata.TmuxName, 5*time.Second)
+		if err := agyWaitForPrompt(context.Background(), metadata.TmuxName, 5*time.Second); err != nil {
+			return fmt.Errorf("AGY did not become ready after resume: %w", err)
+		}
 	}
 
 	// Attach to tmux session (skip if already in tmux)

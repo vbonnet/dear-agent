@@ -374,6 +374,33 @@ func TestAgyResumeSessionLeavesLiveAgyUntouched(t *testing.T) {
 	}
 }
 
+func TestAgyResumeSessionPropagatesReadinessFailureBeforeAttach(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	t.Setenv("TMUX", "")
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	sessionID := SessionID("adapter-session")
+	if err := store.Set(sessionID, &SessionMetadata{
+		TmuxName: "agy-resume", WorkingDir: "/work", UUID: "native-id", Model: "3.5-flash-low",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	agyHasSession = func(string) (bool, error) { return false, nil }
+	agyNewSession = func(string, string) error { return nil }
+	agySendCommand = func(string, string) error { return nil }
+	wantErr := errors.New("fixture readiness failed")
+	agyWaitForPrompt = func(string, time.Duration) error { return wantErr }
+	attached := false
+	agyAttachSession = func(string) error { attached = true; return nil }
+
+	err := (&AgyAdapter{sessionStore: store}).ResumeSession(sessionID)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("ResumeSession error = %v, want readiness failure", err)
+	}
+	if attached {
+		t.Fatal("readiness failure continued into tmux attach")
+	}
+}
+
 func TestAgyGetSessionStatusRequiresAgyProcess(t *testing.T) {
 	preserveAgyAdapterSeams(t)
 	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
