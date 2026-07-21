@@ -416,6 +416,9 @@ func scriptHeredocMarker(value string) string {
 			quote = current
 			continue
 		}
+		if current == '#' && (index == 0 || shellHorizontalSpace(value[index-1])) {
+			break
+		}
 		if current != '<' || value[index+1] != '<' ||
 			(index > 0 && value[index-1] == '<') || (index+2 < len(value) && value[index+2] == '<') {
 			continue

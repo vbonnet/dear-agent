@@ -393,6 +393,8 @@ func TestScriptHeredocVisibilityPreservesQuotesDescriptorsAndFileModes(t *testin
 		"cat <<\\ESCAPED",
 		"gh pr merge 321",
 		"ESCAPED",
+		"echo ok # <<COMMENT_ONLY",
+		"echo 'bd ready'",
 	}, "\n"))
 
 	var text []string
@@ -412,6 +414,7 @@ func TestScriptHeredocVisibilityPreservesQuotesDescriptorsAndFileModes(t *testin
 		"echo 'gh pr close 654'",
 		"git push origin spaced-marker",
 		"gh pr merge 321",
+		"echo 'bd ready'",
 	} {
 		if !slices.Contains(text, visible) {
 			t.Errorf("visible heredoc line %q was hidden: %v", visible, text)
