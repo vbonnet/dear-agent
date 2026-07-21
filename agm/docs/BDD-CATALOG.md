@@ -209,8 +209,12 @@ creation, and terminal state detection.
 - The root command remains the sole process-signal owner, and continuous scan,
   watchdog, event-watch, stalled-session watch, and compaction-monitor loops
   consume its Cobra context and return promptly when canceled.
+- Structured verify-result, work-request, and wake-loop sends preserve the same
+  root context through multiline composer readiness and delivery.
 - AGY feedback survey handling dismisses once and recognizes the subsequent
-  composer even while stale survey text remains in captured pane history.
+  composer even while stale survey text remains in captured pane history;
+  downstream state, direct-delivery, and idle predicates use the same
+  last-marker rule.
 - AGM runtime helper commands keep co-located SPEC coverage.
 - AGM backend implementations keep co-located SPEC coverage.
 - AGM cleanup and process support packages keep co-located SPEC coverage.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -174,7 +175,7 @@ func runSendVerify(cmd *cobra.Command, args []string) error {
 	}
 
 	// Send via tmux
-	return sendVerifyMessage(recipient, senderName, messageID, jsonStr)
+	return sendVerifyMessage(cmd.Context(), recipient, senderName, messageID, jsonStr)
 }
 
 // parseCheckResults parses pipe-separated check result strings
@@ -234,7 +235,7 @@ func parseGaps(raw []string) ([]GapEntry, error) {
 }
 
 // sendVerifyMessage delivers a verify-result JSON message to a recipient
-func sendVerifyMessage(recipient, sender, messageID, jsonPayload string) error {
+func sendVerifyMessage(ctx context.Context, recipient, sender, messageID, jsonPayload string) error {
 	// Check recipient exists in tmux
 	exists, err := tmux.HasSession(recipient)
 	if err != nil {
@@ -265,7 +266,7 @@ func sendVerifyMessage(recipient, sender, messageID, jsonPayload string) error {
 		fmt.Fprintf(os.Stderr, "Warning: failed to write pending file: %v\n", err)
 	}
 
-	if err := tmux.SendMultiLinePromptSafe(recipient, formattedMessage, true); err != nil {
+	if err := sendStructuredPrompt(ctx, recipient, formattedMessage, true); err != nil {
 		return fmt.Errorf("failed to send verify result: %w", err)
 	}
 

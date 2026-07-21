@@ -48,6 +48,10 @@ var (
 
 var sendMultiLinePromptSafeContext = tmux.SendMultiLinePromptSafeContext
 
+func sendStructuredPrompt(ctx context.Context, recipient, message string, shouldInterrupt bool) error {
+	return sendMultiLinePromptSafeContext(ctx, recipient, message, shouldInterrupt)
+}
+
 // Priority levels and their instructions injected into message headers
 var priorityInstructions = map[string]string{
 	"critical":   "DROP everything. Handle this immediately.",

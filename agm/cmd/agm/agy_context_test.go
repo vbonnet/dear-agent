@@ -69,6 +69,28 @@ func TestSendViaTmuxUsesCallerContext(t *testing.T) {
 	}
 }
 
+func TestStructuredPromptUsesCallerContext(t *testing.T) {
+	original := sendMultiLinePromptSafeContext
+	t.Cleanup(func() { sendMultiLinePromptSafeContext = original })
+	type callerContextKey struct{}
+	callerCtx, cancel := context.WithCancel(context.WithValue(t.Context(), callerContextKey{}, "structured-send"))
+	sendMultiLinePromptSafeContext = func(ctx context.Context, sessionName, message string, shouldInterrupt bool) error {
+		if ctx != callerCtx {
+			t.Fatal("structured delivery did not receive the caller context")
+		}
+		if sessionName != "recipient" || message != "payload" || !shouldInterrupt {
+			t.Fatalf("structured delivery = %q/%q/%t", sessionName, message, shouldInterrupt)
+		}
+		cancel()
+		return ctx.Err()
+	}
+
+	err := sendStructuredPrompt(callerCtx, "recipient", "payload", true)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("sendStructuredPrompt() error = %v, want context.Canceled", err)
+	}
+}
+
 func TestWaitForAgyAssociationRetryDelayUsesCallerContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	timer := time.AfterFunc(10*time.Millisecond, cancel)
@@ -132,6 +154,59 @@ func TestRunAgyPostCreateReturnsCancellationBeforeSideEffects(t *testing.T) {
 	}
 	if associated || delivered || retried {
 		t.Fatalf("post-cancellation side effects: associated=%t delivered=%t retried=%t", associated, delivered, retried)
+	}
+}
+
+func TestRunAgyPostCreatePropagatesReadinessFailure(t *testing.T) {
+	t.Setenv("AGM_TEST_RUN_ID", "")
+	t.Setenv("AGM_TEST_ENV", "")
+	wantErr := errors.New("AGY composer unavailable")
+	var associated, delivered bool
+
+	err := runAgyPostCreateWithRuntime(t.Context(), "agy-create", agyPostCreateRuntime{
+		wait:               func(context.Context, string, time.Duration) error { return wantErr },
+		associate:          func(string) { associated = true },
+		deliver:            func(context.Context, string, bool, bool) error { delivered = true; return nil },
+		associateWithRetry: func(context.Context, string, int, time.Duration) error { return nil },
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("runAgyPostCreateWithRuntime() error = %v, want %v", err, wantErr)
+	}
+	if associated || delivered {
+		t.Fatalf("readiness failure side effects: associated=%t delivered=%t", associated, delivered)
+	}
+}
+
+func TestRunAgyPostCreatePropagatesPostPromptReadinessFailure(t *testing.T) {
+	t.Setenv("AGM_TEST_RUN_ID", "")
+	t.Setenv("AGM_TEST_ENV", "")
+	originalPrompt, originalPromptFile := prompt, promptFile
+	prompt, promptFile = "startup prompt", ""
+	t.Cleanup(func() { prompt, promptFile = originalPrompt, originalPromptFile })
+	wantErr := errors.New("AGY response readiness unavailable")
+	waits := 0
+	retried := false
+
+	err := runAgyPostCreateWithRuntime(t.Context(), "agy-create", agyPostCreateRuntime{
+		wait: func(context.Context, string, time.Duration) error {
+			waits++
+			if waits == 1 {
+				return nil
+			}
+			return wantErr
+		},
+		associate: func(string) {},
+		deliver:   func(context.Context, string, bool, bool) error { return nil },
+		associateWithRetry: func(context.Context, string, int, time.Duration) error {
+			retried = true
+			return nil
+		},
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("runAgyPostCreateWithRuntime() error = %v, want %v", err, wantErr)
+	}
+	if retried {
+		t.Fatal("metadata retry ran after post-prompt readiness failure")
 	}
 }
 

@@ -17,6 +17,16 @@ func TestAgySurveyOverridesReadyPrompt(t *testing.T) {
 	}
 }
 
+func TestAgyStaleSurveyAllowsLaterReadyPrompt(t *testing.T) {
+	survey := "How's the CLI experience so far? [1] Good [2] Fine [3] Bad [0] Skip"
+	if !containsAgyReadyPattern(survey + "\nTask complete\n>") {
+		t.Fatal("prompt after stale survey history should be ready")
+	}
+	if containsAgyReadyPattern("Task complete\n>\n" + survey) {
+		t.Fatal("prompt preceding a live survey should not be ready")
+	}
+}
+
 func TestAgyOrdinaryPromptIsNotSurvey(t *testing.T) {
 	content := "Task complete\n>"
 	if ContainsAgySurveyPrompt(content) {

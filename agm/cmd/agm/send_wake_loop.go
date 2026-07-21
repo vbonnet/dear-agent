@@ -44,7 +44,7 @@ func init() {
 	sendWakeLoopCmd.Flags().StringVar(&wakeLoopPrompt, "prompt", defaultWakePrompt, "Wake prompt to send")
 }
 
-func runSendWakeLoop(_ *cobra.Command, args []string) error {
+func runSendWakeLoop(cmd *cobra.Command, args []string) error {
 	targetSession := args[0]
 
 	// Check tmux session exists
@@ -83,7 +83,7 @@ func runSendWakeLoop(_ *cobra.Command, args []string) error {
 	switch currentState {
 	case manifest.StateDone:
 		// Session is at prompt — send wake
-		if err := tmux.SendMultiLinePromptSafe(targetSession, wakeLoopPrompt, false); err != nil {
+		if err := sendStructuredPrompt(cmd.Context(), targetSession, wakeLoopPrompt, false); err != nil {
 			return fmt.Errorf("failed to send wake prompt: %w", err)
 		}
 		ui.PrintSuccess(fmt.Sprintf("Sent wake-loop to '%s': %s", targetSession, wakeLoopPrompt))

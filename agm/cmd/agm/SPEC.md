@@ -88,6 +88,8 @@ Provide a production-ready CLI that:
 
 **CLI-30** When the AGM root owns SIGINT and SIGTERM handling, continuous scan, watchdog, event-watch, stalled-session watch, and bounded compaction-monitor loops shall consume the root Cobra context and return promptly on cancellation; subcommands shall not install competing process-global signal handlers.
 
+**CLI-31** When `agm send verify`, `agm send work-request`, or `agm send wake-loop` performs structured multiline delivery, the system shall pass the Cobra command context through composer readiness and delivery so cancellation cannot later send the payload.
+
 ## Requirements
 
 ### Functional Requirements

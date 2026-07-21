@@ -30,7 +30,10 @@ func containsAgyPromptPattern(content string) bool {
 }
 
 func containsAgyReadyPattern(content string) bool {
-	return !ContainsAgySurveyPrompt(content) && containsAgyPromptPattern(content)
+	if !ContainsAgySurveyPrompt(content) {
+		return containsAgyPromptPattern(content)
+	}
+	return containsAgyPromptAfterSurvey(content)
 }
 
 func containsAgyTrustPromptPattern(content string) bool {

@@ -53,6 +53,26 @@ func TestLongRunningCommandsConsumeRootContext(t *testing.T) {
 	}
 }
 
+func TestCommandHandlersAvoidBackgroundMultilineDelivery(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read command package: %v", err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Clean(name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if strings.Contains(string(data), "tmux.SendMultiLinePromptSafe(") {
+			t.Errorf("%s uses background-context multiline delivery", name)
+		}
+	}
+}
+
 func TestExecuteWithSignalContextPropagatesCancellation(t *testing.T) {
 	ready := make(chan struct{})
 	done := make(chan error, 1)

@@ -238,7 +238,7 @@ func runAgyPostCreateWithRuntime(ctx context.Context, sessionName string, runtim
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			debug.Log("AGY prompt readiness wait failed (non-fatal): %v", err)
+			return fmt.Errorf("wait for AGY prompt readiness: %w", err)
 		} else {
 			debug.Log("AGY prompt detected, session ready")
 		}
@@ -251,7 +251,7 @@ func runAgyPostCreateWithRuntime(ctx context.Context, sessionName string, runtim
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
-				debug.Log("AGY post-prompt readiness wait failed (non-fatal): %v", err)
+				return fmt.Errorf("wait for AGY post-prompt readiness: %w", err)
 			}
 			if err := runtime.associateWithRetry(ctx, sessionName, 20, 500*time.Millisecond); err != nil {
 				return err
