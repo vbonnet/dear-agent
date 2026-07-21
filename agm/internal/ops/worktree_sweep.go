@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -140,7 +141,21 @@ type SweepOptions struct {
 	// SelfPath, when set, is the worktree the sweep itself runs in — always
 	// ACTIVE, never reaped (a fresh sweep worktree can look clean+merged).
 	SelfPath string
+	// ActiveSessionsKnown records whether ActiveSessions is the complete
+	// live set or a guess left over from a failed lookup. An executing
+	// sweep refuses to run when it is false: "fewer ACTIVE matches" is not
+	// conservative for a command that deletes, it is the failure mode that
+	// removed two live worktrees during the 2026-07-10 audit (ce-3knl.1).
+	// Dry runs still classify, so an operator can see what the sweep would
+	// have done before restoring the lookup.
+	ActiveSessionsKnown bool
 }
+
+// ErrActiveSessionsUnknown is returned by Sweep when --execute is requested
+// without a trustworthy active-session set.
+var ErrActiveSessionsUnknown = errors.New(
+	"active-session discovery failed: refusing to execute a sweep that cannot " +
+		"prove which worktrees are live (re-run without --execute to classify only)")
 
 // SweepResult is the outcome of a pass.
 type SweepResult struct {
@@ -170,6 +185,12 @@ const nestedWorktreeMarker = "/.worktrees/"
 func Sweep(opts SweepOptions, deps SweepDeps, logger *slog.Logger) (*SweepResult, error) {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	// Fail closed before discovery: an executing sweep with an unknown live
+	// set has no way to classify ACTIVE, so every live worktree would look
+	// reapable.
+	if opts.Execute && !opts.ActiveSessionsKnown {
+		return nil, ErrActiveSessionsUnknown
 	}
 	res := &SweepResult{Failed: map[string]string{}}
 

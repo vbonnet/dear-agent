@@ -104,6 +104,10 @@ func init() {
 		"Print only orphan branches (commits above main merge-base, no open or merged PR)")
 }
 
+// sweepActiveSessions is the seam the live-set lookup goes through so the
+// fail-closed path can be exercised without a Dolt or tmux host.
+var sweepActiveSessions = getActiveSessions
+
 func runWorktreeSweep(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
@@ -115,13 +119,23 @@ func runWorktreeSweep(cmd *cobra.Command, args []string) error {
 	}
 
 	// Active-session set: reused from the audit-resources path so the sweep
-	// shares one definition of "live" (Dolt, tmux fallback). A query
-	// failure is non-fatal — it only makes the sweep MORE conservative
-	// (fewer ACTIVE matches ⇒ but the merge/dirty guards still hold).
-	active, err := getActiveSessions(ctx)
+	// shares one definition of "live" (Dolt, tmux fallback). A failed lookup
+	// is fatal for --execute: fewer ACTIVE matches is not "more
+	// conservative" for a command that deletes — it is exactly how two live
+	// worktrees were reaped during the 2026-07-10 audit (ce-3knl.1). The
+	// merge/dirty guards do not compensate, because a live worktree sitting
+	// clean at origin/main classifies as MERGED (ce-3ch7).
+	active, err := sweepActiveSessions(ctx)
+	activeKnown := err == nil
 	if err != nil {
+		if sweepExecute {
+			return fmt.Errorf("could not query active sessions (%w): refusing to execute a "+
+				"sweep that cannot prove which worktrees are live — re-run without --execute "+
+				"to classify only", err)
+		}
 		fmt.Fprintf(os.Stderr,
-			"Warning: could not query active sessions (%v); relying on merge/dirty guards\n", err)
+			"Warning: could not query active sessions (%v); dry-run classification only, "+
+				"--execute would refuse to run\n", err)
 	}
 
 	// Resolve self from the cwd's repo (worktreesBase itself is not a git
@@ -133,11 +147,12 @@ func runWorktreeSweep(cmd *cobra.Command, args []string) error {
 	}
 
 	opts := ops.SweepOptions{
-		WorktreesBase:  worktreesBase,
-		Execute:        sweepExecute,
-		CheckPR:        !sweepNoPRCheck,
-		ActiveSessions: active,
-		SelfPath:       currentWorktreeTopLevel(selfRepo),
+		WorktreesBase:       worktreesBase,
+		Execute:             sweepExecute,
+		CheckPR:             !sweepNoPRCheck,
+		ActiveSessions:      active,
+		ActiveSessionsKnown: activeKnown,
+		SelfPath:            currentWorktreeTopLevel(selfRepo),
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
