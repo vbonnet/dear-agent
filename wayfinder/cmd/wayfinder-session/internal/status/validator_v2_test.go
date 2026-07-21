@@ -300,6 +300,27 @@ func TestValidateV2RejectsInvalidWaypointOutcome(t *testing.T) {
 	}
 }
 
+func TestValidateV2RejectsSkippedMandatoryWaypoint(t *testing.T) {
+	now := time.Now()
+	st := &StatusV2{
+		SchemaVersion:   SchemaVersionV2,
+		ProjectName:     "test",
+		ProjectType:     ProjectTypeFeature,
+		RiskLevel:       RiskLevelM,
+		CurrentWaypoint: WaypointV2Retro,
+		Status:          StatusV2InProgress,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		WaypointHistory: []WaypointHistory{
+			{Name: WaypointV2Build, Status: WaypointStatusV2Skipped, StartedAt: now},
+		},
+	}
+
+	if err := ValidateV2(st); err == nil || !strings.Contains(err.Error(), "mandatory waypoint 'BUILD' cannot be skipped") {
+		t.Fatalf("ValidateV2() error = %v, want mandatory BUILD skip rejection", err)
+	}
+}
+
 func TestValidatePhaseHistory(t *testing.T) {
 	tests := []struct {
 		name    string

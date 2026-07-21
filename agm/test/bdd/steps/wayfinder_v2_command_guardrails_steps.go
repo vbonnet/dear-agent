@@ -17,6 +17,7 @@ var retiredWayfinderDocW0Pattern = regexp.MustCompile(`\bW0(?:\.[0-9]+)?\b`)
 var retiredWayfinderDocForwardPattern = regexp.MustCompile(`(?i)\b(?:current[_ ]phase|next[_ ]phase|phase)\b[^A-Za-z0-9]{0,12}(?:W0|D1|D2|D3|D4|S4|S5|S6|S7|S8|S9|S10|S11|V1)\b`)
 var retiredWayfinderDocReversePattern = regexp.MustCompile(`(?i)\b(?:W0|D1|D2|D3|D4|S4|S5|S6|S7|S8|S9|S10|S11|V1)(?:/(?:W0|D1|D2|D3|D4|S4|S5|S6|S7|S8|S9|S10|S11|V1))*\b[^A-Za-z0-9]{0,12}(?:phase|retrospective)\b`)
 var retiredWayfinderDocArtifactPattern = regexp.MustCompile(`(?i)\b(?:W0|D1|D2|D3|D4|S4|S5|S6|S7|S8|S9|S10|S11)-(?:charter|problem|research|design|spec|plan|setup|implementation|validation|retrospective)[A-Za-z0-9_-]*\.md\b`)
+var retiredWayfinderStatusLabelPattern = regexp.MustCompile(`(?m)\b(?:Current|Next) Phase:`)
 
 const wayfinderV2CommandFeaturePath = "agm/test/bdd/features/wayfinder_v2_command_guardrails.feature"
 
@@ -298,6 +299,7 @@ func nonMigrationRuntimeOmitsRetiredPhases(ctx context.Context) error {
 		{path: "internal/safepr", extensions: map[string]bool{".go": true}},
 		{path: "cmd/safe-pr", extensions: map[string]bool{".go": true}},
 		{path: "pkg/phaseengram", extensions: map[string]bool{".go": true}},
+		{path: "pkg/progress", extensions: map[string]bool{".go": true}},
 	} {
 		if err := scanActiveWayfinderRoot(state.repoRoot, root.path, root.extensions, retiredWayfinderPattern); err != nil {
 			return err
@@ -337,8 +339,14 @@ func scanLivingWayfinderDocumentation(repoRoot string) (resultErr error) {
 		if err != nil {
 			return err
 		}
+		content := string(data)
+		if strings.Contains(content, "WAYFINDER-STATUS.md") {
+			if label := retiredWayfinderStatusLabelPattern.FindString(content); label != "" {
+				return fmt.Errorf("living documentation %s parses retired Wayfinder status label %s", rel, label)
+			}
+		}
 		contextLines := 0
-		for lineNumber, line := range strings.Split(string(data), "\n") {
+		for lineNumber, line := range strings.Split(content, "\n") {
 			hasWayfinderContext := contextLines > 0 || strings.Contains(strings.ToLower(line), "wayfinder")
 			if token := retiredWayfinderDocToken(line, hasWayfinderContext); token != "" {
 				return fmt.Errorf("living documentation %s:%d contains retired Wayfinder token %s", rel, lineNumber+1, token)

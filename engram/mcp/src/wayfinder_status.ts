@@ -66,19 +66,18 @@ export interface WayfinderStatusSummary {
 type RecordValue = Record<string, unknown>;
 
 function extractFrontmatter(content: string): string {
-  const normalized = content.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
-  if (!normalized.startsWith('---\n')) {
+  if (!content.startsWith('---\n')) {
     throw new Error('invalid Wayfinder V2 status: must start with ---');
   }
-  const closing = normalized.indexOf('\n---', 4);
+  const closing = content.indexOf('\n---', 4);
   if (closing < 0) {
     throw new Error('invalid Wayfinder V2 status: missing closing ---');
   }
-  const remainder = normalized.slice(closing + 4).trim();
+  const remainder = content.slice(closing + 4).trim();
   if (remainder !== '') {
     throw new Error('invalid Wayfinder V2 status: content after closing --- is not allowed');
   }
-  return normalized.slice(4, closing);
+  return content.slice(4, closing);
 }
 
 function asRecord(value: unknown, path: string): RecordValue {
@@ -345,7 +344,7 @@ function validateSkipPhases(record: RecordValue): string[] {
   return phases;
 }
 
-function completedWaypoints(record: RecordValue): Set<string> {
+function completedWaypoints(record: RecordValue, configuredSkips: ReadonlySet<string>): Set<string> {
   const history = record.waypoint_history;
   if (history === undefined || history === null) return new Set();
   if (!Array.isArray(history)) {
@@ -368,6 +367,9 @@ function completedWaypoints(record: RecordValue): Set<string> {
     }
     seen.add(name);
     const status = requireEnum(waypoint, 'status', WAYPOINT_STATUSES);
+    if (status === 'skipped' && !configuredSkips.has(name)) {
+      throw new Error(`invalid Wayfinder V2 status: ${path} cannot skip mandatory waypoint ${JSON.stringify(name)}`);
+    }
     requireTimestamp(waypoint, 'started_at');
     optionalTimestamp(waypoint, 'completed_at', path);
     if (status === 'completed') {
@@ -452,9 +454,10 @@ export function parseWayfinderStatus(content: string): WayfinderStatusSummary {
   validateRoadmap(record.roadmap);
   validateQualityMetrics(record.quality_metrics);
 
-  const complete = completedWaypoints(record);
-  for (const skipped of validateSkipPhases(record)) complete.add(skipped);
-  if (record.skip_roadmap === true) complete.add('SETUP');
+  const configuredSkips = new Set<string>(validateSkipPhases(record));
+  if (record.skip_roadmap === true) configuredSkips.add('SETUP');
+  const complete = completedWaypoints(record, configuredSkips);
+  for (const skipped of configuredSkips) complete.add(skipped);
 
   return {
     phase,

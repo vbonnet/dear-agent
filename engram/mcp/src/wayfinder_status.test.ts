@@ -36,6 +36,11 @@ describe('parseWayfinderStatus', () => {
     );
   });
 
+  it('rejects BOM and CRLF framing that the Go reader rejects', () => {
+    assert.throws(() => parseWayfinderStatus(`\uFEFF${canonical}`), /must start with ---/);
+    assert.throws(() => parseWayfinderStatus(canonical.replaceAll('\n', '\r\n')), /must start with ---/);
+  });
+
   it('rejects a non-canonical schema version', () => {
     assert.throws(() => parseWayfinderStatus(canonical.replace('"2.0"', '"1.0"')), /schema_version must be/);
   });
@@ -87,6 +92,14 @@ describe('parseWayfinderStatus', () => {
   it('rejects invalid waypoint outcomes', () => {
     const invalid = canonical.replace('status: completed, started_at:', 'status: completed, outcome: typo, started_at:');
     assert.throws(() => parseWayfinderStatus(invalid), /outcome is invalid/);
+  });
+
+  it('rejects skipped history for mandatory phases', () => {
+    const invalid = canonical.replace(
+      '  - {name: CHARTER, status: completed,',
+      '  - {name: BUILD, status: skipped,',
+    );
+    assert.throws(() => parseWayfinderStatus(invalid), /cannot skip mandatory waypoint "BUILD"/);
   });
 
   it('requires blocked_reason for blocked status', () => {

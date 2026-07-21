@@ -208,6 +208,9 @@ func validateWaypointHistory(status *StatusV2) error {
 		if !contains(validWaypointStatuses, waypoint.Status) {
 			errors = append(errors, fmt.Sprintf("waypoint_history[%d]: invalid status '%s'", i, waypoint.Status))
 		}
+		if waypoint.Status == WaypointStatusV2Skipped && !status.IsPhaseSkipped(waypoint.Name) {
+			errors = append(errors, fmt.Sprintf("waypoint_history[%d]: mandatory waypoint '%s' cannot be skipped", i, waypoint.Name))
+		}
 
 		// Validate started_at is present
 		if waypoint.StartedAt.IsZero() {
