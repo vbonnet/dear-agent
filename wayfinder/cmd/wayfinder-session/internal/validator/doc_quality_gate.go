@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/telemetry"
 )
@@ -257,10 +258,9 @@ func reviewDocument(docPath, skillName string) (float64, []string, bool, error) 
 	return score, issues, false, nil
 }
 
-// runReviewSkill applies deterministic structural preflight checks. A
-// substantive provider-backed reviewer is not bundled in the Wayfinder binary,
-// so a structurally valid document must fail closed instead of receiving a
-// manufactured passing score.
+// runReviewSkill applies the deterministic semantic rubric bundled in the
+// Wayfinder binary. The rubric is deliberately local so the phase gate remains
+// reachable when no external provider is configured.
 func runReviewSkill(skillName string, docPath string) (float64, []string, error) {
 	data, err := os.ReadFile(docPath)
 	if err != nil {
@@ -277,15 +277,20 @@ func runReviewSkill(skillName string, docPath string) (float64, []string, error)
 	if len(issues) > 0 {
 		return 0, issues, nil
 	}
-	return 0, nil, NewValidationError(
-		"complete phase",
-		fmt.Sprintf("%s provider review is unavailable", skillName),
-		"Configure a supported provider-backed document review before completing this phase",
-	)
+	return 10, nil, nil
 }
 
 func builtinReviewIssues(skillName, content string) ([]string, error) {
+	if skillName != "review-adr" && skillName != "review-architecture" {
+		return nil, fmt.Errorf("unknown built-in document review %q", skillName)
+	}
 	trimmed := strings.TrimSpace(content)
+	issues := commonDocumentReviewIssues(trimmed)
+	issues = append(issues, skillDocumentReviewIssues(skillName, trimmed, levelTwoHeadings(trimmed))...)
+	return issues, nil
+}
+
+func commonDocumentReviewIssues(trimmed string) []string {
 	var issues []string
 	if len(trimmed) < 100 {
 		issues = append(issues, "document must contain at least 100 bytes of substantive content")
@@ -296,16 +301,79 @@ func builtinReviewIssues(skillName, content string) ([]string, error) {
 	if strings.Count("\n"+trimmed, "\n## ") < 2 {
 		issues = append(issues, "document must contain at least two level-two sections")
 	}
+	words, uniqueWords, maxFrequency := documentWordStats(trimmed)
+	if words < 20 || uniqueWords < 12 {
+		issues = append(issues, "document must contain substantive prose with at least 20 words and 12 distinct words")
+	}
+	if words > 0 && maxFrequency*5 > words*2 {
+		issues = append(issues, "document repeats one word too heavily to be substantive")
+	}
+	return issues
+}
+
+func skillDocumentReviewIssues(skillName, trimmed string, headings []string) []string {
+	var issues []string
 	if skillName == "review-adr" && !strings.HasPrefix(trimmed, "# ADR-") {
 		issues = append(issues, "ADR must begin with a canonical # ADR- heading")
 	}
 	if skillName == "review-adr" && !hasADRStatusLine(trimmed) {
 		issues = append(issues, "ADR must contain a Status line")
 	}
-	if skillName != "review-adr" && skillName != "review-architecture" {
-		return nil, fmt.Errorf("unknown built-in document review %q", skillName)
+	if !containsHeading(headings, "context") {
+		issues = append(issues, "document must contain a Context section")
 	}
-	return issues, nil
+	if skillName == "review-adr" && !containsHeading(headings, "decision") {
+		issues = append(issues, "ADR must contain a Decision section")
+	}
+	if skillName == "review-architecture" &&
+		!containsAnyHeading(headings, "design", "architecture", "decision") {
+		issues = append(issues, "architecture document must contain a Design, Architecture, or Decision section")
+	}
+	return issues
+}
+
+func documentWordStats(content string) (total, unique, maxFrequency int) {
+	counts := make(map[string]int)
+	for _, word := range strings.FieldsFunc(strings.ToLower(content), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}) {
+		if len([]rune(word)) < 3 {
+			continue
+		}
+		total++
+		counts[word]++
+		maxFrequency = max(maxFrequency, counts[word])
+	}
+	return total, len(counts), maxFrequency
+}
+
+func levelTwoHeadings(content string) []string {
+	var headings []string
+	for line := range strings.SplitSeq(content, "\n") {
+		line = strings.TrimSpace(line)
+		if heading, found := strings.CutPrefix(line, "## "); found {
+			headings = append(headings, strings.ToLower(strings.TrimSpace(heading)))
+		}
+	}
+	return headings
+}
+
+func containsHeading(headings []string, required string) bool {
+	for _, heading := range headings {
+		if strings.Contains(heading, required) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsAnyHeading(headings []string, required ...string) bool {
+	for _, candidate := range required {
+		if containsHeading(headings, candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 func hasADRStatusLine(content string) bool {

@@ -35,6 +35,21 @@ func TestValidateV2(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "whitespace-only project name",
+			status: &StatusV2{
+				SchemaVersion:   SchemaVersionV2,
+				ProjectName:     "  \t ",
+				ProjectType:     ProjectTypeFeature,
+				RiskLevel:       RiskLevelM,
+				CurrentWaypoint: PhaseV2Charter,
+				Status:          StatusV2Planning,
+				CreatedAt:       time.Now(),
+				UpdatedAt:       time.Now(),
+			},
+			wantErr: true,
+			errMsg:  "project_name is required",
+		},
+		{
 			name: "missing schema_version",
 			status: &StatusV2{
 				ProjectName:     "Test",

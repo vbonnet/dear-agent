@@ -105,7 +105,7 @@ func validateRequiredFields(status *StatusV2) error {
 	if status.SchemaVersion == "" {
 		errors = append(errors, "schema_version is required")
 	}
-	if status.ProjectName == "" {
+	if strings.TrimSpace(status.ProjectName) == "" {
 		errors = append(errors, "project_name is required")
 	}
 	if status.ProjectType == "" {
