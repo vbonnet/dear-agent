@@ -98,7 +98,7 @@ func runWayfinderSandboxIsolationRegressions(ctx context.Context) error {
 		ctx,
 		2*time.Minute,
 		"go", "test", "./wayfinder/pkg/sandbox", "-v",
-		"-run", `^Test(BasicSandboxOperationsDoNotMutateHostRepository|SandboxGitWorktreeLifecycleIsIsolated)$`,
+		"-run", `^Test(CreateSandbox|ListSandboxes|CleanupSandbox|BasicSandboxOperationsDoNotMutateHostRepository|SandboxGitWorktreeLifecycleIsIsolated)$`,
 		"-count=1", "-timeout=90s",
 	)
 	state.worktreesAfter, state.inventoryErr = runSandboxProviderCommand(ctx, 10*time.Second, "git", "worktree", "list", "--porcelain")
@@ -114,6 +114,9 @@ func wayfinderSandboxIsolationRegressionsShouldPass(ctx context.Context) error {
 		return fmt.Errorf("wayfinder sandbox isolation regressions: %w\n%s", state.testErr, state.testOutput)
 	}
 	for _, name := range []string{
+		"TestCreateSandbox",
+		"TestListSandboxes",
+		"TestCleanupSandbox",
 		"TestBasicSandboxOperationsDoNotMutateHostRepository",
 		"TestSandboxGitWorktreeLifecycleIsIsolated",
 	} {
