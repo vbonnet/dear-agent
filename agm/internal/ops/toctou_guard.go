@@ -20,10 +20,6 @@ func lockDir() string {
 	return filepath.Join(home, ".agm", "locks")
 }
 
-// ErrCodeLockTimeout is the error code returned when a session lock
-// cannot be acquired within the timeout period.
-const ErrCodeLockTimeout = "AGM-014"
-
 // ErrLockTimeout returns an OpError for lock acquisition timeout.
 func ErrLockTimeout(sessionName string, timeout time.Duration) *OpError {
 	return &OpError{

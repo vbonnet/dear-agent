@@ -185,6 +185,8 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-74** When `KillSession` resolves an identifier, the system shall lock the immutable session ID, reload mutable session and tmux identity under that lock, and honor caller cancellation before the irreversible tmux mutation.
 
+**OPS-75** The system shall assign a unique code to every stable RFC 7807 error in the shared operations catalog so programmatic callers can distinguish lifecycle guards and failures without parsing human-readable text.
+
 **OPS-47** When a process-liveness scan fails or the tmux backend cannot verify process liveness, status and kill decisions shall fall back to tmux session existence (fail-safe: an unverifiable session is treated as active).
 
 ---
