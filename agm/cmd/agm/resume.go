@@ -552,7 +552,7 @@ type resumeSessionRuntime struct {
 	killTmux          func(string) error
 	dispatch          func(*dolt.Adapter, *manifest.Manifest, string, *HealthStatus) error
 	wait              func(string, *HealthStatus) error
-	persistTmuxName   func(*dolt.Adapter, *manifest.Manifest, string) error
+	persistTmuxName   func(context.Context, *dolt.Adapter, *manifest.Manifest, string) error
 	restorePermission func(string, *manifest.Manifest, *HealthStatus)
 	updateActivity    func(*dolt.Adapter, string, string) error
 	updateTabTitle    func(string)
@@ -604,14 +604,14 @@ func rollbackCreatedResumeTmux(runtime resumeSessionRuntime, sessionName string,
 	return primaryErr
 }
 
-func persistResumeTmuxName(adapter *dolt.Adapter, m *manifest.Manifest, sessionName string) error {
+func persistResumeTmuxName(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest, sessionName string) error {
 	if m.Tmux.SessionName == sessionName {
 		return nil
 	}
-	m.Tmux.SessionName = sessionName
-	if err := adapter.UpdateSession(m); err != nil {
+	if err := adapter.UpdateTmuxSessionName(ctx, m.SessionID, sessionName); err != nil {
 		return fmt.Errorf("persist canonical tmux session name %q: %w", sessionName, err)
 	}
+	m.Tmux.SessionName = sessionName
 	return nil
 }
 
@@ -637,7 +637,7 @@ func resumeSessionWithRuntime(ctx context.Context, adapter *dolt.Adapter, sessio
 		return err
 	}
 	if createdTmux {
-		if err := persistCreatedResumeTmuxName(runtime, adapter, m, health); err != nil {
+		if err := persistCreatedResumeTmuxName(ctx, runtime, adapter, m, health); err != nil {
 			return rollbackCreatedResumeTmux(runtime, health.TmuxSessionName, err)
 		}
 	}
@@ -691,14 +691,14 @@ func ensureResumeTmuxSession(ctx context.Context, health *HealthStatus, runtime 
 	return true, nil
 }
 
-func persistCreatedResumeTmuxName(runtime resumeSessionRuntime, adapter *dolt.Adapter, m *manifest.Manifest, health *HealthStatus) error {
+func persistCreatedResumeTmuxName(ctx context.Context, runtime resumeSessionRuntime, adapter *dolt.Adapter, m *manifest.Manifest, health *HealthStatus) error {
 	if m.Tmux.SessionName == health.TmuxSessionName {
 		return nil
 	}
 	if runtime.persistTmuxName == nil {
 		return fmt.Errorf("resume runtime does not provide tmux-name persistence")
 	}
-	return runtime.persistTmuxName(adapter, m, health.TmuxSessionName)
+	return runtime.persistTmuxName(ctx, adapter, m, health.TmuxSessionName)
 }
 
 func runHarnessResume(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest, harnessName string, health *HealthStatus, sendCommands bool, runtime resumeSessionRuntime) error {

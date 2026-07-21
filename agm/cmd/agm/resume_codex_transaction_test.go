@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -68,7 +69,7 @@ func recordingResumeRuntime(calls *[]string) resumeSessionRuntime {
 			return nil
 		},
 		wait: func(string, *HealthStatus) error { record("wait"); return nil },
-		persistTmuxName: func(*dolt.Adapter, *manifest.Manifest, string) error {
+		persistTmuxName: func(context.Context, *dolt.Adapter, *manifest.Manifest, string) error {
 			record("persist")
 			return nil
 		},
@@ -200,9 +201,9 @@ func TestResumeSessionCodexPersistsCreatedCanonicalTmuxName(t *testing.T) {
 	wantName := tmux.SanitizeSessionName(health.TmuxSessionName)
 	var calls []string
 	runtime := recordingResumeRuntime(&calls)
-	runtime.persistTmuxName = func(adapter *dolt.Adapter, m *manifest.Manifest, name string) error {
+	runtime.persistTmuxName = func(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest, name string) error {
 		calls = append(calls, "persist")
-		return persistResumeTmuxName(adapter, m, name)
+		return persistResumeTmuxName(ctx, adapter, m, name)
 	}
 
 	if err := resumeSessionWithRuntime(t.Context(), adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime); err != nil {
@@ -220,6 +221,48 @@ func TestResumeSessionCodexPersistsCreatedCanonicalTmuxName(t *testing.T) {
 	}
 }
 
+func TestResumeSessionCodexTmuxPersistencePreservesConcurrentMetadata(t *testing.T) {
+	setDetachedResumeTestGlobals(t, true)
+	adapter, m, health := setupCodexResumeTransaction(t)
+	health.TmuxSessionName = "codex.resume:concurrent"
+	wantName := tmux.SanitizeSessionName(health.TmuxSessionName)
+	const wantUUID = "hook-associated-during-readiness"
+	const wantNotes = "updated while Codex was starting"
+	var calls []string
+	runtime := recordingResumeRuntime(&calls)
+	runtime.wait = func(string, *HealthStatus) error {
+		calls = append(calls, "wait")
+		latest, err := adapter.GetSession(m.SessionID)
+		if err != nil {
+			return err
+		}
+		latest.Claude.UUID = wantUUID
+		latest.Context.Notes = wantNotes
+		return adapter.UpdateSession(latest)
+	}
+	runtime.persistTmuxName = func(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest, name string) error {
+		calls = append(calls, "persist")
+		return persistResumeTmuxName(ctx, adapter, m, name)
+	}
+
+	if err := resumeSessionWithRuntime(t.Context(), adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime); err != nil {
+		t.Fatalf("resumeSessionWithRuntime() error = %v", err)
+	}
+	stored, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() error = %v", err)
+	}
+	if stored.Tmux.SessionName != wantName {
+		t.Fatalf("stored tmux name = %q, want %q", stored.Tmux.SessionName, wantName)
+	}
+	if stored.Claude.UUID != wantUUID || stored.Context.Notes != wantNotes {
+		t.Fatalf("concurrent metadata was lost: uuid=%q notes=%q", stored.Claude.UUID, stored.Context.Notes)
+	}
+	if want := []string{"create", "dispatch", "wait", "persist", "restore", "update", "tab"}; !reflect.DeepEqual(calls, want) {
+		t.Fatalf("resume calls = %v, want %v", calls, want)
+	}
+}
+
 func TestResumeSessionCodexRollsBackWhenCanonicalNamePersistenceFails(t *testing.T) {
 	setDetachedResumeTestGlobals(t, true)
 	adapter, m, health := setupCodexResumeTransaction(t)
@@ -227,7 +270,7 @@ func TestResumeSessionCodexRollsBackWhenCanonicalNamePersistenceFails(t *testing
 	wantErr := errors.New("persist failed")
 	var calls []string
 	runtime := recordingResumeRuntime(&calls)
-	runtime.persistTmuxName = func(*dolt.Adapter, *manifest.Manifest, string) error {
+	runtime.persistTmuxName = func(context.Context, *dolt.Adapter, *manifest.Manifest, string) error {
 		calls = append(calls, "persist")
 		return wantErr
 	}

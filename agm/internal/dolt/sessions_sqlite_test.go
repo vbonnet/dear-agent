@@ -96,6 +96,45 @@ func TestSQLiteSessionLifecycle_RoundTripsReapingTombstone(t *testing.T) {
 	}
 }
 
+func TestSQLiteUpdateTmuxSessionNamePreservesOtherColumns(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	m := &manifest.Manifest{
+		SchemaVersion:  manifest.SchemaVersion,
+		SessionID:      "sqlite-tmux-name-session",
+		Name:           "sqlite-tmux-name-session",
+		Harness:        "codex-cli",
+		Model:          "gpt-5.6-codex",
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		Context:        manifest.Context{Project: t.TempDir(), Notes: "concurrent notes"},
+		Claude:         manifest.Claude{UUID: "concurrent-hook-uuid"},
+		Tmux:           manifest.Tmux{SessionName: "historical.name"},
+		PermissionMode: "plan",
+	}
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+	if err := adapter.UpdateTmuxSessionName(t.Context(), m.SessionID, "canonical-name"); err != nil {
+		t.Fatalf("UpdateTmuxSessionName() error: %v", err)
+	}
+
+	stored, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() error: %v", err)
+	}
+	if stored.Tmux.SessionName != "canonical-name" {
+		t.Fatalf("Tmux.SessionName = %q, want canonical-name", stored.Tmux.SessionName)
+	}
+	if stored.Claude.UUID != m.Claude.UUID || stored.Context.Notes != m.Context.Notes || stored.Model != m.Model || stored.PermissionMode != m.PermissionMode {
+		t.Fatalf("narrow tmux update changed other columns: %#v", stored)
+	}
+}
+
 func TestSQLiteUpdateSessionRoundTripsModel(t *testing.T) {
 	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
 	if err != nil {

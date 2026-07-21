@@ -319,6 +319,39 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 	return nil
 }
 
+// UpdateTmuxSessionName persists only the live tmux identity for a session.
+// Resume readiness can take long enough for hooks or another AGM command to
+// update unrelated metadata, so writing the pre-readiness Manifest snapshot
+// here would lose those concurrent changes.
+func (a *Adapter) UpdateTmuxSessionName(ctx context.Context, sessionID, sessionName string) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id cannot be empty")
+	}
+	if sessionName == "" {
+		return fmt.Errorf("tmux session name cannot be empty")
+	}
+	if err := a.ApplyMigrations(); err != nil {
+		return fmt.Errorf("failed to apply migrations: %w", err)
+	}
+
+	result, err := a.conn.ExecContext(ctx, `
+		UPDATE agm_sessions
+		SET updated_at = ?, tmux_session_name = ?
+		WHERE id = ? AND workspace = ?
+	`, time.Now(), sessionName, sessionID, a.workspace)
+	if err != nil {
+		return fmt.Errorf("failed to update tmux session name: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	return nil
+}
+
 // DeleteSession deletes a session from the database
 func (a *Adapter) DeleteSession(sessionID string) error {
 	if sessionID == "" {
