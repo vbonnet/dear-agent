@@ -214,9 +214,7 @@ func TestValidateGitCommitStatus_PartiallyCommitted(t *testing.T) {
 func TestValidateGitCommitStatus_ModifiedTrackedSource(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	exec.Command("git", "init", tmpDir).Run()
-	exec.Command("git", "-C", tmpDir, "config", "user.email", "test@example.com").Run()
-	exec.Command("git", "-C", tmpDir, "config", "user.name", "Test User").Run()
+	gittest.Run(t, filepath.Dir(tmpDir), "init", tmpDir)
 
 	sourcePath := filepath.Join(tmpDir, "src", "foo.go")
 	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
@@ -225,8 +223,8 @@ func TestValidateGitCommitStatus_ModifiedTrackedSource(t *testing.T) {
 	if err := os.WriteFile(sourcePath, []byte("package src\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	exec.Command("git", "-C", tmpDir, "add", "src/foo.go").Run()
-	exec.Command("git", "-C", tmpDir, "commit", "-m", "initial source").Run()
+	gittest.Command(t, tmpDir, "add", "src/foo.go").Run()
+	gittest.Command(t, tmpDir, "commit", "-m", "initial source").Run()
 
 	if err := os.WriteFile(sourcePath, []byte("package src\n\nconst changed = true\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -241,9 +239,7 @@ func TestValidateGitCommitStatus_ModifiedTrackedSource(t *testing.T) {
 func TestValidateGitCommitStatus_RenamedTrackedSource(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	exec.Command("git", "init", tmpDir).Run()
-	exec.Command("git", "-C", tmpDir, "config", "user.email", "test@example.com").Run()
-	exec.Command("git", "-C", tmpDir, "config", "user.name", "Test User").Run()
+	gittest.Run(t, filepath.Dir(tmpDir), "init", tmpDir)
 
 	sourcePath := filepath.Join(tmpDir, "src", "foo.go")
 	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
@@ -252,9 +248,9 @@ func TestValidateGitCommitStatus_RenamedTrackedSource(t *testing.T) {
 	if err := os.WriteFile(sourcePath, []byte("package src\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	exec.Command("git", "-C", tmpDir, "add", "src/foo.go").Run()
-	exec.Command("git", "-C", tmpDir, "commit", "-m", "initial source").Run()
-	if output, err := exec.Command("git", "-C", tmpDir, "mv", "src/foo.go", "README.txt").CombinedOutput(); err != nil {
+	gittest.Command(t, tmpDir, "add", "src/foo.go").Run()
+	gittest.Command(t, tmpDir, "commit", "-m", "initial source").Run()
+	if output, err := gittest.Command(t, tmpDir, "mv", "src/foo.go", "README.txt").CombinedOutput(); err != nil {
 		t.Fatalf("git mv failed: %v: %s", err, output)
 	}
 

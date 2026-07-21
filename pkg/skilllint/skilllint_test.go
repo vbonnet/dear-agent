@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func writeFile(t *testing.T, dir, name, content string) string {
@@ -24,7 +25,7 @@ func writeFile(t *testing.T, dir, name, content string) string {
 
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd := gittest.Command(t, dir, args...)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
 	}

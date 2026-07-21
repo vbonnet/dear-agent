@@ -173,7 +173,7 @@ func TestCommitPhaseCompletion(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repoDir, "user-notes.md"), []byte("private notes\n"), 0644); err != nil {
 		t.Fatalf("failed to write unrelated file: %v", err)
 	}
-	if err := exec.Command("git", "-C", repoDir, "add", "user-notes.md").Run(); err != nil {
+	if err := gittest.Command(t, repoDir, "add", "user-notes.md").Run(); err != nil {
 		t.Fatalf("stage unrelated file: %v", err)
 	}
 
@@ -213,7 +213,7 @@ func TestCommitPhaseCompletion(t *testing.T) {
 	if !strings.Contains(commitMsg, "Wayfinder-Outcome: success") {
 		t.Errorf("commit message missing outcome metadata: %q", commitMsg)
 	}
-	showCmd := exec.Command("git", "-C", repoDir, "show", "--name-only", "--format=")
+	showCmd := gittest.Command(t, repoDir, "show", "--name-only", "--format=")
 	showOutput, err := showCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git show: %v", err)
@@ -225,7 +225,7 @@ func TestCommitPhaseCompletion(t *testing.T) {
 	if strings.Contains(committed, "user-notes.md") {
 		t.Errorf("unrelated staged file was swept into phase commit:\n%s", committed)
 	}
-	stagedOutput, err := exec.Command("git", "-C", repoDir, "diff", "--cached", "--name-only").CombinedOutput()
+	stagedOutput, err := gittest.Command(t, repoDir, "diff", "--cached", "--name-only").CombinedOutput()
 	if err != nil {
 		t.Fatalf("git diff --cached: %v", err)
 	}
@@ -239,10 +239,10 @@ func TestCommitPhaseCompletionIncludesDesignADRs(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Test Project\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := exec.Command("git", "-C", repoDir, "add", "README.md").Run(); err != nil {
+	if err := gittest.Command(t, repoDir, "add", "README.md").Run(); err != nil {
 		t.Fatal(err)
 	}
-	if err := exec.Command("git", "-C", repoDir, "commit", "-m", "Initial commit").Run(); err != nil {
+	if err := gittest.Command(t, repoDir, "commit", "-m", "Initial commit").Run(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -258,14 +258,14 @@ func TestCommitPhaseCompletionIncludesDesignADRs(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := exec.Command("git", "-C", repoDir, "add", "user-notes.md").Run(); err != nil {
+	if err := gittest.Command(t, repoDir, "add", "user-notes.md").Run(); err != nil {
 		t.Fatal(err)
 	}
 
 	if err := New(repoDir).CommitPhaseCompletion("DESIGN", "success", "Reviewed design documents"); err != nil {
 		t.Fatalf("CommitPhaseCompletion(DESIGN): %v", err)
 	}
-	showOutput, err := exec.Command("git", "-C", repoDir, "show", "--name-only", "--format=").CombinedOutput()
+	showOutput, err := gittest.Command(t, repoDir, "show", "--name-only", "--format=").CombinedOutput()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,10 +285,10 @@ func TestCommitRewindCommitsCanonicalMarkersOnly(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Test\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := exec.Command("git", "-C", repoDir, "add", "README.md").Run(); err != nil {
+	if err := gittest.Command(t, repoDir, "add", "README.md").Run(); err != nil {
 		t.Fatal(err)
 	}
-	if err := exec.Command("git", "-C", repoDir, "commit", "-m", "Initial").Run(); err != nil {
+	if err := gittest.Command(t, repoDir, "commit", "-m", "Initial").Run(); err != nil {
 		t.Fatal(err)
 	}
 	for name, content := range map[string]string{
@@ -301,13 +301,13 @@ func TestCommitRewindCommitsCanonicalMarkersOnly(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := exec.Command("git", "-C", repoDir, "add", "user-notes.md").Run(); err != nil {
+	if err := gittest.Command(t, repoDir, "add", "user-notes.md").Run(); err != nil {
 		t.Fatal(err)
 	}
 	if err := New(repoDir).CommitRewind("BUILD", "DESIGN"); err != nil {
 		t.Fatalf("CommitRewind: %v", err)
 	}
-	showOutput, err := exec.Command("git", "-C", repoDir, "show", "--name-only", "--format=").CombinedOutput()
+	showOutput, err := gittest.Command(t, repoDir, "show", "--name-only", "--format=").CombinedOutput()
 	if err != nil {
 		t.Fatal(err)
 	}
