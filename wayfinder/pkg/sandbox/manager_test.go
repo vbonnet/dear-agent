@@ -1,16 +1,65 @@
 package sandbox
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
 
+func chdirOutsideGitRepository(t *testing.T) {
+	t.Helper()
+	git := NewGitWorktreeManager()
+	candidateParents := []string{os.TempDir()}
+	if cwd, err := os.Getwd(); err == nil && git.IsGitRepository(cwd) {
+		repoRoot, rootErr := git.GetRepositoryRoot(cwd)
+		if rootErr != nil {
+			t.Fatalf("find invoking repository root: %v", rootErr)
+		}
+		for parent := filepath.Dir(repoRoot); ; parent = filepath.Dir(parent) {
+			candidateParents = append(candidateParents, parent)
+			if filepath.Dir(parent) == parent {
+				break
+			}
+		}
+	}
+
+	var failures []string
+	for _, parent := range candidateParents {
+		// t.TempDir inherits TMPDIR and may remain inside the invoking repository.
+		//nolint:usetesting // The explicit parent is the isolation mechanism under test.
+		dir, err := os.MkdirTemp(parent, "wayfinder-sandbox-test-")
+		if err != nil {
+			failures = append(failures, err.Error())
+			continue
+		}
+		if git.IsGitRepository(dir) {
+			failures = append(failures, dir+" is inside a Git repository")
+			if err := os.RemoveAll(dir); err != nil {
+				failures = append(failures, "remove rejected directory: "+err.Error())
+			}
+			continue
+		}
+		t.Cleanup(func() {
+			if err := os.RemoveAll(dir); err != nil {
+				t.Errorf("remove isolated working directory %q: %v", dir, err)
+			}
+		})
+		t.Chdir(dir)
+		return
+	}
+
+	t.Fatalf("create working directory outside Git: %s", strings.Join(failures, "; "))
+}
+
 func TestCreateSandbox(t *testing.T) {
 	// Setup
+	chdirOutsideGitRepository(t)
 	tempDir := t.TempDir()
 	manager := NewManager(tempDir)
 
@@ -44,6 +93,7 @@ func TestCreateSandbox(t *testing.T) {
 
 func TestListSandboxes(t *testing.T) {
 	// Setup
+	chdirOutsideGitRepository(t)
 	tempDir := t.TempDir()
 	manager := NewManager(tempDir)
 
@@ -72,6 +122,7 @@ func TestListSandboxes(t *testing.T) {
 
 func TestCleanupSandbox(t *testing.T) {
 	// Setup
+	chdirOutsideGitRepository(t)
 	tempDir := t.TempDir()
 	manager := NewManager(tempDir)
 
@@ -168,6 +219,142 @@ func gitSandboxTestRun(t *testing.T, args ...string) string {
 		t.Fatalf("git %v: %v: %s", args, err, out)
 	}
 	return string(out)
+}
+
+func TestBasicSandboxOperationsDoNotMutateHostRepository(t *testing.T) {
+	hostDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	git := NewGitWorktreeManager()
+	hostIsRepository := git.IsGitRepository(hostDir)
+	var before []string
+	if hostIsRepository {
+		before, err = git.ListWorktrees(hostDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("TMPDIR", hostDir)
+	}
+
+	chdirOutsideGitRepository(t)
+	isolatedDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if git.IsGitRepository(isolatedDir) {
+		t.Fatalf("isolated working directory %q is inside a Git repository", isolatedDir)
+	}
+	manager := NewManager(t.TempDir())
+	for _, name := range []string{"first", "second"} {
+		if _, err := manager.CreateSandbox(name); err != nil {
+			t.Fatalf("CreateSandbox(%q): %v", name, err)
+		}
+	}
+	sandboxes, err := manager.ListSandboxes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sandboxes) != 2 {
+		t.Fatalf("ListSandboxes() returned %d sandboxes, want 2", len(sandboxes))
+	}
+
+	if hostIsRepository {
+		after, err := git.ListWorktrees(hostDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(before, after) {
+			t.Fatalf("host worktree inventory changed: before=%q after=%q", before, after)
+		}
+	}
+}
+
+func TestSandboxGitWorktreeLifecycleIsIsolated(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "repo")
+	runSandboxTestGit(t, "init", "-q", "-b", "main", repo)
+	repo = canonicalSandboxTestPath(t, repo)
+	runSandboxTestGit(t, "-C", repo, "config", "user.name", "Wayfinder Sandbox Test")
+	runSandboxTestGit(t, "-C", repo, "config", "user.email", "sandbox@example.invalid")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("sandbox test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runSandboxTestGit(t, "-C", repo, "add", "README.md")
+	runSandboxTestGit(t, "-C", repo, "commit", "-q", "-m", "initial")
+	t.Chdir(repo)
+
+	manager := NewManager(filepath.Join(base, "sandboxes"))
+	sandbox, err := manager.CreateSandbox("git-lifecycle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanupNeeded := true
+	t.Cleanup(func() {
+		if !cleanupNeeded {
+			return
+		}
+		if err := manager.CleanupSandbox(sandbox.ID); err != nil {
+			t.Errorf("cleanup sandbox %q: %v", sandbox.ID, err)
+		}
+	})
+	wantWorktree := filepath.Join(repo, ".worktrees", sandbox.ID)
+	if sandbox.WorktreePath != wantWorktree || sandbox.GitRepository != repo {
+		t.Fatalf("sandbox git ownership = worktree:%q repo:%q, want %q and %q", sandbox.WorktreePath, sandbox.GitRepository, wantWorktree, repo)
+	}
+	worktrees, err := manager.git.ListWorktrees(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(worktrees, wantWorktree) {
+		t.Fatalf("created worktree %q not registered in %q", wantWorktree, worktrees)
+	}
+
+	if err := manager.CleanupSandbox(sandbox.ID); err != nil {
+		t.Fatal(err)
+	}
+	cleanupNeeded = false
+	if _, err := os.Stat(wantWorktree); !os.IsNotExist(err) {
+		t.Fatalf("worktree path survived cleanup: %v", err)
+	}
+	worktrees, err = manager.git.ListWorktrees(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(worktrees) != 1 || worktrees[0] != repo {
+		t.Fatalf("worktree registry after cleanup = %q, want only %q", worktrees, repo)
+	}
+}
+
+func canonicalSandboxTestPath(t *testing.T, path string) string {
+	t.Helper()
+	canonical, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatalf("canonicalize %q: %v", path, err)
+	}
+	return canonical
+}
+
+func runSandboxTestGit(t *testing.T, args ...string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = time.Second
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("git %s timed out: %v: %s", strings.Join(args, " "), ctx.Err(), out)
+	}
+	if err != nil {
+		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
+	}
 }
 
 func TestPathResolver(t *testing.T) {

@@ -25,3 +25,9 @@ Feature: Sandbox provider guardrails
   Scenario: Sandbox provider destruction preserves retryable cleanup state
     When AGM runs the sandbox provider cleanup retry regressions
     Then failed destruction should resume at the unfinished cleanup phase
+
+  Scenario: Wayfinder sandbox regressions preserve the invoking repository
+    Given the invoking repository worktree inventory is captured
+    When Wayfinder sandbox isolation regressions run
+    Then the Wayfinder sandbox isolation regressions should pass
+    And the invoking repository worktree inventory should be unchanged
