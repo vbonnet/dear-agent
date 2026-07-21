@@ -401,7 +401,7 @@ func scriptCommandOutputDestination(command string) scriptOutputDestination {
 	for index := 0; index < len(fields); index++ {
 		field := strings.Trim(fields[index], "()")
 		both := strings.HasPrefix(field, "&>")
-		redirect := field
+		var redirect string
 		descriptor := 1
 		if both {
 			redirect = strings.TrimPrefix(field, "&>")
