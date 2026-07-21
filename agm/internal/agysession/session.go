@@ -210,20 +210,54 @@ func FindLatestForWorkspace(homeDir, workspacePath string) (*Metadata, error) {
 	if err != nil {
 		return nil, err
 	}
-	conversationID := lastConversations[workspacePath]
-	if conversationID != "" {
-		metadata, findErr := FindByID(homeDir, conversationID)
-		if findErr == nil {
-			return metadata, nil
-		}
-		if !errors.Is(findErr, ErrConversationNotFound) {
-			return nil, findErr
-		}
-		// A provider cache entry can outlive its conversation database. Treat
-		// that one entry as stale and continue through the bounded log lookup;
-		// corrupt, unreadable, and budget-exhausted metadata still fails closed.
+	metadata, err := cachedConversationForWorkspace(homeDir, lastConversations, workspacePath)
+	if err != nil {
+		return nil, err
+	}
+	if metadata != nil {
+		return metadata, nil
 	}
 	return latestUsableConversationForWorkspaceFromLogs(homeDir, appDir, workspacePath)
+}
+
+func cachedConversationForWorkspace(homeDir string, lastConversations map[string]string, workspacePath string) (*Metadata, error) {
+	keys := make([]string, 0, len(lastConversations))
+	for providerWorkspacePath := range lastConversations {
+		keys = append(keys, providerWorkspacePath)
+	}
+	sort.Strings(keys)
+	seenConversationIDs := make(map[string]struct{}, len(keys))
+	var selected *Metadata
+	for _, providerWorkspacePath := range keys {
+		canonicalProviderPath, err := CanonicalWorkspacePath(providerWorkspacePath)
+		if err != nil {
+			return nil, fmt.Errorf("resolve AGY cached workspace path %q: %w", providerWorkspacePath, err)
+		}
+		if canonicalProviderPath != workspacePath {
+			continue
+		}
+		conversationID := lastConversations[providerWorkspacePath]
+		if conversationID == "" {
+			continue
+		}
+		if _, seen := seenConversationIDs[conversationID]; seen {
+			continue
+		}
+		seenConversationIDs[conversationID] = struct{}{}
+		metadata, findErr := FindByID(homeDir, conversationID)
+		if errors.Is(findErr, ErrConversationNotFound) {
+			continue
+		}
+		if findErr != nil {
+			return nil, findErr
+		}
+		if selected == nil || metadata.ModTime.After(selected.ModTime) {
+			captured := *metadata
+			captured.WorkspacePath = workspacePath
+			selected = &captured
+		}
+	}
+	return selected, nil
 }
 
 func populateTranscriptPaths(appDir string, meta *Metadata) {
@@ -265,9 +299,18 @@ func workspaceFromLastConversations(appDir, conversationID string) string {
 	if err != nil {
 		return ""
 	}
-	for workspacePath, cachedConversationID := range lastConversations {
-		if cachedConversationID == conversationID {
-			return workspacePath
+	keys := make([]string, 0, len(lastConversations))
+	for providerWorkspacePath := range lastConversations {
+		keys = append(keys, providerWorkspacePath)
+	}
+	sort.Strings(keys)
+	for _, providerWorkspacePath := range keys {
+		if lastConversations[providerWorkspacePath] != conversationID {
+			continue
+		}
+		canonicalProviderPath, canonicalErr := CanonicalWorkspacePath(providerWorkspacePath)
+		if canonicalErr == nil {
+			return canonicalProviderPath
 		}
 	}
 	return ""
@@ -345,6 +388,7 @@ func latestUsableConversationForWorkspaceFromLogs(homeDir, appDir, workspacePath
 	if selected == nil {
 		return nil, fmt.Errorf("resolve AGY workspace conversation: provider returned empty metadata")
 	}
+	selected.WorkspacePath = workspacePath
 	return selected, nil
 }
 
@@ -473,7 +517,11 @@ func scanLogForConversation(logPath, conversationID string) (workspacePath strin
 	currentWorkspace := ""
 	for scanner.Scan() {
 		line := scanner.Text()
-		if detectedWorkspacePath, ok := workspaceFromLogLine(line); ok {
+		detectedWorkspacePath, ok, workspaceErr := workspaceFromLogLine(line)
+		if workspaceErr != nil {
+			return "", false, false, fmt.Errorf("scan AGY log %s workspace marker: %w", logPath, workspaceErr)
+		}
+		if ok {
 			currentWorkspace = detectedWorkspacePath
 		}
 		if strings.Contains(line, "Created conversation "+conversationID) ||
@@ -504,7 +552,11 @@ func scanLogForWorkspace(logPath, workspacePath string) (conversationID string, 
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLogLineSize)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if detectedWorkspacePath, ok := workspaceFromLogLine(line); ok {
+		detectedWorkspacePath, ok, workspaceErr := workspaceFromLogLine(line)
+		if workspaceErr != nil {
+			return "", false, false, fmt.Errorf("scan AGY log %s workspace marker: %w", logPath, workspaceErr)
+		}
+		if ok {
 			currentWorkspace = detectedWorkspacePath
 			continue
 		}
@@ -569,10 +621,14 @@ func extractConversationID(line, marker string) string {
 	return conversationID
 }
 
-func workspaceFromLogLine(line string) (string, bool) {
+func workspaceFromLogLine(line string) (string, bool, error) {
 	_, workspacePath, found := strings.Cut(line, workspaceMarker)
 	if !found {
-		return "", false
+		return "", false, nil
 	}
-	return strings.TrimSpace(workspacePath), true
+	canonicalWorkspacePath, err := CanonicalWorkspacePath(strings.TrimSpace(workspacePath))
+	if err != nil {
+		return "", true, err
+	}
+	return canonicalWorkspacePath, true, nil
 }

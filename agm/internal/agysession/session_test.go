@@ -88,7 +88,7 @@ func TestAcquireWorkspaceCreateLockSerializesAndHonorsCancellation(t *testing.T)
 	}
 }
 
-func TestFindLatestForWorkspaceCanonicalizesSymlinkAlias(t *testing.T) {
+func TestFindLatestForWorkspaceCanonicalizesProviderCacheSymlinkAlias(t *testing.T) {
 	homeDir := t.TempDir()
 	appDir := filepath.Join(homeDir, ".gemini", "antigravity-cli")
 	conversationID := "117ff898-a964-4a9f-b460-1be4a8a49b17"
@@ -100,14 +100,37 @@ func TestFindLatestForWorkspaceCanonicalizesSymlinkAlias(t *testing.T) {
 	if err := os.Symlink(workspace, aliasWorkDir); err != nil {
 		t.Fatalf("create workspace symlink: %v", err)
 	}
-	writeAgyFixture(t, appDir, conversationID, workspace, "")
+	writeAgyFixture(t, appDir, conversationID, aliasWorkDir, "")
 
-	meta, err := FindLatestForWorkspace(homeDir, aliasWorkDir)
+	meta, err := FindLatestForWorkspace(homeDir, workspace)
 	if err != nil {
-		t.Fatalf("FindLatestForWorkspace through symlink: %v", err)
+		t.Fatalf("FindLatestForWorkspace with symlinked provider cache key: %v", err)
 	}
 	if meta.ConversationID != conversationID || meta.WorkspacePath != workspace {
 		t.Fatalf("symlink lookup metadata = ID %q workspace %q, want %q/%q", meta.ConversationID, meta.WorkspacePath, conversationID, workspace)
+	}
+}
+
+func TestFindLatestForWorkspaceCanonicalizesProviderLogSymlinkAlias(t *testing.T) {
+	homeDir := t.TempDir()
+	appDir := filepath.Join(homeDir, ".gemini", "antigravity-cli")
+	conversationID := "117ff898-a964-4a9f-b460-1be4a8a49b17"
+	workspace, err := CanonicalWorkspacePath(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliasWorkDir := filepath.Join(t.TempDir(), "workspace-alias")
+	if err := os.Symlink(workspace, aliasWorkDir); err != nil {
+		t.Fatalf("create workspace symlink: %v", err)
+	}
+	writeAgyFixture(t, appDir, conversationID, "", aliasWorkDir)
+
+	meta, err := FindLatestForWorkspace(homeDir, workspace)
+	if err != nil {
+		t.Fatalf("FindLatestForWorkspace with symlinked provider log marker: %v", err)
+	}
+	if meta.ConversationID != conversationID || meta.WorkspacePath != workspace {
+		t.Fatalf("symlink log metadata = ID %q workspace %q, want %q/%q", meta.ConversationID, meta.WorkspacePath, conversationID, workspace)
 	}
 }
 
