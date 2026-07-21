@@ -77,6 +77,10 @@ compatibility.
 
 **AGP-17** If pre-trusting the working directory fails, the codex-cli adapter shall warn and still attempt the launch.
 
+### Harness Doctor Health
+
+**AGP-19** When AGM doctor inspects an AGY session, including one stored with the legacy `agy-cli` or `antigravity` spelling, the system shall normalize the harness, derive `agy` from the shared harness binary registry, and use `$HOME/.gemini/antigravity-cli` as its advisory configuration directory rather than classify the session as unknown.
+
 ### BDD Enforcement
 
 **AGP-12** When a new active harness or model family is added, the system shall require BDD scenarios and registry tests that cross-cut the active parity matrix before the change is complete.

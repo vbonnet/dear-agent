@@ -83,6 +83,23 @@ Feature: Harness parity
     When AGM validates active parity support
     Then harness "gemini-cli" should be deprecated
 
+  Scenario: AGY doctor health uses the native installation surfaces
+    Given harness "agy" is configured
+    When AGM resolves doctor health for the configured harness
+    Then doctor should recognize CLI binary "agy"
+    And doctor should recognize config directory suffix ".gemini/antigravity-cli"
+
+  Scenario Outline: AGY doctor health normalizes legacy manifest spellings
+    Given harness "<harness>" is configured
+    When AGM resolves doctor health for the configured harness
+    Then doctor should recognize CLI binary "agy"
+    And doctor should recognize config directory suffix ".gemini/antigravity-cli"
+
+    Examples:
+      | harness     |
+      | agy-cli     |
+      | antigravity |
+
   Scenario: Active harness adapters satisfy shared conformance
     Given AGM active harnesses are configured
     When AGM validates active harness adapter conformance
