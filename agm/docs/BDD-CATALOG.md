@@ -206,6 +206,9 @@ creation, and terminal state detection.
 - Root cancellation also reaches Claude post-create prompt delivery and retry
   verification plus model, mode, and compaction slash-command readiness before
   later delivery, persistence, liveness validation, or attach work.
+- The root command remains the sole process-signal owner, and continuous scan,
+  watchdog, event-watch, stalled-session watch, and compaction-monitor loops
+  consume its Cobra context and return promptly when canceled.
 - AGY feedback survey handling dismisses once and recognizes the subsequent
   composer even while stale survey text remains in captured pane history.
 - AGM runtime helper commands keep co-located SPEC coverage.

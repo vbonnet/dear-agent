@@ -195,7 +195,7 @@ func completeSendCompact(ctx context.Context, sessionName, command, promptFile, 
 	// Verify completion if requested
 	if compactVerify {
 		fmt.Println()
-		return verifyCompaction(sessionName, 5*time.Minute)
+		return verifyCompaction(ctx, sessionName, 5*time.Minute)
 	}
 
 	return nil
@@ -226,7 +226,7 @@ func enrichPromptFromDolt(input *compaction.PromptInput, sessionName string) {
 }
 
 // verifyCompaction polls session state every 10s until DONE or timeout.
-func verifyCompaction(sessionName string, timeout time.Duration) error {
+func verifyCompaction(ctx context.Context, sessionName string, timeout time.Duration) error {
 	const pollInterval = 10 * time.Second
 
 	start := time.Now()
@@ -236,7 +236,13 @@ func verifyCompaction(sessionName string, timeout time.Duration) error {
 	fmt.Printf("Verifying compaction completion (polling every %s, timeout %s)...\n", pollInterval, timeout)
 
 	for time.Now().Before(deadline) {
-		time.Sleep(pollInterval)
+		timer := time.NewTimer(pollInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
 
 		state, err := session.DetectState(sessionName)
 		if err != nil {
