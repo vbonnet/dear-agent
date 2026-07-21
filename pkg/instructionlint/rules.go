@@ -21,6 +21,7 @@ var environmentAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 var embeddedShellCommand = regexp.MustCompile("\\$\\(([^()]*)\\)|`([^`]*)`")
 var markdownListPrefix = regexp.MustCompile(`^(?:[-+*]|[0-9]+[.)])[ \t]+`)
 var markdownTaskPrefix = regexp.MustCompile(`^\[[ xX]\][ \t]+`)
+var pullRequestAPIEndpoint = regexp.MustCompile(`^/?repos/[^/]+/[^/]+/pulls(?:/([0-9]+))?/?$`)
 
 var instructionRules = []rule{
 	{id: "wayfinder-v1", replacement: "CHARTER, PROBLEM, RESEARCH, DESIGN, SPEC, PLAN, SETUP, BUILD, and RETRO", applies: proseOrShell, detect: retiredWayfinderToken},
@@ -178,10 +179,98 @@ func rawGHMergeFields(fields []string) bool {
 }
 
 func rawGHPRLifecycle(text string) bool {
-	return anyCommand(text, func(fields []string) bool {
-		return len(fields) >= 3 && fields[0] == "gh" && fields[1] == "pr" &&
-			slices.Contains([]string{"create", "close", "reopen"}, fields[2])
+	return anyCommand(text, rawGHPRLifecycleFields)
+}
+
+func rawGHPRLifecycleFields(fields []string) bool {
+	if len(fields) >= 3 && fields[0] == "gh" && fields[1] == "pr" &&
+		slices.Contains([]string{"create", "close", "reopen"}, fields[2]) {
+		return true
+	}
+	if !commandHasPrefix(fields, "gh", "api") {
+		return false
+	}
+	return rawGHAPIPRLifecycle(fields[2:])
+}
+
+func rawGHAPIPRLifecycle(apiFields []string) bool {
+	apiArgs := stripLauncherOptions(apiFields, map[string]bool{
+		"-X": true, "--method": true, "-H": true, "--header": true,
+		"-q": true, "--jq": true, "-F": true, "--field": true,
+		"-f": true, "--raw-field": true, "--input": true,
+		"--template": true, "-t": true, "--preview": true,
 	})
+	if len(apiArgs) == 0 {
+		return false
+	}
+	if apiArgs[0] == "graphql" {
+		query := strings.Join(apiFields, " ")
+		return strings.Contains(query, "createPullRequest") ||
+			strings.Contains(query, "closePullRequest") ||
+			strings.Contains(query, "reopenPullRequest") ||
+			strings.Contains(query, "updatePullRequest") &&
+				(strings.Contains(query, "state:OPEN") || strings.Contains(query, "state:CLOSED"))
+	}
+
+	match := pullRequestAPIEndpoint.FindStringSubmatch(strings.Trim(apiArgs[0], `"'`))
+	if match == nil {
+		return false
+	}
+	method := ghAPIMethod(apiFields)
+	if match[1] == "" {
+		return method == "POST"
+	}
+	return method == "PATCH" && ghAPIHasLifecycleState(apiFields)
+}
+
+func ghAPIMethod(fields []string) string {
+	method := ""
+	hasFields := false
+	for i := 0; i < len(fields); i++ {
+		field := strings.Trim(fields[i], `"'`)
+		if strings.HasPrefix(field, "-X") && field != "-X" {
+			method = strings.TrimPrefix(field, "-X")
+			continue
+		}
+		name, value, inline := strings.Cut(field, "=")
+		switch name {
+		case "-X", "--method":
+			if inline {
+				method = value
+			} else if i+1 < len(fields) {
+				i++
+				method = strings.Trim(fields[i], `"'`)
+			}
+		case "-f", "--raw-field", "-F", "--field":
+			hasFields = true
+		}
+	}
+	if method != "" {
+		return strings.ToUpper(method)
+	}
+	if hasFields {
+		return "POST"
+	}
+	return "GET"
+}
+
+func ghAPIHasLifecycleState(fields []string) bool {
+	for _, field := range fields {
+		field = strings.ToLower(strings.Trim(fieldsValue(field), `"'`))
+		if field == "state=open" || field == "state=closed" {
+			return true
+		}
+	}
+	return false
+}
+
+func fieldsValue(field string) string {
+	for _, prefix := range []string{"-f=", "-F=", "--raw-field=", "--field="} {
+		if value, ok := strings.CutPrefix(field, prefix); ok {
+			return value
+		}
+	}
+	return field
 }
 
 func commandFields(text string) [][]string {

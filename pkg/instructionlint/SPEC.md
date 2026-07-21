@@ -12,7 +12,7 @@
 
 **INSPOL-04** When active prose or executable guidance contains a retired Wayfinder phase token in Wayfinder context or an unambiguous retired phase filename in any letter case, the system shall report the token and the nine-phase V2 replacement contract without misclassifying unrelated labels, schema paths, or semantic versions.
 
-**INSPOL-05** When executable guidance invokes Beads without the canonical `--db ~/beads/context-engine/.beads` database, raw git push, raw GitHub merge, or removed safe-pr emergency forms, the system shall report the rule and canonical wrapper after normalizing executable paths, launchers including `exec`, `env --split-string` and `eval` payloads, tool-global options, chained commands, and shell `-c` payloads.
+**INSPOL-05** When executable guidance invokes Beads without the canonical `--db ~/beads/context-engine/.beads --dolt-auto-commit on` prefix, raw git push, raw GitHub PR lifecycle or merge operations through the CLI, REST, or GraphQL, or removed safe-pr emergency forms, the system shall report the rule and canonical wrapper after normalizing executable paths, launchers including `exec`, `env --split-string` and `eval` payloads, tool-global options, chained commands, and shell `-c` payloads.
 
 **INSPOL-06** When executable guidance uses a known-invalid AGM command or output flag, the system shall report the current command form.
 

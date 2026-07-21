@@ -617,6 +617,9 @@ Refused for create: --web, --fill*, --body-file/-F, --editor (interactive or
 unstampable); --title is required. Every run appends a JSONL audit record to
 ~/.local/state/dear-agent/safe-pr.log.
 
-If no wayfinder session exists and no approved path is available, escalate:
+If no wayfinder session exists and no approved path is available in a current
+AGM session, escalate:
   agm escalate ask --kind blocked-action --context "<why no session exists>" "create PR"
+Outside AGM, add --session <registered-session>. If no registered session
+exists, ask the current user directly.
 `

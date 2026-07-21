@@ -432,6 +432,33 @@ func TestGitHubAPIMergesRemainPolicyVisible(t *testing.T) {
 	}
 }
 
+func TestGitHubAPIPRLifecycleRemainsPolicyVisible(t *testing.T) {
+	commands := []string{
+		"gh api -X POST repos/owner/repo/pulls -f title=test -f head=feature -f base=main",
+		"gh api repos/owner/repo/pulls -f title=test -f head=feature -f base=main",
+		"gh api -XPATCH repos/owner/repo/pulls/1 -f=state=closed",
+		"gh api --method=PATCH repos/owner/repo/pulls/1 --raw-field=state=open",
+		`gh api graphql -f query='mutation { createPullRequest(input:{repositoryId:"R_id"}) { pullRequest { id } } }'`,
+		`gh api graphql -f query='mutation { closePullRequest(input:{pullRequestId:"PR_id"}) { pullRequest { state } } }'`,
+		`gh api graphql -f query='mutation { reopenPullRequest(input:{pullRequestId:"PR_id"}) { pullRequest { state } } }'`,
+	}
+	for _, command := range commands {
+		violations := evaluateSegment("AGENTS.md", Segment{Kind: SegmentShell, Text: command})
+		if len(violations) != 1 || violations[0].Rule != "raw-gh-pr-lifecycle" {
+			t.Errorf("%q violations = %v, want raw-gh-pr-lifecycle", command, violations)
+		}
+	}
+
+	for _, command := range []string{
+		"gh api repos/owner/repo/pulls",
+		"gh api -X PATCH repos/owner/repo/pulls/1 -f title=updated",
+	} {
+		if violations := evaluateSegment("AGENTS.md", Segment{Kind: SegmentShell, Text: command}); len(violations) != 0 {
+			t.Errorf("%q violations = %v, want none", command, violations)
+		}
+	}
+}
+
 func TestExecLaunchedCommandsRemainPolicyVisible(t *testing.T) {
 	commands := []string{
 		"exec gh pr merge 123",
