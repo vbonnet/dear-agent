@@ -51,6 +51,7 @@ func TestSegmentsClassifyExecutableFences(t *testing.T) {
 	want := []string{
 		"inline|git push origin main",
 		"prose|# W0 prose",
+		"prose|explanatory fixture text",
 		"prose|Use `git push origin main` only as a quoted bad command.",
 		"prose|W0 fixture",
 		"prose|echo merged",
@@ -525,7 +526,7 @@ func TestOrdinaryProseCommandsRemainPolicyVisible(t *testing.T) {
 }
 
 func TestRetiredWayfinderVocabularyIsCaseInsensitive(t *testing.T) {
-	for _, token := range []string{"v1", "v1.", "w0", "d1", "s1"} {
+	for _, token := range []string{"v1", "v1.", "w0", "d1", "s1", "Use Wayfinder/V1", "follow the Wayfinder V1.x workflow"} {
 		if !retiredWayfinderToken(token) {
 			t.Errorf("retiredWayfinderToken does not match %q", token)
 		}
@@ -534,6 +535,19 @@ func TestRetiredWayfinderVocabularyIsCaseInsensitive(t *testing.T) {
 		if retiredWayfinderToken(currentVersion) {
 			t.Errorf("retiredWayfinderToken unexpectedly matches %q", currentVersion)
 		}
+	}
+}
+
+func TestIndentedRetiredWayfinderGuidanceRemainsPolicyVisible(t *testing.T) {
+	source := []byte("    Use Wayfinder V1\n    Create W0-charter.md\n")
+	var rules []string
+	for _, segment := range parseSegments(source) {
+		for _, violation := range evaluateSegment("AGENTS.md", segment) {
+			rules = append(rules, violation.Rule)
+		}
+	}
+	if !reflect.DeepEqual(rules, []string{"wayfinder-v1", "wayfinder-v1"}) {
+		t.Fatalf("indented guidance rules = %v, want two wayfinder-v1 violations", rules)
 	}
 }
 

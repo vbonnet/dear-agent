@@ -62,10 +62,11 @@ func retiredWayfinderToken(text string) bool {
 	if retiredWayfinderPhase.MatchString(text) {
 		return true
 	}
+	wayfinderContext := strings.Contains(strings.ToLower(text), "wayfinder")
 	for _, location := range retiredWayfinderV1.FindAllStringIndex(text, -1) {
 		precededBySlash := location[0] > 0 && text[location[0]-1] == '/'
 		followedByVersionSuffix := location[1]+1 < len(text) && text[location[1]] == '.' && isVersionSuffix(text[location[1]+1])
-		if !precededBySlash && !followedByVersionSuffix {
+		if wayfinderContext || !precededBySlash && !followedByVersionSuffix {
 			return true
 		}
 	}

@@ -541,7 +541,7 @@ func classifyIndentedCodeBlock(classified map[int]SegmentKind, block *ast.CodeBl
 	for i := 0; i < block.Lines().Len(); i++ {
 		segment := block.Lines().At(i)
 		value := string(segment.Value(source))
-		kind := SegmentKind("skip")
+		kind := SegmentProse
 		if continuing || commandShaped(value) {
 			kind = SegmentShell
 		}
