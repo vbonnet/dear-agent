@@ -339,26 +339,29 @@ func scanLivingWayfinderDocumentation(repoRoot string) (resultErr error) {
 		if err != nil {
 			return err
 		}
-		content := string(data)
-		if strings.Contains(content, "WAYFINDER-STATUS.md") {
-			if label := retiredWayfinderStatusLabelPattern.FindString(content); label != "" {
-				return fmt.Errorf("living documentation %s parses retired Wayfinder status label %s", rel, label)
-			}
-		}
-		contextLines := 0
-		for lineNumber, line := range strings.Split(content, "\n") {
-			hasWayfinderContext := contextLines > 0 || strings.Contains(strings.ToLower(line), "wayfinder")
-			if token := retiredWayfinderDocToken(line, hasWayfinderContext); token != "" {
-				return fmt.Errorf("living documentation %s:%d contains retired Wayfinder token %s", rel, lineNumber+1, token)
-			}
-			if strings.Contains(strings.ToLower(line), "wayfinder") {
-				contextLines = 2
-			} else if contextLines > 0 {
-				contextLines--
-			}
-		}
-		return nil
+		return validateLivingWayfinderDocument(rel, string(data))
 	})
+}
+
+func validateLivingWayfinderDocument(relativePath, content string) error {
+	if strings.Contains(content, "WAYFINDER-STATUS.md") {
+		if label := retiredWayfinderStatusLabelPattern.FindString(content); label != "" {
+			return fmt.Errorf("living documentation %s parses retired Wayfinder status label %s", relativePath, label)
+		}
+	}
+	contextLines := 0
+	for lineNumber, line := range strings.Split(content, "\n") {
+		hasWayfinderContext := contextLines > 0 || strings.Contains(strings.ToLower(line), "wayfinder")
+		if token := retiredWayfinderDocToken(line, hasWayfinderContext); token != "" {
+			return fmt.Errorf("living documentation %s:%d contains retired Wayfinder token %s", relativePath, lineNumber+1, token)
+		}
+		if strings.Contains(strings.ToLower(line), "wayfinder") {
+			contextLines = 2
+		} else if contextLines > 0 {
+			contextLines--
+		}
+	}
+	return nil
 }
 
 func skipLivingDocumentationDir(relativePath string) bool {
