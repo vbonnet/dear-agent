@@ -283,6 +283,9 @@ func renderKillError(sessionName, message string, textRender func() error) error
 func handleKillError(opCtx *ops.OpContext, sessionName string, killResult *ops.KillSessionResult, killErr error) (*ops.KillSessionResult, bool, error) {
 	var opErr *ops.OpError
 	if !errors.As(killErr, &opErr) {
+		if isJSONOutput() {
+			return killResult, true, renderKillError(sessionName, killErr.Error(), nil)
+		}
 		return killResult, true, killErr
 	}
 	switch opErr.Code {

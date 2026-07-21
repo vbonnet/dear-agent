@@ -1,8 +1,11 @@
 package backend
 
 import (
+	"context"
 	"errors"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
 // fakeBackend is a controllable mock for testing the adapter layer
@@ -18,6 +21,8 @@ type fakeBackend struct {
 	createErr         error
 	attachErr         error
 	sendKeysErr       error
+	killErr           error
+	killed            []string
 }
 
 func (f *fakeBackend) HasSession(name string) (bool, error) {
@@ -40,6 +45,51 @@ func (f *fakeBackend) AttachSession(name string) error {
 }
 func (f *fakeBackend) SendKeys(session, keys string) error {
 	return f.sendKeysErr
+}
+func (f *fakeBackend) KillSession(name string) error {
+	f.killed = append(f.killed, name)
+	return f.killErr
+}
+
+func TestBackendAdapter_KillSessionForwardsProductionCapability(t *testing.T) {
+	wantErr := errors.New("kill denied")
+	fb := &fakeBackend{killErr: wantErr}
+	adapter := NewBackendAdapter(fb)
+
+	err := adapter.KillSession("exact-target")
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("KillSession() error = %v, want %v", err, wantErr)
+	}
+	if len(fb.killed) != 1 || fb.killed[0] != "exact-target" {
+		t.Fatalf("killed = %v, want [exact-target]", fb.killed)
+	}
+}
+
+type strictMockTmux struct {
+	*session.MockTmux
+	strictCalls int
+}
+
+func (m *strictMockTmux) HasSessionStrict(_ context.Context, name string) (bool, error) {
+	m.strictCalls++
+	return m.MockTmux.HasSession(name)
+}
+
+func TestBackendAdapter_PreservesTmuxKillAndStrictProbeThroughProductionChain(t *testing.T) {
+	inner := &strictMockTmux{MockTmux: session.NewMockTmux()}
+	inner.Sessions["exact-target"] = true
+	adapter := NewBackendAdapter(NewTmuxBackendWithClient(inner))
+
+	exists, err := adapter.HasSessionStrict(context.Background(), "exact-target")
+	if err != nil || !exists || inner.strictCalls != 1 {
+		t.Fatalf("strict probe: exists=%v calls=%d error=%v", exists, inner.strictCalls, err)
+	}
+	if err := adapter.KillSession("exact-target"); err != nil {
+		t.Fatalf("KillSession(): %v", err)
+	}
+	if inner.Sessions["exact-target"] {
+		t.Fatal("production adapter chain left exact target running")
+	}
 }
 
 func TestNewBackendAdapter(t *testing.T) {

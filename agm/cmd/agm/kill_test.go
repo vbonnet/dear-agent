@@ -2,12 +2,35 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 )
+
+func TestKill_AgentMode_BackendFailureReturnsJSON(t *testing.T) {
+	setAgentJSON(t)
+	wantErr := errors.New("tmux socket unavailable")
+
+	var done bool
+	var retErr error
+	out := captureStdout(t, func() {
+		_, done, retErr = handleKillError(nil, "demo", nil, wantErr)
+	})
+
+	if !done || retErr == nil {
+		t.Fatalf("done = %v, error = %v; want terminal failure", done, retErr)
+	}
+	var response map[string]string
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &response); err != nil {
+		t.Fatalf("stdout is not JSON: %v\noutput: %q", err, out)
+	}
+	if response["error"] != wantErr.Error() || response["session"] != "demo" {
+		t.Fatalf("response = %#v, want backend error and exact session", response)
+	}
+}
 
 // setAgentJSON flips the package-global output state into agent/JSON mode for
 // the duration of a test and restores it afterwards, mirroring how
