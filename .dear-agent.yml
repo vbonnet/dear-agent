@@ -107,6 +107,8 @@ instruction-policy:
       owner: vroom
     - match: cmd/vroom-dispatch-direct/main.go
       owner: vroom-worker-prompts
+    - match: cmd/vroom-prompt-gen/main.go
+      owner: vroom-worker-prompts
     - match: wayfinder/SKILL.md
       owner: wayfinder
     - match: wayfinder/skills/wayfinder/SKILL.md

@@ -283,6 +283,9 @@ func parseShellWords(input string) []string {
 }
 
 func shellCommandPayload(fields []string) (string, bool) {
+	if len(fields) > 1 && fields[0] == "eval" {
+		return strings.Join(fields[1:], " "), true
+	}
 	if len(fields) < 3 || !slices.Contains([]string{"bash", "dash", "ksh", "sh", "zsh"}, fields[0]) {
 		return "", false
 	}

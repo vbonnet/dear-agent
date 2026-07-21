@@ -167,7 +167,7 @@ func firstParagraph(desc string) string {
 
 // renderPrompt produces the dispatch prompt markdown for a bead. The body mirrors
 // the hand-written prompt files already in ~/.agm/vroom/prompts/ and bakes in the
-// standard worker rules (read-only ~/src, bd --db, no --no-verify/--force, etc.).
+// standard worker rules (read-only ~/src, canonical Beads access, no --no-verify/--force, etc.).
 func renderPrompt(b bead) string {
 	return renderPromptForRoute(b, vroomprompt.DefaultRoute())
 }
@@ -195,7 +195,7 @@ Bead %s (%s). %s
 
 ## Rules
 
-- ALWAYS use `+"`bd --db ~/beads/context-engine/.beads`"+` (never bare bd)
+- ALWAYS use `+"`bd --db ~/beads/context-engine/.beads --dolt-auto-commit on`"+` (never bare bd)
 - NEVER write to ~/src/** (read-only — use worktrees only)
 - NEVER use --no-verify or --force
 - NEVER run chezmoi apply

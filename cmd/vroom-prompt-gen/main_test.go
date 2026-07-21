@@ -146,7 +146,7 @@ func TestRenderPrompt(t *testing.T) {
 	for _, want := range []string{
 		"# Worker: ce-test — Do the thing",
 		"Bead ce-test (P1). Make it work.",
-		"bd --db ~/beads/context-engine/.beads",
+		"bd --db ~/beads/context-engine/.beads --dolt-auto-commit on",
 		"NEVER write to ~/src/**",
 		"claude-opus-4-8",
 		"More detail here", // full description in the Goal block

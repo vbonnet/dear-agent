@@ -284,7 +284,7 @@ func TestCheckRepositoryGovernsMultilineGoPrompts(t *testing.T) {
     - match: cmd/worker/main.go
       owner: worker-prompts
 `)
-	writeTestFile(t, repo, "cmd/worker/main.go", "package main\n\nvar prompt = `# Worker\n\ngh pr merge 123\n`\nvar runtimeCommand = \"git push origin main\"\n")
+	writeTestFile(t, repo, "cmd/worker/main.go", "package main\n\nvar prompt = `# Worker\n\n` + \"gh pr merge 123\" + `\n`\nvar runtimeCommand = \"git push origin main\"\n")
 	runGit(t, repo, "add", ".")
 
 	result, violations, err := CheckRepository(context.Background(), repo)
@@ -293,6 +293,21 @@ func TestCheckRepositoryGovernsMultilineGoPrompts(t *testing.T) {
 	}
 	if result.Files != 1 || len(violations) != 1 || violations[0].Rule != "raw-gh-merge" {
 		t.Fatalf("result=%+v violations=%v, want only the multiline prompt governed", result, violations)
+	}
+}
+
+func TestEvalPayloadsRemainPolicyVisible(t *testing.T) {
+	source := []byte("```\neval 'git push origin main'\neval 'gh pr merge 123'\neval 'bd ready'\n```\n")
+	var rules []string
+	for _, segment := range parseSegments(source) {
+		for _, violation := range evaluateSegment("AGENTS.md", segment) {
+			rules = append(rules, violation.Rule)
+		}
+	}
+	sort.Strings(rules)
+	want := []string{"bare-beads", "raw-gh-merge", "raw-git-push"}
+	if !reflect.DeepEqual(rules, want) {
+		t.Fatalf("eval payload rules = %v, want %v", rules, want)
 	}
 }
 

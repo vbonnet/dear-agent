@@ -25,23 +25,64 @@ func parseGoPromptSegments(source []byte) ([]Segment, error) {
 		return nil, err
 	}
 	var segments []Segment
+	inspected := map[*goast.BasicLit]bool{}
+	goast.Inspect(root, func(node goast.Node) bool {
+		expression, ok := node.(*goast.BinaryExpr)
+		if !ok || expression.Op != token.ADD {
+			return true
+		}
+		var literals []*goast.BasicLit
+		collectGoStringLiterals(expression, &literals)
+		if !slices.ContainsFunc(literals, goLiteralIsMultiline) {
+			return true
+		}
+		for _, literal := range literals {
+			segments = append(segments, goLiteralSegments(files, literal)...)
+			inspected[literal] = true
+		}
+		return false
+	})
 	goast.Inspect(root, func(node goast.Node) bool {
 		literal, ok := node.(*goast.BasicLit)
-		if !ok || literal.Kind != token.STRING {
+		if !ok || inspected[literal] || !goLiteralIsMultiline(literal) {
 			return true
 		}
-		value, unquoteErr := strconv.Unquote(literal.Value)
-		if unquoteErr != nil || !strings.Contains(value, "\n") {
-			return true
-		}
-		startLine := files.Position(literal.Pos()).Line
-		for _, segment := range parseSegments([]byte(value)) {
-			segment.Line += startLine - 1
-			segments = append(segments, segment)
-		}
+		segments = append(segments, goLiteralSegments(files, literal)...)
 		return true
 	})
 	return segments, nil
+}
+
+func collectGoStringLiterals(expression goast.Expr, literals *[]*goast.BasicLit) {
+	switch typed := expression.(type) {
+	case *goast.BasicLit:
+		if typed.Kind == token.STRING {
+			*literals = append(*literals, typed)
+		}
+	case *goast.BinaryExpr:
+		if typed.Op == token.ADD {
+			collectGoStringLiterals(typed.X, literals)
+			collectGoStringLiterals(typed.Y, literals)
+		}
+	}
+}
+
+func goLiteralIsMultiline(literal *goast.BasicLit) bool {
+	value, err := strconv.Unquote(literal.Value)
+	return err == nil && strings.Contains(value, "\n")
+}
+
+func goLiteralSegments(files *token.FileSet, literal *goast.BasicLit) []Segment {
+	value, err := strconv.Unquote(literal.Value)
+	if err != nil {
+		return nil
+	}
+	startLine := files.Position(literal.Pos()).Line
+	segments := parseSegments([]byte(value))
+	for index := range segments {
+		segments[index].Line += startLine - 1
+	}
+	return segments
 }
 
 // SegmentKind distinguishes prose from command-shaped Markdown content.
@@ -630,7 +671,7 @@ func commandShaped(value string) bool {
 		}
 		command := executableBase(strings.TrimLeft(fields[0], "("))
 		switch command {
-		case "agm", "bash", "bd", "command", "dash", "env", "exec", "gh", "git", "gtimeout", "ksh", "nohup", "safe-merge", "safe-pr", "safe-push", "sh", "sudo", "timeout", "zsh":
+		case "agm", "bash", "bd", "command", "dash", "env", "eval", "exec", "gh", "git", "gtimeout", "ksh", "nohup", "safe-merge", "safe-pr", "safe-push", "sh", "sudo", "timeout", "zsh":
 			return true
 		case "if", "while", "until", "then", "do", "!":
 			return true
