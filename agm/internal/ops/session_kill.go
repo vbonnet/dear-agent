@@ -224,27 +224,35 @@ func killResolvedSession(ctx *OpContext, m *manifest.Manifest, req *KillSessionR
 	if recentlyActive && !req.Force && !req.ConfirmedStuck {
 		return result, ErrKillProtected(m.Name, *lastActivity)
 	}
-	if err := killRequestContext(ctx).Err(); err != nil {
+	if err := executeAndVerifyTmuxKill(ctx, tmuxName, liveness.SessionExists); err != nil {
 		return result, err
 	}
 
-	if liveness.SessionExists {
+	return result, nil
+}
+
+// executeAndVerifyTmuxKill owns the irreversible mutation boundary. Callers
+// hold the stable-ID lifecycle lock before entering this function.
+func executeAndVerifyTmuxKill(ctx *OpContext, tmuxName string, sessionExists bool) error {
+	if err := killRequestContext(ctx).Err(); err != nil {
+		return err
+	}
+	if sessionExists {
 		killer, ok := ctx.Tmux.(session.TmuxSessionKiller)
 		if !ok {
-			return result, fmt.Errorf("kill tmux session %q: backend does not implement session deletion", tmuxName)
+			return fmt.Errorf("kill tmux session %q: backend does not implement session deletion", tmuxName)
 		}
 		if err := killer.KillSession(tmuxName); err != nil {
-			return result, fmt.Errorf("kill tmux session %q: %w", tmuxName, err)
+			return fmt.Errorf("kill tmux session %q: %w", tmuxName, err)
 		}
 	}
 
 	exists, err := ctx.Tmux.HasSession(tmuxName)
 	if err != nil {
-		return result, fmt.Errorf("verify tmux session %q after kill: %w", tmuxName, err)
+		return fmt.Errorf("verify tmux session %q after kill: %w", tmuxName, err)
 	}
 	if exists {
-		return result, fmt.Errorf("verify tmux session %q after kill: target still exists", tmuxName)
+		return fmt.Errorf("verify tmux session %q after kill: target still exists", tmuxName)
 	}
-
-	return result, nil
+	return nil
 }
