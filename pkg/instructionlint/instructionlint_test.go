@@ -504,6 +504,46 @@ func TestScriptHeredocVisibilityTracksTeeFilesAndDynamicReplay(t *testing.T) {
 	}
 }
 
+func TestScriptHeredocVisibilityTracksDescriptorsPipelinesAndCapturedVariables(t *testing.T) {
+	source := []byte(strings.Join([]string{
+		"cat <<'STDIN_BODY' 3<<'FD3_BODY'",
+		"gh pr merge 246",
+		"STDIN_BODY",
+		"safe-pr create --emergency --reason unused-fd3",
+		"FD3_BODY",
+		"cat >pipeline-fixture <<'PIPELINE_FIXTURE'",
+		"safe-pr create --emergency --reason hidden-pipeline",
+		"PIPELINE_FIXTURE",
+		"cat pipeline-fixture | sed 's/x/y/' >pipeline-output",
+		"read value <<'SILENT_READ'",
+		"git push origin silent-read",
+		"SILENT_READ",
+		"read message <<'VISIBLE_READ'",
+		"gh pr close 135",
+		"VISIBLE_READ",
+		`printf '%s\n' "$message"`,
+	}, "\n"))
+
+	var text []string
+	for _, segment := range parseScriptSegments(source) {
+		text = append(text, segment.Text)
+	}
+	for _, visible := range []string{"gh pr merge 246", "gh pr close 135"} {
+		if !slices.Contains(text, visible) {
+			t.Errorf("visible line %q was hidden: %v", visible, text)
+		}
+	}
+	for _, hidden := range []string{
+		"safe-pr create --emergency --reason unused-fd3",
+		"safe-pr create --emergency --reason hidden-pipeline",
+		"git push origin silent-read",
+	} {
+		if slices.Contains(text, hidden) {
+			t.Errorf("non-visible line %q was exposed: %v", hidden, text)
+		}
+	}
+}
+
 func TestCheckRepositoryGovernsSkillAgentMetadata(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init", "-q")

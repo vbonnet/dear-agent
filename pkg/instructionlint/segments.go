@@ -138,9 +138,10 @@ func parseSegments(source []byte) []Segment {
 func parseScriptSegments(source []byte) []Segment {
 	var segments []Segment
 	state := scriptParseState{
-		visibleHelpers:  agentVisibleScriptHelpers(source),
-		pendingHeredocs: map[string][]Segment{},
-		descriptors:     defaultScriptDescriptors(),
+		visibleHelpers:   agentVisibleScriptHelpers(source),
+		pendingHeredocs:  map[string][]Segment{},
+		pendingVariables: map[string][]Segment{},
+		descriptors:      defaultScriptDescriptors(),
 	}
 	line := 0
 	for raw := range strings.SplitSeq(string(source), "\n") {
@@ -164,6 +165,14 @@ func parseScriptSegments(source []byte) []Segment {
 			if scriptLinePrintsPath(value, path, state.descriptors) {
 				segments = append(segments, pending...)
 				delete(state.pendingHeredocs, path)
+			}
+		}
+		if agentVisibleScriptCommand(value, state.visibleHelpers) {
+			for variable, pending := range state.pendingVariables {
+				if scriptReferencesVariable(value, variable) {
+					segments = append(segments, pending...)
+					delete(state.pendingVariables, variable)
+				}
 			}
 		}
 		if state.visibleContinuation {
@@ -223,6 +232,7 @@ type scriptParseState struct {
 	quote               byte
 	heredocs            []scriptHeredoc
 	pendingHeredocs     map[string][]Segment
+	pendingVariables    map[string][]Segment
 	descriptors         map[int]scriptOutputDestination
 	visibleContinuation bool
 	continuedCommand    string
@@ -240,6 +250,10 @@ func (state *scriptParseState) commitHeredoc(segments []Segment, heredoc scriptH
 		return append(segments, heredoc.body...)
 	}
 	for _, output := range heredoc.outputs {
+		if output.variable != "" {
+			state.pendingVariables[output.variable] = slices.Clone(heredoc.body)
+			continue
+		}
 		if output.path == "" {
 			continue
 		}
@@ -318,6 +332,7 @@ func agentVisibleScriptCommand(value string, helpers map[string]bool) bool {
 }
 
 var shellAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+var shellVariableName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 var shellDeclaration = regexp.MustCompile(`^(?:local|export|readonly|typeset|declare)(?:\s+-[A-Za-z]+)*\s+`)
 var shellCommandSubstitution = regexp.MustCompile(`\$\(([^()]*)\)`)
 var shellFunction = regexp.MustCompile(`^(?:function\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*\(\))?|([A-Za-z_][A-Za-z0-9_]*)\s*\(\))\s*\{`)
@@ -434,16 +449,13 @@ func scriptAssignmentQuote(value string) byte {
 	return 0
 }
 
-func scriptHeredocMarker(value string) string {
-	markers := scriptHeredocMarkers(value)
-	if len(markers) == 0 {
-		return ""
-	}
-	return markers[0]
+type scriptHeredocRedirect struct {
+	marker     string
+	descriptor int
 }
 
-func scriptHeredocMarkers(value string) []string {
-	var markers []string
+func scriptHeredocRedirects(value string) []scriptHeredocRedirect {
+	var redirects []scriptHeredocRedirect
 	scanner := scriptHeredocScanner{}
 	for index := 0; index+1 < len(value); index++ {
 		current := value[index]
@@ -458,10 +470,28 @@ func scriptHeredocMarkers(value string) []string {
 			break
 		}
 		if marker := scriptHeredocMarkerAt(value, index); marker != "" {
-			markers = append(markers, marker)
+			redirects = append(redirects, scriptHeredocRedirect{
+				marker: marker, descriptor: scriptHeredocDescriptor(value, index),
+			})
 		}
 	}
-	return markers
+	return redirects
+}
+
+func scriptHeredocDescriptor(value string, operator int) int {
+	start := operator
+	for start > 0 && value[start-1] >= '0' && value[start-1] <= '9' {
+		start--
+	}
+	if start == operator || (start > 0 && !shellHorizontalSpace(value[start-1]) &&
+		!strings.ContainsRune(";|&({", rune(value[start-1]))) {
+		return 0
+	}
+	descriptor, err := strconv.Atoi(value[start:operator])
+	if err != nil {
+		return 0
+	}
+	return descriptor
 }
 
 func scriptHeredocMarkerAt(value string, index int) string {
@@ -588,23 +618,66 @@ func scriptHeredocSpecs(value string, descriptors map[int]scriptOutputDestinatio
 	commands := splitScriptCommandParts(value)
 	var heredocs []scriptHeredoc
 	for index, command := range commands {
-		markers := scriptHeredocMarkers(command.text)
-		if len(markers) == 0 {
+		redirects := scriptHeredocRedirects(command.text)
+		if len(redirects) == 0 {
 			continue
 		}
-		for markerIndex, marker := range markers {
-			heredoc := scriptHeredoc{marker: marker}
+		effectiveStdin := -1
+		for redirectIndex, redirect := range redirects {
+			if redirect.descriptor == 0 {
+				effectiveStdin = redirectIndex
+			}
+		}
+		for redirectIndex, redirect := range redirects {
+			heredoc := scriptHeredoc{marker: redirect.marker}
 			// The shell consumes every heredoc body in lexical order, but only
-			// the last stdin redirect on a command supplies that command's input.
-			if markerIndex == len(markers)-1 {
-				heredoc.outputs = append(heredoc.outputs,
-					scriptHeredocCommandOutputDestination(commands, index, descriptors))
-				heredoc.outputs = append(heredoc.outputs, scriptTeeFileDestinations(command.text)...)
+			// the last redirect for descriptor zero supplies that command's stdin.
+			if redirectIndex == effectiveStdin {
+				captures := scriptCapturedVariableDestinations(command.text)
+				switch {
+				case len(captures) > 0:
+					heredoc.outputs = captures
+				case scriptCommandIgnoresHeredocInput(command.text):
+					// The body is neither emitted nor retained for later output.
+				default:
+					heredoc.outputs = append(heredoc.outputs,
+						scriptHeredocCommandOutputDestination(commands, index, descriptors))
+					heredoc.outputs = append(heredoc.outputs, scriptTeeFileDestinations(command.text)...)
+				}
 			}
 			heredocs = append(heredocs, heredoc)
 		}
 	}
 	return heredocs
+}
+
+func scriptCapturedVariableDestinations(command string) []scriptOutputDestination {
+	fields := stripCommandPrefixes(parseShellWords(command))
+	if len(fields) == 0 {
+		return nil
+	}
+	executable := executableBase(fields[0])
+	if executable != "read" && executable != "mapfile" && executable != "readarray" {
+		return nil
+	}
+	var destinations []scriptOutputDestination
+	for _, field := range fields[1:] {
+		if shellVariableName.MatchString(field) {
+			destinations = append(destinations, scriptOutputDestination{variable: field})
+		}
+	}
+	if len(destinations) > 0 {
+		return destinations
+	}
+	if executable == "read" {
+		return []scriptOutputDestination{{variable: "REPLY"}}
+	}
+	return []scriptOutputDestination{{variable: "MAPFILE"}}
+}
+
+func scriptCommandIgnoresHeredocInput(command string) bool {
+	fields := stripCommandPrefixes(parseShellWords(command))
+	return len(fields) > 0 && slices.Contains([]string{"echo", "false", "printf", "true", ":"}, executableBase(fields[0]))
 }
 
 func scriptTeeFileDestinations(command string) []scriptOutputDestination {
@@ -670,6 +743,7 @@ func scriptHeredocCommandOutputDestination(
 type scriptOutputDestination struct {
 	visible    bool
 	path       string
+	variable   string
 	redirected bool
 	append     bool
 }
@@ -943,9 +1017,11 @@ func scriptRedirectDestination(target string, descriptors map[int]scriptOutputDe
 }
 
 func scriptCommandPrintsPath(command, path string, descriptors map[int]scriptOutputDestination) bool {
-	if !scriptCommandOutputDestination(command, descriptors).visible {
-		return false
-	}
+	return scriptCommandReadsPath(command, path, descriptors) &&
+		scriptHeredocCommandOutputDestination([]scriptCommandPart{{text: command}}, 0, descriptors).visible
+}
+
+func scriptCommandReadsPath(command, path string, descriptors map[int]scriptOutputDestination) bool {
 	for _, match := range shellCommandSubstitution.FindAllStringSubmatch(command, -1) {
 		if len(match) == 2 && (scriptLinePrintsPath(match[1], path, descriptors) ||
 			scriptInputOnlySubstitutionReadsPath(match[1], path)) {
@@ -993,9 +1069,15 @@ func sameScriptPath(left, right string) bool {
 	return left != "" && right != "" && filepath.Clean(left) == filepath.Clean(right)
 }
 
+func scriptReferencesVariable(value, variable string) bool {
+	return strings.Contains(value, "$"+variable) || strings.Contains(value, "${"+variable)
+}
+
 func scriptLinePrintsPath(value, path string, descriptors map[int]scriptOutputDestination) bool {
-	for _, command := range splitShellCommands(value) {
-		if scriptCommandPrintsPath(command, path, descriptors) {
+	commands := splitScriptCommandParts(value)
+	for index, command := range commands {
+		if scriptCommandReadsPath(command.text, path, descriptors) &&
+			scriptHeredocCommandOutputDestination(commands, index, descriptors).visible {
 			return true
 		}
 	}
