@@ -256,6 +256,28 @@ func TestValidateV2RejectsUnsafeOrDuplicateSkipPhases(t *testing.T) {
 	}
 }
 
+func TestValidateV2RejectsDuplicateWaypointHistory(t *testing.T) {
+	now := time.Now()
+	st := &StatusV2{
+		SchemaVersion:   SchemaVersionV2,
+		ProjectName:     "test",
+		ProjectType:     ProjectTypeFeature,
+		RiskLevel:       RiskLevelM,
+		CurrentWaypoint: WaypointV2Charter,
+		Status:          StatusV2InProgress,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		WaypointHistory: []WaypointHistory{
+			{Name: WaypointV2Charter, Status: WaypointStatusV2Completed, StartedAt: now, CompletedAt: &now},
+			{Name: WaypointV2Charter, Status: WaypointStatusV2InProgress, StartedAt: now},
+		},
+	}
+
+	if err := ValidateV2(st); err == nil || !strings.Contains(err.Error(), "duplicate waypoint name 'CHARTER'") {
+		t.Fatalf("ValidateV2() error = %v, want duplicate CHARTER rejection", err)
+	}
+}
+
 func TestValidatePhaseHistory(t *testing.T) {
 	tests := []struct {
 		name    string

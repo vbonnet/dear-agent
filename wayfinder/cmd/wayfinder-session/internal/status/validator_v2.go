@@ -190,8 +190,14 @@ func validateWaypointHistory(status *StatusV2) error {
 
 	var errors []string
 	allWaypoints := AllWaypointsV2Schema()
+	seenWaypoints := make(map[string]bool, len(status.WaypointHistory))
 
 	for i, waypoint := range status.WaypointHistory {
+		if seenWaypoints[waypoint.Name] {
+			errors = append(errors, fmt.Sprintf("waypoint_history[%d]: duplicate waypoint name '%s'", i, waypoint.Name))
+		}
+		seenWaypoints[waypoint.Name] = true
+
 		// Validate waypoint name
 		if !contains(allWaypoints, waypoint.Name) {
 			errors = append(errors, fmt.Sprintf("waypoint_history[%d]: invalid waypoint name '%s'", i, waypoint.Name))

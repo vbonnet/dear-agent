@@ -76,6 +76,14 @@ describe('parseWayfinderStatus', () => {
     assert.throws(() => parseWayfinderStatus(invalid), /validation_status is invalid/);
   });
 
+  it('rejects duplicate waypoint history names', () => {
+    const duplicate = canonical.replace(
+      '  - {name: PROBLEM,',
+      '  - {name: CHARTER,',
+    );
+    assert.throws(() => parseWayfinderStatus(duplicate), /duplicate waypoint_history name "CHARTER"/);
+  });
+
   it('requires blocked_reason for blocked status', () => {
     assert.throws(
       () => parseWayfinderStatus(canonical.replace('status: in-progress', 'status: blocked')),

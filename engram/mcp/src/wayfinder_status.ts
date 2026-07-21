@@ -352,6 +352,7 @@ function completedWaypoints(record: RecordValue): Set<string> {
   }
 
   const complete = new Set<string>();
+  const seen = new Set<string>();
   for (const [index, entry] of history.entries()) {
     const path = `waypoint_history[${index}]`;
     const waypoint = asRecord(entry, path);
@@ -361,6 +362,10 @@ function completedWaypoints(record: RecordValue): Set<string> {
       'validation_status', 'deployment_status', 'build_iterations', 'build_metrics',
     ]);
     const name = requireEnum(waypoint, 'name', WAYPOINTS);
+    if (seen.has(name)) {
+      throw new Error(`invalid Wayfinder V2 status: duplicate waypoint_history name ${JSON.stringify(name)}`);
+    }
+    seen.add(name);
     const status = requireEnum(waypoint, 'status', WAYPOINT_STATUSES);
     requireTimestamp(waypoint, 'started_at');
     optionalTimestamp(waypoint, 'completed_at', path);
