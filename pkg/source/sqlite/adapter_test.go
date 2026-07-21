@@ -143,6 +143,16 @@ func TestAdapter_Fetch_KCap(t *testing.T) {
 	}
 }
 
+func TestAdapter_Fetch_RejectsExcessiveK(t *testing.T) {
+	a := openTempAdapter(t)
+	defer func() { _ = a.Close() }()
+
+	_, err := a.Fetch(context.Background(), source.FetchQuery{K: source.MaxFetchK + 1})
+	if err == nil {
+		t.Fatalf("Fetch(K=%d) succeeded, want bound error", source.MaxFetchK+1)
+	}
+}
+
 func TestAdapter_FetchByURI(t *testing.T) {
 	a := openTempAdapter(t)
 	defer func() { _ = a.Close() }()
