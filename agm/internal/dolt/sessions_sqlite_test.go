@@ -305,6 +305,61 @@ func TestResolveTmuxSessionNameChangeCommitErrorPreservesUncertainOwnership(t *t
 	}
 }
 
+func TestSQLiteTmuxSessionNameStaleFullUpdatePreservesOwnership(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "tmux-cas-stale-full-update",
+		Name:          "tmux-cas-stale-full-update",
+		Workspace:     adapter.Workspace(),
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+		Context:       manifest.Context{Project: t.TempDir()},
+		Tmux:          manifest.Tmux{SessionName: "legacy-name"},
+	}
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+	stale, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() before provisional change: %v", err)
+	}
+	change, err := adapter.BeginTmuxSessionNameChange(t.Context(), m.SessionID, "canonical-name")
+	if err != nil || change == nil {
+		t.Fatalf("BeginTmuxSessionNameChange() = (%v, %v), want non-nil change", change, err)
+	}
+	stale.Context.Notes = "unrelated stale-writer update"
+	if err := adapter.UpdateSession(stale); err != nil {
+		t.Fatalf("UpdateSession() from stale snapshot: %v", err)
+	}
+	newerUpdatedAt := stale.UpdatedAt
+	stored, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after stale update: %v", err)
+	}
+	if stored.Tmux.SessionName != change.CurrentName || stored.Tmux.SessionRevision != change.CurrentRevision {
+		t.Fatalf("tmux ownership after stale update = (%q, %q), want (%q, %q)", stored.Tmux.SessionName, stored.Tmux.SessionRevision, change.CurrentName, change.CurrentRevision)
+	}
+	if stored.Context.Notes != stale.Context.Notes {
+		t.Fatalf("unrelated notes = %q, want %q", stored.Context.Notes, stale.Context.Notes)
+	}
+	restored, err := adapter.RestoreTmuxSessionNameChange(t.Context(), *change)
+	if err != nil || !restored {
+		t.Fatalf("RestoreTmuxSessionNameChange() = (%v, %v), want (true, nil)", restored, err)
+	}
+	final, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after restore: %v", err)
+	}
+	if final.Tmux.SessionName != change.PreviousName || final.Context.Notes != stale.Context.Notes || !final.UpdatedAt.Equal(newerUpdatedAt) {
+		t.Fatalf("restored state = (name=%q notes=%q updated=%v), want previous name plus unrelated update timestamp %v", final.Tmux.SessionName, final.Context.Notes, final.UpdatedAt, newerUpdatedAt)
+	}
+}
+
 func TestSQLiteTmuxSessionNameCompensationRejectsNewerMetadata(t *testing.T) {
 	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
 	if err != nil {

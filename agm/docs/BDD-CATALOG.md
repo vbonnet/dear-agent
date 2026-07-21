@@ -262,8 +262,10 @@ creation, and terminal state detection.
   as transactional failures, compensates owned metadata before removing those
   exact identities, and preserves the ready tmux session when a concurrent
   writer supersedes metadata ownership or a post-write reload leaves
-  compensation unproven. A commit error is re-read against the complete prior
-  and provisional revisions before cleanup proceeds. It also avoids killing a same-named or
+  compensation unproven. A stale full-session writer preserves the current
+  name and ownership revision while still updating unrelated fields. A commit
+  error is re-read against the complete prior and provisional revisions before
+  cleanup proceeds. It also avoids killing a same-named or
   server-restart replacement. Reopening a
   persistent pre-revision SQLite test store upgrades its schema idempotently
   while preserving existing sessions before those lifecycle mutations run;

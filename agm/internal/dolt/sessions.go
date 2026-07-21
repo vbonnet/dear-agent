@@ -195,7 +195,7 @@ func (a *Adapter) GetSession(sessionID string) (*manifest.Manifest, error) {
 	query := `
 		SELECT id, created_at, updated_at, status, workspace, model, name, harness,
 			context_project, context_purpose, context_tags, context_notes,
-			claude_uuid, tmux_session_name, metadata,
+			claude_uuid, tmux_session_name, tmux_session_revision, metadata,
 			permission_mode, permission_mode_updated_at, permission_mode_source,
 			is_test,
 			context_total_tokens, context_used_tokens, context_percentage_used,
@@ -266,11 +266,24 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 		monitorsJSON = string(monitorsData)
 	}
 
+	observedTmuxRevision := nullableStringValue(sql.NullString{
+		String: session.Tmux.SessionRevision,
+		Valid:  session.Tmux.SessionRevision != "",
+	})
+	// Full-session writers may have read before a resume installed its
+	// provisional tmux owner. Update their unrelated fields, but change the tmux
+	// identity only when the opaque revision they observed is still current.
 	query := `
 		UPDATE agm_sessions
 		SET updated_at = ?, status = ?, name = ?, harness = ?, model = ?,
 			context_project = ?, context_purpose = ?, context_tags = ?,
-			context_notes = ?, claude_uuid = ?, tmux_session_name = ?, tmux_session_revision = NULL,
+			context_notes = ?, claude_uuid = ?,
+			tmux_session_name = CASE
+				WHEN ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)
+				THEN ? ELSE tmux_session_name END,
+			tmux_session_revision = CASE
+				WHEN ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)
+				THEN NULL ELSE tmux_session_revision END,
 			metadata = ?,
 			permission_mode = ?, permission_mode_updated_at = ?, permission_mode_source = ?,
 			is_test = ?,
@@ -290,7 +303,11 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 		contextTags,
 		session.Context.Notes,
 		session.Claude.UUID,
+		observedTmuxRevision,
+		observedTmuxRevision,
 		session.Tmux.SessionName,
+		observedTmuxRevision,
+		observedTmuxRevision,
 		metadataJSON,
 		session.PermissionMode,
 		session.PermissionModeUpdatedAt,
@@ -316,6 +333,7 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 	if rowsAffected == 0 {
 		return fmt.Errorf("session not found: %s", session.SessionID)
 	}
+	session.Tmux.SessionRevision = ""
 
 	return nil
 }
@@ -363,6 +381,7 @@ type TmuxSessionNameChange struct {
 	PreviousUpdatedAt time.Time
 	CurrentName       string
 	CurrentRevision   string
+	CurrentUpdatedAt  time.Time
 }
 
 type tmuxSessionNameChangeState uint8
@@ -411,6 +430,7 @@ func (a *Adapter) BeginTmuxSessionNameChange(ctx context.Context, sessionID, new
 		return nil, nil
 	}
 	currentRevision := uuid.NewString()
+	currentUpdatedAt := time.Now()
 	previousRevisionValue := nullableStringValue(previousRevision)
 	result, err := tx.ExecContext(ctx, `
 		UPDATE agm_sessions
@@ -418,7 +438,7 @@ func (a *Adapter) BeginTmuxSessionNameChange(ctx context.Context, sessionID, new
 		WHERE id = ? AND workspace = ?
 		  AND tmux_session_name = ?
 		  AND ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)
-	`, time.Now(), newName, currentRevision, sessionID, a.workspace, previousName, previousRevisionValue, previousRevisionValue)
+	`, currentUpdatedAt, newName, currentRevision, sessionID, a.workspace, previousName, previousRevisionValue, previousRevisionValue)
 	if err != nil {
 		return nil, fmt.Errorf("write provisional tmux session name: %w", err)
 	}
@@ -436,6 +456,7 @@ func (a *Adapter) BeginTmuxSessionNameChange(ctx context.Context, sessionID, new
 		PreviousUpdatedAt: previousUpdatedAt,
 		CurrentName:       newName,
 		CurrentRevision:   currentRevision,
+		CurrentUpdatedAt:  currentUpdatedAt,
 	}
 	if err := tx.Commit(); err != nil {
 		// Commit can report an error after the database durably accepted the
@@ -506,10 +527,11 @@ func nullableStringValue(value sql.NullString) any {
 func (a *Adapter) RestoreTmuxSessionNameChange(ctx context.Context, change TmuxSessionNameChange) (bool, error) {
 	result, err := a.conn.ExecContext(ctx, `
 		UPDATE agm_sessions
-		SET updated_at = ?, tmux_session_name = ?, tmux_session_revision = ?
+		SET updated_at = CASE WHEN updated_at = ? THEN ? ELSE updated_at END,
+			tmux_session_name = ?, tmux_session_revision = ?
 		WHERE id = ? AND workspace = ?
 		  AND tmux_session_name = ? AND tmux_session_revision = ?
-	`, change.PreviousUpdatedAt, change.PreviousName, nullableStringValue(change.PreviousRevision), change.SessionID, a.workspace, change.CurrentName, change.CurrentRevision)
+	`, change.CurrentUpdatedAt, change.PreviousUpdatedAt, change.PreviousName, nullableStringValue(change.PreviousRevision), change.SessionID, a.workspace, change.CurrentName, change.CurrentRevision)
 	if err != nil {
 		return false, fmt.Errorf("restore provisional tmux session name: %w", err)
 	}
@@ -649,7 +671,7 @@ func (a *Adapter) ListSessions(filter *SessionFilter) ([]*manifest.Manifest, err
 	query := `
 		SELECT id, created_at, updated_at, status, workspace, model, name, harness,
 			context_project, context_purpose, context_tags, context_notes,
-			claude_uuid, tmux_session_name, metadata,
+			claude_uuid, tmux_session_name, tmux_session_revision, metadata,
 			permission_mode, permission_mode_updated_at, permission_mode_source,
 			is_test,
 			context_total_tokens, context_used_tokens, context_percentage_used,
@@ -703,7 +725,7 @@ func (a *Adapter) ResolveIdentifier(identifier string) (*manifest.Manifest, erro
 	query := `
 		SELECT id, created_at, updated_at, status, workspace, model, name, harness,
 			context_project, context_purpose, context_tags, context_notes,
-			claude_uuid, tmux_session_name, metadata,
+			claude_uuid, tmux_session_name, tmux_session_revision, metadata,
 			permission_mode, permission_mode_updated_at, permission_mode_source,
 			is_test,
 			context_total_tokens, context_used_tokens, context_percentage_used,
@@ -751,7 +773,7 @@ func (a *Adapter) GetSessionByUUID(conversationUUID string) (*manifest.Manifest,
 	query := fmt.Sprintf(`
 		SELECT id, created_at, updated_at, status, workspace, model, name, harness,
 			context_project, context_purpose, context_tags, context_notes,
-			claude_uuid, tmux_session_name, metadata,
+			claude_uuid, tmux_session_name, tmux_session_revision, metadata,
 			permission_mode, permission_mode_updated_at, permission_mode_source,
 			is_test,
 			context_total_tokens, context_used_tokens, context_percentage_used,
@@ -789,7 +811,7 @@ func (a *Adapter) GetSessionByName(name string) (*manifest.Manifest, error) {
 	query := `
 		SELECT id, created_at, updated_at, status, workspace, model, name, harness,
 			context_project, context_purpose, context_tags, context_notes,
-			claude_uuid, tmux_session_name, metadata,
+			claude_uuid, tmux_session_name, tmux_session_revision, metadata,
 			permission_mode, permission_mode_updated_at, permission_mode_source,
 			is_test,
 			context_total_tokens, context_used_tokens, context_percentage_used,
@@ -831,6 +853,7 @@ func (a *Adapter) scanSession(row scanner) (*manifest.Manifest, error) {
 	var ctxUsedTokens sql.NullInt64
 	var ctxPercentageUsed sql.NullFloat64
 	var monitorsJSON sql.NullString
+	var tmuxSessionRevision sql.NullString
 
 	err := row.Scan(
 		&session.SessionID,
@@ -847,6 +870,7 @@ func (a *Adapter) scanSession(row scanner) (*manifest.Manifest, error) {
 		&session.Context.Notes,
 		&session.Claude.UUID,
 		&session.Tmux.SessionName,
+		&tmuxSessionRevision,
 		&metadataJSON,
 		&permissionMode,
 		&permissionModeUpdatedAt,
@@ -877,6 +901,9 @@ func (a *Adapter) scanSession(row scanner) (*manifest.Manifest, error) {
 	// Set workspace and model
 	session.Workspace = workspace
 	session.Model = model
+	if tmuxSessionRevision.Valid {
+		session.Tmux.SessionRevision = tmuxSessionRevision.String
+	}
 
 	// Set schema version
 	session.SchemaVersion = "2.0"

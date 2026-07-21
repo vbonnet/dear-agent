@@ -28,6 +28,10 @@ func TestDoltTmuxSessionNameChangeUsesCrossDialectOwnership(t *testing.T) {
 		t.Fatalf("CreateSession() error: %v", err)
 	}
 	t.Cleanup(func() { _ = adapter.DeleteSession(sessionID) })
+	stale, err := adapter.GetSession(sessionID)
+	if err != nil {
+		t.Fatalf("GetSession() before provisional write: %v", err)
+	}
 
 	change, err := adapter.BeginTmuxSessionNameChange(t.Context(), sessionID, "canonical-name")
 	if err != nil || change == nil {
@@ -39,6 +43,17 @@ func TestDoltTmuxSessionNameChangeUsesCrossDialectOwnership(t *testing.T) {
 	}
 	if !provisionalRevision.Valid || provisionalRevision.String != change.CurrentRevision {
 		t.Fatalf("provisional revision = %#v, want %q", provisionalRevision, change.CurrentRevision)
+	}
+	stale.Context.Notes = "stale production writer"
+	if err := adapter.UpdateSession(stale); err != nil {
+		t.Fatalf("UpdateSession() from pre-revision snapshot: %v", err)
+	}
+	preserved, err := adapter.GetSession(sessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after stale full update: %v", err)
+	}
+	if preserved.Tmux.SessionName != change.CurrentName || preserved.Tmux.SessionRevision != change.CurrentRevision || preserved.Context.Notes != stale.Context.Notes {
+		t.Fatalf("stale full update state = (name=%q revision=%q notes=%q), want provisional ownership plus unrelated note", preserved.Tmux.SessionName, preserved.Tmux.SessionRevision, preserved.Context.Notes)
 	}
 	completed, err := adapter.CompleteTmuxSessionNameChange(t.Context(), *change)
 	if err != nil || !completed {
