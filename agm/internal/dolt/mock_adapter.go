@@ -243,7 +243,8 @@ func (m *MockAdapter) copyManifest(src *manifest.Manifest) *manifest.Manifest {
 			Notes:   src.Context.Notes,
 		},
 		Tmux: manifest.Tmux{
-			SessionName: src.Tmux.SessionName,
+			SessionName:     src.Tmux.SessionName,
+			SessionRevision: src.Tmux.SessionRevision,
 		},
 		Claude: manifest.Claude{
 			UUID: src.Claude.UUID,

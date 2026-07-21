@@ -64,17 +64,28 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-29** When command-scoped file or slash-command delivery or prompt-delivery verification runs, the system shall derive composer waits, pane-capture subprocesses, verification backoff, and retry sends from the caller context and shall not write or retry prompt bytes after cancellation.
 
-**TMUX-30** When command-scoped harness liveness validation runs, the system shall derive the tmux and process-table subprocess timeout from the caller context and return cancellation instead of allowing later completion or attach.
+**TMUX-30** When command-scoped harness liveness validation runs, the system shall derive the tmux, process-table, and Codex Node-wrapper fallback scans from the caller context and return cancellation instead of allowing a later scan completion or attach.
 
 **TMUX-31** When pane liveness is classified for command injection safety, the system shall positively identify a restartable shell only when exactly one pane exists, its process tree is observable, and every process in that tree is a plain interactive shell; any other foreground or descendant process shall fail that proof.
 
 **TMUX-26** When a caller requests liveness for a named harness process, the system shall scan the full pane descendant tree for that exact process and shall return scan failures separately from a proven dead result.
+
+**TMUX-32** When a transactional cleanup kills and verifies a tmux session, the system shall treat only an explicit missing-session response as absence and shall return socket, timeout, permission, and other backend failures instead of reporting cleanup success.
+
+**TMUX-33** When Codex readiness is checked, the system shall require either the initial composer header with its model-change hint and an empty `›` input cursor or an empty post-turn `›` input cursor paired with a structured model footer, shall require that signal to own the current pane tail, and shall reject standalone model text in echoed launch commands, working-status footers, typed drafts, unsubmitted paste chips, or stale composers followed by newer process or shell output. A stale post-turn footer shall not suppress a newer tail-owned initial composer rendered after Codex restarts in the same pane.
+
+**TMUX-34** When a transactional caller creates a tmux session, the system shall return a creation-specific identity composed of tmux's server-local session ID and a random token embedded in its provisional creation name before the token is stored on the session, shall preserve the printed server-local ID if a later command in the creation queue fails, and shall compare the ID with either ownership marker in strict kill and existence checks, so compensation can remove a partially initialized creation at every command boundary without selecting a replacement that reused either the same name or the same server-local ID after a server restart. If creation occurred but the client did not capture the server-local ID, cleanup shall target only the exact random provisional creation name.
+
+**TMUX-35** When a transactional rename starts, the system shall claim the exact source session with its server-local ID and a random short-lived option marker, reconciling a lost claim response by that marker. After every forward or compensating rename response, it shall verify that the same ID still carries the marker at the expected name. A missing marker, unexpected name, failed inspection, or server-restart replacement that reused either name or ID shall be ambiguous and shall never authorize metadata mutation or replacement adoption. Marker cleanup shall be conditional on the same ID and random token so it cannot mutate a replacement.
+
+**TMUX-36** When an Enter for prompt delivery is accepted but the following pane capture cannot determine whether submission occurred, the system shall preserve an explicit submission-uncertain outcome across every later retry so transactional callers preserve work that may have started. A paste positively observed in the composer after every retry shall remain a definite not-submitted failure only when no earlier accepted Enter had an indeterminate capture.
 
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
 - Package tests: `agm/internal/tmux/workdir_test.go`
 - Package tests: `agm/internal/tmux/liveness_test.go`
+- Package tests: `agm/internal/tmux/enter_reliable_test.go`
 - Package tests: `agm/internal/tmux/tmux_test.go`
 - Package tests: `agm/internal/tmux/linger_test.go`
 - Package tests: `agm/internal/tmux/capture_test.go`

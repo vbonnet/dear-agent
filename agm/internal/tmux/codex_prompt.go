@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -24,7 +26,7 @@ import (
 //	│ model:     gpt-5.5 xhigh   /model to change │
 //	│ directory: /private/tmp/codex-probe   │
 //	╰───────────────────────────────────────╯
-//	› Write tests for @filename
+//	›
 //
 // Decorative shell prompts can also use rounded box-drawing characters, so
 // readiness must remain keyed to Codex-specific text instead of generic TUI
@@ -36,14 +38,15 @@ import (
 // on it would risk a false "ready" before the trust prompt is answered.
 //
 // Post-conversation state: after the first exchange, the bordered composer box
-// scrolls off screen. Codex then shows a minimal footer: "gpt-X.Y quality ·
-// /path". The "gpt-" prefix in a footer context reliably identifies Codex after
-// processing one or more turns.
+// scrolls off screen. Codex then shows an input cursor followed by a minimal
+// footer: "gpt-X.Y quality · /path". The model name alone is not sufficient:
+// it also appears in echoed launch commands and while Codex is working.
 var CodexPromptPatterns = []string{
 	"OpenAI Codex",     // composer box header — present once the TUI renders
 	"/model to change", // composer status-line hint
-	"gpt-",             // footer model name after first exchange (e.g. "gpt-5.4 high · /path")
 }
+
+var codexFooterPattern = regexp.MustCompile(`^gpt-\d[^\n]*\s·\s[^\n]+$`)
 
 // CodexTrustPromptPatterns are substrings that indicate Codex is showing a
 // first-run trust / onboarding consent prompt for the working directory,
@@ -75,19 +78,82 @@ var CodexModelUpgradePromptPatterns = []string{
 	"Use existing model",
 }
 
-// containsCodexPromptPattern reports whether content contains any Codex
-// composer-ready signal.
-func containsCodexPromptPattern(content string) bool {
+// IsCodexComposerReady reports whether content contains a complete Codex
+// composer-ready signal. It is the single owner of Codex visual readiness for
+// tmux waits, generic delivery, and shared state classification.
+func IsCodexComposerReady(content string) bool {
 	trimmed := strings.TrimSpace(content)
 	if trimmed == "" {
 		return false
 	}
-	for _, pattern := range CodexPromptPatterns {
-		if strings.Contains(trimmed, pattern) {
-			return true
+	lines := strings.Split(trimmed, "\n")
+
+	// A structured footer is the current post-turn status signal. Inspect the
+	// last one first so stale ready footer text above a newer working footer
+	// or shell output cannot produce a false-ready result.
+	for i, line := range slices.Backward(lines) {
+		if !codexFooterPattern.MatchString(strings.TrimSpace(line)) {
+			continue
+		}
+		if i != len(lines)-1 {
+			// The latest footer is stale, but a restarted Codex process may have
+			// rendered a newer initial composer below it. Let the initial-composer
+			// scan prove whether that newer structure owns the pane tail.
+			break
+		}
+		// The footer is ready only when paired with the nearby composer cursor.
+		// A working view has the same footer but a "Working" status line.
+		for j := i - 1; j >= 0 && j >= i-3; j-- {
+			candidate := strings.TrimSpace(lines[j])
+			if candidate == "" {
+				continue
+			}
+			// Only an empty cursor is idle. Typed drafts and collapsed paste chips
+			// use the same glyph but accepting them would append a second prompt to
+			// input the user has not submitted yet.
+			return candidate == "›"
+		}
+		return false
+	}
+
+	// Before the first exchange Codex renders a bordered welcome composer. Both
+	// the header, its model-change hint, and an empty cursor must be present in the
+	// same compact block; either substring alone can occur in stale or echoed
+	// output, while an occupied cursor is an unsubmitted draft.
+	for i, line := range lines {
+		if !strings.Contains(line, CodexPromptPatterns[0]) {
+			continue
+		}
+		for j := i + 1; j < len(lines) && j <= i+4; j++ {
+			if strings.Contains(lines[j], CodexPromptPatterns[1]) && codexInitialComposerOwnsTail(lines[j+1:]) {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// codexInitialComposerOwnsTail rejects ordinary output rendered after the
+// welcome composer. The hint may be followed by the remaining bordered rows,
+// the bottom border, and an empty Codex input cursor, but not a draft, newer
+// shell prompt, or process-exit message.
+func codexInitialComposerOwnsTail(lines []string) bool {
+	emptyCursor := false
+	for _, line := range lines {
+		candidate := strings.TrimSpace(line)
+		switch {
+		case candidate == "":
+		case strings.HasPrefix(candidate, "│") && strings.HasSuffix(candidate, "│"):
+		case strings.HasPrefix(candidate, "╰") && strings.HasSuffix(candidate, "╯"):
+		case candidate == "›":
+			emptyCursor = true
+		case strings.HasPrefix(candidate, "›"):
+			return false
+		default:
+			return false
+		}
+	}
+	return emptyCursor
 }
 
 // IsCodexIdle reports whether the Codex TUI composer is currently visible in
@@ -97,9 +163,10 @@ func containsCodexPromptPattern(content string) bool {
 // It is the Codex counterpart to Claude's idle-prompt detection used by the
 // supervisor: a live `codex-cli` pane shows the bordered composer box (whose
 // header reads "OpenAI Codex" with a "/model to change" hint) only when it is
-// waiting for input. While Codex is working the composer is hidden, so none of
-// the CodexPromptPatterns are present. Callers can therefore treat a true
-// result as "idle/ready" and false as "working".
+// waiting for input. After a turn, the cursor plus structured footer replaces
+// that welcome composer. While Codex is working, the footer remains but the
+// cursor is replaced by a working-status line. Callers can therefore treat a
+// true result as "idle/ready" and false as "working".
 //
 // The capture mirrors WaitForCodexPrompt: it reads the visible pane through the
 // AGM-specific tmux socket. An error is returned only when the pane cannot be
@@ -111,7 +178,7 @@ func IsCodexIdle(sessionName string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("capture-pane failed: %w", err)
 	}
-	return containsCodexPromptPattern(string(output)), nil
+	return IsCodexComposerReady(string(output)), nil
 }
 
 // containsCodexTrustPromptPattern reports whether content contains a Codex
@@ -235,16 +302,13 @@ func WaitForCodexPromptContext(parent context.Context, sessionName string, timeo
 			continue
 		}
 
-		lines := strings.Split(content, "\n")
-		for i, line := range lines {
-			if containsCodexPromptPattern(line) {
-				debug.Log("✓ Codex prompt detected in line %d (check #%d): %q", i, checkCount, strings.TrimSpace(line))
-				// Found the composer — wait a beat to ensure it's stable.
-				if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
-					return err
-				}
-				return nil
+		if IsCodexComposerReady(content) {
+			debug.Log("✓ Codex composer detected (check #%d)", checkCount)
+			// Found the composer — wait a beat to ensure it's stable.
+			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+				return err
 			}
+			return nil
 		}
 
 		if checkCount%10 == 0 {

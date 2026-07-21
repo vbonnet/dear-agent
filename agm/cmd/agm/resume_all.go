@@ -168,30 +168,11 @@ func resumeSessionsBatch(ctx context.Context, adapter *dolt.Adapter, sessions []
 		// Find manifest path
 		manifestPath := filepath.Join(cfg.SessionsDir, m.SessionID, "manifest.yaml")
 
-		// Check session health
-		health, err := checkSessionHealth(adapter, m.SessionID, manifestPath)
-		if err != nil || !health.CanResume {
-			errMsg := fmt.Sprintf("%s: health check failed", m.Name)
-			errors = append(errors, errMsg)
-			failCount++
-
-			if !resumeAllContinue {
-				break
-			}
-			continue
-		}
-
-		// Auto-detect harness from manifest
-		harnessName := m.Harness
-		if harnessName == "" {
-			harnessName = "claude-code" // Default for backward compatibility
-		}
-
 		// Resume session (force detached mode for bulk)
 		originalDetached := resumeDetached
 		resumeDetached = resumeAllDetached
 
-		err = resumeSession(ctx, adapter, m.SessionID, manifestPath, harnessName, health)
+		err := resumeResolvedSession(ctx, adapter, m.SessionID, manifestPath)
 
 		resumeDetached = originalDetached
 

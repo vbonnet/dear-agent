@@ -53,6 +53,7 @@ type harnessParityState struct {
 	lifecycleReflected         bool
 	codexArchiveInvoked        bool
 	tmuxResumeLaunched         bool
+	tmuxSessionExists          bool
 	configuredHarness          string
 	configuredModelFamily      string
 	modelFamilyDefaulted       bool
@@ -105,6 +106,7 @@ type harnessParityState struct {
 	currentTmuxTestErr         error
 	agyLifecycleTestOutput     string
 	agyLifecycleTestErr        error
+	resumeSource               string
 }
 
 type harnessParityStateKey struct{}
@@ -116,6 +118,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	})
 
 	ctx.Step(`^a Codex CLI composer pane$`, aCodexCLIComposerPane)
+	ctx.Step(`^a stale Codex CLI composer followed by shell output$`, aStaleCodexCLIComposerFollowedByShellOutput)
 	ctx.Step(`^harness "([^"]*)" is configured$`, harnessIsConfigured)
 	ctx.Step(`^AGM validates active parity support$`, agmValidatesActiveParitySupport)
 	ctx.Step(`^harness "([^"]*)" should be active for parity$`, harnessShouldBeActiveForParity)
@@ -288,6 +291,163 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM archives the stopped session$`, agmArchivesTheStoppedSession)
 	ctx.Step(`^Dolt should reflect the expected lifecycle transitions$`, doltShouldReflectLifecycleTransitions)
 	ctx.Step(`^the matching Codex saved session should be archived$`, matchingCodexSavedSessionShouldBeArchived)
+	ctx.Step(`^a stopped Codex CLI session without a tmux pane$`, aStoppedCodexCLISessionWithoutTmuxPane)
+	ctx.Step(`^AGM validates the Codex resume transaction$`, agmValidatesTheCodexResumeTransaction)
+	ctx.Step(`^Codex resume success should require process and composer readiness$`, codexResumeSuccessShouldRequireProcessAndComposerReadiness)
+	ctx.Step(`^a failed Codex resume should serialize concurrent attempts through every production entry point, release the session lock before attachment, preserve canonical tmux identity from stale full-session updates, reconcile ambiguous metadata commits, compensate owned provisional metadata before removing its creation-specific tmux identity even when tmux ID output is lost, and preserve tmux whenever metadata cleanup is unproven$`, aFailedCodexResumeShouldRemoveOnlyItsNewlyCreatedTmuxSession)
+	ctx.Step(`^authoritative session renames should serialize with cold resume, fence ambiguous storage writes, preserve both identity names from stale writers, preserve claimed tmux identity across lost replies and server restarts, reject stale identity revisions, and compensate tmux after storage conflicts$`, authoritativeSessionRenamesShouldRejectStaleIdentityRevisions)
+	ctx.Step(`^administrative hierarchy repairs should atomically link parents and inherited names through the observed identity revision$`, administrativeHierarchyRepairsShouldUseObservedIdentityRevision)
+	ctx.Step(`^successful Codex prompt delivery should remain successful after later caller cancellation$`, successfulCodexPromptDeliveryShouldRemainSuccessfulAfterLaterCallerCancellation)
+	ctx.Step(`^ambiguous final Codex prompt submission should preserve work that may have started$`, ambiguousFinalCodexPromptSubmissionShouldPreserveStartedWork)
+	ctx.Step(`^failed Codex prompt delivery should not suppress a later attach failure$`, failedCodexPromptDeliveryShouldNotSuppressALaterAttachFailure)
+	ctx.Step(`^Codex activity updates should follow resume readiness$`, codexActivityUpdatesShouldFollowResumeReadiness)
+}
+
+func aStoppedCodexCLISessionWithoutTmuxPane(ctx context.Context) error {
+	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	harnessState.harness = "codex-cli"
+	harnessState.tmuxSessionExists = false
+	return nil
+}
+
+func agmValidatesTheCodexResumeTransaction(ctx context.Context) error {
+	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if harnessState.harness != "codex-cli" || harnessState.tmuxSessionExists {
+		return fmt.Errorf("scenario requires a stopped codex-cli session without tmux")
+	}
+	path := filepath.Join(bddRepoRoot(), "agm", "cmd", "agm", "resume.go")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read resume production source: %w", err)
+	}
+	harnessState.resumeSource = string(data)
+	return nil
+}
+
+func codexResumeSuccessShouldRequireProcessAndComposerReadiness(ctx context.Context) error {
+	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(
+		testCtx,
+		"go", "test",
+		"./agm/cmd/agm", "./agm/internal/tmux", "./agm/internal/state",
+		"-run", `^(TestWaitForResumedCodexRequiresProcessAndComposer|TestWaitForCodexPromptRejectsEchoedLaunchModel|TestIsCodexComposerReady|TestIsProcessReadyWithRuntimePreservesCancellation(Before|During)CodexFallback|TestDetector_CodexReadinessRequiresStructuredComposer)$`,
+		"-count=1",
+	)
+	cmd.Dir = bddRepoRoot()
+	output, err := cmd.CombinedOutput()
+	if testCtx.Err() != nil {
+		return fmt.Errorf("codex resume readiness behavior timed out: %w", testCtx.Err())
+	}
+	if err != nil {
+		return fmt.Errorf("codex resume readiness behavior failed: %w\n%s", err, output)
+	}
+	return nil
+}
+
+func aFailedCodexResumeShouldRemoveOnlyItsNewlyCreatedTmuxSession(ctx context.Context) error {
+	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/dolt", "./agm/internal/ops", "./agm/internal/tmux", "-run", `^(TestProductionResumeEntryPointsUseLockedResolvedSession|TestPersistResumeTmuxName(RetainsPendingChangeUntilReloadCompensationIsProven|RetainsChangeWhenBeginCommitIsAmbiguous)|TestRestoreResumeTmuxNameTreatsSuccessfulSwapAsComplete|TestResumeResolvedSessionAcquiresSessionLockBeforeReads|TestResumeAttachmentRunsAfterSessionLockReleases|TestWithSessionLock_MutualExclusion|TestResumeSession(Codex(RollsBackNewTmuxBeforeActivityUpdate|RollsBackPromptlessCancellation(BeforeFinalization|AfterActivityTouch)|JoinsCleanupFailure|RollbackUsesCreatedCanonicalTmuxName|PersistsCreatedCanonicalTmuxName|TmuxPersistencePreservesConcurrentMetadata|CompensatesCanonicalNameWhenOrdinaryPromptDeliveryFails|CompensationPreservesNewerMetadata|PreservesTmuxWhenPersistenceCompensationIsUnproven|RollsBackCreationFailureWhen(TmuxReturnedIdentity|OnlyProvisionalIdentityReturned)|RollsBackWhen(PromptDeliveryIsCanceled|CanonicalNamePersistenceFails)|ReadinessFailureRemovesIsolatedTmux|RollbackReportsInaccessibleSocketAndPreservesHiddenTarget)|PreservesPreexistingTmuxOnLaterFailure)|TestKillCreatedResumeTmuxPreserves(SameNamedReplacement|IDReusedAfterServerRestart)|TestSessionIdentityCleansCreation(BeforeTokenWrite|WhenSessionIDOutputIsLost)|TestNewSessionWithIdentityReturnsIDWhenQueuedInitializationFails|TestResolveTmuxSessionNameChangeCommitErrorPreservesUncertainOwnership|TestSQLite(AdapterUpgradesLegacySessionRevisionColumn|TouchSessionActivityPreservesProvisionalTmuxRevision|TmuxSessionName(ChangeOwnsAndRestoresExactWrite|CompensationRejectsNewerMetadata|ChangeCompletesOwnershipToken|StaleFullUpdatePreservesOwnership))|TestMigration018AddsTmuxSessionRevision)$`, "-count=1")
+	cmd.Dir = bddRepoRoot()
+	output, err := cmd.CombinedOutput()
+	if testCtx.Err() != nil {
+		return fmt.Errorf("codex resume rollback behavior suite timed out: %w", testCtx.Err())
+	}
+	if err != nil {
+		return fmt.Errorf("codex resume rollback behavior suite failed: %w\n%s", err, output)
+	}
+	return nil
+}
+
+func authoritativeSessionRenamesShouldRejectStaleIdentityRevisions(ctx context.Context) error {
+	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/dolt", "./agm/internal/tmux", "-run", `^(Test(SessionRenameSerializesWithResumeByStableID|PersistRenamedSessionIdentity.*|ClassifyTmuxRenameResult|MoveAndRestoreTmuxSessionForRenamePreservesClaimedIdentity)|Test(SQLite(RenameSessionIdentityRejectsStaleRevision|SessionIdentityRenameFenceRejectsObservedRevision|TmuxSessionNameStaleFullUpdatePreservesOwnership)|ClassifySessionIdentityRenameAfterError)|TestRenameSessionIdentity(TracksClaimedSession|RejectsIDReuseAfterServerRestart))$`, "-count=1")
+	cmd.Dir = bddRepoRoot()
+	output, err := cmd.CombinedOutput()
+	if testCtx.Err() != nil {
+		return fmt.Errorf("session rename identity regressions timed out: %w", testCtx.Err())
+	}
+	if err != nil {
+		return fmt.Errorf("session rename identity regressions failed: %w\n%s", err, output)
+	}
+	return nil
+}
+
+func administrativeHierarchyRepairsShouldUseObservedIdentityRevision(ctx context.Context) error {
+	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/dolt", "-run", `^(TestPersistSessionParentLinkUsesObservedIdentityRevision|TestSQLiteLinkSessionParentUsesExplicitIdentityCAS)$`, "-count=1")
+	cmd.Dir = bddRepoRoot()
+	output, err := cmd.CombinedOutput()
+	if testCtx.Err() != nil {
+		return fmt.Errorf("administrative hierarchy identity regressions timed out: %w", testCtx.Err())
+	}
+	if err != nil {
+		return fmt.Errorf("administrative hierarchy identity regressions failed: %w\n%s", err, output)
+	}
+	return nil
+}
+
+func successfulCodexPromptDeliveryShouldRemainSuccessfulAfterLaterCallerCancellation(ctx context.Context) error {
+	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "-run", `^TestResumeSessionCodexDoesNotReturn(Cancellation|AttachFailure)AfterPromptDelivery$`, "-count=1")
+	cmd.Dir = bddRepoRoot()
+	output, err := cmd.CombinedOutput()
+	if testCtx.Err() != nil {
+		return fmt.Errorf("post-prompt cancellation behavior timed out: %w", testCtx.Err())
+	}
+	if err != nil {
+		return fmt.Errorf("post-prompt cancellation behavior failed: %w\n%s", err, output)
+	}
+	return nil
+}
+
+func ambiguousFinalCodexPromptSubmissionShouldPreserveStartedWork(ctx context.Context) error {
+	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/tmux", "-run", `^(TestResumeSessionCodexPreservesStartedWorkWhenPromptAcknowledgementIsLost|TestRunPromptEnterCommand(StartFailureIsDefinite|ExplicitRejectionIsDefinite|TimeoutAfterStartIsUncertain)|TestVerifyingEnter_PreservesUncertaintyAcrossLater(DefiniteFailure|ParkedCaptures))$`, "-count=1")
+	cmd.Dir = bddRepoRoot()
+	output, err := cmd.CombinedOutput()
+	if testCtx.Err() != nil {
+		return fmt.Errorf("ambiguous prompt submission regressions timed out: %w", testCtx.Err())
+	}
+	if err != nil {
+		return fmt.Errorf("ambiguous prompt submission regressions failed: %w\n%s", err, output)
+	}
+	return nil
+}
+
+func failedCodexPromptDeliveryShouldNotSuppressALaterAttachFailure(ctx context.Context) error {
+	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "-run", `^TestResumeSessionCodexReturnsAttachFailureAfterPromptDeliveryFails$`, "-count=1")
+	cmd.Dir = bddRepoRoot()
+	output, err := cmd.CombinedOutput()
+	if testCtx.Err() != nil {
+		return fmt.Errorf("failed-prompt attach regression timed out: %w", testCtx.Err())
+	}
+	if err != nil {
+		return fmt.Errorf("failed-prompt attach regression failed: %w\n%s", err, output)
+	}
+	return nil
+}
+
+func codexActivityUpdatesShouldFollowResumeReadiness(ctx context.Context) error {
+	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/dolt", "-run", `^(TestResumeSessionCodex(CommitsEffectsOnlyAfterReadiness|RollsBackNewTmuxBeforeActivityUpdate|RollsBackPromptlessCancellation(BeforeFinalization|AfterActivityTouch))|TestSQLiteTouchSessionActivityPreservesProvisionalTmuxRevision)$`, "-count=1")
+	cmd.Dir = bddRepoRoot()
+	output, err := cmd.CombinedOutput()
+	if testCtx.Err() != nil {
+		return fmt.Errorf("codex resume activity ordering timed out: %w", testCtx.Err())
+	}
+	if err != nil {
+		return fmt.Errorf("codex resume activity ordering failed: %w\n%s", err, output)
+	}
+	return nil
 }
 
 func agmResolvesDoctorHealthForConfiguredHarness(ctx context.Context) error {
@@ -1738,7 +1898,20 @@ func aCodexCLIComposerPane(ctx context.Context) error {
 	harnessState.paneOutput = `╭────────────────────────────────────────────────────╮
 │ >_ OpenAI Codex                                    │
 │  /model to change model                            │
-╰────────────────────────────────────────────────────╯`
+╰────────────────────────────────────────────────────╯
+›`
+	return nil
+}
+
+func aStaleCodexCLIComposerFollowedByShellOutput(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.paneOutput = `› Continue the task
+
+  gpt-5.6 xhigh · ~/src/project
+user@host:~/src/project$`
 	return nil
 }
 

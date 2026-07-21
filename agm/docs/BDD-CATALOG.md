@@ -213,8 +213,14 @@ generated surface metadata, workflow-bus signaling, and accessible operator UIs.
 creation, and terminal state detection.
 
 **Key scenarios:**
-- A Codex CLI composer pane is detected as `ready`.
+- A Codex CLI composer pane is detected as `ready` only with an explicit empty
+  cursor on both the initial and post-turn forms.
 - An idle Codex composer allows direct delivery.
+- A typed draft or Unicode collapsed-paste chip remains queued even when the
+  normal Codex model footer is visible.
+- A stale Codex composer followed by newer shell output remains queued.
+- A newer tail-owned initial composer remains ready after stale post-turn
+  footer history from a prior Codex process.
 - A Codex trust prompt is queued rather than treated as a sendable prompt.
 - The top-level new command routes in-tmux, non-detached Codex creation into
   the current pane, validates credentials and the executable, and queues the
@@ -243,6 +249,53 @@ creation, and terminal state detection.
   root context through multiline composer readiness and delivery.
 - Resume rechecks the root context after metadata lookup and before tmux
   creation, command delivery, metadata updates, or warm-session attach.
+- Every production resume entry, including last-session and bulk resume,
+  acquires the stable session-ID lock before health or transaction reads and
+  releases it after finalization but before an interactive attachment.
+- A confirmed Codex prompt or a lost acknowledgement after the final Enter
+  creates the irreversible success boundary; the latter preserves the pane and
+  warns that work may have started. A paste positively proven to remain parked
+  is still a delivery failure, and a failed send on an existing pane cannot
+  hide a later attach error.
+- Cold Codex resume retains tmux's server-local ID plus a random per-creation
+  token, including when a later command in the tmux creation queue fails or ID
+  output is lost while the exact random provisional name still exists;
+  serializes concurrent resume attempts by stable session ID; persists a
+  canonical name under an opaque cross-dialect ownership revision before
+  optional prompt submission; treats ordinary prompt failures
+  as transactional failures, compensates owned metadata before removing those
+  exact identities, and preserves the ready tmux session when a concurrent
+  writer supersedes metadata ownership or a post-write reload leaves
+  compensation unproven. A stale full-session writer preserves the current
+  name while applying unrelated fields and advancing the identity revision;
+  every writer advances that revision so multiple stale snapshots stay unable
+  to restore the old name, and rollback preserves the canonical tmux session
+  without timestamp guesses. Activity-only finalization preserves the
+  provisional revision; cancellation before or immediately after that touch
+  restores the prior activity timestamp and canonical name before removing the
+  exact created pane. A commit
+  error is re-read against the complete prior and provisional revisions before
+  cleanup proceeds. It also avoids killing a same-named or
+  server-restart replacement. Reopening a
+  persistent pre-revision SQLite test store upgrades its schema idempotently
+  while preserving existing sessions before those lifecycle mutations run;
+  compensation restores the prior activity timestamp with the prior name.
+- Authoritative `agm session rename` updates both stored names through the
+  exact revision it observed and holds the same stable-ID lifecycle lock as
+  cold resume across all rename effects. A concurrent identity advance returns
+  a conflict and compensates the already-moved tmux name even after caller
+  cancellation, joining rollback failures. Stale broad writers preserve both
+  current identity names while applying unrelated metadata. Lost tmux responses are reconciled through a
+  server-local ID plus random option marker so name or ID reuse cannot adopt a
+  replacement. Lost storage responses first fence the observed revision with
+  a competing compare-and-swap before the prior identity can authorize rollback.
+- Administrative parent-link and plan-session backfill repairs persist the
+  parent and optional inherited display name atomically through the exact
+  identity revision they read, advance that revision on success, and surface a
+  stale writer as a conflict instead of claiming an unapplied repair succeeded.
+- Once a transactional Codex resume prompt is submitted, or its final Enter
+  loses an acknowledgement after tmux received the request, later caller
+  cancellation cannot report a retryable failure that would duplicate work.
 - Final creation liveness validation derives from the root context and rechecks
   cancellation before title update, attach, or detached-success reporting.
 - AGY feedback survey handling dismisses once and recognizes the subsequent
