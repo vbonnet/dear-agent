@@ -29,6 +29,9 @@ func resolveNamedHistoryLocation(sessionName string, store historyPathSessionSto
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to get session metadata: %w", err)
 	}
+	if session == nil {
+		return nil, "", fmt.Errorf("session %q not found", sessionName)
+	}
 	if agent.NormalizeHarnessName(session.Harness) == "agy" {
 		if session.Agy == nil || session.Agy.ConversationID == "" {
 			return nil, "", fmt.Errorf("AGY session %q has no native conversation ID; reassociate or re-import the session before requesting history", sessionName)
@@ -42,6 +45,9 @@ func resolveNamedHistoryLocation(sessionName string, store historyPathSessionSto
 			return nil, fmt.Errorf("failed to list sessions: %w", listErr)
 		}
 		for _, candidate := range manifests {
+			if candidate == nil {
+				continue
+			}
 			if candidate.Tmux.SessionName == name || candidate.Name == name {
 				return candidate, nil
 			}

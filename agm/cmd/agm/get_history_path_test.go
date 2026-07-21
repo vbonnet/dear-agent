@@ -67,3 +67,38 @@ func TestResolveNamedHistoryLocation_PropagatesManifestResolutionFailure(t *test
 		t.Fatalf("error = %v, want %v", err, wantErr)
 	}
 }
+
+func TestResolveNamedHistoryLocation_RejectsNilResolvedManifest(t *testing.T) {
+	store := &fakeHistoryPathSessionStore{}
+
+	_, _, err := resolveNamedHistoryLocation("missing", store)
+	if err == nil || !strings.Contains(err.Error(), `session "missing" not found`) {
+		t.Fatalf("error = %v, want missing session", err)
+	}
+	if store.listCalls != 0 {
+		t.Fatalf("nil resolved manifest entered fallback discovery %d time(s)", store.listCalls)
+	}
+}
+
+func TestResolveNamedHistoryLocation_SkipsNilListedManifests(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	resolved := &manifest.Manifest{Name: "claude-history", Harness: "claude-code"}
+	matched := &manifest.Manifest{
+		Name: "claude-history", Tmux: manifest.Tmux{SessionName: "claude-history"},
+		Claude: manifest.Claude{UUID: "fixture-claude-uuid"},
+	}
+	store := &fakeHistoryPathSessionStore{
+		resolved: resolved,
+		listed:   []*manifest.Manifest{nil, matched},
+	}
+
+	got, identifier, err := resolveNamedHistoryLocation("claude-history", store)
+	if err != nil {
+		t.Fatalf("resolveNamedHistoryLocation: %v", err)
+	}
+	if got != resolved || identifier != "fixture-claude-uuid" {
+		t.Fatalf("resolved manifest/id = %p/%q, want %p/fixture-claude-uuid", got, identifier, resolved)
+	}
+}
