@@ -79,12 +79,11 @@ func containsAgyOnboardingPrompt(content string) bool {
 		offset += len(line) + 1
 	}
 
+	activeRegion := strings.Join(strings.Fields(content[lastComposer+1:]), " ")
 	for _, screen := range agyOnboardingScreens {
-		marker := strings.LastIndex(content, screen.marker)
-		if marker < 0 || marker < lastComposer {
+		if !strings.Contains(activeRegion, screen.marker) {
 			continue
 		}
-		activeRegion := content[lastComposer+1:]
 		matched := true
 		for _, companion := range screen.companions {
 			if !strings.Contains(activeRegion, companion) {
@@ -153,7 +152,7 @@ type agyPromptRuntime struct {
 func realAgyPromptRuntime() agyPromptRuntime {
 	return agyPromptRuntime{
 		capture: func(ctx context.Context, sessionName string) ([]byte, error) {
-			return exec.CommandContext(ctx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-S", "-20").Output()
+			return exec.CommandContext(ctx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-J", "-S", "-20").Output()
 		},
 		sendKeys: SendKeys,
 		sleep: func(ctx context.Context, interval time.Duration) {

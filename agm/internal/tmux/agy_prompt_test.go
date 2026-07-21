@@ -10,8 +10,9 @@ import (
 
 func TestWaitForAgyPromptRejectsFirstRunOnboardingWithoutInput(t *testing.T) {
 	tests := map[string]string{
-		"theme": "Welcome to Antigravity CLI!\nChoose your color scheme:\n> terminal",
-		"terms": "Terms of Service & Data Use\n[ ] Yes, I agree to help improve Antigravity CLI\nPrevious  Done",
+		"theme":         "Welcome to Antigravity CLI!\nChoose your color scheme:\n> terminal",
+		"terms":         "Terms of Service & Data Use\n[ ] Yes, I agree to help improve Antigravity CLI\nPrevious  Done",
+		"wrapped terms": "Terms of Service & Data\nUse\n[ ] Yes, I agree to help improve Antigravity\nCLI\nPrevious  Done",
 	}
 	for name, content := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -54,6 +55,10 @@ func TestAgyOnboardingDetectionRequiresActiveScreen(t *testing.T) {
 		},
 		"active terms": {
 			content: "Terms of Service & Data Use\n[x] Yes, I agree to help improve Antigravity CLI\nPrevious  Done",
+			want:    true,
+		},
+		"active wrapped terms": {
+			content: "Terms of Service & Data\nUse\n[x] Yes, I agree to help improve Antigravity\nCLI\nPrevious  Done",
 			want:    true,
 		},
 		"stale theme before composer": {
