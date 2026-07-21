@@ -28,8 +28,6 @@ created_at: 2026-07-20T00:00:00Z
 updated_at: 2026-07-20T00:00:00Z
 %s
 ---
-
-# Wayfinder Session
 `, project, status, extra)
 }
 
