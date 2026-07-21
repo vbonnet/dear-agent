@@ -50,6 +50,9 @@ func isTmuxSessionRunning(ctx *OpContext, name string) (bool, error) {
 	if ctx.Tmux == nil {
 		return false, fmt.Errorf("tmux backend is required")
 	}
+	if checker, ok := ctx.Tmux.(session.StrictSessionExistenceChecker); ok {
+		return checker.HasSessionStrict(killRequestContext(ctx), name)
+	}
 	return ctx.Tmux.HasSession(name)
 }
 
@@ -140,7 +143,7 @@ func KillSession(ctx *OpContext, req *KillSessionRequest) (*KillSessionResult, e
 	}
 
 	var result *KillSessionResult
-	err = WithSessionLock(m.SessionID, func() error {
+	err = WithSessionLockContext(killRequestContext(ctx), m.SessionID, func() error {
 		if err := killRequestContext(ctx).Err(); err != nil {
 			return err
 		}
@@ -250,7 +253,7 @@ func executeAndVerifyTmuxKill(ctx *OpContext, tmuxName string, sessionExists boo
 		}
 	}
 
-	exists, err := ctx.Tmux.HasSession(tmuxName)
+	exists, err := isTmuxSessionRunning(ctx, tmuxName)
 	if err != nil {
 		return fmt.Errorf("verify tmux session %q after kill: %w", tmuxName, err)
 	}

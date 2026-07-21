@@ -182,6 +182,12 @@ type stubbornKillTmux struct {
 	*mockTmux
 }
 
+type strictProbeKillTmux struct {
+	*mockTmux
+	strictErr   error
+	strictCalls int
+}
+
 type observingKillStorage struct {
 	dolt.Storage
 	firstRead chan struct{}
@@ -210,6 +216,14 @@ func (s *vanishingKillStorage) GetSession(sessionID string) (*manifest.Manifest,
 func (m *stubbornKillTmux) KillSession(name string) error {
 	m.killed = append(m.killed, name)
 	return nil
+}
+
+func (m *strictProbeKillTmux) HasSessionStrict(context.Context, string) (bool, error) {
+	m.strictCalls++
+	if m.strictErr != nil {
+		return false, m.strictErr
+	}
+	return m.mockTmux.HasSession("my-session")
 }
 
 func TestKillSession_RunningSession(t *testing.T) {
@@ -402,6 +416,54 @@ func TestKillSession_CanceledRequestDoesNotMutateTmux(t *testing.T) {
 	}
 }
 
+func TestKillSession_CancelStopsContendedStableIDLock(t *testing.T) {
+	sessionID := "kill-cancel-lock-" + t.Name()
+	store := dolt.NewMockAdapter()
+	if err := store.CreateSession(newManifest(sessionID, "my-session", "~/project")); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	observed := &observingKillStorage{Storage: store, firstRead: make(chan struct{})}
+	tm := newMockTmux("my-session")
+	requestCtx, cancel := context.WithCancel(t.Context())
+	opCtx := &OpContext{Context: requestCtx, Storage: observed, Tmux: tm}
+
+	lockHeld := make(chan struct{})
+	releaseLock := make(chan struct{})
+	lockDone := make(chan error, 1)
+	go func() {
+		lockDone <- WithSessionLockTimeout(sessionID, time.Second, func() error {
+			close(lockHeld)
+			<-releaseLock
+			return nil
+		})
+	}()
+	<-lockHeld
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := KillSession(opCtx, &KillSessionRequest{Identifier: sessionID, ConfirmedStuck: true})
+		done <- err
+	}()
+	<-observed.firstRead
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("KillSession() error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled KillSession did not stop waiting for the stable-ID lock")
+	}
+	close(releaseLock)
+	if err := <-lockDone; err != nil {
+		t.Fatalf("lock owner: %v", err)
+	}
+	if len(tm.killed) != 0 || !tm.sessions["my-session"] {
+		t.Fatalf("canceled lock wait mutated tmux: killed=%v sessions=%v", tm.killed, tm.sessions)
+	}
+}
+
 func TestKillSession_PropagatesBackendFailure(t *testing.T) {
 	wantErr := errors.New("tmux kill denied")
 	tm := newMockTmux("my-session")
@@ -445,6 +507,24 @@ func TestKillSession_PropagatesProbeFailure(t *testing.T) {
 	}
 	if len(tm.killed) != 0 {
 		t.Fatalf("probe failure must not mutate tmux, killed = %v", tm.killed)
+	}
+}
+
+func TestKillSession_UsesStrictProductionProbe(t *testing.T) {
+	wantErr := errors.New("tmux socket permission denied")
+	tm := &strictProbeKillTmux{mockTmux: newMockTmux("my-session"), strictErr: wantErr}
+	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")})
+	ctx.Tmux = tm
+
+	_, err := KillSession(ctx, &KillSessionRequest{Identifier: "id-1", ConfirmedStuck: true})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("KillSession() error = %v, want strict probe failure %v", err, wantErr)
+	}
+	if tm.strictCalls == 0 {
+		t.Fatal("KillSession did not use the strict existence capability")
+	}
+	if len(tm.killed) != 0 {
+		t.Fatalf("strict probe failure mutated tmux: killed = %v", tm.killed)
 	}
 }
 

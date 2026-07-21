@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -54,10 +55,10 @@ func TestWithSessionLock_MutualExclusion(t *testing.T) {
 	session := "test-mutex-" + t.Name()
 
 	var (
-		mu        sync.Mutex
-		maxConc   int32
-		curConc   int32
-		wg        sync.WaitGroup
+		mu         sync.Mutex
+		maxConc    int32
+		curConc    int32
+		wg         sync.WaitGroup
 		goroutines = 5
 	)
 
@@ -135,6 +136,45 @@ func TestWithSessionLockTimeout_TimesOut(t *testing.T) {
 	// Should have waited at least the timeout duration.
 	if elapsed < 150*time.Millisecond {
 		t.Errorf("elapsed = %v; expected >= 150ms", elapsed)
+	}
+}
+
+func TestWithSessionLockContext_CancelStopsContendedWait(t *testing.T) {
+	session := "test-cancel-" + t.Name()
+	dir := lockDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("create lock directory: %v", err)
+	}
+	f, err := os.OpenFile(filepath.Join(dir, session+".lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatalf("open lock file: %v", err)
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatalf("acquire external lock: %v", err)
+	}
+	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	started := make(chan struct{})
+	go func() {
+		close(started)
+		done <- WithSessionLockContext(ctx, session, func() error {
+			t.Error("callback ran after cancellation")
+			return nil
+		})
+	}()
+	<-started
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("WithSessionLockContext() error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled lock acquisition did not return promptly")
 	}
 }
 

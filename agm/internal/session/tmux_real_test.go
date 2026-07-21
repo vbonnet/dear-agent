@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+var _ StrictSessionExistenceChecker = (*RealTmux)(nil)
+
 func TestNewRealTmux(t *testing.T) {
 	rt := NewRealTmux()
 	if rt == nil {

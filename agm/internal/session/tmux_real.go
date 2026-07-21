@@ -1,6 +1,10 @@
 package session
 
-import "github.com/vbonnet/dear-agent/agm/internal/tmux"
+import (
+	"context"
+
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
+)
 
 // RealTmux wraps the internal/tmux package to provide TmuxInterface implementation
 type RealTmux struct{}
@@ -13,6 +17,12 @@ func NewRealTmux() *RealTmux {
 // HasSession checks if a tmux session exists
 func (t *RealTmux) HasSession(name string) (bool, error) {
 	return tmux.HasSession(name)
+}
+
+// HasSessionStrict checks an exact target without collapsing backend failures
+// into a missing-session result.
+func (t *RealTmux) HasSessionStrict(ctx context.Context, name string) (bool, error) {
+	return tmux.HasSessionStrictContext(ctx, name)
 }
 
 // ListSessions returns all active tmux session names
