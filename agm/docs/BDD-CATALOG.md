@@ -47,6 +47,9 @@ newest-first Antigravity log fallback.
   also detects bytes appended during the bounded read.
 - Directory-entry, candidate, or byte exhaustion is distinguishable from a
   complete miss, and oversized lines fail explicitly.
+- Directory exhaustion retains the bounded candidates so a known-ID match can
+  remain conclusive, while latest-workspace lookup rejects any match because
+  an unprocessed entry could be newer.
 - A log removed by provider rotation after enumeration is skipped as a stale
   snapshot during metadata collection or scan open, while other metadata,
   open, and scan failures remain explicit.

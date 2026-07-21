@@ -29,8 +29,9 @@ const (
 var ErrLogDiscoveryBudgetExhausted = errors.New("AGY log discovery budget exhausted")
 
 type agyLogCandidates struct {
-	paths   []string
-	omitted int
+	paths              []string
+	omitted            int
+	unprocessedEntries int
 }
 
 type agyLogCandidate struct {
@@ -184,8 +185,9 @@ func workspaceFromLogCandidates(candidates agyLogCandidates, conversationID stri
 			return workspacePath, logPath, nil
 		}
 	}
-	if candidates.omitted > 0 || truncatedFiles > 0 {
-		return "", "", logDiscoveryBudgetError("conversation "+conversationID, len(candidates.paths), candidates.omitted, truncatedFiles)
+	if candidates.unprocessedEntries > 0 || candidates.omitted > 0 || truncatedFiles > 0 {
+		return "", "", logDiscoveryBudgetError(
+			"conversation "+conversationID, len(candidates.paths), candidates.unprocessedEntries, candidates.omitted, truncatedFiles)
 	}
 	return "", "", fmt.Errorf("failed to determine AGY workspace for conversation %s", conversationID)
 }
@@ -202,6 +204,13 @@ func latestConversationForWorkspaceFromLogs(appDir, workspacePath string) (strin
 }
 
 func latestConversationForWorkspaceFromLogCandidates(candidates agyLogCandidates, workspacePath string) (string, string, error) {
+	if candidates.unprocessedEntries > 0 {
+		// Directory order does not establish recency, so an unprocessed entry
+		// could be newer than every bounded candidate. Unlike known-ID lookup,
+		// latest-workspace discovery cannot accept any match conclusively.
+		return "", "", logDiscoveryBudgetError(
+			"workspace "+workspacePath, 0, candidates.unprocessedEntries, candidates.omitted, 0)
+	}
 	for index, logPath := range candidates.paths {
 		conversationID, matched, truncated, err := scanLogForWorkspace(logPath, workspacePath)
 		if err != nil {
@@ -214,14 +223,14 @@ func latestConversationForWorkspaceFromLogCandidates(candidates agyLogCandidates
 			// A prefix match is not conclusive for latest-session lookup: the
 			// unscanned tail may contain a newer marker for this workspace. A
 			// truncated newer candidate also makes any older-file match unsafe.
-			return "", "", logDiscoveryBudgetError("workspace "+workspacePath, index+1, candidates.omitted, 1)
+			return "", "", logDiscoveryBudgetError("workspace "+workspacePath, index+1, 0, candidates.omitted, 1)
 		}
 		if matched && conversationID != "" {
 			return conversationID, logPath, nil
 		}
 	}
 	if candidates.omitted > 0 {
-		return "", "", logDiscoveryBudgetError("workspace "+workspacePath, len(candidates.paths), candidates.omitted, 0)
+		return "", "", logDiscoveryBudgetError("workspace "+workspacePath, len(candidates.paths), 0, candidates.omitted, 0)
 	}
 	return "", "", fmt.Errorf("no AGY conversation recorded for workspace: %s", workspacePath)
 }
@@ -237,10 +246,10 @@ func agyLogPaths(appDir string) (agyLogCandidates, error) {
 	if err != nil && !errors.Is(err, io.EOF) {
 		return agyLogCandidates{}, fmt.Errorf("read AGY log directory: %w", err)
 	}
+	unprocessedEntries := 0
 	if len(entries) > maxAgyLogDirEntries {
-		return agyLogCandidates{}, fmt.Errorf(
-			"%w: enumerated at least %d AGY log directory entries (max %d)",
-			ErrLogDiscoveryBudgetExhausted, len(entries), maxAgyLogDirEntries)
+		unprocessedEntries = len(entries) - maxAgyLogDirEntries
+		entries = entries[:maxAgyLogDirEntries]
 	}
 	logs, err := collectAgyLogCandidates(logDir, entries)
 	if err != nil {
@@ -261,7 +270,9 @@ func agyLogPaths(appDir string) (agyLogCandidates, error) {
 	for i, log := range logs {
 		paths[i] = log.path
 	}
-	return agyLogCandidates{paths: paths, omitted: omitted}, nil
+	return agyLogCandidates{
+		paths: paths, omitted: omitted, unprocessedEntries: unprocessedEntries,
+	}, nil
 }
 
 func collectAgyLogCandidates(logDir string, entries []os.DirEntry) ([]agyLogCandidate, error) {
@@ -377,9 +388,9 @@ func logHasUnreadTail(file *os.File) (bool, error) {
 	return false, err
 }
 
-func logDiscoveryBudgetError(target string, scanned, omitted, truncated int) error {
-	return fmt.Errorf("%w for %s: scanned %d newest logs (max %d), at most %d bytes each; omitted %d older logs and truncated %d oversized logs",
-		ErrLogDiscoveryBudgetExhausted, target, scanned, maxAgyLogFiles, maxAgyLogScanBytes, omitted, truncated)
+func logDiscoveryBudgetError(target string, scanned, unprocessedEntries, omitted, truncated int) error {
+	return fmt.Errorf("%w for %s: scanned %d selected logs (max %d), at most %d bytes each; left at least %d directory entries unprocessed, omitted %d older logs from the selected set, and truncated %d oversized logs",
+		ErrLogDiscoveryBudgetExhausted, target, scanned, maxAgyLogFiles, maxAgyLogScanBytes, unprocessedEntries, omitted, truncated)
 }
 
 func extractConversationID(line, marker string) string {

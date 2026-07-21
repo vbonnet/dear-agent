@@ -203,14 +203,57 @@ func TestWorkspaceFromLogsReportsDirectoryEntryBudgetExhaustion(t *testing.T) {
 		}
 	}
 
-	_, _, err := workspaceFromLogs(appDir, "missing-conversation")
+	candidates, err := agyLogPaths(appDir)
+	if err != nil {
+		t.Fatalf("agyLogPaths should preserve its bounded candidates: %v", err)
+	}
+	if candidates.unprocessedEntries != 1 || len(candidates.paths) != maxAgyLogFiles {
+		t.Fatalf("directory budget result = %+v", candidates)
+	}
+
+	_, _, err = workspaceFromLogCandidates(candidates, "missing-conversation")
 	if !errors.Is(err, ErrLogDiscoveryBudgetExhausted) {
 		t.Fatalf("error = %v, want ErrLogDiscoveryBudgetExhausted", err)
 	}
-	want := fmt.Sprintf("enumerated at least %d AGY log directory entries (max %d)",
-		maxAgyLogDirEntries+1, maxAgyLogDirEntries)
+	want := "left at least 1 directory entries unprocessed"
 	if !strings.Contains(err.Error(), want) {
 		t.Fatalf("budget error lacks directory-entry evidence: %v", err)
+	}
+}
+
+func TestWorkspaceFromLogCandidatesReturnsKnownMatchWithDirectoryExhaustion(t *testing.T) {
+	appDir := t.TempDir()
+	conversationID := "117ff898-a964-4a9f-b460-1be4a8a49b17"
+	logPath := writeAgyLog(t, appDir, "bounded-match.log", []string{
+		workspaceMarker + "/tmp/bounded-match",
+		"Created conversation " + conversationID,
+	})
+	candidates := agyLogCandidates{paths: []string{logPath}, unprocessedEntries: 1}
+
+	workspace, matchedPath, err := workspaceFromLogCandidates(candidates, conversationID)
+	if err != nil {
+		t.Fatalf("conclusive known-ID match should survive directory exhaustion: %v", err)
+	}
+	if workspace != "/tmp/bounded-match" || matchedPath != logPath {
+		t.Fatalf("known-ID result = workspace %q log %q", workspace, matchedPath)
+	}
+}
+
+func TestLatestConversationForWorkspaceRejectsDirectoryEntryExhaustion(t *testing.T) {
+	appDir := t.TempDir()
+	workspace := "/tmp/inconclusive-latest"
+	logPath := writeAgyLog(t, appDir, "bounded-match.log", []string{
+		workspaceMarker + workspace,
+		"Created conversation bounded-conversation",
+	})
+	candidates := agyLogCandidates{paths: []string{logPath}, unprocessedEntries: 1}
+
+	conversationID, _, err := latestConversationForWorkspaceFromLogCandidates(candidates, workspace)
+	if !errors.Is(err, ErrLogDiscoveryBudgetExhausted) {
+		t.Fatalf("error = %v, want directory budget exhaustion", err)
+	}
+	if conversationID != "" {
+		t.Fatalf("latest conversation = %q, want no inconclusive bounded match", conversationID)
 	}
 }
 
