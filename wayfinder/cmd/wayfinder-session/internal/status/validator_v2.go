@@ -73,6 +73,28 @@ func validateSkipPhases(phases []string) error {
 	return nil
 }
 
+// ValidateSessionCompletion requires completed history for every canonical
+// waypoint except phases explicitly skipped by the session configuration.
+func ValidateSessionCompletion(status *StatusV2) error {
+	if status == nil {
+		return fmt.Errorf("status is nil")
+	}
+	var incomplete []string
+	for _, waypointName := range AllWaypointsV2Schema() {
+		if status.IsPhaseSkipped(waypointName) {
+			continue
+		}
+		waypoint := status.GetWaypointHistory(waypointName)
+		if waypoint == nil || waypoint.Status != WaypointStatusV2Completed {
+			incomplete = append(incomplete, waypointName)
+		}
+	}
+	if len(incomplete) > 0 {
+		return fmt.Errorf("required Wayfinder phases are incomplete: %s", strings.Join(incomplete, ", "))
+	}
+	return nil
+}
+
 // validateRequiredFields checks all required fields are present
 func validateRequiredFields(status *StatusV2) error {
 	var errors []string
@@ -374,10 +396,15 @@ func validateRoadmap(status *StatusV2) error {
 		}
 
 		// Collect tasks
-		for _, task := range phase.Tasks {
+		for taskIndex, task := range phase.Tasks {
 			if task.ID == "" {
 				errors = append(errors, fmt.Sprintf("roadmap.phases[%d]: task has empty ID", i))
 				continue
+			}
+			if math.IsNaN(task.EffortDays) || math.IsInf(task.EffortDays, 0) {
+				errors = append(errors, fmt.Sprintf("roadmap.phases[%d].tasks[%d].effort_days must be finite", i, taskIndex))
+			} else if task.EffortDays < 0 {
+				errors = append(errors, fmt.Sprintf("roadmap.phases[%d].tasks[%d].effort_days cannot be negative", i, taskIndex))
 			}
 
 			if allTaskIDs[task.ID] {
@@ -592,6 +619,11 @@ func validateConditionalRequirements(status *StatusV2) error {
 	// If status = completed, completion_date must be present
 	if status.Status == StatusV2Completed && status.CompletionDate == nil {
 		errors = append(errors, "status is 'completed' but completion_date is missing")
+	}
+	if status.Status == StatusV2Completed {
+		if err := ValidateSessionCompletion(status); err != nil {
+			errors = append(errors, err.Error())
+		}
 	}
 
 	// If status = blocked, blocked_reason must be present.

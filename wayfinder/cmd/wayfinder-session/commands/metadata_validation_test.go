@@ -77,6 +77,17 @@ func TestApplyLifecycleStateKeepsCanonicalStatusValid(t *testing.T) {
 	} {
 		t.Run(test.state, func(t *testing.T) {
 			st := status.NewStatusV2("test", status.ProjectTypeFeature, status.RiskLevelS)
+			if test.state == status.LifecycleCompleted {
+				st.CurrentWaypoint = status.WaypointV2Retro
+				for _, waypointName := range status.AllWaypointsV2Schema() {
+					st.WaypointHistory = append(st.WaypointHistory, status.WaypointHistory{
+						Name:        waypointName,
+						Status:      status.WaypointStatusV2Completed,
+						StartedAt:   now,
+						CompletedAt: &now,
+					})
+				}
+			}
 			applyLifecycleState(st, test.state, test.blockedOn, test.errorMessage, test.inputNeeded, now)
 			if err := status.ValidateV2(st); err != nil {
 				t.Fatalf("ValidateV2 after %s: %v", test.state, err)

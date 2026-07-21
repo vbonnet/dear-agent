@@ -103,12 +103,12 @@ func TestValidateSessionCompletionHonorsConfiguredSkips(t *testing.T) {
 		})
 	}
 
-	if err := validateSessionCompletion(st); err != nil {
-		t.Fatalf("validateSessionCompletion() rejected configured skips: %v", err)
+	if err := wayfinderstatus.ValidateSessionCompletion(st); err != nil {
+		t.Fatalf("ValidateSessionCompletion() rejected configured skips: %v", err)
 	}
 	st.WaypointHistory = st.WaypointHistory[:len(st.WaypointHistory)-1]
-	if err := validateSessionCompletion(st); err == nil || !strings.Contains(err.Error(), wayfinderstatus.WaypointV2Retro) {
-		t.Fatalf("validateSessionCompletion() error = %v, want missing RETRO", err)
+	if err := wayfinderstatus.ValidateSessionCompletion(st); err == nil || !strings.Contains(err.Error(), wayfinderstatus.WaypointV2Retro) {
+		t.Fatalf("ValidateSessionCompletion() error = %v, want missing RETRO", err)
 	}
 }
 

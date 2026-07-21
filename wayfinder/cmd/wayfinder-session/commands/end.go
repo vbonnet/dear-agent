@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -65,7 +64,7 @@ func runEndV2(projectDir, newStatus, blockedReason string) error {
 		return fmt.Errorf("failed to read canonical status file: %w", err)
 	}
 	if newStatus == status.StatusV2Completed {
-		if err := validateSessionCompletion(st); err != nil {
+		if err := status.ValidateSessionCompletion(st); err != nil {
 			return err
 		}
 	}
@@ -119,23 +118,6 @@ func runEndV2(projectDir, newStatus, blockedReason string) error {
 	fmt.Printf("Duration: %s\n", formatDuration(duration))
 	fmt.Printf("Status: %s\n", newStatus)
 	fmt.Printf("Phases completed: %d\n", countCompletedPhasesV2(st))
-	return nil
-}
-
-func validateSessionCompletion(st *status.StatusV2) error {
-	var incomplete []string
-	for _, waypointName := range status.AllWaypointsV2Schema() {
-		if st.IsPhaseSkipped(waypointName) {
-			continue
-		}
-		waypoint := st.GetWaypointHistory(waypointName)
-		if waypoint == nil || waypoint.Status != status.WaypointStatusV2Completed {
-			incomplete = append(incomplete, waypointName)
-		}
-	}
-	if len(incomplete) > 0 {
-		return fmt.Errorf("cannot complete session: required Wayfinder phases are incomplete: %s", strings.Join(incomplete, ", "))
-	}
 	return nil
 }
 

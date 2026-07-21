@@ -106,7 +106,7 @@ func validateLifecycleCompletion(st *status.StatusV2, lifecycleState string) err
 	if lifecycleState != status.LifecycleCompleted {
 		return nil
 	}
-	return validateSessionCompletion(st)
+	return status.ValidateSessionCompletion(st)
 }
 
 func applyLifecycleState(st *status.StatusV2, lifecycleState, blockedOn, errorMessage, inputNeeded string, now time.Time) {

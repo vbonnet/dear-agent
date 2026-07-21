@@ -147,6 +147,14 @@ waypoint_history:
     );
   });
 
+  it('rejects completed status until every required waypoint is complete', () => {
+    const incomplete = canonical.replace(
+      'status: in-progress',
+      'status: completed\ncompletion_date: 2026-07-20T00:04:00Z',
+    );
+    assert.throws(() => parseWayfinderStatus(incomplete), /required Wayfinder phases are incomplete: BUILD, RETRO/);
+  });
+
   it('accepts canonical hyphenated lifecycle state names', () => {
     const blocked = canonical.replace(
       'status: in-progress',
@@ -181,6 +189,22 @@ waypoint_history:
 waypoint_history:`,
     );
     assert.throws(() => parseWayfinderStatus(invalid), /depends_on references missing task/);
+  });
+
+  it('rejects negative roadmap effort', () => {
+    const invalid = canonical.replace(
+      'waypoint_history:',
+      `roadmap:
+  phases:
+    - id: BUILD
+      status: in-progress
+      tasks:
+        - id: task-1
+          status: pending
+          effort_days: -1
+waypoint_history:`,
+    );
+    assert.throws(() => parseWayfinderStatus(invalid), /effort_days cannot be negative/);
   });
 
   it('rejects duplicate roadmap phase IDs', () => {

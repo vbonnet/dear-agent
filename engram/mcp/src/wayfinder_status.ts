@@ -297,7 +297,10 @@ function validateRoadmap(value: unknown): void {
       for (const key of ['title', 'tests_status', 'description', 'assigned_to', 'bead_id', 'notes', 'verify_command', 'verify_expected', 'verify_result']) {
         optionalString(task, key, taskPath);
       }
-      optionalNumber(task, 'effort_days', taskPath);
+      const effortDays = optionalNumber(task, 'effort_days', taskPath);
+      if (effortDays !== undefined && effortDays < 0) {
+        throw new Error(`invalid Wayfinder V2 status: ${taskPath}.effort_days cannot be negative`);
+      }
       optionalTimestamp(task, 'started_at', taskPath);
       optionalTimestamp(task, 'completed_at', taskPath);
       optionalTimestamp(task, 'verified_at', taskPath);
@@ -487,6 +490,12 @@ export function parseWayfinderStatus(content: string): WayfinderStatusSummary {
     }
   }
   for (const skipped of configuredSkips) complete.add(skipped);
+  if (status === 'completed') {
+    const incomplete = WAYPOINTS.filter((waypoint) => !complete.has(waypoint));
+    if (incomplete.length > 0) {
+      throw new Error(`invalid Wayfinder V2 status: required Wayfinder phases are incomplete: ${incomplete.join(', ')}`);
+    }
+  }
 
   return {
     phase,

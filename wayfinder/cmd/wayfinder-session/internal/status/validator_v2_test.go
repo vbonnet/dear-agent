@@ -173,6 +173,32 @@ func TestValidateV2(t *testing.T) {
 	}
 }
 
+func TestValidateV2RejectsIncompleteCompletedSession(t *testing.T) {
+	now := time.Now()
+	st := &StatusV2{
+		SchemaVersion:   SchemaVersionV2,
+		ProjectName:     "Test",
+		ProjectType:     ProjectTypeFeature,
+		RiskLevel:       RiskLevelM,
+		CurrentWaypoint: WaypointV2Retro,
+		Status:          StatusV2Completed,
+		CompletionDate:  &now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		WaypointHistory: []WaypointHistory{{
+			Name:        WaypointV2Charter,
+			Status:      WaypointStatusV2Completed,
+			StartedAt:   now,
+			CompletedAt: &now,
+		}},
+	}
+
+	err := ValidateV2(st)
+	if err == nil || !strings.Contains(err.Error(), "required Wayfinder phases are incomplete") {
+		t.Fatalf("ValidateV2() error = %v, want incomplete completion rejection", err)
+	}
+}
+
 func TestValidateV2LifecycleMetadata(t *testing.T) {
 	newStatus := func(state string) *StatusV2 {
 		now := time.Now()
@@ -551,6 +577,34 @@ func TestValidateRoadmap(t *testing.T) {
 			}},
 			wantErr: true,
 			errMsg:  "duplicate waypoint_id",
+		},
+		{
+			name: "non-finite task effort",
+			roadmap: &Roadmap{Phases: []RoadmapPhase{{
+				ID:     PhaseV2Setup,
+				Status: PhaseStatusV2Pending,
+				Tasks: []Task{{
+					ID:         "task-1",
+					Status:     TaskStatusPending,
+					EffortDays: math.NaN(),
+				}},
+			}}},
+			wantErr: true,
+			errMsg:  "effort_days must be finite",
+		},
+		{
+			name: "negative task effort",
+			roadmap: &Roadmap{Phases: []RoadmapPhase{{
+				ID:     PhaseV2Setup,
+				Status: PhaseStatusV2Pending,
+				Tasks: []Task{{
+					ID:         "task-1",
+					Status:     TaskStatusPending,
+					EffortDays: -1,
+				}},
+			}}},
+			wantErr: true,
+			errMsg:  "effort_days cannot be negative",
 		},
 		{
 			name: "invalid task dependency",
