@@ -350,7 +350,7 @@ func TestRun_CreateProtectsPreflightAndGitHubMutation(t *testing.T) {
 	captureSafePRAudits(t)
 	t.Setenv("WAYFINDER_PROJECT_DIR", "")
 	dir := t.TempDir()
-	writeWayfinderStatus(t, dir, "test-session", "in_progress")
+	writeWayfinderStatus(t, dir, "test-session", "in-progress")
 
 	originalProtect := protectCreateWorktree
 	originalPreflight := runPreflightFull
@@ -411,7 +411,7 @@ func TestRun_CreateAuditsFinalTransactionOutcome(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("WAYFINDER_PROJECT_DIR", "")
 			dir := t.TempDir()
-			writeWayfinderStatus(t, dir, "audit-session", "in_progress")
+			writeWayfinderStatus(t, dir, "audit-session", "in-progress")
 			records := captureSafePRAudits(t)
 
 			originalProtect := protectCreateWorktree
