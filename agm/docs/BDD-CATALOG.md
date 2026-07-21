@@ -213,7 +213,8 @@ generated surface metadata, workflow-bus signaling, and accessible operator UIs.
 creation, and terminal state detection.
 
 **Key scenarios:**
-- A Codex CLI composer pane is detected as `ready`.
+- A Codex CLI composer pane is detected as `ready` only with an explicit empty
+  cursor on both the initial and post-turn forms.
 - An idle Codex composer allows direct delivery.
 - A typed draft or Unicode collapsed-paste chip remains queued even when the
   normal Codex model footer is visible.
@@ -263,6 +264,8 @@ creation, and terminal state detection.
   persistent pre-revision SQLite test store upgrades its schema idempotently
   while preserving existing sessions before those lifecycle mutations run;
   compensation restores the prior activity timestamp with the prior name.
+- Once a transactional Codex resume prompt is submitted, later caller
+  cancellation cannot report a retryable failure that would duplicate work.
 - Final creation liveness validation derives from the root context and rechecks
   cancellation before title update, attach, or detached-success reporting.
 - AGY feedback survey handling dismisses once and recognizes the subsequent

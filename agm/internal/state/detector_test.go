@@ -49,7 +49,8 @@ func TestDetector_DetectState_CodexReady(t *testing.T) {
 │ >_ OpenAI Codex (v0.43.0)                          │
 │                                                    │
 │  /model to change model   /help for commands       │
-╰────────────────────────────────────────────────────╯`
+╰────────────────────────────────────────────────────╯
+›`
 
 	result := detector.DetectState(output, time.Now())
 
@@ -769,7 +770,8 @@ func TestDetector_CheckCanReceive(t *testing.T) {
 			output: `╭────────────────────────────────────────────────────╮
 │ >_ OpenAI Codex                                    │
 │  /model to change model                            │
-╰────────────────────────────────────────────────────╯`,
+╰────────────────────────────────────────────────────╯
+›`,
 			expected: CanReceiveYes,
 		},
 	}

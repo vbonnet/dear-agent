@@ -763,6 +763,7 @@ func resumeSessionWithRuntime(ctx context.Context, adapter *dolt.Adapter, sessio
 		}
 	}
 	transactionalPrompt := agent.NormalizeHarnessName(harnessName) == "codex-cli"
+	promptDelivered := false
 	if transactionalPrompt {
 		// Codex canonical-name persistence must commit before the optional prompt
 		// can trigger work. Prompt delivery is strict for a cold Codex resume;
@@ -777,11 +778,19 @@ func resumeSessionWithRuntime(ctx context.Context, adapter *dolt.Adapter, sessio
 			}
 			return err
 		}
+		promptDelivered = hasPostResumePrompt()
+	}
+	completionCtx := ctx
+	if promptDelivered {
+		// A submitted prompt may already have started external work. From this
+		// irreversible boundary onward, finish metadata and success effects even
+		// if the caller is canceled so a retry cannot duplicate that prompt.
+		completionCtx = context.WithoutCancel(ctx)
 	}
 	if nameChange.Applied {
 		if runtime.completeTmuxName == nil {
 			ui.PrintWarning("Resume metadata ownership token could not be finalized: runtime dependency is missing")
-		} else if err := runtime.completeTmuxName(ctx, adapter, nameChange); err != nil {
+		} else if err := runtime.completeTmuxName(completionCtx, adapter, nameChange); err != nil {
 			// Prompt delivery is irreversible. Do not report a retryable resume
 			// failure after it succeeds; a later full session update also clears
 			// stale ownership tokens.
@@ -791,7 +800,7 @@ func resumeSessionWithRuntime(ctx context.Context, adapter *dolt.Adapter, sessio
 	if sendCommands {
 		runtime.restorePermission(harnessName, m, health)
 	}
-	return finalizeResumeSession(ctx, adapter, sessionID, manifestPath, health, sendCommands, !transactionalPrompt, runtime)
+	return finalizeResumeSession(completionCtx, adapter, sessionID, manifestPath, health, sendCommands, !transactionalPrompt, runtime)
 }
 
 func loadResumeSessionManifest(ctx context.Context, adapter *dolt.Adapter, sessionID, harnessName string, runtime resumeSessionRuntime) (*manifest.Manifest, error) {
@@ -912,7 +921,7 @@ func deliverPostResumePrompt(ctx context.Context, sessionName string, runtime re
 	// Send post-resume prompt if --prompt or --prompt-file was specified.
 	// This happens after the harness is ready, before attach.
 	// Works for both new sessions (sendCommands=true) and existing sessions.
-	if resumePrompt == "" && resumePromptFile == "" {
+	if !hasPostResumePrompt() {
 		return nil
 	}
 	if err := runtime.deliverPrompt(sessionName, resumePrompt, resumePromptFile, resumeDeletePromptFile); err != nil {
@@ -928,6 +937,10 @@ func deliverPostResumePrompt(ctx context.Context, sessionName string, runtime re
 	}
 	ui.PrintSuccess("Post-resume prompt delivered.")
 	return nil
+}
+
+func hasPostResumePrompt() bool {
+	return resumePrompt != "" || resumePromptFile != ""
 }
 
 func attachResumedSession(ctx context.Context, sessionID string, health *HealthStatus, sendCommands bool, runtime resumeSessionRuntime) error {

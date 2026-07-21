@@ -295,6 +295,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates the Codex resume transaction$`, agmValidatesTheCodexResumeTransaction)
 	ctx.Step(`^Codex resume success should require process and composer readiness$`, codexResumeSuccessShouldRequireProcessAndComposerReadiness)
 	ctx.Step(`^a failed Codex resume should serialize concurrent attempts, reconcile ambiguous metadata commits, compensate owned provisional metadata before removing its creation-specific tmux identity even when tmux ID output is lost, and preserve tmux whenever metadata cleanup is unproven$`, aFailedCodexResumeShouldRemoveOnlyItsNewlyCreatedTmuxSession)
+	ctx.Step(`^successful Codex prompt delivery should remain successful after later caller cancellation$`, successfulCodexPromptDeliveryShouldRemainSuccessfulAfterLaterCallerCancellation)
 	ctx.Step(`^Codex activity updates should follow resume readiness$`, codexActivityUpdatesShouldFollowResumeReadiness)
 }
 
@@ -351,6 +352,21 @@ func aFailedCodexResumeShouldRemoveOnlyItsNewlyCreatedTmuxSession(ctx context.Co
 	}
 	if err != nil {
 		return fmt.Errorf("codex resume rollback behavior suite failed: %w\n%s", err, output)
+	}
+	return nil
+}
+
+func successfulCodexPromptDeliveryShouldRemainSuccessfulAfterLaterCallerCancellation(ctx context.Context) error {
+	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "-run", `^TestResumeSessionCodexDoesNotReturnCancellationAfterPromptDelivery$`, "-count=1")
+	cmd.Dir = bddRepoRoot()
+	output, err := cmd.CombinedOutput()
+	if testCtx.Err() != nil {
+		return fmt.Errorf("post-prompt cancellation behavior timed out: %w", testCtx.Err())
+	}
+	if err != nil {
+		return fmt.Errorf("post-prompt cancellation behavior failed: %w\n%s", err, output)
 	}
 	return nil
 }
@@ -1813,7 +1829,8 @@ func aCodexCLIComposerPane(ctx context.Context) error {
 	harnessState.paneOutput = `╭────────────────────────────────────────────────────╮
 │ >_ OpenAI Codex                                    │
 │  /model to change model                            │
-╰────────────────────────────────────────────────────╯`
+╰────────────────────────────────────────────────────╯
+›`
 	return nil
 }
 

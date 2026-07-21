@@ -26,7 +26,7 @@ import (
 //	│ model:     gpt-5.5 xhigh   /model to change │
 //	│ directory: /private/tmp/codex-probe   │
 //	╰───────────────────────────────────────╯
-//	› Write tests for @filename
+//	›
 //
 // Decorative shell prompts can also use rounded box-drawing characters, so
 // readiness must remain keyed to Codex-specific text instead of generic TUI
@@ -117,8 +117,9 @@ func IsCodexComposerReady(content string) bool {
 	}
 
 	// Before the first exchange Codex renders a bordered welcome composer. Both
-	// the header and its model-change hint must be present in the same compact
-	// block; either substring alone can occur in stale or echoed output.
+	// the header, its model-change hint, and an empty cursor must be present in the
+	// same compact block; either substring alone can occur in stale or echoed
+	// output, while an occupied cursor is an unsubmitted draft.
 	for i, line := range lines {
 		if !strings.Contains(line, CodexPromptPatterns[0]) {
 			continue
@@ -134,21 +135,25 @@ func IsCodexComposerReady(content string) bool {
 
 // codexInitialComposerOwnsTail rejects ordinary output rendered after the
 // welcome composer. The hint may be followed by the remaining bordered rows,
-// the bottom border, and Codex's input cursor, but not a newer shell prompt or
-// process-exit message.
+// the bottom border, and an empty Codex input cursor, but not a draft, newer
+// shell prompt, or process-exit message.
 func codexInitialComposerOwnsTail(lines []string) bool {
+	emptyCursor := false
 	for _, line := range lines {
 		candidate := strings.TrimSpace(line)
 		switch {
 		case candidate == "":
 		case strings.HasPrefix(candidate, "│") && strings.HasSuffix(candidate, "│"):
 		case strings.HasPrefix(candidate, "╰") && strings.HasSuffix(candidate, "╯"):
+		case candidate == "›":
+			emptyCursor = true
 		case strings.HasPrefix(candidate, "›"):
+			return false
 		default:
 			return false
 		}
 	}
-	return true
+	return emptyCursor
 }
 
 // IsCodexIdle reports whether the Codex TUI composer is currently visible in

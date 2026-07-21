@@ -35,8 +35,18 @@ func TestIsCodexComposerReady(t *testing.T) {
 	}{
 		{
 			name:     "structured initial composer",
-			content:  "│ >_ OpenAI Codex (v0.141.0) │\n│ model: gpt-5.5 xhigh /model to change │",
+			content:  "│ >_ OpenAI Codex (v0.141.0) │\n│ model: gpt-5.5 xhigh /model to change │\n╰──────────────────────────────╯\n›",
 			expected: true,
+		},
+		{
+			name:     "typed initial draft is not ready",
+			content:  "│ >_ OpenAI Codex (v0.141.0) │\n│ model: gpt-5.5 xhigh /model to change │\n╰──────────────────────────────╯\n› Continue the task",
+			expected: false,
+		},
+		{
+			name:     "initial paste chip is not ready",
+			content:  "│ >_ OpenAI Codex (v0.141.0) │\n│ model: gpt-5.5 xhigh /model to change │\n╰──────────────────────────────╯\n› [Pasted Content 2172 chars]",
+			expected: false,
 		},
 		{
 			name:     "header alone is incomplete",
@@ -229,7 +239,7 @@ func TestCodexPromptPatternsIncludeHeader(t *testing.T) {
 // containsAnyHarnessPromptPattern must also recognize Codex's composer so the
 // harness-agnostic send path (SendPromptLiteral) detects Codex readiness.
 func TestContainsAnyHarnessPromptPatternMatchesCodex(t *testing.T) {
-	if !containsAnyHarnessPromptPattern("│ >_ OpenAI Codex (v0.141.0) │\n│ /model to change │") {
+	if !containsAnyHarnessPromptPattern("│ >_ OpenAI Codex (v0.141.0) │\n│ /model to change │\n›") {
 		t.Error("containsAnyHarnessPromptPattern should match the Codex composer header")
 	}
 }
@@ -241,7 +251,7 @@ func TestWaitForCodexPromptPolling(t *testing.T) {
 	socketPath := newCodexTestSession(t, sessionName)
 
 	// Print the Codex composer header into the pane.
-	sendCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "printf 'OpenAI Codex (v0.141.0)\\n/model to change\\n'; sleep 30", "Enter")
+	sendCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "printf 'OpenAI Codex (v0.141.0)\\n/model to change\\n›\\n'; sleep 30", "Enter")
 	if err := sendCmd.Run(); err != nil {
 		t.Fatalf("Failed to send composer signal: %v", err)
 	}
@@ -284,7 +294,7 @@ func TestIsCodexIdleComposerVisible(t *testing.T) {
 	socketPath := newCodexTestSession(t, sessionName)
 
 	// Render the Codex composer header into the pane.
-	sendCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "printf 'OpenAI Codex (v0.141.0)\\n/model to change\\n'; sleep 30", "Enter")
+	sendCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "printf 'OpenAI Codex (v0.141.0)\\n/model to change\\n›\\n'; sleep 30", "Enter")
 	if err := sendCmd.Run(); err != nil {
 		t.Fatalf("Failed to send composer signal: %v", err)
 	}
@@ -379,7 +389,7 @@ func TestWaitForCodexPromptAutoAcceptsTrust(t *testing.T) {
 	// receiving any input line (the auto-accepted Enter) — prints the composer
 	// header. This exercises both the trust detection and the post-accept
 	// readiness path.
-	script := "printf 'Do you trust the contents of this directory?\\n'; read _; printf 'OpenAI Codex (v0.141.0)\\n/model to change\\n'; sleep 30"
+	script := "printf 'Do you trust the contents of this directory?\\n'; read _; printf 'OpenAI Codex (v0.141.0)\\n/model to change\\n›\\n'; sleep 30"
 	newCodexTestSession(t, sessionName, "sh", "-c", script)
 
 	if err := WaitForCodexPrompt(sessionName, 10*time.Second); err != nil {
@@ -392,7 +402,7 @@ func TestWaitForCodexPromptAutoAcceptsTrust(t *testing.T) {
 // requested existing model instead of accepting the highlighted upgrade option.
 func TestWaitForCodexPromptSelectsExistingModel(t *testing.T) {
 	sessionName := "test-codex-model-upgrade"
-	script := "printf \"Choose how you'd like Codex to proceed\\n› 1. Try new model\\n  2. Use existing model\\n\"; read _; printf 'OpenAI Codex (v0.141.0)\\n/model to change\\n'; sleep 30"
+	script := "printf \"Choose how you'd like Codex to proceed\\n› 1. Try new model\\n  2. Use existing model\\n\"; read _; printf 'OpenAI Codex (v0.141.0)\\n/model to change\\n›\\n'; sleep 30"
 	newCodexTestSession(t, sessionName, "sh", "-c", script)
 
 	if err := WaitForCodexPrompt(sessionName, 10*time.Second); err != nil {

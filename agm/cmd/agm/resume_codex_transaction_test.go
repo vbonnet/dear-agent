@@ -370,6 +370,48 @@ func TestResumeSessionCodexRollsBackWhenPromptDeliveryIsCanceled(t *testing.T) {
 	}
 }
 
+func TestResumeSessionCodexDoesNotReturnCancellationAfterPromptDelivery(t *testing.T) {
+	setDetachedResumeTestGlobals(t, true)
+	resumePrompt = "start irreversible work"
+	adapter, m, health := setupCodexResumeTransaction(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	var calls []string
+	runtime := recordingResumeRuntime(&calls)
+	runtime.persistTmuxName = func(context.Context, *dolt.Adapter, *manifest.Manifest, string) (resumeTmuxNameChange, error) {
+		calls = append(calls, "persist")
+		return resumeTmuxNameChange{
+			Applied: true,
+			Change: dolt.TmuxSessionNameChange{
+				SessionID:       m.SessionID,
+				CurrentName:     health.TmuxSessionName,
+				CurrentRevision: "owned-revision",
+			},
+		}, nil
+	}
+	runtime.deliverPrompt = func(string, string, string, bool) error {
+		calls = append(calls, "prompt")
+		cancel()
+		return nil
+	}
+	runtime.completeTmuxName = func(completeCtx context.Context, _ *dolt.Adapter, change resumeTmuxNameChange) error {
+		if err := completeCtx.Err(); err != nil {
+			t.Fatalf("metadata completion context after prompt = %v, want active", err)
+		}
+		if !change.Applied || change.Change.CurrentRevision != "owned-revision" {
+			t.Fatalf("metadata completion change = %#v", change)
+		}
+		calls = append(calls, "complete")
+		return nil
+	}
+
+	if err := resumeSessionWithRuntime(ctx, adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime); err != nil {
+		t.Fatalf("resumeSessionWithRuntime() after delivered prompt error = %v, want success", err)
+	}
+	if want := []string{"create", "dispatch", "wait", "persist", "prompt", "complete", "restore", "update", "tab"}; !reflect.DeepEqual(calls, want) {
+		t.Fatalf("resume calls = %v, want completed success effects %v", calls, want)
+	}
+}
+
 func TestResumeSessionCodexCompensatesCanonicalNameWhenOrdinaryPromptDeliveryFails(t *testing.T) {
 	setDetachedResumeTestGlobals(t, true)
 	resumePrompt = "start work only after the resume transaction commits"
@@ -962,7 +1004,7 @@ func TestWaitForResumedCodexDetectsFakeComposerInIsolatedTmux(t *testing.T) {
 	t.Cleanup(func() { tmux.KillSession(sessionName) })
 
 	fakeCodex := filepath.Join(t.TempDir(), "fake-codex")
-	if err := os.WriteFile(fakeCodex, []byte("#!/bin/sh\nprintf 'OpenAI Codex\\n/model to change\\n'\nsleep 10\n"), 0o755); err != nil {
+	if err := os.WriteFile(fakeCodex, []byte("#!/bin/sh\nprintf 'OpenAI Codex\\n/model to change\\n›\\n'\nsleep 10\n"), 0o755); err != nil {
 		t.Fatalf("write fake Codex: %v", err)
 	}
 	if err := tmux.SendCommand(sessionName, strconv.Quote(fakeCodex)); err != nil {
