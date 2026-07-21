@@ -141,10 +141,8 @@ type BuildMetrics struct {
 	BuildDurationSecs int     `yaml:"build_duration_secs,omitempty"`
 }
 
-// Constants for V2 schema
+// Constants for the canonical schema.
 const (
-	SchemaVersionV2 = "2.0"
-
 	// Project types
 	ProjectTypeFeature        = "feature"
 	ProjectTypeResearch       = "research"

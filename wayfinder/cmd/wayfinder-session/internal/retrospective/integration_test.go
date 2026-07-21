@@ -372,7 +372,7 @@ func createStatusFile(t *testing.T, dir string, currentWaypoint string) {
 	t.Helper()
 	now := time.Date(2024, time.January, 7, 10, 0, 0, 0, time.UTC)
 	projectStatus := &wayfinderstatus.StatusV2{
-		SchemaVersion:   wayfinderstatus.SchemaVersionV2,
+		SchemaVersion:   wayfinderstatus.SchemaVersion,
 		ProjectName:     "test-session-integration",
 		ProjectType:     wayfinderstatus.ProjectTypeFeature,
 		RiskLevel:       wayfinderstatus.RiskLevelS,

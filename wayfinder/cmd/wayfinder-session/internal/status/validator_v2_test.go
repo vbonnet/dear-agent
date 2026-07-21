@@ -23,7 +23,7 @@ func TestValidateV2(t *testing.T) {
 		{
 			name: "valid minimal status",
 			status: &StatusV2{
-				SchemaVersion:   SchemaVersionV2,
+				SchemaVersion:   SchemaVersion,
 				ProjectName:     "Test",
 				ProjectType:     ProjectTypeFeature,
 				RiskLevel:       RiskLevelM,
@@ -37,7 +37,7 @@ func TestValidateV2(t *testing.T) {
 		{
 			name: "whitespace-only project name",
 			status: &StatusV2{
-				SchemaVersion:   SchemaVersionV2,
+				SchemaVersion:   SchemaVersion,
 				ProjectName:     "  \t ",
 				ProjectType:     ProjectTypeFeature,
 				RiskLevel:       RiskLevelM,
@@ -81,7 +81,7 @@ func TestValidateV2(t *testing.T) {
 		{
 			name: "invalid project_type",
 			status: &StatusV2{
-				SchemaVersion:   SchemaVersionV2,
+				SchemaVersion:   SchemaVersion,
 				ProjectName:     "Test",
 				ProjectType:     "invalid-type",
 				RiskLevel:       RiskLevelM,
@@ -96,7 +96,7 @@ func TestValidateV2(t *testing.T) {
 		{
 			name: "invalid risk_level",
 			status: &StatusV2{
-				SchemaVersion:   SchemaVersionV2,
+				SchemaVersion:   SchemaVersion,
 				ProjectName:     "Test",
 				ProjectType:     ProjectTypeFeature,
 				RiskLevel:       "XXL",
@@ -111,7 +111,7 @@ func TestValidateV2(t *testing.T) {
 		{
 			name: "invalid lifecycle_state",
 			status: &StatusV2{
-				SchemaVersion:   SchemaVersionV2,
+				SchemaVersion:   SchemaVersion,
 				ProjectName:     "Test",
 				ProjectType:     ProjectTypeFeature,
 				RiskLevel:       RiskLevelM,
@@ -127,7 +127,7 @@ func TestValidateV2(t *testing.T) {
 		{
 			name: "lifecycle_state conflicts with status",
 			status: &StatusV2{
-				SchemaVersion:   SchemaVersionV2,
+				SchemaVersion:   SchemaVersion,
 				ProjectName:     "Test",
 				ProjectType:     ProjectTypeFeature,
 				RiskLevel:       RiskLevelM,
@@ -143,7 +143,7 @@ func TestValidateV2(t *testing.T) {
 		{
 			name: "invalid current_phase",
 			status: &StatusV2{
-				SchemaVersion:   SchemaVersionV2,
+				SchemaVersion:   SchemaVersion,
 				ProjectName:     "Test",
 				ProjectType:     ProjectTypeFeature,
 				RiskLevel:       RiskLevelM,
@@ -158,7 +158,7 @@ func TestValidateV2(t *testing.T) {
 		{
 			name: "completed without completion_date",
 			status: &StatusV2{
-				SchemaVersion:   SchemaVersionV2,
+				SchemaVersion:   SchemaVersion,
 				ProjectName:     "Test",
 				ProjectType:     ProjectTypeFeature,
 				RiskLevel:       RiskLevelM,
@@ -191,7 +191,7 @@ func TestValidateV2(t *testing.T) {
 func TestValidateV2RejectsIncompleteCompletedSession(t *testing.T) {
 	now := time.Now()
 	st := &StatusV2{
-		SchemaVersion:   SchemaVersionV2,
+		SchemaVersion:   SchemaVersion,
 		ProjectName:     "Test",
 		ProjectType:     ProjectTypeFeature,
 		RiskLevel:       RiskLevelM,
@@ -218,7 +218,7 @@ func TestValidateV2LifecycleMetadata(t *testing.T) {
 	newStatus := func(state string) *StatusV2 {
 		now := time.Now()
 		return &StatusV2{
-			SchemaVersion:   SchemaVersionV2,
+			SchemaVersion:   SchemaVersion,
 			ProjectName:     "Test",
 			ProjectType:     ProjectTypeFeature,
 			RiskLevel:       RiskLevelM,
@@ -270,7 +270,7 @@ func TestValidateV2RejectsUnsafeOrDuplicateSkipPhases(t *testing.T) {
 	newValid := func() *StatusV2 {
 		now := time.Now()
 		return &StatusV2{
-			SchemaVersion:   SchemaVersionV2,
+			SchemaVersion:   SchemaVersion,
 			ProjectName:     "test",
 			ProjectType:     ProjectTypeFeature,
 			RiskLevel:       RiskLevelM,
@@ -302,7 +302,7 @@ func TestValidateV2RejectsUnsafeOrDuplicateSkipPhases(t *testing.T) {
 func TestValidateV2RejectsActiveHistoryForConfiguredSkip(t *testing.T) {
 	now := time.Now()
 	st := &StatusV2{
-		SchemaVersion:   SchemaVersionV2,
+		SchemaVersion:   SchemaVersion,
 		ProjectName:     "test",
 		ProjectType:     ProjectTypeFeature,
 		RiskLevel:       RiskLevelM,
@@ -327,7 +327,7 @@ func TestValidateV2RejectsActiveHistoryForConfiguredSkip(t *testing.T) {
 func TestValidateV2RejectsUnresolvedSkippedCurrentWaypoint(t *testing.T) {
 	now := time.Now()
 	st := &StatusV2{
-		SchemaVersion:   SchemaVersionV2,
+		SchemaVersion:   SchemaVersion,
 		ProjectName:     "test",
 		ProjectType:     ProjectTypeFeature,
 		RiskLevel:       RiskLevelM,
@@ -348,7 +348,7 @@ func TestValidateV2RejectsUnresolvedSkippedCurrentWaypoint(t *testing.T) {
 func TestValidateV2RejectsDuplicateWaypointHistory(t *testing.T) {
 	now := time.Now()
 	st := &StatusV2{
-		SchemaVersion:   SchemaVersionV2,
+		SchemaVersion:   SchemaVersion,
 		ProjectName:     "test",
 		ProjectType:     ProjectTypeFeature,
 		RiskLevel:       RiskLevelM,
@@ -371,7 +371,7 @@ func TestValidateV2RejectsInvalidWaypointOutcome(t *testing.T) {
 	now := time.Now()
 	invalidOutcome := "typo"
 	st := &StatusV2{
-		SchemaVersion:   SchemaVersionV2,
+		SchemaVersion:   SchemaVersion,
 		ProjectName:     "test",
 		ProjectType:     ProjectTypeFeature,
 		RiskLevel:       RiskLevelM,
@@ -392,7 +392,7 @@ func TestValidateV2RejectsInvalidWaypointOutcome(t *testing.T) {
 func TestValidateV2RejectsSkippedMandatoryWaypoint(t *testing.T) {
 	now := time.Now()
 	st := &StatusV2{
-		SchemaVersion:   SchemaVersionV2,
+		SchemaVersion:   SchemaVersion,
 		ProjectName:     "test",
 		ProjectType:     ProjectTypeFeature,
 		RiskLevel:       RiskLevelM,
@@ -413,7 +413,7 @@ func TestValidateV2RejectsSkippedMandatoryWaypoint(t *testing.T) {
 func TestValidateV2RejectsMissingMandatoryPredecessors(t *testing.T) {
 	now := time.Now()
 	st := &StatusV2{
-		SchemaVersion:   SchemaVersionV2,
+		SchemaVersion:   SchemaVersion,
 		ProjectName:     "test",
 		ProjectType:     ProjectTypeFeature,
 		RiskLevel:       RiskLevelM,
@@ -434,7 +434,7 @@ func TestValidateV2RejectsMissingMandatoryPredecessors(t *testing.T) {
 func TestValidateV2RejectsMissingHistoryForLaterWaypoint(t *testing.T) {
 	now := time.Now()
 	st := &StatusV2{
-		SchemaVersion:   SchemaVersionV2,
+		SchemaVersion:   SchemaVersion,
 		ProjectName:     "test",
 		ProjectType:     ProjectTypeFeature,
 		RiskLevel:       RiskLevelM,
@@ -453,7 +453,7 @@ func TestValidateV2RejectsMissingHistoryForLaterWaypoint(t *testing.T) {
 func TestValidateV2RejectsHistoryAheadOfCurrentWaypoint(t *testing.T) {
 	now := time.Now()
 	st := &StatusV2{
-		SchemaVersion:   SchemaVersionV2,
+		SchemaVersion:   SchemaVersion,
 		ProjectName:     "test",
 		ProjectType:     ProjectTypeFeature,
 		RiskLevel:       RiskLevelM,
@@ -475,7 +475,7 @@ func TestValidateV2RejectsHistoryAheadOfCurrentWaypoint(t *testing.T) {
 func TestValidateV2AllowsConfiguredSkippedPredecessors(t *testing.T) {
 	now := time.Now()
 	st := &StatusV2{
-		SchemaVersion:   SchemaVersionV2,
+		SchemaVersion:   SchemaVersion,
 		ProjectName:     "lite",
 		ProjectType:     ProjectTypeFeature,
 		RiskLevel:       RiskLevelS,
@@ -554,7 +554,7 @@ func TestValidatePhaseHistory(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			status := &StatusV2{
-				SchemaVersion:   SchemaVersionV2,
+				SchemaVersion:   SchemaVersion,
 				ProjectName:     "Test",
 				ProjectType:     ProjectTypeFeature,
 				RiskLevel:       RiskLevelM,
@@ -711,7 +711,7 @@ func TestValidateRoadmap(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			status := &StatusV2{
-				SchemaVersion:   SchemaVersionV2,
+				SchemaVersion:   SchemaVersion,
 				ProjectName:     "Test",
 				ProjectType:     ProjectTypeFeature,
 				RiskLevel:       RiskLevelM,
@@ -871,7 +871,7 @@ func TestValidateQualityMetrics(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			status := &StatusV2{
-				SchemaVersion:   SchemaVersionV2,
+				SchemaVersion:   SchemaVersion,
 				ProjectName:     "Test",
 				ProjectType:     ProjectTypeFeature,
 				RiskLevel:       RiskLevelM,

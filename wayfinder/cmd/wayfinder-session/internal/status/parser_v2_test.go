@@ -89,7 +89,7 @@ func TestRoundTrip(t *testing.T) {
 
 	// Create a complex status with all fields
 	status := &StatusV2{
-		SchemaVersion:   SchemaVersionV2,
+		SchemaVersion:   SchemaVersion,
 		ProjectName:     "Complex Test",
 		ProjectType:     ProjectTypeFeature,
 		RiskLevel:       RiskLevelL,
@@ -405,8 +405,8 @@ func completedHistoryBefore(target string, now time.Time) []WaypointHistory {
 func TestNewStatusV2(t *testing.T) {
 	status := NewStatusV2("Test Project", ProjectTypeResearch, RiskLevelXS)
 
-	if status.SchemaVersion != SchemaVersionV2 {
-		t.Errorf("expected schema_version '%s', got '%s'", SchemaVersionV2, status.SchemaVersion)
+	if status.SchemaVersion != SchemaVersion {
+		t.Errorf("expected schema_version '%s', got '%s'", SchemaVersion, status.SchemaVersion)
 	}
 	if status.ProjectName != "Test Project" {
 		t.Errorf("expected project_name 'Test Project', got '%s'", status.ProjectName)

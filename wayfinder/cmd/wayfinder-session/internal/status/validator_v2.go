@@ -138,8 +138,8 @@ func validateEnums(status *StatusV2) error {
 	var errors []string
 
 	// Validate schema_version
-	if status.SchemaVersion != SchemaVersionV2 {
-		errors = append(errors, fmt.Sprintf("schema_version must be '%s', got '%s'", SchemaVersionV2, status.SchemaVersion))
+	if status.SchemaVersion != SchemaVersion {
+		errors = append(errors, fmt.Sprintf("schema_version must be '%s', got '%s'", SchemaVersion, status.SchemaVersion))
 	}
 
 	// Validate project_type

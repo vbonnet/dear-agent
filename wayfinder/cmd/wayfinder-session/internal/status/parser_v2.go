@@ -350,7 +350,7 @@ func extractV2Frontmatter(content string) (string, error) {
 func NewStatusV2(projectName, projectType, riskLevel string) *StatusV2 {
 	now := time.Now()
 	return &StatusV2{
-		SchemaVersion:   SchemaVersionV2,
+		SchemaVersion:   SchemaVersion,
 		ProjectName:     projectName,
 		ProjectType:     projectType,
 		RiskLevel:       riskLevel,
