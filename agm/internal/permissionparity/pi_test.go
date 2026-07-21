@@ -51,6 +51,9 @@ func TestPiPolicyMatchingIsAnchoredAndMapsNativeTools(t *testing.T) {
 		{name: "bash exact rejects suffix", allow: "Bash(git status)", call: PiToolCall{ToolName: "bash", Input: map[string]any{"command": "git status --short"}}},
 		{name: "bash wildcard", allow: "Bash(git status *)", call: PiToolCall{ToolName: "bash", Input: map[string]any{"command": "git status --short"}}, want: true},
 		{name: "claude colon wildcard", allow: "Bash(git:*)", call: PiToolCall{ToolName: "bash", Input: map[string]any{"command": "git log -1"}}, want: true},
+		{name: "colon wildcard rejects chained command", allow: "Bash(git:*)", call: PiToolCall{ToolName: "bash", Input: map[string]any{"command": "git status; rm -rf /tmp/nope"}}},
+		{name: "wildcard rejects command substitution", allow: "Bash(git:*)", call: PiToolCall{ToolName: "bash", Input: map[string]any{"command": "git show $(danger)"}}},
+		{name: "quoted shell character remains literal", allow: "Bash(git:*)", call: PiToolCall{ToolName: "bash", Input: map[string]any{"command": "git log --format='subject; body'"}}, want: true},
 		{name: "read path", allow: "Read(/work/**)", call: PiToolCall{ToolName: "read", Input: map[string]any{"path": "/work/pkg/file.go"}}, want: true},
 		{name: "find maps glob", allow: "Glob(/work/**)", call: PiToolCall{ToolName: "find", Input: map[string]any{"path": "/work/pkg"}}, want: true},
 		{name: "grep maps grep", allow: "Grep(/work/**)", call: PiToolCall{ToolName: "grep", Input: map[string]any{"path": "/work/pkg"}}, want: true},
@@ -181,6 +184,8 @@ const source = readFileSync(process.argv[1], "utf8");
 const mod = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
 const cases = [
   ["default", ["Bash(git status)"], {toolName:"bash", input:{command:"git status"}}, false, "allow"],
+  ["default", ["Bash(git:*)"], {toolName:"bash", input:{command:"git status; rm -rf /tmp/nope"}}, true, "ask"],
+  ["default", ["Bash(git:*)"], {toolName:"bash", input:{command:"git log --format='subject; body'"}}, false, "allow"],
   ["default", [], {toolName:"bash", input:{command:"rm -rf nope"}}, false, "block"],
   ["plan", ["Bash(git status)"], {toolName:"bash", input:{command:"git status"}}, true, "block"],
   ["plan", ["PluginDeploy"], {toolName:"plugin_deploy", input:{}}, true, "block"],

@@ -276,13 +276,11 @@ func piResumeTargetState(sessionID SessionID, tmuxName string) (bool, bool, erro
 	if err != nil {
 		return true, false, fmt.Errorf("check competing harness liveness: %w", err)
 	}
-	if verdict.HarnessAlive {
-		return true, false, fmt.Errorf("refusing to resume Pi session %q into a tmux pane containing another live harness (pane tree: %s)", sessionID, verdict.Evidence)
+	action, err := DecidePiPaneResume(false, verdict)
+	if err != nil {
+		return true, false, fmt.Errorf("refusing to resume Pi session %q: %w", sessionID, err)
 	}
-	if !verdict.RestartableShell {
-		return true, false, fmt.Errorf("refusing to resume Pi session %q because its tmux pane is not a proven restartable shell (pane tree: %s)", sessionID, verdict.Evidence)
-	}
-	return true, false, nil
+	return true, action == PiPanePreserve, nil
 }
 
 // TerminateSession asks Pi to exit and removes the adapter's metadata record.

@@ -73,7 +73,11 @@ exit 1
 	}
 	t.Cleanup(func() { execCommandContext = originalExec })
 
-	client := &Client{Timeout: 5 * time.Second}
+	// Process startup can be delayed well beyond five seconds while the full
+	// repository test matrix is saturating the host. Preserve ample separation
+	// from the production timeout so this command-failure assertion observes the
+	// injected exit status instead of winning a scheduler race with the deadline.
+	client := &Client{Timeout: 30 * time.Second}
 	err := client.StartRemoteControl(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "exit status 1") {
 		t.Fatalf("StartRemoteControl error = %v, want command failure", err)

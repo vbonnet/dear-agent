@@ -604,6 +604,8 @@ type resumeSessionRuntime struct {
 	deliverPrompt     func(string, string, string, bool) error
 	attachTmux        func(string) error
 	attach            func(string) error
+	checkProcess      func(string, string, string) (bool, error)
+	checkLiveness     func(string, string) (tmux.PaneLiveness, error)
 }
 
 type createdResumeTmux struct {
@@ -638,7 +640,9 @@ func realResumeSessionRuntime(ctx context.Context) resumeSessionRuntime {
 		deliverPrompt: func(sessionName, promptText, promptFile string, deletePromptFile bool) error {
 			return sendPostResumePrompt(ctx, sessionName, promptText, promptFile, deletePromptFile)
 		},
-		attachTmux: tmux.AttachSession,
+		attachTmux:    tmux.AttachSession,
+		checkProcess:  tmux.CheckProcessInPaneTree,
+		checkLiveness: tmux.CheckPaneLiveness,
 	}
 }
 
@@ -803,7 +807,10 @@ func resumeSessionTransactionWithRuntime(ctx context.Context, adapter *dolt.Adap
 		}
 		return nil, err
 	}
-	sendCommands := shouldSendResumeCommands(health.TmuxExists)
+	sendCommands, err := prepareHarnessResumeCommandDelivery(ctx, runtime, adapter, m, harnessName, health, createdTmux)
+	if err != nil {
+		return nil, err
+	}
 	if err := runHarnessResume(ctx, adapter, m, harnessName, health, sendCommands, runtime); err != nil {
 		if createdTmux.owned() {
 			return nil, rollbackCreatedResumeTmux(ctx, runtime, adapter, m, createdTmux, resumeTmuxNameChange{}, err)
@@ -847,6 +854,51 @@ func resumeSessionTransactionWithRuntime(ctx context.Context, adapter *dolt.Adap
 	completePromptlessResumeTmuxOwnership(completionCtx, promptMayHaveStarted, runtime, adapter, nameChange)
 	attachment.promptMayHaveStarted = promptMayHaveStarted
 	return attachment, nil
+}
+
+func prepareHarnessResumeCommandDelivery(
+	ctx context.Context,
+	runtime resumeSessionRuntime,
+	adapter *dolt.Adapter,
+	m *manifest.Manifest,
+	harnessName string,
+	health *HealthStatus,
+	createdTmux createdResumeTmux,
+) (bool, error) {
+	sendCommands, err := shouldSendHarnessResumeCommands(harnessName, health, runtime)
+	if err != nil && createdTmux.owned() {
+		return false, rollbackCreatedResumeTmux(ctx, runtime, adapter, m, createdTmux, resumeTmuxNameChange{}, err)
+	}
+	return sendCommands, err
+}
+
+func shouldSendHarnessResumeCommands(harnessName string, health *HealthStatus, runtime resumeSessionRuntime) (bool, error) {
+	if shouldSendResumeCommands(health.TmuxExists) {
+		return true, nil
+	}
+	if agent.NormalizeHarnessName(harnessName) != "pi-cli" {
+		return false, nil
+	}
+	if runtime.checkProcess == nil || runtime.checkLiveness == nil {
+		return false, fmt.Errorf("resume runtime does not provide Pi pane liveness classification")
+	}
+	socketPath := tmux.GetSocketPath()
+	exactPi, err := runtime.checkProcess(health.TmuxSessionName, socketPath, "pi")
+	if err != nil {
+		return false, fmt.Errorf("check exact Pi process liveness: %w", err)
+	}
+	if exactPi {
+		return false, nil
+	}
+	verdict, err := runtime.checkLiveness(health.TmuxSessionName, socketPath)
+	if err != nil {
+		return false, fmt.Errorf("classify Pi resume pane: %w", err)
+	}
+	action, err := agent.DecidePiPaneResume(false, verdict)
+	if err != nil {
+		return false, fmt.Errorf("refusing to resume Pi session %q: %w", health.TmuxSessionName, err)
+	}
+	return action == agent.PiPaneRelaunch, nil
 }
 
 func completeSubmittedResumeTmuxOwnership(ctx context.Context, promptMayHaveStarted bool, runtime resumeSessionRuntime, adapter *dolt.Adapter, nameChange resumeTmuxNameChange) {
