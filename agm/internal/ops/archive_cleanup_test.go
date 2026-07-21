@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestErrStr(t *testing.T) {
@@ -159,7 +161,7 @@ func TestForceDeleteBranch_UnmergedBranch(t *testing.T) {
 	}
 
 	// Verify branch is gone
-	cmd := exec.Command("git", "-C", repoDir, "branch", "--list", "unmerged-branch")
+	cmd := gittest.Command(t, repoDir, "branch", "--list", "unmerged-branch")
 	output, _ := cmd.Output()
 	if strings.TrimSpace(string(output)) != "" {
 		t.Error("Branch should be deleted after forceDeleteBranch")
@@ -212,13 +214,13 @@ func TestCleanupAfterArchive_SandboxBranchDeletedWithoutInferringSessionBranch(t
 
 	// The system-owned sandbox branch is positively attributed by session ID,
 	// while the merely name-matching session branch must be preserved.
-	cmd := exec.Command("git", "-C", repoDir, "branch", "--list", "my-session")
+	cmd := gittest.Command(t, repoDir, "branch", "--list", "my-session")
 	output, _ := cmd.Output()
 	if strings.TrimSpace(string(output)) == "" {
 		t.Error("Session branch should be preserved without worktree ownership")
 	}
 
-	cmd = exec.Command("git", "-C", repoDir, "branch", "--list", sandboxBranch)
+	cmd = gittest.Command(t, repoDir, "branch", "--list", sandboxBranch)
 	output, _ = cmd.Output()
 	if strings.TrimSpace(string(output)) != "" {
 		t.Error("Sandbox branch should be deleted")
@@ -510,14 +512,7 @@ func TestCleanupAfterArchive_PreservesBranchWhenWorktreeCannotBeClassified(t *te
 // runGit is a test helper that runs a git command in the given directory.
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	allArgs := append([]string{"-C", dir}, args...)
-	cmd := exec.Command("git", allArgs...)
-	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=Test",
-		"GIT_AUTHOR_EMAIL=test@test.com",
-		"GIT_COMMITTER_NAME=Test",
-		"GIT_COMMITTER_EMAIL=test@test.com",
-	)
+	cmd := gittest.Command(t, dir, args...)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v failed: %v\n%s", args, err, string(output))
 	}

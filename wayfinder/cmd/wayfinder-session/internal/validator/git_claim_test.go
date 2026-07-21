@@ -2,10 +2,11 @@ package validator
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestValidateGitCommitStatus(t *testing.T) {
@@ -105,14 +106,10 @@ func TestValidateGitCommitStatus(t *testing.T) {
 			// Create temp directory as git repo
 			tmpDir := t.TempDir()
 
-			// Initialize git repo
-			if err := exec.Command("git", "init", tmpDir).Run(); err != nil {
+			// Initialize git repo (the sandbox also supplies the commit identity)
+			if err := gittest.Command(t, tmpDir, "init", tmpDir).Run(); err != nil {
 				t.Fatalf("failed to init git repo: %v", err)
 			}
-
-			// Configure git user for commits
-			exec.Command("git", "-C", tmpDir, "config", "user.email", "test@example.com").Run()
-			exec.Command("git", "-C", tmpDir, "config", "user.name", "Test User").Run()
 
 			// Create files
 			for _, fileName := range tt.files {
@@ -133,8 +130,8 @@ func TestValidateGitCommitStatus(t *testing.T) {
 
 			// Commit files if requested
 			if tt.gitCommit {
-				exec.Command("git", "-C", tmpDir, "add", ".").Run()
-				exec.Command("git", "-C", tmpDir, "commit", "-m", "test commit").Run()
+				gittest.Command(t, tmpDir, "add", ".").Run()
+				gittest.Command(t, tmpDir, "commit", "-m", "test commit").Run()
 			}
 
 			// Run validation
@@ -177,16 +174,14 @@ func TestValidateGitCommitStatus_PartiallyCommitted(t *testing.T) {
 	// Test the exact scenario from Instance 2: some files committed, some not
 	tmpDir := t.TempDir()
 
-	// Initialize git repo
-	exec.Command("git", "init", tmpDir).Run()
-	exec.Command("git", "-C", tmpDir, "config", "user.email", "test@example.com").Run()
-	exec.Command("git", "-C", tmpDir, "config", "user.name", "Test User").Run()
+	// Initialize git repo (the sandbox also supplies the commit identity)
+	gittest.Command(t, tmpDir, "init", tmpDir).Run()
 
 	// Create and commit WAYFINDER-STATUS.md
 	statusPath := filepath.Join(tmpDir, "WAYFINDER-STATUS.md")
 	os.WriteFile(statusPath, []byte("status"), 0644)
-	exec.Command("git", "-C", tmpDir, "add", "WAYFINDER-STATUS.md").Run()
-	exec.Command("git", "-C", tmpDir, "commit", "-m", "commit status").Run()
+	gittest.Command(t, tmpDir, "add", "WAYFINDER-STATUS.md").Run()
+	gittest.Command(t, tmpDir, "commit", "-m", "commit status").Run()
 
 	// Create phase deliverables but DON'T commit
 	phaseDocs := []string{
@@ -272,16 +267,14 @@ func TestValidateGitCommitStatus_RenamedTrackedSource(t *testing.T) {
 func TestGetUncommittedFilesInProjectDir(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Initialize git repo
-	exec.Command("git", "init", tmpDir).Run()
-	exec.Command("git", "-C", tmpDir, "config", "user.email", "test@example.com").Run()
-	exec.Command("git", "-C", tmpDir, "config", "user.name", "Test User").Run()
+	// Initialize git repo (the sandbox also supplies the commit identity)
+	gittest.Command(t, tmpDir, "init", tmpDir).Run()
 
 	// Create committed file
 	committedPath := filepath.Join(tmpDir, "committed.txt")
 	os.WriteFile(committedPath, []byte("committed"), 0644)
-	exec.Command("git", "-C", tmpDir, "add", "committed.txt").Run()
-	exec.Command("git", "-C", tmpDir, "commit", "-m", "initial").Run()
+	gittest.Command(t, tmpDir, "add", "committed.txt").Run()
+	gittest.Command(t, tmpDir, "commit", "-m", "initial").Run()
 
 	// Create untracked files
 	untrackedPath := filepath.Join(tmpDir, "untracked.txt")

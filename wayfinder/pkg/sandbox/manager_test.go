@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func chdirOutsideGitRepository(t *testing.T) {
@@ -164,8 +166,6 @@ func TestCleanupSandboxPreservesLockedWorktreeAndMetadata(t *testing.T) {
 	}
 
 	gitSandboxTestRun(t, "init", "-q", "-b", "main", repo)
-	gitSandboxTestRun(t, "-C", repo, "config", "user.name", "Wayfinder Test")
-	gitSandboxTestRun(t, "-C", repo, "config", "user.email", "wayfinder@example.invalid")
 	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("sandbox test\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -212,9 +212,12 @@ func TestCleanupSandboxPreservesLockedWorktreeAndMetadata(t *testing.T) {
 	}
 }
 
+// gitSandboxTestRun runs a hermetic Git command. The arguments carry their own
+// repository selector (`-C <repo>` or a path operand), so the command keeps
+// running in the test process working directory.
 func gitSandboxTestRun(t *testing.T, args ...string) string {
 	t.Helper()
-	out, err := exec.Command("git", args...).CombinedOutput()
+	out, err := gittest.Command(t, "", args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v: %v: %s", args, err, out)
 	}
@@ -296,8 +299,6 @@ func TestSandboxGitWorktreeLifecycleIsIsolated(t *testing.T) {
 	repo := filepath.Join(base, "repo")
 	runSandboxTestGit(t, "init", "-q", "-b", "main", repo)
 	repo = canonicalSandboxTestPath(t, repo)
-	runSandboxTestGit(t, "-C", repo, "config", "user.name", "Wayfinder Sandbox Test")
-	runSandboxTestGit(t, "-C", repo, "config", "user.email", "sandbox@example.invalid")
 	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("sandbox test\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -356,11 +357,16 @@ func canonicalSandboxTestPath(t *testing.T, path string) string {
 	return canonical
 }
 
+// runSandboxTestGit runs a hermetic Git command under a timeout in its own
+// process group. Like gitSandboxTestRun, the arguments carry their own
+// repository selector.
 func runSandboxTestGit(t *testing.T, args ...string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", args...)
+	base := gittest.Command(t, "", args...)
+	cmd := exec.CommandContext(ctx, base.Path, base.Args[1:]...)
+	cmd.Dir, cmd.Env = base.Dir, base.Env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {

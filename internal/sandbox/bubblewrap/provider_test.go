@@ -13,6 +13,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/vbonnet/dear-agent/internal/gittest"
 	"github.com/vbonnet/dear-agent/internal/sandbox"
 )
 
@@ -251,9 +252,7 @@ func newLockedBubblewrapWorktree(t *testing.T) (repo, mergedDir, upperDir, workD
 	mergedDir = filepath.Join(workspace, "merged")
 	upperDir = filepath.Join(workspace, "upper")
 	workDir = filepath.Join(workspace, "work")
-	runBubblewrapGit(t, "", "init", "-q", "-b", "main", repo)
-	runBubblewrapGit(t, repo, "config", "user.name", "Bubblewrap Test")
-	runBubblewrapGit(t, repo, "config", "user.email", "bubblewrap@example.invalid")
+	runBubblewrapGit(t, base, "init", "-q", "-b", "main", repo)
 	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("locked provider cleanup\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -269,15 +268,11 @@ func newLockedBubblewrapWorktree(t *testing.T) (repo, mergedDir, upperDir, workD
 func runBubblewrapGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	commandArgs := slices.Clone(args)
-	if dir != "" {
-		commandArgs = append([]string{"-C", dir}, commandArgs...)
-	}
-	cmd := exec.Command("git", commandArgs...)
-	out, err := cmd.CombinedOutput()
+	out, err := gittest.Output(t, dir, commandArgs...)
 	if err != nil {
-		t.Fatalf("git %s: %v: %s", strings.Join(commandArgs, " "), err, strings.TrimSpace(string(out)))
+		t.Fatalf("git %s: %v: %s", strings.Join(commandArgs, " "), err, strings.TrimSpace(out))
 	}
-	return string(out)
+	return out
 }
 
 // ---- buildBwrapArgs unit tests (cross-platform, no exec) ----

@@ -1,10 +1,10 @@
 package session
 
 import (
-	"os"
-	"os/exec"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestGitCache_GetSet(t *testing.T) {
@@ -127,12 +127,11 @@ func TestGetCurrentBranchCached(t *testing.T) {
 	// Use a temp git repo as a known git directory
 	gitDir := t.TempDir()
 	// Initialize a git repo for the test
-	cmd := exec.Command("git", "init", gitDir)
+	cmd := gittest.Command(t, gitDir, "init", gitDir)
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("failed to init git repo: %v", err)
 	}
-	cmd = exec.Command("git", "-C", gitDir, "commit", "--allow-empty", "-m", "init")
-	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com", "GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com")
+	cmd = gittest.Command(t, gitDir, "commit", "--allow-empty", "-m", "init")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("failed to create initial commit: %v", err)
 	}
@@ -166,12 +165,11 @@ func TestGetCurrentBranchCached(t *testing.T) {
 
 func TestGetUncommittedCountCached(t *testing.T) {
 	gitDir := t.TempDir()
-	cmd := exec.Command("git", "init", gitDir)
+	cmd := gittest.Command(t, gitDir, "init", gitDir)
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("failed to init git repo: %v", err)
 	}
-	cmd = exec.Command("git", "-C", gitDir, "commit", "--allow-empty", "-m", "init")
-	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com", "GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com")
+	cmd = gittest.Command(t, gitDir, "commit", "--allow-empty", "-m", "init")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("failed to create initial commit: %v", err)
 	}

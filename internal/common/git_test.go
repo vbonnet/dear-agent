@@ -2,8 +2,9 @@ package common
 
 import (
 	"os"
-	"os/exec"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestGetCurrentCommit(t *testing.T) {
@@ -11,13 +12,13 @@ func TestGetCurrentCommit(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	_, cleanup := setupGitRepo(t)
+	repoDir, cleanup := setupGitRepo(t)
 	defer cleanup()
 
 	// Create initial commit
 	os.WriteFile("test.txt", []byte("test"), 0644)
-	exec.Command("git", "add", "test.txt").Run()
-	exec.Command("git", "commit", "-m", "initial commit").Run()
+	gittest.Command(t, repoDir, "add", "test.txt").Run()
+	gittest.Command(t, repoDir, "commit", "-m", "initial commit").Run()
 
 	commit, err := GetCurrentCommit()
 	if err != nil {
@@ -45,13 +46,13 @@ func TestGetCurrentBranch(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	_, cleanup := setupGitRepo(t)
+	repoDir, cleanup := setupGitRepo(t)
 	defer cleanup()
 
 	// Create initial commit (branch won't exist until first commit)
 	os.WriteFile("test.txt", []byte("test"), 0644)
-	exec.Command("git", "add", "test.txt").Run()
-	exec.Command("git", "commit", "-m", "initial commit").Run()
+	gittest.Command(t, repoDir, "add", "test.txt").Run()
+	gittest.Command(t, repoDir, "commit", "-m", "initial commit").Run()
 
 	branch, err := GetCurrentBranch()
 	if err != nil {

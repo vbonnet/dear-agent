@@ -2,17 +2,16 @@ package main
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestStopSessionGuard_CleanRepo(t *testing.T) {
 	// Create a temp git repo
 	dir := t.TempDir()
 	mustRun(t, dir, "git", "init")
-	mustRun(t, dir, "git", "config", "user.email", "test@test.com")
-	mustRun(t, dir, "git", "config", "user.name", "Test")
 
 	// Create and commit a file so repo is clean
 	os.WriteFile(filepath.Join(dir, "README.md"), []byte("hello"), 0o644)
@@ -23,7 +22,7 @@ func TestStopSessionGuard_CleanRepo(t *testing.T) {
 	// We can't easily test the full binary, but we can test the check functions
 	// by calling them directly
 	t.Run("git status clean", func(t *testing.T) {
-		cmd := exec.Command("git", "-C", dir, "status", "--porcelain", ".")
+		cmd := gittest.Command(t, dir, "status", "--porcelain", ".")
 		out, err := cmd.Output()
 		if err != nil {
 			t.Fatalf("git status failed: %v", err)
@@ -35,7 +34,7 @@ func TestStopSessionGuard_CleanRepo(t *testing.T) {
 
 	t.Run("git status dirty", func(t *testing.T) {
 		os.WriteFile(filepath.Join(dir, "new.txt"), []byte("dirty"), 0o644)
-		cmd := exec.Command("git", "-C", dir, "status", "--porcelain", ".")
+		cmd := gittest.Command(t, dir, "status", "--porcelain", ".")
 		out, err := cmd.Output()
 		if err != nil {
 			t.Fatalf("git status failed: %v", err)
@@ -48,8 +47,10 @@ func TestStopSessionGuard_CleanRepo(t *testing.T) {
 
 func mustRun(t *testing.T, dir string, name string, args ...string) {
 	t.Helper()
-	cmd := exec.Command(name, args...)
-	cmd.Dir = dir
+	if name != "git" {
+		t.Fatalf("mustRun only runs git through the hermetic sandbox, got %q", name)
+	}
+	cmd := gittest.Command(t, dir, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("%s %v failed: %v\n%s", name, args, err, out)
 	}

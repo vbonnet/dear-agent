@@ -2,10 +2,10 @@ package context
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
+	"github.com/vbonnet/dear-agent/internal/gittest"
 	"github.com/vbonnet/dear-agent/internal/testutil"
 )
 
@@ -19,13 +19,13 @@ func TestDetectContext_GitRepo(t *testing.T) {
 	t.Chdir(tmpDir)
 
 	// Initialize git repo
-	cmd := exec.Command("git", "init")
+	cmd := gittest.Command(t, tmpDir, "init")
 	if err := cmd.Run(); err != nil {
 		t.Skip("git not available, skipping test")
 	}
 
 	// Set git remote with SSH URL
-	cmd = exec.Command("git", "remote", "add", "origin", "git@github.com:user/my-awesome-project.git")
+	cmd = gittest.Command(t, tmpDir, "remote", "add", "origin", "git@github.com:user/my-awesome-project.git")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("failed to add git remote: %v", err)
 	}
@@ -46,15 +46,14 @@ func TestDetectContext_GitRepo(t *testing.T) {
 func TestDetectContext_GitHTTPS(t *testing.T) {
 	tmpDir := testutil.SetupTempDir(t)
 
-
 	t.Chdir(tmpDir)
 
-	cmd := exec.Command("git", "init")
+	cmd := gittest.Command(t, tmpDir, "init")
 	if err := cmd.Run(); err != nil {
 		t.Skip("git not available, skipping test")
 	}
 
-	cmd = exec.Command("git", "remote", "add", "origin", "https://github.com/user/another-repo.git")
+	cmd = gittest.Command(t, tmpDir, "remote", "add", "origin", "https://github.com/user/another-repo.git")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("failed to add git remote: %v", err)
 	}
@@ -79,7 +78,6 @@ func TestDetectContext_DirectoryFallback(t *testing.T) {
 	if err := os.MkdirAll(testDir, 0755); err != nil {
 		t.Fatalf("failed to create test directory: %v", err)
 	}
-
 
 	t.Chdir(testDir)
 
@@ -182,7 +180,6 @@ func TestCleanName(t *testing.T) {
 func TestGetGitRepoName_NoGitRepo(t *testing.T) {
 	tmpDir := testutil.SetupTempDir(t)
 
-
 	t.Chdir(tmpDir)
 
 	// Should return error or empty string when not in a git repo
@@ -196,15 +193,14 @@ func TestGetGitRepoName_NoGitRepo(t *testing.T) {
 func TestGetGitRepoName_WithGitSuffix(t *testing.T) {
 	tmpDir := testutil.SetupTempDir(t)
 
-
 	t.Chdir(tmpDir)
 
-	cmd := exec.Command("git", "init")
+	cmd := gittest.Command(t, tmpDir, "init")
 	if err := cmd.Run(); err != nil {
 		t.Skip("git not available, skipping test")
 	}
 
-	cmd = exec.Command("git", "remote", "add", "origin", "https://github.com/user/repo.git")
+	cmd = gittest.Command(t, tmpDir, "remote", "add", "origin", "https://github.com/user/repo.git")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("failed to add git remote: %v", err)
 	}

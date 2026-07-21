@@ -3,11 +3,12 @@ package deploy
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // stubBuild swaps buildBinary for the duration of a test. The stub writes the
@@ -125,10 +126,10 @@ func TestAtomicInstall_FailsLoudOnUnstamped(t *testing.T) {
 func TestAtomicInstall_LinkedWorktreeRetriesCleanCloneForUnstampedBuild(t *testing.T) {
 	repo, _, headSha := gitRepo(t)
 	linked := filepath.Join(t.TempDir(), "linked")
-	if out, err := exec.Command("git", "-C", repo, "worktree", "add", "--detach", linked, "HEAD").CombinedOutput(); err != nil {
+	if out, err := gittest.Output(t, repo, "worktree", "add", "--detach", linked, "HEAD"); err != nil {
 		t.Fatalf("create linked worktree: %v\n%s", err, out)
 	}
-	t.Cleanup(func() { _ = exec.Command("git", "-C", repo, "worktree", "remove", "--force", linked).Run() })
+	t.Cleanup(func() { _ = gittest.Command(t, repo, "worktree", "remove", "--force", linked).Run() })
 
 	origBuild, origFallback, origVersion := buildBinary, buildFromCleanClone, readBinaryVersion
 	buildBinary = func(_, _, outPath string) error { return os.WriteFile(outPath, []byte("unstamped"), 0o644) }
