@@ -425,27 +425,63 @@ func scriptHeredocMarker(value string) string {
 		if markerStart < len(value) && value[markerStart] == '-' {
 			markerStart++
 		}
-		markerQuote := byte(0)
-		if markerStart < len(value) && (value[markerStart] == '\'' || value[markerStart] == '"') {
-			markerQuote = value[markerStart]
-			markerStart++
+		if marker := scriptHeredocWord(value, markerStart); marker != "" {
+			return marker
 		}
-		markerEnd := markerStart
-		for markerEnd < len(value) && (value[markerEnd] == '_' ||
-			value[markerEnd] >= 'A' && value[markerEnd] <= 'Z' ||
-			value[markerEnd] >= 'a' && value[markerEnd] <= 'z' ||
-			markerEnd > markerStart && value[markerEnd] >= '0' && value[markerEnd] <= '9') {
-			markerEnd++
-		}
-		if markerEnd == markerStart || markerStart < len(value) && value[markerStart] >= '0' && value[markerStart] <= '9' {
-			continue
-		}
-		if markerQuote != 0 && (markerEnd >= len(value) || value[markerEnd] != markerQuote) {
-			continue
-		}
-		return value[markerStart:markerEnd]
 	}
 	return ""
+}
+
+func scriptHeredocWord(value string, start int) string {
+	for start < len(value) && shellHorizontalSpace(value[start]) {
+		start++
+	}
+	var marker strings.Builder
+	quote := byte(0)
+	escaped := false
+	for index := start; index < len(value); index++ {
+		current := value[index]
+		if escaped {
+			marker.WriteByte(current)
+			escaped = false
+			continue
+		}
+		if current == '\\' && quote != '\'' {
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			if current == quote {
+				quote = 0
+			} else {
+				marker.WriteByte(current)
+			}
+			continue
+		}
+		if current == '\'' || current == '"' {
+			quote = current
+			continue
+		}
+		if heredocWordBoundary(current) {
+			break
+		}
+		marker.WriteByte(current)
+	}
+	if quote != 0 {
+		return ""
+	}
+	if escaped {
+		marker.WriteByte('\\')
+	}
+	return marker.String()
+}
+
+func shellHorizontalSpace(value byte) bool {
+	return value == ' ' || value == '\t'
+}
+
+func heredocWordBoundary(value byte) bool {
+	return shellHorizontalSpace(value) || strings.ContainsRune(";|&<>", rune(value))
 }
 
 func scriptHeredocOutputDestination(value string, descriptors map[int]scriptOutputDestination) scriptOutputDestination {

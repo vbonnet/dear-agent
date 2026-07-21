@@ -387,6 +387,12 @@ func TestScriptHeredocVisibilityPreservesQuotesDescriptorsAndFileModes(t *testin
 		"echo 'git push origin after-here-string'",
 		`echo "<<PHANTOM"`,
 		"echo 'gh pr close 654'",
+		"cat << 'END-MARKER'",
+		"git push origin spaced-marker",
+		"END-MARKER",
+		"cat <<\\ESCAPED",
+		"gh pr merge 321",
+		"ESCAPED",
 	}, "\n"))
 
 	var text []string
@@ -404,6 +410,8 @@ func TestScriptHeredocVisibilityPreservesQuotesDescriptorsAndFileModes(t *testin
 		"gh pr merge 987",
 		"echo 'git push origin after-here-string'",
 		"echo 'gh pr close 654'",
+		"git push origin spaced-marker",
+		"gh pr merge 321",
 	} {
 		if !slices.Contains(text, visible) {
 			t.Errorf("visible heredoc line %q was hidden: %v", visible, text)
