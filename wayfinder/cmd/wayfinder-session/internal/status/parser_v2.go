@@ -28,7 +28,7 @@ func ParseV2Content(data []byte) (*StatusV2, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := validateV2SchemaVersionScalar(yamlContent); err != nil {
+	if err := validateV2ScalarTypes(yamlContent); err != nil {
 		return nil, err
 	}
 	var metadata struct {
@@ -60,25 +60,133 @@ func ParseV2Content(data []byte) (*StatusV2, error) {
 	return &status, nil
 }
 
-func validateV2SchemaVersionScalar(yamlContent string) error {
+var v2StringFields = map[string]bool{
+	"schema_version":    true,
+	"project_name":      true,
+	"project_type":      true,
+	"risk_level":        true,
+	"current_waypoint":  true,
+	"status":            true,
+	"description":       true,
+	"repository":        true,
+	"branch":            true,
+	"blocked_reason":    true,
+	"lifecycle_state":   true,
+	"blocked_on":        true,
+	"error_message":     true,
+	"input_needed":      true,
+	"name":              true,
+	"notes":             true,
+	"outcome":           true,
+	"stakeholder_notes": true,
+	"research_notes":    true,
+	"validation_status": true,
+	"deployment_status": true,
+	"id":                true,
+	"title":             true,
+	"tests_status":      true,
+	"priority":          true,
+	"assigned_to":       true,
+	"bead_id":           true,
+	"verify_command":    true,
+	"verify_expected":   true,
+	"verify_result":     true,
+}
+
+var v2StringArrayFields = map[string]bool{
+	"tags":                true,
+	"beads":               true,
+	"skip_phases":         true,
+	"deliverables":        true,
+	"depends_on":          true,
+	"blocks":              true,
+	"acceptance_criteria": true,
+}
+
+// validateV2ScalarTypes rejects YAML features that yaml.v3 would otherwise
+// coerce into canonical strings. It also rejects aliases so recursive YAML
+// graphs cannot bypass or crash the later recursive validators.
+func validateV2ScalarTypes(yamlContent string) error {
 	var document yaml.Node
 	if err := yaml.Unmarshal([]byte(yamlContent), &document); err != nil {
-		return fmt.Errorf("failed to parse schema_version: %w", err)
+		return fmt.Errorf("failed to inspect canonical scalar types: %w", err)
 	}
-	if len(document.Content) == 0 || document.Content[0].Kind != yaml.MappingNode {
-		return nil
-	}
-	for i := 0; i+1 < len(document.Content[0].Content); i += 2 {
-		key, value := document.Content[0].Content[i], document.Content[0].Content[i+1]
-		if key.Value != "schema_version" {
-			continue
+	return validateV2ScalarNode(&document, "")
+}
+
+func validateV2ScalarNode(node *yaml.Node, path string) error {
+	switch node.Kind {
+	case yaml.AliasNode:
+		return fmt.Errorf("invalid Wayfinder V2 status: YAML aliases are not allowed at %s", displayV2Path(path))
+	case yaml.DocumentNode, yaml.SequenceNode:
+		for i, child := range node.Content {
+			childPath := path
+			if node.Kind == yaml.SequenceNode {
+				childPath = fmt.Sprintf("%s[%d]", path, i)
+			}
+			if err := validateV2ScalarNode(child, childPath); err != nil {
+				return err
+			}
 		}
-		if value.Kind != yaml.ScalarNode || value.Tag != "!!str" {
-			return fmt.Errorf("schema_version must be an actual string scalar")
-		}
-		return nil
+	case yaml.MappingNode:
+		return validateV2ScalarMapping(node, path)
+	case yaml.ScalarNode:
+		// Scalars are validated by their containing mapping when relevant.
 	}
 	return nil
+}
+
+func validateV2ScalarMapping(node *yaml.Node, path string) error {
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key, value := node.Content[i], node.Content[i+1]
+		if err := validateV2ScalarNode(key, path); err != nil {
+			return err
+		}
+		childPath := key.Value
+		if path != "" {
+			childPath = path + "." + key.Value
+		}
+		if err := validateV2MappedValue(key.Value, value, childPath); err != nil {
+			return err
+		}
+		if err := validateV2ScalarNode(value, childPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateV2MappedValue(key string, value *yaml.Node, path string) error {
+	if value.Kind == yaml.AliasNode {
+		return fmt.Errorf("invalid Wayfinder V2 status: YAML aliases are not allowed at %s", displayV2Path(path))
+	}
+	if v2StringFields[key] && value.Tag != "!!null" &&
+		(value.Kind != yaml.ScalarNode || value.Tag != "!!str") {
+		return fmt.Errorf("%s must be an actual string scalar", path)
+	}
+	if !v2StringArrayFields[key] || value.Tag == "!!null" {
+		return nil
+	}
+	if value.Kind != yaml.SequenceNode {
+		return fmt.Errorf("%s must be a string sequence", path)
+	}
+	for itemIndex, item := range value.Content {
+		itemPath := fmt.Sprintf("%s[%d]", path, itemIndex)
+		if item.Kind == yaml.AliasNode {
+			return fmt.Errorf("invalid Wayfinder V2 status: YAML aliases are not allowed at %s", itemPath)
+		}
+		if item.Kind != yaml.ScalarNode || item.Tag != "!!str" {
+			return fmt.Errorf("%s must be an actual string scalar", itemPath)
+		}
+	}
+	return nil
+}
+
+func displayV2Path(path string) string {
+	if path == "" {
+		return "document"
+	}
+	return path
 }
 
 var v2TimestampFields = map[string]bool{
@@ -118,9 +226,7 @@ func validateV2TimestampNode(node *yaml.Node, path string) error {
 	case yaml.MappingNode:
 		return validateV2TimestampMapping(node, path)
 	case yaml.AliasNode:
-		if node.Alias != nil {
-			return validateV2TimestampNode(node.Alias, path)
-		}
+		return fmt.Errorf("invalid Wayfinder V2 status: YAML aliases are not allowed at %s", displayV2Path(path))
 	case yaml.ScalarNode:
 		// Scalars are validated by their containing mapping when relevant.
 	}

@@ -223,6 +223,71 @@ func TestParseV2RejectsMissingOrUnsupportedSchema(t *testing.T) {
 	}
 }
 
+func TestParseV2RejectsNonStringCanonicalScalars(t *testing.T) {
+	valid, err := os.ReadFile("testdata/valid-v2.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name    string
+		old     string
+		replace string
+		want    string
+	}{
+		{
+			name:    "top-level string",
+			old:     `project_name: "User Authentication Service"`,
+			replace: "project_name: 123",
+			want:    "project_name must be an actual string scalar",
+		},
+		{
+			name:    "nested string",
+			old:     `title: "Break down implementation tasks"`,
+			replace: "title: 123",
+			want:    "roadmap.phases[0].tasks[0].title must be an actual string scalar",
+		},
+		{
+			name:    "string sequence item",
+			old:     `  - "security"`,
+			replace: "  - 123",
+			want:    "tags[0] must be an actual string scalar",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			content := strings.Replace(string(valid), tc.old, tc.replace, 1)
+			if content == string(valid) {
+				t.Fatalf("fixture does not contain %q", tc.old)
+			}
+			_, err := ParseV2Content([]byte(content))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("ParseV2Content() error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseV2RejectsRecursiveYAMLAlias(t *testing.T) {
+	content := `---
+schema_version: "2.0"
+project_name: "test"
+project_type: "feature"
+risk_level: "M"
+current_waypoint: "CHARTER"
+status: "planning"
+created_at: "2026-02-15T10:00:00Z"
+updated_at: "2026-02-15T10:00:00Z"
+waypoint_history: []
+roadmap: &roadmap
+  phases:
+    - *roadmap
+---
+`
+	_, err := ParseV2Content([]byte(content))
+	if err == nil || !strings.Contains(err.Error(), "YAML aliases are not allowed") {
+		t.Fatalf("ParseV2Content() error = %v, want alias rejection", err)
+	}
+}
+
 func TestParseV2RejectsInvalidCanonicalStatus(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
