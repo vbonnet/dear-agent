@@ -25,6 +25,7 @@ var execCommandContext = exec.CommandContext
 type Client struct {
 	CodexPath string
 	Timeout   time.Duration
+	waitDelay time.Duration
 }
 
 // Thread is the subset of Codex app-server thread metadata AGM needs.
@@ -91,7 +92,7 @@ func (c *Client) StartRemoteControl(ctx context.Context) error {
 		}
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
-	cmd.WaitDelay = 1 * time.Second
+	cmd.WaitDelay = c.pipeWaitDelay()
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if output, err := cmd.Output(); err != nil {
@@ -124,6 +125,13 @@ func (c *Client) StartRemoteControl(ctx context.Context) error {
 		return fmt.Errorf("codex remote-control start failed: %w", err)
 	}
 	return nil
+}
+
+func (c *Client) pipeWaitDelay() time.Duration {
+	if c.waitDelay > 0 {
+		return c.waitDelay
+	}
+	return time.Second
 }
 
 func isRemoteControlDaemonStatus(output []byte) bool {
