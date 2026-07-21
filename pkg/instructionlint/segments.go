@@ -362,42 +362,111 @@ func scriptHeredocMarker(value string) string {
 }
 
 func scriptOutputRedirectedToFile(value string) bool {
-	location := heredocMarker.FindStringIndex(value)
-	if location == nil {
+	commands := splitShellCommands(value)
+	producer := -1
+	for index, command := range commands {
+		if heredocMarker.MatchString(command) {
+			producer = index
+			break
+		}
+	}
+	if producer < 0 {
 		return false
 	}
-	fields := parseShellWords(value[:location[0]] + " " + value[location[1]:])
-	redirectedToFile := false
-	for index, field := range fields {
-		field = strings.Trim(field, "()")
-		if remainder, ok := strings.CutPrefix(field, "&>"); ok {
-			target := strings.TrimLeft(remainder, ">|")
-			if target == "" && index+1 < len(fields) {
-				target = strings.Trim(fields[index+1], `"'`)
-			}
-			redirectedToFile = !agentVisibleRedirectTarget(target)
-			continue
-		}
-		redirect := strings.TrimLeft(field, "0123456789")
-		fileDescriptor := strings.TrimSuffix(field, redirect)
-		if fileDescriptor != "" && fileDescriptor != "1" {
-			continue
-		}
-		if !strings.HasPrefix(redirect, ">") {
-			continue
-		}
-		target := strings.TrimLeft(redirect, ">|")
-		if target == "" && index+1 < len(fields) {
-			target = strings.Trim(fields[index+1], `"'`)
-		}
-		redirectedToFile = !agentVisibleRedirectTarget(target)
+
+	destination := scriptCommandOutputDestination(commands[producer])
+	if destination.visible {
+		return false
 	}
-	return redirectedToFile
+	if destination.path == "" {
+		return true
+	}
+	for _, command := range commands[producer+1:] {
+		if scriptCommandPrintsPath(command, destination.path) {
+			return false
+		}
+	}
+	return true
 }
 
-func agentVisibleRedirectTarget(target string) bool {
-	return target == "" || strings.HasPrefix(target, "&") ||
-		slices.Contains([]string{"/dev/fd/1", "/dev/fd/2", "/dev/stderr", "/dev/stdout"}, target)
+type scriptOutputDestination struct {
+	visible bool
+	path    string
+}
+
+func scriptCommandOutputDestination(command string) scriptOutputDestination {
+	visible := scriptOutputDestination{visible: true}
+	descriptors := map[int]scriptOutputDestination{1: visible, 2: visible}
+	fields := parseShellWords(command)
+	for index := 0; index < len(fields); index++ {
+		field := strings.Trim(fields[index], "()")
+		both := strings.HasPrefix(field, "&>")
+		redirect := field
+		descriptor := 1
+		if both {
+			redirect = strings.TrimPrefix(field, "&>")
+		} else {
+			remainder := strings.TrimLeft(field, "0123456789")
+			prefix := strings.TrimSuffix(field, remainder)
+			if !strings.HasPrefix(remainder, ">") {
+				continue
+			}
+			if prefix != "" {
+				parsed, err := strconv.Atoi(prefix)
+				if err != nil {
+					continue
+				}
+				descriptor = parsed
+			}
+			redirect = strings.TrimLeft(remainder, ">|")
+		}
+
+		target := strings.TrimLeft(redirect, ">|")
+		if target == "" && index+1 < len(fields) {
+			index++
+			target = strings.Trim(fields[index], `"'`)
+		}
+		destination := scriptRedirectDestination(target, descriptors)
+		descriptors[descriptor] = destination
+		if both {
+			descriptors[1] = destination
+			descriptors[2] = destination
+		}
+	}
+	return descriptors[1]
+}
+
+func scriptRedirectDestination(target string, descriptors map[int]scriptOutputDestination) scriptOutputDestination {
+	switch target {
+	case "", "&-":
+		return scriptOutputDestination{}
+	case "/dev/stderr", "/dev/stdout":
+		return scriptOutputDestination{visible: true}
+	}
+	if descriptor, ok := strings.CutPrefix(target, "&"); ok {
+		number, err := strconv.Atoi(descriptor)
+		if err == nil {
+			return descriptors[number]
+		}
+	}
+	if descriptor, ok := strings.CutPrefix(target, "/dev/fd/"); ok {
+		number, err := strconv.Atoi(descriptor)
+		if err == nil {
+			return descriptors[number]
+		}
+	}
+	return scriptOutputDestination{path: target}
+}
+
+func scriptCommandPrintsPath(command, path string) bool {
+	if !scriptCommandOutputDestination(command).visible {
+		return false
+	}
+	fields := stripCommandPrefixes(parseShellWords(command))
+	if len(fields) == 0 || !slices.Contains([]string{"cat", "jq"}, fields[0]) {
+		return false
+	}
+	return slices.Contains(fields[1:], path)
 }
 
 func unescapedByteCount(value string, target byte) int {

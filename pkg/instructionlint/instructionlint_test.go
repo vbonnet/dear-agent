@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -277,6 +278,28 @@ func TestScriptHeredocVisibilityFollowsOutputRedirection(t *testing.T) {
 	sort.Strings(rules)
 	if !reflect.DeepEqual(rules, []string{"bare-beads", "raw-gh-pr-lifecycle", "raw-git-push"}) {
 		t.Fatalf("heredoc rules = %v, want only visible heredoc findings", rules)
+	}
+}
+
+func TestScriptHeredocVisibilityTracksCommandListsAndDescriptorAliases(t *testing.T) {
+	source := []byte(strings.Join([]string{
+		"cat >fixture <<'PRINTED_LATER'; cat fixture",
+		"git push origin main",
+		"PRINTED_LATER",
+		"cat 3>fixture >&3 <<'DESCRIPTOR_FILE_ONLY'",
+		"gh pr merge 123",
+		"DESCRIPTOR_FILE_ONLY",
+	}, "\n"))
+
+	var text []string
+	for _, segment := range parseScriptSegments(source) {
+		text = append(text, segment.Text)
+	}
+	if !slices.Contains(text, "git push origin main") {
+		t.Fatalf("command-list heredoc was hidden: %v", text)
+	}
+	if slices.Contains(text, "gh pr merge 123") {
+		t.Fatalf("descriptor-file heredoc was exposed: %v", text)
 	}
 }
 
