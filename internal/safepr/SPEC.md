@@ -17,7 +17,7 @@ cost and intent remain traceable.
 
 **SAFEPR-01** When no Wayfinder directory is provided by flag or environment, the system shall reject PR operations with escalation guidance.
 
-**SAFEPR-02** When `WAYFINDER-STATUS.md` is missing or lacks YAML frontmatter, the system shall reject PR operations.
+**SAFEPR-02** When `WAYFINDER-STATUS.md` is missing, malformed, or incomplete under the complete canonical schema, the system shall reject PR operations.
 
 **SAFEPR-03** When canonical Wayfinder V2 status is `planning` or `in-progress`, the system shall accept the project name as active PR attribution.
 
@@ -33,7 +33,7 @@ cost and intent remain traceable.
 
 **SAFEPR-09** When a Wayfinder bead is present, the system shall include a closing bead reference in the created PR body.
 
-**SAFEPR-10** When Wayfinder status is `blocked`, `completed`, or `abandoned`, the system shall reject PR operations as inactive.
+**SAFEPR-10** When Wayfinder status is `blocked`, `completed`, or `abandoned`, the system shall reject PR operations as inactive and direct the operator to `wayfinder session start <project-name>`.
 
 **SAFEPR-11** When any supported harness or model family creates canonical Wayfinder V2 status, the system shall apply the same provider-neutral attribution policy.
 

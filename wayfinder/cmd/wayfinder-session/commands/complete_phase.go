@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -32,8 +33,8 @@ var CompletePhaseCmd = &cobra.Command{
 	Long: `Update WAYFINDER-STATUS.md, publish phase.completed event, and optionally commit to git.
 
 Example:
-  wayfinder-session complete-phase PROBLEM --outcome success
-  wayfinder-session complete-phase PROBLEM --outcome success --context "Completed user research interviews"`,
+  wayfinder session complete-phase PROBLEM --outcome success
+  wayfinder session complete-phase PROBLEM --outcome success --context "Completed user research interviews"`,
 	Args: cobra.ExactArgs(1),
 	RunE: runCompletePhase,
 }
@@ -46,6 +47,9 @@ func init() {
 
 func runCompletePhase(cmd *cobra.Command, args []string) (retErr error) {
 	phaseName := args[0]
+	if !validPhaseOutcome(phaseOutcome) {
+		return fmt.Errorf("invalid outcome %q (valid: success, partial, skipped)", phaseOutcome)
+	}
 
 	// Trace the phase transition. cmd.Context() is always non-nil (cobra
 	// defaults to context.Background()); the span is a no-op unless a collector
@@ -65,16 +69,9 @@ func runCompletePhase(cmd *cobra.Command, args []string) (retErr error) {
 	// Get project directory
 	projectDir := GetProjectDirectory()
 
-	version, err := status.DetectSchemaVersionFromDir(projectDir)
-	if err != nil {
-		return fmt.Errorf("failed to inspect STATUS file: %w", err)
-	}
-	if version != status.SchemaVersionV2 {
-		return fmt.Errorf("legacy Wayfinder status requires explicit migration before complete-phase")
-	}
 	st, err := status.ParseV2FromDir(projectDir)
 	if err != nil {
-		return fmt.Errorf("failed to read canonical V2 STATUS file: %w", err)
+		return fmt.Errorf("failed to read canonical status file: %w", err)
 	}
 
 	// Initialize history logger
@@ -144,6 +141,10 @@ func runCompletePhase(cmd *cobra.Command, args []string) (retErr error) {
 
 	fmt.Printf("✅ Phase %s completed (%s)\n", phaseName, phaseOutcome)
 	return nil
+}
+
+func validPhaseOutcome(outcome string) bool {
+	return slices.Contains([]string{status.OutcomeSuccess, status.OutcomePartial, status.OutcomeSkipped}, outcome)
 }
 
 // countCodeFiles recursively counts source code files in the project directory.

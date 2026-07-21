@@ -341,7 +341,7 @@ func main() {
     "plugin": "wayfinder",
     "command": "next",
     "duration_ms": 1250,
-    "phase": "S2"
+    "phase": "BUILD"
   }
 }
 ```

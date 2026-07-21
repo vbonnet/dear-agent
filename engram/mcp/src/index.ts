@@ -20,6 +20,7 @@ import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, resolve } from 'path';
 import { homedir } from 'os';
 import { TTLCache } from './cache.js';
+import { parseWayfinderStatus } from './wayfinder_status.js';
 
 /**
  * Configuration
@@ -251,16 +252,13 @@ async function handleWayfinderPhaseStatus(args: any): Promise<string> {
   try {
     const content = readFileSync(statusFile, 'utf-8');
 
-    // Parse current phase from status file
-    const phaseMatch = content.match(/Current Phase:\s*\*\*([^*]+)\*\*/);
-    const progressMatch = content.match(/Progress:\s*([^\n]+)/);
-    const statusMatch = content.match(/Status:\s*([^\n]+)/);
+    const canonical = parseWayfinderStatus(content);
 
     const result = {
       project: projectPath,
-      phase: phaseMatch ? phaseMatch[1].trim() : 'Unknown',
-      progress: progressMatch ? progressMatch[1].trim() : 'Unknown',
-      status: statusMatch ? statusMatch[1].trim() : 'Unknown',
+      phase: canonical.phase,
+      progress: canonical.progress,
+      status: canonical.status,
     };
 
     const output = JSON.stringify(result, null, 2);

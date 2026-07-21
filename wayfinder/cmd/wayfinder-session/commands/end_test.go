@@ -6,23 +6,32 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	wayfinderstatus "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
 
 func makeV2StatusFileWithCreatedAt(t *testing.T, dir string, createdAt time.Time, completedWaypoints int) {
 	t.Helper()
 	var sb strings.Builder
-	for range completedWaypoints {
-		sb.WriteString("\n  - name: CHARTER\n    status: completed\n    started_at: " +
-			createdAt.UTC().Format(time.RFC3339) + "\n")
+	waypointNames := wayfinderstatus.AllWaypointsV2Schema()
+	for _, waypointName := range waypointNames[:completedWaypoints] {
+		sb.WriteString("\n  - name: " + waypointName + "\n    status: completed\n    started_at: " +
+			createdAt.UTC().Format(time.RFC3339) + "\n    completed_at: " +
+			createdAt.Add(time.Minute).UTC().Format(time.RFC3339) + "\n")
 	}
 	waypoints := sb.String()
+	currentWaypoint := wayfinderstatus.WaypointV2Charter
+	if completedWaypoints > 0 {
+		currentWaypoint = waypointNames[completedWaypoints-1]
+	}
 	content := `---
 schema_version: "2.0"
 project_name: test-project
 project_type: feature
 risk_level: S
-current_waypoint: PROBLEM
+current_waypoint: ` + currentWaypoint + `
 status: in-progress
+lifecycle_state: working
 created_at: ` + createdAt.UTC().Format(time.RFC3339) + `
 updated_at: ` + createdAt.UTC().Format(time.RFC3339) + `
 waypoint_history:` + waypoints + `
@@ -37,9 +46,9 @@ func TestRunEndV2_UpdatesStatusFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	createdAt := time.Now().Add(-30 * time.Minute)
-	makeV2StatusFileWithCreatedAt(t, dir, createdAt, 1)
+	makeV2StatusFileWithCreatedAt(t, dir, createdAt, len(wayfinderstatus.AllWaypointsV2Schema()))
 
-	if err := runEndV2(dir, "completed"); err != nil {
+	if err := runEndV2(dir, "completed", ""); err != nil {
 		t.Fatalf("runEndV2: %v", err)
 	}
 
@@ -51,12 +60,62 @@ func TestRunEndV2_UpdatesStatusFile(t *testing.T) {
 	if !strings.Contains(content, "status: completed") {
 		t.Errorf("expected status: completed in output, got:\n%s", content)
 	}
+	if !strings.Contains(content, "lifecycle_state: completed") {
+		t.Errorf("expected completed lifecycle in output, got:\n%s", content)
+	}
 }
 
-func TestRunEndV2_ZeroCreatedAt(t *testing.T) {
+func TestRunEndV2_RejectsIncompleteWorkflow(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	// Write a V2 file with zero/missing created_at — should not panic or produce huge duration.
+	createdAt := time.Now().Add(-30 * time.Minute)
+	makeV2StatusFileWithCreatedAt(t, dir, createdAt, 1)
+
+	err := runEndV2(dir, "completed", "")
+	if err == nil || !strings.Contains(err.Error(), "required Wayfinder phases are incomplete") {
+		t.Fatalf("runEndV2 incomplete workflow error = %v, want completion guard", err)
+	}
+
+	data, readErr := os.ReadFile(filepath.Join(dir, "WAYFINDER-STATUS.md"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if strings.Contains(string(data), "lifecycle_state: completed") {
+		t.Fatalf("incomplete workflow was marked completed:\n%s", data)
+	}
+}
+
+func TestValidateSessionCompletionHonorsConfiguredSkips(t *testing.T) {
+	now := time.Now()
+	st := &wayfinderstatus.StatusV2{
+		SkipPhases:  []string{wayfinderstatus.WaypointV2Design, wayfinderstatus.WaypointV2Spec, wayfinderstatus.WaypointV2Plan},
+		SkipRoadmap: true,
+	}
+	for _, waypointName := range wayfinderstatus.AllWaypointsV2Schema() {
+		if st.IsPhaseSkipped(waypointName) {
+			continue
+		}
+		st.WaypointHistory = append(st.WaypointHistory, wayfinderstatus.WaypointHistory{
+			Name:        waypointName,
+			Status:      wayfinderstatus.WaypointStatusV2Completed,
+			StartedAt:   now,
+			CompletedAt: &now,
+		})
+	}
+
+	if err := wayfinderstatus.ValidateSessionCompletion(st); err != nil {
+		t.Fatalf("ValidateSessionCompletion() rejected configured skips: %v", err)
+	}
+	st.WaypointHistory = st.WaypointHistory[:len(st.WaypointHistory)-1]
+	if err := wayfinderstatus.ValidateSessionCompletion(st); err == nil || !strings.Contains(err.Error(), wayfinderstatus.WaypointV2Retro) {
+		t.Fatalf("ValidateSessionCompletion() error = %v, want missing RETRO", err)
+	}
+}
+
+func TestRunEndV2_RejectsZeroCreatedAt(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	// Write malformed canonical state with zero timestamps.
 	content := `---
 schema_version: "2.0"
 project_name: zero-date-test
@@ -72,9 +131,35 @@ updated_at: 0001-01-01T00:00:00Z
 		t.Fatal(err)
 	}
 
-	// Should not error; zero CreatedAt falls back to now so duration is ~0.
-	if err := runEndV2(dir, "completed"); err != nil {
-		t.Fatalf("runEndV2 with zero created_at: %v", err)
+	if err := runEndV2(dir, "completed", ""); err == nil || !strings.Contains(err.Error(), "created_at is required") {
+		t.Fatalf("runEndV2 with zero created_at error = %v, want validation failure", err)
+	}
+}
+
+func TestRunEndV2_BlockedRequiresAndPersistsReason(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	createdAt := time.Now().Add(-30 * time.Minute)
+	makeV2StatusFileWithCreatedAt(t, dir, createdAt, 1)
+
+	for _, reason := range []string{"", "  \t\n  "} {
+		if err := runEndV2(dir, "blocked", reason); err == nil || !strings.Contains(err.Error(), "requires --reason") {
+			t.Fatalf("runEndV2 with blocked reason %q error = %v, want required reason", reason, err)
+		}
+	}
+	if err := runEndV2(dir, "blocked", "  waiting for reviewer  "); err != nil {
+		t.Fatalf("runEndV2 blocked: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "WAYFINDER-STATUS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "blocked_reason: waiting for reviewer") {
+		t.Fatalf("blocked reason missing from status:\n%s", data)
+	}
+	if strings.Contains(string(data), "lifecycle_state:") {
+		t.Fatalf("generic blocked end retained a conflicting lifecycle state:\n%s", data)
 	}
 }
 

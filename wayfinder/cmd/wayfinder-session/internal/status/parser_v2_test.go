@@ -3,6 +3,7 @@ package status
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -88,7 +89,7 @@ func TestRoundTrip(t *testing.T) {
 
 	// Create a complex status with all fields
 	status := &StatusV2{
-		SchemaVersion:   SchemaVersionV2,
+		SchemaVersion:   SchemaVersion,
 		ProjectName:     "Complex Test",
 		ProjectType:     ProjectTypeFeature,
 		RiskLevel:       RiskLevelL,
@@ -101,17 +102,7 @@ func TestRoundTrip(t *testing.T) {
 		Branch:          "feature/test",
 		Tags:            []string{"test", "complex"},
 		Beads:           []string{"bead-1", "bead-2"},
-		WaypointHistory: []PhaseHistory{
-			{
-				Name:      PhaseV2Charter,
-				Status:    PhaseStatusV2Completed,
-				StartedAt: time.Now().Add(-48 * time.Hour).Truncate(time.Second),
-				CompletedAt: func() *time.Time {
-					t := time.Now().Add(-47 * time.Hour).Truncate(time.Second)
-					return &t
-				}(),
-			},
-		},
+		WaypointHistory: completedHistoryBefore(PhaseV2Build, time.Now().Add(-time.Hour).Truncate(time.Second)),
 		Roadmap: &Roadmap{
 			Phases: []RoadmapPhase{
 				{
@@ -179,40 +170,243 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
-func TestDetectSchemaVersion(t *testing.T) {
-	tests := []struct {
+func TestParseV2RejectsMissingOrUnsupportedSchema(t *testing.T) {
+	for _, tc := range []struct {
 		name    string
-		file    string
-		want    string
-		wantErr bool
+		schema  string
+		message string
 	}{
-		{
-			name:    "V2 file",
-			file:    "testdata/valid-v2.yaml",
-			want:    "2.0",
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			version, err := DetectSchemaVersion(tt.file)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("DetectSchemaVersion() error = %v, wantErr %v", err, tt.wantErr)
-				return
+		{name: "missing", message: "schema_version is required"},
+		{name: "unsupported", schema: "schema_version: \"1.0\"\n", message: "unsupported schema_version"},
+		{name: "unquoted numeric", schema: "schema_version: 2.0\n", message: "schema_version must be an actual string scalar"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), StatusFilename)
+			content := "---\n" + tc.schema + "project_name: test\n---\n"
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
 			}
-			if version != tt.want {
-				t.Errorf("DetectSchemaVersion() = %v, want %v", version, tt.want)
+			_, err := ParseV2(path)
+			if err == nil || !strings.Contains(err.Error(), tc.message) {
+				t.Fatalf("ParseV2() error = %v, want %q", err, tc.message)
 			}
 		})
 	}
 }
 
+func TestParseV2RejectsNonStringCanonicalScalars(t *testing.T) {
+	valid, err := os.ReadFile("testdata/valid-v2.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name    string
+		old     string
+		replace string
+		want    string
+	}{
+		{
+			name:    "top-level string",
+			old:     `project_name: "User Authentication Service"`,
+			replace: "project_name: 123",
+			want:    "project_name must be an actual string scalar",
+		},
+		{
+			name:    "nested string",
+			old:     `title: "Break down implementation tasks"`,
+			replace: "title: 123",
+			want:    "roadmap.phases[0].tasks[0].title must be an actual string scalar",
+		},
+		{
+			name:    "string sequence item",
+			old:     `  - "security"`,
+			replace: "  - 123",
+			want:    "tags[0] must be an actual string scalar",
+		},
+		{
+			name:    "null boolean",
+			old:     `risk_level: "L"`,
+			replace: "risk_level: \"L\"\nskip_roadmap: null",
+			want:    "skip_roadmap must be an actual boolean scalar",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			content := strings.Replace(string(valid), tc.old, tc.replace, 1)
+			if content == string(valid) {
+				t.Fatalf("fixture does not contain %q", tc.old)
+			}
+			_, err := ParseV2Content([]byte(content))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("ParseV2Content() error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseV2RejectsRecursiveYAMLAlias(t *testing.T) {
+	content := `---
+schema_version: "2.0"
+project_name: "test"
+project_type: "feature"
+risk_level: "M"
+current_waypoint: "CHARTER"
+status: "planning"
+created_at: "2026-02-15T10:00:00Z"
+updated_at: "2026-02-15T10:00:00Z"
+waypoint_history: []
+roadmap: &roadmap
+  phases:
+    - *roadmap
+---
+`
+	_, err := ParseV2Content([]byte(content))
+	if err == nil || !strings.Contains(err.Error(), "YAML aliases are not allowed") {
+		t.Fatalf("ParseV2Content() error = %v, want alias rejection", err)
+	}
+}
+
+func TestParseV2RejectsInvalidCanonicalStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		mutate  func(*StatusV2)
+		message string
+	}{
+		{name: "missing required field", mutate: func(status *StatusV2) { status.ProjectName = "" }, message: "project_name is required"},
+		{name: "invalid enum", mutate: func(status *StatusV2) { status.RiskLevel = "UNKNOWN" }, message: "invalid risk_level"},
+		{name: "invalid optional build metadata", mutate: func(status *StatusV2) {
+			status.UpdatePhase(PhaseV2Build, PhaseStatusV2InProgress, "")
+			status.FindWaypointHistory(PhaseV2Build).ValidationStatus = "unknown"
+		}, message: "invalid validation_status"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			status := NewStatusV2("test", ProjectTypeFeature, RiskLevelM)
+			tc.mutate(status)
+			path := filepath.Join(t.TempDir(), StatusFilename)
+			if err := WriteV2(status, path); err != nil {
+				t.Fatalf("WriteV2: %v", err)
+			}
+			_, err := ParseV2(path)
+			if err == nil || !strings.Contains(err.Error(), tc.message) {
+				t.Fatalf("ParseV2() error = %v, want %q", err, tc.message)
+			}
+		})
+	}
+}
+
+func TestParseV2RejectsUnknownFields(t *testing.T) {
+	status := NewStatusV2("test", ProjectTypeFeature, RiskLevelM)
+	path := filepath.Join(t.TempDir(), StatusFilename)
+	if err := WriteV2(status, path); err != nil {
+		t.Fatalf("WriteV2: %v", err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content = []byte(strings.Replace(string(content), "beads:", "beeds:", 1))
+	if !strings.Contains(string(content), "beeds:") {
+		content = []byte(strings.Replace(string(content), "---\n", "---\nbeeds:\n  - ce-123\n", 1))
+	}
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = ParseV2(path)
+	if err == nil || !strings.Contains(err.Error(), "field beeds not found") {
+		t.Fatalf("ParseV2() error = %v, want unknown-field rejection", err)
+	}
+}
+
+func TestParseV2RejectsNonRFC3339Timestamps(t *testing.T) {
+	valid, err := os.ReadFile("testdata/valid-v2.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name    string
+		old     string
+		replace string
+		want    string
+	}{
+		{name: "top-level date", old: `created_at: "2026-02-15T10:00:00Z"`, replace: "created_at: 2026-02-15", want: "created_at must be an RFC3339 timestamp"},
+		{name: "nested date", old: `started_at: "2026-02-15T10:00:00Z"`, replace: "started_at: 2026-02-15", want: "started_at must be an RFC3339 timestamp"},
+		{name: "invalid offset hour", old: `created_at: "2026-02-15T10:00:00Z"`, replace: `created_at: "2026-02-15T10:00:00+24:00"`, want: "created_at must be an RFC3339 timestamp"},
+		{name: "invalid offset minute", old: `created_at: "2026-02-15T10:00:00Z"`, replace: `created_at: "2026-02-15T10:00:00+00:60"`, want: "created_at must be an RFC3339 timestamp"},
+		{name: "comma fraction", old: `created_at: "2026-02-15T10:00:00Z"`, replace: `created_at: "2026-02-15T10:00:00,5Z"`, want: "created_at must be an RFC3339 timestamp"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			content := strings.Replace(string(valid), tc.old, tc.replace, 1)
+			if content == string(valid) {
+				t.Fatalf("fixture does not contain %q", tc.old)
+			}
+			_, err := ParseV2Content([]byte(content))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("ParseV2Content() error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseV2AcceptsCanonicalHistoryAfterRewind(t *testing.T) {
+	st := NewStatusV2("test", ProjectTypeFeature, RiskLevelM)
+	now := time.Now()
+	st.WaypointHistory = []WaypointHistory{{
+		Name:        WaypointV2Charter,
+		Status:      WaypointStatusV2Completed,
+		StartedAt:   now.Add(-time.Hour),
+		CompletedAt: &now,
+	}}
+	st.SetCurrentPhase(WaypointV2Problem)
+	path := filepath.Join(t.TempDir(), StatusFilename)
+	if err := WriteV2(st, path); err != nil {
+		t.Fatalf("WriteV2: %v", err)
+	}
+	if _, err := ParseV2(path); err != nil {
+		t.Fatalf("ParseV2 rejected rewind-produced canonical history: %v", err)
+	}
+}
+
+func TestParseV2AcceptsStatusWrittenAtPhaseStart(t *testing.T) {
+	for _, phase := range []string{PhaseV2Spec, PhaseV2Plan, PhaseV2Build} {
+		t.Run(phase, func(t *testing.T) {
+			st := NewStatusV2("test", ProjectTypeFeature, RiskLevelM)
+			st.Status = StatusV2InProgress
+			st.WaypointHistory = completedHistoryBefore(phase, time.Now())
+			st.SetCurrentPhase(phase)
+			st.UpdatePhase(phase, PhaseStatusV2InProgress, "")
+
+			path := filepath.Join(t.TempDir(), StatusFilename)
+			if err := WriteV2(st, path); err != nil {
+				t.Fatalf("WriteV2: %v", err)
+			}
+			if _, err := ParseV2(path); err != nil {
+				t.Fatalf("ParseV2 rejected start-phase output: %v", err)
+			}
+		})
+	}
+}
+
+func completedHistoryBefore(target string, now time.Time) []WaypointHistory {
+	var history []WaypointHistory
+	for _, waypoint := range AllWaypointsV2Schema() {
+		if waypoint == target {
+			break
+		}
+		history = append(history, WaypointHistory{
+			Name:        waypoint,
+			Status:      WaypointStatusV2Completed,
+			StartedAt:   now,
+			CompletedAt: &now,
+		})
+	}
+	return history
+}
+
 func TestNewStatusV2(t *testing.T) {
 	status := NewStatusV2("Test Project", ProjectTypeResearch, RiskLevelXS)
 
-	if status.SchemaVersion != SchemaVersionV2 {
-		t.Errorf("expected schema_version '%s', got '%s'", SchemaVersionV2, status.SchemaVersion)
+	if status.SchemaVersion != SchemaVersion {
+		t.Errorf("expected schema_version '%s', got '%s'", SchemaVersion, status.SchemaVersion)
 	}
 	if status.ProjectName != "Test Project" {
 		t.Errorf("expected project_name 'Test Project', got '%s'", status.ProjectName)
@@ -276,6 +470,24 @@ schema_version: "2.0"`,
 			content: `---
 ---`,
 			wantErr: true,
+		},
+		{
+			name: "content after closing delimiter",
+			content: `---
+schema_version: "2.0"
+project_name: "Test"
+---
+# retired Markdown status`,
+			wantErr: true,
+		},
+		{
+			name: "whitespace after closing delimiter",
+			content: `---
+schema_version: "2.0"
+project_name: "Test"
+---
+   `,
+			wantErr: false,
 		},
 	}
 

@@ -3,6 +3,8 @@ package coordinator
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -242,7 +244,7 @@ func TestMonitorGetStatus(t *testing.T) {
 	monitor.statusPoller.mu.Lock()
 	monitor.statusPoller.projects["/test/project"] = &ProjectStatus{
 		ProjectDir:   "/test/project",
-		CurrentPhase: "S8",
+		CurrentPhase: "BUILD",
 		Progress:     50,
 	}
 	monitor.statusPoller.mu.Unlock()
@@ -252,8 +254,8 @@ func TestMonitorGetStatus(t *testing.T) {
 		t.Fatalf("GetStatus failed: %v", err)
 	}
 
-	if status.CurrentPhase != "S8" {
-		t.Errorf("Expected phase=S8, got %s", status.CurrentPhase)
+	if status.CurrentPhase != "BUILD" {
+		t.Errorf("Expected phase=BUILD, got %s", status.CurrentPhase)
 	}
 
 	if status.Progress != 50 {
@@ -293,37 +295,96 @@ func TestEventSubscriptionAndEmit(t *testing.T) {
 
 func TestParseWayfinderStatus(t *testing.T) {
 	content := `---
-**Current Phase**: S8 - Implementation
-**Status**: In progress
-**Progress**: 75%
----`
+schema_version: "2.0"
+project_name: test
+project_type: feature
+risk_level: M
+current_waypoint: BUILD
+status: in-progress
+created_at: 2026-07-20T12:00:00Z
+updated_at: 2026-07-20T12:30:00Z
+waypoint_history:
+  - {name: CHARTER, status: completed, started_at: 2026-07-20T12:00:00Z, completed_at: 2026-07-20T12:01:00Z}
+  - {name: PROBLEM, status: completed, started_at: 2026-07-20T12:01:00Z, completed_at: 2026-07-20T12:02:00Z}
+  - {name: RESEARCH, status: completed, started_at: 2026-07-20T12:02:00Z, completed_at: 2026-07-20T12:03:00Z}
+  - {name: DESIGN, status: completed, started_at: 2026-07-20T12:03:00Z, completed_at: 2026-07-20T12:04:00Z}
+  - {name: SPEC, status: completed, started_at: 2026-07-20T12:04:00Z, completed_at: 2026-07-20T12:05:00Z}
+  - {name: PLAN, status: completed, started_at: 2026-07-20T12:05:00Z, completed_at: 2026-07-20T12:06:00Z}
+  - {name: SETUP, status: completed, started_at: 2026-07-20T12:06:00Z, completed_at: 2026-07-20T12:07:00Z}
+---
+`
 
-	status := parseWayfinderStatus("/test/project", content)
-
-	if status.CurrentPhase != "S8" {
-		t.Errorf("Expected phase=S8, got %s", status.CurrentPhase)
+	status := parseWayfinderStatus("/test/project", []byte(content))
+	if status == nil {
+		t.Fatal("parseWayfinderStatus rejected valid canonical status")
 	}
 
-	if status.Progress != 75 {
-		t.Errorf("Expected progress=75, got %d", status.Progress)
+	if status.CurrentPhase != "BUILD" {
+		t.Errorf("Expected phase=BUILD, got %s", status.CurrentPhase)
 	}
 
-	if status.Message != "In progress" {
-		t.Errorf("Expected message='In progress', got %s", status.Message)
+	if status.Progress != 77 {
+		t.Errorf("Expected progress=77, got %d", status.Progress)
+	}
+
+	if status.Message != "in-progress" {
+		t.Errorf("Expected message='in-progress', got %s", status.Message)
 	}
 }
 
 func TestParseWayfinderStatus_Defaults(t *testing.T) {
 	content := `# Some random content without status info`
 
-	status := parseWayfinderStatus("/test/project", content)
+	if status := parseWayfinderStatus("/test/project", []byte(content)); status != nil {
+		t.Fatalf("parseWayfinderStatus accepted invalid content: %+v", status)
+	}
+}
 
-	if status.CurrentPhase != "unknown" {
-		t.Errorf("Expected phase=unknown, got %s", status.CurrentPhase)
+func TestParseWayfinderStatus_RejectsInvalidCanonicalFields(t *testing.T) {
+	content := []byte("---\nschema_version: \"1.0\"\ncurrent_waypoint: UNKNOWN\nstatus: typo\n---\n")
+	if status := parseWayfinderStatus("/test/project", content); status != nil {
+		t.Fatalf("parseWayfinderStatus accepted invalid canonical state: %+v", status)
+	}
+}
+
+func TestStatusPollerEvictsCachedStatusAfterParseFailure(t *testing.T) {
+	dir := t.TempDir()
+	statusPath := filepath.Join(dir, "WAYFINDER-STATUS.md")
+	valid := []byte(`---
+schema_version: "2.0"
+project_name: cache-eviction-test
+project_type: feature
+risk_level: S
+current_waypoint: BUILD
+status: in-progress
+created_at: 2026-07-20T00:00:00Z
+updated_at: 2026-07-20T00:00:00Z
+waypoint_history:
+  - {name: CHARTER, status: completed, started_at: 2026-07-20T00:00:00Z, completed_at: 2026-07-20T00:01:00Z}
+  - {name: PROBLEM, status: completed, started_at: 2026-07-20T00:01:00Z, completed_at: 2026-07-20T00:02:00Z}
+  - {name: RESEARCH, status: completed, started_at: 2026-07-20T00:02:00Z, completed_at: 2026-07-20T00:03:00Z}
+  - {name: DESIGN, status: completed, started_at: 2026-07-20T00:03:00Z, completed_at: 2026-07-20T00:04:00Z}
+  - {name: SPEC, status: completed, started_at: 2026-07-20T00:04:00Z, completed_at: 2026-07-20T00:05:00Z}
+  - {name: PLAN, status: completed, started_at: 2026-07-20T00:05:00Z, completed_at: 2026-07-20T00:06:00Z}
+  - {name: SETUP, status: completed, started_at: 2026-07-20T00:06:00Z, completed_at: 2026-07-20T00:07:00Z}
+---
+`)
+	if err := os.WriteFile(statusPath, valid, 0o600); err != nil {
+		t.Fatal(err)
 	}
 
-	if status.Progress != 0 {
-		t.Errorf("Expected progress=0, got %d", status.Progress)
+	monitor := NewMonitor(time.Second, t.TempDir())
+	monitor.statusPoller.pollOnce([]string{dir})
+	if _, err := monitor.GetStatus(dir); err != nil {
+		t.Fatalf("GetStatus() after valid poll: %v", err)
+	}
+
+	if err := os.WriteFile(statusPath, []byte("not canonical status\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	monitor.statusPoller.pollOnce([]string{dir})
+	if cached, err := monitor.GetStatus(dir); err == nil {
+		t.Fatalf("GetStatus() retained stale cache after parse failure: %+v", cached)
 	}
 }
 

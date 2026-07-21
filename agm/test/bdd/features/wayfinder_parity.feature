@@ -21,7 +21,7 @@ Feature: Wayfinder harness parity
 
   Scenario: Wayfinder assets and MCP operations are published
     When AGM validates Wayfinder asset parity
-    Then Wayfinder should publish SKILL, plugin, command, and MCP status surfaces
+    Then Wayfinder should publish SKILL, plugin, CLI, and MCP status surfaces
 
   Scenario: Wayfinder phase guidance uses harness-neutral Engrams
     When AGM validates Wayfinder phase Engram parity

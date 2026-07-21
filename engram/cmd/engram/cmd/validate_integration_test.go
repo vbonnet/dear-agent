@@ -17,13 +17,12 @@ import (
 
 // validateTestEnv holds the test environment for validation integration tests
 type validateTestEnv struct {
-	bin        string   // Path to built CLI binary
-	repoRoot   string   // Root of engram repository
-	aimdFiles  []string // Real .ai.md files
-	yamlFiles  []string // Real YAML files
-	coreFiles  []string // Real core/*.ai.md files
-	retroFiles []string // Real retrospective files
-	allFiles   []string // All validatable files (500+)
+	bin       string   // Path to built CLI binary
+	repoRoot  string   // Root of engram repository
+	aimdFiles []string // Real .ai.md files
+	yamlFiles []string // Real YAML files
+	coreFiles []string // Real core/*.ai.md files
+	allFiles  []string // All validatable files (500+)
 }
 
 // setupValidateTest builds the CLI binary and discovers real files
@@ -57,17 +56,13 @@ func setupValidateTest(t *testing.T) validateTestEnv {
 	// Discover YAML files
 	env.yamlFiles = discoverFiles(t, repoRoot, "**/*.yaml", 10)
 
-	// Discover retrospective files
-	env.retroFiles = discoverFiles(t, repoRoot, "**/*retrospective*.md", 2)
-
 	// Collect all validatable files for full corpus test
 	env.allFiles = append(env.allFiles, env.aimdFiles...)
 	env.allFiles = append(env.allFiles, env.yamlFiles...)
 	env.allFiles = append(env.allFiles, env.coreFiles...)
-	env.allFiles = append(env.allFiles, env.retroFiles...)
 
-	t.Logf("Test environment: %d .ai.md files, %d YAML files, %d core files, %d retrospective files",
-		len(env.aimdFiles), len(env.yamlFiles), len(env.coreFiles), len(env.retroFiles))
+	t.Logf("Test environment: %d .ai.md files, %d YAML files, %d core files",
+		len(env.aimdFiles), len(env.yamlFiles), len(env.coreFiles))
 	t.Logf("Total corpus: %d files", len(env.allFiles))
 
 	return env
@@ -100,8 +95,6 @@ func discoverFiles(t *testing.T, root string, pattern string, maxFiles int) []st
 		case strings.HasSuffix(pattern, "*.yaml") && strings.HasSuffix(path, ".yaml"):
 			matched = true
 		case strings.HasSuffix(pattern, "*.yml") && strings.HasSuffix(path, ".yml"):
-			matched = true
-		case strings.Contains(pattern, "retrospective") && strings.Contains(path, "retrospective") && strings.HasSuffix(path, ".md"):
 			matched = true
 		}
 
@@ -285,43 +278,6 @@ func TestIntegration_ContentValidator(t *testing.T) {
 	})
 }
 
-// TestIntegration_WayfinderValidator tests wayfinder validator on wayfinder-artifact.yaml
-func TestIntegration_WayfinderValidator(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
-	}
-
-	env := setupValidateTest(t)
-
-	// Find wayfinder-artifact.yaml files
-	var wayfinderFiles []string
-	for _, file := range env.yamlFiles {
-		if strings.Contains(file, "wayfinder-artifact") {
-			wayfinderFiles = append(wayfinderFiles, file)
-		}
-	}
-
-	if len(wayfinderFiles) == 0 {
-		t.Skip("No wayfinder-artifact.yaml files found")
-	}
-
-	t.Run("wayfinder validator", func(t *testing.T) {
-		file := wayfinderFiles[0]
-		output, err := runValidateCommand(t, env.bin, "--type=wayfinder", file)
-
-		// Should not crash
-		if err != nil {
-			exitErr := &exec.ExitError{}
-			ok := errors.As(err, &exitErr)
-			if !ok || exitErr.ExitCode() > 1 {
-				t.Fatalf("Command crashed: %v\nOutput: %s", err, output)
-			}
-		}
-
-		t.Logf("Wayfinder validator output: %s", output)
-	})
-}
-
 // TestIntegration_LinkChecker tests link checker on real .ai.md files
 func TestIntegration_LinkChecker(t *testing.T) {
 	if testing.Short() {
@@ -412,45 +368,6 @@ func TestIntegration_YAMLTokenCounter(t *testing.T) {
 		// Verbose mode should show token counts
 		if !strings.Contains(output, "token") && !strings.Contains(output, "Summary") {
 			t.Logf("Note: Expected token count in verbose output, got: %s", output)
-		}
-	})
-}
-
-// TestIntegration_RetrospectiveValidator tests retrospective validator
-func TestIntegration_RetrospectiveValidator(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
-	}
-
-	env := setupValidateTest(t)
-
-	if len(env.retroFiles) == 0 {
-		t.Skip("No retrospective files found")
-	}
-
-	t.Run("retrospective validator on real files", func(t *testing.T) {
-		file := env.retroFiles[0]
-		output, err := runValidateCommand(t, env.bin, "--type=retrospective", file)
-
-		// Should not crash
-		if err != nil {
-			exitErr := &exec.ExitError{}
-			ok := errors.As(err, &exitErr)
-			if !ok || exitErr.ExitCode() > 1 {
-				t.Fatalf("Command crashed: %v\nOutput: %s", err, output)
-			}
-		}
-
-		t.Logf("Retrospective validator output: %s", output)
-	})
-
-	t.Run("auto-detect retrospective validator", func(t *testing.T) {
-		file := env.retroFiles[0]
-		output, _ := runValidateCommand(t, env.bin, file)
-
-		// Should auto-detect retrospective validator
-		if strings.Contains(output, "unknown file type") {
-			t.Errorf("Failed to auto-detect retrospective validator")
 		}
 	})
 }

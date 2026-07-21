@@ -196,7 +196,7 @@ func queryAGMWorkspace() string {
 	return manifest.Workspace
 }
 
-// ExtractSessionID extracts the session ID from wayfinder-session output.
+// ExtractSessionID extracts the session ID from wayfinder session output.
 func ExtractSessionID(output string) string {
 	lines := strings.Split(output, "\n")
 	for _, line := range lines {

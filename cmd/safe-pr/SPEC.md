@@ -8,7 +8,7 @@
 
 ## Overview
 
-`safe-pr` is the sanctioned CLI for audited PR creation and closure. It wraps
+`safe-pr` is the sanctioned CLI for audited PR creation, closure, and reopening. It wraps
 GitHub CLI operations with Wayfinder attribution, remote-url preflight, denied
 interactive modes, timeout control, and optional CI verification after PR
 creation.
@@ -29,7 +29,7 @@ creation.
 
 **SAFE-PR-07** When a PR URL is returned, the system shall parse owner, repository, and PR number from GitHub URLs.
 
-**SAFE-PR-08** When the canonical Wayfinder V2 writer creates a `planning` session with `project_name`, the system shall accept that trace without requiring a legacy `session_id`.
+**SAFE-PR-08** When the canonical Wayfinder writer creates a schema 2.0 `planning` session with `project_name`, the system shall accept that trace as the sole attribution identity.
 
 **SAFE-PR-09** When safe-pr control flow is tested, the system shall replace the GitHub mutation boundary so unit tests cannot create real pull requests.
 
@@ -50,6 +50,8 @@ creation.
 **SAFE-PR-17** When a protected safe-pr child command is canceled or times out, the system shall terminate its isolated process group and bound pipe draining before the parent releases Git worktree ownership.
 
 **SAFE-PR-18** When an attributed safe-pr transaction finishes, the system shall append exactly one audit record whose exit code and error reflect the final acquisition, GitHub mutation, and worktree release outcome.
+
+**SAFE-PR-19** When `reopen` is requested, the system shall require an explicit reason and stamp the active Wayfinder trace into the reopening comment before invoking GitHub CLI.
 
 ## BDD Traceability
 

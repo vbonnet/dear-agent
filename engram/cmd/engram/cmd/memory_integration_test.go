@@ -316,7 +316,7 @@ func TestMemoryWorkflow_WithMetadata(t *testing.T) {
 		Importance:    0.95,
 		Metadata: map[string]interface{}{
 			"source": "architecture-review",
-			"phase":  "D3",
+			"phase":  "BUILD",
 			"tags":   []string{"api", "rest", "architecture"},
 		},
 	}
@@ -332,7 +332,7 @@ func TestMemoryWorkflow_WithMetadata(t *testing.T) {
 	}
 
 	assertMetadataField(t, retrieved, "source", "architecture-review")
-	assertMetadataField(t, retrieved, "phase", "D3")
+	assertMetadataField(t, retrieved, "phase", "BUILD")
 
 	// Update metadata
 	newMetadata := map[string]interface{}{

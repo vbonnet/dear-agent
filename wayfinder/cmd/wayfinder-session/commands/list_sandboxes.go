@@ -18,8 +18,8 @@ Flags:
   --format    Output format: table (default), json
 
 Example:
-  wayfinder-session list-sandboxes
-  wayfinder-session list-sandboxes --format json`,
+  wayfinder session list-sandboxes
+  wayfinder session list-sandboxes --format json`,
 	Args: cobra.NoArgs,
 	RunE: runListSandboxes,
 }

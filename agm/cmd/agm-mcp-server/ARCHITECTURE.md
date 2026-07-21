@@ -93,7 +93,7 @@ wayfinder.go: listWayfinderSessions() / getWayfinderSessionDetail()
     ↓
 os.ReadDir(wayfinderDir)
     ↓
-for each session dir: parseFrontmatter(WAYFINDER-STATUS.md)
+for each session dir: statusread.Parse(WAYFINDER-STATUS.md bytes)
     ↓
 mcpSuccess(result)       → JSON-encoded CallToolResult
     ↓
@@ -102,8 +102,9 @@ Claude Code ← MCP response
 
 Wayfinder tools read `WAYFINDER-STATUS.md` files directly from the local
 `engram-research/wf/` directory. No HTTP proxy or network call is involved.
-Both schema v2.0 (`project_name`, `current_phase`) and legacy schemas
-(`project`, `current_waypoint`) are supported via `fmString()` key-fallback.
+Only a complete, valid canonical schema 2.0 status is accepted. The shared
+`statusread` adapter validates the exact bytes before the MCP adapter extracts
+the fields needed for list and detail responses.
 
 ## Key Invariants
 

@@ -1,6 +1,6 @@
 # Wayfinder Harness Parity Specification
 
-<!-- Last audited at: 2026-07-01 -->
+<!-- Last audited at: 2026-07-17 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -9,11 +9,10 @@
 ## Overview
 
 Wayfinder parity means every active AGM harness can discover and operate the
-same SDLC workflow surfaces. Claude Code consumes native plugin commands and
-skills. Codex CLI, AGY, and OpenCode consume the same workflow through the
-neutral marketplace, AGENTS.md/SKILL fallback instructions, and the
-`wayfinder-session` CLI. MCP tools expose Wayfinder session status without
-requiring the caller to be Claude Code.
+same workflow. Claude Code auto-discovers the plugin's root skill. Codex CLI,
+AGY, and OpenCode use the same skill content when available and the
+`wayfinder session` CLI as the neutral execution surface. MCP tools expose
+session status without requiring the caller to be Claude Code.
 
 ## EARS Requirements
 
@@ -21,7 +20,7 @@ requiring the caller to be Claude Code.
 
 **WFP-02** When Wayfinder is installed, the system shall publish a Claude plugin manifest for native Claude Code consumption.
 
-**WFP-03** When Wayfinder is installed, the system shall publish command assets for workflow entrypoints.
+**WFP-03** When Wayfinder is installed, the system shall publish the `wayfinder session` CLI as the harness-neutral workflow entrypoint.
 
 **WFP-04** When Wayfinder sessions are queried through MCP, the system shall expose list and detail tools.
 

@@ -29,7 +29,7 @@ waypoint_history: []
 
 func makeLegacyStatusFile(t *testing.T, dir string) {
 	t.Helper()
-	content := "---\nschema_version: \"1.0\"\nsession_id: legacy\ncurrent_phase: D1\n---\n"
+	content := "---\nschema_version: \"1.0\"\nsession_id: legacy\ncurrent_phase: PROBLEM\n---\n"
 	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -79,11 +79,11 @@ func TestNextPhase_MissingStatusFileErrors(t *testing.T) {
 	}
 }
 
-func TestNextPhase_RequiresExplicitLegacyMigration(t *testing.T) {
+func TestNextPhase_RejectsUnsupportedSchema(t *testing.T) {
 	dir := t.TempDir()
 	makeLegacyStatusFile(t, dir)
 	err := runNextPhaseInDir(dir)
-	if err == nil || !strings.Contains(err.Error(), "explicit migration") {
-		t.Fatalf("runNextPhase legacy error = %v, want migration guidance", err)
+	if err == nil || !strings.Contains(err.Error(), "unsupported schema_version") {
+		t.Fatalf("runNextPhase schema error = %v, want unsupported schema guidance", err)
 	}
 }

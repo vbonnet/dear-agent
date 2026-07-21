@@ -1159,13 +1159,15 @@ detect_phase_state() {
         return
     fi
 
-    # Check if deliverables exist
-    local current_phase=$(grep "Current Phase:" "$status_file" | cut -d: -f2)
-    local deliverable_count=$(grep "✅" "$status_file" | wc -l)
+    # Read canonical schema-2.0 YAML fields.
+    local current_waypoint
+    local project_status
+    current_waypoint=$(sed -n 's/^current_waypoint:[[:space:]]*//p' "$status_file" | head -1)
+    project_status=$(sed -n 's/^status:[[:space:]]*//p' "$status_file" | head -1)
 
-    if [ "$deliverable_count" -eq 0 ]; then
+    if [ "$current_waypoint" = "CHARTER" ]; then
         echo "start"
-    elif grep -q "Next Phase:" "$status_file"; then
+    elif [ "$project_status" = "completed" ] || [ "$current_waypoint" = "RETRO" ]; then
         echo "end"
     else
         echo "middle"

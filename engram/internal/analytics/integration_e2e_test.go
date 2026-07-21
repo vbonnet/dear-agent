@@ -10,7 +10,7 @@ import (
 )
 
 // TestE2E_CompleteWayfinderSession tests the complete analytics flow
-// with a full Wayfinder session (D1-D4, S5-S11)
+// with a full canonical Wayfinder session
 // setupE2ETelemetry creates mock telemetry file and returns path
 func setupE2ETelemetry(t *testing.T) (string, string, string) {
 	t.Helper()
@@ -47,7 +47,7 @@ func parseAndVerifyEvents(t *testing.T, telemetryPath, sessionID string) []Parse
 		t.Fatalf("Session %s not found", sessionID)
 	}
 
-	expectedEvents := 24
+	expectedEvents := 20
 	if len(events) != expectedEvents {
 		t.Errorf("Expected %d events, got %d", expectedEvents, len(events))
 	}
@@ -80,12 +80,12 @@ func aggregateAndVerifySession(t *testing.T, sessionID, projectPath string, even
 // verifyPhases checks phase count and names
 func verifyPhases(t *testing.T, session *Session) {
 	t.Helper()
-	expectedPhaseCount := 11
+	expectedPhaseCount := 9
 	if len(session.Phases) != expectedPhaseCount {
 		t.Errorf("Expected %d phases, got %d", expectedPhaseCount, len(session.Phases))
 	}
 
-	expectedPhaseNames := []string{"D1", "D2", "D3", "D4", "S5", "S6", "S7", "S8", "S9", "S10", "S11"}
+	expectedPhaseNames := []string{"CHARTER", "PROBLEM", "RESEARCH", "DESIGN", "SPEC", "PLAN", "SETUP", "BUILD", "RETRO"}
 	for i, expectedName := range expectedPhaseNames {
 		if i >= len(session.Phases) {
 			break
@@ -102,8 +102,8 @@ func verifyMetrics(t *testing.T, session *Session) {
 	if session.Metrics.TotalDuration == 0 {
 		t.Error("Expected non-zero total duration")
 	}
-	if session.Metrics.PhaseCount != 11 {
-		t.Errorf("Expected phase count 11, got %d", session.Metrics.PhaseCount)
+	if session.Metrics.PhaseCount != 9 {
+		t.Errorf("Expected phase count 9, got %d", session.Metrics.PhaseCount)
 	}
 	if session.Metrics.AITime == 0 {
 		t.Error("Expected non-zero AI time")
@@ -113,7 +113,7 @@ func verifyMetrics(t *testing.T, session *Session) {
 // verifyFormatters tests all output formatters
 func verifyFormatters(t *testing.T, session *Session, sessionID string) {
 	t.Helper()
-	expectedPhaseNames := []string{"D1", "D2", "D3", "D4", "S5", "S6", "S7", "S8", "S9", "S10", "S11"}
+	expectedPhaseNames := []string{"CHARTER", "PROBLEM", "RESEARCH", "DESIGN", "SPEC", "PLAN", "SETUP", "BUILD", "RETRO"}
 
 	// Markdown formatter
 	mdFormatter := &MarkdownFormatter{}
@@ -204,22 +204,20 @@ func generateMockWayfinderSession(sessionID, projectPath string, startTime time.
 
 	currentTime := startTime
 
-	// All 11 Wayfinder phases (D1-D4, S5-S11)
+	// All nine canonical Wayfinder phases.
 	phases := []struct {
 		name     string
 		duration time.Duration
 	}{
-		{"D1", 15 * time.Minute},
-		{"D2", 20 * time.Minute},
-		{"D3", 10 * time.Minute},
-		{"D4", 5 * time.Minute},
-		{"S5", 30 * time.Minute},
-		{"S6", 25 * time.Minute},
-		{"S7", 20 * time.Minute},
-		{"S8", 2 * time.Hour},     // Implementation phase (longest)
-		{"S9", 30 * time.Minute},  // Validation
-		{"S10", 15 * time.Minute}, // Documentation
-		{"S11", 10 * time.Minute}, // Retrospective
+		{"CHARTER", 10 * time.Minute},
+		{"PROBLEM", 15 * time.Minute},
+		{"RESEARCH", 20 * time.Minute},
+		{"DESIGN", 25 * time.Minute},
+		{"SPEC", 10 * time.Minute},
+		{"PLAN", 20 * time.Minute},
+		{"SETUP", 15 * time.Minute},
+		{"BUILD", 2 * time.Hour}, // Implementation phase (longest)
+		{"RETRO", 10 * time.Minute},
 	}
 
 	for _, phase := range phases {
