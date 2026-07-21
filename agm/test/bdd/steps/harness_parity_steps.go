@@ -295,6 +295,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates the Codex resume transaction$`, agmValidatesTheCodexResumeTransaction)
 	ctx.Step(`^Codex resume success should require process and composer readiness$`, codexResumeSuccessShouldRequireProcessAndComposerReadiness)
 	ctx.Step(`^a failed Codex resume should serialize concurrent attempts through every production entry point, release the session lock before attachment, preserve canonical tmux identity from stale full-session updates, reconcile ambiguous metadata commits, compensate owned provisional metadata before removing its creation-specific tmux identity even when tmux ID output is lost, and preserve tmux whenever metadata cleanup is unproven$`, aFailedCodexResumeShouldRemoveOnlyItsNewlyCreatedTmuxSession)
+	ctx.Step(`^authoritative session renames should reject stale identity revisions and compensate tmux after storage conflicts$`, authoritativeSessionRenamesShouldRejectStaleIdentityRevisions)
 	ctx.Step(`^successful Codex prompt delivery should remain successful after later caller cancellation$`, successfulCodexPromptDeliveryShouldRemainSuccessfulAfterLaterCallerCancellation)
 	ctx.Step(`^failed Codex prompt delivery should not suppress a later attach failure$`, failedCodexPromptDeliveryShouldNotSuppressALaterAttachFailure)
 	ctx.Step(`^Codex activity updates should follow resume readiness$`, codexActivityUpdatesShouldFollowResumeReadiness)
@@ -353,6 +354,21 @@ func aFailedCodexResumeShouldRemoveOnlyItsNewlyCreatedTmuxSession(ctx context.Co
 	}
 	if err != nil {
 		return fmt.Errorf("codex resume rollback behavior suite failed: %w\n%s", err, output)
+	}
+	return nil
+}
+
+func authoritativeSessionRenamesShouldRejectStaleIdentityRevisions(ctx context.Context) error {
+	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/dolt", "-run", `^(TestPersistRenamedSessionIdentity.*|TestSQLiteRenameSessionIdentityRejectsStaleRevision)$`, "-count=1")
+	cmd.Dir = bddRepoRoot()
+	output, err := cmd.CombinedOutput()
+	if testCtx.Err() != nil {
+		return fmt.Errorf("session rename identity regressions timed out: %w", testCtx.Err())
+	}
+	if err != nil {
+		return fmt.Errorf("session rename identity regressions failed: %w\n%s", err, output)
 	}
 	return nil
 }

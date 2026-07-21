@@ -224,6 +224,60 @@ func TestSQLiteUpdateTmuxSessionNamePreservesOtherColumns(t *testing.T) {
 	}
 }
 
+func TestSQLiteRenameSessionIdentityRejectsStaleRevision(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "sqlite-authoritative-rename",
+		Name:          "old-name",
+		Workspace:     adapter.Workspace(),
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+		Context:       manifest.Context{Project: t.TempDir()},
+		Tmux:          manifest.Tmux{SessionName: "old-tmux"},
+	}
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+	stale, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() stale snapshot error: %v", err)
+	}
+	concurrent, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() concurrent snapshot error: %v", err)
+	}
+	concurrent.Context.Notes = "concurrent unrelated update"
+	if err := adapter.UpdateSession(concurrent); err != nil {
+		t.Fatalf("UpdateSession() concurrent update error: %v", err)
+	}
+	if err := adapter.RenameSessionIdentity(t.Context(), stale.SessionID, stale.Name, stale.Tmux.SessionName, stale.Tmux.SessionRevision, "new-name"); err == nil || !strings.Contains(err.Error(), "changed concurrently") {
+		t.Fatalf("RenameSessionIdentity() stale error = %v, want explicit conflict", err)
+	}
+	current, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after conflict error: %v", err)
+	}
+	if current.Name != "old-name" || current.Tmux.SessionName != "old-tmux" || current.Context.Notes != concurrent.Context.Notes {
+		t.Fatalf("identity after conflict = (name=%q tmux=%q notes=%q), want unchanged identity plus concurrent note", current.Name, current.Tmux.SessionName, current.Context.Notes)
+	}
+	observedRevision := current.Tmux.SessionRevision
+	if err := adapter.RenameSessionIdentity(t.Context(), current.SessionID, current.Name, current.Tmux.SessionName, observedRevision, "new-name"); err != nil {
+		t.Fatalf("RenameSessionIdentity() current error: %v", err)
+	}
+	renamed, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after rename error: %v", err)
+	}
+	if renamed.Name != "new-name" || renamed.Tmux.SessionName != "new-name" || renamed.Tmux.SessionRevision == "" || renamed.Tmux.SessionRevision == observedRevision || renamed.Context.Notes != concurrent.Context.Notes {
+		t.Fatalf("renamed identity = (name=%q tmux=%q revision=%q notes=%q), want atomic renamed identity, advanced revision, and preserved note", renamed.Name, renamed.Tmux.SessionName, renamed.Tmux.SessionRevision, renamed.Context.Notes)
+	}
+}
+
 func TestSQLiteTmuxSessionNameChangeOwnsAndRestoresExactWrite(t *testing.T) {
 	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
 	if err != nil {

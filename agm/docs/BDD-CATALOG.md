@@ -274,6 +274,9 @@ creation, and terminal state detection.
   persistent pre-revision SQLite test store upgrades its schema idempotently
   while preserving existing sessions before those lifecycle mutations run;
   compensation restores the prior activity timestamp with the prior name.
+- Authoritative `agm session rename` updates both stored names through the
+  exact revision it observed; a concurrent identity advance returns a conflict
+  and compensates the already-moved tmux name, joining rollback failures.
 - Once a transactional Codex resume prompt is submitted, later caller
   cancellation cannot report a retryable failure that would duplicate work.
 - Final creation liveness validation derives from the root context and rechecks

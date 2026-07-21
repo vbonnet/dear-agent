@@ -115,4 +115,34 @@ func TestDoltTmuxSessionNameChangeUsesCrossDialectOwnership(t *testing.T) {
 	if final.Tmux.SessionName != "second-canonical-name" || !final.UpdatedAt.Equal(previousUpdatedAt) {
 		t.Fatalf("production compensation = (%q, %v), want (second-canonical-name, %v)", final.Tmux.SessionName, final.UpdatedAt, previousUpdatedAt)
 	}
+	renameStale, err := adapter.GetSession(sessionID)
+	if err != nil {
+		t.Fatalf("GetSession() before authoritative rename conflict: %v", err)
+	}
+	renameConcurrent, err := adapter.GetSession(sessionID)
+	if err != nil {
+		t.Fatalf("second GetSession() before authoritative rename conflict: %v", err)
+	}
+	renameConcurrent.Context.Notes = "concurrent update before authoritative rename"
+	if err := adapter.UpdateSession(renameConcurrent); err != nil {
+		t.Fatalf("UpdateSession() before authoritative rename: %v", err)
+	}
+	if err := adapter.RenameSessionIdentity(t.Context(), sessionID, renameStale.Name, renameStale.Tmux.SessionName, renameStale.Tmux.SessionRevision, sessionID+"-stale-rename"); err == nil {
+		t.Fatal("RenameSessionIdentity() from stale revision succeeded")
+	}
+	renameCurrent, err := adapter.GetSession(sessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after authoritative rename conflict: %v", err)
+	}
+	authoritativeName := sessionID + "-renamed"
+	if err := adapter.RenameSessionIdentity(t.Context(), sessionID, renameCurrent.Name, renameCurrent.Tmux.SessionName, renameCurrent.Tmux.SessionRevision, authoritativeName); err != nil {
+		t.Fatalf("RenameSessionIdentity() current revision: %v", err)
+	}
+	renamed, err := adapter.GetSession(sessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after authoritative rename: %v", err)
+	}
+	if renamed.Name != authoritativeName || renamed.Tmux.SessionName != authoritativeName || renamed.Context.Notes != renameConcurrent.Context.Notes || renamed.Tmux.SessionRevision == renameCurrent.Tmux.SessionRevision {
+		t.Fatalf("authoritative rename state = (name=%q tmux=%q notes=%q revision=%q), want atomic names, preserved note, and advanced revision", renamed.Name, renamed.Tmux.SessionName, renamed.Context.Notes, renamed.Tmux.SessionRevision)
+	}
 }

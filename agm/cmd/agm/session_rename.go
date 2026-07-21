@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/git"
 	"github.com/vbonnet/dear-agent/agm/internal/interrupt"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/messages"
 	"github.com/vbonnet/dear-agent/agm/internal/monitoring"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
@@ -97,23 +99,22 @@ Examples:
 		var updated []string
 
 		// 1. Rename tmux session
-		if err := renameTmuxSession(oldName, newName); err != nil {
+		tmuxRenamed := false
+		if err := renameTmuxSessionContext(cmd.Context(), m.Tmux.SessionName, newName); err != nil {
 			fmt.Printf("  ⚠  tmux rename skipped: %v\n", err)
 		} else {
+			tmuxRenamed = true
 			updated = append(updated, "tmux session")
 		}
 
-		// 2. Update manifest fields
-		m.Name = newName
-		m.Tmux.SessionName = newName
-		m.UpdatedAt = time.Now()
-		updated = append(updated, "manifest")
-
-		// 3. Update Dolt database record
-		if err := adapter.UpdateSession(m); err != nil {
+		// 2-3. Atomically persist the exact identity snapshot. If a concurrent
+		// writer advanced it after resolution, restore the live tmux name and
+		// report the conflict rather than storing a dead identity.
+		if err := persistRenamedSessionIdentity(cmd.Context(), adapter, m, newName, tmuxRenamed, renameTmuxSessionContext); err != nil {
 			ui.PrintError(err, "Failed to update Dolt record", "")
 			return err
 		}
+		updated = append(updated, "manifest")
 		updated = append(updated, "dolt record")
 
 		// 4. Rename heartbeat file
@@ -184,6 +185,32 @@ func init() {
 
 // renameTmuxSession renames the tmux session from oldName to newName.
 func renameTmuxSession(oldName, newName string) error {
+	return renameTmuxSessionContext(context.Background(), oldName, newName)
+}
+
+type sessionIdentityRenamer interface {
+	RenameSessionIdentity(ctx context.Context, sessionID, previousName, previousTmuxName, observedRevision, newName string) error
+}
+
+func persistRenamedSessionIdentity(ctx context.Context, store sessionIdentityRenamer, m *manifest.Manifest, newName string, tmuxRenamed bool, renameTmux func(context.Context, string, string) error) error {
+	previousName := m.Name
+	previousTmuxName := m.Tmux.SessionName
+	err := store.RenameSessionIdentity(ctx, m.SessionID, previousName, previousTmuxName, m.Tmux.SessionRevision, newName)
+	if err != nil {
+		if tmuxRenamed {
+			if rollbackErr := renameTmux(ctx, newName, previousTmuxName); rollbackErr != nil {
+				return errors.Join(err, fmt.Errorf("restore tmux session name after storage conflict: %w", rollbackErr))
+			}
+		}
+		return err
+	}
+	m.Name = newName
+	m.Tmux.SessionName = newName
+	m.UpdatedAt = time.Now()
+	return nil
+}
+
+func renameTmuxSessionContext(ctx context.Context, oldName, newName string) error {
 	normalizedOld := tmux.NormalizeTmuxSessionName(oldName)
 
 	// Check if old tmux session exists
@@ -207,7 +234,6 @@ func renameTmuxSession(oldName, newName string) error {
 
 	// Rename via tmux command
 	socketPath := tmux.GetSocketPath()
-	ctx := context.Background()
 	_, err = tmux.RunWithTimeout(ctx, 5*time.Second,
 		"tmux", "-S", socketPath, "rename-session",
 		"-t", tmux.FormatSessionTarget(normalizedOld), normalizedNew)

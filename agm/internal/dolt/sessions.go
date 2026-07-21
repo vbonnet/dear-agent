@@ -369,6 +369,45 @@ func (a *Adapter) UpdateTmuxSessionName(ctx context.Context, sessionID, sessionN
 	return nil
 }
 
+// RenameSessionIdentity atomically changes both user-visible and tmux names
+// from the exact identity revision observed by the caller. Unlike a broad
+// UpdateSession, an authoritative rename must report a concurrent change
+// instead of silently preserving the old tmux name after the live pane moved.
+func (a *Adapter) RenameSessionIdentity(ctx context.Context, sessionID, previousName, previousTmuxName, observedRevision, newName string) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id cannot be empty")
+	}
+	if newName == "" {
+		return fmt.Errorf("new session name cannot be empty")
+	}
+	if err := a.ApplyMigrations(); err != nil {
+		return fmt.Errorf("failed to apply migrations: %w", err)
+	}
+	observedRevisionValue := nullableStringValue(sql.NullString{
+		String: observedRevision,
+		Valid:  observedRevision != "",
+	})
+	result, err := a.conn.ExecContext(ctx, `
+		UPDATE agm_sessions
+		SET updated_at = ?, name = ?, tmux_session_name = ?, tmux_session_revision = ?
+		WHERE id = ? AND workspace = ?
+		  AND name = ? AND tmux_session_name = ?
+		  AND ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)
+	`, time.Now(), newName, newName, uuid.NewString(), sessionID, a.workspace,
+		previousName, previousTmuxName, observedRevisionValue, observedRevisionValue)
+	if err != nil {
+		return fmt.Errorf("rename session identity: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get renamed session identity rows affected: %w", err)
+	}
+	if rowsAffected != 1 {
+		return fmt.Errorf("session identity changed concurrently: %s", sessionID)
+	}
+	return nil
+}
+
 // TmuxSessionNameChange is the exact adapter-owned revision for a provisional
 // tmux-name write. Its opaque token is compared directly by both MySQL/Dolt and
 // SQLite, avoiding dialect-specific timestamp casts and precision differences.
