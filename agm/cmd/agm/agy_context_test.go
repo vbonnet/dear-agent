@@ -221,15 +221,17 @@ func TestRunAgyPostCreatePropagatesPostPromptReadinessFailure(t *testing.T) {
 	prompt, promptFile = "startup prompt", ""
 	t.Cleanup(func() { prompt, promptFile = originalPrompt, originalPromptFile })
 	wantErr := errors.New("AGY response readiness unavailable")
-	waits := 0
+	startupWaits := 0
+	postInputWaits := 0
 	retried := false
 
 	err := runAgyPostCreateWithRuntime(t.Context(), "agy-create", agyPostCreateRuntime{
 		wait: func(context.Context, string, time.Duration) error {
-			waits++
-			if waits == 1 {
-				return nil
-			}
+			startupWaits++
+			return nil
+		},
+		waitAfterInput: func(context.Context, string, time.Duration) error {
+			postInputWaits++
 			return wantErr
 		},
 		associate: func(string) {},
@@ -244,6 +246,9 @@ func TestRunAgyPostCreatePropagatesPostPromptReadinessFailure(t *testing.T) {
 	}
 	if retried {
 		t.Fatal("metadata retry ran after post-prompt readiness failure")
+	}
+	if startupWaits != 1 || postInputWaits != 1 {
+		t.Fatalf("readiness waits = startup %d/post-input %d, want 1/1", startupWaits, postInputWaits)
 	}
 }
 

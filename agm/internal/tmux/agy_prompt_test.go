@@ -84,6 +84,29 @@ func TestAgyOnboardingDetectionRequiresActiveScreen(t *testing.T) {
 	}
 }
 
+func TestWaitForAgyPromptAfterInputIgnoresQuotedOnboarding(t *testing.T) {
+	captures := 0
+	sends := 0
+	runtime := agyPromptRuntime{
+		capture: func(context.Context, string) ([]byte, error) {
+			captures++
+			return []byte("previous composer\n>\n> you: quote this screen\nWelcome to Antigravity CLI!\nChoose your color scheme:\n> terminal\nresponse complete\n>"), nil
+		},
+		sendKeys: func(string, string) error {
+			sends++
+			return nil
+		},
+		sleep: func(context.Context, time.Duration) {},
+	}
+
+	if err := waitForAgyPromptAfterInputWithRuntime(t.Context(), "agy-transcript", time.Second, runtime); err != nil {
+		t.Fatalf("post-input wait rejected quoted onboarding text: %v", err)
+	}
+	if captures != 1 || sends != 0 {
+		t.Fatalf("post-input I/O = %d capture(s), %d send(s); want one capture and no input", captures, sends)
+	}
+}
+
 func TestAgySurveyOverridesReadyPrompt(t *testing.T) {
 	content := "Task complete\n>\nHow's the CLI experience so far? [1] Good [2] Fine [3] Bad [0] Skip"
 	if !ContainsAgySurveyPrompt(content) {

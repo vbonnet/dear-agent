@@ -635,7 +635,7 @@ func sendDirectly(ctx context.Context, recipientSession, senderName, messageID, 
 		return err
 	}
 	if harnessType == "agy" && (m.Agy == nil || m.Agy.ConversationID == "") {
-		if err := waitForAgyMetadataBackfill(ctx, recipientSession, tmux.WaitForAgyPrompt); err != nil {
+		if err := waitForAgyMetadataBackfill(ctx, recipientSession, tmux.WaitForAgyPromptAfterInput); err != nil {
 			return err
 		}
 		if err := associateSpawnedAgySessionWithRetry(ctx, m.Name, 20, 500*time.Millisecond); err != nil {

@@ -170,6 +170,14 @@ func WaitForAgyPrompt(ctx context.Context, sessionName string, timeout time.Dura
 	return waitForAgyPromptWithRuntime(ctx, sessionName, timeout, realAgyPromptRuntime())
 }
 
+// WaitForAgyPromptAfterInput polls for AGY readiness after operator-controlled
+// text has been delivered. It does not classify onboarding-shaped transcript
+// text as an active first-run screen; onboarding is gated by the pre-input wait.
+func WaitForAgyPromptAfterInput(ctx context.Context, sessionName string, timeout time.Duration) error {
+	debug.Log("\n🔍 Starting post-input AGY prompt detection for session: %s", sessionName)
+	return waitForAgyPromptAfterInputWithRuntime(ctx, sessionName, timeout, realAgyPromptRuntime())
+}
+
 func dismissAgySurveyOnce(runtime agyPromptRuntime, sessionName, content string, alreadyDismissed bool) (dismissed, handled bool) {
 	if alreadyDismissed || !ContainsAgySurveyPrompt(content) {
 		return alreadyDismissed, false
@@ -183,6 +191,21 @@ func dismissAgySurveyOnce(runtime agyPromptRuntime, sessionName, content string,
 }
 
 func waitForAgyPromptWithRuntime(baseCtx context.Context, sessionName string, timeout time.Duration, runtime agyPromptRuntime) error {
+	return waitForAgyPromptWithRuntimeMode(baseCtx, sessionName, timeout, runtime, true)
+}
+
+func waitForAgyPromptAfterInputWithRuntime(baseCtx context.Context, sessionName string, timeout time.Duration, runtime agyPromptRuntime) error {
+	return waitForAgyPromptWithRuntimeMode(baseCtx, sessionName, timeout, runtime, false)
+}
+
+func agyOnboardingWaitError(content string, detectOnboarding bool) error {
+	if !detectOnboarding || !containsAgyOnboardingPrompt(content) {
+		return nil
+	}
+	return fmt.Errorf("%w: run `agy` interactively, review the theme and Terms of Service/Data Use choices, complete onboarding, then retry AGM; AGM will not accept legal or data-use choices automatically", ErrAgyOnboardingRequired)
+}
+
+func waitForAgyPromptWithRuntimeMode(baseCtx context.Context, sessionName string, timeout time.Duration, runtime agyPromptRuntime, detectOnboarding bool) error {
 	ctx, cancel := context.WithTimeout(baseCtx, timeout)
 	defer cancel()
 
@@ -208,8 +231,8 @@ func waitForAgyPromptWithRuntime(baseCtx context.Context, sessionName string, ti
 		}
 
 		content := string(output)
-		if containsAgyOnboardingPrompt(content) {
-			return fmt.Errorf("%w: run `agy` interactively, review the theme and Terms of Service/Data Use choices, complete onboarding, then retry AGM; AGM will not accept legal or data-use choices automatically", ErrAgyOnboardingRequired)
+		if err := agyOnboardingWaitError(content, detectOnboarding); err != nil {
+			return err
 		}
 		var surveyHandled bool
 		surveyDismissed, surveyHandled = dismissAgySurveyOnce(runtime, sessionName, content, surveyDismissed)

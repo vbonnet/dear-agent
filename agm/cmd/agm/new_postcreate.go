@@ -208,6 +208,7 @@ func runCodexPostCreate(ctx context.Context, sessionName string) error {
 // once the interactive prompt is ready.
 type agyPostCreateRuntime struct {
 	wait               func(context.Context, string, time.Duration) error
+	waitAfterInput     func(context.Context, string, time.Duration) error
 	associate          func(string)
 	deliver            func(context.Context, string, bool, bool) error
 	associateWithRetry func(context.Context, string, int, time.Duration) error
@@ -216,6 +217,7 @@ type agyPostCreateRuntime struct {
 func realAgyPostCreateRuntime() agyPostCreateRuntime {
 	return agyPostCreateRuntime{
 		wait:               tmux.WaitForAgyPrompt,
+		waitAfterInput:     tmux.WaitForAgyPromptAfterInput,
 		associate:          associateSpawnedAgySession,
 		deliver:            deliverInitialPrompt,
 		associateWithRetry: associateSpawnedAgySessionWithRetry,
@@ -247,7 +249,11 @@ func runAgyPostCreateWithRuntime(ctx context.Context, sessionName string, runtim
 			return err
 		}
 		if prompt != "" || promptFile != "" {
-			if err := runtime.wait(ctx, sessionName, 60*time.Second); err != nil {
+			waitAfterInput := runtime.waitAfterInput
+			if waitAfterInput == nil {
+				waitAfterInput = runtime.wait
+			}
+			if err := waitAfterInput(ctx, sessionName, 60*time.Second); err != nil {
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}

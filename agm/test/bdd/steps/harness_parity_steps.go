@@ -1883,6 +1883,7 @@ func agmCreatesDetachedAGYSessionWithStartupPrompt(ctx context.Context) error {
 		"TestCreateSession_AgyDetachedPromptUsesCanonicalCommand",
 		"TestWaitForAgyPromptAcceptsTrustBeforeReady",
 		"TestWaitForAgyPromptRejectsFirstRunOnboardingWithoutInput",
+		"TestWaitForAgyPromptAfterInputIgnoresQuotedOnboarding",
 		"TestContainsAgyPromptAfterSurveyRequiresLaterPrompt",
 		"TestWaitForAgyPromptDoesNotRedismissStaleSurvey",
 	); err != nil {
@@ -1917,13 +1918,22 @@ func runAgyLifecycleBehaviorSuite(ctx context.Context, harnessState *harnessPari
 	)
 	cmd.Dir = bddRepoRoot()
 	output, runErr := cmd.CombinedOutput()
+	transcriptCmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/tmux",
+		"-run", `^TestWaitForAgyPromptAfterInputIgnoresQuotedOnboarding$`,
+		"-count=1", "-v",
+	)
+	transcriptCmd.Dir = bddRepoRoot()
+	transcriptOutput, transcriptErr := transcriptCmd.CombinedOutput()
 	lockCmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/lock", "./agm/internal/agysession",
 		"-run", `^Test(FileLockTryLockPreservesPermanentFlockError|AcquireWorkspaceCreateLockStopsOnPermanentFlockError)$`,
 		"-count=1", "-v",
 	)
 	lockCmd.Dir = bddRepoRoot()
 	lockOutput, lockErr := lockCmd.CombinedOutput()
-	harnessState.agyLifecycleTestOutput = string(output) + "\n" + string(lockOutput)
+	harnessState.agyLifecycleTestOutput = string(output) + "\n" + string(transcriptOutput) + "\n" + string(lockOutput)
+	if runErr == nil {
+		runErr = transcriptErr
+	}
 	if runErr == nil {
 		runErr = lockErr
 	}
