@@ -47,6 +47,14 @@ func TestRun_HelpIsNotAnError(t *testing.T) {
 	}
 }
 
+func TestUsageDocumentsNonAGMFallback(t *testing.T) {
+	for _, want := range []string{"agm escalate ask", "--session <registered-session>", "ask the current user directly"} {
+		if !strings.Contains(usage, want) {
+			t.Errorf("usage missing %q", want)
+		}
+	}
+}
+
 func TestParsePRURL(t *testing.T) {
 	repo, num, ok := parsePRURL("https://github.com/vbonnet/dear-agent/pull/582")
 	if !ok || repo != "vbonnet/dear-agent" || num != "582" {

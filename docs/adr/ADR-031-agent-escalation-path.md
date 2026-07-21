@@ -1,4 +1,4 @@
-<!-- Last audited at: 2026-06-15 -->
+<!-- Last audited at: 2026-07-21 -->
 
 # ADR-031: Agent Escalation Path (No Bypass Flags)
 
@@ -61,28 +61,28 @@ detects:
 The hook fires on every Bash call in this project. It fails open (exit 0 on
 any parse error) so it cannot wedge a session for an unrelated reason.
 
-### 3. Escalation path (future work — bead ce-m3ya)
+### 3. Escalation path
 
 When an agent hits a blocked action and no approved path exists, the correct
 flow is:
 
 ```
-agm escalate --action "<what the agent needs to do>" --reason "<why it cannot use the normal path>"
+agm escalate ask --kind blocked-action --context "<why the normal path is unavailable>" "<what the agent needs to do>"
 ```
 
-`agm escalate` (not yet implemented; tracked in bead ce-m3ya) will:
+`agm escalate ask` creates a durable escalation record and:
 
-1. Create a bead in `~/beads/context-engine` tagged `escalation` with the
-   action, reason, and originating session ID.
-2. Route the bead up the VROOM supervisory chain: agent → orchestrator → overseer.
-3. In parallel, fire a research agent to propose an approved path (a new
-   `safe-*` wrapper, a hook exception, a policy revision).
-4. Surface a human-readable notification: "Agent X needs to do Y. No approved
-   path exists. Research suggests Z. Approve Y / Reject / Create approved path."
+1. Attributes the question to the current or explicitly named session.
+2. Routes it to the spawning supervisor, then through the VROOM chain when it
+   must be forwarded.
+3. Supports asynchronous questions or a blocking wait by the asking worker.
+4. Preserves answers, forwards, and VROOM votes in the Dispatch decision trail.
 
-Every approval becomes a mini DEAR retro entry and, where appropriate, a new
-approved path committed to the codebase — so the class of situation is resolved
-for all future agents, not just the current one (CLAUDE.md principle 7).
+Outside an AGM-launched session, the caller must pass
+`--session <registered-session>`. If no registered session exists, the agent
+must ask the current user directly; escalation does not create or update a Bead.
+
+ADR-032 defines the implemented command family and routing contract.
 
 ### 4. Error message contract
 
@@ -98,8 +98,10 @@ Example (from `safe-pr`):
 ```
 no wayfinder session given: pass --wayfinder <project-dir> or set
 WAYFINDER_PROJECT_DIR to the directory containing WAYFINDER-STATUS.md.
-Every PR must carry a wayfinder trace. If no approved path exists, escalate via:
-  agm escalate --action "create PR" --reason "<why no session exists>"
+Every PR must carry a wayfinder trace. In a current AGM session, escalate via:
+  agm escalate ask --kind blocked-action --context "<why no session exists>" "create PR"
+Outside AGM, add --session <registered-session>. If no registered session
+exists, ask the current user directly.
 ```
 
 ---
@@ -110,15 +112,14 @@ Every PR must carry a wayfinder trace. If no approved path exists, escalate via:
 
 - Safety gates are now unconditional; no bypass path exists inside the tools.
 - Every situation where an agent is genuinely blocked becomes a visible signal
-  (a bead, a retro, a resolved approved path).
+  (a durable escalation, a retro, or a resolved approved path).
 - The escalation path turns one-off human decisions into durable policy.
 
 **Negative / trade-offs:**
 
-- Until `agm escalate` is implemented (ce-m3ya), a blocked agent has no
-  machine-readable path to surface the gap. In the interim, agents must file a
-  bead manually (`bd --db ~/beads/context-engine/.beads create ...`) and
-  report the block in their end-of-run summary.
+- Escalation adds a durable decision record and supervisory hop instead of an
+  immediate local exception. Agents may continue independent work or use the
+  command's blocking wait when the exceptional action is truly required.
 - The bot-review gate in `safe-merge` was occasionally hit due to Gemini quota
   exhaustion. Without `--skip-bot-review`, the only options are `--watch` (poll
   until the bot posts) or escalation. This is intentional: quota exhaustion is a

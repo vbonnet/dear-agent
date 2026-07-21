@@ -61,8 +61,10 @@ func ResolveSessionDir(flagDir string) (string, error) {
 	}
 	return "", fmt.Errorf("no wayfinder session given: pass --wayfinder <project-dir> or set " +
 		"WAYFINDER_PROJECT_DIR to the directory containing WAYFINDER-STATUS.md. Every PR must " +
-		"carry a wayfinder trace. If no approved path exists, escalate via: " +
-		"agm escalate --action \"create PR\" --reason \"<why no session exists>\"")
+		"carry a wayfinder trace. In a current AGM session, escalate via: " +
+		"agm escalate ask --kind blocked-action --context \"<why no session exists>\" \"create PR\". " +
+		"Outside AGM, add --session <registered-session>; if no registered session exists, " +
+		"ask the current user directly")
 }
 
 // LoadSession reads <dir>/WAYFINDER-STATUS.md and returns the session it
