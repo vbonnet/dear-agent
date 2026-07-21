@@ -2,12 +2,14 @@ package agysession
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -32,6 +34,129 @@ func TestFindByID_UsesLastConversationsCache(t *testing.T) {
 	}
 	if meta.TranscriptPath == "" || !strings.HasSuffix(meta.TranscriptPath, "transcript.jsonl") {
 		t.Fatalf("unexpected transcript path: %q", meta.TranscriptPath)
+	}
+}
+
+func TestFindByID_RejectsUnsafeConversationIDBeforePathLookup(t *testing.T) {
+	_, err := FindByID(t.TempDir(), "../../escape; touch /tmp/no")
+	if err == nil || !strings.Contains(err.Error(), "invalid AGY native conversation ID") {
+		t.Fatalf("FindByID error = %v, want unsafe native ID rejection", err)
+	}
+}
+
+func TestAcquireWorkspaceCreateLockSerializesAndHonorsCancellation(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	preCanceled, cancelBeforeAcquire := context.WithCancel(t.Context())
+	cancelBeforeAcquire()
+	if _, err := AcquireWorkspaceCreateLock(preCanceled, t.TempDir()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("pre-canceled workspace lock error = %v, want context cancellation", err)
+	}
+	workDir := t.TempDir()
+	aliasWorkDir := filepath.Join(t.TempDir(), "workspace-alias")
+	if err := os.Symlink(workDir, aliasWorkDir); err != nil {
+		t.Fatalf("create workspace symlink: %v", err)
+	}
+	release, err := AcquireWorkspaceCreateLock(t.Context(), workDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := release(); err != nil {
+			t.Errorf("release first workspace lock: %v", err)
+		}
+	}()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	result := make(chan error, 1)
+	go func() {
+		_, lockErr := AcquireWorkspaceCreateLock(ctx, aliasWorkDir)
+		result <- lockErr
+	}()
+	select {
+	case err := <-result:
+		t.Fatalf("contending workspace lock returned before cancellation: %v", err)
+	case <-time.After(75 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("contending workspace lock error = %v, want context cancellation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("contending workspace lock ignored caller cancellation")
+	}
+}
+
+func TestFindLatestForWorkspaceCanonicalizesProviderCacheSymlinkAlias(t *testing.T) {
+	homeDir := t.TempDir()
+	appDir := filepath.Join(homeDir, ".gemini", "antigravity-cli")
+	conversationID := "117ff898-a964-4a9f-b460-1be4a8a49b17"
+	workspace, err := CanonicalWorkspacePath(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliasWorkDir := filepath.Join(t.TempDir(), "workspace-alias")
+	if err := os.Symlink(workspace, aliasWorkDir); err != nil {
+		t.Fatalf("create workspace symlink: %v", err)
+	}
+	writeAgyFixture(t, appDir, conversationID, aliasWorkDir, "")
+
+	meta, err := FindLatestForWorkspace(homeDir, workspace)
+	if err != nil {
+		t.Fatalf("FindLatestForWorkspace with symlinked provider cache key: %v", err)
+	}
+	if meta.ConversationID != conversationID || meta.WorkspacePath != workspace {
+		t.Fatalf("symlink lookup metadata = ID %q workspace %q, want %q/%q", meta.ConversationID, meta.WorkspacePath, conversationID, workspace)
+	}
+}
+
+func TestFindLatestForWorkspaceCanonicalizesProviderLogSymlinkAlias(t *testing.T) {
+	homeDir := t.TempDir()
+	appDir := filepath.Join(homeDir, ".gemini", "antigravity-cli")
+	conversationID := "117ff898-a964-4a9f-b460-1be4a8a49b17"
+	workspace, err := CanonicalWorkspacePath(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliasWorkDir := filepath.Join(t.TempDir(), "workspace-alias")
+	if err := os.Symlink(workspace, aliasWorkDir); err != nil {
+		t.Fatalf("create workspace symlink: %v", err)
+	}
+	writeAgyFixture(t, appDir, conversationID, "", aliasWorkDir)
+
+	meta, err := FindLatestForWorkspace(homeDir, workspace)
+	if err != nil {
+		t.Fatalf("FindLatestForWorkspace with symlinked provider log marker: %v", err)
+	}
+	if meta.ConversationID != conversationID || meta.WorkspacePath != workspace {
+		t.Fatalf("symlink log metadata = ID %q workspace %q, want %q/%q", meta.ConversationID, meta.WorkspacePath, conversationID, workspace)
+	}
+}
+
+type permanentWorkspaceFileLock struct {
+	attempts int
+}
+
+func (fileLock *permanentWorkspaceFileLock) TryLock() error {
+	fileLock.attempts++
+	return syscall.EIO
+}
+
+func (*permanentWorkspaceFileLock) Unlock() error { return nil }
+
+func TestAcquireWorkspaceCreateLockStopsOnPermanentFlockError(t *testing.T) {
+	original := newWorkspaceFileLock
+	t.Cleanup(func() { newWorkspaceFileLock = original })
+	fileLock := &permanentWorkspaceFileLock{}
+	newWorkspaceFileLock = func(string) (workspaceFileLock, error) { return fileLock, nil }
+
+	_, err := AcquireWorkspaceCreateLock(t.Context(), t.TempDir())
+	if !errors.Is(err, syscall.EIO) {
+		t.Fatalf("AcquireWorkspaceCreateLock error = %v, want permanent EIO", err)
+	}
+	if fileLock.attempts != 1 {
+		t.Fatalf("permanent flock attempts = %d, want exactly one", fileLock.attempts)
 	}
 }
 
@@ -114,6 +239,89 @@ func TestFindLatestForWorkspace_FallsBackToLogs(t *testing.T) {
 	}
 }
 
+func TestFindLatestForWorkspace_FallsBackFromDanglingCacheToLogs(t *testing.T) {
+	homeDir := t.TempDir()
+	appDir := filepath.Join(homeDir, ".gemini", "antigravity-cli")
+	workspace := "/tmp/agy-dangling-cache"
+	danglingID := "dangling-conversation"
+	currentID := "current-conversation"
+
+	writeAgyFixture(t, appDir, danglingID, workspace, "")
+	if err := os.Remove(filepath.Join(appDir, "conversations", danglingID+".db")); err != nil {
+		t.Fatalf("remove stale conversation DB: %v", err)
+	}
+	writeAgyFixture(t, appDir, currentID, "", workspace)
+	cachePath := filepath.Join(appDir, "cache", "last_conversations.json")
+	if err := os.WriteFile(cachePath, []byte(`{"`+workspace+`":"`+danglingID+`"}`), 0o644); err != nil {
+		t.Fatalf("restore dangling cache entry: %v", err)
+	}
+
+	meta, err := FindLatestForWorkspace(homeDir, workspace)
+	if err != nil {
+		t.Fatalf("FindLatestForWorkspace: %v", err)
+	}
+	if meta.ConversationID != currentID {
+		t.Fatalf("conversation ID = %q, want log-backed %q", meta.ConversationID, currentID)
+	}
+}
+
+func TestFindLatestForWorkspace_SkipsDeletedConversationsWhileScanningLogs(t *testing.T) {
+	homeDir := t.TempDir()
+	appDir := filepath.Join(homeDir, ".gemini", "antigravity-cli")
+	workspace := "/tmp/agy-deleted-newest-log"
+	danglingID := "deleted-newest-conversation"
+	currentID := "usable-older-conversation"
+
+	writeAgyFixture(t, appDir, danglingID, workspace, "")
+	if err := os.Remove(filepath.Join(appDir, "conversations", danglingID+".db")); err != nil {
+		t.Fatalf("remove stale conversation DB: %v", err)
+	}
+	writeAgyFixture(t, appDir, currentID, "", "")
+	cachePath := filepath.Join(appDir, "cache", "last_conversations.json")
+	if err := os.WriteFile(cachePath, []byte(`{"`+workspace+`":"`+danglingID+`"}`), 0o644); err != nil {
+		t.Fatalf("restore dangling cache entry: %v", err)
+	}
+	olderLog := writeAgyLog(t, appDir, "older-usable.log", []string{
+		workspaceMarker + workspace,
+		"Created conversation " + currentID,
+	})
+	newerLog := writeAgyLog(t, appDir, "newer-deleted.log", []string{
+		workspaceMarker + workspace,
+		"Created conversation " + danglingID,
+	})
+	base := time.Date(2026, time.July, 21, 12, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(olderLog, base, base); err != nil {
+		t.Fatalf("set older log time: %v", err)
+	}
+	if err := os.Chtimes(newerLog, base.Add(time.Minute), base.Add(time.Minute)); err != nil {
+		t.Fatalf("set newer log time: %v", err)
+	}
+
+	meta, err := FindLatestForWorkspace(homeDir, workspace)
+	if err != nil {
+		t.Fatalf("FindLatestForWorkspace: %v", err)
+	}
+	if meta.ConversationID != currentID {
+		t.Fatalf("conversation ID = %q, want older usable %q", meta.ConversationID, currentID)
+	}
+}
+
+func TestFindLatestForWorkspace_ClassifiesDanglingCacheWithoutLogsAsAbsent(t *testing.T) {
+	homeDir := t.TempDir()
+	appDir := filepath.Join(homeDir, ".gemini", "antigravity-cli")
+	workspace := "/tmp/agy-dangling-cache-only"
+	conversationID := "dangling-conversation"
+	writeAgyFixture(t, appDir, conversationID, workspace, "")
+	if err := os.Remove(filepath.Join(appDir, "conversations", conversationID+".db")); err != nil {
+		t.Fatalf("remove stale conversation DB: %v", err)
+	}
+
+	_, err := FindLatestForWorkspace(homeDir, workspace)
+	if !errors.Is(err, ErrConversationNotFound) {
+		t.Fatalf("FindLatestForWorkspace error = %v, want ErrConversationNotFound", err)
+	}
+}
+
 func TestFindLatestForWorkspace_StripsGetConversationDetailSuffix(t *testing.T) {
 	homeDir := t.TempDir()
 	appDir := filepath.Join(homeDir, ".gemini", "antigravity-cli")
@@ -131,6 +339,14 @@ func TestFindLatestForWorkspace_StripsGetConversationDetailSuffix(t *testing.T) 
 	}
 	if meta.ConversationID != conversationID {
 		t.Fatalf("conversation ID = %q, want %q", meta.ConversationID, conversationID)
+	}
+}
+
+func TestFindLatestForWorkspaceDistinguishesNoConversation(t *testing.T) {
+	homeDir := t.TempDir()
+	_, err := FindLatestForWorkspace(homeDir, "/tmp/agy-never-opened")
+	if !errors.Is(err, ErrConversationNotFound) {
+		t.Fatalf("FindLatestForWorkspace error = %v, want ErrConversationNotFound", err)
 	}
 }
 

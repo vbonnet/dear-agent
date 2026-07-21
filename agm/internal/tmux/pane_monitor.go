@@ -147,10 +147,21 @@ func GetPanePID(sessionName string) (int, error) {
 // KillSession kills a tmux session by name. Idempotent — ignores errors
 // if the session is already dead.
 func KillSession(sessionName string) {
+	if KillSessionWithError(sessionName) != nil {
+		return
+	}
+}
+
+// KillSessionWithError kills a tmux session and reports failure. Lifecycle
+// rollback paths use this variant so cleanup failures cannot be discarded.
+func KillSessionWithError(sessionName string) error {
 	socketPath := GetSocketPath()
 	normalizedName := NormalizeTmuxSessionName(sessionName)
 	cmd := exec.Command("tmux", "-S", socketPath, "kill-session", "-t", FormatSessionTarget(normalizedName))
-	_ = cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("kill tmux session %q: %w", sessionName, err)
+	}
+	return nil
 }
 
 // IsPaneActive checks if a pane is currently active

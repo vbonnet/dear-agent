@@ -19,10 +19,10 @@ func TestSingleQuote(t *testing.T) {
 
 func TestIsShellCommand(t *testing.T) {
 	for _, shell := range []string{"zsh", "bash", "sh", "ash", "fish", "-zsh", "/bin/bash"} {
-		assert.True(t, isShellCommand(shell), "expected %q to be a shell", shell)
+		assert.True(t, IsShellCommand(shell), "expected %q to be a shell", shell)
 	}
 	for _, notShell := range []string{"claude", "node", "bun", "env", "codex", "agm", ""} {
-		assert.False(t, isShellCommand(notShell), "expected %q to not be a shell", notShell)
+		assert.False(t, IsShellCommand(notShell), "expected %q to not be a shell", notShell)
 	}
 }
 

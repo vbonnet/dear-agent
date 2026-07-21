@@ -27,6 +27,8 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
 
 **MCS-06** When MCP session creation succeeds, the result shall report `source: "mcp"` and the registered manifest shall contain the `source:mcp` provenance tag.
 
+**MCS-07** When MCP creates an AGY session, the shared creation lifecycle shall persist the newly discovered provider-native conversation identity before the MCP runtime delivers its required startup prompt or reports success.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/mcp_parity.feature`

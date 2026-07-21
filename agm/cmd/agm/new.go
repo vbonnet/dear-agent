@@ -110,7 +110,7 @@ Behavior:
   • Outside tmux + no name → Prompts for name, creates tmux + selected harness
   • Outside tmux + name provided → Creates tmux session with that name + selected harness
   • Inside tmux + no name → Uses current tmux name, starts selected harness
-  • Inside tmux + matching name → Uses current tmux, starts selected harness
+  • Inside tmux + matching name → Uses current tmux, except AGY requires --detached
   • Inside tmux + different name → Error (name mismatch) unless --detached
   • --detached flag → Creates session, doesn't attach (stays in current context)
 
@@ -677,7 +677,7 @@ Examples:
 		// 1. Inside tmux + not detached: start Claude in current session
 		// 2. Outside tmux OR detached: create tmux session, start Claude, attach (or not if detached)
 
-		return startNewSessionForContext(cmd.Context(), inTmux, detached, sessionName, realNewSessionStartRuntime())
+		return startNewSessionForContext(cmd.Context(), inTmux, detached, sessionName, harnessName, realNewSessionStartRuntime())
 	},
 }
 
@@ -693,8 +693,11 @@ func realNewSessionStartRuntime() newSessionStartRuntime {
 	}
 }
 
-func startNewSessionForContext(ctx context.Context, inTmux, detached bool, sessionName string, runtime newSessionStartRuntime) error {
+func startNewSessionForContext(ctx context.Context, inTmux, detached bool, sessionName, harness string, runtime newSessionStartRuntime) error {
 	if inTmux && !detached {
+		if agent.NormalizeHarnessName(harness) == "agy" {
+			return currentTmuxAgyUnsupportedError()
+		}
 		return runtime.currentTmux(ctx, sessionName)
 	}
 	return runtime.separateTmux(ctx, sessionName)

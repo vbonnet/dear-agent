@@ -42,8 +42,20 @@ type SessionMetadata struct {
 	// Project is the optional project identifier.
 	Project string `json:"project,omitempty"`
 
-	// UUID is the agent's native session identifier (Gemini UUID, Claude UUID, etc.).
-	// For Gemini CLI, this is extracted from --list-sessions output.
+	// Model is the selected harness-native model alias or exact model label.
+	// It is retained so a cold resume preserves the create-time model.
+	Model string `json:"model,omitempty"`
+
+	// PermissionMode is the shared AGM mode selected at creation time.
+	PermissionMode string `json:"permission_mode,omitempty"`
+
+	// AuthorizedDirs are additional workspace directories supplied at launch.
+	AuthorizedDirs []string `json:"authorized_dirs,omitempty"`
+
+	// UUID is the agent's native session identifier (AGY conversation ID,
+	// Gemini UUID, Claude UUID, etc.).
+	// For AGY it is captured from native conversation metadata; for deprecated
+	// Gemini CLI it is extracted from --list-sessions output.
 	// Used for --resume flag to restore specific session state.
 	UUID string `json:"uuid,omitempty"`
 

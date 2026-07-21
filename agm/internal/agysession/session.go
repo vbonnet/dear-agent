@@ -4,6 +4,8 @@ package agysession
 
 import (
 	"bufio"
+	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +15,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/lock"
 )
 
 const (
@@ -27,6 +31,22 @@ const (
 // deterministic newest-first log budget. Callers can distinguish this from a
 // complete bounded search that simply found no matching metadata.
 var ErrLogDiscoveryBudgetExhausted = errors.New("AGY log discovery budget exhausted")
+
+// ErrConversationNotFound means a complete provider metadata search found no
+// saved AGY conversation for the requested workspace. It is distinct from an
+// unreadable, corrupt, or incompletely searched metadata store.
+var ErrConversationNotFound = errors.New("AGY conversation not found")
+
+const workspaceCreateLockRetryDelay = 25 * time.Millisecond
+
+type workspaceFileLock interface {
+	TryLock() error
+	Unlock() error
+}
+
+var newWorkspaceFileLock = func(path string) (workspaceFileLock, error) {
+	return lock.New(path)
+}
 
 type agyLogCandidates struct {
 	paths              []string
@@ -54,15 +74,15 @@ type Metadata struct {
 
 // FindByID resolves a saved AGY conversation by its conversation UUID.
 func FindByID(homeDir, conversationID string) (*Metadata, error) {
-	if conversationID == "" {
-		return nil, fmt.Errorf("conversation ID cannot be empty")
+	if err := ValidateConversationID(conversationID); err != nil {
+		return nil, err
 	}
 	appDir := filepath.Join(homeDir, ".gemini", "antigravity-cli")
 	conversationDBPath := filepath.Join(appDir, "conversations", conversationID+".db")
 	info, err := os.Stat(conversationDBPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("no AGY saved conversation found for ID: %s", conversationID)
+			return nil, fmt.Errorf("%w for ID: %s", ErrConversationNotFound, conversationID)
 		}
 		return nil, fmt.Errorf("stat AGY conversation DB: %w", err)
 	}
@@ -88,26 +108,156 @@ func FindByID(homeDir, conversationID string) (*Metadata, error) {
 	return meta, nil
 }
 
+// ValidateConversationID rejects values that are unsafe as both an AGY CLI
+// argument and a provider-owned path component. Current AGY IDs are UUIDs, but
+// the bounded identifier grammar preserves compatibility with future formats.
+func ValidateConversationID(conversationID string) error {
+	if len(conversationID) == 0 || len(conversationID) > 128 {
+		return fmt.Errorf("invalid AGY native conversation ID: expected 1-128 safe identifier characters")
+	}
+	for i := 0; i < len(conversationID); i++ {
+		c := conversationID[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || (i > 0 && (c == '-' || c == '_')) {
+			continue
+		}
+		return fmt.Errorf("invalid AGY native conversation ID: expected an alphanumeric identifier containing only letters, digits, hyphens, or underscores")
+	}
+	return nil
+}
+
+// CanonicalWorkspacePath returns one physical path spelling for an existing
+// AGY workspace. AGY's latest-conversation mapping is workspace-global, so
+// lock, launch, and identity lookup callers must not treat a symlink alias as a
+// different workspace. Removed historical workspaces retain their cleaned
+// absolute spelling so saved-session metadata remains searchable.
+func CanonicalWorkspacePath(workDir string) (string, error) {
+	if strings.TrimSpace(workDir) == "" {
+		return "", fmt.Errorf("AGY workspace path cannot be empty")
+	}
+	absoluteWorkDir, err := filepath.Abs(workDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve absolute AGY workspace path: %w", err)
+	}
+	resolvedWorkDir, err := filepath.EvalSymlinks(absoluteWorkDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return filepath.Clean(absoluteWorkDir), nil
+		}
+		return "", fmt.Errorf("resolve AGY workspace symlinks: %w", err)
+	}
+	return filepath.Clean(resolvedWorkDir), nil
+}
+
+// AcquireWorkspaceCreateLock serializes AGY conversation creation for one
+// canonical workspace. AGY exposes only a workspace-global latest-conversation
+// mapping, so every AGM launch surface must hold this lock until its native ID
+// has been discovered and persisted.
+func AcquireWorkspaceCreateLock(ctx context.Context, workDir string) (func() error, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	canonicalWorkDir, err := CanonicalWorkspacePath(workDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve AGY workspace lock path: %w", err)
+	}
+	stateDir := os.Getenv("AGM_STATE_DIR")
+	if stateDir == "" {
+		stateDir = fmt.Sprintf("/tmp/agm-%d", os.Getuid())
+	}
+	digest := sha256.Sum256([]byte(canonicalWorkDir))
+	fileLock, err := newWorkspaceFileLock(filepath.Join(stateDir, fmt.Sprintf("agy-create-%x.lock", digest[:16])))
+	if err != nil {
+		return nil, fmt.Errorf("create AGY workspace lock: %w", err)
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			_ = fileLock.Unlock()
+			return nil, fmt.Errorf("acquire AGY workspace lock: %w", err)
+		}
+		lockErr := fileLock.TryLock()
+		if lockErr == nil {
+			return fileLock.Unlock, nil
+		}
+		var contention *lock.LockError
+		if !errors.As(lockErr, &contention) {
+			_ = fileLock.Unlock()
+			return nil, fmt.Errorf("acquire AGY workspace lock: %w", lockErr)
+		}
+		timer := time.NewTimer(workspaceCreateLockRetryDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			_ = fileLock.Unlock()
+			return nil, fmt.Errorf("acquire AGY workspace lock: %w", ctx.Err())
+		case <-timer.C:
+		}
+	}
+}
+
 // FindLatestForWorkspace resolves the latest AGY conversation recorded for the
 // given workspace path.
 func FindLatestForWorkspace(homeDir, workspacePath string) (*Metadata, error) {
 	if workspacePath == "" {
 		return nil, fmt.Errorf("workspace path cannot be empty")
 	}
+	canonicalWorkspacePath, err := CanonicalWorkspacePath(workspacePath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve AGY workspace for saved-session lookup: %w", err)
+	}
+	workspacePath = canonicalWorkspacePath
 	appDir := filepath.Join(homeDir, ".gemini", "antigravity-cli")
 	lastConversations, err := loadLastConversations(appDir)
 	if err != nil {
 		return nil, err
 	}
-	conversationID := lastConversations[workspacePath]
-	if conversationID != "" {
-		return FindByID(homeDir, conversationID)
-	}
-	conversationID, _, err = latestConversationForWorkspaceFromLogs(appDir, workspacePath)
+	metadata, err := cachedConversationForWorkspace(homeDir, lastConversations, workspacePath)
 	if err != nil {
 		return nil, err
 	}
-	return FindByID(homeDir, conversationID)
+	if metadata != nil {
+		return metadata, nil
+	}
+	return latestUsableConversationForWorkspaceFromLogs(homeDir, appDir, workspacePath)
+}
+
+func cachedConversationForWorkspace(homeDir string, lastConversations map[string]string, workspacePath string) (*Metadata, error) {
+	keys := make([]string, 0, len(lastConversations))
+	for providerWorkspacePath := range lastConversations {
+		keys = append(keys, providerWorkspacePath)
+	}
+	sort.Strings(keys)
+	seenConversationIDs := make(map[string]struct{}, len(keys))
+	var selected *Metadata
+	for _, providerWorkspacePath := range keys {
+		canonicalProviderPath, err := CanonicalWorkspacePath(providerWorkspacePath)
+		if err != nil {
+			return nil, fmt.Errorf("resolve AGY cached workspace path %q: %w", providerWorkspacePath, err)
+		}
+		if canonicalProviderPath != workspacePath {
+			continue
+		}
+		conversationID := lastConversations[providerWorkspacePath]
+		if conversationID == "" {
+			continue
+		}
+		if _, seen := seenConversationIDs[conversationID]; seen {
+			continue
+		}
+		seenConversationIDs[conversationID] = struct{}{}
+		metadata, findErr := FindByID(homeDir, conversationID)
+		if errors.Is(findErr, ErrConversationNotFound) {
+			continue
+		}
+		if findErr != nil {
+			return nil, findErr
+		}
+		if selected == nil || metadata.ModTime.After(selected.ModTime) {
+			captured := *metadata
+			captured.WorkspacePath = workspacePath
+			selected = &captured
+		}
+	}
+	return selected, nil
 }
 
 func populateTranscriptPaths(appDir string, meta *Metadata) {
@@ -149,9 +299,18 @@ func workspaceFromLastConversations(appDir, conversationID string) string {
 	if err != nil {
 		return ""
 	}
-	for workspacePath, cachedConversationID := range lastConversations {
-		if cachedConversationID == conversationID {
-			return workspacePath
+	keys := make([]string, 0, len(lastConversations))
+	for providerWorkspacePath := range lastConversations {
+		keys = append(keys, providerWorkspacePath)
+	}
+	sort.Strings(keys)
+	for _, providerWorkspacePath := range keys {
+		if lastConversations[providerWorkspacePath] != conversationID {
+			continue
+		}
+		canonicalProviderPath, canonicalErr := CanonicalWorkspacePath(providerWorkspacePath)
+		if canonicalErr == nil {
+			return canonicalProviderPath
 		}
 	}
 	return ""
@@ -160,7 +319,7 @@ func workspaceFromLastConversations(appDir, conversationID string) string {
 func workspaceFromLogs(appDir, conversationID string) (string, string, error) {
 	candidates, err := agyLogPaths(appDir)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return "", "", fmt.Errorf("no AGY log directory found for conversation %s", conversationID)
 		}
 		return "", "", err
@@ -195,15 +354,55 @@ func workspaceFromLogCandidates(candidates agyLogCandidates, conversationID stri
 func latestConversationForWorkspaceFromLogs(appDir, workspacePath string) (string, string, error) {
 	candidates, err := agyLogPaths(appDir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "", "", fmt.Errorf("no AGY log directory found for workspace %s", workspacePath)
+		if errors.Is(err, os.ErrNotExist) {
+			return "", "", fmt.Errorf("%w: no AGY log directory found for workspace %s", ErrConversationNotFound, workspacePath)
 		}
 		return "", "", err
 	}
 	return latestConversationForWorkspaceFromLogCandidates(candidates, workspacePath)
 }
 
+func latestUsableConversationForWorkspaceFromLogs(homeDir, appDir, workspacePath string) (*Metadata, error) {
+	candidates, err := agyLogPaths(appDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("%w: no AGY log directory found for workspace %s", ErrConversationNotFound, workspacePath)
+		}
+		return nil, err
+	}
+	var selected *Metadata
+	_, _, err = latestUsableConversationForWorkspaceFromLogCandidates(candidates, workspacePath, func(conversationID string) (bool, error) {
+		metadata, findErr := FindByID(homeDir, conversationID)
+		if findErr != nil {
+			if errors.Is(findErr, ErrConversationNotFound) {
+				return false, nil
+			}
+			return false, findErr
+		}
+		selected = metadata
+		return true, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if selected == nil {
+		return nil, fmt.Errorf("resolve AGY workspace conversation: provider returned empty metadata")
+	}
+	selected.WorkspacePath = workspacePath
+	return selected, nil
+}
+
 func latestConversationForWorkspaceFromLogCandidates(candidates agyLogCandidates, workspacePath string) (string, string, error) {
+	return latestUsableConversationForWorkspaceFromLogCandidates(candidates, workspacePath, func(string) (bool, error) {
+		return true, nil
+	})
+}
+
+func latestUsableConversationForWorkspaceFromLogCandidates(
+	candidates agyLogCandidates,
+	workspacePath string,
+	usable func(string) (bool, error),
+) (string, string, error) {
 	if candidates.unprocessedEntries > 0 {
 		// Directory order does not establish recency, so an unprocessed entry
 		// could be newer than every bounded candidate. Unlike known-ID lookup,
@@ -226,13 +425,19 @@ func latestConversationForWorkspaceFromLogCandidates(candidates agyLogCandidates
 			return "", "", logDiscoveryBudgetError("workspace "+workspacePath, index+1, 0, candidates.omitted, 1)
 		}
 		if matched && conversationID != "" {
-			return conversationID, logPath, nil
+			isUsable, usableErr := usable(conversationID)
+			if usableErr != nil {
+				return "", "", usableErr
+			}
+			if isUsable {
+				return conversationID, logPath, nil
+			}
 		}
 	}
 	if candidates.omitted > 0 {
 		return "", "", logDiscoveryBudgetError("workspace "+workspacePath, len(candidates.paths), 0, candidates.omitted, 0)
 	}
-	return "", "", fmt.Errorf("no AGY conversation recorded for workspace: %s", workspacePath)
+	return "", "", fmt.Errorf("%w: no AGY conversation recorded for workspace: %s", ErrConversationNotFound, workspacePath)
 }
 
 func agyLogPaths(appDir string) (agyLogCandidates, error) {
@@ -312,7 +517,11 @@ func scanLogForConversation(logPath, conversationID string) (workspacePath strin
 	currentWorkspace := ""
 	for scanner.Scan() {
 		line := scanner.Text()
-		if detectedWorkspacePath, ok := workspaceFromLogLine(line); ok {
+		detectedWorkspacePath, ok, workspaceErr := workspaceFromLogLine(line)
+		if workspaceErr != nil {
+			return "", false, false, fmt.Errorf("scan AGY log %s workspace marker: %w", logPath, workspaceErr)
+		}
+		if ok {
 			currentWorkspace = detectedWorkspacePath
 		}
 		if strings.Contains(line, "Created conversation "+conversationID) ||
@@ -343,7 +552,11 @@ func scanLogForWorkspace(logPath, workspacePath string) (conversationID string, 
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLogLineSize)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if detectedWorkspacePath, ok := workspaceFromLogLine(line); ok {
+		detectedWorkspacePath, ok, workspaceErr := workspaceFromLogLine(line)
+		if workspaceErr != nil {
+			return "", false, false, fmt.Errorf("scan AGY log %s workspace marker: %w", logPath, workspaceErr)
+		}
+		if ok {
 			currentWorkspace = detectedWorkspacePath
 			continue
 		}
@@ -408,10 +621,14 @@ func extractConversationID(line, marker string) string {
 	return conversationID
 }
 
-func workspaceFromLogLine(line string) (string, bool) {
+func workspaceFromLogLine(line string) (string, bool, error) {
 	_, workspacePath, found := strings.Cut(line, workspaceMarker)
 	if !found {
-		return "", false
+		return "", false, nil
 	}
-	return strings.TrimSpace(workspacePath), true
+	canonicalWorkspacePath, err := CanonicalWorkspacePath(strings.TrimSpace(workspacePath))
+	if err != nil {
+		return "", true, err
+	}
+	return canonicalWorkspacePath, true, nil
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/codexcontrol"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
@@ -87,6 +88,10 @@ type SessionStorageOpener func(context.Context) (dolt.Storage, func(), error)
 
 // CodexThreadCreator adapts the external Codex remote-control dependency.
 type CodexThreadCreator func(context.Context, string, string, string) (*manifest.Codex, error)
+
+// AgyWorkspaceCreateLocker serializes the native identity window for one AGY
+// workspace and returns its release operation.
+type AgyWorkspaceCreateLocker func(context.Context, string) (func() error, error)
 
 // CreateSessionRequest defines the input for creating a new AGM session.
 type CreateSessionRequest struct {
@@ -237,6 +242,20 @@ func validateCreateRequest(opCtx *OpContext, req *CreateSessionRequest) (*create
 	return p, nil
 }
 
+func canonicalizeAgyCreateRequest(req *CreateSessionRequest, params *createSessionParams) (*CreateSessionRequest, error) {
+	canonicalWorkDir, err := agysession.CanonicalWorkspacePath(req.Cwd)
+	if err != nil {
+		return nil, ErrInvalidInput("cwd", fmt.Sprintf("Resolve canonical AGY workspace: %v", err))
+	}
+	canonicalRequest := *req
+	canonicalRequest.Cwd = canonicalWorkDir
+	params.name, err = resolveSessionName(canonicalRequest.Title, canonicalWorkDir, canonicalRequest.AllowUnsafeTitle)
+	if err != nil {
+		return nil, err
+	}
+	return &canonicalRequest, nil
+}
+
 // CreateSession preserves the original operation signature for non-request
 // scoped callers. Request-aware surfaces should use CreateSessionWithContext.
 func CreateSession(opCtx *OpContext, req *CreateSessionRequest) (*CreateSessionResult, error) {
@@ -251,6 +270,42 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 	params, err := validateCreateRequest(opCtx, req)
 	if err != nil {
 		return nil, err
+	}
+	if params.harness == "agy" {
+		req, err = canonicalizeAgyCreateRequest(req, params)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var agyIdentityTracker agysession.CreateIdentityTracker
+	var previousAgyConversationID string
+	var releaseAgyWorkspaceLock func() error
+	if params.harness == "agy" {
+		locker := opCtx.AgyWorkspaceCreateLocker
+		if locker == nil {
+			locker = agysession.AcquireWorkspaceCreateLock
+		}
+		release, lockErr := locker(callCtx, req.Cwd)
+		if lockErr != nil {
+			return nil, ErrStorageError("agy.workspace-lock", lockErr)
+		}
+		releaseAgyWorkspaceLock = release
+		defer func() {
+			if releaseAgyWorkspaceLock == nil {
+				return
+			}
+			if unlockErr := releaseAgyWorkspaceLock(); unlockErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to release AGY workspace lock: %v\n", unlockErr)
+			}
+		}()
+		agyIdentityTracker = opCtx.AgyCreateIdentityTracker
+		if agyIdentityTracker == nil {
+			agyIdentityTracker = agysession.NewCreateIdentityTracker()
+		}
+		previousAgyConversationID, err = agyIdentityTracker.Snapshot(callCtx, req.Cwd)
+		if err != nil {
+			return nil, ErrStorageError("agy.identity.snapshot", err)
+		}
 	}
 
 	exists, err := prepareCreateTmux(opCtx, req, params.name)
@@ -283,10 +338,28 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 	}
 	state.createdManifestDir = createdManifestDir
 	m := buildCreateSessionManifest(req, params, sessionID, codexMeta)
+	if agyIdentityTracker != nil {
+		metadata, identityErr := agyIdentityTracker.Discover(callCtx, req.Cwd, previousAgyConversationID)
+		if identityErr != nil {
+			return nil, ErrStorageError("agy.identity.discover", identityErr)
+		}
+		applyAgyCreateIdentity(m, metadata)
+	}
 	if registrationAllowed {
 		state.store, state.storageCleanup, state.registered, err = registerCreatedSession(callCtx, opCtx, req, m)
 		if err != nil {
 			return nil, err
+		}
+	}
+	// Native identity is now persisted in registration. Release before runtime
+	// completion because CLI completion may block for the entire interactive
+	// tmux attachment; holding the workspace lock there would deadlock every
+	// create or cold resume for the same workspace until the user detaches.
+	if releaseAgyWorkspaceLock != nil {
+		release := releaseAgyWorkspaceLock
+		releaseAgyWorkspaceLock = nil
+		if unlockErr := release(); unlockErr != nil {
+			return nil, ErrStorageError("agy.workspace-lock.release", unlockErr)
 		}
 	}
 	if err := callCtx.Err(); err != nil {
@@ -296,6 +369,22 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		return nil, err
 	}
 	return createSessionResult(req, params, sessionID), nil
+}
+
+func applyAgyCreateIdentity(m *manifest.Manifest, metadata *agysession.Metadata) {
+	if m == nil || metadata == nil {
+		return
+	}
+	m.WorkingDirectory = metadata.WorkspacePath
+	if m.Context.Project == "" {
+		m.Context.Project = metadata.WorkspacePath
+	}
+	m.Agy = &manifest.Agy{
+		ConversationID: metadata.ConversationID,
+		WorkspacePath:  metadata.WorkspacePath,
+		ConversationDB: metadata.ConversationDBPath,
+		TranscriptPath: metadata.TranscriptPath,
+	}
 }
 
 func prepareCreateTmux(opCtx *OpContext, req *CreateSessionRequest, name string) (bool, error) {

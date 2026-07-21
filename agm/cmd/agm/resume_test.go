@@ -70,6 +70,27 @@ func TestResumeCommandFlags(t *testing.T) {
 	}
 }
 
+func TestWithAgyResumeWorkspaceLockCoversLifecycle(t *testing.T) {
+	original := agyResumeWorkspaceLock
+	t.Cleanup(func() { agyResumeWorkspaceLock = original })
+
+	var events []string
+	agyResumeWorkspaceLock = func(_ context.Context, workDir string) (func() error, error) {
+		events = append(events, "lock:"+workDir)
+		return func() error { events = append(events, "unlock"); return nil }, nil
+	}
+	if err := withAgyResumeWorkspaceLock(t.Context(), "agy", "/work", func() error {
+		events = append(events, "launch-and-ready")
+		return nil
+	}); err != nil {
+		t.Fatalf("withAgyResumeWorkspaceLock: %v", err)
+	}
+	want := []string{"lock:/work", "launch-and-ready", "unlock"}
+	if fmt.Sprint(events) != fmt.Sprint(want) {
+		t.Fatalf("resume workspace lock events = %v, want %v", events, want)
+	}
+}
+
 // TestResumeDetachedHelp verifies the help text includes --detached documentation
 func TestResumeDetachedHelp(t *testing.T) {
 	helpText := resumeCmd.Long

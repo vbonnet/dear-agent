@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/huh/spinner"
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/claude"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/discovery"
@@ -35,6 +36,7 @@ var (
 	resumePromptFile       string
 	resumeDeletePromptFile bool
 	sendResumePromptSafe   = tmux.SendMultiLinePromptSafeContext
+	agyResumeWorkspaceLock = agysession.AcquireWorkspaceCreateLock
 )
 
 var resumeCmd = &cobra.Command{
@@ -605,17 +607,34 @@ func runHarnessResume(ctx context.Context, adapter *dolt.Adapter, m *manifest.Ma
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := dispatchResumeCommand(adapter, m, harnessName, health); err != nil {
-		return err
+	return withAgyResumeWorkspaceLock(ctx, harnessName, health.WorktreePath, func() error {
+		if err := dispatchResumeCommand(adapter, m, harnessName, health); err != nil {
+			return err
+		}
+		if err := waitForResumedHarness(ctx, harnessName, health); err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		restorePermissionMode(harnessName, m, health)
+		return nil
+	})
+}
+
+func withAgyResumeWorkspaceLock(ctx context.Context, harnessName, workDir string, resume func() error) error {
+	if agent.NormalizeHarnessName(harnessName) == "agy" {
+		releaseWorkspaceLock, err := agyResumeWorkspaceLock(ctx, workDir)
+		if err != nil {
+			return fmt.Errorf("acquire AGY workspace lifecycle lock for resume: %w", err)
+		}
+		defer func() {
+			if unlockErr := releaseWorkspaceLock(); unlockErr != nil {
+				ui.PrintWarning(fmt.Sprintf("Failed to release AGY workspace lock after resume: %v", unlockErr))
+			}
+		}()
 	}
-	if err := waitForResumedHarness(ctx, harnessName, health); err != nil {
-		return err
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	restorePermissionMode(harnessName, m, health)
-	return nil
+	return resume()
 }
 
 func finalizeResumeSession(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath string, health *HealthStatus, sendCommands bool, runtime resumeSessionRuntime) error {
