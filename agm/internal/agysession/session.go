@@ -28,6 +28,11 @@ const (
 // complete bounded search that simply found no matching metadata.
 var ErrLogDiscoveryBudgetExhausted = errors.New("AGY log discovery budget exhausted")
 
+// ErrConversationNotFound means a complete provider metadata search found no
+// saved AGY conversation for the requested workspace. It is distinct from an
+// unreadable, corrupt, or incompletely searched metadata store.
+var ErrConversationNotFound = errors.New("AGY conversation not found")
+
 type agyLogCandidates struct {
 	paths              []string
 	omitted            int
@@ -160,7 +165,7 @@ func workspaceFromLastConversations(appDir, conversationID string) string {
 func workspaceFromLogs(appDir, conversationID string) (string, string, error) {
 	candidates, err := agyLogPaths(appDir)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return "", "", fmt.Errorf("no AGY log directory found for conversation %s", conversationID)
 		}
 		return "", "", err
@@ -195,8 +200,8 @@ func workspaceFromLogCandidates(candidates agyLogCandidates, conversationID stri
 func latestConversationForWorkspaceFromLogs(appDir, workspacePath string) (string, string, error) {
 	candidates, err := agyLogPaths(appDir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "", "", fmt.Errorf("no AGY log directory found for workspace %s", workspacePath)
+		if errors.Is(err, os.ErrNotExist) {
+			return "", "", fmt.Errorf("%w: no AGY log directory found for workspace %s", ErrConversationNotFound, workspacePath)
 		}
 		return "", "", err
 	}
@@ -232,7 +237,7 @@ func latestConversationForWorkspaceFromLogCandidates(candidates agyLogCandidates
 	if candidates.omitted > 0 {
 		return "", "", logDiscoveryBudgetError("workspace "+workspacePath, len(candidates.paths), 0, candidates.omitted, 0)
 	}
-	return "", "", fmt.Errorf("no AGY conversation recorded for workspace: %s", workspacePath)
+	return "", "", fmt.Errorf("%w: no AGY conversation recorded for workspace: %s", ErrConversationNotFound, workspacePath)
 }
 
 func agyLogPaths(appDir string) (agyLogCandidates, error) {

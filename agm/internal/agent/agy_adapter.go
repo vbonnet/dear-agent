@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -123,7 +124,10 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 		// A bare AGY launch creates a fresh conversation. Snapshot the current
 		// workspace mapping so delayed provider metadata cannot make us persist
 		// a pre-existing conversation as the newly created session identity.
-		previousConversationID, _ = agyFindConversation(workDir)
+		previousConversationID, err = agyFindConversation(workDir)
+		if err != nil && !errors.Is(err, agysession.ErrConversationNotFound) {
+			return "", fmt.Errorf("failed to snapshot AGY conversation before create: %w", err)
+		}
 	}
 	if err := agyNewSession(tmuxName, workDir); err != nil {
 		return "", fmt.Errorf("failed to create tmux session: %w", err)

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 )
 
 func preserveAgyAdapterSeams(t *testing.T) {
@@ -237,7 +239,13 @@ func TestAgyCreateSessionRollsBackWhenNativeIdentityCannotBeCaptured(t *testing.
 	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return nil }
 	wantErr := errors.New("fixture provider metadata unavailable")
 	attempts := 0
-	agyFindConversation = func(string) (string, error) { attempts++; return "", wantErr }
+	agyFindConversation = func(string) (string, error) {
+		attempts++
+		if attempts == 1 {
+			return "", agysession.ErrConversationNotFound
+		}
+		return "", wantErr
+	}
 	agyDiscoverySleep = func(time.Duration) {}
 	killed := ""
 	agyKillSession = func(name string) { killed = name }
@@ -288,7 +296,7 @@ func TestAgyCreateSessionPropagatesReadinessFailureAndRollsBack(t *testing.T) {
 	agyHasSession = func(string) (bool, error) { return false, nil }
 	agyNewSession = func(string, string) error { return nil }
 	agySendCommand = func(string, string) error { return nil }
-	agyFindConversation = func(string) (string, error) { return "", errors.New("no prior conversation") }
+	agyFindConversation = func(string) (string, error) { return "", agysession.ErrConversationNotFound }
 	wantErr := errors.New("fixture readiness failed")
 	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return wantErr }
 	killed := ""
@@ -328,6 +336,16 @@ func TestAgyCreateSessionRejectsExistingTmuxAndUnsafeModelBeforeMutation(t *test
 	}
 	if created || sent {
 		t.Fatalf("rejected create mutated tmux: created=%v sent=%v", created, sent)
+	}
+
+	wantErr := errors.New("fixture provider metadata is corrupt")
+	agyFindConversation = func(string) (string, error) { return "", wantErr }
+	_, err = adapter.CreateSession(SessionContext{Name: "snapshot-failure", WorkingDirectory: "/work", Model: "3.5-flash-low"})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("snapshot failure error = %v, want provider metadata error", err)
+	}
+	if created || sent {
+		t.Fatalf("snapshot failure mutated tmux: created=%v sent=%v", created, sent)
 	}
 }
 

@@ -134,6 +134,14 @@ func TestFindLatestForWorkspace_StripsGetConversationDetailSuffix(t *testing.T) 
 	}
 }
 
+func TestFindLatestForWorkspaceDistinguishesNoConversation(t *testing.T) {
+	homeDir := t.TempDir()
+	_, err := FindLatestForWorkspace(homeDir, "/tmp/agy-never-opened")
+	if !errors.Is(err, ErrConversationNotFound) {
+		t.Fatalf("FindLatestForWorkspace error = %v, want ErrConversationNotFound", err)
+	}
+}
+
 func TestWorkspaceFromLogsPrefersNewestModificationTime(t *testing.T) {
 	appDir := t.TempDir()
 	conversationID := "117ff898-a964-4a9f-b460-1be4a8a49b17"
