@@ -1,13 +1,25 @@
 name: AI Code Review (5-dimension)
 
-# Five-dimension multi-persona review per REVIEW.md §2.
-# Uses the Claude API directly (ANTHROPIC_API_KEY secret) — quota-independent.
-# Runs sequentially through all 5 dimensions then synthesizes.
-# Required status check: "5-Dimension AI Review" (replaces gemini-code-assist, ce-hz14).
+# Five-dimension multi-persona review per REVIEW.md §2, wired as a FAIL-CLOSED
+# required merge gate. The review logic lives in cmd/ai-review (Go); this
+# workflow is a thin wrapper whose job exit status is the enforcement signal.
+#
+# Fail-closed contract (see cmd/ai-review):
+#   - only an "approved" outcome (or the audited 'ai-review:override' label)
+#     exits 0; needs-work / rejected / needs-human-review block the merge.
+#   - missing secret, fork PRs, per-dimension API failure, synthesis failure,
+#     unparseable outcome, and oversize diffs all fail closed.
+#
+# Runs on every PR revision (opened/synchronize/reopened/ready_for_review), not
+# just the draft->ready edge, so the check that gates the current head SHA
+# actually reflects the current head SHA.
+#
+# Required status check: "5-Dimension AI Review" — registered in
+# .github/rulesets/main.json.
 
 on:
   pull_request:
-    types: [ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
   merge_group:
 
@@ -16,7 +28,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: ai-review-${{ github.event.pull_request.number }}
+  group: ai-review-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -24,283 +36,41 @@ jobs:
     name: 5-Dimension AI Review
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    # Skip PRs from forks — they don't have access to repo secrets.
-    if: github.event.pull_request.head.repo.full_name == github.repository
 
     steps:
-      - name: Gate on secret presence
-        id: gate
-        env:
-          KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          if [ -z "$KEY" ]; then
-            echo "::notice::ANTHROPIC_API_KEY not set; skipping AI review."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Checkout (full history for diff)
-        if: steps.gate.outputs.skip != 'true'
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - name: Prepare PR diff
-        if: steps.gate.outputs.skip != 'true'
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Detect override label
+        id: override
+        if: github.event_name == 'pull_request'
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
         run: |
           set -euo pipefail
-          # Truncate to 100 KB to fit in Claude's context window alongside prompts.
-          git diff "$BASE_SHA" "$HEAD_SHA" | head -c 102400 > /tmp/pr.diff
-          echo "Diff size: $(wc -c < /tmp/pr.diff) bytes"
-          if [ ! -s /tmp/pr.diff ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
+          if printf '%s\n' "$LABELS" | grep -q '"ai-review:override"'; then
+            echo "active=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "active=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Claude API helper
-        if: steps.gate.outputs.skip != 'true'
-        run: |
-          # Write a reusable curl helper that calls the Claude Messages API.
-          # Usage: call_claude <system_prompt_file> <output_file>
-          cat > /tmp/call_claude.sh << 'HELPER'
-          #!/usr/bin/env bash
-          set -euo pipefail
-          system_file="$1"
-          out_file="$2"
-          diff_content=$(cat /tmp/pr.diff)
-          system_prompt=$(cat "$system_file")
-          payload=$(jq -n \
-            --arg sys "$system_prompt" \
-            --arg diff "$diff_content" \
-            '{
-              model: "claude-sonnet-4-6",
-              max_tokens: 2048,
-              system: $sys,
-              messages: [{role: "user", content: ("Review this PR diff and report your findings per your persona instructions:\n\n```diff\n" + $diff + "\n```")}]
-            }')
-          response=$(curl -sf \
-            -H "x-api-key: $ANTHROPIC_API_KEY" \
-            -H "anthropic-version: 2023-06-01" \
-            -H "content-type: application/json" \
-            --max-time 120 \
-            -d "$payload" \
-            https://api.anthropic.com/v1/messages) || {
-              echo "Claude API call failed; skipping dimension." > "$out_file"
-              exit 0
-            }
-          echo "$response" | jq -r '.content[0].text // "No response"' > "$out_file"
-          HELPER
-          chmod +x /tmp/call_claude.sh
-
-      - name: Write persona prompts
-        if: steps.gate.outputs.skip != 'true'
-        run: |
-          cat > /tmp/bugs.sys << 'EOF'
-          You are a meticulous Go engineer reviewing a diff for logic errors. Your
-          default assumption is that the code is wrong and you are trying to find
-          the evidence. Focus on: incorrect error handling (swallowed errors,
-          missing checks), nil pointer dereferences, off-by-one errors, incorrect
-          use of goroutines and channels, and any code path that could panic or
-          silently corrupt state. Report every finding with: file, line range,
-          severity (blocking | advisory), and a one-sentence fix suggestion.
-          If you find no issues, say so explicitly — do not invent findings.
-          Keep your response under 800 tokens.
-          EOF
-
-          cat > /tmp/security.sys << 'EOF'
-          You are a paranoid security engineer. Assume the diff will be deployed to
-          production and that an attacker will read this review. Focus on: injection
-          vectors (command, SQL, template), path traversal, privilege escalation,
-          secret or credential exposure (including in logs), insecure defaults, and
-          anything that weakens an existing security boundary. For each finding:
-          state the attack scenario, the vulnerable line(s), the severity
-          (blocking | advisory), and the minimal fix. Your default is to flag and
-          escalate, not to approve quietly.
-          Keep your response under 800 tokens.
-          EOF
-
-          cat > /tmp/perf.sys << 'EOF'
-          You are a performance-focused Go engineer. Focus on: algorithmic
-          regressions (e.g. O(n^2) in a previously O(n) path), unnecessary heap
-          allocations in hot paths, goroutine leaks (launched without a cancel path),
-          missing context propagation, and unbounded slices or maps. For each
-          finding: name the hot path, describe the regression, estimate the impact
-          (blocking | advisory), and suggest the fix.
-          Keep your response under 800 tokens.
-          EOF
-
-          cat > /tmp/style.sys << 'EOF'
-          You are enforcing the project Go style conventions. Check: exported
-          symbols have doc comments; error strings are lowercase and do not end with
-          punctuation; packages follow standard naming; golangci-lint rules are
-          satisfied; and the diff does not introduce dead code or unused imports.
-          Advisory-only: you cannot block a merge on style alone, but you must list
-          all violations. Suggest the lint command or exact rewrite for each.
-          Keep your response under 800 tokens.
-          EOF
-
-          cat > /tmp/regression.sys << 'EOF'
-          You are checking whether this diff is consistent with the existing test
-          suite. Look for: tests deleted without replacement, behaviour changes with
-          no corresponding test update, and any changed exported symbol whose
-          callers in the test suite now receive different semantics. If a changed
-          function is untested, flag it. Report each gap with file, affected symbol,
-          and whether it is blocking (deleted test coverage) or advisory (missing
-          new coverage).
-          Keep your response under 800 tokens.
-          EOF
-
-      - name: Review — bugs dimension
-        id: bugs
-        if: steps.gate.outputs.skip != 'true'
+      - name: Run AI review gate
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: /tmp/call_claude.sh /tmp/bugs.sys /tmp/bugs.out || true
-
-      - name: Review — security dimension
-        id: security
-        if: steps.gate.outputs.skip != 'true'
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: /tmp/call_claude.sh /tmp/security.sys /tmp/security.out || true
-
-      - name: Review — perf dimension
-        id: perf
-        if: steps.gate.outputs.skip != 'true'
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: /tmp/call_claude.sh /tmp/perf.sys /tmp/perf.out || true
-
-      - name: Review — style dimension
-        id: style
-        if: steps.gate.outputs.skip != 'true'
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: /tmp/call_claude.sh /tmp/style.sys /tmp/style.out || true
-
-      - name: Review — regression dimension
-        id: regression
-        if: steps.gate.outputs.skip != 'true'
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: /tmp/call_claude.sh /tmp/regression.sys /tmp/regression.out || true
-
-      - name: Synthesize and post comment
-        if: steps.gate.outputs.skip != 'true'
-        env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
-        run: |
-          set -euo pipefail
-          MARKER="<!-- ai-review-5d -->"
-
-          bugs=$(cat /tmp/bugs.out 2>/dev/null || echo "No output")
-          security=$(cat /tmp/security.out 2>/dev/null || echo "No output")
-          perf=$(cat /tmp/perf.out 2>/dev/null || echo "No output")
-          style=$(cat /tmp/style.out 2>/dev/null || echo "No output")
-          regression=$(cat /tmp/regression.out 2>/dev/null || echo "No output")
-
-          # Build synthesis prompt
-          synthesis_prompt=$(cat << SYNEOF
-          You are a senior engineer synthesizing five independent code review dimensions.
-          Based on the dimension reports below, determine the overall outcome per this taxonomy:
-          - approved: no blocking findings
-          - needs-work: fixable findings exist
-          - rejected: fundamental design problem
-          - needs-human-review: security auto-fail trigger, or novel irreversible decision
-
-          Rules: security blocking findings → needs-human-review. Any other blocking → needs-work.
-          Output one sentence with the outcome and a brief summary.
-
-          BUGS: $bugs
-
-          SECURITY: $security
-
-          PERF: $perf
-
-          STYLE: $style
-
-          REGRESSION: $regression
-          SYNEOF
-          )
-
-          synthesis_payload=$(jq -n \
-            --arg sys "You are a synthesis agent. Output exactly one outcome word (approved/needs-work/rejected/needs-human-review) on the first line, then a brief summary." \
-            --arg content "$synthesis_prompt" \
-            '{model: "claude-sonnet-4-6", max_tokens: 512, system: $sys, messages: [{role: "user", content: $content}]}')
-
-          synthesis=$(curl -sf \
-            -H "x-api-key: $ANTHROPIC_API_KEY" \
-            -H "anthropic-version: 2023-06-01" \
-            -H "content-type: application/json" \
-            --max-time 60 \
-            -d "$synthesis_payload" \
-            https://api.anthropic.com/v1/messages \
-            | jq -r '.content[0].text // "synthesis unavailable"' || echo "synthesis unavailable")
-
-          # Determine outcome emoji
-          outcome_line=$(echo "$synthesis" | head -1 | tr '[:upper:]' '[:lower:]')
-          case "$outcome_line" in
-            *approved*) emoji="✅"; outcome="approved" ;;
-            *needs-human*) emoji="🔴"; outcome="needs-human-review" ;;
-            *rejected*) emoji="❌"; outcome="rejected" ;;
-            *) emoji="⚠️"; outcome="needs-work" ;;
-          esac
-
-          {
-            echo "$MARKER"
-            echo "## ${emoji} AI Code Review — ${outcome}"
-            echo
-            echo "> Automated 5-dimension review per [REVIEW.md](REVIEW.md). Model: claude-sonnet-4-6."
-            echo
-            echo "**Synthesis:** ${synthesis}"
-            echo
-            echo "<details>"
-            echo "<summary>Bugs dimension</summary>"
-            echo
-            echo "${bugs}"
-            echo
-            echo "</details>"
-            echo
-            echo "<details>"
-            echo "<summary>Security dimension</summary>"
-            echo
-            echo "${security}"
-            echo
-            echo "</details>"
-            echo
-            echo "<details>"
-            echo "<summary>Performance dimension</summary>"
-            echo
-            echo "${perf}"
-            echo
-            echo "</details>"
-            echo
-            echo "<details>"
-            echo "<summary>Style dimension</summary>"
-            echo
-            echo "${style}"
-            echo
-            echo "</details>"
-            echo
-            echo "<details>"
-            echo "<summary>Regression dimension</summary>"
-            echo
-            echo "${regression}"
-            echo
-            echo "</details>"
-            echo
-            echo "<sub>Required gate per REVIEW.md §2. Model: claude-sonnet-4-6.</sub>"
-          } > /tmp/review-comment.md
-
-          # Sticky comment: delete prior, then post.
-          gh api "repos/${{ github.repository }}/issues/$PR/comments" \
-            --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id" 2>/dev/null \
-            | xargs -r -I {} gh api -X DELETE "repos/${{ github.repository }}/issues/comments/{}" || true
-
-          gh pr comment "$PR" --body-file /tmp/review-comment.md
-          echo "::notice::AI review outcome: ${outcome}"
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          IS_FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+          OVERRIDE: ${{ steps.override.outputs.active }}
+        run: go run ./cmd/ai-review
