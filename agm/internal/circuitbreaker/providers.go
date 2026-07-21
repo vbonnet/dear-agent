@@ -126,7 +126,7 @@ func (t TmuxWorkerCounter) CountWorkers() (int, error) {
 // names, dropping blank lines.
 func splitSessionNames(out string) []string {
 	var names []string
-	for _, l := range strings.Split(out, "\n") {
+	for l := range strings.SplitSeq(out, "\n") {
 		if n := strings.TrimSpace(l); n != "" {
 			names = append(names, n)
 		}
@@ -154,7 +154,10 @@ func countWorkerSessions(names []string, knownWorkers func() (map[string]bool, e
 		if !resolved {
 			// Best-effort: an unreadable session DB falls back to prefix-only
 			// classification rather than resurrecting the count-everything bug.
-			known, _ = knownWorkers()
+			w, err := knownWorkers()
+			if err == nil {
+				known = w
+			}
 			resolved = true
 		}
 		if known[name] {
