@@ -85,6 +85,7 @@ func TestCheckHarnessHealth_AgyPresent(t *testing.T) {
 	t.Setenv("GEMINI_API_KEY", "")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	configDir := filepath.Join(home, ".gemini", "antigravity-cli")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatalf("create AGY config directory: %v", err)
@@ -108,6 +109,7 @@ func TestCheckHarnessHealth_AgyAbsent(t *testing.T) {
 	t.Setenv("GEMINI_API_KEY", "")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	mockLookPath(t, map[string]bool{})
 
 	h := CheckHarnessHealth("agy")
@@ -130,6 +132,7 @@ func TestCheckHarnessHealth_AgyAliases(t *testing.T) {
 	clearClaudeEnv(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	mockLookPath(t, map[string]bool{"agy": true})
 
 	for _, alias := range []string{"agy-cli", "antigravity"} {
