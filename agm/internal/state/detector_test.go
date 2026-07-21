@@ -89,6 +89,18 @@ func TestDetector_CodexReadinessRequiresStructuredComposer(t *testing.T) {
 			wantReceive: CanReceiveQueue,
 		},
 		{
+			name:        "shell output after post-turn composer is not ready",
+			output:      "› Continue the task\n\n  gpt-5.6 xhigh · ~/src/project\nuser@host:~/src/project$",
+			wantState:   StateUnknown,
+			wantReceive: CanReceiveQueue,
+		},
+		{
+			name:        "shell output after initial composer is not ready",
+			output:      "│ >_ OpenAI Codex (v0.141.0) │\n│ /model to change │\n╰──────────────────────────────╯\nuser@host:~/src/project$",
+			wantState:   StateUnknown,
+			wantReceive: CanReceiveQueue,
+		},
+		{
 			name:        "unsubmitted paste and footer are not ready",
 			output:      "> [Pasted Content 2172 chars]\n  gpt-5.6 xhigh · ~/src/project",
 			wantState:   StateUnknown,

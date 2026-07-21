@@ -54,6 +54,11 @@ func TestIsCodexComposerReady(t *testing.T) {
 			expected: true,
 		},
 		{
+			name:     "post-turn composer followed by shell prompt is stale",
+			content:  "› Continue the task\n\n  gpt-5.6 xhigh · ~/src/project\nuser@host:~/src/project$",
+			expected: false,
+		},
+		{
 			name:     "working footer is not ready",
 			content:  "• Working (3s • esc to interrupt)\n  gpt-5.6 xhigh · ~/src/project",
 			expected: false,
@@ -61,6 +66,11 @@ func TestIsCodexComposerReady(t *testing.T) {
 		{
 			name:     "latest working footer overrides stale initial composer",
 			content:  "│ >_ OpenAI Codex (v0.141.0) │\n│ /model to change │\n• Working (3s • esc to interrupt)\n  gpt-5.6 xhigh · ~/src/project",
+			expected: false,
+		},
+		{
+			name:     "initial composer followed by shell prompt is stale",
+			content:  "│ >_ OpenAI Codex (v0.141.0) │\n│ /model to change │\n╰──────────────────────────────╯\nuser@host:~/src/project$",
 			expected: false,
 		},
 		{
@@ -221,7 +231,7 @@ func TestWaitForCodexPromptPolling(t *testing.T) {
 	socketPath := newCodexTestSession(t, sessionName)
 
 	// Print the Codex composer header into the pane.
-	sendCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "printf 'OpenAI Codex (v0.141.0)\\n/model to change\\n'", "Enter")
+	sendCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "printf 'OpenAI Codex (v0.141.0)\\n/model to change\\n'; sleep 30", "Enter")
 	if err := sendCmd.Run(); err != nil {
 		t.Fatalf("Failed to send composer signal: %v", err)
 	}
@@ -231,18 +241,14 @@ func TestWaitForCodexPromptPolling(t *testing.T) {
 	}
 }
 
-func TestWaitForPromptSimpleDetectsCodexComposerAboveFooter(t *testing.T) {
-	sessionName := "test-codex-simple-prompt-tail"
-	socketPath := newCodexTestSession(t, sessionName)
+func TestWaitForCodexPromptRejectsComposerAboveNewerOutput(t *testing.T) {
+	sessionName := "test-codex-stale-prompt-tail"
+	script := "printf 'OpenAI Codex (v0.142.0)\\n/model to change\\nCodex exited\\nuser@host:~/work$\\n'; sleep 30"
+	newCodexTestSession(t, sessionName, "sh", "-c", script)
 
-	script := "printf 'OpenAI Codex (v0.142.0)\\n/model to change\\n'; for i in 1 2 3 4 5 6 7 8 9 10; do printf 'footer line %s\\n' \"$i\"; done"
-	sendCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, script, "Enter")
-	if err := sendCmd.Run(); err != nil {
-		t.Fatalf("Failed to send Codex composer fixture: %v", err)
-	}
-
-	if err := WaitForPromptSimple(sessionName, 5*time.Second); err != nil {
-		t.Fatalf("WaitForPromptSimple failed to detect Codex composer above footer: %v", err)
+	err := WaitForCodexPrompt(sessionName, time.Second)
+	if err == nil || !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("WaitForCodexPrompt() error = %v, want timeout for stale composer", err)
 	}
 }
 
@@ -268,7 +274,7 @@ func TestIsCodexIdleComposerVisible(t *testing.T) {
 	socketPath := newCodexTestSession(t, sessionName)
 
 	// Render the Codex composer header into the pane.
-	sendCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "printf 'OpenAI Codex (v0.141.0)\\n/model to change\\n'", "Enter")
+	sendCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "printf 'OpenAI Codex (v0.141.0)\\n/model to change\\n'; sleep 30", "Enter")
 	if err := sendCmd.Run(); err != nil {
 		t.Fatalf("Failed to send composer signal: %v", err)
 	}

@@ -64,8 +64,10 @@ Important launch invariants:
 state detector sees a complete Codex composer—the initial `OpenAI Codex`
 header with `/model to change`, or a post-turn input cursor paired with the
 structured `gpt-* · <workdir>` footer—delivery is `YES` and AGM sends directly
-to the tmux pane. A model name in an echoed launch command or beside a
-`Working` status is not a composer and remains queued.
+to the tmux pane. Those markers must own the current pane tail: if newer shell
+or process-exit output follows them, the stale composer is not sendable. A
+model name in an echoed launch command or beside a `Working` status is not a
+composer and remains queued.
 
 Codex menus and trust prompts are not idle composers. They remain queued or
 blocked rather than receiving injected prompt text.
@@ -80,11 +82,12 @@ If the tmux session already exists, AGM attaches without sending commands. If
 the tmux session must be recreated, AGM starts Codex with the same launch
 invariants as session creation and waits for both the Codex process and a
 structured idle composer to render. AGM retains a creation-specific identity
-for the attempt: tmux's server-local session ID plus a random token stored on
-that session. It persists a sanitized tmux name under an opaque storage
+for the attempt: tmux's server-local session ID plus a random token embedded in
+a provisional creation name before being stored on that session. It then
+renames the session and persists that sanitized tmux name under an opaque storage
 ownership revision before submitting an optional resume prompt, and reports
 ordinary prompt-delivery failures. Failed cold resumes remove only the session
-whose ID and token both match, including across tmux server restarts; a
+whose ID and either creation marker match, including across tmux server restarts; a
 same-named or ID-reusing replacement is preserved. A provisional name write is
 restored only when no newer session metadata has superseded it, and its
 ownership revision is released after prompt delivery succeeds.

@@ -176,7 +176,8 @@ func KillSessionChecked(sessionName string) error {
 }
 
 // KillSessionIdentityChecked kills only the tmux session whose server-local ID
-// and creation token both match. The comparison and conditional kill execute
+// and stored token match, or whose name is the token-derived provisional name
+// retained before the token write. The comparison and conditional kill execute
 // in one tmux command queue so a replacement cannot be selected by a stale ID.
 // Missing and mismatched targets mean the owned creation is already gone and
 // are treated as idempotent success.
@@ -185,6 +186,9 @@ func KillSessionIdentityChecked(identity SessionIdentity) error {
 		return fmt.Errorf("invalid tmux session identity %q", identity.ID)
 	}
 	condition := fmt.Sprintf("#{==:#{@agm_session_identity},%s}", identity.Token)
+	if identity.CreationName != "" {
+		condition = fmt.Sprintf("#{||:%s,#{==:#{session_name},%s}}", condition, identity.CreationName)
+	}
 	killCommand := fmt.Sprintf("kill-session -t %s", identity.ID)
 	output, err := RunWithTimeout(context.Background(), globalTimeout, "tmux", "-S", GetSocketPath(),
 		"if-shell", "-F", "-t", identity.ID, condition, killCommand, "")

@@ -215,6 +215,7 @@ creation, and terminal state detection.
 **Key scenarios:**
 - A Codex CLI composer pane is detected as `ready`.
 - An idle Codex composer allows direct delivery.
+- A stale Codex composer followed by newer shell output remains queued.
 - A Codex trust prompt is queued rather than treated as a sendable prompt.
 - The top-level new command routes in-tmux, non-detached Codex creation into
   the current pane, validates credentials and the executable, and queues the

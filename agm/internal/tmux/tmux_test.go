@@ -243,10 +243,25 @@ func TestSessionIdentityValidation(t *testing.T) {
 		{ID: "7", Token: valid.Token},
 		{ID: "$7", Token: "short"},
 		{ID: "$7", Token: "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"},
+		{ID: "$7", Token: valid.Token, CreationName: "agm-create-wrong"},
 	} {
 		if invalid.Valid() {
 			t.Fatalf("invalid creation identity was accepted: %#v", invalid)
 		}
+	}
+}
+
+func TestIsMissingSessionOutputIncludesEmptyServerVerdict(t *testing.T) {
+	for _, output := range []string{
+		"can't find session: missing",
+		"no current target",
+	} {
+		if !isMissingSessionOutput([]byte(output)) {
+			t.Fatalf("isMissingSessionOutput(%q) = false, want true", output)
+		}
+	}
+	if isMissingSessionOutput([]byte("no server running on /private/tmp/agm.sock")) {
+		t.Fatal("backend unavailability was classified as a missing session")
 	}
 }
 
@@ -258,11 +273,8 @@ func TestNewSessionWithIdentityReturnsIDWhenQueuedInitializationFails(t *testing
 	socketPath, cleanup := setupTestSocket(t)
 	defer cleanup()
 
-	if err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", "keepalive").Run(); err != nil {
-		t.Fatalf("create keepalive session: %v", err)
-	}
-	if err := exec.Command("tmux", "-S", socketPath, "set-hook", "-g", "after-new-session", "kill-session -t partial-create").Run(); err != nil {
-		t.Fatalf("install post-create failure hook: %v", err)
+	if err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", "partial-create").Run(); err != nil {
+		t.Fatalf("create occupied final name: %v", err)
 	}
 
 	identity, err := NewSessionWithIdentity("partial-create", t.TempDir())
@@ -272,8 +284,67 @@ func TestNewSessionWithIdentityReturnsIDWhenQueuedInitializationFails(t *testing
 	if !identity.Valid() {
 		t.Fatalf("NewSessionWithIdentity() lost partial creation identity: %#v", identity)
 	}
-	if exists, hasErr := HasSession("partial-create"); hasErr != nil || exists {
-		t.Fatalf("post-create failure fixture = (exists=%v, err=%v), want removed target", exists, hasErr)
+	if exists, hasErr := HasSessionIdentityStrict(identity); hasErr != nil || !exists {
+		t.Fatalf("partial creation identity = (exists=%v, err=%v), want owned survivor", exists, hasErr)
+	}
+	if err := KillSessionIdentityChecked(identity); err != nil {
+		t.Fatalf("clean up partial creation: %v", err)
+	}
+	if exists, hasErr := HasSession("partial-create"); hasErr != nil || !exists {
+		t.Fatalf("occupied final session = (exists=%v, err=%v), want preserved", exists, hasErr)
+	}
+}
+
+func TestSessionIdentityCleansCreationBeforeTokenWrite(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping tmux integration test in short mode (uses global lock)")
+	}
+	skipIfNoTmux(t)
+	socketPath, cleanup := setupTestSocket(t)
+	defer cleanup()
+
+	identity, err := newSessionIdentity()
+	if err != nil {
+		t.Fatalf("newSessionIdentity() error = %v", err)
+	}
+	output, err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-P", "-F", "#{session_id}", "-s", identity.CreationName).Output()
+	if err != nil {
+		t.Fatalf("create provisional session: %v", err)
+	}
+	identity.ID = strings.TrimSpace(string(output))
+
+	exists, err := HasSessionIdentityStrict(identity)
+	if err != nil || !exists {
+		t.Fatalf("HasSessionIdentityStrict(provisional) = (%v, %v), want (true, nil)", exists, err)
+	}
+	if err := KillSessionIdentityChecked(identity); err != nil {
+		t.Fatalf("KillSessionIdentityChecked(provisional) error = %v", err)
+	}
+	if exists, err := HasSessionStrict(identity.CreationName); err != nil || exists {
+		t.Fatalf("provisional session after cleanup = (%v, %v), want (false, nil)", exists, err)
+	}
+}
+
+func TestNewSessionCleansProvisionalSessionWhenFinalNameExists(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping tmux integration test in short mode (uses global lock)")
+	}
+	skipIfNoTmux(t)
+	socketPath, cleanup := setupTestSocket(t)
+	defer cleanup()
+
+	if err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", "occupied").Run(); err != nil {
+		t.Fatalf("create occupied session: %v", err)
+	}
+	if err := NewSession("occupied", t.TempDir()); err == nil {
+		t.Fatal("NewSession() succeeded despite occupied final name")
+	}
+	output, err := exec.Command("tmux", "-S", socketPath, "list-sessions", "-F", "#{session_name}").Output()
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if got := strings.TrimSpace(string(output)); got != "occupied" {
+		t.Fatalf("sessions after failed creation = %q, want only occupied", got)
 	}
 }
 

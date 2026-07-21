@@ -59,12 +59,17 @@ func HasSessionStrict(name string) (bool, error) {
 	return false, tmuxCommandError("check session", normalizedName, output, err)
 }
 
+const sessionIdentityCreationPrefix = "agm-create-"
+
 // SessionIdentity identifies one specific tmux session creation. ID is local
-// to a tmux server generation and may be reused after a server restart; Token
-// is stored on the session at creation so the pair remains creation-specific.
+// to a tmux server generation and may be reused after a server restart. Token
+// is first embedded in the provisional CreationName and then stored on the
+// session before its final rename, so every partial creation retains a
+// creation-specific ownership marker.
 type SessionIdentity struct {
-	ID    string
-	Token string
+	ID           string
+	Token        string
+	CreationName string
 }
 
 // Valid reports whether both parts of a creation-specific identity are valid.
@@ -73,7 +78,10 @@ func (identity SessionIdentity) Valid() bool {
 		return false
 	}
 	decoded, err := hex.DecodeString(identity.Token)
-	return err == nil && len(decoded) == 16
+	if err != nil || len(decoded) != 16 {
+		return false
+	}
+	return identity.CreationName == "" || identity.CreationName == sessionIdentityCreationPrefix+identity.Token
 }
 
 func newSessionIdentity() (SessionIdentity, error) {
@@ -81,7 +89,8 @@ func newSessionIdentity() (SessionIdentity, error) {
 	if _, err := rand.Read(tokenBytes); err != nil {
 		return SessionIdentity{}, fmt.Errorf("generate tmux session identity: %w", err)
 	}
-	return SessionIdentity{Token: hex.EncodeToString(tokenBytes)}, nil
+	token := hex.EncodeToString(tokenBytes)
+	return SessionIdentity{Token: token, CreationName: sessionIdentityCreationPrefix + token}, nil
 }
 
 func sanitizeNewSessionName(name string) string {
@@ -98,9 +107,13 @@ func HasSessionIdentityStrict(identity SessionIdentity) (bool, error) {
 	if !identity.Valid() {
 		return false, fmt.Errorf("invalid tmux session identity %q", identity.ID)
 	}
-	output, err := RunWithTimeout(context.Background(), globalTimeout, "tmux", "-S", GetSocketPath(), "display-message", "-p", "-t", identity.ID, "#{@agm_session_identity}")
+	output, err := RunWithTimeout(context.Background(), globalTimeout, "tmux", "-S", GetSocketPath(), "display-message", "-p", "-t", identity.ID, "#{@agm_session_identity}\t#{session_name}")
 	if err == nil {
-		return strings.TrimSpace(string(output)) == identity.Token, nil
+		parts := strings.SplitN(strings.TrimRight(string(output), "\r\n"), "\t", 2)
+		if len(parts) != 2 {
+			return false, fmt.Errorf("tmux returned malformed session identity for %q", identity.ID)
+		}
+		return parts[0] == identity.Token || identity.CreationName != "" && parts[1] == identity.CreationName, nil
 	}
 	if isMissingSessionOutput(output) {
 		return false, nil
@@ -109,7 +122,8 @@ func HasSessionIdentityStrict(identity SessionIdentity) (bool, error) {
 }
 
 func isMissingSessionOutput(output []byte) bool {
-	return strings.Contains(strings.ToLower(string(output)), "can't find session")
+	lowerOutput := strings.ToLower(string(output))
+	return strings.Contains(lowerOutput, "can't find session") || strings.Contains(lowerOutput, "no current target")
 }
 
 func tmuxCommandError(operation, sessionName string, output []byte, err error) error {
@@ -267,14 +281,22 @@ func EnableAutoRespawn(sessionName string) error {
 
 // NewSession creates a new tmux session with optimized settings.
 func NewSession(name string, workDir string) error {
-	_, err := NewSessionWithIdentity(name, workDir)
+	identity, err := NewSessionWithIdentity(name, workDir)
+	if err == nil || !identity.Valid() {
+		return err
+	}
+	if cleanupErr := KillSessionIdentityChecked(identity); cleanupErr != nil {
+		return errors.Join(err, fmt.Errorf("clean up partially created tmux session: %w", cleanupErr))
+	}
 	return err
 }
 
 // NewSessionWithIdentity creates a new tmux session and returns a server-local
-// ID paired with a random option stored on that specific session creation.
-// Transactional callers must retain both so later compensation cannot kill a
-// replacement that reused either the name or ID after a server restart.
+// ID paired with a random ownership token. The session is created under a
+// token-derived provisional name, stores the same token as a user option, and
+// is then renamed to the requested name. Transactional callers retain all
+// three values so compensation is safe at every command-queue boundary and
+// cannot kill a replacement after a server restart.
 //
 // If initialization fails after tmux created the session, the returned
 // identity remains non-empty so the caller can compensate the exact resource.
@@ -296,10 +318,13 @@ func NewSessionWithIdentity(name string, workDir string) (SessionIdentity, error
 
 	// Lock tmux server for session creation + settings (prevent parallel mutations)
 	err = withTmuxLock(func() error {
-		// Create session with detached mode (use sanitized name)
+		// Create under the random provisional name before storing the same token
+		// and renaming. If either later command fails, the surviving session still
+		// has an ownership marker that strict compensation can prove.
 		cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath,
-			"new-session", "-d", "-P", "-F", "#{session_id}", "-s", sanitizedName, "-c", workDir,
-			";", "set-option", "-t", sanitizedName, "@agm_session_identity", identity.Token)
+			"new-session", "-d", "-P", "-F", "#{session_id}", "-s", identity.CreationName, "-c", workDir,
+			";", "set-option", "@agm_session_identity", identity.Token,
+			";", "rename-session", sanitizedName)
 		defer cancel()
 		output, err := cmd.Output()
 		// A tmux command queue can create the session and print its ID before a
@@ -336,9 +361,9 @@ func NewSessionWithIdentity(name string, workDir string) (SessionIdentity, error
 			{[]string{"set", "-g", "exit-empty", "off"}, "Prevent server exit when all sessions detach (crash fix)"},
 			{[]string{"set", "-g", "destroy-unattached", "off"}, "Keep sessions alive when clients disconnect (crash fix)"},
 			// Per-session UX settings
-			{[]string{"set-window-option", "-t", name, "aggressive-resize", "on"}, "Fix multi-device layout conflicts"},
-			{[]string{"set-option", "-t", name, "window-size", "latest"}, "Force window to fit current screen"},
-			{[]string{"set", "-t", name, "mouse", "on"}, "Enable mouse scrolling"},
+			{[]string{"set-window-option", "-t", sanitizedName, "aggressive-resize", "on"}, "Fix multi-device layout conflicts"},
+			{[]string{"set-option", "-t", sanitizedName, "window-size", "latest"}, "Force window to fit current screen"},
+			{[]string{"set", "-t", sanitizedName, "mouse", "on"}, "Enable mouse scrolling"},
 			{[]string{"set", "-s", "set-clipboard", "on"}, "Enable OSC 52 for Cmd-C over SSH"},
 			{[]string{"set", "-s", "escape-time", "10"}, "Reduce Escape key delay for copy-mode (default 500ms causes lag)"},
 		}

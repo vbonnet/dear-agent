@@ -72,9 +72,9 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-31** When a transactional cleanup kills and verifies a tmux session, the system shall treat only an explicit missing-session response as absence and shall return socket, timeout, permission, and other backend failures instead of reporting cleanup success.
 
-**TMUX-32** When Codex readiness is checked, the system shall require either the initial composer header with its model-change hint or a post-turn `›` input cursor paired with a structured model footer, and shall reject standalone model text in echoed launch commands, working-status footers, or unsubmitted paste chips.
+**TMUX-32** When Codex readiness is checked, the system shall require either the initial composer header with its model-change hint or a post-turn `›` input cursor paired with a structured model footer, shall require that signal to own the current pane tail, and shall reject standalone model text in echoed launch commands, working-status footers, unsubmitted paste chips, or stale composers followed by newer process or shell output.
 
-**TMUX-33** When a transactional caller creates a tmux session, the system shall return a creation-specific identity composed of tmux's server-local session ID and a random token stored on that creation, shall preserve the printed server-local ID if a later command in the creation queue fails, and shall compare both values in strict kill and existence checks, so compensation can remove a partially initialized creation without selecting a replacement that reused either the same name or the same server-local ID after a server restart.
+**TMUX-33** When a transactional caller creates a tmux session, the system shall return a creation-specific identity composed of tmux's server-local session ID, a random token embedded in its provisional creation name before the token is stored on the session, shall preserve the printed server-local ID if a later command in the creation queue fails, and shall compare the ID with either ownership marker in strict kill and existence checks, so compensation can remove a partially initialized creation at every command boundary without selecting a replacement that reused either the same name or the same server-local ID after a server restart.
 
 ## BDD Traceability
 

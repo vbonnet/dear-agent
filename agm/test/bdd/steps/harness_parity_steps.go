@@ -118,6 +118,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	})
 
 	ctx.Step(`^a Codex CLI composer pane$`, aCodexCLIComposerPane)
+	ctx.Step(`^a stale Codex CLI composer followed by shell output$`, aStaleCodexCLIComposerFollowedByShellOutput)
 	ctx.Step(`^harness "([^"]*)" is configured$`, harnessIsConfigured)
 	ctx.Step(`^AGM validates active parity support$`, agmValidatesActiveParitySupport)
 	ctx.Step(`^harness "([^"]*)" should be active for parity$`, harnessShouldBeActiveForParity)
@@ -1813,6 +1814,18 @@ func aCodexCLIComposerPane(ctx context.Context) error {
 │ >_ OpenAI Codex                                    │
 │  /model to change model                            │
 ╰────────────────────────────────────────────────────╯`
+	return nil
+}
+
+func aStaleCodexCLIComposerFollowedByShellOutput(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.paneOutput = `› Continue the task
+
+  gpt-5.6 xhigh · ~/src/project
+user@host:~/src/project$`
 	return nil
 }
 

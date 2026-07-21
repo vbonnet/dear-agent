@@ -260,6 +260,11 @@ Feature: Harness parity
     When AGM checks whether the session can receive input
     Then delivery should be queued
 
+  Scenario: Stale Codex composer above shell output is not treated as ready
+    Given a stale Codex CLI composer followed by shell output
+    When AGM checks whether the session can receive input
+    Then delivery should be queued
+
   Scenario: AGY prompt is ready to receive input
     Given an AGY ready prompt
     When AGM checks whether the session can receive input

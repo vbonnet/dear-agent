@@ -90,10 +90,13 @@ func IsCodexComposerReady(content string) bool {
 
 	// A structured footer is the current post-turn status signal. Inspect the
 	// last one first so stale ready footer text above a newer working footer
-	// cannot produce a false-ready result.
+	// or shell output cannot produce a false-ready result.
 	for i, line := range slices.Backward(lines) {
 		if !codexFooterPattern.MatchString(strings.TrimSpace(line)) {
 			continue
+		}
+		if i != len(lines)-1 {
+			return false
 		}
 		// The footer is ready only when paired with the nearby composer cursor.
 		// A working view has the same footer but a "Working" status line.
@@ -115,12 +118,31 @@ func IsCodexComposerReady(content string) bool {
 			continue
 		}
 		for j := i + 1; j < len(lines) && j <= i+4; j++ {
-			if strings.Contains(lines[j], CodexPromptPatterns[1]) {
+			if strings.Contains(lines[j], CodexPromptPatterns[1]) && codexInitialComposerOwnsTail(lines[j+1:]) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// codexInitialComposerOwnsTail rejects ordinary output rendered after the
+// welcome composer. The hint may be followed by the remaining bordered rows,
+// the bottom border, and Codex's input cursor, but not a newer shell prompt or
+// process-exit message.
+func codexInitialComposerOwnsTail(lines []string) bool {
+	for _, line := range lines {
+		candidate := strings.TrimSpace(line)
+		switch {
+		case candidate == "":
+		case strings.HasPrefix(candidate, "│") && strings.HasSuffix(candidate, "│"):
+		case strings.HasPrefix(candidate, "╰") && strings.HasSuffix(candidate, "╯"):
+		case strings.HasPrefix(candidate, "›"):
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // IsCodexIdle reports whether the Codex TUI composer is currently visible in
