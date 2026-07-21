@@ -437,7 +437,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM sends a message to the session$`, agmSendsMessageToTheSession)
 	ctx.Step(`^AGM kills the session$`, agmKillsTheSession)
 	ctx.Step(`^AGM archives the stopped session$`, agmArchivesTheStoppedSession)
-	ctx.Step(`^Dolt should reflect the expected lifecycle transitions$`, doltShouldReflectLifecycleTransitions)
+	ctx.Step(`^the durable AGM store should reflect the expected lifecycle transitions$`, durableAGMStoreShouldReflectLifecycleTransitions)
 	ctx.Step(`^the matching Codex saved session should be archived$`, matchingCodexSavedSessionShouldBeArchived)
 	ctx.Step(`^a stopped Codex CLI session without a tmux pane$`, aStoppedCodexCLISessionWithoutTmuxPane)
 	ctx.Step(`^AGM validates the Codex resume transaction$`, agmValidatesTheCodexResumeTransaction)
@@ -482,7 +482,7 @@ func (t *bddLifecycleTmux) CreateSession(name, _ string) error {
 	return nil
 }
 func (t *bddLifecycleTmux) AttachSession(string) error { return nil }
-func (t *bddLifecycleTmux) CheckInputReadiness(name, harness string) (session.InputReadiness, error) {
+func (t *bddLifecycleTmux) CheckInputReadiness(_ context.Context, name, harness string) (session.InputReadiness, error) {
 	t.events = append(t.events, "readiness:"+name+":"+harness)
 	if !t.sessions[name] {
 		return session.InputReadiness{State: "NOT_FOUND"}, nil
@@ -4308,7 +4308,7 @@ func agmArchivesTheStoppedSession(ctx context.Context) error {
 	return nil
 }
 
-func doltShouldReflectLifecycleTransitions(ctx context.Context) error {
+func durableAGMStoreShouldReflectLifecycleTransitions(ctx context.Context) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
 		return err

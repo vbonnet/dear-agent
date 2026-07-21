@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -83,5 +85,31 @@ func TestValidatePolicyRejectsUnsafeFloorsAndDuplicates(t *testing.T) {
 		if err := validatePolicy(tc); err == nil {
 			t.Fatalf("validatePolicy(%+v) succeeded", tc)
 		}
+	}
+}
+
+func TestRunPreservesPackageTestFailure(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "policy.json")
+	data := `{"version":1,"packages":[{"name":"missing","package":"./definitely-not-a-package","minimum_statements":1}]}`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stderr bytes.Buffer
+	if code := run([]string{"--policy", path}, &bytes.Buffer{}, &stderr); code != 1 {
+		t.Fatalf("run() exit = %d, want 1; stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "test ./definitely-not-a-package") {
+		t.Fatalf("run() did not preserve package failure: %s", stderr.String())
+	}
+}
+
+func TestRunCoveragePreservesContextTimeout(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := runCoverage(ctx, ".", filepath.Join(t.TempDir(), "coverage.out"), false)
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("runCoverage() error = %v, want timeout", err)
 	}
 }

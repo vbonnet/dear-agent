@@ -1,6 +1,6 @@
 # Coverage Ratchet Command Specification
 
-<!-- Last audited at: 2026-07-19 -->
+<!-- Last audited at: 2026-07-21 -->
 
 ## Requirements
 
