@@ -170,35 +170,6 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
-func TestDetectSchemaVersion(t *testing.T) {
-	tests := []struct {
-		name    string
-		file    string
-		want    string
-		wantErr bool
-	}{
-		{
-			name:    "V2 file",
-			file:    "testdata/valid-v2.yaml",
-			want:    "2.0",
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			version, err := DetectSchemaVersion(tt.file)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("DetectSchemaVersion() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if version != tt.want {
-				t.Errorf("DetectSchemaVersion() = %v, want %v", version, tt.want)
-			}
-		})
-	}
-}
-
 func TestParseV2RejectsMissingOrUnsupportedSchema(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

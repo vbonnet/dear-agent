@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -55,8 +56,11 @@ func runEndV2(projectDir, newStatus, blockedReason string) error {
 	if !validStatuses[newStatus] {
 		return fmt.Errorf("invalid status: %s (must be completed, abandoned, or blocked)", newStatus)
 	}
-	if newStatus == status.StatusV2Blocked && blockedReason == "" {
-		return fmt.Errorf("blocked status requires --reason")
+	if newStatus == status.StatusV2Blocked {
+		blockedReason = strings.TrimSpace(blockedReason)
+		if blockedReason == "" {
+			return fmt.Errorf("blocked status requires --reason")
+		}
 	}
 
 	st, err := status.ParseV2FromDir(projectDir)

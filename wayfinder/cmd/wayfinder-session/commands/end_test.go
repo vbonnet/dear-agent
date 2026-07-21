@@ -142,10 +142,12 @@ func TestRunEndV2_BlockedRequiresAndPersistsReason(t *testing.T) {
 	createdAt := time.Now().Add(-30 * time.Minute)
 	makeV2StatusFileWithCreatedAt(t, dir, createdAt, 1)
 
-	if err := runEndV2(dir, "blocked", ""); err == nil || !strings.Contains(err.Error(), "requires --reason") {
-		t.Fatalf("runEndV2 without blocked reason error = %v, want required reason", err)
+	for _, reason := range []string{"", "  \t\n  "} {
+		if err := runEndV2(dir, "blocked", reason); err == nil || !strings.Contains(err.Error(), "requires --reason") {
+			t.Fatalf("runEndV2 with blocked reason %q error = %v, want required reason", reason, err)
+		}
 	}
-	if err := runEndV2(dir, "blocked", "waiting for reviewer"); err != nil {
+	if err := runEndV2(dir, "blocked", "  waiting for reviewer  "); err != nil {
 		t.Fatalf("runEndV2 blocked: %v", err)
 	}
 

@@ -329,41 +329,6 @@ func extractV2Frontmatter(content string) (string, error) {
 	return strings.Join(yamlLines, "\n"), nil
 }
 
-// DetectSchemaVersion returns the canonical schema version or fails closed.
-func DetectSchemaVersion(filePath string) (string, error) {
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return "", fmt.Errorf("failed to read file: %w", err)
-	}
-
-	yamlContent, err := extractV2Frontmatter(string(data))
-	if err != nil {
-		return "", fmt.Errorf("failed to parse canonical frontmatter: %w", err)
-	}
-
-	// Parse just the schema_version field
-	var metadata struct {
-		SchemaVersion string `yaml:"schema_version"`
-	}
-	if err := yaml.Unmarshal([]byte(yamlContent), &metadata); err != nil {
-		return "", fmt.Errorf("failed to parse schema_version: %w", err)
-	}
-
-	if metadata.SchemaVersion == "" {
-		return "", fmt.Errorf("schema_version is required; expected %s", SchemaVersion)
-	}
-	if metadata.SchemaVersion != SchemaVersion {
-		return "", fmt.Errorf("unsupported schema_version %q; expected %s", metadata.SchemaVersion, SchemaVersion)
-	}
-
-	return SchemaVersion, nil
-}
-
-// DetectSchemaVersionFromDir validates the status schema in dir.
-func DetectSchemaVersionFromDir(dir string) (string, error) {
-	return DetectSchemaVersion(filepath.Join(dir, StatusFilename))
-}
-
 // NewStatusV2 creates a new V2 status with default values
 func NewStatusV2(projectName, projectType, riskLevel string) *StatusV2 {
 	now := time.Now()
