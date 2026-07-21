@@ -71,15 +71,36 @@ func (f FileSpawnTimer) RecordSpawn(t time.Time) error {
 
 // --- WorkerCounter: AGM tmux socket ---
 
-// TmuxWorkerCounter counts active sessions in the AGM tmux socket as a proxy
-// for concurrent workers. The count is used only when MaxWorkers > 0 (the
-// default is 0 = disabled). Fails open (returns 0) when tmux is unavailable.
+// WorkerSessionPrefix is the tmux session-name prefix AGM gives to dispatched
+// worker sessions (e.g. "worker-ce-2mib"). It is the cheap, DB-free signal for
+// classifying a session on the shared socket as a worker.
+const WorkerSessionPrefix = "worker-"
+
+// TmuxWorkerCounter counts *worker* sessions in the AGM tmux socket.
+//
+// The socket is shared: test fixtures, supervisor panes (orchestrator,
+// overseer, meta-orchestrator) and orphan sessions all live there alongside
+// workers. Counting every session against the worker cap made the cap
+// self-deadlocking — a single `go test` fixture session was enough to refuse
+// every dispatch. A session is therefore counted only when it is recognisably
+// a worker: its name carries WorkerSessionPrefix, or KnownWorkers reports it
+// as tagged role:worker in the AGM session DB.
+//
+// The count is used only when MaxWorkers > 0 (the default is 0 = disabled).
+// Fails open (returns 0) when tmux is unavailable.
 type TmuxWorkerCounter struct {
 	// Socket is the AGM tmux socket path. Defaults to ~/.agm/agm.sock.
 	Socket string
+
+	// KnownWorkers optionally resolves the set of session names AGM records as
+	// active workers (status active, tagged role:worker). It is consulted only
+	// for live sessions whose names lack WorkerSessionPrefix, so a fleet named
+	// by convention costs no DB access. A nil resolver, or one that errors,
+	// leaves classification to the name prefix alone.
+	KnownWorkers func() (map[string]bool, error)
 }
 
-// CountWorkers returns the number of tmux sessions in the AGM socket.
+// CountWorkers returns the number of worker sessions in the AGM socket.
 func (t TmuxWorkerCounter) CountWorkers() (int, error) {
 	sock := t.Socket
 	if sock == "" {
@@ -98,12 +119,47 @@ func (t TmuxWorkerCounter) CountWorkers() (int, error) {
 	// tmux exits non-zero when there are no sessions; treat any error as 0 workers.
 	out, _ := exec.Command("tmux", "-S", sock, "list-sessions", "-F", "#S").Output()
 
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	return countWorkerSessions(splitSessionNames(string(out)), t.KnownWorkers), nil
+}
+
+// splitSessionNames turns `tmux list-sessions -F '#S'` output into session
+// names, dropping blank lines.
+func splitSessionNames(out string) []string {
+	var names []string
+	for _, l := range strings.Split(out, "\n") {
+		if n := strings.TrimSpace(l); n != "" {
+			names = append(names, n)
+		}
+	}
+	return names
+}
+
+// countWorkerSessions counts the names that denote worker sessions. Names
+// carrying WorkerSessionPrefix count outright; the rest are checked against
+// the AGM session DB via knownWorkers, which is resolved lazily and only when
+// at least one unprefixed name needs adjudicating.
+func countWorkerSessions(names []string, knownWorkers func() (map[string]bool, error)) int {
 	count := 0
-	for _, l := range lines {
-		if strings.TrimSpace(l) != "" {
+	var known map[string]bool
+	resolved := false
+
+	for _, name := range names {
+		if strings.HasPrefix(name, WorkerSessionPrefix) {
+			count++
+			continue
+		}
+		if knownWorkers == nil {
+			continue
+		}
+		if !resolved {
+			// Best-effort: an unreadable session DB falls back to prefix-only
+			// classification rather than resurrecting the count-everything bug.
+			known, _ = knownWorkers()
+			resolved = true
+		}
+		if known[name] {
 			count++
 		}
 	}
-	return count, nil
+	return count
 }

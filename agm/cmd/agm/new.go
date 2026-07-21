@@ -15,6 +15,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/circuitbreaker"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/modelrouter"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
 	"github.com/vbonnet/dear-agent/agm/internal/testcontext"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
@@ -774,8 +775,12 @@ func resolveEnvVarDefaults(cmd *cobra.Command) {
 // gates. Adding a spawn path without calling this is the ce-93lw.18 bug.
 func enforceCircuitBreakers() error {
 	cfg := circuitbreaker.DefaultConfig()
+<<<<<<< HEAD
 	lr := circuitbreaker.DefaultLoadReader()
 	wc := circuitbreaker.TmuxWorkerCounter{}
+	if cfg.MaxWorkers > 0 {
+		wc.KnownWorkers = taggedWorkerSessions
+	}
 	st := circuitbreaker.NewFileSpawnTimer()
 	mr := circuitbreaker.DefaultMemReader()
 	dr := circuitbreaker.DefaultDiskReader()
@@ -803,6 +808,36 @@ func enforceCircuitBreakers() error {
 	}
 
 	return nil
+}
+
+// taggedWorkerSessions returns the names of non-archived sessions AGM records
+// as tagged role:worker. The circuit breaker uses it to recognise workers whose
+// tmux session name lacks the worker- prefix, so they still count against the
+// cap. It is consulted only when such a session is live, and every failure path
+// returns an error so the breaker falls back to prefix-only classification
+// rather than blocking a spawn on an unreadable database.
+func taggedWorkerSessions() (map[string]bool, error) {
+	opCtx, cleanup, err := newOpContextWithStorage()
+	if err != nil {
+		return nil, fmt.Errorf("opening session storage: %w", err)
+	}
+	defer cleanup()
+
+	result, err := ops.ListSessions(opCtx, &ops.ListSessionsRequest{
+		Status:         "active",
+		Tags:           []string{"role:worker"},
+		Limit:          1000,
+		ExcludeStopped: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("listing worker sessions: %w", err)
+	}
+
+	workers := make(map[string]bool, len(result.Sessions))
+	for _, s := range result.Sessions {
+		workers[s.Name] = true
+	}
+	return workers, nil
 }
 
 // buildSessionTags combines --role and --tags into a single tag slice.
