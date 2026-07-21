@@ -251,7 +251,7 @@ func TestResumeSessionCodexCompensatesCanonicalNameWhenOrdinaryPromptDeliveryFai
 	if err != nil {
 		t.Fatalf("GetSession() after resume error = %v", err)
 	}
-	if storedAfter.Tmux.SessionName != storedBefore.Tmux.SessionName {
+	if storedAfter.Tmux.SessionName != storedBefore.Tmux.SessionName || !storedAfter.UpdatedAt.Equal(storedBefore.UpdatedAt) {
 		t.Fatalf("failed prompt left provisional metadata: before=%#v after=%#v", storedBefore, storedAfter)
 	}
 }

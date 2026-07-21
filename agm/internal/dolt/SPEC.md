@@ -12,7 +12,7 @@
 
 **DOLTR-05** When AGM creates a session with no model, the storage adapter shall apply the historical default only to Claude Code sessions and shall preserve unknown model provenance for every non-Claude harness.
 
-**DOLTR-06** When a resume transaction provisionally changes a tmux session name, the storage adapter shall use an opaque cross-dialect ownership revision to compare-and-swap only the name, preserve unrelated columns, restore only that same provisional revision after failure, and release the revision after success so a newer concurrent update is never overwritten.
+**DOLTR-06** When a resume transaction provisionally changes a tmux session name, the storage adapter shall use an opaque cross-dialect ownership revision to compare-and-swap only the name, preserve unrelated columns, restore only that same provisional revision and its prior activity timestamp after failure, and release the revision after success so a newer concurrent update is never overwritten.
 
 **DOLTR-07** When AGM opens a persistent SQLite test store created before tmux ownership revisions existed, the adapter shall idempotently add the nullable revision column before lifecycle queries run and shall preserve every existing session row.
 

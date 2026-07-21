@@ -68,4 +68,20 @@ func TestDoltTmuxSessionNameChangeUsesCrossDialectOwnership(t *testing.T) {
 	if stored.Tmux.SessionName != "second-canonical-name" || stored.Context.Notes != "newer production writer" {
 		t.Fatalf("newer production state was overwritten: name=%q notes=%q", stored.Tmux.SessionName, stored.Context.Notes)
 	}
+	previousUpdatedAt := stored.UpdatedAt
+	thirdChange, err := adapter.BeginTmuxSessionNameChange(t.Context(), sessionID, "third-canonical-name")
+	if err != nil || thirdChange == nil {
+		t.Fatalf("third BeginTmuxSessionNameChange() = (%v, %v), want non-nil change", thirdChange, err)
+	}
+	restored, err = adapter.RestoreTmuxSessionNameChange(t.Context(), *thirdChange)
+	if err != nil || !restored {
+		t.Fatalf("third RestoreTmuxSessionNameChange() = (%v, %v), want (true, nil)", restored, err)
+	}
+	final, err := adapter.GetSession(sessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after production compensation: %v", err)
+	}
+	if final.Tmux.SessionName != "second-canonical-name" || !final.UpdatedAt.Equal(previousUpdatedAt) {
+		t.Fatalf("production compensation = (%q, %v), want (second-canonical-name, %v)", final.Tmux.SessionName, final.UpdatedAt, previousUpdatedAt)
+	}
 }

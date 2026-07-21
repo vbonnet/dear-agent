@@ -142,8 +142,8 @@ func TestSQLiteAdapterUpgradesLegacySessionRevisionColumn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSession() after upgraded lifecycle mutations: %v", err)
 	}
-	if final.Tmux.SessionName != "legacy-name" || final.Context.Notes != "updated after upgrade" {
-		t.Fatalf("upgraded lifecycle state = (%q, %q), want (legacy-name, updated after upgrade)", final.Tmux.SessionName, final.Context.Notes)
+	if final.Tmux.SessionName != "legacy-name" || final.Context.Notes != "updated after upgrade" || !final.UpdatedAt.Equal(stored.UpdatedAt) {
+		t.Fatalf("upgraded lifecycle state = (%q, %q, %v), want (legacy-name, updated after upgrade, %v)", final.Tmux.SessionName, final.Context.Notes, final.UpdatedAt, stored.UpdatedAt)
 	}
 }
 
@@ -261,8 +261,8 @@ func TestSQLiteTmuxSessionNameChangeOwnsAndRestoresExactWrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSession() after restore error: %v", err)
 	}
-	if final.Tmux.SessionName != stored.Tmux.SessionName || final.Context.Notes != "concurrent metadata retained" {
-		t.Fatalf("restored state = (%q, %q), want (%q, concurrent metadata retained)", final.Tmux.SessionName, final.Context.Notes, stored.Tmux.SessionName)
+	if final.Tmux.SessionName != stored.Tmux.SessionName || final.Context.Notes != "concurrent metadata retained" || !final.UpdatedAt.Equal(stored.UpdatedAt) {
+		t.Fatalf("restored state = (%q, %q, %v), want (%q, concurrent metadata retained, %v)", final.Tmux.SessionName, final.Context.Notes, final.UpdatedAt, stored.Tmux.SessionName, stored.UpdatedAt)
 	}
 }
 

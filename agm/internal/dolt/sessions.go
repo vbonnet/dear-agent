@@ -357,11 +357,12 @@ func (a *Adapter) UpdateTmuxSessionName(ctx context.Context, sessionID, sessionN
 // tmux-name write. Its opaque token is compared directly by both MySQL/Dolt and
 // SQLite, avoiding dialect-specific timestamp casts and precision differences.
 type TmuxSessionNameChange struct {
-	SessionID        string
-	PreviousName     string
-	PreviousRevision sql.NullString
-	CurrentName      string
-	CurrentRevision  string
+	SessionID         string
+	PreviousName      string
+	PreviousRevision  sql.NullString
+	PreviousUpdatedAt time.Time
+	CurrentName       string
+	CurrentRevision   string
 }
 
 // BeginTmuxSessionNameChange persists a provisional canonical tmux name while
@@ -386,11 +387,12 @@ func (a *Adapter) BeginTmuxSessionNameChange(ctx context.Context, sessionID, new
 
 	var previousName string
 	var previousRevision sql.NullString
+	var previousUpdatedAt time.Time
 	if err := tx.QueryRowContext(ctx, `
-		SELECT tmux_session_name, tmux_session_revision
+		SELECT tmux_session_name, tmux_session_revision, updated_at
 		FROM agm_sessions
 		WHERE id = ? AND workspace = ?
-	`, sessionID, a.workspace).Scan(&previousName, &previousRevision); err != nil {
+	`, sessionID, a.workspace).Scan(&previousName, &previousRevision, &previousUpdatedAt); err != nil {
 		return nil, fmt.Errorf("read tmux session name revision: %w", err)
 	}
 	if previousName == newName {
@@ -422,11 +424,12 @@ func (a *Adapter) BeginTmuxSessionNameChange(ctx context.Context, sessionID, new
 		return nil, fmt.Errorf("commit provisional tmux session name: %w", err)
 	}
 	return &TmuxSessionNameChange{
-		SessionID:        sessionID,
-		PreviousName:     previousName,
-		PreviousRevision: previousRevision,
-		CurrentName:      newName,
-		CurrentRevision:  currentRevision,
+		SessionID:         sessionID,
+		PreviousName:      previousName,
+		PreviousRevision:  previousRevision,
+		PreviousUpdatedAt: previousUpdatedAt,
+		CurrentName:       newName,
+		CurrentRevision:   currentRevision,
 	}, nil
 }
 
@@ -446,7 +449,7 @@ func (a *Adapter) RestoreTmuxSessionNameChange(ctx context.Context, change TmuxS
 		SET updated_at = ?, tmux_session_name = ?, tmux_session_revision = ?
 		WHERE id = ? AND workspace = ?
 		  AND tmux_session_name = ? AND tmux_session_revision = ?
-	`, time.Now(), change.PreviousName, nullableStringValue(change.PreviousRevision), change.SessionID, a.workspace, change.CurrentName, change.CurrentRevision)
+	`, change.PreviousUpdatedAt, change.PreviousName, nullableStringValue(change.PreviousRevision), change.SessionID, a.workspace, change.CurrentName, change.CurrentRevision)
 	if err != nil {
 		return false, fmt.Errorf("restore provisional tmux session name: %w", err)
 	}
