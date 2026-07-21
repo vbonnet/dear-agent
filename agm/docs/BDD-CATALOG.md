@@ -247,7 +247,9 @@ creation, and terminal state detection.
   token, persists a canonical name under an opaque cross-dialect ownership
   revision before optional prompt submission, treats ordinary prompt failures
   as transactional failures, and compensates only those exact identities
-  without killing a same-named or server-restart replacement.
+  without killing a same-named or server-restart replacement. Reopening a
+  persistent pre-revision SQLite test store upgrades its schema idempotently
+  while preserving existing sessions before those lifecycle mutations run.
 - Final creation liveness validation derives from the root context and rechecks
   cancellation before title update, attach, or detached-success reporting.
 - AGY feedback survey handling dismisses once and recognizes the subsequent

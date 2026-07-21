@@ -14,6 +14,8 @@
 
 **DOLTR-06** When a resume transaction provisionally changes a tmux session name, the storage adapter shall use an opaque cross-dialect ownership revision to compare-and-swap only the name, preserve unrelated columns, restore only that same provisional revision after failure, and release the revision after success so a newer concurrent update is never overwritten.
 
+**DOLTR-07** When AGM opens a persistent SQLite test store created before tmux ownership revisions existed, the adapter shall idempotently add the nullable revision column before lifecycle queries run and shall preserve every existing session row.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`

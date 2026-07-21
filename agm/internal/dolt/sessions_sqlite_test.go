@@ -3,6 +3,7 @@ package dolt
 import (
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,6 +61,89 @@ func TestSQLiteGetSessionByUUID_ClaudeUUID(t *testing.T) {
 	}
 	if found == nil || found.SessionID != codex.SessionID {
 		t.Fatalf("GetSessionByUUID(codex) = %#v, want session %q", found, codex.SessionID)
+	}
+}
+
+func TestSQLiteAdapterUpgradesLegacySessionRevisionColumn(t *testing.T) {
+	databasePath := filepath.Join(t.TempDir(), "agm.db")
+	legacySchema := strings.Replace(sqliteSessionSchema, "  tmux_session_revision TEXT,\n", "", 1)
+	if legacySchema == sqliteSessionSchema {
+		t.Fatal("legacy schema fixture still contains tmux_session_revision")
+	}
+	legacyConn, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatalf("open legacy SQLite store: %v", err)
+	}
+	if _, err := legacyConn.Exec(legacySchema); err != nil {
+		_ = legacyConn.Close()
+		t.Fatalf("initialize legacy SQLite schema: %v", err)
+	}
+	now := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "legacy-sqlite-revision-session",
+		Name:          "legacy-sqlite-revision-session",
+		Harness:       "codex-cli",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		Context:       manifest.Context{Project: t.TempDir(), Notes: "preserve on upgrade"},
+		Tmux:          manifest.Tmux{SessionName: "legacy-name"},
+	}
+	legacyAdapter := &Adapter{
+		conn:              legacyConn,
+		workspace:         "test",
+		migrationsApplied: true,
+		testStore:         true,
+	}
+	if err := legacyAdapter.CreateSession(m); err != nil {
+		_ = legacyConn.Close()
+		t.Fatalf("seed legacy SQLite session: %v", err)
+	}
+	if err := legacyConn.Close(); err != nil {
+		t.Fatalf("close legacy SQLite store: %v", err)
+	}
+
+	adapter, err := NewSQLiteAdapter(databasePath)
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() legacy reopen error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+	upgraded, err := sqliteSessionColumnExists(adapter.Conn(), "tmux_session_revision")
+	if err != nil || !upgraded {
+		t.Fatalf("SQLite ownership revision after reopen = (%v, %v), want (true, nil)", upgraded, err)
+	}
+	secondAdapter, err := NewSQLiteAdapter(databasePath)
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() idempotent second reopen error: %v", err)
+	}
+	if err := secondAdapter.Close(); err != nil {
+		t.Fatalf("close second upgraded SQLite adapter: %v", err)
+	}
+	stored, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after schema upgrade: %v", err)
+	}
+	if stored.Tmux.SessionName != "legacy-name" || stored.Context.Notes != "preserve on upgrade" {
+		t.Fatalf("legacy row changed during schema upgrade: name=%q notes=%q", stored.Tmux.SessionName, stored.Context.Notes)
+	}
+	stored.Context.Notes = "updated after upgrade"
+	if err := adapter.UpdateSession(stored); err != nil {
+		t.Fatalf("UpdateSession() after schema upgrade: %v", err)
+	}
+	change, err := adapter.BeginTmuxSessionNameChange(t.Context(), m.SessionID, "canonical-name")
+	if err != nil || change == nil {
+		t.Fatalf("BeginTmuxSessionNameChange() after schema upgrade = (%v, %v), want non-nil change", change, err)
+	}
+	restored, err := adapter.RestoreTmuxSessionNameChange(t.Context(), *change)
+	if err != nil || !restored {
+		t.Fatalf("RestoreTmuxSessionNameChange() after schema upgrade = (%v, %v), want (true, nil)", restored, err)
+	}
+	final, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after upgraded lifecycle mutations: %v", err)
+	}
+	if final.Tmux.SessionName != "legacy-name" || final.Context.Notes != "updated after upgrade" {
+		t.Fatalf("upgraded lifecycle state = (%q, %q), want (legacy-name, updated after upgrade)", final.Tmux.SessionName, final.Context.Notes)
 	}
 }
 
