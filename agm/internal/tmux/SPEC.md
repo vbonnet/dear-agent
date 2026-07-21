@@ -74,7 +74,7 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-32** When Codex readiness is checked, the system shall require either the initial composer header with its model-change hint or a post-turn `›` input cursor paired with a structured model footer, and shall reject standalone model text in echoed launch commands, working-status footers, or unsubmitted paste chips.
 
-**TMUX-33** When a transactional caller creates a tmux session, the system shall return a creation-specific identity composed of tmux's server-local session ID and a random token stored on that creation, and shall compare both in strict kill and existence checks, so compensation cannot select a replacement that reused either the same name or the same server-local ID after a server restart.
+**TMUX-33** When a transactional caller creates a tmux session, the system shall return a creation-specific identity composed of tmux's server-local session ID and a random token stored on that creation, shall preserve the printed server-local ID if a later command in the creation queue fails, and shall compare both values in strict kill and existence checks, so compensation can remove a partially initialized creation without selecting a replacement that reused either the same name or the same server-local ID after a server restart.
 
 ## BDD Traceability
 

@@ -302,6 +302,11 @@ func NewSessionWithIdentity(name string, workDir string) (SessionIdentity, error
 			";", "set-option", "-t", sanitizedName, "@agm_session_identity", identity.Token)
 		defer cancel()
 		output, err := cmd.Output()
+		// A tmux command queue can create the session and print its ID before a
+		// later command (the identity option write here) fails. Capture that ID
+		// before returning the queue error so the caller can compensate the
+		// partially created resource.
+		identity.ID = strings.TrimSpace(string(output))
 		if err != nil {
 			// Check for timeout
 			if ctx.Err() == context.DeadlineExceeded {
@@ -313,7 +318,6 @@ func NewSessionWithIdentity(name string, workDir string) (SessionIdentity, error
 			}
 			return fmt.Errorf("failed to create tmux session: %w", err)
 		}
-		identity.ID = strings.TrimSpace(string(output))
 		if !identity.Valid() {
 			return fmt.Errorf("tmux created session %q but returned invalid session identity %q", sanitizedName, identity.ID)
 		}

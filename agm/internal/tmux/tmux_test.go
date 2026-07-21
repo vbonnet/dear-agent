@@ -250,6 +250,33 @@ func TestSessionIdentityValidation(t *testing.T) {
 	}
 }
 
+func TestNewSessionWithIdentityReturnsIDWhenQueuedInitializationFails(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping tmux integration test in short mode (uses global lock)")
+	}
+	skipIfNoTmux(t)
+	socketPath, cleanup := setupTestSocket(t)
+	defer cleanup()
+
+	if err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", "keepalive").Run(); err != nil {
+		t.Fatalf("create keepalive session: %v", err)
+	}
+	if err := exec.Command("tmux", "-S", socketPath, "set-hook", "-g", "after-new-session", "kill-session -t partial-create").Run(); err != nil {
+		t.Fatalf("install post-create failure hook: %v", err)
+	}
+
+	identity, err := NewSessionWithIdentity("partial-create", t.TempDir())
+	if err == nil {
+		t.Fatal("NewSessionWithIdentity() succeeded despite queued set-option failure")
+	}
+	if !identity.Valid() {
+		t.Fatalf("NewSessionWithIdentity() lost partial creation identity: %#v", identity)
+	}
+	if exists, hasErr := HasSession("partial-create"); hasErr != nil || exists {
+		t.Fatalf("post-create failure fixture = (exists=%v, err=%v), want removed target", exists, hasErr)
+	}
+}
+
 // TestNewSession_SettingsInjection verifies tmux settings are injected
 func TestNewSession_SettingsInjection(t *testing.T) {
 	if testing.Short() {
