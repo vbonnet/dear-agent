@@ -326,6 +326,16 @@ func validateWaypointMetadata(waypoint WaypointHistory, index int) error {
 		if waypoint.DeploymentStatus != "" && !contains(validDeploymentStatuses, waypoint.DeploymentStatus) {
 			errors = append(errors, fmt.Sprintf("waypoint_history[%d] (BUILD): invalid deployment_status '%s'", index, waypoint.DeploymentStatus))
 		}
+		if waypoint.BuildMetrics != nil {
+			for name, value := range map[string]float64{
+				"coverage_percent":  waypoint.BuildMetrics.CoveragePercent,
+				"assertion_density": waypoint.BuildMetrics.AssertionDensity,
+			} {
+				if math.IsNaN(value) || math.IsInf(value, 0) {
+					errors = append(errors, fmt.Sprintf("waypoint_history[%d] (BUILD): build_metrics.%s must be finite", index, name))
+				}
+			}
+		}
 	}
 
 	if len(errors) > 0 {

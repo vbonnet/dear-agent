@@ -764,6 +764,37 @@ func TestValidateQualityMetrics(t *testing.T) {
 	}
 }
 
+func TestValidateBuildMetricsRejectsNonFiniteValues(t *testing.T) {
+	tests := []struct {
+		name    string
+		metrics BuildMetrics
+		want    string
+	}{
+		{
+			name:    "NaN coverage",
+			metrics: BuildMetrics{CoveragePercent: math.NaN()},
+			want:    "build_metrics.coverage_percent must be finite",
+		},
+		{
+			name:    "infinite assertion density",
+			metrics: BuildMetrics{AssertionDensity: math.Inf(1)},
+			want:    "build_metrics.assertion_density must be finite",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateWaypointMetadata(WaypointHistory{
+				Name:         PhaseV2Build,
+				BuildMetrics: &tt.metrics,
+			}, 0)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("validateWaypointMetadata() error = %v, want error containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateV2WithRealExample(t *testing.T) {
 	// Parse the valid example file
 	status, err := ParseV2("testdata/valid-v2.yaml")
