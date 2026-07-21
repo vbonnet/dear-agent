@@ -207,6 +207,7 @@ func TestParseV2RejectsMissingOrUnsupportedSchema(t *testing.T) {
 	}{
 		{name: "missing", message: "schema_version is required"},
 		{name: "unsupported", schema: "schema_version: \"1.0\"\n", message: "unsupported schema_version"},
+		{name: "unquoted numeric", schema: "schema_version: 2.0\n", message: "schema_version must be an actual string scalar"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), StatusFilename)

@@ -28,6 +28,9 @@ func ParseV2Content(data []byte) (*StatusV2, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := validateV2SchemaVersionScalar(yamlContent); err != nil {
+		return nil, err
+	}
 	var metadata struct {
 		SchemaVersion string `yaml:"schema_version"`
 	}
@@ -55,6 +58,27 @@ func ParseV2Content(data []byte) (*StatusV2, error) {
 	}
 
 	return &status, nil
+}
+
+func validateV2SchemaVersionScalar(yamlContent string) error {
+	var document yaml.Node
+	if err := yaml.Unmarshal([]byte(yamlContent), &document); err != nil {
+		return fmt.Errorf("failed to parse schema_version: %w", err)
+	}
+	if len(document.Content) == 0 || document.Content[0].Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(document.Content[0].Content); i += 2 {
+		key, value := document.Content[0].Content[i], document.Content[0].Content[i+1]
+		if key.Value != "schema_version" {
+			continue
+		}
+		if value.Kind != yaml.ScalarNode || value.Tag != "!!str" {
+			return fmt.Errorf("schema_version must be an actual string scalar")
+		}
+		return nil
+	}
+	return nil
 }
 
 var v2TimestampFields = map[string]bool{
