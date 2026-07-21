@@ -1,6 +1,6 @@
 # Safe Unlock Specification
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-07-20 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -32,6 +32,8 @@ JSONL audit log.
 **SAFEUNLOCK-08** When any locks are evaluated, the system shall append audit records for the decisions.
 
 **SAFEUNLOCK-09** When one lock removal fails, the system shall continue evaluating remaining locks and return a joined error.
+
+**SAFEUNLOCK-10** When a non-Git transaction guard is stored in a linked-worktree Git directory, the system shall exclude it from stale Git lock discovery regardless of its age or holder-probe availability.
 
 ## BDD Traceability
 

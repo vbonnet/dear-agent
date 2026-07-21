@@ -1,6 +1,6 @@
 # safe-pr Command Specification
 
-<!-- Last audited at: 2026-07-19 -->
+<!-- Last audited at: 2026-07-20 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -40,6 +40,16 @@ creation.
 **SAFE-PR-12** When non-draft PR creation succeeds, the system shall attempt to arm squash auto-merge.
 
 **SAFE-PR-13** When draft detection scans GitHub CLI arguments, the system shall treat `-R` and every other value-taking shorthand as consuming its repository value rather than interpreting that value as Boolean flags.
+
+**SAFE-PR-14** When pull request creation runs, the system shall protect the linked worktree across both the full preflight and GitHub mutation boundaries.
+
+**SAFE-PR-15** When pull request creation manages safe-pr lock ownership, the system shall hold a per-worktree operating-system serialization lock across the transaction so process termination releases liveness ownership without relying on reusable numeric process IDs.
+
+**SAFE-PR-16** When pull request creation launches preflight, GitHub mutation, auto-merge, or CI-discovery commands, the system shall attach the active worktree transaction guard so child process lifetime remains part of the protected transaction after abrupt parent termination.
+
+**SAFE-PR-17** When a protected safe-pr child command is canceled or times out, the system shall terminate its isolated process group and bound pipe draining before the parent releases Git worktree ownership.
+
+**SAFE-PR-18** When an attributed safe-pr transaction finishes, the system shall append exactly one audit record whose exit code and error reflect the final acquisition, GitHub mutation, and worktree release outcome.
 
 ## BDD Traceability
 

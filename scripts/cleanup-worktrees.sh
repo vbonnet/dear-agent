@@ -222,7 +222,9 @@ flush_record() {
 
     if ! git -C "$REPO" worktree remove --force "$path" 2>&1 | sed 's/^/    /'; then
         log "  FAILED: worktree remove $path"
-        local_failed=1
+        log "  skipped branch cleanup for $branch because the worktree was preserved"
+        FAILED_COUNT=$(( FAILED_COUNT + 1 ))
+        return 0
     else
         log "  removed worktree: $path"
     fi
@@ -236,6 +238,12 @@ flush_record() {
         fi
     fi
 
+    if [[ $local_failed -eq 1 ]]; then
+        log "  skipped remote branch cleanup for $branch because local cleanup failed"
+        FAILED_COUNT=$(( FAILED_COUNT + 1 ))
+        return 0
+    fi
+
     if [[ -n "$branch" ]]; then
         # Best-effort remote delete; tolerate already-deleted upstream.
         if git -C "$REPO" push origin --delete "$branch" 2>&1 | sed 's/^/    /'; then
@@ -245,9 +253,6 @@ flush_record() {
         fi
     fi
 
-    if [[ $local_failed -eq 1 ]]; then
-        FAILED_COUNT=$(( FAILED_COUNT + 1 ))
-    fi
 }
 
 while IFS= read -r line; do
