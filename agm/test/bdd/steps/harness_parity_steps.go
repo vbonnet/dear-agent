@@ -131,6 +131,9 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the top-level new command should route into current tmux$`, topLevelNewCommandShouldRouteIntoCurrentTmux)
 	ctx.Step(`^Codex current-tmux launch should require the executable without waiting behind its own AGM process$`, codexCurrentTmuxLaunchShouldRequireExecutableWithoutWaiting)
 	ctx.Step(`^Codex queue failures should propagate to shared creation rollback$`, codexQueueFailuresShouldPropagateToSharedCreationRollback)
+	ctx.Step(`^current-tmux creation selects AGY$`, currentTmuxCreationSelectsAGY)
+	ctx.Step(`^AGM validates current-tmux AGY safety$`, agmValidatesCurrentTmuxAGYSafety)
+	ctx.Step(`^current-tmux AGY creation should fail before launch with detached guidance$`, currentTmuxAGYCreationShouldFailBeforeLaunchWithDetachedGuidance)
 	ctx.Step(`^AGM validates active harness adapter conformance$`, agmValidatesActiveHarnessAdapterConformance)
 	ctx.Step(`^every active harness adapter should satisfy the shared conformance suite$`, everyActiveHarnessAdapterShouldSatisfySharedConformanceSuite)
 	ctx.Step(`^AGM validates the pane capture invocation$`, agmValidatesPaneCaptureInvocation)
@@ -244,6 +247,9 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM should auto-accept the AGY trust prompt before prompt delivery$`, agmShouldAutoAcceptAGYTrustPromptBeforePromptDelivery)
 	ctx.Step(`^AGM runs send safety for the configured harness$`, agmRunsSendSafetyForTheConfiguredHarness)
 	ctx.Step(`^send safety should not require a Claude process$`, sendSafetyShouldNotRequireClaudeProcess)
+	ctx.Step(`^AGM validates the AGY adapter lifecycle$`, agmValidatesTheAgyAdapterLifecycle)
+	ctx.Step(`^the AGY adapter should preserve canonical launch and resume policy$`, agyAdapterShouldPreserveCanonicalLaunchAndResumePolicy)
+	ctx.Step(`^the AGY adapter should require AGY process and transcript truth$`, agyAdapterShouldRequireAgyProcessAndTranscriptTruth)
 	ctx.Step(`^an existing tmux session running Codex CLI$`, anExistingTmuxSessionRunningCodexCLI)
 	ctx.Step(`^an existing tmux session running AGY$`, anExistingTmuxSessionRunningAGY)
 	ctx.Step(`^/agm:agm-assoc runs in that session$`, agmAssocRunsInThatSession)
@@ -267,6 +273,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGY runtime model switches should not leave a stale resume override$`, agyRuntimeModelSwitchesShouldNotLeaveAStaleResumeOverride)
 	ctx.Step(`^AGM validates AGY MCP creation readiness$`, agmValidatesAGYMCPCreateReadiness)
 	ctx.Step(`^MCP creation should wait for the AGY composer before prompt delivery$`, mcpCreationShouldWaitForAGYComposerBeforePromptDelivery)
+	ctx.Step(`^shared creation should persist the new AGY identity before registration$`, sharedCreationShouldPersistNewAGYIdentityBeforeRegistration)
 	ctx.Step(`^AGM validates AGY root cancellation plumbing$`, agmValidatesAGYRootCancellationPlumbing)
 	ctx.Step(`^root signal cancellation should reach every command-scoped readiness wait$`, rootSignalCancellationShouldReachEveryCommandScopedReadinessWait)
 	ctx.Step(`^AGM has Codex session records in Dolt$`, agmHasCodexSessionRecordsInDolt)
@@ -398,6 +405,25 @@ func codexQueueFailuresShouldPropagateToSharedCreationRollback(ctx context.Conte
 		}
 	}
 	return nil
+}
+
+func currentTmuxCreationSelectsAGY(ctx context.Context) error {
+	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	harnessState.configuredHarness = "agy"
+	return nil
+}
+
+func agmValidatesCurrentTmuxAGYSafety(ctx context.Context) error {
+	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if harnessState.configuredHarness != "agy" {
+		return fmt.Errorf("configured harness = %q, want agy", harnessState.configuredHarness)
+	}
+	return runAgyLifecycleBehaviorSuite(ctx, harnessState)
+}
+
+func currentTmuxAGYCreationShouldFailBeforeLaunchWithDetachedGuidance(ctx context.Context) error {
+	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	return requireAgyLifecycleBehaviors(harnessState, "TestStartNewSessionForContextRejectsCurrentTmuxAgyBeforeLaunch")
 }
 
 func activeHarnessUsesStartupMode(ctx context.Context, harness, mode string) error {
@@ -1879,22 +1905,91 @@ func runAgyLifecycleBehaviorSuite(ctx context.Context, harnessState *harnessPari
 		"./agm/internal/agent",
 		"./agm/internal/dolt",
 		"./agm/internal/importer",
+		"./agm/internal/lock",
 		"./agm/internal/ops",
 		"./agm/internal/safety",
 		"./agm/internal/send",
 		"./agm/internal/state",
 		"./agm/internal/tmux",
-		"-run", `^(Test(StartAgyHarness(UsesCanonicalLaunchAndWaits|PropagatesReadinessFailure)|StartCurrentTmuxAgyStopsAfterCallerCancellation|BuildAgyCommand_(AutoPermissionMode|DefaultPermissionMode)|AgyModelCatalogMatchesPublicCLI|BuildAgyImportedManifestLeavesUnknownModelUnset|CreateSession_AgyDetachedPromptUsesCanonicalCommand|CreateSession_CancellationAfterRegistrationRollsBackBeforeCompletion|BuildAgyResumeCommandPreservesModelConversationAndMode|BuildAgyResumeCommand_(TranslatesLegacyModels|PreservesImportedConversationModel)|MigrateAmbiguousLegacyAgyModelClearsStoredOverride|GetResumeManifestStopsCanceledMigration|NormalizeModelInput(PreservesAgyPublicLabels|CanonicalizesCrossHarnessAliases)|ResolveSetModelInstruction_(PreservesAgyPublicLabel|NormalizesCrossHarnessAliasCase)|NewAgyModelConfirmationRejectsStaleOrMismatchedOutput|PersistAgyModelSwitchPreservesOnlyConfirmedProvenance|SQLite(CreateSessionDefaultsModelOnlyForClaude|UpdateSessionRoundTripsModel)|MCPCreateSessionRuntime(WaitsForAgyBeforePrompt|StopsBeforePromptAfterCancellation)|ExecuteWithSignalContextPropagatesCancellation|RootCommandOwnsProcessSignalHandling|LongRunningCommandsConsumeRootContext|CommandHandlersAvoidBackgroundMultilineDelivery|RunScanLoopUsesCallerContext|RunHeartbeatWatchdogUsesCallerContext|ExecuteRestartContextUsesCallerContext|RunWatchUsesCallerContext|VerifyCompactionUsesCallerContext|MonitorCompactionUsesCallerContext|ResumeSessionStopsCancellationAfterManifestRead|FinalizeCLICreateSessionStopsCancellationAfterLiveness|WaitForResumed(Agy|Claude|Codex)UsesCallerContext|WaitForAgyMetadataBackfillUsesCallerContext|WaitForAgyAssociationRetryDelayUsesCallerContext|Run(AgyPostCreate(ReturnsCancellationBeforeSideEffects|MetadataRetryUsesCallerContext|Propagates(ReadinessFailure|PostPromptReadinessFailure))|ClaudePostCreateReturnsCallerCancellationBeforeSideEffects|CodexPostCreateReturnsCancellationBeforePromptDelivery|SendSetModelUsesCallerContextBeforeSlashCommandDelivery)|DeliverInitialPromptReturnsCallerCancellation|DispatchModeSwitchContextStopsBeforeSlashCommandDelivery|CommandScoped(ReadinessWaitsReturnCallerCancellation|SafeDeliveryReturnsCallerCancellation)|StructuredPromptUsesCallerContext|Send(ViaTmuxUsesCallerContext|PostResumePromptUsesCallerContext|MultiLinePromptSafeContextReturnsCallerCancellation)|SequentialDeliverPassesCallerContext|NewNonClaudeAssociationManifestLeavesAgyModelUnknown|UpdateNonClaudeAssociationManifestLeavesAgyModelUnknown|DetectAgySessionUninitialized|NormalizeHarnessForSafety|Agy(StaleSurveyAllowsLaterReadyPrompt|PromptBeforeSurveyRemainsOverlay)|ContainsAgyPromptAfterSurveyRequiresLaterPrompt|CheckPaneLivenessContextHonorsCallerCancellation|WaitForAgyPrompt(AcceptsTrustBeforeReady|DismissesSurveyBeforeReady|DoesNotRedismissStaleSurvey|ReturnsCancellationAfterReadyStabilityDelay)))$`,
+		"-run", `^(Test(StartAgyHarness(UsesCanonicalLaunchAndWaits|PropagatesReadinessFailure)|StartNewSessionForContextRejectsCurrentTmuxAgyBeforeLaunch|BuildAgyCommand_(AutoPermissionMode|DefaultPermissionMode)|AgyModelCatalogMatchesPublicCLI|BuildAgyImportedManifest(LeavesUnknownModelUnset|PreservesConversationAndCurrentDefaults)|CreateSession_AgyDetachedPromptUsesCanonicalCommand|CreateSession_Agy(WorkspaceLockReleasesBeforeSurfaceCompletion|IdentitySnapshotFailsBeforeTmuxMutation|IdentityDiscoveryFailureRollsBackBeforeRegistration)|CreateSession_CancellationAfterRegistrationRollsBackBeforeCompletion|BuildAgyResumeCommandPreservesModelConversationAndMode|BuildAgyResumeCommand_(TranslatesLegacyModels|PreservesImportedConversationModel)|MigrateAmbiguousLegacyAgyModelClearsStoredOverride|GetResumeManifestStopsCanceledMigration|NormalizeModelInput(PreservesAgyPublicLabels|CanonicalizesCrossHarnessAliases)|ResolveSetModelInstruction_(PreservesAgyPublicLabel|NormalizesCrossHarnessAliasCase)|NewAgyModelConfirmationRejectsStaleOrMismatchedOutput|PersistAgyModelSwitchPreservesOnlyConfirmedProvenance|SQLite(CreateSessionDefaultsModelOnlyForClaude|UpdateSessionRoundTripsModel)|MCPCreateSessionRuntime(WaitsForAgyBeforePrompt|StopsBeforePromptAfterCancellation)|ExecuteWithSignalContextPropagatesCancellation|RootCommandOwnsProcessSignalHandling|LongRunningCommandsConsumeRootContext|CommandHandlersAvoidBackgroundMultilineDelivery|RunScanLoopUsesCallerContext|RunHeartbeatWatchdogUsesCallerContext|ExecuteRestartContextUsesCallerContext|RunWatchUsesCallerContext|VerifyCompactionUsesCallerContext|MonitorCompactionUsesCallerContext|ResumeSessionStopsCancellationAfterManifestRead|FinalizeCLICreateSessionStopsCancellationAfterLiveness|WithAgyResumeWorkspaceLockCoversLifecycle|WaitForResumed(Agy|Claude|Codex)UsesCallerContext|WaitForAgyMetadataBackfillUsesCallerContext|WaitForAgyAssociationRetryDelayUsesCallerContext|Run(AgyPostCreate(ReturnsCancellationBeforeSideEffects|MetadataRetryUsesCallerContext|Propagates(ReadinessFailure|PostPromptReadinessFailure))|ClaudePostCreateReturnsCallerCancellationBeforeSideEffects|CodexPostCreateReturnsCancellationBeforePromptDelivery|SendSetModelUsesCallerContextBeforeSlashCommandDelivery)|DeliverInitialPromptReturnsCallerCancellation|DispatchModeSwitchContextStopsBeforeSlashCommandDelivery|CommandScoped(ReadinessWaitsReturnCallerCancellation|SafeDeliveryReturnsCallerCancellation)|StructuredPromptUsesCallerContext|Send(ViaTmuxUsesCallerContext|PostResumePromptUsesCallerContext|MultiLinePromptSafeContextReturnsCallerCancellation)|SequentialDeliverPassesCallerContext|NewNonClaudeAssociationManifestLeavesAgyModelUnknown|UpdateNonClaudeAssociationManifestLeavesAgyModelUnknown|AgyCreateSession(UsesCanonicalModelAwareCommand|ImportedConversationOmitsUnknownModel|RejectsExistingTmuxAndUnsafeModelBeforeMutation|PropagatesReadinessFailureAndRollsBack|ReportsRollbackFailure|CapturesNativeConversationIdentity|NormalizesWorkingDirectoryForLaunchAndDiscovery|SerializesWorkspaceIdentityDiscovery|RollsBackWhenNativeIdentityCannotBeCaptured|DoesNotReuseStaleNativeConversationIdentity)|AgyResumePolicyPersistsInJSONSessionStore|AgyResumeSession(PreservesNativeIdentityModelAndMode|OmitsModelWhenProvenanceUnknown|DoesNotInventNativeIdentity|RejectsUnsafeNativeIdentityBeforeMutation|RejectsAnotherLiveHarnessBeforeMutation|RejectsNonShellForegroundBeforeMutation|RestartsInExistingBareShell|HoldsWorkspaceLockThroughReadiness|SerializesPaneProofWithCommandDelivery|UsesExactProcessLivenessAndFailsSafe|LeavesLiveAgyUntouched|PropagatesReadinessFailureBeforeAttach)|AgyGetSessionStatusRequiresAgyProcess|AgyGetHistory(ReadsNativeTranscript|FallsBackToFullTranscript|RequiresNativeIdentity|RejectsUnsafeNativeIdentity)|AgyAdapterRejectsUnsupportedRunHook|DetectAgySessionUninitialized|NormalizeHarnessForSafety|Agy(StaleSurveyAllowsLaterReadyPrompt|PromptBeforeSurveyRemainsOverlay)|ContainsAgyPromptAfterSurveyRequiresLaterPrompt|ClassifyPaneLiveness|CheckPaneLivenessContextHonorsCallerCancellation|WaitForAgyPrompt(AcceptsTrustBeforeReady|DismissesSurveyBeforeReady|DoesNotRedismissStaleSurvey|ReturnsCancellationAfterReadyStabilityDelay)))$`,
 		"-count=1", "-v",
 	)
 	cmd.Dir = bddRepoRoot()
 	output, runErr := cmd.CombinedOutput()
-	harnessState.agyLifecycleTestOutput = string(output)
+	lockCmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/lock", "./agm/internal/agysession",
+		"-run", `^Test(FileLockTryLockPreservesPermanentFlockError|AcquireWorkspaceCreateLockStopsOnPermanentFlockError)$`,
+		"-count=1", "-v",
+	)
+	lockCmd.Dir = bddRepoRoot()
+	lockOutput, lockErr := lockCmd.CombinedOutput()
+	harnessState.agyLifecycleTestOutput = string(output) + "\n" + string(lockOutput)
+	if runErr == nil {
+		runErr = lockErr
+	}
 	harnessState.agyLifecycleTestErr = runErr
 	if testCtx.Err() != nil {
 		return fmt.Errorf("AGY lifecycle behavior suite timed out: %w", testCtx.Err())
 	}
 	return nil
+}
+
+func agmValidatesTheAgyAdapterLifecycle(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	return runAgyLifecycleBehaviorSuite(ctx, harnessState)
+}
+
+func agyAdapterShouldPreserveCanonicalLaunchAndResumePolicy(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	return requireAgyLifecycleBehaviors(harnessState,
+		"TestAgyCreateSessionUsesCanonicalModelAwareCommand",
+		"TestAgyCreateSessionImportedConversationOmitsUnknownModel",
+		"TestAgyCreateSessionRejectsExistingTmuxAndUnsafeModelBeforeMutation",
+		"TestAgyCreateSessionPropagatesReadinessFailureAndRollsBack",
+		"TestAgyCreateSessionCapturesNativeConversationIdentity",
+		"TestAgyCreateSessionNormalizesWorkingDirectoryForLaunchAndDiscovery",
+		"TestAgyCreateSessionSerializesWorkspaceIdentityDiscovery",
+		"TestCreateSession_AgyWorkspaceLockReleasesBeforeSurfaceCompletion",
+		"TestAgyCreateSessionRollsBackWhenNativeIdentityCannotBeCaptured",
+		"TestAgyCreateSessionDoesNotReuseStaleNativeConversationIdentity",
+		"TestAgyCreateSessionReportsRollbackFailure",
+		"TestFileLockTryLockPreservesPermanentFlockError",
+		"TestAcquireWorkspaceCreateLockStopsOnPermanentFlockError",
+		"TestWithAgyResumeWorkspaceLockCoversLifecycle",
+		"TestAgyResumePolicyPersistsInJSONSessionStore",
+		"TestAgyResumeSessionPreservesNativeIdentityModelAndMode",
+		"TestAgyResumeSessionOmitsModelWhenProvenanceUnknown",
+		"TestAgyResumeSessionDoesNotInventNativeIdentity",
+		"TestAgyResumeSessionRejectsUnsafeNativeIdentityBeforeMutation",
+		"TestAgyResumeSessionRejectsAnotherLiveHarnessBeforeMutation",
+		"TestAgyResumeSessionRejectsNonShellForegroundBeforeMutation",
+		"TestAgyResumeSessionRestartsInExistingBareShell",
+		"TestAgyResumeSessionHoldsWorkspaceLockThroughReadiness",
+		"TestAgyResumeSessionSerializesPaneProofWithCommandDelivery",
+		"TestAgyResumeSessionUsesExactProcessLivenessAndFailsSafe",
+		"TestAgyResumeSessionLeavesLiveAgyUntouched",
+		"TestAgyResumeSessionPropagatesReadinessFailureBeforeAttach",
+	)
+}
+
+func agyAdapterShouldRequireAgyProcessAndTranscriptTruth(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	return requireAgyLifecycleBehaviors(harnessState,
+		"TestAgyGetSessionStatusRequiresAgyProcess",
+		"TestAgyGetHistoryReadsNativeTranscript",
+		"TestAgyGetHistoryFallsBackToFullTranscript",
+		"TestAgyGetHistoryRequiresNativeIdentity",
+		"TestAgyGetHistoryRejectsUnsafeNativeIdentity",
+		"TestAgyAdapterRejectsUnsupportedRunHook",
+	)
 }
 
 func requireAgyLifecycleBehaviors(harnessState *harnessParityState, behaviors ...string) error {
@@ -1996,6 +2091,18 @@ func mcpCreationShouldWaitForAGYComposerBeforePromptDelivery(ctx context.Context
 	return requireAgyLifecycleBehaviors(harnessState, "TestMCPCreateSessionRuntimeWaitsForAgyBeforePrompt")
 }
 
+func sharedCreationShouldPersistNewAGYIdentityBeforeRegistration(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	return requireAgyLifecycleBehaviors(harnessState,
+		"TestCreateSession_AgyWorkspaceLockReleasesBeforeSurfaceCompletion",
+		"TestCreateSession_AgyIdentitySnapshotFailsBeforeTmuxMutation",
+		"TestCreateSession_AgyIdentityDiscoveryFailureRollsBackBeforeRegistration",
+	)
+}
+
 func agmValidatesAGYRootCancellationPlumbing(ctx context.Context) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
@@ -2023,7 +2130,6 @@ func rootSignalCancellationShouldReachEveryCommandScopedReadinessWait(ctx contex
 		"TestRunWatchUsesCallerContext",
 		"TestVerifyCompactionUsesCallerContext",
 		"TestMonitorCompactionUsesCallerContext",
-		"TestStartCurrentTmuxAgyStopsAfterCallerCancellation",
 		"TestCreateSession_CancellationAfterRegistrationRollsBackBeforeCompletion",
 		"TestMCPCreateSessionRuntimeStopsBeforePromptAfterCancellation",
 		"TestGetResumeManifestStopsCanceledMigration",

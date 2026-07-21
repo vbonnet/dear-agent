@@ -158,7 +158,7 @@ func WaitForClaudePromptContext(parent context.Context, sessionName string, time
 		// and stay there; a shell in the foreground means the harness either
 		// failed to start or died (ce-5zbg: instant Bun ENOENT in deleted cwd).
 		if fg, ok := paneForegroundCommand(ctx, socketPath, sessionName); ok {
-			if isShellCommand(fg) {
+			if IsShellCommand(fg) {
 				consecutiveShell++
 				if sawHarness && consecutiveShell >= harnessExitedChecks {
 					return fmt.Errorf("harness process exited before becoming ready (pane foreground returned to %q); last pane output:\n%s",
@@ -213,9 +213,9 @@ func paneForegroundCommand(ctx context.Context, socketPath, sessionName string) 
 	return fg, true
 }
 
-// isShellCommand reports whether a pane_current_command value is a plain
+// IsShellCommand reports whether a pane_current_command or process comm value is a plain
 // interactive shell (as opposed to a harness CLI like claude/codex/gemini).
-func isShellCommand(name string) bool {
+func IsShellCommand(name string) bool {
 	name = strings.TrimPrefix(filepath.Base(name), "-") // login shells may report as "-zsh"
 	switch name {
 	case "zsh", "bash", "sh", "ash", "fish", "dash", "ksh", "tcsh", "csh":

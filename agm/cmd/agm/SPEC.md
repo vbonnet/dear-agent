@@ -94,6 +94,8 @@ Provide a production-ready CLI that:
 
 **CLI-33** When final creation liveness validation runs, the system shall derive the scan from the Cobra command context and recheck cancellation before title update, attach, or detached-success reporting.
 
+**CLI-34** When current-pane creation selects AGY, the system shall fail before harness launch or session registration and direct the user to create a detached session with a different name, because the provider-native conversation identity cannot be safely correlated until the foreground AGM command exits.
+
 ## Requirements
 
 ### Functional Requirements
