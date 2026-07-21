@@ -92,6 +92,8 @@ Provide a production-ready CLI that:
 
 **CLI-32** When session resume metadata lookup returns after the Cobra command context has been canceled, the system shall stop before creating, commanding, updating, or attaching to a tmux session.
 
+**CLI-33** When final creation liveness validation runs, the system shall derive the scan from the Cobra command context and recheck cancellation before title update, attach, or detached-success reporting.
+
 ## Requirements
 
 ### Functional Requirements

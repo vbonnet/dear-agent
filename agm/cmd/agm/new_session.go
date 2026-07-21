@@ -35,6 +35,12 @@ type cliCreateSessionRuntime struct {
 	complete func(context.Context, ops.CreateSessionCompletion) error
 }
 
+type cliCreateFinalizationRuntime struct {
+	checkLiveness func(context.Context, string, string) (tmux.PaneLiveness, error)
+	updateTitle   func(string)
+	attach        func(string)
+}
+
 func (r *cliCreateSessionRuntime) Launch(ctx context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
 	return r.launch(ctx, spec)
 }
@@ -86,14 +92,25 @@ func completeCLICreateSession(ctx context.Context, sessionName string, completio
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	return finalizeCLICreateSession(ctx, sessionName, cliCreateFinalizationRuntime{
+		checkLiveness: tmux.CheckPaneLivenessContext,
+		updateTitle:   updateVSCodeTabTitle,
+		attach:        attachOrShowDetached,
+	})
+}
+
+func finalizeCLICreateSession(ctx context.Context, sessionName string, runtime cliCreateFinalizationRuntime) error {
 	if os.Getenv("AGM_TEST_RUN_ID") == "" && os.Getenv("AGM_TEST_ENV") == "" {
-		verdict, livenessErr := tmux.CheckPaneLiveness(sessionName, tmux.GetSocketPath())
+		verdict, livenessErr := runtime.checkLiveness(ctx, sessionName, tmux.GetSocketPath())
 		if err := launchparity.ValidateFinalLiveness(verdict, livenessErr); err != nil {
 			return err
 		}
 	}
-	updateVSCodeTabTitle(sessionName)
-	attachOrShowDetached(sessionName)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	runtime.updateTitle(sessionName)
+	runtime.attach(sessionName)
 	return nil
 }
 

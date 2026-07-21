@@ -64,6 +64,8 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-29** When command-scoped file or slash-command delivery or prompt-delivery verification runs, the system shall derive composer waits, pane-capture subprocesses, verification backoff, and retry sends from the caller context and shall not write or retry prompt bytes after cancellation.
 
+**TMUX-30** When command-scoped harness liveness validation runs, the system shall derive the tmux and process-table subprocess timeout from the caller context and return cancellation instead of allowing later completion or attach.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
