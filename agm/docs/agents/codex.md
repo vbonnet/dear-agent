@@ -62,11 +62,12 @@ Important launch invariants:
 
 `agm send msg` treats `codex-cli` as a tmux-backed harness. When the shared
 state detector sees a complete Codex composer—the initial `OpenAI Codex`
-header with `/model to change`, or a post-turn input cursor paired with the
-structured `gpt-* · <workdir>` footer—delivery is `YES` and AGM sends directly
-to the tmux pane. Those markers must own the current pane tail: if newer shell
-or process-exit output follows them, the stale composer is not sendable. A
-new initial composer rendered after stale post-turn footer history is still
+header with `/model to change` and an empty `›` cursor, or an empty post-turn
+cursor paired with the structured `gpt-* · <workdir>` footer—delivery is `YES`
+and AGM sends directly to the tmux pane. Typed drafts and collapsed paste chips
+remain queued. Those markers must own the current pane tail: if newer shell or
+process-exit output follows them, the stale composer is not sendable. A new
+initial composer rendered after stale post-turn footer history is still
 sendable when that newer complete structure owns the pane tail. A model name in
 an echoed launch command or beside a `Working` status is not a composer and
 remains queued.
