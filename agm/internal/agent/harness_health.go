@@ -75,6 +75,7 @@ func harnessConfigDir(home, harness string) string {
 // PATH as available (the CLI manages its own auth) — keeping the Claude path's
 // behaviour unchanged.
 func CheckHarnessHealth(harness string) HarnessHealth {
+	harness = NormalizeHarnessName(harness)
 	h := HarnessHealth{Harness: harness}
 
 	if bin, ok := harnessCLIBinary[harness]; ok {

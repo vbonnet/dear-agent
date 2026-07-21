@@ -111,6 +111,26 @@ func TestCheckHarnessHealth_AgyAbsent(t *testing.T) {
 	}
 }
 
+func TestCheckHarnessHealth_AgyAliases(t *testing.T) {
+	clearClaudeEnv(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	mockLookPath(t, map[string]bool{"agy": true})
+
+	for _, alias := range []string{"agy-cli", "antigravity"} {
+		t.Run(alias, func(t *testing.T) {
+			h := CheckHarnessHealth(alias)
+			if h.Harness != "agy" || !h.Known || h.BinaryName != "agy" || !h.IsHealthy() {
+				t.Fatalf("health for alias %q = %+v", alias, h)
+			}
+			wantConfigDir := filepath.Join(home, ".gemini", "antigravity-cli")
+			if h.ConfigDir != wantConfigDir {
+				t.Fatalf("config dir for alias %q = %q, want %q", alias, h.ConfigDir, wantConfigDir)
+			}
+		})
+	}
+}
+
 func TestCheckHarnessHealth_UnknownHarness(t *testing.T) {
 	clearClaudeEnv(t)
 	mockLookPath(t, map[string]bool{})
