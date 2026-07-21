@@ -68,6 +68,10 @@ func recordingResumeRuntime(calls *[]string) resumeSessionRuntime {
 			return nil
 		},
 		wait: func(string, *HealthStatus) error { record("wait"); return nil },
+		persistTmuxName: func(*dolt.Adapter, *manifest.Manifest, string) error {
+			record("persist")
+			return nil
+		},
 		restorePermission: func(string, *manifest.Manifest, *HealthStatus) {
 			record("restore")
 		},
@@ -186,6 +190,54 @@ func TestResumeSessionCodexRollbackUsesCreatedCanonicalTmuxName(t *testing.T) {
 	}
 	if createdName != wantName || killedName != wantName || health.TmuxSessionName != wantName {
 		t.Fatalf("tmux names = create %q, kill %q, health %q; want %q", createdName, killedName, health.TmuxSessionName, wantName)
+	}
+}
+
+func TestResumeSessionCodexPersistsCreatedCanonicalTmuxName(t *testing.T) {
+	setDetachedResumeTestGlobals(t, true)
+	adapter, m, health := setupCodexResumeTransaction(t)
+	health.TmuxSessionName = "codex.resume:persist"
+	wantName := tmux.SanitizeSessionName(health.TmuxSessionName)
+	var calls []string
+	runtime := recordingResumeRuntime(&calls)
+	runtime.persistTmuxName = func(adapter *dolt.Adapter, m *manifest.Manifest, name string) error {
+		calls = append(calls, "persist")
+		return persistResumeTmuxName(adapter, m, name)
+	}
+
+	if err := resumeSessionWithRuntime(t.Context(), adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime); err != nil {
+		t.Fatalf("resumeSessionWithRuntime() error = %v", err)
+	}
+	stored, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() error = %v", err)
+	}
+	if stored.Tmux.SessionName != wantName {
+		t.Fatalf("stored tmux name = %q, want %q", stored.Tmux.SessionName, wantName)
+	}
+	if want := []string{"create", "dispatch", "wait", "persist", "restore", "update", "tab"}; !reflect.DeepEqual(calls, want) {
+		t.Fatalf("resume calls = %v, want %v", calls, want)
+	}
+}
+
+func TestResumeSessionCodexRollsBackWhenCanonicalNamePersistenceFails(t *testing.T) {
+	setDetachedResumeTestGlobals(t, true)
+	adapter, m, health := setupCodexResumeTransaction(t)
+	health.TmuxSessionName = "codex.resume:persist-failure"
+	wantErr := errors.New("persist failed")
+	var calls []string
+	runtime := recordingResumeRuntime(&calls)
+	runtime.persistTmuxName = func(*dolt.Adapter, *manifest.Manifest, string) error {
+		calls = append(calls, "persist")
+		return wantErr
+	}
+
+	err := resumeSessionWithRuntime(t.Context(), adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("resumeSessionWithRuntime() error = %v, want %v", err, wantErr)
+	}
+	if want := []string{"create", "dispatch", "wait", "persist", "kill"}; !reflect.DeepEqual(calls, want) {
+		t.Fatalf("resume calls = %v, want %v", calls, want)
 	}
 }
 
