@@ -11,7 +11,7 @@ import (
 func TestWaitForAgyPromptRejectsFirstRunOnboardingWithoutInput(t *testing.T) {
 	tests := map[string]string{
 		"theme": "Welcome to Antigravity CLI!\nChoose your color scheme:\n> terminal",
-		"terms": "Terms of Service & Data Use\n[x] Yes, I agree to help improve Antigravity CLI",
+		"terms": "Terms of Service & Data Use\n[ ] Yes, I agree to help improve Antigravity CLI\nPrevious  Done",
 	}
 	for name, content := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -38,6 +38,42 @@ func TestWaitForAgyPromptRejectsFirstRunOnboardingWithoutInput(t *testing.T) {
 			}
 			if captures != 1 || sends != 0 {
 				t.Fatalf("onboarding I/O = %d capture(s), %d send(s); want one capture and no input", captures, sends)
+			}
+		})
+	}
+}
+
+func TestAgyOnboardingDetectionRequiresActiveScreen(t *testing.T) {
+	tests := map[string]struct {
+		content string
+		want    bool
+	}{
+		"active theme": {
+			content: "Welcome to Antigravity CLI!\nChoose your color scheme:\n> terminal",
+			want:    true,
+		},
+		"active terms": {
+			content: "Terms of Service & Data Use\n[x] Yes, I agree to help improve Antigravity CLI\nPrevious  Done",
+			want:    true,
+		},
+		"stale theme before composer": {
+			content: "Welcome to Antigravity CLI!\nChoose your color scheme:\n> terminal\nsetup complete\n>",
+		},
+		"stale terms before composer": {
+			content: "Terms of Service & Data Use\n[x] Yes, I agree to help improve Antigravity CLI\nPrevious  Done\nsetup complete\n>",
+		},
+		"conversational marker": {
+			content: "I can explain Terms of Service & Data Use.\n>",
+		},
+		"incomplete active marker": {
+			content: "Terms of Service & Data Use",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := containsAgyOnboardingPrompt(test.content); got != test.want {
+				t.Fatalf("containsAgyOnboardingPrompt() = %v, want %v", got, test.want)
 			}
 		})
 	}

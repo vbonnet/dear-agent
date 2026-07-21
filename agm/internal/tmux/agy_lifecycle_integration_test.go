@@ -3,6 +3,7 @@
 package tmux_test
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -25,7 +26,11 @@ func TestAgyLifecycleIntegrationRejectsOnboardingWithoutInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create short tmux socket directory: %v", err)
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(socketDir) })
+	t.Cleanup(func() {
+		if err := os.RemoveAll(socketDir); err != nil {
+			t.Logf("remove tmux socket directory: %v", err)
+		}
+	})
 	socketPath := filepath.Join(socketDir, "agm.sock")
 	inputPath := filepath.Join(fixtureDir, "unexpected-input.txt")
 	binDir := filepath.Join(fixtureDir, "bin")
@@ -51,9 +56,7 @@ fi
 	if err := tmux.NewSession(sessionName, fixtureDir); err != nil {
 		t.Fatalf("create isolated tmux session: %v", err)
 	}
-	t.Cleanup(func() {
-		_ = exec.Command("tmux", "-S", socketPath, "kill-server").Run()
-	})
+	t.Cleanup(func() { cleanupAgyFixtureTmuxServer(t, socketPath) })
 	fixturePathExport := "export PATH='" + strings.ReplaceAll(binDir, "'", "'\"'\"'") + "':\"$PATH\""
 	if err := tmux.SendCommand(sessionName, fixturePathExport); err != nil {
 		t.Fatalf("prepend AGY fixture to pane PATH: %v", err)
@@ -65,7 +68,10 @@ fi
 	started := time.Now()
 	err = tmux.WaitForAgyPrompt(t.Context(), sessionName, 10*time.Second)
 	if !errors.Is(err, tmux.ErrAgyOnboardingRequired) {
-		output, _ := tmux.CapturePaneOutput(sessionName, 30)
+		output, captureErr := tmux.CapturePaneOutput(sessionName, 30)
+		if captureErr != nil {
+			t.Fatalf("onboarding wait error = %v, want ErrAgyOnboardingRequired (capture failed: %v)", err, captureErr)
+		}
 		t.Fatalf("onboarding wait error = %v, want ErrAgyOnboardingRequired\npane output:\n%s", err, output)
 	}
 	if elapsed := time.Since(started); elapsed >= 3*time.Second {
@@ -89,7 +95,11 @@ func TestAgyLifecycleThroughIsolatedTmuxFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create short tmux socket directory: %v", err)
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(socketDir) })
+	t.Cleanup(func() {
+		if err := os.RemoveAll(socketDir); err != nil {
+			t.Logf("remove tmux socket directory: %v", err)
+		}
+	})
 	socketPath := filepath.Join(socketDir, "agm.sock")
 	argsPath := filepath.Join(fixtureDir, "agy-args.txt")
 	binDir := filepath.Join(fixtureDir, "bin")
@@ -118,9 +128,7 @@ done
 	if err := tmux.NewSession(sessionName, fixtureDir); err != nil {
 		t.Fatalf("create isolated tmux session: %v", err)
 	}
-	t.Cleanup(func() {
-		_ = exec.Command("tmux", "-S", socketPath, "kill-server").Run()
-	})
+	t.Cleanup(func() { cleanupAgyFixtureTmuxServer(t, socketPath) })
 	fixturePathExport := "export PATH='" + strings.ReplaceAll(binDir, "'", "'\"'\"'") + "':\"$PATH\""
 	if err := tmux.SendCommand(sessionName, fixturePathExport); err != nil {
 		t.Fatalf("prepend AGY fixture to pane PATH: %v", err)
@@ -138,7 +146,10 @@ done
 		t.Fatalf("send canonical AGY launch command: %v", err)
 	}
 	if err := tmux.WaitForAgyPrompt(t.Context(), sessionName, 10*time.Second); err != nil {
-		output, _ := tmux.CapturePaneOutput(sessionName, 30)
+		output, captureErr := tmux.CapturePaneOutput(sessionName, 30)
+		if captureErr != nil {
+			t.Fatalf("wait through AGY trust prompt: %v (capture failed: %v)\nlaunch: %s", err, captureErr, launch)
+		}
 		t.Fatalf("wait through AGY trust prompt: %v\npane output:\n%s\nlaunch: %s", err, output, launch)
 	}
 
@@ -167,6 +178,20 @@ done
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	output, _ := tmux.CapturePaneOutput(sessionName, 30)
+	output, captureErr := tmux.CapturePaneOutput(sessionName, 30)
+	if captureErr != nil {
+		t.Fatalf("AGY fixture did not receive post-readiness prompt and pane capture failed: %v", captureErr)
+	}
 	t.Fatalf("AGY fixture did not receive post-readiness prompt; pane output:\n%s", output)
+}
+
+func cleanupAgyFixtureTmuxServer(t *testing.T, socketPath string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "kill-server")
+	cmd.WaitDelay = time.Second
+	if err := cmd.Run(); err != nil {
+		t.Logf("kill isolated tmux server: %v", err)
+	}
 }

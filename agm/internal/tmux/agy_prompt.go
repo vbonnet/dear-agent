@@ -21,9 +21,18 @@ var agySurveyPromptPatterns = []string{
 	"[1] Good [2] Fine [3] Bad [0] Skip",
 }
 
-var agyOnboardingPromptPatterns = []string{
-	"Choose your color scheme:",
-	"Terms of Service & Data Use",
+var agyOnboardingScreens = []struct {
+	marker     string
+	companions []string
+}{
+	{
+		marker:     "Choose your color scheme:",
+		companions: []string{"Welcome to Antigravity CLI!"},
+	},
+	{
+		marker:     "Terms of Service & Data Use",
+		companions: []string{"Yes, I agree to help improve Antigravity CLI", "Done"},
+	},
 }
 
 // ErrAgyOnboardingRequired means AGY is waiting for an operator to make
@@ -61,8 +70,29 @@ func containsAgyTrustPromptPattern(content string) bool {
 }
 
 func containsAgyOnboardingPrompt(content string) bool {
-	for _, pattern := range agyOnboardingPromptPatterns {
-		if strings.Contains(content, pattern) {
+	lastComposer := -1
+	offset := 0
+	for line := range strings.SplitSeq(content, "\n") {
+		if strings.TrimSpace(line) == ">" {
+			lastComposer = offset
+		}
+		offset += len(line) + 1
+	}
+
+	for _, screen := range agyOnboardingScreens {
+		marker := strings.LastIndex(content, screen.marker)
+		if marker < 0 || marker < lastComposer {
+			continue
+		}
+		activeRegion := content[lastComposer+1:]
+		matched := true
+		for _, companion := range screen.companions {
+			if !strings.Contains(activeRegion, companion) {
+				matched = false
+				break
+			}
+		}
+		if matched {
 			return true
 		}
 	}
