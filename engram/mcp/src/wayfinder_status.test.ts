@@ -47,6 +47,22 @@ describe('parseWayfinderStatus', () => {
     );
   });
 
+  it('rejects wrong types for optional top-level string arrays', () => {
+    assert.throws(
+      () => parseWayfinderStatus(canonical.replace('skip_roadmap:', 'beads: ce-123\nskip_roadmap:')),
+      /document\.beads must be a string array/,
+    );
+    assert.throws(
+      () => parseWayfinderStatus(canonical.replace('skip_roadmap:', 'tags: release\nskip_roadmap:')),
+      /document\.tags must be a string array/,
+    );
+  });
+
+  it('rejects wrong types in optional waypoint history fields', () => {
+    const invalid = canonical.replace('status: completed, started_at:', 'status: completed, deliverables: output.md, started_at:');
+    assert.throws(() => parseWayfinderStatus(invalid), /deliverables must be a string array/);
+  });
+
   it('requires blocked_reason for blocked status', () => {
     assert.throws(
       () => parseWayfinderStatus(canonical.replace('status: in-progress', 'status: blocked')),

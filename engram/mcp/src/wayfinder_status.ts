@@ -150,6 +150,21 @@ function optionalNumber(record: RecordValue, key: string, path: string): number 
   return value;
 }
 
+function optionalInteger(record: RecordValue, key: string, path: string): number | undefined {
+  const value = optionalNumber(record, key, path);
+  if (value !== undefined && !Number.isInteger(value)) {
+    throw new Error(`invalid Wayfinder V2 status: ${path}.${key} must be an integer`);
+  }
+  return value;
+}
+
+function optionalBoolean(record: RecordValue, key: string, path: string): void {
+  const value = record[key];
+  if (value !== undefined && value !== null && typeof value !== 'boolean') {
+    throw new Error(`invalid Wayfinder V2 status: ${path}.${key} must be a boolean`);
+  }
+}
+
 function validateStringArray(record: RecordValue, key: string, path: string): string[] {
   const value = record[key];
   if (value === undefined || value === null) return [];
@@ -157,6 +172,28 @@ function validateStringArray(record: RecordValue, key: string, path: string): st
     throw new Error(`invalid Wayfinder V2 status: ${path}.${key} must be a string array`);
   }
   return value as string[];
+}
+
+function validateOptionalTopLevelFields(record: RecordValue): void {
+  for (const key of ['description', 'repository', 'branch', 'blocked_reason', 'lifecycle_state', 'blocked_on', 'error_message', 'input_needed']) {
+    optionalString(record, key, 'document');
+  }
+  validateStringArray(record, 'tags', 'document');
+  validateStringArray(record, 'beads', 'document');
+  optionalTimestamp(record, 'completion_date', 'document');
+}
+
+function validateBuildMetrics(value: unknown, path: string): void {
+  if (value === undefined || value === null) return;
+  const metrics = asRecord(value, path);
+  assertKnownFields(metrics, path, [
+    'tests_passed', 'tests_failed', 'coverage_percent', 'assertion_density', 'build_duration_secs',
+  ]);
+  optionalInteger(metrics, 'tests_passed', path);
+  optionalInteger(metrics, 'tests_failed', path);
+  optionalNumber(metrics, 'coverage_percent', path);
+  optionalNumber(metrics, 'assertion_density', path);
+  optionalInteger(metrics, 'build_duration_secs', path);
 }
 
 function validateQualityMetrics(value: unknown): void {
@@ -295,13 +332,28 @@ function completedWaypoints(record: RecordValue): Set<string> {
 
   const complete = new Set<string>();
   for (const [index, entry] of history.entries()) {
-    const waypoint = asRecord(entry, `waypoint_history[${index}]`);
+    const path = `waypoint_history[${index}]`;
+    const waypoint = asRecord(entry, path);
+    assertKnownFields(waypoint, path, [
+      'name', 'status', 'started_at', 'completed_at', 'deliverables', 'notes', 'outcome',
+      'stakeholder_approved', 'stakeholder_notes', 'research_notes', 'tests_feature_created',
+      'validation_status', 'deployment_status', 'build_iterations', 'build_metrics',
+    ]);
     const name = requireEnum(waypoint, 'name', WAYPOINTS);
     const status = requireEnum(waypoint, 'status', WAYPOINT_STATUSES);
     requireTimestamp(waypoint, 'started_at');
+    optionalTimestamp(waypoint, 'completed_at', path);
     if (status === 'completed') {
       requireTimestamp(waypoint, 'completed_at');
     }
+    validateStringArray(waypoint, 'deliverables', path);
+    for (const key of ['notes', 'outcome', 'stakeholder_notes', 'research_notes', 'validation_status', 'deployment_status']) {
+      optionalString(waypoint, key, path);
+    }
+    optionalBoolean(waypoint, 'stakeholder_approved', path);
+    optionalBoolean(waypoint, 'tests_feature_created', path);
+    optionalInteger(waypoint, 'build_iterations', path);
+    validateBuildMetrics(waypoint.build_metrics, `${path}.build_metrics`);
     if (status === 'completed' || status === 'skipped') {
       complete.add(name);
     }
@@ -353,7 +405,8 @@ export function parseWayfinderStatus(content: string): WayfinderStatusSummary {
   const phase = requireEnum(record, 'current_waypoint', WAYPOINTS);
   const status = requireEnum(record, 'status', PROJECT_STATUSES);
   requireTimestamp(record, 'created_at');
-	requireTimestamp(record, 'updated_at');
+  requireTimestamp(record, 'updated_at');
+  validateOptionalTopLevelFields(record);
   validateConditionalStatus(record, status);
   validateRoadmap(record.roadmap);
   validateQualityMetrics(record.quality_metrics);
