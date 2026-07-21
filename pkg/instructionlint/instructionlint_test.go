@@ -430,6 +430,9 @@ func TestGitHubAPIMergesRemainPolicyVisible(t *testing.T) {
 			t.Errorf("%q violations = %v, want raw-gh-merge", command, violations)
 		}
 	}
+	if violations := evaluateSegment("AGENTS.md", Segment{Kind: SegmentShell, Text: "gh api repos/owner/repo/pulls/1/merge"}); len(violations) != 0 {
+		t.Errorf("read-only merge-status request violations = %v, want none", violations)
+	}
 }
 
 func TestGitHubAPIPRLifecycleRemainsPolicyVisible(t *testing.T) {
@@ -438,6 +441,7 @@ func TestGitHubAPIPRLifecycleRemainsPolicyVisible(t *testing.T) {
 		"gh api repos/owner/repo/pulls -f title=test -f head=feature -f base=main",
 		"gh api -XPATCH repos/owner/repo/pulls/1 -f=state=closed",
 		"gh api --method=PATCH repos/owner/repo/pulls/1 --raw-field=state=open",
+		"gh api -X PATCH repos/owner/repo/pulls/$PR -f state=closed",
 		`gh api graphql -f query='mutation { createPullRequest(input:{repositoryId:"R_id"}) { pullRequest { id } } }'`,
 		`gh api graphql -f query='mutation { closePullRequest(input:{pullRequestId:"PR_id"}) { pullRequest { state } } }'`,
 		`gh api graphql -f query='mutation { reopenPullRequest(input:{pullRequestId:"PR_id"}) { pullRequest { state } } }'`,
@@ -616,10 +620,14 @@ func TestRetiredWayfinderVocabularyIsCaseInsensitive(t *testing.T) {
 			t.Errorf("retiredWayfinderToken does not match %q", token)
 		}
 	}
-	for _, currentVersion := range []string{"ai.md/v1", "v1.2", "Use an AWS S3 bucket", "Store state in a Cloudflare D1 database", "Select the S1 tier"} {
+	for _, currentVersion := range []string{"ai.md/v1", "Use the Foo API V1", "v1.2", "Use an AWS S3 bucket", "Store state in a Cloudflare D1 database", "Select the S1 tier"} {
 		if retiredWayfinderToken(currentVersion) {
 			t.Errorf("retiredWayfinderToken unexpectedly matches %q", currentVersion)
 		}
+	}
+	violations := evaluateSegment("docs/policies/wayfinder-v2-canonical.ai.md", Segment{Kind: SegmentProse, Text: "V1's 13-phase model is retired."})
+	if len(violations) != 1 || violations[0].Rule != "wayfinder-v1" {
+		t.Errorf("Wayfinder-path violations = %v, want wayfinder-v1", violations)
 	}
 }
 

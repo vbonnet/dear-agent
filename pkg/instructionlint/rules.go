@@ -21,7 +21,7 @@ var environmentAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 var embeddedShellCommand = regexp.MustCompile("\\$\\(([^()]*)\\)|`([^`]*)`")
 var markdownListPrefix = regexp.MustCompile(`^(?:[-+*]|[0-9]+[.)])[ \t]+`)
 var markdownTaskPrefix = regexp.MustCompile(`^\[[ xX]\][ \t]+`)
-var pullRequestAPIEndpoint = regexp.MustCompile(`^/?repos/[^/]+/[^/]+/pulls(?:/([0-9]+))?/?$`)
+var pullRequestAPIEndpoint = regexp.MustCompile(`^/?repos/[^/]+/[^/]+/pulls(?:/([^/]+))?/?$`)
 
 var instructionRules = []rule{
 	{id: "wayfinder-v1", replacement: "CHARTER, PROBLEM, RESEARCH, DESIGN, SPEC, PLAN, SETUP, BUILD, and RETRO", applies: proseOrShell, detect: retiredWayfinderToken},
@@ -65,18 +65,7 @@ func retiredWayfinderToken(text string) bool {
 	if unambiguousRetiredWayfinderPhase.MatchString(text) || wayfinderContext && retiredWayfinderPhase.MatchString(text) {
 		return true
 	}
-	for _, location := range retiredWayfinderV1.FindAllStringIndex(text, -1) {
-		precededBySlash := location[0] > 0 && text[location[0]-1] == '/'
-		followedByVersionSuffix := location[1]+1 < len(text) && text[location[1]] == '.' && isVersionSuffix(text[location[1]+1])
-		if wayfinderContext || !precededBySlash && !followedByVersionSuffix {
-			return true
-		}
-	}
-	return false
-}
-
-func isVersionSuffix(value byte) bool {
-	return value >= '0' && value <= '9' || value == 'x' || value == 'X'
+	return wayfinderContext && retiredWayfinderV1.MatchString(text)
 }
 
 func knownRule(id string) bool {
@@ -91,7 +80,7 @@ func knownRule(id string) bool {
 func evaluateSegment(path string, segment Segment) []Violation {
 	var violations []Violation
 	for _, candidate := range instructionRules {
-		if candidate.applies(segment.Kind) && candidate.detect(segment.Text) {
+		if candidate.applies(segment.Kind) && ruleDetects(candidate, path, segment.Text) {
 			violations = append(violations, Violation{
 				Path:        path,
 				Line:        segment.Line,
@@ -102,6 +91,24 @@ func evaluateSegment(path string, segment Segment) []Violation {
 		}
 	}
 	return violations
+}
+
+func ruleDetects(candidate rule, sourcePath, text string) bool {
+	if candidate.detect(text) {
+		return true
+	}
+	return candidate.id == "wayfinder-v1" &&
+		strings.Contains(strings.ToLower(sourcePath), "wayfinder") &&
+		unqualifiedRetiredWayfinderV1(text)
+}
+
+func unqualifiedRetiredWayfinderV1(text string) bool {
+	for _, location := range retiredWayfinderV1.FindAllStringIndex(text, -1) {
+		if location[0] == 0 || text[location[0]-1] != '/' {
+			return true
+		}
+	}
+	return false
 }
 
 func proseOrShell(kind SegmentKind) bool {
@@ -171,7 +178,7 @@ func rawGHMergeFields(fields []string) bool {
 		return false
 	}
 	if strings.HasSuffix(strings.TrimSuffix(apiArgs[0], "/"), "/merge") {
-		return true
+		return ghAPIMethod(fields[2:]) == "PUT"
 	}
 	return apiArgs[0] == "graphql" &&
 		(strings.Contains(strings.Join(fields, " "), "mergePullRequest") ||
