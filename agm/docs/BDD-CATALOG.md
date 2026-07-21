@@ -264,8 +264,10 @@ creation, and terminal state detection.
   exact identities, and preserves the ready tmux session when a concurrent
   writer supersedes metadata ownership or a post-write reload leaves
   compensation unproven. A stale full-session writer preserves the current
-  name while applying unrelated fields and superseding ownership, forcing
-  rollback to preserve the canonical tmux session without timestamp guesses. A commit
+  name while applying unrelated fields and advancing the identity revision;
+  every writer advances that revision so multiple stale snapshots stay unable
+  to restore the old name, and rollback preserves the canonical tmux session
+  without timestamp guesses. A commit
   error is re-read against the complete prior and provisional revisions before
   cleanup proceeds. It also avoids killing a same-named or
   server-restart replacement. Reopening a

@@ -216,6 +216,9 @@ func TestSQLiteUpdateTmuxSessionNamePreservesOtherColumns(t *testing.T) {
 	if stored.Tmux.SessionName != "canonical-name" {
 		t.Fatalf("Tmux.SessionName = %q, want canonical-name", stored.Tmux.SessionName)
 	}
+	if stored.Tmux.SessionRevision == "" {
+		t.Fatal("Tmux.SessionRevision is empty after authoritative name update")
+	}
 	if stored.Claude.UUID != m.Claude.UUID || stored.Context.Notes != m.Context.Notes || stored.Model != m.Model || stored.PermissionMode != m.PermissionMode {
 		t.Fatalf("narrow tmux update changed other columns: %#v", stored)
 	}
@@ -328,6 +331,10 @@ func TestSQLiteTmuxSessionNameStaleFullUpdatePreservesOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSession() before provisional change: %v", err)
 	}
+	secondStale, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("second GetSession() before provisional change: %v", err)
+	}
 	change, err := adapter.BeginTmuxSessionNameChange(t.Context(), m.SessionID, "canonical-name")
 	if err != nil || change == nil {
 		t.Fatalf("BeginTmuxSessionNameChange() = (%v, %v), want non-nil change", change, err)
@@ -336,17 +343,32 @@ func TestSQLiteTmuxSessionNameStaleFullUpdatePreservesOwnership(t *testing.T) {
 	if err := adapter.UpdateSession(stale); err != nil {
 		t.Fatalf("UpdateSession() from stale snapshot: %v", err)
 	}
-	newerUpdatedAt := stale.UpdatedAt
 	stored, err := adapter.GetSession(m.SessionID)
 	if err != nil {
 		t.Fatalf("GetSession() after stale update: %v", err)
 	}
-	if stored.Tmux.SessionName != change.CurrentName || stored.Tmux.SessionRevision != "" {
-		t.Fatalf("tmux state after stale update = (%q, %q), want canonical name with superseded ownership", stored.Tmux.SessionName, stored.Tmux.SessionRevision)
+	if stored.Tmux.SessionName != change.CurrentName || stored.Tmux.SessionRevision == "" || stored.Tmux.SessionRevision == change.CurrentRevision {
+		t.Fatalf("tmux state after stale update = (%q, %q), want canonical name with advanced revision", stored.Tmux.SessionName, stored.Tmux.SessionRevision)
 	}
 	if stored.Context.Notes != stale.Context.Notes {
 		t.Fatalf("unrelated notes = %q, want %q", stored.Context.Notes, stale.Context.Notes)
 	}
+	firstSupersedingRevision := stored.Tmux.SessionRevision
+	secondStale.Context.Notes = "second unrelated stale-writer update"
+	if err := adapter.UpdateSession(secondStale); err != nil {
+		t.Fatalf("UpdateSession() from second stale snapshot: %v", err)
+	}
+	stored, err = adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after second stale update: %v", err)
+	}
+	if stored.Tmux.SessionName != change.CurrentName || stored.Tmux.SessionRevision == "" || stored.Tmux.SessionRevision == firstSupersedingRevision {
+		t.Fatalf("tmux state after second stale update = (%q, %q), want canonical name with another advanced revision", stored.Tmux.SessionName, stored.Tmux.SessionRevision)
+	}
+	if stored.Context.Notes != secondStale.Context.Notes {
+		t.Fatalf("second unrelated notes = %q, want %q", stored.Context.Notes, secondStale.Context.Notes)
+	}
+	newerUpdatedAt := secondStale.UpdatedAt
 	restored, err := adapter.RestoreTmuxSessionNameChange(t.Context(), *change)
 	if err != nil || restored {
 		t.Fatalf("RestoreTmuxSessionNameChange() = (%v, %v), want (false, nil)", restored, err)
@@ -355,8 +377,8 @@ func TestSQLiteTmuxSessionNameStaleFullUpdatePreservesOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSession() after restore: %v", err)
 	}
-	if final.Tmux.SessionName != change.CurrentName || final.Context.Notes != stale.Context.Notes || !final.UpdatedAt.Equal(newerUpdatedAt) {
-		t.Fatalf("superseded state = (name=%q notes=%q updated=%v), want canonical name plus unrelated update timestamp %v", final.Tmux.SessionName, final.Context.Notes, final.UpdatedAt, newerUpdatedAt)
+	if final.Tmux.SessionName != change.CurrentName || final.Context.Notes != secondStale.Context.Notes || !final.UpdatedAt.Equal(newerUpdatedAt) {
+		t.Fatalf("superseded state = (name=%q notes=%q updated=%v), want canonical name plus second unrelated update timestamp %v", final.Tmux.SessionName, final.Context.Notes, final.UpdatedAt, newerUpdatedAt)
 	}
 }
 
@@ -438,8 +460,8 @@ func TestSQLiteTmuxSessionNameChangeCompletesOwnershipToken(t *testing.T) {
 	if err := adapter.Conn().QueryRowContext(t.Context(), `SELECT tmux_session_revision FROM agm_sessions WHERE id = ?`, m.SessionID).Scan(&revision); err != nil {
 		t.Fatalf("query completed tmux revision: %v", err)
 	}
-	if revision.Valid {
-		t.Fatalf("completed tmux revision = %q, want NULL", revision.String)
+	if !revision.Valid || revision.String == "" || revision.String == change.CurrentRevision {
+		t.Fatalf("completed tmux revision = %#v, want a new non-provisional revision", revision)
 	}
 }
 

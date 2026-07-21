@@ -270,9 +270,12 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 		String: session.Tmux.SessionRevision,
 		Valid:  session.Tmux.SessionRevision != "",
 	})
+	nextTmuxRevision := uuid.NewString()
 	// Full-session writers may have read before a resume installed its
 	// provisional tmux owner. Update their unrelated fields, but change the tmux
 	// identity only when the opaque revision they observed is still current.
+	// Every writer advances the revision, including a writer that loses this
+	// comparison, so any other stale snapshot remains unable to reopen the CAS.
 	query := `
 		UPDATE agm_sessions
 		SET updated_at = ?, status = ?, name = ?, harness = ?, model = ?,
@@ -281,7 +284,7 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 			tmux_session_name = CASE
 				WHEN ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)
 				THEN ? ELSE tmux_session_name END,
-			tmux_session_revision = NULL,
+			tmux_session_revision = ?,
 			metadata = ?,
 			permission_mode = ?, permission_mode_updated_at = ?, permission_mode_source = ?,
 			is_test = ?,
@@ -304,6 +307,7 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 		observedTmuxRevision,
 		observedTmuxRevision,
 		session.Tmux.SessionName,
+		nextTmuxRevision,
 		metadataJSON,
 		session.PermissionMode,
 		session.PermissionModeUpdatedAt,
@@ -329,8 +333,6 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 	if rowsAffected == 0 {
 		return fmt.Errorf("session not found: %s", session.SessionID)
 	}
-	session.Tmux.SessionRevision = ""
-
 	return nil
 }
 
@@ -351,9 +353,9 @@ func (a *Adapter) UpdateTmuxSessionName(ctx context.Context, sessionID, sessionN
 
 	result, err := a.conn.ExecContext(ctx, `
 		UPDATE agm_sessions
-		SET updated_at = ?, tmux_session_name = ?, tmux_session_revision = NULL
+		SET updated_at = ?, tmux_session_name = ?, tmux_session_revision = ?
 		WHERE id = ? AND workspace = ?
-	`, time.Now(), sessionName, sessionID, a.workspace)
+	`, time.Now(), sessionName, uuid.NewString(), sessionID, a.workspace)
 	if err != nil {
 		return fmt.Errorf("failed to update tmux session name: %w", err)
 	}
@@ -534,16 +536,16 @@ func (a *Adapter) RestoreTmuxSessionNameChange(ctx context.Context, change TmuxS
 	return rowsAffected == 1, nil
 }
 
-// CompleteTmuxSessionNameChange releases the provisional ownership token after
-// the irreversible prompt boundary succeeds. A false result means another
-// writer already superseded the provisional revision.
+// CompleteTmuxSessionNameChange rotates away from the provisional ownership
+// token after the irreversible prompt boundary succeeds. A false result means
+// another writer already superseded the provisional revision.
 func (a *Adapter) CompleteTmuxSessionNameChange(ctx context.Context, change TmuxSessionNameChange) (bool, error) {
 	result, err := a.conn.ExecContext(ctx, `
 		UPDATE agm_sessions
-		SET tmux_session_revision = NULL
+		SET tmux_session_revision = ?
 		WHERE id = ? AND workspace = ?
 		  AND tmux_session_name = ? AND tmux_session_revision = ?
-	`, change.SessionID, a.workspace, change.CurrentName, change.CurrentRevision)
+	`, uuid.NewString(), change.SessionID, a.workspace, change.CurrentName, change.CurrentRevision)
 	if err != nil {
 		return false, fmt.Errorf("complete provisional tmux session name: %w", err)
 	}
