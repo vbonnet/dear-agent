@@ -16,7 +16,7 @@ conversations with their workspace, transcript, and permission-mode context.
 
 **AGYS-03** When the last-conversations cache maps the conversation ID to a workspace, the system shall use that workspace without scanning logs.
 
-**AGYS-04** When cache lookup cannot determine the workspace, the system shall scan at most the 64 newest regular AGY logs by modification time and at most 2 MiB per log for conversation and workspace markers; if older candidates or unscanned bytes remain, including bytes appended during the bounded read, and no conclusive match is found, the system shall return a distinguishable budget-exhaustion error rather than report a complete miss.
+**AGYS-04** When cache lookup cannot determine the workspace, the system shall enumerate at most 256 AGY log-directory entries, scan at most the 64 newest regular logs by modification time, and read at most 2 MiB per log for conversation and workspace markers; if directory entries, older candidates, or unscanned bytes remain, including bytes appended during the bounded read, the system shall return a distinguishable budget-exhaustion error unless a known-conversation match is already conclusive.
 
 **AGYS-05** When resolving the latest AGY conversation for a workspace, the system shall prefer the last-conversations cache and fall back to newest-first log discovery; if any candidate is truncated before a complete match is established, the system shall return budget exhaustion rather than accept a prefix match or an older-file match as latest.
 

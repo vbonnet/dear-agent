@@ -16,10 +16,11 @@ import (
 )
 
 const (
-	workspaceMarker    = "Initializing CLI store manager for workspace "
-	maxLogLineSize     = 1024 * 1024
-	maxAgyLogFiles     = 64
-	maxAgyLogScanBytes = 2 * 1024 * 1024
+	workspaceMarker     = "Initializing CLI store manager for workspace "
+	maxLogLineSize      = 1024 * 1024
+	maxAgyLogDirEntries = 256
+	maxAgyLogFiles      = 64
+	maxAgyLogScanBytes  = 2 * 1024 * 1024
 )
 
 // ErrLogDiscoveryBudgetExhausted means AGY metadata was not found inside the
@@ -207,9 +208,19 @@ func latestConversationForWorkspaceFromLogs(appDir, workspacePath string) (strin
 
 func agyLogPaths(appDir string) (agyLogCandidates, error) {
 	logDir := filepath.Join(appDir, "log")
-	entries, err := os.ReadDir(logDir)
+	dir, err := os.Open(logDir)
 	if err != nil {
+		return agyLogCandidates{}, fmt.Errorf("open AGY log directory: %w", err)
+	}
+	defer dir.Close()
+	entries, err := dir.ReadDir(maxAgyLogDirEntries + 1)
+	if err != nil && !errors.Is(err, io.EOF) {
 		return agyLogCandidates{}, fmt.Errorf("read AGY log directory: %w", err)
+	}
+	if len(entries) > maxAgyLogDirEntries {
+		return agyLogCandidates{}, fmt.Errorf(
+			"%w: enumerated at least %d AGY log directory entries (max %d)",
+			ErrLogDiscoveryBudgetExhausted, len(entries), maxAgyLogDirEntries)
 	}
 	type candidate struct {
 		path    string

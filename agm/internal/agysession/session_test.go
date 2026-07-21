@@ -190,6 +190,30 @@ func TestWorkspaceFromLogsReportsCandidateBudgetExhaustion(t *testing.T) {
 	}
 }
 
+func TestWorkspaceFromLogsReportsDirectoryEntryBudgetExhaustion(t *testing.T) {
+	appDir := t.TempDir()
+	logDir := filepath.Join(appDir, "log")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+	for i := range maxAgyLogDirEntries + 1 {
+		path := filepath.Join(logDir, fmt.Sprintf("entry-%03d.log", i))
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatalf("write log directory entry %d: %v", i, err)
+		}
+	}
+
+	_, _, err := workspaceFromLogs(appDir, "missing-conversation")
+	if !errors.Is(err, ErrLogDiscoveryBudgetExhausted) {
+		t.Fatalf("error = %v, want ErrLogDiscoveryBudgetExhausted", err)
+	}
+	want := fmt.Sprintf("enumerated at least %d AGY log directory entries (max %d)",
+		maxAgyLogDirEntries+1, maxAgyLogDirEntries)
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("budget error lacks directory-entry evidence: %v", err)
+	}
+}
+
 func TestWorkspaceFromLogsReportsPerFileByteBudgetExhaustion(t *testing.T) {
 	appDir := t.TempDir()
 	conversationID := "117ff898-a964-4a9f-b460-1be4a8a49b17"
