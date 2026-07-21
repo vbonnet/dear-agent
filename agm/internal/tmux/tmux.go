@@ -868,10 +868,6 @@ func WaitForProcessReadyContext(parent context.Context, sessionName, processName
 	}
 }
 
-func isProcessReady(sessionName, processName string) (bool, error) {
-	return isProcessReadyWithRuntime(sessionName, processName, GetSocketPath(), IsProcessRunning, IsProcessInPaneTree)
-}
-
 func isProcessReadyContext(ctx context.Context, sessionName, processName string) (bool, error) {
 	isForeground := func(sessionName, processName string) (bool, error) {
 		return IsProcessRunningContext(ctx, sessionName, processName)
