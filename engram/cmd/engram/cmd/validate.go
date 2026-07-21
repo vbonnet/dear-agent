@@ -151,6 +151,9 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	if validateRecursive {
 		validateAll = true
 	}
+	if validateType != "" && !isKnownValidatorType(ValidatorType(validateType)) {
+		return fmt.Errorf("unknown validator type: %s", validateType)
+	}
 
 	// Determine files to validate
 	var filesToValidate []string
@@ -203,6 +206,15 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		return outputValidationJSON(summary)
 	}
 	return outputValidationText(summary)
+}
+
+func isKnownValidatorType(validatorType ValidatorType) bool {
+	switch validatorType {
+	case ValidatorEngram, ValidatorContent, ValidatorLinkChecker, ValidatorYAMLTokenCounter:
+		return true
+	default:
+		return false
+	}
 }
 
 // validateFiles validates all files and returns summary

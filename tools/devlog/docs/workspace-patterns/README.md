@@ -333,4 +333,4 @@ File beads for:
 
 **Last updated**: 2025-12-13
 **Version**: 1.0
-**Maintainer**: See wayfinder project S11 retrospective
+**Maintainer**: See the Wayfinder project RETRO artifact

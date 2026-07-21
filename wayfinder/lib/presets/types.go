@@ -30,10 +30,10 @@ type SpecAlignment struct {
 
 // PhaseGates configuration
 type PhaseGates struct {
-	S8BuildVerification bool   `yaml:"s8_build_verification"`
-	S9ValidationDepth   string `yaml:"s9_validation_depth" validate:"oneof=minimal standard comprehensive"`
-	S9HaltOnMinorIssues bool   `yaml:"s9_halt_on_minor_issues"`
-	DeployGate          string `yaml:"deploy_gate" validate:"oneof=none advisory blocking"`
+	BuildVerification bool   `yaml:"build_verification"`
+	ValidationDepth   string `yaml:"validation_depth" validate:"oneof=minimal standard comprehensive"`
+	HaltOnMinorIssues bool   `yaml:"halt_on_minor_issues"`
+	DeployGate        string `yaml:"deploy_gate" validate:"oneof=none advisory blocking"`
 }
 
 // Retrospective configuration
@@ -74,10 +74,10 @@ type SpecAlignmentOverrides struct {
 
 // PhaseGatesOverrides overrides phase-gate enforcement settings.
 type PhaseGatesOverrides struct {
-	S8BuildVerification *bool   `yaml:"s8_build_verification,omitempty"`
-	S9ValidationDepth   *string `yaml:"s9_validation_depth,omitempty"`
-	S9HaltOnMinorIssues *bool   `yaml:"s9_halt_on_minor_issues,omitempty"`
-	DeployGate          *string `yaml:"deploy_gate,omitempty"`
+	BuildVerification *bool   `yaml:"build_verification,omitempty"`
+	ValidationDepth   *string `yaml:"validation_depth,omitempty"`
+	HaltOnMinorIssues *bool   `yaml:"halt_on_minor_issues,omitempty"`
+	DeployGate        *string `yaml:"deploy_gate,omitempty"`
 }
 
 // RetrospectiveOverrides overrides retrospective requirements for a phase.

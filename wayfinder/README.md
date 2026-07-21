@@ -13,6 +13,9 @@ Install the executable before installing or invoking the companion agent skill:
 go install github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder@latest
 ```
 
+All phase validators are compiled into this executable; no separate review
+scripts, Python environment, or Engram checkout is required.
+
 ## Quick start
 
 ```sh
@@ -29,6 +32,10 @@ printf '# Problem Statement\n\n## Current behavior\nDescribe the observable user
   > <project-dir>/PROBLEM-statement.md
 wayfinder -C <project-dir> session complete-phase PROBLEM --outcome success
 ```
+
+In Git repositories, phase completion commits its canonical marker files and
+`<PHASE>-*.md` artifacts as a scoped commit. Rewinds similarly commit their
+status, history, and retrospective updates before the target is restarted.
 
 Run `wayfinder session --help` for the current command surface. Do not edit
 the status file manually or rely on retired phase identifiers.

@@ -1,12 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
@@ -38,9 +38,6 @@ func enrichManifestWithAgyConversation(m *manifest.Manifest) error {
 		return fmt.Errorf("discover AGY conversation metadata: %s", strings.Join(lookupErrs, "; "))
 	}
 	m.Harness = "agy"
-	if m.Model == "" {
-		m.Model = agent.HarnessDefaults["agy"]
-	}
 	m.WorkingDirectory = meta.WorkspacePath
 	if m.Context.Project == "" {
 		m.Context.Project = meta.WorkspacePath
@@ -104,25 +101,36 @@ func associateSpawnedAgySession(sessionName string) {
 	}
 }
 
-func associateSpawnedAgySessionWithRetry(sessionName string, attempts int, delay time.Duration) {
+func associateSpawnedAgySessionWithRetry(ctx context.Context, sessionName string, attempts int, delay time.Duration) error {
 	if attempts < 1 {
 		attempts = 1
 	}
 	for attempt := 1; attempt <= attempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		adapter, err := getStorage()
 		if err != nil {
 			debug.Log("AGY association skipped: failed to connect to Dolt: %v", err)
-			return
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			_ = adapter.Close()
+			return err
 		}
 
 		m, getErr := adapter.GetSessionByName(sessionName)
 		if getErr == nil && m != nil {
 			enrichErr := enrichManifestWithAgyConversation(m)
 			if enrichErr == nil {
+				if err := ctx.Err(); err != nil {
+					_ = adapter.Close()
+					return err
+				}
 				persistErr := persistAssociatedManifest(adapter, m)
 				if persistErr == nil {
 					_ = adapter.Close()
-					return
+					return nil
 				}
 				debug.Log("AGY association retry %d/%d: failed to persist metadata: %v", attempt, attempts, persistErr)
 			} else {
@@ -133,8 +141,22 @@ func associateSpawnedAgySessionWithRetry(sessionName string, attempts int, delay
 		}
 		_ = adapter.Close()
 		if attempt < attempts {
-			time.Sleep(delay)
+			if err := waitForAgyAssociationRetryDelay(ctx, delay); err != nil {
+				return err
+			}
 		}
+	}
+	return nil
+}
+
+func waitForAgyAssociationRetryDelay(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
 }
 

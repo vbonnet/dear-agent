@@ -16,8 +16,8 @@ func TestReadQualityEventsFromFile(t *testing.T) {
 
 	// Write events using the emitter
 	events := []QualityAssessedEvent{
-		{Phase: "D3", Score: 7.5, InputTokens: 800, OutputTokens: 200, ProjectName: "proj-a"},
-		{Phase: "D4", Score: 9.0, InputTokens: 1500, OutputTokens: 400, ProjectName: "proj-a"},
+		{Phase: "DESIGN", Score: 7.5, InputTokens: 800, OutputTokens: 200, ProjectName: "proj-a"},
+		{Phase: "SPEC", Score: 9.0, InputTokens: 1500, OutputTokens: 400, ProjectName: "proj-a"},
 	}
 	for _, e := range events {
 		if err := EmitQualityEvent(context.Background(), e, telemetryPath); err != nil {
@@ -35,8 +35,8 @@ func TestReadQualityEventsFromFile(t *testing.T) {
 		t.Fatalf("expected 2 events, got %d", len(got))
 	}
 
-	if got[0].Phase != "D3" {
-		t.Errorf("expected phase D3, got %s", got[0].Phase)
+	if got[0].Phase != "DESIGN" {
+		t.Errorf("expected phase DESIGN, got %s", got[0].Phase)
 	}
 	if got[1].Score != 9.0 {
 		t.Errorf("expected score 9.0, got %f", got[1].Score)
@@ -76,9 +76,9 @@ func TestReadQualityEventsSkipsNonQualityLines(t *testing.T) {
 
 	// Mix quality events with other event types
 	lines := []string{
-		`{"type":"wayfinder.quality.assessed","phase":"D4","score":8.5,"input_tokens":100,"output_tokens":50,"timestamp":"2026-03-24T12:00:00Z"}`,
+		`{"type":"wayfinder.quality.assessed","phase":"SPEC","score":8.5,"input_tokens":100,"output_tokens":50,"timestamp":"2026-03-24T12:00:00Z"}`,
 		`{"type":"other.event","data":"something"}`,
-		`{"type":"wayfinder.quality.assessed","phase":"S6","score":9.0,"input_tokens":200,"output_tokens":75,"timestamp":"2026-03-24T13:00:00Z"}`,
+		`{"type":"wayfinder.quality.assessed","phase":"SETUP","score":9.0,"input_tokens":200,"output_tokens":75,"timestamp":"2026-03-24T13:00:00Z"}`,
 		`not valid json at all`,
 		``,
 	}
@@ -97,11 +97,11 @@ func TestReadQualityEventsSkipsNonQualityLines(t *testing.T) {
 		t.Fatalf("expected 2 quality events, got %d", len(events))
 	}
 
-	if events[0].Phase != "D4" {
-		t.Errorf("expected phase D4, got %s", events[0].Phase)
+	if events[0].Phase != "SPEC" {
+		t.Errorf("expected phase SPEC, got %s", events[0].Phase)
 	}
-	if events[1].Phase != "S6" {
-		t.Errorf("expected phase S6, got %s", events[1].Phase)
+	if events[1].Phase != "SETUP" {
+		t.Errorf("expected phase SETUP, got %s", events[1].Phase)
 	}
 }
 
@@ -110,7 +110,7 @@ func TestGenerateCSV(t *testing.T) {
 
 	events := []QualityAssessedEvent{
 		{
-			Phase:          "D4",
+			Phase:          "SPEC",
 			Score:          8.5,
 			InputTokens:    1200,
 			OutputTokens:   350,
@@ -119,7 +119,7 @@ func TestGenerateCSV(t *testing.T) {
 			Timestamp:      ts,
 		},
 		{
-			Phase:          "S6",
+			Phase:          "SETUP",
 			Score:          9.0,
 			InputTokens:    2000,
 			OutputTokens:   500,
@@ -148,7 +148,7 @@ func TestGenerateCSV(t *testing.T) {
 	}
 
 	// Check first data row
-	if !strings.HasPrefix(lines[1], "D4,8.5,1200,350,") {
+	if !strings.HasPrefix(lines[1], "SPEC,8.5,1200,350,") {
 		t.Errorf("unexpected first row: %s", lines[1])
 	}
 	if !strings.Contains(lines[1], "SPEC.md;ARCHITECTURE.md") {
@@ -174,7 +174,7 @@ func TestGenerateCSVQuotesSpecialCharacters(t *testing.T) {
 
 	events := []QualityAssessedEvent{
 		{
-			Phase:          "D3",
+			Phase:          "DESIGN",
 			Score:          7.0,
 			ContextSources: []string{`file "with" quotes`, "normal.md"},
 			Timestamp:      ts,

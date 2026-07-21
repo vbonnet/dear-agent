@@ -1,7 +1,9 @@
 package safegit
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -262,6 +264,14 @@ func TestParseReviewThreads_Empty(t *testing.T) {
 	}
 }
 
+func TestReviewThreadsQueryPaginates(t *testing.T) {
+	for _, required := range []string{"$cursor: String", "after: $cursor", "hasNextPage", "endCursor"} {
+		if !strings.Contains(reviewThreadsQuery, required) {
+			t.Fatalf("reviewThreadsQuery must contain %q", required)
+		}
+	}
+}
+
 // --- parseSoak ---
 
 func makeSoakJSON(committedAt time.Time) []byte {
@@ -407,6 +417,7 @@ func TestBuildMergeArgs_RequiredFlags(t *testing.T) {
 		"pr":                  false,
 		"merge":               false,
 		"--squash":            false,
+		"--auto":              false,
 		"--delete-branch":     false,
 		"--match-head-commit": false,
 	}
@@ -419,6 +430,65 @@ func TestBuildMergeArgs_RequiredFlags(t *testing.T) {
 		if !found {
 			t.Errorf("BuildMergeArgs missing required element %q", flag)
 		}
+	}
+}
+
+// --- merge completion confirmation ---
+
+func TestMergeResultRequiresExactMergedHead(t *testing.T) {
+	cases := []struct {
+		name      string
+		result    mergeResult
+		expected  string
+		wantError bool
+	}{
+		{name: "merged exact head", result: mergeResult{State: "MERGED", HeadRefOid: "abc123"}, expected: "abc123"},
+		{name: "auto merge only enabled", result: mergeResult{State: "OPEN", HeadRefOid: "abc123"}, expected: "abc123", wantError: true},
+		{name: "head changed", result: mergeResult{State: "MERGED", HeadRefOid: "def456"}, expected: "abc123", wantError: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := validateMergeResult(tc.result, tc.expected); (got != nil) != tc.wantError {
+				t.Fatalf("validateMergeResult() error = %v, wantError %v", got, tc.wantError)
+			}
+		})
+	}
+}
+
+func TestMergeResultPendingUsesSentinel(t *testing.T) {
+	err := validateMergeResult(mergeResult{State: "OPEN", HeadRefOid: "abc123"}, "abc123")
+	if !errors.Is(err, errMergePending) {
+		t.Fatalf("validateMergeResult() error = %v, want errMergePending", err)
+	}
+}
+
+func TestWaitForMergeCompletionPollsUntilMerged(t *testing.T) {
+	attempts := 0
+	err := waitForMergeCompletion(context.Background(), time.Second, time.Millisecond, func() error {
+		attempts++
+		if attempts < 3 {
+			return errMergePending
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("waitForMergeCompletion() error = %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("waitForMergeCompletion() attempts = %d, want 3", attempts)
+	}
+}
+
+func TestWaitForMergeCompletionTimesOut(t *testing.T) {
+	err := waitForMergeCompletion(context.Background(), time.Millisecond, time.Millisecond, func() error {
+		return errMergePending
+	})
+	if err == nil {
+		t.Fatal("waitForMergeCompletion() error = nil, want timeout")
+	}
+	if !errors.Is(err, errMergePending) {
+		t.Fatalf("waitForMergeCompletion() error = %v, want wrapped errMergePending", err)
 	}
 }
 

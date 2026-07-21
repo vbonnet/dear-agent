@@ -1,10 +1,13 @@
 package dolt
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
@@ -66,7 +69,7 @@ func (a *Adapter) GetChildren(sessionID string) ([]*manifest.Manifest, error) {
 	query := `
 		SELECT id, created_at, updated_at, status, workspace, model, name, harness,
 			context_project, context_purpose, context_tags, context_notes,
-			claude_uuid, tmux_session_name, metadata,
+			claude_uuid, tmux_session_name, tmux_session_revision, metadata,
 			permission_mode, permission_mode_updated_at, permission_mode_source,
 			is_test,
 			context_total_tokens, context_used_tokens, context_percentage_used,
@@ -96,6 +99,66 @@ func (a *Adapter) GetChildren(sessionID string) ([]*manifest.Manifest, error) {
 	}
 
 	return children, nil
+}
+
+// LinkSessionParent atomically assigns a parent and, when requested, an
+// inherited display name against the exact session identity revision observed
+// by the caller. Administrative hierarchy repair must never report a name
+// update that a concurrent full-session writer silently fenced out.
+func (a *Adapter) LinkSessionParent(ctx context.Context, sessionID, observedRevision, parentSessionID string, inheritedName *string) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id cannot be empty")
+	}
+	if parentSessionID == "" {
+		return fmt.Errorf("parent_session_id cannot be empty")
+	}
+	if sessionID == parentSessionID {
+		return fmt.Errorf("session cannot be its own parent")
+	}
+	if err := a.ApplyMigrations(); err != nil {
+		return fmt.Errorf("failed to apply migrations: %w", err)
+	}
+
+	var parentExists int
+	if err := a.conn.QueryRowContext(ctx, `SELECT 1 FROM agm_sessions WHERE id = ? AND workspace = ?`, parentSessionID, a.workspace).Scan(&parentExists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("parent session not found: %s", parentSessionID)
+		}
+		return fmt.Errorf("check parent session: %w", err)
+	}
+
+	observed := nullableStringValue(sql.NullString{String: observedRevision, Valid: observedRevision != ""})
+	var inheritedNameValue any
+	if inheritedName != nil {
+		inheritedNameValue = *inheritedName
+	}
+	result, err := a.conn.ExecContext(ctx, `
+		UPDATE agm_sessions
+		SET updated_at = ?, parent_session_id = ?,
+			name = CASE WHEN ? IS NULL THEN name ELSE ? END,
+			tmux_session_revision = ?
+		WHERE id = ? AND workspace = ?
+		  AND ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)
+	`, time.Now(), parentSessionID, inheritedNameValue, inheritedNameValue, uuid.NewString(), sessionID, a.workspace, observed, observed)
+	if err != nil {
+		return fmt.Errorf("link session parent: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get linked session rows affected: %w", err)
+	}
+	if rowsAffected > 0 {
+		return nil
+	}
+
+	var currentRevision sql.NullString
+	if err := a.conn.QueryRowContext(ctx, `SELECT tmux_session_revision FROM agm_sessions WHERE id = ? AND workspace = ?`, sessionID, a.workspace).Scan(&currentRevision); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("session not found: %s", sessionID)
+		}
+		return fmt.Errorf("inspect session parent conflict: %w", err)
+	}
+	return fmt.Errorf("session identity changed concurrently while linking parent %s", sessionID)
 }
 
 // DetachChild sets parent_session_id to NULL for a given child session.

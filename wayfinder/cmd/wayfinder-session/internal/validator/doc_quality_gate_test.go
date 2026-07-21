@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -44,6 +45,81 @@ func TestValidateDocQuality_NonValidatedPhase(t *testing.T) {
 		if err != nil {
 			t.Errorf("phase %s should skip validation, got error: %v", phase, err)
 		}
+	}
+}
+
+func TestRunReviewSkillUsesReachableDeterministicReview(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ARCHITECTURE.md")
+	content := "# Architecture\n\n## Context\nThis section records the current system boundaries and constraints.\n\n## Design\nThis section records the chosen seams, invariants, and trade-offs in enough detail for implementation.\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	score, issues, err := runReviewSkill("review-architecture", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if score < minDocQualityScore || len(issues) != 0 {
+		t.Fatalf("deterministic review = score %.1f, issues %v; want a reachable pass", score, issues)
+	}
+}
+
+func TestValidateSingleDocumentHasReachablePass(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "PLAN-design.md")
+	content := "# Implementation Plan\n\n## Context\nThis section records the current system boundaries and constraints that shape the work.\n\n## Design\nThis section records the chosen sequence, validation evidence, dependencies, and important delivery trade-offs.\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateSingleDocument(dir, "PLAN", "PLAN-design.md", "review-architecture"); err != nil {
+		t.Fatalf("validateSingleDocument() blocked a substantive local review: %v", err)
+	}
+}
+
+func TestRunReviewSkillDoesNotPassHeadingOnlyFiller(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ARCHITECTURE.md")
+	content := "# Architecture\n\n## Context\n" + strings.Repeat("filler ", 20) + "\n\n## Design\n" + strings.Repeat("filler ", 20) + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	score, issues, err := runReviewSkill("review-architecture", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if score >= minDocQualityScore || len(issues) == 0 {
+		t.Fatalf("heading-only filler received score %.1f and issues %v; want substantive-review failure", score, issues)
+	}
+}
+
+func TestBuiltinReviewIssuesAcceptsCanonicalADRStatusFormatting(t *testing.T) {
+	formats := []string{
+		"Status: Accepted",
+		"**Status**: Accepted",
+		"**Status:** Accepted",
+	}
+	for _, statusLine := range formats {
+		t.Run(statusLine, func(t *testing.T) {
+			content := "# ADR-001 Example\n\n" + statusLine + "\n\n## Context\nThis context records enough substantive detail to make the decision reviewable.\n\n## Decision\nThis decision records the selected approach and its important trade-offs.\n"
+			issues, err := builtinReviewIssues("review-adr", content)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(issues) != 0 {
+				t.Fatalf("status line %q produced issues %v", statusLine, issues)
+			}
+		})
+	}
+}
+
+func TestBuiltinReviewIssuesRejectsMissingADRStatusValue(t *testing.T) {
+	content := "# ADR-001 Example\n\n**Status:**\n\n## Context\nThis context records enough substantive detail to make the decision reviewable.\n\n## Decision\nThis decision records the selected approach and its important trade-offs.\n"
+	issues, err := builtinReviewIssues("review-adr", content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsString(strings.Join(issues, "; "), "ADR must contain a Status line") {
+		t.Fatalf("issues = %v, want missing Status line finding", issues)
 	}
 }
 

@@ -49,7 +49,8 @@ func TestDetector_DetectState_CodexReady(t *testing.T) {
 │ >_ OpenAI Codex (v0.43.0)                          │
 │                                                    │
 │  /model to change model   /help for commands       │
-╰────────────────────────────────────────────────────╯`
+╰────────────────────────────────────────────────────╯
+›`
 
 	result := detector.DetectState(output, time.Now())
 
@@ -59,6 +60,76 @@ func TestDetector_DetectState_CodexReady(t *testing.T) {
 
 	if result.Confidence != "high" {
 		t.Errorf("Expected high confidence, got %s", result.Confidence)
+	}
+}
+
+func TestDetector_CodexReadinessRequiresStructuredComposer(t *testing.T) {
+	detector := NewDetector()
+	tests := []struct {
+		name        string
+		output      string
+		wantState   State
+		wantReceive CanReceive
+	}{
+		{
+			name:        "post-turn cursor and footer are ready",
+			output:      "›\n\n  gpt-5.6 xhigh · ~/src/project",
+			wantState:   StateReady,
+			wantReceive: CanReceiveYes,
+		},
+		{
+			name:        "typed post-turn draft and footer are not ready",
+			output:      "› Continue the task\n\n  gpt-5.6 xhigh · ~/src/project",
+			wantState:   StateUnknown,
+			wantReceive: CanReceiveQueue,
+		},
+		{
+			name:        "working status and footer are not ready",
+			output:      "• Working (3s • esc to interrupt)\n  gpt-5.6 xhigh · ~/src/project",
+			wantState:   StateUnknown,
+			wantReceive: CanReceiveQueue,
+		},
+		{
+			name:        "latest working footer overrides stale initial composer",
+			output:      "│ >_ OpenAI Codex (v0.141.0) │\n│ /model to change │\n• Working (3s • esc to interrupt)\n  gpt-5.6 xhigh · ~/src/project",
+			wantState:   StateUnknown,
+			wantReceive: CanReceiveQueue,
+		},
+		{
+			name:        "shell output after post-turn composer is not ready",
+			output:      "› Continue the task\n\n  gpt-5.6 xhigh · ~/src/project\nuser@host:~/src/project$",
+			wantState:   StateUnknown,
+			wantReceive: CanReceiveQueue,
+		},
+		{
+			name:        "shell output after initial composer is not ready",
+			output:      "│ >_ OpenAI Codex (v0.141.0) │\n│ /model to change │\n╰──────────────────────────────╯\nuser@host:~/src/project$",
+			wantState:   StateUnknown,
+			wantReceive: CanReceiveQueue,
+		},
+		{
+			name:        "unsubmitted paste and footer are not ready",
+			output:      "› [Pasted Content 2172 chars]\n  gpt-5.6 xhigh · ~/src/project",
+			wantState:   StateUnknown,
+			wantReceive: CanReceiveQueue,
+		},
+		{
+			name:        "echoed launch model is not ready",
+			output:      "user@host$ codex resume abc -m 'gpt-5.6'",
+			wantState:   StateUnknown,
+			wantReceive: CanReceiveQueue,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := detector.DetectState(tt.output, time.Now()).State; got != tt.wantState {
+				t.Errorf("DetectState() = %v, want %v", got, tt.wantState)
+			}
+			if got := detector.CheckCanReceive(tt.output); got != tt.wantReceive {
+				t.Errorf("CheckCanReceive() = %v, want %v", got, tt.wantReceive)
+			}
+		})
 	}
 }
 
@@ -699,7 +770,8 @@ func TestDetector_CheckCanReceive(t *testing.T) {
 			output: `╭────────────────────────────────────────────────────╮
 │ >_ OpenAI Codex                                    │
 │  /model to change model                            │
-╰────────────────────────────────────────────────────╯`,
+╰────────────────────────────────────────────────────╯
+›`,
 			expected: CanReceiveYes,
 		},
 	}

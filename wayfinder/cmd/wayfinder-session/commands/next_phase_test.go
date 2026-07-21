@@ -29,7 +29,7 @@ waypoint_history: []
 
 func makeLegacyStatusFile(t *testing.T, dir string) {
 	t.Helper()
-	content := "---\nschema_version: \"1.0\"\nsession_id: legacy\ncurrent_phase: D1\n---\n"
+	content := "---\nschema_version: \"1.0\"\nsession_id: legacy\ncurrent_phase: PROBLEM\n---\n"
 	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}

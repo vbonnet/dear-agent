@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -227,6 +228,28 @@ func TestMigration011_SQLContainsCreateTable(t *testing.T) {
 		}
 	}
 	t.Error("Migration 011 not found")
+}
+
+func TestMigration018AddsTmuxSessionRevision(t *testing.T) {
+	for _, migration := range AllMigrations() {
+		if migration.Version != 18 {
+			continue
+		}
+		if migration.Name != "add_tmux_session_revision" {
+			t.Fatalf("migration 018 name = %q, want add_tmux_session_revision", migration.Name)
+		}
+		if !strings.Contains(migration.SQL, "ADD COLUMN tmux_session_revision VARCHAR(64) NULL") {
+			t.Fatalf("migration 018 SQL does not add the nullable ownership revision: %q", migration.SQL)
+		}
+		if !strings.Contains(migration.PreConditionSQL, "COLUMN_NAME = 'tmux_session_revision'") {
+			t.Fatalf("migration 018 precondition does not guard the ownership revision: %q", migration.PreConditionSQL)
+		}
+		if migration.Checksum == "" {
+			t.Fatal("migration 018 checksum is empty")
+		}
+		return
+	}
+	t.Fatal("migration 018 not found")
 }
 
 // ---------------------------------------------------------------------------

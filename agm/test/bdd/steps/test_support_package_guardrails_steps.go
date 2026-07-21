@@ -4,11 +4,15 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/cucumber/godog"
 
+	"github.com/vbonnet/dear-agent/agm/internal/procguard"
 	"github.com/vbonnet/dear-agent/internal/earslint"
 )
 
@@ -42,8 +46,10 @@ type testSupportPackageGuardrailStateKey struct{}
 type testSupportRouteStateKey struct{}
 
 type testSupportRouteState struct {
-	harness string
-	family  string
+	harness              string
+	family               string
+	trustIsolationOutput string
+	trustIsolationErr    error
 }
 
 // RegisterTestSupportPackageGuardrailSteps registers residual package coverage steps.
@@ -67,6 +73,131 @@ func RegisterTestSupportPackageGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates live harness contract command construction$`, agmValidatesLiveHarnessContractCommands)
 	ctx.Step(`^live harness contracts should use canonical session and harness arguments$`, liveHarnessContractsUseCanonicalArguments)
 	ctx.Step(`^unavailable live harness dependencies should be skipped explicitly$`, unavailableLiveHarnessDependenciesAreSkipped)
+	ctx.Step(`^AGM validates trust protocol scenario isolation$`, agmValidatesTrustProtocolScenarioIsolation)
+	ctx.Step(`^trust protocol setup should run only for trust scenarios$`, trustProtocolSetupShouldBeScoped)
+	ctx.Step(`^trust protocol hooks should restore HOME and shared Go cache variables$`, trustProtocolHooksShouldRestoreEnvironment)
+	ctx.Step(`^trust protocol cleanup should remove read-only owned module trees$`, trustProtocolCleanupShouldRemoveReadOnlyModuleTrees)
+	ctx.Step(`^AGM performance workload sources are configured$`, agmPerformanceWorkloadSourcesAreConfigured)
+	ctx.Step(`^AGM validates performance client readiness$`, agmValidatesPerformanceClientReadiness)
+	ctx.Step(`^performance workloads should use bounded hub client readiness$`, performanceWorkloadsUseBoundedHubClientReadiness)
+	ctx.Step(`^churn cleanup should be observed before stable clients disconnect$`, churnCleanupIsObservedBeforeStableClientsDisconnect)
+}
+
+func trustProtocolSetupShouldBeScoped(ctx context.Context) error {
+	return requireTrustProtocolIsolationTests(ctx, "TestTrustProtocolHookScope")
+}
+
+func agmValidatesTrustProtocolScenarioIsolation(ctx context.Context) error {
+	state, err := getTestSupportRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := newTrustIsolationTestCommand(testCtx)
+	cmd.Dir = packageSpecBDDRepoRoot()
+	output, runErr := cmd.CombinedOutput()
+	state.trustIsolationOutput = string(output)
+	state.trustIsolationErr = runErr
+	return nil
+}
+
+func newTrustIsolationTestCommand(ctx context.Context) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "go", "test", "./agm/test/bdd/steps", "-run", `^TestTrustProtocol`, "-count=1", "-timeout=90s", "-v")
+	cmd.SysProcAttr = procguard.ProcessGroupAttr()
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = time.Second
+	return cmd
+}
+
+func trustProtocolHooksShouldRestoreEnvironment(ctx context.Context) error {
+	return requireTrustProtocolIsolationTests(ctx,
+		"TestTrustProtocolEnvironmentRoundTrip",
+		"TestTrustProtocolResolveGoCachesUsesExplicitEnvironment",
+	)
+}
+
+func trustProtocolCleanupShouldRemoveReadOnlyModuleTrees(ctx context.Context) error {
+	return requireTrustProtocolIsolationTests(ctx,
+		"TestTrustProtocolCleanupRemovesReadOnlyModuleTree",
+		"TestTrustProtocolCleanupRejectsUnownedDirectory",
+	)
+}
+
+func requireTrustProtocolIsolationTests(ctx context.Context, tests ...string) error {
+	state, err := getTestSupportRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.trustIsolationErr != nil {
+		return fmt.Errorf("trust protocol isolation tests failed: %w\n%s", state.trustIsolationErr, state.trustIsolationOutput)
+	}
+	for _, test := range tests {
+		if !strings.Contains(state.trustIsolationOutput, "--- PASS: "+test) {
+			return fmt.Errorf("trust protocol isolation test %s did not pass:\n%s", test, state.trustIsolationOutput)
+		}
+	}
+	return nil
+}
+
+func agmPerformanceWorkloadSourcesAreConfigured() error {
+	_, err := os.Stat(filepath.Join(packageSpecBDDRepoRoot(), "agm", "test", "performance", "eventbus_load_test.go"))
+	return err
+}
+
+func agmValidatesPerformanceClientReadiness() error {
+	return nil
+}
+
+func performanceWorkloadsUseBoundedHubClientReadiness() error {
+	data, err := os.ReadFile(filepath.Join(packageSpecBDDRepoRoot(), "agm", "test", "performance", "eventbus_load_test.go"))
+	if err != nil {
+		return err
+	}
+	source := string(data)
+	for _, required := range []string{
+		"func waitForClientCount(",
+		"deadline := time.Now().Add(5 * time.Second)",
+		"waitForClientCount(t, hub, 1)",
+		"waitForClientCount(t, hub, numClients)",
+	} {
+		if !strings.Contains(source, required) {
+			return fmt.Errorf("performance workload lacks bounded client readiness %q", required)
+		}
+	}
+	return nil
+}
+
+func churnCleanupIsObservedBeforeStableClientsDisconnect() error {
+	data, err := os.ReadFile(filepath.Join(packageSpecBDDRepoRoot(), "agm", "test", "performance", "eventbus_load_test.go"))
+	if err != nil {
+		return err
+	}
+	source := string(data)
+	churnStart := strings.Index(source, "func TestConnectionChurn(")
+	if churnStart < 0 {
+		return fmt.Errorf("connection churn workload is missing")
+	}
+	churn := source[churnStart:]
+	registered := strings.Index(churn, "waitForClientCount(t, hub, stableClients+1)")
+	closed := strings.Index(churn, "ephConn.Close()")
+	unregistered := -1
+	if closed >= 0 {
+		if relative := strings.Index(churn[closed:], "waitForClientCount(t, hub, stableClients)"); relative >= 0 {
+			unregistered = closed + relative
+		}
+	}
+	stableClosed := strings.Index(churn, "// Close stable connections to unblock ReadMessage in receiver goroutines.")
+	if registered < 0 || closed < 0 || unregistered < 0 || stableClosed < 0 ||
+		registered >= closed || closed >= unregistered || unregistered >= stableClosed {
+		return fmt.Errorf("connection churn does not observe ephemeral registration and cleanup before stable disconnect")
+	}
+	return nil
 }
 
 func liveHarnessContractSourcesAreConfigured() error {

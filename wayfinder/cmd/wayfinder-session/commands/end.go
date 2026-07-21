@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -55,25 +56,38 @@ func runEndV2(projectDir, newStatus, blockedReason string) error {
 	if !validStatuses[newStatus] {
 		return fmt.Errorf("invalid status: %s (must be completed, abandoned, or blocked)", newStatus)
 	}
-	if newStatus == status.StatusV2Blocked && blockedReason == "" {
-		return fmt.Errorf("blocked status requires --reason")
+	if newStatus == status.StatusV2Blocked {
+		blockedReason = strings.TrimSpace(blockedReason)
+		if blockedReason == "" {
+			return fmt.Errorf("blocked status requires --reason")
+		}
 	}
 
 	st, err := status.ParseV2FromDir(projectDir)
 	if err != nil {
 		return fmt.Errorf("failed to read canonical status file: %w", err)
 	}
+	if newStatus == status.StatusV2Completed {
+		if err := status.ValidateSessionCompletion(st); err != nil {
+			return err
+		}
+	}
 
 	now := time.Now()
-	st.Status = newStatus
-	st.UpdatedAt = now
-	st.BlockedReason = ""
-	st.CompletionDate = nil
-	if newStatus == status.StatusV2Blocked {
+	switch newStatus {
+	case status.StatusV2Completed:
+		applyLifecycleState(st, status.LifecycleCompleted, "", "", "", now)
+	case status.StatusV2Abandoned:
+		applyLifecycleState(st, status.LifecycleCanceled, "", "", "", now)
+	case status.StatusV2Blocked:
+		st.Status = status.StatusV2Blocked
+		st.LifecycleState = ""
 		st.BlockedReason = blockedReason
-	}
-	if newStatus == status.StatusV2Completed {
-		st.CompletionDate = &now
+		st.BlockedOn = ""
+		st.ErrorMessage = ""
+		st.InputNeeded = ""
+		st.CompletionDate = nil
+		st.UpdatedAt = now
 	}
 
 	// Guard against zero CreatedAt — use UpdatedAt as the session start if unset.

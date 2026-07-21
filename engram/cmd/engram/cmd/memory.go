@@ -30,7 +30,7 @@ COMMANDS
 EXAMPLES
   # Store a memory
   $ engram memory store --namespace user,alice --type episodic \
-      --content "Completed D1 validation phase"
+      --content "Completed DESIGN validation phase"
 
   # Retrieve memories
   $ engram memory retrieve --namespace user,alice --type episodic --limit 10

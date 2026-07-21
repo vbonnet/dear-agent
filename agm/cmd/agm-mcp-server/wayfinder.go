@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/statusread"
 	"gopkg.in/yaml.v3"
 )
 
@@ -51,14 +53,14 @@ func parseFrontmatter(content []byte) (map[string]any, error) {
 	return fm, nil
 }
 
-// fmString extracts a string field from a parsed frontmatter map, trying
-// multiple key names (newer schema first, then legacy names).
-func fmString(fm map[string]any, keys ...string) string {
-	for _, k := range keys {
-		if v, ok := fm[k]; ok {
-			if s, ok := v.(string); ok {
-				return s
-			}
+// fmString extracts one canonical string field from parsed frontmatter.
+func fmString(fm map[string]any, key string) string {
+	if value, ok := fm[key]; ok {
+		switch typed := value.(type) {
+		case string:
+			return typed
+		case time.Time:
+			return typed.Format(time.RFC3339)
 		}
 	}
 	return ""
@@ -72,6 +74,9 @@ func readWayfinderSession(sessionDir string) (string, map[string]any, error) {
 	data, err := os.ReadFile(statusPath)
 	if err != nil {
 		return id, nil, err
+	}
+	if _, err := statusread.Parse(data); err != nil {
+		return id, nil, fmt.Errorf("invalid canonical status: %w", err)
 	}
 	fm, err := parseFrontmatter(data)
 	if err != nil {
@@ -117,11 +122,11 @@ func listWayfinderSessions(wayfinderDir, statusFilter string, limit int) ([]Wayf
 
 		sessions = append(sessions, WayfinderSession{
 			ID:           id,
-			ProjectName:  fmString(fm, "project_name", "project"),
+			ProjectName:  fmString(fm, "project_name"),
 			Status:       status,
-			CurrentPhase: fmString(fm, "current_phase", "current_waypoint"),
-			CreatedAt:    fmString(fm, "created_at", "created"),
-			UpdatedAt:    fmString(fm, "updated_at", "updated"),
+			CurrentPhase: fmString(fm, "current_waypoint"),
+			CreatedAt:    fmString(fm, "created_at"),
+			UpdatedAt:    fmString(fm, "updated_at"),
 			Repository:   fmString(fm, "repository"),
 		})
 	}

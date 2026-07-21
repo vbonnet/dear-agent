@@ -25,6 +25,14 @@ skip_phases:
   - SPEC
   - PLAN
 waypoint_history:
+  - name: CHARTER
+    status: completed
+    started_at: 2026-01-01T00:00:00Z
+    completed_at: 2026-01-01T00:20:00Z
+  - name: PROBLEM
+    status: completed
+    started_at: 2026-01-01T00:20:00Z
+    completed_at: 2026-01-01T00:40:00Z
   - name: RESEARCH
     status: completed
     started_at: 2026-01-01T00:00:00Z

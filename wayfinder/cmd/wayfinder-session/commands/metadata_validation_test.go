@@ -1,11 +1,28 @@
 package commands
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
+
+func TestStartRejectsWhitespaceProjectNameBeforeWritingState(t *testing.T) {
+	dir := t.TempDir()
+	SetProjectDirectory(dir)
+	t.Cleanup(func() { projectDirectory = "" })
+
+	err := runStart(newStartCmdWithFlags(), []string{"  \t "})
+	if err == nil || !strings.Contains(err.Error(), "project name is required") {
+		t.Fatalf("runStart() error = %v, want project name validation", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, status.StatusFilename)); !os.IsNotExist(statErr) {
+		t.Fatalf("status file was created before project name validation: %v", statErr)
+	}
+}
 
 func TestValidateStartMetadataRejectsInvalidEnums(t *testing.T) {
 	for _, test := range []struct {
@@ -52,6 +69,16 @@ func TestLifecycleMetadataRequiresActionableDetails(t *testing.T) {
 	}
 }
 
+func TestValidateLifecycleCompletionRequiresCompletedWaypoints(t *testing.T) {
+	st := &status.StatusV2{}
+	if err := validateLifecycleCompletion(st, status.LifecycleWorking); err != nil {
+		t.Fatalf("validateLifecycleCompletion() rejected nonterminal update: %v", err)
+	}
+	if err := validateLifecycleCompletion(st, status.LifecycleCompleted); err == nil || !strings.Contains(err.Error(), "required Wayfinder phases are incomplete") {
+		t.Fatalf("validateLifecycleCompletion() error = %v, want completion guard", err)
+	}
+}
+
 func TestApplyLifecycleStateKeepsCanonicalStatusValid(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	for _, test := range []struct {
@@ -66,6 +93,17 @@ func TestApplyLifecycleStateKeepsCanonicalStatusValid(t *testing.T) {
 	} {
 		t.Run(test.state, func(t *testing.T) {
 			st := status.NewStatusV2("test", status.ProjectTypeFeature, status.RiskLevelS)
+			if test.state == status.LifecycleCompleted {
+				st.CurrentWaypoint = status.WaypointV2Retro
+				for _, waypointName := range status.AllWaypointsV2Schema() {
+					st.WaypointHistory = append(st.WaypointHistory, status.WaypointHistory{
+						Name:        waypointName,
+						Status:      status.WaypointStatusV2Completed,
+						StartedAt:   now,
+						CompletedAt: &now,
+					})
+				}
+			}
 			applyLifecycleState(st, test.state, test.blockedOn, test.errorMessage, test.inputNeeded, now)
 			if err := status.ValidateV2(st); err != nil {
 				t.Fatalf("ValidateV2 after %s: %v", test.state, err)

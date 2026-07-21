@@ -23,7 +23,7 @@ func TestRootCommandUsesCanonicalSessionSurface(t *testing.T) {
 	}
 	for _, retired := range []string{"start", "autopilot", "features", "abort"} {
 		if slices.Contains(names, retired) {
-			t.Errorf("root commands expose retired V1 executor %q: %v", retired, names)
+			t.Errorf("root commands expose retired legacy executor %q: %v", retired, names)
 		}
 	}
 }

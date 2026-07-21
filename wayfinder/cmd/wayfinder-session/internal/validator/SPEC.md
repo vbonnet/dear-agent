@@ -31,6 +31,8 @@
 
 **WFVALID-12** When a project without a completed lifecycle state is evaluated for parent completion, the system shall require every canonical non-skipped waypoint to be present and completed.
 
+**WFVALID-13** When BUILD or RETRO completion validates Git state, the system shall allow the current phase artifact to reach the scoped completion commit while rejecting untracked artifacts from earlier phases and untracked BUILD source code.
+
 ## Traceability
 
 - Tests: `wayfinder/cmd/wayfinder-session/internal/validator/*_test.go`

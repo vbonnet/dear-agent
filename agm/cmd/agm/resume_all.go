@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -114,8 +115,7 @@ func runResumeAll(cmd *cobra.Command, args []string) error {
 	}
 
 	// 9. Resume sessions with progress
-	resumeSessionsBatch(adapter, stoppedSessions)
-	return nil
+	return resumeSessionsBatch(cmd.Context(), adapter, stoppedSessions)
 }
 
 // filterNonArchived removes archived sessions from list
@@ -141,7 +141,7 @@ func filterByWorkspace(manifests []*manifest.Manifest, workspace string) []*mani
 }
 
 // resumeSessionsBatch resumes sessions sequentially with progress UI
-func resumeSessionsBatch(adapter *dolt.Adapter, sessions []*manifest.Manifest) {
+func resumeSessionsBatch(ctx context.Context, adapter *dolt.Adapter, sessions []*manifest.Manifest) error {
 	var successCount, failCount int
 	var errors []string
 
@@ -153,6 +153,9 @@ func resumeSessionsBatch(adapter *dolt.Adapter, sessions []*manifest.Manifest) {
 	total := len(sessions)
 
 	for i, m := range sessions {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		// Display progress
 		percent := float64(i) / float64(total)
 		fmt.Printf("\r%s [%d/%d] %s Resuming: %s\n",
@@ -165,30 +168,11 @@ func resumeSessionsBatch(adapter *dolt.Adapter, sessions []*manifest.Manifest) {
 		// Find manifest path
 		manifestPath := filepath.Join(cfg.SessionsDir, m.SessionID, "manifest.yaml")
 
-		// Check session health
-		health, err := checkSessionHealth(adapter, m.SessionID, manifestPath)
-		if err != nil || !health.CanResume {
-			errMsg := fmt.Sprintf("%s: health check failed", m.Name)
-			errors = append(errors, errMsg)
-			failCount++
-
-			if !resumeAllContinue {
-				break
-			}
-			continue
-		}
-
-		// Auto-detect harness from manifest
-		harnessName := m.Harness
-		if harnessName == "" {
-			harnessName = "claude-code" // Default for backward compatibility
-		}
-
 		// Resume session (force detached mode for bulk)
 		originalDetached := resumeDetached
 		resumeDetached = resumeAllDetached
 
-		err = resumeSession(adapter, m.SessionID, manifestPath, harnessName, health)
+		err := resumeResolvedSession(ctx, adapter, m.SessionID, manifestPath)
 
 		resumeDetached = originalDetached
 
@@ -231,6 +215,7 @@ func resumeSessionsBatch(adapter *dolt.Adapter, sessions []*manifest.Manifest) {
 			fmt.Printf("  • %s\n", errMsg)
 		}
 	}
+	return ctx.Err()
 }
 
 // writeResumeTimestamp creates .agm/resume-timestamp file for orchestrator coordination

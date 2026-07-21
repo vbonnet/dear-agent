@@ -1,12 +1,9 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -26,21 +23,21 @@ type stallEventOutput struct {
 
 // recoveryActionOutput represents the JSON output for a recovery action.
 type recoveryActionOutput struct {
-	Timestamp       string `json:"timestamp"`
-	SessionName     string `json:"session_name"`
-	ActionType      string `json:"action_type"`
-	Description     string `json:"description"`
-	Sent            bool   `json:"sent"`
-	Error           string `json:"error,omitempty"`
+	Timestamp   string `json:"timestamp"`
+	SessionName string `json:"session_name"`
+	ActionType  string `json:"action_type"`
+	Description string `json:"description"`
+	Sent        bool   `json:"sent"`
+	Error       string `json:"error,omitempty"`
 }
 
 var (
-	stalledCheckInterval      time.Duration
-	stalledPermissionTimeout  time.Duration
-	stalledNoCommitTimeout    time.Duration
+	stalledCheckInterval        time.Duration
+	stalledPermissionTimeout    time.Duration
+	stalledNoCommitTimeout      time.Duration
 	stalledErrorRepeatThreshold int
-	stalledOrchestratorName   string
-	stalledDryRun             bool
+	stalledOrchestratorName     string
+	stalledDryRun               bool
 )
 
 var watchStalledCmd = &cobra.Command{
@@ -93,17 +90,7 @@ func runWatchStalled(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(os.Stderr, "  Dry run: %v\n", stalledDryRun)
 	fmt.Fprintf(os.Stderr, "\n")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Handle OS signals for clean shutdown
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigCh
-		fmt.Fprintf(os.Stderr, "\nShutting down watcher...\n")
-		cancel()
-	}()
+	ctx := cmd.Context()
 
 	// Create detector and recovery handler
 	detector := ops.NewStallDetector(opCtx)
@@ -120,6 +107,7 @@ func runWatchStalled(cmd *cobra.Command, args []string) error {
 	for {
 		select {
 		case <-ctx.Done():
+			fmt.Fprintln(os.Stderr, "\nShutting down watcher...")
 			return nil
 		case <-ticker.C:
 			events, err := detector.DetectStalls(ctx)

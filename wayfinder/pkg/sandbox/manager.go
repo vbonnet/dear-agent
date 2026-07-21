@@ -190,8 +190,9 @@ func (m *Manager) CleanupSandbox(nameOrID string) error {
 	// Remove git worktree if exists
 	if target.WorktreePath != "" && target.GitRepository != "" {
 		if err := m.git.RemoveWorktree(target.ID, target.GitRepository); err != nil {
-			// Log warning but continue with directory removal
-			fmt.Fprintf(os.Stderr, "Warning: failed to remove worktree: %v\n", err)
+			// Preserve the sandbox metadata so cleanup can be retried after a
+			// protected transaction releases the worktree.
+			return fmt.Errorf("remove sandbox worktree: %w", err)
 		}
 	}
 

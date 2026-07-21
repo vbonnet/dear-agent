@@ -3,6 +3,7 @@ package launchparity
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
@@ -13,6 +14,52 @@ type Contract struct {
 	InteractiveToken string
 	ModeToken        string
 	ExitSuffix       string
+}
+
+// AgyCommandSpec is the complete native AGY launch/resume contract. Callers
+// resolve model aliases before crossing this boundary; command ordering,
+// permission mapping, quoting, and persistence stay centralized here.
+type AgyCommandSpec struct {
+	WorkDir        string
+	ResolvedModel  string
+	PermissionMode string
+	ConversationID string
+	ExtraAddDirs   []string
+	Persistent     bool
+}
+
+// AgyCommand is the shell command plus the permission-policy outcome needed
+// by lifecycle callers.
+type AgyCommand struct {
+	Command              string
+	ModeAppliedAtStartup bool
+}
+
+// BuildAgyCommand constructs one canonical AGY interactive command for both
+// fresh launches and cold resumes.
+func BuildAgyCommand(spec AgyCommandSpec) AgyCommand {
+	var b strings.Builder
+	fmt.Fprintf(&b, "cd %s && agy", ShellQuote(spec.WorkDir))
+	if spec.ResolvedModel != "" {
+		fmt.Fprintf(&b, " --model %s", ShellQuote(spec.ResolvedModel))
+	}
+	modeFlag := AgyPermissionModeFlag(spec.PermissionMode)
+	if modeFlag != "" {
+		b.WriteString(" " + modeFlag)
+	}
+	if spec.ConversationID != "" {
+		fmt.Fprintf(&b, " --conversation %s", ShellQuote(spec.ConversationID))
+	}
+	for _, dir := range spec.ExtraAddDirs {
+		fmt.Fprintf(&b, " --add-dir %s", ShellQuote(dir))
+	}
+	b.WriteString(ExitSuffix(spec.Persistent))
+	return AgyCommand{Command: b.String(), ModeAppliedAtStartup: modeFlag != ""}
+}
+
+// ShellQuote wraps a value for safe interpolation into a POSIX shell command.
+func ShellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 // Resolve returns the startup contract for an active harness.
@@ -28,7 +75,10 @@ func Resolve(harness, mode string, persistent bool) (Contract, error) {
 		contract.InteractiveToken = "codex"
 		contract.ModeToken = CodexPermissionModeFlag(mode)
 	case "agy":
-		contract.InteractiveToken = "--prompt-interactive"
+		// AGY's --prompt-interactive flag is string-valued and requires an
+		// initial prompt. AGM starts a bare interactive process and delivers
+		// detached startup prompts only after native readiness is observed.
+		contract.InteractiveToken = "agy"
 		contract.ModeToken = AgyPermissionModeFlag(mode)
 	case "opencode-cli":
 		contract.InteractiveToken = "opencode attach"

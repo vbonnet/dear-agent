@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -426,6 +427,15 @@ func TestGetHistoryPaths(t *testing.T) {
 			wantHarness: "codex",
 		},
 		{
+			name:        "AGY agent",
+			agent:       "agy",
+			uuid:        "117ff898-a964-4a9f-b460-1be4a8a49b17",
+			workingDir:  "",
+			verify:      false,
+			wantErr:     false,
+			wantHarness: "agy",
+		},
+		{
 			name:       "Unknown agent",
 			agent:      "unknown",
 			uuid:       "some-uuid",
@@ -478,6 +488,70 @@ func TestGetHistoryPaths(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestGetHistoryPaths_AgyNativeLocations(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	conversationID := "117ff898-a964-4a9f-b460-1be4a8a49b17"
+
+	location, err := GetHistoryPaths("antigravity", conversationID, "/ignored/workdir", false)
+	if err != nil {
+		t.Fatalf("GetHistoryPaths(antigravity): %v", err)
+	}
+	appDir := filepath.Join(home, ".gemini", "antigravity-cli")
+	wantPaths := []string{
+		filepath.Join(appDir, "conversations", conversationID+".db"),
+		filepath.Join(appDir, "brain", conversationID, ".system_generated", "logs", "transcript.jsonl"),
+		filepath.Join(appDir, "brain", conversationID, ".system_generated", "logs", "transcript_full.jsonl"),
+	}
+	if !reflect.DeepEqual(location.Paths, wantPaths) {
+		t.Fatalf("AGY paths = %v, want %v", location.Paths, wantPaths)
+	}
+	if location.Metadata["harness"] != "agy" || location.Metadata["conversation_id"] != conversationID || location.Metadata["app_dir"] != appDir {
+		t.Fatalf("AGY metadata = %v", location.Metadata)
+	}
+	if !location.Exists {
+		t.Fatal("unverified AGY paths should retain the existing API's optimistic Exists value")
+	}
+}
+
+func TestGetHistoryPaths_AgyVerification(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	conversationID := "117ff898-a964-4a9f-b460-1be4a8a49b17"
+	location, err := GetHistoryPaths("agy", conversationID, "", false)
+	if err != nil {
+		t.Fatalf("construct AGY paths: %v", err)
+	}
+	for _, path := range location.Paths {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir for %s: %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte("fixture\n"), 0o600); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	verified, err := GetHistoryPaths("agy-cli", conversationID, "", true)
+	if err != nil {
+		t.Fatalf("verify AGY paths: %v", err)
+	}
+	if !verified.Exists {
+		t.Fatalf("existing AGY paths were not verified: %v", verified.Paths)
+	}
+	if err := os.Remove(verified.Paths[2]); err != nil {
+		t.Fatalf("remove transcript_full fixture: %v", err)
+	}
+	missing, err := GetHistoryPaths("agy", conversationID, "", true)
+	if err != nil {
+		t.Fatalf("verify missing AGY path: %v", err)
+	}
+	if missing.Exists {
+		t.Fatal("AGY verification should fail when a returned native path is missing")
 	}
 }
 

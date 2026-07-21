@@ -72,7 +72,6 @@
       "github.com/vbonnet/dear-agent/pkg/synchub",
       "github.com/vbonnet/dear-agent/pkg/validation",
       "github.com/vbonnet/dear-agent/pkg/validation/engram",
-      "github.com/vbonnet/dear-agent/pkg/w0",
       "github.com/vbonnet/dear-agent/pkg/workspace/dolt",
       "github.com/vbonnet/dear-agent/tests/githooks",
       "github.com/vbonnet/dear-agent/tools/devlog/internal/output",

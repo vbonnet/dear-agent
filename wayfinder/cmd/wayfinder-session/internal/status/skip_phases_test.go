@@ -11,7 +11,7 @@ var liteSkips = []string{WaypointV2Design, WaypointV2Spec, WaypointV2Plan}
 // phase for a lite task is SETUP — not DESIGN (ce-12pl / MVD T2.2).
 func TestNextWaypoint_LiteSkipsDesignSpecPlan(t *testing.T) {
 	s := &StatusV2{
-		SchemaVersion:   SchemaVersionV2,
+		SchemaVersion:   SchemaVersion,
 		CurrentWaypoint: WaypointV2Research,
 		SkipPhases:      liteSkips,
 		WaypointHistory: []WaypointHistory{
@@ -33,7 +33,7 @@ func TestNextWaypoint_LiteSkipsDesignSpecPlan(t *testing.T) {
 // unchanged: after RESEARCH, the next phase is DESIGN.
 func TestNextWaypoint_StandardKeepsDesign(t *testing.T) {
 	s := &StatusV2{
-		SchemaVersion:   SchemaVersionV2,
+		SchemaVersion:   SchemaVersion,
 		CurrentWaypoint: WaypointV2Research,
 		WaypointHistory: []WaypointHistory{
 			{Name: WaypointV2Research, Status: WaypointStatusV2Completed},
@@ -52,7 +52,7 @@ func TestNextWaypoint_StandardKeepsDesign(t *testing.T) {
 
 func TestNextWaypointSkipRoadmapAdvancesFromPlanToBuild(t *testing.T) {
 	s := &StatusV2{
-		SchemaVersion:   SchemaVersionV2,
+		SchemaVersion:   SchemaVersion,
 		CurrentWaypoint: WaypointV2Plan,
 		SkipRoadmap:     true,
 		WaypointHistory: []WaypointHistory{
@@ -83,7 +83,7 @@ func TestNextWaypoint_LiteFullProgression(t *testing.T) {
 	}
 
 	s := &StatusV2{
-		SchemaVersion:   SchemaVersionV2,
+		SchemaVersion:   SchemaVersion,
 		CurrentWaypoint: "",
 		SkipPhases:      liteSkips,
 		WaypointHistory: []WaypointHistory{},

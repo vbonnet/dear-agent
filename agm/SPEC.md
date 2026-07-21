@@ -57,6 +57,10 @@ For `codex-cli`, AGM treats Codex as a real interactive CLI harness:
 - send safety MUST evaluate `codex-cli` readiness with Codex-specific composer
   and onboarding detection, never by requiring a Claude process
 - state detection MUST recognize an idle Codex composer as `ready`/sendable
+  only from a complete initial header/hint/empty-cursor structure or an empty
+  post-turn cursor/footer pair; typed drafts, paste chips, standalone model
+  text, working-status footers, and composer markers followed by newer
+  non-composer pane output MUST remain non-ready
 - state detection MUST NOT treat Codex trust prompts or menu selectors as idle
   composers
 - archive paths MUST archive the matching Codex saved session by resolving the
@@ -99,6 +103,12 @@ For `agy`, AGM treats Antigravity as a real interactive CLI harness:
 - AGM MUST capture and persist the spawned AGY conversation ID after `agm
   session new --harness agy` so later `resume`, `list`, and `archive`
   operations target the same saved conversation
+- AGM adapter creation MUST normalize the workspace to an absolute path,
+  share one cancellation-aware provider identity lock across CLI, MCP, and
+  adapter launch surfaces, and reject unsafe native conversation identifiers
+  before command or transcript-path use
+- AGY cold resume MUST refuse to inject its command into an existing tmux pane
+  that contains another live harness process
 - AGY sessions with AGM `permission_mode=auto` MUST launch and resume with
   `--dangerously-skip-permissions`; AGY does not expose Claude-style in-pane
   permission-mode cycling, so non-auto modes remain the AGY default behavior

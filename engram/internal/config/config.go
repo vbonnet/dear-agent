@@ -49,9 +49,6 @@ type Config struct {
 	// Enforcement settings
 	Enforcement EnforcementConfig `yaml:"enforcement"`
 
-	// Wayfinder settings
-	Wayfinder WayfinderConfig `yaml:"wayfinder"`
-
 	// HarnessEffort settings (loaded by harnesseffort package; exposed here for
 	// inspection via 'engram config show').
 	HarnessEffort harnesseffort.HarnessEffortConfig `yaml:"harness_effort"`
@@ -208,82 +205,4 @@ type AuthConfig struct {
 
 	// Environment variable containing auth token
 	TokenEnv string `yaml:"token_env"`
-}
-
-// WayfinderConfig contains wayfinder workflow settings
-type WayfinderConfig struct {
-	// W0 (Project Framing) settings
-	W0 W0Config `yaml:"w0"`
-}
-
-// W0Config contains W0 project framing settings
-type W0Config struct {
-	// Enable W0 project framing
-	Enabled bool `yaml:"enabled"`
-
-	// Enforce W0 (company can prevent user disable)
-	Enforce bool `yaml:"enforce"`
-
-	// Detection settings
-	Detection W0DetectionConfig `yaml:"detection"`
-
-	// Question settings
-	Questions W0QuestionConfig `yaml:"questions"`
-
-	// Synthesis settings
-	Synthesis W0SynthesisConfig `yaml:"synthesis"`
-
-	// Telemetry settings
-	Telemetry W0TelemetryConfig `yaml:"telemetry"`
-}
-
-// W0DetectionConfig contains vagueness detection settings
-type W0DetectionConfig struct {
-	// Enable automatic vagueness detection
-	Enabled bool `yaml:"enabled"`
-
-	// Minimum word count (below this triggers vague signal)
-	MinWordCount int `yaml:"min_word_count"`
-
-	// Maximum word count to skip W0 (above this, skip if detailed)
-	MaxSkipWordCount int `yaml:"max_skip_word_count"`
-
-	// Vagueness threshold (0.0-1.0, confidence to trigger W0)
-	VaguenessThreshold float64 `yaml:"vagueness_threshold"`
-}
-
-// W0QuestionConfig contains question flow settings
-type W0QuestionConfig struct {
-	// Maximum clarification rounds (hard limit)
-	MaxRounds int `yaml:"max_rounds"`
-
-	// Include examples in questions
-	IncludeExamples bool `yaml:"include_examples"`
-
-	// Include expandable help text
-	IncludeHelpText bool `yaml:"include_help_text"`
-}
-
-// W0SynthesisConfig contains charter synthesis settings
-type W0SynthesisConfig struct {
-	// Synthesis method: "simple" or "few_shot_cot"
-	Method string `yaml:"method"`
-
-	// Synthesis timeout in seconds
-	TimeoutSeconds int `yaml:"timeout_seconds"`
-
-	// Retry on synthesis failure
-	RetryOnFailure bool `yaml:"retry_on_failure"`
-}
-
-// W0TelemetryConfig contains W0-specific telemetry settings
-type W0TelemetryConfig struct {
-	// Enable W0 telemetry (respects global telemetry.enabled)
-	Enabled bool `yaml:"enabled"`
-
-	// Log detected technical terms
-	LogTechnicalTerms bool `yaml:"log_technical_terms"`
-
-	// Log response metadata (lengths, scores)
-	LogResponseMetadata bool `yaml:"log_response_metadata"`
 }

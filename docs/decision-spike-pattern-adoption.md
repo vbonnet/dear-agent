@@ -3,21 +3,21 @@
 **Status:** Accepted
 **Date:** 2026-06-20
 **Bead:** ce-ynyb
-**Companions:** [[ce-228u]] first spike · [[ce-t8kn]] output schema · [[ce-4h06]] W0.5 gate · [[ce-90si]] confidence gate · [[ce-kky0]] recursive decomposition
+**Companions:** [[ce-228u]] first spike · [[ce-t8kn]] output schema · [[ce-4h06]] implementation-requirements gate · [[ce-90si]] confidence gate · [[ce-kky0]] recursive decomposition
 
 ---
 
 ## Context
 
 A **spike** — a time-boxed investigation whose sole deliverable is enough signal
-to write W0 requirements for a follow-up implementation bead — has emerged
+to write implementation requirements for a follow-up bead — has emerged
 organically across recent work (ce-htwo, ce-90si, ce-kky0, ce-4h06, ce-t8kn,
 ce-228u, ce-04cv). Each produced a design doc and stopped before implementation.
 The pattern works, but it is informal: nothing says *when* a spike is required,
 how it is labeled, or how it hands off. This decision formalizes it.
 
-The pattern is well-known from Scrum/XP. Our adaptation: a spike feeds W0
-requirements and a cost/benefit decision; the implementation bead is created
+The pattern is well-known from Scrum/XP. Our adaptation: a spike feeds grounded
+implementation requirements and a cost/benefit decision; the implementation bead is created
 separately and prioritized on its own merits. `bd` already ships a first-class
 `spike` type ("timeboxed investigation to reduce uncertainty before committing
 to a story"), so no tooling change is needed.
@@ -29,7 +29,7 @@ to a story"), so no tooling change is needed.
 ### 1. The rule
 
 **Any bead carrying significant design or architecture uncertainty MUST be
-preceded by a spike.** "Significant uncertainty" means W0 requirements cannot be
+preceded by a spike.** "Significant uncertainty" means implementation requirements cannot be
 written with testable acceptance criteria without first investigating — multiple
 viable approaches, unknown blast radius, or an unproven dependency. If a worker
 cannot state what "done" looks like, the work needs a spike first.
@@ -68,7 +68,7 @@ A spike completes via a **PR containing a single decision/design doc**
    impl bead ID and the confidence band ([[ce-90si]]).
 3. Closes the spike bead only after the PR is **MERGED**.
 
-The doc's final section MUST list **W0 requirements for the implementation bead**
+The doc's final section MUST list **requirements for the implementation bead**
 — this is the actual deliverable the handoff carries.
 
 ### 5. Scope limit
@@ -90,21 +90,21 @@ A spike is bounded on three axes:
   cite the prior doc.
 - **Trivial features** where acceptance criteria are already writable.
 
-When in doubt, the test is operational: *can you write testable W0 acceptance
+When in doubt, the test is operational: *can you write testable implementation acceptance
 criteria right now?* If yes, skip the spike; if no, spike first.
 
 ---
 
 ## Consequences
 
-**Positive:** implementation beads start with grounded W0 requirements; investigation
+**Positive:** implementation beads start with grounded requirements; investigation
 cost is paid in a cheap, isolated bead; the spike→impl chain is auditable via bead
 links and trail entries; native `bd` tooling needs no change.
 
 **Negative / trade-offs:** a two-bead chain adds latency for genuinely uncertain
 work (intended — the alternative is a bounced implementation). Proactive creation
 risks spike sprawl; the §5 scope limits and dispatch's after-the-fact reprioritization
-are the controls. The "significant uncertainty" test is judgment-based; the W0
+are the controls. The "significant uncertainty" test is judgment-based; the implementation-readiness
 operational test (§6) is the tie-breaker.
 
 **Awareness:** this pattern propagates via AGENTS.md and worker bead templates so

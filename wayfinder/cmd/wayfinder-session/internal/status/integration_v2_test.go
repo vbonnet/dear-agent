@@ -30,7 +30,7 @@ func TestIntegrationV2Workflow(t *testing.T) {
 			Status:       PhaseStatusV2Completed,
 			StartedAt:    now.Add(-2 * time.Hour),
 			CompletedAt:  &completed,
-			Deliverables: []string{"W0-intake.md"},
+			Deliverables: []string{"CHARTER-intake.md"},
 		},
 	}
 
@@ -167,6 +167,7 @@ func TestIntegrationV2Workflow(t *testing.T) {
 	t.Log("Step 10: Modifying and saving again")
 	readStatus.UpdatedAt = time.Now().Truncate(time.Second)
 	readStatus.CurrentWaypoint = PhaseV2Build
+	readStatus.WaypointHistory = completedHistoryBefore(PhaseV2Build, readStatus.UpdatedAt)
 
 	// Add a new task
 	newTask := Task{

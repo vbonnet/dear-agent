@@ -80,33 +80,6 @@ func (l *Loader) Load() (*Config, error) {
 				LintOnCommit:   true,
 			},
 		},
-		Wayfinder: WayfinderConfig{
-			W0: W0Config{
-				Enabled: true, // Enabled by default
-				Enforce: false,
-				Detection: W0DetectionConfig{
-					Enabled:            true,
-					MinWordCount:       30,
-					MaxSkipWordCount:   50,
-					VaguenessThreshold: 0.6,
-				},
-				Questions: W0QuestionConfig{
-					MaxRounds:       3,
-					IncludeExamples: true,
-					IncludeHelpText: true,
-				},
-				Synthesis: W0SynthesisConfig{
-					Method:         "few_shot_cot",
-					TimeoutSeconds: 15,
-					RetryOnFailure: true,
-				},
-				Telemetry: W0TelemetryConfig{
-					Enabled:             true,
-					LogTechnicalTerms:   true,
-					LogResponseMetadata: true,
-				},
-			},
-		},
 	}
 
 	// Load tiers in order: core -> company -> team -> user
@@ -165,7 +138,6 @@ func (l *Loader) merge(dst, src *Config, tier ConfigTier) {
 	mergePlatform(&dst.Platform, &src.Platform)
 	mergePlugins(&dst.Plugins, &src.Plugins)
 	mergeTelemetry(&dst.Telemetry, &src.Telemetry, tier)
-	mergeWayfinder(&dst.Wayfinder, &src.Wayfinder, tier)
 	mergeHarnessEffort(&dst.HarnessEffort, &src.HarnessEffort)
 	mergeVCS(&dst.VCS, &src.VCS)
 }
@@ -223,70 +195,6 @@ func mergeTelemetry(dst, src *TelemetryConfig, tier ConfigTier) {
 	}
 	if src.LocalBackup {
 		dst.LocalBackup = src.LocalBackup
-	}
-}
-
-func mergeWayfinder(dst, src *WayfinderConfig, tier ConfigTier) {
-	// Handle enforcement (similar to telemetry)
-	if src.W0.Enforce && (tier == TierCore || tier == TierCompany) {
-		dst.W0.Enforce = true
-	}
-
-	// If enforced, user cannot disable W0
-	if dst.W0.Enforce {
-		dst.W0.Enabled = true
-	} else if hasW0Config(&Config{Wayfinder: *src}) {
-		dst.W0.Enabled = src.W0.Enabled
-	}
-
-	mergeW0Detection(&dst.W0.Detection, &src.W0.Detection, src)
-	mergeW0Questions(&dst.W0.Questions, &src.W0.Questions, src)
-	mergeW0Synthesis(&dst.W0.Synthesis, &src.W0.Synthesis, src)
-	mergeW0Telemetry(&dst.W0.Telemetry, &src.W0.Telemetry, src)
-}
-
-func mergeW0Detection(dst, src *W0DetectionConfig, srcWayfinder *WayfinderConfig) {
-	if src.MinWordCount > 0 {
-		dst.MinWordCount = src.MinWordCount
-	}
-	if src.MaxSkipWordCount > 0 {
-		dst.MaxSkipWordCount = src.MaxSkipWordCount
-	}
-	if src.VaguenessThreshold > 0 {
-		dst.VaguenessThreshold = src.VaguenessThreshold
-	}
-	if hasW0DetectionConfig(&Config{Wayfinder: *srcWayfinder}) {
-		dst.Enabled = src.Enabled
-	}
-}
-
-func mergeW0Questions(dst, src *W0QuestionConfig, srcWayfinder *WayfinderConfig) {
-	if src.MaxRounds > 0 {
-		dst.MaxRounds = src.MaxRounds
-	}
-	if hasW0QuestionConfig(&Config{Wayfinder: *srcWayfinder}) {
-		dst.IncludeExamples = src.IncludeExamples
-		dst.IncludeHelpText = src.IncludeHelpText
-	}
-}
-
-func mergeW0Synthesis(dst, src *W0SynthesisConfig, srcWayfinder *WayfinderConfig) {
-	if src.Method != "" {
-		dst.Method = src.Method
-	}
-	if src.TimeoutSeconds > 0 {
-		dst.TimeoutSeconds = src.TimeoutSeconds
-	}
-	if hasW0SynthesisConfig(&Config{Wayfinder: *srcWayfinder}) {
-		dst.RetryOnFailure = src.RetryOnFailure
-	}
-}
-
-func mergeW0Telemetry(dst, src *W0TelemetryConfig, srcWayfinder *WayfinderConfig) {
-	if hasW0TelemetryConfig(&Config{Wayfinder: *srcWayfinder}) {
-		dst.Enabled = src.Enabled
-		dst.LogTechnicalTerms = src.LogTechnicalTerms
-		dst.LogResponseMetadata = src.LogResponseMetadata
 	}
 }
 
@@ -378,42 +286,6 @@ func expandPathsOrFallback(paths []string) []string {
 		expanded = append(expanded, expandPathOrFallback(path))
 	}
 	return expanded
-}
-
-// hasW0Config checks if src has any W0 config fields set
-func hasW0Config(src *Config) bool {
-	// Check if any W0 field is non-zero
-	return hasW0DetectionConfig(src) ||
-		hasW0QuestionConfig(src) ||
-		hasW0SynthesisConfig(src) ||
-		hasW0TelemetryConfig(src)
-}
-
-// hasW0DetectionConfig checks if src has any W0 detection config set
-func hasW0DetectionConfig(src *Config) bool {
-	return src.Wayfinder.W0.Detection.MinWordCount > 0 ||
-		src.Wayfinder.W0.Detection.MaxSkipWordCount > 0 ||
-		src.Wayfinder.W0.Detection.VaguenessThreshold > 0
-}
-
-// hasW0QuestionConfig checks if src has any W0 question config set
-func hasW0QuestionConfig(src *Config) bool {
-	return src.Wayfinder.W0.Questions.MaxRounds > 0
-}
-
-// hasW0SynthesisConfig checks if src has any W0 synthesis config set
-func hasW0SynthesisConfig(src *Config) bool {
-	return src.Wayfinder.W0.Synthesis.Method != "" ||
-		src.Wayfinder.W0.Synthesis.TimeoutSeconds > 0
-}
-
-// hasW0TelemetryConfig checks if src has any W0 telemetry config set
-func hasW0TelemetryConfig(src *Config) bool {
-	// If the wayfinder.w0.telemetry key exists in YAML, assume it's set
-	// This is a heuristic since bool fields can't distinguish false from unset
-	return src.Wayfinder.W0.Detection.MinWordCount > 0 ||
-		src.Wayfinder.W0.Questions.MaxRounds > 0 ||
-		src.Wayfinder.W0.Synthesis.Method != ""
 }
 
 // isCacheFresh checks if cached config is still valid by comparing mtimes

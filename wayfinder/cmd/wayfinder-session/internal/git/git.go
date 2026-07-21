@@ -30,40 +30,54 @@ func (g *GitIntegrator) IsGitRepo() bool {
 	return err == nil
 }
 
-// CommitPhaseCompletion creates a git commit for phase completion
-// Adds WAYFINDER-STATUS.md and WAYFINDER-HISTORY.md to staging and commits
+// CommitPhaseCompletion creates a scoped git commit for phase completion.
+// It includes canonical marker files and the phase's Markdown artifacts while
+// preserving unrelated staged or unstaged user changes.
 func (g *GitIntegrator) CommitPhaseCompletion(phase, outcome, context string) error {
 	if !g.IsGitRepo() {
 		return fmt.Errorf("project directory is not a git repository")
 	}
 
-	// Check if working directory is clean (ignoring wayfinder files)
-	// We allow wayfinder files to be uncommitted
-	statusFiles := []string{
+	files := []string{
 		"WAYFINDER-STATUS.md",
 		"WAYFINDER-HISTORY.md",
 	}
-
-	// Add wayfinder files to staging
-	for _, file := range statusFiles {
-		filePath := filepath.Join(g.projectDir, file)
-		if _, err := os.Stat(filePath); err == nil {
-			// File exists, add it
-			if err := g.gitAdd(file); err != nil {
-				return fmt.Errorf("failed to add %s: %w", file, err)
-			}
+	artifacts, err := filepath.Glob(filepath.Join(g.projectDir, phase+"-*.md"))
+	if err != nil {
+		return fmt.Errorf("find %s phase artifacts: %w", phase, err)
+	}
+	for _, artifact := range artifacts {
+		files = append(files, filepath.Base(artifact))
+	}
+	if phase == "DESIGN" {
+		files = append(files, "ARCHITECTURE.md")
+		adrs, err := filepath.Glob(filepath.Join(g.projectDir, "ADR-*.md"))
+		if err != nil {
+			return fmt.Errorf("find DESIGN ADR artifacts: %w", err)
+		}
+		for _, adr := range adrs {
+			files = append(files, filepath.Base(adr))
 		}
 	}
 
-	// Create commit message
-	commitMsg := g.formatCommitMessage(phase, outcome, context)
-
-	// Create commit
-	if err := g.gitCommit(commitMsg); err != nil {
+	if err := g.commitScoped(g.formatCommitMessage(phase, outcome, context), files); err != nil {
 		return fmt.Errorf("failed to create commit: %w", err)
 	}
-
 	return nil
+}
+
+// CommitRewind commits the status and retrospective markers produced by a
+// rewind so the documented next start-phase command sees a clean project.
+func (g *GitIntegrator) CommitRewind(fromPhase, toPhase string) error {
+	if !g.IsGitRepo() {
+		return fmt.Errorf("project directory is not a git repository")
+	}
+	message := fmt.Sprintf("wayfinder: rewind %s to %s\n\nWayfinder-Event: rewind", fromPhase, toPhase)
+	return g.commitScoped(message, []string{
+		"WAYFINDER-STATUS.md",
+		"WAYFINDER-HISTORY.md",
+		"RETRO-retrospective.md",
+	})
 }
 
 // CommitPhaseStart creates a git commit for phase start.
@@ -179,15 +193,35 @@ func (g *GitIntegrator) gitAdd(file string) error {
 	return nil
 }
 
-// gitCommit creates a git commit with the given message
-func (g *GitIntegrator) gitCommit(message string) error {
-	cmd := exec.Command("git", "commit", "-m", message)
+func (g *GitIntegrator) commitScoped(message string, candidates []string) error {
+	seen := make(map[string]bool, len(candidates))
+	staged := make([]string, 0, len(candidates))
+	for _, file := range candidates {
+		if seen[file] {
+			continue
+		}
+		seen[file] = true
+		if _, err := os.Stat(filepath.Join(g.projectDir, file)); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("stat %s: %w", file, err)
+		}
+		if err := g.gitAdd(file); err != nil {
+			return fmt.Errorf("failed to add %s: %w", file, err)
+		}
+		staged = append(staged, file)
+	}
+	if len(staged) == 0 {
+		return nil
+	}
+	args := append([]string{"commit", "-m", message, "--"}, staged...)
+	cmd := exec.Command("git", args...)
 	cmd.Dir = g.projectDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		// Check if error is "nothing to commit"
 		if strings.Contains(string(output), "nothing to commit") {
-			return nil // Not an error - nothing changed
+			return nil
 		}
 		return fmt.Errorf("git commit failed: %w (output: %s)", err, string(output))
 	}

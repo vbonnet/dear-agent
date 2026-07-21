@@ -73,6 +73,9 @@ Examples:
 				return fmt.Errorf("invalid state transition: %w", err)
 			}
 		}
+		if err := validateLifecycleCompletion(st, lifecycleState); err != nil {
+			return err
+		}
 
 		applyLifecycleState(st, lifecycleState, blockedOn, errorMessage, inputNeeded, time.Now())
 		if err := status.ValidateV2(st); err != nil {
@@ -97,6 +100,13 @@ Examples:
 
 		return nil
 	},
+}
+
+func validateLifecycleCompletion(st *status.StatusV2, lifecycleState string) error {
+	if lifecycleState != status.LifecycleCompleted {
+		return nil
+	}
+	return status.ValidateSessionCompletion(st)
 }
 
 func applyLifecycleState(st *status.StatusV2, lifecycleState, blockedOn, errorMessage, inputNeeded string, now time.Time) {

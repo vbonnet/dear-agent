@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -289,6 +290,22 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 		appendAuditEntry(cfg.Repo, cfg.PRNumber, "error", "merge failed: "+err.Error())
 		return fmt.Errorf("gh pr merge failed: %w", err)
 	}
+	confirm := func() error { return confirmMerged(cfg.PRNumber, cfg.Repo, headInfo.SHA) }
+	var confirmationErr error
+	if cfg.Watch {
+		// watchMerge owns retry timing and the overall deadline.
+		confirmationErr = confirm()
+	} else {
+		// A one-shot invocation must still wait for an accepted auto-merge to
+		// finish; success from `gh pr merge --auto` only means it was queued.
+		confirmationErr = waitForMergeCompletion(ctx, cfg.WatchTimeout, cfg.WatchInterval, confirm)
+	}
+	if confirmationErr != nil {
+		mergeSpan.RecordError(confirmationErr)
+		mergeSpan.SetStatus(codes.Error, confirmationErr.Error())
+		appendAuditEntry(cfg.Repo, cfg.PRNumber, "merge_pending", confirmationErr.Error())
+		return confirmationErr
+	}
 	appendAuditEntry(cfg.Repo, cfg.PRNumber, "merged",
 		fmt.Sprintf("squash merge complete (head=%s)", headInfo.SHA))
 	fmt.Fprintln(os.Stderr, "safe-merge: ✓ merge complete")
@@ -298,6 +315,74 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 		cleanupWorktree(headInfo.Branch)
 	}
 	return nil
+}
+
+type mergeResult struct {
+	State      string `json:"state"`
+	HeadRefOid string `json:"headRefOid"`
+}
+
+var errMergePending = errors.New("merge is pending")
+
+// confirmMerged prevents a successful `gh pr merge --auto` invocation from
+// being mistaken for a completed merge. GitHub exits zero when auto-merge is
+// merely enabled, so cleanup is safe only after the PR reports MERGED at the
+// exact head SHA that passed the gates.
+func confirmMerged(prNum int, repo, expectedHeadSHA string) error {
+	out, err := runCommand(exec.Command("gh", "pr", "view",
+		fmt.Sprintf("%d", prNum), "--repo", repo,
+		"--json", "state,headRefOid"))
+	if err != nil {
+		return fmt.Errorf("confirming merge completion: %w", err)
+	}
+
+	var result mergeResult
+	if err := json.Unmarshal(out, &result); err != nil {
+		return fmt.Errorf("parsing merge completion state: %w", err)
+	}
+	return validateMergeResult(result, expectedHeadSHA)
+}
+
+func validateMergeResult(result mergeResult, expectedHeadSHA string) error {
+	if result.HeadRefOid != expectedHeadSHA {
+		return fmt.Errorf("merge completion head changed: expected %s, got %s",
+			expectedHeadSHA, result.HeadRefOid)
+	}
+	if result.State != "MERGED" {
+		return fmt.Errorf("%w: auto-merge accepted but PR remains %s; waiting for GitHub to complete it",
+			errMergePending,
+			strings.ToLower(result.State))
+	}
+	return nil
+}
+
+func waitForMergeCompletion(ctx context.Context, timeout, interval time.Duration, check func() error) error {
+	if timeout == 0 {
+		timeout = DefaultWatchTimeout
+	}
+	if interval == 0 {
+		interval = 30 * time.Second
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		err := check()
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, errMergePending) {
+			return err
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return fmt.Errorf("merge completion timeout after %s: %w", timeout, err)
+		}
+		wait := min(interval, remaining)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for merge completion: %w", ctx.Err())
+		case <-time.After(wait):
+		}
+	}
 }
 
 // appendAuditEntry writes a single JSON line to the safe-merge audit log.
@@ -364,8 +449,9 @@ func runCommand(cmd *exec.Cmd) ([]byte, error) {
 }
 
 // BuildMergeArgs returns the full argv for the gh pr merge command, including
-// the TOCTOU-preventing --match-head-commit flag. Exported so tests can verify
-// the flag is always present — its removal in PR #460 caused a P1 regression.
+// the TOCTOU-preventing --match-head-commit flag and the policy-compatible
+// auto/merge-queue path. Exported so tests can verify the safety flags are
+// always present — removing the head anchor in PR #460 caused a P1 regression.
 // Panics if headSHA is empty — the caller must resolve it first.
 func BuildMergeArgs(prNum int, repo, headSHA string) []string {
 	if headSHA == "" {
@@ -376,6 +462,7 @@ func BuildMergeArgs(prNum int, repo, headSHA string) []string {
 		fmt.Sprintf("%d", prNum),
 		"--repo", repo,
 		"--squash",
+		"--auto",
 		"--delete-branch",
 		"--match-head-commit", headSHA,
 	}
@@ -492,10 +579,10 @@ func parseCheckRuns(data []byte) error {
 }
 
 const reviewThreadsQuery = `
-query($owner: String!, $name: String!, $number: Int!) {
+query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
-      reviewThreads(first: 100) {
+      reviewThreads(first: 100, after: $cursor) {
         nodes {
           isResolved
           isOutdated
@@ -506,28 +593,35 @@ query($owner: String!, $name: String!, $number: Int!) {
             }
           }
         }
+        pageInfo { hasNextPage endCursor }
       }
     }
   }
 }`
+
+type gqlReviewThread struct {
+	IsResolved bool `json:"isResolved"`
+	IsOutdated bool `json:"isOutdated"`
+	Comments   struct {
+		Nodes []struct {
+			Author struct {
+				Login string `json:"login"`
+			} `json:"author"`
+			Body string `json:"body"`
+		} `json:"nodes"`
+	} `json:"comments"`
+}
 
 type gqlReviewResult struct {
 	Data struct {
 		Repository struct {
 			PullRequest struct {
 				ReviewThreads struct {
-					Nodes []struct {
-						IsResolved bool `json:"isResolved"`
-						IsOutdated bool `json:"isOutdated"`
-						Comments   struct {
-							Nodes []struct {
-								Author struct {
-									Login string `json:"login"`
-								} `json:"author"`
-								Body string `json:"body"`
-							} `json:"nodes"`
-						} `json:"comments"`
-					} `json:"nodes"`
+					Nodes    []gqlReviewThread `json:"nodes"`
+					PageInfo struct {
+						HasNextPage bool   `json:"hasNextPage"`
+						EndCursor   string `json:"endCursor"`
+					} `json:"pageInfo"`
 				} `json:"reviewThreads"`
 			} `json:"pullRequest"`
 		} `json:"repository"`
@@ -541,16 +635,38 @@ func checkReviewThreads(prNum int, repo string) error {
 	}
 	owner, name := parts[0], parts[1]
 
-	out, err := runCommand(exec.Command("gh", "api", "graphql",
-		"--field", fmt.Sprintf("owner=%s", owner),
-		"--field", fmt.Sprintf("name=%s", name),
-		"--field", fmt.Sprintf("number=%d", prNum),
-		"--field", fmt.Sprintf("query=%s", reviewThreadsQuery),
-	))
-	if err != nil {
-		return fmt.Errorf("GraphQL query failed: %w", err)
+	var threads []gqlReviewThread
+	cursor := ""
+	for {
+		args := []string{
+			"api", "graphql",
+			"--field", fmt.Sprintf("owner=%s", owner),
+			"--field", fmt.Sprintf("name=%s", name),
+			"--field", fmt.Sprintf("number=%d", prNum),
+			"--field", fmt.Sprintf("query=%s", reviewThreadsQuery),
+		}
+		if cursor != "" {
+			args = append(args, "--field", fmt.Sprintf("cursor=%s", cursor))
+		}
+		out, err := runCommand(exec.Command("gh", args...))
+		if err != nil {
+			return fmt.Errorf("GraphQL query failed: %w", err)
+		}
+		var result gqlReviewResult
+		if err := json.Unmarshal(out, &result); err != nil {
+			return fmt.Errorf("parsing GraphQL response: %w", err)
+		}
+		page := result.Data.Repository.PullRequest.ReviewThreads
+		threads = append(threads, page.Nodes...)
+		if !page.PageInfo.HasNextPage {
+			break
+		}
+		if page.PageInfo.EndCursor == "" || page.PageInfo.EndCursor == cursor {
+			return fmt.Errorf("GraphQL review-thread pagination did not advance")
+		}
+		cursor = page.PageInfo.EndCursor
 	}
-	return parseReviewThreads(out)
+	return reviewThreadError(threads)
 }
 
 // parseReviewThreads returns an error if any unresolved, non-outdated review
@@ -561,8 +677,12 @@ func parseReviewThreads(data []byte) error {
 		return fmt.Errorf("parsing GraphQL response: %w", err)
 	}
 
+	return reviewThreadError(result.Data.Repository.PullRequest.ReviewThreads.Nodes)
+}
+
+func reviewThreadError(threads []gqlReviewThread) error {
 	var unresolved []string
-	for i, t := range result.Data.Repository.PullRequest.ReviewThreads.Nodes {
+	for i, t := range threads {
 		if t.IsResolved || t.IsOutdated {
 			continue
 		}

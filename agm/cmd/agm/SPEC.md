@@ -4,6 +4,8 @@
 
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
 - Feature: `agm/test/bdd/features/agm_control_surface_guardrails.feature`
+- Feature: `agm/test/bdd/features/local_development_guardrails.feature`
+- Feature: `agm/test/bdd/features/harness_parity.feature`
 
 <!-- Last audited at: NEEDS-AUDIT -->
 
@@ -74,6 +76,34 @@ Provide a production-ready CLI that:
 **CLI-23** When installed AGM command guidance is generated, the system shall derive executable paths and supported flags from the live Cobra tree and shall fail if any installed command Markdown is outside the declared inventory.
 
 **CLI-24** When AGM command tests execute Cobra commands or mutate command flags, the system shall use fresh command instances or restore the complete shared command state so test results remain independent of execution order.
+
+**CLI-25** When `agm new` runs inside tmux without `--detached` for Codex, the system shall route into current-pane creation, require the `codex` executable, queue its launch command behind the invoking AGM process, and finalize session metadata without synchronously waiting for the composer, because the pane shell cannot consume the command until AGM returns.
+
+**CLI-26** When `agm audit resources --fix` cannot remove a linked worktree through a one-force Git operation, including when the worktree is locked, the system shall preserve the checkout and report the cleanup error instead of deleting the directory directly.
+
+**CLI-27** When AGM creates or cold-resumes an AGY session, the system shall resolve and pass the selected AGY model rather than silently launching AGY's default model.
+
+**CLI-28** When AGM launches AGY and a startup prompt must be delivered, the system shall wait through first-run trust and feedback-survey prompts until AGY is ready before sending that prompt, and shall propagate readiness failure.
+
+**CLI-29** When a command-scoped create, model-change, mode-change, or compaction flow waits to deliver or verify a prompt or slash command, the system shall derive that wait from the Cobra command context and shall stop before later delivery, retry, persistence, liveness validation, or attach work when the context is canceled.
+
+**CLI-30** When the AGM root owns SIGINT and SIGTERM handling, continuous scan, watchdog, event-watch, stalled-session watch, and bounded compaction-monitor loops shall consume the root Cobra context and return promptly on cancellation; subcommands shall not install competing process-global signal handlers.
+
+**CLI-31** When `agm send verify`, `agm send work-request`, or `agm send wake-loop` performs structured multiline delivery, the system shall pass the Cobra command context through composer readiness and delivery so cancellation cannot later send the payload.
+
+**CLI-32** When session resume metadata lookup returns after the Cobra command context has been canceled, the system shall stop before creating, commanding, updating, or attaching to a tmux session.
+
+**CLI-33** When final creation liveness validation runs, the system shall derive the scan from the Cobra command context and recheck cancellation before title update, attach, or detached-success reporting.
+
+**CLI-34** When current-pane creation selects AGY, the system shall fail before harness launch or session registration and direct the user to create a detached session with a different name, because the provider-native conversation identity cannot be safely correlated until the foreground AGM command exits.
+
+**CLI-35** When AGM resumes a stopped `codex-cli` session, the system shall report success, update activity, deliver an optional prompt, or attach only after both the Codex process (including its Node wrapper) and interactive composer have been observed as ready, allowing up to 60 seconds for each readiness phase so a healthy cold startup is not rejected at the former advisory threshold.
+
+**CLI-36** If AGM creates a tmux session for a resume attempt and creation finalization, command dispatch, harness readiness, ordinary or caller-canceled prompt delivery, or canonical-name persistence fails, the system shall route every production resume entry, including last-session and bulk resume, through the stable session-ID operation lock before resume reads, serialize the resolved transaction through finalization, release that lock before interactive attachment, compensate only the creation-specific tmux identity created by that attempt, and return the primary failure together with any cleanup failure. The identity shall include the server-local session ID and a random per-creation token represented by a provisional creation name until stored on the session, so every partial command boundary is cleanable; when ID output is lost, the exact random provisional name shall remain cleanable, and a replacement after a server restart shall be preserved. After successful readiness, canonical-name persistence shall use an opaque cross-dialect ownership revision before optional Codex prompt submission; a prompt failure proven to occur before submission or while the paste remains positively parked shall restore only that exact provisional metadata revision and its prior activity timestamp before removing the created tmux identity. A successful restore compare-and-swap shall be sufficient proof for tmux cleanup and shall not depend on a fallible follow-up metadata read. If commit reports an error, storage shall re-read the exact revision and retain the pending ownership change unless the complete prior state proves the write did not commit. If the post-write metadata reload fails, the system shall retain the exact pending ownership revision through rollback unless an immediate compensation was proven successful. If a newer writer superseded metadata ownership or restoration otherwise cannot be proven, the system shall preserve the ready tmux session so canonical metadata never points at a resource the failed transaction destroyed. Every full-session writer shall advance the tmux identity revision, including after a lost compare-and-swap, so any number of older snapshots remain unable to restore a stale tmux name. Confirmed prompt delivery or a lost acknowledgement after the final Enter shall rotate away from the provisional revision, shall become an irreversible success boundary, and shall not be reported as a retryable failure because of later caller cancellation or attachment failure; the latter shall warn that work may have started and preserve the pane. A failed prompt delivery on a pre-existing session shall not suppress a later attachment failure. A same-named replacement tmux session or a tmux session that existed before the attempt shall not be removed.
+
+**CLI-37** When `agm session rename` moves a live tmux session, the system shall resolve its stable session ID, hold the same per-session lifecycle lock as resume while reloading current state and completing every rename effect, first claim that exact tmux creation with its server-local ID plus a random marker, then persist the user-visible and tmux names together through a narrow compare-and-swap against the exact storage revision read before the move. If either the tmux client or storage loses its success response, the command shall use bounded cancellation-independent ownership checks before deciding whether forward progress completed or compensation is safe: tmux shall still carry the claimed identity at the expected name, and storage shall first fence the observed revision with a competing compare-and-swap before re-reading it. If another writer advanced to a different identity, the claimed tmux identity is lost or replaced, or the caller is canceled after the move and storage is fenced as unchanged, the command shall report the primary failure, compensate only the claimed live tmux session, join any fencing, probe, or rollback failure, and never report rename success with metadata pointing at a nonexistent or unrelated tmux session.
+
+**CLI-38** When `agm admin link-session-parent` or `agm admin backfill-plan-sessions` assigns a parent and optionally inherits its display name, the command shall persist both changes through one narrow compare-and-swap against the child identity revision it read and shall report a concurrent identity change as a failure instead of reporting a link or rename that storage did not apply.
 
 ## Requirements
 

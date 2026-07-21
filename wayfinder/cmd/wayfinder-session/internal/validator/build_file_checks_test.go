@@ -24,7 +24,7 @@ func TestScanForRedFlags(t *testing.T) {
 		{
 			name: "red flag - would implement",
 			files: map[string]string{
-				"S8-implementation.md": "# Implementation\n\nThis would implement the feature.",
+				"BUILD-implementation.md": "# Implementation\n\nThis would implement the feature.",
 			},
 			wantErr:     true,
 			errContains: "Design document detected",

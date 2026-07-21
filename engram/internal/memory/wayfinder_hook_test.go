@@ -24,7 +24,7 @@ func TestWayfinderHook_OnPhaseComplete(t *testing.T) {
 
 	event := &PhaseCompleteEvent{
 		SessionID:      "wayfinder-001",
-		PhaseName:      "D2",
+		PhaseName:      "RESEARCH",
 		Outcome:        "success",
 		Duration:       "45m",
 		ErrorCount:     0,
@@ -51,7 +51,7 @@ func TestWayfinderHook_OnPhaseComplete(t *testing.T) {
 	// Check for expected content
 	expectedStrings := []string{
 		"wayfinder-001",
-		"Phase D2 completed: success",
+		"Phase RESEARCH completed: success",
 		"Duration: 45m",
 		"Errors: 0",
 		"Rework: 1",
@@ -190,7 +190,7 @@ func TestWayfinderHook_MultiplePhases(t *testing.T) {
 	phases := []PhaseCompleteEvent{
 		{
 			SessionID:      "wayfinder-multi",
-			PhaseName:      "D1",
+			PhaseName:      "PROBLEM",
 			Outcome:        "success",
 			Duration:       "30m",
 			ErrorCount:     0,
@@ -201,7 +201,7 @@ func TestWayfinderHook_MultiplePhases(t *testing.T) {
 		},
 		{
 			SessionID:      "wayfinder-multi",
-			PhaseName:      "D2",
+			PhaseName:      "RESEARCH",
 			Outcome:        "success",
 			Duration:       "45m",
 			ErrorCount:     1,
@@ -212,7 +212,7 @@ func TestWayfinderHook_MultiplePhases(t *testing.T) {
 		},
 		{
 			SessionID:      "wayfinder-multi",
-			PhaseName:      "I1",
+			PhaseName:      "BUILD",
 			Outcome:        "success",
 			Duration:       "2h",
 			ErrorCount:     2,
@@ -239,7 +239,7 @@ func TestWayfinderHook_MultiplePhases(t *testing.T) {
 	contentStr := string(content)
 
 	// Check all phase names present
-	phaseNames := []string{"D1", "D2", "I1"}
+	phaseNames := []string{"PROBLEM", "RESEARCH", "BUILD"}
 	for _, name := range phaseNames {
 		if !strings.Contains(contentStr, "Phase "+name) {
 			t.Errorf("Missing phase: %s", name)
@@ -259,12 +259,13 @@ func TestWayfinderHook_ConcurrentAccess(t *testing.T) {
 
 	// Simulate concurrent phase completions
 	done := make(chan bool, 3)
+	phaseNames := []string{"PROBLEM", "RESEARCH", "DESIGN"}
 
 	for i := 0; i < 3; i++ {
 		go func(id int) {
 			event := &PhaseCompleteEvent{
 				SessionID:      "concurrent-session",
-				PhaseName:      "D" + string(rune('1'+id)),
+				PhaseName:      phaseNames[id],
 				Outcome:        "success",
 				Duration:       "10m",
 				ErrorCount:     0,
@@ -329,7 +330,7 @@ func TestOnPhaseCompletePublishesEvent(t *testing.T) {
 
 	event := &PhaseCompleteEvent{
 		SessionID:      "test-session-eb",
-		PhaseName:      "D2",
+		PhaseName:      "RESEARCH",
 		Outcome:        "success",
 		Duration:       "30m",
 		ErrorCount:     0,
@@ -363,8 +364,8 @@ func TestOnPhaseCompletePublishesEvent(t *testing.T) {
 	if evt.Data["session_id"] != "test-session-eb" {
 		t.Errorf("Expected session_id 'test-session-eb', got %v", evt.Data["session_id"])
 	}
-	if evt.Data["phase_name"] != "D2" {
-		t.Errorf("Expected phase_name 'D2', got %v", evt.Data["phase_name"])
+	if evt.Data["phase_name"] != "RESEARCH" {
+		t.Errorf("Expected phase_name 'RESEARCH', got %v", evt.Data["phase_name"])
 	}
 	if evt.Data["outcome"] != "success" {
 		t.Errorf("Expected outcome 'success', got %v", evt.Data["outcome"])
@@ -447,7 +448,7 @@ func TestOnPhaseCompleteNoEventBus(t *testing.T) {
 
 	event := &PhaseCompleteEvent{
 		SessionID:      "test-no-bus",
-		PhaseName:      "D1",
+		PhaseName:      "PROBLEM",
 		Outcome:        "success",
 		Duration:       "15m",
 		ErrorCount:     0,
@@ -469,7 +470,7 @@ func TestOnPhaseCompleteNoEventBus(t *testing.T) {
 		t.Fatalf("Failed to read DECISION_LOG.md: %v", err)
 	}
 
-	if !strings.Contains(string(content), "Phase D1 completed: success") {
+	if !strings.Contains(string(content), "Phase PROBLEM completed: success") {
 		t.Error("Decision should still be recorded without EventBus")
 	}
 }

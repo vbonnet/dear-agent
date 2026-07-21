@@ -39,3 +39,9 @@ can never brick a dispatch run (ce-b1zw).
 **VDD-11** When the system renders a worker prompt, the prompt shall remain harness-neutral and shall route the worker through the canonical Wayfinder V2 lifecycle.
 
 **VDD-12** When the system renders a worker completion contract, the prompt shall require evidence that the change is merged, deployed when applicable, and verified before the worker closes its bead.
+
+**VDD-13** If a fail-closed ground-truth query (`bd ready`, `agm session list`, `gh pr list`) fails, then the system shall retry it with backoff before treating the failure as fatal.
+
+**VDD-14** When a fail-closed query is fatal, the system shall persist the failure to a heartbeat file (`-heartbeat-file`, default `~/.agm/vroom/heartbeat/dispatch-direct.json`) recording the consecutive-failure streak and the last error, and shall reset that streak to zero on the next run that completes without a fail-closed halt.
+
+**VDD-15** When the persisted consecutive-failure streak reaches the alert threshold, the system shall escalate loudly — an unmissable stderr banner plus a best-effort desktop notification — rather than continuing to log a terse one-line failure indistinguishable from a healthy tick.

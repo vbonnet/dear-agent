@@ -11,11 +11,11 @@ import (
 
 func TestSimpleFileProvider_WorkingContextRoundTrip(t *testing.T) {
 	provider := &SimpleFileProvider{storagePath: t.TempDir()}
-	phase := "D4"
+	phase := "DESIGN"
 	ctx := context.Background()
 	if err := provider.UpdateWorkingContext(ctx, "session-123", consolidation.ContextUpdate{
 		SetPhase: &phase,
-		AddTasks: []consolidation.Task{{ID: "task-1", Status: "in_progress"}},
+		AddTasks: []consolidation.Task{{ID: "task-1", Status: "in-progress"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestSimpleFileProvider_SessionHistoryRoundTripAndPersist(t *testing.T) {
 	if err := provider.AppendSessionEvent(ctx, "session-123", consolidation.SessionEvent{
 		Timestamp: eventTime,
 		Type:      "phase_started",
-		Data:      map[string]any{"phase": "D4"},
+		Data:      map[string]any{"phase": "DESIGN"},
 	}); err != nil {
 		t.Fatal(err)
 	}

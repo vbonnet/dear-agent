@@ -12,7 +12,7 @@
 
 **VALIDATOR-04** When links are checked, the system shall distinguish valid, missing, and external targets according to configured policy.
 
-**VALIDATOR-05** When the validator package is built, the system shall expose only maintained Engram, content, link, and YAML token contracts; retired Wayfinder artifact and S11 retrospective schemas shall remain absent.
+**VALIDATOR-05** When the validator package is built, the system shall expose only maintained Engram, content, link, and YAML token contracts; retired numeric-phase artifact and retrospective schemas shall remain absent.
 
 **VALIDATOR-06** When YAML frontmatter token counting is offline or exact tokenizers are unavailable, the system shall use the shared simple or heuristic fallback without selecting a model family.
 

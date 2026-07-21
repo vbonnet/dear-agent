@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -418,6 +419,22 @@ func TestValidatorTypeConstants(t *testing.T) {
 		if string(vType) != expectedStr {
 			t.Errorf("Expected ValidatorType %s, got %s", expectedStr, vType)
 		}
+	}
+}
+
+func TestRunValidateRejectsRemovedExplicitValidatorType(t *testing.T) {
+	originalType := validateType
+	t.Cleanup(func() { validateType = originalType })
+	validateType = "wayfinder"
+
+	testFile := filepath.Join(t.TempDir(), "WAYFINDER-STATUS.md")
+	if err := os.WriteFile(testFile, []byte("status: in-progress\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runValidate(nil, []string{testFile})
+	if err == nil || !strings.Contains(err.Error(), "unknown validator type: wayfinder") {
+		t.Fatalf("runValidate() error = %v, want unknown validator type", err)
 	}
 }
 

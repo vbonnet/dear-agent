@@ -1,10 +1,21 @@
 package tmux
 
 import (
+	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestCheckPaneLivenessContextHonorsCallerCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := CheckPaneLivenessContext(ctx, "canceled-liveness", filepath.Join(t.TempDir(), "tmux.sock"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("CheckPaneLivenessContext() error = %v, want context.Canceled", err)
+	}
+}
 
 // TestClassifyPaneLiveness covers the false-green class from ce-axsr/ce-qkf7:
 // a tmux session that exists must only count as alive when a harness process
@@ -17,6 +28,7 @@ func TestClassifyPaneLiveness(t *testing.T) {
 		wantExists   bool
 		wantAlive    bool
 		wantZombie   bool
+		wantShell    bool
 		wantEvidence string // substring that must appear in Evidence
 	}{
 		{
@@ -34,6 +46,7 @@ func TestClassifyPaneLiveness(t *testing.T) {
 			wantExists:   true,
 			wantAlive:    false,
 			wantZombie:   false,
+			wantShell:    true,
 			wantEvidence: "zsh",
 		},
 		{
@@ -148,6 +161,9 @@ func TestClassifyPaneLiveness(t *testing.T) {
 			}
 			if got.ZombieWriter != tt.wantZombie {
 				t.Errorf("ZombieWriter = %v, want %v", got.ZombieWriter, tt.wantZombie)
+			}
+			if got.RestartableShell != tt.wantShell {
+				t.Errorf("RestartableShell = %v, want %v", got.RestartableShell, tt.wantShell)
 			}
 			if tt.wantEvidence != "" && !strings.Contains(got.Evidence, tt.wantEvidence) {
 				t.Errorf("Evidence = %q, want substring %q", got.Evidence, tt.wantEvidence)

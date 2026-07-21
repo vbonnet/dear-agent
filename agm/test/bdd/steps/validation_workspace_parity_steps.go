@@ -90,7 +90,7 @@ func validationWorkspaceBehaviorShouldRemainNeutral(ctx context.Context) error {
 func validationWorkspacePackages() []string {
 	return []string{
 		"pkg/security", "pkg/validation", "pkg/validation/engram", "pkg/validation/scope", "pkg/validator",
-		"pkg/vcs", "pkg/version", "pkg/w0", "pkg/workspace", "pkg/workspace/dolt",
+		"pkg/vcs", "pkg/version", "pkg/workspace", "pkg/workspace/dolt",
 	}
 }
 

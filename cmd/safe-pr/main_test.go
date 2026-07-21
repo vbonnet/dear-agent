@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -26,7 +27,7 @@ func TestRun_Errors(t *testing.T) {
 		{"bad timeout", []string{"create", "--timeout", "soon"}, "invalid --timeout"},
 		{"no session", []string{"create", "--title", "t"}, "no wayfinder session"},
 		{"session dir unreadable", []string{"create", "--wayfinder", "/nonexistent-wf-dir",
-			"--title", "t"}, "cannot read"},
+			"--title", "t"}, "cannot load"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -134,13 +135,44 @@ func initGitRepo(t *testing.T, dir, remoteURL string) {
 	}
 }
 
-// writeWayfinderStatus creates a minimal WAYFINDER-STATUS.md in dir.
-func writeWayfinderStatus(t *testing.T, dir, sessionID, status string) {
+// writeWayfinderStatus creates a complete canonical WAYFINDER-STATUS.md in dir.
+func writeWayfinderStatus(t *testing.T, dir, projectName, status string) {
 	t.Helper()
-	content := fmt.Sprintf("---\nsession_id: %s\nstatus: %s\n---\n", sessionID, status)
+	content := fmt.Sprintf(`---
+schema_version: "2.0"
+project_name: %s
+project_type: feature
+risk_level: S
+current_waypoint: CHARTER
+status: %s
+created_at: 2026-07-20T00:00:00Z
+updated_at: 2026-07-20T00:00:00Z
+---
+`, projectName, status)
 	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), []byte(content), 0o600); err != nil {
 		t.Fatalf("writeWayfinderStatus: %v", err)
 	}
+}
+
+func bypassCreateWorktreeProtection(t *testing.T) {
+	t.Helper()
+	original := protectCreateWorktree
+	t.Cleanup(func() { protectCreateWorktree = original })
+	protectCreateWorktree = func(_ string, _ string, action func(*safepr.WorktreeTransaction) error) error {
+		return action(nil)
+	}
+}
+
+func captureSafePRAudits(t *testing.T) *[]safepr.AuditRecord {
+	t.Helper()
+	original := appendSafePRAudit
+	records := make([]safepr.AuditRecord, 0, 1)
+	t.Cleanup(func() { appendSafePRAudit = original })
+	appendSafePRAudit = func(_ string, record safepr.AuditRecord) error {
+		records = append(records, record)
+		return nil
+	}
+	return &records
 }
 
 func TestParseArgs_SkipPreflight(t *testing.T) {
@@ -216,14 +248,35 @@ func TestPreflightTimeoutCoversRepositoryFullGate(t *testing.T) {
 	}
 }
 
+func TestProtectTransactionCommandIsGroupCancelable(t *testing.T) {
+	cmd := exec.CommandContext(context.Background(), "true")
+	if err := protectTransactionCommand(nil, cmd); err != nil {
+		t.Fatal(err)
+	}
+	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setpgid {
+		t.Fatal("protected child must run in an isolated process group")
+	}
+	if cmd.Cancel == nil {
+		t.Fatal("protected child must cancel its process group")
+	}
+	if cmd.WaitDelay != time.Second {
+		t.Fatalf("protected child WaitDelay = %v, want %v", cmd.WaitDelay, time.Second)
+	}
+	if err := cmd.Cancel(); err != nil {
+		t.Fatalf("cancel before start = %v", err)
+	}
+}
+
 func TestRun_PreflightFail_BlocksPRCreate(t *testing.T) {
+	bypassCreateWorktreeProtection(t)
+	captureSafePRAudits(t)
 	t.Setenv("WAYFINDER_PROJECT_DIR", "")
 	dir := t.TempDir()
-	writeWayfinderStatus(t, dir, "test-session", "in_progress")
+	writeWayfinderStatus(t, dir, "test-session", "in-progress")
 
 	orig := runPreflightFull
 	t.Cleanup(func() { runPreflightFull = orig })
-	runPreflightFull = func(string) error {
+	runPreflightFull = func(string, *safepr.WorktreeTransaction) error {
 		return fmt.Errorf("preflight-full failed — fix issues before creating PR")
 	}
 
@@ -234,19 +287,21 @@ func TestRun_PreflightFail_BlocksPRCreate(t *testing.T) {
 }
 
 func TestRun_PreflightPass_ProceedsToPRCreate(t *testing.T) {
+	bypassCreateWorktreeProtection(t)
+	captureSafePRAudits(t)
 	t.Setenv("WAYFINDER_PROJECT_DIR", "")
 	dir := t.TempDir()
-	writeWayfinderStatus(t, dir, "test-session", "in_progress")
+	writeWayfinderStatus(t, dir, "test-session", "in-progress")
 
 	orig := runPreflightFull
 	t.Cleanup(func() { runPreflightFull = orig })
-	runPreflightFull = func(string) error { return nil }
+	runPreflightFull = func(string, *safepr.WorktreeTransaction) error { return nil }
 	ghCalled := false
 	origGitHub := executeGitHub
 	t.Cleanup(func() { executeGitHub = origGitHub })
-	executeGitHub = func(*safepr.Request, time.Duration, bool) error {
+	executeGitHub = func(*safepr.Request, time.Duration, bool, *safepr.WorktreeTransaction) (githubExecution, error) {
 		ghCalled = true
-		return nil
+		return githubExecution{}, nil
 	}
 
 	if err := run([]string{"create", "--wayfinder", dir, "--title", "t"}); err != nil {
@@ -258,24 +313,26 @@ func TestRun_PreflightPass_ProceedsToPRCreate(t *testing.T) {
 }
 
 func TestRun_SkipPreflight_NoPreflightRun(t *testing.T) {
+	bypassCreateWorktreeProtection(t)
+	captureSafePRAudits(t)
 	t.Setenv("WAYFINDER_PROJECT_DIR", "")
 	dir := t.TempDir()
-	writeWayfinderStatus(t, dir, "test-session", "in_progress")
+	writeWayfinderStatus(t, dir, "test-session", "in-progress")
 
 	preflightCalled := false
 	orig := runPreflightFull
 	t.Cleanup(func() { runPreflightFull = orig })
 	// Mock would fail if called — proves --skip-preflight prevents the call.
-	runPreflightFull = func(string) error {
+	runPreflightFull = func(string, *safepr.WorktreeTransaction) error {
 		preflightCalled = true
 		return fmt.Errorf("preflight-full failed — should not have been called")
 	}
 	ghCalled := false
 	origGitHub := executeGitHub
 	t.Cleanup(func() { executeGitHub = origGitHub })
-	executeGitHub = func(*safepr.Request, time.Duration, bool) error {
+	executeGitHub = func(*safepr.Request, time.Duration, bool, *safepr.WorktreeTransaction) (githubExecution, error) {
 		ghCalled = true
-		return nil
+		return githubExecution{}, nil
 	}
 
 	if err := run([]string{"create", "--wayfinder", dir, "--skip-preflight", "--title", "t"}); err != nil {
@@ -286,5 +343,125 @@ func TestRun_SkipPreflight_NoPreflightRun(t *testing.T) {
 	}
 	if !ghCalled {
 		t.Error("GitHub boundary was not called with --skip-preflight")
+	}
+}
+
+func TestRun_CreateProtectsPreflightAndGitHubMutation(t *testing.T) {
+	captureSafePRAudits(t)
+	t.Setenv("WAYFINDER_PROJECT_DIR", "")
+	dir := t.TempDir()
+	writeWayfinderStatus(t, dir, "test-session", "in-progress")
+
+	originalProtect := protectCreateWorktree
+	originalPreflight := runPreflightFull
+	originalGitHub := executeGitHub
+	t.Cleanup(func() {
+		protectCreateWorktree = originalProtect
+		runPreflightFull = originalPreflight
+		executeGitHub = originalGitHub
+	})
+
+	events := make([]string, 0, 4)
+	protected := false
+	protectCreateWorktree = func(_ string, _ string, action func(*safepr.WorktreeTransaction) error) error {
+		events = append(events, "protect-start")
+		protected = true
+		err := action(nil)
+		protected = false
+		events = append(events, "protect-end")
+		return err
+	}
+	runPreflightFull = func(string, *safepr.WorktreeTransaction) error {
+		if !protected {
+			t.Fatal("preflight ran outside worktree protection")
+		}
+		events = append(events, "preflight")
+		return nil
+	}
+	executeGitHub = func(*safepr.Request, time.Duration, bool, *safepr.WorktreeTransaction) (githubExecution, error) {
+		if !protected {
+			t.Fatal("GitHub mutation ran outside worktree protection")
+		}
+		events = append(events, "github")
+		return githubExecution{}, nil
+	}
+
+	if err := run([]string{"create", "--wayfinder", dir, "--title", "t"}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"protect-start", "preflight", "github", "protect-end"}
+	if strings.Join(events, ",") != strings.Join(want, ",") {
+		t.Fatalf("transaction events = %v, want %v", events, want)
+	}
+}
+
+func TestRun_CreateAuditsFinalTransactionOutcome(t *testing.T) {
+	tests := []struct {
+		name      string
+		runAction bool
+		finalErr  string
+		wantExit  int
+		wantPRURL string
+	}{
+		{name: "success", runAction: true, wantPRURL: "https://github.com/vbonnet/dear-agent/pull/968"},
+		{name: "acquisition failure", finalErr: "acquire transaction guard", wantExit: 1},
+		{name: "release failure", runAction: true, finalErr: "release owned worktree lock", wantExit: 1, wantPRURL: "https://github.com/vbonnet/dear-agent/pull/968"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("WAYFINDER_PROJECT_DIR", "")
+			dir := t.TempDir()
+			writeWayfinderStatus(t, dir, "audit-session", "in-progress")
+			records := captureSafePRAudits(t)
+
+			originalProtect := protectCreateWorktree
+			originalGitHub := executeGitHub
+			t.Cleanup(func() {
+				protectCreateWorktree = originalProtect
+				executeGitHub = originalGitHub
+			})
+
+			githubCalled := false
+			protectCreateWorktree = func(_ string, _ string, action func(*safepr.WorktreeTransaction) error) error {
+				if !tc.runAction {
+					return fmt.Errorf("%s", tc.finalErr)
+				}
+				if err := action(nil); err != nil {
+					return err
+				}
+				if tc.finalErr != "" {
+					return fmt.Errorf("%s", tc.finalErr)
+				}
+				return nil
+			}
+			executeGitHub = func(*safepr.Request, time.Duration, bool, *safepr.WorktreeTransaction) (githubExecution, error) {
+				githubCalled = true
+				return githubExecution{prURL: tc.wantPRURL}, nil
+			}
+
+			err := run([]string{"create", "--wayfinder", dir, "--skip-preflight", "--title", "audit"})
+			if tc.finalErr == "" && err != nil {
+				t.Fatalf("run() = %v, want nil", err)
+			}
+			if tc.finalErr != "" && (err == nil || !strings.Contains(err.Error(), tc.finalErr)) {
+				t.Fatalf("run() = %v, want error containing %q", err, tc.finalErr)
+			}
+			if githubCalled != tc.runAction {
+				t.Fatalf("GitHub called = %t, want %t", githubCalled, tc.runAction)
+			}
+			if len(*records) != 1 {
+				t.Fatalf("audit records = %d, want exactly 1", len(*records))
+			}
+			record := (*records)[0]
+			if record.ExitCode != tc.wantExit || record.PRURL != tc.wantPRURL {
+				t.Fatalf("audit outcome = exit:%d url:%q, want exit:%d url:%q", record.ExitCode, record.PRURL, tc.wantExit, tc.wantPRURL)
+			}
+			if tc.finalErr == "" && record.Error != "" {
+				t.Fatalf("successful audit error = %q, want empty", record.Error)
+			}
+			if tc.finalErr != "" && !strings.Contains(record.Error, tc.finalErr) {
+				t.Fatalf("audit error = %q, want substring %q", record.Error, tc.finalErr)
+			}
+		})
 	}
 }

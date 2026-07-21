@@ -45,7 +45,7 @@ type GateResult struct {
 
 // GateConfig defines gate configuration for phase transitions
 type GateConfig struct {
-	PhaseTransition         string // e.g., "S6_to_S7"
+	PhaseTransition         string // e.g., "SPEC_to_PLAN"
 	Tier                    GateTier
 	RequiredPersonas        []string // Must review
 	OptionalPersonas        []string // May review based on detection

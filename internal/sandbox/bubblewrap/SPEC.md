@@ -1,6 +1,6 @@
 # Bubblewrap Sandbox Provider Specification
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-07-20 -->
 
 ## Overview
 
@@ -32,6 +32,10 @@ no repository can be resolved.
 **BWRAP-10** When a sandbox is destroyed, the system shall remove any created git worktree, remove the sandbox directories, and remove the sandbox from the active provider registry.
 
 **BWRAP-11** When a sandbox is validated, the system shall require an active registry entry and an existing merged path.
+
+**BWRAP-12** When Git refuses to remove a locked sandbox worktree during destruction, the system shall preserve the worktree, sandbox directories, and provider registry entry, return the removal error, and allow destruction to be retried after the owner unlocks the worktree.
+
+**BWRAP-13** When Git worktree removal succeeds but sandbox directory cleanup fails during destruction, the system shall retain the provider registry entry and retry only the unfinished directory cleanup phase.
 
 ## BDD Traceability
 

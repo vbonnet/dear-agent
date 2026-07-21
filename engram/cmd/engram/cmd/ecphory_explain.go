@@ -424,7 +424,7 @@ func explainTier2Ranking(query string, candidates []string) ([]ranking.RankedRes
 	fmt.Println("  Input tokens: ~N/A (not tracked yet)")
 	fmt.Println("  Output tokens: ~N/A (not tracked yet)")
 	fmt.Println("  Total cost: $N/A (integration pending)")
-	fmt.Println("  (Cost tracking implementation: Task S8.9)")
+	fmt.Println("  (Cost tracking implementation)")
 
 	fmt.Println()
 	return results, provider, nil

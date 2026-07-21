@@ -117,10 +117,13 @@ agm new [session-name] [flags]
 ```bash
 --harness string         Harness to use (claude-code|codex-cli|agy|opencode-cli) (default: claude-code)
                          deprecated compatibility: gemini-cli
---model string           Model to use (e.g., sonnet, opus, 2.5-flash, 5.5). If omitted, uses harness default.
+--model string           Model to use (e.g., sonnet, 3.5-flash, 3.5-flash-low, 5.5). If omitted, uses harness default.
                          claude-code: sonnet (default), opus, haiku, opusplan
                          codex-cli: 5.5 (default), 5.6, 5.4, 5.4-mini, 5.3-codex
-                         agy: 2.5-flash (default), 2.5-pro, 2.0-flash-lite
+                         agy: 3.5-flash (default/Medium), 3.5-flash-high,
+                              3.5-flash-low, 3.1-pro-low, 3.1-pro-high,
+                              claude-sonnet-4.6-thinking,
+                              claude-opus-4.6-thinking, gpt-oss-120b-medium
                          opencode-cli: requires selection (no default)
 --project string         Project directory (default: current directory)
 --tags strings           Tags (comma-separated)
@@ -143,7 +146,7 @@ agm new --harness agy research-task
 
 # Specify harness and model
 agm new coding-session --harness claude-code --model opus
-agm new research --harness agy --model 2.5-pro
+agm new research --harness agy --model 3.1-pro-high
 agm new design --harness codex-cli --model 5.4-mini
 
 # Full specification

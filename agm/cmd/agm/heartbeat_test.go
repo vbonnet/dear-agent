@@ -1,13 +1,45 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/monitoring"
 )
+
+func TestRunHeartbeatWatchdogUsesCallerContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	cmd := &cobra.Command{}
+	cmd.SetContext(ctx)
+	started := time.Now()
+
+	if err := runHeartbeatWatchdog(cmd, []string{"test-watchdog"}); err != nil {
+		t.Fatalf("runHeartbeatWatchdog() error = %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("canceled watchdog returned after %s", elapsed)
+	}
+}
+
+func TestExecuteRestartContextUsesCallerContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	target := filepath.Join(t.TempDir(), "must-not-exist")
+
+	err := executeRestartContext(ctx, "touch "+target)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("executeRestartContext() error = %v, want context.Canceled", err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("canceled restart created %s", target)
+	}
+}
 
 func TestCheckStalenessWithMaxAge_OK(t *testing.T) {
 	hb := &monitoring.LoopHeartbeat{

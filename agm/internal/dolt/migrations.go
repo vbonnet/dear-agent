@@ -62,6 +62,9 @@ var migration016 string
 //go:embed migrations/017_harness_history.sql
 var migration017 string
 
+//go:embed migrations/018_add_tmux_session_revision.sql
+var migration018 string
+
 // Migration represents a single database migration
 type Migration struct {
 	Version       int
@@ -249,6 +252,21 @@ func AllMigrations() []Migration {
 					SELECT 1 FROM information_schema.TABLES
 					WHERE TABLE_SCHEMA = DATABASE()
 					  AND TABLE_NAME = 'agm_harness_history'
+				)
+			`,
+		},
+		{
+			Version:       18,
+			Name:          "add_tmux_session_revision",
+			SQL:           migration018,
+			Checksum:      computeChecksum(migration018),
+			TablesCreated: []string{},
+			PreConditionSQL: `
+				SELECT 1 WHERE NOT EXISTS (
+					SELECT 1 FROM information_schema.COLUMNS
+					WHERE TABLE_SCHEMA = DATABASE()
+					  AND TABLE_NAME = 'agm_sessions'
+					  AND COLUMN_NAME = 'tmux_session_revision'
 				)
 			`,
 		},

@@ -13,17 +13,17 @@ type Session struct {
 	Metrics     SessionMetrics `json:"metrics"`
 }
 
-// Phase represents a single Wayfinder phase (D1-D4, S5-S11)
+// Phase represents a single canonical Wayfinder phase.
 type Phase struct {
-	Name      string                 `json:"name"` // D1, D2, ... S11
+	Name      string                 `json:"name"` // CHARTER, PROBLEM, ... RETRO
 	StartTime time.Time              `json:"start_time"`
 	EndTime   time.Time              `json:"end_time"`
 	Duration  time.Duration          `json:"duration_ms"`
 	Metadata  map[string]interface{} `json:"metadata,omitempty"`
-	Metrics   PhaseMetrics           `json:"metrics,omitempty"` // S8 Group 1: Phase-level metrics
+	Metrics   PhaseMetrics           `json:"metrics,omitzero"` // Phase-level metrics
 }
 
-// PhaseMetrics contains phase-level telemetry (S8 Group 1)
+// PhaseMetrics contains phase-level telemetry.
 type PhaseMetrics struct {
 	Outcome          string `json:"outcome"`            // success, partial, skipped
 	CompletionTimeMs int64  `json:"completion_time_ms"` // Time to complete phase
@@ -43,7 +43,7 @@ type SessionMetrics struct {
 	OutputTokens  int64   `json:"output_tokens,omitempty"`
 	EstimatedCost float64 `json:"estimated_cost_usd,omitempty"`
 
-	// S8 Group 1: Wayfinder ROI metrics
+	// Wayfinder ROI metrics
 	QualityScore float64  `json:"quality_score,omitempty"` // Formula: 1.0 - (rework*0.2) - (error*0.1)
 	ErrorCount   int      `json:"error_count"`             // Total errors across all phases
 	ReworkPhases []string `json:"rework_phases,omitempty"` // Phases that required rework

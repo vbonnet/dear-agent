@@ -1,6 +1,6 @@
 # Agent Harness and Model Parity Specification
 
-<!-- Last audited at: 2026-07-01 -->
+<!-- Last audited at: 2026-07-20 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -51,6 +51,46 @@ compatibility.
 
 **AGP-11** When a user selects an active harness's test mode, the system shall choose a low-cost test model for `claude-code`, `codex-cli`, `agy`, and `opencode-cli`.
 
+### AGY Model and Adapter Lifecycle
+
+**AGP-20** When AGM resolves an AGY model alias or accepts an AGY public model label, the system shall pass an exact label exposed by the installed AGY public model catalog through `--model`, including labels containing spaces or parentheses.
+
+**AGP-24** When AGM resumes an AGY manifest containing an unambiguous retired `2.5-pro` or `2.0-flash-lite` alias or its former full identifier, the system shall translate it to the closest current AGY public model label before constructing the resume command; the ambiguous former default `2.5-flash` on a saved conversation is governed by AGP-28.
+
+**AGP-25** When MCP creates an AGY session, the system shall wait through first-run trust and initialization until the AGY composer is ready before delivering the required startup prompt; cancellation or readiness failure shall enter the shared creation rollback path.
+
+**AGP-26** When the AGM process receives SIGINT or SIGTERM, the root command context shall cancel and every command-scoped active-harness readiness or monitoring wait, including create and its final liveness scan, cold-resume metadata lookup and migration, post-create prompt delivery and verification, post-resume prompt delivery, direct, fan-out, or structured send delivery, model or mode slash-command delivery, compaction delivery and monitoring, continuous scan/watch loops, and AGY metadata backfill or association retry, shall return without continuing into tmux creation or command delivery, prompt delivery or retry, attach, success reporting, or metadata mutation.
+
+**AGP-27** When a user supplies a cross-harness tier alias with different letter case, the system shall canonicalize the alias key case-insensitively while preserving any exact case-sensitive public model label.
+
+**AGP-28** When an imported or manually associated AGY conversation has no observable native model, the system shall leave its manifest model unset and cold-resume without `--model` so AGY retains the saved conversation selection; when a pre-provenance saved-conversation record contains the ambiguous former default `2.5-flash` or `gemini-2.5-flash`, the resume path shall clear that stored override before command construction.
+
+**AGP-29** When `send set-model` changes a running AGY conversation, the system shall persist the selection only after observing a new confirmation that exactly names the requested public model; a stale, mismatched, or unavailable confirmation shall clear the stored model override so a later cold resume cannot force an unselected model.
+
+**AGP-21** When the AGY adapter creates or cold-resumes a session, the system shall use the shared canonical AGY command builder, preserve the selected model, permission mode, authorized directories, native conversation ID, quoting, and process-exit policy, require native readiness before returning success or attaching, and roll back any tmux session it created when command delivery, readiness, or metadata persistence fails; when an imported conversation has no defensible model provenance, cold resume shall omit `--model` so AGY retains the saved native selection.
+
+**AGP-22** When the AGY adapter creates a fresh session, the system shall normalize the workspace to an absolute path and serialize the snapshot-through-discovery lifecycle per workspace before capturing and persisting its provider-native conversation ID after readiness and before reporting success, so concurrent creates cannot reuse or exchange the latest pre-launch workspace conversation; if the pre-launch identity snapshot cannot distinguish absence from corrupt or incomplete provider metadata, the system shall fail before creating tmux state. The adapter shall accept only safe path-component native identifiers before using them in a launch command or transcript path. When cold resume requires a new process, the system shall require that captured native ID and shall not substitute AGM's internal session ID.
+
+**AGP-23** When the AGY adapter reports status or reads history, the system shall require an actual `agy` process for live status and shall read user/model messages from the native Antigravity brain transcript rather than a synthetic harness path.
+
+**AGP-30** When AGY cold resume finds the recorded tmux session without a live `agy` process, the system shall verify that the pane contains only a restartable shell before command delivery and shall fail without mutation if another live harness is present or harness liveness cannot be determined.
+
+**AGP-31** When CLI or MCP creates an AGY session through the shared operations lifecycle, the system shall correlate and persist a safe provider-native conversation ID after readiness and before registration or startup-prompt delivery, reject the pre-launch workspace identity as stale, and roll back the newly created tmux session if identity correlation fails.
+
+**AGP-32** When the AGY adapter cold-resumes a conversation, the system shall allow the provider up to 60 seconds to become ready before treating readiness as failed, rolling back a newly created tmux session, or attaching.
+
+**AGP-33** When the AGY adapter reads a native transcript entry whose source is absent, the system shall classify the established `USER_INPUT` and `PLANNER_RESPONSE` entry types as user and assistant messages respectively while continuing to ignore unrelated source-less entry types.
+
+**AGP-34** When CLI or direct-adapter cold resume launches an AGY conversation, the system shall acquire the same canonical per-workspace lifecycle lock used by fresh creation before command delivery and hold it through native readiness, so a resume cannot replace AGY's workspace-global latest mapping during another operation's identity correlation.
+
+**AGP-35** When the AGY adapter rolls back a tmux session it created after command delivery, readiness, identity discovery, or metadata persistence fails, the system shall preserve the primary failure and also report any tmux cleanup failure.
+
+**AGP-36** When the AGY adapter creates a fresh conversation, the system shall route pre-launch snapshot and post-readiness identity correlation through the shared `agysession.CreateIdentityTracker` used by the operations lifecycle.
+
+**AGP-37** When concurrent AGY adapter cold resumes target the same recorded tmux pane, the system shall acquire the workspace lifecycle lock before proving exact process liveness or a restartable shell and shall deliver at most one native resume command; a later caller shall observe and preserve the process launched by the earlier caller.
+
+**AGP-38** When the AGY adapter creates or cold-resumes through a symlinked workspace, the system shall use the canonical physical workspace path consistently for locking, tmux creation, command construction, identity correlation, and newly persisted metadata.
+
 ### Codex Workdir Trust (ce-cmsq)
 
 **AGP-14** When a Codex CLI session is created or resumed through the codex-cli adapter, the system shall record the working directory as a trusted Codex project in `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`) before sending the launch command, so a fresh non-git sandbox directory cannot block Codex startup on its interactive trust prompt.
@@ -61,6 +101,10 @@ compatibility.
 
 **AGP-17** If pre-trusting the working directory fails, the codex-cli adapter shall warn and still attempt the launch.
 
+### Harness Doctor Health
+
+**AGP-19** When AGM doctor inspects an AGY session, including one stored with the legacy `agy-cli` or `antigravity` spelling, the system shall normalize the harness, derive `agy` from the shared harness binary registry, and use `$HOME/.gemini/antigravity-cli` as its advisory configuration directory rather than classify the session as unknown.
+
 ### BDD Enforcement
 
 **AGP-12** When a new active harness or model family is added, the system shall require BDD scenarios and registry tests that cross-cut the active parity matrix before the change is complete.
@@ -68,3 +112,4 @@ compatibility.
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
+- Package tests: `agm/internal/agent/agy_adapter_test.go`

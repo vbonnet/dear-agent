@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -14,6 +15,26 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/testcontext"
 )
+
+func TestRunScanLoopUsesCallerContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cycles := 0
+	started := time.Now()
+	err := runScanLoopWithCycle(ctx, time.Hour, func() (*ScanCycleResult, error) {
+		cycles++
+		cancel()
+		return &ScanCycleResult{Timestamp: time.Now()}, nil
+	})
+	if err != nil {
+		t.Fatalf("runScanLoopWithCycle() error = %v", err)
+	}
+	if cycles != 1 {
+		t.Fatalf("scan cycles = %d, want 1", cycles)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("canceled scan loop returned after %s", elapsed)
+	}
+}
 
 func TestScanDataStructures(t *testing.T) {
 	tests := []struct {
@@ -121,10 +142,10 @@ func TestScanCommandFlags(t *testing.T) {
 
 func TestScanCycleResultFindings(t *testing.T) {
 	tests := []struct {
-		name            string
-		alertCount      int
-		alertLevels     []string
-		expectedStatus  string
+		name           string
+		alertCount     int
+		alertLevels    []string
+		expectedStatus string
 	}{
 		{
 			name:           "no alerts means healthy",
@@ -222,9 +243,9 @@ func TestPrintScanText(t *testing.T) {
 	result := &ScanCycleResult{
 		Timestamp: time.Now(),
 		Sessions: &ops.ListSessionsResult{
-			Total:      2,
-			Sessions:   []ops.SessionSummary{},
-			Operation:  "list",
+			Total:     2,
+			Sessions:  []ops.SessionSummary{},
+			Operation: "list",
 		},
 		Metrics: &ops.MetricsResult{},
 		WorkerBranches: map[string][]WorkerCommit{

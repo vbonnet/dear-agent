@@ -8,11 +8,21 @@ import (
 
 func TestWayfinderStatus_ParsesStatusFile(t *testing.T) {
 	dir := t.TempDir()
-	content := `# Project
-
-Current Phase: **D4 SPEC**
-Progress: 60%
-Status: on-track
+	content := `---
+schema_version: "2.0"
+project_name: test-project
+project_type: feature
+risk_level: M
+current_waypoint: SPEC
+status: in-progress
+created_at: 2026-07-20T12:00:00Z
+updated_at: 2026-07-20T12:30:00Z
+waypoint_history:
+  - {name: CHARTER, status: completed, started_at: 2026-07-20T12:00:00Z, completed_at: 2026-07-20T12:01:00Z}
+  - {name: PROBLEM, status: completed, started_at: 2026-07-20T12:01:00Z, completed_at: 2026-07-20T12:02:00Z}
+  - {name: RESEARCH, status: completed, started_at: 2026-07-20T12:02:00Z, completed_at: 2026-07-20T12:03:00Z}
+  - {name: DESIGN, status: completed, started_at: 2026-07-20T12:03:00Z, completed_at: 2026-07-20T12:04:00Z}
+---
 `
 	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
@@ -22,8 +32,35 @@ Status: on-track
 	if err != nil {
 		t.Fatalf("wayfinderStatus: %v", err)
 	}
-	if res.Phase != "D4 SPEC" || res.Progress != "60%" || res.Status != "on-track" {
-		t.Errorf("parsed %+v, want D4 SPEC / 60%% / on-track", res)
+	if res.Phase != "SPEC" || res.Progress != "44%" || res.Status != "in-progress" {
+		t.Errorf("parsed %+v, want SPEC / 44%% / in-progress", res)
+	}
+}
+
+func TestWayfinderStatus_RejectsNonCanonicalStatusFile(t *testing.T) {
+	dir := t.TempDir()
+	content := "---\nstatus: in-progress\n---\n"
+	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wayfinderStatus(dir); err == nil {
+		t.Fatal("want error for non-canonical status")
+	}
+}
+
+func TestWayfinderStatus_RejectsInvalidCanonicalFields(t *testing.T) {
+	dir := t.TempDir()
+	content := `---
+schema_version: "2.0"
+current_waypoint: UNKNOWN
+status: typo
+---
+`
+	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wayfinderStatus(dir); err == nil {
+		t.Fatal("wayfinderStatus accepted incomplete status with invalid enums")
 	}
 }
 

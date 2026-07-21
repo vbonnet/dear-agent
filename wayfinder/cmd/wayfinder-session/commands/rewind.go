@@ -2,11 +2,13 @@ package commands
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/archive"
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/git"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/retrospective"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
@@ -32,6 +34,7 @@ This will:
 2. Mark all phases after the target phase as pending
 3. Set the current phase to the target phase
 4. Log rewind event to retrospective (with optional prompting)
+5. Commit canonical rewind markers when the project is a Git repository
 
 Examples:
   wayfinder session rewind-to RESEARCH
@@ -76,10 +79,8 @@ func runRewind(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid target phase: %s (valid phases: CHARTER, PROBLEM, RESEARCH, DESIGN, SPEC, PLAN, SETUP, BUILD, RETRO)", targetPhase)
 	}
 
-	// Validate that target phase has been completed
-	targetHistory := st.GetPhaseHistory(targetPhase)
-	if targetHistory == nil || (targetHistory.Status != status.PhaseStatusV2Completed && targetHistory.Status != status.PhaseStatusV2Skipped) {
-		return fmt.Errorf("cannot rewind to phase %s: phase has not been completed yet", targetPhase)
+	if err := validateRewindTarget(st, targetPhase); err != nil {
+		return err
 	}
 
 	// Archive current state before rewinding
@@ -93,50 +94,11 @@ func runRewind(cmd *cobra.Command, args []string) error {
 	// Capture fromPhase BEFORE updating (needed for retrospective logging)
 	fromPhase := st.CurrentWaypoint
 
-	// Mark all phases after target as pending in phase history
-	for i := range st.WaypointHistory {
-		phaseData := &st.WaypointHistory[i]
-		// Find this phase's index in allPhases
-		phaseIdx := -1
-		for j, p := range allPhases {
-			if p == phaseData.Name {
-				phaseIdx = j
-				break
-			}
-		}
-
-		// If phase is after target, mark as pending
-		if phaseIdx > targetIdx {
-			phaseData.Status = status.PhaseStatusV2Pending
-			phaseData.CompletedAt = nil
-			phaseData.Outcome = nil
-		}
-	}
-
-	// Update roadmap phases if present
-	if st.Roadmap != nil {
-		for i := range st.Roadmap.Phases {
-			roadmapPhase := &st.Roadmap.Phases[i]
-			// Find this phase's index in allPhases
-			phaseIdx := -1
-			for j, p := range allPhases {
-				if p == roadmapPhase.ID {
-					phaseIdx = j
-					break
-				}
-			}
-
-			// If phase is after target, mark as pending
-			if phaseIdx > targetIdx {
-				roadmapPhase.Status = status.PhaseStatusV2Pending
-				roadmapPhase.CompletedAt = nil
-			}
-		}
-	}
+	resetForRewind(st, allPhases, targetIdx)
+	resetLifecycleForRewind(st, time.Now())
 
 	// Update current phase
 	st.CurrentWaypoint = targetPhase
-	st.UpdatedAt = time.Now()
 
 	// Write updated canonical status to the project directory.
 	if err := status.WriteV2ToDir(st, projectDir); err != nil {
@@ -153,8 +115,67 @@ func runRewind(cmd *cobra.Command, args []string) error {
 	if err := retrospective.LogRewindEvent(projectDir, fromPhase, targetPhase, flags); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: retrospective logging failed: %v\n", err)
 	}
+	gitIntegrator := git.New(projectDir)
+	commitRewindState(gitIntegrator, fromPhase, targetPhase, os.Stdout, os.Stderr)
 
 	fmt.Printf("⏪ Rewound to phase %s\n", targetPhase)
 	fmt.Println("ℹ️  Phases after", targetPhase, "have been reset to pending")
 	return nil
+}
+
+type rewindCommitter interface {
+	IsGitRepo() bool
+	CommitRewind(fromPhase, toPhase string) error
+}
+
+func commitRewindState(integrator rewindCommitter, fromPhase, targetPhase string, stdout, stderr io.Writer) {
+	if !integrator.IsGitRepo() {
+		return
+	}
+	if err := integrator.CommitRewind(fromPhase, targetPhase); err != nil {
+		fmt.Fprintf(stderr, "Warning: rewind persisted, but its Git commit failed: %v\n", err)
+		return
+	}
+	fmt.Fprintln(stdout, "📝 Rewind state committed")
+}
+
+func validateRewindTarget(st *status.StatusV2, targetPhase string) error {
+	targetHistory := st.GetPhaseHistory(targetPhase)
+	if targetHistory == nil || (targetHistory.Status != status.PhaseStatusV2Completed && targetHistory.Status != status.PhaseStatusV2Skipped) {
+		return fmt.Errorf("cannot rewind to phase %s: phase has not been completed yet", targetPhase)
+	}
+	if st.IsPhaseSkipped(targetPhase) {
+		return fmt.Errorf("cannot rewind to phase %s: phase is configured to be skipped", targetPhase)
+	}
+	return nil
+}
+
+func resetLifecycleForRewind(st *status.StatusV2, now time.Time) {
+	applyLifecycleState(st, status.LifecycleWorking, "", "", "", now)
+}
+
+func resetForRewind(st *status.StatusV2, allPhases []string, targetIdx int) {
+	positions := make(map[string]int, len(allPhases))
+	for index, phase := range allPhases {
+		positions[phase] = index
+	}
+	retainedHistory := st.WaypointHistory[:0]
+	for _, phase := range st.WaypointHistory {
+		if positions[phase.Name] < targetIdx {
+			retainedHistory = append(retainedHistory, phase)
+		}
+	}
+	st.WaypointHistory = retainedHistory
+	if st.Roadmap == nil {
+		return
+	}
+	for index := range st.Roadmap.Phases {
+		phase := &st.Roadmap.Phases[index]
+		if positions[phase.ID] < targetIdx {
+			continue
+		}
+		phase.Status = status.PhaseStatusV2Pending
+		phase.StartedAt = nil
+		phase.CompletedAt = nil
+	}
 }

@@ -51,6 +51,17 @@ func SendCommandSafe(sessionName string, command string) error {
 //   - agm session new --prompt-file <file>
 //   - agm session send <session> --file <file>
 func SendPromptFileSafe(sessionName string, filePath string, shouldInterrupt bool) error {
+	return SendPromptFileSafeContext(context.Background(), sessionName, filePath, shouldInterrupt)
+}
+
+// SendPromptFileSafeContext is the command-scoped file delivery path. Caller
+// cancellation stops file preparation and composer polling before prompt bytes
+// are written.
+func SendPromptFileSafeContext(ctx context.Context, sessionName string, filePath string, shouldInterrupt bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	// Step 1: Validate file exists and read content
 	content, err := os.ReadFile(filePath)
 	if err != nil {
@@ -64,8 +75,11 @@ func SendPromptFileSafe(sessionName string, filePath string, shouldInterrupt boo
 	}
 
 	// Step 3: Wait for Claude to be ready
-	if err := WaitForPromptSimple(sessionName, 60*time.Second); err != nil {
+	if err := WaitForPromptSimpleContext(ctx, sessionName, 60*time.Second); err != nil {
 		return fmt.Errorf("session not ready before sending file: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	// Step 4: Send entire file content as one command with conditional interrupt
@@ -88,14 +102,23 @@ func SendPromptFileSafe(sessionName string, filePath string, shouldInterrupt boo
 //   - Sending /agm:agm-assoc, /engram-swarm:start, etc.
 //   - Any skill invocation via agm session send
 func SendSlashCommandSafe(sessionName string, command string) error {
+	return SendSlashCommandSafeContext(context.Background(), sessionName, command)
+}
+
+// SendSlashCommandSafeContext is the command-scoped slash-command path. Caller
+// cancellation stops composer polling before the slash command is written.
+func SendSlashCommandSafeContext(ctx context.Context, sessionName string, command string) error {
 	// Validate slash command format
 	if !strings.HasPrefix(command, "/") {
 		return fmt.Errorf("not a slash command (must start with /): %s", command)
 	}
 
 	// Wait for Claude to be ready
-	if err := WaitForPromptSimple(sessionName, 60*time.Second); err != nil {
+	if err := WaitForPromptSimpleContext(ctx, sessionName, 60*time.Second); err != nil {
 		return fmt.Errorf("session not ready for slash command: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	// Send slash command using existing SendCommand
@@ -143,8 +166,15 @@ func skipPostSubmitGuard(shouldInterrupt, autonomous, force bool) bool {
 }
 
 func SendMultiLinePromptSafe(sessionName string, prompt string, shouldInterrupt bool) error {
+	return SendMultiLinePromptSafeContext(context.Background(), sessionName, prompt, shouldInterrupt)
+}
+
+// SendMultiLinePromptSafeContext is the command-scoped multiline delivery
+// path. Caller cancellation stops readiness polling and the stability delay
+// before any prompt bytes are written.
+func SendMultiLinePromptSafeContext(ctx context.Context, sessionName string, prompt string, shouldInterrupt bool) error {
 	// Wait for Claude to be ready (consistent with all other *Safe functions)
-	if err := WaitForPromptSimple(sessionName, 60*time.Second); err != nil {
+	if err := WaitForPromptSimpleContext(ctx, sessionName, 60*time.Second); err != nil {
 		return fmt.Errorf("session not ready for multi-line prompt: %w", err)
 	}
 
@@ -163,10 +193,12 @@ func SendMultiLinePromptSafe(sessionName string, prompt string, shouldInterrupt 
 	// ce-v9in / ce-5sow: still skipped in autonomous mode, under operator --force,
 	// and when shouldInterrupt — those callers deliver regardless.
 	if !skipPostSubmitGuard(shouldInterrupt, AutonomousMode(), ForceDelivery()) {
-		time.Sleep(1 * time.Second)
+		if err := sleepWithContext(ctx, time.Second); err != nil {
+			return err
+		}
 
 		// Re-capture pane to verify composer stability
-		cmdCtx, cmdCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		cmdCtx, cmdCancel := context.WithTimeout(ctx, 5*time.Second)
 		recheck, err := exec.CommandContext(cmdCtx, "tmux", "-S", GetSocketPath(), "capture-pane",
 			"-t", NormalizeTmuxSessionName(sessionName), "-p", "-S", "-30").Output()
 		cmdErr := cmdCtx.Err()
@@ -182,6 +214,9 @@ func SendMultiLinePromptSafe(sessionName string, prompt string, shouldInterrupt 
 				return fmt.Errorf("prompt disappeared after detection — session likely processing, aborting delivery")
 			}
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	// Send using literal mode (preserves newlines), with conditional interrupt

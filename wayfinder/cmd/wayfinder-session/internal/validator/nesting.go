@@ -187,16 +187,21 @@ func isProjectCompleteWithDepth(dir string, depth int) (bool, error) {
 }
 
 func allRequiredWaypointsComplete(st *status.StatusV2) bool {
-	completed := make(map[string]bool, len(st.WaypointHistory))
+	waypointStatus := make(map[string]string, len(st.WaypointHistory))
 	for _, waypoint := range st.WaypointHistory {
-		completed[waypoint.Name] = waypoint.Status == status.WaypointStatusV2Completed
+		waypointStatus[waypoint.Name] = waypoint.Status
 	}
 
 	for _, waypoint := range status.AllWaypointsV2Schema() {
 		if st.IsPhaseSkipped(waypoint) {
+			if existing, ok := waypointStatus[waypoint]; ok &&
+				existing != status.WaypointStatusV2Completed &&
+				existing != status.WaypointStatusV2Skipped {
+				return false
+			}
 			continue
 		}
-		if !completed[waypoint] {
+		if waypointStatus[waypoint] != status.WaypointStatusV2Completed {
 			return false
 		}
 	}

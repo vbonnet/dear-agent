@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -34,6 +35,12 @@ type PromptDeliveryResult struct {
 // Returns the delivery result and any error. A non-nil error indicates a tmux
 // failure, not a delivery failure — check result.Delivered for delivery status.
 func VerifyPromptDelivery(sessionName, promptText string, sendFunc func() error, maxRetries int) (PromptDeliveryResult, error) {
+	return VerifyPromptDeliveryContext(context.Background(), sessionName, promptText, sendFunc, maxRetries)
+}
+
+// VerifyPromptDeliveryContext is the command-scoped delivery verifier. Caller
+// cancellation stops verification backoff and prevents subsequent retry sends.
+func VerifyPromptDeliveryContext(ctx context.Context, sessionName, promptText string, sendFunc func() error, maxRetries int) (PromptDeliveryResult, error) {
 	keywords := extractKeywords(promptText)
 	debug.Log("Verifying prompt delivery (keywords: %v, maxRetries: %d)", keywords, maxRetries)
 
@@ -48,10 +55,15 @@ func VerifyPromptDelivery(sessionName, promptText string, sendFunc func() error,
 			waitDuration = time.Duration(1<<uint(attempt)) * time.Second
 		}
 		debug.Log("Verify attempt %d/%d: waiting %v before capture-pane check", attempt, maxRetries+1, waitDuration)
-		time.Sleep(waitDuration)
+		if err := sleepWithContext(ctx, waitDuration); err != nil {
+			return PromptDeliveryResult{}, err
+		}
 
 		// Capture pane content to check delivery status
-		content, err := CapturePaneOutput(sessionName, 50)
+		if err := ctx.Err(); err != nil {
+			return PromptDeliveryResult{}, err
+		}
+		content, err := CapturePaneOutputContext(ctx, sessionName, 50)
 		if err != nil {
 			return PromptDeliveryResult{}, fmt.Errorf("capture-pane failed during delivery verification: %w", err)
 		}
@@ -80,7 +92,13 @@ func VerifyPromptDelivery(sessionName, promptText string, sendFunc func() error,
 		// Delivery not confirmed — prompt might be stuck
 		if attempt <= maxRetries {
 			debug.Log("⚠ Delivery not confirmed (attempt %d/%d): idle prompt visible, retrying send", attempt, maxRetries+1)
+			if err := ctx.Err(); err != nil {
+				return PromptDeliveryResult{}, err
+			}
 			if err := sendFunc(); err != nil {
+				if ctx.Err() != nil {
+					return PromptDeliveryResult{}, ctx.Err()
+				}
 				debug.Log("⚠ Retry send failed (attempt %d): %v", attempt, err)
 				// Don't return error — continue to next attempt, the session state
 				// might have changed (e.g., cooldown expired)
@@ -119,9 +137,9 @@ func extractKeywords(text string) []string {
 // as delivery verification keywords.
 func isCommonWord(word string) bool {
 	common := map[string]bool{
-		"please": true, "should": true, "would":  true, "could":  true,
-		"their":  true, "there":  true, "these":  true, "those":  true,
-		"which":  true, "where":  true, "about":  true, "after":  true,
+		"please": true, "should": true, "would": true, "could": true,
+		"their": true, "there": true, "these": true, "those": true,
+		"which": true, "where": true, "about": true, "after": true,
 		"before": true, "between": true, "through": true, "during": true,
 	}
 	return common[strings.ToLower(word)]
