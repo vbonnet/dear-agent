@@ -17,18 +17,29 @@ func writeStatus(t *testing.T, dir, content string) {
 }
 
 func canonicalTestStatus(project, status, extra string) string {
+	currentWaypoint := "CHARTER"
+	history := ""
+	if status == "completed" {
+		currentWaypoint = "RETRO"
+		var entries strings.Builder
+		for _, waypoint := range []string{"CHARTER", "PROBLEM", "RESEARCH", "DESIGN", "SPEC", "PLAN", "SETUP", "BUILD", "RETRO"} {
+			fmt.Fprintf(&entries, "  - {name: %s, status: completed, started_at: 2026-07-20T00:00:00Z, completed_at: 2026-07-20T00:01:00Z}\n", waypoint)
+		}
+		history = "waypoint_history:\n" + entries.String()
+	}
 	return fmt.Sprintf(`---
 schema_version: "2.0"
 project_name: %s
 project_type: feature
 risk_level: S
-current_waypoint: CHARTER
+current_waypoint: %s
 status: %s
 created_at: 2026-07-20T00:00:00Z
 updated_at: 2026-07-20T00:00:00Z
 %s
+%s
 ---
-`, project, status, extra)
+`, project, currentWaypoint, status, extra, history)
 }
 
 var inProgressStatus = canonicalTestStatus("safepr-test", "in-progress", "")
