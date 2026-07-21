@@ -9,7 +9,7 @@ completion, idle, waiting, and stuck indicators for sentinel recovery.
 
 ## Requirements
 
-**STM-01** When tmux operations execute, the system shall use the configured client timeout and return command failures with per-socket context instead of collapsing execution failures into an unqualified missing-session result.
+**STM-01** When a named-session operation resolves its tmux socket, the system shall use the configured client timeout and return probe failures with per-socket context instead of collapsing execution failures into an unqualified missing-session result.
 
 **STM-02** When pane content contains a permission prompt, the system shall classify the prompt before weaker idle or completion indicators.
 
