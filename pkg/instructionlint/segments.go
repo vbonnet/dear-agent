@@ -6,6 +6,7 @@ import (
 	goast "go/ast"
 	"go/parser"
 	"go/token"
+	"maps"
 	"regexp"
 	"slices"
 	"sort"
@@ -138,6 +139,7 @@ func parseScriptSegments(source []byte) []Segment {
 	state := scriptParseState{
 		visibleHelpers:  agentVisibleScriptHelpers(source),
 		pendingHeredocs: map[string][]Segment{},
+		descriptors:     defaultScriptDescriptors(),
 	}
 	line := 0
 	for raw := range strings.SplitSeq(string(source), "\n") {
@@ -151,8 +153,12 @@ func parseScriptSegments(source []byte) []Segment {
 				if state.heredocOutput.visible {
 					segments = append(segments, state.heredocBody...)
 				} else if state.heredocOutput.path != "" {
-					state.pendingHeredocs[state.heredocOutput.path] = append(
-						state.pendingHeredocs[state.heredocOutput.path], state.heredocBody...)
+					if state.heredocOutput.append {
+						state.pendingHeredocs[state.heredocOutput.path] = append(
+							state.pendingHeredocs[state.heredocOutput.path], state.heredocBody...)
+					} else {
+						state.pendingHeredocs[state.heredocOutput.path] = slices.Clone(state.heredocBody)
+					}
 				}
 				state.heredoc = ""
 				state.heredocBody = nil
@@ -162,8 +168,9 @@ func parseScriptSegments(source []byte) []Segment {
 			state.heredocBody = append(state.heredocBody, Segment{Kind: SegmentShell, Line: line, Text: value})
 			continue
 		}
+		state.updatePersistentDescriptors(value)
 		for path, pending := range state.pendingHeredocs {
-			if scriptLinePrintsPath(value, path) {
+			if scriptLinePrintsPath(value, path, state.descriptors) {
 				segments = append(segments, pending...)
 				delete(state.pendingHeredocs, path)
 			}
@@ -180,7 +187,7 @@ func parseScriptSegments(source []byte) []Segment {
 		}
 		if marker := scriptHeredocMarker(value); marker != "" {
 			state.heredoc = marker
-			state.heredocOutput = scriptHeredocOutputDestination(value)
+			state.heredocOutput = scriptHeredocOutputDestination(value, state.descriptors)
 			continue
 		}
 		assignment := stripShellDeclaration(value)
@@ -216,8 +223,19 @@ type scriptParseState struct {
 	heredocBody         []Segment
 	heredocOutput       scriptOutputDestination
 	pendingHeredocs     map[string][]Segment
+	descriptors         map[int]scriptOutputDestination
 	visibleContinuation bool
 	visibleHelpers      map[string]bool
+}
+
+func (state *scriptParseState) updatePersistentDescriptors(value string) {
+	for _, command := range splitShellCommands(value) {
+		tokens := parseShellTokens(command)
+		if len(tokens) == 0 || tokens[0].text != "exec" {
+			continue
+		}
+		applyScriptRedirections(tokens[1:], state.descriptors)
+	}
 }
 
 func (state *scriptParseState) consumeOngoing(raw, value string) (include, handled bool) {
@@ -382,7 +400,7 @@ func scriptHeredocMarker(value string) string {
 	return ""
 }
 
-func scriptHeredocOutputDestination(value string) scriptOutputDestination {
+func scriptHeredocOutputDestination(value string, descriptors map[int]scriptOutputDestination) scriptOutputDestination {
 	commands := splitScriptCommandParts(value)
 	producer := -1
 	for index, command := range commands {
@@ -401,7 +419,7 @@ func scriptHeredocOutputDestination(value string) scriptOutputDestination {
 	}
 	destination := scriptOutputDestination{visible: true}
 	for index := producer; index <= pipelineEnd; index++ {
-		destination = scriptCommandOutputDestination(commands[index].text)
+		destination = scriptCommandOutputDestination(commands[index].text, descriptors)
 		if destination.redirected {
 			break
 		}
@@ -413,7 +431,7 @@ func scriptHeredocOutputDestination(value string) scriptOutputDestination {
 		return destination
 	}
 	for _, command := range commands[pipelineEnd+1:] {
-		if scriptCommandPrintsPath(command.text, destination.path) {
+		if scriptCommandPrintsPath(command.text, destination.path, descriptors) {
 			return scriptOutputDestination{visible: true}
 		}
 	}
@@ -424,6 +442,7 @@ type scriptOutputDestination struct {
 	visible    bool
 	path       string
 	redirected bool
+	append     bool
 }
 
 type scriptCommandPart struct {
@@ -452,20 +471,108 @@ func splitScriptCommandParts(value string) []scriptCommandPart {
 	return parts
 }
 
-func scriptCommandOutputDestination(command string) scriptOutputDestination {
+func defaultScriptDescriptors() map[int]scriptOutputDestination {
 	visible := scriptOutputDestination{visible: true}
-	descriptors := map[int]scriptOutputDestination{1: visible, 2: visible}
-	fields := parseShellWords(command)
-	for index := 0; index < len(fields); index++ {
-		field := strings.Trim(fields[index], "()")
-		both := strings.HasPrefix(field, "&>")
-		var redirect string
+	return map[int]scriptOutputDestination{1: visible, 2: visible}
+}
+
+func cloneScriptDescriptors(source map[int]scriptOutputDestination) map[int]scriptOutputDestination {
+	cloned := make(map[int]scriptOutputDestination, len(source))
+	maps.Copy(cloned, source)
+	return cloned
+}
+
+func scriptCommandOutputDestination(command string, inherited map[int]scriptOutputDestination) scriptOutputDestination {
+	descriptors := cloneScriptDescriptors(inherited)
+	applyScriptRedirections(parseShellTokens(command), descriptors)
+	return descriptors[1]
+}
+
+type shellToken struct {
+	raw  string
+	text string
+}
+
+// parseShellTokens retains the raw spelling alongside the dequoted value.
+// Redirection syntax is meaningful only when its operator is unquoted and
+// unescaped; parseShellWords intentionally discards exactly that provenance.
+func parseShellTokens(input string) []shellToken {
+	var tokens []shellToken
+	var raw, value strings.Builder
+	var quote byte
+	escaped := false
+	started := false
+	flush := func() {
+		if !started {
+			return
+		}
+		tokens = append(tokens, shellToken{raw: raw.String(), text: value.String()})
+		raw.Reset()
+		value.Reset()
+		started = false
+	}
+	for index := 0; index < len(input); index++ {
+		current := input[index]
+		if escaped {
+			raw.WriteByte(current)
+			value.WriteByte(current)
+			escaped = false
+			started = true
+			continue
+		}
+		if current == '\\' && quote != '\'' {
+			raw.WriteByte(current)
+			escaped = true
+			started = true
+			continue
+		}
+		if quote != 0 {
+			raw.WriteByte(current)
+			if current == quote {
+				quote = 0
+			} else {
+				value.WriteByte(current)
+			}
+			started = true
+			continue
+		}
+		if current == '\'' || current == '"' {
+			raw.WriteByte(current)
+			quote = current
+			started = true
+			continue
+		}
+		if current == ' ' || current == '\t' || current == '\r' || current == '\n' {
+			flush()
+			continue
+		}
+		raw.WriteByte(current)
+		value.WriteByte(current)
+		started = true
+	}
+	if escaped {
+		value.WriteByte('\\')
+	}
+	flush()
+	return tokens
+}
+
+func applyScriptRedirections(tokens []shellToken, descriptors map[int]scriptOutputDestination) {
+	for index := 0; index < len(tokens); index++ {
+		raw := strings.Trim(tokens[index].raw, "()")
+		value := strings.Trim(tokens[index].text, "()")
+		both := false
 		descriptor := 1
-		if both {
-			redirect = strings.TrimPrefix(field, "&>")
-		} else {
-			remainder := strings.TrimLeft(field, "0123456789")
-			prefix := strings.TrimSuffix(field, remainder)
+		operator := ""
+		consumed := 0
+		switch {
+		case strings.HasPrefix(raw, "&>>"):
+			both, operator, consumed = true, ">>", 3
+		case strings.HasPrefix(raw, "&>"):
+			both, operator, consumed = true, ">", 2
+		default:
+			remainder := strings.TrimLeft(raw, "0123456789")
+			prefix := strings.TrimSuffix(raw, remainder)
 			if !strings.HasPrefix(remainder, ">") {
 				continue
 			}
@@ -476,26 +583,39 @@ func scriptCommandOutputDestination(command string) scriptOutputDestination {
 				}
 				descriptor = parsed
 			}
-			redirect = strings.TrimLeft(remainder, ">|")
+			switch {
+			case strings.HasPrefix(remainder, ">>"):
+				operator = ">>"
+			case strings.HasPrefix(remainder, ">|"):
+				operator = ">|"
+			default:
+				operator = ">"
+			}
+			consumed = len(prefix) + len(operator)
 		}
 
-		target := strings.TrimLeft(redirect, ">|")
-		if target == "" && index+1 < len(fields) {
+		target := ""
+		if consumed <= len(value) {
+			target = value[consumed:]
+		}
+		if target == "" && index+1 < len(tokens) {
 			index++
-			target = strings.Trim(fields[index], `"'`)
+			target = tokens[index].text
 		}
 		destination := scriptRedirectDestination(target, descriptors)
-		descriptors[descriptor] = destination
+		destination.append = operator == ">>"
 		if both {
 			destination.redirected = true
 			descriptors[1] = destination
 			descriptors[2] = destination
-		} else if descriptor == 1 {
+			continue
+		}
+		descriptors[descriptor] = destination
+		if descriptor == 1 {
 			destination.redirected = true
 			descriptors[1] = destination
 		}
 	}
-	return descriptors[1]
 }
 
 func scriptRedirectDestination(target string, descriptors map[int]scriptOutputDestination) scriptOutputDestination {
@@ -520,8 +640,8 @@ func scriptRedirectDestination(target string, descriptors map[int]scriptOutputDe
 	return scriptOutputDestination{path: target}
 }
 
-func scriptCommandPrintsPath(command, path string) bool {
-	if !scriptCommandOutputDestination(command).visible {
+func scriptCommandPrintsPath(command, path string, descriptors map[int]scriptOutputDestination) bool {
+	if !scriptCommandOutputDestination(command, descriptors).visible {
 		return false
 	}
 	fields := stripCommandPrefixes(parseShellWords(command))
@@ -540,9 +660,9 @@ func scriptCommandPrintsPath(command, path string) bool {
 	return false
 }
 
-func scriptLinePrintsPath(value, path string) bool {
+func scriptLinePrintsPath(value, path string, descriptors map[int]scriptOutputDestination) bool {
 	for _, command := range splitShellCommands(value) {
-		if scriptCommandPrintsPath(command, path) {
+		if scriptCommandPrintsPath(command, path, descriptors) {
 			return true
 		}
 	}

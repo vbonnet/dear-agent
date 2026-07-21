@@ -343,6 +343,50 @@ func TestScriptHeredocVisibilityFollowsRoutingAndDeferredReplay(t *testing.T) {
 	}
 }
 
+func TestScriptHeredocVisibilityPreservesQuotesDescriptorsAndFileModes(t *testing.T) {
+	source := []byte(strings.Join([]string{
+		"tee '>fixture' <<'QUOTED_REDIRECT_NAME'",
+		"git push origin quoted-name",
+		"QUOTED_REDIRECT_NAME",
+		"exec 3>&1",
+		"cat >&3 <<'PERSISTENT_DESCRIPTOR'",
+		"gh pr merge 123",
+		"PERSISTENT_DESCRIPTOR",
+		"cat >overwritten-fixture <<'OVERWRITTEN'",
+		"safe-pr create --emergency --reason stale",
+		"OVERWRITTEN",
+		"cat >overwritten-fixture <<'REPLACEMENT'",
+		"replacement text",
+		"REPLACEMENT",
+		"cat overwritten-fixture",
+		"cat >appended-fixture <<'APPEND_FIRST'",
+		"git push origin append-first",
+		"APPEND_FIRST",
+		"cat >>appended-fixture <<'APPEND_SECOND'",
+		"gh pr close 456",
+		"APPEND_SECOND",
+		"cat appended-fixture",
+	}, "\n"))
+
+	var text []string
+	for _, segment := range parseScriptSegments(source) {
+		text = append(text, segment.Text)
+	}
+	for _, visible := range []string{
+		"git push origin quoted-name",
+		"gh pr merge 123",
+		"git push origin append-first",
+		"gh pr close 456",
+	} {
+		if !slices.Contains(text, visible) {
+			t.Errorf("visible heredoc line %q was hidden: %v", visible, text)
+		}
+	}
+	if slices.Contains(text, "safe-pr create --emergency --reason stale") {
+		t.Fatalf("overwritten heredoc content remained policy-visible: %v", text)
+	}
+}
+
 func TestCheckRepositoryGovernsSkillAgentMetadata(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init", "-q")
