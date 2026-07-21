@@ -10,7 +10,7 @@
 
 **PI-HOOK-04** When Pi invokes repository guardrails, the `.pi/guardrails` wrappers shall reuse the living OpenCode shell implementations rather than copy their policy logic.
 
-**PI-HOOK-05** While Beads has no `pi-hook` command, Pi shall use the behaviorally equivalent `codex-hook` lifecycle adapter and the documentation shall identify that compatibility boundary.
+**PI-HOOK-05** While Beads has no `pi-hook` command, Pi shall use the behaviorally equivalent `codex-hook` lifecycle adapter with Dolt auto-commit enabled for SessionStart, UserPromptSubmit, PreCompact, and PostCompact, and the documentation shall identify that compatibility boundary.
 
 **PI-HOOK-06** When an approved project contains a malformed or unreadable `.pi/hooks.json`, the managed extension shall fail closed for tool calls instead of treating the manifest as an empty guardrail set.
 

@@ -30,22 +30,22 @@
     ],
     "SessionStart": [
       {
-        "hooks": [{"command": "bd --db ~/beads/context-engine/.beads codex-hook SessionStart", "timeout": 30, "type": "command"}]
+        "hooks": [{"command": "bd --db ~/beads/context-engine/.beads --dolt-auto-commit on codex-hook SessionStart", "timeout": 30, "type": "command"}]
       }
     ],
     "UserPromptSubmit": [
       {
-        "hooks": [{"command": "bd --db ~/beads/context-engine/.beads codex-hook UserPromptSubmit", "timeout": 30, "type": "command"}]
+        "hooks": [{"command": "bd --db ~/beads/context-engine/.beads --dolt-auto-commit on codex-hook UserPromptSubmit", "timeout": 30, "type": "command"}]
       }
     ],
     "PreCompact": [
       {
-        "hooks": [{"command": "bd --db ~/beads/context-engine/.beads codex-hook PreCompact", "timeout": 30, "type": "command"}]
+        "hooks": [{"command": "bd --db ~/beads/context-engine/.beads --dolt-auto-commit on codex-hook PreCompact", "timeout": 30, "type": "command"}]
       }
     ],
     "PostCompact": [
       {
-        "hooks": [{"command": "bd --db ~/beads/context-engine/.beads codex-hook PostCompact", "timeout": 30, "type": "command"}]
+        "hooks": [{"command": "bd --db ~/beads/context-engine/.beads --dolt-auto-commit on codex-hook PostCompact", "timeout": 30, "type": "command"}]
       }
     ]
   }

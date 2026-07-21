@@ -104,7 +104,8 @@ finish its remediation. Completion of Pi's conventional `subagent` extension
 tool projects `SubagentStop`; because the tool runs isolated child Pi processes,
 blocking remediation returns to the parent turn. Until Beads exposes a
 Pi-specific hook entrypoint, lifecycle events use its
-behaviorally equivalent `codex-hook` adapter.
+behaviorally equivalent `codex-hook` adapter with Dolt auto-commit enabled,
+matching the other non-Claude hook manifests.
 
 Wayfinder is available through Pi's native skill discovery and the
 `wayfinder-session` CLI. Its status and temporal artifacts remain
