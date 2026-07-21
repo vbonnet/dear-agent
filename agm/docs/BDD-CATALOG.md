@@ -47,6 +47,8 @@ newest-first Antigravity log fallback.
   also detects bytes appended during the bounded read.
 - Directory-entry, candidate, or byte exhaustion is distinguishable from a
   complete miss, and oversized lines fail explicitly.
+- A log removed by provider rotation after enumeration is skipped as a stale
+  snapshot, while other metadata failures remain explicit.
 
 **Why this matters:** Import, association, and post-create metadata capture must
 not inherit unbounded latency from a large or stale provider log directory.

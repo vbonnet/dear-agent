@@ -214,6 +214,33 @@ func TestWorkspaceFromLogsReportsDirectoryEntryBudgetExhaustion(t *testing.T) {
 	}
 }
 
+func TestCollectAgyLogCandidatesSkipsRemovedEntry(t *testing.T) {
+	logDir := t.TempDir()
+	removedPath := filepath.Join(logDir, "rotated.log")
+	if err := os.WriteFile(removedPath, []byte("fixture\n"), 0o644); err != nil {
+		t.Fatalf("write rotating log: %v", err)
+	}
+	keptPath := filepath.Join(logDir, "current.log")
+	if err := os.WriteFile(keptPath, []byte("current\n"), 0o644); err != nil {
+		t.Fatalf("write current log: %v", err)
+	}
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		t.Fatalf("capture log directory snapshot: %v", err)
+	}
+	if err := os.Remove(removedPath); err != nil {
+		t.Fatalf("remove rotating log: %v", err)
+	}
+
+	candidates, err := collectAgyLogCandidates(logDir, entries)
+	if err != nil {
+		t.Fatalf("removed snapshot entry should be skipped: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].path != keptPath {
+		t.Fatalf("candidates = %+v, want only retained log %q", candidates, keptPath)
+	}
+}
+
 func TestWorkspaceFromLogsReportsPerFileByteBudgetExhaustion(t *testing.T) {
 	appDir := t.TempDir()
 	conversationID := "117ff898-a964-4a9f-b460-1be4a8a49b17"

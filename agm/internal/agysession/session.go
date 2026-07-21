@@ -33,6 +33,12 @@ type agyLogCandidates struct {
 	omitted int
 }
 
+type agyLogCandidate struct {
+	path    string
+	name    string
+	modTime time.Time
+}
+
 // Metadata describes a saved AGY conversation discovered from the local AGY
 // app-data directory.
 type Metadata struct {
@@ -222,26 +228,9 @@ func agyLogPaths(appDir string) (agyLogCandidates, error) {
 			"%w: enumerated at least %d AGY log directory entries (max %d)",
 			ErrLogDiscoveryBudgetExhausted, len(entries), maxAgyLogDirEntries)
 	}
-	type candidate struct {
-		path    string
-		name    string
-		modTime time.Time
-	}
-	logs := make([]candidate, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		info, infoErr := entry.Info()
-		if infoErr != nil {
-			return agyLogCandidates{}, fmt.Errorf("stat AGY log %s: %w", entry.Name(), infoErr)
-		}
-		if !info.Mode().IsRegular() {
-			continue
-		}
-		logs = append(logs, candidate{
-			path: filepath.Join(logDir, entry.Name()), name: entry.Name(), modTime: info.ModTime(),
-		})
+	logs, err := collectAgyLogCandidates(logDir, entries)
+	if err != nil {
+		return agyLogCandidates{}, err
 	}
 	sort.Slice(logs, func(i, j int) bool {
 		if logs[i].modTime.Equal(logs[j].modTime) {
@@ -259,6 +248,32 @@ func agyLogPaths(appDir string) (agyLogCandidates, error) {
 		paths[i] = log.path
 	}
 	return agyLogCandidates{paths: paths, omitted: omitted}, nil
+}
+
+func collectAgyLogCandidates(logDir string, entries []os.DirEntry) ([]agyLogCandidate, error) {
+	logs := make([]agyLogCandidate, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			// Log rotation may invalidate the bounded directory snapshot before
+			// metadata collection. Only a disappeared entry is safe to omit;
+			// permission and other errors could hide a newer candidate.
+			if os.IsNotExist(infoErr) {
+				continue
+			}
+			return nil, fmt.Errorf("stat AGY log %s: %w", entry.Name(), infoErr)
+		}
+		if !info.Mode().IsRegular() {
+			continue
+		}
+		logs = append(logs, agyLogCandidate{
+			path: filepath.Join(logDir, entry.Name()), name: entry.Name(), modTime: info.ModTime(),
+		})
+	}
+	return logs, nil
 }
 
 func scanLogForConversation(logPath, conversationID string) (workspacePath string, matched, truncated bool, err error) {
