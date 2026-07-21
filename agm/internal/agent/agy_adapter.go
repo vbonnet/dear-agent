@@ -177,9 +177,13 @@ func (a *AgyAdapter) ResumeSession(sessionID SessionID) error {
 		if metadata.UUID == "" {
 			return fmt.Errorf("AGY session %q has no native conversation ID; capture or reassociate it before cold resume", sessionID)
 		}
-		resolvedModel, modelErr := resolveAgyAdapterModel(metadata.Model)
-		if modelErr != nil {
-			return modelErr
+		resolvedModel := ""
+		if metadata.Model != "" {
+			var modelErr error
+			resolvedModel, modelErr = resolveAgyAdapterModel(metadata.Model)
+			if modelErr != nil {
+				return modelErr
+			}
 		}
 		if !exists {
 			if err := agyNewSession(metadata.TmuxName, metadata.WorkingDir); err != nil {

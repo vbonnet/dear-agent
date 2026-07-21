@@ -278,6 +278,33 @@ func TestAgyResumeSessionPreservesNativeIdentityModelAndMode(t *testing.T) {
 	}
 }
 
+func TestAgyResumeSessionOmitsModelWhenProvenanceUnknown(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	t.Setenv("TMUX", "fixture")
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	sessionID := SessionID("imported-session")
+	if err := store.Set(sessionID, &SessionMetadata{
+		TmuxName: "agy-imported", WorkingDir: "/work", UUID: "native-conversation-id",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	agyHasSession = func(string) (bool, error) { return false, nil }
+	agyNewSession = func(string, string) error { return nil }
+	var command string
+	agySendCommand = func(_ string, value string) error { command = value; return nil }
+	agyWaitForPrompt = func(string, time.Duration) error { return nil }
+
+	if err := (&AgyAdapter{sessionStore: store}).ResumeSession(sessionID); err != nil {
+		t.Fatalf("ResumeSession: %v", err)
+	}
+	if strings.Contains(command, "--model") {
+		t.Fatalf("unknown model resume command %q must omit --model", command)
+	}
+	if !strings.Contains(command, "--conversation 'native-conversation-id'") {
+		t.Fatalf("resume command %q missing native conversation ID", command)
+	}
+}
+
 func TestAgyResumeSessionDoesNotInventNativeIdentity(t *testing.T) {
 	preserveAgyAdapterSeams(t)
 	t.Setenv("TMUX", "fixture")

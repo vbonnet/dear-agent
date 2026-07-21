@@ -67,7 +67,7 @@ compatibility.
 
 **AGP-29** When `send set-model` changes a running AGY conversation, the system shall persist the selection only after observing a new confirmation that exactly names the requested public model; a stale, mismatched, or unavailable confirmation shall clear the stored model override so a later cold resume cannot force an unselected model.
 
-**AGP-21** When the AGY adapter creates or cold-resumes a session, the system shall use the shared canonical AGY command builder and preserve the selected model, permission mode, authorized directories, native conversation ID, quoting, and process-exit policy.
+**AGP-21** When the AGY adapter creates or cold-resumes a session, the system shall use the shared canonical AGY command builder and preserve the selected model, permission mode, authorized directories, native conversation ID, quoting, and process-exit policy; when an imported conversation has no defensible model provenance, cold resume shall omit `--model` so AGY retains the saved native selection.
 
 **AGP-22** When an AGY adapter cold resume requires a new process, the system shall require the captured native AGY conversation ID and shall not substitute AGM's internal session ID.
 

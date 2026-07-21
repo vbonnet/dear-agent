@@ -247,6 +247,8 @@ creation, and terminal state detection.
   composer even while stale survey text remains in captured pane history;
   downstream state, direct-delivery, and idle predicates use the same
   last-marker rule.
+- The AGY adapter preserves known model provenance on cold resume and omits a
+  model override when an imported conversation's native selection is unknown.
 - AGM runtime helper commands keep co-located SPEC coverage.
 - AGM backend implementations keep co-located SPEC coverage.
 - AGM cleanup and process support packages keep co-located SPEC coverage.
