@@ -277,8 +277,10 @@ creation, and terminal state detection.
 - Authoritative `agm session rename` updates both stored names through the
   exact revision it observed; a concurrent identity advance returns a conflict
   and compensates the already-moved tmux name even after caller cancellation,
-  joining rollback failures. Lost tmux or storage responses are reconciled
-  against the exact old/new names and generated revision before compensation.
+  joining rollback failures. Lost tmux responses are reconciled through a
+  server-local ID plus random option marker so name or ID reuse cannot adopt a
+  replacement. Lost storage responses first fence the observed revision with
+  a competing compare-and-swap before the prior identity can authorize rollback.
 - Once a transactional Codex resume prompt is submitted, later caller
   cancellation cannot report a retryable failure that would duplicate work.
 - Final creation liveness validation derives from the root context and rechecks

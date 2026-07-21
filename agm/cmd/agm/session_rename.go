@@ -100,6 +100,15 @@ Examples:
 
 		// 1. Rename tmux session
 		tmuxRename, err := moveTmuxSessionForRename(cmd.Context(), m.Tmux.SessionName, newName)
+		if tmuxRename.Identity.Valid() {
+			defer func() {
+				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(cmd.Context()), 10*time.Second)
+				defer cancel()
+				if cleanupErr := tmux.ClearSessionRenameIdentityContext(cleanupCtx, tmuxRename.Identity); cleanupErr != nil {
+					ui.PrintWarning(fmt.Sprintf("Failed to clear tmux rename identity marker: %v", cleanupErr))
+				}
+			}()
+		}
 		if err != nil && tmuxRename.SourceAbsent {
 			fmt.Printf("  ⚠  tmux rename skipped: %v\n", err)
 		} else if err != nil {
@@ -112,7 +121,10 @@ Examples:
 		// 2-3. Atomically persist the exact identity snapshot. If a concurrent
 		// writer advanced it after resolution, restore the live tmux name and
 		// report the conflict rather than storing a dead identity.
-		if err := persistRenamedSessionIdentity(cmd.Context(), adapter, m, newName, tmuxRename.Moved, restoreTmuxSessionNameAfterRename); err != nil {
+		restoreTmux := func(ctx context.Context, currentName, previousName string) error {
+			return restoreTmuxSessionNameAfterRename(ctx, tmuxRename.Identity, currentName, previousName)
+		}
+		if err := persistRenamedSessionIdentity(cmd.Context(), adapter, m, newName, tmuxRename.Moved, restoreTmux); err != nil {
 			ui.PrintError(err, "Failed to update Dolt record", "")
 			return err
 		}
@@ -214,6 +226,7 @@ func persistRenamedSessionIdentity(ctx context.Context, store sessionIdentityRen
 type tmuxRenameOutcome struct {
 	Moved        bool
 	SourceAbsent bool
+	Identity     tmux.RenameSessionIdentity
 }
 
 func moveTmuxSessionForRename(ctx context.Context, oldName, newName string) (tmuxRenameOutcome, error) {
@@ -233,92 +246,50 @@ func moveTmuxSessionForRename(ctx context.Context, oldName, newName string) (tmu
 	if newExists && normalizedOld != normalizedNew {
 		return tmuxRenameOutcome{}, fmt.Errorf("tmux session %q already exists", normalizedNew)
 	}
-	socketPath := tmux.GetSocketPath()
-	_, renameErr := tmux.RunWithTimeout(ctx, 5*time.Second,
-		"tmux", "-S", socketPath, "rename-session",
-		"-t", tmux.FormatSessionTarget(normalizedOld), normalizedNew)
-	if renameErr == nil {
-		return tmuxRenameOutcome{Moved: true}, nil
+	identity, err := tmux.ClaimSessionRenameIdentityContext(ctx, normalizedOld)
+	if err != nil {
+		return tmuxRenameOutcome{}, fmt.Errorf("claim source tmux session identity: %w", err)
 	}
+	outcome := tmuxRenameOutcome{Identity: identity}
+	renameErr := tmux.RenameClaimedSessionContext(ctx, identity, normalizedNew)
 
 	inspectCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	oldExists, newExists, inspectErr := probeTmuxRenameState(inspectCtx, normalizedOld, normalizedNew)
+	currentName, owned, inspectErr := tmux.InspectSessionRenameIdentityContext(inspectCtx, identity)
 	if inspectErr != nil {
-		return tmuxRenameOutcome{}, errors.Join(renameErr, inspectErr)
+		return outcome, errors.Join(renameErr, inspectErr)
 	}
-	return classifyTmuxRenameAfterError(normalizedOld == normalizedNew, oldExists, newExists, renameErr)
+	return classifyTmuxRenameResult(outcome, normalizedOld, normalizedNew, currentName, owned, renameErr)
 }
 
-func classifyTmuxRenameAfterError(sameName, oldExists, newExists bool, renameErr error) (tmuxRenameOutcome, error) {
-	if sameName && oldExists {
-		return tmuxRenameOutcome{Moved: true}, nil
+func classifyTmuxRenameResult(outcome tmuxRenameOutcome, oldName, newName, currentName string, owned bool, renameErr error) (tmuxRenameOutcome, error) {
+	if owned && currentName == newName {
+		outcome.Moved = true
+		return outcome, nil
 	}
-	if !oldExists && newExists {
-		return tmuxRenameOutcome{Moved: true}, nil
+	if owned && currentName == oldName && renameErr != nil {
+		return outcome, renameErr
 	}
-	if oldExists && !newExists {
-		return tmuxRenameOutcome{}, renameErr
+	if renameErr == nil {
+		renameErr = fmt.Errorf("tmux rename reported success without preserving its claimed identity")
 	}
-	return tmuxRenameOutcome{}, errors.Join(renameErr, fmt.Errorf("tmux rename outcome is ambiguous: source exists=%v target exists=%v", oldExists, newExists))
+	return outcome, errors.Join(renameErr, fmt.Errorf("tmux rename outcome is ambiguous: identity owned=%v current name=%q source=%q target=%q", owned, currentName, oldName, newName))
 }
 
-func probeTmuxRenameState(ctx context.Context, oldName, newName string) (bool, bool, error) {
-	oldExists, oldErr := tmux.HasSessionStrictContext(ctx, oldName)
-	newExists, newErr := tmux.HasSessionStrictContext(ctx, newName)
-	if oldErr != nil || newErr != nil {
-		return oldExists, newExists, errors.Join(oldErr, newErr)
+func restoreTmuxSessionNameAfterRename(ctx context.Context, identity tmux.RenameSessionIdentity, currentName, previousName string) error {
+	normalizedPrevious := tmux.NormalizeTmuxSessionName(previousName)
+	renameErr := tmux.RenameClaimedSessionContext(ctx, identity, normalizedPrevious)
+	actualName, owned, inspectErr := tmux.InspectSessionRenameIdentityContext(ctx, identity)
+	if inspectErr != nil {
+		return errors.Join(renameErr, inspectErr)
 	}
-	return oldExists, newExists, nil
-}
-
-func restoreTmuxSessionNameAfterRename(ctx context.Context, currentName, previousName string) error {
-	err := renameTmuxSessionContext(ctx, currentName, previousName)
-	if err == nil {
+	if owned && actualName == normalizedPrevious {
 		return nil
 	}
-	currentExists, previousExists, inspectErr := probeTmuxRenameState(ctx, currentName, previousName)
-	if inspectErr != nil {
-		return errors.Join(err, inspectErr)
+	if renameErr == nil {
+		renameErr = fmt.Errorf("tmux rename rollback reported success without preserving its claimed identity")
 	}
-	if !currentExists && previousExists {
-		return nil
-	}
-	return errors.Join(err, fmt.Errorf("tmux rename rollback is unconfirmed: current exists=%v previous exists=%v", currentExists, previousExists))
-}
-
-func renameTmuxSessionContext(ctx context.Context, oldName, newName string) error {
-	normalizedOld := tmux.NormalizeTmuxSessionName(oldName)
-
-	// Check if old tmux session exists
-	exists, err := tmux.HasSessionStrictContext(ctx, normalizedOld)
-	if err != nil {
-		return fmt.Errorf("failed to check tmux session: %w", err)
-	}
-	if !exists {
-		return fmt.Errorf("tmux session '%s' not found", normalizedOld)
-	}
-
-	// Check if new name already exists in tmux
-	normalizedNew := tmux.NormalizeTmuxSessionName(newName)
-	newExists, err := tmux.HasSessionStrictContext(ctx, normalizedNew)
-	if err != nil {
-		return fmt.Errorf("failed to check tmux session: %w", err)
-	}
-	if newExists && normalizedOld != normalizedNew {
-		return fmt.Errorf("tmux session '%s' already exists", normalizedNew)
-	}
-
-	// Rename via tmux command
-	socketPath := tmux.GetSocketPath()
-	_, err = tmux.RunWithTimeout(ctx, 5*time.Second,
-		"tmux", "-S", socketPath, "rename-session",
-		"-t", tmux.FormatSessionTarget(normalizedOld), normalizedNew)
-	if err != nil {
-		return fmt.Errorf("tmux rename-session failed: %w", err)
-	}
-
-	return nil
+	return errors.Join(renameErr, fmt.Errorf("tmux rename rollback is unconfirmed: identity owned=%v current name=%q previous=%q renamed=%q", owned, actualName, normalizedPrevious, currentName))
 }
 
 // renameHeartbeatFile renames the heartbeat file from old to new session name.

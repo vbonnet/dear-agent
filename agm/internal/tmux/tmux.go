@@ -64,6 +64,7 @@ func HasSessionStrictContext(ctx context.Context, name string) (bool, error) {
 }
 
 const sessionIdentityCreationPrefix = "agm-create-"
+const sessionRenameIdentityOption = "@agm_rename_identity"
 
 // SessionIdentity identifies one specific tmux session creation. ID is local
 // to a tmux server generation and may be reused after a server restart. Token
@@ -74,6 +75,19 @@ type SessionIdentity struct {
 	ID           string
 	Token        string
 	CreationName string
+}
+
+// RenameSessionIdentity is a short-lived ownership marker for one existing
+// tmux session during an authoritative rename. The random token distinguishes
+// the claimed session from a replacement that reuses its server-local ID.
+type RenameSessionIdentity struct {
+	ID    string
+	Token string
+}
+
+// Valid reports whether the identity can prove ownership across a rename.
+func (identity RenameSessionIdentity) Valid() bool {
+	return (SessionIdentity{ID: identity.ID, Token: identity.Token}).Valid()
 }
 
 // Valid reports whether the complete creation-specific identity is valid.
@@ -112,6 +126,122 @@ func newSessionIdentity() (SessionIdentity, error) {
 	}
 	token := hex.EncodeToString(tokenBytes)
 	return SessionIdentity{Token: token, CreationName: sessionIdentityCreationPrefix + token}, nil
+}
+
+// ClaimSessionRenameIdentityContext atomically marks an existing session with
+// a random token and captures its server-local ID. If the tmux client loses the
+// command reply, a bounded scan reconciles the exact random token.
+func ClaimSessionRenameIdentityContext(ctx context.Context, name string) (RenameSessionIdentity, error) {
+	generated, err := newSessionIdentity()
+	if err != nil {
+		return RenameSessionIdentity{}, err
+	}
+	normalizedName := NormalizeTmuxSessionName(name)
+	format := "#{session_id}\t#{session_name}\t#{" + sessionRenameIdentityOption + "}"
+	condition := fmt.Sprintf("#{==:#{session_name},%s}", normalizedName)
+	setCommand := fmt.Sprintf("set-option -t %s %s %s", strconv.Quote(normalizedName), sessionRenameIdentityOption, generated.Token)
+	output, claimErr := RunWithTimeout(ctx, globalTimeout,
+		"tmux", "-S", GetSocketPath(),
+		"if-shell", "-F", "-t", normalizedName, condition, setCommand, "",
+		";", "display-message", "-p", "-t", normalizedName, format)
+	if identity, parseErr := parseClaimedSessionRenameIdentity(output, normalizedName, generated.Token); parseErr == nil {
+		return identity, nil
+	} else if claimErr == nil {
+		claimErr = parseErr
+	}
+
+	inspectCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	identity, inspectErr := findClaimedSessionRenameIdentity(inspectCtx, normalizedName, generated.Token)
+	if inspectErr == nil && identity.Valid() {
+		return identity, nil
+	}
+	return RenameSessionIdentity{}, errors.Join(claimErr, inspectErr, fmt.Errorf("tmux rename identity claim is unconfirmed for %q", normalizedName))
+}
+
+func parseClaimedSessionRenameIdentity(output []byte, expectedName, token string) (RenameSessionIdentity, error) {
+	parts := strings.SplitN(strings.TrimRight(string(output), "\r\n"), "\t", 3)
+	if len(parts) != 3 || NormalizeTmuxSessionName(parts[1]) != expectedName || parts[2] != token {
+		return RenameSessionIdentity{}, fmt.Errorf("tmux returned malformed rename identity")
+	}
+	identity := RenameSessionIdentity{ID: parts[0], Token: token}
+	if !identity.Valid() {
+		return RenameSessionIdentity{}, fmt.Errorf("tmux returned invalid rename identity %q", identity.ID)
+	}
+	return identity, nil
+}
+
+func findClaimedSessionRenameIdentity(ctx context.Context, expectedName, token string) (RenameSessionIdentity, error) {
+	format := "#{session_id}\t#{session_name}\t#{" + sessionRenameIdentityOption + "}"
+	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", GetSocketPath(), "list-sessions", "-F", format)
+	if err != nil {
+		return RenameSessionIdentity{}, tmuxCommandError("find rename identity", token, output, err)
+	}
+	var found RenameSessionIdentity
+	for line := range strings.SplitSeq(strings.TrimRight(string(output), "\r\n"), "\n") {
+		identity, parseErr := parseClaimedSessionRenameIdentity([]byte(line), expectedName, token)
+		if parseErr != nil {
+			continue
+		}
+		if found.Valid() {
+			return RenameSessionIdentity{}, fmt.Errorf("tmux rename identity token matched multiple sessions")
+		}
+		found = identity
+	}
+	return found, nil
+}
+
+// InspectSessionRenameIdentityContext returns the current name of the exact
+// claimed session. A missing ID or token mismatch reports owned=false, so a
+// replacement after server restart cannot satisfy the proof.
+func InspectSessionRenameIdentityContext(ctx context.Context, identity RenameSessionIdentity) (name string, owned bool, err error) {
+	if !identity.Valid() {
+		return "", false, fmt.Errorf("invalid tmux rename identity %q", identity.ID)
+	}
+	format := "#{session_name}\t#{" + sessionRenameIdentityOption + "}"
+	output, runErr := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", GetSocketPath(), "display-message", "-p", "-t", identity.ID, format)
+	if runErr != nil {
+		if isMissingSessionOutput(output) {
+			return "", false, nil
+		}
+		return "", false, tmuxCommandError("inspect rename identity", identity.ID, output, runErr)
+	}
+	parts := strings.SplitN(strings.TrimRight(string(output), "\r\n"), "\t", 2)
+	if len(parts) != 2 {
+		return "", false, fmt.Errorf("tmux returned malformed rename identity state for %q", identity.ID)
+	}
+	return NormalizeTmuxSessionName(parts[0]), parts[1] == identity.Token, nil
+}
+
+// RenameClaimedSessionContext renames only while the server-local ID still
+// carries the random claim marker. A replacement that reused the ID makes the
+// conditional command a no-op; the caller verifies the postcondition.
+func RenameClaimedSessionContext(ctx context.Context, identity RenameSessionIdentity, newName string) error {
+	if !identity.Valid() {
+		return fmt.Errorf("invalid tmux rename identity %q", identity.ID)
+	}
+	condition := fmt.Sprintf("#{==:#{%s},%s}", sessionRenameIdentityOption, identity.Token)
+	renameCommand := fmt.Sprintf("rename-session -t %s %s", identity.ID, strconv.Quote(NormalizeTmuxSessionName(newName)))
+	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", GetSocketPath(), "if-shell", "-F", "-t", identity.ID, condition, renameCommand, "")
+	if err == nil || isMissingSessionOutput(output) {
+		return nil
+	}
+	return tmuxCommandError("rename claimed session", identity.ID, output, err)
+}
+
+// ClearSessionRenameIdentityContext removes the marker only if the same
+// server-local ID still carries the random token. Replacements are untouched.
+func ClearSessionRenameIdentityContext(ctx context.Context, identity RenameSessionIdentity) error {
+	if !identity.Valid() {
+		return fmt.Errorf("invalid tmux rename identity %q", identity.ID)
+	}
+	condition := fmt.Sprintf("#{==:#{%s},%s}", sessionRenameIdentityOption, identity.Token)
+	unsetCommand := fmt.Sprintf("set-option -u -t %s %s", identity.ID, sessionRenameIdentityOption)
+	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", GetSocketPath(), "if-shell", "-F", "-t", identity.ID, condition, unsetCommand, "")
+	if err == nil || isMissingSessionOutput(output) {
+		return nil
+	}
+	return tmuxCommandError("clear rename identity", identity.ID, output, err)
 }
 
 func sanitizeNewSessionName(name string) string {

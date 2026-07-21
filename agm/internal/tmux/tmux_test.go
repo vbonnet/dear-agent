@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -256,6 +257,97 @@ func TestSessionIdentityValidation(t *testing.T) {
 	partial.CreationName = sessionIdentityCreationPrefix + "ffffffffffffffffffffffffffffffff"
 	if partial.Cleanable() {
 		t.Fatalf("mismatched provisional identity was accepted: %#v", partial)
+	}
+}
+
+func TestRenameSessionIdentityTracksClaimedSession(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping tmux integration test in short mode")
+	}
+	skipIfNoTmux(t)
+	socketPath, cleanup := setupTestSocket(t)
+	defer cleanup()
+	if err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", "rename-source").Run(); err != nil {
+		t.Fatalf("create source session: %v", err)
+	}
+	identity, err := ClaimSessionRenameIdentityContext(t.Context(), "rename-source")
+	if err != nil {
+		t.Fatalf("ClaimSessionRenameIdentityContext() error: %v", err)
+	}
+	if name, owned, inspectErr := InspectSessionRenameIdentityContext(t.Context(), identity); inspectErr != nil || !owned || name != "rename-source" {
+		t.Fatalf("claimed identity before rename = (name=%q owned=%v err=%v)", name, owned, inspectErr)
+	}
+	if err := exec.Command("tmux", "-S", socketPath, "rename-session", "-t", identity.ID, "rename-target").Run(); err != nil {
+		t.Fatalf("rename claimed session: %v", err)
+	}
+	if name, owned, inspectErr := InspectSessionRenameIdentityContext(t.Context(), identity); inspectErr != nil || !owned || name != "rename-target" {
+		t.Fatalf("claimed identity after rename = (name=%q owned=%v err=%v)", name, owned, inspectErr)
+	}
+	if err := ClearSessionRenameIdentityContext(t.Context(), identity); err != nil {
+		t.Fatalf("ClearSessionRenameIdentityContext() error: %v", err)
+	}
+	if name, owned, inspectErr := InspectSessionRenameIdentityContext(t.Context(), identity); inspectErr != nil || owned || name != "rename-target" {
+		t.Fatalf("cleared identity = (name=%q owned=%v err=%v)", name, owned, inspectErr)
+	}
+}
+
+func waitForTestTmuxServerExit(t *testing.T, socketPath string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		conn, err := net.DialTimeout("unix", socketPath, 50*time.Millisecond)
+		if err != nil {
+			return
+		}
+		_ = conn.Close()
+		if time.Now().After(deadline) {
+			t.Fatalf("tmux server at %s did not exit", socketPath)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestRenameSessionIdentityRejectsIDReuseAfterServerRestart(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping tmux integration test in short mode")
+	}
+	skipIfNoTmux(t)
+	socketPath, cleanup := setupTestSocket(t)
+	defer cleanup()
+	if err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", "rename-source").Run(); err != nil {
+		t.Fatalf("create source session: %v", err)
+	}
+	identity, err := ClaimSessionRenameIdentityContext(t.Context(), "rename-source")
+	if err != nil {
+		t.Fatalf("ClaimSessionRenameIdentityContext() error: %v", err)
+	}
+	if err := exec.Command("tmux", "-S", socketPath, "kill-server").Run(); err != nil {
+		t.Fatalf("kill original tmux server: %v", err)
+	}
+	waitForTestTmuxServerExit(t, socketPath)
+	output, err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-P", "-F", "#{session_id}", "-s", "rename-target").Output()
+	if err != nil {
+		t.Fatalf("create replacement session: %v", err)
+	}
+	replacementID := strings.TrimSpace(string(output))
+	if replacementID != identity.ID {
+		t.Fatalf("server restart did not reuse session ID: original=%q replacement=%q", identity.ID, replacementID)
+	}
+	if err := RenameClaimedSessionContext(t.Context(), identity, "must-not-adopt"); err != nil {
+		t.Fatalf("RenameClaimedSessionContext() replacement error: %v", err)
+	}
+	name, owned, err := InspectSessionRenameIdentityContext(t.Context(), identity)
+	if err != nil {
+		t.Fatalf("InspectSessionRenameIdentityContext() replacement error: %v", err)
+	}
+	if owned || name != "rename-target" {
+		t.Fatalf("replacement satisfied stale rename identity: name=%q owned=%v", name, owned)
+	}
+	if err := ClearSessionRenameIdentityContext(t.Context(), identity); err != nil {
+		t.Fatalf("ClearSessionRenameIdentityContext() replacement error: %v", err)
+	}
+	if exists, err := HasSessionStrict("rename-target"); err != nil || !exists {
+		t.Fatalf("replacement after stale marker cleanup = (exists=%v err=%v)", exists, err)
 	}
 }
 

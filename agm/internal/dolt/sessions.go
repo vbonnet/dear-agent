@@ -416,19 +416,45 @@ func (a *Adapter) RenameSessionIdentity(ctx context.Context, sessionID, previous
 		err = fmt.Errorf("rename session identity: %w", err)
 	}
 
-	// ExecContext can lose its reply after the server commits. Re-read with a
-	// cancellation-independent bound before deciding whether moving tmux back
-	// can orphan committed metadata.
+	// ExecContext can lose its reply before the server finishes autocommit. A
+	// re-read of the unchanged snapshot is not yet proof that the write will not
+	// commit, so first advance the exact observed revision with a competing CAS.
+	// Whichever write reaches the row first fences the other one.
 	inspectCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
+	fenceRevision := uuid.NewString()
+	if fenceErr := a.fenceSessionIdentityRename(inspectCtx, sessionID, previousName, previousTmuxName, observedRevisionValue, fenceRevision); fenceErr != nil {
+		err = errors.Join(err, fenceErr)
+	}
 	currentName, currentTmuxName, currentRevision, inspectErr := a.inspectSessionIdentity(inspectCtx, sessionID)
 	if inspectErr != nil {
 		return RenameSessionIdentityResult{}, errors.Join(err, inspectErr)
 	}
-	return classifySessionIdentityRenameAfterError(previousName, previousTmuxName, newName, nextRevision, currentName, currentTmuxName, currentRevision, err)
+	return classifySessionIdentityRenameAfterError(previousName, previousTmuxName, observedRevision, newName, nextRevision, fenceRevision, currentName, currentTmuxName, currentRevision, err)
 }
 
-func classifySessionIdentityRenameAfterError(previousName, previousTmuxName, newName, nextRevision, currentName, currentTmuxName, currentRevision string, primaryErr error) (RenameSessionIdentityResult, error) {
+func (a *Adapter) fenceSessionIdentityRename(ctx context.Context, sessionID, previousName, previousTmuxName string, observedRevisionValue any, fenceRevision string) error {
+	result, err := a.conn.ExecContext(ctx, `
+		UPDATE agm_sessions
+		SET tmux_session_revision = ?
+		WHERE id = ? AND workspace = ?
+		  AND name = ? AND tmux_session_name = ?
+		  AND ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)
+	`, fenceRevision, sessionID, a.workspace, previousName, previousTmuxName, observedRevisionValue, observedRevisionValue)
+	if err != nil {
+		return fmt.Errorf("fence pending session identity rename: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get session identity rename fence rows affected: %w", err)
+	}
+	if rowsAffected > 1 {
+		return fmt.Errorf("session identity rename fence changed %d rows", rowsAffected)
+	}
+	return nil
+}
+
+func classifySessionIdentityRenameAfterError(previousName, previousTmuxName, observedRevision, newName, nextRevision, fenceRevision, currentName, currentTmuxName, currentRevision string, primaryErr error) (RenameSessionIdentityResult, error) {
 	committedIdentity := currentName == newName && currentTmuxName == newName
 	exactCommit := committedIdentity && currentRevision == nextRevision
 	supersededCommit := committedIdentity && currentRevision != nextRevision
@@ -438,7 +464,13 @@ func classifySessionIdentityRenameAfterError(previousName, previousTmuxName, new
 		// preserving the intended identity; both outcomes are complete.
 		return RenameSessionIdentityResult{}, nil
 	}
-	rollbackSafe := currentName == previousName && currentTmuxName == previousTmuxName
+	previousIdentity := currentName == previousName && currentTmuxName == previousTmuxName
+	// The exact fence revision proves our competing CAS won. Any other revision
+	// advanced away from the observed value also makes the original CAS unable
+	// to commit. The unchanged observed revision remains ambiguous because the
+	// original autocommit may still be in flight.
+	fenced := currentRevision == fenceRevision || currentRevision != observedRevision
+	rollbackSafe := previousIdentity && fenced
 	return RenameSessionIdentityResult{TmuxRollbackSafe: rollbackSafe}, primaryErr
 }
 

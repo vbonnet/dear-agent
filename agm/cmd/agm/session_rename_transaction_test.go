@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 type recordingSessionIdentityRenamer struct {
@@ -107,28 +109,55 @@ func TestPersistRenamedSessionIdentityPreservesTmuxWhenStorageIsUncertain(t *tes
 	}
 }
 
-func TestClassifyTmuxRenameAfterError(t *testing.T) {
+func TestClassifyTmuxRenameResult(t *testing.T) {
 	primary := errors.New("tmux client lost reply")
 	tests := []struct {
-		name      string
-		sameName  bool
-		oldExists bool
-		newExists bool
-		wantMoved bool
-		wantError bool
+		name        string
+		oldName     string
+		newName     string
+		currentName string
+		owned       bool
+		renameErr   error
+		wantMoved   bool
+		wantError   bool
 	}{
-		{name: "server applied rename", oldExists: false, newExists: true, wantMoved: true},
-		{name: "server did not apply rename", oldExists: true, newExists: false, wantError: true},
-		{name: "same normalized identity remains", sameName: true, oldExists: true, newExists: true, wantMoved: true},
-		{name: "both identities exist", oldExists: true, newExists: true, wantError: true},
-		{name: "neither identity is visible", oldExists: false, newExists: false, wantError: true},
+		{name: "server applied rename", oldName: "old", newName: "new", currentName: "new", owned: true, renameErr: primary, wantMoved: true},
+		{name: "server did not apply rename", oldName: "old", newName: "new", currentName: "old", owned: true, renameErr: primary, wantError: true},
+		{name: "same normalized identity remains", oldName: "same", newName: "same", currentName: "same", owned: true, renameErr: primary, wantMoved: true},
+		{name: "replacement occupies target", oldName: "old", newName: "new", currentName: "new", renameErr: primary, wantError: true},
+		{name: "claimed identity moved elsewhere", oldName: "old", newName: "new", currentName: "other", owned: true, renameErr: primary, wantError: true},
+		{name: "success response without identity move", oldName: "old", newName: "new", currentName: "old", owned: true, wantError: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := classifyTmuxRenameAfterError(tt.sameName, tt.oldExists, tt.newExists, primary)
+			result, err := classifyTmuxRenameResult(tmuxRenameOutcome{}, tt.oldName, tt.newName, tt.currentName, tt.owned, tt.renameErr)
 			if result.Moved != tt.wantMoved || (err != nil) != tt.wantError {
-				t.Fatalf("classifyTmuxRenameAfterError() = (moved=%v, err=%v), want (moved=%v, error=%v)", result.Moved, err, tt.wantMoved, tt.wantError)
+				t.Fatalf("classifyTmuxRenameResult() = (moved=%v, err=%v), want (moved=%v, error=%v)", result.Moved, err, tt.wantMoved, tt.wantError)
 			}
 		})
+	}
+}
+
+func TestMoveAndRestoreTmuxSessionForRenamePreservesClaimedIdentity(t *testing.T) {
+	requireCodexResumeTmuxIntegration(t)
+	socketPath := setupRegressionSocket(t)
+	if err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", "rename-source").Run(); err != nil {
+		t.Fatalf("create source session: %v", err)
+	}
+	outcome, err := moveTmuxSessionForRename(t.Context(), "rename-source", "rename-target")
+	if err != nil || !outcome.Moved || !outcome.Identity.Valid() {
+		t.Fatalf("moveTmuxSessionForRename() = (outcome=%+v err=%v)", outcome, err)
+	}
+	t.Cleanup(func() {
+		_ = tmux.ClearSessionRenameIdentityContext(context.Background(), outcome.Identity)
+		tmux.KillSession("rename-source")
+		tmux.KillSession("rename-target")
+	})
+	if err := restoreTmuxSessionNameAfterRename(t.Context(), outcome.Identity, "rename-target", "rename-source"); err != nil {
+		t.Fatalf("restoreTmuxSessionNameAfterRename() error: %v", err)
+	}
+	name, owned, err := tmux.InspectSessionRenameIdentityContext(t.Context(), outcome.Identity)
+	if err != nil || !owned || name != "rename-source" {
+		t.Fatalf("restored claimed identity = (name=%q owned=%v err=%v)", name, owned, err)
 	}
 }

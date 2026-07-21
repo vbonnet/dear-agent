@@ -291,16 +291,58 @@ func TestClassifySessionIdentityRenameAfterError(t *testing.T) {
 	}{
 		{name: "exact generated revision committed", currentName: "new-name", currentTmux: "new-name", currentRev: "next-revision", wantSuccess: true},
 		{name: "later writer superseded committed revision", currentName: "new-name", currentTmux: "new-name", currentRev: "later-revision", wantSuccess: true},
-		{name: "previous identity proves rollback safe", currentName: "old-name", currentTmux: "old-tmux", currentRev: "later-unrelated-revision", wantRollback: true},
+		{name: "exact fence revision proves rollback safe", currentName: "old-name", currentTmux: "old-tmux", currentRev: "fence-revision", wantRollback: true},
+		{name: "later revision also fences pending write", currentName: "old-name", currentTmux: "old-tmux", currentRev: "later-unrelated-revision", wantRollback: true},
+		{name: "unchanged observed revision remains ambiguous", currentName: "old-name", currentTmux: "old-tmux", currentRev: "observed-revision"},
 		{name: "different identity makes rollback unsafe", currentName: "other-name", currentTmux: "other-tmux", currentRev: "other-revision"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := classifySessionIdentityRenameAfterError("old-name", "old-tmux", "new-name", "next-revision", tt.currentName, tt.currentTmux, tt.currentRev, primary)
+			result, err := classifySessionIdentityRenameAfterError("old-name", "old-tmux", "observed-revision", "new-name", "next-revision", "fence-revision", tt.currentName, tt.currentTmux, tt.currentRev, primary)
 			if (err == nil) != tt.wantSuccess || result.TmuxRollbackSafe != tt.wantRollback {
 				t.Fatalf("classification = (result=%+v err=%v), want success=%v rollback=%v", result, err, tt.wantSuccess, tt.wantRollback)
 			}
 		})
+	}
+}
+
+func TestSQLiteSessionIdentityRenameFenceRejectsObservedRevision(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "sqlite-rename-fence",
+		Name:          "old-name",
+		Workspace:     adapter.Workspace(),
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+		Context:       manifest.Context{Project: t.TempDir()},
+		Tmux:          manifest.Tmux{SessionName: "old-tmux"},
+	}
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+	observed, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() error: %v", err)
+	}
+	observedValue := nullableStringValue(sql.NullString{String: observed.Tmux.SessionRevision, Valid: observed.Tmux.SessionRevision != ""})
+	if err := adapter.fenceSessionIdentityRename(t.Context(), observed.SessionID, observed.Name, observed.Tmux.SessionName, observedValue, "fence-revision"); err != nil {
+		t.Fatalf("fenceSessionIdentityRename() error: %v", err)
+	}
+	result, err := adapter.RenameSessionIdentity(t.Context(), observed.SessionID, observed.Name, observed.Tmux.SessionName, observed.Tmux.SessionRevision, "new-name")
+	if err == nil || !result.TmuxRollbackSafe {
+		t.Fatalf("RenameSessionIdentity() after fence = (result=%+v err=%v), want fenced conflict with safe rollback", result, err)
+	}
+	current, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after fence error: %v", err)
+	}
+	if current.Name != "old-name" || current.Tmux.SessionName != "old-tmux" || current.Tmux.SessionRevision != "fence-revision" {
+		t.Fatalf("identity after fence = (name=%q tmux=%q revision=%q)", current.Name, current.Tmux.SessionName, current.Tmux.SessionRevision)
 	}
 }
 
