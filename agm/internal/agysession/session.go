@@ -82,7 +82,7 @@ func FindByID(homeDir, conversationID string) (*Metadata, error) {
 	info, err := os.Stat(conversationDBPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("no AGY saved conversation found for ID: %s", conversationID)
+			return nil, fmt.Errorf("%w for ID: %s", ErrConversationNotFound, conversationID)
 		}
 		return nil, fmt.Errorf("stat AGY conversation DB: %w", err)
 	}
@@ -184,7 +184,16 @@ func FindLatestForWorkspace(homeDir, workspacePath string) (*Metadata, error) {
 	}
 	conversationID := lastConversations[workspacePath]
 	if conversationID != "" {
-		return FindByID(homeDir, conversationID)
+		metadata, findErr := FindByID(homeDir, conversationID)
+		if findErr == nil {
+			return metadata, nil
+		}
+		if !errors.Is(findErr, ErrConversationNotFound) {
+			return nil, findErr
+		}
+		// A provider cache entry can outlive its conversation database. Treat
+		// that one entry as stale and continue through the bounded log lookup;
+		// corrupt, unreadable, and budget-exhausted metadata still fails closed.
 	}
 	conversationID, _, err = latestConversationForWorkspaceFromLogs(appDir, workspacePath)
 	if err != nil {

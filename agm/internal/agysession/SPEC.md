@@ -30,6 +30,8 @@ conversations with their workspace, transcript, and permission-mode context.
 
 **AGYS-10** When the canonical AGY workspace lock attempts acquisition, the system shall retry with caller cancellation only for contention and shall stop after the first attempt and return the cause for any other flock error.
 
+**AGYS-11** When the last-conversations cache maps a workspace to a conversation whose database no longer exists, the system shall treat that cache entry as stale and continue through bounded log discovery, returning conversation-not-found only when the complete bounded search finds no usable conversation while still failing explicitly on corruption, unreadable metadata, or discovery-budget exhaustion.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/agy_saved_session_discovery.feature`

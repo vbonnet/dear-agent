@@ -223,41 +223,12 @@ func (a *AgyAdapter) ResumeSession(sessionID SessionID) error {
 		return fmt.Errorf("session not found: %w", err)
 	}
 
-	// Check if tmux session exists and whether AGY itself is alive. A surviving
-	// shell or another harness process must not suppress a cold resume.
-	exists, err := agyHasSession(metadata.TmuxName)
-	if err != nil {
-		return fmt.Errorf("failed to check tmux session: %w", err)
-	}
-
-	sendCommands := false
-	if exists {
-		running, checkErr := agyCheckProcess(metadata.TmuxName, tmux.GetSocketPath(), "agy")
-		if checkErr != nil {
-			return fmt.Errorf("failed to check AGY process liveness: %w", checkErr)
-		}
-		if !running {
-			verdict, harnessErr := agyCheckHarness(metadata.TmuxName, tmux.GetSocketPath())
-			if harnessErr != nil {
-				return fmt.Errorf("failed to check competing harness liveness: %w", harnessErr)
-			}
-			if verdict.HarnessAlive {
-				return fmt.Errorf("refusing to resume AGY session %q into a tmux pane containing another live harness (pane tree: %s)", sessionID, verdict.Evidence)
-			}
-			if !verdict.RestartableShell {
-				return fmt.Errorf("refusing to resume AGY session %q because its tmux pane is not a proven restartable shell (pane tree: %s)", sessionID, verdict.Evidence)
-			}
-		}
-		sendCommands = !running
-	} else {
-		sendCommands = true
-	}
-
-	// Send resume command if needed
-	if sendCommands {
-		if err := resumeAgyAdapterProcess(sessionID, metadata, exists); err != nil {
-			return err
-		}
+	// Process liveness and the restartable-shell proof must be evaluated while
+	// holding the workspace lifecycle lock. Otherwise two cold resumes can both
+	// observe a shell before either launch and the second can inject into the
+	// first launch's live composer.
+	if err := resumeAgyAdapterProcess(sessionID, metadata); err != nil {
+		return err
 	}
 
 	// Attach to tmux session (skip if already in tmux)
@@ -270,7 +241,7 @@ func (a *AgyAdapter) ResumeSession(sessionID SessionID) error {
 	return nil
 }
 
-func resumeAgyAdapterProcess(sessionID SessionID, metadata *SessionMetadata, tmuxExists bool) error {
+func resumeAgyAdapterProcess(sessionID SessionID, metadata *SessionMetadata) error {
 	if metadata.UUID == "" {
 		return fmt.Errorf("AGY session %q has no native conversation ID; capture or reassociate it before cold resume", sessionID)
 	}
@@ -295,6 +266,14 @@ func resumeAgyAdapterProcess(sessionID SessionID, metadata *SessionMetadata, tmu
 			fmt.Fprintf(os.Stderr, "Warning: failed to release AGY workspace lock after resume: %v\n", unlockErr)
 		}
 	}()
+
+	tmuxExists, running, err := lockedAgyAdapterResumeTargetState(sessionID, metadata.TmuxName)
+	if err != nil {
+		return err
+	}
+	if running {
+		return nil
+	}
 
 	created := false
 	if !tmuxExists {
@@ -327,6 +306,34 @@ func resumeAgyAdapterProcess(sessionID SessionID, metadata *SessionMetadata, tmu
 		return primaryErr
 	}
 	return nil
+}
+
+func lockedAgyAdapterResumeTargetState(sessionID SessionID, tmuxName string) (bool, bool, error) {
+	tmuxExists, err := agyHasSession(tmuxName)
+	if err != nil {
+		return false, false, fmt.Errorf("failed to check tmux session: %w", err)
+	}
+	if !tmuxExists {
+		return false, false, nil
+	}
+	running, err := agyCheckProcess(tmuxName, tmux.GetSocketPath(), "agy")
+	if err != nil {
+		return true, false, fmt.Errorf("failed to check AGY process liveness: %w", err)
+	}
+	if running {
+		return true, true, nil
+	}
+	verdict, err := agyCheckHarness(tmuxName, tmux.GetSocketPath())
+	if err != nil {
+		return true, false, fmt.Errorf("failed to check competing harness liveness: %w", err)
+	}
+	if verdict.HarnessAlive {
+		return true, false, fmt.Errorf("refusing to resume AGY session %q into a tmux pane containing another live harness (pane tree: %s)", sessionID, verdict.Evidence)
+	}
+	if !verdict.RestartableShell {
+		return true, false, fmt.Errorf("refusing to resume AGY session %q because its tmux pane is not a proven restartable shell (pane tree: %s)", sessionID, verdict.Evidence)
+	}
+	return true, false, nil
 }
 
 // TerminateSession terminates an Agy session.

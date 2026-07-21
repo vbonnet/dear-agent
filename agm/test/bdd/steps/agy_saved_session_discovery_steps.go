@@ -57,7 +57,7 @@ func agmValidatesBoundedAgyLogDiscovery(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/agysession", "-run",
-		`^(TestFindByID_(CacheHitDoesNotReadInvalidLogDirectory|RejectsUnsafeConversationIDBeforePathLookup)|TestAcquireWorkspaceCreateLockSerializesAndHonorsCancellation|TestCreateIdentityTracker(SnapshotsAbsenceAndDiscoversNewIdentity|RejectsStaleIdentityAndHonorsCancellation|FailsClosedOn(SnapshotCorruption|EmptySnapshotMetadata))|TestCollectAgyLogCandidatesSkipsRemovedEntry|TestWorkspaceFromLogCandidates(ReturnsKnownMatchWithDirectoryExhaustion|SkipsRemovedFileBeforeScan)|TestWorkspaceFromLogs(PrefersNewestModificationTime|Reports(Candidate|DirectoryEntry|PerFileByte)BudgetExhaustion|RejectsOversizedLine|ReturnsMatchInsideTruncatedFile)|TestLatestConversationForWorkspace(Rejects(DirectoryEntryExhaustion|TruncatedPrefixMatch|OlderMatchAfterTruncatedNewerLog)|FromLogCandidatesSkipsRemovedFileBeforeScan)|TestLogHasUnreadTailDetectsGrowthAfterBoundedScan)$`,
+		`^(TestFindByID_(CacheHitDoesNotReadInvalidLogDirectory|RejectsUnsafeConversationIDBeforePathLookup)|TestFindLatestForWorkspace_(FallsBackFromDanglingCacheToLogs|ClassifiesDanglingCacheWithoutLogsAsAbsent)|TestAcquireWorkspaceCreateLockSerializesAndHonorsCancellation|TestCreateIdentityTracker(SnapshotsAbsenceAndDiscoversNewIdentity|RejectsStaleIdentityAndHonorsCancellation|FailsClosedOn(SnapshotCorruption|EmptySnapshotMetadata))|TestCollectAgyLogCandidatesSkipsRemovedEntry|TestWorkspaceFromLogCandidates(ReturnsKnownMatchWithDirectoryExhaustion|SkipsRemovedFileBeforeScan)|TestWorkspaceFromLogs(PrefersNewestModificationTime|Reports(Candidate|DirectoryEntry|PerFileByte)BudgetExhaustion|RejectsOversizedLine|ReturnsMatchInsideTruncatedFile)|TestLatestConversationForWorkspace(Rejects(DirectoryEntryExhaustion|TruncatedPrefixMatch|OlderMatchAfterTruncatedNewerLog)|FromLogCandidatesSkipsRemovedFileBeforeScan)|TestLogHasUnreadTailDetectsGrowthAfterBoundedScan)$`,
 		"-count=1", "-v")
 	cmd.Dir = packageSpecBDDRepoRoot()
 	output, runErr := cmd.CombinedOutput()
@@ -87,6 +87,8 @@ func agyCreateIdentityCorrelationShouldRejectStaleProviderState(ctx context.Cont
 		"TestCreateIdentityTrackerRejectsStaleIdentityAndHonorsCancellation",
 		"TestCreateIdentityTrackerFailsClosedOnSnapshotCorruption",
 		"TestCreateIdentityTrackerFailsClosedOnEmptySnapshotMetadata",
+		"TestFindLatestForWorkspace_FallsBackFromDanglingCacheToLogs",
+		"TestFindLatestForWorkspace_ClassifiesDanglingCacheWithoutLogsAsAbsent",
 	)
 }
 

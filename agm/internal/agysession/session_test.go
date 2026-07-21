@@ -189,6 +189,48 @@ func TestFindLatestForWorkspace_FallsBackToLogs(t *testing.T) {
 	}
 }
 
+func TestFindLatestForWorkspace_FallsBackFromDanglingCacheToLogs(t *testing.T) {
+	homeDir := t.TempDir()
+	appDir := filepath.Join(homeDir, ".gemini", "antigravity-cli")
+	workspace := "/tmp/agy-dangling-cache"
+	danglingID := "dangling-conversation"
+	currentID := "current-conversation"
+
+	writeAgyFixture(t, appDir, danglingID, workspace, "")
+	if err := os.Remove(filepath.Join(appDir, "conversations", danglingID+".db")); err != nil {
+		t.Fatalf("remove stale conversation DB: %v", err)
+	}
+	writeAgyFixture(t, appDir, currentID, "", workspace)
+	cachePath := filepath.Join(appDir, "cache", "last_conversations.json")
+	if err := os.WriteFile(cachePath, []byte(`{"`+workspace+`":"`+danglingID+`"}`), 0o644); err != nil {
+		t.Fatalf("restore dangling cache entry: %v", err)
+	}
+
+	meta, err := FindLatestForWorkspace(homeDir, workspace)
+	if err != nil {
+		t.Fatalf("FindLatestForWorkspace: %v", err)
+	}
+	if meta.ConversationID != currentID {
+		t.Fatalf("conversation ID = %q, want log-backed %q", meta.ConversationID, currentID)
+	}
+}
+
+func TestFindLatestForWorkspace_ClassifiesDanglingCacheWithoutLogsAsAbsent(t *testing.T) {
+	homeDir := t.TempDir()
+	appDir := filepath.Join(homeDir, ".gemini", "antigravity-cli")
+	workspace := "/tmp/agy-dangling-cache-only"
+	conversationID := "dangling-conversation"
+	writeAgyFixture(t, appDir, conversationID, workspace, "")
+	if err := os.Remove(filepath.Join(appDir, "conversations", conversationID+".db")); err != nil {
+		t.Fatalf("remove stale conversation DB: %v", err)
+	}
+
+	_, err := FindLatestForWorkspace(homeDir, workspace)
+	if !errors.Is(err, ErrConversationNotFound) {
+		t.Fatalf("FindLatestForWorkspace error = %v, want ErrConversationNotFound", err)
+	}
+}
+
 func TestFindLatestForWorkspace_StripsGetConversationDetailSuffix(t *testing.T) {
 	homeDir := t.TempDir()
 	appDir := filepath.Join(homeDir, ".gemini", "antigravity-cli")

@@ -902,6 +902,55 @@ func TestAgyResumeSessionHoldsWorkspaceLockThroughReadiness(t *testing.T) {
 	}
 }
 
+func TestAgyResumeSessionSerializesPaneProofWithCommandDelivery(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	t.Setenv("TMUX", "fixture")
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	sessionID := SessionID("adapter-session")
+	if err := store.Set(sessionID, &SessionMetadata{
+		TmuxName: "agy-concurrent-resume", WorkingDir: "/work", UUID: "native-id",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var lifecycle sync.Mutex
+	running := false
+	sendCount := 0
+	agyAcquireCreateLock = func(string) (func() error, error) {
+		lifecycle.Lock()
+		return func() error { lifecycle.Unlock(); return nil }, nil
+	}
+	agyHasSession = func(string) (bool, error) { return true, nil }
+	agyCheckProcess = func(string, string, string) (bool, error) { return running, nil }
+	agyCheckHarness = func(string, string) (tmux.PaneLiveness, error) {
+		return tmux.PaneLiveness{SessionExists: true, RestartableShell: true, Evidence: "zsh"}, nil
+	}
+	agySendCommand = func(string, string) error {
+		sendCount++
+		running = true
+		return nil
+	}
+	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return nil }
+
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() {
+			<-start
+			errs <- (&AgyAdapter{sessionStore: store}).ResumeSession(sessionID)
+		}()
+	}
+	close(start)
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent ResumeSession: %v", err)
+		}
+	}
+	if sendCount != 1 {
+		t.Fatalf("concurrent cold resumes delivered %d commands, want exactly one", sendCount)
+	}
+}
+
 func TestAgyResumeSessionLeavesLiveAgyUntouched(t *testing.T) {
 	preserveAgyAdapterSeams(t)
 	t.Setenv("TMUX", "fixture")
