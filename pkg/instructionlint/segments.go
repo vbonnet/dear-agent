@@ -278,7 +278,6 @@ func agentVisibleScriptCommand(value string, helpers map[string]bool) bool {
 
 var shellAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 var shellDeclaration = regexp.MustCompile(`^(?:local|export|readonly|typeset|declare)(?:\s+-[A-Za-z]+)*\s+`)
-var heredocMarker = regexp.MustCompile(`<<-?['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
 var shellCommandSubstitution = regexp.MustCompile(`\$\(([^()]*)\)`)
 var shellFunction = regexp.MustCompile(`^(?:function\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*\(\))?|([A-Za-z_][A-Za-z0-9_]*)\s*\(\))\s*\{`)
 
@@ -395,12 +394,56 @@ func scriptAssignmentQuote(value string) byte {
 }
 
 func scriptHeredocMarker(value string) string {
-	for _, match := range heredocMarker.FindAllStringSubmatchIndex(value, -1) {
-		start := match[0]
-		if (start > 0 && value[start-1] == '<') || (start+2 < len(value) && value[start+2] == '<') {
+	quote := byte(0)
+	escaped := false
+	for index := 0; index+1 < len(value); index++ {
+		current := value[index]
+		if escaped {
+			escaped = false
 			continue
 		}
-		return value[match[2]:match[3]]
+		if current == '\\' && quote != '\'' {
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			if current == quote {
+				quote = 0
+			}
+			continue
+		}
+		if current == '\'' || current == '"' {
+			quote = current
+			continue
+		}
+		if current != '<' || value[index+1] != '<' ||
+			(index > 0 && value[index-1] == '<') || (index+2 < len(value) && value[index+2] == '<') {
+			continue
+		}
+
+		markerStart := index + 2
+		if markerStart < len(value) && value[markerStart] == '-' {
+			markerStart++
+		}
+		markerQuote := byte(0)
+		if markerStart < len(value) && (value[markerStart] == '\'' || value[markerStart] == '"') {
+			markerQuote = value[markerStart]
+			markerStart++
+		}
+		markerEnd := markerStart
+		for markerEnd < len(value) && (value[markerEnd] == '_' ||
+			value[markerEnd] >= 'A' && value[markerEnd] <= 'Z' ||
+			value[markerEnd] >= 'a' && value[markerEnd] <= 'z' ||
+			markerEnd > markerStart && value[markerEnd] >= '0' && value[markerEnd] <= '9') {
+			markerEnd++
+		}
+		if markerEnd == markerStart || markerStart < len(value) && value[markerStart] >= '0' && value[markerStart] <= '9' {
+			continue
+		}
+		if markerQuote != 0 && (markerEnd >= len(value) || value[markerEnd] != markerQuote) {
+			continue
+		}
+		return value[markerStart:markerEnd]
 	}
 	return ""
 }
