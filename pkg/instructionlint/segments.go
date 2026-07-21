@@ -528,7 +528,16 @@ func scriptCommandPrintsPath(command, path string) bool {
 	if len(fields) == 0 || !slices.Contains([]string{"cat", "jq"}, fields[0]) {
 		return false
 	}
-	return slices.Contains(fields[1:], path)
+	for _, field := range fields[1:] {
+		if field == path {
+			return true
+		}
+		redirect := strings.TrimLeft(field, "0123456789")
+		if strings.HasPrefix(redirect, "<") && strings.TrimLeft(redirect, "<") == path {
+			return true
+		}
+	}
+	return false
 }
 
 func scriptLinePrintsPath(value, path string) bool {

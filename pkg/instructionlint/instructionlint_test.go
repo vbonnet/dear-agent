@@ -312,6 +312,10 @@ func TestScriptHeredocVisibilityFollowsRoutingAndDeferredReplay(t *testing.T) {
 		"git push origin main",
 		"PRINTED_LATER",
 		"cat later-fixture",
+		"cat >stdin-fixture <<'STDIN_REPLAY'",
+		"gh pr close 456",
+		"STDIN_REPLAY",
+		"cat <stdin-fixture",
 		"cat <<'PIPE_FILE_ONLY' | jq -R . >pipeline-fixture",
 		"gh pr merge 123",
 		"PIPE_FILE_ONLY",
@@ -327,6 +331,7 @@ func TestScriptHeredocVisibilityFollowsRoutingAndDeferredReplay(t *testing.T) {
 	for _, visible := range []string{
 		"safe-pr create --emergency --reason exposed",
 		"git push origin main",
+		"gh pr close 456",
 		"bd ready",
 	} {
 		if !slices.Contains(text, visible) {
