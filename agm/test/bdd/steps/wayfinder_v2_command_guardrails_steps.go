@@ -289,6 +289,7 @@ func nonMigrationRuntimeOmitsRetiredPhases(ctx context.Context) error {
 		{path: "wayfinder", extensions: map[string]bool{".go": true, ".md": true, ".json": true, ".yaml": true, ".yml": true}},
 		{path: "agm/cmd/agm-mcp-server", extensions: map[string]bool{".go": true}},
 		{path: "engram/cmd/engram-mcp", extensions: map[string]bool{".go": true}},
+		{path: "engram/cmd/engram/cmd", extensions: map[string]bool{".go": true}},
 		{path: "engram/internal/analytics", extensions: map[string]bool{".go": true}},
 		{path: "engram/internal/memory", extensions: map[string]bool{".go": true}},
 		{path: "internal/safepr", extensions: map[string]bool{".go": true}},

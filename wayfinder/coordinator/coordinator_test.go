@@ -3,6 +3,8 @@ package coordinator
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -342,6 +344,39 @@ func TestParseWayfinderStatus_RejectsInvalidCanonicalFields(t *testing.T) {
 	content := []byte("---\nschema_version: \"1.0\"\ncurrent_waypoint: UNKNOWN\nstatus: typo\n---\n")
 	if status := parseWayfinderStatus("/test/project", content); status != nil {
 		t.Fatalf("parseWayfinderStatus accepted invalid canonical state: %+v", status)
+	}
+}
+
+func TestStatusPollerEvictsCachedStatusAfterParseFailure(t *testing.T) {
+	dir := t.TempDir()
+	statusPath := filepath.Join(dir, "WAYFINDER-STATUS.md")
+	valid := []byte(`---
+schema_version: "2.0"
+project_name: cache-eviction-test
+project_type: feature
+risk_level: S
+current_waypoint: BUILD
+status: in-progress
+created_at: 2026-07-20T00:00:00Z
+updated_at: 2026-07-20T00:00:00Z
+---
+`)
+	if err := os.WriteFile(statusPath, valid, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	monitor := NewMonitor(time.Second, t.TempDir())
+	monitor.statusPoller.pollOnce([]string{dir})
+	if _, err := monitor.GetStatus(dir); err != nil {
+		t.Fatalf("GetStatus() after valid poll: %v", err)
+	}
+
+	if err := os.WriteFile(statusPath, []byte("not canonical status\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	monitor.statusPoller.pollOnce([]string{dir})
+	if cached, err := monitor.GetStatus(dir); err == nil {
+		t.Fatalf("GetStatus() retained stale cache after parse failure: %+v", cached)
 	}
 }
 

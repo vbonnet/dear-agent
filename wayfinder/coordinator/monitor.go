@@ -224,11 +224,13 @@ func (sp *StatusPoller) pollOnce(projectDirs []string) {
 		}
 
 		status := sp.readStatus(absDir)
-		if status != nil {
-			sp.mu.Lock()
+		sp.mu.Lock()
+		if status == nil {
+			delete(sp.projects, absDir)
+		} else {
 			sp.projects[absDir] = status
-			sp.mu.Unlock()
 		}
+		sp.mu.Unlock()
 	}
 }
 

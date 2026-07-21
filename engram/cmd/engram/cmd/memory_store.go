@@ -43,7 +43,7 @@ REQUIRED FLAGS
 OPTIONAL FLAGS
   --memory-id     Unique memory ID (default: auto-generated UUID)
   --importance    Importance score 0-1 (default: 0)
-  --metadata      Metadata as JSON object (e.g., '{"source":"wayfinder","phase":"D1"}')
+  --metadata      Metadata as JSON object (e.g., '{"source":"wayfinder","phase":"DESIGN"}')
   --format        Output format (json|text) (default: text)
 
 EXAMPLES
@@ -51,7 +51,7 @@ EXAMPLES
   $ engram memory store \
       --namespace user,alice \
       --type episodic \
-      --content "Completed D1 validation phase at 2025-12-15T10:30:00Z"
+      --content "Completed DESIGN validation phase at 2025-12-15T10:30:00Z"
 
   # Store with importance and metadata
   $ engram memory store \

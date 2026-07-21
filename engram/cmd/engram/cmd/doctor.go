@@ -58,7 +58,7 @@ Examples:
 func init() {
 	rootCmd.AddCommand(doctorCmd)
 
-	// Flags (from D4 FR4)
+	// Doctor command flags.
 	doctorCmd.Flags().BoolVar(&autoFixFlag, "auto-fix", false, "Apply safe auto-fixes (Tier 1 operations)")
 	doctorCmd.Flags().BoolVar(&quietFlag, "quiet", false, "Only show issues, silent if healthy")
 	doctorCmd.Flags().BoolVar(&jsonFlag, "json", false, "Output JSON for automation")
