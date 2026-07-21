@@ -102,6 +102,23 @@ describe('parseWayfinderStatus', () => {
     assert.throws(() => parseWayfinderStatus(invalid), /cannot skip mandatory waypoint "BUILD"/);
   });
 
+  it('rejects history that bypasses mandatory predecessors', () => {
+    const invalid = `---
+schema_version: "2.0"
+project_name: bypass
+project_type: feature
+risk_level: M
+current_waypoint: BUILD
+status: in-progress
+created_at: 2026-07-20T00:00:00Z
+updated_at: 2026-07-20T00:01:00Z
+waypoint_history:
+  - {name: BUILD, status: completed, started_at: 2026-07-20T00:00:00Z, completed_at: 2026-07-20T00:01:00Z}
+---
+`;
+    assert.throws(() => parseWayfinderStatus(invalid), /requires completed predecessor "CHARTER"/);
+  });
+
   it('requires blocked_reason for blocked status', () => {
     assert.throws(
       () => parseWayfinderStatus(canonical.replace('status: in-progress', 'status: blocked')),

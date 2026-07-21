@@ -231,11 +231,78 @@ func validateWaypointHistory(status *StatusV2) error {
 		}
 
 	}
+	errors = append(errors, validateWaypointSequence(status, allWaypoints)...)
 
 	if len(errors) > 0 {
 		return fmt.Errorf("%s", strings.Join(errors, "; "))
 	}
 	return nil
+}
+
+func validateWaypointSequence(status *StatusV2, allWaypoints []string) []string {
+	positions := make(map[string]int, len(allWaypoints))
+	for index, waypoint := range allWaypoints {
+		positions[waypoint] = index
+	}
+
+	errors := validateWaypointHistoryOrder(status, allWaypoints, positions)
+	currentPosition, currentValid := positions[status.CurrentWaypoint]
+	if !currentValid {
+		return errors
+	}
+	completed := completedWaypoints(status)
+	for _, predecessor := range missingPredecessors(status, allWaypoints[:currentPosition], completed) {
+		errors = append(errors, fmt.Sprintf("current_waypoint '%s' requires completed predecessor '%s'", status.CurrentWaypoint, predecessor))
+	}
+	return errors
+}
+
+func validateWaypointHistoryOrder(status *StatusV2, allWaypoints []string, positions map[string]int) []string {
+	var errors []string
+	completedBefore := make(map[string]bool, len(status.WaypointHistory))
+	lastPosition := -1
+	for index, waypoint := range status.WaypointHistory {
+		position, valid := positions[waypoint.Name]
+		if !valid {
+			continue
+		}
+		if position < lastPosition {
+			errors = append(errors, fmt.Sprintf("waypoint_history[%d]: waypoint '%s' is out of canonical order", index, waypoint.Name))
+		}
+		for _, predecessor := range missingPredecessors(status, allWaypoints[:position], completedBefore) {
+			errors = append(errors, fmt.Sprintf("waypoint_history[%d]: predecessor '%s' must be completed before '%s'", index, predecessor, waypoint.Name))
+		}
+		if isCompletedWaypoint(status, waypoint) {
+			completedBefore[waypoint.Name] = true
+		}
+		lastPosition = position
+	}
+	return errors
+}
+
+func completedWaypoints(status *StatusV2) map[string]bool {
+	completed := make(map[string]bool, len(status.WaypointHistory))
+	for _, waypoint := range status.WaypointHistory {
+		if isCompletedWaypoint(status, waypoint) {
+			completed[waypoint.Name] = true
+		}
+	}
+	return completed
+}
+
+func missingPredecessors(status *StatusV2, predecessors []string, completed map[string]bool) []string {
+	var missing []string
+	for _, predecessor := range predecessors {
+		if !status.IsPhaseSkipped(predecessor) && !completed[predecessor] {
+			missing = append(missing, predecessor)
+		}
+	}
+	return missing
+}
+
+func isCompletedWaypoint(status *StatusV2, waypoint WaypointHistory) bool {
+	return waypoint.Status == WaypointStatusV2Completed ||
+		(waypoint.Status == WaypointStatusV2Skipped && status.IsPhaseSkipped(waypoint.Name))
 }
 
 // validateWaypointMetadata validates waypoint-specific metadata fields

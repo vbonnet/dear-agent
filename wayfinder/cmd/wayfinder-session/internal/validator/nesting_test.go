@@ -17,8 +17,8 @@ func createStatusFile(t *testing.T, dir string, projectStatus string, allPhasesC
 	t.Helper()
 	st := status.NewStatusV2("test", status.ProjectTypeFeature, status.RiskLevelM)
 	st.Status = projectStatus
-	st.CurrentWaypoint = status.PhaseV2Problem
-	st.UpdatePhase(status.PhaseV2Problem, status.PhaseStatusV2InProgress, "")
+	st.CurrentWaypoint = status.PhaseV2Charter
+	st.UpdatePhase(status.PhaseV2Charter, status.PhaseStatusV2InProgress, "")
 	if allPhasesComplete {
 		st.WaypointHistory = nil
 		for _, phase := range status.AllPhases() {
@@ -31,6 +31,7 @@ func createStatusFile(t *testing.T, dir string, projectStatus string, allPhasesC
 		build := st.FindWaypointHistory(status.WaypointV2Build)
 		build.ValidationStatus = status.ValidationStatusPassed
 		build.DeploymentStatus = status.DeploymentStatusDeployed
+		st.CurrentWaypoint = status.WaypointV2Retro
 	}
 	if projectStatus == status.StatusV2Completed {
 		completedAt := time.Now()

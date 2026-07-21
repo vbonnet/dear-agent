@@ -102,17 +102,7 @@ func TestRoundTrip(t *testing.T) {
 		Branch:          "feature/test",
 		Tags:            []string{"test", "complex"},
 		Beads:           []string{"bead-1", "bead-2"},
-		WaypointHistory: []PhaseHistory{
-			{
-				Name:      PhaseV2Charter,
-				Status:    PhaseStatusV2Completed,
-				StartedAt: time.Now().Add(-48 * time.Hour).Truncate(time.Second),
-				CompletedAt: func() *time.Time {
-					t := time.Now().Add(-47 * time.Hour).Truncate(time.Second)
-					return &t
-				}(),
-			},
-		},
+		WaypointHistory: completedHistoryBefore(PhaseV2Build, time.Now().Add(-time.Hour).Truncate(time.Second)),
 		Roadmap: &Roadmap{
 			Phases: []RoadmapPhase{
 				{
@@ -284,19 +274,22 @@ func TestParseV2RejectsUnknownFields(t *testing.T) {
 	}
 }
 
-func TestParseV2AcceptsPendingWaypointHistoryAfterRewind(t *testing.T) {
+func TestParseV2AcceptsCanonicalHistoryAfterRewind(t *testing.T) {
 	st := NewStatusV2("test", ProjectTypeFeature, RiskLevelM)
+	now := time.Now()
 	st.WaypointHistory = []WaypointHistory{{
-		Name:      WaypointV2Problem,
-		Status:    WaypointStatusV2Pending,
-		StartedAt: time.Now().Add(-time.Hour),
+		Name:        WaypointV2Charter,
+		Status:      WaypointStatusV2Completed,
+		StartedAt:   now.Add(-time.Hour),
+		CompletedAt: &now,
 	}}
+	st.SetCurrentPhase(WaypointV2Problem)
 	path := filepath.Join(t.TempDir(), StatusFilename)
 	if err := WriteV2(st, path); err != nil {
 		t.Fatalf("WriteV2: %v", err)
 	}
 	if _, err := ParseV2(path); err != nil {
-		t.Fatalf("ParseV2 rejected rewind-produced pending history: %v", err)
+		t.Fatalf("ParseV2 rejected rewind-produced canonical history: %v", err)
 	}
 }
 
@@ -305,6 +298,7 @@ func TestParseV2AcceptsStatusWrittenAtPhaseStart(t *testing.T) {
 		t.Run(phase, func(t *testing.T) {
 			st := NewStatusV2("test", ProjectTypeFeature, RiskLevelM)
 			st.Status = StatusV2InProgress
+			st.WaypointHistory = completedHistoryBefore(phase, time.Now())
 			st.SetCurrentPhase(phase)
 			st.UpdatePhase(phase, PhaseStatusV2InProgress, "")
 
@@ -317,6 +311,22 @@ func TestParseV2AcceptsStatusWrittenAtPhaseStart(t *testing.T) {
 			}
 		})
 	}
+}
+
+func completedHistoryBefore(target string, now time.Time) []WaypointHistory {
+	var history []WaypointHistory
+	for _, waypoint := range AllWaypointsV2Schema() {
+		if waypoint == target {
+			break
+		}
+		history = append(history, WaypointHistory{
+			Name:        waypoint,
+			Status:      WaypointStatusV2Completed,
+			StartedAt:   now,
+			CompletedAt: &now,
+		})
+	}
+	return history
 }
 
 func TestNewStatusV2(t *testing.T) {

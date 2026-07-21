@@ -321,6 +321,53 @@ func TestValidateV2RejectsSkippedMandatoryWaypoint(t *testing.T) {
 	}
 }
 
+func TestValidateV2RejectsMissingMandatoryPredecessors(t *testing.T) {
+	now := time.Now()
+	st := &StatusV2{
+		SchemaVersion:   SchemaVersionV2,
+		ProjectName:     "test",
+		ProjectType:     ProjectTypeFeature,
+		RiskLevel:       RiskLevelM,
+		CurrentWaypoint: WaypointV2Build,
+		Status:          StatusV2InProgress,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		WaypointHistory: []WaypointHistory{
+			{Name: WaypointV2Build, Status: WaypointStatusV2Completed, StartedAt: now, CompletedAt: &now},
+		},
+	}
+
+	if err := ValidateV2(st); err == nil || !strings.Contains(err.Error(), "predecessor 'CHARTER' must be completed before 'BUILD'") {
+		t.Fatalf("ValidateV2() error = %v, want missing predecessor rejection", err)
+	}
+}
+
+func TestValidateV2AllowsConfiguredSkippedPredecessors(t *testing.T) {
+	now := time.Now()
+	st := &StatusV2{
+		SchemaVersion:   SchemaVersionV2,
+		ProjectName:     "lite",
+		ProjectType:     ProjectTypeFeature,
+		RiskLevel:       RiskLevelS,
+		CurrentWaypoint: WaypointV2Build,
+		Status:          StatusV2InProgress,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		SkipRoadmap:     true,
+		SkipPhases:      []string{WaypointV2Design, WaypointV2Spec, WaypointV2Plan},
+		WaypointHistory: completedHistoryBefore(WaypointV2Design, now),
+	}
+	st.WaypointHistory = append(st.WaypointHistory, WaypointHistory{
+		Name:      WaypointV2Build,
+		Status:    WaypointStatusV2InProgress,
+		StartedAt: now,
+	})
+
+	if err := ValidateV2(st); err != nil {
+		t.Fatalf("ValidateV2() rejected configured skips: %v", err)
+	}
+}
+
 func TestValidatePhaseHistory(t *testing.T) {
 	tests := []struct {
 		name    string

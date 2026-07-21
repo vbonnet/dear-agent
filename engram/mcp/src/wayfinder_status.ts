@@ -353,6 +353,7 @@ function completedWaypoints(record: RecordValue, configuredSkips: ReadonlySet<st
 
   const complete = new Set<string>();
   const seen = new Set<string>();
+  let lastPosition = -1;
   for (const [index, entry] of history.entries()) {
     const path = `waypoint_history[${index}]`;
     const waypoint = asRecord(entry, path);
@@ -397,9 +398,19 @@ function completedWaypoints(record: RecordValue, configuredSkips: ReadonlySet<st
     optionalBoolean(waypoint, 'tests_feature_created', path);
     optionalInteger(waypoint, 'build_iterations', path);
     validateBuildMetrics(waypoint.build_metrics, `${path}.build_metrics`);
+    const position = WAYPOINTS.indexOf(name as never);
+    if (position < lastPosition) {
+      throw new Error(`invalid Wayfinder V2 status: ${path} waypoint ${JSON.stringify(name)} is out of canonical order`);
+    }
+    for (const predecessor of WAYPOINTS.slice(0, position)) {
+      if (!configuredSkips.has(predecessor) && !complete.has(predecessor)) {
+        throw new Error(`invalid Wayfinder V2 status: ${path} requires completed predecessor ${JSON.stringify(predecessor)}`);
+      }
+    }
     if (status === 'completed' || status === 'skipped') {
       complete.add(name);
     }
+    lastPosition = position;
   }
   return complete;
 }
@@ -457,6 +468,12 @@ export function parseWayfinderStatus(content: string): WayfinderStatusSummary {
   const configuredSkips = new Set<string>(validateSkipPhases(record));
   if (record.skip_roadmap === true) configuredSkips.add('SETUP');
   const complete = completedWaypoints(record, configuredSkips);
+  const currentPosition = WAYPOINTS.indexOf(phase as never);
+  for (const predecessor of WAYPOINTS.slice(0, currentPosition)) {
+    if (!configuredSkips.has(predecessor) && !complete.has(predecessor)) {
+      throw new Error(`invalid Wayfinder V2 status: current_waypoint ${JSON.stringify(phase)} requires completed predecessor ${JSON.stringify(predecessor)}`);
+    }
+  }
   for (const skipped of configuredSkips) complete.add(skipped);
 
   return {
