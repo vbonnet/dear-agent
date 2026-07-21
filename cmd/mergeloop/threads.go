@@ -53,6 +53,23 @@ func isKnownBotAuthor(login string) bool {
 	return knownBotLogins[normalizeBotLogin(login)]
 }
 
+// allCommentsFromKnownBots reports whether every comment in a thread —
+// including any human reply after the bot's opening comment — is authored by
+// a known bot. A single non-bot author anywhere in the thread means the
+// thread must never be auto-resolved (MLC-05). An empty slice is not a bot
+// thread.
+func allCommentsFromKnownBots(logins []string) bool {
+	if len(logins) == 0 {
+		return false
+	}
+	for _, login := range logins {
+		if !isKnownBotAuthor(login) {
+			return false
+		}
+	}
+	return true
+}
+
 // ghThreadResolver implements mergeloop.ThreadResolver by resolving unresolved
 // review threads authored by known bots via the GitHub GraphQL
 // resolveReviewThread mutation. Thread resolution is GraphQL-only — there is no
@@ -67,7 +84,7 @@ const threadsListQuery = `query($owner:String!,$repo:String!,$pr:Int!,$after:Str
         nodes{
           id
           isResolved
-          comments(first:1){ nodes{ author{ login } } }
+          comments(first:100){ pageInfo{ hasNextPage } nodes{ author{ login } } }
         }
       }
     }
@@ -114,7 +131,13 @@ func (r *ghThreadResolver) ResolveBotThreads(ctx context.Context, repo string, p
 }
 
 // listBotThreads pages through the PR's review threads and returns the
-// unresolved ones whose first comment is authored by a known bot.
+// unresolved ones where every comment — not just the first — is authored by
+// a known bot. A bot opening a thread that a human later replies to must
+// never be auto-resolved (MLC-05); checking only the first comment would miss
+// that reply entirely and silently discard human feedback the moment this
+// PR's own review-thread finding illustrates it does (ce-hz14 follow-up). A
+// thread with more comments than a single page fetches is left unresolved
+// rather than risk missing a human reply past the page boundary.
 func (r *ghThreadResolver) listBotThreads(ctx context.Context, owner, name string, pr int) ([]botThread, error) {
 	var out []botThread
 	cursor := ""
@@ -145,6 +168,9 @@ func (r *ghThreadResolver) listBotThreads(ctx context.Context, owner, name strin
 								ID         string `json:"id"`
 								IsResolved bool   `json:"isResolved"`
 								Comments   struct {
+									PageInfo struct {
+										HasNextPage bool `json:"hasNextPage"`
+									} `json:"pageInfo"`
 									Nodes []struct {
 										Author struct {
 											Login string `json:"login"`
@@ -162,14 +188,17 @@ func (r *ghThreadResolver) listBotThreads(ctx context.Context, owner, name strin
 		}
 		rt := resp.Data.Repository.PullRequest.ReviewThreads
 		for _, n := range rt.Nodes {
-			if n.IsResolved || len(n.Comments.Nodes) == 0 {
+			if n.IsResolved || len(n.Comments.Nodes) == 0 || n.Comments.PageInfo.HasNextPage {
 				continue
 			}
-			author := n.Comments.Nodes[0].Author.Login
-			if !isKnownBotAuthor(author) {
+			logins := make([]string, len(n.Comments.Nodes))
+			for i, c := range n.Comments.Nodes {
+				logins[i] = c.Author.Login
+			}
+			if !allCommentsFromKnownBots(logins) {
 				continue
 			}
-			out = append(out, botThread{id: n.ID, author: author})
+			out = append(out, botThread{id: n.ID, author: logins[0]})
 		}
 		if !rt.PageInfo.HasNextPage {
 			break

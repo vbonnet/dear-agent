@@ -21,6 +21,28 @@ func TestIsKnownBotAuthor(t *testing.T) {
 	}
 }
 
+func TestAllCommentsFromKnownBots(t *testing.T) {
+	cases := []struct {
+		name   string
+		logins []string
+		want   bool
+	}{
+		{"empty", nil, false},
+		{"single bot comment", []string{"gemini-code-assist"}, true},
+		{"single human comment", []string{"alice"}, false},
+		{"all known bots", []string{"gemini-code-assist", "chatgpt-codex-connector"}, true},
+		{"bot opens, human replies", []string{"gemini-code-assist", "alice"}, false},
+		{"bot opens, unknown bot replies", []string{"gemini-code-assist", "dependabot[bot]"}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := allCommentsFromKnownBots(c.logins); got != c.want {
+				t.Errorf("allCommentsFromKnownBots(%v) = %v, want %v", c.logins, got, c.want)
+			}
+		})
+	}
+}
+
 func TestNormalizeBotLogin(t *testing.T) {
 	cases := map[string]string{
 		"some-bot":      "some-bot",
