@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -50,6 +51,58 @@ func gitTestRun(t *testing.T, args ...string) string {
 		t.Fatalf("git %v: %v: %s", args, err, out)
 	}
 	return string(out)
+}
+
+func TestCleanupWorktreesScriptPreservesBranchWhenProtectedWorktreeRemovalFails(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+	remote := filepath.Join(base, "remote.git")
+	repo := filepath.Join(base, "repo")
+	worktree := filepath.Join(base, "protected-worktree")
+	gitTestRun(t, "init", "-q", "--bare", remote)
+	gitTestRun(t, "init", "-q", "-b", "main", repo)
+	gitTestRun(t, "-C", repo, "config", "user.name", "Safe PR Test")
+	gitTestRun(t, "-C", repo, "config", "user.email", "safe-pr@example.invalid")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("safe-pr cleanup test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, "-C", repo, "add", "README.md")
+	gitTestRun(t, "-C", repo, "commit", "-q", "-m", "initial")
+	gitTestRun(t, "-C", repo, "remote", "add", "origin", remote)
+	gitTestRun(t, "-C", repo, "push", "-q", "-u", "origin", "main")
+	gitTestRun(t, "-C", repo, "worktree", "add", "-q", "-b", "protected", worktree)
+	gitTestRun(t, "-C", repo, "push", "-q", "-u", "origin", "protected")
+	gitTestRun(t, "-C", repo, "worktree", "lock", "--reason", "safe-pr transaction", worktree)
+
+	_, sourceFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve cleanup-worktrees.sh: runtime.Caller failed")
+	}
+	script := filepath.Join(filepath.Dir(sourceFile), "..", "..", "scripts", "cleanup-worktrees.sh")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "bash", script, repo, "--fix", "--max-age", "0")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = time.Second
+	out, err := cmd.CombinedOutput()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 3 {
+		t.Fatalf("cleanup protected worktree error = %v, want exit 3; output:\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "skipped branch cleanup for protected") {
+		t.Fatalf("cleanup output did not explain preserved branches:\n%s", out)
+	}
+	if _, err := os.Stat(worktree); err != nil {
+		t.Fatalf("protected worktree was removed: %v", err)
+	}
+	gitTestRun(t, "-C", repo, "show-ref", "--verify", "refs/heads/protected")
+	gitTestRun(t, "-C", repo, "ls-remote", "--exit-code", "origin", "refs/heads/protected")
 }
 
 func TestWithWorktreeLockPreservesOrReleasesAcrossOutcomes(t *testing.T) {
