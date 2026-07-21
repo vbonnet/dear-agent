@@ -1299,7 +1299,7 @@ func piProcessIdentityShouldBe(ctx context.Context, decision string) error {
 		return fmt.Errorf("unknown Pi identity decision %q", decision)
 	}
 	if harnessState.piProcessRecognized != want {
-		return fmt.Errorf("Pi identity recognition = %v, want %q", harnessState.piProcessRecognized, decision)
+		return fmt.Errorf("pi identity recognition = %v, want %q", harnessState.piProcessRecognized, decision)
 	}
 	return nil
 }
