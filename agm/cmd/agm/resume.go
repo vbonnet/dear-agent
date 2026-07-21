@@ -476,6 +476,19 @@ func readResumePromptFile(promptFile string, deletePromptFile bool) (string, err
 // `agm session resume` command and the bare `agm` default-command resume path,
 // so both routes perform a real resume instead of a no-op placeholder.
 func resumeResolvedSession(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath string) error {
+	return resumeResolvedSessionWithLocker(ctx, adapter, sessionID, manifestPath, ops.WithSessionLock)
+}
+
+func resumeResolvedSessionWithLocker(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath string, withLock func(string, func() error) error) error {
+	if withLock == nil {
+		return fmt.Errorf("resume session lock dependency is missing")
+	}
+	return withLock(sessionID, func() error {
+		return resumeResolvedSessionLocked(ctx, adapter, sessionID, manifestPath)
+	})
+}
+
+func resumeResolvedSessionLocked(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath string) error {
 	// Read manifest from Dolt to check lifecycle
 	m, err := adapter.GetSession(sessionID)
 	if err != nil {

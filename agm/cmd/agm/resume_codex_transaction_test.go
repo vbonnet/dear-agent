@@ -99,6 +99,27 @@ func TestRestoreResumeTmuxNameTreatsSuccessfulSwapAsComplete(t *testing.T) {
 	}
 }
 
+func TestResumeResolvedSessionAcquiresSessionLockBeforeReads(t *testing.T) {
+	wantErr := errors.New("lock unavailable")
+	lockCalls := 0
+	err := resumeResolvedSessionWithLocker(t.Context(), nil, "stable-session-id", "", func(sessionID string, fn func() error) error {
+		lockCalls++
+		if sessionID != "stable-session-id" {
+			t.Fatalf("lock key = %q, want stable-session-id", sessionID)
+		}
+		if fn == nil {
+			t.Fatal("locked resume callback is nil")
+		}
+		return wantErr
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("resumeResolvedSessionWithLocker() error = %v, want %v", err, wantErr)
+	}
+	if lockCalls != 1 {
+		t.Fatalf("lock calls = %d, want 1", lockCalls)
+	}
+}
+
 func recordingResumeRuntime(calls *[]string) resumeSessionRuntime {
 	record := func(call string) { *calls = append(*calls, call) }
 	return resumeSessionRuntime{

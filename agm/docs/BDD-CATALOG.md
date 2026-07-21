@@ -246,8 +246,9 @@ creation, and terminal state detection.
   creation, command delivery, metadata updates, or warm-session attach.
 - Cold Codex resume retains tmux's server-local ID plus a random per-creation
   token, including when a later command in the tmux creation queue fails;
-  persists a canonical name under an opaque cross-dialect ownership revision
-  before optional prompt submission; treats ordinary prompt failures
+  serializes concurrent resume attempts by stable session ID; persists a
+  canonical name under an opaque cross-dialect ownership revision before
+  optional prompt submission; treats ordinary prompt failures
   as transactional failures, compensates owned metadata before removing those
   exact identities, and preserves the ready tmux session when a concurrent
   writer supersedes metadata ownership. It also avoids killing a same-named or
