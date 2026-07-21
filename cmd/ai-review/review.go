@@ -125,7 +125,6 @@ func runDimensions(ctx context.Context, client anthropic.Client, model anthropic
 	g, ctx := errgroup.WithContext(ctx)
 	user := "Review this PR diff and report your findings per your persona instructions:\n\n```diff\n" + diff + "\n```"
 	for i, d := range dims {
-		i, d := i, d
 		g.Go(func() error {
 			text, err := callClaude(ctx, client, model, effort, d.system, user)
 			if err != nil {
@@ -170,9 +169,6 @@ func synthesize(ctx context.Context, client anthropic.Client, model anthropic.Mo
 	if err != nil {
 		return NeedsHumanReview, "", err
 	}
-	firstLine := text
-	if idx := strings.IndexByte(text, '\n'); idx >= 0 {
-		firstLine = text[:idx]
-	}
+	firstLine, _, _ := strings.Cut(text, "\n")
 	return ParseOutcome(firstLine), text, nil
 }

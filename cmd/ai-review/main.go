@@ -105,7 +105,7 @@ func run(c config) int {
 	diff, err := gitDiff(c.baseSHA, c.headSHA)
 	if err != nil {
 		fmt.Printf("::error::could not compute diff: %v\n", err)
-		return exitOrOverride(c, 1)
+		return failClosed(c)
 	}
 
 	// Empty diff: nothing to review (SPEC R11).
@@ -119,7 +119,7 @@ func run(c config) int {
 		msg := fmt.Sprintf("diff is %d bytes, over the %d-byte auto-review limit. Split the PR into smaller reviewable changes, or apply the 'ai-review:override' label after a human review.", len(diff), c.maxDiff)
 		fmt.Printf("::error::%s\n", msg)
 		postComment(c, oversizeComment(len(diff), c.maxDiff))
-		return exitOrOverride(c, 1)
+		return failClosed(c)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
@@ -131,14 +131,14 @@ func run(c config) int {
 	if err != nil {
 		// Any dimension error fails closed (SPEC R5).
 		fmt.Printf("::error::a review dimension failed: %v\n", err)
-		return exitOrOverride(c, 1)
+		return failClosed(c)
 	}
 
 	outcome, synthesis, err := synthesize(ctx, client, c.model, c.effort, reports)
 	if err != nil {
 		// Synthesis error fails closed (SPEC R6).
 		fmt.Printf("::error::review synthesis failed: %v\n", err)
-		return exitOrOverride(c, 1)
+		return failClosed(c)
 	}
 
 	// Comment is best-effort and never changes the exit code.
@@ -149,12 +149,13 @@ func run(c config) int {
 	return code
 }
 
-// exitOrOverride collapses an intended failure to 0 when the audited override
-// label is present, so an operator can unblock after a conscious human review.
-func exitOrOverride(c config, code int) int {
-	if code != 0 && c.override {
+// failClosed returns the blocking exit code (1) for an intended failure, unless
+// the audited override label is present, in which case an operator has
+// consciously unblocked the merge and it returns 0.
+func failClosed(c config) int {
+	if c.override {
 		fmt.Println("::warning::failure overridden by 'ai-review:override' label.")
 		return 0
 	}
-	return code
+	return 1
 }

@@ -20,6 +20,8 @@ func emojiFor(o Outcome) string {
 		return "❌"
 	case NeedsHumanReview:
 		return "🔴"
+	case NeedsWork:
+		return "⚠️"
 	default:
 		return "⚠️"
 	}
@@ -74,7 +76,7 @@ func postComment(c config, body string) {
 		fmt.Sprintf("repos/%s/issues/%s/comments", c.repo, c.pr),
 		"--jq", fmt.Sprintf(`.[] | select(.body | startswith("%s")) | .id`, commentMarker))
 	if out, err := del.Output(); err == nil {
-		for _, id := range strings.Fields(string(out)) {
+		for id := range strings.FieldsSeq(string(out)) {
 			_ = exec.Command("gh", "api", "-X", "DELETE",
 				fmt.Sprintf("repos/%s/issues/comments/%s", c.repo, id)).Run()
 		}
