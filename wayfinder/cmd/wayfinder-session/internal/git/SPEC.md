@@ -12,15 +12,17 @@
 
 **WAYFINDER-GIT-02** When session initialization or a phase transition changes marker files, the system shall commit only the canonical status, history, and phase artifacts.
 
-**WAYFINDER-GIT-03** When no tracked transition files changed or the project is not a Git repository, the system shall complete commit helpers as non-destructive no-ops.
+**WAYFINDER-GIT-03** When DESIGN completes, the system shall include the reviewed architecture and ADR files in the scoped phase commit.
 
-**WAYFINDER-GIT-04** When uncommitted files are queried, the system shall report only files contained by the project directory.
+**WAYFINDER-GIT-04** When no tracked transition files changed or the project is not a Git repository, the system shall complete commit helpers as non-destructive no-ops.
 
-**WAYFINDER-GIT-05** When a rewind changes canonical status, history, or retrospective markers in a Git repository, the system shall commit those files without sweeping unrelated staged changes.
+**WAYFINDER-GIT-05** When uncommitted files are queried, the system shall report only files contained by the project directory.
 
-**WAYFINDER-GIT-05** When modified source files are queried, the system shall distinguish source code from Wayfinder artifacts and unrelated paths.
+**WAYFINDER-GIT-06** When a rewind changes canonical status, history, or retrospective markers in a Git repository, the system shall commit those files without sweeping unrelated staged changes.
 
-**WAYFINDER-GIT-06** When a worktree lifecycle is exercised, the system shall prevent conflicting paths and preserve repository integrity.
+**WAYFINDER-GIT-07** When modified source files are queried, the system shall distinguish source code from Wayfinder artifacts and unrelated paths.
+
+**WAYFINDER-GIT-08** When a worktree lifecycle is exercised, the system shall prevent conflicting paths and preserve repository integrity.
 
 ## Test Traceability
 

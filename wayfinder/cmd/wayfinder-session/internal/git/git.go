@@ -51,6 +51,13 @@ func (g *GitIntegrator) CommitPhaseCompletion(phase, outcome, context string) er
 	}
 	if phase == "DESIGN" {
 		files = append(files, "ARCHITECTURE.md")
+		adrs, err := filepath.Glob(filepath.Join(g.projectDir, "ADR-*.md"))
+		if err != nil {
+			return fmt.Errorf("find DESIGN ADR artifacts: %w", err)
+		}
+		for _, adr := range adrs {
+			files = append(files, filepath.Base(adr))
+		}
 	}
 
 	if err := g.commitScoped(g.formatCommitMessage(phase, outcome, context), files); err != nil {

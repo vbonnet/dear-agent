@@ -192,6 +192,52 @@ func TestCommitPhaseCompletion(t *testing.T) {
 	}
 }
 
+func TestCommitPhaseCompletionIncludesDesignADRs(t *testing.T) {
+	repoDir := setupGitRepo(t)
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Test Project\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("git", "-C", repoDir, "add", "README.md").Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("git", "-C", repoDir, "commit", "-m", "Initial commit").Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, content := range map[string]string{
+		"WAYFINDER-STATUS.md":  "# Status\n",
+		"WAYFINDER-HISTORY.md": "{}\n",
+		"DESIGN-overview.md":   "# Design\n",
+		"ARCHITECTURE.md":      "# Architecture\n",
+		"ADR-001-storage.md":   "# ADR-001 Storage\n",
+		"user-notes.md":        "private notes\n",
+	} {
+		if err := os.WriteFile(filepath.Join(repoDir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := exec.Command("git", "-C", repoDir, "add", "user-notes.md").Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := New(repoDir).CommitPhaseCompletion("DESIGN", "success", "Reviewed design documents"); err != nil {
+		t.Fatalf("CommitPhaseCompletion(DESIGN): %v", err)
+	}
+	showOutput, err := exec.Command("git", "-C", repoDir, "show", "--name-only", "--format=").CombinedOutput()
+	if err != nil {
+		t.Fatal(err)
+	}
+	committed := string(showOutput)
+	for _, name := range []string{"WAYFINDER-STATUS.md", "WAYFINDER-HISTORY.md", "DESIGN-overview.md", "ARCHITECTURE.md", "ADR-001-storage.md"} {
+		if !strings.Contains(committed, name) {
+			t.Errorf("DESIGN commit missing %s:\n%s", name, committed)
+		}
+	}
+	if strings.Contains(committed, "user-notes.md") {
+		t.Errorf("DESIGN commit swept unrelated staged file:\n%s", committed)
+	}
+}
+
 func TestCommitRewindCommitsCanonicalMarkersOnly(t *testing.T) {
 	repoDir := setupGitRepo(t)
 	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Test\n"), 0o644); err != nil {
