@@ -430,7 +430,7 @@ the human acts.
 
 This note is the authoritative signal the dispatcher reconciles on — it, not
 you, closes DONE/DONE_WITH_CONCERNS beads and blocks FAILED ones on its next
-run. You do not need to (and should not rely on remembering to) run `+"`bd close`"+`
+run. You do not need to (and should not rely on remembering to) close the bead
 yourself; write the note and stop.
 
 ## Rules
