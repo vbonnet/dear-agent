@@ -90,9 +90,9 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-41** When a command-scoped Pi identity or pane-liveness scan runs, the system shall derive tmux and process-table subprocesses from the caller context so cancellation returns before command delivery, attachment, or metadata mutation.
 
-**TMUX-41** When shared input readiness is checked, the system shall require the exact tmux session, a live process compatible with the configured harness, and a current harness-specific composer in the pane tail; a stale or wrong-harness prompt shall not be ready.
+**TMUX-41** When shared input readiness is checked for delivery, the system shall hold one tmux mutation boundary while resolving an exact active pane, proving process liveness and styled composer ownership, and delivering to that same pane ID; every harness including AGY and Pi shall require its structural idle composer to own that pane tail, Pi shall require its latest managed state to be ready, Claude dim or grey placeholder text shall count as empty while unstyled human draft text shall not, and a newer composer shall supersede resolved permission, onboarding, model-upgrade, or survey UI while active structured blockers still win, so a concurrent AGM sender, another pane's harness, generic glyphs or borders, stale prompts followed by work, unrelated Node processes, ordinary permission words, resolved blockers, or stale Pi readiness followed by newer work shall not suppress or fabricate readiness or redirect delivery.
 
-**TMUX-42** When shared startup readiness waits, the system shall honor caller cancellation and a total deadline, fail on observation errors, and mutate input only for documented trust, model-upgrade, or AGY-survey transitions.
+**TMUX-42** When shared startup readiness waits, the system shall honor caller cancellation and the total deadline while the launch shell or wrapper remains visible before the expected harness is first observed, fail promptly if an observed harness later stops or an observation fails, and mutate input only for documented trust, model-upgrade, or AGY-survey transitions on the exact verified pane; Gemini first-run directory trust shall select option `1` and then submit Enter before composer readiness can succeed.
 
 ## BDD Traceability
 

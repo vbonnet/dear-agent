@@ -876,7 +876,7 @@ func TestCreateSession_LifecycleOrder(t *testing.T) {
 	manifestDir := filepath.Join(t.TempDir(), "ordered")
 	var order []string
 	store := &createMockStorage{createOrder: &order}
-	tmuxMock := session.NewMockTmux()
+	tmuxMock := &createReadinessTmux{MockTmux: session.NewMockTmux(), order: &order}
 	runtime := &createTestRuntime{
 		launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
 			if !tmuxMock.Sessions["ordered"] {
@@ -906,9 +906,44 @@ func TestCreateSession_LifecycleOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSessionWithContext: %v", err)
 	}
-	want := []string{"launch", "storage", "register", "complete", "cleanup"}
+	want := []string{"launch", "ready", "storage", "register", "complete", "cleanup"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("lifecycle order = %v, want %v", order, want)
+	}
+}
+
+func TestEstablishCreatedHarnessReadinessAllowsOnlyQueuedCurrentTmuxDeferral(t *testing.T) {
+	t.Parallel()
+
+	validRequest := &CreateSessionRequest{
+		Caller: CreateSessionCaller{Surface: CreateSurfaceCLI}, ReuseExistingTmux: true,
+	}
+	validParams := &createSessionParams{name: "current", harness: "codex-cli"}
+	launch := CreateSessionLaunchResult{Readiness: CreateSessionReadinessDeferredUntilCallerExit}
+	for _, harness := range []string{"claude-code", "codex-cli", "opencode-cli", "pi-cli", "gemini-cli"} {
+		params := &createSessionParams{name: "current", harness: harness}
+		if err := establishCreatedHarnessReadiness(t.Context(), &OpContext{Tmux: session.NewMockTmux()}, validRequest, params, launch); err != nil {
+			t.Fatalf("valid current-tmux %s deferral: %v", harness, err)
+		}
+	}
+
+	tests := []struct {
+		name    string
+		request CreateSessionRequest
+		params  createSessionParams
+	}{
+		{name: "MCP surface", request: CreateSessionRequest{Caller: CreateSessionCaller{Surface: CreateSurfaceMCP}, ReuseExistingTmux: true}, params: *validParams},
+		{name: "unsupported harness", request: *validRequest, params: createSessionParams{name: "current", harness: "agy"}},
+		{name: "new tmux", request: CreateSessionRequest{Caller: CreateSessionCaller{Surface: CreateSurfaceCLI}}, params: *validParams},
+		{name: "initial prompt", request: CreateSessionRequest{Caller: CreateSessionCaller{Surface: CreateSurfaceCLI}, ReuseExistingTmux: true, Prompt: "must wait"}, params: *validParams},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := establishCreatedHarnessReadiness(t.Context(), &OpContext{Tmux: session.NewMockTmux()}, &tt.request, &tt.params, launch)
+			if err == nil || !strings.Contains(err.Error(), "deferred readiness") {
+				t.Fatalf("establishCreatedHarnessReadiness() error = %v, want invalid deferral", err)
+			}
+		})
 	}
 }
 

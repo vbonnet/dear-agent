@@ -7,6 +7,7 @@ import (
 
 	"github.com/vbonnet/dear-agent/agm/internal/manager"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
 type sendReadinessBackend struct {
@@ -118,7 +119,7 @@ func TestSendMessage_ManagerReadinessErrorDoesNotSend(t *testing.T) {
 	}
 }
 
-func TestSendMessage_ExactTmuxReadinessPrecedesGenericManagerCheck(t *testing.T) {
+func TestSendMessage_AtomicReadinessAndDeliveryPrecedesGenericManagerCheck(t *testing.T) {
 	backend := &sendReadinessBackend{readiness: manager.CanReceiveNo}
 	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")}, "my-session")
 	ctx.Manager = backend
@@ -129,6 +130,74 @@ func TestSendMessage_ExactTmuxReadinessPrecedesGenericManagerCheck(t *testing.T)
 	}
 	if backend.checks != 0 {
 		t.Fatalf("generic manager readiness ran %d times after exact tmux proof", backend.checks)
+	}
+	if len(backend.sent) != 0 {
+		t.Fatalf("session-targeted manager delivered after exact pane proof: %v", backend.sent)
+	}
+	tmuxMock := ctx.Tmux.(*mockTmux)
+	if len(tmuxMock.atomicChecks) != 1 || tmuxMock.atomicChecks[0] != "my-session:claude-code" {
+		t.Fatalf("atomic input checks = %v, want [my-session:claude-code]", tmuxMock.atomicChecks)
+	}
+	if len(tmuxMock.sent) != 1 || tmuxMock.sent[0].session != "%1" {
+		t.Fatalf("exact pane sends = %v, want %%1", tmuxMock.sent)
+	}
+}
+
+func TestSendMessage_ReadyWithoutVerifiedPaneFailsClosed(t *testing.T) {
+	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")}, "my-session")
+	tmuxMock := ctx.Tmux.(*mockTmux)
+	tmuxMock.readiness = session.InputReadiness{Ready: true, State: "YES"}
+
+	result, err := SendMessage(ctx, &SendMessageRequest{Recipient: "id-1", Message: "must not send"})
+	if result == nil || result.Delivered {
+		t.Fatalf("result = %#v, want non-delivery", result)
+	}
+	opErr := &OpError{}
+	if !errors.As(err, &opErr) || opErr.Code != ErrCodeSessionNotReady {
+		t.Fatalf("error = %v, want %s", err, ErrCodeSessionNotReady)
+	}
+	if len(tmuxMock.sent) != 0 {
+		t.Fatalf("delivery occurred without a verified pane: %v", tmuxMock.sent)
+	}
+}
+
+func TestSendMessage_NormalizesLegacyAgyHarnessBeforeReadiness(t *testing.T) {
+	t.Parallel()
+
+	for _, legacyHarness := range []string{"agy-cli", "antigravity"} {
+		t.Run(legacyHarness, func(t *testing.T) {
+			t.Parallel()
+
+			m := newManifest("id-1", "agy-session", "~/project")
+			m.Harness = legacyHarness
+			ctx := testCtx([]*manifest.Manifest{m}, "agy-session")
+			tmuxMock := ctx.Tmux.(*mockTmux)
+
+			result, err := SendMessage(ctx, &SendMessageRequest{Recipient: "id-1", Message: "hello"})
+			if err != nil || result == nil || !result.Delivered {
+				t.Fatalf("SendMessage() = (%#v, %v), want canonical AGY delivery", result, err)
+			}
+			if len(tmuxMock.readinessChecks) != 1 || tmuxMock.readinessChecks[0] != "agy-session:agy" {
+				t.Fatalf("readiness checks = %v, want [agy-session:agy]", tmuxMock.readinessChecks)
+			}
+		})
+	}
+}
+
+func TestSendMessage_NormalizesPiHarnessAliasBeforeReadiness(t *testing.T) {
+	t.Parallel()
+
+	m := newManifest("id-1", "pi-session", "~/project")
+	m.Harness = "pi"
+	ctx := testCtx([]*manifest.Manifest{m}, "pi-session")
+	tmuxMock := ctx.Tmux.(*mockTmux)
+
+	result, err := SendMessage(ctx, &SendMessageRequest{Recipient: "id-1", Message: "hello"})
+	if err != nil || result == nil || !result.Delivered {
+		t.Fatalf("SendMessage() = (%#v, %v), want canonical Pi delivery", result, err)
+	}
+	if len(tmuxMock.readinessChecks) != 1 || tmuxMock.readinessChecks[0] != "pi-session:pi-cli" {
+		t.Fatalf("readiness checks = %v, want [pi-session:pi-cli]", tmuxMock.readinessChecks)
 	}
 }
 
@@ -146,10 +215,13 @@ func TestSendMessage_PropagatesRequestContextThroughReadinessAndDelivery(t *test
 		t.Fatalf("SendMessage() = (%#v, %v), want delivery", result, err)
 	}
 	if tmuxMock.inputCtx != wantCtx {
-		t.Fatal("exact tmux readiness did not receive the operation request context")
+		t.Fatal("atomic tmux readiness did not receive the operation request context")
 	}
-	if backend.sendCtx != wantCtx {
-		t.Fatal("manager delivery did not receive the operation request context")
+	if tmuxMock.paneSendCtx != wantCtx {
+		t.Fatal("exact pane delivery did not receive the operation request context")
+	}
+	if backend.sendCtx != nil {
+		t.Fatal("session-targeted manager ran after atomic exact-pane delivery")
 	}
 }
 

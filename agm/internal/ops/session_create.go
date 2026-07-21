@@ -65,12 +65,28 @@ type CreateSessionMetadata struct {
 	PiPolicyFile     string
 }
 
-// CreateSessionLaunchResult records launch facts required by runtime
-// completion. HandledLifecycle is used only by the deprecated Gemini wrapper,
-// which exits after managing its own terminal lifecycle.
+// CreateSessionReadiness records what the launch boundary proved about the
+// interactive harness. The zero value is deliberately unverified so adding a
+// runtime can never silently bypass the shared readiness gate.
+type CreateSessionReadiness string
+
+const (
+	// CreateSessionReadinessVerified means the runtime already observed the
+	// expected harness process and its interactive composer.
+	CreateSessionReadinessVerified CreateSessionReadiness = "verified"
+	// CreateSessionReadinessDeferredUntilCallerExit is reserved for prompt-free
+	// current-pane creation. The harness command is queued behind the foreground
+	// AGM process and cannot start until creation returns.
+	CreateSessionReadinessDeferredUntilCallerExit CreateSessionReadiness = "deferred-until-caller-exit"
+)
+
+// CreateSessionLaunchResult records launch facts required by shared readiness
+// and runtime completion. HandledLifecycle is used only by the deprecated
+// Gemini wrapper, which exits after managing its own terminal lifecycle.
 type CreateSessionLaunchResult struct {
 	ModeAppliedAtStartup bool
 	HandledLifecycle     bool
+	Readiness            CreateSessionReadiness
 	// PromptDelivered records that an AGY startup prompt was delivered before
 	// provider-native identity discovery. Completion must not deliver it again.
 	PromptDelivered bool
@@ -101,7 +117,8 @@ type CreateSessionCompletion struct {
 
 // CreateSessionRuntime is the harness-runtime seam. Implementations adapt
 // interactive startup and surface-specific completion; they cannot insert,
-// reorder, or skip tmux creation, registration, or rollback.
+// reorder, or skip tmux creation, readiness, registration, or rollback. A
+// runtime must explicitly report readiness it has already verified.
 type CreateSessionRuntime interface {
 	Launch(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error)
 	Complete(context.Context, CreateSessionCompletion) error
@@ -366,16 +383,14 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 	if launchResult.HandledLifecycle {
 		return createSessionResult(req, params, sessionID), nil
 	}
+	if err := establishCreatedHarnessReadiness(callCtx, opCtx, req, params, launchResult); err != nil {
+		return nil, err
+	}
 	if agyIdentityTracker != nil {
 		if err := bootstrapAgyCreateIdentity(callCtx, opCtx, params.name, req.Prompt); err != nil {
 			return nil, err
 		}
 		launchResult.PromptDelivered = true
-	}
-	if opCtx.CreationRuntime == nil {
-		if err := waitForCreatedHarnessReady(callCtx, opCtx, params.name, params.harness); err != nil {
-			return nil, err
-		}
 	}
 
 	manifestPath, registrationAllowed, createdManifestDir, err := prepareCreateManifestDir(req)
@@ -477,6 +492,29 @@ func waitForCreatedHarnessReady(ctx context.Context, opCtx *OpContext, sessionNa
 		return ErrStorageError("tmux.WaitForHarnessReady", err)
 	}
 	return nil
+}
+
+func establishCreatedHarnessReadiness(ctx context.Context, opCtx *OpContext, req *CreateSessionRequest, params *createSessionParams, launchResult CreateSessionLaunchResult) error {
+	switch launchResult.Readiness {
+	case CreateSessionReadinessVerified:
+		return nil
+	case CreateSessionReadinessDeferredUntilCallerExit:
+		if req.Caller.Surface != CreateSurfaceCLI || !supportsDeferredCurrentTmuxReadiness(params.harness) || !req.ReuseExistingTmux || req.Prompt != "" {
+			return ErrStorageError("create.readiness", fmt.Errorf("deferred readiness is valid only for supported current-tmux harness creation without an initial prompt"))
+		}
+		return nil
+	default:
+		return waitForCreatedHarnessReady(ctx, opCtx, params.name, params.harness)
+	}
+}
+
+func supportsDeferredCurrentTmuxReadiness(harness string) bool {
+	switch harness {
+	case "claude-code", "codex-cli", "opencode-cli", "pi-cli", "gemini-cli":
+		return true
+	default:
+		return false
+	}
 }
 
 func prepareCreateTmux(opCtx *OpContext, req *CreateSessionRequest, name string) (bool, error) {

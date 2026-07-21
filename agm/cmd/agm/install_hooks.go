@@ -28,7 +28,7 @@ not replace that extension.
 
 Hooks installed:
   • posttool-agm-state-notify         - Set state to THINKING after tool use
-  • session-start/agm-state-ready     - Set state to READY on session start
+  • session-start/agm-state-ready     - Associate Claude UUID and set READY on session start
   • session-start/agm-plan-continuity - Link execution sessions to planning parents
   • pretool-test-session-guard            - Block test-* sessions without --test flag
   • pretool-agm-mode-tracker          - Track permission mode changes for persistence

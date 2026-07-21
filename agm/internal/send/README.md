@@ -62,10 +62,11 @@ jobs := []*send.DeliveryJob{
     },
 }
 
-// Execute parallel delivery with timeout
+// Execute sequential delivery with timeout. The CLI delivery function routes
+// each job through shared ops atomic readiness and exact-pane input.
 ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 defer cancel()
-results := send.ParallelDeliver(ctx, jobs, deliveryFunc)
+results := send.SequentialDeliver(ctx, jobs, deliveryFunc)
 
 // Generate report
 report := send.GenerateReport(results)
@@ -82,11 +83,11 @@ Supports multiple input formats:
 - **Glob patterns**: `*research*`, `test-*`
 - **Wildcard**: `*` (all sessions)
 
-### Parallel Delivery
+### Sequential Delivery
 
-- Worker pool with max 5 concurrent goroutines
-- Semaphore-based concurrency control
-- Channel-based result collection
+- One recipient is processed at a time because tmux mutation is serialized
+- Each registered CLI harness uses shared ops atomic readiness and delivery
+- The exact verified pane remains pinned for each input operation
 - Per-recipient error isolation
 
 ### Error Handling

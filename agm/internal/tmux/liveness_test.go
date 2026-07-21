@@ -279,6 +279,21 @@ func TestClassifyPaneLiveness_CustomPredicate(t *testing.T) {
 	}
 }
 
+func TestParsePSArgsTable(t *testing.T) {
+	t.Parallel()
+
+	got := ParsePSArgsTable("  10 /usr/local/bin/node /opt/node_modules/@openai/codex/bin/codex.js --flag value\nmalformed\n  11 zsh\n")
+	if got[10] != "/usr/local/bin/node /opt/node_modules/@openai/codex/bin/codex.js --flag value" {
+		t.Fatalf("PID 10 args = %q", got[10])
+	}
+	if got[11] != "zsh" {
+		t.Fatalf("PID 11 args = %q", got[11])
+	}
+	if len(got) != 2 {
+		t.Fatalf("parsed args rows = %v, want two valid rows", got)
+	}
+}
+
 func TestIsHarnessComm(t *testing.T) {
 	tests := []struct {
 		comm string

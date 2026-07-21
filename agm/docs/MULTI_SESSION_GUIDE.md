@@ -262,7 +262,8 @@ AGM provides **at-least-once delivery**:
 - ✅ Messages persist in SQLite queue (survives daemon restarts)
 - ✅ Automatic retry (3 attempts with exponential backoff)
 - ✅ Acknowledgment protocol (confirms delivery)
-- ⚠️ No guarantee of ordering (parallel delivery possible)
+- ✅ Fan-out delivery is attempted in resolved recipient order, one recipient at a time
+- ✅ Each CLI recipient must pass shared harness readiness before exact-pane input
 - ⚠️ Duplicate delivery possible (on network errors, use idempotency)
 
 ### Acknowledgment Protocol

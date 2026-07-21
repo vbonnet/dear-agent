@@ -29,13 +29,15 @@ type mockTmux struct {
 	readiness       session.InputReadiness
 	readinessErr    error
 	readinessChecks []string
+	atomicChecks    []string
 	inputCtx        context.Context
+	paneSendCtx     context.Context
 }
 
 func newMockTmux(sessions ...string) *mockTmux {
 	m := &mockTmux{
 		sessions:  make(map[string]bool),
-		readiness: session.InputReadiness{Ready: true, State: "YES"},
+		readiness: session.InputReadiness{Ready: true, State: "YES", PaneID: "%1"},
 	}
 	for _, s := range sessions {
 		m.sessions[s] = true
@@ -91,6 +93,11 @@ func (m *mockTmux) SendKeys(session, keys string) error {
 	return nil
 }
 
+func (m *mockTmux) SendKeysToPane(ctx context.Context, paneID, keys string) error {
+	m.paneSendCtx = ctx
+	return m.SendKeys(paneID, keys)
+}
+
 func (m *mockTmux) CheckInputReadiness(ctx context.Context, sessionName, harness string) (session.InputReadiness, error) {
 	m.inputCtx = ctx
 	m.readinessChecks = append(m.readinessChecks, sessionName+":"+harness)
@@ -98,6 +105,18 @@ func (m *mockTmux) CheckInputReadiness(ctx context.Context, sessionName, harness
 		return session.InputReadiness{}, m.readinessErr
 	}
 	return m.readiness, nil
+}
+
+func (m *mockTmux) SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string) (session.InputReadiness, error) {
+	m.atomicChecks = append(m.atomicChecks, sessionName+":"+harness)
+	readiness, err := m.CheckInputReadiness(ctx, sessionName, harness)
+	if err != nil || !readiness.Ready {
+		return readiness, err
+	}
+	if readiness.PaneID == "" {
+		return readiness, nil
+	}
+	return readiness, m.SendKeysToPane(ctx, readiness.PaneID, keys)
 }
 
 // mockTmuxWithLiveness wraps mockTmux with the optional

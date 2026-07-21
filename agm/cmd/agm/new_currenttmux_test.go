@@ -151,6 +151,41 @@ func TestQueueCurrentTmuxCodexDoesNotWaitForReadiness(t *testing.T) {
 	}
 }
 
+func TestCurrentTmuxLaunchResultDefersEveryQueuedHarness(t *testing.T) {
+	t.Parallel()
+
+	for _, harness := range []string{"claude-code", "codex-cli", "opencode-cli", "pi-cli", "gemini-cli"} {
+		if got := currentTmuxLaunchResult(harness).Readiness; got != ops.CreateSessionReadinessDeferredUntilCallerExit {
+			t.Errorf("currentTmuxLaunchResult(%q) readiness = %q, want deferred", harness, got)
+		}
+	}
+	if got := currentTmuxLaunchResult("agy").Readiness; got != "" {
+		t.Fatalf("current-tmux AGY readiness = %q, want unsupported/unverified", got)
+	}
+}
+
+func TestQueueCurrentTmuxHarnessCommandUsesCanonicalCommandWithoutWaiting(t *testing.T) {
+	t.Parallel()
+
+	for _, harness := range []string{"claude-code", "opencode-cli", "gemini-cli"} {
+		t.Run(harness, func(t *testing.T) {
+			t.Parallel()
+			spec := ops.HarnessLaunchSpec{Harness: harness, SessionName: "current", WorkDir: "/tmp/current"}
+			var gotSession, gotCommand string
+			err := queueCurrentTmuxHarnessCommand(t.Context(), spec, func(sessionName, command string) error {
+				gotSession, gotCommand = sessionName, command
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("queueCurrentTmuxHarnessCommand() error = %v", err)
+			}
+			if gotSession != spec.SessionName || gotCommand != ops.BuildHarnessLaunchCommand(spec).Command {
+				t.Fatalf("queued (%q, %q), want canonical command for %#v", gotSession, gotCommand, spec)
+			}
+		})
+	}
+}
+
 func TestQueueCurrentTmuxCodexRejectsMissingExecutable(t *testing.T) {
 	t.Parallel()
 

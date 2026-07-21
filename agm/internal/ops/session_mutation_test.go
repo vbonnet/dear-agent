@@ -892,7 +892,7 @@ func TestSendMessage_Success(t *testing.T) {
 	if len(mt.sent) != 1 {
 		t.Fatalf("expected 1 send-keys call, got %d", len(mt.sent))
 	}
-	if mt.sent[0].session != "my-session" || mt.sent[0].keys != "hello world" {
+	if mt.sent[0].session != "%1" || mt.sent[0].keys != "hello world" {
 		t.Errorf("unexpected send-keys: %+v", mt.sent[0])
 	}
 }

@@ -28,8 +28,9 @@ type fakeBackend struct {
 
 type readinessBackend struct {
 	*fakeBackend
-	waitCtx  context.Context
-	checkCtx context.Context
+	waitCtx   context.Context
+	checkCtx  context.Context
+	atomicCtx context.Context
 }
 
 type adapterContextKey struct{}
@@ -41,7 +42,12 @@ func (b *readinessBackend) WaitForHarnessReady(ctx context.Context, _, _ string,
 
 func (b *readinessBackend) CheckInputReadiness(ctx context.Context, _, _ string) (session.InputReadiness, error) {
 	b.checkCtx = ctx
-	return session.InputReadiness{Ready: true, State: "YES"}, nil
+	return session.InputReadiness{Ready: true, State: "YES", PaneID: "%1"}, nil
+}
+
+func (b *readinessBackend) SendKeysIfInputReady(ctx context.Context, _, _, _ string) (session.InputReadiness, error) {
+	b.atomicCtx = ctx
+	return session.InputReadiness{Ready: true, State: "YES", PaneID: "%1"}, nil
 }
 
 func (f *fakeBackend) HasSession(name string) (bool, error) {
@@ -295,7 +301,11 @@ func TestBackendAdapter_ForwardsReadinessCapabilities(t *testing.T) {
 	if err != nil || !readiness.Ready {
 		t.Fatalf("CheckInputReadiness() = (%#v, %v)", readiness, err)
 	}
-	if backend.waitCtx != wantCtx || backend.checkCtx != wantCtx {
+	atomic, err := adapter.SendKeysIfInputReady(wantCtx, "worker", "codex-cli", "hello")
+	if err != nil || !atomic.Ready || atomic.PaneID != "%1" {
+		t.Fatalf("SendKeysIfInputReady() = (%#v, %v)", atomic, err)
+	}
+	if backend.waitCtx != wantCtx || backend.checkCtx != wantCtx || backend.atomicCtx != wantCtx {
 		t.Fatal("adapter did not preserve request context through readiness capabilities")
 	}
 }
@@ -307,6 +317,9 @@ func TestBackendAdapter_ReadinessFailsClosedWhenCapabilityMissing(t *testing.T) 
 	}
 	if _, err := adapter.CheckInputReadiness(context.Background(), "worker", "codex-cli"); err == nil {
 		t.Fatal("CheckInputReadiness() succeeded without backend capability")
+	}
+	if _, err := adapter.SendKeysIfInputReady(context.Background(), "worker", "codex-cli", "hello"); err == nil {
+		t.Fatal("SendKeysIfInputReady() succeeded without backend capability")
 	}
 }
 
@@ -321,7 +334,13 @@ func TestTmuxBackend_ForwardsReadinessCapabilities(t *testing.T) {
 	if _, err := backend.CheckInputReadiness(wantCtx, "worker", "codex-cli"); err != nil {
 		t.Fatalf("CheckInputReadiness() error = %v", err)
 	}
+	if _, err := backend.SendKeysIfInputReady(wantCtx, "worker", "codex-cli", "hello"); err != nil {
+		t.Fatalf("SendKeysIfInputReady() error = %v", err)
+	}
 	if tmuxMock.WaitContext != wantCtx || tmuxMock.InputContext != wantCtx {
 		t.Fatal("tmux backend did not preserve request context")
+	}
+	if len(tmuxMock.AtomicInputChecks) != 1 || len(tmuxMock.ExactPaneDeliveries) != 1 {
+		t.Fatalf("atomic backend calls = %v/%v, want one exact delivery", tmuxMock.AtomicInputChecks, tmuxMock.ExactPaneDeliveries)
 	}
 }

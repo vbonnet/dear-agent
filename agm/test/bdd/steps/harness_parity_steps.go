@@ -129,9 +129,27 @@ type harnessParityState struct {
 	sharedCreateErr            error
 	sharedCreateTmux           *session.MockTmux
 	sharedCreateStore          *dolt.MockAdapter
+	startupReadinessTestOutput string
+	startupReadinessTestErr    error
 }
 
 type harnessParityStateKey struct{}
+
+type bddCreateSessionRuntime struct {
+	tmux *session.MockTmux
+}
+
+func (r *bddCreateSessionRuntime) Launch(_ context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
+	launch := ops.BuildHarnessLaunchCommand(spec)
+	return ops.CreateSessionLaunchResult{ModeAppliedAtStartup: launch.ModeAppliedAtStartup}, r.tmux.SendKeys(spec.SessionName, launch.Command)
+}
+
+func (r *bddCreateSessionRuntime) Complete(_ context.Context, completion ops.CreateSessionCompletion) error {
+	if completion.Prompt == "" {
+		return nil
+	}
+	return r.tmux.SendKeys(completion.Manifest.Name, completion.Prompt)
+}
 
 // RegisterHarnessParitySteps registers BDD steps for cross-harness delivery parity.
 func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
@@ -155,6 +173,8 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^Codex credential validation should precede the canonical launcher$`, codexCredentialValidationShouldPrecedeCanonicalLauncher)
 	ctx.Step(`^the top-level new command should route into current tmux$`, topLevelNewCommandShouldRouteIntoCurrentTmux)
 	ctx.Step(`^Codex current-tmux launch should require the executable without waiting behind its own AGM process$`, codexCurrentTmuxLaunchShouldRequireExecutableWithoutWaiting)
+	ctx.Step(`^every queued current-tmux harness should defer readiness until AGM exits$`, everyQueuedCurrentTmuxHarnessShouldDeferReadinessUntilAGMExits)
+	ctx.Step(`^current-tmux Claude should associate its UUID on SessionStart$`, currentTmuxClaudeShouldAssociateItsUUIDOnSessionStart)
 	ctx.Step(`^Codex queue failures should propagate to shared creation rollback$`, codexQueueFailuresShouldPropagateToSharedCreationRollback)
 	ctx.Step(`^current-tmux creation selects AGY$`, currentTmuxCreationSelectsAGY)
 	ctx.Step(`^AGM validates current-tmux AGY safety$`, agmValidatesCurrentTmuxAGYSafety)
@@ -297,9 +317,16 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^shared send should emit (\d+) tmux commands$`, sharedSendShouldEmitTmuxCommands)
 	ctx.Step(`^the shared send request is cancelled$`, theSharedSendRequestIsCancelled)
 	ctx.Step(`^shared Codex creation cannot observe the composer$`, sharedCodexCreationCannotObserveTheComposer)
-	ctx.Step(`^AGM creates Codex through shared operations$`, agmCreatesCodexThroughSharedOperations)
+	ctx.Step(`^AGM creates Codex through a surface runtime$`, agmCreatesCodexThroughSharedOperations)
 	ctx.Step(`^shared creation should fail before registration and prompt delivery$`, sharedCreationShouldFailBeforeRegistrationAndPromptDelivery)
 	ctx.Step(`^shared creation should remove its newly created tmux session$`, sharedCreationShouldRemoveItsNewlyCreatedTmuxSession)
+	ctx.Step(`^AGM validates slow harness startup readiness$`, agmValidatesSlowHarnessStartupReadiness)
+	ctx.Step(`^shared startup readiness should honor the total deadline$`, sharedStartupReadinessShouldHonorTheTotalDeadline)
+	ctx.Step(`^shared input readiness should serialize exact-pane delivery and preserve rendered composer ownership without treating resolved prompts as live$`, sharedInputReadinessShouldRejectStaleClaudeComposerAndUnrelatedNodeProcess)
+	ctx.Step(`^CLI message sends should use shared atomic readiness for single and multi-recipient delivery$`, cliMessageSendsShouldUseSharedAtomicReadiness)
+	ctx.Step(`^shared Gemini readiness should advance first-run trust on the verified pane$`, sharedGeminiReadinessShouldAdvanceFirstRunTrustOnTheVerifiedPane)
+	ctx.Step(`^legacy AGY names should reach canonical shared send readiness$`, legacyAgyNamesShouldReachCanonicalSharedSendReadiness)
+	ctx.Step(`^the Pi alias should reach canonical shared send readiness$`, piAliasShouldReachCanonicalSharedSendReadiness)
 	ctx.Step(`^an existing tmux session running Codex CLI$`, anExistingTmuxSessionRunningCodexCLI)
 	ctx.Step(`^an existing tmux session running AGY$`, anExistingTmuxSessionRunningAGY)
 	ctx.Step(`^/agm:agm-assoc runs in that session$`, agmAssocRunsInThatSession)
@@ -547,7 +574,7 @@ func agmValidatesCurrentTmuxCodexLaunchWiring(ctx context.Context) error {
 	// to compile both production packages under integration-graph contention.
 	testCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/ops", "-run", `^(Test(StartCurrentTmuxHarnessCodex(UsesRealLauncherContract|StopsAfterCredentialFailure|PropagatesQueueFailure)|QueueCurrentTmuxCodex(DoesNotWaitForReadiness|RejectsMissingExecutable)|StartNewSessionForContextRoutesCurrentTmux)|TestCreateSession_RollsBackEveryPostTmuxFailure)$`, "-count=1", "-v")
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/ops", "-run", `^(Test(StartCurrentTmuxHarnessCodex(UsesRealLauncherContract|StopsAfterCredentialFailure|PropagatesQueueFailure)|QueueCurrentTmuxCodex(DoesNotWaitForReadiness|RejectsMissingExecutable)|QueueCurrentTmuxPi(UsesManagedLaunchContract|RejectsMissingExecutable)|CurrentTmuxLaunchResultDefersEveryQueuedHarness|QueueCurrentTmuxHarnessCommandUsesCanonicalCommandWithoutWaiting|StartNewSessionForContextRoutesCurrentTmux|SessionStartHook(AssociatesClaudeUUIDBeforeReadyState|RetriesAssociationUntilRegistration|RetryWindowCoversMaximumStartup|HasSingleCanonicalSource))|Test(CreateSession_RollsBackEveryPostTmuxFailure|EstablishCreatedHarnessReadinessAllowsOnlyQueuedCurrentTmuxDeferral))$`, "-count=1", "-v")
 	cmd.Dir = bddRepoRoot()
 	output, runErr := cmd.CombinedOutput()
 	harnessState.currentTmuxTestOutput = string(output)
@@ -593,6 +620,43 @@ func codexCurrentTmuxLaunchShouldRequireExecutableWithoutWaiting(ctx context.Con
 	for _, behavior := range []string{"TestQueueCurrentTmuxCodexDoesNotWaitForReadiness", "TestQueueCurrentTmuxCodexRejectsMissingExecutable"} {
 		if !strings.Contains(state.currentTmuxTestOutput, "--- PASS: "+behavior) {
 			return fmt.Errorf("current-tmux Codex behavior %s did not pass:\n%s", behavior, state.currentTmuxTestOutput)
+		}
+	}
+	return nil
+}
+
+func everyQueuedCurrentTmuxHarnessShouldDeferReadinessUntilAGMExits(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if state.currentTmuxTestErr != nil {
+		return fmt.Errorf("current-tmux behavior suite failed: %w\n%s", state.currentTmuxTestErr, state.currentTmuxTestOutput)
+	}
+	for _, behavior := range []string{
+		"TestCurrentTmuxLaunchResultDefersEveryQueuedHarness",
+		"TestQueueCurrentTmuxHarnessCommandUsesCanonicalCommandWithoutWaiting",
+		"TestQueueCurrentTmuxPiUsesManagedLaunchContract",
+		"TestQueueCurrentTmuxPiRejectsMissingExecutable",
+		"TestEstablishCreatedHarnessReadinessAllowsOnlyQueuedCurrentTmuxDeferral",
+	} {
+		if !strings.Contains(state.currentTmuxTestOutput, "--- PASS: "+behavior) {
+			return fmt.Errorf("current-tmux deferred readiness behavior %s did not pass:\n%s", behavior, state.currentTmuxTestOutput)
+		}
+	}
+	return nil
+}
+
+func currentTmuxClaudeShouldAssociateItsUUIDOnSessionStart(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if state.currentTmuxTestErr != nil {
+		return fmt.Errorf("current-tmux behavior suite failed: %w\n%s", state.currentTmuxTestErr, state.currentTmuxTestOutput)
+	}
+	for _, behavior := range []string{
+		"TestSessionStartHookAssociatesClaudeUUIDBeforeReadyState",
+		"TestSessionStartHookRetriesAssociationUntilRegistration",
+		"TestSessionStartHookRetryWindowCoversMaximumStartup",
+		"TestSessionStartHookHasSingleCanonicalSource",
+	} {
+		if !strings.Contains(state.currentTmuxTestOutput, "--- PASS: "+behavior) {
+			return fmt.Errorf("claude SessionStart association behavior %s did not pass:\n%s", behavior, state.currentTmuxTestOutput)
 		}
 	}
 	return nil
@@ -661,6 +725,9 @@ func agmSendsAMessageThroughSharedOperations(ctx context.Context) error {
 	tmuxMock.InputReadiness = session.InputReadiness{
 		Ready: harnessState.sharedSendReadiness == "YES",
 		State: harnessState.sharedSendReadiness,
+	}
+	if tmuxMock.InputReadiness.Ready {
+		tmuxMock.InputReadiness.PaneID = "%42"
 	}
 	harnessState.sharedSendTmux = tmuxMock
 	opCtx := &ops.OpContext{Storage: store, Tmux: tmuxMock}
@@ -733,6 +800,19 @@ func sharedSendShouldEmitTmuxCommands(ctx context.Context, expected int) error {
 	if got := len(harnessState.sharedSendTmux.SentCommands); got != expected {
 		return fmt.Errorf("shared send emitted %d tmux commands, want %d", got, expected)
 	}
+	if got := len(harnessState.sharedSendTmux.ExactPaneDeliveries); got != expected {
+		return fmt.Errorf("shared send emitted %d exact-pane deliveries, want %d", got, expected)
+	}
+	wantAtomicChecks := 1
+	if harnessState.sharedSendCancelled {
+		wantAtomicChecks = 0
+	}
+	if got := len(harnessState.sharedSendTmux.AtomicInputChecks); got != wantAtomicChecks {
+		return fmt.Errorf("shared send performed %d atomic readiness-and-delivery operations, want %d", got, wantAtomicChecks)
+	}
+	if expected == 1 && harnessState.sharedSendTmux.ExactPaneDeliveries[0] != "%42" {
+		return fmt.Errorf("shared send targeted pane %q, want verified pane %%42", harnessState.sharedSendTmux.ExactPaneDeliveries[0])
+	}
 	return nil
 }
 
@@ -759,7 +839,7 @@ func agmCreatesCodexThroughSharedOperations(ctx context.Context) error {
 	harnessState.sharedCreateTmux = tmuxMock
 	harnessState.sharedCreateStore = store
 	_, harnessState.sharedCreateErr = ops.CreateSession(
-		&ops.OpContext{Storage: store, Tmux: tmuxMock},
+		&ops.OpContext{Storage: store, Tmux: tmuxMock, CreationRuntime: &bddCreateSessionRuntime{tmux: tmuxMock}},
 		&ops.CreateSessionRequest{
 			Cwd: workDir, Prompt: "must not send", Title: "bdd-shared-create",
 			Harness: "codex-cli", Model: "5.5", SkipCodexRemoteControl: true,
@@ -793,6 +873,111 @@ func sharedCreationShouldRemoveItsNewlyCreatedTmuxSession(ctx context.Context) e
 	}
 	if tmuxMock.Sessions["bdd-shared-create"] {
 		return fmt.Errorf("new tmux session survived failed shared readiness")
+	}
+	return nil
+}
+
+func agmValidatesSlowHarnessStartupReadiness(ctx context.Context) error {
+	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	testCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, "go", "test", "-p", "1", "./agm/cmd/agm", "./agm/cmd/agm-mcp-server", "./agm/internal/session", "./agm/internal/tmux", "./agm/internal/ops", "-run", `^(TestMCPCreateSessionRuntimeRevalidatesStartupPromptAtomically|TestRealTmux(ReadinessAdvancesGeminiTrustOnVerifiedPane|ReadinessDetectsManagedPiComposer|ReadinessIdentifiesNodeBackedCodex|ReadinessPinsLivenessAndDeliveryToActivePane|ReadinessPreservesClaudeGhostComposer|WaitForHarnessReadyAllowsSlowProcessStart)|TestClassifyHarnessInputRequiresCurrentHarnessComposer|TestHarnessStartupAdvanceKeys|TestExpectedHarnessMatcher(RejectsUnrelatedNodeProcess|AcceptsIdentifiedNodeBackedHarness)|TestSendMessage_(AtomicReadinessAndDeliveryPrecedesGenericManagerCheck|Normalizes(LegacyAgyHarness|PiHarnessAlias)BeforeReadiness)|TestSendViaSharedOperations(UsesCallerContext|FailsClosedWhenHarnessIsNotReady)|TestMultiRecipientDeliveryUsesSharedAtomicReadiness|TestDirectCLIDeliveryRejectsUnregisteredTmuxSession)$`, "-count=1", "-v")
+	cmd.Dir = bddRepoRoot()
+	output, err := cmd.CombinedOutput()
+	harnessState.startupReadinessTestOutput = string(output)
+	harnessState.startupReadinessTestErr = err
+	if testCtx.Err() != nil {
+		return fmt.Errorf("slow harness startup readiness test timed out: %w", testCtx.Err())
+	}
+	return nil
+}
+
+func sharedStartupReadinessShouldHonorTheTotalDeadline(ctx context.Context) error {
+	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if harnessState.startupReadinessTestErr != nil {
+		return fmt.Errorf("slow harness startup readiness test failed: %w\n%s", harnessState.startupReadinessTestErr, harnessState.startupReadinessTestOutput)
+	}
+	if !strings.Contains(harnessState.startupReadinessTestOutput, "--- PASS: TestRealTmuxWaitForHarnessReadyAllowsSlowProcessStart") {
+		return fmt.Errorf("slow harness startup readiness behavior did not pass:\n%s", harnessState.startupReadinessTestOutput)
+	}
+	return nil
+}
+
+func sharedInputReadinessShouldRejectStaleClaudeComposerAndUnrelatedNodeProcess(ctx context.Context) error {
+	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if harnessState.startupReadinessTestErr != nil {
+		return fmt.Errorf("shared readiness behavior suite failed: %w\n%s", harnessState.startupReadinessTestErr, harnessState.startupReadinessTestOutput)
+	}
+	for _, behavior := range []string{
+		"TestClassifyHarnessInputRequiresCurrentHarnessComposer",
+		"TestExpectedHarnessMatcherRejectsUnrelatedNodeProcess",
+		"TestExpectedHarnessMatcherAcceptsIdentifiedNodeBackedHarness",
+		"TestRealTmuxReadinessIdentifiesNodeBackedCodex",
+		"TestRealTmuxReadinessPinsLivenessAndDeliveryToActivePane",
+		"TestRealTmuxReadinessPreservesClaudeGhostComposer",
+		"TestRealTmuxReadinessDetectsManagedPiComposer",
+		"TestSendMessage_AtomicReadinessAndDeliveryPrecedesGenericManagerCheck",
+		"TestMCPCreateSessionRuntimeRevalidatesStartupPromptAtomically",
+	} {
+		if !strings.Contains(harnessState.startupReadinessTestOutput, "--- PASS: "+behavior) {
+			return fmt.Errorf("shared readiness behavior %s did not pass:\n%s", behavior, harnessState.startupReadinessTestOutput)
+		}
+	}
+	return nil
+}
+
+func cliMessageSendsShouldUseSharedAtomicReadiness(ctx context.Context) error {
+	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if harnessState.startupReadinessTestErr != nil {
+		return fmt.Errorf("shared readiness behavior suite failed: %w\n%s", harnessState.startupReadinessTestErr, harnessState.startupReadinessTestOutput)
+	}
+	for _, behavior := range []string{
+		"TestSendViaSharedOperationsUsesCallerContext",
+		"TestSendViaSharedOperationsFailsClosedWhenHarnessIsNotReady",
+		"TestMultiRecipientDeliveryUsesSharedAtomicReadiness",
+		"TestDirectCLIDeliveryRejectsUnregisteredTmuxSession",
+	} {
+		if !strings.Contains(harnessState.startupReadinessTestOutput, "--- PASS: "+behavior) {
+			return fmt.Errorf("CLI shared send behavior %s did not pass:\n%s", behavior, harnessState.startupReadinessTestOutput)
+		}
+	}
+	return nil
+}
+
+func sharedGeminiReadinessShouldAdvanceFirstRunTrustOnTheVerifiedPane(ctx context.Context) error {
+	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if harnessState.startupReadinessTestErr != nil {
+		return fmt.Errorf("shared readiness behavior suite failed: %w\n%s", harnessState.startupReadinessTestErr, harnessState.startupReadinessTestOutput)
+	}
+	for _, behavior := range []string{
+		"TestHarnessStartupAdvanceKeys",
+		"TestRealTmuxReadinessAdvancesGeminiTrustOnVerifiedPane",
+	} {
+		if !strings.Contains(harnessState.startupReadinessTestOutput, "--- PASS: "+behavior) {
+			return fmt.Errorf("shared Gemini readiness behavior %s did not pass:\n%s", behavior, harnessState.startupReadinessTestOutput)
+		}
+	}
+	return nil
+}
+
+func legacyAgyNamesShouldReachCanonicalSharedSendReadiness(ctx context.Context) error {
+	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if harnessState.startupReadinessTestErr != nil {
+		return fmt.Errorf("shared readiness behavior suite failed: %w\n%s", harnessState.startupReadinessTestErr, harnessState.startupReadinessTestOutput)
+	}
+	if behavior := "TestSendMessage_NormalizesLegacyAgyHarnessBeforeReadiness"; !strings.Contains(harnessState.startupReadinessTestOutput, "--- PASS: "+behavior) {
+		return fmt.Errorf("legacy AGY send readiness behavior %s did not pass:\n%s", behavior, harnessState.startupReadinessTestOutput)
+	}
+	return nil
+}
+
+func piAliasShouldReachCanonicalSharedSendReadiness(ctx context.Context) error {
+	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if harnessState.startupReadinessTestErr != nil {
+		return fmt.Errorf("shared readiness behavior suite failed: %w\n%s", harnessState.startupReadinessTestErr, harnessState.startupReadinessTestOutput)
+	}
+	if behavior := "TestSendMessage_NormalizesPiHarnessAliasBeforeReadiness"; !strings.Contains(harnessState.startupReadinessTestOutput, "--- PASS: "+behavior) {
+		return fmt.Errorf("pi send readiness behavior %s did not pass:\n%s", behavior, harnessState.startupReadinessTestOutput)
 	}
 	return nil
 }
@@ -2683,7 +2868,10 @@ func mcpCreationShouldWaitForAGYComposerBeforePromptDelivery(ctx context.Context
 	if err != nil {
 		return err
 	}
-	return requireAgyLifecycleBehaviors(harnessState, "TestMCPCreateSessionRuntimeWaitsForAgyBeforePrompt")
+	return requireAgyLifecycleBehaviors(harnessState,
+		"TestMCPCreateSessionRuntimeWaitsForAgyBeforePrompt",
+		"TestMCPCreateSessionRuntimeCannotBypassSharedAgyReadiness",
+	)
 }
 
 func sharedCreationShouldPersistNewAGYIdentityBeforeRegistration(ctx context.Context) error {
@@ -2796,7 +2984,7 @@ func rootSignalCancellationShouldReachEveryCommandScopedReadinessWait(ctx contex
 		"TestWaitForResumedCodexUsesCallerContext",
 		"TestRunCodexPostCreateReturnsCancellationBeforePromptDelivery",
 		"TestWaitForAgyPromptReturnsCancellationAfterReadyStabilityDelay",
-		"TestSendViaTmuxUsesCallerContext",
+		"TestSendViaSharedOperationsUsesCallerContext",
 		"TestStructuredPromptUsesCallerContext",
 		"TestSequentialDeliverPassesCallerContext",
 		"TestSendPostResumePromptUsesCallerContext",

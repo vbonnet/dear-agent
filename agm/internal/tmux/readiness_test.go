@@ -1,9 +1,32 @@
 package tmux
 
 import (
+	"context"
+	"slices"
 	"strings"
 	"testing"
 )
+
+func TestHandleHarnessStartupStateWaitsForSlowInitialProcess(t *testing.T) {
+	t.Parallel()
+
+	observedHarness := false
+	advanced := make(map[string]bool)
+	for attempt := range 12 {
+		ready, err := handleHarnessStartupState(context.Background(), "slow", "codex-cli", HarnessInputReadiness{State: HarnessInputWrongHarness}, &observedHarness, advanced)
+		if err != nil || ready {
+			t.Fatalf("pre-start attempt %d = ready:%t err:%v, want continued wait", attempt, ready, err)
+		}
+	}
+	ready, err := handleHarnessStartupState(context.Background(), "slow", "codex-cli", HarnessInputReadiness{State: HarnessInputBusy}, &observedHarness, advanced)
+	if err != nil || ready || !observedHarness {
+		t.Fatalf("observed busy harness = ready:%t observed:%t err:%v", ready, observedHarness, err)
+	}
+	_, err = handleHarnessStartupState(context.Background(), "slow", "codex-cli", HarnessInputReadiness{State: HarnessInputWrongHarness}, &observedHarness, advanced)
+	if err == nil || !strings.Contains(err.Error(), "stopped") {
+		t.Fatalf("post-start wrong harness error = %v, want stopped-process failure", err)
+	}
+}
 
 func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 	tests := []struct {
@@ -39,10 +62,57 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			state:   HarnessInputOnboarding,
 		},
 		{
+			name:    "resolved Codex onboarding before live composer",
+			harness: "codex-cli",
+			content: "Do you trust the contents of this directory?\n› 1. Yes, continue\napproved\n│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.5 /model to change │\n›",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
 			name:    "Claude permission wins over prompt glyph",
 			harness: "claude-code",
-			content: "Do you want to proceed?\n❯ 1. Yes\n❯",
+			content: "Do you want to proceed?\n❯ 1. Yes\n  2. No",
 			state:   HarnessInputPermission,
+		},
+		{
+			name:    "selector-only permission choices own tail",
+			harness: "claude-code",
+			content: "command preview\n❯ 1. Allow\n  2. Deny\nEsc to cancel",
+			state:   HarnessInputPermission,
+		},
+		{
+			name:    "resolved Claude permission inside live tail",
+			harness: "claude-code",
+			content: "Do you want to proceed?\n❯ 1. Allow\n  2. Deny\napproved\n❯\n────────────────\n? for shortcuts",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "ordinary Allow and Deny output is not permission",
+			harness: "claude-code",
+			content: "The policy maps Deny before Allow.\noperation complete\n❯\n────────────────\n? for shortcuts",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "permission question followed by work does not own input",
+			harness: "claude-code",
+			content: "Do you want to proceed?\nrequest already approved\n✻ Working…",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "resolved Claude permission above live composer",
+			harness: "claude-code",
+			content: "Do you want to proceed?\n❯ 1. Allow\n  2. Deny\napproved\n" + strings.Repeat("historical output\n", 12) + "❯\n────────────────\n? for shortcuts",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "resolved Claude trust before live composer",
+			harness: "claude-code",
+			content: "Do you trust the files in this folder?\n❯ 1. Yes\napproved\n❯\n────────────────\n? for shortcuts",
+			ready:   true,
+			state:   HarnessInputReady,
 		},
 		{
 			name:    "wrong harness composer",
@@ -51,10 +121,120 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			state:   HarnessInputBusy,
 		},
 		{
+			name:    "Claude tail-owned composer",
+			harness: "claude-code",
+			content: "response\n❯\n────────────────\n? for shortcuts",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "Claude dim ghost text is an empty composer",
+			harness: "claude-code",
+			content: "response\n❯ \x1b[2mstart the loop\x1b[0m\n────────────────\n? for shortcuts",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "Claude grey ghost text is an empty composer",
+			harness: "claude-code",
+			content: "response\n❯ \x1b[38;5;241mstart the loop\x1b[0m\n────────────────\n? for shortcuts",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "Claude human draft is not an empty composer",
+			harness: "claude-code",
+			content: "response\n❯ start the loop\n────────────────\n? for shortcuts",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "stale Claude composer before working view",
+			harness: "claude-code",
+			content: "response\n❯\n✻ Working…\nRunning tests",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "Gemini structural composer owns tail",
+			harness: "gemini-cli",
+			content: "response\n╭────────────────╮\n│ >   Type your message or @path/to/file │\n╰────────────────╯\n? for shortcuts",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "Gemini generic border is not a composer",
+			harness: "gemini-cli",
+			content: "tool output\n╭────────────────╮\nWorking on request",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "stale Gemini composer before working view",
+			harness: "gemini-cli",
+			content: ">   Type your message or @path/to/file\nWorking on request",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "Gemini trust owns input",
+			harness: "gemini-cli",
+			content: "Do you trust the files in this folder?\n● 1. Trust folder\n  2. Do not trust",
+			state:   HarnessInputOnboarding,
+		},
+		{
+			name:    "resolved Gemini trust before live composer",
+			harness: "gemini-cli",
+			content: "Do you trust the files in this folder?\n● 1. Trust folder\napproved\n│ >   Type your message or @path/to/file │\n? for shortcuts",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "OpenCode structural composer owns tail",
+			harness: "opencode-cli",
+			content: "response\n> Type your message",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "OpenCode output containing angle marker is not a composer",
+			harness: "opencode-cli",
+			content: "build > ready\nWorking on request",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "stale OpenCode composer before working view",
+			harness: "opencode-cli",
+			content: "> Type your message\nWorking on request",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "Pi managed ready status owns tail",
+			harness: "pi-cli",
+			content: "/work • pi-worker\nAGM plan/ready launch-current",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "stale Pi ready status before working status",
+			harness: "pi-cli",
+			content: "AGM plan/ready launch-old\nAGM plan/working launch-current",
+			state:   HarnessInputBusy,
+		},
+		{
 			name:    "AGY survey wins over bare prompt",
 			harness: "agy",
 			content: ">\nHow's the CLI experience so far?\n[1] Good [2] Fine [3] Bad [0] Skip",
 			state:   HarnessInputOverlay,
+		},
+		{
+			name:    "resolved AGY survey before live composer",
+			harness: "agy",
+			content: "How's the CLI experience so far?\n[1] Good [2] Fine [3] Bad [0] Skip\nthanks\n>",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "stale AGY composer before working output",
+			harness: "agy",
+			content: ">\nprocessing request\nresponse chunk",
+			state:   HarnessInputBusy,
 		},
 	}
 	for _, tt := range tests {
@@ -65,6 +245,29 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			}
 			if ready != tt.ready || state != tt.state {
 				t.Fatalf("ClassifyHarnessInput() = (%v, %q), want (%v, %q)", ready, state, tt.ready, tt.state)
+			}
+		})
+	}
+}
+
+func TestHarnessStartupAdvanceKeys(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		harness string
+		content string
+		want    []string
+	}{
+		{name: "Gemini trust selection", harness: "gemini-cli", content: "Do you trust the files in this folder?", want: []string{"1", "Enter"}},
+		{name: "Codex model upgrade", harness: "codex-cli", content: "Choose how you'd like Codex to proceed", want: []string{"Down", "Enter"}},
+		{name: "AGY survey", harness: "agy", content: "How's the CLI experience so far?\n[0] Skip", want: []string{"0"}},
+		{name: "default trust selection", harness: "claude-code", content: "Do you trust the files in this folder?", want: []string{"Enter"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := harnessStartupAdvanceKeys(tt.harness, tt.content); !slices.Equal(got, tt.want) {
+				t.Fatalf("harnessStartupAdvanceKeys(%q) = %#v, want %#v", tt.harness, got, tt.want)
 			}
 		})
 	}
@@ -86,23 +289,61 @@ func TestExpectedHarnessMatcherRejectsWrongProcess(t *testing.T) {
 		{PID: 10, PPID: 1, Comm: "zsh"},
 		{PID: 11, PPID: 10, Comm: "agy"},
 	}
-	codex := ClassifyPaneLiveness([]int{10}, procs, expectedHarnessMatcher("codex-cli"))
+	codex := classifyPaneLivenessProcesses([]int{10}, procs, expectedHarnessProcessMatcher("codex-cli"))
 	if codex.HarnessAlive {
 		t.Fatalf("AGY process classified as Codex: %#v", codex)
 	}
-	agy := ClassifyPaneLiveness([]int{10}, procs, expectedHarnessMatcher("agy"))
+	agy := classifyPaneLivenessProcesses([]int{10}, procs, expectedHarnessProcessMatcher("agy"))
 	if !agy.HarnessAlive {
 		t.Fatalf("AGY process not detected: %#v", agy)
 	}
+	piProcs := []ProcEntry{
+		{PID: 10, PPID: 1, Comm: "zsh"},
+		{PID: 11, PPID: 10, Comm: "agy"},
+		{PID: 12, PPID: 10, Comm: "pi", Args: "pi --session-id native"},
+	}
+	pi := classifyPaneLivenessProcesses([]int{10}, piProcs, expectedHarnessProcessMatcher("pi-cli"))
+	if !pi.HarnessAlive {
+		t.Fatalf("Pi process not detected: %#v", pi)
+	}
 }
 
-func TestExpectedHarnessMatcherAcceptsNodeBackedCodex(t *testing.T) {
-	procs := []ProcEntry{
-		{PID: 10, PPID: 1, Comm: "zsh"},
-		{PID: 11, PPID: 10, Comm: "/usr/local/bin/node"},
+func TestExpectedHarnessMatcherAcceptsIdentifiedNodeBackedHarness(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		harness string
+		args    string
+	}{
+		{harness: "claude-code", args: "/usr/local/bin/node /opt/node_modules/@anthropic-ai/claude-code/cli.js"},
+		{harness: "codex-cli", args: "/usr/local/bin/node /opt/node_modules/@openai/codex/bin/codex.js"},
+		{harness: "gemini-cli", args: "/usr/local/bin/node /opt/node_modules/@google/gemini-cli/dist/index.js"},
+		{harness: "opencode-cli", args: "/usr/local/bin/node /opt/node_modules/opencode-ai/bin/opencode.js"},
+		{harness: "pi-cli", args: "/usr/local/bin/node /opt/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"},
 	}
-	got := ClassifyPaneLiveness([]int{10}, procs, expectedHarnessMatcher("codex-cli"))
-	if !got.HarnessAlive {
-		t.Fatalf("node-backed Codex liveness = %#v, want alive", got)
+	for _, tt := range tests {
+		procs := []ProcEntry{
+			{PID: 10, PPID: 1, Comm: "zsh"},
+			{PID: 11, PPID: 10, Comm: "/usr/local/bin/node", Args: tt.args},
+		}
+		got := classifyPaneLivenessProcesses([]int{10}, procs, expectedHarnessProcessMatcher(tt.harness))
+		if !got.HarnessAlive {
+			t.Errorf("identified Node-backed %s liveness = %#v, want alive", tt.harness, got)
+		}
+	}
+}
+
+func TestExpectedHarnessMatcherRejectsUnrelatedNodeProcess(t *testing.T) {
+	t.Parallel()
+
+	procs := []ProcEntry{
+		{PID: 10, PPID: 1, Comm: "zsh", Args: "zsh"},
+		{PID: 11, PPID: 10, Comm: "/usr/local/bin/node", Args: "/usr/local/bin/node /srv/telemetry-worker.js"},
+	}
+	for _, harness := range []string{"claude-code", "codex-cli", "gemini-cli", "opencode-cli", "pi-cli"} {
+		got := classifyPaneLivenessProcesses([]int{10}, procs, expectedHarnessProcessMatcher(harness))
+		if got.HarnessAlive {
+			t.Errorf("unrelated Node process classified as %s: %#v", harness, got)
+		}
 	}
 }

@@ -80,14 +80,28 @@ type HarnessReadinessWaiter interface {
 // message delivery. State is the detector verdict (for example YES, NO,
 // QUEUE, OVERLAY, or NOT_FOUND).
 type InputReadiness struct {
-	Ready bool
-	State string
+	Ready  bool
+	State  string
+	PaneID string
 }
 
 // InputReadinessChecker is the optional pre-delivery capability used by
 // shared message operations. Delivery is safe only when Ready is true.
 type InputReadinessChecker interface {
 	CheckInputReadiness(ctx context.Context, sessionName, harness string) (InputReadiness, error)
+}
+
+// AtomicInputSender checks harness input ownership and delivers to the
+// resulting exact pane while holding one tmux mutation boundary. If Ready is
+// false, no input was sent; if Ready is true, delivery completed successfully.
+type AtomicInputSender interface {
+	SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string) (InputReadiness, error)
+}
+
+// VerifiedPaneSender delivers to the exact pane returned by
+// InputReadinessChecker, preventing active-pane changes from redirecting input.
+type VerifiedPaneSender interface {
+	SendKeysToPane(ctx context.Context, paneID, keys string) error
 }
 
 // TmuxInterface provides an abstraction for tmux operations

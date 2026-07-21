@@ -327,6 +327,9 @@ func (r *mcpCreateSessionRuntime) Launch(ctx context.Context, spec ops.HarnessLa
 	if err := r.waitForAgyPrompt(ctx, spec.SessionName, 90*time.Second); err != nil {
 		return result, fmt.Errorf("wait for AGY readiness: %w", err)
 	}
+	// The native wait handles AGY onboarding, but it does not prove that the
+	// process rendering the composer is still alive. Leave the result unverified
+	// so the shared process-and-composer gate owns the final readiness verdict.
 	return result, nil
 }
 
@@ -337,7 +340,21 @@ func (r *mcpCreateSessionRuntime) Complete(ctx context.Context, completion ops.C
 	if completion.Prompt == "" || completion.Launch.PromptDelivered {
 		return nil
 	}
-	return r.tmux.SendKeys(completion.Manifest.Name, completion.Prompt)
+	sender, ok := r.tmux.(session.AtomicInputSender)
+	if !ok {
+		return fmt.Errorf("MCP tmux runtime does not expose atomic input delivery")
+	}
+	readiness, err := sender.SendKeysIfInputReady(ctx, completion.Manifest.Name, completion.Manifest.Harness, completion.Prompt)
+	if err != nil {
+		return fmt.Errorf("revalidate MCP startup prompt delivery: %w", err)
+	}
+	if !readiness.Ready {
+		return fmt.Errorf("revalidate MCP startup prompt delivery: harness input is %s", readiness.State)
+	}
+	if readiness.PaneID == "" {
+		return fmt.Errorf("revalidate MCP startup prompt delivery: harness returned no verified pane")
+	}
+	return nil
 }
 
 func (r *mcpCreateSessionRuntime) BootstrapAgyCreateIdentity(ctx context.Context, input ops.AgyCreateIdentityBootstrap) error {

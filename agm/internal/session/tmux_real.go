@@ -70,6 +70,11 @@ func (t *RealTmux) SendKeys(session, keys string) error {
 	return tmux.SendCommand(session, keys)
 }
 
+// SendKeysToPane sends to an exact pane previously returned by readiness.
+func (t *RealTmux) SendKeysToPane(ctx context.Context, paneID, keys string) error {
+	return tmux.SendCommandToPaneContext(ctx, paneID, keys)
+}
+
 // WaitForHarnessReady observes the harness-specific interactive boundary used
 // by shared creation before registration or prompt delivery.
 func (t *RealTmux) WaitForHarnessReady(ctx context.Context, sessionName, harness string, timeout time.Duration) error {
@@ -89,7 +94,17 @@ func (t *RealTmux) CheckInputReadiness(ctx context.Context, sessionName, harness
 	if err != nil {
 		return InputReadiness{}, err
 	}
-	return InputReadiness{Ready: readiness.Ready, State: readiness.State}, nil
+	return InputReadiness{Ready: readiness.Ready, State: readiness.State, PaneID: readiness.TargetPane}, nil
+}
+
+// SendKeysIfInputReady serializes exact harness readiness with exact-pane
+// delivery so another AGM sender cannot invalidate the observation.
+func (t *RealTmux) SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string) (InputReadiness, error) {
+	readiness, err := tmux.CheckExpectedHarnessInputAndSend(ctx, sessionName, harness, keys)
+	if err != nil {
+		return InputReadiness{}, err
+	}
+	return InputReadiness{Ready: readiness.Ready, State: readiness.State, PaneID: readiness.TargetPane}, nil
 }
 
 // HarnessLiveness scans the session's pane process tree for a live harness

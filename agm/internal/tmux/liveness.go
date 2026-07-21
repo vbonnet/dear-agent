@@ -29,12 +29,13 @@ import (
 // livenessScanTimeout bounds the tmux + ps round-trips for one scan.
 const livenessScanTimeout = 2 * time.Second
 
-// ProcEntry is one row of a process table: a PID, its parent, and the
-// command name (comm). Comm may be a bare name or a full path.
+// ProcEntry is one row of a process table: a PID, its parent, the command name
+// (comm), and optional full arguments. Comm may be a bare name or a full path.
 type ProcEntry struct {
 	PID  int
 	PPID int
 	Comm string
+	Args string
 }
 
 // procCommandEntry is one process-table row with the full command line. Pi's
@@ -146,6 +147,12 @@ func ParsePSTable(out string) []ProcEntry {
 // shells tmux spawned) are included in the walk, so a pane whose root
 // process IS the harness classifies as alive.
 func ClassifyPaneLiveness(panePIDs []int, procs []ProcEntry, isHarness func(comm string) bool) PaneLiveness {
+	return classifyPaneLivenessProcesses(panePIDs, procs, func(process ProcEntry) bool {
+		return isHarness(process.Comm)
+	})
+}
+
+func classifyPaneLivenessProcesses(panePIDs []int, procs []ProcEntry, isHarness func(ProcEntry) bool) PaneLiveness {
 	if len(panePIDs) == 0 {
 		return PaneLiveness{SessionExists: false}
 	}
@@ -178,15 +185,7 @@ func ClassifyPaneLiveness(panePIDs []int, procs []ProcEntry, isHarness func(comm
 			continue
 		}
 		processSeen = true
-		base := filepath.Base(p.Comm)
-		if !IsShellCommand(p.Comm) {
-			verdict.RestartableShell = false
-		}
-		if isHarness(p.Comm) {
-			verdict.HarnessAlive = true
-		} else if base == "agm" {
-			verdict.ZombieWriter = true
-		}
+		observePaneProcess(&verdict, p, isHarness)
 		for _, c := range children[pid] {
 			if !seen[c.PID] {
 				queue = append(queue, c.PID)
@@ -210,6 +209,80 @@ func ClassifyPaneLiveness(panePIDs []int, procs []ProcEntry, isHarness func(comm
 		verdict.Evidence = string(runes[:maxEvidence]) + "..."
 	}
 	return verdict
+}
+
+func observePaneProcess(verdict *PaneLiveness, process ProcEntry, isHarness func(ProcEntry) bool) {
+	if !IsShellCommand(process.Comm) {
+		verdict.RestartableShell = false
+	}
+	if isHarness(process) {
+		verdict.HarnessAlive = true
+	} else if filepath.Base(process.Comm) == "agm" {
+		verdict.ZombieWriter = true
+	}
+}
+
+// ParsePSArgsTable parses `ps -axo pid=,args=` output into full command lines
+// keyed by PID. Malformed rows are skipped so a partial process table cannot
+// accidentally attach arguments to the wrong process.
+func ParsePSArgsTable(out string) map[int]string {
+	entries := make(map[int]string)
+	for line := range strings.SplitSeq(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		idx := strings.IndexAny(line, " \t")
+		if idx < 0 {
+			continue
+		}
+		pid, err := strconv.Atoi(line[:idx])
+		if err != nil {
+			continue
+		}
+		args := strings.TrimSpace(line[idx:])
+		if args != "" {
+			entries[pid] = args
+		}
+	}
+	return entries
+}
+
+type activePaneTarget struct {
+	ID      string
+	RootPID int
+}
+
+// resolveActivePaneTarget resolves the one pane that an unqualified tmux
+// session target would currently receive input in. Callers retain its pane ID
+// so later capture and delivery cannot drift if pane focus changes.
+func resolveActivePaneTarget(ctx context.Context, sessionName, socketPath string) (activePaneTarget, bool, error) {
+	normalized := NormalizeTmuxSessionName(sessionName)
+	has := exec.CommandContext(ctx, "tmux", "-S", socketPath, "has-session", "-t", FormatSessionTarget(normalized))
+	if err := has.Run(); err != nil {
+		if ctx.Err() != nil {
+			return activePaneTarget{}, false, fmt.Errorf("tmux has-session timed out: %w", ctx.Err())
+		}
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return activePaneTarget{}, false, nil
+		}
+		return activePaneTarget{}, false, fmt.Errorf("tmux has-session failed: %w", err)
+	}
+	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "list-panes", "-t", FormatSessionTarget(normalized), "-f", "#{pane_active}", "-F", "#{pane_id}\t#{pane_pid}")
+	out, err := cmd.Output()
+	if err != nil {
+		return activePaneTarget{}, true, fmt.Errorf("resolve active tmux pane: %w", err)
+	}
+	fields := strings.Fields(strings.TrimSpace(string(out)))
+	if len(fields) != 2 || !isPaneID(fields[0]) {
+		return activePaneTarget{}, true, fmt.Errorf("invalid active tmux pane identity %q", strings.TrimSpace(string(out)))
+	}
+	pid, err := strconv.Atoi(fields[1])
+	if err != nil || pid <= 0 {
+		return activePaneTarget{}, true, fmt.Errorf("invalid active tmux pane PID %q", fields[1])
+	}
+	return activePaneTarget{ID: fields[0], RootPID: pid}, true, nil
 }
 
 // listPanePIDs returns the pane root PIDs for sessionName on socketPath.
@@ -722,6 +795,23 @@ func piProcessInPaneTree(panePIDs []int, procs []procCommandEntry) bool {
 		queue = append(queue, children[pid]...)
 	}
 	return false
+}
+
+func readProcessTableWithArgs(ctx context.Context) ([]ProcEntry, error) {
+	procs, err := readProcessTable(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.CommandContext(ctx, "ps", "-axo", "pid=,args=")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("ps args: %w", err)
+	}
+	argsByPID := ParsePSArgsTable(string(out))
+	for i := range procs {
+		procs[i].Args = argsByPID[procs[i].PID]
+	}
+	return procs, nil
 }
 
 // CheckPaneLiveness runs the real harness-liveness scan for sessionName on

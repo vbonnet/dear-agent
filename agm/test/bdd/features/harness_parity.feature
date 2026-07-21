@@ -9,6 +9,7 @@
 # RELATED-SPEC: agm/internal/monitor/opencode/SPEC.md
 # RELATED-SPEC: agm/internal/monitor/tmux/SPEC.md
 # RELATED-SPEC: agm/cmd/agm/SPEC.md
+# RELATED-SPEC: agm/cmd/agm/hooks/SPEC.md
 # RELATED-SPEC: agm/cmd/agm/parity/SPEC.md
 # RELATED-SPEC: cmd/vroom-dispatch/SPEC.md
 # RELATED-SPEC: agm/internal/tmux/SPEC.md
@@ -299,11 +300,20 @@ Feature: Harness parity
     Then AGM should wait for the Codex composer
     And AGM should deliver the startup prompt even though the session is detached
 
-  Scenario: Shared Codex creation rolls back when the composer is absent
+  Scenario: Runtime-backed shared Codex creation rolls back when the composer is absent
     Given shared Codex creation cannot observe the composer
-    When AGM creates Codex through shared operations
+    When AGM creates Codex through a surface runtime
     Then shared creation should fail before registration and prompt delivery
     And shared creation should remove its newly created tmux session
+
+  Scenario: Shared readiness requires current process and composer ownership
+    When AGM validates slow harness startup readiness
+    Then shared startup readiness should honor the total deadline
+    And shared input readiness should serialize exact-pane delivery and preserve rendered composer ownership without treating resolved prompts as live
+    And CLI message sends should use shared atomic readiness for single and multi-recipient delivery
+    And shared Gemini readiness should advance first-run trust on the verified pane
+    And legacy AGY names should reach canonical shared send readiness
+    And the Pi alias should reach canonical shared send readiness
 
   Scenario: Codex detached startup clears first-run trust before delivery
     Given Codex CLI is available
@@ -318,6 +328,8 @@ Feature: Harness parity
     Then Codex credential validation should precede the canonical launcher
     And the top-level new command should route into current tmux
     And Codex current-tmux launch should require the executable without waiting behind its own AGM process
+    And every queued current-tmux harness should defer readiness until AGM exits
+    And current-tmux Claude should associate its UUID on SessionStart
     And Codex queue failures should propagate to shared creation rollback
 
   Scenario: AGY current-tmux creation refuses unsafe deferred identity

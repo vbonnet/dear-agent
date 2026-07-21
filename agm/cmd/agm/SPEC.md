@@ -77,7 +77,7 @@ Provide a production-ready CLI that:
 
 **CLI-24** When AGM command tests execute Cobra commands or mutate command flags, the system shall use fresh command instances or restore the complete shared command state so test results remain independent of execution order.
 
-**CLI-25** When `agm new` runs inside tmux without `--detached` for Codex, the system shall route into current-pane creation, require the `codex` executable, queue its launch command behind the invoking AGM process, and finalize session metadata without synchronously waiting for the composer, because the pane shell cannot consume the command until AGM returns.
+**CLI-25** When `agm new` runs inside tmux without `--detached` for Claude Code, Codex, OpenCode, Pi, or deprecated Gemini compatibility, the system shall route into current-pane creation, queue the canonical launch command behind the invoking AGM process, and finalize session metadata without synchronously waiting for the composer, because the pane shell cannot consume the command until AGM returns; Codex shall additionally require its executable before queueing, Pi shall use its managed canonical launch contract, and Claude's SessionStart hook shall persist the resulting conversation UUID.
 
 **CLI-26** When `agm audit resources --fix` cannot remove a linked worktree through a one-force Git operation, including when the worktree is locked, the system shall preserve the checkout and report the cleanup error instead of deleting the directory directly.
 
@@ -104,6 +104,8 @@ Provide a production-ready CLI that:
 **CLI-37** When `agm session rename` moves a live tmux session, the system shall resolve its stable session ID, hold the same per-session lifecycle lock as resume while reloading current state and completing every rename effect, first claim that exact tmux creation with its server-local ID plus a random marker, then persist the user-visible and tmux names together through a narrow compare-and-swap against the exact storage revision read before the move. If either the tmux client or storage loses its success response, the command shall use bounded cancellation-independent ownership checks before deciding whether forward progress completed or compensation is safe: tmux shall still carry the claimed identity at the expected name, and storage shall first fence the observed revision with a competing compare-and-swap before re-reading it. If another writer advanced to a different identity, the claimed tmux identity is lost or replaced, or the caller is canceled after the move and storage is fenced as unchanged, the command shall report the primary failure, compensate only the claimed live tmux session, join any fencing, probe, or rollback failure, and never report rename success with metadata pointing at a nonexistent or unrelated tmux session.
 
 **CLI-38** When `agm admin link-session-parent` or `agm admin backfill-plan-sessions` assigns a parent and optionally inherits its display name, the command shall persist both changes through one narrow compare-and-swap against the child identity revision it read and shall report a concurrent identity change as a failure instead of reporting a link or rename that storage did not apply.
+
+**CLI-39** When `agm send msg` delivers directly to one or more registered CLI-harness sessions, every recipient shall route through shared `ops.SendMessage`, which shall atomically prove the manifest's canonical harness process and current composer before sending to the exact verified pane; an unregistered tmux session, missing storage, wrong or dead harness, unready composer, missing atomic delivery capability, or failed readiness check shall return non-delivery without creating a pending-file bypass.
 
 ## Requirements
 
@@ -376,10 +378,9 @@ Provide a production-ready CLI that:
   - `agm send msg [recipient] --prompt "..."` - Send messages (replaces `agm session send`)
   - `agm send reject [session] --reason "..."` - Reject permission prompts (replaces `agm session reject`)
   - `agm send approve [session] --reason "..."` - Approve permission prompts (NEW)
-- **Backward Compatibility:**
-  - Old commands still work: `agm session send`, `agm session reject`
-  - Gradual migration path for users
-  - Deprecation warnings in help text (future)
+- **Migration:**
+  - Use `agm send msg` and `agm send reject`; the retired `agm session send` and `agm session reject` paths are not registered
+  - Generated command guidance and examples use the active command tree
 - **Benefits:**
   - Logical grouping of communication commands
   - Improved command discoverability
@@ -388,22 +389,21 @@ Provide a production-ready CLI that:
 #### FR14: Multi-Recipient Support
 - **ID:** FR14
 - **Priority:** P1 (High)
-- **Description:** CLI MUST support sending messages to multiple recipients simultaneously
+- **Description:** CLI MUST support sending messages to multiple recipients in one invocation
 - **Syntax:**
   - Positional: `agm send msg session1,session2,session3 --prompt "..."`
   - Explicit flag: `agm send msg --to session1,session2 --prompt "..."`
   - Glob patterns: `agm send msg "*research*" --prompt "..."`
   - Workspace filtering: `agm send msg --workspace oss --prompt "..."`
 - **Features:**
-  - **Parallel delivery:** Worker pool with max 5 concurrent deliveries
+  - **Sequential delivery:** Recipients are delivered one at a time because tmux mutation is serialized and each send owns one atomic readiness-and-input boundary
   - **Recipient resolution:** Comma-separated lists, glob pattern expansion, workspace filtering
   - **Result aggregation:** Color-coded success/failure report for each recipient
   - **Error isolation:** One recipient failure doesn't block others
   - **Rate limiting:** Per-sender (not per-recipient), 10 messages/minute
-- **Performance:**
-  - 2.5x faster than sequential delivery (measured with 5 recipients)
-  - Worker pool prevents tmux server overload
-  - Buffered channels for efficient job distribution
+- **Safety:**
+  - One recipient's readiness proof and exact-pane send complete before the next begins
+  - A failed recipient is reported without preventing later recipients from being attempted
 - **Flags:**
   - `--to <recipients>` - Explicit recipient list (alternative to positional)
   - `--workspace <name>` - Filter sessions by workspace

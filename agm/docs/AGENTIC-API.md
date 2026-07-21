@@ -13,6 +13,16 @@ AGM exposes three API surfaces, all backed by a shared operations layer (`intern
 Every operation flows through `ops.OpContext`, ensuring identical behavior,
 error handling, and output formatting regardless of surface.
 
+Creation and message delivery use the same fail-closed readiness boundary on
+every surface. Registration and startup prompts require a live configured
+harness plus its tail-owning composer; an MCP-native onboarding wait is not a
+substitute for that proof. Message sends resolve one active tmux pane and pin
+process inspection, styled capture, and delivery to that pane ID, so another
+pane or a later focus change cannot validate or redirect input.
+`agm send msg` uses that shared operation for both single-recipient and fan-out
+delivery; it does not retain a weaker CLI-only tmux path or deliver to
+unregistered sessions whose harness identity cannot be proven.
+
 ## Error Code Catalog
 
 All errors use stable codes that agents can match on programmatically.

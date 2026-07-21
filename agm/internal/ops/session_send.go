@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/manager"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
@@ -59,6 +60,7 @@ func SendMessage(ctx *OpContext, req *SendMessageRequest) (*SendMessageResult, e
 	if harness == "" {
 		harness = "claude-code"
 	}
+	harness = agent.NormalizeHarnessName(harness)
 
 	newResult := func(delivered bool) *SendMessageResult {
 		return &SendMessageResult{
@@ -73,36 +75,38 @@ func SendMessage(ctx *OpContext, req *SendMessageRequest) (*SendMessageResult, e
 	if err := callCtx.Err(); err != nil {
 		return newResult(false), ErrStorageError("send_message context", err)
 	}
-	readinessVerified := false
 
-	// Prefer the exact, harness-aware tmux capability whenever surfaces provide
-	// it. The manager's generic detector remains a compatibility fallback for
-	// non-tmux backends only.
+	// Tmux readiness and delivery are one atomic capability. The implementation
+	// holds the same mutation lock across composer observation and exact-pane
+	// input so a concurrent AGM sender cannot invalidate the readiness proof.
 	if ctx.Tmux != nil {
-		if checker, ok := ctx.Tmux.(session.InputReadinessChecker); ok {
-			readiness, readinessErr := checker.CheckInputReadiness(callCtx, tmuxName, harness)
-			if readinessErr != nil {
-				return newResult(false), ErrStorageError("tmux.CheckInputReadiness", readinessErr)
-			}
-			if !readiness.Ready {
-				return newResult(false), ErrSessionNotReady(m.Name, readiness.State)
-			}
-			readinessVerified = true
+		sender, ok := ctx.Tmux.(session.AtomicInputSender)
+		if !ok {
+			return newResult(false), ErrSessionNotReady(m.Name, "ATOMIC_DELIVERY_UNAVAILABLE")
 		}
+		readiness, readinessErr := sender.SendKeysIfInputReady(callCtx, tmuxName, harness, req.Message)
+		if readinessErr != nil {
+			return newResult(false), ErrStorageError("tmux.SendKeysIfInputReady", readinessErr)
+		}
+		if !readiness.Ready {
+			return newResult(false), ErrSessionNotReady(m.Name, readiness.State)
+		}
+		if readiness.PaneID == "" {
+			return newResult(false), ErrSessionNotReady(m.Name, "UNVERIFIED_PANE")
+		}
+		return newResult(true), nil
 	}
 
 	// Preferred delivery path: manager.Backend. It may represent tmux or a
 	// structured backend; do not repeat a weaker generic check after exact tmux
 	// readiness has already succeeded.
 	if ctx.Manager != nil {
-		if !readinessVerified {
-			readiness, readinessErr := ctx.Manager.CheckDelivery(callCtx, manager.SessionID(tmuxName))
-			if readinessErr != nil {
-				return newResult(false), ErrStorageError("manager.CheckDelivery", readinessErr)
-			}
-			if readiness != manager.CanReceiveYes {
-				return newResult(false), ErrSessionNotReady(m.Name, managerReadinessName(readiness))
-			}
+		readiness, readinessErr := ctx.Manager.CheckDelivery(callCtx, manager.SessionID(tmuxName))
+		if readinessErr != nil {
+			return newResult(false), ErrStorageError("manager.CheckDelivery", readinessErr)
+		}
+		if readiness != manager.CanReceiveYes {
+			return newResult(false), ErrSessionNotReady(m.Name, managerReadinessName(readiness))
 		}
 		if err := callCtx.Err(); err != nil {
 			return newResult(false), ErrStorageError("send_message context", err)
@@ -118,16 +122,7 @@ func SendMessage(ctx *OpContext, req *SendMessageRequest) (*SendMessageResult, e
 	// recipient instead of silently dropping the message. This closes the
 	// long-standing "AGM message delivery is undeliverable" gap (ce-6as.36).
 	if ctx.Tmux != nil {
-		if !readinessVerified {
-			return newResult(false), ErrSessionNotReady(m.Name, "UNVERIFIED")
-		}
-		if err := callCtx.Err(); err != nil {
-			return newResult(false), ErrStorageError("send_message context", err)
-		}
-		if err := ctx.Tmux.SendKeys(tmuxName, req.Message); err != nil {
-			return newResult(false), err
-		}
-		return newResult(true), nil
+		return newResult(false), ErrSessionNotReady(m.Name, "UNVERIFIED")
 	}
 
 	// No delivery mechanism configured at all (neither a manager Backend nor a
