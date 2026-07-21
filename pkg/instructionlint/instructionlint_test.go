@@ -379,6 +379,12 @@ func TestScriptHeredocVisibilityPreservesQuotesDescriptorsAndFileModes(t *testin
 		"SUBSTITUTION_REPLAY",
 		"message=$(cat substitution-fixture)",
 		`printf '%s\n' "$message"`,
+		"cat >alias-fixture <<'ALIASED_REPLAY'",
+		"gh pr merge 987",
+		"ALIASED_REPLAY",
+		"cat ./alias-fixture",
+		"cat <<<EOF",
+		"echo 'git push origin after-here-string'",
 	}, "\n"))
 
 	var text []string
@@ -393,6 +399,8 @@ func TestScriptHeredocVisibilityPreservesQuotesDescriptorsAndFileModes(t *testin
 		"bd ready",
 		"gh pr reopen 789",
 		"git push origin substitution",
+		"gh pr merge 987",
+		"echo 'git push origin after-here-string'",
 	} {
 		if !slices.Contains(text, visible) {
 			t.Errorf("visible heredoc line %q was hidden: %v", visible, text)

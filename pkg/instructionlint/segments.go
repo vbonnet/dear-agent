@@ -7,6 +7,7 @@ import (
 	"go/parser"
 	"go/token"
 	"maps"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -394,9 +395,12 @@ func scriptAssignmentQuote(value string) byte {
 }
 
 func scriptHeredocMarker(value string) string {
-	match := heredocMarker.FindStringSubmatch(value)
-	if len(match) == 2 {
-		return match[1]
+	for _, match := range heredocMarker.FindAllStringSubmatchIndex(value, -1) {
+		start := match[0]
+		if (start > 0 && value[start-1] == '<') || (start+2 < len(value) && value[start+2] == '<') {
+			continue
+		}
+		return value[match[2]:match[3]]
 	}
 	return ""
 }
@@ -405,7 +409,7 @@ func scriptHeredocOutputDestination(value string, descriptors map[int]scriptOutp
 	commands := splitScriptCommandParts(value)
 	producer := -1
 	for index, command := range commands {
-		if heredocMarker.MatchString(command.text) {
+		if scriptHeredocMarker(command.text) != "" {
 			producer = index
 			break
 		}
@@ -644,7 +648,7 @@ func scriptRedirectDestination(target string, descriptors map[int]scriptOutputDe
 			return descriptors[number]
 		}
 	}
-	return scriptOutputDestination{path: target}
+	return scriptOutputDestination{path: filepath.Clean(target)}
 }
 
 func scriptCommandPrintsPath(command, path string, descriptors map[int]scriptOutputDestination) bool {
@@ -664,15 +668,19 @@ func scriptCommandPrintsPath(command, path string, descriptors map[int]scriptOut
 		return false
 	}
 	for _, field := range fields[1:] {
-		if field == path {
+		if sameScriptPath(field, path) {
 			return true
 		}
 		redirect := strings.TrimLeft(field, "0123456789")
-		if strings.HasPrefix(redirect, "<") && strings.TrimLeft(redirect, "<") == path {
+		if strings.HasPrefix(redirect, "<") && sameScriptPath(strings.TrimLeft(redirect, "<"), path) {
 			return true
 		}
 	}
 	return false
+}
+
+func sameScriptPath(left, right string) bool {
+	return left != "" && right != "" && filepath.Clean(left) == filepath.Clean(right)
 }
 
 func scriptLinePrintsPath(value, path string, descriptors map[int]scriptOutputDestination) bool {
