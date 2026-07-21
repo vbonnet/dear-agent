@@ -51,6 +51,33 @@ func TestCanStartPhase_LiteStillGatesOnResearch(t *testing.T) {
 	}
 }
 
+func TestCanStartPhaseRejectsConfiguredSkippedPhase(t *testing.T) {
+	tests := []struct {
+		name  string
+		phase string
+		st    *status.StatusV2
+	}{
+		{
+			name:  "profile skipped phase",
+			phase: status.PhaseV2Design,
+			st:    &status.StatusV2{SkipPhases: liteSkips},
+		},
+		{
+			name:  "roadmap skipped phase",
+			phase: status.PhaseV2Setup,
+			st:    &status.StatusV2{SkipRoadmap: true},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := NewValidator(test.st).CanStartPhase(test.phase, t.TempDir())
+			if err == nil || !contains(err.Error(), "phase is configured to be skipped") {
+				t.Fatalf("CanStartPhase(%s) error = %v, want configured-skip rejection", test.phase, err)
+			}
+		})
+	}
+}
+
 // TestCanStartPhase_StandardStillGatesDesign verifies the default (no skip) behavior
 // is unchanged: starting SETUP requires PLAN, not RESEARCH.
 func TestCanStartPhase_StandardStillGatesDesign(t *testing.T) {

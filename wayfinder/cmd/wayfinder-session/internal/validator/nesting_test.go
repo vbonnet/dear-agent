@@ -173,6 +173,21 @@ func TestIsProjectComplete(t *testing.T) {
 	}
 }
 
+func TestAllRequiredWaypointsCompleteRejectsActiveSkippedPhase(t *testing.T) {
+	st := status.NewStatusV2("lite-child", status.ProjectTypeFeature, status.RiskLevelXS)
+	st.SkipPhases = []string{status.WaypointV2Design, status.WaypointV2Spec, status.WaypointV2Plan}
+	for _, waypoint := range status.AllWaypointsV2Schema() {
+		if !st.IsPhaseSkipped(waypoint) {
+			st.UpdatePhase(waypoint, status.WaypointStatusV2Completed, status.OutcomeSuccess)
+		}
+	}
+	st.UpdatePhase(status.WaypointV2Design, status.WaypointStatusV2InProgress, "")
+
+	if allRequiredWaypointsComplete(st) {
+		t.Fatal("active profile-skipped phase must keep a child project incomplete")
+	}
+}
+
 // Tests for GetIncompleteChildren
 
 func TestGetIncompleteChildren(t *testing.T) {

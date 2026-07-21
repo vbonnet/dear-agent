@@ -45,6 +45,13 @@ func (v *Validator) CanStartPhase(phaseName, projectDir string) error {
 			"Use a valid phase: "+joinPhases(allPhases),
 		)
 	}
+	if v.status.IsPhaseSkipped(phaseName) {
+		return NewValidationError(
+			"start "+phaseName,
+			"phase is configured to be skipped",
+			"Continue with the next required phase instead",
+		)
+	}
 
 	// Check if phase is already started or completed
 	existingPhase := v.status.FindPhase(phaseName)
