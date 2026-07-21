@@ -23,6 +23,9 @@ func writeStatus(t *testing.T, dir, projectName, status, waypoint string) {
 	var history strings.Builder
 	for _, predecessor := range []string{"CHARTER", "PROBLEM", "RESEARCH", "DESIGN", "SPEC", "PLAN", "SETUP", "BUILD", "RETRO"} {
 		if predecessor == waypoint {
+			if status == "completed" {
+				fmt.Fprintf(&history, "  - {name: %s, status: completed, started_at: 2026-07-20T00:00:00Z, completed_at: 2026-07-20T00:01:00Z}\n", predecessor)
+			}
 			break
 		}
 		fmt.Fprintf(&history, "  - {name: %s, status: completed, started_at: 2026-07-20T00:00:00Z, completed_at: 2026-07-20T00:01:00Z}\n", predecessor)
