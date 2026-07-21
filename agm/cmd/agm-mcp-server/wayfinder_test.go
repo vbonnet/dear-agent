@@ -20,6 +20,17 @@ func writeStatus(t *testing.T, dir, projectName, status, waypoint string) {
 	if status == "completed" {
 		completion = "completion_date: 2026-07-20T00:00:00Z\n"
 	}
+	var history strings.Builder
+	for _, predecessor := range []string{"CHARTER", "PROBLEM", "RESEARCH", "DESIGN", "SPEC", "PLAN", "SETUP", "BUILD", "RETRO"} {
+		if predecessor == waypoint {
+			break
+		}
+		fmt.Fprintf(&history, "  - {name: %s, status: completed, started_at: 2026-07-20T00:00:00Z, completed_at: 2026-07-20T00:01:00Z}\n", predecessor)
+	}
+	historyYAML := "waypoint_history: []\n"
+	if history.Len() > 0 {
+		historyYAML = "waypoint_history:\n" + history.String()
+	}
 	content := fmt.Sprintf(`---
 schema_version: "2.0"
 project_name: %s
@@ -29,8 +40,8 @@ status: %s
 current_waypoint: %s
 created_at: 2026-07-20T00:00:00Z
 updated_at: 2026-07-20T00:00:00Z
-%s---
-`, projectName, status, waypoint, completion)
+%s%s---
+`, projectName, status, waypoint, completion, historyYAML)
 	if err := os.WriteFile(filepath.Join(dir, wayfinderStatusFile), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
