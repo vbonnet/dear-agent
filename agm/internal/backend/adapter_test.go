@@ -72,7 +72,7 @@ type strictMockTmux struct {
 
 func (m *strictMockTmux) HasSessionStrict(_ context.Context, name string) (bool, error) {
 	m.strictCalls++
-	return m.MockTmux.HasSession(name)
+	return m.HasSession(name)
 }
 
 func TestBackendAdapter_PreservesTmuxKillAndStrictProbeThroughProductionChain(t *testing.T) {
