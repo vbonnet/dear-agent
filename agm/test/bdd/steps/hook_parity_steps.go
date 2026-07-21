@@ -113,7 +113,7 @@ func hookHarnessShouldIncludeBeadsLifecycleHook(ctx context.Context, harness, ev
 	if !ok {
 		return fmt.Errorf("harness %q is not expected to have Beads lifecycle hooks", state.harness)
 	}
-	want := "bd --db ~/beads/context-engine/.beads " + prefix + "-hook " + event
+	want := "bd --db ~/beads/context-engine/.beads --dolt-auto-commit on " + prefix + "-hook " + event
 	for _, group := range state.hooks[event] {
 		for _, hook := range group.Hooks {
 			if strings.Contains(hook.Command, want) {

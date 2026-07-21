@@ -1,6 +1,6 @@
 ---
 name: beads
-description: Use when working in a repository that uses bd or Beads for durable project task tracking, issue dependencies, blocker management, multi-session handoff, or shared work memory. Trigger when the user asks to find ready work, claim or close tasks, create follow-up work, inspect blockers, recover project context, or choose between local planning and persistent project tracking.
+description: Use when working in a repository that uses Beads for durable project task tracking, issue dependencies, blocker management, multi-session handoff, or shared work memory. Trigger when the user asks to find ready work, claim or close tasks, create follow-up work, inspect blockers, recover project context, or choose between local planning and persistent project tracking.
 ---
 
 # Beads
@@ -23,7 +23,7 @@ bd --db ~/beads/context-engine/.beads --dolt-auto-commit on where
 
 ## Preferred Route
 
-Use the `bd` CLI when shell access is available. It is the most compact and direct Beads interface.
+Use the canonical Beads CLI form shown below when shell access is available.
 
 ## Core CLI Workflow
 
@@ -74,9 +74,9 @@ Use agent-local planning tools only for the current turn's execution checklist. 
 ## Rules
 
 - Do not create markdown TODO files as the source of truth when Beads is available.
-- Do not use `bd edit`; it opens an interactive editor. Use `bd update` flags instead.
-- Prefer `--json` when parsing `bd` output programmatically.
-- If hooks are installed, `bd prime` may already be injected. Run it manually when context is missing.
+- Do not use the interactive edit subcommand; use update flags instead.
+- Prefer `--json` when parsing Beads output programmatically.
+- If hooks are installed, prime output may already be injected. Run the explicit prime command manually when context is missing.
 - Do not auto-close or mutate tasks unless the work is actually complete.
 
 ## Verify

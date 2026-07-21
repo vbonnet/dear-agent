@@ -98,8 +98,13 @@ func TestResolveSessionDir(t *testing.T) {
 	}
 	t.Setenv("WAYFINDER_PROJECT_DIR", "")
 	_, err := ResolveSessionDir("")
-	if err == nil || !strings.Contains(err.Error(), "agm escalate") {
-		t.Errorf("want teaching error mentioning agm escalate, got %v", err)
+	if err == nil {
+		t.Fatal("want teaching error, got nil")
+	}
+	for _, want := range []string{"agm escalate ask", "--session <registered-session>", "ask the current user directly"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("teaching error = %q, want substring %q", err, want)
+		}
 	}
 }
 

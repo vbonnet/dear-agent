@@ -77,6 +77,10 @@ step "validate tracked AI skills"
 go run ./tools/skill-lint -repo . || fail "AI skill validation failed"
 ok "AI skills valid"
 
+step "make lint-instructions"
+make lint-instructions || fail "active instruction policy integrity failed"
+ok "active instruction policy guidance intact"
+
 step "golangci-lint run ./..."
 if ! command -v golangci-lint >/dev/null 2>&1; then
   fail "golangci-lint not installed. Run: brew install golangci-lint"
