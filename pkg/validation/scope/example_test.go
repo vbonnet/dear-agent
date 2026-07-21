@@ -12,7 +12,7 @@ func Example() {
 	parser := scope.NewParser()
 	validator := scope.NewValidator(parser)
 
-	// Sample D3 document with anti-patterns
+	// Sample DESIGN document with anti-patterns
 	markdown := `
 # DESIGN: Approach Decision
 

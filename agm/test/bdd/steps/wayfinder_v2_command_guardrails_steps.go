@@ -315,6 +315,7 @@ func nonMigrationRuntimeOmitsRetiredPhases(ctx context.Context) error {
 		{path: "cmd/safe-pr", extensions: map[string]bool{".go": true}},
 		{path: "pkg/phaseengram", extensions: map[string]bool{".go": true}},
 		{path: "pkg/progress", extensions: map[string]bool{".go": true}},
+		{path: "pkg/validation/scope", extensions: map[string]bool{".go": true}},
 	} {
 		if err := scanActiveWayfinderRoot(state.repoRoot, root.path, root.extensions, retiredWayfinderPattern); err != nil {
 			return err

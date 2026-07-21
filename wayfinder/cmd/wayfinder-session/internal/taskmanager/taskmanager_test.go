@@ -1,6 +1,7 @@
 package taskmanager
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -71,6 +72,14 @@ func TestAddTask(t *testing.T) {
 			wantErr:   true,
 			errString: "invalid priority",
 		},
+		{
+			name:      "non-finite effort",
+			phaseID:   "BUILD",
+			title:     "Impossible effort",
+			opts:      &TaskOptions{EffortDays: math.Inf(1)},
+			wantErr:   true,
+			errString: "effort days must be finite",
+		},
 	}
 
 	for _, tt := range tests {
@@ -84,6 +93,9 @@ func TestAddTask(t *testing.T) {
 				}
 				if tt.errString != "" && !contains(err.Error(), tt.errString) {
 					t.Errorf("expected error containing %q, got %q", tt.errString, err.Error())
+				}
+				if _, parseErr := status.ParseV2(tm.statusFile); parseErr != nil {
+					t.Errorf("failed add corrupted canonical status: %v", parseErr)
 				}
 				return
 			}
@@ -175,6 +187,13 @@ func TestUpdateTask(t *testing.T) {
 			errString: "invalid status",
 		},
 		{
+			name:      "non-finite effort",
+			taskID:    task.ID,
+			opts:      &UpdateOptions{EffortDays: math.NaN()},
+			wantErr:   true,
+			errString: "effort days must be finite",
+		},
+		{
 			name:   "update verify command",
 			taskID: task.ID,
 			opts: &UpdateOptions{
@@ -196,6 +215,9 @@ func TestUpdateTask(t *testing.T) {
 				}
 				if tt.errString != "" && !contains(err.Error(), tt.errString) {
 					t.Errorf("expected error containing %q, got %q", tt.errString, err.Error())
+				}
+				if _, parseErr := status.ParseV2(tm.statusFile); parseErr != nil {
+					t.Errorf("failed update corrupted canonical status: %v", parseErr)
 				}
 				return
 			}

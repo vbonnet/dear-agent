@@ -888,15 +888,15 @@ func TestValidator_Recommendations(t *testing.T) {
 
 ## Acceptance Criteria
 
-D4 content
+SPEC content
 
 ## Requirements
 
-D4 content
+SPEC content
 
 ## Task Breakdown
 
-S7 content
+SETUP content
 `
 		result := validator.Validate(PhaseDesign, markdown, nil)
 
