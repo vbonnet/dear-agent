@@ -98,8 +98,8 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 #   install-resolve-review-threads Install resolve-review-threads to ~/go/bin
 #   build-merge-audit       Build merge-audit: safe-merge P6 detection tier
 #   install-merge-audit     Install merge-audit to ~/go/bin
-#   install-token-refresher-launchagent   Schedule the OAuth token-refresher idle backstop + wire apiKeyHelper (macOS, ce-cs3v)
-#   uninstall-token-refresher-launchagent Remove the token-refresher launch agent + apiKeyHelper wiring
+#   install-token-refresher-launchagent   Schedule the OAuth token-refresher idle backstop (macOS, ce-cs3v)
+#   uninstall-token-refresher-launchagent Remove the token-refresher launch agent
 #   build-dear-deploy       Build dear-deploy: atomic host-artifact deployer (cmd/dear-deploy)
 #   install-dear-deploy     Install dear-deploy to ~/go/bin
 #   dear-deploy-sync        Deploy host artifacts from deploy/manifest.yaml (build guards first)
@@ -119,6 +119,34 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 .PHONY: lint-skills
 .PHONY: lint-instructions
 .PHONY: lint-adrs
+
+# install-go-bin: install a freshly built binary into ~/go/bin so that macOS
+# will actually execute it (ce-77ip.8).
+#
+# A bare `cp` rewrites the EXISTING inode in place. If that binary has already
+# been executed, the kernel still holds the code-signing identity it cached for
+# that vnode, so the new bytes fail validation and the process is SIGKILLed with
+# OS_REASON_CODESIGNING *before main() runs* — no stderr, no log line, nothing.
+# For a launchd-run binary that has no terminal, the only visible symptom is
+# that the job silently stops working. On 2026-07-19 this disabled the OAuth
+# token-refresher for 17 hours and was misread as a dead token family.
+#
+# Staging to a temp path and renaming gives the binary a NEW inode, so no stale
+# cdhash can be cached against it, and makes the swap atomic — a launchd tick
+# firing mid-install can never observe a half-written file. The explicit
+# ad-hoc codesign then covers the installed bytes rather than relying on the
+# linker-signed signature surviving the copy.
+#
+# codesign is macOS-only; failures are tolerated so Linux builds stay green.
+# Correctness rests on the rename, which is portable.
+#
+# Usage: $(call install-go-bin,bin/<name>)
+define install-go-bin
+	@cp '$(1)' '$(HOME)/go/bin/$(notdir $(1)).tmp'
+	@codesign -f -s - '$(HOME)/go/bin/$(notdir $(1)).tmp' 2>/dev/null || true
+	@mv -f '$(HOME)/go/bin/$(notdir $(1)).tmp' '$(HOME)/go/bin/$(notdir $(1))'
+	@echo "Installed: $(HOME)/go/bin/$(notdir $(1))"
+endef
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -377,30 +405,33 @@ build-token-refresher:
 
 # Install token-refresher to GOPATH/bin.
 install-token-refresher: build-token-refresher
-	cp bin/token-refresher $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/token-refresher"
+	$(call install-go-bin,bin/token-refresher)
 
 # Wire token-refresher into the supervisor mesh (ce-cs3v): deploy the launchd
-# idle-backstop that refreshes ~/.claude/.credentials.json every 30 minutes,
-# and print the two host-side, ask-gated activation steps (launchctl load +
-# apiKeyHelper wiring) for you to run yourself. Both the scheduled job and the
-# apiKeyHelper share token-refresher and its cross-process credentials lock.
-install-token-refresher-launchagent: install-token-refresher install-configure-settings
+# idle-backstop that refreshes ~/.claude/.credentials.json every 30 minutes, and
+# print the single host-side, ask-gated activation step for you to run yourself.
+#
+# The scheduled job is the ONLY sanctioned wiring. Do NOT also point Claude
+# Code's apiKeyHelper at this binary: since claude-code 2.1.205 a configured
+# apiKeyHelper is treated as an external API key that SHADOWS a healthy OAuth
+# login and refuses to fall back to it, so the CLI fails with "Invalid API key"
+# even when credentials.json is perfectly fresh (anthropics/claude-code#11587,
+# #9694, #23568). That wiring used to be step 2 here; it caused a multi-day mesh
+# outage and was removed from the host on 2026-07-10. See cmd/token-refresher/
+# README.md ("Retired wiring").
+install-token-refresher-launchagent: install-token-refresher
 	@mkdir -p $(HOME)/Library/LaunchAgents
 	@mkdir -p $(HOME)/.local/state/dear-agent
 	@sed 's|__HOME__|$(HOME)|g' deploy/launchd/com.dear-agent.token-refresher.plist \
 		> $(HOME)/Library/LaunchAgents/com.dear-agent.token-refresher.plist
 	@echo "Staged: $(HOME)/Library/LaunchAgents/com.dear-agent.token-refresher.plist"
-	@echo "Activate it yourself (ask-gated host actions):"
-	@echo "  1. Schedule the idle backstop:"
+	@echo "Activate it yourself (ask-gated host action):"
+	@echo "  Schedule the idle backstop:"
 	@echo "     launchctl load $(HOME)/Library/LaunchAgents/com.dear-agent.token-refresher.plist"
-	@echo "  2. Point Claude Code's apiKeyHelper at the refresher (on-demand refresh):"
-	@echo "     configure-claude-settings set apiKeyHelper '\"$(HOME)/go/bin/token-refresher\"'"
 
 uninstall-token-refresher-launchagent:
-	@echo "Disable it yourself, then remove the plist and unwire apiKeyHelper:"
+	@echo "Disable it yourself, then remove the plist:"
 	@echo "  launchctl bootout gui/$$(id -u)/com.dear-agent.token-refresher"
-	@echo "  configure-claude-settings remove apiKeyHelper"
 	@rm -f $(HOME)/Library/LaunchAgents/com.dear-agent.token-refresher.plist
 	@echo "Removed plist (if present)."
 
@@ -495,8 +526,7 @@ build-bead-pr-sync:
 	@echo "Built: bin/bead-pr-sync"
 
 install-bead-pr-sync: build-bead-pr-sync
-	cp bin/bead-pr-sync $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/bead-pr-sync"
+	$(call install-go-bin,bin/bead-pr-sync)
 
 # Deploy bead-pr-sync as a launchd agent running every 4 hours (ce-yf2c).
 # Stages the plist into ~/Library/LaunchAgents and prints the activation
@@ -600,8 +630,7 @@ build-mergeloop:
 	@echo "Built: bin/mergeloop"
 
 install-mergeloop: build-mergeloop
-	cp bin/mergeloop $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/mergeloop"
+	$(call install-go-bin,bin/mergeloop)
 
 # Install the launchd agent that runs `mergeloop tick` on an interval. The
 # plist is rendered from deploy/launchd/com.dear-agent.mergeloop.plist with the
@@ -823,8 +852,7 @@ build-gopls-watchdog:
 	@echo "Built: bin/gopls-watchdog"
 
 install-gopls-watchdog: build-gopls-watchdog
-	cp bin/gopls-watchdog $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/gopls-watchdog"
+	$(call install-go-bin,bin/gopls-watchdog)
 
 install-gopls-watchdog-launchagent: install-gopls-watchdog
 	@mkdir -p $(HOME)/Library/LaunchAgents
@@ -864,8 +892,7 @@ build-disk-watchdog:
 	@echo "Built: bin/disk-watchdog"
 
 install-disk-watchdog: build-disk-watchdog
-	cp bin/disk-watchdog $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/disk-watchdog"
+	$(call install-go-bin,bin/disk-watchdog)
 
 install-disk-watchdog-launchagent: install-disk-watchdog
 	@mkdir -p $(HOME)/Library/LaunchAgents
@@ -988,8 +1015,7 @@ build-agm:
 	@echo "Built: bin/agm"
 
 install-agm: build-agm
-	cp bin/agm $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/agm"
+	$(call install-go-bin,bin/agm)
 
 build-agm-mcp-server:
 	@echo "Building agm-mcp-server..."
