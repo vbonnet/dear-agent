@@ -407,6 +407,7 @@ func TestBuildMergeArgs_RequiredFlags(t *testing.T) {
 		"pr":                  false,
 		"merge":               false,
 		"--squash":            false,
+		"--auto":              false,
 		"--delete-branch":     false,
 		"--match-head-commit": false,
 	}

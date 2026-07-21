@@ -364,8 +364,9 @@ func runCommand(cmd *exec.Cmd) ([]byte, error) {
 }
 
 // BuildMergeArgs returns the full argv for the gh pr merge command, including
-// the TOCTOU-preventing --match-head-commit flag. Exported so tests can verify
-// the flag is always present — its removal in PR #460 caused a P1 regression.
+// the TOCTOU-preventing --match-head-commit flag and the policy-compatible
+// auto/merge-queue path. Exported so tests can verify the safety flags are
+// always present — removing the head anchor in PR #460 caused a P1 regression.
 // Panics if headSHA is empty — the caller must resolve it first.
 func BuildMergeArgs(prNum int, repo, headSHA string) []string {
 	if headSHA == "" {
@@ -376,6 +377,7 @@ func BuildMergeArgs(prNum int, repo, headSHA string) []string {
 		fmt.Sprintf("%d", prNum),
 		"--repo", repo,
 		"--squash",
+		"--auto",
 		"--delete-branch",
 		"--match-head-commit", headSHA,
 	}
