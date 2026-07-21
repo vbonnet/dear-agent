@@ -69,11 +69,13 @@ func GetHistoryPaths(harness, uuid, workingDir string, verify bool) (*HistoryLoc
 		paths, metadata, err = getOpenCodePaths(uuid)
 	case "codex-cli", "codex", "openai":
 		paths, metadata, err = getCodexPaths(uuid)
+	case "agy", "agy-cli", "antigravity":
+		paths, metadata, err = getAgyPaths(uuid)
 	default:
 		return nil, &LocationError{
 			Code:       "HARNESS_UNKNOWN",
 			Message:    fmt.Sprintf("Unknown harness type: %s", harness),
-			Suggestion: "Supported harnesses: claude-code, gemini-cli, opencode-cli, codex-cli",
+			Suggestion: "Active harnesses: claude-code, codex-cli, agy, opencode-cli; deprecated compatibility: gemini-cli",
 		}
 	}
 
@@ -93,6 +95,28 @@ func GetHistoryPaths(harness, uuid, workingDir string, verify bool) (*HistoryLoc
 		Exists:   exists,
 		Metadata: metadata,
 	}, nil
+}
+
+// getAgyPaths returns native Antigravity conversation storage paths. AGY uses
+// the conversation ID directly for its SQLite database and brain transcripts.
+func getAgyPaths(conversationID string) ([]string, map[string]string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get home directory: %w", err)
+	}
+	appDir := filepath.Join(homeDir, ".gemini", "antigravity-cli")
+	transcriptDir := filepath.Join(appDir, "brain", conversationID, ".system_generated", "logs")
+	paths := []string{
+		filepath.Join(appDir, "conversations", conversationID+".db"),
+		filepath.Join(transcriptDir, "transcript.jsonl"),
+		filepath.Join(transcriptDir, "transcript_full.jsonl"),
+	}
+	metadata := map[string]string{
+		"harness":         "agy",
+		"app_dir":         appDir,
+		"conversation_id": conversationID,
+	}
+	return paths, metadata, nil
 }
 
 // getClaudeCodePaths returns paths for Claude Code harness
