@@ -20,6 +20,46 @@ import (
 // (ce-mjk9) fails loud instead of hanging forever.
 var ErrPasteNotSubmitted = errors.New("prompt pasted but submission not confirmed after retries")
 
+// PromptSubmissionUncertainError means tmux was asked to submit the composer
+// but its command acknowledgement was lost. The harness may already be
+// processing the prompt, so transactional callers must not compensate or
+// report a retryable failure unless they can positively prove it stayed
+// unsubmitted.
+type PromptSubmissionUncertainError struct {
+	err error
+}
+
+func (e *PromptSubmissionUncertainError) Error() string {
+	return fmt.Sprintf("prompt submission acknowledgement is uncertain: %v", e.err)
+}
+
+func (e *PromptSubmissionUncertainError) Unwrap() error {
+	return e.err
+}
+
+// MarkPromptSubmissionUncertain preserves the original error while exposing
+// the irreversible submission boundary to callers.
+func MarkPromptSubmissionUncertain(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &PromptSubmissionUncertainError{err: err}
+}
+
+// PromptSubmissionMayHaveOccurred reports whether a delivery failure happened
+// after tmux was asked to submit the composer.
+func PromptSubmissionMayHaveOccurred(err error) bool {
+	var uncertain *PromptSubmissionUncertainError
+	return errors.As(err, &uncertain)
+}
+
+func classifyPromptSubmissionError(err error) error {
+	if err == nil || errors.Is(err, ErrPasteNotSubmitted) {
+		return err
+	}
+	return MarkPromptSubmissionUncertain(err)
+}
+
 // enterVerifyConfig controls the submit-verify backoff loop.
 type enterVerifyConfig struct {
 	initialSettle time.Duration   // wait before the first Enter (let the paste land)

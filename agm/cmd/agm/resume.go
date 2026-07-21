@@ -760,12 +760,12 @@ func completeResumeTmuxName(ctx context.Context, adapter *dolt.Adapter, change r
 }
 
 type resumeAttachment struct {
-	ctx             context.Context
-	sessionID       string
-	health          *HealthStatus
-	sendCommands    bool
-	runtime         resumeSessionRuntime
-	promptDelivered bool
+	ctx                  context.Context
+	sessionID            string
+	health               *HealthStatus
+	sendCommands         bool
+	runtime              resumeSessionRuntime
+	promptMayHaveStarted bool
 }
 
 func (attachment *resumeAttachment) finish() error {
@@ -773,8 +773,8 @@ func (attachment *resumeAttachment) finish() error {
 		return nil
 	}
 	err := attachResumedSession(attachment.ctx, attachment.sessionID, attachment.health, attachment.sendCommands, attachment.runtime)
-	if err != nil && attachment.promptDelivered {
-		ui.PrintWarning(fmt.Sprintf("Post-prompt resume attachment failed after work was delivered: %v", err))
+	if err != nil && attachment.promptMayHaveStarted {
+		ui.PrintWarning(fmt.Sprintf("Post-prompt resume attachment failed after prompt submission may have started work: %v", err))
 		return nil
 	}
 	return err
@@ -815,25 +815,25 @@ func resumeSessionTransactionWithRuntime(ctx context.Context, adapter *dolt.Adap
 		}
 	}
 	transactionalPrompt := agent.NormalizeHarnessName(harnessName) == "codex-cli"
-	promptDelivered, err := deliverTransactionalResumePrompt(ctx, runtime, adapter, m, health, createdTmux, nameChange, transactionalPrompt)
+	promptMayHaveStarted, err := deliverTransactionalResumePrompt(ctx, runtime, adapter, m, health, createdTmux, nameChange, transactionalPrompt)
 	if err != nil {
 		return nil, err
 	}
 	completionCtx := ctx
-	if promptDelivered {
+	if promptMayHaveStarted {
 		// A submitted prompt may already have started external work. From this
 		// irreversible boundary onward, finish metadata and success effects even
 		// if the caller is canceled so a retry cannot duplicate that prompt.
 		completionCtx = context.WithoutCancel(ctx)
 	}
-	completeDeliveredResumeTmuxOwnership(completionCtx, promptDelivered, runtime, adapter, nameChange)
+	completeSubmittedResumeTmuxOwnership(completionCtx, promptMayHaveStarted, runtime, adapter, nameChange)
 	if sendCommands {
 		runtime.restorePermission(harnessName, m, health)
 	}
 	attachment, err := finalizeResumeSession(completionCtx, adapter, sessionID, manifestPath, health, sendCommands, !transactionalPrompt, runtime)
 	if err != nil {
-		if promptDelivered {
-			ui.PrintWarning(fmt.Sprintf("Post-prompt resume finalization failed after work was delivered: %v", err))
+		if promptMayHaveStarted {
+			ui.PrintWarning(fmt.Sprintf("Post-prompt resume finalization failed after prompt submission may have started work: %v", err))
 			return nil, nil
 		}
 		if createdTmux.owned() {
@@ -841,19 +841,19 @@ func resumeSessionTransactionWithRuntime(ctx context.Context, adapter *dolt.Adap
 		}
 		return nil, err
 	}
-	completePromptlessResumeTmuxOwnership(completionCtx, promptDelivered, runtime, adapter, nameChange)
-	attachment.promptDelivered = promptDelivered
+	completePromptlessResumeTmuxOwnership(completionCtx, promptMayHaveStarted, runtime, adapter, nameChange)
+	attachment.promptMayHaveStarted = promptMayHaveStarted
 	return attachment, nil
 }
 
-func completeDeliveredResumeTmuxOwnership(ctx context.Context, promptDelivered bool, runtime resumeSessionRuntime, adapter *dolt.Adapter, nameChange resumeTmuxNameChange) {
-	if promptDelivered {
+func completeSubmittedResumeTmuxOwnership(ctx context.Context, promptMayHaveStarted bool, runtime resumeSessionRuntime, adapter *dolt.Adapter, nameChange resumeTmuxNameChange) {
+	if promptMayHaveStarted {
 		completeResumeTmuxOwnership(ctx, runtime, adapter, nameChange)
 	}
 }
 
-func completePromptlessResumeTmuxOwnership(ctx context.Context, promptDelivered bool, runtime resumeSessionRuntime, adapter *dolt.Adapter, nameChange resumeTmuxNameChange) {
-	if promptDelivered {
+func completePromptlessResumeTmuxOwnership(ctx context.Context, promptMayHaveStarted bool, runtime resumeSessionRuntime, adapter *dolt.Adapter, nameChange resumeTmuxNameChange) {
+	if promptMayHaveStarted {
 		return
 	}
 	// Until all finalization effects succeed, a promptless cold resume is
@@ -1023,6 +1023,13 @@ func deliverPostResumePrompt(ctx context.Context, sessionName string, runtime re
 		return false, nil
 	}
 	if err := runtime.deliverPrompt(sessionName, resumePrompt, resumePromptFile, resumeDeletePromptFile); err != nil {
+		if tmux.PromptSubmissionMayHaveOccurred(err) {
+			// The final Enter crossed the tmux mutation boundary, but its reply was
+			// lost. Work may already be running. Treat this exactly like confirmed
+			// delivery for ownership, cancellation, and retry safety.
+			ui.PrintWarning(fmt.Sprintf("Prompt submission acknowledgement was lost; preserving the session because work may have started: %v", err))
+			return true, nil
+		}
 		if ctx.Err() != nil {
 			return false, ctx.Err()
 		}

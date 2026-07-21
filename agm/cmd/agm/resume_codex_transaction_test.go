@@ -546,6 +546,51 @@ func TestResumeSessionCodexDoesNotReturnCancellationAfterPromptDelivery(t *testi
 	}
 }
 
+func TestResumeSessionCodexPreservesStartedWorkWhenPromptAcknowledgementIsLost(t *testing.T) {
+	setDetachedResumeTestGlobals(t, true)
+	resumePrompt = "start work exactly once despite a lost tmux reply"
+	adapter, m, health := setupCodexResumeTransaction(t)
+	health.TmuxSessionName = "codex.resume:lost-prompt-ack"
+	wantErr := errors.New("tmux Enter acknowledgement lost")
+	ctx, cancel := context.WithCancel(t.Context())
+	var calls []string
+	runtime := recordingResumeRuntime(&calls)
+	runtime.persistTmuxName = func(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest, name string) (resumeTmuxNameChange, error) {
+		calls = append(calls, "persist")
+		return persistResumeTmuxName(ctx, adapter, m, name)
+	}
+	runtime.restoreTmuxName = func(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest, change resumeTmuxNameChange) error {
+		calls = append(calls, "compensate")
+		return restoreResumeTmuxName(ctx, adapter, m, change)
+	}
+	runtime.completeTmuxName = func(ctx context.Context, adapter *dolt.Adapter, change resumeTmuxNameChange) error {
+		if err := ctx.Err(); err != nil {
+			t.Fatalf("completion context after ambiguous prompt submission = %v, want active", err)
+		}
+		calls = append(calls, "complete")
+		return completeResumeTmuxName(ctx, adapter, change)
+	}
+	runtime.deliverPrompt = func(string, string, string, bool) error {
+		calls = append(calls, "prompt")
+		cancel()
+		return tmux.MarkPromptSubmissionUncertain(wantErr)
+	}
+
+	if err := resumeSessionWithRuntime(ctx, adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime); err != nil {
+		t.Fatalf("resumeSessionWithRuntime() after lost prompt acknowledgement = %v, want irreversible success", err)
+	}
+	if want := []string{"create", "dispatch", "wait", "persist", "prompt", "complete", "restore", "update", "tab"}; !reflect.DeepEqual(calls, want) {
+		t.Fatalf("resume calls = %v, want preservation without compensation %v", calls, want)
+	}
+	stored, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after ambiguous prompt submission: %v", err)
+	}
+	if stored.Tmux.SessionName != tmux.SanitizeSessionName(health.TmuxSessionName) {
+		t.Fatalf("stored tmux name = %q, want preserved canonical name %q", stored.Tmux.SessionName, tmux.SanitizeSessionName(health.TmuxSessionName))
+	}
+}
+
 func TestResumeSessionCodexDoesNotReturnAttachFailureAfterPromptDelivery(t *testing.T) {
 	setDetachedResumeTestGlobals(t, false)
 	resumePrompt = "start irreversible work"
@@ -610,7 +655,7 @@ func TestResumeSessionCodexCompensatesCanonicalNameWhenOrdinaryPromptDeliveryFai
 	if err != nil {
 		t.Fatalf("GetSession() before resume error = %v", err)
 	}
-	wantErr := errors.New("tmux paste failed")
+	wantErr := tmux.ErrPasteNotSubmitted
 	var calls []string
 	runtime := recordingResumeRuntime(&calls)
 	runtime.persistTmuxName = func(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest, name string) (resumeTmuxNameChange, error) {

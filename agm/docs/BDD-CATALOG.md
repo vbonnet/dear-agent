@@ -252,8 +252,11 @@ creation, and terminal state detection.
 - Every production resume entry, including last-session and bulk resume,
   acquires the stable session-ID lock before health or transaction reads and
   releases it after finalization but before an interactive attachment.
-- Only an actually delivered Codex prompt creates the irreversible success
-  boundary; a failed send on an existing pane cannot hide a later attach error.
+- A confirmed Codex prompt or a lost acknowledgement after the final Enter
+  creates the irreversible success boundary; the latter preserves the pane and
+  warns that work may have started. A paste positively proven to remain parked
+  is still a delivery failure, and a failed send on an existing pane cannot
+  hide a later attach error.
 - Cold Codex resume retains tmux's server-local ID plus a random per-creation
   token, including when a later command in the tmux creation queue fails or ID
   output is lost while the exact random provisional name still exists;
@@ -290,7 +293,8 @@ creation, and terminal state detection.
   parent and optional inherited display name atomically through the exact
   identity revision they read, advance that revision on success, and surface a
   stale writer as a conflict instead of claiming an unapplied repair succeeded.
-- Once a transactional Codex resume prompt is submitted, later caller
+- Once a transactional Codex resume prompt is submitted, or its final Enter
+  loses an acknowledgement after tmux received the request, later caller
   cancellation cannot report a retryable failure that would duplicate work.
 - Final creation liveness validation derives from the root context and rechecks
   cancellation before title update, attach, or detached-success reporting.

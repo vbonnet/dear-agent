@@ -364,7 +364,7 @@ func SendPromptLiteral(target, prompt string, shouldInterrupt bool) error {
 		// once if the Enter didn't register (replaces the old 50ms + C-m +
 		// retryEnterAfterPaste sequence).
 		if err := sendEnterReliable(socketPath, normalizedTarget); err != nil {
-			return err
+			return classifyPromptSubmissionError(err)
 		}
 
 		verifyAndResubmitQueuedPrompt(socketPath, normalizedTarget)

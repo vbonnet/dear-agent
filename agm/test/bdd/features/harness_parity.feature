@@ -365,6 +365,7 @@ Feature: Harness parity
     And authoritative session renames should serialize with cold resume, fence ambiguous storage writes, preserve both identity names from stale writers, preserve claimed tmux identity across lost replies and server restarts, reject stale identity revisions, and compensate tmux after storage conflicts
     And administrative hierarchy repairs should atomically link parents and inherited names through the observed identity revision
     And successful Codex prompt delivery should remain successful after later caller cancellation
+    And ambiguous final Codex prompt submission should preserve work that may have started
     And failed Codex prompt delivery should not suppress a later attach failure
     And Codex activity updates should follow resume readiness
 

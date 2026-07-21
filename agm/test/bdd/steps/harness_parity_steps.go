@@ -298,6 +298,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^authoritative session renames should serialize with cold resume, fence ambiguous storage writes, preserve both identity names from stale writers, preserve claimed tmux identity across lost replies and server restarts, reject stale identity revisions, and compensate tmux after storage conflicts$`, authoritativeSessionRenamesShouldRejectStaleIdentityRevisions)
 	ctx.Step(`^administrative hierarchy repairs should atomically link parents and inherited names through the observed identity revision$`, administrativeHierarchyRepairsShouldUseObservedIdentityRevision)
 	ctx.Step(`^successful Codex prompt delivery should remain successful after later caller cancellation$`, successfulCodexPromptDeliveryShouldRemainSuccessfulAfterLaterCallerCancellation)
+	ctx.Step(`^ambiguous final Codex prompt submission should preserve work that may have started$`, ambiguousFinalCodexPromptSubmissionShouldPreserveStartedWork)
 	ctx.Step(`^failed Codex prompt delivery should not suppress a later attach failure$`, failedCodexPromptDeliveryShouldNotSuppressALaterAttachFailure)
 	ctx.Step(`^Codex activity updates should follow resume readiness$`, codexActivityUpdatesShouldFollowResumeReadiness)
 }
@@ -400,6 +401,21 @@ func successfulCodexPromptDeliveryShouldRemainSuccessfulAfterLaterCallerCancella
 	}
 	if err != nil {
 		return fmt.Errorf("post-prompt cancellation behavior failed: %w\n%s", err, output)
+	}
+	return nil
+}
+
+func ambiguousFinalCodexPromptSubmissionShouldPreserveStartedWork(ctx context.Context) error {
+	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/tmux", "-run", `^(TestResumeSessionCodexPreservesStartedWorkWhenPromptAcknowledgementIsLost|TestClassifyPromptSubmissionErrorDistinguishesParkedFromUncertain)$`, "-count=1")
+	cmd.Dir = bddRepoRoot()
+	output, err := cmd.CombinedOutput()
+	if testCtx.Err() != nil {
+		return fmt.Errorf("ambiguous prompt submission regressions timed out: %w", testCtx.Err())
+	}
+	if err != nil {
+		return fmt.Errorf("ambiguous prompt submission regressions failed: %w\n%s", err, output)
 	}
 	return nil
 }

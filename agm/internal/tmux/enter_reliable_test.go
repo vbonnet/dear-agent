@@ -95,6 +95,19 @@ func TestVerifyingEnter_SendError(t *testing.T) {
 	}
 }
 
+func TestClassifyPromptSubmissionErrorDistinguishesParkedFromUncertain(t *testing.T) {
+	lostReply := errors.New("tmux reply lost")
+	uncertain := classifyPromptSubmissionError(lostReply)
+	if !PromptSubmissionMayHaveOccurred(uncertain) || !errors.Is(uncertain, lostReply) {
+		t.Fatalf("classified lost reply = %v, want uncertain wrapper preserving cause", uncertain)
+	}
+
+	parked := classifyPromptSubmissionError(ErrPasteNotSubmitted)
+	if PromptSubmissionMayHaveOccurred(parked) || !errors.Is(parked, ErrPasteNotSubmitted) {
+		t.Fatalf("classified parked prompt = %v, want definite unsubmitted failure", parked)
+	}
+}
+
 // TestIsPasteStuck_CodexChip: the detection fix — the codex "[Pasted Content]"
 // chip must register as stuck (the ce-mjk9 blind spot).
 func TestIsPasteStuck_CodexChip(t *testing.T) {
