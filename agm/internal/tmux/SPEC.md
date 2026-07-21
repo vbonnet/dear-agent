@@ -68,6 +68,8 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-31** When pane liveness is classified for command injection safety, the system shall positively identify a restartable shell only when exactly one pane exists, its process tree is observable, and every process in that tree is a plain interactive shell; any other foreground or descendant process shall fail that proof.
 
+**TMUX-32** When AGY readiness encounters a first-run color-theme or Terms of Service/Data Use screen, the system shall stop promptly with explicit interactive-onboarding guidance and shall not send keys that accept preferences, legal terms, or data-use choices on the operator's behalf.
+
 **TMUX-26** When a caller requests liveness for a named harness process, the system shall scan the full pane descendant tree for that exact process and shall return scan failures separately from a proven dead result.
 
 ## BDD Traceability

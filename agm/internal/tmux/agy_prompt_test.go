@@ -3,9 +3,45 @@ package tmux
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestWaitForAgyPromptRejectsFirstRunOnboardingWithoutInput(t *testing.T) {
+	tests := map[string]string{
+		"theme": "Welcome to Antigravity CLI!\nChoose your color scheme:\n> terminal",
+		"terms": "Terms of Service & Data Use\n[x] Yes, I agree to help improve Antigravity CLI",
+	}
+	for name, content := range tests {
+		t.Run(name, func(t *testing.T) {
+			captures := 0
+			sends := 0
+			runtime := agyPromptRuntime{
+				capture: func(context.Context, string) ([]byte, error) {
+					captures++
+					return []byte(content), nil
+				},
+				sendKeys: func(string, string) error {
+					sends++
+					return nil
+				},
+				sleep: func(context.Context, time.Duration) {},
+			}
+
+			err := waitForAgyPromptWithRuntime(t.Context(), "agy-onboarding", time.Second, runtime)
+			if !errors.Is(err, ErrAgyOnboardingRequired) {
+				t.Fatalf("error = %v, want ErrAgyOnboardingRequired", err)
+			}
+			if !strings.Contains(err.Error(), "will not accept legal or data-use choices automatically") {
+				t.Fatalf("error lacks non-consent guidance: %v", err)
+			}
+			if captures != 1 || sends != 0 {
+				t.Fatalf("onboarding I/O = %d capture(s), %d send(s); want one capture and no input", captures, sends)
+			}
+		})
+	}
+}
 
 func TestAgySurveyOverridesReadyPrompt(t *testing.T) {
 	content := "Task complete\n>\nHow's the CLI experience so far? [1] Good [2] Fine [3] Bad [0] Skip"

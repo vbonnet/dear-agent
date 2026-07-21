@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -19,6 +20,16 @@ var agySurveyPromptPatterns = []string{
 	"How's the CLI experience so far?",
 	"[1] Good [2] Fine [3] Bad [0] Skip",
 }
+
+var agyOnboardingPromptPatterns = []string{
+	"Choose your color scheme:",
+	"Terms of Service & Data Use",
+}
+
+// ErrAgyOnboardingRequired means AGY is waiting for an operator to make
+// first-run preference, legal, or data-use choices. AGM deliberately does not
+// accept those choices on the operator's behalf.
+var ErrAgyOnboardingRequired = errors.New("AGY first-run onboarding requires explicit operator review")
 
 func containsAgyPromptPattern(content string) bool {
 	for line := range strings.SplitSeq(content, "\n") {
@@ -43,6 +54,15 @@ func containsAgyTrustPromptPattern(content string) bool {
 	}
 	for _, pattern := range agyTrustPromptPatterns {
 		if strings.Contains(trimmed, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsAgyOnboardingPrompt(content string) bool {
+	for _, pattern := range agyOnboardingPromptPatterns {
+		if strings.Contains(content, pattern) {
 			return true
 		}
 	}
@@ -159,6 +179,9 @@ func waitForAgyPromptWithRuntime(baseCtx context.Context, sessionName string, ti
 		}
 
 		content := string(output)
+		if containsAgyOnboardingPrompt(content) {
+			return fmt.Errorf("%w: run `agy` interactively, review the theme and Terms of Service/Data Use choices, complete onboarding, then retry AGM; AGM will not accept legal or data-use choices automatically", ErrAgyOnboardingRequired)
+		}
 		var surveyHandled bool
 		surveyDismissed, surveyHandled = dismissAgySurveyOnce(runtime, sessionName, content, surveyDismissed)
 		if surveyHandled {
