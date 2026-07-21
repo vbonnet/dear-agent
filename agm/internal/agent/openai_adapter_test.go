@@ -360,10 +360,12 @@ func TestGetSessionStatusCodexIdle(t *testing.T) {
 		t.Errorf("expected %s before composer renders, got %s", StatusActive, status)
 	}
 
-	// Render the complete initial Codex composer into the pane.
-	if err := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName,
-		"printf 'OpenAI Codex (v0.141.0)\\n/model to change\\n'", "Enter").Run(); err != nil {
-		t.Fatalf("failed to send composer signal: %v", err)
+	// Replace the shell with a long-lived process that renders only the complete
+	// initial Codex composer. Typing printf into a shell would leave command or
+	// prompt output after the fixture and correctly make that composer stale.
+	composerProcess := "printf '│ >_ OpenAI Codex (v0.141.0) │\\n│ model: gpt-5.5 xhigh /model to change │\\n╰──────────────────────────────╯\\n›\\n'; exec sleep 30"
+	if err := exec.Command("tmux", "-S", socketPath, "respawn-pane", "-k", "-t", sessionName, composerProcess).Run(); err != nil {
+		t.Fatalf("failed to render composer fixture: %v", err)
 	}
 
 	deadline := time.Now().Add(5 * time.Second)
