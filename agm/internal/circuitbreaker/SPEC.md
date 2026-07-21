@@ -31,3 +31,7 @@ machine state without false positives that would block healthy agent sessions.
 **CBRK-08** When the worker counter enumerates sessions on the shared AGM tmux socket, the system shall count only sessions recognisable as workers — those whose name carries the `worker-` prefix, or that the AGM session DB records as active and tagged `role:worker` — so test fixtures, supervisor panes, and orphan sessions cannot consume worker slots.
 
 **CBRK-09** When the AGM session DB cannot be read while classifying an unprefixed tmux session, the system shall fall back to prefix-only classification rather than counting the session as a worker, so an unreadable database cannot deadlock dispatch.
+
+**CBRK-10** When the known-worker lookup is invoked, the system shall bound it with a timeout so a locked or overloaded session database cannot hang session admission.
+
+**CBRK-11** When a worker's record name differs from its tmux session name, the system shall recognise the session under either name, so a resumed or imported worker still counts against the cap.

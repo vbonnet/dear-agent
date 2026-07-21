@@ -3,6 +3,7 @@ package circuitbreaker
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 // Regression: the worker cap used to count every tmux session on the shared
@@ -114,6 +115,54 @@ func TestCheckMaxWorkers_TestFixtureDoesNotBlockDispatch(t *testing.T) {
 	gate := checkMaxWorkers(cfg, counter)
 	if !gate.Passed {
 		t.Errorf("max_workers gate refused with zero real workers: %s", gate.Message)
+	}
+}
+
+// A resolver that hangs must not hang session admission: the lookup is bounded
+// and a timeout degrades to prefix-only classification.
+func TestBoundedKnownWorkers_TimeoutFallsBackToPrefix(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+
+	counter := TmuxWorkerCounter{
+		KnownWorkersTimeout: 20 * time.Millisecond,
+		KnownWorkers: func() (map[string]bool, error) {
+			<-release // never returns before the test ends
+			return map[string]bool{"stuck": true}, nil
+		},
+	}
+
+	start := time.Now()
+	got := countWorkerSessions([]string{"stuck", "worker-ce-2mib"}, counter.boundedKnownWorkers())
+	elapsed := time.Since(start)
+
+	if got != 1 {
+		t.Errorf("countWorkerSessions = %d, want 1 (prefix-only after timeout)", got)
+	}
+	if elapsed > time.Second {
+		t.Errorf("lookup took %s — the timeout did not bound it", elapsed)
+	}
+}
+
+// A resolver that answers in time is used normally, and the default timeout
+// applies when none is configured.
+func TestBoundedKnownWorkers_FastResolverIsUsed(t *testing.T) {
+	counter := TmuxWorkerCounter{
+		KnownWorkers: func() (map[string]bool, error) {
+			return map[string]bool{"legacy-fleet-01": true}, nil
+		},
+	}
+
+	if got := countWorkerSessions([]string{"legacy-fleet-01", "test"}, counter.boundedKnownWorkers()); got != 1 {
+		t.Errorf("countWorkerSessions = %d, want 1", got)
+	}
+}
+
+// A nil resolver stays nil through the bounding wrapper, so countWorkerSessions
+// keeps its no-resolver fast path.
+func TestBoundedKnownWorkers_NilStaysNil(t *testing.T) {
+	if got := (TmuxWorkerCounter{}).boundedKnownWorkers(); got != nil {
+		t.Error("boundedKnownWorkers wrapped a nil resolver; want nil")
 	}
 }
 

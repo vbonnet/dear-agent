@@ -95,10 +95,26 @@ type TmuxWorkerCounter struct {
 	// KnownWorkers optionally resolves the set of session names AGM records as
 	// active workers (status active, tagged role:worker). It is consulted only
 	// for live sessions whose names lack WorkerSessionPrefix, so a fleet named
-	// by convention costs no DB access. A nil resolver, or one that errors,
-	// leaves classification to the name prefix alone.
+	// by convention costs no DB access. A nil resolver, one that errors, or one
+	// that exceeds KnownWorkersTimeout leaves classification to the name prefix
+	// alone.
+	//
+	// The set must be keyed by *tmux* session name, since that is what the
+	// counter matches against. A session whose record name differs from its
+	// tmux session name should appear under both.
 	KnownWorkers func() (map[string]bool, error)
+
+	// KnownWorkersTimeout bounds the KnownWorkers lookup. Zero selects
+	// DefaultKnownWorkersTimeout. The resolver reads a database, and this
+	// counter runs on the session-admission path, so a locked or overloaded
+	// store must not be able to hang a spawn (see CBRK-02 for the same rule
+	// applied to the memory probe).
+	KnownWorkersTimeout time.Duration
 }
+
+// DefaultKnownWorkersTimeout bounds the session-DB lookup used to classify
+// sessions whose names lack WorkerSessionPrefix.
+const DefaultKnownWorkersTimeout = 5 * time.Second
 
 // CountWorkers returns the number of worker sessions in the AGM socket.
 func (t TmuxWorkerCounter) CountWorkers() (int, error) {
@@ -119,7 +135,41 @@ func (t TmuxWorkerCounter) CountWorkers() (int, error) {
 	// tmux exits non-zero when there are no sessions; treat any error as 0 workers.
 	out, _ := exec.Command("tmux", "-S", sock, "list-sessions", "-F", "#S").Output()
 
-	return countWorkerSessions(splitSessionNames(string(out)), t.KnownWorkers), nil
+	return countWorkerSessions(splitSessionNames(string(out)), t.boundedKnownWorkers()), nil
+}
+
+// boundedKnownWorkers wraps KnownWorkers so a slow session DB cannot hang
+// session admission. On timeout it reports an error, which countWorkerSessions
+// treats like any other resolver failure: prefix-only classification.
+func (t TmuxWorkerCounter) boundedKnownWorkers() func() (map[string]bool, error) {
+	if t.KnownWorkers == nil {
+		return nil
+	}
+	timeout := t.KnownWorkersTimeout
+	if timeout <= 0 {
+		timeout = DefaultKnownWorkersTimeout
+	}
+
+	return func() (map[string]bool, error) {
+		type result struct {
+			workers map[string]bool
+			err     error
+		}
+		// Buffered so the goroutine can always publish and exit, even after
+		// this function has already given up on it.
+		done := make(chan result, 1)
+		go func() {
+			w, err := t.KnownWorkers()
+			done <- result{w, err}
+		}()
+
+		select {
+		case r := <-done:
+			return r.workers, r.err
+		case <-time.After(timeout):
+			return nil, fmt.Errorf("known-worker lookup exceeded %s", timeout)
+		}
+	}
 }
 
 // splitSessionNames turns `tmux list-sessions -F '#S'` output into session

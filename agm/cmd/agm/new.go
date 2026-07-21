@@ -14,8 +14,8 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/circuitbreaker"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/modelrouter"
-	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
 	"github.com/vbonnet/dear-agent/agm/internal/testcontext"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
@@ -810,12 +810,23 @@ func enforceCircuitBreakers() error {
 	return nil
 }
 
-// taggedWorkerSessions returns the names of non-archived sessions AGM records
-// as tagged role:worker. The circuit breaker uses it to recognise workers whose
-// tmux session name lacks the worker- prefix, so they still count against the
-// cap. It is consulted only when such a session is live, and every failure path
-// returns an error so the breaker falls back to prefix-only classification
-// rather than blocking a spawn on an unreadable database.
+// taggedWorkerSessions returns the tmux session names of non-archived sessions
+// AGM records as tagged role:worker. The circuit breaker uses it to recognise
+// workers whose tmux session name lacks the worker- prefix, so they still count
+// against the cap. It is consulted only when such a session is live, and every
+// failure path returns an error so the breaker falls back to prefix-only
+// classification rather than blocking a spawn on an unreadable database.
+//
+// A session's record name and its tmux session name can diverge (resume and
+// import both produce that state), and the breaker matches against what tmux
+// reports. Both names are therefore registered, mirroring how
+// ops.findOrphanTmuxSessions decides a tmux session belongs to AGM.
+//
+// This reads the manifests directly rather than going through ops.ListSessions:
+// SessionSummary does not carry Tmux.SessionName, and the status computation
+// ListSessions performs would re-enumerate tmux, which the caller has already
+// done. Stopped sessions need no filtering here — the breaker only counts names
+// that are live in tmux, so a record without a session cannot inflate the count.
 func taggedWorkerSessions() (map[string]bool, error) {
 	opCtx, cleanup, err := newOpContextWithStorage()
 	if err != nil {
@@ -823,19 +834,23 @@ func taggedWorkerSessions() (map[string]bool, error) {
 	}
 	defer cleanup()
 
-	result, err := ops.ListSessions(opCtx, &ops.ListSessionsRequest{
-		Status:         "active",
-		Tags:           []string{"role:worker"},
-		Limit:          1000,
-		ExcludeStopped: true,
+	manifests, err := opCtx.Storage.ListSessions(&dolt.SessionFilter{
+		Tags:            []string{"role:worker"},
+		ExcludeArchived: true,
+		Limit:           1000,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("listing worker sessions: %w", err)
 	}
 
-	workers := make(map[string]bool, len(result.Sessions))
-	for _, s := range result.Sessions {
-		workers[s.Name] = true
+	workers := make(map[string]bool, len(manifests)*2)
+	for _, m := range manifests {
+		if m.Tmux.SessionName != "" {
+			workers[m.Tmux.SessionName] = true
+		}
+		if m.Name != "" {
+			workers[m.Name] = true
+		}
 	}
 	return workers, nil
 }
