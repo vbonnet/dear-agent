@@ -206,6 +206,35 @@ func TestAgyCreateSessionUsesCanonicalModelAwareCommand(t *testing.T) {
 	}
 }
 
+func TestAgyCreateSessionImportedConversationOmitsUnknownModel(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	agyHasSession = func(string) (bool, error) { return false, nil }
+	agyNewSession = func(string, string) error { return nil }
+	command := ""
+	agySendCommand = func(_ string, value string) error { command = value; return nil }
+	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return nil }
+
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	sessionID, err := (&AgyAdapter{sessionStore: store}).CreateSession(SessionContext{
+		Name:             "agy-imported",
+		WorkingDirectory: "/work",
+		Environment:      map[string]string{"AGY_CONVERSATION_ID": "imported-native-id"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if strings.Contains(command, "--model") {
+		t.Fatalf("imported AGY command invented model provenance: %q", command)
+	}
+	metadata, err := store.Get(sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metadata.Model != "" || metadata.UUID != "imported-native-id" {
+		t.Fatalf("stored model/native ID = %q/%q, want unknown model and imported ID", metadata.Model, metadata.UUID)
+	}
+}
+
 func TestAgyCreateSessionCapturesNativeConversationIdentity(t *testing.T) {
 	preserveAgyAdapterSeams(t)
 	agyHasSession = func(string) (bool, error) { return false, nil }
@@ -400,7 +429,7 @@ func TestAgyCreateSessionRollsBackWhenNativeIdentityCannotBeCaptured(t *testing.
 	}
 	agyDiscoverySleep = func(time.Duration) {}
 	killed := ""
-	agyKillSession = func(name string) { killed = name }
+	agyKillSession = func(name string) error { killed = name; return nil }
 
 	sessionID, err := (&AgyAdapter{sessionStore: store}).CreateSession(SessionContext{
 		Name: "agy-no-identity", WorkingDirectory: "/work", Model: "3.5-flash-low",
@@ -426,7 +455,7 @@ func TestAgyCreateSessionDoesNotReuseStaleNativeConversationIdentity(t *testing.
 	agyFindConversation = func(string) (string, error) { return "stale-conversation-id", nil }
 	agyDiscoverySleep = func(time.Duration) {}
 	killed := ""
-	agyKillSession = func(name string) { killed = name }
+	agyKillSession = func(name string) error { killed = name; return nil }
 
 	sessionID, err := (&AgyAdapter{sessionStore: store}).CreateSession(SessionContext{
 		Name: "agy-stale-identity", WorkingDirectory: "/work", Model: "3.5-flash-low",
@@ -452,7 +481,7 @@ func TestAgyCreateSessionPropagatesReadinessFailureAndRollsBack(t *testing.T) {
 	wantErr := errors.New("fixture readiness failed")
 	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return wantErr }
 	killed := ""
-	agyKillSession = func(name string) { killed = name }
+	agyKillSession = func(name string) error { killed = name; return nil }
 
 	sessionID, err := (&AgyAdapter{sessionStore: store}).CreateSession(SessionContext{
 		Name: "agy-create", WorkingDirectory: "/work", Model: "3.5-flash-low",
@@ -465,6 +494,29 @@ func TestAgyCreateSessionPropagatesReadinessFailureAndRollsBack(t *testing.T) {
 	}
 	if sessions, listErr := store.List(); listErr != nil || len(sessions) != 0 {
 		t.Fatalf("failed create persisted sessions = %v, %v", sessions, listErr)
+	}
+}
+
+func TestAgyCreateSessionReportsRollbackFailure(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	agyHasSession = func(string) (bool, error) { return false, nil }
+	agyNewSession = func(string, string) error { return nil }
+	agySendCommand = func(string, string) error { return nil }
+	agyFindConversation = func(string) (string, error) { return "", agysession.ErrConversationNotFound }
+	readinessErr := errors.New("fixture readiness failed")
+	cleanupErr := errors.New("fixture tmux cleanup failed")
+	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return readinessErr }
+	agyKillSession = func(string) error { return cleanupErr }
+
+	_, err := (&AgyAdapter{sessionStore: store}).CreateSession(SessionContext{
+		Name: "agy-rollback-failure", WorkingDirectory: "/work", Model: "3.5-flash-low",
+	})
+	if !errors.Is(err, readinessErr) || !errors.Is(err, cleanupErr) {
+		t.Fatalf("CreateSession error = %v, want primary and rollback failures", err)
+	}
+	if !strings.Contains(err.Error(), "failed to roll back AGY tmux session") {
+		t.Fatalf("CreateSession error = %v, want reported rollback context", err)
 	}
 }
 
@@ -705,6 +757,33 @@ func TestAgyResumeSessionRejectsAnotherLiveHarnessBeforeMutation(t *testing.T) {
 	}
 }
 
+func TestAgyResumeSessionRejectsNonShellForegroundBeforeMutation(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	t.Setenv("TMUX", "fixture")
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	sessionID := SessionID("adapter-session")
+	if err := store.Set(sessionID, &SessionMetadata{
+		TmuxName: "agy-editor", WorkingDir: "/work", UUID: "native-id",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	agyHasSession = func(string) (bool, error) { return true, nil }
+	agyCheckProcess = func(string, string, string) (bool, error) { return false, nil }
+	agyCheckHarness = func(string, string) (tmux.PaneLiveness, error) {
+		return tmux.PaneLiveness{SessionExists: true, Evidence: "zsh,vim"}, nil
+	}
+	sent := false
+	agySendCommand = func(string, string) error { sent = true; return nil }
+
+	err := (&AgyAdapter{sessionStore: store}).ResumeSession(sessionID)
+	if err == nil || !strings.Contains(err.Error(), "not a proven restartable shell") {
+		t.Fatalf("ResumeSession error = %v, want non-shell foreground rejection", err)
+	}
+	if sent {
+		t.Fatal("ResumeSession injected the AGY command into a non-shell foreground process")
+	}
+}
+
 func TestAgyResumeSessionRestartsInExistingBareShell(t *testing.T) {
 	preserveAgyAdapterSeams(t)
 	t.Setenv("TMUX", "fixture")
@@ -718,7 +797,7 @@ func TestAgyResumeSessionRestartsInExistingBareShell(t *testing.T) {
 	agyHasSession = func(string) (bool, error) { return true, nil }
 	agyCheckProcess = func(string, string, string) (bool, error) { return false, nil }
 	agyCheckHarness = func(string, string) (tmux.PaneLiveness, error) {
-		return tmux.PaneLiveness{SessionExists: true, Evidence: "zsh"}, nil
+		return tmux.PaneLiveness{SessionExists: true, RestartableShell: true, Evidence: "zsh"}, nil
 	}
 	command := ""
 	agySendCommand = func(_ string, value string) error { command = value; return nil }
@@ -729,6 +808,38 @@ func TestAgyResumeSessionRestartsInExistingBareShell(t *testing.T) {
 	}
 	if !strings.Contains(command, "--conversation 'native-id'") {
 		t.Fatalf("bare-shell resume command = %q", command)
+	}
+}
+
+func TestAgyResumeSessionHoldsWorkspaceLockThroughReadiness(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	t.Setenv("TMUX", "fixture")
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	sessionID := SessionID("adapter-session")
+	if err := store.Set(sessionID, &SessionMetadata{
+		TmuxName: "agy-resume-lock", WorkingDir: "/work", UUID: "native-id",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var events []string
+	agyHasSession = func(string) (bool, error) { return false, nil }
+	agyAcquireCreateLock = func(workDir string) (func() error, error) {
+		events = append(events, "lock:"+workDir)
+		return func() error { events = append(events, "unlock"); return nil }, nil
+	}
+	agyNewSession = func(string, string) error { events = append(events, "new"); return nil }
+	agySendCommand = func(string, string) error { events = append(events, "send"); return nil }
+	agyWaitForPrompt = func(context.Context, string, time.Duration) error {
+		events = append(events, "ready")
+		return nil
+	}
+
+	if err := (&AgyAdapter{sessionStore: store}).ResumeSession(sessionID); err != nil {
+		t.Fatalf("ResumeSession: %v", err)
+	}
+	want := []string{"lock:/work", "new", "send", "ready", "unlock"}
+	if !reflect.DeepEqual(events, want) {
+		t.Fatalf("resume lifecycle events = %v, want %v", events, want)
 	}
 }
 
@@ -775,7 +886,7 @@ func TestAgyResumeSessionPropagatesReadinessFailureBeforeAttach(t *testing.T) {
 	attached := false
 	agyAttachSession = func(string) error { attached = true; return nil }
 	killed := ""
-	agyKillSession = func(name string) { killed = name }
+	agyKillSession = func(name string) error { killed = name; return nil }
 
 	err := (&AgyAdapter{sessionStore: store}).ResumeSession(sessionID)
 	if !errors.Is(err, wantErr) {

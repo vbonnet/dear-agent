@@ -35,7 +35,7 @@ var (
 	agyCheckHarness     = tmux.CheckPaneLiveness
 	agyIsIdle           = tmux.IsAgyIdle
 	agyAttachSession    = tmux.AttachSession
-	agyKillSession      = tmux.KillSession
+	agyKillSession      = tmux.KillSessionWithError
 	agyFindConversation = func(workDir string) (string, error) {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
@@ -102,24 +102,27 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	if err != nil {
 		return "", err
 	}
-	model := ctx.Model
-	if model == "" {
-		model = ctx.Environment["AGM_MODEL"]
-	}
-	if model == "" {
-		model, _ = DefaultModelForHarness("agy")
-	}
-	resolvedModel, err := resolveAgyAdapterModel(model)
-	if err != nil {
-		return "", err
-	}
-	permissionMode := ctx.Environment["AGM_PERMISSION_MODE"]
 	conversationID := ctx.Environment["AGY_CONVERSATION_ID"]
 	if conversationID != "" {
 		if err := agysession.ValidateConversationID(conversationID); err != nil {
 			return "", err
 		}
 	}
+	model := ctx.Model
+	if model == "" {
+		model = ctx.Environment["AGM_MODEL"]
+	}
+	if model == "" && conversationID == "" {
+		model, _ = DefaultModelForHarness("agy")
+	}
+	resolvedModel := ""
+	if model != "" {
+		resolvedModel, err = resolveAgyAdapterModel(model)
+		if err != nil {
+			return "", err
+		}
+	}
+	permissionMode := ctx.Environment["AGM_PERMISSION_MODE"]
 
 	// AGY exposes only the latest conversation for a workspace. Serialize the
 	// snapshot, launch, and discovery sequence so concurrent AGM creates cannot
@@ -170,20 +173,17 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 
 	// Start Agy in the tmux session
 	if err := agySendCommand(tmuxName, agyCmd); err != nil {
-		agyKillSession(tmuxName)
-		return "", fmt.Errorf("failed to start Agy in tmux session: %w", err)
+		return "", rollbackAgyAdapterSession(tmuxName, fmt.Errorf("failed to start Agy in tmux session: %w", err))
 	}
 
 	// Wait for Agy to be ready
 	if err := agyWaitForPrompt(context.Background(), tmuxName, 30*time.Second); err != nil {
-		agyKillSession(tmuxName)
-		return "", fmt.Errorf("AGY did not become ready after create: %w", err)
+		return "", rollbackAgyAdapterSession(tmuxName, fmt.Errorf("AGY did not become ready after create: %w", err))
 	}
 	if conversationID == "" {
 		conversationID, err = discoverAgyConversationID(workDir, previousConversationID)
 		if err != nil {
-			agyKillSession(tmuxName)
-			return "", err
+			return "", rollbackAgyAdapterSession(tmuxName, err)
 		}
 	}
 
@@ -201,11 +201,17 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	}
 
 	if err := a.sessionStore.Set(sessionID, metadata); err != nil {
-		agyKillSession(tmuxName)
-		return "", fmt.Errorf("failed to store session metadata: %w", err)
+		return "", rollbackAgyAdapterSession(tmuxName, fmt.Errorf("failed to store session metadata: %w", err))
 	}
 
 	return sessionID, nil
+}
+
+func rollbackAgyAdapterSession(tmuxName string, primaryErr error) error {
+	if cleanupErr := agyKillSession(tmuxName); cleanupErr != nil {
+		return errors.Join(primaryErr, fmt.Errorf("failed to roll back AGY tmux session %q: %w", tmuxName, cleanupErr))
+	}
+	return primaryErr
 }
 
 func canonicalAgyWorkDir(workDir string) (string, error) {
@@ -269,6 +275,9 @@ func (a *AgyAdapter) ResumeSession(sessionID SessionID) error {
 			if verdict.HarnessAlive {
 				return fmt.Errorf("refusing to resume AGY session %q into a tmux pane containing another live harness (pane tree: %s)", sessionID, verdict.Evidence)
 			}
+			if !verdict.RestartableShell {
+				return fmt.Errorf("refusing to resume AGY session %q because its tmux pane is not a proven restartable shell (pane tree: %s)", sessionID, verdict.Evidence)
+			}
 		}
 		sendCommands = !running
 	} else {
@@ -277,47 +286,8 @@ func (a *AgyAdapter) ResumeSession(sessionID SessionID) error {
 
 	// Send resume command if needed
 	if sendCommands {
-		if metadata.UUID == "" {
-			return fmt.Errorf("AGY session %q has no native conversation ID; capture or reassociate it before cold resume", sessionID)
-		}
-		if err := agysession.ValidateConversationID(metadata.UUID); err != nil {
+		if err := resumeAgyAdapterProcess(sessionID, metadata, exists); err != nil {
 			return err
-		}
-		resolvedModel := ""
-		if metadata.Model != "" {
-			var modelErr error
-			resolvedModel, modelErr = resolveAgyAdapterModel(metadata.Model)
-			if modelErr != nil {
-				return modelErr
-			}
-		}
-		created := false
-		if !exists {
-			if err := agyNewSession(metadata.TmuxName, metadata.WorkingDir); err != nil {
-				return fmt.Errorf("failed to create tmux session: %w", err)
-			}
-			created = true
-		}
-		fullCmd := launchparity.BuildAgyCommand(launchparity.AgyCommandSpec{
-			WorkDir:        metadata.WorkingDir,
-			ResolvedModel:  resolvedModel,
-			PermissionMode: metadata.PermissionMode,
-			ConversationID: metadata.UUID,
-			ExtraAddDirs:   metadata.AuthorizedDirs,
-		}).Command
-
-		if err := agySendCommand(metadata.TmuxName, fullCmd); err != nil {
-			if created {
-				agyKillSession(metadata.TmuxName)
-			}
-			return fmt.Errorf("failed to send resume command: %w", err)
-		}
-
-		if err := agyWaitForPrompt(context.Background(), metadata.TmuxName, agyResumeReadinessTimeout); err != nil {
-			if created {
-				agyKillSession(metadata.TmuxName)
-			}
-			return fmt.Errorf("AGY did not become ready after resume: %w", err)
 		}
 	}
 
@@ -328,6 +298,65 @@ func (a *AgyAdapter) ResumeSession(sessionID SessionID) error {
 		}
 	}
 
+	return nil
+}
+
+func resumeAgyAdapterProcess(sessionID SessionID, metadata *SessionMetadata, tmuxExists bool) error {
+	if metadata.UUID == "" {
+		return fmt.Errorf("AGY session %q has no native conversation ID; capture or reassociate it before cold resume", sessionID)
+	}
+	if err := agysession.ValidateConversationID(metadata.UUID); err != nil {
+		return err
+	}
+	resolvedModel := ""
+	if metadata.Model != "" {
+		var err error
+		resolvedModel, err = resolveAgyAdapterModel(metadata.Model)
+		if err != nil {
+			return err
+		}
+	}
+
+	releaseWorkspaceLock, err := agyAcquireCreateLock(metadata.WorkingDir)
+	if err != nil {
+		return fmt.Errorf("failed to acquire AGY workspace lifecycle lock for resume: %w", err)
+	}
+	defer func() {
+		if unlockErr := releaseWorkspaceLock(); unlockErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to release AGY workspace lock after resume: %v\n", unlockErr)
+		}
+	}()
+
+	created := false
+	if !tmuxExists {
+		if err := agyNewSession(metadata.TmuxName, metadata.WorkingDir); err != nil {
+			return fmt.Errorf("failed to create tmux session: %w", err)
+		}
+		created = true
+	}
+	fullCmd := launchparity.BuildAgyCommand(launchparity.AgyCommandSpec{
+		WorkDir:        metadata.WorkingDir,
+		ResolvedModel:  resolvedModel,
+		PermissionMode: metadata.PermissionMode,
+		ConversationID: metadata.UUID,
+		ExtraAddDirs:   metadata.AuthorizedDirs,
+	}).Command
+
+	if err := agySendCommand(metadata.TmuxName, fullCmd); err != nil {
+		primaryErr := fmt.Errorf("failed to send resume command: %w", err)
+		if created {
+			return rollbackAgyAdapterSession(metadata.TmuxName, primaryErr)
+		}
+		return primaryErr
+	}
+
+	if err := agyWaitForPrompt(context.Background(), metadata.TmuxName, agyResumeReadinessTimeout); err != nil {
+		primaryErr := fmt.Errorf("AGY did not become ready after resume: %w", err)
+		if created {
+			return rollbackAgyAdapterSession(metadata.TmuxName, primaryErr)
+		}
+		return primaryErr
+	}
 	return nil
 }
 
