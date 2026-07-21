@@ -16,6 +16,8 @@
 
 **DOLTR-07** When AGM opens a persistent SQLite test store created before tmux ownership revisions existed, the adapter shall idempotently add the nullable revision column before lifecycle queries run and shall preserve every existing session row.
 
+**DOLTR-08** When an administrative hierarchy repair assigns a parent and optionally inherits its display name, the storage adapter shall atomically persist both changes only against the exact identity revision observed by the caller, advance that revision on success, preserve the tmux name and unrelated fields, and return an explicit conflict instead of silently accepting a stale identity writer.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`

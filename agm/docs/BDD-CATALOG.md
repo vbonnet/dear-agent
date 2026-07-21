@@ -286,6 +286,10 @@ creation, and terminal state detection.
   server-local ID plus random option marker so name or ID reuse cannot adopt a
   replacement. Lost storage responses first fence the observed revision with
   a competing compare-and-swap before the prior identity can authorize rollback.
+- Administrative parent-link and plan-session backfill repairs persist the
+  parent and optional inherited display name atomically through the exact
+  identity revision they read, advance that revision on success, and surface a
+  stale writer as a conflict instead of claiming an unapplied repair succeeded.
 - Once a transactional Codex resume prompt is submitted, later caller
   cancellation cannot report a retryable failure that would duplicate work.
 - Final creation liveness validation derives from the root context and rechecks

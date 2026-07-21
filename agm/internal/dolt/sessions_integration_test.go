@@ -147,4 +147,38 @@ func TestDoltTmuxSessionNameChangeUsesCrossDialectOwnership(t *testing.T) {
 	if renamed.Name != authoritativeName || renamed.Tmux.SessionName != authoritativeName || renamed.Context.Notes != renameConcurrent.Context.Notes || renamed.Tmux.SessionRevision == renameCurrent.Tmux.SessionRevision {
 		t.Fatalf("authoritative rename state = (name=%q tmux=%q notes=%q revision=%q), want atomic names, preserved note, and advanced revision", renamed.Name, renamed.Tmux.SessionName, renamed.Context.Notes, renamed.Tmux.SessionRevision)
 	}
+
+	parentID := sessionID + "-parent"
+	parent := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     parentID,
+		Name:          "integration-parent",
+		Workspace:     adapter.Workspace(),
+		Harness:       "codex-cli",
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+		Context:       manifest.Context{Project: t.TempDir()},
+		Tmux:          manifest.Tmux{SessionName: "integration-parent"},
+	}
+	if err := adapter.CreateSession(parent); err != nil {
+		t.Fatalf("CreateSession() parent: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.DeleteSession(parentID) })
+	inheritedName := parent.Name + "-exec"
+	if err := adapter.LinkSessionParent(t.Context(), sessionID, renamed.Tmux.SessionRevision, parentID, &inheritedName); err != nil {
+		t.Fatalf("LinkSessionParent() current revision: %v", err)
+	}
+	staleAfterLink := *renamed
+	staleAfterLink.Name = "stale-after-parent-link"
+	staleAfterLink.Context.Notes = "unrelated update after parent link"
+	if err := adapter.UpdateSession(&staleAfterLink); err != nil {
+		t.Fatalf("UpdateSession() stale after parent link: %v", err)
+	}
+	var linkedParentID, linkedName string
+	if err := adapter.Conn().QueryRowContext(t.Context(), `SELECT parent_session_id, name FROM agm_sessions WHERE id = ? AND workspace = ?`, sessionID, adapter.Workspace()).Scan(&linkedParentID, &linkedName); err != nil {
+		t.Fatalf("query linked production session: %v", err)
+	}
+	if linkedParentID != parentID || linkedName != inheritedName {
+		t.Fatalf("linked production identity = (parent=%q name=%q), want (%q, %q)", linkedParentID, linkedName, parentID, inheritedName)
+	}
 }

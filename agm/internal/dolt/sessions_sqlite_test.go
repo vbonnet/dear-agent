@@ -271,6 +271,89 @@ func TestSQLiteTouchSessionActivityPreservesProvisionalTmuxRevision(t *testing.T
 	}
 }
 
+func TestSQLiteLinkSessionParentUsesExplicitIdentityCAS(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+	createdAt := time.Now().UTC().Truncate(time.Second)
+	parent := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "parent-link-parent",
+		Name:          "planning-session",
+		Workspace:     adapter.Workspace(),
+		CreatedAt:     createdAt,
+		UpdatedAt:     createdAt,
+		Context:       manifest.Context{Project: t.TempDir()},
+		Tmux:          manifest.Tmux{SessionName: "planning-session"},
+	}
+	child := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "parent-link-child",
+		Name:          "Unknown",
+		Workspace:     adapter.Workspace(),
+		CreatedAt:     createdAt,
+		UpdatedAt:     createdAt,
+		Context:       manifest.Context{Project: t.TempDir()},
+		Tmux:          manifest.Tmux{SessionName: "child-tmux"},
+	}
+	for _, session := range []*manifest.Manifest{parent, child} {
+		if err := adapter.CreateSession(session); err != nil {
+			t.Fatalf("CreateSession(%s) error: %v", session.SessionID, err)
+		}
+	}
+	stale, err := adapter.GetSession(child.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() stale snapshot: %v", err)
+	}
+	current, err := adapter.GetSession(child.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() current snapshot: %v", err)
+	}
+	current.Context.Notes = "concurrent unrelated update"
+	if err := adapter.UpdateSession(current); err != nil {
+		t.Fatalf("UpdateSession() concurrent metadata: %v", err)
+	}
+	inheritedName := parent.Name + "-exec"
+	if err := adapter.LinkSessionParent(t.Context(), child.SessionID, stale.Tmux.SessionRevision, parent.SessionID, &inheritedName); err == nil {
+		t.Fatal("LinkSessionParent() from stale identity revision succeeded")
+	}
+	if got, err := adapter.GetParent(child.SessionID); err != nil || got != nil {
+		t.Fatalf("parent after rejected link = (%#v, %v), want (nil, nil)", got, err)
+	}
+
+	current, err = adapter.GetSession(child.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after rejected link: %v", err)
+	}
+	if err := adapter.LinkSessionParent(t.Context(), child.SessionID, current.Tmux.SessionRevision, parent.SessionID, &inheritedName); err != nil {
+		t.Fatalf("LinkSessionParent() current identity: %v", err)
+	}
+	var storedParentID, storedName, storedRevision string
+	if err := adapter.Conn().QueryRowContext(t.Context(), `SELECT parent_session_id, name, tmux_session_revision FROM agm_sessions WHERE id = ? AND workspace = ?`, child.SessionID, adapter.Workspace()).Scan(&storedParentID, &storedName, &storedRevision); err != nil {
+		t.Fatalf("query linked child: %v", err)
+	}
+	if storedParentID != parent.SessionID || storedName != inheritedName || storedRevision == "" || storedRevision == current.Tmux.SessionRevision {
+		t.Fatalf("linked child = (parent=%q name=%q revision=%q), want (%q, %q, advanced)", storedParentID, storedName, storedRevision, parent.SessionID, inheritedName)
+	}
+	if got, err := adapter.GetParent(child.SessionID); err != nil || got == nil || got.SessionID != parent.SessionID {
+		t.Fatalf("GetParent() after link = (%#v, %v), want %s", got, err, parent.SessionID)
+	}
+
+	stale.Name = "stale-name-writer"
+	stale.Context.Notes = "later stale metadata"
+	if err := adapter.UpdateSession(stale); err != nil {
+		t.Fatalf("UpdateSession() after link: %v", err)
+	}
+	if err := adapter.Conn().QueryRowContext(t.Context(), `SELECT parent_session_id, name FROM agm_sessions WHERE id = ? AND workspace = ?`, child.SessionID, adapter.Workspace()).Scan(&storedParentID, &storedName); err != nil {
+		t.Fatalf("query child after stale writer: %v", err)
+	}
+	if storedParentID != parent.SessionID || storedName != inheritedName {
+		t.Fatalf("stale writer changed linked identity = (parent=%q name=%q)", storedParentID, storedName)
+	}
+}
+
 func TestSQLiteRenameSessionIdentityRejectsStaleRevision(t *testing.T) {
 	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
 	if err != nil {

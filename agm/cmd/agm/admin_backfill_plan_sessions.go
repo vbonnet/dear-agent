@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -124,7 +125,7 @@ func runBackfillPlanSessions(cmd *cobra.Command, args []string) error {
 	fmt.Println(ui.Yellow("Applying changes..."))
 	fmt.Println()
 
-	successCount, failureCount := applyBackfillPairs(adapter, pairs)
+	successCount, failureCount := applyBackfillPairs(cmd.Context(), adapter, pairs)
 
 	fmt.Println()
 
@@ -153,6 +154,14 @@ type parentChildPair struct {
 	parent   backfillCandidate
 	child    backfillCandidate
 	timeDiff time.Duration
+}
+
+type sessionParentLinker interface {
+	LinkSessionParent(context.Context, string, string, string, *string) error
+}
+
+func persistSessionParentLink(ctx context.Context, linker sessionParentLinker, child *manifest.Manifest, parentID string, inheritedName *string) error {
+	return linker.LinkSessionParent(ctx, child.SessionID, child.Tmux.SessionRevision, parentID, inheritedName)
 }
 
 // findOrphanedPairs scans allSessions and returns parent/child candidate pairs
@@ -218,7 +227,7 @@ func findBestParent(child *manifest.Manifest, allSessions []*manifest.Manifest) 
 
 // applyBackfillPairs iterates the discovered pairs and updates each child
 // session in Dolt to point at its parent. Returns (successCount, failureCount).
-func applyBackfillPairs(adapter *dolt.Adapter, pairs []parentChildPair) (int, int) {
+func applyBackfillPairs(ctx context.Context, adapter *dolt.Adapter, pairs []parentChildPair) (int, int) {
 	successCount := 0
 	failureCount := 0
 	for i, pair := range pairs {
@@ -233,17 +242,16 @@ func applyBackfillPairs(adapter *dolt.Adapter, pairs []parentChildPair) (int, in
 		}
 
 		parentID := pair.parent.SessionID
-		child.ParentSessionID = &parentID
-		child.Name = pair.parent.Name + "-exec"
+		inheritedName := pair.parent.Name + "-exec"
 
-		if err := adapter.UpdateSession(child); err != nil {
+		if err := persistSessionParentLink(ctx, adapter, child, parentID, &inheritedName); err != nil {
 			fmt.Printf("  %s Failed to update session: %v\n", ui.Red("✗"), err)
 			failureCount++
 			continue
 		}
 
 		fmt.Printf("  %s Set parent_session_id = %s\n", ui.Green("✓"), pair.parent.SessionID[:8])
-		fmt.Printf("  %s Set name = '%s'\n", ui.Green("✓"), child.Name)
+		fmt.Printf("  %s Set name = '%s'\n", ui.Green("✓"), inheritedName)
 		successCount++
 	}
 	return successCount, failureCount
