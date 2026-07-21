@@ -247,8 +247,12 @@ creation, and terminal state detection.
   composer even while stale survey text remains in captured pane history;
   downstream state, direct-delivery, and idle predicates use the same
   last-marker rule.
-- The AGY adapter preserves known model provenance on cold resume and omits a
-  model override when an imported conversation's native selection is unknown.
+- The AGY adapter captures provider-native conversation identity before fresh
+  create succeeds, preserves known model provenance on cold resume, and omits
+  a model override when an imported conversation's native selection is unknown.
+- AGY adapter create and cold resume require native readiness, roll back tmux
+  sessions created by a failed operation, and use exact AGY process and native
+  transcript truth for status and history.
 - AGM runtime helper commands keep co-located SPEC coverage.
 - AGM backend implementations keep co-located SPEC coverage.
 - AGM cleanup and process support packages keep co-located SPEC coverage.
