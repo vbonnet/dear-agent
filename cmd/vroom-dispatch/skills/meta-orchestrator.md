@@ -30,7 +30,7 @@ maintain a second roadmap or decision ledger.
 2. Read the authoritative queue:
 
    ```bash
-   bd --db ~/beads/context-engine/.beads ready --json
+   bd --db ~/beads/context-engine/.beads --dolt-auto-commit on ready --json
    ```
 
 3. Inspect new or changed candidates. Prefer small, independently deliverable

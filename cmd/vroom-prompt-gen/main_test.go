@@ -179,6 +179,9 @@ func TestRenderPromptForRoute(t *testing.T) {
 			t.Fatalf("prompt missing %q:\n%s", want, got)
 		}
 	}
+	if !strings.Contains(got, "safe-push") || strings.Contains(got, "git push") {
+		t.Fatalf("prompt must require safe-push without raw git-push guidance:\n%s", got)
+	}
 }
 
 func TestExpandHome(t *testing.T) {

@@ -1,0 +1,55 @@
+# Exact policy debt, deliberately separate from the always-read repository
+# router. Each entry is bound to the SHA-256 fingerprint of its source line and
+# nearest non-empty neighbors, so moved or repurposed text becomes new debt.
+exclusions:
+  # The canonical policy must name the retired model to prohibit it. Exact
+  # excerpts keep that permanent negative-reference exception narrow.
+  - path: docs/policies/wayfinder-v2-canonical.ai.md
+    rule: wayfinder-v1
+    excerpt: "description: Wayfinder V2 (9 phases) is the only SDLC model. V1 (13 phases) is dead — do not use or extend it."
+    context: 6307ca979fd05ac3d55f230844badcddb77ad4d5f1be3f052bad213aab6373a1
+    count: 1
+    owner: wayfinder-policy
+    reason: normative prohibition names the retired model
+  - path: docs/policies/wayfinder-v2-canonical.ai.md
+    rule: wayfinder-v1
+    excerpt: "DESIGN, SPEC, PLAN, SETUP, BUILD (TDD loop), RETRO. V1's 13-phase model is retired."
+    context: c09c69659e94213e319825d0e17ffedb365ef8c4fb8017f09d9eac28688e6e30
+    count: 1
+    owner: wayfinder-policy
+    reason: normative prohibition names the retired model
+  - path: docs/policies/wayfinder-v2-canonical.ai.md
+    rule: wayfinder-v1
+    excerpt: "- Use or extend the Wayfinder V1 (13-phase) path."
+    context: c4c1904dfb17e5ba5b0f129f2166f55d3b5bd8deeb201c9eece98432437523b0
+    count: 1
+    owner: wayfinder-policy
+    reason: NEVER section names the retired model
+  - path: docs/policies/wayfinder-v2-canonical.ai.md
+    rule: wayfinder-v1
+    excerpt: "- Add new phase logic, validators, or defaults to V1."
+    context: 878bcecc79ee5d3efe71f80f844bb0cbb1397c1c0a96dc605a8d80d6cc0e07c1
+    count: 1
+    owner: wayfinder-policy
+    reason: NEVER section names the retired model
+  - path: docs/policies/wayfinder-v2-canonical.ai.md
+    rule: wayfinder-v1
+    excerpt: "- Leave code defaulting to V1 while calling V2 canonical."
+    context: 6286ed293512cb696d89cba0e55dc248b20c4ef06591364d34e785631b6c4310
+    count: 1
+    owner: wayfinder-policy
+    reason: NEVER section names the retired model
+  - path: docs/policies/wayfinder-v2-canonical.ai.md
+    rule: wayfinder-v1
+    excerpt: "- When you touch Wayfinder phase logic, make V2 the default and delete the V1"
+    context: 1cd9c73ea19cc1ea7b158f1380adea503d79625aff5cded968a9c694ad9dac6f
+    count: 1
+    owner: wayfinder-policy
+    reason: replacement instruction names the retired model
+  - path: docs/policies/wayfinder-v2-canonical.ai.md
+    rule: wayfinder-v1
+    excerpt: "Wayfinder gates PRs. V1/V2 ambiguity means the gate behaves unpredictably. There"
+    context: ec7c75275eb9c495500846faae33255a43474e3c2a40cfa5bc1bfeff97db3cda
+    count: 1
+    owner: wayfinder-policy
+    reason: invariant explanation names the retired model

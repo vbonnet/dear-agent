@@ -5,7 +5,7 @@ Overseer. Role files define only the work unique to that role.
 
 ## Sources of truth
 
-- **Work:** Beads, read with `bd --db ~/beads/context-engine/.beads`.
+- **Work:** Beads at `~/beads/context-engine/.beads`, read with `bd --db ~/beads/context-engine/.beads --dolt-auto-commit on <subcommand>`.
 - **Execution:** live AGM sessions and their health records.
 - **Delivery:** GitHub PR state, deployed-artifact state, and verification
   evidence recorded on the bead.
@@ -26,7 +26,7 @@ agm supervisor status
 agm -o json session health --all
 agm -o json scan --cross-check
 agm supervisor probe
-bd --db ~/beads/context-engine/.beads ready --json
+bd --db ~/beads/context-engine/.beads --dolt-auto-commit on ready --json
 ```
 
 The Orchestrator dispatches only through the typed direct dispatcher:
@@ -94,9 +94,9 @@ or ambiguous state.
 ## Shared constraints
 
 - Never write to `~/src/**`; use a worktree for repository changes.
-- Never use bare `bd`; always pass the canonical database path.
-- Never use raw `git push`, `gh pr merge`, `--force`, or `--no-verify`; use the
-  repository's safe wrappers.
+- Always pass the canonical database path to the Beads CLI.
+- Use `safe-push` and `safe-merge`; never pass force or verification-bypass
+  flags.
 - Never build JSON or JSONL with shell interpolation. Use typed Go commands and
   their structured output.
 - Do not use Python for repository automation.

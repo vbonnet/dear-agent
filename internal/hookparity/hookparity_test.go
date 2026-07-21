@@ -115,6 +115,51 @@ func TestHookManifestLocalScriptsExistAndAreExecutable(t *testing.T) {
 	}
 }
 
+func TestSpawnRoutingCreatesWorkersDetachedWithInitialPrompt(t *testing.T) {
+	root := repoRoot(t)
+	for _, script := range []string{
+		".claude/hooks/pretool-spawn-routing",
+		".codex/hooks/pretool-spawn-routing",
+		".agents/hooks/pretool-spawn-routing",
+		".opencode/hooks/pretool-spawn-routing",
+	} {
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(script)))
+		if err != nil {
+			t.Fatalf("read %s: %v", script, err)
+		}
+		guidance := string(data)
+		for _, required := range []string{"agm session new", "--detached", "--prompt-file <path>"} {
+			if !strings.Contains(guidance, required) {
+				t.Errorf("%s spawn guidance missing %q", script, required)
+			}
+		}
+		if strings.Contains(guidance, "agm send msg <name>") {
+			t.Errorf("%s retains the separate send sequence", script)
+		}
+	}
+}
+
+func TestPRGuardEscalationWorksOutsideAGM(t *testing.T) {
+	root := repoRoot(t)
+	for _, script := range []string{
+		".claude/hooks/pretool-pr-guard",
+		".codex/hooks/pretool-pr-guard",
+		".agents/hooks/pretool-pr-guard",
+		".opencode/hooks/pretool-pr-guard",
+	} {
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(script)))
+		if err != nil {
+			t.Fatalf("read %s: %v", script, err)
+		}
+		guidance := string(data)
+		for _, required := range []string{"agm escalate ask --session <registered-session>", "ask the current user directly"} {
+			if !strings.Contains(guidance, required) {
+				t.Errorf("%s escalation guidance missing %q", script, required)
+			}
+		}
+	}
+}
+
 func TestOpenCodeHookParserRegressions(t *testing.T) {
 	root := repoRoot(t)
 	tests := []struct {

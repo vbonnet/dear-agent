@@ -199,7 +199,7 @@ Bead %s (%s). %s
 - NEVER write to ~/src/** (read-only — use worktrees only)
 - NEVER use --no-verify or --force
 - NEVER run chezmoi apply
-- ALWAYS use `+"`GIT_TERMINAL_PROMPT=0 gtimeout 30`"+` for git push
+- ALWAYS publish with `+"`safe-push`"+`
 - %s
 - Do NOT run `+"`pkill -x gopls`"+`
 - STOP after the primary deliverable is done — write a bead note and stop
