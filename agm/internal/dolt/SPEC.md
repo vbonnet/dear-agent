@@ -12,9 +12,12 @@
 
 **DOLTR-05** When AGM creates a session with no model, the storage adapter shall apply the historical default only to Claude Code sessions and shall preserve unknown model provenance for every non-Claude harness.
 
+**DOLTR-06** When a resume transaction provisionally changes a tmux session name, the storage adapter shall compare-and-swap only the name and exact raw update revision, preserve unrelated columns, and restore only that same provisional revision so a newer concurrent update is never overwritten.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
+- Feature: `agm/test/bdd/features/harness_parity.feature`
 
 <!-- Last audited at: NEEDS-AUDIT -->
 

@@ -352,6 +352,103 @@ func (a *Adapter) UpdateTmuxSessionName(ctx context.Context, sessionID, sessionN
 	return nil
 }
 
+// TmuxSessionNameChange is the exact adapter-owned revision for a provisional
+// tmux-name write. Raw timestamp values are retained because SQLite time.Time
+// round trips can normalize offsets and are therefore unsafe compare tokens.
+type TmuxSessionNameChange struct {
+	SessionID            string
+	PreviousName         string
+	PreviousUpdatedAtRaw string
+	CurrentName          string
+	CurrentUpdatedAtRaw  string
+}
+
+// BeginTmuxSessionNameChange persists a provisional canonical tmux name while
+// preserving every unrelated column. The read and compare-and-swap run in one
+// database transaction, so a concurrent session update cannot be overwritten.
+// A nil change means the requested name was already current.
+func (a *Adapter) BeginTmuxSessionNameChange(ctx context.Context, sessionID, newName string) (*TmuxSessionNameChange, error) {
+	if sessionID == "" {
+		return nil, fmt.Errorf("session_id cannot be empty")
+	}
+	if newName == "" {
+		return nil, fmt.Errorf("tmux session name cannot be empty")
+	}
+	if err := a.ApplyMigrations(); err != nil {
+		return nil, fmt.Errorf("failed to apply migrations: %w", err)
+	}
+	tx, err := a.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin tmux session name change: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var previousName, previousUpdatedAtRaw string
+	if err := tx.QueryRowContext(ctx, `
+		SELECT tmux_session_name, CAST(updated_at AS TEXT)
+		FROM agm_sessions
+		WHERE id = ? AND workspace = ?
+	`, sessionID, a.workspace).Scan(&previousName, &previousUpdatedAtRaw); err != nil {
+		return nil, fmt.Errorf("read tmux session name revision: %w", err)
+	}
+	if previousName == newName {
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("commit unchanged tmux session name: %w", err)
+		}
+		return nil, nil
+	}
+	currentUpdatedAtRaw := time.Now().UTC().Format(time.RFC3339Nano)
+	if currentUpdatedAtRaw == previousUpdatedAtRaw {
+		currentUpdatedAtRaw = time.Now().UTC().Add(time.Nanosecond).Format(time.RFC3339Nano)
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE agm_sessions
+		SET updated_at = ?, tmux_session_name = ?
+		WHERE id = ? AND workspace = ?
+		  AND tmux_session_name = ? AND CAST(updated_at AS TEXT) = ?
+	`, currentUpdatedAtRaw, newName, sessionID, a.workspace, previousName, previousUpdatedAtRaw)
+	if err != nil {
+		return nil, fmt.Errorf("write provisional tmux session name: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("get provisional tmux name rows affected: %w", err)
+	}
+	if rowsAffected != 1 {
+		return nil, fmt.Errorf("session metadata changed concurrently")
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit provisional tmux session name: %w", err)
+	}
+	return &TmuxSessionNameChange{
+		SessionID:            sessionID,
+		PreviousName:         previousName,
+		PreviousUpdatedAtRaw: previousUpdatedAtRaw,
+		CurrentName:          newName,
+		CurrentUpdatedAtRaw:  currentUpdatedAtRaw,
+	}, nil
+}
+
+// RestoreTmuxSessionNameChange compensates only the exact provisional revision
+// returned by BeginTmuxSessionNameChange. If another operation changed the
+// session afterward, it returns false and preserves that newer state.
+func (a *Adapter) RestoreTmuxSessionNameChange(ctx context.Context, change TmuxSessionNameChange) (bool, error) {
+	result, err := a.conn.ExecContext(ctx, `
+		UPDATE agm_sessions
+		SET updated_at = ?, tmux_session_name = ?
+		WHERE id = ? AND workspace = ?
+		  AND tmux_session_name = ? AND CAST(updated_at AS TEXT) = ?
+	`, change.PreviousUpdatedAtRaw, change.PreviousName, change.SessionID, a.workspace, change.CurrentName, change.CurrentUpdatedAtRaw)
+	if err != nil {
+		return false, fmt.Errorf("restore provisional tmux session name: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("get restored tmux name rows affected: %w", err)
+	}
+	return rowsAffected == 1, nil
+}
+
 // DeleteSession deletes a session from the database
 func (a *Adapter) DeleteSession(sessionID string) error {
 	if sessionID == "" {

@@ -44,9 +44,9 @@ func TestResumeSessionStopsCancellationAfterManifestRead(t *testing.T) {
 					cancel()
 					return &manifest.Manifest{}, nil
 				},
-				newSession: func(string, string) error {
+				createTmux: func(string, string) (string, error) {
 					mutatedTmux = true
-					return nil
+					return "test-session-id", nil
 				},
 				attach: func(string) error {
 					mutatedTmux = true

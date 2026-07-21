@@ -57,6 +57,22 @@ func HasSessionStrict(name string) (bool, error) {
 	return false, tmuxCommandError("check session", normalizedName, output, err)
 }
 
+// HasSessionIDStrict checks an immutable tmux session identity without
+// allowing a same-named replacement to satisfy the lookup.
+func HasSessionIDStrict(sessionID string) (bool, error) {
+	if !IsSessionID(sessionID) {
+		return false, fmt.Errorf("invalid tmux session identity %q", sessionID)
+	}
+	output, err := RunWithTimeout(context.Background(), globalTimeout, "tmux", "-S", GetSocketPath(), "has-session", "-t", sessionID)
+	if err == nil {
+		return true, nil
+	}
+	if isMissingSessionOutput(output) {
+		return false, nil
+	}
+	return false, tmuxCommandError("check session identity", sessionID, output, err)
+}
+
 func isMissingSessionOutput(output []byte) bool {
 	return strings.Contains(strings.ToLower(string(output)), "can't find session")
 }
@@ -214,10 +230,24 @@ func EnableAutoRespawn(sessionName string) error {
 	return nil
 }
 
-// NewSession creates a new tmux session with optimized settings
+// NewSession creates a new tmux session with optimized settings.
 func NewSession(name string, workDir string) error {
+	_, err := NewSessionWithID(name, workDir)
+	return err
+}
+
+// NewSessionWithID creates a new tmux session and returns tmux's immutable
+// server-local session identity (for example, "$7"). Transactional callers
+// must retain this identity so later compensation cannot kill a different
+// session that reused the same human-readable name.
+//
+// If initialization fails after tmux created the session, the returned ID is
+// non-empty together with the error so the caller can still compensate the
+// exact resource it owns.
+func NewSessionWithID(name string, workDir string) (string, error) {
 	ctx := context.Background()
 	socketPath := GetSocketPath()
+	var sessionID string
 
 	// Sanitize session name (tmux only allows alphanumeric, dash, underscore)
 	sanitizedName := SanitizeSessionName(name)
@@ -228,15 +258,16 @@ func NewSession(name string, workDir string) error {
 
 	// Clean stale socket if exists
 	if err := CleanStaleSocket(); err != nil {
-		return fmt.Errorf("failed to clean stale socket: %w", err)
+		return "", fmt.Errorf("failed to clean stale socket: %w", err)
 	}
 
 	// Lock tmux server for session creation + settings (prevent parallel mutations)
 	err := withTmuxLock(func() error {
 		// Create session with detached mode (use sanitized name)
-		cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "new-session", "-d", "-s", sanitizedName, "-c", workDir)
+		cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "new-session", "-d", "-P", "-F", "#{session_id}", "-s", sanitizedName, "-c", workDir)
 		defer cancel()
-		if err := cmd.Run(); err != nil {
+		output, err := cmd.Output()
+		if err != nil {
 			// Check for timeout
 			if ctx.Err() == context.DeadlineExceeded {
 				return &TimeoutError{
@@ -246,6 +277,10 @@ func NewSession(name string, workDir string) error {
 				}
 			}
 			return fmt.Errorf("failed to create tmux session: %w", err)
+		}
+		sessionID = strings.TrimSpace(string(output))
+		if !IsSessionID(sessionID) {
+			return fmt.Errorf("tmux created session %q but returned invalid session identity %q", sanitizedName, sessionID)
 		}
 
 		// Inject tmux settings for better UX
@@ -318,7 +353,7 @@ func NewSession(name string, workDir string) error {
 		return nil
 	})
 	if err != nil {
-		return err
+		return sessionID, err
 	}
 
 	// Verify the pane actually landed in workDir and repair it if not.
@@ -326,7 +361,19 @@ func NewSession(name string, workDir string) error {
 	// been deleted, leaving the pane in a dead directory where harness CLIs
 	// die instantly (ce-5zbg). Must run outside withTmuxLock: the repair path
 	// sends a `cd` via SendCommand, which takes the lock itself.
-	return EnsureSessionWorkDir(sanitizedName, workDir)
+	if err := EnsureSessionWorkDir(sanitizedName, workDir); err != nil {
+		return sessionID, err
+	}
+	return sessionID, nil
+}
+
+// IsSessionID reports whether target is a tmux server-local session identity.
+func IsSessionID(target string) bool {
+	if len(target) < 2 || target[0] != '$' {
+		return false
+	}
+	_, err := strconv.ParseUint(target[1:], 10, 64)
+	return err == nil
 }
 
 // AttachSession attaches to tmux session or switches if already inside tmux

@@ -63,15 +63,19 @@ func setDetachedResumeTestGlobals(t *testing.T, detached bool) {
 func recordingResumeRuntime(calls *[]string) resumeSessionRuntime {
 	record := func(call string) { *calls = append(*calls, call) }
 	return resumeSessionRuntime{
-		createTmux: func(string, string) error { record("create"); return nil },
-		killTmux:   func(string) error { record("kill"); return nil },
+		createTmux: func(string, string) (string, error) { record("create"); return "test-session-id", nil },
+		killTmux:   func(createdResumeTmux) error { record("kill"); return nil },
 		dispatch: func(*dolt.Adapter, *manifest.Manifest, string, *HealthStatus) error {
 			record("dispatch")
 			return nil
 		},
 		wait: func(string, *HealthStatus) error { record("wait"); return nil },
-		persistTmuxName: func(context.Context, *dolt.Adapter, *manifest.Manifest, string) error {
+		persistTmuxName: func(context.Context, *dolt.Adapter, *manifest.Manifest, string) (resumeTmuxNameChange, error) {
 			record("persist")
+			return resumeTmuxNameChange{}, nil
+		},
+		restoreTmuxName: func(context.Context, *dolt.Adapter, *manifest.Manifest, resumeTmuxNameChange) error {
+			record("compensate")
 			return nil
 		},
 		restorePermission: func(string, *manifest.Manifest, *HealthStatus) {
@@ -94,7 +98,7 @@ func TestResumeSessionCodexCommitsEffectsOnlyAfterReadiness(t *testing.T) {
 	if err := resumeSessionWithRuntime(t.Context(), adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime); err != nil {
 		t.Fatalf("resumeSessionWithRuntime() error = %v", err)
 	}
-	want := []string{"create", "dispatch", "wait", "prompt", "restore", "update", "tab"}
+	want := []string{"create", "dispatch", "wait", "persist", "prompt", "restore", "update", "tab"}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("resume calls = %v, want %v", calls, want)
 	}
@@ -115,7 +119,7 @@ func TestResumeSessionClaudeRestoresSavedModeBeforePromptDelivery(t *testing.T) 
 	if err := resumeSessionWithRuntime(t.Context(), adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime); err != nil {
 		t.Fatalf("resumeSessionWithRuntime() error = %v", err)
 	}
-	want := []string{"create", "dispatch", "wait", "restore", "update", "tab", "prompt"}
+	want := []string{"create", "dispatch", "wait", "persist", "restore", "update", "tab", "prompt"}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("resume calls = %v, want %v", calls, want)
 	}
@@ -191,7 +195,7 @@ func TestResumeSessionCodexRollsBackWhenPromptDeliveryIsCanceled(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("resumeSessionWithRuntime() error = %v, want context.Canceled", err)
 	}
-	if want := []string{"create", "dispatch", "wait", "prompt", "kill"}; !reflect.DeepEqual(calls, want) {
+	if want := []string{"create", "dispatch", "wait", "persist", "prompt", "kill"}; !reflect.DeepEqual(calls, want) {
 		t.Fatalf("resume calls = %v, want %v", calls, want)
 	}
 	storedAfter, err := adapter.GetSession(m.SessionID)
@@ -203,6 +207,111 @@ func TestResumeSessionCodexRollsBackWhenPromptDeliveryIsCanceled(t *testing.T) {
 	}
 }
 
+func TestResumeSessionCodexCompensatesCanonicalNameWhenOrdinaryPromptDeliveryFails(t *testing.T) {
+	setDetachedResumeTestGlobals(t, true)
+	resumePrompt = "start work only after the resume transaction commits"
+	adapter, m, health := setupCodexResumeTransaction(t)
+	health.TmuxSessionName = "codex.resume:prompt-failure"
+	storedBefore, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() before resume error = %v", err)
+	}
+	wantErr := errors.New("tmux paste failed")
+	var calls []string
+	runtime := recordingResumeRuntime(&calls)
+	runtime.persistTmuxName = func(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest, name string) (resumeTmuxNameChange, error) {
+		calls = append(calls, "persist")
+		return persistResumeTmuxName(ctx, adapter, m, name)
+	}
+	runtime.restoreTmuxName = func(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest, change resumeTmuxNameChange) error {
+		calls = append(calls, "compensate")
+		return restoreResumeTmuxName(ctx, adapter, m, change)
+	}
+	runtime.deliverPrompt = func(string, string, string, bool) error {
+		calls = append(calls, "prompt")
+		return wantErr
+	}
+
+	err = resumeSessionWithRuntime(t.Context(), adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("resumeSessionWithRuntime() error = %v, want %v", err, wantErr)
+	}
+	wantCalls := []string{"create", "dispatch", "wait", "persist", "prompt", "kill", "compensate"}
+	if !reflect.DeepEqual(calls, wantCalls) {
+		t.Fatalf("resume calls = %v, want %v", calls, wantCalls)
+	}
+	storedAfter, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after resume error = %v", err)
+	}
+	if storedAfter.Tmux.SessionName != storedBefore.Tmux.SessionName || !storedAfter.UpdatedAt.Equal(storedBefore.UpdatedAt) {
+		t.Fatalf("failed prompt left provisional metadata: before=%#v after=%#v", storedBefore, storedAfter)
+	}
+}
+
+func TestResumeSessionCodexCompensationPreservesNewerMetadata(t *testing.T) {
+	setDetachedResumeTestGlobals(t, true)
+	resumePrompt = "start after durable identity"
+	adapter, m, health := setupCodexResumeTransaction(t)
+	health.TmuxSessionName = "codex.resume:newer-metadata"
+	wantErr := errors.New("prompt delivery failed")
+	var calls []string
+	runtime := recordingResumeRuntime(&calls)
+	runtime.persistTmuxName = func(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest, name string) (resumeTmuxNameChange, error) {
+		calls = append(calls, "persist")
+		return persistResumeTmuxName(ctx, adapter, m, name)
+	}
+	runtime.restoreTmuxName = restoreResumeTmuxName
+	runtime.deliverPrompt = func(string, string, string, bool) error {
+		calls = append(calls, "prompt")
+		latest, err := adapter.GetSession(m.SessionID)
+		if err != nil {
+			t.Fatalf("GetSession() during prompt error: %v", err)
+		}
+		latest.Context.Notes = "newer writer after provisional persistence"
+		if err := adapter.UpdateSession(latest); err != nil {
+			t.Fatalf("UpdateSession() during prompt error: %v", err)
+		}
+		return wantErr
+	}
+
+	err := resumeSessionWithRuntime(t.Context(), adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime)
+	if !errors.Is(err, wantErr) || err == nil || !strings.Contains(err.Error(), "metadata no longer matches") {
+		t.Fatalf("resumeSessionWithRuntime() error = %v, want joined prompt and compensation ownership failures", err)
+	}
+	stored, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after failed compensation error: %v", err)
+	}
+	if stored.Tmux.SessionName != tmux.SanitizeSessionName(health.TmuxSessionName) || stored.Context.Notes != "newer writer after provisional persistence" {
+		t.Fatalf("newer metadata was overwritten: name=%q notes=%q", stored.Tmux.SessionName, stored.Context.Notes)
+	}
+}
+
+func TestResumeSessionCodexRollsBackCreationFailureWhenTmuxReturnedIdentity(t *testing.T) {
+	setDetachedResumeTestGlobals(t, true)
+	adapter, m, health := setupCodexResumeTransaction(t)
+	wantErr := errors.New("workdir initialization failed")
+	var calls []string
+	runtime := recordingResumeRuntime(&calls)
+	runtime.createTmux = func(string, string) (string, error) {
+		calls = append(calls, "create")
+		return "$42", wantErr
+	}
+	runtime.killTmux = func(created createdResumeTmux) error {
+		calls = append(calls, "kill:"+created.ID)
+		return nil
+	}
+
+	err := resumeSessionWithRuntime(t.Context(), adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("resumeSessionWithRuntime() error = %v, want %v", err, wantErr)
+	}
+	if want := []string{"create", "kill:$42"}; !reflect.DeepEqual(calls, want) {
+		t.Fatalf("resume calls = %v, want %v", calls, want)
+	}
+}
+
 func TestResumeSessionCodexJoinsCleanupFailure(t *testing.T) {
 	setDetachedResumeTestGlobals(t, true)
 	adapter, m, health := setupCodexResumeTransaction(t)
@@ -211,7 +320,7 @@ func TestResumeSessionCodexJoinsCleanupFailure(t *testing.T) {
 	var calls []string
 	runtime := recordingResumeRuntime(&calls)
 	runtime.wait = func(string, *HealthStatus) error { return primaryErr }
-	runtime.killTmux = func(string) error { return cleanupErr }
+	runtime.killTmux = func(createdResumeTmux) error { return cleanupErr }
 
 	err := resumeSessionWithRuntime(t.Context(), adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime)
 	if !errors.Is(err, primaryErr) || !errors.Is(err, cleanupErr) {
@@ -226,17 +335,18 @@ func TestResumeSessionCodexRollbackUsesCreatedCanonicalTmuxName(t *testing.T) {
 	wantName := tmux.SanitizeSessionName(health.TmuxSessionName)
 	wantErr := errors.New("dispatch failed")
 	var calls []string
-	var createdName, killedName string
+	var createdName, killedName, killedID string
 	runtime := recordingResumeRuntime(&calls)
-	runtime.createTmux = func(name, _ string) error {
+	runtime.createTmux = func(name, _ string) (string, error) {
 		createdName = name
-		return nil
+		return "created-session-id", nil
 	}
 	runtime.dispatch = func(*dolt.Adapter, *manifest.Manifest, string, *HealthStatus) error {
 		return wantErr
 	}
-	runtime.killTmux = func(name string) error {
-		killedName = name
+	runtime.killTmux = func(created createdResumeTmux) error {
+		killedName = created.Name
+		killedID = created.ID
 		return nil
 	}
 
@@ -244,8 +354,8 @@ func TestResumeSessionCodexRollbackUsesCreatedCanonicalTmuxName(t *testing.T) {
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("resumeSessionWithRuntime() error = %v, want %v", err, wantErr)
 	}
-	if createdName != wantName || killedName != wantName || health.TmuxSessionName != wantName {
-		t.Fatalf("tmux names = create %q, kill %q, health %q; want %q", createdName, killedName, health.TmuxSessionName, wantName)
+	if createdName != wantName || killedName != wantName || killedID != "created-session-id" || health.TmuxSessionName != wantName {
+		t.Fatalf("tmux identity = create %q, kill %q (%s), health %q; want %q (created-session-id)", createdName, killedName, killedID, health.TmuxSessionName, wantName)
 	}
 }
 
@@ -256,7 +366,7 @@ func TestResumeSessionCodexPersistsCreatedCanonicalTmuxName(t *testing.T) {
 	wantName := tmux.SanitizeSessionName(health.TmuxSessionName)
 	var calls []string
 	runtime := recordingResumeRuntime(&calls)
-	runtime.persistTmuxName = func(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest, name string) error {
+	runtime.persistTmuxName = func(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest, name string) (resumeTmuxNameChange, error) {
 		calls = append(calls, "persist")
 		return persistResumeTmuxName(ctx, adapter, m, name)
 	}
@@ -295,7 +405,7 @@ func TestResumeSessionCodexTmuxPersistencePreservesConcurrentMetadata(t *testing
 		latest.Context.Notes = wantNotes
 		return adapter.UpdateSession(latest)
 	}
-	runtime.persistTmuxName = func(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest, name string) error {
+	runtime.persistTmuxName = func(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest, name string) (resumeTmuxNameChange, error) {
 		calls = append(calls, "persist")
 		return persistResumeTmuxName(ctx, adapter, m, name)
 	}
@@ -325,9 +435,9 @@ func TestResumeSessionCodexRollsBackWhenCanonicalNamePersistenceFails(t *testing
 	wantErr := errors.New("persist failed")
 	var calls []string
 	runtime := recordingResumeRuntime(&calls)
-	runtime.persistTmuxName = func(context.Context, *dolt.Adapter, *manifest.Manifest, string) error {
+	runtime.persistTmuxName = func(context.Context, *dolt.Adapter, *manifest.Manifest, string) (resumeTmuxNameChange, error) {
 		calls = append(calls, "persist")
-		return wantErr
+		return resumeTmuxNameChange{}, wantErr
 	}
 
 	err := resumeSessionWithRuntime(t.Context(), adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime)
@@ -346,11 +456,11 @@ func TestResumeSessionPreservesPreexistingTmuxOnLaterFailure(t *testing.T) {
 	attachErr := errors.New("attach failed")
 	var calls []string
 	runtime := recordingResumeRuntime(&calls)
-	runtime.createTmux = func(string, string) error {
+	runtime.createTmux = func(string, string) (string, error) {
 		t.Fatal("create called for pre-existing tmux session")
-		return nil
+		return "", nil
 	}
-	runtime.killTmux = func(string) error {
+	runtime.killTmux = func(createdResumeTmux) error {
 		t.Fatal("pre-existing tmux session was killed")
 		return nil
 	}
@@ -459,7 +569,7 @@ func TestResumeSessionCodexReadinessFailureRemovesIsolatedTmux(t *testing.T) {
 	wantErr := errors.New("fake Codex composer missing")
 	var calls []string
 	runtime := recordingResumeRuntime(&calls)
-	runtime.createTmux = tmux.NewSession
+	runtime.createTmux = tmux.NewSessionWithID
 	runtime.killTmux = killCreatedResumeTmux
 	runtime.wait = func(string, *HealthStatus) error { return wantErr }
 
@@ -489,7 +599,7 @@ func TestResumeSessionCodexRollbackReportsInaccessibleSocketAndPreservesHiddenTa
 	primaryErr := errors.New("fake Codex readiness failure")
 	var calls []string
 	runtime := recordingResumeRuntime(&calls)
-	runtime.createTmux = tmux.NewSession
+	runtime.createTmux = tmux.NewSessionWithID
 	runtime.killTmux = killCreatedResumeTmux
 	runtime.wait = func(string, *HealthStatus) error {
 		if err := os.Rename(socketPath, hiddenSocket); err != nil {
@@ -510,6 +620,38 @@ func TestResumeSessionCodexRollbackReportsInaccessibleSocketAndPreservesHiddenTa
 	}
 	if checkErr := exec.Command("tmux", "-S", hiddenSocket, "has-session", "-t", tmux.FormatSessionTarget(health.TmuxSessionName)).Run(); checkErr != nil {
 		t.Fatalf("hidden tmux target was not preserved for verification: %v", checkErr)
+	}
+}
+
+func TestKillCreatedResumeTmuxPreservesSameNamedReplacement(t *testing.T) {
+	requireCodexResumeTmuxIntegration(t)
+	setupRegressionSocket(t)
+	sessionName := "codex-resume-replacement"
+	originalID, err := tmux.NewSessionWithID(sessionName, t.TempDir())
+	if err != nil {
+		t.Fatalf("NewSessionWithID(original) error = %v", err)
+	}
+	if err := tmux.KillSessionIDChecked(originalID); err != nil {
+		t.Fatalf("KillSessionIDChecked(original) error = %v", err)
+	}
+	replacementID, err := tmux.NewSessionWithID(sessionName, t.TempDir())
+	if err != nil {
+		t.Fatalf("NewSessionWithID(replacement) error = %v", err)
+	}
+	t.Cleanup(func() { _ = tmux.KillSessionIDChecked(replacementID) })
+	if replacementID == originalID {
+		t.Fatalf("replacement reused immutable session identity %q", originalID)
+	}
+
+	if err := killCreatedResumeTmux(createdResumeTmux{Name: sessionName, ID: originalID}); err != nil {
+		t.Fatalf("killCreatedResumeTmux(stale identity) error = %v", err)
+	}
+	exists, err := tmux.HasSessionIDStrict(replacementID)
+	if err != nil {
+		t.Fatalf("HasSessionIDStrict(replacement) error = %v", err)
+	}
+	if !exists {
+		t.Fatalf("same-named replacement %s was killed while compensating %s", replacementID, originalID)
 	}
 }
 

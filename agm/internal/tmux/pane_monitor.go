@@ -175,6 +175,20 @@ func KillSessionChecked(sessionName string) error {
 	return tmuxCommandError("kill session", normalizedName, output, err)
 }
 
+// KillSessionIDChecked kills exactly the tmux session identified by the
+// server-local identity returned from NewSessionWithID. Unlike a name target,
+// this cannot select a replacement session that reused the original name.
+func KillSessionIDChecked(sessionID string) error {
+	if !IsSessionID(sessionID) {
+		return fmt.Errorf("invalid tmux session identity %q", sessionID)
+	}
+	output, err := RunWithTimeout(context.Background(), globalTimeout, "tmux", "-S", GetSocketPath(), "kill-session", "-t", sessionID)
+	if err == nil || isMissingSessionOutput(output) {
+		return nil
+	}
+	return tmuxCommandError("kill session identity", sessionID, output, err)
+}
+
 // IsPaneActive checks if a pane is currently active
 func IsPaneActive(sessionName string) (bool, error) {
 	socketPath := GetSocketPath()
