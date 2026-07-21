@@ -851,7 +851,7 @@ func WaitForProcessReadyContext(parent context.Context, sessionName, processName
 			}
 			return err
 		}
-		running, err := IsProcessRunningContext(ctx, sessionName, processName)
+		running, err := isProcessReadyContext(ctx, sessionName, processName)
 		if err != nil {
 			// Ignore transient errors (e.g., brief tmux unavailability)
 			if err := sleepWithContext(ctx, pollInterval); err != nil {
@@ -866,6 +866,40 @@ func WaitForProcessReadyContext(parent context.Context, sessionName, processName
 			continue
 		}
 	}
+}
+
+func isProcessReady(sessionName, processName string) (bool, error) {
+	return isProcessReadyWithRuntime(sessionName, processName, GetSocketPath(), IsProcessRunning, IsProcessInPaneTree)
+}
+
+func isProcessReadyContext(ctx context.Context, sessionName, processName string) (bool, error) {
+	isForeground := func(sessionName, processName string) (bool, error) {
+		return IsProcessRunningContext(ctx, sessionName, processName)
+	}
+	return isProcessReadyWithRuntime(sessionName, processName, GetSocketPath(), isForeground, IsProcessInPaneTree)
+}
+
+func isProcessReadyWithRuntime(
+	sessionName, processName, socketPath string,
+	isForeground func(string, string) (bool, error),
+	isInPaneTree func(string, string, string) bool,
+) (bool, error) {
+	running, err := isForeground(sessionName, processName)
+	if running {
+		return true, nil
+	}
+	if processName != "codex" {
+		return false, err
+	}
+
+	// Codex is commonly launched through a Node wrapper. tmux then reports
+	// "node" as the foreground command even though a healthy Codex harness is
+	// running. Use the shared full-descendant scan so both the native binary
+	// and its Node wrapper satisfy Codex readiness.
+	if isInPaneTree(sessionName, socketPath, "codex") || isInPaneTree(sessionName, socketPath, "node") {
+		return true, nil
+	}
+	return false, err
 }
 
 // GetCurrentWorkingDirectory returns the current working directory of the

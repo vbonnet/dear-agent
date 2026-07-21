@@ -432,6 +432,46 @@ func TestWaitForProcessReady(t *testing.T) {
 	assert.Contains(t, err.Error(), "timeout", "Error should mention timeout")
 }
 
+func TestIsProcessReadyWithRuntimeSupportsCodexNodeWrapper(t *testing.T) {
+	var treeChecks []string
+	running, err := isProcessReadyWithRuntime(
+		"codex-session",
+		"codex",
+		"/tmp/agm.sock",
+		func(sessionName, processName string) (bool, error) {
+			assert.Equal(t, "codex-session", sessionName)
+			assert.Equal(t, "codex", processName)
+			return false, nil
+		},
+		func(sessionName, socketPath, processName string) bool {
+			assert.Equal(t, "codex-session", sessionName)
+			assert.Equal(t, "/tmp/agm.sock", socketPath)
+			treeChecks = append(treeChecks, processName)
+			return processName == "node"
+		},
+	)
+	require.NoError(t, err)
+	assert.True(t, running, "Node-backed Codex should satisfy process readiness")
+	assert.Equal(t, []string{"codex", "node"}, treeChecks)
+}
+
+func TestIsProcessReadyWithRuntimeDoesNotBroadenOtherProcesses(t *testing.T) {
+	treeCalled := false
+	running, err := isProcessReadyWithRuntime(
+		"claude-session",
+		"claude",
+		"/tmp/agm.sock",
+		func(string, string) (bool, error) { return false, nil },
+		func(string, string, string) bool {
+			treeCalled = true
+			return true
+		},
+	)
+	require.NoError(t, err)
+	assert.False(t, running)
+	assert.False(t, treeCalled, "Codex-specific Node fallback must not change other process checks")
+}
+
 // TestIsClaudeProcess tests Claude Code process name detection.
 // Claude Code reports as its semver version string (e.g., "2.1.50") in tmux
 // rather than "claude", so we need to detect both patterns.

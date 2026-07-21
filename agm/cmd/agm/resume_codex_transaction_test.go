@@ -264,6 +264,7 @@ func TestResumeSessionCodexReadinessFailureRemovesIsolatedTmux(t *testing.T) {
 	setupRegressionSocket(t)
 	adapter, m, health := setupCodexResumeTransaction(t)
 	health.TmuxSessionName = "codex-resume-rollback"
+	t.Cleanup(func() { tmux.KillSession(health.TmuxSessionName) })
 	wantErr := errors.New("fake Codex composer missing")
 	var calls []string
 	runtime := recordingResumeRuntime(&calls)
