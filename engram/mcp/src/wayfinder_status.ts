@@ -1,4 +1,4 @@
-import { parseDocument } from 'yaml';
+import { isAlias, parseDocument, visit } from 'yaml';
 
 const WAYPOINTS = [
   'CHARTER',
@@ -460,6 +460,11 @@ export function parseWayfinderStatus(content: string): WayfinderStatusSummary {
   if (document.errors.length > 0) {
     throw new Error(`invalid Wayfinder V2 status: ${document.errors[0].message}`);
   }
+  visit(document, (_key, node) => {
+    if (isAlias(node)) {
+      throw new Error('invalid Wayfinder V2 status: YAML aliases are not allowed');
+    }
+  });
   const record = asRecord(document.toJS(), 'document');
   for (const key of Object.keys(record)) {
     if (!KNOWN_FIELDS.has(key)) {

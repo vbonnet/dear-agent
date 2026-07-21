@@ -67,6 +67,14 @@ describe('parseWayfinderStatus', () => {
     );
   });
 
+  it('rejects YAML aliases before resolving the document', () => {
+    const invalid = canonical.replace(
+      'skip_roadmap:',
+      'tags: &shared [release]\nbeads: *shared\nskip_roadmap:',
+    );
+    assert.throws(() => parseWayfinderStatus(invalid), /YAML aliases are not allowed/);
+  });
+
   it('rejects wrong types in optional waypoint history fields', () => {
     const invalid = canonical.replace('status: completed, started_at:', 'status: completed, deliverables: output.md, started_at:');
     assert.throws(() => parseWayfinderStatus(invalid), /deliverables must be a string array/);
