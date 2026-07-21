@@ -127,7 +127,7 @@ func TestDoltTmuxSessionNameChangeUsesCrossDialectOwnership(t *testing.T) {
 	if err := adapter.UpdateSession(renameConcurrent); err != nil {
 		t.Fatalf("UpdateSession() before authoritative rename: %v", err)
 	}
-	if err := adapter.RenameSessionIdentity(t.Context(), sessionID, renameStale.Name, renameStale.Tmux.SessionName, renameStale.Tmux.SessionRevision, sessionID+"-stale-rename"); err == nil {
+	if _, err := adapter.RenameSessionIdentity(t.Context(), sessionID, renameStale.Name, renameStale.Tmux.SessionName, renameStale.Tmux.SessionRevision, sessionID+"-stale-rename"); err == nil {
 		t.Fatal("RenameSessionIdentity() from stale revision succeeded")
 	}
 	renameCurrent, err := adapter.GetSession(sessionID)
@@ -135,7 +135,7 @@ func TestDoltTmuxSessionNameChangeUsesCrossDialectOwnership(t *testing.T) {
 		t.Fatalf("GetSession() after authoritative rename conflict: %v", err)
 	}
 	authoritativeName := sessionID + "-renamed"
-	if err := adapter.RenameSessionIdentity(t.Context(), sessionID, renameCurrent.Name, renameCurrent.Tmux.SessionName, renameCurrent.Tmux.SessionRevision, authoritativeName); err != nil {
+	if _, err := adapter.RenameSessionIdentity(t.Context(), sessionID, renameCurrent.Name, renameCurrent.Tmux.SessionName, renameCurrent.Tmux.SessionRevision, authoritativeName); err != nil {
 		t.Fatalf("RenameSessionIdentity() current revision: %v", err)
 	}
 	renamed, err := adapter.GetSession(sessionID)

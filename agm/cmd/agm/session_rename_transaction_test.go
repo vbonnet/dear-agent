@@ -6,22 +6,24 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
 type recordingSessionIdentityRenamer struct {
-	err   error
-	calls int
+	result dolt.RenameSessionIdentityResult
+	err    error
+	calls  int
 }
 
-func (r *recordingSessionIdentityRenamer) RenameSessionIdentity(context.Context, string, string, string, string, string) error {
+func (r *recordingSessionIdentityRenamer) RenameSessionIdentity(context.Context, string, string, string, string, string) (dolt.RenameSessionIdentityResult, error) {
 	r.calls++
-	return r.err
+	return r.result, r.err
 }
 
 func TestPersistRenamedSessionIdentityRollsBackTmuxAfterStorageConflict(t *testing.T) {
 	conflictErr := errors.New("session identity changed concurrently")
-	store := &recordingSessionIdentityRenamer{err: conflictErr}
+	store := &recordingSessionIdentityRenamer{result: dolt.RenameSessionIdentityResult{TmuxRollbackSafe: true}, err: conflictErr}
 	m := &manifest.Manifest{
 		SessionID: "stable-id",
 		Name:      "old-name",
@@ -47,7 +49,7 @@ func TestPersistRenamedSessionIdentityRollsBackTmuxAfterStorageConflict(t *testi
 }
 
 func TestPersistRenamedSessionIdentityJoinsTmuxRollbackFailure(t *testing.T) {
-	store := &recordingSessionIdentityRenamer{err: errors.New("storage conflict")}
+	store := &recordingSessionIdentityRenamer{result: dolt.RenameSessionIdentityResult{TmuxRollbackSafe: true}, err: errors.New("storage conflict")}
 	m := &manifest.Manifest{SessionID: "stable-id", Name: "old-name", Tmux: manifest.Tmux{SessionName: "old-tmux"}}
 	err := persistRenamedSessionIdentity(t.Context(), store, m, "new-name", true, func(context.Context, string, string) error {
 		return errors.New("tmux rollback failed")
@@ -58,7 +60,7 @@ func TestPersistRenamedSessionIdentityJoinsTmuxRollbackFailure(t *testing.T) {
 }
 
 func TestPersistRenamedSessionIdentityRollsBackAfterCallerCancellation(t *testing.T) {
-	store := &recordingSessionIdentityRenamer{err: context.Canceled}
+	store := &recordingSessionIdentityRenamer{result: dolt.RenameSessionIdentityResult{TmuxRollbackSafe: true}, err: context.Canceled}
 	m := &manifest.Manifest{SessionID: "stable-id", Name: "old-name", Tmux: manifest.Tmux{SessionName: "old-tmux"}}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -90,5 +92,43 @@ func TestPersistRenamedSessionIdentityMutatesManifestOnlyAfterStorageSuccess(t *
 	}
 	if m.Name != "new-name" || m.Tmux.SessionName != "new-name" {
 		t.Fatalf("manifest identity = (%q, %q), want new-name", m.Name, m.Tmux.SessionName)
+	}
+}
+
+func TestPersistRenamedSessionIdentityPreservesTmuxWhenStorageIsUncertain(t *testing.T) {
+	store := &recordingSessionIdentityRenamer{err: errors.New("storage outcome uncertain")}
+	m := &manifest.Manifest{SessionID: "stable-id", Name: "old-name", Tmux: manifest.Tmux{SessionName: "old-tmux"}}
+	err := persistRenamedSessionIdentity(t.Context(), store, m, "new-name", true, func(context.Context, string, string) error {
+		t.Fatal("tmux rollback called without proof that storage stayed unchanged")
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "rollback skipped") {
+		t.Fatalf("persistRenamedSessionIdentity() error = %v, want uncertain-storage preservation error", err)
+	}
+}
+
+func TestClassifyTmuxRenameAfterError(t *testing.T) {
+	primary := errors.New("tmux client lost reply")
+	tests := []struct {
+		name      string
+		sameName  bool
+		oldExists bool
+		newExists bool
+		wantMoved bool
+		wantError bool
+	}{
+		{name: "server applied rename", oldExists: false, newExists: true, wantMoved: true},
+		{name: "server did not apply rename", oldExists: true, newExists: false, wantError: true},
+		{name: "same normalized identity remains", sameName: true, oldExists: true, newExists: true, wantMoved: true},
+		{name: "both identities exist", oldExists: true, newExists: true, wantError: true},
+		{name: "neither identity is visible", oldExists: false, newExists: false, wantError: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := classifyTmuxRenameAfterError(tt.sameName, tt.oldExists, tt.newExists, primary)
+			if result.Moved != tt.wantMoved || (err != nil) != tt.wantError {
+				t.Fatalf("classifyTmuxRenameAfterError() = (moved=%v, err=%v), want (moved=%v, error=%v)", result.Moved, err, tt.wantMoved, tt.wantError)
+			}
+		})
 	}
 }

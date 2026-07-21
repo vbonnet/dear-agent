@@ -255,7 +255,8 @@ func TestSQLiteRenameSessionIdentityRejectsStaleRevision(t *testing.T) {
 	if err := adapter.UpdateSession(concurrent); err != nil {
 		t.Fatalf("UpdateSession() concurrent update error: %v", err)
 	}
-	if err := adapter.RenameSessionIdentity(t.Context(), stale.SessionID, stale.Name, stale.Tmux.SessionName, stale.Tmux.SessionRevision, "new-name"); err == nil || !strings.Contains(err.Error(), "changed concurrently") {
+	conflict, err := adapter.RenameSessionIdentity(t.Context(), stale.SessionID, stale.Name, stale.Tmux.SessionName, stale.Tmux.SessionRevision, "new-name")
+	if err == nil || !strings.Contains(err.Error(), "changed concurrently") || !conflict.TmuxRollbackSafe {
 		t.Fatalf("RenameSessionIdentity() stale error = %v, want explicit conflict", err)
 	}
 	current, err := adapter.GetSession(m.SessionID)
@@ -266,7 +267,7 @@ func TestSQLiteRenameSessionIdentityRejectsStaleRevision(t *testing.T) {
 		t.Fatalf("identity after conflict = (name=%q tmux=%q notes=%q), want unchanged identity plus concurrent note", current.Name, current.Tmux.SessionName, current.Context.Notes)
 	}
 	observedRevision := current.Tmux.SessionRevision
-	if err := adapter.RenameSessionIdentity(t.Context(), current.SessionID, current.Name, current.Tmux.SessionName, observedRevision, "new-name"); err != nil {
+	if _, err := adapter.RenameSessionIdentity(t.Context(), current.SessionID, current.Name, current.Tmux.SessionName, observedRevision, "new-name"); err != nil {
 		t.Fatalf("RenameSessionIdentity() current error: %v", err)
 	}
 	renamed, err := adapter.GetSession(m.SessionID)
@@ -275,6 +276,31 @@ func TestSQLiteRenameSessionIdentityRejectsStaleRevision(t *testing.T) {
 	}
 	if renamed.Name != "new-name" || renamed.Tmux.SessionName != "new-name" || renamed.Tmux.SessionRevision == "" || renamed.Tmux.SessionRevision == observedRevision || renamed.Context.Notes != concurrent.Context.Notes {
 		t.Fatalf("renamed identity = (name=%q tmux=%q revision=%q notes=%q), want atomic renamed identity, advanced revision, and preserved note", renamed.Name, renamed.Tmux.SessionName, renamed.Tmux.SessionRevision, renamed.Context.Notes)
+	}
+}
+
+func TestClassifySessionIdentityRenameAfterError(t *testing.T) {
+	primary := errors.New("autocommit reply lost")
+	tests := []struct {
+		name         string
+		currentName  string
+		currentTmux  string
+		currentRev   string
+		wantSuccess  bool
+		wantRollback bool
+	}{
+		{name: "exact generated revision committed", currentName: "new-name", currentTmux: "new-name", currentRev: "next-revision", wantSuccess: true},
+		{name: "later writer superseded committed revision", currentName: "new-name", currentTmux: "new-name", currentRev: "later-revision", wantSuccess: true},
+		{name: "previous identity proves rollback safe", currentName: "old-name", currentTmux: "old-tmux", currentRev: "later-unrelated-revision", wantRollback: true},
+		{name: "different identity makes rollback unsafe", currentName: "other-name", currentTmux: "other-tmux", currentRev: "other-revision"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := classifySessionIdentityRenameAfterError("old-name", "old-tmux", "new-name", "next-revision", tt.currentName, tt.currentTmux, tt.currentRev, primary)
+			if (err == nil) != tt.wantSuccess || result.TmuxRollbackSafe != tt.wantRollback {
+				t.Fatalf("classification = (result=%+v err=%v), want success=%v rollback=%v", result, err, tt.wantSuccess, tt.wantRollback)
+			}
+		})
 	}
 }
 

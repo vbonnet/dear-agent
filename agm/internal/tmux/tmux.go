@@ -46,7 +46,11 @@ func HasSession(name string) (bool, error) {
 // destructive-operation postconditions, where an inaccessible socket must not
 // be reported as proof that the target is gone.
 func HasSessionStrict(name string) (bool, error) {
-	ctx := context.Background()
+	return HasSessionStrictContext(context.Background(), name)
+}
+
+// HasSessionStrictContext is the context-aware form of HasSessionStrict.
+func HasSessionStrictContext(ctx context.Context, name string) (bool, error) {
 	socketPath := GetSocketPath()
 	normalizedName := NormalizeTmuxSessionName(name)
 	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "has-session", "-t", FormatSessionTarget(normalizedName))
