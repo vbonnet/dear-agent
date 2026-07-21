@@ -44,6 +44,7 @@ func preserveAgyAdapterSeams(t *testing.T) {
 	origNewSession := agyNewSession
 	origSendCommand := agySendCommand
 	origWaitForPrompt := agyWaitForPrompt
+	origWaitForResumePrompt := agyWaitForResumePrompt
 	origCheckProcess := agyCheckProcess
 	origCheckHarness := agyCheckHarness
 	origIsIdle := agyIsIdle
@@ -59,6 +60,7 @@ func preserveAgyAdapterSeams(t *testing.T) {
 		agyNewSession = origNewSession
 		agySendCommand = origSendCommand
 		agyWaitForPrompt = origWaitForPrompt
+		agyWaitForResumePrompt = origWaitForResumePrompt
 		agyCheckProcess = origCheckProcess
 		agyCheckHarness = origCheckHarness
 		agyIsIdle = origIsIdle
@@ -674,7 +676,7 @@ func TestAgyResumeSessionPreservesNativeIdentityModelAndMode(t *testing.T) {
 	}
 	var command string
 	agySendCommand = func(_ string, value string) error { command = value; return nil }
-	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return nil }
+	agyWaitForResumePrompt = func(context.Context, string, time.Duration) error { return nil }
 
 	adapter := &AgyAdapter{sessionStore: store}
 	if err := adapter.ResumeSession(sessionID); err != nil {
@@ -709,7 +711,7 @@ func TestAgyResumeSessionOmitsModelWhenProvenanceUnknown(t *testing.T) {
 	agyNewSession = func(string, string) error { return nil }
 	var command string
 	agySendCommand = func(_ string, value string) error { command = value; return nil }
-	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return nil }
+	agyWaitForResumePrompt = func(context.Context, string, time.Duration) error { return nil }
 
 	if err := (&AgyAdapter{sessionStore: store}).ResumeSession(sessionID); err != nil {
 		t.Fatalf("ResumeSession: %v", err)
@@ -865,7 +867,7 @@ func TestAgyResumeSessionRestartsInExistingBareShell(t *testing.T) {
 	}
 	command := ""
 	agySendCommand = func(_ string, value string) error { command = value; return nil }
-	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return nil }
+	agyWaitForResumePrompt = func(context.Context, string, time.Duration) error { return nil }
 
 	if err := (&AgyAdapter{sessionStore: store}).ResumeSession(sessionID); err != nil {
 		t.Fatalf("ResumeSession: %v", err)
@@ -907,7 +909,7 @@ func TestAgyResumeSessionHoldsWorkspaceLockThroughReadiness(t *testing.T) {
 		events = append(events, "send")
 		return nil
 	}
-	agyWaitForPrompt = func(context.Context, string, time.Duration) error {
+	agyWaitForResumePrompt = func(context.Context, string, time.Duration) error {
 		events = append(events, "ready")
 		return nil
 	}
@@ -949,7 +951,7 @@ func TestAgyResumeSessionSerializesPaneProofWithCommandDelivery(t *testing.T) {
 		running = true
 		return nil
 	}
-	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return nil }
+	agyWaitForResumePrompt = func(context.Context, string, time.Duration) error { return nil }
 
 	start := make(chan struct{})
 	errs := make(chan error, 2)
@@ -991,6 +993,41 @@ func TestAgyResumeSessionLeavesLiveAgyUntouched(t *testing.T) {
 	}
 }
 
+func TestAgyResumeSessionUsesTranscriptSafeReadinessPolicy(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	t.Setenv("TMUX", "fixture")
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	sessionID := SessionID("adapter-session")
+	if err := store.Set(sessionID, &SessionMetadata{
+		TmuxName: "agy-resume", WorkingDir: "/work", UUID: "native-id",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	agyHasSession = func(string) (bool, error) { return false, nil }
+	agyNewSession = func(string, string) error { return nil }
+	agySendCommand = func(string, string) error { return nil }
+	createWaitCalls := 0
+	agyWaitForPrompt = func(context.Context, string, time.Duration) error {
+		createWaitCalls++
+		return nil
+	}
+	resumeWaitCalls := 0
+	agyWaitForResumePrompt = func(_ context.Context, sessionName string, timeout time.Duration) error {
+		resumeWaitCalls++
+		if sessionName != "agy-resume" || timeout != agyResumeReadinessTimeout {
+			t.Fatalf("resume wait arguments = %q/%s, want agy-resume/%s", sessionName, timeout, agyResumeReadinessTimeout)
+		}
+		return nil
+	}
+
+	if err := (&AgyAdapter{sessionStore: store}).ResumeSession(sessionID); err != nil {
+		t.Fatalf("ResumeSession: %v", err)
+	}
+	if createWaitCalls != 0 || resumeWaitCalls != 1 {
+		t.Fatalf("adapter wait policy calls = create:%d resume:%d, want create:0 resume:1", createWaitCalls, resumeWaitCalls)
+	}
+}
+
 func TestAgyResumeSessionPropagatesReadinessFailureBeforeAttach(t *testing.T) {
 	preserveAgyAdapterSeams(t)
 	t.Setenv("TMUX", "")
@@ -1006,7 +1043,7 @@ func TestAgyResumeSessionPropagatesReadinessFailureBeforeAttach(t *testing.T) {
 	agySendCommand = func(string, string) error { return nil }
 	wantErr := errors.New("fixture readiness failed")
 	var readinessTimeout time.Duration
-	agyWaitForPrompt = func(_ context.Context, _ string, timeout time.Duration) error {
+	agyWaitForResumePrompt = func(_ context.Context, _ string, timeout time.Duration) error {
 		readinessTimeout = timeout
 		return wantErr
 	}
