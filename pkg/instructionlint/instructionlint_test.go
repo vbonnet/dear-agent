@@ -437,6 +437,19 @@ func TestScriptHeredocVisibilityHandlesQueuesArithmeticAndAttachedRedirects(t *t
 		"cat>attached-fixture <<'ATTACHED_FILE_ONLY'",
 		"safe-pr create --emergency --reason attached-redirect",
 		"ATTACHED_FILE_ONLY",
+		"cat \\",
+		"  <<'CONTINUED_HEREDOC'",
+		"gh pr close 876",
+		"CONTINUED_HEREDOC",
+		"cat >input-only-fixture <<'INPUT_ONLY_SUBSTITUTION'",
+		"git push origin input-only-substitution",
+		"INPUT_ONLY_SUBSTITUTION",
+		"message=$(<input-only-fixture)",
+		`printf '%s\n' "$message"`,
+		"{ exec 4>&1; }",
+		"cat >&4 <<'BRACE_EXEC_DESCRIPTOR'",
+		"bd ready",
+		"BRACE_EXEC_DESCRIPTOR",
 	}, "\n"))
 
 	var text []string
@@ -446,6 +459,9 @@ func TestScriptHeredocVisibilityHandlesQueuesArithmeticAndAttachedRedirects(t *t
 	for _, visible := range []string{
 		"gh pr merge 432",
 		"echo 'git push origin after-arithmetic'",
+		"gh pr close 876",
+		"git push origin input-only-substitution",
+		"bd ready",
 	} {
 		if !slices.Contains(text, visible) {
 			t.Errorf("visible line %q was hidden: %v", visible, text)

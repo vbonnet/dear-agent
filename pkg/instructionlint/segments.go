@@ -175,6 +175,15 @@ func parseScriptSegments(source []byte) []Segment {
 				delete(state.pendingHeredocs, path)
 			}
 		}
+		if state.visibleContinuation {
+			continued := state.continuedWith(value)
+			if heredocs := scriptHeredocSpecs(continued, state.descriptors); len(heredocs) > 0 {
+				state.heredocs = heredocs
+				state.visibleContinuation = false
+				state.continuedCommand = ""
+				continue
+			}
+		}
 		if include, handled := state.consumeOngoing(raw, value); handled {
 			if include {
 				segments = append(segments, Segment{Kind: SegmentShell, Line: line, Text: value})
@@ -207,6 +216,9 @@ func parseScriptSegments(source []byte) []Segment {
 				state.quote = commandQuote
 			} else {
 				state.visibleContinuation = hasShellLineContinuation(raw)
+				if state.visibleContinuation {
+					state.continuedCommand = stripShellLineContinuation(value)
+				}
 			}
 		}
 	}
@@ -222,6 +234,7 @@ type scriptParseState struct {
 	pendingHeredocs     map[string][]Segment
 	descriptors         map[int]scriptOutputDestination
 	visibleContinuation bool
+	continuedCommand    string
 	visibleHelpers      map[string]bool
 }
 
@@ -234,6 +247,9 @@ type scriptHeredoc struct {
 func (state *scriptParseState) updatePersistentDescriptors(value string) {
 	for _, command := range splitShellCommands(value) {
 		tokens := parseShellTokens(command)
+		for len(tokens) > 0 && tokens[0].text == "{" {
+			tokens = tokens[1:]
+		}
 		if len(tokens) == 0 || tokens[0].text != "exec" {
 			continue
 		}
@@ -243,11 +259,15 @@ func (state *scriptParseState) updatePersistentDescriptors(value string) {
 
 func (state *scriptParseState) consumeOngoing(raw, value string) (include, handled bool) {
 	if state.visibleContinuation {
+		state.continuedCommand = state.continuedWith(value)
 		if commandQuote := unclosedScriptQuote(value); commandQuote != 0 {
 			state.quote = commandQuote
 			state.visibleContinuation = false
 		} else {
 			state.visibleContinuation = hasShellLineContinuation(raw)
+		}
+		if !state.visibleContinuation {
+			state.continuedCommand = ""
 		}
 		return true, true
 	}
@@ -260,12 +280,23 @@ func (state *scriptParseState) consumeOngoing(raw, value string) (include, handl
 	return false, false
 }
 
+func (state *scriptParseState) continuedWith(value string) string {
+	return strings.TrimSpace(state.continuedCommand + " " + stripShellLineContinuation(value))
+}
+
 func hasShellLineContinuation(value string) bool {
 	backslashes := 0
 	for index := len(value) - 1; index >= 0 && value[index] == '\\'; index-- {
 		backslashes++
 	}
 	return backslashes%2 == 1
+}
+
+func stripShellLineContinuation(value string) string {
+	if hasShellLineContinuation(value) {
+		return strings.TrimSpace(value[:len(value)-1])
+	}
+	return strings.TrimSpace(value)
 }
 
 func agentVisibleScriptCommand(value string, helpers map[string]bool) bool {
@@ -876,7 +907,8 @@ func scriptCommandPrintsPath(command, path string, descriptors map[int]scriptOut
 		return false
 	}
 	for _, match := range shellCommandSubstitution.FindAllStringSubmatch(command, -1) {
-		if len(match) == 2 && scriptLinePrintsPath(match[1], path, descriptors) {
+		if len(match) == 2 && (scriptLinePrintsPath(match[1], path, descriptors) ||
+			scriptInputOnlySubstitutionReadsPath(match[1], path)) {
 			return true
 		}
 	}
@@ -897,6 +929,19 @@ func scriptCommandPrintsPath(command, path string, descriptors map[int]scriptOut
 		}
 	}
 	return false
+}
+
+func scriptInputOnlySubstitutionReadsPath(command, path string) bool {
+	fields := parseShellWords(strings.TrimSpace(command))
+	switch len(fields) {
+	case 1:
+		return strings.HasPrefix(fields[0], "<") &&
+			!strings.HasPrefix(fields[0], "<<") && sameScriptPath(strings.TrimPrefix(fields[0], "<"), path)
+	case 2:
+		return fields[0] == "<" && sameScriptPath(fields[1], path)
+	default:
+		return false
+	}
 }
 
 func sameScriptPath(left, right string) bool {
