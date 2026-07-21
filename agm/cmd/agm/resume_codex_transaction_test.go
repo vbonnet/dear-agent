@@ -99,6 +99,71 @@ func TestRestoreResumeTmuxNameTreatsSuccessfulSwapAsComplete(t *testing.T) {
 	}
 }
 
+func TestPersistResumeTmuxNameRetainsPendingChangeUntilReloadCompensationIsProven(t *testing.T) {
+	reloadErr := errors.New("reload failed")
+	restoreErr := errors.New("restore unavailable")
+	change := dolt.TmuxSessionNameChange{
+		SessionID:         "session-id",
+		PreviousName:      "historical-name",
+		PreviousUpdatedAt: time.Now().Add(-time.Hour).UTC().Truncate(time.Second),
+		CurrentName:       "canonical-name",
+		CurrentRevision:   "owned-revision",
+	}
+	tests := []struct {
+		name           string
+		restored       bool
+		restoreErr     error
+		wantPending    bool
+		wantRestoreErr bool
+	}{
+		{name: "restore error", restoreErr: restoreErr, wantPending: true, wantRestoreErr: true},
+		{name: "restore rejected", restored: false, wantPending: true},
+		{name: "restore proven", restored: true, wantPending: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &manifest.Manifest{SessionID: change.SessionID}
+			got, err := persistResumeTmuxNameWith(
+				t.Context(),
+				m,
+				change.CurrentName,
+				func(_ context.Context, sessionID, newName string) (*dolt.TmuxSessionNameChange, error) {
+					if sessionID != change.SessionID || newName != change.CurrentName {
+						t.Fatalf("begin args = (%q, %q)", sessionID, newName)
+					}
+					copy := change
+					return &copy, nil
+				},
+				func(sessionID string) (*manifest.Manifest, error) {
+					if sessionID != change.SessionID {
+						t.Fatalf("load session ID = %q, want %q", sessionID, change.SessionID)
+					}
+					return nil, reloadErr
+				},
+				func(_ context.Context, got dolt.TmuxSessionNameChange) (bool, error) {
+					if !reflect.DeepEqual(got, change) {
+						t.Fatalf("restore change = %#v, want %#v", got, change)
+					}
+					return tt.restored, tt.restoreErr
+				},
+			)
+			if !errors.Is(err, reloadErr) {
+				t.Fatalf("persistResumeTmuxNameWith() error = %v, want reload failure", err)
+			}
+			if tt.wantRestoreErr && !errors.Is(err, restoreErr) {
+				t.Fatalf("persistResumeTmuxNameWith() error = %v, want restore failure", err)
+			}
+			if got.Applied != tt.wantPending {
+				t.Fatalf("pending change = %#v, want Applied=%v", got, tt.wantPending)
+			}
+			if tt.wantPending && !reflect.DeepEqual(got.Change, change) {
+				t.Fatalf("pending change = %#v, want %#v", got.Change, change)
+			}
+		})
+	}
+}
+
 func TestResumeResolvedSessionAcquiresSessionLockBeforeReads(t *testing.T) {
 	wantErr := errors.New("lock unavailable")
 	lockCalls := 0
@@ -355,6 +420,43 @@ func TestResumeSessionCodexCompensationPreservesNewerMetadata(t *testing.T) {
 	wantCalls := []string{"create", "dispatch", "wait", "persist", "prompt", "compensate"}
 	if !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("resume calls = %v, want %v; superseded metadata must preserve tmux", calls, wantCalls)
+	}
+}
+
+func TestResumeSessionCodexPreservesTmuxWhenPersistenceCompensationIsUnproven(t *testing.T) {
+	setDetachedResumeTestGlobals(t, true)
+	adapter, m, health := setupCodexResumeTransaction(t)
+	reloadErr := errors.New("reload after provisional persistence failed")
+	ownershipErr := errors.New("metadata no longer matches this resume transaction")
+	var calls []string
+	runtime := recordingResumeRuntime(&calls)
+	change := resumeTmuxNameChange{
+		Applied: true,
+		Change: dolt.TmuxSessionNameChange{
+			SessionID:       m.SessionID,
+			CurrentName:     tmux.SanitizeSessionName(health.TmuxSessionName),
+			CurrentRevision: "owned-revision",
+		},
+	}
+	runtime.persistTmuxName = func(context.Context, *dolt.Adapter, *manifest.Manifest, string) (resumeTmuxNameChange, error) {
+		calls = append(calls, "persist")
+		return change, reloadErr
+	}
+	runtime.restoreTmuxName = func(context.Context, *dolt.Adapter, *manifest.Manifest, resumeTmuxNameChange) error {
+		calls = append(calls, "compensate")
+		return ownershipErr
+	}
+	runtime.killTmux = func(createdResumeTmux) error {
+		calls = append(calls, "kill")
+		return nil
+	}
+
+	err := resumeSessionWithRuntime(t.Context(), adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime)
+	if !errors.Is(err, reloadErr) || !errors.Is(err, ownershipErr) {
+		t.Fatalf("resumeSessionWithRuntime() error = %v, want joined reload and ownership failures", err)
+	}
+	if want := []string{"create", "dispatch", "wait", "persist", "compensate"}; !reflect.DeepEqual(calls, want) {
+		t.Fatalf("resume calls = %v, want %v; unproven compensation must preserve tmux", calls, want)
 	}
 }
 

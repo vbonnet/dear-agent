@@ -96,7 +96,10 @@ func IsCodexComposerReady(content string) bool {
 			continue
 		}
 		if i != len(lines)-1 {
-			return false
+			// The latest footer is stale, but a restarted Codex process may have
+			// rendered a newer initial composer below it. Let the initial-composer
+			// scan prove whether that newer structure owns the pane tail.
+			break
 		}
 		// The footer is ready only when paired with the nearby composer cursor.
 		// A working view has the same footer but a "Working" status line.

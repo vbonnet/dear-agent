@@ -294,7 +294,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^a stopped Codex CLI session without a tmux pane$`, aStoppedCodexCLISessionWithoutTmuxPane)
 	ctx.Step(`^AGM validates the Codex resume transaction$`, agmValidatesTheCodexResumeTransaction)
 	ctx.Step(`^Codex resume success should require process and composer readiness$`, codexResumeSuccessShouldRequireProcessAndComposerReadiness)
-	ctx.Step(`^a failed Codex resume should serialize concurrent attempts, compensate owned provisional metadata before removing its creation-specific tmux identity, and preserve tmux when ownership was superseded$`, aFailedCodexResumeShouldRemoveOnlyItsNewlyCreatedTmuxSession)
+	ctx.Step(`^a failed Codex resume should serialize concurrent attempts, compensate owned provisional metadata before removing its creation-specific tmux identity, and preserve tmux whenever metadata cleanup is unproven$`, aFailedCodexResumeShouldRemoveOnlyItsNewlyCreatedTmuxSession)
 	ctx.Step(`^Codex activity updates should follow resume readiness$`, codexActivityUpdatesShouldFollowResumeReadiness)
 }
 
@@ -326,7 +326,7 @@ func codexResumeSuccessShouldRequireProcessAndComposerReadiness(ctx context.Cont
 		testCtx,
 		"go", "test",
 		"./agm/cmd/agm", "./agm/internal/tmux", "./agm/internal/state",
-		"-run", `^(TestWaitForResumedCodexRequiresProcessAndComposer|TestWaitForCodexPromptRejectsEchoedLaunchModel|TestIsProcessReadyWithRuntimePreservesCancellation(Before|During)CodexFallback|TestDetector_CodexReadinessRequiresStructuredComposer)$`,
+		"-run", `^(TestWaitForResumedCodexRequiresProcessAndComposer|TestWaitForCodexPromptRejectsEchoedLaunchModel|TestIsCodexComposerReady|TestIsProcessReadyWithRuntimePreservesCancellation(Before|During)CodexFallback|TestDetector_CodexReadinessRequiresStructuredComposer)$`,
 		"-count=1",
 	)
 	cmd.Dir = bddRepoRoot()
@@ -343,7 +343,7 @@ func codexResumeSuccessShouldRequireProcessAndComposerReadiness(ctx context.Cont
 func aFailedCodexResumeShouldRemoveOnlyItsNewlyCreatedTmuxSession(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/dolt", "./agm/internal/ops", "./agm/internal/tmux", "-run", `^(TestRestoreResumeTmuxNameTreatsSuccessfulSwapAsComplete|TestResumeResolvedSessionAcquiresSessionLockBeforeReads|TestWithSessionLock_MutualExclusion|TestResumeSession(Codex(RollsBackNewTmuxBeforeActivityUpdate|JoinsCleanupFailure|RollbackUsesCreatedCanonicalTmuxName|PersistsCreatedCanonicalTmuxName|TmuxPersistencePreservesConcurrentMetadata|CompensatesCanonicalNameWhenOrdinaryPromptDeliveryFails|CompensationPreservesNewerMetadata|RollsBackCreationFailureWhenTmuxReturnedIdentity|RollsBackWhen(PromptDeliveryIsCanceled|CanonicalNamePersistenceFails)|ReadinessFailureRemovesIsolatedTmux|RollbackReportsInaccessibleSocketAndPreservesHiddenTarget)|PreservesPreexistingTmuxOnLaterFailure)|TestKillCreatedResumeTmuxPreserves(SameNamedReplacement|IDReusedAfterServerRestart)|TestNewSessionWithIdentityReturnsIDWhenQueuedInitializationFails|TestSQLite(AdapterUpgradesLegacySessionRevisionColumn|TmuxSessionName(ChangeOwnsAndRestoresExactWrite|CompensationRejectsNewerMetadata|ChangeCompletesOwnershipToken))|TestMigration018AddsTmuxSessionRevision)$`, "-count=1")
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/dolt", "./agm/internal/ops", "./agm/internal/tmux", "-run", `^(TestPersistResumeTmuxNameRetainsPendingChangeUntilReloadCompensationIsProven|TestRestoreResumeTmuxNameTreatsSuccessfulSwapAsComplete|TestResumeResolvedSessionAcquiresSessionLockBeforeReads|TestWithSessionLock_MutualExclusion|TestResumeSession(Codex(RollsBackNewTmuxBeforeActivityUpdate|JoinsCleanupFailure|RollbackUsesCreatedCanonicalTmuxName|PersistsCreatedCanonicalTmuxName|TmuxPersistencePreservesConcurrentMetadata|CompensatesCanonicalNameWhenOrdinaryPromptDeliveryFails|CompensationPreservesNewerMetadata|PreservesTmuxWhenPersistenceCompensationIsUnproven|RollsBackCreationFailureWhenTmuxReturnedIdentity|RollsBackWhen(PromptDeliveryIsCanceled|CanonicalNamePersistenceFails)|ReadinessFailureRemovesIsolatedTmux|RollbackReportsInaccessibleSocketAndPreservesHiddenTarget)|PreservesPreexistingTmuxOnLaterFailure)|TestKillCreatedResumeTmuxPreserves(SameNamedReplacement|IDReusedAfterServerRestart)|TestNewSessionWithIdentityReturnsIDWhenQueuedInitializationFails|TestSQLite(AdapterUpgradesLegacySessionRevisionColumn|TmuxSessionName(ChangeOwnsAndRestoresExactWrite|CompensationRejectsNewerMetadata|ChangeCompletesOwnershipToken))|TestMigration018AddsTmuxSessionRevision)$`, "-count=1")
 	cmd.Dir = bddRepoRoot()
 	output, err := cmd.CombinedOutput()
 	if testCtx.Err() != nil {

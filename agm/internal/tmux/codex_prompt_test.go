@@ -59,6 +59,11 @@ func TestIsCodexComposerReady(t *testing.T) {
 			expected: false,
 		},
 		{
+			name:     "new initial composer supersedes stale post-turn footer",
+			content:  "› Previous turn\n  gpt-5.6 xhigh · ~/src/project\n│ >_ OpenAI Codex (v0.142.0) │\n│ model: gpt-5.6 xhigh /model to change │\n╰──────────────────────────────╯\n›",
+			expected: true,
+		},
+		{
 			name:     "working footer is not ready",
 			content:  "• Working (3s • esc to interrupt)\n  gpt-5.6 xhigh · ~/src/project",
 			expected: false,

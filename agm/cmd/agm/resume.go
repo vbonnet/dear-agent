@@ -653,22 +653,34 @@ func rollbackCreatedResumeTmux(ctx context.Context, runtime resumeSessionRuntime
 }
 
 func persistResumeTmuxName(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest, sessionName string) (resumeTmuxNameChange, error) {
-	change, err := adapter.BeginTmuxSessionNameChange(ctx, m.SessionID, sessionName)
+	return persistResumeTmuxNameWith(ctx, m, sessionName, adapter.BeginTmuxSessionNameChange, adapter.GetSession, adapter.RestoreTmuxSessionNameChange)
+}
+
+func persistResumeTmuxNameWith(
+	ctx context.Context,
+	m *manifest.Manifest,
+	sessionName string,
+	begin func(context.Context, string, string) (*dolt.TmuxSessionNameChange, error),
+	load func(string) (*manifest.Manifest, error),
+	restore func(context.Context, dolt.TmuxSessionNameChange) (bool, error),
+) (resumeTmuxNameChange, error) {
+	change, err := begin(ctx, m.SessionID, sessionName)
 	if err != nil {
 		return resumeTmuxNameChange{}, fmt.Errorf("persist canonical tmux session name %q: %w", sessionName, err)
 	}
-	latest, err := adapter.GetSession(m.SessionID)
+	latest, err := load(m.SessionID)
 	if err != nil {
 		reloadErr := fmt.Errorf("reload session after canonical tmux-name persistence: %w", err)
 		if change != nil {
+			pending := resumeTmuxNameChange{Applied: true, Change: *change}
 			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer cancel()
-			restored, restoreErr := adapter.RestoreTmuxSessionNameChange(cleanupCtx, *change)
+			restored, restoreErr := restore(cleanupCtx, *change)
 			if restoreErr != nil {
-				return resumeTmuxNameChange{}, errors.Join(reloadErr, fmt.Errorf("compensate tmux-name persistence after reload failure: %w", restoreErr))
+				return pending, errors.Join(reloadErr, fmt.Errorf("compensate tmux-name persistence after reload failure: %w", restoreErr))
 			}
 			if !restored {
-				return resumeTmuxNameChange{}, errors.Join(reloadErr, fmt.Errorf("compensate tmux-name persistence after reload failure: session metadata no longer matches this resume transaction"))
+				return pending, errors.Join(reloadErr, fmt.Errorf("compensate tmux-name persistence after reload failure: session metadata no longer matches this resume transaction"))
 			}
 		}
 		return resumeTmuxNameChange{}, reloadErr
@@ -743,7 +755,7 @@ func resumeSessionWithRuntime(ctx context.Context, adapter *dolt.Adapter, sessio
 	if createdTmux.owned() {
 		nameChange, err = persistCreatedResumeTmuxName(ctx, runtime, adapter, m, health)
 		if err != nil {
-			return rollbackCreatedResumeTmux(ctx, runtime, adapter, m, createdTmux, resumeTmuxNameChange{}, err)
+			return rollbackCreatedResumeTmux(ctx, runtime, adapter, m, createdTmux, nameChange, err)
 		}
 	}
 	transactionalPrompt := agent.NormalizeHarnessName(harnessName) == "codex-cli"

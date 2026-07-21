@@ -66,8 +66,10 @@ header with `/model to change`, or a post-turn input cursor paired with the
 structured `gpt-* · <workdir>` footer—delivery is `YES` and AGM sends directly
 to the tmux pane. Those markers must own the current pane tail: if newer shell
 or process-exit output follows them, the stale composer is not sendable. A
-model name in an echoed launch command or beside a `Working` status is not a
-composer and remains queued.
+new initial composer rendered after stale post-turn footer history is still
+sendable when that newer complete structure owns the pane tail. A model name in
+an echoed launch command or beside a `Working` status is not a composer and
+remains queued.
 
 Codex menus and trust prompts are not idle composers. They remain queued or
 blocked rather than receiving injected prompt text.
@@ -93,7 +95,10 @@ ordinary prompt-delivery failures. Failed cold resumes remove only the session
 whose ID and either creation marker match, including across tmux server restarts; a
 same-named or ID-reusing replacement is preserved. A provisional name write is
 restored only when no newer session metadata has superseded it, and its
-ownership revision is released after prompt delivery succeeds.
+ownership revision is released after prompt delivery succeeds. If the
+post-write metadata reload fails, rollback retains that pending revision until
+compensation is proven; it preserves the pane when storage cannot prove that
+metadata stopped referencing the new tmux identity.
 
 For sessions with persisted Codex metadata, AGM resumes the matching Codex
 thread with `codex resume --remote unix:// <codex-thread-id>`. Older imported

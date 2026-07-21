@@ -216,6 +216,8 @@ creation, and terminal state detection.
 - A Codex CLI composer pane is detected as `ready`.
 - An idle Codex composer allows direct delivery.
 - A stale Codex composer followed by newer shell output remains queued.
+- A newer tail-owned initial composer remains ready after stale post-turn
+  footer history from a prior Codex process.
 - A Codex trust prompt is queued rather than treated as a sendable prompt.
 - The top-level new command routes in-tmux, non-detached Codex creation into
   the current pane, validates credentials and the executable, and queues the
@@ -251,7 +253,8 @@ creation, and terminal state detection.
   optional prompt submission; treats ordinary prompt failures
   as transactional failures, compensates owned metadata before removing those
   exact identities, and preserves the ready tmux session when a concurrent
-  writer supersedes metadata ownership. It also avoids killing a same-named or
+  writer supersedes metadata ownership or a post-write reload leaves
+  compensation unproven. It also avoids killing a same-named or
   server-restart replacement. Reopening a
   persistent pre-revision SQLite test store upgrades its schema idempotently
   while preserving existing sessions before those lifecycle mutations run;
