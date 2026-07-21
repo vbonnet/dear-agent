@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+const worktreeTestHelperStartTimeout = 10 * time.Second
+
 func initLinkedWorktree(t *testing.T) (string, string) {
 	t.Helper()
 	base := t.TempDir()
@@ -342,7 +344,7 @@ func TestWorktreeTransactionHelper(t *testing.T) {
 	worktree := os.Getenv("SAFEPR_TRANSACTION_WORKTREE")
 	marker := os.Getenv("SAFEPR_TRANSACTION_MARKER")
 	if err := WithWorktreeTransaction(worktree, "parent-death helper", func(transaction *WorktreeTransaction) error {
-		cmd := exec.Command("sh", "-c", `touch "$SAFEPR_TRANSACTION_MARKER"; sleep 2`)
+		cmd := exec.Command("sh", "-c", `touch "$SAFEPR_TRANSACTION_MARKER"; while [ ! -e "$SAFEPR_TRANSACTION_RELEASE" ]; do sleep 0.01; done`)
 		cmd.Env = os.Environ()
 		if err := transaction.ProtectCommand(cmd); err != nil {
 			return err
@@ -360,23 +362,26 @@ func TestWorktreeTransactionLockOutlivesKilledParentForProtectedChild(t *testing
 		t.Fatal(err)
 	}
 	marker := filepath.Join(t.TempDir(), "child-started")
+	release := filepath.Join(t.TempDir(), "release-child")
 	helper := exec.Command(os.Args[0], "-test.run=^TestWorktreeTransactionHelper$")
 	helper.Env = append(os.Environ(),
 		"SAFEPR_TRANSACTION_HELPER=1",
 		"SAFEPR_TRANSACTION_WORKTREE="+worktree,
 		"SAFEPR_TRANSACTION_MARKER="+marker,
+		"SAFEPR_TRANSACTION_RELEASE="+release,
 	)
 	if err := helper.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
+		_ = os.WriteFile(release, nil, 0o600)
 		if helper.ProcessState == nil {
 			_ = helper.Process.Kill()
 			_ = helper.Wait()
 		}
 	})
 
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(worktreeTestHelperStartTimeout)
 	for {
 		if _, err := os.Stat(marker); err == nil {
 			break
@@ -408,6 +413,9 @@ func TestWorktreeTransactionLockOutlivesKilledParentForProtectedChild(t *testing
 	}
 	if entered {
 		t.Fatal("replacement entered while killed parent child retained transaction")
+	}
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
 	}
 
 	releaseDeadline := time.Now().Add(4 * time.Second)
@@ -463,8 +471,9 @@ func TestWorktreeTransactionLockOutlivesKilledParentForGitHelper(t *testing.T) {
 	gitDir := t.TempDir()
 	binDir := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "git-helper-started")
+	release := filepath.Join(t.TempDir(), "release-git-helper")
 	fakeGit := filepath.Join(binDir, "git")
-	if err := os.WriteFile(fakeGit, []byte("#!/bin/sh\n: > \"$SAFEPR_GIT_HELPER_MARKER\"\nsleep 2\n"), 0o700); err != nil {
+	if err := os.WriteFile(fakeGit, []byte("#!/bin/sh\n: > \"$SAFEPR_GIT_HELPER_MARKER\"\nwhile [ ! -e \"$SAFEPR_GIT_HELPER_RELEASE\" ]; do sleep 0.01; done\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -473,19 +482,21 @@ func TestWorktreeTransactionLockOutlivesKilledParentForGitHelper(t *testing.T) {
 		"SAFEPR_GIT_TRANSACTION_HELPER=1",
 		"SAFEPR_GIT_TRANSACTION_DIR="+gitDir,
 		"SAFEPR_GIT_HELPER_MARKER="+marker,
+		"SAFEPR_GIT_HELPER_RELEASE="+release,
 		"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)
 	if err := helper.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
+		_ = os.WriteFile(release, nil, 0o600)
 		if helper.ProcessState == nil {
 			_ = helper.Process.Kill()
 			_ = helper.Wait()
 		}
 	})
 
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(worktreeTestHelperStartTimeout)
 	for {
 		if _, err := os.Stat(marker); err == nil {
 			break
@@ -510,6 +521,9 @@ func TestWorktreeTransactionLockOutlivesKilledParentForGitHelper(t *testing.T) {
 	}
 	if entered {
 		t.Fatal("replacement entered while killed parent's Git helper retained the transaction")
+	}
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
 	}
 
 	releaseDeadline := time.Now().Add(4 * time.Second)
