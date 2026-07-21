@@ -3,33 +3,55 @@ package steps
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/cucumber/godog"
+	"github.com/vbonnet/dear-agent/agm/internal/procguard"
 	"github.com/vbonnet/dear-agent/internal/safepr"
+	wayfindersandbox "github.com/vbonnet/dear-agent/wayfinder/pkg/sandbox"
 )
 
 type localDevGuardrailState struct {
-	command             string
-	commandSpec         string
-	library             string
-	librarySpec         string
-	traceDir            string
-	trace               safepr.Session
-	harness             string
-	family              string
-	preflightMinutes    int
-	localTestTimeout    string
-	affectedTestTimeout string
-	ciTestTimeout       string
-	localVulnAllowlist  []string
-	ciVulnAllowlist     []string
+	command              string
+	commandSpec          string
+	library              string
+	librarySpec          string
+	traceDir             string
+	trace                safepr.Session
+	harness              string
+	family               string
+	preflightMinutes     int
+	localTestTimeout     string
+	affectedTestTimeout  string
+	ciTestTimeout        string
+	localVulnAllowlist   []string
+	ciVulnAllowlist      []string
+	worktreeBase         string
+	worktreeRepo         string
+	worktreePath         string
+	initialLockReason    string
+	transactionOutcome   string
+	transactionErr       error
+	lockedInPreflight    bool
+	lockedInPRCreate     bool
+	wayfinderCleanupErr  error
+	worktreePreserved    bool
+	cleanupRegression    string
+	cleanupRegressionErr error
+	childRegression      string
+	childRegressionErr   error
+	auditRegression      string
+	auditRegressionErr   error
 }
 
 type localDevGuardrailStateKey struct{}
@@ -44,6 +66,11 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 		if err == nil && state.traceDir != "" {
 			if removeErr := os.RemoveAll(state.traceDir); removeErr != nil && scenarioErr == nil {
 				return ctx, fmt.Errorf("remove canonical trace directory: %w", removeErr)
+			}
+		}
+		if err == nil && state.worktreeBase != "" {
+			if cleanupErr := cleanupSafePRBDDWorktree(state); cleanupErr != nil && scenarioErr == nil {
+				return ctx, cleanupErr
 			}
 		}
 		return ctx, nil
@@ -61,12 +88,393 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the safe-pr full preflight timeout is configured$`, safePRFullPreflightTimeoutIsConfigured)
 	ctx.Step(`^AGM validates the safe-pr preflight budget$`, agmValidatesSafePRPreflightBudget)
 	ctx.Step(`^safe-pr should allow at least (\d+) minutes for preflight-full$`, safePRShouldAllowAtLeastMinutesForPreflightFull)
+	ctx.Step(`^a safe-pr linked worktree with "([^"]*)" lock ownership$`, safePRLinkedWorktreeWithLockOwnership)
+	ctx.Step(`^safe-pr protects a "([^"]*)" preflight and PR creation transaction$`, safePRProtectsTransaction)
+	ctx.Step(`^the worktree should be protected during preflight and PR creation$`, worktreeShouldBeProtectedDuringTransaction)
+	ctx.Step(`^the "([^"]*)" lock ownership should remain after the transaction$`, lockOwnershipShouldRemainAfterTransaction)
+	ctx.Step(`^Wayfinder cleanup overlaps a protected safe-pr transaction$`, wayfinderCleanupOverlapsProtectedTransaction)
+	ctx.Step(`^Wayfinder should preserve the protected worktree and reject cleanup$`, wayfinderShouldPreserveProtectedWorktree)
+	ctx.Step(`^Wayfinder should remove the worktree after the safe-pr transaction$`, wayfinderShouldRemoveWorktreeAfterTransaction)
+	ctx.Step(`^AGM runs the protected cleanup regressions$`, agmRunsProtectedCleanupRegressions)
+	ctx.Step(`^Wayfinder and AGM cleanup should preserve Git-locked checkouts$`, cleanupShouldPreserveGitLockedCheckouts)
+	ctx.Step(`^AGM runs the protected repository cleanup regression$`, agmRunsProtectedRepositoryCleanupRegression)
+	ctx.Step(`^repository cleanup should preserve the worktree and its branches$`, repositoryCleanupShouldPreserveWorktreeAndBranches)
+	ctx.Step(`^AGM runs the safe-pr abrupt-parent regression$`, agmRunsSafePRAbruptParentRegression)
+	ctx.Step(`^the child should retain transaction ownership until it exits$`, childShouldRetainTransactionOwnershipUntilExit)
+	ctx.Step(`^AGM runs the safe-pr final transaction audit regression$`, agmRunsSafePRFinalTransactionAuditRegression)
+	ctx.Step(`^each safe-pr transaction should have one accurate audit record$`, eachSafePRTransactionShouldHaveOneAccurateAuditRecord)
 	ctx.Step(`^local, affected integration, and required CI Go test timeouts are configured$`, repositoryGoTestTimeoutsAreConfigured)
 	ctx.Step(`^AGM validates Go test timeout parity$`, agmValidatesGoTestTimeoutParity)
 	ctx.Step(`^all repository Go test timeouts should match$`, repositoryGoTestTimeoutsShouldMatch)
 	ctx.Step(`^local and required CI govulncheck allowlists are configured$`, localAndRequiredCIGovulncheckAllowlistsAreConfigured)
 	ctx.Step(`^AGM validates govulncheck policy parity$`, agmValidatesGovulncheckPolicyParity)
 	ctx.Step(`^the local and required CI govulncheck allowlists should match$`, localAndRequiredCIGovulncheckAllowlistsShouldMatch)
+}
+
+func safePRLinkedWorktreeWithLockOwnership(ctx context.Context, initial string) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	initialReason, err := safePRBDDInitialLockReason(initial)
+	if err != nil {
+		return err
+	}
+	base, err := os.MkdirTemp("", "safe-pr-worktree-bdd-*")
+	if err != nil {
+		return err
+	}
+	state.worktreeBase = base
+	state.worktreeRepo = filepath.Join(base, "repo")
+	state.worktreePath = filepath.Join(state.worktreeRepo, ".worktrees", "safe-pr-bdd")
+	state.initialLockReason = initialReason
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main", state.worktreeRepo},
+		{"-C", state.worktreeRepo, "config", "user.name", "Safe PR BDD"},
+		{"-C", state.worktreeRepo, "config", "user.email", "safe-pr-bdd@example.invalid"},
+	} {
+		if _, err := runSafePRBDDGit(ctx, args...); err != nil {
+			return err
+		}
+	}
+	if err := os.WriteFile(filepath.Join(state.worktreeRepo, "README.md"), []byte("safe-pr BDD\n"), 0o600); err != nil {
+		return err
+	}
+	for _, args := range [][]string{
+		{"-C", state.worktreeRepo, "add", "README.md"},
+		{"-C", state.worktreeRepo, "commit", "-q", "-m", "initial"},
+		{"-C", state.worktreeRepo, "worktree", "add", "-q", "-b", "safe-pr-bdd", state.worktreePath},
+	} {
+		if _, err := runSafePRBDDGit(ctx, args...); err != nil {
+			return err
+		}
+	}
+	if state.initialLockReason != "" {
+		_, err = runSafePRBDDGit(ctx, "-C", state.worktreeRepo, "worktree", "lock", "--reason", state.initialLockReason, state.worktreePath)
+	}
+	return err
+}
+
+func wayfinderCleanupOverlapsProtectedTransaction(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	state.transactionErr = safepr.WithWorktreeLock(state.worktreePath, "BDD cleanup overlap", func() error {
+		state.wayfinderCleanupErr = wayfindersandbox.NewGitWorktreeManager().RemoveWorktree("safe-pr-bdd", state.worktreeRepo)
+		_, statErr := os.Stat(state.worktreePath)
+		state.worktreePreserved = statErr == nil
+		return nil
+	})
+	return state.transactionErr
+}
+
+func wayfinderShouldPreserveProtectedWorktree(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.wayfinderCleanupErr == nil {
+		return errors.New("wayfinder cleanup unexpectedly succeeded for a protected worktree")
+	}
+	if !strings.Contains(state.wayfinderCleanupErr.Error(), "preserving") {
+		return fmt.Errorf("wayfinder cleanup: %w; want protected-worktree rejection", state.wayfinderCleanupErr)
+	}
+	if !state.worktreePreserved {
+		return errors.New("wayfinder removed the safe-pr-protected worktree")
+	}
+	return nil
+}
+
+func wayfinderShouldRemoveWorktreeAfterTransaction(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if err := wayfindersandbox.NewGitWorktreeManager().RemoveWorktree("safe-pr-bdd", state.worktreeRepo); err != nil {
+		return fmt.Errorf("wayfinder cleanup after safe-pr release: %w", err)
+	}
+	if _, err := os.Stat(state.worktreePath); err == nil {
+		return errors.New("wayfinder worktree still exists after cleanup")
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("wayfinder worktree after cleanup: %w; want not exist", err)
+	}
+	return nil
+}
+
+func agmRunsProtectedCleanupRegressions(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	state.cleanupRegression, state.cleanupRegressionErr = runLocalGuardrailGoTest(ctx,
+		`^(TestRemoveOrphanWorktreePreservesGitLockedCheckout|TestCleanupSandboxPreservesLockedWorktreeAndMetadata)$`,
+		"./agm/cmd/agm", "./wayfinder/pkg/sandbox",
+	)
+	return nil
+}
+
+func cleanupShouldPreserveGitLockedCheckouts(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.cleanupRegressionErr != nil {
+		return fmt.Errorf("protected cleanup regressions: %w: %s", state.cleanupRegressionErr, state.cleanupRegression)
+	}
+	return nil
+}
+
+func agmRunsProtectedRepositoryCleanupRegression(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	state.cleanupRegression, state.cleanupRegressionErr = runLocalGuardrailGoTest(ctx,
+		`^TestCleanupWorktreesScriptPreservesBranchWhenProtectedWorktreeRemovalFails$`,
+		"./internal/safepr",
+	)
+	return nil
+}
+
+func repositoryCleanupShouldPreserveWorktreeAndBranches(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.cleanupRegressionErr != nil {
+		return fmt.Errorf("protected repository cleanup regression: %w: %s", state.cleanupRegressionErr, state.cleanupRegression)
+	}
+	return nil
+}
+
+func agmRunsSafePRAbruptParentRegression(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	state.childRegression, state.childRegressionErr = runLocalGuardrailGoTest(ctx,
+		`^TestWorktreeTransactionLockOutlivesKilledParentFor(ProtectedChild|GitHelper)$`,
+		"./internal/safepr",
+	)
+	return nil
+}
+
+func childShouldRetainTransactionOwnershipUntilExit(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.childRegressionErr != nil {
+		return fmt.Errorf("safe-pr abrupt-parent regression: %w: %s", state.childRegressionErr, state.childRegression)
+	}
+	return nil
+}
+
+func agmRunsSafePRFinalTransactionAuditRegression(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	state.auditRegression, state.auditRegressionErr = runLocalGuardrailGoTest(ctx,
+		`^TestRun_CreateAuditsFinalTransactionOutcome$`,
+		"./cmd/safe-pr",
+	)
+	return nil
+}
+
+func eachSafePRTransactionShouldHaveOneAccurateAuditRecord(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.auditRegressionErr != nil {
+		return fmt.Errorf("safe-pr final transaction audit regression: %w: %s", state.auditRegressionErr, state.auditRegression)
+	}
+	return nil
+}
+
+func runLocalGuardrailGoTest(parent context.Context, pattern string, packages ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
+	defer cancel()
+	commandArgs := []string{"test", "-count=1", "-timeout=90s", "-run", pattern}
+	commandArgs = append(commandArgs, packages...)
+	cmd := exec.CommandContext(ctx, "go", commandArgs...)
+	cmd.Dir = localDevBDDRepoRoot()
+	cmd.SysProcAttr = procguard.ProcessGroupAttr()
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = time.Second
+	out, err := cmd.CombinedOutput()
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return string(out), fmt.Errorf("go test timed out after 2m")
+	}
+	return string(out), err
+}
+
+func safePRBDDInitialLockReason(initial string) (string, error) {
+	switch initial {
+	case "absent":
+		return "", nil
+	case "pre-existing":
+		return "bdd-existing-owner", nil
+	case "stale-safe-pr":
+		return "safe-pr-owned:2147483647:0011223344556677:stale BDD transaction", nil
+	default:
+		return "", fmt.Errorf("unsupported initial worktree lock %q", initial)
+	}
+}
+
+func safePRProtectsTransaction(ctx context.Context, outcome string) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if outcome != "success" && outcome != "failure" {
+		return fmt.Errorf("unsupported safe-pr transaction outcome %q", outcome)
+	}
+	state.transactionOutcome = outcome
+	state.transactionErr = safepr.WithWorktreeLock(state.worktreePath, "BDD safe-pr create", func() error {
+		locked, _, inspectErr := safePRBDDLockState(ctx, state)
+		if inspectErr != nil {
+			return inspectErr
+		}
+		state.lockedInPreflight = locked
+		locked, _, inspectErr = safePRBDDLockState(ctx, state)
+		if inspectErr != nil {
+			return inspectErr
+		}
+		state.lockedInPRCreate = locked
+		if outcome == "failure" {
+			return errors.New("simulated PR creation failure")
+		}
+		return nil
+	})
+	return nil
+}
+
+func worktreeShouldBeProtectedDuringTransaction(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if !state.lockedInPreflight || !state.lockedInPRCreate {
+		return fmt.Errorf("worktree protection = preflight:%t PR-create:%t", state.lockedInPreflight, state.lockedInPRCreate)
+	}
+	if state.transactionOutcome == "success" && state.transactionErr != nil {
+		return fmt.Errorf("successful transaction returned %w", state.transactionErr)
+	}
+	if state.transactionOutcome == "failure" && state.transactionErr == nil {
+		return errors.New("failed transaction returned no error")
+	}
+	if state.transactionOutcome == "failure" && !strings.Contains(state.transactionErr.Error(), "simulated PR creation failure") {
+		return fmt.Errorf("failed transaction error: %w", state.transactionErr)
+	}
+	return nil
+}
+
+func lockOwnershipShouldRemainAfterTransaction(ctx context.Context, final string) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	locked, reason, err := safePRBDDLockState(ctx, state)
+	if err != nil {
+		return err
+	}
+	switch final {
+	case "absent":
+		if locked {
+			return fmt.Errorf("safe-pr owned lock survived transaction with reason %q", reason)
+		}
+	case "pre-existing":
+		if !locked || reason != "bdd-existing-owner" {
+			return fmt.Errorf("pre-existing lock after transaction = locked:%t reason:%q", locked, reason)
+		}
+	default:
+		return fmt.Errorf("unsupported final worktree lock %q", final)
+	}
+	return nil
+}
+
+func safePRBDDLockState(ctx context.Context, state *localDevGuardrailState) (bool, string, error) {
+	out, err := runSafePRBDDGit(ctx, "-C", state.worktreeRepo, "worktree", "list", "--porcelain")
+	if err != nil {
+		return false, "", err
+	}
+	return parseSafePRBDDLockState(state.worktreePath, out)
+}
+
+func parseSafePRBDDLockState(worktreePath, out string) (bool, string, error) {
+	out = strings.ReplaceAll(out, "\r", "")
+	want := canonicalSafePRBDDPath(worktreePath)
+	for record := range strings.SplitSeq(strings.TrimSpace(out), "\n\n") {
+		path := ""
+		locked := false
+		reason := ""
+		for line := range strings.SplitSeq(record, "\n") {
+			switch {
+			case strings.HasPrefix(line, "worktree "):
+				path = canonicalSafePRBDDPath(strings.TrimPrefix(line, "worktree "))
+			case line == "locked":
+				locked = true
+			case strings.HasPrefix(line, "locked "):
+				locked = true
+				reason = strings.TrimPrefix(line, "locked ")
+			}
+		}
+		if path == want {
+			return locked, reason, nil
+		}
+	}
+	return false, "", fmt.Errorf("BDD worktree %s is not registered", worktreePath)
+}
+
+func cleanupSafePRBDDWorktree(state *localDevGuardrailState) error {
+	if _, err := os.Stat(state.worktreePath); os.IsNotExist(err) {
+		return os.RemoveAll(state.worktreeBase)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	locked, _, inspectErr := safePRBDDLockState(ctx, state)
+	var unlockErr error
+	if inspectErr == nil && locked {
+		_, unlockErr = runSafePRBDDGit(ctx, "-C", state.worktreeRepo, "worktree", "unlock", state.worktreePath)
+	}
+	_, removeErr := runSafePRBDDGit(ctx, "-C", state.worktreeRepo, "worktree", "remove", "--force", state.worktreePath)
+	return errors.Join(inspectErr, unlockErr, removeErr, os.RemoveAll(state.worktreeBase))
+}
+
+func canonicalSafePRBDDPath(path string) string {
+	path = filepath.Clean(path)
+	resolved, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		return filepath.Clean(resolved)
+	}
+	return path
+}
+
+func runSafePRBDDGit(parent context.Context, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.SysProcAttr = procguard.ProcessGroupAttr()
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = time.Second
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(out), fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return string(out), nil
 }
 
 func repositoryGoTestTimeoutsAreConfigured(ctx context.Context) error {

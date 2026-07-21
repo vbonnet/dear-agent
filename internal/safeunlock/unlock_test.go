@@ -66,6 +66,25 @@ func TestClean_NoLocks(t *testing.T) {
 	}
 }
 
+func TestClean_IgnoresNonGitTransactionGuard(t *testing.T) {
+	repo, gitDir := newRepo(t)
+	now := time.Now()
+	guard := filepath.Join(gitDir, "safe-pr-transaction.guard")
+	writeLock(t, guard, now, 10*time.Minute)
+
+	c, _ := newCleaner(t, repo, now)
+	res, err := c.Clean()
+	if err != nil {
+		t.Fatalf("Clean: %v", err)
+	}
+	if len(res) != 0 {
+		t.Fatalf("non-Git transaction guard was collected: %+v", res)
+	}
+	if _, err := os.Stat(guard); err != nil {
+		t.Fatalf("non-Git transaction guard was removed: %v", err)
+	}
+}
+
 func TestClean_StaleIndexLockRemoved(t *testing.T) {
 	repo, gitDir := newRepo(t)
 	now := time.Now()
