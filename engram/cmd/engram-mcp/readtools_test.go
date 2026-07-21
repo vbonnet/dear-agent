@@ -32,8 +32,8 @@ waypoint_history:
 	if err != nil {
 		t.Fatalf("wayfinderStatus: %v", err)
 	}
-	if res.Phase != "SPEC" || res.Progress != "Unknown" || res.Status != "in-progress" {
-		t.Errorf("parsed %+v, want SPEC / Unknown / in-progress", res)
+	if res.Phase != "SPEC" || res.Progress != "44%" || res.Status != "in-progress" {
+		t.Errorf("parsed %+v, want SPEC / 44%% / in-progress", res)
 	}
 }
 

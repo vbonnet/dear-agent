@@ -256,7 +256,7 @@ func wayfinderStatus(projectPath string) (*WayfinderStatusResult, error) {
 	return &WayfinderStatusResult{
 		Project:    abs,
 		Phase:      summary.CurrentWaypoint,
-		Progress:   "Unknown",
+		Progress:   fmt.Sprintf("%d%%", summary.Progress),
 		Status:     summary.Status,
 		SourceFile: statusFile,
 	}, nil

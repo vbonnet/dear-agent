@@ -866,26 +866,35 @@ func TestValidateQualityMetrics(t *testing.T) {
 
 func TestValidateBuildMetricsRejectsNonFiniteValues(t *testing.T) {
 	tests := []struct {
-		name    string
-		metrics BuildMetrics
-		want    string
+		name     string
+		waypoint string
+		metrics  BuildMetrics
+		want     string
 	}{
 		{
-			name:    "NaN coverage",
-			metrics: BuildMetrics{CoveragePercent: math.NaN()},
-			want:    "build_metrics.coverage_percent must be finite",
+			name:     "NaN coverage on BUILD",
+			waypoint: PhaseV2Build,
+			metrics:  BuildMetrics{CoveragePercent: math.NaN()},
+			want:     "build_metrics.coverage_percent must be finite",
 		},
 		{
-			name:    "infinite assertion density",
-			metrics: BuildMetrics{AssertionDensity: math.Inf(1)},
-			want:    "build_metrics.assertion_density must be finite",
+			name:     "infinite assertion density on BUILD",
+			waypoint: PhaseV2Build,
+			metrics:  BuildMetrics{AssertionDensity: math.Inf(1)},
+			want:     "build_metrics.assertion_density must be finite",
+		},
+		{
+			name:     "NaN coverage on non-BUILD history",
+			waypoint: PhaseV2Charter,
+			metrics:  BuildMetrics{CoveragePercent: math.NaN()},
+			want:     "waypoint_history[0] (CHARTER): build_metrics.coverage_percent must be finite",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := validateWaypointMetadata(WaypointHistory{
-				Name:         PhaseV2Build,
+				Name:         tt.waypoint,
 				BuildMetrics: &tt.metrics,
 			}, 0)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
