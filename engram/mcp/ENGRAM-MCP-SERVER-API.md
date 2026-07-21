@@ -158,7 +158,7 @@ For each plugin directory with `plugin.yaml`:
 
 ---
 
-### 3. wayfinder.phase.status
+### 3. wayfinder_phase_status
 
 Get current Wayfinder phase status for a project directory.
 
@@ -166,9 +166,9 @@ Get current Wayfinder phase status for a project directory.
 
 ```typescript
 {
-  name: "wayfinder.phase.status",
+  name: "wayfinder_phase_status",
   arguments: {
-    project: string    // Required: Project directory path
+    project_path: string    // Required: Project directory path
   }
 }
 ```
@@ -192,9 +192,10 @@ Returns JSON with phase information.
 ```json
 {
   "project": "/absolute/path/to/project",
-  "current_waypoint": "DESIGN",
-  "progress": "60%",
-  "status": "In Progress"
+  "phase": "DESIGN",
+  "progress": "Unknown",
+  "status": "in-progress",
+  "source_file": "/absolute/path/to/project/WAYFINDER-STATUS.md"
 }
 ```
 
@@ -202,9 +203,9 @@ Returns JSON with phase information.
 
 ```json
 {
-  "name": "wayfinder.phase.status",
+  "name": "wayfinder_phase_status",
   "arguments": {
-    "project": "the git history"
+    "project_path": "the git history"
   }
 }
 ```
@@ -212,9 +213,9 @@ Returns JSON with phase information.
 **Relative path support:**
 ```json
 {
-  "name": "wayfinder.phase.status",
+  "name": "wayfinder_phase_status",
   "arguments": {
-    "project": "./my-project"
+    "project_path": "./my-project"
   }
 }
 ```
@@ -280,7 +281,7 @@ Add to `~/.claude/settings.json`:
 |-----------|----------------|-------------|
 | engram.retrieve | <1s | 30s (timeout) |
 | engram.plugins.list | <100ms | N/A |
-| wayfinder.phase.status | <50ms | N/A |
+| wayfinder_phase_status | <50ms | N/A |
 
 **Buffer Limits:**
 - Output buffer: 10MB
@@ -313,7 +314,7 @@ All tools return errors in this format:
 Initial release:
 - ✅ engram.retrieve tool
 - ✅ engram.plugins.list tool
-- ✅ wayfinder.phase.status tool
+- ✅ wayfinder_phase_status tool
 - ✅ Basic error handling
 - ✅ CLI integration
 - ✅ MCP stdio transport
