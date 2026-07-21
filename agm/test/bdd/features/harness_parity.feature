@@ -363,6 +363,7 @@ Feature: Harness parity
     Then Codex resume success should require process and composer readiness
     And a failed Codex resume should serialize concurrent attempts through every production entry point, reconcile ambiguous metadata commits, compensate owned provisional metadata before removing its creation-specific tmux identity even when tmux ID output is lost, and preserve tmux whenever metadata cleanup is unproven
     And successful Codex prompt delivery should remain successful after later caller cancellation
+    And failed Codex prompt delivery should not suppress a later attach failure
     And Codex activity updates should follow resume readiness
 
   Scenario: Orphaned AGY conversation can be imported and resumed

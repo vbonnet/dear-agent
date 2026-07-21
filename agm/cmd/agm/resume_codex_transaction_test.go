@@ -432,6 +432,41 @@ func TestResumeSessionCodexDoesNotReturnAttachFailureAfterPromptDelivery(t *test
 	}
 }
 
+func TestResumeSessionCodexReturnsAttachFailureAfterPromptDeliveryFails(t *testing.T) {
+	setDetachedResumeTestGlobals(t, false)
+	resumePrompt = "start irreversible work"
+	adapter, m, health := setupCodexResumeTransaction(t)
+	health.TmuxExists = true
+	promptErr := errors.New("tmux paste failed")
+	attachErr := errors.New("terminal unavailable")
+	var calls []string
+	runtime := recordingResumeRuntime(&calls)
+	runtime.createTmux = func(string, string) (tmux.SessionIdentity, error) {
+		t.Fatal("create called for pre-existing tmux session")
+		return tmux.SessionIdentity{}, nil
+	}
+	runtime.killTmux = func(createdResumeTmux) error {
+		t.Fatal("pre-existing tmux session was killed")
+		return nil
+	}
+	runtime.deliverPrompt = func(string, string, string, bool) error {
+		calls = append(calls, "prompt")
+		return promptErr
+	}
+	runtime.attachTmux = func(string) error {
+		calls = append(calls, "attach")
+		return attachErr
+	}
+
+	err := resumeSessionWithRuntime(t.Context(), adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime)
+	if !errors.Is(err, attachErr) {
+		t.Fatalf("resumeSessionWithRuntime() error = %v, want attach failure %v", err, attachErr)
+	}
+	if want := []string{"prompt", "update", "tab", "attach"}; !reflect.DeepEqual(calls, want) {
+		t.Fatalf("resume calls = %v, want failed prompt followed by observable attach failure %v", calls, want)
+	}
+}
+
 func TestResumeSessionCodexCompensatesCanonicalNameWhenOrdinaryPromptDeliveryFails(t *testing.T) {
 	setDetachedResumeTestGlobals(t, true)
 	resumePrompt = "start work only after the resume transaction commits"

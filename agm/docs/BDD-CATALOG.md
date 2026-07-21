@@ -251,6 +251,8 @@ creation, and terminal state detection.
   creation, command delivery, metadata updates, or warm-session attach.
 - Every production resume entry, including last-session and bulk resume,
   acquires the stable session-ID lock before health or transaction reads.
+- Only an actually delivered Codex prompt creates the irreversible success
+  boundary; a failed send on an existing pane cannot hide a later attach error.
 - Cold Codex resume retains tmux's server-local ID plus a random per-creation
   token, including when a later command in the tmux creation queue fails or ID
   output is lost while the exact random provisional name still exists;

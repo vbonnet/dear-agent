@@ -772,13 +772,13 @@ func resumeSessionWithRuntime(ctx context.Context, adapter *dolt.Adapter, sessio
 		// newer writer superseded metadata ownership, the ready tmux session is
 		// preserved. Other harnesses retain
 		// their established warning-only prompt semantics and finalization order.
-		if err := deliverPostResumePrompt(ctx, health.TmuxSessionName, runtime, createdTmux.owned()); err != nil {
+		promptDelivered, err = deliverPostResumePrompt(ctx, health.TmuxSessionName, runtime, createdTmux.owned())
+		if err != nil {
 			if createdTmux.owned() {
 				return rollbackCreatedResumeTmux(ctx, runtime, adapter, m, createdTmux, nameChange, err)
 			}
 			return err
 		}
-		promptDelivered = hasPostResumePrompt()
 	}
 	completionCtx := ctx
 	if promptDelivered {
@@ -917,33 +917,33 @@ func finalizeResumeSession(ctx context.Context, adapter *dolt.Adapter, sessionID
 	// Update VS Code tab title if running in VS Code
 	runtime.updateTabTitle(health.TmuxSessionName)
 	if deliverPrompt {
-		if err := deliverPostResumePrompt(ctx, health.TmuxSessionName, runtime, false); err != nil {
+		if _, err := deliverPostResumePrompt(ctx, health.TmuxSessionName, runtime, false); err != nil {
 			return err
 		}
 	}
 	return attachResumedSession(ctx, sessionID, health, sendCommands, runtime)
 }
 
-func deliverPostResumePrompt(ctx context.Context, sessionName string, runtime resumeSessionRuntime, strict bool) error {
+func deliverPostResumePrompt(ctx context.Context, sessionName string, runtime resumeSessionRuntime, strict bool) (bool, error) {
 	// Send post-resume prompt if --prompt or --prompt-file was specified.
 	// This happens after the harness is ready, before attach.
 	// Works for both new sessions (sendCommands=true) and existing sessions.
 	if !hasPostResumePrompt() {
-		return nil
+		return false, nil
 	}
 	if err := runtime.deliverPrompt(sessionName, resumePrompt, resumePromptFile, resumeDeletePromptFile); err != nil {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return false, ctx.Err()
 		}
 		if strict {
-			return fmt.Errorf("failed to deliver transactional post-resume prompt: %w", err)
+			return false, fmt.Errorf("failed to deliver transactional post-resume prompt: %w", err)
 		}
 		// Non-fatal: warn but continue so the user can still attach and type manually
 		ui.PrintWarning(fmt.Sprintf("Failed to send post-resume prompt: %v", err))
-		return nil
+		return false, nil
 	}
 	ui.PrintSuccess("Post-resume prompt delivered.")
-	return nil
+	return true, nil
 }
 
 func hasPostResumePrompt() bool {

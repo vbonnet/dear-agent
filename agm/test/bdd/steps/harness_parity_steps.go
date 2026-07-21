@@ -296,6 +296,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^Codex resume success should require process and composer readiness$`, codexResumeSuccessShouldRequireProcessAndComposerReadiness)
 	ctx.Step(`^a failed Codex resume should serialize concurrent attempts through every production entry point, reconcile ambiguous metadata commits, compensate owned provisional metadata before removing its creation-specific tmux identity even when tmux ID output is lost, and preserve tmux whenever metadata cleanup is unproven$`, aFailedCodexResumeShouldRemoveOnlyItsNewlyCreatedTmuxSession)
 	ctx.Step(`^successful Codex prompt delivery should remain successful after later caller cancellation$`, successfulCodexPromptDeliveryShouldRemainSuccessfulAfterLaterCallerCancellation)
+	ctx.Step(`^failed Codex prompt delivery should not suppress a later attach failure$`, failedCodexPromptDeliveryShouldNotSuppressALaterAttachFailure)
 	ctx.Step(`^Codex activity updates should follow resume readiness$`, codexActivityUpdatesShouldFollowResumeReadiness)
 }
 
@@ -367,6 +368,21 @@ func successfulCodexPromptDeliveryShouldRemainSuccessfulAfterLaterCallerCancella
 	}
 	if err != nil {
 		return fmt.Errorf("post-prompt cancellation behavior failed: %w\n%s", err, output)
+	}
+	return nil
+}
+
+func failedCodexPromptDeliveryShouldNotSuppressALaterAttachFailure(ctx context.Context) error {
+	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "-run", `^TestResumeSessionCodexReturnsAttachFailureAfterPromptDeliveryFails$`, "-count=1")
+	cmd.Dir = bddRepoRoot()
+	output, err := cmd.CombinedOutput()
+	if testCtx.Err() != nil {
+		return fmt.Errorf("failed-prompt attach regression timed out: %w", testCtx.Err())
+	}
+	if err != nil {
+		return fmt.Errorf("failed-prompt attach regression failed: %w\n%s", err, output)
 	}
 	return nil
 }
