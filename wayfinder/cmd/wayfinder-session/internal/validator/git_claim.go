@@ -11,11 +11,11 @@ import (
 // This prevents the "fake implementation" bug (oss-55e) where agents claim files
 // are "already committed" but they're actually untracked.
 //
-// For BUILD (Implementation): Check that deliverables are not untracked
+// For BUILD (Implementation): Check that deliverables have no uncommitted changes
 // For RETRO (Retrospective): Check that all phase deliverables are committed
 //
 // Returns ValidationError if:
-// - Files exist but are untracked (documented but not committed)
+// - Files exist but are untracked or modified (documented but not committed)
 // - Agent claims deployment but files not in git history
 func validateGitCommitStatus(projectDir, phaseName string) error {
 	// Only validate for phases where git commits are expected
@@ -28,15 +28,15 @@ func validateGitCommitStatus(projectDir, phaseName string) error {
 		return nil
 	}
 
-	// Get list of untracked files in project directory
-	untrackedFiles, err := getUntrackedFilesInProjectDir(projectDir)
+	// Get all uncommitted paths in the project directory.
+	uncommittedFiles, err := getUncommittedFilesInProjectDir(projectDir)
 	if err != nil {
 		return fmt.Errorf("failed to check git status: %w", err)
 	}
 
 	// Collect all violations
-	violations := checkDeliverableMarkdown(projectDir, phaseName, untrackedFiles)
-	violations = append(violations, checkCodeFiles(projectDir, phaseName, untrackedFiles)...)
+	violations := checkDeliverableMarkdown(projectDir, phaseName, uncommittedFiles)
+	violations = append(violations, checkCodeFiles(projectDir, phaseName, uncommittedFiles)...)
 
 	if len(violations) > 0 {
 		return NewValidationError(
@@ -49,11 +49,11 @@ func validateGitCommitStatus(projectDir, phaseName string) error {
 	return nil
 }
 
-// checkDeliverableMarkdown checks for untracked deliverable markdown files.
+// checkDeliverableMarkdown checks for uncommitted deliverable markdown files.
 // The current phase artifact is committed by CommitPhaseCompletion after all
 // validation gates pass, so it must remain reachable here. Artifacts from any
 // other phase still prove that an earlier deliverable was never committed.
-func checkDeliverableMarkdown(projectDir, currentPhase string, untrackedFiles []string) []string {
+func checkDeliverableMarkdown(projectDir, currentPhase string, uncommittedFiles []string) []string {
 	violations := []string{}
 	allPhases := []string{"CHARTER", "PROBLEM", "RESEARCH", "DESIGN", "SPEC", "PLAN", "SETUP", "BUILD", "RETRO"}
 
@@ -69,7 +69,7 @@ func checkDeliverableMarkdown(projectDir, currentPhase string, untrackedFiles []
 
 		for _, match := range matches {
 			fileName := filepath.Base(match)
-			if isFileUntracked(fileName, untrackedFiles) {
+			if isFileUncommitted(fileName, uncommittedFiles) {
 				violations = append(violations, fileName)
 			}
 		}
@@ -78,8 +78,8 @@ func checkDeliverableMarkdown(projectDir, currentPhase string, untrackedFiles []
 	return violations
 }
 
-// checkCodeFiles checks for untracked code files (BUILD only)
-func checkCodeFiles(_ string, phaseName string, untrackedFiles []string) []string {
+// checkCodeFiles checks for uncommitted code files (BUILD only).
+func checkCodeFiles(_ string, phaseName string, uncommittedFiles []string) []string {
 	if phaseName != "BUILD" {
 		return []string{}
 	}
@@ -90,7 +90,7 @@ func checkCodeFiles(_ string, phaseName string, untrackedFiles []string) []strin
 		".java", ".c", ".cpp", ".rs", ".sh", ".bash",
 	}
 
-	for _, name := range untrackedFiles {
+	for _, name := range uncommittedFiles {
 		for _, ext := range codeExtensions {
 			if strings.HasSuffix(name, ext) {
 				violations = append(violations, name)
@@ -116,43 +116,46 @@ func isGitRepo(dir string) bool {
 	return err == nil
 }
 
-// getUntrackedFilesInProjectDir returns list of untracked files in project directory
-func getUntrackedFilesInProjectDir(projectDir string) ([]string, error) {
-	cmd := exec.Command("git", "status", "--porcelain", "--untracked-files=all", ".")
+// getUncommittedFilesInProjectDir returns modified, staged, deleted, renamed,
+// copied, and untracked paths in the project directory.
+func getUncommittedFilesInProjectDir(projectDir string) ([]string, error) {
+	cmd := exec.Command("git", "status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ".")
 	cmd.Dir = projectDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("git status failed: %w (output: %s)", err, string(output))
 	}
 
-	var untrackedFiles []string
-	lines := strings.Split(string(output), "\n")
+	var uncommittedFiles []string
+	entries := strings.Split(string(output), "\x00")
 
-	for _, line := range lines {
-		if len(line) < 3 {
+	for index := 0; index < len(entries); index++ {
+		entry := entries[index]
+		if len(entry) < 4 {
 			continue
 		}
 
-		statusCode := line[0:2]
-		filePath := strings.TrimSpace(line[3:])
+		statusCode := entry[0:2]
+		filePath := entry[3:]
+		if !strings.HasPrefix(filePath, ".wayfinder/") && !strings.Contains(filePath, "/.wayfinder/") {
+			uncommittedFiles = append(uncommittedFiles, filePath)
+		}
 
-		// Check if file is untracked (??)
-		if statusCode == "??" {
-			// Skip .wayfinder/ internal directory
-			if !strings.HasPrefix(filePath, ".wayfinder/") && !strings.Contains(filePath, "/.wayfinder/") {
-				untrackedFiles = append(untrackedFiles, filePath)
-			}
+		// Porcelain v1 -z emits a second NUL-delimited source path after a
+		// rename or copy. The destination above is the path relevant to gates.
+		if strings.ContainsAny(statusCode, "RC") && index+1 < len(entries) {
+			index++
 		}
 	}
 
-	return untrackedFiles, nil
+	return uncommittedFiles, nil
 }
 
-// isFileUntracked checks if filename is in the untracked files list
-func isFileUntracked(fileName string, untrackedFiles []string) bool {
-	for _, untracked := range untrackedFiles {
+// isFileUncommitted checks if filename is in the uncommitted files list.
+func isFileUncommitted(fileName string, uncommittedFiles []string) bool {
+	for _, uncommitted := range uncommittedFiles {
 		// Match exact filename or filename as path component
-		if untracked == fileName || strings.HasSuffix(untracked, "/"+fileName) {
+		if uncommitted == fileName || strings.HasSuffix(uncommitted, "/"+fileName) {
 			return true
 		}
 	}

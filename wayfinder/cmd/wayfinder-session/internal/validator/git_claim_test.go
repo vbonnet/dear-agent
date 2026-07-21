@@ -216,7 +216,34 @@ func TestValidateGitCommitStatus_PartiallyCommitted(t *testing.T) {
 	}
 }
 
-func TestGetUntrackedFilesInProjectDir(t *testing.T) {
+func TestValidateGitCommitStatus_ModifiedTrackedSource(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	exec.Command("git", "init", tmpDir).Run()
+	exec.Command("git", "-C", tmpDir, "config", "user.email", "test@example.com").Run()
+	exec.Command("git", "-C", tmpDir, "config", "user.name", "Test User").Run()
+
+	sourcePath := filepath.Join(tmpDir, "src", "foo.go")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("package src\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	exec.Command("git", "-C", tmpDir, "add", "src/foo.go").Run()
+	exec.Command("git", "-C", tmpDir, "commit", "-m", "initial source").Run()
+
+	if err := os.WriteFile(sourcePath, []byte("package src\n\nconst changed = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := validateGitCommitStatus(tmpDir, "BUILD")
+	if err == nil || !strings.Contains(err.Error(), "src/foo.go") {
+		t.Fatalf("expected modified tracked source violation for src/foo.go, got %v", err)
+	}
+}
+
+func TestGetUncommittedFilesInProjectDir(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Initialize git repo
@@ -241,9 +268,9 @@ func TestGetUntrackedFilesInProjectDir(t *testing.T) {
 	os.WriteFile(wayfinderFile, []byte("internal"), 0644)
 
 	// Get untracked files
-	untracked, err := getUntrackedFilesInProjectDir(tmpDir)
+	untracked, err := getUncommittedFilesInProjectDir(tmpDir)
 	if err != nil {
-		t.Fatalf("getUntrackedFilesInProjectDir failed: %v", err)
+		t.Fatalf("getUncommittedFilesInProjectDir failed: %v", err)
 	}
 
 	// Should only include untracked.txt, not .wayfinder/session.json
@@ -256,7 +283,7 @@ func TestGetUntrackedFilesInProjectDir(t *testing.T) {
 	}
 }
 
-func TestIsFileUntracked(t *testing.T) {
+func TestIsFileUncommitted(t *testing.T) {
 	tests := []struct {
 		name           string
 		fileName       string
@@ -291,9 +318,9 @@ func TestIsFileUntracked(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := isFileUntracked(tt.fileName, tt.untrackedFiles)
+			got := isFileUncommitted(tt.fileName, tt.untrackedFiles)
 			if got != tt.want {
-				t.Errorf("isFileUntracked() = %v, want %v", got, tt.want)
+				t.Errorf("isFileUncommitted() = %v, want %v", got, tt.want)
 			}
 		})
 	}

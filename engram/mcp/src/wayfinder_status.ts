@@ -15,6 +15,8 @@ const PROJECT_TYPES = ['feature', 'research', 'infrastructure', 'refactor', 'bug
 const RISK_LEVELS = ['XS', 'S', 'M', 'L', 'XL'] as const;
 const PROJECT_STATUSES = ['planning', 'in-progress', 'blocked', 'completed', 'abandoned'] as const;
 const WAYPOINT_STATUSES = ['pending', 'completed', 'in-progress', 'blocked', 'skipped'] as const;
+const TASK_STATUSES = ['pending', 'in-progress', 'completed', 'blocked'] as const;
+const TASK_PRIORITIES = ['P0', 'P1', 'P2'] as const;
 const SKIPPABLE_WAYPOINTS = ['DESIGN', 'SPEC', 'PLAN'] as const;
 const LIFECYCLE_STATUSES: Record<string, string> = {
   working: 'in-progress',
@@ -115,6 +117,163 @@ function optionalStringArray(record: RecordValue, key: string): string[] {
   return value as string[];
 }
 
+function assertKnownFields(record: RecordValue, path: string, knownFields: readonly string[]): void {
+  const known = new Set(knownFields);
+  for (const key of Object.keys(record)) {
+    if (!known.has(key)) {
+      throw new Error(`invalid Wayfinder V2 status: unknown field ${JSON.stringify(`${path}.${key}`)}`);
+    }
+  }
+}
+
+function optionalString(record: RecordValue, key: string, path: string): void {
+  const value = record[key];
+  if (value !== undefined && value !== null && typeof value !== 'string') {
+    throw new Error(`invalid Wayfinder V2 status: ${path}.${key} must be a string`);
+  }
+}
+
+function optionalTimestamp(record: RecordValue, key: string, path: string): void {
+  const value = record[key];
+  if (value === undefined || value === null) return;
+  if (!(typeof value === 'string' || value instanceof Date) || Number.isNaN(new Date(value).getTime())) {
+    throw new Error(`invalid Wayfinder V2 status: ${path}.${key} must be a timestamp`);
+  }
+}
+
+function optionalNumber(record: RecordValue, key: string, path: string): number | undefined {
+  const value = record[key];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`invalid Wayfinder V2 status: ${path}.${key} must be a number`);
+  }
+  return value;
+}
+
+function validateStringArray(record: RecordValue, key: string, path: string): string[] {
+  const value = record[key];
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
+    throw new Error(`invalid Wayfinder V2 status: ${path}.${key} must be a string array`);
+  }
+  return value as string[];
+}
+
+function validateQualityMetrics(value: unknown): void {
+  if (value === undefined || value === null) return;
+  const metrics = asRecord(value, 'quality_metrics');
+  const fields = [
+    'coverage_percent', 'coverage_target', 'assertion_density', 'assertion_density_target',
+    'multi_persona_score', 'security_score', 'performance_score', 'reliability_score',
+    'maintainability_score', 'p0_issues', 'p1_issues', 'p2_issues',
+    'estimated_effort_hours', 'actual_effort_hours', 'effort_variance',
+  ] as const;
+  assertKnownFields(metrics, 'quality_metrics', fields);
+
+  for (const key of fields) optionalNumber(metrics, key, 'quality_metrics');
+  for (const key of ['coverage_percent', 'coverage_target', 'multi_persona_score', 'security_score', 'performance_score', 'reliability_score', 'maintainability_score'] as const) {
+    const score = optionalNumber(metrics, key, 'quality_metrics');
+    if (score !== undefined && (score < 0 || score > 100)) {
+      throw new Error(`invalid Wayfinder V2 status: quality_metrics.${key} must be 0-100`);
+    }
+  }
+  for (const key of ['assertion_density', 'assertion_density_target', 'estimated_effort_hours', 'actual_effort_hours'] as const) {
+    const amount = optionalNumber(metrics, key, 'quality_metrics');
+    if (amount !== undefined && amount < 0) {
+      throw new Error(`invalid Wayfinder V2 status: quality_metrics.${key} cannot be negative`);
+    }
+  }
+  for (const key of ['p0_issues', 'p1_issues', 'p2_issues'] as const) {
+    const count = optionalNumber(metrics, key, 'quality_metrics');
+    if (count !== undefined && (!Number.isInteger(count) || count < 0)) {
+      throw new Error(`invalid Wayfinder V2 status: quality_metrics.${key} must be a non-negative integer`);
+    }
+  }
+}
+
+function validateRoadmap(value: unknown): void {
+  if (value === undefined || value === null) return;
+  const roadmap = asRecord(value, 'roadmap');
+  assertKnownFields(roadmap, 'roadmap', ['phases']);
+  const phasesValue = roadmap.phases;
+  if (phasesValue === undefined || phasesValue === null) return;
+  if (!Array.isArray(phasesValue)) {
+    throw new Error('invalid Wayfinder V2 status: roadmap.phases must be an array');
+  }
+
+  const tasks = new Map<string, RecordValue>();
+  for (const [phaseIndex, phaseValue] of phasesValue.entries()) {
+    const path = `roadmap.phases[${phaseIndex}]`;
+    const phase = asRecord(phaseValue, path);
+    assertKnownFields(phase, path, ['id', 'name', 'status', 'started_at', 'completed_at', 'tasks']);
+    requireEnum(phase, 'id', WAYPOINTS);
+    requireEnum(phase, 'status', WAYPOINT_STATUSES);
+    optionalString(phase, 'name', path);
+    optionalTimestamp(phase, 'started_at', path);
+    optionalTimestamp(phase, 'completed_at', path);
+
+    const phaseTasks = phase.tasks;
+    if (phaseTasks === undefined || phaseTasks === null) continue;
+    if (!Array.isArray(phaseTasks)) {
+      throw new Error(`invalid Wayfinder V2 status: ${path}.tasks must be an array`);
+    }
+    for (const [taskIndex, taskValue] of phaseTasks.entries()) {
+      const taskPath = `${path}.tasks[${taskIndex}]`;
+      const task = asRecord(taskValue, taskPath);
+      assertKnownFields(task, taskPath, [
+        'id', 'title', 'effort_days', 'status', 'deliverables', 'tests_status', 'depends_on',
+        'description', 'priority', 'assigned_to', 'blocks', 'acceptance_criteria', 'started_at',
+        'completed_at', 'bead_id', 'notes', 'verify_command', 'verify_expected', 'verified_at',
+        'verify_result',
+      ]);
+      const id = requiredString(task, 'id');
+      if (tasks.has(id)) {
+        throw new Error(`invalid Wayfinder V2 status: duplicate roadmap task id ${JSON.stringify(id)}`);
+      }
+      requireEnum(task, 'status', TASK_STATUSES);
+      for (const key of ['title', 'tests_status', 'description', 'assigned_to', 'bead_id', 'notes', 'verify_command', 'verify_expected', 'verify_result']) {
+        optionalString(task, key, taskPath);
+      }
+      optionalNumber(task, 'effort_days', taskPath);
+      optionalTimestamp(task, 'started_at', taskPath);
+      optionalTimestamp(task, 'completed_at', taskPath);
+      optionalTimestamp(task, 'verified_at', taskPath);
+      for (const key of ['deliverables', 'depends_on', 'blocks', 'acceptance_criteria']) {
+        validateStringArray(task, key, taskPath);
+      }
+      const priority = task.priority;
+      if (priority !== undefined && priority !== null && priority !== '') {
+        if (typeof priority !== 'string' || !TASK_PRIORITIES.includes(priority as never)) {
+          throw new Error(`invalid Wayfinder V2 status: ${taskPath}.priority is invalid`);
+        }
+      }
+      tasks.set(id, task);
+    }
+  }
+
+  for (const [id, task] of tasks) {
+    for (const key of ['depends_on', 'blocks'] as const) {
+      for (const reference of validateStringArray(task, key, `roadmap task ${id}`)) {
+        if (!tasks.has(reference)) {
+          throw new Error(`invalid Wayfinder V2 status: task ${JSON.stringify(id)} ${key} references missing task ${JSON.stringify(reference)}`);
+        }
+      }
+    }
+  }
+
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (id: string): void => {
+    if (visiting.has(id)) throw new Error(`invalid Wayfinder V2 status: cyclic roadmap dependency at ${JSON.stringify(id)}`);
+    if (visited.has(id)) return;
+    visiting.add(id);
+    for (const dependency of validateStringArray(tasks.get(id)!, 'depends_on', `roadmap task ${id}`)) visit(dependency);
+    visiting.delete(id);
+    visited.add(id);
+  };
+  for (const id of tasks.keys()) visit(id);
+}
+
 function validateSkipPhases(record: RecordValue): string[] {
   const phases = optionalStringArray(record, 'skip_phases');
   const unique = new Set(phases);
@@ -194,8 +353,10 @@ export function parseWayfinderStatus(content: string): WayfinderStatusSummary {
   const phase = requireEnum(record, 'current_waypoint', WAYPOINTS);
   const status = requireEnum(record, 'status', PROJECT_STATUSES);
   requireTimestamp(record, 'created_at');
-  requireTimestamp(record, 'updated_at');
-	validateConditionalStatus(record, status);
+	requireTimestamp(record, 'updated_at');
+  validateConditionalStatus(record, status);
+  validateRoadmap(record.roadmap);
+  validateQualityMetrics(record.quality_metrics);
 
   const complete = completedWaypoints(record);
   for (const skipped of validateSkipPhases(record)) complete.add(skipped);

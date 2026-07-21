@@ -69,7 +69,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	hasRemaining := false
 	for _, phaseName := range status.AllPhasesV2() {
 		if !existingPhases[phaseName] {
-			fmt.Printf("  %s (pending)\n", phaseName)
+			fmt.Printf("  %s %s\n", phaseName, remainingPhaseStatus(currentStatus, phaseName))
 			hasRemaining = true
 		}
 	}
@@ -79,6 +79,13 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func remainingPhaseStatus(currentStatus *status.StatusV2, phaseName string) string {
+	if currentStatus.IsPhaseSkipped(phaseName) {
+		return "(skipped)"
+	}
+	return "(pending)"
 }
 
 // getPhaseSymbol returns the display symbol for a phase

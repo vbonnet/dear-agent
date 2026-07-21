@@ -68,4 +68,32 @@ describe('parseWayfinderStatus', () => {
     );
     assert.equal(parseWayfinderStatus(blocked).status, 'blocked');
   });
+
+  it('rejects out-of-range nested quality metrics', () => {
+    const invalid = canonical.replace('waypoint_history:', 'quality_metrics: {coverage_percent: 150}\nwaypoint_history:');
+    assert.throws(() => parseWayfinderStatus(invalid), /quality_metrics\.coverage_percent must be 0-100/);
+  });
+
+  it('rejects a roadmap that is not a mapping', () => {
+    const invalid = canonical.replace('waypoint_history:', 'roadmap: []\nwaypoint_history:');
+    assert.throws(() => parseWayfinderStatus(invalid), /roadmap must be a mapping/);
+  });
+
+  it('validates nested roadmap task references', () => {
+    const invalid = canonical.replace(
+      'waypoint_history:',
+      `roadmap:
+  phases:
+    - id: BUILD
+      name: Implementation
+      status: in-progress
+      tasks:
+        - id: task-1
+          title: Implement
+          status: blocked
+          depends_on: [missing-task]
+waypoint_history:`,
+    );
+    assert.throws(() => parseWayfinderStatus(invalid), /depends_on references missing task/);
+  });
 });
