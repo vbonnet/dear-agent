@@ -78,7 +78,7 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-35** When a transactional rename starts, the system shall claim the exact source session with its server-local ID and a random short-lived option marker, reconciling a lost claim response by that marker. After every forward or compensating rename response, it shall verify that the same ID still carries the marker at the expected name. A missing marker, unexpected name, failed inspection, or server-restart replacement that reused either name or ID shall be ambiguous and shall never authorize metadata mutation or replacement adoption. Marker cleanup shall be conditional on the same ID and random token so it cannot mutate a replacement.
 
-**TMUX-36** When the final Enter for prompt delivery returns an error after tmux was asked to submit the composer, the system shall expose an explicit submission-uncertain outcome so transactional callers preserve work that may have started; a paste still positively observed in the composer after every retry shall remain a definite not-submitted failure.
+**TMUX-36** When an Enter for prompt delivery is accepted but the following pane capture cannot determine whether submission occurred, the system shall preserve an explicit submission-uncertain outcome across every later retry so transactional callers preserve work that may have started. A paste positively observed in the composer after every retry shall remain a definite not-submitted failure only when no earlier accepted Enter had an indeterminate capture.
 
 ## BDD Traceability
 

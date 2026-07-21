@@ -90,21 +90,32 @@ func defaultEnterVerifyConfig() enterVerifyConfig {
 //     every backoff (fail loud);
 //   - a capture that itself errors is treated as "cannot verify" — best-effort,
 //     never a hard failure on its own (infra flakiness must not fail a send that
-//     may well have succeeded); only a confirmed-stuck final state fails.
+//     may well have succeeded); once this happens after an accepted Enter, later
+//     retry errors retain that submission uncertainty across the entire loop;
+//   - only a confirmed-stuck final state fails definitively, unless an earlier
+//     accepted Enter could not be observed, in which case the failure remains
+//     submission-uncertain.
 func verifyingEnter(sendEnter func() error, capture func() (string, error), cfg enterVerifyConfig) error {
 	time.Sleep(cfg.initialSettle)
 
 	lastStuck := false
+	submissionMayHaveOccurred := false
 	for i := 0; i < len(cfg.backoffs); i++ {
 		if err := sendEnter(); err != nil {
-			return fmt.Errorf("failed to send Enter (-H 0d): %w", err)
+			sendErr := fmt.Errorf("failed to send Enter (-H 0d): %w", err)
+			if submissionMayHaveOccurred {
+				return MarkPromptSubmissionUncertain(sendErr)
+			}
+			return sendErr
 		}
 		time.Sleep(cfg.backoffs[i])
 
 		content, err := capture()
 		if err != nil {
-			// Cannot verify this round — keep retrying, but remember we couldn't
-			// confirm a stuck state so we don't fail loud purely on capture infra.
+			// Cannot verify whether this accepted Enter started the prompt. Keep
+			// that uncertainty sticky: a later retry cannot undo work that may
+			// already have crossed the submission boundary.
+			submissionMayHaveOccurred = true
 			lastStuck = false
 			continue
 		}
@@ -119,6 +130,9 @@ func verifyingEnter(sendEnter func() error, capture func() (string, error), cfg 
 	}
 
 	if lastStuck {
+		if submissionMayHaveOccurred {
+			return MarkPromptSubmissionUncertain(ErrPasteNotSubmitted)
+		}
 		return ErrPasteNotSubmitted
 	}
 	// Never positively confirmed stuck (all captures failed) — best-effort success.

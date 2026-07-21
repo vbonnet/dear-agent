@@ -99,6 +99,42 @@ func TestVerifyingEnter_SendError(t *testing.T) {
 	}
 }
 
+func TestVerifyingEnter_PreservesUncertaintyAcrossLaterDefiniteFailure(t *testing.T) {
+	enters := 0
+	sendEnter := func() error {
+		enters++
+		if enters == 1 {
+			return nil
+		}
+		return errors.New("tmux: explicit rejection")
+	}
+	capture := func() (string, error) {
+		return "", errors.New("capture-pane acknowledgement lost")
+	}
+
+	err := verifyingEnter(sendEnter, capture, fastConfig())
+	if err == nil || !PromptSubmissionMayHaveOccurred(err) {
+		t.Fatalf("later failure = %v, want uncertainty from the first accepted Enter", err)
+	}
+}
+
+func TestVerifyingEnter_PreservesUncertaintyAcrossLaterParkedCaptures(t *testing.T) {
+	captures := 0
+	sendEnter := func() error { return nil }
+	capture := func() (string, error) {
+		captures++
+		if captures == 1 {
+			return "", errors.New("capture-pane acknowledgement lost")
+		}
+		return codexParked, nil
+	}
+
+	err := verifyingEnter(sendEnter, capture, fastConfig())
+	if !errors.Is(err, ErrPasteNotSubmitted) || !PromptSubmissionMayHaveOccurred(err) {
+		t.Fatalf("final parked state = %v, want parked cause with sticky uncertainty", err)
+	}
+}
+
 func TestPromptEnterCommandHelperProcess(t *testing.T) {
 	if os.Getenv("AGM_PROMPT_ENTER_HELPER") != "1" {
 		return

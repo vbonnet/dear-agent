@@ -408,7 +408,7 @@ func successfulCodexPromptDeliveryShouldRemainSuccessfulAfterLaterCallerCancella
 func ambiguousFinalCodexPromptSubmissionShouldPreserveStartedWork(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/tmux", "-run", `^(TestResumeSessionCodexPreservesStartedWorkWhenPromptAcknowledgementIsLost|TestRunPromptEnterCommand(StartFailureIsDefinite|ExplicitRejectionIsDefinite|TimeoutAfterStartIsUncertain))$`, "-count=1")
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/tmux", "-run", `^(TestResumeSessionCodexPreservesStartedWorkWhenPromptAcknowledgementIsLost|TestRunPromptEnterCommand(StartFailureIsDefinite|ExplicitRejectionIsDefinite|TimeoutAfterStartIsUncertain)|TestVerifyingEnter_PreservesUncertaintyAcrossLater(DefiniteFailure|ParkedCaptures))$`, "-count=1")
 	cmd.Dir = bddRepoRoot()
 	output, err := cmd.CombinedOutput()
 	if testCtx.Err() != nil {
