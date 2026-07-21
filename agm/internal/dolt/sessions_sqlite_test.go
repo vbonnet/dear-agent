@@ -2,6 +2,7 @@ package dolt
 
 import (
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -253,9 +254,15 @@ func TestSQLiteTmuxSessionNameChangeOwnsAndRestoresExactWrite(t *testing.T) {
 	if err != nil || change == nil {
 		t.Fatalf("BeginTmuxSessionNameChange() = (%v, %v), want non-nil change", change, err)
 	}
+	if state, err := adapter.inspectTmuxSessionNameChange(t.Context(), *change); err != nil || state != tmuxSessionNameChangeCurrent {
+		t.Fatalf("inspect current tmux-name change = (%v, %v), want current", state, err)
+	}
 	restored, err := adapter.RestoreTmuxSessionNameChange(t.Context(), *change)
 	if err != nil || !restored {
 		t.Fatalf("RestoreTmuxSessionNameChange() = (%v, %v), want (true, nil)", restored, err)
+	}
+	if state, err := adapter.inspectTmuxSessionNameChange(t.Context(), *change); err != nil || state != tmuxSessionNameChangePrevious {
+		t.Fatalf("inspect restored tmux-name change = (%v, %v), want previous", state, err)
 	}
 	final, err := adapter.GetSession(m.SessionID)
 	if err != nil {
@@ -263,6 +270,38 @@ func TestSQLiteTmuxSessionNameChangeOwnsAndRestoresExactWrite(t *testing.T) {
 	}
 	if final.Tmux.SessionName != stored.Tmux.SessionName || final.Context.Notes != "concurrent metadata retained" || !final.UpdatedAt.Equal(stored.UpdatedAt) {
 		t.Fatalf("restored state = (%q, %q, %v), want (%q, concurrent metadata retained, %v)", final.Tmux.SessionName, final.Context.Notes, final.UpdatedAt, stored.Tmux.SessionName, stored.UpdatedAt)
+	}
+}
+
+func TestResolveTmuxSessionNameChangeCommitErrorPreservesUncertainOwnership(t *testing.T) {
+	commitErr := errors.New("commit acknowledgement lost")
+	inspectErr := errors.New("re-read unavailable")
+	change := &TmuxSessionNameChange{SessionID: "session-id", CurrentRevision: "owned-revision"}
+	tests := []struct {
+		name        string
+		state       tmuxSessionNameChangeState
+		inspectErr  error
+		wantPending bool
+	}{
+		{name: "previous revision proves no commit", state: tmuxSessionNameChangePrevious},
+		{name: "current revision proves commit", state: tmuxSessionNameChangeCurrent, wantPending: true},
+		{name: "superseded revision is uncertain", state: tmuxSessionNameChangeSuperseded, wantPending: true},
+		{name: "failed inspection is uncertain", state: tmuxSessionNameChangeUnknown, inspectErr: inspectErr, wantPending: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveTmuxSessionNameChangeCommitError(change, commitErr, tt.state, tt.inspectErr)
+			if !errors.Is(err, commitErr) {
+				t.Fatalf("resolve error = %v, want commit error", err)
+			}
+			if tt.inspectErr != nil && !errors.Is(err, tt.inspectErr) {
+				t.Fatalf("resolve error = %v, want inspect error", err)
+			}
+			if (got != nil) != tt.wantPending {
+				t.Fatalf("pending change = %#v, want pending=%v", got, tt.wantPending)
+			}
+		})
 	}
 }
 
@@ -296,6 +335,9 @@ func TestSQLiteTmuxSessionNameCompensationRejectsNewerMetadata(t *testing.T) {
 	latest.Context.Notes = "newer writer"
 	if err := adapter.UpdateSession(latest); err != nil {
 		t.Fatalf("UpdateSession() error: %v", err)
+	}
+	if state, err := adapter.inspectTmuxSessionNameChange(t.Context(), *change); err != nil || state != tmuxSessionNameChangeSuperseded {
+		t.Fatalf("inspect superseded tmux-name change = (%v, %v), want superseded", state, err)
 	}
 	restored, err := adapter.RestoreTmuxSessionNameChange(t.Context(), *change)
 	if err != nil || restored {

@@ -581,7 +581,7 @@ type createdResumeTmux struct {
 }
 
 func (created createdResumeTmux) owned() bool {
-	return created.Name != "" && created.Identity.Valid()
+	return created.Name != "" && created.Identity.Cleanable()
 }
 
 type resumeTmuxNameChange struct {
@@ -666,7 +666,11 @@ func persistResumeTmuxNameWith(
 ) (resumeTmuxNameChange, error) {
 	change, err := begin(ctx, m.SessionID, sessionName)
 	if err != nil {
-		return resumeTmuxNameChange{}, fmt.Errorf("persist canonical tmux session name %q: %w", sessionName, err)
+		pending := resumeTmuxNameChange{}
+		if change != nil {
+			pending = resumeTmuxNameChange{Applied: true, Change: *change}
+		}
+		return pending, fmt.Errorf("persist canonical tmux session name %q: %w", sessionName, err)
 	}
 	latest, err := load(m.SessionID)
 	if err != nil {
@@ -827,7 +831,7 @@ func ensureResumeTmuxSession(ctx context.Context, health *HealthStatus, runtime 
 		return created, fmt.Errorf("failed to create tmux session: %w", err)
 	}
 	if !identity.Valid() {
-		return createdResumeTmux{}, fmt.Errorf("tmux creation returned no valid creation identity")
+		return created, fmt.Errorf("tmux creation returned no valid creation identity")
 	}
 	// NewSession creates the sanitized name. Carry that exact identity through
 	// dispatch, readiness, rollback, prompt delivery, and attach.

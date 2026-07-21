@@ -108,7 +108,10 @@ func IsCodexComposerReady(content string) bool {
 			if candidate == "" {
 				continue
 			}
-			return strings.HasPrefix(candidate, "›")
+			// Only an empty cursor is idle. Typed drafts and collapsed paste chips
+			// use the same glyph but accepting them would append a second prompt to
+			// input the user has not submitted yet.
+			return candidate == "›"
 		}
 		return false
 	}

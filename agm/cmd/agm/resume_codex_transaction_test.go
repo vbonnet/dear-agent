@@ -164,6 +164,41 @@ func TestPersistResumeTmuxNameRetainsPendingChangeUntilReloadCompensationIsProve
 	}
 }
 
+func TestPersistResumeTmuxNameRetainsChangeWhenBeginCommitIsAmbiguous(t *testing.T) {
+	commitErr := errors.New("commit acknowledgement lost")
+	change := dolt.TmuxSessionNameChange{
+		SessionID:         "session-id",
+		PreviousName:      "historical-name",
+		PreviousUpdatedAt: time.Now().Add(-time.Hour).UTC().Truncate(time.Second),
+		CurrentName:       "canonical-name",
+		CurrentRevision:   "owned-revision",
+	}
+
+	got, err := persistResumeTmuxNameWith(
+		t.Context(),
+		&manifest.Manifest{SessionID: change.SessionID},
+		change.CurrentName,
+		func(context.Context, string, string) (*dolt.TmuxSessionNameChange, error) {
+			copy := change
+			return &copy, commitErr
+		},
+		func(string) (*manifest.Manifest, error) {
+			t.Fatal("load must not run after an ambiguous begin error")
+			return nil, nil
+		},
+		func(context.Context, dolt.TmuxSessionNameChange) (bool, error) {
+			t.Fatal("restore belongs to the outer rollback transaction")
+			return false, nil
+		},
+	)
+	if !errors.Is(err, commitErr) {
+		t.Fatalf("persistResumeTmuxNameWith() error = %v, want commit failure", err)
+	}
+	if !got.Applied || !reflect.DeepEqual(got.Change, change) {
+		t.Fatalf("pending change = %#v, want %#v", got, change)
+	}
+}
+
 func TestResumeResolvedSessionAcquiresSessionLockBeforeReads(t *testing.T) {
 	wantErr := errors.New("lock unavailable")
 	lockCalls := 0
@@ -480,6 +515,35 @@ func TestResumeSessionCodexRollsBackCreationFailureWhenTmuxReturnedIdentity(t *t
 		t.Fatalf("resumeSessionWithRuntime() error = %v, want %v", err, wantErr)
 	}
 	if want := []string{"create", "kill:$42"}; !reflect.DeepEqual(calls, want) {
+		t.Fatalf("resume calls = %v, want %v", calls, want)
+	}
+}
+
+func TestResumeSessionCodexRollsBackCreationFailureWhenOnlyProvisionalIdentityReturned(t *testing.T) {
+	setDetachedResumeTestGlobals(t, true)
+	adapter, m, health := setupCodexResumeTransaction(t)
+	wantErr := errors.New("tmux output lost after provisional creation")
+	token := "0123456789abcdef0123456789abcdef"
+	partial := tmux.SessionIdentity{Token: token, CreationName: "agm-create-" + token}
+	var calls []string
+	runtime := recordingResumeRuntime(&calls)
+	runtime.createTmux = func(string, string) (tmux.SessionIdentity, error) {
+		calls = append(calls, "create")
+		return partial, wantErr
+	}
+	runtime.killTmux = func(created createdResumeTmux) error {
+		if created.Identity != partial || !created.owned() {
+			t.Fatalf("cleanup identity = %#v, want owned provisional %#v", created.Identity, partial)
+		}
+		calls = append(calls, "kill:"+created.Identity.CreationName)
+		return nil
+	}
+
+	err := resumeSessionWithRuntime(t.Context(), adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("resumeSessionWithRuntime() error = %v, want %v", err, wantErr)
+	}
+	if want := []string{"create", "kill:" + partial.CreationName}; !reflect.DeepEqual(calls, want) {
 		t.Fatalf("resume calls = %v, want %v", calls, want)
 	}
 }

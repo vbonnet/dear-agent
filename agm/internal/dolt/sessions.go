@@ -365,6 +365,15 @@ type TmuxSessionNameChange struct {
 	CurrentRevision   string
 }
 
+type tmuxSessionNameChangeState uint8
+
+const (
+	tmuxSessionNameChangeUnknown tmuxSessionNameChangeState = iota
+	tmuxSessionNameChangePrevious
+	tmuxSessionNameChangeCurrent
+	tmuxSessionNameChangeSuperseded
+)
+
 // BeginTmuxSessionNameChange persists a provisional canonical tmux name while
 // preserving every unrelated column. The read and compare-and-swap run in one
 // database transaction, so a concurrent session update cannot be overwritten.
@@ -420,17 +429,68 @@ func (a *Adapter) BeginTmuxSessionNameChange(ctx context.Context, sessionID, new
 	if rowsAffected != 1 {
 		return nil, fmt.Errorf("session metadata changed concurrently")
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit provisional tmux session name: %w", err)
-	}
-	return &TmuxSessionNameChange{
+	change := &TmuxSessionNameChange{
 		SessionID:         sessionID,
 		PreviousName:      previousName,
 		PreviousRevision:  previousRevision,
 		PreviousUpdatedAt: previousUpdatedAt,
 		CurrentName:       newName,
 		CurrentRevision:   currentRevision,
-	}, nil
+	}
+	if err := tx.Commit(); err != nil {
+		// Commit can report an error after the database durably accepted the
+		// write. Release any remaining transaction resources, then re-read the
+		// exact ownership revision before deciding whether cleanup is safe.
+		_ = tx.Rollback()
+		inspectCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		state, inspectErr := a.inspectTmuxSessionNameChange(inspectCtx, *change)
+		return resolveTmuxSessionNameChangeCommitError(change, err, state, inspectErr)
+	}
+	return change, nil
+}
+
+func (a *Adapter) inspectTmuxSessionNameChange(ctx context.Context, change TmuxSessionNameChange) (tmuxSessionNameChangeState, error) {
+	var currentName string
+	var currentRevision sql.NullString
+	var currentUpdatedAt time.Time
+	if err := a.conn.QueryRowContext(ctx, `
+		SELECT tmux_session_name, tmux_session_revision, updated_at
+		FROM agm_sessions
+		WHERE id = ? AND workspace = ?
+	`, change.SessionID, a.workspace).Scan(&currentName, &currentRevision, &currentUpdatedAt); err != nil {
+		return tmuxSessionNameChangeUnknown, fmt.Errorf("re-read tmux session name after commit error: %w", err)
+	}
+	if currentName == change.CurrentName && currentRevision.Valid && currentRevision.String == change.CurrentRevision {
+		return tmuxSessionNameChangeCurrent, nil
+	}
+	if currentName == change.PreviousName && currentRevision == change.PreviousRevision && currentUpdatedAt.Equal(change.PreviousUpdatedAt) {
+		return tmuxSessionNameChangePrevious, nil
+	}
+	return tmuxSessionNameChangeSuperseded, nil
+}
+
+func resolveTmuxSessionNameChangeCommitError(change *TmuxSessionNameChange, commitErr error, state tmuxSessionNameChangeState, inspectErr error) (*TmuxSessionNameChange, error) {
+	err := fmt.Errorf("commit provisional tmux session name: %w", commitErr)
+	if inspectErr != nil {
+		return change, errors.Join(err, inspectErr)
+	}
+	switch state {
+	case tmuxSessionNameChangePrevious:
+		// The complete previous revision proves the write did not commit.
+		return nil, err
+	case tmuxSessionNameChangeCurrent:
+		// The owned provisional revision committed despite the error. Preserve
+		// it so the caller's rollback can restore metadata before killing tmux.
+		return change, err
+	case tmuxSessionNameChangeUnknown, tmuxSessionNameChangeSuperseded:
+		// A superseding writer (or an unrecognized state) makes ownership
+		// uncertain. Preserve the change; its CAS restore will refuse to erase
+		// newer metadata and therefore prevent unsafe tmux cleanup.
+		return change, errors.Join(err, fmt.Errorf("tmux session metadata state after commit error cannot prove rollback safety"))
+	default:
+		return change, errors.Join(err, fmt.Errorf("unknown tmux session metadata state %d after commit error", state))
+	}
 }
 
 func nullableStringValue(value sql.NullString) any {

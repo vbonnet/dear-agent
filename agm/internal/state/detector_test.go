@@ -72,9 +72,15 @@ func TestDetector_CodexReadinessRequiresStructuredComposer(t *testing.T) {
 	}{
 		{
 			name:        "post-turn cursor and footer are ready",
-			output:      "› Continue the task\n\n  gpt-5.6 xhigh · ~/src/project",
+			output:      "›\n\n  gpt-5.6 xhigh · ~/src/project",
 			wantState:   StateReady,
 			wantReceive: CanReceiveYes,
+		},
+		{
+			name:        "typed post-turn draft and footer are not ready",
+			output:      "› Continue the task\n\n  gpt-5.6 xhigh · ~/src/project",
+			wantState:   StateUnknown,
+			wantReceive: CanReceiveQueue,
 		},
 		{
 			name:        "working status and footer are not ready",
@@ -102,7 +108,7 @@ func TestDetector_CodexReadinessRequiresStructuredComposer(t *testing.T) {
 		},
 		{
 			name:        "unsubmitted paste and footer are not ready",
-			output:      "> [Pasted Content 2172 chars]\n  gpt-5.6 xhigh · ~/src/project",
+			output:      "› [Pasted Content 2172 chars]\n  gpt-5.6 xhigh · ~/src/project",
 			wantState:   StateUnknown,
 			wantReceive: CanReceiveQueue,
 		},

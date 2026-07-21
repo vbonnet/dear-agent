@@ -50,8 +50,13 @@ func TestIsCodexComposerReady(t *testing.T) {
 		},
 		{
 			name:     "post-turn cursor and footer",
-			content:  "› Continue the task\n\n  gpt-5.6 xhigh · ~/src/project",
+			content:  "›\n\n  gpt-5.6 xhigh · ~/src/project",
 			expected: true,
+		},
+		{
+			name:     "typed post-turn draft is not ready",
+			content:  "› Continue the task\n\n  gpt-5.6 xhigh · ~/src/project",
+			expected: false,
 		},
 		{
 			name:     "post-turn composer followed by shell prompt is stale",
@@ -80,7 +85,7 @@ func TestIsCodexComposerReady(t *testing.T) {
 		},
 		{
 			name:     "unsubmitted paste before footer is not ready",
-			content:  "> [Pasted Content 2172 chars]\n  gpt-5.6 xhigh · ~/src/project",
+			content:  "› [Pasted Content 2172 chars]\n  gpt-5.6 xhigh · ~/src/project",
 			expected: false,
 		},
 		{

@@ -72,16 +72,33 @@ type SessionIdentity struct {
 	CreationName string
 }
 
-// Valid reports whether both parts of a creation-specific identity are valid.
+// Valid reports whether the complete creation-specific identity is valid.
 func (identity SessionIdentity) Valid() bool {
-	if !IsSessionID(identity.ID) || len(identity.Token) != 32 {
-		return false
-	}
-	decoded, err := hex.DecodeString(identity.Token)
-	if err != nil || len(decoded) != 16 {
+	if !IsSessionID(identity.ID) || !identity.validToken() {
 		return false
 	}
 	return identity.CreationName == "" || identity.CreationName == sessionIdentityCreationPrefix+identity.Token
+}
+
+// Cleanable reports whether the identity safely names a resource created by
+// this attempt. Before tmux's server-local ID reaches the client, the random
+// token-derived provisional name is itself an exact ownership capability.
+func (identity SessionIdentity) Cleanable() bool {
+	if !identity.validToken() {
+		return false
+	}
+	if IsSessionID(identity.ID) {
+		return identity.CreationName == "" || identity.CreationName == sessionIdentityCreationPrefix+identity.Token
+	}
+	return identity.CreationName == sessionIdentityCreationPrefix+identity.Token
+}
+
+func (identity SessionIdentity) validToken() bool {
+	if len(identity.Token) != 32 {
+		return false
+	}
+	decoded, err := hex.DecodeString(identity.Token)
+	return err == nil && len(decoded) == 16
 }
 
 func newSessionIdentity() (SessionIdentity, error) {
@@ -104,8 +121,11 @@ func sanitizeNewSessionName(name string) string {
 // HasSessionIdentityStrict checks a creation-specific tmux identity without
 // allowing a same-named replacement or a new server's reused ID to satisfy it.
 func HasSessionIdentityStrict(identity SessionIdentity) (bool, error) {
-	if !identity.Valid() {
+	if !identity.Cleanable() {
 		return false, fmt.Errorf("invalid tmux session identity %q", identity.ID)
+	}
+	if !identity.Valid() {
+		return HasSessionStrict(identity.CreationName)
 	}
 	output, err := RunWithTimeout(context.Background(), globalTimeout, "tmux", "-S", GetSocketPath(), "display-message", "-p", "-t", identity.ID, "#{@agm_session_identity}\t#{session_name}")
 	if err == nil {
@@ -282,7 +302,7 @@ func EnableAutoRespawn(sessionName string) error {
 // NewSession creates a new tmux session with optimized settings.
 func NewSession(name string, workDir string) error {
 	identity, err := NewSessionWithIdentity(name, workDir)
-	if err == nil || !identity.Valid() {
+	if err == nil || !identity.Cleanable() {
 		return err
 	}
 	if cleanupErr := KillSessionIdentityChecked(identity); cleanupErr != nil {

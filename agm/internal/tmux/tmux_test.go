@@ -249,6 +249,14 @@ func TestSessionIdentityValidation(t *testing.T) {
 			t.Fatalf("invalid creation identity was accepted: %#v", invalid)
 		}
 	}
+	partial := SessionIdentity{Token: valid.Token, CreationName: sessionIdentityCreationPrefix + valid.Token}
+	if partial.Valid() || !partial.Cleanable() {
+		t.Fatalf("provisional-only identity validity = (complete=%v, cleanable=%v), want (false, true)", partial.Valid(), partial.Cleanable())
+	}
+	partial.CreationName = sessionIdentityCreationPrefix + "ffffffffffffffffffffffffffffffff"
+	if partial.Cleanable() {
+		t.Fatalf("mismatched provisional identity was accepted: %#v", partial)
+	}
 }
 
 func TestIsMissingSessionOutputIncludesEmptyServerVerdict(t *testing.T) {
@@ -319,6 +327,30 @@ func TestSessionIdentityCleansCreationBeforeTokenWrite(t *testing.T) {
 	}
 	if err := KillSessionIdentityChecked(identity); err != nil {
 		t.Fatalf("KillSessionIdentityChecked(provisional) error = %v", err)
+	}
+	if exists, err := HasSessionStrict(identity.CreationName); err != nil || exists {
+		t.Fatalf("provisional session after cleanup = (%v, %v), want (false, nil)", exists, err)
+	}
+}
+
+func TestSessionIdentityCleansCreationWhenSessionIDOutputIsLost(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping tmux integration test in short mode (uses global lock)")
+	}
+	skipIfNoTmux(t)
+	socketPath, cleanup := setupTestSocket(t)
+	defer cleanup()
+
+	identity, err := newSessionIdentity()
+	if err != nil {
+		t.Fatalf("newSessionIdentity() error = %v", err)
+	}
+	if err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", identity.CreationName).Run(); err != nil {
+		t.Fatalf("create provisional session without captured ID: %v", err)
+	}
+
+	if err := KillSessionIdentityChecked(identity); err != nil {
+		t.Fatalf("KillSessionIdentityChecked(provisional without ID) error = %v", err)
 	}
 	if exists, err := HasSessionStrict(identity.CreationName); err != nil || exists {
 		t.Fatalf("provisional session after cleanup = (%v, %v), want (false, nil)", exists, err)

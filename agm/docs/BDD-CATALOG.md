@@ -215,6 +215,8 @@ creation, and terminal state detection.
 **Key scenarios:**
 - A Codex CLI composer pane is detected as `ready`.
 - An idle Codex composer allows direct delivery.
+- A typed draft or Unicode collapsed-paste chip remains queued even when the
+  normal Codex model footer is visible.
 - A stale Codex composer followed by newer shell output remains queued.
 - A newer tail-owned initial composer remains ready after stale post-turn
   footer history from a prior Codex process.
@@ -247,14 +249,16 @@ creation, and terminal state detection.
 - Resume rechecks the root context after metadata lookup and before tmux
   creation, command delivery, metadata updates, or warm-session attach.
 - Cold Codex resume retains tmux's server-local ID plus a random per-creation
-  token, including when a later command in the tmux creation queue fails;
+  token, including when a later command in the tmux creation queue fails or ID
+  output is lost while the exact random provisional name still exists;
   serializes concurrent resume attempts by stable session ID; persists a
   canonical name under an opaque cross-dialect ownership revision before
   optional prompt submission; treats ordinary prompt failures
   as transactional failures, compensates owned metadata before removing those
   exact identities, and preserves the ready tmux session when a concurrent
   writer supersedes metadata ownership or a post-write reload leaves
-  compensation unproven. It also avoids killing a same-named or
+  compensation unproven. A commit error is re-read against the complete prior
+  and provisional revisions before cleanup proceeds. It also avoids killing a same-named or
   server-restart replacement. Reopening a
   persistent pre-revision SQLite test store upgrades its schema idempotently
   while preserving existing sessions before those lifecycle mutations run;
