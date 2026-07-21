@@ -367,10 +367,16 @@ func scriptOutputRedirectedToFile(value string) bool {
 		return false
 	}
 	fields := parseShellWords(value[:location[0]] + " " + value[location[1]:])
+	redirectedToFile := false
 	for index, field := range fields {
 		field = strings.Trim(field, "()")
-		if strings.HasPrefix(field, "&>") {
-			return true
+		if remainder, ok := strings.CutPrefix(field, "&>"); ok {
+			target := strings.TrimLeft(remainder, ">|")
+			if target == "" && index+1 < len(fields) {
+				target = strings.Trim(fields[index+1], `"'`)
+			}
+			redirectedToFile = !agentVisibleRedirectTarget(target)
+			continue
 		}
 		redirect := strings.TrimLeft(field, "0123456789")
 		fileDescriptor := strings.TrimSuffix(field, redirect)
@@ -384,12 +390,14 @@ func scriptOutputRedirectedToFile(value string) bool {
 		if target == "" && index+1 < len(fields) {
 			target = strings.Trim(fields[index+1], `"'`)
 		}
-		if strings.HasPrefix(target, "&") || slices.Contains([]string{"/dev/fd/1", "/dev/fd/2", "/dev/stderr", "/dev/stdout"}, target) {
-			continue
-		}
-		return true
+		redirectedToFile = !agentVisibleRedirectTarget(target)
 	}
-	return false
+	return redirectedToFile
+}
+
+func agentVisibleRedirectTarget(target string) bool {
+	return target == "" || strings.HasPrefix(target, "&") ||
+		slices.Contains([]string{"/dev/fd/1", "/dev/fd/2", "/dev/stderr", "/dev/stdout"}, target)
 }
 
 func unescapedByteCount(value string, target byte) int {

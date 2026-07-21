@@ -260,6 +260,12 @@ func TestScriptHeredocVisibilityFollowsOutputRedirection(t *testing.T) {
 		"cat 2>errors <<'STDOUT_VISIBLE'",
 		"bd ready",
 		"STDOUT_VISIBLE",
+		"cat >fixture >&2 <<'RESTORED_VISIBLE'",
+		"gh pr reopen 123",
+		"RESTORED_VISIBLE",
+		"cat >&2 >final-file <<'FINAL_FILE'",
+		"safe-pr create --emergency --reason hidden",
+		"FINAL_FILE",
 	}, "\n"))
 
 	var rules []string
@@ -269,7 +275,7 @@ func TestScriptHeredocVisibilityFollowsOutputRedirection(t *testing.T) {
 		}
 	}
 	sort.Strings(rules)
-	if !reflect.DeepEqual(rules, []string{"bare-beads", "raw-git-push"}) {
+	if !reflect.DeepEqual(rules, []string{"bare-beads", "raw-gh-pr-lifecycle", "raw-git-push"}) {
 		t.Fatalf("heredoc rules = %v, want only visible heredoc findings", rules)
 	}
 }
