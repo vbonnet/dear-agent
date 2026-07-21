@@ -109,7 +109,10 @@ func (f *fakeBoundary) install(t *testing.T) {
 		f.isPaneCalls++
 		return f.isPaneActive, f.isPaneActiveErr
 	}
-	killSessionFn = func(_ string) { f.killSessionCalls++ }
+	killSessionFn = func(_ string) error {
+		f.killSessionCalls++
+		return nil
+	}
 	getPanePIDFn = func(_ string) (int, error) {
 		if f.panePID == 0 {
 			f.panePID = 4242

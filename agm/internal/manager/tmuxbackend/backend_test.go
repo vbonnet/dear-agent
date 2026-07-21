@@ -1,6 +1,8 @@
 package tmuxbackend
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/agm/internal/manager"
@@ -34,4 +36,34 @@ func TestBackendCapabilities(t *testing.T) {
 func TestBackendImplementsInterface(t *testing.T) {
 	var _ manager.Backend = (*TmuxBackend)(nil)
 	var _ manager.AttachableBackend = (*TmuxBackend)(nil)
+}
+
+func TestTerminateSessionPropagatesTmuxFailure(t *testing.T) {
+	wantErr := errors.New("kill denied")
+	b := &TmuxBackend{killSession: func(name string) error {
+		if name != "exact-target" {
+			t.Fatalf("kill target = %q, want exact-target", name)
+		}
+		return wantErr
+	}}
+
+	err := b.TerminateSession(context.Background(), manager.SessionID("exact-target"))
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("TerminateSession() error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestTerminateSessionReturnsSuccessAfterTmuxKill(t *testing.T) {
+	called := false
+	b := &TmuxBackend{killSession: func(name string) error {
+		called = true
+		return nil
+	}}
+
+	if err := b.TerminateSession(context.Background(), manager.SessionID("target")); err != nil {
+		t.Fatalf("TerminateSession() error = %v", err)
+	}
+	if !called {
+		t.Fatal("TerminateSession() did not invoke the tmux mutation")
+	}
 }

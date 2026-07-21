@@ -68,6 +68,8 @@ type harnessParityState struct {
 	mcpModelAccepted           bool
 	mcpLifecycleOpsExposed     bool
 	mcpServerStartupGuard      bool
+	mcpKillTestOutput          string
+	mcpKillTestErr             error
 	marketplaceCatalog         marketplaceparity.Catalog
 	marketplaceSurface         marketplaceparity.HarnessSurface
 	marketplaceMirrorValid     bool
@@ -204,6 +206,9 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the MCP operation registry should expose lifecycle mutations$`, mcpOperationRegistryShouldExposeLifecycleMutations)
 	ctx.Step(`^AGM validates MCP server startup guard coverage$`, agmValidatesMCPServerStartupGuardCoverage)
 	ctx.Step(`^the MCP server SPEC should cover loud workspace and database failures$`, mcpServerSPECShouldCoverLoudWorkspaceAndDatabaseFailures)
+	ctx.Step(`^AGM validates MCP kill mutation wiring$`, agmValidatesMCPKillMutationWiring)
+	ctx.Step(`^MCP kill should provide a real tmux dependency to shared operations$`, mcpKillShouldProvideARealTmuxDependencyToSharedOperations)
+	ctx.Step(`^shared kill success should require exact target absence$`, sharedKillSuccessShouldRequireExactTargetAbsence)
 	ctx.Step(`^AGM validates marketplace parity$`, agmValidatesMarketplaceParity)
 	ctx.Step(`^harness "([^"]*)" should have a marketplace discovery surface$`, harnessShouldHaveMarketplaceDiscoverySurface)
 	ctx.Step(`^the marketplace discovery surface should use the expected mode$`, marketplaceDiscoverySurfaceShouldUseExpectedMode)
@@ -1466,6 +1471,63 @@ func mcpOperationRegistryShouldExposeLifecycleMutations(ctx context.Context) err
 	}
 	if !harnessState.mcpLifecycleOpsExposed {
 		return fmt.Errorf("MCP operation registry does not expose lifecycle mutations")
+	}
+	return nil
+}
+
+func agmValidatesMCPKillMutationWiring(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, "go", "test",
+		"./agm/cmd/agm-mcp-server", "./agm/internal/ops",
+		"-run", `^(TestKillSessionTool(ExecutesAndVerifiesSharedMutation|ForwardsRecentActivityForce|CancellationStopsBeforeMutation)|TestKillSession_(ReloadsCurrentTargetUnderStableIDLock|CanceledRequestDoesNotMutateTmux|PropagatesBackendFailure|FailsWhenTargetRemains|PropagatesProbeFailure))$`,
+		"-count=1", "-v")
+	cmd.Dir = bddRepoRoot()
+	output, runErr := cmd.CombinedOutput()
+	harnessState.mcpKillTestOutput = string(output)
+	harnessState.mcpKillTestErr = runErr
+	if testCtx.Err() != nil {
+		return fmt.Errorf("MCP shared kill behavior suite timed out: %w", testCtx.Err())
+	}
+	return nil
+}
+
+func mcpKillShouldProvideARealTmuxDependencyToSharedOperations(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if state.mcpKillTestErr != nil {
+		return fmt.Errorf("MCP shared kill behavior suite failed: %w\n%s", state.mcpKillTestErr, state.mcpKillTestOutput)
+	}
+	for _, behavior := range []string{
+		"TestKillSessionToolExecutesAndVerifiesSharedMutation",
+		"TestKillSessionToolForwardsRecentActivityForce",
+		"TestKillSessionToolCancellationStopsBeforeMutation",
+	} {
+		if !strings.Contains(state.mcpKillTestOutput, "--- PASS: "+behavior) {
+			return fmt.Errorf("MCP kill behavior %s did not pass:\n%s", behavior, state.mcpKillTestOutput)
+		}
+	}
+	return nil
+}
+
+func sharedKillSuccessShouldRequireExactTargetAbsence(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if state.mcpKillTestErr != nil {
+		return fmt.Errorf("MCP shared kill behavior suite failed: %w\n%s", state.mcpKillTestErr, state.mcpKillTestOutput)
+	}
+	for _, behavior := range []string{
+		"TestKillSession_ReloadsCurrentTargetUnderStableIDLock",
+		"TestKillSession_CanceledRequestDoesNotMutateTmux",
+		"TestKillSession_PropagatesBackendFailure",
+		"TestKillSession_FailsWhenTargetRemains",
+		"TestKillSession_PropagatesProbeFailure",
+	} {
+		if !strings.Contains(state.mcpKillTestOutput, "--- PASS: "+behavior) {
+			return fmt.Errorf("shared kill behavior %s did not pass:\n%s", behavior, state.mcpKillTestOutput)
+		}
 	}
 	return nil
 }

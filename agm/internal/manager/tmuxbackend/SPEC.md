@@ -43,6 +43,8 @@ delivery, interrupt safety, and tmux health checks behind the manager contract.
 
 **TMUXBACKEND-14** When tmux is unavailable or unresponsive, the system shall fail the health check.
 
+**TMUXBACKEND-15** If terminating a manager-backed tmux session fails, then the system shall return the tmux mutation error instead of reporting success.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

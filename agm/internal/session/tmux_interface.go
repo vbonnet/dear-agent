@@ -1,5 +1,7 @@
 package session
 
+import "context"
+
 // SessionInfo holds information about a tmux session
 type SessionInfo struct {
 	Name            string
@@ -55,6 +57,13 @@ type HarnessLivenessBatchChecker interface {
 // implementations that only support the original interface.
 type TmuxSessionKiller interface {
 	KillSession(name string) error
+}
+
+// StrictSessionExistenceChecker distinguishes an absent exact target from
+// socket, permission, timeout, and other tmux failures. Destructive operations
+// use this capability so backend failure cannot be mistaken for absence.
+type StrictSessionExistenceChecker interface {
+	HasSessionStrict(ctx context.Context, name string) (bool, error)
 }
 
 // TmuxInterface provides an abstraction for tmux operations

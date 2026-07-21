@@ -156,16 +156,27 @@ func (b *RestBackend) GetProcessState(session string) (ProcessState, error) {
 
 // TerminateSession stops a running session.
 func (b *RestBackend) TerminateSession(name string) error {
-	b.mu.Lock()
+	b.mu.RLock()
 	proc, exists := b.sessions[name]
+	b.mu.RUnlock()
 	if !exists {
-		b.mu.Unlock()
 		return fmt.Errorf("session %q not found", name)
 	}
-	delete(b.sessions, name)
-	b.mu.Unlock()
+	if err := proc.stop(); err != nil {
+		return err
+	}
 
-	return proc.stop()
+	b.mu.Lock()
+	if b.sessions[name] == proc {
+		delete(b.sessions, name)
+	}
+	b.mu.Unlock()
+	return nil
+}
+
+// KillSession implements backend.Backend's lifecycle mutation contract.
+func (b *RestBackend) KillSession(name string) error {
+	return b.TerminateSession(name)
 }
 
 func init() {

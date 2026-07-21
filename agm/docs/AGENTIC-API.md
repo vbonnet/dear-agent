@@ -30,6 +30,10 @@ All errors use stable codes that agents can match on programmatically.
 | AGM-009 | 404 | `workspace/not_found` | Workspace not found | Workspace detection failed | Set `--workspace` explicitly |
 | AGM-010 | 404 | `uuid/not_associated` | UUID not associated | UUID not linked to session | `agm admin fix-uuid` |
 | AGM-011 | 500 | `storage/error` | Storage error | Storage read/write failed | `agm admin doctor` |
+| AGM-012 | 403/409 | archive verification types | Verification failed | Archive safety or cleanup verification failed | Inspect the returned suggestions |
+| AGM-013 | 409 | `session/kill_protected` | Session recently active | Killing a recently active session without confirmation | Retry with the suggested confirmation flag |
+| AGM-014 | 409 | `session/active_kill` | Session is active | Killing a live harness without stuck confirmation | Retry with `--confirmed-stuck` only when verified stuck |
+| AGM-015 | 409 | `session/lock_timeout` | Session lock timeout | Another lifecycle mutation owns the stable session lock | Wait for it to finish and retry |
 | AGM-100 | 200 | `dry_run` | Dry run | `--dry-run` flag is set | Remove flag to execute |
 
 ## RFC 7807 Error Format

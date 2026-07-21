@@ -44,6 +44,11 @@ Feature: MCP harness parity
     When AGM validates MCP operation discovery parity
     Then the MCP operation registry should expose lifecycle mutations
 
+  Scenario: MCP kill executes and verifies the shared tmux mutation
+    When AGM validates MCP kill mutation wiring
+    Then MCP kill should provide a real tmux dependency to shared operations
+    And shared kill success should require exact target absence
+
   Scenario: MCP server startup guard fails loud before tool registration
     When AGM validates MCP server startup guard coverage
     Then the MCP server SPEC should cover loud workspace and database failures

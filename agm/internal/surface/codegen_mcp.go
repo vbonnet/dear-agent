@@ -178,7 +178,9 @@ func AddArchiveSessionTool(server *mcp.Server, newOpCtx func() (*OpContext, func
 
 // KillSessionMCPInput is the MCP input schema for kill_session.
 type KillSessionMCPInput struct {
-	Identifier string `json:"identifier" jsonschema:"description=Session ID, name, or UUID prefix,required"`
+	Identifier     string `json:"identifier" jsonschema:"description=Session ID, name, or UUID prefix,required"`
+	Force          bool   `json:"force,omitempty" jsonschema:"description=Bypass the recent-activity safety check"`
+	ConfirmedStuck bool   `json:"confirmed_stuck,omitempty" jsonschema:"description=Confirm that a live harness is stuck and may be killed"`
 }
 
 // AddKillSessionTool registers the agm_kill_session MCP tool.
@@ -195,7 +197,9 @@ func AddKillSessionTool(server *mcp.Server, newOpCtx func() (*OpContext, func(),
 
 		req := &KillSessionRequest{
 
-			Identifier: input.Identifier,
+			Identifier:     input.Identifier,
+			Force:          input.Force,
+			ConfirmedStuck: input.ConfirmedStuck,
 		}
 
 		result, opErr := KillSession(opCtx, req)
