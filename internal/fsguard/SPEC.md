@@ -59,7 +59,9 @@ state why.
 
 #### Command-runner stripping
 
-**FSG-13** When a command is prefixed by any runner (`env`, `sudo`, `doas`, `nohup`, `setsid`, `exec`, `time`, `nice`, `ionice`, `stdbuf`, `command`, `builtin`) including their option values (e.g. `sudo -u root`), the system shall strip the runner prefix before classifying the underlying command.
+**FSG-13** When a command is prefixed by any runner (`env`, `sudo`, `doas`, `nohup`, `setsid`, `exec`, `time`, `nice`, `ionice`, `stdbuf`, `command`, `builtin`) including their option values (e.g. `sudo -u root`), the system shall strip the runner prefix before classifying the underlying command. The runner is matched by the command word's basename, so an absolute or PATH-qualified runner (e.g. `/usr/bin/sudo`) is stripped identically.
+
+**FSG-13a** When a command word is an absolute or PATH-qualified path (e.g. `/bin/rm`, `/usr/bin/git`), the system shall classify it by its basename so it cannot bypass the per-command write, git, gh, or runner analysis.
 
 #### Shell nesting
 
@@ -69,13 +71,15 @@ state why.
 
 #### Write-target detection
 
-**FSG-16** When the command is `rm`, `touch`, `mkdir`, `rmdir`, `mv`, `unlink`, `shred`, or `mktemp`, the system shall classify all path-shaped positional arguments as write targets.
+**FSG-16a** For write commands, a positional argument is a target whether it is path-shaped (absolute, `~`, `$HOME`, `.`/`..`) or a bare relative name (e.g. the `AGENTS.md` in `rm AGENTS.md`); bare names are resolved against the current working directory before classification. The value of a value-taking option (e.g. the `755` in `mkdir -m 755 d`) and a leading non-path spec operand (the mode/owner/group in `chmod 755 f`, `chown user f`, `chgrp grp f`) are excluded from targets.
 
-**FSG-17** When the command is `tee`, the system shall classify all path-shaped positional arguments as write targets (file arguments, not stdin).
+**FSG-16** When the command is `rm`, `touch`, `mkdir`, `rmdir`, `mv`, `unlink`, `shred`, or `mktemp`, the system shall classify all positional target arguments (see FSG-16a) as write targets.
 
-**FSG-18** When the command is `cp`, `rsync`, `install`, `ln`, or `link`, the system shall classify only the last path-shaped positional argument (the destination) as a write target.
+**FSG-17** When the command is `tee`, the system shall classify all positional target arguments (see FSG-16a) as write targets (file arguments, not stdin).
 
-**FSG-19** When the command is `chmod`, `chown`, `chgrp`, or `truncate`, the system shall classify all path-shaped positional arguments as write targets.
+**FSG-18** When the command is `cp`, `rsync`, `install`, `ln`, or `link`, the system shall classify only the last positional target argument (see FSG-16a; the destination) as a write target.
+
+**FSG-19** When the command is `chmod`, `chown`, `chgrp`, or `truncate`, the system shall classify all positional target arguments (see FSG-16a; the leading mode/owner/group spec is not a target) as write targets.
 
 **FSG-20** When the command is `dd`, the system shall classify only the `of=` argument as a write target.
 
@@ -91,7 +95,7 @@ state why.
 
 **FSG-25** When a command contains a `&>` redirection, the system shall classify the redirect target as a write target.
 
-**FSG-26** When a redirection token is an fd-dup (e.g. `2>&1`) or a bare digit, the system shall not classify it as a write target.
+**FSG-26** When a redirection token is an fd-dup (e.g. `2>&1`) or a bare digit, the system shall not classify it as a write target. Any other redirect target, including a bare relative name (e.g. `> README.md`), is classified against the current working directory.
 
 #### `cd` tracking
 
@@ -101,9 +105,9 @@ state why.
 
 **FSG-28** When a git subcommand that is read-only (`log`, `diff`, `status`, `show`, `blame`, `describe`, `rev-parse`, `rev-list`, `cat-file`, `ls-files`, `ls-tree`, `shortlog`, `stash list`, `tag`, `fetch`, `remote`, `submodule`) is invoked within `~/src/`, the system shall allow it.
 
-**FSG-29** When `git push` is invoked within `~/src/` without `--force`, `-f`, or `--force-with-lease`, the system shall allow it.
+**FSG-29** When `git push` is invoked within `~/src/` without any force flag or force refspec, the system shall allow it (a plain `git -C ~/src/<repo> push origin main`).
 
-**FSG-30** When `git push` is invoked with `--force`, `-f`, or `--force-with-lease`, the system shall block it regardless of working directory.
+**FSG-30** When `git push` is invoked within `~/src/` with any destructive form — `--force`/`-f`, `--force-with-lease[=…]`, `--force-if-includes`, `--mirror`, or a leading-plus force refspec (e.g. `+main`) — the system shall block it. Detection reuses the `safegit.ForceFlag` parser so the guard and `safe-push` share one definition of "destructive push" rather than maintaining a weaker copy.
 
 **FSG-31** When `git merge`, `git pull`, `git fetch`, `git clone`, or `git worktree` is invoked within `~/src/`, the system shall allow it.
 

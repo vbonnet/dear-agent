@@ -3,6 +3,8 @@ package fsguard
 import (
 	"path/filepath"
 	"strings"
+
+	"github.com/vbonnet/dear-agent/internal/safegit"
 )
 
 // Shell control operators that separate one simple command from the next.
@@ -202,11 +204,11 @@ func isOption(tok string) bool {
 	return strings.HasPrefix(tok, "-") && tok != "-" && tok != "--"
 }
 
-// pathLike reports tokens worth path-classifying: explicit paths, not bare
-// scalars like 755. Restricting to path-shaped tokens avoids misreading option
-// values (the 755 in `mkdir -m 755 dir`) as write targets. The environment
-// convention is absolute / ~ paths, so bare in-cwd filenames are intentionally
-// out of scope.
+// pathLike reports tokens that are unambiguously path-shaped: absolute, ~, or
+// $HOME paths and the . / .. specials. Redirection and sed/perl target
+// detection use it to skip fd-dups and inline scripts. Write-command target
+// detection no longer relies on it alone — bare relative names (e.g.
+// `rm AGENTS.md`) are also targets, resolved against cwd (see targetOperands).
 func pathLike(tok string) bool {
 	return strings.Contains(tok, "/") ||
 		strings.HasPrefix(tok, "~") ||
@@ -221,6 +223,54 @@ func pathyArgs(args []string) []string {
 		if !isOption(a) && pathLike(a) {
 			out = append(out, a)
 		}
+	}
+	return out
+}
+
+// optsWithValue lists, per normalized command basename, the options that
+// consume the following token as a value, so a scalar value is never mistaken
+// for a write target (e.g. the 755 in `mkdir -m 755 dir`). Only the
+// space-separated form leaks a value as a positional; the glued (`-m755`) and
+// `=`-joined (`--mode=755`) forms are single option tokens already dropped by
+// isOption. Reference paths (-r/--reference) are read-only sources, so skipping
+// them here is also correct.
+var optsWithValue = map[string]map[string]bool{
+	"mkdir":    {"-m": true, "--mode": true},
+	"install":  {"-m": true, "--mode": true, "-o": true, "--owner": true, "-g": true, "--group": true},
+	"shred":    {"-n": true, "--iterations": true, "-s": true, "--size": true},
+	"truncate": {"-s": true, "--size": true, "-r": true, "--reference": true},
+}
+
+// leadingSpecOperand lists commands whose first non-option positional is a
+// non-path spec (a permission mode, owner, or group) rather than a write
+// target, e.g. the 755 in `chmod 755 file` or the user in `chown user file`.
+var leadingSpecOperand = map[string]bool{
+	"chmod": true, "chown": true, "chgrp": true,
+}
+
+// targetOperands returns the operands of a write command that name filesystem
+// targets, preserving order. Unlike pathyArgs it keeps bare relative names
+// (which the caller resolves against cwd), while skipping options, the values
+// of value-taking options, and any leading non-path spec operand (a chmod mode
+// or chown owner). This is what lets `rm AGENTS.md` be classified against cwd
+// without misreading `chmod 755 f`'s 755 or `mkdir -m 755 d`'s 755 as targets.
+func targetOperands(cmd string, rest []string) []string {
+	valueOpts := optsWithValue[cmd]
+	out := make([]string, 0, len(rest))
+	leadingSkipped := !leadingSpecOperand[cmd]
+	for i := 0; i < len(rest); i++ {
+		a := rest[i]
+		if isOption(a) {
+			if valueOpts[a] {
+				i++ // consume the option's value so it is not seen as a target
+			}
+			continue
+		}
+		if !leadingSkipped {
+			leadingSkipped = true
+			continue // drop the leading mode/owner/group spec
+		}
+		out = append(out, a)
 	}
 	return out
 }
@@ -245,8 +295,8 @@ func realArgs(tokens []string) []string {
 // slice begins with the actual command word. `sudo -u root rm ~/src/f` and
 // `env FOO=bar rm ~/src/f` both reduce to `rm ~/src/f`.
 func stripRunners(args []string) []string {
-	for len(args) > 0 && commandRunners[args[0]] {
-		runner := args[0]
+	for len(args) > 0 && commandRunners[filepath.Base(args[0])] {
+		runner := filepath.Base(args[0])
 		args = args[1:]
 		for len(args) > 0 {
 			a := args[0]
@@ -318,22 +368,21 @@ func isEnvAssignment(tok string) bool {
 	return true
 }
 
-// writeTargets returns the filesystem paths a write-command would mutate. Only
-// path-shaped positionals are considered, so option values are never mistaken
-// for targets.
+// writeTargets returns the filesystem paths a write-command would mutate,
+// including bare relative names (resolved against cwd by the caller). Option
+// values and leading spec operands are excluded (see targetOperands); dd, sed,
+// and perl keep their bespoke path-shaped extraction.
 func writeTargets(cmd string, rest []string) []string {
 	switch {
-	case destAll[cmd] || cmd == "tee":
-		return pathyArgs(rest)
+	case destAll[cmd] || cmd == "tee" || permsCmds[cmd]:
+		return targetOperands(cmd, rest)
 	case destLast[cmd]:
-		// cp/mv/rsync/install/ln SRC... DEST -> the destination is last.
-		pathy := pathyArgs(rest)
-		if len(pathy) == 0 {
+		// cp/rsync/install/ln SRC... DEST -> the destination is last.
+		ops := targetOperands(cmd, rest)
+		if len(ops) == 0 {
 			return nil
 		}
-		return pathy[len(pathy)-1:]
-	case permsCmds[cmd]:
-		return pathyArgs(rest)
+		return ops[len(ops)-1:]
 	case cmd == "dd":
 		return ddTargets(rest)
 	case cmd == "sed" || cmd == "gsed":
@@ -429,15 +478,6 @@ func parseGit(args []string) (cFlag, sub string, subArgs []string) {
 	return cFlag, "", nil
 }
 
-func isForcePush(subArgs []string) bool {
-	for _, o := range subArgs {
-		if o == "--force" || o == "-f" || strings.HasPrefix(o, "--force-with-lease") {
-			return true
-		}
-	}
-	return false
-}
-
 // checkGit applies the ~/src-specific git rules to a git invocation's
 // arguments (everything after the literal "git"). currentDir is the effective
 // working directory, used when the command has no -C flag.
@@ -461,10 +501,15 @@ func (g *Guard) checkGit(args []string, currentDir string) (allowed bool, messag
 
 	repo := g.repoName(repoDir, src)
 	if sub == "push" {
-		if isForcePush(subArgs) {
-			return false, "You're trying to force-push to ~/src, which can " +
-				"clobber the golden reference. Use a plain `git -C ~/src/" +
-				repo + " push` (no --force), or do the work in a worktree."
+		// Reuse the complete safe-push force parser (internal/safegit) rather
+		// than a weaker local copy: it also rejects --mirror, --force-if-includes,
+		// and leading-plus force refspecs (e.g. +main), any of which can rewrite
+		// remote history just like --force.
+		if flag, ok := safegit.ForceFlag(subArgs); ok {
+			return false, "You're trying to force-push to ~/src (via " + flag +
+				"), which can clobber the golden reference. Force-push, --mirror, " +
+				"and +refspec are all blocked. Use a plain `git -C ~/src/" + repo +
+				" push` (no force flag or +refspec), or do the work in a worktree."
 		}
 		return true, ""
 	}
@@ -511,8 +556,11 @@ func (g *Guard) checkRedirections(tokens []string, cwd string) (allowed bool, me
 			continue
 		}
 		target := tokens[idx+1]
+		// Skip fd-dups (`2>&1`, `>&2`) and bare-digit fds; everything else is a
+		// filename target, including a bare relative name like `> README.md`,
+		// which is resolved against cwd by Classify.
 		if separators[target] || strings.HasPrefix(target, "&") ||
-			isAllDigits(target) || !pathLike(target) {
+			isAllDigits(target) {
 			continue
 		}
 		if ok, msg := g.Classify(target, cwd); !ok {
@@ -531,7 +579,10 @@ func (g *Guard) checkSegments(tokens []string, cwd string, depth int) (allowed b
 		if len(args) == 0 {
 			continue
 		}
-		cmd := args[0]
+		// Classify by the command's basename so an absolute or PATH-qualified
+		// executable (`/bin/rm`, `/usr/bin/git`) is recognized the same as its
+		// bare name; otherwise `/bin/rm ~/src/f` would slip past every map lookup.
+		cmd := filepath.Base(args[0])
 
 		if cmd == "cd" && len(args) > 1 {
 			currentDir = g.expand(args[1], currentDir)

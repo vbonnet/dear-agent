@@ -139,6 +139,38 @@ func TestInspectCommand(t *testing.T) {
 		{"git -f blocked", "git -C ~/src/dear-agent push -f origin main", home, false, "force-push"},
 		{"git commit in worktree allowed", "git -C ~/worktrees/x commit -m y", home, true, ""},
 
+		// Destructive push forms the weaker local parser missed — now via
+		// safegit.ForceFlag (ce-3knl.3).
+		{"git push --mirror blocked", "git -C ~/src/dear-agent push --mirror", home, false, "force-push"},
+		{"git push --force-if-includes blocked", "git -C ~/src/dear-agent push --force-if-includes origin main",
+			home, false, "force-push"},
+		{"git push +refspec blocked", "git -C ~/src/dear-agent push origin +main", home, false, "force-push"},
+		{"git push --force-with-lease=ref blocked", "git -C ~/src/dear-agent push --force-with-lease=main origin main",
+			home, false, "force-push"},
+		{"git push normal refspec allowed", "git -C ~/src/dear-agent push origin main", home, true, ""},
+
+		// Absolute / PATH-qualified executables must normalize to their basename
+		// so they cannot bypass the per-command analysis (ce-3knl.3).
+		{"absolute rm src blocked", "/bin/rm ~/src/dear-agent/f", home, false, "~/src"},
+		{"usr-bin rm src blocked", "/usr/bin/rm -rf ~/src/dear-agent/d", home, false, "~/src"},
+		{"absolute git commit blocked", "/usr/bin/git -C ~/src/dear-agent commit -m x", home, false,
+			"git commit` in ~/src"},
+		{"absolute sudo rm src blocked", "/usr/bin/sudo rm ~/src/dear-agent/f", home, false, "~/src"},
+		{"absolute rm worktree allowed", "/bin/rm ~/worktrees/x/f", home, true, ""},
+
+		// Bare relative targets resolve against cwd: destructive within ~/src,
+		// harmless within a worktree (ce-3knl.3).
+		{"bare rm in src cwd blocked", "rm AGENTS.md", home + "/src/dear-agent", false, "~/src"},
+		{"bare rm nested in src cwd blocked", "rm -f docs/AGENTS.md", home + "/src/dear-agent", false, "~/src"},
+		{"bare redirect in src cwd blocked", "echo x > README.md", home + "/src/dear-agent", false, "~/src"},
+		{"bare redirect append in src cwd blocked", "echo x >> README.md", home + "/src/dear-agent", false, "~/src"},
+		{"bare mv in src cwd blocked", "mv README.md OTHER.md", home + "/src/dear-agent", false, "~/src"},
+		{"bare touch in src cwd blocked", "touch NEWFILE", home + "/src/dear-agent", false, "~/src"},
+		{"bare rm in worktree cwd allowed", "rm main.go", home + "/worktrees/dear-agent/feat", true, ""},
+		{"bare redirect in worktree cwd allowed", "echo x > out.txt", home + "/worktrees/dear-agent/feat", true, ""},
+		{"bare chmod mode not target in worktree", "chmod 755 build.sh", home + "/worktrees/dear-agent/feat", true, ""},
+		{"bare chmod in src cwd blocked", "chmod 644 AGENTS.md", home + "/src/dear-agent", false, "~/src"},
+
 		// cd tracking for git.
 		{"cd then git commit blocked", "cd ~/src/dear-agent && git commit -m x", home, false,
 			"git commit` in ~/src"},
