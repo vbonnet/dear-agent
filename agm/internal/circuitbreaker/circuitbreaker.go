@@ -10,8 +10,8 @@
 //  3. Memory — refuses spawn if free RAM falls below threshold
 //     (default: 10%; override via AGM_MIN_FREE_MEM_PCT)
 //  4. SpawnStagger — minimum time between consecutive spawns
-//  5. Disk — refuses spawn if free disk falls below threshold
-//     (default: 15%; override via AGM_MIN_FREE_DISK_PCT). FAILS CLOSED.
+//  5. Disk — refuses spawn if free disk falls below an absolute reserve
+//     (default: 10 GB; override via AGM_MIN_FREE_DISK_GB). FAILS CLOSED.
 //  6. AgentProcs — refuses spawn if the machine-wide count of agent harness
 //     processes (claude/codex/agm workers, counted from the live process
 //     table, not AGM's session records) reaches the cap (default: NumCPU;
@@ -85,16 +85,23 @@ type Config struct {
 	// Default: 2 minutes.
 	MinSpawnInterval time.Duration
 
-	// MinFreeDiskPct is the minimum percentage of free disk space required on
+	// MinFreeDiskGB is the minimum free disk space, in gigabytes, required on
 	// the volume backing agent working directories (worktrees, sandboxes)
-	// before a spawn is allowed. Default: 15. Override via
-	// AGM_MIN_FREE_DISK_PCT env var.
+	// before a spawn is allowed. Default: 10. Override via
+	// AGM_MIN_FREE_DISK_GB env var.
+	//
+	// This is an absolute reserve, not a percentage of total disk. A
+	// percentage floor scales with disk size and gets punitive on large
+	// disks: 8% of a 460GB disk is ~37GB, which refused spawns at 23GB free
+	// even though that's ample headroom for a worktree checkout plus build
+	// cache. An absolute GB floor stays meaningful regardless of total disk
+	// size.
 	//
 	// Unlike the load and memory gates, the disk gate FAILS CLOSED: if free
 	// disk cannot be determined the spawn is refused, because an unbounded
 	// disk fill is what took the host down (ce-93lw.18) and a blind spawn is
 	// the failure mode that must never recur.
-	MinFreeDiskPct float64
+	MinFreeDiskGB float64
 
 	// MaxAgentProcs caps the number of agent harness processes (the `claude`
 	// and `codex` CLIs and agm-spawned workers) running machine-wide, counted
@@ -124,7 +131,7 @@ func DefaultConfig() Config {
 		MaxLoad5:         float64(runtime.NumCPU()) * 2,
 		MinFreeMemPct:    10,
 		MinSpawnInterval: 2 * time.Minute,
-		MinFreeDiskPct:   15,
+		MinFreeDiskGB:    10,
 		MaxAgentProcs:    runtime.NumCPU(),
 	}
 
@@ -146,9 +153,9 @@ func DefaultConfig() Config {
 		}
 	}
 
-	if v := os.Getenv("AGM_MIN_FREE_DISK_PCT"); v != "" {
+	if v := os.Getenv("AGM_MIN_FREE_DISK_GB"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 {
-			cfg.MinFreeDiskPct = f
+			cfg.MinFreeDiskGB = f
 		}
 	}
 
@@ -182,10 +189,10 @@ type SpawnTimer interface {
 	RecordSpawn(t time.Time) error
 }
 
-// DiskReader provides the percentage of free disk space (0–100) on the volume
+// DiskReader provides the free disk space, in gigabytes, on the volume
 // backing agent working directories.
 type DiskReader interface {
-	FreeDiskPct() (float64, error)
+	FreeDiskGB() (float64, error)
 }
 
 // ProcCounter counts agent harness processes (claude/codex/agm workers)
@@ -443,7 +450,7 @@ func checkSpawnStagger(cfg Config, st SpawnTimer) GateResult {
 // below the floor. It FAILS CLOSED: a read error refuses the spawn, because an
 // unbounded disk fill is the failure that took the host down (ce-93lw.18).
 func checkDisk(cfg Config, dr DiskReader) GateResult {
-	freePct, err := dr.FreeDiskPct()
+	freeGB, err := dr.FreeDiskGB()
 	if err != nil {
 		return GateResult{
 			Gate:    "disk",
@@ -452,13 +459,13 @@ func checkDisk(cfg Config, dr DiskReader) GateResult {
 		}
 	}
 
-	if freePct < cfg.MinFreeDiskPct {
+	if freeGB < cfg.MinFreeDiskGB {
 		return GateResult{
 			Gate:   "disk",
 			Passed: false,
 			Message: fmt.Sprintf(
-				"free disk too low: %.1f%% (minimum: %.0f%%). Reclaim disk (merged worktrees, go-build cache, dead sandboxes) before spawning new sessions.",
-				freePct, cfg.MinFreeDiskPct,
+				"free disk too low: %.1f GB (minimum: %.1f GB). Reclaim disk (merged worktrees, go-build cache, dead sandboxes) before spawning new sessions.",
+				freeGB, cfg.MinFreeDiskGB,
 			),
 		}
 	}
@@ -466,7 +473,7 @@ func checkDisk(cfg Config, dr DiskReader) GateResult {
 	return GateResult{
 		Gate:    "disk",
 		Passed:  true,
-		Message: fmt.Sprintf("free disk: %.1f%% (minimum: %.0f%%)", freePct, cfg.MinFreeDiskPct),
+		Message: fmt.Sprintf("free disk: %.1f GB (minimum: %.1f GB)", freeGB, cfg.MinFreeDiskGB),
 	}
 }
 

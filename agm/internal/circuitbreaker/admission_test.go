@@ -9,11 +9,11 @@ import (
 // --- test doubles for the disk + agent-process gates ---
 
 type stubDisk struct {
-	pct float64
+	gb  float64
 	err error
 }
 
-func (s stubDisk) FreeDiskPct() (float64, error) { return s.pct, s.err }
+func (s stubDisk) FreeDiskGB() (float64, error) { return s.gb, s.err }
 
 type stubProc struct {
 	count int
@@ -30,7 +30,7 @@ func baseCfg() Config {
 		MaxLoad5:         1e9,
 		MinFreeMemPct:    0,
 		MinSpawnInterval: 0,
-		MinFreeDiskPct:   15,
+		MinFreeDiskGB:    15,
 		MaxAgentProcs:    12,
 	}
 }
@@ -44,18 +44,18 @@ func passReaders() (LoadReader, WorkerCounter, SpawnTimer) {
 
 func TestCheckDisk(t *testing.T) {
 	cfg := baseCfg()
-	cfg.MinFreeDiskPct = 15
+	cfg.MinFreeDiskGB = 15
 
 	tests := []struct {
 		name   string
 		reader DiskReader
 		wantOK bool
 	}{
-		{"well above floor", stubDisk{pct: 40}, true},
-		{"just above floor", stubDisk{pct: 15.1}, true},
-		{"at floor passes (strict <, matches mem gate)", stubDisk{pct: 15}, true},
-		{"just below floor refuses", stubDisk{pct: 14.9}, false},
-		{"well below floor refuses", stubDisk{pct: 13.5}, false},
+		{"well above floor", stubDisk{gb: 40}, true},
+		{"just above floor", stubDisk{gb: 15.1}, true},
+		{"at floor passes (strict <, matches mem gate)", stubDisk{gb: 15}, true},
+		{"just below floor refuses", stubDisk{gb: 14.9}, false},
+		{"well below floor refuses", stubDisk{gb: 13.5}, false},
 		{"read error fails closed", stubDisk{err: errors.New("statfs boom")}, false},
 	}
 
@@ -112,7 +112,7 @@ func TestCheckWithNewGates(t *testing.T) {
 
 	t.Run("both gates pass -> allowed", func(t *testing.T) {
 		r := Check(cfg, lr, wc, st, noMem,
-			WithDiskReader(stubDisk{pct: 50}),
+			WithDiskReader(stubDisk{gb: 50}),
 			WithProcCounter(stubProc{count: 1}))
 		if !r.Allowed {
 			t.Fatalf("expected allowed, got denied: %s", FormatDenied(r))
@@ -124,7 +124,7 @@ func TestCheckWithNewGates(t *testing.T) {
 
 	t.Run("low disk refuses", func(t *testing.T) {
 		r := Check(cfg, lr, wc, st, noMem,
-			WithDiskReader(stubDisk{pct: 5}),
+			WithDiskReader(stubDisk{gb: 5}),
 			WithProcCounter(stubProc{count: 1}))
 		if r.Allowed {
 			t.Fatal("expected denial on low disk")
@@ -135,7 +135,7 @@ func TestCheckWithNewGates(t *testing.T) {
 		c := cfg
 		c.MaxAgentProcs = 2
 		r := Check(c, lr, wc, st, noMem,
-			WithDiskReader(stubDisk{pct: 50}),
+			WithDiskReader(stubDisk{gb: 50}),
 			WithProcCounter(stubProc{count: 2}))
 		if r.Allowed {
 			t.Fatal("expected denial at proc cap")
@@ -195,12 +195,12 @@ func TestCountAgentProcsEmpty(t *testing.T) {
 // --- config env overrides ---
 
 func TestDefaultConfigDiskAndProcOverrides(t *testing.T) {
-	t.Setenv("AGM_MIN_FREE_DISK_PCT", "22")
+	t.Setenv("AGM_MIN_FREE_DISK_GB", "22")
 	t.Setenv("AGM_MAX_AGENT_PROCS", "3")
 
 	cfg := DefaultConfig()
-	if cfg.MinFreeDiskPct != 22 {
-		t.Errorf("MinFreeDiskPct = %v, want 22", cfg.MinFreeDiskPct)
+	if cfg.MinFreeDiskGB != 22 {
+		t.Errorf("MinFreeDiskGB = %v, want 22", cfg.MinFreeDiskGB)
 	}
 	if cfg.MaxAgentProcs != 3 {
 		t.Errorf("MaxAgentProcs = %v, want 3", cfg.MaxAgentProcs)
@@ -211,8 +211,8 @@ func TestDefaultConfigDefaults(t *testing.T) {
 	// Ensure the disk floor has a sane non-zero default and the proc cap is
 	// enabled by default (so the gate is real out of the box).
 	cfg := DefaultConfig()
-	if cfg.MinFreeDiskPct <= 0 {
-		t.Errorf("MinFreeDiskPct default = %v, want > 0", cfg.MinFreeDiskPct)
+	if cfg.MinFreeDiskGB <= 0 {
+		t.Errorf("MinFreeDiskGB default = %v, want > 0", cfg.MinFreeDiskGB)
 	}
 	if cfg.MaxAgentProcs <= 0 {
 		t.Errorf("MaxAgentProcs default = %v, want > 0 (gate enabled by default)", cfg.MaxAgentProcs)
