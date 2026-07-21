@@ -9,9 +9,9 @@ import (
 
 // QueryAGMSessions queries AGM sessions in the current workspace
 // Returns list of session metadata from corpus callosum
-func QueryAGMSessions(workspace string, filters map[string]string) ([]map[string]interface{}, error) {
+func QueryAGMSessions(workspace string, filters map[string]string) ([]map[string]any, error) {
 	if !isCorpusCallosumAvailable() {
-		return []map[string]interface{}{}, nil
+		return []map[string]any{}, nil
 	}
 
 	// Build query command
@@ -32,12 +32,12 @@ func QueryAGMSessions(workspace string, filters map[string]string) ([]map[string
 	output, err := cmd.Output()
 	if err != nil {
 		// No results or error - return empty list
-		return []map[string]interface{}{}, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
+		return []map[string]any{}, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
-	var sessions []map[string]interface{}
+	var sessions []map[string]any
 	if err := json.Unmarshal(output, &sessions); err != nil {
-		return []map[string]interface{}{}, fmt.Errorf("failed to parse AGM sessions: %w", err)
+		return []map[string]any{}, fmt.Errorf("failed to parse AGM sessions: %w", err)
 	}
 
 	return sessions, nil
@@ -45,7 +45,7 @@ func QueryAGMSessions(workspace string, filters map[string]string) ([]map[string
 
 // GetCurrentAGMSession retrieves the current AGM session for this workspace
 // Returns session metadata or nil if not found
-func GetCurrentAGMSession(workspace string) (map[string]interface{}, error) {
+func GetCurrentAGMSession(workspace string) (map[string]any, error) {
 	sessions, err := QueryAGMSessions(workspace, map[string]string{
 		"state": "READY",
 	})
@@ -64,9 +64,9 @@ func GetCurrentAGMSession(workspace string) (map[string]interface{}, error) {
 
 // QueryEngramBeads queries Engram beads in the current workspace
 // Returns list of bead metadata from corpus callosum
-func QueryEngramBeads(workspace string, filters map[string]string) ([]map[string]interface{}, error) {
+func QueryEngramBeads(workspace string, filters map[string]string) ([]map[string]any, error) {
 	if !isCorpusCallosumAvailable() {
-		return []map[string]interface{}{}, nil
+		return []map[string]any{}, nil
 	}
 
 	args := []string{
@@ -84,26 +84,26 @@ func QueryEngramBeads(workspace string, filters map[string]string) ([]map[string
 	cmd := exec.Command(corpusCallosumBin(), args...)
 	output, err := cmd.Output()
 	if err != nil {
-		return []map[string]interface{}{}, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
+		return []map[string]any{}, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
-	var beads []map[string]interface{}
+	var beads []map[string]any
 	if err := json.Unmarshal(output, &beads); err != nil {
-		return []map[string]interface{}{}, fmt.Errorf("failed to parse Engram beads: %w", err)
+		return []map[string]any{}, fmt.Errorf("failed to parse Engram beads: %w", err)
 	}
 
 	return beads, nil
 }
 
 // GetBeadsBySession retrieves all beads associated with a specific session
-func GetBeadsBySession(workspace, sessionID string) ([]map[string]interface{}, error) {
+func GetBeadsBySession(workspace, sessionID string) ([]map[string]any, error) {
 	return QueryEngramBeads(workspace, map[string]string{
 		"session_id": sessionID,
 	})
 }
 
 // GetOpenBeads retrieves all open beads in the workspace
-func GetOpenBeads(workspace string) ([]map[string]interface{}, error) {
+func GetOpenBeads(workspace string) ([]map[string]any, error) {
 	return QueryEngramBeads(workspace, map[string]string{
 		"status": "open",
 	})
@@ -111,9 +111,9 @@ func GetOpenBeads(workspace string) ([]map[string]interface{}, error) {
 
 // QueryWayfinderProjects queries Wayfinder projects in the current workspace
 // Returns list of project metadata from corpus callosum
-func QueryWayfinderProjects(workspace string, filters map[string]string) ([]map[string]interface{}, error) {
+func QueryWayfinderProjects(workspace string, filters map[string]string) ([]map[string]any, error) {
 	if !isCorpusCallosumAvailable() {
-		return []map[string]interface{}{}, nil
+		return []map[string]any{}, nil
 	}
 
 	args := []string{
@@ -131,19 +131,19 @@ func QueryWayfinderProjects(workspace string, filters map[string]string) ([]map[
 	cmd := exec.Command(corpusCallosumBin(), args...)
 	output, err := cmd.Output()
 	if err != nil {
-		return []map[string]interface{}{}, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
+		return []map[string]any{}, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
-	var projects []map[string]interface{}
+	var projects []map[string]any
 	if err := json.Unmarshal(output, &projects); err != nil {
-		return []map[string]interface{}{}, fmt.Errorf("failed to parse Wayfinder projects: %w", err)
+		return []map[string]any{}, fmt.Errorf("failed to parse Wayfinder projects: %w", err)
 	}
 
 	return projects, nil
 }
 
 // GetProjectByName retrieves a Wayfinder project by its canonical project name.
-func GetProjectByName(workspace, projectName string) (map[string]interface{}, error) {
+func GetProjectByName(workspace, projectName string) (map[string]any, error) {
 	projects, err := QueryWayfinderProjects(workspace, map[string]string{
 		"project_name": projectName,
 	})
@@ -159,16 +159,16 @@ func GetProjectByName(workspace, projectName string) (map[string]interface{}, er
 }
 
 // GetActiveProjects retrieves all active Wayfinder projects.
-func GetActiveProjects(workspace string) ([]map[string]interface{}, error) {
+func GetActiveProjects(workspace string) ([]map[string]any, error) {
 	return QueryWayfinderProjects(workspace, map[string]string{
 		"status": "in-progress",
 	})
 }
 
 // QueryPhases queries Wayfinder phases for a specific project.
-func QueryPhases(workspace, projectName string) ([]map[string]interface{}, error) {
+func QueryPhases(workspace, projectName string) ([]map[string]any, error) {
 	if !isCorpusCallosumAvailable() {
-		return []map[string]interface{}{}, nil
+		return []map[string]any{}, nil
 	}
 
 	args := []string{
@@ -183,19 +183,19 @@ func QueryPhases(workspace, projectName string) ([]map[string]interface{}, error
 	cmd := exec.Command(corpusCallosumBin(), args...)
 	output, err := cmd.Output()
 	if err != nil {
-		return []map[string]interface{}{}, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
+		return []map[string]any{}, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
-	var phases []map[string]interface{}
+	var phases []map[string]any
 	if err := json.Unmarshal(output, &phases); err != nil {
-		return []map[string]interface{}{}, fmt.Errorf("failed to parse phases: %w", err)
+		return []map[string]any{}, fmt.Errorf("failed to parse phases: %w", err)
 	}
 
 	return phases, nil
 }
 
 // GetCurrentPhase retrieves the current in-progress phase for a project.
-func GetCurrentPhase(workspace, projectName string) (map[string]interface{}, error) {
+func GetCurrentPhase(workspace, projectName string) (map[string]any, error) {
 	phases, err := QueryPhases(workspace, projectName)
 	if err != nil {
 		return nil, err
@@ -213,8 +213,8 @@ func GetCurrentPhase(workspace, projectName string) (map[string]interface{}, err
 
 // CrossComponentQuery performs a cross-component query across multiple tools
 // Returns aggregated results from AGM, Engram, and Wayfinder
-func CrossComponentQuery(workspace string) (map[string]interface{}, error) {
-	result := make(map[string]interface{})
+func CrossComponentQuery(workspace string) (map[string]any, error) {
+	result := make(map[string]any)
 
 	// Query AGM session
 	agmSession, err := GetCurrentAGMSession(workspace)
