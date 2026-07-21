@@ -1924,15 +1924,24 @@ func runAgyLifecycleBehaviorSuite(ctx context.Context, harnessState *harnessPari
 	)
 	transcriptCmd.Dir = bddRepoRoot()
 	transcriptOutput, transcriptErr := transcriptCmd.CombinedOutput()
+	resumeOnboardingCmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/tmux",
+		"-run", `^TestWaitForAgyPromptOnResume(IgnoresTransientQuotedOnboarding|ConfirmsPersistentOnboardingWithoutInput)$`,
+		"-count=1", "-v",
+	)
+	resumeOnboardingCmd.Dir = bddRepoRoot()
+	resumeOnboardingOutput, resumeOnboardingErr := resumeOnboardingCmd.CombinedOutput()
 	lockCmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/lock", "./agm/internal/agysession",
 		"-run", `^Test(FileLockTryLockPreservesPermanentFlockError|AcquireWorkspaceCreateLockStopsOnPermanentFlockError)$`,
 		"-count=1", "-v",
 	)
 	lockCmd.Dir = bddRepoRoot()
 	lockOutput, lockErr := lockCmd.CombinedOutput()
-	harnessState.agyLifecycleTestOutput = string(output) + "\n" + string(transcriptOutput) + "\n" + string(lockOutput)
+	harnessState.agyLifecycleTestOutput = string(output) + "\n" + string(transcriptOutput) + "\n" + string(resumeOnboardingOutput) + "\n" + string(lockOutput)
 	if runErr == nil {
 		runErr = transcriptErr
+	}
+	if runErr == nil {
+		runErr = resumeOnboardingErr
 	}
 	if runErr == nil {
 		runErr = lockErr
@@ -1987,6 +1996,8 @@ func agyAdapterShouldPreserveCanonicalLaunchAndResumePolicy(ctx context.Context)
 		"TestAgyResumeSessionPropagatesReadinessFailureBeforeAttach",
 		"TestWaitForResumedAgyPropagatesOnboardingRequired",
 		"TestWaitForResumedAgyToleratesSlowStartup",
+		"TestWaitForAgyPromptOnResumeIgnoresTransientQuotedOnboarding",
+		"TestWaitForAgyPromptOnResumeConfirmsPersistentOnboardingWithoutInput",
 	)
 }
 

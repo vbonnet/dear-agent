@@ -35,6 +35,21 @@ var agyOnboardingScreens = []struct {
 	},
 }
 
+const (
+	agyPromptPollInterval           = 500 * time.Millisecond
+	agyOnboardingDetectionDisabled  = 0
+	agyOnboardingDetectionImmediate = 1
+)
+
+const (
+	// A cold resume can replay transcript text before rendering the final
+	// composer. The bounded confirmation window lets that replay settle while
+	// still failing well before the 60-second resume readiness timeout when a
+	// real interactive overlay owns the pane.
+	agyResumeOnboardingConfirmationWindow = 10 * time.Second
+	agyResumeOnboardingConfirmationChecks = 1 + int(agyResumeOnboardingConfirmationWindow/agyPromptPollInterval)
+)
+
 // ErrAgyOnboardingRequired means AGY is waiting for an operator to make
 // first-run preference, legal, or data-use choices. AGM deliberately does not
 // accept those choices on the operator's behalf.
@@ -178,6 +193,15 @@ func WaitForAgyPromptAfterInput(ctx context.Context, sessionName string, timeout
 	return waitForAgyPromptAfterInputWithRuntime(ctx, sessionName, timeout, realAgyPromptRuntime())
 }
 
+// WaitForAgyPromptOnResume polls for readiness while a saved AGY conversation
+// is replayed. It confirms an onboarding-shaped screen across multiple
+// captures so quoted transcript text can settle into a composer, but still
+// returns ErrAgyOnboardingRequired when a real interactive overlay persists.
+func WaitForAgyPromptOnResume(ctx context.Context, sessionName string, timeout time.Duration) error {
+	debug.Log("\n🔍 Starting resumed AGY prompt detection for session: %s", sessionName)
+	return waitForAgyPromptOnResumeWithRuntime(ctx, sessionName, timeout, realAgyPromptRuntime())
+}
+
 func dismissAgySurveyOnce(runtime agyPromptRuntime, sessionName, content string, alreadyDismissed bool) (dismissed, handled bool) {
 	if alreadyDismissed || !ContainsAgySurveyPrompt(content) {
 		return alreadyDismissed, false
@@ -191,27 +215,73 @@ func dismissAgySurveyOnce(runtime agyPromptRuntime, sessionName, content string,
 }
 
 func waitForAgyPromptWithRuntime(baseCtx context.Context, sessionName string, timeout time.Duration, runtime agyPromptRuntime) error {
-	return waitForAgyPromptWithRuntimeMode(baseCtx, sessionName, timeout, runtime, true)
+	return waitForAgyPromptWithRuntimeMode(baseCtx, sessionName, timeout, runtime, agyOnboardingDetectionImmediate)
 }
 
 func waitForAgyPromptAfterInputWithRuntime(baseCtx context.Context, sessionName string, timeout time.Duration, runtime agyPromptRuntime) error {
-	return waitForAgyPromptWithRuntimeMode(baseCtx, sessionName, timeout, runtime, false)
+	return waitForAgyPromptWithRuntimeMode(baseCtx, sessionName, timeout, runtime, agyOnboardingDetectionDisabled)
 }
 
-func agyOnboardingWaitError(content string, detectOnboarding bool) error {
-	if !detectOnboarding || !containsAgyOnboardingPrompt(content) {
-		return nil
+func waitForAgyPromptOnResumeWithRuntime(baseCtx context.Context, sessionName string, timeout time.Duration, runtime agyPromptRuntime) error {
+	return waitForAgyPromptWithRuntimeMode(baseCtx, sessionName, timeout, runtime, agyResumeOnboardingConfirmationChecks)
+}
+
+func observeAgyOnboarding(content string, prior, required int) (observations int, pending bool, err error) {
+	if required == 0 || !containsAgyOnboardingPrompt(content) {
+		return 0, false, nil
 	}
-	return fmt.Errorf("%w: run `agy` interactively, review the theme and Terms of Service/Data Use choices, complete onboarding, then retry AGM; AGM will not accept legal or data-use choices automatically", ErrAgyOnboardingRequired)
+	observations = prior + 1
+	if observations < required {
+		return observations, true, nil
+	}
+	return observations, false, fmt.Errorf("%w: run `agy` interactively, review the theme and Terms of Service/Data Use choices, complete onboarding, then retry AGM; AGM will not accept legal or data-use choices automatically", ErrAgyOnboardingRequired)
 }
 
-func waitForAgyPromptWithRuntimeMode(baseCtx context.Context, sessionName string, timeout time.Duration, runtime agyPromptRuntime, detectOnboarding bool) error {
+type agyPromptWaitState struct {
+	onboardingConfirmationChecks int
+	onboardingObservations       int
+	trustAccepted                bool
+	surveyDismissed              bool
+}
+
+func (state *agyPromptWaitState) handleBlockingPrompt(ctx context.Context, runtime agyPromptRuntime, sessionName, content string, checkCount int) (bool, error) {
+	var onboardingPending bool
+	var err error
+	state.onboardingObservations, onboardingPending, err = observeAgyOnboarding(content, state.onboardingObservations, state.onboardingConfirmationChecks)
+	if err != nil {
+		return false, err
+	}
+	if onboardingPending {
+		runtime.sleep(ctx, agyPromptPollInterval)
+		return true, nil
+	}
+
+	var surveyHandled bool
+	state.surveyDismissed, surveyHandled = dismissAgySurveyOnce(runtime, sessionName, content, state.surveyDismissed)
+	if surveyHandled {
+		runtime.sleep(ctx, agyPromptPollInterval)
+		return true, nil
+	}
+	if state.trustAccepted || !containsAgyTrustPromptPattern(content) {
+		return false, nil
+	}
+
+	debug.Log("🛡️  AGY trust prompt detected (check #%d) — auto-answering with Enter", checkCount)
+	if err := runtime.sendKeys(sessionName, "Enter"); err != nil {
+		debug.Log("⚠️  Failed to answer AGY trust prompt: %v", err)
+	} else {
+		state.trustAccepted = true
+	}
+	runtime.sleep(ctx, time.Second)
+	return true, nil
+}
+
+func waitForAgyPromptWithRuntimeMode(baseCtx context.Context, sessionName string, timeout time.Duration, runtime agyPromptRuntime, onboardingConfirmationChecks int) error {
 	ctx, cancel := context.WithTimeout(baseCtx, timeout)
 	defer cancel()
 
 	checkCount := 0
-	trustAccepted := false
-	surveyDismissed := false
+	state := agyPromptWaitState{onboardingConfirmationChecks: onboardingConfirmationChecks}
 
 	for {
 		select {
@@ -226,32 +296,20 @@ func waitForAgyPromptWithRuntimeMode(baseCtx context.Context, sessionName string
 			return fmt.Errorf("timeout or cancellation waiting for AGY prompt: %w", ctx.Err())
 		}
 		if err != nil {
-			runtime.sleep(ctx, 500*time.Millisecond)
+			runtime.sleep(ctx, agyPromptPollInterval)
 			continue
 		}
 
 		content := string(output)
-		if err := agyOnboardingWaitError(content, detectOnboarding); err != nil {
+		blockingPromptHandled, err := state.handleBlockingPrompt(ctx, runtime, sessionName, content, checkCount)
+		if err != nil {
 			return err
 		}
-		var surveyHandled bool
-		surveyDismissed, surveyHandled = dismissAgySurveyOnce(runtime, sessionName, content, surveyDismissed)
-		if surveyHandled {
-			runtime.sleep(ctx, 500*time.Millisecond)
-			continue
-		}
-		if !trustAccepted && containsAgyTrustPromptPattern(content) {
-			debug.Log("🛡️  AGY trust prompt detected (check #%d) — auto-answering with Enter", checkCount)
-			if err := runtime.sendKeys(sessionName, "Enter"); err != nil {
-				debug.Log("⚠️  Failed to answer AGY trust prompt: %v", err)
-			} else {
-				trustAccepted = true
-			}
-			runtime.sleep(ctx, time.Second)
+		if blockingPromptHandled {
 			continue
 		}
 
-		if containsAgyReadyPattern(content) || (surveyDismissed && containsAgyPromptAfterSurvey(content)) {
+		if containsAgyReadyPattern(content) || (state.surveyDismissed && containsAgyPromptAfterSurvey(content)) {
 			debug.Log("✓ AGY prompt detected (check #%d)", checkCount)
 			runtime.sleep(ctx, 500*time.Millisecond)
 			if err := ctx.Err(); err != nil {
@@ -263,6 +321,6 @@ func waitForAgyPromptWithRuntimeMode(baseCtx context.Context, sessionName string
 		if checkCount%10 == 0 {
 			debug.Log("⏳ Still waiting for AGY prompt... (check #%d)", checkCount)
 		}
-		runtime.sleep(ctx, 500*time.Millisecond)
+		runtime.sleep(ctx, agyPromptPollInterval)
 	}
 }

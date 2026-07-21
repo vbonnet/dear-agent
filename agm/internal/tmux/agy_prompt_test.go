@@ -107,6 +107,62 @@ func TestWaitForAgyPromptAfterInputIgnoresQuotedOnboarding(t *testing.T) {
 	}
 }
 
+func TestWaitForAgyPromptOnResumeIgnoresTransientQuotedOnboarding(t *testing.T) {
+	outputs := [][]byte{
+		[]byte("previous composer\n>\n> you: quote this screen\nWelcome to Antigravity CLI!\nChoose your color scheme:\n> terminal"),
+		[]byte("previous composer\n>\n> you: quote this screen\nWelcome to Antigravity CLI!\nChoose your color scheme:\n> terminal\nresume complete\n>"),
+	}
+	captureIndex := 0
+	captures := 0
+	sends := 0
+	runtime := agyPromptRuntime{
+		capture: func(context.Context, string) ([]byte, error) {
+			output := outputs[captureIndex]
+			captures++
+			if captureIndex < len(outputs)-1 {
+				captureIndex++
+			}
+			return output, nil
+		},
+		sendKeys: func(string, string) error {
+			sends++
+			return nil
+		},
+		sleep: func(context.Context, time.Duration) {},
+	}
+
+	if err := waitForAgyPromptOnResumeWithRuntime(t.Context(), "agy-resume-transcript", time.Second, runtime); err != nil {
+		t.Fatalf("resume wait rejected transient quoted onboarding text: %v", err)
+	}
+	if captures != len(outputs) || sends != 0 {
+		t.Fatalf("resume transcript I/O = %d capture(s), %d send(s); want %d captures and no input", captures, sends, len(outputs))
+	}
+}
+
+func TestWaitForAgyPromptOnResumeConfirmsPersistentOnboardingWithoutInput(t *testing.T) {
+	captures := 0
+	sends := 0
+	runtime := agyPromptRuntime{
+		capture: func(context.Context, string) ([]byte, error) {
+			captures++
+			return []byte("Welcome to Antigravity CLI!\nChoose your color scheme:\n> terminal"), nil
+		},
+		sendKeys: func(string, string) error {
+			sends++
+			return nil
+		},
+		sleep: func(context.Context, time.Duration) {},
+	}
+
+	err := waitForAgyPromptOnResumeWithRuntime(t.Context(), "agy-resume-onboarding", time.Second, runtime)
+	if !errors.Is(err, ErrAgyOnboardingRequired) {
+		t.Fatalf("resume wait error = %v, want ErrAgyOnboardingRequired", err)
+	}
+	if captures != agyResumeOnboardingConfirmationChecks || sends != 0 {
+		t.Fatalf("persistent onboarding I/O = %d capture(s), %d send(s); want %d captures and no input", captures, sends, agyResumeOnboardingConfirmationChecks)
+	}
+}
+
 func TestAgySurveyOverridesReadyPrompt(t *testing.T) {
 	content := "Task complete\n>\nHow's the CLI experience so far? [1] Good [2] Fine [3] Bad [0] Skip"
 	if !ContainsAgySurveyPrompt(content) {

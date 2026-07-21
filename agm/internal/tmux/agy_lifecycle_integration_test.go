@@ -85,6 +85,95 @@ fi
 	}
 }
 
+func TestAgyResumeLifecycleDistinguishesTranscriptFromPersistentOnboarding(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+
+	fixtureDir := t.TempDir()
+	socketDir, err := os.MkdirTemp("", "agm-agy-resume-onboarding-")
+	if err != nil {
+		t.Fatalf("create short tmux socket directory: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(socketDir); err != nil {
+			t.Logf("remove tmux socket directory: %v", err)
+		}
+	})
+	socketPath := filepath.Join(socketDir, "agm.sock")
+	inputPath := filepath.Join(fixtureDir, "unexpected-resume-input.txt")
+	binDir := filepath.Join(fixtureDir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatalf("create fixture bin directory: %v", err)
+	}
+	fixturePath := filepath.Join(binDir, "agy")
+	fixture := `#!/bin/sh
+if [ "$1" = "transient" ]; then
+  printf 'previous composer\n>\n> you: quote this screen\nWelcome to Antigravity CLI!\nChoose your color scheme:\n> terminal\n'
+  sleep 1
+  printf 'resume complete\n>\n'
+  sleep 30
+  exit
+fi
+printf 'Welcome to Antigravity CLI!\nChoose your color scheme:\n> terminal\n'
+if IFS= read -r line; then
+  printf '%s\n' "$line" > "$AGY_UNEXPECTED_INPUT"
+fi
+`
+	if err := os.WriteFile(fixturePath, []byte(fixture), 0o755); err != nil {
+		t.Fatalf("write AGY resume fixture: %v", err)
+	}
+
+	t.Setenv("AGM_TMUX_SOCKET", socketPath)
+	t.Setenv("AGY_UNEXPECTED_INPUT", inputPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Cleanup(func() { cleanupAgyFixtureTmuxServer(t, socketPath) })
+	fixturePathExport := "export PATH='" + strings.ReplaceAll(binDir, "'", "'\"'\"'") + "':\"$PATH\""
+
+	const transcriptSession = "agy-resume-transcript-fixture"
+	if err := tmux.NewSession(transcriptSession, fixtureDir); err != nil {
+		t.Fatalf("create transient transcript session: %v", err)
+	}
+	if err := tmux.SendCommand(transcriptSession, fixturePathExport); err != nil {
+		t.Fatalf("prepend AGY fixture to transient pane PATH: %v", err)
+	}
+	if err := tmux.SendCommand(transcriptSession, "agy transient"); err != nil {
+		t.Fatalf("launch transient AGY resume fixture: %v", err)
+	}
+	if err := tmux.WaitForAgyPromptOnResume(t.Context(), transcriptSession, 15*time.Second); err != nil {
+		output, captureErr := tmux.CapturePaneOutput(transcriptSession, 30)
+		if captureErr != nil {
+			t.Fatalf("resume wait rejected transient transcript: %v (capture failed: %v)", err, captureErr)
+		}
+		t.Fatalf("resume wait rejected transient transcript: %v\npane output:\n%s", err, output)
+	}
+
+	const onboardingSession = "agy-resume-onboarding-fixture"
+	if err := tmux.NewSession(onboardingSession, fixtureDir); err != nil {
+		t.Fatalf("create persistent onboarding session: %v", err)
+	}
+	if err := tmux.SendCommand(onboardingSession, fixturePathExport); err != nil {
+		t.Fatalf("prepend AGY fixture to onboarding pane PATH: %v", err)
+	}
+	if err := tmux.SendCommand(onboardingSession, "agy persistent"); err != nil {
+		t.Fatalf("launch persistent AGY resume fixture: %v", err)
+	}
+	err = tmux.WaitForAgyPromptOnResume(t.Context(), onboardingSession, 15*time.Second)
+	if !errors.Is(err, tmux.ErrAgyOnboardingRequired) {
+		output, captureErr := tmux.CapturePaneOutput(onboardingSession, 30)
+		if captureErr != nil {
+			t.Fatalf("persistent onboarding wait error = %v, want ErrAgyOnboardingRequired (capture failed: %v)", err, captureErr)
+		}
+		t.Fatalf("persistent onboarding wait error = %v, want ErrAgyOnboardingRequired\npane output:\n%s", err, output)
+	}
+	time.Sleep(250 * time.Millisecond)
+	if input, readErr := os.ReadFile(inputPath); readErr == nil {
+		t.Fatalf("AGM sent input to persistent onboarding fixture: %q", string(input))
+	} else if !errors.Is(readErr, os.ErrNotExist) {
+		t.Fatalf("inspect persistent onboarding input evidence: %v", readErr)
+	}
+}
+
 func TestAgyLifecycleThroughIsolatedTmuxFixture(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")

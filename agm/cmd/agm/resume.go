@@ -946,7 +946,7 @@ func waitForResumedClaude(ctx context.Context, health *HealthStatus) error {
 }
 
 func waitForResumedAgy(ctx context.Context, health *HealthStatus) error {
-	return waitForResumedAgyWithWait(ctx, health, tmux.WaitForAgyPrompt)
+	return waitForResumedAgyWithWait(ctx, health, tmux.WaitForAgyPromptOnResume)
 }
 
 func waitForResumedAgyWithWait(ctx context.Context, health *HealthStatus, wait func(context.Context, string, time.Duration) error) error {
