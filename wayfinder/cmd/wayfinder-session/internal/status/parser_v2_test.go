@@ -388,6 +388,24 @@ schema_version: "2.0"`,
 ---`,
 			wantErr: true,
 		},
+		{
+			name: "content after closing delimiter",
+			content: `---
+schema_version: "2.0"
+project_name: "Test"
+---
+# retired Markdown status`,
+			wantErr: true,
+		},
+		{
+			name: "whitespace after closing delimiter",
+			content: `---
+schema_version: "2.0"
+project_name: "Test"
+---
+   `,
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {

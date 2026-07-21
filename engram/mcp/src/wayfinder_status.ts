@@ -16,6 +16,15 @@ const RISK_LEVELS = ['XS', 'S', 'M', 'L', 'XL'] as const;
 const PROJECT_STATUSES = ['planning', 'in-progress', 'blocked', 'completed', 'abandoned'] as const;
 const WAYPOINT_STATUSES = ['pending', 'completed', 'in-progress', 'blocked', 'skipped'] as const;
 const SKIPPABLE_WAYPOINTS = ['DESIGN', 'SPEC', 'PLAN'] as const;
+const LIFECYCLE_STATUSES: Record<string, string> = {
+  working: 'in-progress',
+  input_required: 'blocked',
+  dependency_blocked: 'blocked',
+  validating: 'in-progress',
+  completed: 'completed',
+  failed: 'blocked',
+  canceled: 'abandoned',
+};
 const KNOWN_FIELDS = new Set([
   'schema_version',
   'project_name',
@@ -141,6 +150,28 @@ function completedWaypoints(record: RecordValue): Set<string> {
   return complete;
 }
 
+function validateConditionalStatus(record: RecordValue, status: string): void {
+  if (status === 'completed') {
+    requireTimestamp(record, 'completion_date');
+  }
+  if (status === 'blocked') {
+    requiredString(record, 'blocked_reason');
+  }
+
+  const lifecycle = record.lifecycle_state;
+  if (lifecycle === undefined || lifecycle === null || lifecycle === '') return;
+  if (typeof lifecycle !== 'string' || LIFECYCLE_STATUSES[lifecycle] === undefined) {
+    throw new Error(`invalid Wayfinder V2 status: invalid lifecycle_state ${JSON.stringify(lifecycle)}`);
+  }
+  const expectedStatus = LIFECYCLE_STATUSES[lifecycle];
+  if (status !== expectedStatus) {
+    throw new Error(`invalid Wayfinder V2 status: lifecycle_state ${JSON.stringify(lifecycle)} requires status ${JSON.stringify(expectedStatus)}`);
+  }
+  if (lifecycle === 'input_required') requiredString(record, 'input_needed');
+  if (lifecycle === 'dependency_blocked') requiredString(record, 'blocked_on');
+  if (lifecycle === 'failed') requiredString(record, 'error_message');
+}
+
 export function parseWayfinderStatus(content: string): WayfinderStatusSummary {
   const document = parseDocument(extractFrontmatter(content), { strict: true, uniqueKeys: true });
   if (document.errors.length > 0) {
@@ -164,6 +195,7 @@ export function parseWayfinderStatus(content: string): WayfinderStatusSummary {
   const status = requireEnum(record, 'status', PROJECT_STATUSES);
   requireTimestamp(record, 'created_at');
   requireTimestamp(record, 'updated_at');
+	validateConditionalStatus(record, status);
 
   const complete = completedWaypoints(record);
   for (const skipped of validateSkipPhases(record)) complete.add(skipped);

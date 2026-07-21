@@ -2,7 +2,6 @@ package validator
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -80,7 +79,7 @@ func checkDeliverableMarkdown(projectDir, currentPhase string, untrackedFiles []
 }
 
 // checkCodeFiles checks for untracked code files (BUILD only)
-func checkCodeFiles(projectDir, phaseName string, untrackedFiles []string) []string {
+func checkCodeFiles(_ string, phaseName string, untrackedFiles []string) []string {
 	if phaseName != "BUILD" {
 		return []string{}
 	}
@@ -91,19 +90,9 @@ func checkCodeFiles(projectDir, phaseName string, untrackedFiles []string) []str
 		".java", ".c", ".cpp", ".rs", ".sh", ".bash",
 	}
 
-	entries, err := os.ReadDir(projectDir)
-	if err != nil {
-		return violations
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		name := entry.Name()
+	for _, name := range untrackedFiles {
 		for _, ext := range codeExtensions {
-			if strings.HasSuffix(name, ext) && isFileUntracked(name, untrackedFiles) {
+			if strings.HasSuffix(name, ext) {
 				violations = append(violations, name)
 				break // Avoid duplicate entries if multiple extensions match
 			}
@@ -129,7 +118,7 @@ func isGitRepo(dir string) bool {
 
 // getUntrackedFilesInProjectDir returns list of untracked files in project directory
 func getUntrackedFilesInProjectDir(projectDir string) ([]string, error) {
-	cmd := exec.Command("git", "status", "--porcelain", ".")
+	cmd := exec.Command("git", "status", "--porcelain", "--untracked-files=all", ".")
 	cmd.Dir = projectDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {

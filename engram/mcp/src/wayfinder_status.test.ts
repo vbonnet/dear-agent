@@ -46,4 +46,18 @@ describe('parseWayfinderStatus', () => {
       /unknown field "mystery"/,
     );
   });
+
+  it('requires blocked_reason for blocked status', () => {
+    assert.throws(
+      () => parseWayfinderStatus(canonical.replace('status: in-progress', 'status: blocked')),
+      /blocked_reason is required/,
+    );
+  });
+
+  it('enforces lifecycle and status consistency', () => {
+    assert.throws(
+      () => parseWayfinderStatus(canonical.replace('status: in-progress', 'status: in-progress\nlifecycle_state: completed')),
+      /lifecycle_state "completed" requires status "completed"/,
+    );
+  });
 });

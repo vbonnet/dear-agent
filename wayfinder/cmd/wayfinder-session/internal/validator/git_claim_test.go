@@ -84,6 +84,14 @@ func TestValidateGitCommitStatus(t *testing.T) {
 			errContains: "server.py",
 		},
 		{
+			name:        "BUILD - nested code file untracked (VIOLATION)",
+			phaseName:   "BUILD",
+			files:       []string{"BUILD-implementation.md", "src/foo.go"},
+			gitCommit:   false,
+			wantErr:     true,
+			errContains: "src/foo.go",
+		},
+		{
 			name:      "BUILD - current deliverable and wayfinder internal files allowed",
 			phaseName: "BUILD",
 			files:     []string{"BUILD-implementation.md", ".wayfinder/session.json"},

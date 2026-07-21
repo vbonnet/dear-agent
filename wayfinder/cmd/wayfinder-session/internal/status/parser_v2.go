@@ -98,9 +98,11 @@ func extractV2Frontmatter(content string) (string, error) {
 
 	var yamlLines []string
 	foundClosing := false
+	closingLine := -1
 	for i := 1; i < len(lines); i++ {
 		if lines[i] == "---" {
 			foundClosing = true
+			closingLine = i
 			break
 		}
 		yamlLines = append(yamlLines, lines[i])
@@ -112,6 +114,11 @@ func extractV2Frontmatter(content string) (string, error) {
 
 	if len(yamlLines) == 0 {
 		return "", fmt.Errorf("invalid V2 format: empty YAML content")
+	}
+	for _, line := range lines[closingLine+1:] {
+		if strings.TrimSpace(line) != "" {
+			return "", fmt.Errorf("invalid V2 format: content after closing --- is not allowed")
+		}
 	}
 
 	return strings.Join(yamlLines, "\n"), nil
