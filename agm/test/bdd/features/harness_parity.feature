@@ -356,7 +356,7 @@ Feature: Harness parity
     Given a stopped Codex CLI session without a tmux pane
     When AGM validates the Codex resume transaction
     Then Codex resume success should require process and composer readiness
-    And a failed Codex resume should remove only its creation-specific tmux identity and compensate provisional metadata
+    And a failed Codex resume should compensate owned provisional metadata before removing its creation-specific tmux identity and preserve tmux when ownership was superseded
     And Codex activity updates should follow resume readiness
 
   Scenario: Orphaned AGY conversation can be imported and resumed

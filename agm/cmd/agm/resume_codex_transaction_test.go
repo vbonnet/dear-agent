@@ -243,7 +243,7 @@ func TestResumeSessionCodexCompensatesCanonicalNameWhenOrdinaryPromptDeliveryFai
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("resumeSessionWithRuntime() error = %v, want %v", err, wantErr)
 	}
-	wantCalls := []string{"create", "dispatch", "wait", "persist", "prompt", "kill", "compensate"}
+	wantCalls := []string{"create", "dispatch", "wait", "persist", "prompt", "compensate", "kill"}
 	if !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("resume calls = %v, want %v", calls, wantCalls)
 	}
@@ -268,7 +268,10 @@ func TestResumeSessionCodexCompensationPreservesNewerMetadata(t *testing.T) {
 		calls = append(calls, "persist")
 		return persistResumeTmuxName(ctx, adapter, m, name)
 	}
-	runtime.restoreTmuxName = restoreResumeTmuxName
+	runtime.restoreTmuxName = func(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest, change resumeTmuxNameChange) error {
+		calls = append(calls, "compensate")
+		return restoreResumeTmuxName(ctx, adapter, m, change)
+	}
 	runtime.deliverPrompt = func(string, string, string, bool) error {
 		calls = append(calls, "prompt")
 		latest, err := adapter.GetSession(m.SessionID)
@@ -292,6 +295,10 @@ func TestResumeSessionCodexCompensationPreservesNewerMetadata(t *testing.T) {
 	}
 	if stored.Tmux.SessionName != tmux.SanitizeSessionName(health.TmuxSessionName) || stored.Context.Notes != "newer writer after provisional persistence" {
 		t.Fatalf("newer metadata was overwritten: name=%q notes=%q", stored.Tmux.SessionName, stored.Context.Notes)
+	}
+	wantCalls := []string{"create", "dispatch", "wait", "persist", "prompt", "compensate"}
+	if !reflect.DeepEqual(calls, wantCalls) {
+		t.Fatalf("resume calls = %v, want %v; superseded metadata must preserve tmux", calls, wantCalls)
 	}
 }
 

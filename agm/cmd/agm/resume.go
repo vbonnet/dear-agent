@@ -620,9 +620,6 @@ func killCreatedResumeTmux(created createdResumeTmux) error {
 }
 
 func rollbackCreatedResumeTmux(ctx context.Context, runtime resumeSessionRuntime, adapter *dolt.Adapter, m *manifest.Manifest, created createdResumeTmux, nameChange resumeTmuxNameChange, primaryErr error) error {
-	if cleanupErr := runtime.killTmux(created); cleanupErr != nil {
-		return errors.Join(primaryErr, fmt.Errorf("failed to clean up newly created tmux session %q (%s): %w", created.Name, created.Identity.ID, cleanupErr))
-	}
 	if nameChange.Applied {
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
@@ -630,8 +627,14 @@ func rollbackCreatedResumeTmux(ctx context.Context, runtime resumeSessionRuntime
 			return errors.Join(primaryErr, fmt.Errorf("resume runtime does not provide tmux-name compensation"))
 		}
 		if restoreErr := runtime.restoreTmuxName(cleanupCtx, adapter, m, nameChange); restoreErr != nil {
+			// Another writer now owns the canonical metadata (or storage could not
+			// prove restoration). Preserve the ready tmux session so that newer
+			// metadata never points at a resource this transaction destroyed.
 			return errors.Join(primaryErr, fmt.Errorf("failed to compensate canonical tmux-name persistence: %w", restoreErr))
 		}
+	}
+	if cleanupErr := runtime.killTmux(created); cleanupErr != nil {
+		return errors.Join(primaryErr, fmt.Errorf("failed to clean up newly created tmux session %q (%s): %w", created.Name, created.Identity.ID, cleanupErr))
 	}
 	return primaryErr
 }
@@ -730,8 +733,10 @@ func resumeSessionWithRuntime(ctx context.Context, adapter *dolt.Adapter, sessio
 	if transactionalPrompt {
 		// Codex canonical-name persistence must commit before the optional prompt
 		// can trigger work. Prompt delivery is strict for a cold Codex resume;
-		// any failure compensates both the exact created tmux identity and this
-		// transaction's compare-and-swap metadata write. Other harnesses retain
+		// any failure first compensates this transaction's compare-and-swap
+		// metadata write and then removes the exact created tmux identity. If a
+		// newer writer superseded metadata ownership, the ready tmux session is
+		// preserved. Other harnesses retain
 		// their established warning-only prompt semantics and finalization order.
 		if err := deliverPostResumePrompt(ctx, health.TmuxSessionName, runtime, createdTmux.owned()); err != nil {
 			if createdTmux.owned() {

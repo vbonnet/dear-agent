@@ -293,7 +293,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^a stopped Codex CLI session without a tmux pane$`, aStoppedCodexCLISessionWithoutTmuxPane)
 	ctx.Step(`^AGM validates the Codex resume transaction$`, agmValidatesTheCodexResumeTransaction)
 	ctx.Step(`^Codex resume success should require process and composer readiness$`, codexResumeSuccessShouldRequireProcessAndComposerReadiness)
-	ctx.Step(`^a failed Codex resume should remove only its creation-specific tmux identity and compensate provisional metadata$`, aFailedCodexResumeShouldRemoveOnlyItsNewlyCreatedTmuxSession)
+	ctx.Step(`^a failed Codex resume should compensate owned provisional metadata before removing its creation-specific tmux identity and preserve tmux when ownership was superseded$`, aFailedCodexResumeShouldRemoveOnlyItsNewlyCreatedTmuxSession)
 	ctx.Step(`^Codex activity updates should follow resume readiness$`, codexActivityUpdatesShouldFollowResumeReadiness)
 }
 
