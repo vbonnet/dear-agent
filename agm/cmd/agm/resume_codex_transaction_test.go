@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -678,6 +679,22 @@ func TestKillCreatedResumeTmuxPreservesSameNamedReplacement(t *testing.T) {
 	}
 }
 
+func waitForTmuxServerExit(t *testing.T, socketPath string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		conn, err := net.DialTimeout("unix", socketPath, 50*time.Millisecond)
+		if err != nil {
+			return
+		}
+		_ = conn.Close()
+		if time.Now().After(deadline) {
+			t.Fatalf("tmux server at %s did not exit after kill-server", socketPath)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestKillCreatedResumeTmuxPreservesIDReusedAfterServerRestart(t *testing.T) {
 	requireCodexResumeTmuxIntegration(t)
 	socketPath := setupRegressionSocket(t)
@@ -689,6 +706,7 @@ func TestKillCreatedResumeTmuxPreservesIDReusedAfterServerRestart(t *testing.T) 
 	if err := exec.Command("tmux", "-S", socketPath, "kill-server").Run(); err != nil {
 		t.Fatalf("kill original tmux server: %v", err)
 	}
+	waitForTmuxServerExit(t, socketPath)
 	replacementIdentity, err := tmux.NewSessionWithIdentity(sessionName, t.TempDir())
 	if err != nil {
 		t.Fatalf("NewSessionWithIdentity(replacement) error = %v", err)
