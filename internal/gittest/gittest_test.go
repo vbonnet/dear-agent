@@ -134,7 +134,7 @@ func TestSandboxRepositoriesCannotRunHostHooks(t *testing.T) {
 	exercise(t, dir, func(dir string, args ...string) { sandbox.Run(t, dir, args...) })
 
 	if canaryFired(t, canary) {
-		contents, _ := os.ReadFile(canary) //nolint:errcheck // diagnostic only
+		contents, _ := os.ReadFile(canary)
 		t.Fatalf("sandboxed repository executed a host hook (%d invocation(s)):\n%s",
 			strings.Count(string(contents), "fired"), contents)
 	}

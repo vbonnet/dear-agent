@@ -134,7 +134,7 @@ func (s *Sandbox) Command(dir string, args ...string) *exec.Cmd {
 	full := make([]string, 0, len(s.args)+len(args))
 	full = append(full, s.args...)
 	full = append(full, args...)
-	cmd := exec.Command("git", full...) //nolint:gosec // fixed binary; arguments are test-controlled
+	cmd := exec.Command("git", full...)
 	cmd.Dir = dir
 	cmd.Env = s.Env()
 	return cmd
