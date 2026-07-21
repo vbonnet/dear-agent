@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // hookPath resolves scripts/git-hooks/post-merge relative to this test file so
@@ -31,16 +33,12 @@ func hookPath(t *testing.T) string {
 	return p
 }
 
-// git runs a git command in dir and fails the test on error.
+// git runs a git command in dir and fails the test on error. The sandbox
+// supplies a deterministic identity and, critically, an empty hooks path: these
+// repositories are merged into, and an inherited host hook would run for real.
 func git(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	// Deterministic identity; no global config dependence.
-	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
-		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
-	)
+	cmd := gittest.Command(t, dir, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
@@ -50,10 +48,19 @@ func git(t *testing.T, dir string, args ...string) {
 // commit, and returns its path.
 func newRepo(t *testing.T) string {
 	t.Helper()
+	return newRepoAt(t, t.TempDir())
+}
+
+// newRepoAt is newRepo at a caller-chosen path, for tests that need the repo
+// to sit at a specific place relative to a managed root.
+func newRepoAt(t *testing.T, dir string) string {
+	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
-	dir := t.TempDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	git(t, dir, "init", "-q", "-b", "main")
 	if err := os.WriteFile(filepath.Join(dir, "f"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
@@ -82,6 +89,19 @@ func stubAGM(t *testing.T, sentinel string) string {
 // returns the process exit; the hook must always exit 0.
 func runHook(t *testing.T, repoDir, agmDir string, extraEnv ...string) {
 	t.Helper()
+	runHookWith(t, repoDir, agmDir,
+		append([]string{"DEAR_AGENT_MANAGED_REPO_ROOTS=" + repoDir}, extraEnv...)...)
+}
+
+// runHookUnscoped runs the hook WITHOUT opting the temp repo into the managed
+// roots, so the managed-repository gate is the thing under test.
+func runHookUnscoped(t *testing.T, repoDir, agmDir string, extraEnv ...string) {
+	t.Helper()
+	runHookWith(t, repoDir, agmDir, extraEnv...)
+}
+
+func runHookWith(t *testing.T, repoDir, agmDir string, extraEnv ...string) {
+	t.Helper()
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")
 	}
@@ -92,7 +112,9 @@ func runHook(t *testing.T, repoDir, agmDir string, extraEnv ...string) {
 	}
 	cmd := exec.Command("bash", hookPath(t))
 	cmd.Dir = repoDir
-	cmd.Env = append(os.Environ(),
+	// gittest.Env is the base so the git commands the hook itself runs are
+	// sanitized too; the test's own overrides come last and win.
+	cmd.Env = append(gittest.Env(t),
 		"HOME="+home,
 		"PATH="+path,
 		"AGM_POST_MERGE_SWEEP_SYNC=1", // deterministic: run sweep in foreground
@@ -159,6 +181,52 @@ func TestPostMerge_OptOut_Skips(t *testing.T) {
 	runHook(t, repo, agmDir, "AGM_POST_MERGE_SWEEP=0")
 	if swept(t, sentinel) {
 		t.Fatal("sweep ran despite AGM_POST_MERGE_SWEEP=0")
+	}
+}
+
+// The hook is installed globally (core.hooksPath), so it fires after a merge
+// in EVERY repository — including the throwaway ones a test suite creates. On
+// 2026-07-10 that ran a repository-wide `agm worktree sweep --execute` from
+// two temporary repositories and deleted two live worktrees (F-01, ce-3knl.1).
+// Outside the managed roots the hook must do nothing at all.
+//
+// Note this is the one hook test that does NOT set
+// DEAR_AGENT_MANAGED_REPO_ROOTS: every other test opts its temp repo in, so
+// without this case the gate itself would never be exercised.
+func TestPostMerge_UnmanagedRepo_NoOp(t *testing.T) {
+	repo := newRepo(t)
+	sentinel := sentinelPath(t)
+	agmDir := stubAGM(t, sentinel)
+	runHookUnscoped(t, repo, agmDir)
+	if swept(t, sentinel) {
+		t.Fatal("sweep ran in a repository outside the managed roots")
+	}
+}
+
+// A repository nested under a managed root is managed. ~/worktrees/<repo>/<wt>
+// is the normal shape, so the gate must match by path prefix, not equality.
+func TestPostMerge_NestedUnderManagedRoot_Sweeps(t *testing.T) {
+	root := t.TempDir()
+	repo := newRepoAt(t, filepath.Join(root, "some-repo", "some-worktree"))
+	sentinel := sentinelPath(t)
+	agmDir := stubAGM(t, sentinel)
+	runHook(t, repo, agmDir, "DEAR_AGENT_MANAGED_REPO_ROOTS="+root)
+	if !swept(t, sentinel) {
+		t.Fatal("a repository nested under a managed root must be managed")
+	}
+}
+
+// A root that merely shares a textual prefix with the repo path is not a
+// parent of it: ~/src must not manage a repository in ~/src-scratch.
+func TestPostMerge_SiblingPrefixRoot_NoOp(t *testing.T) {
+	base := t.TempDir()
+	repo := newRepoAt(t, filepath.Join(base, "src-scratch"))
+	sentinel := sentinelPath(t)
+	agmDir := stubAGM(t, sentinel)
+	runHookUnscoped(t, repo, agmDir,
+		"DEAR_AGENT_MANAGED_REPO_ROOTS="+filepath.Join(base, "src"))
+	if swept(t, sentinel) {
+		t.Fatal("a sibling sharing a path prefix was treated as managed")
 	}
 }
 
@@ -262,8 +330,7 @@ func installed(t *testing.T, recordFile string) []string {
 // revParse returns the resolved commit for ref in dir.
 func revParse(t *testing.T, dir, ref string) string {
 	t.Helper()
-	cmd := exec.Command("git", "rev-parse", ref)
-	cmd.Dir = dir
+	cmd := gittest.Command(t, dir, "rev-parse", ref)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git rev-parse %s in %s: %v\n%s", ref, dir, err, out)
@@ -325,10 +392,11 @@ func runRebuildRecord(t *testing.T, repo string, extraEnv ...string) string {
 	goDir := stubGo(t, record)
 	cmd := exec.Command("bash", hookPath(t))
 	cmd.Dir = repo
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(gittest.Env(t),
 		"HOME="+home,
 		"PATH="+goDir+string(os.PathListSeparator)+os.Getenv("PATH"),
-		"AGM_POST_MERGE_SWEEP=0", // isolate Stage 1: no sweep
+		"DEAR_AGENT_MANAGED_REPO_ROOTS="+repo, // scope the hook to this temp repo
+		"AGM_POST_MERGE_SWEEP=0",              // isolate Stage 1: no sweep
 	)
 	cmd.Env = append(cmd.Env, extraEnv...)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -362,9 +430,10 @@ func TestRebuild_AtomicInstall_NewInode(t *testing.T) {
 		goDir := stubGo(t, record)
 		cmd := exec.Command("bash", hookPath(t))
 		cmd.Dir = repo
-		cmd.Env = append(os.Environ(),
+		cmd.Env = append(gittest.Env(t),
 			"HOME="+home, "GOBIN="+gobin,
 			"PATH="+goDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+			"DEAR_AGENT_MANAGED_REPO_ROOTS="+repo,
 			"AGM_POST_MERGE_SWEEP=0",
 		)
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -1063,11 +1132,12 @@ func runDeployRecord(t *testing.T, repo string, extraEnv ...string) string {
 	makeDir := stubMake(t, record)
 	cmd := exec.Command("bash", hookPath(t))
 	cmd.Dir = repo
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(gittest.Env(t),
 		"HOME="+home,
 		"PATH="+makeDir+string(os.PathListSeparator)+os.Getenv("PATH"),
-		"DEAR_AGENT_POST_MERGE_REBUILD=0", // isolate Stage 1.6 from Stage 1
-		"AGM_POST_MERGE_SWEEP=0",          // isolate Stage 1.6 from Stage 2
+		"DEAR_AGENT_MANAGED_REPO_ROOTS="+repo, // scope the hook to this temp repo
+		"DEAR_AGENT_POST_MERGE_REBUILD=0",     // isolate Stage 1.6 from Stage 1
+		"AGM_POST_MERGE_SWEEP=0",              // isolate Stage 1.6 from Stage 2
 	)
 	cmd.Env = append(cmd.Env, extraEnv...)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -1202,9 +1272,10 @@ func runBeadTransition(t *testing.T, repo, beadsDB string, extraEnv ...string) [
 	bdDir := stubBd(t, closeLog)
 	cmd := exec.Command("bash", hookPath(t))
 	cmd.Dir = repo
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(gittest.Env(t),
 		"HOME="+home,
 		"PATH="+bdDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"DEAR_AGENT_MANAGED_REPO_ROOTS="+repo, // scope the hook to this temp repo
 		"DEAR_AGENT_POST_MERGE_REBUILD=0",
 		"DEAR_AGENT_POST_MERGE_VERIFY=0",
 		"AGM_POST_MERGE_SWEEP=0",

@@ -53,7 +53,10 @@
 # else. Sharing the default-branch gate keeps that contract in one place.
 #
 # Scope: this hook is GLOBAL (installed via core.hooksPath / chezmoi), so it
-# runs after every merge in every repo. Each stage therefore self-scopes:
+# runs after every merge in every repo — including throwaway repositories a
+# test suite creates. It therefore refuses outright in any repository outside
+# the managed roots (see the managed-repository gate below), and each stage
+# additionally self-scopes:
 #   • Stage 1 acts only in a repo that actually contains the target binary
 #     packages (today, that is dear-agent). Every other repo is a silent no-op.
 #   • Stage 1.6 acts only in a repo that carries deploy/manifest.yaml (dear-agent).
@@ -79,6 +82,11 @@
 #   AGM_POST_MERGE_SWEEP=0                    skip Stage 2 (worktree sweep)
 #   DEAR_AGENT_POST_MERGE_BEAD_TRANSITION=0   skip Stage 3 (bead transition)
 #
+# Scope control:
+#   DEAR_AGENT_MANAGED_REPO_ROOTS   colon-separated roots this hook may act in
+#                                   (default: ~/src:~/worktrees). A repository
+#                                   outside every root is a complete no-op.
+#
 # Test seams: AGM_POST_MERGE_SWEEP_SYNC=1 runs the sweep in the foreground
 # (deterministic for tests; also handy if you want `git pull` to wait).
 # DEAR_AGENT_BEADS_DB overrides the Beads DB path Stage 3 transitions against.
@@ -87,6 +95,75 @@
 # clobbers a chezmoi-managed hooks dir — see cmd/install-post-merge-hook).
 
 set -u
+
+# ── Managed-repository gate ────────────────────────────────────────────────
+#
+# This hook is installed globally (core.hooksPath), so it fires after a merge
+# in EVERY repository on this host — including throwaway repositories created
+# by test suites. On 2026-07-10 that is exactly what happened: two temporary
+# repositories created by a plain `go test ./...` merged a branch, ran this
+# hook, and launched two `agm worktree sweep --execute` processes that deleted
+# two live worktrees (audit finding F-01, bead ce-3knl.1).
+#
+# The default-branch gate below does not catch that case: a temporary repo
+# initialized with `-b main` is sitting on its default branch. Nor do the
+# per-stage self-scoping checks — Stage 2 asks only whether `agm` is on PATH,
+# and a repository-wide sweep does not care which repo triggered it.
+#
+# So every host-mutating stage runs only in a repository this host explicitly
+# manages: a checkout under ~/src or ~/worktrees, or under a root named in
+# DEAR_AGENT_MANAGED_REPO_ROOTS (colon-separated; it REPLACES the defaults
+# rather than extending them, so a test can scope the hook to its own sandbox).
+# Every other repository is a silent, complete no-op.
+#
+# This is opt-in by construction. An opt-out variable would not have prevented
+# the incident: the temp repos did not know to set one.
+
+# path_within <path> <root>: true when <path> is <root> or lies beneath it.
+# Compares whole path components, so ~/src does not match ~/src-scratch.
+path_within() {
+  case "$1" in
+    "$2") return 0 ;;
+    "$2"/*) return 0 ;;
+  esac
+  return 1
+}
+
+# real_path <path>: <path> with symlinks resolved, empty when unresolvable.
+# macOS reports $TMPDIR as /var/folders/... while the real path is
+# /private/var/folders/..., so an unresolved prefix comparison would let a
+# temp repo pass a check against a resolved root (or fail one against an
+# unresolved root).
+real_path() {
+  ( cd "$1" 2>/dev/null && pwd -P ) 2>/dev/null || true
+}
+
+is_managed_repo() {
+  _top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
+  [ -n "${_top}" ] || return 1
+  _top="$(real_path "${_top}")"
+  [ -n "${_top}" ] || return 1
+
+  _roots="${DEAR_AGENT_MANAGED_REPO_ROOTS:-${HOME}/src:${HOME}/worktrees}"
+  _rest="${_roots}"
+  while [ -n "${_rest}" ]; do
+    case "${_rest}" in
+      *:*) _root="${_rest%%:*}"; _rest="${_rest#*:}" ;;
+      *)   _root="${_rest}";     _rest="" ;;
+    esac
+    [ -n "${_root}" ] || continue
+    _real_root="$(real_path "${_root}")"
+    [ -n "${_real_root}" ] || continue
+    if path_within "${_top}" "${_real_root}"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+if ! is_managed_repo; then
+  exit 0
+fi
 
 # ── Resolve the repo's default branch (origin/HEAD, else local main/master) ─
 default_branch=""
