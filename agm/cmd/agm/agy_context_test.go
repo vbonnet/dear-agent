@@ -8,6 +8,7 @@ import (
 
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 func TestWaitForResumedAgyUsesCallerContext(t *testing.T) {
@@ -44,9 +45,9 @@ func TestResumeSessionStopsCancellationAfterManifestRead(t *testing.T) {
 					cancel()
 					return &manifest.Manifest{}, nil
 				},
-				createTmux: func(string, string) (string, error) {
+				createTmux: func(string, string) (tmux.SessionIdentity, error) {
 					mutatedTmux = true
-					return "test-session-id", nil
+					return tmux.SessionIdentity{}, nil
 				},
 				attach: func(string) error {
 					mutatedTmux = true

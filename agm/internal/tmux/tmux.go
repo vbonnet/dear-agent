@@ -2,6 +2,8 @@ package tmux
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -57,20 +59,53 @@ func HasSessionStrict(name string) (bool, error) {
 	return false, tmuxCommandError("check session", normalizedName, output, err)
 }
 
-// HasSessionIDStrict checks an immutable tmux session identity without
-// allowing a same-named replacement to satisfy the lookup.
-func HasSessionIDStrict(sessionID string) (bool, error) {
-	if !IsSessionID(sessionID) {
-		return false, fmt.Errorf("invalid tmux session identity %q", sessionID)
+// SessionIdentity identifies one specific tmux session creation. ID is local
+// to a tmux server generation and may be reused after a server restart; Token
+// is stored on the session at creation so the pair remains creation-specific.
+type SessionIdentity struct {
+	ID    string
+	Token string
+}
+
+// Valid reports whether both parts of a creation-specific identity are valid.
+func (identity SessionIdentity) Valid() bool {
+	if !IsSessionID(identity.ID) || len(identity.Token) != 32 {
+		return false
 	}
-	output, err := RunWithTimeout(context.Background(), globalTimeout, "tmux", "-S", GetSocketPath(), "has-session", "-t", sessionID)
+	decoded, err := hex.DecodeString(identity.Token)
+	return err == nil && len(decoded) == 16
+}
+
+func newSessionIdentity() (SessionIdentity, error) {
+	tokenBytes := make([]byte, 16)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return SessionIdentity{}, fmt.Errorf("generate tmux session identity: %w", err)
+	}
+	return SessionIdentity{Token: hex.EncodeToString(tokenBytes)}, nil
+}
+
+func sanitizeNewSessionName(name string) string {
+	sanitizedName := SanitizeSessionName(name)
+	if sanitizedName != name {
+		fmt.Fprintf(os.Stderr, "Warning: Sanitized session name from %q to %q (tmux requires alphanumeric, dash, underscore)\n", name, sanitizedName)
+	}
+	return sanitizedName
+}
+
+// HasSessionIdentityStrict checks a creation-specific tmux identity without
+// allowing a same-named replacement or a new server's reused ID to satisfy it.
+func HasSessionIdentityStrict(identity SessionIdentity) (bool, error) {
+	if !identity.Valid() {
+		return false, fmt.Errorf("invalid tmux session identity %q", identity.ID)
+	}
+	output, err := RunWithTimeout(context.Background(), globalTimeout, "tmux", "-S", GetSocketPath(), "display-message", "-p", "-t", identity.ID, "#{@agm_session_identity}")
 	if err == nil {
-		return true, nil
+		return strings.TrimSpace(string(output)) == identity.Token, nil
 	}
 	if isMissingSessionOutput(output) {
 		return false, nil
 	}
-	return false, tmuxCommandError("check session identity", sessionID, output, err)
+	return false, tmuxCommandError("check session identity", identity.ID, output, err)
 }
 
 func isMissingSessionOutput(output []byte) bool {
@@ -232,39 +267,39 @@ func EnableAutoRespawn(sessionName string) error {
 
 // NewSession creates a new tmux session with optimized settings.
 func NewSession(name string, workDir string) error {
-	_, err := NewSessionWithID(name, workDir)
+	_, err := NewSessionWithIdentity(name, workDir)
 	return err
 }
 
-// NewSessionWithID creates a new tmux session and returns tmux's immutable
-// server-local session identity (for example, "$7"). Transactional callers
-// must retain this identity so later compensation cannot kill a different
-// session that reused the same human-readable name.
+// NewSessionWithIdentity creates a new tmux session and returns a server-local
+// ID paired with a random option stored on that specific session creation.
+// Transactional callers must retain both so later compensation cannot kill a
+// replacement that reused either the name or ID after a server restart.
 //
-// If initialization fails after tmux created the session, the returned ID is
-// non-empty together with the error so the caller can still compensate the
-// exact resource it owns.
-func NewSessionWithID(name string, workDir string) (string, error) {
+// If initialization fails after tmux created the session, the returned
+// identity remains non-empty so the caller can compensate the exact resource.
+func NewSessionWithIdentity(name string, workDir string) (SessionIdentity, error) {
 	ctx := context.Background()
 	socketPath := GetSocketPath()
-	var sessionID string
-
-	// Sanitize session name (tmux only allows alphanumeric, dash, underscore)
-	sanitizedName := SanitizeSessionName(name)
-	if sanitizedName != name {
-		// Log warning but continue with sanitized name
-		fmt.Fprintf(os.Stderr, "Warning: Sanitized session name from %q to %q (tmux requires alphanumeric, dash, underscore)\n", name, sanitizedName)
+	identity, err := newSessionIdentity()
+	if err != nil {
+		return SessionIdentity{}, err
 	}
+
+	// Sanitize session name (tmux only allows alphanumeric, dash, underscore).
+	sanitizedName := sanitizeNewSessionName(name)
 
 	// Clean stale socket if exists
 	if err := CleanStaleSocket(); err != nil {
-		return "", fmt.Errorf("failed to clean stale socket: %w", err)
+		return SessionIdentity{}, fmt.Errorf("failed to clean stale socket: %w", err)
 	}
 
 	// Lock tmux server for session creation + settings (prevent parallel mutations)
-	err := withTmuxLock(func() error {
+	err = withTmuxLock(func() error {
 		// Create session with detached mode (use sanitized name)
-		cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "new-session", "-d", "-P", "-F", "#{session_id}", "-s", sanitizedName, "-c", workDir)
+		cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath,
+			"new-session", "-d", "-P", "-F", "#{session_id}", "-s", sanitizedName, "-c", workDir,
+			";", "set-option", "-t", sanitizedName, "@agm_session_identity", identity.Token)
 		defer cancel()
 		output, err := cmd.Output()
 		if err != nil {
@@ -278,9 +313,9 @@ func NewSessionWithID(name string, workDir string) (string, error) {
 			}
 			return fmt.Errorf("failed to create tmux session: %w", err)
 		}
-		sessionID = strings.TrimSpace(string(output))
-		if !IsSessionID(sessionID) {
-			return fmt.Errorf("tmux created session %q but returned invalid session identity %q", sanitizedName, sessionID)
+		identity.ID = strings.TrimSpace(string(output))
+		if !identity.Valid() {
+			return fmt.Errorf("tmux created session %q but returned invalid session identity %q", sanitizedName, identity.ID)
 		}
 
 		// Inject tmux settings for better UX
@@ -353,7 +388,7 @@ func NewSessionWithID(name string, workDir string) (string, error) {
 		return nil
 	})
 	if err != nil {
-		return sessionID, err
+		return identity, err
 	}
 
 	// Verify the pane actually landed in workDir and repair it if not.
@@ -362,9 +397,9 @@ func NewSessionWithID(name string, workDir string) (string, error) {
 	// die instantly (ce-5zbg). Must run outside withTmuxLock: the repair path
 	// sends a `cd` via SendCommand, which takes the lock itself.
 	if err := EnsureSessionWorkDir(sanitizedName, workDir); err != nil {
-		return sessionID, err
+		return identity, err
 	}
-	return sessionID, nil
+	return identity, nil
 }
 
 // IsSessionID reports whether target is a tmux server-local session identity.

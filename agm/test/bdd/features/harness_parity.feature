@@ -33,6 +33,8 @@
 # RELATED-SPEC: agm/internal/readiness/SPEC.md
 # RELATED-SPEC: agm/internal/send/SPEC.md
 # RELATED-SPEC: agm/internal/manifest/SPEC.md
+# RELATED-SPEC: agm/internal/dolt/SPEC.md
+# RELATED-SPEC: agm/internal/dolt/migrations/SPEC.md
 # RELATED-SPEC: agm/internal/statusline/SPEC.md
 # RELATED-SPEC: agm/cmd/agm-bus/SPEC.md
 # RELATED-SPEC: agm/cmd/agm-aware-reaper/SPEC.md
@@ -354,7 +356,7 @@ Feature: Harness parity
     Given a stopped Codex CLI session without a tmux pane
     When AGM validates the Codex resume transaction
     Then Codex resume success should require process and composer readiness
-    And a failed Codex resume should remove only its immutable newly created tmux identity and compensate provisional metadata
+    And a failed Codex resume should remove only its creation-specific tmux identity and compensate provisional metadata
     And Codex activity updates should follow resume readiness
 
   Scenario: Orphaned AGY conversation can be imported and resumed

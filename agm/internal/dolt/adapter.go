@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS agm_sessions (
   context_notes TEXT,
   claude_uuid TEXT,
   tmux_session_name TEXT,
+  tmux_session_revision TEXT,
   metadata TEXT,
   permission_mode TEXT,
   permission_mode_updated_at TIMESTAMP,

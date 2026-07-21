@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
@@ -269,7 +270,7 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 		UPDATE agm_sessions
 		SET updated_at = ?, status = ?, name = ?, harness = ?, model = ?,
 			context_project = ?, context_purpose = ?, context_tags = ?,
-			context_notes = ?, claude_uuid = ?, tmux_session_name = ?,
+			context_notes = ?, claude_uuid = ?, tmux_session_name = ?, tmux_session_revision = NULL,
 			metadata = ?,
 			permission_mode = ?, permission_mode_updated_at = ?, permission_mode_source = ?,
 			is_test = ?,
@@ -336,7 +337,7 @@ func (a *Adapter) UpdateTmuxSessionName(ctx context.Context, sessionID, sessionN
 
 	result, err := a.conn.ExecContext(ctx, `
 		UPDATE agm_sessions
-		SET updated_at = ?, tmux_session_name = ?
+		SET updated_at = ?, tmux_session_name = ?, tmux_session_revision = NULL
 		WHERE id = ? AND workspace = ?
 	`, time.Now(), sessionName, sessionID, a.workspace)
 	if err != nil {
@@ -353,14 +354,14 @@ func (a *Adapter) UpdateTmuxSessionName(ctx context.Context, sessionID, sessionN
 }
 
 // TmuxSessionNameChange is the exact adapter-owned revision for a provisional
-// tmux-name write. Raw timestamp values are retained because SQLite time.Time
-// round trips can normalize offsets and are therefore unsafe compare tokens.
+// tmux-name write. Its opaque token is compared directly by both MySQL/Dolt and
+// SQLite, avoiding dialect-specific timestamp casts and precision differences.
 type TmuxSessionNameChange struct {
-	SessionID            string
-	PreviousName         string
-	PreviousUpdatedAtRaw string
-	CurrentName          string
-	CurrentUpdatedAtRaw  string
+	SessionID        string
+	PreviousName     string
+	PreviousRevision sql.NullString
+	CurrentName      string
+	CurrentRevision  string
 }
 
 // BeginTmuxSessionNameChange persists a provisional canonical tmux name while
@@ -383,12 +384,13 @@ func (a *Adapter) BeginTmuxSessionNameChange(ctx context.Context, sessionID, new
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var previousName, previousUpdatedAtRaw string
+	var previousName string
+	var previousRevision sql.NullString
 	if err := tx.QueryRowContext(ctx, `
-		SELECT tmux_session_name, CAST(updated_at AS TEXT)
+		SELECT tmux_session_name, tmux_session_revision
 		FROM agm_sessions
 		WHERE id = ? AND workspace = ?
-	`, sessionID, a.workspace).Scan(&previousName, &previousUpdatedAtRaw); err != nil {
+	`, sessionID, a.workspace).Scan(&previousName, &previousRevision); err != nil {
 		return nil, fmt.Errorf("read tmux session name revision: %w", err)
 	}
 	if previousName == newName {
@@ -397,16 +399,15 @@ func (a *Adapter) BeginTmuxSessionNameChange(ctx context.Context, sessionID, new
 		}
 		return nil, nil
 	}
-	currentUpdatedAtRaw := time.Now().UTC().Format(time.RFC3339Nano)
-	if currentUpdatedAtRaw == previousUpdatedAtRaw {
-		currentUpdatedAtRaw = time.Now().UTC().Add(time.Nanosecond).Format(time.RFC3339Nano)
-	}
+	currentRevision := uuid.NewString()
+	previousRevisionValue := nullableStringValue(previousRevision)
 	result, err := tx.ExecContext(ctx, `
 		UPDATE agm_sessions
-		SET updated_at = ?, tmux_session_name = ?
+		SET updated_at = ?, tmux_session_name = ?, tmux_session_revision = ?
 		WHERE id = ? AND workspace = ?
-		  AND tmux_session_name = ? AND CAST(updated_at AS TEXT) = ?
-	`, currentUpdatedAtRaw, newName, sessionID, a.workspace, previousName, previousUpdatedAtRaw)
+		  AND tmux_session_name = ?
+		  AND ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)
+	`, time.Now(), newName, currentRevision, sessionID, a.workspace, previousName, previousRevisionValue, previousRevisionValue)
 	if err != nil {
 		return nil, fmt.Errorf("write provisional tmux session name: %w", err)
 	}
@@ -421,12 +422,19 @@ func (a *Adapter) BeginTmuxSessionNameChange(ctx context.Context, sessionID, new
 		return nil, fmt.Errorf("commit provisional tmux session name: %w", err)
 	}
 	return &TmuxSessionNameChange{
-		SessionID:            sessionID,
-		PreviousName:         previousName,
-		PreviousUpdatedAtRaw: previousUpdatedAtRaw,
-		CurrentName:          newName,
-		CurrentUpdatedAtRaw:  currentUpdatedAtRaw,
+		SessionID:        sessionID,
+		PreviousName:     previousName,
+		PreviousRevision: previousRevision,
+		CurrentName:      newName,
+		CurrentRevision:  currentRevision,
 	}, nil
+}
+
+func nullableStringValue(value sql.NullString) any {
+	if !value.Valid {
+		return nil
+	}
+	return value.String
 }
 
 // RestoreTmuxSessionNameChange compensates only the exact provisional revision
@@ -435,16 +443,36 @@ func (a *Adapter) BeginTmuxSessionNameChange(ctx context.Context, sessionID, new
 func (a *Adapter) RestoreTmuxSessionNameChange(ctx context.Context, change TmuxSessionNameChange) (bool, error) {
 	result, err := a.conn.ExecContext(ctx, `
 		UPDATE agm_sessions
-		SET updated_at = ?, tmux_session_name = ?
+		SET updated_at = ?, tmux_session_name = ?, tmux_session_revision = ?
 		WHERE id = ? AND workspace = ?
-		  AND tmux_session_name = ? AND CAST(updated_at AS TEXT) = ?
-	`, change.PreviousUpdatedAtRaw, change.PreviousName, change.SessionID, a.workspace, change.CurrentName, change.CurrentUpdatedAtRaw)
+		  AND tmux_session_name = ? AND tmux_session_revision = ?
+	`, time.Now(), change.PreviousName, nullableStringValue(change.PreviousRevision), change.SessionID, a.workspace, change.CurrentName, change.CurrentRevision)
 	if err != nil {
 		return false, fmt.Errorf("restore provisional tmux session name: %w", err)
 	}
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		return false, fmt.Errorf("get restored tmux name rows affected: %w", err)
+	}
+	return rowsAffected == 1, nil
+}
+
+// CompleteTmuxSessionNameChange releases the provisional ownership token after
+// the irreversible prompt boundary succeeds. A false result means another
+// writer already superseded the provisional revision.
+func (a *Adapter) CompleteTmuxSessionNameChange(ctx context.Context, change TmuxSessionNameChange) (bool, error) {
+	result, err := a.conn.ExecContext(ctx, `
+		UPDATE agm_sessions
+		SET tmux_session_revision = NULL
+		WHERE id = ? AND workspace = ?
+		  AND tmux_session_name = ? AND tmux_session_revision = ?
+	`, change.SessionID, a.workspace, change.CurrentName, change.CurrentRevision)
+	if err != nil {
+		return false, fmt.Errorf("complete provisional tmux session name: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("get completed tmux name rows affected: %w", err)
 	}
 	return rowsAffected == 1, nil
 }

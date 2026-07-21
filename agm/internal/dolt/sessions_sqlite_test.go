@@ -1,6 +1,7 @@
 package dolt
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -222,6 +223,42 @@ func TestSQLiteTmuxSessionNameCompensationRejectsNewerMetadata(t *testing.T) {
 	}
 	if final.Tmux.SessionName != "canonical-name" || final.Context.Notes != "newer writer" {
 		t.Fatalf("newer state was overwritten: name=%q notes=%q", final.Tmux.SessionName, final.Context.Notes)
+	}
+}
+
+func TestSQLiteTmuxSessionNameChangeCompletesOwnershipToken(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "tmux-cas-complete-session",
+		Name:          "tmux-cas-complete-session",
+		Workspace:     adapter.Workspace(),
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+		Context:       manifest.Context{Project: t.TempDir()},
+		Tmux:          manifest.Tmux{SessionName: "legacy-name"},
+	}
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+	change, err := adapter.BeginTmuxSessionNameChange(t.Context(), m.SessionID, "canonical-name")
+	if err != nil || change == nil {
+		t.Fatalf("BeginTmuxSessionNameChange() = (%v, %v), want non-nil change", change, err)
+	}
+	completed, err := adapter.CompleteTmuxSessionNameChange(t.Context(), *change)
+	if err != nil || !completed {
+		t.Fatalf("CompleteTmuxSessionNameChange() = (%v, %v), want (true, nil)", completed, err)
+	}
+	var revision sql.NullString
+	if err := adapter.Conn().QueryRowContext(t.Context(), `SELECT tmux_session_revision FROM agm_sessions WHERE id = ?`, m.SessionID).Scan(&revision); err != nil {
+		t.Fatalf("query completed tmux revision: %v", err)
+	}
+	if revision.Valid {
+		t.Fatalf("completed tmux revision = %q, want NULL", revision.String)
 	}
 }
 

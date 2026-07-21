@@ -233,6 +233,23 @@ func TestNewSession(t *testing.T) {
 	}
 }
 
+func TestSessionIdentityValidation(t *testing.T) {
+	valid := SessionIdentity{ID: "$7", Token: "0123456789abcdef0123456789abcdef"}
+	if !valid.Valid() {
+		t.Fatalf("valid creation identity was rejected: %#v", valid)
+	}
+	for _, invalid := range []SessionIdentity{
+		{},
+		{ID: "7", Token: valid.Token},
+		{ID: "$7", Token: "short"},
+		{ID: "$7", Token: "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"},
+	} {
+		if invalid.Valid() {
+			t.Fatalf("invalid creation identity was accepted: %#v", invalid)
+		}
+	}
+}
+
 // TestNewSession_SettingsInjection verifies tmux settings are injected
 func TestNewSession_SettingsInjection(t *testing.T) {
 	if testing.Short() {

@@ -175,18 +175,23 @@ func KillSessionChecked(sessionName string) error {
 	return tmuxCommandError("kill session", normalizedName, output, err)
 }
 
-// KillSessionIDChecked kills exactly the tmux session identified by the
-// server-local identity returned from NewSessionWithID. Unlike a name target,
-// this cannot select a replacement session that reused the original name.
-func KillSessionIDChecked(sessionID string) error {
-	if !IsSessionID(sessionID) {
-		return fmt.Errorf("invalid tmux session identity %q", sessionID)
+// KillSessionIdentityChecked kills only the tmux session whose server-local ID
+// and creation token both match. The comparison and conditional kill execute
+// in one tmux command queue so a replacement cannot be selected by a stale ID.
+// Missing and mismatched targets mean the owned creation is already gone and
+// are treated as idempotent success.
+func KillSessionIdentityChecked(identity SessionIdentity) error {
+	if !identity.Valid() {
+		return fmt.Errorf("invalid tmux session identity %q", identity.ID)
 	}
-	output, err := RunWithTimeout(context.Background(), globalTimeout, "tmux", "-S", GetSocketPath(), "kill-session", "-t", sessionID)
+	condition := fmt.Sprintf("#{==:#{@agm_session_identity},%s}", identity.Token)
+	killCommand := fmt.Sprintf("kill-session -t %s", identity.ID)
+	output, err := RunWithTimeout(context.Background(), globalTimeout, "tmux", "-S", GetSocketPath(),
+		"if-shell", "-F", "-t", identity.ID, condition, killCommand, "")
 	if err == nil || isMissingSessionOutput(output) {
 		return nil
 	}
-	return tmuxCommandError("kill session identity", sessionID, output, err)
+	return tmuxCommandError("kill session identity", identity.ID, output, err)
 }
 
 // IsPaneActive checks if a pane is currently active

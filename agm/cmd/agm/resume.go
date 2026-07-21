@@ -547,12 +547,13 @@ func resumeResolvedSession(ctx context.Context, adapter *dolt.Adapter, sessionID
 // deterministic without mutating package-global function hooks.
 type resumeSessionRuntime struct {
 	loadManifest      func(context.Context, *dolt.Adapter, string, string) (*manifest.Manifest, error)
-	createTmux        func(string, string) (string, error)
+	createTmux        func(string, string) (tmux.SessionIdentity, error)
 	killTmux          func(createdResumeTmux) error
 	dispatch          func(*dolt.Adapter, *manifest.Manifest, string, *HealthStatus) error
 	wait              func(string, *HealthStatus) error
 	persistTmuxName   func(context.Context, *dolt.Adapter, *manifest.Manifest, string) (resumeTmuxNameChange, error)
 	restoreTmuxName   func(context.Context, *dolt.Adapter, *manifest.Manifest, resumeTmuxNameChange) error
+	completeTmuxName  func(context.Context, *dolt.Adapter, resumeTmuxNameChange) error
 	restorePermission func(string, *manifest.Manifest, *HealthStatus)
 	updateActivity    func(*dolt.Adapter, string, string) error
 	updateTabTitle    func(string)
@@ -562,12 +563,12 @@ type resumeSessionRuntime struct {
 }
 
 type createdResumeTmux struct {
-	Name string
-	ID   string
+	Name     string
+	Identity tmux.SessionIdentity
 }
 
 func (created createdResumeTmux) owned() bool {
-	return created.Name != "" && created.ID != ""
+	return created.Name != "" && created.Identity.Valid()
 }
 
 type resumeTmuxNameChange struct {
@@ -578,7 +579,7 @@ type resumeTmuxNameChange struct {
 func realResumeSessionRuntime(ctx context.Context) resumeSessionRuntime {
 	return resumeSessionRuntime{
 		loadManifest: getResumeManifest,
-		createTmux:   tmux.NewSessionWithID,
+		createTmux:   tmux.NewSessionWithIdentity,
 		killTmux:     killCreatedResumeTmux,
 		dispatch:     dispatchResumeCommand,
 		wait: func(harnessName string, health *HealthStatus) error {
@@ -586,6 +587,7 @@ func realResumeSessionRuntime(ctx context.Context) resumeSessionRuntime {
 		},
 		persistTmuxName:   persistResumeTmuxName,
 		restoreTmuxName:   restoreResumeTmuxName,
+		completeTmuxName:  completeResumeTmuxName,
 		restorePermission: restorePermissionMode,
 		updateActivity:    updateManifestActivity,
 		updateTabTitle:    updateVSCodeTabTitle,
@@ -602,24 +604,24 @@ func realResumeSessionRuntime(ctx context.Context) resumeSessionRuntime {
 // as a missing target.
 func killCreatedResumeTmux(created createdResumeTmux) error {
 	if !created.owned() {
-		return fmt.Errorf("cannot clean up tmux session %q without its immutable identity", created.Name)
+		return fmt.Errorf("cannot clean up tmux session %q without its creation identity", created.Name)
 	}
-	if err := tmux.KillSessionIDChecked(created.ID); err != nil {
+	if err := tmux.KillSessionIdentityChecked(created.Identity); err != nil {
 		return err
 	}
-	exists, err := tmux.HasSessionIDStrict(created.ID)
+	exists, err := tmux.HasSessionIdentityStrict(created.Identity)
 	if err != nil {
 		return fmt.Errorf("verify tmux session identity cleanup: %w", err)
 	}
 	if exists {
-		return fmt.Errorf("tmux session %q (%s) still exists after cleanup", created.Name, created.ID)
+		return fmt.Errorf("tmux session %q (%s) still exists after cleanup", created.Name, created.Identity.ID)
 	}
 	return nil
 }
 
 func rollbackCreatedResumeTmux(ctx context.Context, runtime resumeSessionRuntime, adapter *dolt.Adapter, m *manifest.Manifest, created createdResumeTmux, nameChange resumeTmuxNameChange, primaryErr error) error {
 	if cleanupErr := runtime.killTmux(created); cleanupErr != nil {
-		return errors.Join(primaryErr, fmt.Errorf("failed to clean up newly created tmux session %q (%s): %w", created.Name, created.ID, cleanupErr))
+		return errors.Join(primaryErr, fmt.Errorf("failed to clean up newly created tmux session %q (%s): %w", created.Name, created.Identity.ID, cleanupErr))
 	}
 	if nameChange.Applied {
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
@@ -683,6 +685,16 @@ func restoreResumeTmuxName(ctx context.Context, adapter *dolt.Adapter, m *manife
 	return nil
 }
 
+func completeResumeTmuxName(ctx context.Context, adapter *dolt.Adapter, change resumeTmuxNameChange) error {
+	if !change.Applied {
+		return nil
+	}
+	// A newer writer may intentionally supersede and clear the provisional
+	// revision after prompt delivery. That state already owns the metadata.
+	_, err := adapter.CompleteTmuxSessionNameChange(ctx, change.Change)
+	return err
+}
+
 // resumeSession performs the complete resume workflow.
 func resumeSession(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath, harnessName string, health *HealthStatus) error {
 	return resumeSessionWithRuntime(ctx, adapter, sessionID, manifestPath, harnessName, health, realResumeSessionRuntime(ctx))
@@ -728,6 +740,16 @@ func resumeSessionWithRuntime(ctx context.Context, adapter *dolt.Adapter, sessio
 			return err
 		}
 	}
+	if nameChange.Applied {
+		if runtime.completeTmuxName == nil {
+			ui.PrintWarning("Resume metadata ownership token could not be finalized: runtime dependency is missing")
+		} else if err := runtime.completeTmuxName(ctx, adapter, nameChange); err != nil {
+			// Prompt delivery is irreversible. Do not report a retryable resume
+			// failure after it succeeds; a later full session update also clears
+			// stale ownership tokens.
+			ui.PrintWarning(fmt.Sprintf("Failed to finalize resume metadata ownership: %v", err))
+		}
+	}
 	if sendCommands {
 		runtime.restorePermission(harnessName, m, health)
 	}
@@ -765,13 +787,13 @@ func ensureResumeTmuxSession(ctx context.Context, health *HealthStatus, runtime 
 	if runtime.createTmux == nil {
 		return createdResumeTmux{}, fmt.Errorf("resume runtime does not provide tmux creation")
 	}
-	sessionID, err := runtime.createTmux(createdName, health.WorktreePath)
-	created := createdResumeTmux{Name: createdName, ID: sessionID}
+	identity, err := runtime.createTmux(createdName, health.WorktreePath)
+	created := createdResumeTmux{Name: createdName, Identity: identity}
 	if err != nil {
 		return created, fmt.Errorf("failed to create tmux session: %w", err)
 	}
-	if sessionID == "" {
-		return createdResumeTmux{}, fmt.Errorf("tmux creation returned no immutable session identity")
+	if !identity.Valid() {
+		return createdResumeTmux{}, fmt.Errorf("tmux creation returned no valid creation identity")
 	}
 	// NewSession creates the sanitized name. Carry that exact identity through
 	// dispatch, readiness, rollback, prompt delivery, and attach.

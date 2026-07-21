@@ -79,12 +79,15 @@ agm session resume my-codex-session
 If the tmux session already exists, AGM attaches without sending commands. If
 the tmux session must be recreated, AGM starts Codex with the same launch
 invariants as session creation and waits for both the Codex process and a
-structured idle composer to render. AGM retains tmux's immutable session ID for
-the attempt, persists a sanitized tmux name before submitting an optional
-resume prompt, and reports ordinary prompt-delivery failures. Failed cold
-resumes remove only that exact created identity; a same-named replacement is
-preserved, and a provisional name write is restored only when no newer session
-metadata has superseded it.
+structured idle composer to render. AGM retains a creation-specific identity
+for the attempt: tmux's server-local session ID plus a random token stored on
+that session. It persists a sanitized tmux name under an opaque storage
+ownership revision before submitting an optional resume prompt, and reports
+ordinary prompt-delivery failures. Failed cold resumes remove only the session
+whose ID and token both match, including across tmux server restarts; a
+same-named or ID-reusing replacement is preserved. A provisional name write is
+restored only when no newer session metadata has superseded it, and its
+ownership revision is released after prompt delivery succeeds.
 
 For sessions with persisted Codex metadata, AGM resumes the matching Codex
 thread with `codex resume --remote unix:// <codex-thread-id>`. Older imported

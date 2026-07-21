@@ -243,10 +243,11 @@ creation, and terminal state detection.
   root context through multiline composer readiness and delivery.
 - Resume rechecks the root context after metadata lookup and before tmux
   creation, command delivery, metadata updates, or warm-session attach.
-- Cold Codex resume retains tmux's immutable session identity, persists a
-  canonical name before optional prompt submission, treats ordinary prompt
-  failures as transactional failures, and compensates only its exact tmux and
-  metadata revisions without killing a same-named replacement.
+- Cold Codex resume retains tmux's server-local ID plus a random per-creation
+  token, persists a canonical name under an opaque cross-dialect ownership
+  revision before optional prompt submission, treats ordinary prompt failures
+  as transactional failures, and compensates only those exact identities
+  without killing a same-named or server-restart replacement.
 - Final creation liveness validation derives from the root context and rechecks
   cancellation before title update, attach, or detached-success reporting.
 - AGY feedback survey handling dismisses once and recognizes the subsequent
