@@ -1,7 +1,7 @@
 {
   "name": "engram-mcp-server",
   "version": "0.1.0",
-  "description": "MCP server for Engram integration with Claude Code",
+  "description": "MCP server for Engram integration",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
