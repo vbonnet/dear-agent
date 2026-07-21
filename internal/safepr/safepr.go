@@ -1,5 +1,5 @@
 // Package safepr is the policy core of safe-pr, the one sanctioned path for
-// opening and closing GitHub pull requests from agent sessions.
+// opening, closing, and reopening GitHub pull requests from agent sessions.
 //
 // # Why PRs are wrapped at all
 //
@@ -13,11 +13,11 @@
 //
 // What the wrapper guarantees by construction
 //
-//   - Only the verbs `create` and `close` exist; everything else is refused.
+//   - Only the verbs `create`, `close`, and `reopen` exist; everything else is refused.
 //   - A PR carries a wayfinder session trace: the caller names an active
 //     wayfinder project (--wayfinder flag or WAYFINDER_PROJECT_DIR env) whose
 //     WAYFINDER-STATUS.md is active, and its canonical project name is stamped
-//     into the PR body (create) or close comment (close).
+//     into the PR body (create) or mutation comment (close/reopen).
 //   - Interactive and unstampable forms (--web, --fill, --body-file, missing
 //     --title) are refused so the run is deterministic and headless-safe.
 package safepr
@@ -104,7 +104,7 @@ func isActiveStatus(status string) bool {
 
 // Request is one validated safe-pr invocation.
 type Request struct {
-	Verb    string   // "create" or "close"
+	Verb    string   // "create", "close", or "reopen"
 	Session *Session // always required; set before calling Validate
 	GhArgs  []string // caller's pass-through gh arguments
 }
@@ -138,9 +138,9 @@ var deniedCreateFlags = map[string]string{
 // say what was attempted, the right way, and why.
 func (r *Request) Validate() error {
 	switch r.Verb {
-	case "create", "close":
+	case "create", "close", "reopen":
 	default:
-		return fmt.Errorf("safe-pr only supports `create` and `close`, not %q — other gh pr verbs "+
+		return fmt.Errorf("safe-pr only supports `create`, `close`, and `reopen`, not %q — other gh pr verbs "+
 			"(view, list, checks, diff) are read-only and need no wrapper; `merge` keeps its existing "+
 			"review-gated path", r.Verb)
 	}
@@ -170,11 +170,11 @@ func (r *Request) Validate() error {
 				"is deterministic and headless-safe — gh would otherwise drop into an interactive prompt")
 		}
 	}
-	if r.Verb == "close" {
+	if r.Verb == "close" || r.Verb == "reopen" {
 		if !hasFlag(r.GhArgs, "--comment", "-c") {
-			return fmt.Errorf("safe-pr close requires an explicit --comment explaining why the PR " +
-				"is being closed — unattributed closures are invisible to reviewers and cannot be audited; " +
-				"use: safe-pr close --wayfinder <dir> --comment \"reason\" <number>")
+			return fmt.Errorf("safe-pr %s requires an explicit --comment explaining why the PR "+
+				"is being mutated — unattributed state changes are invisible to reviewers and cannot be audited; "+
+				"use: safe-pr %s --wayfinder <dir> --comment \"reason\" <number>", r.Verb, r.Verb)
 		}
 	}
 	return nil
@@ -188,14 +188,14 @@ func (r *Request) Trailer() string {
 
 // StampedArgs returns the final gh argv (after "gh"): the verb mapped to
 // `pr <verb>` with the trace trailer folded into --body (create) or
-// --comment (close), appending the flag when the caller did not pass one.
+// --comment (close/reopen), appending the flag when the caller did not pass one.
 //
 // On create, when the session carries a bead, a "Closes <bead>" line is folded
 // in above the trace trailer so the PR auto-closes its bead on merge — unless
 // the caller already referenced the bead in their args (no duplicate line).
 func (r *Request) StampedArgs() []string {
 	target, short := "--body", "-b"
-	if r.Verb == "close" {
+	if r.Verb == "close" || r.Verb == "reopen" {
 		target, short = "--comment", "-c"
 	}
 	trailer := r.Trailer()

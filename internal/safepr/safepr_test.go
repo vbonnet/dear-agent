@@ -119,8 +119,11 @@ func TestValidate(t *testing.T) {
 			GhArgs: []string{"123"}}, "--comment"},
 		{"close delete-branch refused", Request{Verb: "close", Session: sess(),
 			GhArgs: []string{"123", "--comment", "done", "--delete-branch"}}, "irreversible"},
+		{"reopen ok", Request{Verb: "reopen", Session: sess(),
+			GhArgs: []string{"123", "--comment", "CI event delivery recovery"}}, ""},
+		{"reopen needs comment", Request{Verb: "reopen", Session: sess(),
+			GhArgs: []string{"123"}}, "--comment"},
 		{"merge refused", Request{Verb: "merge", Session: sess()}, "only supports"},
-		{"reopen refused", Request{Verb: "reopen", Session: sess()}, "only supports"},
 		{"web refused", Request{Verb: "create", Session: sess(),
 			GhArgs: []string{"--title", "t", "--web"}}, "browser"},
 		{"fill refused", Request{Verb: "create", Session: sess(),
@@ -201,6 +204,18 @@ func TestStampedArgs(t *testing.T) {
 		joined := strings.Join(r.StampedArgs(), "\x00")
 		if !strings.Contains(joined, "--comment\x00---\nWayfinder-Session: abc-123") {
 			t.Errorf("comment not appended: %q", joined)
+		}
+	})
+	t.Run("reopen stamps existing comment", func(t *testing.T) {
+		r := Request{Verb: "reopen", Session: sess(),
+			GhArgs: []string{"42", "--comment", "retry CI delivery"}}
+		got := r.StampedArgs()
+		joined := strings.Join(got, "\x00")
+		if got[0] != "pr" || got[1] != "reopen" {
+			t.Fatalf("argv prefix = %v", got[:2])
+		}
+		if !strings.Contains(joined, "retry CI delivery\n\n---\nWayfinder-Session: abc-123") {
+			t.Errorf("comment not stamped: %q", joined)
 		}
 	})
 }
