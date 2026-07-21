@@ -188,10 +188,23 @@ type observingKillStorage struct {
 	once      sync.Once
 }
 
+type vanishingKillStorage struct {
+	dolt.Storage
+	reads int
+}
+
 func (s *observingKillStorage) GetSession(sessionID string) (*manifest.Manifest, error) {
 	m, err := s.Storage.GetSession(sessionID)
 	s.once.Do(func() { close(s.firstRead) })
 	return m, err
+}
+
+func (s *vanishingKillStorage) GetSession(sessionID string) (*manifest.Manifest, error) {
+	s.reads++
+	if s.reads > 1 {
+		return nil, nil
+	}
+	return s.Storage.GetSession(sessionID)
 }
 
 func (m *stubbornKillTmux) KillSession(name string) error {
@@ -345,6 +358,30 @@ func TestKillSession_ReloadsCurrentTargetUnderStableIDLock(t *testing.T) {
 	}
 	if !tm.sessions["old-target"] {
 		t.Fatal("stale pre-lock target was killed")
+	}
+}
+
+func TestKillSession_ConcurrentDeletionReturnsNotFound(t *testing.T) {
+	store := dolt.NewMockAdapter()
+	if err := store.CreateSession(newManifest("id-1", "my-session", "~/project")); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	tm := newMockTmux("my-session")
+	opCtx := &OpContext{
+		Storage: &vanishingKillStorage{Storage: store},
+		Tmux:    tm,
+	}
+
+	result, err := KillSession(opCtx, &KillSessionRequest{Identifier: "id-1", ConfirmedStuck: true})
+	if result != nil {
+		t.Fatalf("result = %#v, want nil after concurrent deletion", result)
+	}
+	var opErr *OpError
+	if !errors.As(err, &opErr) || opErr.Code != ErrCodeSessionNotFound {
+		t.Fatalf("KillSession() error = %v, want %s", err, ErrCodeSessionNotFound)
+	}
+	if len(tm.killed) != 0 {
+		t.Fatalf("concurrent deletion mutated tmux: killed = %v", tm.killed)
 	}
 }
 

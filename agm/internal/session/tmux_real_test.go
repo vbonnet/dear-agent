@@ -1,7 +1,9 @@
 package session
 
 import (
+	"fmt"
 	"testing"
+	"time"
 )
 
 func TestNewRealTmux(t *testing.T) {
@@ -51,4 +53,27 @@ func TestRealTmux_ListClients(t *testing.T) {
 		return
 	}
 	_ = clients
+}
+
+func TestRealTmux_KillSessionIsIdempotentWhenTargetDisappears(t *testing.T) {
+	rt := NewRealTmux()
+	suffix := time.Now().UnixNano()
+	keeper := fmt.Sprintf("agm-real-tmux-keeper-%d", suffix)
+	target := fmt.Sprintf("agm-real-tmux-kill-%d", suffix)
+	workdir := t.TempDir()
+	if err := rt.CreateSession(keeper, workdir); err != nil {
+		t.Skipf("tmux not available: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.KillSession(keeper) })
+	if err := rt.CreateSession(target, workdir); err != nil {
+		t.Fatalf("CreateSession(%q): %v", target, err)
+	}
+	t.Cleanup(func() { _ = rt.KillSession(target) })
+
+	if err := rt.KillSession(target); err != nil {
+		t.Fatalf("first KillSession(%q): %v", target, err)
+	}
+	if err := rt.KillSession(target); err != nil {
+		t.Fatalf("idempotent KillSession(%q): %v", target, err)
+	}
 }

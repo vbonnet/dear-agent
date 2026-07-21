@@ -148,6 +148,9 @@ func KillSession(ctx *OpContext, req *KillSessionRequest) (*KillSessionResult, e
 		if err != nil {
 			return ErrStorageError("kill_session_reload", err)
 		}
+		if current == nil {
+			return ErrSessionNotFound(m.SessionID)
+		}
 		result, err = killResolvedSession(ctx, current, req)
 		return err
 	})
