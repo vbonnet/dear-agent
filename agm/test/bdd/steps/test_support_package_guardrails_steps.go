@@ -555,9 +555,14 @@ func legacySuiteOptOutsDoNotSuppressRequiredIntegrationContracts() error {
 		return fmt.Errorf("read CI workflow: %w", err)
 	}
 	ci := string(workflow)
-	for _, required := range []string{"./agm/test/integration/portable", "./agm/test/integration/isolated"} {
+	for _, required := range []string{
+		"./agm/test/integration/portable",
+		"TestActiveHarnessParityContract|TestHarnessPrerequisitesAreScoped",
+		"./agm/test/integration/isolated",
+		"^TestCodexLifecycleUsesIsolatedSourceEnvironment$",
+	} {
 		if !strings.Contains(ci, required) {
-			return fmt.Errorf("CI does not invoke required integration package %s", required)
+			return fmt.Errorf("CI does not invoke required integration package or test selector %s", required)
 		}
 	}
 	return nil
