@@ -119,6 +119,11 @@ type SessionContext struct {
 	// Optional.
 	Project string
 
+	// Model is the harness-native model alias or exact model label selected for
+	// this session. Harnesses with a registry default may leave it empty.
+	// Optional.
+	Model string
+
 	// AuthorizedDirs are directories pre-authorized for agent access.
 	// Optional. If empty, agent may prompt for directory authorization.
 	AuthorizedDirs []string

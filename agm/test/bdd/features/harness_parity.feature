@@ -295,6 +295,11 @@ Feature: Harness parity
     And Codex current-tmux launch should require the executable without waiting behind its own AGM process
     And Codex queue failures should propagate to shared creation rollback
 
+  Scenario: AGY current-tmux creation refuses unsafe deferred identity
+    Given current-tmux creation selects AGY
+    When AGM validates current-tmux AGY safety
+    Then current-tmux AGY creation should fail before launch with detached guidance
+
   Scenario: Codex send safety is harness-specific
     Given Codex CLI is available
     And a Codex CLI composer pane
@@ -319,6 +324,12 @@ Feature: Harness parity
     And an AGY ready prompt
     When AGM runs send safety for the configured harness
     Then send safety should not require a Claude process
+
+  Scenario: AGY adapter uses safe concurrent native lifecycle truth
+    Given AGY is available
+    When AGM validates the AGY adapter lifecycle
+    Then the AGY adapter should preserve canonical launch and resume policy
+    And the AGY adapter should require AGY process and transcript truth
 
   Scenario: Current harness session can be associated with AGM
     Given an existing tmux session running Codex CLI
@@ -365,6 +376,7 @@ Feature: Harness parity
     Given AGY is available
     When AGM validates AGY MCP creation readiness
     Then MCP creation should wait for the AGY composer before prompt delivery
+    And shared creation should persist the new AGY identity before registration
 
   Scenario: Active-harness creation signals preserve rollback
     Given AGY is available

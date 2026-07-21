@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -70,6 +71,27 @@ func TestFileLock_TryLock_AlreadyLocked(t *testing.T) {
 	}
 	if lockErr.Recovery == "" {
 		t.Error("LockError.Recovery is empty")
+	}
+}
+
+func TestFileLockTryLockPreservesPermanentFlockError(t *testing.T) {
+	original := tryFlock
+	t.Cleanup(func() { tryFlock = original })
+	tryFlock = func(int, int) error { return syscall.EIO }
+
+	fileLock, err := New(filepath.Join(t.TempDir(), "permanent-error.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = fileLock.Unlock() }()
+
+	err = fileLock.TryLock()
+	var contention *LockError
+	if errors.As(err, &contention) {
+		t.Fatalf("permanent flock error was misclassified as contention: %v", err)
+	}
+	if !errors.Is(err, syscall.EIO) {
+		t.Fatalf("TryLock error = %v, want preserved EIO", err)
 	}
 }
 
