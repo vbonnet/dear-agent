@@ -223,6 +223,12 @@ func TestParseV2RejectsNonStringCanonicalScalars(t *testing.T) {
 			replace: "  - 123",
 			want:    "tags[0] must be an actual string scalar",
 		},
+		{
+			name:    "null boolean",
+			old:     `risk_level: "L"`,
+			replace: "risk_level: \"L\"\nskip_roadmap: null",
+			want:    "skip_roadmap must be an actual boolean scalar",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			content := strings.Replace(string(valid), tc.old, tc.replace, 1)

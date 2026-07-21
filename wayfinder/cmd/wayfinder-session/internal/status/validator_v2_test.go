@@ -613,6 +613,23 @@ func TestValidateRoadmap(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "whitespace-only task ID",
+			roadmap: &Roadmap{
+				Phases: []RoadmapPhase{
+					{
+						ID:     PhaseV2Setup,
+						Name:   "Planning",
+						Status: PhaseStatusV2Completed,
+						Tasks: []Task{
+							{ID: "  \t ", Title: "Task", Status: TaskStatusCompleted},
+						},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "task has empty ID",
+		},
+		{
 			name: "duplicate task IDs",
 			roadmap: &Roadmap{
 				Phases: []RoadmapPhase{

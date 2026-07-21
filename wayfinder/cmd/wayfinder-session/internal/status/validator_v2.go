@@ -415,7 +415,7 @@ func validateRoadmap(status *StatusV2) error {
 
 		// Collect tasks
 		for taskIndex, task := range phase.Tasks {
-			if task.ID == "" {
+			if strings.TrimSpace(task.ID) == "" {
 				errors = append(errors, fmt.Sprintf("roadmap.phases[%d]: task has empty ID", i))
 				continue
 			}

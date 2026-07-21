@@ -103,6 +103,10 @@ var v2StringArrayFields = map[string]bool{
 	"acceptance_criteria": true,
 }
 
+var v2BooleanFields = map[string]bool{
+	"skip_roadmap": true,
+}
+
 // validateV2ScalarTypes rejects YAML features that yaml.v3 would otherwise
 // coerce into canonical strings. It also rejects aliases so recursive YAML
 // graphs cannot bypass or crash the later recursive validators.
@@ -146,12 +150,25 @@ func validateV2ScalarMapping(node *yaml.Node, path string) error {
 		if path != "" {
 			childPath = path + "." + key.Value
 		}
+		if err := validateV2BooleanValue(key.Value, value, childPath); err != nil {
+			return err
+		}
 		if err := validateV2MappedValue(key.Value, value, childPath); err != nil {
 			return err
 		}
 		if err := validateV2ScalarNode(value, childPath); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateV2BooleanValue(key string, value *yaml.Node, path string) error {
+	if !v2BooleanFields[key] {
+		return nil
+	}
+	if value.Kind != yaml.ScalarNode || value.Tag != "!!bool" {
+		return fmt.Errorf("%s must be an actual boolean scalar", path)
 	}
 	return nil
 }
