@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
@@ -351,7 +352,6 @@ func TestBuildAgyResumeCommand(t *testing.T) {
 func TestBuildAgyResumeCommand_TranslatesLegacyModels(t *testing.T) {
 	health := &HealthStatus{WorktreePath: "/tmp/agy-work"}
 	tests := map[string]string{
-		"2.5-flash":      "Gemini 3.5 Flash (Medium)",
 		"2.5-pro":        "Gemini 3.1 Pro (High)",
 		"2.0-flash-lite": "Gemini 3.5 Flash (Low)",
 	}
@@ -366,6 +366,38 @@ func TestBuildAgyResumeCommand_TranslatesLegacyModels(t *testing.T) {
 				t.Fatalf("legacy model %q leaked into resume command %q", legacy, command)
 			}
 		})
+	}
+}
+
+func TestMigrateAmbiguousLegacyAgyModelClearsStoredOverride(t *testing.T) {
+	adapter, err := dolt.NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	for index, model := range []string{"2.5-flash", "gemini-2.5-flash"} {
+		m := dolt.NewTestManifest(fmt.Sprintf("legacy-agy-%d", index), fmt.Sprintf("legacy-agy-%d", index))
+		m.Harness = "agy"
+		m.Model = model
+		m.Agy = &manifest.Agy{ConversationID: fmt.Sprintf("native-%d", index)}
+		if err := adapter.CreateSession(m); err != nil {
+			t.Fatalf("CreateSession(%q): %v", model, err)
+		}
+		if err := migrateAmbiguousLegacyAgyModel(adapter, m, "agy"); err != nil {
+			t.Fatalf("migrateAmbiguousLegacyAgyModel(%q): %v", model, err)
+		}
+		stored, err := adapter.GetSession(m.SessionID)
+		if err != nil {
+			t.Fatalf("GetSession(%q): %v", model, err)
+		}
+		if stored.Model != "" {
+			t.Fatalf("stored model = %q, want ambiguous legacy default cleared", stored.Model)
+		}
+		command := buildAgyResumeCommand(stored, &HealthStatus{WorktreePath: "/tmp/agy-work"})
+		if strings.Contains(command, "--model") {
+			t.Fatalf("migrated resume command %q must omit --model", command)
+		}
 	}
 }
 

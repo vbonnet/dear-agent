@@ -58,7 +58,7 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-25** When the pane is still positively observed as an unsubmitted paste after every backoff attempt, the system shall return a submission-not-confirmed error so the caller reports delivery failure instead of a false success.
 
-**TMUX-27** When an AGY prompt wait is invoked, the system shall derive cancellation from the caller-supplied context and shall not install process-global signal handling inside the tmux helper.
+**TMUX-27** When an AGY prompt wait is invoked, the system shall derive polling, retry, trust, survey, and ready-stabilization cancellation from the caller-supplied context, shall return cancellation before reporting readiness, and shall not install process-global signal handling inside the tmux helper.
 
 **TMUX-28** When command-scoped multiline prompt delivery waits for a composer or rechecks composer stability, the system shall derive every wait and subprocess timeout from the caller context and shall return before prompt delivery when cancellation is observed during those waits.
 

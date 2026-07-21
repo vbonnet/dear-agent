@@ -55,7 +55,7 @@ compatibility.
 
 **AGP-20** When AGM resolves an AGY model alias or accepts an AGY public model label, the system shall pass an exact label exposed by the installed AGY public model catalog through `--model`, including labels containing spaces or parentheses.
 
-**AGP-24** When AGM resumes an AGY manifest containing a retired `2.5-flash`, `2.5-pro`, or `2.0-flash-lite` alias or its former full identifier, the system shall translate it to the closest current AGY public model label before constructing the resume command.
+**AGP-24** When AGM resumes an AGY manifest containing an unambiguous retired `2.5-pro` or `2.0-flash-lite` alias or its former full identifier, the system shall translate it to the closest current AGY public model label before constructing the resume command; the ambiguous former default `2.5-flash` on a saved conversation is governed by AGP-28.
 
 **AGP-25** When MCP creates an AGY session, the system shall wait through first-run trust and initialization until the AGY composer is ready before delivering the required startup prompt; cancellation or readiness failure shall enter the shared creation rollback path.
 
@@ -63,7 +63,7 @@ compatibility.
 
 **AGP-27** When a user supplies a cross-harness tier alias with different letter case, the system shall canonicalize the alias key case-insensitively while preserving any exact case-sensitive public model label.
 
-**AGP-28** When an imported or manually associated AGY conversation has no observable native model, the system shall leave its manifest model unset and cold-resume without `--model` so AGY retains the saved conversation selection.
+**AGP-28** When an imported or manually associated AGY conversation has no observable native model, the system shall leave its manifest model unset and cold-resume without `--model` so AGY retains the saved conversation selection; when a pre-provenance saved-conversation record contains the ambiguous former default `2.5-flash` or `gemini-2.5-flash`, the resume path shall clear that stored override before command construction.
 
 **AGP-29** When `send set-model` changes a running AGY conversation, the system shall persist the selection only after observing a new confirmation that exactly names the requested public model; a stale, mismatched, or unavailable confirmation shall clear the stored model override so a later cold resume cannot force an unselected model.
 

@@ -84,7 +84,7 @@ func IsAgyIdle(sessionName string) (bool, error) {
 type agyPromptRuntime struct {
 	capture  func(context.Context, string) ([]byte, error)
 	sendKeys func(string, string) error
-	sleep    func(time.Duration)
+	sleep    func(context.Context, time.Duration)
 }
 
 func realAgyPromptRuntime() agyPromptRuntime {
@@ -93,7 +93,11 @@ func realAgyPromptRuntime() agyPromptRuntime {
 			return exec.CommandContext(ctx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-S", "-20").Output()
 		},
 		sendKeys: SendKeys,
-		sleep:    time.Sleep,
+		sleep: func(ctx context.Context, interval time.Duration) {
+			if err := sleepWithContext(ctx, interval); err != nil {
+				debug.Log("AGY prompt sleep interrupted: %v", err)
+			}
+		},
 	}
 }
 
@@ -124,7 +128,7 @@ func waitForAgyPromptWithRuntime(baseCtx context.Context, sessionName string, ti
 			return fmt.Errorf("timeout or cancellation waiting for AGY prompt: %w", ctx.Err())
 		}
 		if err != nil {
-			runtime.sleep(500 * time.Millisecond)
+			runtime.sleep(ctx, 500*time.Millisecond)
 			continue
 		}
 
@@ -134,7 +138,7 @@ func waitForAgyPromptWithRuntime(baseCtx context.Context, sessionName string, ti
 				debug.Log("Failed to dismiss AGY feedback survey: %v", dismissErr)
 			} else {
 				debug.Log("AGY feedback survey detected; selected Skip")
-				runtime.sleep(500 * time.Millisecond)
+				runtime.sleep(ctx, 500*time.Millisecond)
 				continue
 			}
 		}
@@ -145,19 +149,22 @@ func waitForAgyPromptWithRuntime(baseCtx context.Context, sessionName string, ti
 			} else {
 				trustAccepted = true
 			}
-			runtime.sleep(1 * time.Second)
+			runtime.sleep(ctx, time.Second)
 			continue
 		}
 
 		if containsAgyReadyPattern(content) {
 			debug.Log("✓ AGY prompt detected (check #%d)", checkCount)
-			runtime.sleep(500 * time.Millisecond)
+			runtime.sleep(ctx, 500*time.Millisecond)
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("AGY ready stabilization interrupted: %w", err)
+			}
 			return nil
 		}
 
 		if checkCount%10 == 0 {
 			debug.Log("⏳ Still waiting for AGY prompt... (check #%d)", checkCount)
 		}
-		runtime.sleep(500 * time.Millisecond)
+		runtime.sleep(ctx, 500*time.Millisecond)
 	}
 }

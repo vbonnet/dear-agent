@@ -543,6 +543,12 @@ func resumeResolvedSession(ctx context.Context, adapter *dolt.Adapter, sessionID
 func resumeSession(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath, harnessName string, health *HealthStatus) error {
 	sendCommands := shouldSendResumeCommands(health.TmuxExists)
 
+	// Read and migrate harness-specific resume metadata before mutating tmux.
+	m, err := getResumeManifest(adapter, sessionID, harnessName)
+	if err != nil {
+		return err
+	}
+
 	// Ensure tmux session exists
 	if !health.TmuxExists {
 		ui.PrintSuccess(fmt.Sprintf("Creating tmux session: %s", health.TmuxSessionName))
@@ -551,12 +557,6 @@ func resumeSession(ctx context.Context, adapter *dolt.Adapter, sessionID, manife
 		}
 	} else {
 		ui.PrintSuccess(fmt.Sprintf("Attaching to existing tmux session: %s", health.TmuxSessionName))
-	}
-
-	// Read manifest from Dolt to get harness-specific resume metadata.
-	m, err := adapter.GetSession(sessionID)
-	if err != nil {
-		return fmt.Errorf("failed to read session from Dolt: %w", err)
 	}
 
 	if sendCommands {
@@ -617,6 +617,17 @@ func resumeSession(ctx context.Context, adapter *dolt.Adapter, sessionID, manife
 	return nil
 }
 
+func getResumeManifest(adapter *dolt.Adapter, sessionID, harnessName string) (*manifest.Manifest, error) {
+	m, err := adapter.GetSession(sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read session from Dolt: %w", err)
+	}
+	if err := migrateAmbiguousLegacyAgyModel(adapter, m, harnessName); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // dispatchResumeCommand builds the harness-specific resume command and sends
 // it to the tmux session. For Claude, falls back to uuid.Discover if the
 // stored UUID is missing.
@@ -671,8 +682,12 @@ func buildCodexResumeCommand(m *manifest.Manifest, health *HealthStatus) string 
 
 func buildAgyResumeCommand(m *manifest.Manifest, health *HealthStatus) string {
 	if m.Agy != nil && m.Agy.ConversationID != "" {
+		model := m.Model
+		if isAmbiguousLegacyAgyDefault(model) {
+			model = ""
+		}
 		return ops.BuildAgyResumeCommand(ops.HarnessLaunchSpec{
-			Harness: "agy", Model: m.Model, SessionName: health.TmuxSessionName,
+			Harness: "agy", Model: model, SessionName: health.TmuxSessionName,
 			WorkDir: health.WorktreePath, PermissionMode: m.PermissionMode,
 			ExtraAddDirs: []string{health.WorktreePath},
 		}, m.Agy.ConversationID).Command
@@ -686,6 +701,30 @@ func buildAgyResumeCommand(m *manifest.Manifest, health *HealthStatus) string {
 		Harness: "agy", Model: model, SessionName: health.TmuxSessionName,
 		WorkDir: health.WorktreePath, PermissionMode: m.PermissionMode,
 	}).Command
+}
+
+func isAmbiguousLegacyAgyDefault(model string) bool {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "2.5-flash", "gemini-2.5-flash":
+		return true
+	default:
+		return false
+	}
+}
+
+// migrateAmbiguousLegacyAgyModel clears the former AGY default on saved
+// conversations. Older import and association paths wrote this value without
+// observing the native selection, so it cannot safely be distinguished from
+// an explicit choice. The conversation itself remains the source of truth.
+func migrateAmbiguousLegacyAgyModel(adapter *dolt.Adapter, m *manifest.Manifest, harnessName string) error {
+	if agent.NormalizeHarnessName(harnessName) != "agy" || m.Agy == nil || m.Agy.ConversationID == "" || !isAmbiguousLegacyAgyDefault(m.Model) {
+		return nil
+	}
+	m.Model = ""
+	if err := adapter.UpdateSession(m); err != nil {
+		return fmt.Errorf("migrate ambiguous legacy AGY model provenance: %w", err)
+	}
+	return nil
 }
 
 // buildClaudeResumeCommand assembles `claude --resume <uuid>` (or a bare

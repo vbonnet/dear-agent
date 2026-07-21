@@ -49,7 +49,7 @@ func TestWaitForAgyPromptAcceptsTrustBeforeReady(t *testing.T) {
 			sent = append(sent, keys)
 			return nil
 		},
-		sleep: func(time.Duration) {},
+		sleep: func(context.Context, time.Duration) {},
 	}
 	if err := waitForAgyPromptWithRuntime(context.Background(), "agy-trust", time.Second, runtime); err != nil {
 		t.Fatalf("waitForAgyPromptWithRuntime: %v", err)
@@ -78,7 +78,7 @@ func TestWaitForAgyPromptDismissesSurveyBeforeReady(t *testing.T) {
 			sent = append(sent, keys)
 			return nil
 		},
-		sleep: func(time.Duration) {},
+		sleep: func(context.Context, time.Duration) {},
 	}
 	if err := waitForAgyPromptWithRuntime(context.Background(), "agy-survey", time.Second, runtime); err != nil {
 		t.Fatalf("waitForAgyPromptWithRuntime: %v", err)
@@ -98,7 +98,7 @@ func TestWaitForAgyPromptHonorsCallerCancellation(t *testing.T) {
 			return nil, nil
 		},
 		sendKeys: func(string, string) error { return nil },
-		sleep:    func(time.Duration) {},
+		sleep:    func(context.Context, time.Duration) {},
 	}
 
 	err := waitForAgyPromptWithRuntime(ctx, "agy-cancelled", time.Second, runtime)
@@ -107,5 +107,21 @@ func TestWaitForAgyPromptHonorsCallerCancellation(t *testing.T) {
 	}
 	if captured {
 		t.Fatal("pane capture ran after caller cancellation")
+	}
+}
+
+func TestWaitForAgyPromptReturnsCancellationAfterReadyStabilityDelay(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	runtime := agyPromptRuntime{
+		capture:  func(context.Context, string) ([]byte, error) { return []byte("AGY ready\n> "), nil },
+		sendKeys: func(string, string) error { return nil },
+		sleep: func(_ context.Context, _ time.Duration) {
+			cancel()
+		},
+	}
+
+	err := waitForAgyPromptWithRuntime(ctx, "agy-ready-cancelled", time.Second, runtime)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
 	}
 }
