@@ -38,7 +38,8 @@ newest-first Antigravity log fallback.
 
 **Key scenarios:**
 - Cache hits never enter provider log discovery.
-- Log discovery enumerates at most 256 directory entries, then orders regular
+- Log discovery inspects at most 257 directory entries, using the 257th only as
+  an exhaustion sentinel and processing at most 256; it then orders regular
   candidates by modification time and limits scanning to the newest 64 files.
 - Each candidate read is limited to 2 MiB; known-ID matches inside that budget
   remain valid, while latest-workspace lookup rejects a truncated prefix or a
