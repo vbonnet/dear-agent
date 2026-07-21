@@ -18,8 +18,8 @@ const WAYPOINT_STATUSES = ['pending', 'completed', 'in-progress', 'blocked', 'sk
 const SKIPPABLE_WAYPOINTS = ['DESIGN', 'SPEC', 'PLAN'] as const;
 const LIFECYCLE_STATUSES: Record<string, string> = {
   working: 'in-progress',
-  input_required: 'blocked',
-  dependency_blocked: 'blocked',
+  'input-required': 'blocked',
+  'dependency-blocked': 'blocked',
   validating: 'in-progress',
   completed: 'completed',
   failed: 'blocked',
@@ -167,8 +167,8 @@ function validateConditionalStatus(record: RecordValue, status: string): void {
   if (status !== expectedStatus) {
     throw new Error(`invalid Wayfinder V2 status: lifecycle_state ${JSON.stringify(lifecycle)} requires status ${JSON.stringify(expectedStatus)}`);
   }
-  if (lifecycle === 'input_required') requiredString(record, 'input_needed');
-  if (lifecycle === 'dependency_blocked') requiredString(record, 'blocked_on');
+  if (lifecycle === 'input-required') requiredString(record, 'input_needed');
+  if (lifecycle === 'dependency-blocked') requiredString(record, 'blocked_on');
   if (lifecycle === 'failed') requiredString(record, 'error_message');
 }
 

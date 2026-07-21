@@ -60,4 +60,12 @@ describe('parseWayfinderStatus', () => {
       /lifecycle_state "completed" requires status "completed"/,
     );
   });
+
+  it('accepts canonical hyphenated lifecycle state names', () => {
+    const blocked = canonical.replace(
+      'status: in-progress',
+      'status: blocked\nblocked_reason: waiting for input\nlifecycle_state: input-required\ninput_needed: choose a database',
+    );
+    assert.equal(parseWayfinderStatus(blocked).status, 'blocked');
+  });
 });
