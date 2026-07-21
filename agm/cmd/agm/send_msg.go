@@ -46,6 +46,8 @@ var (
 	msgAutonomous          bool   // --autonomous flag: session is unattended, skip human_typing detection
 )
 
+var sendMultiLinePromptSafeContext = tmux.SendMultiLinePromptSafeContext
+
 // Priority levels and their instructions injected into message headers
 var priorityInstructions = map[string]string{
 	"critical":   "DROP everything. Handle this immediately.",
@@ -609,7 +611,7 @@ func sendDirectly(ctx context.Context, recipientSession, senderName, messageID, 
 	m, _, err := session.ResolveIdentifier(recipientSession, cfg.SessionsDir, adapter)
 	if err != nil {
 		// No manifest found - fall back to tmux-based send for legacy sessions
-		return sendViaTmux(recipientSession, senderName, messageID, formattedMessage, promptFile, false)
+		return sendViaTmux(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, false)
 	}
 
 	// Determine delivery method based on harness type
@@ -625,14 +627,16 @@ func sendDirectly(ctx context.Context, recipientSession, senderName, messageID, 
 	}
 
 	// Fall back to tmux for CLI-based harnesses (Claude Code, Gemini CLI)
-	if err := sendViaTmux(recipientSession, senderName, messageID, formattedMessage, promptFile, false); err != nil {
+	if err := sendViaTmux(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, false); err != nil {
 		return err
 	}
 	if harnessType == "agy" && (m.Agy == nil || m.Agy.ConversationID == "") {
 		if err := waitForAgyMetadataBackfill(ctx, recipientSession, tmux.WaitForAgyPrompt); err != nil {
 			return err
 		}
-		associateSpawnedAgySessionWithRetry(m.Name, 20, 500*time.Millisecond)
+		if err := associateSpawnedAgySessionWithRetry(ctx, m.Name, 20, 500*time.Millisecond); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -649,14 +653,17 @@ func waitForAgyMetadataBackfill(ctx context.Context, sessionName string, wait fu
 
 // sendViaTmux sends a message via tmux (for CLI-based agents like Claude, Gemini)
 // Bug fix (2026-03-14): Added shouldInterrupt parameter to control ESC behavior
-func sendViaTmux(recipientSession, senderName, messageID, formattedMessage, promptFile string, shouldInterrupt bool) error {
+func sendViaTmux(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, shouldInterrupt bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// Write pending file for hook-based delivery (best-effort, in addition to tmux)
 	if err := messages.WritePendingFile(recipientSession, messageID, formattedMessage); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to write pending file: %v\n", err)
 	}
 
 	// Send using SAFE method (waits for prompt, with conditional interrupt)
-	if err := tmux.SendMultiLinePromptSafe(recipientSession, formattedMessage, shouldInterrupt); err != nil {
+	if err := sendMultiLinePromptSafeContext(ctx, recipientSession, formattedMessage, shouldInterrupt); err != nil {
 		return fmt.Errorf("failed to send prompt: %w", err)
 	}
 
@@ -938,7 +945,7 @@ func logMultiResults(homeDir, senderName, message string, jobs []*send.DeliveryJ
 
 // deliveryFunc implements the actual message delivery for a single recipient
 // This is used by SequentialDeliver for sequential message sending
-func deliveryFunc(job *send.DeliveryJob) error {
+func deliveryFunc(ctx context.Context, job *send.DeliveryJob) error {
 	// Check recipient session exists in tmux
 	exists, err := tmux.HasSession(job.Recipient)
 	if err != nil {
@@ -950,7 +957,7 @@ func deliveryFunc(job *send.DeliveryJob) error {
 
 	// Use the existing sendDirectly logic for actual delivery
 	// This ensures consistent behavior with single-recipient sends
-	return sendViaTmux(job.Recipient, job.Sender, job.MessageID, job.FormattedMessage, job.PromptFile, job.ShouldInterrupt)
+	return sendViaTmux(ctx, job.Recipient, job.Sender, job.MessageID, job.FormattedMessage, job.PromptFile, job.ShouldInterrupt)
 }
 
 // recordDelegation records a delegation if --delegate flag is set.

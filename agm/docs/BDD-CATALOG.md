@@ -201,7 +201,8 @@ creation, and terminal state detection.
   paths before command construction.
 - AGY model-switch provenance requires a new exact confirmation, and root
   cancellation reaches AGY readiness stabilization and post-resume multiline
-  readiness before delivery, association, or attach.
+  readiness, direct and fan-out tmux delivery, and metadata association retry
+  before delivery, mutation, or attach.
 - AGY feedback survey handling dismisses once and recognizes the subsequent
   composer even while stale survey text remains in captured pane history.
 - AGM runtime helper commands keep co-located SPEC coverage.

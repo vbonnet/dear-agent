@@ -172,7 +172,7 @@ type agyPostCreateRuntime struct {
 	wait               func(context.Context, string, time.Duration) error
 	associate          func(string)
 	deliver            func(string, bool, bool)
-	associateWithRetry func(string, int, time.Duration)
+	associateWithRetry func(context.Context, string, int, time.Duration) error
 }
 
 func realAgyPostCreateRuntime() agyPostCreateRuntime {
@@ -213,7 +213,9 @@ func runAgyPostCreateWithRuntime(ctx context.Context, sessionName string, runtim
 				}
 				debug.Log("AGY post-prompt readiness wait failed (non-fatal): %v", err)
 			}
-			runtime.associateWithRetry(sessionName, 20, 500*time.Millisecond)
+			if err := runtime.associateWithRetry(ctx, sessionName, 20, 500*time.Millisecond); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

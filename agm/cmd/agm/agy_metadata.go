@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -100,25 +101,36 @@ func associateSpawnedAgySession(sessionName string) {
 	}
 }
 
-func associateSpawnedAgySessionWithRetry(sessionName string, attempts int, delay time.Duration) {
+func associateSpawnedAgySessionWithRetry(ctx context.Context, sessionName string, attempts int, delay time.Duration) error {
 	if attempts < 1 {
 		attempts = 1
 	}
 	for attempt := 1; attempt <= attempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		adapter, err := getStorage()
 		if err != nil {
 			debug.Log("AGY association skipped: failed to connect to Dolt: %v", err)
-			return
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			_ = adapter.Close()
+			return err
 		}
 
 		m, getErr := adapter.GetSessionByName(sessionName)
 		if getErr == nil && m != nil {
 			enrichErr := enrichManifestWithAgyConversation(m)
 			if enrichErr == nil {
+				if err := ctx.Err(); err != nil {
+					_ = adapter.Close()
+					return err
+				}
 				persistErr := persistAssociatedManifest(adapter, m)
 				if persistErr == nil {
 					_ = adapter.Close()
-					return
+					return nil
 				}
 				debug.Log("AGY association retry %d/%d: failed to persist metadata: %v", attempt, attempts, persistErr)
 			} else {
@@ -129,8 +141,22 @@ func associateSpawnedAgySessionWithRetry(sessionName string, attempts int, delay
 		}
 		_ = adapter.Close()
 		if attempt < attempts {
-			time.Sleep(delay)
+			if err := waitForAgyAssociationRetryDelay(ctx, delay); err != nil {
+				return err
+			}
 		}
+	}
+	return nil
+}
+
+func waitForAgyAssociationRetryDelay(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
 }
 
