@@ -2,6 +2,7 @@ package status
 
 import (
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -20,6 +21,9 @@ func ValidateV2(status *StatusV2) error {
 
 	// Validate enum fields
 	if err := validateEnums(status); err != nil {
+		errors = append(errors, err.Error())
+	}
+	if err := validateSkipPhases(status.SkipPhases); err != nil {
 		errors = append(errors, err.Error())
 	}
 
@@ -50,6 +54,50 @@ func ValidateV2(status *StatusV2) error {
 	return nil
 }
 
+func validateSkipPhases(phases []string) error {
+	allowed := map[string]bool{
+		WaypointV2Design: true,
+		WaypointV2Spec:   true,
+		WaypointV2Plan:   true,
+	}
+	seen := make(map[string]bool, len(phases))
+	for _, phase := range phases {
+		if !allowed[phase] {
+			return fmt.Errorf("skip_phases contains unsafe phase %q; only DESIGN, SPEC, and PLAN may be skipped", phase)
+		}
+		if seen[phase] {
+			return fmt.Errorf("skip_phases contains duplicate phase %q", phase)
+		}
+		seen[phase] = true
+	}
+	return nil
+}
+
+// ValidateSessionCompletion requires completed history for every canonical
+// waypoint except phases explicitly skipped by the session configuration.
+func ValidateSessionCompletion(status *StatusV2) error {
+	if status == nil {
+		return fmt.Errorf("status is nil")
+	}
+	var incomplete []string
+	for _, waypointName := range AllWaypointsV2Schema() {
+		if status.IsPhaseSkipped(waypointName) {
+			if waypoint := status.GetWaypointHistory(waypointName); waypoint != nil && waypoint.Status != WaypointStatusV2Skipped && waypoint.Status != WaypointStatusV2Completed {
+				return fmt.Errorf("configured skipped Wayfinder phase %s has active history status %s", waypointName, waypoint.Status)
+			}
+			continue
+		}
+		waypoint := status.GetWaypointHistory(waypointName)
+		if waypoint == nil || waypoint.Status != WaypointStatusV2Completed {
+			incomplete = append(incomplete, waypointName)
+		}
+	}
+	if len(incomplete) > 0 {
+		return fmt.Errorf("required Wayfinder phases are incomplete: %s", strings.Join(incomplete, ", "))
+	}
+	return nil
+}
+
 // validateRequiredFields checks all required fields are present
 func validateRequiredFields(status *StatusV2) error {
 	var errors []string
@@ -57,7 +105,7 @@ func validateRequiredFields(status *StatusV2) error {
 	if status.SchemaVersion == "" {
 		errors = append(errors, "schema_version is required")
 	}
-	if status.ProjectName == "" {
+	if strings.TrimSpace(status.ProjectName) == "" {
 		errors = append(errors, "project_name is required")
 	}
 	if status.ProjectType == "" {
@@ -90,8 +138,8 @@ func validateEnums(status *StatusV2) error {
 	var errors []string
 
 	// Validate schema_version
-	if status.SchemaVersion != SchemaVersionV2 {
-		errors = append(errors, fmt.Sprintf("schema_version must be '%s', got '%s'", SchemaVersionV2, status.SchemaVersion))
+	if status.SchemaVersion != SchemaVersion {
+		errors = append(errors, fmt.Sprintf("schema_version must be '%s', got '%s'", SchemaVersion, status.SchemaVersion))
 	}
 
 	// Validate project_type
@@ -113,6 +161,9 @@ func validateEnums(status *StatusV2) error {
 	if !contains(ValidStatuses(), status.Status) {
 		errors = append(errors, fmt.Sprintf("invalid status '%s', must be one of: %s", status.Status, strings.Join(ValidStatuses(), ", ")))
 	}
+	if err := validateLifecycleState(status); err != nil {
+		errors = append(errors, err.Error())
+	}
 
 	if len(errors) > 0 {
 		return fmt.Errorf("enum validation failed: %s", strings.Join(errors, "; "))
@@ -120,25 +171,67 @@ func validateEnums(status *StatusV2) error {
 	return nil
 }
 
+func validateLifecycleState(status *StatusV2) error {
+	if status.LifecycleState == "" {
+		return nil
+	}
+	expectedStatuses := map[string]string{
+		LifecycleWorking:           StatusV2InProgress,
+		LifecycleInputRequired:     StatusV2Blocked,
+		LifecycleDependencyBlocked: StatusV2Blocked,
+		LifecycleValidating:        StatusV2InProgress,
+		LifecycleCompleted:         StatusV2Completed,
+		LifecycleFailed:            StatusV2Blocked,
+		LifecycleCanceled:          StatusV2Abandoned,
+	}
+	expectedStatus, valid := expectedStatuses[status.LifecycleState]
+	if !valid {
+		return fmt.Errorf("invalid lifecycle_state %q", status.LifecycleState)
+	}
+	if status.Status != expectedStatus {
+		return fmt.Errorf("lifecycle_state %q requires status %q, got %q", status.LifecycleState, expectedStatus, status.Status)
+	}
+	switch status.LifecycleState {
+	case LifecycleInputRequired:
+		if strings.TrimSpace(status.InputNeeded) == "" {
+			return fmt.Errorf("lifecycle_state %q requires input_needed", status.LifecycleState)
+		}
+	case LifecycleDependencyBlocked:
+		if strings.TrimSpace(status.BlockedOn) == "" {
+			return fmt.Errorf("lifecycle_state %q requires blocked_on", status.LifecycleState)
+		}
+	case LifecycleFailed:
+		if strings.TrimSpace(status.ErrorMessage) == "" {
+			return fmt.Errorf("lifecycle_state %q requires error_message", status.LifecycleState)
+		}
+	}
+	return nil
+}
+
 // validateWaypointHistory checks waypoint history consistency
 func validateWaypointHistory(status *StatusV2) error {
-	if status.WaypointHistory == nil {
-		return nil // Waypoint history is optional
-	}
-
 	var errors []string
 	allWaypoints := AllWaypointsV2Schema()
+	seenWaypoints := make(map[string]bool, len(status.WaypointHistory))
 
 	for i, waypoint := range status.WaypointHistory {
+		if seenWaypoints[waypoint.Name] {
+			errors = append(errors, fmt.Sprintf("waypoint_history[%d]: duplicate waypoint name '%s'", i, waypoint.Name))
+		}
+		seenWaypoints[waypoint.Name] = true
+
 		// Validate waypoint name
 		if !contains(allWaypoints, waypoint.Name) {
 			errors = append(errors, fmt.Sprintf("waypoint_history[%d]: invalid waypoint name '%s'", i, waypoint.Name))
 		}
 
 		// Validate waypoint status
-		validWaypointStatuses := []string{WaypointStatusV2Completed, WaypointStatusV2InProgress, WaypointStatusV2Blocked, WaypointStatusV2Skipped}
+		validWaypointStatuses := []string{WaypointStatusV2Pending, WaypointStatusV2Completed, WaypointStatusV2InProgress, WaypointStatusV2Blocked, WaypointStatusV2Skipped}
 		if !contains(validWaypointStatuses, waypoint.Status) {
 			errors = append(errors, fmt.Sprintf("waypoint_history[%d]: invalid status '%s'", i, waypoint.Status))
+		}
+		if err := validateWaypointSkipStatus(status, waypoint, i); err != nil {
+			errors = append(errors, err.Error())
 		}
 
 		// Validate started_at is present
@@ -150,18 +243,17 @@ func validateWaypointHistory(status *StatusV2) error {
 		if waypoint.Status == WaypointStatusV2Completed && waypoint.CompletedAt == nil {
 			errors = append(errors, fmt.Sprintf("waypoint_history[%d]: completed waypoints must have completed_at", i))
 		}
+		if waypoint.Outcome != nil && !contains([]string{OutcomeSuccess, OutcomePartial, OutcomeSkipped}, *waypoint.Outcome) {
+			errors = append(errors, fmt.Sprintf("waypoint_history[%d]: invalid outcome '%s'", i, *waypoint.Outcome))
+		}
 
 		// Validate waypoint-specific metadata
 		if err := validateWaypointMetadata(waypoint, i); err != nil {
 			errors = append(errors, err.Error())
 		}
 
-		// Check for legacy waypoints (S4, S5, S9, S10) that were merged
-		legacyWaypoints := []string{"S4", "S5", "S9", "S10"}
-		if contains(legacyWaypoints, waypoint.Name) {
-			errors = append(errors, fmt.Sprintf("waypoint_history[%d]: cannot use legacy waypoint '%s' (merged in V2)", i, waypoint.Name))
-		}
 	}
+	errors = append(errors, validateWaypointSequence(status, allWaypoints)...)
 
 	if len(errors) > 0 {
 		return fmt.Errorf("%s", strings.Join(errors, "; "))
@@ -169,43 +261,120 @@ func validateWaypointHistory(status *StatusV2) error {
 	return nil
 }
 
+func validateWaypointSkipStatus(status *StatusV2, waypoint WaypointHistory, index int) error {
+	configuredSkip := status.IsPhaseSkipped(waypoint.Name)
+	if waypoint.Status == WaypointStatusV2Skipped && !configuredSkip {
+		return fmt.Errorf("waypoint_history[%d]: mandatory waypoint '%s' cannot be skipped", index, waypoint.Name)
+	}
+	if configuredSkip && waypoint.Status != WaypointStatusV2Skipped && waypoint.Status != WaypointStatusV2Completed {
+		return fmt.Errorf("waypoint_history[%d]: configured skipped waypoint '%s' cannot have active status '%s'", index, waypoint.Name, waypoint.Status)
+	}
+	return nil
+}
+
+func validateWaypointSequence(status *StatusV2, allWaypoints []string) []string {
+	positions := make(map[string]int, len(allWaypoints))
+	for index, waypoint := range allWaypoints {
+		positions[waypoint] = index
+	}
+
+	errors := validateWaypointHistoryOrder(status, allWaypoints, positions)
+	currentPosition, currentValid := positions[status.CurrentWaypoint]
+	if !currentValid {
+		return errors
+	}
+	for index, waypoint := range status.WaypointHistory {
+		position, valid := positions[waypoint.Name]
+		if valid && position > currentPosition {
+			errors = append(errors, fmt.Sprintf("waypoint_history[%d]: waypoint '%s' cannot be ahead of current_waypoint '%s'", index, waypoint.Name, status.CurrentWaypoint))
+		}
+	}
+	completed := completedWaypoints(status)
+	if status.IsPhaseSkipped(status.CurrentWaypoint) && !completed[status.CurrentWaypoint] {
+		errors = append(errors, fmt.Sprintf("current_waypoint '%s' is configured to be skipped but has no completed or skipped history", status.CurrentWaypoint))
+	}
+	for _, predecessor := range missingPredecessors(status, allWaypoints[:currentPosition], completed) {
+		errors = append(errors, fmt.Sprintf("current_waypoint '%s' requires completed predecessor '%s'", status.CurrentWaypoint, predecessor))
+	}
+	return errors
+}
+
+func validateWaypointHistoryOrder(status *StatusV2, allWaypoints []string, positions map[string]int) []string {
+	var errors []string
+	completedBefore := make(map[string]bool, len(status.WaypointHistory))
+	lastPosition := -1
+	for index, waypoint := range status.WaypointHistory {
+		position, valid := positions[waypoint.Name]
+		if !valid {
+			continue
+		}
+		if position < lastPosition {
+			errors = append(errors, fmt.Sprintf("waypoint_history[%d]: waypoint '%s' is out of canonical order", index, waypoint.Name))
+		}
+		for _, predecessor := range missingPredecessors(status, allWaypoints[:position], completedBefore) {
+			errors = append(errors, fmt.Sprintf("waypoint_history[%d]: predecessor '%s' must be completed before '%s'", index, predecessor, waypoint.Name))
+		}
+		if isCompletedWaypoint(status, waypoint) {
+			completedBefore[waypoint.Name] = true
+		}
+		lastPosition = position
+	}
+	return errors
+}
+
+func completedWaypoints(status *StatusV2) map[string]bool {
+	completed := make(map[string]bool, len(status.WaypointHistory))
+	for _, waypoint := range status.WaypointHistory {
+		if isCompletedWaypoint(status, waypoint) {
+			completed[waypoint.Name] = true
+		}
+	}
+	return completed
+}
+
+func missingPredecessors(status *StatusV2, predecessors []string, completed map[string]bool) []string {
+	var missing []string
+	for _, predecessor := range predecessors {
+		if !status.IsPhaseSkipped(predecessor) && !completed[predecessor] {
+			missing = append(missing, predecessor)
+		}
+	}
+	return missing
+}
+
+func isCompletedWaypoint(status *StatusV2, waypoint WaypointHistory) bool {
+	return waypoint.Status == WaypointStatusV2Completed ||
+		(waypoint.Status == WaypointStatusV2Skipped && status.IsPhaseSkipped(waypoint.Name))
+}
+
 // validateWaypointMetadata validates waypoint-specific metadata fields
 func validateWaypointMetadata(waypoint WaypointHistory, index int) error {
 	var errors []string
 
-	// SPEC validation
-	if waypoint.Name == WaypointV2Spec {
-		if waypoint.StakeholderApproved == nil {
-			errors = append(errors, fmt.Sprintf("waypoint_history[%d] (SPEC): stakeholder_approved field is recommended", index))
-		}
-	}
-
-	// PLAN validation
-	if waypoint.Name == WaypointV2Plan {
-		if waypoint.TestsFeatureCreated == nil {
-			errors = append(errors, fmt.Sprintf("waypoint_history[%d] (PLAN): tests_feature_created field is recommended", index))
-		}
-	}
-
-	// BUILD validation
+	// Phase-specific metadata is optional. start-phase writes an in-progress
+	// history entry before these values are known, so structural parsing must
+	// accept their absence and validate only values that are present.
+	// BUILD enum validation
 	if waypoint.Name == WaypointV2Build {
-		if waypoint.ValidationStatus == "" {
-			errors = append(errors, fmt.Sprintf("waypoint_history[%d] (BUILD): validation_status field is recommended", index))
-		}
-		if waypoint.DeploymentStatus == "" {
-			errors = append(errors, fmt.Sprintf("waypoint_history[%d] (BUILD): deployment_status field is recommended", index))
-		}
-
-		// Validate validation_status values
 		validValidationStatuses := []string{ValidationStatusPending, ValidationStatusInProgress, ValidationStatusPassed, ValidationStatusFailed}
 		if waypoint.ValidationStatus != "" && !contains(validValidationStatuses, waypoint.ValidationStatus) {
 			errors = append(errors, fmt.Sprintf("waypoint_history[%d] (BUILD): invalid validation_status '%s'", index, waypoint.ValidationStatus))
 		}
 
-		// Validate deployment_status values
 		validDeploymentStatuses := []string{DeploymentStatusPending, DeploymentStatusInProgress, DeploymentStatusDeployed, DeploymentStatusRolledBack}
 		if waypoint.DeploymentStatus != "" && !contains(validDeploymentStatuses, waypoint.DeploymentStatus) {
 			errors = append(errors, fmt.Sprintf("waypoint_history[%d] (BUILD): invalid deployment_status '%s'", index, waypoint.DeploymentStatus))
+		}
+	}
+
+	if waypoint.BuildMetrics != nil {
+		for name, value := range map[string]float64{
+			"coverage_percent":  waypoint.BuildMetrics.CoveragePercent,
+			"assertion_density": waypoint.BuildMetrics.AssertionDensity,
+		} {
+			if math.IsNaN(value) || math.IsInf(value, 0) {
+				errors = append(errors, fmt.Sprintf("waypoint_history[%d] (%s): build_metrics.%s must be finite", index, waypoint.Name, name))
+			}
 		}
 	}
 
@@ -225,6 +394,7 @@ func validateRoadmap(status *StatusV2) error {
 
 	// Collect all task IDs for dependency validation
 	allTaskIDs := make(map[string]bool)
+	allPhaseIDs := make(map[string]bool)
 	var allTasks []Task
 
 	for i, phase := range status.Roadmap.Phases {
@@ -232,6 +402,10 @@ func validateRoadmap(status *StatusV2) error {
 		if !contains(AllWaypointsV2Schema(), phase.ID) {
 			errors = append(errors, fmt.Sprintf("roadmap.phases[%d]: invalid waypoint_id '%s'", i, phase.ID))
 		}
+		if allPhaseIDs[phase.ID] {
+			errors = append(errors, fmt.Sprintf("roadmap.phases[%d]: duplicate waypoint_id '%s'", i, phase.ID))
+		}
+		allPhaseIDs[phase.ID] = true
 
 		// Validate waypoint status
 		validWaypointStatuses := []string{WaypointStatusV2Pending, WaypointStatusV2InProgress, WaypointStatusV2Completed, WaypointStatusV2Blocked, WaypointStatusV2Skipped}
@@ -240,10 +414,15 @@ func validateRoadmap(status *StatusV2) error {
 		}
 
 		// Collect tasks
-		for _, task := range phase.Tasks {
-			if task.ID == "" {
+		for taskIndex, task := range phase.Tasks {
+			if strings.TrimSpace(task.ID) == "" {
 				errors = append(errors, fmt.Sprintf("roadmap.phases[%d]: task has empty ID", i))
 				continue
+			}
+			if math.IsNaN(task.EffortDays) || math.IsInf(task.EffortDays, 0) {
+				errors = append(errors, fmt.Sprintf("roadmap.phases[%d].tasks[%d].effort_days must be finite", i, taskIndex))
+			} else if task.EffortDays < 0 {
+				errors = append(errors, fmt.Sprintf("roadmap.phases[%d].tasks[%d].effort_days cannot be negative", i, taskIndex))
 			}
 
 			if allTaskIDs[task.ID] {
@@ -380,6 +559,25 @@ func validateQualityMetrics(status *StatusV2) error {
 
 	var errors []string
 	qm := status.QualityMetrics
+	finiteValues := map[string]float64{
+		"coverage_percent":         qm.CoveragePercent,
+		"coverage_target":          qm.CoverageTarget,
+		"assertion_density":        qm.AssertionDensity,
+		"assertion_density_target": qm.AssertionDensityTarget,
+		"multi_persona_score":      qm.MultiPersonaScore,
+		"security_score":           qm.SecurityScore,
+		"performance_score":        qm.PerformanceScore,
+		"reliability_score":        qm.ReliabilityScore,
+		"maintainability_score":    qm.MaintainabilityScore,
+		"estimated_effort_hours":   qm.EstimatedEffortHours,
+		"actual_effort_hours":      qm.ActualEffortHours,
+		"effort_variance":          qm.EffortVariance,
+	}
+	for name, value := range finiteValues {
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			errors = append(errors, fmt.Sprintf("%s must be finite", name))
+		}
+	}
 
 	// Validate coverage percentages (0-100)
 	if qm.CoveragePercent < 0 || qm.CoveragePercent > 100 {
@@ -440,10 +638,15 @@ func validateConditionalRequirements(status *StatusV2) error {
 	if status.Status == StatusV2Completed && status.CompletionDate == nil {
 		errors = append(errors, "status is 'completed' but completion_date is missing")
 	}
+	if status.Status == StatusV2Completed {
+		if err := ValidateSessionCompletion(status); err != nil {
+			errors = append(errors, err.Error())
+		}
+	}
 
-	// If status = blocked, blocked_reason should be present (warning only)
-	if status.Status == StatusV2Blocked && status.BlockedReason == "" {
-		errors = append(errors, "status is 'blocked' but blocked_reason is empty (recommended)")
+	// If status = blocked, blocked_reason must be present.
+	if status.Status == StatusV2Blocked && strings.TrimSpace(status.BlockedReason) == "" {
+		errors = append(errors, "status is 'blocked' but blocked_reason is empty")
 	}
 
 	if len(errors) > 0 {

@@ -1,4 +1,4 @@
-// safe-pr opens and closes GitHub pull requests with a mandatory wayfinder
+// safe-pr opens, closes, and reopens GitHub pull requests with a mandatory wayfinder
 // session trace. It is the only sanctioned PR path for agent sessions: the
 // PreToolUse hook .claude/hooks/pretool-pr-guard denies raw `gh pr create|
 // close|reopen` and points here.
@@ -7,10 +7,11 @@
 //
 //	safe-pr create --wayfinder <project-dir> --title "..." --body "..." [gh flags...]
 //	safe-pr close  --wayfinder <project-dir> <number|url> [gh flags...]
+//	safe-pr reopen --wayfinder <project-dir> <number|url> --comment "..." [gh flags...]
 //
 // The wayfinder project dir (or WAYFINDER_PROJECT_DIR) must contain a
-// active WAYFINDER-STATUS.md; its project_name (or legacy session_id) is
-// stamped into the PR body (create) or close comment (close). On create, squash
+// active WAYFINDER-STATUS.md; its canonical project_name is stamped into the
+// PR body (create) or mutation comment (close/reopen). On create, squash
 // auto-merge is armed on a new non-draft PR so it merges itself once required
 // checks and reviews pass. Draft PRs remain unarmed for a human to advance.
 // Every invocation is audit-logged to
@@ -579,7 +580,7 @@ func protectTransactionCommand(transaction *safepr.WorktreeTransaction, cmd *exe
 	return transaction.ProtectCommand(cmd)
 }
 
-const usage = `safe-pr — open/close GitHub PRs with a mandatory wayfinder session trace.
+const usage = `safe-pr — open/close/reopen GitHub PRs with a mandatory wayfinder session trace.
 
 This is the only sanctioned PR path for agent sessions (AGENTS.md principle 9):
 raw 'gh pr create|close|reopen' in Bash is denied by .claude/hooks/pretool-pr-guard.
@@ -588,10 +589,11 @@ Untraced PRs burn CI/review quota and cannot be attributed afterwards.
 Usage:
   safe-pr create --wayfinder <project-dir> --title "..." --body "..." [gh flags...]
   safe-pr close  --wayfinder <project-dir> <number|url> [gh flags...]
+  safe-pr reopen --wayfinder <project-dir> <number|url> --comment "..." [gh flags...]
 
 Flags:
   --wayfinder <dir>   wayfinder project dir holding WAYFINDER-STATUS.md
-                      (default: $WAYFINDER_PROJECT_DIR); session must be in_progress
+                      (default: $WAYFINDER_PROJECT_DIR); session must be in-progress
   --bead <id>         bead this PR closes; folds "Closes <id>" into the create
                       body (default: $BEAD, then the session's first bead)
   --timeout <dur>     kill gh after this long (default 60s)
@@ -603,8 +605,8 @@ Flags:
                       the current directory and blocks PR creation on failure
   -h, --help          show this help
 
-All other arguments pass through to 'gh pr create' / 'gh pr close'.
-The session trace is stamped into the PR body (create) or comment (close).
+All other arguments pass through to 'gh pr create' / 'gh pr close' / 'gh pr reopen'.
+The session trace is stamped into the PR body (create) or comment (close/reopen).
 On create, 'make preflight-full' is run first to ensure local build/test/lint
 health before the PR hits CI (shift-left gate). Use --skip-preflight only for
 emergencies; prefer fixing the underlying issues instead.

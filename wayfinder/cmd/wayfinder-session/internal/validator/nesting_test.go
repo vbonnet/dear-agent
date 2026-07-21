@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
@@ -14,36 +15,29 @@ import (
 
 func createStatusFile(t *testing.T, dir string, projectStatus string, allPhasesComplete bool) {
 	t.Helper()
-
-	phases := `phases:
-  - name: D1
-    status: in_progress`
-
+	st := status.NewStatusV2("test", status.ProjectTypeFeature, status.RiskLevelM)
+	st.Status = projectStatus
+	st.CurrentWaypoint = status.PhaseV2Charter
+	st.UpdatePhase(status.PhaseV2Charter, status.PhaseStatusV2InProgress, "")
 	if allPhasesComplete {
-		phases = `phases:
-  - name: D1
-    status: completed
-  - name: D2
-    status: completed
-  - name: S8
-    status: completed`
+		st.WaypointHistory = nil
+		for _, phase := range status.AllPhases() {
+			st.UpdatePhase(phase, status.PhaseStatusV2Completed, status.OutcomeSuccess)
+		}
+		approved := true
+		testsCreated := true
+		st.FindWaypointHistory(status.WaypointV2Spec).StakeholderApproved = &approved
+		st.FindWaypointHistory(status.WaypointV2Plan).TestsFeatureCreated = &testsCreated
+		build := st.FindWaypointHistory(status.WaypointV2Build)
+		build.ValidationStatus = status.ValidationStatusPassed
+		build.DeploymentStatus = status.DeploymentStatusDeployed
+		st.CurrentWaypoint = status.WaypointV2Retro
 	}
-
-	content := `---
-schema_version: "1.0"
-session_id: test-session
-project_path: .
-started_at: 2026-01-29T12:00:00Z
-status: ` + projectStatus + `
-current_phase: D1
-` + phases + `
----
-
-# Wayfinder Status
-`
-
-	err := os.WriteFile(filepath.Join(dir, status.StatusFilename), []byte(content), 0644)
-	if err != nil {
+	if projectStatus == status.StatusV2Completed {
+		completedAt := time.Now()
+		st.CompletionDate = &completedAt
+	}
+	if err := status.WriteV2ToDir(st, dir); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -89,7 +83,7 @@ func TestIsProjectComplete(t *testing.T) {
 			name: "all phases completed",
 			setup: func(t *testing.T) string {
 				tmpDir := t.TempDir()
-				createStatusFile(t, tmpDir, "in_progress", true)
+				createStatusFile(t, tmpDir, "in-progress", true)
 				return tmpDir
 			},
 			expected: true,
@@ -99,7 +93,22 @@ func TestIsProjectComplete(t *testing.T) {
 			name: "some phases incomplete",
 			setup: func(t *testing.T) string {
 				tmpDir := t.TempDir()
-				createStatusFile(t, tmpDir, "in_progress", false)
+				createStatusFile(t, tmpDir, "in-progress", false)
+				return tmpDir
+			},
+			expected: false,
+			wantErr:  false,
+		},
+		{
+			name: "partial completed history is incomplete",
+			setup: func(t *testing.T) string {
+				tmpDir := t.TempDir()
+				st := status.NewStatusV2("test", status.ProjectTypeFeature, status.RiskLevelM)
+				st.Status = status.StatusV2InProgress
+				st.UpdatePhase(status.WaypointV2Charter, status.WaypointStatusV2Completed, status.OutcomeSuccess)
+				if err := status.WriteV2ToDir(st, tmpDir); err != nil {
+					t.Fatal(err)
+				}
 				return tmpDir
 			},
 			expected: false,
@@ -133,7 +142,7 @@ func TestIsProjectComplete(t *testing.T) {
 				tmpDir := t.TempDir()
 				createStatusFile(t, tmpDir, "completed", true)
 				createChildProject(t, tmpDir, "child-a", "completed", true)
-				createChildProject(t, tmpDir, "child-b", "in_progress", false)
+				createChildProject(t, tmpDir, "child-b", "in-progress", false)
 				return tmpDir
 			},
 			expected: false,
@@ -165,6 +174,21 @@ func TestIsProjectComplete(t *testing.T) {
 	}
 }
 
+func TestAllRequiredWaypointsCompleteRejectsActiveSkippedPhase(t *testing.T) {
+	st := status.NewStatusV2("lite-child", status.ProjectTypeFeature, status.RiskLevelXS)
+	st.SkipPhases = []string{status.WaypointV2Design, status.WaypointV2Spec, status.WaypointV2Plan}
+	for _, waypoint := range status.AllWaypointsV2Schema() {
+		if !st.IsPhaseSkipped(waypoint) {
+			st.UpdatePhase(waypoint, status.WaypointStatusV2Completed, status.OutcomeSuccess)
+		}
+	}
+	st.UpdatePhase(status.WaypointV2Design, status.WaypointStatusV2InProgress, "")
+
+	if allRequiredWaypointsComplete(st) {
+		t.Fatal("active profile-skipped phase must keep a child project incomplete")
+	}
+}
+
 // Tests for GetIncompleteChildren
 
 func TestGetIncompleteChildren(t *testing.T) {
@@ -178,7 +202,7 @@ func TestGetIncompleteChildren(t *testing.T) {
 			name: "no children",
 			setup: func(t *testing.T) string {
 				tmpDir := t.TempDir()
-				createStatusFile(t, tmpDir, "in_progress", false)
+				createStatusFile(t, tmpDir, "in-progress", false)
 				return tmpDir
 			},
 			expectedCount: 0,
@@ -187,7 +211,7 @@ func TestGetIncompleteChildren(t *testing.T) {
 			name: "all children complete",
 			setup: func(t *testing.T) string {
 				tmpDir := t.TempDir()
-				createStatusFile(t, tmpDir, "in_progress", false)
+				createStatusFile(t, tmpDir, "in-progress", false)
 				createChildProject(t, tmpDir, "child-a", "completed", true)
 				createChildProject(t, tmpDir, "child-b", "completed", true)
 				return tmpDir
@@ -198,9 +222,9 @@ func TestGetIncompleteChildren(t *testing.T) {
 			name: "all children incomplete",
 			setup: func(t *testing.T) string {
 				tmpDir := t.TempDir()
-				createStatusFile(t, tmpDir, "in_progress", false)
-				createChildProject(t, tmpDir, "child-a", "in_progress", false)
-				createChildProject(t, tmpDir, "child-b", "in_progress", false)
+				createStatusFile(t, tmpDir, "in-progress", false)
+				createChildProject(t, tmpDir, "child-a", "in-progress", false)
+				createChildProject(t, tmpDir, "child-b", "in-progress", false)
 				return tmpDir
 			},
 			expectedCount: 2,
@@ -210,9 +234,9 @@ func TestGetIncompleteChildren(t *testing.T) {
 			name: "mixed status",
 			setup: func(t *testing.T) string {
 				tmpDir := t.TempDir()
-				createStatusFile(t, tmpDir, "in_progress", false)
+				createStatusFile(t, tmpDir, "in-progress", false)
 				createChildProject(t, tmpDir, "child-a", "completed", true)
-				createChildProject(t, tmpDir, "child-b", "in_progress", false)
+				createChildProject(t, tmpDir, "child-b", "in-progress", false)
 				createChildProject(t, tmpDir, "child-c", "completed", true)
 				return tmpDir
 			},
@@ -264,7 +288,7 @@ func TestCheckChildrenComplete(t *testing.T) {
 			name: "no children - passes",
 			setup: func(t *testing.T) string {
 				tmpDir := t.TempDir()
-				createStatusFile(t, tmpDir, "in_progress", false)
+				createStatusFile(t, tmpDir, "in-progress", false)
 				return tmpDir
 			},
 			wantErr: false,
@@ -273,7 +297,7 @@ func TestCheckChildrenComplete(t *testing.T) {
 			name: "all children complete - passes",
 			setup: func(t *testing.T) string {
 				tmpDir := t.TempDir()
-				createStatusFile(t, tmpDir, "in_progress", false)
+				createStatusFile(t, tmpDir, "in-progress", false)
 				createChildProject(t, tmpDir, "child-a", "completed", true)
 				createChildProject(t, tmpDir, "child-b", "completed", true)
 				return tmpDir
@@ -284,9 +308,9 @@ func TestCheckChildrenComplete(t *testing.T) {
 			name: "some children incomplete - fails",
 			setup: func(t *testing.T) string {
 				tmpDir := t.TempDir()
-				createStatusFile(t, tmpDir, "in_progress", false)
+				createStatusFile(t, tmpDir, "in-progress", false)
 				createChildProject(t, tmpDir, "child-a", "completed", true)
-				createChildProject(t, tmpDir, "child-b", "in_progress", false)
+				createChildProject(t, tmpDir, "child-b", "in-progress", false)
 				return tmpDir
 			},
 			wantErr: true,
@@ -296,9 +320,9 @@ func TestCheckChildrenComplete(t *testing.T) {
 			name: "all children incomplete - fails",
 			setup: func(t *testing.T) string {
 				tmpDir := t.TempDir()
-				createStatusFile(t, tmpDir, "in_progress", false)
-				createChildProject(t, tmpDir, "child-a", "in_progress", false)
-				createChildProject(t, tmpDir, "child-b", "in_progress", false)
+				createStatusFile(t, tmpDir, "in-progress", false)
+				createChildProject(t, tmpDir, "child-a", "in-progress", false)
+				createChildProject(t, tmpDir, "child-b", "in-progress", false)
 				return tmpDir
 			},
 			wantErr: true,
@@ -333,13 +357,13 @@ func TestCheckChildrenComplete_RecursiveValidation(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create parent
-	createStatusFile(t, tmpDir, "in_progress", false)
+	createStatusFile(t, tmpDir, "in-progress", false)
 
 	// Create child
 	childDir := createChildProject(t, tmpDir, "child", "completed", true)
 
 	// Create grandchild (incomplete)
-	createChildProject(t, childDir, "grandchild", "in_progress", false)
+	createChildProject(t, childDir, "grandchild", "in-progress", false)
 
 	// Child should not be considered complete because grandchild is incomplete
 	complete, err := IsProjectComplete(childDir)
@@ -362,7 +386,7 @@ func TestCheckChildrenComplete_ThreeLevelNesting(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create parent
-	createStatusFile(t, tmpDir, "in_progress", false)
+	createStatusFile(t, tmpDir, "in-progress", false)
 
 	// Create child
 	childDir := createChildProject(t, tmpDir, "child", "completed", true)
@@ -379,7 +403,7 @@ func TestCheckChildrenComplete_ThreeLevelNesting(t *testing.T) {
 
 func TestCheckChildrenComplete_MaxDepthExceeded(t *testing.T) {
 	tmpDir := t.TempDir()
-	createStatusFile(t, tmpDir, "in_progress", false)
+	createStatusFile(t, tmpDir, "in-progress", false)
 
 	// Create excessive nesting (MaxNestingDepth + 1)
 	current := tmpDir
@@ -400,11 +424,11 @@ func TestCheckChildrenComplete_MaxDepthExceeded(t *testing.T) {
 
 func TestCheckChildrenComplete_ErrorMessage(t *testing.T) {
 	tmpDir := t.TempDir()
-	createStatusFile(t, tmpDir, "in_progress", false)
+	createStatusFile(t, tmpDir, "in-progress", false)
 
 	createChildProject(t, tmpDir, "child-a", "completed", true)
-	createChildProject(t, tmpDir, "child-b", "in_progress", false)
-	createChildProject(t, tmpDir, "child-c", "in_progress", false)
+	createChildProject(t, tmpDir, "child-b", "in-progress", false)
+	createChildProject(t, tmpDir, "child-c", "in-progress", false)
 
 	err := CheckChildrenComplete(tmpDir)
 	if err == nil {
@@ -464,7 +488,7 @@ func TestIsProjectComplete_CorruptedStatusFile(t *testing.T) {
 
 func TestCheckChildrenComplete_PermissionDenied(t *testing.T) {
 	tmpDir := t.TempDir()
-	createStatusFile(t, tmpDir, "in_progress", false)
+	createStatusFile(t, tmpDir, "in-progress", false)
 
 	// Create child
 	childDir := createChildProject(t, tmpDir, "child", "completed", true)

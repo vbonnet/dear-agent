@@ -1,132 +1,59 @@
 # Engram MCP Server
 
-Model Context Protocol (MCP) server providing programmatic access to Engram's memory retrieval, beads management, and Wayfinder workflow systems.
+This directory contains the Node.js/TypeScript MCP server for Engram. It uses
+stdio transport and exposes three read-only tools:
 
-## Features
+- `engram.retrieve` calls the Engram CLI to retrieve memories.
+- `engram.plugins.list` lists plugins under the configured Engram root.
+- `wayfinder.phase.status` validates `WAYFINDER-STATUS.md` as canonical
+  Wayfinder schema 2.0 and returns its current state.
 
-### Core Tools (Task 3.2 - Basic)
+This package does not create or update Beads. Beads remain owned by the
+canonical Beads store and CLI.
 
-1. **engram.retrieve()** - Semantic memory retrieval with ecphory
-   - Search engrams by query
-   - Filter by type (.ai.md, .why.md)
-   - Return top-k most relevant results
+## Build and test
 
-2. **engram.plugins.list()** - List available Engram plugins
-   - Enumerate installed plugins
-   - Show plugin metadata and status
-
-3. **wayfinder.phase.status()** - Get Wayfinder project phase status
-   - Query current phase
-   - Get phase completion status
-   - Access phase deliverables
-
-### Enhanced Tools (Task 3.5 - Enhanced)
-
-4. **beads.create()** - Programmatic bead creation
-   - Create beads with title, description, priority, labels, estimate
-   - Validate against duplicates
-   - Return bead ID
-
-5. **Advanced Ecphory** - Semantic search with embedding-based similarity
-   - Embedding-based similarity search (using sentence-transformers)
-   - Top-k retrieval with relevance scoring
-   - Contextual ranking
-
-6. **Performance Profiling** - Tool invocation latency tracking
-   - Measure response times (<100ms target)
-   - Log performance metrics
-   - Optimize slow operations
-
-## Installation
+Requirements: Node.js 18 or newer and an `engram` executable on `PATH`.
 
 ```bash
-# Install dependencies
-cd ./engram/mcp-server
-pip install -r requirements.txt
-
-# Test the server
-python test_mcp_server.py
+cd engram/mcp
+npm ci
+npm test
+npm run build
 ```
 
-## Usage
+Start the compiled server with `npm start`. Configure another Engram CLI path
+with `ENGRAM_CLI` if needed.
 
-### As MCP Server (stdio)
+## MCP configuration
 
-```bash
-# Start server (stdio transport)
-python engram_mcp_server.py
+Build first, then configure the client with an absolute path:
 
-# Configure in ~/.claude/settings.json
+```json
 {
   "mcpServers": {
     "engram": {
-      "command": "python",
-      "args": ["engram/mcp-server/engram_mcp_server.py"]
+      "command": "node",
+      "args": ["/absolute/path/to/dear-agent/engram/mcp/dist/index.js"]
     }
   }
 }
 ```
 
-### Testing Tools
+## Configuration
 
-```bash
-# List all tools
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | python engram_mcp_server.py
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `ENGRAM_CLI` | `engram` | Engram executable used by `engram.retrieve` |
+| `ENGRAM_ROOT` | `~/.engram` | Root scanned by `engram.plugins.list` |
+| `MCP_CACHE_TTL_MS` | `30000` | Tool-result cache lifetime in milliseconds |
 
-# Test engram.retrieve()
-echo '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"engram_retrieve","arguments":{"query":"error handling","top_k":3}}}' | python engram_mcp_server.py
+## Source layout
 
-# Test beads.create()
-echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"beads_create","arguments":{"title":"Fix bug","description":"Fix authentication bug","priority":1}}}' | python engram_mcp_server.py
-```
+- `src/index.ts` defines the MCP server and tool handlers.
+- `src/wayfinder_status.ts` strictly parses Wayfinder schema 2.0.
+- `src/cache.ts` provides bounded TTL caching and file-watch invalidation.
+- `src/*.test.ts` contains the executable tests.
 
-## Architecture
-
-```
-mcp-server/
-├── engram_mcp_server.py      # Main MCP server
-├── tools/
-│   ├── engram_retrieve.py    # Memory retrieval with embeddings
-│   ├── beads_create.py       # Bead management
-│   ├── plugins_list.py       # Plugin enumeration
-│   └── wayfinder_status.py   # Wayfinder integration
-├── performance.py            # Performance profiling
-├── requirements.txt          # Dependencies
-├── test_mcp_server.py        # Integration tests
-└── README.md                 # This file
-```
-
-## Performance Targets
-
-- Tool invocation latency: <100ms (measured via performance profiling)
-- Embedding generation: <50ms (cached after first use)
-- Bead validation: <20ms (database lookup)
-- Wayfinder status: <30ms (file system read)
-
-## API Documentation
-
-See [ENGRAM-MCP-SERVER-API.md](./ENGRAM-MCP-SERVER-API.md) for complete API reference.
-
-## Development
-
-```bash
-# Run tests
-python test_mcp_server.py
-
-# Run performance benchmarks
-python benchmark_mcp_server.py
-
-# Check latency
-python -c "from performance import PerformanceProfiler; p = PerformanceProfiler(); print(p.get_stats())"
-```
-
-## Dependencies
-
-- Python 3.9+
-- sentence-transformers (for embeddings)
-- sqlite3 (for beads)
-- Standard library (json, sys, pathlib, subprocess)
-
-## License
-
-Part of the Engram project.
+See [QUICKSTART.md](./QUICKSTART.md) for examples and
+[ENGRAM-MCP-SERVER-API.md](./ENGRAM-MCP-SERVER-API.md) for exact schemas.

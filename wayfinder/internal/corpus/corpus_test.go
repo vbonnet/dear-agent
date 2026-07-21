@@ -13,8 +13,8 @@ func TestGetWayfinderSchema(t *testing.T) {
 		t.Errorf("Expected component 'wayfinder', got '%v'", schema["component"])
 	}
 
-	if schema["version"] != "1.0.0" {
-		t.Errorf("Expected version '1.0.0', got '%v'", schema["version"])
+	if schema["version"] != "2.0.0" {
+		t.Errorf("Expected version '2.0.0', got '%v'", schema["version"])
 	}
 
 	if schema["entity"] != "project" {
@@ -28,10 +28,15 @@ func TestGetWayfinderSchema(t *testing.T) {
 	}
 
 	// Verify critical fields
-	requiredFields := []string{"session_id", "workspace", "project_path", "status", "started_at", "updated_at"}
+	requiredFields := []string{"schema_version", "workspace", "project_path", "project_name", "project_type", "risk_level", "current_waypoint", "status", "created_at", "updated_at"}
 	for _, fieldName := range requiredFields {
 		if _, exists := fields[fieldName]; !exists {
 			t.Errorf("Required field '%s' missing from schema", fieldName)
+		}
+	}
+	for _, retired := range []string{"session_id", "project_id", "current_phase", "depth", "started_at"} {
+		if _, exists := fields[retired]; exists {
+			t.Errorf("Retired project field %q remains in canonical schema", retired)
 		}
 	}
 
@@ -69,7 +74,7 @@ func TestGetPhaseSchema(t *testing.T) {
 	}
 
 	// Verify phase-specific fields
-	phaseFields := []string{"session_id", "workspace", "phase_name", "status"}
+	phaseFields := []string{"project_name", "workspace", "name", "status"}
 	for _, fieldName := range phaseFields {
 		if _, exists := fields[fieldName]; !exists {
 			t.Errorf("Required field '%s' missing from phase schema", fieldName)
@@ -101,7 +106,7 @@ func TestGetValidationSchema(t *testing.T) {
 	}
 
 	// Verify validation-specific fields
-	validationFields := []string{"session_id", "workspace", "phase_name", "validation_type", "status", "timestamp"}
+	validationFields := []string{"project_name", "workspace", "waypoint_name", "validation_type", "status", "timestamp"}
 	for _, fieldName := range validationFields {
 		if _, exists := fields[fieldName]; !exists {
 			t.Errorf("Required field '%s' missing from validation schema", fieldName)
@@ -249,9 +254,9 @@ func TestGetRegistrationStatus_GracefulDegradation(t *testing.T) {
 // TestPublishProject_GracefulDegradation tests graceful degradation
 func TestPublishProject_GracefulDegradation(t *testing.T) {
 	project := map[string]interface{}{
-		"session_id":   "test-session",
+		"project_name": "test-project",
 		"project_path": "/tmp/test-project",
-		"status":       "in_progress",
+		"status":       "in-progress",
 	}
 
 	err := PublishProject("test-workspace", project)
@@ -263,9 +268,9 @@ func TestPublishProject_GracefulDegradation(t *testing.T) {
 // TestPublishPhase_GracefulDegradation tests graceful degradation
 func TestPublishPhase_GracefulDegradation(t *testing.T) {
 	phase := map[string]interface{}{
-		"session_id": "test-session",
-		"phase_name": "D1",
-		"status":     "completed",
+		"project_name": "test-project",
+		"name":         "PROBLEM",
+		"status":       "completed",
 	}
 
 	err := PublishPhase("test-workspace", phase)
@@ -277,8 +282,8 @@ func TestPublishPhase_GracefulDegradation(t *testing.T) {
 // TestPublishValidation_GracefulDegradation tests graceful degradation
 func TestPublishValidation_GracefulDegradation(t *testing.T) {
 	validation := map[string]interface{}{
-		"session_id":      "test-session",
-		"phase_name":      "D1",
+		"project_name":    "test-project",
+		"waypoint_name":   "PROBLEM",
 		"validation_type": "frontmatter",
 		"status":          "passed",
 	}
@@ -360,11 +365,11 @@ func TestQueryWayfinderProjects_GracefulDegradation(t *testing.T) {
 	}
 }
 
-// TestGetProjectBySession_GracefulDegradation tests graceful degradation
-func TestGetProjectBySession_GracefulDegradation(t *testing.T) {
-	project, err := GetProjectBySession("test-workspace", "test-session")
+// TestGetProjectByName_GracefulDegradation tests graceful degradation.
+func TestGetProjectByName_GracefulDegradation(t *testing.T) {
+	project, err := GetProjectByName("test-workspace", "test-project")
 	if err != nil {
-		t.Errorf("GetProjectBySession should not error: %v", err)
+		t.Errorf("GetProjectByName should not error: %v", err)
 	}
 
 	// Can be nil if project not found
@@ -441,7 +446,7 @@ func TestWorkspaceIsolation(t *testing.T) {
 
 	// Test project publication
 	project := map[string]interface{}{
-		"session_id": "test-session",
+		"project_name": "test-project",
 	}
 
 	// Should not error

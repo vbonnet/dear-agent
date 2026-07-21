@@ -14,7 +14,7 @@ func TestResolveEngramPath_KnownPhases(t *testing.T) {
 		t.Skipf("engram repo not found, skipping: %v", err)
 	}
 
-	phases := []string{"CHARTER", "W0", "PROBLEM", "D1", "RESEARCH", "D2", "DESIGN", "S6", "PLAN", "S7", "BUILD", "S8", "RETRO", "S11"}
+	phases := []string{"CHARTER", "PROBLEM", "RESEARCH", "DESIGN", "SPEC", "PLAN", "SETUP", "BUILD", "RETRO"}
 
 	for _, phase := range phases {
 		t.Run(phase, func(t *testing.T) {
@@ -104,18 +104,15 @@ func TestResolveEngramPathAndHash(t *testing.T) {
 
 func TestKnownPhases(t *testing.T) {
 	phases := KnownPhases()
-	if len(phases) == 0 {
-		t.Fatal("KnownPhases() returned empty list")
+	want := []string{"CHARTER", "PROBLEM", "RESEARCH", "DESIGN", "SPEC", "PLAN", "SETUP", "BUILD", "RETRO"}
+	if strings.Join(phases, ",") != strings.Join(want, ",") {
+		t.Fatalf("KnownPhases() = %v, want %v", phases, want)
 	}
-	// Should include at least CHARTER and BUILD
-	found := map[string]bool{}
-	for _, p := range phases {
-		found[p] = true
-	}
-	for _, expected := range []string{"CHARTER", "BUILD", "RETRO"} {
-		if !found[expected] {
-			t.Errorf("KnownPhases() missing %q", expected)
-		}
+}
+
+func TestSetupUsesTaskPlanningEngram(t *testing.T) {
+	if got := phaseToEngram["SETUP"]; got != "s7-plan.ai.md" {
+		t.Fatalf("SETUP engram = %q, want task-planning guidance", got)
 	}
 }
 

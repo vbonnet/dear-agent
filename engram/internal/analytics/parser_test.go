@@ -16,8 +16,8 @@ func TestParseAll_Success(t *testing.T) {
 
 	// Write mock telemetry data
 	content := `{"timestamp":"2025-12-09T10:00:00Z","type":"eventbus_publish","agent":"wayfinder","data":{"event_topic":"wayfinder.session.started","session_id":"test-session-123","project_path":"/tmp/test/project"}}
-{"timestamp":"2025-12-09T10:00:05Z","type":"eventbus_publish","agent":"wayfinder","data":{"event_topic":"wayfinder.phase.started","session_id":"test-session-123","phase":"D1"}}
-{"timestamp":"2025-12-09T10:15:00Z","type":"eventbus_publish","agent":"wayfinder","data":{"event_topic":"wayfinder.phase.completed","session_id":"test-session-123","phase":"D1"}}
+{"timestamp":"2025-12-09T10:00:05Z","type":"eventbus_publish","agent":"wayfinder","data":{"event_topic":"wayfinder.phase.started","session_id":"test-session-123","phase":"PROBLEM"}}
+{"timestamp":"2025-12-09T10:15:00Z","type":"eventbus_publish","agent":"wayfinder","data":{"event_topic":"wayfinder.phase.completed","session_id":"test-session-123","phase":"PROBLEM"}}
 {"timestamp":"2025-12-09T10:15:05Z","type":"eventbus_publish","agent":"claude-code","data":{"some":"data"}}
 {"timestamp":"2025-12-09T10:16:00Z","type":"eventbus_publish","agent":"wayfinder","data":{"event_topic":"wayfinder.session.completed","session_id":"test-session-123","status":"success"}}
 `
@@ -57,8 +57,8 @@ func TestParseAll_Success(t *testing.T) {
 	}
 
 	// Verify phase event
-	if events[1].Phase != "D1" {
-		t.Errorf("Expected phase 'D1', got '%s'", events[1].Phase)
+	if events[1].Phase != "PROBLEM" {
+		t.Errorf("Expected phase 'PROBLEM', got '%s'", events[1].Phase)
 	}
 }
 
@@ -83,7 +83,7 @@ func TestParseAll_MalformedJSON(t *testing.T) {
 	// Include malformed JSON line
 	content := `{"timestamp":"2025-12-09T10:00:00Z","type":"eventbus_publish","agent":"wayfinder","data":{"event_topic":"wayfinder.session.started","session_id":"test-123"}}
 {invalid json line here}
-{"timestamp":"2025-12-09T10:00:05Z","type":"eventbus_publish","agent":"wayfinder","data":{"event_topic":"wayfinder.phase.started","session_id":"test-123","phase":"D1"}}
+{"timestamp":"2025-12-09T10:00:05Z","type":"eventbus_publish","agent":"wayfinder","data":{"event_topic":"wayfinder.phase.started","session_id":"test-123","phase":"PROBLEM"}}
 `
 	if err := os.WriteFile(telemetryPath, []byte(content), 0600); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
@@ -154,7 +154,7 @@ func TestParseSession_Success(t *testing.T) {
 	// Multiple sessions
 	content := `{"timestamp":"2025-12-09T10:00:00Z","type":"eventbus_publish","agent":"wayfinder","data":{"event_topic":"wayfinder.session.started","session_id":"session-1"}}
 {"timestamp":"2025-12-09T11:00:00Z","type":"eventbus_publish","agent":"wayfinder","data":{"event_topic":"wayfinder.session.started","session_id":"session-2"}}
-{"timestamp":"2025-12-09T12:00:00Z","type":"eventbus_publish","agent":"wayfinder","data":{"event_topic":"wayfinder.phase.started","session_id":"session-1","phase":"D1"}}
+{"timestamp":"2025-12-09T12:00:00Z","type":"eventbus_publish","agent":"wayfinder","data":{"event_topic":"wayfinder.phase.started","session_id":"session-1","phase":"PROBLEM"}}
 `
 	if err := os.WriteFile(telemetryPath, []byte(content), 0600); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
@@ -230,14 +230,14 @@ func Benchmark_ParseAll(b *testing.B) {
 	telemetryPath := filepath.Join(tmpDir, "telemetry.jsonl")
 
 	// Generate 1000 events
-	var content string
+	var content strings.Builder
 	timestamp := time.Now()
 	for i := 0; i < 1000; i++ {
-		content += `{"timestamp":"` + timestamp.Format(time.RFC3339) + `","type":"eventbus_publish","agent":"wayfinder","data":{"event_topic":"wayfinder.phase.started","session_id":"bench-session","phase":"D1"}}` + "\n"
+		content.WriteString(`{"timestamp":"` + timestamp.Format(time.RFC3339) + `","type":"eventbus_publish","agent":"wayfinder","data":{"event_topic":"wayfinder.phase.started","session_id":"bench-session","phase":"PROBLEM"}}` + "\n")
 		timestamp = timestamp.Add(time.Second)
 	}
 
-	if err := os.WriteFile(telemetryPath, []byte(content), 0600); err != nil {
+	if err := os.WriteFile(telemetryPath, []byte(content.String()), 0600); err != nil {
 		b.Fatalf("Failed to create test file: %v", err)
 	}
 

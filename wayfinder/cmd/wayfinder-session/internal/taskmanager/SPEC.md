@@ -4,7 +4,7 @@
 
 **Version**: 1.0
 **Status**: Active
-**Scope**: Canonical V2 roadmap task persistence and dependency validation.
+**Scope**: Canonical roadmap task persistence and dependency validation.
 
 ## EARS Requirements
 
@@ -24,7 +24,7 @@
 
 **WFT-08** When tasks are listed, the system shall support canonical phase and status filters without mutating persisted state.
 
-**WFT-09** When task state changes, the system shall atomically rewrite valid V2 status and update its timestamp.
+**WFT-09** When task state changes, the system shall atomically rewrite valid schema 2.0 status and update its timestamp.
 
 ## Test Traceability
 

@@ -19,7 +19,7 @@ func TestLateralThinkingMinimumCount(t *testing.T) {
 	}{
 		{
 			name: "0 approaches - should fail",
-			content: `# S6 Design
+			content: `# PLAN Design
 
 No approaches listed.
 `,
@@ -28,7 +28,7 @@ No approaches listed.
 		},
 		{
 			name: "2 approaches - should fail",
-			content: `# S6 Design
+			content: `# PLAN Design
 
 ## Approach A: Microservices
 
@@ -51,7 +51,7 @@ No approaches listed.
 		},
 		{
 			name: "3 approaches - should pass",
-			content: `# S6 Design
+			content: `# PLAN Design
 
 ## Approach A: Microservices
 
@@ -83,7 +83,7 @@ No approaches listed.
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateLateralThinkingEnhanced(tt.content, "S6", "/tmp/S6-design.md")
+			err := validateLateralThinkingEnhanced(tt.content, "PLAN", "/tmp/PLAN-design.md")
 
 			if tt.wantError && err == nil {
 				t.Errorf("Expected error containing '%s', got nil", tt.errorMsg)
@@ -110,7 +110,7 @@ func TestLateralThinkingTradeoffValidation(t *testing.T) {
 	}{
 		{
 			name: "Approach missing pros/cons - should fail",
-			content: `# S6 Design
+			content: `# PLAN Design
 
 ## Approach A: Microservices
 
@@ -137,7 +137,7 @@ This is a microservices architecture.
 		},
 		{
 			name: "All approaches have pros/cons - should pass",
-			content: `# S6 Design
+			content: `# PLAN Design
 
 ## Approach A: Microservices
 
@@ -171,7 +171,7 @@ This is a microservices architecture.
 		},
 		{
 			name: "Approach has tradeoffs section instead of pros/cons - should pass",
-			content: `# S6 Design
+			content: `# PLAN Design
 
 ## Approach A: Microservices
 
@@ -201,7 +201,7 @@ This is a microservices architecture.
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateLateralThinkingEnhanced(tt.content, "S6", "/tmp/S6-design.md")
+			err := validateLateralThinkingEnhanced(tt.content, "PLAN", "/tmp/PLAN-design.md")
 
 			if tt.wantError && err == nil {
 				t.Errorf("Expected error containing '%s', got nil", tt.errorMsg)
@@ -228,7 +228,7 @@ func TestLateralThinkingDistinctness(t *testing.T) {
 	}{
 		{
 			name: "Too similar approaches - should fail",
-			content: `# S6 Design
+			content: `# PLAN Design
 
 ## Approach A: Microservices with REST API
 
@@ -267,7 +267,7 @@ Single deployment.
 		},
 		{
 			name: "Distinct approaches - should pass",
-			content: `# S6 Design
+			content: `# PLAN Design
 
 ## Approach A: Microservices Architecture
 
@@ -314,7 +314,7 @@ No servers to manage.
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateLateralThinkingEnhanced(tt.content, "S6", "/tmp/S6-design.md")
+			err := validateLateralThinkingEnhanced(tt.content, "PLAN", "/tmp/PLAN-design.md")
 
 			if tt.wantError && err == nil {
 				t.Errorf("Expected error containing '%s', got nil", tt.errorMsg)
@@ -379,9 +379,9 @@ func TestSimilarityCalculation(t *testing.T) {
 // TestGateConfiguration tests gate config retrieval
 func TestGateConfiguration(t *testing.T) {
 	tmpDir := t.TempDir()
-	st := &status.Status{
-		ProjectPath:  tmpDir,
-		CurrentPhase: "S6",
+	st := &status.StatusV2{
+		ProjectName:     "test",
+		CurrentWaypoint: "PLAN",
 	}
 
 	gate := NewMultiPersonaGate(tmpDir, st)
@@ -445,9 +445,9 @@ func TestGateConfiguration(t *testing.T) {
 // TestVoteAggregation tests tier-based voting decision rules
 func TestVoteAggregation(t *testing.T) {
 	tmpDir := t.TempDir()
-	st := &status.Status{
-		ProjectPath:  tmpDir,
-		CurrentPhase: "S6",
+	st := &status.StatusV2{
+		ProjectName:     "test",
+		CurrentWaypoint: "PLAN",
 	}
 
 	gate := NewMultiPersonaGate(tmpDir, st)
@@ -686,7 +686,7 @@ func TestDeriveVote_FailClosed(t *testing.T) {
 // summary) must not let a Tier-1 blocking gate reach PASSED.
 func TestDeriveVote_DegenerateReviewCannotPassBlockingGate(t *testing.T) {
 	tmpDir := t.TempDir()
-	st := &status.Status{ProjectPath: tmpDir, CurrentPhase: "S6"}
+	st := &status.StatusV2{ProjectName: "test", CurrentWaypoint: "PLAN"}
 	gate := NewMultiPersonaGate(tmpDir, st)
 
 	// Three personas all return degenerate (empty) reviews.
@@ -706,9 +706,9 @@ func TestDeriveVote_DegenerateReviewCannotPassBlockingGate(t *testing.T) {
 // TestGateEnforcement tests gate enforcement logic
 func TestGateEnforcement(t *testing.T) {
 	tmpDir := t.TempDir()
-	st := &status.Status{
-		ProjectPath:  tmpDir,
-		CurrentPhase: "S6",
+	st := &status.StatusV2{
+		ProjectName:     "test",
+		CurrentWaypoint: "PLAN",
 	}
 
 	gate := NewMultiPersonaGate(tmpDir, st)
@@ -792,9 +792,9 @@ func TestValidateGateIntegration(t *testing.T) {
 
 	tmpDir := t.TempDir()
 
-	// Create S6-design.md deliverable
-	deliverablePath := filepath.Join(tmpDir, "S6-design.md")
-	content := `# S6 Design
+	// Create PLAN-design.md deliverable
+	deliverablePath := filepath.Join(tmpDir, "PLAN-design.md")
+	content := `# PLAN Design
 
 ## Approach A: Microservices
 
@@ -825,13 +825,13 @@ func TestValidateGateIntegration(t *testing.T) {
 		t.Fatalf("Failed to create test deliverable: %v", err)
 	}
 
-	st := &status.Status{
-		ProjectPath:  tmpDir,
-		CurrentPhase: "S6",
+	st := &status.StatusV2{
+		ProjectName:     "test",
+		CurrentWaypoint: "PLAN",
 	}
 
 	// Test gate validation (should pass Lateral Thinking, persona review via CLI)
-	err := ValidateGate(tmpDir, "S6", st)
+	err := ValidateGate(tmpDir, "PLAN", st)
 
 	// Should pass: Lateral Thinking validates 3 approaches, personas vote via CLI
 	if err != nil {

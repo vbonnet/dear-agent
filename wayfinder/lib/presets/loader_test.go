@@ -79,16 +79,16 @@ func TestPresetDifferentiation(t *testing.T) {
 		t.Errorf("fast-iteration should have higher coverage than research-heavy")
 	}
 
-	// Verify S9 validation depth differentiation
-	if highQuality.PhaseGates.S9ValidationDepth != "comprehensive" {
+	// Verify validation depth differentiation
+	if highQuality.PhaseGates.ValidationDepth != "comprehensive" {
 		t.Errorf("high-quality should have comprehensive validation")
 	}
 
-	if fastIteration.PhaseGates.S9ValidationDepth != "standard" {
+	if fastIteration.PhaseGates.ValidationDepth != "standard" {
 		t.Errorf("fast-iteration should have standard validation")
 	}
 
-	if researchHeavy.PhaseGates.S9ValidationDepth != "minimal" {
+	if researchHeavy.PhaseGates.ValidationDepth != "minimal" {
 		t.Errorf("research-heavy should have minimal validation")
 	}
 
@@ -138,6 +138,69 @@ func TestFileSizeLimit(t *testing.T) {
 	}
 }
 
+func TestRetiredPhaseGateKeyRejected(t *testing.T) {
+	tempDir := t.TempDir()
+	loader := NewLoaderWithDir(tempDir)
+	retiredKey := "s" + "8_build_verification"
+	content := []byte(`version: "1.0"
+name: "retired-gate"
+description: "Preset with a retired phase-numbered gate"
+phase_gates:
+  ` + retiredKey + `: true
+economic_tuning:
+  reputation_multiplier: 1.0
+  token_cost_multiplier: 1.0
+`)
+	if err := os.WriteFile(filepath.Join(tempDir, "retired-gate.yaml"), content, 0644); err != nil {
+		t.Fatalf("write retired preset: %v", err)
+	}
+
+	_, err := loader.Load("retired-gate")
+	if err == nil || !containsString(err.Error(), "field "+retiredKey+" not found") {
+		t.Fatalf("Load() error = %v, want retired key rejection", err)
+	}
+}
+
+func TestCanonicalPhaseGateFieldsLoad(t *testing.T) {
+	tempDir := t.TempDir()
+	loader := NewLoaderWithDir(tempDir)
+	content := []byte(`version: "1.0"
+name: "canonical-gates"
+description: "Preset with canonical descriptive gate names"
+test_coverage:
+  minimum_percentage: 80
+  minimum_test_count: 5
+  enforce_creative_tests: true
+spec_alignment:
+  allow_drift: false
+  checkpoint_auditor_strictness: "strict"
+  freeze_during_build: true
+phase_gates:
+  build_verification: true
+  validation_depth: "comprehensive"
+  halt_on_minor_issues: true
+  deploy_gate: "blocking"
+retrospective:
+  mandatory: true
+  structured_learnings: true
+economic_tuning:
+  reputation_multiplier: 1.0
+  token_cost_multiplier: 1.0
+  penalty_severity: "high"
+`)
+	if err := os.WriteFile(filepath.Join(tempDir, "canonical-gates.yaml"), content, 0644); err != nil {
+		t.Fatalf("write canonical preset: %v", err)
+	}
+
+	preset, err := loader.Load("canonical-gates")
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !preset.PhaseGates.BuildVerification || preset.PhaseGates.ValidationDepth != "comprehensive" || !preset.PhaseGates.HaltOnMinorIssues {
+		t.Fatalf("canonical phase gates not preserved: %+v", preset.PhaseGates)
+	}
+}
+
 func TestReservedNames(t *testing.T) {
 	tempDir := t.TempDir()
 	loader := NewLoaderWithDir(tempDir)
@@ -158,9 +221,9 @@ spec_alignment:
   checkpoint_auditor_strictness: "maximum"
   freeze_during_build: true
 phase_gates:
-  s8_build_verification: true
-  s9_validation_depth: "comprehensive"
-  s9_halt_on_minor_issues: true
+  build_verification: true
+  validation_depth: "comprehensive"
+  halt_on_minor_issues: true
   deploy_gate: "blocking"
 retrospective:
   mandatory: true

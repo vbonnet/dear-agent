@@ -1042,7 +1042,7 @@ every route; a provider-specific default here propagates across the codebase.
 **File:** [`validation_workspace_parity.feature`](../test/bdd/features/validation_workspace_parity.feature)
 
 **Drives:** Co-located contracts and route-neutral implementation checks for
-filesystem safety, content validation, VCS, versioning, W0, and workspace state.
+filesystem safety, content validation, VCS, versioning, and workspace state.
 
 **Key scenarios:**
 - Every validation and workspace package carries a strict EARS specification.
@@ -1234,11 +1234,11 @@ persistence.
 **Key scenarios:**
 - Changed command packages keep co-located strict EARS specifications.
 - Built root help exposes the nine canonical phases and no retired executors.
-- Normal session commands parse V2 only while legacy reads remain isolated to
-  explicit migration commands.
-- Non-migration runtime source cannot reintroduce retired phase identifiers.
+- Normal session commands parse schema 2.0 status only.
+- The active runtime cannot reintroduce retired phase identifiers or migration
+  commands.
 
-**Why this matters:** Wayfinder is the repository's planning gate. A V1 default
+**Why this matters:** Wayfinder is the repository's planning gate. A numeric-phase default
 or hidden legacy executor makes phase enforcement ambiguous and violates the
 canonical V2 and broken-windows policies.
 
@@ -1246,9 +1246,9 @@ canonical V2 and broken-windows policies.
 
 **File:** [`wayfinder_internal_package_guardrails.feature`](../test/bdd/features/wayfinder_internal_package_guardrails.feature)
 
-**Drives:** canonical command entrypoint, Beads, configuration, explicit
-migration, Git, history, lint context, telemetry, tracker, project-discovery,
-and preset package specifications.
+**Drives:** canonical command entrypoint, Beads, configuration, Git, history,
+lint context, telemetry, tracker, project-discovery, and preset package
+specifications.
 
 **Key scenarios:**
 - Every surviving Wayfinder support package keeps a co-located strict EARS SPEC.
@@ -1257,7 +1257,7 @@ and preset package specifications.
 
 **Why this matters:** Wayfinder support code participates in the same planning
 gate regardless of which harness or model executes a task. Structural package
-coverage prevents migration or tooling helpers from becoming ungoverned paths.
+coverage prevents tooling helpers from becoming ungoverned paths.
 
 ### Developer Tool Package Guardrails
 

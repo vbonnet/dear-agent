@@ -1,8 +1,7 @@
 # SPEC: wayfinder/cmd/wayfinder-session/internal/archive/SPEC.md
-# RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/workspace/SPEC.md
 # RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/review/SPEC.md
 Feature: Wayfinder lifecycle guardrails
-  Wayfinder archive, workspace, and review packages should carry
+  Wayfinder archive and review packages should carry
   executable SPEC traceability so lifecycle safety and review gates do not drift
   away from the implementation.
 
@@ -14,5 +13,4 @@ Feature: Wayfinder lifecycle guardrails
     Examples:
       | package                                            |
       | wayfinder/cmd/wayfinder-session/internal/archive   |
-      | wayfinder/cmd/wayfinder-session/internal/workspace |
       | wayfinder/cmd/wayfinder-session/internal/review    |

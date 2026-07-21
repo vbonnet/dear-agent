@@ -29,6 +29,8 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
 
 **MCS-07** When MCP creates an AGY session, the shared creation lifecycle shall persist the newly discovered provider-native conversation identity before the MCP runtime delivers its required startup prompt or reports success.
 
+**MCS-08** When a Wayfinder MCP tool lists or retrieves a status file, the server shall accept it only after complete canonical schema 2.0 validation.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/mcp_parity.feature`

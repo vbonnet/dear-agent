@@ -3,6 +3,7 @@ package archive
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -20,7 +21,7 @@ func TestArchivePhase(t *testing.T) {
 
 	// Create mock STATUS and HISTORY files
 	statusPath := filepath.Join(tmpDir, "WAYFINDER-STATUS.md")
-	if err := os.WriteFile(statusPath, []byte("# Status\nphase: D1\n"), 0644); err != nil {
+	if err := os.WriteFile(statusPath, []byte("# Status\nphase: PROBLEM\n"), 0644); err != nil {
 		t.Fatalf("failed to create STATUS file: %v", err)
 	}
 
@@ -30,7 +31,7 @@ func TestArchivePhase(t *testing.T) {
 	}
 
 	// Archive phase
-	if err := a.ArchivePhase("D1"); err != nil {
+	if err := a.ArchivePhase("PROBLEM"); err != nil {
 		t.Fatalf("ArchivePhase() error = %v", err)
 	}
 
@@ -53,7 +54,7 @@ func TestArchivePhase(t *testing.T) {
 		t.Fatalf("failed to read archived STATUS: %v", err)
 	}
 
-	expected := "# Status\nphase: D1\n"
+	expected := "# Status\nphase: PROBLEM\n"
 	if string(statusData) != expected {
 		t.Errorf("archived STATUS content = %q, want %q", string(statusData), expected)
 	}
@@ -82,7 +83,7 @@ func TestArchivePhase_MissingHistory(t *testing.T) {
 	}
 
 	// Archive should succeed even without HISTORY file
-	if err := a.ArchivePhase("D1"); err != nil {
+	if err := a.ArchivePhase("PROBLEM"); err != nil {
 		t.Fatalf("ArchivePhase() error = %v", err)
 	}
 
@@ -110,7 +111,7 @@ func TestArchivePhase_MultipleArchives(t *testing.T) {
 
 	// Create multiple archives
 	for i := 0; i < 3; i++ {
-		if err := a.ArchivePhase("D1"); err != nil {
+		if err := a.ArchivePhase("PROBLEM"); err != nil {
 			t.Fatalf("ArchivePhase() error = %v", err)
 		}
 		time.Sleep(2 * time.Millisecond) // Ensure different timestamps
@@ -153,7 +154,7 @@ func TestListArchives(t *testing.T) {
 	}
 
 	// Create archive
-	if err := a.ArchivePhase("D1"); err != nil {
+	if err := a.ArchivePhase("PROBLEM"); err != nil {
 		t.Fatalf("ArchivePhase() error = %v", err)
 	}
 
@@ -175,8 +176,8 @@ func TestListArchives(t *testing.T) {
 	}
 
 	// Verify archive name contains phase
-	if archive.Name[:2] != "D1" {
-		t.Errorf("archive.Name = %q, want to start with D1", archive.Name)
+	if !strings.HasPrefix(archive.Name, "PROBLEM") {
+		t.Errorf("archive.Name = %q, want to start with PROBLEM", archive.Name)
 	}
 
 	// Verify archive has timestamp
@@ -200,7 +201,7 @@ func TestArchivePhase_MissingStatusFile(t *testing.T) {
 	a := New(tmpDir)
 
 	// Try to archive without STATUS file
-	err := a.ArchivePhase("D1")
+	err := a.ArchivePhase("PROBLEM")
 	if err == nil {
 		t.Error("ArchivePhase() should error when STATUS file is missing")
 	}

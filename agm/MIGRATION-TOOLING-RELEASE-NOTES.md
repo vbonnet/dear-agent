@@ -497,7 +497,7 @@ Potential improvements for future releases:
 **Developed By**: AGM Team
 **Bead**: oss-be8 (AGM migration tooling)
 **Priority**: P1
-**Methodology**: Wayfinder (W0-S11 complete)
+**Methodology**: canonical Wayfinder workflow complete
 
 **Thanks To**:
 - Existing AGM users for feedback on migration pain points

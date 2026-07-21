@@ -7,11 +7,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
+
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/statusread"
 )
 
 // Monitor provides hybrid monitoring (events + polling)
@@ -225,11 +224,13 @@ func (sp *StatusPoller) pollOnce(projectDirs []string) {
 		}
 
 		status := sp.readStatus(absDir)
-		if status != nil {
-			sp.mu.Lock()
+		sp.mu.Lock()
+		if status == nil {
+			delete(sp.projects, absDir)
+		} else {
 			sp.projects[absDir] = status
-			sp.mu.Unlock()
 		}
+		sp.mu.Unlock()
 	}
 }
 
@@ -248,41 +249,24 @@ func (sp *StatusPoller) readStatus(projectDir string) *ProjectStatus {
 		}
 	}
 
-	return parseWayfinderStatus(projectDir, string(data))
+	return parseWayfinderStatus(projectDir, data)
 }
 
 // parseWayfinderStatus parses WAYFINDER-STATUS.md content
-func parseWayfinderStatus(projectDir, content string) *ProjectStatus {
+func parseWayfinderStatus(projectDir string, content []byte) *ProjectStatus {
+	canonical, err := statusread.Parse(content)
+	if err != nil {
+		return nil
+	}
 	status := &ProjectStatus{
-		ProjectDir: projectDir,
-		LastUpdate: time.Now(),
+		ProjectDir:   projectDir,
+		CurrentPhase: canonical.CurrentWaypoint,
+		Progress:     canonical.Progress,
+		LastUpdate:   canonical.UpdatedAt,
+		Message:      canonical.Status,
 	}
-
-	// Parse current phase from the human-readable status summary.
-	phaseRe := regexp.MustCompile(`\*\*Current Phase\*\*:\s*([A-Z]\d+)`)
-	if match := phaseRe.FindStringSubmatch(content); len(match) > 1 {
-		status.CurrentPhase = match[1]
-	}
-
-	// Parse progress: Look for percentage like "50%" or "Phase Progress: 50%"
-	progressRe := regexp.MustCompile(`(\d+)%`)
-	if match := progressRe.FindStringSubmatch(content); len(match) > 1 {
-		progress, _ := strconv.Atoi(match[1])
-		status.Progress = progress
-	}
-
-	// Parse status message: Look for "**Status**: ..." pattern
-	messageRe := regexp.MustCompile(`\*\*Status\*\*:\s*(.+)`)
-	if match := messageRe.FindStringSubmatch(content); len(match) > 1 {
-		status.Message = strings.TrimSpace(match[1])
-	}
-
-	// Fallback defaults
-	if status.CurrentPhase == "" {
-		status.CurrentPhase = "unknown"
-	}
-	if status.Message == "" {
-		status.Message = "In progress..."
+	if status.LastUpdate.IsZero() {
+		status.LastUpdate = time.Now()
 	}
 
 	return status

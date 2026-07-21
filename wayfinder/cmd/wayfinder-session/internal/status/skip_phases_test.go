@@ -11,7 +11,7 @@ var liteSkips = []string{WaypointV2Design, WaypointV2Spec, WaypointV2Plan}
 // phase for a lite task is SETUP — not DESIGN (ce-12pl / MVD T2.2).
 func TestNextWaypoint_LiteSkipsDesignSpecPlan(t *testing.T) {
 	s := &StatusV2{
-		SchemaVersion:   SchemaVersionV2,
+		SchemaVersion:   SchemaVersion,
 		CurrentWaypoint: WaypointV2Research,
 		SkipPhases:      liteSkips,
 		WaypointHistory: []WaypointHistory{
@@ -33,7 +33,7 @@ func TestNextWaypoint_LiteSkipsDesignSpecPlan(t *testing.T) {
 // unchanged: after RESEARCH, the next phase is DESIGN.
 func TestNextWaypoint_StandardKeepsDesign(t *testing.T) {
 	s := &StatusV2{
-		SchemaVersion:   SchemaVersionV2,
+		SchemaVersion:   SchemaVersion,
 		CurrentWaypoint: WaypointV2Research,
 		WaypointHistory: []WaypointHistory{
 			{Name: WaypointV2Research, Status: WaypointStatusV2Completed},
@@ -47,6 +47,25 @@ func TestNextWaypoint_StandardKeepsDesign(t *testing.T) {
 	if next != WaypointV2Design {
 		t.Errorf("standard profile: expected next waypoint %q after RESEARCH, got %q",
 			WaypointV2Design, next)
+	}
+}
+
+func TestNextWaypointSkipRoadmapAdvancesFromPlanToBuild(t *testing.T) {
+	s := &StatusV2{
+		SchemaVersion:   SchemaVersion,
+		CurrentWaypoint: WaypointV2Plan,
+		SkipRoadmap:     true,
+		WaypointHistory: []WaypointHistory{
+			{Name: WaypointV2Plan, Status: WaypointStatusV2Completed},
+		},
+	}
+
+	next, err := s.NextWaypoint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next != WaypointV2Build {
+		t.Fatalf("next waypoint = %q, want BUILD when SETUP is skipped", next)
 	}
 }
 
@@ -64,7 +83,7 @@ func TestNextWaypoint_LiteFullProgression(t *testing.T) {
 	}
 
 	s := &StatusV2{
-		SchemaVersion:   SchemaVersionV2,
+		SchemaVersion:   SchemaVersion,
 		CurrentWaypoint: "",
 		SkipPhases:      liteSkips,
 		WaypointHistory: []WaypointHistory{},
@@ -115,5 +134,13 @@ func TestIsPhaseSkipped(t *testing.T) {
 	empty := &StatusV2{}
 	if empty.IsPhaseSkipped(WaypointV2Design) {
 		t.Error("empty SkipPhases should skip nothing")
+	}
+
+	skipRoadmap := &StatusV2{SkipRoadmap: true}
+	if !skipRoadmap.IsPhaseSkipped(WaypointV2Setup) {
+		t.Error("SkipRoadmap should skip SETUP")
+	}
+	if skipRoadmap.IsPhaseSkipped(WaypointV2Build) {
+		t.Error("SkipRoadmap must not skip BUILD")
 	}
 }

@@ -45,9 +45,6 @@ var crossLanguageImplementationDirs = []string{
 	"tests/bats",
 	"tools/devlog/diagrams",
 	"wayfinder/cmd/wayfinder-session/internal/lintcontext/testdata/eslint-flat",
-	"wayfinder/cmd/wayfinder-session/migrations",
-	"wayfinder/cmd/wayfinder-session/scripts",
-	"wayfinder/lib",
 }
 
 type crossLanguageGuardrailStateKey struct{}

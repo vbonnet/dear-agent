@@ -158,6 +158,9 @@ Audit log:
   Every attempt is logged to ~/.local/state/dear-agent/safe-merge-audit.jsonl
   (override with SAFE_MERGE_AUDIT_DIR).
 
+Merge execution uses GitHub auto-merge so protected direct-merge policies and
+merge queues remain supported. The exact head SHA is pinned.
+
 Post-merge: local worktree and branch are cleaned up automatically.
 `
 

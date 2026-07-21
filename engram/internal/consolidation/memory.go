@@ -7,7 +7,7 @@ type MemoryType string
 
 const (
 	// Episodic memories are specific experiences (what happened).
-	// Example: "Completed D1 validation phase at 2025-12-15T10:30:00Z"
+	// Example: "Completed CHARTER validation phase at 2025-12-15T10:30:00Z"
 	Episodic MemoryType = "episodic"
 
 	// Semantic memories are extracted knowledge (facts learned).
@@ -19,7 +19,7 @@ const (
 	Procedural MemoryType = "procedural"
 
 	// Working memories are active context (immediate focus).
-	// Example: "Currently implementing D4 solution requirements"
+	// Example: "Currently implementing SPEC solution requirements"
 	Working MemoryType = "working"
 )
 
@@ -47,7 +47,7 @@ type Memory struct {
 	Content interface{} `json:"content"`
 
 	// Metadata stores additional key-value attributes.
-	// Example: {"importance": 0.9, "source": "wayfinder", "phase": "D1"}
+	// Example: {"importance": 0.9, "source": "wayfinder", "phase": "CHARTER"}
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 
 	// Timestamp when memory was created.
@@ -72,7 +72,7 @@ type Memory struct {
 // - Artifact references (not full content)
 type WorkingContext struct {
 	SessionID      string         // Session identifier
-	CurrentPhase   string         // Current workflow phase (e.g., "D4", "S8")
+	CurrentPhase   string         // Current workflow phase (e.g., "SPEC", "BUILD")
 	ActiveTasks    []Task         // Tasks in progress
 	RecentHistory  []SessionEvent // Last N events (sliding window)
 	RelevantMemory []Memory       // Retrieved memories for current context

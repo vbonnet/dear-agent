@@ -5,11 +5,10 @@ import (
 	"time"
 )
 
-// StatusV2 represents the WAYFINDER-STATUS.md V2 file structure
-// Based on Wayfinder V2 schema with 9-phase consolidation
+// StatusV2 represents the canonical WAYFINDER-STATUS.md schema.
 type StatusV2 struct {
 	// Required fields
-	SchemaVersion   string    `yaml:"schema_version"` // Must be "2.0"
+	SchemaVersion   string    `yaml:"schema_version"` // Must equal SchemaVersion
 	ProjectName     string    `yaml:"project_name"`
 	ProjectType     string    `yaml:"project_type"`     // feature, research, infrastructure, refactor, bugfix
 	RiskLevel       string    `yaml:"risk_level"`       // XS, S, M, L, XL
@@ -46,7 +45,7 @@ type StatusV2 struct {
 // WaypointHistory represents a waypoint in the history with build metrics
 type WaypointHistory struct {
 	Name         string     `yaml:"name"`   // CHARTER, PROBLEM, RESEARCH, DESIGN, SPEC, PLAN, SETUP, BUILD, RETRO
-	Status       string     `yaml:"status"` // completed, in-progress, blocked, skipped
+	Status       string     `yaml:"status"` // pending, completed, in-progress, blocked, skipped
 	StartedAt    time.Time  `yaml:"started_at"`
 	CompletedAt  *time.Time `yaml:"completed_at,omitempty"`
 	Deliverables []string   `yaml:"deliverables,omitempty"`
@@ -142,10 +141,8 @@ type BuildMetrics struct {
 	BuildDurationSecs int     `yaml:"build_duration_secs,omitempty"`
 }
 
-// Constants for V2 schema
+// Constants for the canonical schema.
 const (
-	SchemaVersionV2 = "2.0"
-
 	// Project types
 	ProjectTypeFeature        = "feature"
 	ProjectTypeResearch       = "research"
@@ -165,10 +162,10 @@ const (
 	WaypointV2Problem  = "PROBLEM"  // Discovery & Context
 	WaypointV2Research = "RESEARCH" // Investigation & Options
 	WaypointV2Design   = "DESIGN"   // Architecture & Design Spec
-	WaypointV2Spec     = "SPEC"     // Solution Requirements (includes S4 Stakeholder Alignment)
-	WaypointV2Plan     = "PLAN"     // Design (includes S5 Research)
+	WaypointV2Spec     = "SPEC"     // Solution Requirements and stakeholder alignment
+	WaypointV2Plan     = "PLAN"     // Implementation plan and task design
 	WaypointV2Setup    = "SETUP"    // Planning & Task Breakdown
-	WaypointV2Build    = "BUILD"    // BUILD Loop (includes S9 Validation, S10 Deployment)
+	WaypointV2Build    = "BUILD"    // Implementation, validation, and delivery
 	WaypointV2Retro    = "RETRO"    // Closure & Retrospective
 
 	// Status values
@@ -257,14 +254,6 @@ func ValidStatuses() []string {
 	}
 }
 
-// GetVersion returns the schema version (for test compatibility)
-func (s *StatusV2) GetVersion() string {
-	if s.SchemaVersion == SchemaVersionV2 {
-		return WayfinderV2
-	}
-	return WayfinderV1
-}
-
 // FindWaypointHistory finds a waypoint in the history by name
 func (s *StatusV2) FindWaypointHistory(waypointName string) *WaypointHistory {
 	for i := range s.WaypointHistory {
@@ -275,7 +264,7 @@ func (s *StatusV2) FindWaypointHistory(waypointName string) *WaypointHistory {
 	return nil
 }
 
-// GetWaypointStatus returns the status of a waypoint (for test compatibility)
+// GetWaypointStatus returns the status of a named phase.
 func (s *StatusV2) GetWaypointStatus(waypointName string) string {
 	wh := s.FindWaypointHistory(waypointName)
 	if wh != nil {
@@ -284,8 +273,7 @@ func (s *StatusV2) GetWaypointStatus(waypointName string) string {
 	return WaypointStatusV2Pending
 }
 
-// GetSessionID returns a session ID for compatibility with V1 code
-// V2 doesn't have session_id, so we generate one from project_name
+// GetSessionID returns the project identifier used by the event tracker.
 func (s *StatusV2) GetSessionID() string {
 	// Use project_name as session ID for V2
 	// If empty, generate one
@@ -295,14 +283,9 @@ func (s *StatusV2) GetSessionID() string {
 	return "unknown-session"
 }
 
-// UpdateWaypoint updates an existing waypoint or creates it (for V1 compatibility)
-// Maps to UpdateWaypointHistory for V2
+// UpdateWaypoint updates an existing named phase or creates it.
 func (s *StatusV2) UpdateWaypoint(waypointName string, waypointStatus string, outcome string) {
 	now := time.Now()
-
-	// Normalize V1 status constants to V2 format (underscore → hyphen)
-	// V1: "in_progress" → V2: "in-progress"
-	waypointStatus = normalizeStatusV1ToV2(waypointStatus)
 
 	// Find existing waypoint index
 	waypointIdx := -1
@@ -347,33 +330,26 @@ func (s *StatusV2) UpdateWaypoint(waypointName string, waypointStatus string, ou
 	s.UpdatedAt = now
 }
 
-// WriteTo writes STATUS file to specified directory (for V1 compatibility)
-// Wraps WriteV2ToDir
+// WriteTo writes status to the specified directory.
 func (s *StatusV2) WriteTo(dir string) error {
 	return WriteV2ToDir(s, dir)
 }
 
-// FindWaypoint finds a waypoint and returns it in V1 Phase format (for validator compatibility)
-// Converts WaypointHistory to Phase
+// FindWaypoint returns the validator-facing view of a named phase.
 func (s *StatusV2) FindWaypoint(waypointName string) *Phase {
 	wh := s.FindWaypointHistory(waypointName)
 	if wh == nil {
 		return nil
 	}
 
-	// Convert WaypointHistory to Phase (V1 format)
 	outcome := ""
 	if wh.Outcome != nil {
 		outcome = *wh.Outcome
 	}
 
-	// Normalize V2 status to V1 format (hyphen → underscore)
-	// V2: "in-progress" → V1: "in_progress"
-	v1Status := normalizeStatusV2ToV1(wh.Status)
-
 	return &Phase{
 		Name:        wh.Name,
-		Status:      v1Status,
+		Status:      wh.Status,
 		StartedAt:   &wh.StartedAt,
 		CompletedAt: wh.CompletedAt,
 		Outcome:     outcome,
@@ -385,7 +361,7 @@ func (s *StatusV2) GetCurrentWaypoint() string {
 	return s.CurrentWaypoint
 }
 
-// GetStartedAt returns the created time for V2 Status (maps CreatedAt to StartedAt for compatibility)
+// GetStartedAt returns the session creation time.
 func (s *StatusV2) GetStartedAt() time.Time {
 	return s.CreatedAt
 }
@@ -401,86 +377,47 @@ func (s *StatusV2) GetSkipPhases() []string {
 	return s.SkipPhases
 }
 
-// IsPhaseSkipped reports whether the given phase is skipped by this session's profile.
+// IsPhaseSkipped reports whether the phase is skipped by the session's profile
+// or by the explicit roadmap override.
 func (s *StatusV2) IsPhaseSkipped(phase string) bool {
-	return slices.Contains(s.SkipPhases, phase)
+	return slices.Contains(s.SkipPhases, phase) || (s.SkipRoadmap && phase == WaypointV2Setup)
 }
 
-// SetCurrentWaypoint sets the current waypoint for V2 Status
+// SetCurrentWaypoint sets the current named phase.
 func (s *StatusV2) SetCurrentWaypoint(waypoint string) {
 	s.CurrentWaypoint = waypoint
 	s.UpdatedAt = time.Now()
 }
 
-// normalizeStatusV1ToV2 converts V1 status constants to V2 format
-// V1 uses underscores (in_progress), V2 uses hyphens (in-progress)
-func normalizeStatusV1ToV2(status string) string {
-	switch status {
-	case "in_progress":
-		return "in-progress"
-	case "pending", "completed", "skipped", "blocked":
-		return status // Same in both versions
-	default:
-		return status // Unknown status, pass through
-	}
-}
-
-// normalizeStatusV2ToV1 converts V2 status constants to V1 format
-// V2 uses hyphens (in-progress), V1 uses underscores (in_progress)
-func normalizeStatusV2ToV1(status string) string {
-	switch status {
-	case "in-progress":
-		return "in_progress"
-	case "pending", "completed", "skipped", "blocked":
-		return status // Same in both versions
-	default:
-		return status // Unknown status, pass through
-	}
-}
-
-// ============================================================================
-// Backward Compatibility Aliases (for StatusInterface during transition)
-// ============================================================================
-// These methods provide the old "phase" API while internal migration is ongoing.
-// TODO: Remove these after all internal packages are updated to waypoint terminology.
-
-// GetCurrentPhase is a backward-compatibility alias for GetCurrentWaypoint
+// GetCurrentPhase returns the current named phase.
 func (s *StatusV2) GetCurrentPhase() string {
 	return s.GetCurrentWaypoint()
 }
 
-// SetCurrentPhase is a backward-compatibility alias for SetCurrentWaypoint
+// SetCurrentPhase sets the current named phase.
 func (s *StatusV2) SetCurrentPhase(waypoint string) {
 	s.SetCurrentWaypoint(waypoint)
 }
 
-// FindPhase is a backward-compatibility alias for FindWaypoint
+// FindPhase returns a named phase history entry.
 func (s *StatusV2) FindPhase(waypointName string) *Phase {
 	return s.FindWaypoint(waypointName)
 }
 
-// UpdatePhase is a backward-compatibility alias for UpdateWaypoint
+// UpdatePhase updates a named phase history entry.
 func (s *StatusV2) UpdatePhase(waypointName string, waypointStatus string, outcome string) {
 	s.UpdateWaypoint(waypointName, waypointStatus, outcome)
 }
 
-// GetPhaseStatus is a backward-compatibility alias for GetWaypointStatus
+// GetPhaseStatus returns a named phase status.
 func (s *StatusV2) GetPhaseStatus(waypointName string) string {
 	return s.GetWaypointStatus(waypointName)
 }
 
-// ============================================================================
-// Type Aliases (for backward compatibility during transition)
-// ============================================================================
-
-// PhaseHistory is a backward-compatibility type alias for WaypointHistory
+// PhaseHistory is the descriptive phase-history name used by callers.
 type PhaseHistory = WaypointHistory
 
-// ============================================================================
-// Constant Aliases (for backward compatibility during transition)
-// ============================================================================
-
-// Phase constant aliases for backward compatibility
+// Phase aliases expose the named workflow vocabulary to callers.
 const (
 	// Waypoint ID aliases
 	PhaseV2Charter  = WaypointV2Charter
@@ -500,7 +437,7 @@ const (
 	PhaseStatusV2Skipped    = WaypointStatusV2Skipped
 )
 
-// AllPhasesV2Schema is a backward-compatibility alias for AllWaypointsV2Schema
+// AllPhasesV2Schema returns the canonical named sequence.
 func AllPhasesV2Schema() []string {
 	return AllWaypointsV2Schema()
 }

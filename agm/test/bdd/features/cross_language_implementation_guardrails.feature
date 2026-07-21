@@ -28,9 +28,6 @@
 # RELATED-SPEC: tests/bats/SPEC.md
 # RELATED-SPEC: tools/devlog/diagrams/SPEC.md
 # RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/lintcontext/testdata/eslint-flat/SPEC.md
-# RELATED-SPEC: wayfinder/cmd/wayfinder-session/migrations/SPEC.md
-# RELATED-SPEC: wayfinder/cmd/wayfinder-session/scripts/SPEC.md
-# RELATED-SPEC: wayfinder/lib/SPEC.md
 Feature: Cross-language implementation guardrails
   Executable behavior outside Go packages is part of the same product and
   governance boundary. Its contracts must remain strict, executable, and
@@ -73,9 +70,6 @@ Feature: Cross-language implementation guardrails
       | tests/bats                                                                   |
       | tools/devlog/diagrams                                                        |
       | wayfinder/cmd/wayfinder-session/internal/lintcontext/testdata/eslint-flat    |
-      | wayfinder/cmd/wayfinder-session/migrations                                   |
-      | wayfinder/cmd/wayfinder-session/scripts                                      |
-      | wayfinder/lib                                                                |
 
   Scenario Outline: Cross-language contracts are invariant across active routes
     Given cross-language coverage runs through "<harness>" with "<family>"

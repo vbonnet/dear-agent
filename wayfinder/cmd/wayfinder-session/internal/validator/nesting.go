@@ -143,13 +143,13 @@ func isProjectCompleteWithDepth(dir string, depth int) (bool, error) {
 	}
 
 	// Read project status
-	st, err := status.ReadFrom(dir)
+	st, err := status.ParseV2FromDir(dir)
 	if err != nil {
 		return false, fmt.Errorf("failed to read project status: %w", err)
 	}
 
 	// Check 1: Is overall status "completed"?
-	if st.Status == status.StatusCompleted {
+	if st.Status == status.StatusV2Completed {
 		// Still need to verify children are complete
 		if status.HasChildren(dir) {
 			err := checkChildrenCompleteWithDepth(dir, depth)
@@ -164,17 +164,10 @@ func isProjectCompleteWithDepth(dir string, depth int) (bool, error) {
 		return true, nil
 	}
 
-	// Check 2: Are all phases completed?
-	allPhasesComplete := len(st.Phases) != 0
-
-	for _, phase := range st.Phases {
-		if phase.Status != status.PhaseStatusCompleted {
-			allPhasesComplete = false
-			break
-		}
-	}
-
-	if !allPhasesComplete {
+	// Check 2: Is every required phase represented as completed? History is
+	// append-as-started, so checking only the entries that exist would let a
+	// partially completed child satisfy its parent's completion gate.
+	if !allRequiredWaypointsComplete(st) {
 		return false, nil
 	}
 
@@ -191,4 +184,26 @@ func isProjectCompleteWithDepth(dir string, depth int) (bool, error) {
 	}
 
 	return true, nil
+}
+
+func allRequiredWaypointsComplete(st *status.StatusV2) bool {
+	waypointStatus := make(map[string]string, len(st.WaypointHistory))
+	for _, waypoint := range st.WaypointHistory {
+		waypointStatus[waypoint.Name] = waypoint.Status
+	}
+
+	for _, waypoint := range status.AllWaypointsV2Schema() {
+		if st.IsPhaseSkipped(waypoint) {
+			if existing, ok := waypointStatus[waypoint]; ok &&
+				existing != status.WaypointStatusV2Completed &&
+				existing != status.WaypointStatusV2Skipped {
+				return false
+			}
+			continue
+		}
+		if waypointStatus[waypoint] != status.WaypointStatusV2Completed {
+			return false
+		}
+	}
+	return true
 }
