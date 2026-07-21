@@ -4,9 +4,10 @@ package state
 import (
 	"fmt"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 // State represents Claude Code session states
@@ -213,7 +214,7 @@ func (d *Detector) DetectState(output string, lastOutputTime time.Time) Detectio
 		}
 	}
 
-	if codexComposerReady(output) {
+	if tmux.IsCodexComposerReady(output) {
 		return DetectionResult{
 			State:      StateReady,
 			Timestamp:  now,
@@ -400,7 +401,7 @@ func (d *Detector) CheckCanReceive(output string) CanReceive {
 	}
 
 	// Complete Codex composer visible = session is at idle prompt, can receive.
-	if codexComposerReady(output) {
+	if tmux.IsCodexComposerReady(output) {
 		return CanReceiveYes
 	}
 
@@ -411,48 +412,6 @@ func (d *Detector) CheckCanReceive(output string) CanReceive {
 
 	// No prompt visible = session is busy, queue for later
 	return CanReceiveQueue
-}
-
-var codexFooterPattern = regexp.MustCompile(`^gpt-\d[^\n]*\s·\s[^\n]+$`)
-
-// codexComposerReady recognizes the two complete Codex composer forms. A bare
-// model name is deliberately insufficient because it is also rendered in
-// echoed launch commands and in the footer while Codex is still working.
-func codexComposerReady(output string) bool {
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	if len(lines) == 0 {
-		return false
-	}
-
-	// The last structured footer owns the current post-turn state. It is ready
-	// only when the nearest preceding non-empty line is an input cursor.
-	for i, line := range slices.Backward(lines) {
-		if !codexFooterPattern.MatchString(strings.TrimSpace(line)) {
-			continue
-		}
-		for j := i - 1; j >= 0 && j >= i-3; j-- {
-			candidate := strings.TrimSpace(lines[j])
-			if candidate == "" {
-				continue
-			}
-			return strings.HasPrefix(candidate, "›")
-		}
-		return false
-	}
-
-	// The initial bordered composer is complete only when the stable header and
-	// model-change hint occur in the same compact block.
-	for i, line := range lines {
-		if !strings.Contains(line, "OpenAI Codex") {
-			continue
-		}
-		for j := i + 1; j < len(lines) && j <= i+4; j++ {
-			if strings.Contains(lines[j], "/model to change") {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // agySurveyOverlayActive distinguishes a live survey from stale survey text

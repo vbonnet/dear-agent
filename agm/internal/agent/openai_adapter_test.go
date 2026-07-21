@@ -360,9 +360,9 @@ func TestGetSessionStatusCodexIdle(t *testing.T) {
 		t.Errorf("expected %s before composer renders, got %s", StatusActive, status)
 	}
 
-	// Render the Codex composer header into the pane.
+	// Render the complete initial Codex composer into the pane.
 	if err := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName,
-		"echo 'OpenAI Codex (v0.141.0)'", "Enter").Run(); err != nil {
+		"printf 'OpenAI Codex (v0.141.0)\\n/model to change\\n'", "Enter").Run(); err != nil {
 		t.Fatalf("failed to send composer signal: %v", err)
 	}
 

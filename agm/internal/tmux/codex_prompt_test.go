@@ -27,7 +27,7 @@ func newCodexTestSession(t *testing.T, sessionName string, cmd ...string) string
 	return socketPath
 }
 
-func TestContainsCodexPromptPattern(t *testing.T) {
+func TestIsCodexComposerReady(t *testing.T) {
 	tests := []struct {
 		name     string
 		content  string
@@ -117,8 +117,8 @@ func TestContainsCodexPromptPattern(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := containsCodexPromptPattern(tt.content); got != tt.expected {
-				t.Errorf("containsCodexPromptPattern(%q) = %v, expected %v", tt.content, got, tt.expected)
+			if got := IsCodexComposerReady(tt.content); got != tt.expected {
+				t.Errorf("IsCodexComposerReady(%q) = %v, expected %v", tt.content, got, tt.expected)
 			}
 		})
 	}

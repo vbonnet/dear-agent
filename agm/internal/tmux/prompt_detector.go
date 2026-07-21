@@ -461,7 +461,7 @@ func WaitForPromptSimpleContext(parent context.Context, sessionName string, time
 		// Codex readiness is a multi-line contract: the initial header must be
 		// paired with its hint, and the post-turn cursor with its footer. Evaluate
 		// the captured pane before the legacy line-oriented harness checks.
-		if containsCodexPromptPattern(content) {
+		if IsCodexComposerReady(content) {
 			debug.Log("✓ Codex composer detected (check #%d)", checkCount)
 			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
 				return err
@@ -583,7 +583,7 @@ func WaitForPromptOrResumeFailureContext(parent context.Context, sessionName str
 			}
 		}
 
-		if containsCodexPromptPattern(content) {
+		if IsCodexComposerReady(content) {
 			debug.Log("✓ Codex composer detected (check #%d)", checkCount)
 			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
 				return err
@@ -944,7 +944,7 @@ func WaitForGeminiPrompt(sessionName string, timeout time.Duration) error {
 // SendPromptLiteral which don't know the harness type but need to detect readiness.
 func containsAnyHarnessPromptPattern(content string) bool {
 	return containsClaudePromptPattern(content) || containsGeminiPromptPattern(content) ||
-		containsOpenCodePromptPattern(content) || containsCodexPromptPattern(content) ||
+		containsOpenCodePromptPattern(content) || IsCodexComposerReady(content) ||
 		containsAgyPromptPattern(content)
 }
 

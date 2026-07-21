@@ -78,9 +78,10 @@ var CodexModelUpgradePromptPatterns = []string{
 	"Use existing model",
 }
 
-// containsCodexPromptPattern reports whether content contains any Codex
-// composer-ready signal.
-func containsCodexPromptPattern(content string) bool {
+// IsCodexComposerReady reports whether content contains a complete Codex
+// composer-ready signal. It is the single owner of Codex visual readiness for
+// tmux waits, generic delivery, and shared state classification.
+func IsCodexComposerReady(content string) bool {
 	trimmed := strings.TrimSpace(content)
 	if trimmed == "" {
 		return false
@@ -144,7 +145,7 @@ func IsCodexIdle(sessionName string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("capture-pane failed: %w", err)
 	}
-	return containsCodexPromptPattern(string(output)), nil
+	return IsCodexComposerReady(string(output)), nil
 }
 
 // containsCodexTrustPromptPattern reports whether content contains a Codex
@@ -268,7 +269,7 @@ func WaitForCodexPromptContext(parent context.Context, sessionName string, timeo
 			continue
 		}
 
-		if containsCodexPromptPattern(content) {
+		if IsCodexComposerReady(content) {
 			debug.Log("✓ Codex composer detected (check #%d)", checkCount)
 			// Found the composer — wait a beat to ensure it's stable.
 			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
