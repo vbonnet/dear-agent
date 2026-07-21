@@ -65,6 +65,40 @@ func testTmuxIdentity(id string) tmux.SessionIdentity {
 	return tmux.SessionIdentity{ID: id, Token: "0123456789abcdef0123456789abcdef"}
 }
 
+func TestRestoreResumeTmuxNameTreatsSuccessfulSwapAsComplete(t *testing.T) {
+	previousUpdatedAt := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+	m := &manifest.Manifest{
+		UpdatedAt: previousUpdatedAt.Add(30 * time.Minute),
+		Tmux:      manifest.Tmux{SessionName: "canonical-name"},
+	}
+	change := resumeTmuxNameChange{
+		Applied: true,
+		Change: dolt.TmuxSessionNameChange{
+			PreviousName:      "historical.name",
+			PreviousUpdatedAt: previousUpdatedAt,
+			CurrentName:       "canonical-name",
+			CurrentRevision:   "owned-revision",
+		},
+	}
+	restoreCalls := 0
+	err := restoreResumeTmuxNameWith(t.Context(), func(_ context.Context, got dolt.TmuxSessionNameChange) (bool, error) {
+		restoreCalls++
+		if !reflect.DeepEqual(got, change.Change) {
+			t.Fatalf("restore change = %#v, want %#v", got, change.Change)
+		}
+		return true, nil
+	}, m, change)
+	if err != nil {
+		t.Fatalf("restoreResumeTmuxNameWith() error = %v", err)
+	}
+	if restoreCalls != 1 {
+		t.Fatalf("restore calls = %d, want 1", restoreCalls)
+	}
+	if m.Tmux.SessionName != change.Change.PreviousName || !m.UpdatedAt.Equal(previousUpdatedAt) {
+		t.Fatalf("restored snapshot = (%q, %v), want (%q, %v)", m.Tmux.SessionName, m.UpdatedAt, change.Change.PreviousName, previousUpdatedAt)
+	}
+}
+
 func recordingResumeRuntime(calls *[]string) resumeSessionRuntime {
 	record := func(call string) { *calls = append(*calls, call) }
 	return resumeSessionRuntime{

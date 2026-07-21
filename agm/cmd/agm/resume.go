@@ -669,22 +669,26 @@ func persistResumeTmuxName(ctx context.Context, adapter *dolt.Adapter, m *manife
 }
 
 func restoreResumeTmuxName(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest, change resumeTmuxNameChange) error {
+	return restoreResumeTmuxNameWith(ctx, adapter.RestoreTmuxSessionNameChange, m, change)
+}
+
+func restoreResumeTmuxNameWith(ctx context.Context, restore func(context.Context, dolt.TmuxSessionNameChange) (bool, error), m *manifest.Manifest, change resumeTmuxNameChange) error {
 	if !change.Applied {
 		return nil
 	}
-	swapped, err := adapter.RestoreTmuxSessionNameChange(ctx, change.Change)
+	swapped, err := restore(ctx, change.Change)
 	if err != nil {
 		return err
 	}
 	if !swapped {
 		return fmt.Errorf("session metadata no longer matches this resume transaction")
 	}
-	latest, err := adapter.GetSession(m.SessionID)
-	if err != nil {
-		return fmt.Errorf("reload session after tmux-name compensation: %w", err)
-	}
-	m.Tmux.SessionName = latest.Tmux.SessionName
-	m.UpdatedAt = latest.UpdatedAt
+	// The successful compare-and-swap is authoritative proof that the
+	// provisional metadata no longer references this transaction's tmux
+	// creation. Update the snapshot from the exact values written by that CAS;
+	// a fallible follow-up read must not block resource cleanup.
+	m.Tmux.SessionName = change.Change.PreviousName
+	m.UpdatedAt = change.Change.PreviousUpdatedAt
 	return nil
 }
 
