@@ -23,6 +23,18 @@ func TestParseOutcome(t *testing.T) {
 		{"resolve down human beats approved", "approved but needs-human-review for the deploy", NeedsHumanReview},
 		{"resolve down rejected beats approved", "not approved, rejected", Rejected},
 		{"resolve down needs-work beats approved", "mostly approved but needs-work", NeedsWork},
+
+		// Regression guards for the fail-open substring hole: these lines all
+		// CONTAIN "approve" but must never be classified as Approved.
+		{"negated not approved", "not approved due to blocking findings", NeedsHumanReview},
+		{"negated cannot approve", "approval cannot be given", NeedsHumanReview},
+		{"negated no approval", "no approval — see findings", NeedsHumanReview},
+		{"negated unable to approve", "unable to be approved", NeedsHumanReview},
+		{"approve stem alone is not a token", "I would approve this", NeedsHumanReview},
+		{"unknown token fails closed", "looks-fine", NeedsHumanReview},
+		{"markdown bold approved", "**approved**", Approved},
+		{"backticked approved", "`approved`", Approved},
+		{"outcome prefix", "Outcome: approved", Approved},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

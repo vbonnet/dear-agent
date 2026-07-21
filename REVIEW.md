@@ -63,6 +63,13 @@ diff touches any of the following:
 Escalation is not a failure state — it is a correct outcome that preserves
 human authority over irreversible decisions.
 
+These triggers are enforced **deterministically in code** (`cmd/ai-review`
+inspects the changed paths, the PR body, and the commit messages), not left to
+the synthesis agent's judgement — §3 says escalation is mandatory "regardless of
+finding severity", so it must not depend on a nondeterministic model call. A
+diff that trips any trigger is forced to `needs-human-review` even if all five
+dimensions report clean.
+
 ---
 
 ## 4. Review agent invocation

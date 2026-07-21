@@ -28,11 +28,18 @@ func emojiFor(o Outcome) string {
 }
 
 // buildComment renders the sticky review comment body.
-func buildComment(outcome Outcome, synthesis string, reports []dimensionReport, override bool) string {
+func buildComment(outcome Outcome, synthesis string, reports []dimensionReport, override bool, triggers []string) string {
 	var b strings.Builder
 	fmt.Fprintln(&b, commentMarker)
 	fmt.Fprintf(&b, "## %s AI Code Review — %s\n\n", emojiFor(outcome), outcome)
 	fmt.Fprintf(&b, "> Automated 5-dimension review per [REVIEW.md](REVIEW.md). This is a **required, fail-closed** check: any non-approved outcome blocks merge.\n\n")
+	if len(triggers) > 0 {
+		fmt.Fprintf(&b, "### 🔴 Mandatory escalation (REVIEW.md §3)\n\nThis diff trips escalation triggers, so the outcome is forced to `needs-human-review` regardless of the dimension findings:\n\n")
+		for _, t := range triggers {
+			fmt.Fprintf(&b, "- %s\n", t)
+		}
+		fmt.Fprintln(&b)
+	}
 	if override {
 		fmt.Fprintf(&b, "> ⚠️ `ai-review:override` label present — the check passes on human authority. The override is recorded on this PR.\n\n")
 	}

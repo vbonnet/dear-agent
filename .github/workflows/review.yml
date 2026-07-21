@@ -19,7 +19,10 @@ name: AI Code Review (5-dimension)
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    # `labeled`/`unlabeled` matter: applying the documented `ai-review:override`
+    # label must produce a NEW check run on the same head SHA, otherwise the
+    # advertised escape hatch is unusable without an unrelated push.
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
     branches: [main]
   merge_group:
 
@@ -73,4 +76,5 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           IS_FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
           OVERRIDE: ${{ steps.override.outputs.active }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: go run ./cmd/ai-review

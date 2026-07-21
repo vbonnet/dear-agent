@@ -28,6 +28,7 @@ type config struct {
 	eventName string
 	isFork    bool
 	override  bool
+	prBody    string
 	apiKey    string
 	model     anthropic.Model
 	effort    anthropic.OutputConfigEffort
@@ -45,6 +46,7 @@ func loadConfig() config {
 		eventName: os.Getenv("EVENT_NAME"),
 		isFork:    os.Getenv("IS_FORK") == "true",
 		override:  os.Getenv("OVERRIDE") == "true",
+		prBody:    os.Getenv("PR_BODY"),
 		apiKey:    os.Getenv("ANTHROPIC_API_KEY"),
 		model:     anthropic.ModelClaudeOpus4_8,
 		effort:    anthropic.OutputConfigEffortHigh,
@@ -71,6 +73,27 @@ func gitDiff(base, head string) (string, error) {
 		return "", fmt.Errorf("git diff %s %s: %w", base, head, err)
 	}
 	return string(out), nil
+}
+
+// gitChangedPaths lists the files changed between base and head. Used for the
+// deterministic REVIEW.md §3 escalation triggers.
+func gitChangedPaths(base, head string) ([]string, error) {
+	out, err := exec.Command("git", "diff", "--name-only", base, head).Output()
+	if err != nil {
+		return nil, fmt.Errorf("git diff --name-only %s %s: %w", base, head, err)
+	}
+	return strings.Split(strings.TrimSpace(string(out)), "\n"), nil
+}
+
+// gitCommitMessages returns the commit messages in base..head so the explicit
+// "HUMAN REVIEW REQUIRED" marker can be detected (REVIEW.md §3).
+func gitCommitMessages(base, head string) string {
+	out, err := exec.Command("git", "log", "--format=%B", base+".."+head).Output()
+	if err != nil {
+		// Non-fatal: the marker may still appear in the PR body.
+		return ""
+	}
+	return string(out)
 }
 
 func main() {
@@ -141,8 +164,21 @@ func run(c config) int {
 		return failClosed(c)
 	}
 
+	// REVIEW.md §3 escalation is mandatory "regardless of finding severity", so
+	// it is enforced deterministically here rather than trusted to the model.
+	changed, err := gitChangedPaths(c.baseSHA, c.headSHA)
+	if err != nil {
+		fmt.Printf("::error::could not list changed paths: %v\n", err)
+		return failClosed(c)
+	}
+	triggers := EscalationTriggers(changed, c.prBody, gitCommitMessages(c.baseSHA, c.headSHA))
+	if len(triggers) > 0 {
+		fmt.Printf("::warning::REVIEW.md §3 escalation triggered: %s\n", strings.Join(triggers, "; "))
+	}
+	outcome = ApplyEscalation(outcome, triggers)
+
 	// Comment is best-effort and never changes the exit code.
-	postComment(c, buildComment(outcome, synthesis, reports, c.override))
+	postComment(c, buildComment(outcome, synthesis, reports, c.override, triggers))
 
 	code := ExitFor(outcome, c.override)
 	fmt.Printf("::notice::AI review outcome: %s (exit %d, override=%t)\n", outcome, code, c.override)

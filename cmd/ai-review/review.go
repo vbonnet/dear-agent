@@ -154,7 +154,11 @@ func synthesize(ctx context.Context, client anthropic.Client, model anthropic.Mo
 	sb.WriteString("- needs-human-review: security auto-fail trigger, escalation trigger, or novel irreversible decision\n\n")
 	sb.WriteString("Rules: any security blocking finding -> needs-human-review. Any other blocking finding -> needs-work. ")
 	sb.WriteString("Data-loss finding -> rejected. Ambiguous findings resolve down (needs-work beats approved; needs-human-review beats needs-work).\n")
-	sb.WriteString("Output exactly one outcome word (approved | needs-work | rejected | needs-human-review) on the first line, then a brief summary.\n\n")
+	sb.WriteString("Escalate to needs-human-review regardless of severity when the diff touches any of: agent permissions; pre/post-tool hooks or hook registration; ")
+	sb.WriteString("security boundaries (write guards, deny rules, CODEOWNERS, PII manifests); infrastructure that is expensive to reverse (IaC, schema changes, CI/CD pipeline edits); ")
+	sb.WriteString("or an explicit HUMAN REVIEW REQUIRED marker.\n")
+	sb.WriteString("Output exactly one outcome word (approved | needs-work | rejected | needs-human-review) as the FIRST WORD of the first line, then a brief summary. ")
+	sb.WriteString("Do not prefix it with any other word, and do not negate it.\n\n")
 	for _, r := range reports {
 		sb.WriteString(strings.ToUpper(r.key))
 		sb.WriteString(":\n")
