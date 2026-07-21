@@ -61,7 +61,8 @@
       "claude-code": "🤖",
       "codex-cli": "🧠",
       "gemini-cli": "✨",
-      "opencode-cli": "💻"
+      "opencode-cli": "💻",
+      "pi-cli": "π"
     },
     "CustomFormats": {
       "compact": "{{.AgentIcon}} #[fg={{.StateColor}}]●#[default] {{if ge .ContextPercent 0.0}}{{printf \"%.0f\" .ContextPercent}}%{{else}}--{{end}} | {{.Branch}}",
@@ -88,7 +89,8 @@
       "claude-code": 0,
       "codex-cli": 0,
       "gemini-cli": 0,
-      "opencode-cli": 0
+      "opencode-cli": 0,
+      "pi-cli": 0
     },
     "FallbackChain": [
       "sonnet",

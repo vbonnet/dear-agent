@@ -788,6 +788,8 @@ func archiveHarnessDisplayName(harness string) string {
 		return "Gemini"
 	case "opencode-cli":
 		return "OpenCode"
+	case "pi-cli":
+		return "Pi"
 	case "":
 		return "the agent"
 	default:

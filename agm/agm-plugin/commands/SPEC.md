@@ -22,7 +22,7 @@ branching, safety, and completion guidance.
 
 **APC-06** When plugin content hashes are generated or verified, the system shall use the portable Go implementation and shall hash the normalized Markdown body deterministically.
 
-**APC-07** When a plugin command names active harnesses, the system shall include Claude Code, Codex CLI, AGY, and OpenCode and shall identify Gemini as deprecated compatibility only.
+**APC-07** When a plugin command names active harnesses, the system shall include Claude Code, Codex CLI, AGY, OpenCode, and Pi and shall identify Gemini as deprecated compatibility only.
 
 **APC-08** When a plugin command creates private temporary files for untrusted text, the system shall remove every owned temporary file after the typed AGM command returns, before reporting either success or failure.
 

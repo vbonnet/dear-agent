@@ -1,6 +1,6 @@
 # Marketplace Harness Parity Specification
 
-<!-- Last audited at: 2026-07-01 -->
+<!-- Last audited at: 2026-07-21 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -10,8 +10,8 @@
 
 Marketplace parity means every active harness has a declared way to discover
 the same AGM, Wayfinder, and YouTube command/SKILL bundles. Claude Code uses
-its native `.claude-plugin/marketplace.json` format. Codex CLI, AGY, and
-OpenCode use the harness-neutral `.dear-agent/marketplace.json` catalog and
+its native `.claude-plugin/marketplace.json` format. Codex CLI, AGY, OpenCode,
+and Pi use the harness-neutral `.dear-agent/marketplace.json` catalog and
 AGENTS.md/SKILL fallback instructions until those harnesses provide a native
 marketplace format.
 
@@ -33,7 +33,7 @@ marketplace format.
 
 **MKT-08** When Claude Code consumes the catalog, the system shall use `native-claude-plugin-marketplace` mode.
 
-**MKT-09** When Codex CLI, AGY, or OpenCode consume the catalog, the system shall use an AGENTS.md/SKILL fallback mode.
+**MKT-09** When Codex CLI, AGY, OpenCode, or Pi consume the catalog, the system shall use an AGENTS.md/SKILL fallback mode.
 
 **MKT-10** When a new active harness is added, the system shall require marketplace parity tests before the harness is considered supported.
 

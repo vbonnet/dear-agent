@@ -21,6 +21,7 @@ Feature: Engram harness parity
       | codex-cli    |
       | agy          |
       | opencode-cli |
+      | pi-cli       |
 
   Scenario: Engram metadata is harness-neutral
     When AGM validates Engram metadata parity
@@ -37,6 +38,7 @@ Feature: Engram harness parity
       | codex-cli    |
       | agy          |
       | opencode-cli |
+      | pi-cli       |
 
   Scenario: Hippocampus LLM consolidation is model-family-neutral
     When AGM validates Hippocampus LLM parity

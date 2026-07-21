@@ -11,13 +11,14 @@ import (
 	"testing"
 
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 )
 
 func TestSupportedHarnessesHaveCurrentTmuxLauncher(t *testing.T) {
 	t.Parallel()
 
-	for _, harness := range []string{"claude-code", "codex-cli", "opencode-cli", "gemini-cli"} {
+	for _, harness := range []string{"claude-code", "codex-cli", "opencode-cli", "gemini-cli", "pi-cli"} {
 		t.Run(harness, func(t *testing.T) {
 			t.Parallel()
 
@@ -29,6 +30,7 @@ func TestSupportedHarnessesHaveCurrentTmuxLauncher(t *testing.T) {
 			runtime := currentTmuxHarnessRuntime{
 				startClaude:   record,
 				startCodex:    func(ops.HarnessLaunchSpec) (bool, error) { calls++; return false, nil },
+				startPi:       func(ops.HarnessLaunchSpec) (bool, error) { calls++; return false, nil },
 				startOpenCode: record,
 				startGemini:   record,
 				validateCodex: func() error { return nil },
@@ -41,6 +43,52 @@ func TestSupportedHarnessesHaveCurrentTmuxLauncher(t *testing.T) {
 				t.Fatalf("current-tmux dispatch for %q called %d launchers, want 1", harness, calls)
 			}
 		})
+	}
+}
+
+func TestQueueCurrentTmuxPiUsesManagedLaunchContract(t *testing.T) {
+	t.Parallel()
+
+	var gotSession, gotCommand string
+	spec := ops.HarnessLaunchSpec{
+		Harness: "pi-cli", SessionName: "pi-current", WorkDir: "/tmp/pi-current",
+		PiLaunchID:  "launch-current",
+		Pi:          &manifest.Pi{SessionID: "pi-current", SessionDir: "/tmp/agm/pi"},
+		PiExtension: "/tmp/agm/pi/authorization.js",
+	}
+	want := ops.BuildHarnessLaunchCommand(spec)
+	modeApplied, err := queueCurrentTmuxPiWithRuntime(spec, currentTmuxPiQueueRuntime{
+		lookPath: func(string) (string, error) { return "/usr/local/bin/pi", nil },
+		sendCommand: func(sessionName, command string) error {
+			gotSession, gotCommand = sessionName, command
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("queueCurrentTmuxPiWithRuntime() error = %v", err)
+	}
+	if modeApplied != want.ModeAppliedAtStartup {
+		t.Fatalf("mode applied at startup = %v, want %v", modeApplied, want.ModeAppliedAtStartup)
+	}
+	if gotSession != spec.SessionName || gotCommand != want.Command {
+		t.Fatalf("queued (%q, %q), want (%q, %q)", gotSession, gotCommand, spec.SessionName, want.Command)
+	}
+}
+
+func TestQueueCurrentTmuxPiRejectsMissingExecutable(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("pi not found")
+	sent := false
+	_, err := queueCurrentTmuxPiWithRuntime(ops.HarnessLaunchSpec{Harness: "pi-cli"}, currentTmuxPiQueueRuntime{
+		lookPath:    func(string) (string, error) { return "", wantErr },
+		sendCommand: func(string, string) error { sent = true; return nil },
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want executable lookup error %v", err, wantErr)
+	}
+	if sent {
+		t.Fatal("Pi command was queued after executable preflight failed")
 	}
 }
 

@@ -105,6 +105,17 @@ func TestClassifyPaneLiveness(t *testing.T) {
 			wantAlive:  true,
 		},
 		{
+			name:     "pi child of pane shell is alive",
+			panePIDs: []int{100},
+			procs: []ProcEntry{
+				{PID: 100, PPID: 1, Comm: "-zsh"},
+				{PID: 200, PPID: 100, Comm: "/opt/homebrew/bin/pi"},
+			},
+			wantExists:   true,
+			wantAlive:    true,
+			wantEvidence: "pi",
+		},
+		{
 			name:     "agm alongside live harness is NOT flagged as zombie writer",
 			panePIDs: []int{100},
 			procs: []ProcEntry{
@@ -201,6 +212,8 @@ func TestIsHarnessComm(t *testing.T) {
 		{"node", true},
 		{"gemini", true},
 		{"opencode", true},
+		{"pi", true},
+		{"/opt/homebrew/bin/pi", true},
 		{"2.1.50", true},   // Claude Code semver process name
 		{"2_1_195", true},  // macOS underscore form
 		{"2_1_195_", true}, // trailing tmux null placeholder
@@ -214,6 +227,15 @@ func TestIsHarnessComm(t *testing.T) {
 		if got := IsHarnessComm(tt.comm); got != tt.want {
 			t.Errorf("IsHarnessComm(%q) = %v, want %v", tt.comm, got, tt.want)
 		}
+	}
+}
+
+func TestPaneCommandMatchesProcessIsExact(t *testing.T) {
+	if !paneCommandMatchesProcess("zsh\n/opt/homebrew/bin/pi\n", "pi") {
+		t.Fatal("full-path Pi foreground command was not recognized")
+	}
+	if paneCommandMatchesProcess("zsh\npiper\n", "pi") {
+		t.Fatal("partial Pi process name was accepted")
 	}
 }
 

@@ -1,8 +1,8 @@
 ---
 model: haiku
 effort: low
-content-hash: 7c47e18783651fac834de975ccfcdcb0baa75950b1a8a4065d01b25a0e8535f2
-description: Create an AGM-managed harness session. Use when the user wants a new Claude Code, Codex CLI, AGY, or OpenCode session.
+content-hash: d1b464f25b40421fbb5a3c070f70e6e935aeb63e783e2e60b6974adda3ff808d
+description: Create an AGM-managed harness session. Use when the user wants a new Claude Code, Codex CLI, AGY, OpenCode, or Pi session.
 argument-hint: "[session-name] [--harness TYPE] [--workspace NAME]"
 allowed-tools: Bash(agm session new *)
 ---
@@ -14,7 +14,7 @@ allowed-tools: Bash(agm session new *)
 2. If no name, harness, or workspace was supplied, let AGM perform its current
    detection or prompt. Do not invent a Claude-specific name and do not use the
    removed `--project` flag.
-3. Active harnesses are `claude-code`, `codex-cli`, `agy`, and
-   `opencode-cli`. `gemini-cli` is deprecated compatibility only.
+3. Active harnesses are `claude-code`, `codex-cli`, `agy`, `opencode-cli`, and
+   `pi-cli`. `gemini-cli` is deprecated compatibility only.
 4. Report the created session, harness, workspace, project, and resume hint from
    AGM's result. On failure, show stderr and stop.

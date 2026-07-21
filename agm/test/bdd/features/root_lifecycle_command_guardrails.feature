@@ -36,6 +36,7 @@ Feature: Root lifecycle command guardrails
       | codex-cli    | 5.5       |
       | agy          | 3.1-pro-high |
       | opencode-cli | glm-5.2   |
+      | pi-cli       | sonnet    |
 
   Scenario Outline: Merge repair agents preserve model-family routes
     Given merge repair model family "<family>" uses model "<model>"

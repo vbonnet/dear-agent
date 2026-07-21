@@ -21,8 +21,10 @@ var installHooksCmd = &cobra.Command{
 
 For Claude Code, this command copies hook scripts to ~/.claude/hooks/ and
 registers them in ~/.claude/settings.json so the harness invokes them
-automatically. Repository-scoped hook manifests for Codex, AGY, and OpenCode
-live under .codex/, .agents/, and .opencode/ respectively.
+automatically. Repository-scoped hook manifests for Codex, AGY, OpenCode, and
+Pi live under .codex/, .agents/, .opencode/, and .pi/ respectively. Managed Pi
+sessions also load AGM's private authorization extension; repository hooks do
+not replace that extension.
 
 Hooks installed:
   • posttool-agm-state-notify         - Set state to THINKING after tool use

@@ -38,6 +38,12 @@ func resolveNamedHistoryLocation(sessionName string, store historyPathSessionSto
 		}
 		return session, session.Agy.ConversationID, nil
 	}
+	if agent.NormalizeHarnessName(session.Harness) == "pi-cli" {
+		if session.Pi == nil || session.Pi.SessionID == "" || session.Pi.SessionDir == "" {
+			return nil, "", fmt.Errorf("pi session %q has incomplete native identity metadata; reassociate or re-import it before requesting history", sessionName)
+		}
+		return session, session.Pi.SessionID, nil
+	}
 
 	findInManifests := func(name string) (*manifest.Manifest, error) {
 		manifests, listErr := store.ListSessions(&dolt.SessionFilter{})
@@ -179,7 +185,13 @@ Examples:
 
 // outputHistoryLocation constructs and outputs the history location
 func outputHistoryLocation(cmd *cobra.Command, agent, uuid, workingDir string, session *manifest.Manifest) error {
-	location, err := history.GetHistoryPaths(agent, uuid, workingDir, historyVerifyPaths)
+	var location *history.HistoryLocation
+	var err error
+	if agent == "pi-cli" && session != nil && session.Pi != nil {
+		location, err = history.GetPiHistoryPaths(session.Pi.SessionDir, session.Pi.SessionID, session.Pi.TranscriptPath, historyVerifyPaths)
+	} else {
+		location, err = history.GetHistoryPaths(agent, uuid, workingDir, historyVerifyPaths)
+	}
 	if err != nil {
 		if historyJSONOutput {
 			outputHistoryError(cmd, agent, uuid, err)

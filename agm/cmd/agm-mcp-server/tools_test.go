@@ -676,7 +676,7 @@ func TestCreateSessionInputSchemaDocumentsHarnessParity(t *testing.T) {
 		t.Fatal("CreateSessionInput.Harness field missing")
 	}
 	tag := field.Tag.Get("jsonschema")
-	for _, want := range []string{"claude-code", "codex-cli", "agy", "opencode-cli", "gemini-cli"} {
+	for _, want := range []string{"claude-code", "codex-cli", "agy", "opencode-cli", "pi-cli", "gemini-cli"} {
 		if !strings.Contains(tag, want) {
 			t.Errorf("Harness jsonschema tag %q missing %q", tag, want)
 		}

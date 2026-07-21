@@ -129,3 +129,23 @@ func TestSessionMetadata_AgyRoundTrip(t *testing.T) {
 		t.Errorf("AGY transcript path = %q, want %q", got.Agy.TranscriptPath, src.Agy.TranscriptPath)
 	}
 }
+
+func TestSessionMetadata_PiRoundTrip(t *testing.T) {
+	src := &manifest.Manifest{
+		WorkingDirectory: "/tmp/pi-work",
+		Pi: &manifest.Pi{
+			SessionID: "pi-native-id", SessionDir: "/tmp/pi-sessions", TranscriptPath: "/tmp/pi-sessions/native.jsonl",
+		},
+	}
+	metadata, err := json.Marshal(buildSessionMetadata(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := &manifest.Manifest{}
+	if err := unmarshalEngramMetadata(got, metadata); err != nil {
+		t.Fatal(err)
+	}
+	if got.Pi == nil || *got.Pi != *src.Pi {
+		t.Fatalf("Pi metadata = %#v, want %#v", got.Pi, src.Pi)
+	}
+}

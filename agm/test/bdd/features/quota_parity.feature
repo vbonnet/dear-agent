@@ -23,6 +23,7 @@ Feature: Quota monitoring parity
       | codex-cli    |
       | agy          |
       | opencode-cli |
+      | pi-cli       |
 
   Scenario Outline: Model families have quota pricing policy
     Given model family "<family>" is configured

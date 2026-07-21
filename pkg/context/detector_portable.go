@@ -51,6 +51,13 @@ var cliContextRoutes = map[CLI]cliContextRoute{
 		modelEnv:        []string{"CODEX_MODEL", "DEAR_AGENT_MODEL"},
 		messageCountEnv: []string{"CODEX_MESSAGE_COUNT", "DEAR_AGENT_MESSAGE_COUNT"},
 	},
+	CLIPi: {
+		source: "pi-cli", defaultModel: "claude-sonnet-4.6",
+		sessionEnv:      []string{"PI_SESSION_ID"},
+		usageEnv:        []string{"PI_CONTEXT_USAGE", "PI_TOOL_RESULT"},
+		modelEnv:        []string{"PI_MODEL", "DEAR_AGENT_MODEL"},
+		messageCountEnv: []string{"PI_MESSAGE_COUNT", "DEAR_AGENT_MESSAGE_COUNT"},
+	},
 	CLIAgy: {
 		source: "agy", defaultModel: "gemini-2.5-flash",
 		sessionEnv:      []string{"AGY_CONVERSATION_ID", "AGY_SESSION_ID", "ANTIGRAVITY_SESSION_ID"},

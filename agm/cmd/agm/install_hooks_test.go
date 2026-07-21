@@ -22,6 +22,9 @@ func TestInstallHooksHelpIsHarnessNeutral(t *testing.T) {
 	if !strings.Contains(installHooksCmd.Long, ".opencode/") {
 		t.Fatalf("install-hooks help should mention OpenCode hook manifest location:\n%s", installHooksCmd.Long)
 	}
+	if !strings.Contains(installHooksCmd.Long, ".pi/") || !strings.Contains(installHooksCmd.Long, "private authorization extension") {
+		t.Fatalf("install-hooks help should explain Pi hook and authorization surfaces:\n%s", installHooksCmd.Long)
+	}
 }
 
 func TestAddHookRegistration(t *testing.T) {

@@ -93,7 +93,7 @@ Flags:
   --detached    - Create session without attaching (useful when inside tmux)
   --workspace   - Specify workspace (oss, acme) or "auto" for interactive selection
                   If omitted, uses auto-detected workspace or prompts if detection fails
-  --harness     - Harness to use (claude-code, codex-cli, agy, opencode-cli)
+  --harness     - Harness to use (claude-code, codex-cli, agy, opencode-cli, pi-cli)
                   Deprecated compatibility: gemini-cli
                   If omitted, prompts interactively
   --model       - Model to use (e.g., sonnet, 3.5-flash, 3.5-flash-low, 5.5)
@@ -485,6 +485,7 @@ Examples:
 				huh.NewOption("Codex CLI (OpenAI)", "codex-cli"),
 				huh.NewOption("AGY (Antigravity CLI)", "agy"),
 				huh.NewOption("OpenCode CLI (Multi-provider)", "opencode-cli"),
+				huh.NewOption("Pi (Extensible coding agent)", "pi-cli"),
 			}
 			err := huh.NewSelect[string]().
 				Title("Which harness would you like to use?").
@@ -496,7 +497,7 @@ Examples:
 					"Failed to read harness selection",
 					"  • Use --harness flag for non-interactive usage: agm session new --harness=claude-code\n"+
 						"  • Check terminal is interactive (TTY)\n"+
-						"  • Available harnesses: claude-code, codex-cli, agy, opencode-cli")
+						"  • Available harnesses: claude-code, codex-cli, agy, opencode-cli, pi-cli")
 				return err
 			}
 			harnessName = selectedHarness
@@ -518,7 +519,7 @@ Examples:
 		if err := agent.ValidateHarnessName(harnessName); err != nil {
 			ui.PrintError(err,
 				"Invalid harness specified",
-				"  • Valid active harnesses: claude-code, codex-cli, agy, opencode-cli\n"+
+				"  • Valid active harnesses: claude-code, codex-cli, agy, opencode-cli, pi-cli\n"+
 					"  • Deprecated compatibility harness: gemini-cli\n"+
 					"  • Run 'agm harness list' to see available harnesses")
 			return err
@@ -854,7 +855,7 @@ func init() {
 	// propagate to child commands for full isolation.
 	newCmd.Flags().BoolVar(&testMode, "test", false, "Create test session with per-run sandbox isolation")
 	newCmd.Flags().BoolVar(&allowTestName, "allow-test-name", false, "Override test pattern warning (for legitimate production sessions with 'test' in name)")
-	newCmd.Flags().StringVar(&harnessName, "harness", "", "Harness to use (claude-code, codex-cli, agy, opencode-cli; deprecated: gemini-cli) (env: AGM_DEFAULT_HARNESS)")
+	newCmd.Flags().StringVar(&harnessName, "harness", "", "Harness to use (claude-code, codex-cli, agy, opencode-cli, pi-cli; deprecated: gemini-cli) (env: AGM_DEFAULT_HARNESS)")
 	newCmd.Flags().StringVar(&modelName, "model", "", "Model to use (e.g., sonnet, 3.5-flash, 3.5-flash-low, 5.5) (env: AGM_DEFAULT_MODEL)")
 	newCmd.Flags().StringVar(&modelTierFlag, "model-tier", "", "Cost tier for model routing: cheap (70%), mid (20%), expensive (10%)")
 	_ = newCmd.RegisterFlagCompletionFunc("model-tier", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -882,12 +883,12 @@ func init() {
 	_ = newCmd.RegisterFlagCompletionFunc("role", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return []string{"orchestrator", "meta-orchestrator", "researcher", "worker", "reviewer"}, cobra.ShellCompDirectiveNoFileComp
 	})
-	newCmd.Flags().StringSliceVar(&permissionsAllow, "permissions-allow", nil, "Permission patterns to pre-approve (e.g., 'Bash(tmux:*),Read(~/src/**)') — written to project .claude/settings.local.json")
+	newCmd.Flags().StringSliceVar(&permissionsAllow, "permissions-allow", nil, "Permission patterns to pre-approve (e.g., 'Bash(tmux:*),Read(~/src/**)') — persisted in the shared policy and projected to the selected harness")
 	newCmd.Flags().StringVar(&permissionProfile, "permission-profile", "", "Predefined permission profile (worker, monitor, audit)")
 	_ = newCmd.RegisterFlagCompletionFunc("permission-profile", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return rbac.ProfileNames(), cobra.ShellCompDirectiveNoFileComp
 	})
-	newCmd.Flags().BoolVar(&inheritPermissions, "inherit-permissions", false, "Inherit permission allowlist from parent's ~/.claude/settings.json")
+	newCmd.Flags().BoolVar(&inheritPermissions, "inherit-permissions", false, "Inherit the canonical parent permission allowlist from ~/.claude/settings.json")
 	newCmd.Flags().BoolVar(&disposable, "disposable", false, "Create a disposable session with TTL-based auto-archive")
 	newCmd.Flags().StringVar(&disposableTTL, "disposable-ttl", "4h", "TTL for disposable sessions (e.g., 1h, 4h, 30m)")
 	newCmd.Flags().BoolVar(&persistent, "persistent", false, "Omit '&&  exit' from the harness launch command; use for long-lived supervisor sessions that must survive a Claude turn/loop ending (e.g. vroom-meta-orchestrator)")

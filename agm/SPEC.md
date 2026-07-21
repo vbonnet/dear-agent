@@ -16,10 +16,10 @@
 **Status:** Reviewed (5-persona review complete)
 **Last Updated:** 2026-03-06
 
-## 2026-06-23 Audit Addendum: Harness Parity
+## 2026-07-21 Audit Addendum: Harness Parity
 
 AGM supports multiple interactive harnesses. The active parity harnesses are
-`claude-code`, `codex-cli`, `agy`, and `opencode-cli`. Claude Code is the
+`claude-code`, `codex-cli`, `agy`, `opencode-cli`, and `pi-cli`. Claude Code is the
 reference implementation because it is the oldest and most battle-tested
 integration. The shared orchestration layer MUST define behavior in
 harness-neutral terms first, with harness-specific extensions only where a tool
@@ -34,7 +34,7 @@ Core parity capabilities:
 
 | Capability | Baseline | Active harness requirement |
 |---|---|---|
-| Session lifecycle | Claude Code create/send/resume/kill/archive | Equivalent observable outcome for `codex-cli`, `agy`, and `opencode-cli` |
+| Session lifecycle | Claude Code create/send/resume/kill/archive | Equivalent observable outcome for `codex-cli`, `agy`, `opencode-cli`, and `pi-cli` |
 | Hooks | Claude Code native hook events | Native hooks or AGM bridge with equivalent state/safety outcome |
 | Skills/commands | Claude slash commands plus AGM CLI | Non-Claude harnesses MUST have a CLI or harness-neutral command path |
 | AGENTS.md | Claude Code instruction loading | Same repo instruction contract or documented bridge/fallback |
@@ -112,6 +112,40 @@ For `agy`, AGM treats Antigravity as a real interactive CLI harness:
 - AGY sessions with AGM `permission_mode=auto` MUST launch and resume with
   `--dangerously-skip-permissions`; AGY does not expose Claude-style in-pane
   permission-mode cycling, so non-auto modes remain the AGY default behavior
+
+For `pi-cli`, AGM treats Pi as a real interactive CLI harness:
+
+- create and resume MUST use the same canonical command builder with AGM's
+  exact Pi session ID, an AGM-owned private session directory, an explicit
+  managed authorization extension, project approval, model, tools, mode, and
+  process-exit policy
+- create and cold-resume readiness MUST carry a unique per-process launch ID;
+  an older managed footer in pane history MUST NOT satisfy a new launch, and
+  existing panes MUST be reused only after exact Pi liveness or restartable-
+  shell proof
+- manifests and Dolt rows MUST preserve Pi session ID, private session
+  directory, and exact transcript path; lookup and import MUST read the JSONL
+  header and reject newest-file heuristics, duplicate identities, symlinks,
+  oversized files, or unbounded discovery
+- send safety MUST require the managed `AGM <mode>/ready` status, distinguish
+  permission prompts from readiness, and route mode and model changes through
+  `/agm-mode` and `/agm-model`
+- plan mode MUST expose only read, grep, find, and list tools; default mode MUST
+  apply AGM allowlists and ask only with an interactive UI; non-interactive
+  unmatched calls MUST fail closed; auto mode MAY enable all native tools but
+  MUST NOT bypass repository guardrails
+- Pi MUST load the root `AGENTS.md` directly, discover living AGM and Wayfinder
+  skills through `.pi/settings.json`, and project trusted repository hooks
+  through `.pi/hooks.json` without allowing repository code to replace the
+  AGM-owned authorization extension
+- every projected hook invocation MUST carry shared event, native session,
+  approved-directory, and loop-state metadata; structured successful block
+  decisions MUST be enforced, and blocking Stop feedback MUST return to Pi as
+  a bounded follow-up turn
+- history, import, export, Engram indexing, status, doctor, install, MCP,
+  marketplace, quota, config-directory, hook, and Wayfinder surfaces MUST name
+  Pi explicitly; unavailable quota or rate-limit data MUST remain unavailable
+  rather than inherit Claude values
 
 Claude-specific features remain extension points, not baseline requirements for
 other harnesses. `claude --resume <uuid>`, Shift-Tab permission-mode cycling,
@@ -562,11 +596,11 @@ start with a shell script `scripts/agm-compare.sh` (~80 lines) that:
 Wrapped by a thin CLI command for discoverability:
 
 ```
-agm compare --harnesses claude-code,codex-cli,agy,opencode-cli --repo . --prompt "..."
+agm compare --harnesses claude-code,codex-cli,agy,opencode-cli,pi-cli --repo . --prompt "..."
     [--timeout 30m]
 ```
 
-**Active parity harnesses:** claude-code, codex-cli, agy, opencode-cli.
+**Active parity harnesses:** claude-code, codex-cli, agy, opencode-cli, pi-cli.
 `gemini-cli` is deprecated compatibility only.
 
 `cmd/agm/compare.go` validates inputs and execs the shell script.

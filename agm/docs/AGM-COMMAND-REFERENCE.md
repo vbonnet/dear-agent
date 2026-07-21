@@ -123,7 +123,7 @@ Create a new session with tmux integration.
 
 **Flags**:
 - `--detached` - Create without attaching (useful inside tmux)
-- `--harness <name>` - CLI harness to use (claude-code, gemini-cli, codex-cli, opencode-cli)
+- `--harness <name>` - CLI harness to use (claude-code, codex-cli, agy, opencode-cli, pi-cli; gemini-cli is deprecated)
 - `--workspace <name>` - Workspace to use (auto for detection, or explicit name)
 - `--workflow <name>` - Workflow mode (deep-research, code-review, etc.)
 - `--project-id <id>` - Project identifier

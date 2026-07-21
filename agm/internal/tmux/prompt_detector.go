@@ -456,8 +456,13 @@ func WaitForPromptSimpleContext(parent context.Context, sessionName string, time
 		}
 
 		content := string(output)
-		lines := strings.Split(content, "\n")
-
+		if containsPiReadyPattern(content) {
+			debug.Log("✓ Managed Pi prompt detected (check #%d)", checkCount)
+			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+				return err
+			}
+			return nil
+		}
 		// Codex readiness is a multi-line contract: the initial header must be
 		// paired with its hint, and the post-turn cursor with its footer. Evaluate
 		// the captured pane before the legacy line-oriented harness checks.
@@ -468,10 +473,11 @@ func WaitForPromptSimpleContext(parent context.Context, sessionName string, time
 			}
 			return nil
 		}
+		lines := strings.Split(content, "\n")
 
 		// Check each line for any harness prompt pattern (Claude or Gemini)
 		for i, line := range lines {
-			if containsAnyHarnessPromptPattern(line) {
+			if containsAnyNonPiHarnessPromptPattern(line) {
 				debug.Log("✓ Harness prompt detected in line %d (check #%d): %q", i, checkCount, strings.TrimSpace(line))
 				// Found prompt - wait a bit to ensure it's stable
 				if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
@@ -940,9 +946,13 @@ func WaitForGeminiPrompt(sessionName string, timeout time.Duration) error {
 }
 
 // containsAnyHarnessPromptPattern checks if content contains prompt patterns from
-// ANY supported harness (Claude, Gemini, OpenCode, Codex, or AGY). Used by SendMultiLinePromptSafe and
+// ANY supported harness (Claude, Gemini, OpenCode, Codex, AGY, or Pi). Used by SendMultiLinePromptSafe and
 // SendPromptLiteral which don't know the harness type but need to detect readiness.
 func containsAnyHarnessPromptPattern(content string) bool {
+	return containsAnyNonPiHarnessPromptPattern(content) || containsPiReadyPattern(content)
+}
+
+func containsAnyNonPiHarnessPromptPattern(content string) bool {
 	return containsClaudePromptPattern(content) || containsGeminiPromptPattern(content) ||
 		containsOpenCodePromptPattern(content) || IsCodexComposerReady(content) ||
 		containsAgyPromptPattern(content)

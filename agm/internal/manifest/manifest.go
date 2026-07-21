@@ -27,9 +27,10 @@ type Manifest struct {
 	Claude                  Claude            `yaml:"claude"`
 	Codex                   *Codex            `yaml:"codex,omitempty" json:"codex,omitempty"` // Codex CLI saved-session metadata
 	Agy                     *Agy              `yaml:"agy,omitempty" json:"agy,omitempty"`     // AGY saved-conversation metadata
+	Pi                      *Pi               `yaml:"pi,omitempty" json:"pi,omitempty"`       // Pi native session metadata
 	Tmux                    Tmux              `yaml:"tmux"`
 	OpenCode                *OpenCode         `yaml:"opencode,omitempty"`   // OpenCode session metadata
-	Harness                 string            `yaml:"harness,omitempty"`    // Harness specifies the AI harness (claude-code, gemini-cli, codex-cli, opencode-cli)
+	Harness                 string            `yaml:"harness,omitempty"`    // Harness specifies the AI harness (claude-code, codex-cli, agy, opencode-cli, pi-cli; gemini-cli deprecated)
 	Model                   string            `yaml:"model,omitempty"`      // Model specifies the AI model within the harness
 	ModelTier               string            `yaml:"model_tier,omitempty"` // ModelTier is the cost tier assigned by the model router (cheap, mid, expensive)
 	EngramMetadata          *EngramMetadata   `yaml:"engram_metadata,omitempty"`
@@ -160,6 +161,13 @@ type Agy struct {
 	WorkspacePath  string `yaml:"workspace_path,omitempty"`       // Original AGY workspace path for discovery/audit
 	ConversationDB string `yaml:"conversation_db_path,omitempty"` // Resolved AGY sqlite conversation DB path
 	TranscriptPath string `yaml:"transcript_path,omitempty"`      // Resolved AGY transcript JSONL path
+}
+
+// Pi represents Pi native session metadata.
+type Pi struct {
+	SessionID      string `yaml:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionDir     string `yaml:"session_dir,omitempty" json:"session_dir,omitempty"`
+	TranscriptPath string `yaml:"transcript_path,omitempty" json:"transcript_path,omitempty"`
 }
 
 // Tmux represents tmux session metadata

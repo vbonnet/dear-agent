@@ -55,6 +55,7 @@ var defaultAgentIcons = map[string]string{
 	"codex-cli":    "🧠",
 	"agy":          "✦",
 	"opencode-cli": "💻",
+	"pi-cli":       "π",
 }
 
 // HookStalenessThreshold is the maximum age of a hook-based state update

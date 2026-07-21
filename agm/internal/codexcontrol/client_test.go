@@ -15,7 +15,7 @@ func TestStartRemoteControlAcceptsDaemonStatusWhenStdoutClosesLate(t *testing.T)
 	script := filepath.Join(t.TempDir(), "codex")
 	if err := os.WriteFile(script, []byte(`#!/bin/sh
 printf '%s\n' '{"mode":"daemon","daemon":{"status":"alreadyRunning"}}'
-(sleep 2) &
+(sleep 30) &
 `), 0o700); err != nil {
 		t.Fatalf("write fake codex: %v", err)
 	}
@@ -26,7 +26,11 @@ printf '%s\n' '{"mode":"daemon","daemon":{"status":"alreadyRunning"}}'
 	}
 	t.Cleanup(func() { execCommandContext = originalExec })
 
-	client := &Client{Timeout: 5 * time.Second}
+	// Keep the pipe-close bound well inside the command timeout. The old test
+	// used a one-second production WaitDelay against a five-second timeout;
+	// under a fully parallel race suite, scheduler contention could let the
+	// deadline win and turn this success-path regression into a false timeout.
+	client := &Client{Timeout: 30 * time.Second, waitDelay: 25 * time.Millisecond}
 	if err := client.StartRemoteControl(context.Background()); err != nil {
 		t.Fatalf("StartRemoteControl returned error for daemon status: %v", err)
 	}

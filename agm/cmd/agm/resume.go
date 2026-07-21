@@ -22,6 +22,8 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
+	"github.com/vbonnet/dear-agent/agm/internal/permissionparity/piadapter"
+	"github.com/vbonnet/dear-agent/agm/internal/pisession"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/state"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
@@ -163,6 +165,7 @@ type HealthStatus struct {
 	CanResume         bool
 	Issues            []string
 	Warnings          []string
+	piLaunchID        string
 }
 
 // resolveSessionIdentifier finds the Claude UUID and manifest path from various identifier types
@@ -1112,6 +1115,13 @@ func dispatchResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, harnessN
 		fullCmd = buildCodexResumeCommand(m, health)
 	case "agy":
 		fullCmd = buildAgyResumeCommand(m, health)
+	case "pi-cli":
+		var err error
+		health.piLaunchID = launchparity.NewPiLaunchID()
+		fullCmd, err = buildPiResumeCommand(m, health, health.piLaunchID)
+		if err != nil {
+			return err
+		}
 	case "claude-code":
 		fullCmd = buildClaudeResumeCommand(adapter, m, health)
 	default:
@@ -1126,11 +1136,62 @@ func dispatchResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, harnessN
 
 func activeHarnessHasTmuxResumeCommand(harnessName string) bool {
 	switch agent.NormalizeHarnessName(harnessName) {
-	case "claude-code", "codex-cli", "agy", "opencode-cli":
+	case "claude-code", "codex-cli", "agy", "opencode-cli", "pi-cli":
 		return true
 	default:
 		return false
 	}
+}
+
+//nolint:gocyclo // reason: exact-resume transaction keeps identity, transcript, authorization, and model checks adjacent
+func buildPiResumeCommand(m *manifest.Manifest, health *HealthStatus, launchID string) (string, error) {
+	if m.Pi == nil || m.Pi.SessionID == "" || m.Pi.SessionDir == "" {
+		return "", fmt.Errorf("pi session metadata is incomplete; exact native session_id and session_dir are required for resume")
+	}
+	if err := pisession.ValidateID(m.Pi.SessionID); err != nil {
+		return "", err
+	}
+	if _, err := pisession.ValidateRoot(m.Pi.SessionDir); err != nil {
+		return "", fmt.Errorf("pi session directory is unavailable: %w", err)
+	}
+	transcriptPath, findErr := pisession.FindTranscript(m.Pi.SessionDir, m.Pi.SessionID)
+	hasTranscript := findErr == nil
+	if findErr != nil && !errors.Is(findErr, pisession.ErrTranscriptNotFound) {
+		return "", fmt.Errorf("resolve Pi resume transcript: %w", findErr)
+	}
+	if m.Pi.TranscriptPath != "" {
+		persisted, absErr := filepath.Abs(m.Pi.TranscriptPath)
+		if !hasTranscript || absErr != nil || filepath.Clean(transcriptPath) != filepath.Clean(persisted) {
+			return "", fmt.Errorf("pi resume transcript does not match the persisted native identity")
+		}
+	}
+	extensionPath, err := piadapter.EnsureExtension(os.Getenv("AGM_PI_EXTENSION_ROOT"))
+	if err != nil {
+		return "", fmt.Errorf("install Pi authorization extension: %w", err)
+	}
+	allow := []string(nil)
+	if m.PermissionPolicy != nil {
+		allow = m.PermissionPolicy.Allow
+	}
+	policyJSON, err := piadapter.MarshalPolicy(allow)
+	if err != nil {
+		return "", err
+	}
+	policyFile, err := piadapter.EnsurePolicyFile(os.Getenv("AGM_PI_EXTENSION_ROOT"), m.Pi.SessionID, policyJSON)
+	if err != nil {
+		return "", fmt.Errorf("install Pi permission policy: %w", err)
+	}
+	model := m.Model
+	if model == "" && !hasTranscript {
+		model = agent.HarnessDefaults["pi-cli"]
+	}
+	return ops.BuildHarnessLaunchCommand(ops.HarnessLaunchSpec{
+		Harness: "pi-cli", Model: model, SessionName: health.TmuxSessionName,
+		SessionID: m.Pi.SessionID, WorkDir: health.WorktreePath,
+		PermissionMode: m.PermissionMode, Pi: m.Pi,
+		PiLaunchID:  launchID,
+		PiExtension: extensionPath, PiPolicyJSON: policyJSON, PiPolicyFile: policyFile,
+	}).Command, nil
 }
 
 func buildCodexResumeCommand(m *manifest.Manifest, health *HealthStatus) string {
@@ -1258,9 +1319,31 @@ func waitForResumedHarness(ctx context.Context, harnessName string, health *Heal
 		return waitForResumedCodex(ctx, health)
 	case "agy":
 		return waitForResumedAgy(ctx, health)
+	case "pi-cli":
+		return waitForResumedPi(ctx, health)
 	default:
 		return nil
 	}
+}
+
+func waitForResumedPi(ctx context.Context, health *HealthStatus) error {
+	var promptWaitErr error
+	spinErr := spinner.New().
+		Title("Waiting for Pi session to load...").
+		Accessible(true).
+		Action(func() {
+			promptWaitErr = tmux.WaitForPiLaunchPromptContext(ctx, health.TmuxSessionName, health.piLaunchID, 60*time.Second)
+		}).
+		Run()
+	if spinErr != nil {
+		return fmt.Errorf("spinner error: %w", spinErr)
+	}
+	fmt.Println()
+	if promptWaitErr != nil {
+		return fmt.Errorf("pi exact resume did not reach managed readiness: %w", promptWaitErr)
+	}
+	ui.PrintSuccess("Pi session loaded and ready!")
+	return nil
 }
 
 // waitForResumedClaude waits first for the claude process to appear, then for

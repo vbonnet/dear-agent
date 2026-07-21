@@ -889,7 +889,7 @@ SQLite when `AGM_DB_PATH` is set by a named test environment)
 2. Determine target harness:
    - Existing manifest harness wins.
    - `--harness auto` infers from live tmux pane commands.
-   - Explicit `--harness claude-code|codex-cli|agy|opencode-cli|gemini-cli` is accepted.
+   - Explicit `--harness claude-code|codex-cli|agy|opencode-cli|pi-cli|gemini-cli` is accepted.
    - Omitted harness defaults to `claude-code` for backward compatibility.
 3. For Claude Code:
    - Detect or accept the Claude UUID.

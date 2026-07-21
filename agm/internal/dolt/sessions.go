@@ -53,6 +53,17 @@ func buildSessionMetadata(session *manifest.Manifest) map[string]any {
 			metadata["agy_transcript_path"] = session.Agy.TranscriptPath
 		}
 	}
+	if session.Pi != nil {
+		if session.Pi.SessionID != "" {
+			metadata["pi_session_id"] = session.Pi.SessionID
+		}
+		if session.Pi.SessionDir != "" {
+			metadata["pi_session_dir"] = session.Pi.SessionDir
+		}
+		if session.Pi.TranscriptPath != "" {
+			metadata["pi_transcript_path"] = session.Pi.TranscriptPath
+		}
+	}
 	if session.EngramMetadata != nil {
 		metadata["engram_enabled"] = session.EngramMetadata.Enabled
 		metadata["engram_query"] = session.EngramMetadata.Query
@@ -931,10 +942,11 @@ func (a *Adapter) GetSessionByUUID(conversationUUID string) (*manifest.Manifest,
 		WHERE claude_uuid = ?
 		   OR `+jsonValue+` = ?
 		   OR `+jsonValue+` = ?
+		   OR `+jsonValue+` = ?
 		LIMIT 1
-	`, "codex_session_id", "agy_conversation_id")
+	`, "codex_session_id", "agy_conversation_id", "pi_session_id")
 
-	row := a.conn.QueryRow(query, conversationUUID, conversationUUID, conversationUUID) //nolint:noctx // TODO(context): plumb ctx through this layer
+	row := a.conn.QueryRow(query, conversationUUID, conversationUUID, conversationUUID, conversationUUID) //nolint:noctx // TODO(context): plumb ctx through this layer
 	m, err := a.scanSession(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) || strings.Contains(err.Error(), "session not found") {
@@ -1165,6 +1177,16 @@ func unmarshalEngramMetadata(session *manifest.Manifest, metadataJSON []byte) er
 			WorkspacePath:  agyWorkspacePath,
 			ConversationDB: agyConversationDBPath,
 			TranscriptPath: agyTranscriptPath,
+		}
+	}
+	piSessionID, _ := metadata["pi_session_id"].(string)
+	piSessionDir, _ := metadata["pi_session_dir"].(string)
+	piTranscriptPath, _ := metadata["pi_transcript_path"].(string)
+	if piSessionID != "" || piSessionDir != "" || piTranscriptPath != "" {
+		session.Pi = &manifest.Pi{
+			SessionID:      piSessionID,
+			SessionDir:     piSessionDir,
+			TranscriptPath: piTranscriptPath,
 		}
 	}
 	enabled, ok := metadata["engram_enabled"].(bool)
