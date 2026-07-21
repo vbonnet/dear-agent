@@ -29,6 +29,34 @@ into listing tests that do not actually run.
 
 ## Feature Files
 
+### AGY Saved-Session Discovery
+
+**File:** [`agy_saved_session_discovery.feature`](../test/bdd/features/agy_saved_session_discovery.feature)
+
+**Drives:** `agm/internal/agysession` cache-first metadata lookup and bounded
+newest-first Antigravity log fallback.
+
+**Key scenarios:**
+- Cache hits never enter provider log discovery.
+- Log discovery inspects at most 257 directory entries, using the 257th only as
+  an exhaustion sentinel and processing at most 256; it then orders regular
+  candidates by modification time and limits scanning to the newest 64 files.
+- Each candidate read is limited to 2 MiB; known-ID matches inside that budget
+  remain valid, while latest-workspace lookup rejects a truncated prefix or a
+  match in an older file after a truncated newer candidate; a post-scan probe
+  also detects bytes appended during the bounded read.
+- Directory-entry, candidate, or byte exhaustion is distinguishable from a
+  complete miss, and oversized lines fail explicitly.
+- Directory exhaustion retains the bounded candidates so a known-ID match can
+  remain conclusive, while latest-workspace lookup rejects any match because
+  an unprocessed entry could be newer.
+- A log removed by provider rotation after enumeration is skipped as a stale
+  snapshot during metadata collection or scan open, while other metadata,
+  open, and scan failures remain explicit.
+
+**Why this matters:** Import, association, and post-create metadata capture must
+not inherit unbounded latency from a large or stale provider log directory.
+
 ### Declarative Runtime Guardrails
 
 **File:** [`declarative_runtime_guardrails.feature`](../test/bdd/features/declarative_runtime_guardrails.feature)
