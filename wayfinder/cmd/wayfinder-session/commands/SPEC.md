@@ -27,6 +27,8 @@
 
 **WFCMD-10** When a rewind has been persisted and its Git commit fails, the system shall report a warning without reporting the rewind operation as failed.
 
+**WFCMD-11** When `session start` receives a project directory outside a Git work tree, the system shall reject the request before creating any lifecycle artifact.
+
 ## Traceability
 
 - Command tests: `wayfinder/cmd/wayfinder-session/commands/*_test.go`

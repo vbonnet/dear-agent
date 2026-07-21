@@ -24,6 +24,20 @@ func TestStartRejectsWhitespaceProjectNameBeforeWritingState(t *testing.T) {
 	}
 }
 
+func TestStartRejectsNonGitProjectDirectoryBeforeWritingState(t *testing.T) {
+	dir := t.TempDir()
+	SetProjectDirectory(dir)
+	t.Cleanup(func() { projectDirectory = "" })
+
+	err := runStart(newStartCmdWithFlags(), []string{"orphan-session"})
+	if err == nil || !strings.Contains(err.Error(), "must be inside a Git work tree") {
+		t.Fatalf("runStart() error = %v, want Git worktree validation", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, status.StatusFilename)); !os.IsNotExist(statErr) {
+		t.Fatalf("status file was created outside a Git worktree: %v", statErr)
+	}
+}
+
 func TestValidateStartMetadataRejectsInvalidEnums(t *testing.T) {
 	for _, test := range []struct {
 		projectType string
