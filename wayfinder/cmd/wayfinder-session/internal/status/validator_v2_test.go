@@ -278,6 +278,28 @@ func TestValidateV2RejectsDuplicateWaypointHistory(t *testing.T) {
 	}
 }
 
+func TestValidateV2RejectsInvalidWaypointOutcome(t *testing.T) {
+	now := time.Now()
+	invalidOutcome := "typo"
+	st := &StatusV2{
+		SchemaVersion:   SchemaVersionV2,
+		ProjectName:     "test",
+		ProjectType:     ProjectTypeFeature,
+		RiskLevel:       RiskLevelM,
+		CurrentWaypoint: WaypointV2Charter,
+		Status:          StatusV2InProgress,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		WaypointHistory: []WaypointHistory{
+			{Name: WaypointV2Charter, Status: WaypointStatusV2Completed, StartedAt: now, CompletedAt: &now, Outcome: &invalidOutcome},
+		},
+	}
+
+	if err := ValidateV2(st); err == nil || !strings.Contains(err.Error(), "invalid outcome 'typo'") {
+		t.Fatalf("ValidateV2() error = %v, want invalid outcome rejection", err)
+	}
+}
+
 func TestValidatePhaseHistory(t *testing.T) {
 	tests := []struct {
 		name    string

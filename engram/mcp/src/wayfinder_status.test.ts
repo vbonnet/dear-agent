@@ -84,6 +84,11 @@ describe('parseWayfinderStatus', () => {
     assert.throws(() => parseWayfinderStatus(duplicate), /duplicate waypoint_history name "CHARTER"/);
   });
 
+  it('rejects invalid waypoint outcomes', () => {
+    const invalid = canonical.replace('status: completed, started_at:', 'status: completed, outcome: typo, started_at:');
+    assert.throws(() => parseWayfinderStatus(invalid), /outcome is invalid/);
+  });
+
   it('requires blocked_reason for blocked status', () => {
     assert.throws(
       () => parseWayfinderStatus(canonical.replace('status: in-progress', 'status: blocked')),

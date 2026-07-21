@@ -19,6 +19,7 @@ const TASK_STATUSES = ['pending', 'in-progress', 'completed', 'blocked'] as cons
 const TASK_PRIORITIES = ['P0', 'P1', 'P2'] as const;
 const VALIDATION_STATUSES = ['pending', 'in-progress', 'passed', 'failed'] as const;
 const DEPLOYMENT_STATUSES = ['pending', 'in-progress', 'deployed', 'rolled-back'] as const;
+const WAYPOINT_OUTCOMES = ['success', 'partial', 'skipped'] as const;
 const SKIPPABLE_WAYPOINTS = ['DESIGN', 'SPEC', 'PLAN'] as const;
 const LIFECYCLE_STATUSES: Record<string, string> = {
   working: 'in-progress',
@@ -375,6 +376,10 @@ function completedWaypoints(record: RecordValue): Set<string> {
     validateStringArray(waypoint, 'deliverables', path);
     for (const key of ['notes', 'outcome', 'stakeholder_notes', 'research_notes', 'validation_status', 'deployment_status']) {
       optionalString(waypoint, key, path);
+    }
+    const outcome = waypoint.outcome;
+    if (outcome !== undefined && outcome !== null && !WAYPOINT_OUTCOMES.includes(outcome as never)) {
+      throw new Error(`invalid Wayfinder V2 status: ${path}.outcome is invalid`);
     }
     if (name === 'BUILD') {
       const validationStatus = waypoint.validation_status;

@@ -142,10 +142,10 @@ func QueryWayfinderProjects(workspace string, filters map[string]string) ([]map[
 	return projects, nil
 }
 
-// GetProjectBySession retrieves a Wayfinder project by session ID
-func GetProjectBySession(workspace, sessionID string) (map[string]interface{}, error) {
+// GetProjectByName retrieves a Wayfinder project by its canonical project name.
+func GetProjectByName(workspace, projectName string) (map[string]interface{}, error) {
 	projects, err := QueryWayfinderProjects(workspace, map[string]string{
-		"session_id": sessionID,
+		"project_name": projectName,
 	})
 	if err != nil {
 		return nil, err
@@ -158,15 +158,15 @@ func GetProjectBySession(workspace, sessionID string) (map[string]interface{}, e
 	return projects[0], nil
 }
 
-// GetActiveProjects retrieves all active (in_progress) Wayfinder projects
+// GetActiveProjects retrieves all active Wayfinder projects.
 func GetActiveProjects(workspace string) ([]map[string]interface{}, error) {
 	return QueryWayfinderProjects(workspace, map[string]string{
-		"status": "in_progress",
+		"status": "in-progress",
 	})
 }
 
-// QueryPhases queries Wayfinder phases for a specific session
-func QueryPhases(workspace, sessionID string) ([]map[string]interface{}, error) {
+// QueryPhases queries Wayfinder phases for a specific project.
+func QueryPhases(workspace, projectName string) ([]map[string]interface{}, error) {
 	if !isCorpusCallosumAvailable() {
 		return []map[string]interface{}{}, nil
 	}
@@ -176,7 +176,7 @@ func QueryPhases(workspace, sessionID string) ([]map[string]interface{}, error) 
 		"--workspace", workspace,
 		"--component", "wayfinder",
 		"--entity", "phase",
-		"--filter", fmt.Sprintf("session_id=%s", sessionID),
+		"--filter", fmt.Sprintf("project_name=%s", projectName),
 		"--format", "json",
 	}
 
@@ -194,16 +194,16 @@ func QueryPhases(workspace, sessionID string) ([]map[string]interface{}, error) 
 	return phases, nil
 }
 
-// GetCurrentPhase retrieves the current in-progress phase for a session
-func GetCurrentPhase(workspace, sessionID string) (map[string]interface{}, error) {
-	phases, err := QueryPhases(workspace, sessionID)
+// GetCurrentPhase retrieves the current in-progress phase for a project.
+func GetCurrentPhase(workspace, projectName string) (map[string]interface{}, error) {
+	phases, err := QueryPhases(workspace, projectName)
 	if err != nil {
 		return nil, err
 	}
 
-	// Find in_progress phase
+	// Find the canonical in-progress phase.
 	for _, phase := range phases {
-		if status, ok := phase["status"].(string); ok && status == "in_progress" {
+		if status, ok := phase["status"].(string); ok && status == "in-progress" {
 			return phase, nil
 		}
 	}

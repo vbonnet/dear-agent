@@ -218,6 +218,9 @@ func validateWaypointHistory(status *StatusV2) error {
 		if waypoint.Status == WaypointStatusV2Completed && waypoint.CompletedAt == nil {
 			errors = append(errors, fmt.Sprintf("waypoint_history[%d]: completed waypoints must have completed_at", i))
 		}
+		if waypoint.Outcome != nil && !contains([]string{OutcomeSuccess, OutcomePartial, OutcomeSkipped}, *waypoint.Outcome) {
+			errors = append(errors, fmt.Sprintf("waypoint_history[%d]: invalid outcome '%s'", i, *waypoint.Outcome))
+		}
 
 		// Validate waypoint-specific metadata
 		if err := validateWaypointMetadata(waypoint, i); err != nil {

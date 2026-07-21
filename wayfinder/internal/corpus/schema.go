@@ -5,12 +5,12 @@ package corpus
 func GetWayfinderSchema() map[string]interface{} {
 	return map[string]interface{}{
 		"component": "wayfinder",
-		"version":   "1.0.0",
+		"version":   "2.0.0",
 		"entity":    "project",
 		"fields": map[string]interface{}{
-			"session_id": map[string]interface{}{
+			"schema_version": map[string]interface{}{
 				"type":        "string",
-				"description": "Unique session identifier for this Wayfinder project",
+				"description": "Canonical Wayfinder status schema version",
 				"required":    true,
 			},
 			"workspace": map[string]interface{}{
@@ -24,29 +24,34 @@ func GetWayfinderSchema() map[string]interface{} {
 				"description": "Absolute path to project directory",
 				"required":    true,
 			},
-			"project_id": map[string]interface{}{
+			"project_name": map[string]interface{}{
 				"type":        "string",
-				"description": "Project identifier (directory name)",
+				"description": "Canonical project name",
+				"required":    true,
+			},
+			"project_type": map[string]interface{}{
+				"type":        "string",
+				"description": "Project type (feature, research, infrastructure, refactor, bugfix)",
+				"required":    true,
+			},
+			"risk_level": map[string]interface{}{
+				"type":        "string",
+				"description": "Project risk level (XS, S, M, L, XL)",
 				"required":    true,
 			},
 			"status": map[string]interface{}{
 				"type":        "string",
-				"description": "Project status (in_progress, completed, abandoned, etc.)",
+				"description": "Project status (planning, in-progress, blocked, completed, abandoned)",
 				"required":    true,
 			},
-			"current_phase": map[string]interface{}{
+			"current_waypoint": map[string]interface{}{
 				"type":        "string",
-				"description": "Current canonical Wayfinder phase",
-				"required":    false,
+				"description": "Current canonical Wayfinder waypoint",
+				"required":    true,
 			},
-			"depth": map[string]interface{}{
+			"created_at": map[string]interface{}{
 				"type":        "string",
-				"description": "Project depth tier (XS, S, M, L, XL)",
-				"required":    false,
-			},
-			"started_at": map[string]interface{}{
-				"type":        "string",
-				"description": "Project start timestamp (RFC3339 format)",
+				"description": "Project creation timestamp (RFC3339 format)",
 				"required":    true,
 			},
 			"updated_at": map[string]interface{}{
@@ -62,12 +67,12 @@ func GetWayfinderSchema() map[string]interface{} {
 func GetPhaseSchema() map[string]interface{} {
 	return map[string]interface{}{
 		"component": "wayfinder",
-		"version":   "1.0.0",
+		"version":   "2.0.0",
 		"entity":    "phase",
 		"fields": map[string]interface{}{
-			"session_id": map[string]interface{}{
+			"project_name": map[string]interface{}{
 				"type":        "string",
-				"description": "Session this phase belongs to",
+				"description": "Project this phase belongs to",
 				"required":    true,
 			},
 			"workspace": map[string]interface{}{
@@ -76,7 +81,7 @@ func GetPhaseSchema() map[string]interface{} {
 				"required":    true,
 				"indexed":     true,
 			},
-			"phase_name": map[string]interface{}{
+			"name": map[string]interface{}{
 				"type":        "string",
 				"description": "Canonical phase identifier (CHARTER, PROBLEM, RESEARCH, DESIGN, SPEC, PLAN, SETUP, BUILD, RETRO)",
 				"required":    true,
@@ -88,7 +93,7 @@ func GetPhaseSchema() map[string]interface{} {
 			},
 			"status": map[string]interface{}{
 				"type":        "string",
-				"description": "Phase status (not_started, in_progress, completed, blocked)",
+				"description": "Phase status (pending, in-progress, completed, blocked, skipped)",
 				"required":    true,
 			},
 			"started_at": map[string]interface{}{
@@ -114,12 +119,12 @@ func GetPhaseSchema() map[string]interface{} {
 func GetValidationSchema() map[string]interface{} {
 	return map[string]interface{}{
 		"component": "wayfinder",
-		"version":   "1.0.0",
+		"version":   "2.0.0",
 		"entity":    "validation",
 		"fields": map[string]interface{}{
-			"session_id": map[string]interface{}{
+			"project_name": map[string]interface{}{
 				"type":        "string",
-				"description": "Session this validation belongs to",
+				"description": "Project this validation belongs to",
 				"required":    true,
 			},
 			"workspace": map[string]interface{}{
@@ -128,7 +133,7 @@ func GetValidationSchema() map[string]interface{} {
 				"required":    true,
 				"indexed":     true,
 			},
-			"phase_name": map[string]interface{}{
+			"waypoint_name": map[string]interface{}{
 				"type":        "string",
 				"description": "Phase being validated",
 				"required":    true,
