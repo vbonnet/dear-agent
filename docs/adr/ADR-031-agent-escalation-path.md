@@ -1,4 +1,4 @@
-<!-- Last audited at: 2026-06-15 -->
+<!-- Last audited at: 2026-07-21 -->
 
 # ADR-031: Agent Escalation Path (No Bypass Flags)
 
@@ -98,8 +98,10 @@ Example (from `safe-pr`):
 ```
 no wayfinder session given: pass --wayfinder <project-dir> or set
 WAYFINDER_PROJECT_DIR to the directory containing WAYFINDER-STATUS.md.
-Every PR must carry a wayfinder trace. If no approved path exists, escalate via:
+Every PR must carry a wayfinder trace. In a current AGM session, escalate via:
   agm escalate ask --kind blocked-action --context "<why no session exists>" "create PR"
+Outside AGM, add --session <registered-session>. If no registered session
+exists, ask the current user directly.
 ```
 
 ---
