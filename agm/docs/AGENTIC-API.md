@@ -34,6 +34,7 @@ All errors use stable codes that agents can match on programmatically.
 | AGM-013 | 409 | `session/kill_protected` | Session recently active | Killing a recently active session without confirmation | Retry with the suggested confirmation flag |
 | AGM-014 | 409 | `session/active_kill` | Session is active | Killing a live harness without stuck confirmation | Retry with `--confirmed-stuck` only when verified stuck |
 | AGM-015 | 409 | `session/lock_timeout` | Session lock timeout | Another lifecycle mutation owns the stable session lock | Wait for it to finish and retry |
+| AGM-016 | 409 | `session/not_ready` | Session not ready | The exact target harness cannot safely receive input | Wait for the harness composer to become ready and retry |
 | AGM-100 | 200 | `dry_run` | Dry run | `--dry-run` flag is set | Remove flag to execute |
 
 ## RFC 7807 Error Format

@@ -373,7 +373,7 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		launchResult.PromptDelivered = true
 	}
 	if opCtx.CreationRuntime == nil {
-		if err := waitForCreatedHarnessReady(opCtx, params.name, params.harness); err != nil {
+		if err := waitForCreatedHarnessReady(callCtx, opCtx, params.name, params.harness); err != nil {
 			return nil, err
 		}
 	}
@@ -468,12 +468,12 @@ func applyAgyCreateIdentity(m *manifest.Manifest, metadata *agysession.Metadata)
 	}
 }
 
-func waitForCreatedHarnessReady(opCtx *OpContext, sessionName, harness string) error {
+func waitForCreatedHarnessReady(ctx context.Context, opCtx *OpContext, sessionName, harness string) error {
 	waiter, ok := opCtx.Tmux.(session.HarnessReadinessWaiter)
 	if !ok {
 		return ErrStorageError("tmux.WaitForHarnessReady", fmt.Errorf("tmux backend does not expose harness readiness"))
 	}
-	if err := waiter.WaitForHarnessReady(sessionName, harness, sharedHarnessReadyTimeout); err != nil {
+	if err := waiter.WaitForHarnessReady(ctx, sessionName, harness, sharedHarnessReadyTimeout); err != nil {
 		return ErrStorageError("tmux.WaitForHarnessReady", err)
 	}
 	return nil

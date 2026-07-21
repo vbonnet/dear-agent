@@ -1,6 +1,9 @@
 package session
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // MockTmux provides an in-memory mock implementation of TmuxInterface for testing
 type MockTmux struct {
@@ -16,6 +19,8 @@ type MockTmux struct {
 	WaitedHarnesses      []string
 	CheckedInputSessions []string
 	InputReadiness       InputReadiness
+	WaitContext          context.Context
+	InputContext         context.Context
 
 	// Errors can be set to simulate tmux failures
 	HasSessionError          error
@@ -125,13 +130,15 @@ func (m *MockTmux) SendKeys(session, keys string) error {
 }
 
 // WaitForHarnessReady records the requested harness and returns the configured error.
-func (m *MockTmux) WaitForHarnessReady(sessionName, harness string, _ time.Duration) error {
+func (m *MockTmux) WaitForHarnessReady(ctx context.Context, sessionName, harness string, _ time.Duration) error {
+	m.WaitContext = ctx
 	m.WaitedHarnesses = append(m.WaitedHarnesses, sessionName+":"+harness)
 	return m.WaitForHarnessReadyError
 }
 
 // CheckInputReadiness records the target and returns the configured readiness result.
-func (m *MockTmux) CheckInputReadiness(sessionName, harness string) (InputReadiness, error) {
+func (m *MockTmux) CheckInputReadiness(ctx context.Context, sessionName, harness string) (InputReadiness, error) {
+	m.InputContext = ctx
 	m.CheckedInputSessions = append(m.CheckedInputSessions, sessionName+":"+harness)
 	if m.InputReadinessError != nil {
 		return InputReadiness{}, m.InputReadinessError

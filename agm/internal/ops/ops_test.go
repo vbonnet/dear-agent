@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -28,6 +29,7 @@ type mockTmux struct {
 	readiness       session.InputReadiness
 	readinessErr    error
 	readinessChecks []string
+	inputCtx        context.Context
 }
 
 func newMockTmux(sessions ...string) *mockTmux {
@@ -89,7 +91,8 @@ func (m *mockTmux) SendKeys(session, keys string) error {
 	return nil
 }
 
-func (m *mockTmux) CheckInputReadiness(sessionName, harness string) (session.InputReadiness, error) {
+func (m *mockTmux) CheckInputReadiness(ctx context.Context, sessionName, harness string) (session.InputReadiness, error) {
+	m.inputCtx = ctx
 	m.readinessChecks = append(m.readinessChecks, sessionName+":"+harness)
 	if m.readinessErr != nil {
 		return session.InputReadiness{}, m.readinessErr

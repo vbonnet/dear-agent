@@ -1,6 +1,6 @@
 # AGM tmux Delivery Specification
 
-<!-- Last audited at: 2026-07-20 -->
+<!-- Last audited at: 2026-07-21 -->
 
 ## Purpose
 
@@ -90,6 +90,10 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-41** When a command-scoped Pi identity or pane-liveness scan runs, the system shall derive tmux and process-table subprocesses from the caller context so cancellation returns before command delivery, attachment, or metadata mutation.
 
+**TMUX-41** When shared input readiness is checked, the system shall require the exact tmux session, a live process compatible with the configured harness, and a current harness-specific composer in the pane tail; a stale or wrong-harness prompt shall not be ready.
+
+**TMUX-42** When shared startup readiness waits, the system shall honor caller cancellation and a total deadline, fail on observation errors, and mutate input only for documented trust, model-upgrade, or AGY-survey transitions.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
@@ -101,3 +105,5 @@ because the tmux server's own cwd has been deleted.
 - Package tests: `agm/internal/tmux/capture_test.go`
 - Package tests: `agm/internal/tmux/agy_prompt_test.go`
 - Package tests: `agm/internal/tmux/pi_prompt_test.go`
+- Package tests: `agm/internal/tmux/readiness_test.go`
+- Integration tests: `agm/internal/session/tmux_real_readiness_test.go`

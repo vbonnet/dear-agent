@@ -1,6 +1,8 @@
 package session
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +22,9 @@ func setupRealReadinessTmux(t *testing.T) string {
 	}
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not available")
+	}
+	if err := exec.Command("ps", "-axo", "pid=,ppid=,comm=").Run(); err != nil {
+		t.Skipf("process-table inspection is unavailable: %v", err)
 	}
 	dir, err := os.MkdirTemp("", "agm-ready") //nolint:usetesting // macOS Unix socket paths must stay short
 	if err != nil {
@@ -43,7 +48,7 @@ func TestRealTmuxReadinessDetectsFakeCodexComposer(t *testing.T) {
 	t.Cleanup(func() { tmux.KillSession(sessionName) })
 
 	realTmux := NewRealTmux()
-	before, err := realTmux.CheckInputReadiness(sessionName, "codex-cli")
+	before, err := realTmux.CheckInputReadiness(context.Background(), sessionName, "codex-cli")
 	if err != nil {
 		t.Fatalf("CheckInputReadiness(shell) error = %v", err)
 	}
@@ -51,13 +56,22 @@ func TestRealTmuxReadinessDetectsFakeCodexComposer(t *testing.T) {
 		t.Fatalf("bare shell classified ready: %#v", before)
 	}
 
-	if err := tmux.SendCommand(sessionName, "printf 'OpenAI Codex\\n/model to change\\n'; sleep 10"); err != nil {
+	fakeCodex := filepath.Join(t.TempDir(), "codex")
+	sleepBinary, err := os.ReadFile("/bin/sleep")
+	if err != nil {
+		t.Fatalf("read sleep binary: %v", err)
+	}
+	if err := os.WriteFile(fakeCodex, sleepBinary, 0o755); err != nil {
+		t.Fatalf("write fake codex executable: %v", err)
+	}
+	command := fmt.Sprintf("printf '│ >_ OpenAI Codex (vtest) │\\n│ model: gpt-5.5 /model to change │\\n›\\n'; exec %q 10", fakeCodex)
+	if err := tmux.SendCommand(sessionName, command); err != nil {
 		t.Fatalf("SendCommand(fake Codex) error = %v", err)
 	}
-	if err := realTmux.WaitForHarnessReady(sessionName, "codex-cli", 3*time.Second); err != nil {
+	if err := realTmux.WaitForHarnessReady(context.Background(), sessionName, "codex-cli", 3*time.Second); err != nil {
 		t.Fatalf("WaitForHarnessReady(fake Codex) error = %v", err)
 	}
-	after, err := realTmux.CheckInputReadiness(sessionName, "codex-cli")
+	after, err := realTmux.CheckInputReadiness(context.Background(), sessionName, "codex-cli")
 	if err != nil {
 		t.Fatalf("CheckInputReadiness(composer) error = %v", err)
 	}
@@ -69,7 +83,7 @@ func TestRealTmuxReadinessDetectsFakeCodexComposer(t *testing.T) {
 func TestRealTmuxInputReadinessReportsMissingSession(t *testing.T) {
 	setupRealReadinessTmux(t)
 
-	readiness, err := NewRealTmux().CheckInputReadiness("missing-readiness-session", "codex-cli")
+	readiness, err := NewRealTmux().CheckInputReadiness(context.Background(), "missing-readiness-session", "codex-cli")
 	if err != nil {
 		t.Fatalf("CheckInputReadiness() error = %v", err)
 	}
@@ -79,7 +93,7 @@ func TestRealTmuxInputReadinessReportsMissingSession(t *testing.T) {
 }
 
 func TestRealTmuxWaitForHarnessReadyRejectsUnknownHarness(t *testing.T) {
-	err := NewRealTmux().WaitForHarnessReady("unused", "unknown", time.Second)
+	err := NewRealTmux().WaitForHarnessReady(context.Background(), "unused", "unknown", time.Second)
 	if err == nil {
 		t.Fatal("WaitForHarnessReady() accepted an unknown harness")
 	}

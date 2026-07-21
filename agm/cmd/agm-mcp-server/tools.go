@@ -377,6 +377,7 @@ func addCreateSessionTool(server *mcp.Server, _ *Config) {
 			return mcpError(err), nil, nil
 		}
 		defer cleanup()
+		opCtx.Context = ctx
 
 		result, opErr := ops.CreateSessionWithContext(ctx, opCtx, createSessionRequestFromMCP(input))
 		if opErr != nil {
@@ -431,7 +432,7 @@ func addSendMessageTool(server *mcp.Server, _ *Config) {
 			return mcpError(err), nil, nil
 		}
 		defer cleanup()
-
+		opCtx.Context = ctx
 		result, opErr := ops.SendMessage(opCtx, &ops.SendMessageRequest{
 			Recipient: input.SessionID,
 			Message:   input.Message,

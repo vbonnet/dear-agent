@@ -56,6 +56,7 @@ type createReadinessTmux struct {
 	*session.MockTmux
 	order   *[]string
 	waitErr error
+	waitCtx context.Context
 }
 
 func (t *createReadinessTmux) SendKeys(sessionName, keys string) error {
@@ -67,13 +68,28 @@ func (t *createReadinessTmux) SendKeys(sessionName, keys string) error {
 	return t.MockTmux.SendKeys(sessionName, keys)
 }
 
-func (t *createReadinessTmux) WaitForHarnessReady(sessionName, harness string, timeout time.Duration) error {
+func (t *createReadinessTmux) WaitForHarnessReady(ctx context.Context, sessionName, harness string, timeout time.Duration) error {
+	t.waitCtx = ctx
 	*t.order = append(*t.order, "ready")
 	t.WaitedHarnesses = append(t.WaitedHarnesses, sessionName+":"+harness)
 	if timeout != sharedHarnessReadyTimeout {
 		return fmt.Errorf("readiness timeout = %v, want %v", timeout, sharedHarnessReadyTimeout)
 	}
 	return t.waitErr
+}
+
+func TestWaitForCreatedHarnessReadyPropagatesRequestContext(t *testing.T) {
+	type contextKey struct{}
+	wantCtx := context.WithValue(context.Background(), contextKey{}, "request")
+	var order []string
+	tmuxMock := &createReadinessTmux{MockTmux: session.NewMockTmux(), order: &order}
+
+	if err := waitForCreatedHarnessReady(wantCtx, &OpContext{Tmux: tmuxMock}, "worker", "codex-cli"); err != nil {
+		t.Fatalf("waitForCreatedHarnessReady() error = %v", err)
+	}
+	if tmuxMock.waitCtx != wantCtx {
+		t.Fatal("startup readiness did not receive the request context")
+	}
 }
 
 type createTestRuntime struct {

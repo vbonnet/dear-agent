@@ -56,6 +56,9 @@ func capturePane(parent context.Context, sessionName string, lines int) (string,
 	if sessionName == "" {
 		return "", fmt.Errorf("session name cannot be empty")
 	}
+	if parent == nil {
+		parent = context.Background()
+	}
 
 	policy := CapturePanePolicy()
 	ctx, cancel := context.WithTimeout(parent, policy.Timeout)

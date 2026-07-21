@@ -344,6 +344,16 @@ Feature: Harness parity
       | QUEUE     | not_delivered | 0        |
       | OVERLAY   | not_delivered | 0        |
       | NOT_FOUND | not_delivered | 0        |
+      | WRONG_HARNESS | not_delivered | 0     |
+      | ONBOARDING    | not_delivered | 0     |
+      | PERMISSION    | not_delivered | 0     |
+
+  Scenario: Cancelled shared send emits no input
+    Given a shared Codex send target with readiness "YES"
+    And the shared send request is cancelled
+    When AGM sends a message through shared operations
+    Then the shared send result should be "cancelled"
+    And shared send should emit 0 tmux commands
 
   Scenario: AGY detached session receives startup prompt
     Given AGY is available

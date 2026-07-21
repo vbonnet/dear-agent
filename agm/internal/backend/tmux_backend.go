@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
 // Compile-time check to ensure TmuxBackend implements Backend interface
 var _ Backend = (*TmuxBackend)(nil)
+var _ session.HarnessReadinessWaiter = (*TmuxBackend)(nil)
+var _ session.InputReadinessChecker = (*TmuxBackend)(nil)
 
 // TmuxBackend wraps session.TmuxInterface to implement the Backend interface
 // This adapter allows the existing tmux implementation to work with the new backend system
@@ -132,6 +135,24 @@ func (b *TmuxBackend) AttachSession(name string) error {
 // SendKeys sends keys (command) to the given session
 func (b *TmuxBackend) SendKeys(session, keys string) error {
 	return b.tmux.SendKeys(session, keys)
+}
+
+// WaitForHarnessReady forwards the shared startup-readiness capability.
+func (b *TmuxBackend) WaitForHarnessReady(ctx context.Context, sessionName, harness string, timeout time.Duration) error {
+	waiter, ok := b.tmux.(session.HarnessReadinessWaiter)
+	if !ok {
+		return fmt.Errorf("tmux implementation %T does not expose harness readiness", b.tmux)
+	}
+	return waiter.WaitForHarnessReady(ctx, sessionName, harness, timeout)
+}
+
+// CheckInputReadiness forwards exact, harness-aware send safety.
+func (b *TmuxBackend) CheckInputReadiness(ctx context.Context, sessionName, harness string) (session.InputReadiness, error) {
+	checker, ok := b.tmux.(session.InputReadinessChecker)
+	if !ok {
+		return session.InputReadiness{}, fmt.Errorf("tmux implementation %T does not expose input readiness", b.tmux)
+	}
+	return checker.CheckInputReadiness(ctx, sessionName, harness)
 }
 
 func init() {

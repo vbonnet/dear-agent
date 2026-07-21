@@ -14,6 +14,9 @@ type sendReadinessBackend struct {
 	readinessErr error
 	sendErr      error
 	sent         []string
+	checks       int
+	checkCtx     context.Context
+	sendCtx      context.Context
 }
 
 func (b *sendReadinessBackend) CreateSession(context.Context, manager.SessionConfig) (manager.SessionID, error) {
@@ -31,7 +34,8 @@ func (b *sendReadinessBackend) GetSession(context.Context, manager.SessionID) (m
 func (b *sendReadinessBackend) RenameSession(context.Context, manager.SessionID, string) error {
 	return nil
 }
-func (b *sendReadinessBackend) SendMessage(_ context.Context, _ manager.SessionID, message string) (manager.SendResult, error) {
+func (b *sendReadinessBackend) SendMessage(ctx context.Context, _ manager.SessionID, message string) (manager.SendResult, error) {
+	b.sendCtx = ctx
 	if b.sendErr != nil {
 		return manager.SendResult{}, b.sendErr
 	}
@@ -45,7 +49,9 @@ func (b *sendReadinessBackend) Interrupt(context.Context, manager.SessionID) err
 func (b *sendReadinessBackend) GetState(context.Context, manager.SessionID) (manager.StateResult, error) {
 	return manager.StateResult{}, nil
 }
-func (b *sendReadinessBackend) CheckDelivery(context.Context, manager.SessionID) (manager.CanReceive, error) {
+func (b *sendReadinessBackend) CheckDelivery(ctx context.Context, _ manager.SessionID) (manager.CanReceive, error) {
+	b.checks++
+	b.checkCtx = ctx
 	return b.readiness, b.readinessErr
 }
 func (b *sendReadinessBackend) HealthCheck(context.Context) error { return nil }
@@ -63,6 +69,7 @@ func TestSendMessage_ManagerChecksReadinessBeforeDelivery(t *testing.T) {
 		t.Run(managerReadinessName(readiness), func(t *testing.T) {
 			backend := &sendReadinessBackend{readiness: readiness}
 			ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")}, "my-session")
+			ctx.Tmux = nil
 			ctx.Manager = backend
 
 			result, err := SendMessage(ctx, &SendMessageRequest{Recipient: "id-1", Message: "must not send"})
@@ -83,6 +90,7 @@ func TestSendMessage_ManagerChecksReadinessBeforeDelivery(t *testing.T) {
 func TestSendMessage_ManagerReadyDelivers(t *testing.T) {
 	backend := &sendReadinessBackend{readiness: manager.CanReceiveYes}
 	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")}, "my-session")
+	ctx.Tmux = nil
 	ctx.Manager = backend
 
 	result, err := SendMessage(ctx, &SendMessageRequest{Recipient: "id-1", Message: "hello"})
@@ -98,6 +106,7 @@ func TestSendMessage_ManagerReadinessErrorDoesNotSend(t *testing.T) {
 	wantErr := errors.New("state probe failed")
 	backend := &sendReadinessBackend{readinessErr: wantErr}
 	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")}, "my-session")
+	ctx.Tmux = nil
 	ctx.Manager = backend
 
 	result, err := SendMessage(ctx, &SendMessageRequest{Recipient: "id-1", Message: "must not send"})
@@ -106,5 +115,59 @@ func TestSendMessage_ManagerReadinessErrorDoesNotSend(t *testing.T) {
 	}
 	if len(backend.sent) != 0 {
 		t.Fatalf("manager sent after readiness error: %v", backend.sent)
+	}
+}
+
+func TestSendMessage_ExactTmuxReadinessPrecedesGenericManagerCheck(t *testing.T) {
+	backend := &sendReadinessBackend{readiness: manager.CanReceiveNo}
+	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")}, "my-session")
+	ctx.Manager = backend
+
+	result, err := SendMessage(ctx, &SendMessageRequest{Recipient: "id-1", Message: "hello"})
+	if err != nil || result == nil || !result.Delivered {
+		t.Fatalf("SendMessage() = (%#v, %v), want exact-ready delivery", result, err)
+	}
+	if backend.checks != 0 {
+		t.Fatalf("generic manager readiness ran %d times after exact tmux proof", backend.checks)
+	}
+}
+
+func TestSendMessage_PropagatesRequestContextThroughReadinessAndDelivery(t *testing.T) {
+	type contextKey struct{}
+	wantCtx := context.WithValue(context.Background(), contextKey{}, "request")
+	backend := &sendReadinessBackend{readiness: manager.CanReceiveYes}
+	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")}, "my-session")
+	ctx.Context = wantCtx
+	ctx.Manager = backend
+	tmuxMock := ctx.Tmux.(*mockTmux)
+
+	result, err := SendMessage(ctx, &SendMessageRequest{Recipient: "id-1", Message: "hello"})
+	if err != nil || result == nil || !result.Delivered {
+		t.Fatalf("SendMessage() = (%#v, %v), want delivery", result, err)
+	}
+	if tmuxMock.inputCtx != wantCtx {
+		t.Fatal("exact tmux readiness did not receive the operation request context")
+	}
+	if backend.sendCtx != wantCtx {
+		t.Fatal("manager delivery did not receive the operation request context")
+	}
+}
+
+func TestSendMessage_CancelledRequestNeverChecksOrSends(t *testing.T) {
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	backend := &sendReadinessBackend{readiness: manager.CanReceiveYes}
+	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")}, "my-session")
+	ctx.Context = cancelled
+	ctx.Manager = backend
+	tmuxMock := ctx.Tmux.(*mockTmux)
+
+	result, err := SendMessage(ctx, &SendMessageRequest{Recipient: "id-1", Message: "must not send"})
+	if err == nil || result == nil || result.Delivered {
+		t.Fatalf("SendMessage() = (%#v, %v), want cancelled non-delivery", result, err)
+	}
+	if len(tmuxMock.readinessChecks) != 0 || len(tmuxMock.sent) != 0 || backend.checks != 0 || len(backend.sent) != 0 {
+		t.Fatalf("cancelled send performed I/O: tmux checks=%v tmux sends=%v manager checks=%d manager sends=%v",
+			tmuxMock.readinessChecks, tmuxMock.sent, backend.checks, backend.sent)
 	}
 }

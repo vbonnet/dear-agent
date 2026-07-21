@@ -2,10 +2,8 @@ package session
 
 import (
 	"context"
-	"fmt"
 	"time"
 
-	"github.com/vbonnet/dear-agent/agm/internal/state"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
@@ -74,37 +72,24 @@ func (t *RealTmux) SendKeys(session, keys string) error {
 
 // WaitForHarnessReady observes the harness-specific interactive boundary used
 // by shared creation before registration or prompt delivery.
-func (t *RealTmux) WaitForHarnessReady(sessionName, harness string, timeout time.Duration) error {
-	switch harness {
-	case "claude-code":
-		return tmux.WaitForClaudePrompt(sessionName, timeout)
-	case "codex-cli":
-		return tmux.WaitForCodexPrompt(sessionName, timeout)
-	case "agy":
-		return tmux.WaitForAgyPrompt(sessionName, timeout)
-	case "opencode-cli", "gemini-cli":
-		return tmux.WaitForPromptSimple(sessionName, timeout)
-	default:
-		return fmt.Errorf("unsupported harness readiness check %q", harness)
+func (t *RealTmux) WaitForHarnessReady(ctx context.Context, sessionName, harness string, timeout time.Duration) error {
+	if ctx == nil {
+		ctx = context.Background()
 	}
+	return tmux.WaitForExpectedHarnessReady(ctx, sessionName, harness, timeout)
 }
 
 // CheckInputReadiness captures the current pane and classifies whether an
 // interactive harness composer can safely receive input.
-func (t *RealTmux) CheckInputReadiness(sessionName, _ string) (InputReadiness, error) {
-	exists, err := tmux.HasSession(sessionName)
+func (t *RealTmux) CheckInputReadiness(ctx context.Context, sessionName, harness string) (InputReadiness, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	readiness, err := tmux.CheckExpectedHarnessInput(ctx, sessionName, harness)
 	if err != nil {
 		return InputReadiness{}, err
 	}
-	if !exists {
-		return InputReadiness{State: string(state.CanReceiveNotFound)}, nil
-	}
-	content, err := tmux.CapturePaneOutput(sessionName, 30)
-	if err != nil {
-		return InputReadiness{}, err
-	}
-	verdict := state.NewDetector().CheckCanReceive(content)
-	return InputReadiness{Ready: verdict == state.CanReceiveYes, State: string(verdict)}, nil
+	return InputReadiness{Ready: readiness.Ready, State: readiness.State}, nil
 }
 
 // HarnessLiveness scans the session's pane process tree for a live harness

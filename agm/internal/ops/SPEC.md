@@ -159,11 +159,11 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-76** When a fresh AGY session has a startup prompt, `CreateSessionWithContext` shall deliver that prompt once after native readiness but before identity discovery, discover and register the resulting provider identity while retaining the workspace lock, and mark the prompt consumed so CLI, MCP, and fallback completion paths cannot resend it; bootstrap failure or caller cancellation shall roll back the owned tmux session before registration, and a fresh AGY request without a startup prompt shall fail before mutation.
 
-**OPS-76** When shared session creation launches a harness without a surface `CreateSessionRuntime`, the system shall observe harness-specific prompt or composer readiness after launch and before registration or initial prompt delivery; readiness failure shall enter the existing creation rollback transaction.
+**OPS-76** When shared session creation launches a harness without a surface `CreateSessionRuntime`, the system shall prove the expected harness process and harness-specific prompt or composer readiness after launch and before registration or initial prompt delivery; readiness failure shall enter the existing creation rollback transaction.
 
-**OPS-77** When `SendMessage` has a configured delivery mechanism, the system shall inspect the exact target pane and deliver only when the harness composer is ready; a shell, onboarding or permission prompt, busy state, overlay, missing session, or unverified readiness shall return typed non-delivery without sending input or Enter.
+**OPS-77** When `SendMessage` has a configured delivery mechanism, the system shall inspect the exact target pane and deliver only when the expected harness process is alive and that harness currently owns the composer; a shell, wrong or dead harness, stale prompt, onboarding or permission prompt, busy state, overlay, missing session, or unverified readiness shall return typed non-delivery without sending input or Enter.
 
-**OPS-78** If the tmux backend cannot provide or complete a required startup or input-readiness check, the shared create or send operation shall return an error rather than report a successful launch or delivery.
+**OPS-78** If the request is cancelled, or the tmux backend cannot provide or complete a required startup or input-readiness check, the shared create or send operation shall return an error rather than report a successful launch or delivery; CLI and MCP surfaces shall propagate their request context through the shared readiness boundary.
 
 **OPS-36** While a session's state is OFFLINE, READY, or DONE, the stall detector shall skip error-loop detection for that session.
 

@@ -125,6 +125,7 @@ type harnessParityState struct {
 	sharedSendResult           *ops.SendMessageResult
 	sharedSendErr              error
 	sharedSendTmux             *session.MockTmux
+	sharedSendCancelled        bool
 	sharedCreateErr            error
 	sharedCreateTmux           *session.MockTmux
 	sharedCreateStore          *dolt.MockAdapter
@@ -294,6 +295,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM sends a message through shared operations$`, agmSendsAMessageThroughSharedOperations)
 	ctx.Step(`^the shared send result should be "([^"]*)"$`, theSharedSendResultShouldBe)
 	ctx.Step(`^shared send should emit (\d+) tmux commands$`, sharedSendShouldEmitTmuxCommands)
+	ctx.Step(`^the shared send request is cancelled$`, theSharedSendRequestIsCancelled)
 	ctx.Step(`^shared Codex creation cannot observe the composer$`, sharedCodexCreationCannotObserveTheComposer)
 	ctx.Step(`^AGM creates Codex through shared operations$`, agmCreatesCodexThroughSharedOperations)
 	ctx.Step(`^shared creation should fail before registration and prompt delivery$`, sharedCreationShouldFailBeforeRegistrationAndPromptDelivery)
@@ -632,7 +634,7 @@ func currentTmuxAGYCreationShouldFailBeforeLaunchWithDetachedGuidance(ctx contex
 }
 
 func aSharedCodexSendTargetWithReadiness(ctx context.Context, readiness string) error {
-	if slices.Contains([]string{"YES", "NO", "QUEUE", "OVERLAY", "NOT_FOUND"}, readiness) {
+	if slices.Contains([]string{"YES", "NO", "QUEUE", "OVERLAY", "NOT_FOUND", "WRONG_HARNESS", "ONBOARDING", "PERMISSION"}, readiness) {
 		ctx.Value(harnessParityStateKey{}).(*harnessParityState).sharedSendReadiness = readiness
 		return nil
 	}
@@ -661,8 +663,14 @@ func agmSendsAMessageThroughSharedOperations(ctx context.Context) error {
 		State: harnessState.sharedSendReadiness,
 	}
 	harnessState.sharedSendTmux = tmuxMock
+	opCtx := &ops.OpContext{Storage: store, Tmux: tmuxMock}
+	if harnessState.sharedSendCancelled {
+		cancelled, cancel := context.WithCancel(context.Background())
+		cancel()
+		opCtx.Context = cancelled
+	}
 	harnessState.sharedSendResult, harnessState.sharedSendErr = ops.SendMessage(
-		&ops.OpContext{Storage: store, Tmux: tmuxMock},
+		opCtx,
 		&ops.SendMessageRequest{Recipient: m.SessionID, Message: "BDD readiness message"},
 	)
 	return nil
@@ -692,9 +700,28 @@ func theSharedSendResultShouldBe(ctx context.Context, expected string) error {
 			}
 			return fmt.Errorf("shared send returned an unexpected not-ready error: %w", harnessState.sharedSendErr)
 		}
+	case "cancelled":
+		return validateCancelledSharedSend(harnessState.sharedSendResult, harnessState.sharedSendErr)
 	default:
 		return fmt.Errorf("unsupported shared-send outcome %q", expected)
 	}
+	return nil
+}
+
+func validateCancelledSharedSend(result *ops.SendMessageResult, sendErr error) error {
+	opErr := &ops.OpError{}
+	if !result.Delivered && errors.As(sendErr, &opErr) && opErr.Code == ops.ErrCodeStorageError &&
+		strings.Contains(opErr.Detail, context.Canceled.Error()) {
+		return nil
+	}
+	if sendErr == nil {
+		return fmt.Errorf("shared send cancellation result = %#v without an error, want cancelled non-delivery", result)
+	}
+	return fmt.Errorf("shared send cancellation result = %#v, want cancelled non-delivery: %w", result, sendErr)
+}
+
+func theSharedSendRequestIsCancelled(ctx context.Context) error {
+	ctx.Value(harnessParityStateKey{}).(*harnessParityState).sharedSendCancelled = true
 	return nil
 }
 

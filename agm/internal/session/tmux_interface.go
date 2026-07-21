@@ -73,7 +73,7 @@ type StrictSessionExistenceChecker interface {
 // lifecycle operations that launch a harness without a surface runtime. A nil
 // error means the named harness has reached its interactive prompt/composer.
 type HarnessReadinessWaiter interface {
-	WaitForHarnessReady(sessionName, harness string, timeout time.Duration) error
+	WaitForHarnessReady(ctx context.Context, sessionName, harness string, timeout time.Duration) error
 }
 
 // InputReadiness is the observable result of inspecting a tmux pane before
@@ -87,7 +87,7 @@ type InputReadiness struct {
 // InputReadinessChecker is the optional pre-delivery capability used by
 // shared message operations. Delivery is safe only when Ready is true.
 type InputReadinessChecker interface {
-	CheckInputReadiness(sessionName, harness string) (InputReadiness, error)
+	CheckInputReadiness(ctx context.Context, sessionName, harness string) (InputReadiness, error)
 }
 
 // TmuxInterface provides an abstraction for tmux operations
