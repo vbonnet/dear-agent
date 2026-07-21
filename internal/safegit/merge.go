@@ -536,10 +536,10 @@ func parseCheckRuns(data []byte) error {
 }
 
 const reviewThreadsQuery = `
-query($owner: String!, $name: String!, $number: Int!) {
+query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
-      reviewThreads(first: 100) {
+      reviewThreads(first: 100, after: $cursor) {
         nodes {
           isResolved
           isOutdated
@@ -550,28 +550,35 @@ query($owner: String!, $name: String!, $number: Int!) {
             }
           }
         }
+        pageInfo { hasNextPage endCursor }
       }
     }
   }
 }`
+
+type gqlReviewThread struct {
+	IsResolved bool `json:"isResolved"`
+	IsOutdated bool `json:"isOutdated"`
+	Comments   struct {
+		Nodes []struct {
+			Author struct {
+				Login string `json:"login"`
+			} `json:"author"`
+			Body string `json:"body"`
+		} `json:"nodes"`
+	} `json:"comments"`
+}
 
 type gqlReviewResult struct {
 	Data struct {
 		Repository struct {
 			PullRequest struct {
 				ReviewThreads struct {
-					Nodes []struct {
-						IsResolved bool `json:"isResolved"`
-						IsOutdated bool `json:"isOutdated"`
-						Comments   struct {
-							Nodes []struct {
-								Author struct {
-									Login string `json:"login"`
-								} `json:"author"`
-								Body string `json:"body"`
-							} `json:"nodes"`
-						} `json:"comments"`
-					} `json:"nodes"`
+					Nodes    []gqlReviewThread `json:"nodes"`
+					PageInfo struct {
+						HasNextPage bool   `json:"hasNextPage"`
+						EndCursor   string `json:"endCursor"`
+					} `json:"pageInfo"`
 				} `json:"reviewThreads"`
 			} `json:"pullRequest"`
 		} `json:"repository"`
@@ -585,16 +592,38 @@ func checkReviewThreads(prNum int, repo string) error {
 	}
 	owner, name := parts[0], parts[1]
 
-	out, err := runCommand(exec.Command("gh", "api", "graphql",
-		"--field", fmt.Sprintf("owner=%s", owner),
-		"--field", fmt.Sprintf("name=%s", name),
-		"--field", fmt.Sprintf("number=%d", prNum),
-		"--field", fmt.Sprintf("query=%s", reviewThreadsQuery),
-	))
-	if err != nil {
-		return fmt.Errorf("GraphQL query failed: %w", err)
+	var threads []gqlReviewThread
+	cursor := ""
+	for {
+		args := []string{
+			"api", "graphql",
+			"--field", fmt.Sprintf("owner=%s", owner),
+			"--field", fmt.Sprintf("name=%s", name),
+			"--field", fmt.Sprintf("number=%d", prNum),
+			"--field", fmt.Sprintf("query=%s", reviewThreadsQuery),
+		}
+		if cursor != "" {
+			args = append(args, "--field", fmt.Sprintf("cursor=%s", cursor))
+		}
+		out, err := runCommand(exec.Command("gh", args...))
+		if err != nil {
+			return fmt.Errorf("GraphQL query failed: %w", err)
+		}
+		var result gqlReviewResult
+		if err := json.Unmarshal(out, &result); err != nil {
+			return fmt.Errorf("parsing GraphQL response: %w", err)
+		}
+		page := result.Data.Repository.PullRequest.ReviewThreads
+		threads = append(threads, page.Nodes...)
+		if !page.PageInfo.HasNextPage {
+			break
+		}
+		if page.PageInfo.EndCursor == "" || page.PageInfo.EndCursor == cursor {
+			return fmt.Errorf("GraphQL review-thread pagination did not advance")
+		}
+		cursor = page.PageInfo.EndCursor
 	}
-	return parseReviewThreads(out)
+	return reviewThreadError(threads)
 }
 
 // parseReviewThreads returns an error if any unresolved, non-outdated review
@@ -605,8 +634,12 @@ func parseReviewThreads(data []byte) error {
 		return fmt.Errorf("parsing GraphQL response: %w", err)
 	}
 
+	return reviewThreadError(result.Data.Repository.PullRequest.ReviewThreads.Nodes)
+}
+
+func reviewThreadError(threads []gqlReviewThread) error {
 	var unresolved []string
-	for i, t := range result.Data.Repository.PullRequest.ReviewThreads.Nodes {
+	for i, t := range threads {
 		if t.IsResolved || t.IsOutdated {
 			continue
 		}

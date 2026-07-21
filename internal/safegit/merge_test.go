@@ -262,6 +262,14 @@ func TestParseReviewThreads_Empty(t *testing.T) {
 	}
 }
 
+func TestReviewThreadsQueryPaginates(t *testing.T) {
+	for _, required := range []string{"$cursor: String", "after: $cursor", "hasNextPage", "endCursor"} {
+		if !strings.Contains(reviewThreadsQuery, required) {
+			t.Fatalf("reviewThreadsQuery must contain %q", required)
+		}
+	}
+}
+
 // --- parseSoak ---
 
 func makeSoakJSON(committedAt time.Time) []byte {
