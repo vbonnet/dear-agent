@@ -1,8 +1,10 @@
 package agysession
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -297,6 +299,43 @@ func TestLatestConversationForWorkspaceRejectsOlderMatchAfterTruncatedNewerLog(t
 	}
 	if conversationID != "" {
 		t.Fatalf("conversation ID = %q, want no older match after an incomplete newer log", conversationID)
+	}
+}
+
+func TestLogHasUnreadTailDetectsGrowthAfterBoundedScan(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "growing.log")
+	if err := os.WriteFile(logPath, []byte("initial line\n"), 0o644); err != nil {
+		t.Fatalf("write initial log: %v", err)
+	}
+	reader, err := os.Open(logPath)
+	if err != nil {
+		t.Fatalf("open log: %v", err)
+	}
+	t.Cleanup(func() { _ = reader.Close() })
+	scanner := bufio.NewScanner(io.LimitReader(reader, maxAgyLogScanBytes))
+	for scanner.Scan() {
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan initial log: %v", err)
+	}
+	writer, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open growing log: %v", err)
+	}
+	if _, err := writer.WriteString("appended marker\n"); err != nil {
+		_ = writer.Close()
+		t.Fatalf("append log: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close growing log: %v", err)
+	}
+
+	truncated, err := logHasUnreadTail(reader)
+	if err != nil {
+		t.Fatalf("logHasUnreadTail: %v", err)
+	}
+	if !truncated {
+		t.Fatal("log growth after bounded scan was treated as complete")
 	}
 }
 

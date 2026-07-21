@@ -256,12 +256,6 @@ func scanLogForConversation(logPath, conversationID string) (workspacePath strin
 		return "", false, false, fmt.Errorf("open AGY log %s: %w", logPath, err)
 	}
 	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		return "", false, false, fmt.Errorf("stat AGY log %s: %w", logPath, err)
-	}
-	truncated = info.Size() > maxAgyLogScanBytes
-
 	scanner := bufio.NewScanner(io.LimitReader(file, maxAgyLogScanBytes))
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLogLineSize)
 	currentWorkspace := ""
@@ -280,6 +274,10 @@ func scanLogForConversation(logPath, conversationID string) (workspacePath strin
 	if err := scanner.Err(); err != nil {
 		return "", false, truncated, fmt.Errorf("scan AGY log %s: %w", logPath, err)
 	}
+	truncated, err = logHasUnreadTail(file)
+	if err != nil {
+		return "", false, false, fmt.Errorf("probe AGY log %s for unread tail: %w", logPath, err)
+	}
 	return workspacePath, matched, truncated, nil
 }
 
@@ -289,12 +287,6 @@ func scanLogForWorkspace(logPath, workspacePath string) (conversationID string, 
 		return "", false, false, fmt.Errorf("open AGY log %s: %w", logPath, err)
 	}
 	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		return "", false, false, fmt.Errorf("stat AGY log %s: %w", logPath, err)
-	}
-	truncated = info.Size() > maxAgyLogScanBytes
-
 	currentWorkspace := ""
 	scanner := bufio.NewScanner(io.LimitReader(file, maxAgyLogScanBytes))
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLogLineSize)
@@ -326,7 +318,23 @@ func scanLogForWorkspace(logPath, workspacePath string) (conversationID string, 
 	if err := scanner.Err(); err != nil {
 		return "", false, truncated, fmt.Errorf("scan AGY log %s: %w", logPath, err)
 	}
+	truncated, err = logHasUnreadTail(file)
+	if err != nil {
+		return "", false, false, fmt.Errorf("probe AGY log %s for unread tail: %w", logPath, err)
+	}
 	return conversationID, matched, truncated, nil
+}
+
+func logHasUnreadTail(file *os.File) (bool, error) {
+	var probe [1]byte
+	n, err := file.Read(probe[:])
+	if err == nil {
+		return n > 0, nil
+	}
+	if errors.Is(err, io.EOF) {
+		return false, nil
+	}
+	return false, err
 }
 
 func logDiscoveryBudgetError(target string, scanned, omitted, truncated int) error {
