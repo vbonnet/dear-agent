@@ -1,6 +1,6 @@
-// Package circuitbreaker implements deterministic safeguards to prevent CPU
-// and memory spikes from too many concurrent sessions. It enforces up to four
-// gates before allowing a new worker session to spawn:
+// Package circuitbreaker implements deterministic safeguards to prevent CPU,
+// memory, and disk exhaustion from too many concurrent sessions. It enforces
+// up to six gates before allowing a new worker session to spawn:
 //
 //  1. MaxWorkers — optional hard cap on concurrent worker sessions (disabled
 //     when MaxWorkers <= 0, which is the default; workers are then bounded
@@ -10,6 +10,18 @@
 //  3. Memory — refuses spawn if free RAM falls below threshold
 //     (default: 10%; override via AGM_MIN_FREE_MEM_PCT)
 //  4. SpawnStagger — minimum time between consecutive spawns
+//  5. Disk — refuses spawn if free disk falls below an absolute reserve
+//     (default: 10 GB; override via AGM_MIN_FREE_DISK_GB). FAILS CLOSED.
+//  6. AgentProcs — refuses spawn if the machine-wide count of agent harness
+//     processes (claude/codex/agm workers, counted from the live process
+//     table, not AGM's session records) reaches the cap (default: NumCPU;
+//     override via AGM_MAX_AGENT_PROCS). FAILS CLOSED.
+//
+// Gates 5 and 6 were added after an ungated mesh drove the host disk to 100%
+// and forced a hard reboot (ce-93lw.18): the old governor only advised, only
+// counted AGM sessions, and never gated on disk. These two gates fail closed —
+// if headroom or the process count cannot be verified, the spawn is refused —
+// and run only when their readers are wired in (production wires both).
 //
 // The MaxWorkers gate was previously hard-coded to 3. It is now disabled by
 // default (0 = no cap) to support dynamic multi-provider worker fleets where
@@ -72,6 +84,35 @@ type Config struct {
 	// MinSpawnInterval is the minimum duration between consecutive spawns.
 	// Default: 2 minutes.
 	MinSpawnInterval time.Duration
+
+	// MinFreeDiskGB is the minimum free disk space, in gigabytes, required on
+	// the volume backing agent working directories (worktrees, sandboxes)
+	// before a spawn is allowed. Default: 10. Override via
+	// AGM_MIN_FREE_DISK_GB env var.
+	//
+	// This is an absolute reserve, not a percentage of total disk. A
+	// percentage floor scales with disk size and gets punitive on large
+	// disks: 8% of a 460GB disk is ~37GB, which refused spawns at 23GB free
+	// even though that's ample headroom for a worktree checkout plus build
+	// cache. An absolute GB floor stays meaningful regardless of total disk
+	// size.
+	//
+	// Unlike the load and memory gates, the disk gate FAILS CLOSED: if free
+	// disk cannot be determined the spawn is refused, because an unbounded
+	// disk fill is what took the host down (ce-93lw.18) and a blind spawn is
+	// the failure mode that must never recur.
+	MinFreeDiskGB float64
+
+	// MaxAgentProcs caps the number of agent harness processes (the `claude`
+	// and `codex` CLIs and agm-spawned workers) running machine-wide, counted
+	// from the live process table rather than AGM's session records. This
+	// closes the gap where Dispatch-spawned sessions were invisible to a gate
+	// that only counted AGM's own sessions (ce-93lw.18).
+	//
+	// Default: NumCPU. When <= 0 the gate is disabled. Override via
+	// AGM_MAX_AGENT_PROCS. Like the disk gate, it FAILS CLOSED: if the process
+	// count cannot be determined the spawn is refused.
+	MaxAgentProcs int
 }
 
 // DefaultConfig returns a Config with production defaults, applying any
@@ -90,6 +131,8 @@ func DefaultConfig() Config {
 		MaxLoad5:         float64(runtime.NumCPU()) * 2,
 		MinFreeMemPct:    10,
 		MinSpawnInterval: 2 * time.Minute,
+		MinFreeDiskGB:    10,
+		MaxAgentProcs:    runtime.NumCPU(),
 	}
 
 	if v := os.Getenv("AGM_MAX_WORKERS"); v != "" {
@@ -107,6 +150,18 @@ func DefaultConfig() Config {
 	if v := os.Getenv("AGM_MIN_FREE_MEM_PCT"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 {
 			cfg.MinFreeMemPct = f
+		}
+	}
+
+	if v := os.Getenv("AGM_MIN_FREE_DISK_GB"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 {
+			cfg.MinFreeDiskGB = f
+		}
+	}
+
+	if v := os.Getenv("AGM_MAX_AGENT_PROCS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.MaxAgentProcs = n
 		}
 	}
 
@@ -134,9 +189,21 @@ type SpawnTimer interface {
 	RecordSpawn(t time.Time) error
 }
 
+// DiskReader provides the free disk space, in gigabytes, on the volume
+// backing agent working directories.
+type DiskReader interface {
+	FreeDiskGB() (float64, error)
+}
+
+// ProcCounter counts agent harness processes (claude/codex/agm workers)
+// running machine-wide, read from the live process table.
+type ProcCounter interface {
+	CountAgentProcs() (int, error)
+}
+
 // GateResult describes the outcome of a single gate check.
 type GateResult struct {
-	Gate    string // "max_workers", "cpu_load", "memory", "spawn_stagger"
+	Gate    string // "max_workers", "cpu_load", "memory", "spawn_stagger", "disk", "agent_procs"
 	Passed  bool
 	Message string
 }
@@ -149,12 +216,43 @@ type CheckResult struct {
 	Level   DEARLevel
 }
 
+// checkOptions carries the optional disk and process readers injected via
+// CheckOption. Keeping them optional preserves Check's original signature so
+// existing callers and tests compile unchanged; production wires both readers
+// through WithDiskReader / WithProcCounter.
+type checkOptions struct {
+	dr DiskReader
+	pc ProcCounter
+}
+
+// CheckOption injects an optional admission-control reader into Check.
+type CheckOption func(*checkOptions)
+
+// WithDiskReader enables the disk-headroom gate using dr.
+func WithDiskReader(dr DiskReader) CheckOption {
+	return func(o *checkOptions) { o.dr = dr }
+}
+
+// WithProcCounter enables the machine-wide agent-process gate using pc.
+func WithProcCounter(pc ProcCounter) CheckOption {
+	return func(o *checkOptions) { o.pc = pc }
+}
+
 // Check evaluates all gates. It returns CheckResult with Allowed=true only if
 // every gate passes. Gates are always all evaluated so the caller can report
 // every violation, not just the first.
 //
-// mr may be nil; when nil the memory gate is skipped (fails open).
-func Check(cfg Config, lr LoadReader, wc WorkerCounter, st SpawnTimer, mr MemReader) CheckResult {
+// mr may be nil; when nil the memory gate is skipped (fails open). The disk
+// and agent-process gates run only when their readers are supplied via
+// WithDiskReader / WithProcCounter; when supplied they FAIL CLOSED on read
+// error (they refuse the spawn), because they guard against the unbounded
+// resource fill that took the host down (ce-93lw.18).
+func Check(cfg Config, lr LoadReader, wc WorkerCounter, st SpawnTimer, mr MemReader, opts ...CheckOption) CheckResult {
+	var o checkOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+
 	result := CheckResult{Allowed: true}
 
 	// Gate 1: max workers
@@ -183,6 +281,24 @@ func Check(cfg Config, lr LoadReader, wc WorkerCounter, st SpawnTimer, mr MemRea
 	result.Gates = append(result.Gates, staggerGate)
 	if !staggerGate.Passed {
 		result.Allowed = false
+	}
+
+	// Gate 5: disk headroom (fails closed; runs only when a reader is wired)
+	if o.dr != nil {
+		diskGate := checkDisk(cfg, o.dr)
+		result.Gates = append(result.Gates, diskGate)
+		if !diskGate.Passed {
+			result.Allowed = false
+		}
+	}
+
+	// Gate 6: machine-wide agent processes (fails closed; runs only when wired)
+	if o.pc != nil {
+		procGate := checkAgentProcs(cfg, o.pc)
+		result.Gates = append(result.Gates, procGate)
+		if !procGate.Passed {
+			result.Allowed = false
+		}
 	}
 
 	// Read load for DEAR classification (best-effort)
@@ -327,6 +443,77 @@ func checkSpawnStagger(cfg Config, st SpawnTimer) GateResult {
 		Gate:    "spawn_stagger",
 		Passed:  true,
 		Message: fmt.Sprintf("last spawn: %s ago", formatDuration(elapsed)),
+	}
+}
+
+// checkDisk refuses a spawn when free disk on the agent working volume is
+// below the floor. It FAILS CLOSED: a read error refuses the spawn, because an
+// unbounded disk fill is the failure that took the host down (ce-93lw.18).
+func checkDisk(cfg Config, dr DiskReader) GateResult {
+	freeGB, err := dr.FreeDiskGB()
+	if err != nil {
+		return GateResult{
+			Gate:    "disk",
+			Passed:  false,
+			Message: fmt.Sprintf("could not read free disk: %v (failing closed — refusing spawn)", err),
+		}
+	}
+
+	if freeGB < cfg.MinFreeDiskGB {
+		return GateResult{
+			Gate:   "disk",
+			Passed: false,
+			Message: fmt.Sprintf(
+				"free disk too low: %.1f GB (minimum: %.1f GB). Reclaim disk (merged worktrees, go-build cache, dead sandboxes) before spawning new sessions.",
+				freeGB, cfg.MinFreeDiskGB,
+			),
+		}
+	}
+
+	return GateResult{
+		Gate:    "disk",
+		Passed:  true,
+		Message: fmt.Sprintf("free disk: %.1f GB (minimum: %.1f GB)", freeGB, cfg.MinFreeDiskGB),
+	}
+}
+
+// checkAgentProcs refuses a spawn when the machine-wide count of agent harness
+// processes has reached the cap. Counting real PIDs (not AGM's session table)
+// makes Dispatch-spawned workers visible to the gate. It FAILS CLOSED: a count
+// error refuses the spawn.
+func checkAgentProcs(cfg Config, pc ProcCounter) GateResult {
+	if cfg.MaxAgentProcs <= 0 {
+		return GateResult{
+			Gate:    "agent_procs",
+			Passed:  true,
+			Message: "agent-process cap disabled (MaxAgentProcs <= 0)",
+		}
+	}
+
+	count, err := pc.CountAgentProcs()
+	if err != nil {
+		return GateResult{
+			Gate:    "agent_procs",
+			Passed:  false,
+			Message: fmt.Sprintf("could not count agent processes: %v (failing closed — refusing spawn)", err),
+		}
+	}
+
+	if count >= cfg.MaxAgentProcs {
+		return GateResult{
+			Gate:   "agent_procs",
+			Passed: false,
+			Message: fmt.Sprintf(
+				"agent-process cap reached: %d/%d machine-wide agent processes. Wait for workers to exit before spawning new sessions.",
+				count, cfg.MaxAgentProcs,
+			),
+		}
+	}
+
+	return GateResult{
+		Gate:    "agent_procs",
+		Passed:  true,
+		Message: fmt.Sprintf("agent processes: %d/%d", count, cfg.MaxAgentProcs),
 	}
 }
 
