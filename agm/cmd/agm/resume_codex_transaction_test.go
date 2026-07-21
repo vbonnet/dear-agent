@@ -159,6 +159,36 @@ func TestResumeSessionCodexJoinsCleanupFailure(t *testing.T) {
 	}
 }
 
+func TestResumeSessionCodexRollbackUsesCreatedCanonicalTmuxName(t *testing.T) {
+	setDetachedResumeTestGlobals(t, true)
+	adapter, m, health := setupCodexResumeTransaction(t)
+	health.TmuxSessionName = "codex.resume:legacy"
+	wantName := tmux.SanitizeSessionName(health.TmuxSessionName)
+	wantErr := errors.New("dispatch failed")
+	var calls []string
+	var createdName, killedName string
+	runtime := recordingResumeRuntime(&calls)
+	runtime.createTmux = func(name, _ string) error {
+		createdName = name
+		return nil
+	}
+	runtime.dispatch = func(*dolt.Adapter, *manifest.Manifest, string, *HealthStatus) error {
+		return wantErr
+	}
+	runtime.killTmux = func(name string) error {
+		killedName = name
+		return nil
+	}
+
+	err := resumeSessionWithRuntime(t.Context(), adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("resumeSessionWithRuntime() error = %v, want %v", err, wantErr)
+	}
+	if createdName != wantName || killedName != wantName || health.TmuxSessionName != wantName {
+		t.Fatalf("tmux names = create %q, kill %q, health %q; want %q", createdName, killedName, health.TmuxSessionName, wantName)
+	}
+}
+
 func TestResumeSessionPreservesPreexistingTmuxOnLaterFailure(t *testing.T) {
 	setDetachedResumeTestGlobals(t, false)
 	adapter, m, health := setupCodexResumeTransaction(t)
@@ -263,8 +293,13 @@ func TestResumeSessionCodexReadinessFailureRemovesIsolatedTmux(t *testing.T) {
 	setDetachedResumeTestGlobals(t, true)
 	setupRegressionSocket(t)
 	adapter, m, health := setupCodexResumeTransaction(t)
-	health.TmuxSessionName = "codex-resume-rollback"
-	t.Cleanup(func() { tmux.KillSession(health.TmuxSessionName) })
+	requestedName := "codex.resume:rollback"
+	createdName := tmux.SanitizeSessionName(requestedName)
+	health.TmuxSessionName = requestedName
+	t.Cleanup(func() {
+		tmux.KillSession(createdName)
+		tmux.KillSession(requestedName)
+	})
 	wantErr := errors.New("fake Codex composer missing")
 	var calls []string
 	runtime := recordingResumeRuntime(&calls)
@@ -276,12 +311,15 @@ func TestResumeSessionCodexReadinessFailureRemovesIsolatedTmux(t *testing.T) {
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("resumeSessionWithRuntime() error = %v, want %v", err, wantErr)
 	}
-	exists, hasErr := tmux.HasSession(health.TmuxSessionName)
+	if health.TmuxSessionName != createdName {
+		t.Fatalf("transaction tmux name = %q, want created name %q", health.TmuxSessionName, createdName)
+	}
+	exists, hasErr := tmux.HasSession(createdName)
 	if hasErr != nil {
 		t.Fatalf("HasSession() error = %v", hasErr)
 	}
 	if exists {
-		t.Fatalf("new tmux session %q survived failed Codex readiness", health.TmuxSessionName)
+		t.Fatalf("new tmux session %q survived failed Codex readiness", createdName)
 	}
 }
 
