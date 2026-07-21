@@ -14,6 +14,14 @@ const internalFoundationFeaturePath = "agm/test/bdd/features/internal_foundation
 
 type internalFoundationGuardrailStateKey struct{}
 type overrideParityStateKey struct{}
+type gitSandboxIsolationStateKey struct{}
+
+// gitSandboxIsolationState carries the output of the internal/gittest
+// regressions between the When and Then steps.
+type gitSandboxIsolationState struct {
+	output string
+	err    error
+}
 
 type overrideParityState struct {
 	harness     string
@@ -41,6 +49,12 @@ func RegisterInternalFoundationGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
 		return context.WithValue(ctx, overrideParityStateKey{}, &overrideParityState{}), nil
 	})
+
+	ctx.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
+		return context.WithValue(ctx, gitSandboxIsolationStateKey{}, &gitSandboxIsolationState{}), nil
+	})
+
+	registerGitSandboxIsolationSteps(ctx)
 
 	ctx.Step(`^harness "([^"]*)" and model family "([^"]*)" use the shared override policy$`,
 		func(ctx context.Context, harness, family string) error {
@@ -124,6 +138,72 @@ func getOverrideParityState(ctx context.Context) (*overrideParityState, error) {
 	state, ok := ctx.Value(overrideParityStateKey{}).(*overrideParityState)
 	if !ok || state == nil {
 		return nil, fmt.Errorf("override parity state not initialized")
+	}
+	return state, nil
+}
+
+// registerGitSandboxIsolationSteps binds the ce-3knl.1 guardrail: temporary
+// repositories created by the test suite must not be able to run a hook
+// installed by the host's global Git configuration. The regressions live in
+// internal/gittest because they need a poisoned HOME, which a BDD step cannot
+// safely establish for the whole suite process.
+func registerGitSandboxIsolationSteps(ctx *godog.ScenarioContext) {
+	ctx.Step(`^the host global Git configuration installs a canary hook$`,
+		func(ctx context.Context) error {
+			_, err := getGitSandboxIsolationState(ctx)
+			return err
+		})
+
+	ctx.Step(`^AGM runs the hermetic Git sandbox regressions$`,
+		func(ctx context.Context) error {
+			state, err := getGitSandboxIsolationState(ctx)
+			if err != nil {
+				return err
+			}
+			state.output, state.err = runLocalGuardrailGoTestWith(ctx, []string{"-v"},
+				`^(TestHostHooksFireWithoutIsolation|TestSandboxRepositoriesCannotRunHostHooks|TestSandboxIgnoresHostGlobalConfiguration|TestSandboxRedirectsGlobalConfigWrites)$`,
+				"./internal/gittest")
+			return nil
+		})
+
+	ctx.Step(`^the unisolated control should prove the canary hook fires$`,
+		func(ctx context.Context) error {
+			return gitSandboxRegressionPassed(ctx, "TestHostHooksFireWithoutIsolation")
+		})
+
+	ctx.Step(`^no sandboxed repository should execute a host hook$`,
+		func(ctx context.Context) error {
+			for _, name := range []string{
+				"TestSandboxRepositoriesCannotRunHostHooks",
+				"TestSandboxIgnoresHostGlobalConfiguration",
+				"TestSandboxRedirectsGlobalConfigWrites",
+			} {
+				if err := gitSandboxRegressionPassed(ctx, name); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+}
+
+func gitSandboxRegressionPassed(ctx context.Context, name string) error {
+	state, err := getGitSandboxIsolationState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.err != nil {
+		return fmt.Errorf("hermetic Git sandbox regressions: %w\n%s", state.err, state.output)
+	}
+	if !strings.Contains(state.output, "--- PASS: "+name) {
+		return fmt.Errorf("hermetic Git sandbox output does not show %s passing:\n%s", name, state.output)
+	}
+	return nil
+}
+
+func getGitSandboxIsolationState(ctx context.Context) (*gitSandboxIsolationState, error) {
+	state, ok := ctx.Value(gitSandboxIsolationStateKey{}).(*gitSandboxIsolationState)
+	if !ok || state == nil {
+		return nil, fmt.Errorf("git sandbox isolation state not initialized")
 	}
 	return state, nil
 }

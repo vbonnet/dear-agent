@@ -295,12 +295,17 @@ func eachSafePRTransactionShouldHaveOneAccurateAuditRecord(ctx context.Context) 
 }
 
 func runLocalGuardrailGoTest(parent context.Context, pattern string, packages ...string) (string, error) {
+	return runLocalGuardrailGoTestWith(parent, nil, pattern, packages...)
+}
+
+// runLocalGuardrailGoTestWith is runLocalGuardrailGoTest with extra `go test`
+// flags. Its output is always verbose so BDD assertions can prove that the
+// intended named regression ran instead of accepting a vacuous zero-match run.
+func runLocalGuardrailGoTestWith(parent context.Context, extraArgs []string, pattern string, packages ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
 	defer cancel()
-	// Verbose output is part of the guardrail contract: callers can prove that
-	// their exact named regression ran instead of accepting Go's successful
-	// "no tests to run" result after a stale pattern.
 	commandArgs := []string{"test", "-v", "-count=1", "-timeout=90s", "-run", pattern}
+	commandArgs = append(commandArgs, extraArgs...)
 	commandArgs = append(commandArgs, packages...)
 	cmd := exec.CommandContext(ctx, "go", commandArgs...)
 	cmd.Dir = localDevBDDRepoRoot()
