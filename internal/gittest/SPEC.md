@@ -37,6 +37,8 @@ Git-spawned child can reintroduce a host hook.
 
 **GITTEST-06** When package-level helpers are called from one test, the system shall reuse a single sandbox for that test so repositories created by one call remain usable by the next.
 
+**GITTEST-07** When a test file builds a Git command without this package, the system shall fail unless that file carries a reviewed exemption, and shall also fail when an exemption no longer describes a real call site.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/internal_foundation_guardrails.feature`
@@ -47,3 +49,6 @@ Git-spawned child can reintroduce a host hook.
   `TestHostHooksFireWithoutIsolation` is the positive control for GITTEST-04:
   it proves the canary hooks fire for an unisolated repository, so the
   isolation assertion cannot pass vacuously.
+- `internal/gittest/guard_test.go` covers GITTEST-07. Isolating today's call
+  sites fixes the tests that exist; the guard is what stops the next one from
+  reintroducing the hazard.

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -16,6 +15,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestSupportedHarnessesHaveCurrentTmuxLauncher(t *testing.T) {
@@ -453,7 +453,7 @@ func TestCommitCurrentTmuxManifestLogsFailure(t *testing.T) {
 	})
 
 	repo := filepath.Join(t.TempDir(), "repo")
-	if output, err := exec.Command("git", "init", repo).CombinedOutput(); err != nil {
+	if output, err := gittest.Output(t, filepath.Dir(repo), "init", repo); err != nil {
 		t.Fatalf("git init: %v\n%s", err, output)
 	}
 	manifestPath := filepath.Join(repo, "sessions", "current", "manifest.yaml")

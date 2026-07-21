@@ -2,10 +2,11 @@ package main
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // ---------------------------------------------------------------------------
@@ -353,7 +354,7 @@ func TestRemoveOrphanWorktreePreservesGitLockedCheckout(t *testing.T) {
 
 func auditResourcesGitRun(t *testing.T, args ...string) string {
 	t.Helper()
-	out, err := exec.Command("git", args...).CombinedOutput()
+	out, err := gittest.Command(t, "", args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v: %v: %s", args, err, out)
 	}
