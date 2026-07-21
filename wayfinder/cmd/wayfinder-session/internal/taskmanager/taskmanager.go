@@ -360,6 +360,10 @@ func (tm *TaskManager) DeleteTask(taskID string) error {
 	// Update timestamp
 	st.UpdatedAt = time.Now()
 
+	if err := status.ValidateV2(st); err != nil {
+		return fmt.Errorf("task deletion would create invalid status: %w", err)
+	}
+
 	// Write back
 	if err := status.WriteV2(st, tm.statusFile); err != nil {
 		return fmt.Errorf("failed to write status file: %w", err)
@@ -443,10 +447,8 @@ func (tm *TaskManager) checkTaskReferences(st *status.StatusV2, taskID string) e
 	var references []string
 	for _, phase := range st.Roadmap.Phases {
 		for _, task := range phase.Tasks {
-			for _, dep := range task.DependsOn {
-				if dep == taskID {
-					references = append(references, task.ID)
-				}
+			if slices.Contains(task.DependsOn, taskID) || slices.Contains(task.Blocks, taskID) {
+				references = append(references, task.ID)
 			}
 		}
 	}

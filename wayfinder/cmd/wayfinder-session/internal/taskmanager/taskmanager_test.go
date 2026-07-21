@@ -467,6 +467,49 @@ func TestDeleteTask(t *testing.T) {
 	}
 }
 
+func TestDeleteTaskRejectsBlocksReference(t *testing.T) {
+	_, tm := createTestStatusFile(t)
+
+	blocker, err := tm.AddTask("BUILD", "Blocker", nil)
+	if err != nil {
+		t.Fatalf("add blocker: %v", err)
+	}
+	blocked, err := tm.AddTask("BUILD", "Blocked", nil)
+	if err != nil {
+		t.Fatalf("add blocked task: %v", err)
+	}
+
+	st, err := status.ParseV2(tm.statusFile)
+	if err != nil {
+		t.Fatalf("parse status: %v", err)
+	}
+	for phaseIndex := range st.Roadmap.Phases {
+		for taskIndex := range st.Roadmap.Phases[phaseIndex].Tasks {
+			task := &st.Roadmap.Phases[phaseIndex].Tasks[taskIndex]
+			if task.ID == blocker.ID {
+				task.Blocks = []string{blocked.ID}
+			}
+		}
+	}
+	if err := status.ValidateV2(st); err != nil {
+		t.Fatalf("blocks fixture is not canonical: %v", err)
+	}
+	if err := status.WriteV2(st, tm.statusFile); err != nil {
+		t.Fatalf("write blocks fixture: %v", err)
+	}
+
+	err = tm.DeleteTask(blocked.ID)
+	if err == nil || !contains(err.Error(), "it is referenced by") {
+		t.Fatalf("DeleteTask() error = %v, want blocks reference rejection", err)
+	}
+	if _, err := tm.GetTask(blocked.ID); err != nil {
+		t.Fatalf("referenced task was removed: %v", err)
+	}
+	if _, err := status.ParseV2(tm.statusFile); err != nil {
+		t.Fatalf("failed deletion corrupted canonical status: %v", err)
+	}
+}
+
 func TestTaskDependencies(t *testing.T) {
 	_, tm := createTestStatusFile(t)
 
