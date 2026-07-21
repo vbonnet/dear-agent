@@ -18,6 +18,19 @@ var retiredWayfinderDocForwardPattern = regexp.MustCompile(`(?i)\b(?:current[_ ]
 var retiredWayfinderDocReversePattern = regexp.MustCompile(`(?i)\b(?:W0|D1|D2|D3|D4|S4|S5|S6|S7|S8|S9|S10|S11|V1)(?:/(?:W0|D1|D2|D3|D4|S4|S5|S6|S7|S8|S9|S10|S11|V1))*\b[^A-Za-z0-9]{0,12}(?:phase|retrospective)\b`)
 var retiredWayfinderDocArtifactPattern = regexp.MustCompile(`(?i)\b(?:W0|D1|D2|D3|D4|S4|S5|S6|S7|S8|S9|S10|S11)-(?:charter|problem|research|design|spec|plan|setup|implementation|validation|retrospective)[A-Za-z0-9_-]*\.md\b`)
 var retiredWayfinderStatusLabelPattern = regexp.MustCompile(`(?m)\b(?:Current|Next) Phase:`)
+var wayfinderDocPhaseFieldPattern = regexp.MustCompile(`(?i)["']?(?:current[_ ]phase|next[_ ]phase|phase)["']?[ \t]*:[ \t]*["']?([A-Za-z][A-Za-z0-9_-]*)`)
+
+var canonicalWayfinderPhases = map[string]bool{
+	"CHARTER":  true,
+	"PROBLEM":  true,
+	"RESEARCH": true,
+	"DESIGN":   true,
+	"SPEC":     true,
+	"PLAN":     true,
+	"SETUP":    true,
+	"BUILD":    true,
+	"RETRO":    true,
+}
 
 const wayfinderV2CommandFeaturePath = "agm/test/bdd/features/wayfinder_v2_command_guardrails.feature"
 
@@ -296,6 +309,7 @@ func nonMigrationRuntimeOmitsRetiredPhases(ctx context.Context) error {
 		{path: "engram/internal/analytics", extensions: map[string]bool{".go": true}},
 		{path: "engram/internal/consolidation", extensions: map[string]bool{".go": true}},
 		{path: "engram/internal/memory", extensions: map[string]bool{".go": true}},
+		{path: "engram/internal/providers/simple", extensions: map[string]bool{".go": true}},
 		{path: "engram/internal/reflection", extensions: map[string]bool{".go": true}},
 		{path: "internal/safepr", extensions: map[string]bool{".go": true}},
 		{path: "cmd/safe-pr", extensions: map[string]bool{".go": true}},
@@ -351,18 +365,48 @@ func validateLivingWayfinderDocument(relativePath, content string) error {
 		}
 	}
 	contextLines := 0
+	inFence := false
+	wayfinderFence := false
 	for lineNumber, line := range strings.Split(content, "\n") {
-		hasWayfinderContext := contextLines > 0 || strings.Contains(strings.ToLower(line), "wayfinder")
+		trimmed := strings.TrimSpace(line)
+		isFence := strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")
+		openingFence := isFence && !inFence
+		if openingFence {
+			inFence = true
+			wayfinderFence = false
+		}
+		mentionsWayfinder := strings.Contains(strings.ToLower(line), "wayfinder")
+		if inFence && mentionsWayfinder {
+			wayfinderFence = true
+		}
+		hasWayfinderContext := contextLines > 0 || wayfinderFence || mentionsWayfinder
 		if token := retiredWayfinderDocToken(line, hasWayfinderContext); token != "" {
 			return fmt.Errorf("living documentation %s:%d contains retired Wayfinder token %s", relativePath, lineNumber+1, token)
 		}
-		if strings.Contains(strings.ToLower(line), "wayfinder") {
+		if hasWayfinderContext {
+			if phase := wayfinderDocPhaseValue(line); phase != "" && !canonicalWayfinderPhases[phase] {
+				return fmt.Errorf("living documentation %s:%d contains noncanonical Wayfinder phase %s", relativePath, lineNumber+1, phase)
+			}
+		}
+		if mentionsWayfinder {
 			contextLines = 2
 		} else if contextLines > 0 {
 			contextLines--
 		}
+		if isFence && !openingFence {
+			inFence = false
+			wayfinderFence = false
+		}
 	}
 	return nil
+}
+
+func wayfinderDocPhaseValue(line string) string {
+	match := wayfinderDocPhaseFieldPattern.FindStringSubmatch(line)
+	if len(match) != 2 {
+		return ""
+	}
+	return strings.ToUpper(match[1])
 }
 
 func skipLivingDocumentationDir(relativePath string) bool {

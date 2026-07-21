@@ -2,6 +2,7 @@ package status
 
 import (
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -343,6 +344,7 @@ func validateRoadmap(status *StatusV2) error {
 
 	// Collect all task IDs for dependency validation
 	allTaskIDs := make(map[string]bool)
+	allPhaseIDs := make(map[string]bool)
 	var allTasks []Task
 
 	for i, phase := range status.Roadmap.Phases {
@@ -350,6 +352,10 @@ func validateRoadmap(status *StatusV2) error {
 		if !contains(AllWaypointsV2Schema(), phase.ID) {
 			errors = append(errors, fmt.Sprintf("roadmap.phases[%d]: invalid waypoint_id '%s'", i, phase.ID))
 		}
+		if allPhaseIDs[phase.ID] {
+			errors = append(errors, fmt.Sprintf("roadmap.phases[%d]: duplicate waypoint_id '%s'", i, phase.ID))
+		}
+		allPhaseIDs[phase.ID] = true
 
 		// Validate waypoint status
 		validWaypointStatuses := []string{WaypointStatusV2Pending, WaypointStatusV2InProgress, WaypointStatusV2Completed, WaypointStatusV2Blocked, WaypointStatusV2Skipped}
@@ -498,6 +504,25 @@ func validateQualityMetrics(status *StatusV2) error {
 
 	var errors []string
 	qm := status.QualityMetrics
+	finiteValues := map[string]float64{
+		"coverage_percent":         qm.CoveragePercent,
+		"coverage_target":          qm.CoverageTarget,
+		"assertion_density":        qm.AssertionDensity,
+		"assertion_density_target": qm.AssertionDensityTarget,
+		"multi_persona_score":      qm.MultiPersonaScore,
+		"security_score":           qm.SecurityScore,
+		"performance_score":        qm.PerformanceScore,
+		"reliability_score":        qm.ReliabilityScore,
+		"maintainability_score":    qm.MaintainabilityScore,
+		"estimated_effort_hours":   qm.EstimatedEffortHours,
+		"actual_effort_hours":      qm.ActualEffortHours,
+		"effort_variance":          qm.EffortVariance,
+	}
+	for name, value := range finiteValues {
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			errors = append(errors, fmt.Sprintf("%s must be finite", name))
+		}
+	}
 
 	// Validate coverage percentages (0-100)
 	if qm.CoveragePercent < 0 || qm.CoveragePercent > 100 {

@@ -39,6 +39,9 @@ func ParseV2Content(data []byte) (*StatusV2, error) {
 	if metadata.SchemaVersion != SchemaVersion {
 		return nil, fmt.Errorf("unsupported schema_version %q; expected %s", metadata.SchemaVersion, SchemaVersion)
 	}
+	if err := validateV2TimestampScalars(yamlContent); err != nil {
+		return nil, err
+	}
 
 	var status StatusV2
 	decoder := yaml.NewDecoder(strings.NewReader(yamlContent))
@@ -51,6 +54,61 @@ func ParseV2Content(data []byte) (*StatusV2, error) {
 	}
 
 	return &status, nil
+}
+
+var v2TimestampFields = map[string]bool{
+	"created_at":      true,
+	"updated_at":      true,
+	"completion_date": true,
+	"started_at":      true,
+	"completed_at":    true,
+	"verified_at":     true,
+}
+
+// validateV2TimestampScalars rejects YAML's permissive date-only timestamp
+// decoding before it can be normalized into time.Time. Canonical status
+// documents use RFC3339 consistently across Go and TypeScript consumers.
+func validateV2TimestampScalars(yamlContent string) error {
+	var document yaml.Node
+	if err := yaml.Unmarshal([]byte(yamlContent), &document); err != nil {
+		return fmt.Errorf("failed to inspect timestamps: %w", err)
+	}
+	return validateV2TimestampNode(&document, "")
+}
+
+func validateV2TimestampNode(node *yaml.Node, path string) error {
+	switch node.Kind {
+	case yaml.DocumentNode, yaml.SequenceNode:
+		for i, child := range node.Content {
+			childPath := path
+			if node.Kind == yaml.SequenceNode {
+				childPath = fmt.Sprintf("%s[%d]", path, i)
+			}
+			if err := validateV2TimestampNode(child, childPath); err != nil {
+				return err
+			}
+		}
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			key, value := node.Content[i], node.Content[i+1]
+			childPath := key.Value
+			if path != "" {
+				childPath = path + "." + key.Value
+			}
+			if v2TimestampFields[key.Value] && value.Tag != "!!null" {
+				if value.Kind != yaml.ScalarNode {
+					return fmt.Errorf("invalid Wayfinder V2 status: %s must be an RFC3339 timestamp", childPath)
+				}
+				if _, err := time.Parse(time.RFC3339, value.Value); err != nil {
+					return fmt.Errorf("invalid Wayfinder V2 status: %s must be an RFC3339 timestamp", childPath)
+				}
+			}
+			if err := validateV2TimestampNode(value, childPath); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // ParseV2FromDir reads WAYFINDER-STATUS.md from a directory

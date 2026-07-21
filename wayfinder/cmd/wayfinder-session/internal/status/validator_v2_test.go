@@ -1,6 +1,7 @@
 package status
 
 import (
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -543,6 +544,15 @@ func TestValidateRoadmap(t *testing.T) {
 			errMsg:  "duplicate task_id",
 		},
 		{
+			name: "duplicate phase IDs",
+			roadmap: &Roadmap{Phases: []RoadmapPhase{
+				{ID: PhaseV2Setup, Status: PhaseStatusV2Completed},
+				{ID: PhaseV2Setup, Status: PhaseStatusV2Pending},
+			}},
+			wantErr: true,
+			errMsg:  "duplicate waypoint_id",
+		},
+		{
 			name: "invalid task dependency",
 			roadmap: &Roadmap{
 				Phases: []RoadmapPhase{
@@ -715,6 +725,14 @@ func TestValidateQualityMetrics(t *testing.T) {
 			},
 			wantErr: true,
 			errMsg:  "security_score must be 0-100",
+		},
+		{
+			name: "non-finite metric",
+			metrics: &QualityMetrics{
+				CoveragePercent: math.NaN(),
+			},
+			wantErr: true,
+			errMsg:  "coverage_percent must be finite",
 		},
 	}
 

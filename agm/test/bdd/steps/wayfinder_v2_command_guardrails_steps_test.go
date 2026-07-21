@@ -1,6 +1,9 @@
 package steps
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRetiredWayfinderPatternMatchesPrefixedIdentifiers(t *testing.T) {
 	tests := []struct {
@@ -48,5 +51,24 @@ func TestRetiredWayfinderDocToken(t *testing.T) {
 				t.Fatalf("retiredWayfinderDocToken(%q, %t) match = %t, want %t", tt.line, tt.contextual, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestLivingWayfinderDocumentRejectsNoncanonicalPhaseInCodeBlock(t *testing.T) {
+	content := "" +
+		"```json\n" +
+		"{\n" +
+		"  \"plugin\": \"wayfinder\",\n" +
+		"  \"duration_ms\": 1250,\n" +
+		"  \"phase\": \"S2\"\n" +
+		"}\n" +
+		"```\n"
+	if err := validateLivingWayfinderDocument("SPEC.md", content); err == nil {
+		t.Fatal("expected a noncanonical Wayfinder phase to be rejected")
+	}
+
+	canonical := strings.Replace(content, `"S2"`, `"BUILD"`, 1)
+	if err := validateLivingWayfinderDocument("SPEC.md", canonical); err != nil {
+		t.Fatalf("canonical phase rejected: %v", err)
 	}
 }

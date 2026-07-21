@@ -260,11 +260,16 @@ function validateRoadmap(value: unknown): void {
   }
 
   const tasks = new Map<string, RecordValue>();
+  const phaseIds = new Set<string>();
   for (const [phaseIndex, phaseValue] of phasesValue.entries()) {
     const path = `roadmap.phases[${phaseIndex}]`;
     const phase = asRecord(phaseValue, path);
     assertKnownFields(phase, path, ['id', 'name', 'status', 'started_at', 'completed_at', 'tasks']);
-    requireEnum(phase, 'id', WAYPOINTS);
+    const phaseId = requireEnum(phase, 'id', WAYPOINTS);
+    if (phaseIds.has(phaseId)) {
+      throw new Error(`invalid Wayfinder V2 status: duplicate roadmap phase id ${JSON.stringify(phaseId)}`);
+    }
+    phaseIds.add(phaseId);
     requireEnum(phase, 'status', WAYPOINT_STATUSES);
     optionalString(phase, 'name', path);
     optionalTimestamp(phase, 'started_at', path);

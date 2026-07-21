@@ -182,4 +182,16 @@ waypoint_history:`,
     );
     assert.throws(() => parseWayfinderStatus(invalid), /depends_on references missing task/);
   });
+
+  it('rejects duplicate roadmap phase IDs', () => {
+    const invalid = canonical.replace(
+      'waypoint_history:',
+      `roadmap:
+  phases:
+    - {id: BUILD, status: in-progress}
+    - {id: BUILD, status: pending}
+waypoint_history:`,
+    );
+    assert.throws(() => parseWayfinderStatus(invalid), /duplicate roadmap phase id "BUILD"/);
+  });
 });

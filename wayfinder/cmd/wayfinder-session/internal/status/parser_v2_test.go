@@ -274,6 +274,33 @@ func TestParseV2RejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestParseV2RejectsNonRFC3339Timestamps(t *testing.T) {
+	valid, err := os.ReadFile("testdata/valid-v2.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name    string
+		old     string
+		replace string
+		want    string
+	}{
+		{name: "top-level date", old: `created_at: "2026-02-15T10:00:00Z"`, replace: "created_at: 2026-02-15", want: "created_at must be an RFC3339 timestamp"},
+		{name: "nested date", old: `started_at: "2026-02-15T10:00:00Z"`, replace: "started_at: 2026-02-15", want: "started_at must be an RFC3339 timestamp"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			content := strings.Replace(string(valid), tc.old, tc.replace, 1)
+			if content == string(valid) {
+				t.Fatalf("fixture does not contain %q", tc.old)
+			}
+			_, err := ParseV2Content([]byte(content))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("ParseV2Content() error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseV2AcceptsCanonicalHistoryAfterRewind(t *testing.T) {
 	st := NewStatusV2("test", ProjectTypeFeature, RiskLevelM)
 	now := time.Now()
