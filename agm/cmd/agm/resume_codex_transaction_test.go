@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -475,6 +476,40 @@ func TestResumeSessionCodexReadinessFailureRemovesIsolatedTmux(t *testing.T) {
 	}
 	if exists {
 		t.Fatalf("new tmux session %q survived failed Codex readiness", createdName)
+	}
+}
+
+func TestResumeSessionCodexRollbackReportsInaccessibleSocketAndPreservesHiddenTarget(t *testing.T) {
+	requireCodexResumeTmuxIntegration(t)
+	setDetachedResumeTestGlobals(t, true)
+	socketPath := setupRegressionSocket(t)
+	hiddenSocket := socketPath + ".hidden"
+	adapter, m, health := setupCodexResumeTransaction(t)
+	health.TmuxSessionName = "codex-resume-hidden-socket"
+	primaryErr := errors.New("fake Codex readiness failure")
+	var calls []string
+	runtime := recordingResumeRuntime(&calls)
+	runtime.createTmux = tmux.NewSession
+	runtime.killTmux = killCreatedResumeTmux
+	runtime.wait = func(string, *HealthStatus) error {
+		if err := os.Rename(socketPath, hiddenSocket); err != nil {
+			t.Fatalf("hide tmux socket: %v", err)
+		}
+		return primaryErr
+	}
+	t.Cleanup(func() {
+		_ = exec.Command("tmux", "-S", hiddenSocket, "kill-server").Run()
+	})
+
+	err := resumeSessionWithRuntime(t.Context(), adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime)
+	if !errors.Is(err, primaryErr) {
+		t.Fatalf("resumeSessionWithRuntime() error = %v, want primary readiness failure", err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "tmux kill session") {
+		t.Fatalf("rollback error = %v, want inaccessible-socket cleanup failure", err)
+	}
+	if checkErr := exec.Command("tmux", "-S", hiddenSocket, "has-session", "-t", tmux.FormatSessionTarget(health.TmuxSessionName)).Run(); checkErr != nil {
+		t.Fatalf("hidden tmux target was not preserved for verification: %v", checkErr)
 	}
 }
 

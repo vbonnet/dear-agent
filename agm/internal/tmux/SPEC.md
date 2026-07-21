@@ -70,6 +70,8 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-26** When a caller requests liveness for a named harness process, the system shall scan the full pane descendant tree for that exact process and shall return scan failures separately from a proven dead result.
 
+**TMUX-31** When a transactional cleanup kills and verifies a tmux session, the system shall treat only an explicit missing-session response as absence and shall return socket, timeout, permission, and other backend failures instead of reporting cleanup success.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

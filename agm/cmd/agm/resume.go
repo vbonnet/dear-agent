@@ -582,12 +582,14 @@ func realResumeSessionRuntime(ctx context.Context) resumeSessionRuntime {
 }
 
 // killCreatedResumeTmux compensates a failed resume and verifies that the
-// exact session created by this attempt is gone. tmux.KillSession is currently
-// idempotent and does not return its command error, so the postcondition check
-// is also the observable cleanup result.
+// exact session created by this attempt is gone. Both mutation and verification
+// use strict error-reporting paths so an inaccessible socket cannot masquerade
+// as a missing target.
 func killCreatedResumeTmux(sessionName string) error {
-	tmux.KillSession(sessionName)
-	exists, err := tmux.HasSession(sessionName)
+	if err := tmux.KillSessionChecked(sessionName); err != nil {
+		return err
+	}
+	exists, err := tmux.HasSessionStrict(sessionName)
 	if err != nil {
 		return fmt.Errorf("verify tmux session cleanup: %w", err)
 	}

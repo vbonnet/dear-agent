@@ -39,6 +39,36 @@ func HasSession(name string) (bool, error) {
 	return true, nil
 }
 
+// HasSessionStrict checks whether a session exists without collapsing every
+// tmux exit failure into a missing-session verdict. It is intended for
+// destructive-operation postconditions, where an inaccessible socket must not
+// be reported as proof that the target is gone.
+func HasSessionStrict(name string) (bool, error) {
+	ctx := context.Background()
+	socketPath := GetSocketPath()
+	normalizedName := NormalizeTmuxSessionName(name)
+	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "has-session", "-t", FormatSessionTarget(normalizedName))
+	if err == nil {
+		return true, nil
+	}
+	if isMissingSessionOutput(output) {
+		return false, nil
+	}
+	return false, tmuxCommandError("check session", normalizedName, output, err)
+}
+
+func isMissingSessionOutput(output []byte) bool {
+	return strings.Contains(strings.ToLower(string(output)), "can't find session")
+}
+
+func tmuxCommandError(operation, sessionName string, output []byte, err error) error {
+	detail := strings.TrimSpace(string(output))
+	if detail == "" {
+		return fmt.Errorf("tmux %s %q: %w", operation, sessionName, err)
+	}
+	return fmt.Errorf("tmux %s %q: %w: %s", operation, sessionName, err, detail)
+}
+
 // NormalizeTmuxSessionName converts AGM session names to tmux-compatible format.
 // This matches tmux's actual normalization behavior when creating sessions.
 //
