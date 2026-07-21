@@ -319,13 +319,16 @@ func agmValidatesTheCodexResumeTransaction(ctx context.Context) error {
 }
 
 func codexResumeSuccessShouldRequireProcessAndComposerReadiness(ctx context.Context) error {
-	source := ctx.Value(harnessParityStateKey{}).(*harnessParityState).resumeSource
-	processWait := strings.Index(source, "runtime.waitForProcess")
-	processFailure := strings.Index(source, "codex process did not become ready")
-	composerWait := strings.Index(source, "runtime.waitForComposer")
-	composerFailure := strings.Index(source, "codex composer did not become ready")
-	if processWait < 0 || processFailure < processWait || composerWait < processFailure || composerFailure < composerWait {
-		return fmt.Errorf("codex resume must fail unless process and composer readiness both succeed")
+	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "-run", `^TestWaitForResumedCodexRequiresProcessAndComposer$`, "-count=1")
+	cmd.Dir = bddRepoRoot()
+	output, err := cmd.CombinedOutput()
+	if testCtx.Err() != nil {
+		return fmt.Errorf("codex resume readiness behavior timed out: %w", testCtx.Err())
+	}
+	if err != nil {
+		return fmt.Errorf("codex resume readiness behavior failed: %w\n%s", err, output)
 	}
 	return nil
 }

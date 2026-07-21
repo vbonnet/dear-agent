@@ -636,14 +636,19 @@ func resumeSessionWithRuntime(ctx context.Context, adapter *dolt.Adapter, sessio
 		}
 		return err
 	}
-	// Prompt delivery follows readiness but precedes durable success effects.
-	// A caller cancellation here must compensate a cold resume rather than
-	// leave a newly launched session behind after reporting failure.
-	if err := deliverPostResumePrompt(ctx, health.TmuxSessionName, runtime); err != nil {
-		if createdTmux {
-			return rollbackCreatedResumeTmux(runtime, health.TmuxSessionName, err)
+	transactionalPrompt := agent.NormalizeHarnessName(harnessName) == "codex-cli"
+	if transactionalPrompt {
+		// Codex prompt delivery follows readiness but precedes durable success
+		// effects. A caller cancellation here must compensate a cold resume
+		// rather than leave a newly launched session behind after reporting
+		// failure. Other harnesses retain their established finalization order;
+		// in particular, Claude restores its saved permission mode first.
+		if err := deliverPostResumePrompt(ctx, health.TmuxSessionName, runtime); err != nil {
+			if createdTmux {
+				return rollbackCreatedResumeTmux(runtime, health.TmuxSessionName, err)
+			}
+			return err
 		}
-		return err
 	}
 	if createdTmux {
 		if err := persistCreatedResumeTmuxName(ctx, runtime, adapter, m, health); err != nil {
@@ -653,7 +658,7 @@ func resumeSessionWithRuntime(ctx context.Context, adapter *dolt.Adapter, sessio
 	if sendCommands {
 		runtime.restorePermission(harnessName, m, health)
 	}
-	return finalizeResumeSession(ctx, adapter, sessionID, manifestPath, health, sendCommands, runtime)
+	return finalizeResumeSession(ctx, adapter, sessionID, manifestPath, health, sendCommands, !transactionalPrompt, runtime)
 }
 
 func loadResumeSessionManifest(ctx context.Context, adapter *dolt.Adapter, sessionID, harnessName string, runtime resumeSessionRuntime) (*manifest.Manifest, error) {
@@ -749,7 +754,7 @@ func withAgyResumeWorkspaceLock(ctx context.Context, harnessName, workDir string
 	return resume()
 }
 
-func finalizeResumeSession(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath string, health *HealthStatus, sendCommands bool, runtime resumeSessionRuntime) error {
+func finalizeResumeSession(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath string, health *HealthStatus, sendCommands, deliverPrompt bool, runtime resumeSessionRuntime) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -764,6 +769,11 @@ func finalizeResumeSession(ctx context.Context, adapter *dolt.Adapter, sessionID
 
 	// Update VS Code tab title if running in VS Code
 	runtime.updateTabTitle(health.TmuxSessionName)
+	if deliverPrompt {
+		if err := deliverPostResumePrompt(ctx, health.TmuxSessionName, runtime); err != nil {
+			return err
+		}
+	}
 	return attachResumedSession(ctx, sessionID, health, sendCommands, runtime)
 }
 
@@ -1115,7 +1125,7 @@ func waitForResumedCodexWithRuntime(ctx context.Context, health *HealthStatus, r
 		Title("Waiting for Codex process to start...").
 		Accessible(true).
 		Action(func() {
-			processWaitErr = runtime.waitForProcess(health.TmuxSessionName, "codex", 15*time.Second)
+			processWaitErr = runtime.waitForProcess(health.TmuxSessionName, "codex", 60*time.Second)
 		}).
 		Run()
 	if spinErr != nil {

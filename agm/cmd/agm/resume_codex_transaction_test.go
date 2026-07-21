@@ -99,6 +99,27 @@ func TestResumeSessionCodexCommitsEffectsOnlyAfterReadiness(t *testing.T) {
 	}
 }
 
+func TestResumeSessionClaudeRestoresSavedModeBeforePromptDelivery(t *testing.T) {
+	setDetachedResumeTestGlobals(t, true)
+	resumePrompt = "continue in the saved plan mode"
+	adapter, m, health := setupCodexResumeTransaction(t)
+	m.Harness = "claude-code"
+	m.PermissionMode = "plan"
+	var calls []string
+	runtime := recordingResumeRuntime(&calls)
+	runtime.loadManifest = func(context.Context, *dolt.Adapter, string, string) (*manifest.Manifest, error) {
+		return m, nil
+	}
+
+	if err := resumeSessionWithRuntime(t.Context(), adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime); err != nil {
+		t.Fatalf("resumeSessionWithRuntime() error = %v", err)
+	}
+	want := []string{"create", "dispatch", "wait", "restore", "update", "tab", "prompt"}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("resume calls = %v, want %v", calls, want)
+	}
+}
+
 func TestResumeSessionCodexRollsBackNewTmuxBeforeActivityUpdate(t *testing.T) {
 	setDetachedResumeTestGlobals(t, true)
 	for _, failurePoint := range []string{"dispatch", "wait"} {
@@ -345,11 +366,11 @@ func TestWaitForResumedCodexRequiresProcessAndComposer(t *testing.T) {
 	processErr := errors.New("process missing")
 	composerErr := errors.New("composer missing")
 
-	t.Run("missing process", func(t *testing.T) {
+	t.Run("missing process after full startup window", func(t *testing.T) {
 		composerCalled := false
 		err := waitForResumedCodexWithRuntime(t.Context(), health, codexResumeReadinessRuntime{
 			waitForProcess: func(session, process string, timeout time.Duration) error {
-				if session != health.TmuxSessionName || process != "codex" || timeout != 15*time.Second {
+				if session != health.TmuxSessionName || process != "codex" || timeout != 60*time.Second {
 					t.Fatalf("process wait = (%q, %q, %v)", session, process, timeout)
 				}
 				return processErr
@@ -385,11 +406,17 @@ func TestWaitForResumedCodexRequiresProcessAndComposer(t *testing.T) {
 	t.Run("ready", func(t *testing.T) {
 		var calls []string
 		err := waitForResumedCodexWithRuntime(t.Context(), health, codexResumeReadinessRuntime{
-			waitForProcess: func(string, string, time.Duration) error {
+			waitForProcess: func(_ string, _ string, timeout time.Duration) error {
+				if timeout != 60*time.Second {
+					t.Fatalf("process timeout = %v, want 60s", timeout)
+				}
 				calls = append(calls, "process")
 				return nil
 			},
-			waitForComposer: func(string, time.Duration) error {
+			waitForComposer: func(_ string, timeout time.Duration) error {
+				if timeout != 60*time.Second {
+					t.Fatalf("composer timeout = %v, want 60s", timeout)
+				}
 				calls = append(calls, "composer")
 				return nil
 			},
