@@ -2,7 +2,11 @@
 // fields to consumers outside the wayfinder-session command tree.
 package statusread
 
-import "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
+import (
+	"time"
+
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
+)
 
 // Summary contains the validated fields needed by read-only policy consumers.
 type Summary struct {
@@ -10,6 +14,7 @@ type Summary struct {
 	Status          string
 	CurrentWaypoint string
 	Beads           []string
+	UpdatedAt       time.Time
 }
 
 // Parse fully validates canonical status bytes and returns consumer fields.
@@ -36,5 +41,6 @@ func summary(parsed *status.StatusV2) *Summary {
 		Status:          parsed.Status,
 		CurrentWaypoint: parsed.CurrentWaypoint,
 		Beads:           append([]string(nil), parsed.Beads...),
+		UpdatedAt:       parsed.UpdatedAt,
 	}
 }

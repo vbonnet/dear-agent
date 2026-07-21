@@ -57,7 +57,7 @@ func TestLoadSession_Failures(t *testing.T) {
 	}{
 		{"missing file", "", "cannot load"},
 		{"partial canonical status", "---\nschema_version: \"2.0\"\nproject_name: x\nstatus: in-progress\n---\n", "project_type is required"},
-		{"completed session", canonicalTestStatus("x", "completed", "completion_date: 2026-07-20T00:00:00Z"), "not active"},
+		{"completed session", canonicalTestStatus("x", "completed", "completion_date: 2026-07-20T00:00:00Z"), "wayfinder session start <project-name>"},
 		{"no project name", canonicalTestStatus("", "in-progress", ""), "project_name is required"},
 		{"abandoned", canonicalTestStatus("foo", "abandoned", ""), "not active"},
 		{"blocked", canonicalTestStatus("foo", "blocked", "blocked_reason: waiting"), "not active"},

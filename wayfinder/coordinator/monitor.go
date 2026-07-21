@@ -9,11 +9,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/statusread"
 )
 
 // Monitor provides hybrid monitoring (events + polling)
@@ -250,57 +249,33 @@ func (sp *StatusPoller) readStatus(projectDir string) *ProjectStatus {
 		}
 	}
 
-	return parseWayfinderStatus(projectDir, string(data))
+	return parseWayfinderStatus(projectDir, data)
 }
 
 // parseWayfinderStatus parses WAYFINDER-STATUS.md content
-func parseWayfinderStatus(projectDir, content string) *ProjectStatus {
-	status := &ProjectStatus{
-		ProjectDir: projectDir,
-		LastUpdate: time.Now(),
+func parseWayfinderStatus(projectDir string, content []byte) *ProjectStatus {
+	canonical, err := statusread.Parse(content)
+	if err != nil {
+		return nil
 	}
-
-	if frontmatter, found := canonicalStatusFrontmatter(content); found {
-		var canonical struct {
-			CurrentWaypoint string    `yaml:"current_waypoint"`
-			Status          string    `yaml:"status"`
-			UpdatedAt       time.Time `yaml:"updated_at"`
-		}
-		if err := yaml.Unmarshal([]byte(frontmatter), &canonical); err == nil {
-			status.CurrentPhase = canonical.CurrentWaypoint
-			status.Message = canonical.Status
-			if !canonical.UpdatedAt.IsZero() {
-				status.LastUpdate = canonical.UpdatedAt
-			}
-		}
+	status := &ProjectStatus{
+		ProjectDir:   projectDir,
+		CurrentPhase: canonical.CurrentWaypoint,
+		LastUpdate:   canonical.UpdatedAt,
+		Message:      canonical.Status,
+	}
+	if status.LastUpdate.IsZero() {
+		status.LastUpdate = time.Now()
 	}
 
 	// Parse progress: Look for percentage like "50%" or "Phase Progress: 50%"
 	progressRe := regexp.MustCompile(`(\d+)%`)
-	if match := progressRe.FindStringSubmatch(content); len(match) > 1 {
+	if match := progressRe.FindStringSubmatch(string(content)); len(match) > 1 {
 		progress, _ := strconv.Atoi(match[1])
 		status.Progress = progress
 	}
 
-	// Fallback defaults
-	if status.CurrentPhase == "" {
-		status.CurrentPhase = "unknown"
-	}
-	if status.Message == "" {
-		status.Message = "In progress..."
-	}
-
 	return status
-}
-
-func canonicalStatusFrontmatter(content string) (string, bool) {
-	trimmed := strings.TrimSpace(content)
-	afterOpen, found := strings.CutPrefix(trimmed, "---")
-	if !found {
-		return "", false
-	}
-	frontmatter, _, found := strings.Cut(afterOpen, "\n---")
-	return frontmatter, found
 }
 
 // Close closes all open log files

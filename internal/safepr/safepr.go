@@ -79,7 +79,7 @@ func LoadSession(dir string) (Session, error) {
 	}
 	if !isActiveStatus(st.Status) {
 		return Session{}, fmt.Errorf("wayfinder session %s is %q, not active — start or resume "+
-			"a session (wayfinder start / wayfinder session) before opening PRs against it",
+			"a session with `wayfinder session start <project-name>` before opening PRs against it",
 			st.ProjectName, st.Status)
 	}
 	abs, err := filepath.Abs(dir)

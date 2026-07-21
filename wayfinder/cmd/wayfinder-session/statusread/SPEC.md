@@ -11,7 +11,7 @@
 
 **WFREAD-02** When canonical status is missing, unreadable, or invalid, the system shall return an error without a partial summary or compatibility fallback.
 
-**WFREAD-03** When canonical status is valid, the system shall expose only the project name, lifecycle status, current waypoint, and bead references required by read-only policy consumers.
+**WFREAD-03** When canonical status is valid, the system shall expose only the project name, lifecycle status, current waypoint, update timestamp, and bead references required by read-only consumers.
 
 **WFREAD-04** When a consumer already holds status bytes, the system shall fully validate those exact bytes without requiring a second filesystem read.
 

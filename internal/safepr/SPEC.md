@@ -33,7 +33,7 @@ cost and intent remain traceable.
 
 **SAFEPR-09** When a Wayfinder bead is present, the system shall include a closing bead reference in the created PR body.
 
-**SAFEPR-10** When Wayfinder status is `blocked`, `completed`, or `abandoned`, the system shall reject PR operations as inactive.
+**SAFEPR-10** When Wayfinder status is `blocked`, `completed`, or `abandoned`, the system shall reject PR operations as inactive and direct the operator to `wayfinder session start <project-name>`.
 
 **SAFEPR-11** When any supported harness or model family creates canonical Wayfinder V2 status, the system shall apply the same provider-neutral attribution policy.
 

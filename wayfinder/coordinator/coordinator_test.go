@@ -305,7 +305,10 @@ updated_at: 2026-07-20T12:30:00Z
 **Progress**: 75%
 `
 
-	status := parseWayfinderStatus("/test/project", content)
+	status := parseWayfinderStatus("/test/project", []byte(content))
+	if status == nil {
+		t.Fatal("parseWayfinderStatus rejected valid canonical status")
+	}
 
 	if status.CurrentPhase != "BUILD" {
 		t.Errorf("Expected phase=BUILD, got %s", status.CurrentPhase)
@@ -323,14 +326,15 @@ updated_at: 2026-07-20T12:30:00Z
 func TestParseWayfinderStatus_Defaults(t *testing.T) {
 	content := `# Some random content without status info`
 
-	status := parseWayfinderStatus("/test/project", content)
-
-	if status.CurrentPhase != "unknown" {
-		t.Errorf("Expected phase=unknown, got %s", status.CurrentPhase)
+	if status := parseWayfinderStatus("/test/project", []byte(content)); status != nil {
+		t.Fatalf("parseWayfinderStatus accepted invalid content: %+v", status)
 	}
+}
 
-	if status.Progress != 0 {
-		t.Errorf("Expected progress=0, got %d", status.Progress)
+func TestParseWayfinderStatus_RejectsInvalidCanonicalFields(t *testing.T) {
+	content := []byte("---\nschema_version: \"1.0\"\ncurrent_waypoint: UNKNOWN\nstatus: typo\n---\n")
+	if status := parseWayfinderStatus("/test/project", content); status != nil {
+		t.Fatalf("parseWayfinderStatus accepted invalid canonical state: %+v", status)
 	}
 }
 

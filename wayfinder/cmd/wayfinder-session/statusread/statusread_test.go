@@ -54,6 +54,9 @@ beads:
 	if len(summary.Beads) != 1 || summary.Beads[0] != "ce-reader" {
 		t.Fatalf("ParseFromDir() beads = %v", summary.Beads)
 	}
+	if summary.UpdatedAt.IsZero() {
+		t.Fatal("ParseFromDir() omitted canonical updated_at")
+	}
 }
 
 func TestParseValidatesExactStatusBytes(t *testing.T) {
