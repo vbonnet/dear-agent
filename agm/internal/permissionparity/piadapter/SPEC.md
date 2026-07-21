@@ -29,6 +29,8 @@ dependency-free extension installed in AGM-private storage.
 
 **PI-AUTH-10** When AGM launches or resumes Pi with a resolved allowlist, the system shall pass an AGM-private policy file path instead of pasting policy JSON through the bounded terminal input queue, and the extension shall fail closed if that file is unreadable or malformed.
 
+**PI-AUTH-11** When the extension publishes managed status for an AGM launch, the system shall append the caller-provided unique launch ID so lifecycle readiness can distinguish current process output from stale pane history.
+
 ## Traceability
 
 - Package tests: `agm/internal/permissionparity/pi_test.go`

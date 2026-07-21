@@ -26,6 +26,8 @@
 
 **LAUNCH-PARITY-11** When AGM resumes Pi, the system shall reuse that canonical builder with the persisted native identity and shall not discover or select a different transcript by modification time.
 
+**LAUNCH-PARITY-12** When AGM constructs a Pi create or resume command, the system shall pass a unique launch ID to the managed extension without reusing the persistent native session ID as process-readiness identity.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

@@ -78,8 +78,11 @@ which sends the managed `/agm-mode plan|default|auto` command. Model transitions
 `/agm-model provider/model` and are persisted only after AGM observes the
 managed transition result.
 
-The stable footer token `AGM <mode>/ready` is AGM's send-safety boundary.
-`working`, permission, model-selection, and other overlays are not ready.
+The stable footer token `AGM <mode>/ready <launch-id>` is AGM's send-safety
+boundary. Create and cold resume require the current launch ID before they can
+report readiness, so an older footer retained in tmux history cannot authorize
+a new process. Routine sends use the latest managed mode/state; `working`,
+permission, model-selection, and other overlays are not ready.
 
 ## Repository instructions, skills, and hooks
 
@@ -133,7 +136,7 @@ data remains an explicit storage operation, not an archive side effect.
   read credential files to diagnose this.
 - `Pi transcript not found`: inspect the manifest's `pi` block; do not replace
   it with the most recent JSONL path.
-- no `AGM <mode>/ready` footer: treat the session as not sendable and inspect
+- no `AGM <mode>/ready <launch-id>` footer: treat the session as not sendable and inspect
   the managed extension load error in the pane.
 - project hook rejection: run the named `.pi/guardrails` wrapper from the same
   project directory and preserve the fail-closed behavior while fixing it.

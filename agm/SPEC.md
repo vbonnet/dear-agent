@@ -119,6 +119,10 @@ For `pi-cli`, AGM treats Pi as a real interactive CLI harness:
   exact Pi session ID, an AGM-owned private session directory, an explicit
   managed authorization extension, project approval, model, tools, mode, and
   process-exit policy
+- create and cold-resume readiness MUST carry a unique per-process launch ID;
+  an older managed footer in pane history MUST NOT satisfy a new launch, and
+  existing panes MUST be reused only after exact Pi liveness or restartable-
+  shell proof
 - manifests and Dolt rows MUST preserve Pi session ID, private session
   directory, and exact transcript path; lookup and import MUST read the JSONL
   header and reject newest-file heuristics, duplicate identities, symlinks,

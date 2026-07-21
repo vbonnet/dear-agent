@@ -56,7 +56,19 @@ func PiManagedState(content string) string {
 }
 
 func containsPiReadyPattern(content string) bool {
-	return PiManagedState(content) == "ready"
+	return containsPiReadyPatternForLaunch(content, "")
+}
+
+func containsPiReadyPatternForLaunch(content, launchID string) bool {
+	index := strings.LastIndex(content, "AGM ")
+	if index < 0 {
+		return false
+	}
+	fields := strings.Fields(content[index:])
+	if len(fields) < 2 || PiManagedState(content) != "ready" {
+		return false
+	}
+	return launchID == "" || len(fields) >= 3 && fields[2] == launchID
 }
 
 func piStartupFailure(content string) string {
@@ -81,7 +93,7 @@ func IsPiIdle(sessionName string) (bool, error) {
 
 type piPromptRuntime struct {
 	capture func(context.Context, string) ([]byte, error)
-	alive   func(context.Context, string) (PaneLiveness, error)
+	alive   func(context.Context, string) (bool, error)
 	sleep   func(context.Context, time.Duration) error
 }
 
@@ -90,8 +102,8 @@ func realPiPromptRuntime() piPromptRuntime {
 		capture: func(ctx context.Context, sessionName string) ([]byte, error) {
 			return exec.CommandContext(ctx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", NormalizeTmuxSessionName(sessionName), "-p", "-S", "-30").Output()
 		},
-		alive: func(ctx context.Context, sessionName string) (PaneLiveness, error) {
-			return CheckPaneLivenessContext(ctx, sessionName, GetSocketPath())
+		alive: func(ctx context.Context, sessionName string) (bool, error) {
+			return IsProcessInPaneTreeContext(ctx, sessionName, GetSocketPath(), "pi")
 		},
 		sleep: sleepWithContext,
 	}
@@ -104,11 +116,21 @@ func WaitForPiPrompt(sessionName string, timeout time.Duration) error {
 
 // WaitForPiPromptContext is the caller-scoped Pi readiness protocol.
 func WaitForPiPromptContext(ctx context.Context, sessionName string, timeout time.Duration) error {
-	return waitForPiPromptWithRuntime(ctx, sessionName, timeout, realPiPromptRuntime())
+	return waitForPiPromptWithRuntime(ctx, sessionName, "", timeout, realPiPromptRuntime())
+}
+
+// WaitForPiLaunchPromptContext requires readiness published by the exact Pi
+// process launch identified by launchID. A footer left in pane history by an
+// earlier process cannot satisfy this gate.
+func WaitForPiLaunchPromptContext(ctx context.Context, sessionName, launchID string, timeout time.Duration) error {
+	if strings.TrimSpace(launchID) == "" {
+		return fmt.Errorf("pi launch readiness requires a launch id")
+	}
+	return waitForPiPromptWithRuntime(ctx, sessionName, launchID, timeout, realPiPromptRuntime())
 }
 
 //nolint:gocyclo // reason: stateful readiness loop keeps capture, fatal startup, liveness, and cancellation transitions explicit
-func waitForPiPromptWithRuntime(parent context.Context, sessionName string, timeout time.Duration, runtime piPromptRuntime) error {
+func waitForPiPromptWithRuntime(parent context.Context, sessionName, launchID string, timeout time.Duration, runtime piPromptRuntime) error {
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	checks := 0
@@ -136,7 +158,7 @@ func waitForPiPromptWithRuntime(parent context.Context, sessionName string, time
 		if detail := piStartupFailure(content); detail != "" {
 			return &PiStartupError{Detail: detail}
 		}
-		if containsPiReadyPattern(content) {
+		if containsPiReadyPatternForLaunch(content, launchID) {
 			debug.Log("Pi managed prompt detected after %d checks", checks)
 			if err := runtime.sleep(ctx, 250*time.Millisecond); err != nil {
 				return err
@@ -147,9 +169,12 @@ func waitForPiPromptWithRuntime(parent context.Context, sessionName string, time
 			return nil
 		}
 		if checks >= 3 && runtime.alive != nil {
-			verdict, aliveErr := runtime.alive(ctx, sessionName)
-			if aliveErr == nil && (!verdict.SessionExists || !verdict.HarnessAlive) {
-				return &PiStartupError{Detail: fmt.Sprintf("harness exited before managed readiness (%s); pane tail: %s", verdict.Evidence, paneTail(lastContent, 6))}
+			alive, aliveErr := runtime.alive(ctx, sessionName)
+			if aliveErr != nil {
+				return &PiStartupError{Detail: fmt.Sprintf("cannot prove exact Pi process liveness: %v", aliveErr)}
+			}
+			if !alive {
+				return &PiStartupError{Detail: fmt.Sprintf("exact Pi process exited before managed readiness; pane tail: %s", paneTail(lastContent, 6))}
 			}
 		}
 		if err := runtime.sleep(ctx, 500*time.Millisecond); err != nil {

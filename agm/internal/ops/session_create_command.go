@@ -30,6 +30,7 @@ type HarnessLaunchSpec struct {
 	ForwardTelemetry bool
 	Codex            *manifest.Codex
 	Pi               *manifest.Pi
+	PiLaunchID       string
 	PiExtension      string
 	PiPolicyJSON     string
 	PiPolicyFile     string
@@ -74,9 +75,13 @@ func buildPiLaunchCommand(spec HarnessLaunchSpec) HarnessLaunchCommand {
 		}
 		sessionDir = spec.Pi.SessionDir
 	}
+	launchID := spec.PiLaunchID
+	if launchID == "" {
+		launchID = launchparity.NewPiLaunchID()
+	}
 	command := launchparity.BuildPiCommand(launchparity.PiCommandSpec{
 		WorkDir: spec.WorkDir, ResolvedModel: agent.ResolveModelFullName("pi-cli", spec.Model),
-		SessionName: spec.SessionName, SessionID: nativeID, SessionDir: sessionDir,
+		SessionName: spec.SessionName, SessionID: nativeID, LaunchID: launchID, SessionDir: sessionDir,
 		PermissionMode: spec.PermissionMode, PermissionExtension: spec.PiExtension,
 		PermissionPolicyFile: spec.PiPolicyFile, Persistent: spec.Persistent,
 	})

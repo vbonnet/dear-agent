@@ -353,13 +353,14 @@ func TestBuildPiResumeCommandPreservesExactIdentityModelModeAndPolicy(t *testing
 		Pi:               &manifest.Pi{SessionID: "native.pi-id", SessionDir: sessionDir},
 		PermissionPolicy: &manifest.PermissionPolicy{Allow: []string{"Bash(git:*)"}},
 	}
-	command, err := buildPiResumeCommand(m, &HealthStatus{TmuxSessionName: "pi-worker", WorktreePath: "/tmp/work"})
+	command, err := buildPiResumeCommand(m, &HealthStatus{TmuxSessionName: "pi-worker", WorktreePath: "/tmp/work"}, "launch-resume")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
 		"--session-id 'native.pi-id'", "--session-dir '" + sessionDir + "'", "--name 'pi-worker'",
 		"PI_SESSION_ID='native.pi-id'", "AGM_PI_PROJECT_DIR='/tmp/work'",
+		"AGM_PI_LAUNCH_ID='launch-resume'",
 		"--model 'openai/gpt-5.6-terra'", "AGM_PI_PERMISSION_MODE='auto'", "AGM_PI_PERMISSION_POLICY_FILE=", "policy-", "--extension",
 	} {
 		if !strings.Contains(command, want) {
@@ -372,7 +373,7 @@ func TestBuildPiResumeCommandPreservesExactIdentityModelModeAndPolicy(t *testing
 }
 
 func TestBuildPiResumeCommandRejectsMissingNativeIdentity(t *testing.T) {
-	_, err := buildPiResumeCommand(&manifest.Manifest{}, &HealthStatus{TmuxSessionName: "pi-worker", WorktreePath: "/tmp/work"})
+	_, err := buildPiResumeCommand(&manifest.Manifest{}, &HealthStatus{TmuxSessionName: "pi-worker", WorktreePath: "/tmp/work"}, "launch-resume")
 	if err == nil || !strings.Contains(err.Error(), "exact native") {
 		t.Fatalf("error = %v", err)
 	}
@@ -385,7 +386,7 @@ func TestBuildPiResumeCommandWithoutModelProvenancePreservesNativeSelection(t *t
 		t.Fatal(err)
 	}
 	m := &manifest.Manifest{Pi: &manifest.Pi{SessionID: "native-id", SessionDir: sessionDir}}
-	command, err := buildPiResumeCommand(m, &HealthStatus{TmuxSessionName: "pi-worker", WorktreePath: "/tmp/work"})
+	command, err := buildPiResumeCommand(m, &HealthStatus{TmuxSessionName: "pi-worker", WorktreePath: "/tmp/work"}, "launch-resume")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,7 +398,7 @@ func TestBuildPiResumeCommandWithoutModelProvenancePreservesNativeSelection(t *t
 func TestBuildPiResumeCommandWithoutTranscriptUsesHarnessDefault(t *testing.T) {
 	t.Setenv("AGM_PI_EXTENSION_ROOT", t.TempDir())
 	m := &manifest.Manifest{Pi: &manifest.Pi{SessionID: "native-id", SessionDir: t.TempDir()}}
-	command, err := buildPiResumeCommand(m, &HealthStatus{TmuxSessionName: "pi-worker", WorktreePath: "/tmp/work"})
+	command, err := buildPiResumeCommand(m, &HealthStatus{TmuxSessionName: "pi-worker", WorktreePath: "/tmp/work"}, "launch-resume")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -416,7 +417,7 @@ func TestBuildPiResumeCommandRejectsTranscriptIdentityMismatch(t *testing.T) {
 	m := &manifest.Manifest{Pi: &manifest.Pi{
 		SessionID: "native-id", SessionDir: dir, TranscriptPath: filepath.Join(dir, "different.jsonl"),
 	}}
-	_, err := buildPiResumeCommand(m, &HealthStatus{TmuxSessionName: "pi-worker", WorktreePath: "/tmp/work"})
+	_, err := buildPiResumeCommand(m, &HealthStatus{TmuxSessionName: "pi-worker", WorktreePath: "/tmp/work"}, "launch-resume")
 	if err == nil || !strings.Contains(err.Error(), "persisted native identity") {
 		t.Fatalf("error = %v", err)
 	}

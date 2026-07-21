@@ -171,6 +171,7 @@ export function toolsForMode(mode) {
 
 export default function (pi) {
 	let mode = process.env.AGM_PI_PERMISSION_MODE || "default";
+	const launchID = process.env.AGM_PI_LAUNCH_ID || "";
 	let state = "ready";
 	let allow = [];
 	let stopHookActive = false;
@@ -187,7 +188,7 @@ export default function (pi) {
 		state = "permission";
 		policyLoadError = `cannot load AGM Pi permission policy: ${error?.message || error}`;
 	}
-	const updateStatus = (ctx) => ctx.ui.setStatus("agm-pi", `AGM ${mode}/${state}`);
+	const updateStatus = (ctx) => ctx.ui.setStatus("agm-pi", `AGM ${mode}/${state}${launchID ? ` ${launchID}` : ""}`);
 
 	pi.on("session_start", async (_event, ctx) => {
 		updateStatus(ctx);

@@ -10,11 +10,13 @@ func TestBuildPiCommandIncludesIdentityPolicyAndModeTools(t *testing.T) {
 	command := BuildPiCommand(PiCommandSpec{
 		WorkDir: "/work dir", ResolvedModel: "anthropic/claude-sonnet-4-6",
 		SessionName: "worker", SessionID: "native-id", SessionDir: "/state dir",
+		LaunchID:       "launch-id",
 		PermissionMode: "default", PermissionExtension: "/ext dir/authorization.js",
 		PermissionPolicyFile: "/state dir/policy.json",
 	}).Command
 	for _, want := range []string{
 		"cd '/work dir'", "AGM_SESSION_NAME='worker'", "AGM_PI_PERMISSION_MODE='default'",
+		"AGM_PI_LAUNCH_ID='launch-id'",
 		"AGM_PI_PERMISSION_POLICY_FILE='/state dir/policy.json'", "pi --session-id 'native-id'",
 		"--session-dir '/state dir'", "--extension '/ext dir/authorization.js'",
 		"--approve --tools 'read,bash,edit,write,grep,find,ls'",

@@ -165,6 +165,7 @@ type HealthStatus struct {
 	CanResume         bool
 	Issues            []string
 	Warnings          []string
+	piLaunchID        string
 }
 
 // resolveSessionIdentifier finds the Claude UUID and manifest path from various identifier types
@@ -1116,7 +1117,8 @@ func dispatchResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, harnessN
 		fullCmd = buildAgyResumeCommand(m, health)
 	case "pi-cli":
 		var err error
-		fullCmd, err = buildPiResumeCommand(m, health)
+		health.piLaunchID = launchparity.NewPiLaunchID()
+		fullCmd, err = buildPiResumeCommand(m, health, health.piLaunchID)
 		if err != nil {
 			return err
 		}
@@ -1142,7 +1144,7 @@ func activeHarnessHasTmuxResumeCommand(harnessName string) bool {
 }
 
 //nolint:gocyclo // reason: exact-resume transaction keeps identity, transcript, authorization, and model checks adjacent
-func buildPiResumeCommand(m *manifest.Manifest, health *HealthStatus) (string, error) {
+func buildPiResumeCommand(m *manifest.Manifest, health *HealthStatus, launchID string) (string, error) {
 	if m.Pi == nil || m.Pi.SessionID == "" || m.Pi.SessionDir == "" {
 		return "", fmt.Errorf("pi session metadata is incomplete; exact native session_id and session_dir are required for resume")
 	}
@@ -1187,6 +1189,7 @@ func buildPiResumeCommand(m *manifest.Manifest, health *HealthStatus) (string, e
 		Harness: "pi-cli", Model: model, SessionName: health.TmuxSessionName,
 		SessionID: m.Pi.SessionID, WorkDir: health.WorktreePath,
 		PermissionMode: m.PermissionMode, Pi: m.Pi,
+		PiLaunchID:  launchID,
 		PiExtension: extensionPath, PiPolicyJSON: policyJSON, PiPolicyFile: policyFile,
 	}).Command, nil
 }
@@ -1329,7 +1332,7 @@ func waitForResumedPi(ctx context.Context, health *HealthStatus) error {
 		Title("Waiting for Pi session to load...").
 		Accessible(true).
 		Action(func() {
-			promptWaitErr = tmux.WaitForPiPromptContext(ctx, health.TmuxSessionName, 60*time.Second)
+			promptWaitErr = tmux.WaitForPiLaunchPromptContext(ctx, health.TmuxSessionName, health.piLaunchID, 60*time.Second)
 		}).
 		Run()
 	if spinErr != nil {

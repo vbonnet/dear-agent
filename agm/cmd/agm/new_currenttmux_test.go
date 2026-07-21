@@ -52,6 +52,7 @@ func TestQueueCurrentTmuxPiUsesManagedLaunchContract(t *testing.T) {
 	var gotSession, gotCommand string
 	spec := ops.HarnessLaunchSpec{
 		Harness: "pi-cli", SessionName: "pi-current", WorkDir: "/tmp/pi-current",
+		PiLaunchID:  "launch-current",
 		Pi:          &manifest.Pi{SessionID: "pi-current", SessionDir: "/tmp/agm/pi"},
 		PiExtension: "/tmp/agm/pi/authorization.js",
 	}

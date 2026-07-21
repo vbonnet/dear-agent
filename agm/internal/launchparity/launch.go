@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
@@ -41,6 +42,7 @@ type PiCommandSpec struct {
 	ResolvedModel        string
 	SessionName          string
 	SessionID            string
+	LaunchID             string
 	SessionDir           string
 	PermissionMode       string
 	PermissionExtension  string
@@ -54,10 +56,16 @@ type PiCommand struct {
 	ModeAppliedAtStartup bool
 }
 
+// NewPiLaunchID returns a compact per-process identity that remains visible in
+// Pi's shared terminal footer while retaining 64 bits of random uniqueness.
+func NewPiLaunchID() string {
+	return strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
+}
+
 // BuildPiCommand constructs one canonical Pi command for create and resume.
 func BuildPiCommand(spec PiCommandSpec) PiCommand {
 	var b strings.Builder
-	fmt.Fprintf(&b, "cd %s && env -u CLAUDECODE AGM_SESSION_NAME=%s PI_SESSION_ID=%s AGM_PI_PROJECT_DIR=%s", ShellQuote(spec.WorkDir), ShellQuote(spec.SessionName), ShellQuote(spec.SessionID), ShellQuote(spec.WorkDir))
+	fmt.Fprintf(&b, "cd %s && env -u CLAUDECODE AGM_SESSION_NAME=%s PI_SESSION_ID=%s AGM_PI_LAUNCH_ID=%s AGM_PI_PROJECT_DIR=%s", ShellQuote(spec.WorkDir), ShellQuote(spec.SessionName), ShellQuote(spec.SessionID), ShellQuote(spec.LaunchID), ShellQuote(spec.WorkDir))
 	fmt.Fprintf(&b, " AGM_PI_PERMISSION_MODE=%s AGM_PI_PERMISSION_POLICY_FILE=%s pi", ShellQuote(defaultPiMode(spec.PermissionMode)), ShellQuote(spec.PermissionPolicyFile))
 	fmt.Fprintf(&b, " --session-id %s --session-dir %s --name %s", ShellQuote(spec.SessionID), ShellQuote(spec.SessionDir), ShellQuote(spec.SessionName))
 	if spec.ResolvedModel != "" {

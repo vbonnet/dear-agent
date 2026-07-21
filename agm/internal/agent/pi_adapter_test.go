@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 func withPiAdapterRuntime(t *testing.T) {
@@ -21,7 +23,8 @@ func withPiAdapterRuntime(t *testing.T) {
 	originalSendPromptLiteral := piSendPromptLiteral
 	originalWaitForPrompt := piWaitForPrompt
 	originalKillSession := piKillSession
-	originalIsProcessRunning := piIsProcessRunning
+	originalCheckProcess := piCheckProcess
+	originalCheckHarness := piCheckHarness
 	originalAttachSession := piAttachSession
 	originalIsIdle := piIsIdle
 	t.Cleanup(func() {
@@ -33,7 +36,8 @@ func withPiAdapterRuntime(t *testing.T) {
 		piSendPromptLiteral = originalSendPromptLiteral
 		piWaitForPrompt = originalWaitForPrompt
 		piKillSession = originalKillSession
-		piIsProcessRunning = originalIsProcessRunning
+		piCheckProcess = originalCheckProcess
+		piCheckHarness = originalCheckHarness
 		piAttachSession = originalAttachSession
 		piIsIdle = originalIsIdle
 	})
@@ -43,9 +47,12 @@ func withPiAdapterRuntime(t *testing.T) {
 	piSendShellCommand = func(string, string) error { return nil }
 	piSendCommandLiteral = func(string, string) error { return nil }
 	piSendPromptLiteral = func(string, string, bool) error { return nil }
-	piWaitForPrompt = func(context.Context, string, time.Duration) error { return nil }
+	piWaitForPrompt = func(context.Context, string, string, time.Duration) error { return nil }
 	piKillSession = func(string) error { return nil }
-	piIsProcessRunning = func(string, string) (bool, error) { return false, nil }
+	piCheckProcess = func(string, string, string) (bool, error) { return false, nil }
+	piCheckHarness = func(string, string) (tmux.PaneLiveness, error) {
+		return tmux.PaneLiveness{SessionExists: true, RestartableShell: true, Evidence: "zsh"}, nil
+	}
 	piAttachSession = func(string) error { return nil }
 	piIsIdle = func(string) (bool, error) { return true, nil }
 }
@@ -120,7 +127,7 @@ func TestPiAdapterCreateRollsBackReadinessFailure(t *testing.T) {
 	withPiAdapterRuntime(t)
 	t.Setenv("AGM_PI_SESSION_ROOT", t.TempDir())
 	readyErr := errors.New("Pi fatal startup")
-	piWaitForPrompt = func(context.Context, string, time.Duration) error { return readyErr }
+	piWaitForPrompt = func(context.Context, string, string, time.Duration) error { return readyErr }
 	var killed string
 	piKillSession = func(name string) error { killed = name; return nil }
 	adapter, err := NewPiAdapter(&MockSessionStore{sessions: map[SessionID]*SessionMetadata{}})
@@ -147,8 +154,12 @@ func TestPiAdapterResumeUsesPersistedNativeIdentityModelAndMode(t *testing.T) {
 			PermissionPolicyJSON: `{"allow":["Bash(git:*)"]}`,
 		},
 	}}
-	var command string
+	var command, launchID string
 	piSendShellCommand = func(_, value string) error { command = value; return nil }
+	piWaitForPrompt = func(_ context.Context, _ string, gotLaunchID string, _ time.Duration) error {
+		launchID = gotLaunchID
+		return nil
+	}
 	adapter, err := NewPiAdapter(store)
 	if err != nil {
 		t.Fatal(err)
@@ -164,6 +175,125 @@ func TestPiAdapterResumeUsesPersistedNativeIdentityModelAndMode(t *testing.T) {
 	if strings.Contains(command, "Bash(git:*)") {
 		t.Fatalf("Pi resume inlined permission policy: %s", command)
 	}
+	if launchID == "" || !strings.Contains(command, "AGM_PI_LAUNCH_ID='"+launchID+"'") {
+		t.Fatalf("Pi resume command/readiness launch correlation = %q / %q", command, launchID)
+	}
+}
+
+func TestPiAdapterResumeUsesExactProcessLivenessAndFailsSafe(t *testing.T) {
+	withPiAdapterRuntime(t)
+	t.Setenv("TMUX", "fixture")
+	store := piResumeFixtureStore(t, "pi-live")
+	piHasSession = func(string) (bool, error) { return true, nil }
+	var processName string
+	piCheckProcess = func(_, _, process string) (bool, error) {
+		processName = process
+		return false, errors.New("fixture liveness unavailable")
+	}
+	sent := false
+	piSendShellCommand = func(string, string) error { sent = true; return nil }
+
+	adapter, _ := NewPiAdapter(store)
+	err := adapter.ResumeSession("agm-id")
+	if err == nil || !strings.Contains(err.Error(), "liveness unavailable") {
+		t.Fatalf("ResumeSession error = %v, want liveness failure", err)
+	}
+	if processName != "pi" || sent {
+		t.Fatalf("process=%q sent=%v, want exact Pi fail-safe check", processName, sent)
+	}
+}
+
+func TestPiAdapterResumeRejectsAnotherLiveHarnessBeforeMutation(t *testing.T) {
+	withPiAdapterRuntime(t)
+	t.Setenv("TMUX", "fixture")
+	store := piResumeFixtureStore(t, "pi-collision")
+	piHasSession = func(string) (bool, error) { return true, nil }
+	piCheckProcess = func(string, string, string) (bool, error) { return false, nil }
+	piCheckHarness = func(string, string) (tmux.PaneLiveness, error) {
+		return tmux.PaneLiveness{SessionExists: true, HarnessAlive: true, Evidence: "zsh,claude"}, nil
+	}
+	sent := false
+	piSendShellCommand = func(string, string) error { sent = true; return nil }
+
+	adapter, _ := NewPiAdapter(store)
+	err := adapter.ResumeSession("agm-id")
+	if err == nil || !strings.Contains(err.Error(), "another live harness") {
+		t.Fatalf("ResumeSession error = %v, want competing harness rejection", err)
+	}
+	if sent {
+		t.Fatal("ResumeSession injected the Pi command into another live harness")
+	}
+}
+
+func TestPiAdapterResumeRejectsNonShellForegroundBeforeMutation(t *testing.T) {
+	withPiAdapterRuntime(t)
+	t.Setenv("TMUX", "fixture")
+	store := piResumeFixtureStore(t, "pi-editor")
+	piHasSession = func(string) (bool, error) { return true, nil }
+	piCheckProcess = func(string, string, string) (bool, error) { return false, nil }
+	piCheckHarness = func(string, string) (tmux.PaneLiveness, error) {
+		return tmux.PaneLiveness{SessionExists: true, Evidence: "zsh,vim"}, nil
+	}
+	sent := false
+	piSendShellCommand = func(string, string) error { sent = true; return nil }
+
+	adapter, _ := NewPiAdapter(store)
+	err := adapter.ResumeSession("agm-id")
+	if err == nil || !strings.Contains(err.Error(), "not a proven restartable shell") {
+		t.Fatalf("ResumeSession error = %v, want non-shell rejection", err)
+	}
+	if sent {
+		t.Fatal("ResumeSession injected the Pi command into a non-shell foreground process")
+	}
+}
+
+func TestPiAdapterResumeRestartsOnlyInProvenBareShell(t *testing.T) {
+	withPiAdapterRuntime(t)
+	t.Setenv("TMUX", "fixture")
+	store := piResumeFixtureStore(t, "pi-shell")
+	piHasSession = func(string) (bool, error) { return true, nil }
+	piCheckProcess = func(string, string, string) (bool, error) { return false, nil }
+	piCheckHarness = func(string, string) (tmux.PaneLiveness, error) {
+		return tmux.PaneLiveness{SessionExists: true, RestartableShell: true, Evidence: "zsh"}, nil
+	}
+	command := ""
+	piSendShellCommand = func(_ string, value string) error { command = value; return nil }
+
+	adapter, _ := NewPiAdapter(store)
+	if err := adapter.ResumeSession("agm-id"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(command, "--session-id 'native.pi-id'") {
+		t.Fatalf("bare-shell resume command = %q", command)
+	}
+}
+
+func TestPiAdapterResumeLeavesLivePiUntouched(t *testing.T) {
+	withPiAdapterRuntime(t)
+	t.Setenv("TMUX", "fixture")
+	store := piResumeFixtureStore(t, "pi-live")
+	piHasSession = func(string) (bool, error) { return true, nil }
+	piCheckProcess = func(_, _, process string) (bool, error) { return process == "pi", nil }
+	sent := false
+	piSendShellCommand = func(string, string) error { sent = true; return nil }
+
+	adapter, _ := NewPiAdapter(store)
+	if err := adapter.ResumeSession("agm-id"); err != nil {
+		t.Fatal(err)
+	}
+	if sent {
+		t.Fatal("ResumeSession injected a command into an already-live Pi process")
+	}
+}
+
+func piResumeFixtureStore(t *testing.T, tmuxName string) *MockSessionStore {
+	t.Helper()
+	return &MockSessionStore{sessions: map[SessionID]*SessionMetadata{
+		"agm-id": {
+			TmuxName: tmuxName, WorkingDir: t.TempDir(), UUID: "native.pi-id",
+			NativeSessionDir: t.TempDir(), Model: "sonnet", PermissionPolicyJSON: `{"allow":[]}`,
+		},
+	}}
 }
 
 func TestPiAdapterSendsMessagesLiterallyWithoutInterrupting(t *testing.T) {

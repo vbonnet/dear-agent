@@ -86,6 +86,8 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-39** When AGM verifies Pi liveness, the system shall scan the pane process tree for the exact `pi` executable rather than infer liveness from tmux existence or a generic shell prompt.
 
+**TMUX-40** When AGM waits for a newly launched Pi process, the system shall accept only a managed ready marker containing that launch's unique ID, reject stale ready markers from earlier pane history, and fail closed when exact Pi process liveness cannot be proved.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

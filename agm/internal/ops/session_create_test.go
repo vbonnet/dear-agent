@@ -286,6 +286,9 @@ func TestCreateSessionPiPreparesExactNativeIdentityPolicyAndManifest(t *testing.
 	if launched.Pi.SessionID != "pi-native-id" || launched.Pi.SessionDir != root {
 		t.Fatalf("Pi identity = %#v", launched.Pi)
 	}
+	if launched.PiLaunchID == "" {
+		t.Fatal("Pi creation omitted process launch identity")
+	}
 	if launched.PiPolicyJSON != `{"allow":["Read(/work/**)"]}` {
 		t.Fatalf("Pi policy JSON = %q", launched.PiPolicyJSON)
 	}

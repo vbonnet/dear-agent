@@ -29,14 +29,12 @@ var (
 	piSendShellCommand   = tmux.SendCommand
 	piSendCommandLiteral = tmux.SendCommandLiteral
 	piSendPromptLiteral  = tmux.SendPromptLiteral
-	piWaitForPrompt      = tmux.WaitForPiPromptContext
+	piWaitForPrompt      = tmux.WaitForPiLaunchPromptContext
 	piKillSession        = tmux.KillSessionWithError
-	piIsProcessRunning   = func(name, _ string) (bool, error) {
-		verdict, err := tmux.CheckPaneLiveness(name, tmux.GetSocketPath())
-		return verdict.SessionExists && verdict.HarnessAlive, err
-	}
-	piAttachSession = tmux.AttachSession
-	piIsIdle        = tmux.IsPiIdle
+	piCheckProcess       = tmux.CheckProcessInPaneTree
+	piCheckHarness       = tmux.CheckPaneLiveness
+	piAttachSession      = tmux.AttachSession
+	piIsIdle             = tmux.IsPiIdle
 )
 
 // NewPiAdapter creates a Pi CLI adapter.
@@ -113,11 +111,12 @@ func (a *PiAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	if err := piNewSession(tmuxName, workDir); err != nil {
 		return "", fmt.Errorf("create Pi tmux session: %w", err)
 	}
-	command := buildPiAdapterCommand(tmuxName, string(sessionID), sessionDir, workDir, model, permissionMode, extensionPath, policyFile)
+	launchID := launchparity.NewPiLaunchID()
+	command := buildPiAdapterCommand(tmuxName, string(sessionID), launchID, sessionDir, workDir, model, permissionMode, extensionPath, policyFile)
 	if err := piSendShellCommand(tmuxName, command); err != nil {
 		return "", rollbackPiAdapterSession(tmuxName, fmt.Errorf("start Pi in tmux: %w", err))
 	}
-	if err := piWaitForPrompt(context.Background(), tmuxName, 30*time.Second); err != nil {
+	if err := piWaitForPrompt(context.Background(), tmuxName, launchID, 30*time.Second); err != nil {
 		return "", rollbackPiAdapterSession(tmuxName, fmt.Errorf("pi did not become ready after create: %w", err))
 	}
 	metadata := &SessionMetadata{
@@ -135,10 +134,10 @@ func (a *PiAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	return sessionID, nil
 }
 
-func buildPiAdapterCommand(tmuxName, nativeID, sessionDir, workDir, model, permissionMode, extensionPath, permissionPolicyFile string) string {
+func buildPiAdapterCommand(tmuxName, nativeID, launchID, sessionDir, workDir, model, permissionMode, extensionPath, permissionPolicyFile string) string {
 	return launchparity.BuildPiCommand(launchparity.PiCommandSpec{
 		WorkDir: workDir, ResolvedModel: ResolveModelFullName("pi-cli", model),
-		SessionName: tmuxName, SessionID: nativeID, SessionDir: sessionDir,
+		SessionName: tmuxName, SessionID: nativeID, LaunchID: launchID, SessionDir: sessionDir,
 		PermissionMode: permissionMode, PermissionExtension: extensionPath,
 		PermissionPolicyFile: permissionPolicyFile,
 	}).Command
@@ -222,29 +221,28 @@ func (a *PiAdapter) ResumeSession(sessionID SessionID) error {
 	if err != nil {
 		return fmt.Errorf("install Pi permission policy: %w", err)
 	}
-	exists, err := piHasSession(metadata.TmuxName)
+	exists, running, err := piResumeTargetState(sessionID, metadata.TmuxName)
 	if err != nil {
-		return fmt.Errorf("check Pi tmux session: %w", err)
+		return err
 	}
 	created := false
-	launch := !exists
+	launch := !running
 	if !exists {
 		if err := piNewSession(metadata.TmuxName, metadata.WorkingDir); err != nil {
 			return fmt.Errorf("create Pi resume tmux session: %w", err)
 		}
 		created = true
-	} else if running, runningErr := piIsProcessRunning(metadata.TmuxName, "pi"); runningErr != nil || !running {
-		launch = true
 	}
 	if launch {
-		command := buildPiAdapterCommand(metadata.TmuxName, metadata.UUID, metadata.NativeSessionDir, metadata.WorkingDir, metadata.Model, metadata.PermissionMode, extensionPath, policyFile)
+		launchID := launchparity.NewPiLaunchID()
+		command := buildPiAdapterCommand(metadata.TmuxName, metadata.UUID, launchID, metadata.NativeSessionDir, metadata.WorkingDir, metadata.Model, metadata.PermissionMode, extensionPath, policyFile)
 		if err := piSendShellCommand(metadata.TmuxName, command); err != nil {
 			if created {
 				return rollbackPiAdapterSession(metadata.TmuxName, fmt.Errorf("send Pi resume command: %w", err))
 			}
 			return fmt.Errorf("send Pi resume command: %w", err)
 		}
-		if err := piWaitForPrompt(context.Background(), metadata.TmuxName, 60*time.Second); err != nil {
+		if err := piWaitForPrompt(context.Background(), metadata.TmuxName, launchID, 60*time.Second); err != nil {
 			if created {
 				return rollbackPiAdapterSession(metadata.TmuxName, fmt.Errorf("pi resume readiness: %w", err))
 			}
@@ -257,6 +255,34 @@ func (a *PiAdapter) ResumeSession(sessionID SessionID) error {
 		}
 	}
 	return nil
+}
+
+func piResumeTargetState(sessionID SessionID, tmuxName string) (bool, bool, error) {
+	exists, err := piHasSession(tmuxName)
+	if err != nil {
+		return false, false, fmt.Errorf("check Pi tmux session: %w", err)
+	}
+	if !exists {
+		return false, false, nil
+	}
+	running, err := piCheckProcess(tmuxName, tmux.GetSocketPath(), "pi")
+	if err != nil {
+		return true, false, fmt.Errorf("check exact Pi process liveness: %w", err)
+	}
+	if running {
+		return true, true, nil
+	}
+	verdict, err := piCheckHarness(tmuxName, tmux.GetSocketPath())
+	if err != nil {
+		return true, false, fmt.Errorf("check competing harness liveness: %w", err)
+	}
+	if verdict.HarnessAlive {
+		return true, false, fmt.Errorf("refusing to resume Pi session %q into a tmux pane containing another live harness (pane tree: %s)", sessionID, verdict.Evidence)
+	}
+	if !verdict.RestartableShell {
+		return true, false, fmt.Errorf("refusing to resume Pi session %q because its tmux pane is not a proven restartable shell (pane tree: %s)", sessionID, verdict.Evidence)
+	}
+	return true, false, nil
 }
 
 // TerminateSession asks Pi to exit and removes the adapter's metadata record.

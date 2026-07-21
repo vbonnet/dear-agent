@@ -91,7 +91,7 @@ func TestStartAgyHarnessPropagatesReadinessFailure(t *testing.T) {
 
 func TestStartPiHarnessUsesManagedExtensionAndFatalReadiness(t *testing.T) {
 	callerCtx := t.Context()
-	var sent string
+	var sent, waitedLaunchID string
 	runtime := piHarnessRuntime{
 		lookPath: func(file string) (string, error) {
 			if file != "pi" {
@@ -106,10 +106,11 @@ func TestStartPiHarnessUsesManagedExtensionAndFatalReadiness(t *testing.T) {
 			sent = command
 			return nil
 		},
-		waitForPrompt: func(ctx context.Context, session string, timeout time.Duration) error {
+		waitForPrompt: func(ctx context.Context, session, launchID string, timeout time.Duration) error {
 			if ctx != callerCtx || session != "pi-worker" || timeout != 90*time.Second {
 				t.Fatalf("readiness = ctx %v session %q timeout %s", ctx == callerCtx, session, timeout)
 			}
+			waitedLaunchID = launchID
 			return nil
 		},
 		sleep: func(time.Duration) {},
@@ -125,6 +126,9 @@ func TestStartPiHarnessUsesManagedExtensionAndFatalReadiness(t *testing.T) {
 	if !modeApplied || !strings.Contains(sent, "--extension '/tmp/agm-auth.js'") || !strings.Contains(sent, "--tools 'read,grep,find,ls'") {
 		t.Fatalf("Pi launch = mode %v command %q", modeApplied, sent)
 	}
+	if waitedLaunchID == "" || !strings.Contains(sent, "AGM_PI_LAUNCH_ID='"+waitedLaunchID+"'") {
+		t.Fatalf("Pi launch/readiness correlation = command %q launch %q", sent, waitedLaunchID)
+	}
 }
 
 func TestStartPiHarnessPropagatesManagedReadinessFailure(t *testing.T) {
@@ -132,7 +136,7 @@ func TestStartPiHarnessPropagatesManagedReadinessFailure(t *testing.T) {
 	runtime := piHarnessRuntime{
 		lookPath:      func(string) (string, error) { return "/fixture/pi", nil },
 		sendCommand:   func(string, string) error { return nil },
-		waitForPrompt: func(context.Context, string, time.Duration) error { return wantErr },
+		waitForPrompt: func(context.Context, string, string, time.Duration) error { return wantErr },
 		sleep:         func(time.Duration) {},
 	}
 	_, err := startPiHarnessWithRuntime(t.Context(), ops.HarnessLaunchSpec{

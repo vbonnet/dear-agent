@@ -14,6 +14,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/codexcontrol"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
+	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/permissionparity/piadapter"
 	"github.com/vbonnet/dear-agent/agm/internal/pisession"
@@ -482,7 +483,7 @@ func optionalCodexMetadata(callCtx context.Context, opCtx *OpContext, req *Creat
 }
 
 func buildHarnessLaunchSpec(req *CreateSessionRequest, params *createSessionParams, sessionID string, codexMeta *manifest.Codex) HarnessLaunchSpec {
-	return HarnessLaunchSpec{
+	spec := HarnessLaunchSpec{
 		Harness:          params.harness,
 		Model:            params.model,
 		SessionName:      params.name,
@@ -501,6 +502,10 @@ func buildHarnessLaunchSpec(req *CreateSessionRequest, params *createSessionPara
 		PiPolicyJSON:     req.Metadata.PiPolicyJSON,
 		PiPolicyFile:     req.Metadata.PiPolicyFile,
 	}
+	if params.harness == "pi-cli" {
+		spec.PiLaunchID = launchparity.NewPiLaunchID()
+	}
+	return spec
 }
 
 func prepareCreateManifestDir(req *CreateSessionRequest) (manifestPath string, registrationAllowed, created bool, err error) {

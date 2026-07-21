@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/huh/spinner"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
+	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
@@ -58,14 +59,14 @@ func activeHarnessHasTmuxLauncher(harness string) bool {
 type piHarnessRuntime struct {
 	lookPath      func(string) (string, error)
 	sendCommand   func(string, string) error
-	waitForPrompt func(context.Context, string, time.Duration) error
+	waitForPrompt func(context.Context, string, string, time.Duration) error
 	sleep         func(time.Duration)
 }
 
 func realPiHarnessRuntime() piHarnessRuntime {
 	return piHarnessRuntime{
 		lookPath: exec.LookPath, sendCommand: tmux.SendCommand,
-		waitForPrompt: tmux.WaitForPiPromptContext, sleep: time.Sleep,
+		waitForPrompt: tmux.WaitForPiLaunchPromptContext, sleep: time.Sleep,
 	}
 }
 
@@ -78,12 +79,15 @@ func startPiHarnessWithRuntime(ctx context.Context, spec ops.HarnessLaunchSpec, 
 	if _, err := runtime.lookPath("pi"); err != nil {
 		return false, fmt.Errorf("pi executable is unavailable: %w", err)
 	}
+	if spec.PiLaunchID == "" {
+		spec.PiLaunchID = launchparity.NewPiLaunchID()
+	}
 	launch := ops.BuildHarnessLaunchCommand(spec)
 	if err := runtime.sendCommand(spec.SessionName, launch.Command); err != nil {
 		return launch.ModeAppliedAtStartup, fmt.Errorf("start Pi in tmux: %w", err)
 	}
 	runtime.sleep(500 * time.Millisecond)
-	if err := runtime.waitForPrompt(ctx, spec.SessionName, 90*time.Second); err != nil {
+	if err := runtime.waitForPrompt(ctx, spec.SessionName, spec.PiLaunchID, 90*time.Second); err != nil {
 		return launch.ModeAppliedAtStartup, fmt.Errorf("pi managed readiness: %w", err)
 	}
 	ui.PrintSuccess("Pi adapter ready")
