@@ -703,15 +703,25 @@ func startNewSessionForContext(ctx context.Context, inTmux, detached bool, sessi
 // applyCreationModeSwitch dispatches a mode switch during session creation.
 // Non-fatal: errors are logged as warnings and execution continues.
 func applyCreationModeSwitch(sessionName, harness, targetMode string) {
+	applyCreationModeSwitchContext(context.Background(), sessionName, harness, targetMode)
+}
+
+func applyCreationModeSwitchContext(ctx context.Context, sessionName, harness, targetMode string) {
 	if targetMode == "" {
 		return
 	}
+	if ctx.Err() != nil {
+		return
+	}
 	debug.Log("Applying creation mode switch: default -> %s (harness: %s)", targetMode, harness)
-	if err := dispatchModeSwitch(harness, sessionName, targetMode, "default"); err != nil {
+	if err := dispatchModeSwitchContext(ctx, harness, sessionName, targetMode, "default"); err != nil {
 		ui.PrintWarning(fmt.Sprintf("Mode switch to %s failed: %v (continuing with default mode)", targetMode, err))
 		return
 	}
 	ui.PrintSuccess(fmt.Sprintf("Mode set to %s", targetMode))
+	if ctx.Err() != nil {
+		return
+	}
 	adapter, err := getStorage()
 	if err != nil {
 		debug.Log("Could not connect to storage for mode manifest update: %v", err)
@@ -789,12 +799,15 @@ func enforceCircuitBreakers() error {
 //   - sessionName: target tmux session
 //   - promptText: the prompt content (used for keyword-based verification)
 //   - sendFunc: function that re-sends the prompt on retry
-func verifyAndRetryPromptDelivery(sessionName, promptText string, sendFunc func() error) {
-	result, err := tmux.VerifyPromptDelivery(sessionName, promptText, sendFunc, 3)
+func verifyAndRetryPromptDelivery(ctx context.Context, sessionName, promptText string, sendFunc func() error) error {
+	result, err := tmux.VerifyPromptDeliveryContext(ctx, sessionName, promptText, sendFunc, 3)
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		debug.Log("Prompt delivery verification error: %v", err)
 		logger.Warn("Could not verify prompt delivery", "error", err)
-		return
+		return nil
 	}
 	if result.Delivered {
 		debug.Log("Prompt delivery confirmed (attempt %d, method: %s)", result.Attempt, result.Method)
@@ -806,6 +819,7 @@ func verifyAndRetryPromptDelivery(sessionName, promptText string, sendFunc func(
 			"session", sessionName)
 		fmt.Println("  ⚠ Prompt delivery could not be verified — check session manually")
 	}
+	return nil
 }
 
 func buildSessionTags(role string, tags []string) []string {

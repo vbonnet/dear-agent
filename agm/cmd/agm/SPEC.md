@@ -84,6 +84,8 @@ Provide a production-ready CLI that:
 
 **CLI-28** When AGM launches AGY and a startup prompt must be delivered, the system shall wait through first-run trust and feedback-survey prompts until AGY is ready before sending that prompt, and shall propagate readiness failure.
 
+**CLI-29** When a command-scoped create, model-change, mode-change, or compaction flow waits to deliver or verify a prompt or slash command, the system shall derive that wait from the Cobra command context and shall stop before later delivery, retry, persistence, liveness validation, or attach work when the context is canceled.
+
 ## Requirements
 
 ### Functional Requirements

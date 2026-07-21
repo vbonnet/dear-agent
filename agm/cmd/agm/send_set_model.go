@@ -18,6 +18,12 @@ import (
 var setModelDryRun bool
 var setModelHarness string
 
+var (
+	setModelHasSession                  = tmux.HasSession
+	setModelCapturePaneOutputContext    = tmux.CapturePaneOutputContext
+	setModelSendSlashCommandSafeContext = tmux.SendSlashCommandSafeContext
+)
+
 var sendSetModelCmd = &cobra.Command{
 	Use:   "set-model <session-name> <model>",
 	Short: "Change the AI model of a running harness session",
@@ -161,7 +167,7 @@ func verifyModelSet(ctx context.Context, sessionName string, instruction setMode
 			return false, "", ctx.Err()
 		case <-timer.C:
 		}
-		output, err := tmux.CapturePaneOutput(sessionName, 10)
+		output, err := setModelCapturePaneOutputContext(ctx, sessionName, 10)
 		if err != nil {
 			continue
 		}
@@ -220,6 +226,13 @@ func persistAgyModelSwitchForSession(sessionName string, instruction setModelIns
 func runSendSetModel(cmd *cobra.Command, args []string) error {
 	sessionName := args[0]
 	modelInput := args[1]
+	ctx := context.Background()
+	if cmd != nil {
+		ctx = cmd.Context()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	instruction, err := resolveSetModelInstruction(resolveSetModelHarness(sessionName), modelInput)
 	if err != nil {
@@ -233,25 +246,21 @@ func runSendSetModel(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check tmux session exists
-	exists, err := tmux.HasSession(sessionName)
+	exists, err := setModelHasSession(sessionName)
 	if err != nil {
 		return fmt.Errorf("failed to check tmux session: %w", err)
 	}
 	if !exists {
 		return fmt.Errorf("session '%s' does not exist in tmux.\n\nSuggestions:\n  - List sessions: agm session list\n  - Create session: agm session new %s", sessionName, sessionName)
 	}
-	baseline, baselineErr := tmux.CapturePaneOutput(sessionName, 10)
+	baseline, baselineErr := setModelCapturePaneOutputContext(ctx, sessionName, 10)
 
 	// Send /model command
-	if err := tmux.SendSlashCommandSafe(sessionName, instruction.Command); err != nil {
+	if err := setModelSendSlashCommandSafeContext(ctx, sessionName, instruction.Command); err != nil {
 		return fmt.Errorf("failed to send model command: %w", err)
 	}
 
 	// Verify model was set
-	ctx := context.Background()
-	if cmd != nil {
-		ctx = cmd.Context()
-	}
 	verified, confirmation, err := verifyModelSet(ctx, sessionName, instruction, baseline, baselineErr == nil, 5*time.Second)
 	if err != nil {
 		// The command was already delivered, so cancellation leaves the runtime

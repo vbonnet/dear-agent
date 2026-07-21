@@ -53,7 +53,7 @@ func init() {
 	sessionCmd.AddCommand(sessionCompactCmd)
 }
 
-func runSessionCompact(_ *cobra.Command, args []string) error {
+func runSessionCompact(cmd *cobra.Command, args []string) error {
 	identifier := args[0]
 
 	// Resolve session via Dolt
@@ -104,7 +104,7 @@ func runSessionCompact(_ *cobra.Command, args []string) error {
 
 	// Build and send /compact command
 	command := buildCompactCommand(sessionCompactArgs)
-	if err := tmux.SendSlashCommandSafe(tmuxName, command); err != nil {
+	if err := tmux.SendSlashCommandSafeContext(cmd.Context(), tmuxName, command); err != nil {
 		return fmt.Errorf("failed to send compact command: %w", err)
 	}
 

@@ -83,6 +83,29 @@ func TestWaitForAgyAssociationRetryDelayUsesCallerContext(t *testing.T) {
 	}
 }
 
+func TestRunClaudePostCreateReturnsCallerCancellationBeforeSideEffects(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err := runClaudePostCreate(ctx, "claude-create", false)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("runClaudePostCreate() error = %v, want context.Canceled", err)
+	}
+}
+
+func TestDeliverInitialPromptReturnsCallerCancellation(t *testing.T) {
+	originalPrompt, originalPromptFile := prompt, promptFile
+	prompt, promptFile = "startup prompt", ""
+	t.Cleanup(func() { prompt, promptFile = originalPrompt, originalPromptFile })
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err := deliverInitialPrompt(ctx, "claude-create", true, true)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("deliverInitialPrompt() error = %v, want context.Canceled", err)
+	}
+}
+
 func TestRunAgyPostCreateReturnsCancellationBeforeSideEffects(t *testing.T) {
 	t.Setenv("AGM_TEST_RUN_ID", "")
 	t.Setenv("AGM_TEST_ENV", "")
@@ -101,7 +124,7 @@ func TestRunAgyPostCreateReturnsCancellationBeforeSideEffects(t *testing.T) {
 			return ctx.Err()
 		},
 		associate:          func(string) { associated = true },
-		deliver:            func(string, bool, bool) { delivered = true },
+		deliver:            func(context.Context, string, bool, bool) error { delivered = true; return nil },
 		associateWithRetry: func(context.Context, string, int, time.Duration) error { retried = true; return nil },
 	})
 	if !errors.Is(err, context.Canceled) {
@@ -124,7 +147,7 @@ func TestRunAgyPostCreateMetadataRetryUsesCallerContext(t *testing.T) {
 	err := runAgyPostCreateWithRuntime(callerCtx, "agy-create", agyPostCreateRuntime{
 		wait:      func(context.Context, string, time.Duration) error { return nil },
 		associate: func(string) {},
-		deliver:   func(string, bool, bool) {},
+		deliver:   func(context.Context, string, bool, bool) error { return nil },
 		associateWithRetry: func(ctx context.Context, sessionName string, attempts int, delay time.Duration) error {
 			if ctx != callerCtx {
 				t.Fatal("metadata retry did not receive the caller context")

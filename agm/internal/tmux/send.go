@@ -51,6 +51,17 @@ func SendCommandSafe(sessionName string, command string) error {
 //   - agm session new --prompt-file <file>
 //   - agm session send <session> --file <file>
 func SendPromptFileSafe(sessionName string, filePath string, shouldInterrupt bool) error {
+	return SendPromptFileSafeContext(context.Background(), sessionName, filePath, shouldInterrupt)
+}
+
+// SendPromptFileSafeContext is the command-scoped file delivery path. Caller
+// cancellation stops file preparation and composer polling before prompt bytes
+// are written.
+func SendPromptFileSafeContext(ctx context.Context, sessionName string, filePath string, shouldInterrupt bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	// Step 1: Validate file exists and read content
 	content, err := os.ReadFile(filePath)
 	if err != nil {
@@ -64,8 +75,11 @@ func SendPromptFileSafe(sessionName string, filePath string, shouldInterrupt boo
 	}
 
 	// Step 3: Wait for Claude to be ready
-	if err := WaitForPromptSimple(sessionName, 60*time.Second); err != nil {
+	if err := WaitForPromptSimpleContext(ctx, sessionName, 60*time.Second); err != nil {
 		return fmt.Errorf("session not ready before sending file: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	// Step 4: Send entire file content as one command with conditional interrupt
@@ -88,14 +102,23 @@ func SendPromptFileSafe(sessionName string, filePath string, shouldInterrupt boo
 //   - Sending /agm:agm-assoc, /engram-swarm:start, etc.
 //   - Any skill invocation via agm session send
 func SendSlashCommandSafe(sessionName string, command string) error {
+	return SendSlashCommandSafeContext(context.Background(), sessionName, command)
+}
+
+// SendSlashCommandSafeContext is the command-scoped slash-command path. Caller
+// cancellation stops composer polling before the slash command is written.
+func SendSlashCommandSafeContext(ctx context.Context, sessionName string, command string) error {
 	// Validate slash command format
 	if !strings.HasPrefix(command, "/") {
 		return fmt.Errorf("not a slash command (must start with /): %s", command)
 	}
 
 	// Wait for Claude to be ready
-	if err := WaitForPromptSimple(sessionName, 60*time.Second); err != nil {
+	if err := WaitForPromptSimpleContext(ctx, sessionName, 60*time.Second); err != nil {
 		return fmt.Errorf("session not ready for slash command: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	// Send slash command using existing SendCommand

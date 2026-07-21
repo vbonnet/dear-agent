@@ -81,7 +81,10 @@ func completeCLICreateSession(ctx context.Context, sessionName string, completio
 		return err
 	}
 	if modeFlagValue != "" && !completion.Launch.ModeAppliedAtStartup && (harnessName != "claude-code" || os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "") {
-		applyCreationModeSwitch(sessionName, harnessName, modeFlagValue)
+		applyCreationModeSwitchContext(ctx, sessionName, harnessName, modeFlagValue)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if os.Getenv("AGM_TEST_RUN_ID") == "" && os.Getenv("AGM_TEST_ENV") == "" {
 		verdict, livenessErr := tmux.CheckPaneLiveness(sessionName, tmux.GetSocketPath())

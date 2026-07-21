@@ -17,7 +17,7 @@ import (
 func runHarnessPostCreate(ctx context.Context, sessionName string, modeAppliedAtStartup bool) error {
 	switch {
 	case harnessName == "claude-code" && os.Getenv("AGM_TEST_RUN_ID") == "" && os.Getenv("AGM_TEST_ENV") == "":
-		return runClaudePostCreate(sessionName, modeAppliedAtStartup)
+		return runClaudePostCreate(ctx, sessionName, modeAppliedAtStartup)
 	case harnessName == "claude-code":
 		debug.Phase("Skip Association (Test Environment)")
 		debug.Log("Skipping deterministic association: AGM_TEST_RUN_ID=%s AGM_TEST_ENV=%s",
@@ -48,59 +48,93 @@ func runHarnessPostCreate(ctx context.Context, sessionName string, modeAppliedAt
 // ready-file timeout per session and leaving the session unassociated (ce-o1sg).
 // associateSpawnedClaudeSession does the same work from the spawner with no
 // dependency on the spawned session running anything.
-func runClaudePostCreate(sessionName string, modeAppliedAtStartup bool) error {
+func runClaudePostCreate(ctx context.Context, sessionName string, modeAppliedAtStartup bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	associateSpawnedClaudeSession(sessionName)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if modeFlagValue != "" && !modeAppliedAtStartup {
-		applyCreationModeSwitch(sessionName, harnessName, modeFlagValue)
+		applyCreationModeSwitchContext(ctx, sessionName, harnessName, modeFlagValue)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	ui.PrintSuccess("Claude is ready and session associated!")
-	deliverInitialPrompt(sessionName, true, true)
-	return nil
+	return deliverInitialPrompt(ctx, sessionName, true, true)
 }
 
 // deliverInitialPrompt sends the user-supplied --prompt or --prompt-file to the
-// session. The multiLine flag selects SendMultiLinePromptSafe (Claude) vs
+// session. The multiLine flag selects SendMultiLinePromptSafeContext (Claude) vs
 // SendPromptLiteral (Gemini/OpenCode/Codex). verifyDelivery enables the generic
 // retry verifier, which depends on Claude-style prompt echo/processing signals.
-func deliverInitialPrompt(sessionName string, multiLine, verifyDelivery bool) {
-	if prompt != "" {
-		debug.Log("Sending prompt from --prompt flag")
-		var sendErr error
+func deliverInitialPrompt(ctx context.Context, sessionName string, multiLine, verifyDelivery bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	switch {
+	case prompt != "":
+		return deliverInitialPromptText(ctx, sessionName, multiLine, verifyDelivery)
+	case promptFile != "":
+		return deliverInitialPromptFile(ctx, sessionName, verifyDelivery)
+	default:
+		return nil
+	}
+}
+
+func deliverInitialPromptText(ctx context.Context, sessionName string, multiLine, verifyDelivery bool) error {
+	debug.Log("Sending prompt from --prompt flag")
+	send := func() error {
 		if multiLine {
-			sendErr = tmux.SendMultiLinePromptSafe(sessionName, prompt, false)
-		} else {
-			sendErr = tmux.SendPromptLiteral(sessionName, prompt, false)
+			return tmux.SendMultiLinePromptSafeContext(ctx, sessionName, prompt, false)
 		}
-		if sendErr != nil {
-			logger.Warn("Failed to send prompt", "error", sendErr)
-			fmt.Println("  • You can manually enter the prompt in the session")
-			return
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		if verifyDelivery {
-			verifyAndRetryPromptDelivery(sessionName, prompt, func() error {
-				if multiLine {
-					return tmux.SendMultiLinePromptSafe(sessionName, prompt, false)
-				}
-				return tmux.SendPromptLiteral(sessionName, prompt, false)
-			})
-		}
-		return
+		return tmux.SendPromptLiteral(sessionName, prompt, false)
 	}
-	if promptFile == "" {
-		return
+	if err := send(); err != nil {
+		return reportInitialPromptSendFailure(ctx, err, "Failed to send prompt", "")
 	}
+	if !verifyDelivery {
+		return nil
+	}
+	return verifyAndRetryPromptDelivery(ctx, sessionName, prompt, send)
+}
+
+func deliverInitialPromptFile(ctx context.Context, sessionName string, verifyDelivery bool) error {
 	debug.Log("Sending prompt from --prompt-file flag: %s", promptFile)
-	promptContent, readErr := os.ReadFile(promptFile)
-	if err := tmux.SendPromptFileSafe(sessionName, promptFile, false); err != nil {
-		logger.Warn("Failed to send prompt from file", "error", err, "file", promptFile)
-		fmt.Println("  • You can manually enter the prompt in the session")
-		return
+	promptContent, readable := readPromptForVerification(promptFile)
+	send := func() error {
+		return tmux.SendPromptFileSafeContext(ctx, sessionName, promptFile, false)
 	}
-	if verifyDelivery && readErr == nil {
-		verifyAndRetryPromptDelivery(sessionName, string(promptContent), func() error {
-			return tmux.SendPromptFileSafe(sessionName, promptFile, false)
-		})
+	if err := send(); err != nil {
+		return reportInitialPromptSendFailure(ctx, err, "Failed to send prompt from file", promptFile)
 	}
+	if !verifyDelivery || !readable {
+		return nil
+	}
+	return verifyAndRetryPromptDelivery(ctx, sessionName, string(promptContent), send)
+}
+
+func readPromptForVerification(file string) ([]byte, bool) {
+	content, err := os.ReadFile(file)
+	return content, err == nil
+}
+
+func reportInitialPromptSendFailure(ctx context.Context, sendErr error, message, file string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if file == "" {
+		logger.Warn(message, "error", sendErr)
+	} else {
+		logger.Warn(message, "error", sendErr, "file", file)
+	}
+	fmt.Println("  • You can manually enter the prompt in the session")
+	return nil
 }
 
 // runGeminiPostCreate waits for the Gemini prompt and delivers --prompt /
@@ -124,7 +158,9 @@ func runGeminiPostCreate(ctx context.Context, sessionName string) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		deliverInitialPrompt(sessionName, false, true)
+		if err := deliverInitialPrompt(ctx, sessionName, false, true); err != nil {
+			return err
+		}
 	default:
 		debug.Log("Detached mode: skipping Gemini prompt wait and prompt delivery")
 	}
@@ -160,7 +196,9 @@ func runCodexPostCreate(ctx context.Context, sessionName string) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		deliverInitialPrompt(sessionName, false, false)
+		if err := deliverInitialPrompt(ctx, sessionName, false, false); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -171,7 +209,7 @@ func runCodexPostCreate(ctx context.Context, sessionName string) error {
 type agyPostCreateRuntime struct {
 	wait               func(context.Context, string, time.Duration) error
 	associate          func(string)
-	deliver            func(string, bool, bool)
+	deliver            func(context.Context, string, bool, bool) error
 	associateWithRetry func(context.Context, string, int, time.Duration) error
 }
 
@@ -205,7 +243,9 @@ func runAgyPostCreateWithRuntime(ctx context.Context, sessionName string, runtim
 			debug.Log("AGY prompt detected, session ready")
 		}
 		runtime.associate(sessionName)
-		runtime.deliver(sessionName, false, false)
+		if err := runtime.deliver(ctx, sessionName, false, false); err != nil {
+			return err
+		}
 		if prompt != "" || promptFile != "" {
 			if err := runtime.wait(ctx, sessionName, 60*time.Second); err != nil {
 				if ctx.Err() != nil {
@@ -242,7 +282,9 @@ func runOpenCodePostCreate(ctx context.Context, sessionName string) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		deliverInitialPrompt(sessionName, false, true)
+		if err := deliverInitialPrompt(ctx, sessionName, false, true); err != nil {
+			return err
+		}
 	default:
 		debug.Log("Detached mode: skipping OpenCode prompt wait and prompt delivery")
 	}

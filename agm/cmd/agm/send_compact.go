@@ -89,7 +89,7 @@ func agmBaseDir() string {
 	return filepath.Join(home, ".agm")
 }
 
-func runSendCompact(_ *cobra.Command, args []string) error {
+func runSendCompact(cmd *cobra.Command, args []string) error {
 	sessionName := args[0]
 
 	// Check tmux session exists
@@ -169,7 +169,10 @@ func runSendCompact(_ *cobra.Command, args []string) error {
 		ui.PrintWarning(fmt.Sprintf("Could not save prompt audit trail: %v", err))
 		promptFile = "(unsaved)"
 	}
+	return completeSendCompact(cmd.Context(), sessionName, command, promptFile, baseDir, compState)
+}
 
+func completeSendCompact(ctx context.Context, sessionName, command, promptFile, baseDir string, compState *compaction.CompactionState) error {
 	// Dry-run: output prompt and exit
 	if compactDryRun {
 		fmt.Printf("=== Dry Run: Compaction Prompt ===\n\n%s\n\n=== Saved to: %s ===\n", command, promptFile)
@@ -177,7 +180,7 @@ func runSendCompact(_ *cobra.Command, args []string) error {
 	}
 
 	// Send via tmux
-	if err := tmux.SendSlashCommandSafe(sessionName, command); err != nil {
+	if err := tmux.SendSlashCommandSafeContext(ctx, sessionName, command); err != nil {
 		return fmt.Errorf("failed to send compact command: %w", err)
 	}
 

@@ -1,12 +1,52 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 )
+
+func TestRunSendSetModelUsesCallerContextBeforeSlashCommandDelivery(t *testing.T) {
+	originalDryRun, originalHarness := setModelDryRun, setModelHarness
+	originalHasSession := setModelHasSession
+	originalCapture := setModelCapturePaneOutputContext
+	originalSend := setModelSendSlashCommandSafeContext
+	t.Cleanup(func() {
+		setModelDryRun, setModelHarness = originalDryRun, originalHarness
+		setModelHasSession = originalHasSession
+		setModelCapturePaneOutputContext = originalCapture
+		setModelSendSlashCommandSafeContext = originalSend
+	})
+	setModelDryRun = false
+	setModelHarness = "agy"
+	setModelHasSession = func(string) (bool, error) { return true, nil }
+	setModelCapturePaneOutputContext = func(context.Context, string, int) (string, error) { return "", nil }
+
+	type callerContextKey struct{}
+	callerCtx, cancel := context.WithCancel(context.WithValue(t.Context(), callerContextKey{}, "set-model"))
+	setModelSendSlashCommandSafeContext = func(ctx context.Context, sessionName, command string) error {
+		if ctx != callerCtx {
+			t.Fatal("slash-command delivery did not receive the caller context")
+		}
+		if sessionName != "agy-model" || command != "/model Gemini 3.5 Flash (Low)" {
+			t.Fatalf("slash-command delivery = %q/%q", sessionName, command)
+		}
+		cancel()
+		return ctx.Err()
+	}
+	cmd := &cobra.Command{}
+	cmd.SetContext(callerCtx)
+
+	err := runSendSetModel(cmd, []string{"agy-model", "3.5-flash-low"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("runSendSetModel() error = %v, want context.Canceled", err)
+	}
+}
 
 func TestNormalizeClaudeSetModelAlias(t *testing.T) {
 	tests := []struct {

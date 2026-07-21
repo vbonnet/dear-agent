@@ -14,13 +14,19 @@ import (
 
 // CapturePaneOutput captures the last N lines from a session's active pane.
 func CapturePaneOutput(sessionName string, lines int) (string, error) {
-	return capturePane(sessionName, lines)
+	return CapturePaneOutputContext(context.Background(), sessionName, lines)
+}
+
+// CapturePaneOutputContext captures pane output while bounding the tmux
+// subprocess by both the caller context and the adaptive capture timeout.
+func CapturePaneOutputContext(ctx context.Context, sessionName string, lines int) (string, error) {
+	return capturePane(ctx, sessionName, lines)
 }
 
 // CapturePaneHistoryOutput captures all available scrollback from a session's
 // active pane.
 func CapturePaneHistoryOutput(sessionName string) (string, error) {
-	return capturePane(sessionName, 0)
+	return capturePane(context.Background(), sessionName, 0)
 }
 
 // CapturePaneLines captures pane output and returns it as individual lines.
@@ -46,13 +52,13 @@ func CapturePaneLines(sessionName string, lines int) ([]string, error) {
 	return strings.Split(output, "\n"), nil
 }
 
-func capturePane(sessionName string, lines int) (string, error) {
+func capturePane(parent context.Context, sessionName string, lines int) (string, error) {
 	if sessionName == "" {
 		return "", fmt.Errorf("session name cannot be empty")
 	}
 
 	policy := CapturePanePolicy()
-	ctx, cancel := context.WithTimeout(context.Background(), policy.Timeout)
+	ctx, cancel := context.WithTimeout(parent, policy.Timeout)
 	defer cancel()
 	cmd := newCapturePaneCommand(ctx, sessionName, lines, policy)
 

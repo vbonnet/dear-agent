@@ -203,6 +203,9 @@ creation, and terminal state detection.
   cancellation reaches AGY readiness stabilization and post-resume multiline
   readiness, direct and fan-out tmux delivery, and metadata association retry
   before delivery, mutation, or attach.
+- Root cancellation also reaches Claude post-create prompt delivery and retry
+  verification plus model, mode, and compaction slash-command readiness before
+  later delivery, persistence, liveness validation, or attach work.
 - AGY feedback survey handling dismisses once and recognizes the subsequent
   composer even while stale survey text remains in captured pane history.
 - AGM runtime helper commands keep co-located SPEC coverage.
