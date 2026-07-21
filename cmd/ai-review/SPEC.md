@@ -2,30 +2,25 @@
 
 <!-- Last audited at: 2026-07-21 -->
 
-`ai-review` runs the REVIEW.md §2 five-dimension review against a PR diff and
-turns the synthesized outcome into a process exit code, so the CI check is a
-real merge gate rather than an advisory comment.
+## Overview
+
+`cmd/ai-review` runs the REVIEW.md §2 five-dimension review against a pull
+request diff and turns the synthesized outcome into a process exit code, so the
+CI check is a real merge gate rather than an advisory comment.
 
 ## EARS Requirements
 
-**AIREV-01** When the synthesized outcome is `approved`, the command shall exit 0.
+**AIREV-01** When the synthesized outcome is approved, the command shall exit successfully.
 
-**AIREV-02** When the synthesized outcome is `needs-work`, `rejected`, or
-`needs-human-review` and no override label is present, the command shall exit
-non-zero.
+**AIREV-02** When the synthesized outcome is needs-work or rejected or needs-human-review, the command shall exit with a non-zero status unless a human override label is present.
 
-**AIREV-03** When the `ai-review:override` label is present, the command shall
-post its comment and exit 0 (the verified human fallback).
+**AIREV-03** When a human override label is present, the command shall post its review comment and exit successfully.
 
-**AIREV-04** If `ANTHROPIC_API_KEY` is unset, a review dimension fails, synthesis
-fails, the outcome is unparseable, the PR is from a fork, or the diff exceeds the
-size limit, then the command shall exit non-zero (fail closed), absent an
-override.
+**AIREV-04** When the review cannot run because the API key is missing, a review dimension fails, synthesis fails, the outcome is unparseable, the pull request is from a fork, or the diff exceeds the size limit, the command shall exit with a non-zero status unless a human override label is present.
 
-**AIREV-05** When the diff is empty, the command shall exit 0.
+**AIREV-05** When the diff is empty, the command shall exit successfully.
 
-**AIREV-06** The command shall submit the complete diff to each dimension and
-shall run the five dimensions concurrently as independent model calls.
+**AIREV-06** When the review runs, the command shall submit the complete diff to each dimension and shall run the five dimensions concurrently as independent model calls.
 
 ## Enforcement wiring
 
@@ -37,6 +32,5 @@ shall run the five dimensions concurrently as independent model calls.
 
 ## BDD Traceability
 
-- Feature: `agm/test/bdd/features/declarative_runtime_guardrails.feature`
-  (co-located SPEC coverage for `cmd/` directories).
-- Unit tests: `cmd/ai-review/outcome_test.go`, `cmd/ai-review/main_test.go`.
+- Feature: `agm/test/bdd/features/root_lifecycle_command_guardrails.feature`
+- Package tests: `cmd/ai-review/*_test.go`
