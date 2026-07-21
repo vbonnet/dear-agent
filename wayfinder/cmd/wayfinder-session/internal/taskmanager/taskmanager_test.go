@@ -510,6 +510,44 @@ func TestDeleteTaskRejectsBlocksReference(t *testing.T) {
 	}
 }
 
+func TestDeleteTaskAllowsSelfReference(t *testing.T) {
+	_, tm := createTestStatusFile(t)
+
+	task, err := tm.AddTask("BUILD", "Self-referencing task", nil)
+	if err != nil {
+		t.Fatalf("add task: %v", err)
+	}
+
+	st, err := status.ParseV2(tm.statusFile)
+	if err != nil {
+		t.Fatalf("parse status: %v", err)
+	}
+	for phaseIndex := range st.Roadmap.Phases {
+		for taskIndex := range st.Roadmap.Phases[phaseIndex].Tasks {
+			candidate := &st.Roadmap.Phases[phaseIndex].Tasks[taskIndex]
+			if candidate.ID == task.ID {
+				candidate.Blocks = []string{task.ID}
+			}
+		}
+	}
+	if err := status.ValidateV2(st); err != nil {
+		t.Fatalf("self-reference fixture is not canonical: %v", err)
+	}
+	if err := status.WriteV2(st, tm.statusFile); err != nil {
+		t.Fatalf("write self-reference fixture: %v", err)
+	}
+
+	if err := tm.DeleteTask(task.ID); err != nil {
+		t.Fatalf("DeleteTask() rejected removable self-reference: %v", err)
+	}
+	if _, err := tm.GetTask(task.ID); err == nil {
+		t.Fatal("self-referencing task was not removed")
+	}
+	if _, err := status.ParseV2(tm.statusFile); err != nil {
+		t.Fatalf("deletion left non-canonical status: %v", err)
+	}
+}
+
 func TestTaskDependencies(t *testing.T) {
 	_, tm := createTestStatusFile(t)
 

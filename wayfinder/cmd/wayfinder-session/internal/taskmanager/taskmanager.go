@@ -447,6 +447,9 @@ func (tm *TaskManager) checkTaskReferences(st *status.StatusV2, taskID string) e
 	var references []string
 	for _, phase := range st.Roadmap.Phases {
 		for _, task := range phase.Tasks {
+			if task.ID == taskID {
+				continue
+			}
 			if slices.Contains(task.DependsOn, taskID) || slices.Contains(task.Blocks, taskID) {
 				references = append(references, task.ID)
 			}
