@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
@@ -44,6 +45,28 @@ func (t *createFailingKillTmux) KillSession(string) error {
 type createTestRuntime struct {
 	launch   func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error)
 	complete func(context.Context, CreateSessionCompletion) error
+}
+
+type createTestAgyIdentityTracker struct {
+	snapshot func(context.Context, string) (string, error)
+	discover func(context.Context, string, string) (*agysession.Metadata, error)
+}
+
+func (tracker *createTestAgyIdentityTracker) Snapshot(ctx context.Context, workDir string) (string, error) {
+	return tracker.snapshot(ctx, workDir)
+}
+
+func (tracker *createTestAgyIdentityTracker) Discover(ctx context.Context, workDir, previousConversationID string) (*agysession.Metadata, error) {
+	return tracker.discover(ctx, workDir, previousConversationID)
+}
+
+func successfulCreateTestAgyIdentityTracker() *createTestAgyIdentityTracker {
+	return &createTestAgyIdentityTracker{
+		snapshot: func(context.Context, string) (string, error) { return "previous-native-id", nil },
+		discover: func(_ context.Context, workDir, _ string) (*agysession.Metadata, error) {
+			return &agysession.Metadata{ConversationID: "new-native-id", WorkspacePath: workDir}, nil
+		},
+	}
 }
 
 func (r *createTestRuntime) Launch(ctx context.Context, spec HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
@@ -190,7 +213,9 @@ func TestCreateSession_AgyDetachedPromptUsesCanonicalCommand(t *testing.T) {
 	tmuxMock := session.NewMockTmux()
 	store := &createMockStorage{}
 
-	result, err := CreateSession(&OpContext{Tmux: tmuxMock, Storage: store}, &CreateSessionRequest{
+	result, err := CreateSession(&OpContext{
+		Tmux: tmuxMock, Storage: store, AgyCreateIdentityTracker: successfulCreateTestAgyIdentityTracker(),
+	}, &CreateSessionRequest{
 		Cwd: dir, Prompt: "detached AGY prompt", Title: "agy-detached",
 		Harness: "agy", Model: "3.5-flash-low", PermissionMode: "auto",
 		ExtraAddDirs: []string{"/tmp/extra dir"},
@@ -280,7 +305,11 @@ func TestCreateSession_DefaultsModelPerHarness(t *testing.T) {
 		t.Run(tt.harness, func(t *testing.T) {
 			// Isolate the codex trust pre-write from the developer's real ~/.codex.
 			t.Setenv("CODEX_HOME", t.TempDir())
-			result, err := CreateSession(&OpContext{Tmux: session.NewMockTmux(), OutputMode: "json"}, &CreateSessionRequest{
+			opCtx := &OpContext{Tmux: session.NewMockTmux(), OutputMode: "json"}
+			if tt.harness == "agy" {
+				opCtx.AgyCreateIdentityTracker = successfulCreateTestAgyIdentityTracker()
+			}
+			result, err := CreateSession(opCtx, &CreateSessionRequest{
 				Cwd:     t.TempDir(),
 				Prompt:  "test",
 				Title:   "session-" + strings.ReplaceAll(tt.harness, "-", "_"),
@@ -606,11 +635,16 @@ func TestCreateSession_AgyWorkspaceLockCoversSharedLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	var order []string
 	locked := false
-	store := &createMockStorage{onCreate: func() {
+	store := &createMockStorage{}
+	store.onCreate = func() {
 		if !locked {
 			t.Fatal("AGY workspace lock was released before registration")
 		}
-	}}
+		created := store.created[len(store.created)-1]
+		if created.Agy == nil || created.Agy.ConversationID != "new-native-id" {
+			t.Fatalf("registered AGY identity = %+v, want new-native-id", created.Agy)
+		}
+	}
 	runtime := &createTestRuntime{
 		launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
 			if !locked {
@@ -629,6 +663,27 @@ func TestCreateSession_AgyWorkspaceLockCoversSharedLifecycle(t *testing.T) {
 	}
 	opCtx := &OpContext{
 		Tmux: session.NewMockTmux(), Storage: store, CreationRuntime: runtime,
+		AgyCreateIdentityTracker: &createTestAgyIdentityTracker{
+			snapshot: func(ctx context.Context, workDir string) (string, error) {
+				if !locked || ctx != t.Context() || workDir != dir {
+					t.Fatalf("AGY snapshot input = locked:%t %v/%q, want locked caller context/%q", locked, ctx, workDir, dir)
+				}
+				order = append(order, "snapshot")
+				return "previous-native-id", nil
+			},
+			discover: func(ctx context.Context, workDir, previousConversationID string) (*agysession.Metadata, error) {
+				if !locked || ctx != t.Context() || workDir != dir || previousConversationID != "previous-native-id" {
+					t.Fatalf("AGY discovery input = locked:%t %v/%q/%q", locked, ctx, workDir, previousConversationID)
+				}
+				order = append(order, "discover")
+				return &agysession.Metadata{
+					ConversationID:     "new-native-id",
+					WorkspacePath:      dir,
+					ConversationDBPath: "/provider/new-native-id.db",
+					TranscriptPath:     "/provider/new-native-id/transcript.jsonl",
+				}, nil
+			},
+		},
 		AgyWorkspaceCreateLocker: func(ctx context.Context, workDir string) (func() error, error) {
 			if ctx != t.Context() || workDir != dir {
 				t.Fatalf("AGY lock input = %v/%q, want caller context/%q", ctx, workDir, dir)
@@ -652,9 +707,57 @@ func TestCreateSession_AgyWorkspaceLockCoversSharedLifecycle(t *testing.T) {
 	if locked {
 		t.Fatal("AGY workspace lock was not released after lifecycle completion")
 	}
-	want := []string{"lock", "launch", "complete", "unlock"}
+	want := []string{"lock", "snapshot", "launch", "discover", "complete", "unlock"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("AGY lock lifecycle order = %v, want %v", order, want)
+	}
+}
+
+func TestCreateSession_AgyIdentitySnapshotFailsBeforeTmuxMutation(t *testing.T) {
+	dir := t.TempDir()
+	tmuxMock := session.NewMockTmux()
+	wantErr := errors.New("corrupt provider snapshot")
+	tracker := successfulCreateTestAgyIdentityTracker()
+	tracker.snapshot = func(context.Context, string) (string, error) { return "", wantErr }
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, CreationRuntime: &createTestRuntime{}, AgyCreateIdentityTracker: tracker,
+	}, &CreateSessionRequest{
+		Cwd: dir, Title: "agy-snapshot-failure", Harness: "agy", Model: "3.5-flash-low",
+		Prompt: "fixture",
+	})
+	if err == nil || !strings.Contains(err.Error(), wantErr.Error()) {
+		t.Fatalf("CreateSessionWithContext error = %v, want %v", err, wantErr)
+	}
+	if len(tmuxMock.CreatedSessions) != 0 {
+		t.Fatalf("tmux mutated after failed identity snapshot: %v", tmuxMock.CreatedSessions)
+	}
+}
+
+func TestCreateSession_AgyIdentityDiscoveryFailureRollsBackBeforeRegistration(t *testing.T) {
+	dir := t.TempDir()
+	tmuxMock := session.NewMockTmux()
+	store := &createMockStorage{}
+	wantErr := errors.New("provider still reports stale identity")
+	tracker := successfulCreateTestAgyIdentityTracker()
+	tracker.discover = func(context.Context, string, string) (*agysession.Metadata, error) {
+		return nil, wantErr
+	}
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: &createTestRuntime{}, AgyCreateIdentityTracker: tracker,
+	}, &CreateSessionRequest{
+		Cwd: dir, Title: "agy-discovery-failure", Harness: "agy", Model: "3.5-flash-low",
+		Prompt: "fixture", SessionID: "agy-discovery-failure-id", RequireStorage: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), wantErr.Error()) {
+		t.Fatalf("CreateSessionWithContext error = %v, want %v", err, wantErr)
+	}
+	if tmuxMock.Sessions["agy-discovery-failure"] {
+		t.Fatal("tmux survived failed identity discovery")
+	}
+	if len(store.created) != 0 {
+		t.Fatalf("registered manifests after failed identity discovery = %d, want 0", len(store.created))
 	}
 }
 
@@ -675,6 +778,7 @@ func TestCreateSession_CancellationAfterRegistrationRollsBackBeforeCompletion(t 
 
 	_, err := CreateSessionWithContext(ctx, &OpContext{
 		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+		AgyCreateIdentityTracker: successfulCreateTestAgyIdentityTracker(),
 	}, &CreateSessionRequest{
 		Cwd: dir, Title: "cancel-after-register", Harness: "agy", Model: "3.5-flash-low",
 		Prompt: "must not run", SessionID: "cancel-after-register-id", RequireStorage: true,

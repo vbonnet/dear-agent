@@ -371,6 +371,7 @@ Feature: Harness parity
     Given AGY is available
     When AGM validates AGY MCP creation readiness
     Then MCP creation should wait for the AGY composer before prompt delivery
+    And shared creation should persist the new AGY identity before registration
 
   Scenario: Active-harness creation signals preserve rollback
     Given AGY is available
