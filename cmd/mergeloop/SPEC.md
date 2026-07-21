@@ -17,7 +17,7 @@ session operations to the persistent merge-loop policy engine.
 
 **MLC-04** When a green pull request is merged, the command shall delegate irreversible execution to the shared safe-merge library.
 
-**MLC-05** When known bot review threads remain unresolved, the command shall resolve only bot-authored threads and shall never resolve human-authored threads.
+**MLC-05** When known bot review threads remain unresolved, the command shall resolve only bot-authored threads and shall never resolve human-authored threads. A thread counts as bot-authored only when every comment in it — not merely the first — is from a known bot; a human reply anywhere in the thread, even after a bot's opening comment, disqualifies it from auto-resolution.
 
 **MLC-06** When agent spawning is disabled or its selected harness lacks usable credentials, the command shall defer and audit the repair rather than blocking later pull requests.
 
