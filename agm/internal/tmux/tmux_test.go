@@ -384,13 +384,20 @@ func TestIsMissingSessionOutputIncludesEmptyServerVerdict(t *testing.T) {
 	for _, output := range []string{
 		"can't find session: missing",
 		"no current target",
+		"no server running on /private/tmp/agm.sock",
 	} {
 		if !isMissingSessionOutput([]byte(output)) {
 			t.Fatalf("isMissingSessionOutput(%q) = false, want true", output)
 		}
 	}
-	if isMissingSessionOutput([]byte("no server running on /private/tmp/agm.sock")) {
-		t.Fatal("backend unavailability was classified as a missing session")
+	for _, output := range []string{
+		"permission denied",
+		"failed to connect to server",
+		"server exited unexpectedly",
+	} {
+		if isMissingSessionOutput([]byte(output)) {
+			t.Fatalf("operational failure %q was classified as a missing session", output)
+		}
 	}
 }
 
