@@ -234,6 +234,24 @@ func TestUpdateNonClaudeAssociationManifest_PreservesExistingProjectAndWorkingDi
 	}
 }
 
+func TestNewNonClaudeAssociationManifestLeavesAgyModelUnknown(t *testing.T) {
+	m := newNonClaudeAssociationManifest("agy-associated", "agy", "oss")
+	if m.Model != "" {
+		t.Fatalf("associated AGY model = %q, want unknown model left unset", m.Model)
+	}
+	if m.Harness != "agy" {
+		t.Fatalf("associated harness = %q, want agy", m.Harness)
+	}
+}
+
+func TestUpdateNonClaudeAssociationManifestLeavesAgyModelUnknown(t *testing.T) {
+	m := &manifest.Manifest{}
+	updateNonClaudeAssociationManifest(m, "agy-associated", "agy", "oss")
+	if m.Model != "" {
+		t.Fatalf("updated AGY model = %q, want unknown model left unset", m.Model)
+	}
+}
+
 // writeHistoryEntries is a helper to create a test history.jsonl file
 func writeHistoryEntries(t *testing.T, historyPath string, entries []history.ConversationEntry) {
 	t.Helper()

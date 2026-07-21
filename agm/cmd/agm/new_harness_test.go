@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
@@ -11,6 +14,79 @@ import (
 func testLaunchCommand(spec ops.HarnessLaunchSpec) string {
 	spec.DisableOAuth = true
 	return ops.BuildHarnessLaunchCommand(spec).Command
+}
+
+func TestStartAgyHarnessUsesCanonicalLaunchAndWaits(t *testing.T) {
+	callerCtx := t.Context()
+	var sentCommand string
+	var waitedSession string
+	var waitedTimeout time.Duration
+	runtime := agyHarnessRuntime{
+		lookPath: func(file string) (string, error) {
+			if file != "agy" {
+				t.Fatalf("lookPath(%q), want agy", file)
+			}
+			return "/fixture/agy", nil
+		},
+		sendCommand: func(sessionName, command string) error {
+			if sessionName != "agy-production-seam" {
+				t.Fatalf("send session = %q", sessionName)
+			}
+			sentCommand = command
+			return nil
+		},
+		waitForPrompt: func(ctx context.Context, sessionName string, timeout time.Duration) error {
+			if ctx != callerCtx {
+				t.Fatal("readiness wait did not receive the caller context")
+			}
+			waitedSession, waitedTimeout = sessionName, timeout
+			return nil
+		},
+		sleep: func(time.Duration) {},
+	}
+
+	modeApplied, err := startAgyHarnessWithRuntime(callerCtx, ops.HarnessLaunchSpec{
+		Harness: "agy", Model: "3.5-flash-low", SessionName: "agy-production-seam",
+		WorkDir: "/tmp/agy work", ExtraAddDirs: []string{"/tmp/extra dir"}, PermissionMode: "auto",
+	}, runtime)
+	if err != nil {
+		t.Fatalf("startAgyHarnessWithRuntime: %v", err)
+	}
+	if !modeApplied {
+		t.Fatal("auto permission mode was not reported as applied")
+	}
+	for _, want := range []string{
+		"cd '/tmp/agy work' && agy --model 'Gemini 3.5 Flash (Low)'",
+		"--dangerously-skip-permissions",
+		"--add-dir '/tmp/extra dir'",
+		"&& exit",
+	} {
+		if !strings.Contains(sentCommand, want) {
+			t.Errorf("launch command %q missing %q", sentCommand, want)
+		}
+	}
+	if strings.Contains(sentCommand, "--prompt-interactive") {
+		t.Errorf("launch used string-valued prompt flag without a prompt: %q", sentCommand)
+	}
+	if waitedSession != "agy-production-seam" || waitedTimeout != 90*time.Second {
+		t.Fatalf("readiness wait = (%q, %s), want (agy-production-seam, 90s)", waitedSession, waitedTimeout)
+	}
+}
+
+func TestStartAgyHarnessPropagatesReadinessFailure(t *testing.T) {
+	wantErr := errors.New("fixture AGY never became ready")
+	runtime := agyHarnessRuntime{
+		lookPath:      func(string) (string, error) { return "/fixture/agy", nil },
+		sendCommand:   func(string, string) error { return nil },
+		waitForPrompt: func(context.Context, string, time.Duration) error { return wantErr },
+		sleep:         func(time.Duration) {},
+	}
+	_, err := startAgyHarnessWithRuntime(t.Context(), ops.HarnessLaunchSpec{
+		Harness: "agy", Model: "3.5-flash", SessionName: "agy-not-ready", WorkDir: "/tmp",
+	}, runtime)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("readiness error = %v, want %v", err, wantErr)
+	}
 }
 
 // TestBuildCodexCommand_ModelResolved verifies that a registry alias is resolved
@@ -121,12 +197,12 @@ func TestBuildCodexCommand_RemoteThreadResume(t *testing.T) {
 
 func TestBuildAgyCommand_AutoPermissionMode(t *testing.T) {
 	cmd := testLaunchCommand(ops.HarnessLaunchSpec{
-		Harness: "agy", Model: "2.5-flash", SessionName: "agy", WorkDir: "/tmp/agy work",
+		Harness: "agy", Model: "3.5-flash-low", SessionName: "agy", WorkDir: "/tmp/agy work",
 		ExtraAddDirs: []string{"/tmp/extra dir"}, PermissionMode: "auto",
 	})
 
 	for _, want := range []string{
-		"cd '/tmp/agy work' && agy --prompt-interactive --dangerously-skip-permissions",
+		"cd '/tmp/agy work' && agy --model 'Gemini 3.5 Flash (Low)' --dangerously-skip-permissions",
 		"--add-dir '/tmp/extra dir'",
 		"&& exit",
 	} {
@@ -138,15 +214,18 @@ func TestBuildAgyCommand_AutoPermissionMode(t *testing.T) {
 
 func TestBuildAgyCommand_DefaultPermissionMode(t *testing.T) {
 	cmd := testLaunchCommand(ops.HarnessLaunchSpec{
-		Harness: "agy", Model: "2.5-flash", SessionName: "agy", WorkDir: "/tmp/agy-work",
+		Harness: "agy", Model: "3.5-flash", SessionName: "agy", WorkDir: "/tmp/agy-work",
 		PermissionMode: "default",
 	})
 
 	if strings.Contains(cmd, "--dangerously-skip-permissions") {
 		t.Errorf("default AGY command should not skip permissions: %q", cmd)
 	}
-	if !strings.Contains(cmd, "cd '/tmp/agy-work' && agy --prompt-interactive && exit") {
+	if !strings.Contains(cmd, "cd '/tmp/agy-work' && agy --model 'Gemini 3.5 Flash (Medium)' && exit") {
 		t.Errorf("unexpected default AGY launch command: %q", cmd)
+	}
+	if strings.Contains(cmd, "--prompt-interactive") {
+		t.Errorf("bare AGY lifecycle must not use the string-valued prompt flag: %q", cmd)
 	}
 }
 
@@ -157,7 +236,7 @@ func TestActiveHarnessBuildersHonorPersistentStartupContracts(t *testing.T) {
 		want string
 	}{
 		{name: "Codex", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "codex-cli", Model: "5.4", SessionName: "worker", WorkDir: "/tmp/work", Persistent: true, PermissionMode: "auto"}), want: "-a never"},
-		{name: "AGY", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "agy", Model: "2.5-flash", SessionName: "worker", WorkDir: "/tmp/work", Persistent: true, PermissionMode: "auto"}), want: "--prompt-interactive --dangerously-skip-permissions"},
+		{name: "AGY", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "agy", Model: "3.5-flash", SessionName: "worker", WorkDir: "/tmp/work", Persistent: true, PermissionMode: "auto"}), want: "agy --model 'Gemini 3.5 Flash (Medium)' --dangerously-skip-permissions"},
 		{name: "OpenCode", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "opencode-cli", Model: "glm-5.2", SessionName: "worker", WorkDir: "/tmp/work", Persistent: true}), want: "opencode attach"},
 	}
 	for _, tt := range tests {

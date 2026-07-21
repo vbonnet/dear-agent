@@ -32,6 +32,8 @@ active, overlay, waiting, looping, stuck, and unknown states.
 
 **AGM-STATE-11** When state helper methods are used, the system shall classify blocked, overlay, active, idle, and waiting states according to the exported state constants.
 
+**AGM-STATE-12** When AGY pane history contains a feedback-survey marker, the system shall classify it as an active overlay only when no bare AGY composer appears after the final marker; a later composer shall be ready and directly sendable, while a prompt that precedes the marker shall remain blocked by the survey.
+
 ## BDD Traceability
 
 - `agm/test/bdd/features/agm_runtime_package_guardrails.feature` enforces that this package keeps co-located SPEC coverage.

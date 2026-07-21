@@ -7,8 +7,29 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/messages"
 )
+
+func TestRunWatchUsesCallerContext(t *testing.T) {
+	originalDir, originalInterval := watchDirectiveDir, watchHeartbeatInterval
+	watchDirectiveDir, watchHeartbeatInterval = t.TempDir(), time.Hour
+	t.Cleanup(func() {
+		watchDirectiveDir, watchHeartbeatInterval = originalDir, originalInterval
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	cmd := &cobra.Command{}
+	cmd.SetContext(ctx)
+	started := time.Now()
+
+	if err := runWatch(cmd, nil); err != nil {
+		t.Fatalf("runWatch() error = %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("canceled watcher returned after %s", elapsed)
+	}
+}
 
 // mockQueuePoller implements QueuePoller for testing.
 type mockQueuePoller struct {

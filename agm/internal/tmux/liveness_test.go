@@ -1,10 +1,21 @@
 package tmux
 
 import (
+	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestCheckPaneLivenessContextHonorsCallerCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := CheckPaneLivenessContext(ctx, "canceled-liveness", filepath.Join(t.TempDir(), "tmux.sock"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("CheckPaneLivenessContext() error = %v, want context.Canceled", err)
+	}
+}
 
 // TestClassifyPaneLiveness covers the false-green class from ce-axsr/ce-qkf7:
 // a tmux session that exists must only count as alive when a harness process

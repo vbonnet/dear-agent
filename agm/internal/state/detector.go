@@ -206,7 +206,7 @@ func (d *Detector) DetectState(output string, lastOutputTime time.Time) Detectio
 
 	// AGY's feedback footer owns input focus even when a bare ">" prompt is
 	// still visible. Treat it as a dismissible overlay before readiness checks.
-	if d.agySurveyPattern.MatchString(output) {
+	if d.agySurveyOverlayActive(output) {
 		evidence := d.extractEvidence(output, d.agySurveyPattern, 80)
 		return DetectionResult{State: StateBackgroundTasksView, Timestamp: now, Evidence: evidence, Confidence: "high"}
 	}
@@ -398,7 +398,7 @@ func (d *Detector) CheckCanReceive(output string) CanReceive {
 	if d.backgroundTasksPattern.MatchString(output) {
 		return CanReceiveOverlay
 	}
-	if d.agySurveyPattern.MatchString(output) {
+	if d.agySurveyOverlayActive(output) {
 		return CanReceiveOverlay
 	}
 
@@ -419,6 +419,18 @@ func (d *Detector) CheckCanReceive(output string) CanReceive {
 
 	// No prompt visible = session is busy, queue for later
 	return CanReceiveQueue
+}
+
+// agySurveyOverlayActive distinguishes a live survey from stale survey text
+// retained in scrollback. A bare AGY composer after the final survey marker is
+// current and sendable; a prompt before the marker still belongs to history.
+func (d *Detector) agySurveyOverlayActive(output string) bool {
+	matches := d.agySurveyPattern.FindAllStringIndex(output, -1)
+	if len(matches) == 0 {
+		return false
+	}
+	lastSurveyEnd := matches[len(matches)-1][1]
+	return !d.agyReadyPattern.MatchString(output[lastSurveyEnd:])
 }
 
 // CanReceive represents whether a session can accept input right now.

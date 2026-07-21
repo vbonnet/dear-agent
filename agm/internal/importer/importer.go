@@ -226,22 +226,28 @@ func importAgyOrphanedSession(conversationUUID, sessionName, workspace string, a
 		return "", fmt.Errorf("failed to determine AGY workspace path for conversation %s", conversationUUID)
 	}
 
+	sessionID := uuid.New().String()
+	m := buildAgyImportedManifest(agyMeta, sessionName, workspace, sessionID, time.Now())
+	if err := adapter.CreateSession(m); err != nil {
+		return "", fmt.Errorf("failed to create session in Dolt: %w", err)
+	}
+	return sessionID, nil
+}
+
+func buildAgyImportedManifest(agyMeta *agysession.Metadata, sessionName, workspace, sessionID string, now time.Time) *manifest.Manifest {
 	createdAt := agyMeta.ModTime
 	if createdAt.IsZero() {
-		createdAt = time.Now()
+		createdAt = now
 	}
-	sessionID := uuid.New().String()
-	tmuxName := tmux.SanitizeSessionName(sessionName)
-	m := &manifest.Manifest{
+	return &manifest.Manifest{
 		SchemaVersion:    manifest.SchemaVersion,
 		SessionID:        sessionID,
 		Name:             sessionName,
 		CreatedAt:        createdAt,
-		UpdatedAt:        time.Now(),
+		UpdatedAt:        now,
 		Lifecycle:        "",
 		Workspace:        workspace,
 		Harness:          "agy",
-		Model:            agent.HarnessDefaults["agy"],
 		WorkingDirectory: agyMeta.WorkspacePath,
 		Context: manifest.Context{
 			Project: agyMeta.WorkspacePath,
@@ -253,13 +259,9 @@ func importAgyOrphanedSession(conversationUUID, sessionName, workspace string, a
 			TranscriptPath: agyMeta.TranscriptPath,
 		},
 		Tmux: manifest.Tmux{
-			SessionName: tmuxName,
+			SessionName: tmux.SanitizeSessionName(sessionName),
 		},
 	}
-	if err := adapter.CreateSession(m); err != nil {
-		return "", fmt.Errorf("failed to create session in Dolt: %w", err)
-	}
-	return sessionID, nil
 }
 
 // RegisterResult describes the outcome of a RegisterSession call.

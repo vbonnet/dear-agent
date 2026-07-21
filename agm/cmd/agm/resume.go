@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -33,6 +34,7 @@ var (
 	resumePrompt           string
 	resumePromptFile       string
 	resumeDeletePromptFile bool
+	sendResumePromptSafe   = tmux.SendMultiLinePromptSafeContext
 )
 
 var resumeCmd = &cobra.Command{
@@ -99,7 +101,7 @@ Examples:
 
 		ui.PrintSuccess(fmt.Sprintf("Resolved identifier %q to session: %s", identifier, sessionID))
 
-		return resumeResolvedSession(adapter, sessionID, manifestPath)
+		return resumeResolvedSession(cmd.Context(), adapter, sessionID, manifestPath)
 	},
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		// Only complete first argument (session identifier)
@@ -417,13 +419,6 @@ func displayHealthStatus(health *HealthStatus) {
 	}
 }
 
-// shellQuote quotes a string for safe use in shell commands
-// This prevents command injection by escaping special characters
-func shellQuote(s string) string {
-	// Simple but secure: wrap in single quotes and escape any single quotes
-	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
-}
-
 // shouldSendResumeCommands determines whether resume should send commands to the tmux session.
 // Fix (commit e7cacf8): NEVER send commands to existing tmux sessions.
 // Sending resume commands to an active session injects text into the running agent.
@@ -435,8 +430,9 @@ func shouldSendResumeCommands(tmuxExists bool) bool {
 
 // sendPostResumePrompt delivers a prompt to the session after it is ready.
 // It reads the prompt from promptText (inline) or promptFile, then uses
-// SendMultiLinePromptSafe which waits for the Claude prompt before sending.
-func sendPostResumePrompt(sessionName, promptText, promptFile string, deletePromptFile bool) error {
+// the context-aware multiline path, which waits for the active harness prompt
+// before sending.
+func sendPostResumePrompt(ctx context.Context, sessionName, promptText, promptFile string, deletePromptFile bool) error {
 	var message string
 	if promptText != "" {
 		message = promptText
@@ -449,7 +445,7 @@ func sendPostResumePrompt(sessionName, promptText, promptFile string, deleteProm
 	}
 
 	ui.PrintSuccess("Sending post-resume prompt...")
-	if err := tmux.SendMultiLinePromptSafe(sessionName, message, false); err != nil {
+	if err := sendResumePromptSafe(ctx, sessionName, message, false); err != nil {
 		return fmt.Errorf("failed to send prompt: %w", err)
 	}
 	return nil
@@ -477,7 +473,7 @@ func readResumePromptFile(promptFile string, deletePromptFile bool) (string, err
 // already been resolved to a sessionID and manifestPath. It is shared by the
 // `agm session resume` command and the bare `agm` default-command resume path,
 // so both routes perform a real resume instead of a no-op placeholder.
-func resumeResolvedSession(adapter *dolt.Adapter, sessionID, manifestPath string) error {
+func resumeResolvedSession(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath string) error {
 	// Read manifest from Dolt to check lifecycle
 	m, err := adapter.GetSession(sessionID)
 	if err != nil {
@@ -530,7 +526,7 @@ func resumeResolvedSession(adapter *dolt.Adapter, sessionID, manifestPath string
 	}
 
 	// Resume the session
-	if err := resumeSession(adapter, sessionID, manifestPath, harnessName, health); err != nil {
+	if err := resumeSession(ctx, adapter, sessionID, manifestPath, harnessName, health); err != nil {
 		ui.PrintError(err,
 			"Failed to resume session",
 			"  • Check tmux is running: tmux list-sessions\n"+
@@ -544,78 +540,161 @@ func resumeResolvedSession(adapter *dolt.Adapter, sessionID, manifestPath string
 }
 
 // resumeSession performs the complete resume workflow
-func resumeSession(adapter *dolt.Adapter, sessionID, manifestPath, harnessName string, health *HealthStatus) error {
-	sendCommands := shouldSendResumeCommands(health.TmuxExists)
+func resumeSession(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath, harnessName string, health *HealthStatus) error {
+	return resumeSessionWithRuntime(ctx, adapter, sessionID, manifestPath, harnessName, health, resumeSessionRuntime{
+		loadManifest: getResumeManifest,
+		newSession:   tmux.NewSession,
+		attach:       tmux.AttachSession,
+	})
+}
 
-	// Ensure tmux session exists
-	if !health.TmuxExists {
-		ui.PrintSuccess(fmt.Sprintf("Creating tmux session: %s", health.TmuxSessionName))
-		if err := tmux.NewSession(health.TmuxSessionName, health.WorktreePath); err != nil {
-			return fmt.Errorf("failed to create tmux session: %w", err)
-		}
-	} else {
-		ui.PrintSuccess(fmt.Sprintf("Attaching to existing tmux session: %s", health.TmuxSessionName))
-	}
+type resumeSessionRuntime struct {
+	loadManifest func(context.Context, *dolt.Adapter, string, string) (*manifest.Manifest, error)
+	newSession   func(string, string) error
+	attach       func(string) error
+}
 
-	// Read manifest from Dolt to get harness-specific resume metadata.
-	m, err := adapter.GetSession(sessionID)
+func resumeSessionWithRuntime(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath, harnessName string, health *HealthStatus, runtime resumeSessionRuntime) error {
+	m, err := loadResumeSessionManifest(ctx, adapter, sessionID, harnessName, runtime)
 	if err != nil {
-		return fmt.Errorf("failed to read session from Dolt: %w", err)
+		return err
 	}
+	if err := ensureResumeTmuxSession(ctx, health, runtime); err != nil {
+		return err
+	}
+	sendCommands := shouldSendResumeCommands(health.TmuxExists)
+	if err := runHarnessResume(ctx, adapter, m, harnessName, health, sendCommands); err != nil {
+		return err
+	}
+	return finalizeResumeSession(ctx, adapter, sessionID, manifestPath, health, sendCommands, runtime)
+}
 
-	if sendCommands {
-		if err := dispatchResumeCommand(adapter, m, harnessName, health); err != nil {
-			return err
-		}
-		if err := waitForResumedHarness(harnessName, health); err != nil {
-			return err
-		}
-		restorePermissionMode(harnessName, m, health)
+func loadResumeSessionManifest(ctx context.Context, adapter *dolt.Adapter, sessionID, harnessName string, runtime resumeSessionRuntime) (*manifest.Manifest, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	m, err := runtime.loadManifest(ctx, adapter, sessionID, harnessName)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func ensureResumeTmuxSession(ctx context.Context, health *HealthStatus, runtime resumeSessionRuntime) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if health.TmuxExists {
+		ui.PrintSuccess(fmt.Sprintf("Attaching to existing tmux session: %s", health.TmuxSessionName))
+		return nil
+	}
+	ui.PrintSuccess(fmt.Sprintf("Creating tmux session: %s", health.TmuxSessionName))
+	if err := runtime.newSession(health.TmuxSessionName, health.WorktreePath); err != nil {
+		return fmt.Errorf("failed to create tmux session: %w", err)
+	}
+	return nil
+}
+
+func runHarnessResume(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest, harnessName string, health *HealthStatus, sendCommands bool) error {
+	if !sendCommands {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := dispatchResumeCommand(adapter, m, harnessName, health); err != nil {
+		return err
+	}
+	if err := waitForResumedHarness(ctx, harnessName, health); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	restorePermissionMode(harnessName, m, health)
+	return nil
+}
+
+func finalizeResumeSession(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath string, health *HealthStatus, sendCommands bool, runtime resumeSessionRuntime) error {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	// Update manifest last_activity (best effort - don't fail if this errors)
 	if err := updateManifestActivity(adapter, sessionID, manifestPath); err != nil {
 		ui.PrintWarning(fmt.Sprintf("Failed to update manifest activity: %v", err))
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	// Update VS Code tab title if running in VS Code
 	updateVSCodeTabTitle(health.TmuxSessionName)
+	if err := deliverPostResumePrompt(ctx, health.TmuxSessionName); err != nil {
+		return err
+	}
+	return attachResumedSession(ctx, sessionID, health, sendCommands, runtime)
+}
 
+func deliverPostResumePrompt(ctx context.Context, sessionName string) error {
 	// Send post-resume prompt if --prompt or --prompt-file was specified.
 	// This happens after the harness is ready, before attach.
 	// Works for both new sessions (sendCommands=true) and existing sessions.
-	if resumePrompt != "" || resumePromptFile != "" {
-		if err := sendPostResumePrompt(health.TmuxSessionName, resumePrompt, resumePromptFile, resumeDeletePromptFile); err != nil {
-			// Non-fatal: warn but continue so the user can still attach and type manually
-			ui.PrintWarning(fmt.Sprintf("Failed to send post-resume prompt: %v", err))
-		} else {
-			ui.PrintSuccess("Post-resume prompt delivered.")
-		}
+	if resumePrompt == "" && resumePromptFile == "" {
+		return nil
 	}
+	if err := sendPostResumePrompt(ctx, sessionName, resumePrompt, resumePromptFile, resumeDeletePromptFile); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		// Non-fatal: warn but continue so the user can still attach and type manually
+		ui.PrintWarning(fmt.Sprintf("Failed to send post-resume prompt: %v", err))
+		return nil
+	}
+	ui.PrintSuccess("Post-resume prompt delivered.")
+	return nil
+}
 
+func attachResumedSession(ctx context.Context, sessionID string, health *HealthStatus, sendCommands bool, runtime resumeSessionRuntime) error {
 	// NOTE: No need to release global lock before attach - using fine-grained locks
 	// AttachSession never holds any lock, so it can block indefinitely without issues
-
-	// Attach to tmux session (unless --detached)
-	if !resumeDetached {
-		socketPath := tmux.GetSocketPath()
-		debug.Log("Attaching to tmux session: %s (socket: %s)", health.TmuxSessionName, socketPath)
-		ui.PrintSuccess(fmt.Sprintf("Attaching to tmux session: %s", health.TmuxSessionName))
-		if sendCommands {
-			fmt.Println("\nNote: You will be attached to the tmux session. Press Ctrl+B then D to detach.")
-		}
-		fmt.Println()
-
-		if err := tmux.AttachSession(health.TmuxSessionName); err != nil {
-			return fmt.Errorf("failed to attach to tmux session: %w", err)
-		}
-	} else {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if resumeDetached {
 		ui.PrintSuccess(fmt.Sprintf("Session '%s' resumed (detached)", health.TmuxSessionName))
 		fmt.Printf("  • To attach later: tmux attach -t %s\n", health.TmuxSessionName)
 		fmt.Printf("  • To view logs: agm logs %s\n", sessionID)
+		return nil
 	}
-
+	socketPath := tmux.GetSocketPath()
+	debug.Log("Attaching to tmux session: %s (socket: %s)", health.TmuxSessionName, socketPath)
+	ui.PrintSuccess(fmt.Sprintf("Attaching to tmux session: %s", health.TmuxSessionName))
+	if sendCommands {
+		fmt.Println("\nNote: You will be attached to the tmux session. Press Ctrl+B then D to detach.")
+	}
+	fmt.Println()
+	if err := runtime.attach(health.TmuxSessionName); err != nil {
+		return fmt.Errorf("failed to attach to tmux session: %w", err)
+	}
 	return nil
+}
+
+func getResumeManifest(ctx context.Context, adapter *dolt.Adapter, sessionID, harnessName string) (*manifest.Manifest, error) {
+	m, err := adapter.GetSession(sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read session from Dolt: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := migrateAmbiguousLegacyAgyModel(adapter, m, harnessName); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 // dispatchResumeCommand builds the harness-specific resume command and sends
@@ -641,7 +720,7 @@ func dispatchResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, harnessN
 	case "claude-code":
 		fullCmd = buildClaudeResumeCommand(adapter, m, health)
 	default:
-		fullCmd = fmt.Sprintf("cd %s && exit", shellQuote(health.WorktreePath))
+		fullCmd = fmt.Sprintf("cd %s && exit", launchparity.ShellQuote(health.WorktreePath))
 		ui.PrintWarning(fmt.Sprintf("Harness '%s' does not support resume - starting in working directory", harnessName))
 	}
 	if err := tmux.SendCommand(health.TmuxSessionName, fullCmd); err != nil {
@@ -672,21 +751,49 @@ func buildCodexResumeCommand(m *manifest.Manifest, health *HealthStatus) string 
 
 func buildAgyResumeCommand(m *manifest.Manifest, health *HealthStatus) string {
 	if m.Agy != nil && m.Agy.ConversationID != "" {
-		permissionFlag := launchparity.AgyPermissionModeFlag(m.PermissionMode)
-		if permissionFlag != "" {
-			permissionFlag = " " + permissionFlag
+		model := m.Model
+		if isAmbiguousLegacyAgyDefault(model) {
+			model = ""
 		}
-		return fmt.Sprintf("cd %s && agy%s --conversation %s --add-dir %s && exit",
-			shellQuote(health.WorktreePath),
-			permissionFlag,
-			shellQuote(m.Agy.ConversationID),
-			shellQuote(health.WorktreePath))
+		return ops.BuildAgyResumeCommand(ops.HarnessLaunchSpec{
+			Harness: "agy", Model: model, SessionName: health.TmuxSessionName,
+			WorkDir: health.WorktreePath, PermissionMode: m.PermissionMode,
+			ExtraAddDirs: []string{health.WorktreePath},
+		}, m.Agy.ConversationID).Command
 	}
 	ui.PrintWarning("No AGY conversation ID found - starting new AGY session")
+	model := m.Model
+	if model == "" {
+		model = agent.HarnessDefaults["agy"]
+	}
 	return ops.BuildHarnessLaunchCommand(ops.HarnessLaunchSpec{
-		Harness: "agy", Model: m.Model, SessionName: health.TmuxSessionName,
+		Harness: "agy", Model: model, SessionName: health.TmuxSessionName,
 		WorkDir: health.WorktreePath, PermissionMode: m.PermissionMode,
 	}).Command
+}
+
+func isAmbiguousLegacyAgyDefault(model string) bool {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "2.5-flash", "gemini-2.5-flash":
+		return true
+	default:
+		return false
+	}
+}
+
+// migrateAmbiguousLegacyAgyModel clears the former AGY default on saved
+// conversations. Older import and association paths wrote this value without
+// observing the native selection, so it cannot safely be distinguished from
+// an explicit choice. The conversation itself remains the source of truth.
+func migrateAmbiguousLegacyAgyModel(adapter *dolt.Adapter, m *manifest.Manifest, harnessName string) error {
+	if agent.NormalizeHarnessName(harnessName) != "agy" || m.Agy == nil || m.Agy.ConversationID == "" || !isAmbiguousLegacyAgyDefault(m.Model) {
+		return nil
+	}
+	m.Model = ""
+	if err := adapter.UpdateSession(m); err != nil {
+		return fmt.Errorf("migrate ambiguous legacy AGY model provenance: %w", err)
+	}
+	return nil
 }
 
 // buildClaudeResumeCommand assembles `claude --resume <uuid>` (or a bare
@@ -720,11 +827,11 @@ func buildClaudeResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, healt
 		// conversation's actual cwd when it can be located.
 		resumeDir := resolveResumeDir(resumeUUID, health.WorktreePath)
 		return fmt.Sprintf("cd %s && claude --resume %s && exit",
-			shellQuote(resumeDir),
-			shellQuote(resumeUUID))
+			launchparity.ShellQuote(resumeDir),
+			launchparity.ShellQuote(resumeUUID))
 	}
 	ui.PrintWarning("No Claude UUID found - starting new Claude session")
-	return fmt.Sprintf("cd %s && claude && exit", shellQuote(health.WorktreePath))
+	return fmt.Sprintf("cd %s && claude && exit", launchparity.ShellQuote(health.WorktreePath))
 }
 
 // resolveResumeDir returns the directory `claude --resume` should run from for
@@ -748,14 +855,14 @@ func resolveResumeDir(resumeUUID, worktreePath string) string {
 	return cwd
 }
 
-func waitForResumedHarness(harnessName string, health *HealthStatus) error {
+func waitForResumedHarness(ctx context.Context, harnessName string, health *HealthStatus) error {
 	switch agent.NormalizeHarnessName(harnessName) {
 	case "claude-code":
-		return waitForResumedClaude(health)
+		return waitForResumedClaude(ctx, health)
 	case "codex-cli":
-		return waitForResumedCodex(health)
+		return waitForResumedCodex(ctx, health)
 	case "agy":
-		return waitForResumedAgy(health)
+		return waitForResumedAgy(ctx, health)
 	default:
 		return nil
 	}
@@ -763,17 +870,20 @@ func waitForResumedHarness(harnessName string, health *HealthStatus) error {
 
 // waitForResumedClaude waits first for the claude process to appear, then for
 // the conversation prompt to render (60s timeout each behind a spinner).
-func waitForResumedClaude(health *HealthStatus) error {
+func waitForResumedClaude(ctx context.Context, health *HealthStatus) error {
 	var processWaitErr error
 	spinErr := spinner.New().
 		Title("Waiting for Claude process to start...").
 		Accessible(true).
 		Action(func() {
-			processWaitErr = tmux.WaitForProcessReady(health.TmuxSessionName, "claude", 15*time.Second)
+			processWaitErr = tmux.WaitForProcessReadyContext(ctx, health.TmuxSessionName, "claude", 15*time.Second)
 		}).
 		Run()
 	if spinErr != nil {
 		return fmt.Errorf("spinner error: %w", spinErr)
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 	fmt.Println()
 	if processWaitErr != nil {
@@ -787,11 +897,14 @@ func waitForResumedClaude(health *HealthStatus) error {
 		Title("Waiting for conversation to load...").
 		Accessible(true).
 		Action(func() {
-			promptWaitErr = tmux.WaitForPromptOrResumeFailure(health.TmuxSessionName, 60*time.Second)
+			promptWaitErr = tmux.WaitForPromptOrResumeFailureContext(ctx, health.TmuxSessionName, 60*time.Second)
 		}).
 		Run()
 	if spinErr != nil {
 		return fmt.Errorf("spinner error: %w", spinErr)
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 	fmt.Println()
 	// A fatal resume failure (e.g. "No conversation found") means the harness
@@ -813,13 +926,17 @@ func waitForResumedClaude(health *HealthStatus) error {
 	return nil
 }
 
-func waitForResumedAgy(health *HealthStatus) error {
+func waitForResumedAgy(ctx context.Context, health *HealthStatus) error {
+	return waitForResumedAgyWithWait(ctx, health, tmux.WaitForAgyPrompt)
+}
+
+func waitForResumedAgyWithWait(ctx context.Context, health *HealthStatus, wait func(context.Context, string, time.Duration) error) error {
 	var promptWaitErr error
 	spinErr := spinner.New().
 		Title("Waiting for AGY conversation to load...").
 		Accessible(true).
 		Action(func() {
-			promptWaitErr = tmux.WaitForAgyPrompt(health.TmuxSessionName, 60*time.Second)
+			promptWaitErr = wait(ctx, health.TmuxSessionName, 60*time.Second)
 		}).
 		Run()
 	if spinErr != nil {
@@ -827,6 +944,9 @@ func waitForResumedAgy(health *HealthStatus) error {
 	}
 	fmt.Println()
 	if promptWaitErr != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		ui.PrintWarning("AGY conversation is taking longer than expected to load")
 		fmt.Println("  Attaching now - AGY should appear shortly")
 	} else {
@@ -835,17 +955,20 @@ func waitForResumedAgy(health *HealthStatus) error {
 	return nil
 }
 
-func waitForResumedCodex(health *HealthStatus) error {
+func waitForResumedCodex(ctx context.Context, health *HealthStatus) error {
 	var processWaitErr error
 	spinErr := spinner.New().
 		Title("Waiting for Codex process to start...").
 		Accessible(true).
 		Action(func() {
-			processWaitErr = tmux.WaitForProcessReady(health.TmuxSessionName, "codex", 15*time.Second)
+			processWaitErr = tmux.WaitForProcessReadyContext(ctx, health.TmuxSessionName, "codex", 15*time.Second)
 		}).
 		Run()
 	if spinErr != nil {
 		return fmt.Errorf("spinner error: %w", spinErr)
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 	fmt.Println()
 	if processWaitErr != nil {
@@ -860,11 +983,14 @@ func waitForResumedCodex(health *HealthStatus) error {
 		Title("Waiting for Codex composer to load...").
 		Accessible(true).
 		Action(func() {
-			promptWaitErr = tmux.WaitForCodexPrompt(health.TmuxSessionName, 60*time.Second)
+			promptWaitErr = tmux.WaitForCodexPromptContext(ctx, health.TmuxSessionName, 60*time.Second)
 		}).
 		Run()
 	if spinErr != nil {
 		return fmt.Errorf("spinner error: %w", spinErr)
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 	fmt.Println()
 	if promptWaitErr != nil {

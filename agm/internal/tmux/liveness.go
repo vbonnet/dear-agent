@@ -244,7 +244,13 @@ func readProcessTable(ctx context.Context) ([]ProcEntry, error) {
 // with the standard harness set. A missing session returns
 // SessionExists=false with a nil error — that IS the verdict.
 func CheckPaneLiveness(sessionName, socketPath string) (PaneLiveness, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), livenessScanTimeout)
+	return CheckPaneLivenessContext(context.Background(), sessionName, socketPath)
+}
+
+// CheckPaneLivenessContext runs the liveness scan under the caller's lifetime
+// while retaining the package timeout as an upper bound.
+func CheckPaneLivenessContext(parent context.Context, sessionName, socketPath string) (PaneLiveness, error) {
+	ctx, cancel := context.WithTimeout(parent, livenessScanTimeout)
 	defer cancel()
 
 	pids, err := listPanePIDs(ctx, sessionName, socketPath)

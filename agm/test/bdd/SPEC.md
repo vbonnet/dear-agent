@@ -1,6 +1,6 @@
 # AGM Executable BDD Runner Specification
 
-<!-- Last audited at: 2026-07-10 -->
+<!-- Last audited at: 2026-07-20 -->
 
 ## Requirements
 

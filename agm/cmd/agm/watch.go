@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -28,13 +26,13 @@ type EventCallback func(event WatchEvent)
 
 // Watcher monitors multiple event sources and dispatches callbacks.
 type Watcher struct {
-	directiveDir  string
-	pollInterval  time.Duration
-	callback      EventCallback
-	queueFactory  func() (QueuePoller, error) // factory for testability
-	fsWatcher     *fsnotify.Watcher           // nil = use real fsnotify
-	mu            sync.Mutex
-	events        []WatchEvent // recorded events (for testing)
+	directiveDir string
+	pollInterval time.Duration
+	callback     EventCallback
+	queueFactory func() (QueuePoller, error) // factory for testability
+	fsWatcher    *fsnotify.Watcher           // nil = use real fsnotify
+	mu           sync.Mutex
+	events       []WatchEvent // recorded events (for testing)
 }
 
 // QueuePoller abstracts message queue polling for testability.
@@ -241,19 +239,7 @@ func init() {
 	watchCmd.Flags().DurationVar(&watchHeartbeatInterval, "heartbeat", 5*time.Minute, "Heartbeat interval when no events occur")
 }
 
-func runWatch(_ *cobra.Command, _ []string) error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Handle OS signals for clean shutdown
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigCh
-		fmt.Fprintln(os.Stderr, "\nShutting down watcher...")
-		cancel()
-	}()
-
+func runWatch(cmd *cobra.Command, _ []string) error {
 	fmt.Printf("Watching for events...\n")
 	fmt.Printf("  Directives: %s\n", watchDirectiveDir)
 	fmt.Printf("  Heartbeat:  %s\n", watchHeartbeatInterval)
@@ -269,5 +255,9 @@ func runWatch(_ *cobra.Command, _ []string) error {
 	}
 
 	w := NewWatcher(watchDirectiveDir, watchHeartbeatInterval, callback)
-	return w.Run(ctx)
+	err := w.Run(cmd.Context())
+	if cmd.Context().Err() != nil {
+		fmt.Fprintln(os.Stderr, "\nShutting down watcher...")
+	}
+	return err
 }

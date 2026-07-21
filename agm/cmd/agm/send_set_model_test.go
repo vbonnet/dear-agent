@@ -1,11 +1,52 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 )
+
+func TestRunSendSetModelUsesCallerContextBeforeSlashCommandDelivery(t *testing.T) {
+	originalDryRun, originalHarness := setModelDryRun, setModelHarness
+	originalHasSession := setModelHasSession
+	originalCapture := setModelCapturePaneOutputContext
+	originalSend := setModelSendSlashCommandSafeContext
+	t.Cleanup(func() {
+		setModelDryRun, setModelHarness = originalDryRun, originalHarness
+		setModelHasSession = originalHasSession
+		setModelCapturePaneOutputContext = originalCapture
+		setModelSendSlashCommandSafeContext = originalSend
+	})
+	setModelDryRun = false
+	setModelHarness = "agy"
+	setModelHasSession = func(string) (bool, error) { return true, nil }
+	setModelCapturePaneOutputContext = func(context.Context, string, int) (string, error) { return "", nil }
+
+	type callerContextKey struct{}
+	callerCtx, cancel := context.WithCancel(context.WithValue(t.Context(), callerContextKey{}, "set-model"))
+	setModelSendSlashCommandSafeContext = func(ctx context.Context, sessionName, command string) error {
+		if ctx != callerCtx {
+			t.Fatal("slash-command delivery did not receive the caller context")
+		}
+		if sessionName != "agy-model" || command != "/model Gemini 3.5 Flash (Low)" {
+			t.Fatalf("slash-command delivery = %q/%q", sessionName, command)
+		}
+		cancel()
+		return ctx.Err()
+	}
+	cmd := &cobra.Command{}
+	cmd.SetContext(callerCtx)
+
+	err := runSendSetModel(cmd, []string{"agy-model", "3.5-flash-low"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("runSendSetModel() error = %v, want context.Canceled", err)
+	}
+}
 
 func TestNormalizeClaudeSetModelAlias(t *testing.T) {
 	tests := []struct {
@@ -35,7 +76,7 @@ func TestResolveSetModelInstruction_ActiveHarnesses(t *testing.T) {
 	tests := map[string]string{
 		"claude-code":  "opus",
 		"codex-cli":    "5.4-mini",
-		"agy":          "2.5-flash",
+		"agy":          "3.5-flash",
 		"opencode-cli": "glm-5.2",
 	}
 	for _, harness := range agent.ActiveHarnesses() {
@@ -91,7 +132,7 @@ func TestResolveSetModelInstruction_RejectsUnsafeModel(t *testing.T) {
 }
 
 func TestResolveSetModelInstruction_NormalizesAgyAliases(t *testing.T) {
-	instruction, err := resolveSetModelInstruction("antigravity", "2.5-flash")
+	instruction, err := resolveSetModelInstruction("antigravity", "3.5-flash")
 	if err != nil {
 		t.Fatalf("resolveSetModelInstruction returned error: %v", err)
 	}
@@ -100,26 +141,55 @@ func TestResolveSetModelInstruction_NormalizesAgyAliases(t *testing.T) {
 	}
 }
 
-func TestVerifyModelSetParsing(t *testing.T) {
-	// Test the line-matching logic used by verifyModelSet
-	tests := []struct {
-		name    string
-		line    string
-		matches bool
-	}{
-		{"confirmation line", "Set model to claude-sonnet-4-6-20250514", true},
-		{"with whitespace", "  Set model to claude-opus-4-6  ", true},
-		{"unrelated line", "Some other output", false},
-		{"empty line", "", false},
-		{"partial match", "Set model", false},
+func TestResolveSetModelInstruction_PreservesAgyPublicLabel(t *testing.T) {
+	const publicLabel = "Gemini 3.5 Flash (Low)"
+	instruction, err := resolveSetModelInstruction("agy", publicLabel)
+	if err != nil {
+		t.Fatalf("resolveSetModelInstruction returned error: %v", err)
 	}
+	if instruction.ResolvedModel != publicLabel {
+		t.Fatalf("resolved model = %q, want %q", instruction.ResolvedModel, publicLabel)
+	}
+	if instruction.Command != "/model "+publicLabel {
+		t.Fatalf("command = %q, want exact public label", instruction.Command)
+	}
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			trimmed := strings.TrimSpace(tt.line)
-			got := strings.HasPrefix(trimmed, "Set model to")
-			if got != tt.matches {
-				t.Errorf("line %q: got match=%v, want %v", tt.line, got, tt.matches)
+func TestResolveSetModelInstruction_NormalizesCrossHarnessAliasCase(t *testing.T) {
+	instruction, err := resolveSetModelInstruction("agy", "OPUS")
+	if err != nil {
+		t.Fatalf("resolveSetModelInstruction returned error: %v", err)
+	}
+	if instruction.ResolvedModel != "Claude Opus 4.6 (Thinking)" {
+		t.Fatalf("resolved model = %q, want AGY Opus public label", instruction.ResolvedModel)
+	}
+	if instruction.Command != "/model Claude Opus 4.6 (Thinking)" {
+		t.Fatalf("command = %q, want normalized cross-harness model", instruction.Command)
+	}
+}
+
+func TestNewAgyModelConfirmationRejectsStaleOrMismatchedOutput(t *testing.T) {
+	instruction := setModelInstruction{Harness: "agy", ResolvedModel: "Gemini 3.5 Flash (Low)"}
+	for _, tc := range []struct {
+		name     string
+		baseline string
+		current  string
+		want     bool
+	}{
+		{name: "new exact confirmation", current: "Set model to Gemini 3.5 Flash (Low)", want: true},
+		{name: "same stale confirmation", baseline: "Set model to Gemini 3.5 Flash (Low)", current: "Set model to Gemini 3.5 Flash (Low)"},
+		{name: "new confirmation added after stale copy", baseline: "Set model to Gemini 3.5 Flash (Low)", current: "Set model to Gemini 3.5 Flash (Low)\nSet model to Gemini 3.5 Flash (Low)", want: true},
+		{name: "stale different model", baseline: "Set model to Gemini 3.5 Flash (Medium)", current: "request rejected\nSet model to Gemini 3.5 Flash (Medium)"},
+		{name: "new different model", current: "Set model to Gemini 3.5 Flash (Medium)"},
+		{name: "prefix without model", current: "Set model to"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			confirmation, got := newModelConfirmation(instruction, tc.baseline, tc.current)
+			if got != tc.want {
+				t.Fatalf("newModelConfirmation() = %q, %v; want match %v", confirmation, got, tc.want)
+			}
+			if got && confirmation != "Set model to "+instruction.ResolvedModel {
+				t.Fatalf("confirmation = %q", confirmation)
 			}
 		})
 	}
@@ -140,5 +210,43 @@ func TestRunSendSetModelInvalidModel(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "gpt-4;rm") {
 		t.Errorf("error should include the invalid model name, got: %s", err.Error())
+	}
+}
+
+func TestPersistAgyModelSwitchPreservesOnlyConfirmedProvenance(t *testing.T) {
+	adapter := dolt.NewMockAdapter()
+	t.Cleanup(func() { _ = adapter.Close() })
+	m := dolt.NewTestManifest("agy-model-switch", "agy-model-switch")
+	m.Harness = "agy"
+	m.Model = "Gemini 3.5 Flash (Medium)"
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+	instruction := setModelInstruction{
+		Harness:       "agy",
+		ResolvedModel: "Gemini 3.5 Flash (Low)",
+		Command:       "/model Gemini 3.5 Flash (Low)",
+	}
+
+	if err := persistAgyModelSwitch(adapter, m, instruction, false); err != nil {
+		t.Fatalf("persist unverified switch: %v", err)
+	}
+	stored, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after unverified switch: %v", err)
+	}
+	if stored.Model != "" {
+		t.Fatalf("unverified model = %q, want unknown so resume omits --model", stored.Model)
+	}
+
+	if err := persistAgyModelSwitch(adapter, stored, instruction, true); err != nil {
+		t.Fatalf("persist confirmed switch: %v", err)
+	}
+	stored, err = adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after confirmed switch: %v", err)
+	}
+	if stored.Model != instruction.ResolvedModel {
+		t.Fatalf("confirmed model = %q, want %q", stored.Model, instruction.ResolvedModel)
 	}
 }

@@ -3,11 +3,8 @@ package tmux
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
-	"os/signal"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
@@ -33,7 +30,10 @@ func containsAgyPromptPattern(content string) bool {
 }
 
 func containsAgyReadyPattern(content string) bool {
-	return !ContainsAgySurveyPrompt(content) && containsAgyPromptPattern(content)
+	if !ContainsAgySurveyPrompt(content) {
+		return containsAgyPromptPattern(content)
+	}
+	return containsAgyPromptAfterSurvey(content)
 }
 
 func containsAgyTrustPromptPattern(content string) bool {
@@ -61,6 +61,16 @@ func ContainsAgySurveyPrompt(content string) bool {
 	return false
 }
 
+func containsAgyPromptAfterSurvey(content string) bool {
+	lastSurveyEnd := -1
+	for _, pattern := range agySurveyPromptPatterns {
+		if index := strings.LastIndex(content, pattern); index >= 0 && index+len(pattern) > lastSurveyEnd {
+			lastSurveyEnd = index + len(pattern)
+		}
+	}
+	return lastSurveyEnd >= 0 && containsAgyPromptPattern(content[lastSurveyEnd:])
+}
+
 // DismissAgySurveyIfPresent sends the documented Skip option when the survey
 // owns focus. It returns true only when a survey was detected and the key sent.
 func DismissAgySurveyIfPresent(sessionName, content string) (bool, error) {
@@ -84,18 +94,52 @@ func IsAgyIdle(sessionName string) (bool, error) {
 	return containsAgyReadyPattern(content), nil
 }
 
+type agyPromptRuntime struct {
+	capture  func(context.Context, string) ([]byte, error)
+	sendKeys func(string, string) error
+	sleep    func(context.Context, time.Duration)
+}
+
+func realAgyPromptRuntime() agyPromptRuntime {
+	return agyPromptRuntime{
+		capture: func(ctx context.Context, sessionName string) ([]byte, error) {
+			return exec.CommandContext(ctx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-S", "-20").Output()
+		},
+		sendKeys: SendKeys,
+		sleep: func(ctx context.Context, interval time.Duration) {
+			if err := sleepWithContext(ctx, interval); err != nil {
+				debug.Log("AGY prompt sleep interrupted: %v", err)
+			}
+		},
+	}
+}
+
 // WaitForAgyPrompt polls the pane until AGY shows its idle prompt. If the
 // first-run trust prompt appears, it is auto-accepted with Enter.
-func WaitForAgyPrompt(sessionName string, timeout time.Duration) error {
+func WaitForAgyPrompt(ctx context.Context, sessionName string, timeout time.Duration) error {
 	debug.Log("\n🔍 Starting AGY prompt detection for session: %s", sessionName)
+	return waitForAgyPromptWithRuntime(ctx, sessionName, timeout, realAgyPromptRuntime())
+}
 
-	baseCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+func dismissAgySurveyOnce(runtime agyPromptRuntime, sessionName, content string, alreadyDismissed bool) (dismissed, handled bool) {
+	if alreadyDismissed || !ContainsAgySurveyPrompt(content) {
+		return alreadyDismissed, false
+	}
+	if err := runtime.sendKeys(sessionName, "0"); err != nil {
+		debug.Log("Failed to dismiss AGY feedback survey: %v", err)
+		return false, false
+	}
+	debug.Log("AGY feedback survey detected; selected Skip")
+	return true, true
+}
+
+func waitForAgyPromptWithRuntime(baseCtx context.Context, sessionName string, timeout time.Duration, runtime agyPromptRuntime) error {
 	ctx, cancel := context.WithTimeout(baseCtx, timeout)
 	defer cancel()
 
 	checkCount := 0
 	trustAccepted := false
+	surveyDismissed := false
 
 	for {
 		select {
@@ -105,43 +149,45 @@ func WaitForAgyPrompt(sessionName string, timeout time.Duration) error {
 		}
 		checkCount++
 
-		output, err := exec.CommandContext(ctx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-S", "-20").Output()
+		output, err := runtime.capture(ctx, sessionName)
 		if ctx.Err() != nil {
 			return fmt.Errorf("timeout or cancellation waiting for AGY prompt: %w", ctx.Err())
 		}
 		if err != nil {
-			time.Sleep(500 * time.Millisecond)
+			runtime.sleep(ctx, 500*time.Millisecond)
 			continue
 		}
 
 		content := string(output)
-		if dismissed, dismissErr := DismissAgySurveyIfPresent(sessionName, content); dismissErr != nil {
-			debug.Log("Failed to dismiss AGY feedback survey: %v", dismissErr)
-		} else if dismissed {
-			debug.Log("AGY feedback survey detected; selected Skip")
-			time.Sleep(500 * time.Millisecond)
+		var surveyHandled bool
+		surveyDismissed, surveyHandled = dismissAgySurveyOnce(runtime, sessionName, content, surveyDismissed)
+		if surveyHandled {
+			runtime.sleep(ctx, 500*time.Millisecond)
 			continue
 		}
 		if !trustAccepted && containsAgyTrustPromptPattern(content) {
 			debug.Log("🛡️  AGY trust prompt detected (check #%d) — auto-answering with Enter", checkCount)
-			if err := SendKeys(sessionName, "Enter"); err != nil {
+			if err := runtime.sendKeys(sessionName, "Enter"); err != nil {
 				debug.Log("⚠️  Failed to answer AGY trust prompt: %v", err)
 			} else {
 				trustAccepted = true
 			}
-			time.Sleep(1 * time.Second)
+			runtime.sleep(ctx, time.Second)
 			continue
 		}
 
-		if containsAgyReadyPattern(content) {
+		if containsAgyReadyPattern(content) || (surveyDismissed && containsAgyPromptAfterSurvey(content)) {
 			debug.Log("✓ AGY prompt detected (check #%d)", checkCount)
-			time.Sleep(500 * time.Millisecond)
+			runtime.sleep(ctx, 500*time.Millisecond)
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("AGY ready stabilization interrupted: %w", err)
+			}
 			return nil
 		}
 
 		if checkCount%10 == 0 {
 			debug.Log("⏳ Still waiting for AGY prompt... (check #%d)", checkCount)
 		}
-		time.Sleep(500 * time.Millisecond)
+		runtime.sleep(ctx, 500*time.Millisecond)
 	}
 }

@@ -4,9 +4,43 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 )
+
+func TestBuildAgyImportedManifestLeavesUnknownModelUnset(t *testing.T) {
+	now := time.Date(2026, time.July, 20, 12, 30, 0, 0, time.UTC)
+	createdAt := now.Add(-time.Hour)
+	meta := &agysession.Metadata{
+		ConversationID:     "117ff898-a964-4a9f-b460-1be4a8a49b17",
+		WorkspacePath:      "/tmp/agy workspace",
+		ConversationDBPath: "/tmp/agy.db",
+		TranscriptPath:     "/tmp/transcript.jsonl",
+		ModTime:            createdAt,
+	}
+	m := buildAgyImportedManifest(meta, "AGY imported session", "oss", "agm-session-id", now)
+
+	if m.SessionID != "agm-session-id" || m.Name != "AGY imported session" || m.Workspace != "oss" {
+		t.Fatalf("manifest identity = %+v", m)
+	}
+	if m.Harness != "agy" || m.Model != "" {
+		t.Fatalf("manifest harness/model = %q/%q", m.Harness, m.Model)
+	}
+	if m.WorkingDirectory != meta.WorkspacePath || m.Context.Project != meta.WorkspacePath {
+		t.Fatalf("manifest workspace paths = %q/%q", m.WorkingDirectory, m.Context.Project)
+	}
+	if m.Agy == nil || m.Agy.ConversationID != meta.ConversationID || m.Agy.ConversationDB != meta.ConversationDBPath || m.Agy.TranscriptPath != meta.TranscriptPath {
+		t.Fatalf("manifest AGY metadata = %+v", m.Agy)
+	}
+	if !m.CreatedAt.Equal(createdAt) || !m.UpdatedAt.Equal(now) {
+		t.Fatalf("manifest timestamps = %s/%s", m.CreatedAt, m.UpdatedAt)
+	}
+	if m.Tmux.SessionName != "AGY-imported-session" {
+		t.Fatalf("tmux session name = %q", m.Tmux.SessionName)
+	}
+}
 
 func TestImportOrphanedSessionWithOptions_Agy(t *testing.T) {
 	adapter := dolt.GetTestAdapter(t)
@@ -41,8 +75,8 @@ func TestImportOrphanedSessionWithOptions_Agy(t *testing.T) {
 	if m.Harness != "agy" {
 		t.Fatalf("harness = %q, want agy", m.Harness)
 	}
-	if m.Model != "3.5-flash" {
-		t.Fatalf("model = %q, want 3.5-flash", m.Model)
+	if m.Model != "" {
+		t.Fatalf("model = %q, want unknown model left unset", m.Model)
 	}
 	if m.WorkingDirectory != workspacePath {
 		t.Fatalf("working directory = %q, want %q", m.WorkingDirectory, workspacePath)

@@ -195,6 +195,30 @@ creation, and terminal state detection.
 - Active harness factories use canonical names.
 - Active harness adapters satisfy the shared non-I/O conformance suite.
 - Active harness launch commands preserve native startup mode and persistence.
+- Imported AGY conversations preserve unknown native-model provenance through
+  the real storage adapter instead of acquiring Claude's legacy default, and
+  cold resume clears the ambiguous model guessed by older import/association
+  paths before command construction.
+- AGY model-switch provenance requires a new exact confirmation, and root
+  cancellation reaches AGY readiness stabilization and post-resume multiline
+  readiness, direct and fan-out tmux delivery, and metadata association retry
+  before delivery, mutation, or attach.
+- Root cancellation also reaches Claude post-create prompt delivery and retry
+  verification plus model, mode, and compaction slash-command readiness before
+  later delivery, persistence, liveness validation, or attach work.
+- The root command remains the sole process-signal owner, and continuous scan,
+  watchdog, event-watch, stalled-session watch, and compaction-monitor loops
+  consume its Cobra context and return promptly when canceled.
+- Structured verify-result, work-request, and wake-loop sends preserve the same
+  root context through multiline composer readiness and delivery.
+- Resume rechecks the root context after metadata lookup and before tmux
+  creation, command delivery, metadata updates, or warm-session attach.
+- Final creation liveness validation derives from the root context and rechecks
+  cancellation before title update, attach, or detached-success reporting.
+- AGY feedback survey handling dismisses once and recognizes the subsequent
+  composer even while stale survey text remains in captured pane history;
+  downstream state, direct-delivery, and idle predicates use the same
+  last-marker rule.
 - AGM runtime helper commands keep co-located SPEC coverage.
 - AGM backend implementations keep co-located SPEC coverage.
 - AGM cleanup and process support packages keep co-located SPEC coverage.

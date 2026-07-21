@@ -1,6 +1,6 @@
 # AGM tmux Delivery Specification
 
-<!-- Last audited at: 2026-07-04 -->
+<!-- Last audited at: 2026-07-20 -->
 
 ## Purpose
 
@@ -46,7 +46,7 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-15** When pane output or scrollback capture starts, the system shall bound the tmux subprocess with a timeout, isolate its process group, and bound command waiting after cancellation.
 
-**TMUX-20** When the AGY feedback survey is visible with a bare prompt, the system shall classify the session as blocked rather than ready and shall select the survey's Skip option before delivering automated input.
+**TMUX-20** When the AGY feedback survey is visible with a bare prompt, the system shall classify the session as blocked rather than ready and shall select the survey's Skip option before delivering automated input; after one successful dismissal in a readiness wait, stale survey text retained in captured pane history shall neither trigger another dismissal nor suppress a subsequently visible composer.
 
 **TMUX-21** When the operating-system user database cannot resolve the current process UID, the system shall use the numeric UID and environment username for linger diagnostics.
 
@@ -57,6 +57,14 @@ because the tmux server's own cwd has been deleted.
 **TMUX-24** When delivering a prompt via paste-buffer, the system shall re-send Enter and re-check the pane on an increasing backoff until the paste is observed submitted, rather than sending Enter a fixed number of times.
 
 **TMUX-25** When the pane is still positively observed as an unsubmitted paste after every backoff attempt, the system shall return a submission-not-confirmed error so the caller reports delivery failure instead of a false success.
+
+**TMUX-27** When an AGY prompt wait is invoked, the system shall derive polling, retry, trust, survey, and ready-stabilization cancellation from the caller-supplied context, shall return cancellation before reporting readiness, and shall not install process-global signal handling inside the tmux helper.
+
+**TMUX-28** When command-scoped multiline prompt delivery waits for a composer or rechecks composer stability, the system shall derive every wait and subprocess timeout from the caller context and shall return before prompt delivery when cancellation is observed during those waits.
+
+**TMUX-29** When command-scoped file or slash-command delivery or prompt-delivery verification runs, the system shall derive composer waits, pane-capture subprocesses, verification backoff, and retry sends from the caller context and shall not write or retry prompt bytes after cancellation.
+
+**TMUX-30** When command-scoped harness liveness validation runs, the system shall derive the tmux and process-table subprocess timeout from the caller context and return cancellation instead of allowing later completion or attach.
 
 ## BDD Traceability
 

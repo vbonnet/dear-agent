@@ -1,6 +1,21 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+)
+
+func TestVerifyCompactionUsesCallerContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err := verifyCompaction(ctx, "missing-session", time.Hour)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("verifyCompaction() error = %v, want context.Canceled", err)
+	}
+}
 
 func TestBuildCompactCommand(t *testing.T) {
 	tests := []struct {
