@@ -425,6 +425,42 @@ func TestScriptHeredocVisibilityPreservesQuotesDescriptorsAndFileModes(t *testin
 	}
 }
 
+func TestScriptHeredocVisibilityHandlesQueuesArithmeticAndAttachedRedirects(t *testing.T) {
+	source := []byte(strings.Join([]string{
+		"cat <<'FIRST' <<'SECOND'",
+		"safe-pr create --emergency --reason inactive-heredoc",
+		"FIRST",
+		"gh pr merge 432",
+		"SECOND",
+		"mask=$((1 << 2))",
+		"echo 'git push origin after-arithmetic'",
+		"cat>attached-fixture <<'ATTACHED_FILE_ONLY'",
+		"safe-pr create --emergency --reason attached-redirect",
+		"ATTACHED_FILE_ONLY",
+	}, "\n"))
+
+	var text []string
+	for _, segment := range parseScriptSegments(source) {
+		text = append(text, segment.Text)
+	}
+	for _, visible := range []string{
+		"gh pr merge 432",
+		"echo 'git push origin after-arithmetic'",
+	} {
+		if !slices.Contains(text, visible) {
+			t.Errorf("visible line %q was hidden: %v", visible, text)
+		}
+	}
+	for _, hidden := range []string{
+		"safe-pr create --emergency --reason inactive-heredoc",
+		"safe-pr create --emergency --reason attached-redirect",
+	} {
+		if slices.Contains(text, hidden) {
+			t.Errorf("file-only or inactive heredoc line %q was exposed: %v", hidden, text)
+		}
+	}
+}
+
 func TestCheckRepositoryGovernsSkillAgentMetadata(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init", "-q")

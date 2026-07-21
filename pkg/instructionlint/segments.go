@@ -149,24 +149,23 @@ func parseScriptSegments(source []byte) []Segment {
 		if value == "" {
 			continue
 		}
-		if state.heredoc != "" {
-			if value == state.heredoc {
-				if state.heredocOutput.visible {
-					segments = append(segments, state.heredocBody...)
-				} else if state.heredocOutput.path != "" {
-					if state.heredocOutput.append {
-						state.pendingHeredocs[state.heredocOutput.path] = append(
-							state.pendingHeredocs[state.heredocOutput.path], state.heredocBody...)
+		if len(state.heredocs) > 0 {
+			heredoc := &state.heredocs[0]
+			if value == heredoc.marker {
+				if heredoc.output.visible {
+					segments = append(segments, heredoc.body...)
+				} else if heredoc.output.path != "" {
+					if heredoc.output.append {
+						state.pendingHeredocs[heredoc.output.path] = append(
+							state.pendingHeredocs[heredoc.output.path], heredoc.body...)
 					} else {
-						state.pendingHeredocs[state.heredocOutput.path] = slices.Clone(state.heredocBody)
+						state.pendingHeredocs[heredoc.output.path] = slices.Clone(heredoc.body)
 					}
 				}
-				state.heredoc = ""
-				state.heredocBody = nil
-				state.heredocOutput = scriptOutputDestination{}
+				state.heredocs = state.heredocs[1:]
 				continue
 			}
-			state.heredocBody = append(state.heredocBody, Segment{Kind: SegmentShell, Line: line, Text: value})
+			heredoc.body = append(heredoc.body, Segment{Kind: SegmentShell, Line: line, Text: value})
 			continue
 		}
 		state.updatePersistentDescriptors(value)
@@ -186,9 +185,8 @@ func parseScriptSegments(source []byte) []Segment {
 			segments = append(segments, Segment{Kind: SegmentProse, Line: line, Text: value})
 			continue
 		}
-		if marker := scriptHeredocMarker(value); marker != "" {
-			state.heredoc = marker
-			state.heredocOutput = scriptHeredocOutputDestination(value, state.descriptors)
+		if heredocs := scriptHeredocSpecs(value, state.descriptors); len(heredocs) > 0 {
+			state.heredocs = heredocs
 			continue
 		}
 		assignment := stripShellDeclaration(value)
@@ -220,13 +218,17 @@ func parseScriptSegments(source []byte) []Segment {
 
 type scriptParseState struct {
 	quote               byte
-	heredoc             string
-	heredocBody         []Segment
-	heredocOutput       scriptOutputDestination
+	heredocs            []scriptHeredoc
 	pendingHeredocs     map[string][]Segment
 	descriptors         map[int]scriptOutputDestination
 	visibleContinuation bool
 	visibleHelpers      map[string]bool
+}
+
+type scriptHeredoc struct {
+	marker string
+	body   []Segment
+	output scriptOutputDestination
 }
 
 func (state *scriptParseState) updatePersistentDescriptors(value string) {
@@ -394,45 +396,101 @@ func scriptAssignmentQuote(value string) byte {
 }
 
 func scriptHeredocMarker(value string) string {
-	quote := byte(0)
-	escaped := false
+	markers := scriptHeredocMarkers(value)
+	if len(markers) == 0 {
+		return ""
+	}
+	return markers[0]
+}
+
+func scriptHeredocMarkers(value string) []string {
+	var markers []string
+	scanner := scriptHeredocScanner{}
 	for index := 0; index+1 < len(value); index++ {
 		current := value[index]
-		if escaped {
-			escaped = false
+		if scanner.consumeQuotedOrEscaped(current) {
 			continue
 		}
-		if current == '\\' && quote != '\'' {
-			escaped = true
-			continue
-		}
-		if quote != 0 {
-			if current == quote {
-				quote = 0
-			}
-			continue
-		}
-		if current == '\'' || current == '"' {
-			quote = current
+		if consumed, advance := scanner.consumeArithmetic(value, index); consumed {
+			index += advance
 			continue
 		}
 		if current == '#' && (index == 0 || shellHorizontalSpace(value[index-1])) {
 			break
 		}
-		if current != '<' || value[index+1] != '<' ||
-			(index > 0 && value[index-1] == '<') || (index+2 < len(value) && value[index+2] == '<') {
-			continue
-		}
-
-		markerStart := index + 2
-		if markerStart < len(value) && value[markerStart] == '-' {
-			markerStart++
-		}
-		if marker := scriptHeredocWord(value, markerStart); marker != "" {
-			return marker
+		if marker := scriptHeredocMarkerAt(value, index); marker != "" {
+			markers = append(markers, marker)
 		}
 	}
-	return ""
+	return markers
+}
+
+func scriptHeredocMarkerAt(value string, index int) string {
+	if value[index] != '<' || value[index+1] != '<' ||
+		(index > 0 && value[index-1] == '<') || (index+2 < len(value) && value[index+2] == '<') {
+		return ""
+	}
+	markerStart := index + 2
+	if markerStart < len(value) && value[markerStart] == '-' {
+		markerStart++
+	}
+	return scriptHeredocWord(value, markerStart)
+}
+
+type scriptHeredocScanner struct {
+	quote           byte
+	escaped         bool
+	arithmeticDepth int
+}
+
+func (scanner *scriptHeredocScanner) consumeQuotedOrEscaped(current byte) bool {
+	if scanner.escaped {
+		scanner.escaped = false
+		return true
+	}
+	if current == '\\' && scanner.quote != '\'' {
+		scanner.escaped = true
+		return true
+	}
+	if scanner.quote != 0 {
+		if current == scanner.quote {
+			scanner.quote = 0
+		}
+		return true
+	}
+	if current == '\'' || current == '"' {
+		scanner.quote = current
+		return true
+	}
+	return false
+}
+
+func (scanner *scriptHeredocScanner) consumeArithmetic(value string, index int) (bool, int) {
+	if scanner.arithmeticDepth > 0 {
+		switch value[index] {
+		case '(':
+			scanner.arithmeticDepth++
+		case ')':
+			scanner.arithmeticDepth--
+		}
+		return true, 0
+	}
+	if strings.HasPrefix(value[index:], "$((") {
+		scanner.arithmeticDepth = 2
+		return true, 2
+	}
+	if strings.HasPrefix(value[index:], "((") && arithmeticCommandBoundary(value, index) {
+		scanner.arithmeticDepth = 2
+		return true, 1
+	}
+	return false, 0
+}
+
+func arithmeticCommandBoundary(value string, index int) bool {
+	if index == 0 {
+		return true
+	}
+	return shellHorizontalSpace(value[index-1]) || strings.ContainsRune(";|&({", rune(value[index-1]))
 }
 
 func scriptHeredocWord(value string, start int) string {
@@ -487,19 +545,32 @@ func heredocWordBoundary(value byte) bool {
 	return shellHorizontalSpace(value) || strings.ContainsRune(";|&<>", rune(value))
 }
 
-func scriptHeredocOutputDestination(value string, descriptors map[int]scriptOutputDestination) scriptOutputDestination {
+func scriptHeredocSpecs(value string, descriptors map[int]scriptOutputDestination) []scriptHeredoc {
 	commands := splitScriptCommandParts(value)
-	producer := -1
+	var heredocs []scriptHeredoc
 	for index, command := range commands {
-		if scriptHeredocMarker(command.text) != "" {
-			producer = index
-			break
+		markers := scriptHeredocMarkers(command.text)
+		if len(markers) == 0 {
+			continue
+		}
+		for markerIndex, marker := range markers {
+			heredoc := scriptHeredoc{marker: marker}
+			// The shell consumes every heredoc body in lexical order, but only
+			// the last stdin redirect on a command supplies that command's input.
+			if markerIndex == len(markers)-1 {
+				heredoc.output = scriptHeredocCommandOutputDestination(commands, index, descriptors)
+			}
+			heredocs = append(heredocs, heredoc)
 		}
 	}
-	if producer < 0 {
-		return scriptOutputDestination{visible: true}
-	}
+	return heredocs
+}
 
+func scriptHeredocCommandOutputDestination(
+	commands []scriptCommandPart,
+	producer int,
+	descriptors map[int]scriptOutputDestination,
+) scriptOutputDestination {
 	pipelineEnd := producer
 	for pipelineEnd < len(commands)-1 && commands[pipelineEnd].separator == "|" {
 		pipelineEnd++
@@ -584,64 +655,131 @@ type shellToken struct {
 // Redirection syntax is meaningful only when its operator is unquoted and
 // unescaped; parseShellWords intentionally discards exactly that provenance.
 func parseShellTokens(input string) []shellToken {
-	var tokens []shellToken
-	var raw, value strings.Builder
-	var quote byte
-	escaped := false
-	started := false
-	flush := func() {
-		if !started {
-			return
-		}
-		tokens = append(tokens, shellToken{raw: raw.String(), text: value.String()})
-		raw.Reset()
-		value.Reset()
-		started = false
-	}
+	parser := shellTokenParser{}
 	for index := 0; index < len(input); index++ {
-		current := input[index]
-		if escaped {
-			raw.WriteByte(current)
-			value.WriteByte(current)
-			escaped = false
-			started = true
-			continue
-		}
-		if current == '\\' && quote != '\'' {
-			raw.WriteByte(current)
-			escaped = true
-			started = true
-			continue
-		}
-		if quote != 0 {
-			raw.WriteByte(current)
-			if current == quote {
-				quote = 0
-			} else {
-				value.WriteByte(current)
-			}
-			started = true
-			continue
-		}
-		if current == '\'' || current == '"' {
-			raw.WriteByte(current)
-			quote = current
-			started = true
-			continue
-		}
-		if current == ' ' || current == '\t' || current == '\r' || current == '\n' {
-			flush()
-			continue
-		}
-		raw.WriteByte(current)
-		value.WriteByte(current)
-		started = true
+		parser.consume(input[index])
 	}
-	if escaped {
-		value.WriteByte('\\')
+	if parser.escaped {
+		parser.value.WriteByte('\\')
 	}
-	flush()
-	return tokens
+	parser.flush()
+	return parser.tokens
+}
+
+type shellTokenParser struct {
+	tokens         []shellToken
+	raw            strings.Builder
+	value          strings.Builder
+	quote          byte
+	escaped        bool
+	started        bool
+	redirect       bool
+	redirectTarget bool
+}
+
+func (parser *shellTokenParser) consume(current byte) {
+	switch {
+	case parser.escaped:
+		parser.consumeEscaped(current)
+	case current == '\\' && parser.quote != '\'':
+		parser.beginEscape()
+	case parser.quote != 0:
+		parser.consumeQuoted(current)
+	case current == '\'' || current == '"':
+		parser.beginQuote(current)
+	case strings.ContainsRune(" \t\r\n", rune(current)):
+		parser.flush()
+	case current == '>':
+		parser.consumeRedirectOperator()
+	case parser.redirect && !parser.redirectTarget && current == '|' && strings.HasSuffix(parser.raw.String(), ">"):
+		parser.write(current)
+	default:
+		if parser.redirect {
+			parser.redirectTarget = true
+		}
+		parser.write(current)
+	}
+}
+
+func (parser *shellTokenParser) consumeEscaped(current byte) {
+	if parser.redirect {
+		parser.redirectTarget = true
+	}
+	parser.raw.WriteByte(current)
+	parser.value.WriteByte(current)
+	parser.escaped = false
+	parser.started = true
+}
+
+func (parser *shellTokenParser) beginEscape() {
+	if parser.redirect {
+		parser.redirectTarget = true
+	}
+	parser.raw.WriteByte('\\')
+	parser.escaped = true
+	parser.started = true
+}
+
+func (parser *shellTokenParser) consumeQuoted(current byte) {
+	parser.raw.WriteByte(current)
+	if current == parser.quote {
+		parser.quote = 0
+	} else {
+		parser.value.WriteByte(current)
+	}
+	parser.started = true
+}
+
+func (parser *shellTokenParser) beginQuote(quote byte) {
+	if parser.redirect {
+		parser.redirectTarget = true
+	}
+	parser.raw.WriteByte(quote)
+	parser.quote = quote
+	parser.started = true
+}
+
+func (parser *shellTokenParser) consumeRedirectOperator() {
+	if parser.redirect && !parser.redirectTarget && strings.HasSuffix(parser.raw.String(), ">") {
+		parser.write('>')
+		return
+	}
+	prefix := parser.value.String()
+	if parser.started && (parser.redirect || (prefix != "&" && !asciiDigits(prefix))) {
+		parser.flush()
+	}
+	parser.redirect = true
+	parser.write('>')
+}
+
+func (parser *shellTokenParser) write(current byte) {
+	parser.raw.WriteByte(current)
+	parser.value.WriteByte(current)
+	parser.started = true
+}
+
+func (parser *shellTokenParser) flush() {
+	if !parser.started {
+		return
+	}
+	parser.tokens = append(parser.tokens, shellToken{raw: parser.raw.String(), text: parser.value.String()})
+	parser.raw.Reset()
+	parser.value.Reset()
+	parser.started = false
+	parser.redirect = false
+	parser.redirectTarget = false
+}
+
+func asciiDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, current := range value {
+		if current < '0' || current > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func applyScriptRedirections(tokens []shellToken, descriptors map[int]scriptOutputDestination) {
