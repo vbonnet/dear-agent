@@ -602,6 +602,62 @@ func TestCreateSession_LifecycleOrder(t *testing.T) {
 	}
 }
 
+func TestCreateSession_AgyWorkspaceLockCoversSharedLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	var order []string
+	locked := false
+	store := &createMockStorage{onCreate: func() {
+		if !locked {
+			t.Fatal("AGY workspace lock was released before registration")
+		}
+	}}
+	runtime := &createTestRuntime{
+		launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			if !locked {
+				t.Fatal("AGY workspace lock was not held during launch")
+			}
+			order = append(order, "launch")
+			return CreateSessionLaunchResult{}, nil
+		},
+		complete: func(context.Context, CreateSessionCompletion) error {
+			if !locked {
+				t.Fatal("AGY workspace lock was not held during provider identity completion")
+			}
+			order = append(order, "complete")
+			return nil
+		},
+	}
+	opCtx := &OpContext{
+		Tmux: session.NewMockTmux(), Storage: store, CreationRuntime: runtime,
+		AgyWorkspaceCreateLocker: func(ctx context.Context, workDir string) (func() error, error) {
+			if ctx != t.Context() || workDir != dir {
+				t.Fatalf("AGY lock input = %v/%q, want caller context/%q", ctx, workDir, dir)
+			}
+			locked = true
+			order = append(order, "lock")
+			return func() error {
+				locked = false
+				order = append(order, "unlock")
+				return nil
+			}, nil
+		},
+	}
+	_, err := CreateSessionWithContext(t.Context(), opCtx, &CreateSessionRequest{
+		Cwd: dir, Title: "agy-locked", Harness: "agy", Model: "3.5-flash-low",
+		Prompt: "fixture", SessionID: "agy-locked-id", RequireStorage: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateSessionWithContext: %v", err)
+	}
+	if locked {
+		t.Fatal("AGY workspace lock was not released after lifecycle completion")
+	}
+	want := []string{"lock", "launch", "complete", "unlock"}
+	if !reflect.DeepEqual(order, want) {
+		t.Fatalf("AGY lock lifecycle order = %v, want %v", order, want)
+	}
+}
+
 func TestCreateSession_CancellationAfterRegistrationRollsBackBeforeCompletion(t *testing.T) {
 	t.Parallel()
 

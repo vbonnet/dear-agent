@@ -4,6 +4,8 @@ package agysession
 
 import (
 	"bufio"
+	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +15,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/lock"
 )
 
 const (
@@ -32,6 +36,8 @@ var ErrLogDiscoveryBudgetExhausted = errors.New("AGY log discovery budget exhaus
 // saved AGY conversation for the requested workspace. It is distinct from an
 // unreadable, corrupt, or incompletely searched metadata store.
 var ErrConversationNotFound = errors.New("AGY conversation not found")
+
+const workspaceCreateLockRetryDelay = 25 * time.Millisecond
 
 type agyLogCandidates struct {
 	paths              []string
@@ -108,6 +114,46 @@ func ValidateConversationID(conversationID string) error {
 		return fmt.Errorf("invalid AGY native conversation ID: expected an alphanumeric identifier containing only letters, digits, hyphens, or underscores")
 	}
 	return nil
+}
+
+// AcquireWorkspaceCreateLock serializes AGY conversation creation for one
+// canonical workspace. AGY exposes only a workspace-global latest-conversation
+// mapping, so every AGM launch surface must hold this lock until its native ID
+// has been discovered and persisted.
+func AcquireWorkspaceCreateLock(ctx context.Context, workDir string) (func() error, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	absoluteWorkDir, err := filepath.Abs(workDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve AGY workspace lock path: %w", err)
+	}
+	stateDir := os.Getenv("AGM_STATE_DIR")
+	if stateDir == "" {
+		stateDir = fmt.Sprintf("/tmp/agm-%d", os.Getuid())
+	}
+	digest := sha256.Sum256([]byte(filepath.Clean(absoluteWorkDir)))
+	fileLock, err := lock.New(filepath.Join(stateDir, fmt.Sprintf("agy-create-%x.lock", digest[:16])))
+	if err != nil {
+		return nil, fmt.Errorf("create AGY workspace lock: %w", err)
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			_ = fileLock.Unlock()
+			return nil, fmt.Errorf("acquire AGY workspace lock: %w", err)
+		}
+		if err := fileLock.TryLock(); err == nil {
+			return fileLock.Unlock, nil
+		}
+		timer := time.NewTimer(workspaceCreateLockRetryDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			_ = fileLock.Unlock()
+			return nil, fmt.Errorf("acquire AGY workspace lock: %w", ctx.Err())
+		case <-timer.C:
+		}
+	}
 }
 
 // FindLatestForWorkspace resolves the latest AGY conversation recorded for the

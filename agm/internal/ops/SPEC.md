@@ -155,6 +155,8 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-69** When a creation request is canceled after registration but before runtime completion, the shared lifecycle shall skip completion and enter rollback before a startup prompt or other completion side effect can run.
 
+**OPS-70** When any shared creation surface launches AGY, the system shall use `CreateSessionWithContext` to hold the canonical AGY workspace-create lock across tmux preparation, launch, registration, runtime readiness and identity completion, and rollback cleanup so it coordinates with direct adapter creation.
+
 **OPS-36** While a session's state is OFFLINE, READY, or DONE, the stall detector shall skip error-loop detection for that session.
 
 ### Field Mask Projection

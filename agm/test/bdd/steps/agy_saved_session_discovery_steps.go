@@ -29,6 +29,7 @@ func RegisterAgySavedSessionDiscoverySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates bounded AGY log discovery$`, agmValidatesBoundedAgyLogDiscovery)
 	ctx.Step(`^AGY cache hits should bypass log discovery$`, agyCacheHitsShouldBypassLogDiscovery)
 	ctx.Step(`^unsafe AGY native IDs should be rejected before path lookup$`, unsafeAgyNativeIDsShouldBeRejectedBeforePathLookup)
+	ctx.Step(`^AGY workspace creation should serialize and honor cancellation$`, agyWorkspaceCreationShouldSerializeAndHonorCancellation)
 	ctx.Step(`^AGY log fallback should prefer the newest modification time$`, agyLogFallbackShouldPreferNewestModificationTime)
 	ctx.Step(`^AGY log fallback should enforce its candidate-file budget$`, agyLogFallbackShouldEnforceCandidateFileBudget)
 	ctx.Step(`^AGY log fallback should enforce its per-file byte budget$`, agyLogFallbackShouldEnforcePerFileByteBudget)
@@ -55,7 +56,7 @@ func agmValidatesBoundedAgyLogDiscovery(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/agysession", "-run",
-		`^(TestFindByID_(CacheHitDoesNotReadInvalidLogDirectory|RejectsUnsafeConversationIDBeforePathLookup)|TestCollectAgyLogCandidatesSkipsRemovedEntry|TestWorkspaceFromLogCandidates(ReturnsKnownMatchWithDirectoryExhaustion|SkipsRemovedFileBeforeScan)|TestWorkspaceFromLogs(PrefersNewestModificationTime|Reports(Candidate|DirectoryEntry|PerFileByte)BudgetExhaustion|RejectsOversizedLine|ReturnsMatchInsideTruncatedFile)|TestLatestConversationForWorkspace(Rejects(DirectoryEntryExhaustion|TruncatedPrefixMatch|OlderMatchAfterTruncatedNewerLog)|FromLogCandidatesSkipsRemovedFileBeforeScan)|TestLogHasUnreadTailDetectsGrowthAfterBoundedScan)$`,
+		`^(TestFindByID_(CacheHitDoesNotReadInvalidLogDirectory|RejectsUnsafeConversationIDBeforePathLookup)|TestAcquireWorkspaceCreateLockSerializesAndHonorsCancellation|TestCollectAgyLogCandidatesSkipsRemovedEntry|TestWorkspaceFromLogCandidates(ReturnsKnownMatchWithDirectoryExhaustion|SkipsRemovedFileBeforeScan)|TestWorkspaceFromLogs(PrefersNewestModificationTime|Reports(Candidate|DirectoryEntry|PerFileByte)BudgetExhaustion|RejectsOversizedLine|ReturnsMatchInsideTruncatedFile)|TestLatestConversationForWorkspace(Rejects(DirectoryEntryExhaustion|TruncatedPrefixMatch|OlderMatchAfterTruncatedNewerLog)|FromLogCandidatesSkipsRemovedFileBeforeScan)|TestLogHasUnreadTailDetectsGrowthAfterBoundedScan)$`,
 		"-count=1", "-v")
 	cmd.Dir = packageSpecBDDRepoRoot()
 	output, runErr := cmd.CombinedOutput()
@@ -73,6 +74,10 @@ func agyCacheHitsShouldBypassLogDiscovery(ctx context.Context) error {
 
 func unsafeAgyNativeIDsShouldBeRejectedBeforePathLookup(ctx context.Context) error {
 	return requireAgySavedSessionBehavior(ctx, "TestFindByID_RejectsUnsafeConversationIDBeforePathLookup")
+}
+
+func agyWorkspaceCreationShouldSerializeAndHonorCancellation(ctx context.Context) error {
+	return requireAgySavedSessionBehavior(ctx, "TestAcquireWorkspaceCreateLockSerializesAndHonorsCancellation")
 }
 
 func agyLogFallbackShouldPreferNewestModificationTime(ctx context.Context) error {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/codexcontrol"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
@@ -87,6 +88,10 @@ type SessionStorageOpener func(context.Context) (dolt.Storage, func(), error)
 
 // CodexThreadCreator adapts the external Codex remote-control dependency.
 type CodexThreadCreator func(context.Context, string, string, string) (*manifest.Codex, error)
+
+// AgyWorkspaceCreateLocker serializes the native identity window for one AGY
+// workspace and returns its release operation.
+type AgyWorkspaceCreateLocker func(context.Context, string) (func() error, error)
 
 // CreateSessionRequest defines the input for creating a new AGM session.
 type CreateSessionRequest struct {
@@ -251,6 +256,21 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 	params, err := validateCreateRequest(opCtx, req)
 	if err != nil {
 		return nil, err
+	}
+	if params.harness == "agy" {
+		locker := opCtx.AgyWorkspaceCreateLocker
+		if locker == nil {
+			locker = agysession.AcquireWorkspaceCreateLock
+		}
+		release, lockErr := locker(callCtx, req.Cwd)
+		if lockErr != nil {
+			return nil, ErrStorageError("agy.workspace-lock", lockErr)
+		}
+		defer func() {
+			if unlockErr := release(); unlockErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to release AGY workspace lock: %v\n", unlockErr)
+			}
+		}()
 	}
 
 	exists, err := prepareCreateTmux(opCtx, req, params.name)

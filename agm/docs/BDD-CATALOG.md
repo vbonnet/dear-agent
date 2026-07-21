@@ -254,10 +254,12 @@ creation, and terminal state detection.
   snapshot is unreadable or incomplete, preserves known model provenance on
   cold resume, and omits a model override when an imported conversation's
   native selection is unknown.
-- AGY adapter create normalizes relative workspaces and serializes native
-  identity snapshot-through-discovery per workspace; launch, resume, and
-  history reject unsafe provider identifiers before external mutation or path
-  lookup.
+- AGY creation normalizes relative workspaces and shares cancellation-aware
+  native identity serialization across CLI, MCP, and adapter lifecycle paths;
+  launch, resume, and history reject unsafe provider identifiers before
+  external mutation or path lookup.
+- AGY cold resume distinguishes a restartable bare shell from a pane containing
+  another live harness and never injects its command into the latter.
 - AGY adapter create and cold resume require native readiness, roll back tmux
   sessions created by a failed operation, and use exact AGY process and native
   transcript truth for status and history.

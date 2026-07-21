@@ -3,7 +3,6 @@ package agent
 import (
 	"bufio"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,7 +15,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
-	"github.com/vbonnet/dear-agent/agm/internal/lock"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
@@ -34,6 +32,7 @@ var (
 	agySendCommand      = tmux.SendCommand
 	agyWaitForPrompt    = tmux.WaitForAgyPrompt
 	agyCheckProcess     = tmux.CheckProcessInPaneTree
+	agyCheckHarness     = tmux.CheckPaneLiveness
 	agyIsIdle           = tmux.IsAgyIdle
 	agyAttachSession    = tmux.AttachSession
 	agyKillSession      = tmux.KillSession
@@ -49,7 +48,9 @@ var (
 		return metadata.ConversationID, nil
 	}
 	agyDiscoverySleep    = time.Sleep
-	agyAcquireCreateLock = acquireAgyCreateLock
+	agyAcquireCreateLock = func(workDir string) (func() error, error) {
+		return agysession.AcquireWorkspaceCreateLock(context.Background(), workDir)
+	}
 )
 
 const (
@@ -217,23 +218,6 @@ func canonicalAgyWorkDir(workDir string) (string, error) {
 	return filepath.Clean(absolute), nil
 }
 
-func acquireAgyCreateLock(workDir string) (func() error, error) {
-	stateDir := os.Getenv("AGM_STATE_DIR")
-	if stateDir == "" {
-		stateDir = fmt.Sprintf("/tmp/agm-%d", os.Getuid())
-	}
-	digest := sha256.Sum256([]byte(workDir))
-	fileLock, err := lock.New(filepath.Join(stateDir, fmt.Sprintf("agy-create-%x.lock", digest[:16])))
-	if err != nil {
-		return nil, fmt.Errorf("create AGY workspace lock: %w", err)
-	}
-	if err := fileLock.Lock(); err != nil {
-		_ = fileLock.Unlock()
-		return nil, fmt.Errorf("acquire AGY workspace lock: %w", err)
-	}
-	return fileLock.Unlock, nil
-}
-
 func discoverAgyConversationID(workDir, previousConversationID string) (string, error) {
 	var lastErr error
 	for attempt := 1; attempt <= agyConversationDiscoveryAttempts; attempt++ {
@@ -275,6 +259,15 @@ func (a *AgyAdapter) ResumeSession(sessionID SessionID) error {
 		running, checkErr := agyCheckProcess(metadata.TmuxName, tmux.GetSocketPath(), "agy")
 		if checkErr != nil {
 			return fmt.Errorf("failed to check AGY process liveness: %w", checkErr)
+		}
+		if !running {
+			verdict, harnessErr := agyCheckHarness(metadata.TmuxName, tmux.GetSocketPath())
+			if harnessErr != nil {
+				return fmt.Errorf("failed to check competing harness liveness: %w", harnessErr)
+			}
+			if verdict.HarnessAlive {
+				return fmt.Errorf("refusing to resume AGY session %q into a tmux pane containing another live harness (pane tree: %s)", sessionID, verdict.Evidence)
+			}
 		}
 		sendCommands = !running
 	} else {

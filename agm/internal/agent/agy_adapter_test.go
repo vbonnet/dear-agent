@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 func preserveAgyAdapterSeams(t *testing.T) {
@@ -21,6 +22,7 @@ func preserveAgyAdapterSeams(t *testing.T) {
 	origSendCommand := agySendCommand
 	origWaitForPrompt := agyWaitForPrompt
 	origCheckProcess := agyCheckProcess
+	origCheckHarness := agyCheckHarness
 	origIsIdle := agyIsIdle
 	origAttachSession := agyAttachSession
 	origKillSession := agyKillSession
@@ -36,6 +38,7 @@ func preserveAgyAdapterSeams(t *testing.T) {
 		agySendCommand = origSendCommand
 		agyWaitForPrompt = origWaitForPrompt
 		agyCheckProcess = origCheckProcess
+		agyCheckHarness = origCheckHarness
 		agyIsIdle = origIsIdle
 		agyAttachSession = origAttachSession
 		agyKillSession = origKillSession
@@ -294,7 +297,9 @@ func TestAgyCreateSessionNormalizesWorkingDirectoryForLaunchAndDiscovery(t *test
 func TestAgyCreateSessionSerializesWorkspaceIdentityDiscovery(t *testing.T) {
 	preserveAgyAdapterSeams(t)
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
-	agyAcquireCreateLock = acquireAgyCreateLock
+	agyAcquireCreateLock = func(workDir string) (func() error, error) {
+		return agysession.AcquireWorkspaceCreateLock(t.Context(), workDir)
+	}
 
 	var providerMu sync.Mutex
 	providerConversationID := "pre-existing-conversation-id"
@@ -670,6 +675,60 @@ func TestAgyResumeSessionUsesExactProcessLivenessAndFailsSafe(t *testing.T) {
 	}
 	if processName != "agy" || sent {
 		t.Fatalf("process=%q sent=%v, want exact AGY fail-safe check", processName, sent)
+	}
+}
+
+func TestAgyResumeSessionRejectsAnotherLiveHarnessBeforeMutation(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	t.Setenv("TMUX", "fixture")
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	sessionID := SessionID("adapter-session")
+	if err := store.Set(sessionID, &SessionMetadata{
+		TmuxName: "agy-collision", WorkingDir: "/work", UUID: "native-id",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	agyHasSession = func(string) (bool, error) { return true, nil }
+	agyCheckProcess = func(string, string, string) (bool, error) { return false, nil }
+	agyCheckHarness = func(string, string) (tmux.PaneLiveness, error) {
+		return tmux.PaneLiveness{SessionExists: true, HarnessAlive: true, Evidence: "zsh,claude"}, nil
+	}
+	sent := false
+	agySendCommand = func(string, string) error { sent = true; return nil }
+
+	err := (&AgyAdapter{sessionStore: store}).ResumeSession(sessionID)
+	if err == nil || !strings.Contains(err.Error(), "another live harness") {
+		t.Fatalf("ResumeSession error = %v, want competing harness rejection", err)
+	}
+	if sent {
+		t.Fatal("ResumeSession injected the AGY command into another live harness")
+	}
+}
+
+func TestAgyResumeSessionRestartsInExistingBareShell(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	t.Setenv("TMUX", "fixture")
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	sessionID := SessionID("adapter-session")
+	if err := store.Set(sessionID, &SessionMetadata{
+		TmuxName: "agy-shell", WorkingDir: "/work", UUID: "native-id",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	agyHasSession = func(string) (bool, error) { return true, nil }
+	agyCheckProcess = func(string, string, string) (bool, error) { return false, nil }
+	agyCheckHarness = func(string, string) (tmux.PaneLiveness, error) {
+		return tmux.PaneLiveness{SessionExists: true, Evidence: "zsh"}, nil
+	}
+	command := ""
+	agySendCommand = func(_ string, value string) error { command = value; return nil }
+	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return nil }
+
+	if err := (&AgyAdapter{sessionStore: store}).ResumeSession(sessionID); err != nil {
+		t.Fatalf("ResumeSession: %v", err)
+	}
+	if !strings.Contains(command, "--conversation 'native-id'") {
+		t.Fatalf("bare-shell resume command = %q", command)
 	}
 }
 

@@ -2,6 +2,7 @@ package agysession
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -39,6 +40,46 @@ func TestFindByID_RejectsUnsafeConversationIDBeforePathLookup(t *testing.T) {
 	_, err := FindByID(t.TempDir(), "../../escape; touch /tmp/no")
 	if err == nil || !strings.Contains(err.Error(), "invalid AGY native conversation ID") {
 		t.Fatalf("FindByID error = %v, want unsafe native ID rejection", err)
+	}
+}
+
+func TestAcquireWorkspaceCreateLockSerializesAndHonorsCancellation(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	preCanceled, cancelBeforeAcquire := context.WithCancel(t.Context())
+	cancelBeforeAcquire()
+	if _, err := AcquireWorkspaceCreateLock(preCanceled, t.TempDir()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("pre-canceled workspace lock error = %v, want context cancellation", err)
+	}
+	workDir := t.TempDir()
+	release, err := AcquireWorkspaceCreateLock(t.Context(), workDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := release(); err != nil {
+			t.Errorf("release first workspace lock: %v", err)
+		}
+	}()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	result := make(chan error, 1)
+	go func() {
+		_, lockErr := AcquireWorkspaceCreateLock(ctx, workDir)
+		result <- lockErr
+	}()
+	select {
+	case err := <-result:
+		t.Fatalf("contending workspace lock returned before cancellation: %v", err)
+	case <-time.After(75 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("contending workspace lock error = %v, want context cancellation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("contending workspace lock ignored caller cancellation")
 	}
 }
 

@@ -42,6 +42,9 @@ type OpContext struct {
 	// CodexThreadCreator adapts the external Codex remote-control dependency.
 	// Nil selects the production implementation.
 	CodexThreadCreator CodexThreadCreator
+	// AgyWorkspaceCreateLocker serializes the provider-global identity window
+	// across every AGY creation surface. Nil selects the production lock.
+	AgyWorkspaceCreateLocker AgyWorkspaceCreateLocker
 }
 
 // Result is the base type for all operation results.

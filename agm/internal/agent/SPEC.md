@@ -73,6 +73,8 @@ compatibility.
 
 **AGP-23** When the AGY adapter reports status or reads history, the system shall require an actual `agy` process for live status and shall read user/model messages from the native Antigravity brain transcript rather than a synthetic harness path.
 
+**AGP-30** When AGY cold resume finds the recorded tmux session without a live `agy` process, the system shall verify that the pane contains only a restartable shell before command delivery and shall fail without mutation if another live harness is present or harness liveness cannot be determined.
+
 ### Codex Workdir Trust (ce-cmsq)
 
 **AGP-14** When a Codex CLI session is created or resumed through the codex-cli adapter, the system shall record the working directory as a trusted Codex project in `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`) before sending the launch command, so a fresh non-git sandbox directory cannot block Codex startup on its interactive trust prompt.

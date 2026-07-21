@@ -22,6 +22,8 @@ conversations with their workspace, transcript, and permission-mode context.
 
 **AGYS-06** When an enumerated log disappears during metadata collection or before its bounded scan opens the file, the system shall treat it as a stale rotation snapshot and continue with remaining candidates; when metadata lookup, open, or scan fails for any other reason, the system shall fail explicitly rather than silently omit a potentially newer log.
 
+**AGYS-07** When any AGM surface creates an AGY conversation, the system shall acquire the same cancellation-aware cross-process lock for its canonical workspace before launch and retain it through provider-native identity discovery and persistence.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/agy_saved_session_discovery.feature`
