@@ -17,6 +17,11 @@ current_waypoint: SPEC
 status: in-progress
 created_at: 2026-07-20T12:00:00Z
 updated_at: 2026-07-20T12:30:00Z
+waypoint_history:
+  - {name: CHARTER, status: completed, started_at: 2026-07-20T12:00:00Z, completed_at: 2026-07-20T12:01:00Z}
+  - {name: PROBLEM, status: completed, started_at: 2026-07-20T12:01:00Z, completed_at: 2026-07-20T12:02:00Z}
+  - {name: RESEARCH, status: completed, started_at: 2026-07-20T12:02:00Z, completed_at: 2026-07-20T12:03:00Z}
+  - {name: DESIGN, status: completed, started_at: 2026-07-20T12:03:00Z, completed_at: 2026-07-20T12:04:00Z}
 ---
 `
 	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), []byte(content), 0o644); err != nil {
