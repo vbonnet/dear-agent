@@ -250,6 +250,56 @@ func TestWorkspaceFromLogsReturnsMatchInsideTruncatedFile(t *testing.T) {
 	}
 }
 
+func TestLatestConversationForWorkspaceRejectsTruncatedPrefixMatch(t *testing.T) {
+	appDir := t.TempDir()
+	workspace := "/tmp/latest-workspace"
+	logDir := filepath.Join(appDir, "log")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+	content := workspaceMarker + workspace + "\nCreated conversation older-prefix\n" +
+		strings.Repeat("padding\n", maxAgyLogScanBytes/len("padding\n")+1) +
+		workspaceMarker + workspace + "\nCreated conversation newer-tail\n"
+	if err := os.WriteFile(filepath.Join(logDir, "truncated-match.log"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write truncated match log: %v", err)
+	}
+
+	conversationID, _, err := latestConversationForWorkspaceFromLogs(appDir, workspace)
+	if !errors.Is(err, ErrLogDiscoveryBudgetExhausted) {
+		t.Fatalf("error = %v, want ErrLogDiscoveryBudgetExhausted", err)
+	}
+	if conversationID != "" {
+		t.Fatalf("conversation ID = %q, want no inconclusive prefix match", conversationID)
+	}
+}
+
+func TestLatestConversationForWorkspaceRejectsOlderMatchAfterTruncatedNewerLog(t *testing.T) {
+	appDir := t.TempDir()
+	workspace := "/tmp/latest-workspace"
+	newerPath := writeAgyLog(t, appDir, "newer-truncated.log", []string{
+		strings.Repeat("padding\n", maxAgyLogScanBytes/len("padding\n")+1),
+	})
+	olderPath := writeAgyLog(t, appDir, "older-match.log", []string{
+		workspaceMarker + workspace,
+		"Created conversation older-file",
+	})
+	base := time.Date(2026, time.July, 20, 12, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(olderPath, base, base); err != nil {
+		t.Fatalf("set older log time: %v", err)
+	}
+	if err := os.Chtimes(newerPath, base.Add(time.Minute), base.Add(time.Minute)); err != nil {
+		t.Fatalf("set newer log time: %v", err)
+	}
+
+	conversationID, _, err := latestConversationForWorkspaceFromLogs(appDir, workspace)
+	if !errors.Is(err, ErrLogDiscoveryBudgetExhausted) {
+		t.Fatalf("error = %v, want ErrLogDiscoveryBudgetExhausted", err)
+	}
+	if conversationID != "" {
+		t.Fatalf("conversation ID = %q, want no older match after an incomplete newer log", conversationID)
+	}
+}
+
 func writeAgyFixture(t *testing.T, appDir, conversationID, cachedWorkspace, loggedWorkspace string) {
 	t.Helper()
 

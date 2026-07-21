@@ -184,21 +184,23 @@ func latestConversationForWorkspaceFromLogs(appDir, workspacePath string) (strin
 		}
 		return "", "", err
 	}
-	truncatedFiles := 0
-	for _, logPath := range candidates.paths {
+	for index, logPath := range candidates.paths {
 		conversationID, matched, truncated, err := scanLogForWorkspace(logPath, workspacePath)
 		if err != nil {
 			return "", "", err
 		}
 		if truncated {
-			truncatedFiles++
+			// A prefix match is not conclusive for latest-session lookup: the
+			// unscanned tail may contain a newer marker for this workspace. A
+			// truncated newer candidate also makes any older-file match unsafe.
+			return "", "", logDiscoveryBudgetError("workspace "+workspacePath, index+1, candidates.omitted, 1)
 		}
 		if matched && conversationID != "" {
 			return conversationID, logPath, nil
 		}
 	}
-	if candidates.omitted > 0 || truncatedFiles > 0 {
-		return "", "", logDiscoveryBudgetError("workspace "+workspacePath, len(candidates.paths), candidates.omitted, truncatedFiles)
+	if candidates.omitted > 0 {
+		return "", "", logDiscoveryBudgetError("workspace "+workspacePath, len(candidates.paths), candidates.omitted, 0)
 	}
 	return "", "", fmt.Errorf("no AGY conversation recorded for workspace: %s", workspacePath)
 }

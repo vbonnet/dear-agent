@@ -54,7 +54,7 @@ func agmValidatesBoundedAgyLogDiscovery(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/agysession", "-run",
-		`^(TestFindByID_CacheHitDoesNotReadInvalidLogDirectory|TestWorkspaceFromLogs(PrefersNewestModificationTime|ReportsCandidateBudgetExhaustion|ReportsPerFileByteBudgetExhaustion|RejectsOversizedLine|ReturnsMatchInsideTruncatedFile))$`,
+		`^(TestFindByID_CacheHitDoesNotReadInvalidLogDirectory|TestWorkspaceFromLogs(PrefersNewestModificationTime|ReportsCandidateBudgetExhaustion|ReportsPerFileByteBudgetExhaustion|RejectsOversizedLine|ReturnsMatchInsideTruncatedFile)|TestLatestConversationForWorkspaceRejects(TruncatedPrefixMatch|OlderMatchAfterTruncatedNewerLog))$`,
 		"-count=1", "-v")
 	cmd.Dir = packageSpecBDDRepoRoot()
 	output, runErr := cmd.CombinedOutput()
@@ -82,6 +82,8 @@ func agyLogFallbackShouldEnforcePerFileByteBudget(ctx context.Context) error {
 	return requireAgySavedSessionBehavior(ctx,
 		"TestWorkspaceFromLogsReportsPerFileByteBudgetExhaustion",
 		"TestWorkspaceFromLogsReturnsMatchInsideTruncatedFile",
+		"TestLatestConversationForWorkspaceRejectsTruncatedPrefixMatch",
+		"TestLatestConversationForWorkspaceRejectsOlderMatchAfterTruncatedNewerLog",
 	)
 }
 
