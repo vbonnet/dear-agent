@@ -364,39 +364,58 @@ func validateLivingWayfinderDocument(relativePath, content string) error {
 			return fmt.Errorf("living documentation %s parses retired Wayfinder status label %s", relativePath, label)
 		}
 	}
-	contextLines := 0
-	inFence := false
-	wayfinderFence := false
+	state := livingWayfinderDocState{}
 	for lineNumber, line := range strings.Split(content, "\n") {
-		trimmed := strings.TrimSpace(line)
-		isFence := strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")
-		openingFence := isFence && !inFence
-		if openingFence {
-			inFence = true
-			wayfinderFence = false
+		if err := validateLivingWayfinderLine(relativePath, lineNumber+1, line, &state); err != nil {
+			return err
 		}
-		mentionsWayfinder := strings.Contains(strings.ToLower(line), "wayfinder")
-		if inFence && mentionsWayfinder {
-			wayfinderFence = true
-		}
-		hasWayfinderContext := contextLines > 0 || wayfinderFence || mentionsWayfinder
-		if token := retiredWayfinderDocToken(line, hasWayfinderContext); token != "" {
-			return fmt.Errorf("living documentation %s:%d contains retired Wayfinder token %s", relativePath, lineNumber+1, token)
-		}
-		if hasWayfinderContext {
-			if phase := wayfinderDocPhaseValue(line); phase != "" && !canonicalWayfinderPhases[phase] {
-				return fmt.Errorf("living documentation %s:%d contains noncanonical Wayfinder phase %s", relativePath, lineNumber+1, phase)
-			}
-		}
-		if mentionsWayfinder {
-			contextLines = 2
-		} else if contextLines > 0 {
-			contextLines--
-		}
-		if isFence && !openingFence {
-			inFence = false
-			wayfinderFence = false
-		}
+	}
+	return nil
+}
+
+type livingWayfinderDocState struct {
+	contextLines   int
+	inFence        bool
+	wayfinderFence bool
+}
+
+func validateLivingWayfinderLine(relativePath string, lineNumber int, line string, state *livingWayfinderDocState) error {
+	trimmed := strings.TrimSpace(line)
+	isFence := strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")
+	openingFence := isFence && !state.inFence
+	if openingFence {
+		state.inFence = true
+		state.wayfinderFence = false
+	}
+	mentionsWayfinder := strings.Contains(strings.ToLower(line), "wayfinder")
+	if state.inFence && mentionsWayfinder {
+		state.wayfinderFence = true
+	}
+	hasWayfinderContext := state.contextLines > 0 || state.wayfinderFence || mentionsWayfinder
+	if token := retiredWayfinderDocToken(line, hasWayfinderContext); token != "" {
+		return fmt.Errorf("living documentation %s:%d contains retired Wayfinder token %s", relativePath, lineNumber, token)
+	}
+	if err := validateLivingWayfinderPhase(relativePath, lineNumber, line, hasWayfinderContext); err != nil {
+		return err
+	}
+	if mentionsWayfinder {
+		state.contextLines = 2
+	} else if state.contextLines > 0 {
+		state.contextLines--
+	}
+	if isFence && !openingFence {
+		state.inFence = false
+		state.wayfinderFence = false
+	}
+	return nil
+}
+
+func validateLivingWayfinderPhase(relativePath string, lineNumber int, line string, hasWayfinderContext bool) error {
+	if !hasWayfinderContext {
+		return nil
+	}
+	if phase := wayfinderDocPhaseValue(line); phase != "" && !canonicalWayfinderPhases[phase] {
+		return fmt.Errorf("living documentation %s:%d contains noncanonical Wayfinder phase %s", relativePath, lineNumber, phase)
 	}
 	return nil
 }

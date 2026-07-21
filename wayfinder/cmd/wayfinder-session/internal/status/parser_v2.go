@@ -89,23 +89,34 @@ func validateV2TimestampNode(node *yaml.Node, path string) error {
 			}
 		}
 	case yaml.MappingNode:
-		for i := 0; i+1 < len(node.Content); i += 2 {
-			key, value := node.Content[i], node.Content[i+1]
-			childPath := key.Value
-			if path != "" {
-				childPath = path + "." + key.Value
+		return validateV2TimestampMapping(node, path)
+	case yaml.AliasNode:
+		if node.Alias != nil {
+			return validateV2TimestampNode(node.Alias, path)
+		}
+	case yaml.ScalarNode:
+		// Scalars are validated by their containing mapping when relevant.
+	}
+	return nil
+}
+
+func validateV2TimestampMapping(node *yaml.Node, path string) error {
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key, value := node.Content[i], node.Content[i+1]
+		childPath := key.Value
+		if path != "" {
+			childPath = path + "." + key.Value
+		}
+		if v2TimestampFields[key.Value] && value.Tag != "!!null" {
+			if value.Kind != yaml.ScalarNode {
+				return fmt.Errorf("invalid Wayfinder V2 status: %s must be an RFC3339 timestamp", childPath)
 			}
-			if v2TimestampFields[key.Value] && value.Tag != "!!null" {
-				if value.Kind != yaml.ScalarNode {
-					return fmt.Errorf("invalid Wayfinder V2 status: %s must be an RFC3339 timestamp", childPath)
-				}
-				if _, err := time.Parse(time.RFC3339, value.Value); err != nil {
-					return fmt.Errorf("invalid Wayfinder V2 status: %s must be an RFC3339 timestamp", childPath)
-				}
+			if _, err := time.Parse(time.RFC3339, value.Value); err != nil {
+				return fmt.Errorf("invalid Wayfinder V2 status: %s must be an RFC3339 timestamp", childPath)
 			}
-			if err := validateV2TimestampNode(value, childPath); err != nil {
-				return err
-			}
+		}
+		if err := validateV2TimestampNode(value, childPath); err != nil {
+			return err
 		}
 	}
 	return nil
