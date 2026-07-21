@@ -419,8 +419,8 @@ func validateCanonicalWayfinderConsumers(repoRoot string) error {
 		forbidden []string
 	}{
 		{path: "wayfinder/coordinator/monitor.go", required: []string{`yaml:"current_waypoint"`}, forbidden: []string{"Current Phase:"}},
-		{path: "engram/cmd/engram-mcp/readtools.go", required: []string{`fields["current_waypoint"]`, `fields["status"]`}, forbidden: []string{"rePhase", "Current Phase:"}},
-		{path: "agm/cmd/agm-mcp-server/wayfinder.go", required: []string{`fmString(fm, "current_waypoint")`, `fmString(fm, "project_name")`}, forbidden: []string{`fmString(fm, "current_phase"`, `fmString(fm, "project_name",`}},
+		{path: "engram/cmd/engram-mcp/readtools.go", required: []string{"statusread.Parse(data)", "summary.CurrentWaypoint", "summary.Status"}, forbidden: []string{"rePhase", "Current Phase:"}},
+		{path: "agm/cmd/agm-mcp-server/wayfinder.go", required: []string{"statusread.Parse(data)", `fmString(fm, "current_waypoint")`, `fmString(fm, "project_name")`}, forbidden: []string{`fmString(fm, "current_phase"`, `fmString(fm, "project_name",`}},
 		{path: "internal/safepr/safepr.go", required: []string{`statusread.ParseFromDir(dir)`, "st.ProjectName", "st.Beads"}, forbidden: []string{`yaml:"schema_version"`, `yaml:"project_name"`, `yaml:"session_id"`, "st.SessionID"}},
 		{path: "engram/internal/config/config.go", forbidden: []string{"WayfinderConfig", "W0Config", `yaml:"w0"`}},
 		{path: "engram/internal/config/loader.go", forbidden: []string{"mergeWayfinder", "mergeW0", "hasW0"}},

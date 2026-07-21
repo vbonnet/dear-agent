@@ -40,6 +40,8 @@ four P0 disk-retro action items on 2026-07-03 (bead ce-ctsi).
 
 **EMC-08** When beads_reconcile is invoked with dry_run enabled, the system shall report the beads that would be backfilled without performing any write.
 
+**EMC-09** When wayfinder_phase_status reads a status file, the server shall return phase state only after complete canonical schema 2.0 validation.
+
 ## Tools
 
 | Tool | Kind | Behaviour |
@@ -48,7 +50,7 @@ four P0 disk-retro action items on 2026-07-03 (bead ce-ctsi).
 | `beads_reconcile` | write | Idempotent backfill from a legacy JSONL store (EMC-06..08) |
 | `engram_retrieve` | read | Wraps `engram retrieve --format json` |
 | `engram_plugins_list` | read | Scans `$ENGRAM_ROOT/{core,user}/plugins/*/plugin.yaml` |
-| `wayfinder_phase_status` | read | Parses schema 2.0 `current_waypoint` and `status` from `WAYFINDER-STATUS.md`; reports progress as unknown because the canonical schema has no percentage field |
+| `wayfinder_phase_status` | read | Fully validates canonical schema 2.0, then reports `current_waypoint` and `status`; progress is unknown because the schema has no percentage field |
 
 ## Configuration
 

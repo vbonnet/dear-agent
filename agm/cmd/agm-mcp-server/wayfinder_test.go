@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // writeStatus creates a complete canonical WAYFINDER-STATUS.md.
@@ -80,6 +81,9 @@ func TestListWayfinderSessions_Basic(t *testing.T) {
 	}
 	if len(sessions) != 3 {
 		t.Errorf("got %d sessions, want 3", len(sessions))
+	}
+	if sessions[0].CreatedAt != "2026-07-20T00:00:00Z" || sessions[0].UpdatedAt != "2026-07-20T00:00:00Z" {
+		t.Errorf("canonical timestamps were not preserved: %+v", sessions[0])
 	}
 }
 
@@ -224,5 +228,12 @@ func TestFmString_CanonicalKey(t *testing.T) {
 	got := fmString(fm, "project_name")
 	if got != "canonical-name" {
 		t.Errorf("fmString = %q, want canonical-name", got)
+	}
+}
+
+func TestFmString_CanonicalTimestamp(t *testing.T) {
+	stamp := time.Date(2026, 7, 20, 1, 2, 3, 0, time.UTC)
+	if got := fmString(map[string]any{"created_at": stamp}, "created_at"); got != "2026-07-20T01:02:03Z" {
+		t.Fatalf("fmString timestamp = %q", got)
 	}
 }

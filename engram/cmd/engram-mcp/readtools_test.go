@@ -43,6 +43,22 @@ func TestWayfinderStatus_RejectsNonCanonicalStatusFile(t *testing.T) {
 	}
 }
 
+func TestWayfinderStatus_RejectsInvalidCanonicalFields(t *testing.T) {
+	dir := t.TempDir()
+	content := `---
+schema_version: "2.0"
+current_waypoint: UNKNOWN
+status: typo
+---
+`
+	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wayfinderStatus(dir); err == nil {
+		t.Fatal("wayfinderStatus accepted incomplete status with invalid enums")
+	}
+}
+
 func TestWayfinderStatus_MissingFileIsError(t *testing.T) {
 	if _, err := wayfinderStatus(t.TempDir()); err == nil {
 		t.Fatal("want error for missing WAYFINDER-STATUS.md")

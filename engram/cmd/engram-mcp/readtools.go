@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/statusread"
 )
 
 // --- engram_retrieve ---
@@ -247,37 +249,15 @@ func wayfinderStatus(projectPath string) (*WayfinderStatusResult, error) {
 		return nil, fmt.Errorf("WAYFINDER-STATUS.md not found in %s", abs)
 	}
 
-	fields, err := canonicalWayfinderFields(string(data))
+	summary, err := statusread.Parse(data)
 	if err != nil {
 		return nil, fmt.Errorf("parse %s: %w", statusFile, err)
 	}
 	return &WayfinderStatusResult{
 		Project:    abs,
-		Phase:      fields["current_waypoint"],
+		Phase:      summary.CurrentWaypoint,
 		Progress:   "Unknown",
-		Status:     fields["status"],
+		Status:     summary.Status,
 		SourceFile: statusFile,
 	}, nil
-}
-
-func canonicalWayfinderFields(content string) (map[string]string, error) {
-	trimmed := strings.TrimSpace(content)
-	afterOpen, found := strings.CutPrefix(trimmed, "---")
-	if !found {
-		return nil, errors.New("canonical YAML frontmatter is required")
-	}
-	frontmatter, _, found := strings.Cut(afterOpen, "\n---")
-	if !found {
-		return nil, errors.New("unterminated YAML frontmatter")
-	}
-	fields := parseFlatYAML(frontmatter)
-	if fields["schema_version"] != "2.0" {
-		return nil, fmt.Errorf("schema_version must be 2.0, got %q", fields["schema_version"])
-	}
-	for _, field := range []string{"current_waypoint", "status"} {
-		if fields[field] == "" {
-			return nil, fmt.Errorf("%s is required", field)
-		}
-	}
-	return fields, nil
 }
