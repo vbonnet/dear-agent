@@ -82,6 +82,9 @@ func ValidateSessionCompletion(status *StatusV2) error {
 	var incomplete []string
 	for _, waypointName := range AllWaypointsV2Schema() {
 		if status.IsPhaseSkipped(waypointName) {
+			if waypoint := status.GetWaypointHistory(waypointName); waypoint != nil && waypoint.Status != WaypointStatusV2Skipped && waypoint.Status != WaypointStatusV2Completed {
+				return fmt.Errorf("configured skipped Wayfinder phase %s has active history status %s", waypointName, waypoint.Status)
+			}
 			continue
 		}
 		waypoint := status.GetWaypointHistory(waypointName)
@@ -227,8 +230,8 @@ func validateWaypointHistory(status *StatusV2) error {
 		if !contains(validWaypointStatuses, waypoint.Status) {
 			errors = append(errors, fmt.Sprintf("waypoint_history[%d]: invalid status '%s'", i, waypoint.Status))
 		}
-		if waypoint.Status == WaypointStatusV2Skipped && !status.IsPhaseSkipped(waypoint.Name) {
-			errors = append(errors, fmt.Sprintf("waypoint_history[%d]: mandatory waypoint '%s' cannot be skipped", i, waypoint.Name))
+		if err := validateWaypointSkipStatus(status, waypoint, i); err != nil {
+			errors = append(errors, err.Error())
 		}
 
 		// Validate started_at is present
@@ -258,6 +261,17 @@ func validateWaypointHistory(status *StatusV2) error {
 	return nil
 }
 
+func validateWaypointSkipStatus(status *StatusV2, waypoint WaypointHistory, index int) error {
+	configuredSkip := status.IsPhaseSkipped(waypoint.Name)
+	if waypoint.Status == WaypointStatusV2Skipped && !configuredSkip {
+		return fmt.Errorf("waypoint_history[%d]: mandatory waypoint '%s' cannot be skipped", index, waypoint.Name)
+	}
+	if configuredSkip && waypoint.Status != WaypointStatusV2Skipped && waypoint.Status != WaypointStatusV2Completed {
+		return fmt.Errorf("waypoint_history[%d]: configured skipped waypoint '%s' cannot have active status '%s'", index, waypoint.Name, waypoint.Status)
+	}
+	return nil
+}
+
 func validateWaypointSequence(status *StatusV2, allWaypoints []string) []string {
 	positions := make(map[string]int, len(allWaypoints))
 	for index, waypoint := range allWaypoints {
@@ -276,6 +290,9 @@ func validateWaypointSequence(status *StatusV2, allWaypoints []string) []string 
 		}
 	}
 	completed := completedWaypoints(status)
+	if status.IsPhaseSkipped(status.CurrentWaypoint) && !completed[status.CurrentWaypoint] {
+		errors = append(errors, fmt.Sprintf("current_waypoint '%s' is configured to be skipped but has no completed or skipped history", status.CurrentWaypoint))
+	}
 	for _, predecessor := range missingPredecessors(status, allWaypoints[:currentPosition], completed) {
 		errors = append(errors, fmt.Sprintf("current_waypoint '%s' requires completed predecessor '%s'", status.CurrentWaypoint, predecessor))
 	}

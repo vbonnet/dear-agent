@@ -287,6 +287,9 @@ func TestParseV2RejectsNonRFC3339Timestamps(t *testing.T) {
 	}{
 		{name: "top-level date", old: `created_at: "2026-02-15T10:00:00Z"`, replace: "created_at: 2026-02-15", want: "created_at must be an RFC3339 timestamp"},
 		{name: "nested date", old: `started_at: "2026-02-15T10:00:00Z"`, replace: "started_at: 2026-02-15", want: "started_at must be an RFC3339 timestamp"},
+		{name: "invalid offset hour", old: `created_at: "2026-02-15T10:00:00Z"`, replace: `created_at: "2026-02-15T10:00:00+24:00"`, want: "created_at must be an RFC3339 timestamp"},
+		{name: "invalid offset minute", old: `created_at: "2026-02-15T10:00:00Z"`, replace: `created_at: "2026-02-15T10:00:00+00:60"`, want: "created_at must be an RFC3339 timestamp"},
+		{name: "comma fraction", old: `created_at: "2026-02-15T10:00:00Z"`, replace: `created_at: "2026-02-15T10:00:00,5Z"`, want: "created_at must be an RFC3339 timestamp"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			content := strings.Replace(string(valid), tc.old, tc.replace, 1)

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -65,6 +66,8 @@ var v2TimestampFields = map[string]bool{
 	"verified_at":     true,
 }
 
+var canonicalRFC3339Pattern = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]+)?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])$`)
+
 // validateV2TimestampScalars rejects YAML's permissive date-only timestamp
 // decoding before it can be normalized into time.Time. Canonical status
 // documents use RFC3339 consistently across Go and TypeScript consumers.
@@ -109,6 +112,9 @@ func validateV2TimestampMapping(node *yaml.Node, path string) error {
 		}
 		if v2TimestampFields[key.Value] && value.Tag != "!!null" {
 			if value.Kind != yaml.ScalarNode {
+				return fmt.Errorf("invalid Wayfinder V2 status: %s must be an RFC3339 timestamp", childPath)
+			}
+			if !canonicalRFC3339Pattern.MatchString(value.Value) {
 				return fmt.Errorf("invalid Wayfinder V2 status: %s must be an RFC3339 timestamp", childPath)
 			}
 			if _, err := time.Parse(time.RFC3339, value.Value); err != nil {

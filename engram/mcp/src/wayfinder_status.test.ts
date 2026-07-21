@@ -106,6 +106,19 @@ describe('parseWayfinderStatus', () => {
     assert.throws(() => parseWayfinderStatus(invalid), /cannot skip mandatory waypoint "BUILD"/);
   });
 
+  it('rejects active history for a configured skip', () => {
+    const invalid = canonical.replace(
+      '\n---\n',
+      '\n  - {name: DESIGN, status: in-progress, started_at: 2026-07-20T00:03:00Z}\n---\n',
+    );
+    assert.throws(() => parseWayfinderStatus(invalid), /configured skipped waypoint "DESIGN" cannot have active status "in-progress"/);
+  });
+
+  it('rejects a configured skip as the unresolved current waypoint', () => {
+    const invalid = canonical.replace('current_waypoint: BUILD', 'current_waypoint: DESIGN');
+    assert.throws(() => parseWayfinderStatus(invalid), /current_waypoint "DESIGN" is configured to be skipped/);
+  });
+
   it('rejects history that bypasses mandatory predecessors', () => {
     const invalid = `---
 schema_version: "2.0"

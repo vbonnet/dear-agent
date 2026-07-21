@@ -284,6 +284,52 @@ func TestValidateV2RejectsUnsafeOrDuplicateSkipPhases(t *testing.T) {
 	}
 }
 
+func TestValidateV2RejectsActiveHistoryForConfiguredSkip(t *testing.T) {
+	now := time.Now()
+	st := &StatusV2{
+		SchemaVersion:   SchemaVersionV2,
+		ProjectName:     "test",
+		ProjectType:     ProjectTypeFeature,
+		RiskLevel:       RiskLevelM,
+		CurrentWaypoint: WaypointV2Design,
+		Status:          StatusV2InProgress,
+		SkipPhases:      []string{WaypointV2Design},
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		WaypointHistory: append(completedHistoryBefore(WaypointV2Design, now), WaypointHistory{
+			Name:      WaypointV2Design,
+			Status:    WaypointStatusV2InProgress,
+			StartedAt: now,
+		}),
+	}
+
+	err := ValidateV2(st)
+	if err == nil || !strings.Contains(err.Error(), "configured skipped waypoint 'DESIGN' cannot have active status") {
+		t.Fatalf("ValidateV2() error = %v, want active configured-skip rejection", err)
+	}
+}
+
+func TestValidateV2RejectsUnresolvedSkippedCurrentWaypoint(t *testing.T) {
+	now := time.Now()
+	st := &StatusV2{
+		SchemaVersion:   SchemaVersionV2,
+		ProjectName:     "test",
+		ProjectType:     ProjectTypeFeature,
+		RiskLevel:       RiskLevelM,
+		CurrentWaypoint: WaypointV2Design,
+		Status:          StatusV2InProgress,
+		SkipPhases:      []string{WaypointV2Design},
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		WaypointHistory: completedHistoryBefore(WaypointV2Design, now),
+	}
+
+	err := ValidateV2(st)
+	if err == nil || !strings.Contains(err.Error(), "current_waypoint 'DESIGN' is configured to be skipped") {
+		t.Fatalf("ValidateV2() error = %v, want unresolved skipped-current rejection", err)
+	}
+}
+
 func TestValidateV2RejectsDuplicateWaypointHistory(t *testing.T) {
 	now := time.Now()
 	st := &StatusV2{

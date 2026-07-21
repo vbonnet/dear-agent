@@ -383,6 +383,9 @@ function completedWaypoints(
     if (status === 'skipped' && !configuredSkips.has(name)) {
       throw new Error(`invalid Wayfinder V2 status: ${path} cannot skip mandatory waypoint ${JSON.stringify(name)}`);
     }
+    if (configuredSkips.has(name) && status !== 'skipped' && status !== 'completed') {
+      throw new Error(`invalid Wayfinder V2 status: ${path} configured skipped waypoint ${JSON.stringify(name)} cannot have active status ${JSON.stringify(status)}`);
+    }
     requireTimestamp(waypoint, 'started_at');
     optionalTimestamp(waypoint, 'completed_at', path);
     if (status === 'completed') {
@@ -484,6 +487,9 @@ export function parseWayfinderStatus(content: string): WayfinderStatusSummary {
   if (record.skip_roadmap === true) configuredSkips.add('SETUP');
   const currentPosition = WAYPOINTS.indexOf(phase as never);
   const complete = completedWaypoints(record, configuredSkips, currentPosition);
+  if (configuredSkips.has(phase) && !complete.has(phase)) {
+    throw new Error(`invalid Wayfinder V2 status: current_waypoint ${JSON.stringify(phase)} is configured to be skipped but has no completed or skipped history`);
+  }
   for (const predecessor of WAYPOINTS.slice(0, currentPosition)) {
     if (!configuredSkips.has(predecessor) && !complete.has(predecessor)) {
       throw new Error(`invalid Wayfinder V2 status: current_waypoint ${JSON.stringify(phase)} requires completed predecessor ${JSON.stringify(predecessor)}`);
