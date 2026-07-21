@@ -1,6 +1,6 @@
 # Sentinel Tmux Inspection Specification
 
-<!-- Last audited at: 2026-07-09 -->
+<!-- Last audited at: 2026-07-21 -->
 
 ## Overview
 
@@ -9,7 +9,7 @@ completion, idle, waiting, and stuck indicators for sentinel recovery.
 
 ## Requirements
 
-**STM-01** When tmux operations execute, the system shall use the configured client timeout and return command failures with context.
+**STM-01** When a named-session operation resolves its tmux socket, the system shall use the configured client timeout and return probe failures with per-socket context instead of collapsing execution failures into an unqualified missing-session result.
 
 **STM-02** When pane content contains a permission prompt, the system shall classify the prompt before weaker idle or completion indicators.
 
@@ -19,7 +19,7 @@ completion, idle, waiting, and stuck indicators for sentinel recovery.
 
 **STM-05** When pane information is captured, the system shall return the recent content, last command, and derived status indicators for the requested session.
 
-**STM-06** When `CI_SKIP_TMUX=true`, the test suite shall skip sentinel tmux integration tests without suppressing pure sentinel classification tests.
+**STM-06** When `CI_SKIP_TMUX=true`, the test suite shall skip real sentinel tmux integration tests without suppressing pure sentinel classification, client-configuration, or injected command-routing tests.
 
 ## BDD Traceability
 
