@@ -800,7 +800,14 @@ func resumeSessionWithRuntime(ctx context.Context, adapter *dolt.Adapter, sessio
 	if sendCommands {
 		runtime.restorePermission(harnessName, m, health)
 	}
-	return finalizeResumeSession(completionCtx, adapter, sessionID, manifestPath, health, sendCommands, !transactionalPrompt, runtime)
+	if err := finalizeResumeSession(completionCtx, adapter, sessionID, manifestPath, health, sendCommands, !transactionalPrompt, runtime); err != nil {
+		if promptDelivered {
+			ui.PrintWarning(fmt.Sprintf("Post-prompt resume finalization failed after work was delivered: %v", err))
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func loadResumeSessionManifest(ctx context.Context, adapter *dolt.Adapter, sessionID, harnessName string, runtime resumeSessionRuntime) (*manifest.Manifest, error) {

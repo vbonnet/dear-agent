@@ -412,6 +412,26 @@ func TestResumeSessionCodexDoesNotReturnCancellationAfterPromptDelivery(t *testi
 	}
 }
 
+func TestResumeSessionCodexDoesNotReturnAttachFailureAfterPromptDelivery(t *testing.T) {
+	setDetachedResumeTestGlobals(t, false)
+	resumePrompt = "start irreversible work"
+	adapter, m, health := setupCodexResumeTransaction(t)
+	attachErr := errors.New("terminal unavailable")
+	var calls []string
+	runtime := recordingResumeRuntime(&calls)
+	runtime.attachTmux = func(string) error {
+		calls = append(calls, "attach")
+		return attachErr
+	}
+
+	if err := resumeSessionWithRuntime(t.Context(), adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime); err != nil {
+		t.Fatalf("resumeSessionWithRuntime() after delivered prompt and attach failure = %v, want success", err)
+	}
+	if want := []string{"create", "dispatch", "wait", "persist", "prompt", "restore", "update", "tab", "attach"}; !reflect.DeepEqual(calls, want) {
+		t.Fatalf("resume calls = %v, want post-prompt attach attempt without rollback %v", calls, want)
+	}
+}
+
 func TestResumeSessionCodexCompensatesCanonicalNameWhenOrdinaryPromptDeliveryFails(t *testing.T) {
 	setDetachedResumeTestGlobals(t, true)
 	resumePrompt = "start work only after the resume transaction commits"
