@@ -79,7 +79,7 @@ compatibility.
 
 ### Harness Doctor Health
 
-**AGP-19** When AGM doctor inspects an AGY session, including one stored with the legacy `agy-cli` or `antigravity` spelling, the system shall normalize the harness, recognize `agy` as the required CLI binary, and use `$HOME/.gemini/antigravity-cli` as its advisory configuration directory rather than classify the session as unknown.
+**AGP-19** When AGM doctor inspects an AGY session, including one stored with the legacy `agy-cli` or `antigravity` spelling, the system shall normalize the harness, derive `agy` from the shared harness binary registry, and use `$HOME/.gemini/antigravity-cli` as its advisory configuration directory rather than classify the session as unknown.
 
 ### BDD Enforcement
 

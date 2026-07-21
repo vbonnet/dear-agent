@@ -32,18 +32,18 @@ func (h HarnessHealth) IsHealthy() bool {
 	return h.BinaryPresent && h.AuthConfigured
 }
 
-// harnessCLIBinary maps a harness to the CLI binary the doctor expects on PATH.
-//
-// This intentionally extends the availability-focused harnessBinaries map
-// (which omits opencode-cli because its availability is server-based, not
-// binary-based) so the doctor can still report whether the opencode binary
-// itself is installed.
-var harnessCLIBinary = map[string]string{
-	"claude-code":  "claude",
-	"gemini-cli":   "gemini",
-	"codex-cli":    "codex",
-	"agy":          "agy",
-	"opencode-cli": "opencode",
+// harnessHealthBinary derives CLI harnesses from the availability registry.
+// OpenCode is the only doctor-specific exception: availability is based on its
+// server, while doctor also reports whether the optional CLI is installed.
+func harnessHealthBinary(harness string) (string, bool) {
+	if harness == "opencode-cli" {
+		return "opencode", true
+	}
+	binaries := harnessBinaries[harness]
+	if len(binaries) == 0 {
+		return "", false
+	}
+	return binaries[0], true
 }
 
 // harnessConfigDir returns the harness's on-disk config/home directory under
@@ -78,7 +78,7 @@ func CheckHarnessHealth(harness string) HarnessHealth {
 	harness = NormalizeHarnessName(harness)
 	h := HarnessHealth{Harness: harness}
 
-	if bin, ok := harnessCLIBinary[harness]; ok {
+	if bin, ok := harnessHealthBinary(harness); ok {
 		h.Known = true
 		h.BinaryName = bin
 		if _, err := lookPath(bin); err == nil {

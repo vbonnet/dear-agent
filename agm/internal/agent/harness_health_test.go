@@ -65,6 +65,21 @@ func TestCheckHarnessHealth_OpenCodeBinaryTracked(t *testing.T) {
 	}
 }
 
+func TestHarnessHealthUsesCanonicalBinaryRegistry(t *testing.T) {
+	clearClaudeEnv(t)
+	mockLookPath(t, map[string]bool{})
+
+	for harness, binaries := range harnessBinaries {
+		if len(binaries) == 0 {
+			t.Fatalf("canonical binary registry has no binaries for %q", harness)
+		}
+		h := CheckHarnessHealth(harness)
+		if !h.Known || h.BinaryName != binaries[0] {
+			t.Fatalf("doctor binary for %q = known %v name %q, want true %q", harness, h.Known, h.BinaryName, binaries[0])
+		}
+	}
+}
+
 func TestCheckHarnessHealth_AgyPresent(t *testing.T) {
 	clearClaudeEnv(t)
 	t.Setenv("GEMINI_API_KEY", "")
