@@ -7,7 +7,9 @@ func TestIsKnownBotAuthor(t *testing.T) {
 		login string
 		want  bool
 	}{
-		// knownBotLogins is empty after the Gemini sunset (ce-hz14).
+		{"gemini-code-assist", true},
+		{"gemini-code-assist[bot]", true}, // "[bot]" suffix normalizes off
+		{"chatgpt-codex-connector", true},
 		{"alice", false},           // human
 		{"dependabot[bot]", false}, // a bot, but not one we auto-resolve
 		{"", false},                // missing author

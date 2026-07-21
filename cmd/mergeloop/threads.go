@@ -24,9 +24,19 @@ import (
 // thread would hide unaddressed feedback, which is exactly what
 // required_conversation_resolution exists to prevent.
 //
-// Empty after the Gemini sunset (2026-07-17): gemini-code-assist was removed
-// when its consumer tier was discontinued. Add future bot logins here as needed.
-var knownBotLogins = map[string]bool{}
+// gemini-code-assist was removed 2026-06-24 (#724) in anticipation of its
+// consumer tier sunsetting 2026-07-17, and chatgpt-codex-connector was never
+// added. Both are still actively commenting as of 2026-07-20 (confirmed via
+// live PR review threads, e.g. #960), so the map sat empty for nearly a
+// month: mergeloop's auto-resolve step became a silent no-op, and every PR
+// that received a bot comment stayed BLOCKED on required_conversation_
+// resolution with fully green CI (#945, #947, #949, #950, #960, #961, #976).
+// Restore both; re-remove a login only once its bot has actually stopped
+// commenting.
+var knownBotLogins = map[string]bool{
+	"gemini-code-assist":      true,
+	"chatgpt-codex-connector": true,
+}
 
 // normalizeBotLogin strips the "[bot]" suffix that some GitHub surfaces append
 // to GitHub-App accounts. The reviews/threads GraphQL API returns the bare
