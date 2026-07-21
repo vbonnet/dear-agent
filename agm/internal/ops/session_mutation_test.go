@@ -223,7 +223,7 @@ func (m *strictProbeKillTmux) HasSessionStrict(context.Context, string) (bool, e
 	if m.strictErr != nil {
 		return false, m.strictErr
 	}
-	return m.mockTmux.HasSession("my-session")
+	return m.HasSession("my-session")
 }
 
 func TestKillSession_RunningSession(t *testing.T) {

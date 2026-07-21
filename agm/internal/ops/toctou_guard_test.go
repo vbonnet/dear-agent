@@ -57,7 +57,7 @@ func TestWithSessionLock_MutualExclusion(t *testing.T) {
 	var (
 		mu         sync.Mutex
 		maxConc    int32
-		curConc    int32
+		curConc    atomic.Int32
 		wg         sync.WaitGroup
 		goroutines = 5
 	)
@@ -67,7 +67,7 @@ func TestWithSessionLock_MutualExclusion(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			err := WithSessionLock(session, func() error {
-				c := atomic.AddInt32(&curConc, 1)
+				c := curConc.Add(1)
 				mu.Lock()
 				if c > maxConc {
 					maxConc = c
@@ -77,7 +77,7 @@ func TestWithSessionLock_MutualExclusion(t *testing.T) {
 				// Hold lock briefly to allow overlap attempts.
 				time.Sleep(10 * time.Millisecond)
 
-				atomic.AddInt32(&curConc, -1)
+				curConc.Add(-1)
 				return nil
 			})
 			if err != nil {
