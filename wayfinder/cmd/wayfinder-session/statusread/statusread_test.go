@@ -72,7 +72,7 @@ func canonicalStatusBytes(projectName, currentWaypoint, extraFields string) []by
 		}
 		fmt.Fprintf(&history, "  - {name: %s, status: completed, started_at: 2026-07-20T00:00:00Z, completed_at: 2026-07-20T00:01:00Z}\n", waypoint)
 	}
-	return []byte(fmt.Sprintf(`---
+	return fmt.Appendf(nil, `---
 schema_version: "2.0"
 project_name: %s
 project_type: feature
@@ -83,7 +83,7 @@ created_at: 2026-07-20T00:00:00Z
 updated_at: 2026-07-20T00:00:00Z
 %swaypoint_history:
 %s---
-`, projectName, currentWaypoint, extraFields, history.String()))
+`, projectName, currentWaypoint, extraFields, history.String())
 }
 
 func TestParseDerivesProgressFromCanonicalHistory(t *testing.T) {
