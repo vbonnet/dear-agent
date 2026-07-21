@@ -290,6 +290,7 @@ func nonMigrationRuntimeOmitsRetiredPhases(ctx context.Context) error {
 		{path: "agm/cmd/agm-mcp-server", extensions: map[string]bool{".go": true}},
 		{path: "engram/cmd/engram-mcp", extensions: map[string]bool{".go": true}},
 		{path: "engram/cmd/engram/cmd", extensions: map[string]bool{".go": true}},
+		{path: "engram/mcp/src", extensions: map[string]bool{".ts": true}},
 		{path: "engram/internal/analytics", extensions: map[string]bool{".go": true}},
 		{path: "engram/internal/memory", extensions: map[string]bool{".go": true}},
 		{path: "internal/safepr", extensions: map[string]bool{".go": true}},
@@ -421,6 +422,8 @@ func validateCanonicalWayfinderConsumers(repoRoot string) error {
 	}{
 		{path: "wayfinder/coordinator/monitor.go", required: []string{"statusread.Parse(content)", "canonical.CurrentWaypoint", "canonical.Status", "canonical.Progress"}, forbidden: []string{"Current Phase:", `yaml:"current_waypoint"`, "FindStringSubmatch"}},
 		{path: "engram/cmd/engram-mcp/readtools.go", required: []string{"statusread.Parse(data)", "summary.CurrentWaypoint", "summary.Status"}, forbidden: []string{"rePhase", "Current Phase:"}},
+		{path: "engram/mcp/src/index.ts", required: []string{"parseWayfinderStatus(content)", "canonical.phase", "canonical.progress", "canonical.status"}, forbidden: []string{"Current Phase:", "phaseMatch", "progressMatch", "statusMatch"}},
+		{path: "engram/mcp/src/wayfinder_status.ts", required: []string{"parseDocument", "schema_version", "current_waypoint", "waypoint_history"}, forbidden: []string{"Current Phase:", "Progress:", "Status:"}},
 		{path: "agm/cmd/agm-mcp-server/wayfinder.go", required: []string{"statusread.Parse(data)", `fmString(fm, "current_waypoint")`, `fmString(fm, "project_name")`}, forbidden: []string{`fmString(fm, "current_phase"`, `fmString(fm, "project_name",`}},
 		{path: "internal/safepr/safepr.go", required: []string{`statusread.ParseFromDir(dir)`, "st.ProjectName", "st.Beads"}, forbidden: []string{`yaml:"schema_version"`, `yaml:"project_name"`, `yaml:"session_id"`, "st.SessionID"}},
 		{path: "engram/internal/config/config.go", forbidden: []string{"WayfinderConfig", "W0Config", `yaml:"w0"`}},
