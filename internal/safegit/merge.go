@@ -289,6 +289,12 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 		appendAuditEntry(cfg.Repo, cfg.PRNumber, "error", "merge failed: "+err.Error())
 		return fmt.Errorf("gh pr merge failed: %w", err)
 	}
+	if err := confirmMerged(cfg.PRNumber, cfg.Repo, headInfo.SHA); err != nil {
+		mergeSpan.RecordError(err)
+		mergeSpan.SetStatus(codes.Error, err.Error())
+		appendAuditEntry(cfg.Repo, cfg.PRNumber, "merge_pending", err.Error())
+		return err
+	}
 	appendAuditEntry(cfg.Repo, cfg.PRNumber, "merged",
 		fmt.Sprintf("squash merge complete (head=%s)", headInfo.SHA))
 	fmt.Fprintln(os.Stderr, "safe-merge: ✓ merge complete")
@@ -296,6 +302,42 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 	// Post-merge cleanup (best-effort, non-fatal).
 	if headInfo.Branch != "" {
 		cleanupWorktree(headInfo.Branch)
+	}
+	return nil
+}
+
+type mergeResult struct {
+	State      string `json:"state"`
+	HeadRefOid string `json:"headRefOid"`
+}
+
+// confirmMerged prevents a successful `gh pr merge --auto` invocation from
+// being mistaken for a completed merge. GitHub exits zero when auto-merge is
+// merely enabled, so cleanup is safe only after the PR reports MERGED at the
+// exact head SHA that passed the gates.
+func confirmMerged(prNum int, repo, expectedHeadSHA string) error {
+	out, err := runCommand(exec.Command("gh", "pr", "view",
+		fmt.Sprintf("%d", prNum), "--repo", repo,
+		"--json", "state,headRefOid"))
+	if err != nil {
+		return fmt.Errorf("confirming merge completion: %w", err)
+	}
+
+	var result mergeResult
+	if err := json.Unmarshal(out, &result); err != nil {
+		return fmt.Errorf("parsing merge completion state: %w", err)
+	}
+	return validateMergeResult(result, expectedHeadSHA)
+}
+
+func validateMergeResult(result mergeResult, expectedHeadSHA string) error {
+	if result.HeadRefOid != expectedHeadSHA {
+		return fmt.Errorf("merge completion head changed: expected %s, got %s",
+			expectedHeadSHA, result.HeadRefOid)
+	}
+	if result.State != "MERGED" {
+		return fmt.Errorf("auto-merge accepted but PR remains %s; waiting for GitHub to complete it",
+			strings.ToLower(result.State))
 	}
 	return nil
 }

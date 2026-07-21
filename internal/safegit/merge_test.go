@@ -423,6 +423,29 @@ func TestBuildMergeArgs_RequiredFlags(t *testing.T) {
 	}
 }
 
+// --- merge completion confirmation ---
+
+func TestMergeResultRequiresExactMergedHead(t *testing.T) {
+	cases := []struct {
+		name      string
+		result    mergeResult
+		expected  string
+		wantError bool
+	}{
+		{name: "merged exact head", result: mergeResult{State: "MERGED", HeadRefOid: "abc123"}, expected: "abc123"},
+		{name: "auto merge only enabled", result: mergeResult{State: "OPEN", HeadRefOid: "abc123"}, expected: "abc123", wantError: true},
+		{name: "head changed", result: mergeResult{State: "MERGED", HeadRefOid: "def456"}, expected: "abc123", wantError: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := validateMergeResult(tc.result, tc.expected); (got != nil) != tc.wantError {
+				t.Fatalf("validateMergeResult() error = %v, wantError %v", got, tc.wantError)
+			}
+		})
+	}
+}
+
 // --- helpers ---
 
 func marshalJSON(v any) []byte {
