@@ -71,7 +71,7 @@ AgyAdapter implementation:
 - Implements Agent interface for Antigravity/AGY
 - Uses tmux-backed interactive sessions
 - Uses the same model-aware launch command policy as the production lifecycle
-- Requires native AGY conversation IDs for cold resume and history
+- Captures native AGY conversation IDs after create and requires them for cold resume and history
 - Requires readiness before reporting create or cold-resume success
 - Uses exact AGY process-tree liveness and native brain transcripts
 

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
@@ -25,14 +26,31 @@ type AgyAdapter struct {
 }
 
 var (
-	agyHasSession    = tmux.HasSession
-	agyNewSession    = tmux.NewSession
-	agySendCommand   = tmux.SendCommand
-	agyWaitForPrompt = tmux.WaitForAgyPrompt
-	agyCheckProcess  = tmux.CheckProcessInPaneTree
-	agyIsIdle        = tmux.IsAgyIdle
-	agyAttachSession = tmux.AttachSession
-	agyKillSession   = tmux.KillSession
+	agyHasSession       = tmux.HasSession
+	agyNewSession       = tmux.NewSession
+	agySendCommand      = tmux.SendCommand
+	agyWaitForPrompt    = tmux.WaitForAgyPrompt
+	agyCheckProcess     = tmux.CheckProcessInPaneTree
+	agyIsIdle           = tmux.IsAgyIdle
+	agyAttachSession    = tmux.AttachSession
+	agyKillSession      = tmux.KillSession
+	agyFindConversation = func(workDir string) (string, error) {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("determine home directory: %w", err)
+		}
+		metadata, err := agysession.FindLatestForWorkspace(homeDir, workDir)
+		if err != nil {
+			return "", err
+		}
+		return metadata.ConversationID, nil
+	}
+	agyDiscoverySleep = time.Sleep
+)
+
+const (
+	agyConversationDiscoveryAttempts = 20
+	agyConversationDiscoveryDelay    = 500 * time.Millisecond
 )
 
 // NewAgyAdapter creates a new Agy adapter instance.
@@ -90,6 +108,7 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 		return "", err
 	}
 	permissionMode := ctx.Environment["AGM_PERMISSION_MODE"]
+	conversationID := ctx.Environment["AGY_CONVERSATION_ID"]
 
 	// Check if tmux session already exists
 	exists, err := agyHasSession(tmuxName)
@@ -106,6 +125,7 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 		WorkDir:        workDir,
 		ResolvedModel:  resolvedModel,
 		PermissionMode: permissionMode,
+		ConversationID: conversationID,
 		ExtraAddDirs:   ctx.AuthorizedDirs,
 	}).Command
 
@@ -120,6 +140,13 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 		agyKillSession(tmuxName)
 		return "", fmt.Errorf("AGY did not become ready after create: %w", err)
 	}
+	if conversationID == "" {
+		conversationID, err = discoverAgyConversationID(workDir)
+		if err != nil {
+			agyKillSession(tmuxName)
+			return "", err
+		}
+	}
 
 	// Store session metadata
 	metadata := &SessionMetadata{
@@ -131,7 +158,7 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 		Model:          model,
 		PermissionMode: permissionMode,
 		AuthorizedDirs: append([]string(nil), ctx.AuthorizedDirs...),
-		UUID:           ctx.Environment["AGY_CONVERSATION_ID"],
+		UUID:           conversationID,
 	}
 
 	if err := a.sessionStore.Set(sessionID, metadata); err != nil {
@@ -140,6 +167,24 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	}
 
 	return sessionID, nil
+}
+
+func discoverAgyConversationID(workDir string) (string, error) {
+	var lastErr error
+	for attempt := 1; attempt <= agyConversationDiscoveryAttempts; attempt++ {
+		conversationID, err := agyFindConversation(workDir)
+		if err == nil && conversationID != "" {
+			return conversationID, nil
+		}
+		if err == nil {
+			err = fmt.Errorf("provider returned an empty conversation ID")
+		}
+		lastErr = err
+		if attempt < agyConversationDiscoveryAttempts {
+			agyDiscoverySleep(agyConversationDiscoveryDelay)
+		}
+	}
+	return "", fmt.Errorf("failed to capture native AGY conversation after create: %w", lastErr)
 }
 
 // ResumeSession resumes an existing Agy session.

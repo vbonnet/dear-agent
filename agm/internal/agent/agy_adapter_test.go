@@ -21,6 +21,8 @@ func preserveAgyAdapterSeams(t *testing.T) {
 	origIsIdle := agyIsIdle
 	origAttachSession := agyAttachSession
 	origKillSession := agyKillSession
+	origFindConversation := agyFindConversation
+	origDiscoverySleep := agyDiscoverySleep
 	t.Cleanup(func() {
 		agyHasSession = origHasSession
 		agyNewSession = origNewSession
@@ -30,6 +32,8 @@ func preserveAgyAdapterSeams(t *testing.T) {
 		agyIsIdle = origIsIdle
 		agyAttachSession = origAttachSession
 		agyKillSession = origKillSession
+		agyFindConversation = origFindConversation
+		agyDiscoverySleep = origDiscoverySleep
 	})
 }
 
@@ -168,6 +172,7 @@ func TestAgyCreateSessionUsesCanonicalModelAwareCommand(t *testing.T) {
 	for _, want := range []string{
 		"agy --model 'Gemini 3.5 Flash (Low)'",
 		"--dangerously-skip-permissions",
+		"--conversation 'native-conversation-id'",
 		"--add-dir '/extra dir'",
 		"&& exit",
 	} {
@@ -190,6 +195,62 @@ func TestAgyCreateSessionUsesCanonicalModelAwareCommand(t *testing.T) {
 	}
 }
 
+func TestAgyCreateSessionCapturesNativeConversationIdentity(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	agyHasSession = func(string) (bool, error) { return false, nil }
+	agyNewSession = func(string, string) error { return nil }
+	agySendCommand = func(string, string) error { return nil }
+	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return nil }
+	var discoveredWorkDir string
+	agyFindConversation = func(workDir string) (string, error) {
+		discoveredWorkDir = workDir
+		return "provider-conversation-id", nil
+	}
+
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	sessionID, err := (&AgyAdapter{sessionStore: store}).CreateSession(SessionContext{
+		Name: "agy-fresh", WorkingDirectory: "/work", Model: "3.5-flash-low",
+	})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	metadata, err := store.Get(sessionID)
+	if err != nil {
+		t.Fatalf("stored session metadata: %v", err)
+	}
+	if discoveredWorkDir != "/work" || metadata.UUID != "provider-conversation-id" {
+		t.Fatalf("discovered workdir/native ID = %q/%q", discoveredWorkDir, metadata.UUID)
+	}
+}
+
+func TestAgyCreateSessionRollsBackWhenNativeIdentityCannotBeCaptured(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	agyHasSession = func(string) (bool, error) { return false, nil }
+	agyNewSession = func(string, string) error { return nil }
+	agySendCommand = func(string, string) error { return nil }
+	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return nil }
+	wantErr := errors.New("fixture provider metadata unavailable")
+	attempts := 0
+	agyFindConversation = func(string) (string, error) { attempts++; return "", wantErr }
+	agyDiscoverySleep = func(time.Duration) {}
+	killed := ""
+	agyKillSession = func(name string) { killed = name }
+
+	sessionID, err := (&AgyAdapter{sessionStore: store}).CreateSession(SessionContext{
+		Name: "agy-no-identity", WorkingDirectory: "/work", Model: "3.5-flash-low",
+	})
+	if !errors.Is(err, wantErr) || sessionID != "" {
+		t.Fatalf("CreateSession = %q, %v; want empty ID and discovery failure", sessionID, err)
+	}
+	if attempts != agyConversationDiscoveryAttempts || killed != "agy-no-identity" {
+		t.Fatalf("discovery attempts/rollback = %d/%q", attempts, killed)
+	}
+	if sessions, listErr := store.List(); listErr != nil || len(sessions) != 0 {
+		t.Fatalf("failed create persisted sessions = %v, %v", sessions, listErr)
+	}
+}
+
 func TestAgyCreateSessionPropagatesReadinessFailureAndRollsBack(t *testing.T) {
 	preserveAgyAdapterSeams(t)
 	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
@@ -197,7 +258,7 @@ func TestAgyCreateSessionPropagatesReadinessFailureAndRollsBack(t *testing.T) {
 	agyNewSession = func(string, string) error { return nil }
 	agySendCommand = func(string, string) error { return nil }
 	wantErr := errors.New("fixture readiness failed")
-	agyWaitForPrompt = func(string, time.Duration) error { return wantErr }
+	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return wantErr }
 	killed := ""
 	agyKillSession = func(name string) { killed = name }
 
@@ -319,7 +380,7 @@ func TestAgyResumeSessionOmitsModelWhenProvenanceUnknown(t *testing.T) {
 	agyNewSession = func(string, string) error { return nil }
 	var command string
 	agySendCommand = func(_ string, value string) error { command = value; return nil }
-	agyWaitForPrompt = func(string, time.Duration) error { return nil }
+	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return nil }
 
 	if err := (&AgyAdapter{sessionStore: store}).ResumeSession(sessionID); err != nil {
 		t.Fatalf("ResumeSession: %v", err)
@@ -415,7 +476,7 @@ func TestAgyResumeSessionPropagatesReadinessFailureBeforeAttach(t *testing.T) {
 	agyNewSession = func(string, string) error { return nil }
 	agySendCommand = func(string, string) error { return nil }
 	wantErr := errors.New("fixture readiness failed")
-	agyWaitForPrompt = func(string, time.Duration) error { return wantErr }
+	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return wantErr }
 	attached := false
 	agyAttachSession = func(string) error { attached = true; return nil }
 	killed := ""
