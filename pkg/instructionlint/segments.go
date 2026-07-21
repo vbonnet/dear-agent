@@ -278,6 +278,7 @@ func agentVisibleScriptCommand(value string, helpers map[string]bool) bool {
 var shellAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 var shellDeclaration = regexp.MustCompile(`^(?:local|export|readonly|typeset|declare)(?:\s+-[A-Za-z]+)*\s+`)
 var heredocMarker = regexp.MustCompile(`<<-?['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?`)
+var shellCommandSubstitution = regexp.MustCompile(`\$\(([^()]*)\)`)
 var shellFunction = regexp.MustCompile(`^(?:function\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*\(\))?|([A-Za-z_][A-Za-z0-9_]*)\s*\(\))\s*\{`)
 
 func agentVisibleScriptHelpers(source []byte) map[string]bool {
@@ -649,6 +650,11 @@ func scriptRedirectDestination(target string, descriptors map[int]scriptOutputDe
 func scriptCommandPrintsPath(command, path string, descriptors map[int]scriptOutputDestination) bool {
 	if !scriptCommandOutputDestination(command, descriptors).visible {
 		return false
+	}
+	for _, match := range shellCommandSubstitution.FindAllStringSubmatch(command, -1) {
+		if len(match) == 2 && scriptLinePrintsPath(match[1], path, descriptors) {
+			return true
+		}
 	}
 	fields := stripCommandPrefixes(parseShellWords(command))
 	if len(fields) == 0 || !slices.Contains([]string{
