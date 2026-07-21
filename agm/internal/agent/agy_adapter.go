@@ -56,6 +56,7 @@ var (
 const (
 	agyConversationDiscoveryAttempts = 20
 	agyConversationDiscoveryDelay    = 500 * time.Millisecond
+	agyResumeReadinessTimeout        = 60 * time.Second
 )
 
 // NewAgyAdapter creates a new Agy adapter instance.
@@ -312,7 +313,7 @@ func (a *AgyAdapter) ResumeSession(sessionID SessionID) error {
 			return fmt.Errorf("failed to send resume command: %w", err)
 		}
 
-		if err := agyWaitForPrompt(context.Background(), metadata.TmuxName, 5*time.Second); err != nil {
+		if err := agyWaitForPrompt(context.Background(), metadata.TmuxName, agyResumeReadinessTimeout); err != nil {
 			if created {
 				agyKillSession(metadata.TmuxName)
 			}
@@ -454,13 +455,8 @@ func readAgyHistory(historyPath string) ([]Message, error) {
 		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
 			continue
 		}
-		var role Role
-		switch entry.Source {
-		case "USER_EXPLICIT":
-			role = RoleUser
-		case "MODEL":
-			role = RoleAssistant
-		default:
+		role, include := agyTranscriptRole(entry)
+		if !include {
 			continue
 		}
 		timestamp, _ := time.Parse(time.RFC3339, entry.CreatedAt)
@@ -482,6 +478,23 @@ func readAgyHistory(historyPath string) ([]Message, error) {
 	}
 
 	return messages, nil
+}
+
+func agyTranscriptRole(entry agyTranscriptEntry) (Role, bool) {
+	switch entry.Source {
+	case "USER_EXPLICIT":
+		return RoleUser, true
+	case "MODEL":
+		return RoleAssistant, true
+	case "":
+		switch entry.Type {
+		case "USER_INPUT":
+			return RoleUser, true
+		case "PLANNER_RESPONSE":
+			return RoleAssistant, true
+		}
+	}
+	return "", false
 }
 
 // ExportConversation exports conversation in specified format.

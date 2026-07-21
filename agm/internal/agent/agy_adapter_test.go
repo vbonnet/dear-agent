@@ -767,7 +767,11 @@ func TestAgyResumeSessionPropagatesReadinessFailureBeforeAttach(t *testing.T) {
 	agyNewSession = func(string, string) error { return nil }
 	agySendCommand = func(string, string) error { return nil }
 	wantErr := errors.New("fixture readiness failed")
-	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return wantErr }
+	var readinessTimeout time.Duration
+	agyWaitForPrompt = func(_ context.Context, _ string, timeout time.Duration) error {
+		readinessTimeout = timeout
+		return wantErr
+	}
 	attached := false
 	agyAttachSession = func(string) error { attached = true; return nil }
 	killed := ""
@@ -782,6 +786,9 @@ func TestAgyResumeSessionPropagatesReadinessFailureBeforeAttach(t *testing.T) {
 	}
 	if killed != "agy-resume" {
 		t.Fatalf("readiness rollback killed %q, want agy-resume", killed)
+	}
+	if readinessTimeout != 60*time.Second {
+		t.Fatalf("resume readiness timeout = %s, want 60s", readinessTimeout)
 	}
 }
 
@@ -819,9 +826,12 @@ func TestAgyGetHistoryReadsNativeTranscript(t *testing.T) {
 	}
 	fixture := strings.Join([]string{
 		`{"step_index":1,"source":"SYSTEM","type":"CHECKPOINT","status":"DONE","created_at":"2026-07-20T18:23:20Z","content":"system"}`,
+		`{"step_index":6,"source":"SYSTEM","type":"USER_INPUT","status":"DONE","created_at":"2026-07-20T18:23:25Z","content":"typed system"}`,
 		`not-json`,
 		`{"step_index":2,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-07-20T18:23:21Z","content":"hello"}`,
 		`{"step_index":3,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-07-20T18:23:22Z","content":"world"}`,
+		`{"step_index":4,"type":"USER_INPUT","status":"DONE","created_at":"2026-07-20T18:23:23Z","content":"legacy question"}`,
+		`{"step_index":5,"type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-07-20T18:23:24Z","content":"legacy answer"}`,
 	}, "\n") + "\n"
 	if err := os.WriteFile(filepath.Join(logsDir, "transcript.jsonl"), []byte(fixture), 0o600); err != nil {
 		t.Fatal(err)
@@ -836,7 +846,11 @@ func TestAgyGetHistoryReadsNativeTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetHistory: %v", err)
 	}
-	if len(messages) != 2 || messages[0].Role != RoleUser || messages[0].Content != "hello" || messages[1].Role != RoleAssistant || messages[1].Content != "world" {
+	if len(messages) != 4 ||
+		messages[0].Role != RoleUser || messages[0].Content != "hello" ||
+		messages[1].Role != RoleAssistant || messages[1].Content != "world" ||
+		messages[2].Role != RoleUser || messages[2].Content != "legacy question" ||
+		messages[3].Role != RoleAssistant || messages[3].Content != "legacy answer" {
 		t.Fatalf("native AGY messages = %+v", messages)
 	}
 	if got := messages[1].Timestamp.Format(time.RFC3339); got != "2026-07-20T18:23:22Z" {

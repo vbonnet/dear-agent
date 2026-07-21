@@ -9,17 +9,15 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 )
 
-func TestActiveHarnessesHaveCurrentTmuxLauncher(t *testing.T) {
+func TestSupportedHarnessesHaveCurrentTmuxLauncher(t *testing.T) {
 	t.Parallel()
 
-	for _, harness := range agent.ActiveHarnesses() {
+	for _, harness := range []string{"claude-code", "codex-cli", "opencode-cli", "gemini-cli"} {
 		t.Run(harness, func(t *testing.T) {
 			t.Parallel()
 
@@ -33,7 +31,6 @@ func TestActiveHarnessesHaveCurrentTmuxLauncher(t *testing.T) {
 				startCodex:    func(ops.HarnessLaunchSpec) (bool, error) { calls++; return false, nil },
 				startOpenCode: record,
 				startGemini:   record,
-				startAgy:      func(context.Context, ops.HarnessLaunchSpec) error { calls++; return nil },
 				validateCodex: func() error { return nil },
 			}
 
@@ -131,7 +128,7 @@ func TestStartNewSessionForContextRoutesCurrentTmux(t *testing.T) {
 
 	callerCtx := t.Context()
 	var current, separate int
-	err := startNewSessionForContext(callerCtx, true, false, "current", newSessionStartRuntime{
+	err := startNewSessionForContext(callerCtx, true, false, "current", "claude-code", newSessionStartRuntime{
 		currentTmux: func(ctx context.Context, sessionName string) error {
 			current++
 			if ctx != callerCtx {
@@ -149,6 +146,42 @@ func TestStartNewSessionForContextRoutesCurrentTmux(t *testing.T) {
 	}
 	if current != 1 || separate != 0 {
 		t.Fatalf("route calls current=%d separate=%d, want 1/0", current, separate)
+	}
+}
+
+func TestStartNewSessionForContextRejectsCurrentTmuxAgyBeforeLaunch(t *testing.T) {
+	t.Parallel()
+
+	var current, separate int
+	err := startNewSessionForContext(t.Context(), true, false, "current", "agy", newSessionStartRuntime{
+		currentTmux:  func(context.Context, string) error { current++; return nil },
+		separateTmux: func(context.Context, string) error { separate++; return nil },
+	})
+	if err == nil || !strings.Contains(err.Error(), "use --detached") {
+		t.Fatalf("startNewSessionForContext() error = %v, want detached AGY guidance", err)
+	}
+	if current != 0 || separate != 0 {
+		t.Fatalf("rejected AGY route launched current=%d separate=%d", current, separate)
+	}
+	if dispatcherErr := startCurrentTmuxHarnessWithRuntime(t.Context(), ops.HarnessLaunchSpec{Harness: "agy"}, currentTmuxHarnessRuntime{}); dispatcherErr == nil || !strings.Contains(dispatcherErr.Error(), "use --detached") {
+		t.Fatalf("direct current-tmux AGY dispatch error = %v, want detached guidance", dispatcherErr)
+	}
+
+	err = startNewSessionForContext(t.Context(), true, true, "detached", "antigravity", newSessionStartRuntime{
+		currentTmux: func(context.Context, string) error { current++; return nil },
+		separateTmux: func(_ context.Context, sessionName string) error {
+			separate++
+			if sessionName != "detached" {
+				t.Fatalf("detached session name = %q, want detached", sessionName)
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("detached AGY route failed: %v", err)
+	}
+	if current != 0 || separate != 1 {
+		t.Fatalf("detached AGY route launched current=%d separate=%d, want 0/1", current, separate)
 	}
 }
 
@@ -188,57 +221,6 @@ func TestStartCurrentTmuxHarnessCodexPropagatesQueueFailure(t *testing.T) {
 	err := startCurrentTmuxHarnessWithRuntime(t.Context(), ops.HarnessLaunchSpec{Harness: "codex-cli"}, runtime)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("error = %v, want queue failure %v", err, wantErr)
-	}
-}
-
-func TestStartCurrentTmuxAgyStopsAfterCallerCancellation(t *testing.T) {
-	t.Parallel()
-
-	ctx, cancel := context.WithCancel(t.Context())
-	associated := false
-	err := startCurrentTmuxAgyWithRuntime(ctx, ops.HarnessLaunchSpec{
-		Harness: "agy", SessionName: "agy-current",
-	}, currentTmuxAgyRuntime{
-		sendCommand: func(string, string) error { return nil },
-		waitForPrompt: func(context.Context, string, time.Duration) error {
-			cancel()
-			return context.Canceled
-		},
-		associate: func(string) { associated = true },
-	})
-
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("error = %v, want context cancellation", err)
-	}
-	if associated {
-		t.Fatal("AGY session was associated after caller cancellation")
-	}
-}
-
-func TestStartCurrentTmuxAgyAssociatesAfterReadinessTimeout(t *testing.T) {
-	t.Parallel()
-
-	associated := false
-	err := startCurrentTmuxAgyWithRuntime(t.Context(), ops.HarnessLaunchSpec{
-		Harness: "agy", SessionName: "agy-current",
-	}, currentTmuxAgyRuntime{
-		sendCommand: func(string, string) error { return nil },
-		waitForPrompt: func(context.Context, string, time.Duration) error {
-			return errors.New("readiness timed out")
-		},
-		associate: func(sessionName string) {
-			if sessionName != "agy-current" {
-				t.Fatalf("associated session = %q, want agy-current", sessionName)
-			}
-			associated = true
-		},
-	})
-
-	if err != nil {
-		t.Fatalf("startCurrentTmuxAgyWithRuntime() error = %v", err)
-	}
-	if !associated {
-		t.Fatal("AGY session was not associated after a non-cancellation readiness timeout")
 	}
 }
 

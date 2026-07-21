@@ -295,6 +295,11 @@ Feature: Harness parity
     And Codex current-tmux launch should require the executable without waiting behind its own AGM process
     And Codex queue failures should propagate to shared creation rollback
 
+  Scenario: AGY current-tmux creation refuses unsafe deferred identity
+    Given current-tmux creation selects AGY
+    When AGM validates current-tmux AGY safety
+    Then current-tmux AGY creation should fail before launch with detached guidance
+
   Scenario: Codex send safety is harness-specific
     Given Codex CLI is available
     And a Codex CLI composer pane

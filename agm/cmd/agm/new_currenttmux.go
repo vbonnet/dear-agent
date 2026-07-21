@@ -124,7 +124,6 @@ type currentTmuxHarnessRuntime struct {
 	startCodex    func(ops.HarnessLaunchSpec) (bool, error)
 	startOpenCode func(context.Context, ops.HarnessLaunchSpec) error
 	startGemini   func(context.Context, ops.HarnessLaunchSpec) error
-	startAgy      func(context.Context, ops.HarnessLaunchSpec) error
 	validateCodex func() error
 }
 
@@ -134,7 +133,6 @@ func realCurrentTmuxHarnessRuntime() currentTmuxHarnessRuntime {
 		startCodex:    queueCurrentTmuxCodex,
 		startOpenCode: startCurrentTmuxOpenCode,
 		startGemini:   startCurrentTmuxGemini,
-		startAgy:      startCurrentTmuxAgy,
 		validateCodex: validateCodexCredentials,
 	}
 }
@@ -146,20 +144,6 @@ type currentTmuxCodexQueueRuntime struct {
 
 func realCurrentTmuxCodexQueueRuntime() currentTmuxCodexQueueRuntime {
 	return currentTmuxCodexQueueRuntime{sendCommand: tmux.SendCommand, lookPath: exec.LookPath}
-}
-
-type currentTmuxAgyRuntime struct {
-	sendCommand   func(sessionName, command string) error
-	waitForPrompt func(context.Context, string, time.Duration) error
-	associate     func(string)
-}
-
-func realCurrentTmuxAgyRuntime() currentTmuxAgyRuntime {
-	return currentTmuxAgyRuntime{
-		sendCommand:   tmux.SendCommand,
-		waitForPrompt: tmux.WaitForAgyPrompt,
-		associate:     associateSpawnedAgySession,
-	}
 }
 
 // queueCurrentTmuxCodex queues Codex behind the AGM process currently owning
@@ -188,11 +172,17 @@ func queueCurrentTmuxCodexWithRuntime(spec ops.HarnessLaunchSpec, runtime curren
 	return launch.ModeAppliedAtStartup, nil
 }
 
-// startCurrentTmuxHarness dispatches the per-harness startup flow for the
-// in-place (current tmux pane) active harnesses and deprecated Gemini
-// compatibility path.
+// startCurrentTmuxHarness dispatches the supported in-place (current tmux
+// pane) harnesses and the deprecated Gemini compatibility path. AGY is
+// deliberately excluded because its native identity cannot be correlated
+// until the foreground AGM command returns; callers reject that route before
+// invoking this dispatcher.
 func startCurrentTmuxHarness(ctx context.Context, spec ops.HarnessLaunchSpec) error {
 	return startCurrentTmuxHarnessWithRuntime(ctx, spec, realCurrentTmuxHarnessRuntime())
+}
+
+func currentTmuxAgyUnsupportedError() error {
+	return fmt.Errorf("AGY cannot start in the current tmux pane because its provider-native identity cannot be correlated until the invoking AGM process exits; use --detached with a different session name")
 }
 
 func startCurrentTmuxHarnessWithRuntime(ctx context.Context, spec ops.HarnessLaunchSpec, runtime currentTmuxHarnessRuntime) error {
@@ -210,7 +200,7 @@ func startCurrentTmuxHarnessWithRuntime(ctx context.Context, spec ops.HarnessLau
 	case "gemini-cli":
 		return runtime.startGemini(ctx, spec)
 	case "agy":
-		return runtime.startAgy(ctx, spec)
+		return currentTmuxAgyUnsupportedError()
 	default:
 		debug.Log("Skipping CLI startup for harness: %s (no CLI configured)", spec.Harness)
 		ui.PrintSuccess(fmt.Sprintf("Session created for %s harness", spec.Harness))
@@ -329,35 +319,6 @@ func startCurrentTmuxGemini(ctx context.Context, spec ops.HarnessLaunchSpec) err
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	return nil
-}
-
-func startCurrentTmuxAgy(ctx context.Context, spec ops.HarnessLaunchSpec) error {
-	return startCurrentTmuxAgyWithRuntime(ctx, spec, realCurrentTmuxAgyRuntime())
-}
-
-func startCurrentTmuxAgyWithRuntime(ctx context.Context, spec ops.HarnessLaunchSpec, runtime currentTmuxAgyRuntime) error {
-	fmt.Println("Starting AGY...")
-	agyCmd := ops.BuildHarnessLaunchCommand(spec).Command
-	if err := runtime.sendCommand(spec.SessionName, agyCmd); err != nil {
-		ui.PrintError(err,
-			"Failed to start AGY in current tmux pane",
-			"  • Verify AGY is installed: which agy\n"+
-				"  • Test AGY manually: agy --help\n"+
-				"  • Check you're in tmux: echo $TMUX")
-		return err
-	}
-	fmt.Println("Waiting for AGY to initialize...")
-	if err := runtime.waitForPrompt(ctx, spec.SessionName, 30*time.Second); err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return ctxErr
-		}
-		ui.PrintWarning("AGY ready signal not detected")
-		fmt.Printf("Session may still work, but initialization timing is uncertain.\n")
-	} else {
-		ui.PrintSuccess("AGY is ready!")
-	}
-	runtime.associate(spec.SessionName)
 	return nil
 }
 

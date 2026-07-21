@@ -77,6 +77,10 @@ compatibility.
 
 **AGP-31** When CLI or MCP creates an AGY session through the shared operations lifecycle, the system shall correlate and persist a safe provider-native conversation ID after readiness and before registration or startup-prompt delivery, reject the pre-launch workspace identity as stale, and roll back the newly created tmux session if identity correlation fails.
 
+**AGP-32** When the AGY adapter cold-resumes a conversation, the system shall allow the provider up to 60 seconds to become ready before treating readiness as failed, rolling back a newly created tmux session, or attaching.
+
+**AGP-33** When the AGY adapter reads a native transcript entry whose source is absent, the system shall classify the established `USER_INPUT` and `PLANNER_RESPONSE` entry types as user and assistant messages respectively while continuing to ignore unrelated source-less entry types.
+
 ### Codex Workdir Trust (ce-cmsq)
 
 **AGP-14** When a Codex CLI session is created or resumed through the codex-cli adapter, the system shall record the working directory as a trusted Codex project in `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`) before sending the launch command, so a fresh non-git sandbox directory cannot block Codex startup on its interactive trust prompt.
