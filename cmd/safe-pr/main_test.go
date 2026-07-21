@@ -26,7 +26,7 @@ func TestRun_Errors(t *testing.T) {
 		{"bad timeout", []string{"create", "--timeout", "soon"}, "invalid --timeout"},
 		{"no session", []string{"create", "--title", "t"}, "no wayfinder session"},
 		{"session dir unreadable", []string{"create", "--wayfinder", "/nonexistent-wf-dir",
-			"--title", "t"}, "cannot read"},
+			"--title", "t"}, "cannot load"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -134,10 +134,20 @@ func initGitRepo(t *testing.T, dir, remoteURL string) {
 	}
 }
 
-// writeWayfinderStatus creates a minimal WAYFINDER-STATUS.md in dir.
+// writeWayfinderStatus creates a complete canonical WAYFINDER-STATUS.md in dir.
 func writeWayfinderStatus(t *testing.T, dir, projectName, status string) {
 	t.Helper()
-	content := fmt.Sprintf("---\nschema_version: \"2.0\"\nproject_name: %s\nstatus: %s\n---\n", projectName, status)
+	content := fmt.Sprintf(`---
+schema_version: "2.0"
+project_name: %s
+project_type: feature
+risk_level: S
+current_waypoint: CHARTER
+status: %s
+created_at: 2026-07-20T00:00:00Z
+updated_at: 2026-07-20T00:00:00Z
+---
+`, projectName, status)
 	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), []byte(content), 0o600); err != nil {
 		t.Fatalf("writeWayfinderStatus: %v", err)
 	}
