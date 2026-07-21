@@ -192,8 +192,10 @@ type ArchiveSessionInput struct {
 }
 
 type KillSessionInput struct {
-	Identifier string `json:"identifier" jsonschema:"Session ID, name, or tmux session name to kill"`
-	DryRun     bool   `json:"dry_run,omitempty" jsonschema:"Preview the kill without executing. Returns what would happen."`
+	Identifier     string `json:"identifier" jsonschema:"Session ID, name, or tmux session name to kill"`
+	Force          bool   `json:"force,omitempty" jsonschema:"Bypass the recent-activity safety check."`
+	ConfirmedStuck bool   `json:"confirmed_stuck,omitempty" jsonschema:"Confirm that a live harness is stuck and may be killed. Required for an active session."`
+	DryRun         bool   `json:"dry_run,omitempty" jsonschema:"Preview the kill without executing. Returns what would happen."`
 }
 
 type CreateSessionInput struct {
@@ -238,23 +240,35 @@ func addArchiveSessionTool(server *mcp.Server, _ *Config) {
 }
 
 func addKillSessionTool(server *mcp.Server, _ *Config) {
+	addKillSessionToolWithFactory(server, newMCPOpContextWithTmux)
+}
+
+type mcpOpContextFactory func() (*ops.OpContext, func(), error)
+
+// addKillSessionToolWithFactory keeps dependency construction private while
+// allowing the complete MCP transport and shared mutation contract to be
+// exercised with deterministic storage and tmux adapters.
+func addKillSessionToolWithFactory(server *mcp.Server, newOpContext mcpOpContextFactory) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "agm_kill_session",
 		Description: "Kill the tmux session for an AGM session. Use when a session is stuck or unresponsive and needs to be force-stopped.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, input KillSessionInput) (*mcp.CallToolResult, any, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, input KillSessionInput) (*mcp.CallToolResult, any, error) {
 		if input.Identifier == "" {
 			return mcpError(ops.ErrInvalidInput("identifier", "Session identifier is required.")), nil, nil
 		}
 
-		opCtx, cleanup, err := newMCPOpContext()
+		opCtx, cleanup, err := newOpContext()
 		if err != nil {
 			return mcpError(err), nil, nil
 		}
 		defer cleanup()
+		opCtx.Context = ctx
 		opCtx.DryRun = input.DryRun
 
 		result, opErr := ops.KillSession(opCtx, &ops.KillSessionRequest{
-			Identifier: input.Identifier,
+			Identifier:     input.Identifier,
+			Force:          input.Force,
+			ConfirmedStuck: input.ConfirmedStuck,
 		})
 		if opErr != nil {
 			return mcpError(opErr), nil, nil

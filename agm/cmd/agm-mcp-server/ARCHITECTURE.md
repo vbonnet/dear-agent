@@ -35,7 +35,7 @@ the Dolt storage layer) and reads Wayfinder data directly from
 | `agm_search_sessions` | `tools.go` | Search sessions by partial name match |
 | `agm_get_session_metadata` | `tools.go` | Full metadata for a session by ID/name |
 | `agm_archive_session` | `tools.go` | Mark a session archived (supports dry-run) |
-| `agm_kill_session` | `tools.go` | Kill the tmux session (supports dry-run) |
+| `agm_kill_session` | `tools.go` | Kill and verify the exact tmux session (supports dry-run and explicit safety confirmation) |
 | `agm_list_ops` | `tools.go` | List all available ops (schema discovery) |
 | `engram_list_wayfinder_sessions` | `tools.go` + `wayfinder.go` | List Wayfinder sessions from `wf/` directory |
 | `engram_get_wayfinder_session` | `tools.go` + `wayfinder.go` | Get full frontmatter for one Wayfinder session |

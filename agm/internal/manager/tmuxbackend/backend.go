@@ -22,11 +22,13 @@ var (
 // TmuxBackend manages agent sessions via tmux.
 // It delegates to the existing agm/internal/tmux package for all
 // tmux operations, adapting them to the manager.Backend interface.
-type TmuxBackend struct{}
+type TmuxBackend struct {
+	killSession func(string) error
+}
 
 // New creates a new TmuxBackend.
 func New() *TmuxBackend {
-	return &TmuxBackend{}
+	return &TmuxBackend{killSession: tmux.KillSessionChecked}
 }
 
 // Name returns the backend identifier.
@@ -62,7 +64,13 @@ func (b *TmuxBackend) CreateSession(_ context.Context, config manager.SessionCon
 
 // TerminateSession kills a tmux session.
 func (b *TmuxBackend) TerminateSession(_ context.Context, id manager.SessionID) error {
-	tmux.KillSession(string(id))
+	killSession := b.killSession
+	if killSession == nil {
+		killSession = tmux.KillSessionChecked
+	}
+	if err := killSession(string(id)); err != nil {
+		return fmt.Errorf("terminate tmux session %q: %w", id, err)
+	}
 	return nil
 }
 

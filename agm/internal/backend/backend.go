@@ -19,6 +19,11 @@ type Backend interface {
 	// CreateSession creates a new session with the given name and working directory
 	CreateSession(name, workdir string) error
 
+	// KillSession terminates a session and verifies that its backend resource is gone.
+	// Lifecycle mutations require every registered backend to provide the inverse
+	// of CreateSession so rollback and explicit kill cannot silently strand work.
+	KillSession(name string) error
+
 	// AttachSession attaches to or switches to the given session
 	AttachSession(name string) error
 

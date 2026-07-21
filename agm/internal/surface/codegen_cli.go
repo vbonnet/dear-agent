@@ -232,6 +232,8 @@ func NewKillSessionCmd(newOpCtx OpCtxFunc) *cobra.Command {
 			if len(args) > 0 {
 				req.Identifier = args[0]
 			}
+			req.Force, _ = cmd.Flags().GetBool("force")
+			req.ConfirmedStuck, _ = cmd.Flags().GetBool("confirmed-stuck")
 
 			result, opErr := KillSession(opCtx, req)
 			if opErr != nil {
@@ -243,6 +245,9 @@ func NewKillSessionCmd(newOpCtx OpCtxFunc) *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.Flags().Bool("force", false, "Bypass the recent-activity safety check")
+	cmd.Flags().Bool("confirmed-stuck", false, "Confirm that a live harness is stuck and may be killed")
 
 	return cmd
 }

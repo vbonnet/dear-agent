@@ -63,7 +63,7 @@ var (
 	sendPromptSafeFn   = tmux.SendMultiLinePromptSafe
 	waitForPaneCloseFn = tmux.WaitForPaneClose
 	isPaneActiveFn     = tmux.IsPaneActive
-	killSessionFn      = tmux.KillSession
+	killSessionFn      = tmux.KillSessionChecked
 	getPanePIDFn       = tmux.GetPanePID
 	processKillFn      = syscall.Kill
 	openStorageFn      = openStorage
@@ -168,7 +168,9 @@ func (r *Reaper) Run() error {
 
 	// Step 6: Kill tmux session as final cleanup (idempotent, always runs)
 	r.logger.Info("Killing tmux session (final cleanup)")
-	killSessionFn(r.SessionName)
+	if err := killSessionFn(r.SessionName); err != nil {
+		r.logger.Warn("tmux kill-session cleanup returned an error", "error", err)
+	}
 
 	// Verify pane is actually gone
 	if active, _ := isPaneActiveFn(r.SessionName); active {
