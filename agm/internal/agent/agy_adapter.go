@@ -36,7 +36,7 @@ var (
 	agyCheckHarness        = tmux.CheckPaneLiveness
 	agyIsIdle              = tmux.IsAgyIdle
 	agyAttachSession       = tmux.AttachSession
-	agyKillSession         = tmux.KillSessionWithError
+	agyKillSession         = tmux.KillSessionChecked
 	agyIdentityTracker     = agysession.NewCreateIdentityTracker
 	agyAcquireCreateLock   = func(workDir string) (func() error, error) {
 		return agysession.AcquireWorkspaceCreateLock(context.Background(), workDir)
