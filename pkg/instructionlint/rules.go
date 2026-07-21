@@ -15,6 +15,7 @@ type rule struct {
 }
 
 var retiredWayfinderPhase = regexp.MustCompile(`(?i)(?:\bW0(?:\b|-)|\bD[1-6](?:\b|-)|\bS(?:1[01]|[1-9])(?:\b|-))`)
+var unambiguousRetiredWayfinderPhase = regexp.MustCompile(`(?i)(?:\bW0-|\bD[1-6]-|\bS(?:1[01]|[1-9])-)`)
 var retiredWayfinderV1 = regexp.MustCompile(`(?i)\bV1\b`)
 var environmentAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 var embeddedShellCommand = regexp.MustCompile("\\$\\(([^()]*)\\)|`([^`]*)`")
@@ -59,10 +60,10 @@ var instructionRules = []rule{
 }
 
 func retiredWayfinderToken(text string) bool {
-	if retiredWayfinderPhase.MatchString(text) {
+	wayfinderContext := strings.Contains(strings.ToLower(text), "wayfinder")
+	if unambiguousRetiredWayfinderPhase.MatchString(text) || wayfinderContext && retiredWayfinderPhase.MatchString(text) {
 		return true
 	}
-	wayfinderContext := strings.Contains(strings.ToLower(text), "wayfinder")
 	for _, location := range retiredWayfinderV1.FindAllStringIndex(text, -1) {
 		precededBySlash := location[0] > 0 && text[location[0]-1] == '/'
 		followedByVersionSuffix := location[1]+1 < len(text) && text[location[1]] == '.' && isVersionSuffix(text[location[1]+1])
@@ -428,10 +429,7 @@ func stripCommandPrefix(fields []string) ([]string, bool) {
 	case environmentAssignment.MatchString(command):
 		return fields[1:], true
 	case command == "env":
-		return stripLauncherOptions(fields[1:], map[string]bool{
-			"-C": true, "--chdir": true, "-S": true, "--split-string": true,
-			"-u": true, "--unset": true,
-		}), true
+		return stripEnvPrefix(fields[1:]), true
 	case command == "timeout" || command == "gtimeout":
 		return stripTimeoutPrefix(fields[1:]), true
 	case command == "sudo":
@@ -448,6 +446,30 @@ func stripCommandPrefix(fields []string) ([]string, bool) {
 	default:
 		return fields, false
 	}
+}
+
+func stripEnvPrefix(fields []string) []string {
+	for len(fields) > 0 && strings.HasPrefix(fields[0], "-") {
+		option := fields[0]
+		fields = fields[1:]
+		name, inlineValue, hasInlineValue := strings.Cut(option, "=")
+		if name == "-S" || name == "--split-string" {
+			payload := inlineValue
+			if !hasInlineValue {
+				if len(fields) == 0 {
+					return fields
+				}
+				payload = fields[0]
+				fields = fields[1:]
+			}
+			return append(parseShellWords(payload), fields...)
+		}
+		if (name == "-C" || name == "--chdir" || name == "-u" || name == "--unset") &&
+			!hasInlineValue && len(fields) > 0 {
+			fields = fields[1:]
+		}
+	}
+	return fields
 }
 
 func trimShellGroupPrefixes(fields []string) []string {

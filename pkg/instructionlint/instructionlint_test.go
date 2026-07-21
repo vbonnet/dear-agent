@@ -569,15 +569,35 @@ func TestOrdinaryProseCommandsRemainPolicyVisible(t *testing.T) {
 }
 
 func TestRetiredWayfinderVocabularyIsCaseInsensitive(t *testing.T) {
-	for _, token := range []string{"v1", "v1.", "w0", "d1", "s1", "Use Wayfinder/V1", "follow the Wayfinder V1.x workflow"} {
+	for _, token := range []string{"Wayfinder v1", "Wayfinder v1.", "Wayfinder w0", "Wayfinder d1", "Wayfinder s1", "Create W0-charter.md", "Use Wayfinder/V1", "follow the Wayfinder V1.x workflow"} {
 		if !retiredWayfinderToken(token) {
 			t.Errorf("retiredWayfinderToken does not match %q", token)
 		}
 	}
-	for _, currentVersion := range []string{"ai.md/v1", "v1.2"} {
+	for _, currentVersion := range []string{"ai.md/v1", "v1.2", "Use an AWS S3 bucket", "Store state in a Cloudflare D1 database", "Select the S1 tier"} {
 		if retiredWayfinderToken(currentVersion) {
 			t.Errorf("retiredWayfinderToken unexpectedly matches %q", currentVersion)
 		}
+	}
+}
+
+func TestEnvSplitStringCommandsRemainPolicyVisible(t *testing.T) {
+	commands := []string{
+		`env -S 'git push origin main'`,
+		`env --split-string='gh pr merge 123'`,
+		`/usr/bin/env -S 'bd ready'`,
+		`env -S git\ push origin main`,
+	}
+	var rules []string
+	for _, command := range commands {
+		for _, violation := range evaluateSegment("AGENTS.md", Segment{Kind: SegmentShell, Text: command}) {
+			rules = append(rules, violation.Rule)
+		}
+	}
+	sort.Strings(rules)
+	want := []string{"bare-beads", "raw-gh-merge", "raw-git-push", "raw-git-push"}
+	if !reflect.DeepEqual(rules, want) {
+		t.Fatalf("env split-string rules = %v, want %v", rules, want)
 	}
 }
 
