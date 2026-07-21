@@ -224,6 +224,53 @@ func TestSQLiteUpdateTmuxSessionNamePreservesOtherColumns(t *testing.T) {
 	}
 }
 
+func TestSQLiteTouchSessionActivityPreservesProvisionalTmuxRevision(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	initial := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "sqlite-activity-touch-session",
+		Name:          "sqlite-activity-touch-session",
+		Harness:       "codex-cli",
+		CreatedAt:     initial,
+		UpdatedAt:     initial,
+		Context:       manifest.Context{Project: t.TempDir(), Notes: "preserve me"},
+		Tmux:          manifest.Tmux{SessionName: "historical-name"},
+	}
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+	change, err := adapter.BeginTmuxSessionNameChange(t.Context(), m.SessionID, "canonical-name")
+	if err != nil || change == nil {
+		t.Fatalf("BeginTmuxSessionNameChange() = (%v, %v), want provisional change", change, err)
+	}
+	if err := adapter.TouchSessionActivity(t.Context(), m.SessionID); err != nil {
+		t.Fatalf("TouchSessionActivity() error: %v", err)
+	}
+	stored, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() error: %v", err)
+	}
+	if stored.Tmux.SessionName != change.CurrentName || stored.Tmux.SessionRevision != change.CurrentRevision {
+		t.Fatalf("tmux identity after activity touch = (%q, %q), want (%q, %q)", stored.Tmux.SessionName, stored.Tmux.SessionRevision, change.CurrentName, change.CurrentRevision)
+	}
+	if !stored.UpdatedAt.After(initial) || stored.Context.Notes != m.Context.Notes {
+		t.Fatalf("activity touch state = (updated=%v notes=%q), want updated after %v with preserved notes", stored.UpdatedAt, stored.Context.Notes, initial)
+	}
+	frecency, err := adapter.GetByFrecency(0)
+	if err != nil {
+		t.Fatalf("GetByFrecency() error: %v", err)
+	}
+	if len(frecency) != 1 || frecency[0].Session.Tmux.SessionRevision != change.CurrentRevision {
+		t.Fatalf("frecency read lost tmux revision: %#v", frecency)
+	}
+}
+
 func TestSQLiteRenameSessionIdentityRejectsStaleRevision(t *testing.T) {
 	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
 	if err != nil {

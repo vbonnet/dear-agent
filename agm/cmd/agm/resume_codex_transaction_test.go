@@ -286,7 +286,7 @@ func recordingResumeRuntime(calls *[]string) resumeSessionRuntime {
 		restorePermission: func(string, *manifest.Manifest, *HealthStatus) {
 			record("restore")
 		},
-		updateActivity: func(*dolt.Adapter, string, string) error { record("update"); return nil },
+		updateActivity: func(context.Context, *dolt.Adapter, string, string) error { record("update"); return nil },
 		updateTabTitle: func(string) { record("tab") },
 		deliverPrompt:  func(string, string, string, bool) error { record("prompt"); return nil },
 		attachTmux:     func(string) error { record("attach"); return nil },
@@ -409,6 +409,98 @@ func TestResumeSessionCodexRollsBackWhenPromptDeliveryIsCanceled(t *testing.T) {
 	}
 	if !storedAfter.UpdatedAt.Equal(storedBefore.UpdatedAt) || storedAfter.Tmux.SessionName != storedBefore.Tmux.SessionName {
 		t.Fatalf("canceled prompt committed resume metadata: before=%#v after=%#v", storedBefore, storedAfter)
+	}
+}
+
+func TestResumeSessionCodexRollsBackPromptlessCancellationBeforeFinalization(t *testing.T) {
+	setDetachedResumeTestGlobals(t, true)
+	adapter, m, health := setupCodexResumeTransaction(t)
+	health.TmuxSessionName = "codex.resume:promptless-cancel"
+	storedBefore, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() before resume error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	var calls []string
+	runtime := recordingResumeRuntime(&calls)
+	runtime.persistTmuxName = func(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest, name string) (resumeTmuxNameChange, error) {
+		calls = append(calls, "persist")
+		return persistResumeTmuxName(ctx, adapter, m, name)
+	}
+	runtime.restoreTmuxName = func(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest, change resumeTmuxNameChange) error {
+		calls = append(calls, "compensate")
+		return restoreResumeTmuxName(ctx, adapter, m, change)
+	}
+	runtime.completeTmuxName = func(ctx context.Context, adapter *dolt.Adapter, change resumeTmuxNameChange) error {
+		calls = append(calls, "complete")
+		return completeResumeTmuxName(ctx, adapter, change)
+	}
+	runtime.restorePermission = func(string, *manifest.Manifest, *HealthStatus) {
+		calls = append(calls, "restore")
+		cancel()
+	}
+
+	err = resumeSessionWithRuntime(ctx, adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("resumeSessionWithRuntime() error = %v, want context.Canceled", err)
+	}
+	if want := []string{"create", "dispatch", "wait", "persist", "restore", "compensate", "kill"}; !reflect.DeepEqual(calls, want) {
+		t.Fatalf("resume calls = %v, want promptless cancellation rollback %v", calls, want)
+	}
+	storedAfter, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after resume error = %v", err)
+	}
+	if storedAfter.Tmux.SessionName != storedBefore.Tmux.SessionName || !storedAfter.UpdatedAt.Equal(storedBefore.UpdatedAt) {
+		t.Fatalf("promptless cancellation left canonical metadata: before=%#v after=%#v", storedBefore, storedAfter)
+	}
+}
+
+func TestResumeSessionCodexRollsBackPromptlessCancellationAfterActivityTouch(t *testing.T) {
+	setDetachedResumeTestGlobals(t, true)
+	adapter, m, health := setupCodexResumeTransaction(t)
+	health.TmuxSessionName = "codex.resume:activity-cancel"
+	storedBefore, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() before resume error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	var calls []string
+	runtime := recordingResumeRuntime(&calls)
+	runtime.persistTmuxName = func(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest, name string) (resumeTmuxNameChange, error) {
+		calls = append(calls, "persist")
+		return persistResumeTmuxName(ctx, adapter, m, name)
+	}
+	runtime.restoreTmuxName = func(ctx context.Context, adapter *dolt.Adapter, m *manifest.Manifest, change resumeTmuxNameChange) error {
+		calls = append(calls, "compensate")
+		return restoreResumeTmuxName(ctx, adapter, m, change)
+	}
+	runtime.completeTmuxName = func(context.Context, *dolt.Adapter, resumeTmuxNameChange) error {
+		calls = append(calls, "complete")
+		return nil
+	}
+	runtime.updateActivity = func(ctx context.Context, adapter *dolt.Adapter, sessionID, _ string) error {
+		calls = append(calls, "update")
+		if err := adapter.TouchSessionActivity(context.WithoutCancel(ctx), sessionID); err != nil {
+			return err
+		}
+		cancel()
+		return nil
+	}
+
+	err = resumeSessionWithRuntime(ctx, adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("resumeSessionWithRuntime() error = %v, want context.Canceled", err)
+	}
+	if want := []string{"create", "dispatch", "wait", "persist", "restore", "update", "compensate", "kill"}; !reflect.DeepEqual(calls, want) {
+		t.Fatalf("resume calls = %v, want post-touch rollback %v", calls, want)
+	}
+	storedAfter, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after resume error = %v", err)
+	}
+	if storedAfter.Tmux.SessionName != storedBefore.Tmux.SessionName || !storedAfter.UpdatedAt.Equal(storedBefore.UpdatedAt) {
+		t.Fatalf("post-touch cancellation left finalization effects: before=%#v after=%#v", storedBefore, storedAfter)
 	}
 }
 
@@ -807,7 +899,7 @@ func TestResumeSessionCodexTmuxPersistencePreservesConcurrentMetadata(t *testing
 	if stored.Claude.UUID != wantUUID || stored.Context.Notes != wantNotes {
 		t.Fatalf("concurrent metadata was lost: uuid=%q notes=%q", stored.Claude.UUID, stored.Context.Notes)
 	}
-	if want := []string{"create", "dispatch", "wait", "persist", "complete", "restore", "update", "tab"}; !reflect.DeepEqual(calls, want) {
+	if want := []string{"create", "dispatch", "wait", "persist", "restore", "update", "tab", "complete"}; !reflect.DeepEqual(calls, want) {
 		t.Fatalf("resume calls = %v, want %v", calls, want)
 	}
 }

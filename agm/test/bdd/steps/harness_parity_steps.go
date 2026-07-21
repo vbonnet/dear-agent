@@ -346,7 +346,7 @@ func codexResumeSuccessShouldRequireProcessAndComposerReadiness(ctx context.Cont
 func aFailedCodexResumeShouldRemoveOnlyItsNewlyCreatedTmuxSession(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/dolt", "./agm/internal/ops", "./agm/internal/tmux", "-run", `^(TestProductionResumeEntryPointsUseLockedResolvedSession|TestPersistResumeTmuxName(RetainsPendingChangeUntilReloadCompensationIsProven|RetainsChangeWhenBeginCommitIsAmbiguous)|TestRestoreResumeTmuxNameTreatsSuccessfulSwapAsComplete|TestResumeResolvedSessionAcquiresSessionLockBeforeReads|TestResumeAttachmentRunsAfterSessionLockReleases|TestWithSessionLock_MutualExclusion|TestResumeSession(Codex(RollsBackNewTmuxBeforeActivityUpdate|JoinsCleanupFailure|RollbackUsesCreatedCanonicalTmuxName|PersistsCreatedCanonicalTmuxName|TmuxPersistencePreservesConcurrentMetadata|CompensatesCanonicalNameWhenOrdinaryPromptDeliveryFails|CompensationPreservesNewerMetadata|PreservesTmuxWhenPersistenceCompensationIsUnproven|RollsBackCreationFailureWhen(TmuxReturnedIdentity|OnlyProvisionalIdentityReturned)|RollsBackWhen(PromptDeliveryIsCanceled|CanonicalNamePersistenceFails)|ReadinessFailureRemovesIsolatedTmux|RollbackReportsInaccessibleSocketAndPreservesHiddenTarget)|PreservesPreexistingTmuxOnLaterFailure)|TestKillCreatedResumeTmuxPreserves(SameNamedReplacement|IDReusedAfterServerRestart)|TestSessionIdentityCleansCreation(BeforeTokenWrite|WhenSessionIDOutputIsLost)|TestNewSessionWithIdentityReturnsIDWhenQueuedInitializationFails|TestResolveTmuxSessionNameChangeCommitErrorPreservesUncertainOwnership|TestSQLite(AdapterUpgradesLegacySessionRevisionColumn|TmuxSessionName(ChangeOwnsAndRestoresExactWrite|CompensationRejectsNewerMetadata|ChangeCompletesOwnershipToken|StaleFullUpdatePreservesOwnership))|TestMigration018AddsTmuxSessionRevision)$`, "-count=1")
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/dolt", "./agm/internal/ops", "./agm/internal/tmux", "-run", `^(TestProductionResumeEntryPointsUseLockedResolvedSession|TestPersistResumeTmuxName(RetainsPendingChangeUntilReloadCompensationIsProven|RetainsChangeWhenBeginCommitIsAmbiguous)|TestRestoreResumeTmuxNameTreatsSuccessfulSwapAsComplete|TestResumeResolvedSessionAcquiresSessionLockBeforeReads|TestResumeAttachmentRunsAfterSessionLockReleases|TestWithSessionLock_MutualExclusion|TestResumeSession(Codex(RollsBackNewTmuxBeforeActivityUpdate|RollsBackPromptlessCancellation(BeforeFinalization|AfterActivityTouch)|JoinsCleanupFailure|RollbackUsesCreatedCanonicalTmuxName|PersistsCreatedCanonicalTmuxName|TmuxPersistencePreservesConcurrentMetadata|CompensatesCanonicalNameWhenOrdinaryPromptDeliveryFails|CompensationPreservesNewerMetadata|PreservesTmuxWhenPersistenceCompensationIsUnproven|RollsBackCreationFailureWhen(TmuxReturnedIdentity|OnlyProvisionalIdentityReturned)|RollsBackWhen(PromptDeliveryIsCanceled|CanonicalNamePersistenceFails)|ReadinessFailureRemovesIsolatedTmux|RollbackReportsInaccessibleSocketAndPreservesHiddenTarget)|PreservesPreexistingTmuxOnLaterFailure)|TestKillCreatedResumeTmuxPreserves(SameNamedReplacement|IDReusedAfterServerRestart)|TestSessionIdentityCleansCreation(BeforeTokenWrite|WhenSessionIDOutputIsLost)|TestNewSessionWithIdentityReturnsIDWhenQueuedInitializationFails|TestResolveTmuxSessionNameChangeCommitErrorPreservesUncertainOwnership|TestSQLite(AdapterUpgradesLegacySessionRevisionColumn|TouchSessionActivityPreservesProvisionalTmuxRevision|TmuxSessionName(ChangeOwnsAndRestoresExactWrite|CompensationRejectsNewerMetadata|ChangeCompletesOwnershipToken|StaleFullUpdatePreservesOwnership))|TestMigration018AddsTmuxSessionRevision)$`, "-count=1")
 	cmd.Dir = bddRepoRoot()
 	output, err := cmd.CombinedOutput()
 	if testCtx.Err() != nil {
@@ -404,11 +404,16 @@ func failedCodexPromptDeliveryShouldNotSuppressALaterAttachFailure(ctx context.C
 }
 
 func codexActivityUpdatesShouldFollowResumeReadiness(ctx context.Context) error {
-	source := ctx.Value(harnessParityStateKey{}).(*harnessParityState).resumeSource
-	waitIndex := strings.Index(source, "runtime.wait(harnessName, health)")
-	updateIndex := strings.Index(source, "runtime.updateActivity(adapter, sessionID, manifestPath)")
-	if waitIndex < 0 || updateIndex < waitIndex {
-		return fmt.Errorf("codex activity update must follow successful resume readiness")
+	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/dolt", "-run", `^(TestResumeSessionCodex(CommitsEffectsOnlyAfterReadiness|RollsBackNewTmuxBeforeActivityUpdate|RollsBackPromptlessCancellation(BeforeFinalization|AfterActivityTouch))|TestSQLiteTouchSessionActivityPreservesProvisionalTmuxRevision)$`, "-count=1")
+	cmd.Dir = bddRepoRoot()
+	output, err := cmd.CombinedOutput()
+	if testCtx.Err() != nil {
+		return fmt.Errorf("codex resume activity ordering timed out: %w", testCtx.Err())
+	}
+	if err != nil {
+		return fmt.Errorf("codex resume activity ordering failed: %w\n%s", err, output)
 	}
 	return nil
 }

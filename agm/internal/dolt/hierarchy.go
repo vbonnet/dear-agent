@@ -66,7 +66,7 @@ func (a *Adapter) GetChildren(sessionID string) ([]*manifest.Manifest, error) {
 	query := `
 		SELECT id, created_at, updated_at, status, workspace, model, name, harness,
 			context_project, context_purpose, context_tags, context_notes,
-			claude_uuid, tmux_session_name, metadata,
+			claude_uuid, tmux_session_name, tmux_session_revision, metadata,
 			permission_mode, permission_mode_updated_at, permission_mode_source,
 			is_test,
 			context_total_tokens, context_used_tokens, context_percentage_used,

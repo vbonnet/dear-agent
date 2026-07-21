@@ -369,6 +369,36 @@ func (a *Adapter) UpdateTmuxSessionName(ctx context.Context, sessionID, sessionN
 	return nil
 }
 
+// TouchSessionActivity updates only the session activity timestamp. It does
+// not rotate the tmux identity revision: a cold-resume transaction keeps that
+// ownership token provisional until every creation-finalization effect has
+// succeeded, allowing an exact rollback after caller cancellation.
+func (a *Adapter) TouchSessionActivity(ctx context.Context, sessionID string) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id cannot be empty")
+	}
+	if err := a.ApplyMigrations(); err != nil {
+		return fmt.Errorf("failed to apply migrations: %w", err)
+	}
+
+	result, err := a.conn.ExecContext(ctx, `
+		UPDATE agm_sessions
+		SET updated_at = ?
+		WHERE id = ? AND workspace = ?
+	`, time.Now(), sessionID, a.workspace)
+	if err != nil {
+		return fmt.Errorf("touch session activity: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get touched session rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	return nil
+}
+
 // RenameSessionIdentityResult tells the caller whether reverting an already
 // moved tmux session is safe when the storage mutation returns an error.
 type RenameSessionIdentityResult struct {

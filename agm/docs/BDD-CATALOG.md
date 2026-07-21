@@ -267,7 +267,10 @@ creation, and terminal state detection.
   name while applying unrelated fields and advancing the identity revision;
   every writer advances that revision so multiple stale snapshots stay unable
   to restore the old name, and rollback preserves the canonical tmux session
-  without timestamp guesses. A commit
+  without timestamp guesses. Activity-only finalization preserves the
+  provisional revision; cancellation before or immediately after that touch
+  restores the prior activity timestamp and canonical name before removing the
+  exact created pane. A commit
   error is re-read against the complete prior and provisional revisions before
   cleanup proceeds. It also avoids killing a same-named or
   server-restart replacement. Reopening a

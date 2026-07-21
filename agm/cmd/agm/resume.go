@@ -596,7 +596,7 @@ type resumeSessionRuntime struct {
 	restoreTmuxName   func(context.Context, *dolt.Adapter, *manifest.Manifest, resumeTmuxNameChange) error
 	completeTmuxName  func(context.Context, *dolt.Adapter, resumeTmuxNameChange) error
 	restorePermission func(string, *manifest.Manifest, *HealthStatus)
-	updateActivity    func(*dolt.Adapter, string, string) error
+	updateActivity    func(context.Context, *dolt.Adapter, string, string) error
 	updateTabTitle    func(string)
 	deliverPrompt     func(string, string, string, bool) error
 	attachTmux        func(string) error
@@ -826,7 +826,7 @@ func resumeSessionTransactionWithRuntime(ctx context.Context, adapter *dolt.Adap
 		// if the caller is canceled so a retry cannot duplicate that prompt.
 		completionCtx = context.WithoutCancel(ctx)
 	}
-	completeResumeTmuxOwnership(completionCtx, runtime, adapter, nameChange)
+	completeDeliveredResumeTmuxOwnership(completionCtx, promptDelivered, runtime, adapter, nameChange)
 	if sendCommands {
 		runtime.restorePermission(harnessName, m, health)
 	}
@@ -836,10 +836,30 @@ func resumeSessionTransactionWithRuntime(ctx context.Context, adapter *dolt.Adap
 			ui.PrintWarning(fmt.Sprintf("Post-prompt resume finalization failed after work was delivered: %v", err))
 			return nil, nil
 		}
+		if createdTmux.owned() {
+			return nil, rollbackCreatedResumeTmux(ctx, runtime, adapter, m, createdTmux, nameChange, err)
+		}
 		return nil, err
 	}
+	completePromptlessResumeTmuxOwnership(completionCtx, promptDelivered, runtime, adapter, nameChange)
 	attachment.promptDelivered = promptDelivered
 	return attachment, nil
+}
+
+func completeDeliveredResumeTmuxOwnership(ctx context.Context, promptDelivered bool, runtime resumeSessionRuntime, adapter *dolt.Adapter, nameChange resumeTmuxNameChange) {
+	if promptDelivered {
+		completeResumeTmuxOwnership(ctx, runtime, adapter, nameChange)
+	}
+}
+
+func completePromptlessResumeTmuxOwnership(ctx context.Context, promptDelivered bool, runtime resumeSessionRuntime, adapter *dolt.Adapter, nameChange resumeTmuxNameChange) {
+	if promptDelivered {
+		return
+	}
+	// Until all finalization effects succeed, a promptless cold resume is
+	// still compensatable. Rotate away from the provisional ownership token
+	// only after that boundary so cancellation cannot strand its tmux pane.
+	completeResumeTmuxOwnership(ctx, runtime, adapter, nameChange)
 }
 
 func deliverTransactionalResumePrompt(ctx context.Context, runtime resumeSessionRuntime, adapter *dolt.Adapter, m *manifest.Manifest, health *HealthStatus, createdTmux createdResumeTmux, nameChange resumeTmuxNameChange, transactional bool) (bool, error) {
@@ -972,7 +992,7 @@ func finalizeResumeSession(ctx context.Context, adapter *dolt.Adapter, sessionID
 	}
 
 	// Update manifest last_activity (best effort - don't fail if this errors)
-	if err := runtime.updateActivity(adapter, sessionID, manifestPath); err != nil {
+	if err := runtime.updateActivity(ctx, adapter, sessionID, manifestPath); err != nil {
 		ui.PrintWarning(fmt.Sprintf("Failed to update manifest activity: %v", err))
 	}
 	if err := ctx.Err(); err != nil {
@@ -1410,18 +1430,19 @@ func restorePermissionMode(harnessName string, m *manifest.Manifest, health *Hea
 	}
 }
 
-// updateManifestActivity updates the updated_at field and state in manifest (v2: auto-updated by Write)
-func updateManifestActivity(adapter *dolt.Adapter, sessionID, manifestPath string) error {
+// updateManifestActivity records the resume timestamp without changing any
+// other session field or the provisional tmux ownership revision.
+func updateManifestActivity(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath string) error {
 	m, err := adapter.GetSession(sessionID)
 	if err != nil {
 		return err
 	}
 
-	// v2: UpdatedAt is automatically updated when we call UpdateSession
-	// Just write the manifest back to Dolt, which will update UpdatedAt
-
-	// Write back to Dolt
-	if err := adapter.UpdateSession(m); err != nil {
+	// Activity is a narrow lifecycle effect. In particular, it must not rotate
+	// a provisional tmux ownership revision before cold-resume finalization has
+	// succeeded. Complete a started write even if the caller is canceled so a
+	// following compensation CAS never races an in-flight activity update.
+	if err := adapter.TouchSessionActivity(context.WithoutCancel(ctx), sessionID); err != nil {
 		return err
 	}
 
