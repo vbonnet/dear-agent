@@ -303,6 +303,41 @@ func TestScriptHeredocVisibilityTracksCommandListsAndDescriptorAliases(t *testin
 	}
 }
 
+func TestScriptHeredocVisibilityFollowsRoutingAndDeferredReplay(t *testing.T) {
+	source := []byte(strings.Join([]string{
+		"tee fixture <<'TEE_VISIBLE'",
+		"safe-pr create --emergency --reason exposed",
+		"TEE_VISIBLE",
+		"cat >later-fixture <<'PRINTED_LATER'",
+		"git push origin main",
+		"PRINTED_LATER",
+		"cat later-fixture",
+		"cat <<'PIPE_FILE_ONLY' | jq -R . >pipeline-fixture",
+		"gh pr merge 123",
+		"PIPE_FILE_ONLY",
+		"cat <<'PIPE_VISIBLE' | jq -R .",
+		"bd ready",
+		"PIPE_VISIBLE",
+	}, "\n"))
+
+	var text []string
+	for _, segment := range parseScriptSegments(source) {
+		text = append(text, segment.Text)
+	}
+	for _, visible := range []string{
+		"safe-pr create --emergency --reason exposed",
+		"git push origin main",
+		"bd ready",
+	} {
+		if !slices.Contains(text, visible) {
+			t.Errorf("visible heredoc line %q was hidden: %v", visible, text)
+		}
+	}
+	if slices.Contains(text, "gh pr merge 123") {
+		t.Fatalf("file-only pipeline heredoc was exposed: %v", text)
+	}
+}
+
 func TestCheckRepositoryGovernsSkillAgentMetadata(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init", "-q")

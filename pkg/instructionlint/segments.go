@@ -135,13 +135,38 @@ func parseSegments(source []byte) []Segment {
 
 func parseScriptSegments(source []byte) []Segment {
 	var segments []Segment
-	state := scriptParseState{visibleHelpers: agentVisibleScriptHelpers(source)}
+	state := scriptParseState{
+		visibleHelpers:  agentVisibleScriptHelpers(source),
+		pendingHeredocs: map[string][]Segment{},
+	}
 	line := 0
 	for raw := range strings.SplitSeq(string(source), "\n") {
 		line++
 		value := strings.TrimSpace(raw)
 		if value == "" {
 			continue
+		}
+		if state.heredoc != "" {
+			if value == state.heredoc {
+				if state.heredocOutput.visible {
+					segments = append(segments, state.heredocBody...)
+				} else if state.heredocOutput.path != "" {
+					state.pendingHeredocs[state.heredocOutput.path] = append(
+						state.pendingHeredocs[state.heredocOutput.path], state.heredocBody...)
+				}
+				state.heredoc = ""
+				state.heredocBody = nil
+				state.heredocOutput = scriptOutputDestination{}
+				continue
+			}
+			state.heredocBody = append(state.heredocBody, Segment{Kind: SegmentShell, Line: line, Text: value})
+			continue
+		}
+		for path, pending := range state.pendingHeredocs {
+			if scriptLinePrintsPath(value, path) {
+				segments = append(segments, pending...)
+				delete(state.pendingHeredocs, path)
+			}
 		}
 		if include, handled := state.consumeOngoing(raw, value); handled {
 			if include {
@@ -155,8 +180,7 @@ func parseScriptSegments(source []byte) []Segment {
 		}
 		if marker := scriptHeredocMarker(value); marker != "" {
 			state.heredoc = marker
-			state.heredocVisible = agentVisibleScriptCommand(value, state.visibleHelpers) &&
-				!scriptOutputRedirectedToFile(value)
+			state.heredocOutput = scriptHeredocOutputDestination(value)
 			continue
 		}
 		assignment := stripShellDeclaration(value)
@@ -180,26 +204,23 @@ func parseScriptSegments(source []byte) []Segment {
 			}
 		}
 	}
+	sort.SliceStable(segments, func(left, right int) bool {
+		return segments[left].Line < segments[right].Line
+	})
 	return segments
 }
 
 type scriptParseState struct {
 	quote               byte
 	heredoc             string
-	heredocVisible      bool
+	heredocBody         []Segment
+	heredocOutput       scriptOutputDestination
+	pendingHeredocs     map[string][]Segment
 	visibleContinuation bool
 	visibleHelpers      map[string]bool
 }
 
 func (state *scriptParseState) consumeOngoing(raw, value string) (include, handled bool) {
-	if state.heredoc != "" {
-		if value == state.heredoc {
-			state.heredoc = ""
-			state.heredocVisible = false
-			return false, true
-		}
-		return state.heredocVisible, true
-	}
 	if state.visibleContinuation {
 		if commandQuote := unclosedScriptQuote(value); commandQuote != 0 {
 			state.quote = commandQuote
@@ -361,37 +382,74 @@ func scriptHeredocMarker(value string) string {
 	return ""
 }
 
-func scriptOutputRedirectedToFile(value string) bool {
-	commands := splitShellCommands(value)
+func scriptHeredocOutputDestination(value string) scriptOutputDestination {
+	commands := splitScriptCommandParts(value)
 	producer := -1
 	for index, command := range commands {
-		if heredocMarker.MatchString(command) {
+		if heredocMarker.MatchString(command.text) {
 			producer = index
 			break
 		}
 	}
 	if producer < 0 {
-		return false
+		return scriptOutputDestination{visible: true}
 	}
 
-	destination := scriptCommandOutputDestination(commands[producer])
-	if destination.visible {
-		return false
+	pipelineEnd := producer
+	for pipelineEnd < len(commands)-1 && commands[pipelineEnd].separator == "|" {
+		pipelineEnd++
 	}
-	if destination.path == "" {
-		return true
-	}
-	for _, command := range commands[producer+1:] {
-		if scriptCommandPrintsPath(command, destination.path) {
-			return false
+	destination := scriptOutputDestination{visible: true}
+	for index := producer; index <= pipelineEnd; index++ {
+		destination = scriptCommandOutputDestination(commands[index].text)
+		if destination.redirected {
+			break
 		}
 	}
-	return true
+	if destination.visible {
+		return destination
+	}
+	if destination.path == "" {
+		return destination
+	}
+	for _, command := range commands[pipelineEnd+1:] {
+		if scriptCommandPrintsPath(command.text, destination.path) {
+			return scriptOutputDestination{visible: true}
+		}
+	}
+	return destination
 }
 
 type scriptOutputDestination struct {
-	visible bool
-	path    string
+	visible    bool
+	path       string
+	redirected bool
+}
+
+type scriptCommandPart struct {
+	text      string
+	separator string
+}
+
+func splitScriptCommandParts(value string) []scriptCommandPart {
+	parts := make([]scriptCommandPart, 0, 2)
+	start := 0
+	scanner := shellScanState{}
+	for index := 0; index < len(value); index++ {
+		width := scanner.boundaryWidth(value, index)
+		if width == 0 {
+			continue
+		}
+		if command := strings.TrimSpace(value[start:index]); command != "" {
+			parts = append(parts, scriptCommandPart{text: command, separator: value[index : index+width]})
+		}
+		index += width - 1
+		start = index + 1
+	}
+	if command := strings.TrimSpace(value[start:]); command != "" {
+		parts = append(parts, scriptCommandPart{text: command})
+	}
+	return parts
 }
 
 func scriptCommandOutputDestination(command string) scriptOutputDestination {
@@ -429,8 +487,12 @@ func scriptCommandOutputDestination(command string) scriptOutputDestination {
 		destination := scriptRedirectDestination(target, descriptors)
 		descriptors[descriptor] = destination
 		if both {
+			destination.redirected = true
 			descriptors[1] = destination
 			descriptors[2] = destination
+		} else if descriptor == 1 {
+			destination.redirected = true
+			descriptors[1] = destination
 		}
 	}
 	return descriptors[1]
@@ -467,6 +529,15 @@ func scriptCommandPrintsPath(command, path string) bool {
 		return false
 	}
 	return slices.Contains(fields[1:], path)
+}
+
+func scriptLinePrintsPath(value, path string) bool {
+	for _, command := range splitShellCommands(value) {
+		if scriptCommandPrintsPath(command, path) {
+			return true
+		}
+	}
+	return false
 }
 
 func unescapedByteCount(value string, target byte) int {
