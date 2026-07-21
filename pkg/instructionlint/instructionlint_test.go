@@ -120,6 +120,29 @@ func TestWrappedShellCommandsRemainPolicyVisible(t *testing.T) {
 	}
 }
 
+func TestOrdinaryMarkdownContinuationsRemainPolicyVisible(t *testing.T) {
+	source := []byte(strings.Join([]string{
+		`gh \`,
+		"  pr merge 123",
+		`git \`,
+		"  push origin branch",
+		`bd \`,
+		"  ready",
+	}, "\n"))
+
+	var got []string
+	for _, segment := range parseSegments(source) {
+		for _, violation := range evaluateSegment("AGENTS.md", segment) {
+			got = append(got, violation.Rule)
+		}
+	}
+	sort.Strings(got)
+	want := []string{"bare-beads", "raw-gh-merge", "raw-git-push"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("rules = %v, want %v", got, want)
+	}
+}
+
 func TestScriptGuidanceAndCommandSubstitutionsRemainPolicyVisible(t *testing.T) {
 	source := []byte(strings.Join([]string{
 		"#!/usr/bin/env bash",
@@ -250,6 +273,26 @@ func TestCheckRepositoryGovernsSkillAgentMetadata(t *testing.T) {
 	sort.Strings(rules)
 	if result.Files != 1 || !reflect.DeepEqual(rules, []string{"raw-gh-merge", "raw-git-push"}) {
 		t.Fatalf("result=%+v rules=%v, want governed skill-agent prompts", result, rules)
+	}
+}
+
+func TestCheckRepositoryGovernsMultilineGoPrompts(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	writeTestFile(t, repo, ".dear-agent.yml", `instruction-policy:
+  surfaces:
+    - match: cmd/worker/main.go
+      owner: worker-prompts
+`)
+	writeTestFile(t, repo, "cmd/worker/main.go", "package main\n\nvar prompt = `# Worker\n\ngh pr merge 123\n`\nvar runtimeCommand = \"git push origin main\"\n")
+	runGit(t, repo, "add", ".")
+
+	result, violations, err := CheckRepository(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Files != 1 || len(violations) != 1 || violations[0].Rule != "raw-gh-merge" {
+		t.Fatalf("result=%+v violations=%v, want only the multiline prompt governed", result, violations)
 	}
 }
 
@@ -960,8 +1003,13 @@ func TestCheckRepositoryUsesTrackedGovernedInventory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(violations) != 1 || violations[0].Rule != "wayfinder-v1" {
-		t.Fatalf("violations = %v, want unexcluded Wayfinder V1 token", violations)
+	var rules []string
+	for _, violation := range violations {
+		rules = append(rules, violation.Rule)
+	}
+	sort.Strings(rules)
+	if !reflect.DeepEqual(rules, []string{"bare-beads", "stale-exclusion", "wayfinder-v1"}) {
+		t.Fatalf("violations = %v, want moved debt plus unexcluded Wayfinder V1 token", violations)
 	}
 }
 
@@ -989,6 +1037,44 @@ func TestExclusionContextDoesNotSuppressMovedGuidance(t *testing.T) {
 		t.Fatalf("legacy violations=%v err=%v", violations, err)
 	}
 	writeTestFile(t, repo, "AGENTS.md", "# Delivery\n\nRun `git push` now.\n")
+	_, violations, err := CheckRepository(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rules []string
+	for _, violation := range violations {
+		rules = append(rules, violation.Rule)
+	}
+	sort.Strings(rules)
+	if !reflect.DeepEqual(rules, []string{"raw-git-push", "stale-exclusion"}) {
+		t.Fatalf("moved guidance rules = %v, want new finding plus stale exclusion", rules)
+	}
+}
+
+func TestExclusionContextIncludesPhysicalLine(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q")
+	legacy := []byte("# Safety\n\nBefore.\n\nNever run `git push` directly.\n\nAfter.\n")
+	writeTestFile(t, repo, ".dear-agent.yml", fmt.Sprintf(`instruction-policy:
+  surfaces:
+    - match: AGENTS.md
+      owner: root
+  exclusions:
+    - path: AGENTS.md
+      rule: raw-git-push
+      excerpt: git push
+      context: %q
+      count: 1
+      owner: test
+      reason: negative reference fixture
+`, contextFingerprint(legacy, 5)))
+	writeTestFile(t, repo, "AGENTS.md", string(legacy))
+	runGit(t, repo, "add", ".")
+
+	if _, violations, err := CheckRepository(context.Background(), repo); err != nil || len(violations) != 0 {
+		t.Fatalf("legacy violations=%v err=%v", violations, err)
+	}
+	writeTestFile(t, repo, "AGENTS.md", "\n"+string(legacy))
 	_, violations, err := CheckRepository(context.Background(), repo)
 	if err != nil {
 		t.Fatal(err)

@@ -1,6 +1,6 @@
 # Active Instruction Policy Specification
 
-<!-- Last audited at: 2026-07-19 -->
+<!-- Last audited at: 2026-07-21 -->
 
 ## EARS Requirements
 
@@ -8,7 +8,7 @@
 
 **INSPOL-02** When governed instruction files are discovered, the system shall use context-bounded, non-interactive Git-tracked inventory, reject paths matched by multiple declarations, and require a governed symlink to resolve inside the repository to one tracked, governed target.
 
-**INSPOL-03** When governed Markdown, YAML, JSON, or hook scripts are parsed, the system shall inspect command guidance in ordinary prose, inline code, every fenced language, shell groups, every physical structured-string line including folded YAML scalars, and agent-visible output emitted directly or through a local shell helper without trusting formatting or container syntax as a policy exemption.
+**INSPOL-03** When governed Markdown, YAML, JSON, Go prompt sources, or hook scripts are parsed, the system shall inspect command guidance in ordinary prose, inline code, multiline Go strings, every fenced language, shell groups and continuations, every physical structured-string line including folded YAML scalars, and agent-visible output emitted directly or through a local shell helper without trusting formatting or container syntax as a policy exemption.
 
 **INSPOL-04** When active prose or executable guidance contains a retired Wayfinder phase token in any letter case, the system shall report the token and the nine-phase V2 replacement contract without misclassifying schema paths or semantic versions.
 
@@ -16,7 +16,7 @@
 
 **INSPOL-06** When executable guidance uses a known-invalid AGM command or output flag, the system shall report the current command form.
 
-**INSPOL-07** When an exclusion is loaded, the system shall require its path, rule, exact excerpt, SHA-256 local-context fingerprint, positive expected count, owner, and reason.
+**INSPOL-07** When an exclusion is loaded, the system shall require its path, rule, exact excerpt, SHA-256 local-context-and-line fingerprint, positive expected count, owner, and reason.
 
 **INSPOL-08** If an excluded finding changes text or local context, disappears, moves, or exceeds its expected count, the system shall report the new finding or stale exclusion.
 

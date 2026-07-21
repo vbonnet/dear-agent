@@ -3,9 +3,13 @@ package instructionlint
 import (
 	"bytes"
 	"fmt"
+	goast "go/ast"
+	"go/parser"
+	"go/token"
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/yuin/goldmark"
@@ -13,6 +17,32 @@ import (
 	"github.com/yuin/goldmark/text"
 	"gopkg.in/yaml.v3"
 )
+
+func parseGoPromptSegments(source []byte) ([]Segment, error) {
+	files := token.NewFileSet()
+	root, err := parser.ParseFile(files, "instruction-surface.go", source, 0)
+	if err != nil {
+		return nil, err
+	}
+	var segments []Segment
+	goast.Inspect(root, func(node goast.Node) bool {
+		literal, ok := node.(*goast.BasicLit)
+		if !ok || literal.Kind != token.STRING {
+			return true
+		}
+		value, unquoteErr := strconv.Unquote(literal.Value)
+		if unquoteErr != nil || !strings.Contains(value, "\n") {
+			return true
+		}
+		startLine := files.Position(literal.Pos()).Line
+		for _, segment := range parseSegments([]byte(value)) {
+			segment.Line += startLine - 1
+			segments = append(segments, segment)
+		}
+		return true
+	})
+	return segments, nil
+}
 
 // SegmentKind distinguishes prose from command-shaped Markdown content.
 type SegmentKind string
@@ -648,25 +678,29 @@ func codeSpanSegment(span *ast.CodeSpan, source []byte) (Segment, bool) {
 func sourceSegments(source []byte, classified map[int]SegmentKind) []Segment {
 	lines := strings.Split(string(source), "\n")
 	segments := make([]Segment, 0, len(lines))
+	continuing := false
 	for i, raw := range lines {
 		line := i + 1
 		normalized := strings.TrimSpace(raw)
 		if strings.HasPrefix(normalized, "```") || strings.HasPrefix(normalized, "~~~") {
+			continuing = false
 			continue
 		}
 		kind, classifiedLine := classified[line]
 		if classifiedLine && kind == "skip" {
+			continuing = false
 			continue
 		}
 		if !classifiedLine {
 			kind = SegmentProse
-			if commandShaped(normalized) {
+			if continuing || commandShaped(normalized) {
 				kind = SegmentShell
 			}
 		}
 		if normalized != "" {
 			segments = append(segments, Segment{Kind: kind, Line: line, Text: normalized})
 		}
+		continuing = !classifiedLine && normalized != "" && kind == SegmentShell && shellContinues(normalized)
 	}
 	return segments
 }

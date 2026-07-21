@@ -392,7 +392,7 @@ the human acts.
 
 ## Rules
 
-- ALWAYS use `+"`bd --db ~/beads/context-engine/.beads`"+` (never bare bd)
+- ALWAYS use `+"`bd --db ~/beads/context-engine/.beads --dolt-auto-commit on`"+` (never bare bd)
 - NEVER write to ~/src/** (read-only — use worktrees only)
 - NEVER use --no-verify or --force
 - NEVER use raw git push or gh pr merge; use the safe wrappers
@@ -400,7 +400,7 @@ the human acts.
 - Do NOT run `+"`pkill -x gopls`"+`
 - Do NOT create unrelated beads or broaden scope
 
-Bead details: run bd --db ~/beads/context-engine/.beads show %s
+Bead details: run bd --db ~/beads/context-engine/.beads --dolt-auto-commit on show %s
 `, b.ID, b.Title, b.ID, prio, summary, goal, b.ID, b.ID, b.ID)
 }
 

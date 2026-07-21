@@ -131,7 +131,8 @@ func contextFingerprint(data []byte, line int) string {
 			break
 		}
 	}
-	digest := sha256.Sum256([]byte(strings.Join(window, "\n")))
+	fingerprintInput := fmt.Sprintf("line:%d\n%s", line, strings.Join(window, "\n"))
+	digest := sha256.Sum256([]byte(fingerprintInput))
 	return fmt.Sprintf("%x", digest)
 }
 
@@ -177,6 +178,9 @@ func instructionSegments(relative string, data []byte) ([]Segment, error) {
 	extension := strings.ToLower(filepath.Ext(relative))
 	if extension == ".yml" || extension == ".yaml" || extension == ".json" {
 		return parseYAMLSegments(data)
+	}
+	if extension == ".go" {
+		return parseGoPromptSegments(data)
 	}
 	if strings.Contains(filepath.ToSlash(relative), "/hooks/") && extension == "" {
 		return parseScriptSegments(data), nil
