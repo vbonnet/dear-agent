@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -289,11 +290,21 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 		appendAuditEntry(cfg.Repo, cfg.PRNumber, "error", "merge failed: "+err.Error())
 		return fmt.Errorf("gh pr merge failed: %w", err)
 	}
-	if err := confirmMerged(cfg.PRNumber, cfg.Repo, headInfo.SHA); err != nil {
-		mergeSpan.RecordError(err)
-		mergeSpan.SetStatus(codes.Error, err.Error())
-		appendAuditEntry(cfg.Repo, cfg.PRNumber, "merge_pending", err.Error())
-		return err
+	confirm := func() error { return confirmMerged(cfg.PRNumber, cfg.Repo, headInfo.SHA) }
+	var confirmationErr error
+	if cfg.Watch {
+		// watchMerge owns retry timing and the overall deadline.
+		confirmationErr = confirm()
+	} else {
+		// A one-shot invocation must still wait for an accepted auto-merge to
+		// finish; success from `gh pr merge --auto` only means it was queued.
+		confirmationErr = waitForMergeCompletion(ctx, cfg.WatchTimeout, cfg.WatchInterval, confirm)
+	}
+	if confirmationErr != nil {
+		mergeSpan.RecordError(confirmationErr)
+		mergeSpan.SetStatus(codes.Error, confirmationErr.Error())
+		appendAuditEntry(cfg.Repo, cfg.PRNumber, "merge_pending", confirmationErr.Error())
+		return confirmationErr
 	}
 	appendAuditEntry(cfg.Repo, cfg.PRNumber, "merged",
 		fmt.Sprintf("squash merge complete (head=%s)", headInfo.SHA))
@@ -310,6 +321,8 @@ type mergeResult struct {
 	State      string `json:"state"`
 	HeadRefOid string `json:"headRefOid"`
 }
+
+var errMergePending = errors.New("merge is pending")
 
 // confirmMerged prevents a successful `gh pr merge --auto` invocation from
 // being mistaken for a completed merge. GitHub exits zero when auto-merge is
@@ -336,10 +349,40 @@ func validateMergeResult(result mergeResult, expectedHeadSHA string) error {
 			expectedHeadSHA, result.HeadRefOid)
 	}
 	if result.State != "MERGED" {
-		return fmt.Errorf("auto-merge accepted but PR remains %s; waiting for GitHub to complete it",
+		return fmt.Errorf("%w: auto-merge accepted but PR remains %s; waiting for GitHub to complete it",
+			errMergePending,
 			strings.ToLower(result.State))
 	}
 	return nil
+}
+
+func waitForMergeCompletion(ctx context.Context, timeout, interval time.Duration, check func() error) error {
+	if timeout == 0 {
+		timeout = DefaultWatchTimeout
+	}
+	if interval == 0 {
+		interval = 30 * time.Second
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		err := check()
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, errMergePending) {
+			return err
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return fmt.Errorf("merge completion timeout after %s: %w", timeout, err)
+		}
+		wait := min(interval, remaining)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for merge completion: %w", ctx.Err())
+		case <-time.After(wait):
+		}
+	}
 }
 
 // appendAuditEntry writes a single JSON line to the safe-merge audit log.

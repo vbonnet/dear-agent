@@ -1,7 +1,9 @@
 package safegit
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -451,6 +453,42 @@ func TestMergeResultRequiresExactMergedHead(t *testing.T) {
 				t.Fatalf("validateMergeResult() error = %v, wantError %v", got, tc.wantError)
 			}
 		})
+	}
+}
+
+func TestMergeResultPendingUsesSentinel(t *testing.T) {
+	err := validateMergeResult(mergeResult{State: "OPEN", HeadRefOid: "abc123"}, "abc123")
+	if !errors.Is(err, errMergePending) {
+		t.Fatalf("validateMergeResult() error = %v, want errMergePending", err)
+	}
+}
+
+func TestWaitForMergeCompletionPollsUntilMerged(t *testing.T) {
+	attempts := 0
+	err := waitForMergeCompletion(context.Background(), time.Second, time.Millisecond, func() error {
+		attempts++
+		if attempts < 3 {
+			return errMergePending
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("waitForMergeCompletion() error = %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("waitForMergeCompletion() attempts = %d, want 3", attempts)
+	}
+}
+
+func TestWaitForMergeCompletionTimesOut(t *testing.T) {
+	err := waitForMergeCompletion(context.Background(), time.Millisecond, time.Millisecond, func() error {
+		return errMergePending
+	})
+	if err == nil {
+		t.Fatal("waitForMergeCompletion() error = nil, want timeout")
+	}
+	if !errors.Is(err, errMergePending) {
+		t.Fatalf("waitForMergeCompletion() error = %v, want wrapped errMergePending", err)
 	}
 }
 
