@@ -2,8 +2,11 @@ package sandbox
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestCreateSandbox(t *testing.T) {
@@ -94,6 +97,77 @@ func TestCleanupSandbox(t *testing.T) {
 	if _, err := os.Stat(sandboxPath); !os.IsNotExist(err) {
 		t.Error("Sandbox directory should be removed after cleanup")
 	}
+}
+
+func TestCleanupSandboxPreservesLockedWorktreeAndMetadata(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "repo")
+	sandboxBase := filepath.Join(base, "sandboxes")
+	manager := NewManager(sandboxBase)
+	sandbox := &Sandbox{
+		ID:            "locked-sandbox",
+		Name:          "locked-sandbox",
+		CreatedAt:     time.Now(),
+		LastUsedAt:    time.Now(),
+		GitRepository: repo,
+	}
+
+	gitSandboxTestRun(t, "init", "-q", "-b", "main", repo)
+	gitSandboxTestRun(t, "-C", repo, "config", "user.name", "Wayfinder Test")
+	gitSandboxTestRun(t, "-C", repo, "config", "user.email", "wayfinder@example.invalid")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("sandbox test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitSandboxTestRun(t, "-C", repo, "add", "README.md")
+	gitSandboxTestRun(t, "-C", repo, "commit", "-q", "-m", "initial")
+	worktree, err := manager.git.CreateWorktree(sandbox.ID, repo, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sandbox.WorktreePath = worktree
+	sandboxPath := filepath.Join(sandboxBase, sandbox.ID)
+	if err := os.MkdirAll(sandboxPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.writeMetadata(filepath.Join(sandboxPath, ".wayfinder-project"), sandbox); err != nil {
+		t.Fatal(err)
+	}
+	gitSandboxTestRun(t, "-C", repo, "worktree", "lock", "--reason", "active-safe-pr", worktree)
+
+	err = manager.CleanupSandbox(sandbox.ID)
+	if err == nil || !strings.Contains(err.Error(), "preserving") {
+		t.Fatalf("CleanupSandbox(locked) = %v, want preserving error", err)
+	}
+	if _, err := os.Stat(worktree); err != nil {
+		t.Fatalf("protected worktree was removed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sandboxPath, ".wayfinder-project")); err != nil {
+		t.Fatalf("sandbox metadata was removed: %v", err)
+	}
+	porcelain := gitSandboxTestRun(t, "-C", repo, "worktree", "list", "--porcelain")
+	if !strings.Contains(porcelain, "locked active-safe-pr") {
+		t.Fatalf("protected worktree lock changed:\n%s", porcelain)
+	}
+
+	gitSandboxTestRun(t, "-C", repo, "worktree", "unlock", worktree)
+	if err := manager.CleanupSandbox(sandbox.ID); err != nil {
+		t.Fatalf("CleanupSandbox(after unlock) = %v", err)
+	}
+	if _, err := os.Stat(worktree); !os.IsNotExist(err) {
+		t.Fatalf("worktree after retry stat = %v, want not exist", err)
+	}
+	if _, err := os.Stat(sandboxPath); !os.IsNotExist(err) {
+		t.Fatalf("sandbox metadata after retry stat = %v, want not exist", err)
+	}
+}
+
+func gitSandboxTestRun(t *testing.T, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+	return string(out)
 }
 
 func TestPathResolver(t *testing.T) {

@@ -30,6 +30,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/vbonnet/dear-agent/internal/safepr"
@@ -151,25 +152,51 @@ func run(argv []string) error {
 		return err
 	}
 
-	if p.req.Verb == "create" && !p.skipPreflight {
-		if err := runPreflightFull(cwd); err != nil {
-			return err
+	var githubOutcome githubExecution
+	execute := func(transaction *safepr.WorktreeTransaction) error {
+		if p.req.Verb == "create" && !p.skipPreflight {
+			if err := runPreflightFull(cwd, transaction); err != nil {
+				return err
+			}
 		}
+
+		shutdown := otelsetup.InitTracer("safe-pr")
+		defer func() {
+			if err := shutdown(context.Background()); err != nil {
+				fmt.Fprintf(os.Stderr, "safe-pr: otel shutdown: %v\n", err)
+			}
+		}()
+
+		var executeErr error
+		githubOutcome, executeErr = executeGitHub(&p.req, p.timeout, p.verifyCI, transaction)
+		return executeErr
 	}
+	var runErr error
+	if p.req.Verb == "create" {
+		runErr = protectCreateWorktree(cwd, "safe-pr create", execute)
+	} else {
+		runErr = execute(nil)
+	}
+	appendFinalAudit(&p.req, cwd, githubOutcome, runErr)
+	return runErr
+}
 
-	shutdown := otelsetup.InitTracer("safe-pr")
-	defer func() {
-		if err := shutdown(context.Background()); err != nil {
-			fmt.Fprintf(os.Stderr, "safe-pr: otel shutdown: %v\n", err)
-		}
-	}()
-
-	return executeGitHub(&p.req, p.timeout, p.verifyCI)
+type githubExecution struct {
+	prURL    string
+	exitCode int
 }
 
 // executeGitHub is the external PR mutation boundary. Tests replace it so a
 // unit test can prove control flow without creating a real GitHub pull request.
 var executeGitHub = execGh
+
+// appendSafePRAudit is the durable audit boundary. Tests replace it so command
+// control-flow regressions cannot write to the developer's real audit log.
+var appendSafePRAudit = safepr.AppendAudit
+
+// protectCreateWorktree owns the worktree lock across both preflight and the
+// GitHub mutation. Tests replace it to prove the command's transaction scope.
+var protectCreateWorktree = safepr.WithWorktreeTransaction
 
 // expectedRemotePrefix is the required GitHub org prefix for origin remotes.
 // Any URL that does not start with this string is rejected by validateRemoteURL.
@@ -200,12 +227,15 @@ const preflightTimeout = 30 * time.Minute
 
 // runPreflightFull runs `make -C dir preflight-full` and returns a clear error
 // on failure. Assigned to a var so tests can replace it without spawning make.
-var runPreflightFull = func(dir string) error {
+var runPreflightFull = func(dir string, transaction *safepr.WorktreeTransaction) error {
 	ctx, cancel := context.WithTimeout(context.Background(), preflightTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "make", "-C", dir, "preflight-full")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	if err := protectTransactionCommand(transaction, cmd); err != nil {
+		return err
+	}
 	if err := cmd.Run(); err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return fmt.Errorf("preflight-full failed — fix issues before creating PR (timed out after %s)", preflightTimeout)
@@ -220,9 +250,9 @@ var runPreflightFull = func(dir string) error {
 var prURLRe = regexp.MustCompile(`\bhttps://github\.com/[^\s]+/pull/\d+\b`)
 
 // execGh runs the stamped gh command, bounded by timeout and with
-// GIT_TERMINAL_PROMPT=0, then writes the audit record and span. The audit
-// line is written on every outcome, success or failure.
-func execGh(req *safepr.Request, timeout time.Duration, verifyCI bool) error {
+// GIT_TERMINAL_PROMPT=0, and returns the GitHub outcome used by the final
+// transaction audit boundary.
+func execGh(req *safepr.Request, timeout time.Duration, verifyCI bool, transaction *safepr.WorktreeTransaction) (githubExecution, error) {
 	if timeout <= 0 {
 		timeout = safepr.DefaultTimeout
 	}
@@ -235,20 +265,21 @@ func execGh(req *safepr.Request, timeout time.Duration, verifyCI bool) error {
 	cmd.Stdout = io.MultiWriter(os.Stdout, &out)
 	cmd.Stderr = io.MultiWriter(os.Stderr, &out)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1")
+	if err := protectTransactionCommand(transaction, cmd); err != nil {
+		return githubExecution{}, err
+	}
 
 	_, span := otel.Tracer("safe-pr").Start(ctx, "safepr."+req.Verb)
 	runErr := cmd.Run()
 	prURL := prURLRe.FindString(out.String())
 
 	exitCode := 0
-	errText := ""
 	if runErr != nil {
 		exitCode = 1
 		var ee *exec.ExitError
 		if errors.As(runErr, &ee) {
 			exitCode = ee.ExitCode()
 		}
-		errText = runErr.Error()
 	}
 
 	sessionID := ""
@@ -262,10 +293,37 @@ func execGh(req *safepr.Request, timeout time.Duration, verifyCI bool) error {
 	)
 	span.End()
 
-	cwd, cwdErr := os.Getwd()
-	if cwdErr != nil {
-		cwd = ""
-		fmt.Fprintf(os.Stderr, "safe-pr: WARNING: could not determine current directory for audit log: %v\n", cwdErr)
+	// Arm squash auto-merge on a freshly created, non-draft PR so routine PRs
+	// merge once required checks and reviews pass. Drafts are the explicit
+	// handoff boundary for human-required changes and must remain unarmed.
+	// Best-effort: the PR already exists, so a failure here (auto-merge disabled
+	// on the repo, branch not yet pushed) must not fail the run; it is surfaced
+	// as a warning and can be armed manually.
+	handlePostCreate(req, prURL, runErr, timeout, verifyCI, transaction)
+
+	if ctx.Err() == context.DeadlineExceeded {
+		return githubExecution{prURL: prURL, exitCode: exitCode}, fmt.Errorf("gh exceeded %s and was killed — gh may have been waiting on an "+
+			"interactive prompt; pass all required flags explicitly (safe-pr requires --title/--body "+
+			"for create) and retry", timeout)
+	}
+	if runErr != nil {
+		return githubExecution{prURL: prURL, exitCode: exitCode}, fmt.Errorf("gh pr %s failed: %w", req.Verb, runErr)
+	}
+	return githubExecution{prURL: prURL, exitCode: exitCode}, nil
+}
+
+func appendFinalAudit(req *safepr.Request, cwd string, outcome githubExecution, finalErr error) {
+	exitCode := outcome.exitCode
+	errText := ""
+	if finalErr != nil {
+		if exitCode == 0 {
+			exitCode = 1
+		}
+		errText = finalErr.Error()
+	}
+	sessionID := ""
+	if req.Session != nil {
+		sessionID = req.Session.ID
 	}
 	home, homeErr := os.UserHomeDir()
 	if homeErr != nil {
@@ -274,47 +332,33 @@ func execGh(req *safepr.Request, timeout time.Duration, verifyCI bool) error {
 	}
 	rec := safepr.AuditRecord{
 		Time: time.Now().UTC().Format(time.RFC3339), Verb: req.Verb, Dir: cwd,
-		Args: args, SessionID: sessionID,
-		PRURL: prURL, ExitCode: exitCode, Error: errText,
+		Args: req.StampedArgs(), SessionID: sessionID,
+		PRURL: outcome.prURL, ExitCode: exitCode, Error: errText,
 	}
-	if auditErr := safepr.AppendAudit(home, rec); auditErr != nil {
-		// The PR action already happened; a failed audit write must not fail
-		// the run, but it must be visible.
+	if auditErr := appendSafePRAudit(home, rec); auditErr != nil {
+		// The PR action may already have happened; a failed audit write must not
+		// change the command outcome, but it must be visible.
 		fmt.Fprintf(os.Stderr, "safe-pr: WARNING: audit log write failed: %v\n", auditErr)
 	}
+}
 
-	// Arm squash auto-merge on a freshly created, non-draft PR so routine PRs
-	// merge once required checks and reviews pass. Drafts are the explicit
-	// handoff boundary for human-required changes and must remain unarmed.
-	// Best-effort: the PR already exists, so a failure here (auto-merge disabled
-	// on the repo, branch not yet pushed) must not fail the run; it is surfaced
-	// as a warning and can be armed manually.
-	if runErr == nil && req.Verb == "create" && prURL != "" {
-		draft := requestsDraft(req.GhArgs)
-		if !draft {
-			if mergeErr := armAutoMerge(prURL, timeout); mergeErr != nil {
-				fmt.Fprintf(os.Stderr, "safe-pr: WARNING: could not arm auto-merge on %s: %v\n", prURL, mergeErr)
-			}
-		}
-		// Opt-in safety net for the push-then-PR-open race (bead ce-np2s): an
-		// armed PR whose head SHA never gets check-runs would wait on auto-merge
-		// forever with no signal. When asked, confirm CI actually started and
-		// warn loudly if it did not — a warning only, since the PR exists and
-		// the `agm pr scan-no-checks` sweep is the durable backstop.
-		if verifyCI && !draft {
-			warnIfNoCI(prURL)
+func handlePostCreate(req *safepr.Request, prURL string, runErr error, timeout time.Duration, verifyCI bool, transaction *safepr.WorktreeTransaction) {
+	if runErr != nil || req.Verb != "create" || prURL == "" {
+		return
+	}
+	draft := requestsDraft(req.GhArgs)
+	if !draft {
+		if mergeErr := armAutoMerge(prURL, timeout, transaction); mergeErr != nil {
+			fmt.Fprintf(os.Stderr, "safe-pr: WARNING: could not arm auto-merge on %s: %v\n", prURL, mergeErr)
 		}
 	}
-
-	if ctx.Err() == context.DeadlineExceeded {
-		return fmt.Errorf("gh exceeded %s and was killed — gh may have been waiting on an "+
-			"interactive prompt; pass all required flags explicitly (safe-pr requires --title/--body "+
-			"for create) and retry", timeout)
+	// Opt-in safety net for the push-then-PR-open race (bead ce-np2s): an
+	// armed PR whose head SHA never gets check-runs would wait on auto-merge
+	// forever with no signal. When asked, confirm CI actually started and warn
+	// loudly if it did not; the PR already exists, so this remains advisory.
+	if verifyCI && !draft {
+		warnIfNoCI(prURL, transaction)
 	}
-	if runErr != nil {
-		return fmt.Errorf("gh pr %s failed: %w", req.Verb, runErr)
-	}
-	return nil
 }
 
 // requestsDraft reports whether the pass-through GitHub CLI arguments request
@@ -403,18 +447,18 @@ const verifyCIPollWindow = 60 * time.Second
 // a missing-CI condition is surfaced, not treated as a create failure. Any gh
 // lookup failure along the way is silently ignored — this is a best-effort
 // safety net, not a gate.
-func warnIfNoCI(prURL string) {
+func warnIfNoCI(prURL string, transaction *safepr.WorktreeTransaction) {
 	repo, num, ok := parsePRURL(prURL)
 	if !ok {
 		return
 	}
-	sha := ghHeadSHA(repo, num)
+	sha := ghHeadSHA(repo, num, transaction)
 	if sha == "" {
 		return
 	}
 	deadline := time.Now().Add(verifyCIPollWindow)
 	for {
-		if ghCheckRunCount(repo, sha) > 0 {
+		if ghCheckRunCount(repo, sha, transaction) > 0 {
 			return // CI registered — nothing to warn about.
 		}
 		if time.Now().After(deadline) {
@@ -447,11 +491,14 @@ func shortSHA(sha string) string {
 }
 
 // ghHeadSHA returns the head SHA of PR number num in repo, or "" on any error.
-func ghHeadSHA(repo, num string) string {
+func ghHeadSHA(repo, num string, transaction *safepr.WorktreeTransaction) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "gh", "pr", "view", num, "--repo", repo, "--json", "headRefOid", "--jq", ".headRefOid")
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1")
+	if err := protectTransactionCommand(transaction, cmd); err != nil {
+		return ""
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -461,12 +508,15 @@ func ghHeadSHA(repo, num string) string {
 
 // ghCheckRunCount returns the number of check-runs reported against sha, or 0 on
 // any error (treated as "not yet started").
-func ghCheckRunCount(repo, sha string) int {
+func ghCheckRunCount(repo, sha string, transaction *safepr.WorktreeTransaction) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "gh", "api",
 		fmt.Sprintf("repos/%s/commits/%s/check-runs", repo, sha), "--jq", ".total_count")
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1")
+	if err := protectTransactionCommand(transaction, cmd); err != nil {
+		return 0
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		return 0
@@ -482,7 +532,7 @@ func ghCheckRunCount(repo, sha string) int {
 // required checks and reviews pass. It runs with its own timeout and the same
 // non-interactive environment as the create call. A non-nil error is advisory:
 // the caller treats it as a warning, not a failure.
-func armAutoMerge(prURL string, timeout time.Duration) error {
+func armAutoMerge(prURL string, timeout time.Duration, transaction *safepr.WorktreeTransaction) error {
 	if timeout <= 0 {
 		timeout = safepr.DefaultTimeout
 	}
@@ -494,6 +544,9 @@ func armAutoMerge(prURL string, timeout time.Duration) error {
 	cmd.Stdout = nil // discard: success message ("✓ Armed auto-merge…") must not pollute safe-pr stdout
 	cmd.Stderr = &errBuf
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1")
+	if err := protectTransactionCommand(transaction, cmd); err != nil {
+		return err
+	}
 
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
@@ -505,6 +558,25 @@ func armAutoMerge(prURL string, timeout time.Duration) error {
 		return fmt.Errorf("gh pr merge --auto: %w", err)
 	}
 	return nil
+}
+
+func protectTransactionCommand(transaction *safepr.WorktreeTransaction, cmd *exec.Cmd) error {
+	if cmd == nil {
+		return fmt.Errorf("protect safe-pr child command: command is required")
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		if errors.Is(err, syscall.ESRCH) {
+			return nil
+		}
+		return err
+	}
+	cmd.WaitDelay = time.Second
+	return transaction.ProtectCommand(cmd)
 }
 
 const usage = `safe-pr — open/close GitHub PRs with a mandatory wayfinder session trace.

@@ -4,6 +4,7 @@
 
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
 - Feature: `agm/test/bdd/features/agm_control_surface_guardrails.feature`
+- Feature: `agm/test/bdd/features/local_development_guardrails.feature`
 
 <!-- Last audited at: NEEDS-AUDIT -->
 
@@ -76,6 +77,8 @@ Provide a production-ready CLI that:
 **CLI-24** When AGM command tests execute Cobra commands or mutate command flags, the system shall use fresh command instances or restore the complete shared command state so test results remain independent of execution order.
 
 **CLI-25** When `agm new` runs inside tmux without `--detached` for Codex, the system shall route into current-pane creation, require the `codex` executable, queue its launch command behind the invoking AGM process, and finalize session metadata without synchronously waiting for the composer, because the pane shell cannot consume the command until AGM returns.
+
+**CLI-26** When `agm audit resources --fix` cannot remove a linked worktree through a one-force Git operation, including when the worktree is locked, the system shall preserve the checkout and report the cleanup error instead of deleting the directory directly.
 
 ## Requirements
 
