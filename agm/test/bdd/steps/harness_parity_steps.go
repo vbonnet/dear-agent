@@ -331,16 +331,16 @@ func codexResumeSuccessShouldRequireProcessAndComposerReadiness(ctx context.Cont
 }
 
 func aFailedCodexResumeShouldRemoveOnlyItsNewlyCreatedTmuxSession(ctx context.Context) error {
-	source := ctx.Value(harnessParityStateKey{}).(*harnessParityState).resumeSource
-	for _, required := range []string{
-		"createdTmux := false",
-		"createdTmux = true",
-		"rollbackCreatedResumeTmux(runtime, health.TmuxSessionName",
-		"if sendCommands",
-	} {
-		if !strings.Contains(source, required) {
-			return fmt.Errorf("codex resume production path missing rollback guard %q", required)
-		}
+	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "-run", `^TestResumeSession(Codex(RollsBackNewTmuxBeforeActivityUpdate|JoinsCleanupFailure|RollbackUsesCreatedCanonicalTmuxName|PersistsCreatedCanonicalTmuxName|RollsBackWhenCanonicalNamePersistenceFails|ReadinessFailureRemovesIsolatedTmux)|PreservesPreexistingTmuxOnLaterFailure)$`, "-count=1")
+	cmd.Dir = bddRepoRoot()
+	output, err := cmd.CombinedOutput()
+	if testCtx.Err() != nil {
+		return fmt.Errorf("codex resume rollback behavior suite timed out: %w", testCtx.Err())
+	}
+	if err != nil {
+		return fmt.Errorf("codex resume rollback behavior suite failed: %w\n%s", err, output)
 	}
 	return nil
 }
