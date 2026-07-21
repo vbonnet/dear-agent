@@ -302,11 +302,16 @@ func TestAgyCreateSessionNormalizesWorkingDirectoryForLaunchAndDiscovery(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	relativeWorkDir, err := filepath.Rel(currentWorkDir, t.TempDir())
+	physicalWorkDir := t.TempDir()
+	aliasWorkDir := filepath.Join(t.TempDir(), "workspace-alias")
+	if err := os.Symlink(physicalWorkDir, aliasWorkDir); err != nil {
+		t.Fatalf("create workspace symlink: %v", err)
+	}
+	relativeWorkDir, err := filepath.Rel(currentWorkDir, aliasWorkDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantWorkDir, err := filepath.Abs(relativeWorkDir)
+	wantWorkDir, err := agysession.CanonicalWorkspacePath(physicalWorkDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -873,10 +878,18 @@ func TestAgyResumeSessionRestartsInExistingBareShell(t *testing.T) {
 func TestAgyResumeSessionHoldsWorkspaceLockThroughReadiness(t *testing.T) {
 	preserveAgyAdapterSeams(t)
 	t.Setenv("TMUX", "fixture")
+	workDir, err := agysession.CanonicalWorkspacePath(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliasWorkDir := filepath.Join(t.TempDir(), "workspace-alias")
+	if err := os.Symlink(workDir, aliasWorkDir); err != nil {
+		t.Fatalf("create workspace symlink: %v", err)
+	}
 	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
 	sessionID := SessionID("adapter-session")
 	if err := store.Set(sessionID, &SessionMetadata{
-		TmuxName: "agy-resume-lock", WorkingDir: "/work", UUID: "native-id",
+		TmuxName: "agy-resume-lock", WorkingDir: aliasWorkDir, UUID: "native-id",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -886,8 +899,14 @@ func TestAgyResumeSessionHoldsWorkspaceLockThroughReadiness(t *testing.T) {
 		events = append(events, "lock:"+workDir)
 		return func() error { events = append(events, "unlock"); return nil }, nil
 	}
-	agyNewSession = func(string, string) error { events = append(events, "new"); return nil }
-	agySendCommand = func(string, string) error { events = append(events, "send"); return nil }
+	agyNewSession = func(_ string, gotWorkDir string) error { events = append(events, "new:"+gotWorkDir); return nil }
+	agySendCommand = func(_ string, command string) error {
+		if !strings.Contains(command, "cd '"+workDir+"' && agy") {
+			t.Fatalf("resume command %q does not use canonical workspace %q", command, workDir)
+		}
+		events = append(events, "send")
+		return nil
+	}
 	agyWaitForPrompt = func(context.Context, string, time.Duration) error {
 		events = append(events, "ready")
 		return nil
@@ -896,7 +915,7 @@ func TestAgyResumeSessionHoldsWorkspaceLockThroughReadiness(t *testing.T) {
 	if err := (&AgyAdapter{sessionStore: store}).ResumeSession(sessionID); err != nil {
 		t.Fatalf("ResumeSession: %v", err)
 	}
-	want := []string{"lock:/work", "new", "send", "ready", "unlock"}
+	want := []string{"lock:" + workDir, "new:" + workDir, "send", "ready", "unlock"}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("resume lifecycle events = %v, want %v", events, want)
 	}

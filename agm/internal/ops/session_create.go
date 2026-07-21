@@ -242,6 +242,20 @@ func validateCreateRequest(opCtx *OpContext, req *CreateSessionRequest) (*create
 	return p, nil
 }
 
+func canonicalizeAgyCreateRequest(req *CreateSessionRequest, params *createSessionParams) (*CreateSessionRequest, error) {
+	canonicalWorkDir, err := agysession.CanonicalWorkspacePath(req.Cwd)
+	if err != nil {
+		return nil, ErrInvalidInput("cwd", fmt.Sprintf("Resolve canonical AGY workspace: %v", err))
+	}
+	canonicalRequest := *req
+	canonicalRequest.Cwd = canonicalWorkDir
+	params.name, err = resolveSessionName(canonicalRequest.Title, canonicalWorkDir, canonicalRequest.AllowUnsafeTitle)
+	if err != nil {
+		return nil, err
+	}
+	return &canonicalRequest, nil
+}
+
 // CreateSession preserves the original operation signature for non-request
 // scoped callers. Request-aware surfaces should use CreateSessionWithContext.
 func CreateSession(opCtx *OpContext, req *CreateSessionRequest) (*CreateSessionResult, error) {
@@ -256,6 +270,12 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 	params, err := validateCreateRequest(opCtx, req)
 	if err != nil {
 		return nil, err
+	}
+	if params.harness == "agy" {
+		req, err = canonicalizeAgyCreateRequest(req, params)
+		if err != nil {
+			return nil, err
+		}
 	}
 	var agyIdentityTracker agysession.CreateIdentityTracker
 	var previousAgyConversationID string

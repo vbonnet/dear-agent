@@ -89,6 +89,8 @@ compatibility.
 
 **AGP-37** When concurrent AGY adapter cold resumes target the same recorded tmux pane, the system shall acquire the workspace lifecycle lock before proving exact process liveness or a restartable shell and shall deliver at most one native resume command; a later caller shall observe and preserve the process launched by the earlier caller.
 
+**AGP-38** When the AGY adapter creates or cold-resumes through a symlinked workspace, the system shall use the canonical physical workspace path consistently for locking, tmux creation, command construction, identity correlation, and newly persisted metadata.
+
 ### Codex Workdir Trust (ce-cmsq)
 
 **AGP-14** When a Codex CLI session is created or resumed through the codex-cli adapter, the system shall record the working directory as a trusted Codex project in `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`) before sending the launch command, so a fresh non-git sandbox directory cannot block Codex startup on its interactive trust prompt.

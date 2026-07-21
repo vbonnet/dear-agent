@@ -125,6 +125,29 @@ func ValidateConversationID(conversationID string) error {
 	return nil
 }
 
+// CanonicalWorkspacePath returns one physical path spelling for an existing
+// AGY workspace. AGY's latest-conversation mapping is workspace-global, so
+// lock, launch, and identity lookup callers must not treat a symlink alias as a
+// different workspace. Removed historical workspaces retain their cleaned
+// absolute spelling so saved-session metadata remains searchable.
+func CanonicalWorkspacePath(workDir string) (string, error) {
+	if strings.TrimSpace(workDir) == "" {
+		return "", fmt.Errorf("AGY workspace path cannot be empty")
+	}
+	absoluteWorkDir, err := filepath.Abs(workDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve absolute AGY workspace path: %w", err)
+	}
+	resolvedWorkDir, err := filepath.EvalSymlinks(absoluteWorkDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return filepath.Clean(absoluteWorkDir), nil
+		}
+		return "", fmt.Errorf("resolve AGY workspace symlinks: %w", err)
+	}
+	return filepath.Clean(resolvedWorkDir), nil
+}
+
 // AcquireWorkspaceCreateLock serializes AGY conversation creation for one
 // canonical workspace. AGY exposes only a workspace-global latest-conversation
 // mapping, so every AGM launch surface must hold this lock until its native ID
@@ -133,7 +156,7 @@ func AcquireWorkspaceCreateLock(ctx context.Context, workDir string) (func() err
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	absoluteWorkDir, err := filepath.Abs(workDir)
+	canonicalWorkDir, err := CanonicalWorkspacePath(workDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve AGY workspace lock path: %w", err)
 	}
@@ -141,7 +164,7 @@ func AcquireWorkspaceCreateLock(ctx context.Context, workDir string) (func() err
 	if stateDir == "" {
 		stateDir = fmt.Sprintf("/tmp/agm-%d", os.Getuid())
 	}
-	digest := sha256.Sum256([]byte(filepath.Clean(absoluteWorkDir)))
+	digest := sha256.Sum256([]byte(canonicalWorkDir))
 	fileLock, err := newWorkspaceFileLock(filepath.Join(stateDir, fmt.Sprintf("agy-create-%x.lock", digest[:16])))
 	if err != nil {
 		return nil, fmt.Errorf("create AGY workspace lock: %w", err)
@@ -177,6 +200,11 @@ func FindLatestForWorkspace(homeDir, workspacePath string) (*Metadata, error) {
 	if workspacePath == "" {
 		return nil, fmt.Errorf("workspace path cannot be empty")
 	}
+	canonicalWorkspacePath, err := CanonicalWorkspacePath(workspacePath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve AGY workspace for saved-session lookup: %w", err)
+	}
+	workspacePath = canonicalWorkspacePath
 	appDir := filepath.Join(homeDir, ".gemini", "antigravity-cli")
 	lastConversations, err := loadLastConversations(appDir)
 	if err != nil {

@@ -32,6 +32,8 @@ conversations with their workspace, transcript, and permission-mode context.
 
 **AGYS-11** When the last-conversations cache maps a workspace to a conversation whose database no longer exists, the system shall treat that cache entry as stale and continue newest-first through bounded log discovery, skipping every logged conversation whose database is also gone until it finds a usable saved conversation; it shall return conversation-not-found only when the complete bounded search finds none while still failing explicitly on unsafe identifiers, corruption, unreadable metadata, or discovery-budget exhaustion.
 
+**AGYS-12** When AGM accepts a workspace path for AGY creation, resume, or saved-session discovery, the system shall resolve every existing symlink alias to one canonical physical path before deriving the workspace lock, launching AGY, or correlating provider metadata while retaining a cleaned absolute spelling for a removed historical workspace.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/agy_saved_session_discovery.feature`

@@ -209,11 +209,11 @@ func canonicalAgyWorkDir(workDir string) (string, error) {
 	if workDir == "" {
 		workDir = "."
 	}
-	absolute, err := filepath.Abs(workDir)
+	canonical, err := agysession.CanonicalWorkspacePath(workDir)
 	if err != nil {
 		return "", fmt.Errorf("resolve AGY working directory: %w", err)
 	}
-	return filepath.Clean(absolute), nil
+	return canonical, nil
 }
 
 // ResumeSession resumes an existing Agy session.
@@ -242,22 +242,12 @@ func (a *AgyAdapter) ResumeSession(sessionID SessionID) error {
 }
 
 func resumeAgyAdapterProcess(sessionID SessionID, metadata *SessionMetadata) error {
-	if metadata.UUID == "" {
-		return fmt.Errorf("AGY session %q has no native conversation ID; capture or reassociate it before cold resume", sessionID)
-	}
-	if err := agysession.ValidateConversationID(metadata.UUID); err != nil {
+	workDir, resolvedModel, err := resolveAgyResumeInputs(sessionID, metadata)
+	if err != nil {
 		return err
 	}
-	resolvedModel := ""
-	if metadata.Model != "" {
-		var err error
-		resolvedModel, err = resolveAgyAdapterModel(metadata.Model)
-		if err != nil {
-			return err
-		}
-	}
 
-	releaseWorkspaceLock, err := agyAcquireCreateLock(metadata.WorkingDir)
+	releaseWorkspaceLock, err := agyAcquireCreateLock(workDir)
 	if err != nil {
 		return fmt.Errorf("failed to acquire AGY workspace lifecycle lock for resume: %w", err)
 	}
@@ -277,13 +267,13 @@ func resumeAgyAdapterProcess(sessionID SessionID, metadata *SessionMetadata) err
 
 	created := false
 	if !tmuxExists {
-		if err := agyNewSession(metadata.TmuxName, metadata.WorkingDir); err != nil {
+		if err := agyNewSession(metadata.TmuxName, workDir); err != nil {
 			return fmt.Errorf("failed to create tmux session: %w", err)
 		}
 		created = true
 	}
 	fullCmd := launchparity.BuildAgyCommand(launchparity.AgyCommandSpec{
-		WorkDir:        metadata.WorkingDir,
+		WorkDir:        workDir,
 		ResolvedModel:  resolvedModel,
 		PermissionMode: metadata.PermissionMode,
 		ConversationID: metadata.UUID,
@@ -306,6 +296,27 @@ func resumeAgyAdapterProcess(sessionID SessionID, metadata *SessionMetadata) err
 		return primaryErr
 	}
 	return nil
+}
+
+func resolveAgyResumeInputs(sessionID SessionID, metadata *SessionMetadata) (string, string, error) {
+	if metadata.UUID == "" {
+		return "", "", fmt.Errorf("AGY session %q has no native conversation ID; capture or reassociate it before cold resume", sessionID)
+	}
+	if err := agysession.ValidateConversationID(metadata.UUID); err != nil {
+		return "", "", err
+	}
+	workDir, err := canonicalAgyWorkDir(metadata.WorkingDir)
+	if err != nil {
+		return "", "", err
+	}
+	resolvedModel := ""
+	if metadata.Model != "" {
+		resolvedModel, err = resolveAgyAdapterModel(metadata.Model)
+		if err != nil {
+			return "", "", err
+		}
+	}
+	return workDir, resolvedModel, nil
 }
 
 func lockedAgyAdapterResumeTargetState(sessionID SessionID, tmuxName string) (bool, bool, error) {

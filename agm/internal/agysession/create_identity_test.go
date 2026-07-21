@@ -3,12 +3,52 @@ package agysession
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
 
+func TestCreateIdentityTrackerCanonicalizesSymlinkWorkspace(t *testing.T) {
+	workspace, err := CanonicalWorkspacePath(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliasWorkDir := filepath.Join(t.TempDir(), "workspace-alias")
+	if err := os.Symlink(workspace, aliasWorkDir); err != nil {
+		t.Fatalf("create workspace symlink: %v", err)
+	}
+	var findWorkDirs []string
+	tracker := &providerCreateIdentityTracker{
+		userHomeDir: func() (string, error) { return t.TempDir(), nil },
+		findLatest: func(_ string, gotWorkspace string) (*Metadata, error) {
+			findWorkDirs = append(findWorkDirs, gotWorkspace)
+			if len(findWorkDirs) == 1 {
+				return nil, ErrConversationNotFound
+			}
+			return &Metadata{ConversationID: "native-new", WorkspacePath: gotWorkspace}, nil
+		},
+		attempts: 1,
+	}
+
+	previous, err := tracker.Snapshot(t.Context(), aliasWorkDir)
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	metadata, err := tracker.Discover(t.Context(), aliasWorkDir, previous)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(findWorkDirs) != 2 || findWorkDirs[0] != workspace || findWorkDirs[1] != workspace || metadata.WorkspacePath != workspace {
+		t.Fatalf("canonical snapshot/discovery paths = %v, metadata workspace %q, want %q", findWorkDirs, metadata.WorkspacePath, workspace)
+	}
+}
+
 func TestCreateIdentityTrackerSnapshotsAbsenceAndDiscoversNewIdentity(t *testing.T) {
-	workspace := t.TempDir()
+	workspace, err := CanonicalWorkspacePath(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	findCalls := 0
 	tracker := &providerCreateIdentityTracker{
 		userHomeDir: func() (string, error) { return t.TempDir(), nil },

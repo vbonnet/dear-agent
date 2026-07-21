@@ -632,7 +632,14 @@ func TestCreateSession_LifecycleOrder(t *testing.T) {
 }
 
 func TestCreateSession_AgyWorkspaceLockReleasesBeforeSurfaceCompletion(t *testing.T) {
-	dir := t.TempDir()
+	dir, err := agysession.CanonicalWorkspacePath(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliasDir := filepath.Join(t.TempDir(), "workspace-alias")
+	if err := os.Symlink(dir, aliasDir); err != nil {
+		t.Fatalf("create workspace symlink: %v", err)
+	}
 	var order []string
 	locked := false
 	store := &createMockStorage{}
@@ -644,11 +651,17 @@ func TestCreateSession_AgyWorkspaceLockReleasesBeforeSurfaceCompletion(t *testin
 		if created.Agy == nil || created.Agy.ConversationID != "new-native-id" {
 			t.Fatalf("registered AGY identity = %+v, want new-native-id", created.Agy)
 		}
+		if created.WorkingDirectory != dir || created.Agy.WorkspacePath != dir {
+			t.Fatalf("registered canonical workspace = manifest %q AGY %q, want %q", created.WorkingDirectory, created.Agy.WorkspacePath, dir)
+		}
 	}
 	runtime := &createTestRuntime{
-		launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+		launch: func(_ context.Context, spec HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
 			if !locked {
 				t.Fatal("AGY workspace lock was not held during launch")
+			}
+			if spec.WorkDir != dir {
+				t.Fatalf("AGY launch workspace = %q, want canonical %q", spec.WorkDir, dir)
 			}
 			order = append(order, "launch")
 			return CreateSessionLaunchResult{}, nil
@@ -697,8 +710,8 @@ func TestCreateSession_AgyWorkspaceLockReleasesBeforeSurfaceCompletion(t *testin
 			}, nil
 		},
 	}
-	_, err := CreateSessionWithContext(t.Context(), opCtx, &CreateSessionRequest{
-		Cwd: dir, Title: "agy-locked", Harness: "agy", Model: "3.5-flash-low",
+	result, err := CreateSessionWithContext(t.Context(), opCtx, &CreateSessionRequest{
+		Cwd: aliasDir, Title: "agy-locked", Harness: "agy", Model: "3.5-flash-low",
 		Prompt: "fixture", SessionID: "agy-locked-id", RequireStorage: true,
 	})
 	if err != nil {
@@ -706,6 +719,9 @@ func TestCreateSession_AgyWorkspaceLockReleasesBeforeSurfaceCompletion(t *testin
 	}
 	if locked {
 		t.Fatal("AGY workspace lock was not released after lifecycle completion")
+	}
+	if result.Cwd != dir {
+		t.Fatalf("result cwd = %q, want canonical workspace %q", result.Cwd, dir)
 	}
 	want := []string{"lock", "snapshot", "launch", "discover", "unlock", "complete"}
 	if !reflect.DeepEqual(order, want) {

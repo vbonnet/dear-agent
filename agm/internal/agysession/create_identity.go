@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -120,11 +119,11 @@ func (tracker *providerCreateIdentityTracker) identityPaths(workDir string) (str
 	if err != nil {
 		return "", "", fmt.Errorf("determine home directory: %w", err)
 	}
-	workspace, err := filepath.Abs(workDir)
+	workspace, err := CanonicalWorkspacePath(workDir)
 	if err != nil {
 		return "", "", fmt.Errorf("resolve AGY workspace: %w", err)
 	}
-	return homeDir, filepath.Clean(workspace), nil
+	return homeDir, workspace, nil
 }
 
 func waitForCreateIdentityRetry(ctx context.Context, delay time.Duration) error {

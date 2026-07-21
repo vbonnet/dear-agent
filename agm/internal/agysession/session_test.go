@@ -52,6 +52,10 @@ func TestAcquireWorkspaceCreateLockSerializesAndHonorsCancellation(t *testing.T)
 		t.Fatalf("pre-canceled workspace lock error = %v, want context cancellation", err)
 	}
 	workDir := t.TempDir()
+	aliasWorkDir := filepath.Join(t.TempDir(), "workspace-alias")
+	if err := os.Symlink(workDir, aliasWorkDir); err != nil {
+		t.Fatalf("create workspace symlink: %v", err)
+	}
 	release, err := AcquireWorkspaceCreateLock(t.Context(), workDir)
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +69,7 @@ func TestAcquireWorkspaceCreateLockSerializesAndHonorsCancellation(t *testing.T)
 	ctx, cancel := context.WithCancel(t.Context())
 	result := make(chan error, 1)
 	go func() {
-		_, lockErr := AcquireWorkspaceCreateLock(ctx, workDir)
+		_, lockErr := AcquireWorkspaceCreateLock(ctx, aliasWorkDir)
 		result <- lockErr
 	}()
 	select {
@@ -81,6 +85,29 @@ func TestAcquireWorkspaceCreateLockSerializesAndHonorsCancellation(t *testing.T)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("contending workspace lock ignored caller cancellation")
+	}
+}
+
+func TestFindLatestForWorkspaceCanonicalizesSymlinkAlias(t *testing.T) {
+	homeDir := t.TempDir()
+	appDir := filepath.Join(homeDir, ".gemini", "antigravity-cli")
+	conversationID := "117ff898-a964-4a9f-b460-1be4a8a49b17"
+	workspace, err := CanonicalWorkspacePath(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliasWorkDir := filepath.Join(t.TempDir(), "workspace-alias")
+	if err := os.Symlink(workspace, aliasWorkDir); err != nil {
+		t.Fatalf("create workspace symlink: %v", err)
+	}
+	writeAgyFixture(t, appDir, conversationID, workspace, "")
+
+	meta, err := FindLatestForWorkspace(homeDir, aliasWorkDir)
+	if err != nil {
+		t.Fatalf("FindLatestForWorkspace through symlink: %v", err)
+	}
+	if meta.ConversationID != conversationID || meta.WorkspacePath != workspace {
+		t.Fatalf("symlink lookup metadata = ID %q workspace %q, want %q/%q", meta.ConversationID, meta.WorkspacePath, conversationID, workspace)
 	}
 }
 
