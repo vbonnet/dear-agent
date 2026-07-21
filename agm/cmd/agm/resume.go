@@ -636,6 +636,15 @@ func resumeSessionWithRuntime(ctx context.Context, adapter *dolt.Adapter, sessio
 		}
 		return err
 	}
+	// Prompt delivery follows readiness but precedes durable success effects.
+	// A caller cancellation here must compensate a cold resume rather than
+	// leave a newly launched session behind after reporting failure.
+	if err := deliverPostResumePrompt(ctx, health.TmuxSessionName, runtime); err != nil {
+		if createdTmux {
+			return rollbackCreatedResumeTmux(runtime, health.TmuxSessionName, err)
+		}
+		return err
+	}
 	if createdTmux {
 		if err := persistCreatedResumeTmuxName(ctx, runtime, adapter, m, health); err != nil {
 			return rollbackCreatedResumeTmux(runtime, health.TmuxSessionName, err)
@@ -755,9 +764,6 @@ func finalizeResumeSession(ctx context.Context, adapter *dolt.Adapter, sessionID
 
 	// Update VS Code tab title if running in VS Code
 	runtime.updateTabTitle(health.TmuxSessionName)
-	if err := deliverPostResumePrompt(ctx, health.TmuxSessionName, runtime); err != nil {
-		return err
-	}
 	return attachResumedSession(ctx, sessionID, health, sendCommands, runtime)
 }
 

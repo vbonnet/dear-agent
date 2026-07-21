@@ -93,7 +93,7 @@ func TestResumeSessionCodexCommitsEffectsOnlyAfterReadiness(t *testing.T) {
 	if err := resumeSessionWithRuntime(t.Context(), adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime); err != nil {
 		t.Fatalf("resumeSessionWithRuntime() error = %v", err)
 	}
-	want := []string{"create", "dispatch", "wait", "restore", "update", "tab", "prompt"}
+	want := []string{"create", "dispatch", "wait", "prompt", "restore", "update", "tab"}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("resume calls = %v, want %v", calls, want)
 	}
@@ -145,6 +145,39 @@ func TestResumeSessionCodexRollsBackNewTmuxBeforeActivityUpdate(t *testing.T) {
 				t.Fatalf("UpdatedAt changed after failed resume: before=%v after=%v", storedBefore.UpdatedAt, storedAfter.UpdatedAt)
 			}
 		})
+	}
+}
+
+func TestResumeSessionCodexRollsBackWhenPromptDeliveryIsCanceled(t *testing.T) {
+	setDetachedResumeTestGlobals(t, true)
+	resumePrompt = "continue only if the caller remains active"
+	adapter, m, health := setupCodexResumeTransaction(t)
+	storedBefore, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() before resume error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	var calls []string
+	runtime := recordingResumeRuntime(&calls)
+	runtime.deliverPrompt = func(string, string, string, bool) error {
+		calls = append(calls, "prompt")
+		cancel()
+		return ctx.Err()
+	}
+
+	err = resumeSessionWithRuntime(ctx, adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("resumeSessionWithRuntime() error = %v, want context.Canceled", err)
+	}
+	if want := []string{"create", "dispatch", "wait", "prompt", "kill"}; !reflect.DeepEqual(calls, want) {
+		t.Fatalf("resume calls = %v, want %v", calls, want)
+	}
+	storedAfter, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after resume error = %v", err)
+	}
+	if !storedAfter.UpdatedAt.Equal(storedBefore.UpdatedAt) || storedAfter.Tmux.SessionName != storedBefore.Tmux.SessionName {
+		t.Fatalf("canceled prompt committed resume metadata: before=%#v after=%#v", storedBefore, storedAfter)
 	}
 }
 

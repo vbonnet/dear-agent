@@ -98,7 +98,7 @@ Provide a production-ready CLI that:
 
 **CLI-34** When AGM resumes a stopped `codex-cli` session, the system shall report success, update activity, deliver an optional prompt, or attach only after both the Codex process (including its Node wrapper) and interactive composer have been observed as ready.
 
-**CLI-35** If AGM creates a tmux session for a resume attempt and command dispatch, harness readiness, or canonical-name persistence fails, the system shall remove that exact canonically named tmux session and return the primary failure together with any cleanup failure; after successful readiness the canonical name shall be persisted without overwriting session metadata updated during readiness, while a tmux session that existed before the attempt shall not be removed.
+**CLI-35** If AGM creates a tmux session for a resume attempt and command dispatch, harness readiness, caller-canceled prompt delivery, or canonical-name persistence fails, the system shall remove that exact canonically named tmux session and return the primary failure together with any cleanup failure; prompt delivery shall precede durable resume-success effects, and after successful readiness the canonical name shall be persisted without overwriting session metadata updated during readiness, while a tmux session that existed before the attempt shall not be removed.
 
 ## Requirements
 
