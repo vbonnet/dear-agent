@@ -7,8 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"sync"
 	"time"
 
@@ -261,18 +259,12 @@ func parseWayfinderStatus(projectDir string, content []byte) *ProjectStatus {
 	status := &ProjectStatus{
 		ProjectDir:   projectDir,
 		CurrentPhase: canonical.CurrentWaypoint,
+		Progress:     canonical.Progress,
 		LastUpdate:   canonical.UpdatedAt,
 		Message:      canonical.Status,
 	}
 	if status.LastUpdate.IsZero() {
 		status.LastUpdate = time.Now()
-	}
-
-	// Parse progress: Look for percentage like "50%" or "Phase Progress: 50%"
-	progressRe := regexp.MustCompile(`(\d+)%`)
-	if match := progressRe.FindStringSubmatch(string(content)); len(match) > 1 {
-		progress, _ := strconv.Atoi(match[1])
-		status.Progress = progress
 	}
 
 	return status

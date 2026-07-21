@@ -301,8 +301,15 @@ current_waypoint: BUILD
 status: in-progress
 created_at: 2026-07-20T12:00:00Z
 updated_at: 2026-07-20T12:30:00Z
+waypoint_history:
+  - {name: CHARTER, status: completed, started_at: 2026-07-20T12:00:00Z, completed_at: 2026-07-20T12:01:00Z}
+  - {name: PROBLEM, status: completed, started_at: 2026-07-20T12:01:00Z, completed_at: 2026-07-20T12:02:00Z}
+  - {name: RESEARCH, status: completed, started_at: 2026-07-20T12:02:00Z, completed_at: 2026-07-20T12:03:00Z}
+  - {name: DESIGN, status: completed, started_at: 2026-07-20T12:03:00Z, completed_at: 2026-07-20T12:04:00Z}
+  - {name: SPEC, status: completed, started_at: 2026-07-20T12:04:00Z, completed_at: 2026-07-20T12:05:00Z}
+  - {name: PLAN, status: completed, started_at: 2026-07-20T12:05:00Z, completed_at: 2026-07-20T12:06:00Z}
+  - {name: SETUP, status: completed, started_at: 2026-07-20T12:06:00Z, completed_at: 2026-07-20T12:07:00Z}
 ---
-**Progress**: 75%
 `
 
 	status := parseWayfinderStatus("/test/project", []byte(content))
@@ -314,8 +321,8 @@ updated_at: 2026-07-20T12:30:00Z
 		t.Errorf("Expected phase=BUILD, got %s", status.CurrentPhase)
 	}
 
-	if status.Progress != 75 {
-		t.Errorf("Expected progress=75, got %d", status.Progress)
+	if status.Progress != 77 {
+		t.Errorf("Expected progress=77, got %d", status.Progress)
 	}
 
 	if status.Message != "in-progress" {

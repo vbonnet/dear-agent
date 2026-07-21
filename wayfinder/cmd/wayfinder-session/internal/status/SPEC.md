@@ -25,6 +25,8 @@
 
 **WFSTATUS-09** When lifecycle state is input-required, dependency-blocked, or failed, the system shall require input-needed, blocked-on, or error-message diagnostics respectively in addition to a blocked reason.
 
+**WFSTATUS-10** When canonical YAML contains a field not declared by schema 2.0, the system shall reject it rather than silently discard it.
+
 ## Traceability
 
 - Parser tests: `parser_v2_test.go`

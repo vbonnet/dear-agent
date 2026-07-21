@@ -27,16 +27,24 @@ func ParseV2Content(data []byte) (*StatusV2, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	var status StatusV2
-	if err := yaml.Unmarshal([]byte(yamlContent), &status); err != nil {
-		return nil, fmt.Errorf("failed to parse YAML: %w", err)
+	var metadata struct {
+		SchemaVersion string `yaml:"schema_version"`
 	}
-	if status.SchemaVersion == "" {
+	if err := yaml.Unmarshal([]byte(yamlContent), &metadata); err != nil {
+		return nil, fmt.Errorf("failed to parse schema_version: %w", err)
+	}
+	if metadata.SchemaVersion == "" {
 		return nil, fmt.Errorf("schema_version is required; expected %s", SchemaVersion)
 	}
-	if status.SchemaVersion != SchemaVersion {
-		return nil, fmt.Errorf("unsupported schema_version %q; expected %s", status.SchemaVersion, SchemaVersion)
+	if metadata.SchemaVersion != SchemaVersion {
+		return nil, fmt.Errorf("unsupported schema_version %q; expected %s", metadata.SchemaVersion, SchemaVersion)
+	}
+
+	var status StatusV2
+	decoder := yaml.NewDecoder(strings.NewReader(yamlContent))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&status); err != nil {
+		return nil, fmt.Errorf("failed to parse YAML: %w", err)
 	}
 	if err := ValidateV2(&status); err != nil {
 		return nil, fmt.Errorf("invalid Wayfinder V2 status: %w", err)

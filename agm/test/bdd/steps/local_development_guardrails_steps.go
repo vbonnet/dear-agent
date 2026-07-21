@@ -242,7 +242,7 @@ func canonicalWayfinderV2StatusForRoute(ctx context.Context, harness, family str
 	state.traceDir = dir
 	state.harness = harness
 	state.family = family
-	content := fmt.Sprintf("---\nschema_version: \"2.0\"\nproject_name: parity-audit\nproject_type: infrastructure\nrisk_level: M\ncurrent_waypoint: CHARTER\nstatus: planning\ncreated_at: 2026-07-20T00:00:00Z\nupdated_at: 2026-07-20T00:00:00Z\nharness: %s\nmodel_family: %s\n---\n", harness, family)
+	content := "---\nschema_version: \"2.0\"\nproject_name: parity-audit\nproject_type: infrastructure\nrisk_level: M\ncurrent_waypoint: CHARTER\nstatus: planning\ncreated_at: 2026-07-20T00:00:00Z\nupdated_at: 2026-07-20T00:00:00Z\n---\n"
 	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), []byte(content), 0o600); err != nil {
 		return fmt.Errorf("write canonical trace: %w", err)
 	}

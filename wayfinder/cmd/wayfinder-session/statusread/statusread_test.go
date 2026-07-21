@@ -84,3 +84,53 @@ updated_at: 2026-07-20T00:00:00Z
 		t.Fatalf("Parse() error = %v, want invalid risk_level", err)
 	}
 }
+
+func TestParseDerivesProgressFromCanonicalHistory(t *testing.T) {
+	contents := []byte(`---
+schema_version: "2.0"
+project_name: progress-reader
+project_type: feature
+risk_level: S
+current_waypoint: BUILD
+status: in-progress
+created_at: 2026-07-20T00:00:00Z
+updated_at: 2026-07-20T00:00:00Z
+waypoint_history:
+  - name: CHARTER
+    status: completed
+    started_at: 2026-07-20T00:00:00Z
+    completed_at: 2026-07-20T00:01:00Z
+  - name: PROBLEM
+    status: completed
+    started_at: 2026-07-20T00:01:00Z
+    completed_at: 2026-07-20T00:02:00Z
+  - name: RESEARCH
+    status: completed
+    started_at: 2026-07-20T00:02:00Z
+    completed_at: 2026-07-20T00:03:00Z
+  - name: DESIGN
+    status: completed
+    started_at: 2026-07-20T00:03:00Z
+    completed_at: 2026-07-20T00:04:00Z
+  - name: SPEC
+    status: completed
+    started_at: 2026-07-20T00:04:00Z
+    completed_at: 2026-07-20T00:05:00Z
+  - name: PLAN
+    status: completed
+    started_at: 2026-07-20T00:05:00Z
+    completed_at: 2026-07-20T00:06:00Z
+  - name: SETUP
+    status: completed
+    started_at: 2026-07-20T00:06:00Z
+    completed_at: 2026-07-20T00:07:00Z
+---
+`)
+	summary, err := Parse(contents)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if summary.Progress != 77 {
+		t.Fatalf("Parse() progress = %d, want 77", summary.Progress)
+	}
+}

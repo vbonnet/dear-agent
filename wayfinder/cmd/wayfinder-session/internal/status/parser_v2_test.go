@@ -260,6 +260,30 @@ func TestParseV2RejectsInvalidCanonicalStatus(t *testing.T) {
 	}
 }
 
+func TestParseV2RejectsUnknownFields(t *testing.T) {
+	status := NewStatusV2("test", ProjectTypeFeature, RiskLevelM)
+	path := filepath.Join(t.TempDir(), StatusFilename)
+	if err := WriteV2(status, path); err != nil {
+		t.Fatalf("WriteV2: %v", err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content = []byte(strings.Replace(string(content), "beads:", "beeds:", 1))
+	if !strings.Contains(string(content), "beeds:") {
+		content = []byte(strings.Replace(string(content), "---\n", "---\nbeeds:\n  - ce-123\n", 1))
+	}
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = ParseV2(path)
+	if err == nil || !strings.Contains(err.Error(), "field beeds not found") {
+		t.Fatalf("ParseV2() error = %v, want unknown-field rejection", err)
+	}
+}
+
 func TestParseV2AcceptsPendingWaypointHistoryAfterRewind(t *testing.T) {
 	st := NewStatusV2("test", ProjectTypeFeature, RiskLevelM)
 	st.WaypointHistory = []WaypointHistory{{

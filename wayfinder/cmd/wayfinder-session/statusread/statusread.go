@@ -15,6 +15,7 @@ type Summary struct {
 	CurrentWaypoint string
 	Beads           []string
 	UpdatedAt       time.Time
+	Progress        int
 }
 
 // Parse fully validates canonical status bytes and returns consumer fields.
@@ -42,5 +43,19 @@ func summary(parsed *status.StatusV2) *Summary {
 		CurrentWaypoint: parsed.CurrentWaypoint,
 		Beads:           append([]string(nil), parsed.Beads...),
 		UpdatedAt:       parsed.UpdatedAt,
+		Progress:        canonicalProgress(parsed),
 	}
+}
+
+func canonicalProgress(parsed *status.StatusV2) int {
+	if parsed.Status == status.StatusV2Completed {
+		return 100
+	}
+	complete := make(map[string]bool)
+	for _, waypoint := range parsed.WaypointHistory {
+		if waypoint.Status == status.WaypointStatusV2Completed || waypoint.Status == status.WaypointStatusV2Skipped {
+			complete[waypoint.Name] = true
+		}
+	}
+	return len(complete) * 100 / len(status.AllWaypointsV2Schema())
 }
