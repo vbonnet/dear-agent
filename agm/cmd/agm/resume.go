@@ -966,6 +966,9 @@ func waitForResumedAgyWithWait(ctx context.Context, health *HealthStatus, wait f
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		if errors.Is(promptWaitErr, tmux.ErrAgyOnboardingRequired) {
+			return promptWaitErr
+		}
 		ui.PrintWarning("AGY conversation is taking longer than expected to load")
 		fmt.Println("  Attaching now - AGY should appear shortly")
 	} else {

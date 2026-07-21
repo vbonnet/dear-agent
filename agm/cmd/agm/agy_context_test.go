@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 func TestWaitForResumedAgyUsesCallerContext(t *testing.T) {
@@ -26,6 +28,24 @@ func TestWaitForResumedAgyUsesCallerContext(t *testing.T) {
 	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("waitForResumedAgyWithWait error = %v, want context.Canceled", err)
+	}
+}
+
+func TestWaitForResumedAgyPropagatesOnboardingRequired(t *testing.T) {
+	err := waitForResumedAgyWithWait(t.Context(), &HealthStatus{TmuxSessionName: "agy-resume"}, func(context.Context, string, time.Duration) error {
+		return fmt.Errorf("onboarding: %w", tmux.ErrAgyOnboardingRequired)
+	})
+	if !errors.Is(err, tmux.ErrAgyOnboardingRequired) {
+		t.Fatalf("waitForResumedAgyWithWait error = %v, want ErrAgyOnboardingRequired", err)
+	}
+}
+
+func TestWaitForResumedAgyToleratesSlowStartup(t *testing.T) {
+	err := waitForResumedAgyWithWait(t.Context(), &HealthStatus{TmuxSessionName: "agy-resume"}, func(context.Context, string, time.Duration) error {
+		return errors.New("readiness timeout")
+	})
+	if err != nil {
+		t.Fatalf("waitForResumedAgyWithWait error = %v, want slow startup to remain non-fatal", err)
 	}
 }
 
