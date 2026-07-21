@@ -1,9 +1,11 @@
 package tmux
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -38,29 +40,37 @@ func TestBoundedCommandUsesSubprocessSafetyPolicy(t *testing.T) {
 }
 
 func TestConfiguredClientActionsUseOnlyConfiguredSocket(t *testing.T) {
-	binDir := t.TempDir()
-	invocationsPath := filepath.Join(t.TempDir(), "tmux-invocations")
-	fakeTmux := filepath.Join(binDir, "tmux")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SENTINEL_TMUX_LOG\"\ncase \"$*\" in *list-panes*) printf '123\\n';; esac\nexit 0\n"
-	require.NoError(t, os.WriteFile(fakeTmux, []byte(script), 0o700))
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("SENTINEL_TMUX_LOG", invocationsPath)
-
 	socketPath := filepath.Join(t.TempDir(), "owned.sock")
-	client := NewClientWithSocket(socketPath)
+	var invocations []string
+	client := newClientWithSocketAndRunner(socketPath, func(args ...string) ([]byte, error) {
+		invocations = append(invocations, strings.Join(args, " "))
+		if slices.Contains(args, "list-panes") {
+			return []byte("123\n"), nil
+		}
+		return nil, nil
+	})
 	_, err := client.GetPanePID("worker")
 	require.NoError(t, err)
 	require.NoError(t, client.SendLiteral("worker", "recovery message"))
 	require.NoError(t, client.SendKeys("worker", "C-c"))
 	require.NoError(t, client.KillSession("worker"))
 
-	invocations, err := os.ReadFile(invocationsPath)
-	require.NoError(t, err)
-	lines := strings.Split(strings.TrimSpace(string(invocations)), "\n")
-	require.Len(t, lines, 8)
-	for _, line := range lines {
+	require.Len(t, invocations, 8)
+	for _, line := range invocations {
 		assert.True(t, strings.HasPrefix(line, "-S "+socketPath+" "), line)
 	}
+}
+
+func TestConfiguredClientProbePreservesCommandFailure(t *testing.T) {
+	wantErr := errors.New("fixture command failed")
+	client := newClientWithSocketAndRunner("/tmp/owned.sock", func(...string) ([]byte, error) {
+		return nil, wantErr
+	})
+
+	_, err := client.GetPanePID("worker")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, wantErr)
+	assert.ErrorContains(t, err, `probe socket "/tmp/owned.sock"`)
 }
 
 // TestGetReadSocketPaths verifies socket path detection.
