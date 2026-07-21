@@ -1,9 +1,21 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 )
+
+func TestDispatchModeSwitchContextStopsBeforeSlashCommandDelivery(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err := dispatchModeSwitchContext(ctx, "claude-code", "missing-session", "plan", "default")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("dispatchModeSwitchContext() error = %v, want context.Canceled", err)
+	}
+}
 
 func TestCalculateShiftTabPresses(t *testing.T) {
 	tests := []struct {

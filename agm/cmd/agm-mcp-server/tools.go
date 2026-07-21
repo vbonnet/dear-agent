@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os/exec"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
@@ -198,7 +200,7 @@ type CreateSessionInput struct {
 	Cwd     string `json:"cwd" jsonschema:"Absolute path to the working directory for the new session (required)"`
 	Prompt  string `json:"prompt" jsonschema:"Initial prompt to send to the session after startup (required)"`
 	Title   string `json:"title,omitempty" jsonschema:"Session name. If omitted, derived from cwd directory name."`
-	Model   string `json:"model,omitempty" jsonschema:"Model to use (e.g. sonnet, 5.5, 5.6, 2.5-flash, z-ai/glm-5.2). Defaults to the selected harness default."`
+	Model   string `json:"model,omitempty" jsonschema:"Model to use (e.g. sonnet, 5.5, 5.6, 3.5-flash, z-ai/glm-5.2). Defaults to the selected harness default."`
 	Harness string `json:"harness,omitempty" jsonschema:"Agent harness: claude-code, codex-cli, agy, opencode-cli, or deprecated gemini-cli. Defaults to claude-code."`
 }
 
@@ -273,7 +275,55 @@ func newMCPOpContextWithTmux() (*ops.OpContext, func(), error) {
 		return nil, cleanup, err
 	}
 	opCtx.Tmux = session.NewRealTmux()
+	opCtx.CreationRuntime = newMCPCreateSessionRuntime(opCtx.Tmux)
 	return opCtx, cleanup, nil
+}
+
+type mcpCreateSessionRuntime struct {
+	tmux             session.TmuxInterface
+	lookPath         func(string) (string, error)
+	waitForAgyPrompt func(context.Context, string, time.Duration) error
+	sleep            func(time.Duration)
+}
+
+func newMCPCreateSessionRuntime(tmuxClient session.TmuxInterface) *mcpCreateSessionRuntime {
+	return &mcpCreateSessionRuntime{
+		tmux:             tmuxClient,
+		lookPath:         exec.LookPath,
+		waitForAgyPrompt: tmux.WaitForAgyPrompt,
+		sleep:            time.Sleep,
+	}
+}
+
+func (r *mcpCreateSessionRuntime) Launch(ctx context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
+	if spec.Harness == "agy" {
+		if _, err := r.lookPath("agy"); err != nil {
+			return ops.CreateSessionLaunchResult{}, fmt.Errorf("find AGY executable: %w", err)
+		}
+	}
+	launch := ops.BuildHarnessLaunchCommand(spec)
+	result := ops.CreateSessionLaunchResult{ModeAppliedAtStartup: launch.ModeAppliedAtStartup}
+	if err := r.tmux.SendKeys(spec.SessionName, launch.Command); err != nil {
+		return result, err
+	}
+	if spec.Harness != "agy" {
+		return result, nil
+	}
+	r.sleep(500 * time.Millisecond)
+	if err := r.waitForAgyPrompt(ctx, spec.SessionName, 90*time.Second); err != nil {
+		return result, fmt.Errorf("wait for AGY readiness: %w", err)
+	}
+	return result, nil
+}
+
+func (r *mcpCreateSessionRuntime) Complete(ctx context.Context, completion ops.CreateSessionCompletion) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if completion.Prompt == "" {
+		return nil
+	}
+	return r.tmux.SendKeys(completion.Manifest.Name, completion.Prompt)
 }
 
 // mcpTracer is the OTel tracer for MCP tool handlers.

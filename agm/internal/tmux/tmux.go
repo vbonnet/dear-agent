@@ -684,7 +684,11 @@ func GetCurrentSessionName() (string, error) {
 // Node-based CLIs such as Codex can report "node" as the current command while
 // retaining "codex ..." as the start command.
 func GetPaneCommands(sessionName string) ([]string, error) {
-	ctx := context.Background()
+	return GetPaneCommandsContext(context.Background(), sessionName)
+}
+
+// GetPaneCommandsContext is the command-scoped variant of GetPaneCommands.
+func GetPaneCommandsContext(ctx context.Context, sessionName string) ([]string, error) {
 	socketPath := GetSocketPath()
 	normalizedName := NormalizeTmuxSessionName(sessionName)
 	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "list-panes", "-t", normalizedName,
@@ -722,7 +726,12 @@ func GetPaneCommands(sessionName string) ([]string, error) {
 // Returns (false, nil) if process not found
 // Returns (false, error) if tmux command fails
 func IsProcessRunning(sessionName, processName string) (bool, error) {
-	commands, err := GetPaneCommands(sessionName)
+	return IsProcessRunningContext(context.Background(), sessionName, processName)
+}
+
+// IsProcessRunningContext is the command-scoped variant of IsProcessRunning.
+func IsProcessRunningContext(ctx context.Context, sessionName, processName string) (bool, error) {
+	commands, err := GetPaneCommandsContext(ctx, sessionName)
 	if err != nil {
 		return false, err
 	}
@@ -825,23 +834,38 @@ func isClaudeProcess(command string) bool {
 //
 // Returns nil when process is ready, error on timeout or check failure.
 func WaitForProcessReady(sessionName, processName string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
+	return WaitForProcessReadyContext(context.Background(), sessionName, processName, timeout)
+}
+
+// WaitForProcessReadyContext is the command-scoped variant of
+// WaitForProcessReady. Caller cancellation takes precedence over the timeout.
+func WaitForProcessReadyContext(parent context.Context, sessionName, processName string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
 	pollInterval := 100 * time.Millisecond
 
-	for time.Now().Before(deadline) {
-		running, err := IsProcessRunning(sessionName, processName)
+	for {
+		if err := ctx.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return fmt.Errorf("timeout waiting for %s to start (waited %v)", processName, timeout)
+			}
+			return err
+		}
+		running, err := IsProcessRunningContext(ctx, sessionName, processName)
 		if err != nil {
 			// Ignore transient errors (e.g., brief tmux unavailability)
-			time.Sleep(pollInterval)
+			if err := sleepWithContext(ctx, pollInterval); err != nil {
+				continue
+			}
 			continue
 		}
 		if running {
 			return nil // Process is ready!
 		}
-		time.Sleep(pollInterval)
+		if err := sleepWithContext(ctx, pollInterval); err != nil {
+			continue
+		}
 	}
-
-	return fmt.Errorf("timeout waiting for %s to start (waited %v)", processName, timeout)
 }
 
 // GetCurrentWorkingDirectory returns the current working directory of the

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -8,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
@@ -22,7 +24,7 @@ func TestActiveHarnessesHaveCurrentTmuxLauncher(t *testing.T) {
 			t.Parallel()
 
 			calls := 0
-			record := func(ops.HarnessLaunchSpec) error {
+			record := func(context.Context, ops.HarnessLaunchSpec) error {
 				calls++
 				return nil
 			}
@@ -31,11 +33,11 @@ func TestActiveHarnessesHaveCurrentTmuxLauncher(t *testing.T) {
 				startCodex:    func(ops.HarnessLaunchSpec) (bool, error) { calls++; return false, nil },
 				startOpenCode: record,
 				startGemini:   record,
-				startAgy:      record,
+				startAgy:      func(context.Context, ops.HarnessLaunchSpec) error { calls++; return nil },
 				validateCodex: func() error { return nil },
 			}
 
-			if err := startCurrentTmuxHarnessWithRuntime(ops.HarnessLaunchSpec{Harness: harness}, runtime); err != nil {
+			if err := startCurrentTmuxHarnessWithRuntime(t.Context(), ops.HarnessLaunchSpec{Harness: harness}, runtime); err != nil {
 				t.Fatalf("current-tmux dispatch for %q failed: %v", harness, err)
 			}
 			if calls != 1 {
@@ -64,7 +66,7 @@ func TestStartCurrentTmuxHarnessCodexUsesRealLauncherContract(t *testing.T) {
 		Harness: "codex-cli", Model: "5.5", SessionName: "codex-current", WorkDir: "/tmp/codex-current",
 	}
 
-	if err := startCurrentTmuxHarnessWithRuntime(spec, runtime); err != nil {
+	if err := startCurrentTmuxHarnessWithRuntime(t.Context(), spec, runtime); err != nil {
 		t.Fatalf("startCurrentTmuxHarnessWithRuntime() error = %v", err)
 	}
 	if !validated {
@@ -127,16 +129,20 @@ func TestQueueCurrentTmuxCodexRejectsMissingExecutable(t *testing.T) {
 func TestStartNewSessionForContextRoutesCurrentTmux(t *testing.T) {
 	t.Parallel()
 
+	callerCtx := t.Context()
 	var current, separate int
-	err := startNewSessionForContext(true, false, "current", newSessionStartRuntime{
-		currentTmux: func(sessionName string) error {
+	err := startNewSessionForContext(callerCtx, true, false, "current", newSessionStartRuntime{
+		currentTmux: func(ctx context.Context, sessionName string) error {
 			current++
+			if ctx != callerCtx {
+				t.Fatal("current-tmux route did not receive the command context")
+			}
 			if sessionName != "current" {
 				t.Fatalf("session name = %q, want current", sessionName)
 			}
 			return nil
 		},
-		separateTmux: func(string) error { separate++; return nil },
+		separateTmux: func(context.Context, string) error { separate++; return nil },
 	})
 	if err != nil {
 		t.Fatalf("startNewSessionForContext() error = %v", err)
@@ -159,7 +165,7 @@ func TestStartCurrentTmuxHarnessCodexStopsAfterCredentialFailure(t *testing.T) {
 		},
 	}
 
-	err := startCurrentTmuxHarnessWithRuntime(ops.HarnessLaunchSpec{Harness: "codex-cli"}, runtime)
+	err := startCurrentTmuxHarnessWithRuntime(t.Context(), ops.HarnessLaunchSpec{Harness: "codex-cli"}, runtime)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("error = %v, want %v", err, wantErr)
 	}
@@ -179,9 +185,60 @@ func TestStartCurrentTmuxHarnessCodexPropagatesQueueFailure(t *testing.T) {
 		},
 	}
 
-	err := startCurrentTmuxHarnessWithRuntime(ops.HarnessLaunchSpec{Harness: "codex-cli"}, runtime)
+	err := startCurrentTmuxHarnessWithRuntime(t.Context(), ops.HarnessLaunchSpec{Harness: "codex-cli"}, runtime)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("error = %v, want queue failure %v", err, wantErr)
+	}
+}
+
+func TestStartCurrentTmuxAgyStopsAfterCallerCancellation(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	associated := false
+	err := startCurrentTmuxAgyWithRuntime(ctx, ops.HarnessLaunchSpec{
+		Harness: "agy", SessionName: "agy-current",
+	}, currentTmuxAgyRuntime{
+		sendCommand: func(string, string) error { return nil },
+		waitForPrompt: func(context.Context, string, time.Duration) error {
+			cancel()
+			return context.Canceled
+		},
+		associate: func(string) { associated = true },
+	})
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context cancellation", err)
+	}
+	if associated {
+		t.Fatal("AGY session was associated after caller cancellation")
+	}
+}
+
+func TestStartCurrentTmuxAgyAssociatesAfterReadinessTimeout(t *testing.T) {
+	t.Parallel()
+
+	associated := false
+	err := startCurrentTmuxAgyWithRuntime(t.Context(), ops.HarnessLaunchSpec{
+		Harness: "agy", SessionName: "agy-current",
+	}, currentTmuxAgyRuntime{
+		sendCommand: func(string, string) error { return nil },
+		waitForPrompt: func(context.Context, string, time.Duration) error {
+			return errors.New("readiness timed out")
+		},
+		associate: func(sessionName string) {
+			if sessionName != "agy-current" {
+				t.Fatalf("associated session = %q, want agy-current", sessionName)
+			}
+			associated = true
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("startCurrentTmuxAgyWithRuntime() error = %v", err)
+	}
+	if !associated {
+		t.Fatal("AGY session was not associated after a non-cancellation readiness timeout")
 	}
 }
 

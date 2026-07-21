@@ -1,6 +1,6 @@
 # Orphaned Conversation Import Specification
 
-<!-- Last audited at: 2026-07-09 -->
+<!-- Last audited at: 2026-07-20 -->
 
 ## Overview
 
@@ -22,6 +22,8 @@ harness-neutral manifest store while preserving harness-specific resume metadata
 **IMP-06** When registration must resolve a workspace, the system shall apply explicit workspace, project-inferred workspace, and configured fallback in that order.
 
 **IMP-07** When history metadata is unavailable but the saved conversation is discoverable, the system shall preserve importability using filesystem metadata rather than discarding the conversation.
+
+**IMP-08** When importing an AGY conversation, the system shall persist its conversation ID, native conversation database, transcript path, and discovered working directory while leaving the model unset because AGY's public saved-conversation metadata does not expose the native selection.
 
 ## BDD Traceability
 

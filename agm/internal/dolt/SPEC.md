@@ -8,6 +8,10 @@
 
 **DOLTR-03** When an isolated SQLite test store resolves a session by harness conversation UUID, the isolated SQLite test store shall use SQLite-compatible JSON extraction and return the same matching manifest semantics as production Dolt.
 
+**DOLTR-04** When AGM updates a session after a runtime model change, the storage adapter shall persist the manifest model field, including an intentional empty value that represents unknown model provenance.
+
+**DOLTR-05** When AGM creates a session with no model, the storage adapter shall apply the historical default only to Claude Code sessions and shall preserve unknown model provenance for every non-Claude harness.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`

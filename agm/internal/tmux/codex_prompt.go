@@ -1,6 +1,8 @@
 package tmux
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -157,23 +159,43 @@ func containsCodexModelUpgradePromptPattern(content string) bool {
 // Trust auto-accept is best-effort: a failed keystroke just means we keep
 // polling until the composer appears or the deadline elapses.
 func WaitForCodexPrompt(sessionName string, timeout time.Duration) error {
+	return WaitForCodexPromptContext(context.Background(), sessionName, timeout)
+}
+
+// WaitForCodexPromptContext is the command-scoped variant of
+// WaitForCodexPrompt. It stops polling immediately when the caller cancels.
+//
+//nolint:gocyclo // Readiness is a stateful polling protocol with trust and model-upgrade interstitials.
+func WaitForCodexPromptContext(parent context.Context, sessionName string, timeout time.Duration) error {
 	debug.Log("\n🔍 Starting Codex prompt detection for session: %s", sessionName)
 
-	deadline := time.Now().Add(timeout)
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
 	checkCount := 0
 	trustAccepted := false
 	modelUpgradeAnswered := false
 
-	for time.Now().Before(deadline) {
+	for {
+		if err := ctx.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return fmt.Errorf("timeout waiting for Codex prompt (waited %v, performed %d checks)", timeout, checkCount)
+			}
+			return err
+		}
 		checkCount++
 
 		// Capture the recent pane tail (10 lines into scrollback through the
 		// visible region) so a trust dialog and the composer that follows are
 		// both observable across consecutive checks.
-		output, err := exec.Command("tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-S", "-10").Output()
+		output, err := exec.CommandContext(ctx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-S", "-10").Output()
 		if err != nil {
+			if ctx.Err() != nil {
+				continue
+			}
 			// Session might not exist yet or not be accessible.
-			time.Sleep(500 * time.Millisecond)
+			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+				continue
+			}
 			continue
 		}
 
@@ -192,7 +214,9 @@ func WaitForCodexPrompt(sessionName string, timeout time.Duration) error {
 			} else {
 				trustAccepted = true
 			}
-			time.Sleep(1 * time.Second)
+			if err := sleepWithContext(ctx, time.Second); err != nil {
+				continue
+			}
 			continue
 		}
 
@@ -205,7 +229,9 @@ func WaitForCodexPrompt(sessionName string, timeout time.Duration) error {
 			} else {
 				modelUpgradeAnswered = true
 			}
-			time.Sleep(1 * time.Second)
+			if err := sleepWithContext(ctx, time.Second); err != nil {
+				continue
+			}
 			continue
 		}
 
@@ -214,7 +240,9 @@ func WaitForCodexPrompt(sessionName string, timeout time.Duration) error {
 			if containsCodexPromptPattern(line) {
 				debug.Log("✓ Codex prompt detected in line %d (check #%d): %q", i, checkCount, strings.TrimSpace(line))
 				// Found the composer — wait a beat to ensure it's stable.
-				time.Sleep(500 * time.Millisecond)
+				if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+					return err
+				}
 				return nil
 			}
 		}
@@ -223,8 +251,8 @@ func WaitForCodexPrompt(sessionName string, timeout time.Duration) error {
 			debug.Log("⏳ Still waiting for Codex prompt... (check #%d)", checkCount)
 		}
 
-		time.Sleep(500 * time.Millisecond)
+		if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+			continue
+		}
 	}
-
-	return fmt.Errorf("timeout waiting for Codex prompt (waited %v, performed %d checks)", timeout, checkCount)
 }

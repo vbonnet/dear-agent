@@ -1,6 +1,6 @@
 # Harness Launch Parity Specification
 
-<!-- Last audited at: 2026-07-10 -->
+<!-- Last audited at: 2026-07-20 -->
 
 ## EARS Requirements
 
@@ -17,6 +17,10 @@
 **LAUNCH-PARITY-06** When post-create startup or final process-tree liveness verification fails, the system shall remove the newly created tmux session, manifest directory, Dolt row, and sandbox rather than reporting an active session.
 
 **LAUNCH-PARITY-07** When startup reaches its final verification gate, the system shall require both a live tmux session and an active harness process before reporting success.
+
+**LAUNCH-PARITY-08** When AGM starts AGY interactively, the system shall invoke bare `agy` and shall not emit `--prompt-interactive` or `--print` unless it also supplies the prompt argument required by those string-valued flags.
+
+**LAUNCH-PARITY-09** When an AGY launch specification has no resolved model, the system shall omit `--model` rather than emitting an empty value, allowing a saved conversation to retain its native selection.
 
 ## BDD Traceability
 

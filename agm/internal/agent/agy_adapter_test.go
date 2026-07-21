@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -112,7 +113,7 @@ func TestAgyCreateSessionWaitsForPrompt(t *testing.T) {
 	}
 
 	waited := false
-	agyWaitForPrompt = func(sessionName string, timeout time.Duration) error {
+	agyWaitForPrompt = func(_ context.Context, sessionName string, timeout time.Duration) error {
 		waited = true
 		if sessionName != "agy-wait-test" {
 			t.Fatalf("agyWaitForPrompt session = %q, want agy-wait-test", sessionName)

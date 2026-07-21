@@ -599,7 +599,7 @@ func TestBuildSessionManifestPersistsPermissionPolicy(t *testing.T) {
 }
 
 func TestBuildSessionManifestPersistsStartupPermissionMode(t *testing.T) {
-	m := createPermissionManifest(t, "agy", "2.5-flash", "auto", nil)
+	m := createPermissionManifest(t, "agy", "3.5-flash", "auto", nil)
 	if m.PermissionMode != "auto" {
 		t.Fatalf("permission mode = %q, want auto", m.PermissionMode)
 	}
