@@ -34,6 +34,7 @@ var (
 	resumePrompt           string
 	resumePromptFile       string
 	resumeDeletePromptFile bool
+	sendResumePromptSafe   = tmux.SendMultiLinePromptSafeContext
 )
 
 var resumeCmd = &cobra.Command{
@@ -429,8 +430,9 @@ func shouldSendResumeCommands(tmuxExists bool) bool {
 
 // sendPostResumePrompt delivers a prompt to the session after it is ready.
 // It reads the prompt from promptText (inline) or promptFile, then uses
-// SendMultiLinePromptSafe which waits for the Claude prompt before sending.
-func sendPostResumePrompt(sessionName, promptText, promptFile string, deletePromptFile bool) error {
+// the context-aware multiline path, which waits for the active harness prompt
+// before sending.
+func sendPostResumePrompt(ctx context.Context, sessionName, promptText, promptFile string, deletePromptFile bool) error {
 	var message string
 	if promptText != "" {
 		message = promptText
@@ -443,7 +445,7 @@ func sendPostResumePrompt(sessionName, promptText, promptFile string, deleteProm
 	}
 
 	ui.PrintSuccess("Sending post-resume prompt...")
-	if err := tmux.SendMultiLinePromptSafe(sessionName, message, false); err != nil {
+	if err := sendResumePromptSafe(ctx, sessionName, message, false); err != nil {
 		return fmt.Errorf("failed to send prompt: %w", err)
 	}
 	return nil
@@ -579,7 +581,10 @@ func resumeSession(ctx context.Context, adapter *dolt.Adapter, sessionID, manife
 	// This happens after the harness is ready, before attach.
 	// Works for both new sessions (sendCommands=true) and existing sessions.
 	if resumePrompt != "" || resumePromptFile != "" {
-		if err := sendPostResumePrompt(health.TmuxSessionName, resumePrompt, resumePromptFile, resumeDeletePromptFile); err != nil {
+		if err := sendPostResumePrompt(ctx, health.TmuxSessionName, resumePrompt, resumePromptFile, resumeDeletePromptFile); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			// Non-fatal: warn but continue so the user can still attach and type manually
 			ui.PrintWarning(fmt.Sprintf("Failed to send post-resume prompt: %v", err))
 		} else {

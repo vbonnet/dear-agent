@@ -197,6 +197,8 @@ creation, and terminal state detection.
 - Active harness launch commands preserve native startup mode and persistence.
 - Imported AGY conversations preserve unknown native-model provenance through
   the real storage adapter instead of acquiring Claude's legacy default.
+- AGY model-switch provenance requires a new exact confirmation, and root
+  cancellation reaches post-resume multiline readiness before delivery or attach.
 - AGM runtime helper commands keep co-located SPEC coverage.
 - AGM backend implementations keep co-located SPEC coverage.
 - AGM cleanup and process support packages keep co-located SPEC coverage.

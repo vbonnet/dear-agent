@@ -143,8 +143,15 @@ func skipPostSubmitGuard(shouldInterrupt, autonomous, force bool) bool {
 }
 
 func SendMultiLinePromptSafe(sessionName string, prompt string, shouldInterrupt bool) error {
+	return SendMultiLinePromptSafeContext(context.Background(), sessionName, prompt, shouldInterrupt)
+}
+
+// SendMultiLinePromptSafeContext is the command-scoped multiline delivery
+// path. Caller cancellation stops readiness polling and the stability delay
+// before any prompt bytes are written.
+func SendMultiLinePromptSafeContext(ctx context.Context, sessionName string, prompt string, shouldInterrupt bool) error {
 	// Wait for Claude to be ready (consistent with all other *Safe functions)
-	if err := WaitForPromptSimple(sessionName, 60*time.Second); err != nil {
+	if err := WaitForPromptSimpleContext(ctx, sessionName, 60*time.Second); err != nil {
 		return fmt.Errorf("session not ready for multi-line prompt: %w", err)
 	}
 
@@ -163,10 +170,12 @@ func SendMultiLinePromptSafe(sessionName string, prompt string, shouldInterrupt 
 	// ce-v9in / ce-5sow: still skipped in autonomous mode, under operator --force,
 	// and when shouldInterrupt — those callers deliver regardless.
 	if !skipPostSubmitGuard(shouldInterrupt, AutonomousMode(), ForceDelivery()) {
-		time.Sleep(1 * time.Second)
+		if err := sleepWithContext(ctx, time.Second); err != nil {
+			return err
+		}
 
 		// Re-capture pane to verify composer stability
-		cmdCtx, cmdCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		cmdCtx, cmdCancel := context.WithTimeout(ctx, 5*time.Second)
 		recheck, err := exec.CommandContext(cmdCtx, "tmux", "-S", GetSocketPath(), "capture-pane",
 			"-t", NormalizeTmuxSessionName(sessionName), "-p", "-S", "-30").Output()
 		cmdErr := cmdCtx.Err()
@@ -182,6 +191,9 @@ func SendMultiLinePromptSafe(sessionName string, prompt string, shouldInterrupt 
 				return fmt.Errorf("prompt disappeared after detection — session likely processing, aborting delivery")
 			}
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	// Send using literal mode (preserves newlines), with conditional interrupt

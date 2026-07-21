@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -113,26 +114,62 @@ func resolveSetModelHarness(sessionName string) string {
 	return m.Harness
 }
 
-// verifyModelSet captures pane output and checks for model confirmation.
+// newModelConfirmation returns a confirmation that was not present before the
+// command. AGY additionally requires the confirmation to name the exact model
+// requested, because persisting a different or stale model would poison cold
+// resume provenance.
+func newModelConfirmation(instruction setModelInstruction, baseline, current string) (string, bool) {
+	baselineCounts := make(map[string]int)
+	for line := range strings.SplitSeq(baseline, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "Set model to ") {
+			baselineCounts[trimmed]++
+		}
+	}
+	currentCounts := make(map[string]int)
+	for line := range strings.SplitSeq(current, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "Set model to ") {
+			continue
+		}
+		currentCounts[trimmed]++
+		if currentCounts[trimmed] <= baselineCounts[trimmed] {
+			continue
+		}
+		if instruction.Harness == "agy" && strings.TrimSpace(strings.TrimPrefix(trimmed, "Set model to ")) != instruction.ResolvedModel {
+			continue
+		}
+		return trimmed, true
+	}
+	return "", false
+}
+
+// verifyModelSet captures pane output and checks for a new model confirmation.
 // Claude Code prints "Set model to ..." when a model change succeeds. Other
 // harnesses may not expose a stable confirmation line, so this remains a
 // best-effort check for the common slash-command path.
-func verifyModelSet(sessionName string, timeout time.Duration) (bool, string) {
+func verifyModelSet(ctx context.Context, sessionName string, instruction setModelInstruction, baseline string, baselineOK bool, timeout time.Duration) (bool, string, error) {
+	if !baselineOK {
+		return false, "", nil
+	}
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		time.Sleep(500 * time.Millisecond)
+		timer := time.NewTimer(500 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return false, "", ctx.Err()
+		case <-timer.C:
+		}
 		output, err := tmux.CapturePaneOutput(sessionName, 10)
 		if err != nil {
 			continue
 		}
-		for _, line := range strings.Split(output, "\n") {
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "Set model to") {
-				return true, trimmed
-			}
+		if confirmation, ok := newModelConfirmation(instruction, baseline, output); ok {
+			return true, confirmation, nil
 		}
 	}
-	return false, ""
+	return false, "", nil
 }
 
 // persistAgyModelSwitch records only model provenance AGM can defend. A
@@ -180,7 +217,7 @@ func persistAgyModelSwitchForSession(sessionName string, instruction setModelIns
 	return persistAgyModelSwitch(adapter, m, instruction, verified)
 }
 
-func runSendSetModel(_ *cobra.Command, args []string) error {
+func runSendSetModel(cmd *cobra.Command, args []string) error {
 	sessionName := args[0]
 	modelInput := args[1]
 
@@ -203,6 +240,7 @@ func runSendSetModel(_ *cobra.Command, args []string) error {
 	if !exists {
 		return fmt.Errorf("session '%s' does not exist in tmux.\n\nSuggestions:\n  - List sessions: agm session list\n  - Create session: agm session new %s", sessionName, sessionName)
 	}
+	baseline, baselineErr := tmux.CapturePaneOutput(sessionName, 10)
 
 	// Send /model command
 	if err := tmux.SendSlashCommandSafe(sessionName, instruction.Command); err != nil {
@@ -210,7 +248,20 @@ func runSendSetModel(_ *cobra.Command, args []string) error {
 	}
 
 	// Verify model was set
-	verified, confirmation := verifyModelSet(sessionName, 5*time.Second)
+	ctx := context.Background()
+	if cmd != nil {
+		ctx = cmd.Context()
+	}
+	verified, confirmation, err := verifyModelSet(ctx, sessionName, instruction, baseline, baselineErr == nil, 5*time.Second)
+	if err != nil {
+		// The command was already delivered, so cancellation leaves the runtime
+		// selection uncertain. Clear AGY provenance before returning rather than
+		// retaining a creation-time override that may now be stale.
+		if persistErr := persistAgyModelSwitchForSession(sessionName, instruction, false); persistErr != nil {
+			return fmt.Errorf("model verification stopped: %w; additionally failed to clear uncertain provenance: %w", err, persistErr)
+		}
+		return err
+	}
 	if err := persistAgyModelSwitchForSession(sessionName, instruction, verified); err != nil {
 		return err
 	}

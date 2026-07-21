@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -191,7 +193,7 @@ func TestResumeHelpMentionsPromptFlags(t *testing.T) {
 // TestSendPostResumePrompt_FileNotFound verifies an error is returned when the
 // prompt file does not exist, before any tmux operations occur.
 func TestSendPostResumePrompt_FileNotFound(t *testing.T) {
-	err := sendPostResumePrompt("any-session", "", "/nonexistent/path/prompt.txt", false)
+	err := sendPostResumePrompt(context.Background(), "any-session", "", "/nonexistent/path/prompt.txt", false)
 	if err == nil {
 		t.Fatal("expected error for missing prompt file, got nil")
 		return
@@ -214,13 +216,28 @@ func TestSendPostResumePrompt_FileTooLarge(t *testing.T) {
 		t.Fatalf("failed to write temp file: %v", err)
 	}
 
-	err := sendPostResumePrompt("any-session", "", tmp, false)
+	err := sendPostResumePrompt(context.Background(), "any-session", "", tmp, false)
 	if err == nil {
 		t.Fatal("expected error for oversized prompt file, got nil")
 		return
 	}
 	if !strings.Contains(err.Error(), "too large") {
 		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestSendPostResumePromptUsesCallerContext(t *testing.T) {
+	original := sendResumePromptSafe
+	t.Cleanup(func() { sendResumePromptSafe = original })
+	sendResumePromptSafe = func(ctx context.Context, _, _ string, _ bool) error {
+		return ctx.Err()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := sendPostResumePrompt(ctx, "resume-context", "continue", "", false)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("sendPostResumePrompt() error = %v, want context.Canceled", err)
 	}
 }
 

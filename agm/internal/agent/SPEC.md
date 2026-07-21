@@ -59,13 +59,13 @@ compatibility.
 
 **AGP-25** When MCP creates an AGY session, the system shall wait through first-run trust and initialization until the AGY composer is ready before delivering the required startup prompt; cancellation or readiness failure shall enter the shared creation rollback path.
 
-**AGP-26** When the AGM process receives SIGINT or SIGTERM, the root command context shall cancel and every command-scoped active-harness readiness wait, including create, cold resume, post-create prompt delivery, and AGY send metadata backfill, shall return without continuing into prompt delivery, attach, or metadata mutation.
+**AGP-26** When the AGM process receives SIGINT or SIGTERM, the root command context shall cancel and every command-scoped active-harness readiness wait, including create, cold resume, post-create prompt delivery, post-resume prompt delivery, and AGY send metadata backfill, shall return without continuing into prompt delivery, attach, or metadata mutation.
 
 **AGP-27** When a user supplies a cross-harness tier alias with different letter case, the system shall canonicalize the alias key case-insensitively while preserving any exact case-sensitive public model label.
 
 **AGP-28** When an imported or manually associated AGY conversation has no observable native model, the system shall leave its manifest model unset and cold-resume without `--model` so AGY retains the saved conversation selection.
 
-**AGP-29** When `send set-model` changes a running AGY conversation, the system shall persist an exact confirmed model selection; if AGM cannot confirm the switch, it shall clear the stored model override so a later cold resume cannot force the stale creation-time model.
+**AGP-29** When `send set-model` changes a running AGY conversation, the system shall persist the selection only after observing a new confirmation that exactly names the requested public model; a stale, mismatched, or unavailable confirmation shall clear the stored model override so a later cold resume cannot force an unselected model.
 
 ### Codex Workdir Trust (ce-cmsq)
 

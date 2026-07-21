@@ -128,26 +128,28 @@ func TestResolveSetModelInstruction_NormalizesCrossHarnessAliasCase(t *testing.T
 	}
 }
 
-func TestVerifyModelSetParsing(t *testing.T) {
-	// Test the line-matching logic used by verifyModelSet
-	tests := []struct {
-		name    string
-		line    string
-		matches bool
+func TestNewAgyModelConfirmationRejectsStaleOrMismatchedOutput(t *testing.T) {
+	instruction := setModelInstruction{Harness: "agy", ResolvedModel: "Gemini 3.5 Flash (Low)"}
+	for _, tc := range []struct {
+		name     string
+		baseline string
+		current  string
+		want     bool
 	}{
-		{"confirmation line", "Set model to claude-sonnet-4-6-20250514", true},
-		{"with whitespace", "  Set model to claude-opus-4-6  ", true},
-		{"unrelated line", "Some other output", false},
-		{"empty line", "", false},
-		{"partial match", "Set model", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			trimmed := strings.TrimSpace(tt.line)
-			got := strings.HasPrefix(trimmed, "Set model to")
-			if got != tt.matches {
-				t.Errorf("line %q: got match=%v, want %v", tt.line, got, tt.matches)
+		{name: "new exact confirmation", current: "Set model to Gemini 3.5 Flash (Low)", want: true},
+		{name: "same stale confirmation", baseline: "Set model to Gemini 3.5 Flash (Low)", current: "Set model to Gemini 3.5 Flash (Low)"},
+		{name: "new confirmation added after stale copy", baseline: "Set model to Gemini 3.5 Flash (Low)", current: "Set model to Gemini 3.5 Flash (Low)\nSet model to Gemini 3.5 Flash (Low)", want: true},
+		{name: "stale different model", baseline: "Set model to Gemini 3.5 Flash (Medium)", current: "request rejected\nSet model to Gemini 3.5 Flash (Medium)"},
+		{name: "new different model", current: "Set model to Gemini 3.5 Flash (Medium)"},
+		{name: "prefix without model", current: "Set model to"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			confirmation, got := newModelConfirmation(instruction, tc.baseline, tc.current)
+			if got != tc.want {
+				t.Fatalf("newModelConfirmation() = %q, %v; want match %v", confirmation, got, tc.want)
+			}
+			if got && confirmation != "Set model to "+instruction.ResolvedModel {
+				t.Fatalf("confirmation = %q", confirmation)
 			}
 		})
 	}

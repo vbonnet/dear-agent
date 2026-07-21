@@ -60,6 +60,8 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-27** When an AGY prompt wait is invoked, the system shall derive cancellation from the caller-supplied context and shall not install process-global signal handling inside the tmux helper.
 
+**TMUX-28** When command-scoped multiline prompt delivery waits for a composer or rechecks composer stability, the system shall derive every wait and subprocess timeout from the caller context and shall return before prompt delivery when cancellation is observed during those waits.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
