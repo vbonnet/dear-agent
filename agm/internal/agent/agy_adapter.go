@@ -416,7 +416,7 @@ func readAgyHistory(historyPath string) ([]Message, error) {
 			Role:      role,
 			Content:   entry.Content,
 			Timestamp: timestamp,
-			Metadata: map[string]interface{}{
+			Metadata: map[string]any{
 				"source": entry.Source,
 				"type":   entry.Type,
 				"status": entry.Status,
@@ -494,7 +494,10 @@ func (a *AgyAdapter) Capabilities() Capabilities {
 }
 
 func defaultAgyModel() string {
-	model, _ := resolveAgyAdapterModel("")
+	model, err := resolveAgyAdapterModel("")
+	if err != nil {
+		return ""
+	}
 	return model
 }
 
