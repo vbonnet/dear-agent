@@ -57,6 +57,27 @@ func TestPersistRenamedSessionIdentityJoinsTmuxRollbackFailure(t *testing.T) {
 	}
 }
 
+func TestPersistRenamedSessionIdentityRollsBackAfterCallerCancellation(t *testing.T) {
+	store := &recordingSessionIdentityRenamer{err: context.Canceled}
+	m := &manifest.Manifest{SessionID: "stable-id", Name: "old-name", Tmux: manifest.Tmux{SessionName: "old-tmux"}}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	rollbackCalled := false
+	err := persistRenamedSessionIdentity(ctx, store, m, "new-name", true, func(rollbackCtx context.Context, _, _ string) error {
+		if rollbackCtx.Err() != nil {
+			t.Fatalf("rollback context inherited caller cancellation: %v", rollbackCtx.Err())
+		}
+		rollbackCalled = true
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("persistRenamedSessionIdentity() error = %v, want context cancellation", err)
+	}
+	if !rollbackCalled {
+		t.Fatal("tmux rollback was not called after caller cancellation")
+	}
+}
+
 func TestPersistRenamedSessionIdentityMutatesManifestOnlyAfterStorageSuccess(t *testing.T) {
 	store := &recordingSessionIdentityRenamer{}
 	m := &manifest.Manifest{SessionID: "stable-id", Name: "old-name", Tmux: manifest.Tmux{SessionName: "old-tmux"}}

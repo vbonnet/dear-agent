@@ -198,7 +198,9 @@ func persistRenamedSessionIdentity(ctx context.Context, store sessionIdentityRen
 	err := store.RenameSessionIdentity(ctx, m.SessionID, previousName, previousTmuxName, m.Tmux.SessionRevision, newName)
 	if err != nil {
 		if tmuxRenamed {
-			if rollbackErr := renameTmux(ctx, newName, previousTmuxName); rollbackErr != nil {
+			rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer cancel()
+			if rollbackErr := renameTmux(rollbackCtx, newName, previousTmuxName); rollbackErr != nil {
 				return errors.Join(err, fmt.Errorf("restore tmux session name after storage conflict: %w", rollbackErr))
 			}
 		}
