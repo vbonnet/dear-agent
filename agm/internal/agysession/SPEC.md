@@ -20,7 +20,7 @@ conversations with their workspace, transcript, and permission-mode context.
 
 **AGYS-05** When resolving the latest AGY conversation for a workspace, the system shall prefer the last-conversations cache and fall back to newest-first log discovery; if any candidate is truncated before a complete match is established, the system shall return budget exhaustion rather than accept a prefix match or an older-file match as latest.
 
-**AGYS-06** When an enumerated log disappears during metadata collection, the system shall treat it as a stale rotation snapshot and continue with remaining candidates; when metadata lookup fails for any other reason, the system shall fail explicitly rather than silently omit a potentially newer log.
+**AGYS-06** When an enumerated log disappears during metadata collection or before its bounded scan opens the file, the system shall treat it as a stale rotation snapshot and continue with remaining candidates; when metadata lookup, open, or scan fails for any other reason, the system shall fail explicitly rather than silently omit a potentially newer log.
 
 ## BDD Traceability
 

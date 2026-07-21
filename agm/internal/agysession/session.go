@@ -164,10 +164,17 @@ func workspaceFromLogs(appDir, conversationID string) (string, string, error) {
 		}
 		return "", "", err
 	}
+	return workspaceFromLogCandidates(candidates, conversationID)
+}
+
+func workspaceFromLogCandidates(candidates agyLogCandidates, conversationID string) (string, string, error) {
 	truncatedFiles := 0
 	for _, logPath := range candidates.paths {
 		workspacePath, matched, truncated, err := scanLogForConversation(logPath, conversationID)
 		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
 			return "", "", err
 		}
 		if truncated {
@@ -191,9 +198,16 @@ func latestConversationForWorkspaceFromLogs(appDir, workspacePath string) (strin
 		}
 		return "", "", err
 	}
+	return latestConversationForWorkspaceFromLogCandidates(candidates, workspacePath)
+}
+
+func latestConversationForWorkspaceFromLogCandidates(candidates agyLogCandidates, workspacePath string) (string, string, error) {
 	for index, logPath := range candidates.paths {
 		conversationID, matched, truncated, err := scanLogForWorkspace(logPath, workspacePath)
 		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
 			return "", "", err
 		}
 		if truncated {
@@ -261,7 +275,7 @@ func collectAgyLogCandidates(logDir string, entries []os.DirEntry) ([]agyLogCand
 			// Log rotation may invalidate the bounded directory snapshot before
 			// metadata collection. Only a disappeared entry is safe to omit;
 			// permission and other errors could hide a newer candidate.
-			if os.IsNotExist(infoErr) {
+			if errors.Is(infoErr, os.ErrNotExist) {
 				continue
 			}
 			return nil, fmt.Errorf("stat AGY log %s: %w", entry.Name(), infoErr)

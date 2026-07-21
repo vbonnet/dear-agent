@@ -241,6 +241,48 @@ func TestCollectAgyLogCandidatesSkipsRemovedEntry(t *testing.T) {
 	}
 }
 
+func TestWorkspaceFromLogCandidatesSkipsRemovedFileBeforeScan(t *testing.T) {
+	appDir := t.TempDir()
+	conversationID := "117ff898-a964-4a9f-b460-1be4a8a49b17"
+	validPath := writeAgyLog(t, appDir, "retained.log", []string{
+		workspaceMarker + "/tmp/retained-workspace",
+		"Created conversation " + conversationID,
+	})
+	candidates := agyLogCandidates{paths: []string{
+		filepath.Join(appDir, "log", "rotated-away.log"),
+		validPath,
+	}}
+
+	workspace, logPath, err := workspaceFromLogCandidates(candidates, conversationID)
+	if err != nil {
+		t.Fatalf("removed candidate should not hide retained known-ID match: %v", err)
+	}
+	if workspace != "/tmp/retained-workspace" || logPath != validPath {
+		t.Fatalf("known-ID result = workspace %q log %q", workspace, logPath)
+	}
+}
+
+func TestLatestConversationForWorkspaceFromLogCandidatesSkipsRemovedFileBeforeScan(t *testing.T) {
+	appDir := t.TempDir()
+	workspace := "/tmp/retained-workspace"
+	validPath := writeAgyLog(t, appDir, "retained.log", []string{
+		workspaceMarker + workspace,
+		"Created conversation retained-conversation",
+	})
+	candidates := agyLogCandidates{paths: []string{
+		filepath.Join(appDir, "log", "rotated-away.log"),
+		validPath,
+	}}
+
+	conversationID, logPath, err := latestConversationForWorkspaceFromLogCandidates(candidates, workspace)
+	if err != nil {
+		t.Fatalf("removed candidate should not hide retained latest-workspace match: %v", err)
+	}
+	if conversationID != "retained-conversation" || logPath != validPath {
+		t.Fatalf("latest-workspace result = conversation %q log %q", conversationID, logPath)
+	}
+}
+
 func TestWorkspaceFromLogsReportsPerFileByteBudgetExhaustion(t *testing.T) {
 	appDir := t.TempDir()
 	conversationID := "117ff898-a964-4a9f-b460-1be4a8a49b17"
