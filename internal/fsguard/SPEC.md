@@ -61,7 +61,7 @@ state why.
 
 **FSG-13** When a command is prefixed by any runner (`env`, `sudo`, `doas`, `nohup`, `setsid`, `exec`, `time`, `nice`, `ionice`, `stdbuf`, `command`, `builtin`) including their option values (e.g. `sudo -u root`), the system shall strip the runner prefix before classifying the underlying command. The runner is matched by the command word's basename, so an absolute or PATH-qualified runner (e.g. `/usr/bin/sudo`) is stripped identically.
 
-**FSG-13a** When a command word is an absolute or PATH-qualified path (e.g. `/bin/rm`, `/usr/bin/git`), the system shall classify it by its basename so it cannot bypass the per-command write, git, gh, or runner analysis.
+**FSG-42** When a command word is an absolute or PATH-qualified path (e.g. `/bin/rm`, `/usr/bin/git`), the system shall classify it by its basename so it cannot bypass the per-command write, git, gh, or runner analysis.
 
 #### Shell nesting
 
@@ -71,15 +71,17 @@ state why.
 
 #### Write-target detection
 
-**FSG-16a** For write commands, a positional argument is a target whether it is path-shaped (absolute, `~`, `$HOME`, `.`/`..`) or a bare relative name (e.g. the `AGENTS.md` in `rm AGENTS.md`); bare names are resolved against the current working directory before classification. The value of a value-taking option (e.g. the `755` in `mkdir -m 755 d`) and a leading non-path spec operand (the mode/owner/group in `chmod 755 f`, `chown user f`, `chgrp grp f`) are excluded from targets.
+**FSG-43** When a write command's positional argument is a bare relative name (e.g. the `AGENTS.md` in `rm AGENTS.md`) rather than a path-shaped one (absolute, `~`, `$HOME`, `.`/`..`), the system shall resolve it against the current working directory and classify it as a write target.
 
-**FSG-16** When the command is `rm`, `touch`, `mkdir`, `rmdir`, `mv`, `unlink`, `shred`, or `mktemp`, the system shall classify all positional target arguments (see FSG-16a) as write targets.
+**FSG-44** The system shall not treat the value of a value-taking option (e.g. the `755` in `mkdir -m 755 d`) or a leading non-path spec operand (the mode/owner/group in `chmod 755 f`, `chown user f`, `chgrp grp f`) as a write target.
 
-**FSG-17** When the command is `tee`, the system shall classify all positional target arguments (see FSG-16a) as write targets (file arguments, not stdin).
+**FSG-16** When the command is `rm`, `touch`, `mkdir`, `rmdir`, `mv`, `unlink`, `shred`, or `mktemp`, the system shall classify all positional target arguments (see FSG-43, FSG-44) as write targets.
 
-**FSG-18** When the command is `cp`, `rsync`, `install`, `ln`, or `link`, the system shall classify only the last positional target argument (see FSG-16a; the destination) as a write target.
+**FSG-17** When the command is `tee`, the system shall classify all positional target arguments (see FSG-43, FSG-44) as write targets (file arguments, not stdin).
 
-**FSG-19** When the command is `chmod`, `chown`, `chgrp`, or `truncate`, the system shall classify all positional target arguments (see FSG-16a; the leading mode/owner/group spec is not a target) as write targets.
+**FSG-18** When the command is `cp`, `rsync`, `install`, `ln`, or `link`, the system shall classify only the last positional target argument (see FSG-43, FSG-44; the destination) as a write target.
+
+**FSG-19** When the command is `chmod`, `chown`, `chgrp`, or `truncate`, the system shall classify all positional target arguments (see FSG-43, FSG-44; the leading mode/owner/group spec is not a target) as write targets.
 
 **FSG-20** When the command is `dd`, the system shall classify only the `of=` argument as a write target.
 
