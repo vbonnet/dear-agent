@@ -28,7 +28,7 @@ type TmuxBackend struct {
 
 // New creates a new TmuxBackend.
 func New() *TmuxBackend {
-	return &TmuxBackend{killSession: tmux.KillSession}
+	return &TmuxBackend{killSession: tmux.KillSessionWithError}
 }
 
 // Name returns the backend identifier.
@@ -66,7 +66,7 @@ func (b *TmuxBackend) CreateSession(_ context.Context, config manager.SessionCon
 func (b *TmuxBackend) TerminateSession(_ context.Context, id manager.SessionID) error {
 	killSession := b.killSession
 	if killSession == nil {
-		killSession = tmux.KillSession
+		killSession = tmux.KillSessionWithError
 	}
 	if err := killSession(string(id)); err != nil {
 		return fmt.Errorf("terminate tmux session %q: %w", id, err)

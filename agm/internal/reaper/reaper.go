@@ -63,7 +63,7 @@ var (
 	sendPromptSafeFn   = tmux.SendMultiLinePromptSafe
 	waitForPaneCloseFn = tmux.WaitForPaneClose
 	isPaneActiveFn     = tmux.IsPaneActive
-	killSessionFn      = tmux.KillSession
+	killSessionFn      = tmux.KillSessionWithError
 	getPanePIDFn       = tmux.GetPanePID
 	processKillFn      = syscall.Kill
 	openStorageFn      = openStorage

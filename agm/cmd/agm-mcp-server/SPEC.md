@@ -33,6 +33,8 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
 
 **MCS-09** When `agm_kill_session` returns success outside dry-run mode, the MCP adapter shall provide a real tmux dependency to the shared kill operation, which shall remove and verify absence of the exact resolved tmux session.
 
+**MCS-09** When `agm_kill_session` receives a request, the MCP adapter shall propagate the request context and the explicit `force` and `confirmed_stuck` safety controls to the shared kill operation; cancellation observed before mutation shall leave tmux unchanged.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/mcp_parity.feature`

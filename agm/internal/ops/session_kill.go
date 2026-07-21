@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -114,10 +115,16 @@ func KillSession(ctx *OpContext, req *KillSessionRequest) (*KillSessionResult, e
 	if req == nil || req.Identifier == "" {
 		return nil, ErrInvalidInput("identifier", "Session identifier is required. Provide a session ID, name, or UUID prefix.")
 	}
+	if ctx == nil || ctx.Storage == nil {
+		return nil, ErrStorageError("kill_session", fmt.Errorf("storage is required"))
+	}
+	if err := killRequestContext(ctx).Err(); err != nil {
+		return nil, err
+	}
 
-	recentActivityThreshold := contracts.Load().SessionLifecycle.RecentActivityThreshold.Duration
-
-	// Resolve session
+	// Resolve only the stable session identity before taking the mutation lock.
+	// Mutable fields such as name and tmux identity are reloaded under that lock
+	// so a concurrent rename or resume cannot redirect this kill to a stale pane.
 	m, err := ctx.Storage.GetSession(req.Identifier)
 	if err != nil {
 		m, err = findByName(ctx, req.Identifier)
@@ -128,11 +135,40 @@ func KillSession(ctx *OpContext, req *KillSessionRequest) (*KillSessionResult, e
 	if m == nil {
 		return nil, ErrSessionNotFound(req.Identifier)
 	}
+	if m.SessionID == "" {
+		return nil, ErrStorageError("kill_session", fmt.Errorf("resolved session has no stable session ID"))
+	}
 
+	var result *KillSessionResult
+	err = WithSessionLock(m.SessionID, func() error {
+		if err := killRequestContext(ctx).Err(); err != nil {
+			return err
+		}
+		current, err := ctx.Storage.GetSession(m.SessionID)
+		if err != nil {
+			return ErrStorageError("kill_session_reload", err)
+		}
+		result, err = killResolvedSession(ctx, current, req)
+		return err
+	})
+	return result, err
+}
+
+func killRequestContext(ctx *OpContext) context.Context {
+	if ctx != nil && ctx.Context != nil {
+		return ctx.Context
+	}
+	return context.Background()
+}
+
+// killResolvedSession validates and mutates one session snapshot while its
+// stable-ID lifecycle lock is held.
+func killResolvedSession(ctx *OpContext, m *manifest.Manifest, req *KillSessionRequest) (*KillSessionResult, error) {
 	// Check if already archived
 	if m.Lifecycle == "archived" {
 		return nil, ErrSessionArchived(m.Name)
 	}
+	recentActivityThreshold := contracts.Load().SessionLifecycle.RecentActivityThreshold.Duration
 
 	tmuxName := m.Tmux.SessionName
 	if tmuxName == "" {
@@ -187,6 +223,9 @@ func KillSession(ctx *OpContext, req *KillSessionRequest) (*KillSessionResult, e
 	// One flag path must be sufficient.
 	if recentlyActive && !req.Force && !req.ConfirmedStuck {
 		return result, ErrKillProtected(m.Name, *lastActivity)
+	}
+	if err := killRequestContext(ctx).Err(); err != nil {
+		return result, err
 	}
 
 	if liveness.SessionExists {

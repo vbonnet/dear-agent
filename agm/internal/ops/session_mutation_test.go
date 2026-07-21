@@ -1,7 +1,9 @@
 package ops
 
 import (
+	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -180,6 +182,18 @@ type stubbornKillTmux struct {
 	*mockTmux
 }
 
+type observingKillStorage struct {
+	dolt.Storage
+	firstRead chan struct{}
+	once      sync.Once
+}
+
+func (s *observingKillStorage) GetSession(sessionID string) (*manifest.Manifest, error) {
+	m, err := s.Storage.GetSession(sessionID)
+	s.once.Do(func() { close(s.firstRead) })
+	return m, err
+}
+
 func (m *stubbornKillTmux) KillSession(name string) error {
 	m.killed = append(m.killed, name)
 	return nil
@@ -267,6 +281,87 @@ func TestKillSession_RemovesExactTmuxTarget(t *testing.T) {
 	}
 	if !tm.sessions["exact-target-child"] {
 		t.Error("prefix-related non-target session was removed")
+	}
+}
+
+func TestKillSession_ReloadsCurrentTargetUnderStableIDLock(t *testing.T) {
+	sessionID := "kill-lock-" + t.Name()
+	initial := newManifest(sessionID, "display-name", "~/project")
+	initial.Tmux.SessionName = "old-target"
+	initial.UpdatedAt = time.Now().Add(-time.Hour)
+	store := dolt.NewMockAdapter()
+	if err := store.CreateSession(initial); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	observed := &observingKillStorage{Storage: store, firstRead: make(chan struct{})}
+	tm := newMockTmux("old-target", "new-target")
+	opCtx := &OpContext{Storage: observed, Tmux: tm}
+
+	lockHeld := make(chan struct{})
+	releaseLock := make(chan struct{})
+	lockDone := make(chan error, 1)
+	go func() {
+		lockDone <- WithSessionLockTimeout(sessionID, time.Second, func() error {
+			close(lockHeld)
+			<-releaseLock
+			return nil
+		})
+	}()
+	<-lockHeld
+
+	type killOutcome struct {
+		result *KillSessionResult
+		err    error
+	}
+	killDone := make(chan killOutcome, 1)
+	go func() {
+		result, err := KillSession(opCtx, &KillSessionRequest{Identifier: sessionID, ConfirmedStuck: true})
+		killDone <- killOutcome{result: result, err: err}
+	}()
+	<-observed.firstRead
+
+	current, err := store.GetSession(sessionID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	current.Tmux.SessionName = "new-target"
+	if err := store.UpdateSession(current); err != nil {
+		t.Fatalf("UpdateSession: %v", err)
+	}
+	close(releaseLock)
+	if err := <-lockDone; err != nil {
+		t.Fatalf("lock owner: %v", err)
+	}
+
+	outcome := <-killDone
+	if outcome.err != nil {
+		t.Fatalf("KillSession: %v", outcome.err)
+	}
+	if outcome.result.TmuxSessionName != "new-target" {
+		t.Fatalf("resolved tmux target = %q, want reloaded new-target", outcome.result.TmuxSessionName)
+	}
+	if tm.sessions["new-target"] {
+		t.Fatal("reloaded target remains after successful kill")
+	}
+	if !tm.sessions["old-target"] {
+		t.Fatal("stale pre-lock target was killed")
+	}
+}
+
+func TestKillSession_CanceledRequestDoesNotMutateTmux(t *testing.T) {
+	tm := newMockTmux("my-session")
+	opCtx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")})
+	opCtx.Tmux = tm
+	requestCtx, cancel := context.WithCancel(t.Context())
+	cancel()
+	opCtx.Context = requestCtx
+
+	_, err := KillSession(opCtx, &KillSessionRequest{Identifier: "id-1", ConfirmedStuck: true})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("KillSession() error = %v, want context.Canceled", err)
+	}
+	if len(tm.killed) != 0 || !tm.sessions["my-session"] {
+		t.Fatalf("canceled request mutated tmux: killed=%v sessions=%v", tm.killed, tm.sessions)
 	}
 }
 

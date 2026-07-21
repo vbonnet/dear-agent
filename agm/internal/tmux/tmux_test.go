@@ -177,7 +177,7 @@ func TestHasSession(t *testing.T) {
 
 	// Kill session through the production boundary and require the backend
 	// command to succeed.
-	require.NoError(t, KillSession(sessionName))
+	require.NoError(t, KillSessionWithError(sessionName))
 	time.Sleep(100 * time.Millisecond)
 
 	// Session should not exist after killing
@@ -190,7 +190,7 @@ func TestKillSession_ReturnsBackendError(t *testing.T) {
 	_, cleanup := setupTestSocket(t)
 	defer cleanup()
 
-	err := KillSession("definitely-not-running")
+	err := KillSessionWithError("definitely-not-running")
 	require.Error(t, err, "a failed tmux kill command must be observable")
 }
 
@@ -202,10 +202,10 @@ func TestKillSession_UsesExactTarget(t *testing.T) {
 	for _, name := range []string{"kill-exact", "kill-exact-child"} {
 		require.NoError(t, NewSession(name, t.TempDir()))
 		name := name
-		t.Cleanup(func() { _ = KillSession(name) })
+		t.Cleanup(func() { _ = KillSessionWithError(name) })
 	}
 
-	require.NoError(t, KillSession("kill-exact"))
+	require.NoError(t, KillSessionWithError("kill-exact"))
 	exists, err := HasSession("kill-exact")
 	require.NoError(t, err)
 	assert.False(t, exists, "exact target should be absent")

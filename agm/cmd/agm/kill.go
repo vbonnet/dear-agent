@@ -172,14 +172,13 @@ func runKillCommand(cmd *cobra.Command, args []string) (retErr error) {
 		}, retErr)
 	}()
 
-	_ = ctx // span propagation to future sub-operations
-
 	// Construct OpContext with storage
 	opCtx, cleanup, err := newOpContextWithStorage()
 	if err != nil {
 		return fmt.Errorf("failed to connect to storage: %w", err)
 	}
 	defer cleanup()
+	opCtx.Context = ctx
 	interactiveSoftKill := !hardKill && !forceKill && !isJSONOutput()
 	// Interactive soft kill and hard-kill detection need a side-effect-free
 	// shared preflight. All non-interactive soft-kill paths execute the shared

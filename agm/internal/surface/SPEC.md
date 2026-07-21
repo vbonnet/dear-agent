@@ -27,6 +27,8 @@ Installed plugin Markdown is owned separately by the live Cobra tree.
 
 **AGM-SURFACE-08** While the Cobra tree owns installed plugin command contracts, the operation registry shall not declare a second Skill surface for those commands.
 
+**AGM-SURFACE-09** When the kill-session operation is generated for CLI or MCP, the request schema shall expose both the recent-activity `force` bypass and the active-harness `confirmed_stuck` confirmation used by the shared operation.
+
 ## BDD Traceability
 
 - `agm/test/bdd/features/agm_control_surface_guardrails.feature` enforces that this package keeps co-located SPEC coverage.
