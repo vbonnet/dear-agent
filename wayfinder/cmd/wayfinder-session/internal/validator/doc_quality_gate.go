@@ -238,15 +238,12 @@ func reviewDocument(docPath, skillName string) (float64, []string, bool, error) 
 		)
 	}
 
-	// Check cache
 	projectDir := filepath.Dir(docPath)
 	docFile := filepath.Base(docPath)
-	cachedScore, cacheHit := checkCache(projectDir, docFile, fileHash)
-	if cacheHit && cachedScore >= minDocQualityScore {
-		return cachedScore, nil, true, nil
-	}
 
-	// Run review skill
+	// Do not consult historical scores here. Earlier builds cached a structural
+	// preflight as a perfect review, so those entries do not carry enough
+	// provenance to satisfy the provider-backed quality gate.
 	score, issues, err := runReviewSkill(skillName, docPath)
 	if err != nil {
 		return 0, nil, false, err
@@ -260,8 +257,10 @@ func reviewDocument(docPath, skillName string) (float64, []string, bool, error) 
 	return score, issues, false, nil
 }
 
-// runReviewSkill applies the deterministic review bundled in the Wayfinder
-// binary. It deliberately avoids executable assets from ambient checkouts.
+// runReviewSkill applies deterministic structural preflight checks. A
+// substantive provider-backed reviewer is not bundled in the Wayfinder binary,
+// so a structurally valid document must fail closed instead of receiving a
+// manufactured passing score.
 func runReviewSkill(skillName string, docPath string) (float64, []string, error) {
 	data, err := os.ReadFile(docPath)
 	if err != nil {
@@ -278,7 +277,11 @@ func runReviewSkill(skillName string, docPath string) (float64, []string, error)
 	if len(issues) > 0 {
 		return 0, issues, nil
 	}
-	return 10, nil, nil
+	return 0, nil, NewValidationError(
+		"complete phase",
+		fmt.Sprintf("%s provider review is unavailable", skillName),
+		"Configure a supported provider-backed document review before completing this phase",
+	)
 }
 
 func builtinReviewIssues(skillName, content string) ([]string, error) {

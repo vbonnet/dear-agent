@@ -186,6 +186,7 @@ func TestValidateV2LifecycleMetadata(t *testing.T) {
 			BlockedReason:   "generic reason",
 			CreatedAt:       now,
 			UpdatedAt:       now,
+			WaypointHistory: completedHistoryBefore(WaypointV2Build, now),
 		}
 	}
 
@@ -339,6 +340,47 @@ func TestValidateV2RejectsMissingMandatoryPredecessors(t *testing.T) {
 
 	if err := ValidateV2(st); err == nil || !strings.Contains(err.Error(), "predecessor 'CHARTER' must be completed before 'BUILD'") {
 		t.Fatalf("ValidateV2() error = %v, want missing predecessor rejection", err)
+	}
+}
+
+func TestValidateV2RejectsMissingHistoryForLaterWaypoint(t *testing.T) {
+	now := time.Now()
+	st := &StatusV2{
+		SchemaVersion:   SchemaVersionV2,
+		ProjectName:     "test",
+		ProjectType:     ProjectTypeFeature,
+		RiskLevel:       RiskLevelM,
+		CurrentWaypoint: WaypointV2Build,
+		Status:          StatusV2InProgress,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		WaypointHistory: nil,
+	}
+
+	if err := ValidateV2(st); err == nil || !strings.Contains(err.Error(), "current_waypoint 'BUILD' requires completed predecessor 'CHARTER'") {
+		t.Fatalf("ValidateV2() error = %v, want nil-history predecessor rejection", err)
+	}
+}
+
+func TestValidateV2RejectsHistoryAheadOfCurrentWaypoint(t *testing.T) {
+	now := time.Now()
+	st := &StatusV2{
+		SchemaVersion:   SchemaVersionV2,
+		ProjectName:     "test",
+		ProjectType:     ProjectTypeFeature,
+		RiskLevel:       RiskLevelM,
+		CurrentWaypoint: WaypointV2Charter,
+		Status:          StatusV2InProgress,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		WaypointHistory: []WaypointHistory{
+			{Name: WaypointV2Charter, Status: WaypointStatusV2Completed, StartedAt: now, CompletedAt: &now},
+			{Name: WaypointV2Problem, Status: WaypointStatusV2Completed, StartedAt: now, CompletedAt: &now},
+		},
+	}
+
+	if err := ValidateV2(st); err == nil || !strings.Contains(err.Error(), "waypoint 'PROBLEM' cannot be ahead of current_waypoint 'CHARTER'") {
+		t.Fatalf("ValidateV2() error = %v, want history/current consistency rejection", err)
 	}
 }
 

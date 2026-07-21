@@ -1,6 +1,7 @@
 package statusread
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,20 +28,8 @@ current_waypoint: RETRO
 
 func TestParseFromDirReturnsValidatedConsumerFields(t *testing.T) {
 	dir := t.TempDir()
-	contents := `---
-schema_version: "2.0"
-project_name: reader-test
-project_type: feature
-risk_level: S
-current_waypoint: BUILD
-status: in-progress
-created_at: 2026-07-20T00:00:00Z
-updated_at: 2026-07-20T00:00:00Z
-beads:
-  - ce-reader
----
-`
-	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), []byte(contents), 0o600); err != nil {
+	contents := canonicalStatusBytes("reader-test", "BUILD", "beads:\n  - ce-reader\n")
+	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), contents, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -60,17 +49,7 @@ beads:
 }
 
 func TestParseValidatesExactStatusBytes(t *testing.T) {
-	contents := []byte(`---
-schema_version: "2.0"
-project_name: byte-reader
-project_type: feature
-risk_level: S
-current_waypoint: SETUP
-status: in-progress
-created_at: 2026-07-20T00:00:00Z
-updated_at: 2026-07-20T00:00:00Z
----
-`)
+	contents := canonicalStatusBytes("byte-reader", "SETUP", "")
 	summary, err := Parse(contents)
 	if err != nil {
 		t.Fatalf("Parse() error = %v", err)
@@ -83,6 +62,28 @@ updated_at: 2026-07-20T00:00:00Z
 	if _, err := Parse(invalid); err == nil || !strings.Contains(err.Error(), "invalid risk_level") {
 		t.Fatalf("Parse() error = %v, want invalid risk_level", err)
 	}
+}
+
+func canonicalStatusBytes(projectName, currentWaypoint, extraFields string) []byte {
+	var history strings.Builder
+	for _, waypoint := range []string{"CHARTER", "PROBLEM", "RESEARCH", "DESIGN", "SPEC", "PLAN", "SETUP", "BUILD", "RETRO"} {
+		if waypoint == currentWaypoint {
+			break
+		}
+		fmt.Fprintf(&history, "  - {name: %s, status: completed, started_at: 2026-07-20T00:00:00Z, completed_at: 2026-07-20T00:01:00Z}\n", waypoint)
+	}
+	return []byte(fmt.Sprintf(`---
+schema_version: "2.0"
+project_name: %s
+project_type: feature
+risk_level: S
+current_waypoint: %s
+status: in-progress
+created_at: 2026-07-20T00:00:00Z
+updated_at: 2026-07-20T00:00:00Z
+%swaypoint_history:
+%s---
+`, projectName, currentWaypoint, extraFields, history.String()))
 }
 
 func TestParseDerivesProgressFromCanonicalHistory(t *testing.T) {

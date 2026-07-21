@@ -41,6 +41,10 @@ describe('parseWayfinderStatus', () => {
     assert.throws(() => parseWayfinderStatus(canonical.replaceAll('\n', '\r\n')), /must start with ---/);
   });
 
+  it('requires the closing delimiter to occupy the complete line', () => {
+    assert.throws(() => parseWayfinderStatus(canonical.replace('\n---\n', '\n---   \n')), /missing closing ---/);
+  });
+
   it('rejects a non-canonical schema version', () => {
     assert.throws(() => parseWayfinderStatus(canonical.replace('"2.0"', '"1.0"')), /schema_version must be/);
   });
@@ -117,6 +121,16 @@ waypoint_history:
 ---
 `;
     assert.throws(() => parseWayfinderStatus(invalid), /requires completed predecessor "CHARTER"/);
+  });
+
+  it('rejects a later current waypoint when history is missing', () => {
+    const invalid = canonical.replace(/waypoint_history:[\s\S]*?\n---\n$/, '---\n');
+    assert.throws(() => parseWayfinderStatus(invalid), /requires completed predecessor "CHARTER"/);
+  });
+
+  it('rejects history entries ahead of the current waypoint', () => {
+    const invalid = canonical.replace('current_waypoint: BUILD', 'current_waypoint: CHARTER');
+    assert.throws(() => parseWayfinderStatus(invalid), /cannot be ahead of current_waypoint/);
   });
 
   it('requires blocked_reason for blocked status', () => {

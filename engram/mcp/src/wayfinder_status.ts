@@ -66,18 +66,18 @@ export interface WayfinderStatusSummary {
 type RecordValue = Record<string, unknown>;
 
 function extractFrontmatter(content: string): string {
-  if (!content.startsWith('---\n')) {
+  const lines = content.split('\n');
+  if (lines[0] !== '---') {
     throw new Error('invalid Wayfinder V2 status: must start with ---');
   }
-  const closing = content.indexOf('\n---', 4);
-  if (closing < 0) {
+  const closingLine = lines.indexOf('---', 1);
+  if (closingLine < 0) {
     throw new Error('invalid Wayfinder V2 status: missing closing ---');
   }
-  const remainder = content.slice(closing + 4).trim();
-  if (remainder !== '') {
+  if (lines.slice(closingLine + 1).some((line) => line.trim() !== '')) {
     throw new Error('invalid Wayfinder V2 status: content after closing --- is not allowed');
   }
-  return content.slice(4, closing);
+  return lines.slice(1, closingLine).join('\n');
 }
 
 function asRecord(value: unknown, path: string): RecordValue {
@@ -344,7 +344,11 @@ function validateSkipPhases(record: RecordValue): string[] {
   return phases;
 }
 
-function completedWaypoints(record: RecordValue, configuredSkips: ReadonlySet<string>): Set<string> {
+function completedWaypoints(
+  record: RecordValue,
+  configuredSkips: ReadonlySet<string>,
+  currentPosition: number,
+): Set<string> {
   const history = record.waypoint_history;
   if (history === undefined || history === null) return new Set();
   if (!Array.isArray(history)) {
@@ -399,6 +403,9 @@ function completedWaypoints(record: RecordValue, configuredSkips: ReadonlySet<st
     optionalInteger(waypoint, 'build_iterations', path);
     validateBuildMetrics(waypoint.build_metrics, `${path}.build_metrics`);
     const position = WAYPOINTS.indexOf(name as never);
+    if (position > currentPosition) {
+      throw new Error(`invalid Wayfinder V2 status: ${path} waypoint ${JSON.stringify(name)} cannot be ahead of current_waypoint`);
+    }
     if (position < lastPosition) {
       throw new Error(`invalid Wayfinder V2 status: ${path} waypoint ${JSON.stringify(name)} is out of canonical order`);
     }
@@ -467,8 +474,8 @@ export function parseWayfinderStatus(content: string): WayfinderStatusSummary {
 
   const configuredSkips = new Set<string>(validateSkipPhases(record));
   if (record.skip_roadmap === true) configuredSkips.add('SETUP');
-  const complete = completedWaypoints(record, configuredSkips);
   const currentPosition = WAYPOINTS.indexOf(phase as never);
+  const complete = completedWaypoints(record, configuredSkips, currentPosition);
   for (const predecessor of WAYPOINTS.slice(0, currentPosition)) {
     if (!configuredSkips.has(predecessor) && !complete.has(predecessor)) {
       throw new Error(`invalid Wayfinder V2 status: current_waypoint ${JSON.stringify(phase)} requires completed predecessor ${JSON.stringify(predecessor)}`);

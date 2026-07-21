@@ -184,10 +184,6 @@ func validateLifecycleState(status *StatusV2) error {
 
 // validateWaypointHistory checks waypoint history consistency
 func validateWaypointHistory(status *StatusV2) error {
-	if status.WaypointHistory == nil {
-		return nil // Waypoint history is optional
-	}
-
 	var errors []string
 	allWaypoints := AllWaypointsV2Schema()
 	seenWaypoints := make(map[string]bool, len(status.WaypointHistory))
@@ -249,6 +245,12 @@ func validateWaypointSequence(status *StatusV2, allWaypoints []string) []string 
 	currentPosition, currentValid := positions[status.CurrentWaypoint]
 	if !currentValid {
 		return errors
+	}
+	for index, waypoint := range status.WaypointHistory {
+		position, valid := positions[waypoint.Name]
+		if valid && position > currentPosition {
+			errors = append(errors, fmt.Sprintf("waypoint_history[%d]: waypoint '%s' cannot be ahead of current_waypoint '%s'", index, waypoint.Name, status.CurrentWaypoint))
+		}
 	}
 	completed := completedWaypoints(status)
 	for _, predecessor := range missingPredecessors(status, allWaypoints[:currentPosition], completed) {

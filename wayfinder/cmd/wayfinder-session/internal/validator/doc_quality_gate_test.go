@@ -48,7 +48,7 @@ func TestValidateDocQuality_NonValidatedPhase(t *testing.T) {
 	}
 }
 
-func TestRunReviewSkillUsesContainedDeterministicChecks(t *testing.T) {
+func TestRunReviewSkillReportsUnavailableAfterDeterministicPreflight(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ARCHITECTURE.md")
 	content := "# Architecture\n\n## Context\nThis section records the current system boundaries and constraints.\n\n## Design\nThis section records the chosen seams, invariants, and trade-offs in enough detail for implementation.\n"
@@ -56,11 +56,28 @@ func TestRunReviewSkillUsesContainedDeterministicChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	score, issues, err := runReviewSkill("review-architecture", path)
-	if err != nil {
+	if err == nil {
+		t.Fatal("expected unavailable provider review to fail closed")
+	}
+	if score != 0 || len(issues) != 0 {
+		t.Fatalf("unavailable review = score %.1f, issues %v; want no manufactured score", score, issues)
+	}
+	var validationErr *ValidationError
+	if !errors.As(err, &validationErr) || !strings.Contains(validationErr.Reason, "provider review is unavailable") {
+		t.Fatalf("runReviewSkill() error = %v, want explicit provider boundary", err)
+	}
+}
+
+func TestRunReviewSkillDoesNotPassHeadingOnlyFiller(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ARCHITECTURE.md")
+	content := "# Architecture\n\n## Context\n" + strings.Repeat("filler ", 20) + "\n\n## Design\n" + strings.Repeat("filler ", 20) + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if score != 10 || len(issues) != 0 {
-		t.Fatalf("contained review = score %.1f, issues %v; want 10 with no issues", score, issues)
+	score, _, err := runReviewSkill("review-architecture", path)
+	if err == nil || score >= minDocQualityScore {
+		t.Fatalf("heading-only filler received score %.1f and error %v; want fail-closed review", score, err)
 	}
 }
 

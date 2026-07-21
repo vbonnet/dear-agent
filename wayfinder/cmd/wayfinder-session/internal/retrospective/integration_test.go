@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	wayfinderstatus "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
 
 // Integration tests for end-to-end retrospective logging workflows
@@ -364,64 +367,33 @@ func TestIntegration_RETROMarkdownFormat(t *testing.T) {
 	}
 }
 
-// Helper function to create WAYFINDER-STATUS.md file
-func createStatusFile(t *testing.T, dir string, currentPhase string) {
+// Helper function to create a canonical WAYFINDER-STATUS.md file.
+func createStatusFile(t *testing.T, dir string, currentWaypoint string) {
 	t.Helper()
-
-	statusContent := `---
-schema_version: "2.0"
-project_name: test-session-integration
-project_type: feature
-risk_level: S
-current_waypoint: ` + currentPhase + `
-status: in-progress
-created_at: "2024-01-01T09:00:00Z"
-updated_at: "2024-01-07T10:00:00Z"
-waypoint_history:
-  - name: CHARTER
-    status: completed
-    started_at: "2024-01-01T10:00:00Z"
-    completed_at: "2024-01-01T11:00:00Z"
-  - name: PROBLEM
-    status: completed
-    started_at: "2024-01-01T12:00:00Z"
-    completed_at: "2024-01-01T13:00:00Z"
-  - name: RESEARCH
-    status: completed
-    started_at: "2024-01-02T10:00:00Z"
-    completed_at: "2024-01-02T11:00:00Z"
-  - name: DESIGN
-    status: completed
-    started_at: "2024-01-03T10:00:00Z"
-    completed_at: "2024-01-03T11:00:00Z"
-  - name: SPEC
-    status: completed
-    started_at: "2024-01-04T10:00:00Z"
-    completed_at: "2024-01-04T11:00:00Z"
-    stakeholder_approved: true
-  - name: PLAN
-    status: completed
-    started_at: "2024-01-05T10:00:00Z"
-    completed_at: "2024-01-05T11:00:00Z"
-    tests_feature_created: true
-  - name: SETUP
-    status: completed
-    started_at: "2024-01-05T12:00:00Z"
-    completed_at: "2024-01-05T13:00:00Z"
-  - name: BUILD
-    status: completed
-    started_at: "2024-01-06T10:00:00Z"
-    completed_at: "2024-01-06T11:00:00Z"
-    validation_status: passed
-    deployment_status: deployed
-  - name: RETRO
-    status: in-progress
-    started_at: "2024-01-07T10:00:00Z"
----
-`
-
+	now := time.Date(2024, time.January, 7, 10, 0, 0, 0, time.UTC)
+	projectStatus := &wayfinderstatus.StatusV2{
+		SchemaVersion:   wayfinderstatus.SchemaVersionV2,
+		ProjectName:     "test-session-integration",
+		ProjectType:     wayfinderstatus.ProjectTypeFeature,
+		RiskLevel:       wayfinderstatus.RiskLevelS,
+		CurrentWaypoint: currentWaypoint,
+		Status:          wayfinderstatus.StatusV2InProgress,
+		CreatedAt:       now.Add(-time.Hour),
+		UpdatedAt:       now,
+	}
+	for _, waypoint := range wayfinderstatus.AllWaypointsV2Schema() {
+		entry := wayfinderstatus.WaypointHistory{Name: waypoint, StartedAt: now}
+		if waypoint == currentWaypoint {
+			entry.Status = wayfinderstatus.WaypointStatusV2InProgress
+			projectStatus.WaypointHistory = append(projectStatus.WaypointHistory, entry)
+			break
+		}
+		entry.Status = wayfinderstatus.WaypointStatusV2Completed
+		entry.CompletedAt = &now
+		projectStatus.WaypointHistory = append(projectStatus.WaypointHistory, entry)
+	}
 	statusPath := filepath.Join(dir, "WAYFINDER-STATUS.md")
-	if err := os.WriteFile(statusPath, []byte(statusContent), 0644); err != nil {
+	if err := wayfinderstatus.WriteV2(projectStatus, statusPath); err != nil {
 		t.Fatalf("Failed to create STATUS file: %v", err)
 	}
 }
