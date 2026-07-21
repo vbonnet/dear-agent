@@ -61,8 +61,11 @@ Important launch invariants:
 ## Send
 
 `agm send msg` treats `codex-cli` as a tmux-backed harness. When the shared
-state detector sees the Codex composer (`OpenAI Codex` with `/model to change`
-footer chrome), delivery is `YES` and AGM sends directly to the tmux pane.
+state detector sees a complete Codex composer—the initial `OpenAI Codex`
+header with `/model to change`, or a post-turn input cursor paired with the
+structured `gpt-* · <workdir>` footer—delivery is `YES` and AGM sends directly
+to the tmux pane. A model name in an echoed launch command or beside a
+`Working` status is not a composer and remains queued.
 
 Codex menus and trust prompts are not idle composers. They remain queued or
 blocked rather than receiving injected prompt text.

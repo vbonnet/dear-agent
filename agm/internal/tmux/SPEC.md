@@ -64,13 +64,15 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-29** When command-scoped file or slash-command delivery or prompt-delivery verification runs, the system shall derive composer waits, pane-capture subprocesses, verification backoff, and retry sends from the caller context and shall not write or retry prompt bytes after cancellation.
 
-**TMUX-30** When command-scoped harness liveness validation runs, the system shall derive the tmux and process-table subprocess timeout from the caller context and return cancellation instead of allowing later completion or attach.
+**TMUX-30** When command-scoped harness liveness validation runs, the system shall derive the tmux, process-table, and Codex Node-wrapper fallback scans from the caller context and return cancellation instead of allowing a later scan completion or attach.
 
 **TMUX-31** When pane liveness is classified for command injection safety, the system shall positively identify a restartable shell only when exactly one pane exists, its process tree is observable, and every process in that tree is a plain interactive shell; any other foreground or descendant process shall fail that proof.
 
 **TMUX-26** When a caller requests liveness for a named harness process, the system shall scan the full pane descendant tree for that exact process and shall return scan failures separately from a proven dead result.
 
 **TMUX-31** When a transactional cleanup kills and verifies a tmux session, the system shall treat only an explicit missing-session response as absence and shall return socket, timeout, permission, and other backend failures instead of reporting cleanup success.
+
+**TMUX-32** When Codex readiness is checked, the system shall require either the initial composer header with its model-change hint or a post-turn `›` input cursor paired with a structured model footer, and shall reject standalone model text in echoed launch commands, working-status footers, or unsubmitted paste chips.
 
 ## BDD Traceability
 

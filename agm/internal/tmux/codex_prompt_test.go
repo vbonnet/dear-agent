@@ -34,14 +34,44 @@ func TestContainsCodexPromptPattern(t *testing.T) {
 		expected bool
 	}{
 		{
-			name:     "composer box header",
-			content:  "│ >_ OpenAI Codex (v0.141.0)            │",
+			name:     "structured initial composer",
+			content:  "│ >_ OpenAI Codex (v0.141.0) │\n│ model: gpt-5.5 xhigh /model to change │",
 			expected: true,
 		},
 		{
-			name:     "model status hint",
+			name:     "header alone is incomplete",
+			content:  "│ >_ OpenAI Codex (v0.141.0) │",
+			expected: false,
+		},
+		{
+			name:     "model status hint alone is incomplete",
 			content:  "│ model:     gpt-5.5 xhigh   /model to change │",
+			expected: false,
+		},
+		{
+			name:     "post-turn cursor and footer",
+			content:  "› Continue the task\n\n  gpt-5.6 xhigh · ~/src/project",
 			expected: true,
+		},
+		{
+			name:     "working footer is not ready",
+			content:  "• Working (3s • esc to interrupt)\n  gpt-5.6 xhigh · ~/src/project",
+			expected: false,
+		},
+		{
+			name:     "latest working footer overrides stale initial composer",
+			content:  "│ >_ OpenAI Codex (v0.141.0) │\n│ /model to change │\n• Working (3s • esc to interrupt)\n  gpt-5.6 xhigh · ~/src/project",
+			expected: false,
+		},
+		{
+			name:     "unsubmitted paste before footer is not ready",
+			content:  "> [Pasted Content 2172 chars]\n  gpt-5.6 xhigh · ~/src/project",
+			expected: false,
+		},
+		{
+			name:     "echoed launch model is not ready",
+			content:  "user@host$ codex resume abc -m 'gpt-5.6'",
+			expected: false,
 		},
 		{
 			name:     "input box top border",
@@ -179,7 +209,7 @@ func TestCodexPromptPatternsIncludeHeader(t *testing.T) {
 // containsAnyHarnessPromptPattern must also recognize Codex's composer so the
 // harness-agnostic send path (SendPromptLiteral) detects Codex readiness.
 func TestContainsAnyHarnessPromptPatternMatchesCodex(t *testing.T) {
-	if !containsAnyHarnessPromptPattern("│ >_ OpenAI Codex (v0.141.0) │") {
+	if !containsAnyHarnessPromptPattern("│ >_ OpenAI Codex (v0.141.0) │\n│ /model to change │") {
 		t.Error("containsAnyHarnessPromptPattern should match the Codex composer header")
 	}
 }
@@ -191,7 +221,7 @@ func TestWaitForCodexPromptPolling(t *testing.T) {
 	socketPath := newCodexTestSession(t, sessionName)
 
 	// Print the Codex composer header into the pane.
-	sendCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "echo 'OpenAI Codex (v0.141.0)'", "Enter")
+	sendCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "printf 'OpenAI Codex (v0.141.0)\\n/model to change\\n'", "Enter")
 	if err := sendCmd.Run(); err != nil {
 		t.Fatalf("Failed to send composer signal: %v", err)
 	}
@@ -205,7 +235,7 @@ func TestWaitForPromptSimpleDetectsCodexComposerAboveFooter(t *testing.T) {
 	sessionName := "test-codex-simple-prompt-tail"
 	socketPath := newCodexTestSession(t, sessionName)
 
-	script := "printf 'OpenAI Codex (v0.142.0)\\n'; for i in 1 2 3 4 5 6 7 8 9 10; do printf 'footer line %s\\n' \"$i\"; done"
+	script := "printf 'OpenAI Codex (v0.142.0)\\n/model to change\\n'; for i in 1 2 3 4 5 6 7 8 9 10; do printf 'footer line %s\\n' \"$i\"; done"
 	sendCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, script, "Enter")
 	if err := sendCmd.Run(); err != nil {
 		t.Fatalf("Failed to send Codex composer fixture: %v", err)
@@ -238,7 +268,7 @@ func TestIsCodexIdleComposerVisible(t *testing.T) {
 	socketPath := newCodexTestSession(t, sessionName)
 
 	// Render the Codex composer header into the pane.
-	sendCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "echo 'OpenAI Codex (v0.141.0)'", "Enter")
+	sendCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "printf 'OpenAI Codex (v0.141.0)\\n/model to change\\n'", "Enter")
 	if err := sendCmd.Run(); err != nil {
 		t.Fatalf("Failed to send composer signal: %v", err)
 	}
@@ -266,8 +296,7 @@ func TestIsCodexIdleComposerVisible(t *testing.T) {
 // no composer (i.e. Codex is working / no TUI signals present).
 func TestIsCodexIdleWorking(t *testing.T) {
 	sessionName := "test-codex-idle-working"
-	// A bare sleep produces no composer chrome, so the pane looks "working".
-	newCodexTestSession(t, sessionName, "sh", "-c", "sleep 30")
+	newCodexTestSession(t, sessionName, "sh", "-c", "printf '• Working (3s • esc to interrupt)\\n  gpt-5.6 xhigh · ~/src/project\\n'; sleep 30")
 
 	idle, err := IsCodexIdle(sessionName)
 	if err != nil {
@@ -275,6 +304,16 @@ func TestIsCodexIdleWorking(t *testing.T) {
 	}
 	if idle {
 		t.Error("IsCodexIdle = true, want false when composer is not visible")
+	}
+}
+
+func TestWaitForCodexPromptRejectsEchoedLaunchModel(t *testing.T) {
+	sessionName := "test-codex-echoed-model"
+	newCodexTestSession(t, sessionName, "sh", "-c", "printf \"user@host$ codex resume abc -m 'gpt-5.6'\\n\"; sleep 30")
+
+	err := WaitForCodexPrompt(sessionName, time.Second)
+	if err == nil || !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("WaitForCodexPrompt() error = %v, want timeout without a composer", err)
 	}
 }
 
@@ -324,7 +363,7 @@ func TestWaitForCodexPromptAutoAcceptsTrust(t *testing.T) {
 	// receiving any input line (the auto-accepted Enter) — prints the composer
 	// header. This exercises both the trust detection and the post-accept
 	// readiness path.
-	script := "printf 'Do you trust the contents of this directory?\\n'; read _; printf 'OpenAI Codex (v0.141.0)\\n'; sleep 30"
+	script := "printf 'Do you trust the contents of this directory?\\n'; read _; printf 'OpenAI Codex (v0.141.0)\\n/model to change\\n'; sleep 30"
 	newCodexTestSession(t, sessionName, "sh", "-c", script)
 
 	if err := WaitForCodexPrompt(sessionName, 10*time.Second); err != nil {
@@ -337,7 +376,7 @@ func TestWaitForCodexPromptAutoAcceptsTrust(t *testing.T) {
 // requested existing model instead of accepting the highlighted upgrade option.
 func TestWaitForCodexPromptSelectsExistingModel(t *testing.T) {
 	sessionName := "test-codex-model-upgrade"
-	script := "printf \"Choose how you'd like Codex to proceed\\n› 1. Try new model\\n  2. Use existing model\\n\"; read _; printf 'OpenAI Codex (v0.141.0)\\n'; sleep 30"
+	script := "printf \"Choose how you'd like Codex to proceed\\n› 1. Try new model\\n  2. Use existing model\\n\"; read _; printf 'OpenAI Codex (v0.141.0)\\n/model to change\\n'; sleep 30"
 	newCodexTestSession(t, sessionName, "sh", "-c", script)
 
 	if err := WaitForCodexPrompt(sessionName, 10*time.Second); err != nil {

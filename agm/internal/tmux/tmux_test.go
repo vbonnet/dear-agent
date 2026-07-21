@@ -1,6 +1,8 @@
 package tmux
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -435,6 +437,7 @@ func TestWaitForProcessReady(t *testing.T) {
 func TestIsProcessReadyWithRuntimeSupportsCodexNodeWrapper(t *testing.T) {
 	var treeChecks []string
 	running, err := isProcessReadyWithRuntime(
+		t.Context(),
 		"codex-session",
 		"codex",
 		"/tmp/agm.sock",
@@ -443,11 +446,11 @@ func TestIsProcessReadyWithRuntimeSupportsCodexNodeWrapper(t *testing.T) {
 			assert.Equal(t, "codex", processName)
 			return false, nil
 		},
-		func(sessionName, socketPath, processName string) bool {
+		func(_ context.Context, sessionName, socketPath, processName string) (bool, error) {
 			assert.Equal(t, "codex-session", sessionName)
 			assert.Equal(t, "/tmp/agm.sock", socketPath)
 			treeChecks = append(treeChecks, processName)
-			return processName == "node"
+			return processName == "node", nil
 		},
 	)
 	require.NoError(t, err)
@@ -458,18 +461,61 @@ func TestIsProcessReadyWithRuntimeSupportsCodexNodeWrapper(t *testing.T) {
 func TestIsProcessReadyWithRuntimeDoesNotBroadenOtherProcesses(t *testing.T) {
 	treeCalled := false
 	running, err := isProcessReadyWithRuntime(
+		t.Context(),
 		"claude-session",
 		"claude",
 		"/tmp/agm.sock",
 		func(string, string) (bool, error) { return false, nil },
-		func(string, string, string) bool {
+		func(context.Context, string, string, string) (bool, error) {
 			treeCalled = true
-			return true
+			return true, nil
 		},
 	)
 	require.NoError(t, err)
 	assert.False(t, running)
 	assert.False(t, treeCalled, "Codex-specific Node fallback must not change other process checks")
+}
+
+func TestIsProcessReadyWithRuntimePreservesCancellationBeforeCodexFallback(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	treeCalled := false
+	running, err := isProcessReadyWithRuntime(
+		ctx,
+		"codex-session",
+		"codex",
+		"/tmp/agm.sock",
+		func(string, string) (bool, error) {
+			cancel()
+			return false, errors.New("foreground probe interrupted")
+		},
+		func(context.Context, string, string, string) (bool, error) {
+			treeCalled = true
+			return true, nil
+		},
+	)
+	assert.False(t, running)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.False(t, treeCalled, "canceled foreground probe must not enter the process-tree fallback")
+}
+
+func TestIsProcessReadyWithRuntimePreservesCancellationDuringCodexFallback(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	var treeChecks []string
+	running, err := isProcessReadyWithRuntime(
+		ctx,
+		"codex-session",
+		"codex",
+		"/tmp/agm.sock",
+		func(string, string) (bool, error) { return false, nil },
+		func(_ context.Context, _, _, processName string) (bool, error) {
+			treeChecks = append(treeChecks, processName)
+			cancel()
+			return false, nil
+		},
+	)
+	assert.False(t, running)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, []string{"codex"}, treeChecks, "cancellation must prevent the Node fallback scan")
 }
 
 // TestIsClaudeProcess tests Claude Code process name detection.

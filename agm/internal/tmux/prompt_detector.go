@@ -455,7 +455,19 @@ func WaitForPromptSimpleContext(parent context.Context, sessionName string, time
 			continue
 		}
 
-		lines := strings.Split(string(output), "\n")
+		content := string(output)
+		lines := strings.Split(content, "\n")
+
+		// Codex readiness is a multi-line contract: the initial header must be
+		// paired with its hint, and the post-turn cursor with its footer. Evaluate
+		// the captured pane before the legacy line-oriented harness checks.
+		if containsCodexPromptPattern(content) {
+			debug.Log("✓ Codex composer detected (check #%d)", checkCount)
+			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+				return err
+			}
+			return nil
+		}
 
 		// Check each line for any harness prompt pattern (Claude or Gemini)
 		for i, line := range lines {
@@ -559,7 +571,8 @@ func WaitForPromptOrResumeFailureContext(parent context.Context, sessionName str
 			continue
 		}
 
-		lines := strings.Split(string(output), "\n")
+		content := string(output)
+		lines := strings.Split(content, "\n")
 
 		// Check for a fatal resume failure first - it is the more specific
 		// signal and a returned shell prompt could otherwise look like success.
@@ -568,6 +581,14 @@ func WaitForPromptOrResumeFailureContext(parent context.Context, sessionName str
 				debug.Log("✗ Resume failure detected (check #%d): %q", checkCount, strings.TrimSpace(line))
 				return &ResumeFailureError{Detail: strings.TrimSpace(line)}
 			}
+		}
+
+		if containsCodexPromptPattern(content) {
+			debug.Log("✓ Codex composer detected (check #%d)", checkCount)
+			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+				return err
+			}
+			return nil
 		}
 
 		for i, line := range lines {

@@ -57,6 +57,8 @@ For `codex-cli`, AGM treats Codex as a real interactive CLI harness:
 - send safety MUST evaluate `codex-cli` readiness with Codex-specific composer
   and onboarding detection, never by requiring a Claude process
 - state detection MUST recognize an idle Codex composer as `ready`/sendable
+  only from a complete initial header/hint or post-turn cursor/footer pair;
+  standalone model text and working-status footers MUST remain non-ready
 - state detection MUST NOT treat Codex trust prompts or menu selectors as idle
   composers
 - archive paths MUST archive the matching Codex saved session by resolving the

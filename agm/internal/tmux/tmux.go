@@ -902,15 +902,19 @@ func isProcessReadyContext(ctx context.Context, sessionName, processName string)
 	isForeground := func(sessionName, processName string) (bool, error) {
 		return IsProcessRunningContext(ctx, sessionName, processName)
 	}
-	return isProcessReadyWithRuntime(sessionName, processName, GetSocketPath(), isForeground, IsProcessInPaneTree)
+	return isProcessReadyWithRuntime(ctx, sessionName, processName, GetSocketPath(), isForeground, IsProcessInPaneTreeContext)
 }
 
 func isProcessReadyWithRuntime(
+	ctx context.Context,
 	sessionName, processName, socketPath string,
 	isForeground func(string, string) (bool, error),
-	isInPaneTree func(string, string, string) bool,
+	isInPaneTree func(context.Context, string, string, string) (bool, error),
 ) (bool, error) {
 	running, err := isForeground(sessionName, processName)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return false, ctxErr
+	}
 	if running {
 		return true, nil
 	}
@@ -922,8 +926,17 @@ func isProcessReadyWithRuntime(
 	// "node" as the foreground command even though a healthy Codex harness is
 	// running. Use the shared full-descendant scan so both the native binary
 	// and its Node wrapper satisfy Codex readiness.
-	if isInPaneTree(sessionName, socketPath, "codex") || isInPaneTree(sessionName, socketPath, "node") {
-		return true, nil
+	for _, candidate := range []string{"codex", "node"} {
+		running, treeErr := isInPaneTree(ctx, sessionName, socketPath, candidate)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return false, ctxErr
+		}
+		if treeErr != nil {
+			return false, treeErr
+		}
+		if running {
+			return true, nil
+		}
 	}
 	return false, err
 }

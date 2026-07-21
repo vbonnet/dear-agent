@@ -4,6 +4,7 @@ package state
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -60,7 +61,6 @@ type Detector struct {
 	blockedInputPattern      *regexp.Regexp
 	blockedPermissionPattern *regexp.Regexp
 	readyPattern             *regexp.Regexp
-	codexReadyPattern        *regexp.Regexp
 	agyReadyPattern          *regexp.Regexp
 	agySurveyPattern         *regexp.Regexp
 	waitingAgentPattern      *regexp.Regexp
@@ -112,14 +112,6 @@ func NewDetector() *Detector {
 		// Includes \x{00a0} (NBSP) because Claude Code renders ❯ followed by NBSP.
 		// The pane may have a status bar (━━━) and trailing blank lines after the prompt.
 		readyPattern: regexp.MustCompile(`(?m)❯[\s\x{00a0}]*$`),
-
-		// Codex Ready: Codex CLI composer/footer chrome. Keep this specific to
-		// Codex text so generic box-drawing UI or menu selectors do not become
-		// sendable prompts.
-		// After the first exchange the bordered composer box ("OpenAI Codex" /
-		// "/model to change") scrolls off; only the footer "gpt-X.Y quality ·
-		// /path" remains. "gpt-\d" covers both the initial and post-exchange state.
-		codexReadyPattern: regexp.MustCompile(`(?ms)(?:>_\s+OpenAI Codex|OpenAI Codex[\s\S]*?/model to change|gpt-\d)`),
 
 		// AGY Ready: the live AGY interactive prompt is a bare ">" line after
 		// the last response. Keep it line-anchored so trust/menu lines like
@@ -221,7 +213,7 @@ func (d *Detector) DetectState(output string, lastOutputTime time.Time) Detectio
 		}
 	}
 
-	if d.codexReadyPattern.MatchString(output) {
+	if codexComposerReady(output) {
 		return DetectionResult{
 			State:      StateReady,
 			Timestamp:  now,
@@ -407,8 +399,8 @@ func (d *Detector) CheckCanReceive(output string) CanReceive {
 		return CanReceiveYes
 	}
 
-	// Codex composer/footer visible = session is at idle prompt, can receive.
-	if d.codexReadyPattern.MatchString(output) {
+	// Complete Codex composer visible = session is at idle prompt, can receive.
+	if codexComposerReady(output) {
 		return CanReceiveYes
 	}
 
@@ -419,6 +411,48 @@ func (d *Detector) CheckCanReceive(output string) CanReceive {
 
 	// No prompt visible = session is busy, queue for later
 	return CanReceiveQueue
+}
+
+var codexFooterPattern = regexp.MustCompile(`^gpt-\d[^\n]*\s·\s[^\n]+$`)
+
+// codexComposerReady recognizes the two complete Codex composer forms. A bare
+// model name is deliberately insufficient because it is also rendered in
+// echoed launch commands and in the footer while Codex is still working.
+func codexComposerReady(output string) bool {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	if len(lines) == 0 {
+		return false
+	}
+
+	// The last structured footer owns the current post-turn state. It is ready
+	// only when the nearest preceding non-empty line is an input cursor.
+	for i, line := range slices.Backward(lines) {
+		if !codexFooterPattern.MatchString(strings.TrimSpace(line)) {
+			continue
+		}
+		for j := i - 1; j >= 0 && j >= i-3; j-- {
+			candidate := strings.TrimSpace(lines[j])
+			if candidate == "" {
+				continue
+			}
+			return strings.HasPrefix(candidate, "›")
+		}
+		return false
+	}
+
+	// The initial bordered composer is complete only when the stable header and
+	// model-change hint occur in the same compact block.
+	for i, line := range lines {
+		if !strings.Contains(line, "OpenAI Codex") {
+			continue
+		}
+		for j := i + 1; j < len(lines) && j <= i+4; j++ {
+			if strings.Contains(lines[j], "/model to change") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // agySurveyOverlayActive distinguishes a live survey from stale survey text
