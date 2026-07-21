@@ -38,6 +38,8 @@ path resolution for sessions, costs, and temporary data.
 
 **WF-SANDBOX-14** When Git worktree removal fails, the system shall not bypass Git worktree protection with direct filesystem deletion or metadata pruning.
 
+**WF-SANDBOX-15** When sandbox tests exercise basic creation, listing, and cleanup, the system shall isolate the process working directory so the invoking repository's worktree registry remains unchanged.
+
 ## BDD Traceability
 
 - `agm/test/bdd/features/sandbox_provider_guardrails.feature` enforces that this

@@ -50,12 +50,12 @@ func BuildHarnessLaunchCommand(spec HarnessLaunchSpec) HarnessLaunchCommand {
 	case "agy":
 		return buildAgyLaunchCommand(spec, exitSuffix)
 	case "opencode-cli":
-		return HarnessLaunchCommand{Command: fmt.Sprintf("cd %s && opencode attach%s", shellQuoteArg(spec.WorkDir), exitSuffix)}
+		return HarnessLaunchCommand{Command: fmt.Sprintf("cd %s && opencode attach%s", launchparity.ShellQuote(spec.WorkDir), exitSuffix)}
 	case "gemini-cli":
 		resolvedModel := agent.ResolveModelFullName("gemini-cli", spec.Model)
-		return HarnessLaunchCommand{Command: fmt.Sprintf("gemini -m %s%s", shellQuoteArg(resolvedModel), exitSuffix)}
+		return HarnessLaunchCommand{Command: fmt.Sprintf("gemini -m %s%s", launchparity.ShellQuote(resolvedModel), exitSuffix)}
 	default:
-		return HarnessLaunchCommand{Command: fmt.Sprintf("echo %s && exit 1", shellQuoteArg("Unknown harness: "+spec.Harness))}
+		return HarnessLaunchCommand{Command: fmt.Sprintf("echo %s && exit 1", launchparity.ShellQuote("Unknown harness: "+spec.Harness))}
 	}
 }
 
@@ -69,20 +69,20 @@ func buildClaudeLaunchCommand(spec HarnessLaunchSpec, exitSuffix string) Harness
 	oauthArg := ""
 	if oauthToken != "" {
 		envUnset += " -u ANTHROPIC_API_KEY"
-		oauthArg = " CLAUDE_CODE_OAUTH_TOKEN=" + shellQuoteArg(oauthToken)
+		oauthArg = " CLAUDE_CODE_OAUTH_TOKEN=" + launchparity.ShellQuote(oauthToken)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "env %s AGM_SESSION_NAME=%s", envUnset, shellQuoteArg(spec.SessionName))
+	fmt.Fprintf(&b, "env %s AGM_SESSION_NAME=%s", envUnset, launchparity.ShellQuote(spec.SessionName))
 	if spec.ForwardTelemetry {
 		appendTelemetryEnv(&b, spec.SessionID)
 	}
 	b.WriteString(oauthArg)
-	fmt.Fprintf(&b, " claude --model %s --add-dir %s", shellQuoteArg(resolvedModel), shellQuoteArg(spec.WorkDir))
+	fmt.Fprintf(&b, " claude --model %s --add-dir %s", launchparity.ShellQuote(resolvedModel), launchparity.ShellQuote(spec.WorkDir))
 	if !spec.DisableAutoMode {
 		b.WriteString(" --enable-auto-mode")
 	}
 	for _, dir := range spec.ExtraAddDirs {
-		fmt.Fprintf(&b, " --add-dir %s", shellQuoteArg(dir))
+		fmt.Fprintf(&b, " --add-dir %s", launchparity.ShellQuote(dir))
 	}
 	modeApplied := false
 	if spec.PermissionMode == "auto" || spec.PermissionMode == "plan" || spec.PermissionMode == "default" {
@@ -100,13 +100,13 @@ func buildCodexLaunchCommand(spec HarnessLaunchSpec, exitSuffix string) HarnessL
 	resolvedModel := agent.ResolveModelFullName("codex-cli", spec.Model)
 	sandboxMode := launchparity.CodexSandboxMode(spec.PermissionMode)
 	var b strings.Builder
-	fmt.Fprintf(&b, "env -u CLAUDECODE AGM_SESSION_NAME=%s codex", shellQuoteArg(spec.SessionName))
+	fmt.Fprintf(&b, "env -u CLAUDECODE AGM_SESSION_NAME=%s codex", launchparity.ShellQuote(spec.SessionName))
 	if spec.Codex != nil && spec.Codex.SessionID != "" {
 		b.WriteString(" resume --remote unix://")
 	}
-	fmt.Fprintf(&b, " -m %s -C %s -s %s", shellQuoteArg(resolvedModel), shellQuoteArg(spec.WorkDir), sandboxMode)
+	fmt.Fprintf(&b, " -m %s -C %s -s %s", launchparity.ShellQuote(resolvedModel), launchparity.ShellQuote(spec.WorkDir), sandboxMode)
 	for _, dir := range spec.ExtraAddDirs {
-		fmt.Fprintf(&b, " --add-dir %s", shellQuoteArg(dir))
+		fmt.Fprintf(&b, " --add-dir %s", launchparity.ShellQuote(dir))
 	}
 	modeApplied := false
 	if flag := launchparity.CodexPermissionModeFlag(spec.PermissionMode); flag != "" {
@@ -114,39 +114,44 @@ func buildCodexLaunchCommand(spec HarnessLaunchSpec, exitSuffix string) HarnessL
 		modeApplied = true
 	}
 	if spec.Codex != nil && spec.Codex.SessionID != "" {
-		fmt.Fprintf(&b, " %s", shellQuoteArg(spec.Codex.SessionID))
+		fmt.Fprintf(&b, " %s", launchparity.ShellQuote(spec.Codex.SessionID))
 	}
 	b.WriteString(exitSuffix)
 	return HarnessLaunchCommand{Command: b.String(), ModeAppliedAtStartup: modeApplied}
 }
 
-func buildAgyLaunchCommand(spec HarnessLaunchSpec, exitSuffix string) HarnessLaunchCommand {
-	var b strings.Builder
-	fmt.Fprintf(&b, "cd %s && agy --prompt-interactive", shellQuoteArg(spec.WorkDir))
-	modeFlag := launchparity.AgyPermissionModeFlag(spec.PermissionMode)
-	if modeFlag != "" {
-		b.WriteString(" " + modeFlag)
-	}
-	for _, dir := range spec.ExtraAddDirs {
-		fmt.Fprintf(&b, " --add-dir %s", shellQuoteArg(dir))
-	}
-	b.WriteString(exitSuffix)
-	return HarnessLaunchCommand{Command: b.String(), ModeAppliedAtStartup: modeFlag != ""}
+func buildAgyLaunchCommand(spec HarnessLaunchSpec, _ string) HarnessLaunchCommand {
+	return buildAgyCommand(spec, "")
+}
+
+// BuildAgyResumeCommand builds AGY's native cold-resume command from the same
+// model, permission, directory, quoting, and persistence policy used at create.
+func BuildAgyResumeCommand(spec HarnessLaunchSpec, conversationID string) HarnessLaunchCommand {
+	return buildAgyCommand(spec, conversationID)
+}
+
+func buildAgyCommand(spec HarnessLaunchSpec, conversationID string) HarnessLaunchCommand {
+	resolvedModel := agent.ResolveModelFullName("agy", spec.Model)
+	command := launchparity.BuildAgyCommand(launchparity.AgyCommandSpec{
+		WorkDir:        spec.WorkDir,
+		ResolvedModel:  resolvedModel,
+		PermissionMode: spec.PermissionMode,
+		ConversationID: conversationID,
+		ExtraAddDirs:   spec.ExtraAddDirs,
+		Persistent:     spec.Persistent,
+	})
+	return HarnessLaunchCommand{Command: command.Command, ModeAppliedAtStartup: command.ModeAppliedAtStartup}
 }
 
 func appendTelemetryEnv(b *strings.Builder, sessionID string) {
 	if endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); endpoint != "" {
-		fmt.Fprintf(b, " OTEL_EXPORTER_OTLP_ENDPOINT=%s", shellQuoteArg(endpoint))
+		fmt.Fprintf(b, " OTEL_EXPORTER_OTLP_ENDPOINT=%s", launchparity.ShellQuote(endpoint))
 		b.WriteString(" CLAUDE_CODE_ENABLE_TELEMETRY=1")
 		b.WriteString(" CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1")
 		b.WriteString(" OTEL_TRACES_EXPORTER=otlp")
 		b.WriteString(" OTEL_EXPORTER_OTLP_PROTOCOL=grpc")
 	}
 	if sessionID != "" {
-		fmt.Fprintf(b, " ENGRAM_SESSION_ID=%s", shellQuoteArg(sessionID))
+		fmt.Fprintf(b, " ENGRAM_SESSION_ID=%s", launchparity.ShellQuote(sessionID))
 	}
-}
-
-func shellQuoteArg(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }

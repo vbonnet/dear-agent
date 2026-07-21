@@ -69,6 +69,7 @@ type CreateSessionLaunchResult struct {
 type CreateSessionCompletion struct {
 	Manifest     *manifest.Manifest
 	ManifestPath string
+	Prompt       string
 	Launch       CreateSessionLaunchResult
 }
 
@@ -288,6 +289,9 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 			return nil, err
 		}
 	}
+	if err := callCtx.Err(); err != nil {
+		return nil, err
+	}
 	if err := completeCreatedSession(callCtx, opCtx, req, params.name, manifestPath, m, launchResult); err != nil {
 		return nil, err
 	}
@@ -399,7 +403,7 @@ func registerCreatedSession(callCtx context.Context, opCtx *OpContext, req *Crea
 func completeCreatedSession(callCtx context.Context, opCtx *OpContext, req *CreateSessionRequest, name, manifestPath string, m *manifest.Manifest, launchResult CreateSessionLaunchResult) error {
 	if opCtx.CreationRuntime != nil {
 		return opCtx.CreationRuntime.Complete(callCtx, CreateSessionCompletion{
-			Manifest: m, ManifestPath: manifestPath, Launch: launchResult,
+			Manifest: m, ManifestPath: manifestPath, Prompt: req.Prompt, Launch: launchResult,
 		})
 	}
 	if req.Prompt == "" {

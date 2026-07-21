@@ -1,6 +1,6 @@
 # Agent Harness and Model Parity Specification
 
-<!-- Last audited at: 2026-07-01 -->
+<!-- Last audited at: 2026-07-20 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -51,6 +51,22 @@ compatibility.
 
 **AGP-11** When a user selects an active harness's test mode, the system shall choose a low-cost test model for `claude-code`, `codex-cli`, `agy`, and `opencode-cli`.
 
+### AGY Model Lifecycle
+
+**AGP-20** When AGM resolves an AGY model alias or accepts an AGY public model label, the system shall pass an exact label exposed by the installed AGY public model catalog through `--model`, including labels containing spaces or parentheses.
+
+**AGP-24** When AGM resumes an AGY manifest containing an unambiguous retired `2.5-pro` or `2.0-flash-lite` alias or its former full identifier, the system shall translate it to the closest current AGY public model label before constructing the resume command; the ambiguous former default `2.5-flash` on a saved conversation is governed by AGP-28.
+
+**AGP-25** When MCP creates an AGY session, the system shall wait through first-run trust and initialization until the AGY composer is ready before delivering the required startup prompt; cancellation or readiness failure shall enter the shared creation rollback path.
+
+**AGP-26** When the AGM process receives SIGINT or SIGTERM, the root command context shall cancel and every command-scoped active-harness readiness or monitoring wait, including create and its final liveness scan, cold-resume metadata lookup and migration, post-create prompt delivery and verification, post-resume prompt delivery, direct, fan-out, or structured send delivery, model or mode slash-command delivery, compaction delivery and monitoring, continuous scan/watch loops, and AGY metadata backfill or association retry, shall return without continuing into tmux creation or command delivery, prompt delivery or retry, attach, success reporting, or metadata mutation.
+
+**AGP-27** When a user supplies a cross-harness tier alias with different letter case, the system shall canonicalize the alias key case-insensitively while preserving any exact case-sensitive public model label.
+
+**AGP-28** When an imported or manually associated AGY conversation has no observable native model, the system shall leave its manifest model unset and cold-resume without `--model` so AGY retains the saved conversation selection; when a pre-provenance saved-conversation record contains the ambiguous former default `2.5-flash` or `gemini-2.5-flash`, the resume path shall clear that stored override before command construction.
+
+**AGP-29** When `send set-model` changes a running AGY conversation, the system shall persist the selection only after observing a new confirmation that exactly names the requested public model; a stale, mismatched, or unavailable confirmation shall clear the stored model override so a later cold resume cannot force an unselected model.
+
 ### Codex Workdir Trust (ce-cmsq)
 
 **AGP-14** When a Codex CLI session is created or resumed through the codex-cli adapter, the system shall record the working directory as a trusted Codex project in `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`) before sending the launch command, so a fresh non-git sandbox directory cannot block Codex startup on its interactive trust prompt.
@@ -60,6 +76,10 @@ compatibility.
 **AGP-16** When appending a trust entry, the system shall preserve the existing config bytes, escape the directory path as a TOML basic-string key, and replace the file atomically; if the existing config fails to parse, the system shall leave the file untouched and report an error rather than risk a duplicate-table append that would break every subsequent Codex launch.
 
 **AGP-17** If pre-trusting the working directory fails, the codex-cli adapter shall warn and still attempt the launch.
+
+### Harness Doctor Health
+
+**AGP-19** When AGM doctor inspects an AGY session, including one stored with the legacy `agy-cli` or `antigravity` spelling, the system shall normalize the harness, derive `agy` from the shared harness binary registry, and use `$HOME/.gemini/antigravity-cli` as its advisory configuration directory rather than classify the session as unknown.
 
 ### BDD Enforcement
 

@@ -3,13 +3,28 @@ package steps
 import (
 	"context"
 	"fmt"
+	"os/exec"
+	"strings"
+	"syscall"
+	"time"
 
 	"github.com/cucumber/godog"
+
+	"github.com/vbonnet/dear-agent/agm/internal/procguard"
 )
 
 const sandboxProviderFeaturePath = "agm/test/bdd/features/sandbox_provider_guardrails.feature"
 
 type sandboxProviderGuardrailStateKey struct{}
+type sandboxProviderRuntimeStateKey struct{}
+
+type sandboxProviderRuntimeState struct {
+	worktreesBefore string
+	worktreesAfter  string
+	testOutput      string
+	testErr         error
+	inventoryErr    error
+}
 
 type sandboxProviderCleanupStateKey struct{}
 
@@ -23,6 +38,9 @@ func RegisterSandboxProviderGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Before(func(parent context.Context, _ *godog.Scenario) (context.Context, error) {
 		return context.WithValue(parent, sandboxProviderCleanupStateKey{}, &sandboxProviderCleanupState{}), nil
 	})
+	ctx.Before(func(parent context.Context, _ *godog.Scenario) (context.Context, error) {
+		return context.WithValue(parent, sandboxProviderRuntimeStateKey{}, &sandboxProviderRuntimeState{}), nil
+	})
 	registerPackageSpecGuardrailSteps(ctx, packageSpecGuardrailConfig{
 		stateKey:          sandboxProviderGuardrailStateKey{},
 		label:             "sandbox provider package",
@@ -33,6 +51,10 @@ func RegisterSandboxProviderGuardrailSteps(ctx *godog.ScenarioContext) {
 	})
 	ctx.Step(`^AGM runs the sandbox provider cleanup retry regressions$`, agmRunsSandboxProviderCleanupRetryRegressions)
 	ctx.Step(`^failed destruction should resume at the unfinished cleanup phase$`, failedSandboxDestructionShouldResumeAtUnfinishedPhase)
+	ctx.Step(`^the invoking repository worktree inventory is captured$`, captureInvokingRepositoryWorktrees)
+	ctx.Step(`^Wayfinder sandbox isolation regressions run$`, runWayfinderSandboxIsolationRegressions)
+	ctx.Step(`^the Wayfinder sandbox isolation regressions should pass$`, wayfinderSandboxIsolationRegressionsShouldPass)
+	ctx.Step(`^the invoking repository worktree inventory should be unchanged$`, invokingRepositoryWorktreesShouldBeUnchanged)
 }
 
 func agmRunsSandboxProviderCleanupRetryRegressions(ctx context.Context) error {
@@ -56,4 +78,96 @@ func failedSandboxDestructionShouldResumeAtUnfinishedPhase(ctx context.Context) 
 		return fmt.Errorf("sandbox provider cleanup retry regressions: %w: %s", state.err, state.output)
 	}
 	return nil
+}
+
+func captureInvokingRepositoryWorktrees(ctx context.Context) error {
+	state, err := getSandboxProviderRuntimeState(ctx)
+	if err != nil {
+		return err
+	}
+	state.worktreesBefore, err = runSandboxProviderCommand(ctx, 10*time.Second, "git", "worktree", "list", "--porcelain")
+	return err
+}
+
+func runWayfinderSandboxIsolationRegressions(ctx context.Context) error {
+	state, err := getSandboxProviderRuntimeState(ctx)
+	if err != nil {
+		return err
+	}
+	state.testOutput, state.testErr = runSandboxProviderCommand(
+		ctx,
+		2*time.Minute,
+		"go", "test", "./wayfinder/pkg/sandbox", "-v",
+		"-run", `^Test(CreateSandbox|ListSandboxes|CleanupSandbox|BasicSandboxOperationsDoNotMutateHostRepository|SandboxGitWorktreeLifecycleIsIsolated)$`,
+		"-count=1", "-timeout=90s",
+	)
+	state.worktreesAfter, state.inventoryErr = runSandboxProviderCommand(ctx, 10*time.Second, "git", "worktree", "list", "--porcelain")
+	return nil
+}
+
+func wayfinderSandboxIsolationRegressionsShouldPass(ctx context.Context) error {
+	state, err := getSandboxProviderRuntimeState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.testErr != nil {
+		return fmt.Errorf("wayfinder sandbox isolation regressions: %w\n%s", state.testErr, state.testOutput)
+	}
+	for _, name := range []string{
+		"TestCreateSandbox",
+		"TestListSandboxes",
+		"TestCleanupSandbox",
+		"TestBasicSandboxOperationsDoNotMutateHostRepository",
+		"TestSandboxGitWorktreeLifecycleIsIsolated",
+	} {
+		if !strings.Contains(state.testOutput, "--- PASS: "+name) {
+			return fmt.Errorf("wayfinder sandbox output does not show %s passing:\n%s", name, state.testOutput)
+		}
+	}
+	return nil
+}
+
+func invokingRepositoryWorktreesShouldBeUnchanged(ctx context.Context) error {
+	state, err := getSandboxProviderRuntimeState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.inventoryErr != nil {
+		return fmt.Errorf("capture final worktree inventory: %w", state.inventoryErr)
+	}
+	if state.worktreesAfter != state.worktreesBefore {
+		return fmt.Errorf("invoking repository worktree inventory changed:\nbefore:\n%s\nafter:\n%s", state.worktreesBefore, state.worktreesAfter)
+	}
+	return nil
+}
+
+func getSandboxProviderRuntimeState(ctx context.Context) (*sandboxProviderRuntimeState, error) {
+	state, ok := ctx.Value(sandboxProviderRuntimeStateKey{}).(*sandboxProviderRuntimeState)
+	if !ok || state == nil {
+		return nil, fmt.Errorf("sandbox provider runtime state not initialized")
+	}
+	return state, nil
+}
+
+func runSandboxProviderCommand(parent context.Context, timeout time.Duration, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = packageSpecBDDRepoRoot()
+	cmd.SysProcAttr = procguard.ProcessGroupAttr()
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = time.Second
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return string(output), fmt.Errorf("%s timed out after %s: %w", name, timeout, ctx.Err())
+	}
+	if err != nil {
+		return string(output), fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+	}
+	return string(output), nil
 }

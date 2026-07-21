@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -100,7 +101,7 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	}
 
 	// Wait for Agy to be ready
-	if err := agyWaitForPrompt(tmuxName, 30*time.Second); err != nil {
+	if err := agyWaitForPrompt(context.Background(), tmuxName, 30*time.Second); err != nil {
 		// Non-fatal warning
 		fmt.Fprintf(os.Stderr, "Warning: Agy prompt not detected (still initializing)\n")
 	}
@@ -177,7 +178,7 @@ func (a *AgyAdapter) ResumeSession(sessionID SessionID) error {
 			return fmt.Errorf("failed to send resume command: %w", err)
 		}
 
-		_ = tmux.WaitForAgyPrompt(metadata.TmuxName, 5*time.Second)
+		_ = tmux.WaitForAgyPrompt(context.Background(), metadata.TmuxName, 5*time.Second)
 	}
 
 	// Attach to tmux session (skip if already in tmux)

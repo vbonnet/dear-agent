@@ -1,6 +1,6 @@
 # AGY Saved Session Specification
 
-<!-- Last audited at: 2026-07-03 -->
+<!-- Last audited at: 2026-07-20 -->
 
 ## Purpose
 
@@ -16,10 +16,13 @@ conversations with their workspace, transcript, and permission-mode context.
 
 **AGYS-03** When the last-conversations cache maps the conversation ID to a workspace, the system shall use that workspace without scanning logs.
 
-**AGYS-04** When cache lookup cannot determine the workspace, the system shall scan AGY logs in newest-first order for conversation and workspace markers, bounded by a timeout or maximum scan depth to prevent performance bottlenecks.
+**AGYS-04** When cache lookup cannot determine the workspace, the system shall inspect at most 257 AGY log-directory entries, using the 257th only to prove exhaustion while retaining at most 256 entries for bounded processing; it shall scan at most the 64 newest regular logs selected from those retained entries by modification time and read at most 2 MiB per log for conversation and workspace markers; if directory entries, older selected candidates, or unscanned bytes remain, including bytes appended during the bounded read, the system shall return a distinguishable budget-exhaustion error unless a known-conversation match inside the bounded candidates is already conclusive.
 
-**AGYS-05** When resolving the latest AGY conversation for a workspace, the system shall prefer the last-conversations cache and fall back to log discovery.
+**AGYS-05** When resolving the latest AGY conversation for a workspace, the system shall prefer the last-conversations cache and fall back to newest-first log discovery; if directory entries remain unprocessed or any candidate is truncated before a complete match is established, the system shall return budget exhaustion rather than accept a bounded-directory, prefix, or older-file match as latest.
+
+**AGYS-06** When an enumerated log disappears during metadata collection or before its bounded scan opens the file, the system shall treat it as a stale rotation snapshot and continue with remaining candidates; when metadata lookup, open, or scan fails for any other reason, the system shall fail explicitly rather than silently omit a potentially newer log.
 
 ## BDD Traceability
 
-- Feature: `agm/test/bdd/features/harness_parity.feature`
+- Feature: `agm/test/bdd/features/agy_saved_session_discovery.feature`
+- Related feature: `agm/test/bdd/features/harness_parity.feature`

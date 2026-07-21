@@ -83,6 +83,23 @@ Feature: Harness parity
     When AGM validates active parity support
     Then harness "gemini-cli" should be deprecated
 
+  Scenario: AGY doctor health uses the native installation surfaces
+    Given harness "agy" is configured
+    When AGM resolves doctor health for the configured harness
+    Then doctor should recognize CLI binary "agy"
+    And doctor should recognize config directory suffix ".gemini/antigravity-cli"
+
+  Scenario Outline: AGY doctor health normalizes legacy manifest spellings
+    Given harness "<harness>" is configured
+    When AGM resolves doctor health for the configured harness
+    Then doctor should recognize CLI binary "agy"
+    And doctor should recognize config directory suffix ".gemini/antigravity-cli"
+
+    Examples:
+      | harness     |
+      | agy-cli     |
+      | antigravity |
+
   Scenario: Active harness adapters satisfy shared conformance
     Given AGM active harnesses are configured
     When AGM validates active harness adapter conformance
@@ -224,7 +241,7 @@ Feature: Harness parity
       | harness      | model     |
       | claude-code  | sonnet    |
       | codex-cli    | 5.4-mini  |
-      | agy          | 2.5-flash |
+      | agy          | 3.5-flash |
       | opencode-cli | glm-5.2   |
       | opencode-cli | deepseek-v4 |
       | opencode-cli | nemotron  |
@@ -334,6 +351,25 @@ Feature: Harness parity
     When AGM resumes the session
     Then AGM should launch a tmux pane that resumes the AGY conversation
     And the AGY resume command should include "--dangerously-skip-permissions"
+
+  Scenario: AGY model compatibility survives catalog migrations
+    Given AGY is available
+    When AGM validates AGY model compatibility
+    Then retired AGY manifest models should map to current public labels
+    And exact AGY public labels should remain unchanged
+    And cross-harness AGY aliases should normalize case-insensitively
+    And imported AGY conversations should preserve unknown model provenance
+    And AGY runtime model switches should not leave a stale resume override
+
+  Scenario: MCP waits for AGY before delivering its startup prompt
+    Given AGY is available
+    When AGM validates AGY MCP creation readiness
+    Then MCP creation should wait for the AGY composer before prompt delivery
+
+  Scenario: Active-harness creation signals preserve rollback
+    Given AGY is available
+    When AGM validates AGY root cancellation plumbing
+    Then root signal cancellation should reach every command-scoped readiness wait
 
   Scenario: Session list fields can target session rows
     Given AGM has Codex session records in Dolt

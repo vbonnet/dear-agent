@@ -46,6 +46,12 @@ var (
 	msgAutonomous          bool   // --autonomous flag: session is unattended, skip human_typing detection
 )
 
+var sendMultiLinePromptSafeContext = tmux.SendMultiLinePromptSafeContext
+
+func sendStructuredPrompt(ctx context.Context, recipient, message string, shouldInterrupt bool) error {
+	return sendMultiLinePromptSafeContext(ctx, recipient, message, shouldInterrupt)
+}
+
 // Priority levels and their instructions injected into message headers
 var priorityInstructions = map[string]string{
 	"critical":   "DROP everything. Handle this immediately.",
@@ -253,17 +259,17 @@ func runSend(cmd *cobra.Command, args []string) error {
 	// This preserves all existing behavior and ensures zero regression
 	if spec.Type == "direct" && len(spec.Recipients) == 1 {
 		recipientSession := spec.Recipients[0]
-		return runSendSingle(recipientSession)
+		return runSendSingle(cmd.Context(), recipientSession)
 	}
 
 	// Multi-recipient path: resolve and deliver in parallel
-	return runSendMulti(spec)
+	return runSendMulti(cmd.Context(), spec)
 }
 
 // runSendSingle handles single-recipient sends (original behavior, backward compatible)
-func runSendSingle(recipientSession string) (retErr error) {
+func runSendSingle(ctx context.Context, recipientSession string) (retErr error) {
 	// Telemetry: agm.session.execute span covering message dispatch.
-	_, span := telemetry.SessionExecute(context.Background(), recipientSession)
+	_, span := telemetry.SessionExecute(ctx, recipientSession)
 	defer func() {
 		if retErr != nil {
 			span.RecordError(retErr)
@@ -307,7 +313,7 @@ func runSendSingle(recipientSession string) (retErr error) {
 
 	currentState, tmuxName := resolveRecipientState(recipientSession, adapter)
 	canReceive := session.CheckSessionDelivery(tmuxName)
-	return dispatchSendByCanReceive(recipientSession, tmuxName, senderName, messageID, formattedMessage, message, currentState, canReceive, adapter)
+	return dispatchSendByCanReceive(ctx, recipientSession, tmuxName, senderName, messageID, formattedMessage, message, currentState, canReceive, adapter)
 }
 
 // sendSingleAuditArgs builds the audit arg map for runSendSingle.
@@ -501,10 +507,10 @@ func resolveRecipientState(recipientSession string, adapter *dolt.Adapter) (stri
 
 // dispatchSendByCanReceive routes the formatted message to the appropriate
 // delivery path based on the CanReceive state read from the recipient pane.
-func dispatchSendByCanReceive(recipientSession, tmuxName, senderName, messageID, formattedMessage, message, currentState string, canReceive state.CanReceive, adapter *dolt.Adapter) error {
+func dispatchSendByCanReceive(ctx context.Context, recipientSession, tmuxName, senderName, messageID, formattedMessage, message, currentState string, canReceive state.CanReceive, adapter *dolt.Adapter) error {
 	switch canReceive {
 	case state.CanReceiveYes:
-		if err := sendDirectly(recipientSession, senderName, messageID, formattedMessage, sessionSendPromptFile, adapter); err != nil {
+		if err := sendDirectly(ctx, recipientSession, senderName, messageID, formattedMessage, sessionSendPromptFile, adapter); err != nil {
 			return err
 		}
 		recordDelegation(senderName, recipientSession, messageID, message)
@@ -512,24 +518,24 @@ func dispatchSendByCanReceive(recipientSession, tmuxName, senderName, messageID,
 	case state.CanReceiveNotFound:
 		return fmt.Errorf("session '%s' tmux session disappeared during delivery", recipientSession)
 	case state.CanReceiveQueue:
-		if err := queueMessage(recipientSession, senderName, messageID, formattedMessage, currentState); err != nil {
+		if err := queueMessage(ctx, recipientSession, senderName, messageID, formattedMessage, currentState); err != nil {
 			return err
 		}
 		recordDelegation(senderName, recipientSession, messageID, message)
 		return nil
 	case state.CanReceiveOverlay:
 		fmt.Fprintf(os.Stderr, "⚠ Session '%s' has an active dismissible overlay — attempting auto-recovery\n", recipientSession)
-		if err := dismissOverlayAndDeliver(tmuxName, recipientSession, senderName, messageID, formattedMessage, sessionSendPromptFile, adapter); err != nil {
+		if err := dismissOverlayAndDeliver(ctx, tmuxName, recipientSession, senderName, messageID, formattedMessage, sessionSendPromptFile, adapter); err != nil {
 			return err
 		}
 		recordDelegation(senderName, recipientSession, messageID, message)
 		return nil
 	case state.CanReceiveNo:
 		fmt.Fprintf(os.Stderr, "⚠ Session '%s' has active permission prompt — message queued for delivery after resolution\n", recipientSession)
-		return queueMessage(recipientSession, senderName, messageID, formattedMessage, currentState)
+		return queueMessage(ctx, recipientSession, senderName, messageID, formattedMessage, currentState)
 	default:
 		fmt.Fprintf(os.Stderr, "Warning: unknown CanReceive state '%s', queueing\n", canReceive)
-		if err := queueMessage(recipientSession, senderName, messageID, formattedMessage, currentState); err != nil {
+		if err := queueMessage(ctx, recipientSession, senderName, messageID, formattedMessage, currentState); err != nil {
 			return err
 		}
 		recordDelegation(senderName, recipientSession, messageID, message)
@@ -538,14 +544,14 @@ func dispatchSendByCanReceive(recipientSession, tmuxName, senderName, messageID,
 }
 
 // queueMessage queues a message for later delivery (non-disruptive default)
-func queueMessage(recipientSession, senderName, messageID, formattedMessage, currentState string) error {
+func queueMessage(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, currentState string) error {
 	// Create message queue
 	queue, err := messages.NewMessageQueue()
 	if err != nil {
 		// Queue creation failed - fall back to direct send with warning
 		fmt.Fprintf(os.Stderr, "Warning: failed to create message queue: %v\n", err)
 		fallbackAdapter, _ := getStorage()
-		return sendDirectly(recipientSession, senderName, messageID, formattedMessage, "", fallbackAdapter)
+		return sendDirectly(ctx, recipientSession, senderName, messageID, formattedMessage, "", fallbackAdapter)
 	}
 	defer func() { _ = queue.Close() }()
 
@@ -565,7 +571,7 @@ func queueMessage(recipientSession, senderName, messageID, formattedMessage, cur
 		if fallbackAdapter != nil {
 			defer func() { _ = fallbackAdapter.Close() }()
 		}
-		return sendDirectly(recipientSession, senderName, messageID, formattedMessage, "", fallbackAdapter)
+		return sendDirectly(ctx, recipientSession, senderName, messageID, formattedMessage, "", fallbackAdapter)
 	}
 
 	// Create queue entry with mapped priority
@@ -604,12 +610,12 @@ func queueMessage(recipientSession, senderName, messageID, formattedMessage, cur
 // For DONE-state sends, the underlying tmux send does not emit an ESC keystroke
 // because the session is already at the prompt — sending ESC is redundant and
 // can exit plan mode.
-func sendDirectly(recipientSession, senderName, messageID, formattedMessage, promptFile string, adapter *dolt.Adapter) error {
+func sendDirectly(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, adapter *dolt.Adapter) error {
 	// Try to load manifest to determine agent type
 	m, _, err := session.ResolveIdentifier(recipientSession, cfg.SessionsDir, adapter)
 	if err != nil {
 		// No manifest found - fall back to tmux-based send for legacy sessions
-		return sendViaTmux(recipientSession, senderName, messageID, formattedMessage, promptFile, false)
+		return sendViaTmux(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, false)
 	}
 
 	// Determine delivery method based on harness type
@@ -625,28 +631,43 @@ func sendDirectly(recipientSession, senderName, messageID, formattedMessage, pro
 	}
 
 	// Fall back to tmux for CLI-based harnesses (Claude Code, Gemini CLI)
-	if err := sendViaTmux(recipientSession, senderName, messageID, formattedMessage, promptFile, false); err != nil {
+	if err := sendViaTmux(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, false); err != nil {
 		return err
 	}
 	if harnessType == "agy" && (m.Agy == nil || m.Agy.ConversationID == "") {
-		if err := tmux.WaitForAgyPrompt(recipientSession, 60*time.Second); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: AGY metadata backfill wait failed: %v\n", err)
+		if err := waitForAgyMetadataBackfill(ctx, recipientSession, tmux.WaitForAgyPrompt); err != nil {
+			return err
 		}
-		associateSpawnedAgySessionWithRetry(m.Name, 20, 500*time.Millisecond)
+		if err := associateSpawnedAgySessionWithRetry(ctx, m.Name, 20, 500*time.Millisecond); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func waitForAgyMetadataBackfill(ctx context.Context, sessionName string, wait func(context.Context, string, time.Duration) error) error {
+	if err := wait(ctx, sessionName, 60*time.Second); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		fmt.Fprintf(os.Stderr, "Warning: AGY metadata backfill wait failed: %v\n", err)
 	}
 	return nil
 }
 
 // sendViaTmux sends a message via tmux (for CLI-based agents like Claude, Gemini)
 // Bug fix (2026-03-14): Added shouldInterrupt parameter to control ESC behavior
-func sendViaTmux(recipientSession, senderName, messageID, formattedMessage, promptFile string, shouldInterrupt bool) error {
+func sendViaTmux(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, shouldInterrupt bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// Write pending file for hook-based delivery (best-effort, in addition to tmux)
 	if err := messages.WritePendingFile(recipientSession, messageID, formattedMessage); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to write pending file: %v\n", err)
 	}
 
 	// Send using SAFE method (waits for prompt, with conditional interrupt)
-	if err := tmux.SendMultiLinePromptSafe(recipientSession, formattedMessage, shouldInterrupt); err != nil {
+	if err := sendMultiLinePromptSafeContext(ctx, recipientSession, formattedMessage, shouldInterrupt); err != nil {
 		return fmt.Errorf("failed to send prompt: %w", err)
 	}
 
@@ -756,7 +777,7 @@ func formatMessageWithMetadata(sender, messageID, replyTo, message string) strin
 }
 
 // runSendMulti handles multi-recipient message delivery with sequential execution
-func runSendMulti(spec *send.RecipientSpec) (retErr error) {
+func runSendMulti(ctx context.Context, spec *send.RecipientSpec) (retErr error) {
 	defer func() {
 		logCommandAudit("send.msg.multi", "", multiAuditArgs(spec), retErr)
 	}()
@@ -797,7 +818,7 @@ func runSendMulti(spec *send.RecipientSpec) (retErr error) {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	results := send.SequentialDeliver(ctx, jobs, deliveryFunc)
 
@@ -928,7 +949,7 @@ func logMultiResults(homeDir, senderName, message string, jobs []*send.DeliveryJ
 
 // deliveryFunc implements the actual message delivery for a single recipient
 // This is used by SequentialDeliver for sequential message sending
-func deliveryFunc(job *send.DeliveryJob) error {
+func deliveryFunc(ctx context.Context, job *send.DeliveryJob) error {
 	// Check recipient session exists in tmux
 	exists, err := tmux.HasSession(job.Recipient)
 	if err != nil {
@@ -940,7 +961,7 @@ func deliveryFunc(job *send.DeliveryJob) error {
 
 	// Use the existing sendDirectly logic for actual delivery
 	// This ensures consistent behavior with single-recipient sends
-	return sendViaTmux(job.Recipient, job.Sender, job.MessageID, job.FormattedMessage, job.PromptFile, job.ShouldInterrupt)
+	return sendViaTmux(ctx, job.Recipient, job.Sender, job.MessageID, job.FormattedMessage, job.PromptFile, job.ShouldInterrupt)
 }
 
 // recordDelegation records a delegation if --delegate flag is set.
@@ -997,7 +1018,7 @@ func recordDelegation(sender, recipient, messageID, message string) {
 //  3. Re-check delivery readiness (pane content)
 //  4. If ready, deliver the message directly
 //  5. If still blocked, queue for later delivery
-func dismissOverlayAndDeliver(tmuxName, recipientSession, senderName, messageID, formattedMessage, promptFile string, adapter *dolt.Adapter) error {
+func dismissOverlayAndDeliver(ctx context.Context, tmuxName, recipientSession, senderName, messageID, formattedMessage, promptFile string, adapter *dolt.Adapter) error {
 	if paneContent, err := tmux.CapturePaneOutput(tmuxName, 30); err == nil {
 		if dismissed, dismissErr := tmux.DismissAgySurveyIfPresent(tmuxName, paneContent); dismissErr != nil {
 			return dismissErr
@@ -1005,7 +1026,7 @@ func dismissOverlayAndDeliver(tmuxName, recipientSession, senderName, messageID,
 			time.Sleep(200 * time.Millisecond)
 			if session.CheckSessionDelivery(tmuxName) == state.CanReceiveYes {
 				fmt.Fprintf(os.Stderr, "✓ AGY feedback survey skipped on '%s' — delivering message\n", recipientSession)
-				return sendDirectly(recipientSession, senderName, messageID, formattedMessage, promptFile, adapter)
+				return sendDirectly(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, adapter)
 			}
 		}
 	}
@@ -1025,7 +1046,7 @@ func dismissOverlayAndDeliver(tmuxName, recipientSession, senderName, messageID,
 	case state.CanReceiveYes:
 		// Overlay dismissed, prompt visible — deliver directly
 		fmt.Fprintf(os.Stderr, "✓ Overlay dismissed on '%s' — delivering message\n", recipientSession)
-		return sendDirectly(recipientSession, senderName, messageID, formattedMessage, promptFile, adapter)
+		return sendDirectly(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, adapter)
 
 	case state.CanReceiveOverlay:
 		// Overlay still visible — try Escape as fallback
@@ -1039,16 +1060,16 @@ func dismissOverlayAndDeliver(tmuxName, recipientSession, senderName, messageID,
 		canReceive = session.CheckSessionDelivery(tmuxName)
 		if canReceive == state.CanReceiveYes {
 			fmt.Fprintf(os.Stderr, "✓ Overlay dismissed with Escape on '%s' — delivering message\n", recipientSession)
-			return sendDirectly(recipientSession, senderName, messageID, formattedMessage, promptFile, adapter)
+			return sendDirectly(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, adapter)
 		}
 		// Give up — queue the message
 		fmt.Fprintf(os.Stderr, "⚠ Could not dismiss overlay on '%s' (state: %s) — queueing message\n", recipientSession, canReceive)
-		return queueMessage(recipientSession, senderName, messageID, formattedMessage, "BACKGROUND_TASKS")
+		return queueMessage(ctx, recipientSession, senderName, messageID, formattedMessage, "BACKGROUND_TASKS")
 
 	default:
 		// Overlay dismissed but session is in unexpected state — queue for safety
 		fmt.Fprintf(os.Stderr, "⚠ Overlay dismissed but session '%s' is %s — queueing message\n", recipientSession, canReceive)
-		return queueMessage(recipientSession, senderName, messageID, formattedMessage, string(canReceive))
+		return queueMessage(ctx, recipientSession, senderName, messageID, formattedMessage, string(canReceive))
 	}
 }
 

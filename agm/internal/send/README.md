@@ -121,7 +121,7 @@ type SessionResolver interface {
 }
 
 // DeliveryFunc allows custom delivery implementations
-type DeliveryFunc func(job *DeliveryJob) error
+type DeliveryFunc func(ctx context.Context, job *DeliveryJob) error
 ```
 
 ### Key Types

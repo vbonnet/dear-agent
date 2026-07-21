@@ -80,6 +80,20 @@ Provide a production-ready CLI that:
 
 **CLI-26** When `agm audit resources --fix` cannot remove a linked worktree through a one-force Git operation, including when the worktree is locked, the system shall preserve the checkout and report the cleanup error instead of deleting the directory directly.
 
+**CLI-27** When AGM creates or cold-resumes an AGY session, the system shall resolve and pass the selected AGY model rather than silently launching AGY's default model.
+
+**CLI-28** When AGM launches AGY and a startup prompt must be delivered, the system shall wait through first-run trust and feedback-survey prompts until AGY is ready before sending that prompt, and shall propagate readiness failure.
+
+**CLI-29** When a command-scoped create, model-change, mode-change, or compaction flow waits to deliver or verify a prompt or slash command, the system shall derive that wait from the Cobra command context and shall stop before later delivery, retry, persistence, liveness validation, or attach work when the context is canceled.
+
+**CLI-30** When the AGM root owns SIGINT and SIGTERM handling, continuous scan, watchdog, event-watch, stalled-session watch, and bounded compaction-monitor loops shall consume the root Cobra context and return promptly on cancellation; subcommands shall not install competing process-global signal handlers.
+
+**CLI-31** When `agm send verify`, `agm send work-request`, or `agm send wake-loop` performs structured multiline delivery, the system shall pass the Cobra command context through composer readiness and delivery so cancellation cannot later send the payload.
+
+**CLI-32** When session resume metadata lookup returns after the Cobra command context has been canceled, the system shall stop before creating, commanding, updating, or attaching to a tmux session.
+
+**CLI-33** When final creation liveness validation runs, the system shall derive the scan from the Cobra command context and recheck cancellation before title update, attach, or detached-success reporting.
+
 ## Requirements
 
 ### Functional Requirements

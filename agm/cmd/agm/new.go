@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -95,7 +96,7 @@ Flags:
   --harness     - Harness to use (claude-code, codex-cli, agy, opencode-cli)
                   Deprecated compatibility: gemini-cli
                   If omitted, prompts interactively
-  --model       - Model to use (e.g., sonnet, opus, 2.5-flash, 5.5)
+  --model       - Model to use (e.g., sonnet, 3.5-flash, 3.5-flash-low, 5.5)
                   If omitted, uses default for harness
 
 Workspace Detection:
@@ -676,13 +677,13 @@ Examples:
 		// 1. Inside tmux + not detached: start Claude in current session
 		// 2. Outside tmux OR detached: create tmux session, start Claude, attach (or not if detached)
 
-		return startNewSessionForContext(inTmux, detached, sessionName, realNewSessionStartRuntime())
+		return startNewSessionForContext(cmd.Context(), inTmux, detached, sessionName, realNewSessionStartRuntime())
 	},
 }
 
 type newSessionStartRuntime struct {
-	currentTmux  func(sessionName string) error
-	separateTmux func(sessionName string) error
+	currentTmux  func(context.Context, string) error
+	separateTmux func(context.Context, string) error
 }
 
 func realNewSessionStartRuntime() newSessionStartRuntime {
@@ -692,25 +693,35 @@ func realNewSessionStartRuntime() newSessionStartRuntime {
 	}
 }
 
-func startNewSessionForContext(inTmux, detached bool, sessionName string, runtime newSessionStartRuntime) error {
+func startNewSessionForContext(ctx context.Context, inTmux, detached bool, sessionName string, runtime newSessionStartRuntime) error {
 	if inTmux && !detached {
-		return runtime.currentTmux(sessionName)
+		return runtime.currentTmux(ctx, sessionName)
 	}
-	return runtime.separateTmux(sessionName)
+	return runtime.separateTmux(ctx, sessionName)
 }
 
 // applyCreationModeSwitch dispatches a mode switch during session creation.
 // Non-fatal: errors are logged as warnings and execution continues.
 func applyCreationModeSwitch(sessionName, harness, targetMode string) {
+	applyCreationModeSwitchContext(context.Background(), sessionName, harness, targetMode)
+}
+
+func applyCreationModeSwitchContext(ctx context.Context, sessionName, harness, targetMode string) {
 	if targetMode == "" {
 		return
 	}
+	if ctx.Err() != nil {
+		return
+	}
 	debug.Log("Applying creation mode switch: default -> %s (harness: %s)", targetMode, harness)
-	if err := dispatchModeSwitch(harness, sessionName, targetMode, "default"); err != nil {
+	if err := dispatchModeSwitchContext(ctx, harness, sessionName, targetMode, "default"); err != nil {
 		ui.PrintWarning(fmt.Sprintf("Mode switch to %s failed: %v (continuing with default mode)", targetMode, err))
 		return
 	}
 	ui.PrintSuccess(fmt.Sprintf("Mode set to %s", targetMode))
+	if ctx.Err() != nil {
+		return
+	}
 	adapter, err := getStorage()
 	if err != nil {
 		debug.Log("Could not connect to storage for mode manifest update: %v", err)
@@ -788,12 +799,15 @@ func enforceCircuitBreakers() error {
 //   - sessionName: target tmux session
 //   - promptText: the prompt content (used for keyword-based verification)
 //   - sendFunc: function that re-sends the prompt on retry
-func verifyAndRetryPromptDelivery(sessionName, promptText string, sendFunc func() error) {
-	result, err := tmux.VerifyPromptDelivery(sessionName, promptText, sendFunc, 3)
+func verifyAndRetryPromptDelivery(ctx context.Context, sessionName, promptText string, sendFunc func() error) error {
+	result, err := tmux.VerifyPromptDeliveryContext(ctx, sessionName, promptText, sendFunc, 3)
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		debug.Log("Prompt delivery verification error: %v", err)
 		logger.Warn("Could not verify prompt delivery", "error", err)
-		return
+		return nil
 	}
 	if result.Delivered {
 		debug.Log("Prompt delivery confirmed (attempt %d, method: %s)", result.Attempt, result.Method)
@@ -805,6 +819,7 @@ func verifyAndRetryPromptDelivery(sessionName, promptText string, sendFunc func(
 			"session", sessionName)
 		fmt.Println("  ⚠ Prompt delivery could not be verified — check session manually")
 	}
+	return nil
 }
 
 func buildSessionTags(role string, tags []string) []string {
@@ -833,7 +848,7 @@ func init() {
 	newCmd.Flags().BoolVar(&testMode, "test", false, "Create test session with per-run sandbox isolation")
 	newCmd.Flags().BoolVar(&allowTestName, "allow-test-name", false, "Override test pattern warning (for legitimate production sessions with 'test' in name)")
 	newCmd.Flags().StringVar(&harnessName, "harness", "", "Harness to use (claude-code, codex-cli, agy, opencode-cli; deprecated: gemini-cli) (env: AGM_DEFAULT_HARNESS)")
-	newCmd.Flags().StringVar(&modelName, "model", "", "Model to use (e.g., sonnet, opus, 2.5-flash, 5.5) (env: AGM_DEFAULT_MODEL)")
+	newCmd.Flags().StringVar(&modelName, "model", "", "Model to use (e.g., sonnet, 3.5-flash, 3.5-flash-low, 5.5) (env: AGM_DEFAULT_MODEL)")
 	newCmd.Flags().StringVar(&modelTierFlag, "model-tier", "", "Cost tier for model routing: cheap (70%), mid (20%), expensive (10%)")
 	_ = newCmd.RegisterFlagCompletionFunc("model-tier", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return []string{"cheap", "mid", "expensive"}, cobra.ShellCompDirectiveNoFileComp

@@ -24,9 +24,11 @@ New harness IDs:
 
 ### 2. Add --model flag
 
-Added per-harness model selection with:
+Added per-harness model selection with (the defaults listed here are the
+historical values at decision time; the living registry in
+`internal/agent/models.go` is authoritative):
 - Model registry in `internal/agent/models.go`
-- Per-harness defaults: claude-code→sonnet, gemini-cli→2.5-flash, codex-cli→5.4
+- Initial per-harness defaults: claude-code→sonnet, gemini-cli→2.5-flash, codex-cli→5.4
 - opencode-cli has no default (interactive picker required)
 - Unknown models warn but pass through (forward compatibility)
 - Tab completion via Cobra ValidArgsFunction

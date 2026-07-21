@@ -428,7 +428,7 @@ agm session get-history-path --verify
 ```
 
 **Features:**
-- Works across all CLI harnesses (Claude Code, Gemini CLI, OpenCode, Codex)
+- Works across active CLI harnesses (Claude Code, Codex CLI, Antigravity, and OpenCode) plus deprecated Gemini CLI compatibility
 - Auto-detects harness type and constructs correct paths
 - JSON output for automation and scripting
 - File existence verification with `--verify` flag
@@ -437,7 +437,7 @@ agm session get-history-path --verify
 **Output (JSON):**
 ```json
 {
-  "agent": "claude",
+  "harness": "claude-code",
   "uuid": "54790b4a-5342-4a60-a25f-5b260e319b5a",
   "paths": [
     "~/.claude/projects/-home-user-src/54790b4a.jsonl",

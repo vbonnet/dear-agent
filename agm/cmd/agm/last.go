@@ -77,7 +77,7 @@ Examples:
 				return fmt.Errorf("session cannot be resumed - critical health issues detected")
 			}
 
-			return resumeSession(adapter, sessionID, manifestPath, harnessName, health)
+			return resumeSession(cmd.Context(), adapter, sessionID, manifestPath, harnessName, health)
 		}
 
 		// Default: print session details

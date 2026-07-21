@@ -29,6 +29,34 @@ into listing tests that do not actually run.
 
 ## Feature Files
 
+### AGY Saved-Session Discovery
+
+**File:** [`agy_saved_session_discovery.feature`](../test/bdd/features/agy_saved_session_discovery.feature)
+
+**Drives:** `agm/internal/agysession` cache-first metadata lookup and bounded
+newest-first Antigravity log fallback.
+
+**Key scenarios:**
+- Cache hits never enter provider log discovery.
+- Log discovery inspects at most 257 directory entries, using the 257th only as
+  an exhaustion sentinel and processing at most 256; it then orders regular
+  candidates by modification time and limits scanning to the newest 64 files.
+- Each candidate read is limited to 2 MiB; known-ID matches inside that budget
+  remain valid, while latest-workspace lookup rejects a truncated prefix or a
+  match in an older file after a truncated newer candidate; a post-scan probe
+  also detects bytes appended during the bounded read.
+- Directory-entry, candidate, or byte exhaustion is distinguishable from a
+  complete miss, and oversized lines fail explicitly.
+- Directory exhaustion retains the bounded candidates so a known-ID match can
+  remain conclusive, while latest-workspace lookup rejects any match because
+  an unprocessed entry could be newer.
+- A log removed by provider rotation after enumeration is skipped as a stale
+  snapshot during metadata collection or scan open, while other metadata,
+  open, and scan failures remain explicit.
+
+**Why this matters:** Import, association, and post-create metadata capture must
+not inherit unbounded latency from a large or stale provider log directory.
+
 ### Declarative Runtime Guardrails
 
 **File:** [`declarative_runtime_guardrails.feature`](../test/bdd/features/declarative_runtime_guardrails.feature)
@@ -195,6 +223,30 @@ creation, and terminal state detection.
 - Active harness factories use canonical names.
 - Active harness adapters satisfy the shared non-I/O conformance suite.
 - Active harness launch commands preserve native startup mode and persistence.
+- Imported AGY conversations preserve unknown native-model provenance through
+  the real storage adapter instead of acquiring Claude's legacy default, and
+  cold resume clears the ambiguous model guessed by older import/association
+  paths before command construction.
+- AGY model-switch provenance requires a new exact confirmation, and root
+  cancellation reaches AGY readiness stabilization and post-resume multiline
+  readiness, direct and fan-out tmux delivery, and metadata association retry
+  before delivery, mutation, or attach.
+- Root cancellation also reaches Claude post-create prompt delivery and retry
+  verification plus model, mode, and compaction slash-command readiness before
+  later delivery, persistence, liveness validation, or attach work.
+- The root command remains the sole process-signal owner, and continuous scan,
+  watchdog, event-watch, stalled-session watch, and compaction-monitor loops
+  consume its Cobra context and return promptly when canceled.
+- Structured verify-result, work-request, and wake-loop sends preserve the same
+  root context through multiline composer readiness and delivery.
+- Resume rechecks the root context after metadata lookup and before tmux
+  creation, command delivery, metadata updates, or warm-session attach.
+- Final creation liveness validation derives from the root context and rechecks
+  cancellation before title update, attach, or detached-success reporting.
+- AGY feedback survey handling dismisses once and recognizes the subsequent
+  composer even while stale survey text remains in captured pane history;
+  downstream state, direct-delivery, and idle predicates use the same
+  last-marker rule.
 - AGM runtime helper commands keep co-located SPEC coverage.
 - AGM backend implementations keep co-located SPEC coverage.
 - AGM cleanup and process support packages keep co-located SPEC coverage.
