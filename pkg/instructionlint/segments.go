@@ -64,6 +64,8 @@ func collectGoStringLiterals(expression goast.Expr, literals *[]*goast.BasicLit)
 			collectGoStringLiterals(typed.X, literals)
 			collectGoStringLiterals(typed.Y, literals)
 		}
+	case *goast.ParenExpr:
+		collectGoStringLiterals(typed.X, literals)
 	}
 }
 
@@ -153,6 +155,8 @@ func parseScriptSegments(source []byte) []Segment {
 		}
 		if marker := scriptHeredocMarker(value); marker != "" {
 			state.heredoc = marker
+			state.heredocVisible = agentVisibleScriptCommand(value, state.visibleHelpers) &&
+				!scriptOutputRedirectedToFile(value)
 			continue
 		}
 		assignment := stripShellDeclaration(value)
@@ -182,6 +186,7 @@ func parseScriptSegments(source []byte) []Segment {
 type scriptParseState struct {
 	quote               byte
 	heredoc             string
+	heredocVisible      bool
 	visibleContinuation bool
 	visibleHelpers      map[string]bool
 }
@@ -190,9 +195,10 @@ func (state *scriptParseState) consumeOngoing(raw, value string) (include, handl
 	if state.heredoc != "" {
 		if value == state.heredoc {
 			state.heredoc = ""
+			state.heredocVisible = false
 			return false, true
 		}
-		return true, true
+		return state.heredocVisible, true
 	}
 	if state.visibleContinuation {
 		if commandQuote := unclosedScriptQuote(value); commandQuote != 0 {
@@ -223,7 +229,7 @@ func hasShellLineContinuation(value string) bool {
 func agentVisibleScriptCommand(value string, helpers map[string]bool) bool {
 	for _, command := range splitShellCommands(value) {
 		fields := stripCommandPrefixes(parseShellWords(command))
-		if len(fields) > 0 && (slices.Contains([]string{"echo", "emit", "jq", "printf"}, fields[0]) || helpers[fields[0]]) {
+		if len(fields) > 0 && (slices.Contains([]string{"cat", "echo", "emit", "jq", "printf"}, fields[0]) || helpers[fields[0]]) {
 			return true
 		}
 	}
@@ -353,6 +359,37 @@ func scriptHeredocMarker(value string) string {
 		return match[1]
 	}
 	return ""
+}
+
+func scriptOutputRedirectedToFile(value string) bool {
+	location := heredocMarker.FindStringIndex(value)
+	if location == nil {
+		return false
+	}
+	fields := parseShellWords(value[:location[0]] + " " + value[location[1]:])
+	for index, field := range fields {
+		field = strings.Trim(field, "()")
+		if strings.HasPrefix(field, "&>") {
+			return true
+		}
+		redirect := strings.TrimLeft(field, "0123456789")
+		fileDescriptor := strings.TrimSuffix(field, redirect)
+		if fileDescriptor != "" && fileDescriptor != "1" {
+			continue
+		}
+		if !strings.HasPrefix(redirect, ">") {
+			continue
+		}
+		target := strings.TrimLeft(redirect, ">|")
+		if target == "" && index+1 < len(fields) {
+			target = strings.Trim(fields[index+1], `"'`)
+		}
+		if strings.HasPrefix(target, "&") || slices.Contains([]string{"/dev/fd/1", "/dev/fd/2", "/dev/stderr", "/dev/stdout"}, target) {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func unescapedByteCount(value string, target byte) int {

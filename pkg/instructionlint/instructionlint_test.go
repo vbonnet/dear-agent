@@ -246,6 +246,34 @@ func TestScriptOutputContinuationsRemainPolicyVisible(t *testing.T) {
 	}
 }
 
+func TestScriptHeredocVisibilityFollowsOutputRedirection(t *testing.T) {
+	source := []byte(strings.Join([]string{
+		"cat >&2 <<'VISIBLE'",
+		"git push origin main",
+		"VISIBLE",
+		"cat >fixture <<'FILE_ONLY'",
+		"gh pr merge 123",
+		"FILE_ONLY",
+		"cat <<'AFTER_MARKER' >after-marker-fixture",
+		"gh pr close 123",
+		"AFTER_MARKER",
+		"cat 2>errors <<'STDOUT_VISIBLE'",
+		"bd ready",
+		"STDOUT_VISIBLE",
+	}, "\n"))
+
+	var rules []string
+	for _, segment := range parseScriptSegments(source) {
+		for _, violation := range evaluateSegment("hook", segment) {
+			rules = append(rules, violation.Rule)
+		}
+	}
+	sort.Strings(rules)
+	if !reflect.DeepEqual(rules, []string{"bare-beads", "raw-git-push"}) {
+		t.Fatalf("heredoc rules = %v, want only visible heredoc findings", rules)
+	}
+}
+
 func TestCheckRepositoryGovernsSkillAgentMetadata(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init", "-q")
@@ -284,7 +312,7 @@ func TestCheckRepositoryGovernsMultilineGoPrompts(t *testing.T) {
     - match: cmd/worker/main.go
       owner: worker-prompts
 `)
-	writeTestFile(t, repo, "cmd/worker/main.go", "package main\n\nvar prompt = `# Worker\n\n` + \"gh pr merge 123\" + `\n`\nvar runtimeCommand = \"git push origin main\"\n")
+	writeTestFile(t, repo, "cmd/worker/main.go", "package main\n\nvar prompt = `# Worker\n\n` + (\"gh pr merge 123\") + `\n`\nvar runtimeCommand = \"git push origin main\"\n")
 	runGit(t, repo, "add", ".")
 
 	result, violations, err := CheckRepository(context.Background(), repo)
