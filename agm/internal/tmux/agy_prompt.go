@@ -58,6 +58,16 @@ func ContainsAgySurveyPrompt(content string) bool {
 	return false
 }
 
+func containsAgyPromptAfterSurvey(content string) bool {
+	lastSurveyEnd := -1
+	for _, pattern := range agySurveyPromptPatterns {
+		if index := strings.LastIndex(content, pattern); index >= 0 && index+len(pattern) > lastSurveyEnd {
+			lastSurveyEnd = index + len(pattern)
+		}
+	}
+	return lastSurveyEnd >= 0 && containsAgyPromptPattern(content[lastSurveyEnd:])
+}
+
 // DismissAgySurveyIfPresent sends the documented Skip option when the survey
 // owns focus. It returns true only when a survey was detected and the key sent.
 func DismissAgySurveyIfPresent(sessionName, content string) (bool, error) {
@@ -108,12 +118,25 @@ func WaitForAgyPrompt(ctx context.Context, sessionName string, timeout time.Dura
 	return waitForAgyPromptWithRuntime(ctx, sessionName, timeout, realAgyPromptRuntime())
 }
 
+func dismissAgySurveyOnce(runtime agyPromptRuntime, sessionName, content string, alreadyDismissed bool) (dismissed, handled bool) {
+	if alreadyDismissed || !ContainsAgySurveyPrompt(content) {
+		return alreadyDismissed, false
+	}
+	if err := runtime.sendKeys(sessionName, "0"); err != nil {
+		debug.Log("Failed to dismiss AGY feedback survey: %v", err)
+		return false, false
+	}
+	debug.Log("AGY feedback survey detected; selected Skip")
+	return true, true
+}
+
 func waitForAgyPromptWithRuntime(baseCtx context.Context, sessionName string, timeout time.Duration, runtime agyPromptRuntime) error {
 	ctx, cancel := context.WithTimeout(baseCtx, timeout)
 	defer cancel()
 
 	checkCount := 0
 	trustAccepted := false
+	surveyDismissed := false
 
 	for {
 		select {
@@ -133,14 +156,11 @@ func waitForAgyPromptWithRuntime(baseCtx context.Context, sessionName string, ti
 		}
 
 		content := string(output)
-		if ContainsAgySurveyPrompt(content) {
-			if dismissErr := runtime.sendKeys(sessionName, "0"); dismissErr != nil {
-				debug.Log("Failed to dismiss AGY feedback survey: %v", dismissErr)
-			} else {
-				debug.Log("AGY feedback survey detected; selected Skip")
-				runtime.sleep(ctx, 500*time.Millisecond)
-				continue
-			}
+		var surveyHandled bool
+		surveyDismissed, surveyHandled = dismissAgySurveyOnce(runtime, sessionName, content, surveyDismissed)
+		if surveyHandled {
+			runtime.sleep(ctx, 500*time.Millisecond)
+			continue
 		}
 		if !trustAccepted && containsAgyTrustPromptPattern(content) {
 			debug.Log("🛡️  AGY trust prompt detected (check #%d) — auto-answering with Enter", checkCount)
@@ -153,7 +173,7 @@ func waitForAgyPromptWithRuntime(baseCtx context.Context, sessionName string, ti
 			continue
 		}
 
-		if containsAgyReadyPattern(content) {
+		if containsAgyReadyPattern(content) || (surveyDismissed && containsAgyPromptAfterSurvey(content)) {
 			debug.Log("✓ AGY prompt detected (check #%d)", checkCount)
 			runtime.sleep(ctx, 500*time.Millisecond)
 			if err := ctx.Err(); err != nil {

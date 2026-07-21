@@ -27,6 +27,16 @@ func TestAgyOrdinaryPromptIsNotSurvey(t *testing.T) {
 	}
 }
 
+func TestContainsAgyPromptAfterSurveyRequiresLaterPrompt(t *testing.T) {
+	survey := "How's the CLI experience so far? [1] Good [2] Fine [3] Bad [0] Skip"
+	if containsAgyPromptAfterSurvey("Task complete\n>\n" + survey) {
+		t.Fatal("prompt preceding the survey was treated as the post-dismissal composer")
+	}
+	if !containsAgyPromptAfterSurvey(survey + "\nAGY ready\n>") {
+		t.Fatal("prompt following stale survey history was not treated as the composer")
+	}
+}
+
 func TestWaitForAgyPromptAcceptsTrustBeforeReady(t *testing.T) {
 	outputs := [][]byte{
 		[]byte("Do you trust the contents of this project?\n> Yes"),
@@ -59,11 +69,8 @@ func TestWaitForAgyPromptAcceptsTrustBeforeReady(t *testing.T) {
 	}
 }
 
-func TestWaitForAgyPromptDismissesSurveyBeforeReady(t *testing.T) {
-	outputs := [][]byte{
-		[]byte("Task complete\n>\nHow's the CLI experience so far? [1] Good [2] Fine [3] Bad [0] Skip"),
-		[]byte("AGY ready\n> "),
-	}
+func assertAgySurveySequence(t *testing.T, sessionName string, outputs [][]byte) {
+	t.Helper()
 	captureIndex := 0
 	var sent []string
 	runtime := agyPromptRuntime{
@@ -80,12 +87,26 @@ func TestWaitForAgyPromptDismissesSurveyBeforeReady(t *testing.T) {
 		},
 		sleep: func(context.Context, time.Duration) {},
 	}
-	if err := waitForAgyPromptWithRuntime(context.Background(), "agy-survey", time.Second, runtime); err != nil {
+	if err := waitForAgyPromptWithRuntime(context.Background(), sessionName, time.Second, runtime); err != nil {
 		t.Fatalf("waitForAgyPromptWithRuntime: %v", err)
 	}
 	if len(sent) != 1 || sent[0] != "0" {
-		t.Fatalf("survey keys = %v, want [0]", sent)
+		t.Fatalf("survey keys = %v, want one dismissal", sent)
 	}
+}
+
+func TestWaitForAgyPromptDismissesSurveyBeforeReady(t *testing.T) {
+	assertAgySurveySequence(t, "agy-survey", [][]byte{
+		[]byte("Task complete\n>\nHow's the CLI experience so far? [1] Good [2] Fine [3] Bad [0] Skip"),
+		[]byte("AGY ready\n> "),
+	})
+}
+
+func TestWaitForAgyPromptDoesNotRedismissStaleSurvey(t *testing.T) {
+	assertAgySurveySequence(t, "agy-stale-survey", [][]byte{
+		[]byte("Task complete\n>\nHow's the CLI experience so far? [1] Good [2] Fine [3] Bad [0] Skip"),
+		[]byte("How's the CLI experience so far? [1] Good [2] Fine [3] Bad [0] Skip\nAGY ready\n> "),
+	})
 }
 
 func TestWaitForAgyPromptHonorsCallerCancellation(t *testing.T) {

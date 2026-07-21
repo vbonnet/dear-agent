@@ -202,6 +202,8 @@ creation, and terminal state detection.
 - AGY model-switch provenance requires a new exact confirmation, and root
   cancellation reaches AGY readiness stabilization and post-resume multiline
   readiness before delivery, association, or attach.
+- AGY feedback survey handling dismisses once and recognizes the subsequent
+  composer even while stale survey text remains in captured pane history.
 - AGM runtime helper commands keep co-located SPEC coverage.
 - AGM backend implementations keep co-located SPEC coverage.
 - AGM cleanup and process support packages keep co-located SPEC coverage.
