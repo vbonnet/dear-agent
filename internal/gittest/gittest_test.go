@@ -222,3 +222,61 @@ func TestDefaultSandboxIsStablePerTest(t *testing.T) {
 		t.Fatalf("default sandbox repo is not on main: %q", out)
 	}
 }
+
+// TestProductionStyleGitCannotRunHostHooksInSandboxRepos covers the hazard one
+// layer below the test file. Production Git wrappers build their own
+// *exec.Cmd and never set Cmd.Env, so pointing one at a temporary repository
+// re-creates F-01 inside the code under test — the migration of the test call
+// sites does not reach them.
+//
+// rawGit here is exactly that shape: inherited environment, poisoned HOME,
+// repository created by the sandbox. It must still be unable to reach a host
+// hook, because InitRepo plants the empty hooks path in the repository's own
+// config and repository configuration outranks global configuration.
+func TestProductionStyleGitCannotRunHostHooksInSandboxRepos(t *testing.T) {
+	canary := poisonHost(t)
+	sandbox := gittest.New(t)
+	repo := sandbox.NewRepo(t)
+
+	// Every command below is raw: no sandbox environment, no -c overrides.
+	write(t, filepath.Join(repo, "topic.txt"), "topic\n")
+	rawGit(t, repo, "add", "topic.txt")
+	rawGit(t, repo, "-c", "user.name=t", "-c", "user.email=t@t.invalid", "commit", "-m", "raw commit")
+	rawGit(t, repo, "checkout", "-b", "topic")
+	rawGit(t, repo, "checkout", "main")
+	rawGit(t, repo, "-c", "user.name=t", "-c", "user.email=t@t.invalid",
+		"merge", "--no-ff", "-m", "raw merge", "topic")
+
+	if canaryFired(t, canary) {
+		contents, _ := os.ReadFile(canary)
+		t.Fatalf("an unsandboxed Git command reached a host hook inside a sandbox repository "+
+			"(%d invocation(s)):\n%s", strings.Count(string(contents), "fired"), contents)
+	}
+}
+
+// TestSandboxRepoStillAllowsItsOwnHooks proves the repository-level hardening
+// is not a blanket ban: a test that needs its own hook to fire can still say
+// so on the command line, which outranks repository configuration.
+func TestSandboxRepoStillAllowsItsOwnHooks(t *testing.T) {
+	poisonHost(t)
+	sandbox := gittest.New(t)
+	repo := sandbox.NewRepo(t)
+
+	ownHooks := filepath.Join(t.TempDir(), "own-hooks")
+	if err := os.MkdirAll(ownHooks, 0o700); err != nil {
+		t.Fatalf("create %s: %v", ownHooks, err)
+	}
+	fired := filepath.Join(t.TempDir(), "own-fired")
+	if err := os.WriteFile(filepath.Join(ownHooks, "post-commit"),
+		[]byte("#!/bin/sh\necho fired > "+fired+"\n"), 0o700); err != nil {
+		t.Fatalf("write own hook: %v", err)
+	}
+
+	write(t, filepath.Join(repo, "own.txt"), "own\n")
+	sandbox.Run(t, repo, "add", "own.txt")
+	sandbox.Run(t, repo, "-c", "core.hooksPath="+ownHooks, "commit", "-m", "with own hook")
+
+	if _, err := os.Stat(fired); err != nil {
+		t.Fatalf("a test's own hook must still be able to fire: %v", err)
+	}
+}

@@ -158,6 +158,25 @@ func (s *Sandbox) Output(dir string, args ...string) (string, error) {
 	return string(raw), err
 }
 
+// HardenRepo writes the sandbox's empty hooks path into an existing
+// repository's own config.
+//
+// Env() and Command() only protect commands this package builds. Production
+// Git wrappers build their own *exec.Cmd and leave Cmd.Env unset, so when a
+// test points one at a sandboxed repository it still reads the host's global
+// configuration — the same hook hazard, relocated from the test file into the
+// code under test. Repository configuration outranks global configuration, so
+// planting the empty hooks path in the repository closes that path for every
+// process that touches it, whoever spawned it.
+//
+// Command-line configuration still outranks the repository, so a test that
+// needs its own hooks to fire can pass `-c core.hooksPath=...` for that one
+// invocation.
+func (s *Sandbox) HardenRepo(t testing.TB, dir string) {
+	t.Helper()
+	s.Run(t, dir, "config", "core.hooksPath", s.HooksDir)
+}
+
 // InitRepo initializes a sandboxed repository in dir, creating dir if needed,
 // and returns dir. The repository has one commit so it has a resolvable HEAD.
 func (s *Sandbox) InitRepo(t testing.TB, dir string) string {
@@ -166,6 +185,7 @@ func (s *Sandbox) InitRepo(t testing.TB, dir string) string {
 		t.Fatalf("gittest: create %s: %v", dir, err)
 	}
 	s.Run(t, dir, "init", "-b", "main")
+	s.HardenRepo(t, dir)
 	readme := filepath.Join(dir, "README.md")
 	if err := os.WriteFile(readme, []byte("# test repo\n"), 0o600); err != nil {
 		t.Fatalf("gittest: seed %s: %v", readme, err)
@@ -243,6 +263,11 @@ func Output(t testing.TB, dir string, args ...string) (string, error) {
 // InitRepo initializes a sandboxed repository in dir using t's default
 // sandbox and returns dir.
 func InitRepo(t testing.TB, dir string) string { t.Helper(); return Default(t).InitRepo(t, dir) }
+
+// HardenRepo writes t's default sandbox's empty hooks path into an existing
+// repository's own config. Use it for repositories a test did not create
+// through InitRepo — a clone, or one the code under test produced.
+func HardenRepo(t testing.TB, dir string) { t.Helper(); Default(t).HardenRepo(t, dir) }
 
 // NewRepo initializes a sandboxed repository in a fresh temporary directory
 // using t's default sandbox.
