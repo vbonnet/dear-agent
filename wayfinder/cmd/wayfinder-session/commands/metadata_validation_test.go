@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -49,6 +50,16 @@ func TestLifecycleMetadataRequiresActionableDetails(t *testing.T) {
 		if (err != nil) != test.wantErr {
 			t.Fatalf("validateLifecycleMetadata(%q) error = %v, wantErr=%v", test.state, err, test.wantErr)
 		}
+	}
+}
+
+func TestValidateLifecycleCompletionRequiresCompletedWaypoints(t *testing.T) {
+	st := &status.StatusV2{}
+	if err := validateLifecycleCompletion(st, status.LifecycleWorking); err != nil {
+		t.Fatalf("validateLifecycleCompletion() rejected nonterminal update: %v", err)
+	}
+	if err := validateLifecycleCompletion(st, status.LifecycleCompleted); err == nil || !strings.Contains(err.Error(), "required Wayfinder phases are incomplete") {
+		t.Fatalf("validateLifecycleCompletion() error = %v, want completion guard", err)
 	}
 }
 
