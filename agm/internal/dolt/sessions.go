@@ -281,9 +281,7 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 			tmux_session_name = CASE
 				WHEN ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)
 				THEN ? ELSE tmux_session_name END,
-			tmux_session_revision = CASE
-				WHEN ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)
-				THEN NULL ELSE tmux_session_revision END,
+			tmux_session_revision = NULL,
 			metadata = ?,
 			permission_mode = ?, permission_mode_updated_at = ?, permission_mode_source = ?,
 			is_test = ?,
@@ -306,8 +304,6 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 		observedTmuxRevision,
 		observedTmuxRevision,
 		session.Tmux.SessionName,
-		observedTmuxRevision,
-		observedTmuxRevision,
 		metadataJSON,
 		session.PermissionMode,
 		session.PermissionModeUpdatedAt,
@@ -381,7 +377,6 @@ type TmuxSessionNameChange struct {
 	PreviousUpdatedAt time.Time
 	CurrentName       string
 	CurrentRevision   string
-	CurrentUpdatedAt  time.Time
 }
 
 type tmuxSessionNameChangeState uint8
@@ -430,7 +425,6 @@ func (a *Adapter) BeginTmuxSessionNameChange(ctx context.Context, sessionID, new
 		return nil, nil
 	}
 	currentRevision := uuid.NewString()
-	currentUpdatedAt := time.Now()
 	previousRevisionValue := nullableStringValue(previousRevision)
 	result, err := tx.ExecContext(ctx, `
 		UPDATE agm_sessions
@@ -438,7 +432,7 @@ func (a *Adapter) BeginTmuxSessionNameChange(ctx context.Context, sessionID, new
 		WHERE id = ? AND workspace = ?
 		  AND tmux_session_name = ?
 		  AND ((tmux_session_revision IS NULL AND ? IS NULL) OR tmux_session_revision = ?)
-	`, currentUpdatedAt, newName, currentRevision, sessionID, a.workspace, previousName, previousRevisionValue, previousRevisionValue)
+	`, time.Now(), newName, currentRevision, sessionID, a.workspace, previousName, previousRevisionValue, previousRevisionValue)
 	if err != nil {
 		return nil, fmt.Errorf("write provisional tmux session name: %w", err)
 	}
@@ -456,7 +450,6 @@ func (a *Adapter) BeginTmuxSessionNameChange(ctx context.Context, sessionID, new
 		PreviousUpdatedAt: previousUpdatedAt,
 		CurrentName:       newName,
 		CurrentRevision:   currentRevision,
-		CurrentUpdatedAt:  currentUpdatedAt,
 	}
 	if err := tx.Commit(); err != nil {
 		// Commit can report an error after the database durably accepted the
@@ -527,11 +520,10 @@ func nullableStringValue(value sql.NullString) any {
 func (a *Adapter) RestoreTmuxSessionNameChange(ctx context.Context, change TmuxSessionNameChange) (bool, error) {
 	result, err := a.conn.ExecContext(ctx, `
 		UPDATE agm_sessions
-		SET updated_at = CASE WHEN updated_at = ? THEN ? ELSE updated_at END,
-			tmux_session_name = ?, tmux_session_revision = ?
+		SET updated_at = ?, tmux_session_name = ?, tmux_session_revision = ?
 		WHERE id = ? AND workspace = ?
 		  AND tmux_session_name = ? AND tmux_session_revision = ?
-	`, change.CurrentUpdatedAt, change.PreviousUpdatedAt, change.PreviousName, nullableStringValue(change.PreviousRevision), change.SessionID, a.workspace, change.CurrentName, change.CurrentRevision)
+	`, change.PreviousUpdatedAt, change.PreviousName, nullableStringValue(change.PreviousRevision), change.SessionID, a.workspace, change.CurrentName, change.CurrentRevision)
 	if err != nil {
 		return false, fmt.Errorf("restore provisional tmux session name: %w", err)
 	}

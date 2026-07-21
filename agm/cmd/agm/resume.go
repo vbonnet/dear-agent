@@ -480,22 +480,50 @@ func resumeResolvedSession(ctx context.Context, adapter *dolt.Adapter, sessionID
 }
 
 func resumeResolvedSessionWithLocker(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath string, withLock func(string, func() error) error) error {
-	if withLock == nil {
-		return fmt.Errorf("resume session lock dependency is missing")
-	}
-	return withLock(sessionID, func() error {
+	attachment, err := runResumeTransactionWithLock(sessionID, withLock, func() (*resumeAttachment, error) {
 		return resumeResolvedSessionLocked(ctx, adapter, sessionID, manifestPath)
 	})
+	if err != nil {
+		return err
+	}
+	if attachment != nil {
+		if err := attachment.finish(); err != nil {
+			ui.PrintError(err,
+				"Failed to resume session",
+				"  • Check tmux is running: tmux list-sessions\n"+
+					"  • Verify session health: agmdoctor\n"+
+					"  • Try manual attach: tmux attach -t "+attachment.health.TmuxSessionName)
+			return err
+		}
+	}
+	ui.PrintSuccess(fmt.Sprintf("Successfully resumed session %s", sessionID))
+	return nil
 }
 
-func resumeResolvedSessionLocked(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath string) error {
+func runResumeTransactionWithLock(sessionID string, withLock func(string, func() error) error, transaction func() (*resumeAttachment, error)) (*resumeAttachment, error) {
+	if withLock == nil {
+		return nil, fmt.Errorf("resume session lock dependency is missing")
+	}
+	if transaction == nil {
+		return nil, fmt.Errorf("resume transaction dependency is missing")
+	}
+	var attachment *resumeAttachment
+	err := withLock(sessionID, func() error {
+		var err error
+		attachment, err = transaction()
+		return err
+	})
+	return attachment, err
+}
+
+func resumeResolvedSessionLocked(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath string) (*resumeAttachment, error) {
 	// Read manifest from Dolt to check lifecycle
 	m, err := adapter.GetSession(sessionID)
 	if err != nil {
 		ui.PrintError(err, "Failed to read session from Dolt",
 			"  • Session may not exist in database\n"+
 				"  • Try: agm session list --all")
-		return err
+		return nil, err
 	}
 
 	// Auto-detect harness from manifest
@@ -514,7 +542,7 @@ func resumeResolvedSessionLocked(ctx context.Context, adapter *dolt.Adapter, ses
 	// Check if session is archived
 	if m.Lifecycle == manifest.LifecycleArchived {
 		ui.PrintArchivedSessionError(sessionID)
-		return fmt.Errorf("cannot resume archived session")
+		return nil, fmt.Errorf("cannot resume archived session")
 	}
 
 	// Check session health
@@ -524,7 +552,7 @@ func resumeResolvedSessionLocked(ctx context.Context, adapter *dolt.Adapter, ses
 			"Session health check failed",
 			"  • Run diagnostics: agmdoctor\n"+
 				"  • List all sessions: agmlist --all")
-		return err
+		return nil, err
 	}
 
 	// Display health status
@@ -537,21 +565,21 @@ func resumeResolvedSessionLocked(ctx context.Context, adapter *dolt.Adapter, ses
 			"Critical issues prevent resuming this session",
 			"  • Fix the issues above and try again",
 		)
-		return fmt.Errorf("session health check failed")
+		return nil, fmt.Errorf("session health check failed")
 	}
 
-	// Resume the session
-	if err := resumeSession(ctx, adapter, sessionID, manifestPath, harnessName, health); err != nil {
+	// Run the transactional resume under the lock, but return attachment work to
+	// the caller so an interactive terminal cannot hold the operation lock.
+	attachment, err := resumeSessionTransactionWithRuntime(ctx, adapter, sessionID, manifestPath, harnessName, health, realResumeSessionRuntime(ctx))
+	if err != nil {
 		ui.PrintError(err,
 			"Failed to resume session",
 			"  • Check tmux is running: tmux list-sessions\n"+
 				"  • Verify session health: agmdoctor\n"+
 				"  • Try manual attach: tmux attach -t "+health.TmuxSessionName)
-		return err
+		return nil, err
 	}
-
-	ui.PrintSuccess(fmt.Sprintf("Successfully resumed session %s", sessionID))
-	return nil
+	return attachment, nil
 }
 
 // resumeSessionRuntime is the narrow impure boundary for the resume
@@ -731,54 +759,65 @@ func completeResumeTmuxName(ctx context.Context, adapter *dolt.Adapter, change r
 	return err
 }
 
-// resumeSession performs the complete resume workflow.
-func resumeSession(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath, harnessName string, health *HealthStatus) error {
-	return resumeSessionWithRuntime(ctx, adapter, sessionID, manifestPath, harnessName, health, realResumeSessionRuntime(ctx))
+type resumeAttachment struct {
+	ctx             context.Context
+	sessionID       string
+	health          *HealthStatus
+	sendCommands    bool
+	runtime         resumeSessionRuntime
+	promptDelivered bool
+}
+
+func (attachment *resumeAttachment) finish() error {
+	if attachment == nil {
+		return nil
+	}
+	err := attachResumedSession(attachment.ctx, attachment.sessionID, attachment.health, attachment.sendCommands, attachment.runtime)
+	if err != nil && attachment.promptDelivered {
+		ui.PrintWarning(fmt.Sprintf("Post-prompt resume attachment failed after work was delivered: %v", err))
+		return nil
+	}
+	return err
 }
 
 func resumeSessionWithRuntime(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath, harnessName string, health *HealthStatus, runtime resumeSessionRuntime) error {
-	m, err := loadResumeSessionManifest(ctx, adapter, sessionID, harnessName, runtime)
+	attachment, err := resumeSessionTransactionWithRuntime(ctx, adapter, sessionID, manifestPath, harnessName, health, runtime)
 	if err != nil {
 		return err
+	}
+	return attachment.finish()
+}
+
+func resumeSessionTransactionWithRuntime(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath, harnessName string, health *HealthStatus, runtime resumeSessionRuntime) (*resumeAttachment, error) {
+	m, err := loadResumeSessionManifest(ctx, adapter, sessionID, harnessName, runtime)
+	if err != nil {
+		return nil, err
 	}
 	createdTmux, err := ensureResumeTmuxSession(ctx, health, runtime)
 	if err != nil {
 		if createdTmux.owned() {
-			return rollbackCreatedResumeTmux(ctx, runtime, adapter, m, createdTmux, resumeTmuxNameChange{}, err)
+			return nil, rollbackCreatedResumeTmux(ctx, runtime, adapter, m, createdTmux, resumeTmuxNameChange{}, err)
 		}
-		return err
+		return nil, err
 	}
 	sendCommands := shouldSendResumeCommands(health.TmuxExists)
 	if err := runHarnessResume(ctx, adapter, m, harnessName, health, sendCommands, runtime); err != nil {
 		if createdTmux.owned() {
-			return rollbackCreatedResumeTmux(ctx, runtime, adapter, m, createdTmux, resumeTmuxNameChange{}, err)
+			return nil, rollbackCreatedResumeTmux(ctx, runtime, adapter, m, createdTmux, resumeTmuxNameChange{}, err)
 		}
-		return err
+		return nil, err
 	}
 	var nameChange resumeTmuxNameChange
 	if createdTmux.owned() {
 		nameChange, err = persistCreatedResumeTmuxName(ctx, runtime, adapter, m, health)
 		if err != nil {
-			return rollbackCreatedResumeTmux(ctx, runtime, adapter, m, createdTmux, nameChange, err)
+			return nil, rollbackCreatedResumeTmux(ctx, runtime, adapter, m, createdTmux, nameChange, err)
 		}
 	}
 	transactionalPrompt := agent.NormalizeHarnessName(harnessName) == "codex-cli"
-	promptDelivered := false
-	if transactionalPrompt {
-		// Codex canonical-name persistence must commit before the optional prompt
-		// can trigger work. Prompt delivery is strict for a cold Codex resume;
-		// any failure first compensates this transaction's compare-and-swap
-		// metadata write and then removes the exact created tmux identity. If a
-		// newer writer superseded metadata ownership, the ready tmux session is
-		// preserved. Other harnesses retain
-		// their established warning-only prompt semantics and finalization order.
-		promptDelivered, err = deliverPostResumePrompt(ctx, health.TmuxSessionName, runtime, createdTmux.owned())
-		if err != nil {
-			if createdTmux.owned() {
-				return rollbackCreatedResumeTmux(ctx, runtime, adapter, m, createdTmux, nameChange, err)
-			}
-			return err
-		}
+	promptDelivered, err := deliverTransactionalResumePrompt(ctx, runtime, adapter, m, health, createdTmux, nameChange, transactionalPrompt)
+	if err != nil {
+		return nil, err
 	}
 	completionCtx := ctx
 	if promptDelivered {
@@ -787,27 +826,53 @@ func resumeSessionWithRuntime(ctx context.Context, adapter *dolt.Adapter, sessio
 		// if the caller is canceled so a retry cannot duplicate that prompt.
 		completionCtx = context.WithoutCancel(ctx)
 	}
-	if nameChange.Applied {
-		if runtime.completeTmuxName == nil {
-			ui.PrintWarning("Resume metadata ownership token could not be finalized: runtime dependency is missing")
-		} else if err := runtime.completeTmuxName(completionCtx, adapter, nameChange); err != nil {
-			// Prompt delivery is irreversible. Do not report a retryable resume
-			// failure after it succeeds; a later full session update also clears
-			// stale ownership tokens.
-			ui.PrintWarning(fmt.Sprintf("Failed to finalize resume metadata ownership: %v", err))
-		}
-	}
+	completeResumeTmuxOwnership(completionCtx, runtime, adapter, nameChange)
 	if sendCommands {
 		runtime.restorePermission(harnessName, m, health)
 	}
-	if err := finalizeResumeSession(completionCtx, adapter, sessionID, manifestPath, health, sendCommands, !transactionalPrompt, runtime); err != nil {
+	attachment, err := finalizeResumeSession(completionCtx, adapter, sessionID, manifestPath, health, sendCommands, !transactionalPrompt, runtime)
+	if err != nil {
 		if promptDelivered {
 			ui.PrintWarning(fmt.Sprintf("Post-prompt resume finalization failed after work was delivered: %v", err))
-			return nil
+			return nil, nil
 		}
-		return err
+		return nil, err
 	}
-	return nil
+	attachment.promptDelivered = promptDelivered
+	return attachment, nil
+}
+
+func deliverTransactionalResumePrompt(ctx context.Context, runtime resumeSessionRuntime, adapter *dolt.Adapter, m *manifest.Manifest, health *HealthStatus, createdTmux createdResumeTmux, nameChange resumeTmuxNameChange, transactional bool) (bool, error) {
+	if !transactional {
+		return false, nil
+	}
+	// Codex canonical-name persistence must commit before the optional prompt
+	// can trigger work. Prompt delivery is strict for a cold Codex resume; any
+	// failure compensates metadata before removing the exact created identity.
+	delivered, err := deliverPostResumePrompt(ctx, health.TmuxSessionName, runtime, createdTmux.owned())
+	if err == nil {
+		return delivered, nil
+	}
+	if createdTmux.owned() {
+		return false, rollbackCreatedResumeTmux(ctx, runtime, adapter, m, createdTmux, nameChange, err)
+	}
+	return false, err
+}
+
+func completeResumeTmuxOwnership(ctx context.Context, runtime resumeSessionRuntime, adapter *dolt.Adapter, nameChange resumeTmuxNameChange) {
+	if !nameChange.Applied {
+		return
+	}
+	if runtime.completeTmuxName == nil {
+		ui.PrintWarning("Resume metadata ownership token could not be finalized: runtime dependency is missing")
+		return
+	}
+	if err := runtime.completeTmuxName(ctx, adapter, nameChange); err != nil {
+		// Prompt delivery is irreversible. Do not report a retryable resume
+		// failure after it succeeds; a later full session update also clears
+		// stale ownership tokens.
+		ui.PrintWarning(fmt.Sprintf("Failed to finalize resume metadata ownership: %v", err))
+	}
 }
 
 func loadResumeSessionManifest(ctx context.Context, adapter *dolt.Adapter, sessionID, harnessName string, runtime resumeSessionRuntime) (*manifest.Manifest, error) {
@@ -901,9 +966,9 @@ func withAgyResumeWorkspaceLock(ctx context.Context, harnessName, workDir string
 	return resume()
 }
 
-func finalizeResumeSession(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath string, health *HealthStatus, sendCommands, deliverPrompt bool, runtime resumeSessionRuntime) error {
+func finalizeResumeSession(ctx context.Context, adapter *dolt.Adapter, sessionID, manifestPath string, health *HealthStatus, sendCommands, deliverPrompt bool, runtime resumeSessionRuntime) (*resumeAttachment, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Update manifest last_activity (best effort - don't fail if this errors)
@@ -911,17 +976,23 @@ func finalizeResumeSession(ctx context.Context, adapter *dolt.Adapter, sessionID
 		ui.PrintWarning(fmt.Sprintf("Failed to update manifest activity: %v", err))
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Update VS Code tab title if running in VS Code
 	runtime.updateTabTitle(health.TmuxSessionName)
 	if deliverPrompt {
 		if _, err := deliverPostResumePrompt(ctx, health.TmuxSessionName, runtime, false); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return attachResumedSession(ctx, sessionID, health, sendCommands, runtime)
+	return &resumeAttachment{
+		ctx:          ctx,
+		sessionID:    sessionID,
+		health:       health,
+		sendCommands: sendCommands,
+		runtime:      runtime,
+	}, nil
 }
 
 func deliverPostResumePrompt(ctx context.Context, sessionName string, runtime resumeSessionRuntime, strict bool) (bool, error) {
@@ -951,8 +1022,6 @@ func hasPostResumePrompt() bool {
 }
 
 func attachResumedSession(ctx context.Context, sessionID string, health *HealthStatus, sendCommands bool, runtime resumeSessionRuntime) error {
-	// NOTE: No need to release global lock before attach - using fine-grained locks
-	// AttachSession never holds any lock, so it can block indefinitely without issues
 	if err := ctx.Err(); err != nil {
 		return err
 	}

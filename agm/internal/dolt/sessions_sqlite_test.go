@@ -341,22 +341,22 @@ func TestSQLiteTmuxSessionNameStaleFullUpdatePreservesOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSession() after stale update: %v", err)
 	}
-	if stored.Tmux.SessionName != change.CurrentName || stored.Tmux.SessionRevision != change.CurrentRevision {
-		t.Fatalf("tmux ownership after stale update = (%q, %q), want (%q, %q)", stored.Tmux.SessionName, stored.Tmux.SessionRevision, change.CurrentName, change.CurrentRevision)
+	if stored.Tmux.SessionName != change.CurrentName || stored.Tmux.SessionRevision != "" {
+		t.Fatalf("tmux state after stale update = (%q, %q), want canonical name with superseded ownership", stored.Tmux.SessionName, stored.Tmux.SessionRevision)
 	}
 	if stored.Context.Notes != stale.Context.Notes {
 		t.Fatalf("unrelated notes = %q, want %q", stored.Context.Notes, stale.Context.Notes)
 	}
 	restored, err := adapter.RestoreTmuxSessionNameChange(t.Context(), *change)
-	if err != nil || !restored {
-		t.Fatalf("RestoreTmuxSessionNameChange() = (%v, %v), want (true, nil)", restored, err)
+	if err != nil || restored {
+		t.Fatalf("RestoreTmuxSessionNameChange() = (%v, %v), want (false, nil)", restored, err)
 	}
 	final, err := adapter.GetSession(m.SessionID)
 	if err != nil {
 		t.Fatalf("GetSession() after restore: %v", err)
 	}
-	if final.Tmux.SessionName != change.PreviousName || final.Context.Notes != stale.Context.Notes || !final.UpdatedAt.Equal(newerUpdatedAt) {
-		t.Fatalf("restored state = (name=%q notes=%q updated=%v), want previous name plus unrelated update timestamp %v", final.Tmux.SessionName, final.Context.Notes, final.UpdatedAt, newerUpdatedAt)
+	if final.Tmux.SessionName != change.CurrentName || final.Context.Notes != stale.Context.Notes || !final.UpdatedAt.Equal(newerUpdatedAt) {
+		t.Fatalf("superseded state = (name=%q notes=%q updated=%v), want canonical name plus unrelated update timestamp %v", final.Tmux.SessionName, final.Context.Notes, final.UpdatedAt, newerUpdatedAt)
 	}
 }
 

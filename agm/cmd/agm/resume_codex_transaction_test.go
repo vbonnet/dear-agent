@@ -220,6 +220,48 @@ func TestResumeResolvedSessionAcquiresSessionLockBeforeReads(t *testing.T) {
 	}
 }
 
+func TestResumeAttachmentRunsAfterSessionLockReleases(t *testing.T) {
+	setDetachedResumeTestGlobals(t, false)
+	locked := false
+	attached := false
+	attachment, err := runResumeTransactionWithLock("stable-session-id", func(sessionID string, fn func() error) error {
+		if sessionID != "stable-session-id" {
+			t.Fatalf("lock key = %q, want stable-session-id", sessionID)
+		}
+		locked = true
+		defer func() { locked = false }()
+		return fn()
+	}, func() (*resumeAttachment, error) {
+		if !locked {
+			t.Fatal("resume transaction ran outside the session lock")
+		}
+		return &resumeAttachment{
+			ctx:       t.Context(),
+			sessionID: "stable-session-id",
+			health:    &HealthStatus{TmuxSessionName: "stable-session"},
+			runtime: resumeSessionRuntime{attachTmux: func(string) error {
+				if locked {
+					t.Fatal("interactive attachment ran while the session lock was held")
+				}
+				attached = true
+				return nil
+			}},
+		}, nil
+	})
+	if err != nil {
+		t.Fatalf("runResumeTransactionWithLock() error = %v", err)
+	}
+	if locked {
+		t.Fatal("session lock remained held after the transaction returned")
+	}
+	if err := attachment.finish(); err != nil {
+		t.Fatalf("attachment.finish() error = %v", err)
+	}
+	if !attached {
+		t.Fatal("attachment did not run")
+	}
+}
+
 func recordingResumeRuntime(calls *[]string) resumeSessionRuntime {
 	record := func(call string) { *calls = append(*calls, call) }
 	return resumeSessionRuntime{

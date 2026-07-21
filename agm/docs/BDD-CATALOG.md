@@ -250,7 +250,8 @@ creation, and terminal state detection.
 - Resume rechecks the root context after metadata lookup and before tmux
   creation, command delivery, metadata updates, or warm-session attach.
 - Every production resume entry, including last-session and bulk resume,
-  acquires the stable session-ID lock before health or transaction reads.
+  acquires the stable session-ID lock before health or transaction reads and
+  releases it after finalization but before an interactive attachment.
 - Only an actually delivered Codex prompt creates the irreversible success
   boundary; a failed send on an existing pane cannot hide a later attach error.
 - Cold Codex resume retains tmux's server-local ID plus a random per-creation
@@ -263,7 +264,8 @@ creation, and terminal state detection.
   exact identities, and preserves the ready tmux session when a concurrent
   writer supersedes metadata ownership or a post-write reload leaves
   compensation unproven. A stale full-session writer preserves the current
-  name and ownership revision while still updating unrelated fields. A commit
+  name while applying unrelated fields and superseding ownership, forcing
+  rollback to preserve the canonical tmux session without timestamp guesses. A commit
   error is re-read against the complete prior and provisional revisions before
   cleanup proceeds. It also avoids killing a same-named or
   server-restart replacement. Reopening a

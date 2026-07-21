@@ -52,12 +52,12 @@ func TestDoltTmuxSessionNameChangeUsesCrossDialectOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSession() after stale full update: %v", err)
 	}
-	if preserved.Tmux.SessionName != change.CurrentName || preserved.Tmux.SessionRevision != change.CurrentRevision || preserved.Context.Notes != stale.Context.Notes {
-		t.Fatalf("stale full update state = (name=%q revision=%q notes=%q), want provisional ownership plus unrelated note", preserved.Tmux.SessionName, preserved.Tmux.SessionRevision, preserved.Context.Notes)
+	if preserved.Tmux.SessionName != change.CurrentName || preserved.Tmux.SessionRevision != "" || preserved.Context.Notes != stale.Context.Notes {
+		t.Fatalf("stale full update state = (name=%q revision=%q notes=%q), want canonical name, superseded ownership, and unrelated note", preserved.Tmux.SessionName, preserved.Tmux.SessionRevision, preserved.Context.Notes)
 	}
 	completed, err := adapter.CompleteTmuxSessionNameChange(t.Context(), *change)
-	if err != nil || !completed {
-		t.Fatalf("CompleteTmuxSessionNameChange() = (%v, %v), want (true, nil)", completed, err)
+	if err != nil || completed {
+		t.Fatalf("CompleteTmuxSessionNameChange() = (%v, %v), want (false, nil) after superseding writer", completed, err)
 	}
 
 	secondChange, err := adapter.BeginTmuxSessionNameChange(t.Context(), sessionID, "second-canonical-name")
