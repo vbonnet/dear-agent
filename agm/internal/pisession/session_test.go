@@ -57,6 +57,48 @@ func TestSessionRootRejectsRelativeAndSymlinkDirectories(t *testing.T) {
 	}
 }
 
+func TestValidateCodingAgentDirNormalizesAndRejectsUnsafeTargets(t *testing.T) {
+	if got, err := ValidateCodingAgentDir(""); err != nil || got != "" {
+		t.Fatalf("empty coding agent dir = %q, %v", got, err)
+	}
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "pi agent")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ValidateCodingAgentDir(dir)
+	if err != nil || got != dir {
+		t.Fatalf("validated coding agent dir = %q, %v; want %q", got, err, dir)
+	}
+	t.Chdir(parent)
+	got, err = ValidateCodingAgentDir("pi agent")
+	if err != nil || got != dir {
+		t.Fatalf("normalized relative coding agent dir = %q, %v; want %q", got, err, dir)
+	}
+	link := filepath.Join(t.TempDir(), "pi-link")
+	if err := os.Symlink(dir, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ValidateCodingAgentDir(link); err == nil {
+		t.Fatal("symlink Pi coding agent directory was accepted")
+	}
+	if _, err := ValidateCodingAgentDir(filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Fatal("missing Pi coding agent directory was accepted")
+	}
+}
+
+func TestResolveCodingAgentDirDistinguishesPersistedDefaultFromLegacyMetadata(t *testing.T) {
+	if got := ResolveCodingAgentDir("", true, "/caller/config"); got != "" {
+		t.Fatalf("persisted native default resolved to %q", got)
+	}
+	if got := ResolveCodingAgentDir("/persisted/config", false, "/caller/config"); got != "/persisted/config" {
+		t.Fatalf("persisted custom directory resolved to %q", got)
+	}
+	if got := ResolveCodingAgentDir("", false, "/caller/config"); got != "/caller/config" {
+		t.Fatalf("legacy metadata resolved to %q", got)
+	}
+}
+
 func TestFindTranscriptMatchesExactHeaderID(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

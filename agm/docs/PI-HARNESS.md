@@ -144,6 +144,22 @@ OpenRouter OpenAI entries can expose a different context window than the same
 model through direct OpenAI. Provider and model IDs remain case-sensitive and
 separate; a custom raw model ID may repeat its provider prefix without AGM
 collapsing that opaque segment.
+When `PI_CODING_AGENT_DIR` selects a custom Pi configuration, AGM validates
+the directory before creating or importing a session, records the absolute
+non-symlink path with Pi's native identity, and quotes it into both create and
+cold-resume commands. This explicit forwarding is required for sessions
+started through an already-running tmux server, whose environment may predate
+the invoking shell. Sessions without an explicit directory continue to use
+Pi's native default discovery because AGM explicitly clears any stale copy of
+the variable inherited from the tmux server. New manifests also persist a
+presence marker for that empty native-default choice, so a later shell cannot
+silently replace it; only legacy metadata written before the marker existed
+uses the current caller variable as a cold-resume and status compatibility
+fallback.
+Direct adapter callers may provide `PI_CODING_AGENT_DIR` in the session
+environment. Its presence, including an explicit empty value, takes precedence
+over the adapter process environment before the same validation and persistence
+rules are applied.
 For models declared in Pi's `models.json`, AGM reads only the bounded model ID,
 `contextWindow`, and `modelOverrides` data: it never evaluates credential or
 command fields. A custom model with an omitted window uses Pi's 128000-token
@@ -176,6 +192,11 @@ data remains an explicit storage operation, not an archive side effect.
   --version` is visible in AGM's `PATH`.
 - `no provider models available`: configure a provider through Pi; AGM will not
   read credential files to diagnose this.
+- custom provider missing only under AGM: confirm `PI_CODING_AGENT_DIR` names
+  an existing non-symlink directory when the session is created; AGM persists
+  that path and field presence for cold resume instead of relying on tmux's
+  global environment. A legacy session without the presence marker uses the
+  current value only for backwards compatibility.
 - `Pi transcript not found`: inspect the manifest's `pi` block; do not replace
   it with the most recent JSONL path.
 - no `AGM <mode>/ready <launch-id>` footer: treat the session as not sendable and inspect

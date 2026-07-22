@@ -347,7 +347,11 @@ func detectPiContext(pi *manifest.Pi) (*manifest.ContextUsage, error) {
 	if err != nil {
 		return nil, err
 	}
-	contextWindow := piModelContextWindow(usage.Model)
+	codingAgentDir := pisession.ResolveCodingAgentDir(
+		pi.CodingAgentDir, pi.CodingAgentDirSet,
+		os.Getenv("PI_CODING_AGENT_DIR"),
+	)
+	contextWindow := piModelContextWindow(usage.Model, codingAgentDir)
 	percentage := math.Min(100, float64(usage.ContextTokens)/float64(contextWindow)*100)
 	return &manifest.ContextUsage{
 		TotalTokens:    contextWindow,
@@ -413,8 +417,8 @@ func (window *piModelCatalogContextWindow) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func piModelContextWindow(model string) int {
-	if contextWindow, ok := piConfiguredModelContextWindow(model); ok {
+func piModelContextWindow(model, codingAgentDir string) int {
+	if contextWindow, ok := piConfiguredModelContextWindow(model, codingAgentDir); ok {
 		return contextWindow
 	}
 	return piNativeModelContextWindow(model)
@@ -491,8 +495,8 @@ func piKnownOpenRouterModelContextWindow(route string) (int, bool) {
 	}
 }
 
-func piConfiguredModelContextWindow(model string) (int, bool) {
-	catalog, ok := readPiModelCatalog()
+func piConfiguredModelContextWindow(model, codingAgentDir string) (int, bool) {
+	catalog, ok := readPiModelCatalog(codingAgentDir)
 	if !ok {
 		return 0, false
 	}
@@ -524,8 +528,8 @@ func piConfiguredModelContextWindow(model string) (int, bool) {
 	}
 	return window, matched
 }
-func readPiModelCatalog() (piModelCatalog, bool) {
-	path, err := piModelCatalogPath()
+func readPiModelCatalog(codingAgentDir string) (piModelCatalog, bool) {
+	path, err := piModelCatalogPath(codingAgentDir)
 	if err != nil {
 		return piModelCatalog{}, false
 	}
@@ -589,8 +593,8 @@ func safePiModelCatalogFile(info os.FileInfo) bool {
 		info.Size() >= 0 && info.Size() <= piModelCatalogMaxBytes
 }
 
-func piModelCatalogPath() (string, error) {
-	root := strings.TrimSpace(os.Getenv("PI_CODING_AGENT_DIR"))
+func piModelCatalogPath(codingAgentDir string) (string, error) {
+	root := strings.TrimSpace(codingAgentDir)
 	if root == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {

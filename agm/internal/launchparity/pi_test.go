@@ -30,6 +30,23 @@ func TestBuildPiCommandIncludesIdentityPolicyAndModeTools(t *testing.T) {
 	}
 }
 
+func TestBuildPiCommandSafelyForwardsOptionalCodingAgentDirectory(t *testing.T) {
+	t.Parallel()
+	configured := BuildPiCommand(PiCommandSpec{
+		WorkDir: "/work", SessionName: "worker", SessionID: "native-id",
+		SessionDir: "/state", CodingAgentDir: "/tmp/pi agent's config",
+	}).Command
+	if !strings.Contains(configured, "env -u CLAUDECODE -u PI_CODING_AGENT_DIR") || !strings.Contains(configured, `PI_CODING_AGENT_DIR='/tmp/pi agent'"'"'s config' pi`) {
+		t.Fatalf("configured command did not safely forward Pi directory: %s", configured)
+	}
+	defaulted := BuildPiCommand(PiCommandSpec{
+		WorkDir: "/work", SessionName: "worker", SessionID: "native-id", SessionDir: "/state",
+	}).Command
+	if !strings.Contains(defaulted, "env -u CLAUDECODE -u PI_CODING_AGENT_DIR") || strings.Contains(defaulted, "PI_CODING_AGENT_DIR=") {
+		t.Fatalf("default command did not clear inherited Pi configuration: %s", defaulted)
+	}
+}
+
 func TestPiToolsForMode(t *testing.T) {
 	t.Parallel()
 	if got := PiToolsForMode("plan"); got != "read,grep,find,ls" {

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
@@ -60,6 +61,11 @@ func withPiAdapterRuntime(t *testing.T) {
 func TestPiAdapterCreatePersistsNativeIdentityAndCanonicalCommand(t *testing.T) {
 	withPiAdapterRuntime(t)
 	t.Setenv("AGM_PI_SESSION_ROOT", t.TempDir())
+	codingAgentDir := filepath.Join(t.TempDir(), "pi agent")
+	if err := os.Mkdir(codingAgentDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PI_CODING_AGENT_DIR", codingAgentDir)
 	var gotName, gotDir, gotCommand string
 	piNewSession = func(name, dir string) error {
 		gotName, gotDir = name, dir
@@ -99,6 +105,9 @@ func TestPiAdapterCreatePersistsNativeIdentityAndCanonicalCommand(t *testing.T) 
 	if metadata.NativeSessionDir == "" || !strings.HasPrefix(metadata.NativeSessionDir, os.Getenv("AGM_PI_SESSION_ROOT")) {
 		t.Fatalf("native session dir = %q", metadata.NativeSessionDir)
 	}
+	if metadata.CodingAgentDir != codingAgentDir || !metadata.CodingAgentDirSet || !strings.Contains(gotCommand, "PI_CODING_AGENT_DIR="+launchparity.ShellQuote(codingAgentDir)) {
+		t.Fatalf("Pi coding agent persistence/command = %q / %q", metadata.CodingAgentDir, gotCommand)
+	}
 	for _, token := range []string{"pi", "--session-id", string(sessionID), "PI_SESSION_ID='" + string(sessionID) + "'", "AGM_PI_PROJECT_DIR=", "--session-dir", metadata.NativeSessionDir, "--name", "pi-worker", "--model", "anthropic/claude-sonnet-4-6", "--extension", "agm-authorization.js", "AGM_PI_PERMISSION_MODE='plan'", "AGM_PI_PERMISSION_POLICY_FILE=", "policy-", "--tools", "read,grep,find,ls"} {
 		if !strings.Contains(gotCommand, token) {
 			t.Fatalf("command omits %q: %s", token, gotCommand)
@@ -120,6 +129,64 @@ func TestPiAdapterCreatePersistsNativeIdentityAndCanonicalCommand(t *testing.T) 
 	}
 	if gotName != "pi-worker" || gotDir == "" {
 		t.Fatalf("tmux create = %q, %q", gotName, gotDir)
+	}
+}
+
+func TestPiAdapterCreatePrefersPerSessionCodingAgentDirectory(t *testing.T) {
+	tests := []struct {
+		name          string
+		sessionConfig func(*testing.T) string
+		wantAssigned  bool
+	}{
+		{
+			name: "custom session config wins",
+			sessionConfig: func(t *testing.T) string {
+				return t.TempDir()
+			},
+			wantAssigned: true,
+		},
+		{
+			name:          "explicit session default wins",
+			sessionConfig: func(*testing.T) string { return "" },
+			wantAssigned:  false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			withPiAdapterRuntime(t)
+			t.Setenv("AGM_PI_SESSION_ROOT", t.TempDir())
+			processConfig := t.TempDir()
+			t.Setenv("PI_CODING_AGENT_DIR", processConfig)
+			sessionConfig := test.sessionConfig(t)
+			var command string
+			piSendShellCommand = func(_, value string) error { command = value; return nil }
+			store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+			adapter, err := NewPiAdapter(store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			id, err := adapter.CreateSession(SessionContext{
+				Name: "pi-session-config", WorkingDirectory: t.TempDir(),
+				Environment: map[string]string{"PI_CODING_AGENT_DIR": sessionConfig},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			metadata, err := store.Get(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if metadata.CodingAgentDir != sessionConfig || !metadata.CodingAgentDirSet {
+				t.Fatalf("persisted session config = %q, set=%t; want %q, true", metadata.CodingAgentDir, metadata.CodingAgentDirSet, sessionConfig)
+			}
+			assignment := "PI_CODING_AGENT_DIR=" + launchparity.ShellQuote(sessionConfig)
+			if test.wantAssigned != strings.Contains(command, assignment) {
+				t.Fatalf("session assignment presence = %t, want %t: %s", strings.Contains(command, assignment), test.wantAssigned, command)
+			}
+			if strings.Contains(command, processConfig) {
+				t.Fatalf("Pi command inherited process config instead of explicit session value: %s", command)
+			}
+		})
 	}
 }
 
@@ -147,10 +214,13 @@ func TestPiAdapterResumeUsesPersistedNativeIdentityModelAndMode(t *testing.T) {
 	withPiAdapterRuntime(t)
 	workDir := t.TempDir()
 	sessionDir := t.TempDir()
+	codingAgentDir := t.TempDir()
 	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{
 		"agm-id": {
 			TmuxName: "pi-resume", WorkingDir: workDir, UUID: "native.pi-id",
 			NativeSessionDir: sessionDir, Model: "gpt", PermissionMode: "auto",
+			CodingAgentDir:       codingAgentDir,
+			CodingAgentDirSet:    true,
 			PermissionPolicyJSON: `{"allow":["Bash(git:*)"]}`,
 		},
 	}}
@@ -172,11 +242,32 @@ func TestPiAdapterResumeUsesPersistedNativeIdentityModelAndMode(t *testing.T) {
 			t.Fatalf("resume command omits %q: %s", token, command)
 		}
 	}
+	if !strings.Contains(command, "PI_CODING_AGENT_DIR="+launchparity.ShellQuote(codingAgentDir)) {
+		t.Fatalf("Pi resume omitted persisted coding-agent directory: %s", command)
+	}
 	if strings.Contains(command, "Bash(git:*)") {
 		t.Fatalf("Pi resume inlined permission policy: %s", command)
 	}
 	if launchID == "" || !strings.Contains(command, "AGM_PI_LAUNCH_ID='"+launchID+"'") {
 		t.Fatalf("Pi resume command/readiness launch correlation = %q / %q", command, launchID)
+	}
+}
+
+func TestPiAdapterResumePreservesPersistedNativeDefault(t *testing.T) {
+	withPiAdapterRuntime(t)
+	callerDir := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", callerDir)
+	store := piResumeFixtureStore(t, "pi-native-default")
+	store.sessions["agm-id"].CodingAgentDirSet = true
+	var command string
+	piSendShellCommand = func(_, value string) error { command = value; return nil }
+
+	adapter, _ := NewPiAdapter(store)
+	if err := adapter.ResumeSession("agm-id"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(command, "env -u CLAUDECODE -u PI_CODING_AGENT_DIR") || strings.Contains(command, "PI_CODING_AGENT_DIR=") {
+		t.Fatalf("new native-default Pi adapter resume inherited %q: %s", callerDir, command)
 	}
 }
 
@@ -272,6 +363,7 @@ func TestPiAdapterResumeLeavesLivePiUntouched(t *testing.T) {
 	withPiAdapterRuntime(t)
 	t.Setenv("TMUX", "fixture")
 	store := piResumeFixtureStore(t, "pi-live")
+	store.sessions["agm-id"].CodingAgentDir = filepath.Join(t.TempDir(), "removed-config")
 	piHasSession = func(string) (bool, error) { return true, nil }
 	piCheckProcess = func(string, string) (bool, error) { return true, nil }
 	sent := false
@@ -283,6 +375,23 @@ func TestPiAdapterResumeLeavesLivePiUntouched(t *testing.T) {
 	}
 	if sent {
 		t.Fatal("ResumeSession injected a command into an already-live Pi process")
+	}
+}
+
+func TestPiAdapterResumeValidatesConfigBeforeCreatingRelaunchTmux(t *testing.T) {
+	withPiAdapterRuntime(t)
+	store := piResumeFixtureStore(t, "pi-relaunch")
+	store.sessions["agm-id"].CodingAgentDir = filepath.Join(t.TempDir(), "missing-config")
+	created := false
+	piNewSession = func(string, string) error { created = true; return nil }
+
+	adapter, _ := NewPiAdapter(store)
+	err := adapter.ResumeSession("agm-id")
+	if err == nil || !strings.Contains(err.Error(), "coding agent directory") {
+		t.Fatalf("ResumeSession error = %v, want invalid coding-agent directory", err)
+	}
+	if created {
+		t.Fatal("ResumeSession created tmux before validating relaunch configuration")
 	}
 }
 
