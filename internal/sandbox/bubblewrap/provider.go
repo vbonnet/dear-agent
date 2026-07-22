@@ -3,7 +3,6 @@
 package bubblewrap
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -246,41 +245,7 @@ func (p *Provider) findGitRepo(lowerDirs []string) string {
 		}
 	}
 
-	// Fallback: scan well-known workspace locations
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-
-	// Check AGM config for workspace roots
-	repos := p.findReposFromAGMConfig(homeDir)
-	if repo := p.preferRepoWithGoMod(repos); repo != "" {
-		return repo
-	}
-
 	return ""
-}
-
-// preferRepoWithGoMod returns the first git repo that contains go.mod at its
-// root. This ensures the monorepo (ai-tools) is preferred over auxiliary repos
-// (ai-conversation-logs) when scanning alphabetically. Falls back to first git
-// repo if none has go.mod.
-func (p *Provider) preferRepoWithGoMod(repos []string) string {
-	var firstGitRepo string
-	for _, repo := range repos {
-		if !p.isGitRepo(repo) {
-			continue
-		}
-		if firstGitRepo == "" {
-			firstGitRepo = repo
-		}
-		goModPath := filepath.Join(repo, "go.mod")
-		if _, err := os.Stat(goModPath); err == nil {
-			fmt.Fprintf(os.Stderr, "bubblewrap: preferring repo with go.mod: %s\n", repo)
-			return repo
-		}
-	}
-	return firstGitRepo
 }
 
 // resolveRepoFromSymlinks traces symlinks in a directory back to their
@@ -626,71 +591,6 @@ func (p *Provider) cleanup(upperDir, workDir, mergedDir string) error {
 		return sandbox.NewCleanupFailedError(mergedDir, err)
 	}
 	return nil
-}
-
-// findReposFromAGMConfig parses ~/.agm/config.yaml (lightweight, no YAML dep)
-// to find workspace roots, then scans for repos under {root}/repos/.
-func (p *Provider) findReposFromAGMConfig(homeDir string) []string {
-	cfgPath := filepath.Join(homeDir, ".agm", "config.yaml")
-	f, err := os.Open(cfgPath)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-
-	var roots []string
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		// Look for "root: /path/to/workspace" lines
-		if strings.HasPrefix(line, "root:") {
-			root := strings.TrimSpace(strings.TrimPrefix(line, "root:"))
-			root = strings.ReplaceAll(root, "~", homeDir)
-			if root != "" {
-				roots = append(roots, root)
-			}
-		}
-	}
-
-	// For each workspace root, scan {root}/repos/ for actual repos
-	var allRepos []string
-	for _, root := range roots {
-		reposDir := filepath.Join(root, "repos")
-		repos := p.scanForRepos(reposDir)
-		allRepos = append(allRepos, repos...)
-	}
-
-	return allRepos
-}
-
-// scanForRepos returns directories under parentDir that look like repos
-// (contain .git, go.mod, package.json, or similar markers).
-func (p *Provider) scanForRepos(parentDir string) []string {
-	entries, err := os.ReadDir(parentDir)
-	if err != nil {
-		return nil
-	}
-
-	var repos []string
-	repoMarkers := []string{".git", "go.mod", "package.json", "Cargo.toml", "pyproject.toml", "Makefile"}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if strings.HasPrefix(name, ".") {
-			continue
-		}
-		dirPath := filepath.Join(parentDir, name)
-		for _, marker := range repoMarkers {
-			if _, err := os.Stat(filepath.Join(dirPath, marker)); err == nil {
-				repos = append(repos, dirPath)
-				break
-			}
-		}
-	}
-	return repos
 }
 
 // writeSecrets writes secrets to upperdir/.env file.

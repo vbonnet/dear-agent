@@ -99,7 +99,7 @@ func agmRunsSandboxWorkingDirectoryRegressions(ctx context.Context) error {
 	}
 	state.output, state.err = runSandboxProviderCommand(ctx, 2*time.Minute,
 		"go", "test", "-v", "-count=1", "-timeout=90s", "-run",
-		`^(TestMatchWorkingDir.*|TestMapFlatWorkingDir.*|TestPrioritizeLowerDir.*|TestBubblewrap(RejectsMatchedNonGitLowerDir|PreservesGitWorktreeCreationFailure)|TestGVisor(RejectsMatchedNonGitLowerDir|PreservesGitWorktreeCreationFailure)|TestNativeOverlayFSRequestPrioritizesMatchedLowerDir|TestProvider_CreateMapsRequestedWorkingDirectoryIntoMatchingClone|TestProvider_CreateDetachesLinkedWorktreeGitMetadata|TestResolveSandboxLowerDirs_(FallsBackToContainingGitRepoForSubdirectory|ScansWorkspaceRepos|IncludesRequestedRepoAlongsideWorkspaceScan)|TestFindPrimaryRepoUsesRequestedDirectoryInsteadOfProcessCWD|TestMaybeProvisionSandboxReturnsProviderMappedWorkingDirectory|TestProvisionSandbox.*)$`,
+		`^(TestMatchWorkingDir.*|TestMapFlatWorkingDir.*|TestPrioritizeLowerDir.*|TestBubblewrap(RejectsMatchedNonGitLowerDir|RejectsConfigRepoOutsideLowerDirs|PreservesGitWorktreeCreationFailure)|TestGVisor(RejectsMatchedNonGitLowerDir|PreservesGitWorktreeCreationFailure)|TestNativeOverlayFSRequestPrioritizesMatchedLowerDir|TestProvider_CreateMapsRequestedWorkingDirectoryIntoMatchingClone|TestProvider_CreateDetachesLinkedWorktreeGitMetadata|TestResolveSandboxLowerDirs_(FallsBackToContainingGitRepoForSubdirectory|ScansWorkspaceRepos|IncludesRequestedRepoAlongsideWorkspaceScan)|TestFindPrimaryRepoUsesRequestedDirectoryInsteadOfProcessCWD|TestMaybeProvisionSandboxReturnsProviderMappedWorkingDirectory|TestProvisionSandbox.*)$`,
 		"./internal/sandbox", "./internal/sandbox/apfs", "./internal/sandbox/bubblewrap", "./internal/sandbox/gvisor", "./agm/cmd/agm",
 	)
 	return nil
@@ -127,7 +127,10 @@ func flatLinuxProvidersShouldRejectHostSymlinkFallbacks(ctx context.Context) err
 	if !ok || state == nil {
 		return fmt.Errorf("sandbox provider cleanup state not initialized")
 	}
-	names := []string{"TestBubblewrapRejectsMatchedNonGitLowerDir"}
+	names := []string{
+		"TestBubblewrapRejectsMatchedNonGitLowerDir",
+		"TestBubblewrapRejectsConfigRepoOutsideLowerDirs",
+	}
 	if runtime.GOOS == "linux" {
 		names = append(names,
 			"TestGVisorRejectsMatchedNonGitLowerDir",

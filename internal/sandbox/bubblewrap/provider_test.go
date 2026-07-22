@@ -155,6 +155,36 @@ func TestBubblewrapRejectsMatchedNonGitLowerDir(t *testing.T) {
 	assert.ErrorIs(t, statErr, os.ErrNotExist, "failed isolation must not expose either host repository")
 }
 
+func TestBubblewrapRejectsConfigRepoOutsideLowerDirs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	externalRepo := filepath.Join(home, "workspace", "repos", "configured")
+	runBubblewrapGit(t, "", "init", "-q", "-b", "main", externalRepo)
+	runBubblewrapGit(t, externalRepo, "config", "user.name", "Bubblewrap Test")
+	runBubblewrapGit(t, externalRepo, "config", "user.email", "bubblewrap@example.invalid")
+	require.NoError(t, os.WriteFile(filepath.Join(externalRepo, "outside.txt"), []byte("outside request\n"), 0o600))
+	runBubblewrapGit(t, externalRepo, "add", "outside.txt")
+	runBubblewrapGit(t, externalRepo, "commit", "-q", "-m", "initial")
+
+	configPath := filepath.Join(home, ".agm", "config.yaml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0o755))
+	require.NoError(t, os.WriteFile(configPath, []byte("workspaces:\n  - name: configured\n    root: ~/workspace\n"), 0o600))
+
+	lowerDir := filepath.Join(t.TempDir(), "requested-non-git")
+	mergedDir := filepath.Join(t.TempDir(), "merged")
+	require.NoError(t, os.MkdirAll(lowerDir, 0o755))
+	require.NoError(t, os.MkdirAll(mergedDir, 0o755))
+
+	_, err := NewProvider().createPrivateWorktree([]string{lowerDir}, "outside-lower", mergedDir, "")
+	require.Error(t, err)
+	assert.Equal(t, sandbox.ErrCodeMountFailed, errCode(t, err))
+	assert.Contains(t, err.Error(), "refusing host-symlink fallback")
+	assert.NotContains(t, runBubblewrapGit(t, externalRepo, "branch", "--list"), "agm/outside-lower")
+	_, statErr := os.Lstat(filepath.Join(mergedDir, "outside.txt"))
+	assert.ErrorIs(t, statErr, os.ErrNotExist, "configured repository outside LowerDirs must not be materialized")
+}
+
 func TestBubblewrapPreservesGitWorktreeCreationFailure(t *testing.T) {
 	base := t.TempDir()
 	repo := filepath.Join(base, "repo")

@@ -40,6 +40,8 @@ an isolated branch without writes traversing host-repository symlinks.
 
 **BWRAP-15** When private Git worktree creation fails after a repository is resolved, the system shall return a structured mount error that preserves the underlying Git failure.
 
+**BWRAP-16** When no explicit target repository is requested, repository discovery shall be constrained to the request's lower directories and shall never materialize a repository discovered only through machine-level AGM configuration.
+
 ## BDD Traceability
 
 - `agm/test/bdd/features/sandbox_provider_guardrails.feature` enforces that this
