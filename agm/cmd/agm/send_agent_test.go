@@ -157,6 +157,7 @@ type mockAgentAdapter struct {
 	sessionStatus agent.Status
 	statusError   error
 	statusContext context.Context
+	sendContext   context.Context
 }
 
 func (m *mockAgentAdapter) Name() string {
@@ -210,6 +211,7 @@ func (m *mockAgentAdapter) SendMessage(sessionID agent.SessionID, message agent.
 }
 
 func (m *mockAgentAdapter) SendMessageContext(ctx context.Context, sessionID agent.SessionID, message agent.Message) error {
+	m.sendContext = ctx
 	if err := ctx.Err(); err != nil {
 		return err
 	}

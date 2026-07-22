@@ -123,10 +123,10 @@ Since API-based execution has no shell access, hooks are **synthetic**:
 3. AGM reloads the current manifest and verifies that it is active
 4. AGM reconstructs the adapter from persisted non-secret runtime settings
 5. The adapter obtains credentials from current runtime configuration
-6. AGM verifies adapter readiness and performs bounded direct API delivery;
-   fan-out gives each recipient an outer budget with headroom beyond the
-   adapter's provider-completion ceiling
-7. The adapter atomically commits the completed turn to local JSONL history
+6. AGM verifies adapter readiness under a separate bounded preflight context
+7. AGM performs bounded direct API delivery with the adapter's complete
+   provider-completion ceiling; fan-out also retains a finite outer budget
+8. The adapter atomically commits the completed turn to local JSONL history
 ```
 
 Reconstruction and readiness reloads use the delivery request context. Caller

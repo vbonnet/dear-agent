@@ -243,9 +243,10 @@ creation, and terminal state detection.
   before any tmux probe, while both single-recipient and fan-out delivery
   restore the session's persisted model, storage locator, endpoint, and Azure
   settings without persisting credentials. Every sequential fan-out recipient
-  receives a fresh finite deadline that still inherits caller cancellation and
-  leaves the adapter its complete provider budget after reconstruction and
-  readiness preflight.
+  receives a fresh finite deadline that still inherits caller cancellation.
+  Stable-lock acquisition, reconstruction, and readiness use a separate
+  bounded preflight context; the completed-turn phase then retains the
+  adapter's complete provider budget.
   Under the same stable session-ID
   boundary as archive, delivery reloads lifecycle before adapter construction,
   rejects reaping and archived sessions, and uses a provider-appropriate wait, so archive linearizes before or after

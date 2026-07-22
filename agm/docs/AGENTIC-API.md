@@ -35,9 +35,10 @@ reloads lifecycle before adapter construction and shares that boundary with
 archive: an in-flight completed turn commits before archive, or delivery sees
 the reaping or archived lifecycle before paid provider work. The lock wait and provider
 completion honor request cancellation, and the provider call has a finite
-ceiling. Each sequential fan-out recipient receives a fresh outer deadline
-with preflight headroom so reconstruction and readiness cannot consume the
-adapter's complete provider budget. Direct adapter callers use a context-aware store-scoped session lock
+ceiling. Each sequential fan-out recipient receives a fresh outer deadline;
+stable-lock acquisition, reconstruction, and readiness use an independently
+bounded preflight context so the completed-turn phase starts with the adapter's
+complete provider budget. Direct adapter callers use a context-aware store-scoped session lock
 and the same provider ceiling. Provider failures, cancellation, and timeouts
 leave no provisional user message in durable history.
 

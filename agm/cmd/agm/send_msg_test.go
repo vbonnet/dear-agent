@@ -416,6 +416,51 @@ func TestMultiRecipientDeliveryAllowsFullProviderDeadline(t *testing.T) {
 	}
 }
 
+func TestAPIDeliveryReservesFullCompletionBudgetAfterPreflight(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	storage := dolt.NewMockAdapter()
+	m := &manifest.Manifest{SessionID: "budget-api-id", Name: "budget-api", Harness: "openai"}
+	if err := storage.CreateSession(m); err != nil {
+		t.Fatalf("create API session: %v", err)
+	}
+	mockAgent := &mockAgentAdapter{sessionStatus: agent.StatusActive}
+	jobs := []*send.DeliveryJob{{Recipient: m.Name, MessageID: "budget-message"}}
+	var factoryCtx context.Context
+	results := deliverMultiRecipientJobs(t.Context(), jobs, agent.OpenAIDeliveryTimeout, func(deliveryCtx context.Context, _ *send.DeliveryJob) error {
+		return sendToAPIAgentIfReady(deliveryCtx, m, "sender", "budget-message", "message", "", storage, func(ctx context.Context, _ *manifest.Manifest) (agent.Agent, error) {
+			factoryCtx = ctx
+			timer := time.NewTimer(50 * time.Millisecond)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-timer.C:
+				return mockAgent, nil
+			}
+		})
+	})
+	if len(results) != 1 || !results[0].Success {
+		t.Fatalf("API delivery result = %#v, want success after preflight", results)
+	}
+	preflightDeadline, ok := factoryCtx.Deadline()
+	if !ok {
+		t.Fatal("API reconstruction context has no preflight deadline")
+	}
+	if remaining := time.Until(preflightDeadline); remaining > agent.OpenAIPreflightTimeout {
+		t.Fatalf("API preflight budget = %s, want at most %s", remaining, agent.OpenAIPreflightTimeout)
+	}
+	completionDeadline, ok := mockAgent.sendContext.Deadline()
+	if !ok {
+		t.Fatal("API completion parent context has no deadline")
+	}
+	if remaining := time.Until(completionDeadline); remaining <= agent.OpenAICompletionTimeout {
+		t.Fatalf("API completion parent budget after preflight = %s, must exceed full provider ceiling %s", remaining, agent.OpenAICompletionTimeout)
+	}
+	if agent.OpenAIDeliveryTimeout-agent.OpenAIPreflightTimeout <= agent.OpenAICompletionTimeout {
+		t.Fatalf("delivery budget %s minus preflight %s must exceed completion ceiling %s", agent.OpenAIDeliveryTimeout, agent.OpenAIPreflightTimeout, agent.OpenAICompletionTimeout)
+	}
+}
+
 func TestSingleAndMultiRecipientAPIDeliveryUsesAdapterReadiness(t *testing.T) {
 	adapter, err := dolt.NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
 	if err != nil {

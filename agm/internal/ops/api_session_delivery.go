@@ -41,6 +41,9 @@ func NewAPISessionAgent(ctx context.Context, m *manifest.Manifest) (agent.Agent,
 // for every AGM surface. The stable session-ID lock is shared with archive;
 // the locked reload therefore decides whether provider work may begin.
 func DeliverAPISessionMessage(ctx context.Context, storage dolt.Storage, stale *manifest.Manifest, message agent.Message, newAgent APISessionAgentFactory) (*manifest.Manifest, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if storage == nil {
 		return nil, fmt.Errorf("verified API delivery requires session storage")
 	}
@@ -55,8 +58,10 @@ func DeliverAPISessionMessage(ctx context.Context, storage dolt.Storage, stale *
 		recipient = stale.SessionID
 	}
 
+	preflightCtx, cancelPreflight := context.WithTimeout(ctx, agent.OpenAIPreflightTimeout)
+	defer cancelPreflight()
 	var delivered *manifest.Manifest
-	err := WithAPISessionLockContext(ctx, stale.SessionID, func() error {
+	err := WithAPISessionLockContext(preflightCtx, stale.SessionID, func() error {
 		current, err := storage.GetSession(stale.SessionID)
 		if err != nil {
 			return fmt.Errorf("reload API session %q under mutation lock: %w", recipient, err)
@@ -67,7 +72,7 @@ func DeliverAPISessionMessage(ctx context.Context, storage dolt.Storage, stale *
 		if err := requireActiveAPISession(current, recipient); err != nil {
 			return err
 		}
-		if err := deliverThroughAPIAdapter(ctx, current, recipient, message, newAgent); err != nil {
+		if err := deliverThroughAPIAdapter(preflightCtx, ctx, current, recipient, message, newAgent); err != nil {
 			return err
 		}
 		delivered = current
@@ -90,8 +95,8 @@ func requireActiveAPISession(current *manifest.Manifest, fallbackName string) er
 	return ErrSessionNotReady(currentName, "LIFECYCLE_"+current.Lifecycle)
 }
 
-func deliverThroughAPIAdapter(ctx context.Context, current *manifest.Manifest, recipient string, message agent.Message, newAgent APISessionAgentFactory) error {
-	agentAdapter, err := newAgent(ctx, current)
+func deliverThroughAPIAdapter(preflightCtx, deliveryCtx context.Context, current *manifest.Manifest, recipient string, message agent.Message, newAgent APISessionAgentFactory) error {
+	agentAdapter, err := newAgent(preflightCtx, current)
 	if err != nil {
 		return fmt.Errorf("create API harness adapter for %q: %w", recipient, err)
 	}
@@ -100,7 +105,7 @@ func deliverThroughAPIAdapter(ctx context.Context, current *manifest.Manifest, r
 	if !ok {
 		return fmt.Errorf("API harness adapter does not support context-aware readiness")
 	}
-	status, err := contextStatus.GetSessionStatusContext(ctx, sessionID)
+	status, err := contextStatus.GetSessionStatusContext(preflightCtx, sessionID)
 	if err != nil {
 		return fmt.Errorf("check API session %q readiness: %w", recipient, err)
 	}
@@ -111,7 +116,7 @@ func deliverThroughAPIAdapter(ctx context.Context, current *manifest.Manifest, r
 	if !ok {
 		return fmt.Errorf("API harness adapter does not support context-aware delivery")
 	}
-	if err := contextSender.SendMessageContext(ctx, sessionID, message); err != nil {
+	if err := contextSender.SendMessageContext(deliveryCtx, sessionID, message); err != nil {
 		return fmt.Errorf("failed to send message via harness: %w", err)
 	}
 	return nil

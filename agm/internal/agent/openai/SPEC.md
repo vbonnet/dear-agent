@@ -43,6 +43,8 @@ errors for callers that need harness-neutral failure handling.
 
 **OAI-16** When importing a parsed OpenAI conversation, the system shall convert the complete message batch once and persist it with at most one history transaction; an empty import shall not perform a history transaction.
 
+**OAI-17** When a fan-out recipient uses an OpenAI-compatible API adapter, the system shall bound stable-lock acquisition, reconstruction, and readiness as a separate preflight phase and shall leave the completed-turn phase its full provider deadline while preserving cancellation from the original caller.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
