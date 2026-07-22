@@ -399,13 +399,17 @@ func piNativeModelContextWindow(model string) int {
 }
 
 func piKnownNativeModelContextWindow(model string) (int, bool) {
-	model = strings.ToLower(strings.TrimSpace(model))
+	// Pi provider/model IDs are case-sensitive. Only OpenRouter owns a nested
+	// vendor route here; direct providers may remove at most one prefix.
+	model = strings.TrimSpace(model)
 	if route, ok := strings.CutPrefix(model, "openrouter/"); ok {
 		return piKnownOpenRouterModelContextWindow(route)
 	}
-	model = strings.TrimPrefix(model, "anthropic/")
-	model = strings.TrimPrefix(model, "openai/")
-	model = strings.TrimPrefix(model, "google/")
+	for _, provider := range []string{"anthropic/", "openai/", "google/"} {
+		if route, ok := strings.CutPrefix(model, provider); ok {
+			return piKnownDirectModelContextWindow(route)
+		}
+	}
 	return piKnownDirectModelContextWindow(model)
 }
 

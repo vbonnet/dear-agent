@@ -245,6 +245,8 @@ func TestPiModelContextWindowMatchesNativeCatalog(t *testing.T) {
 		"openrouter/openai/gpt-5.4-pro":                1050000,
 		"openrouter/openai/gpt-5.5-pro":                1050000,
 		"openrouter/openai/gpt-5.3-chat-latest":        200000,
+		"anthropic/openai/gpt-5.4":                     200000,
+		"OPENAI/GPT-5.4":                               200000,
 		"openai/gpt-5.4-mini":                          400000,
 		"openai/gpt-5.4-pro":                           1050000,
 		"openai/gpt-5.3-codex":                         400000,

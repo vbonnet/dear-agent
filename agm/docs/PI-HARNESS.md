@@ -141,7 +141,8 @@ assistant prompt footprint for context, the audited Pi 0.81.1 model-catalog
 window for the recorded direct or nested OpenRouter model route, and sums
 native cost records for the session. Route identity matters: Pi's nested
 OpenRouter OpenAI entries can expose a different context window than the same
-model through direct OpenAI.
+model through direct OpenAI. Provider and model IDs remain case-sensitive, and
+direct providers never discard a second, foreign provider prefix.
 For models declared in Pi's `models.json`, AGM reads only the bounded model ID,
 `contextWindow`, and `modelOverrides` data: it never evaluates credential or
 command fields. A custom model without an explicit window uses Pi's 128000-token
