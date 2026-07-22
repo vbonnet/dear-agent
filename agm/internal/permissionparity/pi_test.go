@@ -181,7 +181,7 @@ func TestEmbeddedPiExtensionDecisionParity(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(timeoutProject, ".pi"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	const timeoutHooks = `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"hookSpecificOutput\":{\"additionalContext\":\"timeout context\"}}\\n'; while :; do :; done","timeout":1}]}]}}`
+	const timeoutHooks = `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"hookSpecificOutput\":{\"additionalContext\":\"timeout context\"}}\\n'; printf 'timeout stderr' >&2; while :; do :; done","timeout":1}]}]}}`
 	if err := os.WriteFile(filepath.Join(timeoutProject, ".pi", "hooks.json"), []byte(timeoutHooks), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ for (let attempt = 0; attempt < 3; attempt++) {
 }
 if (!hookResult?.block || !hookResult.reason.includes("project guard rejected")) throw new Error("project hook did not fail closed with its declared reason: " + JSON.stringify(hookResult));
 const timeoutHook = mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git push"}}, process.argv[5]);
-if (!timeoutHook?.block || !timeoutHook.reason.includes("ETIMEDOUT") || timeoutHook.reason.includes("timeout context")) throw new Error("project hook timeout masked its execution failure: " + JSON.stringify(timeoutHook));
+if (!timeoutHook?.block || !timeoutHook.reason.includes("ETIMEDOUT") || !timeoutHook.reason.includes("timeout stderr") || timeoutHook.reason.includes("timeout context")) throw new Error("project hook timeout masked its execution failure: " + JSON.stringify(timeoutHook));
 const unmatchedHook = mod.runProjectHooks("PreToolUse", {toolName:"read", input:{path:"README.md"}}, process.argv[2]);
 if (unmatchedHook !== undefined) throw new Error("matcher ran for an unrelated tool");
 const malformedHook = mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git status"}}, process.argv[3]);
