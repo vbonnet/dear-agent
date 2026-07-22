@@ -382,7 +382,7 @@ go build -o ~/go/bin/agm ./cmd/agm
 # Use the install target, not cp: copying over an already-executed binary can
 # leave a stale code-signing cache entry and macOS then kills it before main()
 # runs (ce-77ip.8). make install stages, signs and renames instead.
-cp ~/go/bin/agm.backup ~/go/bin/agm.new && mv -f ~/go/bin/agm.new ~/go/bin/agm
+stage=$(mktemp ~/go/bin/agm.XXXXXX) && cp ~/go/bin/agm.backup "$stage" && chmod 755 "$stage" && mv -f "$stage" ~/go/bin/agm
 ```
 
 ---
@@ -420,7 +420,7 @@ After successful verification:
    # Copy binary to production path. Stage and rename rather than copying
    # straight over it: overwriting an already-executed binary can leave a
    # stale code-signing cache entry that macOS kills on next exec (ce-77ip.8).
-   sudo cp ~/go/bin/agm /usr/local/bin/agm.new && sudo mv -f /usr/local/bin/agm.new /usr/local/bin/agm
+   stage=$(sudo mktemp /usr/local/bin/agm.XXXXXX) && sudo cp ~/go/bin/agm "$stage" && sudo chmod 755 "$stage" && sudo mv -f "$stage" /usr/local/bin/agm
 
    # Or install system-wide
    cd main/agm

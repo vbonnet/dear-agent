@@ -103,8 +103,13 @@ func TestLaunchdBinariesUseHardenedInstall(t *testing.T) {
 	// comment even claimed `install` gave "atomic replacement", which is the
 	// misconception this whole change exists to correct.
 	t.Run("no-bare-installs", func(t *testing.T) {
+		// Every spelling of an install root, not just $(HOME)/go/bin: a Makefile
+		// may write ~/go/bin, $HOME/go/bin, ${HOME}/go/bin or $(HOME)/.local/bin,
+		// and recognising only one of them leaves the retired path reachable
+		// through a synonym.
 		bareCopy := regexp.MustCompile(
-			`(?m)^\t@?(?:cp|install)\b[^\n]*\$\((?:HOME\)/(?:go/bin|\.local/bin)|HOOKS_DIR\))[^\n]*$`)
+			`(?m)^\t@?(?:cp|install)\b[^\n]*(?:\$\(HOME\)|\$\{HOME\}|\$HOME|~)/(?:go/bin|\.local/bin)[^\n]*$` +
+				`|(?m)^\t@?(?:cp|install)\b[^\n]*\$\(HOOKS_DIR\)[^\n]*$`)
 		for _, rel := range trackedMakefiles(t, repoRoot) {
 			raw, err := os.ReadFile(filepath.Join(repoRoot, rel))
 			if err != nil {
@@ -386,10 +391,15 @@ func TestNoRawCopyIntoInstallRoots(t *testing.T) {
 	staged := regexp.MustCompile(`&&\s*(?:sudo\s+)?mv\b`)
 
 	for _, rel := range trackedTextFiles(t, repoRoot) {
-		switch filepath.Ext(rel) {
-		case ".md", ".sh", ".bash", ".zsh":
+		base := filepath.Base(rel)
+		switch {
+		case base == "Makefile" || strings.HasSuffix(base, ".mk"):
 		default:
-			continue
+			switch filepath.Ext(rel) {
+			case ".md", ".sh", ".bash", ".zsh":
+			default:
+				continue
+			}
 		}
 		raw, err := os.ReadFile(filepath.Join(repoRoot, rel))
 		if err != nil {
