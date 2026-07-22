@@ -107,7 +107,7 @@ Provide a production-ready CLI that:
 
 **CLI-38** When `agm admin link-session-parent` or `agm admin backfill-plan-sessions` assigns a parent and optionally inherits its display name, the command shall persist both changes through one narrow compare-and-swap against the child identity revision it read and shall report a concurrent identity change as a failure instead of reporting a link or rename that storage did not apply.
 
-**CLI-39** When `agm send msg` delivers directly to one or more registered CLI-harness sessions, every recipient shall route through shared `ops.SendMessage`, which shall atomically prove the manifest's canonical harness process and current composer before sending to the exact verified pane; `--force` shall be preserved across this shared route and may override only a `QUEUE` verdict caused by queued or stale composer input after exact harness and pane ownership are proved, while an unregistered tmux session, missing storage, wrong or dead harness, permission, overlay, onboarding, missing target, other unready composer, missing atomic delivery capability, or failed readiness check shall return non-delivery without creating a pending-file bypass.
+**CLI-39** When `agm send msg` delivers directly to one or more registered CLI-harness sessions, every recipient shall route through shared `ops.SendMessage`, which shall atomically prove the manifest's canonical harness process and current composer before sending to the exact verified pane; a single-recipient `--force`, `--autonomous`, `AGM_AUTONOMOUS=1`, or autonomous-role send shall reach that shared atomic route before preliminary queue dispatch, and may override only a `QUEUE` verdict caused by queued or stale composer input after exact harness and pane ownership are proved, while an unregistered tmux session, missing storage, wrong or dead harness, permission, overlay, onboarding, missing target, other unready composer, missing atomic delivery capability, or failed readiness check shall return non-delivery without creating a pending-file bypass.
 
 **CLI-40** When CLI session creation has registered a supported harness and must deliver `--prompt` or `--prompt-file`, the completion boundary shall atomically revalidate that the expected harness owns the foreground terminal and an empty composer, then send to the exact verified pane under the same mutation boundary; an unready, background, suspended, wrong, or missing harness, a focus change, an invalid pane proof, or caller cancellation shall not deliver the startup prompt.
 
@@ -298,16 +298,17 @@ Provide a production-ready CLI that:
 - **Priority:** P0 (Critical)
 - **Description:** CLI MUST support non-disruptive message sending to running sessions
 - **Commands:**
-  - `agm session send [session-name] --prompt "message"` - Send message (queued by default)
-  - `agm session send [session-name] --prompt-file /path/to/file` - Send from file
-  - `agm session send [session-name] --interrupt --prompt "urgent"` - Interrupt immediately
-  - `agm session send [session-name] --sender [name] --prompt "msg"` - Specify sender
-  - `agm session send [session-name] --reply-to [message-id] --prompt "reply"` - Thread messages
+  - `agm send msg [session-name] --prompt "message"` - Send or queue by verified readiness
+  - `agm send msg [session-name] --prompt-file /path/to/file` - Send from file
+  - `agm send msg [session-name] --force --prompt "recovery"` - Recover only a verified busy composer
+  - `agm send msg [session-name] --autonomous --prompt "msg"` - Mark the recipient unattended for verified busy-composer recovery
+  - `agm send msg [session-name] --sender [name] --prompt "msg"` - Specify sender
+  - `agm send msg [session-name] --reply-to [message-id] --prompt "reply"` - Thread messages
 - **Behavior:**
-  - **Default (non-interrupt):** Queue messages for later delivery when session becomes READY
-  - **Interrupt mode:** Send immediately via tmux, interrupting ongoing work (legacy behavior)
+  - **Default:** Deliver through shared atomic readiness when the registered harness owns an idle composer; queue a busy composer for later delivery
+  - **Force/autonomous recovery:** Bypass preliminary queue routing only so the shared atomic operation can accept a `QUEUE` verdict; never bypass permission, overlay, onboarding, wrong-harness, missing-target, or backend-error states
   - **State-based routing:**
-    - READY state → Queue message (non-disruptive)
+    - READY state → Deliver to the exact verified pane
     - THINKING state → Queue message (wait for READY)
     - PERMISSION_PROMPT state → Queue message (wait for READY)
     - COMPACTING state → Reject with error (never interrupt compaction)

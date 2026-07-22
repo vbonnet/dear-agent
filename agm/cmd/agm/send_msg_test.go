@@ -11,6 +11,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/send"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
+	"github.com/vbonnet/dear-agent/agm/internal/state"
 )
 
 func TestIsAutonomousRole(t *testing.T) {
@@ -51,7 +52,7 @@ func TestSendViaSharedOperationsFailsClosedWhenHarnessIsNotReady(t *testing.T) {
 	tmuxClient := session.NewMockTmux()
 	tmuxClient.InputReadiness = session.InputReadiness{Ready: false, State: "WRONG_HARNESS", PaneID: "%4"}
 
-	err := sendViaSharedOperations(t.Context(), "codex-send", "sender", "message-id", "message", "", false, storage, tmuxClient)
+	err := sendViaSharedOperations(t.Context(), "codex-send", "sender", "message-id", "message", "", false, false, storage, tmuxClient)
 	if err == nil || !strings.Contains(err.Error(), "WRONG_HARNESS") {
 		t.Fatalf("sendViaSharedOperations() error = %v, want WRONG_HARNESS", err)
 	}
@@ -66,28 +67,80 @@ func TestSendViaSharedOperationsFailsClosedWhenHarnessIsNotReady(t *testing.T) {
 	}
 }
 
-func TestSendViaSharedOperationsPreservesForceForBusyComposer(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	storage := dolt.NewMockAdapter()
-	if err := storage.CreateSession(&manifest.Manifest{
-		SessionID: "codex-send-id",
-		Name:      "codex-send",
-		Harness:   "codex-cli",
-		Tmux:      manifest.Tmux{SessionName: "codex-send-tmux"},
-	}); err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	tmuxClient := session.NewMockTmux()
-	tmuxClient.InputReadiness = session.InputReadiness{State: "QUEUE", PaneID: "%9"}
+func TestSendViaSharedOperationsPreservesBusyComposerRecoveryPolicy(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		force      bool
+		autonomous bool
+	}{
+		{name: "force", force: true},
+		{name: "autonomous", autonomous: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			storage := dolt.NewMockAdapter()
+			if err := storage.CreateSession(&manifest.Manifest{
+				SessionID: "codex-send-id",
+				Name:      "codex-send",
+				Harness:   "codex-cli",
+				Tmux:      manifest.Tmux{SessionName: "codex-send-tmux"},
+			}); err != nil {
+				t.Fatalf("create session: %v", err)
+			}
+			tmuxClient := session.NewMockTmux()
+			tmuxClient.InputReadiness = session.InputReadiness{State: "QUEUE", PaneID: "%9"}
 
-	if err := sendViaSharedOperations(t.Context(), "codex-send", "sender", "message-id", "forced message", "", true, storage, tmuxClient); err != nil {
-		t.Fatalf("sendViaSharedOperations(force busy) error = %v", err)
+			if err := sendViaSharedOperations(t.Context(), "codex-send", "sender", "message-id", "recovery message", "", testCase.force, testCase.autonomous, storage, tmuxClient); err != nil {
+				t.Fatalf("sendViaSharedOperations(%s busy) error = %v", testCase.name, err)
+			}
+			if len(tmuxClient.AtomicInputOptions) != 1 || !tmuxClient.AtomicInputOptions[0].AllowBusyComposer {
+				t.Fatalf("atomic delivery options = %#v, want %s busy-composer recovery", tmuxClient.AtomicInputOptions, testCase.name)
+			}
+			if got, want := tmuxClient.ExactPaneDeliveries, []string{"%9"}; !slices.Equal(got, want) {
+				t.Fatalf("%s exact-pane deliveries = %v, want %v", testCase.name, got, want)
+			}
+		})
 	}
-	if len(tmuxClient.AtomicInputOptions) != 1 || !tmuxClient.AtomicInputOptions[0].AllowBusyComposer {
-		t.Fatalf("atomic delivery options = %#v, want busy-composer override", tmuxClient.AtomicInputOptions)
-	}
-	if got, want := tmuxClient.ExactPaneDeliveries, []string{"%9"}; !slices.Equal(got, want) {
-		t.Fatalf("forced exact-pane deliveries = %v, want %v", got, want)
+}
+
+func TestBusySingleSendReachesAtomicDeliveryForForceAndAutonomous(t *testing.T) {
+	previousDelegate := msgDelegate
+	msgDelegate = false
+	t.Cleanup(func() { msgDelegate = previousDelegate })
+
+	for _, testCase := range []struct {
+		name   string
+		policy cliInputDeliveryPolicy
+	}{
+		{name: "force", policy: cliInputDeliveryPolicy{Force: true}},
+		{name: "autonomous", policy: cliInputDeliveryPolicy{Autonomous: true}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			directCalls := 0
+			err := dispatchSendByCanReceiveWithDirect(
+				t.Context(),
+				"busy-session",
+				"busy-session-tmux",
+				"sender",
+				"message-id",
+				"formatted message",
+				"message",
+				"working",
+				state.CanReceiveQueue,
+				nil,
+				testCase.policy,
+				func() error {
+					directCalls++
+					return nil
+				},
+			)
+			if err != nil {
+				t.Fatalf("dispatch busy %s send: %v", testCase.name, err)
+			}
+			if directCalls != 1 {
+				t.Fatalf("atomic direct calls = %d, want 1", directCalls)
+			}
+		})
 	}
 }
 

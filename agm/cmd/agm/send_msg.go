@@ -527,12 +527,47 @@ func resolveRecipientState(recipientSession string, adapter *dolt.Adapter) (stri
 	return currentState, tmuxName
 }
 
+type cliInputDeliveryPolicy struct {
+	Force      bool
+	Autonomous bool
+}
+
+func currentCLIInputDeliveryPolicy() cliInputDeliveryPolicy {
+	return cliInputDeliveryPolicy{
+		Force:      msgForce,
+		Autonomous: tmux.AutonomousMode(),
+	}
+}
+
+func (p cliInputDeliveryPolicy) allowsBusyComposer() bool {
+	return p.Force || p.Autonomous
+}
+
 // dispatchSendByCanReceive routes the formatted message to the appropriate
 // delivery path based on the CanReceive state read from the recipient pane.
 func dispatchSendByCanReceive(ctx context.Context, recipientSession, tmuxName, senderName, messageID, formattedMessage, message, currentState string, canReceive state.CanReceive, adapter *dolt.Adapter) error {
+	directDelivery := func() error {
+		return sendDirectly(ctx, recipientSession, senderName, messageID, formattedMessage, sessionSendPromptFile, adapter)
+	}
+	return dispatchSendByCanReceiveWithDirect(ctx, recipientSession, tmuxName, senderName, messageID, formattedMessage, message, currentState, canReceive, adapter, currentCLIInputDeliveryPolicy(), directDelivery)
+}
+
+func dispatchSendByCanReceiveWithDirect(ctx context.Context, recipientSession, tmuxName, senderName, messageID, formattedMessage, message, currentState string, canReceive state.CanReceive, adapter *dolt.Adapter, policy cliInputDeliveryPolicy, directDelivery func() error) error {
+	// Force and autonomous sends must reach the shared atomic classifier before
+	// legacy pane-state routing. Otherwise a preliminary QUEUE verdict diverts
+	// them into the daemon queue and makes their narrowly scoped recovery policy
+	// unreachable. The shared operation still rejects every protected state.
+	if policy.allowsBusyComposer() {
+		if err := directDelivery(); err != nil {
+			return err
+		}
+		recordDelegation(senderName, recipientSession, messageID, message)
+		return nil
+	}
+
 	switch canReceive {
 	case state.CanReceiveYes:
-		if err := sendDirectly(ctx, recipientSession, senderName, messageID, formattedMessage, sessionSendPromptFile, adapter); err != nil {
+		if err := directDelivery(); err != nil {
 			return err
 		}
 		recordDelegation(senderName, recipientSession, messageID, message)
@@ -666,7 +701,8 @@ func sendDirectlyWithTmux(ctx context.Context, recipientSession, senderName, mes
 	if sharedRecipient == "" {
 		sharedRecipient = recipientSession
 	}
-	if err := sendViaSharedOperations(ctx, sharedRecipient, senderName, messageID, formattedMessage, promptFile, msgForce, adapter, tmuxClient); err != nil {
+	policy := currentCLIInputDeliveryPolicy()
+	if err := sendViaSharedOperations(ctx, sharedRecipient, senderName, messageID, formattedMessage, promptFile, policy.Force, policy.Autonomous, adapter, tmuxClient); err != nil {
 		return err
 	}
 	if harnessType == "agy" && (m.Agy == nil || m.Agy.ConversationID == "") {
@@ -697,7 +733,7 @@ func waitForAgyMetadataBackfill(ctx context.Context, sessionName string, wait fu
 // sendViaSharedOperations routes CLI delivery through ops.SendMessage. The
 // supplied tmux capability must atomically prove harness ownership and send to
 // the exact verified pane; weaker transports fail closed inside shared ops.
-func sendViaSharedOperations(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, force bool, storage dolt.Storage, tmuxClient session.TmuxInterface) error {
+func sendViaSharedOperations(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, force, autonomous bool, storage dolt.Storage, tmuxClient session.TmuxInterface) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -713,9 +749,10 @@ func sendViaSharedOperations(ctx context.Context, recipientSession, senderName, 
 		Storage: storage,
 		Tmux:    tmuxClient,
 	}, &ops.SendMessageRequest{
-		Recipient: recipientSession,
-		Message:   formattedMessage,
-		Force:     force,
+		Recipient:  recipientSession,
+		Message:    formattedMessage,
+		Force:      force,
+		Autonomous: autonomous,
 	})
 	if err != nil {
 		return fmt.Errorf("shared CLI send: %w", err)

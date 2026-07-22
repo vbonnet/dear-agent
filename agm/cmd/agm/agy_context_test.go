@@ -124,7 +124,7 @@ func TestSendViaSharedOperationsUsesCallerContext(t *testing.T) {
 	type callerContextKey struct{}
 	callerCtx := context.WithValue(t.Context(), callerContextKey{}, "direct-send")
 
-	err := sendViaSharedOperations(callerCtx, "agy-send", "sender", "message-id", "header\nmessage body", "", false, storage, tmuxClient)
+	err := sendViaSharedOperations(callerCtx, "agy-send", "sender", "message-id", "header\nmessage body", "", false, false, storage, tmuxClient)
 	if err != nil {
 		t.Fatalf("sendViaSharedOperations() error = %v", err)
 	}

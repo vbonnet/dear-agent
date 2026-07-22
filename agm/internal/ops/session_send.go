@@ -18,6 +18,11 @@ type SendMessageRequest struct {
 	// and QUEUE is the sole readiness blocker. It does not bypass permission or
 	// any other fail-closed state.
 	Force bool `json:"force,omitempty"`
+
+	// Autonomous permits the same narrowly scoped QUEUE recovery for an
+	// unattended session. It never bypasses permission, overlay, onboarding,
+	// harness-identity, target-existence, or backend-error checks.
+	Autonomous bool `json:"autonomous,omitempty"`
 }
 
 // SendMessageResult is the output of SendMessage.
@@ -89,8 +94,9 @@ func SendMessage(ctx *OpContext, req *SendMessageRequest) (*SendMessageResult, e
 		if !ok {
 			return newResult(false), ErrSessionNotReady(m.Name, "ATOMIC_DELIVERY_UNAVAILABLE")
 		}
+		allowBusyComposer := req.Force || req.Autonomous
 		readiness, readinessErr := sender.SendKeysIfInputReady(callCtx, tmuxName, harness, req.Message, session.InputDeliveryOptions{
-			AllowBusyComposer: req.Force,
+			AllowBusyComposer: allowBusyComposer,
 		})
 		if readinessErr != nil {
 			return newResult(false), ErrStorageError("tmux.SendKeysIfInputReady", readinessErr)
@@ -98,8 +104,8 @@ func SendMessage(ctx *OpContext, req *SendMessageRequest) (*SendMessageResult, e
 		if !readiness.Ready {
 			return newResult(false), ErrSessionNotReady(m.Name, readiness.State)
 		}
-		if readiness.Forced && (!req.Force || readiness.State != "QUEUE") {
-			return newResult(false), ErrSessionNotReady(m.Name, "INVALID_FORCE_DELIVERY")
+		if readiness.Forced && (!allowBusyComposer || readiness.State != "QUEUE") {
+			return newResult(false), ErrSessionNotReady(m.Name, "INVALID_BUSY_COMPOSER_DELIVERY")
 		}
 		if readiness.PaneID == "" {
 			return newResult(false), ErrSessionNotReady(m.Name, "UNVERIFIED_PANE")
