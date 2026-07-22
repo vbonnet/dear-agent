@@ -821,3 +821,85 @@ func TestSupervisorTmuxSession(t *testing.T) {
 		})
 	}
 }
+
+// --- admission gating on the supervisor spawn path (ce-93lw.18) ---
+
+// supervisorPreflight is the ordering contract for `agm supervisor run`: env
+// guards, then binary lookup, then host admission. Before ce-93lw.18 this path
+// had no admission check at all, so a supervisor could launch onto a host that
+// `agm session new` was already refusing.
+
+func TestSupervisorPreflight_RefusesWhenAdmissionGateRefuses(t *testing.T) {
+	env := fakeSupervisorEnv{
+		envs:  map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "oauth-token"},
+		paths: map[string]string{"claude": "/usr/local/bin/claude"},
+	}
+	refusal := errors.New("circuit breaker: spawn refused (load level: RED)")
+
+	bin, err := supervisorPreflight(env, false, noCredsPath(t), func() error { return refusal })
+	if err == nil {
+		t.Fatal("expected the admission refusal to propagate")
+	}
+	if !errors.Is(err, refusal) {
+		t.Errorf("error = %v, want it to wrap the circuit-breaker refusal", err)
+	}
+	if bin != "" {
+		t.Errorf("bin = %q, want empty — a refused supervisor must not resolve a binary to exec", bin)
+	}
+}
+
+func TestSupervisorPreflight_ReturnsBinaryWhenAdmitted(t *testing.T) {
+	env := fakeSupervisorEnv{
+		envs:  map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "oauth-token"},
+		paths: map[string]string{"claude": "/usr/local/bin/claude"},
+	}
+	called := false
+
+	bin, err := supervisorPreflight(env, false, noCredsPath(t), func() error { called = true; return nil })
+	if err != nil {
+		t.Fatalf("supervisorPreflight: %v", err)
+	}
+	if bin != "/usr/local/bin/claude" {
+		t.Errorf("bin = %q, want /usr/local/bin/claude", bin)
+	}
+	if !called {
+		t.Error("admission gate was never consulted — the supervisor path must go through it")
+	}
+}
+
+// A misconfigured invocation should report its real problem, not a resource
+// refusal, so admission runs last.
+func TestSupervisorPreflight_EnvGuardPrecedesAdmission(t *testing.T) {
+	env := fakeSupervisorEnv{
+		envs:  map[string]string{"ANTHROPIC_API_KEY": "sk-fake", "CLAUDE_CODE_OAUTH_TOKEN": "oauth-token"},
+		paths: map[string]string{"claude": "/usr/local/bin/claude"},
+	}
+	called := false
+
+	_, err := supervisorPreflight(env, false, noCredsPath(t), func() error { called = true; return nil })
+	if err == nil {
+		t.Fatal("expected the ANTHROPIC_API_KEY refusal")
+	}
+	if called {
+		t.Error("admission gate ran before the env guard; a bad env must report itself first")
+	}
+}
+
+func TestSupervisorPreflight_MissingBinaryPrecedesAdmission(t *testing.T) {
+	env := fakeSupervisorEnv{
+		envs:  map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "oauth-token"},
+		paths: map[string]string{},
+	}
+	called := false
+
+	_, err := supervisorPreflight(env, false, noCredsPath(t), func() error { called = true; return nil })
+	if err == nil {
+		t.Fatal("expected a missing-binary refusal")
+	}
+	if !strings.Contains(err.Error(), "cannot locate claude binary") {
+		t.Errorf("error = %v, want a missing-binary message", err)
+	}
+	if called {
+		t.Error("admission gate ran before the binary lookup")
+	}
+}

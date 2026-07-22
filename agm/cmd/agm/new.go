@@ -767,6 +767,11 @@ func resolveEnvVarDefaults(cmd *cobra.Command) {
 // enforceCircuitBreakers runs all circuit breaker gates and returns an
 // error if any gate refuses the spawn. On success it records the spawn time
 // so the stagger gate works for subsequent spawns.
+//
+// It is the single admission point for every sanctioned spawn path: `agm
+// session new` (and its current-tmux variant) and `agm supervisor run`.
+// vroom-dispatch shells out to `agm session new`, so it inherits the same
+// gates. Adding a spawn path without calling this is the ce-93lw.18 bug.
 func enforceCircuitBreakers() error {
 	cfg := circuitbreaker.DefaultConfig()
 	lr := circuitbreaker.DefaultLoadReader()
@@ -775,10 +780,12 @@ func enforceCircuitBreakers() error {
 	mr := circuitbreaker.DefaultMemReader()
 	dr := circuitbreaker.DefaultDiskReader()
 	pc := circuitbreaker.DefaultProcCounter()
+	br := circuitbreaker.DefaultBrakeReader()
 
 	result := circuitbreaker.Check(cfg, lr, wc, st, mr,
 		circuitbreaker.WithDiskReader(dr),
-		circuitbreaker.WithProcCounter(pc))
+		circuitbreaker.WithProcCounter(pc),
+		circuitbreaker.WithBrakeReader(br))
 
 	// Log DEAR level regardless of outcome
 	debug.Log("Circuit breaker check: level=%s load=%.1f allowed=%v", result.Level, result.Load, result.Allowed)
