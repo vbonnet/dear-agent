@@ -19,13 +19,13 @@ func TestClassifyQueuedInput_AGMMessage(t *testing.T) {
 		},
 		{
 			name:           "stuck AGM message with worker sender",
-			input:          "some output\n[Pasted text #2 +3 lines]\n[From: worker-42 | ID: 1774871219202-worker42-10110 | Sent: 2026-03-30T11:46:59Z]\nPlease review",
+			input:          "some output\n[Pasted text #2 +3 lines]\n[From: worker-42 | ID: 1774871219202-worker-4-10110 | Sent: 2026-03-30T11:46:59Z]\nPlease review",
 			expectedType:   QueuedInputAGM,
 			expectedSender: "worker-42",
 		},
 		{
 			name:           "stuck AGM message with astrocyte sender",
-			input:          "[Pasted text #1 +2 lines]\n[From: astrocyte | ID: 123-astro-001 | Sent: 2026-03-30T12:00:00Z]",
+			input:          "[Pasted text #1 +2 lines]\n[From: astrocyte | ID: 1774872000000-astrocyt-001 | Sent: 2026-03-30T12:00:00Z]",
 			expectedType:   QueuedInputAGM,
 			expectedSender: "astrocyte",
 		},
@@ -66,6 +66,10 @@ func TestClassifyQueuedInput_HumanInput(t *testing.T) {
 		{
 			name:  "pasted text with partial From but no ID",
 			input: "[Pasted text #1 +1 lines]\n[From: someone but no pipe ID field]",
+		},
+		{
+			name:  "opaque Codex pasted-content chip",
+			input: "› [Pasted Content 2172 chars]\n  gpt-5.6 xhigh · /repo",
 		},
 	}
 
@@ -157,27 +161,76 @@ func TestExtractSender(t *testing.T) {
 	}
 }
 
-func TestClassifyQueuedInput_AGMHeaderVariants(t *testing.T) {
-	// Ensure the detection works with various real-world AGM header formats
+func TestClassifyQueuedInputBindsCompleteHeaderToLatestMarker(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
 		want  QueuedInputType
 	}{
 		{
-			name:  "header at start of pane",
+			name:  "header before marker is unbound",
 			input: "[From: orchestrator | ID: 1774863250311-orchestr-10093 | Sent: 2026-03-30T09:34:10Z]\n[Priority: urgent] Fix something\n[Pasted text #1 +5 lines]",
-			want:  QueuedInputAGM,
+			want:  QueuedInputHuman,
 		},
 		{
-			name:  "header with surrounding output",
-			input: "❯ some command\noutput line\n[Pasted text #3 +8 lines]\n[From: fix-session | ID: 999-fix-001 | Sent: 2026-03-30T12:00:00Z]\nDo the thing",
+			name:  "complete header immediately after latest marker",
+			input: "❯ some command\noutput line\n[Pasted text #3 +8 lines]\n[From: fix-session | ID: 1774872000000-fix-sess-001 | Sent: 2026-03-30T12:00:00Z]\nDo the thing",
 			want:  QueuedInputAGM,
 		},
 		{
 			name:  "queued messages with AGM header",
-			input: "Press up to edit queued messages\n[From: astrocyte | ID: 100-astro-001 | Sent: 2026-03-30T08:00:00Z]\nHealth check",
+			input: "Press up to edit queued messages\n[From: astrocyte | ID: 1774872000000-astrocyt-002 | Sent: 2026-03-30T08:00:00Z]\nHealth check",
 			want:  QueuedInputAGM,
+		},
+		{
+			name:  "complete header with reply-to",
+			input: "[Pasted text #1 +2 lines]\n[From: astrocyte | ID: 1774872000000-astrocyt-003 | Sent: 2026-03-30T08:00:00Z | Reply-To: 1774871000000-orchestr-001]\nHealth check",
+			want:  QueuedInputAGM,
+		},
+		{
+			name:  "historical AGM header cannot own newer human paste",
+			input: "[Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-001 | Sent: 2026-03-30T08:00:00Z]\nrecover\n[Pasted text #2 +1 lines]\nplease preserve my draft",
+			want:  QueuedInputHuman,
+		},
+		{
+			name:  "Codex chip with observable complete header",
+			input: "› [Pasted Content 2172 chars]\n[From: orchestrator | ID: 1774872000000-orchestr-002 | Sent: 2026-03-30T08:00:00Z]\nrecover",
+			want:  QueuedInputAGM,
+		},
+		{
+			name:  "partial header",
+			input: "[Pasted text #1 +1 lines]\n[From: orchestrator | ID:",
+			want:  QueuedInputHuman,
+		},
+		{
+			name:  "missing sent field",
+			input: "[Pasted text #1 +1 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-003]",
+			want:  QueuedInputHuman,
+		},
+		{
+			name:  "invalid sent timestamp",
+			input: "[Pasted text #1 +1 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-003 | Sent: recently]",
+			want:  QueuedInputHuman,
+		},
+		{
+			name:  "missing closing bracket",
+			input: "[Pasted text #1 +1 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-003 | Sent: 2026-03-30T08:00:00Z",
+			want:  QueuedInputHuman,
+		},
+		{
+			name:  "invalid sender",
+			input: "[Pasted text #1 +1 lines]\n[From: orchestrator! | ID: 1774872000000-orchestr-003 | Sent: 2026-03-30T08:00:00Z]",
+			want:  QueuedInputHuman,
+		},
+		{
+			name:  "message ID sender mismatch",
+			input: "[Pasted text #1 +1 lines]\n[From: orchestrator | ID: 1774872000000-astrocyt-003 | Sent: 2026-03-30T08:00:00Z]",
+			want:  QueuedInputHuman,
+		},
+		{
+			name:  "invalid reply-to",
+			input: "[Pasted text #1 +1 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-003 | Sent: 2026-03-30T08:00:00Z | Reply-To: notes]",
+			want:  QueuedInputHuman,
 		},
 	}
 

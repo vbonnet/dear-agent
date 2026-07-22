@@ -138,7 +138,7 @@ func ClassifyHarnessInput(content, harness string) (bool, string, error) {
 	}
 	styledTail := paneRawInputTail(content, 12)
 	tail := stripANSI(styledTail)
-	queuedInput, _ := ClassifyQueuedInput(tail)
+	queuedInput, _ := classifyCurrentQueuedInput(styledTail, harness)
 
 	// Pi's managed ready footer remains visible while its native confirmation
 	// dialog owns input. Treat that dialog as authoritative before consulting
@@ -174,13 +174,107 @@ func ClassifyHarnessInput(content, harness string) (bool, string, error) {
 	if hasTailOwnedPermissionPrompt(tail) {
 		return false, HarnessInputPermission, nil
 	}
-	// A queued marker is current only when the registered harness's structural
-	// composer also owns the live tail. A stale marker above active work cannot
-	// authorize replacement, even if it contains an AGM header.
-	if ready && queuedInput == QueuedInputAGM {
+	if queuedInput == QueuedInputAGM {
 		return false, HarnessInputQueuedAGM, nil
 	}
 	return false, HarnessInputBusy, nil
+}
+
+// classifyCurrentQueuedInput scopes queue evidence to the registered harness's
+// latest composer. It downgrades an otherwise valid AGM header to human-owned
+// input unless the marker is on the current occupied composer and idle chrome
+// still owns the pane tail.
+func classifyCurrentQueuedInput(content, harness string) (QueuedInputType, string) {
+	region, anchorLine, ok := currentComposerInputRegion(content, harness)
+	if !ok {
+		return QueuedInputNone, ""
+	}
+	inputType, description := ClassifyQueuedInput(stripANSI(region))
+	if inputType != QueuedInputAGM {
+		return inputType, description
+	}
+	if !hasQueuedInputMarker(stripANSI(anchorLine)) || !queuedComposerOwnsTail(region, content, harness) {
+		return QueuedInputHuman, "session has human input in progress - not sending. Retry later"
+	}
+	return inputType, description
+}
+
+func currentComposerInputRegion(content, harness string) (region, anchorLine string, ok bool) {
+	lines := strings.Split(content, "\n")
+	anchor := -1
+	for i, line := range lines {
+		plain := strings.TrimSpace(stripANSI(line))
+		switch harness {
+		case "claude-code":
+			if strings.HasPrefix(plain, "❯") {
+				anchor = i
+			}
+		case "codex-cli":
+			if plain == "›" || strings.HasPrefix(plain, "› ") || plain == ">" || strings.HasPrefix(plain, "> [Pasted Content") {
+				anchor = i
+			}
+		}
+	}
+	if anchor < 0 {
+		return "", "", false
+	}
+	return strings.Join(lines[anchor:], "\n"), lines[anchor], true
+}
+
+func queuedComposerOwnsTail(region, content, harness string) bool {
+	plainRegion := stripANSI(region)
+	if hasActiveSpinner(plainRegion) || strings.Contains(strings.ToLower(plainRegion), "esc to interrupt") {
+		return false
+	}
+	lines := strings.Split(strings.TrimSpace(plainRegion), "\n")
+	if len(lines) == 0 {
+		return false
+	}
+	switch harness {
+	case "claude-code":
+		for _, line := range lines {
+			lower := strings.ToLower(strings.TrimSpace(line))
+			if strings.Contains(lower, "? for shortcuts") ||
+				strings.Contains(lower, "shift+tab to cycle") ||
+				strings.Contains(lower, "accept edits on") ||
+				strings.Contains(lower, "plan mode on") {
+				return true
+			}
+		}
+	case "codex-cli":
+		if codexFooterPattern.MatchString(strings.TrimSpace(lines[len(lines)-1])) {
+			return true
+		}
+		return codexInitialQueuedComposerOwnsTail(stripANSI(content))
+	}
+	return false
+}
+
+func codexInitialQueuedComposerOwnsTail(content string) bool {
+	lines := strings.Split(strings.TrimSpace(content), "\n")
+	for i, line := range lines {
+		if !strings.Contains(line, CodexPromptPatterns[0]) {
+			continue
+		}
+		for j := i + 1; j < len(lines) && j <= i+4; j++ {
+			if !strings.Contains(lines[j], CodexPromptPatterns[1]) {
+				continue
+			}
+			for _, tailLine := range lines[j+1:] {
+				candidate := strings.TrimSpace(tailLine)
+				switch {
+				case candidate == "":
+				case strings.HasPrefix(candidate, "│") && strings.HasSuffix(candidate, "│"):
+				case strings.HasPrefix(candidate, "╰") && strings.HasSuffix(candidate, "╯"):
+				case (strings.HasPrefix(candidate, "› ") || strings.HasPrefix(candidate, "> ")) && hasQueuedInputMarker(candidate):
+					return true
+				default:
+					return false
+				}
+			}
+		}
+	}
+	return false
 }
 
 // CheckExpectedHarnessLiveness scans the exact session's process tree and
