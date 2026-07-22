@@ -8,6 +8,12 @@
 
 **SNDBR-03** When Git worktree removal succeeds but subsequent sandbox directory cleanup fails, the system shall resume a retry at directory cleanup without repeating the completed Git removal phase.
 
+**SNDBR-04** When a sandbox request names a working directory inside a configured lower directory, the provider shall return the corresponding isolated directory while preserving its repository-relative path.
+
+**SNDBR-05** If a requested working directory is outside every configured lower directory, the provider shall fail before materializing a workspace rather than launch from an unrelated repository.
+
+**SNDBR-06** If an explicitly selected sandbox provider cannot materialize a provider-owned isolated workspace, the system shall reject it as unavailable before creating any sandbox directory.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
@@ -51,10 +57,15 @@ type Provider interface {
 
 The factory auto-detects the best provider for the current platform:
 
-- **Linux 5.11+**: Native rootless OverlayFS (optimal)
-- **Linux < 5.11**: FUSE-based OverlayFS fallback (future)
-- **macOS**: APFS reflink cloning
-- **Other**: Mock provider (testing only)
+- **Linux with `bwrap`**: Bubblewrap
+- **Linux without `bwrap`, kernel 5.11+**: Native rootless OverlayFS
+- **Older Linux**: Unsupported `fuse-overlayfs` recommendation
+- **macOS**: APFS directory cloning
+- **Other**: Unsupported fallback recommendation
+
+Automatic selection never substitutes the test-only mock provider. Unsupported
+recommendations fail closed so callers cannot mistake an empty directory for an
+isolated workspace.
 
 ### Provider Registry Pattern
 
@@ -81,6 +92,7 @@ if err != nil {
 sb, err := provider.Create(ctx, sandbox.SandboxRequest{
     SessionID:    "session-abc123",
     LowerDirs:    []string{"/path/to/repo1", "/path/to/repo2"},
+    WorkingDir:   "/path/to/repo2/agm",
     WorkspaceDir: "/tmp/sandboxes",
     Secrets: map[string]string{
         "ANTHROPIC_API_KEY": "sk-ant-...",
@@ -88,7 +100,7 @@ sb, err := provider.Create(ctx, sandbox.SandboxRequest{
     },
 })
 
-// Agent operates in sb.MergedPath
+// Harness operates in sb.WorkingDir; sb.MergedPath remains the workspace root.
 // All modifications go to sb.UpperPath (isolated)
 ```
 
@@ -178,46 +190,16 @@ Sandbox settings in AGM config:
 ```yaml
 sandbox:
   enabled: true           # Sandbox-by-default (changed from opt-in)
-  provider: "auto"        # auto, overlayfs, apfs, claudecode-worktree, mock
+  provider: "auto"        # auto, bubblewrap, overlayfs, gvisor, apfs, mock
   repos: []               # Additional repositories to merge
   secrets: {}             # Secrets to inject
 ```
 
 **Note**: As of the better-sandboxing feature, sandboxing is enabled by default.
-The `claudecode-worktree` provider is the default for sub-agent execution,
-delegating isolation to Claude Code's native worktree support.
-
-## SandboxSpec (Provider-Agnostic Configuration)
-
-`SandboxSpec` decouples sandbox *requirements* from provider *implementation*.
-Components like the executor, wayfinder, and AGM compose a `SandboxSpec` to
-declare what isolation they need, without knowing which provider will fulfill it.
-
-```go
-spec := &SandboxSpec{
-    Mode: "worktree",
-    Resources: &ResourceSpec{MaxBudgetUSD: 5.0},
-    Tools:     &ToolSpec{Preset: "code-only"},
-}
-provider := NewClaudeCodeProvider(spec)
-args := provider.BuildClaudeArgs("/path/to/workdir")
-// args: ["--add-dir", "/path/to/workdir", "--max-budget-usd", "5.00"]
-```
-
-### Presets
-
-| Preset | Tools | Use Case |
-|--------|-------|----------|
-| `ReadOnlySpec()` | Read, Grep, Glob, WebSearch, WebFetch | Research, review |
-| `CodeOnlySpec()` | Read, Write, Edit, Bash, Grep, Glob | Implementation |
-| `FullAccessSpec()` | All | Trusted agents |
-
-### ClaudeCode Provider
-
-The `ClaudeCodeProvider` maps `SandboxSpec` fields to Claude CLI arguments:
-- `Filesystem.AllowWrite` -> `--add-dir` flags
-- `Resources.MaxBudgetUSD` -> `--max-budget-usd` flag
-- `Tools.AllowedTools` -> applied at AGM/executor level (not CLI flags)
+The retired `claudecode-worktree` name is deliberately unavailable: AGM cannot
+delegate workspace creation to a harness after it has already chosen the
+sandbox working directory. Harness-specific tool permissions remain a harness
+launch concern and are not represented as filesystem isolation.
 
 ## Integration with AGM
 

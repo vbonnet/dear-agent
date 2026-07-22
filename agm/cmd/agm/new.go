@@ -875,7 +875,7 @@ func init() {
 	newCmd.Flags().StringVar(&prompt, "prompt", "", "Prompt to send after session initialization")
 	newCmd.Flags().StringVar(&promptFile, "prompt-file", "", "File containing prompt to send")
 	newCmd.Flags().BoolVar(&noSandbox, "no-sandbox", false, "Disable sandbox isolation (sandbox is ON by default)")
-	newCmd.Flags().StringVar(&sandboxProvider, "sandbox-provider", "auto", "Sandbox provider (auto, overlayfs, apfs, mock)")
+	newCmd.Flags().StringVar(&sandboxProvider, "sandbox-provider", "auto", "Sandbox provider (auto, bubblewrap, overlayfs, gvisor, apfs, mock)")
 	newCmd.Flags().Float64Var(&maxBudgetUsd, "max-budget-usd", 0, "Maximum budget in USD for the session (passed to claude --max-budget-usd)")
 	newCmd.Flags().StringVar(&testEnvName, "test-env", "", "Use named test environment (created via 'agm test-env create')")
 	newCmd.MarkFlagsMutuallyExclusive("prompt", "prompt-file")

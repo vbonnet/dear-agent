@@ -134,6 +134,28 @@ func TestProvider_checkBubblewrapInstalled(t *testing.T) {
 	}
 }
 
+func TestBubblewrapMatchedNonGitLowerDirRemainsAuthoritative(t *testing.T) {
+	base := t.TempDir()
+	gitRepo := filepath.Join(base, "git-repo")
+	requestedRepo := filepath.Join(base, "requested-non-git")
+	mergedDir := filepath.Join(base, "merged")
+	runBubblewrapGit(t, "", "init", "-q", "-b", "main", gitRepo)
+	require.NoError(t, os.MkdirAll(requestedRepo, 0o755))
+	require.NoError(t, os.MkdirAll(mergedDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(gitRepo, "project.txt"), []byte("wrong repo\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(requestedRepo, "project.txt"), []byte("requested repo\n"), 0o600))
+
+	p := NewProvider()
+	orderedLowerDirs := sandbox.PrioritizeLowerDir([]string{gitRepo, requestedRepo}, requestedRepo)
+	_, worktreeCreated := p.tryCreateWorktree(orderedLowerDirs, "non-git-authority", mergedDir, requestedRepo)
+	require.False(t, worktreeCreated, "matched non-Git lower directory was replaced by another Git repository")
+	require.NoError(t, p.populateMergedDir(orderedLowerDirs, mergedDir))
+
+	content, err := os.ReadFile(filepath.Join(mergedDir, "project.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "requested repo\n", string(content))
+}
+
 func TestProvider_DestroyPreservesLockedWorktreeForRetry(t *testing.T) {
 	repo, mergedDir, upperDir, workDir := newLockedBubblewrapWorktree(t)
 	p := NewProvider()
