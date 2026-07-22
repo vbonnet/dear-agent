@@ -28,6 +28,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/pisession"
 	"github.com/vbonnet/dear-agent/agm/internal/quotaparity"
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
+	"github.com/vbonnet/dear-agent/agm/internal/reaper"
 	"github.com/vbonnet/dear-agent/agm/internal/recovery"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/state"
@@ -139,6 +140,7 @@ type harnessParityState struct {
 	sharedCreateStore          *dolt.MockAdapter
 	startupReadinessTestOutput string
 	startupReadinessTestErr    error
+	gracefulExitCommand        string
 }
 
 type harnessParityStateKey struct{}
@@ -168,6 +170,8 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^a Codex CLI composer pane$`, aCodexCLIComposerPane)
 	ctx.Step(`^a stale Codex CLI composer followed by shell output$`, aStaleCodexCLIComposerFollowedByShellOutput)
 	ctx.Step(`^harness "([^"]*)" is configured$`, harnessIsConfigured)
+	ctx.Step(`^AGM selects the graceful reaper exit command$`, agmSelectsGracefulReaperExitCommand)
+	ctx.Step(`^the graceful reaper exit command should be "([^"]*)"$`, gracefulReaperExitCommandShouldBe)
 	ctx.Step(`^AGM validates active parity support$`, agmValidatesActiveParitySupport)
 	ctx.Step(`^harness "([^"]*)" should be active for parity$`, harnessShouldBeActiveForParity)
 	ctx.Step(`^harness "([^"]*)" should not be deprecated$`, harnessShouldNotBeDeprecated)
@@ -1318,6 +1322,29 @@ func harnessIsConfigured(ctx context.Context, harness string) error {
 		return err
 	}
 	harnessState.configuredHarness = agent.NormalizeHarnessName(harness)
+	return nil
+}
+
+func agmSelectsGracefulReaperExitCommand(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredHarness == "" {
+		return fmt.Errorf("no harness configured")
+	}
+	harnessState.gracefulExitCommand = reaper.GracefulExitCommand(harnessState.configuredHarness)
+	return nil
+}
+
+func gracefulReaperExitCommandShouldBe(ctx context.Context, want string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.gracefulExitCommand != want {
+		return fmt.Errorf("graceful reaper exit command = %q, want %q", harnessState.gracefulExitCommand, want)
+	}
 	return nil
 }
 

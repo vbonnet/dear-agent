@@ -913,6 +913,7 @@ func TestArchiveHarnessDisplayName(t *testing.T) {
 		"codex-cli":    "Codex",
 		"gemini-cli":   "Gemini",
 		"opencode-cli": "OpenCode",
+		"pi-cli":       "Pi",
 		"":             "the agent",
 		"custom":       "custom",
 	}

@@ -3,12 +3,13 @@
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
+- Feature: `agm/test/bdd/features/harness_parity.feature`
 
-<!-- Last audited at: 2026-07-17 -->
+<!-- Last audited at: 2026-07-22 -->
 
-**Version**: 1.0
-**Last Updated**: 2026-06-07
-**Status**: Baseline (derived from tests + code, not design-forward)
+**Version**: 1.1
+**Last Updated**: 2026-07-22
+**Status**: Living
 **Scope**: Two-phase stop-then-archive lifecycle for AGM-managed harness sessions
 
 ---
@@ -51,11 +52,14 @@ alive.
 
 **REA-08** When attempting to stop the session, the system shall wait up to 90 seconds for the agent prompt to appear.
 
-**REA-09** When the agent prompt is detected, the system shall send `/exit` via `tmux.SendMultiLinePromptSafe` to request a graceful shutdown.
+**REA-09** When the agent prompt is detected, the system shall select the
+harness-native graceful-exit command from the persisted session harness and
+send it via `tmux.SendMultiLinePromptSafe`: Pi (`pi-cli` and legacy `pi`) uses
+`/quit`; every other supported or unknown harness retains `/exit`.
 
-**REA-10** When `/exit` has been sent, the system shall wait up to 60 seconds for the pane to close.
+**REA-10** When the native graceful-exit command has been sent, the system shall wait up to 60 seconds for the pane to close.
 
-**REA-11** When the `ReaperTimeout` budget is exhausted before `/exit` can be sent, the system shall mark the session as a zombie and escalate to force-kill.
+**REA-11** When the `ReaperTimeout` budget is exhausted before the native graceful-exit command can be sent, the system shall mark the session as a zombie and escalate to force-kill.
 
 **REA-12** When escalating to force-kill, the system shall send SIGTERM before SIGKILL.
 
@@ -95,3 +99,6 @@ alive.
 - **No retry on permission errors.** If safety.Check blocks or storage is
   unreachable, `Run()` returns immediately. Callers must not retry blindly;
   they must report and escalate.
+- **Native shutdown ownership.** `GracefulExitCommand` is the single owner of
+  harness shutdown-command selection. Detached reapers must derive the harness
+  from durable session state rather than ambient caller configuration.
