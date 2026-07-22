@@ -14,7 +14,10 @@ import (
 	"time"
 )
 
-const worktreeTestHelperStartTimeout = 10 * time.Second
+// The helper is a second race-instrumented test process. Allow enough startup
+// time for it to reach the fake Git binary while the full repository suite is
+// running in parallel.
+const worktreeTestHelperStartTimeout = 30 * time.Second
 
 func initLinkedWorktree(t *testing.T) (string, string) {
 	t.Helper()
