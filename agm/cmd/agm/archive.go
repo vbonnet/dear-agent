@@ -713,11 +713,32 @@ func spawnReaper(sessionName, harness string, outcome manifest.SessionOutcome) e
 		return fmt.Errorf("agm-reaper binary not found (log: %s): %w", logFile, err)
 	}
 
+	// The CLI and detached reaper share lifecycle serialization code. Refuse to
+	// cross the process boundary unless the exact binary at reaperPath proves it
+	// was built from the same VCS revision. The reaper repeats this check after
+	// exec so a post-merge rename between this probe and cmd.Start still fails
+	// closed instead of running mixed lifecycle schemas.
+	expectedRevision := strings.TrimSuffix(GitCommit, "-dirty")
+	if len(expectedRevision) > 12 {
+		expectedRevision = expectedRevision[:12]
+	}
+	if expectedRevision == "" || expectedRevision == "unknown" {
+		return fmt.Errorf("cannot verify agm-reaper revision: agm has no embedded VCS revision")
+	}
+	check := exec.Command(reaperPath, "--check-revision", expectedRevision)
+	if out, err := check.CombinedOutput(); err != nil {
+		detail := strings.TrimSpace(string(out))
+		if detail == "" {
+			detail = err.Error()
+		}
+		return fmt.Errorf("agm-reaper revision mismatch: %s", detail)
+	}
+
 	// Get sessions directory from config
 	sessionsDir := cfg.SessionsDir
 
 	// Build command with detachment
-	reaperArgs := []string{"--session", sessionName, "--log-file", logFile, "--sessions-dir", sessionsDir}
+	reaperArgs := []string{"--session", sessionName, "--log-file", logFile, "--sessions-dir", sessionsDir, "--expected-revision", expectedRevision}
 	if forceArchive {
 		reaperArgs = append(reaperArgs, "--force")
 	}

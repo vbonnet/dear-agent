@@ -207,7 +207,7 @@ func postMergeSafeguardNeedles(safeguard string) []string {
 	case "trunk-build-context":
 		return []string{"fetch_trunk_commit", "ensure_build_dir", "origin/${default_branch}"}
 	case "agm-companion-coherence":
-		return []string{`maybe_rebuild "agm/cmd/agm"`, `maybe_rebuild "agm/cmd/agm-reaper"`, "agm/internal/"}
+		return []string{"maybe_rebuild_agm_pair", "installed pair unchanged", "--check-revision", "agm/internal/"}
 	case "host-artifact-deploy":
 		return []string{"deploy_host_artifacts", "make dear-deploy-sync"}
 	case "deployment-verification":

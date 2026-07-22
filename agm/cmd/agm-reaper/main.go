@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/logging"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/reaper"
+	pkgversion "github.com/vbonnet/dear-agent/pkg/version"
 )
 
 var logger = logging.DefaultLogger()
@@ -28,7 +30,20 @@ func run() error {
 	force := flag.Bool("force", false, "Override archive verification guards (propagated from agm session archive --force)")
 	keepSandbox := flag.Bool("keep-sandbox", false, "Preserve the session sandbox")
 	outcome := flag.String("outcome", "", "Archive outcome: completed, crashed, killed, or gc-stale")
+	expectedRevision := flag.String("expected-revision", "", "Expected AGM VCS revision for detached archive execution")
+	checkRevision := flag.String("check-revision", "", "Verify this binary revision and exit")
 	flag.Parse()
+
+	pkgversion.PopulateFromBuildInfo()
+	actualRevision := pkgversion.Short()
+	if *checkRevision != "" {
+		return validateRevision(*checkRevision, actualRevision)
+	}
+	if *expectedRevision != "" {
+		if err := validateRevision(*expectedRevision, actualRevision); err != nil {
+			return err
+		}
+	}
 
 	// Validate required flags
 	if *sessionName == "" {
@@ -65,4 +80,27 @@ func run() error {
 
 	logger.Info("Reaper completed successfully")
 	return nil
+}
+
+func validateRevision(expected, actual string) error {
+	expected = normalizeRevision(expected)
+	actual = normalizeRevision(actual)
+	if expected == "" || expected == "unknown" {
+		return fmt.Errorf("expected AGM revision is unavailable")
+	}
+	if actual == "" || actual == "unknown" {
+		return fmt.Errorf("agm-reaper has no embedded VCS revision; expected %s", expected)
+	}
+	if expected != actual {
+		return fmt.Errorf("agm-reaper revision %s does not match AGM revision %s", actual, expected)
+	}
+	return nil
+}
+
+func normalizeRevision(revision string) string {
+	revision = strings.TrimSuffix(revision, "-dirty")
+	if len(revision) > 12 {
+		revision = revision[:12]
+	}
+	return revision
 }

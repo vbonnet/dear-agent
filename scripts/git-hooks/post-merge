@@ -117,8 +117,7 @@ fi
 # only when inputs changed — but we additionally gate on the diff so we don't
 # even invoke `go` on a docs/tests/config-only merge.
 #
-#   agm             ./agm/cmd/agm        ← agm/ pkg/ internal/ go.mod go.sum
-#   agm-reaper      ./agm/cmd/agm-reaper ← agm/cmd/agm-reaper/ agm/internal/ pkg/ internal/ go.mod go.sum
+#   agm + reaper    ./agm/cmd/{agm,agm-reaper} ← agm/ pkg/ internal/ go.mod go.sum
 #   vroom-dispatch  ./cmd/vroom-dispatch ← cmd/vroom-dispatch/ pkg/ internal/ go.mod go.sum
 
 # is_build_relevant: a changed file that cannot affect a compiled binary
@@ -216,6 +215,107 @@ maybe_rebuild() {
     echo "[post-merge:rebuild] ✗ ${_name} rebuild FAILED — git op unaffected." >&2
     echo "[post-merge:rebuild]   rebuild manually: (cd ${repo_root} && go build -o ${_gobin}/${_name} ./${_pkg})" >&2
   fi
+}
+
+# maybe_rebuild_agm_pair: stage the AGM CLI and its detached archive companion
+# together whenever compiled AGM input changes. Neither installed binary is touched
+# unless both builds succeed. The rollback links preserve the prior pair if the
+# second activation fails; the runtime revision handshake in spawnReaper closes
+# the necessarily small interval between the two same-filesystem renames.
+maybe_rebuild_agm_pair() {
+  agm_pair_handled=0
+  [ -d "${repo_root}/agm/cmd/agm" ] || return 0
+  [ -d "${repo_root}/agm/cmd/agm-reaper" ] || return 0
+
+  _affected=0
+  _trigger=""
+  if [ "${indeterminate}" = "1" ]; then
+    _affected=1
+    _trigger="could not determine diff — rebuilding to be safe"
+  else
+    while IFS= read -r _f; do
+      [ -n "${_f}" ] || continue
+      is_build_relevant "${_f}" || continue
+      if under_prefix "${_f}" agm/ pkg/ internal/ go.mod go.sum; then
+        _affected=1
+        [ -z "${_trigger}" ] && _trigger="$(dirname "${_f}")/"
+      fi
+    done < <(printf '%s\n' "${changed}")
+  fi
+
+  [ "${_affected}" = "1" ] || return 0
+  agm_pair_handled=1
+  ensure_build_dir
+
+  _gobin="${GOBIN:-${HOME}/go/bin}"
+  mkdir -p "${_gobin}" 2>/dev/null || true
+  _agm_tmp="${_gobin}/.agm.install.$$.pair"
+  _reaper_tmp="${_gobin}/.agm-reaper.install.$$.pair"
+  _agm_target="${_gobin}/agm"
+  _reaper_target="${_gobin}/agm-reaper"
+  _agm_backup="${_gobin}/.agm.rollback.$$.pair"
+  _reaper_backup="${_gobin}/.agm-reaper.rollback.$$.pair"
+  _had_agm=0
+  _had_reaper=0
+
+  _pair_revision="$(git -C "${build_dir}" rev-parse --short=12 HEAD 2>/dev/null || true)"
+  if [ -z "${_pair_revision}" ]; then
+    echo "[post-merge:rebuild] ✗ cannot resolve AGM pair revision — installed pair unchanged." >&2
+    return 0
+  fi
+  _pair_ldflags="-X github.com/vbonnet/dear-agent/pkg/version.GitCommit=${_pair_revision}"
+
+  echo "[post-merge:rebuild] Staging agm + agm-reaper (source changed in ${_trigger})..." >&2
+  if ! ( cd "${build_dir}" && go build -ldflags "${_pair_ldflags}" -o "${_agm_tmp}" ./agm/cmd/agm ); then
+    rm -f "${_agm_tmp}" "${_reaper_tmp}" 2>/dev/null || true
+    echo "[post-merge:rebuild] ✗ agm pair staging FAILED — installed pair unchanged." >&2
+    return 0
+  fi
+  if ! ( cd "${build_dir}" && go build -ldflags "${_pair_ldflags}" -o "${_reaper_tmp}" ./agm/cmd/agm-reaper ); then
+    rm -f "${_agm_tmp}" "${_reaper_tmp}" 2>/dev/null || true
+    echo "[post-merge:rebuild] ✗ agm-reaper pair staging FAILED — installed pair unchanged." >&2
+    return 0
+  fi
+
+  if [ -e "${_agm_target}" ]; then
+    _had_agm=1
+    ln "${_agm_target}" "${_agm_backup}" 2>/dev/null || cp -p "${_agm_target}" "${_agm_backup}" 2>/dev/null || {
+      rm -f "${_agm_tmp}" "${_reaper_tmp}" "${_agm_backup}" 2>/dev/null || true
+      echo "[post-merge:rebuild] ✗ could not stage agm rollback — installed pair unchanged." >&2
+      return 0
+    }
+  fi
+  if [ -e "${_reaper_target}" ]; then
+    _had_reaper=1
+    ln "${_reaper_target}" "${_reaper_backup}" 2>/dev/null || cp -p "${_reaper_target}" "${_reaper_backup}" 2>/dev/null || {
+      rm -f "${_agm_tmp}" "${_reaper_tmp}" "${_agm_backup}" "${_reaper_backup}" 2>/dev/null || true
+      echo "[post-merge:rebuild] ✗ could not stage agm-reaper rollback — installed pair unchanged." >&2
+      return 0
+    }
+  fi
+
+  if ! mv -f "${_agm_tmp}" "${_agm_target}"; then
+    rm -f "${_agm_tmp}" "${_reaper_tmp}" "${_agm_backup}" "${_reaper_backup}" 2>/dev/null || true
+    echo "[post-merge:rebuild] ✗ agm pair activation FAILED — installed pair unchanged." >&2
+    return 0
+  fi
+  if ! mv -f "${_reaper_tmp}" "${_reaper_target}"; then
+    if [ "${_had_agm}" = "1" ]; then
+      mv -f "${_agm_backup}" "${_agm_target}" 2>/dev/null || true
+    else
+      rm -f "${_agm_target}" 2>/dev/null || true
+    fi
+    if [ "${_had_reaper}" = "1" ]; then
+      mv -f "${_reaper_backup}" "${_reaper_target}" 2>/dev/null || true
+    fi
+    rm -f "${_agm_tmp}" "${_reaper_tmp}" "${_agm_backup}" "${_reaper_backup}" 2>/dev/null || true
+    echo "[post-merge:rebuild] ✗ agm-reaper pair activation FAILED — prior pair restored." >&2
+    return 0
+  fi
+
+  rm -f "${_agm_backup}" "${_reaper_backup}" 2>/dev/null || true
+  rebuilt_any=1
+  echo "[post-merge:rebuild] ✓ installed agm + agm-reaper as one revision-coherent pair (atomic files)" >&2
 }
 
 # _pick_timeout: echo the first available timeout wrapper (gtimeout on macOS
@@ -340,12 +440,11 @@ rebuild_changed_binaries() {
   fetch_trunk_commit
 
   rebuilt_any=0
-  maybe_rebuild "agm/cmd/agm"        agm/ pkg/ internal/ go.mod go.sum
-  # agm-reaper is a separately installed process, but it executes the shared
-  # AGM lifecycle and tmux packages. Keep it on the same resolved trunk source
-  # whenever those inputs change; otherwise `agm session archive --async` can
-  # run a newer CLI beside an older lifecycle implementation.
-  maybe_rebuild "agm/cmd/agm-reaper" agm/cmd/agm-reaper/ agm/internal/ pkg/ internal/ go.mod go.sum
+  maybe_rebuild_agm_pair
+  if [ "${agm_pair_handled}" != "1" ]; then
+    maybe_rebuild "agm/cmd/agm"        agm/ pkg/ internal/ go.mod go.sum
+    maybe_rebuild "agm/cmd/agm-reaper" agm/cmd/agm-reaper/ agm/internal/ pkg/ internal/ go.mod go.sum
+  fi
   maybe_rebuild "cmd/vroom-dispatch" cmd/vroom-dispatch/ pkg/ internal/ go.mod go.sum
   # Self-update the deploy tool: keep ~/go/bin/dear-deploy current so on-demand /
   # Orchestrator invocations (Layer 2, ce-33sy) run trunk. Stage 1.6 below does

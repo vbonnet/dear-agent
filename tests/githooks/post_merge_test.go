@@ -172,6 +172,7 @@ func stubGo(t *testing.T, recordFile string) string {
 		"if [ \"$1\" = build ]; then\n" +
 		"  out=\"\"; pkg=\"\"; prev=\"\"\n" +
 		"  for a in \"$@\"; do [ \"$prev\" = -o ] && out=\"$a\"; pkg=\"$a\"; prev=\"$a\"; done\n" +
+		"  [ -n \"$STUB_GO_FAIL_PKG\" ] && [ \"$pkg\" = \"$STUB_GO_FAIL_PKG\" ] && exit 1\n" +
 		"  [ -n \"$out\" ] && printf 'fakebin\\n' > \"$out\"\n" +
 		"  echo \"$pkg|$(git rev-parse HEAD 2>/dev/null)\" >> \"" + recordFile + "\"\n" +
 		"fi\n" +
@@ -379,6 +380,45 @@ func TestRebuild_AGMSharedLifecycle_RebuildsCLIAndReaperFromSameRevision(t *test
 	}
 }
 
+// A partial pair build must not replace either installed binary. In
+// particular, a reaper build failure cannot leave a newer CLI beside the old
+// detached lifecycle implementation.
+func TestRebuild_AGMPairBuildFailurePreservesInstalledPair(t *testing.T) {
+	repo := newRebuildRepo(t)
+	mergeBranchChanging(t, repo, map[string]string{"agm/internal/tmux/prompt.go": "package tmux // v2\n"})
+	gobin := t.TempDir()
+	for name, content := range map[string]string{"agm": "old-agm\n", "agm-reaper": "old-reaper\n"} {
+		if err := os.WriteFile(filepath.Join(gobin, name), []byte(content), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	record := filepath.Join(t.TempDir(), "installed")
+	goDir := stubGo(t, record)
+	cmd := exec.Command("bash", hookPath(t))
+	cmd.Dir = repo
+	cmd.Env = append(os.Environ(),
+		"HOME="+t.TempDir(),
+		"GOBIN="+gobin,
+		"PATH="+goDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"AGM_POST_MERGE_SWEEP=0",
+		"STUB_GO_FAIL_PKG=./agm/cmd/agm-reaper",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("hook must fail safe, got %v\n%s", err, out)
+	}
+
+	for name, want := range map[string]string{"agm": "old-agm\n", "agm-reaper": "old-reaper\n"} {
+		got, err := os.ReadFile(filepath.Join(gobin, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != want {
+			t.Fatalf("%s changed after pair build failure: got %q, want %q", name, got, want)
+		}
+	}
+}
+
 // A change confined to cmd/vroom-dispatch/ rebuilds ONLY vroom-dispatch.
 func TestRebuild_ScopedSource_RebuildsOnlyAffected(t *testing.T) {
 	repo := newRebuildRepo(t)
@@ -392,8 +432,9 @@ func TestRebuild_ScopedSource_RebuildsOnlyAffected(t *testing.T) {
 	}
 }
 
-// A change confined to the agm CLI rebuilds only agm; the reaper is rebuilt
-// for its own command or shared agm/internal inputs, not unrelated CLI code.
+// Any compiled AGM change rebuilds the coherent CLI/reaper pair. Even when a
+// source change is CLI-local, exact revision handshaking means the detached
+// companion must move to the same commit.
 func TestRebuild_AgmOnly(t *testing.T) {
 	repo := newRebuildRepo(t)
 	mergeBranchChanging(t, repo, map[string]string{"agm/cmd/agm/main.go": "package main // v2\n"})
@@ -404,8 +445,8 @@ func TestRebuild_AgmOnly(t *testing.T) {
 	if !slices.Contains(got, "./agm/cmd/agm") {
 		t.Fatalf("agm not rebuilt for its own change: %v", got)
 	}
-	if slices.Contains(got, "./agm/cmd/agm-reaper") {
-		t.Fatalf("agm-reaper rebuilt for CLI-only source: %v", got)
+	if !slices.Contains(got, "./agm/cmd/agm-reaper") {
+		t.Fatalf("agm-reaper not rebuilt with coherent AGM pair: %v", got)
 	}
 }
 
