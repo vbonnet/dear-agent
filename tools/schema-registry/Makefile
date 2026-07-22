@@ -1,9 +1,10 @@
 include ../../mk/install-go-bin.mk
 
-# GOPATH is frequently unset, in which case $(GOPATH)/bin expands to the bare
-# "/bin" -- a system directory this target must never write to. Default it the
-# way the go tool does.
-GOPATH ?= $(HOME)/go
+# GOPATH is frequently unset OR set to an empty string, in which case
+# $(GOPATH)/bin expands to the bare "/bin" -- a system directory this target
+# must never write to. `?=` only covers the undefined case, so normalise the
+# empty one too, the way the go tool defaults it.
+GOPATH := $(if $(strip $(GOPATH)),$(strip $(GOPATH)),$(HOME)/go)
 
 .PHONY: all build test clean install lint
 

@@ -396,9 +396,13 @@ func TestNoRawCopyIntoInstallRoots(t *testing.T) {
 	// `cp <src> <install-root>/<name>` anywhere on the line — including inside a
 	// quoted echo, which is how the flagged instance was written.
 	rawCopy := regexp.MustCompile(`\b(?:cp|install)\s+[^\n]*?` + installRootPattern + `/[A-Za-z0-9._-]+`)
-	// A staged copy followed by a rename is the SAFE form this change teaches,
-	// so do not flag `cp X dest.new && mv -f dest.new dest`.
-	staged := regexp.MustCompile(`&&\s*(?:sudo\s+)?mv\b`)
+	// The SAFE form is: allocate a unique staging path with mktemp, copy into
+	// it, then rename it onto the destination. Requiring mktemp AND mv — rather
+	// than "some mv appears later on the line" — is what binds the rename to the
+	// staged copy. A bare `cp bin/foo /usr/local/bin/foo && mv log log.old` has
+	// an unrelated rename and must still fail.
+	staged := regexp.MustCompile(`\bmktemp\b`)
+	renamed := regexp.MustCompile(`\b(?:sudo\s+)?mv\b`)
 
 	for _, rel := range trackedTextFiles(t, repoRoot) {
 		raw, err := os.ReadFile(filepath.Join(repoRoot, rel))
@@ -407,14 +411,17 @@ func TestNoRawCopyIntoInstallRoots(t *testing.T) {
 		}
 		for _, lg := range logicalLines(string(raw)) {
 			line, i := lg.text, lg.line-1
-			if !rawCopy.MatchString(line) || staged.MatchString(line) {
+			if !rawCopy.MatchString(line) || (staged.MatchString(line) && renamed.MatchString(line)) {
 				continue
 			}
 			t.Errorf("%s:%d tells an operator to copy straight over an install root:\n\t%s\n"+
 				"Copying over an already-executed binary can leave a stale code-signing "+
 				"cache entry, and macOS then kills it before main() runs — intermittently, "+
 				"which is what makes it hard to diagnose. Use `make -C agm install` (or the "+
-				"relevant install target), or stage and rename: `cp X dest.new && mv -f dest.new dest`.",
+				"relevant install target), or stage into a UNIQUE path and rename: "+
+				"`stage=$(mktemp <dest>.XXXXXX) && cp X \"$stage\" && chmod 755 \"$stage\" "+
+				"&& mv -f \"$stage\" <dest>` — a fixed `<dest>.new` is itself racy when two "+
+				"jobs run it at once.",
 				rel, i+1, strings.TrimSpace(line))
 		}
 	}
