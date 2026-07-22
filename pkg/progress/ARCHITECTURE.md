@@ -554,16 +554,6 @@ CI=true go run example.go
 
 ---
 
-## ADR References
-
-See `docs/adrs/` directory for detailed decision records:
-
-- **ADR-001**: Strategy Pattern for Mode Selection
-- **ADR-002**: Automatic TTY Detection
-- **ADR-003**: Idempotent Operations Design
-
----
-
 ## Version History
 
 - **1.0.0** (2026-02-11): Initial implementation and architecture documentation backfill

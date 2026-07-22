@@ -119,12 +119,22 @@ func (r *Router) Generate(ctx context.Context, role string, req *provider.Genera
 		callReq := *req
 		callReq.Model = model
 		callReq.Metadata = mergeMetadata(callReq.Metadata, map[string]any{
-			"router_role":  resolvedRole,
-			"router_model": modelID,
+			"router_role":            resolvedRole,
+			"router_candidate_model": modelID,
 		})
 
-		resp, callErr := prov.Generate(ctx, &callReq)
+		resp, source, callErr := prov.GenerateWithSource(ctx, &callReq)
+		if callErr == nil && resp == nil {
+			callErr = fmt.Errorf("provider %s/%s returned a nil response", family, model)
+		}
 		if callErr == nil {
+			resp.Metadata = mergeMetadata(resp.Metadata, map[string]any{
+				"router_provider":        source.Provider,
+				"router_model":           source.Model,
+				"router_candidate_model": modelID,
+				"router_role":            resolvedRole,
+				"router_fallback":        source.Fallback,
+			})
 			return resp, nil
 		}
 
@@ -163,9 +173,22 @@ func (r *Router) GenerateForModel(ctx context.Context, modelID string, req *prov
 	callReq := *req
 	callReq.Model = model
 	callReq.Metadata = mergeMetadata(callReq.Metadata, map[string]any{
-		"router_model": modelID,
+		"router_candidate_model": modelID,
 	})
-	return prov.Generate(ctx, &callReq)
+	resp, source, err := prov.GenerateWithSource(ctx, &callReq)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("router: provider %s/%s returned a nil response", family, model)
+	}
+	resp.Metadata = mergeMetadata(resp.Metadata, map[string]any{
+		"router_provider":        source.Provider,
+		"router_model":           source.Model,
+		"router_candidate_model": modelID,
+		"router_fallback":        source.Fallback,
+	})
+	return resp, nil
 }
 
 // HasRole reports whether a role name is defined in the config.
@@ -196,7 +219,7 @@ func (r *Router) resolveRole(name string) (string, RoleSpec, error) {
 	return name, spec, nil
 }
 
-func (r *Router) providerFor(family, model string) (provider.Provider, error) {
+func (r *Router) providerFor(family, model string) (*provider.CircuitBreaker, error) {
 	key := family + "|" + model
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -245,4 +268,3 @@ func mergeMetadata(base, extra map[string]any) map[string]any {
 	}
 	return out
 }
-

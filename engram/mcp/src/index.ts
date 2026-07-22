@@ -29,7 +29,10 @@ const ENGRAM_ROOT = process.env.ENGRAM_ROOT || join(homedir(), '.engram');
 const ENGRAM_CLI = process.env.ENGRAM_CLI || 'engram';
 
 /** Cache TTL in ms. Override via MCP_CACHE_TTL_MS env var. */
-const CACHE_TTL_MS = parseInt(process.env.MCP_CACHE_TTL_MS || '30000', 10);
+const configuredCacheTTL = Number.parseInt(process.env.MCP_CACHE_TTL_MS || '', 10);
+const CACHE_TTL_MS = Number.isFinite(configuredCacheTTL) && configuredCacheTTL > 0
+  ? configuredCacheTTL
+  : 30000;
 
 /**
  * Tool result cache — invalidated by TTL or file watches.

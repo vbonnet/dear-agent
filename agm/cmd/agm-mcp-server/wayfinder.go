@@ -15,13 +15,13 @@ import (
 
 // WayfinderSession is the minimal summary returned by engram_list_wayfinder_sessions.
 type WayfinderSession struct {
-	ID           string `json:"id"`
-	ProjectName  string `json:"project_name"`
-	Status       string `json:"status"`
-	CurrentPhase string `json:"current_phase"`
-	CreatedAt    string `json:"created_at,omitempty"`
-	UpdatedAt    string `json:"updated_at,omitempty"`
-	Repository   string `json:"repository,omitempty"`
+	ID              string `json:"id"`
+	ProjectName     string `json:"project_name"`
+	Status          string `json:"status"`
+	CurrentWaypoint string `json:"current_waypoint"`
+	CreatedAt       string `json:"created_at,omitempty"`
+	UpdatedAt       string `json:"updated_at,omitempty"`
+	Repository      string `json:"repository,omitempty"`
 }
 
 const defaultWayfinderDir = "~/src/engram-research/wf"
@@ -66,6 +66,18 @@ func fmString(fm map[string]any, key string) string {
 	return ""
 }
 
+func validateWayfinderV2Frontmatter(fm map[string]any) error {
+	if fmString(fm, "schema_version") != "2.0" {
+		return fmt.Errorf("unsupported Wayfinder schema: require schema_version 2.0")
+	}
+	for _, key := range []string{"project_name", "status", "current_waypoint"} {
+		if fmString(fm, key) == "" {
+			return fmt.Errorf("invalid Wayfinder V2 frontmatter: %s is required", key)
+		}
+	}
+	return nil
+}
+
 // readWayfinderSession reads and parses WAYFINDER-STATUS.md from sessionDir.
 // Returns the raw frontmatter map and the canonical session ID (the dir name).
 func readWayfinderSession(sessionDir string) (string, map[string]any, error) {
@@ -80,6 +92,9 @@ func readWayfinderSession(sessionDir string) (string, map[string]any, error) {
 	}
 	fm, err := parseFrontmatter(data)
 	if err != nil {
+		return id, nil, err
+	}
+	if err := validateWayfinderV2Frontmatter(fm); err != nil {
 		return id, nil, err
 	}
 	return id, fm, nil
@@ -121,13 +136,13 @@ func listWayfinderSessions(wayfinderDir, statusFilter string, limit int) ([]Wayf
 		}
 
 		sessions = append(sessions, WayfinderSession{
-			ID:           id,
-			ProjectName:  fmString(fm, "project_name"),
-			Status:       status,
-			CurrentPhase: fmString(fm, "current_waypoint"),
-			CreatedAt:    fmString(fm, "created_at"),
-			UpdatedAt:    fmString(fm, "updated_at"),
-			Repository:   fmString(fm, "repository"),
+			ID:              id,
+			ProjectName:     fmString(fm, "project_name"),
+			Status:          status,
+			CurrentWaypoint: fmString(fm, "current_waypoint"),
+			CreatedAt:       fmString(fm, "created_at"),
+			UpdatedAt:       fmString(fm, "updated_at"),
+			Repository:      fmString(fm, "repository"),
 		})
 	}
 	return sessions, nil

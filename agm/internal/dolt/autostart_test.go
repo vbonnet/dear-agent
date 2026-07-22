@@ -124,6 +124,8 @@ func TestNewAdapter_EmptyPort(t *testing.T) {
 }
 
 func TestNewAdapter_ConnectionFailsNoScript(t *testing.T) {
+	t.Setenv("ENGRAM_TEST_MODE", "1")
+	t.Setenv("ENGRAM_TEST_WORKSPACE", "test")
 	// Use a port nothing listens on
 	_, err := New(&Config{
 		Workspace: "test",
@@ -148,6 +150,8 @@ func TestNewAdapter_ConnectionFailsNoScript(t *testing.T) {
 }
 
 func TestNewAdapter_ConnectionFailsWithScript(t *testing.T) {
+	t.Setenv("ENGRAM_TEST_MODE", "1")
+	t.Setenv("ENGRAM_TEST_WORKSPACE", "test")
 	// Use a port nothing listens on, with a start script path (won't be invoked
 	// because isRunningInTest() returns true)
 	_, err := New(&Config{

@@ -20,6 +20,7 @@
 # RELATED-SPEC: engram/ecphory/diagrams/SPEC.md
 # RELATED-SPEC: engram/hooks-bin/SPEC.md
 # RELATED-SPEC: engram/hooks-bin/lib/SPEC.md
+# RELATED-SPEC: engram/mcp/SPEC.md
 # RELATED-SPEC: engram/mcp/src/SPEC.md
 # RELATED-SPEC: infra/SPEC.md
 # RELATED-SPEC: infra/modules/managed-repo/SPEC.md

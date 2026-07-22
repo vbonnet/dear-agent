@@ -18,6 +18,8 @@
 
 **DOLTR-08** When an administrative hierarchy repair assigns a parent and optionally inherits its display name, the storage adapter shall atomically persist both changes only against the exact identity revision observed by the caller, advance that revision on success, preserve the tmux name and unrelated fields, and return an explicit conflict instead of silently accepting a stale identity writer.
 
+**DOLTR-09** When a Go test or explicitly marked built test subprocess resolves Dolt configuration or constructs an adapter directly, the system shall select `ENGRAM_TEST_WORKSPACE` as its workspace and shall require its database to equal that workspace or the shared `agm_test` target before connecting.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`

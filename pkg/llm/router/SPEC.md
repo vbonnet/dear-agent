@@ -1,6 +1,6 @@
 # LLM Router Specification
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-07-21 -->
 
 ## Overview
 
@@ -36,10 +36,11 @@ attempt history.
 
 **LLM-ROUTER-12** When the same family and model are requested repeatedly, the system shall reuse the cached provider entry.
 
+**LLM-ROUTER-13** When a circuit-breaker fallback produces a response, the system shall identify the actual provider and model in response metadata and preserve the originally selected candidate separately.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/llm_runtime_guardrails.feature`
 - Package tests: `pkg/llm/router/config_test.go`
 - Package tests: `pkg/llm/router/router_test.go`
 - Package tests: `pkg/llm/router/executor_test.go`
-
