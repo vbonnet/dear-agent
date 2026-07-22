@@ -22,7 +22,10 @@
 
 # Makefile — install target warns against it; uninstall keeps cleanup guidance.
 0eb7adc892922b89  # Makefile: "Do NOT also point Claude Code's apiKeyHelper at this binary..."
-745dfcca702efe2a  # Makefile: install-token-refresher-launchagent, no apiKeyHelper step
+f65970f84219ca2f  # Makefile: install-token-refresher-launchagent, no apiKeyHelper step
+16f3b251bdeda3f2  # Makefile: upgrade path detects a leftover apiKeyHelper in settings.json
+abc130424f637e69  # Makefile: warns a retired apiKeyHelper still shadows OAuth
+3c623e0080984716  # Makefile: prints "configure-claude-settings remove apiKeyHelper"
 f436665c337f64f7  # Makefile: uninstall still clears the retired apiKeyHelper
 
 # cmd/token-refresher/README.md — the retirement is documented here.

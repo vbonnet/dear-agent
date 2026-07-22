@@ -446,6 +446,13 @@ install-token-refresher-launchagent: install-token-refresher
 	@echo "Activate it yourself (ask-gated host action):"
 	@echo "  Schedule the idle backstop:"
 	@echo "     launchctl load $(HOME)/Library/LaunchAgents/com.dear-agent.token-refresher.plist"
+	@if grep -q '"apiKeyHelper"' $(HOME)/.claude/settings.json 2>/dev/null; then \
+		echo ""; \
+		echo "  WARNING: this host still has a retired apiKeyHelper in ~/.claude/settings.json."; \
+		echo "  It shadows healthy OAuth (claude-code >=2.1.205) and will keep breaking auth"; \
+		echo "  even with this launch agent running. Clear it:"; \
+		echo "     configure-claude-settings remove apiKeyHelper"; \
+	fi
 
 # Uninstall still tells you to clear the retired apiKeyHelper. Setup guidance
 # for it is gone (see install target), but a host that followed the OLD steps
@@ -829,7 +836,7 @@ bumblebee-scan: build-bumblebee
 # $HOME/.local/bin first so the plist references a stable path.
 install-bumblebee-launchagent: build-bumblebee
 	@mkdir -p $(HOME)/.local/bin
-	@install -m 0755 bin/dear-agent-bumblebee $(HOME)/.local/bin/dear-agent-bumblebee
+	$(call install-go-bin,bin/dear-agent-bumblebee,$(HOME)/.local/bin)
 	@$(HOME)/.local/bin/dear-agent-bumblebee install-launchagent
 
 uninstall-bumblebee-launchagent: build-bumblebee

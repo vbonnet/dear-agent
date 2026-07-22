@@ -75,13 +75,24 @@ func TestLaunchdBinariesUseHardenedInstall(t *testing.T) {
 	// out that rebuilding an already-executed safe-push or safe-pr reproduces
 	// it identically, and those fail in the middle of a developer's workflow.
 	// The launchd set is merely where the failure is *silent*.
-	t.Run("no-bare-cp-installs", func(t *testing.T) {
-		bareCopy := regexp.MustCompile(`(?m)^\t@?cp bin/.*\$\((?:HOME\)/go/bin|HOOKS_DIR)\)?/?\s*$`)
+	//
+	// Matching on the INSTALL side rather than resolving plists is deliberate.
+	// Several launch-agent templates reference their program through a
+	// placeholder (__AGM_BINARY__, __BUMBLEBEE_BINARY__), so a path-derived
+	// guard cannot see them at all — which is how the bumblebee wrapper,
+	// installed with `install -m` into ~/.local/bin, escaped the first version
+	// of this check. Asserting that no install target uses a raw copy into any
+	// install root covers every scheduled binary regardless of how its plist
+	// names it.
+	t.Run("no-bare-installs", func(t *testing.T) {
+		bareCopy := regexp.MustCompile(
+			`(?m)^\t@?(?:cp|install)\b[^\n]*\$\((?:HOME\)/(?:go/bin|\.local/bin)|HOOKS_DIR\))[^\n]*$`)
 		for _, m := range bareCopy.FindAllString(makefile, -1) {
-			t.Errorf("install target uses a bare cp instead of the hardened macro:\n\t%s\n"+
-				"Use $(call install-go-bin,bin/<name>[,<dest-dir>]). A bare cp rewrites the "+
-				"existing inode; macOS then kills the rebuilt binary with OS_REASON_CODESIGNING "+
-				"before main() runs.", strings.TrimSpace(m))
+			t.Errorf("install target copies into an install root without the hardened macro:\n\t%s\n"+
+				"Use $(call install-go-bin,bin/<name>[,<dest-dir>]). A raw cp/install rewrites "+
+				"the existing inode; macOS then kills the rebuilt binary with "+
+				"OS_REASON_CODESIGNING before main() runs — silently, for a launchd job.",
+				strings.TrimSpace(m))
 		}
 	})
 }
