@@ -5,7 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  '@hono/node-server': 2.0.5
+  '@hono/node-server': 2.0.10
   brace-expansion@5.0.6: 5.0.7
   body-parser: 2.3.0
   hono: ^4.12.31
@@ -82,8 +82,8 @@ packages:
     resolution: {integrity: sha512-JiDShH45zKHWyGe4ZNVRrCjBz8Nh9TMmZG1kh4QTK8hCBTWBi8Da+i7s1fJw7/lYpM4ccepSNfqzZ/QvABBi5g==}
     engines: {node: '>=6.9.0'}
 
-  '@hono/node-server@2.0.5':
-    resolution: {integrity: sha512-yQFvDmyDo3y6rEOJZDUYPJ49DIKTPpIk4kGvm40xx4Ejne0Pu9a1+exxPN+C1UppWK/WGZX9F++/Xs231tE86g==}
+  '@hono/node-server@2.0.10':
+    resolution: {integrity: sha512-ZcnNVhKTmyDJeg0UlnZjvM73JBsTAuhrH/J4fjwGOw59PwOW51r4J+p6CsKZWXdKSme4MFqU62CZMOsdDrU4CA==}
     engines: {node: '>=20'}
     peerDependencies:
       hono: ^4.12.31
@@ -674,7 +674,7 @@ snapshots:
 
   '@babel/runtime@7.29.2': {}
 
-  '@hono/node-server@2.0.5(hono@4.12.31)':
+  '@hono/node-server@2.0.10(hono@4.12.31)':
     dependencies:
       hono: 4.12.31
 
@@ -684,7 +684,7 @@ snapshots:
 
   '@modelcontextprotocol/sdk@1.29.0(zod@3.24.4)':
     dependencies:
-      '@hono/node-server': 2.0.5(hono@4.12.31)
+      '@hono/node-server': 2.0.10(hono@4.12.31)
       ajv: 8.20.0
       ajv-formats: 3.0.1(ajv@8.20.0)
       content-type: 1.0.5
