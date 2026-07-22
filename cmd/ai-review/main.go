@@ -112,6 +112,37 @@ func gitBinaryPaths(base, head string) []string {
 	return bins
 }
 
+// gitlinkMode is git's file mode for a submodule entry (a "gitlink").
+const gitlinkMode = "160000"
+
+// gitGitlinkPaths lists submodule (gitlink) entries changed between base and
+// head. A submodule bump appears in the diff as a single "Subproject commit
+// <sha>" line — the external tree it points at is never in the payload, and
+// --numstat counts it as ordinary text rather than binary — so an unreviewed
+// dependency could otherwise ride an "approved" outcome (AIREV-06).
+func gitGitlinkPaths(base, head string) []string {
+	out, err := exec.Command("git", "diff", "--raw", "--no-renames", base, head).Output()
+	if err != nil {
+		return nil
+	}
+	var links []string
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+		// :<srcmode> <dstmode> <srcsha> <dstsha> <status>\t<path>
+		meta, path, ok := strings.Cut(line, "\t")
+		if !ok || !strings.HasPrefix(meta, ":") {
+			continue
+		}
+		fields := strings.Fields(strings.TrimPrefix(meta, ":"))
+		if len(fields) < 2 {
+			continue
+		}
+		if fields[0] == gitlinkMode || fields[1] == gitlinkMode {
+			links = append(links, strings.TrimSpace(path))
+		}
+	}
+	return links
+}
+
 // gitCommitMessages returns the commit messages in base..head so the explicit
 // "HUMAN REVIEW REQUIRED" marker can be detected (REVIEW.md §3).
 func gitCommitMessages(base, head string) string {
@@ -234,6 +265,7 @@ func run(c config) int {
 	}
 	triggers := EscalationTriggers(changed, c.prBody, gitCommitMessages(c.baseSHA, c.headSHA))
 	triggers = append(triggers, BinaryEscalationTriggers(gitBinaryPaths(c.baseSHA, c.headSHA))...)
+	triggers = append(triggers, GitlinkEscalationTriggers(gitGitlinkPaths(c.baseSHA, c.headSHA))...)
 	if len(triggers) > 0 {
 		fmt.Printf("::warning::REVIEW.md §3 escalation triggered: %s\n", strings.Join(triggers, "; "))
 	}

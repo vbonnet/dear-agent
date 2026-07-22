@@ -46,11 +46,16 @@ var escalationRules = []escalationRule{
 			// Registration files (hooks.json) and the packages that own hook
 			// implementations must match too — a hooks.json has no "/hooks/"
 			// segment, and a hook implementation's basename is often main.go.
-			return strings.Contains(lower, "/hooks/") ||
-				strings.HasPrefix(lower, "hooks/") ||
-				base == "hooks.json" || base == "hooks.yaml" || base == "hooks.yml" ||
-				strings.Contains(lower, "-hooks/") ||
-				strings.Contains(lower, "/hooks.") ||
+			// Scoped to the directories that own *tool* hooks and to hook
+			// registration files. A bare "/hooks/" substring also matches
+			// unrelated application packages (e.g. engram/hooks/), which would
+			// force needless human review on routine maintenance.
+			for _, owner := range toolHookDirs {
+				if strings.Contains(lower, owner) {
+					return true
+				}
+			}
+			return base == "hooks.json" || base == "hooks.yaml" || base == "hooks.yml" ||
 				strings.HasPrefix(base, "pretool-") ||
 				strings.HasPrefix(base, "posttool-") ||
 				strings.HasPrefix(base, "sessionstart-") ||
@@ -102,6 +107,18 @@ var escalationRules = []escalationRule{
 	},
 }
 
+// toolHookDirs are the directories that own pre/post-tool hooks — the surface
+// REVIEW.md §3 means by "pre-tool hooks". Deliberately narrower than any
+// directory named "hooks".
+var toolHookDirs = []string{
+	".claude/hooks/",
+	".config/claude-code/hooks/",
+	".config/git/hooks/",
+	".agents/hooks",
+	".codex/hooks",
+	"-hooks/",
+}
+
 // securityBoundaryDirs are the packages that own a security boundary. A change
 // anywhere inside one escalates, regardless of the individual filename.
 var securityBoundaryDirs = []string{
@@ -131,6 +148,22 @@ func BinaryEscalationTriggers(binaryPaths []string) []string {
 			continue
 		}
 		triggers = append(triggers, fmt.Sprintf("binary file not reviewable from a text diff (%s)", p))
+	}
+	return triggers
+}
+
+// GitlinkEscalationTriggers returns a trigger per changed submodule. A gitlink
+// bump shows up as a lone "Subproject commit <sha>" line, so the external tree
+// it now points at is never reviewed — escalate rather than approve an
+// unreviewed dependency.
+func GitlinkEscalationTriggers(gitlinkPaths []string) []string {
+	var triggers []string
+	for _, p := range gitlinkPaths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		triggers = append(triggers, fmt.Sprintf("submodule (gitlink) change whose target tree is not in the diff (%s)", p))
 	}
 	return triggers
 }

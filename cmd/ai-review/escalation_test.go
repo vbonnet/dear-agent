@@ -78,6 +78,47 @@ func TestBinaryEscalationTriggers(t *testing.T) {
 	}
 }
 
+// TestGitlinkEscalationTriggers guards the submodule bypass: a gitlink bump
+// shows only "Subproject commit <sha>", so the target tree is never reviewed.
+func TestGitlinkEscalationTriggers(t *testing.T) {
+	if got := GitlinkEscalationTriggers([]string{"vendor/dep"}); len(got) != 1 {
+		t.Fatalf("expected a gitlink trigger, got %v", got)
+	}
+	if got := GitlinkEscalationTriggers([]string{"", " "}); len(got) != 0 {
+		t.Fatalf("blank paths must not trigger, got %v", got)
+	}
+	if ApplyEscalation(Approved, GitlinkEscalationTriggers([]string{"vendor/dep"})) != NeedsHumanReview {
+		t.Fatal("submodule change must escalate an approved outcome")
+	}
+}
+
+// TestHookEscalationIsScoped keeps the hook rule targeted at tool-hook owners:
+// over-escalating every directory named "hooks" would force needless human
+// review on ordinary application packages.
+func TestHookEscalationIsScoped(t *testing.T) {
+	shouldNot := []string{
+		"engram/hooks/registry_test.go",
+		"engram/hooks/registry.go",
+		"pkg/hooks/doc.go",
+	}
+	for _, p := range shouldNot {
+		if got := EscalationTriggers([]string{p}, "", ""); len(got) != 0 {
+			t.Errorf("%s must not escalate as a tool hook, got %v", p, got)
+		}
+	}
+	shouldEscalate := []string{
+		".claude/hooks/pretool-guard",
+		".config/claude-code/hooks/pretool-bash-write-guard",
+		"agm/cmd/agm-hooks/pretool-bash-blocker/main.go",
+		".agents/hooks.json",
+	}
+	for _, p := range shouldEscalate {
+		if got := EscalationTriggers([]string{p}, "", ""); len(got) == 0 {
+			t.Errorf("%s must escalate as a tool hook surface", p)
+		}
+	}
+}
+
 func TestApplyEscalation(t *testing.T) {
 	// Escalation forces needs-human-review from any outcome...
 	for _, o := range []Outcome{Approved, NeedsWork, Rejected, NeedsHumanReview} {
