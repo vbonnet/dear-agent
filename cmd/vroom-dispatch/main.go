@@ -527,7 +527,7 @@ func isRetryableSpawnRefusal(output string) bool {
 	// any transient marker would incorrectly retry disk, process-cap, or
 	// admission-brake failures. If structured gate bullets are present, require
 	// every failed gate to be the recognized transient spawn-stagger gate.
-	for _, line := range strings.Split(output, "\n") {
+	for line := range strings.SplitSeq(output, "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "• [") {
 			continue
