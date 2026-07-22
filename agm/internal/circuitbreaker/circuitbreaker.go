@@ -506,7 +506,26 @@ func checkSpawnStagger(cfg Config, st SpawnTimer) GateResult {
 		}
 	}
 
-	elapsed := time.Since(lastSpawn)
+	now := time.Now()
+	if lastSpawn.After(now) {
+		// A governor timestamp is not a successful spawn, but the shared timer
+		// cannot encode provenance after the timestamp passes. The ordinary
+		// stagger therefore remains in force for MinSpawnInterval after the
+		// governor hold. Report that effective admission boundary so operators
+		// are not told to retry before this gate can actually pass.
+		resumeAt := lastSpawn.Add(cfg.MinSpawnInterval)
+		remaining := resumeAt.Sub(now)
+		return GateResult{
+			Gate:   "spawn_stagger",
+			Passed: false,
+			Message: fmt.Sprintf(
+				"spawns paused by resource governor; earliest possible admission is %s (%s until that boundary), if the governor does not extend the hold and all other gates pass. This boundary includes the governor hold and %s spawn safety interval.",
+				resumeAt.Format(time.RFC3339), formatDuration(remaining), formatDuration(cfg.MinSpawnInterval),
+			),
+		}
+	}
+
+	elapsed := now.Sub(lastSpawn)
 	if elapsed < cfg.MinSpawnInterval {
 		remaining := cfg.MinSpawnInterval - elapsed
 		return GateResult{

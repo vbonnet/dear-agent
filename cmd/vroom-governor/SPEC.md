@@ -12,6 +12,10 @@
 
 **VGOVR-05** When a probe reads cleanly and breaches a threshold, the governor shall extend the last-spawn timestamp and the governor shall not modify the admission brake.
 
+**VGOVR-06** When a resource limit is exceeded, the governor shall write a future RFC3339 timestamp to AGM's shared spawn timer so admission remains paused for the configured interval.
+
+**VGOVR-07** When resource limits clear, the governor shall stop extending the shared spawn timer; admission shall remain blocked until the existing hold and the circuit breaker's spawn safety interval have elapsed, and shall still require every other admission gate to pass.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
