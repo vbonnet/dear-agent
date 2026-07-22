@@ -13,6 +13,16 @@ import (
 // ProgramArguments, e.g. <string>__HOME__/go/bin/token-refresher</string>.
 var programArgumentsBinary = regexp.MustCompile(`(?:__HOME__|\$\{?HOME\}?|/Users/[^/<]+)/go/bin/([A-Za-z0-9._-]+)`)
 
+// scannedExtensions are the file types the apiKeyHelper guard reads: prose and
+// code, plus the configuration and script surfaces that can set the key or run
+// the wiring command directly (.json above all — apiKeyHelper is a
+// settings.json key).
+var scannedExtensions = map[string]bool{
+	".go": true, ".md": true, ".plist": true,
+	".json": true, ".yaml": true, ".yml": true, ".toml": true,
+	".sh": true, ".bash": true, ".zsh": true,
+}
+
 // TestLaunchdBinariesUseHardenedInstall asserts that every binary launchd runs
 // is installed into ~/go/bin through the install-go-bin macro rather than a
 // bare `cp` (ce-77ip.8).
@@ -154,7 +164,15 @@ func TestNoAPIKeyHelperInstructions(t *testing.T) {
 	// Checked per mention rather than per file on purpose. The defect review
 	// found was a package doc carrying a retirement note at the top while still
 	// recommending the helper further down — a file-level check passes that.
-	disclaimed := regexp.MustCompile(`(?i)(\b(not|never|retired|removed|remove|no longer|void|originally|instead|prohibit\w*|forbid\w*|unwire|stop)\b|shadow\w*)`)
+	//
+	// The accepted tokens must be genuinely NEGATIVE about the wiring. An
+	// earlier revision also accepted polarity-free words — "instead", "stop",
+	// "originally", "remove", "void" — which let affirmative guidance through:
+	// "Instead, use token-refresher as Claude Code's apiKeyHelper" contains no
+	// `set` command and would have passed. Every token below asserts the wiring
+	// is absent, forbidden, or harmful; none of them can appear in a sentence
+	// that recommends it.
+	disclaimed := regexp.MustCompile(`(?i)(\b(not|never|retired|removed|deprecated|disabled|no longer|prohibit\w*|forbid\w*|must\s+not|do\s+not|don't)\b|shadow\w*|\bharmful\b)`)
 
 	for _, path := range operatorFacingFiles(t, repoRoot) {
 		rel, _ := filepath.Rel(repoRoot, path)
@@ -206,9 +224,18 @@ func TestNoAPIKeyHelperInstructions(t *testing.T) {
 }
 
 // operatorFacingFiles returns the repository files an operator could act on:
-// the Makefile, Go sources, Markdown docs, and launchd templates. Vendored,
-// generated, and VCS trees are skipped, as are this guard's own sources (which
-// necessarily contain the forbidden strings as test fixtures).
+// prose, code, and — critically — the configuration and script surfaces that
+// can enable the setting directly. Vendored, generated, and VCS trees are
+// skipped, as are this guard's own sources (which necessarily contain the
+// forbidden strings as test fixtures).
+//
+// Configuration types are included because they are the most direct route to
+// the failure, not an afterthought: `apiKeyHelper` is a key in
+// `.claude/settings.json`, so a tracked settings file could restore OAuth
+// shadowing with no prose and no Makefile change at all. Shell installers can
+// likewise print or run the wiring command. A guard limited to prose, Go, and
+// plists would watch every door but the one the setting actually walks
+// through.
 func operatorFacingFiles(t *testing.T, repoRoot string) []string {
 	t.Helper()
 
@@ -233,11 +260,7 @@ func operatorFacingFiles(t *testing.T, repoRoot string) []string {
 		if strings.HasSuffix(name, "_test.go") {
 			return nil
 		}
-		switch {
-		case name == "Makefile",
-			strings.HasSuffix(name, ".go"),
-			strings.HasSuffix(name, ".md"),
-			strings.HasSuffix(name, ".plist"):
+		if name == "Makefile" || scannedExtensions[filepath.Ext(name)] {
 			out = append(out, path)
 		}
 		return nil

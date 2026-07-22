@@ -9,7 +9,8 @@
   the single-use refresh-token family never dies of neglect.
 
   WARNING -- the single-writer invariant this job was designed around is VOID.
-  It originally read: "during active sessions the Claude Code `apiKeyHelper`
+  It is retired, and must not be restored. It once read: "during active
+  sessions the Claude Code `apiKeyHelper`
   (which also points at this binary) drives on-demand refresh; both paths share
   the same cross-process file lock, so they never race or double-spend the
   refresh token." apiKeyHelper was removed on 2026-07-10 because Claude Code

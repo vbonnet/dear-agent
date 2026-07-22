@@ -140,12 +140,33 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 # codesign is macOS-only; failures are tolerated so Linux builds stay green.
 # Correctness rests on the rename, which is portable.
 #
+# The staging path is unique per invocation, via mktemp in the destination
+# directory. Two worktrees or automation jobs installing the same binary at
+# once would otherwise share one <name>.tmp: each could codesign or rename it
+# while the other was still copying, installing a mixed binary — or the second
+# mv would fail because the first already consumed the path.
+#
+# mktemp rather than $$ (the shell PID): $$ is NOT reliably unique, because in
+# a subshell it expands to the PARENT shell's pid, so parallel installs driven
+# from one shell would still collide. mktemp is unique by construction. It
+# creates the file in the destination directory, which keeps the final mv on
+# the same filesystem and therefore atomic. Copying into that freshly created
+# inode is safe: it has never been executed, so no cdhash is cached for it.
+#
+# The whole sequence runs in ONE shell so the trap can remove the staging file
+# if any step fails, rather than leaving debris in ~/go/bin.
+#
 # Usage: $(call install-go-bin,bin/<name>)
 define install-go-bin
-	@cp '$(1)' '$(HOME)/go/bin/$(notdir $(1)).tmp'
-	@codesign -f -s - '$(HOME)/go/bin/$(notdir $(1)).tmp' 2>/dev/null || true
-	@mv -f '$(HOME)/go/bin/$(notdir $(1)).tmp' '$(HOME)/go/bin/$(notdir $(1))'
-	@echo "Installed: $(HOME)/go/bin/$(notdir $(1))"
+	@set -e; \
+	dest='$(HOME)/go/bin/$(notdir $(1))'; \
+	stage="$$(mktemp "$$dest.XXXXXX")"; \
+	trap 'rm -f "$$stage"' EXIT; \
+	cp '$(1)' "$$stage"; \
+	chmod 755 "$$stage"; \
+	codesign -f -s - "$$stage" 2>/dev/null || true; \
+	mv -f "$$stage" "$$dest"; \
+	echo "Installed: $$dest"
 endef
 
 # Validate EARS-formatted requirements in SPEC.md files using the same

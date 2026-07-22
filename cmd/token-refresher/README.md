@@ -67,7 +67,7 @@ because ANTHROPIC_API_KEY or another auth source is set` even when
 [#23568](https://github.com/anthropics/claude-code/issues/23568).
 
 It also masked real errors: with the helper in front, a dead token family
-surfaced as `apiKeyHelper failed: exited 2` instead of a legible auth failure,
+surfaced as `apiKeyHelper failed: exited 2` and not as a legible auth failure,
 which cost days of misdirected debugging (see the ce-77ip epic's "four-layer
 auth failure" retro).
 
