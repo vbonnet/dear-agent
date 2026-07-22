@@ -943,6 +943,22 @@ substrate behind every harness needs explicit contracts for preserving state,
 avoiding unsafe concurrency, detecting interactive readiness, and recovering
 from stale or wedged sessions.
 
+### AGM Capacity Platform Detection
+
+**File:** [`agm_capacity_platform.feature`](../test/bdd/features/agm_capacity_platform.feature)
+
+**Drives:** the real `agm/internal/capacity` native memory detector on the
+current Linux or macOS test host.
+
+**Key scenarios:**
+- Supported development platforms resolve native total and available memory.
+- Total memory is positive, available memory is non-negative, and available
+  memory never exceeds total memory.
+
+**Why this matters:** `agm capacity` is an operator-facing safety surface. A
+Linux-only `/proc` probe made the command unusable on macOS even though AGM's
+session lifecycle and circuit breaker support both platforms.
+
 ### Observability Package Guardrails
 
 **File:** [`observability_package_guardrails.feature`](../test/bdd/features/observability_package_guardrails.feature)
