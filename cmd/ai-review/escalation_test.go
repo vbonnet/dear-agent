@@ -11,6 +11,11 @@ func TestEscalationTriggers_Paths(t *testing.T) {
 		{"workflow edit", []string{".github/workflows/review.yml"}, true},
 		{"ruleset edit", []string{".github/rulesets/main.json"}, true},
 		{"settings.json", []string{".claude/settings.json"}, true},
+		// Permission/authorization surfaces are matched by concept, so a new
+		// owning package does not silently escape escalation.
+		{"permission parity pkg", []string{"agm/internal/permissionparity/parity.go"}, true},
+		{"pi authorization ext", []string{"agm/internal/permissionparity/piadapter/pi_authorization_extension.js"}, true},
+		{"hook installer", []string{"agm/cmd/agm/install_hooks.go"}, true},
 		{"hook script", []string{".config/claude-code/hooks/pretool-bash-write-guard"}, true},
 		{"pretool prefix", []string{"cmd/pretool-fs-write-guard/main.go"}, true},
 		// Hook *registration* files have no "/hooks/" segment, and hook

@@ -31,11 +31,19 @@ var escalationRules = []escalationRule{
 		},
 	},
 	{
-		reason: "agent permissions or settings change",
+		reason: "agent permissions or authorization change",
 		match: func(p string) bool {
-			base := basename(p)
+			lower := strings.ToLower(p)
+			base := basename(lower)
+			// Matched by concept rather than by an enumerated path list: any
+			// permission/authorization surface is a §3 trigger, and an
+			// allowlist of specific packages is structurally incomplete (a new
+			// owner can always be added). Over-escalation here is the safe
+			// direction — REVIEW.md §3 calls escalation "a correct outcome".
 			return base == "settings.json" || base == "settings.local.json" ||
-				strings.Contains(p, "/permissions/")
+				strings.Contains(lower, "permission") ||
+				strings.Contains(lower, "authorization") ||
+				strings.Contains(lower, "authz")
 		},
 	},
 	{
@@ -55,7 +63,12 @@ var escalationRules = []escalationRule{
 					return true
 				}
 			}
+			// Registration/installer surfaces own hook wiring even when they
+			// live outside a hooks directory (e.g. agm/cmd/agm/install_hooks.go
+			// writes hook registrations into ~/.claude/settings.json).
 			return base == "hooks.json" || base == "hooks.yaml" || base == "hooks.yml" ||
+				strings.Contains(base, "install_hooks") ||
+				strings.Contains(base, "install-hooks") ||
 				strings.HasPrefix(base, "pretool-") ||
 				strings.HasPrefix(base, "posttool-") ||
 				strings.HasPrefix(base, "sessionstart-") ||
