@@ -113,7 +113,7 @@ func TestLaunchdBinariesUseHardenedInstall(t *testing.T) {
 			if err != nil {
 				continue
 			}
-			for _, m := range bareCopy.FindAllString(string(raw), -1) {
+			for _, m := range bareCopy.FindAllString(joinContinuations(string(raw)), -1) {
 				t.Errorf("%s copies into an install root without the hardened macro:\n\t%s\n"+
 					"Use $(call install-go-bin,bin/<name>[,<dest-dir>]) from mk/install-go-bin.mk. "+
 					"A raw cp/install rewrites the existing inode; macOS then kills the rebuilt "+
@@ -401,21 +401,12 @@ func TestNoRawCopyIntoInstallRoots(t *testing.T) {
 	staged := regexp.MustCompile(`&&\s*(?:sudo\s+)?mv\b`)
 
 	for _, rel := range trackedTextFiles(t, repoRoot) {
-		base := filepath.Base(rel)
-		switch {
-		case base == "Makefile" || strings.HasSuffix(base, ".mk"):
-		default:
-			switch filepath.Ext(rel) {
-			case ".md", ".sh", ".bash", ".zsh":
-			default:
-				continue
-			}
-		}
 		raw, err := os.ReadFile(filepath.Join(repoRoot, rel))
 		if err != nil {
 			continue
 		}
-		for i, line := range strings.Split(string(raw), "\n") {
+		for _, lg := range logicalLines(string(raw)) {
+			line, i := lg.text, lg.line-1
 			if !rawCopy.MatchString(line) || staged.MatchString(line) {
 				continue
 			}
@@ -445,4 +436,57 @@ func trackedMakefiles(t *testing.T, repoRoot string) []string {
 		t.Fatal("no tracked Makefiles found; the scan is broken")
 	}
 	return out
+}
+
+// logicalLine is a command with its shell/Make line continuations joined, and
+// the 1-based line it starts on.
+type logicalLine struct {
+	text string
+	line int
+}
+
+// logicalLines splits text into commands, joining backslash continuations.
+//
+// Operator guidance conventionally wraps long commands:
+//
+//	cp bin/foo \
+//	  /usr/local/bin/foo
+//
+// Scanning raw lines sees neither the verb and the destination together, so the
+// pattern matches nothing and the guard reports success on the very thing it
+// forbids.
+func logicalLines(text string) []logicalLine {
+	var out []logicalLine
+	var buf strings.Builder
+	start := 0
+
+	for i, line := range strings.Split(text, "\n") {
+		if buf.Len() == 0 {
+			start = i + 1
+		}
+		trimmed := strings.TrimRight(line, " \t")
+		if cut, ok := strings.CutSuffix(trimmed, "\\"); ok {
+			buf.WriteString(cut)
+			buf.WriteString(" ")
+			continue
+		}
+		buf.WriteString(line)
+		out = append(out, logicalLine{text: buf.String(), line: start})
+		buf.Reset()
+	}
+	if buf.Len() > 0 {
+		out = append(out, logicalLine{text: buf.String(), line: start})
+	}
+	return out
+}
+
+// joinContinuations rebuilds text with continuations joined, preserving line
+// starts so the Makefile scanner's anchored patterns still work.
+func joinContinuations(text string) string {
+	var b strings.Builder
+	for _, lg := range logicalLines(text) {
+		b.WriteString(lg.text)
+		b.WriteString("\n")
+	}
+	return b.String()
 }
