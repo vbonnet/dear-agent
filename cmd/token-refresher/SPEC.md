@@ -34,6 +34,12 @@ provider credential handling.
 
 **CTR-13** When cadence mode encounters a quarantine, the command shall alert the operator once per episode and still exit 0 so launchd retains the schedule.
 
+**CTR-14** When a quarantine marker exists but cannot be read or parsed, the command shall decline to present the refresh token and return exit code 4.
+
+**CTR-15** When a possibly-spent refresh token cannot be recorded in the quarantine marker, the command shall report a critical non-persistence failure and return exit code 3.
+
+**CTR-16** When reporting status in check mode, the command shall treat a quarantine marker naming a token other than the one on disk as inactive, and shall not mutate it.
+
 **CTR-09** When provider credentials are not Claude Code OAuth credentials, the system shall use the corresponding provider or harness credential surface instead of this adapter.
 
 ## BDD Traceability

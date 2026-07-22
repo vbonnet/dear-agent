@@ -267,9 +267,13 @@ func TestRefresh_QuarantineDisabledByDefault(t *testing.T) {
 	}
 }
 
-// A corrupt marker must not wedge refreshes forever.
-func TestQuarantine_CorruptMarkerIsIgnored(t *testing.T) {
+// A marker that exists but cannot be parsed might be naming the token on disk,
+// so it must fail CLOSED. Treating it as "no quarantine" would replay a possibly
+// spent token — the exact failure this mechanism prevents.
+func TestQuarantine_CorruptMarkerFailsClosed(t *testing.T) {
+	var hits int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		hits++
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"access_token":"at","expires_in":3600,"refresh_token":"rt-next"}`))
 	}))
@@ -280,8 +284,123 @@ func TestQuarantine_CorruptMarkerIsIgnored(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
+	_, err := r.Refresh(context.Background())
+	if !errors.Is(err, ErrQuarantineUnreadable) {
+		t.Fatalf("error = %v, want ErrQuarantineUnreadable", err)
+	}
+	if hits != 0 {
+		t.Errorf("token endpoint called %d times; an unreadable marker must block the refresh", hits)
+	}
+}
+
+// A marker missing its fingerprint is equally unusable and must also fail closed.
+func TestQuarantine_MarkerWithoutFingerprintFailsClosed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		t.Error("token endpoint must not be reached")
+	}))
+	defer srv.Close()
+
+	r, _, quarPath := quarantineResolver(t, srv.URL, "rt-current")
+	if err := os.WriteFile(quarPath, []byte(`{"quarantined_at":"2026-07-18T08:58:37Z"}`), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	if _, err := r.Refresh(context.Background()); !errors.Is(err, ErrQuarantineUnreadable) {
+		t.Fatalf("error = %v, want ErrQuarantineUnreadable", err)
+	}
+}
+
+// -clear-quarantine is the escape hatch that keeps fail-closed from being a
+// permanent wedge.
+func TestQuarantine_ClearReleasesAnUnreadableMarker(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"at","expires_in":3600,"refresh_token":"rt-next"}`))
+	}))
+	defer srv.Close()
+
+	r, _, quarPath := quarantineResolver(t, srv.URL, "rt-current")
+	if err := os.WriteFile(quarPath, []byte("not json"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := r.Refresh(context.Background()); !errors.Is(err, ErrQuarantineUnreadable) {
+		t.Fatalf("expected the marker to block first, got %v", err)
+	}
+
+	if err := r.ClearQuarantine(); err != nil {
+		t.Fatalf("ClearQuarantine: %v", err)
+	}
 	if _, err := r.Refresh(context.Background()); err != nil {
-		t.Fatalf("a corrupt quarantine marker must not block refresh: %v", err)
+		t.Fatalf("refresh should proceed once the marker is cleared: %v", err)
+	}
+}
+
+// The protection lives in the marker file, not in this process. If it cannot be
+// written, the next tick would replay the token, so the failure must escalate
+// rather than be logged and swallowed.
+func TestRefresh_QuarantineWriteFailureEscalates(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Error("no hijack support")
+			return
+		}
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			t.Errorf("hijack: %v", err)
+			return
+		}
+		_ = conn.Close()
+	}))
+	defer srv.Close()
+
+	r, _, _ := quarantineResolver(t, srv.URL, "rt-maybe-spent")
+	// Point the marker at a path that cannot be created: an existing regular
+	// file stands where the parent directory would have to be.
+	blocker := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write blocker: %v", err)
+	}
+	r.QuarantinePath = filepath.Join(blocker, "quarantine.json")
+
+	_, err := r.Refresh(context.Background())
+	if !errors.Is(err, ErrQuarantineNotPersisted) {
+		t.Fatalf("error = %v, want ErrQuarantineNotPersisted", err)
+	}
+	// The original cause must survive for the operator.
+	if !errors.Is(err, ErrRefreshOutcomeUnknown) {
+		t.Errorf("the underlying refresh failure should still be reported: %v", err)
+	}
+}
+
+// -check must not tell the operator to clear a marker that is already inert, and
+// must not mutate anything while saying so.
+func TestQuarantineStatus_StaleMarkerReportsInactiveWithoutMutating(t *testing.T) {
+	r, _, quarPath := quarantineResolver(t, "http://127.0.0.1:1", "rt-current")
+	if err := r.writeQuarantine("rt-long-gone", "earlier ambiguity"); err != nil {
+		t.Fatalf("writeQuarantine: %v", err)
+	}
+
+	fp, _, _, active := r.QuarantineStatus()
+	if active {
+		t.Error("a marker naming a rotated-away token holds nothing back; want active=false")
+	}
+	if want := RefreshTokenFingerprint("rt-long-gone"); fp != want {
+		t.Errorf("fingerprint = %q, want %q so the operator can still see the stale marker", fp, want)
+	}
+	if _, err := os.Stat(quarPath); err != nil {
+		t.Error("check mode promises no mutation; the marker must still be on disk")
+	}
+}
+
+func TestQuarantineStatus_MatchingMarkerReportsActive(t *testing.T) {
+	r, _, _ := quarantineResolver(t, "http://127.0.0.1:1", "rt-current")
+	if err := r.writeQuarantine("rt-current", "response lost"); err != nil {
+		t.Fatalf("writeQuarantine: %v", err)
+	}
+
+	if _, _, _, active := r.QuarantineStatus(); !active {
+		t.Error("a marker naming the on-disk token is holding refreshes back; want active=true")
 	}
 }
 

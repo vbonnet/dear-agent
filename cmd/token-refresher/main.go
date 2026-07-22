@@ -156,9 +156,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 			attribute.Bool("fresh", st.Fresh),
 		)
 		printStatus(stderr, st)
-		if qfp, qat, qreason, quarantined := r.QuarantineStatus(); quarantined {
+		// A marker naming a token that is no longer on disk holds nothing back,
+		// so it must not be reported as if it did — that would send the operator
+		// to -clear-quarantine for no reason. See CTR-13.
+		if qfp, qat, qreason, active := r.QuarantineStatus(); active {
 			fmt.Fprintf(stderr, "token-refresher: QUARANTINED refresh token %s since %s (%s)\n"+
 				"  Automatic refresh is held back. Clear with: token-refresher -clear-quarantine\n", qfp, qat, qreason)
+		} else if qfp != "" {
+			fmt.Fprintf(stderr, "token-refresher: stale quarantine marker for %s (token has since rotated); "+
+				"it is inert and the next refresh will remove it.\n", qfp)
 		}
 		writeAudit(*auditPath, auditRecord{
 			Mode: "check", Outcome: "ok", Fresh: st.Fresh, ExpiresAt: msOrZero(st.ExpiresAt),
@@ -179,7 +185,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
-		return finish(handleRefreshError(err, mode, *auditPath, stderr, fp, credMod))
+		return finish(handleRefreshError(err, mode, *auditPath, stderr, fp, credMod, *quarPath))
 	}
 
 	span.SetAttributes(
@@ -200,7 +206,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 // handleRefreshError maps a refresh error to a clear stderr message, an audit
 // record, and an exit code. The typed errors get distinct codes so a wrapper
 // (or operator) can escalate the unrecoverable ones.
-func handleRefreshError(err error, mode, auditPath string, stderr io.Writer, fp, credMod string) int {
+func handleRefreshError(err error, mode, auditPath string, stderr io.Writer, fp, credMod, quarPath string) int {
 	switch {
 	case errors.Is(err, auth.ErrTokenFamilyDead):
 		fmt.Fprintf(stderr, "token-refresher: refresh token rejected (invalid_grant). The token family is dead.\n"+
@@ -214,6 +220,28 @@ func handleRefreshError(err error, mode, auditPath string, stderr io.Writer, fp,
 			RefreshTokenFP: fp, CredentialsModTime: credMod,
 		})
 		return exitTokenFamilyDead
+	case errors.Is(err, auth.ErrQuarantineNotPersisted):
+		fmt.Fprintf(stderr, "token-refresher: CRITICAL — the refresh token may be spent and the quarantine marker could NOT be written.\n"+
+			"  Nothing will stop the next tick from presenting it again, which would revoke the whole token family.\n"+
+			"  Fix the state directory (%s) now, or re-authenticate with `claude /login` to retire the token.\n  cause: %v\n",
+			quarPath, err)
+		writeAudit(auditPath, auditRecord{
+			Mode: mode, Outcome: "quarantine_not_persisted", Error: err.Error(),
+			RefreshTokenFP: fp, CredentialsModTime: credMod,
+		})
+		return exitNotPersisted
+
+	case errors.Is(err, auth.ErrQuarantineUnreadable):
+		fmt.Fprintf(stderr, "token-refresher: refresh SKIPPED — a quarantine marker exists but could not be read.\n"+
+			"  It may name the token on disk, so presenting it could revoke the token family. Failing closed.\n"+
+			"  Inspect %s, then either repair it or run: token-refresher -clear-quarantine\n  cause: %v\n",
+			quarPath, err)
+		writeAudit(auditPath, auditRecord{
+			Mode: mode, Outcome: "quarantine_unreadable", Error: err.Error(),
+			RefreshTokenFP: fp, CredentialsModTime: credMod,
+		})
+		return exitQuarantined
+
 	case errors.Is(err, auth.ErrRefreshOutcomeUnknown):
 		fmt.Fprintf(stderr, "token-refresher: refresh outcome UNKNOWN — the request reached the server but the response did not.\n"+
 			"  The refresh token may already be spent. It has been quarantined (fingerprint %s) so the next tick will NOT\n"+

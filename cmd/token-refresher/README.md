@@ -66,6 +66,14 @@ So the refresher distinguishes the two network failure modes precisely, using
   unreadable 200): the token may be spent. It is **quarantined** — recorded by
   fingerprint and never presented again automatically.
 
+The mechanism **fails closed** everywhere it can. Only "the marker file is not
+there" counts as no quarantine; a marker that exists but cannot be read or parsed
+blocks the refresh, because it may be naming the token on disk. And if a
+possibly-spent token cannot be *recorded*, that is reported as a critical
+non-persistence failure (exit 3) rather than logged and forgotten — the
+protection lives in that file, not in the running process, so a failed write
+means the next tick would replay the token.
+
 A quarantine clears itself as soon as the on-disk token changes, so if any client
 rotates successfully, refreshing resumes with no intervention. To inspect or
 override:

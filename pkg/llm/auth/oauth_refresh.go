@@ -185,7 +185,14 @@ func (r OAuthResolver) Refresh(ctx context.Context) (string, error) {
 				// The token may be spent. Record it so the next tick refuses to
 				// replay it, which is what revokes the family.
 				if qerr := r.writeQuarantine(creds.ClaudeAIOAuth.RefreshToken, err.Error()); qerr != nil {
+					// The protection lives in that file, not in this process:
+					// the next tick is a fresh process that reads the marker. A
+					// failed write therefore means the replay WILL happen unless
+					// a human intervenes, so it is escalated rather than logged
+					// and swallowed.
 					r.log("oauth.refresh.quarantine_write_failed", "error", qerr.Error())
+					return fmt.Errorf("%w: %w (original refresh failure: %w)",
+						ErrQuarantineNotPersisted, qerr, err)
 				}
 			}
 			return err

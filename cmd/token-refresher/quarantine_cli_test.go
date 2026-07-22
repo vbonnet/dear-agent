@@ -144,6 +144,34 @@ func TestRun_ClearQuarantineOverride(t *testing.T) {
 func TestRun_CheckReportsQuarantine(t *testing.T) {
 	creds := writeCreds(t, "tok", freshMs(), "rt")
 	quar := tmpQuarantine(t)
+	// The marker must name the token actually on disk, or it is not holding
+	// anything back.
+	fp := fingerprintOf(t, creds)
+	marker := `{"refresh_token_fp":"` + fp + `","quarantined_at":"2026-07-18T08:58:37Z","reason":"response lost"}`
+	if err := os.WriteFile(quar, []byte(marker), 0o600); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"-check", "-credentials", creds,
+		"-audit-log", filepath.Join(t.TempDir(), "audit.jsonl"), "-quarantine", quar,
+	}, &stdout, &stderr)
+
+	if code != exitOK {
+		t.Errorf("exit code = %d, want %d", code, exitOK)
+	}
+	out := stderr.String()
+	if !strings.Contains(out, "QUARANTINED") || !strings.Contains(out, fp) {
+		t.Errorf("check should report the quarantine, got: %s", out)
+	}
+}
+
+// A marker for a token that has since rotated holds nothing back. Reporting it
+// as active would send the operator to -clear-quarantine for no reason.
+func TestRun_CheckReportsStaleMarkerAsInert(t *testing.T) {
+	creds := writeCreds(t, "tok", freshMs(), "rt-current")
+	quar := tmpQuarantine(t)
 	if err := os.WriteFile(quar, []byte(`{"refresh_token_fp":"deadbeef1234","quarantined_at":"2026-07-18T08:58:37Z","reason":"response lost"}`), 0o600); err != nil {
 		t.Fatalf("write marker: %v", err)
 	}
@@ -158,8 +186,46 @@ func TestRun_CheckReportsQuarantine(t *testing.T) {
 		t.Errorf("exit code = %d, want %d", code, exitOK)
 	}
 	out := stderr.String()
-	if !strings.Contains(out, "QUARANTINED") || !strings.Contains(out, "deadbeef1234") {
-		t.Errorf("check should report the quarantine, got: %s", out)
+	if strings.Contains(out, "QUARANTINED") {
+		t.Errorf("a stale marker must not be reported as holding refreshes back, got: %s", out)
+	}
+	if !strings.Contains(out, "stale quarantine marker") {
+		t.Errorf("check should still mention the inert marker, got: %s", out)
+	}
+	if _, err := os.Stat(quar); err != nil {
+		t.Error("check mode must not delete the marker")
+	}
+}
+
+// An unreadable marker must block the refresh rather than be ignored.
+func TestRun_UnreadableMarkerBlocksRefresh(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+	}))
+	defer srv.Close()
+
+	creds := writeCreds(t, "old", staleMs(), "old-rt")
+	audit := filepath.Join(t.TempDir(), "audit.jsonl")
+	quar := tmpQuarantine(t)
+	if err := os.WriteFile(quar, []byte("not json"), 0o600); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"-force", "-credentials", creds, "-endpoint", srv.URL,
+		"-audit-log", audit, "-quarantine", quar,
+	}, &stdout, &stderr)
+
+	if code != exitQuarantined {
+		t.Errorf("exit code = %d, want %d", code, exitQuarantined)
+	}
+	if hits != 0 {
+		t.Errorf("endpoint hit %d times; an unreadable marker must fail closed", hits)
+	}
+	if rec := lastAuditRecord(t, audit); rec["outcome"] != "quarantine_unreadable" {
+		t.Errorf("audit outcome = %v, want quarantine_unreadable", rec["outcome"])
 	}
 }
 
