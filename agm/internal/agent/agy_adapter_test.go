@@ -308,9 +308,9 @@ func TestAgyCreateSessionBootstrapsLazyNativeIdentityWithInitialPrompt(t *testin
 	agySendCommand = func(string, string) error { launches++; return nil }
 	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return nil }
 	promptDeliveries := 0
-	agySendPromptLiteral = func(sessionName, prompt string, interrupt bool) error {
-		if sessionName != "agy-lazy-adapter" || prompt != "persist adapter prompt" || interrupt {
-			t.Fatalf("initial prompt delivery = %q/%q/%t", sessionName, prompt, interrupt)
+	agySendPromptLiteral = func(sessionName, prompt string, interrupt bool, harness string) error {
+		if sessionName != "agy-lazy-adapter" || prompt != "persist adapter\nprompt" || interrupt || harness != "agy" {
+			t.Fatalf("initial prompt delivery = %q/%q/%t/%q", sessionName, prompt, interrupt, harness)
 		}
 		promptDeliveries++
 		return nil
@@ -327,7 +327,7 @@ func TestAgyCreateSessionBootstrapsLazyNativeIdentityWithInitialPrompt(t *testin
 
 	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
 	id, err := (&AgyAdapter{sessionStore: store}).CreateSession(SessionContext{
-		Name: "agy-lazy-adapter", WorkingDirectory: "/work", Model: "3.5-flash-low", InitialPrompt: "persist adapter prompt",
+		Name: "agy-lazy-adapter", WorkingDirectory: "/work", Model: "3.5-flash-low", InitialPrompt: "persist adapter\nprompt",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -348,7 +348,7 @@ func TestAgyCreateSessionRollsBackWhenInitialPromptBootstrapFails(t *testing.T) 
 	agySendCommand = func(string, string) error { return nil }
 	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return nil }
 	wantErr := errors.New("fixture initial prompt failure")
-	agySendPromptLiteral = func(string, string, bool) error { return wantErr }
+	agySendPromptLiteral = func(string, string, bool, string) error { return wantErr }
 	discovered := false
 	useStubAgyIdentityTracker(
 		func(context.Context, string) (string, error) { return "old-native-id", nil },
@@ -372,6 +372,48 @@ func TestAgyCreateSessionRollsBackWhenInitialPromptBootstrapFails(t *testing.T) 
 	}
 	if sessions, listErr := store.List(); listErr != nil || len(sessions) != 0 {
 		t.Fatalf("failed create persisted sessions = %v, %v", sessions, listErr)
+	}
+}
+
+func TestAgySendMessageUsesHarnessAwareMultilineDelivery(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	sessionID := SessionID("agy-message-session")
+	if err := store.Set(sessionID, &SessionMetadata{TmuxName: "agy-message-pane"}); err != nil {
+		t.Fatal(err)
+	}
+
+	wantMessage := "[From: codex]\n\nfirst line\nsecond line"
+	called := 0
+	agySendPromptLiteral = func(sessionName, prompt string, interrupt bool, harness string) error {
+		called++
+		if sessionName != "agy-message-pane" || prompt != wantMessage || interrupt || harness != "agy" {
+			t.Fatalf("message delivery = %q/%q/%t/%q", sessionName, prompt, interrupt, harness)
+		}
+		return nil
+	}
+
+	if err := (&AgyAdapter{sessionStore: store}).SendMessage(sessionID, Message{Content: wantMessage}); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if called != 1 {
+		t.Fatalf("harness-aware message deliveries = %d, want 1", called)
+	}
+}
+
+func TestAgySendMessagePropagatesHarnessAwareDeliveryFailure(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	sessionID := SessionID("agy-message-session")
+	if err := store.Set(sessionID, &SessionMetadata{TmuxName: "agy-message-pane"}); err != nil {
+		t.Fatal(err)
+	}
+	wantErr := errors.New("fixture AGY paste failure")
+	agySendPromptLiteral = func(string, string, bool, string) error { return wantErr }
+
+	err := (&AgyAdapter{sessionStore: store}).SendMessage(sessionID, Message{Content: "line one\nline two"})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("SendMessage error = %v, want %v", err, wantErr)
 	}
 }
 
