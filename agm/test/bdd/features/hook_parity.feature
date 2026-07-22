@@ -19,6 +19,7 @@
 # RELATED-SPEC: agm/hooks/cmd/stop-session-guard/SPEC.md
 # RELATED-SPEC: cmd/pretool-bash-write-guard/SPEC.md
 # RELATED-SPEC: cmd/pretool-fs-write-guard/SPEC.md
+# RELATED-SPEC: pkg/version/SPEC.md
 Feature: Hook harness parity
   Active interactive harnesses should receive the same repository guardrails
   through their native hook configuration surfaces.
