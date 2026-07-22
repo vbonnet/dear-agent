@@ -214,8 +214,13 @@ func stripRedirections(text string) string {
 }
 
 // redirection matches a shell redirection operand: >file, >>file, 2>file,
-// &>file, <file, and their spaced forms.
-var redirection = regexp.MustCompile(`\s*[0-9]*(?:&?>{1,2}|<)\s*\S+`)
+// &>file, <file, spaced or not, with the target either bare or QUOTED.
+//
+// The quoted alternatives matter: consuming only the first whitespace-delimited
+// fragment of `> "$LOG_DIR/install log"` left a dangling `log"` behind, which
+// displaced the destination from the end of the command and let the overwrite
+// through.
+var redirection = regexp.MustCompile(`\s*[0-9]*(?:&?>{1,2}|<)\s*(?:"[^"]*"|'[^']*'|\S+)`)
 
 // splitCommands breaks a shell line into its individual commands, so a check
 // applied to one cannot be satisfied or excused by another, and strips trailing
