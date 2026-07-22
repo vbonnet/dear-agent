@@ -20,10 +20,9 @@ adapters:
 
     # Reconnect configuration (resilient SSE connection)
     reconnect:
-      enabled: true                # Auto-reconnect on disconnect
       initial_delay: 5s            # First reconnect delay
       max_delay: 5m                # Maximum backoff delay
-      backoff_multiplier: 2        # Exponential backoff factor
+      multiplier: 2                # Exponential backoff factor
 
     # Annotate startup failures so the caller can select a tmux fallback.
     # This flag does not start Astrocyte or another monitor by itself.
