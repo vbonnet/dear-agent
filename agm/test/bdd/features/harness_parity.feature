@@ -323,7 +323,7 @@ Feature: Harness parity
     And CLI message and startup prompt sends should use shared atomic readiness for exact-pane delivery
     And forced CLI message sends should preserve the measured queued AGM anchor across prompt-like payload lines
     And autonomous CLI message sends should preserve only positively identified queued AGM recovery
-    And API delivery should restore persisted configuration, linearize archive with bounded completed turns, renew fan-out deadlines, and require adapter readiness without tmux
+    And API delivery should restore persisted configuration, linearize archive with bounded completed turns, renew fan-out deadlines, require adapter readiness without tmux, and document its compatibility-only control plane
     And shared Gemini readiness should advance first-run trust on the verified pane
     And legacy AGY names should reach canonical shared send readiness
     And the Pi alias should reach canonical shared send readiness

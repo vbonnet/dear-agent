@@ -33,6 +33,8 @@ errors for callers that need harness-neutral failure handling.
 
 **OAI-11** When the pure OpenAI API adapter reports session status, the system shall report an existing stored session as active and a missing stored session as terminated without invoking tmux; tmux-backed Codex CLI readiness belongs exclusively to the `codex-cli` adapter.
 
+**OAI-12** When documenting the legacy OpenAI API adapter, the system shall distinguish direct Go adapter construction from the supported AGM control plane, shall limit production delivery to already-registered `openai` or `gpt` manifests, and shall not advertise public CLI creation or resume commands that harness validation rejects.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

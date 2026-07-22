@@ -1,6 +1,6 @@
 # OpenAI Execution Model Decision
 
-**Status**: Implemented legacy compatibility path
+**Status**: Implemented compatibility adapter; public creation unsupported
 **Date**: 2026-02-24
 **Last reviewed**: 2026-07-21
 **Task**: 1.5 - Determine Execution Model
@@ -52,6 +52,22 @@ interactive process, tmux composer readiness, and provider-native conversation
 identity. The `openai` harness owns direct API calls and local conversation
 history. Callers must not infer one execution model from the other.
 
+### Supported Control-Plane Boundary
+
+There is no public AGM CLI creation or resume path for the `openai` or `gpt`
+legacy harness names. `agm session new` validates only registered CLI harnesses;
+new OpenAI-backed interactive sessions therefore use `codex-cli` (or `pi-cli`
+with an OpenAI model).
+
+The compatibility adapter remains available for:
+
+- delivery to an already-registered legacy AGM manifest whose harness is
+  `openai` or `gpt`; and
+- direct Go callers of the `agent.Agent` interface.
+
+Calling `OpenAIAdapter.CreateSession` directly initializes the adapter's JSONL
+store, but does not register an AGM manifest and is not a CLI entrypoint.
+
 ---
 
 ## Implementation Architecture
@@ -69,7 +85,7 @@ OpenAIAdapter
 │   ├── Metadata (title, model, working directory)
 │   └── Session persistence (~/.agm/openai-sessions/)
 └── Agent Interface Implementation
-    ├── CreateSession → Generate UUID + initialize storage
+    ├── CreateSession → Internal Go API: generate UUID + initialize storage
     ├── SendMessage → API call with conversation context
     ├── GetHistory → Load from local storage
     └── ExecuteCommand → Synthetic command translation
@@ -89,7 +105,7 @@ streaming delivery is not yet implemented.
 ### Synthetic Hooks
 
 Since API-based execution has no shell access, hooks are **synthetic**:
-- `SessionStart`: Triggered when session created via CreateSession()
+- `SessionStart`: Triggered when a direct Go caller invokes CreateSession()
 - `SessionEnd`: Triggered when session archived/deleted
 - `MessageSent`: Triggered after successful API response
 - Hooks execute in AGM process context (not OpenAI subprocess)
@@ -100,20 +116,20 @@ Since API-based execution has no shell access, hooks are **synthetic**:
 
 ## Execution Flow
 
-### Session Creation
+### Compatibility Reconstruction and Delivery
 ```
-1. User: agm session new openai
-2. AGM: Calls OpenAIAdapter.CreateSession()
-3. Adapter: Generates UUID session ID
-4. SessionManager: Creates ~/.agm/openai-sessions/{uuid}/
-5. SessionManager: Initializes metadata.json
-6. Hook: Fires SessionStart synthetic hook
-7. Return: Session ready for messages
+1. AGM resolves an already-registered manifest with harness openai or gpt
+2. AGM acquires the stable session-ID lifecycle/mutation lock
+3. AGM reloads the current manifest and verifies that it is active
+4. AGM reconstructs the adapter from persisted non-secret runtime settings
+5. The adapter obtains credentials from current runtime configuration
+6. AGM verifies adapter readiness and performs bounded direct API delivery
+7. The adapter atomically commits the completed turn to local JSONL history
 ```
 
 ### Message Send
 ```
-1. User types message in tmux/terminal
+1. User sends to an already-registered legacy session through an AGM surface
 2. AGM: Calls OpenAIAdapter.SendMessage(sessionID, message)
 3. Adapter: Acquires the context-aware store-scoped stable session lock
 4. SessionManager: Reloads completed conversation history from JSONL
@@ -131,14 +147,12 @@ commit. Archive uses the same boundary, so it cannot race a stale pre-lock
 lifecycle snapshot against paid provider work.
 ```
 
-### Session Resumption
-```
-1. User: agm session resume {session-id}
-2. Adapter: Calls SessionManager.GetSession(sessionID)
-3. SessionManager: Loads metadata.json
-4. SessionManager: Loads messages.jsonl (on-demand)
-5. Return: Full conversation context restored
-```
+### Persisted Session Reload
+
+There is no public CLI resume or attach operation for this process-free adapter.
+During delivery, or when a direct Go caller reconstructs an adapter, the
+session manager loads `metadata.json` and `messages.jsonl` on demand. This
+restores the completed conversation context without attaching to a process.
 
 ---
 
@@ -148,7 +162,7 @@ lifecycle snapshot against paid provider work.
 |--------|----------------------------|-------------------|
 | **Session Isolation** | tmux sessions | In-memory + file storage |
 | **Message Delivery** | `tmux send-keys` | HTTP POST to API |
-| **Resume** | Attach to tmux | Load from ~/.agm/openai-sessions/ |
+| **Resume** | Attach to tmux | Reconstruct from a persisted manifest and local JSONL; no public CLI resume |
 | **Process Management** | Lifecycle via tmux | Stateless API calls |
 | **Hooks** | Shell hooks in subprocess | Synthetic hooks in AGM process |
 | **Working Directory** | tmux pane CWD | Metadata-based context injection |
@@ -167,6 +181,9 @@ lifecycle snapshot against paid provider work.
    - Mitigation: Store in metadata, inject via system messages if needed
 3. **Stateless**: Each API call independent (no persistent process)
    - Mitigation: Local conversation history storage maintains state
+4. **Compatibility-only control plane**: No public CLI creation or resume
+   - Mitigation: Use `codex-cli` for new interactive OpenAI sessions; retain
+     reconstruction for registered legacy manifests and direct Go callers
 
 ### Trade-offs
 1. **Simplicity vs Features**: API-only is simpler but lacks CLI hooks
@@ -197,7 +214,8 @@ lifecycle snapshot against paid provider work.
 - [x] Execution model decided: API-based
 - [x] Decision documented (this file)
 - [x] Implementation architecture defined
-- [x] Session creation/resumption flow documented
+- [x] Legacy reconstruction/delivery flow documented
+- [x] Unsupported public creation/resume paths explicitly excluded
 - [x] Streaming approach identified (go-openai SDK)
 - [x] Hooks model: Synthetic hooks documented
 - [x] Limitations and trade-offs documented
@@ -215,4 +233,7 @@ lifecycle snapshot against paid provider work.
 
 ---
 
-**Conclusion**: API-based execution model chosen for OpenAI adapter. Implementation complete in Phase 1. Streaming and advanced features to be added in Phase 2+.
+**Conclusion**: The API-based OpenAI adapter is an implemented compatibility
+component for registered legacy manifests and direct Go callers. It is not a
+public AGM CLI harness; new interactive OpenAI sessions use `codex-cli`.
+Streaming and advanced features remain future work.

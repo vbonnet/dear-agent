@@ -24,6 +24,32 @@ func TestOpenAIAdapterImplementsAgentInterface(t *testing.T) {
 	var _ = adapter
 }
 
+func TestOpenAIExecutionModelDocumentsCompatibilityOnlyControlPlane(t *testing.T) {
+	document, err := os.ReadFile(filepath.Join("openai", "EXECUTION-MODEL.md"))
+	if err != nil {
+		t.Fatalf("read OpenAI execution model: %v", err)
+	}
+	contents := string(document)
+	for _, unsupported := range []string{
+		"agm session new openai",
+		"agm session resume {session-id}",
+	} {
+		if strings.Contains(contents, unsupported) {
+			t.Fatalf("execution model advertises unsupported CLI flow %q", unsupported)
+		}
+	}
+	for _, required := range []string{
+		"There is no public AGM CLI creation or resume path",
+		"already-registered legacy AGM manifest",
+		"Calling `OpenAIAdapter.CreateSession` directly",
+		"new interactive OpenAI sessions use `codex-cli`",
+	} {
+		if !strings.Contains(contents, required) {
+			t.Errorf("execution model does not document compatibility boundary %q", required)
+		}
+	}
+}
+
 // TestNewOpenAIAdapter tests OpenAI adapter creation
 func TestNewOpenAIAdapter(t *testing.T) {
 	tests := []struct {
