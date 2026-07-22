@@ -327,9 +327,9 @@ func TestExpectedHarnessMatcherAcceptsIdentifiedNodeBackedHarness(t *testing.T) 
 		harness string
 		args    string
 	}{
-		{harness: "claude-code", args: "/usr/local/bin/node /opt/node_modules/@anthropic-ai/claude-code/cli.js"},
-		{harness: "codex-cli", args: "/usr/local/bin/node /opt/node_modules/@openai/codex/bin/codex.js"},
-		{harness: "gemini-cli", args: "/usr/local/bin/node /opt/node_modules/@google/gemini-cli/dist/index.js"},
+		{harness: "claude-code", args: "env NODE_ENV=production /usr/local/bin/node /opt/node_modules/@anthropic-ai/claude-code/cli.js"},
+		{harness: "codex-cli", args: "/usr/local/bin/node --enable-source-maps /opt/node_modules/@openai/codex/bin/codex.js --quiet"},
+		{harness: "gemini-cli", args: `/usr/local/bin/node "/opt/My Tools/node_modules/@google/gemini-cli/dist/index.js"`},
 		{harness: "opencode-cli", args: "/usr/local/bin/node /opt/node_modules/opencode-ai/bin/opencode.js"},
 		{harness: "pi-cli", args: "/usr/local/bin/node /opt/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"},
 	}
@@ -348,14 +348,24 @@ func TestExpectedHarnessMatcherAcceptsIdentifiedNodeBackedHarness(t *testing.T) 
 func TestExpectedHarnessMatcherRejectsUnrelatedNodeProcess(t *testing.T) {
 	t.Parallel()
 
-	procs := []ProcEntry{
-		{PID: 10, PPID: 1, Comm: "zsh", Args: "zsh"},
-		{PID: 11, PPID: 10, PGID: 11, TPGID: 11, State: "S+", Comm: "MainThread", Args: "/usr/local/bin/node /srv/telemetry-worker.js"},
+	tests := []struct {
+		harness string
+		args    string
+	}{
+		{harness: "claude-code", args: "/usr/local/bin/node /srv/worker.js /tmp/@anthropic-ai/claude-code/cli.js"},
+		{harness: "codex-cli", args: "/usr/local/bin/node /srv/worker.js /tmp/codex.js"},
+		{harness: "gemini-cli", args: "/usr/local/bin/node --require /tmp/@google/gemini-cli.js /srv/worker.js"},
+		{harness: "opencode-cli", args: "/usr/local/bin/node --trace-warnings /srv/worker.js /tmp/opencode.js"},
+		{harness: "pi-cli", args: "/usr/local/bin/node /srv/worker.js /opt/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"},
 	}
-	for _, harness := range []string{"claude-code", "codex-cli", "gemini-cli", "opencode-cli", "pi-cli"} {
-		got := classifyPaneLivenessProcesses([]int{10}, procs, expectedHarnessProcessMatcher(harness))
+	for _, tt := range tests {
+		procs := []ProcEntry{
+			{PID: 10, PPID: 1, Comm: "zsh", Args: "zsh"},
+			{PID: 11, PPID: 10, PGID: 11, TPGID: 11, State: "S+", Comm: "MainThread", Args: tt.args},
+		}
+		got := classifyPaneLivenessProcesses([]int{10}, procs, expectedHarnessProcessMatcher(tt.harness))
 		if got.HarnessAlive {
-			t.Errorf("unrelated Node process classified as %s: %#v", harness, got)
+			t.Errorf("unrelated Node process %q classified as %s: %#v", tt.args, tt.harness, got)
 		}
 	}
 }

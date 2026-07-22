@@ -317,7 +317,18 @@ func nodeProcessMatchesHarness(args, harness string) bool {
 	if executable >= len(fields) || filepath.Base(strings.Trim(fields[executable], "'\"")) != "node" {
 		return false
 	}
-	args = strings.ToLower(args)
+	script, mustResolve, ok := nodeScriptArgument(args, fields, executable)
+	if !ok {
+		return false
+	}
+	if mustResolve {
+		resolved, err := filepath.EvalSymlinks(script)
+		if err != nil {
+			return false
+		}
+		script = resolved
+	}
+	script = strings.ToLower(filepath.ToSlash(script))
 	patterns := map[string][]string{
 		"claude-code":  {"@anthropic-ai/claude-code", "/claude-code/", "/bin/claude", "claude.js"},
 		"codex-cli":    {"@openai/codex", "/codex/bin/", "/bin/codex", "codex.js"},
@@ -325,7 +336,7 @@ func nodeProcessMatchesHarness(args, harness string) bool {
 		"opencode-cli": {"opencode-ai", "/opencode/bin/", "/bin/opencode", "opencode.js"},
 	}
 	for _, pattern := range patterns[harness] {
-		if strings.Contains(args, pattern) {
+		if strings.Contains(script, pattern) {
 			return true
 		}
 	}
