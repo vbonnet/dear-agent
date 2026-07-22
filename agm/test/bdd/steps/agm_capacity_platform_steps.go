@@ -23,7 +23,7 @@ func RegisterAGMCapacityPlatformSteps(ctx *godog.ScenarioContext) {
 	})
 	ctx.Step(`^AGM is running on a supported capacity platform$`, agmIsRunningOnSupportedCapacityPlatform)
 	ctx.Step(`^AGM detects the host capacity resources$`, agmDetectsHostCapacityResources)
-	ctx.Step(`^the capacity detector should report bounded positive memory$`, capacityDetectorShouldReportBoundedPositiveMemory)
+	ctx.Step(`^the capacity detector should report bounded memory$`, capacityDetectorShouldReportBoundedMemory)
 }
 
 func agmIsRunningOnSupportedCapacityPlatform() error {
@@ -42,16 +42,13 @@ func agmDetectsHostCapacityResources(ctx context.Context) error {
 	return err
 }
 
-func capacityDetectorShouldReportBoundedPositiveMemory(ctx context.Context) error {
+func capacityDetectorShouldReportBoundedMemory(ctx context.Context) error {
 	state, err := getAGMCapacityPlatformState(ctx)
 	if err != nil {
 		return err
 	}
 	if state.info.TotalRAMBytes == 0 {
 		return fmt.Errorf("total RAM must be positive")
-	}
-	if state.info.AvailableRAMBytes == 0 {
-		return fmt.Errorf("available RAM must be positive")
 	}
 	if state.info.AvailableRAMBytes > state.info.TotalRAMBytes {
 		return fmt.Errorf("available RAM %d exceeds total RAM %d", state.info.AvailableRAMBytes, state.info.TotalRAMBytes)

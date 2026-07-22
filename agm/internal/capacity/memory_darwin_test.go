@@ -27,6 +27,23 @@ func TestReadDarwinMemoryInfo(t *testing.T) {
 	}
 }
 
+func TestReadDarwinMemoryInfoAcceptsZeroAvailableMemory(t *testing.T) {
+	const total = uint64(32 * 1024 * 1024 * 1024)
+	gotTotal, gotAvailable, err := readDarwinMemoryInfo(
+		func() (uint64, error) { return total, nil },
+		func() (float64, error) { return 0, nil },
+	)
+	if err != nil {
+		t.Fatalf("readDarwinMemoryInfo() error: %v", err)
+	}
+	if gotTotal != total {
+		t.Errorf("total = %d, want %d", gotTotal, total)
+	}
+	if gotAvailable != 0 {
+		t.Errorf("available = %d, want 0", gotAvailable)
+	}
+}
+
 func TestReadDarwinMemoryInfoErrors(t *testing.T) {
 	tests := []struct {
 		name        string
