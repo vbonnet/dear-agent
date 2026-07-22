@@ -214,6 +214,54 @@ func TestEnsureRecipientReadyDoesNotRequireTmuxForPureAPISession(t *testing.T) {
 	}
 }
 
+func TestAPIRecipientStateSkipsTmuxPersistence(t *testing.T) {
+	previousConfig := cfg
+	cfg = &config.Config{SessionsDir: t.TempDir()}
+	t.Cleanup(func() { cfg = previousConfig })
+
+	storage, err := dolt.NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("open session storage: %v", err)
+	}
+	t.Cleanup(func() { _ = storage.Close() })
+	if err := storage.CreateSession(&manifest.Manifest{
+		SessionID: "api-state-id",
+		Name:      "api-state",
+		Harness:   "openai",
+	}); err != nil {
+		t.Fatalf("create API session: %v", err)
+	}
+
+	stateResolved := false
+	statePersisted := false
+	currentState, tmuxName, harnessType := resolveRecipientStateWithDependencies(
+		"api-state",
+		storage,
+		func(string, string, string, time.Time) string {
+			stateResolved = true
+			return manifest.StateOffline
+		},
+		func(string, string, string, string, *dolt.Adapter) error {
+			statePersisted = true
+			return nil
+		},
+	)
+	if currentState == manifest.StateOffline || harnessType != "openai" {
+		t.Fatalf("API recipient state = (%q, %q), want non-tmux state and openai", currentState, harnessType)
+	}
+	if stateResolved || statePersisted {
+		t.Fatalf("API recipient used tmux state resolver=%t persistence=%t", stateResolved, statePersisted)
+	}
+	tmuxChecked := false
+	canReceive := recipientCanReceive(harnessType, tmuxName, func(string) state.CanReceive {
+		tmuxChecked = true
+		return state.CanReceiveNotFound
+	})
+	if tmuxChecked || canReceive != state.CanReceiveYes {
+		t.Fatalf("API recipient tmux checked=%t canReceive=%q, want false and YES", tmuxChecked, canReceive)
+	}
+}
+
 func TestFailedAPIAdapterReadinessCreatesNoDelegation(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)

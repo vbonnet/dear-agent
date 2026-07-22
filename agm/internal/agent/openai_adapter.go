@@ -375,7 +375,7 @@ func (a *OpenAIAdapter) SendMessageContext(ctx context.Context, sessionID Sessio
 			Content:   response.Content,
 			Timestamp: time.Now(),
 		}
-		if err := a.sessionManager.AddMessages(string(sessionID), userMsg, assistantMsg); err != nil {
+		if err := a.sessionManager.AddMessagesUnderLock(string(sessionID), userMsg, assistantMsg); err != nil {
 			return fmt.Errorf("failed to commit completed OpenAI turn: %w", err)
 		}
 		return nil
@@ -603,7 +603,7 @@ func (a *OpenAIAdapter) openAIClearHistory(sessionIDStr string) error {
 	clearCtx, cancel := context.WithTimeout(context.Background(), OpenAICompletionTimeout)
 	defer cancel()
 	return a.sessionManager.WithSessionLockContext(clearCtx, sessionIDStr, func() error {
-		if err := a.sessionManager.ClearMessages(sessionIDStr); err != nil {
+		if err := a.sessionManager.ClearMessagesUnderLock(sessionIDStr); err != nil {
 			return fmt.Errorf("failed to clear session history: %w", err)
 		}
 		return nil

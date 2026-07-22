@@ -49,6 +49,73 @@ func TestWithSessionLockContextCancelsContendedWait(t *testing.T) {
 	}
 }
 
+func TestMetadataUpdatesSerializeAndPreserveIndependentFields(t *testing.T) {
+	sessionsDir := t.TempDir()
+	first, err := NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create first manager: %v", err)
+	}
+	const sessionID = "serialized-metadata"
+	if _, err := first.CreateSession(sessionID, "gpt-4", "/original"); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	second, err := NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create second manager: %v", err)
+	}
+
+	lockEntered := make(chan struct{})
+	releaseLock := make(chan struct{})
+	lockDone := make(chan error, 1)
+	go func() {
+		lockDone <- first.WithSessionLock(sessionID, func() error {
+			close(lockEntered)
+			<-releaseLock
+			return nil
+		})
+	}()
+	select {
+	case <-lockEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("metadata transaction lock was not acquired")
+	}
+
+	updateDone := make(chan error, 1)
+	go func() { updateDone <- second.UpdateTitle(sessionID, "updated-title") }()
+	select {
+	case err := <-updateDone:
+		close(releaseLock)
+		t.Fatalf("metadata update bypassed the session lock: %v", err)
+	case <-time.After(75 * time.Millisecond):
+	}
+	close(releaseLock)
+	if err := <-lockDone; err != nil {
+		t.Fatalf("release metadata transaction lock: %v", err)
+	}
+	if err := <-updateDone; err != nil {
+		t.Fatalf("update title after lock release: %v", err)
+	}
+
+	if err := first.UpdateWorkingDirectory(sessionID, "/updated"); err != nil {
+		t.Fatalf("update directory through stale manager: %v", err)
+	}
+	wantRuntime := SessionRuntimeConfig{Temperature: 0.7, MaxTokens: 707}
+	if err := second.UpdateRuntimeConfig(sessionID, wantRuntime); err != nil {
+		t.Fatalf("update runtime config through stale manager: %v", err)
+	}
+	reader, err := NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create metadata reader: %v", err)
+	}
+	info, err := reader.GetSession(sessionID)
+	if err != nil {
+		t.Fatalf("read serialized metadata: %v", err)
+	}
+	if info.Title != "updated-title" || info.WorkingDirectory != "/updated" || info.RuntimeConfig == nil || *info.RuntimeConfig != wantRuntime {
+		t.Fatalf("independent metadata updates clobbered fields: %#v", info)
+	}
+}
+
 func TestNewSessionManager(t *testing.T) {
 	tempDir := t.TempDir()
 

@@ -29,7 +29,8 @@ persisted model, storage location, endpoint, and Azure settings. Credentials
 remain runtime-only. The adapter's session status is the final common delivery
 boundary, delivering only while it reports active or idle and failing closed
 before any pending artifact when status is unavailable, suspended, or
-terminated. Under a provider-appropriate stable session-ID lock, API delivery
+terminated. Successful API delivery does not run tmux state resolution or
+rewrite the manifest to `OFFLINE`. Under a provider-appropriate stable session-ID lock, API delivery
 reloads lifecycle before adapter construction and shares that boundary with
 archive: an in-flight completed turn commits before archive, or delivery sees
 the reaping or archived lifecycle before paid provider work. The lock wait and provider
@@ -42,6 +43,9 @@ Clearing OpenAI-compatible history atomically empties only the message stream
 under the store lock. It reloads current on-disk metadata first, preserving the
 model, title, working directory, and non-secret runtime configuration used by
 later process reconstruction even when another process updated those fields.
+Completed-turn commits reload the same metadata before updating history counts,
+and every title, directory, or runtime-configuration writer participates in the
+same lock and applies only its requested field.
 
 ## Error Code Catalog
 

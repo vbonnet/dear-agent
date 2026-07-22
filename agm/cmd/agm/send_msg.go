@@ -334,7 +334,7 @@ func runSendSingle(ctx context.Context, recipientSession string) (retErr error) 
 	}
 
 	currentState, tmuxName, harnessType := resolveRecipientState(recipientSession, adapter)
-	canReceive := session.CheckSessionDelivery(tmuxName)
+	canReceive := recipientCanReceive(harnessType, tmuxName, session.CheckSessionDelivery)
 	return dispatchSendByCanReceive(ctx, recipientSession, tmuxName, harnessType, senderName, messageID, formattedMessage, message, currentState, canReceive, adapter)
 }
 
@@ -511,6 +511,15 @@ func buildAndLogMessage(senderName, recipientSession, message string) (string, s
 // resolveRecipientState resolves the recipient's display state and delivery
 // surface for persistence, returning (currentState, tmuxName, harnessType).
 func resolveRecipientState(recipientSession string, adapter *dolt.Adapter) (string, string, string) {
+	return resolveRecipientStateWithDependencies(recipientSession, adapter, session.ResolveSessionState, session.UpdateSessionState)
+}
+
+func resolveRecipientStateWithDependencies(
+	recipientSession string,
+	adapter *dolt.Adapter,
+	resolveState func(string, string, string, time.Time) string,
+	updateState func(string, string, string, string, *dolt.Adapter) error,
+) (string, string, string) {
 	var currentState string
 	tmuxName := recipientSession
 	m, manifestPath, resolveErr := session.ResolveIdentifier(recipientSession, cfg.SessionsDir, adapter)
@@ -520,17 +529,31 @@ func resolveRecipientState(recipientSession string, adapter *dolt.Adapter) (stri
 	if m.Tmux.SessionName != "" {
 		tmuxName = m.Tmux.SessionName
 	}
-	currentState = session.ResolveSessionState(tmuxName, m.State, m.Claude.UUID, m.StateUpdatedAt)
-	if currentState != m.State {
-		if err := session.UpdateSessionState(manifestPath, currentState, "hybrid", m.SessionID, adapter); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to persist session state: %v\n", err)
-		}
-	}
 	harnessType := m.Harness
 	if harnessType == "" {
 		harnessType = "claude-code"
 	}
-	return currentState, tmuxName, agent.NormalizeHarnessName(harnessType)
+	harnessType = agent.NormalizeHarnessName(harnessType)
+	// Pure API sessions intentionally have no tmux state. Their adapter status
+	// is checked inside direct delivery, so tmux-only state resolution must not
+	// persist OFFLINE after a successful provider send.
+	if isAPIBasedAgent(harnessType) {
+		return m.State, tmuxName, harnessType
+	}
+	currentState = resolveState(tmuxName, m.State, m.Claude.UUID, m.StateUpdatedAt)
+	if currentState != m.State {
+		if err := updateState(manifestPath, currentState, "hybrid", m.SessionID, adapter); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to persist session state: %v\n", err)
+		}
+	}
+	return currentState, tmuxName, harnessType
+}
+
+func recipientCanReceive(harnessType, tmuxName string, checkTmux func(string) state.CanReceive) state.CanReceive {
+	if isAPIBasedAgent(harnessType) {
+		return state.CanReceiveYes
+	}
+	return checkTmux(tmuxName)
 }
 
 type cliInputDeliveryPolicy struct {

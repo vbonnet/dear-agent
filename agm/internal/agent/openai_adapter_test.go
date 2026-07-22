@@ -712,6 +712,20 @@ func TestSendMessageSerializesIndependentManagersAndCommitsCompleteTurns(t *test
 	if err != nil {
 		t.Fatalf("reconstruct second manager: %v", err)
 	}
+	wantRuntime := openai.SessionRuntimeConfig{
+		Temperature: 0.6,
+		MaxTokens:   777,
+		BaseURL:     "https://updated.example.test",
+	}
+	if err := creator.UpdateTitle(string(sessionID), "updated-before-send"); err != nil {
+		t.Fatalf("update title after managers loaded: %v", err)
+	}
+	if err := creator.UpdateWorkingDirectory(string(sessionID), "/updated-before-send"); err != nil {
+		t.Fatalf("update working directory after managers loaded: %v", err)
+	}
+	if err := creator.UpdateRuntimeConfig(string(sessionID), wantRuntime); err != nil {
+		t.Fatalf("update runtime config after managers loaded: %v", err)
+	}
 
 	firstEntered := make(chan struct{}, 1)
 	secondEntered := make(chan struct{}, 1)
@@ -775,6 +789,13 @@ func TestSendMessageSerializesIndependentManagersAndCommitsCompleteTurns(t *test
 	}
 	if len(history) != 4 {
 		t.Fatalf("committed history length = %d, want 4: %#v", len(history), history)
+	}
+	info, err := reader.GetSession(string(sessionID))
+	if err != nil {
+		t.Fatalf("read metadata after completed turns: %v", err)
+	}
+	if info.Title != "updated-before-send" || info.WorkingDirectory != "/updated-before-send" || info.RuntimeConfig == nil || *info.RuntimeConfig != wantRuntime {
+		t.Fatalf("completed turns overwrote authoritative metadata: %#v", info)
 	}
 }
 

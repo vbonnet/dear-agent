@@ -167,17 +167,28 @@ func (sm *SessionManager) AddMessage(sessionID string, msg Message) error {
 // plus all supplied messages. Callers use this to commit a completed
 // user/assistant turn without exposing a provisional user message.
 func (sm *SessionManager) AddMessages(sessionID string, messages ...Message) error {
+	return sm.WithSessionLock(sessionID, func() error {
+		return sm.AddMessagesUnderLock(sessionID, messages...)
+	})
+}
+
+// AddMessagesUnderLock commits messages while the caller holds the
+// store-scoped session lock across a larger transaction such as provider work.
+func (sm *SessionManager) AddMessagesUnderLock(sessionID string, messages ...Message) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	info, exists := sm.sessions[sessionID]
-	if !exists {
+	if _, exists := sm.sessions[sessionID]; !exists {
 		return fmt.Errorf("session %s not found", sessionID)
 	}
 	if len(messages) == 0 {
 		return nil
 	}
 
+	info, err := sm.loadMetadataFromFile(sessionID)
+	if err != nil {
+		return err
+	}
 	currentMessages, err := sm.loadMessagesFromFile(sessionID)
 	if err != nil {
 		return err
@@ -194,19 +205,14 @@ func (sm *SessionManager) AddMessages(sessionID string, messages ...Message) err
 		return err
 	}
 
-	previousMessages := info.messages
-	previousMessageCount := info.MessageCount
-	previousUpdatedAt := info.UpdatedAt
 	info.messages = append([]Message(nil), committedMessages...)
 	info.MessageCount = len(committedMessages)
 	info.UpdatedAt = time.Now()
-	if err := sm.saveMetadata(sessionID); err != nil {
-		info.messages = previousMessages
-		info.MessageCount = previousMessageCount
-		info.UpdatedAt = previousUpdatedAt
+	if err := sm.writeMetadata(sessionID, info); err != nil {
 		rollbackErr := sm.writeMessagesToFile(sessionID, currentMessages)
 		return errors.Join(err, rollbackErr)
 	}
+	sm.sessions[sessionID] = info
 
 	return nil
 }
@@ -215,6 +221,14 @@ func (sm *SessionManager) AddMessages(sessionID string, messages ...Message) err
 // metadata field, including the non-secret runtime configuration required for
 // later adapter reconstruction.
 func (sm *SessionManager) ClearMessages(sessionID string) error {
+	return sm.WithSessionLock(sessionID, func() error {
+		return sm.ClearMessagesUnderLock(sessionID)
+	})
+}
+
+// ClearMessagesUnderLock clears history while the caller holds the
+// store-scoped lock across a larger adapter command transaction.
+func (sm *SessionManager) ClearMessagesUnderLock(sessionID string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -237,19 +251,14 @@ func (sm *SessionManager) ClearMessages(sessionID string) error {
 		return err
 	}
 
-	previousMessageCount := info.MessageCount
-	previousUpdatedAt := info.UpdatedAt
 	info.messages = nil
 	info.MessageCount = 0
 	info.UpdatedAt = time.Now()
-	sm.sessions[sessionID] = info
-	if err := sm.saveMetadata(sessionID); err != nil {
-		info.messages = append([]Message(nil), currentMessages...)
-		info.MessageCount = previousMessageCount
-		info.UpdatedAt = previousUpdatedAt
+	if err := sm.writeMetadata(sessionID, info); err != nil {
 		rollbackErr := sm.writeMessagesToFile(sessionID, currentMessages)
 		return errors.Join(err, rollbackErr)
 	}
+	sm.sessions[sessionID] = info
 	return nil
 }
 
@@ -322,51 +331,51 @@ func (sm *SessionManager) WithSessionLockContext(ctx context.Context, sessionID 
 
 // UpdateTitle updates the session title.
 func (sm *SessionManager) UpdateTitle(sessionID, title string) error {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	info, exists := sm.sessions[sessionID]
-	if !exists {
-		return fmt.Errorf("session %s not found", sessionID)
-	}
-
-	info.Title = title
-	info.UpdatedAt = time.Now()
-
-	return sm.saveMetadata(sessionID)
+	return sm.updateMetadata(sessionID, func(info *SessionInfo) {
+		info.Title = title
+	})
 }
 
 // UpdateWorkingDirectory updates the session's working directory.
 func (sm *SessionManager) UpdateWorkingDirectory(sessionID, workingDir string) error {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	info, exists := sm.sessions[sessionID]
-	if !exists {
-		return fmt.Errorf("session %s not found", sessionID)
-	}
-
-	info.WorkingDirectory = workingDir
-	info.UpdatedAt = time.Now()
-
-	return sm.saveMetadata(sessionID)
+	return sm.updateMetadata(sessionID, func(info *SessionInfo) {
+		info.WorkingDirectory = workingDir
+	})
 }
 
 // UpdateRuntimeConfig persists the non-secret client settings used by a
 // session so another AGM process can reconstruct its delivery adapter.
 func (sm *SessionManager) UpdateRuntimeConfig(sessionID string, runtimeConfig SessionRuntimeConfig) error {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
+	return sm.updateMetadata(sessionID, func(info *SessionInfo) {
+		info.RuntimeConfig = &runtimeConfig
+	})
+}
 
-	info, exists := sm.sessions[sessionID]
-	if !exists {
-		return fmt.Errorf("session %s not found", sessionID)
-	}
+// updateMetadata serializes every metadata writer with completed-turn and
+// history-clear transactions, then applies one field update to the current
+// on-disk snapshot so independent managers cannot clobber each other.
+func (sm *SessionManager) updateMetadata(sessionID string, update func(*SessionInfo)) error {
+	return sm.WithSessionLock(sessionID, func() error {
+		sm.mu.Lock()
+		defer sm.mu.Unlock()
 
-	info.RuntimeConfig = &runtimeConfig
-	info.UpdatedAt = time.Now()
-
-	return sm.saveMetadata(sessionID)
+		cached, exists := sm.sessions[sessionID]
+		if !exists {
+			return fmt.Errorf("session %s not found", sessionID)
+		}
+		info, err := sm.loadMetadataFromFile(sessionID)
+		if err != nil {
+			return err
+		}
+		info.messages = append([]Message(nil), cached.messages...)
+		update(info)
+		info.UpdatedAt = time.Now()
+		if err := sm.writeMetadata(sessionID, info); err != nil {
+			return err
+		}
+		sm.sessions[sessionID] = info
+		return nil
+	})
 }
 
 // DeleteSession removes a session and its data.
@@ -406,7 +415,10 @@ func (sm *SessionManager) saveMetadata(sessionID string) error {
 	if !exists {
 		return fmt.Errorf("session %s not found", sessionID)
 	}
+	return sm.writeMetadata(sessionID, info)
+}
 
+func (sm *SessionManager) writeMetadata(sessionID string, info *SessionInfo) error {
 	data, err := json.MarshalIndent(info, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
