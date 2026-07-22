@@ -105,7 +105,7 @@ func SendMessage(ctx *OpContext, req *SendMessageRequest) (*SendMessageResult, e
 		if !readiness.Ready {
 			return newResult(false), ErrSessionNotReady(m.Name, readiness.State)
 		}
-		if readiness.Forced && (!allowQueuedAGM || readiness.State != "QUEUED_AGM") {
+		if readiness.Forced && (!allowQueuedAGM || readiness.State != "YES") {
 			return newResult(false), ErrSessionNotReady(m.Name, "INVALID_QUEUED_AGM_DELIVERY")
 		}
 		if readiness.PaneID == "" {

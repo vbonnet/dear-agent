@@ -170,6 +170,7 @@ func (m *MockTmux) SendKeysIfInputReady(ctx context.Context, sessionName, harnes
 			return readiness, nil
 		}
 		readiness.Ready = true
+		readiness.State = "YES"
 		readiness.Forced = true
 	}
 	if readiness.PaneID == "" {

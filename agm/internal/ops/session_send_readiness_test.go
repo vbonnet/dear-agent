@@ -21,6 +21,21 @@ type sendReadinessBackend struct {
 	sendCtx      context.Context
 }
 
+type postRecoveryReadyTmux struct {
+	*mockTmux
+	result session.InputReadiness
+}
+
+func (t *postRecoveryReadyTmux) SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string, options session.InputDeliveryOptions) (session.InputReadiness, error) {
+	t.atomicChecks = append(t.atomicChecks, sessionName+":"+harness)
+	t.atomicOptions = append(t.atomicOptions, options)
+	t.paneSendCtx = ctx
+	if t.result.Ready {
+		t.sent = append(t.sent, sentKey{session: t.result.PaneID, keys: keys})
+	}
+	return t.result, nil
+}
+
 func (b *sendReadinessBackend) CreateSession(context.Context, manager.SessionConfig) (manager.SessionID, error) {
 	return "", nil
 }
@@ -203,6 +218,28 @@ func TestSendMessage_QueuedAGMRecoveryPolicies(t *testing.T) {
 				t.Fatalf("%s exact-pane sends = %#v, want %%7 recovery message", testCase.name, tmuxMock.sent)
 			}
 		})
+	}
+}
+
+func TestSendMessage_AcceptsPostRecoveryReadyState(t *testing.T) {
+	t.Parallel()
+
+	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")}, "my-session")
+	tmuxClient := &postRecoveryReadyTmux{
+		mockTmux: ctx.Tmux.(*mockTmux),
+		result:   session.InputReadiness{Ready: true, State: "YES", PaneID: "%7", Forced: true},
+	}
+	ctx.Tmux = tmuxClient
+
+	result, err := SendMessage(ctx, &SendMessageRequest{Recipient: "id-1", Message: "replacement", Force: true})
+	if err != nil || result == nil || !result.Delivered {
+		t.Fatalf("SendMessage(post-recovery YES) = (%#v, %v), want delivered", result, err)
+	}
+	if len(tmuxClient.atomicOptions) != 1 || !tmuxClient.atomicOptions[0].AllowQueuedAGM {
+		t.Fatalf("atomic options = %#v, want queued-AGM recovery", tmuxClient.atomicOptions)
+	}
+	if len(tmuxClient.sent) != 1 || tmuxClient.sent[0] != (sentKey{session: "%7", keys: "replacement"}) {
+		t.Fatalf("post-recovery sends = %#v, want one exact-pane replacement", tmuxClient.sent)
 	}
 }
 

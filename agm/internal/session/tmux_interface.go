@@ -104,7 +104,8 @@ type InputReadinessChecker interface {
 // AtomicInputSender checks harness input ownership and delivers to the
 // resulting exact pane while holding one tmux mutation boundary. If Ready is
 // false, no input was sent; if Ready is true, delivery completed successfully.
-// A forced result is valid only for a positively identified queued AGM paste.
+// A forced result is valid only for a positively identified queued AGM paste
+// and reports the post-clear empty-composer state YES.
 type AtomicInputSender interface {
 	SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string, options InputDeliveryOptions) (InputReadiness, error)
 }
