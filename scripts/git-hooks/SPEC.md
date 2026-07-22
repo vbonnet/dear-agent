@@ -49,7 +49,7 @@ that triggered it.
 
 **GITHOOK-16** When build-relevant AGM source changes, the system shall serialize deployment with a kernel-released lock across checkouts sharing the install directory, safely recover ownerless or malformed legacy lock directories, make every contender reacquire the lock and refresh trunk, stage both `agm` and the separately installed `agm-reaper` from the same resolved revision, preserve the installed pair if either build fails, and activate the pair only after both builds succeed.
 
-**GITHOOK-17** When build-relevant Wayfinder source changes on the default branch, the system shall rebuild and atomically install the Wayfinder binary from the freshly resolved canonical trunk revision.
+**GITHOOK-17** When build-relevant Wayfinder source changes on the default branch, the system shall serialize activation across checkouts sharing the install directory, make every contender acquire the shared lock before refreshing canonical trunk, and atomically install the Wayfinder binary from that freshly resolved revision.
 
 ## BDD Traceability
 

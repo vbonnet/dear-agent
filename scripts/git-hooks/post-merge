@@ -4,8 +4,9 @@
 # on the repo's DEFAULT branch:
 #
 #   Stage 1 — rebuild affected Go binaries (this repo only).
-#     After a PR lands on main, the `agm` / `agm-reaper` / `vroom-dispatch` binaries in
-#     ~/go/bin are stale until someone remembers to `go install`. This stage
+#     After a PR lands on main, the `agm` / `agm-reaper` / `vroom-dispatch` /
+#     `wayfinder` binaries in ~/go/bin are stale until someone remembers to
+#     `go install`. This stage
 #     closes that gap: it inspects what changed in the merge and reinstalls
 #     ONLY the binaries whose source actually changed. Docs/tests/config-only
 #     merges rebuild nothing (near-instant no-op). Crucially, it ALWAYS builds
@@ -147,6 +148,27 @@ under_prefix() {
   return 1
 }
 
+# resolve_build_trigger <prefix...>: set _affected/_trigger for the current
+# changed-file set. Keeping this decision in one helper ensures serialized and
+# ordinary rebuild paths classify the same source boundary.
+resolve_build_trigger() {
+  _affected=0
+  _trigger=""
+  if [ "${indeterminate}" = "1" ]; then
+    _affected=1
+    _trigger="could not determine diff — rebuilding to be safe"
+    return 0
+  fi
+  while IFS= read -r _f; do
+    [ -n "${_f}" ] || continue
+    is_build_relevant "${_f}" || continue
+    if under_prefix "${_f}" "$@"; then
+      _affected=1
+      [ -z "${_trigger}" ] && _trigger="$(dirname "${_f}")/"
+    fi
+  done < <(printf '%s\n' "${changed}")
+}
+
 # maybe_rebuild <pkg-path> <prefix...>: reinstall the binary built from
 # <pkg-path> iff a build-relevant changed file falls under one of its prefixes
 # (or the diff could not be determined — then rebuild to be safe). Sets
@@ -159,24 +181,7 @@ maybe_rebuild() {
   # Self-scope: only a repo that actually contains this package gets touched.
   [ -d "${repo_root}/${_pkg}" ] || return 0
 
-  _affected=0
-  _trigger=""
-  if [ "${indeterminate}" = "1" ]; then
-    _affected=1
-    _trigger="could not determine diff — rebuilding to be safe"
-  else
-    # Feed the file list via `printf` + process substitution rather than an
-    # unquoted here-doc: the variable is quoted (no expansion of its contents)
-    # and the loop runs in the current shell so _affected/_trigger persist.
-    while IFS= read -r _f; do
-      [ -n "${_f}" ] || continue
-      is_build_relevant "${_f}" || continue
-      if under_prefix "${_f}" "$@"; then
-        _affected=1
-        [ -z "${_trigger}" ] && _trigger="$(dirname "${_f}")/"
-      fi
-    done < <(printf '%s\n' "${changed}")
-  fi
+  resolve_build_trigger "$@"
 
   [ "${_affected}" = "1" ] || return 0
 
@@ -218,6 +223,33 @@ maybe_rebuild() {
   fi
 }
 
+# acquire_install_lock <path> <timeout-seconds> <label>: hold a shared,
+# kernel-released advisory lock on fd 9. Both managed single binaries and the
+# AGM companion pair use this primitive so cross-checkout activation cannot
+# reorder canonical trunk revisions.
+acquire_install_lock() {
+  _install_lock_path="$1"
+  _install_lock_timeout="$2"
+  _install_lock_label="$3"
+  case "${_install_lock_timeout}" in ''|*[!0-9]*) _install_lock_timeout=300 ;; esac
+  if ! exec 9>"${_install_lock_path}"; then
+    return 1
+  fi
+  if command -v flock >/dev/null 2>&1; then
+    flock -w "${_install_lock_timeout}" 9 && return 0
+  elif command -v lockf >/dev/null 2>&1; then
+    lockf -t "${_install_lock_timeout}" 9 && return 0
+  else
+    echo "[post-merge:rebuild] neither flock nor lockf is available for ${_install_lock_label} deployment." >&2
+  fi
+  exec 9>&-
+  return 1
+}
+
+release_install_lock() {
+  exec 9>&-
+}
+
 # acquire_agm_pair_lock: hold a kernel-released advisory lock on fd 9. flock is
 # standard on Linux and lockf is standard on macOS; both release automatically
 # if the hook is killed, so there is no owner-file creation gap or stale PID to
@@ -245,22 +277,11 @@ acquire_agm_pair_lock() {
     _pair_legacy_wait=$((_pair_legacy_wait + 1))
   done
 
-  if ! exec 9>"${_pair_lock}"; then
-    return 1
-  fi
-  if command -v flock >/dev/null 2>&1; then
-    flock -w "${_pair_lock_timeout}" 9 && return 0
-  elif command -v lockf >/dev/null 2>&1; then
-    lockf -t "${_pair_lock_timeout}" 9 && return 0
-  else
-    echo "[post-merge:rebuild] neither flock nor lockf is available for AGM pair deployment." >&2
-  fi
-  exec 9>&-
-  return 1
+  acquire_install_lock "${_pair_lock}" "${_pair_lock_timeout}" "AGM pair"
 }
 
 release_agm_pair_lock() {
-  exec 9>&-
+  release_install_lock
 }
 
 # maybe_rebuild_agm_pair serializes pair deployment across every checkout that
@@ -291,21 +312,7 @@ maybe_rebuild_agm_pair_locked() {
   [ -d "${repo_root}/agm/cmd/agm" ] || return 0
   [ -d "${repo_root}/agm/cmd/agm-reaper" ] || return 0
 
-  _affected=0
-  _trigger=""
-  if [ "${indeterminate}" = "1" ]; then
-    _affected=1
-    _trigger="could not determine diff — rebuilding to be safe"
-  else
-    while IFS= read -r _f; do
-      [ -n "${_f}" ] || continue
-      is_build_relevant "${_f}" || continue
-      if under_prefix "${_f}" agm/ pkg/ internal/ go.mod go.sum; then
-        _affected=1
-        [ -z "${_trigger}" ] && _trigger="$(dirname "${_f}")/"
-      fi
-    done < <(printf '%s\n' "${changed}")
-  fi
+  resolve_build_trigger agm/ pkg/ internal/ go.mod go.sum
 
   [ "${_affected}" = "1" ] || return 0
   agm_pair_handled=1
@@ -385,6 +392,33 @@ maybe_rebuild_agm_pair_locked() {
   rm -f "${_agm_backup}" "${_reaper_backup}" 2>/dev/null || true
   rebuilt_any=1
   echo "[post-merge:rebuild] ✓ installed agm + agm-reaper as one revision-coherent pair (atomic files)" >&2
+}
+
+# maybe_rebuild_wayfinder serializes Wayfinder activation across checkouts that
+# share GOBIN. A contender refreshes canonical trunk only after acquiring the
+# lock, preventing an older, slower build from replacing a newer installation.
+maybe_rebuild_wayfinder() {
+  [ -d "${repo_root}/wayfinder/cmd/wayfinder" ] || return 0
+  resolve_build_trigger wayfinder/ pkg/ internal/ go.mod go.sum
+  [ "${_affected}" = "1" ] || return 0
+
+  _wayfinder_gobin="${GOBIN:-${HOME}/go/bin}"
+  mkdir -p "${_wayfinder_gobin}" 2>/dev/null || true
+  _wayfinder_lock="${_wayfinder_gobin}/.wayfinder-install.lock"
+  _wayfinder_lock_timeout="${WAYFINDER_LOCK_TIMEOUT_SECONDS:-300}"
+  if ! acquire_install_lock "${_wayfinder_lock}" "${_wayfinder_lock_timeout}" "Wayfinder"; then
+    echo "[post-merge:rebuild] could not acquire Wayfinder deployment lock — installed binary unchanged." >&2
+    return 0
+  fi
+
+  cleanup_build_dir
+  build_dir=""
+  build_worktree=""
+  fetch_trunk_commit
+  maybe_rebuild "wayfinder/cmd/wayfinder" wayfinder/ pkg/ internal/ go.mod go.sum
+  _wayfinder_status=$?
+  release_install_lock
+  return "${_wayfinder_status}"
 }
 
 # _pick_timeout: echo the first available timeout wrapper (gtimeout on macOS
@@ -515,7 +549,7 @@ rebuild_changed_binaries() {
     maybe_rebuild "agm/cmd/agm-reaper" agm/cmd/agm-reaper/ agm/internal/ pkg/ internal/ go.mod go.sum
   fi
   maybe_rebuild "cmd/vroom-dispatch" cmd/vroom-dispatch/ pkg/ internal/ go.mod go.sum
-  maybe_rebuild "wayfinder/cmd/wayfinder" wayfinder/ pkg/ internal/ go.mod go.sum
+  maybe_rebuild_wayfinder
   # Self-update the deploy tool: keep ~/go/bin/dear-deploy current so on-demand /
   # Orchestrator invocations (Layer 2, ce-33sy) run trunk. Stage 1.6 below does
   # not depend on this — it builds dear-deploy from the trunk worktree itself —

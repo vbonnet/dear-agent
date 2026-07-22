@@ -264,7 +264,7 @@ func postMergeSafeguardNeedles(safeguard string) []string {
 	case "agm-companion-coherence":
 		return []string{"maybe_rebuild_agm_pair", ".agm-pair-install.lock", "installed pair unchanged", "_pair_ldflags", "agm/internal/"}
 	case "wayfinder-runtime-deploy":
-		return []string{"maybe_rebuild \"wayfinder/cmd/wayfinder\"", "wayfinder/ pkg/ internal/ go.mod go.sum"}
+		return []string{"maybe_rebuild_wayfinder", ".wayfinder-install.lock", "acquire_install_lock", "fetch_trunk_commit", "wayfinder/ pkg/ internal/ go.mod go.sum"}
 	case "host-artifact-deploy":
 		return []string{"deploy_host_artifacts", "make dear-deploy-sync"}
 	case "deployment-verification":

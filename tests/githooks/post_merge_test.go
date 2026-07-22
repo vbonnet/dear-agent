@@ -716,6 +716,107 @@ func TestRebuild_WayfinderOnly(t *testing.T) {
 	}
 }
 
+// Two default-branch hooks can overlap from distinct checkouts that install to
+// one GOBIN. The newer contender must wait, then refresh origin/main while it
+// owns the lock so an older, slower build cannot become the final activation.
+func TestRebuild_WayfinderRefreshesTrunkAfterWaitingForLock(t *testing.T) {
+	origin := newRebuildRepo(t)
+	firstCheckout := cloneRepo(t, origin)
+	secondCheckout := cloneRepo(t, origin)
+
+	sharedSource := filepath.Join(origin, "wayfinder", "cmd", "wayfinder", "main.go")
+	if err := os.WriteFile(sharedSource, []byte("package main // revision x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, origin, "add", "wayfinder/cmd/wayfinder/main.go")
+	git(t, origin, "commit", "-qm", "wayfinder revision x")
+	firstRevision := revParse(t, origin, "HEAD")
+	git(t, firstCheckout, "pull", "-q", "--ff-only")
+
+	gobin := t.TempDir()
+	record := filepath.Join(t.TempDir(), "installed")
+	goDir := stubGo(t, record)
+	ready := filepath.Join(t.TempDir(), "first-build-ready")
+	release := filepath.Join(t.TempDir(), "release-first-build")
+	baseEnv := append(os.Environ(),
+		"HOME="+t.TempDir(),
+		"GOBIN="+gobin,
+		"PATH="+goDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"AGM_POST_MERGE_SWEEP=0",
+		"STUB_GO_BLOCK_PKG=./wayfinder/cmd/wayfinder",
+		"STUB_GO_BLOCK_READY="+ready,
+		"STUB_GO_BLOCK_RELEASE="+release,
+	)
+
+	var firstOutput bytes.Buffer
+	first := exec.Command("bash", hookPath(t))
+	first.Dir = firstCheckout
+	first.Env = baseEnv
+	first.Stdout = &firstOutput
+	first.Stderr = &firstOutput
+	if err := first.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if first.Process != nil {
+			_ = first.Process.Kill()
+		}
+	})
+	waitForFile(t, ready, 20*time.Second, "first Wayfinder hook did not reach staged build", &firstOutput)
+
+	if err := os.WriteFile(sharedSource, []byte("package main // revision y\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, origin, "add", "wayfinder/cmd/wayfinder/main.go")
+	git(t, origin, "commit", "-qm", "wayfinder revision y")
+	secondRevision := revParse(t, origin, "HEAD")
+	git(t, secondCheckout, "pull", "-q", "--ff-only")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var secondOutput bytes.Buffer
+	second := exec.CommandContext(ctx, "bash", hookPath(t))
+	second.Dir = secondCheckout
+	second.Env = baseEnv
+	second.Stdout = &secondOutput
+	second.Stderr = &secondOutput
+	if err := second.Start(); err != nil {
+		t.Fatal(err)
+	}
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- second.Wait() }()
+	select {
+	case err := <-secondDone:
+		t.Fatalf("newer Wayfinder hook did not wait for the older deployment: %v\n%s", err, secondOutput.String())
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	if err := os.WriteFile(release, []byte("release\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Wait(); err != nil {
+		t.Fatalf("first Wayfinder hook failed: %v\n%s", err, firstOutput.String())
+	}
+	select {
+	case err := <-secondDone:
+		if err != nil {
+			t.Fatalf("newer Wayfinder hook failed after lock release: %v\n%s", err, secondOutput.String())
+		}
+	case <-ctx.Done():
+		t.Fatalf("newer Wayfinder hook did not deploy after lock release: %v\n%s", ctx.Err(), secondOutput.String())
+	}
+
+	records := installRecords(t, record)
+	if len(records) != 2 {
+		t.Fatalf("serialized Wayfinder hooks staged %d builds, want two: %v", len(records), records)
+	}
+	for i, want := range []string{firstRevision, secondRevision} {
+		if records[i].commit != want {
+			t.Fatalf("Wayfinder build %d used revision %s, want %s (records: %+v)", i, records[i].commit, want, records)
+		}
+	}
+}
+
 // Any compiled AGM change rebuilds the coherent CLI/reaper pair. Even when a
 // source change is CLI-local, exact revision handshaking means the detached
 // companion must move to the same commit.
