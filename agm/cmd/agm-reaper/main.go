@@ -32,6 +32,7 @@ func run() error {
 	outcome := flag.String("outcome", "", "Archive outcome: completed, crashed, killed, or gc-stale")
 	expectedRevision := flag.String("expected-revision", "", "Expected AGM VCS revision for detached archive execution")
 	checkRevision := flag.String("check-revision", "", "Verify this binary revision and exit")
+	startupFD := flag.Int("startup-fd", -1, "File descriptor for detached startup acknowledgement")
 	flag.Parse()
 
 	pkgversion.PopulateFromBuildInfo()
@@ -67,6 +68,9 @@ func run() error {
 	// Log startup
 	logger.Info("Reaper started", "timestamp", time.Now().UTC().Format(time.RFC3339))
 	logger.Info("Reaper configuration", "session", *sessionName, "pid", os.Getpid(), "log_file", *logFile, "sessions_dir", *sessionsDir)
+	if err := acknowledgeStartup(*startupFD); err != nil {
+		return err
+	}
 
 	// Create and run reaper
 	r := reaper.NewWithOptions(*sessionName, *sessionsDir, reaper.ArchiveOptions{
@@ -79,6 +83,21 @@ func run() error {
 	}
 
 	logger.Info("Reaper completed successfully")
+	return nil
+}
+
+func acknowledgeStartup(fd int) error {
+	if fd < 0 {
+		return nil
+	}
+	startup := os.NewFile(uintptr(fd), "agm-reaper-startup")
+	if startup == nil {
+		return fmt.Errorf("invalid startup acknowledgement descriptor %d", fd)
+	}
+	defer func() { _ = startup.Close() }()
+	if _, err := startup.WriteString("ready\n"); err != nil {
+		return fmt.Errorf("write startup acknowledgement: %w", err)
+	}
 	return nil
 }
 

@@ -95,3 +95,7 @@ Feature: Hook harness parity
       | bead-transition         |
       | worktree-sweep          |
       | fail-safe-exit          |
+
+  Scenario: Detached archive companion proves coherent startup
+    When AGM runs detached archive companion startup regressions
+    Then a mixed revision or missing startup acknowledgement should fail before async success

@@ -217,12 +217,53 @@ maybe_rebuild() {
   fi
 }
 
-# maybe_rebuild_agm_pair: stage the AGM CLI and its detached archive companion
-# together whenever compiled AGM input changes. Neither installed binary is touched
-# unless both builds succeed. The rollback links preserve the prior pair if the
-# second activation fails; the runtime revision handshake in spawnReaper closes
-# the necessarily small interval between the two same-filesystem renames.
+# maybe_rebuild_agm_pair: serialize pair deployment across every checkout that
+# shares GOBIN. A live lock owner completes the deployment, so this invocation
+# can safely defer; a dead PID is recoverable without recursively deleting an
+# unresolved path.
 maybe_rebuild_agm_pair() {
+  agm_pair_handled=0
+  _pair_gobin="${GOBIN:-${HOME}/go/bin}"
+  mkdir -p "${_pair_gobin}" 2>/dev/null || true
+  _pair_lock="${_pair_gobin}/.agm-pair-install.lock"
+  _pair_locked=0
+  if mkdir "${_pair_lock}" 2>/dev/null; then
+    _pair_locked=1
+  else
+    _pair_owner="$(cat "${_pair_lock}/pid" 2>/dev/null || true)"
+    case "${_pair_owner}" in ''|*[!0-9]*) _pair_owner="" ;; esac
+    if [ -n "${_pair_owner}" ] && ! kill -0 "${_pair_owner}" 2>/dev/null; then
+      rm -f "${_pair_lock}/pid" 2>/dev/null || true
+      rmdir "${_pair_lock}" 2>/dev/null || true
+    fi
+  fi
+  if [ "${_pair_locked}" = "0" ] && mkdir "${_pair_lock}" 2>/dev/null; then
+    _pair_locked=1
+  fi
+  if [ "${_pair_locked}" = "0" ]; then
+    agm_pair_handled=1
+    echo "[post-merge:rebuild] another post-merge hook owns AGM pair deployment — deferring to that coherent install." >&2
+    return 0
+  fi
+  if ! printf '%s\n' "$$" > "${_pair_lock}/pid"; then
+    rm -f "${_pair_lock}/pid" 2>/dev/null || true
+    rmdir "${_pair_lock}" 2>/dev/null || true
+    agm_pair_handled=1
+    echo "[post-merge:rebuild] could not record AGM pair deployment lock — installed pair unchanged." >&2
+    return 0
+  fi
+
+  maybe_rebuild_agm_pair_locked
+  _pair_status=$?
+  rm -f "${_pair_lock}/pid" 2>/dev/null || true
+  rmdir "${_pair_lock}" 2>/dev/null || true
+  return "${_pair_status}"
+}
+
+# maybe_rebuild_agm_pair_locked stages the CLI and detached archive companion
+# while the shared install lock is held. Neither installed binary is touched
+# unless both builds succeed.
+maybe_rebuild_agm_pair_locked() {
   agm_pair_handled=0
   [ -d "${repo_root}/agm/cmd/agm" ] || return 0
   [ -d "${repo_root}/agm/cmd/agm-reaper" ] || return 0

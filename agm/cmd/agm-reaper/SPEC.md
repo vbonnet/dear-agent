@@ -34,6 +34,8 @@ depend on its flags and exit behavior.
 
 **AGM-REAPER-09** When AGM supplies an expected VCS revision for asynchronous archive execution, the system shall refuse to run lifecycle code unless the detached `agm-reaper` binary carries the same embedded revision.
 
+**AGM-REAPER-10** When AGM supplies a startup acknowledgement descriptor, the system shall acknowledge readiness only after revision validation and durable log initialization succeed.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

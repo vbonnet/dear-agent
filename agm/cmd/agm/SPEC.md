@@ -876,6 +876,7 @@ SQLite when `AGM_DB_PATH` is set by a named test environment)
 6. For active sessions with --async:
    - preflight through ops.ArchiveSession without mutating
    - require the detached agm-reaper binary to prove the same embedded VCS revision as agm
+   - wait for the exact detached child to acknowledge revision validation and durable log initialization before reporting success
    - spawn agm-reaper with force/keep-sandbox/outcome options preserved
    - mark lifecycle=reaping before stopping the pane
    - after pane death, call ops.ArchiveSession for the final transition

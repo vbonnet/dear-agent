@@ -1,6 +1,8 @@
 package githooks_test
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // hookPath resolves scripts/git-hooks/post-merge relative to this test file so
@@ -173,6 +176,10 @@ func stubGo(t *testing.T, recordFile string) string {
 		"  out=\"\"; pkg=\"\"; prev=\"\"\n" +
 		"  for a in \"$@\"; do [ \"$prev\" = -o ] && out=\"$a\"; pkg=\"$a\"; prev=\"$a\"; done\n" +
 		"  [ -n \"$STUB_GO_FAIL_PKG\" ] && [ \"$pkg\" = \"$STUB_GO_FAIL_PKG\" ] && exit 1\n" +
+		"  if [ -n \"$STUB_GO_BLOCK_PKG\" ] && [ \"$pkg\" = \"$STUB_GO_BLOCK_PKG\" ]; then\n" +
+		"    : > \"$STUB_GO_BLOCK_READY\"\n" +
+		"    while [ ! -e \"$STUB_GO_BLOCK_RELEASE\" ]; do sleep 0.01; done\n" +
+		"  fi\n" +
 		"  [ -n \"$out\" ] && printf 'fakebin\\n' > \"$out\"\n" +
 		"  echo \"$pkg|$(git rev-parse HEAD 2>/dev/null)\" >> \"" + recordFile + "\"\n" +
 		"fi\n" +
@@ -416,6 +423,74 @@ func TestRebuild_AGMPairBuildFailurePreservesInstalledPair(t *testing.T) {
 		if string(got) != want {
 			t.Fatalf("%s changed after pair build failure: got %q, want %q", name, got, want)
 		}
+	}
+}
+
+func TestRebuild_AGMPairActivationIsSerializedAcrossHookProcesses(t *testing.T) {
+	repo := newRebuildRepo(t)
+	mergeBranchChanging(t, repo, map[string]string{"agm/internal/tmux/prompt.go": "package tmux // v2\n"})
+	gobin := t.TempDir()
+	record := filepath.Join(t.TempDir(), "installed")
+	goDir := stubGo(t, record)
+	ready := filepath.Join(t.TempDir(), "first-build-ready")
+	release := filepath.Join(t.TempDir(), "release-first-build")
+	baseEnv := append(os.Environ(),
+		"HOME="+t.TempDir(),
+		"GOBIN="+gobin,
+		"PATH="+goDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"AGM_POST_MERGE_SWEEP=0",
+		"STUB_GO_BLOCK_PKG=./agm/cmd/agm",
+		"STUB_GO_BLOCK_READY="+ready,
+		"STUB_GO_BLOCK_RELEASE="+release,
+	)
+
+	var firstOutput bytes.Buffer
+	first := exec.Command("bash", hookPath(t))
+	first.Dir = repo
+	first.Env = baseEnv
+	first.Stdout = &firstOutput
+	first.Stderr = &firstOutput
+	if err := first.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if first.Process != nil {
+			_ = first.Process.Kill()
+		}
+	})
+
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("first hook did not reach staged build:\n%s", firstOutput.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	second := exec.CommandContext(ctx, "bash", hookPath(t))
+	second.Dir = repo
+	second.Env = baseEnv
+	secondOutput, err := second.CombinedOutput()
+	if err != nil {
+		t.Fatalf("contending hook failed: %v\n%s", err, secondOutput)
+	}
+	if !strings.Contains(string(secondOutput), "another post-merge hook owns AGM pair deployment") {
+		t.Fatalf("contending hook did not defer to lock owner:\n%s", secondOutput)
+	}
+
+	if err := os.WriteFile(release, []byte("release\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Wait(); err != nil {
+		t.Fatalf("first hook failed: %v\n%s", err, firstOutput.String())
+	}
+	if got := installRecords(t, record); len(got) != 2 {
+		t.Fatalf("concurrent hooks staged %d builds, want one coherent pair: %v", len(got), got)
 	}
 }
 

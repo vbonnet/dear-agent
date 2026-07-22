@@ -1,6 +1,8 @@
 package main
 
 import (
+	"io"
+	"os"
 	"strings"
 	"testing"
 )
@@ -35,5 +37,31 @@ func TestValidateRevision(t *testing.T) {
 				t.Fatalf("validateRevision() error = %v, want substring %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestAcknowledgeStartupWritesReadyAndClosesDescriptor(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reader.Close() }()
+
+	if err := acknowledgeStartup(int(writer.Fd())); err != nil {
+		t.Fatalf("acknowledgeStartup() error = %v", err)
+	}
+	_ = writer.Close()
+	got, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "ready\n" {
+		t.Fatalf("acknowledgeStartup() wrote %q, want ready record", got)
+	}
+}
+
+func TestAcknowledgeStartupAllowsDisabledChannel(t *testing.T) {
+	if err := acknowledgeStartup(-1); err != nil {
+		t.Fatalf("acknowledgeStartup(-1) error = %v", err)
 	}
 }
