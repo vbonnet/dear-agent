@@ -48,7 +48,7 @@ func sendThroughTmux(t *testing.T, sessionName, cmdText, harnessName, paneDir st
 	// makes the canary unable to run at all while the shorter-named test still
 	// passes, i.e. a green suite that proves nothing. Cleaned up via t.Cleanup
 	// below, so the usetesting lint's actual concern is covered.
-	socketDir, err := os.MkdirTemp("", "agmsock")
+	socketDir, err := os.MkdirTemp("", "agmsock") //nolint:usetesting // see above: t.TempDir() overruns the unix-socket path limit
 	if err != nil {
 		t.Fatalf("socket dir: %v", err)
 	}
