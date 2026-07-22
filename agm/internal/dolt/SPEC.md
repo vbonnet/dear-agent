@@ -22,6 +22,8 @@
 
 **DOLTR-10** When AGM persists and reloads a pure OpenAI API session, the storage adapter shall round-trip its non-secret session-store locator and client fallback configuration through the shared session metadata column.
 
+**DOLTR-11** When AGM stores Pi native metadata in the session metadata document, the Dolt adapter shall round-trip the session ID, session directory, transcript path, and explicit coding-agent directory without a harness-specific schema migration.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`

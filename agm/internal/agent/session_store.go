@@ -66,6 +66,10 @@ type SessionMetadata struct {
 	// NativeSessionDir is the harness-owned directory containing native state.
 	NativeSessionDir string `json:"native_session_dir,omitempty"`
 
+	// CodingAgentDir is Pi's explicitly configured native configuration root.
+	// It is retained so cold resume does not depend on the tmux server's env.
+	CodingAgentDir string `json:"coding_agent_dir,omitempty"`
+
 	// TranscriptPath is the exact validated native transcript when known.
 	TranscriptPath string `json:"transcript_path,omitempty"`
 

@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -24,6 +25,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/mcpparity"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/permissionparity"
+	"github.com/vbonnet/dear-agent/agm/internal/pisession"
 	"github.com/vbonnet/dear-agent/agm/internal/quotaparity"
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
 	"github.com/vbonnet/dear-agent/agm/internal/recovery"
@@ -117,6 +119,10 @@ type harnessParityState struct {
 	capturePolicyValid         bool
 	launchMode                 string
 	launchContract             launchparity.Contract
+	piCodingAgentDir           string
+	piCreateCommand            string
+	piResumeCommand            string
+	piMetadataPreserved        bool
 	startupLivenessValid       bool
 	currentTmuxTestOutput      string
 	currentTmuxTestErr         error
@@ -201,6 +207,11 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM builds the harness launch command with persistence enabled$`, agmBuildsPersistentHarnessLaunchCommand)
 	ctx.Step(`^the launch command should use the native interactive startup contract$`, launchCommandShouldUseNativeInteractiveContract)
 	ctx.Step(`^the launch command should not exit the tmux pane shell$`, launchCommandShouldNotExitTmuxPaneShell)
+	ctx.Step(`^a validated Pi custom coding-agent directory$`, aValidatedPiCustomCodingAgentDirectory)
+	ctx.Step(`^AGM builds Pi create and cold-resume commands from native metadata$`, agmBuildsPiCreateAndColdResumeCommands)
+	ctx.Step(`^both Pi commands should forward the safely quoted coding-agent directory$`, bothPiCommandsShouldForwardCodingAgentDirectory)
+	ctx.Step(`^Pi native metadata should preserve the coding-agent directory$`, piNativeMetadataShouldPreserveCodingAgentDirectory)
+	ctx.Step(`^default Pi launch should leave native configuration discovery unchanged$`, defaultPiLaunchShouldLeaveNativeDiscoveryUnchanged)
 	ctx.Step(`^AGM validates final startup liveness$`, agmValidatesFinalStartupLiveness)
 	ctx.Step(`^startup should require a live tmux session and harness process$`, startupShouldRequireLiveTmuxAndHarness)
 	ctx.Step(`^AGM runtime helper command "([^"]*)" is configured$`, agmRuntimeHelperCommandIsConfigured)
@@ -1183,6 +1194,93 @@ func launchCommandShouldNotExitTmuxPaneShell(ctx context.Context) error {
 	}
 	if state.launchContract.ExitSuffix != "" {
 		return fmt.Errorf("persistent harness %q exit suffix = %q", state.configuredHarness, state.launchContract.ExitSuffix)
+	}
+	return nil
+}
+
+func aValidatedPiCustomCodingAgentDirectory(ctx context.Context) error {
+	state, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	dir, err := os.MkdirTemp("", "agm-bdd-pi-agent-")
+	if err != nil {
+		return err
+	}
+	validated, validateErr := pisession.ValidateCodingAgentDir(dir)
+	removeErr := os.RemoveAll(dir)
+	if validateErr != nil {
+		return validateErr
+	}
+	if removeErr != nil {
+		return removeErr
+	}
+	state.piCodingAgentDir = validated
+	return nil
+}
+
+func agmBuildsPiCreateAndColdResumeCommands(ctx context.Context) error {
+	state, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	pi := &manifest.Pi{SessionID: "native-pi", SessionDir: "/private/pi", CodingAgentDir: state.piCodingAgentDir}
+	base := ops.HarnessLaunchSpec{
+		Harness: "pi-cli", Model: "sonnet", SessionName: "pi-worker", SessionID: "native-pi",
+		WorkDir: "/work", PermissionMode: "default", Pi: pi,
+	}
+	base.PiLaunchID = "create-launch"
+	state.piCreateCommand = ops.BuildHarnessLaunchCommand(base).Command
+	base.PiLaunchID = "resume-launch"
+	state.piResumeCommand = ops.BuildHarnessLaunchCommand(base).Command
+	encoded, err := json.Marshal(pi)
+	if err != nil {
+		return err
+	}
+	var restored manifest.Pi
+	if err := json.Unmarshal(encoded, &restored); err != nil {
+		return err
+	}
+	state.piMetadataPreserved = restored.CodingAgentDir == state.piCodingAgentDir
+	return nil
+}
+
+func bothPiCommandsShouldForwardCodingAgentDirectory(ctx context.Context) error {
+	state, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	want := "PI_CODING_AGENT_DIR=" + launchparity.ShellQuote(state.piCodingAgentDir)
+	for name, command := range map[string]string{"create": state.piCreateCommand, "resume": state.piResumeCommand} {
+		if !strings.Contains(command, want) {
+			return fmt.Errorf("pi %s command omitted %q: %s", name, want, command)
+		}
+	}
+	return nil
+}
+
+func piNativeMetadataShouldPreserveCodingAgentDirectory(ctx context.Context) error {
+	state, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !state.piMetadataPreserved {
+		return fmt.Errorf("pi coding-agent directory did not survive native metadata round-trip")
+	}
+	return nil
+}
+
+func defaultPiLaunchShouldLeaveNativeDiscoveryUnchanged(ctx context.Context) error {
+	_, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	command := ops.BuildHarnessLaunchCommand(ops.HarnessLaunchSpec{
+		Harness: "pi-cli", SessionName: "pi-default", SessionID: "native-default",
+		WorkDir: "/work", Pi: &manifest.Pi{SessionID: "native-default", SessionDir: "/private/pi"},
+	}).Command
+	if strings.Contains(command, "PI_CODING_AGENT_DIR") {
+		return fmt.Errorf("default Pi launch overrode native configuration discovery: %s", command)
 	}
 	return nil
 }

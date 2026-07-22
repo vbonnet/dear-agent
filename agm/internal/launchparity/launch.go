@@ -44,6 +44,7 @@ type PiCommandSpec struct {
 	SessionID            string
 	LaunchID             string
 	SessionDir           string
+	CodingAgentDir       string
 	PermissionMode       string
 	PermissionExtension  string
 	PermissionPolicyFile string
@@ -66,7 +67,11 @@ func NewPiLaunchID() string {
 func BuildPiCommand(spec PiCommandSpec) PiCommand {
 	var b strings.Builder
 	fmt.Fprintf(&b, "cd %s && env -u CLAUDECODE AGM_SESSION_NAME=%s PI_SESSION_ID=%s AGM_PI_LAUNCH_ID=%s AGM_PI_PROJECT_DIR=%s", ShellQuote(spec.WorkDir), ShellQuote(spec.SessionName), ShellQuote(spec.SessionID), ShellQuote(spec.LaunchID), ShellQuote(spec.WorkDir))
-	fmt.Fprintf(&b, " AGM_PI_PERMISSION_MODE=%s AGM_PI_PERMISSION_POLICY_FILE=%s pi", ShellQuote(defaultPiMode(spec.PermissionMode)), ShellQuote(spec.PermissionPolicyFile))
+	fmt.Fprintf(&b, " AGM_PI_PERMISSION_MODE=%s AGM_PI_PERMISSION_POLICY_FILE=%s", ShellQuote(defaultPiMode(spec.PermissionMode)), ShellQuote(spec.PermissionPolicyFile))
+	if spec.CodingAgentDir != "" {
+		fmt.Fprintf(&b, " PI_CODING_AGENT_DIR=%s", ShellQuote(spec.CodingAgentDir))
+	}
+	b.WriteString(" pi")
 	fmt.Fprintf(&b, " --session-id %s --session-dir %s --name %s", ShellQuote(spec.SessionID), ShellQuote(spec.SessionDir), ShellQuote(spec.SessionName))
 	if spec.ResolvedModel != "" {
 		fmt.Fprintf(&b, " --model %s", ShellQuote(spec.ResolvedModel))

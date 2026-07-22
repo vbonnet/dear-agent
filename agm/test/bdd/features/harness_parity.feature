@@ -124,6 +124,13 @@ Feature: Harness parity
       | opencode-cli | plan |
       | pi-cli       | plan |
 
+  Scenario: Pi custom configuration survives tmux create and cold resume
+    Given a validated Pi custom coding-agent directory
+    When AGM builds Pi create and cold-resume commands from native metadata
+    Then both Pi commands should forward the safely quoted coding-agent directory
+    And Pi native metadata should preserve the coding-agent directory
+    And default Pi launch should leave native configuration discovery unchanged
+
   Scenario Outline: Active harness startup is transactional
     Given active harness "<harness>" uses startup mode "default"
     When AGM validates final startup liveness

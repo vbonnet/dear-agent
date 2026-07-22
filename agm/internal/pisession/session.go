@@ -148,6 +148,30 @@ func ValidateRoot(root string) (string, error) {
 	return abs, nil
 }
 
+// ValidateCodingAgentDir resolves an explicitly configured Pi agent directory
+// and rejects missing, symlink, or non-directory targets before the path is
+// persisted or interpolated into a launch command.
+// An empty value preserves Pi's native default configuration discovery.
+func ValidateCodingAgentDir(root string) (string, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return "", nil
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve Pi coding agent directory: %w", err)
+	}
+	abs = filepath.Clean(abs)
+	info, err := os.Lstat(abs)
+	if err != nil {
+		return "", fmt.Errorf("stat Pi coding agent directory: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return "", fmt.Errorf("pi coding agent directory must be a non-symlink directory: %q", root)
+	}
+	return abs, nil
+}
+
 func validateOwnedTranscript(sessionRoot, path string) (string, fs.FileInfo, error) {
 	root, err := ValidateRoot(sessionRoot)
 	if err != nil {

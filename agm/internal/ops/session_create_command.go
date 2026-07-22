@@ -69,11 +69,13 @@ func BuildHarnessLaunchCommand(spec HarnessLaunchSpec) HarnessLaunchCommand {
 func buildPiLaunchCommand(spec HarnessLaunchSpec) HarnessLaunchCommand {
 	nativeID := spec.SessionID
 	sessionDir := ""
+	codingAgentDir := ""
 	if spec.Pi != nil {
 		if spec.Pi.SessionID != "" {
 			nativeID = spec.Pi.SessionID
 		}
 		sessionDir = spec.Pi.SessionDir
+		codingAgentDir = spec.Pi.CodingAgentDir
 	}
 	launchID := spec.PiLaunchID
 	if launchID == "" {
@@ -82,6 +84,7 @@ func buildPiLaunchCommand(spec HarnessLaunchSpec) HarnessLaunchCommand {
 	command := launchparity.BuildPiCommand(launchparity.PiCommandSpec{
 		WorkDir: spec.WorkDir, ResolvedModel: agent.ResolveModelFullName("pi-cli", spec.Model),
 		SessionName: spec.SessionName, SessionID: nativeID, LaunchID: launchID, SessionDir: sessionDir,
+		CodingAgentDir: codingAgentDir,
 		PermissionMode: spec.PermissionMode, PermissionExtension: spec.PiExtension,
 		PermissionPolicyFile: spec.PiPolicyFile, Persistent: spec.Persistent,
 	})

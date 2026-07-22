@@ -20,6 +20,7 @@ func TestManifestAcceptsPiMetadata(t *testing.T) {
 			SessionID:      "pi-session",
 			SessionDir:     "/tmp/pi-sessions",
 			TranscriptPath: "/tmp/pi-sessions/session.jsonl",
+			CodingAgentDir: "/tmp/pi-agent",
 		},
 	}
 	if err := m.Validate(); err != nil {

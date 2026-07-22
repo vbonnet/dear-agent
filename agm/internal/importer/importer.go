@@ -84,11 +84,15 @@ func importPiOrphanedSession(nativeID, sessionName, workspace string, adapter *d
 	if err := ValidateNotDuplicate(nativeID, adapter); err != nil {
 		return "", err
 	}
+	codingAgentDir, err := pisession.ValidateCodingAgentDir(os.Getenv("PI_CODING_AGENT_DIR"))
+	if err != nil {
+		return "", err
+	}
 	privateRoot, err := pisession.EnsureRoot("")
 	if err != nil {
 		return "", err
 	}
-	native, transcript, createdCopy, err := resolvePiImport(nativeID, privateRoot)
+	native, transcript, createdCopy, err := resolvePiImport(nativeID, privateRoot, codingAgentDir)
 	if err != nil {
 		return "", err
 	}
@@ -101,14 +105,14 @@ func importPiOrphanedSession(nativeID, sessionName, workspace string, adapter *d
 		return "", rollbackPiImport(privateRoot, transcript, createdCopy, fmt.Errorf("read Pi native model: %w", modelErr))
 	}
 	sessionID := uuid.New().String()
-	m := buildPiImportedManifest(native, transcript, privateRoot, model, sessionName, workspace, sessionID, modifiedAt, time.Now())
+	m := buildPiImportedManifest(native, transcript, privateRoot, codingAgentDir, model, sessionName, workspace, sessionID, modifiedAt, time.Now())
 	if err := adapter.CreateSession(m); err != nil {
 		return "", rollbackPiImport(privateRoot, transcript, createdCopy, fmt.Errorf("failed to create session in Dolt: %w", err))
 	}
 	return sessionID, nil
 }
 
-func resolvePiImport(nativeID, privateRoot string) (pisession.Metadata, string, bool, error) {
+func resolvePiImport(nativeID, privateRoot, codingAgentDir string) (pisession.Metadata, string, bool, error) {
 	transcript, findErr := pisession.FindTranscript(privateRoot, nativeID)
 	switch {
 	case findErr == nil:
@@ -118,7 +122,7 @@ func resolvePiImport(nativeID, privateRoot string) (pisession.Metadata, string, 
 		return pisession.Metadata{}, "", false, findErr
 	}
 
-	agentDir := os.Getenv("PI_CODING_AGENT_DIR")
+	agentDir := codingAgentDir
 	if agentDir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -144,7 +148,7 @@ func rollbackPiImport(privateRoot, transcript string, created bool, primary erro
 	return primary
 }
 
-func buildPiImportedManifest(native pisession.Metadata, transcript, sessionDir, model, sessionName, workspace, sessionID string, createdAt, now time.Time) *manifest.Manifest {
+func buildPiImportedManifest(native pisession.Metadata, transcript, sessionDir, codingAgentDir, model, sessionName, workspace, sessionID string, createdAt, now time.Time) *manifest.Manifest {
 	if createdAt.IsZero() {
 		createdAt = now
 	}
@@ -153,8 +157,11 @@ func buildPiImportedManifest(native pisession.Metadata, transcript, sessionDir, 
 		CreatedAt: createdAt, UpdatedAt: now, Workspace: workspace, Harness: "pi-cli",
 		Model: model, WorkingDirectory: native.CWD,
 		Context: manifest.Context{Project: native.CWD},
-		Pi:      &manifest.Pi{SessionID: native.ID, SessionDir: sessionDir, TranscriptPath: transcript},
-		Tmux:    manifest.Tmux{SessionName: tmux.SanitizeSessionName(sessionName)},
+		Pi: &manifest.Pi{
+			SessionID: native.ID, SessionDir: sessionDir, TranscriptPath: transcript,
+			CodingAgentDir: codingAgentDir,
+		},
+		Tmux: manifest.Tmux{SessionName: tmux.SanitizeSessionName(sessionName)},
 	}
 }
 
