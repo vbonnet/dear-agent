@@ -154,7 +154,9 @@ matching the exact provider-qualified route recorded by Pi applies even when
 the provider or model is newer than AGM's static tables; unqualified orphan
 overrides remain conservative. Malformed, oversized, symlinked,
 group- or other-writable, ambiguous, or invalid catalog data retains AGM's
-conservative 200000-token fallback.
+conservative 200000-token fallback. An unqualified legacy model is accepted
+only when exactly one provider matches; a second match remains ambiguous even
+when both windows are equal or one declaration is invalid.
 Pi does not expose a provider quota/rate-limit API, so those fields are
 reported as unavailable rather than populated with Claude-specific values.
 

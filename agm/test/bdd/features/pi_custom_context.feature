@@ -51,3 +51,10 @@ Feature: Pi custom model context
     When AGM detects the managed Pi context
     Then the Pi context should report 3562 of 200000 tokens used
     And the Pi context model should be "ollama/qwen2.5-coder:7b"
+
+  Scenario: An unqualified legacy model never guesses between providers
+    Given a managed Pi transcript omits its provider for model "shared-model"
+    And two Pi catalog providers declare "shared-model" with the same 8192 token window
+    When AGM detects the managed Pi context
+    Then the Pi context should report 3562 of 200000 tokens used
+    And the Pi context model should be "shared-model"

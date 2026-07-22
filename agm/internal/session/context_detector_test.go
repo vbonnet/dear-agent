@@ -175,6 +175,18 @@ func TestPiConfiguredModelContextWindowTrustBoundaries(t *testing.T) {
 			},
 		},
 		{
+			name: "equal duplicate unqualified models remain ambiguous", model: "shared-model", want: 200000,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"one":{"models":[{"id":"shared-model","contextWindow":8192}]},"two":{"models":[{"id":"shared-model","contextWindow":8192}]}}}`)
+			},
+		},
+		{
+			name: "invalid duplicate unqualified model poisons the match", model: "shared-model", want: 200000,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"one":{"models":[{"id":"shared-model","contextWindow":8192}]},"two":{"models":[{"id":"shared-model","contextWindow":null}]}}}`)
+			},
+		},
+		{
 			name: "invalid explicit window falls back", model: "ollama/qwen2.5-coder:7b", want: 200000,
 			prepare: func(t *testing.T, dir string) {
 				writePiModelCatalogFixture(t, dir, `{"providers":{"ollama":{"models":[{"id":"qwen2.5-coder:7b","contextWindow":16777217}]}}}`)
