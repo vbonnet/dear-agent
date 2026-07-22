@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -58,11 +59,21 @@ func cadenceExit(code int, stateDir string, stderr io.Writer) int {
 	return code
 }
 
+// notifyNotifyTimeout bounds the osascript call. A launchd job runs without a
+// GUI session attached, so `osascript` can block indefinitely when Notification
+// Center is unavailable or wedged. An unbounded call there would hang the very
+// refresher this file exists to keep alive, so the alert is given a deadline
+// and abandoned if it misses it.
+const notifyTimeout = 5 * time.Second
+
 // notifyOperator raises a macOS notification. Alerting is best-effort: a
-// refresh must never fail because the notification did not render.
+// refresh must never fail — or stall — because the notification did not render.
 func notifyOperator(title, message string) {
+	ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)
+	defer cancel()
+
 	script := fmt.Sprintf("display notification %q with title %q sound name \"Basso\"", message, title)
-	cmd := exec.Command("osascript", "-e", script)
+	cmd := exec.CommandContext(ctx, "osascript", "-e", script)
 	_ = cmd.Run()
 }
 
