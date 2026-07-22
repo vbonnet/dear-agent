@@ -1087,6 +1087,8 @@ model catalog.
   default reserved for an omitted field.
 - An integral exponent-spelled context window resolves to the same exact token
   count that Pi uses, without accepting nearby fractional values.
+- Provider-less legacy history rejects two matching providers even when their
+  declared windows agree, rather than guessing a route from equal values.
 - Credential command strings in Pi's model catalog remain inert data.
 
 **Why this matters:** Custom providers are a supported Pi route. Using a static
