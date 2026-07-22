@@ -30,6 +30,7 @@ var (
 	agyHasSession          = tmux.HasSession
 	agyNewSession          = tmux.NewSession
 	agySendCommand         = tmux.SendCommand
+	agySendPromptLiteral   = tmux.SendPromptLiteral
 	agyWaitForPrompt       = tmux.WaitForAgyPrompt
 	agyWaitForResumePrompt = tmux.WaitForAgyPromptOnResume
 	agyCheckProcess        = tmux.CheckProcessInPaneTree
@@ -164,6 +165,11 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	// Wait for Agy to be ready
 	if err := agyWaitForPrompt(context.Background(), tmuxName, 30*time.Second); err != nil {
 		return "", rollbackAgyAdapterSession(tmuxName, fmt.Errorf("AGY did not become ready after create: %w", err))
+	}
+	if ctx.InitialPrompt != "" {
+		if err := agySendPromptLiteral(tmuxName, ctx.InitialPrompt, false); err != nil {
+			return "", rollbackAgyAdapterSession(tmuxName, fmt.Errorf("failed to deliver AGY initial prompt before identity discovery: %w", err))
+		}
 	}
 	if conversationID == "" {
 		metadata, identityErr := identityTracker.Discover(context.Background(), workDir, previousConversationID)

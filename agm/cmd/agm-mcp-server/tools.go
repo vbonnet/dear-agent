@@ -334,10 +334,17 @@ func (r *mcpCreateSessionRuntime) Complete(ctx context.Context, completion ops.C
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if completion.Prompt == "" {
+	if completion.Prompt == "" || completion.Launch.PromptDelivered {
 		return nil
 	}
 	return r.tmux.SendKeys(completion.Manifest.Name, completion.Prompt)
+}
+
+func (r *mcpCreateSessionRuntime) BootstrapAgyCreateIdentity(ctx context.Context, input ops.AgyCreateIdentityBootstrap) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return r.tmux.SendKeys(input.SessionName, input.Prompt)
 }
 
 // mcpTracer is the OTel tracer for MCP tool handlers.

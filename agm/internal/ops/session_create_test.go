@@ -47,6 +47,15 @@ type createTestRuntime struct {
 	complete func(context.Context, CreateSessionCompletion) error
 }
 
+type createTestAgyBootstrapRuntime struct {
+	*createTestRuntime
+	bootstrap func(context.Context, AgyCreateIdentityBootstrap) error
+}
+
+func (r *createTestAgyBootstrapRuntime) BootstrapAgyCreateIdentity(ctx context.Context, input AgyCreateIdentityBootstrap) error {
+	return r.bootstrap(ctx, input)
+}
+
 type createTestAgyIdentityTracker struct {
 	snapshot func(context.Context, string) (string, error)
 	discover func(context.Context, string, string) (*agysession.Metadata, error)
@@ -212,9 +221,16 @@ func TestCreateSession_AgyDetachedPromptUsesCanonicalCommand(t *testing.T) {
 	dir := t.TempDir()
 	tmuxMock := session.NewMockTmux()
 	store := &createMockStorage{}
+	tracker := successfulCreateTestAgyIdentityTracker()
+	tracker.discover = func(_ context.Context, workDir, _ string) (*agysession.Metadata, error) {
+		if len(tmuxMock.SentCommands) != 2 || tmuxMock.SentCommands[1] != "detached AGY prompt" {
+			t.Fatalf("commands before identity discovery = %v, want launch then startup prompt", tmuxMock.SentCommands)
+		}
+		return &agysession.Metadata{ConversationID: "new-native-id", WorkspacePath: workDir}, nil
+	}
 
 	result, err := CreateSession(&OpContext{
-		Tmux: tmuxMock, Storage: store, AgyCreateIdentityTracker: successfulCreateTestAgyIdentityTracker(),
+		Tmux: tmuxMock, Storage: store, AgyCreateIdentityTracker: tracker,
 	}, &CreateSessionRequest{
 		Cwd: dir, Prompt: "detached AGY prompt", Title: "agy-detached",
 		Harness: "agy", Model: "3.5-flash-low", PermissionMode: "auto",
@@ -247,6 +263,167 @@ func TestCreateSession_AgyDetachedPromptUsesCanonicalCommand(t *testing.T) {
 	}
 	if len(store.created) != 1 || store.created[0].Harness != "agy" || store.created[0].Model != "3.5-flash-low" {
 		t.Fatalf("stored AGY manifest = %+v", store.created)
+	}
+}
+
+func TestIntegration_CreateSession_AgyBootstrapsLazyIdentityBeforeRegistrationExactlyOnce(t *testing.T) {
+	dir := t.TempDir()
+	tmuxMock := session.NewMockTmux()
+	store := &createMockStorage{}
+	locked := false
+	promptDeliveries := 0
+	order := []string{}
+	runtime := &createTestAgyBootstrapRuntime{createTestRuntime: &createTestRuntime{}}
+	runtime.launch = func(ctx context.Context, spec HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+		if ctx != t.Context() || !locked || spec.SessionName != "agy-lazy-identity" {
+			t.Fatalf("launch input = caller:%t locked:%t session:%q", ctx == t.Context(), locked, spec.SessionName)
+		}
+		order = append(order, "launch")
+		return CreateSessionLaunchResult{}, nil
+	}
+	runtime.bootstrap = func(ctx context.Context, input AgyCreateIdentityBootstrap) error {
+		if ctx != t.Context() || !locked || input.SessionName != "agy-lazy-identity" || input.Prompt != "persist me once" {
+			t.Fatalf("bootstrap input = caller:%t locked:%t %+v", ctx == t.Context(), locked, input)
+		}
+		promptDeliveries++
+		order = append(order, "prompt")
+		return nil
+	}
+	runtime.complete = func(ctx context.Context, completion CreateSessionCompletion) error {
+		if ctx != t.Context() || locked {
+			t.Fatalf("completion input = caller:%t locked:%t", ctx == t.Context(), locked)
+		}
+		if !completion.Launch.PromptDelivered || completion.Prompt != "persist me once" {
+			t.Fatalf("completion prompt state = delivered:%t prompt:%q", completion.Launch.PromptDelivered, completion.Prompt)
+		}
+		order = append(order, "complete")
+		return nil
+	}
+	tracker := &createTestAgyIdentityTracker{
+		snapshot: func(context.Context, string) (string, error) {
+			order = append(order, "snapshot")
+			return "old-native-id", nil
+		},
+		discover: func(_ context.Context, workDir, previous string) (*agysession.Metadata, error) {
+			if !locked || promptDeliveries != 1 || previous != "old-native-id" {
+				t.Fatalf("discovery state = locked:%t prompt deliveries:%d previous:%q", locked, promptDeliveries, previous)
+			}
+			order = append(order, "discover")
+			return &agysession.Metadata{ConversationID: "new-native-id", WorkspacePath: workDir}, nil
+		},
+	}
+	store.onCreate = func() {
+		if !locked || promptDeliveries != 1 || store.created[0].Agy == nil || store.created[0].Agy.ConversationID != "new-native-id" {
+			t.Fatalf("registration state = locked:%t prompt deliveries:%d manifest:%+v", locked, promptDeliveries, store.created[0])
+		}
+		order = append(order, "register")
+	}
+
+	result, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+		AgyCreateIdentityTracker: tracker,
+		AgyWorkspaceCreateLocker: func(context.Context, string) (func() error, error) {
+			locked = true
+			order = append(order, "lock")
+			return func() error {
+				locked = false
+				order = append(order, "unlock")
+				return nil
+			}, nil
+		},
+	}, &CreateSessionRequest{
+		Cwd: dir, Prompt: "persist me once", Title: "agy-lazy-identity", Harness: "agy",
+		Model: "3.5-flash-low", SessionID: "agy-lazy-id", RequireStorage: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateSessionWithContext: %v", err)
+	}
+	if result.SessionID != "agy-lazy-id" || promptDeliveries != 1 {
+		t.Fatalf("result/prompt deliveries = %+v/%d", result, promptDeliveries)
+	}
+	wantOrder := []string{"lock", "snapshot", "launch", "prompt", "discover", "register", "unlock", "complete"}
+	if !reflect.DeepEqual(order, wantOrder) {
+		t.Fatalf("AGY lazy identity lifecycle = %v, want %v", order, wantOrder)
+	}
+}
+
+func TestCreateSession_AgyRejectsMissingIdentityBootstrapPromptBeforeMutation(t *testing.T) {
+	tmuxMock := session.NewMockTmux()
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{Tmux: tmuxMock}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Prompt: " \n\t", Title: "agy-no-prompt", Harness: "agy", Model: "3.5-flash-low", AllowEmptyPrompt: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "startup prompt is required") {
+		t.Fatalf("CreateSessionWithContext error = %v, want actionable AGY prompt requirement", err)
+	}
+	if len(tmuxMock.CreatedSessions) != 0 || len(tmuxMock.SentCommands) != 0 {
+		t.Fatalf("missing-prompt create mutated tmux: created=%v sent=%v", tmuxMock.CreatedSessions, tmuxMock.SentCommands)
+	}
+}
+
+func TestCreateSession_AgyBootstrapFailureRollsBackBeforeDiscoveryAndRegistration(t *testing.T) {
+	dir := t.TempDir()
+	tmuxMock := session.NewMockTmux()
+	store := &createMockStorage{}
+	discovered, completed := false, false
+	wantErr := errors.New("fixture prompt delivery failed")
+	runtime := &createTestAgyBootstrapRuntime{
+		createTestRuntime: &createTestRuntime{complete: func(context.Context, CreateSessionCompletion) error {
+			completed = true
+			return nil
+		}},
+		bootstrap: func(context.Context, AgyCreateIdentityBootstrap) error { return wantErr },
+	}
+	tracker := successfulCreateTestAgyIdentityTracker()
+	tracker.discover = func(context.Context, string, string) (*agysession.Metadata, error) {
+		discovered = true
+		return nil, nil
+	}
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime, AgyCreateIdentityTracker: tracker,
+	}, &CreateSessionRequest{
+		Cwd: dir, Prompt: "must roll back", Title: "agy-bootstrap-failure", Harness: "agy", Model: "3.5-flash-low",
+	})
+	if err == nil || !strings.Contains(err.Error(), wantErr.Error()) {
+		t.Fatalf("CreateSessionWithContext error = %v, want %v", err, wantErr)
+	}
+	if discovered || completed || len(store.created) != 0 || tmuxMock.Sessions["agy-bootstrap-failure"] {
+		t.Fatalf("post-failure state = discovered:%t completed:%t registrations:%d tmux:%t", discovered, completed, len(store.created), tmuxMock.Sessions["agy-bootstrap-failure"])
+	}
+}
+
+func TestCreateSession_AgyCancellationDuringIdentityBootstrapRollsBackWithCallerError(t *testing.T) {
+	dir := t.TempDir()
+	ctx, cancel := context.WithCancel(t.Context())
+	tmuxMock := session.NewMockTmux()
+	store := &createMockStorage{}
+	discovered, completed := false, false
+	runtime := &createTestAgyBootstrapRuntime{
+		createTestRuntime: &createTestRuntime{complete: func(context.Context, CreateSessionCompletion) error {
+			completed = true
+			return nil
+		}},
+		bootstrap: func(context.Context, AgyCreateIdentityBootstrap) error {
+			cancel()
+			return context.Canceled
+		},
+	}
+	tracker := successfulCreateTestAgyIdentityTracker()
+	tracker.discover = func(context.Context, string, string) (*agysession.Metadata, error) {
+		discovered = true
+		return nil, nil
+	}
+
+	_, err := CreateSessionWithContext(ctx, &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime, AgyCreateIdentityTracker: tracker,
+	}, &CreateSessionRequest{
+		Cwd: dir, Prompt: "cancel while sending", Title: "agy-bootstrap-cancel", Harness: "agy", Model: "3.5-flash-low",
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("CreateSessionWithContext error = %v, want context.Canceled", err)
+	}
+	if discovered || completed || len(store.created) != 0 || tmuxMock.Sessions["agy-bootstrap-cancel"] {
+		t.Fatalf("post-cancel state = discovered:%t completed:%t registrations:%d tmux:%t", discovered, completed, len(store.created), tmuxMock.Sessions["agy-bootstrap-cancel"])
 	}
 }
 

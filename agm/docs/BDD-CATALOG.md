@@ -307,6 +307,10 @@ creation, and terminal state detection.
   snapshot is unreadable or incomplete, preserves known model provenance on
   cold resume, and omits a model override when an imported conversation's
   native selection is unknown.
+- Fresh AGY startup prompts bootstrap lazy provider identity under the shared
+  workspace lock before registration, remain out of process arguments, and are
+  marked consumed so CLI, MCP, adapter, and completion paths deliver them only
+  once; missing prompts and bootstrap failures fail before durable success.
 - AGY creation normalizes relative workspaces and shares cancellation-aware
   native identity serialization across CLI, MCP, and adapter lifecycle paths;
   launch, resume, and history reject unsafe provider identifiers before

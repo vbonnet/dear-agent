@@ -419,6 +419,13 @@ Feature: Harness parity
     Then MCP creation should wait for the AGY composer before prompt delivery
     And shared creation should persist the new AGY identity before registration
 
+  Scenario: AGY startup prompt bootstraps lazy provider identity exactly once
+    Given AGY is available
+    When AGM validates AGY lazy identity bootstrap
+    Then shared creation should deliver the AGY startup prompt before identity discovery
+    And every AGY creation surface should avoid duplicate prompt delivery
+    And AGY bootstrap failures should preserve transactional rollback
+
   Scenario: Active-harness creation signals preserve rollback
     Given AGY is available
     When AGM validates AGY root cancellation plumbing

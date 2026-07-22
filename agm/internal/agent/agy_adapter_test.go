@@ -43,6 +43,7 @@ func preserveAgyAdapterSeams(t *testing.T) {
 	origHasSession := agyHasSession
 	origNewSession := agyNewSession
 	origSendCommand := agySendCommand
+	origSendPromptLiteral := agySendPromptLiteral
 	origWaitForPrompt := agyWaitForPrompt
 	origWaitForResumePrompt := agyWaitForResumePrompt
 	origCheckProcess := agyCheckProcess
@@ -59,6 +60,7 @@ func preserveAgyAdapterSeams(t *testing.T) {
 		agyHasSession = origHasSession
 		agyNewSession = origNewSession
 		agySendCommand = origSendCommand
+		agySendPromptLiteral = origSendPromptLiteral
 		agyWaitForPrompt = origWaitForPrompt
 		agyWaitForResumePrompt = origWaitForResumePrompt
 		agyCheckProcess = origCheckProcess
@@ -295,6 +297,81 @@ func TestAgyCreateSessionCapturesNativeConversationIdentity(t *testing.T) {
 	}
 	if discoveredWorkDir != "/work" || snapshotCalls != 1 || discoveryCalls != 1 || metadata.UUID != "provider-conversation-id" {
 		t.Fatalf("discovered workdir/snapshot/discovery calls/native ID = %q/%d/%d/%q", discoveredWorkDir, snapshotCalls, discoveryCalls, metadata.UUID)
+	}
+}
+
+func TestAgyCreateSessionBootstrapsLazyNativeIdentityWithInitialPrompt(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	agyHasSession = func(string) (bool, error) { return false, nil }
+	agyNewSession = func(string, string) error { return nil }
+	launches := 0
+	agySendCommand = func(string, string) error { launches++; return nil }
+	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return nil }
+	promptDeliveries := 0
+	agySendPromptLiteral = func(sessionName, prompt string, interrupt bool) error {
+		if sessionName != "agy-lazy-adapter" || prompt != "persist adapter prompt" || interrupt {
+			t.Fatalf("initial prompt delivery = %q/%q/%t", sessionName, prompt, interrupt)
+		}
+		promptDeliveries++
+		return nil
+	}
+	useStubAgyIdentityTracker(
+		func(context.Context, string) (string, error) { return "old-native-id", nil },
+		func(_ context.Context, workDir, previous string) (*agysession.Metadata, error) {
+			if promptDeliveries != 1 || previous != "old-native-id" {
+				t.Fatalf("identity discovery state = prompt deliveries:%d previous:%q", promptDeliveries, previous)
+			}
+			return &agysession.Metadata{ConversationID: "new-native-id", WorkspacePath: workDir}, nil
+		},
+	)
+
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	id, err := (&AgyAdapter{sessionStore: store}).CreateSession(SessionContext{
+		Name: "agy-lazy-adapter", WorkingDirectory: "/work", Model: "3.5-flash-low", InitialPrompt: "persist adapter prompt",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := store.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if launches != 1 || promptDeliveries != 1 || metadata.UUID != "new-native-id" {
+		t.Fatalf("adapter lifecycle = launches:%d prompts:%d native ID:%q", launches, promptDeliveries, metadata.UUID)
+	}
+}
+
+func TestAgyCreateSessionRollsBackWhenInitialPromptBootstrapFails(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	agyHasSession = func(string) (bool, error) { return false, nil }
+	agyNewSession = func(string, string) error { return nil }
+	agySendCommand = func(string, string) error { return nil }
+	agyWaitForPrompt = func(context.Context, string, time.Duration) error { return nil }
+	wantErr := errors.New("fixture initial prompt failure")
+	agySendPromptLiteral = func(string, string, bool) error { return wantErr }
+	discovered := false
+	useStubAgyIdentityTracker(
+		func(context.Context, string) (string, error) { return "old-native-id", nil },
+		func(context.Context, string, string) (*agysession.Metadata, error) {
+			discovered = true
+			return nil, nil
+		},
+	)
+	killed := ""
+	agyKillSession = func(name string) error { killed = name; return nil }
+
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	_, err := (&AgyAdapter{sessionStore: store}).CreateSession(SessionContext{
+		Name: "agy-bootstrap-failure", WorkingDirectory: "/work", Model: "3.5-flash-low", InitialPrompt: "must fail",
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("CreateSession error = %v, want %v", err, wantErr)
+	}
+	if discovered || killed != "agy-bootstrap-failure" {
+		t.Fatalf("failure state = discovered:%t killed:%q", discovered, killed)
+	}
+	if sessions, listErr := store.List(); listErr != nil || len(sessions) != 0 {
+		t.Fatalf("failed create persisted sessions = %v, %v", sessions, listErr)
 	}
 }
 

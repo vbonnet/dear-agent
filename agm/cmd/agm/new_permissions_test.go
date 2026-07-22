@@ -626,6 +626,7 @@ func createPermissionManifest(t *testing.T, harness, model, permissionMode strin
 		launch: func(context.Context, ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
 			return ops.CreateSessionLaunchResult{}, nil
 		},
+		bootstrapAgyIdentity: func(context.Context, ops.AgyCreateIdentityBootstrap) error { return nil },
 		complete: func(_ context.Context, completion ops.CreateSessionCompletion) error {
 			got = completion.Manifest
 			return nil
@@ -639,6 +640,7 @@ func createPermissionManifest(t *testing.T, harness, model, permissionMode strin
 	}
 	_, err := ops.CreateSessionWithContext(context.Background(), opCtx, &ops.CreateSessionRequest{
 		Cwd:                    t.TempDir(),
+		Prompt:                 "fixture startup prompt",
 		Title:                  "session-name",
 		Model:                  model,
 		Harness:                harness,

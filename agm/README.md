@@ -26,7 +26,7 @@ automatic session tracking.
 ```bash
 # Create session with specific harness
 agm new --harness claude-code my-coding-session   # Claude Code: code, reasoning
-agm new --harness agy research-task               # Antigravity: interactive native conversation
+agm new --harness agy --prompt "Start the research task" research-task  # Antigravity: prompt creates native identity
 agm new --harness codex-cli chat-session          # Codex CLI: native interactive CLI and OAuth
 agm new --harness opencode-cli dev-session        # OpenCode CLI: native SSE monitoring
 agm new --harness pi-cli pi-session               # Pi: native JSONL sessions and managed tool authorization
