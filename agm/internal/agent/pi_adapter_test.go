@@ -286,6 +286,7 @@ func TestPiAdapterResumeLeavesLivePiUntouched(t *testing.T) {
 	withPiAdapterRuntime(t)
 	t.Setenv("TMUX", "fixture")
 	store := piResumeFixtureStore(t, "pi-live")
+	store.sessions["agm-id"].CodingAgentDir = filepath.Join(t.TempDir(), "removed-config")
 	piHasSession = func(string) (bool, error) { return true, nil }
 	piCheckProcess = func(string, string) (bool, error) { return true, nil }
 	sent := false
@@ -297,6 +298,23 @@ func TestPiAdapterResumeLeavesLivePiUntouched(t *testing.T) {
 	}
 	if sent {
 		t.Fatal("ResumeSession injected a command into an already-live Pi process")
+	}
+}
+
+func TestPiAdapterResumeValidatesConfigBeforeCreatingRelaunchTmux(t *testing.T) {
+	withPiAdapterRuntime(t)
+	store := piResumeFixtureStore(t, "pi-relaunch")
+	store.sessions["agm-id"].CodingAgentDir = filepath.Join(t.TempDir(), "missing-config")
+	created := false
+	piNewSession = func(string, string) error { created = true; return nil }
+
+	adapter, _ := NewPiAdapter(store)
+	err := adapter.ResumeSession("agm-id")
+	if err == nil || !strings.Contains(err.Error(), "coding agent directory") {
+		t.Fatalf("ResumeSession error = %v, want invalid coding-agent directory", err)
+	}
+	if created {
+		t.Fatal("ResumeSession created tmux before validating relaunch configuration")
 	}
 }
 

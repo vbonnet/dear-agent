@@ -31,6 +31,8 @@ directly, including the optional harness-process liveness capability
 
 **SESS-09** When a Pi transcript identifies a configured model declaration or an override matching its exact provider-qualified route, the system shall read only a bounded non-symlink regular `models.json` that is not writable by group or other users, shall resolve the case-sensitive provider separately from the complete opaque model ID with Pi declaration and override precedence independently of AGM's static model-window and provider tables, shall distinguish an omitted custom-model window from an explicit null, shall accept positive integral explicit context windows no larger than 16,777,216 tokens regardless of equivalent JSON integer, decimal, or exponent spelling, and shall fall back without evaluating credential or header values when the catalog or match is absent, malformed, unsafe, fractional, invalid, or oversized or when an unqualified model ID matches more than one provider regardless of equal values or validity.
 
+**SESS-10** When AGM calculates context usage for a Pi session, the system shall resolve custom model metadata from the coding-agent directory persisted with that session, including an intentional empty value for Pi's native default, rather than from the status caller's current `PI_CODING_AGENT_DIR` environment.
+
 ## Key Invariants
 
 - **Capability, not contract widening.** `HarnessLivenessChecker` is a
