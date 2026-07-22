@@ -117,7 +117,7 @@ Provide a production-ready CLI that:
 
 **CLI-43** When automatic workspace discovery finds repositories that do not contain the requested project directory, the system shall retain those repositories, prepend the nearest Git repository containing the requested directory, and reject sandbox creation if the requested directory has no safe containing Git repository.
 
-**CLI-44** When direct, fan-out, structured, daemon-queued, or fresh-startup delivery targets an AGY session, the command shall propagate the resolved `agy` harness through the shared tmux delivery boundary so attribution and multiline bodies remain one native request; unresolved and non-AGY sessions shall retain their established delivery semantics.
+**CLI-44** When direct, fan-out, structured, daemon-queued, fresh-startup, or post-resume delivery targets an AGY session, the command shall propagate the resolved `agy` harness through the shared tmux delivery boundary so attribution and multiline bodies remain one native request; unresolved and non-AGY sessions shall retain their established delivery semantics.
 
 ## Requirements
 
