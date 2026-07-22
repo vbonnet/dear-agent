@@ -11,7 +11,8 @@
 //
 //	load > max-load-ratio × NumCPU OR memfree < min-free-mem-pct:
 //	    Extend ~/.agm/last-spawn.txt by one interval to pause new spawns.
-//	    Spawns resume automatically when the timestamp passes.
+//	    Earliest admission is the timestamp plus AGM's spawn-safety interval,
+//	    provided the governor stops extending the hold and all other gates pass.
 //
 //	memfree < min-free-mem-pct-critical:
 //	    Archive the newest active worker session to reclaim memory.
@@ -30,8 +31,9 @@
 //	    unreadable case escalates to the brake, because that is the case where we
 //	    do not know what we are waiting for.
 //
-//	Otherwise: release the brake and do nothing (spawns self-resume when
-//	last-spawn.txt expires).
+//	Otherwise: release the brake and stop extending last-spawn.txt. The existing
+//	hold and AGM's spawn-safety interval still elapse before other gates may
+//	admit a spawn.
 //
 // Exits cleanly on SIGTERM/SIGINT.
 package main
@@ -216,8 +218,8 @@ func buildReason(loadHigh bool, load, maxLoad float64, memLow bool, memPct, minF
 	return strings.Join(parts, ", ")
 }
 
-// pauseSpawns writes a future timestamp to last-spawn.txt, causing the
-// stagger gate to refuse spawns until that time passes.
+// pauseSpawns writes a future timestamp to last-spawn.txt. The stagger gate
+// refuses spawns through that hold and its configured post-hold safety interval.
 func pauseSpawns(spawnFile string, pauseDuration time.Duration) error {
 	future := time.Now().Add(pauseDuration)
 	dir := filepath.Dir(spawnFile)
