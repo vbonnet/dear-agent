@@ -10,6 +10,8 @@ import (
 
 // TestPluginExecution verifies full plugin loading and execution pipeline
 func TestPluginExecution(t *testing.T) {
+	requireExecutableSandbox(t)
+
 	// Create temporary directory for test plugin
 	tmpDir := t.TempDir()
 
