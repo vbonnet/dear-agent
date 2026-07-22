@@ -14,6 +14,8 @@
 
 **BDDS-05** When sandbox isolation is validated in a shared repository, the step shall compare worktree records within the invoking checkout and shall ignore sibling worktree churn owned by concurrent tasks.
 
+**BDDS-06** When a real-tmux regression self-skips because the execution environment denies process-table inspection, the step definitions shall accept that exact capability diagnosis while rejecting every other unconfigured skip.
+
 **BDDS-ROOT-01** When BDD steps resolve the repository from a nested package working directory, the system shall find the nearest ancestor containing `go.mod` and `agm` without relying on compiler source paths.
 
 ## BDD Traceability
