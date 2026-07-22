@@ -17,7 +17,7 @@ const (
 	// HarnessInputBusy means the harness does not currently own an empty composer.
 	HarnessInputBusy = "QUEUE"
 	// HarnessInputQueuedAGM means a queued-input marker and complete AGM message
-	// header positively identify a stuck AGM paste in the live pane tail.
+	// header positively identify a stuck AGM paste in the current logical composer.
 	HarnessInputQueuedAGM = "QUEUED_AGM"
 	// HarnessInputPermission means a permission decision currently owns input.
 	HarnessInputPermission = "PERMISSION"
@@ -43,7 +43,9 @@ type HarnessInputReadiness struct {
 
 // InputDeliveryOptions controls narrowly scoped exceptions inside the tmux
 // mutation boundary. AllowQueuedAGM accepts only a positively identified stuck
-// AGM paste after the expected foreground harness and exact pane are proved.
+// AGM paste after the expected foreground harness and exact pane are proved;
+// the implementation clears and re-proves that exact composer before replacing
+// the queued input.
 type InputDeliveryOptions struct {
 	AllowQueuedAGM bool
 }
@@ -74,7 +76,7 @@ func CheckExpectedHarnessInput(ctx context.Context, sessionName, harness string)
 	if !liveness.HarnessAlive {
 		return HarnessInputReadiness{State: HarnessInputWrongHarness, TargetPane: pane.ID}, nil
 	}
-	styledContent, err := CapturePaneANSIOutputTargetContext(ctx, pane.ID, 30)
+	styledContent, err := CapturePaneLogicalANSIOutputTargetContext(ctx, pane.ID)
 	if err != nil {
 		return HarnessInputReadiness{}, fmt.Errorf("capture expected %s pane: %w", harness, err)
 	}
@@ -109,16 +111,82 @@ func CheckExpectedHarnessInputAndSend(ctx context.Context, sessionName, harness,
 		if !allowed {
 			return nil
 		}
-		if forced {
-			readiness.Ready = true
-			readiness.Forced = true
-		}
 		if !isPaneID(readiness.TargetPane) {
 			return fmt.Errorf("ready harness returned invalid tmux pane ID %q", readiness.TargetPane)
+		}
+		if forced {
+			readiness.Ready = false
+			readiness.Forced = true
+			recovered, recoveryErr := replaceQueuedAGMInputLocked(ctx, readiness.TargetPane, command, queuedAGMRecoveryRuntime{
+				sendKey: sendReadinessKey,
+				wait:    sleepWithContext,
+				recheck: func() (HarnessInputReadiness, error) {
+					return CheckExpectedHarnessInput(ctx, sessionName, harness)
+				},
+				deliver: func(ctx context.Context, targetPane, command string) error {
+					return sendCommandToTargetForHarnessLocked(ctx, targetPane, command, harness)
+				},
+			})
+			if recoveryErr != nil {
+				return recoveryErr
+			}
+			readiness = recovered
+			return nil
 		}
 		return sendCommandToTargetForHarnessLocked(ctx, readiness.TargetPane, command, harness)
 	})
 	return readiness, err
+}
+
+type queuedAGMRecoveryRuntime struct {
+	sendKey func(context.Context, string, string) error
+	wait    func(context.Context, time.Duration) error
+	recheck func() (HarnessInputReadiness, error)
+	deliver func(context.Context, string, string) error
+}
+
+// replaceQueuedAGMInputLocked clears one positively identified AGM-owned
+// composer and proves that the same exact pane now owns an empty composer before
+// delivering its replacement. The caller must hold the tmux mutation lock.
+func replaceQueuedAGMInputLocked(ctx context.Context, targetPane, command string, runtime queuedAGMRecoveryRuntime) (HarnessInputReadiness, error) {
+	clearSteps := []struct {
+		key   string
+		pause time.Duration
+	}{
+		{key: "C-c", pause: 200 * time.Millisecond},
+		{key: "C-u", pause: 100 * time.Millisecond},
+		{key: "C-a"},
+		{key: "C-k", pause: 300 * time.Millisecond},
+	}
+	for _, step := range clearSteps {
+		if err := runtime.sendKey(ctx, targetPane, step.key); err != nil {
+			return HarnessInputReadiness{State: HarnessInputQueuedAGM, TargetPane: targetPane, Forced: true}, fmt.Errorf("clear queued AGM input with %s: %w", step.key, err)
+		}
+		if step.pause > 0 {
+			if err := runtime.wait(ctx, step.pause); err != nil {
+				return HarnessInputReadiness{State: HarnessInputQueuedAGM, TargetPane: targetPane, Forced: true}, fmt.Errorf("wait for queued AGM input clear: %w", err)
+			}
+		}
+	}
+
+	cleared, err := runtime.recheck()
+	if err != nil {
+		return HarnessInputReadiness{State: HarnessInputQueuedAGM, TargetPane: targetPane, Forced: true}, fmt.Errorf("recheck cleared queued AGM input: %w", err)
+	}
+	cleared.Forced = true
+	if cleared.TargetPane != targetPane {
+		cleared.Ready = false
+		return cleared, fmt.Errorf("queued AGM input moved from verified pane %q to %q while clearing", targetPane, cleared.TargetPane)
+	}
+	if !cleared.Ready || cleared.State != HarnessInputReady {
+		cleared.Ready = false
+		return cleared, fmt.Errorf("queued AGM input was not cleared on verified pane %q: state %s", targetPane, cleared.State)
+	}
+	if err := runtime.deliver(ctx, targetPane, command); err != nil {
+		cleared.Ready = false
+		return cleared, fmt.Errorf("deliver replacement to cleared pane %q: %w", targetPane, err)
+	}
+	return cleared, nil
 }
 
 func inputDeliveryAllowed(readiness HarnessInputReadiness, options InputDeliveryOptions) (allowed, forced bool) {
@@ -132,14 +200,16 @@ func inputDeliveryAllowed(readiness HarnessInputReadiness, options InputDelivery
 }
 
 // ClassifyHarnessInput is the pure composer classifier. Readiness is scoped to
-// the configured harness and to the pane tail that currently owns input.
+// the configured harness. Queue identity uses the complete joined logical
+// composer; blockers and empty-composer readiness remain scoped to the pane
+// tail that currently owns input.
 func ClassifyHarnessInput(content, harness string) (bool, string, error) {
 	if err := validateReadinessHarness(harness); err != nil {
 		return false, "", err
 	}
 	styledTail := paneRawInputTail(content, 12)
 	tail := stripANSI(styledTail)
-	queuedInput, _ := classifyCurrentQueuedInput(styledTail, harness)
+	queuedInput, _ := classifyCurrentQueuedInput(content, harness)
 
 	// Pi's managed ready footer remains visible while its native confirmation
 	// dialog owns input. Treat that dialog as authoritative before consulting

@@ -2,9 +2,11 @@ package tmux
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHandleHarnessStartupStateWaitsForSlowInitialProcess(t *testing.T) {
@@ -163,6 +165,12 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			name:    "Claude queued AGM paste is positively identified",
 			harness: "claude-code",
 			content: "response\n❯ [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-001 | Sent: 2026-07-21T12:00:00Z]\nrecover\n────────────────\n? for shortcuts",
+			state:   HarnessInputQueuedAGM,
+		},
+		{
+			name:    "long Claude queued AGM paste is classified beyond the display tail",
+			harness: "claude-code",
+			content: "response\n❯ [Pasted text #1 +14 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-001 | Sent: 2026-07-21T12:00:00Z]\n" + strings.Repeat("payload line\n", 13) + "────────────────\n? for shortcuts",
 			state:   HarnessInputQueuedAGM,
 		},
 		{
@@ -563,5 +571,102 @@ func TestInputDeliveryAllowedOverridesOnlyPositivelyIdentifiedAGMQueue(t *testin
 				t.Fatalf("inputDeliveryAllowed() = (%t, %t), want (%t, %t)", allowed, forced, tt.allowed, tt.forced)
 			}
 		})
+	}
+}
+
+func TestQueuedAGMRecoveryClearsBeforeReplacement(t *testing.T) {
+	t.Parallel()
+
+	var events []string
+	runtime := queuedAGMRecoveryRuntime{
+		sendKey: func(_ context.Context, pane, key string) error {
+			events = append(events, "key:"+pane+":"+key)
+			return nil
+		},
+		wait: func(_ context.Context, delay time.Duration) error {
+			events = append(events, "wait:"+delay.String())
+			return nil
+		},
+		recheck: func() (HarnessInputReadiness, error) {
+			events = append(events, "recheck")
+			return HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%7", Content: "empty composer"}, nil
+		},
+		deliver: func(_ context.Context, pane, command string) error {
+			events = append(events, "deliver:"+pane+":"+command)
+			return nil
+		},
+	}
+
+	got, err := replaceQueuedAGMInputLocked(context.Background(), "%7", "replacement", runtime)
+	if err != nil {
+		t.Fatalf("replaceQueuedAGMInputLocked() error = %v", err)
+	}
+	want := []string{
+		"key:%7:C-c", "wait:200ms", "key:%7:C-u", "wait:100ms",
+		"key:%7:C-a", "key:%7:C-k", "wait:300ms", "recheck",
+		"deliver:%7:replacement",
+	}
+	if !slices.Equal(events, want) {
+		t.Fatalf("replacement events = %#v, want %#v", events, want)
+	}
+	if !got.Ready || got.State != HarnessInputReady || !got.Forced || got.TargetPane != "%7" {
+		t.Fatalf("replacement readiness = %#v, want forced ready on %%7", got)
+	}
+}
+
+func TestQueuedAGMRecoveryDoesNotReplaceUntilExactPaneIsEmpty(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		recheck HarnessInputReadiness
+	}{
+		{name: "queue remains", recheck: HarnessInputReadiness{State: HarnessInputQueuedAGM, TargetPane: "%7"}},
+		{name: "human input appears", recheck: HarnessInputReadiness{State: HarnessInputBusy, TargetPane: "%7"}},
+		{name: "active pane changes", recheck: HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%8"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			delivered := false
+			runtime := queuedAGMRecoveryRuntime{
+				sendKey: func(context.Context, string, string) error { return nil },
+				wait:    func(context.Context, time.Duration) error { return nil },
+				recheck: func() (HarnessInputReadiness, error) { return tt.recheck, nil },
+				deliver: func(context.Context, string, string) error {
+					delivered = true
+					return nil
+				},
+			}
+			got, err := replaceQueuedAGMInputLocked(context.Background(), "%7", "replacement", runtime)
+			if err == nil {
+				t.Fatal("replaceQueuedAGMInputLocked() error = nil, want failed closed")
+			}
+			if delivered {
+				t.Fatal("replacement was delivered before exact empty-composer proof")
+			}
+			if got.Ready {
+				t.Fatalf("failed recovery readiness = %#v, want Ready=false", got)
+			}
+		})
+	}
+}
+
+func TestQueuedAGMRecoveryDoesNotReportReadyWhenReplacementFails(t *testing.T) {
+	t.Parallel()
+
+	runtime := queuedAGMRecoveryRuntime{
+		sendKey: func(context.Context, string, string) error { return nil },
+		wait:    func(context.Context, time.Duration) error { return nil },
+		recheck: func() (HarnessInputReadiness, error) {
+			return HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%7"}, nil
+		},
+		deliver: func(context.Context, string, string) error { return errors.New("paste failed") },
+	}
+	got, err := replaceQueuedAGMInputLocked(context.Background(), "%7", "replacement", runtime)
+	if err == nil || !strings.Contains(err.Error(), "paste failed") {
+		t.Fatalf("replaceQueuedAGMInputLocked() error = %v, want paste failure", err)
+	}
+	if got.Ready {
+		t.Fatalf("failed replacement readiness = %#v, want Ready=false", got)
 	}
 }
