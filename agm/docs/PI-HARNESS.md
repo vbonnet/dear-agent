@@ -147,10 +147,10 @@ collapsing that opaque segment.
 For models declared in Pi's `models.json`, AGM reads only the bounded model ID,
 `contextWindow`, and `modelOverrides` data: it never evaluates credential or
 command fields. A custom model with an omitted window uses Pi's 128000-token
-default; an explicit null or otherwise invalid window is rejected. Overrides
-for Pi 0.81.1 built-in providers apply even when a native
-model is newer than AGM's smaller static window table; orphan overrides for
-custom-only providers remain ignored like Pi. Malformed, oversized, symlinked,
+default; an explicit null or otherwise invalid window is rejected. An override
+matching the exact provider-qualified route recorded by Pi applies even when
+the provider or model is newer than AGM's static tables; unqualified orphan
+overrides remain conservative. Malformed, oversized, symlinked,
 group- or other-writable, ambiguous, or invalid catalog data retains AGM's
 conservative 200000-token fallback.
 Pi does not expose a provider quota/rate-limit API, so those fields are

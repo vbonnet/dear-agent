@@ -491,13 +491,14 @@ func piConfiguredModelContextWindow(model string) (int, bool) {
 		if !exists {
 			return 0, false
 		}
-		return piProviderModelContextWindow(configured, modelID, piKnownNativeProvider(provider))
+		return piProviderModelContextWindow(configured, modelID, true)
 	}
 	modelID = provider
 
 	window, matched := 0, false
 	for providerID, configured := range catalog.Providers {
-		candidate, exists := piProviderModelContextWindow(configured, modelID, piKnownNativeProvider(providerID))
+		_, knownNativeModel := piKnownNativeModelContextWindow(providerID + "/" + modelID)
+		candidate, exists := piProviderModelContextWindow(configured, modelID, knownNativeModel)
 		if !exists {
 			continue
 		}
@@ -508,28 +509,6 @@ func piConfiguredModelContextWindow(model string) (int, bool) {
 	}
 	return window, matched
 }
-
-// piKnownNativeProvider mirrors Pi 0.81.1's built-in provider registry. Model
-// catalogs refresh independently of AGM releases, so provider membership—not
-// AGM's smaller static context-window table—is the durable boundary for
-// deciding whether modelOverrides can target a native model.
-func piKnownNativeProvider(provider string) bool {
-	switch strings.TrimSpace(provider) {
-	case "amazon-bedrock", "ant-ling", "anthropic", "azure-openai-responses",
-		"cerebras", "cloudflare-ai-gateway", "cloudflare-workers-ai", "deepseek",
-		"fireworks", "github-copilot", "google", "google-vertex", "groq",
-		"huggingface", "kimi-coding", "minimax", "minimax-cn", "mistral",
-		"moonshotai", "moonshotai-cn", "nvidia", "openai", "openai-codex",
-		"opencode", "opencode-go", "openrouter", "qwen-token-plan",
-		"qwen-token-plan-cn", "radius", "together", "vercel-ai-gateway", "xai",
-		"xiaomi", "xiaomi-token-plan-ams", "xiaomi-token-plan-cn",
-		"xiaomi-token-plan-sgp", "zai", "zai-coding-cn":
-		return true
-	default:
-		return false
-	}
-}
-
 func readPiModelCatalog() (piModelCatalog, bool) {
 	path, err := piModelCatalogPath()
 	if err != nil {
@@ -611,7 +590,7 @@ func piModelCatalogPath() (string, error) {
 	return filepath.Join(root, "models.json"), nil
 }
 
-func piProviderModelContextWindow(provider piModelCatalogProvider, modelID string, nativeProvider bool) (int, bool) {
+func piProviderModelContextWindow(provider piModelCatalogProvider, modelID string, recordedRoute bool) (int, bool) {
 	window, matched := 0, false
 	for _, model := range provider.Models {
 		if strings.TrimSpace(model.ID) != modelID {
@@ -626,7 +605,10 @@ func piProviderModelContextWindow(provider piModelCatalogProvider, modelID strin
 		window, matched = candidate, true
 	}
 	if override, ok := provider.ModelOverrides[modelID]; ok && override.ContextWindow.present {
-		if !matched && !nativeProvider {
+		// A provider-qualified native transcript proves Pi knew this exact route.
+		// That evidence remains valid when a newer Pi adds providers after AGM's
+		// release; unqualified IDs still require a declaration to avoid guessing.
+		if !matched && !recordedRoute {
 			return 0, false
 		}
 		return validPiModelContextWindow(override.ContextWindow, false)

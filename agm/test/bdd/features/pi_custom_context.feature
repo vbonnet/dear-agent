@@ -18,6 +18,13 @@ Feature: Pi custom model context
     Then the Pi context should report 3562 of 4096 tokens used
     And the Pi context model should be "openai/gpt-4.1"
 
+  Scenario: A provider added by a newer Pi release honors its recorded override
+    Given a managed Pi transcript uses provider "future-provider" model "future-model"
+    And the Pi model catalog overrides "future-provider/future-model" to 16384 tokens
+    When AGM detects the managed Pi context
+    Then the Pi context should report 3562 of 16384 tokens used
+    And the Pi context model should be "future-provider/future-model"
+
   Scenario: A nested OpenRouter vendor route retains its native context window
     Given a managed Pi transcript uses provider "openrouter" model "openai/gpt-5.4"
     When AGM detects the managed Pi context

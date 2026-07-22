@@ -103,9 +103,21 @@ func TestPiConfiguredModelContextWindowTrustBoundaries(t *testing.T) {
 			},
 		},
 		{
-			name: "native provider override does not depend on static model table", model: "openai/gpt-4.1", want: 4096,
+			name: "recorded provider override does not depend on static model table", model: "openai/gpt-4.1", want: 4096,
 			prepare: func(t *testing.T, dir string) {
 				writePiModelCatalogFixture(t, dir, `{"providers":{"openai":{"modelOverrides":{"gpt-4.1":{"contextWindow":4096}}}}}`)
+			},
+		},
+		{
+			name: "recorded future provider override does not depend on frozen provider registry", model: "future-provider/future-model", want: 16384,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"future-provider":{"modelOverrides":{"future-model":{"contextWindow":16384}}}}}`)
+			},
+		},
+		{
+			name: "unqualified known route retains its override", model: "gpt-5.4", want: 4096,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"openai":{"modelOverrides":{"gpt-5.4":{"contextWindow":4096}}}}}`)
 			},
 		},
 		{
@@ -115,7 +127,13 @@ func TestPiConfiguredModelContextWindowTrustBoundaries(t *testing.T) {
 			},
 		},
 		{
-			name: "orphan override is ignored like Pi", model: "ollama/qwen2.5-coder:7b", want: 200000,
+			name: "exact recorded custom route honors explicit override", model: "ollama/qwen2.5-coder:7b", want: 4096,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"ollama":{"modelOverrides":{"qwen2.5-coder:7b":{"contextWindow":4096}}}}}`)
+			},
+		},
+		{
+			name: "unqualified orphan override remains conservative", model: "qwen2.5-coder:7b", want: 200000,
 			prepare: func(t *testing.T, dir string) {
 				writePiModelCatalogFixture(t, dir, `{"providers":{"ollama":{"modelOverrides":{"qwen2.5-coder:7b":{"contextWindow":4096}}}}}`)
 			},
@@ -215,19 +233,6 @@ func TestPiConfiguredModelContextWindowTrustBoundaries(t *testing.T) {
 				t.Fatalf("piModelContextWindow(%q) = %d, want %d", test.model, got, test.want)
 			}
 		})
-	}
-}
-
-func TestPiKnownNativeProvider(t *testing.T) {
-	for _, provider := range []string{"anthropic", "openai", "openrouter", "zai-coding-cn"} {
-		if !piKnownNativeProvider(provider) {
-			t.Errorf("piKnownNativeProvider(%q) = false, want true", provider)
-		}
-	}
-	for _, provider := range []string{"", "OPENAI", "ollama", "custom-provider"} {
-		if piKnownNativeProvider(provider) {
-			t.Errorf("piKnownNativeProvider(%q) = true, want false", provider)
-		}
 	}
 }
 
