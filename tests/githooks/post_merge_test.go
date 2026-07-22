@@ -234,13 +234,13 @@ func revParse(t *testing.T, dir, ref string) string {
 func newRebuildRepo(t *testing.T) string {
 	t.Helper()
 	repo := newRepo(t)
-	for _, p := range []string{"agm/cmd/agm", "cmd/vroom-dispatch", "pkg/llm/auth", "internal/x", "docs"} {
+	for _, p := range []string{"agm/cmd/agm", "agm/cmd/agm-reaper", "agm/internal/tmux", "cmd/vroom-dispatch", "pkg/llm/auth", "internal/x", "docs"} {
 		if err := os.MkdirAll(filepath.Join(repo, p), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// Seed each package dir with a tracked file so later diffs are meaningful.
-	for _, f := range []string{"agm/cmd/agm/main.go", "cmd/vroom-dispatch/main.go", "pkg/llm/auth/auth.go", "internal/x/x.go", "docs/readme.md"} {
+	for _, f := range []string{"agm/cmd/agm/main.go", "agm/cmd/agm-reaper/main.go", "agm/internal/tmux/prompt.go", "cmd/vroom-dispatch/main.go", "pkg/llm/auth/auth.go", "internal/x/x.go", "docs/readme.md"} {
 		if err := os.WriteFile(filepath.Join(repo, f), []byte("package x\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -346,13 +346,36 @@ func TestRebuild_AtomicInstall_NewInode(t *testing.T) {
 	}
 }
 
-// A change under a shared source tree (pkg/) rebuilds BOTH binaries.
-func TestRebuild_SharedSource_RebuildsBoth(t *testing.T) {
+// A change under a root shared source tree (pkg/) rebuilds all three consumers.
+func TestRebuild_SharedSource_RebuildsAllConsumers(t *testing.T) {
 	repo := newRebuildRepo(t)
 	mergeBranchChanging(t, repo, map[string]string{"pkg/llm/auth/auth.go": "package auth // v2\n"})
 	got := runRebuild(t, repo)
-	if !slices.Contains(got, "./agm/cmd/agm") || !slices.Contains(got, "./cmd/vroom-dispatch") {
-		t.Fatalf("expected both binaries rebuilt on a pkg/ change, got %v", got)
+	if !slices.Contains(got, "./agm/cmd/agm") || !slices.Contains(got, "./agm/cmd/agm-reaper") || !slices.Contains(got, "./cmd/vroom-dispatch") {
+		t.Fatalf("expected all consumers rebuilt on a pkg/ change, got %v", got)
+	}
+}
+
+// The async archive companion consumes agm/internal just like the CLI. Both
+// binaries must be built from one source revision so a merged prompt/lifecycle
+// change cannot leave the detached reaper running stale code.
+func TestRebuild_AGMSharedLifecycle_RebuildsCLIAndReaperFromSameRevision(t *testing.T) {
+	repo := newRebuildRepo(t)
+	mergeBranchChanging(t, repo, map[string]string{"agm/internal/tmux/prompt.go": "package tmux // v2\n"})
+	wantCommit := revParse(t, repo, "HEAD")
+
+	recs := installRecords(t, runRebuildRecord(t, repo))
+	commits := make(map[string]string)
+	for _, rec := range recs {
+		commits[rec.pkg] = rec.commit
+	}
+	for _, pkg := range []string{"./agm/cmd/agm", "./agm/cmd/agm-reaper"} {
+		if commits[pkg] != wantCommit {
+			t.Errorf("%s built from %q; want shared source revision %s (records: %+v)", pkg, commits[pkg], wantCommit, recs)
+		}
+	}
+	if _, ok := commits["./cmd/vroom-dispatch"]; ok {
+		t.Fatal("AGM-only shared source unexpectedly rebuilt vroom-dispatch")
 	}
 }
 
@@ -369,7 +392,8 @@ func TestRebuild_ScopedSource_RebuildsOnlyAffected(t *testing.T) {
 	}
 }
 
-// A change confined to agm/ rebuilds ONLY agm.
+// A change confined to the agm CLI rebuilds only agm; the reaper is rebuilt
+// for its own command or shared agm/internal inputs, not unrelated CLI code.
 func TestRebuild_AgmOnly(t *testing.T) {
 	repo := newRebuildRepo(t)
 	mergeBranchChanging(t, repo, map[string]string{"agm/cmd/agm/main.go": "package main // v2\n"})
@@ -379,6 +403,9 @@ func TestRebuild_AgmOnly(t *testing.T) {
 	}
 	if !slices.Contains(got, "./agm/cmd/agm") {
 		t.Fatalf("agm not rebuilt for its own change: %v", got)
+	}
+	if slices.Contains(got, "./agm/cmd/agm-reaper") {
+		t.Fatalf("agm-reaper rebuilt for CLI-only source: %v", got)
 	}
 }
 

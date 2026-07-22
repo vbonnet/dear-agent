@@ -89,6 +89,7 @@ Feature: Hook harness parity
       | safeguard               |
       | atomic-binary-install   |
       | trunk-build-context     |
+      | agm-companion-coherence |
       | host-artifact-deploy    |
       | deployment-verification |
       | bead-transition         |

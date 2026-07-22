@@ -206,6 +206,8 @@ func postMergeSafeguardNeedles(safeguard string) []string {
 		return []string{"go build -o", "mv -f", "(atomic)"}
 	case "trunk-build-context":
 		return []string{"fetch_trunk_commit", "ensure_build_dir", "origin/${default_branch}"}
+	case "agm-companion-coherence":
+		return []string{`maybe_rebuild "agm/cmd/agm"`, `maybe_rebuild "agm/cmd/agm-reaper"`, "agm/internal/"}
 	case "host-artifact-deploy":
 		return []string{"deploy_host_artifacts", "make dear-deploy-sync"}
 	case "deployment-verification":

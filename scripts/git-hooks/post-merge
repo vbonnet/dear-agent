@@ -4,7 +4,7 @@
 # on the repo's DEFAULT branch:
 #
 #   Stage 1 — rebuild affected Go binaries (this repo only).
-#     After a PR lands on main, the `agm` / `vroom-dispatch` binaries in
+#     After a PR lands on main, the `agm` / `agm-reaper` / `vroom-dispatch` binaries in
 #     ~/go/bin are stale until someone remembers to `go install`. This stage
 #     closes that gap: it inspects what changed in the merge and reinstalls
 #     ONLY the binaries whose source actually changed. Docs/tests/config-only
@@ -117,7 +117,8 @@ fi
 # only when inputs changed — but we additionally gate on the diff so we don't
 # even invoke `go` on a docs/tests/config-only merge.
 #
-#   agm             ./agm/cmd/agm       ← agm/ pkg/ internal/ go.mod go.sum
+#   agm             ./agm/cmd/agm        ← agm/ pkg/ internal/ go.mod go.sum
+#   agm-reaper      ./agm/cmd/agm-reaper ← agm/cmd/agm-reaper/ agm/internal/ pkg/ internal/ go.mod go.sum
 #   vroom-dispatch  ./cmd/vroom-dispatch ← cmd/vroom-dispatch/ pkg/ internal/ go.mod go.sum
 
 # is_build_relevant: a changed file that cannot affect a compiled binary
@@ -294,7 +295,7 @@ rebuild_changed_binaries() {
   # Scope the global hook: if neither binary package exists in this repo, this
   # is not dear-agent — stay completely silent.
   any_target=0
-  for _pkg in agm/cmd/agm cmd/vroom-dispatch; do
+  for _pkg in agm/cmd/agm agm/cmd/agm-reaper cmd/vroom-dispatch; do
     [ -d "${repo_root}/${_pkg}" ] && any_target=1
   done
   [ "${any_target}" = "1" ] || return 0
@@ -340,6 +341,11 @@ rebuild_changed_binaries() {
 
   rebuilt_any=0
   maybe_rebuild "agm/cmd/agm"        agm/ pkg/ internal/ go.mod go.sum
+  # agm-reaper is a separately installed process, but it executes the shared
+  # AGM lifecycle and tmux packages. Keep it on the same resolved trunk source
+  # whenever those inputs change; otherwise `agm session archive --async` can
+  # run a newer CLI beside an older lifecycle implementation.
+  maybe_rebuild "agm/cmd/agm-reaper" agm/cmd/agm-reaper/ agm/internal/ pkg/ internal/ go.mod go.sum
   maybe_rebuild "cmd/vroom-dispatch" cmd/vroom-dispatch/ pkg/ internal/ go.mod go.sum
   # Self-update the deploy tool: keep ~/go/bin/dear-deploy current so on-demand /
   # Orchestrator invocations (Layer 2, ce-33sy) run trunk. Stage 1.6 below does

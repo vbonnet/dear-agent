@@ -47,6 +47,8 @@ that triggered it.
 
 **GITHOOK-15** When a post-merge maintenance stage has an opt-out environment variable set to `0`, the system shall skip that stage.
 
+**GITHOOK-16** When build-relevant shared AGM lifecycle source changes, the system shall atomically rebuild both `agm` and the separately installed `agm-reaper` from the same resolved trunk revision before future asynchronous archives run.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/hook_parity.feature`
