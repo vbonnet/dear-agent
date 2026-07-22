@@ -20,7 +20,7 @@ to receive queued work.
 
 **DAEMON-04** When OpenCode adapter support is enabled and an event bus is configured, the system shall initialize the OpenCode SSE adapter from shared configuration.
 
-**DAEMON-05** When OpenCode adapter startup fails and fallback is enabled, the system shall continue using tmux monitoring for OpenCode sessions.
+**DAEMON-05** When OpenCode adapter startup fails and fallback is enabled, the system shall report that the caller may select a tmux fallback and shall not claim that a fallback monitor started automatically.
 
 **DAEMON-06** When OpenCode adapter startup fails and fallback is disabled, the system shall report that OpenCode sessions will not be monitored until the adapter succeeds.
 

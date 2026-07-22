@@ -313,8 +313,8 @@ func TestAdapter_Start_WithFallback(t *testing.T) {
 		return
 	}
 
-	if !contains(err.Error(), "tmux fallback active") {
-		t.Errorf("Start() error = %q, want error containing 'tmux fallback active'", err.Error())
+	if !contains(err.Error(), "tmux fallback available to caller") {
+		t.Errorf("Start() error = %q, want error containing 'tmux fallback available to caller'", err.Error())
 	}
 }
 

@@ -52,5 +52,5 @@
 // are published to the canonical EventBus for consumption by notification managers,
 // state file writers, and tmux status displays.
 //
-// See ARCHITECTURE.md and MULTI-AGENT-INTEGRATION-SPEC.md for complete integration details.
+// See ARCHITECTURE.md, README.md, and SPEC.md for the current integration contract.
 package opencode

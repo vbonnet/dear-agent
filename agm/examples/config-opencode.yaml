@@ -20,14 +20,13 @@ adapters:
 
     # Reconnect configuration (resilient SSE connection)
     reconnect:
-      enabled: true                # Auto-reconnect on disconnect
       initial_delay: 5s            # First reconnect delay
       max_delay: 5m                # Maximum backoff delay
-      backoff_multiplier: 2        # Exponential backoff factor
+      multiplier: 2                # Exponential backoff factor
 
     # Annotate startup failures so the caller can select a tmux fallback.
     # This flag does not start Astrocyte or another monitor by itself.
-    fallback_tmux: true
+    fallback_to_tmux: true
 
   # Future adapters can be added here:
   # gemini:
@@ -218,7 +217,7 @@ advanced:
 # adapters:
 #   opencode:
 #     enabled: true
-#     fallback_tmux: false  # No fallback needed
+#     fallback_to_tmux: false  # Do not annotate startup errors with fallback context
 #
 # multi_agent:
 #   default_agent: opencode
@@ -230,7 +229,7 @@ advanced:
 # adapters:
 #   opencode:
 #     enabled: true
-#     fallback_tmux: true  # Caller receives fallback-aware error context
+#     fallback_to_tmux: true  # Caller receives fallback-aware error context
 #
 # multi_agent:
 #   default_agent: claude
@@ -278,7 +277,7 @@ advanced:
 # 3. Migration from v3:
 #    - v3 config files work without changes (no 'adapters' section)
 #    - Adding 'adapters' section is opt-in
-#    - See docs/MULTI-AGENT-MIGRATION-GUIDE.md for details
+#    - See docs/OPENCODE-INTEGRATION.md for the current monitor contract
 
 # 4. Validation:
 #    Test your configuration before deploying:
