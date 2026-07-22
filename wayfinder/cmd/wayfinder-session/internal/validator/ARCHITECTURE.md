@@ -26,8 +26,10 @@ review, test, deployment, or monitoring outcomes.
 5. document quality and code-deliverable verification where applicable.
 
 SPEC uses a deterministic strict-EARS parser. PLAN uses the architecture review
-adapter when configured. BUILD rejects placeholder-only evidence and runs
-bounded build/test checks for discovered code.
+adapter when configured. Document review removes one canonical leading YAML
+frontmatter block before checking the Markdown body; a malformed leading block
+fails closed. BUILD rejects placeholder-only evidence and runs bounded
+build/test checks for discovered code.
 
 ## Trust boundaries
 

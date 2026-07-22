@@ -14,6 +14,7 @@ import (
 	"unicode"
 
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/telemetry"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -284,10 +285,35 @@ func builtinReviewIssues(skillName, content string) ([]string, error) {
 	if skillName != "review-adr" && skillName != "review-architecture" {
 		return nil, fmt.Errorf("unknown built-in document review %q", skillName)
 	}
-	trimmed := strings.TrimSpace(content)
+	body, err := markdownBodyForReview(content)
+	if err != nil {
+		return nil, err
+	}
+	trimmed := strings.TrimSpace(body)
 	issues := commonDocumentReviewIssues(trimmed)
 	issues = append(issues, skillDocumentReviewIssues(skillName, trimmed, levelTwoHeadings(trimmed))...)
 	return issues, nil
+}
+
+// markdownBodyForReview returns the Markdown body after one canonical leading
+// YAML frontmatter block. Methodology validation requires phase deliverables
+// such as PLAN-design.md to carry that block, while document quality applies to
+// the authored Markdown beneath it. A leading but unclosed block is malformed
+// input and must not be reviewed as ordinary prose.
+func markdownBodyForReview(content string) (string, error) {
+	yamlContent, body, found, err := splitLeadingFrontmatter(content)
+	if err != nil {
+		return "", fmt.Errorf("document has unclosed YAML frontmatter: %w", err)
+	}
+	if !found {
+		return content, nil
+	}
+
+	var metadata map[string]any
+	if err := yaml.Unmarshal([]byte(yamlContent), &metadata); err != nil {
+		return "", fmt.Errorf("document has invalid YAML frontmatter: %w", err)
+	}
+	return body, nil
 }
 
 func commonDocumentReviewIssues(trimmed string) []string {

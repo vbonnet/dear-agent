@@ -32,28 +32,14 @@ func extractFrontmatter(filePath string) (*DeliverableFrontmatter, error) {
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	// Check for frontmatter delimiters
 	contentStr := string(content)
-	if !strings.HasPrefix(contentStr, "---\n") {
+	yamlContent, _, found, err := splitLeadingFrontmatter(contentStr)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
 		return nil, fmt.Errorf("file does not start with YAML frontmatter delimiter (---)")
 	}
-
-	// Find closing delimiter
-	lines := strings.Split(contentStr, "\n")
-	closingIdx := -1
-	for i := 1; i < len(lines); i++ {
-		if lines[i] == "---" {
-			closingIdx = i
-			break
-		}
-	}
-
-	if closingIdx == -1 {
-		return nil, fmt.Errorf("no closing frontmatter delimiter (---) found")
-	}
-
-	// Extract YAML content (between delimiters)
-	yamlContent := strings.Join(lines[1:closingIdx], "\n")
 
 	// Parse YAML (lenient: tolerate unknown fields from future schema versions)
 	var fm DeliverableFrontmatter
@@ -81,6 +67,24 @@ func extractFrontmatter(filePath string) (*DeliverableFrontmatter, error) {
 	}
 
 	return &fm, nil
+}
+
+// splitLeadingFrontmatter separates one exact leading YAML frontmatter block
+// from its Markdown body. Callers decide whether frontmatter is optional and
+// which schema, if any, to apply to the YAML payload.
+func splitLeadingFrontmatter(content string) (yamlContent, body string, found bool, err error) {
+	if !strings.HasPrefix(content, "---\n") {
+		return "", content, false, nil
+	}
+
+	lines := strings.Split(content, "\n")
+	for i := 1; i < len(lines); i++ {
+		if lines[i] == "---" {
+			return strings.Join(lines[1:i], "\n"), strings.Join(lines[i+1:], "\n"), true, nil
+		}
+	}
+
+	return "", "", true, fmt.Errorf("no closing frontmatter delimiter (---) found")
 }
 
 // ArchitectureFrontmatter represents YAML frontmatter from ARCHITECTURE.md
