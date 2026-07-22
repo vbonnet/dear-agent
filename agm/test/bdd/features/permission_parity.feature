@@ -59,9 +59,11 @@ Feature: Agent permission parity
       | pi --session-id native-id                                                                     | recognized |
       | node /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js --session-id abc | recognized |
       | node '/Users/me/My Projects/node_modules/@earendil-works/pi-coding-agent/dist/cli.js'         | recognized |
+      | node --enable-source-maps /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js | recognized |
       | node /tmp/bin/pi --session-id impostor                                                       | rejected   |
       | node /tmp/worker.js pi                                                                        | rejected   |
       | node /tmp/worker /Users/me/My Projects/node_modules/@earendil-works/pi-coding-agent/dist/cli.js | rejected |
+      | node --require /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js /tmp/worker.js | rejected |
       | node /usr/local/lib/node_modules/@openai/codex/dist/cli.js                                    | rejected   |
 
   Scenario: Permission profiles resolve across the active harness set

@@ -353,7 +353,8 @@ func nodeScriptArgument(command string, fields []string, executable int) (script
 	if !ok {
 		return "", false, false
 	}
-	if tail == "" || strings.HasPrefix(tail, "-") {
+	tail, ok = trimNodeRuntimeOptions(tail)
+	if !ok {
 		return "", false, false
 	}
 	if script, quoted := quotedNodeScript(tail); quoted {
@@ -375,6 +376,123 @@ func commandTailAfterField(command string, fields []string, fieldIndex int) (str
 		offset += index + len(fields[i])
 	}
 	return strings.TrimSpace(command[offset:]), true
+}
+
+var nodeFlagOptions = map[string]bool{
+	"--abort-on-uncaught-exception":           true,
+	"--disallow-code-generation-from-strings": true,
+	"--enable-source-maps":                    true,
+	"--expose-gc":                             true,
+	"--frozen-intrinsics":                     true,
+	"--inspect":                               true,
+	"--inspect-brk":                           true,
+	"--inspect-wait":                          true,
+	"--jitless":                               true,
+	"--no-deprecation":                        true,
+	"--no-warnings":                           true,
+	"--openssl-legacy-provider":               true,
+	"--openssl-shared-config":                 true,
+	"--pending-deprecation":                   true,
+	"--preserve-symlinks":                     true,
+	"--preserve-symlinks-main":                true,
+	"--throw-deprecation":                     true,
+	"--trace-deprecation":                     true,
+	"--trace-exit":                            true,
+	"--trace-uncaught":                        true,
+	"--trace-warnings":                        true,
+	"--use-bundled-ca":                        true,
+	"--use-openssl-ca":                        true,
+	"--use-system-ca":                         true,
+	"--zero-fill-buffers":                     true,
+}
+
+var nodeValueOptions = map[string]bool{
+	"-C":                    true,
+	"-r":                    true,
+	"--conditions":          true,
+	"--experimental-loader": true,
+	"--import":              true,
+	"--inspect-port":        true,
+	"--debug-port":          true,
+	"--loader":              true,
+	"--require":             true,
+}
+
+var nodeNonScriptOptions = map[string]bool{
+	"-":                 true,
+	"-e":                true,
+	"-i":                true,
+	"-p":                true,
+	"--check":           true,
+	"--completion-bash": true,
+	"--eval":            true,
+	"--help":            true,
+	"--interactive":     true,
+	"--print":           true,
+	"--prof-process":    true,
+	"--run":             true,
+	"--version":         true,
+	"--v8-options":      true,
+}
+
+// trimNodeRuntimeOptions locates Node's script argument without allowing an
+// option value to masquerade as that script. Known boolean runtime flags are
+// skipped, known preload options consume their following value, evaluator and
+// other non-script modes are rejected, and unknown options fail closed.
+func trimNodeRuntimeOptions(tail string) (string, bool) {
+	for {
+		token, remainder, ok := commandToken(tail)
+		if !ok {
+			return "", false
+		}
+		if token == "--" {
+			return strings.TrimSpace(remainder), strings.TrimSpace(remainder) != ""
+		}
+		if !strings.HasPrefix(token, "-") {
+			return tail, true
+		}
+		name, _, hasInlineValue := strings.Cut(token, "=")
+		if nodeNonScriptOptions[name] {
+			return "", false
+		}
+		if hasInlineValue {
+			// The value is bound to this option, so it cannot be mistaken for
+			// the later script argument. This also safely supports V8 and
+			// future Node options that follow the --name=value convention.
+			tail = remainder
+			continue
+		}
+		if nodeValueOptions[name] {
+			_, remainder, ok = commandToken(remainder)
+			if !ok {
+				return "", false
+			}
+			tail = remainder
+			continue
+		}
+		if !nodeFlagOptions[name] {
+			return "", false
+		}
+		tail = remainder
+	}
+}
+
+func commandToken(input string) (token, remainder string, ok bool) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return "", "", false
+	}
+	if input[0] == '\'' || input[0] == '"' {
+		quote := input[0]
+		if end := strings.IndexByte(input[1:], quote); end >= 0 {
+			return input[1 : end+1], strings.TrimSpace(input[end+2:]), true
+		}
+		return "", "", false
+	}
+	if end := strings.IndexAny(input, " \t"); end >= 0 {
+		return input[:end], strings.TrimSpace(input[end:]), true
+	}
+	return input, "", true
 }
 
 func quotedNodeScript(tail string) (string, bool) {

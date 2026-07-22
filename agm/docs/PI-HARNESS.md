@@ -87,8 +87,9 @@ report readiness, so an older footer retained in tmux history cannot authorize
 a new process. Every cold-resume entry point also proves Pi-specific process
 identity before attaching. This recognizes the canonical npm package's Node
 entrypoint, including installations beneath npm prefixes containing spaces,
-without treating an unrelated `node` process or later Pi-looking argument as
-Pi. When Pi has exited, AGM relaunches only in a positively classified bare
+and permits supported Node runtime flags and preload options without treating
+an option value, unrelated `node` process, or later Pi-looking argument as Pi.
+When Pi has exited, AGM relaunches only in a positively classified bare
 shell and rejects retained pane start-command metadata or any other foreground
 process. Ctrl-C and root shutdown cancel both identity and pane-classification
 scans before command delivery or attachment.

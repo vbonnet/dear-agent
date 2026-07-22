@@ -344,11 +344,16 @@ func TestPiProcessCommandRequiresPiSpecificIdentity(t *testing.T) {
 		{command: "pi --session-id abc", want: true},
 		{command: "/opt/homebrew/bin/pi --session-id abc", want: true},
 		{command: "/opt/homebrew/bin/node /opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js --session-id abc", want: true},
+		{command: "node --enable-source-maps /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", want: true},
+		{command: "node --max-old-space-size=1024 --inspect=127.0.0.1:0 /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", want: true},
+		{command: "node --preserve-symlinks --require /tmp/register.cjs /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", want: true},
 		{command: "/opt/homebrew/bin/node '/Users/me/My Projects/node_modules/@earendil-works/pi-coding-agent/dist/cli.js' --session-id quoted", want: true},
 		{command: "env PI_OFFLINE=1 node /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", want: true},
 		{command: "node /usr/local/lib/node_modules/@openai/codex/dist/cli.js"},
 		{command: "node /tmp/worker.js /Users/me/My Projects/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"},
 		{command: "node /tmp/worker /Users/me/My Projects/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"},
+		{command: "node --require /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js /tmp/worker.js"},
+		{command: "node --future-option /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"},
 		{command: "node /tmp/pi"},
 		{command: "node -e console.log('/opt/homebrew/bin/pi')"},
 		{command: "zsh -l"},
@@ -368,7 +373,7 @@ func TestPiProcessCommandAcceptsExistingUnquotedSpacedPackageEntry(t *testing.T)
 	if err := os.WriteFile(entry, []byte("// Pi test entrypoint\n"), 0o644); err != nil {
 		t.Fatalf("write spaced Pi package entrypoint: %v", err)
 	}
-	if !isPiProcessCommand("node " + entry + " --session-id spaced") {
+	if !isPiProcessCommand("node --enable-source-maps " + entry + " --session-id spaced") {
 		t.Fatal("existing unquoted Pi package path containing spaces was rejected")
 	}
 	if isPiProcessCommand("node /tmp/worker " + entry) {
