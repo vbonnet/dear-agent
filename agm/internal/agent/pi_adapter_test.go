@@ -132,6 +132,64 @@ func TestPiAdapterCreatePersistsNativeIdentityAndCanonicalCommand(t *testing.T) 
 	}
 }
 
+func TestPiAdapterCreatePrefersPerSessionCodingAgentDirectory(t *testing.T) {
+	tests := []struct {
+		name          string
+		sessionConfig func(*testing.T) string
+		wantAssigned  bool
+	}{
+		{
+			name: "custom session config wins",
+			sessionConfig: func(t *testing.T) string {
+				return t.TempDir()
+			},
+			wantAssigned: true,
+		},
+		{
+			name:          "explicit session default wins",
+			sessionConfig: func(*testing.T) string { return "" },
+			wantAssigned:  false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			withPiAdapterRuntime(t)
+			t.Setenv("AGM_PI_SESSION_ROOT", t.TempDir())
+			processConfig := t.TempDir()
+			t.Setenv("PI_CODING_AGENT_DIR", processConfig)
+			sessionConfig := test.sessionConfig(t)
+			var command string
+			piSendShellCommand = func(_, value string) error { command = value; return nil }
+			store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+			adapter, err := NewPiAdapter(store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			id, err := adapter.CreateSession(SessionContext{
+				Name: "pi-session-config", WorkingDirectory: t.TempDir(),
+				Environment: map[string]string{"PI_CODING_AGENT_DIR": sessionConfig},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			metadata, err := store.Get(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if metadata.CodingAgentDir != sessionConfig || !metadata.CodingAgentDirSet {
+				t.Fatalf("persisted session config = %q, set=%t; want %q, true", metadata.CodingAgentDir, metadata.CodingAgentDirSet, sessionConfig)
+			}
+			assignment := "PI_CODING_AGENT_DIR=" + launchparity.ShellQuote(sessionConfig)
+			if test.wantAssigned != strings.Contains(command, assignment) {
+				t.Fatalf("session assignment presence = %t, want %t: %s", strings.Contains(command, assignment), test.wantAssigned, command)
+			}
+			if strings.Contains(command, processConfig) {
+				t.Fatalf("Pi command inherited process config instead of explicit session value: %s", command)
+			}
+		})
+	}
+}
+
 func TestPiAdapterCreateRollsBackReadinessFailure(t *testing.T) {
 	withPiAdapterRuntime(t)
 	t.Setenv("AGM_PI_SESSION_ROOT", t.TempDir())

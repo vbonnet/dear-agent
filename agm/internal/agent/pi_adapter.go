@@ -81,7 +81,11 @@ func (a *PiAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	if err := pisession.ValidateID(string(sessionID)); err != nil {
 		return "", err
 	}
-	codingAgentDir, err := pisession.ValidateCodingAgentDir(os.Getenv("PI_CODING_AGENT_DIR"))
+	codingAgentDirInput, sessionConfigured := ctx.Environment["PI_CODING_AGENT_DIR"]
+	if !sessionConfigured {
+		codingAgentDirInput = os.Getenv("PI_CODING_AGENT_DIR")
+	}
+	codingAgentDir, err := pisession.ValidateCodingAgentDir(codingAgentDirInput)
 	if err != nil {
 		return "", err
 	}
