@@ -49,6 +49,19 @@ Feature: Agent permission parity
       | false | foreground | reject   |
       | false | missing   | reject   |
 
+  Scenario Outline: Pi process identity distinguishes the npm Node entrypoint
+    Given an existing Pi pane process command "<command>"
+    When AGM evaluates Pi process identity
+    Then Pi process identity should be "<decision>"
+
+    Examples:
+      | command                                                                                       | decision   |
+      | pi --session-id native-id                                                                     | recognized |
+      | node /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js --session-id abc | recognized |
+      | node /tmp/bin/pi --session-id impostor                                                       | rejected   |
+      | node /tmp/worker.js pi                                                                        | rejected   |
+      | node /usr/local/lib/node_modules/@openai/codex/dist/cli.js                                    | rejected   |
+
   Scenario: Permission profiles resolve across the active harness set
     Given permission profile "worker" is configured
     When AGM resolves permission policy parity

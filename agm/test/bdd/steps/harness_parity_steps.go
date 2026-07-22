@@ -69,6 +69,8 @@ type harnessParityState struct {
 	piPaneLiveness             tmux.PaneLiveness
 	piPaneResumeAction         agent.PiPaneResumeAction
 	piPaneResumeErr            error
+	piProcessCommand           string
+	piProcessRecognized        bool
 	quotaSurfaces              []quotaparity.HarnessSurface
 	quotaFamilyCoverage        quotaparity.ModelFamilyCoverage
 	mcpSurface                 mcpparity.CreateSessionSurface
@@ -201,6 +203,9 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^an existing Pi pane with exact process "([^"]*)" and liveness "([^"]*)"$`, existingPiPaneWithLiveness)
 	ctx.Step(`^AGM evaluates Pi cold resume safety$`, agmEvaluatesPiColdResumeSafety)
 	ctx.Step(`^Pi resume should "([^"]*)"$`, piResumeShould)
+	ctx.Step(`^an existing Pi pane process command "([^"]*)"$`, existingPiPaneProcessCommand)
+	ctx.Step(`^AGM evaluates Pi process identity$`, agmEvaluatesPiProcessIdentity)
+	ctx.Step(`^Pi process identity should be "([^"]*)"$`, piProcessIdentityShouldBe)
 	ctx.Step(`^AGM validates quota monitoring parity$`, agmValidatesQuotaMonitoringParity)
 	ctx.Step(`^AGM validates quota model family coverage$`, agmValidatesQuotaModelFamilyCoverage)
 	ctx.Step(`^harness "([^"]*)" should have a context quota source$`, harnessShouldHaveContextQuotaSource)
@@ -1262,6 +1267,39 @@ func piResumeShould(ctx context.Context, want string) error {
 	}
 	if got := string(harnessState.piPaneResumeAction); got != want {
 		return fmt.Errorf("pi resume action = %q, want %q", got, want)
+	}
+	return nil
+}
+
+func existingPiPaneProcessCommand(ctx context.Context, command string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.piProcessCommand = command
+	return nil
+}
+
+func agmEvaluatesPiProcessIdentity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.piProcessRecognized = tmux.IsPiProcessCommand(harnessState.piProcessCommand)
+	return nil
+}
+
+func piProcessIdentityShouldBe(ctx context.Context, decision string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	want := decision == "recognized"
+	if decision != "recognized" && decision != "rejected" {
+		return fmt.Errorf("unknown Pi identity decision %q", decision)
+	}
+	if harnessState.piProcessRecognized != want {
+		return fmt.Errorf("pi identity recognition = %v, want %q", harnessState.piProcessRecognized, decision)
 	}
 	return nil
 }

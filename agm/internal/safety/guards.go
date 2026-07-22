@@ -214,7 +214,8 @@ func CheckSessionUninitialized(sessionName, socketPath, harness string) *Violati
 		return detectAgySessionUninitialized(content)
 	}
 	if harness == "pi-cli" {
-		if !isHarnessProcessRunning(sessionName, socketPath, "pi") {
+		piRunning, scanErr := tmux.IsPiProcessInPaneTree(sessionName, socketPath)
+		if scanErr != nil || !piRunning {
 			return &Violation{
 				Guard:      ViolationSessionUninitialized,
 				Message:    "Pi process is not running in this session.",
