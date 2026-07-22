@@ -1011,3 +1011,48 @@ func TestFlowProbesBoundContextAndWrapErrors(t *testing.T) {
 		}
 	})
 }
+
+// TestSpawnRetryDoesNotSwallowSafetyRefusals pins the reason the ce-93lw.18
+// admission brake is NOT encoded as a stagger pause. The retry loop exists to
+// wait out the 2-minute spawn window; it keys on agm's "spawn too soon"
+// message. A disk-headroom or admission-brake refusal must propagate on the
+// first attempt instead of being retried three times into a saturated host.
+func TestSpawnRetryDoesNotSwallowSafetyRefusals(t *testing.T) {
+	origRun, origSleep := runSpawn, sleepFor
+	t.Cleanup(func() { runSpawn, sleepFor = origRun, origSleep })
+
+	refusals := map[string]string{
+		"disk headroom": "circuit breaker: spawn refused (load level: GREEN)\n\n" +
+			"  • [disk] free disk too low: 3.2 GB (minimum: 15.0 GB).",
+		"admission brake": "circuit breaker: spawn refused (load level: GREEN)\n\n" +
+			"  • [admission_brake] admission brake engaged by disk-watchdog: " +
+			"worktree-sweep remediation failed: signal: killed",
+		"agent process cap": "circuit breaker: spawn refused (load level: RED)\n\n" +
+			"  • [agent_procs] agent-process cap reached: 12/12 machine-wide agent processes.",
+	}
+
+	for name, output := range refusals {
+		t.Run(name, func(t *testing.T) {
+			if strings.Contains(output, spawnTooSoonMarker) {
+				t.Fatalf("refusal text contains %q and would be retried as a stagger pause", spawnTooSoonMarker)
+			}
+
+			calls, sleeps := 0, 0
+			sleepFor = func(time.Duration) { sleeps++ }
+			runSpawn = func(supervisor, string) ([]byte, error) {
+				calls++
+				return []byte(output), errors.New("exit status 1")
+			}
+
+			if err := spawnSessionWithRetry(supervisors[0], "sonnet-200k"); err == nil {
+				t.Fatal("expected the refusal to propagate as an error")
+			}
+			if calls != 1 {
+				t.Errorf("spawn attempts = %d, want 1 — a safety refusal must not be retried", calls)
+			}
+			if sleeps != 0 {
+				t.Errorf("backoff sleeps = %d, want 0", sleeps)
+			}
+		})
+	}
+}

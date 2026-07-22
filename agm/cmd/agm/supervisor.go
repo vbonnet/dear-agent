@@ -336,6 +336,40 @@ func (realSupervisorEnv) LookPath(bin string) (string, error) { return exec.Look
 // API-key-present guard. Unwrapped as exit code 2.
 var errToSRefusal = errors.New("supervisor refused: ANTHROPIC_API_KEY is set; unset it or use an OAuth-only env")
 
+// supervisorPreflight runs every pre-launch guard in order and returns the
+// resolved claude binary path, or the first refusal. It returns errors rather
+// than exiting so the ordering and the refusals are testable; runSupervisorRun
+// owns the exit code.
+//
+// Order matters. The env and binary guards come first so a misconfigured
+// invocation reports its real problem (no OAuth token, no claude on PATH)
+// instead of a resource refusal. Admission comes last, immediately before the
+// caller execs.
+//
+// credsPath overrides the OAuth credentials-file location (empty means the real
+// ~/.claude/.credentials.json), matching checkSupervisorEnv, so tests do not
+// depend on the host's auth.
+//
+// admit is the host admission gate. A supervisor is a persistent claude process
+// that consumes the same CPU, RAM, and disk as any worker, so it goes through
+// the same gates as `agm session new` — this path was entirely ungated while
+// the mesh saturated the host on 2026-07-18 (ce-93lw.18).
+func supervisorPreflight(env supervisorEnv, skipOAuthCheck bool, credsPath string, admit func() error) (string, error) {
+	if err := checkSupervisorEnv(env, skipOAuthCheck, credsPath); err != nil {
+		return "", err
+	}
+	bin, err := env.LookPath(supervisorClaudeBin)
+	if err != nil {
+		return "", fmt.Errorf("supervisor: cannot locate claude binary %q: %w", supervisorClaudeBin, err)
+	}
+	if admit != nil {
+		if err := admit(); err != nil {
+			return "", fmt.Errorf("supervisor: %w", err)
+		}
+	}
+	return bin, nil
+}
+
 func runSupervisorRun(cmd *cobra.Command, _ []string) error {
 	// Skipping the OAuth-token requirement requires a recorded justification:
 	// the gate exists so a supervisor never launches without auth and silently
@@ -352,15 +386,10 @@ func runSupervisorRun(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	env := realSupervisorEnv{}
-	if err := checkSupervisorEnv(env, supervisorSkipOAuthCheck, ""); err != nil {
+	bin, err := supervisorPreflight(realSupervisorEnv{}, supervisorSkipOAuthCheck, "", enforceCircuitBreakers)
+	if err != nil {
 		// Print to our stderr (so hooks see it) and exit with a stable code.
 		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), err)
-		os.Exit(2)
-	}
-	bin, err := env.LookPath(supervisorClaudeBin)
-	if err != nil {
-		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "supervisor: cannot locate claude binary %q: %v\n", supervisorClaudeBin, err)
 		os.Exit(2)
 	}
 
