@@ -897,7 +897,7 @@ func sharedStartupReadinessShouldHonorTheTotalDeadline(ctx context.Context) erro
 	if harnessState.startupReadinessTestErr != nil {
 		return fmt.Errorf("slow harness startup readiness test failed: %w\n%s", harnessState.startupReadinessTestErr, harnessState.startupReadinessTestOutput)
 	}
-	if !strings.Contains(harnessState.startupReadinessTestOutput, "--- PASS: TestRealTmuxWaitForHarnessReadyAllowsSlowProcessStart") {
+	if !realTmuxReadinessBehaviorSatisfied(harnessState.startupReadinessTestOutput, "TestRealTmuxWaitForHarnessReadyAllowsSlowProcessStart") {
 		return fmt.Errorf("slow harness startup readiness behavior did not pass:\n%s", harnessState.startupReadinessTestOutput)
 	}
 	return nil
@@ -914,17 +914,23 @@ func sharedInputReadinessShouldRejectStaleClaudeComposerAndUnrelatedNodeProcess(
 		"TestExpectedHarnessMatcherAcceptsIdentifiedNodeBackedHarness",
 		"TestExpectedHarnessMatcherRequiresForegroundTerminalOwnership",
 		"TestParsePSForegroundTable",
-		"TestRealTmuxReadinessIdentifiesNodeBackedCodex",
-		"TestRealTmuxReadinessRejectsSuspendedHarnessWithStaleComposer",
-		"TestRealTmuxReadinessPinsLivenessAndDeliveryToActivePane",
-		"TestRealTmuxReadinessPreservesClaudeGhostComposer",
-		"TestRealTmuxReadinessDetectsManagedPiComposer",
 		"TestSendMessage_AtomicReadinessAndDeliveryPrecedesGenericManagerCheck",
 		"TestSendMessage_PiPermissionPromptBlocksAtomicDelivery",
 		"TestMCPCreateSessionRuntimeRevalidatesStartupPromptAtomically",
 	} {
 		if !strings.Contains(harnessState.startupReadinessTestOutput, "--- PASS: "+behavior) {
 			return fmt.Errorf("shared readiness behavior %s did not pass:\n%s", behavior, harnessState.startupReadinessTestOutput)
+		}
+	}
+	for _, behavior := range []string{
+		"TestRealTmuxReadinessIdentifiesNodeBackedCodex",
+		"TestRealTmuxReadinessRejectsSuspendedHarnessWithStaleComposer",
+		"TestRealTmuxReadinessPinsLivenessAndDeliveryToActivePane",
+		"TestRealTmuxReadinessPreservesClaudeGhostComposer",
+		"TestRealTmuxReadinessDetectsManagedPiComposer",
+	} {
+		if !realTmuxReadinessBehaviorSatisfied(harnessState.startupReadinessTestOutput, behavior) {
+			return fmt.Errorf("shared real-tmux readiness behavior %s did not pass or use the configured CI skip:\n%s", behavior, harnessState.startupReadinessTestOutput)
 		}
 	}
 	return nil
@@ -956,15 +962,20 @@ func sharedGeminiReadinessShouldAdvanceFirstRunTrustOnTheVerifiedPane(ctx contex
 	if harnessState.startupReadinessTestErr != nil {
 		return fmt.Errorf("shared readiness behavior suite failed: %w\n%s", harnessState.startupReadinessTestErr, harnessState.startupReadinessTestOutput)
 	}
-	for _, behavior := range []string{
-		"TestHarnessStartupAdvanceKeys",
-		"TestRealTmuxReadinessAdvancesGeminiTrustOnVerifiedPane",
-	} {
-		if !strings.Contains(harnessState.startupReadinessTestOutput, "--- PASS: "+behavior) {
-			return fmt.Errorf("shared Gemini readiness behavior %s did not pass:\n%s", behavior, harnessState.startupReadinessTestOutput)
-		}
+	if behavior := "TestHarnessStartupAdvanceKeys"; !strings.Contains(harnessState.startupReadinessTestOutput, "--- PASS: "+behavior) {
+		return fmt.Errorf("shared Gemini readiness behavior %s did not pass:\n%s", behavior, harnessState.startupReadinessTestOutput)
+	}
+	if behavior := "TestRealTmuxReadinessAdvancesGeminiTrustOnVerifiedPane"; !realTmuxReadinessBehaviorSatisfied(harnessState.startupReadinessTestOutput, behavior) {
+		return fmt.Errorf("shared real-tmux Gemini readiness behavior %s did not pass or use the configured CI skip:\n%s", behavior, harnessState.startupReadinessTestOutput)
 	}
 	return nil
+}
+
+func realTmuxReadinessBehaviorSatisfied(output, behavior string) bool {
+	if strings.Contains(output, "--- PASS: "+behavior) {
+		return true
+	}
+	return os.Getenv("CI_SKIP_TMUX") == "true" && strings.Contains(output, "--- SKIP: "+behavior)
 }
 
 func legacyAgyNamesShouldReachCanonicalSharedSendReadiness(ctx context.Context) error {

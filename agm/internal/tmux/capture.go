@@ -122,11 +122,7 @@ func newCapturePaneCommandWithStyle(ctx context.Context, sessionName string, lin
 }
 
 func newCapturePaneTargetCommandWithStyle(ctx context.Context, target string, lines int, policy CapturePolicy, preserveStyle bool) *exec.Cmd {
-	args := capturePaneTargetCommandArgs(target, lines, false)
-	if preserveStyle {
-		args = capturePaneTargetCommandArgs(target, lines, true)
-	}
-	cmd := exec.CommandContext(ctx, "tmux", args...)
+	cmd := exec.CommandContext(ctx, "tmux", capturePaneTargetCommandArgs(target, lines, preserveStyle)...)
 	if policy.IsolateProcessGroup {
 		cmd.SysProcAttr = procguard.ProcessGroupAttr()
 		cmd.Cancel = func() error {
