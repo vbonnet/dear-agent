@@ -1380,6 +1380,48 @@ func TestImportConversation(t *testing.T) {
 	}
 }
 
+func TestImportedOpenAIMessagesUseOneHistoryTransaction(t *testing.T) {
+	timestamp := time.Now().UTC().Truncate(time.Second)
+	messages := []Message{
+		{Role: RoleUser, Content: "first", Timestamp: timestamp},
+		{Role: RoleAssistant, Content: "second", Timestamp: timestamp.Add(time.Second)},
+		{Role: RoleUser, Content: "third", Timestamp: timestamp.Add(2 * time.Second)},
+	}
+
+	var calls int
+	var imported []openai.Message
+	err := addImportedOpenAIMessages(messages, func(batch ...openai.Message) error {
+		calls++
+		imported = append([]openai.Message(nil), batch...)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("add imported OpenAI messages: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("history transactions = %d, want one", calls)
+	}
+	if len(imported) != len(messages) {
+		t.Fatalf("imported messages = %d, want %d", len(imported), len(messages))
+	}
+	for i, message := range messages {
+		if imported[i].Role != string(message.Role) || imported[i].Content != message.Content || !imported[i].Timestamp.Equal(message.Timestamp) {
+			t.Errorf("imported message %d = %#v, want role=%q content=%q timestamp=%s", i, imported[i], message.Role, message.Content, message.Timestamp)
+		}
+	}
+
+	calls = 0
+	if err := addImportedOpenAIMessages(nil, func(...openai.Message) error {
+		calls++
+		return nil
+	}); err != nil {
+		t.Fatalf("add empty import: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("empty import history transactions = %d, want none", calls)
+	}
+}
+
 // TestImportConversation_MalformedData tests import with invalid JSON
 func TestImportConversation_MalformedData(t *testing.T) {
 	tmpDir := t.TempDir()

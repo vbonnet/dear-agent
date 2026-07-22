@@ -481,20 +481,28 @@ func (a *OpenAIAdapter) ImportConversation(data []byte, format ConversationForma
 		return "", fmt.Errorf("failed to create session: %w", err)
 	}
 
-	// Import messages
-	for _, msg := range messages {
-		openaiMsg := openai.Message{
-			Role:      string(msg.Role),
-			Content:   msg.Content,
-			Timestamp: msg.Timestamp,
-		}
-
-		if err := a.sessionManager.AddMessage(string(sessionID), openaiMsg); err != nil {
-			return "", fmt.Errorf("failed to import message: %w", err)
-		}
+	if err := addImportedOpenAIMessages(messages, func(imported ...openai.Message) error {
+		return a.sessionManager.AddMessages(string(sessionID), imported...)
+	}); err != nil {
+		return "", fmt.Errorf("failed to import messages: %w", err)
 	}
 
 	return sessionID, nil
+}
+
+func addImportedOpenAIMessages(messages []Message, add func(...openai.Message) error) error {
+	if len(messages) == 0 {
+		return nil
+	}
+	imported := make([]openai.Message, 0, len(messages))
+	for _, msg := range messages {
+		imported = append(imported, openai.Message{
+			Role:      string(msg.Role),
+			Content:   msg.Content,
+			Timestamp: msg.Timestamp,
+		})
+	}
+	return add(imported...)
 }
 
 // Capabilities returns OpenAI's feature capabilities.
