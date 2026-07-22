@@ -219,6 +219,41 @@ func TestNewOpenAIAdapterForSessionRestoresPersistedRuntimeConfig(t *testing.T) 
 	}
 }
 
+func TestNewOpenAIAdapterForSessionDoesNotScanUnrelatedSessions(t *testing.T) {
+	sessionsDir := t.TempDir()
+	creator, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create session manager: %v", err)
+	}
+	const sessionID = SessionID("target-session")
+	if _, err := creator.CreateSession(string(sessionID), "gpt-4", t.TempDir()); err != nil {
+		t.Fatalf("create target session: %v", err)
+	}
+
+	unrelatedDir := filepath.Join(sessionsDir, "unrelated-corrupt-session")
+	if err := os.MkdirAll(unrelatedDir, 0o700); err != nil {
+		t.Fatalf("create unrelated session directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(unrelatedDir, "metadata.json"), []byte("{"), 0o600); err != nil {
+		t.Fatalf("write unrelated corrupt metadata: %v", err)
+	}
+	if _, err := openai.NewSessionManager(sessionsDir); err == nil {
+		t.Fatal("full session inventory unexpectedly accepted corrupt unrelated metadata")
+	}
+
+	restoredAgent, err := NewOpenAIAdapterForSession(t.Context(), sessionID, &OpenAIConfig{
+		APIKey:      "runtime-secret",
+		SessionsDir: sessionsDir,
+	})
+	if err != nil {
+		t.Fatalf("targeted reconstruction inspected unrelated session: %v", err)
+	}
+	restored := restoredAgent.(*OpenAIAdapter)
+	if ids := restored.sessionManager.ListSessions(); len(ids) != 1 || ids[0] != string(sessionID) {
+		t.Fatalf("targeted manager sessions = %v, want only %q", ids, sessionID)
+	}
+}
+
 func TestNewOpenAIAdapterForLegacySessionUsesManifestFallback(t *testing.T) {
 	sessionsDir := t.TempDir()
 	sessionManager, err := openai.NewSessionManager(sessionsDir)

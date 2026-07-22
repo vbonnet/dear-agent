@@ -45,6 +45,8 @@ errors for callers that need harness-neutral failure handling.
 
 **OAI-17** When a fan-out recipient uses an OpenAI-compatible API adapter, the system shall bound stable-lock acquisition, reconstruction, and readiness as a separate preflight phase and shall leave the completed-turn phase its full provider deadline while preserving cancellation from the original caller.
 
+**OAI-18** When AGM reconstructs an OpenAI-compatible adapter for one registered session, the system shall load only that session's authoritative metadata under the request context and shall not enumerate or parse unrelated session directories while holding the surrounding lifecycle lock.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

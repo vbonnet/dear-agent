@@ -121,7 +121,8 @@ Since API-based execution has no shell access, hooks are **synthetic**:
 1. AGM resolves an already-registered manifest with harness openai or gpt
 2. AGM acquires the stable session-ID lifecycle/mutation lock
 3. AGM reloads the current manifest and verifies that it is active
-4. AGM reconstructs the adapter from persisted non-secret runtime settings
+4. AGM reconstructs the adapter from that session's persisted non-secret
+   runtime settings without enumerating unrelated session directories
 5. The adapter obtains credentials from current runtime configuration
 6. AGM verifies adapter readiness under a separate bounded preflight context
 7. AGM performs bounded direct API delivery with the adapter's complete
@@ -129,9 +130,11 @@ Since API-based execution has no shell access, hooks are **synthetic**:
 8. The adapter atomically commits the completed turn to local JSONL history
 ```
 
-Reconstruction and readiness reloads use the delivery request context. Caller
+Reconstruction loads only the requested session's authoritative metadata, and
+reconstruction and readiness reloads use the delivery request context. Caller
 cancellation therefore stops a contended store-lock wait and releases AGM's
-surrounding lifecycle lock instead of misreporting the session as terminated.
+surrounding lifecycle lock instead of scanning unrelated sessions or
+misreporting the requested session as terminated.
 
 ### Message Send
 ```

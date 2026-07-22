@@ -56,6 +56,36 @@ type SessionRuntimeConfig struct {
 // NewSessionManager creates a new session manager.
 // If baseDir is empty, defaults to ~/.agm/openai-sessions/
 func NewSessionManager(baseDir string) (*SessionManager, error) {
+	sm, err := newSessionManager(baseDir)
+	if err != nil {
+		return nil, err
+	}
+
+	// Load existing sessions for callers that need the complete inventory.
+	if err := sm.loadAllSessions(); err != nil {
+		return nil, err
+	}
+
+	return sm, nil
+}
+
+// NewSessionManagerForSession constructs a manager containing only the
+// requested authoritative session. Delivery reconstruction uses this path so
+// unrelated session directories cannot consume or escape the request's
+// preflight budget while the surrounding lifecycle lock is held.
+func NewSessionManagerForSession(ctx context.Context, baseDir, sessionID string) (*SessionManager, *SessionInfo, error) {
+	sm, err := newSessionManager(baseDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	info, err := sm.GetSessionContext(ctx, sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return sm, info, nil
+}
+
+func newSessionManager(baseDir string) (*SessionManager, error) {
 	if baseDir == "" {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
@@ -73,12 +103,6 @@ func NewSessionManager(baseDir string) (*SessionManager, error) {
 		baseDir:  baseDir,
 		sessions: make(map[string]*SessionInfo),
 	}
-
-	// Load existing sessions
-	if err := sm.loadAllSessions(); err != nil {
-		return nil, err
-	}
-
 	return sm, nil
 }
 

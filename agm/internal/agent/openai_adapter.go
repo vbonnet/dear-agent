@@ -81,12 +81,7 @@ func NewOpenAIAdapter(ctx context.Context, config *OpenAIConfig) (Agent, error) 
 // resolved from config or the environment on each process invocation.
 func NewOpenAIAdapterForSession(ctx context.Context, sessionID SessionID, config *OpenAIConfig) (Agent, error) {
 	resolvedConfig := resolveOpenAIConfig(config)
-	sessionManager, err := openai.NewSessionManager(resolvedConfig.SessionsDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create session manager: %w", err)
-	}
-
-	info, err := sessionManager.GetSessionContext(ctx, string(sessionID))
+	sessionManager, info, err := openai.NewSessionManagerForSession(ctx, resolvedConfig.SessionsDir, string(sessionID))
 	if err != nil {
 		return nil, fmt.Errorf("load OpenAI session %q: %w", sessionID, err)
 	}
@@ -99,7 +94,7 @@ func NewOpenAIAdapterForSession(ctx context.Context, sessionID SessionID, config
 		resolvedConfig.AzureAPIVersion = info.RuntimeConfig.AzureAPIVersion
 	}
 
-	return newOpenAIAdapter(ctx, resolvedConfig)
+	return newOpenAIAdapterWithSessionManager(ctx, resolvedConfig, sessionManager)
 }
 
 func resolveOpenAIConfig(config *OpenAIConfig) OpenAIConfig {
@@ -131,6 +126,14 @@ func resolveOpenAIConfig(config *OpenAIConfig) OpenAIConfig {
 }
 
 func newOpenAIAdapter(ctx context.Context, config OpenAIConfig) (*OpenAIAdapter, error) {
+	sessionManager, err := openai.NewSessionManager(config.SessionsDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create session manager: %w", err)
+	}
+	return newOpenAIAdapterWithSessionManager(ctx, config, sessionManager)
+}
+
+func newOpenAIAdapterWithSessionManager(ctx context.Context, config OpenAIConfig, sessionManager *openai.SessionManager) (*OpenAIAdapter, error) {
 	// Create OpenAI client
 	clientConfig := openai.Config{
 		APIKey:          config.APIKey,
@@ -145,12 +148,6 @@ func newOpenAIAdapter(ctx context.Context, config OpenAIConfig) (*OpenAIAdapter,
 	client, err := openai.NewClient(ctx, clientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OpenAI client: %w", err)
-	}
-
-	// Create session manager
-	sessionManager, err := openai.NewSessionManager(config.SessionsDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create session manager: %w", err)
 	}
 
 	// Determine model name

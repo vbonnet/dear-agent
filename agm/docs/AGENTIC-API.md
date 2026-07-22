@@ -38,7 +38,9 @@ completion honor request cancellation, and the provider call has a finite
 ceiling. Each sequential fan-out recipient receives a fresh outer deadline;
 stable-lock acquisition, reconstruction, and readiness use an independently
 bounded preflight context so the completed-turn phase starts with the adapter's
-complete provider budget. Direct adapter callers use a context-aware store-scoped session lock
+complete provider budget. Reconstruction loads only the requested session's
+authoritative metadata and never scans unrelated session directories while the
+lifecycle lock is held. Direct adapter callers use a context-aware store-scoped session lock
 and the same provider ceiling. Provider failures, cancellation, and timeouts
 leave no provisional user message in durable history.
 
