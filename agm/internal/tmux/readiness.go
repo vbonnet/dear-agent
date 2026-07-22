@@ -327,9 +327,10 @@ func queuedComposerOwnsTail(region, content, harness string) bool {
 	case "claude-code":
 		return hasTerminalIdleFooter(lines, isClaudeIdleFooter) && queuedPastePayloadOwnsTail(lines, isClaudeIdleComposerChrome)
 	case "codex-cli":
-		if codexFooterPattern.MatchString(strings.TrimSpace(lines[len(lines)-1])) {
-			return true
-		}
+		// Codex keeps its model footer visible while a turn is active, and a
+		// queued paste replaces the empty cursor that would otherwise prove idle
+		// ownership. Only the compact first-turn composer can therefore prove the
+		// queue was pasted before any work began; post-turn queues fail closed.
 		return codexInitialQueuedComposerOwnsTail(stripANSI(content))
 	case "agy":
 		return queuedPastePayloadOwnsTail(lines, isTerminalIdleChrome)

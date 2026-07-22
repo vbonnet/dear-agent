@@ -199,10 +199,16 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			state:   HarnessInputBusy,
 		},
 		{
-			name:    "Codex queued AGM paste with observable header is positively identified",
+			name:    "post-turn Codex queue without empty cursor remains protected",
 			harness: "codex-cli",
 			content: "response\n› [Pasted Content 2172 chars]\n[From: orchestrator | ID: 1774872000000-orchestr-002 | Sent: 2026-07-21T12:00:00Z]\nrecover\ngpt-5.6 xhigh · /repo",
-			state:   HarnessInputQueuedAGM,
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "active Codex turn with queued AGM paste remains protected",
+			harness: "codex-cli",
+			content: "response\n• Working on tests\n› [Pasted Content 2172 chars]\n[From: orchestrator | ID: 1774872000000-orchestr-002 | Sent: 2026-07-21T12:00:00Z]\nrecover\ngpt-5.6 xhigh · /repo",
+			state:   HarnessInputBusy,
 		},
 		{
 			name:    "initial Codex composer can own observable queued AGM paste",
