@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
@@ -23,6 +24,30 @@ type fakeBackend struct {
 	sendKeysErr       error
 	killErr           error
 	killed            []string
+}
+
+type readinessBackend struct {
+	*fakeBackend
+	waitCtx   context.Context
+	checkCtx  context.Context
+	atomicCtx context.Context
+}
+
+type adapterContextKey struct{}
+
+func (b *readinessBackend) WaitForHarnessReady(ctx context.Context, _, _ string, _ time.Duration) error {
+	b.waitCtx = ctx
+	return nil
+}
+
+func (b *readinessBackend) CheckInputReadiness(ctx context.Context, _, _ string) (session.InputReadiness, error) {
+	b.checkCtx = ctx
+	return session.InputReadiness{Ready: true, State: "YES", PaneID: "%1"}, nil
+}
+
+func (b *readinessBackend) SendKeysIfInputReady(ctx context.Context, _, _, _ string, _ session.InputDeliveryOptions) (session.InputReadiness, error) {
+	b.atomicCtx = ctx
+	return session.InputReadiness{Ready: true, State: "YES", PaneID: "%1"}, nil
 }
 
 func (f *fakeBackend) HasSession(name string) (bool, error) {
@@ -261,5 +286,61 @@ func TestBackendAdapter_SendKeys_Error(t *testing.T) {
 	err := adapter.SendKeys("test", "echo hello")
 	if err == nil {
 		t.Error("expected error, got nil")
+	}
+}
+
+func TestBackendAdapter_ForwardsReadinessCapabilities(t *testing.T) {
+	wantCtx := context.WithValue(context.Background(), adapterContextKey{}, "request")
+	backend := &readinessBackend{fakeBackend: &fakeBackend{}}
+	adapter := NewBackendAdapter(backend)
+
+	if err := adapter.WaitForHarnessReady(wantCtx, "worker", "codex-cli", time.Second); err != nil {
+		t.Fatalf("WaitForHarnessReady() error = %v", err)
+	}
+	readiness, err := adapter.CheckInputReadiness(wantCtx, "worker", "codex-cli")
+	if err != nil || !readiness.Ready {
+		t.Fatalf("CheckInputReadiness() = (%#v, %v)", readiness, err)
+	}
+	atomic, err := adapter.SendKeysIfInputReady(wantCtx, "worker", "codex-cli", "hello", session.InputDeliveryOptions{})
+	if err != nil || !atomic.Ready || atomic.PaneID != "%1" {
+		t.Fatalf("SendKeysIfInputReady() = (%#v, %v)", atomic, err)
+	}
+	if backend.waitCtx != wantCtx || backend.checkCtx != wantCtx || backend.atomicCtx != wantCtx {
+		t.Fatal("adapter did not preserve request context through readiness capabilities")
+	}
+}
+
+func TestBackendAdapter_ReadinessFailsClosedWhenCapabilityMissing(t *testing.T) {
+	adapter := NewBackendAdapter(&fakeBackend{})
+	if err := adapter.WaitForHarnessReady(context.Background(), "worker", "codex-cli", time.Second); err == nil {
+		t.Fatal("WaitForHarnessReady() succeeded without backend capability")
+	}
+	if _, err := adapter.CheckInputReadiness(context.Background(), "worker", "codex-cli"); err == nil {
+		t.Fatal("CheckInputReadiness() succeeded without backend capability")
+	}
+	if _, err := adapter.SendKeysIfInputReady(context.Background(), "worker", "codex-cli", "hello", session.InputDeliveryOptions{}); err == nil {
+		t.Fatal("SendKeysIfInputReady() succeeded without backend capability")
+	}
+}
+
+func TestTmuxBackend_ForwardsReadinessCapabilities(t *testing.T) {
+	tmuxMock := session.NewMockTmux()
+	backend := NewTmuxBackendWithClient(tmuxMock)
+	wantCtx := context.WithValue(context.Background(), adapterContextKey{}, "request")
+
+	if err := backend.WaitForHarnessReady(wantCtx, "worker", "codex-cli", time.Second); err != nil {
+		t.Fatalf("WaitForHarnessReady() error = %v", err)
+	}
+	if _, err := backend.CheckInputReadiness(wantCtx, "worker", "codex-cli"); err != nil {
+		t.Fatalf("CheckInputReadiness() error = %v", err)
+	}
+	if _, err := backend.SendKeysIfInputReady(wantCtx, "worker", "codex-cli", "hello", session.InputDeliveryOptions{}); err != nil {
+		t.Fatalf("SendKeysIfInputReady() error = %v", err)
+	}
+	if tmuxMock.WaitContext != wantCtx || tmuxMock.InputContext != wantCtx {
+		t.Fatal("tmux backend did not preserve request context")
+	}
+	if len(tmuxMock.AtomicInputChecks) != 1 || len(tmuxMock.ExactPaneDeliveries) != 1 {
+		t.Fatalf("atomic backend calls = %v/%v, want one exact delivery", tmuxMock.AtomicInputChecks, tmuxMock.ExactPaneDeliveries)
 	}
 }

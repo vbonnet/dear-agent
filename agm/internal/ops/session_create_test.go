@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -40,6 +41,68 @@ type createFailingKillTmux struct {
 
 func (t *createFailingKillTmux) KillSession(string) error {
 	return t.err
+}
+
+type createNoReadinessTmux struct {
+	session.TmuxInterface
+	kill func(string) error
+}
+
+func (t *createNoReadinessTmux) KillSession(name string) error {
+	return t.kill(name)
+}
+
+type createReadinessTmux struct {
+	*session.MockTmux
+	order   *[]string
+	waitErr error
+	waitCtx context.Context
+	atomic  func()
+}
+
+func (t *createReadinessTmux) SendKeys(sessionName, keys string) error {
+	phase := "prompt"
+	if len(t.SentCommands) == 0 {
+		phase = "launch"
+	}
+	*t.order = append(*t.order, phase)
+	return t.MockTmux.SendKeys(sessionName, keys)
+}
+
+func (t *createReadinessTmux) WaitForHarnessReady(ctx context.Context, sessionName, harness string, timeout time.Duration) error {
+	t.waitCtx = ctx
+	*t.order = append(*t.order, "ready")
+	t.WaitedHarnesses = append(t.WaitedHarnesses, sessionName+":"+harness)
+	if timeout != sharedHarnessReadyTimeout {
+		return fmt.Errorf("readiness timeout = %v, want %v", timeout, sharedHarnessReadyTimeout)
+	}
+	return t.waitErr
+}
+
+func (t *createReadinessTmux) SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string, options session.InputDeliveryOptions) (session.InputReadiness, error) {
+	if t.atomic != nil {
+		t.atomic()
+	}
+	sentBefore := len(t.SentCommands)
+	readiness, err := t.MockTmux.SendKeysIfInputReady(ctx, sessionName, harness, keys, options)
+	if len(t.SentCommands) > sentBefore {
+		*t.order = append(*t.order, "prompt")
+	}
+	return readiness, err
+}
+
+func TestWaitForCreatedHarnessReadyPropagatesRequestContext(t *testing.T) {
+	type contextKey struct{}
+	wantCtx := context.WithValue(context.Background(), contextKey{}, "request")
+	var order []string
+	tmuxMock := &createReadinessTmux{MockTmux: session.NewMockTmux(), order: &order}
+
+	if err := waitForCreatedHarnessReady(wantCtx, &OpContext{Tmux: tmuxMock}, "worker", "codex-cli"); err != nil {
+		t.Fatalf("waitForCreatedHarnessReady() error = %v", err)
+	}
+	if tmuxMock.waitCtx != wantCtx {
+		t.Fatal("startup readiness did not receive the request context")
+	}
 }
 
 type createTestRuntime struct {
@@ -826,7 +889,7 @@ func TestCreateSession_LifecycleOrder(t *testing.T) {
 	manifestDir := filepath.Join(t.TempDir(), "ordered")
 	var order []string
 	store := &createMockStorage{createOrder: &order}
-	tmuxMock := session.NewMockTmux()
+	tmuxMock := &createReadinessTmux{MockTmux: session.NewMockTmux(), order: &order}
 	runtime := &createTestRuntime{
 		launch: func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
 			if !tmuxMock.Sessions["ordered"] {
@@ -856,9 +919,114 @@ func TestCreateSession_LifecycleOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSessionWithContext: %v", err)
 	}
-	want := []string{"launch", "storage", "register", "complete", "cleanup"}
+	want := []string{"launch", "ready", "storage", "register", "complete", "cleanup"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("lifecycle order = %v, want %v", order, want)
+	}
+}
+
+func TestCreateSession_NoRuntimeInitialPromptRevalidatesAfterRegistration(t *testing.T) {
+	t.Parallel()
+
+	callerCtx := t.Context()
+	var order []string
+	registered := false
+	tmuxMock := &createReadinessTmux{MockTmux: session.NewMockTmux(), order: &order}
+	tmuxMock.InputReadiness = session.InputReadiness{State: "PERMISSION", PaneID: "%42"}
+	tmuxMock.atomic = func() {
+		if !registered {
+			t.Fatal("atomic initial-prompt readiness ran before registration")
+		}
+	}
+	store := &createMockStorage{createOrder: &order, onCreate: func() { registered = true }}
+
+	_, err := CreateSessionWithContext(callerCtx, &OpContext{Tmux: tmuxMock, Storage: store}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "atomic-prompt", SessionID: "atomic-prompt-id",
+		Harness: "claude-code", Model: "sonnet", Prompt: "do not inject",
+	})
+	if err == nil || !strings.Contains(err.Error(), "harness input is PERMISSION") {
+		t.Fatalf("CreateSessionWithContext() error = %v, want post-registration permission rejection", err)
+	}
+	if !reflect.DeepEqual(tmuxMock.AtomicInputChecks, []string{"atomic-prompt:claude-code"}) {
+		t.Fatalf("atomic input checks = %v", tmuxMock.AtomicInputChecks)
+	}
+	if tmuxMock.InputContext != callerCtx {
+		t.Fatal("atomic initial-prompt readiness did not receive the caller context")
+	}
+	if len(tmuxMock.SentCommands) != 1 || len(tmuxMock.ExactPaneDeliveries) != 0 {
+		t.Fatalf("tmux deliveries = commands %v panes %v, want launch only", tmuxMock.SentCommands, tmuxMock.ExactPaneDeliveries)
+	}
+	if !reflect.DeepEqual(store.deleted, []string{"atomic-prompt-id"}) || tmuxMock.Sessions["atomic-prompt"] {
+		t.Fatalf("failed prompt rollback = deleted %v sessionExists %v", store.deleted, tmuxMock.Sessions["atomic-prompt"])
+	}
+}
+
+func TestCreateSession_NoRuntimeInitialPromptUsesAtomicExactPaneDelivery(t *testing.T) {
+	t.Parallel()
+
+	callerCtx := t.Context()
+	var order []string
+	registered := false
+	tmuxMock := &createReadinessTmux{MockTmux: session.NewMockTmux(), order: &order}
+	tmuxMock.InputReadiness = session.InputReadiness{Ready: true, State: "YES", PaneID: "%42"}
+	tmuxMock.atomic = func() {
+		if !registered {
+			t.Fatal("atomic initial-prompt readiness ran before registration")
+		}
+	}
+	store := &createMockStorage{createOrder: &order, onCreate: func() { registered = true }}
+
+	_, err := CreateSessionWithContext(callerCtx, &OpContext{Tmux: tmuxMock, Storage: store}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "atomic-prompt", SessionID: "atomic-prompt-id",
+		Harness: "claude-code", Model: "sonnet", Prompt: "deliver exactly once",
+	})
+	if err != nil {
+		t.Fatalf("CreateSessionWithContext() error = %v", err)
+	}
+	if !reflect.DeepEqual(tmuxMock.AtomicInputChecks, []string{"atomic-prompt:claude-code"}) ||
+		!reflect.DeepEqual(tmuxMock.ExactPaneDeliveries, []string{"%42"}) {
+		t.Fatalf("atomic input = checks %v panes %v", tmuxMock.AtomicInputChecks, tmuxMock.ExactPaneDeliveries)
+	}
+	if tmuxMock.InputContext != callerCtx || tmuxMock.PaneSendContext != callerCtx {
+		t.Fatal("atomic initial-prompt delivery did not retain the caller context")
+	}
+	if len(tmuxMock.SentCommands) != 2 || tmuxMock.SentCommands[1] != "deliver exactly once" {
+		t.Fatalf("tmux commands = %v, want launch then exact initial prompt", tmuxMock.SentCommands)
+	}
+}
+
+func TestEstablishCreatedHarnessReadinessAllowsOnlyQueuedCurrentTmuxDeferral(t *testing.T) {
+	t.Parallel()
+
+	validRequest := &CreateSessionRequest{
+		Caller: CreateSessionCaller{Surface: CreateSurfaceCLI}, ReuseExistingTmux: true,
+	}
+	validParams := &createSessionParams{name: "current", harness: "codex-cli"}
+	launch := CreateSessionLaunchResult{Readiness: CreateSessionReadinessDeferredUntilCallerExit}
+	for _, harness := range []string{"claude-code", "codex-cli", "opencode-cli", "pi-cli", "gemini-cli"} {
+		params := &createSessionParams{name: "current", harness: harness}
+		if err := establishCreatedHarnessReadiness(t.Context(), &OpContext{Tmux: session.NewMockTmux()}, validRequest, params, launch); err != nil {
+			t.Fatalf("valid current-tmux %s deferral: %v", harness, err)
+		}
+	}
+
+	tests := []struct {
+		name    string
+		request CreateSessionRequest
+		params  createSessionParams
+	}{
+		{name: "MCP surface", request: CreateSessionRequest{Caller: CreateSessionCaller{Surface: CreateSurfaceMCP}, ReuseExistingTmux: true}, params: *validParams},
+		{name: "unsupported harness", request: *validRequest, params: createSessionParams{name: "current", harness: "agy"}},
+		{name: "new tmux", request: CreateSessionRequest{Caller: CreateSessionCaller{Surface: CreateSurfaceCLI}}, params: *validParams},
+		{name: "initial prompt", request: CreateSessionRequest{Caller: CreateSessionCaller{Surface: CreateSurfaceCLI}, ReuseExistingTmux: true, Prompt: "must wait"}, params: *validParams},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := establishCreatedHarnessReadiness(t.Context(), &OpContext{Tmux: session.NewMockTmux()}, &tt.request, &tt.params, launch)
+			if err == nil || !strings.Contains(err.Error(), "deferred readiness") {
+				t.Fatalf("establishCreatedHarnessReadiness() error = %v, want invalid deferral", err)
+			}
+		})
 	}
 }
 
@@ -1041,6 +1209,96 @@ func TestCreateSession_CancellationAfterRegistrationRollsBackBeforeCompletion(t 
 	}
 	if !slices.Contains(store.deleted, "cancel-after-register-id") {
 		t.Fatalf("deleted registrations = %v, want canceled session ID", store.deleted)
+	}
+}
+
+func TestCreateSession_NoRuntimeWaitsBeforeRegistrationAndPrompt(t *testing.T) {
+	var order []string
+	tmuxMock := &createReadinessTmux{MockTmux: session.NewMockTmux(), order: &order}
+	store := &createMockStorage{createOrder: &order}
+
+	result, err := CreateSession(&OpContext{Tmux: tmuxMock, Storage: store}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "readiness-order", Model: "sonnet", Harness: "claude-code", Prompt: "start work",
+	})
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if !result.Created {
+		t.Fatal("CreateSession() did not report creation")
+	}
+	want := []string{"launch", "ready", "register", "prompt"}
+	if !reflect.DeepEqual(order, want) {
+		t.Fatalf("creation order = %v, want %v", order, want)
+	}
+	if got := tmuxMock.WaitedHarnesses; len(got) != 1 || got[0] != "readiness-order:claude-code" {
+		t.Fatalf("readiness checks = %v, want [readiness-order:claude-code]", got)
+	}
+}
+
+func TestCreateSession_ReadinessFailureRollsBackBeforeRegistrationOrPrompt(t *testing.T) {
+	var order []string
+	wantErr := errors.New("composer missing")
+	tmuxMock := &createReadinessTmux{MockTmux: session.NewMockTmux(), order: &order, waitErr: wantErr}
+	store := &createMockStorage{createOrder: &order}
+
+	_, err := CreateSession(&OpContext{Tmux: tmuxMock, Storage: store}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "readiness-failure", Model: "5.5", Harness: "codex-cli", Prompt: "must not send",
+		SkipCodexRemoteControl: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), wantErr.Error()) {
+		t.Fatalf("CreateSession() error = %v, want readiness failure", err)
+	}
+	if tmuxMock.Sessions["readiness-failure"] {
+		t.Fatal("new tmux session survived readiness failure")
+	}
+	if len(store.created) != 0 {
+		t.Fatalf("readiness failure registered sessions: %d", len(store.created))
+	}
+	if len(tmuxMock.SentCommands) != 1 {
+		t.Fatalf("commands = %v, want harness launch only", tmuxMock.SentCommands)
+	}
+	if want := []string{"launch", "ready"}; !reflect.DeepEqual(order, want) {
+		t.Fatalf("creation order = %v, want %v", order, want)
+	}
+}
+
+func TestCreateSession_ReadinessFailurePreservesReusedTmux(t *testing.T) {
+	var order []string
+	tmuxMock := &createReadinessTmux{
+		MockTmux: session.NewMockTmux(), order: &order, waitErr: errors.New("onboarding still visible"),
+	}
+	tmuxMock.Sessions["reused-readiness"] = true
+
+	_, err := CreateSession(&OpContext{Tmux: tmuxMock}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "reused-readiness", Model: "sonnet", Harness: "claude-code", Prompt: "must not send",
+		ReuseExistingTmux: true,
+	})
+	if err == nil {
+		t.Fatal("CreateSession() returned success without readiness")
+	}
+	if !tmuxMock.Sessions["reused-readiness"] {
+		t.Fatal("readiness rollback killed a pre-existing tmux session")
+	}
+	if len(tmuxMock.SentCommands) != 1 {
+		t.Fatalf("commands = %v, want harness launch only", tmuxMock.SentCommands)
+	}
+}
+
+func TestCreateSession_NoRuntimeRequiresReadinessCapability(t *testing.T) {
+	base := session.NewMockTmux()
+	tmuxWithoutReadiness := &createNoReadinessTmux{
+		TmuxInterface: base,
+		kill:          base.KillSession,
+	}
+
+	_, err := CreateSession(&OpContext{Tmux: tmuxWithoutReadiness}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "no-readiness", Model: "sonnet", Harness: "claude-code", Prompt: "must not send",
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not expose harness readiness") {
+		t.Fatalf("CreateSession() error = %v, want readiness capability failure", err)
+	}
+	if base.Sessions["no-readiness"] {
+		t.Fatal("new tmux session survived missing-readiness capability")
 	}
 }
 

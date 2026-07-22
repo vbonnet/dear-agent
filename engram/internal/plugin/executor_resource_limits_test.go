@@ -28,6 +28,8 @@ func TestApplyResourceLimits(t *testing.T) {
 
 // TestExecutor_ResourceLimits verifies that resource limits are applied during execution
 func TestExecutor_ResourceLimits(t *testing.T) {
+	requireExecutableSandbox(t)
+
 	// Create temporary directory for test plugin
 	tmpDir := t.TempDir()
 

@@ -27,7 +27,7 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
 
 **MCS-06** When MCP session creation succeeds, the result shall report `source: "mcp"` and the registered manifest shall contain the `source:mcp` provenance tag.
 
-**MCS-07** When MCP creates an AGY session, the shared creation lifecycle shall persist the newly discovered provider-native conversation identity before the MCP runtime delivers its required startup prompt or reports success.
+**MCS-07** When MCP creates a session with an initial prompt, the shared creation lifecycle shall persist required provider-native identity before the MCP runtime atomically revalidates the expected harness and current composer and delivers to that exact pane; if readiness changed during registration, MCP shall fail without sending the prompt or reporting success.
 
 **MCS-08** When a Wayfinder MCP tool lists or retrieves a status file, the server shall accept it only after complete canonical schema 2.0 validation.
 

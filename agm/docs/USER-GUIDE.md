@@ -593,17 +593,17 @@ Select UUID (1-3):
 
 ```bash
 # Send inline prompt
-agm session send my-session --prompt "Please review the code"
+agm send msg my-session --prompt "Please review the code"
 
 # Send from file
-agm session send my-session --prompt-file ~/prompts/review.txt
+agm send msg my-session --prompt-file ~/prompts/review.txt
 ```
 
 **Features:**
-- Auto-interrupts thinking state (sends ESC first)
-- Literal mode (tmux `-l` flag)
+- Requires the registered harness process and its current composer
+- Delivers to the exact pane that passed readiness
 - Supports up to 10KB prompt files
-- Executes immediately (not queued)
+- Queues or rejects when the session cannot safely receive input
 
 **Use cases:**
 - Automated recovery of stuck sessions

@@ -327,6 +327,9 @@ func (r *mcpCreateSessionRuntime) Launch(ctx context.Context, spec ops.HarnessLa
 	if err := r.waitForAgyPrompt(ctx, spec.SessionName, 90*time.Second); err != nil {
 		return result, fmt.Errorf("wait for AGY readiness: %w", err)
 	}
+	// The native wait handles AGY onboarding, but it does not prove that the
+	// process rendering the composer is still alive. Leave the result unverified
+	// so the shared process-and-composer gate owns the final readiness verdict.
 	return result, nil
 }
 
@@ -337,14 +340,32 @@ func (r *mcpCreateSessionRuntime) Complete(ctx context.Context, completion ops.C
 	if completion.Prompt == "" || completion.Launch.PromptDelivered {
 		return nil
 	}
-	return r.tmux.SendKeys(completion.Manifest.Name, completion.Prompt)
+	return r.sendPromptAtomically(ctx, completion.Manifest.Name, completion.Manifest.Harness, completion.Prompt, "startup prompt delivery")
+}
+
+func (r *mcpCreateSessionRuntime) sendPromptAtomically(ctx context.Context, sessionName, harness, prompt, operation string) error {
+	sender, ok := r.tmux.(session.AtomicInputSender)
+	if !ok {
+		return fmt.Errorf("MCP tmux runtime does not expose atomic input delivery")
+	}
+	readiness, err := sender.SendKeysIfInputReady(ctx, sessionName, harness, prompt, session.InputDeliveryOptions{})
+	if err != nil {
+		return fmt.Errorf("revalidate MCP %s: %w", operation, err)
+	}
+	if !readiness.Ready {
+		return fmt.Errorf("revalidate MCP %s: harness input is %s", operation, readiness.State)
+	}
+	if readiness.PaneID == "" {
+		return fmt.Errorf("revalidate MCP %s: harness returned no verified pane", operation)
+	}
+	return nil
 }
 
 func (r *mcpCreateSessionRuntime) BootstrapAgyCreateIdentity(ctx context.Context, input ops.AgyCreateIdentityBootstrap) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return r.tmux.SendKeys(input.SessionName, input.Prompt)
+	return r.sendPromptAtomically(ctx, input.SessionName, "agy", input.Prompt, "AGY identity bootstrap prompt")
 }
 
 // mcpTracer is the OTel tracer for MCP tool handlers.
@@ -377,6 +398,7 @@ func addCreateSessionTool(server *mcp.Server, _ *Config) {
 			return mcpError(err), nil, nil
 		}
 		defer cleanup()
+		opCtx.Context = ctx
 
 		result, opErr := ops.CreateSessionWithContext(ctx, opCtx, createSessionRequestFromMCP(input))
 		if opErr != nil {
@@ -431,7 +453,7 @@ func addSendMessageTool(server *mcp.Server, _ *Config) {
 			return mcpError(err), nil, nil
 		}
 		defer cleanup()
-
+		opCtx.Context = ctx
 		result, opErr := ops.SendMessage(opCtx, &ops.SendMessageRequest{
 			Recipient: input.SessionID,
 			Message:   input.Message,

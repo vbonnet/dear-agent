@@ -1,5 +1,10 @@
 package session
 
+import (
+	"context"
+	"time"
+)
+
 // MockTmux provides an in-memory mock implementation of TmuxInterface for testing
 type MockTmux struct {
 	// Sessions maps session name to whether it exists
@@ -10,14 +15,26 @@ type MockTmux struct {
 
 	// SentCommands tracks commands sent via SendKeys
 	SentCommands []string
+	// Readiness checks track shared lifecycle gating in tests.
+	WaitedHarnesses      []string
+	CheckedInputSessions []string
+	AtomicInputChecks    []string
+	AtomicInputOptions   []InputDeliveryOptions
+	ExactPaneDeliveries  []string
+	InputReadiness       InputReadiness
+	WaitContext          context.Context
+	InputContext         context.Context
+	PaneSendContext      context.Context
 
 	// Errors can be set to simulate tmux failures
-	HasSessionError    error
-	ListSessionsError  error
-	CreateSessionError error
-	KillSessionError   error
-	AttachSessionError error
-	SendKeysError      error
+	HasSessionError          error
+	ListSessionsError        error
+	CreateSessionError       error
+	KillSessionError         error
+	AttachSessionError       error
+	SendKeysError            error
+	WaitForHarnessReadyError error
+	InputReadinessError      error
 }
 
 // NewMockTmux creates a new MockTmux instance
@@ -26,6 +43,7 @@ func NewMockTmux() *MockTmux {
 		Sessions:        make(map[string]bool),
 		CreatedSessions: []string{},
 		SentCommands:    []string{},
+		InputReadiness:  InputReadiness{Ready: true, State: "YES", PaneID: "%0"},
 	}
 }
 
@@ -113,6 +131,51 @@ func (m *MockTmux) SendKeys(session, keys string) error {
 
 	m.SentCommands = append(m.SentCommands, keys)
 	return nil
+}
+
+// SendKeysToPane records exact-pane delivery through the same mock transport.
+func (m *MockTmux) SendKeysToPane(ctx context.Context, paneID, keys string) error {
+	m.PaneSendContext = ctx
+	m.ExactPaneDeliveries = append(m.ExactPaneDeliveries, paneID)
+	return m.SendKeys(paneID, keys)
+}
+
+// WaitForHarnessReady records the requested harness and returns the configured error.
+func (m *MockTmux) WaitForHarnessReady(ctx context.Context, sessionName, harness string, _ time.Duration) error {
+	m.WaitContext = ctx
+	m.WaitedHarnesses = append(m.WaitedHarnesses, sessionName+":"+harness)
+	return m.WaitForHarnessReadyError
+}
+
+// CheckInputReadiness records the target and returns the configured readiness result.
+func (m *MockTmux) CheckInputReadiness(ctx context.Context, sessionName, harness string) (InputReadiness, error) {
+	m.InputContext = ctx
+	m.CheckedInputSessions = append(m.CheckedInputSessions, sessionName+":"+harness)
+	if m.InputReadinessError != nil {
+		return InputReadiness{}, m.InputReadinessError
+	}
+	return m.InputReadiness, nil
+}
+
+// SendKeysIfInputReady models the atomic readiness-and-delivery capability.
+func (m *MockTmux) SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string, options InputDeliveryOptions) (InputReadiness, error) {
+	m.AtomicInputChecks = append(m.AtomicInputChecks, sessionName+":"+harness)
+	m.AtomicInputOptions = append(m.AtomicInputOptions, options)
+	readiness, err := m.CheckInputReadiness(ctx, sessionName, harness)
+	if err != nil {
+		return readiness, err
+	}
+	if !readiness.Ready {
+		if !options.AllowBusyComposer || readiness.State != "QUEUE" {
+			return readiness, nil
+		}
+		readiness.Ready = true
+		readiness.Forced = true
+	}
+	if readiness.PaneID == "" {
+		return readiness, nil
+	}
+	return readiness, m.SendKeysToPane(ctx, readiness.PaneID, keys)
 }
 
 // ListClients returns empty list in the mock (clients not tracked)

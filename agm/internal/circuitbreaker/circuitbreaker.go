@@ -1,27 +1,47 @@
 // Package circuitbreaker implements deterministic safeguards to prevent CPU,
 // memory, and disk exhaustion from too many concurrent sessions. It enforces
-// up to six gates before allowing a new worker session to spawn:
+// up to seven gates before allowing a new worker session to spawn:
 //
 //  1. MaxWorkers — optional hard cap on concurrent worker sessions (disabled
 //     when MaxWorkers <= 0, which is the default; workers are then bounded
 //     only by the gates below)
 //  2. CPULoad — refuses spawn if 5-min load average exceeds threshold
-//     (default: 2×NumCPU; override via AGM_MAX_LOAD5)
+//     (default: 2×NumCPU; override via AGM_MAX_LOAD5). FAILS CLOSED.
 //  3. Memory — refuses spawn if free RAM falls below threshold
-//     (default: 10%; override via AGM_MIN_FREE_MEM_PCT)
+//     (default: 10%; override via AGM_MIN_FREE_MEM_PCT). FAILS CLOSED when a
+//     reader is wired.
 //  4. SpawnStagger — minimum time between consecutive spawns
 //  5. Disk — refuses spawn if free disk falls below an absolute reserve
-//     (default: 10 GB; override via AGM_MIN_FREE_DISK_GB). FAILS CLOSED.
+//     (default: 15 GiB; override via AGM_MIN_FREE_DISK_GB). FAILS CLOSED.
 //  6. AgentProcs — refuses spawn if the machine-wide count of agent harness
 //     processes (claude/codex/agm workers, counted from the live process
 //     table, not AGM's session records) reaches the cap (default: NumCPU;
 //     override via AGM_MAX_AGENT_PROCS). FAILS CLOSED.
+//  7. AdmissionBrake — refuses spawn while a host watchdog has engaged the
+//     cross-process brake (pkg/vroom/admission). FAILS CLOSED.
 //
-// Gates 5 and 6 were added after an ungated mesh drove the host disk to 100%
-// and forced a hard reboot (ce-93lw.18): the old governor only advised, only
-// counted AGM sessions, and never gated on disk. These two gates fail closed —
-// if headroom or the process count cannot be verified, the spawn is refused —
-// and run only when their readers are wired in (production wires both).
+// Gates 5, 6, and 7 exist because an ungated mesh saturated the host and forced
+// a hard reboot (ce-93lw.18): the old governor only advised, only counted AGM
+// sessions, never gated on disk, and had no way to hear that disk-watchdog's
+// own remediation was being SIGKILLed. Gates 5–7 run only when their readers
+// are wired in (production wires all three).
+//
+// # Fail-closed semantics
+//
+// The distinction that keeps fail-closed safe is *not wired* versus *wired and
+// broken*. A reader that is absent — a nil MemReader on non-Darwin, or no brake
+// reader supplied — means the gate was never asked, and it is skipped. A reader
+// that is present and returns an error means we asked a question about a host
+// whose failure mode is "probes stop answering" and got no answer, so the spawn
+// is refused.
+//
+// AGM_ADMISSION_ALLOW_UNVERIFIED=1 restores fail-open behaviour for load and
+// memory *probe errors only*. It exists because a fail-closed gate with no
+// manual override is an outage generator: the first time sysctl is missing on a
+// box, nothing can spawn and there is no documented way out. It deliberately
+// cannot pass a real threshold breach, and cannot pass the disk, agent-process,
+// or admission-brake gates — those are the ce-93lw.18 gates whose entire
+// purpose is to be unconditional.
 //
 // The MaxWorkers gate was previously hard-coded to 3. It is now disabled by
 // default (0 = no cap) to support dynamic multi-provider worker fleets where
@@ -37,6 +57,46 @@ import (
 	"strings"
 	"time"
 )
+
+// allowUnverifiedEnv opts out of fail-closed handling for load and memory probe
+// errors. It is read per-check rather than cached so an operator can set it for
+// a single command.
+const allowUnverifiedEnv = "AGM_ADMISSION_ALLOW_UNVERIFIED"
+
+// allowUnverified reports whether the operator has explicitly accepted spawning
+// without a verified load/memory reading.
+func allowUnverified() bool {
+	switch os.Getenv(allowUnverifiedEnv) {
+	case "1", "true", "TRUE", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+// unverifiedProbeResult builds the GateResult for a probe that could not be
+// read. It refuses by default and passes only under the documented override,
+// which is always named in the message so it cannot be set and forgotten.
+func unverifiedProbeResult(gate, what string, err error) GateResult {
+	if allowUnverified() {
+		return GateResult{
+			Gate:   gate,
+			Passed: true,
+			Message: fmt.Sprintf(
+				"could not read %s: %v (failing open — %s is set)",
+				what, err, allowUnverifiedEnv,
+			),
+		}
+	}
+	return GateResult{
+		Gate:   gate,
+		Passed: false,
+		Message: fmt.Sprintf(
+			"could not read %s: %v (failing closed — refusing spawn; an unreadable probe is itself a saturation signal. Set %s=1 to spawn without a verified reading.)",
+			what, err, allowUnverifiedEnv,
+		),
+	}
+}
 
 // DEARLevel classifies system load for logging/reporting.
 type DEARLevel string
@@ -87,8 +147,14 @@ type Config struct {
 
 	// MinFreeDiskGB is the minimum free disk space, in gigabytes, required on
 	// the volume backing agent working directories (worktrees, sandboxes)
-	// before a spawn is allowed. Default: 10. Override via
+	// before a spawn is allowed. Default: 15. Override via
 	// AGM_MIN_FREE_DISK_GB env var.
+	//
+	// Honest accounting on the 15 GiB figure: the host that forced the
+	// 2026-07-18 reboot still had 17.6 GiB free when it wedged, so this floor
+	// would not have fired during that incident. It is defence in depth against
+	// an ordinary fill; the admission brake (gate 7) is what catches the
+	// remediation-is-dying shape of ce-93lw.18. Do not read the floor as the fix.
 	//
 	// This is an absolute reserve, not a percentage of total disk. A
 	// percentage floor scales with disk size and gets punitive on large
@@ -131,7 +197,7 @@ func DefaultConfig() Config {
 		MaxLoad5:         float64(runtime.NumCPU()) * 2,
 		MinFreeMemPct:    10,
 		MinSpawnInterval: 2 * time.Minute,
-		MinFreeDiskGB:    10,
+		MinFreeDiskGB:    15,
 		MaxAgentProcs:    runtime.NumCPU(),
 	}
 
@@ -203,7 +269,7 @@ type ProcCounter interface {
 
 // GateResult describes the outcome of a single gate check.
 type GateResult struct {
-	Gate    string // "max_workers", "cpu_load", "memory", "spawn_stagger", "disk", "agent_procs"
+	Gate    string // "max_workers", "cpu_load", "memory", "spawn_stagger", "disk", "agent_procs", "admission_brake"
 	Passed  bool
 	Message string
 }
@@ -216,13 +282,14 @@ type CheckResult struct {
 	Level   DEARLevel
 }
 
-// checkOptions carries the optional disk and process readers injected via
-// CheckOption. Keeping them optional preserves Check's original signature so
-// existing callers and tests compile unchanged; production wires both readers
-// through WithDiskReader / WithProcCounter.
+// checkOptions carries the optional disk, process, and brake readers injected
+// via CheckOption. Keeping them optional preserves Check's original signature so
+// existing callers and tests compile unchanged; production wires all three
+// through WithDiskReader / WithProcCounter / WithBrakeReader.
 type checkOptions struct {
 	dr DiskReader
 	pc ProcCounter
+	br BrakeReader
 }
 
 // CheckOption injects an optional admission-control reader into Check.
@@ -238,15 +305,25 @@ func WithProcCounter(pc ProcCounter) CheckOption {
 	return func(o *checkOptions) { o.pc = pc }
 }
 
+// WithBrakeReader enables the admission-brake gate using br.
+func WithBrakeReader(br BrakeReader) CheckOption {
+	return func(o *checkOptions) { o.br = br }
+}
+
 // Check evaluates all gates. It returns CheckResult with Allowed=true only if
 // every gate passes. Gates are always all evaluated so the caller can report
 // every violation, not just the first.
 //
-// mr may be nil; when nil the memory gate is skipped (fails open). The disk
-// and agent-process gates run only when their readers are supplied via
-// WithDiskReader / WithProcCounter; when supplied they FAIL CLOSED on read
-// error (they refuse the spawn), because they guard against the unbounded
-// resource fill that took the host down (ce-93lw.18).
+// mr may be nil; when nil the memory gate is skipped, because a reader that was
+// never wired asked no question and so cannot have failed. The disk,
+// agent-process, and admission-brake gates run only when their readers are
+// supplied via WithDiskReader / WithProcCounter / WithBrakeReader; when supplied
+// they FAIL CLOSED on read error (they refuse the spawn), because they guard
+// against the unbounded resource fill that took the host down (ce-93lw.18).
+//
+// The load gate, and the memory gate when a reader is wired, also fail closed
+// on read error — see the package doc on AGM_ADMISSION_ALLOW_UNVERIFIED for the
+// one documented way to opt out of that.
 func Check(cfg Config, lr LoadReader, wc WorkerCounter, st SpawnTimer, mr MemReader, opts ...CheckOption) CheckResult {
 	var o checkOptions
 	for _, opt := range opts {
@@ -297,6 +374,15 @@ func Check(cfg Config, lr LoadReader, wc WorkerCounter, st SpawnTimer, mr MemRea
 		procGate := checkAgentProcs(cfg, o.pc)
 		result.Gates = append(result.Gates, procGate)
 		if !procGate.Passed {
+			result.Allowed = false
+		}
+	}
+
+	// Gate 7: watchdog admission brake (fails closed; runs only when wired)
+	if o.br != nil {
+		brakeGate := checkAdmissionBrake(o.br)
+		result.Gates = append(result.Gates, brakeGate)
+		if !brakeGate.Passed {
 			result.Allowed = false
 		}
 	}
@@ -353,11 +439,7 @@ func checkMaxWorkers(cfg Config, wc WorkerCounter) GateResult {
 func checkCPULoad(cfg Config, lr LoadReader) GateResult {
 	load, err := lr.Load5()
 	if err != nil {
-		return GateResult{
-			Gate:    "cpu_load",
-			Passed:  true,
-			Message: fmt.Sprintf("could not read load: %v (failing open)", err),
-		}
+		return unverifiedProbeResult("cpu_load", "load", err)
 	}
 
 	if load > cfg.MaxLoad5 {
@@ -380,21 +462,19 @@ func checkCPULoad(cfg Config, lr LoadReader) GateResult {
 }
 
 func checkMemory(cfg Config, mr MemReader) GateResult {
+	// No reader wired (non-Darwin) is not the same as a reader that failed:
+	// nothing was asked, so nothing can have gone unanswered.
 	if mr == nil {
 		return GateResult{
 			Gate:    "memory",
 			Passed:  true,
-			Message: "memory reader unavailable (failing open)",
+			Message: "memory reader not wired on this platform (gate skipped)",
 		}
 	}
 
 	freePct, err := mr.FreeMemPct()
 	if err != nil {
-		return GateResult{
-			Gate:    "memory",
-			Passed:  true,
-			Message: fmt.Sprintf("could not read free memory: %v (failing open)", err),
-		}
+		return unverifiedProbeResult("memory", "free memory", err)
 	}
 
 	if freePct < cfg.MinFreeMemPct {
@@ -426,7 +506,26 @@ func checkSpawnStagger(cfg Config, st SpawnTimer) GateResult {
 		}
 	}
 
-	elapsed := time.Since(lastSpawn)
+	now := time.Now()
+	if lastSpawn.After(now) {
+		// A governor timestamp is not a successful spawn, but the shared timer
+		// cannot encode provenance after the timestamp passes. The ordinary
+		// stagger therefore remains in force for MinSpawnInterval after the
+		// governor hold. Report that effective admission boundary so operators
+		// are not told to retry before this gate can actually pass.
+		resumeAt := lastSpawn.Add(cfg.MinSpawnInterval)
+		remaining := resumeAt.Sub(now)
+		return GateResult{
+			Gate:   "spawn_stagger",
+			Passed: false,
+			Message: fmt.Sprintf(
+				"spawns paused by resource governor; earliest possible admission is %s (%s until that boundary), if the governor does not extend the hold and all other gates pass. This boundary includes the governor hold and %s spawn safety interval.",
+				resumeAt.Format(time.RFC3339), formatDuration(remaining), formatDuration(cfg.MinSpawnInterval),
+			),
+		}
+	}
+
+	elapsed := now.Sub(lastSpawn)
 	if elapsed < cfg.MinSpawnInterval {
 		remaining := cfg.MinSpawnInterval - elapsed
 		return GateResult{
@@ -515,6 +614,59 @@ func checkAgentProcs(cfg Config, pc ProcCounter) GateResult {
 		Passed:  true,
 		Message: fmt.Sprintf("agent processes: %d/%d", count, cfg.MaxAgentProcs),
 	}
+}
+
+// checkAdmissionBrake refuses a spawn while a host watchdog has engaged the
+// cross-process brake. This is the gate that would have fired on 2026-07-18:
+// disk-watchdog's `agm worktree sweep --execute` was returning `signal: killed`
+// every tick, and nothing turned that into a refusal.
+//
+// It FAILS CLOSED in both directions that matter — an engaged brake refuses,
+// and an unreadable brake refuses — and it is not subject to
+// AGM_ADMISSION_ALLOW_UNVERIFIED, because a latch an operator cannot read is
+// cleared by deleting the file, not by overriding the gate that reads it.
+func checkAdmissionBrake(br BrakeReader) GateResult {
+	brake, err := br.Brake()
+	if err != nil {
+		return GateResult{
+			Gate:   "admission_brake",
+			Passed: false,
+			Message: fmt.Sprintf(
+				"could not read the admission brake: %v (failing closed — refusing spawn). Inspect or delete %s to clear it.",
+				err, brakeLocation(br),
+			),
+		}
+	}
+
+	if brake == nil {
+		return GateResult{
+			Gate:    "admission_brake",
+			Passed:  true,
+			Message: "no admission brake engaged",
+		}
+	}
+
+	return GateResult{
+		Gate:   "admission_brake",
+		Passed: false,
+		Message: fmt.Sprintf(
+			"admission brake engaged by %s: %s (set %s ago, expires %s). Spawns resume when the watchdog sees a healthy host, or delete %s to clear it.",
+			brake.Source,
+			brake.Reason,
+			formatDuration(brake.Age(time.Now().UTC())),
+			brake.ExpiresUTC.Format(time.RFC3339),
+			brakeLocation(br),
+		),
+	}
+}
+
+// brakeLocation names the brake file when the reader can report it, so the
+// refusal tells an operator exactly what to delete.
+func brakeLocation(br BrakeReader) string {
+	if namer, ok := br.(brakePathNamer); ok {
+		return namer.BrakePath()
+	}
+	return "the admission brake file"
 }
 
 // formatDuration produces a human-friendly duration string.

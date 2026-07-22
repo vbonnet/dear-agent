@@ -772,13 +772,13 @@ agm doctor gemini --generate-bashrc >> ~/.bashrc
 
 ## Advanced Commands
 
-### agm session send
+### agm send msg
 
 Send message/prompt to a running session.
 
 **Usage:**
 ```bash
-agm session send <session-name> [flags]
+agm send msg <session-name> [flags]
 ```
 
 **Flags:**
@@ -790,19 +790,19 @@ agm session send <session-name> [flags]
 **Examples:**
 ```bash
 # Send inline prompt
-agm session send my-session --prompt "Please review the code"
+agm send msg my-session --prompt "Please review the code"
 
 # Send from file
-agm session send my-session --prompt-file ~/prompts/review.txt
+agm send msg my-session --prompt-file ~/prompts/review.txt
 
 # Diagnosis prompt
-agm session send stuck-session --prompt "⚠️ Your session was stuck. Analyze what caused the hang."
+agm send msg stuck-session --prompt "Analyze what caused the earlier hang."
 ```
 
 **Features:**
-- Auto-interrupts thinking state (sends ESC first)
-- Literal mode (tmux `-l` flag for reliable transmission)
-- Executes immediately (not queued)
+- Requires the registered harness process and its current composer
+- Pins the readiness proof and input to the same tmux pane
+- Queues or rejects delivery when the session cannot safely receive input
 - Supports up to 10KB prompt files
 
 **Use cases:**

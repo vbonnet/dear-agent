@@ -49,7 +49,10 @@ func startClaudeInCurrentTmux(ctx context.Context, sessionName string) error {
 			if pwd := os.Getenv("PWD"); pwd != "" {
 				spec.WorkDir = pwd
 			}
-			return ops.CreateSessionLaunchResult{}, startCurrentTmuxHarness(ctx, spec)
+			if err := startCurrentTmuxHarness(ctx, spec); err != nil {
+				return ops.CreateSessionLaunchResult{}, err
+			}
+			return currentTmuxLaunchResult(spec.Harness), nil
 		},
 		complete: func(_ context.Context, completion ops.CreateSessionCompletion) error {
 			if completion.ManifestPath != "" {
@@ -107,6 +110,15 @@ func startClaudeInCurrentTmux(ctx context.Context, sessionName string) error {
 
 	ui.PrintSuccess(fmt.Sprintf("%s session started in current tmux!", harnessName))
 	return nil
+}
+
+func currentTmuxLaunchResult(harness string) ops.CreateSessionLaunchResult {
+	result := ops.CreateSessionLaunchResult{}
+	switch harness {
+	case "claude-code", "codex-cli", "opencode-cli", "pi-cli", "gemini-cli":
+		result.Readiness = ops.CreateSessionReadinessDeferredUntilCallerExit
+	}
+	return result
 }
 
 func commitCurrentTmuxManifest(manifestPath, sessionName string) {
@@ -246,149 +258,91 @@ func startCurrentTmuxHarnessWithRuntime(ctx context.Context, spec ops.HarnessLau
 	}
 }
 
-// startCurrentTmuxClaude runs Claude in the current tmux pane, waits for
-// readiness, and runs the rename/agm-assoc init sequence.
-func startCurrentTmuxClaude(ctx context.Context, spec ops.HarnessLaunchSpec) error {
-	claudeReady := tmux.NewClaudeReadyFile(spec.SessionName)
-	if err := claudeReady.Cleanup(); err != nil {
-		debug.Log("Warning: failed to cleanup ready-files: %v", err)
+type currentTmuxCommandSender func(sessionName, command string) error
+
+type currentTmuxCommandQueueRuntime struct {
+	sendCommand currentTmuxCommandSender
+	lookPath    func(file string) (string, error)
+}
+
+func realCurrentTmuxCommandQueueRuntime() currentTmuxCommandQueueRuntime {
+	return currentTmuxCommandQueueRuntime{sendCommand: tmux.SendCommand, lookPath: exec.LookPath}
+}
+
+func currentTmuxHarnessExecutable(harness string) (string, error) {
+	switch harness {
+	case "claude-code":
+		return "claude", nil
+	case "opencode-cli":
+		return "opencode", nil
+	case "gemini-cli":
+		return "gemini", nil
+	default:
+		return "", fmt.Errorf("current-tmux command queue does not support harness %q", harness)
 	}
-	fmt.Println("Starting Claude CLI...")
-	claudeCmd := ops.BuildHarnessLaunchCommand(spec).Command
-	if err := tmux.SendCommand(spec.SessionName, claudeCmd); err != nil {
+}
+
+func queueCurrentTmuxHarnessCommand(ctx context.Context, spec ops.HarnessLaunchSpec, runtime currentTmuxCommandQueueRuntime) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	executable, err := currentTmuxHarnessExecutable(spec.Harness)
+	if err != nil {
+		return err
+	}
+	if _, err := runtime.lookPath(executable); err != nil {
+		return fmt.Errorf("%s executable is unavailable: %w", executable, err)
+	}
+	return runtime.sendCommand(spec.SessionName, ops.BuildHarnessLaunchCommand(spec).Command)
+}
+
+// startCurrentTmuxClaude queues Claude behind the foreground AGM process. The
+// command cannot execute until AGM returns, so readiness is explicitly deferred.
+func startCurrentTmuxClaude(ctx context.Context, spec ops.HarnessLaunchSpec) error {
+	if err := queueCurrentTmuxHarnessCommand(ctx, spec, realCurrentTmuxCommandQueueRuntime()); err != nil {
 		ui.PrintError(err,
-			"Failed to start Claude in current tmux pane",
+			"Failed to queue Claude in current tmux pane",
 			"  • Verify Claude is installed: which claude\n"+
 				"  • Test Claude manually: claude --version\n"+
 				"  • Check you're in tmux: echo $TMUX\n"+
 				"  • Exit tmux and try: agmnew "+spec.SessionName)
 		return err
 	}
-	if err := sleepWithCallerContext(ctx, 500*time.Millisecond); err != nil {
-		return err
-	}
-	fmt.Println("Waiting for Claude to initialize...")
-	if err := tmux.WaitForClaudePromptContext(ctx, spec.SessionName, 30*time.Second); err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		ui.PrintWarning("Claude ready signal not detected")
-		fmt.Printf("💡 Session may still work, but initialization timing is uncertain.\n")
-	} else {
-		ui.PrintSuccess("Claude is ready!")
-	}
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	debug.Log("Triggering SessionStart hook post-verification")
-	if err := claudeReady.TriggerHookManually(); err != nil {
-		debug.Log("Manual hook trigger failed (non-fatal): %v", err)
-	}
-	if os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "" {
-		debug.Log("Skipping association in test environment")
-		ui.PrintSuccess("Test session ready (association skipped)")
-		return nil
-	}
-	// Associate and signal readiness deterministically from Go — no dependency
-	// on the /agm:agm-assoc plugin slash command loading in the pane (ce-o1sg).
-	associateSpawnedClaudeSession(spec.SessionName)
-	ui.PrintSuccess("Claude is ready and session associated!")
+	debug.Log("Claude command queued; the SessionStart hook will associate its UUID after AGM releases the pane")
+	ui.PrintSuccess("Queued Claude CLI in current tmux session")
 	return nil
 }
 
-// startCurrentTmuxOpenCode starts OpenCode in the current tmux pane and waits
-// for prompt readiness.
+// startCurrentTmuxOpenCode queues OpenCode behind the foreground AGM process.
 func startCurrentTmuxOpenCode(ctx context.Context, spec ops.HarnessLaunchSpec) error {
-	fmt.Println("Starting OpenCode...")
-	opencodeCmd := ops.BuildHarnessLaunchCommand(spec).Command
-	if err := tmux.SendCommand(spec.SessionName, opencodeCmd); err != nil {
+	if err := queueCurrentTmuxHarnessCommand(ctx, spec, realCurrentTmuxCommandQueueRuntime()); err != nil {
 		ui.PrintError(err,
-			"Failed to start OpenCode in current tmux pane",
+			"Failed to queue OpenCode in current tmux pane",
 			"  • Verify OpenCode server is running: curl http://localhost:4096/health\n"+
 				"  • Start server if needed: opencode serve --port 4096\n"+
 				"  • Check you're in tmux: echo $TMUX\n"+
 				"  • Exit tmux and try: agm new "+spec.SessionName+" --harness opencode-cli")
 		return err
 	}
-	fmt.Println("Waiting for OpenCode to initialize...")
-	if err := tmux.WaitForPromptSimpleContext(ctx, spec.SessionName, 30*time.Second); err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		ui.PrintWarning("OpenCode ready signal not detected")
-		fmt.Printf("Session may still work, but initialization timing is uncertain.\n")
-	} else {
-		ui.PrintSuccess("OpenCode is ready!")
-	}
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
+	debug.Log("OpenCode command queued; readiness is deferred until AGM releases the pane")
+	ui.PrintSuccess("Queued OpenCode in current tmux session")
 	return nil
 }
 
-// startCurrentTmuxGemini starts Gemini in the current tmux pane and handles
-// the optional first-run trust prompt.
+// startCurrentTmuxGemini queues deprecated Gemini compatibility behind the
+// foreground AGM process.
 func startCurrentTmuxGemini(ctx context.Context, spec ops.HarnessLaunchSpec) error {
-	fmt.Println("Starting Gemini CLI...")
-	geminiCmd := ops.BuildHarnessLaunchCommand(spec).Command
-	debug.Log("Sending command: %s", geminiCmd)
-	if err := tmux.SendCommand(spec.SessionName, geminiCmd); err != nil {
+	if err := queueCurrentTmuxHarnessCommand(ctx, spec, realCurrentTmuxCommandQueueRuntime()); err != nil {
 		ui.PrintError(err,
-			"Failed to start Gemini in current tmux pane",
+			"Failed to queue Gemini in current tmux pane",
 			"  • Verify Gemini is installed: which gemini\n"+
 				"  • Test Gemini manually: gemini --version\n"+
 				"  • Check you're in tmux: echo $TMUX")
 		return err
 	}
-	autoAcceptGeminiTrustPrompt(ctx, spec.SessionName)
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	fmt.Println("Waiting for Gemini to initialize...")
-	if err := tmux.WaitForPromptSimpleContext(ctx, spec.SessionName, 30*time.Second); err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		ui.PrintWarning("Gemini ready signal not detected")
-		fmt.Printf("Session may still work, but initialization timing is uncertain.\n")
-	} else {
-		ui.PrintSuccess("Gemini is ready!")
-	}
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
+	debug.Log("Gemini command queued; readiness is deferred until AGM releases the pane")
+	ui.PrintSuccess("Queued Gemini CLI in current tmux session")
 	return nil
-}
-
-// autoAcceptGeminiTrustPrompt scans the tmux pane for the Gemini trust prompt
-// and answers "1<Enter>" if found.
-func autoAcceptGeminiTrustPrompt(ctx context.Context, sessionName string) {
-	debug.Log("Checking for Gemini trust prompt (3s window)...")
-	if err := sleepWithCallerContext(ctx, 2*time.Second); err != nil {
-		return
-	}
-	socketPath := tmux.GetSocketPath()
-	normalizedName := tmux.NormalizeTmuxSessionName(sessionName)
-	trustCheckCmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "capture-pane", "-t", normalizedName, "-p", "-S", "-20")
-	trustOutput, err := trustCheckCmd.CombinedOutput()
-	if err != nil {
-		return
-	}
-	content := string(trustOutput)
-	if !strings.Contains(content, "Do you trust") && !strings.Contains(content, "trust the files") {
-		debug.Log("No trust prompt detected (directory already trusted)")
-		return
-	}
-	debug.Log("Gemini trust prompt detected, auto-accepting with '1' + Enter")
-	selectCmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "1")
-	_ = selectCmd.Run()
-	if err := sleepWithCallerContext(ctx, 300*time.Millisecond); err != nil {
-		return
-	}
-	enterCmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "-H", "0d")
-	_ = enterCmd.Run()
-	debug.Log("Trust prompt auto-accepted")
-	ui.PrintSuccess("Auto-accepted Gemini trust prompt")
 }
 
 // monitorAndAnswerTrustPrompt monitors tmux output via control mode and answers trust prompt if detected

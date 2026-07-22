@@ -13,9 +13,11 @@ import (
 )
 
 type hookParityState struct {
-	harness       string
-	hooks         map[string][]bddHookGroup
-	postMergeHook string
+	harness             string
+	hooks               map[string][]bddHookGroup
+	postMergeHook       string
+	companionOutput     string
+	companionRegression error
 }
 
 type bddHookGroup struct {
@@ -45,6 +47,10 @@ func RegisterHookParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the repository post-merge hook is configured$`, repositoryPostMergeHookIsConfigured)
 	ctx.Step(`^AGM validates repository post-merge hook coverage$`, agmValidatesRepositoryPostMergeHookCoverage)
 	ctx.Step(`^the repository post-merge hook should include lifecycle safeguard "([^"]*)"$`, repositoryPostMergeHookShouldIncludeLifecycleSafeguard)
+	ctx.Step(`^AGM runs detached archive companion startup regressions$`, agmRunsDetachedArchiveCompanionStartupRegressions)
+	ctx.Step(`^a mixed revision or missing startup acknowledgement should fail before async success$`, mixedRevisionOrMissingStartupAcknowledgementShouldFailBeforeAsyncSuccess)
+	ctx.Step(`^AGM runs the canonical AGM companion install regression$`, agmRunsCanonicalAGMCompanionInstallRegression)
+	ctx.Step(`^the root AGM install target should build and install the companion pair$`, rootAGMInstallTargetShouldBuildAndInstallCompanionPair)
 }
 
 func hookHarnessIsConfigured(ctx context.Context, harness string) error {
@@ -200,12 +206,63 @@ func repositoryPostMergeHookShouldIncludeLifecycleSafeguard(ctx context.Context,
 	return nil
 }
 
+func agmRunsDetachedArchiveCompanionStartupRegressions(ctx context.Context) error {
+	state, err := getHookParityState(ctx)
+	if err != nil {
+		return err
+	}
+	state.companionOutput, state.companionRegression = runLocalGuardrailGoTest(ctx,
+		`^(TestValidateRevision|TestAcknowledgeStartup.*|TestAwaitReaperStartup.*)$`,
+		"./agm/cmd/agm", "./agm/cmd/agm-reaper",
+	)
+	return nil
+}
+
+func mixedRevisionOrMissingStartupAcknowledgementShouldFailBeforeAsyncSuccess(ctx context.Context) error {
+	state, err := getHookParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.companionRegression != nil {
+		return fmt.Errorf("detached archive companion regressions: %w: %s", state.companionRegression, state.companionOutput)
+	}
+	return nil
+}
+
+func agmRunsCanonicalAGMCompanionInstallRegression(ctx context.Context) error {
+	state, err := getHookParityState(ctx)
+	if err != nil {
+		return err
+	}
+	state.companionOutput, state.companionRegression = runLocalGuardrailGoTest(ctx,
+		`^TestCanonicalAGMInstallBuildsCompanionPair$`,
+		"./tests/githooks",
+	)
+	return nil
+}
+
+func rootAGMInstallTargetShouldBuildAndInstallCompanionPair(ctx context.Context) error {
+	state, err := getHookParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.companionRegression != nil {
+		return fmt.Errorf("canonical AGM companion install regression: %w: %s", state.companionRegression, state.companionOutput)
+	}
+	if !strings.Contains(state.companionOutput, "--- PASS: TestCanonicalAGMInstallBuildsCompanionPair") {
+		return fmt.Errorf("canonical AGM companion install output missing passing regression: %s", state.companionOutput)
+	}
+	return nil
+}
+
 func postMergeSafeguardNeedles(safeguard string) []string {
 	switch safeguard {
 	case "atomic-binary-install":
 		return []string{"go build -o", "mv -f", "(atomic)"}
 	case "trunk-build-context":
 		return []string{"fetch_trunk_commit", "ensure_build_dir", "origin/${default_branch}"}
+	case "agm-companion-coherence":
+		return []string{"maybe_rebuild_agm_pair", ".agm-pair-install.lock", "installed pair unchanged", "_pair_ldflags", "agm/internal/"}
 	case "host-artifact-deploy":
 		return []string{"deploy_host_artifacts", "make dear-deploy-sync"}
 	case "deployment-verification":

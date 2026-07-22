@@ -666,7 +666,7 @@ defaults:
 
 ### agm send msg
 
-Send message/prompt to running session, interrupting active thinking.
+Send a message to a registered session when its harness composer can safely receive input.
 
 **Usage**: `agm send msg <session-name> [flags]`
 
@@ -689,8 +689,8 @@ agm send msg research --prompt "Analyze the following:
 2. Error handling
 3. Security concerns"
 
-# Interrupt and redirect stuck session
-agm send msg my-session --prompt "Stop and list all files in current directory"
+# Send when the registered harness composer is ready
+agm send msg my-session --prompt "List all files in the current directory"
 
 # Send code review request
 agm send msg code-review --prompt "Review src/auth/login.py for security issues"
@@ -700,8 +700,9 @@ agm send msg research-task --prompt-file ~/tasks/api-analysis.md
 ```
 
 **Features**:
-- Readiness-aware delivery: Waits for a recognized harness composer
-- Literal atomic paste: Prevents special character interpretation
+- Harness-aware readiness: Refuses input unless the registered harness owns the current composer
+- Exact-pane delivery: Pins readiness and input to the same pane
+- Non-disruptive routing: Busy or blocked sessions are queued or rejected without sending ESC
 - AGY multiline safety: Preserves attribution and body as one bracketed request
 - Large prompts: Supports up to 10KB files
 

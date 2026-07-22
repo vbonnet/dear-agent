@@ -1,6 +1,8 @@
 package githooks_test
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // hookPath resolves scripts/git-hooks/post-merge relative to this test file so
@@ -110,6 +113,20 @@ func swept(t *testing.T, sentinel string) bool {
 	return err == nil
 }
 
+func waitForFile(t *testing.T, path string, timeout time.Duration, message string, output *bytes.Buffer) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s:\n%s", message, output.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // On the default branch, the hook triggers the sweep.
 func TestPostMerge_DefaultBranch_Sweeps(t *testing.T) {
 	repo := newRepo(t)
@@ -172,6 +189,11 @@ func stubGo(t *testing.T, recordFile string) string {
 		"if [ \"$1\" = build ]; then\n" +
 		"  out=\"\"; pkg=\"\"; prev=\"\"\n" +
 		"  for a in \"$@\"; do [ \"$prev\" = -o ] && out=\"$a\"; pkg=\"$a\"; prev=\"$a\"; done\n" +
+		"  [ -n \"$STUB_GO_FAIL_PKG\" ] && [ \"$pkg\" = \"$STUB_GO_FAIL_PKG\" ] && exit 1\n" +
+		"  if [ -n \"$STUB_GO_BLOCK_PKG\" ] && [ \"$pkg\" = \"$STUB_GO_BLOCK_PKG\" ]; then\n" +
+		"    : > \"$STUB_GO_BLOCK_READY\"\n" +
+		"    while [ ! -e \"$STUB_GO_BLOCK_RELEASE\" ]; do sleep 0.01; done\n" +
+		"  fi\n" +
 		"  [ -n \"$out\" ] && printf 'fakebin\\n' > \"$out\"\n" +
 		"  echo \"$pkg|$(git rev-parse HEAD 2>/dev/null)\" >> \"" + recordFile + "\"\n" +
 		"fi\n" +
@@ -234,13 +256,13 @@ func revParse(t *testing.T, dir, ref string) string {
 func newRebuildRepo(t *testing.T) string {
 	t.Helper()
 	repo := newRepo(t)
-	for _, p := range []string{"agm/cmd/agm", "cmd/vroom-dispatch", "pkg/llm/auth", "internal/x", "docs"} {
+	for _, p := range []string{"agm/cmd/agm", "agm/cmd/agm-reaper", "agm/internal/tmux", "cmd/vroom-dispatch", "pkg/llm/auth", "internal/x", "docs"} {
 		if err := os.MkdirAll(filepath.Join(repo, p), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// Seed each package dir with a tracked file so later diffs are meaningful.
-	for _, f := range []string{"agm/cmd/agm/main.go", "cmd/vroom-dispatch/main.go", "pkg/llm/auth/auth.go", "internal/x/x.go", "docs/readme.md"} {
+	for _, f := range []string{"agm/cmd/agm/main.go", "agm/cmd/agm-reaper/main.go", "agm/internal/tmux/prompt.go", "cmd/vroom-dispatch/main.go", "pkg/llm/auth/auth.go", "internal/x/x.go", "docs/readme.md"} {
 		if err := os.WriteFile(filepath.Join(repo, f), []byte("package x\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -346,13 +368,318 @@ func TestRebuild_AtomicInstall_NewInode(t *testing.T) {
 	}
 }
 
-// A change under a shared source tree (pkg/) rebuilds BOTH binaries.
-func TestRebuild_SharedSource_RebuildsBoth(t *testing.T) {
+// A change under a root shared source tree (pkg/) rebuilds all three consumers.
+func TestRebuild_SharedSource_RebuildsAllConsumers(t *testing.T) {
 	repo := newRebuildRepo(t)
 	mergeBranchChanging(t, repo, map[string]string{"pkg/llm/auth/auth.go": "package auth // v2\n"})
 	got := runRebuild(t, repo)
-	if !slices.Contains(got, "./agm/cmd/agm") || !slices.Contains(got, "./cmd/vroom-dispatch") {
-		t.Fatalf("expected both binaries rebuilt on a pkg/ change, got %v", got)
+	if !slices.Contains(got, "./agm/cmd/agm") || !slices.Contains(got, "./agm/cmd/agm-reaper") || !slices.Contains(got, "./cmd/vroom-dispatch") {
+		t.Fatalf("expected all consumers rebuilt on a pkg/ change, got %v", got)
+	}
+}
+
+// The async archive companion consumes agm/internal just like the CLI. Both
+// binaries must be built from one source revision so a merged prompt/lifecycle
+// change cannot leave the detached reaper running stale code.
+func TestRebuild_AGMSharedLifecycle_RebuildsCLIAndReaperFromSameRevision(t *testing.T) {
+	repo := newRebuildRepo(t)
+	mergeBranchChanging(t, repo, map[string]string{"agm/internal/tmux/prompt.go": "package tmux // v2\n"})
+	wantCommit := revParse(t, repo, "HEAD")
+
+	recs := installRecords(t, runRebuildRecord(t, repo))
+	commits := make(map[string]string)
+	for _, rec := range recs {
+		commits[rec.pkg] = rec.commit
+	}
+	for _, pkg := range []string{"./agm/cmd/agm", "./agm/cmd/agm-reaper"} {
+		if commits[pkg] != wantCommit {
+			t.Errorf("%s built from %q; want shared source revision %s (records: %+v)", pkg, commits[pkg], wantCommit, recs)
+		}
+	}
+	if _, ok := commits["./cmd/vroom-dispatch"]; ok {
+		t.Fatal("AGM-only shared source unexpectedly rebuilt vroom-dispatch")
+	}
+}
+
+// A partial pair build must not replace either installed binary. In
+// particular, a reaper build failure cannot leave a newer CLI beside the old
+// detached lifecycle implementation.
+func TestRebuild_AGMPairBuildFailurePreservesInstalledPair(t *testing.T) {
+	repo := newRebuildRepo(t)
+	mergeBranchChanging(t, repo, map[string]string{"agm/internal/tmux/prompt.go": "package tmux // v2\n"})
+	gobin := t.TempDir()
+	for name, content := range map[string]string{"agm": "old-agm\n", "agm-reaper": "old-reaper\n"} {
+		if err := os.WriteFile(filepath.Join(gobin, name), []byte(content), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	record := filepath.Join(t.TempDir(), "installed")
+	goDir := stubGo(t, record)
+	cmd := exec.Command("bash", hookPath(t))
+	cmd.Dir = repo
+	cmd.Env = append(os.Environ(),
+		"HOME="+t.TempDir(),
+		"GOBIN="+gobin,
+		"PATH="+goDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"AGM_POST_MERGE_SWEEP=0",
+		"STUB_GO_FAIL_PKG=./agm/cmd/agm-reaper",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("hook must fail safe, got %v\n%s", err, out)
+	}
+
+	for name, want := range map[string]string{"agm": "old-agm\n", "agm-reaper": "old-reaper\n"} {
+		got, err := os.ReadFile(filepath.Join(gobin, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != want {
+			t.Fatalf("%s changed after pair build failure: got %q, want %q", name, got, want)
+		}
+	}
+}
+
+func TestRebuild_AGMPairActivationIsSerializedAcrossHookProcesses(t *testing.T) {
+	repo := newRebuildRepo(t)
+	mergeBranchChanging(t, repo, map[string]string{"agm/internal/tmux/prompt.go": "package tmux // v2\n"})
+	gobin := t.TempDir()
+	record := filepath.Join(t.TempDir(), "installed")
+	goDir := stubGo(t, record)
+	ready := filepath.Join(t.TempDir(), "first-build-ready")
+	release := filepath.Join(t.TempDir(), "release-first-build")
+	baseEnv := append(os.Environ(),
+		"HOME="+t.TempDir(),
+		"GOBIN="+gobin,
+		"PATH="+goDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"AGM_POST_MERGE_SWEEP=0",
+		"STUB_GO_BLOCK_PKG=./agm/cmd/agm",
+		"STUB_GO_BLOCK_READY="+ready,
+		"STUB_GO_BLOCK_RELEASE="+release,
+	)
+
+	var firstOutput bytes.Buffer
+	first := exec.Command("bash", hookPath(t))
+	first.Dir = repo
+	first.Env = baseEnv
+	first.Stdout = &firstOutput
+	first.Stderr = &firstOutput
+	if err := first.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if first.Process != nil {
+			_ = first.Process.Kill()
+		}
+	})
+
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("first hook did not reach staged build:\n%s", firstOutput.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var secondOutput bytes.Buffer
+	second := exec.CommandContext(ctx, "bash", hookPath(t))
+	second.Dir = repo
+	second.Env = baseEnv
+	second.Stdout = &secondOutput
+	second.Stderr = &secondOutput
+	if err := second.Start(); err != nil {
+		t.Fatal(err)
+	}
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- second.Wait() }()
+	select {
+	case err := <-secondDone:
+		t.Fatalf("contending hook did not wait for lock owner: %v\n%s", err, secondOutput.String())
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	if err := os.WriteFile(release, []byte("release\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Wait(); err != nil {
+		t.Fatalf("first hook failed: %v\n%s", err, firstOutput.String())
+	}
+	select {
+	case err := <-secondDone:
+		if err != nil {
+			t.Fatalf("contending hook failed after lock release: %v\n%s", err, secondOutput.String())
+		}
+	case <-ctx.Done():
+		t.Fatalf("contending hook did not reacquire deployment lock: %v\n%s", ctx.Err(), secondOutput.String())
+	}
+	if got := installRecords(t, record); len(got) != 4 {
+		t.Fatalf("concurrent hooks staged %d builds, want two serialized coherent pairs: %v", len(got), got)
+	}
+}
+
+func TestRebuild_AGMPairRefreshesTrunkAfterWaitingForLock(t *testing.T) {
+	origin := newRebuildRepo(t)
+	firstCheckout := cloneRepo(t, origin)
+	secondCheckout := cloneRepo(t, origin)
+
+	sharedSource := filepath.Join(origin, "agm", "internal", "tmux", "prompt.go")
+	if err := os.WriteFile(sharedSource, []byte("package tmux // revision x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, origin, "add", "agm/internal/tmux/prompt.go")
+	git(t, origin, "commit", "-qm", "revision x")
+	firstRevision := revParse(t, origin, "HEAD")
+	git(t, firstCheckout, "pull", "-q", "--ff-only")
+
+	gobin := t.TempDir()
+	record := filepath.Join(t.TempDir(), "installed")
+	goDir := stubGo(t, record)
+	ready := filepath.Join(t.TempDir(), "first-build-ready")
+	release := filepath.Join(t.TempDir(), "release-first-build")
+	baseEnv := append(os.Environ(),
+		"HOME="+t.TempDir(),
+		"GOBIN="+gobin,
+		"PATH="+goDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"AGM_POST_MERGE_SWEEP=0",
+		"STUB_GO_BLOCK_PKG=./agm/cmd/agm",
+		"STUB_GO_BLOCK_READY="+ready,
+		"STUB_GO_BLOCK_RELEASE="+release,
+	)
+
+	var firstOutput bytes.Buffer
+	first := exec.Command("bash", hookPath(t))
+	first.Dir = firstCheckout
+	first.Env = baseEnv
+	first.Stdout = &firstOutput
+	first.Stderr = &firstOutput
+	if err := first.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if first.Process != nil {
+			_ = first.Process.Kill()
+		}
+	})
+	waitForFile(t, ready, 20*time.Second, "first hook did not reach staged build", &firstOutput)
+
+	if err := os.WriteFile(sharedSource, []byte("package tmux // revision y\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, origin, "add", "agm/internal/tmux/prompt.go")
+	git(t, origin, "commit", "-qm", "revision y")
+	secondRevision := revParse(t, origin, "HEAD")
+	git(t, secondCheckout, "pull", "-q", "--ff-only")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var secondOutput bytes.Buffer
+	second := exec.CommandContext(ctx, "bash", hookPath(t))
+	second.Dir = secondCheckout
+	second.Env = baseEnv
+	second.Stdout = &secondOutput
+	second.Stderr = &secondOutput
+	if err := second.Start(); err != nil {
+		t.Fatal(err)
+	}
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- second.Wait() }()
+	select {
+	case err := <-secondDone:
+		t.Fatalf("newer hook did not wait for the older deployment: %v\n%s", err, secondOutput.String())
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	if err := os.WriteFile(release, []byte("release\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Wait(); err != nil {
+		t.Fatalf("first hook failed: %v\n%s", err, firstOutput.String())
+	}
+	select {
+	case err := <-secondDone:
+		if err != nil {
+			t.Fatalf("newer hook failed after lock release: %v\n%s", err, secondOutput.String())
+		}
+	case <-ctx.Done():
+		t.Fatalf("newer hook did not deploy after lock release: %v\n%s", ctx.Err(), secondOutput.String())
+	}
+
+	records := installRecords(t, record)
+	if len(records) != 4 {
+		t.Fatalf("serialized hooks staged %d builds, want two coherent pairs: %v", len(records), records)
+	}
+	for i, want := range []string{firstRevision, firstRevision, secondRevision, secondRevision} {
+		if records[i].commit != want {
+			t.Fatalf("build %d used revision %s, want %s (records: %+v)", i, records[i].commit, want, records)
+		}
+	}
+}
+
+func TestRebuild_AGMPairRecoversLegacyLockDirectories(t *testing.T) {
+	tests := []struct {
+		name       string
+		pidContent string
+	}{
+		{name: "ownerless"},
+		{name: "malformed owner", pidContent: "not-a-pid\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newRebuildRepo(t)
+			mergeBranchChanging(t, repo, map[string]string{"agm/internal/tmux/prompt.go": "package tmux // v2\n"})
+			gobin := t.TempDir()
+			lockDir := filepath.Join(gobin, ".agm-pair-install.lock")
+			if err := os.Mkdir(lockDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if tc.pidContent != "" {
+				if err := os.WriteFile(filepath.Join(lockDir, "pid"), []byte(tc.pidContent), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			record := filepath.Join(t.TempDir(), "installed")
+			goDir := stubGo(t, record)
+			cmd := exec.Command("bash", hookPath(t))
+			cmd.Dir = repo
+			cmd.Env = append(os.Environ(),
+				"HOME="+t.TempDir(),
+				"GOBIN="+gobin,
+				"PATH="+goDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+				"AGM_POST_MERGE_SWEEP=0",
+			)
+			if output, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("hook failed with %s legacy lock: %v\n%s", tc.name, err, output)
+			}
+			if got := installRecords(t, record); len(got) != 2 {
+				t.Fatalf("hook staged %d builds, want one coherent pair: %v", len(got), got)
+			}
+		})
+	}
+}
+
+func TestCanonicalAGMInstallBuildsCompanionPair(t *testing.T) {
+	cmd := exec.Command("make", "-n", "install-agm", "GIT_COMMIT=0123456789ab", "HOME="+t.TempDir())
+	cmd.Dir = filepath.Clean(filepath.Join(filepath.Dir(hookPath(t)), "..", ".."))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n install-agm failed: %v\n%s", err, output)
+	}
+	text := string(output)
+	for _, want := range []string{
+		"-o bin/agm ./agm/cmd/agm/",
+		"-o bin/agm-reaper ./agm/cmd/agm-reaper/",
+		"bin/agm'",
+		"bin/agm-reaper'",
+		"GitCommit=0123456789ab",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("canonical install output missing %q:\n%s", want, text)
+		}
 	}
 }
 
@@ -369,7 +696,9 @@ func TestRebuild_ScopedSource_RebuildsOnlyAffected(t *testing.T) {
 	}
 }
 
-// A change confined to agm/ rebuilds ONLY agm.
+// Any compiled AGM change rebuilds the coherent CLI/reaper pair. Even when a
+// source change is CLI-local, exact revision handshaking means the detached
+// companion must move to the same commit.
 func TestRebuild_AgmOnly(t *testing.T) {
 	repo := newRebuildRepo(t)
 	mergeBranchChanging(t, repo, map[string]string{"agm/cmd/agm/main.go": "package main // v2\n"})
@@ -379,6 +708,9 @@ func TestRebuild_AgmOnly(t *testing.T) {
 	}
 	if !slices.Contains(got, "./agm/cmd/agm") {
 		t.Fatalf("agm not rebuilt for its own change: %v", got)
+	}
+	if !slices.Contains(got, "./agm/cmd/agm-reaper") {
+		t.Fatalf("agm-reaper not rebuilt with coherent AGM pair: %v", got)
 	}
 }
 

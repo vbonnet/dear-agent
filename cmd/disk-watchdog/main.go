@@ -32,9 +32,19 @@
 //	disk-watchdog --free-critical-gb 10  # override the free-space CRITICAL floor
 //	disk-watchdog --inode-warn 0.85      # override the inode WARN ceiling
 //	disk-watchdog --inode-critical 0.92  # override the inode CRITICAL ceiling
+//	disk-watchdog --brake /path/brake.json  # admission-brake location
+//	disk-watchdog --brake-ttl 45m        # how long an engaged brake blocks spawns
+//
+// Beyond alarming and remediating, the watchdog drives the cross-process
+// admission brake (pkg/vroom/admission): when its own remediation fails, or
+// when it cannot take a snapshot at all, it latches the brake and every spawn
+// path refuses new work until a healthy tick releases it or the TTL expires.
+// That is the ce-93lw.18 fix — on 2026-07-18 this watchdog was in ALARM with
+// `agm worktree sweep --execute: signal: killed` in every remediation slot, and
+// nothing consumed that fact, so the mesh kept spawning into a wedged host.
 //
 // Exit codes: 0 = within limits; 1 = at least one threshold breached (an alarm
-// fired); 2 = usage/runtime error.
+// fired); 2 = usage/runtime error. Brake I/O never changes the exit code.
 package main
 
 import (
@@ -48,6 +58,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/vbonnet/dear-agent/pkg/vroom/admission"
 	"github.com/vbonnet/dear-agent/pkg/vroom/decisiontrail"
 	"github.com/vbonnet/dear-agent/pkg/vroom/supervisor"
 )
@@ -77,6 +88,8 @@ type config struct {
 	path       string
 	agmBin     string
 	trailPath  string
+	brakePath  string
+	brakeTTL   time.Duration
 	thresholds supervisor.DiskAlertThresholds
 
 	// runCommand is the exec seam for remediation; nil = real exec. Injectable
@@ -94,6 +107,10 @@ func run(args []string, out io.Writer) (int, error) {
 	fs.StringVar(&cfg.path, "path", "/", "filesystem path to measure")
 	fs.StringVar(&cfg.agmBin, "agm", "agm", "path to the agm binary used for worktree-sweep remediation")
 	fs.StringVar(&cfg.trailPath, "trail", defaultTrailPath(), "decision-trail JSONL path for alarm records")
+	fs.StringVar(&cfg.brakePath, "brake", admission.DefaultPath(),
+		"admission-brake path; engaged when remediation fails, released on a healthy tick")
+	fs.DurationVar(&cfg.brakeTTL, "brake-ttl", admission.DefaultTTL,
+		"how long an engaged admission brake blocks spawns before expiring on its own")
 	fs.Float64Var(&freeWarnGB, "free-warn-gb", float64(supervisor.DefaultDiskAlertThresholds.FreeWarnBytes)/supervisor.GiB,
 		"alarm WARN when free disk space (GiB) falls below this value")
 	fs.Float64Var(&freeCriticalGB, "free-critical-gb", float64(supervisor.DefaultDiskAlertThresholds.FreeCriticalBytes)/supervisor.GiB,
@@ -110,6 +127,11 @@ func run(args []string, out io.Writer) (int, error) {
 
 	snap, err := takeSnapshot(cfg.path)
 	if err != nil {
+		// A watchdog that cannot measure the thing it guards is itself a
+		// saturation signal (ce-93lw.18 (c)). Latch the brake before returning,
+		// so spawns stop while we are blind rather than continuing on the last
+		// reading nobody has.
+		applyBrake(cfg, true, fmt.Sprintf("cannot read a disk snapshot for %s: %v", cfg.path, err))
 		return 2, fmt.Errorf("snapshot: %w", err)
 	}
 
@@ -125,6 +147,8 @@ func run(args []string, out io.Writer) (int, error) {
 		}
 		remediation = r
 	}
+
+	updateAdmissionBrake(cfg, breached, remediation)
 
 	// Logging the alarm to the trail is best-effort: a trail write failure is a
 	// warning, never a reason to suppress the breach exit code — and on a truly
@@ -210,6 +234,79 @@ func sweepMergedWorktrees(ctx context.Context, cfg config) (*sweepResult, error)
 		return nil, fmt.Errorf("parse worktree sweep output: %w", err)
 	}
 	return &r, nil
+}
+
+// brakeSource identifies this watchdog in the admission-brake record.
+const brakeSource = "disk-watchdog"
+
+// brakeDecision is what a tick concluded about the admission brake. Pure, so
+// the policy can be tested without touching the filesystem.
+type brakeDecision struct {
+	// Engage latches the brake; Release clears it. Both false means leave any
+	// existing brake alone and let its TTL run.
+	Engage  bool
+	Release bool
+	Reason  string
+}
+
+// decideBrake maps a tick outcome onto a brake transition.
+//
+// The case that matters is row one. On 2026-07-18 this watchdog ticked every
+// five minutes with root at 96.2% used and
+// `agm worktree sweep --execute: signal: killed` in every remediation slot —
+// the remediation path was being killed by the exhaustion it existed to
+// relieve — and the mesh kept spawning because that fact had no consumer.
+//
+// A breached tick whose remediation *succeeded* deliberately leaves an existing
+// brake alone rather than clearing it: one successful sweep under an active
+// alarm is not evidence the host is healthy. Only an unbreached tick releases.
+func decideBrake(breached bool, rem *sweepResult) brakeDecision {
+	switch {
+	case !breached:
+		return brakeDecision{Release: true}
+	case rem != nil && rem.Error != "":
+		return brakeDecision{
+			Engage: true,
+			Reason: fmt.Sprintf("worktree-sweep remediation failed: %s", rem.Error),
+		}
+	default:
+		return brakeDecision{}
+	}
+}
+
+// updateAdmissionBrake applies the tick's brake decision.
+func updateAdmissionBrake(cfg config, breached bool, rem *sweepResult) {
+	d := decideBrake(breached, rem)
+	switch {
+	case d.Engage:
+		applyBrake(cfg, true, d.Reason)
+	case d.Release:
+		applyBrake(cfg, false, "")
+	}
+}
+
+// applyBrake engages or releases the brake, honouring --dry-run.
+//
+// Brake I/O is best-effort in exactly the same way the trail append is: a write
+// failure is a warning on stderr and never changes the exit code, because the
+// alarm itself must still be reported. On a truly full disk the brake write is
+// one of the operations most likely to fail, and swallowing the alarm to report
+// that would be the wrong trade.
+func applyBrake(cfg config, engage bool, reason string) {
+	if cfg.dryRun || cfg.brakePath == "" {
+		return
+	}
+	if engage {
+		if err := admission.Engage(cfg.brakePath, brakeSource, reason, cfg.brakeTTL); err != nil {
+			fmt.Fprintf(os.Stderr, "disk-watchdog: warning: could not engage admission brake: %v\n", err)
+		}
+		return
+	}
+	// Scoped to this source so a healthy disk tick cannot clear a brake
+	// vroom-governor engaged because its own probes had gone unreadable.
+	if err := admission.ReleaseBySource(cfg.brakePath, brakeSource); err != nil {
+		fmt.Fprintf(os.Stderr, "disk-watchdog: warning: could not release admission brake: %v\n", err)
+	}
 }
 
 // logAlarm appends one watchdog.disk.alarm record to the decision trail.

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 func TestResolveCreateLifecyclePromptLoadsAgyPromptFileBeforeMutation(t *testing.T) {
@@ -67,15 +68,15 @@ func TestCLICreateSessionRuntimeUsesCallerContextForAgyIdentityBootstrap(t *test
 }
 
 func TestCLICreateSessionRuntimeUsesAgyBracketedRawPaste(t *testing.T) {
-	original := sendPromptLiteralForHarness
-	t.Cleanup(func() { sendPromptLiteralForHarness = original })
+	original := checkExpectedHarnessInputAndSend
+	t.Cleanup(func() { checkExpectedHarnessInputAndSend = original })
 	called := false
-	sendPromptLiteralForHarness = func(sessionName, prompt string, shouldInterrupt bool, harness string) error {
+	checkExpectedHarnessInputAndSend = func(ctx context.Context, sessionName, harness, prompt string, options tmux.InputDeliveryOptions) (tmux.HarnessInputReadiness, error) {
 		called = true
-		if sessionName != "agy-bootstrap" || prompt != "first line\nsecond line" || shouldInterrupt || harness != "agy" {
-			t.Fatalf("bootstrap paste = %q/%q/%t/%q", sessionName, prompt, shouldInterrupt, harness)
+		if ctx != t.Context() || sessionName != "agy-bootstrap" || prompt != "first line\nsecond line" || harness != "agy" || options.AllowBusyComposer {
+			t.Fatalf("bootstrap atomic send = context:%t %q/%q/%q/%+v", ctx == t.Context(), sessionName, prompt, harness, options)
 		}
-		return nil
+		return tmux.HarnessInputReadiness{Ready: true, State: tmux.HarnessInputReady, TargetPane: "%7"}, nil
 	}
 	runtime := newCLICreateSessionRuntime("agy-bootstrap", false, true)
 	if err := runtime.BootstrapAgyCreateIdentity(t.Context(), ops.AgyCreateIdentityBootstrap{
@@ -85,6 +86,6 @@ func TestCLICreateSessionRuntimeUsesAgyBracketedRawPaste(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !called {
-		t.Fatal("CLI AGY identity bootstrap did not use harness-aware literal paste")
+		t.Fatal("CLI AGY identity bootstrap did not use harness-aware atomic delivery")
 	}
 }

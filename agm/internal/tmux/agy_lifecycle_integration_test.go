@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -39,6 +40,10 @@ func TestAgyMultilinePasteIntegrationPreservesOneBracketedSubmission(t *testing.
 	})
 	socketPath := filepath.Join(socketDir, "agm.sock")
 	outputPath := filepath.Join(fixtureDir, "input.bin")
+	fixtureExecutable := filepath.Join(fixtureDir, "agy")
+	if err := copyAgyFixtureExecutable(executable, fixtureExecutable); err != nil {
+		t.Fatalf("copy AGY bracketed-paste fixture executable: %v", err)
+	}
 	t.Setenv("AGM_TMUX_SOCKET", socketPath)
 
 	const sessionName = "agy-multiline-paste-fixture"
@@ -47,15 +52,23 @@ func TestAgyMultilinePasteIntegrationPreservesOneBracketedSubmission(t *testing.
 	}
 	t.Cleanup(func() { cleanupAgyFixtureTmuxServer(t, socketPath) })
 	command := fmt.Sprintf("AGY_BRACKETED_PASTE_HELPER=1 AGY_BRACKETED_PASTE_OUTPUT=%s %s -test.run '^TestAgyBracketedPasteHelper$'",
-		launchparity.ShellQuote(outputPath), launchparity.ShellQuote(executable))
+		launchparity.ShellQuote(outputPath), launchparity.ShellQuote(fixtureExecutable))
 	if err := tmux.SendCommand(sessionName, command); err != nil {
 		t.Fatalf("launch bracketed-paste fixture: %v", err)
 	}
+	if err := tmux.WaitForExpectedHarnessReady(t.Context(), sessionName, "agy", 5*time.Second); err != nil {
+		output, _ := tmux.CapturePaneOutput(sessionName, 30)
+		t.Fatalf("wait for bracketed-paste fixture: %v\npane output:\n%s", err, output)
+	}
 
 	prompt := "[From: codex | ID: regression]\n\nReply exactly: AGM_AGY_MULTILINE_OK"
-	if err := tmux.SendMultiLinePromptSafeForHarnessContext(t.Context(), sessionName, prompt, false, "agy"); err != nil {
+	readiness, err := tmux.CheckExpectedHarnessInputAndSend(t.Context(), sessionName, "agy", prompt, tmux.InputDeliveryOptions{})
+	if err != nil {
 		output, _ := tmux.CapturePaneOutput(sessionName, 30)
 		t.Fatalf("send AGY multiline prompt: %v\npane output:\n%s", err, output)
+	}
+	if !readiness.Ready || readiness.TargetPane == "" {
+		t.Fatalf("AGY atomic delivery readiness = %+v, want ready exact pane", readiness)
 	}
 
 	deadline := time.Now().Add(5 * time.Second)
@@ -74,6 +87,23 @@ func TestAgyMultilinePasteIntegrationPreservesOneBracketedSubmission(t *testing.
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatal("timed out waiting for AGY bracketed-paste fixture input")
+}
+
+func copyAgyFixtureExecutable(source, target string) error {
+	in, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o755)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 func TestAgyBracketedPasteHelper(t *testing.T) {

@@ -3,9 +3,13 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestInstallHooksHelpIsHarnessNeutral(t *testing.T) {
@@ -25,6 +29,154 @@ func TestInstallHooksHelpIsHarnessNeutral(t *testing.T) {
 	if !strings.Contains(installHooksCmd.Long, ".pi/") || !strings.Contains(installHooksCmd.Long, "private authorization extension") {
 		t.Fatalf("install-hooks help should explain Pi hook and authorization surfaces:\n%s", installHooksCmd.Long)
 	}
+}
+
+func TestSessionStartHookAssociatesClaudeUUIDBeforeReadyState(t *testing.T) {
+	hook, err := hooksFS.ReadFile("hooks/session-start-agm-state-ready")
+	if err != nil {
+		t.Fatal(err)
+	}
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "agm-calls.log")
+	fakeAGM := filepath.Join(binDir, "agm")
+	if err := os.WriteFile(fakeAGM, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$HOOK_CALL_LOG\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("bash", "-c", string(hook))
+	cmd.Env = append(os.Environ(),
+		"PATH="+binDir+":"+os.Getenv("PATH"),
+		"AGM_SESSION_NAME=current-claude",
+		// A newly launched child may inherit its parent's UUID. The payload UUID
+		// identifies the session that actually invoked this hook and must win.
+		"CLAUDE_SESSION_ID=550e8400-e29b-41d4-a716-446655440099",
+		"HOOK_CALL_LOG="+logPath,
+		"BASH_ENV=",
+	)
+	cmd.Stdin = strings.NewReader(`{"session_id":"550e8400-e29b-41d4-a716-446655440000"}`)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("session-start hook failed: %v\n%s", err, output)
+	}
+
+	calls := waitForHookCalls(t, logPath, 2)
+	want := []string{
+		"session associate current-claude --uuid 550e8400-e29b-41d4-a716-446655440000",
+		"session state set current-claude READY --source hook",
+	}
+	if got := calls; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("hook calls = %#v, want %#v", got, want)
+	}
+}
+
+func TestSessionStartHookRetriesAssociationUntilRegistration(t *testing.T) {
+	hook, err := hooksFS.ReadFile("hooks/session-start-agm-state-ready")
+	if err != nil {
+		t.Fatal(err)
+	}
+	binDir := t.TempDir()
+	stateDir := t.TempDir()
+	logPath := filepath.Join(stateDir, "agm-calls.log")
+	countPath := filepath.Join(stateDir, "associate-count")
+	fakeAGM := filepath.Join(binDir, "agm")
+	fakeScript := `#!/bin/sh
+if [ "$1 $2" = "session associate" ]; then
+    count=0
+    [ ! -f "$HOOK_COUNT_FILE" ] || count=$(cat "$HOOK_COUNT_FILE")
+    count=$((count + 1))
+    printf '%s\n' "$count" > "$HOOK_COUNT_FILE"
+    printf '%s\n' "$*" >> "$HOOK_CALL_LOG"
+    [ "$count" -ge 3 ] || exit 1
+    exit 0
+fi
+printf '%s\n' "$*" >> "$HOOK_CALL_LOG"
+`
+	if err := os.WriteFile(fakeAGM, []byte(fakeScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("bash", "-c", string(hook))
+	cmd.Env = append(os.Environ(),
+		"PATH="+binDir+":"+os.Getenv("PATH"),
+		"AGM_SESSION_NAME=detached-claude",
+		"CLAUDE_SESSION_ID=550e8400-e29b-41d4-a716-446655440001",
+		"HOOK_CALL_LOG="+logPath,
+		"HOOK_COUNT_FILE="+countPath,
+		"BASH_ENV=",
+	)
+	cmd.Stdin = strings.NewReader(`{}`)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("session-start hook failed: %v\n%s", err, output)
+	}
+
+	calls := waitForHookCalls(t, logPath, 4)
+	wantAssociate := "session associate detached-claude --uuid 550e8400-e29b-41d4-a716-446655440001"
+	wantReady := "session state set detached-claude READY --source hook"
+	if calls[0] != wantAssociate || calls[1] != wantAssociate || calls[2] != wantAssociate || calls[3] != wantReady {
+		t.Fatalf("hook retry calls = %#v, want three associations then READY", calls)
+	}
+}
+
+func TestSessionStartHookRetryWindowCoversMaximumStartup(t *testing.T) {
+	t.Parallel()
+
+	hook, err := hooksFS.ReadFile("hooks/session-start-agm-state-ready")
+	if err != nil {
+		t.Fatal(err)
+	}
+	match := regexp.MustCompile(`while \[ "\$attempt" -lt ([0-9]+) \]`).FindSubmatch(hook)
+	if len(match) != 2 {
+		t.Fatal("SessionStart hook retry bound is not explicit")
+	}
+	attempts, err := strconv.Atoi(string(match[1]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempts < 91 {
+		t.Fatalf("SessionStart hook retries %d times, want at least 91 to cover the 90-second startup window", attempts)
+	}
+}
+
+func TestSessionStartHookHasSingleCanonicalSource(t *testing.T) {
+	t.Parallel()
+
+	workingDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoRoot := findDearAgentRootFrom(workingDir)
+	if repoRoot == "" {
+		t.Fatal("could not resolve dear-agent repository root")
+	}
+	legacyPath := filepath.Join(repoRoot, "agm", "hooks", "cmd", "session-start-agm-state-ready")
+	if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
+		if err != nil {
+			t.Fatalf("inspect retired SessionStart hook: %v", err)
+		}
+		t.Fatalf("retired SessionStart hook still exists at %s", legacyPath)
+	}
+}
+
+func waitForHookCalls(t *testing.T, logPath string, want int) []string {
+	t.Helper()
+	// The hook is asynchronous by contract. Allow enough scheduling slack for
+	// the full CLI package, whose real tmux/process tests can heavily contend on
+	// CI hosts, while still failing far before the 120-second production retry
+	// window.
+	deadline := time.Now().Add(45 * time.Second)
+	for time.Now().Before(deadline) {
+		calls, err := os.ReadFile(logPath)
+		if err == nil {
+			lines := strings.Split(strings.TrimSpace(string(calls)), "\n")
+			if len(lines) >= want {
+				return lines
+			}
+		} else if !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d hook calls", want)
+	return nil
 }
 
 func TestAddHookRegistration(t *testing.T) {

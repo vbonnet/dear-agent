@@ -13,7 +13,7 @@ export GOMEMLIMIT GOMAXPROCS GOGC
 # `<binary> --version` reports the actual build provenance.
 # Override on the CLI: make build-safe-pr VERSION=1.2.3
 VERSION    ?= dev
-GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+GIT_COMMIT ?= $(shell commit=$$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown); if [ "$$commit" != unknown ] && [ -n "$$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then printf '%s-dirty' "$$commit"; else printf '%s' "$$commit"; fi)
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 PKG_VERSION := github.com/vbonnet/dear-agent/pkg/version
@@ -98,8 +98,8 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 #   install-resolve-review-threads Install resolve-review-threads to ~/go/bin
 #   build-merge-audit       Build merge-audit: safe-merge P6 detection tier
 #   install-merge-audit     Install merge-audit to ~/go/bin
-#   install-token-refresher-launchagent   Schedule the OAuth token-refresher idle backstop + wire apiKeyHelper (macOS, ce-cs3v)
-#   uninstall-token-refresher-launchagent Remove the token-refresher launch agent + apiKeyHelper wiring
+#   install-token-refresher-launchagent   Schedule the OAuth token-refresher idle backstop (macOS, ce-cs3v)
+#   uninstall-token-refresher-launchagent Remove the token-refresher launch agent
 #   build-dear-deploy       Build dear-deploy: atomic host-artifact deployer (cmd/dear-deploy)
 #   install-dear-deploy     Install dear-deploy to ~/go/bin
 #   dear-deploy-sync        Deploy host artifacts from deploy/manifest.yaml (build guards first)
@@ -119,6 +119,8 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 .PHONY: lint-skills
 .PHONY: lint-instructions
 .PHONY: lint-adrs
+
+include mk/install-go-bin.mk
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -323,8 +325,7 @@ build-configure-settings:
 
 # Install configure-claude-settings to GOPATH/bin
 install-configure-settings: build-configure-settings
-	cp bin/configure-claude-settings $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/configure-claude-settings"
+	$(call install-go-bin,bin/configure-claude-settings)
 
 # Build safe-push: a git-push wrapper that resets the credential helper chain
 # to gh-only (never osxkeychain, which can hang on a headless GUI prompt) and
@@ -337,8 +338,7 @@ build-safe-push:
 
 # Install safe-push to GOPATH/bin so it is on PATH for every agent session.
 install-safe-push: build-safe-push
-	cp bin/safe-push $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/safe-push"
+	$(call install-go-bin,bin/safe-push)
 
 # Build safe-merge: the vetted, gated PR merger that replaces raw `gh pr merge`.
 # Enforces AGENTS.md principle 9: required CI gates, review thread check, soak
@@ -351,8 +351,7 @@ build-safe-merge:
 
 # Install safe-merge to GOPATH/bin so it is on PATH for every agent session.
 install-safe-merge: build-safe-merge
-	cp bin/safe-merge $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/safe-merge"
+	$(call install-go-bin,bin/safe-merge)
 
 # Build safe-rebase: rebase feature branches onto main with safety checks.
 # Refuses protected branches, aborts on conflict, optionally force-pushes
@@ -364,8 +363,7 @@ build-safe-rebase:
 
 # Install safe-rebase to GOPATH/bin.
 install-safe-rebase: build-safe-rebase
-	cp bin/safe-rebase $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/safe-rebase"
+	$(call install-go-bin,bin/safe-rebase)
 
 # Build token-refresher: single-owner, file-locked Claude Code OAuth refresher
 # for the VROOM supervisor mesh. Keeps ~/.claude/.credentials.json fresh so
@@ -377,29 +375,46 @@ build-token-refresher:
 
 # Install token-refresher to GOPATH/bin.
 install-token-refresher: build-token-refresher
-	cp bin/token-refresher $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/token-refresher"
+	$(call install-go-bin,bin/token-refresher)
 
 # Wire token-refresher into the supervisor mesh (ce-cs3v): deploy the launchd
-# idle-backstop that refreshes ~/.claude/.credentials.json every 30 minutes,
-# and print the two host-side, ask-gated activation steps (launchctl load +
-# apiKeyHelper wiring) for you to run yourself. Both the scheduled job and the
-# apiKeyHelper share token-refresher and its cross-process credentials lock.
-install-token-refresher-launchagent: install-token-refresher install-configure-settings
+# idle-backstop that refreshes ~/.claude/.credentials.json every 30 minutes, and
+# print the single host-side, ask-gated activation step for you to run yourself.
+#
+# The scheduled job is the ONLY sanctioned wiring. Do NOT also point Claude
+# Code's apiKeyHelper at this binary: since claude-code 2.1.205 a configured
+# apiKeyHelper is treated as an external API key that SHADOWS a healthy OAuth
+# login and refuses to fall back to it, so the CLI fails with "Invalid API key"
+# even when credentials.json is perfectly fresh (anthropics/claude-code#11587,
+# #9694, #23568). That wiring used to be step 2 here; it caused a multi-day mesh
+# outage and was removed from the host on 2026-07-10. See cmd/token-refresher/
+# README.md ("Retired wiring").
+install-token-refresher-launchagent: install-token-refresher
 	@mkdir -p $(HOME)/Library/LaunchAgents
 	@mkdir -p $(HOME)/.local/state/dear-agent
 	@sed 's|__HOME__|$(HOME)|g' deploy/launchd/com.dear-agent.token-refresher.plist \
 		> $(HOME)/Library/LaunchAgents/com.dear-agent.token-refresher.plist
 	@echo "Staged: $(HOME)/Library/LaunchAgents/com.dear-agent.token-refresher.plist"
-	@echo "Activate it yourself (ask-gated host actions):"
-	@echo "  1. Schedule the idle backstop:"
+	@echo "Activate it yourself (ask-gated host action):"
+	@echo "  Schedule the idle backstop:"
 	@echo "     launchctl load $(HOME)/Library/LaunchAgents/com.dear-agent.token-refresher.plist"
-	@echo "  2. Point Claude Code's apiKeyHelper at the refresher (on-demand refresh):"
-	@echo "     configure-claude-settings set apiKeyHelper '\"$(HOME)/go/bin/token-refresher\"'"
+	@if grep -q '"apiKeyHelper"' $(HOME)/.claude/settings.json 2>/dev/null; then \
+		echo ""; \
+		echo "  WARNING: this host still has a retired apiKeyHelper in ~/.claude/settings.json."; \
+		echo "  It shadows healthy OAuth (claude-code >=2.1.205) and will keep breaking auth"; \
+		echo "  even with this launch agent running. Clear it:"; \
+		echo "     configure-claude-settings remove apiKeyHelper"; \
+	fi
 
+# Uninstall still tells you to clear the retired apiKeyHelper. Setup guidance
+# for it is gone (see install target), but a host that followed the OLD steps
+# has the harmful value sitting in ~/.claude/settings.json, where it keeps
+# shadowing healthy OAuth long after this launch agent is gone. Removing the
+# setup step without keeping the cleanup step would strand exactly those hosts.
 uninstall-token-refresher-launchagent:
-	@echo "Disable it yourself, then remove the plist and unwire apiKeyHelper:"
+	@echo "Disable it yourself, then remove the plist:"
 	@echo "  launchctl bootout gui/$$(id -u)/com.dear-agent.token-refresher"
+	@echo "If this host ever followed the retired apiKeyHelper instructions, clear it too:"
 	@echo "  configure-claude-settings remove apiKeyHelper"
 	@rm -f $(HOME)/Library/LaunchAgents/com.dear-agent.token-refresher.plist
 	@echo "Removed plist (if present)."
@@ -412,8 +427,7 @@ build-safe-pr:
 
 # Install safe-pr to GOPATH/bin.
 install-safe-pr: build-safe-pr
-	cp bin/safe-pr $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/safe-pr"
+	$(call install-go-bin,bin/safe-pr)
 
 # Build src-recovery: the one sanctioned writer to ~/src/**. It restores a
 # golden checkout to a clean, current default branch via exactly stash ->
@@ -430,8 +444,7 @@ build-src-recovery:
 # alongside chezmoi-deploy and safe-push — its safety is guaranteed by
 # construction, so it needs no per-invocation approval (AGENTS.md principle 9).
 install-src-recovery: build-src-recovery
-	cp bin/src-recovery $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/src-recovery"
+	$(call install-go-bin,bin/src-recovery)
 
 # Build safe-unlock: the vetted path for clearing stale git lock files from any
 # repo or linked worktree. Removes a lock only when it is older than --min-age
@@ -449,8 +462,7 @@ build-safe-unlock:
 # its safety is guaranteed by construction, so it needs no per-invocation
 # approval (AGENTS.md principle 9).
 install-safe-unlock: build-safe-unlock
-	cp bin/safe-unlock $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/safe-unlock"
+	$(call install-go-bin,bin/safe-unlock)
 
 # Build the Jaeger health-check CLI. Reports whether Jaeger at localhost:16686
 # is alive and receiving traces. Exit codes: 0 healthy, 1 degraded (no recent
@@ -463,8 +475,7 @@ build-jaeger-health:
 	@echo "Built: bin/jaeger-health"
 
 install-jaeger-health: build-jaeger-health
-	cp bin/jaeger-health $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/jaeger-health"
+	$(call install-go-bin,bin/jaeger-health)
 
 # Build otel-local: launches a local Jaeger v2 collector (OTLP gRPC :4317,
 # UI :16686) with no Docker. Locates or --fetch'es the native Jaeger binary,
@@ -477,8 +488,7 @@ build-otel-local:
 	@echo "Built: bin/otel-local"
 
 install-otel-local: build-otel-local
-	cp bin/otel-local $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/otel-local"
+	$(call install-go-bin,bin/otel-local)
 
 # Convenience: install and launch the local collector in one step. Fetches the
 # pinned Jaeger release if no binary is present, then runs it in the foreground
@@ -495,8 +505,7 @@ build-bead-pr-sync:
 	@echo "Built: bin/bead-pr-sync"
 
 install-bead-pr-sync: build-bead-pr-sync
-	cp bin/bead-pr-sync $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/bead-pr-sync"
+	$(call install-go-bin,bin/bead-pr-sync)
 
 # Deploy bead-pr-sync as a launchd agent running every 4 hours (ce-yf2c).
 # Stages the plist into ~/Library/LaunchAgents and prints the activation
@@ -525,8 +534,7 @@ build-bead-pr-guard:
 	@echo "Built: bin/bead-pr-guard"
 
 install-bead-pr-guard: build-bead-pr-guard
-	cp bin/bead-pr-guard $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/bead-pr-guard"
+	$(call install-go-bin,bin/bead-pr-guard)
 
 # Enforces Definition of Done before bead closure: blocks `bd close` when
 # referenced PRs are not yet merged. Used by the pretool-bead-close-guard hook.
@@ -538,8 +546,7 @@ build-bead-close-guard:
 	@echo "Built: bin/bead-close-guard"
 
 install-bead-close-guard: build-bead-close-guard
-	cp bin/bead-close-guard $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/bead-close-guard"
+	$(call install-go-bin,bin/bead-close-guard)
 
 # Detects deployment drift: deployed artifacts (Claude Code hooks, launchd
 # plists, chezmoi files) whose source of truth in main no longer matches the
@@ -552,8 +559,7 @@ build-drift-check:
 	@echo "Built: bin/drift-check"
 
 install-drift-check: build-drift-check
-	cp bin/drift-check $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/drift-check"
+	$(call install-go-bin,bin/drift-check)
 
 # Run the legacy hash-only drift check against cmd/drift-check's built-in
 # targets. Superseded by `make deploy-status` (manifest-driven, also covers Go
@@ -585,8 +591,7 @@ build-babysit-prs:
 	@echo "Built: bin/babysit-prs"
 
 install-babysit-prs: build-babysit-prs
-	cp bin/babysit-prs $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/babysit-prs"
+	$(call install-go-bin,bin/babysit-prs)
 
 # Build mergeloop: the Ralph Wiggum persistent PR-merge loop (ADR-029). Drives
 # every open PR toward MERGED with zero human mechanics — rebases behind
@@ -600,8 +605,7 @@ build-mergeloop:
 	@echo "Built: bin/mergeloop"
 
 install-mergeloop: build-mergeloop
-	cp bin/mergeloop $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/mergeloop"
+	$(call install-go-bin,bin/mergeloop)
 
 # Install the launchd agent that runs `mergeloop tick` on an interval. The
 # plist is rendered from deploy/launchd/com.dear-agent.mergeloop.plist with the
@@ -633,8 +637,7 @@ build-resolve-review-threads:
 	@echo "Built: bin/resolve-review-threads"
 
 install-resolve-review-threads: build-resolve-review-threads
-	cp bin/resolve-review-threads $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/resolve-review-threads"
+	$(call install-go-bin,bin/resolve-review-threads)
 
 # Build merge-audit: safe-merge P6 detection tier. Weekly cross-repo sweep for
 # unresolved-threads-at-merge, checks-incomplete-at-merge, direct pushes,
@@ -645,8 +648,7 @@ build-merge-audit:
 	@echo "Built: bin/merge-audit"
 
 install-merge-audit: build-merge-audit
-	cp bin/merge-audit $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/merge-audit"
+	$(call install-go-bin,bin/merge-audit)
 
 # Build dear-deploy: the write-side counterpart to drift-check. It deploys host
 # artifacts (launchd plists, Claude Code hooks) from deploy/manifest.yaml through
@@ -659,8 +661,7 @@ build-dear-deploy:
 	@echo "Built: bin/dear-deploy"
 
 install-dear-deploy: build-dear-deploy
-	cp bin/dear-deploy $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/dear-deploy"
+	$(call install-go-bin,bin/dear-deploy)
 
 # Deploy every artifact in deploy/manifest.yaml to the host. The write-guard
 # hooks are compiled first (their source is the built binary under bin/), then
@@ -702,8 +703,8 @@ build-write-guards:
 HOOKS_DIR ?= $(HOME)/.config/claude-code/hooks
 install-write-guards: build-write-guards
 	@mkdir -p $(HOOKS_DIR)
-	cp bin/pretool-fs-write-guard bin/pretool-bash-write-guard $(HOOKS_DIR)/
-	@echo "Installed: $(HOOKS_DIR)/pretool-fs-write-guard $(HOOKS_DIR)/pretool-bash-write-guard"
+	$(call install-go-bin,bin/pretool-fs-write-guard,$(HOOKS_DIR))
+	$(call install-go-bin,bin/pretool-bash-write-guard,$(HOOKS_DIR))
 
 # Uninstall AGM components
 uninstall:
@@ -787,7 +788,7 @@ bumblebee-scan: build-bumblebee
 # $HOME/.local/bin first so the plist references a stable path.
 install-bumblebee-launchagent: build-bumblebee
 	@mkdir -p $(HOME)/.local/bin
-	@install -m 0755 bin/dear-agent-bumblebee $(HOME)/.local/bin/dear-agent-bumblebee
+	$(call install-go-bin,bin/dear-agent-bumblebee,$(HOME)/.local/bin)
 	@$(HOME)/.local/bin/dear-agent-bumblebee install-launchagent
 
 uninstall-bumblebee-launchagent: build-bumblebee
@@ -799,8 +800,7 @@ build-pr-linkify:
 	@echo "Built: bin/pr-linkify"
 
 install-pr-linkify: build-pr-linkify
-	cp bin/pr-linkify $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/pr-linkify"
+	$(call install-go-bin,bin/pr-linkify)
 
 # Build fd-pressure: a standalone FD/vnode/gopls pressure monitor. Samples
 # system resource state and exits non-zero if any threshold is breached.
@@ -813,8 +813,7 @@ build-fd-pressure:
 	@echo "Built: bin/fd-pressure"
 
 install-fd-pressure: build-fd-pressure
-	cp bin/fd-pressure $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/fd-pressure"
+	$(call install-go-bin,bin/fd-pressure)
 
 build-gopls-watchdog:
 	@echo "Building gopls-watchdog..."
@@ -823,8 +822,7 @@ build-gopls-watchdog:
 	@echo "Built: bin/gopls-watchdog"
 
 install-gopls-watchdog: build-gopls-watchdog
-	cp bin/gopls-watchdog $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/gopls-watchdog"
+	$(call install-go-bin,bin/gopls-watchdog)
 
 install-gopls-watchdog-launchagent: install-gopls-watchdog
 	@mkdir -p $(HOME)/Library/LaunchAgents
@@ -864,8 +862,7 @@ build-disk-watchdog:
 	@echo "Built: bin/disk-watchdog"
 
 install-disk-watchdog: build-disk-watchdog
-	cp bin/disk-watchdog $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/disk-watchdog"
+	$(call install-go-bin,bin/disk-watchdog)
 
 install-disk-watchdog-launchagent: install-disk-watchdog
 	@mkdir -p $(HOME)/Library/LaunchAgents
@@ -888,8 +885,7 @@ build-vroom-dispatch:
 	@echo "Built: bin/vroom-dispatch"
 
 install-vroom-dispatch: build-vroom-dispatch
-	cp bin/vroom-dispatch $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/vroom-dispatch"
+	$(call install-go-bin,bin/vroom-dispatch)
 
 # Build vroom-mesh: in-process 3-supervisor VROOM mesh harness (ce-plf0).
 # Supports both in-memory substrates (default) and real adapters:
@@ -902,8 +898,7 @@ build-vroom-mesh:
 	@echo "Built: bin/vroom-mesh"
 
 install-vroom-mesh: build-vroom-mesh
-	cp bin/vroom-mesh $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/vroom-mesh"
+	$(call install-go-bin,bin/vroom-mesh)
 
 # Build agm-bus channel MCP adapter (permission-relay channel, ce-plf0).
 # TypeScript: runs npm install + tsc. Output lands in agm/agm-plugin/channels/agm-bus/dist/.
@@ -921,8 +916,7 @@ build-vroom-prompt-gen:
 	@echo "Built: bin/vroom-prompt-gen"
 
 install-vroom-prompt-gen: build-vroom-prompt-gen
-	cp bin/vroom-prompt-gen $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/vroom-prompt-gen"
+	$(call install-go-bin,bin/vroom-prompt-gen)
 
 # Build agm-job: the host-side job runner for the dear-agent dispatch loop
 # (ce-m3ya, Phase A of ce-cd14). Wraps commands with atomic flock locking,
@@ -935,8 +929,7 @@ build-agm-job:
 	@echo "Built: bin/agm-job"
 
 install-agm-job: build-agm-job
-	cp bin/agm-job $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/agm-job"
+	$(call install-go-bin,bin/agm-job)
 
 # Build src-health: canary that checks 7 ~/src repos for clean working tree,
 # branch, and ahead/behind status. Used to soak the host dispatch loop during
@@ -948,8 +941,7 @@ build-src-health:
 	@echo "Built: bin/src-health"
 
 install-src-health: build-src-health
-	cp bin/src-health $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/src-health"
+	$(call install-go-bin,bin/src-health)
 
 # Build burndown-maint: host-side bead-burndown maintenance tick (ce-cd14.2).
 # Counts active burndown workers via agm session list, spawns at most 1 per
@@ -961,8 +953,7 @@ build-burndown-maint:
 	@echo "Built: bin/burndown-maint"
 
 install-burndown-maint: build-burndown-maint
-	cp bin/burndown-maint $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/burndown-maint"
+	$(call install-go-bin,bin/burndown-maint)
 
 # Build vroom-governor: system load + RAM monitor that pauses/resumes spawns
 # and archives the newest worker on critical memory pressure (ce-lxdo).
@@ -974,22 +965,21 @@ build-vroom-governor:
 	@echo "Built: bin/vroom-governor"
 
 install-vroom-governor: build-vroom-governor
-	cp bin/vroom-governor $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/vroom-governor"
+	$(call install-go-bin,bin/vroom-governor)
 
-# Build agm + agm-mcp-server with version stamping (ce-wy1q).
-# These binaries are also installable via `go install ./agm/cmd/agm` but that
-# path omits version info; prefer `make build-agm && make install-agm` so that
-# `agm version` shows the correct commit and build date.
+# Build the AGM CLI and its detached archive companion with one version stamp.
+# A standalone `go install ./agm/cmd/agm` omits both the stamp and companion;
+# prefer `make install-agm` so async archive compatibility remains coherent.
 build-agm:
-	@echo "Building agm..."
+	@echo "Building agm + agm-reaper..."
 	@mkdir -p bin
 	go build $(GOFLAGS) -o bin/agm ./agm/cmd/agm/
-	@echo "Built: bin/agm"
+	go build $(GOFLAGS) -o bin/agm-reaper ./agm/cmd/agm-reaper/
+	@echo "Built: bin/agm bin/agm-reaper"
 
 install-agm: build-agm
-	cp bin/agm $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/agm"
+	$(call install-go-bin,bin/agm)
+	$(call install-go-bin,bin/agm-reaper)
 
 build-agm-mcp-server:
 	@echo "Building agm-mcp-server..."
@@ -998,8 +988,7 @@ build-agm-mcp-server:
 	@echo "Built: bin/agm-mcp-server"
 
 install-agm-mcp-server: build-agm-mcp-server
-	cp bin/agm-mcp-server $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/agm-mcp-server"
+	$(call install-go-bin,bin/agm-mcp-server)
 
 # Build engram-mcp: Go Engram MCP server with verified beads writes (ce-ctsi).
 # Supersedes the legacy Python server whose beads_create silently wrote to a
@@ -1011,8 +1000,7 @@ build-engram-mcp:
 	@echo "Built: bin/engram-mcp"
 
 install-engram-mcp: build-engram-mcp
-	cp bin/engram-mcp $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/engram-mcp"
+	$(call install-go-bin,bin/engram-mcp)
 
 # Build session-skill-extractor: analyzes a completed session transcript and
 # proposes a new SKILL candidate via the model (ce-ouvr). Includes dedup
@@ -1025,5 +1013,4 @@ build-session-skill-extractor:
 	@echo "Built: bin/session-skill-extractor"
 
 install-session-skill-extractor: build-session-skill-extractor
-	cp bin/session-skill-extractor $(HOME)/go/bin/
-	@echo "Installed: $(HOME)/go/bin/session-skill-extractor"
+	$(call install-go-bin,bin/session-skill-extractor)

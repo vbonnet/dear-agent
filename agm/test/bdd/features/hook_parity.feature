@@ -19,6 +19,7 @@
 # RELATED-SPEC: agm/hooks/cmd/stop-session-guard/SPEC.md
 # RELATED-SPEC: cmd/pretool-bash-write-guard/SPEC.md
 # RELATED-SPEC: cmd/pretool-fs-write-guard/SPEC.md
+# RELATED-SPEC: pkg/version/SPEC.md
 Feature: Hook harness parity
   Active interactive harnesses should receive the same repository guardrails
   through their native hook configuration surfaces.
@@ -89,8 +90,17 @@ Feature: Hook harness parity
       | safeguard               |
       | atomic-binary-install   |
       | trunk-build-context     |
+      | agm-companion-coherence |
       | host-artifact-deploy    |
       | deployment-verification |
       | bead-transition         |
       | worktree-sweep          |
       | fail-safe-exit          |
+
+  Scenario: Detached archive companion proves coherent startup
+    When AGM runs detached archive companion startup regressions
+    Then a mixed revision or missing startup acknowledgement should fail before async success
+
+  Scenario: Canonical AGM installation preserves companion coherence
+    When AGM runs the canonical AGM companion install regression
+    Then the root AGM install target should build and install the companion pair

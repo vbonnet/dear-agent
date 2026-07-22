@@ -79,7 +79,7 @@ Provide a production-ready CLI that:
 
 **CLI-24** When AGM command tests execute Cobra commands or mutate command flags, the system shall use fresh command instances or restore the complete shared command state so test results remain independent of execution order.
 
-**CLI-25** When `agm new` runs inside tmux without `--detached` for Codex, the system shall route into current-pane creation, require the `codex` executable, queue its launch command behind the invoking AGM process, and finalize session metadata without synchronously waiting for the composer, because the pane shell cannot consume the command until AGM returns.
+**CLI-25** When `agm new` runs inside tmux without `--detached` for Claude Code, Codex, OpenCode, Pi, or deprecated Gemini compatibility, the system shall route into current-pane creation, require the harness's canonical executable, queue the canonical launch command behind the invoking AGM process, and finalize session metadata without synchronously waiting for the composer, because the pane shell cannot consume the command until AGM returns; Pi shall use its managed canonical launch contract, and Claude's SessionStart hook shall persist the resulting conversation UUID.
 
 **CLI-26** When `agm audit resources --fix` cannot remove a linked worktree through a one-force Git operation, including when the worktree is locked, the system shall preserve the checkout and report the cleanup error instead of deleting the directory directly.
 
@@ -107,7 +107,17 @@ Provide a production-ready CLI that:
 
 **CLI-38** When `agm admin link-session-parent` or `agm admin backfill-plan-sessions` assigns a parent and optionally inherits its display name, the command shall persist both changes through one narrow compare-and-swap against the child identity revision it read and shall report a concurrent identity change as a failure instead of reporting a link or rename that storage did not apply.
 
-**CLI-39** When direct, fan-out, structured, or fresh-startup delivery targets an AGY session, the command shall propagate the resolved `agy` harness through the shared tmux delivery boundary so attribution and multiline bodies remain one native request; unresolved and non-AGY sessions shall retain backward-compatible delivery semantics.
+**CLI-39** When `agm send msg` delivers directly to one or more registered CLI-harness sessions, every recipient shall route through shared `ops.SendMessage`, which shall atomically prove the manifest's canonical harness process and current composer before sending to the exact verified pane; `--force` shall be preserved across this shared route and may override only a `QUEUE` verdict caused by queued or stale composer input after exact harness and pane ownership are proved, while an unregistered tmux session, missing storage, wrong or dead harness, permission, overlay, onboarding, missing target, other unready composer, missing atomic delivery capability, or failed readiness check shall return non-delivery without creating a pending-file bypass.
+
+**CLI-40** When CLI session creation has registered a supported harness and must deliver `--prompt` or `--prompt-file`, the completion boundary shall atomically revalidate that the expected harness owns the foreground terminal and an empty composer, then send to the exact verified pane under the same mutation boundary; an unready, background, suspended, wrong, or missing harness, a focus change, an invalid pane proof, or caller cancellation shall not deliver the startup prompt.
+
+**CLI-41** When `agm session new` provisions a sandbox for any harness, the system shall start the shared harness lifecycle from the provider-mapped counterpart of the requested project directory and shall persist both that directory and the sandbox workspace root.
+
+**CLI-42** When sandbox onboarding is enabled for a nested harness working directory, the system shall render onboarding template workspace-root data from the provider's merged path while writing the generated instructions to the harness working directory's project-scoped configuration.
+
+**CLI-43** When automatic workspace discovery finds repositories that do not contain the requested project directory, the system shall retain those repositories, prepend the nearest Git repository containing the requested directory, and reject sandbox creation if the requested directory has no safe containing Git repository.
+
+**CLI-44** When direct, fan-out, structured, daemon-queued, or fresh-startup delivery targets an AGY session, the command shall propagate the resolved `agy` harness through the shared tmux delivery boundary so attribution and multiline bodies remain one native request; unresolved and non-AGY sessions shall retain their established delivery semantics.
 
 ## Requirements
 
@@ -380,10 +390,9 @@ Provide a production-ready CLI that:
   - `agm send msg [recipient] --prompt "..."` - Send messages (replaces `agm session send`)
   - `agm send reject [session] --reason "..."` - Reject permission prompts (replaces `agm session reject`)
   - `agm send approve [session] --reason "..."` - Approve permission prompts (NEW)
-- **Backward Compatibility:**
-  - Old commands still work: `agm session send`, `agm session reject`
-  - Gradual migration path for users
-  - Deprecation warnings in help text (future)
+- **Migration:**
+  - Use `agm send msg` and `agm send reject`; the retired `agm session send` and `agm session reject` paths are not registered
+  - Generated command guidance and examples use the active command tree
 - **Benefits:**
   - Logical grouping of communication commands
   - Improved command discoverability
@@ -392,22 +401,21 @@ Provide a production-ready CLI that:
 #### FR14: Multi-Recipient Support
 - **ID:** FR14
 - **Priority:** P1 (High)
-- **Description:** CLI MUST support sending messages to multiple recipients simultaneously
+- **Description:** CLI MUST support sending messages to multiple recipients in one invocation
 - **Syntax:**
   - Positional: `agm send msg session1,session2,session3 --prompt "..."`
   - Explicit flag: `agm send msg --to session1,session2 --prompt "..."`
   - Glob patterns: `agm send msg "*research*" --prompt "..."`
   - Workspace filtering: `agm send msg --workspace oss --prompt "..."`
 - **Features:**
-  - **Parallel delivery:** Worker pool with max 5 concurrent deliveries
+  - **Sequential delivery:** Recipients are delivered one at a time because tmux mutation is serialized and each send owns one atomic readiness-and-input boundary
   - **Recipient resolution:** Comma-separated lists, glob pattern expansion, workspace filtering
   - **Result aggregation:** Color-coded success/failure report for each recipient
   - **Error isolation:** One recipient failure doesn't block others
   - **Rate limiting:** Per-sender (not per-recipient), 10 messages/minute
-- **Performance:**
-  - 2.5x faster than sequential delivery (measured with 5 recipients)
-  - Worker pool prevents tmux server overload
-  - Buffered channels for efficient job distribution
+- **Safety:**
+  - One recipient's readiness proof and exact-pane send complete before the next begins
+  - A failed recipient is reported without preventing later recipients from being attempted
 - **Flags:**
   - `--to <recipients>` - Explicit recipient list (alternative to positional)
   - `--workspace <name>` - Filter sessions by workspace
@@ -875,6 +883,8 @@ SQLite when `AGM_DB_PATH` is set by a named test environment)
 5. For stopped sessions, call ops.ArchiveSession immediately
 6. For active sessions with --async:
    - preflight through ops.ArchiveSession without mutating
+   - require the detached agm-reaper binary to prove the same embedded VCS revision and clean or dirty provenance as agm
+   - wait for the exact detached child to acknowledge revision validation and durable log initialization before reporting success
    - spawn agm-reaper with force/keep-sandbox/outcome options preserved
    - mark lifecycle=reaping before stopping the pane
    - after pane death, call ops.ArchiveSession for the final transition

@@ -64,6 +64,9 @@ tests/test_helper/
 /workflow-audit
 /dear-agent-mcp
 /stop-wayfinder-guard
+/disk-watchdog
+/vroom-governor
+/vroom-dispatch
 
 # Local runtime state
 .local/

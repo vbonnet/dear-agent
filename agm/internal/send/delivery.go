@@ -16,7 +16,6 @@ type DeliveryJob struct {
 	PromptFile       string
 	ShouldInterrupt  bool
 	SessionsDir      string
-	Harness          string
 }
 
 // DeliveryResult represents delivery outcome
@@ -86,8 +85,8 @@ func SequentialDeliver(ctx context.Context, jobs []*DeliveryJob, deliverFunc Del
 // Allows dependency injection for testing
 type DeliveryFunc func(context.Context, *DeliveryJob) error
 
-// DefaultDeliveryFunc is the default delivery implementation
-// Uses tmux for message delivery (matches existing sendViaTmux behavior)
+// DefaultDeliveryFunc is the default delivery implementation. The CLI installs
+// a function that resolves each recipient through storage and shared ops.
 var DefaultDeliveryFunc DeliveryFunc = func(context.Context, *DeliveryJob) error {
 	// Import cycle prevention: this will be set by cmd/agm/send_msg.go
 	// during initialization to avoid circular dependency

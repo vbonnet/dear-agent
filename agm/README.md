@@ -516,7 +516,8 @@ AGM provides a unified `agm send` command group for all session communication op
 
 ### `agm send msg <recipient> [flags]`
 
-Send messages to one or more AGM sessions with multi-recipient support and parallel delivery.
+Send messages to one or more registered AGM sessions with harness-aware,
+exact-pane delivery.
 
 **Single recipient:**
 ```bash
@@ -526,11 +527,11 @@ agm send msg my-session --prompt "Please review the code"
 # Send prompt from file (for large multi-line prompts)
 agm send msg my-session --prompt-file /path/to/prompt.txt
 
-# Backward compatible (still works)
-agm session send my-session --prompt "Please review the code"
+# Current command path
+agm send msg my-session --prompt "Please review the code"
 ```
 
-**Multi-recipient (2.5x faster with parallel delivery):**
+**Multi-recipient:**
 ```bash
 # Comma-separated list
 agm send msg session1,session2,session3 --prompt "Status check"
@@ -546,10 +547,11 @@ agm send msg --workspace oss --prompt "OSS update available"
 ```
 
 **Features:**
-- **Multi-recipient**: Send to multiple sessions simultaneously
-- **Parallel delivery**: Worker pool with max 5 concurrent deliveries (2.5x speedup)
+- **Multi-recipient**: Send to multiple sessions in one invocation
+- **Serialized delivery**: Complete each atomic readiness-and-send boundary before processing the next recipient
 - **Flexible targeting**: Comma-separated lists, glob patterns, workspace filtering
-- **Auto-interrupt**: Sends ESC to interrupt thinking before sending prompt
+- **Harness-aware readiness**: Require the registered harness process and its current composer before sending
+- **Exact-pane input**: Deliver to the pane that passed readiness while holding one tmux mutation boundary
 - **Literal mode**: Uses tmux `-l` flag to prevent special character interpretation
 - **Per-recipient error isolation**: One failure doesn't block others
 - **Color-coded reporting**: Success/failure status for each recipient

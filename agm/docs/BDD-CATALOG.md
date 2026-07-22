@@ -222,10 +222,47 @@ creation, and terminal state detection.
 - A newer tail-owned initial composer remains ready after stale post-turn
   footer history from a prior Codex process.
 - A Codex trust prompt is queued rather than treated as a sendable prompt.
-- The top-level new command routes in-tmux, non-detached Codex creation into
-  the current pane, validates credentials and the executable, and queues the
-  canonical launch command without waiting behind the AGM process that owns
-  the pane.
+- The top-level new command routes in-tmux, non-detached Claude, Codex,
+  OpenCode, Pi, and deprecated Gemini creation into the current pane and queues
+  canonical launch commands without an impossible wait behind the AGM process
+  that owns the pane; Codex also validates credentials and its executable,
+  Pi uses its managed canonical launch contract, while Claude's SessionStart
+  hook persists the conversation UUID after the queued launch begins.
+- Shared creation requires process and composer readiness before registration
+  or startup-prompt delivery even when a CLI or MCP surface runtime owns the
+  launch. Prompt-free current-pane Claude, Codex, OpenCode, Pi, and deprecated
+  Gemini creation explicitly defer readiness until the foreground AGM process
+  exits because each command is queued behind that process.
+- Shared tmux sends serialize exact-pane readiness with delivery under one
+  mutation boundary, and MCP creation atomically revalidates the harness and
+  composer after registration immediately before delivering its startup prompt.
+  A concurrent sender or readiness change cannot reuse the earlier proof.
+- Shared startup readiness honors its total deadline while a slow launch
+  wrapper still owns the pane, but fails promptly if an already-observed
+  harness process later stops.
+- Shared readiness rejects a retained Claude prompt followed by current
+  working output, recognizes styled Claude ghost placeholders as empty without
+  accepting unstyled human drafts, requires structural tail-owned Gemini and
+  OpenCode composers rather than generic glyphs or borders, requires AGY's bare
+  prompt to own the tail, requires Pi's latest managed state to be ready rather
+  than stale readiness followed by work, and distinguishes harness-specific
+  Node launch arguments from unrelated background Node descendants. Permission,
+  onboarding, model-upgrade, and survey prompts block only while their UI owns
+  the tail; resolved dialogs and ordinary Allow/Deny output before a newer
+  composer do not. Liveness, styled capture, and delivery stay pinned to one
+  resolved pane ID even if session focus changes. Legacy AGY manifest names
+  normalize to canonical `agy`, and the `pi` alias normalizes to canonical
+  `pi-cli`, before shared send readiness.
+- MCP AGY's native onboarding wait remains an unverified transition; shared
+  creation still proves the live AGY process and tail-owned composer before
+  registration or prompt delivery.
+- Claude SessionStart association retries asynchronously across the detached
+  registration race for longer than the maximum launch-readiness window and
+  reports READY only after the payload UUID is persisted; the installable
+  command hook is the sole repository source for that destination.
+- Shared Gemini startup detects first-run directory trust, sends option `1`
+  plus Enter to the exact pane that displayed the dialog, and still requires a
+  later tail-owned Gemini composer before reporting readiness.
 - Active harnesses are exactly Claude Code, Codex CLI, AGY, OpenCode, and Pi.
 - Gemini CLI remains deprecated compatibility, not active parity.
 - Active harness factories use canonical names.
@@ -909,6 +946,22 @@ substrate behind every harness needs explicit contracts for preserving state,
 avoiding unsafe concurrency, detecting interactive readiness, and recovering
 from stale or wedged sessions.
 
+### AGM Capacity Platform Detection
+
+**File:** [`agm_capacity_platform.feature`](../test/bdd/features/agm_capacity_platform.feature)
+
+**Drives:** the real `agm/internal/capacity` native memory detector on the
+current Linux or macOS test host.
+
+**Key scenarios:**
+- Supported development platforms resolve native total and available memory.
+- Total memory is positive, available memory is non-negative, and available
+  memory never exceeds total memory.
+
+**Why this matters:** `agm capacity` is an operator-facing safety surface. A
+Linux-only `/proc` probe made the command unusable on macOS even though AGM's
+session lifecycle and circuit breaker support both platforms.
+
 ### Observability Package Guardrails
 
 **File:** [`observability_package_guardrails.feature`](../test/bdd/features/observability_package_guardrails.feature)
@@ -1012,6 +1065,39 @@ model-family context windows, and provider-neutral compaction defaults.
 **Why this matters:** Quota and compaction policy cannot be parity-complete when
 non-Claude harnesses return not-implemented errors or silently inherit a Claude
 summarizer model.
+
+### Pi Custom Model Context
+
+**File:** [`pi_custom_context.feature`](../test/bdd/features/pi_custom_context.feature)
+
+**Drives:** `agm/internal/pisession` provider provenance and
+`agm/internal/session` native Pi context-window selection from a bounded custom
+model catalog.
+
+**Key scenarios:**
+- A managed Pi transcript preserves the provider-qualified custom model ID.
+- AGM reports the latest native prompt footprint against the exact configured
+  custom model context window.
+- A built-in provider model outside AGM's static window table still honors
+  Pi's topmost user override.
+- A provider added after AGM's audited Pi release still honors an override for
+  the exact provider-qualified route recorded in native history.
+- An OpenRouter route with a nested vendor-qualified model ID retains its own
+  route-specific native context window rather than a direct-provider default.
+- A custom model ID remains opaque when it begins with its own provider name;
+  AGM does not collapse the repeated provider segment during qualification.
+- An explicit null custom context window is rejected instead of receiving the
+  default reserved for an omitted field.
+- An integral exponent-spelled context window resolves to the same exact token
+  count that Pi uses, without accepting nearby fractional values.
+- Provider-less legacy history rejects two matching providers even when their
+  declared windows agree, rather than guessing a route from equal values.
+- Credential command strings in Pi's model catalog remain inert data.
+
+**Why this matters:** Custom providers are a supported Pi route. Using a static
+fallback for their configured windows makes AGM's percentage disagree with Pi,
+while evaluating unrelated credential configuration would cross the harness
+permission boundary.
 
 ### Shared Runtime Policy Package Guardrails
 

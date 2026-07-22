@@ -29,7 +29,7 @@ import (
 )
 
 var resolvedSessionPermissionPolicy *manifest.PermissionPolicy
-var sendPromptLiteralForHarness = tmux.SendPromptLiteralForHarness
+var checkExpectedHarnessInputAndSend = tmux.CheckExpectedHarnessInputAndSend
 
 type cliCreateSessionRuntime struct {
 	launch               func(context.Context, ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error)
@@ -67,7 +67,17 @@ func newCLICreateSessionRuntime(sessionName string, existed, trustPreConfigured 
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			return sendPromptLiteralForHarness(input.SessionName, input.Prompt, false, "agy")
+			readiness, err := checkExpectedHarnessInputAndSend(ctx, input.SessionName, "agy", input.Prompt, tmux.InputDeliveryOptions{})
+			if err != nil {
+				return fmt.Errorf("revalidate CLI AGY identity bootstrap prompt: %w", err)
+			}
+			if !readiness.Ready {
+				return fmt.Errorf("revalidate CLI AGY identity bootstrap prompt: harness input is %s", readiness.State)
+			}
+			if readiness.TargetPane == "" {
+				return fmt.Errorf("revalidate CLI AGY identity bootstrap prompt: harness returned no verified pane")
+			}
+			return nil
 		},
 		complete: func(ctx context.Context, completion ops.CreateSessionCompletion) error {
 			return completeCLICreateSession(ctx, sessionName, completion)

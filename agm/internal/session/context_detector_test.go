@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ func floatEqual(a, b float64) bool {
 }
 
 func TestDetectContextFromManifestOrLogReadsExactPiTranscript(t *testing.T) {
+	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
 	dir := t.TempDir()
 	path := filepath.Join(dir, "pi.jsonl")
 	content := `{"type":"session","id":"pi-context","cwd":"/work"}` + "\n" +
@@ -43,16 +45,267 @@ func TestDetectContextFromManifestOrLogReadsExactPiTranscript(t *testing.T) {
 	}
 }
 
+func TestDetectContextFromManifestOrLogUsesTrustedPiCustomCatalog(t *testing.T) {
+	catalogDir := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", catalogDir)
+	marker := filepath.Join(t.TempDir(), "credential-command-ran")
+	catalog := `{"providers":{"ollama":{"baseUrl":"http://localhost:11434/v1","apiKey":"!touch ` + marker + `","models":[{"id":"qwen2.5-coder:7b","contextWindow":8192}]}}}`
+	if err := os.WriteFile(filepath.Join(catalogDir, "models.json"), []byte(catalog), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pi.jsonl")
+	content := `{"type":"session","id":"pi-custom-context","cwd":"/work"}` + "\n" +
+		`{"type":"message","timestamp":"2026-07-22T10:11:52Z","message":{"role":"assistant","provider":"ollama","model":"qwen2.5-coder:7b","usage":{"input":3539,"output":4,"cacheRead":23}}}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	usage, err := DetectContextFromManifestOrLog(&manifest.Manifest{Pi: &manifest.Pi{
+		SessionID: "pi-custom-context", SessionDir: dir, TranscriptPath: path,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.ModelID != "ollama/qwen2.5-coder:7b" || usage.TotalTokens != 8192 || usage.UsedTokens != 3562 {
+		t.Fatalf("custom Pi context usage = %#v", usage)
+	}
+	if !floatEqual(usage.PercentageUsed, float64(3562)/8192*100) {
+		t.Fatalf("custom Pi context percentage = %f", usage.PercentageUsed)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("models.json apiKey command was evaluated: %v", err)
+	}
+}
+
+func TestPiConfiguredModelContextWindowTrustBoundaries(t *testing.T) {
+	tests := []struct {
+		name    string
+		model   string
+		prepare func(*testing.T, string)
+		want    int
+	}{
+		{
+			name: "missing catalog retains conservative fallback", model: "ollama/qwen2.5-coder:7b", want: 200000,
+			prepare: func(_ *testing.T, _ string) {},
+		},
+		{
+			name: "custom model uses documented Pi default", model: "ollama/qwen2.5-coder:7b", want: 128000,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"ollama":{"models":[{"id":"qwen2.5-coder:7b"}]}}}`)
+			},
+		},
+		{
+			name: "integral decimal window matches Pi JSON semantics", model: "ollama/qwen2.5-coder:7b", want: 8192,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"ollama":{"models":[{"id":"qwen2.5-coder:7b","contextWindow":8192.0}]}}}`)
+			},
+		},
+		{
+			name: "integral exponent window matches Pi JSON semantics", model: "ollama/qwen2.5-coder:7b", want: 8192,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"ollama":{"models":[{"id":"qwen2.5-coder:7b","contextWindow":8.192e3}]}}}`)
+			},
+		},
+		{
+			name: "fractional window remains invalid without float rounding", model: "ollama/qwen2.5-coder:7b", want: 200000,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"ollama":{"models":[{"id":"qwen2.5-coder:7b","contextWindow":8192.000000000000001}]}}}`)
+			},
+		},
+		{
+			name: "provider model override wins", model: "openai/gpt-5.4", want: 4096,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"openai":{"modelOverrides":{"gpt-5.4":{"contextWindow":4096}}}}}`)
+			},
+		},
+		{
+			name: "integral exponent override matches Pi JSON semantics", model: "openai/gpt-5.4", want: 4096,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"openai":{"modelOverrides":{"gpt-5.4":{"contextWindow":4.096e3}}}}}`)
+			},
+		},
+		{
+			name: "recorded provider override does not depend on static model table", model: "openai/gpt-4.1", want: 4096,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"openai":{"modelOverrides":{"gpt-4.1":{"contextWindow":4096}}}}}`)
+			},
+		},
+		{
+			name: "recorded future provider override does not depend on frozen provider registry", model: "future-provider/future-model", want: 16384,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"future-provider":{"modelOverrides":{"future-model":{"contextWindow":16384}}}}}`)
+			},
+		},
+		{
+			name: "unqualified known route retains its override", model: "gpt-5.4", want: 4096,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"openai":{"modelOverrides":{"gpt-5.4":{"contextWindow":4096}}}}}`)
+			},
+		},
+		{
+			name: "non-context override preserves custom model window", model: "ollama/qwen2.5-coder:7b", want: 8192,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"ollama":{"models":[{"id":"qwen2.5-coder:7b","contextWindow":8192}],"modelOverrides":{"qwen2.5-coder:7b":{}}}}}`)
+			},
+		},
+		{
+			name: "exact recorded custom route honors explicit override", model: "ollama/qwen2.5-coder:7b", want: 4096,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"ollama":{"modelOverrides":{"qwen2.5-coder:7b":{"contextWindow":4096}}}}}`)
+			},
+		},
+		{
+			name: "unqualified orphan override remains conservative", model: "qwen2.5-coder:7b", want: 200000,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"ollama":{"modelOverrides":{"qwen2.5-coder:7b":{"contextWindow":4096}}}}}`)
+			},
+		},
+		{
+			name: "last duplicate custom model wins like Pi", model: "ollama/qwen2.5-coder:7b", want: 16384,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"ollama":{"models":[{"id":"qwen2.5-coder:7b","contextWindow":8192},{"id":"qwen2.5-coder:7b","contextWindow":16384}]}}}`)
+			},
+		},
+		{
+			name: "ambiguous unqualified model falls back", model: "shared-model", want: 200000,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"one":{"models":[{"id":"shared-model","contextWindow":8192}]},"two":{"models":[{"id":"shared-model","contextWindow":16384}]}}}`)
+			},
+		},
+		{
+			name: "equal duplicate unqualified models remain ambiguous", model: "shared-model", want: 200000,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"one":{"models":[{"id":"shared-model","contextWindow":8192}]},"two":{"models":[{"id":"shared-model","contextWindow":8192}]}}}`)
+			},
+		},
+		{
+			name: "invalid duplicate unqualified model poisons the match", model: "shared-model", want: 200000,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"one":{"models":[{"id":"shared-model","contextWindow":8192}]},"two":{"models":[{"id":"shared-model","contextWindow":null}]}}}`)
+			},
+		},
+		{
+			name: "invalid explicit window falls back", model: "ollama/qwen2.5-coder:7b", want: 200000,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"ollama":{"models":[{"id":"qwen2.5-coder:7b","contextWindow":16777217}]}}}`)
+			},
+		},
+		{
+			name: "explicit null window falls back", model: "ollama/qwen2.5-coder:7b", want: 200000,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"ollama":{"models":[{"id":"qwen2.5-coder:7b","contextWindow":null}]}}}`)
+			},
+		},
+		{
+			name: "explicit null override falls back", model: "openai/gpt-5.4", want: 272000,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"openai":{"modelOverrides":{"gpt-5.4":{"contextWindow":null}}}}}`)
+			},
+		},
+		{
+			name: "malformed catalog falls back", model: "ollama/qwen2.5-coder:7b", want: 200000,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":`)
+			},
+		},
+		{
+			name: "symlinked catalog falls back", model: "ollama/qwen2.5-coder:7b", want: 200000,
+			prepare: func(t *testing.T, dir string) {
+				target := filepath.Join(t.TempDir(), "models.json")
+				if err := os.WriteFile(target, []byte(`{"providers":{"ollama":{"models":[{"id":"qwen2.5-coder:7b","contextWindow":8192}]}}}`), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(target, filepath.Join(dir, "models.json")); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "group-writable catalog falls back", model: "ollama/qwen2.5-coder:7b", want: 200000,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"ollama":{"models":[{"id":"qwen2.5-coder:7b","contextWindow":8192}]}}}`)
+				if err := os.Chmod(filepath.Join(dir, "models.json"), 0o620); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "oversized catalog falls back", model: "ollama/qwen2.5-coder:7b", want: 200000,
+			prepare: func(t *testing.T, dir string) {
+				if err := os.WriteFile(filepath.Join(dir, "models.json"), make([]byte, piModelCatalogMaxBytes+1), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "excessive model count falls back", model: "ollama/qwen2.5-coder:7b", want: 200000,
+			prepare: func(t *testing.T, dir string) {
+				models := make([]piModelCatalogModel, piModelCatalogMaxModels+1)
+				for index := range models {
+					models[index].ID = fmt.Sprintf("model-%d", index)
+				}
+				models[0].ID = "qwen2.5-coder:7b"
+				data, err := json.Marshal(piModelCatalog{Providers: map[string]piModelCatalogProvider{
+					"ollama": {Models: models},
+				}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, "models.json"), data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("PI_CODING_AGENT_DIR", dir)
+			test.prepare(t, dir)
+			if got := piModelContextWindow(test.model); got != test.want {
+				t.Fatalf("piModelContextWindow(%q) = %d, want %d", test.model, got, test.want)
+			}
+		})
+	}
+}
+
+func writePiModelCatalogFixture(t *testing.T, dir, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, "models.json"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPiModelContextWindowMatchesNativeCatalog(t *testing.T) {
+	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
 	tests := map[string]int{
 		"anthropic/claude-fable-5":                     1000000,
 		"anthropic/claude-opus-4-8":                    1000000,
 		"openai/gpt-5.6-terra":                         272000,
 		"openai/gpt-5.4":                               272000,
+		"openrouter/anthropic/claude-fable-5":          1000000,
+		"openrouter/openai/gpt-5.3-codex":              400000,
+		"openrouter/openai/gpt-5.4-mini":               400000,
+		"openrouter/openai/gpt-5.4-nano":               400000,
+		"openrouter/openai/gpt-5.4":                    1050000,
+		"openrouter/openai/gpt-5.5":                    1050000,
+		"openrouter/openai/gpt-5.6-sol":                1050000,
+		"openrouter/openai/gpt-5.6-terra":              1050000,
+		"openrouter/openai/gpt-5.6-luna":               1050000,
+		"openrouter/openai/gpt-5.4-pro":                1050000,
+		"openrouter/openai/gpt-5.5-pro":                1050000,
+		"openrouter/openai/gpt-5.3-chat-latest":        200000,
+		"anthropic/openai/gpt-5.4":                     200000,
+		"OPENAI/GPT-5.4":                               200000,
 		"openai/gpt-5.4-mini":                          400000,
 		"openai/gpt-5.4-pro":                           1050000,
 		"openai/gpt-5.3-codex":                         400000,
 		"google/gemini-3.5-flash":                      1048576,
+		"openrouter/google/gemini-3.5-flash":           1048576,
+		"openrouter/google/gemini-3.1-flash-lite":      1048576,
 		"openrouter/z-ai/glm-5.2":                      1048576,
 		"openrouter/deepseek/deepseek-v4-pro":          1048576,
 		"openrouter/nvidia/nemotron-3-ultra-550b-a55b": 512288,
