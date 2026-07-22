@@ -38,6 +38,8 @@ an isolated branch without writes traversing host-repository symlinks.
 
 **BWRAP-14** When a request names a working directory inside a lower directory, the provider shall materialize that lower directory instead of a conflicting target repository and return `merged/<relative-directory>` as the harness working directory; if the matched lower directory is not a Git repository, the provider shall reject creation instead of substituting another repository or exposing the host directory through symlinks.
 
+**BWRAP-15** When private Git worktree creation fails after a repository is resolved, the system shall return a structured mount error that preserves the underlying Git failure.
+
 ## BDD Traceability
 
 - `agm/test/bdd/features/sandbox_provider_guardrails.feature` enforces that this

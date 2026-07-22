@@ -149,22 +149,11 @@ func (p *Provider) Create(ctx context.Context, req sandbox.SandboxRequest) (*san
 }
 
 func (p *Provider) createPrivateWorktree(lowerDirs []string, sessionID, mergedDir, targetRepo string) (string, error) {
-	repoPath, created := p.tryCreateWorktree(lowerDirs, sessionID, mergedDir, targetRepo)
-	if !created {
-		return "", sandbox.NewError(sandbox.ErrCodeMountFailed,
-			"bubblewrap requires a private Git worktree; refusing host-symlink fallback")
-	}
-	return repoPath, nil
-}
-
-// tryCreateWorktree attempts to create a git worktree in mergedDir from the
-// first git repo found in lowerDirs. Returns the repo path and true on success.
-// If targetRepo is set, it is used directly instead of scanning lowerDirs.
-func (p *Provider) tryCreateWorktree(lowerDirs []string, sessionID, mergedDir, targetRepo string) (string, bool) {
 	var repoPath string
 	if targetRepo != "" {
 		if !p.isGitRepo(targetRepo) {
-			return "", false
+			return "", sandbox.NewError(sandbox.ErrCodeMountFailed,
+				"bubblewrap requires a private Git worktree; refusing host-symlink fallback")
 		}
 		repoPath = targetRepo
 		fmt.Fprintf(os.Stderr, "bubblewrap: using explicit target repo: %s\n", repoPath)
@@ -173,14 +162,15 @@ func (p *Provider) tryCreateWorktree(lowerDirs []string, sessionID, mergedDir, t
 		repoPath = p.findGitRepo(lowerDirs)
 	}
 	if repoPath == "" {
-		return "", false
+		return "", sandbox.NewError(sandbox.ErrCodeMountFailed,
+			"bubblewrap requires a private Git worktree; refusing host-symlink fallback")
 	}
 
 	// The mergedDir already exists (created by createDirectories). Git worktree
 	// add requires the target to not exist, so remove it first.
 	if err := os.RemoveAll(mergedDir); err != nil {
-		fmt.Fprintf(os.Stderr, "bubblewrap: failed to remove mergedDir for worktree: %v\n", err)
-		return "", false
+		return "", sandbox.WrapError(sandbox.ErrCodeMountFailed,
+			"bubblewrap failed to prepare private Git worktree", err)
 	}
 
 	// Create branch name from session ID (sanitized for git)
@@ -190,14 +180,14 @@ func (p *Provider) tryCreateWorktree(lowerDirs []string, sessionID, mergedDir, t
 		repoPath, mergedDir, branchName)
 
 	if err := p.addWorktree(repoPath, mergedDir, branchName); err != nil {
-		fmt.Fprintf(os.Stderr, "bubblewrap: git worktree add failed: %v\n", err)
 		// Re-create mergedDir so the caller can clean the standard directory layout.
 		_ = os.MkdirAll(mergedDir, 0755)
-		return "", false
+		return "", sandbox.WrapError(sandbox.ErrCodeMountFailed,
+			"bubblewrap failed to create private Git worktree", err)
 	}
 
 	fmt.Fprintf(os.Stderr, "bubblewrap: git worktree created successfully\n")
-	return repoPath, true
+	return repoPath, nil
 }
 
 // findGitRepo finds the first git repository among the lower directories.

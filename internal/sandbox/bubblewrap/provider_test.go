@@ -155,6 +155,27 @@ func TestBubblewrapRejectsMatchedNonGitLowerDir(t *testing.T) {
 	assert.ErrorIs(t, statErr, os.ErrNotExist, "failed isolation must not expose either host repository")
 }
 
+func TestBubblewrapPreservesGitWorktreeCreationFailure(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "repo")
+	activeWorktree := filepath.Join(base, "active")
+	mergedDir := filepath.Join(base, "merged")
+	runBubblewrapGit(t, "", "init", "-q", "-b", "main", repo)
+	runBubblewrapGit(t, repo, "config", "user.name", "Bubblewrap Test")
+	runBubblewrapGit(t, repo, "config", "user.email", "bubblewrap@example.invalid")
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("fixture\n"), 0o600))
+	runBubblewrapGit(t, repo, "add", "README.md")
+	runBubblewrapGit(t, repo, "commit", "-q", "-m", "initial")
+	runBubblewrapGit(t, repo, "worktree", "add", "-q", "-b", "agm/worktree-add-failure", activeWorktree)
+	require.NoError(t, os.MkdirAll(mergedDir, 0o755))
+
+	_, err := NewProvider().createPrivateWorktree([]string{repo}, "worktree-add-failure", mergedDir, repo)
+	require.Error(t, err)
+	assert.Equal(t, sandbox.ErrCodeMountFailed, errCode(t, err))
+	assert.Contains(t, err.Error(), "git worktree add failed")
+	assert.Contains(t, err.Error(), "delete failed")
+}
+
 func TestProvider_DestroyPreservesLockedWorktreeForRetry(t *testing.T) {
 	repo, mergedDir, upperDir, workDir := newLockedBubblewrapWorktree(t)
 	p := NewProvider()

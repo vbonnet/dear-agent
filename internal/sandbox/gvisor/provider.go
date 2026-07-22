@@ -236,42 +236,32 @@ func (p *Provider) testRunsc(ctx context.Context) error {
 	return nil
 }
 
-// tryCreateWorktree attempts to create a git worktree in mergedDir from the
-// first git repo found in lowerDirs. Returns the repo path and true on
-// success. If targetRepo is set, it is used directly instead of scanning.
-func (p *Provider) tryCreateWorktree(lowerDirs []string, sessionID, mergedDir, targetRepo string) (string, bool) {
+func (p *Provider) createPrivateWorktree(lowerDirs []string, sessionID, mergedDir, targetRepo string) (string, error) {
 	var repoPath string
 	if targetRepo != "" {
 		if !p.isGitRepo(targetRepo) {
-			return "", false
+			return "", sandbox.NewError(sandbox.ErrCodeMountFailed,
+				"gvisor requires a private Git worktree; refusing host-symlink fallback")
 		}
 		repoPath = targetRepo
 	} else {
 		repoPath = p.findGitRepo(lowerDirs)
 	}
 	if repoPath == "" {
-		return "", false
+		return "", sandbox.NewError(sandbox.ErrCodeMountFailed,
+			"gvisor requires a private Git worktree; refusing host-symlink fallback")
 	}
 
 	if err := os.RemoveAll(mergedDir); err != nil {
-		fmt.Fprintf(os.Stderr, "gvisor: failed to remove mergedDir for worktree: %v\n", err)
-		return "", false
+		return "", sandbox.WrapError(sandbox.ErrCodeMountFailed,
+			"gvisor failed to prepare private Git worktree", err)
 	}
 
 	branchName := "agm/" + sessionID
 	if err := p.addWorktree(repoPath, mergedDir, branchName); err != nil {
-		fmt.Fprintf(os.Stderr, "gvisor: git worktree add failed: %v\n", err)
 		_ = os.MkdirAll(mergedDir, 0755)
-		return "", false
-	}
-	return repoPath, true
-}
-
-func (p *Provider) createPrivateWorktree(lowerDirs []string, sessionID, mergedDir, targetRepo string) (string, error) {
-	repoPath, created := p.tryCreateWorktree(lowerDirs, sessionID, mergedDir, targetRepo)
-	if !created {
-		return "", sandbox.NewError(sandbox.ErrCodeMountFailed,
-			"gvisor requires a private Git worktree; refusing host-symlink fallback")
+		return "", sandbox.WrapError(sandbox.ErrCodeMountFailed,
+			"gvisor failed to create private Git worktree", err)
 	}
 	return repoPath, nil
 }

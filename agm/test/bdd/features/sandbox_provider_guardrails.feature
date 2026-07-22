@@ -30,6 +30,7 @@ Feature: Sandbox provider guardrails
     When AGM runs the sandbox working directory regressions
     Then sandbox providers should preserve the requested project directory
     And flat Linux providers should reject host-symlink fallbacks
+    And flat Linux providers should preserve private worktree failure diagnostics
     And APFS should detach linked worktree Git metadata on macOS
     And AGM should route the mapped directory through the shared harness lifecycle
 

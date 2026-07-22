@@ -168,6 +168,37 @@ func TestGVisorRejectsMatchedNonGitLowerDir(t *testing.T) {
 	}
 }
 
+func TestGVisorPreservesGitWorktreeCreationFailure(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "repo")
+	activeWorktree := filepath.Join(base, "active")
+	mergedDir := filepath.Join(base, "merged")
+	runGVisorGit(t, "", "init", "-q", "-b", "main", repo)
+	runGVisorGit(t, repo, "config", "user.name", "gVisor Test")
+	runGVisorGit(t, repo, "config", "user.email", "gvisor@example.invalid")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("fixture\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGVisorGit(t, repo, "add", "README.md")
+	runGVisorGit(t, repo, "commit", "-q", "-m", "initial")
+	runGVisorGit(t, repo, "worktree", "add", "-q", "-b", "agm/worktree-add-failure", activeWorktree)
+	if err := os.MkdirAll(mergedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := NewProvider().createPrivateWorktree([]string{repo}, "worktree-add-failure", mergedDir, repo)
+	if err == nil {
+		t.Fatal("createPrivateWorktree() error = nil, want Git worktree failure")
+	}
+	var sbErr *sandbox.Error
+	if !errors.As(err, &sbErr) || sbErr.Code != sandbox.ErrCodeMountFailed {
+		t.Fatalf("error = %v, want structured %v error", err, sandbox.ErrCodeMountFailed)
+	}
+	if !strings.Contains(err.Error(), "git worktree add failed") || !strings.Contains(err.Error(), "delete failed") {
+		t.Fatalf("error = %v, want preserved Git worktree failure", err)
+	}
+}
+
 func TestProvider_Destroy_Idempotent(t *testing.T) {
 	p := NewProvider()
 	if err := p.Destroy(context.Background(), "does-not-exist"); err != nil {
