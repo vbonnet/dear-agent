@@ -361,6 +361,11 @@ func TestHasQueuedInput_DetectsPastedText(t *testing.T) {
 			expected: true,
 		},
 		{
+			name:     "Codex pasted-content chip",
+			input:    "› [Pasted Content 2172 chars]",
+			expected: true,
+		},
+		{
 			name:     "clean pane output no paste",
 			input:    "❯ hello world\nsome response text",
 			expected: false,

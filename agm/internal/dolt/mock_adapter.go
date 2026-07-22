@@ -274,6 +274,10 @@ func (m *MockAdapter) copyManifest(src *manifest.Manifest) *manifest.Manifest {
 			TranscriptPath: src.Codex.TranscriptPath,
 		}
 	}
+	if src.OpenAI != nil {
+		openAI := *src.OpenAI
+		dst.OpenAI = &openAI
+	}
 	if src.Agy != nil {
 		dst.Agy = &manifest.Agy{
 			ConversationID: src.Agy.ConversationID,

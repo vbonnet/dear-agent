@@ -19,9 +19,42 @@ harness plus its tail-owning composer; an MCP-native onboarding wait is not a
 substitute for that proof. Message sends resolve one active tmux pane and pin
 process inspection, styled capture, and delivery to that pane ID, so another
 pane or a later focus change cannot validate or redirect input.
-`agm send msg` uses that shared operation for both single-recipient and fan-out
-delivery; it does not retain a weaker CLI-only tmux path or deliver to
-unregistered sessions whose harness identity cannot be proven.
+`agm send msg` uses that shared operation for every CLI recipient in both
+single-recipient and fan-out delivery; it does not retain a weaker CLI-only
+tmux path or deliver to unregistered sessions whose harness identity cannot be
+proven. Pure API recipients intentionally have no tmux pane: single-recipient
+preflight resolves the registered delivery surface before any tmux probe, and
+single-recipient plus fan-out sends reconstruct the adapter from the session's
+persisted model, storage location, endpoint, and Azure settings. Credentials
+remain runtime-only. The adapter's session status is the final common delivery
+boundary, delivering only while it reports active or idle and failing closed
+before any pending artifact when status is unavailable, suspended, or
+terminated. Successful API delivery does not run tmux state resolution or
+rewrite the manifest to `OFFLINE`. Under a provider-appropriate stable session-ID lock, API delivery
+reloads lifecycle before adapter construction and shares that boundary with
+archive: an in-flight completed turn commits before archive, or delivery sees
+the reaping or archived lifecycle before paid provider work. The lock wait and provider
+completion honor request cancellation, and the provider call has a finite
+ceiling. Each sequential fan-out recipient receives a fresh outer deadline;
+stable-lock acquisition, reconstruction, and readiness use an independently
+bounded preflight context so the completed-turn phase starts with the adapter's
+complete provider budget. Reconstruction loads only the requested session's
+authoritative metadata and never scans unrelated session directories while the
+lifecycle lock is held. Direct adapter callers use a context-aware store-scoped session lock
+and the same provider ceiling. Provider failures, cancellation, and timeouts
+leave no provisional user message in durable history.
+
+Clearing OpenAI-compatible history atomically empties only the message stream
+under the store lock. It reloads current on-disk metadata first, preserving the
+model, title, working directory, and non-secret runtime configuration used by
+later process reconstruction even when another process updated those fields.
+Completed-turn commits reload the same metadata before updating history counts,
+and every title, directory, or runtime-configuration writer participates in the
+same lock and applies only its requested field.
+Valid JSONL message records are reloaded without the standard scanner token
+limit, so a long prompt or response cannot make the next append, read, or clear
+transaction fail. Import converts a parsed conversation once and persists the
+complete batch with one history transaction; an empty import performs none.
 
 ## Error Code Catalog
 

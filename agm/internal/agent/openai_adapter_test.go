@@ -6,12 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent/openai"
-	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 // TestOpenAIAdapterImplementsAgentInterface verifies OpenAIAdapter implements Agent interface.
@@ -21,6 +22,32 @@ func TestOpenAIAdapterImplementsAgentInterface(t *testing.T) {
 
 	// Verify adapter implements Agent interface
 	var _ = adapter
+}
+
+func TestOpenAIExecutionModelDocumentsCompatibilityOnlyControlPlane(t *testing.T) {
+	document, err := os.ReadFile(filepath.Join("openai", "EXECUTION-MODEL.md"))
+	if err != nil {
+		t.Fatalf("read OpenAI execution model: %v", err)
+	}
+	contents := string(document)
+	for _, unsupported := range []string{
+		"agm session new openai",
+		"agm session resume {session-id}",
+	} {
+		if strings.Contains(contents, unsupported) {
+			t.Fatalf("execution model advertises unsupported CLI flow %q", unsupported)
+		}
+	}
+	for _, required := range []string{
+		"There is no public AGM CLI creation or resume path",
+		"already-registered legacy AGM manifest",
+		"Calling `OpenAIAdapter.CreateSession` directly",
+		"new interactive OpenAI sessions use `codex-cli`",
+	} {
+		if !strings.Contains(contents, required) {
+			t.Errorf("execution model does not document compatibility boundary %q", required)
+		}
+	}
 }
 
 // TestNewOpenAIAdapter tests OpenAI adapter creation
@@ -128,6 +155,134 @@ func TestNewOpenAIAdapter(t *testing.T) {
 				tt.checkFunc(t, adapter)
 			}
 		})
+	}
+}
+
+func TestNewOpenAIAdapterForSessionRestoresPersistedRuntimeConfig(t *testing.T) {
+	sessionsDir := t.TempDir()
+	creatorAgent, err := NewOpenAIAdapter(t.Context(), &OpenAIConfig{
+		APIKey:          "creation-secret",
+		Model:           "gpt-4o",
+		Temperature:     1.25,
+		MaxTokens:       4321,
+		SessionsDir:     sessionsDir,
+		BaseURL:         "https://azure.example.test",
+		IsAzure:         true,
+		AzureAPIVersion: "2025-01-01-preview",
+	})
+	if err != nil {
+		t.Fatalf("create configured adapter: %v", err)
+	}
+	sessionID, err := creatorAgent.CreateSession(SessionContext{Name: "persisted-runtime"})
+	if err != nil {
+		t.Fatalf("create configured session: %v", err)
+	}
+
+	metadata, err := os.ReadFile(filepath.Join(sessionsDir, string(sessionID), "metadata.json"))
+	if err != nil {
+		t.Fatalf("read session metadata: %v", err)
+	}
+	if strings.Contains(string(metadata), "creation-secret") {
+		t.Fatal("session metadata persisted an API credential")
+	}
+
+	restoredAgent, err := NewOpenAIAdapterForSession(t.Context(), sessionID, &OpenAIConfig{
+		APIKey:          "rotated-runtime-secret",
+		Model:           "gpt-3.5-turbo",
+		Temperature:     0.2,
+		MaxTokens:       12,
+		SessionsDir:     sessionsDir,
+		BaseURL:         "https://wrong.example.test",
+		AzureAPIVersion: "wrong-version",
+	})
+	if err != nil {
+		t.Fatalf("restore adapter from session: %v", err)
+	}
+	restored, ok := restoredAgent.(*OpenAIAdapter)
+	if !ok {
+		t.Fatalf("restored adapter type = %T, want *OpenAIAdapter", restoredAgent)
+	}
+	if got := restored.Version(); got != "gpt-4o" {
+		t.Fatalf("restored model = %q, want persisted gpt-4o", got)
+	}
+	if got := restored.runtimeConfig; got != (openai.SessionRuntimeConfig{
+		Temperature:     1.25,
+		MaxTokens:       4321,
+		BaseURL:         "https://azure.example.test",
+		IsAzure:         true,
+		AzureAPIVersion: "2025-01-01-preview",
+	}) {
+		t.Fatalf("restored runtime config = %#v", got)
+	}
+	if !restored.client.IsAzure() || restored.client.Model() != "gpt-4o" {
+		t.Fatalf("restored client azure=%t model=%q", restored.client.IsAzure(), restored.client.Model())
+	}
+}
+
+func TestNewOpenAIAdapterForSessionDoesNotScanUnrelatedSessions(t *testing.T) {
+	sessionsDir := t.TempDir()
+	creator, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create session manager: %v", err)
+	}
+	const sessionID = SessionID("target-session")
+	if _, err := creator.CreateSession(string(sessionID), "gpt-4", t.TempDir()); err != nil {
+		t.Fatalf("create target session: %v", err)
+	}
+
+	unrelatedDir := filepath.Join(sessionsDir, "unrelated-corrupt-session")
+	if err := os.MkdirAll(unrelatedDir, 0o700); err != nil {
+		t.Fatalf("create unrelated session directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(unrelatedDir, "metadata.json"), []byte("{"), 0o600); err != nil {
+		t.Fatalf("write unrelated corrupt metadata: %v", err)
+	}
+	if _, err := openai.NewSessionManager(sessionsDir); err == nil {
+		t.Fatal("full session inventory unexpectedly accepted corrupt unrelated metadata")
+	}
+
+	restoredAgent, err := NewOpenAIAdapterForSession(t.Context(), sessionID, &OpenAIConfig{
+		APIKey:      "runtime-secret",
+		SessionsDir: sessionsDir,
+	})
+	if err != nil {
+		t.Fatalf("targeted reconstruction inspected unrelated session: %v", err)
+	}
+	restored := restoredAgent.(*OpenAIAdapter)
+	if ids := restored.sessionManager.ListSessions(); len(ids) != 1 || ids[0] != string(sessionID) {
+		t.Fatalf("targeted manager sessions = %v, want only %q", ids, sessionID)
+	}
+}
+
+func TestNewOpenAIAdapterForLegacySessionUsesManifestFallback(t *testing.T) {
+	sessionsDir := t.TempDir()
+	sessionManager, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create legacy session manager: %v", err)
+	}
+	if _, err := sessionManager.CreateSession("legacy-session", "gpt-4.1", "/work"); err != nil {
+		t.Fatalf("create legacy session: %v", err)
+	}
+
+	restoredAgent, err := NewOpenAIAdapterForSession(t.Context(), "legacy-session", &OpenAIConfig{
+		APIKey:          "runtime-secret",
+		Model:           "gpt-3.5-turbo",
+		Temperature:     0.9,
+		MaxTokens:       987,
+		SessionsDir:     sessionsDir,
+		BaseURL:         "https://legacy.example.test",
+		IsAzure:         true,
+		AzureAPIVersion: "2024-06-01",
+	})
+	if err != nil {
+		t.Fatalf("restore legacy adapter: %v", err)
+	}
+	restored := restoredAgent.(*OpenAIAdapter)
+	if restored.Version() != "gpt-4.1" {
+		t.Fatalf("legacy restored model = %q, want session model gpt-4.1", restored.Version())
+	}
+	if got := restored.runtimeConfig; got.BaseURL != "https://legacy.example.test" || !got.IsAzure || got.AzureAPIVersion != "2024-06-01" || got.Temperature != 0.9 || got.MaxTokens != 987 {
+		t.Fatalf("legacy fallback runtime config = %#v", got)
 	}
 }
 
@@ -320,67 +475,38 @@ func TestGetSessionStatus(t *testing.T) {
 	}
 }
 
-// TestGetSessionStatusCodexIdle verifies that, for a codex-cli-style session
-// whose title is a live tmux pane showing the Codex composer, GetSessionStatus
-// refines Active into Idle. The session title is used as the tmux session name
-// (set from SessionContext.Name at create time).
-func TestGetSessionStatusCodexIdle(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux not available")
-	}
-
+// TestGetSessionStatusIsTmuxIndependent proves that the retired API adapter
+// does not probe a same-named tmux pane. codex-cli status belongs exclusively
+// to CodexCLIAdapter.
+func TestGetSessionStatusIsTmuxIndependent(t *testing.T) {
 	tmpDir := t.TempDir()
 	adapter := createTestAdapter(t, tmpDir)
-
-	sessionName := "test-openai-codex-idle"
-	socketPath := tmux.GetSocketPath()
-	exec.Command("tmux", "-S", socketPath, "kill-session", "-t", sessionName).Run()
-	if err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", sessionName).Run(); err != nil {
-		t.Fatalf("failed to create tmux session: %v", err)
+	binDir := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "tmux-probed")
+	fakeTmux := filepath.Join(binDir, "tmux")
+	if err := os.WriteFile(fakeTmux, []byte("#!/bin/sh\n: > \"$TMUX_PROBE_MARKER\"\nexit 1\n"), 0o700); err != nil {
+		t.Fatalf("write fake tmux: %v", err)
 	}
-	t.Cleanup(func() {
-		exec.Command("tmux", "-S", socketPath, "kill-session", "-t", sessionName).Run()
-	})
+	t.Setenv("PATH", binDir)
+	t.Setenv("TMUX_PROBE_MARKER", marker)
 
-	// The adapter keys off the session title; set it to the tmux session name.
 	sessionID, err := adapter.CreateSession(SessionContext{
-		Name:             sessionName,
+		Name:             "same-name-as-a-pane",
 		WorkingDirectory: "/tmp",
 	})
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
 
-	// Before the composer renders, the pane has no Codex signals → Active.
 	status, err := adapter.GetSessionStatus(sessionID)
 	if err != nil {
 		t.Fatalf("failed to get session status: %v", err)
 	}
 	if status != StatusActive {
-		t.Errorf("expected %s before composer renders, got %s", StatusActive, status)
+		t.Errorf("expected %s for existing API session, got %s", StatusActive, status)
 	}
-
-	// Replace the shell with a long-lived process that renders only the complete
-	// initial Codex composer. Typing printf into a shell would leave command or
-	// prompt output after the fixture and correctly make that composer stale.
-	composerProcess := "printf '│ >_ OpenAI Codex (v0.141.0) │\\n│ model: gpt-5.5 xhigh /model to change │\\n╰──────────────────────────────╯\\n›\\n'; exec sleep 30"
-	if err := exec.Command("tmux", "-S", socketPath, "respawn-pane", "-k", "-t", sessionName, composerProcess).Run(); err != nil {
-		t.Fatalf("failed to render composer fixture: %v", err)
-	}
-
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		status, err = adapter.GetSessionStatus(sessionID)
-		if err != nil {
-			t.Fatalf("failed to get session status: %v", err)
-		}
-		if status == StatusIdle {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	if status != StatusIdle {
-		t.Errorf("expected %s once composer is visible, got %s", StatusIdle, status)
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("pure API status invoked tmux: %v", err)
 	}
 }
 
@@ -391,6 +517,40 @@ type mockOpenAIClient struct {
 	callCount        int
 	capturedMessages [][]openai.Message
 	capturedModel    string
+}
+
+type blockingOpenAIClient struct {
+	response *openai.ChatCompletionResponse
+	entered  chan<- struct{}
+	release  <-chan struct{}
+
+	mu               sync.Mutex
+	capturedMessages []openai.Message
+}
+
+func (m *blockingOpenAIClient) CreateChatCompletion(ctx context.Context, messages []openai.Message) (*openai.ChatCompletionResponse, error) {
+	m.mu.Lock()
+	m.capturedMessages = append([]openai.Message(nil), messages...)
+	m.mu.Unlock()
+	m.entered <- struct{}{}
+	if m.release != nil {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-m.release:
+		}
+	}
+	return m.response, nil
+}
+
+func (m *blockingOpenAIClient) Model() string { return "gpt-4" }
+
+func (m *blockingOpenAIClient) IsAzure() bool { return false }
+
+func (m *blockingOpenAIClient) messages() []openai.Message {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]openai.Message(nil), m.capturedMessages...)
 }
 
 func (m *mockOpenAIClient) CreateChatCompletion(ctx context.Context, messages []openai.Message) (*openai.ChatCompletionResponse, error) {
@@ -531,6 +691,13 @@ func TestSendMessage(t *testing.T) {
 				if err == nil {
 					t.Error("expected error, got nil")
 				}
+				history, historyErr := adapter.GetHistory(sessionID)
+				if historyErr != nil {
+					t.Fatalf("get history after failed completion: %v", historyErr)
+				}
+				if len(history) != 0 {
+					t.Fatalf("failed completion persisted provisional history: %#v", history)
+				}
 				return
 			}
 
@@ -553,6 +720,354 @@ func TestSendMessage(t *testing.T) {
 				t.Errorf("expected 1 API call, got %d", mockClient.callCount)
 			}
 		})
+	}
+}
+
+func TestSendMessageSerializesIndependentManagersAndCommitsCompleteTurns(t *testing.T) {
+	sessionsDir := t.TempDir()
+	creator, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create session manager: %v", err)
+	}
+	sessionID := SessionID("serialized-session")
+	if _, err := creator.CreateSession(string(sessionID), "gpt-4", t.TempDir()); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	firstManager, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("reconstruct first manager: %v", err)
+	}
+	secondManager, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("reconstruct second manager: %v", err)
+	}
+	wantRuntime := openai.SessionRuntimeConfig{
+		Temperature: 0.6,
+		MaxTokens:   777,
+		BaseURL:     "https://updated.example.test",
+	}
+	if err := creator.UpdateTitle(string(sessionID), "updated-before-send"); err != nil {
+		t.Fatalf("update title after managers loaded: %v", err)
+	}
+	if err := creator.UpdateWorkingDirectory(string(sessionID), "/updated-before-send"); err != nil {
+		t.Fatalf("update working directory after managers loaded: %v", err)
+	}
+	if err := creator.UpdateRuntimeConfig(string(sessionID), wantRuntime); err != nil {
+		t.Fatalf("update runtime config after managers loaded: %v", err)
+	}
+
+	firstEntered := make(chan struct{}, 1)
+	secondEntered := make(chan struct{}, 1)
+	releaseFirst := make(chan struct{})
+	firstClient := &blockingOpenAIClient{
+		response: &openai.ChatCompletionResponse{Content: "first response", Model: "gpt-4", FinishReason: "stop"},
+		entered:  firstEntered,
+		release:  releaseFirst,
+	}
+	secondClient := &blockingOpenAIClient{
+		response: &openai.ChatCompletionResponse{Content: "second response", Model: "gpt-4", FinishReason: "stop"},
+		entered:  secondEntered,
+	}
+	firstAdapter := newOpenAIAdapterWithClient(firstClient, firstManager)
+	secondAdapter := newOpenAIAdapterWithClient(secondClient, secondManager)
+
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- firstAdapter.SendMessage(sessionID, Message{Role: RoleUser, Content: "first request"})
+	}()
+	select {
+	case <-firstEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first completion did not start")
+	}
+
+	secondDone := make(chan error, 1)
+	go func() {
+		secondDone <- secondAdapter.SendMessage(sessionID, Message{Role: RoleUser, Content: "second request"})
+	}()
+	select {
+	case <-secondEntered:
+		close(releaseFirst)
+		t.Fatal("second completion started before the first completed turn committed")
+	case <-time.After(150 * time.Millisecond):
+	}
+	close(releaseFirst)
+
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first send: %v", err)
+	}
+	select {
+	case <-secondEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second completion did not start after the first committed")
+	}
+	if err := <-secondDone; err != nil {
+		t.Fatalf("second send: %v", err)
+	}
+
+	if got := secondClient.messages(); len(got) != 3 || got[0].Content != "first request" || got[1].Content != "first response" || got[2].Content != "second request" {
+		t.Fatalf("second completion context = %#v, want first completed turn plus second request", got)
+	}
+	reader, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("reconstruct history reader: %v", err)
+	}
+	history, err := reader.GetMessages(string(sessionID))
+	if err != nil {
+		t.Fatalf("read committed history: %v", err)
+	}
+	if len(history) != 4 {
+		t.Fatalf("committed history length = %d, want 4: %#v", len(history), history)
+	}
+	info, err := reader.GetSession(string(sessionID))
+	if err != nil {
+		t.Fatalf("read metadata after completed turns: %v", err)
+	}
+	if info.Title != "updated-before-send" || info.WorkingDirectory != "/updated-before-send" || info.RuntimeConfig == nil || *info.RuntimeConfig != wantRuntime {
+		t.Fatalf("completed turns overwrote authoritative metadata: %#v", info)
+	}
+}
+
+func TestSendMessageRejectsSessionDeletedByIndependentManagerBeforeProvider(t *testing.T) {
+	sessionsDir := t.TempDir()
+	creator, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create session manager: %v", err)
+	}
+	sessionID := SessionID("deleted-before-provider")
+	if _, err := creator.CreateSession(string(sessionID), "gpt-4", t.TempDir()); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	senderManager, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("reconstruct sender manager: %v", err)
+	}
+	deletingManager, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("reconstruct deleting manager: %v", err)
+	}
+	if err := deletingManager.DeleteSession(string(sessionID)); err != nil {
+		t.Fatalf("delete session through independent manager: %v", err)
+	}
+
+	client := &mockOpenAIClient{}
+	adapter := newOpenAIAdapterWithClient(client, senderManager)
+	err = adapter.SendMessage(sessionID, Message{Role: RoleUser, Content: "must not reach provider"})
+	if err == nil || !strings.Contains(err.Error(), "session "+string(sessionID)+" not found") {
+		t.Fatalf("send after independent deletion error = %v, want session not found", err)
+	}
+	if client.callCount != 0 {
+		t.Fatalf("send after independent deletion made %d provider calls, want 0", client.callCount)
+	}
+	status, err := adapter.GetSessionStatus(sessionID)
+	if err != nil {
+		t.Fatalf("status after independent deletion: %v", err)
+	}
+	if status != StatusTerminated {
+		t.Fatalf("status after independent deletion = %s, want %s", status, StatusTerminated)
+	}
+}
+
+func TestDeleteSessionWaitsForCompletedTurnFromIndependentManager(t *testing.T) {
+	sessionsDir := t.TempDir()
+	creator, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create session manager: %v", err)
+	}
+	sessionID := SessionID("delete-after-completed-turn")
+	if _, err := creator.CreateSession(string(sessionID), "gpt-4", t.TempDir()); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	senderManager, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("reconstruct sender manager: %v", err)
+	}
+	deletingManager, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("reconstruct deleting manager: %v", err)
+	}
+	providerEntered := make(chan struct{}, 1)
+	releaseProvider := make(chan struct{})
+	adapter := newOpenAIAdapterWithClient(&blockingOpenAIClient{
+		response: &openai.ChatCompletionResponse{Content: "committed before delete", Model: "gpt-4", FinishReason: "stop"},
+		entered:  providerEntered,
+		release:  releaseProvider,
+	}, senderManager)
+
+	sendDone := make(chan error, 1)
+	go func() {
+		sendDone <- adapter.SendMessage(sessionID, Message{Role: RoleUser, Content: "complete me"})
+	}()
+	select {
+	case <-providerEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("provider completion did not start")
+	}
+
+	deleteDone := make(chan error, 1)
+	go func() { deleteDone <- deletingManager.DeleteSession(string(sessionID)) }()
+	select {
+	case err := <-deleteDone:
+		close(releaseProvider)
+		t.Fatalf("deletion completed before in-flight turn committed: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	close(releaseProvider)
+	if err := <-sendDone; err != nil {
+		t.Fatalf("completed turn before deletion: %v", err)
+	}
+	if err := <-deleteDone; err != nil {
+		t.Fatalf("delete after completed turn: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sessionsDir, string(sessionID))); !os.IsNotExist(err) {
+		t.Fatalf("session directory remains after serialized deletion: %v", err)
+	}
+}
+
+func TestOpenAIRequestContextCancelsReconstructionAndReadinessLockWait(t *testing.T) {
+	sessionsDir := t.TempDir()
+	creator, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create session manager: %v", err)
+	}
+	sessionID := SessionID("context-aware-reload")
+	if _, err := creator.CreateSession(string(sessionID), "gpt-4", t.TempDir()); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	statusManager, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("reconstruct status manager: %v", err)
+	}
+	locker, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("reconstruct lock manager: %v", err)
+	}
+
+	holdStoreLock := func() func() {
+		entered := make(chan struct{})
+		release := make(chan struct{})
+		done := make(chan error, 1)
+		go func() {
+			done <- locker.WithSessionLock(string(sessionID), func() error {
+				close(entered)
+				<-release
+				return nil
+			})
+		}()
+		select {
+		case <-entered:
+		case <-time.After(2 * time.Second):
+			t.Fatal("store lock holder did not enter")
+		}
+		return func() {
+			close(release)
+			if err := <-done; err != nil {
+				t.Fatalf("release store lock: %v", err)
+			}
+		}
+	}
+
+	release := holdStoreLock()
+	reconstructCtx, cancelReconstruct := context.WithTimeout(t.Context(), 40*time.Millisecond)
+	_, err = NewOpenAIAdapterForSession(reconstructCtx, sessionID, &OpenAIConfig{
+		APIKey:      "test-key",
+		SessionsDir: sessionsDir,
+	})
+	cancelReconstruct()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		release()
+		t.Fatalf("canceled adapter reconstruction error = %v, want deadline exceeded", err)
+	}
+	release()
+
+	statusAdapter := newOpenAIAdapterWithClient(&mockOpenAIClient{}, statusManager)
+	release = holdStoreLock()
+	statusCtx, cancelStatus := context.WithTimeout(t.Context(), 40*time.Millisecond)
+	status, err := statusAdapter.GetSessionStatusContext(statusCtx, sessionID)
+	cancelStatus()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		release()
+		t.Fatalf("canceled readiness error = %v, want deadline exceeded", err)
+	}
+	if status != "" {
+		release()
+		t.Fatalf("canceled readiness status = %q, want no terminated projection", status)
+	}
+	release()
+}
+
+func TestSendMessageCompletionFailureLeavesHistoryUnchanged(t *testing.T) {
+	sessionsDir := t.TempDir()
+	sessionManager, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create session manager: %v", err)
+	}
+	sessionID := SessionID("failed-completion")
+	if _, err := sessionManager.CreateSession(string(sessionID), "gpt-4", t.TempDir()); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	adapter := newOpenAIAdapterWithClient(&mockOpenAIClient{
+		responses: []*openai.ChatCompletionResponse{nil},
+		errors:    []error{errors.New("provider unavailable")},
+	}, sessionManager)
+
+	if err := adapter.SendMessage(sessionID, Message{Role: RoleUser, Content: "must roll back"}); err == nil {
+		t.Fatal("failed completion error = nil")
+	}
+	history, err := adapter.GetHistory(sessionID)
+	if err != nil {
+		t.Fatalf("get history: %v", err)
+	}
+	if len(history) != 0 {
+		t.Fatalf("failed completion history = %#v, want empty", history)
+	}
+}
+
+func TestSendMessageContextCancelsProviderAndReleasesSessionLock(t *testing.T) {
+	sessionsDir := t.TempDir()
+	sessionManager, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create session manager: %v", err)
+	}
+	sessionID := SessionID("canceled-completion")
+	if _, err := sessionManager.CreateSession(string(sessionID), "gpt-4", t.TempDir()); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	providerEntered := make(chan struct{}, 1)
+	neverRelease := make(chan struct{})
+	adapter := newOpenAIAdapterWithClient(&blockingOpenAIClient{
+		response: &openai.ChatCompletionResponse{Content: "must not commit", Model: "gpt-4", FinishReason: "stop"},
+		entered:  providerEntered,
+		release:  neverRelease,
+	}, sessionManager)
+	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Millisecond)
+	defer cancel()
+	err = adapter.SendMessageContext(ctx, sessionID, Message{Role: RoleUser, Content: "cancel me"})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("canceled provider send error = %v, want deadline exceeded", err)
+	}
+	select {
+	case <-providerEntered:
+	default:
+		t.Fatal("provider was not entered before cancellation")
+	}
+	history, err := adapter.GetHistory(sessionID)
+	if err != nil {
+		t.Fatalf("get history after cancellation: %v", err)
+	}
+	if len(history) != 0 {
+		t.Fatalf("canceled completion history = %#v, want empty", history)
+	}
+
+	secondAdapter := newOpenAIAdapterWithClient(&mockOpenAIClient{
+		responses: []*openai.ChatCompletionResponse{{Content: "committed", Model: "gpt-4", FinishReason: "stop"}},
+	}, sessionManager)
+	if err := secondAdapter.SendMessageContext(t.Context(), sessionID, Message{Role: RoleUser, Content: "after cancellation"}); err != nil {
+		t.Fatalf("send after canceled provider retained lock: %v", err)
 	}
 }
 
@@ -897,6 +1412,48 @@ func TestImportConversation(t *testing.T) {
 	_, err = adapter.ImportConversation([]byte("test"), FormatHTML)
 	if err == nil {
 		t.Error("expected error for unsupported format, got nil")
+	}
+}
+
+func TestImportedOpenAIMessagesUseOneHistoryTransaction(t *testing.T) {
+	timestamp := time.Now().UTC().Truncate(time.Second)
+	messages := []Message{
+		{Role: RoleUser, Content: "first", Timestamp: timestamp},
+		{Role: RoleAssistant, Content: "second", Timestamp: timestamp.Add(time.Second)},
+		{Role: RoleUser, Content: "third", Timestamp: timestamp.Add(2 * time.Second)},
+	}
+
+	var calls int
+	var imported []openai.Message
+	err := addImportedOpenAIMessages(messages, func(batch ...openai.Message) error {
+		calls++
+		imported = append([]openai.Message(nil), batch...)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("add imported OpenAI messages: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("history transactions = %d, want one", calls)
+	}
+	if len(imported) != len(messages) {
+		t.Fatalf("imported messages = %d, want %d", len(imported), len(messages))
+	}
+	for i, message := range messages {
+		if imported[i].Role != string(message.Role) || imported[i].Content != message.Content || !imported[i].Timestamp.Equal(message.Timestamp) {
+			t.Errorf("imported message %d = %#v, want role=%q content=%q timestamp=%s", i, imported[i], message.Role, message.Content, message.Timestamp)
+		}
+	}
+
+	calls = 0
+	if err := addImportedOpenAIMessages(nil, func(...openai.Message) error {
+		calls++
+		return nil
+	}); err != nil {
+		t.Fatalf("add empty import: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("empty import history transactions = %d, want none", calls)
 	}
 }
 
@@ -1265,10 +1822,23 @@ func TestExecuteCommand(t *testing.T) {
 	}
 }
 
-// TestClearHistory tests clearing conversation history
-func TestClearHistory(t *testing.T) {
+// TestClearHistoryPreservesRuntimeConfig tests clearing conversation history
+// without discarding the metadata needed to reconstruct the delivery adapter.
+func TestClearHistoryPreservesRuntimeConfig(t *testing.T) {
 	tmpDir := t.TempDir()
-	adapter := createTestAdapter(t, tmpDir)
+	adapter, err := NewOpenAIAdapter(t.Context(), &OpenAIConfig{
+		APIKey:          "test-key",
+		Model:           "gpt-4",
+		SessionsDir:     tmpDir,
+		Temperature:     1.1,
+		MaxTokens:       321,
+		BaseURL:         "https://azure.example.test",
+		IsAzure:         true,
+		AzureAPIVersion: "2024-06-01",
+	})
+	if err != nil {
+		t.Fatalf("create configured adapter: %v", err)
+	}
 
 	// Create session and add messages
 	sessionID, err := adapter.CreateSession(SessionContext{
@@ -1299,6 +1869,29 @@ func TestClearHistory(t *testing.T) {
 		t.Errorf("expected 1 message before clear, got %d", len(history))
 	}
 
+	// Simulate a second AGM process updating authoritative metadata after this
+	// adapter loaded its manager cache.
+	externalManager, err := openai.NewSessionManager(tmpDir)
+	if err != nil {
+		t.Fatalf("create external session manager: %v", err)
+	}
+	wantRuntime := openai.SessionRuntimeConfig{
+		Temperature:     0.4,
+		MaxTokens:       654,
+		BaseURL:         "https://new-azure.example.test",
+		IsAzure:         true,
+		AzureAPIVersion: "2025-01-01",
+	}
+	if err := externalManager.UpdateTitle(string(sessionID), "externally-updated"); err != nil {
+		t.Fatalf("externally update title: %v", err)
+	}
+	if err := externalManager.UpdateWorkingDirectory(string(sessionID), "/external"); err != nil {
+		t.Fatalf("externally update working directory: %v", err)
+	}
+	if err := externalManager.UpdateRuntimeConfig(string(sessionID), wantRuntime); err != nil {
+		t.Fatalf("externally update runtime config: %v", err)
+	}
+
 	// Clear history
 	err = adapter.ExecuteCommand(Command{
 		Type: CommandClearHistory,
@@ -1317,6 +1910,28 @@ func TestClearHistory(t *testing.T) {
 	}
 	if len(history) != 0 {
 		t.Errorf("expected 0 messages after clear, got %d", len(history))
+	}
+
+	clearedInfo, err := openaiAdapter.sessionManager.GetSession(string(sessionID))
+	if err != nil {
+		t.Fatalf("get cleared session metadata: %v", err)
+	}
+	if clearedInfo.RuntimeConfig == nil || *clearedInfo.RuntimeConfig != wantRuntime {
+		t.Fatalf("cleared session runtime config = %#v, want %#v", clearedInfo.RuntimeConfig, wantRuntime)
+	}
+	if clearedInfo.Title != "externally-updated" || clearedInfo.Model != "gpt-4" || clearedInfo.WorkingDirectory != "/external" {
+		t.Fatalf("cleared session identity metadata changed: %#v", clearedInfo)
+	}
+
+	reconstructed, err := NewOpenAIAdapterForSession(t.Context(), sessionID, &OpenAIConfig{
+		APIKey:      "test-key",
+		SessionsDir: tmpDir,
+	})
+	if err != nil {
+		t.Fatalf("reconstruct adapter after clear: %v", err)
+	}
+	if got := reconstructed.(*OpenAIAdapter).runtimeConfig; got != wantRuntime {
+		t.Fatalf("reconstructed runtime config after clear = %#v, want %#v", got, wantRuntime)
 	}
 }
 

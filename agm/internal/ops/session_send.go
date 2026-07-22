@@ -1,6 +1,9 @@
 package ops
 
 import (
+	"time"
+
+	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/manager"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
@@ -15,9 +18,15 @@ type SendMessageRequest struct {
 	Message string `json:"message"`
 
 	// Force permits delivery only when the verified harness owns the exact pane
-	// and QUEUE is the sole readiness blocker. It does not bypass permission or
-	// any other fail-closed state.
+	// and a queued-input marker plus complete AGM header identify a stuck AGM
+	// paste. It does not bypass human drafts or any other fail-closed state.
 	Force bool `json:"force,omitempty"`
+
+	// Autonomous permits the same narrowly scoped stuck-AGM recovery for an
+	// unattended session. It never bypasses human drafts, generic busy states,
+	// permission, overlays, onboarding, harness identity, target existence, or
+	// backend-error checks.
+	Autonomous bool `json:"autonomous,omitempty"`
 }
 
 // SendMessageResult is the output of SendMessage.
@@ -81,6 +90,25 @@ func SendMessage(ctx *OpContext, req *SendMessageRequest) (*SendMessageResult, e
 		return newResult(false), ErrStorageError("send_message context", err)
 	}
 
+	// Pure API sessions have no pane. Route them through the shared stable-ID
+	// lifecycle/readiness/provider transaction before considering any tmux
+	// capability that a surface (notably MCP) may also have wired.
+	if isAPISessionManifest(m) {
+		message := agent.Message{
+			ID:        uuid.NewString(),
+			Role:      agent.RoleUser,
+			Content:   req.Message,
+			Timestamp: time.Now(),
+			Metadata: map[string]any{
+				"source": "ops_send_message",
+			},
+		}
+		if _, err := DeliverAPISessionMessage(callCtx, ctx.Storage, m, message, ctx.APIAgentFactory); err != nil {
+			return newResult(false), err
+		}
+		return newResult(true), nil
+	}
+
 	// Tmux readiness and delivery are one atomic capability. The implementation
 	// holds the same mutation lock across composer observation and exact-pane
 	// input so a concurrent AGM sender cannot invalidate the readiness proof.
@@ -89,8 +117,9 @@ func SendMessage(ctx *OpContext, req *SendMessageRequest) (*SendMessageResult, e
 		if !ok {
 			return newResult(false), ErrSessionNotReady(m.Name, "ATOMIC_DELIVERY_UNAVAILABLE")
 		}
+		allowQueuedAGM := req.Force || req.Autonomous
 		readiness, readinessErr := sender.SendKeysIfInputReady(callCtx, tmuxName, harness, req.Message, session.InputDeliveryOptions{
-			AllowBusyComposer: req.Force,
+			AllowQueuedAGM: allowQueuedAGM,
 		})
 		if readinessErr != nil {
 			return newResult(false), ErrStorageError("tmux.SendKeysIfInputReady", readinessErr)
@@ -98,8 +127,8 @@ func SendMessage(ctx *OpContext, req *SendMessageRequest) (*SendMessageResult, e
 		if !readiness.Ready {
 			return newResult(false), ErrSessionNotReady(m.Name, readiness.State)
 		}
-		if readiness.Forced && (!req.Force || readiness.State != "QUEUE") {
-			return newResult(false), ErrSessionNotReady(m.Name, "INVALID_FORCE_DELIVERY")
+		if readiness.Forced && (!allowQueuedAGM || readiness.State != "YES") {
+			return newResult(false), ErrSessionNotReady(m.Name, "INVALID_QUEUED_AGM_DELIVERY")
 		}
 		if readiness.PaneID == "" {
 			return newResult(false), ErrSessionNotReady(m.Name, "UNVERIFIED_PANE")

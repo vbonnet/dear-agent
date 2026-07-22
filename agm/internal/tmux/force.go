@@ -11,11 +11,12 @@ import "sync/atomic"
 // SendMultiLinePromptSafe's separate post-submit composer-stability check.
 // Setting this flag makes that path honor the operator's delivery intent too.
 // Shared message delivery receives the same intent explicitly through
-// InputDeliveryOptions and may override only a verified QUEUE state.
+// InputDeliveryOptions and may override only a positively identified queued
+// AGM paste.
 //
-// Unlike autonomousMode, force does NOT stash stale input with C-s — the
-// operator has explicitly accepted the risk and just wants the message
-// delivered. Permission and wrong-harness states remain protected.
+// Unlike autonomousMode, force does not change advisory human-typing telemetry.
+// Shared atomic delivery still protects human drafts, generic busy composers,
+// permission prompts, and wrong-harness states.
 var forceDelivery atomic.Bool
 
 // SetForceDelivery marks the current process as performing an operator-forced

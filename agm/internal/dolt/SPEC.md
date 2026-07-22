@@ -20,12 +20,14 @@
 
 **DOLTR-09** When a Go test or explicitly marked built test subprocess resolves Dolt configuration or constructs an adapter directly, the system shall select `ENGRAM_TEST_WORKSPACE` as its workspace and shall require its database to equal that workspace or the shared `agm_test` target before connecting.
 
+**DOLTR-10** When AGM persists and reloads a pure OpenAI API session, the storage adapter shall round-trip its non-secret session-store locator and client fallback configuration through the shared session metadata column.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
 - Feature: `agm/test/bdd/features/harness_parity.feature`
 
-<!-- Last audited at: NEEDS-AUDIT -->
+<!-- Last audited at: 2026-07-21 -->
 
 **Version**: 2.0
 **Status**: Phase 6 Complete - Dolt-Only Architecture (YAML Backend Removed)

@@ -247,9 +247,9 @@ func init() {
 	sendMsgCmd.MarkFlagsOneRequired("prompt", "prompt-file", "prompt-stdin")
 	sendMsgCmd.MarkFlagsMutuallyExclusive("to", "all")
 
-	sendMsgCmd.Flags().BoolVar(&msgForce, "force", false, "Force delivery through the queued-input/post-submit cooldown checks (human_typing is advisory now and never blocks)")
+	sendMsgCmd.Flags().BoolVar(&msgForce, "force", false, "Replace only positively identified queued AGM input after exact harness and pane verification")
 	sendMsgCmd.Flags().StringVar(&msgForceReason, "reason", "", "Deprecated no-op: human_typing no longer blocks, so --force needs no audited reason (accepted for compatibility)")
-	sendMsgCmd.Flags().BoolVar(&msgAutonomous, "autonomous", false, "Session is unattended — skip human_typing detection entirely")
+	sendMsgCmd.Flags().BoolVar(&msgAutonomous, "autonomous", false, "Mark the session unattended and allow the same narrow queued-AGM recovery as --force")
 
 	sendGroupCmd.AddCommand(sendMsgCmd)
 
@@ -333,9 +333,9 @@ func runSendSingle(ctx context.Context, recipientSession string) (retErr error) 
 		return err
 	}
 
-	currentState, tmuxName := resolveRecipientState(recipientSession, adapter)
-	canReceive := session.CheckSessionDelivery(tmuxName)
-	return dispatchSendByCanReceive(ctx, recipientSession, tmuxName, senderName, messageID, formattedMessage, message, currentState, canReceive, adapter)
+	currentState, tmuxName, harnessType := resolveRecipientState(recipientSession, adapter)
+	canReceive := recipientCanReceive(harnessType, tmuxName, session.CheckSessionDelivery)
+	return dispatchSendByCanReceive(ctx, recipientSession, tmuxName, harnessType, senderName, messageID, formattedMessage, message, currentState, canReceive, adapter)
 }
 
 // sendSingleAuditArgs builds the audit arg map for runSendSingle.
@@ -379,35 +379,37 @@ func enforceSendRateLimit(senderName string) error {
 	return nil
 }
 
-// ensureRecipientReady verifies the recipient tmux session exists, runs the
-// safety guards, records the recipient harness for the non-blocking human_typing
-// stash, and wakes any stale monitors.
+// ensureRecipientReady verifies the recipient exists on its delivery surface.
+// Pure API sessions have no tmux pane, so their final adapter-status check is
+// performed by sendDirectly. CLI sessions retain the tmux and safety guards.
 //
 // human_typing is advisory now (it over-captures; see internal/tmux/stash.go), so
 // it never blocks a send and --force no longer needs to bypass it. --force still
 // sets ForceDelivery, which forces through the SEPARATE queued-input / post-submit
 // cooldown checks for genuinely-stuck supervisors (ce-5sow).
 func ensureRecipientReady(recipientSession string, adapter *dolt.Adapter) error {
-	exists, err := tmux.HasSession(recipientSession)
-	if err != nil {
-		return fmt.Errorf("failed to check tmux session: %w", err)
-	}
-	if !exists {
-		return fmt.Errorf("session '%s' does not exist in tmux.\n\nSuggestions:\n  • List sessions: agm session list\n  • Create session: agm session new %s", recipientSession, recipientSession)
-	}
-
-	// ce-7mxn: auto-detect autonomous recipients. The human_typing guard exists to
-	// avoid clobbering a human at the keyboard; a session tagged with a non-human
-	// role (worker/orchestrator/overseer) never has one, so the guard is pure noise.
-	// Enabling autonomous mode here makes the dark factory work without every send
-	// passing --autonomous or AGM_AUTONOMOUS=1 (which still take precedence via
-	// runSend). Resolve failures fall through harmlessly to the default guard.
+	// Resolve the registered delivery surface before touching tmux. API sessions
+	// intentionally have no pane; requiring one here would reject them before
+	// their adapter can report authoritative readiness. ce-7mxn also auto-detects
+	// autonomous recipients: the human_typing guard is irrelevant to a session
+	// tagged with a non-human role (worker/orchestrator/overseer).
 	harnessType := ""
 	if m, _, resolveErr := session.ResolveIdentifier(recipientSession, cfg.SessionsDir, adapter); resolveErr == nil {
 		harnessType = m.Harness
 		if isAutonomousRole(m.Context.Tags) {
 			tmux.SetAutonomousMode(true)
 		}
+		if isAPIBasedAgent(harnessType) {
+			return nil
+		}
+	}
+
+	exists, err := tmux.HasSession(recipientSession)
+	if err != nil {
+		return fmt.Errorf("failed to check tmux session: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("session '%s' does not exist in tmux.\n\nSuggestions:\n  • List sessions: agm session list\n  • Create session: agm session new %s", recipientSession, recipientSession)
 	}
 
 	// Record the recipient harness so the non-blocking human_typing stash in the
@@ -506,33 +508,111 @@ func buildAndLogMessage(senderName, recipientSession, message string) (string, s
 	return messageID, formattedMessage, nil
 }
 
-// resolveRecipientState resolves the recipient's display state for persistence
-// and returns (currentState, tmuxName).
-func resolveRecipientState(recipientSession string, adapter *dolt.Adapter) (string, string) {
+// resolveRecipientState resolves the recipient's display state and delivery
+// surface for persistence, returning (currentState, tmuxName, harnessType).
+func resolveRecipientState(recipientSession string, adapter *dolt.Adapter) (string, string, string) {
+	return resolveRecipientStateWithDependencies(recipientSession, adapter, session.ResolveSessionState, session.UpdateSessionState)
+}
+
+func resolveRecipientStateWithDependencies(
+	recipientSession string,
+	adapter *dolt.Adapter,
+	resolveState func(string, string, string, time.Time) string,
+	updateState func(string, string, string, string, *dolt.Adapter) error,
+) (string, string, string) {
 	var currentState string
 	tmuxName := recipientSession
 	m, manifestPath, resolveErr := session.ResolveIdentifier(recipientSession, cfg.SessionsDir, adapter)
 	if resolveErr != nil {
-		return currentState, tmuxName
+		return currentState, tmuxName, ""
 	}
 	if m.Tmux.SessionName != "" {
 		tmuxName = m.Tmux.SessionName
 	}
-	currentState = session.ResolveSessionState(tmuxName, m.State, m.Claude.UUID, m.StateUpdatedAt)
+	harnessType := m.Harness
+	if harnessType == "" {
+		harnessType = "claude-code"
+	}
+	harnessType = agent.NormalizeHarnessName(harnessType)
+	// Pure API sessions intentionally have no tmux state. Their adapter status
+	// is checked inside direct delivery, so tmux-only state resolution must not
+	// persist OFFLINE after a successful provider send.
+	if isAPIBasedAgent(harnessType) {
+		return m.State, tmuxName, harnessType
+	}
+	currentState = resolveState(tmuxName, m.State, m.Claude.UUID, m.StateUpdatedAt)
 	if currentState != m.State {
-		if err := session.UpdateSessionState(manifestPath, currentState, "hybrid", m.SessionID, adapter); err != nil {
+		if err := updateState(manifestPath, currentState, "hybrid", m.SessionID, adapter); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to persist session state: %v\n", err)
 		}
 	}
-	return currentState, tmuxName
+	return currentState, tmuxName, harnessType
+}
+
+func recipientCanReceive(harnessType, tmuxName string, checkTmux func(string) state.CanReceive) state.CanReceive {
+	if isAPIBasedAgent(harnessType) {
+		return state.CanReceiveYes
+	}
+	return checkTmux(tmuxName)
+}
+
+type cliInputDeliveryPolicy struct {
+	Force      bool
+	Autonomous bool
+}
+
+func currentCLIInputDeliveryPolicy() cliInputDeliveryPolicy {
+	return cliInputDeliveryPolicy{
+		Force:      msgForce,
+		Autonomous: tmux.AutonomousMode(),
+	}
+}
+
+func (p cliInputDeliveryPolicy) allowsQueuedAGM() bool {
+	return p.Force || p.Autonomous
 }
 
 // dispatchSendByCanReceive routes the formatted message to the appropriate
 // delivery path based on the CanReceive state read from the recipient pane.
-func dispatchSendByCanReceive(ctx context.Context, recipientSession, tmuxName, senderName, messageID, formattedMessage, message, currentState string, canReceive state.CanReceive, adapter *dolt.Adapter) error {
+func dispatchSendByCanReceive(ctx context.Context, recipientSession, tmuxName, harnessType, senderName, messageID, formattedMessage, message, currentState string, canReceive state.CanReceive, adapter *dolt.Adapter) error {
+	directDelivery := func() error {
+		return sendDirectly(ctx, recipientSession, senderName, messageID, formattedMessage, sessionSendPromptFile, adapter)
+	}
+	return dispatchSendByCanReceiveWithDirect(ctx, recipientSession, tmuxName, senderName, messageID, formattedMessage, message, currentState, canReceive, adapter, currentCLIInputDeliveryPolicy(), supportsSharedAtomicInput(harnessType), isAPIBasedAgent(harnessType), directDelivery)
+}
+
+func supportsSharedAtomicInput(harnessType string) bool {
+	switch agent.NormalizeHarnessName(harnessType) {
+	case "claude-code", "codex-cli", "agy", "gemini-cli", "opencode-cli", "pi-cli":
+		return true
+	default:
+		return false
+	}
+}
+
+func dispatchSendByCanReceiveWithDirect(ctx context.Context, recipientSession, tmuxName, senderName, messageID, formattedMessage, message, currentState string, canReceive state.CanReceive, adapter *dolt.Adapter, policy cliInputDeliveryPolicy, sharedAtomicInput, apiBased bool, directDelivery func() error) error {
+	// Force and autonomous sends must reach the shared atomic classifier before
+	// legacy pane-state routing. Otherwise a preliminary QUEUE verdict diverts
+	// them into the daemon queue and makes their narrowly scoped stuck-AGM
+	// recovery policy unreachable. Pure API harnesses have no tmux pane, so
+	// their adapter status is the final readiness authority instead.
+	if apiBased {
+		if err := directDelivery(); err != nil {
+			return err
+		}
+		recordDelegation(senderName, recipientSession, messageID, message)
+		return nil
+	}
+	if sharedAtomicInput && policy.allowsQueuedAGM() {
+		if err := directDelivery(); err != nil {
+			return err
+		}
+		recordDelegation(senderName, recipientSession, messageID, message)
+		return nil
+	}
 	switch canReceive {
 	case state.CanReceiveYes:
-		if err := sendDirectly(ctx, recipientSession, senderName, messageID, formattedMessage, sessionSendPromptFile, adapter); err != nil {
+		if err := directDelivery(); err != nil {
 			return err
 		}
 		recordDelegation(senderName, recipientSession, messageID, message)
@@ -570,7 +650,7 @@ func queueMessage(ctx context.Context, recipientSession, senderName, messageID, 
 	// Create message queue
 	queue, err := messages.NewMessageQueue()
 	if err != nil {
-		// Queue creation failed - fall back to direct send with warning
+		// CLI fallback re-enters shared atomic exact-pane readiness.
 		fmt.Fprintf(os.Stderr, "Warning: failed to create message queue: %v\n", err)
 		fallbackAdapter, _ := getStorage()
 		return sendDirectly(ctx, recipientSession, senderName, messageID, formattedMessage, "", fallbackAdapter)
@@ -585,8 +665,8 @@ func queueMessage(ctx context.Context, recipientSession, senderName, messageID, 
 	pidFile := filepath.Join(homeDir, ".agm", "daemon.pid")
 	daemonRunning := daemon.IsRunning(pidFile)
 
-	// If daemon is not running, fall back to direct tmux delivery
-	// instead of refusing — the message is better delivered directly than not at all
+	// Only CLI delivery reaches this queue path; daemon-absent fallback re-enters
+	// shared atomic readiness before sending any replacement input.
 	if !daemonRunning {
 		fmt.Fprintf(os.Stderr, "⚠ Daemon not running — falling back to direct tmux delivery for '%s'\n", recipientSession)
 		fallbackAdapter, _ := getStorage()
@@ -634,6 +714,12 @@ func sendDirectly(ctx context.Context, recipientSession, senderName, messageID, 
 }
 
 func sendDirectlyWithTmux(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, adapter *dolt.Adapter, tmuxClient session.TmuxInterface) error {
+	return sendDirectlyWithDependencies(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, adapter, tmuxClient, newAPIHarnessAdapter)
+}
+
+type apiAgentFactory = ops.APISessionAgentFactory
+
+func sendDirectlyWithDependencies(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, adapter *dolt.Adapter, tmuxClient session.TmuxInterface, newAPIAgent apiAgentFactory) error {
 	if adapter == nil {
 		return fmt.Errorf("verified delivery requires session storage")
 	}
@@ -644,9 +730,9 @@ func sendDirectlyWithTmux(ctx context.Context, recipientSession, senderName, mes
 	if cfg != nil {
 		sessionsDir = cfg.SessionsDir
 	}
-	m, _, err := session.ResolveIdentifier(recipientSession, sessionsDir, adapter)
+	m, err := resolveDirectDeliveryManifest(recipientSession, sessionsDir, adapter)
 	if err != nil {
-		return fmt.Errorf("resolve %q for verified delivery: %w", recipientSession, err)
+		return err
 	}
 
 	// Determine delivery method based on harness type
@@ -657,8 +743,7 @@ func sendDirectlyWithTmux(ctx context.Context, recipientSession, senderName, mes
 
 	// Check if this is an API-based harness (OpenAI, etc.)
 	if isAPIBasedAgent(harnessType) {
-		// Use Agent interface for API-based sessions
-		return sendViaAgent(m, senderName, messageID, formattedMessage, promptFile)
+		return sendToAPIAgentIfReady(ctx, m, senderName, messageID, formattedMessage, promptFile, adapter, newAPIAgent)
 	}
 
 	// CLI-based harnesses share one atomic readiness-and-delivery operation.
@@ -666,7 +751,8 @@ func sendDirectlyWithTmux(ctx context.Context, recipientSession, senderName, mes
 	if sharedRecipient == "" {
 		sharedRecipient = recipientSession
 	}
-	if err := sendViaSharedOperations(ctx, sharedRecipient, senderName, messageID, formattedMessage, promptFile, msgForce, adapter, tmuxClient); err != nil {
+	policy := currentCLIInputDeliveryPolicy()
+	if err := sendViaSharedOperations(ctx, sharedRecipient, senderName, messageID, formattedMessage, promptFile, policy.Force, policy.Autonomous, adapter, tmuxClient); err != nil {
 		return err
 	}
 	if harnessType == "agy" && (m.Agy == nil || m.Agy.ConversationID == "") {
@@ -684,6 +770,56 @@ func sendDirectlyWithTmux(ctx context.Context, recipientSession, senderName, mes
 	return nil
 }
 
+func resolveDirectDeliveryManifest(recipientSession, sessionsDir string, adapter *dolt.Adapter) (*manifest.Manifest, error) {
+	m, _, err := session.ResolveIdentifier(recipientSession, sessionsDir, adapter)
+	if err != nil {
+		return nil, fmt.Errorf("resolve %q for verified delivery: %w", recipientSession, err)
+	}
+	if m.Lifecycle != manifest.LifecycleArchived {
+		return m, nil
+	}
+	archivedName := m.Name
+	if archivedName == "" {
+		archivedName = recipientSession
+	}
+	return nil, ops.ErrSessionArchived(archivedName)
+}
+
+func newAPIHarnessAdapter(ctx context.Context, m *manifest.Manifest) (agent.Agent, error) {
+	return ops.NewAPISessionAgent(ctx, m)
+}
+
+func sendToAPIAgentIfReady(ctx context.Context, m *manifest.Manifest, senderName, messageID, formattedMessage, promptFile string, storage dolt.Storage, newAPIAgent apiAgentFactory) error {
+	message := agent.Message{
+		ID:        messageID,
+		Role:      agent.RoleUser,
+		Content:   formattedMessage,
+		Timestamp: time.Now(),
+		Metadata: map[string]any{
+			"sender":    senderName,
+			"source":    "agm_send",
+			"file_path": promptFile,
+		},
+	}
+	current, err := ops.DeliverAPISessionMessage(ctx, storage, m, message, newAPIAgent)
+	if err != nil {
+		return err
+	}
+
+	// Preserve the hook-visible audit artifact only after successful API
+	// delivery. A failed adapter call must not leave an alternate delivery path.
+	if err := messages.WritePendingFile(current.Name, messageID, formattedMessage); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to write pending file: %v\n", err)
+	}
+
+	successMsg := fmt.Sprintf("✓ Sent to '%s' from '%s' (%d chars) [ID: %s] [via: %s API]", current.Name, senderName, len(formattedMessage), messageID, current.Harness)
+	if promptFile != "" {
+		successMsg += fmt.Sprintf(" [file: %s]", promptFile)
+	}
+	ui.PrintSuccess(successMsg)
+	return nil
+}
+
 func waitForAgyMetadataBackfill(ctx context.Context, sessionName string, wait func(context.Context, string, time.Duration) error) error {
 	if err := wait(ctx, sessionName, 60*time.Second); err != nil {
 		if ctx.Err() != nil {
@@ -697,7 +833,7 @@ func waitForAgyMetadataBackfill(ctx context.Context, sessionName string, wait fu
 // sendViaSharedOperations routes CLI delivery through ops.SendMessage. The
 // supplied tmux capability must atomically prove harness ownership and send to
 // the exact verified pane; weaker transports fail closed inside shared ops.
-func sendViaSharedOperations(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, force bool, storage dolt.Storage, tmuxClient session.TmuxInterface) error {
+func sendViaSharedOperations(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, force, autonomous bool, storage dolt.Storage, tmuxClient session.TmuxInterface) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -713,9 +849,10 @@ func sendViaSharedOperations(ctx context.Context, recipientSession, senderName, 
 		Storage: storage,
 		Tmux:    tmuxClient,
 	}, &ops.SendMessageRequest{
-		Recipient: recipientSession,
-		Message:   formattedMessage,
-		Force:     force,
+		Recipient:  recipientSession,
+		Message:    formattedMessage,
+		Force:      force,
+		Autonomous: autonomous,
 	})
 	if err != nil {
 		return fmt.Errorf("shared CLI send: %w", err)
@@ -733,54 +870,6 @@ func sendViaSharedOperations(ctx context.Context, recipientSession, senderName, 
 
 	// Print success message with message ID
 	successMsg := fmt.Sprintf("✓ Sent to '%s' from '%s' (%d chars) [ID: %s] [via: tmux]", recipientSession, senderName, len(formattedMessage), messageID)
-	if promptFile != "" {
-		successMsg += fmt.Sprintf(" [file: %s]", promptFile)
-	}
-	ui.PrintSuccess(successMsg)
-
-	return nil
-}
-
-// sendViaAgent sends a message via Agent interface (for API-based harnesses like OpenAI)
-func sendViaAgent(m *manifest.Manifest, senderName, messageID, formattedMessage, promptFile string) error {
-	// Get harness type from manifest
-	harnessType := m.Harness
-	if harnessType == "" {
-		return fmt.Errorf("manifest missing harness type")
-	}
-
-	// Create harness adapter via factory
-	agentAdapter, err := agent.GetHarness(harnessType)
-	if err != nil {
-		return fmt.Errorf("failed to create harness adapter for type '%s': %w", harnessType, err)
-	}
-
-	// Create message
-	msg := agent.Message{
-		ID:        messageID,
-		Role:      agent.RoleUser,
-		Content:   formattedMessage,
-		Timestamp: time.Now(),
-		Metadata: map[string]interface{}{
-			"sender":    senderName,
-			"source":    "agm_send",
-			"file_path": promptFile,
-		},
-	}
-
-	// Write pending file for hook-based delivery (best-effort, in addition to API)
-	if err := messages.WritePendingFile(m.Name, messageID, formattedMessage); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to write pending file: %v\n", err)
-	}
-
-	// Send message via Agent interface
-	sessionID := agent.SessionID(m.SessionID)
-	if err := agentAdapter.SendMessage(sessionID, msg); err != nil {
-		return fmt.Errorf("failed to send message via harness: %w", err)
-	}
-
-	// Print success message with message ID
-	successMsg := fmt.Sprintf("✓ Sent to '%s' from '%s' (%d chars) [ID: %s] [via: %s API]", m.Name, senderName, len(formattedMessage), messageID, m.Harness)
 	if promptFile != "" {
 		successMsg += fmt.Sprintf(" [file: %s]", promptFile)
 	}
@@ -878,10 +967,8 @@ func runSendMulti(ctx context.Context, spec *send.RecipientSpec) (retErr error) 
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
 	tmuxClient := session.NewRealTmux()
-	results := send.SequentialDeliver(ctx, jobs, func(ctx context.Context, job *send.DeliveryJob) error {
+	results := deliverMultiRecipientJobs(ctx, jobs, agent.OpenAIDeliveryTimeout, func(ctx context.Context, job *send.DeliveryJob) error {
 		return deliveryFuncWithDependencies(ctx, job, adapter, tmuxClient)
 	})
 
@@ -900,6 +987,17 @@ func runSendMulti(ctx context.Context, spec *send.RecipientSpec) (retErr error) 
 		return fmt.Errorf("some deliveries failed (see report above)")
 	}
 	return nil
+}
+
+// deliverMultiRecipientJobs gives every sequential recipient its own bounded
+// transaction. A batch-wide deadline would let one valid slow API completion
+// consume the budget of every later recipient.
+func deliverMultiRecipientJobs(ctx context.Context, jobs []*send.DeliveryJob, timeout time.Duration, deliver send.DeliveryFunc) []*send.DeliveryResult {
+	return send.SequentialDeliver(ctx, jobs, func(ctx context.Context, job *send.DeliveryJob) error {
+		deliveryCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		return deliver(deliveryCtx, job)
+	})
 }
 
 // multiAuditArgs builds the audit map for runSendMulti.
@@ -1023,9 +1121,13 @@ func deliveryFunc(ctx context.Context, job *send.DeliveryJob) error {
 }
 
 func deliveryFuncWithDependencies(ctx context.Context, job *send.DeliveryJob, adapter *dolt.Adapter, tmuxClient session.TmuxInterface) error {
+	return deliveryFuncWithAgentFactory(ctx, job, adapter, tmuxClient, newAPIHarnessAdapter)
+}
+
+func deliveryFuncWithAgentFactory(ctx context.Context, job *send.DeliveryJob, adapter *dolt.Adapter, tmuxClient session.TmuxInterface, newAPIAgent apiAgentFactory) error {
 	// Multi-recipient sends intentionally use the same manifest resolution and
-	// shared operations boundary as single-recipient sends.
-	return sendDirectlyWithTmux(ctx, job.Recipient, job.Sender, job.MessageID, job.FormattedMessage, job.PromptFile, adapter, tmuxClient)
+	// final readiness boundary as single-recipient sends.
+	return sendDirectlyWithDependencies(ctx, job.Recipient, job.Sender, job.MessageID, job.FormattedMessage, job.PromptFile, adapter, tmuxClient, newAPIAgent)
 }
 
 // recordDelegation records a delegation if --delegate flag is set.

@@ -236,7 +236,37 @@ creation, and terminal state detection.
 - Shared tmux sends serialize exact-pane readiness with delivery under one
   mutation boundary, and MCP creation atomically revalidates the harness and
   composer after registration immediately before delivering its startup prompt.
-  A concurrent sender or readiness change cannot reuse the earlier proof.
+  A concurrent sender or readiness change cannot reuse the earlier proof. A
+  measured pasted-content marker binds its complete payload, so prompt-like
+  glyphs inside that payload cannot displace the composer anchor that owns it.
+- Pure API single-send preflight resolves the registered delivery surface
+  before any tmux probe, while both single-recipient and fan-out delivery
+  restore the session's persisted model, storage locator, endpoint, and Azure
+  settings without persisting credentials. Every sequential fan-out recipient
+  receives a fresh finite deadline that still inherits caller cancellation.
+  Stable-lock acquisition, reconstruction, and readiness use a separate
+  bounded preflight context; the completed-turn phase then retains the
+  adapter's complete provider budget. Targeted reconstruction loads only the
+  requested session and cannot be delayed or failed by unrelated session
+  directories.
+  Under the same stable session-ID
+  boundary as archive, delivery reloads lifecycle before adapter construction,
+  rejects reaping and archived sessions, and uses a provider-appropriate wait, so archive linearizes before or after
+  a bounded completed turn. Lock acquisition and provider work honor caller
+  cancellation; direct adapter callers retain context-aware store-level
+  serialization and a finite provider ceiling; completion errors, cancellation,
+  and timeout leave history unchanged. Delivery otherwise fails closed unless
+  adapter status is active or idle. A successful API send does not run tmux
+  state resolution or persist `OFFLINE` for the pane-less session.
+- Clearing API history reloads and preserves the current reconstruction
+  metadata while atomically emptying only messages under the store-level
+  transaction lock, including updates made by another process. Completed-turn
+  commits reload the same metadata, and title, directory, and runtime-setting
+  writers serialize on that lock and apply only their requested field.
+- OpenAI-compatible history reload accepts valid JSONL records larger than the
+  standard scanner token limit. Conversation import converts the parsed batch
+  once and persists it with one history transaction, while an empty import
+  performs no history transaction.
 - Shared startup readiness honors its total deadline while a slow launch
   wrapper still owns the pane, but fails promptly if an already-observed
   harness process later stops.

@@ -7,7 +7,7 @@
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`
 - Feature: `agm/test/bdd/features/harness_parity.feature`
 
-<!-- Last audited at: NEEDS-AUDIT -->
+<!-- Last audited at: 2026-07-21 -->
 
 **Version:** 2.0
 **Status:** Production (Phase 6 Complete - Dolt-Only Architecture, YAML Backend Removed)
@@ -75,7 +75,7 @@ Provide a production-ready CLI that:
 
 **CLI-23** When `agm wiki query-save` receives user-controlled question or answer text, the system shall accept file-backed inputs, reject conflicting inline and file values, and preserve file content without shell evaluation.
 
-**CLI-39** When installed AGM command guidance is generated, the system shall derive executable paths and supported flags from the live Cobra tree and shall fail if any installed command Markdown is outside the declared inventory.
+**CLI-41** When installed AGM command guidance is generated, the system shall derive executable paths and supported flags from the live Cobra tree and shall fail if any installed command Markdown is outside the declared inventory.
 
 **CLI-24** When AGM command tests execute Cobra commands or mutate command flags, the system shall use fresh command instances or restore the complete shared command state so test results remain independent of execution order.
 
@@ -107,7 +107,7 @@ Provide a production-ready CLI that:
 
 **CLI-38** When `agm admin link-session-parent` or `agm admin backfill-plan-sessions` assigns a parent and optionally inherits its display name, the command shall persist both changes through one narrow compare-and-swap against the child identity revision it read and shall report a concurrent identity change as a failure instead of reporting a link or rename that storage did not apply.
 
-**CLI-39** When `agm send msg` delivers directly to one or more registered CLI-harness sessions, every recipient shall route through shared `ops.SendMessage`, which shall atomically prove the manifest's canonical harness process and current composer before sending to the exact verified pane; `--force` shall be preserved across this shared route and may override only a `QUEUE` verdict caused by queued or stale composer input after exact harness and pane ownership are proved, while an unregistered tmux session, missing storage, wrong or dead harness, permission, overlay, onboarding, missing target, other unready composer, missing atomic delivery capability, or failed readiness check shall return non-delivery without creating a pending-file bypass.
+**CLI-39** When `agm send msg` delivers directly to one or more registered CLI-harness sessions, every recipient shall route through shared `ops.SendMessage`, which shall atomically prove the manifest's canonical harness process and current composer before sending to the exact verified pane; a single-recipient `--force`, `--autonomous`, `AGM_AUTONOMOUS=1`, or autonomous-role send shall reach that shared atomic route before preliminary queue dispatch only for a manifest-confirmed supported CLI harness. Pure API harnesses intentionally have no tmux pane: single-recipient preflight shall resolve the registered harness before any tmux probe, successful delivery shall not invoke tmux state resolution or persist `OFFLINE`, and both single-recipient and fan-out delivery shall reconstruct the adapter from only the requested session's persisted non-secret runtime configuration without enumerating unrelated sessions and shall obtain credentials only at runtime. Fan-out shall derive a fresh finite delivery deadline for every sequential recipient while inheriting caller cancellation, so one valid slow completion cannot consume a later recipient's provider budget. A provider-appropriate stable session-ID mutation boundary shall serialize adapter construction, a locked lifecycle reload, active-or-idle readiness, bounded context-aware provider completion, and completed-turn history persistence across AGM processes while sharing that boundary with archive; every non-active lifecycle, including reaping and archived, shall fail before adapter construction or paid provider work. Adapter-level delivery shall independently serialize callers that bypass the CLI and bound its own provider work. Adapter errors, non-active lifecycle, caller cancellation, provider timeout, and suspended or terminated status shall not enter the tmux-only daemon queue and shall create neither pending-file nor delegation state. For every supported CLI harness the shared route may replace input only when the latest queued-input marker and a syntactically complete generated AGM message header are bound inside that same current composer after exact foreground-harness and pane ownership are proved from the complete style-preserving logical composer with terminal-wrapped rows joined, with visible pasted-text line counts and terminal idle or managed chrome excluding later active output; once a measured pasted-content marker owns the tail, prompt-like glyphs inside that measured payload shall remain payload rather than replace its composer anchor. Replacement shall first clear the verified queue without submitting it and re-prove the expected foreground harness plus an empty composer on the same exact pane; a failed clear or recheck, changed pane, historical or partial header, opaque Codex pasted-content chip without an observable bound header, human draft, generic busy composer, active work, an unregistered tmux session, missing storage, wrong or dead harness, permission, overlay, onboarding, missing target, missing atomic delivery capability, or failed readiness check shall return non-delivery without pasting replacement input or creating a pending-file bypass.
 
 **CLI-40** When CLI session creation has registered a supported harness and must deliver `--prompt` or `--prompt-file`, the completion boundary shall atomically revalidate that the expected harness owns the foreground terminal and an empty composer, then send to the exact verified pane under the same mutation boundary; an unready, background, suspended, wrong, or missing harness, a focus change, an invalid pane proof, or caller cancellation shall not deliver the startup prompt.
 
@@ -298,16 +298,17 @@ Provide a production-ready CLI that:
 - **Priority:** P0 (Critical)
 - **Description:** CLI MUST support non-disruptive message sending to running sessions
 - **Commands:**
-  - `agm session send [session-name] --prompt "message"` - Send message (queued by default)
-  - `agm session send [session-name] --prompt-file /path/to/file` - Send from file
-  - `agm session send [session-name] --interrupt --prompt "urgent"` - Interrupt immediately
-  - `agm session send [session-name] --sender [name] --prompt "msg"` - Specify sender
-  - `agm session send [session-name] --reply-to [message-id] --prompt "reply"` - Thread messages
+  - `agm send msg [session-name] --prompt "message"` - Send or queue by verified readiness
+  - `agm send msg [session-name] --prompt-file /path/to/file` - Send from file
+  - `agm send msg [session-name] --force --prompt "recovery"` - Replace only positively identified queued AGM input
+  - `agm send msg [session-name] --autonomous --prompt "msg"` - Mark the recipient unattended for the same narrow queued-AGM recovery
+  - `agm send msg [session-name] --sender [name] --prompt "msg"` - Specify sender
+  - `agm send msg [session-name] --reply-to [message-id] --prompt "reply"` - Thread messages
 - **Behavior:**
-  - **Default (non-interrupt):** Queue messages for later delivery when session becomes READY
-  - **Interrupt mode:** Send immediately via tmux, interrupting ongoing work (legacy behavior)
+  - **Default:** Deliver through shared atomic readiness when the registered harness owns an idle composer; queue a busy composer for later delivery
+  - **Force/autonomous recovery:** For manifest-confirmed supported CLI harnesses only, bypass preliminary queue routing so the shared atomic operation can replace the latest queued-input artifact when a syntactically complete generated AGM message header is observably bound inside that same current composer; pure API harnesses bypass irrelevant tmux state but require adapter status active or idle at the final common single-recipient or fan-out delivery boundary and reject adapter errors, suspended status, or terminated status without entering the tmux-only daemon queue, and no path may infer AGM ownership from a historical or partial header or an opaque Codex pasted-content chip, replace a human draft, or bypass generic busy, active-work, permission, overlay, onboarding, wrong-harness, missing-target, or backend-error states
   - **State-based routing:**
-    - READY state → Queue message (non-disruptive)
+    - READY state → Deliver to the exact verified pane
     - THINKING state → Queue message (wait for READY)
     - PERMISSION_PROMPT state → Queue message (wait for READY)
     - COMPACTING state → Reject with error (never interrupt compaction)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -150,8 +151,13 @@ func TestDetectAgentType(t *testing.T) {
 
 // mockAgentAdapter is a mock implementation of the Agent interface for testing
 type mockAgentAdapter struct {
-	sentMessages []agent.Message
-	sendError    error
+	sentMessages  []agent.Message
+	sendError     error
+	sendFunc      func(agent.SessionID, agent.Message) error
+	sessionStatus agent.Status
+	statusError   error
+	statusContext context.Context
+	sendContext   context.Context
 }
 
 func (m *mockAgentAdapter) Name() string {
@@ -175,16 +181,41 @@ func (m *mockAgentAdapter) TerminateSession(sessionID agent.SessionID) error {
 }
 
 func (m *mockAgentAdapter) GetSessionStatus(sessionID agent.SessionID) (agent.Status, error) {
-	return agent.StatusActive, nil
+	if m.statusError != nil {
+		return "", m.statusError
+	}
+	if m.sessionStatus == "" {
+		return agent.StatusActive, nil
+	}
+	return m.sessionStatus, nil
+}
+
+func (m *mockAgentAdapter) GetSessionStatusContext(ctx context.Context, sessionID agent.SessionID) (agent.Status, error) {
+	m.statusContext = ctx
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return m.GetSessionStatus(sessionID)
 }
 
 func (m *mockAgentAdapter) SendMessage(sessionID agent.SessionID, message agent.Message) error {
+	if m.sendFunc != nil {
+		return m.sendFunc(sessionID, message)
+	}
 	if m.sendError != nil {
 		return m.sendError
 	}
 
 	m.sentMessages = append(m.sentMessages, message)
 	return nil
+}
+
+func (m *mockAgentAdapter) SendMessageContext(ctx context.Context, sessionID agent.SessionID, message agent.Message) error {
+	m.sendContext = ctx
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return m.SendMessage(sessionID, message)
 }
 
 func (m *mockAgentAdapter) GetHistory(sessionID agent.SessionID) ([]agent.Message, error) {

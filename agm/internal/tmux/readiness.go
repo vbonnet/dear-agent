@@ -6,8 +6,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -15,6 +17,9 @@ const (
 	HarnessInputReady = "YES"
 	// HarnessInputBusy means the harness does not currently own an empty composer.
 	HarnessInputBusy = "QUEUE"
+	// HarnessInputQueuedAGM means a queued-input marker and complete AGM message
+	// header positively identify a stuck AGM paste in the current logical composer.
+	HarnessInputQueuedAGM = "QUEUED_AGM"
 	// HarnessInputPermission means a permission decision currently owns input.
 	HarnessInputPermission = "PERMISSION"
 	// HarnessInputOverlay means a harness overlay currently owns input.
@@ -38,10 +43,12 @@ type HarnessInputReadiness struct {
 }
 
 // InputDeliveryOptions controls narrowly scoped exceptions inside the tmux
-// mutation boundary. AllowBusyComposer accepts only HarnessInputBusy after the
-// expected foreground harness and exact pane have already been proved.
+// mutation boundary. AllowQueuedAGM accepts only a positively identified stuck
+// AGM paste after the expected foreground harness and exact pane are proved;
+// the implementation clears and re-proves that exact composer before replacing
+// the queued input.
 type InputDeliveryOptions struct {
-	AllowBusyComposer bool
+	AllowQueuedAGM bool
 }
 
 // CheckExpectedHarnessInput proves that the exact session exists, an expected
@@ -70,7 +77,7 @@ func CheckExpectedHarnessInput(ctx context.Context, sessionName, harness string)
 	if !liveness.HarnessAlive {
 		return HarnessInputReadiness{State: HarnessInputWrongHarness, TargetPane: pane.ID}, nil
 	}
-	styledContent, err := CapturePaneANSIOutputTargetContext(ctx, pane.ID, 30)
+	styledContent, err := CapturePaneLogicalANSIOutputTargetContext(ctx, pane.ID)
 	if err != nil {
 		return HarnessInputReadiness{}, fmt.Errorf("capture expected %s pane: %w", harness, err)
 	}
@@ -83,8 +90,8 @@ func CheckExpectedHarnessInput(ctx context.Context, sessionName, harness string)
 
 // CheckExpectedHarnessInputAndSend serializes the readiness observation and
 // exact-pane delivery under the same tmux mutation lock. A non-ready result
-// never sends input unless options explicitly allow the verified QUEUE state;
-// a ready result is returned only after delivery succeeds.
+// never sends input unless options explicitly allow a positively identified
+// stuck AGM paste; a ready result is returned only after delivery succeeds.
 func CheckExpectedHarnessInputAndSend(ctx context.Context, sessionName, harness, command string, options InputDeliveryOptions) (HarnessInputReadiness, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -105,36 +112,105 @@ func CheckExpectedHarnessInputAndSend(ctx context.Context, sessionName, harness,
 		if !allowed {
 			return nil
 		}
-		if forced {
-			readiness.Ready = true
-			readiness.Forced = true
-		}
 		if !isPaneID(readiness.TargetPane) {
 			return fmt.Errorf("ready harness returned invalid tmux pane ID %q", readiness.TargetPane)
+		}
+		if forced {
+			readiness.Ready = false
+			readiness.Forced = true
+			recovered, recoveryErr := replaceQueuedAGMInputLocked(ctx, readiness.TargetPane, command, queuedAGMRecoveryRuntime{
+				sendKey: sendReadinessKey,
+				wait:    sleepWithContext,
+				recheck: func() (HarnessInputReadiness, error) {
+					return CheckExpectedHarnessInput(ctx, sessionName, harness)
+				},
+				deliver: func(ctx context.Context, targetPane, command string) error {
+					return sendCommandToTargetForHarnessLocked(ctx, targetPane, command, harness)
+				},
+			})
+			if recoveryErr != nil {
+				return recoveryErr
+			}
+			readiness = recovered
+			return nil
 		}
 		return sendCommandToTargetForHarnessLocked(ctx, readiness.TargetPane, command, harness)
 	})
 	return readiness, err
 }
 
+type queuedAGMRecoveryRuntime struct {
+	sendKey func(context.Context, string, string) error
+	wait    func(context.Context, time.Duration) error
+	recheck func() (HarnessInputReadiness, error)
+	deliver func(context.Context, string, string) error
+}
+
+// replaceQueuedAGMInputLocked clears one positively identified AGM-owned
+// composer and proves that the same exact pane now owns an empty composer before
+// delivering its replacement. The caller must hold the tmux mutation lock.
+func replaceQueuedAGMInputLocked(ctx context.Context, targetPane, command string, runtime queuedAGMRecoveryRuntime) (HarnessInputReadiness, error) {
+	clearSteps := []struct {
+		key   string
+		pause time.Duration
+	}{
+		{key: "C-c", pause: 200 * time.Millisecond},
+		{key: "C-u", pause: 100 * time.Millisecond},
+		{key: "C-a"},
+		{key: "C-k", pause: 300 * time.Millisecond},
+	}
+	for _, step := range clearSteps {
+		if err := runtime.sendKey(ctx, targetPane, step.key); err != nil {
+			return HarnessInputReadiness{State: HarnessInputQueuedAGM, TargetPane: targetPane, Forced: true}, fmt.Errorf("clear queued AGM input with %s: %w", step.key, err)
+		}
+		if step.pause > 0 {
+			if err := runtime.wait(ctx, step.pause); err != nil {
+				return HarnessInputReadiness{State: HarnessInputQueuedAGM, TargetPane: targetPane, Forced: true}, fmt.Errorf("wait for queued AGM input clear: %w", err)
+			}
+		}
+	}
+
+	cleared, err := runtime.recheck()
+	if err != nil {
+		return HarnessInputReadiness{State: HarnessInputQueuedAGM, TargetPane: targetPane, Forced: true}, fmt.Errorf("recheck cleared queued AGM input: %w", err)
+	}
+	cleared.Forced = true
+	if cleared.TargetPane != targetPane {
+		cleared.Ready = false
+		return cleared, fmt.Errorf("queued AGM input moved from verified pane %q to %q while clearing", targetPane, cleared.TargetPane)
+	}
+	if !cleared.Ready || cleared.State != HarnessInputReady {
+		cleared.Ready = false
+		return cleared, fmt.Errorf("queued AGM input was not cleared on verified pane %q: state %s", targetPane, cleared.State)
+	}
+	if err := runtime.deliver(ctx, targetPane, command); err != nil {
+		cleared.Ready = false
+		return cleared, fmt.Errorf("deliver replacement to cleared pane %q: %w", targetPane, err)
+	}
+	return cleared, nil
+}
+
 func inputDeliveryAllowed(readiness HarnessInputReadiness, options InputDeliveryOptions) (allowed, forced bool) {
 	if readiness.Ready {
 		return true, false
 	}
-	if options.AllowBusyComposer && readiness.State == HarnessInputBusy {
+	if options.AllowQueuedAGM && readiness.State == HarnessInputQueuedAGM {
 		return true, true
 	}
 	return false, false
 }
 
 // ClassifyHarnessInput is the pure composer classifier. Readiness is scoped to
-// the configured harness and to the pane tail that currently owns input.
+// the configured harness. Queue identity uses the complete joined logical
+// composer; blockers and empty-composer readiness remain scoped to the pane
+// tail that currently owns input.
 func ClassifyHarnessInput(content, harness string) (bool, string, error) {
 	if err := validateReadinessHarness(harness); err != nil {
 		return false, "", err
 	}
 	styledTail := paneRawInputTail(content, 12)
 	tail := stripANSI(styledTail)
+	queuedInput, _ := classifyCurrentQueuedInput(content, harness)
 
 	// Pi's managed ready footer remains visible while its native confirmation
 	// dialog owns input. Treat that dialog as authoritative before consulting
@@ -158,7 +234,7 @@ func ClassifyHarnessInput(content, harness string) (bool, string, error) {
 	case "pi-cli":
 		ready = containsPiReadyPattern(tail)
 	}
-	if ready {
+	if ready && queuedInput == QueuedInputNone {
 		return true, HarnessInputReady, nil
 	}
 	if hasInputOverlay(tail, harness) {
@@ -170,7 +246,242 @@ func ClassifyHarnessInput(content, harness string) (bool, string, error) {
 	if hasTailOwnedPermissionPrompt(tail) {
 		return false, HarnessInputPermission, nil
 	}
+	if queuedInput == QueuedInputAGM {
+		return false, HarnessInputQueuedAGM, nil
+	}
 	return false, HarnessInputBusy, nil
+}
+
+// classifyCurrentQueuedInput scopes queue evidence to the registered harness's
+// latest composer. It downgrades an otherwise valid AGM header to human-owned
+// input unless the marker is on the current occupied composer and idle chrome
+// still owns the pane tail.
+func classifyCurrentQueuedInput(content, harness string) (QueuedInputType, string) {
+	region, anchorLine, ok := currentComposerInputRegion(content, harness)
+	if !ok {
+		return QueuedInputNone, ""
+	}
+	inputType, description := ClassifyQueuedInput(stripANSI(region))
+	if inputType != QueuedInputAGM {
+		if harness == "pi-cli" && inputType != QueuedInputNone && piQueuedMarkerIsHistorical(region) {
+			return QueuedInputNone, ""
+		}
+		return inputType, description
+	}
+	if harness == "pi-cli" && piQueuedMarkerIsHistorical(region) {
+		return QueuedInputNone, ""
+	}
+	if !hasQueuedInputMarker(stripANSI(anchorLine)) || !queuedComposerOwnsTail(region, content, harness) {
+		return QueuedInputHuman, "session has human input in progress - not sending. Retry later"
+	}
+	return inputType, description
+}
+
+func currentComposerInputRegion(content, harness string) (region, anchorLine string, ok bool) {
+	lines := strings.Split(content, "\n")
+	anchor := -1
+	for i, line := range lines {
+		plain := strings.TrimSpace(stripANSI(line))
+		if isCurrentComposerAnchor(plain, harness) {
+			candidate := strings.Join(lines[i:], "\n")
+			// Once a structural pasted-content marker owns the pane tail, all
+			// following lines are payload. Prompt glyphs inside that payload must
+			// not replace the composer anchor that introduced it.
+			if hasQueuedInputMarker(plain) && queuedComposerOwnsTail(candidate, content, harness) {
+				return candidate, lines[i], true
+			}
+			anchor = i
+		}
+	}
+	if anchor < 0 {
+		return "", "", false
+	}
+	return strings.Join(lines[anchor:], "\n"), lines[anchor], true
+}
+
+func isCurrentComposerAnchor(line, harness string) bool {
+	switch harness {
+	case "claude-code":
+		return strings.HasPrefix(line, "❯")
+	case "codex-cli":
+		return isCodexComposerAnchor(line)
+	case "agy":
+		return line == ">" || strings.HasPrefix(line, "> ") && hasQueuedInputMarker(line)
+	case "gemini-cli":
+		return isGeminiComposerAnchor(line)
+	case "opencode-cli":
+		return isOpenCodeComposerAnchor(line)
+	case "pi-cli":
+		return hasQueuedInputMarker(line)
+	default:
+		return false
+	}
+}
+
+func isCodexComposerAnchor(line string) bool {
+	return line == "›" || strings.HasPrefix(line, "› ") || line == ">" || strings.HasPrefix(line, "> [Pasted Content")
+}
+
+func queuedComposerOwnsTail(region, content, harness string) bool {
+	plainRegion := stripANSI(region)
+	if hasActiveSpinner(plainRegion) || strings.Contains(strings.ToLower(plainRegion), "esc to interrupt") {
+		return false
+	}
+	lines := strings.Split(strings.TrimSpace(plainRegion), "\n")
+	if len(lines) == 0 {
+		return false
+	}
+	switch harness {
+	case "claude-code":
+		return hasTerminalIdleFooter(lines, isClaudeIdleFooter) && queuedPastePayloadOwnsTail(lines, isClaudeIdleComposerChrome)
+	case "codex-cli":
+		// Codex keeps its model footer visible while a turn is active, and a
+		// queued paste replaces the empty cursor that would otherwise prove idle
+		// ownership. Only the compact first-turn composer can therefore prove the
+		// queue was pasted before any work began; post-turn queues fail closed.
+		return codexInitialQueuedComposerOwnsTail(stripANSI(content))
+	case "agy":
+		return queuedPastePayloadOwnsTail(lines, isTerminalIdleChrome)
+	case "gemini-cli":
+		return hasTerminalIdleFooter(lines, isGeminiIdleFooter) && queuedPastePayloadOwnsTail(lines, isTerminalIdleChrome)
+	case "opencode-cli":
+		return queuedPastePayloadOwnsTail(lines, isTerminalIdleChrome)
+	case "pi-cli":
+		return hasTerminalIdleFooter(lines, isPiReadyFooter) && queuedPastePayloadOwnsTail(lines, isPiIdleComposerChrome)
+	}
+	return false
+}
+
+var queuedPastedTextLinePattern = regexp.MustCompile(`\[Pasted text(?: #\d+)? \+(\d+) lines?\]`)
+var codexQueuedPasteCharPattern = regexp.MustCompile(`^[›>]\s+\[Pasted Content (\d+) chars\]$`)
+
+func queuedPastePayloadOwnsTail(lines []string, isChrome func(string) bool) bool {
+	if len(lines) == 0 {
+		return false
+	}
+	matches := queuedPastedTextLinePattern.FindStringSubmatch(lines[0])
+	if matches == nil {
+		return false
+	}
+	want, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return false
+	}
+	payload := lines[1:]
+	for len(payload) > 0 && isChrome(payload[len(payload)-1]) {
+		payload = payload[:len(payload)-1]
+	}
+	return len(payload) == want
+}
+
+func hasTerminalIdleFooter(lines []string, isFooter func(string) bool) bool {
+	for _, line := range slices.Backward(lines) {
+		if isDecorativeChromeLine(line) {
+			continue
+		}
+		return isFooter(line)
+	}
+	return false
+}
+
+func isClaudeIdleFooter(line string) bool {
+	lower := strings.ToLower(strings.TrimSpace(stripANSI(line)))
+	for _, marker := range []string{"? for shortcuts", "shift+tab to cycle", "bypass permissions on", "accept edits on", "plan mode on"} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func isGeminiIdleFooter(line string) bool {
+	lower := strings.ToLower(strings.TrimSpace(stripANSI(line)))
+	return strings.Contains(lower, "? for shortcuts") || strings.Contains(lower, "sandbox") && strings.Contains(lower, "gemini-")
+}
+
+func isPiIdleComposerChrome(line string) bool {
+	plain := strings.TrimSpace(stripANSI(line))
+	if isDecorativeChromeLine(plain) {
+		return true
+	}
+	return PiManagedState(plain) != "" || strings.Contains(plain, " • pi-") || strings.Contains(plain, "%/")
+}
+
+func isPiReadyFooter(line string) bool {
+	return PiManagedState(stripANSI(line)) == "ready"
+}
+
+func isDecorativeChromeLine(line string) bool {
+	line = strings.TrimSpace(stripANSI(line))
+	return line == "" || strings.Trim(line, "─━┄┈╌╍═│┃┆┊╎╏┌┐└┘├┤┬┴┼╭╮╰╯ ") == ""
+}
+
+func isGeminiComposerAnchor(line string) bool {
+	line = strings.TrimSpace(strings.Trim(strings.TrimSpace(line), "│"))
+	return strings.HasPrefix(line, ">") && (strings.Contains(strings.ToLower(line), "type your message") || hasQueuedInputMarker(line))
+}
+
+func isOpenCodeComposerAnchor(line string) bool {
+	line = strings.TrimSpace(strings.Trim(strings.TrimSpace(line), "│"))
+	switch line {
+	case ">", ">>", "❯":
+		return true
+	}
+	lower := strings.ToLower(line)
+	if strings.HasPrefix(line, ">") && (strings.Contains(lower, "type your message") || strings.Contains(lower, "type here") || hasQueuedInputMarker(line)) {
+		return true
+	}
+	return strings.HasPrefix(line, "❯") && (line == "❯" || hasQueuedInputMarker(line))
+}
+
+func piQueuedMarkerIsHistorical(region string) bool {
+	lines := strings.Split(strings.TrimSpace(stripANSI(region)), "\n")
+	return hasTerminalIdleFooter(lines, isPiReadyFooter) && !queuedPastePayloadOwnsTail(lines, isPiIdleComposerChrome)
+}
+
+func codexInitialQueuedComposerOwnsTail(content string) bool {
+	// capture-pane -p appends one framing newline. Remove only that terminator:
+	// trailing whitespace inside the queued payload contributes to Codex's
+	// native pasted-character extent and must remain observable.
+	lines := strings.Split(strings.TrimSuffix(content, "\n"), "\n")
+	for i, line := range lines {
+		if !strings.Contains(line, CodexPromptPatterns[0]) {
+			continue
+		}
+		for j := i + 1; j < len(lines) && j <= i+4; j++ {
+			if !strings.Contains(lines[j], CodexPromptPatterns[1]) {
+				continue
+			}
+			for k, tailLine := range lines[j+1:] {
+				candidate := strings.TrimSpace(tailLine)
+				switch {
+				case candidate == "":
+				case strings.HasPrefix(candidate, "│") && strings.HasSuffix(candidate, "│"):
+				case strings.HasPrefix(candidate, "╰") && strings.HasSuffix(candidate, "╯"):
+				case (strings.HasPrefix(candidate, "› ") || strings.HasPrefix(candidate, "> ")) && hasQueuedInputMarker(candidate):
+					return codexQueuedPastePayloadOwnsTail(lines[j+1+k:])
+				default:
+					return false
+				}
+			}
+		}
+	}
+	return false
+}
+
+func codexQueuedPastePayloadOwnsTail(lines []string) bool {
+	if len(lines) < 2 {
+		return false
+	}
+	matches := codexQueuedPasteCharPattern.FindStringSubmatch(strings.TrimSpace(lines[0]))
+	if matches == nil {
+		return false
+	}
+	want, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return false
+	}
+	return utf8.RuneCountInString(strings.Join(lines[1:], "\n")) == want
 }
 
 // CheckExpectedHarnessLiveness scans the exact session's process tree and
