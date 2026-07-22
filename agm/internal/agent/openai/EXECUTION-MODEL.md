@@ -1,7 +1,8 @@
 # OpenAI Execution Model Decision
 
-**Status**: Implemented (Phase 1)
+**Status**: Implemented legacy compatibility path
 **Date**: 2026-02-24
+**Last reviewed**: 2026-07-21
 **Task**: 1.5 - Determine Execution Model
 
 ---
@@ -16,12 +17,11 @@
 
 Based on Phase 0 research (see `OPENAI-EXECUTION-MODEL.md`):
 
-### Why API-Only
+### Why This Adapter Remains API-Only
 
-1. **No Official CLI**: OpenAI has no CLI tool equivalent to Claude/Gemini
-   - Claude: `claude` official CLI with tmux integration
-   - Gemini: `gemini` official CLI with tmux integration
-   - OpenAI: Only API available (no official CLI)
+1. **Separate execution contracts**: AGM now supports OpenAI Codex as the
+   `codex-cli` harness. This `openai` adapter remains the legacy Chat
+   Completions compatibility path, with local JSONL history and no tmux pane.
 
 2. **API is Primary Interface**:
    - Stable, documented, feature-rich
@@ -45,12 +45,12 @@ Based on Phase 0 research (see `OPENAI-EXECUTION-MODEL.md`):
 3. **Platform limitations**: Windows tmux support limited
 4. **Maintenance burden**: Custom CLI + API client maintenance
 
-### Codex CLI Optional
+### Codex CLI Separation
 
-If OpenAI releases an official CLI (e.g., enhanced Codex CLI):
-- Can be added as enhancement layer
-- Core API functionality remains unchanged
-- Adapter pattern supports both execution models
+Codex CLI is implemented as the separate `codex-cli` harness. It owns an
+interactive process, tmux composer readiness, and provider-native conversation
+identity. The `openai` harness owns direct API calls and local conversation
+history. Callers must not infer one execution model from the other.
 
 ---
 
@@ -75,15 +75,16 @@ OpenAIAdapter
     └── ExecuteCommand → Synthetic command translation
 ```
 
-### Streaming Support
+### Streaming Capability
 
-Streaming implemented via OpenAI API:
+The SDK and model capability helper can identify streaming support:
 - Server-Sent Events (SSE) for real-time responses
 - `stream: true` parameter in API requests
 - Delta chunks processed as they arrive
 - Supports partial response updates
 
-**Implementation**: Available in `github.com/sashabaranov/go-openai` SDK via `CreateChatCompletionStream()`
+The adapter's current `SendMessage` transaction uses complete responses;
+streaming delivery is not yet implemented.
 
 ### Synthetic Hooks
 
@@ -114,13 +115,17 @@ Since API-based execution has no shell access, hooks are **synthetic**:
 ```
 1. User types message in tmux/terminal
 2. AGM: Calls OpenAIAdapter.SendMessage(sessionID, message)
-3. SessionManager: Loads conversation history from JSONL
-4. SessionManager: Appends user message
-5. Client: Calls OpenAI API with full conversation context
-6. Client: Receives response (streaming or complete)
-7. SessionManager: Saves assistant response to JSONL
+3. Adapter: Acquires the store-scoped stable session lock
+4. SessionManager: Reloads completed conversation history from JSONL
+5. Client: Calls OpenAI API with completed history plus the new user message
+6. Client: Receives the complete response
+7. SessionManager: Atomically commits the user and assistant messages as one turn
 8. Hook: Fires MessageSent synthetic hook
 9. Return: Display response to user
+
+If completion fails, neither provisional message is persisted. AGM CLI sends
+also hold the global stable session-ID mutation lock across reconstruction,
+readiness, completion, and the completed-turn commit.
 ```
 
 ### Session Resumption
@@ -144,7 +149,7 @@ Since API-based execution has no shell access, hooks are **synthetic**:
 | **Process Management** | Lifecycle via tmux | Stateless API calls |
 | **Hooks** | Shell hooks in subprocess | Synthetic hooks in AGM process |
 | **Working Directory** | tmux pane CWD | Metadata-based context injection |
-| **Streaming** | Native CLI | SSE via API |
+| **Streaming** | Native CLI | SDK-capable; adapter delivery is currently complete-response |
 | **Cross-Platform** | Unix-only (limited Windows) | Windows/macOS/Linux |
 | **Complexity** | High (tmux + process mgmt) | Low (HTTP client) |
 
@@ -175,7 +180,7 @@ Since API-based execution has no shell access, hooks are **synthetic**:
 - [ ] Add context window management (pruning old messages)
 - [ ] Support Responses API (built-in tools, web search)
 - [ ] Implement Conversations API integration (server-side persistence)
-- [ ] Add support for Codex CLI if/when released
+- [x] Keep Codex CLI isolated in the separate `codex-cli` harness
 
 ### Optional
 - Custom REPL (if user requests interactive mode)

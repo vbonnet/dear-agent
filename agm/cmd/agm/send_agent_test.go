@@ -152,6 +152,7 @@ func TestDetectAgentType(t *testing.T) {
 type mockAgentAdapter struct {
 	sentMessages  []agent.Message
 	sendError     error
+	sendFunc      func(agent.SessionID, agent.Message) error
 	sessionStatus agent.Status
 	statusError   error
 }
@@ -187,6 +188,9 @@ func (m *mockAgentAdapter) GetSessionStatus(sessionID agent.SessionID) (agent.St
 }
 
 func (m *mockAgentAdapter) SendMessage(sessionID agent.SessionID, message agent.Message) error {
+	if m.sendFunc != nil {
+		return m.sendFunc(sessionID, message)
+	}
 	if m.sendError != nil {
 		return m.sendError
 	}

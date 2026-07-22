@@ -707,9 +707,9 @@ func sendDirectlyWithDependencies(ctx context.Context, recipientSession, senderN
 	if cfg != nil {
 		sessionsDir = cfg.SessionsDir
 	}
-	m, _, err := session.ResolveIdentifier(recipientSession, sessionsDir, adapter)
+	m, err := resolveDirectDeliveryManifest(recipientSession, sessionsDir, adapter)
 	if err != nil {
-		return fmt.Errorf("resolve %q for verified delivery: %w", recipientSession, err)
+		return err
 	}
 
 	// Determine delivery method based on harness type
@@ -747,6 +747,21 @@ func sendDirectlyWithDependencies(ctx context.Context, recipientSession, senderN
 	return nil
 }
 
+func resolveDirectDeliveryManifest(recipientSession, sessionsDir string, adapter *dolt.Adapter) (*manifest.Manifest, error) {
+	m, _, err := session.ResolveIdentifier(recipientSession, sessionsDir, adapter)
+	if err != nil {
+		return nil, fmt.Errorf("resolve %q for verified delivery: %w", recipientSession, err)
+	}
+	if m.Lifecycle != manifest.LifecycleArchived {
+		return m, nil
+	}
+	archivedName := m.Name
+	if archivedName == "" {
+		archivedName = recipientSession
+	}
+	return nil, ops.ErrSessionArchived(archivedName)
+}
+
 func newAPIHarnessAdapter(ctx context.Context, m *manifest.Manifest) (agent.Agent, error) {
 	switch m.Harness {
 	case "openai", "gpt":
@@ -768,20 +783,24 @@ func newAPIHarnessAdapter(ctx context.Context, m *manifest.Manifest) (agent.Agen
 func sendToAPIAgentIfReady(ctx context.Context, m *manifest.Manifest, recipientSession, senderName, messageID, formattedMessage, promptFile string, newAPIAgent apiAgentFactory) error {
 	// Pure API sessions intentionally have no tmux pane. Their adapter's session
 	// status is therefore the only delivery readiness authority shared by
-	// single-recipient and fan-out sends.
-	agentAdapter, err := newAPIAgent(ctx, m)
-	if err != nil {
-		return fmt.Errorf("create API harness adapter for %q: %w", recipientSession, err)
-	}
-	sessionID := agent.SessionID(m.SessionID)
-	status, err := agentAdapter.GetSessionStatus(sessionID)
-	if err != nil {
-		return fmt.Errorf("check API session %q readiness: %w", recipientSession, err)
-	}
-	if status != agent.StatusActive && status != agent.StatusIdle {
-		return fmt.Errorf("API session %q is not ready for direct delivery (status %s)", recipientSession, status)
-	}
-	return sendViaAgent(m, senderName, messageID, formattedMessage, promptFile, agentAdapter)
+	// single-recipient and fan-out sends. The stable session lock covers adapter
+	// reconstruction, readiness, provider completion, and history persistence so
+	// separate AGM processes cannot fork or corrupt one conversation.
+	return ops.WithSessionLockContext(ctx, m.SessionID, func() error {
+		agentAdapter, err := newAPIAgent(ctx, m)
+		if err != nil {
+			return fmt.Errorf("create API harness adapter for %q: %w", recipientSession, err)
+		}
+		sessionID := agent.SessionID(m.SessionID)
+		status, err := agentAdapter.GetSessionStatus(sessionID)
+		if err != nil {
+			return fmt.Errorf("check API session %q readiness: %w", recipientSession, err)
+		}
+		if status != agent.StatusActive && status != agent.StatusIdle {
+			return fmt.Errorf("API session %q is not ready for direct delivery (status %s)", recipientSession, status)
+		}
+		return sendViaAgent(m, senderName, messageID, formattedMessage, promptFile, agentAdapter)
+	})
 }
 
 func waitForAgyMetadataBackfill(ctx context.Context, sessionName string, wait func(context.Context, string, time.Duration) error) error {

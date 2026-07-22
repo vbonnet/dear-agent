@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/config"
@@ -418,6 +420,108 @@ func TestSingleAndMultiRecipientAPIDeliveryUsesAdapterReadiness(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestAPIDeliverySerializesReadinessCompletionAndPersistenceByStableSessionID(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := &manifest.Manifest{
+		SessionID: "stable-api-session-id",
+		Name:      "renamable-api-session",
+		Harness:   "openai",
+	}
+
+	var calls atomic.Int32
+	factoryEntered := make(chan int32, 2)
+	firstSendEntered := make(chan struct{}, 1)
+	releaseFirst := make(chan struct{})
+	factory := func(_ context.Context, _ *manifest.Manifest) (agent.Agent, error) {
+		call := calls.Add(1)
+		factoryEntered <- call
+		return &mockAgentAdapter{sendFunc: func(_ agent.SessionID, _ agent.Message) error {
+			if call == 1 {
+				firstSendEntered <- struct{}{}
+				<-releaseFirst
+			}
+			return nil
+		}}, nil
+	}
+
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- sendToAPIAgentIfReady(t.Context(), m, m.Name, "sender", "first-id", "first", "", factory)
+	}()
+	select {
+	case call := <-factoryEntered:
+		if call != 1 {
+			t.Fatalf("first factory call = %d, want 1", call)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("first adapter construction did not start")
+	}
+	select {
+	case <-firstSendEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first provider completion did not start")
+	}
+
+	secondDone := make(chan error, 1)
+	go func() {
+		secondDone <- sendToAPIAgentIfReady(t.Context(), m, m.Name, "sender", "second-id", "second", "", factory)
+	}()
+	select {
+	case call := <-factoryEntered:
+		close(releaseFirst)
+		t.Fatalf("adapter construction %d crossed the first session transaction", call)
+	case <-time.After(150 * time.Millisecond):
+	}
+	close(releaseFirst)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first delivery: %v", err)
+	}
+	select {
+	case call := <-factoryEntered:
+		if call != 2 {
+			t.Fatalf("second factory call = %d, want 2", call)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("second adapter construction did not start after first transaction")
+	}
+	if err := <-secondDone; err != nil {
+		t.Fatalf("second delivery: %v", err)
+	}
+}
+
+func TestDirectAPIDeliveryRejectsArchivedSessionBeforeAdapterConstruction(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	adapter, err := dolt.NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("open SQLite adapter: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+	if err := adapter.CreateSession(&manifest.Manifest{
+		SessionID: "archived-api-id",
+		Name:      "archived-api",
+		Harness:   "openai",
+		Lifecycle: manifest.LifecycleArchived,
+	}); err != nil {
+		t.Fatalf("create archived API session: %v", err)
+	}
+
+	factoryCalled := false
+	err = sendDirectlyWithDependencies(t.Context(), "archived-api-id", "sender", "message-id", "message", "", adapter, session.NewMockTmux(), func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+		factoryCalled = true
+		return &mockAgentAdapter{}, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "archived") {
+		t.Fatalf("archived API send error = %v, want archived rejection", err)
+	}
+	if factoryCalled {
+		t.Fatal("archived API send constructed an adapter")
+	}
+	if _, statErr := os.Stat(filepath.Join(homeDir, ".agm", "pending", "archived-api-id")); !os.IsNotExist(statErr) {
+		t.Fatalf("archived API send created a pending artifact: %v", statErr)
 	}
 }
 

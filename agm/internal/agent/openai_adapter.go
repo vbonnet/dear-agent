@@ -323,54 +323,40 @@ func (a *OpenAIAdapter) GetSessionStatus(sessionID SessionID) (Status, error) {
 // SendMessage sends a message to OpenAI and stores both the user message
 // and assistant response in the conversation history.
 //
-// This method:
-// 1. Adds user message to session history
-// 2. Retrieves full conversation history
-// 3. Sends to OpenAI API
-// 4. Stores assistant response
+// The complete history read, provider completion, and completed-turn commit are
+// serialized across adapter instances and processes. A failed completion does
+// not persist its provisional user message.
 func (a *OpenAIAdapter) SendMessage(sessionID SessionID, message Message) error {
-	// Verify session exists
-	_, err := a.sessionManager.GetSession(string(sessionID))
-	if err != nil {
-		return fmt.Errorf("session not found: %w", err)
-	}
+	return a.sessionManager.WithSessionLock(string(sessionID), func() error {
+		if _, err := a.sessionManager.GetSession(string(sessionID)); err != nil {
+			return fmt.Errorf("session not found: %w", err)
+		}
 
-	// Add user message to history
-	userMsg := openai.Message{
-		Role:      string(message.Role),
-		Content:   message.Content,
-		Timestamp: time.Now(),
-	}
+		history, err := a.sessionManager.GetMessages(string(sessionID))
+		if err != nil {
+			return fmt.Errorf("failed to get conversation history: %w", err)
+		}
+		userMsg := openai.Message{
+			Role:      string(message.Role),
+			Content:   message.Content,
+			Timestamp: time.Now(),
+		}
+		requestHistory := append(append([]openai.Message(nil), history...), userMsg)
 
-	if err := a.sessionManager.AddMessage(string(sessionID), userMsg); err != nil {
-		return fmt.Errorf("failed to add user message: %w", err)
-	}
-
-	// Get full conversation history for API call
-	history, err := a.sessionManager.GetMessages(string(sessionID))
-	if err != nil {
-		return fmt.Errorf("failed to get conversation history: %w", err)
-	}
-
-	// Send to OpenAI API
-	ctx := context.Background()
-	response, err := a.client.CreateChatCompletion(ctx, history)
-	if err != nil {
-		return fmt.Errorf("OpenAI API call failed: %w", err)
-	}
-
-	// Store assistant response
-	assistantMsg := openai.Message{
-		Role:      "assistant",
-		Content:   response.Content,
-		Timestamp: time.Now(),
-	}
-
-	if err := a.sessionManager.AddMessage(string(sessionID), assistantMsg); err != nil {
-		return fmt.Errorf("failed to add assistant response: %w", err)
-	}
-
-	return nil
+		response, err := a.client.CreateChatCompletion(context.Background(), requestHistory)
+		if err != nil {
+			return fmt.Errorf("OpenAI API call failed: %w", err)
+		}
+		assistantMsg := openai.Message{
+			Role:      "assistant",
+			Content:   response.Content,
+			Timestamp: time.Now(),
+		}
+		if err := a.sessionManager.AddMessages(string(sessionID), userMsg, assistantMsg); err != nil {
+			return fmt.Errorf("failed to commit completed OpenAI turn: %w", err)
+		}
+		return nil
+	})
 }
 
 // GetHistory retrieves conversation history for a session.

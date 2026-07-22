@@ -2,12 +2,17 @@ package openai
 
 import (
 	"bufio"
+	"bytes"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	agmlock "github.com/vbonnet/dear-agent/agm/internal/lock"
 )
 
 // SessionManager manages OpenAI conversation sessions with JSONL storage.
@@ -152,6 +157,13 @@ func (sm *SessionManager) ListSessions() []string {
 
 // AddMessage appends a message to the session's conversation history.
 func (sm *SessionManager) AddMessage(sessionID string, msg Message) error {
+	return sm.AddMessages(sessionID, msg)
+}
+
+// AddMessages atomically replaces the on-disk history with the prior history
+// plus all supplied messages. Callers use this to commit a completed
+// user/assistant turn without exposing a provisional user message.
+func (sm *SessionManager) AddMessages(sessionID string, messages ...Message) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -159,51 +171,80 @@ func (sm *SessionManager) AddMessage(sessionID string, msg Message) error {
 	if !exists {
 		return fmt.Errorf("session %s not found", sessionID)
 	}
-
-	// Set timestamp if not provided
-	if msg.Timestamp.IsZero() {
-		msg.Timestamp = time.Now()
+	if len(messages) == 0 {
+		return nil
 	}
 
-	// Append to in-memory cache
-	info.messages = append(info.messages, msg)
-	info.MessageCount++
-	info.UpdatedAt = time.Now()
+	currentMessages, err := sm.loadMessagesFromFile(sessionID)
+	if err != nil {
+		return err
+	}
+	committedMessages := append([]Message(nil), currentMessages...)
+	for _, message := range messages {
+		if message.Timestamp.IsZero() {
+			message.Timestamp = time.Now()
+		}
+		committedMessages = append(committedMessages, message)
+	}
 
-	// Append to JSONL file
-	if err := sm.appendMessageToFile(sessionID, msg); err != nil {
+	if err := sm.writeMessagesToFile(sessionID, committedMessages); err != nil {
 		return err
 	}
 
-	// Update metadata
-	return sm.saveMetadata(sessionID)
+	previousMessages := info.messages
+	previousMessageCount := info.MessageCount
+	previousUpdatedAt := info.UpdatedAt
+	info.messages = append([]Message(nil), committedMessages...)
+	info.MessageCount = len(committedMessages)
+	info.UpdatedAt = time.Now()
+	if err := sm.saveMetadata(sessionID); err != nil {
+		info.messages = previousMessages
+		info.MessageCount = previousMessageCount
+		info.UpdatedAt = previousUpdatedAt
+		rollbackErr := sm.writeMessagesToFile(sessionID, currentMessages)
+		return errors.Join(err, rollbackErr)
+	}
+
+	return nil
 }
 
 // GetMessages retrieves all messages for a session.
 func (sm *SessionManager) GetMessages(sessionID string) ([]Message, error) {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 
 	info, exists := sm.sessions[sessionID]
 	if !exists {
 		return nil, fmt.Errorf("session %s not found", sessionID)
 	}
 
-	// If messages are already loaded, return them
-	if len(info.messages) > 0 {
-		return info.messages, nil
-	}
-
-	// Otherwise load from file
-	sm.mu.RUnlock()
 	messages, err := sm.loadMessagesFromFile(sessionID)
-	sm.mu.RLock()
-
 	if err != nil {
 		return nil, err
 	}
+	info.messages = append([]Message(nil), messages...)
+	info.MessageCount = len(messages)
+	return append([]Message(nil), messages...), nil
+}
 
-	return messages, nil
+// WithSessionLock serializes one OpenAI session across adapter instances and
+// processes for the complete provider completion and history commit.
+func (sm *SessionManager) WithSessionLock(sessionID string, fn func() error) error {
+	digest := sha256.Sum256([]byte(sessionID))
+	lockPath := filepath.Join(sm.baseDir, ".locks", fmt.Sprintf("%x.lock", digest[:16]))
+	sessionLock, err := agmlock.New(lockPath)
+	if err != nil {
+		return fmt.Errorf("create OpenAI session lock: %w", err)
+	}
+	if err := sessionLock.Lock(); err != nil {
+		_ = sessionLock.Unlock()
+		return fmt.Errorf("acquire OpenAI session lock: %w", err)
+	}
+	// Unlock/close cannot safely turn a successfully persisted provider turn
+	// into a retryable send failure. The OS releases this advisory lock when the
+	// descriptor closes or the process exits.
+	defer func() { _ = sessionLock.Unlock() }()
+	return fn()
 }
 
 // UpdateTitle updates the session title.
@@ -312,25 +353,26 @@ func (sm *SessionManager) saveMetadata(sessionID string) error {
 	return nil
 }
 
-// appendMessageToFile appends a message to the JSONL file.
-func (sm *SessionManager) appendMessageToFile(sessionID string, msg Message) error {
+// writeMessagesToFile atomically replaces the session's JSONL history.
+func (sm *SessionManager) writeMessagesToFile(sessionID string, messages []Message) error {
 	messagesPath := sm.getMessagesPath(sessionID)
-
-	file, err := os.OpenFile(messagesPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
-		return fmt.Errorf("failed to open messages file: %w", err)
-	}
-	defer file.Close()
-
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return fmt.Errorf("failed to marshal message: %w", err)
+	var buffer bytes.Buffer
+	for _, message := range messages {
+		data, err := json.Marshal(message)
+		if err != nil {
+			return fmt.Errorf("failed to marshal message: %w", err)
+		}
+		buffer.Write(data)
+		buffer.WriteByte('\n')
 	}
 
-	if _, err := file.Write(append(data, '\n')); err != nil {
-		return fmt.Errorf("failed to write message: %w", err)
+	tempPath := messagesPath + ".tmp"
+	if err := os.WriteFile(tempPath, buffer.Bytes(), 0o600); err != nil {
+		return fmt.Errorf("failed to write messages: %w", err)
 	}
-
+	if err := os.Rename(tempPath, messagesPath); err != nil {
+		return fmt.Errorf("failed to replace messages: %w", err)
+	}
 	return nil
 }
 

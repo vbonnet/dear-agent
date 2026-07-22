@@ -5,6 +5,7 @@ This package provides a Go client for the OpenAI API with support for both stand
 ## Features
 
 - **Conversation History Support**: Send full conversation history with each request
+- **Completed-Turn Persistence**: Serialize sends across processes and atomically persist user/assistant turns only after provider success
 - **Error Classification**: Structured error types for better error handling
 - **Azure OpenAI Support**: Works with both OpenAI and Azure OpenAI endpoints
 - **Configuration Flexibility**: Environment variables or explicit configuration

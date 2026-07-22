@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -488,6 +489,40 @@ type mockOpenAIClient struct {
 	capturedModel    string
 }
 
+type blockingOpenAIClient struct {
+	response *openai.ChatCompletionResponse
+	entered  chan<- struct{}
+	release  <-chan struct{}
+
+	mu               sync.Mutex
+	capturedMessages []openai.Message
+}
+
+func (m *blockingOpenAIClient) CreateChatCompletion(ctx context.Context, messages []openai.Message) (*openai.ChatCompletionResponse, error) {
+	m.mu.Lock()
+	m.capturedMessages = append([]openai.Message(nil), messages...)
+	m.mu.Unlock()
+	m.entered <- struct{}{}
+	if m.release != nil {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-m.release:
+		}
+	}
+	return m.response, nil
+}
+
+func (m *blockingOpenAIClient) Model() string { return "gpt-4" }
+
+func (m *blockingOpenAIClient) IsAzure() bool { return false }
+
+func (m *blockingOpenAIClient) messages() []openai.Message {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]openai.Message(nil), m.capturedMessages...)
+}
+
 func (m *mockOpenAIClient) CreateChatCompletion(ctx context.Context, messages []openai.Message) (*openai.ChatCompletionResponse, error) {
 	m.callCount++
 	m.capturedMessages = append(m.capturedMessages, messages)
@@ -626,6 +661,13 @@ func TestSendMessage(t *testing.T) {
 				if err == nil {
 					t.Error("expected error, got nil")
 				}
+				history, historyErr := adapter.GetHistory(sessionID)
+				if historyErr != nil {
+					t.Fatalf("get history after failed completion: %v", historyErr)
+				}
+				if len(history) != 0 {
+					t.Fatalf("failed completion persisted provisional history: %#v", history)
+				}
 				return
 			}
 
@@ -648,6 +690,118 @@ func TestSendMessage(t *testing.T) {
 				t.Errorf("expected 1 API call, got %d", mockClient.callCount)
 			}
 		})
+	}
+}
+
+func TestSendMessageSerializesIndependentManagersAndCommitsCompleteTurns(t *testing.T) {
+	sessionsDir := t.TempDir()
+	creator, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create session manager: %v", err)
+	}
+	sessionID := SessionID("serialized-session")
+	if _, err := creator.CreateSession(string(sessionID), "gpt-4", t.TempDir()); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	firstManager, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("reconstruct first manager: %v", err)
+	}
+	secondManager, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("reconstruct second manager: %v", err)
+	}
+
+	firstEntered := make(chan struct{}, 1)
+	secondEntered := make(chan struct{}, 1)
+	releaseFirst := make(chan struct{})
+	firstClient := &blockingOpenAIClient{
+		response: &openai.ChatCompletionResponse{Content: "first response", Model: "gpt-4", FinishReason: "stop"},
+		entered:  firstEntered,
+		release:  releaseFirst,
+	}
+	secondClient := &blockingOpenAIClient{
+		response: &openai.ChatCompletionResponse{Content: "second response", Model: "gpt-4", FinishReason: "stop"},
+		entered:  secondEntered,
+	}
+	firstAdapter := newOpenAIAdapterWithClient(firstClient, firstManager)
+	secondAdapter := newOpenAIAdapterWithClient(secondClient, secondManager)
+
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- firstAdapter.SendMessage(sessionID, Message{Role: RoleUser, Content: "first request"})
+	}()
+	select {
+	case <-firstEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first completion did not start")
+	}
+
+	secondDone := make(chan error, 1)
+	go func() {
+		secondDone <- secondAdapter.SendMessage(sessionID, Message{Role: RoleUser, Content: "second request"})
+	}()
+	select {
+	case <-secondEntered:
+		close(releaseFirst)
+		t.Fatal("second completion started before the first completed turn committed")
+	case <-time.After(150 * time.Millisecond):
+	}
+	close(releaseFirst)
+
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first send: %v", err)
+	}
+	select {
+	case <-secondEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second completion did not start after the first committed")
+	}
+	if err := <-secondDone; err != nil {
+		t.Fatalf("second send: %v", err)
+	}
+
+	if got := secondClient.messages(); len(got) != 3 || got[0].Content != "first request" || got[1].Content != "first response" || got[2].Content != "second request" {
+		t.Fatalf("second completion context = %#v, want first completed turn plus second request", got)
+	}
+	reader, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("reconstruct history reader: %v", err)
+	}
+	history, err := reader.GetMessages(string(sessionID))
+	if err != nil {
+		t.Fatalf("read committed history: %v", err)
+	}
+	if len(history) != 4 {
+		t.Fatalf("committed history length = %d, want 4: %#v", len(history), history)
+	}
+}
+
+func TestSendMessageCompletionFailureLeavesHistoryUnchanged(t *testing.T) {
+	sessionsDir := t.TempDir()
+	sessionManager, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create session manager: %v", err)
+	}
+	sessionID := SessionID("failed-completion")
+	if _, err := sessionManager.CreateSession(string(sessionID), "gpt-4", t.TempDir()); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	adapter := newOpenAIAdapterWithClient(&mockOpenAIClient{
+		responses: []*openai.ChatCompletionResponse{nil},
+		errors:    []error{errors.New("provider unavailable")},
+	}, sessionManager)
+
+	if err := adapter.SendMessage(sessionID, Message{Role: RoleUser, Content: "must roll back"}); err == nil {
+		t.Fatal("failed completion error = nil")
+	}
+	history, err := adapter.GetHistory(sessionID)
+	if err != nil {
+		t.Fatalf("get history: %v", err)
+	}
+	if len(history) != 0 {
+		t.Fatalf("failed completion history = %#v, want empty", history)
 	}
 }
 
