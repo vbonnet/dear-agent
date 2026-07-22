@@ -188,6 +188,11 @@ func TestClassifyQueuedInputBindsCompleteHeaderToLatestMarker(t *testing.T) {
 			want:  QueuedInputAGM,
 		},
 		{
+			name:  "complete header with legacy valid reply-to",
+			input: "[Pasted text #1 +2 lines]\n[From: astrocyte | ID: 1774872000000-astrocyt-004 | Sent: 2026-03-30T08:00:00Z | Reply-To: notanumber-sender-001]\nHealth check",
+			want:  QueuedInputAGM,
+		},
+		{
 			name:  "historical AGM header cannot own newer human paste",
 			input: "[Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-001 | Sent: 2026-03-30T08:00:00Z]\nrecover\n[Pasted text #2 +1 lines]\nplease preserve my draft",
 			want:  QueuedInputHuman,

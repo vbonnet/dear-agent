@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/messages"
 )
 
 const maxPromptFileSize = 10 * 1024 // 10KB
@@ -239,7 +241,9 @@ func parseCompleteAGMHeader(line string) (string, bool) {
 	if _, err := time.Parse(time.RFC3339, strings.TrimSpace(matches[3])); err != nil {
 		return "", false
 	}
-	if matches[4] != "" && !validGeneratedMessageID(matches[4], "") {
+	// Reply-To is caller-supplied and follows the public message-ID contract,
+	// which intentionally accepts legacy IDs that are not generator-shaped.
+	if matches[4] != "" && !messages.ValidateMessageID(matches[4]) {
 		return "", false
 	}
 	return matches[1], true
