@@ -131,7 +131,7 @@ func run(c config) int {
 	diff, err := gitDiff(c.baseSHA, c.headSHA)
 	if err != nil {
 		fmt.Printf("::error::could not compute diff: %v\n", err)
-		return failClosed(c)
+		return failClosed(c, "the PR diff could not be computed")
 	}
 
 	// Empty diff: nothing to review (SPEC R11).
@@ -145,7 +145,7 @@ func run(c config) int {
 		msg := fmt.Sprintf("diff is %d bytes, over the %d-byte auto-review limit. Split the PR into smaller reviewable changes, or apply the 'ai-review:override' label after a human review.", len(diff), c.maxDiff)
 		fmt.Printf("::error::%s\n", msg)
 		postComment(c, oversizeComment(len(diff), c.maxDiff))
-		return failClosed(c)
+		return failClosed(c, "the diff exceeded the auto-review size limit")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
@@ -157,14 +157,14 @@ func run(c config) int {
 	if err != nil {
 		// Any dimension error fails closed (SPEC R5).
 		fmt.Printf("::error::a review dimension failed: %v\n", err)
-		return failClosed(c)
+		return failClosed(c, "a review dimension call failed")
 	}
 
 	outcome, synthesis, err := synthesize(ctx, client, c.model, c.effort, reports)
 	if err != nil {
 		// Synthesis error fails closed (SPEC R6).
 		fmt.Printf("::error::review synthesis failed: %v\n", err)
-		return failClosed(c)
+		return failClosed(c, "the review synthesis call failed")
 	}
 
 	// REVIEW.md §3 escalation is mandatory "regardless of finding severity", so
@@ -172,7 +172,7 @@ func run(c config) int {
 	changed, err := gitChangedPaths(c.baseSHA, c.headSHA)
 	if err != nil {
 		fmt.Printf("::error::could not list changed paths: %v\n", err)
-		return failClosed(c)
+		return failClosed(c, "the changed-path list could not be computed")
 	}
 	triggers := EscalationTriggers(changed, c.prBody, gitCommitMessages(c.baseSHA, c.headSHA))
 	if len(triggers) > 0 {
@@ -191,9 +191,14 @@ func run(c config) int {
 // failClosed returns the blocking exit code (1) for an intended failure, unless
 // the audited override label is present, in which case an operator has
 // consciously unblocked the merge and it returns 0.
-func failClosed(c config) int {
+//
+// Every override path posts a sticky comment (AIREV-03) so a check that passed
+// on human authority always carries a visible, auditable explanation of what
+// failed — a silent green check is exactly what this gate exists to prevent.
+func failClosed(c config, reason string) int {
 	if c.override {
 		fmt.Println("::warning::failure overridden by 'ai-review:override' label.")
+		postComment(c, overrideComment(reason))
 		return 0
 	}
 	return 1

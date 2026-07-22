@@ -22,7 +22,10 @@ on:
     # `labeled`/`unlabeled` matter: applying the documented `ai-review:override`
     # label must produce a NEW check run on the same head SHA, otherwise the
     # advertised escape hatch is unusable without an unrelated push.
-    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+    # `edited` matters: the PR body is an escalation input (the mandatory
+    # HUMAN REVIEW REQUIRED marker), so editing the description must re-run the
+    # gate rather than leave a stale pass on the current head SHA.
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled, edited]
     branches: [main]
   merge_group:
 
@@ -118,4 +121,19 @@ jobs:
           IS_FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
           OVERRIDE: ${{ steps.override.outputs.active }}
           PR_BODY: ${{ github.event.pull_request.body }}
-        run: go run ./cmd/ai-review
+        run: |
+          set -euo pipefail
+          # Bootstrap: the reviewer is deliberately run from the protected base
+          # revision, so on the rollout PR that first introduces cmd/ai-review
+          # the base has no such package. Fail closed with a clear message
+          # rather than a confusing missing-package error; the documented
+          # 'ai-review:override' label is the sanctioned path to land it.
+          if [ ! -d cmd/ai-review ]; then
+            if [ "${OVERRIDE:-false}" = "true" ]; then
+              echo "::warning::cmd/ai-review is absent from the trusted base revision (bootstrap); passing on 'ai-review:override'."
+              exit 0
+            fi
+            echo "::error::cmd/ai-review is absent from the trusted base revision. This is expected only on the rollout PR that introduces it: apply the 'ai-review:override' label after a human review to land it. Thereafter the gate runs from protected base code."
+            exit 1
+          fi
+          go run ./cmd/ai-review

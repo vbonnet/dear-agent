@@ -39,10 +39,18 @@ var escalationRules = []escalationRule{
 		},
 	},
 	{
-		reason: "pre/post-tool hook change",
+		reason: "pre/post-tool hook change or hook registration",
 		match: func(p string) bool {
-			base := basename(p)
-			return strings.Contains(p, "/hooks/") ||
+			lower := strings.ToLower(p)
+			base := basename(lower)
+			// Registration files (hooks.json) and the packages that own hook
+			// implementations must match too — a hooks.json has no "/hooks/"
+			// segment, and a hook implementation's basename is often main.go.
+			return strings.Contains(lower, "/hooks/") ||
+				strings.HasPrefix(lower, "hooks/") ||
+				base == "hooks.json" || base == "hooks.yaml" || base == "hooks.yml" ||
+				strings.Contains(lower, "-hooks/") ||
+				strings.Contains(lower, "/hooks.") ||
 				strings.HasPrefix(base, "pretool-") ||
 				strings.HasPrefix(base, "posttool-") ||
 				strings.HasPrefix(base, "sessionstart-") ||

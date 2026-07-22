@@ -13,6 +13,11 @@ func TestEscalationTriggers_Paths(t *testing.T) {
 		{"settings.json", []string{".claude/settings.json"}, true},
 		{"hook script", []string{".config/claude-code/hooks/pretool-bash-write-guard"}, true},
 		{"pretool prefix", []string{"cmd/pretool-fs-write-guard/main.go"}, true},
+		// Hook *registration* files have no "/hooks/" segment, and hook
+		// implementations are often named main.go under a -hooks/ owner dir.
+		{"agents hooks.json", []string{".agents/hooks.json"}, true},
+		{"codex hooks.json", []string{".codex/hooks.json"}, true},
+		{"agm-hooks impl", []string{"agm/cmd/agm-hooks/pretool-bash-blocker/main.go"}, true},
 		{"write guard", []string{"internal/writeguard/write-guard.go"}, true},
 		// The package that owns the boundary must escalate even though its
 		// filename contains none of the guard spellings.
