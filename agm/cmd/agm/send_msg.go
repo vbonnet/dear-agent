@@ -263,7 +263,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 		return runSendSingle(cmd.Context(), recipientSession)
 	}
 
-	// Multi-recipient path: resolve and deliver in parallel
+	// Multi-recipient path: resolve and deliver sequentially under shared tmux safety.
 	return runSendMulti(cmd.Context(), spec)
 }
 

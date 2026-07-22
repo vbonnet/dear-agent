@@ -23,13 +23,12 @@ if [ -z "$AGM_SESSION" ]; then
     exit 0
 fi
 
-# Claude exposes the UUID directly in some launch environments and always
-# includes it in the SessionStart JSON payload. Registration can still be in
-# flight for detached creation, so associate asynchronously with bounded retry
-# and report READY only after that durable write succeeds.
-CLAUDE_UUID=${CLAUDE_SESSION_ID:-}
+# The SessionStart payload identifies the session that actually invoked this
+# hook. A child Claude process can inherit CLAUDE_SESSION_ID from its parent, so
+# use the environment only when the authoritative payload omits a UUID.
+CLAUDE_UUID=$(printf '%s\n' "$HOOK_PAYLOAD" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
 if [ -z "$CLAUDE_UUID" ]; then
-    CLAUDE_UUID=$(printf '%s\n' "$HOOK_PAYLOAD" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+    CLAUDE_UUID=${CLAUDE_SESSION_ID:-}
 fi
 if [ -n "$CLAUDE_UUID" ]; then
     (

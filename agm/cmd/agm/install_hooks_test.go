@@ -47,7 +47,9 @@ func TestSessionStartHookAssociatesClaudeUUIDBeforeReadyState(t *testing.T) {
 	cmd.Env = append(os.Environ(),
 		"PATH="+binDir+":"+os.Getenv("PATH"),
 		"AGM_SESSION_NAME=current-claude",
-		"CLAUDE_SESSION_ID=",
+		// A newly launched child may inherit its parent's UUID. The payload UUID
+		// identifies the session that actually invoked this hook and must win.
+		"CLAUDE_SESSION_ID=550e8400-e29b-41d4-a716-446655440099",
 		"HOOK_CALL_LOG="+logPath,
 		"BASH_ENV=",
 	)
