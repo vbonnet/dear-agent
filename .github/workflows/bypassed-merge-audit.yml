@@ -68,6 +68,18 @@ jobs:
           pr_count=$(echo "$merged_prs" | jq length)
           echo "Found ${pr_count} merged PRs in the window."
 
+          # Resolve the checks actually required on main. The legacy branch
+          # protection endpoint omits repository rulesets, so use the
+          # effective-rules endpoint rather than treating every check run as
+          # required. That keeps advisory bot failures visible in their own
+          # workflows without creating a false bypassed-merge finding.
+          required_checks=$(gh api "repos/${REPO}/rules/branches/main" \
+            --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[]?.context] | unique') || {
+              echo "::error::Could not resolve the required checks for main; refusing to classify merges."
+              exit 1
+            }
+          echo "Required checks: ${required_checks}"
+
           findings=""
 
           while IFS= read -r pr_json; do
@@ -84,8 +96,9 @@ jobs:
 
             # Checks that completed with a non-success conclusion BEFORE the merge.
             red=$(echo "$check_runs" | jq -r \
+              --argjson required "$required_checks" \
               --arg merged "$merged_at" \
-              '[.[] | select(
+              '[.[] | select(.name as $name | ($required | index($name)) != null) | select(
                   .status == "completed" and
                   (.conclusion // "") != "" and
                   (.conclusion // "") != "success" and
@@ -96,8 +109,9 @@ jobs:
 
             # Checks that were still running (started but not completed) at merge time.
             pending=$(echo "$check_runs" | jq -r \
+              --argjson required "$required_checks" \
               --arg merged "$merged_at" \
-              '[.[] | select(
+              '[.[] | select(.name as $name | ($required | index($name)) != null) | select(
                   (.started_at // "z") <= $merged and
                   (.status != "completed" or (.completed_at // "z") > $merged)
               ) | .name] | join(", ")')
@@ -129,7 +143,7 @@ jobs:
         run: |
           set -euo pipefail
           title="bypassed-merge: PRs merged with failing or pending required checks"
-          body="The Bypassed Merge Audit detected PRs merged to \`main\` while CI checks were not all green:
+          body="The Bypassed Merge Audit detected PRs merged to \`main\` while required CI checks were not all green:
 
           ${findings}
 

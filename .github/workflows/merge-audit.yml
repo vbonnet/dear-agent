@@ -53,11 +53,16 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Find the PR whose squash/merge produced this commit.
-          pr_num=$(timeout 30 gh pr list \
-            --repo "$REPO" --state merged --base main --limit 50 \
-            --json number,mergeCommit \
-            --jq "[.[] | select(.mergeCommit.oid==\"${SHA}\")][0].number // empty")
+          # Resolve PR association from the pushed commit itself. A bounded PR
+          # list becomes incomplete during merge bursts and can turn a valid
+          # PR merge into a false direct-push alert.
+          pr_num=$(timeout 30 gh api \
+            -H "Accept: application/vnd.github+json" \
+            "repos/${REPO}/commits/${SHA}/pulls?per_page=100" \
+            --jq '[.[] | select(.merged_at != null and .base.ref == "main")][0].number // empty') || {
+              echo "::error::Could not resolve pull-request association for ${SHA}; refusing to classify it as a direct push."
+              exit 1
+            }
 
           findings=""
 
