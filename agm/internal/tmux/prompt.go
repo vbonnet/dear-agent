@@ -232,9 +232,20 @@ func extractSender(headerLine string) string {
 // Bug fix (2026-03-14): Added shouldInterrupt parameter to make ESC sending conditional.
 // ESC interrupts Claude's thinking state, which should only happen when explicitly requested.
 // When shouldInterrupt=false, prompts are queued instead of interrupting.
-//
-//nolint:gocyclo // reason: linear protocol — capture pane, optional ESC, load-buffer, paste-buffer, C-m, retry — extracting each step into a helper would obscure the linear flow.
 func SendPromptLiteral(target, prompt string, shouldInterrupt bool) error {
+	return sendPromptLiteral(target, prompt, shouldInterrupt, "")
+}
+
+// SendPromptLiteralForHarness sends prompt text using the terminal paste
+// semantics required by harness. AGY's composer enables bracketed paste and
+// treats carriage returns as submissions, so tmux must preserve embedded line
+// feeds (-r) and wrap the paste when requested by the application (-p).
+func SendPromptLiteralForHarness(target, prompt string, shouldInterrupt bool, harness string) error {
+	return sendPromptLiteral(target, prompt, shouldInterrupt, harness)
+}
+
+//nolint:gocyclo // reason: linear protocol — capture pane, optional ESC, load-buffer, paste-buffer, C-m, retry — extracting each step into a helper would obscure the linear flow.
+func sendPromptLiteral(target, prompt string, shouldInterrupt bool, harness string) error {
 	ctx := context.Background()
 	socketPath := GetSocketPath()
 
@@ -344,8 +355,10 @@ func SendPromptLiteral(target, prompt string, shouldInterrupt bool) error {
 		}
 		bufferLoaded = true
 
-		// Paste buffer to session (atomic operation, -d deletes buffer after paste)
-		cmdPaste, cancel2 := CommandWithTimeout(ctx, timeout, "tmux", "-S", socketPath, "paste-buffer", "-b", "agm-cmd", "-t", normalizedTarget, "-d")
+		// Paste buffer to session atomically. AGY needs raw bracketed paste: tmux's
+		// default LF-to-CR conversion submits the attribution header as a complete
+		// request and leaves the message body behind in the composer.
+		cmdPaste, cancel2 := CommandWithTimeout(ctx, timeout, "tmux", pasteBufferArgs(socketPath, normalizedTarget, harness)...)
 		defer cancel2()
 		if err := cmdPaste.Run(); err != nil {
 			if ctx.Err() == context.DeadlineExceeded {
@@ -376,6 +389,14 @@ func SendPromptLiteral(target, prompt string, shouldInterrupt bool) error {
 
 		return nil
 	})
+}
+
+func pasteBufferArgs(socketPath, target, harness string) []string {
+	deleteFlag := "-d"
+	if harness == "agy" {
+		deleteFlag = "-dpr"
+	}
+	return []string{"-S", socketPath, "paste-buffer", "-b", "agm-cmd", "-t", target, deleteFlag}
 }
 
 // checkPaneForQueuedInput examines an ANSI pane capture and returns an error if

@@ -130,6 +130,45 @@ func TestMultiRecipientDeliveryUsesSharedAtomicReadiness(t *testing.T) {
 	}
 }
 
+func TestMultiRecipientAgyDeliveryUsesSharedAtomicReadiness(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	adapter, err := dolt.NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("open SQLite adapter: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+	if err := adapter.CreateSession(&manifest.Manifest{
+		SessionID: "agy-multi-send-id",
+		Name:      "agy-multi-send",
+		Harness:   "agy",
+		Tmux:      manifest.Tmux{SessionName: "agy-multi-send-tmux"},
+		Agy:       &manifest.Agy{ConversationID: "agy-native-conversation"},
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	tmuxClient := session.NewMockTmux()
+	tmuxClient.InputReadiness = session.InputReadiness{Ready: true, State: "YES", PaneID: "%12"}
+	job := &send.DeliveryJob{
+		Recipient:        "agy-multi-send",
+		Sender:           "sender",
+		MessageID:        "agy-multi-message-id",
+		FormattedMessage: "header\nmessage body",
+	}
+
+	if err := deliveryFuncWithDependencies(t.Context(), job, adapter, tmuxClient); err != nil {
+		t.Fatalf("deliveryFuncWithDependencies() error = %v", err)
+	}
+	if got, want := tmuxClient.AtomicInputChecks, []string{"agy-multi-send-tmux:agy"}; !slices.Equal(got, want) {
+		t.Fatalf("atomic input checks = %v, want %v", got, want)
+	}
+	if got, want := tmuxClient.ExactPaneDeliveries, []string{"%12"}; !slices.Equal(got, want) {
+		t.Fatalf("exact-pane deliveries = %v, want %v", got, want)
+	}
+	if got, want := tmuxClient.SentCommands, []string{"header\nmessage body"}; !slices.Equal(got, want) {
+		t.Fatalf("sent commands = %v, want %v", got, want)
+	}
+}
+
 func TestDirectCLIDeliveryRejectsUnregisteredTmuxSession(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	adapter, err := dolt.NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))

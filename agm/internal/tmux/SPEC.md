@@ -100,6 +100,8 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-46** When shared input readiness or pane liveness checks verify tmux session existence, the system shall classify only an explicit missing-target response as absence and shall return inaccessible-socket, unavailable-server, timeout, permission, and other backend failures instead of reporting `NOT_FOUND` or a dead session.
 
+**TMUX-47** When a multiline prompt is delivered to AGY, including through the atomic exact-pane delivery boundary, the system shall ask tmux to preserve line feeds and emit bracketed-paste delimiters when the application requested them, then send one Enter after the complete paste; other harnesses shall retain the established paste behavior.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
@@ -110,6 +112,8 @@ because the tmux server's own cwd has been deleted.
 - Package tests: `agm/internal/tmux/linger_test.go`
 - Package tests: `agm/internal/tmux/capture_test.go`
 - Package tests: `agm/internal/tmux/agy_prompt_test.go`
+- Package tests: `agm/internal/tmux/prompt_test.go`
+- Integration tests: `agm/internal/tmux/agy_lifecycle_integration_test.go`
 - Package tests: `agm/internal/tmux/pi_prompt_test.go`
 - Package tests: `agm/internal/tmux/readiness_test.go`
 - Integration tests: `agm/internal/session/tmux_real_readiness_test.go`

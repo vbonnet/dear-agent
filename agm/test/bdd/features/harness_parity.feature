@@ -396,6 +396,11 @@ Feature: Harness parity
     When AGM runs send safety for the configured harness
     Then send safety should not require a Claude process
 
+  Scenario: AGY attributed multiline delivery remains one native request
+    Given AGY is available
+    When AGM validates AGY multiline delivery
+    Then every AGY message surface should preserve one bracketed multiline submission
+
   Scenario Outline: Pi and OpenCode send safety is harness-specific
     Given harness "<harness>" is configured
     When AGM runs send safety for the configured harness

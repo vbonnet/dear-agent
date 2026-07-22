@@ -11,7 +11,7 @@
 
 **Version:** 2.0
 **Status:** Production (Phase 6 Complete - Dolt-Only Architecture, YAML Backend Removed)
-**Last Updated:** 2026-07-19
+**Last Updated:** 2026-07-21
 
 ## Overview
 
@@ -116,6 +116,8 @@ Provide a production-ready CLI that:
 **CLI-42** When sandbox onboarding is enabled for a nested harness working directory, the system shall render onboarding template workspace-root data from the provider's merged path while writing the generated instructions to the harness working directory's project-scoped configuration.
 
 **CLI-43** When automatic workspace discovery finds repositories that do not contain the requested project directory, the system shall retain those repositories, prepend the nearest Git repository containing the requested directory, and reject sandbox creation if the requested directory has no safe containing Git repository.
+
+**CLI-44** When direct, fan-out, structured, daemon-queued, or fresh-startup delivery targets an AGY session, the command shall propagate the resolved `agy` harness through the shared tmux delivery boundary so attribution and multiline bodies remain one native request; unresolved and non-AGY sessions shall retain their established delivery semantics.
 
 ## Requirements
 

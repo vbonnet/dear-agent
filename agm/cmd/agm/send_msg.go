@@ -47,10 +47,31 @@ var (
 	msgAutonomous          bool   // --autonomous flag: session is unattended, skip human_typing detection
 )
 
-var sendMultiLinePromptSafeContext = tmux.SendMultiLinePromptSafeContext
+var sendMultiLinePromptSafeForHarnessContext = tmux.SendMultiLinePromptSafeForHarnessContext
+var resolveSendRecipientHarness = bestEffortSendRecipientHarness
 
 func sendStructuredPrompt(ctx context.Context, recipient, message string, shouldInterrupt bool) error {
-	return sendMultiLinePromptSafeContext(ctx, recipient, message, shouldInterrupt)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return sendMultiLinePromptSafeForHarnessContext(ctx, recipient, message, shouldInterrupt, resolveSendRecipientHarness(recipient))
+}
+
+func bestEffortSendRecipientHarness(recipient string) string {
+	adapter, err := getStorage()
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = adapter.Close() }()
+	sessionsDir := ""
+	if cfg != nil {
+		sessionsDir = cfg.SessionsDir
+	}
+	m, _, err := session.ResolveIdentifier(recipient, sessionsDir, adapter)
+	if err != nil {
+		return ""
+	}
+	return m.Harness
 }
 
 // Priority levels and their instructions injected into message headers

@@ -348,6 +348,9 @@ creation, and terminal state detection.
   workspace lock before registration, remain out of process arguments, and are
   marked consumed so CLI, MCP, adapter, and completion paths deliver them only
   once; missing prompts and bootstrap failures fail before durable success.
+- AGY direct, fan-out, queued-daemon, structured, and fresh-startup message
+  surfaces preserve attribution plus multiline bodies as one bracketed native
+  composer submission while retaining legacy paste behavior for other harnesses.
 - AGY creation normalizes relative workspaces and shares cancellation-aware
   native identity serialization across CLI, MCP, and adapter lifecycle paths;
   launch, resume, and history reject unsafe provider identifiers before
