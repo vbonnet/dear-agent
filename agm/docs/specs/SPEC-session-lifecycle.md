@@ -35,7 +35,11 @@ Manages the full lifecycle of AGM sessions: creation (via `agm session new` / `a
 1. Resolve identifier to manifest (tries: session ID -> tmux name -> manifest Name; skips archived)
 2. Health check (`CheckHealth`) — validates working directory exists, checks for Claude Code session file bloat (>100MB / >1000 progress entries)
 3. Ensure tmux session exists; create if missing
-4. If Claude not already running: send `cd <project> && claude --resume <uuid> && exit` to tmux
+4. If Claude is not already running, the invoking AGM process stages its
+   selected authentication and telemetry snapshot in an owner-only one-shot
+   handoff and sends a non-secret command for the absolute AGM private executor
+   to tmux; after consuming the handoff, the executor changes to the project
+   directory and directly replaces itself with `claude --resume <uuid>`
 5. Wait up to 5s for Claude readiness
 6. Update `UpdatedAt` in Dolt
 7. Display transcript context (last 3 exchanges)
