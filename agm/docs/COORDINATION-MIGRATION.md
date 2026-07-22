@@ -381,7 +381,10 @@ cp -r "$BACKUP_DIR/sessions" ~/.agm/sessions
 sqlite3 ~/.agm/queue.db ".restore '$BACKUP_DIR/queue.db'"
 
 # Restore hooks
-cp -r "$BACKUP_DIR/claude-hooks"/* ~/.claude/hooks/
+# rsync, not cp: it writes each file to a temporary name and renames it into
+# place, so a hook that is compiled and already running is never overwritten
+# in place (ce-77ip.8). A glob copy can expand to binaries.
+rsync -a "$BACKUP_DIR/claude-hooks/" ~/.claude/hooks/
 
 # Restart daemon
 systemctl --user start agm-daemon

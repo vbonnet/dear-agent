@@ -324,16 +324,21 @@ func clauseMentions(body string) []mention {
 	return out
 }
 
-// scriptOrGlob matches a copy source that is immune to the stale-signature kill
-// -- an interpreted file, or a glob (a directory restore, not a binary install).
-var scriptOrGlob = regexp.MustCompile(`(?:\.(?:sh|py|rb|pl|js|ts|bash|zsh)$|\*)`)
+// scriptExtension matches a copy source that is immune to the stale-signature
+// kill because it is interpreted.
+//
+// A glob is NOT immune and is deliberately absent: `cp bin/* /usr/local/bin/`
+// expands to whatever is in that directory, Mach-O binaries included, so
+// exempting a command merely for containing `*` waved through exactly the
+// overwrite this guard exists to catch.
+var scriptExtension = regexp.MustCompile(`\.(?:sh|py|rb|pl|js|ts|bash|zsh)$`)
 
 // flagTakesArg lists install(1) flags whose following token is a value, not a
 // source path.
 var flagTakesArg = map[string]bool{"-m": true, "-o": true, "-g": true, "--mode": true, "--owner": true, "--group": true}
 
-// allSourcesInterpreted reports whether EVERY source operand of a copy is a
-// script or a glob.
+// allSourcesInterpreted reports whether EVERY source operand of a copy is an
+// interpreted script.
 //
 // Checking "any source is interpreted" was bypassable: `cp hook.sh agm
 // /usr/local/bin/` exempted the whole command on hook.sh while agm was
@@ -375,7 +380,7 @@ func allSourcesInterpreted(repoRoot, cmd string) bool {
 	return true
 }
 
-// isInterpretedSource reports whether a copy source is a script or a glob.
+// isInterpretedSource reports whether a copy source is an interpreted script.
 //
 // Extension alone is not enough: this repository has many tracked, executable,
 // EXTENSIONLESS shebang scripts (.claude/hooks/*, scripts/codegraph), and
@@ -385,7 +390,7 @@ func allSourcesInterpreted(repoRoot, cmd string) bool {
 // shebang. A path that is not a tracked text file (a build output such as
 // `agm`) stays classified as a binary, which is the safe default.
 func isInterpretedSource(repoRoot, src string) bool {
-	if scriptOrGlob.MatchString(src) {
+	if scriptExtension.MatchString(src) {
 		return true
 	}
 	raw, err := os.ReadFile(filepath.Join(repoRoot, filepath.Clean(src)))
