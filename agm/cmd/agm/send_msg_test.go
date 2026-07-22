@@ -399,6 +399,23 @@ func TestMultiRecipientDeliveryRenewsDeadlinePerRecipient(t *testing.T) {
 	}
 }
 
+func TestMultiRecipientDeliveryAllowsFullProviderDeadline(t *testing.T) {
+	jobs := []*send.DeliveryJob{{Recipient: "api", MessageID: "api-message"}}
+	results := deliverMultiRecipientJobs(t.Context(), jobs, agent.OpenAIDeliveryTimeout, func(ctx context.Context, _ *send.DeliveryJob) error {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("multi-recipient API delivery context has no deadline")
+		}
+		if remaining := time.Until(deadline); remaining <= agent.OpenAICompletionTimeout {
+			t.Fatalf("multi-recipient API delivery budget = %s, must exceed provider ceiling %s", remaining, agent.OpenAICompletionTimeout)
+		}
+		return nil
+	})
+	if len(results) != 1 || !results[0].Success {
+		t.Fatalf("multi-recipient API result = %#v, want success", results)
+	}
+}
+
 func TestSingleAndMultiRecipientAPIDeliveryUsesAdapterReadiness(t *testing.T) {
 	adapter, err := dolt.NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
 	if err != nil {

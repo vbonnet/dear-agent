@@ -35,7 +35,9 @@ reloads lifecycle before adapter construction and shares that boundary with
 archive: an in-flight completed turn commits before archive, or delivery sees
 the reaping or archived lifecycle before paid provider work. The lock wait and provider
 completion honor request cancellation, and the provider call has a finite
-ceiling. Direct adapter callers use a context-aware store-scoped session lock
+ceiling. Each sequential fan-out recipient receives a fresh outer deadline
+with preflight headroom so reconstruction and readiness cannot consume the
+adapter's complete provider budget. Direct adapter callers use a context-aware store-scoped session lock
 and the same provider ceiling. Provider failures, cancellation, and timeouts
 leave no provisional user message in durable history.
 
@@ -46,6 +48,10 @@ later process reconstruction even when another process updated those fields.
 Completed-turn commits reload the same metadata before updating history counts,
 and every title, directory, or runtime-configuration writer participates in the
 same lock and applies only its requested field.
+Valid JSONL message records are reloaded without the standard scanner token
+limit, so a long prompt or response cannot make the next append, read, or clear
+transaction fail. Import converts a parsed conversation once and persists the
+complete batch with one history transaction; an empty import performs none.
 
 ## Error Code Catalog
 

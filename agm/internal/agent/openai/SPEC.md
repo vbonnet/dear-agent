@@ -39,6 +39,10 @@ errors for callers that need harness-neutral failure handling.
 
 **OAI-14** When an OpenAI adapter is reconstructed or its readiness is checked for a request-scoped delivery, the system shall use the caller context while waiting for the authoritative store lock, shall return cancellation or deadline errors without reporting the session terminated, and shall not retain the surrounding lifecycle lock after the request is canceled.
 
+**OAI-15** When OpenAI session history contains a valid JSONL message record larger than the default scanner token limit, the system shall reload the complete record for append, read, and clear transactions without making the session unusable.
+
+**OAI-16** When importing a parsed OpenAI conversation, the system shall convert the complete message batch once and persist it with at most one history transaction; an empty import shall not perform a history transaction.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

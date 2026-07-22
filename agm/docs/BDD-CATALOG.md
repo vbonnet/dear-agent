@@ -243,7 +243,9 @@ creation, and terminal state detection.
   before any tmux probe, while both single-recipient and fan-out delivery
   restore the session's persisted model, storage locator, endpoint, and Azure
   settings without persisting credentials. Every sequential fan-out recipient
-  receives a fresh finite deadline that still inherits caller cancellation.
+  receives a fresh finite deadline that still inherits caller cancellation and
+  leaves the adapter its complete provider budget after reconstruction and
+  readiness preflight.
   Under the same stable session-ID
   boundary as archive, delivery reloads lifecycle before adapter construction,
   rejects reaping and archived sessions, and uses a provider-appropriate wait, so archive linearizes before or after
@@ -258,6 +260,10 @@ creation, and terminal state detection.
   transaction lock, including updates made by another process. Completed-turn
   commits reload the same metadata, and title, directory, and runtime-setting
   writers serialize on that lock and apply only their requested field.
+- OpenAI-compatible history reload accepts valid JSONL records larger than the
+  standard scanner token limit. Conversation import converts the parsed batch
+  once and persists it with one history transaction, while an empty import
+  performs no history transaction.
 - Shared startup readiness honors its total deadline while a slow launch
   wrapper still owns the pane, but fails promptly if an already-observed
   harness process later stops.

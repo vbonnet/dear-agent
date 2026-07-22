@@ -2,7 +2,7 @@
 
 **Status**: Implemented compatibility adapter; public creation unsupported
 **Date**: 2026-02-24
-**Last reviewed**: 2026-07-21
+**Last reviewed**: 2026-07-22
 **Task**: 1.5 - Determine Execution Model
 
 ---
@@ -123,7 +123,9 @@ Since API-based execution has no shell access, hooks are **synthetic**:
 3. AGM reloads the current manifest and verifies that it is active
 4. AGM reconstructs the adapter from persisted non-secret runtime settings
 5. The adapter obtains credentials from current runtime configuration
-6. AGM verifies adapter readiness and performs bounded direct API delivery
+6. AGM verifies adapter readiness and performs bounded direct API delivery;
+   fan-out gives each recipient an outer budget with headroom beyond the
+   adapter's provider-completion ceiling
 7. The adapter atomically commits the completed turn to local JSONL history
 ```
 
@@ -162,6 +164,10 @@ There is no public CLI resume or attach operation for this process-free adapter.
 During delivery, or when a direct Go caller reconstructs an adapter, the
 session manager loads `metadata.json` and `messages.jsonl` on demand. This
 restores the completed conversation context without attaching to a process.
+The JSONL reader supports valid records larger than `bufio.Scanner`'s default
+token limit, so a long prompt or model response does not poison later reads,
+appends, or clears. Import converts all parsed messages once and commits the
+batch in one history transaction; an empty import performs no history write.
 
 ---
 

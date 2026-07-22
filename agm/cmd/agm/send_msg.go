@@ -968,7 +968,7 @@ func runSendMulti(ctx context.Context, spec *send.RecipientSpec) (retErr error) 
 	}
 
 	tmuxClient := session.NewRealTmux()
-	results := deliverMultiRecipientJobs(ctx, jobs, agent.OpenAICompletionTimeout, func(ctx context.Context, job *send.DeliveryJob) error {
+	results := deliverMultiRecipientJobs(ctx, jobs, agent.OpenAIDeliveryTimeout, func(ctx context.Context, job *send.DeliveryJob) error {
 		return deliveryFuncWithDependencies(ctx, job, adapter, tmuxClient)
 	})
 

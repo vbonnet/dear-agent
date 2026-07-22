@@ -335,6 +335,11 @@ func (a *OpenAIAdapter) SendMessage(sessionID SessionID, message Message) error 
 // completed-turn transaction, including a contended store-lock wait.
 const OpenAICompletionTimeout = 2 * time.Minute
 
+// OpenAIDeliveryTimeout bounds the surrounding reconstruction, readiness, and
+// stable lifecycle transaction while leaving the adapter its full completion
+// ceiling after preflight.
+const OpenAIDeliveryTimeout = OpenAICompletionTimeout + time.Minute
+
 // SendMessageContext is the request-aware OpenAI delivery transaction. The
 // adapter applies a finite provider ceiling even when a legacy direct caller
 // supplies a background context, so a stalled provider cannot retain the

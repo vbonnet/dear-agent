@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -366,6 +367,47 @@ func TestAddMultipleMessages(t *testing.T) {
 		if msg.Content != messages[i].Content {
 			t.Errorf("Message %d: expected Content %s, got %s", i, messages[i].Content, msg.Content)
 		}
+	}
+}
+
+func TestSessionHistoryReloadSupportsLargeJSONLRecords(t *testing.T) {
+	sessionsDir := t.TempDir()
+	writer, err := NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create writer: %v", err)
+	}
+	const sessionID = "large-jsonl-record"
+	if _, err := writer.CreateSession(sessionID, "gpt-4", "/work"); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	largeContent := strings.Repeat("x", 128*1024)
+	if err := writer.AddMessage(sessionID, Message{Role: "user", Content: largeContent}); err != nil {
+		t.Fatalf("persist large message: %v", err)
+	}
+
+	reloader, err := NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create reloader: %v", err)
+	}
+	if err := reloader.AddMessage(sessionID, Message{Role: "assistant", Content: "after-large-record"}); err != nil {
+		t.Fatalf("append after large message: %v", err)
+	}
+	messages, err := reloader.GetMessages(sessionID)
+	if err != nil {
+		t.Fatalf("reload large history: %v", err)
+	}
+	if len(messages) != 2 || messages[0].Content != largeContent || messages[1].Content != "after-large-record" {
+		t.Fatalf("large history reload = %#v, want preserved large record and appended response", messages)
+	}
+	if err := writer.ClearMessages(sessionID); err != nil {
+		t.Fatalf("clear history containing large record through stale manager: %v", err)
+	}
+	messages, err = reloader.GetMessages(sessionID)
+	if err != nil {
+		t.Fatalf("reload cleared large history: %v", err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("history after clear = %#v, want empty", messages)
 	}
 }
 

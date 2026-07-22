@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -543,11 +544,17 @@ func (sm *SessionManager) loadMessagesFromFile(sessionID string) ([]Message, err
 	defer file.Close()
 
 	var messages []Message
-	scanner := bufio.NewScanner(file)
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
+	reader := bufio.NewReader(file)
+	for {
+		line, readErr := reader.ReadBytes('\n')
+		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+			if readErr != nil {
+				return nil, fmt.Errorf("failed to read messages file: %w", readErr)
+			}
 			continue
 		}
 
@@ -557,10 +564,12 @@ func (sm *SessionManager) loadMessagesFromFile(sessionID string) ([]Message, err
 		}
 
 		messages = append(messages, msg)
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("failed to read messages file: %w", err)
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			return nil, fmt.Errorf("failed to read messages file: %w", readErr)
+		}
 	}
 
 	return messages, nil

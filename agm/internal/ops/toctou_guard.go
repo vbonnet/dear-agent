@@ -15,7 +15,7 @@ import (
 // apiSessionMutationLockTimeout exceeds the bounded provider transaction so a
 // second send or archive can wait for one in-flight API completion instead of
 // failing at the ordinary short lifecycle-operation threshold.
-const apiSessionMutationLockTimeout = agent.OpenAICompletionTimeout + time.Minute
+const apiSessionMutationLockTimeout = agent.OpenAIDeliveryTimeout
 
 // lockDir returns the directory where session lock files are stored.
 func lockDir() string {
