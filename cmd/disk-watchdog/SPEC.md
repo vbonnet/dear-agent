@@ -4,7 +4,7 @@
 
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
 
-<!-- Last audited at: 2026-07-03 -->
+<!-- Last audited at: 2026-07-21 -->
 
 ## Purpose
 
@@ -16,6 +16,14 @@ layers can never disagree), records the alarm to the decision trail, and
 remediates through the existing safe hook `agm worktree sweep --execute`
 (provably-merged clean worktree husks only). It runs independently of the VROOM
 mesh because a full disk is exactly the failure state that takes the mesh down.
+
+Since ce-93lw.18 it also drives the cross-process **admission brake**
+(`pkg/vroom/admission`). Alarming was never the gap: on 2026-07-18 this watchdog
+was in ALARM with root at 96.2% used and
+`agm worktree sweep --execute: signal: killed` in every remediation slot — the
+remediation path being killed by the exhaustion it existed to relieve — and
+nothing consumed that fact, so the mesh kept spawning until the host had to be
+power-cycled. The brake is the consumer: a TTL'd latch every spawn path reads.
 
 ## EARS Requirements
 
@@ -38,3 +46,15 @@ mesh because a full disk is exactly the failure state that takes the mesh down.
 **DW-09** When no threshold is breached, the system shall exit 0 without invoking any remediation.
 
 **DW-10** While dry-run mode is set, the system shall detect and log breaches but the system shall not remove any worktree.
+
+**DW-11** When any threshold is breached and remediation returns an error, the system shall engage the admission brake with a reason carrying the remediation error.
+
+**DW-12** When no threshold is breached, the system shall release the admission brake only if it engaged that brake itself.
+
+**DW-13** If the filesystem snapshot cannot be taken, then the system shall engage the admission brake before reporting the error.
+
+**DW-14** When any threshold is breached and remediation succeeds, the system shall leave any existing admission brake in place.
+
+**DW-15** While dry-run mode is set, the system shall not write or remove the admission brake file.
+
+**DW-16** If engaging or releasing the admission brake fails, then the system shall report the failure on stderr and the system shall not change its exit code.

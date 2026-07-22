@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -161,7 +162,7 @@ func TestCheckMemory(t *testing.T) {
 		{"at threshold", 10, stubMem{pct: 10}, true},
 		{"just below threshold", 9.9, stubMem{pct: 9.9}, false},
 		{"critically low", 1, stubMem{pct: 1}, false},
-		{"reader error fails open", 0, stubMem{err: os.ErrPermission}, true},
+		{"reader error fails closed", 0, stubMem{err: os.ErrPermission}, false},
 	}
 
 	for _, tt := range tests {
@@ -269,7 +270,26 @@ func TestCheckAllGatesFail(t *testing.T) {
 	}
 }
 
-func TestCheckFailOpen_LoadError(t *testing.T) {
+// A load probe that cannot answer is itself a saturation signal: on 2026-07-18
+// the host's probes and remediation were being killed while the mesh kept
+// spawning (ce-93lw.18). Refusing is the point.
+func TestCheckFailClosed_LoadError(t *testing.T) {
+	cfg := Config{MaxWorkers: 3, MaxLoad5: 50, MinSpawnInterval: 2 * time.Minute}
+
+	r := Check(cfg,
+		stubLoad{err: os.ErrPermission},
+		stubWorkers{count: 0},
+		&stubTimer{err: os.ErrNotExist},
+		noMem,
+	)
+
+	if r.Allowed {
+		t.Error("should fail closed when the load reader errors")
+	}
+}
+
+func TestCheckFailClosed_LoadError_OverrideAllowsSpawn(t *testing.T) {
+	t.Setenv(allowUnverifiedEnv, "1")
 	cfg := Config{MaxWorkers: 3, MaxLoad5: 50, MinSpawnInterval: 2 * time.Minute}
 
 	r := Check(cfg,
@@ -280,7 +300,35 @@ func TestCheckFailOpen_LoadError(t *testing.T) {
 	)
 
 	if !r.Allowed {
-		t.Error("should fail open when load reader errors")
+		t.Errorf("%s=1 should allow a spawn with an unreadable load probe: %s",
+			allowUnverifiedEnv, FormatDenied(r))
+	}
+	if g := findGate(r, "cpu_load"); !strings.Contains(g.Message, allowUnverifiedEnv) {
+		t.Errorf("cpu_load message must name the override that let it pass, got %q", g.Message)
+	}
+}
+
+// The override buys tolerance for an unreadable probe, never for a reading that
+// actually breaches the threshold.
+func TestOverrideDoesNotPassRealBreach(t *testing.T) {
+	t.Setenv(allowUnverifiedEnv, "1")
+	cfg := Config{MaxWorkers: 3, MaxLoad5: 50, MinFreeMemPct: 10, MinSpawnInterval: 2 * time.Minute}
+
+	r := Check(cfg,
+		stubLoad{load: 999},
+		stubWorkers{count: 0},
+		&stubTimer{err: os.ErrNotExist},
+		stubMem{pct: 1},
+	)
+
+	if r.Allowed {
+		t.Error("override must not pass a real load/memory threshold breach")
+	}
+	if g := findGate(r, "cpu_load"); g.Passed {
+		t.Error("cpu_load should still fail on a real breach under the override")
+	}
+	if g := findGate(r, "memory"); g.Passed {
+		t.Error("memory should still fail on a real breach under the override")
 	}
 }
 
@@ -299,7 +347,7 @@ func TestCheckFailOpen_WorkerCountError(t *testing.T) {
 	}
 }
 
-func TestCheckFailOpen_MemError(t *testing.T) {
+func TestCheckFailClosed_MemError(t *testing.T) {
 	cfg := Config{MaxWorkers: 3, MaxLoad5: 50, MinFreeMemPct: 10, MinSpawnInterval: 2 * time.Minute}
 
 	r := Check(cfg,
@@ -309,8 +357,28 @@ func TestCheckFailOpen_MemError(t *testing.T) {
 		stubMem{err: os.ErrPermission},
 	)
 
+	if r.Allowed {
+		t.Error("should fail closed when the memory reader errors")
+	}
+}
+
+// A nil MemReader (non-Darwin) is a gate that was never wired, not a gate that
+// failed. Nothing was asked, so nothing went unanswered.
+func TestCheckMemory_NilReaderSkipsGate(t *testing.T) {
+	cfg := Config{MaxWorkers: 3, MaxLoad5: 50, MinFreeMemPct: 10, MinSpawnInterval: 2 * time.Minute}
+
+	r := Check(cfg,
+		stubLoad{load: 1},
+		stubWorkers{count: 0},
+		&stubTimer{err: os.ErrNotExist},
+		noMem,
+	)
+
 	if !r.Allowed {
-		t.Error("should fail open when memory reader errors")
+		t.Errorf("an unwired memory reader must not refuse a spawn: %s", FormatDenied(r))
+	}
+	if g := findGate(r, "memory"); !g.Passed {
+		t.Errorf("memory gate should be skipped, got %q", g.Message)
 	}
 }
 
