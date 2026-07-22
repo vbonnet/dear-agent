@@ -6,6 +6,7 @@ package apfs
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -100,6 +101,11 @@ func (p *Provider) Create(ctx context.Context, req sandbox.SandboxRequest) (*san
 			_ = os.RemoveAll(req.WorkspaceDir)
 			return nil, sandbox.WrapError(sandbox.ErrCodeMountFailed,
 				fmt.Sprintf("reflink clone failed for %s", lowerDir), err)
+		}
+		if err := p.detachLinkedWorktreeGitMetadata(ctx, lowerDir, cloneDir); err != nil {
+			_ = os.RemoveAll(req.WorkspaceDir)
+			return nil, sandbox.WrapError(sandbox.ErrCodeMountFailed,
+				fmt.Sprintf("failed to isolate Git metadata for %s", lowerDir), err)
 		}
 	}
 
@@ -250,14 +256,7 @@ func (p *Provider) cloneDirectory(ctx context.Context, src, dst string) error {
 	// child; without WaitDelay a wedged descendant holding a pipe open can
 	// still block Wait() indefinitely (see PR #915 / ce-fmxv for the same
 	// failure mode in the codex boot path).
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
-	cmd.WaitDelay = 1 * time.Second
+	configureIsolatedCommand(cmd)
 	if runErr := cmd.Run(); runErr != nil {
 		if cloneCtx.Err() != nil {
 			_ = os.RemoveAll(dst)
@@ -278,6 +277,210 @@ func (p *Provider) cloneDirectory(ctx context.Context, src, dst string) error {
 		return fmt.Errorf("cp -c failed: %w", runErr)
 	}
 	return nil
+}
+
+// detachLinkedWorktreeGitMetadata replaces a cloned .git indirection with an
+// independent copy-on-write Git directory. Linked worktree .git files contain
+// an absolute path into the host repository; leaving that file in the clone
+// would let sandbox Git commands mutate the host worktree index and refs.
+func (p *Provider) detachLinkedWorktreeGitMetadata(ctx context.Context, src, dst string) error {
+	detach, err := needsGitMetadataDetachment(src)
+	if err != nil {
+		return err
+	}
+	if !detach {
+		return nil
+	}
+
+	detachCtx, cancel := context.WithTimeout(ctx, cloneTimeout)
+	defer cancel()
+	gitDir, commonDir, err := resolveLinkedGitDirectories(detachCtx, src)
+	if err != nil {
+		return err
+	}
+	stageParent, stageGit, err := p.stageDetachedGitMetadata(detachCtx, gitDir, commonDir, dst)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(stageParent) }()
+	return activateDetachedGitMetadata(detachCtx, stageGit, dst)
+}
+
+func needsGitMetadataDetachment(src string) (bool, error) {
+	info, err := os.Lstat(filepath.Join(src, ".git"))
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect source Git metadata: %w", err)
+	}
+	if info.IsDir() {
+		return false, nil
+	}
+	if !info.Mode().IsRegular() {
+		return false, fmt.Errorf("unsupported source .git entry mode %s", info.Mode())
+	}
+	return true, nil
+}
+
+func resolveLinkedGitDirectories(ctx context.Context, src string) (string, string, error) {
+	gitDir, err := apfsGitOutput(ctx, "-C", src, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return "", "", fmt.Errorf("resolve linked worktree Git directory: %w", err)
+	}
+	commonDir, err := apfsGitOutput(ctx, "-C", src, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return "", "", fmt.Errorf("resolve linked worktree common Git directory: %w", err)
+	}
+	return gitDir, commonDir, nil
+}
+
+func (p *Provider) stageDetachedGitMetadata(ctx context.Context, gitDir, commonDir, dst string) (string, string, error) {
+	stageParent, err := os.MkdirTemp(filepath.Dir(dst), ".git-detach-")
+	if err != nil {
+		return "", "", fmt.Errorf("create Git metadata staging directory: %w", err)
+	}
+	stageGit := filepath.Join(stageParent, ".git")
+	if err := p.cloneDirectory(ctx, commonDir, stageGit); err != nil {
+		_ = os.RemoveAll(stageParent)
+		return "", "", fmt.Errorf("clone common Git metadata: %w", err)
+	}
+	if err := os.RemoveAll(filepath.Join(stageGit, "worktrees")); err != nil {
+		_ = os.RemoveAll(stageParent)
+		return "", "", fmt.Errorf("remove copied host worktree registrations: %w", err)
+	}
+	if err := copyLinkedWorktreeState(gitDir, stageGit); err != nil {
+		_ = os.RemoveAll(stageParent)
+		return "", "", err
+	}
+	return stageParent, stageGit, nil
+}
+
+func copyLinkedWorktreeState(gitDir, stageGit string) error {
+	for _, name := range []string{"HEAD", "index", "config.worktree"} {
+		destination := filepath.Join(stageGit, name)
+		err := copyRegularFile(filepath.Join(gitDir, name), destination)
+		if os.IsNotExist(err) && name != "HEAD" {
+			if removeErr := os.RemoveAll(destination); removeErr != nil {
+				return fmt.Errorf("remove inherited primary worktree %s: %w", name, removeErr)
+			}
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("copy linked worktree %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func activateDetachedGitMetadata(ctx context.Context, stageGit, dst string) error {
+	dstGit := filepath.Join(dst, ".git")
+	if err := os.RemoveAll(dstGit); err != nil {
+		return fmt.Errorf("remove cloned Git indirection: %w", err)
+	}
+	if err := os.Rename(stageGit, dstGit); err != nil {
+		return fmt.Errorf("activate detached Git metadata: %w", err)
+	}
+	if err := configureDetachedGitWorktree(ctx, dstGit, dst); err != nil {
+		return err
+	}
+	resolvedRoot, err := apfsGitOutput(ctx, "-C", dst, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return fmt.Errorf("validate detached Git worktree: %w", err)
+	}
+	sameRoot, err := sameExistingPath(resolvedRoot, dst)
+	if err != nil {
+		return fmt.Errorf("compare detached Git worktree root: %w", err)
+	}
+	if !sameRoot {
+		return fmt.Errorf("detached Git metadata resolved worktree %q, want %q", resolvedRoot, dst)
+	}
+	return nil
+}
+
+func configureDetachedGitWorktree(ctx context.Context, gitDir, worktree string) error {
+	if _, err := apfsGitOutput(ctx, "config", "--file", filepath.Join(gitDir, "config"), "core.worktree", worktree); err != nil {
+		return fmt.Errorf("configure detached Git worktree: %w", err)
+	}
+	worktreeConfig := filepath.Join(gitDir, "config.worktree")
+	if _, err := os.Stat(worktreeConfig); err == nil {
+		if _, err := apfsGitOutput(ctx, "config", "--file", worktreeConfig, "core.worktree", worktree); err != nil {
+			return fmt.Errorf("configure detached per-worktree Git path: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("inspect detached per-worktree Git config: %w", err)
+	}
+	return nil
+}
+
+func copyRegularFile(src, dst string) (returnErr error) {
+	info, err := os.Lstat(src)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("source is not a regular file: %s", src)
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := in.Close(); returnErr == nil && closeErr != nil {
+			returnErr = closeErr
+		}
+	}()
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	// dst is inside the provider-owned staging directory.
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := out.Close(); returnErr == nil && closeErr != nil {
+			returnErr = closeErr
+		}
+	}()
+	_, err = io.Copy(out, in)
+	return err
+}
+
+func apfsGitOutput(ctx context.Context, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	configureIsolatedCommand(cmd)
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	if err != nil {
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+func configureIsolatedCommand(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = time.Second
+}
+
+func sameExistingPath(first, second string) (bool, error) {
+	firstInfo, err := os.Stat(first)
+	if err != nil {
+		return false, fmt.Errorf("stat %s: %w", first, err)
+	}
+	secondInfo, err := os.Stat(second)
+	if err != nil {
+		return false, fmt.Errorf("stat %s: %w", second, err)
+	}
+	return os.SameFile(firstInfo, secondInfo), nil
 }
 
 // isDstNestedInSrc reports whether dst is inside (or equal to) src, which
