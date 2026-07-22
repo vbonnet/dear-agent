@@ -147,9 +147,6 @@ func parseScriptSegments(source []byte) []Segment {
 	for raw := range strings.SplitSeq(string(source), "\n") {
 		line++
 		value := strings.TrimSpace(raw)
-		if value == "" {
-			continue
-		}
 		if len(state.heredocs) > 0 {
 			heredoc := &state.heredocs[0]
 			terminator := raw
@@ -164,7 +161,11 @@ func parseScriptSegments(source []byte) []Segment {
 			heredoc.body = append(heredoc.body, Segment{Kind: SegmentShell, Line: line, Text: value})
 			continue
 		}
+		if value == "" {
+			continue
+		}
 		state.updatePersistentDescriptors(value)
+		state.updatePendingFileWrites(value)
 		for path, pending := range state.pendingHeredocs {
 			if scriptLinePrintsPath(value, path, state.descriptors) {
 				segments = append(segments, pending...)
@@ -286,6 +287,15 @@ func (state *scriptParseState) updatePersistentDescriptors(value string) {
 			continue
 		}
 		applyScriptRedirections(tokens[1:], state.descriptors)
+	}
+}
+
+func (state *scriptParseState) updatePendingFileWrites(value string) {
+	for _, command := range splitScriptCommandParts(value) {
+		destination := scriptCommandOutputDestination(command.text, state.descriptors)
+		if destination.redirected && destination.path != "" && !destination.append {
+			delete(state.pendingHeredocs, destination.path)
+		}
 	}
 }
 
@@ -485,6 +495,7 @@ type scriptHeredocRedirect struct {
 	marker     string
 	descriptor int
 	stripTabs  bool
+	operator   int
 }
 
 func scriptHeredocRedirects(value string) []scriptHeredocRedirect {
@@ -502,10 +513,11 @@ func scriptHeredocRedirects(value string) []scriptHeredocRedirect {
 		if current == '#' && (index == 0 || shellHorizontalSpace(value[index-1])) {
 			break
 		}
-		if marker := scriptHeredocMarkerAt(value, index); marker != "" {
+		if marker, ok := scriptHeredocMarkerAt(value, index); ok {
 			redirects = append(redirects, scriptHeredocRedirect{
 				marker: marker, descriptor: scriptHeredocDescriptor(value, index),
 				stripTabs: index+2 < len(value) && value[index+2] == '-',
+				operator:  index,
 			})
 		}
 	}
@@ -528,10 +540,35 @@ func scriptHeredocDescriptor(value string, operator int) int {
 	return descriptor
 }
 
-func scriptHeredocMarkerAt(value string, index int) string {
+func scriptHasLaterStdinRedirect(value string, after int) bool {
+	scanner := scriptHeredocScanner{}
+	for index := 0; index < len(value); index++ {
+		current := value[index]
+		if scanner.consumeQuotedOrEscaped(current) {
+			continue
+		}
+		if consumed, advance := scanner.consumeArithmetic(value, index); consumed {
+			index += advance
+			continue
+		}
+		if current == '#' && (index == 0 || shellHorizontalSpace(value[index-1])) {
+			break
+		}
+		if index <= after || current != '<' || index > 0 && value[index-1] == '<' ||
+			index+1 < len(value) && value[index+1] == '(' {
+			continue
+		}
+		if scriptHeredocDescriptor(value, index) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func scriptHeredocMarkerAt(value string, index int) (string, bool) {
 	if value[index] != '<' || value[index+1] != '<' ||
 		(index > 0 && value[index-1] == '<') || (index+2 < len(value) && value[index+2] == '<') {
-		return ""
+		return "", false
 	}
 	markerStart := index + 2
 	if markerStart < len(value) && value[markerStart] == '-' {
@@ -596,22 +633,25 @@ func arithmeticCommandBoundary(value string, index int) bool {
 	return shellHorizontalSpace(value[index-1]) || strings.ContainsRune(";|&({", rune(value[index-1]))
 }
 
-func scriptHeredocWord(value string, start int) string {
+func scriptHeredocWord(value string, start int) (string, bool) {
 	for start < len(value) && shellHorizontalSpace(value[start]) {
 		start++
 	}
 	var marker strings.Builder
 	quote := byte(0)
 	escaped := false
+	started := false
 	for index := start; index < len(value); index++ {
 		current := value[index]
 		if escaped {
 			marker.WriteByte(current)
 			escaped = false
+			started = true
 			continue
 		}
 		if current == '\\' && quote != '\'' {
 			escaped = true
+			started = true
 			continue
 		}
 		if quote != 0 {
@@ -624,20 +664,22 @@ func scriptHeredocWord(value string, start int) string {
 		}
 		if current == '\'' || current == '"' {
 			quote = current
+			started = true
 			continue
 		}
 		if heredocWordBoundary(current) {
 			break
 		}
 		marker.WriteByte(current)
+		started = true
 	}
 	if quote != 0 {
-		return ""
+		return "", false
 	}
 	if escaped {
 		marker.WriteByte('\\')
 	}
-	return marker.String()
+	return marker.String(), started
 }
 
 func shellHorizontalSpace(value byte) bool {
@@ -666,9 +708,11 @@ func scriptHeredocSpecs(value string, descriptors map[int]scriptOutputDestinatio
 			heredoc := scriptHeredoc{marker: redirect.marker, stripTabs: redirect.stripTabs}
 			// The shell consumes every heredoc body in lexical order, but only
 			// the last redirect for descriptor zero supplies that command's stdin.
-			if redirectIndex == effectiveStdin {
+			if redirectIndex == effectiveStdin && !scriptHasLaterStdinRedirect(command.text, redirect.operator) {
 				captures := scriptCapturedVariableDestinations(command.text)
 				switch {
+				case scriptReadUsesAlternateDescriptor(command.text):
+					// read -u consumes the selected descriptor rather than fd 0.
 				case len(captures) > 0:
 					heredoc.outputs = captures
 				case scriptCommandIgnoresHeredocInput(command.text):
@@ -711,6 +755,29 @@ func scriptCapturedVariableDestinations(command string) []scriptOutputDestinatio
 		return []scriptOutputDestination{{variable: "REPLY", captureLines: captureLines}}
 	}
 	return []scriptOutputDestination{{variable: "MAPFILE"}}
+}
+
+func scriptReadUsesAlternateDescriptor(command string) bool {
+	fields := stripCommandPrefixes(parseShellWords(command))
+	if len(fields) == 0 || executableBase(fields[0]) != "read" {
+		return false
+	}
+	arguments := fields[1:]
+	for index, argument := range arguments {
+		if !strings.HasPrefix(argument, "-") || strings.HasPrefix(argument, "--") {
+			continue
+		}
+		option := strings.IndexByte(strings.TrimPrefix(argument, "-"), 'u')
+		if option < 0 {
+			continue
+		}
+		value := strings.TrimPrefix(argument, "-")[option+1:]
+		if value == "" && index+1 < len(arguments) {
+			value = arguments[index+1]
+		}
+		return value != "0"
+	}
+	return false
 }
 
 func readUsesNonDefaultTerminator(arguments []string) bool {
@@ -1081,6 +1148,13 @@ func scriptCommandReadsPath(command, path string, descriptors map[int]scriptOutp
 		}
 	}
 	fields := stripCommandPrefixes(parseShellWords(command))
+	if len(fields) > 0 {
+		payloadFields := slices.Clone(fields)
+		payloadFields[0] = executableBase(payloadFields[0])
+		if payload, ok := shellCommandPayload(payloadFields); ok && scriptLinePrintsPath(payload, path, descriptors) {
+			return true
+		}
+	}
 	if len(fields) == 0 || !slices.Contains([]string{
 		"awk", "base64", "cat", "cut", "grep", "head", "jq", "less", "more",
 		"nl", "od", "rg", "sed", "sort", "strings", "tail", "uniq", "wc", "xxd",

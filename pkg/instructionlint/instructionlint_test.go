@@ -583,6 +583,49 @@ func TestScriptHeredocTerminatorsAndReadCapturesMatchShellSemantics(t *testing.T
 	}
 }
 
+func TestScriptHeredocStateHandlesEmptySupersededAndDeferredInputs(t *testing.T) {
+	source := []byte(strings.Join([]string{
+		"cat <<''",
+		"gh pr merge 123",
+		"",
+		"cat <<'SUPERSEDED' </dev/null",
+		"safe-pr create --emergency --reason superseded-stdin",
+		"SUPERSEDED",
+		"cat >overwritten-fixture <<'OVERWRITTEN_FIXTURE'",
+		"git push origin overwritten-fixture",
+		"OVERWRITTEN_FIXTURE",
+		"printf safe >overwritten-fixture",
+		"cat overwritten-fixture",
+		"read -u 3 value <<'ALTERNATE_READ_FD'",
+		"gh pr close 456",
+		"ALTERNATE_READ_FD",
+		`printf '%s\n' "$value"`,
+		"cat >shell-payload-fixture <<'SHELL_PAYLOAD'",
+		"bd ready",
+		"SHELL_PAYLOAD",
+		"sh -c 'cat shell-payload-fixture'",
+	}, "\n"))
+
+	var text []string
+	for _, segment := range parseScriptSegments(source) {
+		text = append(text, segment.Text)
+	}
+	for _, visible := range []string{"gh pr merge 123", "bd ready"} {
+		if !slices.Contains(text, visible) {
+			t.Errorf("visible line %q was hidden: %v", visible, text)
+		}
+	}
+	for _, hidden := range []string{
+		"safe-pr create --emergency --reason superseded-stdin",
+		"git push origin overwritten-fixture",
+		"gh pr close 456",
+	} {
+		if slices.Contains(text, hidden) {
+			t.Errorf("non-visible line %q was exposed: %v", hidden, text)
+		}
+	}
+}
+
 func TestCheckRepositoryGovernsSkillAgentMetadata(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init", "-q")
