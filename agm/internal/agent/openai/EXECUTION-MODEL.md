@@ -127,6 +127,10 @@ Since API-based execution has no shell access, hooks are **synthetic**:
 7. The adapter atomically commits the completed turn to local JSONL history
 ```
 
+Reconstruction and readiness reloads use the delivery request context. Caller
+cancellation therefore stops a contended store-lock wait and releases AGM's
+surrounding lifecycle lock instead of misreporting the session as terminated.
+
 ### Message Send
 ```
 1. User sends to an already-registered legacy session through an AGM surface

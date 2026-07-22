@@ -892,6 +892,78 @@ func TestDeleteSessionWaitsForCompletedTurnFromIndependentManager(t *testing.T) 
 	}
 }
 
+func TestOpenAIRequestContextCancelsReconstructionAndReadinessLockWait(t *testing.T) {
+	sessionsDir := t.TempDir()
+	creator, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create session manager: %v", err)
+	}
+	sessionID := SessionID("context-aware-reload")
+	if _, err := creator.CreateSession(string(sessionID), "gpt-4", t.TempDir()); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	statusManager, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("reconstruct status manager: %v", err)
+	}
+	locker, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("reconstruct lock manager: %v", err)
+	}
+
+	holdStoreLock := func() func() {
+		entered := make(chan struct{})
+		release := make(chan struct{})
+		done := make(chan error, 1)
+		go func() {
+			done <- locker.WithSessionLock(string(sessionID), func() error {
+				close(entered)
+				<-release
+				return nil
+			})
+		}()
+		select {
+		case <-entered:
+		case <-time.After(2 * time.Second):
+			t.Fatal("store lock holder did not enter")
+		}
+		return func() {
+			close(release)
+			if err := <-done; err != nil {
+				t.Fatalf("release store lock: %v", err)
+			}
+		}
+	}
+
+	release := holdStoreLock()
+	reconstructCtx, cancelReconstruct := context.WithTimeout(t.Context(), 40*time.Millisecond)
+	_, err = NewOpenAIAdapterForSession(reconstructCtx, sessionID, &OpenAIConfig{
+		APIKey:      "test-key",
+		SessionsDir: sessionsDir,
+	})
+	cancelReconstruct()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		release()
+		t.Fatalf("canceled adapter reconstruction error = %v, want deadline exceeded", err)
+	}
+	release()
+
+	statusAdapter := newOpenAIAdapterWithClient(&mockOpenAIClient{}, statusManager)
+	release = holdStoreLock()
+	statusCtx, cancelStatus := context.WithTimeout(t.Context(), 40*time.Millisecond)
+	status, err := statusAdapter.GetSessionStatusContext(statusCtx, sessionID)
+	cancelStatus()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		release()
+		t.Fatalf("canceled readiness error = %v, want deadline exceeded", err)
+	}
+	if status != "" {
+		release()
+		t.Fatalf("canceled readiness status = %q, want no terminated projection", status)
+	}
+	release()
+}
+
 func TestSendMessageCompletionFailureLeavesHistoryUnchanged(t *testing.T) {
 	sessionsDir := t.TempDir()
 	sessionManager, err := openai.NewSessionManager(sessionsDir)

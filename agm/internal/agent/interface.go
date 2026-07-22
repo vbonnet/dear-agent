@@ -113,6 +113,13 @@ type ContextMessageSender interface {
 	SendMessageContext(ctx context.Context, sessionID SessionID, message Message) error
 }
 
+// ContextSessionStatusGetter is implemented by agents whose readiness lookup
+// can honor caller cancellation and deadlines. Pure API delivery requires this
+// contract so a contended adapter store cannot pin the outer lifecycle lock.
+type ContextSessionStatusGetter interface {
+	GetSessionStatusContext(ctx context.Context, sessionID SessionID) (Status, error)
+}
+
 // SessionContext provides parameters for creating a new agent session.
 type SessionContext struct {
 	// Name is the session name (used for tmux session name).

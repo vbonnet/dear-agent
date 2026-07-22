@@ -96,7 +96,11 @@ func deliverThroughAPIAdapter(ctx context.Context, current *manifest.Manifest, r
 		return fmt.Errorf("create API harness adapter for %q: %w", recipient, err)
 	}
 	sessionID := agent.SessionID(current.SessionID)
-	status, err := agentAdapter.GetSessionStatus(sessionID)
+	contextStatus, ok := agentAdapter.(agent.ContextSessionStatusGetter)
+	if !ok {
+		return fmt.Errorf("API harness adapter does not support context-aware readiness")
+	}
+	status, err := contextStatus.GetSessionStatusContext(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("check API session %q readiness: %w", recipient, err)
 	}

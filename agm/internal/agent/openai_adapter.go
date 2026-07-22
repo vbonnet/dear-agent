@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,8 +27,9 @@ type OpenAIAdapter struct {
 }
 
 var (
-	_ Agent                = (*OpenAIAdapter)(nil)
-	_ ContextMessageSender = (*OpenAIAdapter)(nil)
+	_ Agent                      = (*OpenAIAdapter)(nil)
+	_ ContextMessageSender       = (*OpenAIAdapter)(nil)
+	_ ContextSessionStatusGetter = (*OpenAIAdapter)(nil)
 )
 
 // OpenAIConfig holds configuration for creating an OpenAI adapter.
@@ -84,7 +86,7 @@ func NewOpenAIAdapterForSession(ctx context.Context, sessionID SessionID, config
 		return nil, fmt.Errorf("failed to create session manager: %w", err)
 	}
 
-	info, err := sessionManager.GetSession(string(sessionID))
+	info, err := sessionManager.GetSessionContext(ctx, string(sessionID))
 	if err != nil {
 		return nil, fmt.Errorf("load OpenAI session %q: %w", sessionID, err)
 	}
@@ -298,10 +300,21 @@ func (a *OpenAIAdapter) TerminateSession(sessionID SessionID) error {
 // The tmux-backed codex-cli harness has its own adapter and status projection;
 // this pure API adapter must never capture or otherwise depend on a pane.
 func (a *OpenAIAdapter) GetSessionStatus(sessionID SessionID) (Status, error) {
-	_, err := a.sessionManager.GetSession(string(sessionID))
+	return a.GetSessionStatusContext(context.Background(), sessionID)
+}
+
+// GetSessionStatusContext reports pure API readiness without tmux while
+// honoring cancellation during authoritative store-lock acquisition.
+func (a *OpenAIAdapter) GetSessionStatusContext(ctx context.Context, sessionID SessionID) (Status, error) {
+	_, err := a.sessionManager.GetSessionContext(ctx, string(sessionID))
 	if err != nil {
-		// Session not found = terminated
-		return StatusTerminated, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return "", err
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			return StatusTerminated, nil
+		}
+		return "", fmt.Errorf("load OpenAI session status: %w", err)
 	}
 
 	// Session exists = active

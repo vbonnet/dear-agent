@@ -134,8 +134,15 @@ func (sm *SessionManager) CreateSession(id, model, workingDir string) (*SessionI
 
 // GetSession retrieves session information.
 func (sm *SessionManager) GetSession(id string) (*SessionInfo, error) {
+	return sm.GetSessionContext(context.Background(), id)
+}
+
+// GetSessionContext is the request-aware form of GetSession. It lets adapter
+// reconstruction and readiness stop waiting for a contended session lock when
+// their owning CLI or MCP request is canceled.
+func (sm *SessionManager) GetSessionContext(ctx context.Context, id string) (*SessionInfo, error) {
 	var info *SessionInfo
-	err := sm.WithSessionLock(id, func() error {
+	err := sm.WithSessionLockContext(ctx, id, func() error {
 		var err error
 		info, err = sm.GetSessionUnderLock(id)
 		return err

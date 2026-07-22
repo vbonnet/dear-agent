@@ -37,6 +37,8 @@ errors for callers that need harness-neutral failure handling.
 
 **OAI-13** When an OpenAI session is deleted while another adapter may deliver to the same store and session ID, deletion shall acquire the store-scoped session lock shared with provider completion, and delivery shall revalidate authoritative on-disk metadata under that lock before provider work; either a started completed turn shall commit before deletion or a completed deletion shall reject the send without calling the provider.
 
+**OAI-14** When an OpenAI adapter is reconstructed or its readiness is checked for a request-scoped delivery, the system shall use the caller context while waiting for the authoritative store lock, shall return cancellation or deadline errors without reporting the session terminated, and shall not retain the surrounding lifecycle lock after the request is canceled.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

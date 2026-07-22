@@ -570,6 +570,31 @@ func TestAPIDeliverySerializesReadinessCompletionAndPersistenceByStableSessionID
 	}
 }
 
+func TestAPIDeliveryPassesCallerContextToReadiness(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	type contextKey struct{}
+	wantCtx := context.WithValue(t.Context(), contextKey{}, "readiness-request")
+	storage := dolt.NewMockAdapter()
+	m := &manifest.Manifest{
+		SessionID: "context-api-session-id",
+		Name:      "context-api-session",
+		Harness:   "openai",
+	}
+	if err := storage.CreateSession(m); err != nil {
+		t.Fatalf("create API session: %v", err)
+	}
+	mockAgent := &mockAgentAdapter{sessionStatus: agent.StatusActive}
+	err := sendToAPIAgentIfReady(wantCtx, m, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+		return mockAgent, nil
+	})
+	if err != nil {
+		t.Fatalf("context-aware API delivery: %v", err)
+	}
+	if mockAgent.statusContext == nil || mockAgent.statusContext.Value(contextKey{}) != "readiness-request" {
+		t.Fatalf("API readiness context = %v, want caller context", mockAgent.statusContext)
+	}
+}
+
 func TestDirectAPIDeliveryRejectsArchivedSessionBeforeAdapterConstruction(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
@@ -717,7 +742,10 @@ func TestAPIDeliveryRejectsAdapterWithoutContextDelivery(t *testing.T) {
 		t.Fatalf("create API session: %v", err)
 	}
 	legacy := &mockAgentAdapter{sessionStatus: agent.StatusActive}
-	legacyAgentOnly := struct{ agent.Agent }{Agent: legacy}
+	legacyAgentOnly := struct {
+		agent.Agent
+		agent.ContextSessionStatusGetter
+	}{Agent: legacy, ContextSessionStatusGetter: legacy}
 
 	err := sendToAPIAgentIfReady(t.Context(), m, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
 		return legacyAgentOnly, nil
