@@ -27,7 +27,7 @@ errors for callers that need harness-neutral failure handling.
 
 **OAI-08** When an OpenAI adapter waits for the store-scoped session lock or calls the provider, the system shall honor the caller's context and apply a finite provider deadline even for legacy callers without one; cancellation or timeout shall release the lock and shall leave durable history unchanged.
 
-**OAI-09** When an OpenAI adapter clears session history, the system shall serialize the mutation, atomically replace only the message history, and preserve the session model, title, working directory, and persisted non-secret runtime configuration so a later process reconstructs identical delivery settings.
+**OAI-09** When an OpenAI adapter clears session history, the system shall serialize the mutation, reload the current on-disk metadata under that boundary, atomically replace only the message history, and preserve the session model, title, working directory, and persisted non-secret runtime configuration so a later process reconstructs identical delivery settings without losing updates from another process.
 
 ## BDD Traceability
 

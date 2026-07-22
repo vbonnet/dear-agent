@@ -218,26 +218,33 @@ func (sm *SessionManager) ClearMessages(sessionID string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	info, exists := sm.sessions[sessionID]
-	if !exists {
+	if _, exists := sm.sessions[sessionID]; !exists {
 		return fmt.Errorf("session %s not found", sessionID)
+	}
+	// The cross-process session lock held by the adapter makes the on-disk
+	// metadata authoritative here. A long-lived manager cache may predate
+	// title, directory, or runtime-config changes from another process.
+	info, err := sm.loadMetadataFromFile(sessionID)
+	if err != nil {
+		return err
 	}
 	currentMessages, err := sm.loadMessagesFromFile(sessionID)
 	if err != nil {
 		return err
 	}
+	info.messages = append([]Message(nil), currentMessages...)
 	if err := sm.writeMessagesToFile(sessionID, nil); err != nil {
 		return err
 	}
 
-	previousMessages := info.messages
 	previousMessageCount := info.MessageCount
 	previousUpdatedAt := info.UpdatedAt
 	info.messages = nil
 	info.MessageCount = 0
 	info.UpdatedAt = time.Now()
+	sm.sessions[sessionID] = info
 	if err := sm.saveMetadata(sessionID); err != nil {
-		info.messages = previousMessages
+		info.messages = append([]Message(nil), currentMessages...)
 		info.MessageCount = previousMessageCount
 		info.UpdatedAt = previousUpdatedAt
 		rollbackErr := sm.writeMessagesToFile(sessionID, currentMessages)
@@ -417,6 +424,21 @@ func (sm *SessionManager) saveMetadata(sessionID string) error {
 	}
 
 	return nil
+}
+
+// loadMetadataFromFile reads the current cross-process metadata snapshot.
+// Callers must hold sm.mu and, for read-modify-write transactions, the
+// store-scoped session lock.
+func (sm *SessionManager) loadMetadataFromFile(sessionID string) (*SessionInfo, error) {
+	data, err := os.ReadFile(sm.getMetadataPath(sessionID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read metadata for session %s: %w", sessionID, err)
+	}
+	var info SessionInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		return nil, fmt.Errorf("failed to parse metadata for session %s: %w", sessionID, err)
+	}
+	return &info, nil
 }
 
 // writeMessagesToFile atomically replaces the session's JSONL history.

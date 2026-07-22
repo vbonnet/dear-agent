@@ -39,8 +39,9 @@ and the same provider ceiling. Provider failures, cancellation, and timeouts
 leave no provisional user message in durable history.
 
 Clearing OpenAI-compatible history atomically empties only the message stream
-under the store lock. It preserves the model, title, working directory, and
-non-secret runtime configuration used by later process reconstruction.
+under the store lock. It reloads current on-disk metadata first, preserving the
+model, title, working directory, and non-secret runtime configuration used by
+later process reconstruction even when another process updated those fields.
 
 ## Error Code Catalog
 

@@ -248,8 +248,9 @@ creation, and terminal state detection.
   serialization and a finite provider ceiling; completion errors, cancellation,
   and timeout leave history unchanged. Delivery otherwise fails closed unless
   adapter status is active or idle.
-- Clearing API history preserves the complete reconstruction metadata while
-  atomically emptying only messages under the store-level transaction lock.
+- Clearing API history reloads and preserves the current reconstruction
+  metadata while atomically emptying only messages under the store-level
+  transaction lock, including updates made by another process.
 - Shared startup readiness honors its total deadline while a slow launch
   wrapper still owns the pane, but fails promptly if an already-observed
   harness process later stops.

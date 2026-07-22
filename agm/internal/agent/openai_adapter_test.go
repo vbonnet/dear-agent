@@ -1606,6 +1606,29 @@ func TestClearHistoryPreservesRuntimeConfig(t *testing.T) {
 		t.Errorf("expected 1 message before clear, got %d", len(history))
 	}
 
+	// Simulate a second AGM process updating authoritative metadata after this
+	// adapter loaded its manager cache.
+	externalManager, err := openai.NewSessionManager(tmpDir)
+	if err != nil {
+		t.Fatalf("create external session manager: %v", err)
+	}
+	wantRuntime := openai.SessionRuntimeConfig{
+		Temperature:     0.4,
+		MaxTokens:       654,
+		BaseURL:         "https://new-azure.example.test",
+		IsAzure:         true,
+		AzureAPIVersion: "2025-01-01",
+	}
+	if err := externalManager.UpdateTitle(string(sessionID), "externally-updated"); err != nil {
+		t.Fatalf("externally update title: %v", err)
+	}
+	if err := externalManager.UpdateWorkingDirectory(string(sessionID), "/external"); err != nil {
+		t.Fatalf("externally update working directory: %v", err)
+	}
+	if err := externalManager.UpdateRuntimeConfig(string(sessionID), wantRuntime); err != nil {
+		t.Fatalf("externally update runtime config: %v", err)
+	}
+
 	// Clear history
 	err = adapter.ExecuteCommand(Command{
 		Type: CommandClearHistory,
@@ -1630,17 +1653,10 @@ func TestClearHistoryPreservesRuntimeConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get cleared session metadata: %v", err)
 	}
-	wantRuntime := openai.SessionRuntimeConfig{
-		Temperature:     1.1,
-		MaxTokens:       321,
-		BaseURL:         "https://azure.example.test",
-		IsAzure:         true,
-		AzureAPIVersion: "2024-06-01",
-	}
 	if clearedInfo.RuntimeConfig == nil || *clearedInfo.RuntimeConfig != wantRuntime {
 		t.Fatalf("cleared session runtime config = %#v, want %#v", clearedInfo.RuntimeConfig, wantRuntime)
 	}
-	if clearedInfo.Title != "clear-test" || clearedInfo.Model != "gpt-4" || clearedInfo.WorkingDirectory != "/tmp" {
+	if clearedInfo.Title != "externally-updated" || clearedInfo.Model != "gpt-4" || clearedInfo.WorkingDirectory != "/external" {
 		t.Fatalf("cleared session identity metadata changed: %#v", clearedInfo)
 	}
 
