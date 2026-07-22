@@ -225,6 +225,48 @@ func TestCheckSpawnStagger(t *testing.T) {
 	}
 }
 
+func TestCheckSpawnStaggerDistinguishesGovernorPause(t *testing.T) {
+	cfg := Config{MaxWorkers: 10, MaxLoad5: 100, MinSpawnInterval: 2 * time.Minute}
+	future := time.Now().Add(2 * time.Minute).Truncate(time.Second)
+	timer := FileSpawnTimer{Dir: t.TempDir()}
+	if err := timer.RecordSpawn(future); err != nil {
+		t.Fatalf("record governor hold: %v", err)
+	}
+
+	gate := checkSpawnStagger(cfg, timer)
+	if gate.Passed {
+		t.Fatal("future governor hold passed the spawn stagger gate")
+	}
+	for _, want := range []string{
+		"spawns paused by resource governor",
+		"until " + future.Format(time.RFC3339),
+		"remaining",
+		"resume automatically",
+	} {
+		if !strings.Contains(gate.Message, want) {
+			t.Errorf("message %q does not contain %q", gate.Message, want)
+		}
+	}
+	if strings.Contains(gate.Message, "last spawn was") {
+		t.Errorf("governor hold misreported as a recent spawn: %q", gate.Message)
+	}
+}
+
+func TestCheckSpawnStaggerRetainsRecentSpawnDiagnostic(t *testing.T) {
+	cfg := Config{MaxWorkers: 10, MaxLoad5: 100, MinSpawnInterval: 2 * time.Minute}
+
+	gate := checkSpawnStagger(cfg, &stubTimer{t: time.Now().Add(-30 * time.Second)})
+	if gate.Passed {
+		t.Fatal("recent spawn passed the spawn stagger gate")
+	}
+	if !strings.Contains(gate.Message, "spawn too soon: last spawn was") {
+		t.Errorf("recent spawn diagnostic changed unexpectedly: %q", gate.Message)
+	}
+	if strings.Contains(gate.Message, "resource governor") {
+		t.Errorf("recent spawn misreported as a governor hold: %q", gate.Message)
+	}
+}
+
 // --- Combined: all gates ---
 
 func TestCheckAllGatesPass(t *testing.T) {

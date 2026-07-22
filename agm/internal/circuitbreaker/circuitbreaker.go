@@ -506,7 +506,20 @@ func checkSpawnStagger(cfg Config, st SpawnTimer) GateResult {
 		}
 	}
 
-	elapsed := time.Since(lastSpawn)
+	now := time.Now()
+	if lastSpawn.After(now) {
+		remaining := lastSpawn.Sub(now)
+		return GateResult{
+			Gate:   "spawn_stagger",
+			Passed: false,
+			Message: fmt.Sprintf(
+				"spawns paused by resource governor until %s (%s remaining). New sessions resume automatically when the pause expires.",
+				lastSpawn.Format(time.RFC3339), formatDuration(remaining),
+			),
+		}
+	}
+
+	elapsed := now.Sub(lastSpawn)
 	if elapsed < cfg.MinSpawnInterval {
 		remaining := cfg.MinSpawnInterval - elapsed
 		return GateResult{
