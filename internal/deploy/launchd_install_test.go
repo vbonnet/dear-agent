@@ -114,7 +114,7 @@ func TestLaunchdBinariesUseHardenedInstall(t *testing.T) {
 			if err != nil {
 				continue
 			}
-			for _, m := range bareCopy.FindAllString(joinContinuations(string(raw)), -1) {
+			for _, m := range bareCopy.FindAllString(stripRedirections(joinContinuations(string(raw))), -1) {
 				// Scripts are immune to the stale-signature kill; see
 				// interpretedSource.
 				if allSourcesInterpreted(repoRoot, m) {
@@ -201,10 +201,37 @@ const installRootPattern = `(?:(?:\$\(HOME\)|\$\{HOME\}|\$HOME|~)/(?:go/bin|\.lo
 // commandSplit separates the commands within one shell line.
 var commandSplit = regexp.MustCompile(`&&|\|\||;|\|`)
 
+// stripRedirections removes shell redirections from every line of text.
+func stripRedirections(text string) string {
+	var b strings.Builder
+	for i, line := range strings.Split(text, "\n") {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(strings.TrimRight(redirection.ReplaceAllString(line, ""), " \t"))
+	}
+	return b.String()
+}
+
+// redirection matches a shell redirection operand: >file, >>file, 2>file,
+// &>file, <file, and their spaced forms.
+var redirection = regexp.MustCompile(`\s*[0-9]*(?:&?>{1,2}|<)\s*\S+`)
+
 // splitCommands breaks a shell line into its individual commands, so a check
-// applied to one cannot be satisfied or excused by another.
+// applied to one cannot be satisfied or excused by another, and strips trailing
+// redirections from each.
+//
+// Redirections are removed rather than added to the terminator set. A
+// destination can be followed by any of `>/dev/null`, `2>/dev/null`, `&>log`,
+// `>> log` — enumerating those in the match itself is the same losing game as
+// enumerating install roots or comment characters. Removing them first leaves
+// each command ending where its arguments end.
 func splitCommands(line string) []string {
-	return commandSplit.Split(line, -1)
+	parts := commandSplit.Split(line, -1)
+	for i, p := range parts {
+		parts[i] = strings.TrimSpace(redirection.ReplaceAllString(p, ""))
+	}
+	return parts
 }
 
 var clauseSplit = regexp.MustCompile(`;|[.!?]\s`)
