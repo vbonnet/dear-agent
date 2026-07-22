@@ -182,9 +182,12 @@ interactive startup. AGM does not reinterpret native retry output as a
 readiness transition: the latest managed `AGM <mode>/<state> <launch-id>`
 status remains the sole readiness authority.
 
-Pi does not require a background server. Archive stops the managed tmux
-process while preserving its private native transcript. Deleting transcript
-data remains an explicit storage operation, not an archive side effect.
+Pi does not require a background server. Archive waits for Pi's managed ready
+prompt and sends Pi's native `/quit` command; `/exit` was removed upstream and
+must not be treated as a model prompt. Signal escalation remains a bounded
+fallback only when graceful shutdown does not close the pane. Archive preserves
+the private native transcript, and deleting transcript data remains an explicit
+storage operation rather than an archive side effect.
 
 ## Troubleshooting
 

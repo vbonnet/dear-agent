@@ -18,7 +18,7 @@ import (
 // fakes. They replace the cargo-cult compile-time "method exists" checks that
 // previously stood in for coverage of this destructive code path (ce-6as.110).
 //
-// The session-killing chain (/exit -> wait -> SIGTERM -> SIGKILL ->
+// The session-killing chain (native exit -> wait -> SIGTERM -> SIGKILL ->
 // kill-session -> archive) is what these fakes stand in for: each fake records
 // whether/how it was called so the ordering and gating logic can be asserted
 // without a live tmux session or process.
@@ -132,7 +132,7 @@ func TestSendExit_Success(t *testing.T) {
 	f.install(t)
 
 	r := New("sess", "/tmp/sessions")
-	if err := r.sendExit(); err != nil {
+	if err := r.sendExit("/exit"); err != nil {
 		t.Fatalf("sendExit() returned error: %v", err)
 	}
 
@@ -152,7 +152,7 @@ func TestSendExit_WrapsUnderlyingError(t *testing.T) {
 	f.install(t)
 
 	r := New("sess", "/tmp/sessions")
-	err := r.sendExit()
+	err := r.sendExit("/exit")
 	if err == nil {
 		t.Fatal("sendExit() should return an error when the send fails")
 	}
@@ -164,17 +164,36 @@ func TestSendExit_WrapsUnderlyingError(t *testing.T) {
 	}
 }
 
+func TestGracefulExitCommandUsesNativeHarnessContract(t *testing.T) {
+	tests := map[string]string{
+		"claude-code":  "/exit",
+		"codex-cli":    "/exit",
+		"agy":          "/exit",
+		"opencode-cli": "/exit",
+		"pi-cli":       "/quit",
+		"PI":           "/quit",
+		"":             "/exit",
+	}
+	for harness, want := range tests {
+		t.Run(harness, func(t *testing.T) {
+			if got := GracefulExitCommand(harness); got != want {
+				t.Fatalf("GracefulExitCommand(%q) = %q, want %q", harness, got, want)
+			}
+		})
+	}
+}
+
 // --- stopProcess ---
 
 // TestStopProcess_ZombieTimeout asserts that an already-expired budget makes
-// stopProcess report a zombie and skip /exit entirely (never touching the
+// stopProcess report a zombie and skip graceful exit entirely (never touching the
 // pane), per the timeout guard.
 func TestStopProcess_ZombieTimeout(t *testing.T) {
 	f := &fakeBoundary{}
 	f.install(t)
 
 	r := New("sess", "/tmp/sessions")
-	zombie := r.stopProcess(time.Now().Add(-ReaperTimeout - time.Minute))
+	zombie := r.stopProcess(time.Now().Add(-ReaperTimeout-time.Minute), "pi-cli")
 
 	if !zombie {
 		t.Error("stopProcess() should report zombie when budget already exceeded")
@@ -183,7 +202,7 @@ func TestStopProcess_ZombieTimeout(t *testing.T) {
 		t.Errorf("expired budget should skip prompt wait, got %d calls", f.promptCalls)
 	}
 	if f.sendPromptCalls != 0 {
-		t.Errorf("expired budget should skip /exit, got %d send calls", f.sendPromptCalls)
+		t.Errorf("expired budget should skip graceful exit, got %d send calls", f.sendPromptCalls)
 	}
 }
 
@@ -194,7 +213,7 @@ func TestStopProcess_GracefulExit(t *testing.T) {
 	f.install(t)
 
 	r := New("sess", "/tmp/sessions")
-	zombie := r.stopProcess(time.Now())
+	zombie := r.stopProcess(time.Now(), "claude-code")
 
 	if zombie {
 		t.Error("graceful exit should not report a zombie")
@@ -210,7 +229,28 @@ func TestStopProcess_GracefulExit(t *testing.T) {
 	}
 }
 
-// TestStopProcess_PaneAlreadyClosed covers the case where /exit fails but the
+func TestStopProcess_PiUsesQuitAndClosesWithoutSignals(t *testing.T) {
+	f := &fakeBoundary{}
+	f.install(t)
+
+	r := New("pi-session", "/tmp/sessions")
+	zombie := r.stopProcess(time.Now(), "pi-cli")
+
+	if zombie {
+		t.Error("graceful Pi exit should not report a zombie")
+	}
+	if f.lastSendPrompt != "/quit" {
+		t.Fatalf("Pi reaper sent %q, want /quit", f.lastSendPrompt)
+	}
+	if f.paneCloseCalls != 1 {
+		t.Fatalf("Pi reaper pane-close waits = %d, want 1", f.paneCloseCalls)
+	}
+	if len(f.signals) != 0 {
+		t.Fatalf("graceful Pi exit should not signal the process, got %v", f.signals)
+	}
+}
+
+// TestStopProcess_PaneAlreadyClosed covers a failed graceful-exit send when the
 // pane is already gone — stopProcess should short-circuit without waiting on
 // pane close or escalating.
 func TestStopProcess_PaneAlreadyClosed(t *testing.T) {
@@ -221,13 +261,13 @@ func TestStopProcess_PaneAlreadyClosed(t *testing.T) {
 	f.install(t)
 
 	r := New("sess", "/tmp/sessions")
-	zombie := r.stopProcess(time.Now())
+	zombie := r.stopProcess(time.Now(), "claude-code")
 
 	if zombie {
 		t.Error("a closed pane is not a zombie")
 	}
 	if f.isPaneCalls != 1 {
-		t.Errorf("expected one pane-active check after failed /exit, got %d", f.isPaneCalls)
+		t.Errorf("expected one pane-active check after failed graceful exit, got %d", f.isPaneCalls)
 	}
 	if f.paneCloseCalls != 0 {
 		t.Errorf("should not wait for pane close when pane already gone, got %d", f.paneCloseCalls)
@@ -237,17 +277,17 @@ func TestStopProcess_PaneAlreadyClosed(t *testing.T) {
 	}
 }
 
-// TestStopProcess_EscalatesToSIGTERM covers: /exit sent, pane does NOT close,
+// TestStopProcess_EscalatesToSIGTERM covers: native exit sent, pane does NOT close,
 // escalate to SIGTERM, process exits after SIGTERM (no SIGKILL needed).
 func TestStopProcess_EscalatesToSIGTERM(t *testing.T) {
 	f := &fakeBoundary{
-		// 1st wait (after /exit): stuck. 2nd wait (after SIGTERM): exits.
+		// 1st wait (after native exit): stuck. 2nd wait (after SIGTERM): exits.
 		paneCloseResults: []error{errors.New("still alive"), nil},
 	}
 	f.install(t)
 
 	r := New("sess", "/tmp/sessions")
-	zombie := r.stopProcess(time.Now())
+	zombie := r.stopProcess(time.Now(), "claude-code")
 
 	if zombie {
 		t.Error("force-kill escalation is not a timeout zombie")
@@ -267,7 +307,7 @@ func TestStopProcess_EscalatesToSIGKILL(t *testing.T) {
 	f.install(t)
 
 	r := New("sess", "/tmp/sessions")
-	zombie := r.stopProcess(time.Now())
+	zombie := r.stopProcess(time.Now(), "claude-code")
 
 	if zombie {
 		t.Error("force-kill escalation is not a timeout zombie")

@@ -13,47 +13,13 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
-// TestSendExit_UsesAGMSend verifies that sendExit() now uses 'agm send msg' instead of raw tmux commands
-func TestSendExit_UsesAGMSend(t *testing.T) {
-	// This is a smoke test to verify the sendExit() implementation calls agm send msg
-	// We can't easily test the full integration without a real tmux session,
-	// but we can verify the code path uses exec.LookPath("agm") and exec.Command("agm", "session", "send", ...)
-
-	// Check that agm binary exists in PATH (required for the fix to work)
-	agmPath, err := exec.LookPath("agm")
-	if err != nil {
-		t.Skip("agm binary not found in PATH, skipping integration test")
-	}
-
-	t.Logf("Found agm binary at: %s", agmPath)
-
-	// Verify agm send msg command syntax
-	cmd := exec.Command(agmPath, "session", "send", "--help")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("agm send msg --help failed: %v\nOutput: %s", err, string(output))
-	}
-
-	// Verify --sender flag is documented
-	if !strings.Contains(string(output), "--sender") {
-		t.Error("agm send msg doesn't support --sender flag (required for reaper)")
-	}
-
-	// Verify --prompt flag is documented
-	if !strings.Contains(string(output), "--prompt") {
-		t.Error("agm send msg doesn't support --prompt flag (required for reaper)")
-	}
-
-	t.Log("✓ agm send msg supports required flags (--sender, --prompt)")
-}
-
 // TestSendExit_FailsGracefully verifies error handling when session doesn't exist
 func TestSendExit_FailsGracefully(t *testing.T) {
 	// Create reaper for non-existent session
 	r := New("nonexistent-test-session-12345", "/tmp/test-sessions")
 
 	// sendExit should fail gracefully (session doesn't exist)
-	err := r.sendExit()
+	err := r.sendExit("/exit")
 	if err == nil {
 		t.Error("sendExit() should fail for non-existent session, but succeeded")
 	}
@@ -66,19 +32,11 @@ func TestSendExit_FailsGracefully(t *testing.T) {
 	t.Logf("✓ sendExit() fails gracefully with error: %v", err)
 }
 
-// TestIntegration_ReaperWithRealSession tests the full reaper flow with a real tmux session
-// This test requires:
-// - agm binary in PATH
-// - tmux running
-// - ability to create test sessions
+// TestIntegration_ReaperWithRealSession exercises literal shutdown delivery to
+// a real tmux session without depending on one harness's renderer.
 func TestIntegration_ReaperWithRealSession(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
-	}
-
-	// Check prerequisites
-	if _, err := exec.LookPath("agm"); err != nil {
-		t.Skip("agm binary not found, skipping integration test")
 	}
 
 	// Get socket path
@@ -139,12 +97,12 @@ func TestIntegration_ReaperWithRealSession(t *testing.T) {
 	// Wait for command to execute
 	time.Sleep(500 * time.Millisecond)
 
-	// Test sendExit() which should use agm send
+	// Exercise the same literal tmux delivery boundary used by the reaper.
 	r := New(sessionName, sessionsDir)
 
-	// This test focuses on sendExit() error handling
-	// It waits for prompt and sends /exit
-	err := r.sendExit()
+	// This synthetic shell is not a real harness, so prompt detection may time
+	// out. Either outcome verifies that the boundary returns without panicking.
+	err := r.sendExit("/exit")
 
 	// Note: sendExit will likely timeout because this isn't a real Claude session
 	// But we can verify it gracefully handles the error
@@ -161,6 +119,5 @@ func TestIntegration_ReaperWithRealSession(t *testing.T) {
 		t.Log("✓ sendExit() succeeded")
 	}
 
-	// The key verification: reaper gracefully handles sending /exit to sessions
-	// This is a behavioral test, not a full end-to-end test
+	// This is a boundary test, not the product-level Pi archive canary.
 }

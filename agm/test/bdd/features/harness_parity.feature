@@ -41,6 +41,7 @@
 # RELATED-SPEC: agm/cmd/agm-bus/SPEC.md
 # RELATED-SPEC: agm/cmd/agm-aware-reaper/SPEC.md
 # RELATED-SPEC: agm/cmd/agm-reaper/SPEC.md
+# RELATED-SPEC: agm/internal/reaper/SPEC.md
 # RELATED-SPEC: agm/cmd/agm-statusline/SPEC.md
 # RELATED-SPEC: agm/cmd/agm-statusline-capture/SPEC.md
 # RELATED-SPEC: agm/internal/a2a/SPEC.md
@@ -87,6 +88,19 @@ Feature: Harness parity
     Given harness "gemini-cli" is configured
     When AGM validates active parity support
     Then harness "gemini-cli" should be deprecated
+
+  Scenario Outline: Reaper uses each harness native graceful-exit command
+    Given harness "<harness>" is configured
+    When AGM selects the graceful reaper exit command
+    Then the graceful reaper exit command should be "<command>"
+
+    Examples:
+      | harness      | command |
+      | claude-code  | /exit   |
+      | codex-cli    | /exit   |
+      | agy          | /exit   |
+      | opencode-cli | /exit   |
+      | pi-cli       | /quit   |
 
   Scenario: AGY doctor health uses the native installation surfaces
     Given harness "agy" is configured
