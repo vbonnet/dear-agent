@@ -160,7 +160,7 @@ func TestSessionMetadata_PiRoundTrip(t *testing.T) {
 		WorkingDirectory: "/tmp/pi-work",
 		Pi: &manifest.Pi{
 			SessionID: "pi-native-id", SessionDir: "/tmp/pi-sessions", TranscriptPath: "/tmp/pi-sessions/native.jsonl",
-			CodingAgentDir: "/tmp/pi-agent",
+			CodingAgentDir: "/tmp/pi-agent", CodingAgentDirSet: true,
 		},
 	}
 	metadata, err := json.Marshal(buildSessionMetadata(src))
@@ -173,5 +173,22 @@ func TestSessionMetadata_PiRoundTrip(t *testing.T) {
 	}
 	if got.Pi == nil || *got.Pi != *src.Pi {
 		t.Fatalf("Pi metadata = %#v, want %#v", got.Pi, src.Pi)
+	}
+}
+
+func TestSessionMetadata_PiNativeDefaultPresenceRoundTrip(t *testing.T) {
+	src := &manifest.Manifest{Pi: &manifest.Pi{
+		SessionID: "pi-native-default", CodingAgentDirSet: true,
+	}}
+	metadata, err := json.Marshal(buildSessionMetadata(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := &manifest.Manifest{}
+	if err := unmarshalEngramMetadata(got, metadata); err != nil {
+		t.Fatal(err)
+	}
+	if got.Pi == nil || got.Pi.CodingAgentDir != "" || !got.Pi.CodingAgentDirSet {
+		t.Fatalf("Pi native-default presence = %#v", got.Pi)
 	}
 }

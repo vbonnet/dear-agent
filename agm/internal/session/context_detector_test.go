@@ -63,7 +63,8 @@ func TestDetectContextFromManifestOrLogUsesTrustedPiCustomCatalog(t *testing.T) 
 	}
 
 	usage, err := DetectContextFromManifestOrLog(&manifest.Manifest{Pi: &manifest.Pi{
-		SessionID: "pi-custom-context", SessionDir: dir, TranscriptPath: path, CodingAgentDir: catalogDir,
+		SessionID: "pi-custom-context", SessionDir: dir, TranscriptPath: path,
+		CodingAgentDir: catalogDir, CodingAgentDirSet: true,
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +96,7 @@ func TestDetectContextFromManifestOrLogUsesPersistedPiCatalogInsteadOfCallerEnvi
 	}
 	m := &manifest.Manifest{Pi: &manifest.Pi{
 		SessionID: "pi-persisted-catalog", SessionDir: sessionDir,
-		TranscriptPath: transcript, CodingAgentDir: persistedDir,
+		TranscriptPath: transcript, CodingAgentDir: persistedDir, CodingAgentDirSet: true,
 	}}
 	usage, err := DetectContextFromManifestOrLog(m)
 	if err != nil {
@@ -113,6 +114,15 @@ func TestDetectContextFromManifestOrLogUsesPersistedPiCatalogInsteadOfCallerEnvi
 	}
 	if usage.TotalTokens != 200000 {
 		t.Fatalf("default Pi catalog context inherited caller environment: %d", usage.TotalTokens)
+	}
+
+	m.Pi.CodingAgentDirSet = false
+	usage, err = DetectContextFromManifestOrLog(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.TotalTokens != 4096 {
+		t.Fatalf("legacy Pi catalog compatibility context = %d, want 4096", usage.TotalTokens)
 	}
 }
 

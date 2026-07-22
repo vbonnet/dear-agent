@@ -105,7 +105,7 @@ func TestPiAdapterCreatePersistsNativeIdentityAndCanonicalCommand(t *testing.T) 
 	if metadata.NativeSessionDir == "" || !strings.HasPrefix(metadata.NativeSessionDir, os.Getenv("AGM_PI_SESSION_ROOT")) {
 		t.Fatalf("native session dir = %q", metadata.NativeSessionDir)
 	}
-	if metadata.CodingAgentDir != codingAgentDir || !strings.Contains(gotCommand, "PI_CODING_AGENT_DIR="+launchparity.ShellQuote(codingAgentDir)) {
+	if metadata.CodingAgentDir != codingAgentDir || !metadata.CodingAgentDirSet || !strings.Contains(gotCommand, "PI_CODING_AGENT_DIR="+launchparity.ShellQuote(codingAgentDir)) {
 		t.Fatalf("Pi coding agent persistence/command = %q / %q", metadata.CodingAgentDir, gotCommand)
 	}
 	for _, token := range []string{"pi", "--session-id", string(sessionID), "PI_SESSION_ID='" + string(sessionID) + "'", "AGM_PI_PROJECT_DIR=", "--session-dir", metadata.NativeSessionDir, "--name", "pi-worker", "--model", "anthropic/claude-sonnet-4-6", "--extension", "agm-authorization.js", "AGM_PI_PERMISSION_MODE='plan'", "AGM_PI_PERMISSION_POLICY_FILE=", "policy-", "--tools", "read,grep,find,ls"} {
@@ -162,6 +162,7 @@ func TestPiAdapterResumeUsesPersistedNativeIdentityModelAndMode(t *testing.T) {
 			TmuxName: "pi-resume", WorkingDir: workDir, UUID: "native.pi-id",
 			NativeSessionDir: sessionDir, Model: "gpt", PermissionMode: "auto",
 			CodingAgentDir:       codingAgentDir,
+			CodingAgentDirSet:    true,
 			PermissionPolicyJSON: `{"allow":["Bash(git:*)"]}`,
 		},
 	}}
@@ -191,6 +192,24 @@ func TestPiAdapterResumeUsesPersistedNativeIdentityModelAndMode(t *testing.T) {
 	}
 	if launchID == "" || !strings.Contains(command, "AGM_PI_LAUNCH_ID='"+launchID+"'") {
 		t.Fatalf("Pi resume command/readiness launch correlation = %q / %q", command, launchID)
+	}
+}
+
+func TestPiAdapterResumePreservesPersistedNativeDefault(t *testing.T) {
+	withPiAdapterRuntime(t)
+	callerDir := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", callerDir)
+	store := piResumeFixtureStore(t, "pi-native-default")
+	store.sessions["agm-id"].CodingAgentDirSet = true
+	var command string
+	piSendShellCommand = func(_, value string) error { command = value; return nil }
+
+	adapter, _ := NewPiAdapter(store)
+	if err := adapter.ResumeSession("agm-id"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(command, "env -u CLAUDECODE -u PI_CODING_AGENT_DIR") || strings.Contains(command, "PI_CODING_AGENT_DIR=") {
+		t.Fatalf("new native-default Pi adapter resume inherited %q: %s", callerDir, command)
 	}
 }
 

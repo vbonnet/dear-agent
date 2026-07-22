@@ -454,7 +454,10 @@ func preparePiCreateRequest(req *CreateSessionRequest, sessionID string) (*Creat
 	}
 	prepared := *req
 	prepared.Metadata = req.Metadata
-	prepared.Metadata.Pi = &manifest.Pi{SessionID: sessionID, SessionDir: sessionRoot, CodingAgentDir: codingAgentDir}
+	prepared.Metadata.Pi = &manifest.Pi{
+		SessionID: sessionID, SessionDir: sessionRoot,
+		CodingAgentDir: codingAgentDir, CodingAgentDirSet: true,
+	}
 	prepared.Metadata.PiExtension = extensionPath
 	prepared.Metadata.PiPolicyJSON = policyJSON
 	prepared.Metadata.PiPolicyFile, err = piadapter.EnsurePolicyFile(os.Getenv("AGM_PI_EXTENSION_ROOT"), sessionID, policyJSON)

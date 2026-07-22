@@ -128,7 +128,7 @@ func (a *PiAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 		Project: ctx.Project, Model: model, PermissionMode: permissionMode,
 		AuthorizedDirs: append([]string(nil), ctx.AuthorizedDirs...), UUID: string(sessionID),
 		NativeSessionDir: sessionDir, PermissionPolicyJSON: permissionPolicyJSON,
-		CodingAgentDir: codingAgentDir,
+		CodingAgentDir: codingAgentDir, CodingAgentDirSet: true,
 	}
 	if transcript, findErr := pisession.FindTranscript(sessionDir, string(sessionID)); findErr == nil {
 		metadata.TranscriptPath = transcript
@@ -223,10 +223,10 @@ func (a *PiAdapter) ResumeSession(sessionID SessionID) error {
 	launch := !running
 	codingAgentDir, extensionPath, policyFile := "", "", ""
 	if launch {
-		codingAgentDir = metadata.CodingAgentDir
-		if codingAgentDir == "" {
-			codingAgentDir = os.Getenv("PI_CODING_AGENT_DIR")
-		}
+		codingAgentDir = pisession.ResolveCodingAgentDir(
+			metadata.CodingAgentDir, metadata.CodingAgentDirSet,
+			os.Getenv("PI_CODING_AGENT_DIR"),
+		)
 		codingAgentDir, err = pisession.ValidateCodingAgentDir(codingAgentDir)
 		if err != nil {
 			return err
@@ -472,7 +472,8 @@ func (a *PiAdapter) ImportConversation(data []byte, format ConversationFormat) (
 	metadata := &SessionMetadata{
 		TmuxName: "pi-import-" + native.ID, Title: native.ID, CreatedAt: time.Now(),
 		WorkingDir: native.CWD, Model: model, UUID: native.ID,
-		NativeSessionDir: root, TranscriptPath: path, CodingAgentDir: codingAgentDir,
+		NativeSessionDir: root, TranscriptPath: path,
+		CodingAgentDir: codingAgentDir, CodingAgentDirSet: true,
 	}
 	if err := a.sessionStore.Set(sessionID, metadata); err != nil {
 		if removeErr := pisession.RemoveTranscript(root, path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
