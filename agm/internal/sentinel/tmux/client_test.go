@@ -1,8 +1,11 @@
 package tmux
 
 import (
+	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -17,6 +20,57 @@ func TestNewClient(t *testing.T) {
 	assert.NotNil(t, client)
 	assert.NotNil(t, client.socketPaths)
 	assert.Greater(t, len(client.socketPaths), 0, "should have at least one socket path")
+}
+
+func TestNewClientWithSocketUsesOnlyConfiguredSocket(t *testing.T) {
+	socketPath := "/tmp/sentinel-owned.sock"
+	client := NewClientWithSocket(socketPath)
+
+	assert.Equal(t, []string{socketPath}, client.socketPaths)
+}
+
+func TestBoundedCommandUsesSubprocessSafetyPolicy(t *testing.T) {
+	cmd, cancel := boundedCommand("-V")
+	defer cancel()
+
+	assert.NotNil(t, cmd.SysProcAttr)
+	assert.True(t, cmd.SysProcAttr.Setpgid)
+	assert.NotNil(t, cmd.Cancel)
+	assert.Equal(t, commandWaitDelay, cmd.WaitDelay)
+}
+
+func TestConfiguredClientActionsUseOnlyConfiguredSocket(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "owned.sock")
+	var invocations []string
+	client := newClientWithSocketAndRunner(socketPath, func(args ...string) ([]byte, error) {
+		invocations = append(invocations, strings.Join(args, " "))
+		if slices.Contains(args, "list-panes") {
+			return []byte("123\n"), nil
+		}
+		return nil, nil
+	})
+	_, err := client.GetPanePID("worker")
+	require.NoError(t, err)
+	require.NoError(t, client.SendLiteral("worker", "recovery message"))
+	require.NoError(t, client.SendKeys("worker", "C-c"))
+	require.NoError(t, client.KillSession("worker"))
+
+	require.Len(t, invocations, 8)
+	for _, line := range invocations {
+		assert.True(t, strings.HasPrefix(line, "-S "+socketPath+" "), line)
+	}
+}
+
+func TestConfiguredClientProbePreservesCommandFailure(t *testing.T) {
+	wantErr := errors.New("fixture command failed")
+	client := newClientWithSocketAndRunner("/tmp/owned.sock", func(...string) ([]byte, error) {
+		return nil, wantErr
+	})
+
+	_, err := client.GetPanePID("worker")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, wantErr)
+	assert.ErrorContains(t, err, `probe socket "/tmp/owned.sock"`)
 }
 
 // TestGetReadSocketPaths verifies socket path detection.

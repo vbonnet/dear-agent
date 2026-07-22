@@ -1,6 +1,9 @@
 package launchparity
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestActiveHarnessContracts(t *testing.T) {
 	t.Parallel()
@@ -12,8 +15,9 @@ func TestActiveHarnessContracts(t *testing.T) {
 	}{
 		{harness: "claude-code", mode: "auto", interactive: "claude", modeToken: "--permission-mode auto"},
 		{harness: "codex-cli", mode: "auto", interactive: "codex", modeToken: "-a never"},
-		{harness: "agy", mode: "auto", interactive: "--prompt-interactive", modeToken: "--dangerously-skip-permissions"},
+		{harness: "agy", mode: "auto", interactive: "agy", modeToken: "--dangerously-skip-permissions"},
 		{harness: "opencode-cli", mode: "plan", interactive: "opencode attach"},
+		{harness: "pi-cli", mode: "plan", interactive: "pi", modeToken: "--tools read,grep,find,ls"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.harness, func(t *testing.T) {
@@ -60,5 +64,29 @@ func TestNonPersistentContractExitsPaneShell(t *testing.T) {
 	}
 	if contract.ExitSuffix != " && exit" {
 		t.Fatalf("exit suffix = %q", contract.ExitSuffix)
+	}
+}
+
+func TestBuildAgyCommandOwnsLaunchAndResumePolicy(t *testing.T) {
+	command := BuildAgyCommand(AgyCommandSpec{
+		WorkDir:        "/tmp/agy work's",
+		ResolvedModel:  "Claude Sonnet 4.6 (Thinking)",
+		PermissionMode: "auto",
+		ConversationID: "117ff898-a964-4a9f-b460-1be4a8a49b17",
+		ExtraAddDirs:   []string{"/tmp/extra dir"},
+	})
+	for _, want := range []string{
+		"cd '/tmp/agy work'\"'\"'s' && agy --model 'Claude Sonnet 4.6 (Thinking)'",
+		"--dangerously-skip-permissions",
+		"--conversation '117ff898-a964-4a9f-b460-1be4a8a49b17'",
+		"--add-dir '/tmp/extra dir'",
+		"&& exit",
+	} {
+		if !strings.Contains(command.Command, want) {
+			t.Errorf("AGY command %q missing %q", command.Command, want)
+		}
+	}
+	if !command.ModeAppliedAtStartup {
+		t.Fatal("auto mode should be reported as applied at startup")
 	}
 }

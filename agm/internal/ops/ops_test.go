@@ -22,6 +22,9 @@ type mockTmux struct {
 	sessions map[string]bool
 	sent     []sentKey
 	sendErr  error
+	killed   []string
+	killErr  error
+	hasErr   error
 }
 
 func newMockTmux(sessions ...string) *mockTmux {
@@ -33,6 +36,9 @@ func newMockTmux(sessions ...string) *mockTmux {
 }
 
 func (m *mockTmux) HasSession(name string) (bool, error) {
+	if m.hasErr != nil {
+		return false, m.hasErr
+	}
 	return m.sessions[name], nil
 }
 
@@ -61,6 +67,14 @@ func (m *mockTmux) ListClients(string) ([]session.ClientInfo, error) {
 
 func (m *mockTmux) CreateSession(name, workdir string) error { return nil }
 func (m *mockTmux) AttachSession(name string) error          { return nil }
+func (m *mockTmux) KillSession(name string) error {
+	if m.killErr != nil {
+		return m.killErr
+	}
+	m.killed = append(m.killed, name)
+	delete(m.sessions, name)
+	return nil
+}
 func (m *mockTmux) SendKeys(session, keys string) error {
 	if m.sendErr != nil {
 		return m.sendErr

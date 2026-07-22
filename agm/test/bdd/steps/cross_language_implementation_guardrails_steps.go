@@ -45,9 +45,6 @@ var crossLanguageImplementationDirs = []string{
 	"tests/bats",
 	"tools/devlog/diagrams",
 	"wayfinder/cmd/wayfinder-session/internal/lintcontext/testdata/eslint-flat",
-	"wayfinder/cmd/wayfinder-session/migrations",
-	"wayfinder/cmd/wayfinder-session/scripts",
-	"wayfinder/lib",
 }
 
 type crossLanguageGuardrailStateKey struct{}
@@ -82,7 +79,7 @@ func configureCrossLanguageRoute(ctx context.Context, harness, family string) er
 	if err != nil {
 		return err
 	}
-	if _, ok := map[string]struct{}{"claude-code": {}, "codex-cli": {}, "agy": {}, "opencode-cli": {}}[harness]; !ok {
+	if _, ok := map[string]struct{}{"claude-code": {}, "codex-cli": {}, "agy": {}, "opencode-cli": {}, "pi-cli": {}}[harness]; !ok {
 		return fmt.Errorf("unsupported active harness %q", harness)
 	}
 	if _, ok := map[string]struct{}{"anthropic": {}, "openai": {}, "gemini": {}, "glm": {}, "deepseek": {}, "nemotron": {}, "qwen": {}}[family]; !ok {

@@ -437,7 +437,7 @@ Examples:
 
 func init() {
 	associateCmd.Flags().StringVar(&claudeUUID, "uuid", "", "Claude session UUID (auto-detected if not specified)")
-	associateCmd.Flags().StringVar(&associateHarness, "harness", "", "Harness for --create when no existing session is found (auto, claude-code, codex-cli, gemini-cli, opencode-cli, agy)")
+	associateCmd.Flags().StringVar(&associateHarness, "harness", "", "Harness for --create when no existing session is found (auto, claude-code, codex-cli, agy, opencode-cli, pi-cli; deprecated: gemini-cli)")
 	associateCmd.Flags().BoolVar(&createNew, "create", false, "Create new manifest if it doesn't exist")
 	associateCmd.Flags().BoolVar(&updateTimestampOnly, "update-timestamp-only", false, "Only update timestamp, don't change UUID (fast path for same UUID)")
 	associateCmd.Flags().BoolVar(&autoDetectOnly, "auto-detect-only", false, "Auto-detect UUID only if high confidence (for hooks, silent mode)")
@@ -492,6 +492,8 @@ func harnessFromPaneCommands(commands []string) string {
 			return "opencode-cli"
 		case "agy":
 			return "agy"
+		case "pi":
+			return "pi-cli"
 		case "claude":
 			return "claude-code"
 		}
@@ -570,10 +572,6 @@ func associateNonClaudeSession(sessionName, sessionsDir, harness string, existin
 
 func newNonClaudeAssociationManifest(sessionName, harness, workspace string) *manifest.Manifest {
 	cwd := currentWorkingDirectory()
-	model := ""
-	if d, ok := agent.DefaultModelForHarness(harness); ok {
-		model = d
-	}
 	return &manifest.Manifest{
 		SchemaVersion: manifest.SchemaVersion,
 		SessionID:     uuid.New().String(),
@@ -589,7 +587,7 @@ func newNonClaudeAssociationManifest(sessionName, harness, workspace string) *ma
 			SessionName: sessionName,
 		},
 		Harness:          harness,
-		Model:            model,
+		Model:            associationModel(harness),
 		WorkingDirectory: cwd,
 	}
 }
@@ -614,13 +612,23 @@ func updateNonClaudeAssociationManifest(m *manifest.Manifest, sessionName, harne
 		}
 	}
 	if m.Model == "" {
-		if d, ok := agent.DefaultModelForHarness(harness); ok {
-			m.Model = d
-		}
+		m.Model = associationModel(harness)
 	}
 	if m.SessionID == "" {
 		m.SessionID = uuid.New().String()
 	}
+}
+
+// associationModel returns a default only when it describes the process being
+// associated. AGY saved conversations retain their own model selection, which
+// the public filesystem metadata does not expose, so an empty model is the
+// truthful representation until AGM observes an explicit selection.
+func associationModel(harness string) string {
+	if agent.NormalizeHarnessName(harness) == "agy" {
+		return ""
+	}
+	model, _ := agent.DefaultModelForHarness(harness)
+	return model
 }
 
 func currentWorkingDirectory() string {

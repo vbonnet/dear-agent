@@ -72,10 +72,10 @@ SUCCESS: All files processed
 
 ### Phase Indicators (Multi-Step Workflows)
 
-For workflows like Wayfinder phases (W0-S11):
+For workflows like the canonical Wayfinder phases:
 
 ```go
-phases := []string{"W0", "D1", "D2", "D3", "D4", "S4", "S5", "S6", "S7", "S8", "S9", "S10", "S11"}
+phases := []string{"CHARTER", "PROBLEM", "RESEARCH", "DESIGN", "SPEC", "PLAN", "SETUP", "BUILD", "RETRO"}
 p := progress.New(progress.Options{Total: len(phases), Label: "Wayfinder"})
 p.Start()
 
@@ -89,18 +89,18 @@ p.Complete(fmt.Sprintf("All phases complete (%d/%d)", len(phases), len(phases)))
 
 **Output (TTY)**:
 ```
-⏳ Phase 3/11: D2 - Existing Solutions [=====>    ] 27% (6m remaining)
-✅ All phases complete (11/11)
+⏳ Phase 3/9: RESEARCH - Existing Solutions [=====>    ] 33% (6m remaining)
+✅ All phases complete (9/9)
 ```
 
 **Output (non-TTY)**:
 ```
 Wayfinder
-Phase 1/11: W0 - Project Framing 9%
-Phase 2/11: D1 - Problem Validation 18%
-Phase 3/11: D2 - Existing Solutions 27%
+Phase 1/9: CHARTER - Project Framing 11%
+Phase 2/9: PROBLEM - Problem Validation 22%
+Phase 3/9: RESEARCH - Existing Solutions 33%
 ...
-SUCCESS: All phases complete (11/11)
+SUCCESS: All phases complete (9/9)
 ```
 
 ### Error Handling

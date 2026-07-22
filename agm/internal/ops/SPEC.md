@@ -157,6 +157,14 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-66** When an optional manifest directory cannot be created, the system shall continue without registration and shall provide no manifest path to runtime completion.
 
+**OPS-67** When AGM creates an AGY session, the shared launch-command owner shall preserve the selected model, permission mode, work directory, additional directories, and persistence policy while using AGY's native bare interactive entry point.
+
+**OPS-68** When AGM cold-resumes an AGY conversation, the shared AGY command owner shall preserve a known stored model and permission mode, include the canonical conversation ID, and apply the same quoting, directory, and persistence policy used by creation; if the native model is unknown, the command shall omit `--model` so AGY retains the conversation's saved selection.
+
+**OPS-69** When a creation request is canceled after registration but before runtime completion, the shared lifecycle shall skip completion and enter rollback before a startup prompt or other completion side effect can run.
+
+**OPS-70** When any shared creation surface launches AGY, the system shall use `CreateSessionWithContext` to resolve the existing workspace to one canonical physical path for locking, tmux creation, launch, identity correlation, registration, and persisted metadata while holding the workspace-create lock across the fail-closed pre-launch snapshot through registration and releasing it before surface-specific completion, including any blocking interactive attach, without surrendering normal rollback ownership.
+
 **OPS-36** While a session's state is OFFLINE, READY, or DONE, the stall detector shall skip error-loop detection for that session.
 
 ### Field Mask Projection
@@ -176,6 +184,16 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 **OPS-45** When `KillSession` evaluates the recent-activity protection, the system shall accept either `Force` or `ConfirmedStuck` as sufficient confirmation, so that no combination of two flags is ever required to kill a session.
 
 **OPS-46** When session status is computed and the tmux backend can verify process liveness, a session whose tmux session exists but whose harness process is dead shall report status `zombie` rather than `active`.
+
+**OPS-71** When `KillSession` returns success outside dry-run mode, the shared operation shall have removed the exact resolved tmux session and verified that the target no longer exists.
+
+**OPS-72** If the tmux existence probe, kill command, or post-kill absence check fails, `KillSession` shall return the backend or verification error and shall not report a successful kill.
+
+**OPS-73** When `KillSession` runs in dry-run mode, the system shall evaluate the active-session guard and report the resolved tmux target without invoking the kill mutation.
+
+**OPS-74** When `KillSession` resolves an identifier, the system shall lock the immutable session ID, reload mutable session and tmux identity under that lock, and honor caller cancellation before the irreversible tmux mutation.
+
+**OPS-75** The system shall assign a unique code to every stable RFC 7807 error in the shared operations catalog so programmatic callers can distinguish lifecycle guards and failures without parsing human-readable text.
 
 **OPS-47** When a process-liveness scan fails or the tmux backend cannot verify process liveness, status and kill decisions shall fall back to tmux session existence (fail-safe: an unverifiable session is treated as active).
 

@@ -1,6 +1,8 @@
 package ops
 
 import (
+	"context"
+	"fmt"
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/contracts"
@@ -21,13 +23,14 @@ type KillSessionRequest struct {
 
 // KillSessionResult is the output of KillSession.
 type KillSessionResult struct {
-	Operation      string     `json:"operation"`
-	SessionID      string     `json:"session_id"`
-	Name           string     `json:"name"`
-	WasRunning     bool       `json:"was_running"`
-	DryRun         bool       `json:"dry_run,omitempty"`
-	RecentlyActive bool       `json:"recently_active,omitempty"`
-	LastActivity   *time.Time `json:"last_activity,omitempty"`
+	Operation       string     `json:"operation"`
+	SessionID       string     `json:"session_id"`
+	Name            string     `json:"name"`
+	TmuxSessionName string     `json:"tmux_session_name"`
+	WasRunning      bool       `json:"was_running"`
+	DryRun          bool       `json:"dry_run,omitempty"`
+	RecentlyActive  bool       `json:"recently_active,omitempty"`
+	LastActivity    *time.Time `json:"last_activity,omitempty"`
 	// HarnessDead reports that the tmux session exists but the process check
 	// proved no harness process is running in the pane tree (ce-axsr): the
 	// session is a zombie pane, not an active session, so --confirmed-stuck
@@ -41,28 +44,16 @@ type KillSessionResult struct {
 	LivenessEvidence string `json:"liveness_evidence,omitempty"`
 }
 
-// TmuxKiller is the subset of tmux operations needed by KillSession.
-// The ops layer uses this interface to kill tmux sessions without
-// importing the tmux package directly.
-type TmuxKiller interface {
-	HasSession(name string) (bool, error)
-	SendKeys(session, keys string) error
-}
-
 // isTmuxSessionRunning queries the tmux backend (when available) for the
 // liveness of name.
-func isTmuxSessionRunning(ctx *OpContext, name string) bool {
+func isTmuxSessionRunning(ctx *OpContext, name string) (bool, error) {
 	if ctx.Tmux == nil {
-		return false
+		return false, fmt.Errorf("tmux backend is required")
 	}
-	ti, ok := ctx.Tmux.(interface {
-		HasSession(name string) (bool, error)
-	})
-	if !ok {
-		return false
+	if checker, ok := ctx.Tmux.(session.StrictSessionExistenceChecker); ok {
+		return checker.HasSessionStrict(killRequestContext(ctx), name)
 	}
-	has, err := ti.HasSession(name)
-	return err == nil && has
+	return ctx.Tmux.HasSession(name)
 }
 
 // sessionLiveness combines the two liveness signals for name: tmux session
@@ -80,10 +71,14 @@ type sessionLiveness struct {
 	HarnessDead   bool
 	ZombieWriter  bool
 	Evidence      string
+	ProbeErr      error
 }
 
 func assessSessionLiveness(ctx *OpContext, name string) sessionLiveness {
-	exists := isTmuxSessionRunning(ctx, name)
+	exists, err := isTmuxSessionRunning(ctx, name)
+	if err != nil {
+		return sessionLiveness{ProbeErr: err}
+	}
 	lv := sessionLiveness{SessionExists: exists, Active: exists}
 	if !exists {
 		return lv
@@ -123,10 +118,16 @@ func KillSession(ctx *OpContext, req *KillSessionRequest) (*KillSessionResult, e
 	if req == nil || req.Identifier == "" {
 		return nil, ErrInvalidInput("identifier", "Session identifier is required. Provide a session ID, name, or UUID prefix.")
 	}
+	if ctx == nil || ctx.Storage == nil {
+		return nil, ErrStorageError("kill_session", fmt.Errorf("storage is required"))
+	}
+	if err := killRequestContext(ctx).Err(); err != nil {
+		return nil, err
+	}
 
-	recentActivityThreshold := contracts.Load().SessionLifecycle.RecentActivityThreshold.Duration
-
-	// Resolve session
+	// Resolve only the stable session identity before taking the mutation lock.
+	// Mutable fields such as name and tmux identity are reloaded under that lock
+	// so a concurrent rename or resume cannot redirect this kill to a stale pane.
 	m, err := ctx.Storage.GetSession(req.Identifier)
 	if err != nil {
 		m, err = findByName(ctx, req.Identifier)
@@ -137,11 +138,43 @@ func KillSession(ctx *OpContext, req *KillSessionRequest) (*KillSessionResult, e
 	if m == nil {
 		return nil, ErrSessionNotFound(req.Identifier)
 	}
+	if m.SessionID == "" {
+		return nil, ErrStorageError("kill_session", fmt.Errorf("resolved session has no stable session ID"))
+	}
 
+	var result *KillSessionResult
+	err = WithSessionLockContext(killRequestContext(ctx), m.SessionID, func() error {
+		if err := killRequestContext(ctx).Err(); err != nil {
+			return err
+		}
+		current, err := ctx.Storage.GetSession(m.SessionID)
+		if err != nil {
+			return ErrStorageError("kill_session_reload", err)
+		}
+		if current == nil {
+			return ErrSessionNotFound(m.SessionID)
+		}
+		result, err = killResolvedSession(ctx, current, req)
+		return err
+	})
+	return result, err
+}
+
+func killRequestContext(ctx *OpContext) context.Context {
+	if ctx != nil && ctx.Context != nil {
+		return ctx.Context
+	}
+	return context.Background()
+}
+
+// killResolvedSession validates and mutates one session snapshot while its
+// stable-ID lifecycle lock is held.
+func killResolvedSession(ctx *OpContext, m *manifest.Manifest, req *KillSessionRequest) (*KillSessionResult, error) {
 	// Check if already archived
 	if m.Lifecycle == "archived" {
 		return nil, ErrSessionArchived(m.Name)
 	}
+	recentActivityThreshold := contracts.Load().SessionLifecycle.RecentActivityThreshold.Duration
 
 	tmuxName := m.Tmux.SessionName
 	if tmuxName == "" {
@@ -152,13 +185,17 @@ func KillSession(ctx *OpContext, req *KillSessionRequest) (*KillSessionResult, e
 	// pane (tmux session exists, harness dead) is killable without
 	// --confirmed-stuck — that flag protects live work, and there is none.
 	liveness := assessSessionLiveness(ctx, tmuxName)
+	if liveness.ProbeErr != nil {
+		return nil, fmt.Errorf("check tmux session %q before kill: %w", tmuxName, liveness.ProbeErr)
+	}
 	wasRunning := liveness.Active
 	if wasRunning && !req.ConfirmedStuck {
 		return &KillSessionResult{
-			Operation:  "kill_session",
-			SessionID:  m.SessionID,
-			Name:       m.Name,
-			WasRunning: true,
+			Operation:       "kill_session",
+			SessionID:       m.SessionID,
+			Name:            m.Name,
+			TmuxSessionName: tmuxName,
+			WasRunning:      true,
 		}, ErrActiveSessionKill(m.Name)
 	}
 	lastActivity, recentlyActive := assessRecentActivity(m, recentActivityThreshold)
@@ -169,6 +206,7 @@ func KillSession(ctx *OpContext, req *KillSessionRequest) (*KillSessionResult, e
 		Operation:        "kill_session",
 		SessionID:        m.SessionID,
 		Name:             m.Name,
+		TmuxSessionName:  tmuxName,
 		WasRunning:       wasRunning,
 		RecentlyActive:   recentlyActive,
 		LastActivity:     lastActivity,
@@ -192,6 +230,35 @@ func KillSession(ctx *OpContext, req *KillSessionRequest) (*KillSessionResult, e
 	if recentlyActive && !req.Force && !req.ConfirmedStuck {
 		return result, ErrKillProtected(m.Name, *lastActivity)
 	}
+	if err := executeAndVerifyTmuxKill(ctx, tmuxName, liveness.SessionExists); err != nil {
+		return result, err
+	}
 
 	return result, nil
+}
+
+// executeAndVerifyTmuxKill owns the irreversible mutation boundary. Callers
+// hold the stable-ID lifecycle lock before entering this function.
+func executeAndVerifyTmuxKill(ctx *OpContext, tmuxName string, sessionExists bool) error {
+	if err := killRequestContext(ctx).Err(); err != nil {
+		return err
+	}
+	if sessionExists {
+		killer, ok := ctx.Tmux.(session.TmuxSessionKiller)
+		if !ok {
+			return fmt.Errorf("kill tmux session %q: backend does not implement session deletion", tmuxName)
+		}
+		if err := killer.KillSession(tmuxName); err != nil {
+			return fmt.Errorf("kill tmux session %q: %w", tmuxName, err)
+		}
+	}
+
+	exists, err := isTmuxSessionRunning(ctx, tmuxName)
+	if err != nil {
+		return fmt.Errorf("verify tmux session %q after kill: %w", tmuxName, err)
+	}
+	if exists {
+		return fmt.Errorf("verify tmux session %q after kill: target still exists", tmuxName)
+	}
+	return nil
 }

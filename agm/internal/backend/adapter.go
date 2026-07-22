@@ -1,11 +1,18 @@
 package backend
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
 // Compile-time check to ensure BackendAdapter implements session.TmuxInterface
 var _ session.TmuxInterface = (*BackendAdapter)(nil)
+var _ session.TmuxSessionKiller = (*BackendAdapter)(nil)
+var _ session.StrictSessionExistenceChecker = (*BackendAdapter)(nil)
+var _ session.HarnessLivenessChecker = (*BackendAdapter)(nil)
+var _ session.HarnessLivenessBatchChecker = (*BackendAdapter)(nil)
 
 // BackendAdapter adapts a Backend to implement session.TmuxInterface
 // This allows the backend system to be used with existing code that expects TmuxInterface
@@ -71,6 +78,40 @@ func (a *BackendAdapter) ListClients(sessionName string) ([]session.ClientInfo, 
 // CreateSession creates a new session with the given name and working directory
 func (a *BackendAdapter) CreateSession(name, workdir string) error {
 	return a.backend.CreateSession(name, workdir)
+}
+
+// KillSession forwards the destructive capability required by shared
+// lifecycle operations. Keeping this on the adapter is essential: the CLI
+// passes BackendAdapter (not the underlying RealTmux) into ops.OpContext.
+func (a *BackendAdapter) KillSession(name string) error {
+	return a.backend.KillSession(name)
+}
+
+// HasSessionStrict preserves a backend's strict existence capability through
+// the CLI adapter. Backends without a stronger probe retain the Backend
+// contract that HasSession returns operational failures rather than absence.
+func (a *BackendAdapter) HasSessionStrict(ctx context.Context, name string) (bool, error) {
+	if checker, ok := a.backend.(session.StrictSessionExistenceChecker); ok {
+		return checker.HasSessionStrict(ctx, name)
+	}
+	return a.backend.HasSession(name)
+}
+
+// HarnessLiveness preserves process-level liveness when the selected backend
+// provides it. Callers treat an unsupported capability error conservatively.
+func (a *BackendAdapter) HarnessLiveness(name string) (session.LivenessInfo, error) {
+	if checker, ok := a.backend.(session.HarnessLivenessChecker); ok {
+		return checker.HarnessLiveness(name)
+	}
+	return session.LivenessInfo{}, fmt.Errorf("backend does not implement harness liveness")
+}
+
+// HarnessLivenessBatch preserves the efficient batch liveness capability.
+func (a *BackendAdapter) HarnessLivenessBatch(names []string) (map[string]session.LivenessInfo, error) {
+	if checker, ok := a.backend.(session.HarnessLivenessBatchChecker); ok {
+		return checker.HarnessLivenessBatch(names)
+	}
+	return nil, fmt.Errorf("backend does not implement batch harness liveness")
 }
 
 // AttachSession attaches to or switches to the given session

@@ -33,6 +33,8 @@
 # RELATED-SPEC: agm/internal/readiness/SPEC.md
 # RELATED-SPEC: agm/internal/send/SPEC.md
 # RELATED-SPEC: agm/internal/manifest/SPEC.md
+# RELATED-SPEC: agm/internal/dolt/SPEC.md
+# RELATED-SPEC: agm/internal/dolt/migrations/SPEC.md
 # RELATED-SPEC: agm/internal/statusline/SPEC.md
 # RELATED-SPEC: agm/cmd/agm-bus/SPEC.md
 # RELATED-SPEC: agm/cmd/agm-aware-reaper/SPEC.md
@@ -55,7 +57,7 @@
 Feature: Harness parity
   AGM should use one harness-neutral delivery contract for interactive CLI
   harnesses. Claude Code is the reference implementation. Codex CLI, AGY, and
-  OpenCode have different terminal chrome and control surfaces than Claude
+  OpenCode and Pi have different terminal chrome and control surfaces than Claude
   Code, but their idle prompts must still be sendable and their trust/menu
   prompts must not be treated as ready. Gemini CLI is deprecated compatibility
   and is not part of active parity enforcement.
@@ -77,11 +79,29 @@ Feature: Harness parity
       | codex-cli    |
       | agy          |
       | opencode-cli |
+      | pi-cli       |
 
   Scenario: Gemini CLI is deprecated compatibility
     Given harness "gemini-cli" is configured
     When AGM validates active parity support
     Then harness "gemini-cli" should be deprecated
+
+  Scenario: AGY doctor health uses the native installation surfaces
+    Given harness "agy" is configured
+    When AGM resolves doctor health for the configured harness
+    Then doctor should recognize CLI binary "agy"
+    And doctor should recognize config directory suffix ".gemini/antigravity-cli"
+
+  Scenario Outline: AGY doctor health normalizes legacy manifest spellings
+    Given harness "<harness>" is configured
+    When AGM resolves doctor health for the configured harness
+    Then doctor should recognize CLI binary "agy"
+    And doctor should recognize config directory suffix ".gemini/antigravity-cli"
+
+    Examples:
+      | harness     |
+      | agy-cli     |
+      | antigravity |
 
   Scenario: Active harness adapters satisfy shared conformance
     Given AGM active harnesses are configured
@@ -100,6 +120,7 @@ Feature: Harness parity
       | codex-cli    | auto |
       | agy          | auto |
       | opencode-cli | plan |
+      | pi-cli       | plan |
 
   Scenario Outline: Active harness startup is transactional
     Given active harness "<harness>" uses startup mode "default"
@@ -112,6 +133,7 @@ Feature: Harness parity
       | codex-cli    |
       | agy          |
       | opencode-cli |
+      | pi-cli       |
 
   Scenario Outline: Active harness recovery requires process-state evidence
     Given harness "<harness>" is configured
@@ -126,6 +148,7 @@ Feature: Harness parity
       | codex-cli    |
       | agy          |
       | opencode-cli |
+      | pi-cli       |
 
   Scenario Outline: Active harness capture uses the canonical AGM socket
     Given harness "<harness>" is configured
@@ -140,6 +163,7 @@ Feature: Harness parity
       | codex-cli    |
       | agy          |
       | opencode-cli |
+      | pi-cli       |
 
   Scenario: Every tmux-facing AGM command declares active harness parity
     Given AGM tmux-facing command sources
@@ -224,11 +248,18 @@ Feature: Harness parity
       | harness      | model     |
       | claude-code  | sonnet    |
       | codex-cli    | 5.4-mini  |
-      | agy          | 2.5-flash |
+      | agy          | 3.5-flash |
       | opencode-cli | glm-5.2   |
       | opencode-cli | deepseek-v4 |
       | opencode-cli | nemotron  |
       | opencode-cli | qwen      |
+      | pi-cli       | sonnet    |
+      | pi-cli       | gpt       |
+      | pi-cli       | gemini-flash |
+      | pi-cli       | glm-5.2   |
+      | pi-cli       | deepseek-v4 |
+      | pi-cli       | nemotron  |
+      | pi-cli       | qwen      |
 
   Scenario: Codex composer is ready to receive input
     Given a Codex CLI composer pane
@@ -238,6 +269,11 @@ Feature: Harness parity
 
   Scenario: Codex trust prompt is not treated as ready
     Given a Codex CLI trust prompt
+    When AGM checks whether the session can receive input
+    Then delivery should be queued
+
+  Scenario: Stale Codex composer above shell output is not treated as ready
+    Given a stale Codex CLI composer followed by shell output
     When AGM checks whether the session can receive input
     Then delivery should be queued
 
@@ -270,6 +306,19 @@ Feature: Harness parity
     Then AGM should auto-accept the Codex trust prompt before prompt delivery
     And AGM should wait for the Codex composer
 
+  Scenario: Codex current-tmux creation launches before registration
+    Given current-tmux creation selects Codex CLI
+    When AGM validates current-tmux Codex launch wiring
+    Then Codex credential validation should precede the canonical launcher
+    And the top-level new command should route into current tmux
+    And Codex current-tmux launch should require the executable without waiting behind its own AGM process
+    And Codex queue failures should propagate to shared creation rollback
+
+  Scenario: AGY current-tmux creation refuses unsafe deferred identity
+    Given current-tmux creation selects AGY
+    When AGM validates current-tmux AGY safety
+    Then current-tmux AGY creation should fail before launch with detached guidance
+
   Scenario: Codex send safety is harness-specific
     Given Codex CLI is available
     And a Codex CLI composer pane
@@ -295,6 +344,22 @@ Feature: Harness parity
     When AGM runs send safety for the configured harness
     Then send safety should not require a Claude process
 
+  Scenario Outline: Pi and OpenCode send safety is harness-specific
+    Given harness "<harness>" is configured
+    When AGM runs send safety for the configured harness
+    Then send safety should not require a Claude process
+
+    Examples:
+      | harness      |
+      | opencode-cli |
+      | pi-cli       |
+
+  Scenario: AGY adapter uses safe concurrent native lifecycle truth
+    Given AGY is available
+    When AGM validates the AGY adapter lifecycle
+    Then the AGY adapter should preserve canonical launch and resume policy
+    And the AGY adapter should require AGY process and transcript truth
+
   Scenario: Current harness session can be associated with AGM
     Given an existing tmux session running Codex CLI
     When /agm:agm-assoc runs in that session
@@ -314,6 +379,18 @@ Feature: Harness parity
     And the record should preserve the Codex session UUID
     And AGM should launch a tmux pane that resumes the Codex conversation
 
+  Scenario: Failed Codex resume is rolled back before success effects
+    Given a stopped Codex CLI session without a tmux pane
+    When AGM validates the Codex resume transaction
+    Then Codex resume success should require process and composer readiness
+    And a failed Codex resume should serialize concurrent attempts through every production entry point, release the session lock before attachment, preserve canonical tmux identity from stale full-session updates, reconcile ambiguous metadata commits, compensate owned provisional metadata before removing its creation-specific tmux identity even when tmux ID output is lost, and preserve tmux whenever metadata cleanup is unproven
+    And authoritative session renames should serialize with cold resume, fence ambiguous storage writes, preserve both identity names from stale writers, preserve claimed tmux identity across lost replies and server restarts, reject stale identity revisions, and compensate tmux after storage conflicts
+    And administrative hierarchy repairs should atomically link parents and inherited names through the observed identity revision
+    And successful Codex prompt delivery should remain successful after later caller cancellation
+    And ambiguous final Codex prompt submission should preserve work that may have started
+    And failed Codex prompt delivery should not suppress a later attach failure
+    And Codex activity updates should follow resume readiness
+
   Scenario: Orphaned AGY conversation can be imported and resumed
     Given an AGY saved conversation exists outside AGM
     When AGM imports the AGY conversation ID with harness "agy"
@@ -326,6 +403,26 @@ Feature: Harness parity
     When AGM resumes the session
     Then AGM should launch a tmux pane that resumes the AGY conversation
     And the AGY resume command should include "--dangerously-skip-permissions"
+
+  Scenario: AGY model compatibility survives catalog migrations
+    Given AGY is available
+    When AGM validates AGY model compatibility
+    Then retired AGY manifest models should map to current public labels
+    And exact AGY public labels should remain unchanged
+    And cross-harness AGY aliases should normalize case-insensitively
+    And imported AGY conversations should preserve unknown model provenance
+    And AGY runtime model switches should not leave a stale resume override
+
+  Scenario: MCP waits for AGY before delivering its startup prompt
+    Given AGY is available
+    When AGM validates AGY MCP creation readiness
+    Then MCP creation should wait for the AGY composer before prompt delivery
+    And shared creation should persist the new AGY identity before registration
+
+  Scenario: Active-harness creation signals preserve rollback
+    Given AGY is available
+    When AGM validates AGY root cancellation plumbing
+    Then root signal cancellation should reach every command-scoped readiness wait
 
   Scenario: Session list fields can target session rows
     Given AGM has Codex session records in Dolt

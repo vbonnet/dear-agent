@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/statusread"
 	"gopkg.in/yaml.v3"
 )
 
@@ -54,8 +56,11 @@ func parseFrontmatter(content []byte) (map[string]any, error) {
 // fmString extracts one canonical string field from parsed frontmatter.
 func fmString(fm map[string]any, key string) string {
 	if value, ok := fm[key]; ok {
-		if text, ok := value.(string); ok {
-			return text
+		switch typed := value.(type) {
+		case string:
+			return typed
+		case time.Time:
+			return typed.Format(time.RFC3339)
 		}
 	}
 	return ""
@@ -81,6 +86,9 @@ func readWayfinderSession(sessionDir string) (string, map[string]any, error) {
 	data, err := os.ReadFile(statusPath)
 	if err != nil {
 		return id, nil, err
+	}
+	if _, err := statusread.Parse(data); err != nil {
+		return id, nil, fmt.Errorf("invalid canonical status: %w", err)
 	}
 	fm, err := parseFrontmatter(data)
 	if err != nil {

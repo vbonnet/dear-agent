@@ -2,18 +2,49 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
-// writeStatus creates a WAYFINDER-STATUS.md in dir with the given frontmatter.
-func writeStatus(t *testing.T, dir, frontmatter string) {
+// writeStatus creates a complete canonical WAYFINDER-STATUS.md.
+func writeStatus(t *testing.T, dir, projectName, status, waypoint string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	content := "---\n" + frontmatter + "\n---\n"
+	completion := ""
+	if status == "completed" {
+		completion = "completion_date: 2026-07-20T00:00:00Z\n"
+	}
+	var history strings.Builder
+	for _, predecessor := range []string{"CHARTER", "PROBLEM", "RESEARCH", "DESIGN", "SPEC", "PLAN", "SETUP", "BUILD", "RETRO"} {
+		if predecessor == waypoint {
+			if status == "completed" {
+				fmt.Fprintf(&history, "  - {name: %s, status: completed, started_at: 2026-07-20T00:00:00Z, completed_at: 2026-07-20T00:01:00Z}\n", predecessor)
+			}
+			break
+		}
+		fmt.Fprintf(&history, "  - {name: %s, status: completed, started_at: 2026-07-20T00:00:00Z, completed_at: 2026-07-20T00:01:00Z}\n", predecessor)
+	}
+	historyYAML := "waypoint_history: []\n"
+	if history.Len() > 0 {
+		historyYAML = "waypoint_history:\n" + history.String()
+	}
+	content := fmt.Sprintf(`---
+schema_version: "2.0"
+project_name: %s
+project_type: feature
+risk_level: S
+status: %s
+current_waypoint: %s
+created_at: 2026-07-20T00:00:00Z
+updated_at: 2026-07-20T00:00:00Z
+%s%s---
+`, projectName, status, waypoint, completion, historyYAML)
 	if err := os.WriteFile(filepath.Join(dir, wayfinderStatusFile), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -33,6 +64,17 @@ func TestParseFrontmatter_SchemaV2(t *testing.T) {
 	}
 }
 
+func TestReadWayfinderSession_RejectsNonCanonicalSchema(t *testing.T) {
+	dir := t.TempDir()
+	content := []byte("---\nproject_name: old-project\nstatus: completed\ncurrent_waypoint: RETRO\n---\n")
+	if err := os.WriteFile(filepath.Join(dir, wayfinderStatusFile), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := readWayfinderSession(dir); err == nil {
+		t.Fatal("readWayfinderSession accepted a status without schema_version")
+	}
+}
+
 func TestParseFrontmatter_NoFrontmatter(t *testing.T) {
 	_, err := parseFrontmatter([]byte("# Just a heading\nno frontmatter here"))
 	if err == nil {
@@ -43,9 +85,9 @@ func TestParseFrontmatter_NoFrontmatter(t *testing.T) {
 func TestListWayfinderSessions_Basic(t *testing.T) {
 	root := t.TempDir()
 
-	writeStatus(t, filepath.Join(root, "alpha"), "schema_version: \"2.0\"\nproject_name: alpha\nstatus: in-progress\ncurrent_waypoint: DESIGN\n")
-	writeStatus(t, filepath.Join(root, "beta"), "schema_version: \"2.0\"\nproject_name: beta\nstatus: completed\ncurrent_waypoint: RETRO\n")
-	writeStatus(t, filepath.Join(root, "gamma"), "schema_version: \"2.0\"\nproject_name: gamma\nstatus: in-progress\ncurrent_waypoint: CHARTER\n")
+	writeStatus(t, filepath.Join(root, "alpha"), "alpha", "in-progress", "DESIGN")
+	writeStatus(t, filepath.Join(root, "beta"), "beta", "completed", "RETRO")
+	writeStatus(t, filepath.Join(root, "gamma"), "gamma", "in-progress", "CHARTER")
 
 	sessions, err := listWayfinderSessions(root, "", 0)
 	if err != nil {
@@ -54,14 +96,17 @@ func TestListWayfinderSessions_Basic(t *testing.T) {
 	if len(sessions) != 3 {
 		t.Errorf("got %d sessions, want 3", len(sessions))
 	}
+	if sessions[0].CreatedAt != "2026-07-20T00:00:00Z" || sessions[0].UpdatedAt != "2026-07-20T00:00:00Z" {
+		t.Errorf("canonical timestamps were not preserved: %+v", sessions[0])
+	}
 }
 
 func TestListWayfinderSessions_StatusFilter(t *testing.T) {
 	root := t.TempDir()
 
-	writeStatus(t, filepath.Join(root, "active1"), "schema_version: \"2.0\"\nproject_name: active1\nstatus: in-progress\ncurrent_waypoint: BUILD\n")
-	writeStatus(t, filepath.Join(root, "done1"), "schema_version: \"2.0\"\nproject_name: done1\nstatus: completed\ncurrent_waypoint: RETRO\n")
-	writeStatus(t, filepath.Join(root, "active2"), "schema_version: \"2.0\"\nproject_name: active2\nstatus: in-progress\ncurrent_waypoint: PLAN\n")
+	writeStatus(t, filepath.Join(root, "active1"), "active1", "in-progress", "BUILD")
+	writeStatus(t, filepath.Join(root, "done1"), "done1", "completed", "RETRO")
+	writeStatus(t, filepath.Join(root, "active2"), "active2", "in-progress", "PLAN")
 
 	sessions, err := listWayfinderSessions(root, "in-progress", 0)
 	if err != nil {
@@ -81,7 +126,7 @@ func TestListWayfinderSessions_Limit(t *testing.T) {
 	root := t.TempDir()
 
 	for _, name := range []string{"a", "b", "c", "d", "e"} {
-		writeStatus(t, filepath.Join(root, name), "schema_version: \"2.0\"\nproject_name: "+name+"\nstatus: open\ncurrent_waypoint: CHARTER\n")
+		writeStatus(t, filepath.Join(root, name), name, "in-progress", "BUILD")
 	}
 
 	sessions, err := listWayfinderSessions(root, "", 3)
@@ -96,7 +141,7 @@ func TestListWayfinderSessions_Limit(t *testing.T) {
 func TestListWayfinderSessions_SkipsNonDirs(t *testing.T) {
 	root := t.TempDir()
 
-	writeStatus(t, filepath.Join(root, "real-session"), "schema_version: \"2.0\"\nproject_name: real\nstatus: in-progress\ncurrent_waypoint: CHARTER\n")
+	writeStatus(t, filepath.Join(root, "real-session"), "real", "in-progress", "BUILD")
 	// Create a plain file (should be skipped)
 	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("# root readme"), 0o644); err != nil {
 		t.Fatal(err)
@@ -117,7 +162,7 @@ func TestListWayfinderSessions_SkipsNonDirs(t *testing.T) {
 
 func TestGetWayfinderSessionDetail_Found(t *testing.T) {
 	root := t.TempDir()
-	writeStatus(t, filepath.Join(root, "my-project"), "schema_version: \"2.0\"\nproject_name: my-project\nstatus: in-progress\ncurrent_waypoint: DESIGN\n")
+	writeStatus(t, filepath.Join(root, "my-project"), "my-project", "in-progress", "DESIGN")
 
 	detail, err := getWayfinderSessionDetail(root, "my-project")
 	if err != nil {
@@ -143,6 +188,45 @@ func TestGetWayfinderSessionDetail_NotFound(t *testing.T) {
 	}
 }
 
+func TestListWayfinderSessions_SkipsIncompleteCanonicalStatus(t *testing.T) {
+	root := t.TempDir()
+	incompleteDir := filepath.Join(root, "incomplete")
+	if err := os.MkdirAll(incompleteDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := []byte("---\nschema_version: \"2.0\"\nproject_name: incomplete\nstatus: in-progress\ncurrent_waypoint: BUILD\n---\n")
+	if err := os.WriteFile(filepath.Join(incompleteDir, wayfinderStatusFile), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sessions, err := listWayfinderSessions(root, "", 0)
+	if err != nil {
+		t.Fatalf("listWayfinderSessions: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("listWayfinderSessions returned incomplete status: %+v", sessions)
+	}
+}
+
+func TestGetWayfinderSessionDetail_RejectsInvalidCanonicalEnum(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "invalid")
+	writeStatus(t, dir, "invalid", "in-progress", "BUILD")
+	path := filepath.Join(dir, wayfinderStatusFile)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content = []byte(strings.Replace(string(content), "risk_level: S", "risk_level: impossible", 1))
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := getWayfinderSessionDetail(root, "invalid"); err == nil {
+		t.Fatal("getWayfinderSessionDetail accepted an invalid canonical enum")
+	}
+}
+
 func TestGetWayfinderSessionDetail_PathTraversal(t *testing.T) {
 	root := t.TempDir()
 	_, err := getWayfinderSessionDetail(root, "../escape")
@@ -151,19 +235,19 @@ func TestGetWayfinderSessionDetail_PathTraversal(t *testing.T) {
 	}
 }
 
-func TestListWayfinderSessionsRejectsLegacyAndPrefersCanonicalFields(t *testing.T) {
-	root := t.TempDir()
-	writeStatus(t, filepath.Join(root, "legacy"), "schema_version: \"1.0\"\nproject: legacy\nstatus: in-progress\ncurrent_phase: D3\n")
-	writeStatus(t, filepath.Join(root, "canonical"), "schema_version: \"2.0\"\nproject_name: canonical\nproject: legacy-name\nstatus: in-progress\ncurrent_waypoint: BUILD\ncurrent_phase: D3\n")
+func TestFmString_CanonicalKey(t *testing.T) {
+	fm := map[string]any{
+		"project_name": "canonical-name",
+	}
+	got := fmString(fm, "project_name")
+	if got != "canonical-name" {
+		t.Errorf("fmString = %q, want canonical-name", got)
+	}
+}
 
-	sessions, err := listWayfinderSessions(root, "", 0)
-	if err != nil {
-		t.Fatalf("listWayfinderSessions: %v", err)
-	}
-	if len(sessions) != 1 {
-		t.Fatalf("got %d sessions, want only the canonical V2 session", len(sessions))
-	}
-	if sessions[0].ProjectName != "canonical" || sessions[0].CurrentWaypoint != "BUILD" {
-		t.Fatalf("session = %+v, want canonical V2 fields", sessions[0])
+func TestFmString_CanonicalTimestamp(t *testing.T) {
+	stamp := time.Date(2026, 7, 20, 1, 2, 3, 0, time.UTC)
+	if got := fmString(map[string]any{"created_at": stamp}, "created_at"); got != "2026-07-20T01:02:03Z" {
+		t.Fatalf("fmString timestamp = %q", got)
 	}
 }

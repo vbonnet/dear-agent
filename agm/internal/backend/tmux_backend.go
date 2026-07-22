@@ -2,6 +2,8 @@
 package backend
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -83,6 +85,43 @@ func (b *TmuxBackend) ListClients(sessionName string) ([]ClientInfo, error) {
 // CreateSession creates a new session with the given name and working directory
 func (b *TmuxBackend) CreateSession(name, workdir string) error {
 	return b.tmux.CreateSession(name, workdir)
+}
+
+// KillSession preserves the optional destructive tmux capability through the
+// backend layer used by the CLI.
+func (b *TmuxBackend) KillSession(name string) error {
+	killer, ok := b.tmux.(session.TmuxSessionKiller)
+	if !ok {
+		return fmt.Errorf("tmux client does not implement session deletion")
+	}
+	return killer.KillSession(name)
+}
+
+// HasSessionStrict preserves strict failure-vs-absence semantics through the
+// backend layer used by destructive operations.
+func (b *TmuxBackend) HasSessionStrict(ctx context.Context, name string) (bool, error) {
+	if checker, ok := b.tmux.(session.StrictSessionExistenceChecker); ok {
+		return checker.HasSessionStrict(ctx, name)
+	}
+	return b.tmux.HasSession(name)
+}
+
+// HarnessLiveness preserves process-level liveness through the backend layer.
+func (b *TmuxBackend) HarnessLiveness(name string) (session.LivenessInfo, error) {
+	checker, ok := b.tmux.(session.HarnessLivenessChecker)
+	if !ok {
+		return session.LivenessInfo{}, fmt.Errorf("tmux client does not implement harness liveness")
+	}
+	return checker.HarnessLiveness(name)
+}
+
+// HarnessLivenessBatch preserves efficient batch liveness through the backend layer.
+func (b *TmuxBackend) HarnessLivenessBatch(names []string) (map[string]session.LivenessInfo, error) {
+	checker, ok := b.tmux.(session.HarnessLivenessBatchChecker)
+	if !ok {
+		return nil, fmt.Errorf("tmux client does not implement batch harness liveness")
+	}
+	return checker.HarnessLivenessBatch(names)
 }
 
 // AttachSession attaches to or switches to the given session

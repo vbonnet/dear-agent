@@ -1,10 +1,30 @@
 package tmux
 
 import (
+	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestCheckPaneLivenessContextHonorsCallerCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := CheckPaneLivenessContext(ctx, "canceled-liveness", filepath.Join(t.TempDir(), "tmux.sock"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("CheckPaneLivenessContext() error = %v, want context.Canceled", err)
+	}
+}
+
+func TestIsPiProcessInPaneTreeContextHonorsCallerCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := IsPiProcessInPaneTreeContext(ctx, "canceled-pi-liveness", filepath.Join(t.TempDir(), "tmux.sock"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("IsPiProcessInPaneTreeContext() error = %v, want context.Canceled", err)
+	}
+}
 
 // TestClassifyPaneLiveness covers the false-green class from ce-axsr/ce-qkf7:
 // a tmux session that exists must only count as alive when a harness process
@@ -17,6 +37,7 @@ func TestClassifyPaneLiveness(t *testing.T) {
 		wantExists   bool
 		wantAlive    bool
 		wantZombie   bool
+		wantShell    bool
 		wantEvidence string // substring that must appear in Evidence
 	}{
 		{
@@ -34,6 +55,7 @@ func TestClassifyPaneLiveness(t *testing.T) {
 			wantExists:   true,
 			wantAlive:    false,
 			wantZombie:   false,
+			wantShell:    true,
 			wantEvidence: "zsh",
 		},
 		{
@@ -90,6 +112,17 @@ func TestClassifyPaneLiveness(t *testing.T) {
 			},
 			wantExists: true,
 			wantAlive:  true,
+		},
+		{
+			name:     "pi child of pane shell is alive",
+			panePIDs: []int{100},
+			procs: []ProcEntry{
+				{PID: 100, PPID: 1, Comm: "-zsh"},
+				{PID: 200, PPID: 100, Comm: "/opt/homebrew/bin/pi"},
+			},
+			wantExists:   true,
+			wantAlive:    true,
+			wantEvidence: "pi",
 		},
 		{
 			name:     "agm alongside live harness is NOT flagged as zombie writer",
@@ -149,6 +182,9 @@ func TestClassifyPaneLiveness(t *testing.T) {
 			if got.ZombieWriter != tt.wantZombie {
 				t.Errorf("ZombieWriter = %v, want %v", got.ZombieWriter, tt.wantZombie)
 			}
+			if got.RestartableShell != tt.wantShell {
+				t.Errorf("RestartableShell = %v, want %v", got.RestartableShell, tt.wantShell)
+			}
 			if tt.wantEvidence != "" && !strings.Contains(got.Evidence, tt.wantEvidence) {
 				t.Errorf("Evidence = %q, want substring %q", got.Evidence, tt.wantEvidence)
 			}
@@ -185,6 +221,8 @@ func TestIsHarnessComm(t *testing.T) {
 		{"node", true},
 		{"gemini", true},
 		{"opencode", true},
+		{"pi", true},
+		{"/opt/homebrew/bin/pi", true},
 		{"2.1.50", true},   // Claude Code semver process name
 		{"2_1_195", true},  // macOS underscore form
 		{"2_1_195_", true}, // trailing tmux null placeholder
@@ -198,6 +236,15 @@ func TestIsHarnessComm(t *testing.T) {
 		if got := IsHarnessComm(tt.comm); got != tt.want {
 			t.Errorf("IsHarnessComm(%q) = %v, want %v", tt.comm, got, tt.want)
 		}
+	}
+}
+
+func TestPaneCommandMatchesProcessIsExact(t *testing.T) {
+	if !paneCommandMatchesProcess("zsh\n/opt/homebrew/bin/pi\n", "pi") {
+		t.Fatal("full-path Pi foreground command was not recognized")
+	}
+	if paneCommandMatchesProcess("zsh\npiper\n", "pi") {
+		t.Fatal("partial Pi process name was accepted")
 	}
 }
 
@@ -235,5 +282,57 @@ func TestParsePSTable(t *testing.T) {
 	}
 	if entries[2].PPID != 200 {
 		t.Errorf("bad third entry: %+v", entries[2])
+	}
+}
+
+func TestPiProcessCommandRequiresPiSpecificIdentity(t *testing.T) {
+	tests := []struct {
+		command string
+		want    bool
+	}{
+		{command: "pi --session-id abc", want: true},
+		{command: "/opt/homebrew/bin/pi --session-id abc", want: true},
+		{command: "/opt/homebrew/bin/node /opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js --session-id abc", want: true},
+		{command: "env PI_OFFLINE=1 node /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", want: true},
+		{command: "node /usr/local/lib/node_modules/@openai/codex/dist/cli.js"},
+		{command: "node /tmp/pi"},
+		{command: "node -e console.log('/opt/homebrew/bin/pi')"},
+		{command: "zsh -l"},
+	}
+	for _, test := range tests {
+		if got := isPiProcessCommand(test.command); got != test.want {
+			t.Errorf("isPiProcessCommand(%q) = %v, want %v", test.command, got, test.want)
+		}
+	}
+}
+
+func TestPiProcessCommandAcceptsOnlyShimResolvingToPackageEntry(t *testing.T) {
+	resolve := func(path string) (string, error) {
+		if path == "/opt/homebrew/bin/pi" {
+			return "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", nil
+		}
+		return "", errors.New("not a Pi package shim")
+	}
+	if !isPiProcessCommandWithResolver("node /opt/homebrew/bin/pi --session-id abc", resolve) {
+		t.Fatal("Pi npm shim resolving to the package entry was rejected")
+	}
+	if isPiProcessCommandWithResolver("node /tmp/bin/pi --session-id abc", resolve) {
+		t.Fatal("unrelated Node script named pi was accepted")
+	}
+}
+
+func TestParsePSCommandTableAndPiProcessTree(t *testing.T) {
+	procs := parsePSCommandTable("  100     1 /bin/zsh -l\n" +
+		"  200   100 /opt/homebrew/bin/node /opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js --session-id abc\n" +
+		"  300     1 /opt/homebrew/bin/node /work/codex.js\n" +
+		"bad row\n")
+	if len(procs) != 3 {
+		t.Fatalf("parsePSCommandTable() returned %d rows: %+v", len(procs), procs)
+	}
+	if !piProcessInPaneTree([]int{100}, procs) {
+		t.Fatal("Pi Node entrypoint was not found below the pane shell")
+	}
+	if piProcessInPaneTree([]int{300}, procs) {
+		t.Fatal("generic Node process was accepted as Pi")
 	}
 }

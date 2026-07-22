@@ -6,9 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
@@ -283,6 +285,9 @@ func TestPermissionsAllowFlagRegistered(t *testing.T) {
 	}
 	if flag.Value.Type() != "stringSlice" {
 		t.Errorf("--permissions-allow should be stringSlice type, got %q", flag.Value.Type())
+	}
+	if !strings.Contains(flag.Usage, "shared policy") || strings.Contains(flag.Usage, "written to project .claude") {
+		t.Errorf("--permissions-allow usage is not harness-neutral: %q", flag.Usage)
 	}
 }
 
@@ -599,7 +604,10 @@ func TestBuildSessionManifestPersistsPermissionPolicy(t *testing.T) {
 }
 
 func TestBuildSessionManifestPersistsStartupPermissionMode(t *testing.T) {
-	m := createPermissionManifest(t, "agy", "2.5-flash", "auto", nil)
+	m := createPermissionManifest(t, "agy", "3.5-flash", "auto", nil)
+	if m.Agy == nil || m.Agy.ConversationID != "test-native-id" {
+		t.Fatalf("AGY identity = %+v, want test-native-id", m.Agy)
+	}
 	if m.PermissionMode != "auto" {
 		t.Fatalf("permission mode = %q, want auto", m.PermissionMode)
 	}
@@ -623,9 +631,13 @@ func createPermissionManifest(t *testing.T, harness, model, permissionMode strin
 			return nil
 		},
 	}
-	_, err := ops.CreateSessionWithContext(context.Background(), &ops.OpContext{
+	opCtx := &ops.OpContext{
 		Tmux: session.NewMockTmux(), CreationRuntime: runtime,
-	}, &ops.CreateSessionRequest{
+	}
+	if agent.NormalizeHarnessName(harness) == "agy" {
+		opCtx.AgyCreateIdentityTracker = permissionManifestAgyIdentityTracker{}
+	}
+	_, err := ops.CreateSessionWithContext(context.Background(), opCtx, &ops.CreateSessionRequest{
 		Cwd:                    t.TempDir(),
 		Title:                  "session-name",
 		Model:                  model,
@@ -648,4 +660,17 @@ func createPermissionManifest(t *testing.T, harness, model, permissionMode strin
 		t.Fatal("creation lifecycle did not expose a manifest")
 	}
 	return got
+}
+
+type permissionManifestAgyIdentityTracker struct{}
+
+func (permissionManifestAgyIdentityTracker) Snapshot(context.Context, string) (string, error) {
+	return "", nil
+}
+
+func (permissionManifestAgyIdentityTracker) Discover(_ context.Context, workDir, _ string) (*agysession.Metadata, error) {
+	return &agysession.Metadata{
+		ConversationID: "test-native-id",
+		WorkspacePath:  workDir,
+	}, nil
 }

@@ -17,7 +17,7 @@ func TestEmitQualityEvent(t *testing.T) {
 	telemetryPath := filepath.Join(tmpDir, "telemetry.jsonl")
 
 	event := QualityAssessedEvent{
-		Phase:          "D4",
+		Phase:          "SPEC",
 		Score:          8.5,
 		InputTokens:    1200,
 		OutputTokens:   350,
@@ -50,8 +50,8 @@ func TestEmitQualityEvent(t *testing.T) {
 	if decoded.Type != EventType {
 		t.Errorf("expected type %q, got %q", EventType, decoded.Type)
 	}
-	if decoded.Phase != "D4" {
-		t.Errorf("expected phase D4, got %s", decoded.Phase)
+	if decoded.Phase != "SPEC" {
+		t.Errorf("expected phase SPEC, got %s", decoded.Phase)
 	}
 	if decoded.Score != 8.5 {
 		t.Errorf("expected score 8.5, got %f", decoded.Score)
@@ -72,9 +72,9 @@ func TestEmitQualityEventMultiple(t *testing.T) {
 	telemetryPath := filepath.Join(tmpDir, "telemetry.jsonl")
 
 	events := []QualityAssessedEvent{
-		{Phase: "D3", Score: 7.0, ProjectName: "proj-a"},
-		{Phase: "D4", Score: 9.0, ProjectName: "proj-a"},
-		{Phase: "S6", Score: 8.5, ProjectName: "proj-b"},
+		{Phase: "DESIGN", Score: 7.0, ProjectName: "proj-a"},
+		{Phase: "SPEC", Score: 9.0, ProjectName: "proj-a"},
+		{Phase: "SETUP", Score: 8.5, ProjectName: "proj-b"},
 	}
 
 	for _, e := range events {
@@ -100,7 +100,7 @@ func TestEmitQualityEventPreservesTimestamp(t *testing.T) {
 
 	fixedTime := time.Date(2026, 3, 24, 12, 0, 0, 0, time.UTC)
 	event := QualityAssessedEvent{
-		Phase:     "D4",
+		Phase:     "SPEC",
 		Score:     8.0,
 		Timestamp: fixedTime,
 	}
@@ -128,7 +128,7 @@ func TestEmitQualityEventCreatesDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 	telemetryPath := filepath.Join(tmpDir, "sub", "dir", "telemetry.jsonl")
 
-	event := QualityAssessedEvent{Phase: "D4", Score: 8.0}
+	event := QualityAssessedEvent{Phase: "SPEC", Score: 8.0}
 	if err := EmitQualityEvent(context.Background(), event, telemetryPath); err != nil {
 		t.Fatalf("EmitQualityEvent returned error: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestEmitQualityEventPopulatesTraceIDFromSpanContext(t *testing.T) {
 	})
 	ctx := trace.ContextWithSpanContext(context.Background(), sc)
 
-	event := QualityAssessedEvent{Phase: "D4", Score: 8.5}
+	event := QualityAssessedEvent{Phase: "SPEC", Score: 8.5}
 	if err := EmitQualityEvent(ctx, event, telemetryPath); err != nil {
 		t.Fatalf("EmitQualityEvent returned error: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestEmitQualityEventNoSpanContextOmitsIDs(t *testing.T) {
 	tmpDir := t.TempDir()
 	telemetryPath := filepath.Join(tmpDir, "telemetry.jsonl")
 
-	event := QualityAssessedEvent{Phase: "D4", Score: 8.0}
+	event := QualityAssessedEvent{Phase: "SPEC", Score: 8.0}
 	if err := EmitQualityEvent(context.Background(), event, telemetryPath); err != nil {
 		t.Fatalf("EmitQualityEvent returned error: %v", err)
 	}

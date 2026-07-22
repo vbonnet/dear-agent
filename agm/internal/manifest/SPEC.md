@@ -1,6 +1,6 @@
 # AGM Manifest Specification
 
-<!-- Last audited at: 2026-07-04 -->
+<!-- Last audited at: 2026-07-21 -->
 
 ## Purpose
 
@@ -13,13 +13,15 @@ cross-harness session lifecycle state.
 
 **MAN-01** When a session manifest is written, the system shall use the current manifest schema version.
 
-**MAN-02** When harness-specific saved-session metadata is present, the system shall preserve Claude, Codex, AGY, and OpenCode metadata in their dedicated manifest fields.
+**MAN-02** When harness-specific saved-session metadata is present, the system shall preserve Claude, Codex, AGY, OpenCode, and Pi metadata in their dedicated manifest fields.
 
 **MAN-03** When permission policy is resolved for a session, the system shall record the profile, sources, allowlist, and per-harness target surfaces in the manifest.
 
 **MAN-04** When a disposable session has a valid TTL and the TTL has elapsed, the system shall report the manifest as expired.
 
 **MAN-05** When context usage, cost, model, sandbox, resource, or workflow-phase metadata is available, the system shall preserve that metadata without changing the session lifecycle value.
+
+**MAN-06** When a Pi manifest is persisted to or restored from Dolt, the system shall preserve the exact native session ID, private session directory, and transcript path instead of dropping harness-specific identity metadata.
 
 ## BDD Traceability
 

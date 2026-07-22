@@ -1,6 +1,6 @@
 # AGM Operation Surface Specification
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-07-21 -->
 
 ## Overview
 
@@ -21,11 +21,13 @@ Installed plugin Markdown is owned separately by the live Cobra tree.
 
 **AGM-SURFACE-05** When operation discovery is exposed, the system shall publish `list_ops` as an MCP-only meta operation.
 
-**AGM-SURFACE-06** When active harness filters are exposed, the system shall include Claude Code, Codex CLI, AGY, OpenCode, deprecated Gemini compatibility, and all-harness filtering.
+**AGM-SURFACE-06** When active harness filters are exposed, the system shall include Claude Code, Codex CLI, AGY, OpenCode, Pi, deprecated Gemini compatibility, and all-harness filtering.
 
 **AGM-SURFACE-07** When operation definitions change, the system shall keep generated CLI and MCP code derived from the registry rather than hand-maintained divergent schemas.
 
 **AGM-SURFACE-08** While the Cobra tree owns installed plugin command contracts, the operation registry shall not declare a second Skill surface for those commands.
+
+**AGM-SURFACE-09** When the kill-session operation is generated for CLI or MCP, the request schema shall expose both the recent-activity `force` bypass and the active-harness `confirmed_stuck` confirmation used by the shared operation.
 
 ## BDD Traceability
 

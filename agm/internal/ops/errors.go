@@ -64,6 +64,7 @@ const (
 	ErrCodeVerificationFailed = "AGM-012"
 	ErrCodeKillProtected      = "AGM-013"
 	ErrCodeActiveSessionKill  = "AGM-014"
+	ErrCodeLockTimeout        = "AGM-015"
 	ErrCodeDryRun             = "AGM-100"
 )
 

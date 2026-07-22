@@ -11,9 +11,13 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/codexcontrol"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
+	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/permissionparity/piadapter"
+	"github.com/vbonnet/dear-agent/agm/internal/pisession"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
@@ -53,6 +57,10 @@ type CreateSessionMetadata struct {
 	DisposableTTL    string
 	PermissionMode   string
 	OpenCodeServer   string
+	Pi               *manifest.Pi
+	PiExtension      string
+	PiPolicyJSON     string
+	PiPolicyFile     string
 }
 
 // CreateSessionLaunchResult records launch facts required by runtime
@@ -69,6 +77,7 @@ type CreateSessionLaunchResult struct {
 type CreateSessionCompletion struct {
 	Manifest     *manifest.Manifest
 	ManifestPath string
+	Prompt       string
 	Launch       CreateSessionLaunchResult
 }
 
@@ -86,6 +95,10 @@ type SessionStorageOpener func(context.Context) (dolt.Storage, func(), error)
 
 // CodexThreadCreator adapts the external Codex remote-control dependency.
 type CodexThreadCreator func(context.Context, string, string, string) (*manifest.Codex, error)
+
+// AgyWorkspaceCreateLocker serializes the native identity window for one AGY
+// workspace and returns its release operation.
+type AgyWorkspaceCreateLocker func(context.Context, string) (func() error, error)
 
 // CreateSessionRequest defines the input for creating a new AGM session.
 type CreateSessionRequest struct {
@@ -236,6 +249,20 @@ func validateCreateRequest(opCtx *OpContext, req *CreateSessionRequest) (*create
 	return p, nil
 }
 
+func canonicalizeAgyCreateRequest(req *CreateSessionRequest, params *createSessionParams) (*CreateSessionRequest, error) {
+	canonicalWorkDir, err := agysession.CanonicalWorkspacePath(req.Cwd)
+	if err != nil {
+		return nil, ErrInvalidInput("cwd", fmt.Sprintf("Resolve canonical AGY workspace: %v", err))
+	}
+	canonicalRequest := *req
+	canonicalRequest.Cwd = canonicalWorkDir
+	params.name, err = resolveSessionName(canonicalRequest.Title, canonicalWorkDir, canonicalRequest.AllowUnsafeTitle)
+	if err != nil {
+		return nil, err
+	}
+	return &canonicalRequest, nil
+}
+
 // CreateSession preserves the original operation signature for non-request
 // scoped callers. Request-aware surfaces should use CreateSessionWithContext.
 func CreateSession(opCtx *OpContext, req *CreateSessionRequest) (*CreateSessionResult, error) {
@@ -251,12 +278,55 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 	if err != nil {
 		return nil, err
 	}
+	if params.harness == "agy" {
+		req, err = canonicalizeAgyCreateRequest(req, params)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var agyIdentityTracker agysession.CreateIdentityTracker
+	var previousAgyConversationID string
+	var releaseAgyWorkspaceLock func() error
+	if params.harness == "agy" {
+		locker := opCtx.AgyWorkspaceCreateLocker
+		if locker == nil {
+			locker = agysession.AcquireWorkspaceCreateLock
+		}
+		release, lockErr := locker(callCtx, req.Cwd)
+		if lockErr != nil {
+			return nil, ErrStorageError("agy.workspace-lock", lockErr)
+		}
+		releaseAgyWorkspaceLock = release
+		defer func() {
+			if releaseAgyWorkspaceLock == nil {
+				return
+			}
+			if unlockErr := releaseAgyWorkspaceLock(); unlockErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to release AGY workspace lock: %v\n", unlockErr)
+			}
+		}()
+		agyIdentityTracker = opCtx.AgyCreateIdentityTracker
+		if agyIdentityTracker == nil {
+			agyIdentityTracker = agysession.NewCreateIdentityTracker()
+		}
+		previousAgyConversationID, err = agyIdentityTracker.Snapshot(callCtx, req.Cwd)
+		if err != nil {
+			return nil, ErrStorageError("agy.identity.snapshot", err)
+		}
+	}
 
 	exists, err := prepareCreateTmux(opCtx, req, params.name)
 	if err != nil {
 		return nil, err
 	}
 	sessionID := createSessionID(req.SessionID)
+	if params.harness == "pi-cli" {
+		prepared, prepareErr := preparePiCreateRequest(req, sessionID)
+		if prepareErr != nil {
+			return nil, prepareErr
+		}
+		req = prepared
+	}
 	state := &createSessionState{}
 	defer func() { state.finish(opCtx, req, params.name, sessionID, retErr) }()
 
@@ -282,16 +352,88 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 	}
 	state.createdManifestDir = createdManifestDir
 	m := buildCreateSessionManifest(req, params, sessionID, codexMeta)
+	if agyIdentityTracker != nil {
+		metadata, identityErr := agyIdentityTracker.Discover(callCtx, req.Cwd, previousAgyConversationID)
+		if identityErr != nil {
+			return nil, ErrStorageError("agy.identity.discover", identityErr)
+		}
+		applyAgyCreateIdentity(m, metadata)
+	}
 	if registrationAllowed {
 		state.store, state.storageCleanup, state.registered, err = registerCreatedSession(callCtx, opCtx, req, m)
 		if err != nil {
 			return nil, err
 		}
 	}
+	// Native identity is now persisted in registration. Release before runtime
+	// completion because CLI completion may block for the entire interactive
+	// tmux attachment; holding the workspace lock there would deadlock every
+	// create or cold resume for the same workspace until the user detaches.
+	if releaseAgyWorkspaceLock != nil {
+		release := releaseAgyWorkspaceLock
+		releaseAgyWorkspaceLock = nil
+		if unlockErr := release(); unlockErr != nil {
+			return nil, ErrStorageError("agy.workspace-lock.release", unlockErr)
+		}
+	}
+	if err := callCtx.Err(); err != nil {
+		return nil, err
+	}
 	if err := completeCreatedSession(callCtx, opCtx, req, params.name, manifestPath, m, launchResult); err != nil {
 		return nil, err
 	}
 	return createSessionResult(req, params, sessionID), nil
+}
+
+func preparePiCreateRequest(req *CreateSessionRequest, sessionID string) (*CreateSessionRequest, error) {
+	if err := pisession.ValidateID(sessionID); err != nil {
+		return nil, ErrInvalidInput("session_id", err.Error())
+	}
+	sessionRoot, err := pisession.EnsureRoot(os.Getenv("AGM_PI_SESSION_ROOT"))
+	if err != nil {
+		return nil, ErrStorageError("pi.session-root", err)
+	}
+	extensionPath, err := piadapter.EnsureExtension(os.Getenv("AGM_PI_EXTENSION_ROOT"))
+	if err != nil {
+		return nil, ErrStorageError("pi.authorization-extension", err)
+	}
+	policyJSON, err := piadapter.MarshalPolicy(req.Metadata.permissionPolicyAllow())
+	if err != nil {
+		return nil, ErrStorageError("pi.permission-policy", err)
+	}
+	prepared := *req
+	prepared.Metadata = req.Metadata
+	prepared.Metadata.Pi = &manifest.Pi{SessionID: sessionID, SessionDir: sessionRoot}
+	prepared.Metadata.PiExtension = extensionPath
+	prepared.Metadata.PiPolicyJSON = policyJSON
+	prepared.Metadata.PiPolicyFile, err = piadapter.EnsurePolicyFile(os.Getenv("AGM_PI_EXTENSION_ROOT"), sessionID, policyJSON)
+	if err != nil {
+		return nil, ErrStorageError("pi.permission-policy-file", err)
+	}
+	return &prepared, nil
+}
+
+func (metadata CreateSessionMetadata) permissionPolicyAllow() []string {
+	if metadata.PermissionPolicy == nil {
+		return nil
+	}
+	return metadata.PermissionPolicy.Allow
+}
+
+func applyAgyCreateIdentity(m *manifest.Manifest, metadata *agysession.Metadata) {
+	if m == nil || metadata == nil {
+		return
+	}
+	m.WorkingDirectory = metadata.WorkspacePath
+	if m.Context.Project == "" {
+		m.Context.Project = metadata.WorkspacePath
+	}
+	m.Agy = &manifest.Agy{
+		ConversationID: metadata.ConversationID,
+		WorkspacePath:  metadata.WorkspacePath,
+		ConversationDB: metadata.ConversationDBPath,
+		TranscriptPath: metadata.TranscriptPath,
+	}
 }
 
 func prepareCreateTmux(opCtx *OpContext, req *CreateSessionRequest, name string) (bool, error) {
@@ -341,7 +483,7 @@ func optionalCodexMetadata(callCtx context.Context, opCtx *OpContext, req *Creat
 }
 
 func buildHarnessLaunchSpec(req *CreateSessionRequest, params *createSessionParams, sessionID string, codexMeta *manifest.Codex) HarnessLaunchSpec {
-	return HarnessLaunchSpec{
+	spec := HarnessLaunchSpec{
 		Harness:          params.harness,
 		Model:            params.model,
 		SessionName:      params.name,
@@ -355,7 +497,15 @@ func buildHarnessLaunchSpec(req *CreateSessionRequest, params *createSessionPara
 		ExtraAddDirs:     append([]string{}, req.ExtraAddDirs...),
 		ForwardTelemetry: req.ForwardTelemetry,
 		Codex:            codexMeta,
+		Pi:               req.Metadata.Pi,
+		PiExtension:      req.Metadata.PiExtension,
+		PiPolicyJSON:     req.Metadata.PiPolicyJSON,
+		PiPolicyFile:     req.Metadata.PiPolicyFile,
 	}
+	if params.harness == "pi-cli" {
+		spec.PiLaunchID = launchparity.NewPiLaunchID()
+	}
+	return spec
 }
 
 func prepareCreateManifestDir(req *CreateSessionRequest) (manifestPath string, registrationAllowed, created bool, err error) {
@@ -399,7 +549,7 @@ func registerCreatedSession(callCtx context.Context, opCtx *OpContext, req *Crea
 func completeCreatedSession(callCtx context.Context, opCtx *OpContext, req *CreateSessionRequest, name, manifestPath string, m *manifest.Manifest, launchResult CreateSessionLaunchResult) error {
 	if opCtx.CreationRuntime != nil {
 		return opCtx.CreationRuntime.Complete(callCtx, CreateSessionCompletion{
-			Manifest: m, ManifestPath: manifestPath, Launch: launchResult,
+			Manifest: m, ManifestPath: manifestPath, Prompt: req.Prompt, Launch: launchResult,
 		})
 	}
 	if req.Prompt == "" {
@@ -510,6 +660,11 @@ func buildCreateSessionManifest(req *CreateSessionRequest, params *createSession
 	if codexMeta != nil {
 		meta := *codexMeta
 		m.Codex = &meta
+	}
+	if req.Metadata.Pi != nil {
+		meta := *req.Metadata.Pi
+		m.Pi = &meta
+		m.WorkingDirectory = req.Cwd
 	}
 	mode := req.Metadata.PermissionMode
 	if mode == "" {

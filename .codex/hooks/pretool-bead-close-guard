@@ -104,7 +104,7 @@ bead_id="$(printf '%s' "$stripped" | xargs -n 1 2>/dev/null | awk '
 # unparseable close is exactly the bypass this guard exists to stop, so block
 # loudly rather than silently allowing it.
 if [ -z "$bead_id" ]; then
-  jq -cn --arg msg "bead-close-guard: detected a bead-close command but could not parse the bead id, so the Definition-of-Done check cannot run. Use the standard form 'bd --db <path> close <id>' (or add --force to abandon)." \
+  jq -cn --arg msg "bead-close-guard: detected a bead-close command but could not parse the bead id, so the Definition-of-Done check cannot run. Use the standard form 'bd --db ~/beads/context-engine/.beads --dolt-auto-commit on close <id>' (or add --force to abandon)." \
     '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",additionalContext:$msg}}'
   exit 2
 fi

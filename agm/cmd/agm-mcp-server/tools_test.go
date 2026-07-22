@@ -17,10 +17,15 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
+	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 )
@@ -44,6 +49,27 @@ func extractText(t *testing.T, r *mcp.CallToolResult) string {
 		return ""
 	}
 	return tc.Text
+}
+
+type blockingKillTmux struct {
+	*session.MockTmux
+	probeStarted chan struct{}
+	releaseProbe chan struct{}
+	probeOnce    sync.Once
+	killCalls    int
+}
+
+func (m *blockingKillTmux) HasSession(name string) (bool, error) {
+	m.probeOnce.Do(func() {
+		close(m.probeStarted)
+		<-m.releaseProbe
+	})
+	return m.MockTmux.HasSession(name)
+}
+
+func (m *blockingKillTmux) KillSession(name string) error {
+	m.killCalls++
+	return m.MockTmux.KillSession(name)
 }
 
 func TestMcpSuccess_EncodesResultAsJSON(t *testing.T) {
@@ -147,6 +173,220 @@ func TestInjectTraceContext_PropagatesTraceparent(t *testing.T) {
 	meta := injectTraceContext(ctx)
 	if got := meta["traceparent"]; got != want {
 		t.Errorf("traceparent = %v, want %s", got, want)
+	}
+}
+
+func TestMCPCreateSessionRuntimeWaitsForAgyBeforePrompt(t *testing.T) {
+	type callerContextKey struct{}
+	tmuxMock := session.NewMockTmux()
+	callerCtx := context.WithValue(t.Context(), callerContextKey{}, "caller")
+	var waited bool
+	runtime := &mcpCreateSessionRuntime{
+		tmux:     tmuxMock,
+		lookPath: func(string) (string, error) { return "/usr/local/bin/agy", nil },
+		sleep:    func(time.Duration) {},
+		waitForAgyPrompt: func(ctx context.Context, sessionName string, timeout time.Duration) error {
+			if ctx != callerCtx {
+				t.Fatalf("readiness context identity changed")
+			}
+			if sessionName != "mcp-agy" || timeout != 90*time.Second {
+				t.Fatalf("readiness wait = %q/%s, want mcp-agy/90s", sessionName, timeout)
+			}
+			if len(tmuxMock.SentCommands) != 1 || strings.Contains(tmuxMock.SentCommands[0], "startup prompt") {
+				t.Fatalf("commands before readiness = %v, want launch only", tmuxMock.SentCommands)
+			}
+			waited = true
+			return nil
+		},
+	}
+
+	result, err := runtime.Launch(callerCtx, ops.HarnessLaunchSpec{
+		Harness: "agy", Model: "3.5-flash-low", SessionName: "mcp-agy", WorkDir: "/tmp/mcp-agy",
+	})
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if !waited {
+		t.Fatal("AGY readiness wait was not called")
+	}
+	if result.ModeAppliedAtStartup {
+		t.Fatal("default AGY launch unexpectedly applied auto mode")
+	}
+	if err := runtime.Complete(callerCtx, ops.CreateSessionCompletion{
+		Manifest: &manifest.Manifest{Name: "mcp-agy"}, Prompt: "startup prompt",
+	}); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if len(tmuxMock.SentCommands) != 2 || tmuxMock.SentCommands[1] != "startup prompt" {
+		t.Fatalf("commands after completion = %v, want launch then startup prompt", tmuxMock.SentCommands)
+	}
+}
+
+func TestMCPCreateSessionRuntimeStopsBeforePromptAfterCancellation(t *testing.T) {
+	t.Parallel()
+
+	tmuxMock := session.NewMockTmux()
+	runtime := &mcpCreateSessionRuntime{tmux: tmuxMock}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err := runtime.Complete(ctx, ops.CreateSessionCompletion{
+		Manifest: &manifest.Manifest{Name: "mcp-agy"}, Prompt: "must not run",
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Complete error = %v, want context.Canceled", err)
+	}
+	if len(tmuxMock.SentCommands) != 0 {
+		t.Fatalf("commands after cancellation = %v, want none", tmuxMock.SentCommands)
+	}
+}
+
+func TestKillSessionToolExecutesAndVerifiesSharedMutation(t *testing.T) {
+	store := dolt.NewMockAdapter()
+	m := &manifest.Manifest{
+		SessionID: "mcp-kill-id",
+		Name:      "display-name",
+		UpdatedAt: time.Now().Add(-time.Hour),
+	}
+	m.Tmux.SessionName = "exact-tmux-target"
+	if err := store.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	tmuxClient := session.NewMockTmux()
+	tmuxClient.Sessions["exact-tmux-target"] = true
+	tmuxClient.Sessions["exact-tmux-target-child"] = true
+
+	cli := newTestMCPClient(t, func(server *mcp.Server, _ *Config) {
+		addKillSessionToolWithFactory(server, func() (*ops.OpContext, func(), error) {
+			return &ops.OpContext{Storage: store, Tmux: tmuxClient}, func() {}, nil
+		})
+	})
+	res, err := cli.CallTool(t.Context(), &mcp.CallToolParams{
+		Name: "agm_kill_session",
+		Arguments: map[string]any{
+			"identifier":      m.SessionID,
+			"confirmed_stuck": true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("CallTool result is an error: %s", extractText(t, res))
+	}
+	var payload ops.KillSessionResult
+	if err := json.Unmarshal([]byte(extractText(t, res)), &payload); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if payload.SessionID != m.SessionID || payload.TmuxSessionName != "exact-tmux-target" {
+		t.Fatalf("kill result = %+v, want exact stable-ID target", payload)
+	}
+	if tmuxClient.Sessions["exact-tmux-target"] {
+		t.Fatal("exact tmux target remains after successful MCP kill")
+	}
+	if !tmuxClient.Sessions["exact-tmux-target-child"] {
+		t.Fatal("prefix-related tmux session was mutated")
+	}
+}
+
+func TestKillSessionToolForwardsRecentActivityForce(t *testing.T) {
+	store := dolt.NewMockAdapter()
+	m := &manifest.Manifest{
+		SessionID: "mcp-force-id",
+		Name:      "recent-stopped-session",
+		UpdatedAt: time.Now(),
+	}
+	m.Tmux.SessionName = "missing-tmux-target"
+	if err := store.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	tmuxClient := session.NewMockTmux()
+	cli := newTestMCPClient(t, func(server *mcp.Server, _ *Config) {
+		addKillSessionToolWithFactory(server, func() (*ops.OpContext, func(), error) {
+			return &ops.OpContext{Storage: store, Tmux: tmuxClient}, func() {}, nil
+		})
+	})
+
+	res, err := cli.CallTool(t.Context(), &mcp.CallToolParams{
+		Name: "agm_kill_session",
+		Arguments: map[string]any{
+			"identifier": m.SessionID,
+			"force":      true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("CallTool result is an error: %s", extractText(t, res))
+	}
+	var payload ops.KillSessionResult
+	if err := json.Unmarshal([]byte(extractText(t, res)), &payload); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if !payload.RecentlyActive || payload.WasRunning {
+		t.Fatalf("kill result = %+v, want recently active stopped target", payload)
+	}
+}
+
+func TestKillSessionToolCancellationStopsBeforeMutation(t *testing.T) {
+	store := dolt.NewMockAdapter()
+	m := &manifest.Manifest{
+		SessionID: "mcp-cancel-id",
+		Name:      "cancel-display",
+		UpdatedAt: time.Now().Add(-time.Hour),
+	}
+	m.Tmux.SessionName = "cancel-target"
+	if err := store.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	tmuxClient := &blockingKillTmux{
+		MockTmux:     session.NewMockTmux(),
+		probeStarted: make(chan struct{}),
+		releaseProbe: make(chan struct{}),
+	}
+	tmuxClient.Sessions["cancel-target"] = true
+	handlerDone := make(chan struct{})
+	opCtx := &ops.OpContext{Storage: store, Tmux: tmuxClient}
+	cli := newTestMCPClient(t, func(server *mcp.Server, _ *Config) {
+		addKillSessionToolWithFactory(server, func() (*ops.OpContext, func(), error) {
+			return opCtx, func() { close(handlerDone) }, nil
+		})
+	})
+
+	requestCtx, cancel := context.WithCancel(t.Context())
+	callDone := make(chan error, 1)
+	go func() {
+		_, err := cli.CallTool(requestCtx, &mcp.CallToolParams{
+			Name: "agm_kill_session",
+			Arguments: map[string]any{
+				"identifier":      m.SessionID,
+				"confirmed_stuck": true,
+			},
+		})
+		callDone <- err
+	}()
+	<-tmuxClient.probeStarted
+	cancel()
+	select {
+	case <-opCtx.Context.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("MCP handler context did not observe client cancellation")
+	}
+	close(tmuxClient.releaseProbe)
+
+	select {
+	case <-handlerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("MCP kill handler did not finish after cancellation")
+	}
+	select {
+	case <-callDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("MCP client call did not finish after cancellation")
+	}
+	if tmuxClient.killCalls != 0 || !tmuxClient.Sessions["cancel-target"] {
+		t.Fatalf("canceled MCP request mutated tmux: killCalls=%d sessions=%v", tmuxClient.killCalls, tmuxClient.Sessions)
 	}
 }
 
@@ -436,7 +676,7 @@ func TestCreateSessionInputSchemaDocumentsHarnessParity(t *testing.T) {
 		t.Fatal("CreateSessionInput.Harness field missing")
 	}
 	tag := field.Tag.Get("jsonschema")
-	for _, want := range []string{"claude-code", "codex-cli", "agy", "opencode-cli", "gemini-cli"} {
+	for _, want := range []string{"claude-code", "codex-cli", "agy", "opencode-cli", "pi-cli", "gemini-cli"} {
 		if !strings.Contains(tag, want) {
 			t.Errorf("Harness jsonschema tag %q missing %q", tag, want)
 		}
@@ -447,7 +687,7 @@ func TestCreateSessionInputSchemaDocumentsHarnessParity(t *testing.T) {
 		t.Fatal("CreateSessionInput.Model field missing")
 	}
 	modelTag := modelField.Tag.Get("jsonschema")
-	for _, want := range []string{"5.5", "5.6", "2.5-flash", "z-ai/glm-5.2"} {
+	for _, want := range []string{"5.5", "5.6", "3.5-flash", "z-ai/glm-5.2"} {
 		if !strings.Contains(modelTag, want) {
 			t.Errorf("Model jsonschema tag %q missing %q", modelTag, want)
 		}

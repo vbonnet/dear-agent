@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os/exec"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
@@ -36,7 +38,7 @@ func injectTraceContext(ctx context.Context) map[string]interface{} {
 type ListSessionsInput struct {
 	Filters struct {
 		Status    string `json:"status,omitempty" jsonschema:"Filter by status: active (default), archived, or all"`
-		AgentType string `json:"agent_type,omitempty" jsonschema:"Filter by harness: claude-code, codex-cli, agy, opencode-cli, gemini-cli, or all"`
+		AgentType string `json:"agent_type,omitempty" jsonschema:"Filter by harness: claude-code, codex-cli, agy, opencode-cli, pi-cli, gemini-cli, or all"`
 		Limit     int    `json:"limit,omitempty" jsonschema:"Maximum sessions to return (1-1000, default 100)"`
 	} `json:"filters"`
 	Fields []string `json:"fields,omitempty" jsonschema:"Field mask: only return these fields (e.g. [id, name, status]). Omit for all fields."`
@@ -190,16 +192,18 @@ type ArchiveSessionInput struct {
 }
 
 type KillSessionInput struct {
-	Identifier string `json:"identifier" jsonschema:"Session ID, name, or tmux session name to kill"`
-	DryRun     bool   `json:"dry_run,omitempty" jsonschema:"Preview the kill without executing. Returns what would happen."`
+	Identifier     string `json:"identifier" jsonschema:"Session ID, name, or tmux session name to kill"`
+	Force          bool   `json:"force,omitempty" jsonschema:"Bypass the recent-activity safety check."`
+	ConfirmedStuck bool   `json:"confirmed_stuck,omitempty" jsonschema:"Confirm that a live harness is stuck and may be killed. Required for an active session."`
+	DryRun         bool   `json:"dry_run,omitempty" jsonschema:"Preview the kill without executing. Returns what would happen."`
 }
 
 type CreateSessionInput struct {
 	Cwd     string `json:"cwd" jsonschema:"Absolute path to the working directory for the new session (required)"`
 	Prompt  string `json:"prompt" jsonschema:"Initial prompt to send to the session after startup (required)"`
 	Title   string `json:"title,omitempty" jsonschema:"Session name. If omitted, derived from cwd directory name."`
-	Model   string `json:"model,omitempty" jsonschema:"Model to use (e.g. sonnet, 5.5, 5.6, 2.5-flash, z-ai/glm-5.2). Defaults to the selected harness default."`
-	Harness string `json:"harness,omitempty" jsonschema:"Agent harness: claude-code, codex-cli, agy, opencode-cli, or deprecated gemini-cli. Defaults to claude-code."`
+	Model   string `json:"model,omitempty" jsonschema:"Model to use (e.g. sonnet, 5.5, 5.6, 3.5-flash, z-ai/glm-5.2). Defaults to the selected harness default."`
+	Harness string `json:"harness,omitempty" jsonschema:"Agent harness: claude-code, codex-cli, agy, opencode-cli, pi-cli, or deprecated gemini-cli. Defaults to claude-code."`
 }
 
 type SendMessageInput struct {
@@ -236,23 +240,35 @@ func addArchiveSessionTool(server *mcp.Server, _ *Config) {
 }
 
 func addKillSessionTool(server *mcp.Server, _ *Config) {
+	addKillSessionToolWithFactory(server, newMCPOpContextWithTmux)
+}
+
+type mcpOpContextFactory func() (*ops.OpContext, func(), error)
+
+// addKillSessionToolWithFactory keeps dependency construction private while
+// allowing the complete MCP transport and shared mutation contract to be
+// exercised with deterministic storage and tmux adapters.
+func addKillSessionToolWithFactory(server *mcp.Server, newOpContext mcpOpContextFactory) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "agm_kill_session",
 		Description: "Kill the tmux session for an AGM session. Use when a session is stuck or unresponsive and needs to be force-stopped.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, input KillSessionInput) (*mcp.CallToolResult, any, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, input KillSessionInput) (*mcp.CallToolResult, any, error) {
 		if input.Identifier == "" {
 			return mcpError(ops.ErrInvalidInput("identifier", "Session identifier is required.")), nil, nil
 		}
 
-		opCtx, cleanup, err := newMCPOpContext()
+		opCtx, cleanup, err := newOpContext()
 		if err != nil {
 			return mcpError(err), nil, nil
 		}
 		defer cleanup()
+		opCtx.Context = ctx
 		opCtx.DryRun = input.DryRun
 
 		result, opErr := ops.KillSession(opCtx, &ops.KillSessionRequest{
-			Identifier: input.Identifier,
+			Identifier:     input.Identifier,
+			Force:          input.Force,
+			ConfirmedStuck: input.ConfirmedStuck,
 		})
 		if opErr != nil {
 			return mcpError(opErr), nil, nil
@@ -273,7 +289,55 @@ func newMCPOpContextWithTmux() (*ops.OpContext, func(), error) {
 		return nil, cleanup, err
 	}
 	opCtx.Tmux = session.NewRealTmux()
+	opCtx.CreationRuntime = newMCPCreateSessionRuntime(opCtx.Tmux)
 	return opCtx, cleanup, nil
+}
+
+type mcpCreateSessionRuntime struct {
+	tmux             session.TmuxInterface
+	lookPath         func(string) (string, error)
+	waitForAgyPrompt func(context.Context, string, time.Duration) error
+	sleep            func(time.Duration)
+}
+
+func newMCPCreateSessionRuntime(tmuxClient session.TmuxInterface) *mcpCreateSessionRuntime {
+	return &mcpCreateSessionRuntime{
+		tmux:             tmuxClient,
+		lookPath:         exec.LookPath,
+		waitForAgyPrompt: tmux.WaitForAgyPrompt,
+		sleep:            time.Sleep,
+	}
+}
+
+func (r *mcpCreateSessionRuntime) Launch(ctx context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
+	if spec.Harness == "agy" {
+		if _, err := r.lookPath("agy"); err != nil {
+			return ops.CreateSessionLaunchResult{}, fmt.Errorf("find AGY executable: %w", err)
+		}
+	}
+	launch := ops.BuildHarnessLaunchCommand(spec)
+	result := ops.CreateSessionLaunchResult{ModeAppliedAtStartup: launch.ModeAppliedAtStartup}
+	if err := r.tmux.SendKeys(spec.SessionName, launch.Command); err != nil {
+		return result, err
+	}
+	if spec.Harness != "agy" {
+		return result, nil
+	}
+	r.sleep(500 * time.Millisecond)
+	if err := r.waitForAgyPrompt(ctx, spec.SessionName, 90*time.Second); err != nil {
+		return result, fmt.Errorf("wait for AGY readiness: %w", err)
+	}
+	return result, nil
+}
+
+func (r *mcpCreateSessionRuntime) Complete(ctx context.Context, completion ops.CreateSessionCompletion) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if completion.Prompt == "" {
+		return nil
+	}
+	return r.tmux.SendKeys(completion.Manifest.Name, completion.Prompt)
 }
 
 // mcpTracer is the OTel tracer for MCP tool handlers.

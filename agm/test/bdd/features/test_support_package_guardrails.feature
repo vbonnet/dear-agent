@@ -19,7 +19,6 @@
 # RELATED-SPEC: engram/hooks-bin/internal/integration_test/SPEC.md
 # RELATED-SPEC: engram/internal/testutil/SPEC.md
 # RELATED-SPEC: internal/testutil/SPEC.md
-# RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/integration/SPEC.md
 Feature: Test support package guardrails
   Test infrastructure is part of the product's enforcement boundary. Its
   contracts must remain strict, executable, and provider-neutral.
@@ -52,7 +51,6 @@ Feature: Test support package guardrails
       | engram/hooks-bin/internal/integration_test                |
       | engram/internal/testutil                                  |
       | internal/testutil                                         |
-      | wayfinder/cmd/wayfinder-session/internal/integration      |
 
   Scenario Outline: Test enforcement is invariant across active routes
     Given test support coverage runs through "<harness>" with "<family>"
@@ -89,9 +87,28 @@ Feature: Test support package guardrails
       | opencode-cli | deepseek  |
       | opencode-cli | nemotron  |
       | opencode-cli | qwen      |
+      | pi-cli       | anthropic |
+      | pi-cli       | openai    |
+      | pi-cli       | gemini    |
+      | pi-cli       | glm       |
+      | pi-cli       | deepseek  |
+      | pi-cli       | nemotron  |
+      | pi-cli       | qwen      |
 
   Scenario: Live harness contracts use canonical guarded CLI routes
     Given live harness contract sources are configured
     When AGM validates live harness contract command construction
     Then live harness contracts should use canonical session and harness arguments
     And unavailable live harness dependencies should be skipped explicitly
+
+  Scenario: Trust protocol hooks restore process state and owned storage
+    When AGM validates trust protocol scenario isolation
+    Then trust protocol setup should run only for trust scenarios
+    And trust protocol hooks should restore HOME and shared Go cache variables
+    And trust protocol cleanup should remove read-only owned module trees
+
+  Scenario: Performance workloads wait for observed client readiness
+    Given AGM performance workload sources are configured
+    When AGM validates performance client readiness
+    Then performance workloads should use bounded hub client readiness
+    And churn cleanup should be observed before stable clients disconnect

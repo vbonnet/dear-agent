@@ -1,6 +1,6 @@
 # AGM tmux Delivery Specification
 
-<!-- Last audited at: 2026-07-04 -->
+<!-- Last audited at: 2026-07-20 -->
 
 ## Purpose
 
@@ -46,7 +46,7 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-15** When pane output or scrollback capture starts, the system shall bound the tmux subprocess with a timeout, isolate its process group, and bound command waiting after cancellation.
 
-**TMUX-20** When the AGY feedback survey is visible with a bare prompt, the system shall classify the session as blocked rather than ready and shall select the survey's Skip option before delivering automated input.
+**TMUX-20** When the AGY feedback survey is visible with a bare prompt, the system shall classify the session as blocked rather than ready and shall select the survey's Skip option before delivering automated input; after one successful dismissal in a readiness wait, stale survey text retained in captured pane history shall neither trigger another dismissal nor suppress a subsequently visible composer.
 
 **TMUX-21** When the operating-system user database cannot resolve the current process UID, the system shall use the numeric UID and environment username for linger diagnostics.
 
@@ -58,12 +58,46 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-25** When the pane is still positively observed as an unsubmitted paste after every backoff attempt, the system shall return a submission-not-confirmed error so the caller reports delivery failure instead of a false success.
 
+**TMUX-26** When a caller requests liveness for a named harness process, the system shall scan the full pane descendant tree for that exact process and shall return scan failures separately from a proven dead result.
+
+**TMUX-27** When an AGY prompt wait is invoked, the system shall derive polling, retry, trust, survey, and ready-stabilization cancellation from the caller-supplied context, shall return cancellation before reporting readiness, and shall not install process-global signal handling inside the tmux helper.
+
+**TMUX-28** When command-scoped multiline prompt delivery waits for a composer or rechecks composer stability, the system shall derive every wait and subprocess timeout from the caller context and shall return before prompt delivery when cancellation is observed during those waits.
+
+**TMUX-29** When command-scoped file or slash-command delivery or prompt-delivery verification runs, the system shall derive composer waits, pane-capture subprocesses, verification backoff, and retry sends from the caller context and shall not write or retry prompt bytes after cancellation.
+
+**TMUX-30** When command-scoped harness liveness validation runs, the system shall derive the tmux, process-table, and Codex Node-wrapper fallback scans from the caller context and return cancellation instead of allowing a later scan completion or attach.
+
+**TMUX-31** When pane liveness is classified for command injection safety, the system shall positively identify a restartable shell only when exactly one pane exists, its process tree is observable, and every process in that tree is a plain interactive shell; any other foreground or descendant process shall fail that proof.
+
+**TMUX-32** When pre-input AGY readiness encounters an active first-run color-theme or Terms of Service/Data Use screen, the system shall stop promptly with explicit interactive-onboarding guidance and shall not send keys that accept preferences, legal terms, or data-use choices on the operator's behalf; every create and resume entry point, including CLI and adapter paths, shall propagate this failure before prompt delivery or attachment. Detection shall tolerate pane line wrapping. Every resume entry point shall use a resume wait that requires the onboarding screen to persist across a bounded confirmation window so restored transcript content can settle before classification, while post-input transcript text and onboarding markers present only before the latest composer shall not be classified as an active onboarding screen.
+
+**TMUX-33** When a transactional cleanup kills and verifies a tmux session, the system shall treat only an explicit missing-session response as absence and shall return socket, timeout, permission, and other backend failures instead of reporting cleanup success.
+
+**TMUX-34** When Codex readiness is checked, the system shall require either the initial composer header with its model-change hint and an empty `›` input cursor or an empty post-turn `›` input cursor paired with a structured model footer, shall require that signal to own the current pane tail, and shall reject standalone model text in echoed launch commands, working-status footers, typed drafts, unsubmitted paste chips, or stale composers followed by newer process or shell output. A stale post-turn footer shall not suppress a newer tail-owned initial composer rendered after Codex restarts in the same pane.
+
+**TMUX-35** When a transactional caller creates a tmux session, the system shall return a creation-specific identity composed of tmux's server-local session ID and a random token embedded in its provisional creation name before the token is stored on the session, shall preserve the printed server-local ID if a later command in the creation queue fails, and shall compare the ID with either ownership marker in strict kill and existence checks, so compensation can remove a partially initialized creation at every command boundary without selecting a replacement that reused either the same name or the same server-local ID after a server restart. If creation occurred but the client did not capture the server-local ID, cleanup shall target only the exact random provisional creation name.
+
+**TMUX-36** When a transactional rename starts, the system shall claim the exact source session with its server-local ID and a random short-lived option marker, reconciling a lost claim response by that marker. After every forward or compensating rename response, it shall verify that the same ID still carries the marker at the expected name. A missing marker, unexpected name, failed inspection, or server-restart replacement that reused either name or ID shall be ambiguous and shall never authorize metadata mutation or replacement adoption. Marker cleanup shall be conditional on the same ID and random token so it cannot mutate a replacement.
+
+**TMUX-37** When an Enter for prompt delivery is accepted but the following pane capture cannot determine whether submission occurred, the system shall preserve an explicit submission-uncertain outcome across every later retry so transactional callers preserve work that may have started. A paste positively observed in the composer after every retry shall remain a definite not-submitted failure only when no earlier accepted Enter had an indeterminate capture.
+
+**TMUX-38** When AGM waits to send to Pi, the system shall require the latest managed `AGM <mode>/ready` status, reject permission or selection overlays, and not accept stale readiness that precedes a newer working status.
+
+**TMUX-39** When AGM verifies Pi liveness, the system shall scan the pane process tree for Pi-specific executable identity, including the canonical npm Node entrypoint, and shall not accept tmux existence, a generic shell prompt, or a generic `node` process as proof.
+
+**TMUX-40** When AGM waits for a newly launched Pi process, the system shall accept only a managed ready marker containing that launch's unique ID, reject stale ready markers from earlier pane history, and fail closed when Pi-specific process liveness cannot be proved.
+
+**TMUX-41** When a command-scoped Pi identity or pane-liveness scan runs, the system shall derive tmux and process-table subprocesses from the caller context so cancellation returns before command delivery, attachment, or metadata mutation.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
 - Package tests: `agm/internal/tmux/workdir_test.go`
 - Package tests: `agm/internal/tmux/liveness_test.go`
+- Package tests: `agm/internal/tmux/enter_reliable_test.go`
 - Package tests: `agm/internal/tmux/tmux_test.go`
 - Package tests: `agm/internal/tmux/linger_test.go`
 - Package tests: `agm/internal/tmux/capture_test.go`
 - Package tests: `agm/internal/tmux/agy_prompt_test.go`
+- Package tests: `agm/internal/tmux/pi_prompt_test.go`

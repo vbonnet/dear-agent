@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
@@ -13,10 +14,10 @@ import (
 // runHarnessPostCreate runs the harness-specific post-create flow (deterministic
 // association + readiness signal for Claude, prompt-readiness wait + prompt
 // delivery for CLI harnesses).
-func runHarnessPostCreate(sessionName string, modeAppliedAtStartup bool) error {
+func runHarnessPostCreate(ctx context.Context, sessionName string, modeAppliedAtStartup bool) error {
 	switch {
 	case harnessName == "claude-code" && os.Getenv("AGM_TEST_RUN_ID") == "" && os.Getenv("AGM_TEST_ENV") == "":
-		return runClaudePostCreate(sessionName, modeAppliedAtStartup)
+		return runClaudePostCreate(ctx, sessionName, modeAppliedAtStartup)
 	case harnessName == "claude-code":
 		debug.Phase("Skip Association (Test Environment)")
 		debug.Log("Skipping deterministic association: AGM_TEST_RUN_ID=%s AGM_TEST_ENV=%s",
@@ -24,21 +25,29 @@ func runHarnessPostCreate(sessionName string, modeAppliedAtStartup bool) error {
 		ui.PrintSuccess("Test session ready (association skipped)")
 		return nil
 	case harnessName == "gemini-cli":
-		runGeminiPostCreate(sessionName)
-		return nil
+		return runGeminiPostCreate(ctx, sessionName)
 	case harnessName == "opencode-cli":
-		runOpenCodePostCreate(sessionName)
-		return nil
+		return runOpenCodePostCreate(ctx, sessionName)
 	case harnessName == "codex-cli":
-		runCodexPostCreate(sessionName)
-		return nil
+		return runCodexPostCreate(ctx, sessionName)
 	case harnessName == "agy":
-		runAgyPostCreate(sessionName)
-		return nil
+		return runAgyPostCreate(ctx, sessionName)
+	case harnessName == "pi-cli":
+		return runPiPostCreate(ctx, sessionName)
 	default:
 		debug.Log("Skipping initialization sequence for harness: %s", harnessName)
 		return nil
 	}
+}
+
+func runPiPostCreate(ctx context.Context, sessionName string) error {
+	if err := tmux.WaitForPiPromptContext(ctx, sessionName, 30*time.Second); err != nil {
+		return fmt.Errorf("pi did not reach managed readiness after creation: %w", err)
+	}
+	ui.PrintSuccess("Pi is ready with AGM authorization controls")
+	// The managed footer is the delivery acknowledgement. Pi does not expose
+	// Claude's echoed-composer signals, so the Claude retry verifier is not used.
+	return deliverInitialPrompt(ctx, sessionName, false, false)
 }
 
 // runClaudePostCreate associates the freshly-spawned Claude session and signals
@@ -51,64 +60,98 @@ func runHarnessPostCreate(sessionName string, modeAppliedAtStartup bool) error {
 // ready-file timeout per session and leaving the session unassociated (ce-o1sg).
 // associateSpawnedClaudeSession does the same work from the spawner with no
 // dependency on the spawned session running anything.
-func runClaudePostCreate(sessionName string, modeAppliedAtStartup bool) error {
+func runClaudePostCreate(ctx context.Context, sessionName string, modeAppliedAtStartup bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	associateSpawnedClaudeSession(sessionName)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if modeFlagValue != "" && !modeAppliedAtStartup {
-		applyCreationModeSwitch(sessionName, harnessName, modeFlagValue)
+		applyCreationModeSwitchContext(ctx, sessionName, harnessName, modeFlagValue)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	ui.PrintSuccess("Claude is ready and session associated!")
-	deliverInitialPrompt(sessionName, true, true)
-	return nil
+	return deliverInitialPrompt(ctx, sessionName, true, true)
 }
 
 // deliverInitialPrompt sends the user-supplied --prompt or --prompt-file to the
-// session. The multiLine flag selects SendMultiLinePromptSafe (Claude) vs
+// session. The multiLine flag selects SendMultiLinePromptSafeContext (Claude) vs
 // SendPromptLiteral (Gemini/OpenCode/Codex). verifyDelivery enables the generic
 // retry verifier, which depends on Claude-style prompt echo/processing signals.
-func deliverInitialPrompt(sessionName string, multiLine, verifyDelivery bool) {
-	if prompt != "" {
-		debug.Log("Sending prompt from --prompt flag")
-		var sendErr error
+func deliverInitialPrompt(ctx context.Context, sessionName string, multiLine, verifyDelivery bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	switch {
+	case prompt != "":
+		return deliverInitialPromptText(ctx, sessionName, multiLine, verifyDelivery)
+	case promptFile != "":
+		return deliverInitialPromptFile(ctx, sessionName, verifyDelivery)
+	default:
+		return nil
+	}
+}
+
+func deliverInitialPromptText(ctx context.Context, sessionName string, multiLine, verifyDelivery bool) error {
+	debug.Log("Sending prompt from --prompt flag")
+	send := func() error {
 		if multiLine {
-			sendErr = tmux.SendMultiLinePromptSafe(sessionName, prompt, false)
-		} else {
-			sendErr = tmux.SendPromptLiteral(sessionName, prompt, false)
+			return tmux.SendMultiLinePromptSafeContext(ctx, sessionName, prompt, false)
 		}
-		if sendErr != nil {
-			logger.Warn("Failed to send prompt", "error", sendErr)
-			fmt.Println("  • You can manually enter the prompt in the session")
-			return
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		if verifyDelivery {
-			verifyAndRetryPromptDelivery(sessionName, prompt, func() error {
-				if multiLine {
-					return tmux.SendMultiLinePromptSafe(sessionName, prompt, false)
-				}
-				return tmux.SendPromptLiteral(sessionName, prompt, false)
-			})
-		}
-		return
+		return tmux.SendPromptLiteral(sessionName, prompt, false)
 	}
-	if promptFile == "" {
-		return
+	if err := send(); err != nil {
+		return reportInitialPromptSendFailure(ctx, err, "Failed to send prompt", "")
 	}
+	if !verifyDelivery {
+		return nil
+	}
+	return verifyAndRetryPromptDelivery(ctx, sessionName, prompt, send)
+}
+
+func deliverInitialPromptFile(ctx context.Context, sessionName string, verifyDelivery bool) error {
 	debug.Log("Sending prompt from --prompt-file flag: %s", promptFile)
-	promptContent, readErr := os.ReadFile(promptFile)
-	if err := tmux.SendPromptFileSafe(sessionName, promptFile, false); err != nil {
-		logger.Warn("Failed to send prompt from file", "error", err, "file", promptFile)
-		fmt.Println("  • You can manually enter the prompt in the session")
-		return
+	promptContent, readable := readPromptForVerification(promptFile)
+	send := func() error {
+		return tmux.SendPromptFileSafeContext(ctx, sessionName, promptFile, false)
 	}
-	if verifyDelivery && readErr == nil {
-		verifyAndRetryPromptDelivery(sessionName, string(promptContent), func() error {
-			return tmux.SendPromptFileSafe(sessionName, promptFile, false)
-		})
+	if err := send(); err != nil {
+		return reportInitialPromptSendFailure(ctx, err, "Failed to send prompt from file", promptFile)
 	}
+	if !verifyDelivery || !readable {
+		return nil
+	}
+	return verifyAndRetryPromptDelivery(ctx, sessionName, string(promptContent), send)
+}
+
+func readPromptForVerification(file string) ([]byte, bool) {
+	content, err := os.ReadFile(file)
+	return content, err == nil
+}
+
+func reportInitialPromptSendFailure(ctx context.Context, sendErr error, message, file string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if file == "" {
+		logger.Warn(message, "error", sendErr)
+	} else {
+		logger.Warn(message, "error", sendErr, "file", file)
+	}
+	fmt.Println("  • You can manually enter the prompt in the session")
+	return nil
 }
 
 // runGeminiPostCreate waits for the Gemini prompt and delivers --prompt /
 // --prompt-file in non-test, non-detached mode.
-func runGeminiPostCreate(sessionName string) {
+func runGeminiPostCreate(ctx context.Context, sessionName string) error {
 	debug.Phase("Gemini Post-Create")
 	switch {
 	case os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "":
@@ -116,15 +159,24 @@ func runGeminiPostCreate(sessionName string) {
 		ui.PrintSuccess("Gemini test session ready (init sequence skipped)")
 	case !detached:
 		debug.Log("Waiting for Gemini prompt readiness before prompt delivery")
-		if err := tmux.WaitForPromptSimple(sessionName, 30*time.Second); err != nil {
+		if err := tmux.WaitForPromptSimpleContext(ctx, sessionName, 30*time.Second); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			debug.Log("Gemini prompt readiness wait failed (non-fatal): %v", err)
 		} else {
 			debug.Log("Gemini prompt detected, session ready")
 		}
-		deliverInitialPrompt(sessionName, false, true)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err := deliverInitialPrompt(ctx, sessionName, false, true); err != nil {
+			return err
+		}
 	default:
 		debug.Log("Detached mode: skipping Gemini prompt wait and prompt delivery")
 	}
+	return nil
 }
 
 // runCodexPostCreate waits for the Codex prompt and delivers --prompt /
@@ -135,7 +187,7 @@ func runGeminiPostCreate(sessionName string) {
 // WaitForPromptSimple) so readiness keys on Codex's composer signals and any
 // first-run trust/onboarding prompt is auto-accepted inside the wait, ensuring
 // prompt delivery never races the consent dialog or a not-yet-ready TUI.
-func runCodexPostCreate(sessionName string) {
+func runCodexPostCreate(ctx context.Context, sessionName string) error {
 	debug.Phase("Codex Post-Create")
 	switch {
 	case os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "":
@@ -145,19 +197,50 @@ func runCodexPostCreate(sessionName string) {
 		debug.Log("Detached mode with no prompt: skipping Codex prompt wait")
 	default:
 		debug.Log("Waiting for Codex prompt readiness before prompt delivery")
-		if err := tmux.WaitForCodexPrompt(sessionName, 30*time.Second); err != nil {
+		if err := tmux.WaitForCodexPromptContext(ctx, sessionName, 30*time.Second); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			debug.Log("Codex prompt readiness wait failed (non-fatal): %v", err)
 		} else {
 			debug.Log("Codex prompt detected, session ready")
 		}
-		deliverInitialPrompt(sessionName, false, false)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err := deliverInitialPrompt(ctx, sessionName, false, false); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // runAgyPostCreate waits for the AGY prompt, captures the spawned AGY
 // conversation ID, and delivers --prompt / --prompt-file even in detached mode
 // once the interactive prompt is ready.
-func runAgyPostCreate(sessionName string) {
+type agyPostCreateRuntime struct {
+	wait               func(context.Context, string, time.Duration) error
+	waitAfterInput     func(context.Context, string, time.Duration) error
+	associate          func(string)
+	deliver            func(context.Context, string, bool, bool) error
+	associateWithRetry func(context.Context, string, int, time.Duration) error
+}
+
+func realAgyPostCreateRuntime() agyPostCreateRuntime {
+	return agyPostCreateRuntime{
+		wait:               tmux.WaitForAgyPrompt,
+		waitAfterInput:     tmux.WaitForAgyPromptAfterInput,
+		associate:          associateSpawnedAgySession,
+		deliver:            deliverInitialPrompt,
+		associateWithRetry: associateSpawnedAgySessionWithRetry,
+	}
+}
+
+func runAgyPostCreate(ctx context.Context, sessionName string) error {
+	return runAgyPostCreateWithRuntime(ctx, sessionName, realAgyPostCreateRuntime())
+}
+
+func runAgyPostCreateWithRuntime(ctx context.Context, sessionName string, runtime agyPostCreateRuntime) error {
 	debug.Phase("AGY Post-Create")
 	switch {
 	case os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "":
@@ -165,25 +248,40 @@ func runAgyPostCreate(sessionName string) {
 		ui.PrintSuccess("AGY test session ready (init sequence skipped)")
 	default:
 		debug.Log("Waiting for AGY prompt readiness before metadata capture and prompt delivery")
-		if err := tmux.WaitForAgyPrompt(sessionName, 30*time.Second); err != nil {
-			debug.Log("AGY prompt readiness wait failed (non-fatal): %v", err)
+		if err := runtime.wait(ctx, sessionName, 30*time.Second); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return fmt.Errorf("wait for AGY prompt readiness: %w", err)
 		} else {
 			debug.Log("AGY prompt detected, session ready")
 		}
-		associateSpawnedAgySession(sessionName)
-		deliverInitialPrompt(sessionName, false, false)
+		runtime.associate(sessionName)
+		if err := runtime.deliver(ctx, sessionName, false, false); err != nil {
+			return err
+		}
 		if prompt != "" || promptFile != "" {
-			if err := tmux.WaitForAgyPrompt(sessionName, 60*time.Second); err != nil {
-				debug.Log("AGY post-prompt readiness wait failed (non-fatal): %v", err)
+			waitAfterInput := runtime.waitAfterInput
+			if waitAfterInput == nil {
+				waitAfterInput = runtime.wait
 			}
-			associateSpawnedAgySessionWithRetry(sessionName, 20, 500*time.Millisecond)
+			if err := waitAfterInput(ctx, sessionName, 60*time.Second); err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				return fmt.Errorf("wait for AGY post-prompt readiness: %w", err)
+			}
+			if err := runtime.associateWithRetry(ctx, sessionName, 20, 500*time.Millisecond); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 // runOpenCodePostCreate waits for the OpenCode prompt and delivers
 // --prompt / --prompt-file in non-test, non-detached mode.
-func runOpenCodePostCreate(sessionName string) {
+func runOpenCodePostCreate(ctx context.Context, sessionName string) error {
 	debug.Phase("OpenCode Post-Create")
 	switch {
 	case os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "":
@@ -191,13 +289,22 @@ func runOpenCodePostCreate(sessionName string) {
 		ui.PrintSuccess("OpenCode test session ready (init sequence skipped)")
 	case !detached:
 		debug.Log("Waiting for OpenCode prompt readiness before prompt delivery")
-		if err := tmux.WaitForPromptSimple(sessionName, 30*time.Second); err != nil {
+		if err := tmux.WaitForPromptSimpleContext(ctx, sessionName, 30*time.Second); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			debug.Log("OpenCode prompt readiness wait failed (non-fatal): %v", err)
 		} else {
 			debug.Log("OpenCode prompt detected, session ready")
 		}
-		deliverInitialPrompt(sessionName, false, true)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err := deliverInitialPrompt(ctx, sessionName, false, true); err != nil {
+			return err
+		}
 	default:
 		debug.Log("Detached mode: skipping OpenCode prompt wait and prompt delivery")
 	}
+	return nil
 }

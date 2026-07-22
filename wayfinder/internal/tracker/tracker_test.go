@@ -61,10 +61,10 @@ func TestLifecycle_NoError(t *testing.T) {
 	if err := tr.StartSession("/test/project"); err != nil {
 		t.Errorf("StartSession: %v", err)
 	}
-	if err := tr.StartPhase("D1"); err != nil {
+	if err := tr.StartPhase("PROBLEM"); err != nil {
 		t.Errorf("StartPhase: %v", err)
 	}
-	if err := tr.CompletePhase("D1", "success", map[string]any{"key": "val"}); err != nil {
+	if err := tr.CompletePhase("PROBLEM", "success", map[string]any{"key": "val"}); err != nil {
 		t.Errorf("CompletePhase: %v", err)
 	}
 	if err := tr.EndSession("success"); err != nil {

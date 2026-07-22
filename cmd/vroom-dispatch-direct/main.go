@@ -24,6 +24,31 @@
 // Exit status is 0 on success even when zero beads are dispatched — "nothing new
 // to dispatch" (backlog drained, at capacity, or all in flight) is a normal
 // steady state, not an error.
+//
+// The three ground-truth queries (bd ready, agm session list, gh pr list) fail
+// closed: any error there aborts the run rather than risk double-dispatching.
+// That's correct for the individual tick, but the dispatch loop wrapper reruns
+// this binary every INTERVAL forever, so a transient failure (a gh token
+// mid-rotation, a momentary dolt lock) can silently stall the whole flywheel
+// tick after tick while the loop still looks "alive" in its log. See
+// degraded.go: each query is retried before it's treated as fatal, and a
+// persisted failure streak (~/.agm/vroom/heartbeat/dispatch-direct.json,
+// overridable via -heartbeat-file) escalates past a threshold — a loud stderr
+// banner plus a best-effort desktop notification — instead of degrading
+// invisibly (incident: 2026-07-20, gh auth rotation, ~20 minutes of dead
+// ticks discoverable only by reading dispatch-loop.log line by line).
+//
+// Bead closure (ce-2n5j / ce-24f1): the worker prompt asks a worker to leave a
+// terminal-status note, but nothing ever made that deterministic — a worker
+// that finished (or crashed, or hit a permission block) without closing its
+// own bead left it `open` and `ready`, so the next run's `bd ready` saw it
+// again and redispatched a fresh worker to re-derive the same answer,
+// forever. Every run now reconciles beads it previously dispatched a worker
+// for (see reconcile.go): a merged PR closes the bead as done, an explicit
+// no-op/failure note closes or blocks it, and repeated silent exits with no
+// evidence of progress auto-block the bead instead of allowing infinite
+// redispatch. Enforcement never depends on the worker having run any bd
+// command beyond the note the prompt already requires.
 package main
 
 import (
@@ -115,6 +140,7 @@ type pullRequest struct {
 	Number      int    `json:"number"`
 	HeadRefName string `json:"headRefName"`
 	Title       string `json:"title"`
+	MergedAt    string `json:"mergedAt"`
 }
 
 // queryReady runs `bd --db <db> ready --json` and returns the ready beads. It is
@@ -125,7 +151,7 @@ var queryReady = func(ctx context.Context, db string) ([]bead, error) {
 	cmd := exec.CommandContext(ctx, "bd", "--db", db, "ready", "--json")
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("bd ready: %w", err)
+		return nil, wrapExecErr("bd ready", err)
 	}
 	var beads []bead
 	if err := json.Unmarshal(out, &beads); err != nil {
@@ -148,11 +174,36 @@ var queryOpenPRs = func(ctx context.Context, repo string) ([]pullRequest, error)
 		"--json", "number,headRefName,title")
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("gh pr list: %w", err)
+		return nil, wrapExecErr("gh pr list", err)
 	}
 	var prs []pullRequest
 	if err := json.Unmarshal(out, &prs); err != nil {
 		return nil, fmt.Errorf("parse gh pr list output: %w", err)
+	}
+	return prs, nil
+}
+
+// queryMergedPRs runs `gh pr list --state merged` for the repo. This is the
+// ground-truth signal reconcile uses to close a bead as done: a merged PR
+// mentioning the bead id is verified independently of anything a worker wrote
+// in a bead note, so a worker that forgets (or is killed before) reporting its
+// outcome still gets its bead closed once the PR is merged. It is a package
+// var so tests can stub the gh invocation.
+var queryMergedPRs = func(ctx context.Context, repo string) ([]pullRequest, error) {
+	ctx, cancel := context.WithTimeout(ctx, subprocessTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gh", "pr", "list",
+		"--repo", repo,
+		"--state", "merged",
+		"--limit", "200",
+		"--json", "number,headRefName,title,mergedAt")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("gh pr list --state merged: %w", err)
+	}
+	var prs []pullRequest
+	if err := json.Unmarshal(out, &prs); err != nil {
+		return nil, fmt.Errorf("parse gh pr list --state merged output: %w", err)
 	}
 	return prs, nil
 }
@@ -416,9 +467,14 @@ the human acts.
   doubt by reporting a bare DONE.
 - FAILED — deliverable not complete; report the blocker and two concrete alternatives.
 
+This note is the authoritative signal the dispatcher reconciles on — it, not
+you, closes DONE/DONE_WITH_CONCERNS beads and blocks FAILED ones on its next
+run. You do not need to (and should not rely on remembering to) close the bead
+yourself; write the note and stop.
+
 ## Rules
 
-- ALWAYS use `+"`bd --db ~/beads/context-engine/.beads`"+` (never bare bd)
+- ALWAYS use `+"`bd --db ~/beads/context-engine/.beads --dolt-auto-commit on`"+` (never bare bd)
 - NEVER write to ~/src/** (read-only — use worktrees only)
 - NEVER use --no-verify or --force
 - NEVER use raw git push or gh pr merge; use the safe wrappers
@@ -426,7 +482,7 @@ the human acts.
 - Do NOT run `+"`pkill -x gopls`"+`
 - Do NOT create unrelated beads or broaden scope
 
-Bead details: run bd --db ~/beads/context-engine/.beads show %s
+Bead details: run bd --db ~/beads/context-engine/.beads --dolt-auto-commit on show %s
 `, b.ID, b.Title, b.ID, prio, summary, goal, b.ID, b.ID, b.ID)
 }
 
@@ -620,6 +676,8 @@ func main() {
 	repoDir := flag.String("repo-dir", "~/src/dear-agent", "local checkout passed as `agm session new --directory` so a launchd-context spawn never inherits launchd's cwd (ce-fmxv)")
 	maxPriority := flag.Int("max-priority", 2, "numeric priority ceiling: 0=P0 only, 1=P0+P1, 2=P0..P2 (orchestrator narrows this as Meta-O goes stale)")
 	dryRun := flag.Bool("dry-run", false, "report what would be dispatched without spawning any sessions")
+	heartbeatFile := flag.String("heartbeat-file", "~/.agm/vroom/heartbeat/dispatch-direct.json", "path to the persisted control-plane health state (consecutive fail-closed streak, last error)")
+	ledgerPath := flag.String("ledger", "~/.agm/vroom/dispatch-ledger.json", "path to the dispatch ledger used to reconcile bead closure across runs")
 	flag.Parse()
 
 	// Cancel in-flight subprocesses if the dispatcher is interrupted (SIGINT/
@@ -633,37 +691,97 @@ func main() {
 	}
 	dbPath := expandHome(*db, home)
 	repoDirPath := expandHome(*repoDir, home)
+	statePath := expandHome(*heartbeatFile, home)
 
-	beads, err := queryReady(ctx, dbPath)
-	if err != nil {
-		fatal("query ready beads: %v", err)
+	var beads []bead
+	if err := withRetry(ctx, func() error {
+		var qErr error
+		beads, qErr = queryReady(ctx, dbPath)
+		return qErr
+	}); err != nil {
+		wrapped := fmt.Errorf("query ready beads: %w", err)
+		recordFailure(ctx, statePath, wrapped)
+		fatal("%v", wrapped)
 	}
 
 	// Fail closed on a session-list failure: without it we cannot tell which
-	// worker names are already occupied, so we must not risk a rejected duplicate.
-	sessions, err := listSessions(ctx)
-	if err != nil {
-		fatal("list sessions (failing closed to avoid double-dispatch): %v", err)
+	// worker names are already occupied and must not risk a rejected duplicate.
+	var sessions []string
+	if err := withRetry(ctx, func() error {
+		var qErr error
+		sessions, qErr = listSessions(ctx)
+		return qErr
+	}); err != nil {
+		wrapped := fmt.Errorf("list sessions (failing closed to avoid double-dispatch): %w", err)
+		recordFailure(ctx, statePath, wrapped)
+		fatal("%v", wrapped)
 	}
 	occupied := occupiedWorkerIDs(sessions)
 
-	// Fail closed on a PR-list failure for the same reason.
-	prs, err := queryOpenPRs(ctx, *repo)
-	if err != nil {
-		fatal("query open PRs (failing closed to avoid double-dispatch): %v", err)
+	// Fail closed on a PR-list failure for the same reason. Retried first: a
+	// gh token mid-rotation (or any other transient gh failure) is exactly the
+	// case retryAttempts exists for — see degraded.go.
+	var prs []pullRequest
+	if err := withRetry(ctx, func() error {
+		var qErr error
+		prs, qErr = queryOpenPRs(ctx, *repo)
+		return qErr
+	}); err != nil {
+		wrapped := fmt.Errorf("query open PRs (failing closed to avoid double-dispatch): %w", err)
+		recordFailure(ctx, statePath, wrapped)
+		fatal("%v", wrapped)
 	}
+
+	ledgerFilePath := expandHome(*ledgerPath, home)
+	ledger, err := loadLedger(ledgerFilePath)
+	if err != nil {
+		// A corrupt/unreadable ledger must not stop dispatch — it only degrades
+		// reconciliation (nothing looks previously-dispatched) for this run.
+		fmt.Fprintf(os.Stderr, "vroom-dispatch-direct: load ledger %s: %v (reconciliation degraded this run)\n", ledgerFilePath, err)
+		ledger = &dispatchLedger{Beads: map[string]*ledgerEntry{}}
+	}
+
+	// Reconcile before selecting candidates: a bead our ledger shows we
+	// previously dispatched a worker for, which no longer has a live worker,
+	// gets its terminal outcome determined deterministically — merged work
+	// closes it, an explicit no-op/failure note closes or blocks it, and
+	// silent no-progress exits accumulate strikes toward an auto-block. This
+	// is what stops a finished-but-unclosed bead from being redispatched
+	// forever (the ce-2n5j / ce-24f1 flywheel-stall defect).
+	mergedPRs, err := queryMergedPRs(ctx, *repo)
+	reconciled := map[string]bool{}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "vroom-dispatch-direct: query merged PRs (skipping reconcile this run): %v\n", err)
+	} else {
+		reconciled = reconcile(ctx, dbPath, beads, occupied, prs, mergedPRs, ledger, *dryRun, os.Stdout, os.Stderr)
+	}
+	beads = excludeReconciled(beads, reconciled)
 
 	candidates := selectCandidates(beads, occupied, prs, *maxPriority)
 
 	launch := workerLaunchConfig{Harness: *harness, Model: *model, Mode: *mode, Workspace: *workspace}
-	dispatched := dispatchCandidates(ctx, candidates, launch, repoDirPath, *dryRun, os.Stdout, os.Stderr)
+	dispatched := dispatchCandidates(ctx, candidates, launch, repoDirPath, *dryRun, os.Stdout, os.Stderr, ledger)
+
+	if !*dryRun {
+		if err := saveLedger(ledgerFilePath, ledger); err != nil {
+			fmt.Fprintf(os.Stderr, "vroom-dispatch-direct: save ledger %s: %v\n", ledgerFilePath, err)
+		}
+	}
+
+	recordSuccess(statePath)
 
 	fmt.Fprintf(os.Stderr,
-		"vroom-dispatch-direct: %d ready, %d occupied worker name(s), %d eligible, %d dispatched\n",
-		len(beads), len(occupied), len(candidates), dispatched)
+		"vroom-dispatch-direct: %d ready, %d occupied worker name(s), %d eligible, %d dispatched, %d reconciled\n",
+		len(beads), len(occupied), len(candidates), dispatched, len(reconciled))
 }
 
-func dispatchCandidates(ctx context.Context, candidates []bead, cfg workerLaunchConfig, repoDir string, dryRun bool, out, errOut io.Writer) int {
+// dispatchCandidates spawns a worker for each candidate in order. When ledger
+// is non-nil and dryRun is false, every successful dispatch is recorded in
+// it so a later run's reconcile pass can tell "we dispatched a worker for
+// this bead and it's now gone" apart from "this bead was never touched" —
+// the ledger entry is what makes deterministic bead-closure reconciliation
+// possible across the tool's one-shot-per-tick invocations.
+func dispatchCandidates(ctx context.Context, candidates []bead, cfg workerLaunchConfig, repoDir string, dryRun bool, out, errOut io.Writer, ledger *dispatchLedger) int {
 	dispatched := 0
 	for _, b := range candidates {
 		if ctx.Err() != nil {
@@ -691,6 +809,9 @@ func dispatchCandidates(ctx context.Context, candidates []bead, cfg workerLaunch
 		}
 		fmt.Fprintf(out, "dispatched %s (%s) %s\n", workerSessionName(b.ID), priorityLabel(b.Priority), b.Title)
 		dispatched++
+		if ledger != nil {
+			ledger.recordDispatch(b.ID, workerSessionName(b.ID))
+		}
 	}
 	return dispatched
 }

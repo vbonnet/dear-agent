@@ -542,7 +542,7 @@ func TestDispatchCandidates_SkipsDeterministicSpawnFailure(t *testing.T) {
 		{ID: "ce-3", Title: "three", Priority: 1},
 	}
 	var out, errOut bytes.Buffer
-	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", false, &out, &errOut)
+	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", false, &out, &errOut, nil)
 	if got != 2 {
 		t.Errorf("dispatched = %d, want 2 (skip the poisoned bead, keep going)\nstderr:\n%s", got, errOut.String())
 	}
@@ -572,7 +572,7 @@ func TestDispatchCandidates_StopsOnBackpressure(t *testing.T) {
 		{ID: "ce-2", Title: "two", Priority: 1},
 	}
 	var out, errOut bytes.Buffer
-	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", false, &out, &errOut)
+	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", false, &out, &errOut, nil)
 	if got != 0 {
 		t.Errorf("dispatched = %d, want 0 on backpressure", got)
 	}
@@ -599,7 +599,7 @@ func TestDispatchCandidates_StopsOnUnknownError(t *testing.T) {
 		{ID: "ce-2", Title: "two", Priority: 1},
 	}
 	var out, errOut bytes.Buffer
-	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", false, &out, &errOut)
+	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", false, &out, &errOut, nil)
 	if got != 0 {
 		t.Errorf("dispatched = %d, want 0 on unknown error", got)
 	}
@@ -629,7 +629,7 @@ func TestDispatchCandidates_DryRunHasNoWorkerCap(t *testing.T) {
 		{ID: "ce-4", Title: "four", Priority: 1},
 	}
 	var out, errOut bytes.Buffer
-	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", true, &out, &errOut)
+	got := dispatchCandidates(context.Background(), candidates, testWorkerLaunchConfig(), "/repo", true, &out, &errOut, nil)
 	if got != len(candidates) {
 		t.Fatalf("dry-run dispatched %d candidates, want all %d; output:\n%s", got, len(candidates), out.String())
 	}
@@ -647,7 +647,7 @@ func TestDispatchCandidates_StopsOnCanceledContext(t *testing.T) {
 		{ID: "ce-2", Title: "two", Priority: 1},
 	}
 	var out, errOut bytes.Buffer
-	got := dispatchCandidates(ctx, candidates, testWorkerLaunchConfig(), "/repo", true, &out, &errOut)
+	got := dispatchCandidates(ctx, candidates, testWorkerLaunchConfig(), "/repo", true, &out, &errOut, nil)
 	if got != 0 {
 		t.Fatalf("dispatchCandidates dispatched %d candidates after context cancellation; output:\n%s", got, out.String())
 	}

@@ -22,8 +22,6 @@
 # RELATED-SPEC: pkg/codeintel/rules/python/SPEC.md
 # RELATED-SPEC: pkg/codeintel/rules/typescript/SPEC.md
 # RELATED-SPEC: wayfinder/.claude-plugin/SPEC.md
-# RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/integration/.github/workflows/SPEC.md
-# RELATED-SPEC: wayfinder/cmd/wayfinder-session/schema/SPEC.md
 Feature: Declarative runtime guardrails
   Runtime configuration is executable product behavior. Plugin manifests,
   workflows, contracts, schemas, schedules, deployment services, and analysis
@@ -60,8 +58,6 @@ Feature: Declarative runtime guardrails
       | pkg/codeintel/rules/python                                                   |
       | pkg/codeintel/rules/typescript                                               |
       | wayfinder/.claude-plugin                                                     |
-      | wayfinder/cmd/wayfinder-session/internal/integration/.github/workflows       |
-      | wayfinder/cmd/wayfinder-session/schema                                       |
 
   Scenario Outline: Declarative contracts are invariant across active routes
     Given declarative runtime coverage runs through "<harness>" with "<family>"
@@ -98,3 +94,10 @@ Feature: Declarative runtime guardrails
       | opencode-cli  | deepseek  |
       | opencode-cli  | nemotron  |
       | opencode-cli  | qwen      |
+      | pi-cli        | anthropic |
+      | pi-cli        | openai    |
+      | pi-cli        | gemini    |
+      | pi-cli        | glm       |
+      | pi-cli        | deepseek  |
+      | pi-cli        | nemotron  |
+      | pi-cli        | qwen      |

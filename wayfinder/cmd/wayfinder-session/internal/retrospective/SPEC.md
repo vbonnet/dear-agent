@@ -14,7 +14,7 @@
 
 **WFR-03** When a non-zero rewind is logged, the system shall capture reason, learnings, git state, canonical deliverables, and completed waypoint state.
 
-**WFR-04** When rewind context is captured from status, the system shall parse canonical V2 status and preserve project identity as the session identifier.
+**WFR-04** When rewind context is captured from status, the system shall parse canonical schema 2.0 status and preserve project identity as the session identifier.
 
 **WFR-05** When a rewind entry is persisted, the system shall append it to `RETRO-retrospective.md` without rewriting existing entries.
 

@@ -142,6 +142,14 @@ func isInteractiveHarnessIdle(sessionName string) (bool, error) {
 	if agyIdle {
 		return true, nil
 	}
+
+	piIdle, err := tmux.IsPiIdle(sessionName)
+	if err != nil {
+		return false, fmt.Errorf("failed during Pi managed-state check: %w", err)
+	}
+	if piIdle {
+		return true, nil
+	}
 	return false, nil
 }
 

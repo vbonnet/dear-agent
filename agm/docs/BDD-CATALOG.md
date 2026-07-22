@@ -29,6 +29,36 @@ into listing tests that do not actually run.
 
 ## Feature Files
 
+### AGY Saved-Session Discovery
+
+**File:** [`agy_saved_session_discovery.feature`](../test/bdd/features/agy_saved_session_discovery.feature)
+
+**Drives:** `agm/internal/agysession` cache-first metadata lookup and bounded
+newest-first Antigravity log fallback.
+
+**Key scenarios:**
+- Native conversation IDs are validated as bounded safe path components before
+  saved-session database or transcript lookup.
+- Cache hits never enter provider log discovery.
+- Log discovery inspects at most 257 directory entries, using the 257th only as
+  an exhaustion sentinel and processing at most 256; it then orders regular
+  candidates by modification time and limits scanning to the newest 64 files.
+- Each candidate read is limited to 2 MiB; known-ID matches inside that budget
+  remain valid, while latest-workspace lookup rejects a truncated prefix or a
+  match in an older file after a truncated newer candidate; a post-scan probe
+  also detects bytes appended during the bounded read.
+- Directory-entry, candidate, or byte exhaustion is distinguishable from a
+  complete miss, and oversized lines fail explicitly.
+- Directory exhaustion retains the bounded candidates so a known-ID match can
+  remain conclusive, while latest-workspace lookup rejects any match because
+  an unprocessed entry could be newer.
+- A log removed by provider rotation after enumeration is skipped as a stale
+  snapshot during metadata collection or scan open, while other metadata,
+  open, and scan failures remain explicit.
+
+**Why this matters:** Import, association, and post-create metadata capture must
+not inherit unbounded latency from a large or stale provider log directory.
+
 ### Declarative Runtime Guardrails
 
 **File:** [`declarative_runtime_guardrails.feature`](../test/bdd/features/declarative_runtime_guardrails.feature)
@@ -126,11 +156,16 @@ awareness; its safety (allowlist) and cadence (SLO thresholds) must be pinned.
 **File:** [`agm_supervision_recovery_guardrails.feature`](../test/bdd/features/agm_supervision_recovery_guardrails.feature)
 
 **Drives:** co-located SPEC coverage for conservative PR, process, worktree,
-sentinel intake, tmux inspection, and verification-skip recovery policies.
+sentinel intake, configured-socket isolation, tmux inspection, and
+verification-skip recovery policies.
 
 **Key scenarios:**
 - Every listed supervision and recovery package has a co-located `SPEC.md`.
 - Every package SPEC points back to the executable guardrail feature.
+- Sentinel discovery and lifecycle tests stay on the exact configured tmux
+  socket rather than inspecting ambient user sessions.
+- Nested AGM recovery commands inherit the exact configured socket instead of
+  falling back to the ambient default server.
 - Unknown cleanup evidence remains conservative rather than destructive.
 
 ---
@@ -174,17 +209,113 @@ generated surface metadata, workflow-bus signaling, and accessible operator UIs.
 **File:** [`harness_parity.feature`](../test/bdd/features/harness_parity.feature)
 
 **Drives:** `agm/internal/agent` harness/model registry,
-`agm/internal/launchparity` startup contracts, and terminal state detection.
+`agm/internal/launchparity` startup contracts, `agm/cmd/agm` current-pane
+creation, and terminal state detection.
 
 **Key scenarios:**
-- A Codex CLI composer pane is detected as `ready`.
+- A Codex CLI composer pane is detected as `ready` only with an explicit empty
+  cursor on both the initial and post-turn forms.
 - An idle Codex composer allows direct delivery.
+- A typed draft or Unicode collapsed-paste chip remains queued even when the
+  normal Codex model footer is visible.
+- A stale Codex composer followed by newer shell output remains queued.
+- A newer tail-owned initial composer remains ready after stale post-turn
+  footer history from a prior Codex process.
 - A Codex trust prompt is queued rather than treated as a sendable prompt.
-- Active harnesses are exactly Claude Code, Codex CLI, AGY, and OpenCode.
+- The top-level new command routes in-tmux, non-detached Codex creation into
+  the current pane, validates credentials and the executable, and queues the
+  canonical launch command without waiting behind the AGM process that owns
+  the pane.
+- Active harnesses are exactly Claude Code, Codex CLI, AGY, OpenCode, and Pi.
 - Gemini CLI remains deprecated compatibility, not active parity.
 - Active harness factories use canonical names.
 - Active harness adapters satisfy the shared non-I/O conformance suite.
 - Active harness launch commands preserve native startup mode and persistence.
+- Imported AGY conversations preserve unknown native-model provenance through
+  the real storage adapter instead of acquiring Claude's legacy default, and
+  cold resume clears the ambiguous model guessed by older import/association
+  paths before command construction.
+- AGY model-switch provenance requires a new exact confirmation, and root
+  cancellation reaches AGY readiness stabilization and post-resume multiline
+  readiness, direct and fan-out tmux delivery, and metadata association retry
+  before delivery, mutation, or attach.
+- Root cancellation also reaches Claude post-create prompt delivery and retry
+  verification plus model, mode, and compaction slash-command readiness before
+  later delivery, persistence, liveness validation, or attach work.
+- The root command remains the sole process-signal owner, and continuous scan,
+  watchdog, event-watch, stalled-session watch, and compaction-monitor loops
+  consume its Cobra context and return promptly when canceled.
+- Structured verify-result, work-request, and wake-loop sends preserve the same
+  root context through multiline composer readiness and delivery.
+- Resume rechecks the root context after metadata lookup and before tmux
+  creation, command delivery, metadata updates, or warm-session attach.
+- Every production resume entry, including last-session and bulk resume,
+  acquires the stable session-ID lock before health or transaction reads and
+  releases it after finalization but before an interactive attachment.
+- A confirmed Codex prompt or a lost acknowledgement after the final Enter
+  creates the irreversible success boundary; the latter preserves the pane and
+  warns that work may have started. A paste positively proven to remain parked
+  is still a delivery failure, and a failed send on an existing pane cannot
+  hide a later attach error.
+- Cold Codex resume retains tmux's server-local ID plus a random per-creation
+  token, including when a later command in the tmux creation queue fails or ID
+  output is lost while the exact random provisional name still exists;
+  serializes concurrent resume attempts by stable session ID; persists a
+  canonical name under an opaque cross-dialect ownership revision before
+  optional prompt submission; treats ordinary prompt failures
+  as transactional failures, compensates owned metadata before removing those
+  exact identities, and preserves the ready tmux session when a concurrent
+  writer supersedes metadata ownership or a post-write reload leaves
+  compensation unproven. A stale full-session writer preserves the current
+  name while applying unrelated fields and advancing the identity revision;
+  every writer advances that revision so multiple stale snapshots stay unable
+  to restore the old name, and rollback preserves the canonical tmux session
+  without timestamp guesses. Activity-only finalization preserves the
+  provisional revision; cancellation before or immediately after that touch
+  restores the prior activity timestamp and canonical name before removing the
+  exact created pane. A commit
+  error is re-read against the complete prior and provisional revisions before
+  cleanup proceeds. It also avoids killing a same-named or
+  server-restart replacement. Reopening a
+  persistent pre-revision SQLite test store upgrades its schema idempotently
+  while preserving existing sessions before those lifecycle mutations run;
+  compensation restores the prior activity timestamp with the prior name.
+- Authoritative `agm session rename` updates both stored names through the
+  exact revision it observed and holds the same stable-ID lifecycle lock as
+  cold resume across all rename effects. A concurrent identity advance returns
+  a conflict and compensates the already-moved tmux name even after caller
+  cancellation, joining rollback failures. Stale broad writers preserve both
+  current identity names while applying unrelated metadata. Lost tmux responses are reconciled through a
+  server-local ID plus random option marker so name or ID reuse cannot adopt a
+  replacement. Lost storage responses first fence the observed revision with
+  a competing compare-and-swap before the prior identity can authorize rollback.
+- Administrative parent-link and plan-session backfill repairs persist the
+  parent and optional inherited display name atomically through the exact
+  identity revision they read, advance that revision on success, and surface a
+  stale writer as a conflict instead of claiming an unapplied repair succeeded.
+- Once a transactional Codex resume prompt is submitted, or its final Enter
+  loses an acknowledgement after tmux received the request, later caller
+  cancellation cannot report a retryable failure that would duplicate work.
+- Final creation liveness validation derives from the root context and rechecks
+  cancellation before title update, attach, or detached-success reporting.
+- AGY feedback survey handling dismisses once and recognizes the subsequent
+  composer even while stale survey text remains in captured pane history;
+  downstream state, direct-delivery, and idle predicates use the same
+  last-marker rule.
+- The AGY adapter captures provider-native conversation identity before fresh
+  create succeeds, fails before tmux mutation when its pre-create identity
+  snapshot is unreadable or incomplete, preserves known model provenance on
+  cold resume, and omits a model override when an imported conversation's
+  native selection is unknown.
+- AGY creation normalizes relative workspaces and shares cancellation-aware
+  native identity serialization across CLI, MCP, and adapter lifecycle paths;
+  launch, resume, and history reject unsafe provider identifiers before
+  external mutation or path lookup.
+- AGY cold resume distinguishes a restartable bare shell from a pane containing
+  another live harness and never injects its command into the latter.
+- AGY adapter create and cold resume require native readiness, roll back tmux
+  sessions created by a failed operation, and use exact AGY process and native
+  transcript truth for status and history.
 - AGM runtime helper commands keep co-located SPEC coverage.
 - AGM backend implementations keep co-located SPEC coverage.
 - AGM cleanup and process support packages keep co-located SPEC coverage.
@@ -282,7 +413,7 @@ entrypoints should only add model/harness-specific guidance.
 **Drives:** repository hook manifests and `internal/hookparity`.
 
 **Key scenarios:**
-- Claude Code, Codex CLI, AGY, and OpenCode expose the required PreToolUse
+- Claude Code, Codex CLI, AGY, OpenCode, and Pi expose the required PreToolUse
   guardrails.
 - Stop and SubagentStop feedback hooks are configured.
 - Non-Claude harnesses expose Beads lifecycle hooks through their native hook
@@ -451,7 +582,7 @@ review gates staying explicit and executable.
 `agm/internal/configdirparity`.
 
 **Key scenarios:**
-- Active harnesses have `.claude`, `.codex`, `.agents`, and `.opencode`
+- Active harnesses have `.claude`, `.codex`, `.agents`, `.opencode`, and `.pi`
   directory surfaces.
 - Deprecated Gemini compatibility keeps `.gemini` available without making it
   active parity.
@@ -749,6 +880,8 @@ history adapters, UUID detection, orphan import, transcript context, and search.
 - Every listed conversation and discovery package has a co-located `SPEC.md`.
 - Every package SPEC points back to the executable guardrail feature.
 - Claude-only storage details remain explicit adapters rather than shared contracts.
+- Pi imports preserve provider-qualified native model provenance and leave the
+  model override empty when the native transcript does not record one.
 
 ---
 
@@ -883,7 +1016,7 @@ enforcement, evaluation, event, markdown, graceful-exit, and health packages.
 
 **Key scenarios:**
 - Every shared runtime policy package carries a reciprocal SPEC reference.
-- Every package contract names all four active harnesses and seven model families.
+- Every package contract names all five active harnesses and seven model families.
 - Production string literals do not embed a harness or model-family route.
 
 **Why this matters:** Shared policy behavior must remain identical across caller
@@ -911,7 +1044,7 @@ every route; a provider-specific default here propagates across the codebase.
 **File:** [`validation_workspace_parity.feature`](../test/bdd/features/validation_workspace_parity.feature)
 
 **Drives:** Co-located contracts and route-neutral implementation checks for
-filesystem safety, content validation, VCS, versioning, W0, and workspace state.
+filesystem safety, content validation, VCS, versioning, and workspace state.
 
 **Key scenarios:**
 - Every validation and workspace package carries a strict EARS specification.
@@ -1103,11 +1236,11 @@ persistence.
 **Key scenarios:**
 - Changed command packages keep co-located strict EARS specifications.
 - Built root help exposes the nine canonical phases and no retired executors.
-- Normal session commands parse V2 only while legacy reads remain isolated to
-  explicit migration commands.
-- Non-migration runtime source cannot reintroduce retired phase identifiers.
+- Normal session commands parse schema 2.0 status only.
+- The active runtime cannot reintroduce retired phase identifiers or migration
+  commands.
 
-**Why this matters:** Wayfinder is the repository's planning gate. A V1 default
+**Why this matters:** Wayfinder is the repository's planning gate. A numeric-phase default
 or hidden legacy executor makes phase enforcement ambiguous and violates the
 canonical V2 and broken-windows policies.
 
@@ -1115,9 +1248,9 @@ canonical V2 and broken-windows policies.
 
 **File:** [`wayfinder_internal_package_guardrails.feature`](../test/bdd/features/wayfinder_internal_package_guardrails.feature)
 
-**Drives:** canonical command entrypoint, Beads, configuration, explicit
-migration, Git, history, lint context, telemetry, tracker, project-discovery,
-and preset package specifications.
+**Drives:** canonical command entrypoint, Beads, configuration, Git, history,
+lint context, telemetry, tracker, project-discovery, and preset package
+specifications.
 
 **Key scenarios:**
 - Every surviving Wayfinder support package keeps a co-located strict EARS SPEC.
@@ -1126,7 +1259,7 @@ and preset package specifications.
 
 **Why this matters:** Wayfinder support code participates in the same planning
 gate regardless of which harness or model executes a task. Structural package
-coverage prevents migration or tooling helpers from becoming ungoverned paths.
+coverage prevents tooling helpers from becoming ungoverned paths.
 
 ### Developer Tool Package Guardrails
 
@@ -1231,9 +1364,12 @@ and Wayfinder test-support package boundaries.
 **Key scenarios:**
 - Every residual test and support package retains a co-located strict EARS SPEC.
 - Every SPEC references the executable feature that enforces it.
-- The complete support contract is validated across all four active harnesses
+- The complete support contract is validated across all five active harnesses
   and all seven supported model families.
 - Live harness contracts use canonical guarded session and message commands.
+- Trust hooks run only for trust scenarios, restore process environment, reuse
+  shared Go caches, and remove only their exact owned temporary directory,
+  including read-only module trees.
 
 **Why this matters:** Test infrastructure is an enforcement surface. Ungoverned
 helpers and suites can silently skip harnesses, consume the wrong provider

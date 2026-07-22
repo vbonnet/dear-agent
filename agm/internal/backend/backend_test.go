@@ -11,6 +11,8 @@ type mockBackend struct {
 	name string
 }
 
+func (m *mockBackend) KillSession(string) error { return nil }
+
 func (m *mockBackend) HasSession(name string) (bool, error)                 { return false, nil }
 func (m *mockBackend) ListSessions() ([]string, error)                      { return nil, nil }
 func (m *mockBackend) ListSessionsWithInfo() ([]SessionInfo, error)         { return nil, nil }

@@ -73,6 +73,10 @@ func NewSQLiteAdapter(path string) (*Adapter, error) {
 		_ = conn.Close()
 		return nil, fmt.Errorf("initialize SQLite session store: %w", err)
 	}
+	if err := upgradeSQLiteSessionSchema(conn); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
 
 	return &Adapter{
 		conn:              conn,
@@ -80,6 +84,54 @@ func NewSQLiteAdapter(path string) (*Adapter, error) {
 		migrationsApplied: true,
 		testStore:         true,
 	}, nil
+}
+
+func upgradeSQLiteSessionSchema(conn *sql.DB) error {
+	hasRevision, err := sqliteSessionColumnExists(conn, "tmux_session_revision")
+	if err != nil {
+		return fmt.Errorf("inspect SQLite session store schema: %w", err)
+	}
+	if hasRevision {
+		return nil
+	}
+	if _, err := conn.Exec(`ALTER TABLE agm_sessions ADD COLUMN tmux_session_revision TEXT`); err != nil { //nolint:noctx // startup schema upgrade
+		// Another opener may have completed the idempotent upgrade after the
+		// first inspection. Verify the postcondition before reporting failure.
+		upgraded, verifyErr := sqliteSessionColumnExists(conn, "tmux_session_revision")
+		if verifyErr == nil && upgraded {
+			return nil
+		}
+		return fmt.Errorf("upgrade SQLite session store with tmux ownership revision: %w", err)
+	}
+	return nil
+}
+
+func sqliteSessionColumnExists(conn *sql.DB, column string) (bool, error) {
+	rows, err := conn.Query(`PRAGMA table_info(agm_sessions)`) //nolint:noctx // startup schema inspection
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			columnID     int
+			name         string
+			columnType   string
+			notNull      int
+			defaultValue sql.NullString
+			primaryKey   int
+		)
+		if err := rows.Scan(&columnID, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 // IsTestStore reports whether this adapter backs an isolated AGM test
@@ -102,6 +154,7 @@ CREATE TABLE IF NOT EXISTS agm_sessions (
   context_notes TEXT,
   claude_uuid TEXT,
   tmux_session_name TEXT,
+  tmux_session_revision TEXT,
   metadata TEXT,
   permission_mode TEXT,
   permission_mode_updated_at TIMESTAMP,

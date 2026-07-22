@@ -61,8 +61,16 @@ Important launch invariants:
 ## Send
 
 `agm send msg` treats `codex-cli` as a tmux-backed harness. When the shared
-state detector sees the Codex composer (`OpenAI Codex` with `/model to change`
-footer chrome), delivery is `YES` and AGM sends directly to the tmux pane.
+state detector sees a complete Codex composer—the initial `OpenAI Codex`
+header with `/model to change` and an empty `›` cursor, or an empty post-turn
+cursor paired with the structured `gpt-* · <workdir>` footer—delivery is `YES`
+and AGM sends directly to the tmux pane. Typed drafts and collapsed paste chips
+remain queued. Those markers must own the current pane tail: if newer shell or
+process-exit output follows them, the stale composer is not sendable. A new
+initial composer rendered after stale post-turn footer history is still
+sendable when that newer complete structure owns the pane tail. A model name in
+an echoed launch command or beside a `Working` status is not a composer and
+remains queued.
 
 Codex menus and trust prompts are not idle composers. They remain queued or
 blocked rather than receiving injected prompt text.
@@ -75,7 +83,24 @@ agm session resume my-codex-session
 
 If the tmux session already exists, AGM attaches without sending commands. If
 the tmux session must be recreated, AGM starts Codex with the same launch
-invariants as session creation and waits for the Codex composer to render.
+invariants as session creation and waits for both the Codex process and a
+structured idle composer to render. The complete resolved resume, including
+its health read and rollback or commit, is serialized by stable AGM session ID
+across direct, last-session, and bulk resume commands so a concurrent resume
+cannot adopt an uncommitted pane. AGM retains a
+creation-specific identity for the attempt: tmux's server-local session ID plus
+a random token embedded in
+a provisional creation name before being stored on that session. It then
+renames the session and persists that sanitized tmux name under an opaque storage
+ownership revision before submitting an optional resume prompt, and reports
+ordinary prompt-delivery failures. Failed cold resumes remove only the session
+whose ID and either creation marker match, including across tmux server restarts; a
+same-named or ID-reusing replacement is preserved. A provisional name write is
+restored only when no newer session metadata has superseded it, and its
+ownership revision is released after prompt delivery succeeds. If the
+post-write metadata reload fails, rollback retains that pending revision until
+compensation is proven; it preserves the pane when storage cannot prove that
+metadata stopped referencing the new tmux identity.
 
 For sessions with persisted Codex metadata, AGM resumes the matching Codex
 thread with `codex resume --remote unix:// <codex-thread-id>`. Older imported

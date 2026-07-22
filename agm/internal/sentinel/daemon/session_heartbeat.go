@@ -182,6 +182,17 @@ func (m *SessionHeartbeatMonitor) SetExemptSessions(prefixes []string) {
 	m.exemptSessions = prefixes
 }
 
+// SetTmuxSessionLister keeps heartbeat discovery on the same tmux boundary as
+// the parent session monitor. In particular, an explicitly configured socket
+// must not fall back to the ambient default server.
+func (m *SessionHeartbeatMonitor) SetTmuxSessionLister(lister func() ([]string, error)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if lister != nil {
+		m.listTmuxSessions = lister
+	}
+}
+
 // isExempt checks if a session name matches any exempt prefix.
 func (m *SessionHeartbeatMonitor) isExempt(sessionName string) bool {
 	for _, prefix := range m.exemptSessions {

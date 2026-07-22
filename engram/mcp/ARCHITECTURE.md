@@ -1,98 +1,46 @@
-# Engram MCP server architecture
+# Engram MCP Architecture
 
-<!-- Last audited at: 2026-07-17 -->
+## Boundary
 
-The Engram MCP server is a small TypeScript/Node process that exposes three
-local tools over MCP stdio. It retrieves memory through the Engram CLI, lists
-installed plugin metadata, and reads a project's Wayfinder status file.
-
-This package is separate from the Go AGM MCP server under
-`agm/cmd/agm-mcp-server`.
-
-## Runtime map
+This package is a small stdio adapter. It translates MCP tool calls into
+read-only Engram CLI or filesystem operations; it does not own Engram memories,
+Wayfinder state, plugin manifests, or Beads data.
 
 ```text
 MCP client
-   -> Node >= 18 / StdioServerTransport
-   -> src/index.ts tool router
-      +-> engram.retrieve
-      |     -> execFileSync(ENGRAM_CLI, argv, shell=false)
-      +-> engram.plugins.list
-      |     -> ENGRAM_ROOT/{core,user}/plugins/*/plugin.yaml
-      +-> wayfinder.phase.status
-            -> <project>/WAYFINDER-STATUS.md
-   -> text result or MCP error result
+  -> stdio server (src/index.ts)
+     -> Engram CLI: engram.retrieve
+     -> ~/.engram plugin manifests: engram.plugins.list
+     -> WAYFINDER-STATUS.md: wayfinder.phase.status
+        -> strict schema-2.0 parser (src/wayfinder_status.ts)
 ```
 
-`src/index.ts` is the executable owner for the tool schemas, validation, and
-handlers. `src/cache.ts` owns the bounded result cache.
+## Design decisions
 
-## Tools
+- Tool names and schemas are declared once in `src/index.ts` beside routing.
+- CLI arguments use `execFileSync` without a shell to preserve argument
+  boundaries.
+- Wayfinder status is parsed from one canonical file; heuristic discovery and
+  legacy label matching are intentionally absent.
+- Results use bounded, expiring in-memory caching. Filesystem watches provide
+  earlier invalidation where available; TTL expiry remains the backstop.
+- The server emits diagnostics only on stderr so stdout remains valid MCP
+  transport.
 
-| Tool | Required input | Behavior |
-|---|---|---|
-| `engram.retrieve` | `query` | Invokes `engram retrieve`; optional `tag` and `limit` become argv entries. |
-| `engram.plugins.list` | none | Reads basic name, type, and description fields from installed plugin YAML. |
-| `wayfinder.phase.status` | `project` | Reads legacy body-form phase, progress, and status fields from `WAYFINDER-STATUS.md`. |
+## Failure behavior
 
-The Wayfinder handler does not parse schema-v2 frontmatter. Missing body fields
-are returned as `Unknown`; this is current behavior, not a promise that all
-Wayfinder schemas are understood.
+Missing project files and Wayfinder parse failures are returned as text results
+from the Wayfinder handler. Invalid tool names and unhandled argument errors are
+returned as MCP errors with `isError: true`. Engram CLI failures are converted
+to readable tool output.
 
-## Configuration
+## Trust boundaries
 
-| Environment variable | Default | Owner |
-|---|---|---|
-| `ENGRAM_ROOT` | `~/.engram` | plugin discovery roots |
-| `ENGRAM_CLI` | `engram` | retrieval executable |
-| `MCP_CACHE_TTL_MS` | `30000` | default cache TTL in milliseconds |
+MCP arguments are untrusted. The server validates query, tag, and limit before
+running the Engram CLI; resolves project paths before filesystem access; and
+strictly validates the complete Wayfinder document. The client controls which
+filesystem paths and Engram root are available to the process.
 
-The cache used by the server is capped at 200 entries. Entries expire by TTL;
-plugin directories and Wayfinder status files also install non-persistent file
-watchers that invalidate matching key prefixes. Retrieval results use TTL only.
-
-## Command-execution boundary
-
-Untrusted retrieval values are appended to an argv array and passed to
-`execFileSync` with `shell: false`. They must never be interpolated into a shell
-command. The child has a 30-second timeout and a 10 MiB output buffer. CLI
-failures are converted to tool text rather than exposing a child-process stack.
-
-## Protocol and error behavior
-
-- stdout belongs to the MCP stdio transport; startup and fatal diagnostics use
-  stderr.
-- invalid handler input and unknown tools return `isError: true`.
-- expected operational misses, such as no plugins or no Wayfinder file, return
-  explanatory text.
-- the process exits non-zero if server setup fails.
-
-## Package layout
-
-| File | Responsibility |
-|---|---|
-| `src/index.ts` | schemas, handlers, configuration, stdio lifecycle |
-| `src/cache.ts` | TTL, capacity eviction, file-watch invalidation |
-| `src/cache.test.ts` | cache behavior tests |
-| `src/SPEC.md` | TypeScript implementation guardrails |
-| `SPEC.md` | package behavior requirements |
-| `package.json` | build, test, runtime, and dependency declarations |
-
-Generated `dist/` output is not the source of truth and should not be committed.
-
-## Build and verification
-
-```bash
-npm install
-npm run build
-npm test
-```
-
-The repository documentation-truth test also checks the finite tool inventory
-and rejects the retired Python service design.
-
-## Non-goals
-
-This server does not embed text, import Python packages, scan arbitrary project
-metadata, expose an HTTP transport, or mirror the AGM MCP lifecycle surface.
-Those capabilities require their own implementation and decision record.
+See [SPEC.md](./SPEC.md) for requirements and
+[ENGRAM-MCP-SERVER-API.md](./ENGRAM-MCP-SERVER-API.md) for the public tool
+contract.

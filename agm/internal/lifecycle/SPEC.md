@@ -6,7 +6,7 @@
 
 `agm/internal/lifecycle` emits OpenTelemetry spans for terminal session lifecycle
 transitions. The package keeps session lifecycle observability harness-neutral:
-Claude Code, Codex CLI, AGY, and OpenCode can all update state through different
+Claude Code, Codex CLI, AGY, OpenCode, and Pi can all update state through different
 surfaces while producing the same terminal lifecycle span contract.
 
 ## EARS Requirements

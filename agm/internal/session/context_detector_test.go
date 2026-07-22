@@ -8,11 +8,62 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
 // floatEqual compares two float64 values within a small tolerance.
 func floatEqual(a, b float64) bool {
 	return math.Abs(a-b) < 1e-9
+}
+
+func TestDetectContextFromManifestOrLogReadsExactPiTranscript(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pi.jsonl")
+	content := `{"type":"session","id":"pi-context","cwd":"/work"}` + "\n" +
+		`{"type":"message","timestamp":"2026-07-21T00:00:03Z","message":{"role":"assistant","model":"openai/gpt-5.4","usage":{"input":1000,"output":25,"cacheRead":500,"cacheWrite":100,"cost":{"total":0.42}}}}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := &manifest.Manifest{Pi: &manifest.Pi{SessionID: "pi-context", SessionDir: dir, TranscriptPath: path}}
+	usage, err := DetectContextFromManifestOrLog(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.Source != "pi_jsonl" || usage.ModelID != "openai/gpt-5.4" || usage.UsedTokens != 1600 {
+		t.Fatalf("Pi context usage = %#v", usage)
+	}
+	if usage.TotalTokens != 272000 || !floatEqual(usage.PercentageUsed, float64(1600)/272000*100) || !floatEqual(usage.EstimatedCost, 0.42) {
+		t.Fatalf("Pi context percentage/cost = %#v", usage)
+	}
+
+	m.Pi.TranscriptPath = filepath.Join(dir, "different.jsonl")
+	if _, err := DetectContextFromManifestOrLog(m); err == nil {
+		t.Fatal("persisted Pi transcript mismatch was accepted")
+	}
+}
+
+func TestPiModelContextWindowMatchesNativeCatalog(t *testing.T) {
+	tests := map[string]int{
+		"anthropic/claude-fable-5":                     1000000,
+		"anthropic/claude-opus-4-8":                    1000000,
+		"openai/gpt-5.6-terra":                         272000,
+		"openai/gpt-5.4":                               272000,
+		"openai/gpt-5.4-mini":                          400000,
+		"openai/gpt-5.4-pro":                           1050000,
+		"openai/gpt-5.3-codex":                         400000,
+		"google/gemini-3.5-flash":                      1048576,
+		"openrouter/z-ai/glm-5.2":                      1048576,
+		"openrouter/deepseek/deepseek-v4-pro":          1048576,
+		"openrouter/nvidia/nemotron-3-ultra-550b-a55b": 512288,
+		"openrouter/qwen/qwen3.6-max-preview":          262144,
+		"custom/model":                                 200000,
+	}
+	for model, want := range tests {
+		if got := piModelContextWindow(model); got != want {
+			t.Errorf("piModelContextWindow(%q) = %d, want %d", model, got, want)
+		}
+	}
 }
 
 func TestExtractTokenUsage(t *testing.T) {

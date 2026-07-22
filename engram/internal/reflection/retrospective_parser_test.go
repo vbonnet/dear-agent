@@ -33,11 +33,11 @@ func TestParseFile_WithTechnicalChallenges(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	retrospectiveContent := `---
-phase: S11
+phase: RETRO
 title: Test Retrospective
 ---
 
-# S11: Retrospective
+# RETRO: Retrospective
 
 ## What Went Well
 
@@ -63,7 +63,7 @@ title: Test Retrospective
 - Always load test before production
 `
 
-	retrospectivePath := filepath.Join(tmpDir, "S11-retrospective.md")
+	retrospectivePath := filepath.Join(tmpDir, "RETRO-retrospective.md")
 	err := os.WriteFile(retrospectivePath, []byte(retrospectiveContent), 0644)
 	if err != nil {
 		t.Fatalf("failed to write test file: %v", err)
@@ -105,10 +105,10 @@ func TestParseFile_NoTechnicalChallenges(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	retrospectiveContent := `---
-phase: S11
+phase: RETRO
 ---
 
-# S11: Retrospective
+# RETRO: Retrospective
 
 ## What Went Well
 
@@ -123,7 +123,7 @@ phase: S11
 ---
 `
 
-	retrospectivePath := filepath.Join(tmpDir, "S11-retrospective.md")
+	retrospectivePath := filepath.Join(tmpDir, "RETRO-retrospective.md")
 	err := os.WriteFile(retrospectivePath, []byte(retrospectiveContent), 0644)
 	if err != nil {
 		t.Fatalf("failed to write test file: %v", err)
@@ -153,7 +153,7 @@ func TestParseFile_NumberedList(t *testing.T) {
 3. Third failure with syntax error
 `
 
-	retrospectivePath := filepath.Join(tmpDir, "S11-retrospective.md")
+	retrospectivePath := filepath.Join(tmpDir, "RETRO-retrospective.md")
 	err := os.WriteFile(retrospectivePath, []byte(retrospectiveContent), 0644)
 	if err != nil {
 		t.Fatalf("failed to write test file: %v", err)
@@ -290,7 +290,7 @@ func TestExtractAndConvert(t *testing.T) {
 - Permission denied on file access
 `
 
-	retrospectivePath := filepath.Join(tmpDir, "S11-retrospective.md")
+	retrospectivePath := filepath.Join(tmpDir, "RETRO-retrospective.md")
 	err := os.WriteFile(retrospectivePath, []byte(retrospectiveContent), 0644)
 	if err != nil {
 		t.Fatalf("failed to write test file: %v", err)
@@ -347,11 +347,11 @@ func TestParseFile_RealWorldExample(t *testing.T) {
 
 	// Realistic retrospective with multiple sections
 	retrospectiveContent := `---
-phase: S11
+phase: RETRO
 title: Living Retrospective - Fix authentication bug
 ---
 
-# S11: Retrospective
+# RETRO: Retrospective
 
 ## What Went Well
 
@@ -392,7 +392,7 @@ title: Living Retrospective - Fix authentication bug
 - Need better monitoring for connection pools
 `
 
-	retrospectivePath := filepath.Join(tmpDir, "S11-retrospective.md")
+	retrospectivePath := filepath.Join(tmpDir, "RETRO-retrospective.md")
 	err := os.WriteFile(retrospectivePath, []byte(retrospectiveContent), 0644)
 	if err != nil {
 		t.Fatalf("failed to write test file: %v", err)

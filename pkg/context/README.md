@@ -483,7 +483,7 @@ fmt.Printf("Percentage: %.1f%%\n", usage.PercentageUsed) // 72.0%
 Identifies which CLI is running based on environment variables.
 
 **Returns**:
-- `CLI`: One of `CLIClaude`, `CLIGemini`, `CLIOpenCode`, `CLICodex`, `CLIUnknown`
+- `CLI`: One of `CLIClaude`, `CLIGemini`, `CLIOpenCode`, `CLICodex`, `CLIPi`, `CLIAgy`, `CLIUnknown`
 
 **Example**:
 ```go
@@ -494,6 +494,8 @@ case context.CLIClaude:
     fmt.Println("Running in Claude Code")
 case context.CLIGemini:
     fmt.Println("Running in Gemini CLI")
+case context.CLIPi:
+    fmt.Println("Running in Pi CLI")
 case context.CLIUnknown:
     fmt.Println("Unknown CLI - will use heuristic")
 }
@@ -1159,13 +1161,15 @@ detect_phase_state() {
         return
     fi
 
-    # Check if deliverables exist
-    local current_phase=$(grep "Current Phase:" "$status_file" | cut -d: -f2)
-    local deliverable_count=$(grep "✅" "$status_file" | wc -l)
+    # Read canonical schema-2.0 YAML fields.
+    local current_waypoint
+    local project_status
+    current_waypoint=$(sed -n 's/^current_waypoint:[[:space:]]*//p' "$status_file" | head -1)
+    project_status=$(sed -n 's/^status:[[:space:]]*//p' "$status_file" | head -1)
 
-    if [ "$deliverable_count" -eq 0 ]; then
+    if [ "$current_waypoint" = "CHARTER" ]; then
         echo "start"
-    elif grep -q "Next Phase:" "$status_file"; then
+    elif [ "$project_status" = "completed" ] || [ "$current_waypoint" = "RETRO" ]; then
         echo "end"
     else
         echo "middle"

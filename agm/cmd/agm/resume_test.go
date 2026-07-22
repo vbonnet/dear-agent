@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
@@ -64,6 +67,27 @@ func TestResumeCommandFlags(t *testing.T) {
 				t.Errorf("%s: detached flag should be false by default", tt.description)
 			}
 		})
+	}
+}
+
+func TestWithAgyResumeWorkspaceLockCoversLifecycle(t *testing.T) {
+	original := agyResumeWorkspaceLock
+	t.Cleanup(func() { agyResumeWorkspaceLock = original })
+
+	var events []string
+	agyResumeWorkspaceLock = func(_ context.Context, workDir string) (func() error, error) {
+		events = append(events, "lock:"+workDir)
+		return func() error { events = append(events, "unlock"); return nil }, nil
+	}
+	if err := withAgyResumeWorkspaceLock(t.Context(), "agy", "/work", func() error {
+		events = append(events, "launch-and-ready")
+		return nil
+	}); err != nil {
+		t.Fatalf("withAgyResumeWorkspaceLock: %v", err)
+	}
+	want := []string{"lock:/work", "launch-and-ready", "unlock"}
+	if fmt.Sprint(events) != fmt.Sprint(want) {
+		t.Fatalf("resume workspace lock events = %v, want %v", events, want)
 	}
 }
 
@@ -191,7 +215,7 @@ func TestResumeHelpMentionsPromptFlags(t *testing.T) {
 // TestSendPostResumePrompt_FileNotFound verifies an error is returned when the
 // prompt file does not exist, before any tmux operations occur.
 func TestSendPostResumePrompt_FileNotFound(t *testing.T) {
-	err := sendPostResumePrompt("any-session", "", "/nonexistent/path/prompt.txt", false)
+	err := sendPostResumePrompt(context.Background(), "any-session", "", "/nonexistent/path/prompt.txt", false)
 	if err == nil {
 		t.Fatal("expected error for missing prompt file, got nil")
 		return
@@ -214,13 +238,28 @@ func TestSendPostResumePrompt_FileTooLarge(t *testing.T) {
 		t.Fatalf("failed to write temp file: %v", err)
 	}
 
-	err := sendPostResumePrompt("any-session", "", tmp, false)
+	err := sendPostResumePrompt(context.Background(), "any-session", "", tmp, false)
 	if err == nil {
 		t.Fatal("expected error for oversized prompt file, got nil")
 		return
 	}
 	if !strings.Contains(err.Error(), "too large") {
 		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestSendPostResumePromptUsesCallerContext(t *testing.T) {
+	original := sendResumePromptSafe
+	t.Cleanup(func() { sendResumePromptSafe = original })
+	sendResumePromptSafe = func(ctx context.Context, _, _ string, _ bool) error {
+		return ctx.Err()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := sendPostResumePrompt(ctx, "resume-context", "continue", "", false)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("sendPostResumePrompt() error = %v, want context.Canceled", err)
 	}
 }
 
@@ -306,8 +345,87 @@ func TestBuildCodexResumeCommand_DefaultModel(t *testing.T) {
 	}
 }
 
+func TestBuildPiResumeCommandPreservesExactIdentityModelModeAndPolicy(t *testing.T) {
+	t.Setenv("AGM_PI_EXTENSION_ROOT", t.TempDir())
+	sessionDir := t.TempDir()
+	m := &manifest.Manifest{
+		Model: "gpt", PermissionMode: "auto",
+		Pi:               &manifest.Pi{SessionID: "native.pi-id", SessionDir: sessionDir},
+		PermissionPolicy: &manifest.PermissionPolicy{Allow: []string{"Bash(git:*)"}},
+	}
+	command, err := buildPiResumeCommand(m, &HealthStatus{TmuxSessionName: "pi-worker", WorktreePath: "/tmp/work"}, "launch-resume")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"--session-id 'native.pi-id'", "--session-dir '" + sessionDir + "'", "--name 'pi-worker'",
+		"PI_SESSION_ID='native.pi-id'", "AGM_PI_PROJECT_DIR='/tmp/work'",
+		"AGM_PI_LAUNCH_ID='launch-resume'",
+		"--model 'openai/gpt-5.6-terra'", "AGM_PI_PERMISSION_MODE='auto'", "AGM_PI_PERMISSION_POLICY_FILE=", "policy-", "--extension",
+	} {
+		if !strings.Contains(command, want) {
+			t.Errorf("Pi resume %q missing %q", command, want)
+		}
+	}
+	if strings.Contains(command, "Bash(git:*)") {
+		t.Fatalf("Pi resume inlined permission policy: %s", command)
+	}
+}
+
+func TestBuildPiResumeCommandRejectsMissingNativeIdentity(t *testing.T) {
+	_, err := buildPiResumeCommand(&manifest.Manifest{}, &HealthStatus{TmuxSessionName: "pi-worker", WorktreePath: "/tmp/work"}, "launch-resume")
+	if err == nil || !strings.Contains(err.Error(), "exact native") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestBuildPiResumeCommandWithoutModelProvenancePreservesNativeSelection(t *testing.T) {
+	t.Setenv("AGM_PI_EXTENSION_ROOT", t.TempDir())
+	sessionDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sessionDir, "native.jsonl"), []byte(`{"type":"session","id":"native-id","cwd":"/tmp/work"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := &manifest.Manifest{Pi: &manifest.Pi{SessionID: "native-id", SessionDir: sessionDir}}
+	command, err := buildPiResumeCommand(m, &HealthStatus{TmuxSessionName: "pi-worker", WorktreePath: "/tmp/work"}, "launch-resume")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(command, " --model ") {
+		t.Fatalf("Pi resume fabricated model override: %s", command)
+	}
+}
+
+func TestBuildPiResumeCommandWithoutTranscriptUsesHarnessDefault(t *testing.T) {
+	t.Setenv("AGM_PI_EXTENSION_ROOT", t.TempDir())
+	m := &manifest.Manifest{Pi: &manifest.Pi{SessionID: "native-id", SessionDir: t.TempDir()}}
+	command, err := buildPiResumeCommand(m, &HealthStatus{TmuxSessionName: "pi-worker", WorktreePath: "/tmp/work"}, "launch-resume")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(command, "--model 'anthropic/claude-sonnet-4-6'") {
+		t.Fatalf("Pi unpersisted resume omitted the harness default model: %s", command)
+	}
+}
+
+func TestBuildPiResumeCommandRejectsTranscriptIdentityMismatch(t *testing.T) {
+	t.Setenv("AGM_PI_EXTENSION_ROOT", t.TempDir())
+	dir := t.TempDir()
+	path := filepath.Join(dir, "native.jsonl")
+	if err := os.WriteFile(path, []byte(`{"type":"session","id":"native-id","cwd":"/work"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := &manifest.Manifest{Pi: &manifest.Pi{
+		SessionID: "native-id", SessionDir: dir, TranscriptPath: filepath.Join(dir, "different.jsonl"),
+	}}
+	_, err := buildPiResumeCommand(m, &HealthStatus{TmuxSessionName: "pi-worker", WorktreePath: "/tmp/work"}, "launch-resume")
+	if err == nil || !strings.Contains(err.Error(), "persisted native identity") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestBuildAgyResumeCommand(t *testing.T) {
 	m := &manifest.Manifest{
+		Model: "3.1-pro-high",
 		Agy: &manifest.Agy{
 			ConversationID: "117ff898-a964-4a9f-b460-1be4a8a49b17",
 		},
@@ -320,7 +438,7 @@ func TestBuildAgyResumeCommand(t *testing.T) {
 
 	for _, want := range []string{
 		"cd '/tmp/agy-work'",
-		"agy --conversation '117ff898-a964-4a9f-b460-1be4a8a49b17'",
+		"agy --model 'Gemini 3.1 Pro (High)' --conversation '117ff898-a964-4a9f-b460-1be4a8a49b17'",
 		"--add-dir '/tmp/agy-work'",
 		"&& exit",
 	} {
@@ -330,8 +448,105 @@ func TestBuildAgyResumeCommand(t *testing.T) {
 	}
 }
 
+func TestBuildAgyResumeCommand_TranslatesLegacyModels(t *testing.T) {
+	health := &HealthStatus{WorktreePath: "/tmp/agy-work"}
+	tests := map[string]string{
+		"2.5-pro":        "Gemini 3.1 Pro (High)",
+		"2.0-flash-lite": "Gemini 3.5 Flash (Low)",
+	}
+	for legacy, current := range tests {
+		t.Run(legacy, func(t *testing.T) {
+			m := &manifest.Manifest{Model: legacy, Agy: &manifest.Agy{ConversationID: "legacy-conversation"}}
+			command := buildAgyResumeCommand(m, health)
+			if !strings.Contains(command, "--model '"+current+"'") {
+				t.Fatalf("legacy model %q command = %q, want current label %q", legacy, command, current)
+			}
+			if strings.Contains(command, "--model '"+legacy+"'") {
+				t.Fatalf("legacy model %q leaked into resume command %q", legacy, command)
+			}
+		})
+	}
+}
+
+func TestMigrateAmbiguousLegacyAgyModelClearsStoredOverride(t *testing.T) {
+	adapter, err := dolt.NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	for index, model := range []string{"2.5-flash", "gemini-2.5-flash"} {
+		m := dolt.NewTestManifest(fmt.Sprintf("legacy-agy-%d", index), fmt.Sprintf("legacy-agy-%d", index))
+		m.Harness = "agy"
+		m.Model = model
+		m.Agy = &manifest.Agy{ConversationID: fmt.Sprintf("native-%d", index)}
+		if err := adapter.CreateSession(m); err != nil {
+			t.Fatalf("CreateSession(%q): %v", model, err)
+		}
+		if err := migrateAmbiguousLegacyAgyModel(adapter, m, "agy"); err != nil {
+			t.Fatalf("migrateAmbiguousLegacyAgyModel(%q): %v", model, err)
+		}
+		stored, err := adapter.GetSession(m.SessionID)
+		if err != nil {
+			t.Fatalf("GetSession(%q): %v", model, err)
+		}
+		if stored.Model != "" {
+			t.Fatalf("stored model = %q, want ambiguous legacy default cleared", stored.Model)
+		}
+		command := buildAgyResumeCommand(stored, &HealthStatus{WorktreePath: "/tmp/agy-work"})
+		if strings.Contains(command, "--model") {
+			t.Fatalf("migrated resume command %q must omit --model", command)
+		}
+	}
+}
+
+func TestGetResumeManifestStopsCanceledMigration(t *testing.T) {
+	adapter, err := dolt.NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	m := dolt.NewTestManifest("canceled-legacy-agy", "canceled-legacy-agy")
+	m.Harness = "agy"
+	m.Model = "2.5-flash"
+	m.Agy = &manifest.Agy{ConversationID: "native-conversation"}
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := getResumeManifest(ctx, adapter, m.SessionID, "agy"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("getResumeManifest() error = %v, want context.Canceled", err)
+	}
+	stored, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if stored.Model != "2.5-flash" {
+		t.Fatalf("stored model = %q, want canceled migration to preserve provenance", stored.Model)
+	}
+}
+
+func TestBuildAgyResumeCommand_PreservesImportedConversationModel(t *testing.T) {
+	health := &HealthStatus{WorktreePath: "/tmp/agy-work"}
+	m := &manifest.Manifest{
+		Agy: &manifest.Agy{ConversationID: "imported-conversation"},
+	}
+
+	command := buildAgyResumeCommand(m, health)
+	if strings.Contains(command, "--model") {
+		t.Fatalf("imported AGY resume command forced an unknown model: %q", command)
+	}
+	if !strings.Contains(command, "agy --conversation 'imported-conversation'") {
+		t.Fatalf("imported AGY resume command = %q, want native conversation resume", command)
+	}
+}
+
 func TestBuildAgyResumeCommand_AutoPermissionMode(t *testing.T) {
 	m := &manifest.Manifest{
+		Model:          "3.5-flash",
 		PermissionMode: "auto",
 		Agy: &manifest.Agy{
 			ConversationID: "117ff898-a964-4a9f-b460-1be4a8a49b17",
@@ -343,7 +558,7 @@ func TestBuildAgyResumeCommand_AutoPermissionMode(t *testing.T) {
 
 	cmd := buildAgyResumeCommand(m, health)
 
-	if !strings.Contains(cmd, "agy --dangerously-skip-permissions --conversation '117ff898-a964-4a9f-b460-1be4a8a49b17'") {
+	if !strings.Contains(cmd, "agy --model 'Gemini 3.5 Flash (Medium)' --dangerously-skip-permissions --conversation '117ff898-a964-4a9f-b460-1be4a8a49b17'") {
 		t.Errorf("auto AGY resume should skip permissions, got %q", cmd)
 	}
 }
@@ -355,7 +570,7 @@ func TestBuildAgyResumeCommand_FallbacksToNewSession(t *testing.T) {
 
 	cmd := buildAgyResumeCommand(&manifest.Manifest{}, health)
 
-	if !strings.Contains(cmd, "cd '/tmp/agy-work' && agy --prompt-interactive && exit") {
+	if !strings.Contains(cmd, "cd '/tmp/agy-work' && agy --model 'Gemini 3.5 Flash (Medium)' && exit") {
 		t.Errorf("expected fallback AGY launch command, got %q", cmd)
 	}
 	if strings.Contains(cmd, "--conversation") {
@@ -370,7 +585,7 @@ func TestBuildAgyResumeCommand_FallbacksToNewSessionWithAutoPermissionMode(t *te
 
 	cmd := buildAgyResumeCommand(&manifest.Manifest{PermissionMode: "auto"}, health)
 
-	if !strings.Contains(cmd, "cd '/tmp/agy-work' && agy --prompt-interactive --dangerously-skip-permissions && exit") {
+	if !strings.Contains(cmd, "cd '/tmp/agy-work' && agy --model 'Gemini 3.5 Flash (Medium)' --dangerously-skip-permissions && exit") {
 		t.Errorf("expected fallback AGY launch command with auto permissions, got %q", cmd)
 	}
 }

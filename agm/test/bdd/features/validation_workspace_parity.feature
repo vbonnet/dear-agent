@@ -5,7 +5,6 @@
 # RELATED-SPEC: pkg/validator/SPEC.md
 # RELATED-SPEC: pkg/vcs/SPEC.md
 # RELATED-SPEC: pkg/version/SPEC.md
-# RELATED-SPEC: pkg/w0/SPEC.md
 # RELATED-SPEC: pkg/workspace/SPEC.md
 # RELATED-SPEC: pkg/workspace/dolt/SPEC.md
 Feature: Validation and workspace parity
@@ -26,7 +25,6 @@ Feature: Validation and workspace parity
       | pkg/validator         |
       | pkg/vcs               |
       | pkg/version           |
-      | pkg/w0                |
       | pkg/workspace         |
       | pkg/workspace/dolt    |
 
@@ -65,3 +63,10 @@ Feature: Validation and workspace parity
       | opencode-cli | deepseek  |
       | opencode-cli | nemotron  |
       | opencode-cli | qwen      |
+      | pi-cli       | anthropic |
+      | pi-cli       | openai    |
+      | pi-cli       | gemini    |
+      | pi-cli       | glm       |
+      | pi-cli       | deepseek  |
+      | pi-cli       | nemotron  |
+      | pi-cli       | qwen      |

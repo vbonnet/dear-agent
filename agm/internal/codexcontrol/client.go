@@ -25,6 +25,7 @@ var execCommandContext = exec.CommandContext
 type Client struct {
 	CodexPath string
 	Timeout   time.Duration
+	waitDelay time.Duration
 }
 
 // Thread is the subset of Codex app-server thread metadata AGM needs.
@@ -91,12 +92,25 @@ func (c *Client) StartRemoteControl(ctx context.Context) error {
 		}
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
-	cmd.WaitDelay = 1 * time.Second
+	cmd.WaitDelay = c.pipeWaitDelay()
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if output, err := cmd.Output(); err != nil {
-		if timeoutCtx.Err() != nil {
-			return fmt.Errorf("codex remote-control start timed out after %s", c.timeout())
+		if timeoutErr := timeoutCtx.Err(); timeoutErr != nil {
+			if errors.Is(timeoutErr, context.DeadlineExceeded) {
+				return fmt.Errorf("codex remote-control start timed out after %s", c.timeout())
+			}
+			return fmt.Errorf("codex remote-control start canceled: %w", timeoutErr)
+		}
+		// A daemonized app-server can keep the stdout pipe open after it has
+		// already emitted its successful machine-readable status. In that case
+		// WaitDelay makes Output return an error even though startup succeeded.
+		// ErrWaitDelay is the narrow, non-cancellation case in which the direct
+		// child succeeded but a daemon retained its stdout pipe. Treat only that
+		// complete daemon-status response as success; other command failures,
+		// stderr-only responses, and malformed responses still surface.
+		if errors.Is(err, exec.ErrWaitDelay) && isRemoteControlDaemonStatus(output) {
+			return nil
 		}
 		msg := strings.TrimSpace(stderr.String())
 		if out := strings.TrimSpace(string(output)); out != "" {
@@ -111,6 +125,24 @@ func (c *Client) StartRemoteControl(ctx context.Context) error {
 		return fmt.Errorf("codex remote-control start failed: %w", err)
 	}
 	return nil
+}
+
+func (c *Client) pipeWaitDelay() time.Duration {
+	if c.waitDelay > 0 {
+		return c.waitDelay
+	}
+	return time.Second
+}
+
+func isRemoteControlDaemonStatus(output []byte) bool {
+	var status struct {
+		Mode   string          `json:"mode"`
+		Daemon json.RawMessage `json:"daemon"`
+	}
+	if err := json.Unmarshal(output, &status); err != nil {
+		return false
+	}
+	return status.Mode == "daemon" && len(status.Daemon) > 0 && string(status.Daemon) != "null"
 }
 
 // StartThread creates a new Codex thread.

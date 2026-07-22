@@ -49,9 +49,9 @@ When switching from TTY to non-TTY environments (e.g., piping to a file), no pan
 
 ### 4. Wayfinder Phase Support
 
-Provide first-class support for multi-phase workflows like Wayfinder (W0-S11), with clear phase tracking and progress display.
+Provide first-class support for multi-phase workflows like canonical Wayfinder (CHARTER through RETRO), with clear phase tracking and progress display.
 
-**Success Metric**: `UpdatePhase()` method formats phase information consistently (e.g., "Phase 3/11: D2 - Existing Solutions") and integrates seamlessly with progress bars.
+**Success Metric**: `UpdatePhase()` method formats phase information consistently (e.g., "Phase 3/9: RESEARCH - Existing Solutions") and integrates seamlessly with progress bars.
 
 ---
 

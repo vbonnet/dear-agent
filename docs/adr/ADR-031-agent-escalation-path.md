@@ -2,6 +2,8 @@
 
 Status: Accepted (2026-06-15; amended 2026-07-17)
 
+<!-- Last audited at: 2026-07-21 -->
+
 ## Context
 
 A silent or generic bypass turns a safety gate into a suggestion and hides
@@ -19,6 +21,18 @@ verified change from reaching review.
   escalate`; it does not substitute a raw command that bypasses the wrapper.
 - Repeated exception use is a defect signal and must become a tooling, policy,
   or test-isolation fix.
+
+The implemented escalation entry point is:
+
+```text
+agm escalate ask --kind blocked-action --context "<why the normal path is unavailable>" "<what is needed>"
+```
+
+Inside an AGM-launched session the command attributes and routes the request
+through the registered session and supervisor chain. Outside AGM, callers must
+pass `--session <registered-session>`. If no registered session exists, the
+agent asks the current user directly. Escalations are durable decision records;
+they do not create or update Beads.
 
 `safe-pr`, `safe-merge`, `internal/override`, and the escalation engine are the
 source owners. ADR-032 defines supervisor routing.

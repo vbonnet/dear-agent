@@ -4,7 +4,6 @@ on:
   push:
     branches: [main, develop]
   pull_request:
-    branches: [main, develop]
   schedule:
     # Daily 06:00 UTC — catches dependency CVEs and drift between PRs.
     - cron: "0 6 * * *"
@@ -54,7 +53,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: 'go.mod'
           cache: true
@@ -93,6 +92,9 @@ jobs:
 
       - name: Vet
         run: go vet ./...
+
+      - name: Validate tracked AI skills
+        run: go run ./tools/skill-lint -repo .
 
       - name: Verify generated AGM surfaces and plugin hashes
         run: |
@@ -161,7 +163,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: 'go.mod'
           cache: true
@@ -194,7 +196,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: 'go.mod'
           cache: true
@@ -227,7 +229,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: 'go.mod'
 

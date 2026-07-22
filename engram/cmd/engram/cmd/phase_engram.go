@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/pkg/phaseengram"
@@ -13,13 +14,12 @@ var phaseEngramJSON bool
 var phaseEngramCmd = &cobra.Command{
 	Use:   "phase-engram <phase>",
 	Short: "Resolve phase engram path and hash",
-	Long: `Resolve the engram file path and compute its SHA-256 hash for a Wayfinder phase.
+	Long: fmt.Sprintf(`Resolve the engram file path and compute its SHA-256 hash for a Wayfinder phase.
 
 This replaces hardcoded hashes in skill templates. Instead of embedding a
 stale hash, call this command at runtime to get the current path and hash.
 
-Supported phases: CHARTER, PROBLEM, RESEARCH, DECISION, SPEC, DESIGN, PLAN,
-BUILD, RETRO (and their numeric aliases W0, D1-D4, S4-S11).
+Supported phases: %s.
 
 Examples:
   # Get path and hash for CHARTER phase
@@ -29,7 +29,7 @@ Examples:
   engram phase-engram CHARTER --json
 
   # Use in shell to get just the hash
-  HASH=$(engram phase-engram CHARTER --json | jq -r .hash)`,
+  HASH=$(engram phase-engram CHARTER --json | jq -r .hash)`, strings.Join(phaseengram.KnownPhases(), ", ")),
 	Args: cobra.ExactArgs(1),
 	RunE: runPhaseEngram,
 }

@@ -2,6 +2,7 @@
 # RELATED-SPEC: agm/internal/a2a/channel/SPEC.md
 # RELATED-SPEC: agm/internal/a2a/config/SPEC.md
 # RELATED-SPEC: agm/internal/a2a/wayfinder/SPEC.md
+# RELATED-SPEC: .pi/SPEC.md
 Feature: Wayfinder harness parity
   AGM should expose Wayfinder workflow discovery, execution, and status surfaces
   across every active harness.
@@ -18,10 +19,11 @@ Feature: Wayfinder harness parity
       | codex-cli    |
       | agy          |
       | opencode-cli |
+      | pi-cli       |
 
   Scenario: Wayfinder assets and MCP operations are published
     When AGM validates Wayfinder asset parity
-    Then Wayfinder should publish SKILL, plugin, command, and MCP status surfaces
+    Then Wayfinder should publish SKILL, plugin, CLI, and MCP status surfaces
 
   Scenario: Wayfinder phase guidance uses harness-neutral Engrams
     When AGM validates Wayfinder phase Engram parity

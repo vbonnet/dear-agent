@@ -1,12 +1,9 @@
 # SPEC: wayfinder/cmd/wayfinder/SPEC.md
 # RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/beads/SPEC.md
 # RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/config/SPEC.md
-# RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/converter/SPEC.md
 # RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/git/SPEC.md
 # RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/history/SPEC.md
 # RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/lintcontext/SPEC.md
-# RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/migrate/SPEC.md
-# RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/migration/SPEC.md
 # RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/telemetry/SPEC.md
 # RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/tracker/SPEC.md
 # RELATED-SPEC: wayfinder/internal/project/SPEC.md
@@ -26,12 +23,9 @@ Feature: Wayfinder internal package guardrails
       | wayfinder/cmd/wayfinder                                  |
       | wayfinder/cmd/wayfinder-session/internal/beads           |
       | wayfinder/cmd/wayfinder-session/internal/config          |
-      | wayfinder/cmd/wayfinder-session/internal/converter       |
       | wayfinder/cmd/wayfinder-session/internal/git             |
       | wayfinder/cmd/wayfinder-session/internal/history         |
       | wayfinder/cmd/wayfinder-session/internal/lintcontext     |
-      | wayfinder/cmd/wayfinder-session/internal/migrate         |
-      | wayfinder/cmd/wayfinder-session/internal/migration       |
       | wayfinder/cmd/wayfinder-session/internal/telemetry       |
       | wayfinder/cmd/wayfinder-session/internal/tracker         |
       | wayfinder/internal/project                               |
@@ -73,3 +67,10 @@ Feature: Wayfinder internal package guardrails
       | opencode-cli | deepseek  |
       | opencode-cli | nemotron  |
       | opencode-cli | qwen      |
+      | pi-cli       | anthropic |
+      | pi-cli       | openai    |
+      | pi-cli       | gemini    |
+      | pi-cli       | glm       |
+      | pi-cli       | deepseek  |
+      | pi-cli       | nemotron  |
+      | pi-cli       | qwen      |

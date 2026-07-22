@@ -9,7 +9,7 @@
 ## Overview
 
 `internal/phasegraph` parses the Wayfinder phase dependency configuration used
-to load upstream artifacts for canonical V2 phases. It keeps dependency lookup
+to load upstream artifacts for canonical named phases. It keeps dependency lookup
 pure and defensive by copying returned maps
 and rejecting unsupported load strategy values.
 
@@ -27,7 +27,7 @@ and rejecting unsupported load strategy values.
 
 **WAYFINDER-PHASEGRAPH-06** When dependencies are returned, the system shall return a copy so callers cannot mutate stored configuration.
 
-**WAYFINDER-PHASEGRAPH-07** When phase names are requested, the system shall return the V2 phase names defined in the dependency graph.
+**WAYFINDER-PHASEGRAPH-07** When phase names are requested, the system shall return the canonical names defined in the dependency graph.
 
 ## BDD Traceability
 

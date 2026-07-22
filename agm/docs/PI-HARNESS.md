@@ -1,0 +1,161 @@
+# Pi Harness
+
+<!-- Last audited at: 2026-07-21 against Pi 0.81.0 -->
+
+AGM supports [Pi](https://github.com/earendil-works/pi) as the canonical
+`pi-cli` harness. `pi` is accepted as an input alias and normalized before
+storage. Claude Code remains the reference harness, but Pi participates in the
+same active lifecycle, model-family, permission, hook, MCP, Engram, Wayfinder,
+marketplace, config-directory, quota, and BDD parity contracts.
+
+## Install and create
+
+```bash
+agm admin install-harness pi
+agm session new pi-work --harness pi-cli -C /absolute/project/path
+agm session new pi-plan --harness pi-cli --permission-mode plan -C /absolute/project/path
+agm session send msg pi-work "Inspect the failing test"
+agm session resume pi-work
+```
+
+AGM installs the canonical npm package
+`@earendil-works/pi-coding-agent` and verifies the `pi` executable. Provider
+authentication remains Pi-owned; AGM does not copy, inspect, or translate Pi
+credentials.
+
+## Native identity and storage
+
+New sessions use AGM's session ID as Pi's exact `--session-id`. AGM creates an
+owner-only session directory and launches Pi with an explicit `--session-dir`.
+The manifest persists:
+
+```yaml
+pi:
+  session_id: <exact-native-id>
+  session_dir: <absolute-private-directory>
+  transcript_path: <exact-jsonl-path-when-created>
+```
+
+Resume, history, import, export, Engram indexing, and quota collection validate
+the JSONL header. Discovery is bounded, does not follow symlinks, rejects
+duplicate IDs, and never selects a transcript because it is newest.
+
+To register an existing native session, use `agm session import --harness
+pi-cli --session-id <native-id>`. AGM discovers Pi's default project-grouped
+session tree, validates the header and absolute working directory, and copies
+the transcript into AGM-private storage before registering it. Import preserves
+the latest native provider/model when the transcript establishes one; otherwise
+AGM leaves the model override empty so Pi resumes the saved native selection.
+Before Pi has persisted a transcript (which it defers until the first assistant
+message), no saved selection exists; cold resume therefore preserves the
+configured model or uses the Pi harness default.
+
+## Permission model
+
+Pi project trust and tool authorization are separate decisions. AGM launches
+Pi with explicit project approval only after selecting the requested working
+directory. It also installs a dependency-free authorization extension in
+AGM-owned private storage and passes it with `--extension`; repository files
+cannot replace that mandatory extension.
+
+Resolved allowlists are written atomically to a per-session owner-only policy
+file beside the managed extension. The launch command passes only that path,
+which avoids macOS's bounded terminal input queue; a missing or malformed file
+keeps the managed status out of `ready` and blocks tool calls.
+
+| Mode | Active native tools | Unmatched tool call |
+|---|---|---|
+| `plan` | `read`, `grep`, `find`, `ls` | Mutating calls are blocked before allowlist evaluation |
+| `default` | all built-in tools | Ask in an interactive UI; block without one |
+| `auto` | all built-in tools | Allow after repository guardrails run |
+
+The extension maps Pi's `bash`, `read`, `edit`, `write`, `grep`, `find`, and
+`ls` calls to AGM permission categories. Extension tools receive a stable
+PascalCase category (for example, `plugin_deploy` becomes `PluginDeploy`) so
+they can be pre-approved without weakening plan mode. Patterns are anchored;
+wildcards must be explicit. Bash calls containing unquoted command chaining,
+redirection, or command substitution are never pre-approved by an allowlist;
+default mode asks interactively and a non-interactive caller fails closed.
+Runtime transitions use `agm session send mode`,
+which sends the managed `/agm-mode plan|default|auto` command. Model transitions use
+`/agm-model provider/model` and are persisted only after AGM observes the
+managed transition result.
+
+The stable footer token `AGM <mode>/ready <launch-id>` is AGM's send-safety
+boundary. Create and cold resume require the current launch ID before they can
+report readiness, so an older footer retained in tmux history cannot authorize
+a new process. Every cold-resume entry point also proves Pi-specific process
+identity before attaching. This recognizes the canonical npm package's Node
+entrypoint without treating an unrelated `node` process as Pi. When Pi has
+exited, AGM relaunches only in a positively classified bare shell and rejects
+any other foreground process. Ctrl-C and root shutdown cancel both identity
+and pane-classification scans before command delivery or attachment.
+Routine sends use the latest managed mode/state; `working`,
+permission, model-selection, and other overlays are not ready.
+
+## Repository instructions, skills, and hooks
+
+Pi reads the repository's root `AGENTS.md` directly. `.pi/settings.json`
+discovers the living AGM and Wayfinder skill trees; it does not copy those
+skills. `.pi/hooks.json` maps native Pi events to the repository's shared
+lifecycle and tool guardrails. The wrappers under `.pi/guardrails/` reuse the living
+OpenCode shell policies so rule fixes have one implementation owner.
+
+Repository hooks load only from the explicitly approved working directory.
+`PreToolUse` failures block the native call before auto or allowlist decisions.
+Every invocation receives the shared event name, native Pi session ID, approved
+working directory, loop state, and native event payload. Structured hook
+decisions are honored even when the command exits successfully. In particular,
+a blocked `UserPromptSubmit` is consumed before the model sees it, a blocked
+`PreCompact` cancels compaction, and a blocking `Stop` result is delivered back
+to Pi as a follow-up user turn so the shared bounded guardrail-feedback loop can
+finish its remediation. Completion of Pi's conventional `subagent` extension
+tool projects `SubagentStop`; because the tool runs isolated child Pi processes,
+blocking remediation returns to the parent turn. Until Beads exposes a
+Pi-specific hook entrypoint, lifecycle events use its
+behaviorally equivalent `codex-hook` adapter with Dolt auto-commit enabled,
+matching the other non-Claude hook manifests.
+
+Wayfinder is available through Pi's native skill discovery and the
+`wayfinder-session` CLI. Its status and temporal artifacts remain
+harness-neutral.
+
+## Models, usage, and limitations
+
+Pi exposes the shared `fable`, `opus`, `sonnet`, and `haiku` tiers plus
+`gpt-frontier`, `gpt`, and `gpt-fast`. Its aliases cover every active AGM model family. Anthropic, OpenAI, and Gemini
+aliases use their native Pi providers; GLM, DeepSeek, Nemotron, and Qwen use
+their canonical OpenRouter routes. Provider availability still depends on the
+models and authentication configured in Pi.
+
+AGM reads Pi's native JSONL usage and provider-reported cost. It uses the latest
+assistant prompt footprint for context, the audited Pi 0.81.0 model-catalog
+window for the recorded model, and sums native cost records for the session.
+Pi does not expose a provider quota/rate-limit API, so those fields are
+reported as unavailable rather than populated with Claude-specific values.
+
+Pi does not require a background server. Archive stops the managed tmux
+process while preserving its private native transcript. Deleting transcript
+data remains an explicit storage operation, not an archive side effect.
+
+## Troubleshooting
+
+- `pi binary not found`: run `agm admin install-harness pi` and confirm `pi
+  --version` is visible in AGM's `PATH`.
+- `no provider models available`: configure a provider through Pi; AGM will not
+  read credential files to diagnose this.
+- `Pi transcript not found`: inspect the manifest's `pi` block; do not replace
+  it with the most recent JSONL path.
+- no `AGM <mode>/ready <launch-id>` footer: treat the session as not sendable and inspect
+  the managed extension load error in the pane.
+- project hook rejection: run the named `.pi/guardrails` wrapper from the same
+  project directory and preserve the fail-closed behavior while fixing it.
+
+## Verification boundaries
+
+Pure tests cover command construction, identity, parsing, permission decisions,
+hook execution, persistence, and parity matrices. Contract tests require the
+real `pi` binary. A provider-authenticated prompt/response test must be skipped
+with an explicit reason when this machine has no configured Pi models; startup,
+extension loading, mode transitions, project skills, and fail-closed tool
+guardrails remain locally verifiable without provider credentials.

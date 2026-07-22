@@ -2,6 +2,8 @@ package tmux
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -37,6 +39,255 @@ func HasSession(name string) (bool, error) {
 		return false, fmt.Errorf("failed to check tmux session: %w", err)
 	}
 	return true, nil
+}
+
+// HasSessionStrict checks whether a session exists without collapsing every
+// tmux exit failure into a missing-session verdict. It is intended for
+// destructive-operation postconditions, where an inaccessible socket must not
+// be reported as proof that the target is gone.
+func HasSessionStrict(name string) (bool, error) {
+	return HasSessionStrictContext(context.Background(), name)
+}
+
+// HasSessionStrictContext is the context-aware form of HasSessionStrict.
+func HasSessionStrictContext(ctx context.Context, name string) (bool, error) {
+	socketPath := GetSocketPath()
+	normalizedName := NormalizeTmuxSessionName(name)
+	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "has-session", "-t", FormatSessionTarget(normalizedName))
+	if err == nil {
+		return true, nil
+	}
+	if isMissingSessionOutput(output) {
+		return false, nil
+	}
+	return false, tmuxCommandError("check session", normalizedName, output, err)
+}
+
+const sessionIdentityCreationPrefix = "agm-create-"
+const sessionRenameIdentityOption = "@agm_rename_identity"
+
+// SessionIdentity identifies one specific tmux session creation. ID is local
+// to a tmux server generation and may be reused after a server restart. Token
+// is first embedded in the provisional CreationName and then stored on the
+// session before its final rename, so every partial creation retains a
+// creation-specific ownership marker.
+type SessionIdentity struct {
+	ID           string
+	Token        string
+	CreationName string
+}
+
+// RenameSessionIdentity is a short-lived ownership marker for one existing
+// tmux session during an authoritative rename. The random token distinguishes
+// the claimed session from a replacement that reuses its server-local ID.
+type RenameSessionIdentity struct {
+	ID    string
+	Token string
+}
+
+// Valid reports whether the identity can prove ownership across a rename.
+func (identity RenameSessionIdentity) Valid() bool {
+	return (SessionIdentity{ID: identity.ID, Token: identity.Token}).Valid()
+}
+
+// Valid reports whether the complete creation-specific identity is valid.
+func (identity SessionIdentity) Valid() bool {
+	if !IsSessionID(identity.ID) || !identity.validToken() {
+		return false
+	}
+	return identity.CreationName == "" || identity.CreationName == sessionIdentityCreationPrefix+identity.Token
+}
+
+// Cleanable reports whether the identity safely names a resource created by
+// this attempt. Before tmux's server-local ID reaches the client, the random
+// token-derived provisional name is itself an exact ownership capability.
+func (identity SessionIdentity) Cleanable() bool {
+	if !identity.validToken() {
+		return false
+	}
+	if IsSessionID(identity.ID) {
+		return identity.CreationName == "" || identity.CreationName == sessionIdentityCreationPrefix+identity.Token
+	}
+	return identity.CreationName == sessionIdentityCreationPrefix+identity.Token
+}
+
+func (identity SessionIdentity) validToken() bool {
+	if len(identity.Token) != 32 {
+		return false
+	}
+	decoded, err := hex.DecodeString(identity.Token)
+	return err == nil && len(decoded) == 16
+}
+
+func newSessionIdentity() (SessionIdentity, error) {
+	tokenBytes := make([]byte, 16)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return SessionIdentity{}, fmt.Errorf("generate tmux session identity: %w", err)
+	}
+	token := hex.EncodeToString(tokenBytes)
+	return SessionIdentity{Token: token, CreationName: sessionIdentityCreationPrefix + token}, nil
+}
+
+// ClaimSessionRenameIdentityContext atomically marks an existing session with
+// a random token and captures its server-local ID. If the tmux client loses the
+// command reply, a bounded scan reconciles the exact random token.
+func ClaimSessionRenameIdentityContext(ctx context.Context, name string) (RenameSessionIdentity, error) {
+	generated, err := newSessionIdentity()
+	if err != nil {
+		return RenameSessionIdentity{}, err
+	}
+	normalizedName := NormalizeTmuxSessionName(name)
+	format := "#{session_id}\t#{session_name}\t#{" + sessionRenameIdentityOption + "}"
+	condition := fmt.Sprintf("#{==:#{session_name},%s}", normalizedName)
+	setCommand := fmt.Sprintf("set-option -t %s %s %s", strconv.Quote(normalizedName), sessionRenameIdentityOption, generated.Token)
+	output, claimErr := RunWithTimeout(ctx, globalTimeout,
+		"tmux", "-S", GetSocketPath(),
+		"if-shell", "-F", "-t", normalizedName, condition, setCommand, "",
+		";", "display-message", "-p", "-t", normalizedName, format)
+	if identity, parseErr := parseClaimedSessionRenameIdentity(output, normalizedName, generated.Token); parseErr == nil {
+		return identity, nil
+	} else if claimErr == nil {
+		claimErr = parseErr
+	}
+
+	inspectCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	identity, inspectErr := findClaimedSessionRenameIdentity(inspectCtx, normalizedName, generated.Token)
+	if inspectErr == nil && identity.Valid() {
+		return identity, nil
+	}
+	return RenameSessionIdentity{}, errors.Join(claimErr, inspectErr, fmt.Errorf("tmux rename identity claim is unconfirmed for %q", normalizedName))
+}
+
+func parseClaimedSessionRenameIdentity(output []byte, expectedName, token string) (RenameSessionIdentity, error) {
+	parts := strings.SplitN(strings.TrimRight(string(output), "\r\n"), "\t", 3)
+	if len(parts) != 3 || NormalizeTmuxSessionName(parts[1]) != expectedName || parts[2] != token {
+		return RenameSessionIdentity{}, fmt.Errorf("tmux returned malformed rename identity")
+	}
+	identity := RenameSessionIdentity{ID: parts[0], Token: token}
+	if !identity.Valid() {
+		return RenameSessionIdentity{}, fmt.Errorf("tmux returned invalid rename identity %q", identity.ID)
+	}
+	return identity, nil
+}
+
+func findClaimedSessionRenameIdentity(ctx context.Context, expectedName, token string) (RenameSessionIdentity, error) {
+	format := "#{session_id}\t#{session_name}\t#{" + sessionRenameIdentityOption + "}"
+	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", GetSocketPath(), "list-sessions", "-F", format)
+	if err != nil {
+		return RenameSessionIdentity{}, tmuxCommandError("find rename identity", token, output, err)
+	}
+	var found RenameSessionIdentity
+	for line := range strings.SplitSeq(strings.TrimRight(string(output), "\r\n"), "\n") {
+		identity, parseErr := parseClaimedSessionRenameIdentity([]byte(line), expectedName, token)
+		if parseErr != nil {
+			continue
+		}
+		if found.Valid() {
+			return RenameSessionIdentity{}, fmt.Errorf("tmux rename identity token matched multiple sessions")
+		}
+		found = identity
+	}
+	return found, nil
+}
+
+// InspectSessionRenameIdentityContext returns the current name of the exact
+// claimed session. A missing ID or token mismatch reports owned=false, so a
+// replacement after server restart cannot satisfy the proof.
+func InspectSessionRenameIdentityContext(ctx context.Context, identity RenameSessionIdentity) (name string, owned bool, err error) {
+	if !identity.Valid() {
+		return "", false, fmt.Errorf("invalid tmux rename identity %q", identity.ID)
+	}
+	format := "#{session_name}\t#{" + sessionRenameIdentityOption + "}"
+	output, runErr := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", GetSocketPath(), "display-message", "-p", "-t", identity.ID, format)
+	if runErr != nil {
+		if isMissingSessionOutput(output) {
+			return "", false, nil
+		}
+		return "", false, tmuxCommandError("inspect rename identity", identity.ID, output, runErr)
+	}
+	parts := strings.SplitN(strings.TrimRight(string(output), "\r\n"), "\t", 2)
+	if len(parts) != 2 {
+		return "", false, fmt.Errorf("tmux returned malformed rename identity state for %q", identity.ID)
+	}
+	return NormalizeTmuxSessionName(parts[0]), parts[1] == identity.Token, nil
+}
+
+// RenameClaimedSessionContext renames only while the server-local ID still
+// carries the random claim marker. A replacement that reused the ID makes the
+// conditional command a no-op; the caller verifies the postcondition.
+func RenameClaimedSessionContext(ctx context.Context, identity RenameSessionIdentity, newName string) error {
+	if !identity.Valid() {
+		return fmt.Errorf("invalid tmux rename identity %q", identity.ID)
+	}
+	condition := fmt.Sprintf("#{==:#{%s},%s}", sessionRenameIdentityOption, identity.Token)
+	renameCommand := fmt.Sprintf("rename-session -t %s %s", identity.ID, strconv.Quote(NormalizeTmuxSessionName(newName)))
+	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", GetSocketPath(), "if-shell", "-F", "-t", identity.ID, condition, renameCommand, "")
+	if err == nil || isMissingSessionOutput(output) {
+		return nil
+	}
+	return tmuxCommandError("rename claimed session", identity.ID, output, err)
+}
+
+// ClearSessionRenameIdentityContext removes the marker only if the same
+// server-local ID still carries the random token. Replacements are untouched.
+func ClearSessionRenameIdentityContext(ctx context.Context, identity RenameSessionIdentity) error {
+	if !identity.Valid() {
+		return fmt.Errorf("invalid tmux rename identity %q", identity.ID)
+	}
+	condition := fmt.Sprintf("#{==:#{%s},%s}", sessionRenameIdentityOption, identity.Token)
+	unsetCommand := fmt.Sprintf("set-option -u -t %s %s", identity.ID, sessionRenameIdentityOption)
+	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", GetSocketPath(), "if-shell", "-F", "-t", identity.ID, condition, unsetCommand, "")
+	if err == nil || isMissingSessionOutput(output) {
+		return nil
+	}
+	return tmuxCommandError("clear rename identity", identity.ID, output, err)
+}
+
+func sanitizeNewSessionName(name string) string {
+	sanitizedName := SanitizeSessionName(name)
+	if sanitizedName != name {
+		fmt.Fprintf(os.Stderr, "Warning: Sanitized session name from %q to %q (tmux requires alphanumeric, dash, underscore)\n", name, sanitizedName)
+	}
+	return sanitizedName
+}
+
+// HasSessionIdentityStrict checks a creation-specific tmux identity without
+// allowing a same-named replacement or a new server's reused ID to satisfy it.
+func HasSessionIdentityStrict(identity SessionIdentity) (bool, error) {
+	if !identity.Cleanable() {
+		return false, fmt.Errorf("invalid tmux session identity %q", identity.ID)
+	}
+	if !identity.Valid() {
+		return HasSessionStrict(identity.CreationName)
+	}
+	output, err := RunWithTimeout(context.Background(), globalTimeout, "tmux", "-S", GetSocketPath(), "display-message", "-p", "-t", identity.ID, "#{@agm_session_identity}\t#{session_name}")
+	if err == nil {
+		parts := strings.SplitN(strings.TrimRight(string(output), "\r\n"), "\t", 2)
+		if len(parts) != 2 {
+			return false, fmt.Errorf("tmux returned malformed session identity for %q", identity.ID)
+		}
+		return parts[0] == identity.Token || identity.CreationName != "" && parts[1] == identity.CreationName, nil
+	}
+	if isMissingSessionOutput(output) {
+		return false, nil
+	}
+	return false, tmuxCommandError("check session identity", identity.ID, output, err)
+}
+
+func isMissingSessionOutput(output []byte) bool {
+	lowerOutput := strings.ToLower(string(output))
+	return strings.Contains(lowerOutput, "can't find session") ||
+		strings.Contains(lowerOutput, "no current target") ||
+		strings.Contains(lowerOutput, "no server running")
+}
+
+func tmuxCommandError(operation, sessionName string, output []byte, err error) error {
+	detail := strings.TrimSpace(string(output))
+	if detail == "" {
+		return fmt.Errorf("tmux %s %q: %w", operation, sessionName, err)
+	}
+	return fmt.Errorf("tmux %s %q: %w: %s", operation, sessionName, err, detail)
 }
 
 // NormalizeTmuxSessionName converts AGM session names to tmux-compatible format.
@@ -184,29 +435,60 @@ func EnableAutoRespawn(sessionName string) error {
 	return nil
 }
 
-// NewSession creates a new tmux session with optimized settings
+// NewSession creates a new tmux session with optimized settings.
 func NewSession(name string, workDir string) error {
+	identity, err := NewSessionWithIdentity(name, workDir)
+	if err == nil || !identity.Cleanable() {
+		return err
+	}
+	if cleanupErr := KillSessionIdentityChecked(identity); cleanupErr != nil {
+		return errors.Join(err, fmt.Errorf("clean up partially created tmux session: %w", cleanupErr))
+	}
+	return err
+}
+
+// NewSessionWithIdentity creates a new tmux session and returns a server-local
+// ID paired with a random ownership token. The session is created under a
+// token-derived provisional name, stores the same token as a user option, and
+// is then renamed to the requested name. Transactional callers retain all
+// three values so compensation is safe at every command-queue boundary and
+// cannot kill a replacement after a server restart.
+//
+// If initialization fails after tmux created the session, the returned
+// identity remains non-empty so the caller can compensate the exact resource.
+func NewSessionWithIdentity(name string, workDir string) (SessionIdentity, error) {
 	ctx := context.Background()
 	socketPath := GetSocketPath()
-
-	// Sanitize session name (tmux only allows alphanumeric, dash, underscore)
-	sanitizedName := SanitizeSessionName(name)
-	if sanitizedName != name {
-		// Log warning but continue with sanitized name
-		fmt.Fprintf(os.Stderr, "Warning: Sanitized session name from %q to %q (tmux requires alphanumeric, dash, underscore)\n", name, sanitizedName)
+	identity, err := newSessionIdentity()
+	if err != nil {
+		return SessionIdentity{}, err
 	}
+
+	// Sanitize session name (tmux only allows alphanumeric, dash, underscore).
+	sanitizedName := sanitizeNewSessionName(name)
 
 	// Clean stale socket if exists
 	if err := CleanStaleSocket(); err != nil {
-		return fmt.Errorf("failed to clean stale socket: %w", err)
+		return SessionIdentity{}, fmt.Errorf("failed to clean stale socket: %w", err)
 	}
 
 	// Lock tmux server for session creation + settings (prevent parallel mutations)
-	err := withTmuxLock(func() error {
-		// Create session with detached mode (use sanitized name)
-		cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "new-session", "-d", "-s", sanitizedName, "-c", workDir)
+	err = withTmuxLock(func() error {
+		// Create under the random provisional name before storing the same token
+		// and renaming. If either later command fails, the surviving session still
+		// has an ownership marker that strict compensation can prove.
+		cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath,
+			"new-session", "-d", "-P", "-F", "#{session_id}", "-s", identity.CreationName, "-c", workDir,
+			";", "set-option", "@agm_session_identity", identity.Token,
+			";", "rename-session", sanitizedName)
 		defer cancel()
-		if err := cmd.Run(); err != nil {
+		output, err := cmd.Output()
+		// A tmux command queue can create the session and print its ID before a
+		// later command (the identity option write here) fails. Capture that ID
+		// before returning the queue error so the caller can compensate the
+		// partially created resource.
+		identity.ID = strings.TrimSpace(string(output))
+		if err != nil {
 			// Check for timeout
 			if ctx.Err() == context.DeadlineExceeded {
 				return &TimeoutError{
@@ -216,6 +498,9 @@ func NewSession(name string, workDir string) error {
 				}
 			}
 			return fmt.Errorf("failed to create tmux session: %w", err)
+		}
+		if !identity.Valid() {
+			return fmt.Errorf("tmux created session %q but returned invalid session identity %q", sanitizedName, identity.ID)
 		}
 
 		// Inject tmux settings for better UX
@@ -232,9 +517,9 @@ func NewSession(name string, workDir string) error {
 			{[]string{"set", "-g", "exit-empty", "off"}, "Prevent server exit when all sessions detach (crash fix)"},
 			{[]string{"set", "-g", "destroy-unattached", "off"}, "Keep sessions alive when clients disconnect (crash fix)"},
 			// Per-session UX settings
-			{[]string{"set-window-option", "-t", name, "aggressive-resize", "on"}, "Fix multi-device layout conflicts"},
-			{[]string{"set-option", "-t", name, "window-size", "latest"}, "Force window to fit current screen"},
-			{[]string{"set", "-t", name, "mouse", "on"}, "Enable mouse scrolling"},
+			{[]string{"set-window-option", "-t", sanitizedName, "aggressive-resize", "on"}, "Fix multi-device layout conflicts"},
+			{[]string{"set-option", "-t", sanitizedName, "window-size", "latest"}, "Force window to fit current screen"},
+			{[]string{"set", "-t", sanitizedName, "mouse", "on"}, "Enable mouse scrolling"},
 			{[]string{"set", "-s", "set-clipboard", "on"}, "Enable OSC 52 for Cmd-C over SSH"},
 			{[]string{"set", "-s", "escape-time", "10"}, "Reduce Escape key delay for copy-mode (default 500ms causes lag)"},
 		}
@@ -288,7 +573,7 @@ func NewSession(name string, workDir string) error {
 		return nil
 	})
 	if err != nil {
-		return err
+		return identity, err
 	}
 
 	// Verify the pane actually landed in workDir and repair it if not.
@@ -296,7 +581,19 @@ func NewSession(name string, workDir string) error {
 	// been deleted, leaving the pane in a dead directory where harness CLIs
 	// die instantly (ce-5zbg). Must run outside withTmuxLock: the repair path
 	// sends a `cd` via SendCommand, which takes the lock itself.
-	return EnsureSessionWorkDir(sanitizedName, workDir)
+	if err := EnsureSessionWorkDir(sanitizedName, workDir); err != nil {
+		return identity, err
+	}
+	return identity, nil
+}
+
+// IsSessionID reports whether target is a tmux server-local session identity.
+func IsSessionID(target string) bool {
+	if len(target) < 2 || target[0] != '$' {
+		return false
+	}
+	_, err := strconv.ParseUint(target[1:], 10, 64)
+	return err == nil
 }
 
 // AttachSession attaches to tmux session or switches if already inside tmux
@@ -684,7 +981,11 @@ func GetCurrentSessionName() (string, error) {
 // Node-based CLIs such as Codex can report "node" as the current command while
 // retaining "codex ..." as the start command.
 func GetPaneCommands(sessionName string) ([]string, error) {
-	ctx := context.Background()
+	return GetPaneCommandsContext(context.Background(), sessionName)
+}
+
+// GetPaneCommandsContext is the command-scoped variant of GetPaneCommands.
+func GetPaneCommandsContext(ctx context.Context, sessionName string) ([]string, error) {
 	socketPath := GetSocketPath()
 	normalizedName := NormalizeTmuxSessionName(sessionName)
 	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "list-panes", "-t", normalizedName,
@@ -722,7 +1023,12 @@ func GetPaneCommands(sessionName string) ([]string, error) {
 // Returns (false, nil) if process not found
 // Returns (false, error) if tmux command fails
 func IsProcessRunning(sessionName, processName string) (bool, error) {
-	commands, err := GetPaneCommands(sessionName)
+	return IsProcessRunningContext(context.Background(), sessionName, processName)
+}
+
+// IsProcessRunningContext is the command-scoped variant of IsProcessRunning.
+func IsProcessRunningContext(ctx context.Context, sessionName, processName string) (bool, error) {
+	commands, err := GetPaneCommandsContext(ctx, sessionName)
 	if err != nil {
 		return false, err
 	}
@@ -756,7 +1062,7 @@ func IsClaudeRunning(sessionName string) (bool, error) {
 	// instead of the Claude process. Detect by capturing recent pane output
 	// and looking for the Claude prompt character.
 	for _, cmd := range commands {
-		if isShellCommand(cmd) || cmd == "agm" {
+		if IsShellCommand(cmd) || cmd == "agm" {
 			ctx := context.Background()
 			socketPath := GetSocketPath()
 			normalizedName := NormalizeTmuxSessionName(sessionName)
@@ -825,23 +1131,81 @@ func isClaudeProcess(command string) bool {
 //
 // Returns nil when process is ready, error on timeout or check failure.
 func WaitForProcessReady(sessionName, processName string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
+	return WaitForProcessReadyContext(context.Background(), sessionName, processName, timeout)
+}
+
+// WaitForProcessReadyContext is the command-scoped variant of
+// WaitForProcessReady. Caller cancellation takes precedence over the timeout.
+func WaitForProcessReadyContext(parent context.Context, sessionName, processName string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
 	pollInterval := 100 * time.Millisecond
 
-	for time.Now().Before(deadline) {
-		running, err := IsProcessRunning(sessionName, processName)
+	for {
+		if err := ctx.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return fmt.Errorf("timeout waiting for %s to start (waited %v)", processName, timeout)
+			}
+			return err
+		}
+		running, err := isProcessReadyContext(ctx, sessionName, processName)
 		if err != nil {
 			// Ignore transient errors (e.g., brief tmux unavailability)
-			time.Sleep(pollInterval)
+			if err := sleepWithContext(ctx, pollInterval); err != nil {
+				continue
+			}
 			continue
 		}
 		if running {
 			return nil // Process is ready!
 		}
-		time.Sleep(pollInterval)
+		if err := sleepWithContext(ctx, pollInterval); err != nil {
+			continue
+		}
+	}
+}
+
+func isProcessReadyContext(ctx context.Context, sessionName, processName string) (bool, error) {
+	isForeground := func(sessionName, processName string) (bool, error) {
+		return IsProcessRunningContext(ctx, sessionName, processName)
+	}
+	return isProcessReadyWithRuntime(ctx, sessionName, processName, GetSocketPath(), isForeground, IsProcessInPaneTreeContext)
+}
+
+func isProcessReadyWithRuntime(
+	ctx context.Context,
+	sessionName, processName, socketPath string,
+	isForeground func(string, string) (bool, error),
+	isInPaneTree func(context.Context, string, string, string) (bool, error),
+) (bool, error) {
+	running, err := isForeground(sessionName, processName)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return false, ctxErr
+	}
+	if running {
+		return true, nil
+	}
+	if processName != "codex" {
+		return false, err
 	}
 
-	return fmt.Errorf("timeout waiting for %s to start (waited %v)", processName, timeout)
+	// Codex is commonly launched through a Node wrapper. tmux then reports
+	// "node" as the foreground command even though a healthy Codex harness is
+	// running. Use the shared full-descendant scan so both the native binary
+	// and its Node wrapper satisfy Codex readiness.
+	for _, candidate := range []string{"codex", "node"} {
+		running, treeErr := isInPaneTree(ctx, sessionName, socketPath, candidate)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return false, ctxErr
+		}
+		if treeErr != nil {
+			return false, treeErr
+		}
+		if running {
+			return true, nil
+		}
+	}
+	return false, err
 }
 
 // GetCurrentWorkingDirectory returns the current working directory of the

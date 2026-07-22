@@ -7,7 +7,7 @@
 # this script exists.
 #
 # Usage:
-#   scripts/preflight.sh            # fast tier: vet + build + lint  (~25s)
+#   scripts/preflight.sh            # fast tier: vet + build + AI skills + lint
 #   scripts/preflight.sh --tests    # fast tier + go test (no -race, no vuln)
 #   scripts/preflight.sh --race     # fast tier + go test -race (no vuln)
 #   scripts/preflight.sh --full     # add: go test -race + govulncheck  (full CI parity)
@@ -72,6 +72,14 @@ go build -ldflags="${LDFLAGS}" -o build/agm-reaper ./agm/cmd/agm-reaper
 go build -ldflags="${LDFLAGS}" -o build/agm-mcp-server ./agm/cmd/agm-mcp-server
 go build ./...
 ok "build clean"
+
+step "validate tracked AI skills"
+go run ./tools/skill-lint -repo . || fail "AI skill validation failed"
+ok "AI skills valid"
+
+step "make lint-instructions"
+make lint-instructions || fail "active instruction policy integrity failed"
+ok "active instruction policy guidance intact"
 
 step "make lint-adrs"
 make lint-adrs || fail "ADR identity/index/lifecycle contract failed"

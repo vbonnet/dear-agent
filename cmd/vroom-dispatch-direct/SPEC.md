@@ -38,8 +38,26 @@ dotted bead id can never brick a dispatch run (ce-b1zw).
 
 **VDD-11** When the system renders a worker prompt, the prompt shall remain harness-neutral and shall route the worker through the canonical Wayfinder V2 lifecycle.
 
-**VDD-12** When the system renders a worker completion contract, the prompt shall require evidence that the change is merged, deployed when applicable, and verified before the worker closes its bead.
+**VDD-12** When the system renders a worker completion contract, the prompt shall require evidence that the change is merged, deployed when applicable, and verified, and shall require the worker to record exactly one terminal outcome (DONE, DONE_WITH_CONCERNS, or FAILED) as the first token of its final bead note.
 
-**VDD-13** When worker-name deduplication reads session state, the system shall treat active, running, zombie, and stopped worker sessions as occupied because AGM rejects duplicate non-archived names; archived sessions shall not suppress dispatch.
+**VDD-13** If a fail-closed ground-truth query (`bd ready`, `agm session list`, `gh pr list`) fails, then the system shall retry it with backoff before treating the failure as fatal.
 
-**VDD-14** When session inventory exceeds one AGM list page, the system shall retrieve every page before candidate selection so an older occupied worker name cannot fall outside deduplication.
+**VDD-14** When a fail-closed query is fatal, the system shall persist the failure to a heartbeat file (`-heartbeat-file`, default `~/.agm/vroom/heartbeat/dispatch-direct.json`) recording the consecutive-failure streak and the last error, and shall reset that streak to zero on the next run that completes without a fail-closed halt.
+
+**VDD-15** When the persisted consecutive-failure streak reaches the alert threshold, the system shall escalate loudly — an unmissable stderr banner plus a best-effort desktop notification — rather than continuing to log a terse one-line failure indistinguishable from a healthy tick.
+
+**VDD-16** When a dispatch run starts, the system shall load a persistent dispatch ledger recording every bead a prior run has dispatched a worker for, so a bead this tool never dispatched is never reconciled.
+
+**VDD-17** When a ready bead the ledger shows was previously dispatched currently has no live worker session, the system shall determine bead closure deterministically rather than relying on the worker having run any command, closing the bead as done when a merged pull request mentioning it is found via `gh pr list --state merged` regardless of the bead's notes.
+
+**VDD-18** If no open or merged pull request exists for a previously-dispatched, worker-less bead, the system shall read the bead's notes for the mandated terminal-outcome token: DONE or DONE_WITH_CONCERNS shall close the bead as a no-op ("already satisfied"); FAILED shall move the bead to bd's `blocked` status so it is excluded from `bd ready` until a human clears it.
+
+**VDD-19** If a previously-dispatched, worker-less bead has no open or merged pull request and no recognizable terminal-outcome token in its notes, the system shall record a no-progress strike, and once a bead accumulates a configured number of consecutive no-progress strikes with no open pull request in between, the system shall move it to bd's `blocked` status instead of leaving it eligible for further redispatch.
+
+**VDD-20** When an open pull request exists for a bead with accumulated no-progress strikes, the system shall reset its strike count to zero, treating an open PR as evidence of real progress.
+
+**VDD-21** When a dispatch run reconciles (closes or blocks) a bead, the system shall exclude it from that same run's candidate selection, and in dry-run mode the system shall report what reconciliation would do without closing, blocking, or persisting any ledger mutation.
+
+**VDD-22** When worker-name deduplication reads session state, the system shall treat active, running, zombie, and stopped worker sessions as occupied because AGM rejects duplicate non-archived names; archived sessions shall not suppress dispatch.
+
+**VDD-23** When session inventory exceeds one AGM list page, the system shall retrieve every page before candidate selection so an older occupied worker name cannot fall outside deduplication.

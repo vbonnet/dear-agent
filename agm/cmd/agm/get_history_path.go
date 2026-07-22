@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/history"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
@@ -18,13 +19,61 @@ var (
 	historyVerifyPaths bool
 )
 
+type historyPathSessionStore interface {
+	ResolveIdentifier(string) (*manifest.Manifest, error)
+	ListSessions(*dolt.SessionFilter) ([]*manifest.Manifest, error)
+}
+
+func resolveNamedHistoryLocation(sessionName string, store historyPathSessionStore) (*manifest.Manifest, string, error) {
+	session, err := store.ResolveIdentifier(sessionName)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get session metadata: %w", err)
+	}
+	if session == nil {
+		return nil, "", fmt.Errorf("session %q not found", sessionName)
+	}
+	if agent.NormalizeHarnessName(session.Harness) == "agy" {
+		if session.Agy == nil || session.Agy.ConversationID == "" {
+			return nil, "", fmt.Errorf("AGY session %q has no native conversation ID; reassociate or re-import the session before requesting history", sessionName)
+		}
+		return session, session.Agy.ConversationID, nil
+	}
+	if agent.NormalizeHarnessName(session.Harness) == "pi-cli" {
+		if session.Pi == nil || session.Pi.SessionID == "" || session.Pi.SessionDir == "" {
+			return nil, "", fmt.Errorf("pi session %q has incomplete native identity metadata; reassociate or re-import it before requesting history", sessionName)
+		}
+		return session, session.Pi.SessionID, nil
+	}
+
+	findInManifests := func(name string) (*manifest.Manifest, error) {
+		manifests, listErr := store.ListSessions(&dolt.SessionFilter{})
+		if listErr != nil {
+			return nil, fmt.Errorf("failed to list sessions: %w", listErr)
+		}
+		for _, candidate := range manifests {
+			if candidate == nil {
+				continue
+			}
+			if candidate.Tmux.SessionName == name || candidate.Name == name {
+				return candidate, nil
+			}
+		}
+		return nil, fmt.Errorf("no AGM session found for: %s", name)
+	}
+	discoveredUUID, err := uuid.Discover(sessionName, findInManifests, false)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to discover UUID for session '%s': %w", sessionName, err)
+	}
+	return session, discoveredUUID, nil
+}
+
 var getHistoryPathCmd = &cobra.Command{
 	Use:   "get-history-path [session-name]",
 	Short: "Get conversation history file paths for a session",
 	Long: `Returns conversation history file paths for an AGM session.
 
 This command constructs file paths based on the harness type (Claude Code,
-Gemini CLI, OpenCode, Codex) used by the session. The harness determines
+Codex, AGY, OpenCode, or deprecated Gemini CLI) used by the session. The harness determines
 where conversation logs are stored.
 
 If session-name is not provided:
@@ -114,35 +163,15 @@ Examples:
 		}
 		defer func() { _ = adapter.Close() }()
 
-		// Create manifest search function for uuid.Discover
-		findInManifests := func(name string) (*manifest.Manifest, error) {
-			manifests, err := adapter.ListSessions(&dolt.SessionFilter{})
-			if err != nil {
-				return nil, fmt.Errorf("failed to list sessions: %w", err)
-			}
-
-			for _, m := range manifests {
-				if m.Tmux.SessionName == name || m.Name == name {
-					return m, nil
-				}
-			}
-			return nil, fmt.Errorf("no AGM session found for: %s", name)
-		}
-
-		// Use 3-level fallback to discover UUID
-		discoveredUUID, err := uuid.Discover(sessionName, findInManifests, false)
+		// Resolve the manifest first. Native harnesses such as AGY store their
+		// conversation identity there and must not enter Claude UUID discovery.
+		session, discoveredUUID, err := resolveNamedHistoryLocation(sessionName, adapter)
 		if err != nil {
-			return fmt.Errorf("failed to discover UUID for session '%s': %w", sessionName, err)
-		}
-
-		// Get session metadata from database
-		session, err := adapter.ResolveIdentifier(sessionName)
-		if err != nil {
-			return fmt.Errorf("failed to get session metadata: %w", err)
+			return err
 		}
 
 		// Extract harness type and working directory
-		harness := session.Harness
+		harness := agent.NormalizeHarnessName(session.Harness)
 		if harness == "" {
 			harness = "claude-code" // Default to claude-code if not set
 		}
@@ -156,7 +185,13 @@ Examples:
 
 // outputHistoryLocation constructs and outputs the history location
 func outputHistoryLocation(cmd *cobra.Command, agent, uuid, workingDir string, session *manifest.Manifest) error {
-	location, err := history.GetHistoryPaths(agent, uuid, workingDir, historyVerifyPaths)
+	var location *history.HistoryLocation
+	var err error
+	if agent == "pi-cli" && session != nil && session.Pi != nil {
+		location, err = history.GetPiHistoryPaths(session.Pi.SessionDir, session.Pi.SessionID, session.Pi.TranscriptPath, historyVerifyPaths)
+	} else {
+		location, err = history.GetHistoryPaths(agent, uuid, workingDir, historyVerifyPaths)
+	}
 	if err != nil {
 		if historyJSONOutput {
 			outputHistoryError(cmd, agent, uuid, err)

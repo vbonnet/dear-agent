@@ -2,6 +2,7 @@ package taskmanager
 
 import (
 	"fmt"
+	"math"
 	"path/filepath"
 	"slices"
 	"time"
@@ -70,6 +71,9 @@ func (tm *TaskManager) AddTask(phaseID, title string, opts *TaskOptions) (*statu
 
 	// Apply options
 	if opts != nil {
+		if math.IsNaN(opts.EffortDays) || math.IsInf(opts.EffortDays, 0) {
+			return nil, fmt.Errorf("effort days must be finite")
+		}
 		if opts.EffortDays > 0 {
 			task.EffortDays = opts.EffortDays
 		}
@@ -126,6 +130,10 @@ func (tm *TaskManager) AddTask(phaseID, title string, opts *TaskOptions) (*statu
 	// Update timestamp
 	st.UpdatedAt = time.Now()
 
+	if err := status.ValidateV2(st); err != nil {
+		return nil, fmt.Errorf("task update would create invalid status: %w", err)
+	}
+
 	// Write back
 	if err := status.WriteV2(st, tm.statusFile); err != nil {
 		return nil, fmt.Errorf("failed to write status file: %w", err)
@@ -148,6 +156,9 @@ func (tm *TaskManager) UpdateTask(taskID string, opts *UpdateOptions) (*status.T
 	task, phase := tm.findTask(st, taskID)
 	if task == nil {
 		return nil, fmt.Errorf("task not found: %s", taskID)
+	}
+	if math.IsNaN(opts.EffortDays) || math.IsInf(opts.EffortDays, 0) {
+		return nil, fmt.Errorf("effort days must be finite")
 	}
 
 	// Apply updates
@@ -249,6 +260,10 @@ func (tm *TaskManager) UpdateTask(taskID string, opts *UpdateOptions) (*status.T
 	// Update timestamp
 	st.UpdatedAt = time.Now()
 
+	if err := status.ValidateV2(st); err != nil {
+		return nil, fmt.Errorf("task update would create invalid status: %w", err)
+	}
+
 	// Write back
 	if err := status.WriteV2(st, tm.statusFile); err != nil {
 		return nil, fmt.Errorf("failed to write status file: %w", err)
@@ -345,6 +360,10 @@ func (tm *TaskManager) DeleteTask(taskID string) error {
 	// Update timestamp
 	st.UpdatedAt = time.Now()
 
+	if err := status.ValidateV2(st); err != nil {
+		return fmt.Errorf("task deletion would create invalid status: %w", err)
+	}
+
 	// Write back
 	if err := status.WriteV2(st, tm.statusFile); err != nil {
 		return fmt.Errorf("failed to write status file: %w", err)
@@ -428,10 +447,11 @@ func (tm *TaskManager) checkTaskReferences(st *status.StatusV2, taskID string) e
 	var references []string
 	for _, phase := range st.Roadmap.Phases {
 		for _, task := range phase.Tasks {
-			for _, dep := range task.DependsOn {
-				if dep == taskID {
-					references = append(references, task.ID)
-				}
+			if task.ID == taskID {
+				continue
+			}
+			if slices.Contains(task.DependsOn, taskID) || slices.Contains(task.Blocks, taskID) {
+				references = append(references, task.ID)
 			}
 		}
 	}

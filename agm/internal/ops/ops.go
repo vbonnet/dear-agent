@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manager"
@@ -42,6 +43,13 @@ type OpContext struct {
 	// CodexThreadCreator adapts the external Codex remote-control dependency.
 	// Nil selects the production implementation.
 	CodexThreadCreator CodexThreadCreator
+	// AgyWorkspaceCreateLocker serializes the provider-global identity window
+	// across every AGY creation surface. Nil selects the production lock.
+	AgyWorkspaceCreateLocker AgyWorkspaceCreateLocker
+	// AgyCreateIdentityTracker snapshots and correlates the provider-native AGY
+	// conversation while the shared workspace lock is held. Nil selects the
+	// production tracker.
+	AgyCreateIdentityTracker agysession.CreateIdentityTracker
 }
 
 // Result is the base type for all operation results.

@@ -8,11 +8,22 @@
 
 **DOLTR-03** When an isolated SQLite test store resolves a session by harness conversation UUID, the isolated SQLite test store shall use SQLite-compatible JSON extraction and return the same matching manifest semantics as production Dolt.
 
-**DOLTR-04** When a Go test or explicitly marked built test subprocess resolves Dolt configuration or constructs an adapter directly, the system shall select `ENGRAM_TEST_WORKSPACE` as its workspace and shall require its database to equal that workspace or the shared `agm_test` target before connecting.
+**DOLTR-04** When AGM updates a session after a runtime model change, the storage adapter shall persist the manifest model field, including an intentional empty value that represents unknown model provenance.
+
+**DOLTR-05** When AGM creates a session with no model, the storage adapter shall apply the historical default only to Claude Code sessions and shall preserve unknown model provenance for every non-Claude harness.
+
+**DOLTR-06** When a resume transaction provisionally changes a tmux session name, the storage adapter shall use an opaque cross-dialect ownership revision to compare-and-swap only the name, preserve unrelated columns, restore only that same provisional revision and its prior activity timestamp after failure, and rotate the revision after success so a newer concurrent update is never overwritten. An activity-only write during creation finalization shall preserve that provisional revision until finalization succeeds. If commit reports an error, the adapter shall re-read the exact prior and provisional revisions; it shall permit tmux cleanup without a pending metadata change only when the complete prior state proves the write did not commit, and otherwise shall preserve the provisional change for compare-and-swap compensation. A full-session update shall carry the revision observed by its read; it shall change the display and tmux names only if that revision is current, shall otherwise preserve both current identity names while applying unrelated fields, and shall always advance the revision so any number of older snapshots remain unable to reopen the identity compare-and-swap. An authoritative session rename shall atomically compare the prior user-visible name, tmux name, and observed revision before changing both names and advancing a generated revision. After an autocommit or result error it shall use a cancellation-independent competing compare-and-swap to advance the exact observed revision before re-reading: intended names under the generated or a later revision are success, while both prior names authorize tmux rollback only after their revision differs from the observed value and therefore fences the original write. An unchanged observed revision, failed fence, failed inspection, or different identity shall preserve tmux. Superseded rollback shall preserve the canonical tmux session without relying on timestamp precision.
+
+**DOLTR-07** When AGM opens a persistent SQLite test store created before tmux ownership revisions existed, the adapter shall idempotently add the nullable revision column before lifecycle queries run and shall preserve every existing session row.
+
+**DOLTR-08** When an administrative hierarchy repair assigns a parent and optionally inherits its display name, the storage adapter shall atomically persist both changes only against the exact identity revision observed by the caller, advance that revision on success, preserve the tmux name and unrelated fields, and return an explicit conflict instead of silently accepting a stale identity writer.
+
+**DOLTR-09** When a Go test or explicitly marked built test subprocess resolves Dolt configuration or constructs an adapter directly, the system shall select `ENGRAM_TEST_WORKSPACE` as its workspace and shall require its database to equal that workspace or the shared `agm_test` target before connecting.
 
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
+- Feature: `agm/test/bdd/features/harness_parity.feature`
 
 <!-- Last audited at: NEEDS-AUDIT -->
 

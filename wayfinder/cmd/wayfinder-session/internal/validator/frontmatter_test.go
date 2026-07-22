@@ -17,22 +17,22 @@ func TestExtractFrontmatter(t *testing.T) {
 		{
 			name: "valid frontmatter",
 			content: `---
-phase: "D1"
+phase: "PROBLEM"
 phase_name: "Problem Validation"
 wayfinder_session_id: "test-session-123"
 created_at: "2026-01-05T12:00:00Z"
 phase_engram_hash: "sha256:abc123"
-phase_engram_path: "~/engrams/d1-problem-validation.ai.md"
+phase_engram_path: "~/engrams/problem-validation.ai.md"
 ---
 
-# D1: Problem Validation
+# PROBLEM: Problem Validation
 
 Content here.
 `,
 			wantErr: false,
 			validate: func(t *testing.T, fm *DeliverableFrontmatter) {
-				if fm.Phase != "D1" {
-					t.Errorf("Phase = %q, want %q", fm.Phase, "D1")
+				if fm.Phase != "PROBLEM" {
+					t.Errorf("Phase = %q, want %q", fm.Phase, "PROBLEM")
 				}
 				if fm.PhaseName != "Problem Validation" {
 					t.Errorf("PhaseName = %q, want %q", fm.PhaseName, "Problem Validation")
@@ -46,14 +46,14 @@ Content here.
 				if fm.PhaseEngramHash != "sha256:abc123" {
 					t.Errorf("PhaseEngramHash = %q, want %q", fm.PhaseEngramHash, "sha256:abc123")
 				}
-				if fm.PhaseEngramPath != "~/engrams/d1-problem-validation.ai.md" {
-					t.Errorf("PhaseEngramPath = %q, want %q", fm.PhaseEngramPath, "~/engrams/d1-problem-validation.ai.md")
+				if fm.PhaseEngramPath != "~/engrams/problem-validation.ai.md" {
+					t.Errorf("PhaseEngramPath = %q, want %q", fm.PhaseEngramPath, "~/engrams/problem-validation.ai.md")
 				}
 			},
 		},
 		{
 			name: "missing frontmatter - no opening delimiter",
-			content: `# D1: Problem Validation
+			content: `# PROBLEM: Problem Validation
 
 Content without frontmatter.
 `,
@@ -63,7 +63,7 @@ Content without frontmatter.
 		{
 			name: "missing closing delimiter",
 			content: `---
-phase: "D1"
+phase: "PROBLEM"
 phase_name: "Problem Validation"
 
 # No closing delimiter above
@@ -74,7 +74,7 @@ phase_name: "Problem Validation"
 		{
 			name: "invalid YAML",
 			content: `---
-phase: "D1"
+phase: "PROBLEM"
 phase_name: [unclosed array
 created_at: "2026-01-05T12:00:00Z"
 ---
@@ -87,20 +87,20 @@ Content
 		{
 			name: "valid frontmatter without engram fields (standalone use)",
 			content: `---
-phase: "D1"
+phase: "PROBLEM"
 phase_name: "Problem Validation"
 wayfinder_session_id: "test-session-123"
 created_at: "2026-01-05T12:00:00Z"
 ---
 
-# D1: Problem Validation
+# PROBLEM: Problem Validation
 
 Content here.
 `,
 			wantErr: false,
 			validate: func(t *testing.T, fm *DeliverableFrontmatter) {
-				if fm.Phase != "D1" {
-					t.Errorf("Phase = %q, want %q", fm.Phase, "D1")
+				if fm.Phase != "PROBLEM" {
+					t.Errorf("Phase = %q, want %q", fm.Phase, "PROBLEM")
 				}
 				if fm.PhaseEngramHash != "" {
 					t.Errorf("PhaseEngramHash should be empty for standalone use, got %q", fm.PhaseEngramHash)
@@ -123,7 +123,7 @@ Content
 		{
 			name: "missing multiple required fields",
 			content: `---
-phase: "D1"
+phase: "PROBLEM"
 created_at: "2026-01-05T12:00:00Z"
 ---
 
@@ -141,7 +141,7 @@ Content
 		{
 			name: "frontmatter with extra fields tolerated",
 			content: `---
-phase: "D1"
+phase: "PROBLEM"
 phase_name: "Problem Validation"
 wayfinder_session_id: "test-session-123"
 created_at: "2026-01-05T12:00:00Z"
@@ -152,28 +152,28 @@ Content
 `,
 			wantErr: false,
 			validate: func(t *testing.T, fm *DeliverableFrontmatter) {
-				if fm.Phase != "D1" {
-					t.Errorf("Phase = %q, want %q", fm.Phase, "D1")
+				if fm.Phase != "PROBLEM" {
+					t.Errorf("Phase = %q, want %q", fm.Phase, "PROBLEM")
 				}
 			},
 		},
 		{
 			name: "valid frontmatter without engram fields",
 			content: `---
-phase: "S7"
+phase: "PLAN"
 phase_name: "Plan"
 wayfinder_session_id: "session-abc"
 created_at: "2026-06-11T10:00:00Z"
 ---
 
-# S7: Plan
+# PLAN: Plan
 
 Content here.
 `,
 			wantErr: false,
 			validate: func(t *testing.T, fm *DeliverableFrontmatter) {
-				if fm.Phase != "S7" {
-					t.Errorf("Phase = %q, want %q", fm.Phase, "S7")
+				if fm.Phase != "PLAN" {
+					t.Errorf("Phase = %q, want %q", fm.Phase, "PLAN")
 				}
 				if fm.PhaseEngramHash != "" {
 					t.Errorf("PhaseEngramHash should be empty (optional), got %q", fm.PhaseEngramHash)

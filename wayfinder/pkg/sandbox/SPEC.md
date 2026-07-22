@@ -1,6 +1,6 @@
 # Wayfinder Sandbox Package Specification
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-07-20 -->
 
 ## Overview
 
@@ -34,8 +34,17 @@ path resolution for sessions, costs, and temporary data.
 
 **WF-SANDBOX-12** When tests need fresh active-sandbox detection, the system shall provide a cache reset path for the resolver.
 
+**WF-SANDBOX-13** When cleanup encounters a registered worktree that Git refuses to remove, including a locked worktree, the system shall preserve the checkout and its sandbox metadata and return an error so cleanup can be retried safely.
+
+**WF-SANDBOX-14** When Git worktree removal fails, the system shall not bypass Git worktree protection with direct filesystem deletion or metadata pruning.
+
+**WF-SANDBOX-15** When sandbox tests exercise basic creation, listing, and cleanup, the system shall isolate the process working directory so the invoking repository's worktree registry remains unchanged.
+
 ## BDD Traceability
 
 - `agm/test/bdd/features/sandbox_provider_guardrails.feature` enforces that this
   package keeps co-located SPEC coverage and that the SPEC points back to the
   executable guardrail.
+- `agm/test/bdd/features/local_development_guardrails.feature` exercises cleanup
+  overlapping a live safe-pr worktree transaction and the safe retry after the
+  transaction releases its lock.

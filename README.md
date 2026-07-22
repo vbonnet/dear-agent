@@ -42,13 +42,14 @@ something breaks you open a terminal, not a dashboard.
 ```bash
 go install github.com/vbonnet/dear-agent/agm/cmd/agm@latest
 go install github.com/vbonnet/dear-agent/engram/cmd/engram@latest
+go install github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder@latest
 ```
 
-### Install the Claude Code plugins (`/agm:*`, `/wayfinder:*`, `/youtube`)
+### Install the Claude Code plugins (`/agm:*`, Wayfinder skill, `/youtube`)
 
-This repo also ships as a Claude Code plugin marketplace. To install the
-namespaced slash commands and skills (`/agm:agm-assoc`, `/wayfinder:validate-phase`,
-etc.), run:
+This repo also ships as a Claude Code plugin marketplace. The Wayfinder skill
+delegates to the `wayfinder` binary installed above. To install the namespaced
+AGM/YouTube commands and the Wayfinder skill, run:
 
 ```bash
 ./scripts/install-claude-plugins.sh             # from a local clone (default)

@@ -1,10 +1,109 @@
 package codexcontrol
 
 import (
+	"context"
 	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestStartRemoteControlAcceptsDaemonStatusWhenStdoutClosesLate(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "codex")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+printf '%s\n' '{"mode":"daemon","daemon":{"status":"alreadyRunning"}}'
+(sleep 30) &
+`), 0o700); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+
+	originalExec := execCommandContext
+	execCommandContext = func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, script)
+	}
+	t.Cleanup(func() { execCommandContext = originalExec })
+
+	// Keep the pipe-close bound well inside the command timeout. The old test
+	// used a one-second production WaitDelay against a five-second timeout;
+	// under a fully parallel race suite, scheduler contention could let the
+	// deadline win and turn this success-path regression into a false timeout.
+	client := &Client{Timeout: 30 * time.Second, waitDelay: 25 * time.Millisecond}
+	if err := client.StartRemoteControl(context.Background()); err != nil {
+		t.Fatalf("StartRemoteControl returned error for daemon status: %v", err)
+	}
+}
+
+func TestStartRemoteControlRejectsDaemonStatusAfterContextDeadline(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "codex")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+printf '%s\n' '{"mode":"daemon","daemon":{"status":"alreadyRunning"}}'
+sleep 2
+`), 0o700); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+
+	originalExec := execCommandContext
+	execCommandContext = func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, script)
+	}
+	t.Cleanup(func() { execCommandContext = originalExec })
+
+	client := &Client{Timeout: 50 * time.Millisecond}
+	err := client.StartRemoteControl(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("StartRemoteControl error = %v, want timeout", err)
+	}
+}
+
+func TestStartRemoteControlRejectsDaemonStatusAfterCommandFailure(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "codex")
+	if err := os.WriteFile(script, []byte(`#!/bin/sh
+printf '%s\n' '{"mode":"daemon","daemon":{"status":"alreadyRunning"}}'
+exit 1
+`), 0o700); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+
+	originalExec := execCommandContext
+	execCommandContext = func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, script)
+	}
+	t.Cleanup(func() { execCommandContext = originalExec })
+
+	// Process startup can be delayed well beyond five seconds while the full
+	// repository test matrix is saturating the host. Preserve ample separation
+	// from the production timeout so this command-failure assertion observes the
+	// injected exit status instead of winning a scheduler race with the deadline.
+	client := &Client{Timeout: 30 * time.Second}
+	err := client.StartRemoteControl(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "exit status 1") {
+		t.Fatalf("StartRemoteControl error = %v, want command failure", err)
+	}
+}
+
+func TestIsRemoteControlDaemonStatus(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		want   bool
+	}{
+		{name: "daemon", output: `{"mode":"daemon","daemon":{"status":"alreadyRunning"}}`, want: true},
+		{name: "missing daemon", output: `{"mode":"daemon"}`, want: false},
+		{name: "wrong mode", output: `{"mode":"foreground","daemon":{}}`, want: false},
+		{name: "malformed", output: `{`, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isRemoteControlDaemonStatus([]byte(tt.output)); got != tt.want {
+				t.Fatalf("isRemoteControlDaemonStatus(%q) = %t, want %t", tt.output, got, tt.want)
+			}
+		})
+	}
+}
 
 func TestReadResponseSkipsNotifications(t *testing.T) {
 	input := strings.NewReader(strings.Join([]string{

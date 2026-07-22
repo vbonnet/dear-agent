@@ -9,13 +9,13 @@ import (
 
 func TestStatusToMessage_InProgress(t *testing.T) {
 	status := Status{
-		SessionID:    "sess-1",
-		ProjectPath:  "/tmp/project",
-		Status:       "in_progress",
-		CurrentPhase: "design",
-		Phases: []Phase{
-			{Name: "planning", Status: "completed"},
-			{Name: "design", Status: "in_progress"},
+		ProjectName:     "project-one",
+		ProjectPath:     "/tmp/project",
+		Status:          "in-progress",
+		CurrentWaypoint: "DESIGN",
+		Waypoints: []Waypoint{
+			{Name: "PLAN", Status: "completed"},
+			{Name: "DESIGN", Status: "in-progress"},
 		},
 	}
 
@@ -27,46 +27,46 @@ func TestStatusToMessage_InProgress(t *testing.T) {
 	if msg.Status != protocol.StatusPending {
 		t.Errorf("Status = %q, want %q", msg.Status, protocol.StatusPending)
 	}
-	if !strings.Contains(msg.Context, "sess-1") {
-		t.Error("Context should contain session ID")
+	if !strings.Contains(msg.Context, "project-one") {
+		t.Error("Context should contain project name")
 	}
-	if !strings.Contains(msg.Context, "design") {
-		t.Error("Context should contain current phase")
+	if !strings.Contains(msg.Context, "DESIGN") {
+		t.Error("Context should contain current waypoint")
 	}
 
-	// NextSteps should mention continuing the current phase
+	// NextSteps should mention continuing the current waypoint.
 	found := false
 	for _, step := range msg.NextSteps {
-		if strings.Contains(step, "Continue") && strings.Contains(step, "design") {
+		if strings.Contains(step, "Continue") && strings.Contains(step, "DESIGN") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("NextSteps should contain step about continuing design phase, got %v", msg.NextSteps)
+		t.Errorf("NextSteps should contain step about continuing DESIGN, got %v", msg.NextSteps)
 	}
 
-	// formatPhases tested indirectly: multiple phases should appear in proposal
-	if !strings.Contains(msg.Proposal, "planning") {
-		t.Error("Proposal should contain phase 'planning' from formatPhases")
+	// formatWaypoints is exercised indirectly through the proposal.
+	if !strings.Contains(msg.Proposal, "PLAN") {
+		t.Error("Proposal should contain PLAN from formatWaypoints")
 	}
-	if !strings.Contains(msg.Proposal, "design") {
-		t.Error("Proposal should contain phase 'design' from formatPhases")
+	if !strings.Contains(msg.Proposal, "DESIGN") {
+		t.Error("Proposal should contain DESIGN from formatWaypoints")
 	}
-	// completed phase gets "V" icon, in_progress gets ">"
-	if !strings.Contains(msg.Proposal, "V planning") {
-		t.Error("Proposal should show V icon for completed phase")
+	// A completed waypoint gets the V icon and an active one gets >.
+	if !strings.Contains(msg.Proposal, "V PLAN") {
+		t.Error("Proposal should show V icon for completed waypoint")
 	}
-	if !strings.Contains(msg.Proposal, "> design") {
-		t.Error("Proposal should show > icon for in_progress phase")
+	if !strings.Contains(msg.Proposal, "> DESIGN") {
+		t.Error("Proposal should show > icon for in-progress waypoint")
 	}
 }
 
 func TestStatusToMessage_Completed(t *testing.T) {
 	status := Status{
-		SessionID:    "sess-2",
-		Status:       "completed",
-		CurrentPhase: "delivery",
+		ProjectName:     "project-two",
+		Status:          "completed",
+		CurrentWaypoint: "BUILD",
 	}
 
 	msg := StatusToMessage(status, "agent-B")
@@ -87,13 +87,13 @@ func TestStatusToMessage_Completed(t *testing.T) {
 	}
 }
 
-func TestPhaseTransitionMessage(t *testing.T) {
+func TestWaypointTransitionMessage(t *testing.T) {
 	status := Status{
-		SessionID:   "sess-3",
+		ProjectName: "project-three",
 		ProjectPath: "/my/project",
 	}
 
-	msg := PhaseTransitionMessage(status, "planning", "design", "agent-C")
+	msg := WaypointTransitionMessage(status, "PLAN", "BUILD", "agent-C")
 
 	if msg.AgentID != "agent-C" {
 		t.Errorf("AgentID = %q, want %q", msg.AgentID, "agent-C")
@@ -103,23 +103,23 @@ func TestPhaseTransitionMessage(t *testing.T) {
 	}
 
 	// Context should describe the transition
-	if !strings.Contains(msg.Context, "planning") || !strings.Contains(msg.Context, "design") {
-		t.Errorf("Context should mention both old and new phases, got %q", msg.Context)
+	if !strings.Contains(msg.Context, "PLAN") || !strings.Contains(msg.Context, "BUILD") {
+		t.Errorf("Context should mention both old and new waypoints, got %q", msg.Context)
 	}
-	if !strings.Contains(msg.Context, "sess-3") {
-		t.Error("Context should contain session ID")
+	if !strings.Contains(msg.Context, "project-three") {
+		t.Error("Context should contain project name")
 	}
 
 	// Questions should contain approval request
 	approvalFound := false
 	for _, q := range msg.Questions {
-		if strings.Contains(q, "Approved") && strings.Contains(q, "design") {
+		if strings.Contains(q, "Approved") && strings.Contains(q, "BUILD") {
 			approvalFound = true
 			break
 		}
 	}
 	if !approvalFound {
-		t.Errorf("Questions should contain approval request for new phase, got %v", msg.Questions)
+		t.Errorf("Questions should contain approval request for new waypoint, got %v", msg.Questions)
 	}
 
 	// Proposal should mention the project path
@@ -133,7 +133,7 @@ func TestTaskToMessage_Completed(t *testing.T) {
 		TaskID:      "task-10",
 		Description: "Implement feature X",
 		Status:      "completed",
-		Phase:       "implementation",
+		Waypoint:    "BUILD",
 	}
 
 	msg := TaskToMessage(task, "agent-D", "custom context")
@@ -154,7 +154,7 @@ func TestTaskToMessage_Blocked(t *testing.T) {
 		TaskID:      "task-20",
 		Description: "Deploy service",
 		Status:      "blocked",
-		Phase:       "deployment",
+		Waypoint:    "BUILD",
 	}
 
 	msg := TaskToMessage(task, "agent-E", "deploying")
@@ -172,8 +172,8 @@ func TestTaskToMessage_Blocked(t *testing.T) {
 
 func TestTaskToMessage_EmptyContext(t *testing.T) {
 	task := TaskUpdate{
-		TaskID: "task-30",
-		Phase:  "testing",
+		TaskID:   "task-30",
+		Waypoint: "BUILD",
 	}
 
 	msg := TaskToMessage(task, "agent-F", "")
@@ -181,8 +181,8 @@ func TestTaskToMessage_EmptyContext(t *testing.T) {
 	if !strings.Contains(msg.Context, "task-30") {
 		t.Error("Default context should contain task ID")
 	}
-	if !strings.Contains(msg.Context, "testing") {
-		t.Error("Default context should contain phase name")
+	if !strings.Contains(msg.Context, "BUILD") {
+		t.Error("Default context should contain waypoint name")
 	}
 }
 

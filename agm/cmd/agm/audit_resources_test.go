@@ -2,7 +2,9 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -310,6 +312,52 @@ func TestScanWorktreesDir_SkipsActiveSessions(t *testing.T) {
 	if len(orphans) != 0 {
 		t.Errorf("Expected no orphans for active session, got %v", orphans)
 	}
+}
+
+func TestRemoveOrphanWorktreePreservesGitLockedCheckout(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "repo")
+	worktree := filepath.Join(base, "worktree")
+	auditResourcesGitRun(t, "init", "-q", "-b", "main", repo)
+	auditResourcesGitRun(t, "-C", repo, "config", "user.name", "AGM Audit Test")
+	auditResourcesGitRun(t, "-C", repo, "config", "user.email", "agm-audit@example.invalid")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("audit test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	auditResourcesGitRun(t, "-C", repo, "add", "README.md")
+	auditResourcesGitRun(t, "-C", repo, "commit", "-q", "-m", "initial")
+	auditResourcesGitRun(t, "-C", repo, "worktree", "add", "-q", "-b", "audit-test", worktree)
+	auditResourcesGitRun(t, "-C", repo, "worktree", "lock", "--reason", "active-safe-pr", worktree)
+
+	orphan := orphanedWorktree{Path: worktree, Repo: repo, Reason: "no-active-session"}
+	err := removeOrphanWorktree(orphan)
+	if err == nil || !strings.Contains(err.Error(), "refusing direct removal") {
+		t.Fatalf("removeOrphanWorktree(locked) = %v, want conservative rejection", err)
+	}
+	if _, err := os.Stat(worktree); err != nil {
+		t.Fatalf("locked orphan checkout was removed: %v", err)
+	}
+	porcelain := auditResourcesGitRun(t, "-C", repo, "worktree", "list", "--porcelain")
+	if !strings.Contains(porcelain, "locked active-safe-pr") {
+		t.Fatalf("locked orphan metadata changed:\n%s", porcelain)
+	}
+
+	auditResourcesGitRun(t, "-C", repo, "worktree", "unlock", worktree)
+	if err := removeOrphanWorktree(orphan); err != nil {
+		t.Fatalf("removeOrphanWorktree(after unlock) = %v", err)
+	}
+	if _, err := os.Stat(worktree); !os.IsNotExist(err) {
+		t.Fatalf("orphan checkout after retry stat = %v, want not exist", err)
+	}
+}
+
+func auditResourcesGitRun(t *testing.T, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+	return string(out)
 }
 
 // ---------------------------------------------------------------------------

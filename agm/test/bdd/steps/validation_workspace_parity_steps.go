@@ -51,7 +51,7 @@ func validationWorkspaceHarnessUsesFamily(ctx context.Context, harness, family s
 	if err != nil {
 		return err
 	}
-	if !slices.Contains([]string{"claude-code", "codex-cli", "agy", "opencode-cli"}, harness) {
+	if !slices.Contains([]string{"claude-code", "codex-cli", "agy", "opencode-cli", "pi-cli"}, harness) {
 		return fmt.Errorf("unsupported validation workspace harness %q", harness)
 	}
 	if !slices.Contains([]string{"anthropic", "openai", "gemini", "glm", "deepseek", "nemotron", "qwen"}, family) {
@@ -90,7 +90,7 @@ func validationWorkspaceBehaviorShouldRemainNeutral(ctx context.Context) error {
 func validationWorkspacePackages() []string {
 	return []string{
 		"pkg/security", "pkg/validation", "pkg/validation/engram", "pkg/validation/scope", "pkg/validator",
-		"pkg/vcs", "pkg/version", "pkg/w0", "pkg/workspace", "pkg/workspace/dolt",
+		"pkg/vcs", "pkg/version", "pkg/workspace", "pkg/workspace/dolt",
 	}
 }
 

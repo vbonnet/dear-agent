@@ -14,7 +14,7 @@ const RetroFilename = "RETRO-retrospective.md"
 // AppendToRetro formats RewindEventData as markdown and appends to the RETRO deliverable.
 //
 // Uses O_APPEND flag for concurrent-safe writes (atomic at OS level).
-// Creates file if it doesn't exist (should exist from wayfinder-session start, but fail-gracefully).
+// Creates file if it doesn't exist (should exist from wayfinder session start, but fail-gracefully).
 func AppendToRetro(projectDir string, data *RewindEventData) error {
 	retroPath := filepath.Join(projectDir, RetroFilename)
 

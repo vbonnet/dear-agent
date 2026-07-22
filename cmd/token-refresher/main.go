@@ -7,11 +7,20 @@
 // the whole read-check-exchange-write cycle runs under a cross-process lock, so
 // two panes never each spend the single-use refresh token and poison the family.
 //
+// That lock only binds callers of THIS binary. Since apiKeyHelper was removed on
+// 2026-07-10 (Claude Code >=2.1.205 lets a configured helper shadow healthy
+// OAuth -- anthropics/claude-code#11587), the Claude Code runtimes on the host
+// refresh on their own and take no lock, so "single-owner" no longer describes
+// reality. Every audit line therefore carries a fingerprint of the refresh token
+// it was about to present (fingerprint.go), which is what lets a post-mortem
+// name the client that actually spent the token. See ce-77ip.
+//
 // Modes:
 //
 //	token-refresher              # ensure fresh, print the access token to stdout
 //	token-refresher -check       # report status only, no network, no mutation
 //	token-refresher -force       # refresh even if the current token is fresh
+//	token-refresher -cadence     # unattended launchd mode (see cadence.go)
 //
 // The default (print) mode is designed for use as a Claude Code `apiKeyHelper`:
 // it emits ONLY the access token on stdout (all logs go to stderr), so the CLI
@@ -72,6 +81,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		credPath    = fs.String("credentials", "", "path to credentials.json (default ~/.claude/.credentials.json)")
 		endpoint    = fs.String("endpoint", "", "OAuth token endpoint override (default built-in / $CLAUDE_OAUTH_TOKEN_ENDPOINT)")
 		clientID    = fs.String("client-id", "", "OAuth client ID override (default built-in / $CLAUDE_OAUTH_CLIENT_ID)")
+		cadence     = fs.Bool("cadence", false, "unattended launchd mode: alert on token-family death and always exit 0 so launchd keeps the schedule")
 		lockTimeout = fs.Duration("lock-timeout", 0, "max wait for the cross-process credentials lock (default 10s)")
 		auditPath   = fs.String("audit-log", defaultAuditPath(), "JSONL audit log path (empty to disable)")
 	)
@@ -104,6 +114,19 @@ func run(args []string, stdout, stderr io.Writer) int {
 		HTTPClient:      &http.Client{Timeout: httpTimeout},
 	}
 
+	// Fingerprint the on-disk refresh token BEFORE doing anything, so the audit
+	// line records the token this tick was about to present. See fingerprint.go.
+	fp, credMod := credentialsFingerprint(*credPath)
+
+	// finish adapts the exit code for the unattended cadence caller. See
+	// cadence.go: it alerts on a dead family and keeps launchd's schedule alive.
+	finish := func(code int) int {
+		if *cadence {
+			return cadenceExit(code, defaultStateDir(), stderr)
+		}
+		return code
+	}
+
 	if *check {
 		st := r.Status()
 		span.SetAttributes(
@@ -111,7 +134,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 			attribute.Bool("fresh", st.Fresh),
 		)
 		printStatus(stderr, st)
-		writeAudit(*auditPath, auditRecord{Mode: "check", Outcome: "ok", Fresh: st.Fresh, ExpiresAt: msOrZero(st.ExpiresAt)})
+		writeAudit(*auditPath, auditRecord{
+			Mode: "check", Outcome: "ok", Fresh: st.Fresh, ExpiresAt: msOrZero(st.ExpiresAt),
+			RefreshTokenFP: fp, CredentialsModTime: credMod,
+		})
 		return exitOK
 	}
 
@@ -127,7 +153,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
-		return handleRefreshError(err, mode, *auditPath, stderr)
+		return finish(handleRefreshError(err, mode, *auditPath, stderr, fp, credMod))
 	}
 
 	span.SetAttributes(
@@ -135,33 +161,65 @@ func run(args []string, stdout, stderr io.Writer) int {
 		attribute.Bool("refreshed", refreshed),
 		attribute.String("outcome", "ok"),
 	)
-	writeAudit(*auditPath, auditRecord{Mode: mode, Outcome: "ok", Refreshed: refreshed})
+	writeAudit(*auditPath, auditRecord{
+		Mode: mode, Outcome: "ok", Refreshed: refreshed,
+		RefreshTokenFP: fp, CredentialsModTime: credMod,
+	})
 
 	// apiKeyHelper contract: stdout carries ONLY the token.
 	fmt.Fprintln(stdout, token)
-	return exitOK
+	return finish(exitOK)
 }
 
 // handleRefreshError maps a refresh error to a clear stderr message, an audit
 // record, and an exit code. The typed errors get distinct codes so a wrapper
 // (or operator) can escalate the unrecoverable ones.
-func handleRefreshError(err error, mode, auditPath string, stderr io.Writer) int {
+func handleRefreshError(err error, mode, auditPath string, stderr io.Writer, fp, credMod string) int {
 	switch {
 	case errors.Is(err, auth.ErrTokenFamilyDead):
 		fmt.Fprintf(stderr, "token-refresher: refresh token rejected (invalid_grant). The token family is dead.\n"+
-			"  Re-authenticate on the host with `claude /login` or `claude setup-token`, then restart the mesh.\n")
-		writeAudit(auditPath, auditRecord{Mode: mode, Outcome: "token_family_dead", Error: err.Error()})
+			"  Re-authenticate on the host with `claude /login` or `claude setup-token`, then restart the mesh.\n"+
+			"  Spent refresh token fingerprint: %s (credentials mtime %s).\n"+
+			"  Compare against the preceding audit lines: if the fingerprint changed since our last\n"+
+			"  successful refresh, another OAuth client on this host rotated the token. If it did not,\n"+
+			"  the token was spent by a client that never wrote back to this credentials file.\n", fpOrUnknown(fp), credModOrUnknown(credMod))
+		writeAudit(auditPath, auditRecord{
+			Mode: mode, Outcome: "token_family_dead", Error: err.Error(),
+			RefreshTokenFP: fp, CredentialsModTime: credMod,
+		})
 		return exitTokenFamilyDead
 	case errors.Is(err, auth.ErrRefreshNotPersisted):
 		fmt.Fprintf(stderr, "token-refresher: CRITICAL — refresh succeeded but new credentials could not be written.\n"+
 			"  The rotated refresh token is not on disk; the next refresh may fail. Investigate disk/permissions now.\n  cause: %v\n", err)
-		writeAudit(auditPath, auditRecord{Mode: mode, Outcome: "not_persisted", Error: err.Error()})
+		writeAudit(auditPath, auditRecord{
+			Mode: mode, Outcome: "not_persisted", Error: err.Error(),
+			RefreshTokenFP: fp, CredentialsModTime: credMod,
+		})
 		return exitNotPersisted
 	default:
 		fmt.Fprintf(stderr, "token-refresher: %v\n", err)
-		writeAudit(auditPath, auditRecord{Mode: mode, Outcome: "error", Error: err.Error()})
+		writeAudit(auditPath, auditRecord{
+			Mode: mode, Outcome: "error", Error: err.Error(),
+			RefreshTokenFP: fp, CredentialsModTime: credMod,
+		})
 		return exitError
 	}
+}
+
+// fpOrUnknown and credModOrUnknown keep the operator-facing death message
+// readable when the credentials file could not be read at all.
+func fpOrUnknown(fp string) string {
+	if fp == "" {
+		return "unknown"
+	}
+	return fp
+}
+
+func credModOrUnknown(m string) string {
+	if m == "" {
+		return "unknown"
+	}
+	return m
 }
 
 func printStatus(w io.Writer, st auth.TokenStatus) {
@@ -199,6 +257,15 @@ type auditRecord struct {
 	Fresh     bool   `json:"fresh,omitempty"`
 	ExpiresAt int64  `json:"expires_at_ms,omitempty"`
 	Error     string `json:"error,omitempty"`
+
+	// RefreshTokenFP is a short SHA-256 prefix of the refresh token that was on
+	// disk when this tick STARTED, and CredentialsModTime is that file's mtime.
+	// Comparing them across consecutive ticks reveals whether a third-party
+	// OAuth client rotated the token behind our back -- the question the logs
+	// could not answer during the ce-77ip family-death investigation. Neither
+	// field is reversible to the token itself.
+	RefreshTokenFP     string `json:"refresh_token_fp,omitempty"`
+	CredentialsModTime string `json:"credentials_mtime,omitempty"`
 }
 
 func writeAudit(path string, rec auditRecord) {

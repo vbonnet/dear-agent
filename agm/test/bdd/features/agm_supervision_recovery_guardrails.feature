@@ -3,6 +3,7 @@
 # RELATED-SPEC: agm/internal/orphan/SPEC.md
 # RELATED-SPEC: agm/internal/orphanpr/SPEC.md
 # RELATED-SPEC: agm/internal/sentinel/config/SPEC.md
+# RELATED-SPEC: agm/internal/sentinel/daemon/SPEC.md
 # RELATED-SPEC: agm/internal/sentinel/intake/SPEC.md
 # RELATED-SPEC: agm/internal/sentinel/tmux/SPEC.md
 # RELATED-SPEC: agm/internal/skipdetect/SPEC.md
@@ -23,6 +24,14 @@ Feature: AGM supervision and recovery guardrails
       | agm/internal/orphanpr        |
       | agm/internal/ops/wtpolicy    |
       | agm/internal/sentinel/config |
+      | agm/internal/sentinel/daemon |
       | agm/internal/sentinel/intake |
       | agm/internal/sentinel/tmux   |
       | agm/internal/skipdetect      |
+
+  Scenario: Sentinel monitoring stays on its configured tmux socket
+    Given sentinel monitoring owns an explicit tmux socket
+    When AGM validates sentinel tmux isolation
+    Then sentinel discovery should use only the configured socket
+    And nested AGM recovery commands should inherit the configured socket
+    And sentinel lifecycle tests should not inspect ambient tmux sessions

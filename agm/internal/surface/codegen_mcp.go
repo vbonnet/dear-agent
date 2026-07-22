@@ -14,7 +14,7 @@ import (
 // ListSessionsMCPInput is the MCP input schema for list_sessions.
 type ListSessionsMCPInput struct {
 	Status  string `json:"status,omitempty" jsonschema:"description=Filter by session status,enum=active, archived, all"`
-	Harness string `json:"harness,omitempty" jsonschema:"description=Filter by harness; gemini-cli is deprecated,enum=claude-code, codex-cli, agy, opencode-cli, gemini-cli, all"`
+	Harness string `json:"harness,omitempty" jsonschema:"description=Filter by harness; gemini-cli is deprecated,enum=claude-code, codex-cli, agy, opencode-cli, pi-cli, gemini-cli, all"`
 	Limit   int    `json:"limit,omitempty" jsonschema:"description=Maximum sessions to return (1-1000)"`
 	Offset  int    `json:"offset,omitempty" jsonschema:"description=Pagination offset"`
 }
@@ -178,7 +178,9 @@ func AddArchiveSessionTool(server *mcp.Server, newOpCtx func() (*OpContext, func
 
 // KillSessionMCPInput is the MCP input schema for kill_session.
 type KillSessionMCPInput struct {
-	Identifier string `json:"identifier" jsonschema:"description=Session ID, name, or UUID prefix,required"`
+	Identifier     string `json:"identifier" jsonschema:"description=Session ID, name, or UUID prefix,required"`
+	Force          bool   `json:"force,omitempty" jsonschema:"description=Bypass the recent-activity safety check"`
+	ConfirmedStuck bool   `json:"confirmed_stuck,omitempty" jsonschema:"description=Confirm that a live harness is stuck and may be killed"`
 }
 
 // AddKillSessionTool registers the agm_kill_session MCP tool.
@@ -195,7 +197,9 @@ func AddKillSessionTool(server *mcp.Server, newOpCtx func() (*OpContext, func(),
 
 		req := &KillSessionRequest{
 
-			Identifier: input.Identifier,
+			Identifier:     input.Identifier,
+			Force:          input.Force,
+			ConfirmedStuck: input.ConfirmedStuck,
 		}
 
 		result, opErr := KillSession(opCtx, req)

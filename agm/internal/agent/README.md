@@ -4,7 +4,7 @@ This package implements the Agent interface abstraction for supporting multiple 
 
 ## Overview
 
-The Agent interface provides a unified API for managing AI harness sessions. The active parity harnesses are `claude-code`, `codex-cli`, `agy`, and `opencode-cli`, with Claude Code as the reference implementation. `gemini-cli` remains deprecated compatibility for old sessions.
+The Agent interface provides a unified API for managing AI harness sessions. The active parity harnesses are `claude-code`, `codex-cli`, `agy`, `opencode-cli`, and `pi-cli`, with Claude Code as the reference implementation. `gemini-cli` remains deprecated compatibility for old sessions.
 
 ## Architecture
 
@@ -70,7 +70,12 @@ CodexCLIAdapter implementation:
 AgyAdapter implementation:
 - Implements Agent interface for Antigravity/AGY
 - Uses tmux-backed interactive sessions
-- Resumes saved conversations with AGY conversation IDs where available
+- Uses the same model-aware launch command policy as the production lifecycle
+- Normalizes workspaces and shares provider identity serialization with CLI and MCP creation so cross-surface concurrent creates cannot exchange native IDs
+- Fails closed on unreadable metadata and rejects unsafe native AGY conversation IDs before launch, resume, or history path use
+- Refuses cold-resume command injection when the recorded tmux pane contains another live harness
+- Requires readiness before reporting create or cold-resume success
+- Uses exact AGY process-tree liveness and native brain transcripts
 
 ### opencode_adapter.go
 OpenCodeAdapter implementation:
@@ -86,7 +91,8 @@ GeminiCLIAdapter implementation:
 SessionStore manages SessionID persistence:
 - `SessionStore` interface - Get/Set/Delete/List operations
 - `JSONSessionStore` - File-based implementation (~/.agm/sessions.json)
-- `SessionMetadata` - Session information (tmux name, created time, working dir)
+- `SessionMetadata` - Session information (tmux name, created time, working dir,
+  selected model/mode/directories, and native harness identifier)
 - Thread-safe with sync.RWMutex
 - Atomic file writes for data integrity
 
@@ -114,6 +120,7 @@ sessionID, err := adapter.CreateSession(agent.SessionContext{
     Name:             "my-session",
     WorkingDirectory: "~/project",
     Project:          "my-project",
+    Model:            "3.5-flash-low",
 })
 
 // Resume existing session

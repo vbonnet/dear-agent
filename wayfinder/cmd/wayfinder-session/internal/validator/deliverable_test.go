@@ -168,7 +168,7 @@ func TestValidateDeliverableSize_NoDeliverable(t *testing.T) {
 	}
 }
 
-func TestValidateS8Implementation(t *testing.T) {
+func TestValidateBuildImplementation(t *testing.T) {
 	tests := []struct {
 		name        string
 		files       []string

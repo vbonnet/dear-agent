@@ -8,7 +8,7 @@ import (
 )
 
 func TestSupportedHarnesses(t *testing.T) {
-	want := []string{"claude-code", "codex-cli", "agy", "opencode-cli"}
+	want := []string{"claude-code", "codex-cli", "agy", "opencode-cli", "pi-cli"}
 	if got := SupportedHarnesses(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("SupportedHarnesses() = %v, want %v", got, want)
 	}
@@ -20,6 +20,7 @@ func TestNewHarnessAdapterAliases(t *testing.T) {
 		"codex":       "codex-cli",
 		"antigravity": "agy",
 		"opencode":    "opencode-cli",
+		"pi":          "pi-cli",
 	}
 	for input, want := range tests {
 		t.Run(input, func(t *testing.T) {

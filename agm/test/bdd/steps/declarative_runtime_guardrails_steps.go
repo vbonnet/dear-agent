@@ -39,8 +39,6 @@ var declarativeRuntimeDirs = []string{
 	"pkg/codeintel/rules/python",
 	"pkg/codeintel/rules/typescript",
 	"wayfinder/.claude-plugin",
-	"wayfinder/cmd/wayfinder-session/internal/integration/.github/workflows",
-	"wayfinder/cmd/wayfinder-session/schema",
 }
 
 type declarativeRuntimeGuardrailStateKey struct{}
@@ -75,7 +73,7 @@ func configureDeclarativeRuntimeRoute(ctx context.Context, harness, family strin
 	if err != nil {
 		return err
 	}
-	if _, ok := map[string]struct{}{"claude-code": {}, "codex-cli": {}, "agy": {}, "opencode-cli": {}}[harness]; !ok {
+	if _, ok := map[string]struct{}{"claude-code": {}, "codex-cli": {}, "agy": {}, "opencode-cli": {}, "pi-cli": {}}[harness]; !ok {
 		return fmt.Errorf("unsupported active harness %q", harness)
 	}
 	if _, ok := map[string]struct{}{"anthropic": {}, "openai": {}, "gemini": {}, "glm": {}, "deepseek": {}, "nemotron": {}, "qwen": {}}[family]; !ok {

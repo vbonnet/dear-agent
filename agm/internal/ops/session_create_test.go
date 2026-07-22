@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
+	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
@@ -24,6 +26,7 @@ type createMockStorage struct {
 	createErr   error
 	deleteErr   error
 	createOrder *[]string
+	onCreate    func()
 }
 
 type createOnlyTmux struct {
@@ -42,6 +45,28 @@ func (t *createFailingKillTmux) KillSession(string) error {
 type createTestRuntime struct {
 	launch   func(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error)
 	complete func(context.Context, CreateSessionCompletion) error
+}
+
+type createTestAgyIdentityTracker struct {
+	snapshot func(context.Context, string) (string, error)
+	discover func(context.Context, string, string) (*agysession.Metadata, error)
+}
+
+func (tracker *createTestAgyIdentityTracker) Snapshot(ctx context.Context, workDir string) (string, error) {
+	return tracker.snapshot(ctx, workDir)
+}
+
+func (tracker *createTestAgyIdentityTracker) Discover(ctx context.Context, workDir, previousConversationID string) (*agysession.Metadata, error) {
+	return tracker.discover(ctx, workDir, previousConversationID)
+}
+
+func successfulCreateTestAgyIdentityTracker() *createTestAgyIdentityTracker {
+	return &createTestAgyIdentityTracker{
+		snapshot: func(context.Context, string) (string, error) { return "previous-native-id", nil },
+		discover: func(_ context.Context, workDir, _ string) (*agysession.Metadata, error) {
+			return &agysession.Metadata{ConversationID: "new-native-id", WorkspacePath: workDir}, nil
+		},
+	}
 }
 
 func (r *createTestRuntime) Launch(ctx context.Context, spec HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
@@ -63,6 +88,9 @@ func (s *createMockStorage) CreateSession(m *manifest.Manifest) error {
 		*s.createOrder = append(*s.createOrder, "register")
 	}
 	s.created = append(s.created, m)
+	if s.onCreate != nil {
+		s.onCreate()
+	}
 	return s.createErr
 }
 func (s *createMockStorage) GetSession(string) (*manifest.Manifest, error) { return nil, nil }
@@ -180,6 +208,120 @@ func TestCreateSession_HappyPath(t *testing.T) {
 	}
 }
 
+func TestCreateSession_AgyDetachedPromptUsesCanonicalCommand(t *testing.T) {
+	dir := t.TempDir()
+	tmuxMock := session.NewMockTmux()
+	store := &createMockStorage{}
+
+	result, err := CreateSession(&OpContext{
+		Tmux: tmuxMock, Storage: store, AgyCreateIdentityTracker: successfulCreateTestAgyIdentityTracker(),
+	}, &CreateSessionRequest{
+		Cwd: dir, Prompt: "detached AGY prompt", Title: "agy-detached",
+		Harness: "agy", Model: "3.5-flash-low", PermissionMode: "auto",
+		ExtraAddDirs: []string{"/tmp/extra dir"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if result.Harness != "agy" || result.Model != "3.5-flash-low" {
+		t.Fatalf("result harness/model = %q/%q", result.Harness, result.Model)
+	}
+	if len(tmuxMock.SentCommands) != 2 {
+		t.Fatalf("tmux commands = %v, want launch then detached prompt", tmuxMock.SentCommands)
+	}
+	launch := tmuxMock.SentCommands[0]
+	for _, want := range []string{
+		"agy --model 'Gemini 3.5 Flash (Low)'",
+		"--dangerously-skip-permissions",
+		"--add-dir '/tmp/extra dir'",
+	} {
+		if !strings.Contains(launch, want) {
+			t.Errorf("AGY launch %q missing %q", launch, want)
+		}
+	}
+	if strings.Contains(launch, "--prompt-interactive") {
+		t.Errorf("AGY launch used prompt flag without a prompt: %q", launch)
+	}
+	if tmuxMock.SentCommands[1] != "detached AGY prompt" {
+		t.Fatalf("startup prompt = %q", tmuxMock.SentCommands[1])
+	}
+	if len(store.created) != 1 || store.created[0].Harness != "agy" || store.created[0].Model != "3.5-flash-low" {
+		t.Fatalf("stored AGY manifest = %+v", store.created)
+	}
+}
+
+func TestCreateSessionPiPreparesExactNativeIdentityPolicyAndManifest(t *testing.T) {
+	root := t.TempDir()
+	extensionRoot := t.TempDir()
+	t.Setenv("AGM_PI_SESSION_ROOT", root)
+	t.Setenv("AGM_PI_EXTENSION_ROOT", extensionRoot)
+	workDir := t.TempDir()
+	store := &createMockStorage{}
+	tmuxMock := session.NewMockTmux()
+	var launched HarnessLaunchSpec
+	var completed *manifest.Manifest
+	runtime := &createTestRuntime{
+		launch: func(_ context.Context, spec HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			launched = spec
+			return CreateSessionLaunchResult{ModeAppliedAtStartup: true}, nil
+		},
+		complete: func(_ context.Context, completion CreateSessionCompletion) error {
+			completed = completion.Manifest
+			return nil
+		},
+	}
+	result, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+	}, &CreateSessionRequest{
+		Cwd: workDir, Prompt: "hello", Title: "pi-worker", Harness: "pi", Model: "sonnet",
+		SessionID: "pi-native-id", PermissionMode: "plan",
+		Metadata: CreateSessionMetadata{PermissionPolicy: &manifest.PermissionPolicy{Allow: []string{"Read(/work/**)"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Harness != "pi-cli" || launched.Pi == nil {
+		t.Fatalf("result/spec = %#v / %#v", result, launched)
+	}
+	if launched.Pi.SessionID != "pi-native-id" || launched.Pi.SessionDir != root {
+		t.Fatalf("Pi identity = %#v", launched.Pi)
+	}
+	if launched.PiLaunchID == "" {
+		t.Fatal("Pi creation omitted process launch identity")
+	}
+	if launched.PiPolicyJSON != `{"allow":["Read(/work/**)"]}` {
+		t.Fatalf("Pi policy JSON = %q", launched.PiPolicyJSON)
+	}
+	policyData, readErr := os.ReadFile(launched.PiPolicyFile)
+	if readErr != nil || string(policyData) != launched.PiPolicyJSON {
+		t.Fatalf("Pi policy file = %q, read=%v data=%q", launched.PiPolicyFile, readErr, policyData)
+	}
+	if info, statErr := os.Stat(launched.PiExtension); statErr != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("Pi extension = %q, stat=%v info=%v", launched.PiExtension, statErr, info)
+	}
+	if completed == nil || completed.Pi == nil || completed.Pi.SessionID != "pi-native-id" || completed.WorkingDirectory != workDir {
+		t.Fatalf("Pi manifest = %#v", completed)
+	}
+}
+
+func TestBuildAgyResumeCommandPreservesModelConversationAndMode(t *testing.T) {
+	command := BuildAgyResumeCommand(HarnessLaunchSpec{
+		Harness: "agy", Model: "claude-sonnet-4.6-thinking", WorkDir: "/tmp/agy resume",
+		PermissionMode: "auto", ExtraAddDirs: []string{"/tmp/agy resume"},
+	}, "117ff898-a964-4a9f-b460-1be4a8a49b17").Command
+	for _, want := range []string{
+		"cd '/tmp/agy resume' && agy --model 'Claude Sonnet 4.6 (Thinking)'",
+		"--dangerously-skip-permissions",
+		"--conversation '117ff898-a964-4a9f-b460-1be4a8a49b17'",
+		"--add-dir '/tmp/agy resume'",
+		"&& exit",
+	} {
+		if !strings.Contains(command, want) {
+			t.Errorf("resume command %q missing %q", command, want)
+		}
+	}
+}
+
 func TestCreateSession_DefaultsModelAndHarness(t *testing.T) {
 	dir := t.TempDir()
 	tmuxMock := session.NewMockTmux()
@@ -210,14 +352,18 @@ func TestCreateSession_DefaultsModelPerHarness(t *testing.T) {
 		want    string
 	}{
 		{"codex-cli", "5.5"},
-		{"agy", "2.5-flash"},
+		{"agy", "3.5-flash"},
 		{"opencode-cli", "glm-5.2"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.harness, func(t *testing.T) {
 			// Isolate the codex trust pre-write from the developer's real ~/.codex.
 			t.Setenv("CODEX_HOME", t.TempDir())
-			result, err := CreateSession(&OpContext{Tmux: session.NewMockTmux(), OutputMode: "json"}, &CreateSessionRequest{
+			opCtx := &OpContext{Tmux: session.NewMockTmux(), OutputMode: "json"}
+			if tt.harness == "agy" {
+				opCtx.AgyCreateIdentityTracker = successfulCreateTestAgyIdentityTracker()
+			}
+			result, err := CreateSession(opCtx, &CreateSessionRequest{
 				Cwd:     t.TempDir(),
 				Prompt:  "test",
 				Title:   "session-" + strings.ReplaceAll(tt.harness, "-", "_"),
@@ -536,6 +682,188 @@ func TestCreateSession_LifecycleOrder(t *testing.T) {
 	want := []string{"launch", "storage", "register", "complete", "cleanup"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("lifecycle order = %v, want %v", order, want)
+	}
+}
+
+func TestCreateSession_AgyWorkspaceLockReleasesBeforeSurfaceCompletion(t *testing.T) {
+	dir, err := agysession.CanonicalWorkspacePath(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliasDir := filepath.Join(t.TempDir(), "workspace-alias")
+	if err := os.Symlink(dir, aliasDir); err != nil {
+		t.Fatalf("create workspace symlink: %v", err)
+	}
+	var order []string
+	locked := false
+	store := &createMockStorage{}
+	store.onCreate = func() {
+		if !locked {
+			t.Fatal("AGY workspace lock was released before registration")
+		}
+		created := store.created[len(store.created)-1]
+		if created.Agy == nil || created.Agy.ConversationID != "new-native-id" {
+			t.Fatalf("registered AGY identity = %+v, want new-native-id", created.Agy)
+		}
+		if created.WorkingDirectory != dir || created.Agy.WorkspacePath != dir {
+			t.Fatalf("registered canonical workspace = manifest %q AGY %q, want %q", created.WorkingDirectory, created.Agy.WorkspacePath, dir)
+		}
+	}
+	runtime := &createTestRuntime{
+		launch: func(_ context.Context, spec HarnessLaunchSpec) (CreateSessionLaunchResult, error) {
+			if !locked {
+				t.Fatal("AGY workspace lock was not held during launch")
+			}
+			if spec.WorkDir != dir {
+				t.Fatalf("AGY launch workspace = %q, want canonical %q", spec.WorkDir, dir)
+			}
+			order = append(order, "launch")
+			return CreateSessionLaunchResult{}, nil
+		},
+		complete: func(context.Context, CreateSessionCompletion) error {
+			if locked {
+				t.Fatal("AGY workspace lock remained held during surface completion")
+			}
+			order = append(order, "complete")
+			return nil
+		},
+	}
+	opCtx := &OpContext{
+		Tmux: session.NewMockTmux(), Storage: store, CreationRuntime: runtime,
+		AgyCreateIdentityTracker: &createTestAgyIdentityTracker{
+			snapshot: func(ctx context.Context, workDir string) (string, error) {
+				if !locked || ctx != t.Context() || workDir != dir {
+					t.Fatalf("AGY snapshot input = locked:%t %v/%q, want locked caller context/%q", locked, ctx, workDir, dir)
+				}
+				order = append(order, "snapshot")
+				return "previous-native-id", nil
+			},
+			discover: func(ctx context.Context, workDir, previousConversationID string) (*agysession.Metadata, error) {
+				if !locked || ctx != t.Context() || workDir != dir || previousConversationID != "previous-native-id" {
+					t.Fatalf("AGY discovery input = locked:%t %v/%q/%q", locked, ctx, workDir, previousConversationID)
+				}
+				order = append(order, "discover")
+				return &agysession.Metadata{
+					ConversationID:     "new-native-id",
+					WorkspacePath:      dir,
+					ConversationDBPath: "/provider/new-native-id.db",
+					TranscriptPath:     "/provider/new-native-id/transcript.jsonl",
+				}, nil
+			},
+		},
+		AgyWorkspaceCreateLocker: func(ctx context.Context, workDir string) (func() error, error) {
+			if ctx != t.Context() || workDir != dir {
+				t.Fatalf("AGY lock input = %v/%q, want caller context/%q", ctx, workDir, dir)
+			}
+			locked = true
+			order = append(order, "lock")
+			return func() error {
+				locked = false
+				order = append(order, "unlock")
+				return nil
+			}, nil
+		},
+	}
+	result, err := CreateSessionWithContext(t.Context(), opCtx, &CreateSessionRequest{
+		Cwd: aliasDir, Title: "agy-locked", Harness: "agy", Model: "3.5-flash-low",
+		Prompt: "fixture", SessionID: "agy-locked-id", RequireStorage: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateSessionWithContext: %v", err)
+	}
+	if locked {
+		t.Fatal("AGY workspace lock was not released after lifecycle completion")
+	}
+	if result.Cwd != dir {
+		t.Fatalf("result cwd = %q, want canonical workspace %q", result.Cwd, dir)
+	}
+	want := []string{"lock", "snapshot", "launch", "discover", "unlock", "complete"}
+	if !reflect.DeepEqual(order, want) {
+		t.Fatalf("AGY lock lifecycle order = %v, want %v", order, want)
+	}
+}
+
+func TestCreateSession_AgyIdentitySnapshotFailsBeforeTmuxMutation(t *testing.T) {
+	dir := t.TempDir()
+	tmuxMock := session.NewMockTmux()
+	wantErr := errors.New("corrupt provider snapshot")
+	tracker := successfulCreateTestAgyIdentityTracker()
+	tracker.snapshot = func(context.Context, string) (string, error) { return "", wantErr }
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, CreationRuntime: &createTestRuntime{}, AgyCreateIdentityTracker: tracker,
+	}, &CreateSessionRequest{
+		Cwd: dir, Title: "agy-snapshot-failure", Harness: "agy", Model: "3.5-flash-low",
+		Prompt: "fixture",
+	})
+	if err == nil || !strings.Contains(err.Error(), wantErr.Error()) {
+		t.Fatalf("CreateSessionWithContext error = %v, want %v", err, wantErr)
+	}
+	if len(tmuxMock.CreatedSessions) != 0 {
+		t.Fatalf("tmux mutated after failed identity snapshot: %v", tmuxMock.CreatedSessions)
+	}
+}
+
+func TestCreateSession_AgyIdentityDiscoveryFailureRollsBackBeforeRegistration(t *testing.T) {
+	dir := t.TempDir()
+	tmuxMock := session.NewMockTmux()
+	store := &createMockStorage{}
+	wantErr := errors.New("provider still reports stale identity")
+	tracker := successfulCreateTestAgyIdentityTracker()
+	tracker.discover = func(context.Context, string, string) (*agysession.Metadata, error) {
+		return nil, wantErr
+	}
+
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: &createTestRuntime{}, AgyCreateIdentityTracker: tracker,
+	}, &CreateSessionRequest{
+		Cwd: dir, Title: "agy-discovery-failure", Harness: "agy", Model: "3.5-flash-low",
+		Prompt: "fixture", SessionID: "agy-discovery-failure-id", RequireStorage: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), wantErr.Error()) {
+		t.Fatalf("CreateSessionWithContext error = %v, want %v", err, wantErr)
+	}
+	if tmuxMock.Sessions["agy-discovery-failure"] {
+		t.Fatal("tmux survived failed identity discovery")
+	}
+	if len(store.created) != 0 {
+		t.Fatalf("registered manifests after failed identity discovery = %d, want 0", len(store.created))
+	}
+}
+
+func TestCreateSession_CancellationAfterRegistrationRollsBackBeforeCompletion(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	ctx, cancel := context.WithCancel(t.Context())
+	store := &createMockStorage{onCreate: cancel}
+	tmuxMock := session.NewMockTmux()
+	completed := false
+	runtime := &createTestRuntime{
+		complete: func(context.Context, CreateSessionCompletion) error {
+			completed = true
+			return nil
+		},
+	}
+
+	_, err := CreateSessionWithContext(ctx, &OpContext{
+		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+		AgyCreateIdentityTracker: successfulCreateTestAgyIdentityTracker(),
+	}, &CreateSessionRequest{
+		Cwd: dir, Title: "cancel-after-register", Harness: "agy", Model: "3.5-flash-low",
+		Prompt: "must not run", SessionID: "cancel-after-register-id", RequireStorage: true,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("CreateSessionWithContext error = %v, want context.Canceled", err)
+	}
+	if completed {
+		t.Fatal("runtime completion ran after registration canceled the request context")
+	}
+	if tmuxMock.Sessions["cancel-after-register"] {
+		t.Fatal("new tmux session survived cancellation rollback")
+	}
+	if !slices.Contains(store.deleted, "cancel-after-register-id") {
+		t.Fatalf("deleted registrations = %v, want canceled session ID", store.deleted)
 	}
 }
 
@@ -897,9 +1225,9 @@ func TestBuildHarnessCommand_NonPersistentHasExit(t *testing.T) {
 	}
 }
 
-func TestShellQuoteArg(t *testing.T) {
-	got := shellQuoteArg("a'b")
+func TestSharedShellQuote(t *testing.T) {
+	got := launchparity.ShellQuote("a'b")
 	if got != `'a'"'"'b'` {
-		t.Errorf("shellQuoteArg = %q", got)
+		t.Errorf("ShellQuote = %q", got)
 	}
 }

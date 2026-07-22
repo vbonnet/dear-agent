@@ -21,11 +21,11 @@ tmux harnesses. Gemini CLI remains deprecated compatibility.
 
 **ACP-01** When AGM exposes the `session new` command, the system shall describe the command as creating an AGM-managed harness session rather than a Claude-only session.
 
-**ACP-02** When AGM creates a session for an active harness, the system shall dispatch to a tmux launch implementation for `claude-code`, `codex-cli`, `agy`, and `opencode-cli`.
+**ACP-02** When AGM creates a session for an active harness, the system shall dispatch to a tmux launch implementation for `claude-code`, `codex-cli`, `agy`, `opencode-cli`, and `pi-cli`.
 
-**ACP-03** When AGM resumes an active harness session, the system shall dispatch a harness-specific tmux resume command for `claude-code`, `codex-cli`, `agy`, and `opencode-cli`.
+**ACP-03** When AGM resumes an active harness session, the system shall dispatch a harness-specific tmux resume command for `claude-code`, `codex-cli`, `agy`, `opencode-cli`, and `pi-cli`.
 
-**ACP-04** When AGM sends a message to an active harness session, the system shall use tmux delivery for `claude-code`, `codex-cli`, `agy`, and `opencode-cli`.
+**ACP-04** When AGM sends a message to an active harness session, the system shall use tmux delivery for `claude-code`, `codex-cli`, `agy`, `opencode-cli`, and `pi-cli`.
 
 **ACP-05** When AGM changes a running session model, the system shall resolve the session harness before resolving model aliases.
 
@@ -41,7 +41,7 @@ tmux harnesses. Gemini CLI remains deprecated compatibility.
 
 **ACP-11** When a production Cobra command source imports AGM's canonical tmux package, the system shall require that source to declare an executable command parity contract.
 
-**ACP-12** When command parity contracts are validated, the system shall require an explicit strategy for Claude Code, Codex CLI, AGY, and OpenCode for every tmux-facing command.
+**ACP-12** When command parity contracts are validated, the system shall require an explicit strategy for Claude Code, Codex CLI, AGY, OpenCode, and Pi for every tmux-facing command.
 
 **ACP-13** When a tmux-facing command does not depend on model behavior, the system shall declare it model-independent so the same command contract applies to Anthropic, OpenAI, Gemini, GLM, DeepSeek, Nemotron, and Qwen families.
 
@@ -56,6 +56,8 @@ tmux harnesses. Gemini CLI remains deprecated compatibility.
 **ACP-18** When AGM starts Codex, the system shall map plan and automatic permission modes to native startup flags instead of attempting an unsupported in-session mode switch.
 
 **ACP-19** When an AGM session is created with `--persistent`, the system shall omit the shell exit suffix for Claude Code, Codex, AGY, and OpenCode launch commands.
+
+**ACP-20** When AGM creates a `codex-cli` session inside an existing current tmux pane, the system shall validate Codex authentication, dispatch through the canonical Codex launcher, and observe the Codex composer before registering success; if launch or readiness fails, the system shall preserve the pre-existing tmux session and remove only registration artifacts created by the attempt.
 
 ## BDD Traceability
 
