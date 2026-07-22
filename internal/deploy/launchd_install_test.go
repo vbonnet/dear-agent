@@ -67,18 +67,7 @@ func TestLaunchdBinariesUseHardenedInstall(t *testing.T) {
 
 	for _, bin := range binaries {
 		t.Run(bin, func(t *testing.T) {
-			// The unsafe pattern: `cp bin/<name> $(HOME)/go/bin/`.
-			unsafe := "cp bin/" + bin + " $(HOME)/go/bin/"
-			if strings.Contains(makefile, unsafe) {
-				t.Errorf("%s is launchd-managed but installed with a bare cp.\n"+
-					"Found: %q\n"+
-					"Use:   $(call install-go-bin,bin/%s)\n"+
-					"A bare cp rewrites the existing inode; macOS then kills the binary with "+
-					"OS_REASON_CODESIGNING before main() runs, silently disabling the launchd job.",
-					bin, unsafe, bin)
-			}
-
-			// And it must positively use the macro, so deleting the cp line
+			// It must positively use the macro, so deleting the cp line
 			// without replacing it does not pass.
 			want := "$(call install-go-bin,bin/" + bin + ")"
 			if !strings.Contains(makefile, want) {
@@ -87,6 +76,21 @@ func TestLaunchdBinariesUseHardenedInstall(t *testing.T) {
 			}
 		})
 	}
+
+	// No install target anywhere may use a bare cp into an install root. The
+	// code-signing kill is not specific to launchd binaries — review pointed
+	// out that rebuilding an already-executed safe-push or safe-pr reproduces
+	// it identically, and those fail in the middle of a developer's workflow.
+	// The launchd set is merely where the failure is *silent*.
+	t.Run("no-bare-cp-installs", func(t *testing.T) {
+		bareCopy := regexp.MustCompile(`(?m)^\t@?cp bin/.*\$\((?:HOME\)/go/bin|HOOKS_DIR)\)?/?\s*$`)
+		for _, m := range bareCopy.FindAllString(makefile, -1) {
+			t.Errorf("install target uses a bare cp instead of the hardened macro:\n\t%s\n"+
+				"Use $(call install-go-bin,bin/<name>[,<dest-dir>]). A bare cp rewrites the "+
+				"existing inode; macOS then kills the rebuilt binary with OS_REASON_CODESIGNING "+
+				"before main() runs.", strings.TrimSpace(m))
+		}
+	})
 }
 
 // launchdManagedBinaries returns the set of ~/go/bin binary names referenced by
@@ -206,7 +210,17 @@ func TestNoAPIKeyHelperInstructions(t *testing.T) {
 				if hi > len(lines) {
 					hi = len(lines)
 				}
-				window := strings.Join(lines[lo:hi], "\n")
+				// Narrow the window to the CLAUSE containing the mention, so
+				// the disclaimer has to describe the helper rather than merely
+				// share a paragraph with it. Review's counter-example was
+				// "Do not use launchd; use token-refresher as apiKeyHelper" —
+				// the "do not" belongs to a different clause entirely, and a
+				// whole-window check waves it through.
+				//
+				// Split on ";" and sentence-ending punctuation followed by
+				// whitespace. Requiring the whitespace keeps version strings
+				// ("2.1.205") and filenames ("settings.json") intact.
+				window := clauseAround(strings.Join(lines[lo:hi], " "), "apikeyhelper")
 				if !disclaimed.MatchString(window) {
 					t.Errorf("%s:%d mentions apiKeyHelper without disclaiming it:\n\t%s\n"+
 						"Every mention must say, in its own immediate context, that this "+
@@ -272,4 +286,25 @@ func operatorFacingFiles(t *testing.T, repoRoot string) []string {
 		t.Fatal("no operator-facing files found; the walk is broken")
 	}
 	return out
+}
+
+// clauseSplit ends a clause at ";" or at sentence punctuation followed by
+// whitespace. The trailing-whitespace requirement is deliberate: it keeps
+// "claude-code 2.1.205" and "settings.json" from being split mid-token.
+var clauseSplit = regexp.MustCompile(`;|[.!?]\s`)
+
+// clauseAround returns the clause of text containing the first occurrence of
+// needle (lower-cased comparison), or the whole text when it is absent.
+//
+// This is what binds a disclaimer to the thing it disclaims. Checking a
+// multi-line window instead lets an unrelated negation elsewhere in the
+// paragraph vouch for a recommendation.
+func clauseAround(text, needle string) string {
+	clauses := clauseSplit.Split(text, -1)
+	for _, c := range clauses {
+		if strings.Contains(strings.ToLower(c), needle) {
+			return c
+		}
+	}
+	return text
 }

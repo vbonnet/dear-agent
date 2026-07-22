@@ -53,8 +53,8 @@ stderr), so it composes cleanly with any caller that wants to capture the token.
 ### Retired wiring: `apiKeyHelper` — do not reintroduce
 
 This binary was previously wired in as Claude Code's `apiKeyHelper` (ce-cs3v,
-PR #560). **That wiring was removed from the host on 2026-07-10 and must not be
-restored.**
+PR #560) and no longer is. **That wiring was removed from the host on
+2026-07-10 and must not be restored.**
 
 Since claude-code 2.1.205, a configured `apiKeyHelper` is treated as an external
 API key that takes precedence over — and *shadows* — a healthy `claude.ai` OAuth
