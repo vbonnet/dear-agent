@@ -131,6 +131,44 @@ func TestProvider_Create_FailsWithoutRunsc(t *testing.T) {
 	}
 }
 
+func TestGVisorMatchedNonGitLowerDirRemainsAuthoritative(t *testing.T) {
+	base := t.TempDir()
+	gitRepo := filepath.Join(base, "git-repo")
+	requestedRepo := filepath.Join(base, "requested-non-git")
+	mergedDir := filepath.Join(base, "merged")
+	runGVisorGit(t, "", "init", "-q", "-b", "main", gitRepo)
+	if err := os.MkdirAll(requestedRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(mergedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gitRepo, "project.txt"), []byte("wrong repo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(requestedRepo, "project.txt"), []byte("requested repo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	p := NewProvider()
+	orderedLowerDirs := sandbox.PrioritizeLowerDir([]string{gitRepo, requestedRepo}, requestedRepo)
+	_, worktreeCreated := p.tryCreateWorktree(orderedLowerDirs, "non-git-authority", mergedDir, requestedRepo)
+	if worktreeCreated {
+		t.Fatal("matched non-Git lower directory was replaced by another Git repository")
+	}
+	if err := p.populateMergedDir(orderedLowerDirs, mergedDir); err != nil {
+		t.Fatal(err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(mergedDir, "project.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(content); got != "requested repo\n" {
+		t.Fatalf("project.txt = %q, want requested repository content", got)
+	}
+}
+
 func TestProvider_Destroy_Idempotent(t *testing.T) {
 	p := NewProvider()
 	if err := p.Destroy(context.Background(), "does-not-exist"); err != nil {

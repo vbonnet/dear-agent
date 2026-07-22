@@ -300,7 +300,18 @@ func TestMaybeProvisionSandboxReturnsProviderMappedWorkingDirectory(t *testing.T
 	if err := os.MkdirAll(requestedDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfg = &config.Config{Sandbox: config.SandboxConfig{Enabled: true, Repos: []string{repoRoot}}}
+	templatePath := filepath.Join(homeDir, "sandbox-onboarding.tmpl")
+	if err := os.WriteFile(templatePath, []byte("workspace-root={{.MergedPath}}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg = &config.Config{Sandbox: config.SandboxConfig{
+		Enabled: true,
+		Repos:   []string{repoRoot},
+		Onboarding: config.OnboardingConfig{
+			Enabled:      true,
+			TemplatePath: templatePath,
+		},
+	}}
 	enableSandbox = false
 	noSandbox = false
 	sandboxProvider = "mock"
@@ -318,6 +329,18 @@ func TestMaybeProvisionSandboxReturnsProviderMappedWorkingDirectory(t *testing.T
 	}
 	if sandboxInfo.MergedPath == sandboxInfo.WorkingDir {
 		t.Fatalf("merged root %q must remain distinct from nested working directory", sandboxInfo.MergedPath)
+	}
+	projectDir, err := sandbox.ClaudeProjectDir(wantWorkingDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	onboarding, err := os.ReadFile(filepath.Join(projectDir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantOnboarding := "workspace-root=" + sandboxInfo.MergedPath + "\n"
+	if string(onboarding) != wantOnboarding {
+		t.Fatalf("custom onboarding = %q, want workspace root %q", onboarding, wantOnboarding)
 	}
 }
 

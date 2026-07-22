@@ -113,6 +113,8 @@ Provide a production-ready CLI that:
 
 **CLI-41** When `agm session new` provisions a sandbox for any harness, the system shall start the shared harness lifecycle from the provider-mapped counterpart of the requested project directory and shall persist both that directory and the sandbox workspace root.
 
+**CLI-42** When sandbox onboarding is enabled for a nested harness working directory, the system shall render onboarding template workspace-root data from the provider's merged path while writing the generated instructions to the harness working directory's project-scoped configuration.
+
 ## Requirements
 
 ### Functional Requirements

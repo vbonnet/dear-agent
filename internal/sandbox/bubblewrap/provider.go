@@ -74,6 +74,7 @@ func (p *Provider) Create(ctx context.Context, req sandbox.SandboxRequest) (*san
 	if err != nil {
 		return nil, err
 	}
+	orderedLowerDirs := sandbox.PrioritizeLowerDir(req.LowerDirs, matchedRepo)
 	targetRepo := req.TargetRepo
 	if matchedRepo != "" {
 		// The requested directory is authoritative. Materializing a different
@@ -93,11 +94,11 @@ func (p *Provider) Create(ctx context.Context, req sandbox.SandboxRequest) (*san
 	// This replaces the symlink approach which only gave read access (writes
 	// through symlinks modify the source repo, and new files stay in the sandbox
 	// dir with no .git -- so git commit doesn't work).
-	worktreeRepo, worktreeCreated := p.tryCreateWorktree(req.LowerDirs, req.SessionID, mergedDir, targetRepo)
+	worktreeRepo, worktreeCreated := p.tryCreateWorktree(orderedLowerDirs, req.SessionID, mergedDir, targetRepo)
 	if !worktreeCreated {
 		// Fallback: populate merged directory with symlinks to lower dir contents.
 		fmt.Fprintf(os.Stderr, "bubblewrap: no git repo in lower dirs, falling back to symlinks\n")
-		if err := p.populateMergedDir(req.LowerDirs, mergedDir); err != nil {
+		if err := p.populateMergedDir(orderedLowerDirs, mergedDir); err != nil {
 			_ = p.cleanupDirectories(upperDir, workDir, mergedDir)
 			return nil, sandbox.WrapError(sandbox.ErrCodeMountFailed,
 				"failed to populate merged directory with repo symlinks", err)
@@ -157,7 +158,10 @@ func (p *Provider) Create(ctx context.Context, req sandbox.SandboxRequest) (*san
 // If targetRepo is set, it is used directly instead of scanning lowerDirs.
 func (p *Provider) tryCreateWorktree(lowerDirs []string, sessionID, mergedDir, targetRepo string) (string, bool) {
 	var repoPath string
-	if targetRepo != "" && p.isGitRepo(targetRepo) {
+	if targetRepo != "" {
+		if !p.isGitRepo(targetRepo) {
+			return "", false
+		}
 		repoPath = targetRepo
 		fmt.Fprintf(os.Stderr, "bubblewrap: using explicit target repo: %s\n", repoPath)
 	} else {

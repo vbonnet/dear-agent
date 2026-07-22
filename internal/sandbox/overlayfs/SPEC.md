@@ -1,6 +1,6 @@
 # Native OverlayFS Sandbox Provider Specification
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-07-21 -->
 
 ## Overview
 
@@ -32,7 +32,7 @@ operate.
 
 **OVERLAYFS-10** When a request names a working directory inside a lower directory, the provider shall return `merged/<relative-directory>` as the harness working directory.
 
-**OVERLAYFS-11** When multiple lower directories contain colliding paths and a sandbox request names one repository as its working directory, the provider shall give that matched repository overlay precedence while preserving the order of all remaining lower directories.
+**OVERLAYFS-11** When multiple lower directories contain colliding paths and a sandbox request names one repository as its working directory, the system shall configure both native OverlayFS implementations to give that matched repository overlay precedence while preserving the order of all remaining lower directories.
 
 ## BDD Traceability
 

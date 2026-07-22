@@ -63,7 +63,7 @@ func (p *OverlayFSProvider) Create(ctx context.Context, req SandboxRequest) (*Sa
 	upperDir := filepath.Join(req.WorkspaceDir, "upper")
 	workDir := filepath.Join(req.WorkspaceDir, "work")
 	mergedDir := filepath.Join(req.WorkspaceDir, "merged")
-	workingDir, _, err := MapFlatWorkingDir(req.WorkingDir, req.LowerDirs, mergedDir)
+	workingDir, orderedLowerDirs, err := mapNativeOverlayFSRequest(req, mergedDir)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +81,7 @@ func (p *OverlayFSProvider) Create(ctx context.Context, req SandboxRequest) (*Sa
 	}
 
 	// Build lowerdir string (colon-separated, reverse order for priority)
-	lowerDirStr := strings.Join(req.LowerDirs, ":")
+	lowerDirStr := strings.Join(orderedLowerDirs, ":")
 
 	// Mount OverlayFS with xino=auto flag for inotify propagation
 	if err := p.mountOverlay(lowerDirStr, upperDir, workDir, mergedDir); err != nil {
@@ -121,6 +121,14 @@ func (p *OverlayFSProvider) Create(ctx context.Context, req SandboxRequest) (*Sa
 	p.mu.Unlock()
 
 	return sb, nil
+}
+
+func mapNativeOverlayFSRequest(req SandboxRequest, mergedDir string) (string, []string, error) {
+	workingDir, selectedLowerDir, err := MapFlatWorkingDir(req.WorkingDir, req.LowerDirs, mergedDir)
+	if err != nil {
+		return "", nil, err
+	}
+	return workingDir, PrioritizeLowerDir(req.LowerDirs, selectedLowerDir), nil
 }
 
 // Destroy tears down a sandbox and cleans up all associated resources.

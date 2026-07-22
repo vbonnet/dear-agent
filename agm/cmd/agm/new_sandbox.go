@@ -124,10 +124,10 @@ func provisionSandbox(ctx context.Context, providerName string, sessionID string
 		var onboardErr error
 		if cfg.Sandbox.Onboarding.TemplatePath != "" {
 			content, onboardErr = sandbox.GenerateOnboardingContentFromFile(
-				cfg.Sandbox.Onboarding.TemplatePath, sessionID, sb.WorkingDir, lowerDirs,
+				cfg.Sandbox.Onboarding.TemplatePath, sessionID, sb.MergedPath, lowerDirs,
 			)
 		} else {
-			content, onboardErr = sandbox.GenerateOnboardingContent(sessionID, sb.WorkingDir, lowerDirs)
+			content, onboardErr = sandbox.GenerateOnboardingContent(sessionID, sb.MergedPath, lowerDirs)
 		}
 		if onboardErr != nil {
 			debug.Log("Warning: failed to generate onboarding content: %v", onboardErr)

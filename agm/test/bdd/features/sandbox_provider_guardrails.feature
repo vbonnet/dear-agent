@@ -29,6 +29,7 @@ Feature: Sandbox provider guardrails
   Scenario: Sandbox sessions preserve the requested project directory
     When AGM runs the sandbox working directory regressions
     Then sandbox providers should preserve the requested project directory
+    And flat Linux providers should keep the matched lower directory authoritative
     And APFS should detach linked worktree Git metadata on macOS
     And AGM should route the mapped directory through the shared harness lifecycle
 
