@@ -19,9 +19,11 @@ func TestValidateRevision(t *testing.T) {
 	}{
 		{name: "same revision", expected: "0123456789ab", actual: "0123456789ab"},
 		{name: "full and short revision", expected: "0123456789abcdef", actual: "0123456789ab"},
-		{name: "dirty suffix normalized", expected: "0123456789ab-dirty", actual: "0123456789ab"},
+		{name: "same dirty revision", expected: "0123456789abcdef-dirty", actual: "0123456789ab-dirty"},
+		{name: "clean and dirty mismatch", expected: "0123456789ab", actual: "0123456789ab-dirty", wantErr: "does not match"},
 		{name: "mismatch", expected: "0123456789ab", actual: "fedcba987654", wantErr: "does not match"},
 		{name: "missing expected", expected: "unknown", actual: "0123456789ab", wantErr: "expected AGM revision is unavailable"},
+		{name: "dirty missing expected", expected: "unknown-dirty", actual: "0123456789ab-dirty", wantErr: "expected AGM revision is unavailable"},
 		{name: "missing actual", expected: "0123456789ab", actual: "unknown", wantErr: "no embedded VCS revision"},
 	}
 	for _, tc := range tests {

@@ -99,3 +99,7 @@ Feature: Hook harness parity
   Scenario: Detached archive companion proves coherent startup
     When AGM runs detached archive companion startup regressions
     Then a mixed revision or missing startup acknowledgement should fail before async success
+
+  Scenario: Canonical AGM installation preserves companion coherence
+    When AGM runs the canonical AGM companion install regression
+    Then the root AGM install target should build and install the companion pair

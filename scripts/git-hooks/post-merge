@@ -217,46 +217,68 @@ maybe_rebuild() {
   fi
 }
 
-# maybe_rebuild_agm_pair: serialize pair deployment across every checkout that
-# shares GOBIN. A live lock owner completes the deployment, so this invocation
-# can safely defer; a dead PID is recoverable without recursively deleting an
-# unresolved path.
+# acquire_agm_pair_lock: hold a kernel-released advisory lock on fd 9. flock is
+# standard on Linux and lockf is standard on macOS; both release automatically
+# if the hook is killed, so there is no owner-file creation gap or stale PID to
+# recover. A missing primitive fails closed without touching the installed pair.
+acquire_agm_pair_lock() {
+  _pair_lock_timeout="${AGM_PAIR_LOCK_TIMEOUT_SECONDS:-300}"
+  case "${_pair_lock_timeout}" in ''|*[!0-9]*) _pair_lock_timeout=300 ;; esac
+
+  # Migrate a lock directory left by the previous PID-directory protocol. An
+  # ownerless/malformed directory is safe to remove with rmdir (which fails if
+  # any unexpected entry appears); a live legacy owner gets the same bounded
+  # wait as the advisory lock below. If we remove the directory during the old
+  # mkdir/write gap, that owner fails its PID write and leaves the pair intact.
+  _pair_legacy_wait=0
+  while [ -d "${_pair_lock}" ]; do
+    _pair_legacy_owner="$(cat "${_pair_lock}/pid" 2>/dev/null || true)"
+    case "${_pair_legacy_owner}" in ''|*[!0-9]*) _pair_legacy_owner="" ;; esac
+    if [ -z "${_pair_legacy_owner}" ] || ! kill -0 "${_pair_legacy_owner}" 2>/dev/null; then
+      rm -f "${_pair_lock}/pid" 2>/dev/null || true
+      rmdir "${_pair_lock}" 2>/dev/null || return 1
+      break
+    fi
+    [ "${_pair_legacy_wait}" -lt "${_pair_lock_timeout}" ] || return 1
+    sleep 1
+    _pair_legacy_wait=$((_pair_legacy_wait + 1))
+  done
+
+  if ! exec 9>"${_pair_lock}"; then
+    return 1
+  fi
+  if command -v flock >/dev/null 2>&1; then
+    flock -w "${_pair_lock_timeout}" 9 && return 0
+  elif command -v lockf >/dev/null 2>&1; then
+    lockf -t "${_pair_lock_timeout}" 9 && return 0
+  else
+    echo "[post-merge:rebuild] neither flock nor lockf is available for AGM pair deployment." >&2
+  fi
+  exec 9>&-
+  return 1
+}
+
+release_agm_pair_lock() {
+  exec 9>&-
+}
+
+# maybe_rebuild_agm_pair serializes pair deployment across every checkout that
+# shares GOBIN. Every affected contender waits, reacquires, refreshes canonical
+# trunk, and installs that latest revision rather than deferring a newer merge.
 maybe_rebuild_agm_pair() {
   agm_pair_handled=0
   _pair_gobin="${GOBIN:-${HOME}/go/bin}"
   mkdir -p "${_pair_gobin}" 2>/dev/null || true
   _pair_lock="${_pair_gobin}/.agm-pair-install.lock"
-  _pair_locked=0
-  if mkdir "${_pair_lock}" 2>/dev/null; then
-    _pair_locked=1
-  else
-    _pair_owner="$(cat "${_pair_lock}/pid" 2>/dev/null || true)"
-    case "${_pair_owner}" in ''|*[!0-9]*) _pair_owner="" ;; esac
-    if [ -n "${_pair_owner}" ] && ! kill -0 "${_pair_owner}" 2>/dev/null; then
-      rm -f "${_pair_lock}/pid" 2>/dev/null || true
-      rmdir "${_pair_lock}" 2>/dev/null || true
-    fi
-  fi
-  if [ "${_pair_locked}" = "0" ] && mkdir "${_pair_lock}" 2>/dev/null; then
-    _pair_locked=1
-  fi
-  if [ "${_pair_locked}" = "0" ]; then
+  if ! acquire_agm_pair_lock; then
     agm_pair_handled=1
-    echo "[post-merge:rebuild] another post-merge hook owns AGM pair deployment — deferring to that coherent install." >&2
-    return 0
-  fi
-  if ! printf '%s\n' "$$" > "${_pair_lock}/pid"; then
-    rm -f "${_pair_lock}/pid" 2>/dev/null || true
-    rmdir "${_pair_lock}" 2>/dev/null || true
-    agm_pair_handled=1
-    echo "[post-merge:rebuild] could not record AGM pair deployment lock — installed pair unchanged." >&2
+    echo "[post-merge:rebuild] could not acquire AGM pair deployment lock — installed pair unchanged." >&2
     return 0
   fi
 
   maybe_rebuild_agm_pair_locked
   _pair_status=$?
-  rm -f "${_pair_lock}/pid" 2>/dev/null || true
-  rmdir "${_pair_lock}" 2>/dev/null || true
+  release_agm_pair_lock
   return "${_pair_status}"
 }
 
@@ -286,6 +308,11 @@ maybe_rebuild_agm_pair_locked() {
 
   [ "${_affected}" = "1" ] || return 0
   agm_pair_handled=1
+
+  # The hook may have waited behind an older merge. Refresh origin/main only
+  # after acquiring the lock so the last contender cannot reinstall an older
+  # ancestor over a newer coherent pair.
+  fetch_trunk_commit
   ensure_build_dir
 
   _gobin="${GOBIN:-${HOME}/go/bin}"

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/logging"
@@ -36,7 +35,7 @@ func run() error {
 	flag.Parse()
 
 	pkgversion.PopulateFromBuildInfo()
-	actualRevision := pkgversion.Short()
+	actualRevision := pkgversion.RevisionIdentity(pkgversion.GitCommit)
 	if *checkRevision != "" {
 		return validateRevision(*checkRevision, actualRevision)
 	}
@@ -104,10 +103,10 @@ func acknowledgeStartup(fd int) error {
 func validateRevision(expected, actual string) error {
 	expected = normalizeRevision(expected)
 	actual = normalizeRevision(actual)
-	if expected == "" || expected == "unknown" {
+	if expected == "" || expected == "unknown" || expected == "unknown-dirty" {
 		return fmt.Errorf("expected AGM revision is unavailable")
 	}
-	if actual == "" || actual == "unknown" {
+	if actual == "" || actual == "unknown" || actual == "unknown-dirty" {
 		return fmt.Errorf("agm-reaper has no embedded VCS revision; expected %s", expected)
 	}
 	if expected != actual {
@@ -117,9 +116,5 @@ func validateRevision(expected, actual string) error {
 }
 
 func normalizeRevision(revision string) string {
-	revision = strings.TrimSuffix(revision, "-dirty")
-	if len(revision) > 12 {
-		revision = revision[:12]
-	}
-	return revision
+	return pkgversion.RevisionIdentity(revision)
 }
