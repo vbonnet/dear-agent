@@ -87,11 +87,12 @@ type InputReadiness struct {
 }
 
 // InputDeliveryOptions controls narrowly scoped exceptions inside the atomic
-// readiness-and-delivery boundary. AllowBusyComposer accepts only QUEUE; it
-// never bypasses process ownership, permission, overlay, onboarding, missing
-// target, or other fail-closed states.
+// readiness-and-delivery boundary. AllowQueuedAGM accepts only a positively
+// identified queued AGM paste; it never bypasses generic busy states, human
+// drafts, process ownership, permission, overlays, onboarding, missing targets,
+// or other fail-closed states.
 type InputDeliveryOptions struct {
-	AllowBusyComposer bool
+	AllowQueuedAGM bool
 }
 
 // InputReadinessChecker is the optional pre-delivery capability used by
@@ -103,7 +104,7 @@ type InputReadinessChecker interface {
 // AtomicInputSender checks harness input ownership and delivers to the
 // resulting exact pane while holding one tmux mutation boundary. If Ready is
 // false, no input was sent; if Ready is true, delivery completed successfully.
-// A forced result is valid only for a verified QUEUE state.
+// A forced result is valid only for a positively identified queued AGM paste.
 type AtomicInputSender interface {
 	SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string, options InputDeliveryOptions) (InputReadiness, error)
 }

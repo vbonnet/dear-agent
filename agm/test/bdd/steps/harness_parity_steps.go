@@ -335,8 +335,8 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^shared startup readiness should honor the total deadline$`, sharedStartupReadinessShouldHonorTheTotalDeadline)
 	ctx.Step(`^shared input readiness should serialize exact-pane delivery and preserve rendered composer ownership without treating resolved prompts as live$`, sharedInputReadinessShouldRejectStaleClaudeComposerAndUnrelatedNodeProcess)
 	ctx.Step(`^CLI message and startup prompt sends should use shared atomic readiness for exact-pane delivery$`, cliMessageSendsShouldUseSharedAtomicReadiness)
-	ctx.Step(`^forced CLI message sends should override only verified busy composers$`, forcedCLIMessageSendsShouldOverrideOnlyVerifiedBusyComposers)
-	ctx.Step(`^autonomous CLI message sends should preserve only verified busy-composer recovery$`, autonomousCLIMessageSendsShouldPreserveOnlyVerifiedBusyComposerRecovery)
+	ctx.Step(`^forced CLI message sends should replace only positively identified queued AGM input$`, forcedCLIMessageSendsShouldReplaceOnlyPositivelyIdentifiedQueuedAGMInput)
+	ctx.Step(`^autonomous CLI message sends should preserve only positively identified queued AGM recovery$`, autonomousCLIMessageSendsShouldPreserveOnlyPositivelyIdentifiedQueuedAGMRecovery)
 	ctx.Step(`^shared Gemini readiness should advance first-run trust on the verified pane$`, sharedGeminiReadinessShouldAdvanceFirstRunTrustOnTheVerifiedPane)
 	ctx.Step(`^legacy AGY names should reach canonical shared send readiness$`, legacyAgyNamesShouldReachCanonicalSharedSendReadiness)
 	ctx.Step(`^the Pi alias should reach canonical shared send readiness$`, piAliasShouldReachCanonicalSharedSendReadiness)
@@ -713,7 +713,7 @@ func currentTmuxAGYCreationShouldFailBeforeLaunchWithDetachedGuidance(ctx contex
 }
 
 func aSharedCodexSendTargetWithReadiness(ctx context.Context, readiness string) error {
-	if slices.Contains([]string{"YES", "NO", "QUEUE", "OVERLAY", "NOT_FOUND", "WRONG_HARNESS", "ONBOARDING", "PERMISSION"}, readiness) {
+	if slices.Contains([]string{"YES", "NO", "QUEUE", "QUEUED_AGM", "OVERLAY", "NOT_FOUND", "WRONG_HARNESS", "ONBOARDING", "PERMISSION"}, readiness) {
 		ctx.Value(harnessParityStateKey{}).(*harnessParityState).sharedSendReadiness = readiness
 		return nil
 	}
@@ -896,7 +896,7 @@ func agmValidatesSlowHarnessStartupReadiness(ctx context.Context) error {
 	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
 	testCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(testCtx, "go", "test", "-p", "1", "./agm/cmd/agm", "./agm/cmd/agm-mcp-server", "./agm/internal/session", "./agm/internal/tmux", "./agm/internal/ops", "-run", `^(TestMCPCreateSessionRuntimeRevalidatesStartupPromptAtomically|TestRealTmux(InputReadinessReportsMissingSession|ReadinessAdvancesGeminiTrustOnVerifiedPane|ReadinessDetectsManagedPiComposer|ReadinessIdentifiesNodeBackedCodex|ReadinessPinsLivenessAndDeliveryToActivePane|ReadinessPreservesClaudeGhostComposer|ReadinessRejectsSuspendedHarnessWithStaleComposer|WaitForHarnessReadyAllowsSlowProcessStart)|TestClassifyHarnessInputRequiresCurrentHarnessComposer|TestHarnessStartupAdvanceKeys|TestInputDeliveryAllowedForceOverridesOnlyBusyComposer|TestParsePSForegroundTable|TestExpectedHarnessMatcher(RejectsUnrelatedNodeProcess|AcceptsIdentifiedNodeBackedHarness|RequiresForegroundTerminalOwnership)|TestSendMessage_(AtomicReadinessAndDeliveryPrecedesGenericManagerCheck|BusyComposerRecoveryPolicies|ForceDoesNotBypassProtectedInputStates|AutonomousDoesNotBypassProtectedInputStates|PiPermissionPromptBlocksAtomicDelivery|Normalizes(LegacyAgyHarness|PiHarnessAlias)BeforeReadiness)|TestSendViaSharedOperations(UsesCallerContext|FailsClosedWhenHarnessIsNotReady|PreservesBusyComposerRecoveryPolicy)|TestBusySingleSendReachesAtomicDeliveryForForceAndAutonomous|TestMultiRecipientDeliveryUsesSharedAtomicReadiness|TestDirectCLIDeliveryRejectsUnregisteredTmuxSession|TestCreateSession_NoRuntimeInitialPrompt(RevalidatesAfterRegistration|UsesAtomicExactPaneDelivery)|TestDeliverInitialPrompt(UsesAtomicExactPaneReadiness|FileUsesAtomicExactPaneReadiness|FailsClosedWhenHarnessDoesNotOwnTerminal))$`, "-count=1", "-v")
+	cmd := exec.CommandContext(testCtx, "go", "test", "-p", "1", "./agm/cmd/agm", "./agm/cmd/agm-mcp-server", "./agm/internal/session", "./agm/internal/tmux", "./agm/internal/ops", "-run", `^(TestMCPCreateSessionRuntimeRevalidatesStartupPromptAtomically|TestRealTmux(InputReadinessReportsMissingSession|ReadinessAdvancesGeminiTrustOnVerifiedPane|ReadinessDetectsManagedPiComposer|ReadinessIdentifiesNodeBackedCodex|ReadinessPinsLivenessAndDeliveryToActivePane|ReadinessPreservesClaudeGhostComposer|ReadinessRejectsSuspendedHarnessWithStaleComposer|WaitForHarnessReadyAllowsSlowProcessStart)|TestClassifyHarnessInputRequiresCurrentHarnessComposer|TestHarnessStartupAdvanceKeys|TestInputDeliveryAllowedOverridesOnlyPositivelyIdentifiedAGMQueue|TestParsePSForegroundTable|TestExpectedHarnessMatcher(RejectsUnrelatedNodeProcess|AcceptsIdentifiedNodeBackedHarness|RequiresForegroundTerminalOwnership)|TestSendMessage_(AtomicReadinessAndDeliveryPrecedesGenericManagerCheck|QueuedAGMRecoveryPolicies|ForceDoesNotBypassProtectedInputStates|AutonomousDoesNotBypassProtectedInputStates|PiPermissionPromptBlocksAtomicDelivery|Normalizes(LegacyAgyHarness|PiHarnessAlias)BeforeReadiness)|TestSendViaSharedOperations(UsesCallerContext|FailsClosedWhenHarnessIsNotReady|PreservesQueuedAGMRecoveryPolicy)|TestBusySingleSendReachesAtomicDeliveryForForceAndAutonomous|TestMultiRecipientDeliveryUsesSharedAtomicReadiness|TestDirectCLIDeliveryRejectsUnregisteredTmuxSession|TestCreateSession_NoRuntimeInitialPrompt(RevalidatesAfterRegistration|UsesAtomicExactPaneDelivery)|TestDeliverInitialPrompt(UsesAtomicExactPaneReadiness|FileUsesAtomicExactPaneReadiness|FailsClosedWhenHarnessDoesNotOwnTerminal))$`, "-count=1", "-v")
 	cmd.Dir = bddRepoRoot()
 	output, err := cmd.CombinedOutput()
 	agyBootstrapCmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm-mcp-server",
@@ -988,16 +988,16 @@ func cliMessageSendsShouldUseSharedAtomicReadiness(ctx context.Context) error {
 	return nil
 }
 
-func forcedCLIMessageSendsShouldOverrideOnlyVerifiedBusyComposers(ctx context.Context) error {
+func forcedCLIMessageSendsShouldReplaceOnlyPositivelyIdentifiedQueuedAGMInput(ctx context.Context) error {
 	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
 	if harnessState.startupReadinessTestErr != nil {
 		return fmt.Errorf("shared readiness behavior suite failed: %w\n%s", harnessState.startupReadinessTestErr, harnessState.startupReadinessTestOutput)
 	}
 	for _, behavior := range []string{
-		"TestInputDeliveryAllowedForceOverridesOnlyBusyComposer",
-		"TestSendMessage_BusyComposerRecoveryPolicies",
+		"TestInputDeliveryAllowedOverridesOnlyPositivelyIdentifiedAGMQueue",
+		"TestSendMessage_QueuedAGMRecoveryPolicies",
 		"TestSendMessage_ForceDoesNotBypassProtectedInputStates",
-		"TestSendViaSharedOperationsPreservesBusyComposerRecoveryPolicy",
+		"TestSendViaSharedOperationsPreservesQueuedAGMRecoveryPolicy",
 		"TestBusySingleSendReachesAtomicDeliveryForForceAndAutonomous",
 	} {
 		if !strings.Contains(harnessState.startupReadinessTestOutput, "--- PASS: "+behavior) {
@@ -1007,15 +1007,15 @@ func forcedCLIMessageSendsShouldOverrideOnlyVerifiedBusyComposers(ctx context.Co
 	return nil
 }
 
-func autonomousCLIMessageSendsShouldPreserveOnlyVerifiedBusyComposerRecovery(ctx context.Context) error {
+func autonomousCLIMessageSendsShouldPreserveOnlyPositivelyIdentifiedQueuedAGMRecovery(ctx context.Context) error {
 	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
 	if harnessState.startupReadinessTestErr != nil {
 		return fmt.Errorf("shared readiness behavior suite failed: %w\n%s", harnessState.startupReadinessTestErr, harnessState.startupReadinessTestOutput)
 	}
 	for _, behavior := range []string{
-		"TestSendMessage_BusyComposerRecoveryPolicies",
+		"TestSendMessage_QueuedAGMRecoveryPolicies",
 		"TestSendMessage_AutonomousDoesNotBypassProtectedInputStates",
-		"TestSendViaSharedOperationsPreservesBusyComposerRecoveryPolicy",
+		"TestSendViaSharedOperationsPreservesQueuedAGMRecoveryPolicy",
 		"TestBusySingleSendReachesAtomicDeliveryForForceAndAutonomous",
 	} {
 		if !strings.Contains(harnessState.startupReadinessTestOutput, "--- PASS: "+behavior) {

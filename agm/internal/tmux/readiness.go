@@ -15,6 +15,9 @@ const (
 	HarnessInputReady = "YES"
 	// HarnessInputBusy means the harness does not currently own an empty composer.
 	HarnessInputBusy = "QUEUE"
+	// HarnessInputQueuedAGM means a queued-input marker and complete AGM message
+	// header positively identify a stuck AGM paste in the live pane tail.
+	HarnessInputQueuedAGM = "QUEUED_AGM"
 	// HarnessInputPermission means a permission decision currently owns input.
 	HarnessInputPermission = "PERMISSION"
 	// HarnessInputOverlay means a harness overlay currently owns input.
@@ -38,10 +41,10 @@ type HarnessInputReadiness struct {
 }
 
 // InputDeliveryOptions controls narrowly scoped exceptions inside the tmux
-// mutation boundary. AllowBusyComposer accepts only HarnessInputBusy after the
-// expected foreground harness and exact pane have already been proved.
+// mutation boundary. AllowQueuedAGM accepts only a positively identified stuck
+// AGM paste after the expected foreground harness and exact pane are proved.
 type InputDeliveryOptions struct {
-	AllowBusyComposer bool
+	AllowQueuedAGM bool
 }
 
 // CheckExpectedHarnessInput proves that the exact session exists, an expected
@@ -83,8 +86,8 @@ func CheckExpectedHarnessInput(ctx context.Context, sessionName, harness string)
 
 // CheckExpectedHarnessInputAndSend serializes the readiness observation and
 // exact-pane delivery under the same tmux mutation lock. A non-ready result
-// never sends input unless options explicitly allow the verified QUEUE state;
-// a ready result is returned only after delivery succeeds.
+// never sends input unless options explicitly allow a positively identified
+// stuck AGM paste; a ready result is returned only after delivery succeeds.
 func CheckExpectedHarnessInputAndSend(ctx context.Context, sessionName, harness, command string, options InputDeliveryOptions) (HarnessInputReadiness, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -121,7 +124,7 @@ func inputDeliveryAllowed(readiness HarnessInputReadiness, options InputDelivery
 	if readiness.Ready {
 		return true, false
 	}
-	if options.AllowBusyComposer && readiness.State == HarnessInputBusy {
+	if options.AllowQueuedAGM && readiness.State == HarnessInputQueuedAGM {
 		return true, true
 	}
 	return false, false
@@ -135,6 +138,7 @@ func ClassifyHarnessInput(content, harness string) (bool, string, error) {
 	}
 	styledTail := paneRawInputTail(content, 12)
 	tail := stripANSI(styledTail)
+	queuedInput, _ := ClassifyQueuedInput(tail)
 
 	// Pi's managed ready footer remains visible while its native confirmation
 	// dialog owns input. Treat that dialog as authoritative before consulting
@@ -158,7 +162,7 @@ func ClassifyHarnessInput(content, harness string) (bool, string, error) {
 	case "pi-cli":
 		ready = containsPiReadyPattern(tail)
 	}
-	if ready {
+	if ready && queuedInput == QueuedInputNone {
 		return true, HarnessInputReady, nil
 	}
 	if hasInputOverlay(tail, harness) {
@@ -169,6 +173,12 @@ func ClassifyHarnessInput(content, harness string) (bool, string, error) {
 	}
 	if hasTailOwnedPermissionPrompt(tail) {
 		return false, HarnessInputPermission, nil
+	}
+	// A queued marker is current only when the registered harness's structural
+	// composer also owns the live tail. A stale marker above active work cannot
+	// authorize replacement, even if it contains an AGM header.
+	if ready && queuedInput == QueuedInputAGM {
+		return false, HarnessInputQueuedAGM, nil
 	}
 	return false, HarnessInputBusy, nil
 }

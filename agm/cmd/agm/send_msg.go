@@ -247,9 +247,9 @@ func init() {
 	sendMsgCmd.MarkFlagsOneRequired("prompt", "prompt-file", "prompt-stdin")
 	sendMsgCmd.MarkFlagsMutuallyExclusive("to", "all")
 
-	sendMsgCmd.Flags().BoolVar(&msgForce, "force", false, "Force delivery through the queued-input/post-submit cooldown checks (human_typing is advisory now and never blocks)")
+	sendMsgCmd.Flags().BoolVar(&msgForce, "force", false, "Replace only positively identified queued AGM input after exact harness and pane verification")
 	sendMsgCmd.Flags().StringVar(&msgForceReason, "reason", "", "Deprecated no-op: human_typing no longer blocks, so --force needs no audited reason (accepted for compatibility)")
-	sendMsgCmd.Flags().BoolVar(&msgAutonomous, "autonomous", false, "Session is unattended — skip human_typing detection entirely")
+	sendMsgCmd.Flags().BoolVar(&msgAutonomous, "autonomous", false, "Mark the session unattended and allow the same narrow queued-AGM recovery as --force")
 
 	sendGroupCmd.AddCommand(sendMsgCmd)
 
@@ -539,7 +539,7 @@ func currentCLIInputDeliveryPolicy() cliInputDeliveryPolicy {
 	}
 }
 
-func (p cliInputDeliveryPolicy) allowsBusyComposer() bool {
+func (p cliInputDeliveryPolicy) allowsQueuedAGM() bool {
 	return p.Force || p.Autonomous
 }
 
@@ -555,9 +555,10 @@ func dispatchSendByCanReceive(ctx context.Context, recipientSession, tmuxName, s
 func dispatchSendByCanReceiveWithDirect(ctx context.Context, recipientSession, tmuxName, senderName, messageID, formattedMessage, message, currentState string, canReceive state.CanReceive, adapter *dolt.Adapter, policy cliInputDeliveryPolicy, directDelivery func() error) error {
 	// Force and autonomous sends must reach the shared atomic classifier before
 	// legacy pane-state routing. Otherwise a preliminary QUEUE verdict diverts
-	// them into the daemon queue and makes their narrowly scoped recovery policy
-	// unreachable. The shared operation still rejects every protected state.
-	if policy.allowsBusyComposer() {
+	// them into the daemon queue and makes their narrowly scoped stuck-AGM
+	// recovery policy unreachable. The shared operation still rejects generic
+	// busy composers, human drafts, and every other protected state.
+	if policy.allowsQueuedAGM() {
 		if err := directDelivery(); err != nil {
 			return err
 		}

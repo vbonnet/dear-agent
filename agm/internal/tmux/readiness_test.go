@@ -154,6 +154,24 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			state:   HarnessInputBusy,
 		},
 		{
+			name:    "Claude human queued paste remains generic busy",
+			harness: "claude-code",
+			content: "response\n[Pasted text #1 +2 lines]\nplease fix the bug in auth.go\n❯\n────────────────\n? for shortcuts",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "Claude queued AGM paste is positively identified",
+			harness: "claude-code",
+			content: "response\n[Pasted text #1 +2 lines]\n[From: orchestrator | ID: 123-orchestrator-1 | Sent: 2026-07-21T12:00:00Z]\nrecover\n❯\n────────────────\n? for shortcuts",
+			state:   HarnessInputQueuedAGM,
+		},
+		{
+			name:    "active work suppresses stale queued AGM recovery",
+			harness: "claude-code",
+			content: "[Pasted text #1 +2 lines]\n[From: orchestrator | ID: 123-orchestrator-1 | Sent: 2026-07-21T12:00:00Z]\nrecover\n✻ Working…\nRunning tests",
+			state:   HarnessInputBusy,
+		},
+		{
 			name:    "stale Claude composer before working view",
 			harness: "claude-code",
 			content: "response\n❯\n✻ Working…\nRunning tests",
@@ -385,7 +403,7 @@ func TestExpectedHarnessMatcherRequiresForegroundTerminalOwnership(t *testing.T)
 	}
 }
 
-func TestInputDeliveryAllowedForceOverridesOnlyBusyComposer(t *testing.T) {
+func TestInputDeliveryAllowedOverridesOnlyPositivelyIdentifiedAGMQueue(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -397,8 +415,10 @@ func TestInputDeliveryAllowedForceOverridesOnlyBusyComposer(t *testing.T) {
 	}{
 		{name: "ready", readiness: HarnessInputReadiness{Ready: true, State: HarnessInputReady}, allowed: true},
 		{name: "ready with force", readiness: HarnessInputReadiness{Ready: true, State: HarnessInputReady}, force: true, allowed: true},
-		{name: "busy without force", readiness: HarnessInputReadiness{State: HarnessInputBusy}},
-		{name: "busy with force", readiness: HarnessInputReadiness{State: HarnessInputBusy}, force: true, allowed: true, forced: true},
+		{name: "generic busy without policy", readiness: HarnessInputReadiness{State: HarnessInputBusy}},
+		{name: "generic busy with policy", readiness: HarnessInputReadiness{State: HarnessInputBusy}, force: true},
+		{name: "queued AGM without policy", readiness: HarnessInputReadiness{State: HarnessInputQueuedAGM}},
+		{name: "queued AGM with policy", readiness: HarnessInputReadiness{State: HarnessInputQueuedAGM}, force: true, allowed: true, forced: true},
 		{name: "permission with force", readiness: HarnessInputReadiness{State: HarnessInputPermission}, force: true},
 		{name: "overlay with force", readiness: HarnessInputReadiness{State: HarnessInputOverlay}, force: true},
 		{name: "onboarding with force", readiness: HarnessInputReadiness{State: HarnessInputOnboarding}, force: true},
@@ -408,7 +428,7 @@ func TestInputDeliveryAllowedForceOverridesOnlyBusyComposer(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			allowed, forced := inputDeliveryAllowed(tt.readiness, InputDeliveryOptions{AllowBusyComposer: tt.force})
+			allowed, forced := inputDeliveryAllowed(tt.readiness, InputDeliveryOptions{AllowQueuedAGM: tt.force})
 			if allowed != tt.allowed || forced != tt.forced {
 				t.Fatalf("inputDeliveryAllowed() = (%t, %t), want (%t, %t)", allowed, forced, tt.allowed, tt.forced)
 			}

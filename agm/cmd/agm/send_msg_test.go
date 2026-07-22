@@ -67,7 +67,7 @@ func TestSendViaSharedOperationsFailsClosedWhenHarnessIsNotReady(t *testing.T) {
 	}
 }
 
-func TestSendViaSharedOperationsPreservesBusyComposerRecoveryPolicy(t *testing.T) {
+func TestSendViaSharedOperationsPreservesQueuedAGMRecoveryPolicy(t *testing.T) {
 	for _, testCase := range []struct {
 		name       string
 		force      bool
@@ -88,13 +88,13 @@ func TestSendViaSharedOperationsPreservesBusyComposerRecoveryPolicy(t *testing.T
 				t.Fatalf("create session: %v", err)
 			}
 			tmuxClient := session.NewMockTmux()
-			tmuxClient.InputReadiness = session.InputReadiness{State: "QUEUE", PaneID: "%9"}
+			tmuxClient.InputReadiness = session.InputReadiness{State: "QUEUED_AGM", PaneID: "%9"}
 
 			if err := sendViaSharedOperations(t.Context(), "codex-send", "sender", "message-id", "recovery message", "", testCase.force, testCase.autonomous, storage, tmuxClient); err != nil {
-				t.Fatalf("sendViaSharedOperations(%s busy) error = %v", testCase.name, err)
+				t.Fatalf("sendViaSharedOperations(%s queued AGM) error = %v", testCase.name, err)
 			}
-			if len(tmuxClient.AtomicInputOptions) != 1 || !tmuxClient.AtomicInputOptions[0].AllowBusyComposer {
-				t.Fatalf("atomic delivery options = %#v, want %s busy-composer recovery", tmuxClient.AtomicInputOptions, testCase.name)
+			if len(tmuxClient.AtomicInputOptions) != 1 || !tmuxClient.AtomicInputOptions[0].AllowQueuedAGM {
+				t.Fatalf("atomic delivery options = %#v, want %s queued-AGM recovery", tmuxClient.AtomicInputOptions, testCase.name)
 			}
 			if got, want := tmuxClient.ExactPaneDeliveries, []string{"%9"}; !slices.Equal(got, want) {
 				t.Fatalf("%s exact-pane deliveries = %v, want %v", testCase.name, got, want)

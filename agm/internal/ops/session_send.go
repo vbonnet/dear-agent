@@ -15,13 +15,14 @@ type SendMessageRequest struct {
 	Message string `json:"message"`
 
 	// Force permits delivery only when the verified harness owns the exact pane
-	// and QUEUE is the sole readiness blocker. It does not bypass permission or
-	// any other fail-closed state.
+	// and a queued-input marker plus complete AGM header identify a stuck AGM
+	// paste. It does not bypass human drafts or any other fail-closed state.
 	Force bool `json:"force,omitempty"`
 
-	// Autonomous permits the same narrowly scoped QUEUE recovery for an
-	// unattended session. It never bypasses permission, overlay, onboarding,
-	// harness-identity, target-existence, or backend-error checks.
+	// Autonomous permits the same narrowly scoped stuck-AGM recovery for an
+	// unattended session. It never bypasses human drafts, generic busy states,
+	// permission, overlays, onboarding, harness identity, target existence, or
+	// backend-error checks.
 	Autonomous bool `json:"autonomous,omitempty"`
 }
 
@@ -94,9 +95,9 @@ func SendMessage(ctx *OpContext, req *SendMessageRequest) (*SendMessageResult, e
 		if !ok {
 			return newResult(false), ErrSessionNotReady(m.Name, "ATOMIC_DELIVERY_UNAVAILABLE")
 		}
-		allowBusyComposer := req.Force || req.Autonomous
+		allowQueuedAGM := req.Force || req.Autonomous
 		readiness, readinessErr := sender.SendKeysIfInputReady(callCtx, tmuxName, harness, req.Message, session.InputDeliveryOptions{
-			AllowBusyComposer: allowBusyComposer,
+			AllowQueuedAGM: allowQueuedAGM,
 		})
 		if readinessErr != nil {
 			return newResult(false), ErrStorageError("tmux.SendKeysIfInputReady", readinessErr)
@@ -104,8 +105,8 @@ func SendMessage(ctx *OpContext, req *SendMessageRequest) (*SendMessageResult, e
 		if !readiness.Ready {
 			return newResult(false), ErrSessionNotReady(m.Name, readiness.State)
 		}
-		if readiness.Forced && (!allowBusyComposer || readiness.State != "QUEUE") {
-			return newResult(false), ErrSessionNotReady(m.Name, "INVALID_BUSY_COMPOSER_DELIVERY")
+		if readiness.Forced && (!allowQueuedAGM || readiness.State != "QUEUED_AGM") {
+			return newResult(false), ErrSessionNotReady(m.Name, "INVALID_QUEUED_AGM_DELIVERY")
 		}
 		if readiness.PaneID == "" {
 			return newResult(false), ErrSessionNotReady(m.Name, "UNVERIFIED_PANE")
