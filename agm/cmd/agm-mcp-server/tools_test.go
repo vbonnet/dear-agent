@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
@@ -58,6 +59,43 @@ type blockingKillTmux struct {
 	probeOnce    sync.Once
 	killCalls    int
 }
+
+type mcpAPIProbeAgent struct {
+	status agent.Status
+	sent   []agent.Message
+}
+
+func (a *mcpAPIProbeAgent) Name() string    { return "api-probe" }
+func (a *mcpAPIProbeAgent) Version() string { return "test" }
+func (a *mcpAPIProbeAgent) CreateSession(agent.SessionContext) (agent.SessionID, error) {
+	return "", nil
+}
+func (a *mcpAPIProbeAgent) ResumeSession(agent.SessionID) error    { return nil }
+func (a *mcpAPIProbeAgent) TerminateSession(agent.SessionID) error { return nil }
+func (a *mcpAPIProbeAgent) GetSessionStatus(agent.SessionID) (agent.Status, error) {
+	return a.status, nil
+}
+func (a *mcpAPIProbeAgent) SendMessage(_ agent.SessionID, message agent.Message) error {
+	a.sent = append(a.sent, message)
+	return nil
+}
+func (a *mcpAPIProbeAgent) SendMessageContext(ctx context.Context, sessionID agent.SessionID, message agent.Message) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return a.SendMessage(sessionID, message)
+}
+func (a *mcpAPIProbeAgent) GetHistory(agent.SessionID) ([]agent.Message, error) {
+	return a.sent, nil
+}
+func (a *mcpAPIProbeAgent) ExportConversation(agent.SessionID, agent.ConversationFormat) ([]byte, error) {
+	return nil, nil
+}
+func (a *mcpAPIProbeAgent) ImportConversation([]byte, agent.ConversationFormat) (agent.SessionID, error) {
+	return "", nil
+}
+func (a *mcpAPIProbeAgent) Capabilities() agent.Capabilities   { return agent.Capabilities{} }
+func (a *mcpAPIProbeAgent) ExecuteCommand(agent.Command) error { return nil }
 
 func (m *blockingKillTmux) HasSession(name string) (bool, error) {
 	m.probeOnce.Do(func() {
@@ -801,6 +839,53 @@ func TestSendMessageTool_RejectsEmptySessionID(t *testing.T) {
 func TestSendMessageTool_RejectsEmptyMessage(t *testing.T) {
 	cli := newTestMCPClient(t, func(s *mcp.Server, c *Config) { addSendMessageTool(s, c) })
 	callToolExpectError(t, cli, "agm_send_message", map[string]any{"session_id": "some-id"})
+}
+
+func TestSendMessageTool_RoutesPureAPIBeforeTmux(t *testing.T) {
+	storage := dolt.NewMockAdapter()
+	if err := storage.CreateSession(&manifest.Manifest{
+		SessionID: "mcp-api-id",
+		Name:      "mcp-api",
+		Harness:   "openai",
+		Tmux:      manifest.Tmux{SessionName: "must-not-be-probed"},
+	}); err != nil {
+		t.Fatalf("create API session: %v", err)
+	}
+	tmuxClient := session.NewMockTmux()
+	tmuxClient.InputReadiness = session.InputReadiness{Ready: true, State: "YES", PaneID: "%9"}
+	apiAgent := &mcpAPIProbeAgent{status: agent.StatusActive}
+
+	cli := newTestMCPClient(t, func(server *mcp.Server, _ *Config) {
+		addSendMessageToolWithFactory(server, func() (*ops.OpContext, func(), error) {
+			return &ops.OpContext{
+				Storage: storage,
+				Tmux:    tmuxClient,
+				APIAgentFactory: func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+					return apiAgent, nil
+				},
+			}, func() {}, nil
+		})
+	})
+	result, err := cli.CallTool(t.Context(), &mcp.CallToolParams{
+		Name: "agm_send_message",
+		Arguments: map[string]any{
+			"session_id": "mcp-api-id",
+			"message":    "API delivery",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(agm_send_message): %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("agm_send_message result = %s", extractText(t, result))
+	}
+	if len(apiAgent.sent) != 1 || apiAgent.sent[0].Content != "API delivery" {
+		t.Fatalf("API messages = %#v, want one delivery", apiAgent.sent)
+	}
+	if len(tmuxClient.AtomicInputChecks) != 0 || len(tmuxClient.ExactPaneDeliveries) != 0 || len(tmuxClient.SentCommands) != 0 {
+		t.Fatalf("pure API MCP delivery touched tmux: checks=%v panes=%v commands=%v",
+			tmuxClient.AtomicInputChecks, tmuxClient.ExactPaneDeliveries, tmuxClient.SentCommands)
+	}
 }
 
 func TestLifecycleTools_RegisterUnderCorrectNames(t *testing.T) {

@@ -502,7 +502,7 @@ func TestAPIDeliverySerializesReadinessCompletionAndPersistenceByStableSessionID
 
 	firstDone := make(chan error, 1)
 	go func() {
-		firstDone <- sendToAPIAgentIfReady(t.Context(), m, m.Name, "sender", "first-id", "first", "", storage, factory)
+		firstDone <- sendToAPIAgentIfReady(t.Context(), m, "sender", "first-id", "first", "", storage, factory)
 	}()
 	select {
 	case call := <-factoryEntered:
@@ -520,7 +520,7 @@ func TestAPIDeliverySerializesReadinessCompletionAndPersistenceByStableSessionID
 
 	secondDone := make(chan error, 1)
 	go func() {
-		secondDone <- sendToAPIAgentIfReady(t.Context(), m, m.Name, "sender", "second-id", "second", "", storage, factory)
+		secondDone <- sendToAPIAgentIfReady(t.Context(), m, "sender", "second-id", "second", "", storage, factory)
 	}()
 	select {
 	case call := <-factoryEntered:
@@ -599,7 +599,7 @@ func TestAPIDeliveryReloadsLifecycleInsideStableSessionLock(t *testing.T) {
 	}
 
 	factoryCalled := false
-	err = sendToAPIAgentIfReady(t.Context(), staleActive, staleActive.Name, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+	err = sendToAPIAgentIfReady(t.Context(), staleActive, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
 		factoryCalled = true
 		return &mockAgentAdapter{}, nil
 	})
@@ -608,6 +608,41 @@ func TestAPIDeliveryReloadsLifecycleInsideStableSessionLock(t *testing.T) {
 	}
 	if factoryCalled {
 		t.Fatal("stale active API delivery constructed adapter after locked lifecycle reload")
+	}
+}
+
+func TestAPIDeliveryUsesLockedManifestForAuditArtifact(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	storage := dolt.NewMockAdapter()
+	stale := &manifest.Manifest{
+		SessionID: "renamed-api-session-id",
+		Name:      "old-api-name",
+		Harness:   "openai",
+	}
+	if err := storage.CreateSession(stale); err != nil {
+		t.Fatalf("create API session: %v", err)
+	}
+	current, err := storage.GetSession(stale.SessionID)
+	if err != nil {
+		t.Fatalf("get API session: %v", err)
+	}
+	current.Name = "current-api-name"
+	if err := storage.UpdateSession(current); err != nil {
+		t.Fatalf("rename API session: %v", err)
+	}
+
+	err = sendToAPIAgentIfReady(t.Context(), stale, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+		return &mockAgentAdapter{sessionStatus: agent.StatusActive}, nil
+	})
+	if err != nil {
+		t.Fatalf("deliver to renamed API session: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(homeDir, ".agm", "pending", "current-api-name")); err != nil {
+		t.Fatalf("current-name pending artifact: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(homeDir, ".agm", "pending", "old-api-name")); !os.IsNotExist(err) {
+		t.Fatalf("stale-name pending artifact exists: %v", err)
 	}
 }
 
@@ -632,7 +667,7 @@ func TestAPIDeliveryRejectsReapingLifecycleInsideStableSessionLock(t *testing.T)
 	}
 
 	factoryCalled := false
-	err = sendToAPIAgentIfReady(t.Context(), staleActive, staleActive.Name, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+	err = sendToAPIAgentIfReady(t.Context(), staleActive, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
 		factoryCalled = true
 		return &mockAgentAdapter{}, nil
 	})
@@ -659,7 +694,7 @@ func TestAPIDeliveryRejectsAdapterWithoutContextDelivery(t *testing.T) {
 	legacy := &mockAgentAdapter{sessionStatus: agent.StatusActive}
 	legacyAgentOnly := struct{ agent.Agent }{Agent: legacy}
 
-	err := sendToAPIAgentIfReady(t.Context(), m, m.Name, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+	err := sendToAPIAgentIfReady(t.Context(), m, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
 		return legacyAgentOnly, nil
 	})
 	if err == nil || !strings.Contains(err.Error(), "does not support context-aware delivery") {

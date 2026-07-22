@@ -9,6 +9,7 @@
 # RELATED-SPEC: agm/internal/monitor/opencode/SPEC.md
 # RELATED-SPEC: agm/internal/monitor/tmux/SPEC.md
 # RELATED-SPEC: agm/cmd/agm/SPEC.md
+# RELATED-SPEC: agm/cmd/agm-mcp-server/SPEC.md
 # RELATED-SPEC: agm/cmd/agm/hooks/SPEC.md
 # RELATED-SPEC: agm/cmd/agm/parity/SPEC.md
 # RELATED-SPEC: cmd/vroom-dispatch/SPEC.md

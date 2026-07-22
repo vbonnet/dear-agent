@@ -31,6 +31,8 @@ errors for callers that need harness-neutral failure handling.
 
 **OAI-10** When any OpenAI session manager updates title, working directory, or persisted runtime configuration, the system shall acquire the same store-scoped session lock as message commit and history clear, reload current metadata under that lock, apply only the requested field change, and preserve independent updates made by another process.
 
+**OAI-11** When the pure OpenAI API adapter reports session status, the system shall report an existing stored session as active and a missing stored session as terminated without invoking tmux; tmux-backed Codex CLI readiness belongs exclusively to the `codex-cli` adapter.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

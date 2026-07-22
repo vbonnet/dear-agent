@@ -1,6 +1,9 @@
 package ops
 
 import (
+	"time"
+
+	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/manager"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
@@ -85,6 +88,25 @@ func SendMessage(ctx *OpContext, req *SendMessageRequest) (*SendMessageResult, e
 	callCtx := requestContext(ctx)
 	if err := callCtx.Err(); err != nil {
 		return newResult(false), ErrStorageError("send_message context", err)
+	}
+
+	// Pure API sessions have no pane. Route them through the shared stable-ID
+	// lifecycle/readiness/provider transaction before considering any tmux
+	// capability that a surface (notably MCP) may also have wired.
+	if isAPISessionManifest(m) {
+		message := agent.Message{
+			ID:        uuid.NewString(),
+			Role:      agent.RoleUser,
+			Content:   req.Message,
+			Timestamp: time.Now(),
+			Metadata: map[string]any{
+				"source": "ops_send_message",
+			},
+		}
+		if _, err := DeliverAPISessionMessage(callCtx, ctx.Storage, m, message, ctx.APIAgentFactory); err != nil {
+			return newResult(false), err
+		}
+		return newResult(true), nil
 	}
 
 	// Tmux readiness and delivery are one atomic capability. The implementation

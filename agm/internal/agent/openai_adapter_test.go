@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -14,7 +13,6 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent/openai"
-	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 // TestOpenAIAdapterImplementsAgentInterface verifies OpenAIAdapter implements Agent interface.
@@ -416,67 +414,38 @@ func TestGetSessionStatus(t *testing.T) {
 	}
 }
 
-// TestGetSessionStatusCodexIdle verifies that, for a codex-cli-style session
-// whose title is a live tmux pane showing the Codex composer, GetSessionStatus
-// refines Active into Idle. The session title is used as the tmux session name
-// (set from SessionContext.Name at create time).
-func TestGetSessionStatusCodexIdle(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux not available")
-	}
-
+// TestGetSessionStatusIsTmuxIndependent proves that the retired API adapter
+// does not probe a same-named tmux pane. codex-cli status belongs exclusively
+// to CodexCLIAdapter.
+func TestGetSessionStatusIsTmuxIndependent(t *testing.T) {
 	tmpDir := t.TempDir()
 	adapter := createTestAdapter(t, tmpDir)
-
-	sessionName := "test-openai-codex-idle"
-	socketPath := tmux.GetSocketPath()
-	exec.Command("tmux", "-S", socketPath, "kill-session", "-t", sessionName).Run()
-	if err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", sessionName).Run(); err != nil {
-		t.Fatalf("failed to create tmux session: %v", err)
+	binDir := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "tmux-probed")
+	fakeTmux := filepath.Join(binDir, "tmux")
+	if err := os.WriteFile(fakeTmux, []byte("#!/bin/sh\n: > \"$TMUX_PROBE_MARKER\"\nexit 1\n"), 0o700); err != nil {
+		t.Fatalf("write fake tmux: %v", err)
 	}
-	t.Cleanup(func() {
-		exec.Command("tmux", "-S", socketPath, "kill-session", "-t", sessionName).Run()
-	})
+	t.Setenv("PATH", binDir)
+	t.Setenv("TMUX_PROBE_MARKER", marker)
 
-	// The adapter keys off the session title; set it to the tmux session name.
 	sessionID, err := adapter.CreateSession(SessionContext{
-		Name:             sessionName,
+		Name:             "same-name-as-a-pane",
 		WorkingDirectory: "/tmp",
 	})
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
 
-	// Before the composer renders, the pane has no Codex signals → Active.
 	status, err := adapter.GetSessionStatus(sessionID)
 	if err != nil {
 		t.Fatalf("failed to get session status: %v", err)
 	}
 	if status != StatusActive {
-		t.Errorf("expected %s before composer renders, got %s", StatusActive, status)
+		t.Errorf("expected %s for existing API session, got %s", StatusActive, status)
 	}
-
-	// Replace the shell with a long-lived process that renders only the complete
-	// initial Codex composer. Typing printf into a shell would leave command or
-	// prompt output after the fixture and correctly make that composer stale.
-	composerProcess := "printf '│ >_ OpenAI Codex (v0.141.0) │\\n│ model: gpt-5.5 xhigh /model to change │\\n╰──────────────────────────────╯\\n›\\n'; exec sleep 30"
-	if err := exec.Command("tmux", "-S", socketPath, "respawn-pane", "-k", "-t", sessionName, composerProcess).Run(); err != nil {
-		t.Fatalf("failed to render composer fixture: %v", err)
-	}
-
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		status, err = adapter.GetSessionStatus(sessionID)
-		if err != nil {
-			t.Fatalf("failed to get session status: %v", err)
-		}
-		if status == StatusIdle {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	if status != StatusIdle {
-		t.Errorf("expected %s once composer is visible, got %s", StatusIdle, status)
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("pure API status invoked tmux: %v", err)
 	}
 }
 

@@ -717,7 +717,7 @@ func sendDirectlyWithTmux(ctx context.Context, recipientSession, senderName, mes
 	return sendDirectlyWithDependencies(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, adapter, tmuxClient, newAPIHarnessAdapter)
 }
 
-type apiAgentFactory func(context.Context, *manifest.Manifest) (agent.Agent, error)
+type apiAgentFactory = ops.APISessionAgentFactory
 
 func sendDirectlyWithDependencies(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, adapter *dolt.Adapter, tmuxClient session.TmuxInterface, newAPIAgent apiAgentFactory) error {
 	if adapter == nil {
@@ -743,7 +743,7 @@ func sendDirectlyWithDependencies(ctx context.Context, recipientSession, senderN
 
 	// Check if this is an API-based harness (OpenAI, etc.)
 	if isAPIBasedAgent(harnessType) {
-		return sendToAPIAgentIfReady(ctx, m, recipientSession, senderName, messageID, formattedMessage, promptFile, adapter, newAPIAgent)
+		return sendToAPIAgentIfReady(ctx, m, senderName, messageID, formattedMessage, promptFile, adapter, newAPIAgent)
 	}
 
 	// CLI-based harnesses share one atomic readiness-and-delivery operation.
@@ -786,65 +786,38 @@ func resolveDirectDeliveryManifest(recipientSession, sessionsDir string, adapter
 }
 
 func newAPIHarnessAdapter(ctx context.Context, m *manifest.Manifest) (agent.Agent, error) {
-	switch m.Harness {
-	case "openai", "gpt":
-		apiConfig := &agent.OpenAIConfig{Model: m.Model}
-		if m.OpenAI != nil {
-			apiConfig.SessionsDir = m.OpenAI.SessionsDir
-			apiConfig.BaseURL = m.OpenAI.BaseURL
-			apiConfig.IsAzure = m.OpenAI.IsAzure
-			apiConfig.AzureAPIVersion = m.OpenAI.AzureAPIVersion
-			apiConfig.Temperature = m.OpenAI.Temperature
-			apiConfig.MaxTokens = m.OpenAI.MaxTokens
-		}
-		return agent.NewOpenAIAdapterForSession(ctx, agent.SessionID(m.SessionID), apiConfig)
-	default:
-		return agent.GetHarness(m.Harness)
-	}
+	return ops.NewAPISessionAgent(ctx, m)
 }
 
-func sendToAPIAgentIfReady(ctx context.Context, m *manifest.Manifest, recipientSession, senderName, messageID, formattedMessage, promptFile string, storage dolt.Storage, newAPIAgent apiAgentFactory) error {
-	if storage == nil {
-		return fmt.Errorf("verified API delivery requires session storage")
+func sendToAPIAgentIfReady(ctx context.Context, m *manifest.Manifest, senderName, messageID, formattedMessage, promptFile string, storage dolt.Storage, newAPIAgent apiAgentFactory) error {
+	message := agent.Message{
+		ID:        messageID,
+		Role:      agent.RoleUser,
+		Content:   formattedMessage,
+		Timestamp: time.Now(),
+		Metadata: map[string]any{
+			"sender":    senderName,
+			"source":    "agm_send",
+			"file_path": promptFile,
+		},
 	}
-	// Pure API sessions intentionally have no tmux pane. Their adapter's session
-	// status is therefore the only delivery readiness authority shared by
-	// single-recipient and fan-out sends. The stable session lock covers adapter
-	// reconstruction, readiness, provider completion, and history persistence so
-	// separate AGM processes cannot fork or corrupt one conversation.
-	return ops.WithAPISessionLockContext(ctx, m.SessionID, func() error {
-		current, err := storage.GetSession(m.SessionID)
-		if err != nil {
-			return fmt.Errorf("reload API session %q under mutation lock: %w", recipientSession, err)
-		}
-		if current == nil {
-			return ops.ErrSessionNotFound(m.SessionID)
-		}
-		if current.Lifecycle != "" {
-			currentName := current.Name
-			if currentName == "" {
-				currentName = recipientSession
-			}
-			if current.Lifecycle == manifest.LifecycleArchived {
-				return ops.ErrSessionArchived(currentName)
-			}
-			return ops.ErrSessionNotReady(currentName, "LIFECYCLE_"+current.Lifecycle)
-		}
+	current, err := ops.DeliverAPISessionMessage(ctx, storage, m, message, newAPIAgent)
+	if err != nil {
+		return err
+	}
 
-		agentAdapter, err := newAPIAgent(ctx, current)
-		if err != nil {
-			return fmt.Errorf("create API harness adapter for %q: %w", recipientSession, err)
-		}
-		sessionID := agent.SessionID(current.SessionID)
-		status, err := agentAdapter.GetSessionStatus(sessionID)
-		if err != nil {
-			return fmt.Errorf("check API session %q readiness: %w", recipientSession, err)
-		}
-		if status != agent.StatusActive && status != agent.StatusIdle {
-			return fmt.Errorf("API session %q is not ready for direct delivery (status %s)", recipientSession, status)
-		}
-		return sendViaAgentContext(ctx, current, senderName, messageID, formattedMessage, promptFile, agentAdapter)
-	})
+	// Preserve the hook-visible audit artifact only after successful API
+	// delivery. A failed adapter call must not leave an alternate delivery path.
+	if err := messages.WritePendingFile(current.Name, messageID, formattedMessage); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to write pending file: %v\n", err)
+	}
+
+	successMsg := fmt.Sprintf("✓ Sent to '%s' from '%s' (%d chars) [ID: %s] [via: %s API]", current.Name, senderName, len(formattedMessage), messageID, current.Harness)
+	if promptFile != "" {
+		successMsg += fmt.Sprintf(" [file: %s]", promptFile)
+	}
+	ui.PrintSuccess(successMsg)
+	return nil
 }
 
 func waitForAgyMetadataBackfill(ctx context.Context, sessionName string, wait func(context.Context, string, time.Duration) error) error {
@@ -897,46 +870,6 @@ func sendViaSharedOperations(ctx context.Context, recipientSession, senderName, 
 
 	// Print success message with message ID
 	successMsg := fmt.Sprintf("✓ Sent to '%s' from '%s' (%d chars) [ID: %s] [via: tmux]", recipientSession, senderName, len(formattedMessage), messageID)
-	if promptFile != "" {
-		successMsg += fmt.Sprintf(" [file: %s]", promptFile)
-	}
-	ui.PrintSuccess(successMsg)
-
-	return nil
-}
-
-func sendViaAgentContext(ctx context.Context, m *manifest.Manifest, senderName, messageID, formattedMessage, promptFile string, agentAdapter agent.Agent) error {
-	// Create message
-	msg := agent.Message{
-		ID:        messageID,
-		Role:      agent.RoleUser,
-		Content:   formattedMessage,
-		Timestamp: time.Now(),
-		Metadata: map[string]interface{}{
-			"sender":    senderName,
-			"source":    "agm_send",
-			"file_path": promptFile,
-		},
-	}
-
-	// Send message via Agent interface
-	sessionID := agent.SessionID(m.SessionID)
-	contextSender, ok := agentAdapter.(agent.ContextMessageSender)
-	if !ok {
-		return fmt.Errorf("API harness adapter does not support context-aware delivery")
-	}
-	if err := contextSender.SendMessageContext(ctx, sessionID, msg); err != nil {
-		return fmt.Errorf("failed to send message via harness: %w", err)
-	}
-
-	// Preserve the hook-visible audit artifact only after successful API
-	// delivery. A failed adapter call must not leave an alternate delivery path.
-	if err := messages.WritePendingFile(m.Name, messageID, formattedMessage); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to write pending file: %v\n", err)
-	}
-
-	// Print success message with message ID
-	successMsg := fmt.Sprintf("✓ Sent to '%s' from '%s' (%d chars) [ID: %s] [via: %s API]", m.Name, senderName, len(formattedMessage), messageID, m.Harness)
 	if promptFile != "" {
 		successMsg += fmt.Sprintf(" [file: %s]", promptFile)
 	}

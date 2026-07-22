@@ -119,6 +119,8 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-31** When a Manager backend is present, the system shall deliver `SendMessage` via `manager.Backend.SendMessage` using the tmux session name as the session identifier.
 
+**OPS-82** When `SendMessage` resolves an `openai` or `gpt` manifest, the system shall route before every configured tmux capability through the shared stable-session-ID API transaction, reload lifecycle under the archive-compatible lock, reconstruct the adapter from persisted non-secret runtime configuration, accept only active or idle adapter status, and require context-aware provider delivery; CLI, MCP, and other callers shall therefore neither inspect nor send to a tmux pane for a pure API session.
+
 ### Stall Detection
 
 **OPS-32** When a session has been in `PERMISSION_PROMPT` state for longer than `PermissionTimeout` (default 5 minutes), the stall detector shall classify it as a critical stall.
