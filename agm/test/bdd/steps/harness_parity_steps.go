@@ -884,8 +884,17 @@ func agmValidatesSlowHarnessStartupReadiness(ctx context.Context) error {
 	cmd := exec.CommandContext(testCtx, "go", "test", "-p", "1", "./agm/cmd/agm", "./agm/cmd/agm-mcp-server", "./agm/internal/session", "./agm/internal/tmux", "./agm/internal/ops", "-run", `^(TestMCPCreateSessionRuntimeRevalidatesStartupPromptAtomically|TestRealTmux(ReadinessAdvancesGeminiTrustOnVerifiedPane|ReadinessDetectsManagedPiComposer|ReadinessIdentifiesNodeBackedCodex|ReadinessPinsLivenessAndDeliveryToActivePane|ReadinessPreservesClaudeGhostComposer|ReadinessRejectsSuspendedHarnessWithStaleComposer|WaitForHarnessReadyAllowsSlowProcessStart)|TestClassifyHarnessInputRequiresCurrentHarnessComposer|TestHarnessStartupAdvanceKeys|TestParsePSForegroundTable|TestExpectedHarnessMatcher(RejectsUnrelatedNodeProcess|AcceptsIdentifiedNodeBackedHarness|RequiresForegroundTerminalOwnership)|TestSendMessage_(AtomicReadinessAndDeliveryPrecedesGenericManagerCheck|PiPermissionPromptBlocksAtomicDelivery|Normalizes(LegacyAgyHarness|PiHarnessAlias)BeforeReadiness)|TestSendViaSharedOperations(UsesCallerContext|FailsClosedWhenHarnessIsNotReady)|TestMultiRecipientDeliveryUsesSharedAtomicReadiness|TestDirectCLIDeliveryRejectsUnregisteredTmuxSession|TestDeliverInitialPrompt(UsesAtomicExactPaneReadiness|FileUsesAtomicExactPaneReadiness|FailsClosedWhenHarnessDoesNotOwnTerminal))$`, "-count=1", "-v")
 	cmd.Dir = bddRepoRoot()
 	output, err := cmd.CombinedOutput()
-	harnessState.startupReadinessTestOutput = string(output)
+	agyBootstrapCmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm-mcp-server",
+		"-run", `^TestMCPCreateSessionRuntime(AgyIdentityBootstrapFailsClosedWhenComposerIsNotReady|CannotBypassSharedAgyReadiness)$`,
+		"-count=1", "-v",
+	)
+	agyBootstrapCmd.Dir = bddRepoRoot()
+	agyBootstrapOutput, agyBootstrapErr := agyBootstrapCmd.CombinedOutput()
+	harnessState.startupReadinessTestOutput = string(output) + "\n" + string(agyBootstrapOutput)
 	harnessState.startupReadinessTestErr = err
+	if harnessState.startupReadinessTestErr == nil {
+		harnessState.startupReadinessTestErr = agyBootstrapErr
+	}
 	if testCtx.Err() != nil {
 		return fmt.Errorf("slow harness startup readiness test timed out: %w", testCtx.Err())
 	}
@@ -917,6 +926,8 @@ func sharedInputReadinessShouldRejectStaleClaudeComposerAndUnrelatedNodeProcess(
 		"TestSendMessage_AtomicReadinessAndDeliveryPrecedesGenericManagerCheck",
 		"TestSendMessage_PiPermissionPromptBlocksAtomicDelivery",
 		"TestMCPCreateSessionRuntimeRevalidatesStartupPromptAtomically",
+		"TestMCPCreateSessionRuntimeCannotBypassSharedAgyReadiness",
+		"TestMCPCreateSessionRuntimeAgyIdentityBootstrapFailsClosedWhenComposerIsNotReady",
 	} {
 		if !strings.Contains(harnessState.startupReadinessTestOutput, "--- PASS: "+behavior) {
 			return fmt.Errorf("shared readiness behavior %s did not pass:\n%s", behavior, harnessState.startupReadinessTestOutput)
@@ -2703,18 +2714,27 @@ func runAgyLifecycleBehaviorSuite(ctx context.Context, harnessState *harnessPari
 	)
 	resumeOnboardingCmd.Dir = bddRepoRoot()
 	resumeOnboardingOutput, resumeOnboardingErr := resumeOnboardingCmd.CombinedOutput()
+	sharedReadinessCmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/cmd/agm-mcp-server",
+		"-run", `^(TestMCPCreateSessionRuntime(CannotBypassSharedAgyReadiness|AgyIdentityBootstrapFailsClosedWhenComposerIsNotReady)|TestSendViaSharedOperations(UsesCallerContext|FailsClosedWhenHarnessIsNotReady))$`,
+		"-count=1", "-v",
+	)
+	sharedReadinessCmd.Dir = bddRepoRoot()
+	sharedReadinessOutput, sharedReadinessErr := sharedReadinessCmd.CombinedOutput()
 	lockCmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/lock", "./agm/internal/agysession",
 		"-run", `^Test(FileLockTryLockPreservesPermanentFlockError|AcquireWorkspaceCreateLockStopsOnPermanentFlockError)$`,
 		"-count=1", "-v",
 	)
 	lockCmd.Dir = bddRepoRoot()
 	lockOutput, lockErr := lockCmd.CombinedOutput()
-	harnessState.agyLifecycleTestOutput = string(output) + "\n" + string(transcriptOutput) + "\n" + string(resumeOnboardingOutput) + "\n" + string(lockOutput)
+	harnessState.agyLifecycleTestOutput = string(output) + "\n" + string(transcriptOutput) + "\n" + string(resumeOnboardingOutput) + "\n" + string(sharedReadinessOutput) + "\n" + string(lockOutput)
 	if runErr == nil {
 		runErr = transcriptErr
 	}
 	if runErr == nil {
 		runErr = resumeOnboardingErr
+	}
+	if runErr == nil {
+		runErr = sharedReadinessErr
 	}
 	if runErr == nil {
 		runErr = lockErr

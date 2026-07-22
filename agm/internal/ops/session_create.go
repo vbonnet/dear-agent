@@ -656,11 +656,22 @@ func bootstrapAgyCreateIdentity(callCtx context.Context, opCtx *OpContext, sessi
 		}
 		return nil
 	}
-	if err := opCtx.Tmux.SendKeys(sessionName, prompt); err != nil {
+	sender, ok := opCtx.Tmux.(session.AtomicInputSender)
+	if !ok {
+		return ErrStorageError("agy.identity.bootstrap-prompt", fmt.Errorf("tmux backend does not expose atomic input delivery"))
+	}
+	readiness, err := sender.SendKeysIfInputReady(callCtx, sessionName, "agy", prompt)
+	if err != nil {
 		if ctxErr := callCtx.Err(); ctxErr != nil {
 			return ctxErr
 		}
 		return ErrStorageError("agy.identity.bootstrap-prompt", err)
+	}
+	if !readiness.Ready {
+		return ErrStorageError("agy.identity.bootstrap-prompt", fmt.Errorf("harness input is %s", readiness.State))
+	}
+	if readiness.PaneID == "" {
+		return ErrStorageError("agy.identity.bootstrap-prompt", fmt.Errorf("harness returned no verified pane"))
 	}
 	return nil
 }

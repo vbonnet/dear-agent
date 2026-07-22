@@ -340,19 +340,23 @@ func (r *mcpCreateSessionRuntime) Complete(ctx context.Context, completion ops.C
 	if completion.Prompt == "" || completion.Launch.PromptDelivered {
 		return nil
 	}
+	return r.sendPromptAtomically(ctx, completion.Manifest.Name, completion.Manifest.Harness, completion.Prompt, "startup prompt delivery")
+}
+
+func (r *mcpCreateSessionRuntime) sendPromptAtomically(ctx context.Context, sessionName, harness, prompt, operation string) error {
 	sender, ok := r.tmux.(session.AtomicInputSender)
 	if !ok {
 		return fmt.Errorf("MCP tmux runtime does not expose atomic input delivery")
 	}
-	readiness, err := sender.SendKeysIfInputReady(ctx, completion.Manifest.Name, completion.Manifest.Harness, completion.Prompt)
+	readiness, err := sender.SendKeysIfInputReady(ctx, sessionName, harness, prompt)
 	if err != nil {
-		return fmt.Errorf("revalidate MCP startup prompt delivery: %w", err)
+		return fmt.Errorf("revalidate MCP %s: %w", operation, err)
 	}
 	if !readiness.Ready {
-		return fmt.Errorf("revalidate MCP startup prompt delivery: harness input is %s", readiness.State)
+		return fmt.Errorf("revalidate MCP %s: harness input is %s", operation, readiness.State)
 	}
 	if readiness.PaneID == "" {
-		return fmt.Errorf("revalidate MCP startup prompt delivery: harness returned no verified pane")
+		return fmt.Errorf("revalidate MCP %s: harness returned no verified pane", operation)
 	}
 	return nil
 }
@@ -361,7 +365,7 @@ func (r *mcpCreateSessionRuntime) BootstrapAgyCreateIdentity(ctx context.Context
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return r.tmux.SendKeys(input.SessionName, input.Prompt)
+	return r.sendPromptAtomically(ctx, input.SessionName, "agy", input.Prompt, "AGY identity bootstrap prompt")
 }
 
 // mcpTracer is the OTel tracer for MCP tool handlers.

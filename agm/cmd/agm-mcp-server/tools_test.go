@@ -257,6 +257,25 @@ func TestMCPCreateSessionRuntimeBootstrapsAgyIdentityPromptExactlyOnce(t *testin
 	if strings.Contains(tmuxMock.SentCommands[0], "persist once") || strings.Contains(tmuxMock.SentCommands[0], "--prompt-interactive") {
 		t.Fatalf("MCP launch leaked startup prompt into process arguments: %q", tmuxMock.SentCommands[0])
 	}
+	if got := tmuxMock.AtomicInputChecks; !reflect.DeepEqual(got, []string{"mcp-agy-lazy:agy"}) {
+		t.Fatalf("AGY identity bootstrap atomic checks = %v, want [mcp-agy-lazy:agy]", got)
+	}
+}
+
+func TestMCPCreateSessionRuntimeAgyIdentityBootstrapFailsClosedWhenComposerIsNotReady(t *testing.T) {
+	tmuxMock := session.NewMockTmux()
+	tmuxMock.InputReadiness = session.InputReadiness{State: "PERMISSION", PaneID: "%0"}
+	runtime := newMCPCreateSessionRuntime(tmuxMock)
+
+	err := runtime.BootstrapAgyCreateIdentity(t.Context(), ops.AgyCreateIdentityBootstrap{
+		SessionName: "mcp-agy-permission", Prompt: "must not authorize",
+	})
+	if err == nil || !strings.Contains(err.Error(), "PERMISSION") {
+		t.Fatalf("BootstrapAgyCreateIdentity() error = %v, want permission readiness failure", err)
+	}
+	if len(tmuxMock.SentCommands) != 0 {
+		t.Fatalf("AGY permission prompt received bootstrap input: %v", tmuxMock.SentCommands)
+	}
 }
 
 func TestMCPCreateSessionRuntimeCannotBypassSharedCodexReadiness(t *testing.T) {
