@@ -66,7 +66,7 @@ func NewPiLaunchID() string {
 // BuildPiCommand constructs one canonical Pi command for create and resume.
 func BuildPiCommand(spec PiCommandSpec) PiCommand {
 	var b strings.Builder
-	fmt.Fprintf(&b, "cd %s && env -u CLAUDECODE AGM_SESSION_NAME=%s PI_SESSION_ID=%s AGM_PI_LAUNCH_ID=%s AGM_PI_PROJECT_DIR=%s", ShellQuote(spec.WorkDir), ShellQuote(spec.SessionName), ShellQuote(spec.SessionID), ShellQuote(spec.LaunchID), ShellQuote(spec.WorkDir))
+	fmt.Fprintf(&b, "cd %s && env -u CLAUDECODE -u PI_CODING_AGENT_DIR AGM_SESSION_NAME=%s PI_SESSION_ID=%s AGM_PI_LAUNCH_ID=%s AGM_PI_PROJECT_DIR=%s", ShellQuote(spec.WorkDir), ShellQuote(spec.SessionName), ShellQuote(spec.SessionID), ShellQuote(spec.LaunchID), ShellQuote(spec.WorkDir))
 	fmt.Fprintf(&b, " AGM_PI_PERMISSION_MODE=%s AGM_PI_PERMISSION_POLICY_FILE=%s", ShellQuote(defaultPiMode(spec.PermissionMode)), ShellQuote(spec.PermissionPolicyFile))
 	if spec.CodingAgentDir != "" {
 		fmt.Fprintf(&b, " PI_CODING_AGENT_DIR=%s", ShellQuote(spec.CodingAgentDir))
