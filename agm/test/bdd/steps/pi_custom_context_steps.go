@@ -112,7 +112,7 @@ func piCatalogOverridesWindow(ctx context.Context, qualifiedModel string, window
 	}
 	provider, model, ok := strings.Cut(qualifiedModel, "/")
 	if !ok || provider == "" || model == "" {
-		return fmt.Errorf("Pi model %q is not provider-qualified", qualifiedModel)
+		return fmt.Errorf("pi model %q is not provider-qualified", qualifiedModel)
 	}
 	catalog := fmt.Sprintf(`{"providers":{%q:{"modelOverrides":{%q:{"contextWindow":%d}}}}}`, provider, model, window)
 	return os.WriteFile(filepath.Join(state.root, "models.json"), []byte(catalog), 0o600)
