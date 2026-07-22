@@ -532,9 +532,12 @@ func ReadModel(path string) (string, error) {
 func qualifyModel(provider, model string) string {
 	provider = strings.TrimSpace(provider)
 	model = strings.TrimSpace(model)
-	if provider == "" || strings.Contains(model, "/") {
+	if provider == "" || model == "" {
 		return model
 	}
+	// Pi persists provider and model as separate native fields. Model IDs are
+	// opaque and may themselves begin with the provider name, so an apparent
+	// prefix match must not erase that boundary.
 	return provider + "/" + model
 }
 
@@ -569,7 +572,7 @@ func ReadUsage(path string) (Usage, error) {
 		if message.Role != "assistant" || usage.Input+usage.Output+usage.CacheRead+usage.CacheWrite == 0 {
 			continue
 		}
-		out.Model = message.Model
+		out.Model = qualifyModel(message.Provider, message.Model)
 		out.ContextTokens = usage.Input + usage.CacheRead + usage.CacheWrite
 		out.AssistantCalls++
 		out.LastAssistantAt, _ = time.Parse(time.RFC3339Nano, entry.Timestamp)
