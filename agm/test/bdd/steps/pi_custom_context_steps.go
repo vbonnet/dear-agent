@@ -49,10 +49,12 @@ func RegisterPiCustomContextSteps(ctx *godog.ScenarioContext) {
 	})
 
 	ctx.Step(`^a managed Pi transcript uses provider "([^"]*)" model "([^"]*)"$`, managedPiTranscriptUsesModel)
+	ctx.Step(`^a managed Pi transcript omits its provider for model "([^"]*)"$`, managedPiTranscriptOmitsProvider)
 	ctx.Step(`^the Pi custom model catalog declares an (\d+) token window with an inert credential command$`, piCatalogDeclaresInertWindow)
 	ctx.Step(`^the Pi custom model catalog declares an integral exponent context window$`, piCatalogDeclaresIntegralExponentWindow)
 	ctx.Step(`^the Pi custom model catalog for provider "([^"]*)" declares model "([^"]*)" with an (\d+) token window$`, piCatalogDeclaresModelWindow)
 	ctx.Step(`^the Pi custom model catalog declares a null context window$`, piCatalogDeclaresNullWindow)
+	ctx.Step(`^two Pi catalog providers declare "([^"]*)" with the same (\d+) token window$`, piCatalogDeclaresEqualProviderDuplicates)
 	ctx.Step(`^the Pi model catalog overrides "([^"]*)" to (\d+) tokens$`, piCatalogOverridesWindow)
 	ctx.Step(`^AGM detects the managed Pi context$`, agmDetectsManagedPiContext)
 	ctx.Step(`^the Pi context should report (\d+) of (\d+) tokens used$`, piContextShouldReportUsage)
@@ -75,6 +77,30 @@ func managedPiTranscriptUsesModel(ctx context.Context, provider, model string) e
 	transcriptPath := filepath.Join(sessionDir, "pi.jsonl")
 	content := fmt.Sprintf("{\"type\":\"session\",\"id\":\"pi-bdd-context\",\"cwd\":\"/work\"}\n"+
 		"{\"type\":\"message\",\"timestamp\":\"2026-07-22T10:11:52Z\",\"message\":{\"role\":\"assistant\",\"provider\":%q,\"model\":%q,\"usage\":{\"input\":3539,\"output\":4,\"cacheRead\":23}}}\n", provider, model)
+	if err := os.WriteFile(transcriptPath, []byte(content), 0o600); err != nil {
+		return err
+	}
+	state.manifest = &manifest.Manifest{Pi: &manifest.Pi{
+		SessionID: "pi-bdd-context", SessionDir: sessionDir, TranscriptPath: transcriptPath,
+	}}
+	return nil
+}
+
+func managedPiTranscriptOmitsProvider(ctx context.Context, model string) error {
+	state, err := getPiCustomContextState(ctx)
+	if err != nil {
+		return err
+	}
+	if err := initializePiCustomContextFixture(state); err != nil {
+		return err
+	}
+	sessionDir := filepath.Join(state.root, "sessions")
+	if err := os.Mkdir(sessionDir, 0o700); err != nil {
+		return err
+	}
+	transcriptPath := filepath.Join(sessionDir, "pi.jsonl")
+	content := fmt.Sprintf("{\"type\":\"session\",\"id\":\"pi-bdd-context\",\"cwd\":\"/work\"}\n"+
+		"{\"type\":\"message\",\"timestamp\":\"2026-07-22T10:11:52Z\",\"message\":{\"role\":\"assistant\",\"model\":%q,\"usage\":{\"input\":3539,\"output\":4,\"cacheRead\":23}}}\n", model)
 	if err := os.WriteFile(transcriptPath, []byte(content), 0o600); err != nil {
 		return err
 	}
@@ -132,6 +158,15 @@ func piCatalogDeclaresNullWindow(ctx context.Context) error {
 		return err
 	}
 	catalog := `{"providers":{"ollama":{"models":[{"id":"qwen2.5-coder:7b","contextWindow":null}]}}}`
+	return os.WriteFile(filepath.Join(state.root, "models.json"), []byte(catalog), 0o600)
+}
+
+func piCatalogDeclaresEqualProviderDuplicates(ctx context.Context, model string, window int) error {
+	state, err := getPiCustomContextState(ctx)
+	if err != nil {
+		return err
+	}
+	catalog := fmt.Sprintf(`{"providers":{"one":{"models":[{"id":%q,"contextWindow":%d}]},"two":{"models":[{"id":%q,"contextWindow":%d}]}}}`, model, window, model, window)
 	return os.WriteFile(filepath.Join(state.root, "models.json"), []byte(catalog), 0o600)
 }
 

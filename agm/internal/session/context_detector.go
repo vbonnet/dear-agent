@@ -502,18 +502,22 @@ func piConfiguredModelContextWindow(model string) (int, bool) {
 		if !exists {
 			return 0, false
 		}
-		return piProviderModelContextWindow(configured, modelID, true)
+		window, matched, valid := piProviderModelContextWindow(configured, modelID, true)
+		return window, matched && valid
 	}
 	modelID = provider
 
 	window, matched := 0, false
 	for providerID, configured := range catalog.Providers {
 		_, knownNativeModel := piKnownNativeModelContextWindow(providerID + "/" + modelID)
-		candidate, exists := piProviderModelContextWindow(configured, modelID, knownNativeModel)
-		if !exists {
+		candidate, providerMatched, valid := piProviderModelContextWindow(configured, modelID, knownNativeModel)
+		if !providerMatched {
 			continue
 		}
-		if matched && candidate != window {
+		// An unqualified transcript does not identify which provider owned the
+		// route. Reject every second provider match, even when both windows are
+		// equal or one declaration is invalid, instead of guessing by value.
+		if matched || !valid {
 			return 0, false
 		}
 		window, matched = candidate, true
@@ -601,30 +605,31 @@ func piModelCatalogPath() (string, error) {
 	return filepath.Join(root, "models.json"), nil
 }
 
-func piProviderModelContextWindow(provider piModelCatalogProvider, modelID string, recordedRoute bool) (int, bool) {
-	window, matched := 0, false
+func piProviderModelContextWindow(provider piModelCatalogProvider, modelID string, recordedRoute bool) (window int, matched bool, valid bool) {
 	for _, model := range provider.Models {
 		if strings.TrimSpace(model.ID) != modelID {
 			continue
 		}
+		matched = true
 		candidate, ok := validPiModelContextWindow(model.ContextWindow, true)
 		if !ok {
-			return 0, false
+			return 0, true, false
 		}
 		// Pi upserts custom definitions in declaration order, so the last
 		// duplicate is effective before modelOverrides are applied.
-		window, matched = candidate, true
+		window = candidate
 	}
 	if override, ok := provider.ModelOverrides[modelID]; ok && override.ContextWindow.present {
 		// A provider-qualified native transcript proves Pi knew this exact route.
 		// That evidence remains valid when a newer Pi adds providers after AGM's
 		// release; unqualified IDs still require a declaration to avoid guessing.
 		if !matched && !recordedRoute {
-			return 0, false
+			return 0, false, false
 		}
-		return validPiModelContextWindow(override.ContextWindow, false)
+		window, valid = validPiModelContextWindow(override.ContextWindow, false)
+		return window, true, valid
 	}
-	return window, matched
+	return window, matched, matched
 }
 
 func validPiModelContextWindow(value piModelCatalogContextWindow, useDefault bool) (int, bool) {
