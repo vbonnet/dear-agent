@@ -240,9 +240,10 @@ func TestCheckSpawnStaggerDistinguishesGovernorPause(t *testing.T) {
 	}
 	for _, want := range []string{
 		"spawns paused by resource governor",
-		"admission resumes automatically at " + resumeAt.Format(time.RFC3339),
-		"after the governor hold and 2m spawn safety interval",
-		"remaining",
+		"earliest possible admission is " + resumeAt.Format(time.RFC3339),
+		"if the governor does not extend the hold and all other gates pass",
+		"includes the governor hold and 2m spawn safety interval",
+		"until that boundary",
 	} {
 		if !strings.Contains(gate.Message, want) {
 			t.Errorf("message %q does not contain %q", gate.Message, want)
@@ -267,6 +268,9 @@ func TestCheckSpawnStaggerGovernorPauseReportsFullAdmissionWindow(t *testing.T) 
 	}
 	if strings.Contains(gate.Message, "at "+future.Format(time.RFC3339)+" (") {
 		t.Fatalf("governor diagnostic reports the hold timestamp as the full admission expiry: %q", gate.Message)
+	}
+	if strings.Contains(gate.Message, "resumes automatically") {
+		t.Fatalf("governor diagnostic promises unconditional admission despite extendable hold: %q", gate.Message)
 	}
 }
 

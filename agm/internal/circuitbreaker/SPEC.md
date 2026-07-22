@@ -24,6 +24,6 @@ machine state without false positives that would block healthy agent sessions.
 
 **CBRK-05** When the default memory reader is requested on macOS, the system shall return the native memory-pressure reader for circuit-breaker decisions.
 
-**CBRK-06** When the spawn timer contains a future timestamp written by the resource governor, AGM shall refuse the spawn and identify the condition as a governor pause with the effective admission expiry and remaining duration including the required spawn safety interval.
+**CBRK-06** When the spawn timer contains a future timestamp written by the resource governor, AGM shall refuse the spawn and identify the condition as a governor pause with the earliest possible admission boundary including the required spawn safety interval, while stating that the governor may extend the hold and other gates must also pass.
 
 **CBRK-07** When the spawn timer contains a recent timestamp in the past, AGM shall identify the condition as a recent spawn with the minimum interval and remaining wait.

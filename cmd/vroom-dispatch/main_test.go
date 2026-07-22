@@ -179,7 +179,7 @@ func TestSpawnSessionWithRetry(t *testing.T) {
 		runSpawn = func(supervisor, string) ([]byte, error) {
 			calls++
 			if calls == 1 {
-				return []byte("circuit breaker: spawn refused\n  • [spawn_stagger] spawns paused by resource governor; admission resumes automatically at 2026-07-22T02:00:00-07:00"), cbErr
+				return []byte("circuit breaker: spawn refused\n  • [spawn_stagger] spawns paused by resource governor; earliest possible admission is 2026-07-22T02:00:00-07:00 if the governor does not extend the hold"), cbErr
 			}
 			return []byte("created"), nil
 		}
@@ -1049,7 +1049,7 @@ func TestSpawnRetryDoesNotSwallowSafetyRefusals(t *testing.T) {
 		"agent process cap": "circuit breaker: spawn refused (load level: RED)\n\n" +
 			"  • [agent_procs] agent-process cap reached: 12/12 machine-wide agent processes.",
 		"governor pause with disk headroom": "circuit breaker: spawn refused (load level: RED)\n\n" +
-			"  • [spawn_stagger] spawns paused by resource governor; admission resumes automatically at 2026-07-22T02:00:00-07:00\n" +
+			"  • [spawn_stagger] spawns paused by resource governor; earliest possible admission is 2026-07-22T02:00:00-07:00 if the governor does not extend the hold\n" +
 			"  • [disk] free disk too low: 3.2 GB (minimum: 15.0 GB).",
 		"recent spawn with agent process cap": "circuit breaker: spawn refused (load level: RED)\n\n" +
 			"  • [spawn_stagger] spawn too soon: last spawn was 30s ago\n" +

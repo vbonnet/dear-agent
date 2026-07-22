@@ -519,7 +519,7 @@ func checkSpawnStagger(cfg Config, st SpawnTimer) GateResult {
 			Gate:   "spawn_stagger",
 			Passed: false,
 			Message: fmt.Sprintf(
-				"spawns paused by resource governor; admission resumes automatically at %s (%s remaining), after the governor hold and %s spawn safety interval.",
+				"spawns paused by resource governor; earliest possible admission is %s (%s until that boundary), if the governor does not extend the hold and all other gates pass. This boundary includes the governor hold and %s spawn safety interval.",
 				resumeAt.Format(time.RFC3339), formatDuration(remaining), formatDuration(cfg.MinSpawnInterval),
 			),
 		}
