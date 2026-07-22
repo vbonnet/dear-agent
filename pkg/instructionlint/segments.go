@@ -152,7 +152,11 @@ func parseScriptSegments(source []byte) []Segment {
 		}
 		if len(state.heredocs) > 0 {
 			heredoc := &state.heredocs[0]
-			if value == heredoc.marker {
+			terminator := raw
+			if heredoc.stripTabs {
+				terminator = strings.TrimLeft(terminator, "\t")
+			}
+			if terminator == heredoc.marker {
 				segments = state.commitHeredoc(segments, *heredoc)
 				state.heredocs = state.heredocs[1:]
 				continue
@@ -241,9 +245,10 @@ type scriptParseState struct {
 }
 
 type scriptHeredoc struct {
-	marker  string
-	body    []Segment
-	outputs []scriptOutputDestination
+	marker    string
+	stripTabs bool
+	body      []Segment
+	outputs   []scriptOutputDestination
 }
 
 func (state *scriptParseState) commitHeredoc(segments []Segment, heredoc scriptHeredoc) []Segment {
@@ -252,7 +257,11 @@ func (state *scriptParseState) commitHeredoc(segments []Segment, heredoc scriptH
 	}
 	for _, output := range heredoc.outputs {
 		if output.variable != "" {
-			state.pendingVariables[output.variable] = slices.Clone(heredoc.body)
+			body := heredoc.body
+			if output.captureLines > 0 && len(body) > output.captureLines {
+				body = body[:output.captureLines]
+			}
+			state.pendingVariables[output.variable] = slices.Clone(body)
 			continue
 		}
 		if output.path == "" {
@@ -475,6 +484,7 @@ func scriptAssignmentQuote(value string) byte {
 type scriptHeredocRedirect struct {
 	marker     string
 	descriptor int
+	stripTabs  bool
 }
 
 func scriptHeredocRedirects(value string) []scriptHeredocRedirect {
@@ -495,6 +505,7 @@ func scriptHeredocRedirects(value string) []scriptHeredocRedirect {
 		if marker := scriptHeredocMarkerAt(value, index); marker != "" {
 			redirects = append(redirects, scriptHeredocRedirect{
 				marker: marker, descriptor: scriptHeredocDescriptor(value, index),
+				stripTabs: index+2 < len(value) && value[index+2] == '-',
 			})
 		}
 	}
@@ -652,7 +663,7 @@ func scriptHeredocSpecs(value string, descriptors map[int]scriptOutputDestinatio
 			}
 		}
 		for redirectIndex, redirect := range redirects {
-			heredoc := scriptHeredoc{marker: redirect.marker}
+			heredoc := scriptHeredoc{marker: redirect.marker, stripTabs: redirect.stripTabs}
 			// The shell consumes every heredoc body in lexical order, but only
 			// the last redirect for descriptor zero supplies that command's stdin.
 			if redirectIndex == effectiveStdin {
@@ -683,19 +694,36 @@ func scriptCapturedVariableDestinations(command string) []scriptOutputDestinatio
 	if executable != "read" && executable != "mapfile" && executable != "readarray" {
 		return nil
 	}
+	captureLines := 0
+	if executable == "read" && !readUsesNonDefaultTerminator(fields[1:]) {
+		captureLines = 1
+	}
 	var destinations []scriptOutputDestination
 	for _, field := range fields[1:] {
 		if shellVariableName.MatchString(field) {
-			destinations = append(destinations, scriptOutputDestination{variable: field})
+			destinations = append(destinations, scriptOutputDestination{variable: field, captureLines: captureLines})
 		}
 	}
 	if len(destinations) > 0 {
 		return destinations
 	}
 	if executable == "read" {
-		return []scriptOutputDestination{{variable: "REPLY"}}
+		return []scriptOutputDestination{{variable: "REPLY", captureLines: captureLines}}
 	}
 	return []scriptOutputDestination{{variable: "MAPFILE"}}
+}
+
+func readUsesNonDefaultTerminator(arguments []string) bool {
+	for _, argument := range arguments {
+		if argument == "--delimiter" || strings.HasPrefix(argument, "--delimiter=") {
+			return true
+		}
+		if strings.HasPrefix(argument, "-") && !strings.HasPrefix(argument, "--") &&
+			strings.ContainsAny(strings.TrimPrefix(argument, "-"), "dNn") {
+			return true
+		}
+	}
+	return false
 }
 
 func scriptCommandIgnoresHeredocInput(command string) bool {
@@ -764,11 +792,12 @@ func scriptHeredocCommandOutputDestination(
 }
 
 type scriptOutputDestination struct {
-	visible    bool
-	path       string
-	variable   string
-	redirected bool
-	append     bool
+	visible      bool
+	path         string
+	variable     string
+	captureLines int
+	redirected   bool
+	append       bool
 }
 
 type scriptCommandPart struct {
@@ -1093,7 +1122,24 @@ func sameScriptPath(left, right string) bool {
 }
 
 func scriptReferencesVariable(value, variable string) bool {
-	return strings.Contains(value, "$"+variable) || strings.Contains(value, "${"+variable)
+	for index := 0; index < len(value); index++ {
+		if value[index] != '$' || index+1 >= len(value) {
+			continue
+		}
+		start := index + 1
+		if value[start] == '{' {
+			start++
+		}
+		end := start
+		for end < len(value) && (value[end] == '_' || value[end] >= 'A' && value[end] <= 'Z' ||
+			value[end] >= 'a' && value[end] <= 'z' || value[end] >= '0' && value[end] <= '9') {
+			end++
+		}
+		if value[start:end] == variable {
+			return true
+		}
+	}
+	return false
 }
 
 func scriptLinePrintsPath(value, path string, descriptors map[int]scriptOutputDestination) bool {

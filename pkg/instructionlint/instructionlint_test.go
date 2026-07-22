@@ -545,6 +545,44 @@ func TestScriptHeredocVisibilityTracksDescriptorsPipelinesAndCapturedVariables(t
 	}
 }
 
+func TestScriptHeredocTerminatorsAndReadCapturesMatchShellSemantics(t *testing.T) {
+	source := []byte(strings.Join([]string{
+		"cat <<'STRICT_TERMINATOR'",
+		"safe text",
+		" STRICT_TERMINATOR",
+		"gh pr reopen 864",
+		"STRICT_TERMINATOR",
+		"cat <<-'TAB_TERMINATOR'",
+		"bd ready",
+		"\tTAB_TERMINATOR",
+		"read first <<'SINGLE_LINE_READ'",
+		"safe first line",
+		"git push origin unread-second-line",
+		"SINGLE_LINE_READ",
+		`printf '%s\n' "$first"`,
+		"read msg <<'SHORT_NAME'",
+		"gh pr merge 975",
+		"SHORT_NAME",
+		"message=safe",
+		`printf '%s\n' "$message"`,
+	}, "\n"))
+
+	var text []string
+	for _, segment := range parseScriptSegments(source) {
+		text = append(text, segment.Text)
+	}
+	for _, visible := range []string{"gh pr reopen 864", "bd ready"} {
+		if !slices.Contains(text, visible) {
+			t.Errorf("visible line %q was hidden: %v", visible, text)
+		}
+	}
+	for _, hidden := range []string{"git push origin unread-second-line", "gh pr merge 975"} {
+		if slices.Contains(text, hidden) {
+			t.Errorf("non-visible line %q was exposed: %v", hidden, text)
+		}
+	}
+}
+
 func TestCheckRepositoryGovernsSkillAgentMetadata(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init", "-q")
