@@ -302,7 +302,9 @@ func applyBrake(cfg config, engage bool, reason string) {
 		}
 		return
 	}
-	if err := admission.Release(cfg.brakePath); err != nil {
+	// Scoped to this source so a healthy disk tick cannot clear a brake
+	// vroom-governor engaged because its own probes had gone unreadable.
+	if err := admission.ReleaseBySource(cfg.brakePath, brakeSource); err != nil {
 		fmt.Fprintf(os.Stderr, "disk-watchdog: warning: could not release admission brake: %v\n", err)
 	}
 }

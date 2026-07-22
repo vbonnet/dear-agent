@@ -140,17 +140,48 @@ func Engage(path, source, reason string, ttl time.Duration) error {
 	return nil
 }
 
-// Release removes the brake at path. Releasing an absent brake succeeds, so a
-// watchdog can call this on every healthy tick without checking first.
-//
-// Release is unconditional by design: it does not verify which source engaged
-// the brake. Any watchdog that has observed a healthy host may clear a stale
-// latch, and an operator can always just delete the file.
+// Release removes the brake at path unconditionally, whoever engaged it.
+// Releasing an absent brake succeeds. This is the operator's escape hatch and
+// the equivalent of deleting the file; watchdogs should use ReleaseBySource.
 func Release(path string) error {
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("releasing brake at %s: %w", path, err)
 	}
 	return nil
+}
+
+// ReleaseBySource removes the brake at path only if that source engaged it.
+// A brake engaged by a different watchdog is left alone, as is one that cannot
+// be read.
+//
+// This scoping is what keeps two watchdogs on different cadences from undoing
+// each other. vroom-governor ticks every 30 seconds and disk-watchdog every 5
+// minutes; with an unconditional release, a governor whose load and memory
+// probes are perfectly healthy would clear a disk-watchdog brake within half a
+// minute of it being engaged — silently defeating the whole ce-93lw.18 fix on
+// the most likely path, a host that is out of disk but not out of CPU.
+//
+// Releasing an absent or expired brake succeeds: both mean nothing is in force.
+//
+// There is a read-then-remove race here. If another writer engages a brake
+// between the read and the remove, that brand-new brake is dropped. It is
+// bounded and self-correcting — each watchdog re-engages on its next tick, at
+// most 5 minutes later — and closing it properly would need file locking that
+// buys less than it costs on a single-host latch.
+func ReleaseBySource(path, source string) error {
+	rec, err := Read(path)
+	if err != nil {
+		// Unreadable: leave it. An unparseable latch still refuses spawns, and
+		// clearing what we cannot read would silently unblock the host.
+		return fmt.Errorf("not releasing unreadable brake at %s: %w", path, err)
+	}
+	if rec == nil {
+		return nil // absent or expired — nothing in force
+	}
+	if rec.Source != source {
+		return nil // another watchdog's brake; not ours to clear
+	}
+	return Release(path)
 }
 
 // Read returns the live brake at path.

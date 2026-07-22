@@ -195,7 +195,12 @@ func applyBrake(cfg tickConfig, reason string, thresholdBreached bool) {
 	if thresholdBreached {
 		return
 	}
-	if err := admission.Release(cfg.brakePath); err != nil {
+	// Scoped to this source. This governor ticks every 30 seconds while
+	// disk-watchdog ticks every 5 minutes, so an unconditional release here
+	// would clear a disk brake almost as fast as the watchdog could set one --
+	// and a host that is out of disk but not out of CPU is the likeliest shape
+	// of the failure this gate exists for.
+	if err := admission.ReleaseBySource(cfg.brakePath, brakeSource); err != nil {
 		log.Printf("release admission brake: %v", err)
 	}
 }

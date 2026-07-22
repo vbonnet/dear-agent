@@ -206,3 +206,46 @@ func TestApplyBrake_ThresholdBreachDoesNotTouchTheBrake(t *testing.T) {
 func TestApplyBrake_EmptyPathIsANoOp(t *testing.T) {
 	applyBrake(tickConfig{}, "load probe unreadable", false) // must not panic
 }
+
+// The governor ticks every 30s and disk-watchdog every 5 minutes. An
+// unconditional release here would clear a disk brake almost as fast as the
+// watchdog could set one — silently defeating ce-93lw.18 on its likeliest path,
+// a host out of disk but not out of CPU.
+func TestApplyBrake_CleanTickDoesNotClearAnotherWatchdogsBrake(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "admission-brake.json")
+	cfg := tickConfig{brakePath: path, brakeTTL: time.Hour}
+	if err := admission.Engage(path, "disk-watchdog", "worktree-sweep remediation failed: signal: killed", time.Hour); err != nil {
+		t.Fatalf("Engage: %v", err)
+	}
+
+	applyBrake(cfg, "", false) // probes healthy, thresholds fine
+
+	brake, err := admission.Read(path)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if brake == nil {
+		t.Fatal("a healthy governor tick cleared the disk-watchdog brake")
+	}
+	if brake.Source != "disk-watchdog" {
+		t.Errorf("Source = %q, want the disk-watchdog brake preserved", brake.Source)
+	}
+}
+
+func TestApplyBrake_CleanTickClearsItsOwnBrake(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "admission-brake.json")
+	cfg := tickConfig{brakePath: path, brakeTTL: time.Hour}
+	if err := admission.Engage(path, brakeSource, "load probe unreadable", time.Hour); err != nil {
+		t.Fatalf("Engage: %v", err)
+	}
+
+	applyBrake(cfg, "", false)
+
+	brake, err := admission.Read(path)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if brake != nil {
+		t.Errorf("governor did not clear its own brake on a clean tick: %+v", brake)
+	}
+}

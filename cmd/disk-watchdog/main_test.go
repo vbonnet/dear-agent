@@ -302,3 +302,26 @@ func TestRun_HealthyTickReleasesAStaleBrake(t *testing.T) {
 		t.Errorf("healthy tick left the brake engaged: %+v", brake)
 	}
 }
+
+// The mirror of the governor's guard: a healthy disk tick must not clear a
+// brake vroom-governor engaged because its own probes had gone unreadable.
+func TestApplyBrake_HealthyTickDoesNotClearAnotherWatchdogsBrake(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "admission-brake.json")
+	cfg := config{brakePath: path, brakeTTL: time.Hour}
+	if err := admission.Engage(path, "vroom-governor", "load probe unreadable", time.Hour); err != nil {
+		t.Fatalf("Engage: %v", err)
+	}
+
+	applyBrake(cfg, false, "")
+
+	brake, err := admission.Read(path)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if brake == nil {
+		t.Fatal("a healthy disk tick cleared the vroom-governor brake")
+	}
+	if brake.Source != "vroom-governor" {
+		t.Errorf("Source = %q, want the vroom-governor brake preserved", brake.Source)
+	}
+}

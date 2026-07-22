@@ -49,7 +49,7 @@ power-cycled. The brake is the consumer: a TTL'd latch every spawn path reads.
 
 **DW-11** When any threshold is breached and remediation returns an error, the system shall engage the admission brake with a reason carrying the remediation error.
 
-**DW-12** When no threshold is breached, the system shall release the admission brake.
+**DW-12** When no threshold is breached, the system shall release the admission brake only if it engaged that brake itself.
 
 **DW-13** If the filesystem snapshot cannot be taken, then the system shall engage the admission brake before reporting the error.
 

@@ -228,3 +228,73 @@ func writeRawBrake(t *testing.T, path string, b Brake) {
 		t.Fatalf("write brake: %v", err)
 	}
 }
+
+func TestReleaseBySource_RemovesItsOwnBrake(t *testing.T) {
+	path := brakePath(t)
+	if err := Engage(path, "disk-watchdog", "sweep killed", time.Hour); err != nil {
+		t.Fatalf("Engage: %v", err)
+	}
+	if err := ReleaseBySource(path, "disk-watchdog"); err != nil {
+		t.Fatalf("ReleaseBySource: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("brake survived a same-source release (stat err = %v)", err)
+	}
+}
+
+// Two watchdogs on different cadences must not undo each other: vroom-governor
+// ticks every 30s and would otherwise clear a disk-watchdog brake within half a
+// minute of it being engaged.
+func TestReleaseBySource_LeavesAnotherSourcesBrake(t *testing.T) {
+	path := brakePath(t)
+	if err := Engage(path, "disk-watchdog", "sweep killed", time.Hour); err != nil {
+		t.Fatalf("Engage: %v", err)
+	}
+	if err := ReleaseBySource(path, "vroom-governor"); err != nil {
+		t.Fatalf("ReleaseBySource: %v", err)
+	}
+
+	got, err := Read(path)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if got == nil {
+		t.Fatal("a foreign brake was cleared; one watchdog must not undo another's")
+	}
+	if got.Source != "disk-watchdog" {
+		t.Errorf("Source = %q, want disk-watchdog", got.Source)
+	}
+}
+
+func TestReleaseBySource_AbsentAndExpiredAreNoOps(t *testing.T) {
+	path := brakePath(t)
+	if err := ReleaseBySource(path, "disk-watchdog"); err != nil {
+		t.Errorf("ReleaseBySource on an absent brake: %v", err)
+	}
+
+	past := time.Now().UTC().Add(-2 * time.Hour)
+	writeRawBrake(t, path, Brake{
+		Source:     "disk-watchdog",
+		Reason:     "stale",
+		SetAtUTC:   past,
+		ExpiresUTC: past.Add(time.Minute),
+	})
+	if err := ReleaseBySource(path, "disk-watchdog"); err != nil {
+		t.Errorf("ReleaseBySource on an expired brake: %v", err)
+	}
+}
+
+// Clearing what we cannot read would silently unblock the host; an unparseable
+// latch still refuses spawns, so it stays put.
+func TestReleaseBySource_LeavesAnUnreadableBrake(t *testing.T) {
+	path := brakePath(t)
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := ReleaseBySource(path, "disk-watchdog"); err == nil {
+		t.Error("expected an error rather than a silent release of an unreadable brake")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("unreadable brake was removed: %v", err)
+	}
+}

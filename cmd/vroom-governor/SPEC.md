@@ -8,7 +8,7 @@
 
 **VGOVR-03** If the load probe or the memory probe returns an error, then the governor shall engage the admission brake with a reason naming the failing probe.
 
-**VGOVR-04** When both probes read cleanly and both readings are within thresholds, the governor shall release the admission brake.
+**VGOVR-04** When both probes read cleanly and both readings are within thresholds, the governor shall release the admission brake only if it engaged that brake itself.
 
 **VGOVR-05** When a probe reads cleanly and breaches a threshold, the governor shall extend the last-spawn timestamp and the governor shall not modify the admission brake.
 
@@ -41,7 +41,10 @@ reclaim resources.
   indistinguishable from one reporting a healthy host. Threshold breaches keep
   using the `last-spawn.txt` pause: that path works and vroom-dispatch's stagger
   retry is the right response to it, whereas an unreadable probe is the case
-  where we do not know what we are waiting for
+  where we do not know what we are waiting for. Releases are scoped to this
+  source: this governor ticks every 30 seconds against disk-watchdog's 5
+  minutes, so an unconditional release would clear a disk brake almost as fast
+  as the watchdog could set one
 - Read free memory on macOS via `memory_pressure -Q` (accounts for the
   reclaimable inactive queue, matching Activity Monitor) rather than raw
   `vm_stat` free-page counts, which macOS keeps near zero by design
