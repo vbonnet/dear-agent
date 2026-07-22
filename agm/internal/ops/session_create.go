@@ -436,6 +436,10 @@ func preparePiCreateRequest(req *CreateSessionRequest, sessionID string) (*Creat
 	if err := pisession.ValidateID(sessionID); err != nil {
 		return nil, ErrInvalidInput("session_id", err.Error())
 	}
+	codingAgentDir, err := pisession.ValidateCodingAgentDir(os.Getenv("PI_CODING_AGENT_DIR"))
+	if err != nil {
+		return nil, ErrInvalidInput("PI_CODING_AGENT_DIR", err.Error())
+	}
 	sessionRoot, err := pisession.EnsureRoot(os.Getenv("AGM_PI_SESSION_ROOT"))
 	if err != nil {
 		return nil, ErrStorageError("pi.session-root", err)
@@ -450,7 +454,7 @@ func preparePiCreateRequest(req *CreateSessionRequest, sessionID string) (*Creat
 	}
 	prepared := *req
 	prepared.Metadata = req.Metadata
-	prepared.Metadata.Pi = &manifest.Pi{SessionID: sessionID, SessionDir: sessionRoot}
+	prepared.Metadata.Pi = &manifest.Pi{SessionID: sessionID, SessionDir: sessionRoot, CodingAgentDir: codingAgentDir}
 	prepared.Metadata.PiExtension = extensionPath
 	prepared.Metadata.PiPolicyJSON = policyJSON
 	prepared.Metadata.PiPolicyFile, err = piadapter.EnsurePolicyFile(os.Getenv("AGM_PI_EXTENSION_ROOT"), sessionID, policyJSON)

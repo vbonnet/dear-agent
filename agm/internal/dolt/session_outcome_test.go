@@ -135,6 +135,7 @@ func TestSessionMetadata_PiRoundTrip(t *testing.T) {
 		WorkingDirectory: "/tmp/pi-work",
 		Pi: &manifest.Pi{
 			SessionID: "pi-native-id", SessionDir: "/tmp/pi-sessions", TranscriptPath: "/tmp/pi-sessions/native.jsonl",
+			CodingAgentDir: "/tmp/pi-agent",
 		},
 	}
 	metadata, err := json.Marshal(buildSessionMetadata(src))

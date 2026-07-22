@@ -144,6 +144,13 @@ OpenRouter OpenAI entries can expose a different context window than the same
 model through direct OpenAI. Provider and model IDs remain case-sensitive and
 separate; a custom raw model ID may repeat its provider prefix without AGM
 collapsing that opaque segment.
+When `PI_CODING_AGENT_DIR` selects a custom Pi configuration, AGM validates
+the directory before creating or importing a session, records the absolute
+non-symlink path with Pi's native identity, and quotes it into both create and
+cold-resume commands. This explicit forwarding is required for sessions
+started through an already-running tmux server, whose environment may predate
+the invoking shell. Sessions without an explicit directory continue to use
+Pi's native default discovery.
 For models declared in Pi's `models.json`, AGM reads only the bounded model ID,
 `contextWindow`, and `modelOverrides` data: it never evaluates credential or
 command fields. A custom model with an omitted window uses Pi's 128000-token
@@ -176,6 +183,9 @@ data remains an explicit storage operation, not an archive side effect.
   --version` is visible in AGM's `PATH`.
 - `no provider models available`: configure a provider through Pi; AGM will not
   read credential files to diagnose this.
+- custom provider missing only under AGM: confirm `PI_CODING_AGENT_DIR` names
+  an existing non-symlink directory when the session is created; AGM persists
+  that path for cold resume instead of relying on tmux's global environment.
 - `Pi transcript not found`: inspect the manifest's `pi` block; do not replace
   it with the most recent JSONL path.
 - no `AGM <mode>/ready <launch-id>` footer: treat the session as not sendable and inspect

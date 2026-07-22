@@ -20,6 +20,8 @@
 
 **DOLTR-09** When a Go test or explicitly marked built test subprocess resolves Dolt configuration or constructs an adapter directly, the system shall select `ENGRAM_TEST_WORKSPACE` as its workspace and shall require its database to equal that workspace or the shared `agm_test` target before connecting.
 
+**DOLTR-10** When AGM stores Pi native metadata in the session metadata document, the Dolt adapter shall round-trip the session ID, session directory, transcript path, and explicit coding-agent directory without a harness-specific schema migration.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`

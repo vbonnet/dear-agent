@@ -23,6 +23,8 @@ cross-harness session lifecycle state.
 
 **MAN-06** When a Pi manifest is persisted to or restored from Dolt, the system shall preserve the exact native session ID, private session directory, and transcript path instead of dropping harness-specific identity metadata.
 
+**MAN-07** When a Pi session uses an explicit coding-agent directory, the manifest and storage adapter shall preserve its validated absolute path so cold resume does not depend on the invoking shell or tmux server environment.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

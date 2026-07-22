@@ -81,6 +81,10 @@ func (a *PiAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	if err := pisession.ValidateID(string(sessionID)); err != nil {
 		return "", err
 	}
+	codingAgentDir, err := pisession.ValidateCodingAgentDir(os.Getenv("PI_CODING_AGENT_DIR"))
+	if err != nil {
+		return "", err
+	}
 	sessionDir, err := ensurePiSessionRoot()
 	if err != nil {
 		return "", err
@@ -112,7 +116,7 @@ func (a *PiAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 		return "", fmt.Errorf("create Pi tmux session: %w", err)
 	}
 	launchID := launchparity.NewPiLaunchID()
-	command := buildPiAdapterCommand(tmuxName, string(sessionID), launchID, sessionDir, workDir, model, permissionMode, extensionPath, policyFile)
+	command := buildPiAdapterCommand(tmuxName, string(sessionID), launchID, sessionDir, codingAgentDir, workDir, model, permissionMode, extensionPath, policyFile)
 	if err := piSendShellCommand(tmuxName, command); err != nil {
 		return "", rollbackPiAdapterSession(tmuxName, fmt.Errorf("start Pi in tmux: %w", err))
 	}
@@ -124,6 +128,7 @@ func (a *PiAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 		Project: ctx.Project, Model: model, PermissionMode: permissionMode,
 		AuthorizedDirs: append([]string(nil), ctx.AuthorizedDirs...), UUID: string(sessionID),
 		NativeSessionDir: sessionDir, PermissionPolicyJSON: permissionPolicyJSON,
+		CodingAgentDir: codingAgentDir,
 	}
 	if transcript, findErr := pisession.FindTranscript(sessionDir, string(sessionID)); findErr == nil {
 		metadata.TranscriptPath = transcript
@@ -134,10 +139,11 @@ func (a *PiAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	return sessionID, nil
 }
 
-func buildPiAdapterCommand(tmuxName, nativeID, launchID, sessionDir, workDir, model, permissionMode, extensionPath, permissionPolicyFile string) string {
+func buildPiAdapterCommand(tmuxName, nativeID, launchID, sessionDir, codingAgentDir, workDir, model, permissionMode, extensionPath, permissionPolicyFile string) string {
 	return launchparity.BuildPiCommand(launchparity.PiCommandSpec{
 		WorkDir: workDir, ResolvedModel: ResolveModelFullName("pi-cli", model),
 		SessionName: tmuxName, SessionID: nativeID, LaunchID: launchID, SessionDir: sessionDir,
+		CodingAgentDir: codingAgentDir,
 		PermissionMode: permissionMode, PermissionExtension: extensionPath,
 		PermissionPolicyFile: permissionPolicyFile,
 	}).Command
@@ -209,6 +215,14 @@ func (a *PiAdapter) ResumeSession(sessionID SessionID) error {
 			return fmt.Errorf("validate Pi resume transcript: %w", err)
 		}
 	}
+	codingAgentDir := metadata.CodingAgentDir
+	if codingAgentDir == "" {
+		codingAgentDir = os.Getenv("PI_CODING_AGENT_DIR")
+	}
+	codingAgentDir, err = pisession.ValidateCodingAgentDir(codingAgentDir)
+	if err != nil {
+		return err
+	}
 	permissionPolicyJSON, err := normalizePiPermissionPolicy(metadata.PermissionPolicyJSON)
 	if err != nil {
 		return err
@@ -235,7 +249,7 @@ func (a *PiAdapter) ResumeSession(sessionID SessionID) error {
 	}
 	if launch {
 		launchID := launchparity.NewPiLaunchID()
-		command := buildPiAdapterCommand(metadata.TmuxName, metadata.UUID, launchID, metadata.NativeSessionDir, metadata.WorkingDir, metadata.Model, metadata.PermissionMode, extensionPath, policyFile)
+		command := buildPiAdapterCommand(metadata.TmuxName, metadata.UUID, launchID, metadata.NativeSessionDir, codingAgentDir, metadata.WorkingDir, metadata.Model, metadata.PermissionMode, extensionPath, policyFile)
 		if err := piSendShellCommand(metadata.TmuxName, command); err != nil {
 			if created {
 				return rollbackPiAdapterSession(metadata.TmuxName, fmt.Errorf("send Pi resume command: %w", err))
@@ -447,10 +461,15 @@ func (a *PiAdapter) ImportConversation(data []byte, format ConversationFormat) (
 		_ = pisession.RemoveTranscript(root, path)
 		return "", fmt.Errorf("read imported Pi model: %w", modelErr)
 	}
+	codingAgentDir, configErr := pisession.ValidateCodingAgentDir(os.Getenv("PI_CODING_AGENT_DIR"))
+	if configErr != nil {
+		_ = pisession.RemoveTranscript(root, path)
+		return "", configErr
+	}
 	metadata := &SessionMetadata{
 		TmuxName: "pi-import-" + native.ID, Title: native.ID, CreatedAt: time.Now(),
 		WorkingDir: native.CWD, Model: model, UUID: native.ID,
-		NativeSessionDir: root, TranscriptPath: path,
+		NativeSessionDir: root, TranscriptPath: path, CodingAgentDir: codingAgentDir,
 	}
 	if err := a.sessionStore.Set(sessionID, metadata); err != nil {
 		if removeErr := pisession.RemoveTranscript(root, path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {

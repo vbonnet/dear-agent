@@ -172,11 +172,14 @@ func TestBuildPiImportedManifestPreservesNativeResumeMetadata(t *testing.T) {
 	now := created.Add(time.Hour)
 	m := buildPiImportedManifest(
 		pisession.Metadata{ID: "native-pi", CWD: "/work/pi"},
-		"/private/pi/native.jsonl", "/private/pi", "openai/gpt-5.6-terra", "recovered-pi", "oss", "agm-id", created, now,
+		"/private/pi/native.jsonl", "/private/pi", "/private/pi-agent", "openai/gpt-5.6-terra", "recovered-pi", "oss", "agm-id", created, now,
 	)
 	if m.Harness != "pi-cli" || m.Pi == nil || m.Pi.SessionID != "native-pi" ||
 		m.Pi.SessionDir != "/private/pi" || m.Pi.TranscriptPath != "/private/pi/native.jsonl" {
 		t.Fatalf("Pi import manifest = %#v", m)
+	}
+	if m.Pi.CodingAgentDir != "/private/pi-agent" {
+		t.Fatalf("Pi import coding agent directory = %q", m.Pi.CodingAgentDir)
 	}
 	if m.WorkingDirectory != "/work/pi" || m.Context.Project != "/work/pi" || m.CreatedAt != created {
 		t.Fatalf("Pi import working metadata = %#v", m)

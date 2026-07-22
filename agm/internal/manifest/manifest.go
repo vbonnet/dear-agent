@@ -168,6 +168,7 @@ type Pi struct {
 	SessionID      string `yaml:"session_id,omitempty" json:"session_id,omitempty"`
 	SessionDir     string `yaml:"session_dir,omitempty" json:"session_dir,omitempty"`
 	TranscriptPath string `yaml:"transcript_path,omitempty" json:"transcript_path,omitempty"`
+	CodingAgentDir string `yaml:"coding_agent_dir,omitempty" json:"coding_agent_dir,omitempty"`
 }
 
 // Tmux represents tmux session metadata

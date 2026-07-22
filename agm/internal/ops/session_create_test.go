@@ -496,6 +496,11 @@ func TestCreateSessionPiPreparesExactNativeIdentityPolicyAndManifest(t *testing.
 	t.Setenv("AGM_PI_SESSION_ROOT", root)
 	t.Setenv("AGM_PI_EXTENSION_ROOT", extensionRoot)
 	workDir := t.TempDir()
+	codingAgentDir := filepath.Join(t.TempDir(), "pi agent")
+	if err := os.Mkdir(codingAgentDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PI_CODING_AGENT_DIR", codingAgentDir)
 	store := &createMockStorage{}
 	tmuxMock := session.NewMockTmux()
 	var launched HarnessLaunchSpec
@@ -526,6 +531,9 @@ func TestCreateSessionPiPreparesExactNativeIdentityPolicyAndManifest(t *testing.
 	if launched.Pi.SessionID != "pi-native-id" || launched.Pi.SessionDir != root {
 		t.Fatalf("Pi identity = %#v", launched.Pi)
 	}
+	if launched.Pi.CodingAgentDir != codingAgentDir {
+		t.Fatalf("Pi coding agent directory = %q, want %q", launched.Pi.CodingAgentDir, codingAgentDir)
+	}
 	if launched.PiLaunchID == "" {
 		t.Fatal("Pi creation omitted process launch identity")
 	}
@@ -539,8 +547,24 @@ func TestCreateSessionPiPreparesExactNativeIdentityPolicyAndManifest(t *testing.
 	if info, statErr := os.Stat(launched.PiExtension); statErr != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("Pi extension = %q, stat=%v info=%v", launched.PiExtension, statErr, info)
 	}
-	if completed == nil || completed.Pi == nil || completed.Pi.SessionID != "pi-native-id" || completed.WorkingDirectory != workDir {
+	if completed == nil || completed.Pi == nil || completed.Pi.SessionID != "pi-native-id" || completed.Pi.CodingAgentDir != codingAgentDir || completed.WorkingDirectory != workDir {
 		t.Fatalf("Pi manifest = %#v", completed)
+	}
+}
+
+func TestCreateSessionPiRejectsInvalidCodingAgentDirectoryBeforeTmux(t *testing.T) {
+	t.Setenv("AGM_PI_SESSION_ROOT", t.TempDir())
+	t.Setenv("AGM_PI_EXTENSION_ROOT", t.TempDir())
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(t.TempDir(), "missing"))
+	tmuxMock := session.NewMockTmux()
+	_, err := CreateSessionWithContext(t.Context(), &OpContext{Tmux: tmuxMock}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Prompt: "fixture", Title: "pi-invalid-config", Harness: "pi", SessionID: "pi-invalid-config",
+	})
+	if err == nil || !strings.Contains(err.Error(), "coding agent directory") {
+		t.Fatalf("CreateSessionWithContext error = %v", err)
+	}
+	if tmuxMock.Sessions["pi-invalid-config"] {
+		t.Fatal("Pi tmux session was created before coding-agent directory validation")
 	}
 }
 
