@@ -1,10 +1,14 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/pkg/vroom/admission"
 )
 
 func TestPauseSpawns_WritesFile(t *testing.T) {
@@ -97,4 +101,108 @@ func containsStr(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// --- admission brake (ce-93lw.18) ---
+
+// TestUnreadableProbeReason pins the signal the governor used to discard. The
+// `err == nil &&` guards in tick made a blind governor look exactly like a
+// healthy one, so a host whose probes had stopped answering kept admitting work.
+func TestUnreadableProbeReason(t *testing.T) {
+	loadBoom := errors.New("sysctl vm.loadavg: signal: killed")
+	memBoom := errors.New("memory_pressure -Q: context deadline exceeded")
+
+	tests := []struct {
+		name     string
+		loadErr  error
+		memErr   error
+		want     bool
+		contains []string
+	}{
+		{"both clean", nil, nil, false, nil},
+		{"load unreadable", loadBoom, nil, true, []string{"load probe unreadable", "signal: killed"}},
+		{"memory unreadable", nil, memBoom, true, []string{"memory probe unreadable", "deadline"}},
+		{"both unreadable", loadBoom, memBoom, true, []string{"signal: killed", "deadline"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := unreadableProbeReason(tt.loadErr, tt.memErr)
+			if (got != "") != tt.want {
+				t.Fatalf("unreadableProbeReason = %q, want engaged=%v", got, tt.want)
+			}
+			for _, want := range tt.contains {
+				if !strings.Contains(got, want) {
+					t.Errorf("reason %q missing %q", got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestApplyBrake_EngagesOnUnreadableProbe(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "admission-brake.json")
+	cfg := tickConfig{brakePath: path, brakeTTL: time.Hour}
+
+	applyBrake(cfg, "load probe unreadable: signal: killed", false)
+
+	brake, err := admission.Read(path)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if brake == nil {
+		t.Fatal("an unreadable probe must engage the brake")
+	}
+	if brake.Source != brakeSource {
+		t.Errorf("Source = %q, want %q", brake.Source, brakeSource)
+	}
+	if !strings.Contains(brake.Reason, "signal: killed") {
+		t.Errorf("Reason = %q, want the probe error", brake.Reason)
+	}
+}
+
+func TestApplyBrake_ReleasesOnCleanTick(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "admission-brake.json")
+	cfg := tickConfig{brakePath: path, brakeTTL: time.Hour}
+	if err := admission.Engage(path, brakeSource, "earlier blindness", time.Hour); err != nil {
+		t.Fatalf("Engage: %v", err)
+	}
+
+	applyBrake(cfg, "", false)
+
+	brake, err := admission.Read(path)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if brake != nil {
+		t.Errorf("clean in-threshold tick left the brake engaged: %+v", brake)
+	}
+}
+
+// An ordinary threshold breach is handled by the last-spawn.txt pause. Clearing
+// the brake here would let this governor overrule a brake disk-watchdog engaged
+// for an unrelated reason.
+func TestApplyBrake_ThresholdBreachDoesNotTouchTheBrake(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "admission-brake.json")
+	cfg := tickConfig{brakePath: path, brakeTTL: time.Hour}
+	if err := admission.Engage(path, "disk-watchdog", "sweep killed", time.Hour); err != nil {
+		t.Fatalf("Engage: %v", err)
+	}
+
+	applyBrake(cfg, "", true)
+
+	brake, err := admission.Read(path)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if brake == nil {
+		t.Fatal("a clean-but-breaching tick must not clear another watchdog's brake")
+	}
+	if brake.Source != "disk-watchdog" {
+		t.Errorf("Source = %q, want the disk-watchdog brake preserved", brake.Source)
+	}
+}
+
+func TestApplyBrake_EmptyPathIsANoOp(t *testing.T) {
+	applyBrake(tickConfig{}, "load probe unreadable", false) // must not panic
 }
