@@ -117,7 +117,7 @@ func TestLaunchdBinariesUseHardenedInstall(t *testing.T) {
 			for _, m := range bareCopy.FindAllString(joinContinuations(string(raw)), -1) {
 				// Scripts are immune to the stale-signature kill; see
 				// interpretedSource.
-				if allSourcesInterpreted(m) {
+				if allSourcesInterpreted(repoRoot, m) {
 					continue
 				}
 				t.Errorf("%s copies into an install root without the hardened macro:\n\t%s\n"+
@@ -339,7 +339,7 @@ var flagTakesArg = map[string]bool{"-m": true, "-o": true, "-g": true, "--mode":
 // /usr/local/bin/` exempted the whole command on hook.sh while agm was
 // overwritten in place. An exemption is only sound if it covers every operand
 // it excuses.
-func allSourcesInterpreted(cmd string) bool {
+func allSourcesInterpreted(repoRoot, cmd string) bool {
 	if i := strings.Index(cmd, "#"); i >= 0 {
 		cmd = cmd[:i]
 	}
@@ -368,11 +368,31 @@ func allSourcesInterpreted(cmd string) bool {
 		return false
 	}
 	for _, src := range sources {
-		if !scriptOrGlob.MatchString(src) {
+		if !isInterpretedSource(repoRoot, src) {
 			return false
 		}
 	}
 	return true
+}
+
+// isInterpretedSource reports whether a copy source is a script or a glob.
+//
+// Extension alone is not enough: this repository has many tracked, executable,
+// EXTENSIONLESS shebang scripts (.claude/hooks/*, scripts/codegraph), and
+// treating those as compiled binaries would make the guard block a safe
+// operation — with no way out, since the allowlist only exempts warnings. So
+// when the extension is inconclusive, read the tracked file and look for a
+// shebang. A path that is not a tracked text file (a build output such as
+// `agm`) stays classified as a binary, which is the safe default.
+func isInterpretedSource(repoRoot, src string) bool {
+	if scriptOrGlob.MatchString(src) {
+		return true
+	}
+	raw, err := os.ReadFile(filepath.Join(repoRoot, filepath.Clean(src)))
+	if err != nil {
+		return false
+	}
+	return bytes.HasPrefix(raw, []byte("#!"))
 }
 
 // siteKey identifies one sanctioned occurrence: its file, its text, AND which
@@ -586,7 +606,7 @@ func TestNoRawCopyIntoInstallRoots(t *testing.T) {
 			// exemption to the command that earned it.
 			var offending string
 			for _, cmd := range splitCommands(line) {
-				if rawCopy.MatchString(cmd) && !allSourcesInterpreted(cmd) {
+				if rawCopy.MatchString(cmd) && !allSourcesInterpreted(repoRoot, cmd) {
 					offending = cmd
 					break
 				}
