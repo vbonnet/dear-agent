@@ -185,6 +185,14 @@ func TestEmbeddedPiExtensionDecisionParity(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(timeoutProject, ".pi", "hooks.json"), []byte(timeoutHooks), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	nonzeroProject := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(nonzeroProject, ".pi"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const nonzeroHooks = `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"hookSpecificOutput\":{\"additionalContext\":\"advisory only\"}}\\n'; exit 42","timeout":1}]}]}}`
+	if err := os.WriteFile(filepath.Join(nonzeroProject, ".pi", "hooks.json"), []byte(nonzeroHooks), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	capturePath := filepath.Join(t.TempDir(), "hook-input.json")
 	script := `
 import {readFileSync} from "node:fs";
@@ -213,6 +221,8 @@ for (let attempt = 0; attempt < 3; attempt++) {
 if (!hookResult?.block || !hookResult.reason.includes("project guard rejected")) throw new Error("project hook did not fail closed with its declared reason: " + JSON.stringify(hookResult));
 const timeoutHook = mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git push"}}, process.argv[5]);
 if (!timeoutHook?.block || !timeoutHook.reason.includes("ETIMEDOUT") || !timeoutHook.reason.includes("timeout stderr") || timeoutHook.reason.includes("timeout context")) throw new Error("project hook timeout masked its execution failure: " + JSON.stringify(timeoutHook));
+const nonzeroHook = mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git push"}}, process.argv[6]);
+if (!nonzeroHook?.block || !nonzeroHook.reason.startsWith("PreToolUse hook exited with status 42") || !nonzeroHook.reason.includes("advisory only")) throw new Error("project hook nonzero status was masked by advisory context: " + JSON.stringify(nonzeroHook));
 const unmatchedHook = mod.runProjectHooks("PreToolUse", {toolName:"read", input:{path:"README.md"}}, process.argv[2]);
 if (unmatchedHook !== undefined) throw new Error("matcher ran for an unrelated tool");
 const malformedHook = mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git status"}}, process.argv[3]);
@@ -263,7 +273,7 @@ if (userMessages.length !== 2 || userMessages[1][0] !== "review the delegated re
 await commands.get("agm-model")("openai/gpt-5.6-terra", ctx);
 if (selectedModel !== model || notifications.at(-1) !== "AGM model: openai/gpt-5.6-terra") throw new Error("model transition failed");
 `
-	command := exec.Command(node, "--input-type=module", "-e", script, filepath.Clean(path), filepath.Clean(project), filepath.Clean(malformedProject), filepath.Clean(capturePath), filepath.Clean(timeoutProject))
+	command := exec.Command(node, "--input-type=module", "-e", script, filepath.Clean(path), filepath.Clean(project), filepath.Clean(malformedProject), filepath.Clean(capturePath), filepath.Clean(timeoutProject), filepath.Clean(nonzeroProject))
 	command.Env = append(os.Environ(),
 		"AGM_PI_PROJECT_DIR="+filepath.Clean(project),
 		"AGM_PI_PERMISSION_POLICY_FILE="+filepath.Clean(policyPath),

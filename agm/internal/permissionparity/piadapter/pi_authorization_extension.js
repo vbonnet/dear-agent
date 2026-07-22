@@ -90,9 +90,17 @@ export function runProjectHooks(eventName, call, cwd = process.cwd()) {
 			if (structured?.block) return structured;
 			if (result.error || result.status !== 0) {
 				const stderr = String(result.stderr || "").trim();
-				const detail = result.error
-					? [String(result.error.message || result.error).trim(), stderr].filter(Boolean).join(": ")
-					: String(stderr || structured?.context || result.stdout || "hook rejected the event").trim();
+				let failure;
+				let partial = stderr;
+				if (result.error) {
+					failure = String(result.error.message || result.error).trim();
+				} else {
+					failure = result.signal
+						? `${eventName} hook terminated by ${result.signal}`
+						: `${eventName} hook exited with status ${result.status}`;
+					partial ||= String(structured?.context || result.stdout || "").trim();
+				}
+				const detail = [failure, partial].filter(Boolean).join(": ");
 				return {block: true, reason: detail || `${eventName} hook failed`};
 			}
 			if (structured?.context) contexts.push(structured.context);

@@ -111,8 +111,9 @@ Repository hooks load only from the explicitly approved working directory.
 Every invocation receives the shared event name, native Pi session ID, approved
 working directory, loop state, and native event payload. Structured hook
 decisions are honored even when the command exits successfully. A hook
-execution error or timeout takes precedence over partial stderr and advisory
-context in its fail-closed diagnostic. In particular,
+execution error, timeout, signal, or nonzero exit status takes precedence over
+partial stderr and advisory context in its fail-closed diagnostic. In
+particular,
 a blocked `UserPromptSubmit` is consumed before the model sees it, a blocked
 `PreCompact` cancels compaction, and a blocking `Stop` result is delivered back
 to Pi as a follow-up user turn so the shared bounded guardrail-feedback loop can
