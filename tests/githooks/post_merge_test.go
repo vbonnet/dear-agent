@@ -204,6 +204,26 @@ func stubGo(t *testing.T, recordFile string) string {
 	return dir
 }
 
+// stubLockf models stock macOS lockf's file-and-command CLI. It records the
+// invocation and executes the command after the lock-file argument, rejecting
+// the invalid open-file-descriptor shape that prompted the regression.
+func stubLockf(t *testing.T, recordFile string) string {
+	t.Helper()
+	dir := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$*\" > \"" + recordFile + "\"\n" +
+		"[ \"$1\" = -t ] || exit 64\n" +
+		"shift 2\n" +
+		"[ -n \"$1\" ] || exit 64\n" +
+		"shift\n" +
+		"[ $# -gt 0 ] || exit 64\n" +
+		"exec \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "lockf"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 // installRecord is one captured `go install` invocation: the package and the
 // HEAD commit of the directory the build actually ran in.
 type installRecord struct {
@@ -251,18 +271,18 @@ func revParse(t *testing.T, dir, ref string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// newRebuildRepo builds a repo that looks like dear-agent: it has the two
+// newRebuildRepo builds a repo that looks like dear-agent: it has the managed
 // binary package dirs and a baseline commit on main. It returns the repo path.
 func newRebuildRepo(t *testing.T) string {
 	t.Helper()
 	repo := newRepo(t)
-	for _, p := range []string{"agm/cmd/agm", "agm/cmd/agm-reaper", "agm/internal/tmux", "cmd/vroom-dispatch", "pkg/llm/auth", "internal/x", "docs"} {
+	for _, p := range []string{"agm/cmd/agm", "agm/cmd/agm-reaper", "agm/internal/tmux", "cmd/vroom-dispatch", "wayfinder/cmd/wayfinder", "pkg/llm/auth", "internal/x", "docs"} {
 		if err := os.MkdirAll(filepath.Join(repo, p), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// Seed each package dir with a tracked file so later diffs are meaningful.
-	for _, f := range []string{"agm/cmd/agm/main.go", "agm/cmd/agm-reaper/main.go", "agm/internal/tmux/prompt.go", "cmd/vroom-dispatch/main.go", "pkg/llm/auth/auth.go", "internal/x/x.go", "docs/readme.md"} {
+	for _, f := range []string{"agm/cmd/agm/main.go", "agm/cmd/agm-reaper/main.go", "agm/internal/tmux/prompt.go", "cmd/vroom-dispatch/main.go", "wayfinder/cmd/wayfinder/main.go", "pkg/llm/auth/auth.go", "internal/x/x.go", "docs/readme.md"} {
 		if err := os.WriteFile(filepath.Join(repo, f), []byte("package x\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -368,12 +388,12 @@ func TestRebuild_AtomicInstall_NewInode(t *testing.T) {
 	}
 }
 
-// A change under a root shared source tree (pkg/) rebuilds all three consumers.
+// A change under a root shared source tree (pkg/) rebuilds every consumer.
 func TestRebuild_SharedSource_RebuildsAllConsumers(t *testing.T) {
 	repo := newRebuildRepo(t)
 	mergeBranchChanging(t, repo, map[string]string{"pkg/llm/auth/auth.go": "package auth // v2\n"})
 	got := runRebuild(t, repo)
-	if !slices.Contains(got, "./agm/cmd/agm") || !slices.Contains(got, "./agm/cmd/agm-reaper") || !slices.Contains(got, "./cmd/vroom-dispatch") {
+	if !slices.Contains(got, "./agm/cmd/agm") || !slices.Contains(got, "./agm/cmd/agm-reaper") || !slices.Contains(got, "./cmd/vroom-dispatch") || !slices.Contains(got, "./wayfinder/cmd/wayfinder") {
 		t.Fatalf("expected all consumers rebuilt on a pkg/ change, got %v", got)
 	}
 }
@@ -694,6 +714,166 @@ func TestRebuild_ScopedSource_RebuildsOnlyAffected(t *testing.T) {
 	if !slices.Contains(got, "./cmd/vroom-dispatch") {
 		t.Fatalf("vroom-dispatch not rebuilt for its own change: %v", got)
 	}
+	if slices.Contains(got, "./wayfinder/cmd/wayfinder") {
+		t.Fatalf("wayfinder rebuilt for a vroom-dispatch-only change: %v", got)
+	}
+}
+
+// A Wayfinder runtime change rebuilds Wayfinder and no unrelated executable.
+// This is the exact boundary missed when PR #1024 changed validator Go files
+// but the installed binary remained at the prior revision.
+func TestRebuild_WayfinderOnly(t *testing.T) {
+	repo := newRebuildRepo(t)
+	mergeBranchChanging(t, repo, map[string]string{"wayfinder/cmd/wayfinder/main.go": "package main // v2\n"})
+	got := runRebuild(t, repo)
+	if !slices.Contains(got, "./wayfinder/cmd/wayfinder") {
+		t.Fatalf("wayfinder not rebuilt for its own runtime change: %v", got)
+	}
+	for _, unrelated := range []string{"./agm/cmd/agm", "./agm/cmd/agm-reaper", "./cmd/vroom-dispatch"} {
+		if slices.Contains(got, unrelated) {
+			t.Fatalf("%s rebuilt for a wayfinder-only change: %v", unrelated, got)
+		}
+	}
+}
+
+func TestRebuild_WayfinderUsesMacOSLockfFileAndCommandForm(t *testing.T) {
+	repo := newRebuildRepo(t)
+	mergeBranchChanging(t, repo, map[string]string{"wayfinder/cmd/wayfinder/main.go": "package main // v2\n"})
+	gobin := t.TempDir()
+	installRecord := filepath.Join(t.TempDir(), "installed")
+	lockfRecord := filepath.Join(t.TempDir(), "lockf-args")
+	goDir := stubGo(t, installRecord)
+	lockfDir := stubLockf(t, lockfRecord)
+
+	cmd := exec.Command("bash", hookPath(t))
+	cmd.Dir = repo
+	cmd.Env = append(os.Environ(),
+		"HOME="+t.TempDir(),
+		"GOBIN="+gobin,
+		"PATH="+goDir+string(os.PathListSeparator)+lockfDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"AGM_POST_MERGE_SWEEP=0",
+		"DEAR_AGENT_INSTALL_LOCK_TOOL=lockf",
+	)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("Wayfinder lockf-form rebuild failed: %v\n%s", err, output)
+	}
+	if got := installed(t, installRecord); !slices.Contains(got, "./wayfinder/cmd/wayfinder") {
+		t.Fatalf("Wayfinder was not installed through lockf command form: %v", got)
+	}
+	args, err := os.ReadFile(lockfRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"-t 300 " + filepath.Join(gobin, ".wayfinder-install.lock"),
+		"env DEAR_AGENT_POST_MERGE_INTERNAL_MODE=wayfinder DEAR_AGENT_POST_MERGE_REBUILD=1 bash",
+		hookPath(t),
+	} {
+		if !strings.Contains(string(args), want) {
+			t.Fatalf("lockf invocation missing %q: %s", want, args)
+		}
+	}
+}
+
+// Two default-branch hooks can overlap from distinct checkouts that install to
+// one GOBIN. The newer contender must wait, then refresh origin/main while it
+// owns the lock so an older, slower build cannot become the final activation.
+func TestRebuild_WayfinderRefreshesTrunkAfterWaitingForLock(t *testing.T) {
+	origin := newRebuildRepo(t)
+	firstCheckout := cloneRepo(t, origin)
+	secondCheckout := cloneRepo(t, origin)
+
+	sharedSource := filepath.Join(origin, "wayfinder", "cmd", "wayfinder", "main.go")
+	if err := os.WriteFile(sharedSource, []byte("package main // revision x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, origin, "add", "wayfinder/cmd/wayfinder/main.go")
+	git(t, origin, "commit", "-qm", "wayfinder revision x")
+	firstRevision := revParse(t, origin, "HEAD")
+	git(t, firstCheckout, "pull", "-q", "--ff-only")
+
+	gobin := t.TempDir()
+	record := filepath.Join(t.TempDir(), "installed")
+	goDir := stubGo(t, record)
+	ready := filepath.Join(t.TempDir(), "first-build-ready")
+	release := filepath.Join(t.TempDir(), "release-first-build")
+	baseEnv := append(os.Environ(),
+		"HOME="+t.TempDir(),
+		"GOBIN="+gobin,
+		"PATH="+goDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"AGM_POST_MERGE_SWEEP=0",
+		"STUB_GO_BLOCK_PKG=./wayfinder/cmd/wayfinder",
+		"STUB_GO_BLOCK_READY="+ready,
+		"STUB_GO_BLOCK_RELEASE="+release,
+	)
+
+	var firstOutput bytes.Buffer
+	first := exec.Command("bash", hookPath(t))
+	first.Dir = firstCheckout
+	first.Env = baseEnv
+	first.Stdout = &firstOutput
+	first.Stderr = &firstOutput
+	if err := first.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if first.Process != nil {
+			_ = first.Process.Kill()
+		}
+	})
+	waitForFile(t, ready, 20*time.Second, "first Wayfinder hook did not reach staged build", &firstOutput)
+
+	if err := os.WriteFile(sharedSource, []byte("package main // revision y\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, origin, "add", "wayfinder/cmd/wayfinder/main.go")
+	git(t, origin, "commit", "-qm", "wayfinder revision y")
+	secondRevision := revParse(t, origin, "HEAD")
+	git(t, secondCheckout, "pull", "-q", "--ff-only")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var secondOutput bytes.Buffer
+	second := exec.CommandContext(ctx, "bash", hookPath(t))
+	second.Dir = secondCheckout
+	second.Env = baseEnv
+	second.Stdout = &secondOutput
+	second.Stderr = &secondOutput
+	if err := second.Start(); err != nil {
+		t.Fatal(err)
+	}
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- second.Wait() }()
+	select {
+	case err := <-secondDone:
+		t.Fatalf("newer Wayfinder hook did not wait for the older deployment: %v\n%s", err, secondOutput.String())
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	if err := os.WriteFile(release, []byte("release\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Wait(); err != nil {
+		t.Fatalf("first Wayfinder hook failed: %v\n%s", err, firstOutput.String())
+	}
+	select {
+	case err := <-secondDone:
+		if err != nil {
+			t.Fatalf("newer Wayfinder hook failed after lock release: %v\n%s", err, secondOutput.String())
+		}
+	case <-ctx.Done():
+		t.Fatalf("newer Wayfinder hook did not deploy after lock release: %v\n%s", ctx.Err(), secondOutput.String())
+	}
+
+	records := installRecords(t, record)
+	if len(records) != 2 {
+		t.Fatalf("serialized Wayfinder hooks staged %d builds, want two: %v", len(records), records)
+	}
+	for i, want := range []string{firstRevision, secondRevision} {
+		if records[i].commit != want {
+			t.Fatalf("Wayfinder build %d used revision %s, want %s (records: %+v)", i, records[i].commit, want, records)
+		}
+	}
 }
 
 // Any compiled AGM change rebuilds the coherent CLI/reaper pair. Even when a
@@ -705,6 +885,9 @@ func TestRebuild_AgmOnly(t *testing.T) {
 	got := runRebuild(t, repo)
 	if slices.Contains(got, "./cmd/vroom-dispatch") {
 		t.Fatalf("vroom-dispatch rebuilt for an agm-only change: %v", got)
+	}
+	if slices.Contains(got, "./wayfinder/cmd/wayfinder") {
+		t.Fatalf("wayfinder rebuilt for an agm-only change: %v", got)
 	}
 	if !slices.Contains(got, "./agm/cmd/agm") {
 		t.Fatalf("agm not rebuilt for its own change: %v", got)
