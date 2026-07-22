@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -43,7 +44,7 @@ type ValidationResult struct {
 
 // CheckResult represents the result of a single check.
 type CheckResult struct {
-	Type    string // "file", "test", "command"
+	Type    string // "file", "test", "command", "extension"
 	Name    string // file path or command
 	Success bool
 	Error   string
@@ -76,6 +77,15 @@ func LoadDoD(path string) (*BeadDoD, error) {
 func (d *BeadDoD) Validate() (*ValidationResult, error) {
 	start := time.Now()
 
+	if unsupported := d.checkUnsupportedExtensions(); len(unsupported) > 0 {
+		return &ValidationResult{
+			Success:  false,
+			Checks:   unsupported,
+			Error:    unsupported[0].Error,
+			Duration: time.Since(start),
+		}, nil
+	}
+
 	var allChecks []CheckResult
 
 	// Run all checks
@@ -102,6 +112,25 @@ func (d *BeadDoD) Validate() (*ValidationResult, error) {
 		Error:    errorMsg,
 		Duration: time.Since(start),
 	}, nil
+}
+
+func (d *BeadDoD) checkUnsupportedExtensions() []CheckResult {
+	keys := make([]string, 0, len(d.Extensions))
+	for key := range d.Extensions {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	results := make([]CheckResult, 0, len(keys))
+	for _, key := range keys {
+		results = append(results, CheckResult{
+			Type:    "extension",
+			Name:    key,
+			Success: false,
+			Error:   fmt.Sprintf("unsupported DoD check family %q; validation cannot certify an unexecuted check", key),
+		})
+	}
+	return results
 }
 
 // checkFilesExist verifies that all required files exist.

@@ -144,6 +144,39 @@ func TestRouter_Generate_FallsThroughOnError(t *testing.T) {
 	}
 }
 
+func TestRouter_Generate_AttributesCircuitBreakerFallback(t *testing.T) {
+	cfg := &Config{Version: 1, Roles: map[string]RoleSpec{
+		"research": {Primary: "claude-opus-4-7"},
+	}}
+	primary := &fakeProvider{name: "anthropic", err: errors.New("primary failed")}
+	fallback := &fakeProvider{name: "openai", resp: &provider.GenerateResponse{Text: "ok"}}
+	r, err := New(Options{
+		Config: cfg,
+		Factory: func(_, _ string) (provider.Provider, error) {
+			return primary, nil
+		},
+		CircuitBreaker: provider.CircuitBreakerConfig{
+			FailureThreshold: 1,
+			FallbackProvider: fallback,
+			FallbackModel:    "gpt-4o",
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	resp, err := r.Generate(context.Background(), "research", &provider.GenerateRequest{Prompt: "hi"})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if resp.Metadata["router_provider"] != "openai" || resp.Metadata["router_model"] != "gpt-4o" || resp.Metadata["router_fallback"] != true {
+		t.Fatalf("fallback routing metadata = %#v", resp.Metadata)
+	}
+	if resp.Metadata["router_candidate_model"] != "claude-opus-4-7" || resp.Metadata["router_role"] != "research" {
+		t.Fatalf("candidate routing metadata = %#v", resp.Metadata)
+	}
+}
+
 func TestRouter_Generate_AllFail(t *testing.T) {
 	cfg := &Config{Version: 1, Roles: map[string]RoleSpec{
 		"research": {Primary: "claude-opus-4-7", Secondary: "gpt-4o"},

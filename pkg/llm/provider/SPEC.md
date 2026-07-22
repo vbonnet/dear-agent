@@ -1,6 +1,6 @@
 # LLM Provider Routing Specification
 
-<!-- Last audited at: 2026-07-02 -->
+<!-- Last audited at: 2026-07-21 -->
 
 ## Purpose
 
@@ -24,6 +24,8 @@ callers.
 **LLMP-06** When OpenRouter capabilities advertise Nemotron or Qwen defaults, the system shall publish provider-canonical model identifiers that correspond to routable model pages.
 
 **LLMP-07** When a circuit-breaker primary or fallback provider returns a nil response without an error, the system shall convert it to an explicit provider error rather than returning a successful nil response.
+
+**LLMP-08** When a circuit breaker returns a response, the system shall expose the provider, model, and fallback state that actually produced it.
 
 ## BDD Traceability
 

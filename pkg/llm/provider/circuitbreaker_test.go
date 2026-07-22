@@ -40,3 +40,28 @@ func TestCircuitBreakerRejectsNilFallbackResponses(t *testing.T) {
 		}
 	}
 }
+
+func TestCircuitBreakerReportsFallbackSource(t *testing.T) {
+	breaker := NewCircuitBreaker(
+		&stubProvider{name: "primary", err: errors.New("primary failed")},
+		CircuitBreakerConfig{
+			FailureThreshold: 1,
+			FallbackProvider: &stubProvider{name: "fallback", resp: &GenerateResponse{
+				Text:  "ok",
+				Model: "fallback-model",
+			}},
+			FallbackModel: "fallback-model",
+		},
+	)
+
+	response, source, err := breaker.GenerateWithSource(context.Background(), &GenerateRequest{
+		Prompt: "test",
+		Model:  "primary-model",
+	})
+	if err != nil || response == nil {
+		t.Fatalf("GenerateWithSource() = (%v, %v), want fallback response", response, err)
+	}
+	if source.Provider != "fallback" || source.Model != "fallback-model" || !source.Fallback {
+		t.Fatalf("source = %#v, want fallback/fallback-model", source)
+	}
+}

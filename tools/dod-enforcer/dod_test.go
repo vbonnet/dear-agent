@@ -55,6 +55,31 @@ func TestLoadDoDPreservesExtensionFields(t *testing.T) {
 	if !ok || extension.Value != "true" {
 		t.Fatalf("extension = %#v, want preserved true value", extension)
 	}
+	result, err := dod.Validate()
+	if err != nil {
+		t.Fatalf("Validate returned error: %v", err)
+	}
+	if result.Success || len(result.Checks) != 1 || result.Checks[0].Name != "benchmarks_must_improve" {
+		t.Fatalf("validation = %#v, want fail-closed extension result", result)
+	}
+}
+
+func TestValidateRejectsMisspelledCoreCheck(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "misspelled.dod.yaml")
+	if err := os.WriteFile(path, []byte("tests_must_pas: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dod, err := LoadDoD(path)
+	if err != nil {
+		t.Fatalf("LoadDoD: %v", err)
+	}
+	result, err := dod.Validate()
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if result.Success || !strings.Contains(result.Error, "tests_must_pas") {
+		t.Fatalf("validation = %#v, want unsupported-check failure", result)
+	}
 }
 
 func TestLoadDoDRejectsTrailingYAMLDocument(t *testing.T) {
