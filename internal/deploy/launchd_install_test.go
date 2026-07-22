@@ -418,9 +418,13 @@ func TestNoRawCopyIntoInstallRoots(t *testing.T) {
 	// the matched path must be the DESTINATION. That distinction matters:
 	// `cp ~/go/bin/agm.backup "$stage"` reads FROM an install root and is
 	// perfectly safe.
+	//
+	// The destination may be quoted — `cp foo "/usr/local/bin/foo"` and
+	// `install -m 755 foo "$HOME/go/bin/foo"` are ordinary shell — so optional
+	// quotes are allowed around it.
 	rawCopy := regexp.MustCompile(
-		`\b(?:sudo\s+)?(?:cp|install)\s+(?:[^\s;|&]+\s+)*?(?:sudo\s+)?` +
-			installRootPattern + `[^\s"';|&]*\s*(?:$|[;|&])`)
+		`\b(?:sudo\s+)?(?:cp|install)\s+(?:[^\s;|&]+\s+)*?(?:sudo\s+)?["']?` +
+			installRootPattern + `[^\s"';|&]*["']?\s*(?:$|[;|&])`)
 
 	for _, rel := range trackedTextFiles(t, repoRoot) {
 		raw, err := os.ReadFile(filepath.Join(repoRoot, rel))
