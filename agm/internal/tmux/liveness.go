@@ -330,18 +330,77 @@ func isPiProcessCommandWithResolver(command string, resolve func(string) (string
 	if base != "node" {
 		return false
 	}
-	for _, raw := range fields[executable+1:] {
-		if strings.HasPrefix(raw, "-") {
-			continue
-		}
-		script := strings.Trim(raw, "'\"")
-		if isPiPackageEntry(script) {
-			return true
-		}
-		resolved, err := resolve(script)
-		return err == nil && isPiPackageEntry(resolved)
+	script, mustResolve, ok := nodeScriptArgument(command, fields, executable)
+	if !ok {
+		return false
 	}
-	return false
+	if !mustResolve && isPiPackageEntry(script) {
+		return true
+	}
+	resolved, err := resolve(script)
+	return err == nil && isPiPackageEntry(resolved)
+}
+
+// nodeScriptArgument recovers Node's entry-script argument from ps command
+// text. ps flattens argv with spaces, so an unquoted npm prefix such as
+// "/Users/me/My Projects" cannot be reconstructed with strings.Fields. The
+// canonical package suffix gives us a bounded endpoint while the start stays
+// anchored to Node's first non-option argument. An earlier JavaScript entry
+// makes the reconstructed path require filesystem resolution so a generic
+// Node worker cannot smuggle a later Pi path in its ordinary arguments.
+func nodeScriptArgument(command string, fields []string, executable int) (script string, mustResolve, ok bool) {
+	tail, ok := commandTailAfterField(command, fields, executable)
+	if !ok {
+		return "", false, false
+	}
+	if tail == "" || strings.HasPrefix(tail, "-") {
+		return "", false, false
+	}
+	if script, quoted := quotedNodeScript(tail); quoted {
+		return script, false, true
+	}
+	if strings.Contains(filepath.ToSlash(tail), piPackageEntrySuffix) {
+		return unquotedPiPackageEntry(tail)
+	}
+	return strings.Trim(strings.Fields(tail)[0], "'\""), false, true
+}
+
+func commandTailAfterField(command string, fields []string, fieldIndex int) (string, bool) {
+	offset := 0
+	for i := 0; i <= fieldIndex; i++ {
+		index := strings.Index(command[offset:], fields[i])
+		if index < 0 {
+			return "", false
+		}
+		offset += index + len(fields[i])
+	}
+	return strings.TrimSpace(command[offset:]), true
+}
+
+func quotedNodeScript(tail string) (string, bool) {
+	if tail[0] == '\'' || tail[0] == '"' {
+		quote := tail[0]
+		if end := strings.IndexByte(tail[1:], quote); end >= 0 {
+			return tail[1 : end+1], true
+		}
+	}
+	return "", false
+}
+
+const piPackageEntrySuffix = "/@earendil-works/pi-coding-agent/dist/cli.js"
+
+func unquotedPiPackageEntry(tail string) (script string, mustResolve, ok bool) {
+	normalized := filepath.ToSlash(tail)
+	index := strings.Index(normalized, piPackageEntrySuffix)
+	end := index + len(piPackageEntrySuffix)
+	if index < 0 || (end < len(normalized) && normalized[end] != ' ' && normalized[end] != '\t') {
+		return "", false, false
+	}
+	candidate := strings.Trim(normalized[:end], "'\"")
+	if strings.HasPrefix(candidate, "/") || strings.HasPrefix(candidate, "./") || strings.HasPrefix(candidate, "../") {
+		return candidate, strings.ContainsAny(strings.TrimSpace(normalized[:index]), " \t"), true
+	}
+	return "", false, false
 }
 
 // IsPiProcessCommand is the pure process-identity contract used by BDD. A
@@ -353,7 +412,7 @@ func IsPiProcessCommand(command string) bool {
 
 func isPiPackageEntry(path string) bool {
 	normalized := filepath.ToSlash(filepath.Clean(path))
-	return strings.HasSuffix(normalized, "/@earendil-works/pi-coding-agent/dist/cli.js")
+	return strings.HasSuffix(normalized, piPackageEntrySuffix)
 }
 
 func piProcessInPaneTree(panePIDs []int, procs []procCommandEntry) bool {
@@ -493,8 +552,10 @@ func IsPiProcessInPaneTree(sessionName, socketPath string) (bool, error) {
 }
 
 // IsPiProcessInPaneTreeContext distinguishes Pi from other Node-hosted
-// harnesses by inspecting the pane commands and descendant argv values under
-// the caller's lifetime. A generic node comm is never sufficient proof.
+// harnesses by inspecting live descendant argv values under the caller's
+// lifetime. Tmux pane command metadata is deliberately not identity evidence:
+// remain-on-exit preserves it after the process has died. A generic node comm
+// is never sufficient proof either.
 func IsPiProcessInPaneTreeContext(parent context.Context, sessionName, socketPath string) (bool, error) {
 	ctx, cancel := context.WithTimeout(parent, livenessScanTimeout)
 	defer cancel()
@@ -502,16 +563,6 @@ func IsPiProcessInPaneTreeContext(parent context.Context, sessionName, socketPat
 	pids, err := listPanePIDs(ctx, sessionName, socketPath)
 	if err != nil || len(pids) == 0 {
 		return false, err
-	}
-	command := exec.CommandContext(ctx, "tmux", "-S", socketPath, "list-panes", "-s", "-t", FormatSessionTarget(NormalizeTmuxSessionName(sessionName)), "-F", "#{pane_current_command}\t#{pane_start_command}")
-	if output, commandErr := command.Output(); commandErr == nil {
-		for line := range strings.SplitSeq(string(output), "\n") {
-			for paneCommand := range strings.SplitSeq(line, "\t") {
-				if isPiProcessCommand(strings.TrimSpace(paneCommand)) {
-					return true, nil
-				}
-			}
-		}
 	}
 	procs, err := readProcessCommandTable(ctx)
 	if err != nil {

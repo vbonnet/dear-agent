@@ -86,10 +86,12 @@ boundary. Create and cold resume require the current launch ID before they can
 report readiness, so an older footer retained in tmux history cannot authorize
 a new process. Every cold-resume entry point also proves Pi-specific process
 identity before attaching. This recognizes the canonical npm package's Node
-entrypoint without treating an unrelated `node` process as Pi. When Pi has
-exited, AGM relaunches only in a positively classified bare shell and rejects
-any other foreground process. Ctrl-C and root shutdown cancel both identity
-and pane-classification scans before command delivery or attachment.
+entrypoint, including installations beneath npm prefixes containing spaces,
+without treating an unrelated `node` process or later Pi-looking argument as
+Pi. When Pi has exited, AGM relaunches only in a positively classified bare
+shell and rejects retained pane start-command metadata or any other foreground
+process. Ctrl-C and root shutdown cancel both identity and pane-classification
+scans before command delivery or attachment.
 Routine sends use the latest managed mode/state; `working`,
 permission, model-selection, and other overlays are not ready.
 
