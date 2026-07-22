@@ -236,11 +236,15 @@ creation, and terminal state detection.
 - Shared tmux sends serialize exact-pane readiness with delivery under one
   mutation boundary, and MCP creation atomically revalidates the harness and
   composer after registration immediately before delivering its startup prompt.
-  A concurrent sender or readiness change cannot reuse the earlier proof.
+  A concurrent sender or readiness change cannot reuse the earlier proof. A
+  measured pasted-content marker binds its complete payload, so prompt-like
+  glyphs inside that payload cannot displace the composer anchor that owns it.
 - Pure API single-send preflight resolves the registered delivery surface
   before any tmux probe, while both single-recipient and fan-out delivery
   restore the session's persisted model, storage locator, endpoint, and Azure
-  settings without persisting credentials. Under the same stable session-ID
+  settings without persisting credentials. Every sequential fan-out recipient
+  receives a fresh finite deadline that still inherits caller cancellation.
+  Under the same stable session-ID
   boundary as archive, delivery reloads lifecycle before adapter construction,
   rejects reaping and archived sessions, and uses a provider-appropriate wait, so archive linearizes before or after
   a bounded completed turn. Lock acquisition and provider work honor caller

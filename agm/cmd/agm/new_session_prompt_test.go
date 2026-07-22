@@ -73,7 +73,7 @@ func TestCLICreateSessionRuntimeUsesAgyBracketedRawPaste(t *testing.T) {
 	called := false
 	checkExpectedHarnessInputAndSend = func(ctx context.Context, sessionName, harness, prompt string, options tmux.InputDeliveryOptions) (tmux.HarnessInputReadiness, error) {
 		called = true
-		if ctx != t.Context() || sessionName != "agy-bootstrap" || prompt != "first line\nsecond line" || harness != "agy" || options.AllowBusyComposer {
+		if ctx != t.Context() || sessionName != "agy-bootstrap" || prompt != "first line\nsecond line" || harness != "agy" || options.AllowQueuedAGM {
 			t.Fatalf("bootstrap atomic send = context:%t %q/%q/%q/%+v", ctx == t.Context(), sessionName, prompt, harness, options)
 		}
 		return tmux.HarnessInputReadiness{Ready: true, State: tmux.HarnessInputReady, TargetPane: "%7"}, nil

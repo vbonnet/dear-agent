@@ -967,10 +967,8 @@ func runSendMulti(ctx context.Context, spec *send.RecipientSpec) (retErr error) 
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
 	tmuxClient := session.NewRealTmux()
-	results := send.SequentialDeliver(ctx, jobs, func(ctx context.Context, job *send.DeliveryJob) error {
+	results := deliverMultiRecipientJobs(ctx, jobs, agent.OpenAICompletionTimeout, func(ctx context.Context, job *send.DeliveryJob) error {
 		return deliveryFuncWithDependencies(ctx, job, adapter, tmuxClient)
 	})
 
@@ -989,6 +987,17 @@ func runSendMulti(ctx context.Context, spec *send.RecipientSpec) (retErr error) 
 		return fmt.Errorf("some deliveries failed (see report above)")
 	}
 	return nil
+}
+
+// deliverMultiRecipientJobs gives every sequential recipient its own bounded
+// transaction. A batch-wide deadline would let one valid slow API completion
+// consume the budget of every later recipient.
+func deliverMultiRecipientJobs(ctx context.Context, jobs []*send.DeliveryJob, timeout time.Duration, deliver send.DeliveryFunc) []*send.DeliveryResult {
+	return send.SequentialDeliver(ctx, jobs, func(ctx context.Context, job *send.DeliveryJob) error {
+		deliveryCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		return deliver(deliveryCtx, job)
+	})
 }
 
 // multiAuditArgs builds the audit map for runSendMulti.

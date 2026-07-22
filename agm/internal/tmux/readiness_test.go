@@ -3,10 +3,12 @@ package tmux
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestHandleHarnessStartupStateWaitsForSlowInitialProcess(t *testing.T) {
@@ -431,6 +433,37 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			}
 			if ready != tt.ready || state != tt.state {
 				t.Fatalf("ClassifyHarnessInput() = (%v, %q), want (%v, %q)", ready, state, tt.ready, tt.state)
+			}
+		})
+	}
+}
+
+func TestQueuedComposerPayloadPromptGlyphsRemainBoundToPasteAnchor(t *testing.T) {
+	codexPayload := "[From: orchestrator | ID: 1774872000000-orchestr-002 | Sent: 2026-07-21T12:00:00Z]\n› explain this glyph without moving the anchor"
+	tests := []struct {
+		name    string
+		harness string
+		content string
+	}{
+		{
+			name:    "Claude",
+			harness: "claude-code",
+			content: "response\n❯ [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-001 | Sent: 2026-07-21T12:00:00Z]\n❯ explain this glyph without moving the anchor\n────────────────\n? for shortcuts",
+		},
+		{
+			name:    "Codex",
+			harness: "codex-cli",
+			content: fmt.Sprintf("│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.6 /model to change │\n╰──────────────────────────╯\n› [Pasted Content %d chars]\n%s", utf8.RuneCountInString(codexPayload), codexPayload),
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			ready, state, err := ClassifyHarnessInput(testCase.content, testCase.harness)
+			if err != nil {
+				t.Fatalf("ClassifyHarnessInput() error = %v", err)
+			}
+			if ready || state != HarnessInputQueuedAGM {
+				t.Fatalf("ClassifyHarnessInput() = (%t, %q), want (false, %q)", ready, state, HarnessInputQueuedAGM)
 			}
 		})
 	}

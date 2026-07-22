@@ -374,6 +374,31 @@ func TestMultiRecipientAgyDeliveryUsesSharedAtomicReadiness(t *testing.T) {
 	}
 }
 
+func TestMultiRecipientDeliveryRenewsDeadlinePerRecipient(t *testing.T) {
+	jobs := []*send.DeliveryJob{
+		{Recipient: "first", MessageID: "first-message"},
+		{Recipient: "second", MessageID: "second-message"},
+	}
+	deadlines := make([]time.Time, 0, len(jobs))
+	results := deliverMultiRecipientJobs(t.Context(), jobs, time.Second, func(ctx context.Context, _ *send.DeliveryJob) error {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("multi-recipient delivery context has no deadline")
+		}
+		deadlines = append(deadlines, deadline)
+		if len(deadlines) == 1 {
+			time.Sleep(time.Millisecond)
+		}
+		return nil
+	})
+	if len(results) != len(jobs) || !results[0].Success || !results[1].Success {
+		t.Fatalf("multi-recipient results = %#v, want two successes", results)
+	}
+	if len(deadlines) != len(jobs) || !deadlines[1].After(deadlines[0]) {
+		t.Fatalf("delivery deadlines = %v, want a fresh later deadline for the second recipient", deadlines)
+	}
+}
+
 func TestSingleAndMultiRecipientAPIDeliveryUsesAdapterReadiness(t *testing.T) {
 	adapter, err := dolt.NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
 	if err != nil {

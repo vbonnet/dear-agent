@@ -283,6 +283,13 @@ func currentComposerInputRegion(content, harness string) (region, anchorLine str
 	for i, line := range lines {
 		plain := strings.TrimSpace(stripANSI(line))
 		if isCurrentComposerAnchor(plain, harness) {
+			candidate := strings.Join(lines[i:], "\n")
+			// Once a structural pasted-content marker owns the pane tail, all
+			// following lines are payload. Prompt glyphs inside that payload must
+			// not replace the composer anchor that introduced it.
+			if hasQueuedInputMarker(plain) && queuedComposerOwnsTail(candidate, content, harness) {
+				return candidate, lines[i], true
+			}
 			anchor = i
 		}
 	}
