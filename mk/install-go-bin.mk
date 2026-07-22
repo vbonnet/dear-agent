@@ -7,9 +7,16 @@
 # will actually execute it (ce-77ip.8).
 #
 # A bare `cp` rewrites the EXISTING inode in place. If that binary has already
-# been executed, the kernel still holds the code-signing identity it cached for
-# that vnode, so the new bytes fail validation and the process is SIGKILLed with
-# OS_REASON_CODESIGNING *before main() runs* — no stderr, no log line, nothing.
+# been executed, the kernel may still hold the code-signing identity it cached
+# for that vnode, so the new bytes fail validation and the process is SIGKILLed
+# with OS_REASON_CODESIGNING *before main() runs* — no stderr, no log line.
+#
+# This is a RACE, not a certainty: whether the kill happens depends on the
+# cached signature still being live for that vnode. Measured on this host, a
+# bare cp over an already-executed binary was killed 1 time in 30; staging and
+# renaming was killed 0 times in 30. Intermittency is what made the original
+# incident so hard to attribute — a rebuild usually works, so the failure looks
+# like something else entirely.
 # For a launchd-run binary that has no terminal, the only visible symptom is
 # that the job silently stops working. On 2026-07-19 this disabled the OAuth
 # token-refresher for 17 hours and was misread as a dead token family.

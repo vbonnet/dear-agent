@@ -23,11 +23,16 @@ var programArgumentsBinary = regexp.MustCompile(`(?:__HOME__|\$\{?HOME\}?|/Users
 // Why this matters, and why a comment in the Makefile is not enough:
 //
 // `cp` rewrites the destination's EXISTING inode in place. If that binary has
-// already been executed, macOS still holds the code-signing identity it cached
+// already been executed, macOS may still hold the code-signing identity cached
 // for that vnode, so the newly written bytes fail validation and the kernel
 // SIGKILLs the process with OS_REASON_CODESIGNING *before main() runs*. There
 // is no stderr, no exit message, and no log line — for a launchd job, which has
 // no terminal, the only symptom is that it silently stops working.
+//
+// The kill is INTERMITTENT — it depends on the cached signature still being
+// live for that vnode. Measured here: bare cp killed 1/30, staged-and-renamed
+// 0/30. That intermittency is the point. A rebuild usually works, so when it
+// does not the failure reads as anything but the install step.
 //
 // On 2026-07-19 this disabled the OAuth token-refresher for 17 hours. Because
 // the symptom (credentials go stale, sessions 401) is identical to a dead token
@@ -360,6 +365,48 @@ func isBinary(path string) bool {
 	buf := make([]byte, 8192)
 	n, _ := f.Read(buf)
 	return bytes.IndexByte(buf[:n], 0) >= 0
+}
+
+// TestNoRawCopyIntoInstallRoots asserts that no tracked doc or script tells an
+// operator to `cp` a binary straight over an install root.
+//
+// Scope note, established by measurement rather than assumption: `go build -o
+// ~/go/bin/agm` is SAFE and is deliberately not flagged. The Go toolchain does
+// not leave a stale code-signing cache entry, and 3/3 trials rebuilding over an
+// already-executed binary ran fine. A raw `cp` over that same binary was killed
+// 1/30. So the docs' many `go build -o` lines are fine; only raw copies are not.
+func TestNoRawCopyIntoInstallRoots(t *testing.T) {
+	repoRoot := filepath.Join("..", "..")
+
+	// `cp <src> <install-root>/<name>` anywhere on the line — including inside a
+	// quoted echo, which is how the flagged instance was written.
+	rawCopy := regexp.MustCompile(`\bcp\s+[^\n]*?(?:~|\$HOME|\$\{HOME\})/(?:go/bin|\.local/bin)/[A-Za-z0-9._-]+`)
+	// A staged copy followed by a rename is the SAFE form this change teaches,
+	// so do not flag `cp X dest.new && mv -f dest.new dest`.
+	staged := regexp.MustCompile(`&&\s*(?:sudo\s+)?mv\b`)
+
+	for _, rel := range trackedTextFiles(t, repoRoot) {
+		switch filepath.Ext(rel) {
+		case ".md", ".sh", ".bash", ".zsh":
+		default:
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(repoRoot, rel))
+		if err != nil {
+			continue
+		}
+		for i, line := range strings.Split(string(raw), "\n") {
+			if !rawCopy.MatchString(line) || staged.MatchString(line) {
+				continue
+			}
+			t.Errorf("%s:%d tells an operator to copy straight over an install root:\n\t%s\n"+
+				"Copying over an already-executed binary can leave a stale code-signing "+
+				"cache entry, and macOS then kills it before main() runs — intermittently, "+
+				"which is what makes it hard to diagnose. Use `make -C agm install` (or the "+
+				"relevant install target), or stage and rename: `cp X dest.new && mv -f dest.new dest`.",
+				rel, i+1, strings.TrimSpace(line))
+		}
+	}
 }
 
 // trackedMakefiles lists every tracked Makefile and .mk fragment, so a nested
