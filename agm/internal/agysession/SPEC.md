@@ -1,6 +1,6 @@
 # AGY Saved Session Specification
 
-<!-- Last audited at: 2026-07-20 -->
+<!-- Last audited at: 2026-07-21 -->
 
 ## Purpose
 
@@ -33,6 +33,8 @@ conversations with their workspace, transcript, and permission-mode context.
 **AGYS-11** When the last-conversations cache maps a workspace to a conversation whose database no longer exists, the system shall treat that cache entry as stale and continue newest-first through bounded log discovery, skipping every logged conversation whose database is also gone until it finds a usable saved conversation; it shall return conversation-not-found only when the complete bounded search finds none while still failing explicitly on unsafe identifiers, corruption, unreadable metadata, or discovery-budget exhaustion.
 
 **AGYS-12** When AGM creates, resumes, or discovers an AGY session, the system shall resolve existing workspace inputs, provider cache keys, and provider log markers to one canonical physical path before lock derivation, launch, identity matching, or new metadata persistence while retaining a cleaned absolute spelling for a removed historical workspace.
+
+**AGYS-13** When a fresh AGY provider conversation is created lazily on first input, every prompt-bearing AGM creation surface shall launch the bare interactive harness, wait through trust handling for its composer, deliver the startup prompt exactly once while retaining the canonical workspace lock, and only then discover and persist the new native identity; a fresh shared-lifecycle request without a startup prompt shall fail before tmux mutation, and bootstrap, discovery, cancellation, or registration failure shall retain normal rollback ownership.
 
 ## BDD Traceability
 

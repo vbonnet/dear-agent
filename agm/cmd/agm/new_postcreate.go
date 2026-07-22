@@ -14,7 +14,7 @@ import (
 // runHarnessPostCreate runs the harness-specific post-create flow (deterministic
 // association + readiness signal for Claude, prompt-readiness wait + prompt
 // delivery for CLI harnesses).
-func runHarnessPostCreate(ctx context.Context, sessionName string, modeAppliedAtStartup bool) error {
+func runHarnessPostCreate(ctx context.Context, sessionName string, modeAppliedAtStartup, promptDelivered bool) error {
 	switch {
 	case harnessName == "claude-code" && os.Getenv("AGM_TEST_RUN_ID") == "" && os.Getenv("AGM_TEST_ENV") == "":
 		return runClaudePostCreate(ctx, sessionName, modeAppliedAtStartup)
@@ -31,7 +31,7 @@ func runHarnessPostCreate(ctx context.Context, sessionName string, modeAppliedAt
 	case harnessName == "codex-cli":
 		return runCodexPostCreate(ctx, sessionName)
 	case harnessName == "agy":
-		return runAgyPostCreate(ctx, sessionName)
+		return runAgyPostCreate(ctx, sessionName, promptDelivered)
 	case harnessName == "pi-cli":
 		return runPiPostCreate(ctx, sessionName)
 	default:
@@ -236,16 +236,21 @@ func realAgyPostCreateRuntime() agyPostCreateRuntime {
 	}
 }
 
-func runAgyPostCreate(ctx context.Context, sessionName string) error {
-	return runAgyPostCreateWithRuntime(ctx, sessionName, realAgyPostCreateRuntime())
+func runAgyPostCreate(ctx context.Context, sessionName string, promptDelivered bool) error {
+	return runAgyPostCreateWithRuntime(ctx, sessionName, promptDelivered, realAgyPostCreateRuntime())
 }
 
-func runAgyPostCreateWithRuntime(ctx context.Context, sessionName string, runtime agyPostCreateRuntime) error {
+func runAgyPostCreateWithRuntime(ctx context.Context, sessionName string, promptDelivered bool, runtime agyPostCreateRuntime) error {
 	debug.Phase("AGY Post-Create")
 	switch {
 	case os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "":
 		debug.Log("Test environment: skipping AGY prompt wait")
 		ui.PrintSuccess("AGY test session ready (init sequence skipped)")
+	case promptDelivered:
+		// Shared creation already submitted the prompt, discovered the resulting
+		// native identity, and persisted it before this completion phase.
+		debug.Log("AGY startup prompt and native identity completed before registration")
+		ui.PrintSuccess("AGY is ready and session associated!")
 	default:
 		debug.Log("Waiting for AGY prompt readiness before metadata capture and prompt delivery")
 		if err := runtime.wait(ctx, sessionName, 30*time.Second); err != nil {

@@ -69,6 +69,22 @@ type CreateSessionMetadata struct {
 type CreateSessionLaunchResult struct {
 	ModeAppliedAtStartup bool
 	HandledLifecycle     bool
+	// PromptDelivered records that an AGY startup prompt was delivered before
+	// provider-native identity discovery. Completion must not deliver it again.
+	PromptDelivered bool
+}
+
+// AgyCreateIdentityBootstrap is the prompt delivery input required by AGY
+// versions that persist a new provider conversation only after first input.
+type AgyCreateIdentityBootstrap struct {
+	SessionName string
+	Prompt      string
+}
+
+// AgyCreateIdentityBootstrapper lets a surface preserve its safe literal-input
+// implementation while the shared lifecycle continues to own phase ordering.
+type AgyCreateIdentityBootstrapper interface {
+	BootstrapAgyCreateIdentity(context.Context, AgyCreateIdentityBootstrap) error
 }
 
 // CreateSessionCompletion is the single post-registration input presented to
@@ -241,6 +257,9 @@ func validateCreateRequest(opCtx *OpContext, req *CreateSessionRequest) (*create
 	if err := agent.ValidateModel(p.harness, p.model); err != nil {
 		return nil, ErrInvalidInput("model", err.Error())
 	}
+	if p.harness == "agy" && strings.TrimSpace(req.Prompt) == "" {
+		return nil, ErrInvalidInput("prompt", "A startup prompt is required for a fresh AGY session because AGY persists its native conversation only after first input.")
+	}
 	name, err := resolveSessionName(req.Title, req.Cwd, req.AllowUnsafeTitle)
 	if err != nil {
 		return nil, err
@@ -344,6 +363,12 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 	}
 	if launchResult.HandledLifecycle {
 		return createSessionResult(req, params, sessionID), nil
+	}
+	if agyIdentityTracker != nil {
+		if err := bootstrapAgyCreateIdentity(callCtx, opCtx, params.name, req.Prompt); err != nil {
+			return nil, err
+		}
+		launchResult.PromptDelivered = true
 	}
 
 	manifestPath, registrationAllowed, createdManifestDir, err := prepareCreateManifestDir(req)
@@ -552,11 +577,34 @@ func completeCreatedSession(callCtx context.Context, opCtx *OpContext, req *Crea
 			Manifest: m, ManifestPath: manifestPath, Prompt: req.Prompt, Launch: launchResult,
 		})
 	}
-	if req.Prompt == "" {
+	if req.Prompt == "" || launchResult.PromptDelivered {
 		return nil
 	}
 	if err := opCtx.Tmux.SendKeys(name, req.Prompt); err != nil {
 		return ErrStorageError("tmux.SendKeys(prompt)", err)
+	}
+	return nil
+}
+
+func bootstrapAgyCreateIdentity(callCtx context.Context, opCtx *OpContext, sessionName, prompt string) error {
+	if err := callCtx.Err(); err != nil {
+		return err
+	}
+	input := AgyCreateIdentityBootstrap{SessionName: sessionName, Prompt: prompt}
+	if bootstrapper, ok := opCtx.CreationRuntime.(AgyCreateIdentityBootstrapper); ok {
+		if err := bootstrapper.BootstrapAgyCreateIdentity(callCtx, input); err != nil {
+			if ctxErr := callCtx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			return ErrStorageError("agy.identity.bootstrap-prompt", err)
+		}
+		return nil
+	}
+	if err := opCtx.Tmux.SendKeys(sessionName, prompt); err != nil {
+		if ctxErr := callCtx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		return ErrStorageError("agy.identity.bootstrap-prompt", err)
 	}
 	return nil
 }

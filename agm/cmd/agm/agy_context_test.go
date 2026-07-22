@@ -192,7 +192,7 @@ func TestRunAgyPostCreateReturnsCancellationBeforeSideEffects(t *testing.T) {
 	cancel()
 
 	var associated, delivered, retried bool
-	err := runAgyPostCreateWithRuntime(callerCtx, "agy-create", agyPostCreateRuntime{
+	err := runAgyPostCreateWithRuntime(callerCtx, "agy-create", false, agyPostCreateRuntime{
 		wait: func(ctx context.Context, sessionName string, timeout time.Duration) error {
 			if ctx != callerCtx {
 				t.Fatalf("post-create wait context identity changed")
@@ -220,7 +220,7 @@ func TestRunAgyPostCreatePropagatesReadinessFailure(t *testing.T) {
 	wantErr := errors.New("AGY composer unavailable")
 	var associated, delivered bool
 
-	err := runAgyPostCreateWithRuntime(t.Context(), "agy-create", agyPostCreateRuntime{
+	err := runAgyPostCreateWithRuntime(t.Context(), "agy-create", false, agyPostCreateRuntime{
 		wait:               func(context.Context, string, time.Duration) error { return wantErr },
 		associate:          func(string) { associated = true },
 		deliver:            func(context.Context, string, bool, bool) error { delivered = true; return nil },
@@ -245,7 +245,7 @@ func TestRunAgyPostCreatePropagatesPostPromptReadinessFailure(t *testing.T) {
 	postInputWaits := 0
 	retried := false
 
-	err := runAgyPostCreateWithRuntime(t.Context(), "agy-create", agyPostCreateRuntime{
+	err := runAgyPostCreateWithRuntime(t.Context(), "agy-create", false, agyPostCreateRuntime{
 		wait: func(context.Context, string, time.Duration) error {
 			startupWaits++
 			return nil
@@ -281,7 +281,7 @@ func TestRunAgyPostCreateMetadataRetryUsesCallerContext(t *testing.T) {
 
 	type callerContextKey struct{}
 	callerCtx := context.WithValue(t.Context(), callerContextKey{}, "post-create-retry")
-	err := runAgyPostCreateWithRuntime(callerCtx, "agy-create", agyPostCreateRuntime{
+	err := runAgyPostCreateWithRuntime(callerCtx, "agy-create", false, agyPostCreateRuntime{
 		wait:      func(context.Context, string, time.Duration) error { return nil },
 		associate: func(string) {},
 		deliver:   func(context.Context, string, bool, bool) error { return nil },
@@ -297,5 +297,33 @@ func TestRunAgyPostCreateMetadataRetryUsesCallerContext(t *testing.T) {
 	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("runAgyPostCreateWithRuntime error = %v, want context.Canceled", err)
+	}
+}
+
+func TestRunAgyPostCreateSkipsPromptAlreadyDeliveredForIdentityBootstrap(t *testing.T) {
+	t.Setenv("AGM_TEST_RUN_ID", "")
+	t.Setenv("AGM_TEST_ENV", "")
+	sideEffects := 0
+	err := runAgyPostCreateWithRuntime(t.Context(), "agy-create", true, agyPostCreateRuntime{
+		wait: func(context.Context, string, time.Duration) error { sideEffects++; return nil },
+		waitAfterInput: func(context.Context, string, time.Duration) error {
+			sideEffects++
+			return nil
+		},
+		associate: func(string) { sideEffects++ },
+		deliver: func(context.Context, string, bool, bool) error {
+			sideEffects++
+			return nil
+		},
+		associateWithRetry: func(context.Context, string, int, time.Duration) error {
+			sideEffects++
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sideEffects != 0 {
+		t.Fatalf("legacy AGY completion ran %d side effect(s) after pre-registration prompt delivery", sideEffects)
 	}
 }
