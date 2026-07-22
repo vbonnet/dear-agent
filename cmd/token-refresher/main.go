@@ -22,10 +22,17 @@
 //	token-refresher -force       # refresh even if the current token is fresh
 //	token-refresher -cadence     # unattended launchd mode (see cadence.go)
 //
-// The default (print) mode is designed for use as a Claude Code `apiKeyHelper`:
-// it emits ONLY the access token on stdout (all logs go to stderr), so the CLI
-// can drive the refresh cadence (every CLAUDE_CODE_API_KEY_HELPER_TTL_MS, or on
-// HTTP 401).
+// The default (print) mode emits ONLY the access token on stdout (all logs go
+// to stderr) so it composes with any caller that wants to capture the token.
+//
+// Do NOT wire this binary in as a Claude Code `apiKeyHelper`. That was its
+// original purpose and it is retired: since claude-code 2.1.205 a configured
+// helper is treated as an external API key that shadows a healthy claude.ai
+// OAuth login and refuses to fall back to it, so the CLI fails with "Invalid
+// API key" even when the credentials file is fresh (anthropics/claude-code
+// #11587, #9694, #23568). It was removed from the host on 2026-07-10 after
+// causing a multi-day mesh outage. The launchd idle backstop is the only
+// sanctioned wiring -- see cmd/token-refresher/README.md ("Retired wiring").
 //
 // Exit codes:
 //
@@ -166,7 +173,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		RefreshTokenFP: fp, CredentialsModTime: credMod,
 	})
 
-	// apiKeyHelper contract: stdout carries ONLY the token.
+	// stdout-only token contract: stdout carries ONLY the token.
 	fmt.Fprintln(stdout, token)
 	return finish(exitOK)
 }

@@ -429,9 +429,16 @@ install-token-refresher-launchagent: install-token-refresher
 	@echo "  Schedule the idle backstop:"
 	@echo "     launchctl load $(HOME)/Library/LaunchAgents/com.dear-agent.token-refresher.plist"
 
+# Uninstall still tells you to clear apiKeyHelper. Setup guidance for it is
+# retired (see install target), but a host that followed the OLD instructions
+# has the harmful value sitting in ~/.claude/settings.json, where it keeps
+# shadowing healthy OAuth long after this launch agent is gone. Removing the
+# setup step without keeping the cleanup step would strand exactly those hosts.
 uninstall-token-refresher-launchagent:
 	@echo "Disable it yourself, then remove the plist:"
 	@echo "  launchctl bootout gui/$$(id -u)/com.dear-agent.token-refresher"
+	@echo "If this host ever followed the retired apiKeyHelper instructions, clear it too:"
+	@echo "  configure-claude-settings remove apiKeyHelper"
 	@rm -f $(HOME)/Library/LaunchAgents/com.dear-agent.token-refresher.plist
 	@echo "Removed plist (if present)."
 
