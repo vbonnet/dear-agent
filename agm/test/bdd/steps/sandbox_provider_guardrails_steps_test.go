@@ -85,6 +85,25 @@ func TestScopedWorktreeInventoryCanonicalizesSymlinkedCheckout(t *testing.T) {
 	}
 }
 
+func TestScopedWorktreeInventoryIgnoresMissingExternalWorktree(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "current")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	missingSibling := filepath.Join(base, "removed-sibling")
+	porcelain := worktreeRecord(root, "aaaa") + "\n\n" + worktreeRecord(missingSibling, "bbbb") +
+		"\nprunable gitdir file points to non-existent location"
+
+	got, err := scopedWorktreeInventory(root, porcelain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "removed-sibling") {
+		t.Fatalf("missing external worktree changed scoped inventory:\n%s", got)
+	}
+}
+
 func worktreeRecord(path, head string) string {
 	return "worktree " + path + "\nHEAD " + head + "\ndetached"
 }

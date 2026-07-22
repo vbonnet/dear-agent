@@ -2,7 +2,9 @@ package steps
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -175,11 +177,11 @@ func scopedWorktreeInventory(root, porcelain string) (string, error) {
 }
 
 func pathWithinDirectory(root, path string) (bool, error) {
-	canonicalRoot, err := filepath.EvalSymlinks(filepath.Clean(root))
+	canonicalRoot, err := canonicalPathAllowMissing(root)
 	if err != nil {
 		return false, fmt.Errorf("resolve invoking repository root %q: %w", root, err)
 	}
-	canonicalPath, err := filepath.EvalSymlinks(filepath.Clean(path))
+	canonicalPath, err := canonicalPathAllowMissing(path)
 	if err != nil {
 		return false, fmt.Errorf("resolve worktree path %q: %w", path, err)
 	}
@@ -188,6 +190,36 @@ func pathWithinDirectory(root, path string) (bool, error) {
 		return false, fmt.Errorf("compare worktree path %q with root %q: %w", path, root, err)
 	}
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))), nil
+}
+
+// canonicalPathAllowMissing resolves every existing prefix while retaining a
+// missing suffix. Git can report a concurrently removed, prunable worktree;
+// its absent path must still be classified lexically against the physical
+// invoking root instead of turning unrelated shared-repository churn into a
+// BDD failure.
+func canonicalPathAllowMissing(path string) (string, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	current := filepath.Clean(absolute)
+	var suffix []string
+	for {
+		resolved, resolveErr := filepath.EvalSymlinks(current)
+		if resolveErr == nil {
+			parts := append([]string{resolved}, suffix...)
+			return filepath.Join(parts...), nil
+		}
+		if !errors.Is(resolveErr, os.ErrNotExist) {
+			return "", resolveErr
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", resolveErr
+		}
+		suffix = append([]string{filepath.Base(current)}, suffix...)
+		current = parent
+	}
 }
 
 func getSandboxProviderRuntimeState(ctx context.Context) (*sandboxProviderRuntimeState, error) {
