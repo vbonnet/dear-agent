@@ -15,6 +15,9 @@ MCP client
         -> strict schema-2.0 parser (src/wayfinder_status.ts)
 ```
 
+The registered names are `engram.retrieve`, `engram.plugins.list`, and
+`wayfinder.phase.status`.
+
 ## Design decisions
 
 - Tool names and schemas are declared once in `src/index.ts` beside routing.

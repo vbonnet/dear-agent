@@ -1,6 +1,6 @@
 # ADR-013: Tailscale-Integrated HTTP API
 
-**Status**: Proposed (2026-05-03)
+Status: Accepted (2026-05-03; verified 2026-07-17)
 
 The workflow CLIs and `workflow-inspector` cover read-only browsing from the
 host. They do not help when the operator is away from the box and a

@@ -3,6 +3,7 @@ package dolt
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -130,6 +131,14 @@ func (m *MockAdapter) ListSessions(filter *SessionFilter) ([]*manifest.Manifest,
 			continue
 		}
 		results = append(results, m.copyManifest(session))
+	}
+	if filter != nil && filter.StableOrder {
+		sort.Slice(results, func(i, j int) bool {
+			if !results[i].CreatedAt.Equal(results[j].CreatedAt) {
+				return results[i].CreatedAt.Before(results[j].CreatedAt)
+			}
+			return results[i].SessionID < results[j].SessionID
+		})
 	}
 
 	// Apply limit and offset

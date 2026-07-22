@@ -3,6 +3,7 @@ package dod
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -37,6 +38,58 @@ commands_must_succeed:
 
 	if len(dod.CommandsMustSucceed) != 1 {
 		t.Errorf("Expected 1 command, got %d", len(dod.CommandsMustSucceed))
+	}
+}
+
+func TestLoadDoDPreservesExtensionFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "unknown.dod.yaml")
+	content := "files_must_exist: []\nbenchmarks_must_improve: true\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dod, err := LoadDoD(path)
+	if err != nil {
+		t.Fatalf("LoadDoD rejected extension field: %v", err)
+	}
+	extension, ok := dod.Extensions["benchmarks_must_improve"]
+	if !ok || extension.Value != "true" {
+		t.Fatalf("extension = %#v, want preserved true value", extension)
+	}
+	result, err := dod.Validate()
+	if err != nil {
+		t.Fatalf("Validate returned error: %v", err)
+	}
+	if result.Success || len(result.Checks) != 1 || result.Checks[0].Name != "benchmarks_must_improve" {
+		t.Fatalf("validation = %#v, want fail-closed extension result", result)
+	}
+}
+
+func TestValidateRejectsMisspelledCoreCheck(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "misspelled.dod.yaml")
+	if err := os.WriteFile(path, []byte("tests_must_pas: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dod, err := LoadDoD(path)
+	if err != nil {
+		t.Fatalf("LoadDoD: %v", err)
+	}
+	result, err := dod.Validate()
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if result.Success || !strings.Contains(result.Error, "tests_must_pas") {
+		t.Fatalf("validation = %#v, want unsupported-check failure", result)
+	}
+}
+
+func TestLoadDoDRejectsTrailingYAMLDocument(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "multiple.dod.yaml")
+	content := "files_must_exist: []\n---\ntests_must_pass: true\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadDoD(path); err == nil || !strings.Contains(err.Error(), "multiple YAML documents") {
+		t.Fatalf("expected multiple-document error, got %v", err)
 	}
 }
 

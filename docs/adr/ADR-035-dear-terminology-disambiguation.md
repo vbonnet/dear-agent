@@ -1,6 +1,6 @@
 # ADR-035: DEAR Terminology Disambiguation
 
-**Status**: Accepted (2026-07-01)
+Status: Accepted (2026-07-01)
 
 ## Context
 

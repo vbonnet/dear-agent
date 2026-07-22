@@ -579,7 +579,6 @@ chmod 755 ~/.claude/hooks/*
 - **Daemon Spec**: `cmd/agm-daemon/SPEC.md`
 - **ADR-006**: Message Queue Architecture
 - **ADR-007**: Hook-Based State Detection
-- **ADR-008**: Status Aggregation
 
 ### Getting Help
 

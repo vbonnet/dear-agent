@@ -1,6 +1,6 @@
 # ADR-030: Auto-merge Dependabot patch/minor PRs via GitHub Actions
 
-**Status:** Accepted — 2026-06-15
+Status: Accepted (2026-06-15)
 
 Dependabot opens ~15 dependency-bump PRs/week. Our merge path requires a Gemini
 bot review before a PR can land, but Gemini never reviews `dependabot[bot]`

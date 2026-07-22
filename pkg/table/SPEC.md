@@ -186,14 +186,8 @@ tbl.Print()
 
 ## Design Decisions
 
-### ADR-002: Table Formatting Enhancement
-See `core/internal/ADR-002-table-formatting-lipgloss.md` for comprehensive rationale.
-
-**Key decisions**:
-1. Adopt lipgloss (not custom markdown builder)
-2. Create unified `pkg/table` package
-3. Migrate 4 CLI commands as proof-of-concept
-4. Support 3 output formats (styled, markdown, CSV)
+The package contract and supported output modes are owned by this specification
+and `ARCHITECTURE.md`; ordinary library selection is not a separate ADR.
 
 ## Test Coverage
 
@@ -248,6 +242,6 @@ All dependencies from trusted source (Charmbracelet ecosystem, 8,900+ stars).
 
 ## References
 
-- ADR-002: Table Formatting Enhancement
+- [Package architecture](ARCHITECTURE.md)
 - Lipgloss docs: https://github.com/charmbracelet/lipgloss
 - Migrated commands: analytics_usage.go, telemetry.go, main.go (benchmark), list.go (invariants)

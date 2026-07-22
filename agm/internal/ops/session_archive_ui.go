@@ -198,7 +198,7 @@ func uiSkipReason(archived, live bool, c uiConfig, ageMs int64) (skip bool, reas
 		return true, uiSkipAlreadyUnarchived
 	}
 	// Safety gate: never touch a session with a live process, regardless of
-	// --status (ADR-026 risk table).
+	// --status (OPS-67).
 	if live {
 		return true, uiSkipLive
 	}
@@ -372,7 +372,7 @@ func applyFlip(s *claudeui.Session, c uiConfig, backup bool, backupDir string,
 // gate (--older-than) and the safety-warning gate (uncommitted/unmerged work,
 // open PR, awaiting-input) downstream, so dropping the cwd match does not
 // archive a session that still has live work — it only stops mislabelling dead
-// sessions as live. See ADR-026 idle-derivation note.
+// sessions as live. See OPS-67 and OPS-68.
 func isLive(s *claudeui.Session, liveIDs map[string]bool) bool {
 	if s.CliSessionID != "" && liveIDs[s.CliSessionID] {
 		return true

@@ -2,6 +2,7 @@ package dolt
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -58,6 +59,8 @@ func TestDefaultConfig(t *testing.T) {
 		switch key {
 		case "ENGRAM_TEST_MODE":
 			return "1", true
+		case "ENGRAM_TEST_WORKSPACE":
+			return "config-workspace", true
 		default:
 			return "", false
 		}
@@ -80,6 +83,8 @@ func TestDefaultConfig(t *testing.T) {
 			return "3307", true
 		case "ENGRAM_TEST_MODE":
 			return "1", true
+		case "ENGRAM_TEST_WORKSPACE":
+			return "test-workspace", true
 		default:
 			return "", false
 		}
@@ -100,6 +105,105 @@ func TestDefaultConfig(t *testing.T) {
 
 	if config2.Host != "127.0.0.1" {
 		t.Errorf("Expected default host '127.0.0.1', got '%s'", config2.Host)
+	}
+}
+
+func TestDefaultConfigSelectsExplicitTestWorkspace(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	originalAgmConfigPath := agmConfigPath
+	t.Cleanup(func() {
+		lookupEnv = originalLookupEnv
+		agmConfigPath = originalAgmConfigPath
+	})
+	agmConfigPath = "/nonexistent/path/config.yaml"
+	lookupEnv = func(key string) (string, bool) {
+		values := map[string]string{
+			"WORKSPACE":             "oss",
+			"ENGRAM_TEST_MODE":      "1",
+			"ENGRAM_TEST_WORKSPACE": "test",
+		}
+		value, ok := values[key]
+		return value, ok
+	}
+
+	config, err := DefaultConfig()
+	if err != nil {
+		t.Fatalf("DefaultConfig: %v", err)
+	}
+	if config.Workspace != "test" || config.Database != "test" {
+		t.Fatalf("DefaultConfig target = %s/%s, want test/test", config.Workspace, config.Database)
+	}
+}
+
+func TestTestExecutionRecognizesBuiltTestSubprocess(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		executable string
+		mode       string
+		want       bool
+	}{
+		{name: "go test binary", executable: "/tmp/dolt.test", want: true},
+		{name: "built subprocess with explicit mode", executable: "/tmp/agm", mode: "1", want: true},
+		{name: "ordinary binary", executable: "/tmp/agm", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := testExecution(tc.executable, tc.mode); got != tc.want {
+				t.Fatalf("testExecution(%q, %q) = %t, want %t", tc.executable, tc.mode, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidateTestTargetUsesPositiveAllowlist(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		workspace     string
+		database      string
+		testWorkspace string
+		wantError     bool
+	}{
+		{name: "workspace database", workspace: "test-e2e", database: "test-e2e", testWorkspace: "test-e2e"},
+		{name: "shared test database", workspace: "test", database: "agm_test", testWorkspace: "test"},
+		{name: "missing selection", workspace: "test", database: "test", wantError: true},
+		{name: "workspace mismatch", workspace: "customer", database: "customer", testWorkspace: "test", wantError: true},
+		{name: "unselected database", workspace: "test", database: "customer", testWorkspace: "test", wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateTestTarget(tc.workspace, tc.database, tc.testWorkspace)
+			if (err != nil) != tc.wantError {
+				t.Fatalf("validateTestTarget(%q, %q, %q) error = %v, wantError=%t", tc.workspace, tc.database, tc.testWorkspace, err, tc.wantError)
+			}
+		})
+	}
+}
+
+func TestSharedDoltTestConfigEstablishesGuardedTarget(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	lookupEnv = os.LookupEnv
+	t.Cleanup(func() { lookupEnv = originalLookupEnv })
+
+	config := sharedDoltTestConfig(t)
+	if err := validateTestExecutionTarget(config.Workspace, config.Database); err != nil {
+		t.Fatalf("sharedDoltTestConfig target rejected: %v", err)
+	}
+}
+
+func TestNewRejectsDirectProductionTargetInTests(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	lookupEnv = os.LookupEnv
+	t.Cleanup(func() { lookupEnv = originalLookupEnv })
+	t.Setenv("ENGRAM_TEST_MODE", "1")
+	t.Setenv("ENGRAM_TEST_WORKSPACE", "test")
+
+	_, err := New(&Config{
+		Workspace: "oss",
+		Database:  "oss",
+		Host:      "127.0.0.1",
+		Port:      "3307",
+		User:      "root",
+	})
+	if err == nil || !strings.Contains(err.Error(), "TEST POLLUTION BLOCKED") {
+		t.Fatalf("New() error = %v, want direct production target rejection", err)
 	}
 }
 
@@ -129,6 +233,8 @@ func getTestAdapter(t *testing.T) *Adapter {
 	}
 
 	// Set up test environment
+	t.Setenv("ENGRAM_TEST_MODE", "1")
+	t.Setenv("ENGRAM_TEST_WORKSPACE", "test")
 	t.Setenv("WORKSPACE", "test")
 	t.Setenv("DOLT_PORT", "3307")
 	os.Unsetenv("DOLT_DATABASE") // Let it default to workspace name

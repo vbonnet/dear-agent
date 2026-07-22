@@ -1,4 +1,4 @@
-// Package bus — multi-bot Discord guild-channel portal (ADR-026).
+// Package bus — multi-bot Discord guild-channel portal (ADR-028).
 //
 // MultiBotDiscordAdapter runs N Discord bot identities (one per agent) in a
 // single guild channel so the user can @mention @Claude / @Codex / etc. and
@@ -36,7 +36,7 @@ const discordMaxMessage = 2000
 
 // guildBotClient is the narrow Discord surface the portal needs. It is a
 // sibling of discordClient (kept separate so the DM adapter and its mock
-// stay untouched per ADR-026).
+// stay untouched per ADR-028).
 type guildBotClient interface {
 	// Me returns the authenticated bot's own user (GET /users/@me), used to
 	// learn each bot's user id for mention matching.
@@ -87,8 +87,8 @@ func (g *guildBotSession) ChannelMessagesBulkDelete(channelID string, messageIDs
 }
 
 func (g *guildBotSession) AddHandler(handler any) func() { return g.s.AddHandler(handler) }
-func (g *guildBotSession) Open() error                           { return g.s.Open() }
-func (g *guildBotSession) Close() error                          { return g.s.Close() }
+func (g *guildBotSession) Open() error                   { return g.s.Open() }
+func (g *guildBotSession) Close() error                  { return g.s.Close() }
 
 // DiscordAgent is one mentionable agent bot in the portal.
 type DiscordAgent struct {
@@ -154,7 +154,7 @@ func (d *multiBotDelivery) Deliver(f *Frame) error {
 func (d *multiBotDelivery) Close() error { return nil }
 
 // MultiBotDiscordAdapter bridges the agm-bus broker and a single Discord guild
-// channel via N per-agent bot identities. See ADR-026.
+// channel via N per-agent bot identities. See ADR-028.
 type MultiBotDiscordAdapter struct {
 	// Agents is the set of mentionable agent bots.
 	Agents []*DiscordAgent
