@@ -40,6 +40,7 @@
 //	1  generic / usage error
 //	2  token family dead (invalid_grant) — re-authentication required
 //	3  refresh succeeded on the server but could not be persisted (critical)
+//	4  refresh token quarantined — an earlier refresh may have spent it
 package main
 
 import (
@@ -67,6 +68,7 @@ const (
 	exitError           = 1
 	exitTokenFamilyDead = 2
 	exitNotPersisted    = 3
+	exitQuarantined     = 4
 
 	httpTimeout = 30 * time.Second
 	// forceSkew, applied in -force mode, makes any on-disk token read as stale
@@ -91,6 +93,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		cadence     = fs.Bool("cadence", false, "unattended launchd mode: alert on token-family death and always exit 0 so launchd keeps the schedule")
 		lockTimeout = fs.Duration("lock-timeout", 0, "max wait for the cross-process credentials lock (default 10s)")
 		auditPath   = fs.String("audit-log", defaultAuditPath(), "JSONL audit log path (empty to disable)")
+		quarPath    = fs.String("quarantine", defaultQuarantinePath(), "refresh-token quarantine marker path (empty to disable quarantine)")
+		clearQuar   = fs.Bool("clear-quarantine", false, "clear the refresh-token quarantine and exit (operator override)")
 	)
 	if err := fs.Parse(args); err != nil {
 		return exitError
@@ -117,8 +121,19 @@ func run(args []string, stdout, stderr io.Writer) int {
 		TokenEndpoint:   *endpoint,
 		ClientID:        *clientID,
 		LockTimeout:     *lockTimeout,
+		QuarantinePath:  *quarPath,
 		Logger:          logger,
 		HTTPClient:      &http.Client{Timeout: httpTimeout},
+	}
+
+	if *clearQuar {
+		if err := r.ClearQuarantine(); err != nil {
+			fmt.Fprintf(stderr, "token-refresher: could not clear quarantine: %v\n", err)
+			return exitError
+		}
+		fmt.Fprintln(stderr, "token-refresher: refresh-token quarantine cleared; automatic refresh re-armed.")
+		writeAudit(*auditPath, auditRecord{Mode: "clear-quarantine", Outcome: "ok"})
+		return exitOK
 	}
 
 	// Fingerprint the on-disk refresh token BEFORE doing anything, so the audit
@@ -141,6 +156,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 			attribute.Bool("fresh", st.Fresh),
 		)
 		printStatus(stderr, st)
+		if qfp, qat, qreason, quarantined := r.QuarantineStatus(); quarantined {
+			fmt.Fprintf(stderr, "token-refresher: QUARANTINED refresh token %s since %s (%s)\n"+
+				"  Automatic refresh is held back. Clear with: token-refresher -clear-quarantine\n", qfp, qat, qreason)
+		}
 		writeAudit(*auditPath, auditRecord{
 			Mode: "check", Outcome: "ok", Fresh: st.Fresh, ExpiresAt: msOrZero(st.ExpiresAt),
 			RefreshTokenFP: fp, CredentialsModTime: credMod,
@@ -195,6 +214,29 @@ func handleRefreshError(err error, mode, auditPath string, stderr io.Writer, fp,
 			RefreshTokenFP: fp, CredentialsModTime: credMod,
 		})
 		return exitTokenFamilyDead
+	case errors.Is(err, auth.ErrRefreshOutcomeUnknown):
+		fmt.Fprintf(stderr, "token-refresher: refresh outcome UNKNOWN — the request reached the server but the response did not.\n"+
+			"  The refresh token may already be spent. It has been quarantined (fingerprint %s) so the next tick will NOT\n"+
+			"  present it again; replaying a spent token is what revokes the whole token family.\n"+
+			"  If the access token expires before another client refreshes, re-authenticate with `claude /login`.\n"+
+			"  To override and retry anyway: token-refresher -clear-quarantine\n  cause: %v\n", fpOrUnknown(fp), err)
+		writeAudit(auditPath, auditRecord{
+			Mode: mode, Outcome: "refresh_outcome_unknown", Error: err.Error(),
+			RefreshTokenFP: fp, CredentialsModTime: credMod,
+		})
+		return exitQuarantined
+
+	case errors.Is(err, auth.ErrRefreshQuarantined):
+		fmt.Fprintf(stderr, "token-refresher: refresh SKIPPED — the on-disk refresh token is quarantined.\n"+
+			"  An earlier refresh may have spent it, so presenting it again risks killing the token family.\n"+
+			"  This clears itself as soon as any client rotates the token successfully.\n"+
+			"  To override: token-refresher -clear-quarantine\n  detail: %v\n", err)
+		writeAudit(auditPath, auditRecord{
+			Mode: mode, Outcome: "refresh_quarantined", Error: err.Error(),
+			RefreshTokenFP: fp, CredentialsModTime: credMod,
+		})
+		return exitQuarantined
+
 	case errors.Is(err, auth.ErrRefreshNotPersisted):
 		fmt.Fprintf(stderr, "token-refresher: CRITICAL — refresh succeeded but new credentials could not be written.\n"+
 			"  The rotated refresh token is not on disk; the next refresh may fail. Investigate disk/permissions now.\n  cause: %v\n", err)
@@ -308,6 +350,16 @@ func defaultAuditPath() string {
 		return ""
 	}
 	return filepath.Join(home, ".local", "state", "dear-agent", "token-refresher-audit.jsonl")
+}
+
+// defaultQuarantinePath puts the quarantine marker alongside the audit log and
+// the death sentinel, so all refresher state lives in one directory.
+func defaultQuarantinePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".local", "state", "dear-agent", "refresh-token-quarantine.json")
 }
 
 func msOrZero(t time.Time) int64 {

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
 
 // credsWithRefreshToken wraps the package's writeCreds helper for the cases
@@ -27,8 +29,8 @@ func TestCredentialsFingerprint_StableForSameToken(t *testing.T) {
 	if fpA != fpB {
 		t.Errorf("same refresh token produced different fingerprints: %q vs %q", fpA, fpB)
 	}
-	if len(fpA) != fingerprintLen {
-		t.Errorf("fingerprint length = %d, want %d", len(fpA), fingerprintLen)
+	if len(fpA) != auth.FingerprintLen {
+		t.Errorf("fingerprint length = %d, want %d", len(fpA), auth.FingerprintLen)
 	}
 	if modA == "" {
 		t.Error("expected a modification time for a readable credentials file")

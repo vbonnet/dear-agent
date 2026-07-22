@@ -76,6 +76,14 @@ type OAuthResolver struct {
 	// credentials lock. Zero means defaultLockTimeout.
 	LockTimeout time.Duration
 
+	// QuarantinePath is where the refresh-token quarantine marker is kept. When
+	// a refresh request reaches the server but its response is lost, the token
+	// may already be spent, and re-presenting it revokes the whole family
+	// (ce-77ip.7). Setting this makes Refresh record such a token and refuse to
+	// present it again until it changes on disk or the operator clears it.
+	// Empty disables quarantine and restores the prior retry-blindly behavior.
+	QuarantinePath string
+
 	// Logger, when non-nil, receives structured refresh events (attempt,
 	// success, failure) for OTel/observability. Token values are never logged.
 	// Nil disables logging.

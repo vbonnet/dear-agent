@@ -26,6 +26,14 @@ provider credential handling.
 
 **CTR-08** When audit evidence is written, the command shall record mode, outcome, freshness, expiry metadata, and errors without recording token values.
 
+**CTR-10** When a refresh request is transmitted but no usable response is received, the command shall treat the refresh token as possibly spent, quarantine it, and return exit code 4.
+
+**CTR-11** When the refresh token on disk matches an active quarantine, the command shall decline to present it to the OAuth server and return exit code 4.
+
+**CTR-12** When the refresh token on disk differs from the quarantined fingerprint, or a refresh succeeds, the command shall clear the quarantine automatically.
+
+**CTR-13** When cadence mode encounters a quarantine, the command shall alert the operator once per episode and still exit 0 so launchd retains the schedule.
+
 **CTR-09** When provider credentials are not Claude Code OAuth credentials, the system shall use the corresponding provider or harness credential surface instead of this adapter.
 
 ## BDD Traceability

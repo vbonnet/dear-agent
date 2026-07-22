@@ -50,6 +50,21 @@ func cadenceExit(code int, stateDir string, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "token-refresher: cadence mode — reporting success so launchd keeps the schedule.\n")
 		return exitOK
 
+	case exitQuarantined:
+		// A near-miss, and the alert that matters most: the family is still
+		// alive precisely because we declined to replay the token. Reuse the
+		// death sentinel so one episode raises one notification.
+		if _, err := os.Stat(sentinel); err != nil {
+			notifyOperator("Claude auth AT RISK",
+				"Refresh outcome unknown; token quarantined to protect the family. Check token-refresher -check")
+			if err := os.MkdirAll(stateDir, 0o700); err == nil {
+				stamp := time.Now().UTC().Format(time.RFC3339)
+				_ = os.WriteFile(sentinel, []byte(stamp+"\n"), 0o600)
+			}
+		}
+		fmt.Fprintf(stderr, "token-refresher: cadence mode — reporting success so launchd keeps the schedule.\n")
+		return exitOK
+
 	case exitOK:
 		// Family is healthy again; arm the alert for the next episode.
 		_ = os.Remove(sentinel)

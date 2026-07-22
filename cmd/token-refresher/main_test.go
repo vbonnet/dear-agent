@@ -42,6 +42,14 @@ func okTokenServer(t *testing.T, access, refresh string) *httptest.Server {
 	}))
 }
 
+// tmpQuarantine gives each test its own quarantine marker path. Without it the
+// CLI would fall back to the real ~/.local/state/dear-agent marker and a test
+// run could clear an operator's live quarantine.
+func tmpQuarantine(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(t.TempDir(), "quarantine.json")
+}
+
 // staleMs returns an expiry well in the past.
 func staleMs() int64 { return time.Now().Add(-time.Hour).UnixMilli() }
 
@@ -58,6 +66,7 @@ func TestRun_StaleTokenRefreshesAndPrints(t *testing.T) {
 		"-credentials", creds,
 		"-endpoint", srv.URL,
 		"-audit-log", filepath.Join(t.TempDir(), "audit.jsonl"),
+		"-quarantine", tmpQuarantine(t),
 	}, &stdout, &stderr)
 
 	if code != exitOK {
@@ -82,7 +91,7 @@ func TestRun_FreshTokenSkipsNetwork(t *testing.T) {
 	creds := writeCreds(t, "still-good", freshMs(), "rt")
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-credentials", creds, "-endpoint", srv.URL, "-audit-log", ""}, &stdout, &stderr)
+	code := run([]string{"-credentials", creds, "-endpoint", srv.URL, "-audit-log", "", "-quarantine", tmpQuarantine(t)}, &stdout, &stderr)
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0; stderr=%s", code, stderr.String())
 	}
@@ -97,7 +106,7 @@ func TestRun_ForceRefreshesFreshToken(t *testing.T) {
 	creds := writeCreds(t, "still-good", freshMs(), "rt")
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-force", "-credentials", creds, "-endpoint", srv.URL, "-audit-log", ""}, &stdout, &stderr)
+	code := run([]string{"-force", "-credentials", creds, "-endpoint", srv.URL, "-audit-log", "", "-quarantine", tmpQuarantine(t)}, &stdout, &stderr)
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0; stderr=%s", code, stderr.String())
 	}
@@ -115,7 +124,7 @@ func TestRun_InvalidGrantExits2(t *testing.T) {
 	creds := writeCreds(t, "old", staleMs(), "dead-rt")
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-credentials", creds, "-endpoint", srv.URL, "-audit-log", ""}, &stdout, &stderr)
+	code := run([]string{"-credentials", creds, "-endpoint", srv.URL, "-audit-log", "", "-quarantine", tmpQuarantine(t)}, &stdout, &stderr)
 	if code != exitTokenFamilyDead {
 		t.Fatalf("exit = %d, want %d (token family dead)", code, exitTokenFamilyDead)
 	}
@@ -136,7 +145,7 @@ func TestRun_CheckModeReportsStatusNoNetwork(t *testing.T) {
 	audit := filepath.Join(t.TempDir(), "audit.jsonl")
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-check", "-credentials", creds, "-endpoint", srv.URL, "-audit-log", audit}, &stdout, &stderr)
+	code := run([]string{"-check", "-credentials", creds, "-endpoint", srv.URL, "-audit-log", audit, "-quarantine", tmpQuarantine(t)}, &stdout, &stderr)
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0", code)
 	}

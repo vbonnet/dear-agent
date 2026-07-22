@@ -31,6 +31,8 @@ stderr), so it composes cleanly with any caller that wants to capture the token.
 | `-lock-timeout` | `10s` | max wait for the cross-process credentials lock |
 | `-quiet` | `false` | suppress structured stderr logs |
 | `-audit-log` | `~/.local/state/dear-agent/token-refresher-audit.jsonl` | JSONL audit (empty disables) |
+| `-quarantine` | `~/.local/state/dear-agent/refresh-token-quarantine.json` | refresh-token quarantine marker (empty disables) |
+| `-clear-quarantine` | `false` | clear the quarantine and exit (operator override) |
 
 ## Exit codes
 
@@ -40,6 +42,44 @@ stderr), so it composes cleanly with any caller that wants to capture the token.
 | `1` | generic / usage error |
 | `2` | token family dead (`invalid_grant`) — re-authenticate (`claude /login` / `claude setup-token`) |
 | `3` | refresh succeeded on the server but could not be persisted (critical — investigate disk/permissions) |
+| `4` | refresh token quarantined — an earlier refresh may have spent it (see below) |
+
+## Refresh-token quarantine
+
+Refresh tokens here are single-use and rotating, so a refresh whose request
+reached the server but whose response did not is genuinely ambiguous: the server
+may have consumed the token and issued a replacement that never arrived. The
+on-disk token then looks valid but is spent, and presenting it again is a replay
+— which rotation treats as proof of theft, revoking the whole family and forcing
+a `claude /login`.
+
+That is exactly how the 2026-07-18 family death happened (ce-77ip.7): a
+`Client.Timeout exceeded while awaiting headers` at 08:58:37Z, then the same
+token presented again at 10:29:06Z.
+
+So the refresher distinguishes the two network failure modes precisely, using
+`httptrace` rather than error text:
+
+- **Request never transmitted** (TLS handshake timeout, connection refused, DNS):
+  the token is untouched. Ordinary retryable error.
+- **Request transmitted, no usable response** (timeout awaiting headers, 5xx, an
+  unreadable 200): the token may be spent. It is **quarantined** — recorded by
+  fingerprint and never presented again automatically.
+
+A quarantine clears itself as soon as the on-disk token changes, so if any client
+rotates successfully, refreshing resumes with no intervention. To inspect or
+override:
+
+```sh
+token-refresher -check              # reports an active quarantine
+token-refresher -clear-quarantine   # override: re-arm automatic refresh
+```
+
+Holding back is the safer failure. If the server did rotate, replaying guarantees
+family revocation and takes down every OAuth client on the host at once;
+quarantining instead lets the current access token live out its expiry while the
+operator is alerted. If the server never processed the request, the cost is one
+stalled refresh cycle.
 
 ## Wiring options
 

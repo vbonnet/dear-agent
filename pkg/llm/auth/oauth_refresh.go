@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -168,10 +169,25 @@ func (r OAuthResolver) Refresh(ctx context.Context) (string, error) {
 			return errors.New("no refresh token available in credentials file")
 		}
 
+		// Refuse to re-present a token an earlier ambiguous refresh may already
+		// have spent. Checked under the lock and against the token we are about
+		// to send, so it self-clears as soon as anyone rotates successfully.
+		if qerr := r.checkQuarantine(creds.ClaudeAIOAuth.RefreshToken); qerr != nil {
+			r.log("oauth.refresh.quarantined", "error", qerr.Error())
+			return qerr
+		}
+
 		r.log("oauth.refresh.attempt", "endpoint", r.endpoint())
 		tok, err := r.exchange(ctx, creds.ClaudeAIOAuth.RefreshToken)
 		if err != nil {
 			r.log("oauth.refresh.failed", "error", err.Error())
+			if errors.Is(err, ErrRefreshOutcomeUnknown) {
+				// The token may be spent. Record it so the next tick refuses to
+				// replay it, which is what revokes the family.
+				if qerr := r.writeQuarantine(creds.ClaudeAIOAuth.RefreshToken, err.Error()); qerr != nil {
+					r.log("oauth.refresh.quarantine_write_failed", "error", qerr.Error())
+				}
+			}
 			return err
 		}
 
@@ -196,6 +212,12 @@ func (r OAuthResolver) Refresh(ctx context.Context) (string, error) {
 			// next refresh will use the dead on-disk token and kill the family.
 			r.log("oauth.refresh.persist_failed", "error", werr.Error())
 			return fmt.Errorf("%w: %w", ErrRefreshNotPersisted, werr)
+		}
+
+		// The rotation completed and is on disk, so any earlier quarantine is
+		// moot: the token it named is gone.
+		if qerr := r.ClearQuarantine(); qerr != nil {
+			r.log("oauth.refresh.quarantine_clear_failed", "error", qerr.Error())
 		}
 
 		token = tok.AccessToken
@@ -252,6 +274,25 @@ func (r OAuthResolver) exchange(ctx context.Context, refreshToken string) (token
 		"scope":         {defaultRefreshScopes},
 	}
 
+	// wroteRequest records whether the request actually went out on the wire.
+	// This is the difference between a harmless failure and one that kills the
+	// token family: if the request was never transmitted the refresh token is
+	// untouched and retrying is safe, but if it WAS transmitted the server may
+	// have consumed the single-use token and returned a replacement we never
+	// read. Tracing it is exact, unlike matching on error text — "TLS handshake
+	// timeout" and "Client.Timeout exceeded while awaiting headers" are both
+	// plain transport errors from the caller's side but sit on opposite sides of
+	// this line. See ce-77ip.7 and ErrRefreshOutcomeUnknown.
+	var wroteRequest bool
+	trace := &httptrace.ClientTrace{
+		WroteRequest: func(info httptrace.WroteRequestInfo) {
+			if info.Err == nil {
+				wroteRequest = true
+			}
+		},
+	}
+	ctx = httptrace.WithClientTrace(ctx, trace)
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.endpoint(), strings.NewReader(form.Encode()))
 	if err != nil {
 		return tokenResponse{}, fmt.Errorf("build token refresh request: %w", err)
@@ -264,6 +305,11 @@ func (r OAuthResolver) exchange(ctx context.Context, refreshToken string) (token
 
 	resp, err := r.HTTPClient.Do(req)
 	if err != nil {
+		if wroteRequest {
+			// The token is on the wire and we will never learn what the server
+			// did with it. Treat it as possibly spent.
+			return tokenResponse{}, fmt.Errorf("%w: %w", ErrRefreshOutcomeUnknown, err)
+		}
 		return tokenResponse{}, fmt.Errorf("token refresh request failed: %w", err)
 	}
 	defer resp.Body.Close()
@@ -273,15 +319,27 @@ func (r OAuthResolver) exchange(ctx context.Context, refreshToken string) (token
 		if resp.StatusCode == http.StatusBadRequest && bytes.Contains(body, []byte("invalid_grant")) {
 			return tokenResponse{}, fmt.Errorf("%w (status 400)", ErrTokenFamilyDead)
 		}
+		// A 5xx leaves it genuinely open whether the token was consumed before
+		// the server faltered, so it is treated as possibly spent. A 4xx is a
+		// deliberate rejection: no token was issued, so the on-disk one is
+		// untouched and retrying is safe.
+		if resp.StatusCode >= http.StatusInternalServerError {
+			return tokenResponse{}, fmt.Errorf("%w: token refresh returned %d: %s",
+				ErrRefreshOutcomeUnknown, resp.StatusCode, strings.TrimSpace(string(body)))
+		}
 		return tokenResponse{}, fmt.Errorf("token refresh returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
+	// Past this point the server returned 200, so it HAS rotated the refresh
+	// token. Any failure to read the reply means the replacement is lost and the
+	// on-disk token is definitively spent — the same recovery as the ambiguous
+	// case, so it carries the same error.
 	var tok tokenResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tok); err != nil {
-		return tokenResponse{}, fmt.Errorf("decode token response: %w", err)
+		return tokenResponse{}, fmt.Errorf("%w: decode token response: %w", ErrRefreshOutcomeUnknown, err)
 	}
 	if tok.AccessToken == "" {
-		return tokenResponse{}, errors.New("token response contained no access_token")
+		return tokenResponse{}, fmt.Errorf("%w: token response contained no access_token", ErrRefreshOutcomeUnknown)
 	}
 	return tok, nil
 }
