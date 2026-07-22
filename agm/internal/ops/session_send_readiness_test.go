@@ -197,7 +197,6 @@ func TestSendMessage_ForceDoesNotBypassProtectedInputStates(t *testing.T) {
 	t.Parallel()
 
 	for _, readinessState := range []string{"PERMISSION", "OVERLAY", "ONBOARDING", "WRONG_HARNESS", "NOT_FOUND"} {
-		readinessState := readinessState
 		t.Run(readinessState, func(t *testing.T) {
 			t.Parallel()
 			ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")}, "my-session")
