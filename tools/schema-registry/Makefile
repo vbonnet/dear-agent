@@ -4,7 +4,9 @@ include ../../mk/install-go-bin.mk
 # $(GOPATH)/bin expands to the bare "/bin" -- a system directory this target
 # must never write to. `?=` only covers the undefined case, so normalise the
 # empty one too, the way the go tool defaults it.
-GOPATH := $(if $(strip $(GOPATH)),$(strip $(GOPATH)),$(HOME)/go)
+# `override` so a command-line `GOPATH=` or `make -e` with an empty value
+# cannot put the bare "/bin" back: a plain assignment loses to both.
+override GOPATH := $(if $(strip $(GOPATH)),$(strip $(GOPATH)),$(HOME)/go)
 
 .PHONY: all build test clean install lint
 

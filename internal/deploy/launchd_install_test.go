@@ -202,6 +202,15 @@ const installRootPattern = `(?:(?:\$\(HOME\)|\$\{HOME\}|\$HOME|~)/(?:go/bin|\.lo
 // restores rather than binary installs.
 var interpretedSource = regexp.MustCompile(`\b(?:cp|install)\s+[^\n]*?(?:\.(?:sh|py|rb|pl|js|ts|bash|zsh)\b|\*)`)
 
+// commandSplit separates the commands within one shell line.
+var commandSplit = regexp.MustCompile(`&&|\|\||;|\|`)
+
+// splitCommands breaks a shell line into its individual commands, so a check
+// applied to one cannot be satisfied or excused by another.
+func splitCommands(line string) []string {
+	return commandSplit.Split(line, -1)
+}
+
 var clauseSplit = regexp.MustCompile(`;|[.!?]\s`)
 
 // TestNoAPIKeyHelperInstructions asserts that nothing in the repository can
@@ -457,9 +466,23 @@ func TestNoRawCopyIntoInstallRoots(t *testing.T) {
 		}
 		for _, lg := range logicalLines(string(raw)) {
 			line, i := lg.text, lg.line-1
-			if !rawCopy.MatchString(line) || interpretedSource.MatchString(line) {
+			// Evaluate each COMMAND separately. Checking the whole logical line
+			// let an exemption earned by one command excuse another:
+			// `cp hook.sh "$HOOKS_DIR/hook" && cp agm /usr/local/bin/agm` matched
+			// rawCopy on the second and interpretedSource on the first, so the
+			// binary overwrite was skipped. Splitting is what binds each
+			// exemption to the command that earned it.
+			var offending string
+			for _, cmd := range splitCommands(line) {
+				if rawCopy.MatchString(cmd) && !interpretedSource.MatchString(cmd) {
+					offending = cmd
+					break
+				}
+			}
+			if offending == "" {
 				continue
 			}
+			line = offending
 			t.Errorf("%s:%d tells an operator to copy straight over an install root:\n\t%s\n"+
 				"Copying over an already-executed binary can leave a stale code-signing "+
 				"cache entry, and macOS then kills it before main() runs — intermittently, "+
