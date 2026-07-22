@@ -1,6 +1,6 @@
 # Pi Harness
 
-<!-- Last audited at: 2026-07-21 against Pi 0.81.0 -->
+<!-- Last audited at: 2026-07-21 against Pi 0.81.1 -->
 
 AGM supports [Pi](https://github.com/earendil-works/pi) as the canonical
 `pi-cli` harness. `pi` is accepted as an input alias and normalized before
@@ -86,10 +86,15 @@ boundary. Create and cold resume require the current launch ID before they can
 report readiness, so an older footer retained in tmux history cannot authorize
 a new process. Every cold-resume entry point also proves Pi-specific process
 identity before attaching. This recognizes the canonical npm package's Node
-entrypoint without treating an unrelated `node` process as Pi. When Pi has
-exited, AGM relaunches only in a positively classified bare shell and rejects
-any other foreground process. Ctrl-C and root shutdown cancel both identity
-and pane-classification scans before command delivery or attachment.
+entrypoint, including installations beneath npm prefixes containing spaces,
+and permits supported Node runtime flags and whitespace-bearing preload paths
+without treating an option value, unrelated `node` process, or later Pi-looking
+argument as Pi. AGM reads lossless process argv from the host OS for this
+decision; flattened tmux or `ps` display text is not liveness evidence.
+When Pi has exited, AGM relaunches only in a positively classified bare
+shell and rejects retained pane start-command metadata or any other foreground
+process. Ctrl-C and root shutdown cancel both identity and pane-classification
+scans before command delivery or attachment.
 Routine sends use the latest managed mode/state; `working`,
 permission, model-selection, and other overlays are not ready.
 
@@ -105,7 +110,10 @@ Repository hooks load only from the explicitly approved working directory.
 `PreToolUse` failures block the native call before auto or allowlist decisions.
 Every invocation receives the shared event name, native Pi session ID, approved
 working directory, loop state, and native event payload. Structured hook
-decisions are honored even when the command exits successfully. In particular,
+decisions are honored even when the command exits successfully. A hook
+execution error, timeout, signal, or nonzero exit status takes precedence over
+partial stderr and advisory context in its fail-closed diagnostic. In
+particular,
 a blocked `UserPromptSubmit` is consumed before the model sees it, a blocked
 `PreCompact` cancels compaction, and a blocking `Stop` result is delivered back
 to Pi as a follow-up user turn so the shared bounded guardrail-feedback loop can
@@ -129,10 +137,16 @@ their canonical OpenRouter routes. Provider availability still depends on the
 models and authentication configured in Pi.
 
 AGM reads Pi's native JSONL usage and provider-reported cost. It uses the latest
-assistant prompt footprint for context, the audited Pi 0.81.0 model-catalog
+assistant prompt footprint for context, the audited Pi 0.81.1 model-catalog
 window for the recorded model, and sums native cost records for the session.
 Pi does not expose a provider quota/rate-limit API, so those fields are
 reported as unavailable rather than populated with Claude-specific values.
+
+Pi 0.81.1 adds native retry lifecycle events for compaction and branch
+summarization and defers background model-catalog refresh until after
+interactive startup. AGM does not reinterpret native retry output as a
+readiness transition: the latest managed `AGM <mode>/<state> <launch-id>`
+status remains the sole readiness authority.
 
 Pi does not require a background server. Archive stops the managed tmux
 process while preserving its private native transcript. Deleting transcript
