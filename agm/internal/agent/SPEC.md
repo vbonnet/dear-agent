@@ -117,6 +117,8 @@ compatibility.
 
 **AGP-38** When the AGY adapter creates or cold-resumes through a symlinked workspace, the system shall use the canonical physical workspace path consistently for locking, tmux creation, command construction, identity correlation, and newly persisted metadata.
 
+**AGP-39** When the AGY adapter delivers an initial prompt or a later message, the system shall use AGY's harness-aware literal paste path, preserve embedded line feeds as one bracketed-paste submission, and send exactly one final Enter.
+
 ### Codex Workdir Trust (ce-cmsq)
 
 **AGP-14** When a Codex CLI session is created or resumed through the codex-cli adapter, the system shall record the working directory as a trusted Codex project in `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`) before sending the launch command, so a fresh non-git sandbox directory cannot block Codex startup on its interactive trust prompt.

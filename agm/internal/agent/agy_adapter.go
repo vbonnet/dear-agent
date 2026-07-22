@@ -30,7 +30,7 @@ var (
 	agyHasSession          = tmux.HasSession
 	agyNewSession          = tmux.NewSession
 	agySendCommand         = tmux.SendCommand
-	agySendPromptLiteral   = tmux.SendPromptLiteral
+	agySendPromptLiteral   = tmux.SendPromptLiteralForHarness
 	agyWaitForPrompt       = tmux.WaitForAgyPrompt
 	agyWaitForResumePrompt = tmux.WaitForAgyPromptOnResume
 	agyCheckProcess        = tmux.CheckProcessInPaneTree
@@ -167,7 +167,7 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 		return "", rollbackAgyAdapterSession(tmuxName, fmt.Errorf("AGY did not become ready after create: %w", err))
 	}
 	if ctx.InitialPrompt != "" {
-		if err := agySendPromptLiteral(tmuxName, ctx.InitialPrompt, false); err != nil {
+		if err := agySendPromptLiteral(tmuxName, ctx.InitialPrompt, false, "agy"); err != nil {
 			return "", rollbackAgyAdapterSession(tmuxName, fmt.Errorf("failed to deliver AGY initial prompt before identity discovery: %w", err))
 		}
 	}
@@ -408,7 +408,7 @@ func (a *AgyAdapter) SendMessage(sessionID SessionID, message Message) error {
 		return fmt.Errorf("session not found: %w", err)
 	}
 
-	if err := tmux.SendCommand(metadata.TmuxName, message.Content); err != nil {
+	if err := agySendPromptLiteral(metadata.TmuxName, message.Content, false, "agy"); err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
 
