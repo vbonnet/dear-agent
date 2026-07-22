@@ -44,8 +44,12 @@ func sendThroughTmux(t *testing.T, sessionName, cmdText, harnessName, paneDir st
 
 	// Not t.TempDir(): its path embeds the test name, and a unix socket path is
 	// capped near 104 bytes on macOS. A long test name silently pushes the
-	// socket over the limit and tmux fails with "File name too long".
-	socketDir, err := os.MkdirTemp("", "agmsock")
+	// socket over the limit and tmux fails with "File name too long" — which
+	// makes the canary unable to run at all while the shorter-named test still
+	// passes, i.e. a green suite that proves nothing. Cleaned up via t.Cleanup
+	// below, so the usetesting lint's actual concern is covered.
+	//nolint:usetesting // t.TempDir() paths overflow the 104-byte sun_path limit
+	socketDir, err := os.MkdirTemp("", "agmsock") //nolint:usetesting // see above: t.TempDir() embeds the test name and overruns the unix-socket path limit
 	if err != nil {
 		t.Fatalf("socket dir: %v", err)
 	}
