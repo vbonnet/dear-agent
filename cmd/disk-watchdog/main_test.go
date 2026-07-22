@@ -198,13 +198,12 @@ func TestUpdateAdmissionBrake_EngagesAndReleases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read after engage: %v", err)
 	}
-	if brake == nil {
+	switch {
+	case brake == nil:
 		t.Fatal("brake not engaged after a failed remediation")
-	}
-	if brake.Source != brakeSource {
+	case brake.Source != brakeSource:
 		t.Errorf("Source = %q, want %q", brake.Source, brakeSource)
-	}
-	if !strings.Contains(brake.Reason, "signal: killed") {
+	case !strings.Contains(brake.Reason, "signal: killed"):
 		t.Errorf("Reason = %q, want the remediation error", brake.Reason)
 	}
 
@@ -231,10 +230,10 @@ func TestUpdateAdmissionBrake_SuccessfulRemediationLeavesBrakeInPlace(t *testing
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	if brake == nil {
+	switch {
+	case brake == nil:
 		t.Fatal("one successful sweep under an active alarm is not evidence of health; brake should remain")
-	}
-	if brake.Reason != "earlier failure" {
+	case brake.Reason != "earlier failure":
 		t.Errorf("Reason = %q, want the original brake preserved", brake.Reason)
 	}
 }
@@ -278,14 +277,26 @@ func TestRun_HealthyTickReleasesAStaleBrake(t *testing.T) {
 
 	var out bytes.Buffer
 	// Thresholds a real filesystem cannot breach, so the tick is healthy.
+	//
+	// They must be tiny-but-POSITIVE: DiskAlertThresholds.withDefaults treats a
+	// zero threshold as "unset" and substitutes the 20 GiB default, so passing 0
+	// here silently asked for default thresholds instead of disabling them. That
+	// made this test pass only while the host happened to have >20 GiB free, and
+	// on a fuller disk it breached and ran the real `agm worktree sweep
+	// --execute`.
+	//
+	// --agm points at a path that cannot exist, so if the no-breach premise ever
+	// breaks again this test fails loudly instead of shelling out to real
+	// worktree remediation.
 	code, err := run([]string{
 		"--path", t.TempDir(),
 		"--brake", path,
 		"--trail", filepath.Join(t.TempDir(), "trail.jsonl"),
-		"--free-warn-gb", "0",
-		"--free-critical-gb", "0",
-		"--inode-warn", "1",
-		"--inode-critical", "1",
+		"--agm", filepath.Join(t.TempDir(), "no-such-agm"),
+		"--free-warn-gb", "0.0001",
+		"--free-critical-gb", "0.0001",
+		"--inode-warn", "0.999999",
+		"--inode-critical", "0.999999",
 	}, &out)
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -318,10 +329,10 @@ func TestApplyBrake_HealthyTickDoesNotClearAnotherWatchdogsBrake(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	if brake == nil {
+	switch {
+	case brake == nil:
 		t.Fatal("a healthy disk tick cleared the vroom-governor brake")
-	}
-	if brake.Source != "vroom-governor" {
+	case brake.Source != "vroom-governor":
 		t.Errorf("Source = %q, want the vroom-governor brake preserved", brake.Source)
 	}
 }

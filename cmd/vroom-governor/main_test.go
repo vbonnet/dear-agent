@@ -150,13 +150,12 @@ func TestApplyBrake_EngagesOnUnreadableProbe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	if brake == nil {
+	switch {
+	case brake == nil:
 		t.Fatal("an unreadable probe must engage the brake")
-	}
-	if brake.Source != brakeSource {
+	case brake.Source != brakeSource:
 		t.Errorf("Source = %q, want %q", brake.Source, brakeSource)
-	}
-	if !strings.Contains(brake.Reason, "signal: killed") {
+	case !strings.Contains(brake.Reason, "signal: killed"):
 		t.Errorf("Reason = %q, want the probe error", brake.Reason)
 	}
 }
@@ -195,10 +194,10 @@ func TestApplyBrake_ThresholdBreachDoesNotTouchTheBrake(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	if brake == nil {
+	switch {
+	case brake == nil:
 		t.Fatal("a clean-but-breaching tick must not clear another watchdog's brake")
-	}
-	if brake.Source != "disk-watchdog" {
+	case brake.Source != "disk-watchdog":
 		t.Errorf("Source = %q, want the disk-watchdog brake preserved", brake.Source)
 	}
 }
@@ -224,10 +223,10 @@ func TestApplyBrake_CleanTickDoesNotClearAnotherWatchdogsBrake(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	if brake == nil {
+	switch {
+	case brake == nil:
 		t.Fatal("a healthy governor tick cleared the disk-watchdog brake")
-	}
-	if brake.Source != "disk-watchdog" {
+	case brake.Source != "disk-watchdog":
 		t.Errorf("Source = %q, want the disk-watchdog brake preserved", brake.Source)
 	}
 }

@@ -34,17 +34,15 @@ func TestEngage_RoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	if got == nil {
+	switch {
+	case got == nil:
 		t.Fatal("Read returned nil for a live brake")
-	}
-	if got.Source != "disk-watchdog" {
+	case got.Source != "disk-watchdog":
 		t.Errorf("Source = %q, want disk-watchdog", got.Source)
-	}
-	if got.Reason != "remediation killed" {
+	case got.Reason != "remediation killed":
 		t.Errorf("Reason = %q, want %q", got.Reason, "remediation killed")
-	}
-	if want := got.SetAtUTC.Add(10 * time.Minute); !got.ExpiresUTC.Equal(want) {
-		t.Errorf("ExpiresUTC = %v, want SetAtUTC+10m = %v", got.ExpiresUTC, want)
+	case !got.ExpiresUTC.Equal(got.SetAtUTC.Add(10 * time.Minute)):
+		t.Errorf("ExpiresUTC = %v, want SetAtUTC+10m = %v", got.ExpiresUTC, got.SetAtUTC.Add(10*time.Minute))
 	}
 }
 
@@ -54,11 +52,12 @@ func TestEngage_ZeroTTLUsesDefault(t *testing.T) {
 		t.Fatalf("Engage: %v", err)
 	}
 	got, err := Read(path)
-	if err != nil || got == nil {
+	switch {
+	case err != nil || got == nil:
 		t.Fatalf("Read: got=%v err=%v", got, err)
-	}
-	if want := got.SetAtUTC.Add(DefaultTTL); !got.ExpiresUTC.Equal(want) {
-		t.Errorf("ExpiresUTC = %v, want SetAtUTC+DefaultTTL = %v", got.ExpiresUTC, want)
+	case !got.ExpiresUTC.Equal(got.SetAtUTC.Add(DefaultTTL)):
+		t.Errorf("ExpiresUTC = %v, want SetAtUTC+DefaultTTL = %v",
+			got.ExpiresUTC, got.SetAtUTC.Add(DefaultTTL))
 	}
 }
 
@@ -71,10 +70,10 @@ func TestEngage_ReplacesExistingBrake(t *testing.T) {
 		t.Fatalf("second Engage: %v", err)
 	}
 	got, err := Read(path)
-	if err != nil || got == nil {
+	switch {
+	case err != nil || got == nil:
 		t.Fatalf("Read: got=%v err=%v", got, err)
-	}
-	if got.Source != "vroom-governor" || got.Reason != "second" {
+	case got.Source != "vroom-governor" || got.Reason != "second":
 		t.Errorf("brake = %+v, want the second engage to win", got)
 	}
 }
@@ -258,10 +257,10 @@ func TestReleaseBySource_LeavesAnotherSourcesBrake(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	if got == nil {
+	switch {
+	case got == nil:
 		t.Fatal("a foreign brake was cleared; one watchdog must not undo another's")
-	}
-	if got.Source != "disk-watchdog" {
+	case got.Source != "disk-watchdog":
 		t.Errorf("Source = %q, want disk-watchdog", got.Source)
 	}
 }
