@@ -665,6 +665,50 @@ func TestScriptHeredocStateHandlesCopiedAndConditionallyRoutedInputs(t *testing.
 	}
 }
 
+func TestScriptHeredocStateHandlesPipelineSideOutputsAndShellCaptures(t *testing.T) {
+	source := []byte(strings.Join([]string{
+		"cat <<'PIPELINE_TEE' | tee pipeline-tee >/dev/null",
+		"gh pr reopen 864",
+		"PIPELINE_TEE",
+		"cat pipeline-tee",
+		"hidden=$(cat <<'CAPTURED_HIDDEN'",
+		"git push origin captured-hidden",
+		"CAPTURED_HIDDEN",
+		")",
+		"visible=$(cat <<'CAPTURED_VISIBLE'",
+		"bd ready",
+		"CAPTURED_VISIBLE",
+		")",
+		`printf '%s\n' "$visible"`,
+		"read -p prompt value <<'READ_PROMPT_ONLY'",
+		"safe-pr create --emergency --reason prompt-is-not-a-variable",
+		"READ_PROMPT_ONLY",
+		`printf '%s\n' "$prompt"`,
+		"read -p prompt value <<'READ_VALUE'",
+		"gh pr merge 975",
+		"READ_VALUE",
+		`printf '%s\n' "$value"`,
+	}, "\n"))
+
+	var text []string
+	for _, segment := range parseScriptSegments(source) {
+		text = append(text, segment.Text)
+	}
+	for _, visible := range []string{"gh pr reopen 864", "bd ready", "gh pr merge 975"} {
+		if !slices.Contains(text, visible) {
+			t.Errorf("visible line %q was hidden: %v", visible, text)
+		}
+	}
+	for _, hidden := range []string{
+		"git push origin captured-hidden",
+		"safe-pr create --emergency --reason prompt-is-not-a-variable",
+	} {
+		if slices.Contains(text, hidden) {
+			t.Errorf("non-visible line %q was exposed: %v", hidden, text)
+		}
+	}
+}
+
 func TestCheckRepositoryGovernsSkillAgentMetadata(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init", "-q")

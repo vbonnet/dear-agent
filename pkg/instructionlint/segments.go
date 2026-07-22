@@ -738,17 +738,22 @@ func scriptHeredocSpecs(value string, descriptors map[int]scriptOutputDestinatio
 			// the last redirect for descriptor zero supplies that command's stdin.
 			if redirectIndex == effectiveStdin && !scriptHasLaterStdinRedirect(command.text, redirect.operator) {
 				captures := scriptCapturedVariableDestinations(command.text)
+				substitutionCaptures := scriptCommandSubstitutionVariableDestinations(
+					command.text, redirect.operator)
 				switch {
 				case scriptReadUsesAlternateDescriptor(command.text):
 					// read -u consumes the selected descriptor rather than fd 0.
 				case len(captures) > 0:
 					heredoc.outputs = captures
+				case len(substitutionCaptures) > 0:
+					heredoc.outputs = substitutionCaptures
 				case scriptCommandIgnoresHeredocInput(command.text):
 					// The body is neither emitted nor retained for later output.
 				default:
 					heredoc.outputs = append(heredoc.outputs,
 						scriptHeredocCommandOutputDestination(commands, index, descriptors))
-					heredoc.outputs = append(heredoc.outputs, scriptTeeFileDestinations(command.text)...)
+					heredoc.outputs = append(heredoc.outputs,
+						scriptPipelineTeeFileDestinations(commands, index)...)
 				}
 			}
 			heredocs = append(heredocs, heredoc)
@@ -770,8 +775,12 @@ func scriptCapturedVariableDestinations(command string) []scriptOutputDestinatio
 	if executable == "read" && !readUsesNonDefaultTerminator(fields[1:]) {
 		captureLines = 1
 	}
+	variables := fields[1:]
+	if executable == "read" {
+		variables = scriptReadCapturedVariables(variables)
+	}
 	var destinations []scriptOutputDestination
-	for _, field := range fields[1:] {
+	for _, field := range variables {
 		if shellVariableName.MatchString(field) {
 			destinations = append(destinations, scriptOutputDestination{variable: field, captureLines: captureLines})
 		}
@@ -783,6 +792,58 @@ func scriptCapturedVariableDestinations(command string) []scriptOutputDestinatio
 		return []scriptOutputDestination{{variable: "REPLY", captureLines: captureLines}}
 	}
 	return []scriptOutputDestination{{variable: "MAPFILE"}}
+}
+
+func scriptReadCapturedVariables(arguments []string) []string {
+	var variables []string
+	for index := 0; index < len(arguments); index++ {
+		argument := arguments[index]
+		if argument == "--" {
+			variables = append(variables, arguments[index+1:]...)
+			break
+		}
+		if !strings.HasPrefix(argument, "-") || argument == "-" {
+			variables = append(variables, argument)
+			continue
+		}
+		if strings.HasPrefix(argument, "--") {
+			continue
+		}
+		options := strings.TrimPrefix(argument, "-")
+		for optionIndex, option := range options {
+			if !strings.ContainsRune("adinNptu", option) {
+				continue
+			}
+			operand := options[optionIndex+1:]
+			if operand == "" && index+1 < len(arguments) {
+				index++
+				operand = arguments[index]
+			}
+			if option == 'a' && shellVariableName.MatchString(operand) {
+				variables = append(variables, operand)
+			}
+			break
+		}
+	}
+	return variables
+}
+
+func scriptCommandSubstitutionVariableDestinations(
+	command string,
+	heredocOperator int,
+) []scriptOutputDestination {
+	if heredocOperator < 0 || heredocOperator > len(command) {
+		return nil
+	}
+	assignment := stripShellDeclaration(strings.TrimSpace(command[:heredocOperator]))
+	if !shellAssignment.MatchString(assignment) {
+		return nil
+	}
+	name, right, found := strings.Cut(assignment, "=")
+	if !found || !strings.Contains(right, "$(") && !strings.Contains(right, "`") {
+		return nil
+	}
+	return []scriptOutputDestination{{variable: name}}
 }
 
 func scriptReadUsesAlternateDescriptor(command string) bool {
@@ -852,6 +913,21 @@ func scriptTeeFileDestinations(command string) []scriptOutputDestination {
 			return []scriptOutputDestination{{visible: true}}
 		}
 		destinations = append(destinations, scriptOutputDestination{path: filepath.Clean(field), append: appendMode})
+	}
+	return destinations
+}
+
+func scriptPipelineTeeFileDestinations(
+	commands []scriptCommandPart,
+	producer int,
+) []scriptOutputDestination {
+	pipelineEnd := producer
+	for pipelineEnd < len(commands)-1 && commands[pipelineEnd].separator == "|" {
+		pipelineEnd++
+	}
+	var destinations []scriptOutputDestination
+	for index := producer; index <= pipelineEnd; index++ {
+		destinations = append(destinations, scriptTeeFileDestinations(commands[index].text)...)
 	}
 	return destinations
 }
