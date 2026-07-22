@@ -107,9 +107,7 @@ func TestLaunchdBinariesUseHardenedInstall(t *testing.T) {
 		// may write ~/go/bin, $HOME/go/bin, ${HOME}/go/bin or $(HOME)/.local/bin,
 		// and recognising only one of them leaves the retired path reachable
 		// through a synonym.
-		bareCopy := regexp.MustCompile(
-			`(?m)^\t@?(?:cp|install)\b[^\n]*(?:\$\(HOME\)|\$\{HOME\}|\$HOME|~)/(?:go/bin|\.local/bin)[^\n]*$` +
-				`|(?m)^\t@?(?:cp|install)\b[^\n]*\$\(HOOKS_DIR\)[^\n]*$`)
+		bareCopy := regexp.MustCompile(`(?m)^\t@?(?:cp|install)\b[^\n]*` + installRootPattern + `[^\n]*$`)
 		for _, rel := range trackedMakefiles(t, repoRoot) {
 			raw, err := os.ReadFile(filepath.Join(repoRoot, rel))
 			if err != nil {
@@ -171,6 +169,18 @@ var setCommand = regexp.MustCompile(`configure-claude-settings\s+set\s+apiKeyHel
 // configKey matches apiKeyHelper used as a settings key in JSON/YAML/TOML —
 // the most direct route to the failure, needing no prose and no Makefile.
 var configKey = regexp.MustCompile(`["']?apiKeyHelper["']?\s*[:=]`)
+
+// installRootPattern matches any directory binaries get installed into, in any
+// spelling. Enumerating roots is how this guard kept leaking: it began with
+// $(HOME)/go/bin, then needed ~/.local/bin, then $(HOOKS_DIR), then $(GOPATH)/bin
+// and /usr/local/bin. The list below is still a list, but it now covers the
+// system roots and the GOPATH form as well as the home-relative ones, and both
+// the Makefile and the documentation scanners share it so they cannot drift
+// apart.
+const installRootPattern = `(?:(?:\$\(HOME\)|\$\{HOME\}|\$HOME|~)/(?:go/bin|\.local/bin)` +
+	`|\$\((?:HOOKS_DIR|GOPATH)\)(?:/bin)?` +
+	`|(?:\$GOPATH|\$\{GOPATH\})/bin` +
+	`|/usr/local/bin|/opt/homebrew/bin)`
 
 // clauseSplit ends a clause at ";" or at sentence punctuation followed by
 // whitespace. Requiring the trailing whitespace keeps "claude-code 2.1.205"
@@ -385,7 +395,7 @@ func TestNoRawCopyIntoInstallRoots(t *testing.T) {
 
 	// `cp <src> <install-root>/<name>` anywhere on the line — including inside a
 	// quoted echo, which is how the flagged instance was written.
-	rawCopy := regexp.MustCompile(`\bcp\s+[^\n]*?(?:~|\$HOME|\$\{HOME\})/(?:go/bin|\.local/bin)/[A-Za-z0-9._-]+`)
+	rawCopy := regexp.MustCompile(`\b(?:cp|install)\s+[^\n]*?` + installRootPattern + `/[A-Za-z0-9._-]+`)
 	// A staged copy followed by a rename is the SAFE form this change teaches,
 	// so do not flag `cp X dest.new && mv -f dest.new dest`.
 	staged := regexp.MustCompile(`&&\s*(?:sudo\s+)?mv\b`)

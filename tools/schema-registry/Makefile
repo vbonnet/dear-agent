@@ -1,3 +1,10 @@
+include ../../mk/install-go-bin.mk
+
+# GOPATH is frequently unset, in which case $(GOPATH)/bin expands to the bare
+# "/bin" -- a system directory this target must never write to. Default it the
+# way the go tool does.
+GOPATH ?= $(HOME)/go
+
 .PHONY: all build test clean install lint
 
 all: build
@@ -15,8 +22,8 @@ clean:
 	rm -rf ~/.config/corpus-callosum/test*
 
 install: build
-	cp cc $(GOPATH)/bin/
-	cp cc-mcp-server $(GOPATH)/bin/
+	$(call install-go-bin,cc,$(GOPATH)/bin)
+	$(call install-go-bin,cc-mcp-server,$(GOPATH)/bin)
 
 lint:
 	golangci-lint run ./...
