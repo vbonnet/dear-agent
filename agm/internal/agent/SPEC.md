@@ -79,6 +79,8 @@ compatibility.
 
 **AGP-51** When the Pi adapter resumes a session, the system shall classify exact process liveness before validating or materializing relaunch configuration; a proven live Pi process shall remain attachable when its persisted coding-agent directory is no longer available, while a required relaunch shall validate configuration and permission artifacts before creating a new tmux session.
 
+**AGP-52** When the Pi adapter creates or imports a session, it shall persist coding-agent directory presence even for the native default; resume shall use the caller environment only for metadata that lacks both a persisted directory and that marker.
+
 ### AGY Model and Adapter Lifecycle
 
 **AGP-20** When AGM resolves an AGY model alias or accepts an AGY public model label, the system shall pass an exact label exposed by the installed AGY public model catalog through `--model`, including labels containing spaces or parentheses.

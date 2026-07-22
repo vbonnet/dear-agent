@@ -172,6 +172,16 @@ func ValidateCodingAgentDir(root string) (string, error) {
 	return abs, nil
 }
 
+// ResolveCodingAgentDir returns persisted Pi configuration, including an
+// intentional empty native-default value. The fallback exists only for legacy
+// metadata written before AGM persisted the field's presence.
+func ResolveCodingAgentDir(persisted string, persistedSet bool, legacyFallback string) string {
+	if persistedSet || persisted != "" {
+		return persisted
+	}
+	return legacyFallback
+}
+
 func validateOwnedTranscript(sessionRoot, path string) (string, fs.FileInfo, error) {
 	root, err := ValidateRoot(sessionRoot)
 	if err != nil {

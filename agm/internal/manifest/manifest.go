@@ -165,10 +165,11 @@ type Agy struct {
 
 // Pi represents Pi native session metadata.
 type Pi struct {
-	SessionID      string `yaml:"session_id,omitempty" json:"session_id,omitempty"`
-	SessionDir     string `yaml:"session_dir,omitempty" json:"session_dir,omitempty"`
-	TranscriptPath string `yaml:"transcript_path,omitempty" json:"transcript_path,omitempty"`
-	CodingAgentDir string `yaml:"coding_agent_dir,omitempty" json:"coding_agent_dir,omitempty"`
+	SessionID         string `yaml:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionDir        string `yaml:"session_dir,omitempty" json:"session_dir,omitempty"`
+	TranscriptPath    string `yaml:"transcript_path,omitempty" json:"transcript_path,omitempty"`
+	CodingAgentDir    string `yaml:"coding_agent_dir,omitempty" json:"coding_agent_dir,omitempty"`
+	CodingAgentDirSet bool   `yaml:"coding_agent_dir_set,omitempty" json:"coding_agent_dir_set,omitempty"`
 }
 
 // Tmux represents tmux session metadata

@@ -347,7 +347,11 @@ func detectPiContext(pi *manifest.Pi) (*manifest.ContextUsage, error) {
 	if err != nil {
 		return nil, err
 	}
-	contextWindow := piModelContextWindow(usage.Model, pi.CodingAgentDir)
+	codingAgentDir := pisession.ResolveCodingAgentDir(
+		pi.CodingAgentDir, pi.CodingAgentDirSet,
+		os.Getenv("PI_CODING_AGENT_DIR"),
+	)
+	contextWindow := piModelContextWindow(usage.Model, codingAgentDir)
 	percentage := math.Min(100, float64(usage.ContextTokens)/float64(contextWindow)*100)
 	return &manifest.ContextUsage{
 		TotalTokens:    contextWindow,

@@ -63,8 +63,9 @@ func buildSessionMetadata(session *manifest.Manifest) map[string]any {
 		if session.Pi.TranscriptPath != "" {
 			metadata["pi_transcript_path"] = session.Pi.TranscriptPath
 		}
-		if session.Pi.CodingAgentDir != "" {
+		if session.Pi.CodingAgentDirSet || session.Pi.CodingAgentDir != "" {
 			metadata["pi_coding_agent_dir"] = session.Pi.CodingAgentDir
+			metadata["pi_coding_agent_dir_set"] = true
 		}
 	}
 	if session.EngramMetadata != nil {
@@ -1190,12 +1191,14 @@ func unmarshalEngramMetadata(session *manifest.Manifest, metadataJSON []byte) er
 	piSessionDir, _ := metadata["pi_session_dir"].(string)
 	piTranscriptPath, _ := metadata["pi_transcript_path"].(string)
 	piCodingAgentDir, _ := metadata["pi_coding_agent_dir"].(string)
-	if piSessionID != "" || piSessionDir != "" || piTranscriptPath != "" || piCodingAgentDir != "" {
+	piCodingAgentDirSet, _ := metadata["pi_coding_agent_dir_set"].(bool)
+	if piSessionID != "" || piSessionDir != "" || piTranscriptPath != "" || piCodingAgentDir != "" || piCodingAgentDirSet {
 		session.Pi = &manifest.Pi{
-			SessionID:      piSessionID,
-			SessionDir:     piSessionDir,
-			TranscriptPath: piTranscriptPath,
-			CodingAgentDir: piCodingAgentDir,
+			SessionID:         piSessionID,
+			SessionDir:        piSessionDir,
+			TranscriptPath:    piTranscriptPath,
+			CodingAgentDir:    piCodingAgentDir,
+			CodingAgentDirSet: piCodingAgentDirSet,
 		}
 	}
 	enabled, ok := metadata["engram_enabled"].(bool)

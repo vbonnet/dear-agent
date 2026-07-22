@@ -1140,7 +1140,10 @@ func agmBuildsPiCreateAndColdResumeCommands(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	pi := &manifest.Pi{SessionID: "native-pi", SessionDir: "/private/pi", CodingAgentDir: state.piCodingAgentDir}
+	pi := &manifest.Pi{
+		SessionID: "native-pi", SessionDir: "/private/pi",
+		CodingAgentDir: state.piCodingAgentDir, CodingAgentDirSet: true,
+	}
 	base := ops.HarnessLaunchSpec{
 		Harness: "pi-cli", Model: "sonnet", SessionName: "pi-worker", SessionID: "native-pi",
 		WorkDir: "/work", PermissionMode: "default", Pi: pi,
@@ -1157,7 +1160,7 @@ func agmBuildsPiCreateAndColdResumeCommands(ctx context.Context) error {
 	if err := json.Unmarshal(encoded, &restored); err != nil {
 		return err
 	}
-	state.piMetadataPreserved = restored.CodingAgentDir == state.piCodingAgentDir
+	state.piMetadataPreserved = restored.CodingAgentDir == state.piCodingAgentDir && restored.CodingAgentDirSet
 	return nil
 }
 
@@ -1193,7 +1196,9 @@ func defaultPiLaunchShouldLeaveNativeDiscoveryUnchanged(ctx context.Context) err
 	}
 	command := ops.BuildHarnessLaunchCommand(ops.HarnessLaunchSpec{
 		Harness: "pi-cli", SessionName: "pi-default", SessionID: "native-default",
-		WorkDir: "/work", Pi: &manifest.Pi{SessionID: "native-default", SessionDir: "/private/pi"},
+		WorkDir: "/work", Pi: &manifest.Pi{
+			SessionID: "native-default", SessionDir: "/private/pi", CodingAgentDirSet: true,
+		},
 	}).Command
 	if !strings.Contains(command, "env -u CLAUDECODE -u PI_CODING_AGENT_DIR") || strings.Contains(command, "PI_CODING_AGENT_DIR=") {
 		return fmt.Errorf("default Pi launch did not clear inherited custom configuration: %s", command)

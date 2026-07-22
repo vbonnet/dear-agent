@@ -53,6 +53,8 @@ func RegisterPiCustomContextSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the Pi custom model catalog declares an (\d+) token window with an inert credential command$`, piCatalogDeclaresInertWindow)
 	ctx.Step(`^the Pi custom model catalog declares an integral exponent context window$`, piCatalogDeclaresIntegralExponentWindow)
 	ctx.Step(`^the status caller Pi catalog declares a (\d+) token window$`, statusCallerPiCatalogDeclaresWindow)
+	ctx.Step(`^the Pi session persists native default configuration$`, piSessionPersistsNativeDefaultConfiguration)
+	ctx.Step(`^the Pi session predates configuration presence metadata$`, piSessionPredatesConfigurationPresenceMetadata)
 	ctx.Step(`^the Pi custom model catalog for provider "([^"]*)" declares model "([^"]*)" with an (\d+) token window$`, piCatalogDeclaresModelWindow)
 	ctx.Step(`^the Pi custom model catalog declares a null context window$`, piCatalogDeclaresNullWindow)
 	ctx.Step(`^two Pi catalog providers declare "([^"]*)" with the same (\d+) token window$`, piCatalogDeclaresEqualProviderDuplicates)
@@ -82,7 +84,8 @@ func managedPiTranscriptUsesModel(ctx context.Context, provider, model string) e
 		return err
 	}
 	state.manifest = &manifest.Manifest{Pi: &manifest.Pi{
-		SessionID: "pi-bdd-context", SessionDir: sessionDir, TranscriptPath: transcriptPath, CodingAgentDir: state.root,
+		SessionID: "pi-bdd-context", SessionDir: sessionDir, TranscriptPath: transcriptPath,
+		CodingAgentDir: state.root, CodingAgentDirSet: true,
 	}}
 	return nil
 }
@@ -106,7 +109,8 @@ func managedPiTranscriptOmitsProvider(ctx context.Context, model string) error {
 		return err
 	}
 	state.manifest = &manifest.Manifest{Pi: &manifest.Pi{
-		SessionID: "pi-bdd-context", SessionDir: sessionDir, TranscriptPath: transcriptPath, CodingAgentDir: state.root,
+		SessionID: "pi-bdd-context", SessionDir: sessionDir, TranscriptPath: transcriptPath,
+		CodingAgentDir: state.root, CodingAgentDirSet: true,
 	}}
 	return nil
 }
@@ -158,6 +162,26 @@ func statusCallerPiCatalogDeclaresWindow(ctx context.Context, window int) error 
 		return err
 	}
 	return os.Setenv("PI_CODING_AGENT_DIR", callerDir)
+}
+
+func piSessionPersistsNativeDefaultConfiguration(ctx context.Context) error {
+	state, err := getPiCustomContextState(ctx)
+	if err != nil {
+		return err
+	}
+	state.manifest.Pi.CodingAgentDir = ""
+	state.manifest.Pi.CodingAgentDirSet = true
+	return nil
+}
+
+func piSessionPredatesConfigurationPresenceMetadata(ctx context.Context) error {
+	state, err := getPiCustomContextState(ctx)
+	if err != nil {
+		return err
+	}
+	state.manifest.Pi.CodingAgentDir = ""
+	state.manifest.Pi.CodingAgentDirSet = false
+	return nil
 }
 
 func piCatalogDeclaresModelWindow(ctx context.Context, provider, model string, window int) error {

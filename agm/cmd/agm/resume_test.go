@@ -377,7 +377,10 @@ func TestBuildPiResumeCommandPreservesExactIdentityModelModeAndPolicy(t *testing
 	}
 	m := &manifest.Manifest{
 		Model: "gpt", PermissionMode: "auto",
-		Pi:               &manifest.Pi{SessionID: "native.pi-id", SessionDir: sessionDir, CodingAgentDir: codingAgentDir},
+		Pi: &manifest.Pi{
+			SessionID: "native.pi-id", SessionDir: sessionDir,
+			CodingAgentDir: codingAgentDir, CodingAgentDirSet: true,
+		},
 		PermissionPolicy: &manifest.PermissionPolicy{Allow: []string{"Bash(git:*)"}},
 	}
 	command, err := buildPiResumeCommand(m, &HealthStatus{TmuxSessionName: "pi-worker", WorktreePath: "/tmp/work"}, "launch-resume")
@@ -411,6 +414,21 @@ func TestBuildPiResumeCommandUsesCurrentCodingAgentDirectoryForLegacyMetadata(t 
 	}
 	if !strings.Contains(command, "PI_CODING_AGENT_DIR="+launchparity.ShellQuote(codingAgentDir)) {
 		t.Fatalf("legacy Pi resume omitted current coding-agent directory: %s", command)
+	}
+}
+
+func TestBuildPiResumeCommandPreservesPersistedNativeDefault(t *testing.T) {
+	t.Setenv("AGM_PI_EXTENSION_ROOT", t.TempDir())
+	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
+	m := &manifest.Manifest{Pi: &manifest.Pi{
+		SessionID: "native-id", SessionDir: t.TempDir(), CodingAgentDirSet: true,
+	}}
+	command, err := buildPiResumeCommand(m, &HealthStatus{TmuxSessionName: "pi-worker", WorktreePath: "/tmp/work"}, "launch-resume")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(command, "env -u CLAUDECODE -u PI_CODING_AGENT_DIR") || strings.Contains(command, "PI_CODING_AGENT_DIR=") {
+		t.Fatalf("new native-default Pi resume inherited caller config: %s", command)
 	}
 }
 

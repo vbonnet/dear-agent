@@ -159,7 +159,7 @@ func buildPiImportedManifest(native pisession.Metadata, transcript, sessionDir, 
 		Context: manifest.Context{Project: native.CWD},
 		Pi: &manifest.Pi{
 			SessionID: native.ID, SessionDir: sessionDir, TranscriptPath: transcript,
-			CodingAgentDir: codingAgentDir,
+			CodingAgentDir: codingAgentDir, CodingAgentDirSet: true,
 		},
 		Tmux: manifest.Tmux{SessionName: tmux.SanitizeSessionName(sessionName)},
 	}

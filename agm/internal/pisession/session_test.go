@@ -87,6 +87,18 @@ func TestValidateCodingAgentDirNormalizesAndRejectsUnsafeTargets(t *testing.T) {
 	}
 }
 
+func TestResolveCodingAgentDirDistinguishesPersistedDefaultFromLegacyMetadata(t *testing.T) {
+	if got := ResolveCodingAgentDir("", true, "/caller/config"); got != "" {
+		t.Fatalf("persisted native default resolved to %q", got)
+	}
+	if got := ResolveCodingAgentDir("/persisted/config", false, "/caller/config"); got != "/persisted/config" {
+		t.Fatalf("persisted custom directory resolved to %q", got)
+	}
+	if got := ResolveCodingAgentDir("", false, "/caller/config"); got != "/caller/config" {
+		t.Fatalf("legacy metadata resolved to %q", got)
+	}
+}
+
 func TestFindTranscriptMatchesExactHeaderID(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

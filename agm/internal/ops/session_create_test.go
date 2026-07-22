@@ -531,7 +531,7 @@ func TestCreateSessionPiPreparesExactNativeIdentityPolicyAndManifest(t *testing.
 	if launched.Pi.SessionID != "pi-native-id" || launched.Pi.SessionDir != root {
 		t.Fatalf("Pi identity = %#v", launched.Pi)
 	}
-	if launched.Pi.CodingAgentDir != codingAgentDir {
+	if launched.Pi.CodingAgentDir != codingAgentDir || !launched.Pi.CodingAgentDirSet {
 		t.Fatalf("Pi coding agent directory = %q, want %q", launched.Pi.CodingAgentDir, codingAgentDir)
 	}
 	if launched.PiLaunchID == "" {
@@ -547,7 +547,7 @@ func TestCreateSessionPiPreparesExactNativeIdentityPolicyAndManifest(t *testing.
 	if info, statErr := os.Stat(launched.PiExtension); statErr != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("Pi extension = %q, stat=%v info=%v", launched.PiExtension, statErr, info)
 	}
-	if completed == nil || completed.Pi == nil || completed.Pi.SessionID != "pi-native-id" || completed.Pi.CodingAgentDir != codingAgentDir || completed.WorkingDirectory != workDir {
+	if completed == nil || completed.Pi == nil || completed.Pi.SessionID != "pi-native-id" || completed.Pi.CodingAgentDir != codingAgentDir || !completed.Pi.CodingAgentDirSet || completed.WorkingDirectory != workDir {
 		t.Fatalf("Pi manifest = %#v", completed)
 	}
 }
