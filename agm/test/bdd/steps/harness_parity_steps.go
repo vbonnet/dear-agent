@@ -1279,8 +1279,8 @@ func defaultPiLaunchShouldLeaveNativeDiscoveryUnchanged(ctx context.Context) err
 		Harness: "pi-cli", SessionName: "pi-default", SessionID: "native-default",
 		WorkDir: "/work", Pi: &manifest.Pi{SessionID: "native-default", SessionDir: "/private/pi"},
 	}).Command
-	if strings.Contains(command, "PI_CODING_AGENT_DIR") {
-		return fmt.Errorf("default Pi launch overrode native configuration discovery: %s", command)
+	if !strings.Contains(command, "env -u CLAUDECODE -u PI_CODING_AGENT_DIR") || strings.Contains(command, "PI_CODING_AGENT_DIR=") {
+		return fmt.Errorf("default Pi launch did not clear inherited custom configuration: %s", command)
 	}
 	return nil
 }
