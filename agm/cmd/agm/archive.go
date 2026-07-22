@@ -18,6 +18,7 @@ import (
 	gitpkg "github.com/vbonnet/dear-agent/agm/internal/git"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
+	"github.com/vbonnet/dear-agent/agm/internal/reaper"
 	"github.com/vbonnet/dear-agent/agm/internal/testcontext"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 	"github.com/vbonnet/dear-agent/internal/override"
@@ -676,7 +677,8 @@ func reportExternalArchives(outcomes []ops.ExternalArchiveOutcome) {
 }
 
 // spawnReaper spawns a detached agm-reaper process for async archival.
-// The reaper waits for the harness prompt, sends /exit, and archives the session.
+// The reaper waits for the harness prompt, sends its native graceful-exit
+// command, and archives the session.
 func spawnReaper(sessionName, harness string, outcome manifest.SessionOutcome) error {
 	// Find agm-reaper binary (should be in same directory as agm)
 	agmPath, err := os.Executable()
@@ -813,7 +815,7 @@ func spawnReaper(sessionName, harness string, outcome manifest.SessionOutcome) e
 	fmt.Printf("  Log file: %s\n", logFile)
 	fmt.Printf("\nThe reaper will:\n")
 	fmt.Printf("  1. Wait for %s to return to prompt (smart detection, not fixed interval)\n", archiveHarnessDisplayName(harness))
-	fmt.Printf("  2. Send /exit command\n")
+	fmt.Printf("  2. Send %s command\n", reaper.GracefulExitCommand(harness))
 	fmt.Printf("  3. Wait for pane to close\n")
 	fmt.Printf("  4. Archive the session\n")
 	fmt.Printf("\nMonitor progress: tail -f %s\n", logFile)
