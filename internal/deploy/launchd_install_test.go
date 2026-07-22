@@ -196,42 +196,33 @@ func TestNoAPIKeyHelperInstructions(t *testing.T) {
 					"still allowed — hosts that followed the old instructions need it.",
 					rel, loc)
 			}
-			// Examine each apiKeyHelper mention with one line of context either
-			// side, since prose wraps across lines.
-			lines := strings.Split(body, "\n")
-			for i, line := range lines {
-				if !strings.Contains(strings.ToLower(line), "apikeyhelper") {
+			// Check EVERY mention against its OWN clause.
+			//
+			// The disclaimer must describe the helper, not merely share a
+			// paragraph with it: "Do not use launchd; use token-refresher as
+			// apiKeyHelper" puts the negation in a different clause entirely.
+			// Clauses split on ";" and on sentence punctuation followed by
+			// whitespace — the trailing-space requirement keeps version strings
+			// ("2.1.205") and filenames ("settings.json") intact.
+			//
+			// Enumerating occurrences rather than lines matters: an earlier
+			// implementation resolved each line to the FIRST clause mentioning
+			// the helper, so in "apiKeyHelper is retired. Use token-refresher
+			// as apiKeyHelper" the affirmative second mention re-validated
+			// against the disclaimed first one and passed.
+			for _, m := range clauseMentions(body, "apikeyhelper") {
+				if disclaimed.MatchString(m.clause) {
 					continue
 				}
-				lo, hi := i-1, i+2
-				if lo < 0 {
-					lo = 0
-				}
-				if hi > len(lines) {
-					hi = len(lines)
-				}
-				// Narrow the window to the CLAUSE containing the mention, so
-				// the disclaimer has to describe the helper rather than merely
-				// share a paragraph with it. Review's counter-example was
-				// "Do not use launchd; use token-refresher as apiKeyHelper" —
-				// the "do not" belongs to a different clause entirely, and a
-				// whole-window check waves it through.
-				//
-				// Split on ";" and sentence-ending punctuation followed by
-				// whitespace. Requiring the whitespace keeps version strings
-				// ("2.1.205") and filenames ("settings.json") intact.
-				window := clauseAround(strings.Join(lines[lo:hi], " "), "apikeyhelper")
-				if !disclaimed.MatchString(window) {
-					t.Errorf("%s:%d mentions apiKeyHelper without disclaiming it:\n\t%s\n"+
-						"Every mention must say, in its own immediate context, that this "+
-						"wiring is retired — otherwise a reader can reconstruct the "+
-						"auth-shadowing configuration. claude-code >= 2.1.205 treats a "+
-						"configured helper as an external API key that shadows healthy "+
-						"OAuth (anthropics/claude-code#11587); it was removed from the "+
-						"host on 2026-07-10. Cleanup guidance "+
-						"(`configure-claude-settings remove apiKeyHelper`) is fine.",
-						rel, i+1, strings.TrimSpace(line))
-				}
+				t.Errorf("%s:%d mentions apiKeyHelper without disclaiming it:\n\t%s\n"+
+					"Every mention must say, in its own clause, that this wiring is "+
+					"retired — otherwise a reader can reconstruct the auth-shadowing "+
+					"configuration. claude-code >= 2.1.205 treats a configured helper "+
+					"as an external API key that shadows healthy OAuth "+
+					"(anthropics/claude-code#11587); it was removed from the host on "+
+					"2026-07-10. Cleanup guidance "+
+					"(`configure-claude-settings remove apiKeyHelper`) is fine.",
+					rel, m.line, strings.TrimSpace(m.clause))
 			}
 		})
 	}
@@ -293,18 +284,39 @@ func operatorFacingFiles(t *testing.T, repoRoot string) []string {
 // "claude-code 2.1.205" and "settings.json" from being split mid-token.
 var clauseSplit = regexp.MustCompile(`;|[.!?]\s`)
 
-// clauseAround returns the clause of text containing the first occurrence of
-// needle (lower-cased comparison), or the whole text when it is absent.
+// mention is one occurrence of a term, with the clause it sits in and the
+// 1-based line it starts on.
+type mention struct {
+	clause string
+	line   int
+}
+
+// clauseMentions returns EVERY clause of text that contains needle (compared
+// lower-cased), each with its line number.
 //
-// This is what binds a disclaimer to the thing it disclaims. Checking a
-// multi-line window instead lets an unrelated negation elsewhere in the
-// paragraph vouch for a recommendation.
-func clauseAround(text, needle string) string {
-	clauses := clauseSplit.Split(text, -1)
-	for _, c := range clauses {
-		if strings.Contains(strings.ToLower(c), needle) {
-			return c
+// Returning every occurrence rather than the first is the point: a guard that
+// resolves all mentions in a region to one clause lets a disclaimed mention
+// vouch for an undisclaimed one next to it.
+func clauseMentions(text, needle string) []mention {
+	var out []mention
+
+	add := func(clause string, start int) {
+		if !strings.Contains(strings.ToLower(clause), needle) {
+			return
 		}
+		out = append(out, mention{
+			clause: clause,
+			line:   1 + strings.Count(text[:start], "\n"),
+		})
 	}
-	return text
+
+	start := 0
+	for _, sep := range clauseSplit.FindAllStringIndex(text, -1) {
+		add(text[start:sep[0]], start)
+		start = sep[1]
+	}
+	if start < len(text) {
+		add(text[start:], start)
+	}
+	return out
 }
