@@ -278,6 +278,66 @@ func TestMultiRecipientAgyDeliveryUsesSharedAtomicReadiness(t *testing.T) {
 	}
 }
 
+func TestSingleAndMultiRecipientAPIDeliveryRecheckCurrentReadiness(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	adapter, err := dolt.NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("open SQLite adapter: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+	if err := adapter.CreateSession(&manifest.Manifest{
+		SessionID: "multi-api-id",
+		Name:      "multi-api",
+		Harness:   "openai",
+		Tmux:      manifest.Tmux{SessionName: "multi-api-tmux"},
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	job := &send.DeliveryJob{
+		Recipient:        "multi-api",
+		Sender:           "sender",
+		MessageID:        "multi-api-message-id",
+		FormattedMessage: "multi API message",
+	}
+
+	for _, surface := range []struct {
+		name    string
+		deliver func(t *testing.T, checkDelivery deliveryStateChecker) error
+	}{
+		{
+			name: "single",
+			deliver: func(t *testing.T, checkDelivery deliveryStateChecker) error {
+				return sendDirectlyWithDependencies(t.Context(), job.Recipient, job.Sender, job.MessageID, job.FormattedMessage, job.PromptFile, adapter, session.NewMockTmux(), checkDelivery)
+			},
+		},
+		{
+			name: "fan-out",
+			deliver: func(t *testing.T, checkDelivery deliveryStateChecker) error {
+				return deliveryFuncWithStateChecker(t.Context(), job, adapter, session.NewMockTmux(), checkDelivery)
+			},
+		},
+	} {
+		for _, canReceive := range []state.CanReceive{state.CanReceiveQueue, state.CanReceiveNo, state.CanReceiveOverlay, state.CanReceiveNotFound} {
+			t.Run(surface.name+"/"+string(canReceive), func(t *testing.T) {
+				checkedTmuxName := ""
+				err := surface.deliver(t, func(tmuxName string) state.CanReceive {
+					checkedTmuxName = tmuxName
+					return canReceive
+				})
+				if err == nil || !strings.Contains(err.Error(), "deferred API delivery is unsupported") {
+					t.Fatalf("%s API delivery state %s error = %v, want unsupported deferred-delivery error", surface.name, canReceive, err)
+				}
+				if checkedTmuxName != "multi-api-tmux" {
+					t.Fatalf("%s API delivery checked tmux name %q, want multi-api-tmux", surface.name, checkedTmuxName)
+				}
+				if _, statErr := os.Stat(filepath.Join(os.Getenv("HOME"), ".agm", "pending", "multi-api")); !os.IsNotExist(statErr) {
+					t.Fatalf("failed %s API delivery state %s created pending delivery state: %v", surface.name, canReceive, statErr)
+				}
+			})
+		}
+	}
+}
+
 func TestDirectCLIDeliveryRejectsUnregisteredTmuxSession(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	adapter, err := dolt.NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))

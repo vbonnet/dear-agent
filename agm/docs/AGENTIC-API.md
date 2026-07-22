@@ -19,9 +19,12 @@ harness plus its tail-owning composer; an MCP-native onboarding wait is not a
 substitute for that proof. Message sends resolve one active tmux pane and pin
 process inspection, styled capture, and delivery to that pane ID, so another
 pane or a later focus change cannot validate or redirect input.
-`agm send msg` uses that shared operation for both single-recipient and fan-out
-delivery; it does not retain a weaker CLI-only tmux path or deliver to
-unregistered sessions whose harness identity cannot be proven.
+`agm send msg` uses that shared operation for every CLI recipient in both
+single-recipient and fan-out delivery; it does not retain a weaker CLI-only
+tmux path or deliver to unregistered sessions whose harness identity cannot be
+proven. API recipients use their adapter only after a preliminary ready verdict
+and a fail-closed recheck at the final common delivery boundary, including
+fan-out sends.
 
 ## Error Code Catalog
 

@@ -686,6 +686,12 @@ func sendDirectly(ctx context.Context, recipientSession, senderName, messageID, 
 }
 
 func sendDirectlyWithTmux(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, adapter *dolt.Adapter, tmuxClient session.TmuxInterface) error {
+	return sendDirectlyWithDependencies(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, adapter, tmuxClient, session.CheckSessionDelivery)
+}
+
+type deliveryStateChecker func(string) state.CanReceive
+
+func sendDirectlyWithDependencies(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, adapter *dolt.Adapter, tmuxClient session.TmuxInterface, checkDelivery deliveryStateChecker) error {
 	if adapter == nil {
 		return fmt.Errorf("verified delivery requires session storage")
 	}
@@ -709,8 +715,7 @@ func sendDirectlyWithTmux(ctx context.Context, recipientSession, senderName, mes
 
 	// Check if this is an API-based harness (OpenAI, etc.)
 	if isAPIBasedAgent(harnessType) {
-		// Use Agent interface for API-based sessions
-		return sendViaAgent(m, senderName, messageID, formattedMessage, promptFile)
+		return sendToAPIAgentIfReady(m, recipientSession, senderName, messageID, formattedMessage, promptFile, checkDelivery)
 	}
 
 	// CLI-based harnesses share one atomic readiness-and-delivery operation.
@@ -735,6 +740,22 @@ func sendDirectlyWithTmux(ctx context.Context, recipientSession, senderName, mes
 		}
 	}
 	return nil
+}
+
+func sendToAPIAgentIfReady(m *manifest.Manifest, recipientSession, senderName, messageID, formattedMessage, promptFile string, checkDelivery deliveryStateChecker) error {
+	// API delivery has no atomic tmux operation that can close the gap between
+	// the command's preliminary pane check and adapter delivery. Recheck at this
+	// final shared seam so fan-out sends cannot bypass the readiness policy and
+	// single sends fail closed if state changes.
+	tmuxName := m.Tmux.SessionName
+	if tmuxName == "" {
+		tmuxName = recipientSession
+	}
+	canReceive := checkDelivery(tmuxName)
+	if canReceive != state.CanReceiveYes {
+		return fmt.Errorf("API session %q is not ready for direct delivery (state %s); deferred API delivery is unsupported", recipientSession, canReceive)
+	}
+	return sendViaAgent(m, senderName, messageID, formattedMessage, promptFile)
 }
 
 func waitForAgyMetadataBackfill(ctx context.Context, sessionName string, wait func(context.Context, string, time.Duration) error) error {
@@ -1077,9 +1098,13 @@ func deliveryFunc(ctx context.Context, job *send.DeliveryJob) error {
 }
 
 func deliveryFuncWithDependencies(ctx context.Context, job *send.DeliveryJob, adapter *dolt.Adapter, tmuxClient session.TmuxInterface) error {
+	return deliveryFuncWithStateChecker(ctx, job, adapter, tmuxClient, session.CheckSessionDelivery)
+}
+
+func deliveryFuncWithStateChecker(ctx context.Context, job *send.DeliveryJob, adapter *dolt.Adapter, tmuxClient session.TmuxInterface, checkDelivery deliveryStateChecker) error {
 	// Multi-recipient sends intentionally use the same manifest resolution and
-	// shared operations boundary as single-recipient sends.
-	return sendDirectlyWithTmux(ctx, job.Recipient, job.Sender, job.MessageID, job.FormattedMessage, job.PromptFile, adapter, tmuxClient)
+	// final readiness boundary as single-recipient sends.
+	return sendDirectlyWithDependencies(ctx, job.Recipient, job.Sender, job.MessageID, job.FormattedMessage, job.PromptFile, adapter, tmuxClient, checkDelivery)
 }
 
 // recordDelegation records a delegation if --delegate flag is set.
