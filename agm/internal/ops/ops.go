@@ -52,6 +52,13 @@ type OpContext struct {
 	AgyCreateIdentityTracker agysession.CreateIdentityTracker
 }
 
+func requestContext(opCtx *OpContext) context.Context {
+	if opCtx != nil && opCtx.Context != nil {
+		return opCtx.Context
+	}
+	return context.Background()
+}
+
 // Result is the base type for all operation results.
 // Every op returns a concrete result type that embeds or follows this pattern.
 type Result struct {

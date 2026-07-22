@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
@@ -13,6 +14,8 @@ var _ session.TmuxSessionKiller = (*BackendAdapter)(nil)
 var _ session.StrictSessionExistenceChecker = (*BackendAdapter)(nil)
 var _ session.HarnessLivenessChecker = (*BackendAdapter)(nil)
 var _ session.HarnessLivenessBatchChecker = (*BackendAdapter)(nil)
+var _ session.HarnessReadinessWaiter = (*BackendAdapter)(nil)
+var _ session.InputReadinessChecker = (*BackendAdapter)(nil)
 
 // BackendAdapter adapts a Backend to implement session.TmuxInterface
 // This allows the backend system to be used with existing code that expects TmuxInterface
@@ -122,6 +125,45 @@ func (a *BackendAdapter) AttachSession(name string) error {
 // SendKeys sends keys (command) to the given session
 func (a *BackendAdapter) SendKeys(sessionName, keys string) error {
 	return a.backend.SendKeys(sessionName, keys)
+}
+
+// SendKeysToPane preserves verified exact-pane delivery through the adapter.
+func (a *BackendAdapter) SendKeysToPane(ctx context.Context, paneID, keys string) error {
+	sender, ok := a.backend.(session.VerifiedPaneSender)
+	if !ok {
+		return fmt.Errorf("backend does not expose verified pane delivery")
+	}
+	return sender.SendKeysToPane(ctx, paneID, keys)
+}
+
+// WaitForHarnessReady preserves the optional readiness capability through the
+// legacy backend adapter used by the production CLI.
+func (a *BackendAdapter) WaitForHarnessReady(ctx context.Context, sessionName, harness string, timeout time.Duration) error {
+	waiter, ok := a.backend.(session.HarnessReadinessWaiter)
+	if !ok {
+		return fmt.Errorf("backend %T does not expose harness readiness", a.backend)
+	}
+	return waiter.WaitForHarnessReady(ctx, sessionName, harness, timeout)
+}
+
+// CheckInputReadiness preserves exact, harness-aware send safety through the
+// production adapter chain.
+func (a *BackendAdapter) CheckInputReadiness(ctx context.Context, sessionName, harness string) (session.InputReadiness, error) {
+	checker, ok := a.backend.(session.InputReadinessChecker)
+	if !ok {
+		return session.InputReadiness{}, fmt.Errorf("backend %T does not expose input readiness", a.backend)
+	}
+	return checker.CheckInputReadiness(ctx, sessionName, harness)
+}
+
+// SendKeysIfInputReady preserves atomic readiness and exact-pane delivery
+// through the production backend adapter chain.
+func (a *BackendAdapter) SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string, options session.InputDeliveryOptions) (session.InputReadiness, error) {
+	sender, ok := a.backend.(session.AtomicInputSender)
+	if !ok {
+		return session.InputReadiness{}, fmt.Errorf("backend %T does not expose atomic input delivery", a.backend)
+	}
+	return sender.SendKeysIfInputReady(ctx, sessionName, harness, keys, options)
 }
 
 // GetDefaultBackendAdapter returns a BackendAdapter using the default backend

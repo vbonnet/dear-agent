@@ -65,6 +65,7 @@ const (
 	ErrCodeKillProtected      = "AGM-013"
 	ErrCodeActiveSessionKill  = "AGM-014"
 	ErrCodeLockTimeout        = "AGM-015"
+	ErrCodeSessionNotReady    = "AGM-016"
 	ErrCodeDryRun             = "AGM-100"
 )
 
@@ -178,6 +179,30 @@ func ErrActiveSessionKill(name string) *OpError {
 		},
 		Parameters: map[string]string{
 			"session": name,
+		},
+	}
+}
+
+// ErrSessionNotReady reports a non-delivery decision made before any input is
+// sent to the tmux pane.
+func ErrSessionNotReady(name, readiness string) *OpError {
+	if readiness == "" {
+		readiness = "UNKNOWN"
+	}
+	return &OpError{
+		Status:   409,
+		Type:     "session/not_ready",
+		Code:     ErrCodeSessionNotReady,
+		Title:    "Session is not ready for input",
+		Detail:   fmt.Sprintf("Session %q cannot safely receive input (readiness: %s). No input was sent.", name, readiness),
+		Instance: "session/send",
+		Suggestions: []string{
+			fmt.Sprintf("Inspect the pane: `agm capture %s`.", name),
+			fmt.Sprintf("Wait until the harness composer is ready, then retry: `agm send msg %s --prompt <text>`.", name),
+		},
+		Parameters: map[string]string{
+			"session":   name,
+			"readiness": readiness,
 		},
 	}
 }

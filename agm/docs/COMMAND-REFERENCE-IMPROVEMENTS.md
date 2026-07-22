@@ -59,11 +59,11 @@ One-page cheat sheet with:
 
 ### 2. Enhanced Command Help Text
 
-#### csm send
-**File**: `main/agm/cmd/csm/send.go`
+#### agm send msg
+**File**: `agm/cmd/agm/send_msg.go`
 
 **Improvements**:
-- Added features section (auto-interrupt, literal mode, reliable execution)
+- Added features section (harness readiness, exact-pane delivery, reliable execution)
 - Added use cases (recovery, diagnosis, batch delivery)
 - Enhanced examples (inline, file, diagnosis, multi-line)
 - Added requirements section
@@ -79,10 +79,11 @@ Examples:
 
 **After**:
 ```
-Send a message/prompt to a running AGM session, interrupting any active thinking state.
+Send a message/prompt to a registered AGM session when its harness composer is ready.
 
 Features:
-  • Auto-interrupt: Sends ESC to interrupt thinking before sending prompt
+  • Harness-aware readiness: Refuses input unless the registered harness owns the current composer
+  • Exact-pane delivery: Sends under the same tmux mutation boundary as the readiness proof
   • Literal mode: Uses tmux -l flag to prevent special character interpretation
   • Reliable execution: Prompt is executed as command, not queued as pasted text
   • Large prompts: Supports up to 10KB prompt files
@@ -270,7 +271,7 @@ agm reject --help
 agm list
 agm agent list
 agm new --harness gemini-cli test-session
-agm session send test-session --prompt "Test message"
+agm send msg test-session --prompt "Test message"
 ```
 
 ### Documentation Testing

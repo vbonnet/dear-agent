@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
 // Compile-time check to ensure TmuxBackend implements Backend interface
 var _ Backend = (*TmuxBackend)(nil)
+var _ session.HarnessReadinessWaiter = (*TmuxBackend)(nil)
+var _ session.InputReadinessChecker = (*TmuxBackend)(nil)
 
 // TmuxBackend wraps session.TmuxInterface to implement the Backend interface
 // This adapter allows the existing tmux implementation to work with the new backend system
@@ -132,6 +135,42 @@ func (b *TmuxBackend) AttachSession(name string) error {
 // SendKeys sends keys (command) to the given session
 func (b *TmuxBackend) SendKeys(session, keys string) error {
 	return b.tmux.SendKeys(session, keys)
+}
+
+// SendKeysToPane forwards verified exact-pane delivery.
+func (b *TmuxBackend) SendKeysToPane(ctx context.Context, paneID, keys string) error {
+	sender, ok := b.tmux.(session.VerifiedPaneSender)
+	if !ok {
+		return fmt.Errorf("tmux implementation %T does not expose verified pane delivery", b.tmux)
+	}
+	return sender.SendKeysToPane(ctx, paneID, keys)
+}
+
+// WaitForHarnessReady forwards the shared startup-readiness capability.
+func (b *TmuxBackend) WaitForHarnessReady(ctx context.Context, sessionName, harness string, timeout time.Duration) error {
+	waiter, ok := b.tmux.(session.HarnessReadinessWaiter)
+	if !ok {
+		return fmt.Errorf("tmux implementation %T does not expose harness readiness", b.tmux)
+	}
+	return waiter.WaitForHarnessReady(ctx, sessionName, harness, timeout)
+}
+
+// CheckInputReadiness forwards exact, harness-aware send safety.
+func (b *TmuxBackend) CheckInputReadiness(ctx context.Context, sessionName, harness string) (session.InputReadiness, error) {
+	checker, ok := b.tmux.(session.InputReadinessChecker)
+	if !ok {
+		return session.InputReadiness{}, fmt.Errorf("tmux implementation %T does not expose input readiness", b.tmux)
+	}
+	return checker.CheckInputReadiness(ctx, sessionName, harness)
+}
+
+// SendKeysIfInputReady forwards the atomic readiness-and-delivery boundary.
+func (b *TmuxBackend) SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string, options session.InputDeliveryOptions) (session.InputReadiness, error) {
+	sender, ok := b.tmux.(session.AtomicInputSender)
+	if !ok {
+		return session.InputReadiness{}, fmt.Errorf("tmux implementation %T does not expose atomic input delivery", b.tmux)
+	}
+	return sender.SendKeysIfInputReady(ctx, sessionName, harness, keys, options)
 }
 
 func init() {

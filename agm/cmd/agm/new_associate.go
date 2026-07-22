@@ -37,7 +37,7 @@ import (
 //     UUID is usually NOT yet discoverable — Claude has not written its
 //     conversation to ~/.claude/history.jsonl yet — so this is genuinely
 //     best-effort and a miss is the expected, non-fatal case. The SessionStart
-//     hook (sessionstart-agm-register), which receives Claude's session_id
+//     hook (agm-state-ready), which receives Claude's session_id
 //     directly in its payload, backfills the UUID once Claude emits it. We never
 //     block readiness on UUID detection.
 //
