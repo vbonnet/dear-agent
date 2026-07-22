@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -191,7 +192,13 @@ func classifyCurrentQueuedInput(content, harness string) (QueuedInputType, strin
 	}
 	inputType, description := ClassifyQueuedInput(stripANSI(region))
 	if inputType != QueuedInputAGM {
+		if harness == "pi-cli" && inputType != QueuedInputNone && piQueuedMarkerIsHistorical(region) {
+			return QueuedInputNone, ""
+		}
 		return inputType, description
+	}
+	if harness == "pi-cli" && piQueuedMarkerIsHistorical(region) {
+		return QueuedInputNone, ""
 	}
 	if !hasQueuedInputMarker(stripANSI(anchorLine)) || !queuedComposerOwnsTail(region, content, harness) {
 		return QueuedInputHuman, "session has human input in progress - not sending. Retry later"
@@ -204,21 +211,37 @@ func currentComposerInputRegion(content, harness string) (region, anchorLine str
 	anchor := -1
 	for i, line := range lines {
 		plain := strings.TrimSpace(stripANSI(line))
-		switch harness {
-		case "claude-code":
-			if strings.HasPrefix(plain, "❯") {
-				anchor = i
-			}
-		case "codex-cli":
-			if plain == "›" || strings.HasPrefix(plain, "› ") || plain == ">" || strings.HasPrefix(plain, "> [Pasted Content") {
-				anchor = i
-			}
+		if isCurrentComposerAnchor(plain, harness) {
+			anchor = i
 		}
 	}
 	if anchor < 0 {
 		return "", "", false
 	}
 	return strings.Join(lines[anchor:], "\n"), lines[anchor], true
+}
+
+func isCurrentComposerAnchor(line, harness string) bool {
+	switch harness {
+	case "claude-code":
+		return strings.HasPrefix(line, "❯")
+	case "codex-cli":
+		return isCodexComposerAnchor(line)
+	case "agy":
+		return line == ">" || strings.HasPrefix(line, "> ") && hasQueuedInputMarker(line)
+	case "gemini-cli":
+		return isGeminiComposerAnchor(line)
+	case "opencode-cli":
+		return isOpenCodeComposerAnchor(line)
+	case "pi-cli":
+		return hasQueuedInputMarker(line)
+	default:
+		return false
+	}
+}
+
+func isCodexComposerAnchor(line string) bool {
+	return line == "›" || strings.HasPrefix(line, "› ") || line == ">" || strings.HasPrefix(line, "> [Pasted Content")
 }
 
 func queuedComposerOwnsTail(region, content, harness string) bool {
@@ -232,22 +255,108 @@ func queuedComposerOwnsTail(region, content, harness string) bool {
 	}
 	switch harness {
 	case "claude-code":
-		for _, line := range lines {
-			lower := strings.ToLower(strings.TrimSpace(line))
-			if strings.Contains(lower, "? for shortcuts") ||
-				strings.Contains(lower, "shift+tab to cycle") ||
-				strings.Contains(lower, "accept edits on") ||
-				strings.Contains(lower, "plan mode on") {
-				return true
-			}
-		}
+		return hasTerminalIdleFooter(lines, isClaudeIdleFooter) && queuedPastePayloadOwnsTail(lines, isClaudeIdleComposerChrome)
 	case "codex-cli":
 		if codexFooterPattern.MatchString(strings.TrimSpace(lines[len(lines)-1])) {
 			return true
 		}
 		return codexInitialQueuedComposerOwnsTail(stripANSI(content))
+	case "agy":
+		return queuedPastePayloadOwnsTail(lines, isTerminalIdleChrome)
+	case "gemini-cli":
+		return hasTerminalIdleFooter(lines, isGeminiIdleFooter) && queuedPastePayloadOwnsTail(lines, isTerminalIdleChrome)
+	case "opencode-cli":
+		return queuedPastePayloadOwnsTail(lines, isTerminalIdleChrome)
+	case "pi-cli":
+		return hasTerminalIdleFooter(lines, isPiReadyFooter) && queuedPastePayloadOwnsTail(lines, isPiIdleComposerChrome)
 	}
 	return false
+}
+
+var queuedPastedTextLinePattern = regexp.MustCompile(`\[Pasted text(?: #\d+)? \+(\d+) lines?\]`)
+
+func queuedPastePayloadOwnsTail(lines []string, isChrome func(string) bool) bool {
+	if len(lines) == 0 {
+		return false
+	}
+	matches := queuedPastedTextLinePattern.FindStringSubmatch(lines[0])
+	if matches == nil {
+		return false
+	}
+	want, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return false
+	}
+	payload := lines[1:]
+	for len(payload) > 0 && isChrome(payload[len(payload)-1]) {
+		payload = payload[:len(payload)-1]
+	}
+	return len(payload) == want
+}
+
+func hasTerminalIdleFooter(lines []string, isFooter func(string) bool) bool {
+	for _, line := range slices.Backward(lines) {
+		if isDecorativeChromeLine(line) {
+			continue
+		}
+		return isFooter(line)
+	}
+	return false
+}
+
+func isClaudeIdleFooter(line string) bool {
+	lower := strings.ToLower(strings.TrimSpace(stripANSI(line)))
+	for _, marker := range []string{"? for shortcuts", "shift+tab to cycle", "bypass permissions on", "accept edits on", "plan mode on"} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func isGeminiIdleFooter(line string) bool {
+	lower := strings.ToLower(strings.TrimSpace(stripANSI(line)))
+	return strings.Contains(lower, "? for shortcuts") || strings.Contains(lower, "sandbox") && strings.Contains(lower, "gemini-")
+}
+
+func isPiIdleComposerChrome(line string) bool {
+	plain := strings.TrimSpace(stripANSI(line))
+	if isDecorativeChromeLine(plain) {
+		return true
+	}
+	return PiManagedState(plain) != "" || strings.Contains(plain, " • pi-") || strings.Contains(plain, "%/")
+}
+
+func isPiReadyFooter(line string) bool {
+	return PiManagedState(stripANSI(line)) == "ready"
+}
+
+func isDecorativeChromeLine(line string) bool {
+	line = strings.TrimSpace(stripANSI(line))
+	return line == "" || strings.Trim(line, "─━┄┈╌╍═│┃┆┊╎╏┌┐└┘├┤┬┴┼╭╮╰╯ ") == ""
+}
+
+func isGeminiComposerAnchor(line string) bool {
+	line = strings.TrimSpace(strings.Trim(strings.TrimSpace(line), "│"))
+	return strings.HasPrefix(line, ">") && (strings.Contains(strings.ToLower(line), "type your message") || hasQueuedInputMarker(line))
+}
+
+func isOpenCodeComposerAnchor(line string) bool {
+	line = strings.TrimSpace(strings.Trim(strings.TrimSpace(line), "│"))
+	switch line {
+	case ">", ">>", "❯":
+		return true
+	}
+	lower := strings.ToLower(line)
+	if strings.HasPrefix(line, ">") && (strings.Contains(lower, "type your message") || strings.Contains(lower, "type here") || hasQueuedInputMarker(line)) {
+		return true
+	}
+	return strings.HasPrefix(line, "❯") && (line == "❯" || hasQueuedInputMarker(line))
+}
+
+func piQueuedMarkerIsHistorical(region string) bool {
+	lines := strings.Split(strings.TrimSpace(stripANSI(region)), "\n")
+	return hasTerminalIdleFooter(lines, isPiReadyFooter) && !queuedPastePayloadOwnsTail(lines, isPiIdleComposerChrome)
 }
 
 func codexInitialQueuedComposerOwnsTail(content string) bool {

@@ -222,6 +222,12 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			state:   HarnessInputBusy,
 		},
 		{
+			name:    "active output after stale Claude footer suppresses recovery",
+			harness: "claude-code",
+			content: "❯ [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-001 | Sent: 2026-07-21T12:00:00Z]\nrecover\n────────────────\n? for shortcuts\nordinary active-work output",
+			state:   HarnessInputBusy,
+		},
+		{
 			name:    "stale Claude composer before working view",
 			harness: "claude-code",
 			content: "response\n❯\n✻ Working…\nRunning tests",
@@ -244,6 +250,18 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			name:    "stale Gemini composer before working view",
 			harness: "gemini-cli",
 			content: ">   Type your message or @path/to/file\nWorking on request",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "Gemini queued AGM paste is positively identified",
+			harness: "gemini-cli",
+			content: "│ > [Pasted text #1 +2 lines] │\n[From: orchestrator | ID: 1774872000000-orchestr-003 | Sent: 2026-07-21T12:00:00Z]\nrecover\n╰────────────────╯\n? for shortcuts",
+			state:   HarnessInputQueuedAGM,
+		},
+		{
+			name:    "active output after stale Gemini footer suppresses recovery",
+			harness: "gemini-cli",
+			content: "│ > [Pasted text #1 +2 lines] │\n[From: orchestrator | ID: 1774872000000-orchestr-003 | Sent: 2026-07-21T12:00:00Z]\nrecover\n? for shortcuts\nordinary active-work output",
 			state:   HarnessInputBusy,
 		},
 		{
@@ -279,6 +297,25 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			state:   HarnessInputBusy,
 		},
 		{
+			name:    "OpenCode queued AGM paste is positively identified",
+			harness: "opencode-cli",
+			content: "> [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-004 | Sent: 2026-07-21T12:00:00Z]\nrecover",
+			state:   HarnessInputQueuedAGM,
+		},
+		{
+			name:    "historical OpenCode paste followed by output suppresses recovery",
+			harness: "opencode-cli",
+			content: "> [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-004 | Sent: 2026-07-21T12:00:00Z]\nrecover\nordinary active-work output",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "historical OpenCode paste cannot occupy current empty composer",
+			harness: "opencode-cli",
+			content: "> [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-004 | Sent: 2026-07-21T12:00:00Z]\nrecover\nshort response\n>",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
 			name:    "Pi managed ready status owns tail",
 			harness: "pi-cli",
 			content: "/work • pi-worker\nAGM plan/ready launch-current",
@@ -298,6 +335,31 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			state:   HarnessInputBusy,
 		},
 		{
+			name:    "Pi queued AGM paste is positively identified",
+			harness: "pi-cli",
+			content: "[Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-005 | Sent: 2026-07-21T12:00:00Z]\nrecover\n/work • pi-worker\n0.0%/0 (auto) AGM plan/ready launch-current",
+			state:   HarnessInputQueuedAGM,
+		},
+		{
+			name:    "Pi queued human paste remains generic busy",
+			harness: "pi-cli",
+			content: "[Pasted text #1 +1 line]\nplease preserve my draft\nAGM plan/ready launch-current",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "historical Pi paste cannot occupy current managed ready state",
+			harness: "pi-cli",
+			content: "[Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-005 | Sent: 2026-07-21T12:00:00Z]\nrecover\nshort response\nAGM plan/ready launch-current",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "historical Pi paste followed by output suppresses recovery",
+			harness: "pi-cli",
+			content: "[Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-005 | Sent: 2026-07-21T12:00:00Z]\nrecover\nAGM plan/ready launch-current\nordinary active-work output",
+			state:   HarnessInputBusy,
+		},
+		{
 			name:    "AGY survey wins over bare prompt",
 			harness: "agy",
 			content: ">\nHow's the CLI experience so far?\n[1] Good [2] Fine [3] Bad [0] Skip",
@@ -314,6 +376,24 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			name:    "stale AGY composer before working output",
 			harness: "agy",
 			content: ">\nprocessing request\nresponse chunk",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "AGY queued AGM paste is positively identified",
+			harness: "agy",
+			content: "> [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-006 | Sent: 2026-07-21T12:00:00Z]\nrecover",
+			state:   HarnessInputQueuedAGM,
+		},
+		{
+			name:    "AGY queued human paste remains generic busy",
+			harness: "agy",
+			content: "> [Pasted text #1 +1 line]\nplease preserve my draft",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "historical AGY paste followed by output suppresses recovery",
+			harness: "agy",
+			content: "> [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-006 | Sent: 2026-07-21T12:00:00Z]\nrecover\nordinary active-work output",
 			state:   HarnessInputBusy,
 		},
 	}
