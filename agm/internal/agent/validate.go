@@ -309,3 +309,32 @@ func ValidateSendDirPath(p string) error {
 	}
 	return nil
 }
+
+// ValidateSendKeysText rejects text destined for a harness's own TUI input
+// line — `/rename <name>`, `/chat save <name>` — rather than for a shell.
+//
+// The distinction matters. ValidateSendDirPath guards a string a shell will
+// parse, so it denies shell metacharacters. Here the parser is the agent's
+// input widget, where `'` and `$` are ordinary characters and shell-quoting
+// would be a bug: the quotes would land verbatim in the session title. The
+// only dangerous class is the line terminator. A `\r` or `\n` submits the line
+// early and injects everything after it as a fresh prompt into a live agent
+// session — prompt injection rather than command execution, and still a hole.
+//
+// Printable text is allowed unchanged, including spaces, quotes and non-ASCII,
+// because a session title is human-facing prose and mangling it would be its
+// own regression. kind names the field for the error message.
+func ValidateSendKeysText(kind, s string) error {
+	if s == "" {
+		return fmt.Errorf("%s is empty", kind)
+	}
+	for _, r := range s {
+		// All C0 controls and DEL are rejected, tab included: in a TUI, tab
+		// triggers completion rather than inserting a character, so it mangles
+		// the value just as surely as \r submits it.
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("%s contains control character %q", kind, r)
+		}
+	}
+	return nil
+}

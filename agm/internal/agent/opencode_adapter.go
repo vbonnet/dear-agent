@@ -209,7 +209,7 @@ func (a *OpenCodeAdapter) ResumeSession(sessionID SessionID) error {
 	if sendCommands {
 		// OpenCode uses simple `opencode attach` (no session-specific resume)
 		// The OpenCode server maintains session state internally
-		fullCmd := fmt.Sprintf("cd '%s' && opencode attach && exit", metadata.WorkingDir)
+		fullCmd := buildOpenCodeResumeCommand(metadata.WorkingDir)
 
 		if err := tmux.SendCommand(metadata.TmuxName, fullCmd); err != nil {
 			return fmt.Errorf("failed to send attach command: %w", err)

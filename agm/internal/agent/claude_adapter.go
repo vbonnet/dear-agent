@@ -453,6 +453,10 @@ func (a *ClaudeAdapter) ExecuteCommand(cmd Command) error {
 			return fmt.Errorf("rename command: %w", err)
 		}
 
+		if err := ValidateSendKeysText("session name", newName); err != nil {
+			return fmt.Errorf("rename command: %w", err)
+		}
+
 		// 1. Send to Claude CLI (updates Claude's internal name)
 		if err := tmux.SendCommand(metadata.TmuxName, fmt.Sprintf("/rename %s\r", newName)); err != nil {
 			return fmt.Errorf("failed to send rename command: %w", err)
@@ -475,7 +479,7 @@ func (a *ClaudeAdapter) ExecuteCommand(cmd Command) error {
 		if err := ValidateSendDirPath(newPath); err != nil {
 			return fmt.Errorf("setdir command: %w", err)
 		}
-		if err := tmux.SendCommand(metadata.TmuxName, fmt.Sprintf("cd %s\r", newPath)); err != nil {
+		if err := tmux.SendCommand(metadata.TmuxName, buildSetDirCommand(newPath)); err != nil {
 			return fmt.Errorf("failed to send cd command: %w", err)
 		}
 		return nil

@@ -323,7 +323,7 @@ func (a *CodexCLIAdapter) ExecuteCommand(cmd Command) error {
 		if err := ValidateSendDirPath(path); err != nil {
 			return fmt.Errorf("invalid set_directory path: %w", err)
 		}
-		return codexSendCommand(metadata.TmuxName, fmt.Sprintf("cd %s\r", shellQuote(path)))
+		return codexSendCommand(metadata.TmuxName, buildSetDirCommand(path))
 	case CommandRunHook:
 		return nil
 	case CommandRename, CommandAuthorize, CommandClearHistory, CommandSetSystemPrompt:
@@ -331,8 +331,4 @@ func (a *CodexCLIAdapter) ExecuteCommand(cmd Command) error {
 	default:
 		return fmt.Errorf("command %s not supported by Codex CLI", cmd.Type)
 	}
-}
-
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }

@@ -78,16 +78,7 @@ func (a *GeminiCLIAdapter) CreateSession(ctx SessionContext) (SessionID, error) 
 
 	// Build Gemini command with directory authorization
 	// Use --include-directories to pre-approve workspace and avoid trust prompt
-	geminiCmd := fmt.Sprintf("gemini --include-directories '%s'", ctx.WorkingDirectory)
-
-	// Add additional authorized directories
-	for _, dir := range ctx.AuthorizedDirs {
-		if dir != ctx.WorkingDirectory {
-			geminiCmd += fmt.Sprintf(" --include-directories '%s'", dir)
-		}
-	}
-
-	geminiCmd += " && exit"
+	geminiCmd := buildGeminiStartCommand(ctx.WorkingDirectory, ctx.AuthorizedDirs)
 
 	// Start Gemini CLI in tmux
 	if err := tmux.SendCommand(tmuxName, geminiCmd); err != nil {
@@ -167,19 +158,9 @@ func (a *GeminiCLIAdapter) ResumeSession(sessionID SessionID) error {
 	}
 
 	if sendCommands {
-		// Build resume command with UUID
-		// If UUID is stored, use it. Otherwise fall back to "latest"
-		var resumeCmd string
-		if metadata.UUID != "" {
-			// Resume specific session by UUID
-			resumeCmd = fmt.Sprintf("cd '%s' && gemini --resume %s && exit",
-				metadata.WorkingDir,
-				metadata.UUID)
-		} else {
-			// No UUID stored - use "latest" as fallback
-			resumeCmd = fmt.Sprintf("cd '%s' && gemini --resume latest && exit",
-				metadata.WorkingDir)
-		}
+		// Build resume command with UUID.
+		// If UUID is stored, use it. Otherwise fall back to "latest".
+		resumeCmd := buildGeminiResumeCommand(metadata.WorkingDir, metadata.UUID)
 
 		if err := tmux.SendCommand(metadata.TmuxName, resumeCmd); err != nil {
 			return fmt.Errorf("failed to resume Gemini: %w", err)
@@ -447,6 +428,9 @@ func (a *GeminiCLIAdapter) cmdRename(cmd Command, sessionIDStr string, metadata 
 	if err != nil {
 		return fmt.Errorf("rename command: %w", err)
 	}
+	if err := ValidateSendKeysText("session name", newName); err != nil {
+		return fmt.Errorf("rename command: %w", err)
+	}
 	if err := tmux.SendCommand(metadata.TmuxName, fmt.Sprintf("/chat save %s\r", newName)); err != nil {
 		return fmt.Errorf("failed to send chat save command: %w", err)
 	}
@@ -465,7 +449,7 @@ func (a *GeminiCLIAdapter) cmdSetDir(cmd Command, sessionIDStr string, metadata 
 	if err := ValidateSendDirPath(newPath); err != nil {
 		return fmt.Errorf("setdir command: %w", err)
 	}
-	if err := tmux.SendCommand(metadata.TmuxName, fmt.Sprintf("cd %s\r", newPath)); err != nil {
+	if err := tmux.SendCommand(metadata.TmuxName, buildSetDirCommand(newPath)); err != nil {
 		return fmt.Errorf("failed to send cd command: %w", err)
 	}
 	metadata.WorkingDir = newPath
