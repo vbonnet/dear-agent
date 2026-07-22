@@ -138,7 +138,10 @@ models and authentication configured in Pi.
 
 AGM reads Pi's native JSONL usage and provider-reported cost. It uses the latest
 assistant prompt footprint for context, the audited Pi 0.81.1 model-catalog
-window for the recorded model, and sums native cost records for the session.
+window for the recorded direct or nested OpenRouter model route, and sums
+native cost records for the session. Route identity matters: Pi's nested
+OpenRouter OpenAI entries can expose a different context window than the same
+model through direct OpenAI.
 For models declared in Pi's `models.json`, AGM reads only the bounded model ID,
 `contextWindow`, and `modelOverrides` data: it never evaluates credential or
 command fields. A custom model without an explicit window uses Pi's 128000-token

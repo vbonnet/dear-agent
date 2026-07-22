@@ -399,10 +399,17 @@ func piNativeModelContextWindow(model string) int {
 }
 
 func piKnownNativeModelContextWindow(model string) (int, bool) {
-	model = strings.TrimPrefix(strings.ToLower(model), "anthropic/")
+	model = strings.ToLower(strings.TrimSpace(model))
+	if route, ok := strings.CutPrefix(model, "openrouter/"); ok {
+		return piKnownOpenRouterModelContextWindow(route)
+	}
+	model = strings.TrimPrefix(model, "anthropic/")
 	model = strings.TrimPrefix(model, "openai/")
 	model = strings.TrimPrefix(model, "google/")
-	model = strings.TrimPrefix(model, "openrouter/")
+	return piKnownDirectModelContextWindow(model)
+}
+
+func piKnownDirectModelContextWindow(model string) (int, bool) {
 	switch model {
 	case "claude-fable-5", "claude-opus-4-8", "claude-sonnet-4-6":
 		return 1000000, true
@@ -415,6 +422,32 @@ func piKnownNativeModelContextWindow(model string) (int, bool) {
 	case "gpt-5.4-pro", "gpt-5.5-pro":
 		return 1050000, true
 	case "gemini-3.5-flash", "gemini-3.1-flash-lite", "z-ai/glm-5.2", "deepseek/deepseek-v4-pro":
+		return 1048576, true
+	case "nvidia/nemotron-3-ultra-550b-a55b":
+		return 512288, true
+	case "qwen/qwen3.6-max-preview":
+		return 262144, true
+	default:
+		return 0, false
+	}
+}
+
+// OpenRouter vendor routes have their own Pi catalog entries. In particular,
+// OpenRouter exposes the long-context OpenAI routes while direct OpenAI keeps
+// several models at 272k for short-context pricing, so nested routes must not
+// be collapsed into direct-provider defaults.
+func piKnownOpenRouterModelContextWindow(route string) (int, bool) {
+	switch route {
+	case "anthropic/claude-fable-5":
+		return 1000000, true
+	case "openai/gpt-5.3-codex", "openai/gpt-5.4-mini", "openai/gpt-5.4-nano":
+		return 400000, true
+	case "openai/gpt-5.4", "openai/gpt-5.5", "openai/gpt-5.6-sol",
+		"openai/gpt-5.6-terra", "openai/gpt-5.6-luna", "openai/gpt-5.4-pro",
+		"openai/gpt-5.5-pro":
+		return 1050000, true
+	case "google/gemini-3.5-flash", "google/gemini-3.1-flash-lite",
+		"z-ai/glm-5.2", "deepseek/deepseek-v4-pro":
 		return 1048576, true
 	case "nvidia/nemotron-3-ultra-550b-a55b":
 		return 512288, true

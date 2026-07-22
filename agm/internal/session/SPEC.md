@@ -27,7 +27,7 @@ directly, including the optional harness-process liveness capability
 
 **SESS-07** When AGM detects context for a Pi manifest, the system shall resolve the exact persisted native transcript identity and reject a transcript-path mismatch.
 
-**SESS-08** When AGM converts Pi native usage into context percentage, the system shall use the exact Pi 0.81 model-catalog window for known provider-qualified models and a conservative documented fallback for unknown models.
+**SESS-08** When AGM converts Pi native usage into context percentage, the system shall preserve the exact route-specific Pi 0.81 model-catalog window for known direct or nested OpenRouter provider-qualified models and a conservative documented fallback for unknown models.
 
 **SESS-09** When a Pi transcript identifies a configured model declaration or a model override for a Pi 0.81 built-in provider, the system shall read only a bounded non-symlink regular `models.json` that is not writable by group or other users, shall resolve the provider-qualified model with Pi 0.81 declaration and override precedence independently of AGM's static model-window table, shall accept only positive integral context windows no larger than 16,777,216 tokens, and shall fall back without evaluating credential or header values when the catalog or match is absent, ambiguous, malformed, unsafe, or oversized.
 

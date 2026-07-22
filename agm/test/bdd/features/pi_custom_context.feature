@@ -17,3 +17,9 @@ Feature: Pi custom model context
     When AGM detects the managed Pi context
     Then the Pi context should report 3562 of 4096 tokens used
     And the Pi context model should be "openai/gpt-4.1"
+
+  Scenario: A nested OpenRouter vendor route retains its native context window
+    Given a managed Pi transcript uses provider "openrouter" model "openai/gpt-5.4"
+    When AGM detects the managed Pi context
+    Then the Pi context should report 3562 of 1050000 tokens used
+    And the Pi context model should be "openrouter/openai/gpt-5.4"

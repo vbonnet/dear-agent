@@ -1077,6 +1077,8 @@ model catalog.
   custom model context window.
 - A built-in provider model outside AGM's static window table still honors
   Pi's topmost user override.
+- An OpenRouter route with a nested vendor-qualified model ID retains its own
+  route-specific native context window rather than a direct-provider default.
 - Credential command strings in Pi's model catalog remain inert data.
 
 **Why this matters:** Custom providers are a supported Pi route. Using a static
