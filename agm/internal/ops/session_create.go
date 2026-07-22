@@ -26,6 +26,8 @@ import (
 // StartRemoteControl->StartThread->SetThreadName sequence for every surface.
 const CodexRemoteBootTimeout = 45 * time.Second
 
+const sharedHarnessReadyTimeout = 60 * time.Second
+
 const (
 	// CreateSurfaceCLI identifies the command-line creation surface.
 	CreateSurfaceCLI = "cli"
@@ -63,12 +65,28 @@ type CreateSessionMetadata struct {
 	PiPolicyFile     string
 }
 
-// CreateSessionLaunchResult records launch facts required by runtime
-// completion. HandledLifecycle is used only by the deprecated Gemini wrapper,
-// which exits after managing its own terminal lifecycle.
+// CreateSessionReadiness records what the launch boundary proved about the
+// interactive harness. The zero value is deliberately unverified so adding a
+// runtime can never silently bypass the shared readiness gate.
+type CreateSessionReadiness string
+
+const (
+	// CreateSessionReadinessVerified means the runtime already observed the
+	// expected harness process and its interactive composer.
+	CreateSessionReadinessVerified CreateSessionReadiness = "verified"
+	// CreateSessionReadinessDeferredUntilCallerExit is reserved for prompt-free
+	// current-pane creation. The harness command is queued behind the foreground
+	// AGM process and cannot start until creation returns.
+	CreateSessionReadinessDeferredUntilCallerExit CreateSessionReadiness = "deferred-until-caller-exit"
+)
+
+// CreateSessionLaunchResult records launch facts required by shared readiness
+// and runtime completion. HandledLifecycle is used only by the deprecated
+// Gemini wrapper, which exits after managing its own terminal lifecycle.
 type CreateSessionLaunchResult struct {
 	ModeAppliedAtStartup bool
 	HandledLifecycle     bool
+	Readiness            CreateSessionReadiness
 	// PromptDelivered records that an AGY startup prompt was delivered before
 	// provider-native identity discovery. Completion must not deliver it again.
 	PromptDelivered bool
@@ -99,7 +117,8 @@ type CreateSessionCompletion struct {
 
 // CreateSessionRuntime is the harness-runtime seam. Implementations adapt
 // interactive startup and surface-specific completion; they cannot insert,
-// reorder, or skip tmux creation, registration, or rollback.
+// reorder, or skip tmux creation, readiness, registration, or rollback. A
+// runtime must explicitly report readiness it has already verified.
 type CreateSessionRuntime interface {
 	Launch(context.Context, HarnessLaunchSpec) (CreateSessionLaunchResult, error)
 	Complete(context.Context, CreateSessionCompletion) error
@@ -364,6 +383,9 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 	if launchResult.HandledLifecycle {
 		return createSessionResult(req, params, sessionID), nil
 	}
+	if err := establishCreatedHarnessReadiness(callCtx, opCtx, req, params, launchResult); err != nil {
+		return nil, err
+	}
 	if agyIdentityTracker != nil {
 		if err := bootstrapAgyCreateIdentity(callCtx, opCtx, params.name, req.Prompt); err != nil {
 			return nil, err
@@ -458,6 +480,40 @@ func applyAgyCreateIdentity(m *manifest.Manifest, metadata *agysession.Metadata)
 		WorkspacePath:  metadata.WorkspacePath,
 		ConversationDB: metadata.ConversationDBPath,
 		TranscriptPath: metadata.TranscriptPath,
+	}
+}
+
+func waitForCreatedHarnessReady(ctx context.Context, opCtx *OpContext, sessionName, harness string) error {
+	waiter, ok := opCtx.Tmux.(session.HarnessReadinessWaiter)
+	if !ok {
+		return ErrStorageError("tmux.WaitForHarnessReady", fmt.Errorf("tmux backend does not expose harness readiness"))
+	}
+	if err := waiter.WaitForHarnessReady(ctx, sessionName, harness, sharedHarnessReadyTimeout); err != nil {
+		return ErrStorageError("tmux.WaitForHarnessReady", err)
+	}
+	return nil
+}
+
+func establishCreatedHarnessReadiness(ctx context.Context, opCtx *OpContext, req *CreateSessionRequest, params *createSessionParams, launchResult CreateSessionLaunchResult) error {
+	switch launchResult.Readiness {
+	case CreateSessionReadinessVerified:
+		return nil
+	case CreateSessionReadinessDeferredUntilCallerExit:
+		if req.Caller.Surface != CreateSurfaceCLI || !supportsDeferredCurrentTmuxReadiness(params.harness) || !req.ReuseExistingTmux || req.Prompt != "" {
+			return ErrStorageError("create.readiness", fmt.Errorf("deferred readiness is valid only for supported current-tmux harness creation without an initial prompt"))
+		}
+		return nil
+	default:
+		return waitForCreatedHarnessReady(ctx, opCtx, params.name, params.harness)
+	}
+}
+
+func supportsDeferredCurrentTmuxReadiness(harness string) bool {
+	switch harness {
+	case "claude-code", "codex-cli", "opencode-cli", "pi-cli", "gemini-cli":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -580,10 +636,7 @@ func completeCreatedSession(callCtx context.Context, opCtx *OpContext, req *Crea
 	if req.Prompt == "" || launchResult.PromptDelivered {
 		return nil
 	}
-	if err := opCtx.Tmux.SendKeys(name, req.Prompt); err != nil {
-		return ErrStorageError("tmux.SendKeys(prompt)", err)
-	}
-	return nil
+	return sendCreatedInputAtomically(callCtx, opCtx, name, m.Harness, req.Prompt, "create.initial-prompt")
 }
 
 func bootstrapAgyCreateIdentity(callCtx context.Context, opCtx *OpContext, sessionName, prompt string) error {
@@ -600,11 +653,29 @@ func bootstrapAgyCreateIdentity(callCtx context.Context, opCtx *OpContext, sessi
 		}
 		return nil
 	}
-	if err := opCtx.Tmux.SendKeys(sessionName, prompt); err != nil {
+	return sendCreatedInputAtomically(callCtx, opCtx, sessionName, "agy", prompt, "agy.identity.bootstrap-prompt")
+}
+
+func sendCreatedInputAtomically(callCtx context.Context, opCtx *OpContext, sessionName, harness, input, operation string) error {
+	if err := callCtx.Err(); err != nil {
+		return err
+	}
+	sender, ok := opCtx.Tmux.(session.AtomicInputSender)
+	if !ok {
+		return ErrStorageError(operation, fmt.Errorf("tmux backend does not expose atomic input delivery"))
+	}
+	readiness, err := sender.SendKeysIfInputReady(callCtx, sessionName, harness, input, session.InputDeliveryOptions{})
+	if err != nil {
 		if ctxErr := callCtx.Err(); ctxErr != nil {
 			return ctxErr
 		}
-		return ErrStorageError("agy.identity.bootstrap-prompt", err)
+		return ErrStorageError(operation, err)
+	}
+	if !readiness.Ready {
+		return ErrStorageError(operation, fmt.Errorf("harness input is %s", readiness.State))
+	}
+	if readiness.PaneID == "" {
+		return ErrStorageError(operation, fmt.Errorf("harness returned no verified pane"))
 	}
 	return nil
 }

@@ -40,6 +40,20 @@ func skipUnlessBwrapFunctional(t *testing.T) {
 	}
 }
 
+func commitBubblewrapFixtureRepo(t *testing.T, dir string) {
+	t.Helper()
+	commands := [][]string{
+		{"init", "-q", "-b", "main", dir},
+		{"-C", dir, "add", "-A"},
+		{"-C", dir, "-c", "user.name=AGM Test", "-c", "user.email=agm-test@example.invalid", "commit", "-q", "--allow-empty", "-m", "fixture"},
+	}
+	for _, args := range commands {
+		if output, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, output)
+		}
+	}
+}
+
 // TestBubblewrap_E2E tests end-to-end Bubblewrap lifecycle
 func TestBubblewrap_E2E(t *testing.T) {
 	skipUnlessBwrapFunctional(t)
@@ -65,6 +79,7 @@ func TestBubblewrap_E2E(t *testing.T) {
 		err = os.WriteFile(fullPath, []byte(content), 0644)
 		require.NoError(t, err)
 	}
+	commitBubblewrapFixtureRepo(t, lowerDir)
 
 	req := sandbox.SandboxRequest{
 		SessionID:    "bwrap-e2e-test",
@@ -132,6 +147,9 @@ func TestBubblewrap_MultiRepo(t *testing.T) {
 
 	err = os.WriteFile(filepath.Join(repo3, "file3.txt"), []byte("repo3"), 0644)
 	require.NoError(t, err)
+	commitBubblewrapFixtureRepo(t, repo1)
+	commitBubblewrapFixtureRepo(t, repo2)
+	commitBubblewrapFixtureRepo(t, repo3)
 
 	req := sandbox.SandboxRequest{
 		SessionID:    "bwrap-multi-repo-test",
@@ -236,9 +254,11 @@ func TestBubblewrap_IdempotentDestroy(t *testing.T) {
 	assert.NoError(t, err, "Destroy should be idempotent")
 
 	// Destroy same sandbox multiple times should succeed
+	lowerDir := t.TempDir()
+	commitBubblewrapFixtureRepo(t, lowerDir)
 	req := sandbox.SandboxRequest{
 		SessionID:    "bwrap-idempotent-test",
-		LowerDirs:    []string{t.TempDir()},
+		LowerDirs:    []string{lowerDir},
 		WorkspaceDir: t.TempDir(),
 	}
 

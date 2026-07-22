@@ -1,9 +1,9 @@
 package ops
 
 import (
-	"context"
-
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/manager"
+	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
 // SendMessageRequest defines the input for sending a message to a session.
@@ -13,6 +13,11 @@ type SendMessageRequest struct {
 
 	// Message is the text to send.
 	Message string `json:"message"`
+
+	// Force permits delivery only when the verified harness owns the exact pane
+	// and QUEUE is the sole readiness blocker. It does not bypass permission or
+	// any other fail-closed state.
+	Force bool `json:"force,omitempty"`
 }
 
 // SendMessageResult is the output of SendMessage.
@@ -56,6 +61,11 @@ func SendMessage(ctx *OpContext, req *SendMessageRequest) (*SendMessageResult, e
 	if tmuxName == "" {
 		tmuxName = m.Name
 	}
+	harness := m.Harness
+	if harness == "" {
+		harness = "claude-code"
+	}
+	harness = agent.NormalizeHarnessName(harness)
 
 	newResult := func(delivered bool) *SendMessageResult {
 		return &SendMessageResult{
@@ -66,9 +76,52 @@ func SendMessage(ctx *OpContext, req *SendMessageRequest) (*SendMessageResult, e
 		}
 	}
 
-	// Preferred path: deliver through the manager.Backend abstraction.
+	callCtx := requestContext(ctx)
+	if err := callCtx.Err(); err != nil {
+		return newResult(false), ErrStorageError("send_message context", err)
+	}
+
+	// Tmux readiness and delivery are one atomic capability. The implementation
+	// holds the same mutation lock across composer observation and exact-pane
+	// input so a concurrent AGM sender cannot invalidate the readiness proof.
+	if ctx.Tmux != nil {
+		sender, ok := ctx.Tmux.(session.AtomicInputSender)
+		if !ok {
+			return newResult(false), ErrSessionNotReady(m.Name, "ATOMIC_DELIVERY_UNAVAILABLE")
+		}
+		readiness, readinessErr := sender.SendKeysIfInputReady(callCtx, tmuxName, harness, req.Message, session.InputDeliveryOptions{
+			AllowBusyComposer: req.Force,
+		})
+		if readinessErr != nil {
+			return newResult(false), ErrStorageError("tmux.SendKeysIfInputReady", readinessErr)
+		}
+		if !readiness.Ready {
+			return newResult(false), ErrSessionNotReady(m.Name, readiness.State)
+		}
+		if readiness.Forced && (!req.Force || readiness.State != "QUEUE") {
+			return newResult(false), ErrSessionNotReady(m.Name, "INVALID_FORCE_DELIVERY")
+		}
+		if readiness.PaneID == "" {
+			return newResult(false), ErrSessionNotReady(m.Name, "UNVERIFIED_PANE")
+		}
+		return newResult(true), nil
+	}
+
+	// Preferred delivery path: manager.Backend. It may represent tmux or a
+	// structured backend; do not repeat a weaker generic check after exact tmux
+	// readiness has already succeeded.
 	if ctx.Manager != nil {
-		result, sendErr := ctx.Manager.SendMessage(context.Background(), manager.SessionID(tmuxName), req.Message)
+		readiness, readinessErr := ctx.Manager.CheckDelivery(callCtx, manager.SessionID(tmuxName))
+		if readinessErr != nil {
+			return newResult(false), ErrStorageError("manager.CheckDelivery", readinessErr)
+		}
+		if readiness != manager.CanReceiveYes {
+			return newResult(false), ErrSessionNotReady(m.Name, managerReadinessName(readiness))
+		}
+		if err := callCtx.Err(); err != nil {
+			return newResult(false), ErrStorageError("send_message context", err)
+		}
+		result, sendErr := ctx.Manager.SendMessage(callCtx, manager.SessionID(tmuxName), req.Message)
 		return newResult(sendErr == nil && result.Delivered), sendErr
 	}
 
@@ -79,10 +132,7 @@ func SendMessage(ctx *OpContext, req *SendMessageRequest) (*SendMessageResult, e
 	// recipient instead of silently dropping the message. This closes the
 	// long-standing "AGM message delivery is undeliverable" gap (ce-6as.36).
 	if ctx.Tmux != nil {
-		if err := ctx.Tmux.SendKeys(tmuxName, req.Message); err != nil {
-			return newResult(false), err
-		}
-		return newResult(true), nil
+		return newResult(false), ErrSessionNotReady(m.Name, "UNVERIFIED")
 	}
 
 	// No delivery mechanism configured at all (neither a manager Backend nor a
@@ -90,4 +140,19 @@ func SendMessage(ctx *OpContext, req *SendMessageRequest) (*SendMessageResult, e
 	// such as stall recovery rely on this to surface "could not send" via the
 	// Delivered flag rather than failing the whole operation.
 	return newResult(false), nil
+}
+
+func managerReadinessName(readiness manager.CanReceive) string {
+	switch readiness {
+	case manager.CanReceiveYes:
+		return "YES"
+	case manager.CanReceiveNo:
+		return "NO"
+	case manager.CanReceiveQueue:
+		return "QUEUE"
+	case manager.CanReceiveNotFound:
+		return "NOT_FOUND"
+	default:
+		return "UNKNOWN"
+	}
 }

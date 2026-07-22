@@ -764,6 +764,55 @@ func TestArchiveSession_AsyncWithEmptyTmuxName(t *testing.T) {
 	}
 }
 
+func TestAwaitReaperStartupRequiresExactReadinessRecord(t *testing.T) {
+	tests := []struct {
+		name    string
+		record  string
+		wantErr string
+	}{
+		{name: "ready", record: "ready\n"},
+		{name: "invalid", record: "not-ready\n", wantErr: "invalid startup acknowledgement"},
+		{name: "closed", wantErr: "closed before readiness"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			reader, writer, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.record != "" {
+				if _, err := writer.WriteString(tc.record); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_ = writer.Close()
+			defer func() { _ = reader.Close() }()
+
+			err = awaitReaperStartup(reader, time.Second)
+			if tc.wantErr == "" && err != nil {
+				t.Fatalf("awaitReaperStartup() error = %v", err)
+			}
+			if tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
+				t.Fatalf("awaitReaperStartup() error = %v, want substring %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestAwaitReaperStartupTimesOutWithoutAcknowledgement(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = writer.Close()
+		_ = reader.Close()
+	}()
+	if err := awaitReaperStartup(reader, 20*time.Millisecond); err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("awaitReaperStartup() error = %v, want timeout", err)
+	}
+}
+
 // TestArchiveSession_AsyncIncompatibleWithAll tests --async + --all error
 func TestArchiveSession_AsyncIncompatibleWithAll(t *testing.T) {
 	_, sessionsDir, cleanup := setupArchiveTest(t)

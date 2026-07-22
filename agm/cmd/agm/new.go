@@ -767,6 +767,11 @@ func resolveEnvVarDefaults(cmd *cobra.Command) {
 // enforceCircuitBreakers runs all circuit breaker gates and returns an
 // error if any gate refuses the spawn. On success it records the spawn time
 // so the stagger gate works for subsequent spawns.
+//
+// It is the single admission point for every sanctioned spawn path: `agm
+// session new` (and its current-tmux variant) and `agm supervisor run`.
+// vroom-dispatch shells out to `agm session new`, so it inherits the same
+// gates. Adding a spawn path without calling this is the ce-93lw.18 bug.
 func enforceCircuitBreakers() error {
 	cfg := circuitbreaker.DefaultConfig()
 	lr := circuitbreaker.DefaultLoadReader()
@@ -775,10 +780,12 @@ func enforceCircuitBreakers() error {
 	mr := circuitbreaker.DefaultMemReader()
 	dr := circuitbreaker.DefaultDiskReader()
 	pc := circuitbreaker.DefaultProcCounter()
+	br := circuitbreaker.DefaultBrakeReader()
 
 	result := circuitbreaker.Check(cfg, lr, wc, st, mr,
 		circuitbreaker.WithDiskReader(dr),
-		circuitbreaker.WithProcCounter(pc))
+		circuitbreaker.WithProcCounter(pc),
+		circuitbreaker.WithBrakeReader(br))
 
 	// Log DEAR level regardless of outcome
 	debug.Log("Circuit breaker check: level=%s load=%.1f allowed=%v", result.Level, result.Load, result.Allowed)
@@ -868,7 +875,7 @@ func init() {
 	newCmd.Flags().StringVar(&prompt, "prompt", "", "Prompt to send after session initialization")
 	newCmd.Flags().StringVar(&promptFile, "prompt-file", "", "File containing prompt to send")
 	newCmd.Flags().BoolVar(&noSandbox, "no-sandbox", false, "Disable sandbox isolation (sandbox is ON by default)")
-	newCmd.Flags().StringVar(&sandboxProvider, "sandbox-provider", "auto", "Sandbox provider (auto, overlayfs, apfs, mock)")
+	newCmd.Flags().StringVar(&sandboxProvider, "sandbox-provider", "auto", "Sandbox provider (auto, bubblewrap, overlayfs, gvisor, apfs, mock)")
 	newCmd.Flags().Float64Var(&maxBudgetUsd, "max-budget-usd", 0, "Maximum budget in USD for the session (passed to claude --max-budget-usd)")
 	newCmd.Flags().StringVar(&testEnvName, "test-env", "", "Use named test environment (created via 'agm test-env create')")
 	newCmd.MarkFlagsMutuallyExclusive("prompt", "prompt-file")

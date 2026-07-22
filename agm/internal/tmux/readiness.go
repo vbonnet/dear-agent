@@ -1,0 +1,653 @@
+package tmux
+
+import (
+	"context"
+	"fmt"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
+	"time"
+)
+
+const (
+	// HarnessInputReady means the harness can safely receive input.
+	HarnessInputReady = "YES"
+	// HarnessInputBusy means the harness does not currently own an empty composer.
+	HarnessInputBusy = "QUEUE"
+	// HarnessInputPermission means a permission decision currently owns input.
+	HarnessInputPermission = "PERMISSION"
+	// HarnessInputOverlay means a harness overlay currently owns input.
+	HarnessInputOverlay = "OVERLAY"
+	// HarnessInputOnboarding means a documented first-run prompt currently owns input.
+	HarnessInputOnboarding = "ONBOARDING"
+	// HarnessInputNotFound means the exact tmux session does not exist.
+	HarnessInputNotFound = "NOT_FOUND"
+	// HarnessInputWrongHarness means the expected harness process is not alive.
+	HarnessInputWrongHarness = "WRONG_HARNESS"
+)
+
+// HarnessInputReadiness is the harness-specific, fail-closed verdict shared by
+// every surface before it sends input to a tmux pane.
+type HarnessInputReadiness struct {
+	Ready      bool
+	State      string
+	Content    string
+	TargetPane string
+	Forced     bool
+}
+
+// InputDeliveryOptions controls narrowly scoped exceptions inside the tmux
+// mutation boundary. AllowBusyComposer accepts only HarnessInputBusy after the
+// expected foreground harness and exact pane have already been proved.
+type InputDeliveryOptions struct {
+	AllowBusyComposer bool
+}
+
+// CheckExpectedHarnessInput proves that the exact session exists, an expected
+// harness process is alive, and that harness currently owns the input composer.
+// A stale prompt rendered by a dead or different process is never sufficient.
+func CheckExpectedHarnessInput(ctx context.Context, sessionName, harness string) (HarnessInputReadiness, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := validateReadinessHarness(harness); err != nil {
+		return HarnessInputReadiness{}, err
+	}
+	scanCtx, cancel := context.WithTimeout(ctx, livenessScanTimeout)
+	defer cancel()
+	pane, exists, err := resolveActivePaneTarget(scanCtx, sessionName, GetSocketPath())
+	if err != nil {
+		return HarnessInputReadiness{}, err
+	}
+	if !exists {
+		return HarnessInputReadiness{State: HarnessInputNotFound}, nil
+	}
+	liveness, err := checkExpectedHarnessLivenessForPane(scanCtx, pane, harness)
+	if err != nil {
+		return HarnessInputReadiness{}, err
+	}
+	if !liveness.HarnessAlive {
+		return HarnessInputReadiness{State: HarnessInputWrongHarness, TargetPane: pane.ID}, nil
+	}
+	styledContent, err := CapturePaneANSIOutputTargetContext(ctx, pane.ID, 30)
+	if err != nil {
+		return HarnessInputReadiness{}, fmt.Errorf("capture expected %s pane: %w", harness, err)
+	}
+	ready, state, err := ClassifyHarnessInput(styledContent, harness)
+	if err != nil {
+		return HarnessInputReadiness{}, err
+	}
+	return HarnessInputReadiness{Ready: ready, State: state, Content: stripANSI(styledContent), TargetPane: pane.ID}, nil
+}
+
+// CheckExpectedHarnessInputAndSend serializes the readiness observation and
+// exact-pane delivery under the same tmux mutation lock. A non-ready result
+// never sends input unless options explicitly allow the verified QUEUE state;
+// a ready result is returned only after delivery succeeds.
+func CheckExpectedHarnessInputAndSend(ctx context.Context, sessionName, harness, command string, options InputDeliveryOptions) (HarnessInputReadiness, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := acquireTmuxSemaphore(ctx); err != nil {
+		return HarnessInputReadiness{}, fmt.Errorf("tmux concurrency limit reached: %w", err)
+	}
+	defer releaseTmuxSemaphore()
+
+	var readiness HarnessInputReadiness
+	err := withTmuxLock(func() error {
+		var err error
+		readiness, err = CheckExpectedHarnessInput(ctx, sessionName, harness)
+		if err != nil {
+			return err
+		}
+		allowed, forced := inputDeliveryAllowed(readiness, options)
+		if !allowed {
+			return nil
+		}
+		if forced {
+			readiness.Ready = true
+			readiness.Forced = true
+		}
+		if !isPaneID(readiness.TargetPane) {
+			return fmt.Errorf("ready harness returned invalid tmux pane ID %q", readiness.TargetPane)
+		}
+		return sendCommandToTargetLocked(ctx, readiness.TargetPane, command)
+	})
+	return readiness, err
+}
+
+func inputDeliveryAllowed(readiness HarnessInputReadiness, options InputDeliveryOptions) (allowed, forced bool) {
+	if readiness.Ready {
+		return true, false
+	}
+	if options.AllowBusyComposer && readiness.State == HarnessInputBusy {
+		return true, true
+	}
+	return false, false
+}
+
+// ClassifyHarnessInput is the pure composer classifier. Readiness is scoped to
+// the configured harness and to the pane tail that currently owns input.
+func ClassifyHarnessInput(content, harness string) (bool, string, error) {
+	if err := validateReadinessHarness(harness); err != nil {
+		return false, "", err
+	}
+	styledTail := paneRawInputTail(content, 12)
+	tail := stripANSI(styledTail)
+
+	// Pi's managed ready footer remains visible while its native confirmation
+	// dialog owns input. Treat that dialog as authoritative before consulting
+	// the footer so automated input can never become an authorization answer.
+	if harness == "pi-cli" && hasPiManagedPermissionPrompt(tail) {
+		return false, HarnessInputPermission, nil
+	}
+
+	var ready bool
+	switch harness {
+	case "claude-code":
+		ready = hasTailOwnedClaudeComposer(styledTail)
+	case "codex-cli":
+		ready = isCodexInputComposerReady(tail)
+	case "agy":
+		ready = hasTailOwnedAgyComposer(tail)
+	case "gemini-cli":
+		ready = hasTailOwnedGeminiComposer(tail)
+	case "opencode-cli":
+		ready = hasTailOwnedOpenCodeComposer(tail)
+	case "pi-cli":
+		ready = containsPiReadyPattern(tail)
+	}
+	if ready {
+		return true, HarnessInputReady, nil
+	}
+	if hasInputOverlay(tail, harness) {
+		return false, HarnessInputOverlay, nil
+	}
+	if hasOnboardingPrompt(tail, harness) {
+		return false, HarnessInputOnboarding, nil
+	}
+	if hasTailOwnedPermissionPrompt(tail) {
+		return false, HarnessInputPermission, nil
+	}
+	return false, HarnessInputBusy, nil
+}
+
+// CheckExpectedHarnessLiveness scans the exact session's process tree and
+// accepts only processes compatible with the configured harness. Node-backed
+// harnesses must carry a harness-specific script/package identity in argv;
+// an unrelated Node descendant is not liveness proof.
+func CheckExpectedHarnessLiveness(ctx context.Context, sessionName, harness string) (PaneLiveness, error) {
+	if err := validateReadinessHarness(harness); err != nil {
+		return PaneLiveness{}, err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	scanCtx, cancel := context.WithTimeout(ctx, livenessScanTimeout)
+	defer cancel()
+	pane, exists, err := resolveActivePaneTarget(scanCtx, sessionName, GetSocketPath())
+	if err != nil {
+		return PaneLiveness{}, err
+	}
+	if !exists {
+		return PaneLiveness{SessionExists: false}, nil
+	}
+	return checkExpectedHarnessLivenessForPane(scanCtx, pane, harness)
+}
+
+func checkExpectedHarnessLivenessForPane(ctx context.Context, pane activePaneTarget, harness string) (PaneLiveness, error) {
+	procs, err := readProcessTableWithArgs(ctx)
+	if err != nil {
+		return PaneLiveness{}, err
+	}
+	return classifyPaneLivenessProcesses([]int{pane.RootPID}, procs, expectedHarnessProcessMatcher(harness)), nil
+}
+
+// WaitForExpectedHarnessReady owns startup readiness for shared operations.
+// It permits documented first-run transitions, but otherwise only observes.
+func WaitForExpectedHarnessReady(ctx context.Context, sessionName, harness string, timeout time.Duration) error {
+	if err := validateReadinessHarness(harness); err != nil {
+		return err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	observedHarness := false
+	advanced := make(map[string]bool)
+	for {
+		readiness, err := CheckExpectedHarnessInput(waitCtx, sessionName, harness)
+		if err != nil {
+			if waitCtx.Err() != nil {
+				return fmt.Errorf("wait for %s readiness in %q: %w", harness, sessionName, waitCtx.Err())
+			}
+			return fmt.Errorf("check %s readiness in %q: %w", harness, sessionName, err)
+		}
+		ready, err := handleHarnessStartupState(waitCtx, sessionName, harness, readiness, &observedHarness, advanced)
+		if err != nil {
+			return err
+		}
+		if ready {
+			return nil
+		}
+
+		select {
+		case <-waitCtx.Done():
+			return fmt.Errorf("timeout waiting for %s readiness in %q (last state %s): %w", harness, sessionName, readiness.State, waitCtx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+func handleHarnessStartupState(
+	ctx context.Context,
+	sessionName, harness string,
+	readiness HarnessInputReadiness,
+	observedHarness *bool,
+	advanced map[string]bool,
+) (bool, error) {
+	switch readiness.State {
+	case HarnessInputReady:
+		*observedHarness = true
+		return true, nil
+	case HarnessInputNotFound:
+		return false, fmt.Errorf("tmux session %q disappeared while waiting for %s readiness", sessionName, harness)
+	case HarnessInputWrongHarness:
+		if *observedHarness {
+			return false, fmt.Errorf("expected %s process stopped in tmux session %q after startup", harness, sessionName)
+		}
+	case HarnessInputOnboarding, HarnessInputOverlay:
+		*observedHarness = true
+		if !canAdvanceHarnessStartup(readiness.State, harness, readiness.Content) {
+			return false, nil
+		}
+		transition := readiness.State + ":" + onboardingKind(readiness.Content, harness)
+		if !advanced[transition] {
+			if err := advanceHarnessStartup(ctx, readiness.TargetPane, harness, readiness.Content); err != nil {
+				return false, fmt.Errorf("advance %s startup in %q: %w", harness, sessionName, err)
+			}
+			advanced[transition] = true
+		}
+	default:
+		*observedHarness = true
+	}
+	return false, nil
+}
+
+func validateReadinessHarness(harness string) error {
+	switch harness {
+	case "claude-code", "codex-cli", "agy", "gemini-cli", "opencode-cli", "pi-cli":
+		return nil
+	default:
+		return fmt.Errorf("unsupported harness readiness check %q", harness)
+	}
+}
+
+func expectedHarnessProcessMatcher(harness string) func(ProcEntry) bool {
+	return func(process ProcEntry) bool {
+		if !processOwnsForegroundTerminal(process) {
+			return false
+		}
+		base := filepath.Base(strings.TrimSpace(process.Comm))
+		return processBaseMatchesHarness(base, harness) ||
+			nodeProcessMatchesHarness(process.Args, harness)
+	}
+}
+
+// processOwnsForegroundTerminal rejects a matching harness that is merely a
+// stopped or background descendant. Only a process in the terminal's current
+// foreground process group can own the composer that will receive input.
+func processOwnsForegroundTerminal(process ProcEntry) bool {
+	return process.PGID > 0 && process.TPGID == process.PGID &&
+		!strings.Contains(strings.ToUpper(process.State), "T")
+}
+
+func processBaseMatchesHarness(base, harness string) bool {
+	switch harness {
+	case "claude-code":
+		return base == "claude" || isClaudeProcess(base)
+	case "codex-cli":
+		return base == "codex"
+	case "agy":
+		return base == "agy"
+	case "gemini-cli":
+		return base == "gemini"
+	case "opencode-cli":
+		return base == "opencode"
+	case "pi-cli":
+		return base == "pi"
+	default:
+		return false
+	}
+}
+
+func nodeProcessMatchesHarness(args, harness string) bool {
+	if harness == "pi-cli" {
+		return isPiProcessCommand(args)
+	}
+	fields := strings.Fields(args)
+	if len(fields) == 0 {
+		return false
+	}
+	executable := 0
+	if filepath.Base(strings.Trim(fields[0], "'\"")) == "env" {
+		executable++
+		for executable < len(fields) && strings.Contains(fields[executable], "=") {
+			executable++
+		}
+	}
+	if executable >= len(fields) || filepath.Base(strings.Trim(fields[executable], "'\"")) != "node" {
+		return false
+	}
+	script, mustResolve, ok := nodeScriptArgument(args, fields, executable)
+	if !ok {
+		return false
+	}
+	if mustResolve {
+		resolved, err := filepath.EvalSymlinks(script)
+		if err != nil {
+			return false
+		}
+		script = resolved
+	}
+	script = strings.ToLower(filepath.ToSlash(script))
+	patterns := map[string][]string{
+		"claude-code":  {"@anthropic-ai/claude-code", "/claude-code/", "/bin/claude", "claude.js"},
+		"codex-cli":    {"@openai/codex", "/codex/bin/", "/bin/codex", "codex.js"},
+		"gemini-cli":   {"@google/gemini-cli", "/gemini-cli/", "/bin/gemini", "gemini.js"},
+		"opencode-cli": {"opencode-ai", "/opencode/bin/", "/bin/opencode", "opencode.js"},
+	}
+	for _, pattern := range patterns[harness] {
+		if strings.Contains(script, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func paneRawInputTail(content string, maxLines int) string {
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+	if len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+	}
+	return strings.Join(lines, "\n")
+}
+
+func hasTailOwnedClaudeComposer(content string) bool {
+	lines := strings.Split(content, "\n")
+	promptIndex := -1
+	for i, line := range lines {
+		plainLine := strings.TrimSpace(stripANSI(line))
+		if plainLine == "❯" || strings.HasPrefix(plainLine, "❯") && HasGhostTextInANSI(line) {
+			promptIndex = i
+		}
+	}
+	if promptIndex < 0 {
+		return false
+	}
+	for _, line := range lines[promptIndex+1:] {
+		if !isClaudeIdleComposerChrome(line) {
+			return false
+		}
+	}
+	return true
+}
+
+func isClaudeIdleComposerChrome(line string) bool {
+	line = strings.TrimSpace(stripANSI(line))
+	if line == "" {
+		return true
+	}
+	if strings.Trim(line, "─━┄┈╌╍ ") == "" {
+		return true
+	}
+	lower := strings.ToLower(line)
+	if strings.Contains(lower, "esc to interrupt") {
+		return false
+	}
+	for _, marker := range []string{"? for shortcuts", "shift+tab to cycle", "bypass permissions on", "accept edits on", "plan mode on"} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasTailOwnedGeminiComposer(content string) bool {
+	return hasTailOwnedTextComposer(content, func(line string) bool {
+		line = strings.TrimSpace(strings.Trim(strings.TrimSpace(line), "│"))
+		return strings.HasPrefix(line, ">") && strings.Contains(strings.ToLower(line), "type your message")
+	})
+}
+
+func hasTailOwnedAgyComposer(content string) bool {
+	return hasTailOwnedTextComposer(content, func(line string) bool {
+		return strings.TrimSpace(line) == ">"
+	})
+}
+
+func hasTailOwnedOpenCodeComposer(content string) bool {
+	return hasTailOwnedTextComposer(content, func(line string) bool {
+		line = strings.TrimSpace(strings.Trim(strings.TrimSpace(line), "│"))
+		switch line {
+		case ">", ">>", "❯":
+			return true
+		}
+		lower := strings.ToLower(line)
+		return strings.HasPrefix(line, ">") &&
+			(strings.Contains(lower, "type your message") || strings.Contains(lower, "type here"))
+	})
+}
+
+func hasTailOwnedTextComposer(content string, isComposer func(string) bool) bool {
+	lines := strings.Split(content, "\n")
+	composerIndex := -1
+	for i, line := range lines {
+		if isComposer(line) {
+			composerIndex = i
+		}
+	}
+	if composerIndex < 0 {
+		return false
+	}
+	for _, line := range lines[composerIndex+1:] {
+		if !isTerminalIdleChrome(line) {
+			return false
+		}
+	}
+	return true
+}
+
+func isTerminalIdleChrome(line string) bool {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return true
+	}
+	if strings.Trim(line, "─━┄┈╌╍═│┃┆┊╎╏┌┐└┘├┤┬┴┼╭╮╰╯ ") == "" {
+		return true
+	}
+	lower := strings.ToLower(line)
+	for _, marker := range []string{"? for shortcuts", "shift+tab to", "accept edits"} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return strings.Contains(lower, "sandbox") && strings.Contains(lower, "gemini-")
+}
+
+func isCodexInputComposerReady(content string) bool {
+	return IsCodexComposerReady(content)
+}
+
+var permissionChoicePattern = regexp.MustCompile(`(?i)^\s*(?:[❯>•]\s*(?:\d+[.)]\s*)?|\d+[.)]\s+)(yes|no|allow(?:\s+once|\s+always)?|deny|approve|reject|cancel|don't allow)\b`)
+
+func hasTailOwnedPermissionPrompt(content string) bool {
+	lines := strings.Split(content, "\n")
+	anchor := -1
+	for i, line := range lines {
+		lower := strings.ToLower(line)
+		for _, marker := range []string{
+			"do you want to proceed?",
+			"allow this command",
+			"allow this action",
+			"approve this action",
+		} {
+			if strings.Contains(lower, marker) {
+				anchor = i
+				break
+			}
+		}
+	}
+	if anchor >= 0 && permissionChoicesOwnTail(lines[anchor+1:]) {
+		return true
+	}
+	return unanchoredPermissionChoicesOwnTail(lines)
+}
+
+func hasPiManagedPermissionPrompt(content string) bool {
+	return strings.Contains(strings.ToLower(content), "agm permission required") ||
+		hasTailOwnedPermissionPrompt(content)
+}
+
+func permissionChoicesOwnTail(lines []string) bool {
+	hasChoice := false
+	for _, line := range lines {
+		if _, ok := permissionChoiceKind(line); ok {
+			hasChoice = true
+			continue
+		}
+		if isPermissionPromptChrome(line) {
+			continue
+		}
+		return false
+	}
+	return hasChoice
+}
+
+func unanchoredPermissionChoicesOwnTail(lines []string) bool {
+	var allow, deny, structured bool
+	for _, line := range slices.Backward(lines) {
+		if isPermissionPromptChrome(line) {
+			continue
+		}
+		kind, ok := permissionChoiceKind(line)
+		if !ok {
+			break
+		}
+		structured = true
+		switch kind {
+		case "yes", "allow", "approve":
+			allow = true
+		case "no", "deny", "reject", "cancel", "don't allow":
+			deny = true
+		}
+	}
+	return structured && allow && deny
+}
+
+func permissionChoiceKind(line string) (string, bool) {
+	match := permissionChoicePattern.FindStringSubmatch(strings.TrimSpace(line))
+	if len(match) != 2 {
+		return "", false
+	}
+	kind := strings.ToLower(match[1])
+	if strings.HasPrefix(kind, "allow") {
+		kind = "allow"
+	}
+	return kind, true
+}
+
+func isPermissionPromptChrome(line string) bool {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return true
+	}
+	if strings.Trim(line, "─━┄┈╌╍═│┃┆┊╎╏┌┐└┘├┤┬┴┼╭╮╰╯ ") == "" {
+		return true
+	}
+	lower := strings.ToLower(line)
+	return strings.Contains(lower, "enter to confirm") ||
+		strings.Contains(lower, "esc to cancel") ||
+		strings.Contains(lower, "use arrow keys")
+}
+
+func hasInputOverlay(content, harness string) bool {
+	if strings.Contains(content, "Background tasks") && strings.Contains(content, "to close") {
+		return true
+	}
+	return harness == "agy" && ContainsAgySurveyPrompt(content)
+}
+
+func hasOnboardingPrompt(content, harness string) bool {
+	switch harness {
+	case "claude-code":
+		return containsTrustPromptPattern(content)
+	case "codex-cli":
+		return containsCodexTrustPromptPattern(content) || containsCodexModelUpgradePromptPattern(content)
+	case "agy":
+		return containsAgyTrustPromptPattern(content)
+	case "gemini-cli":
+		return containsGeminiTrustPromptPattern(content)
+	default:
+		return false
+	}
+}
+
+func containsGeminiTrustPromptPattern(content string) bool {
+	lower := strings.ToLower(content)
+	return strings.Contains(lower, "do you trust the files in this folder") ||
+		strings.Contains(lower, "do you trust this folder")
+}
+
+func onboardingKind(content, harness string) string {
+	if harness == "codex-cli" && containsCodexModelUpgradePromptPattern(content) {
+		return "model-upgrade"
+	}
+	if harness == "agy" && ContainsAgySurveyPrompt(content) {
+		return "survey"
+	}
+	return "trust"
+}
+
+func canAdvanceHarnessStartup(state, harness, content string) bool {
+	return state == HarnessInputOnboarding ||
+		(state == HarnessInputOverlay && harness == "agy" && ContainsAgySurveyPrompt(content))
+}
+
+func advanceHarnessStartup(ctx context.Context, targetPane, harness, content string) error {
+	if !isPaneID(targetPane) {
+		return fmt.Errorf("missing verified pane for %s startup transition", harness)
+	}
+	for _, key := range harnessStartupAdvanceKeys(harness, content) {
+		if err := sendReadinessKey(ctx, targetPane, key); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func harnessStartupAdvanceKeys(harness, content string) []string {
+	if harness == "codex-cli" && containsCodexModelUpgradePromptPattern(content) {
+		return []string{"Down", "Enter"}
+	}
+	if harness == "agy" && ContainsAgySurveyPrompt(content) {
+		return []string{"0"}
+	}
+	if harness == "gemini-cli" && containsGeminiTrustPromptPattern(content) {
+		return []string{"1", "Enter"}
+	}
+	return []string{"Enter"}
+}
+
+func sendReadinessKey(ctx context.Context, targetPane, key string) error {
+	_, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", GetSocketPath(), "send-keys", "-t", targetPane, key)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
+}

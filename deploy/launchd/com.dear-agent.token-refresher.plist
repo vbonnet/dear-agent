@@ -9,10 +9,10 @@
   the single-use refresh-token family never dies of neglect.
 
   WARNING -- the single-writer invariant this job was designed around is VOID.
-  It originally read: "during active sessions the Claude Code `apiKeyHelper`
-  (which also points at this binary) drives on-demand refresh; both paths share
-  the same cross-process file lock, so they never race or double-spend the
-  refresh token." apiKeyHelper was removed on 2026-07-10 because Claude Code
+  It assumed a retired `apiKeyHelper` (not to be restored) drove on-demand
+  refresh through this same binary during active sessions, so both paths shared
+  one cross-process file lock and could never race or double-spend the refresh
+  token. That apiKeyHelper was removed on 2026-07-10 because Claude Code
   >=2.1.205 treats it as an external API key that shadows healthy OAuth
   (anthropics/claude-code#11587). Since then this binary is the ONLY refresher
   that takes the lock, while ~15 other OAuth clients on the host (the
@@ -26,7 +26,7 @@
   Runs with -force so every tick guarantees a fresh token regardless of the
   remaining lifetime (the binary is the single-owner, file-locked refresher
   mandated by ce-rnpt / ce-f3e3, designed for exactly this cadence). stdout
-  carries ONLY the access token (apiKeyHelper contract), so it is routed to
+  carries ONLY the access token (stdout-only token contract), so it is routed to
   /dev/null to keep the secret out of the log file; structured logs and the
   JSONL audit trail go to stderr / ~/.local/state/dear-agent.
 
@@ -65,7 +65,7 @@
   <key>AbandonProcessGroup</key>
   <false/>
 
-  <!-- stdout is the access token (apiKeyHelper contract) — discard it so the
+  <!-- stdout is the access token (stdout-only token contract) — discard it so the
        secret never lands in a log file. -->
   <key>StandardOutPath</key>
   <string>/dev/null</string>

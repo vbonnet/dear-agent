@@ -138,15 +138,14 @@ Copy-on-write filesystem isolation so agents work in contained environments:
 ┌────────────────────────────────────────┐
 │          Provider Interface            │
 ├────────────┬────────────┬──────────────┤
-│ OverlayFS  │   APFS     │ ClaudeCode   │
-│ (Linux)    │  (macOS)   │ (Worktree)   │
+│ Bubblewrap │ OverlayFS  │     APFS     │
+│ (Linux)    │ (Linux)    │   (macOS)    │
 └────────────┴────────────┴──────────────┘
 ```
 
+- **Bubblewrap** — Linux: materialized worktree with namespace validation
 - **OverlayFS** — Linux: upper/lower/work/merged directory structure
-- **APFS** — macOS: cloned volumes with instant snapshots
-- **ClaudeCode** — Git worktree-based isolation (lightweight fallback)
-- **Presets** — `ReadOnlySpec()`, `FullAccessSpec()`, `CodeOnlySpec()`
+- **APFS** — macOS: cloned directories with isolated project-path mapping
 
 Sandbox lifecycle is tied to session lifecycle: provisioned on `new`, cleaned
 up on `archive`.

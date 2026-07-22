@@ -180,7 +180,7 @@ func TestForceDeleteBranch_NonexistentBranch(t *testing.T) {
 	}
 }
 
-func TestCleanupAfterArchive_SandboxBranchDeleted(t *testing.T) {
+func TestCleanupAfterArchive_SandboxBranchDeletedWithoutInferringSessionBranch(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not found in PATH")
 	}
@@ -203,18 +203,19 @@ func TestCleanupAfterArchive_SandboxBranchDeleted(t *testing.T) {
 		false,
 	)
 
-	if !result.BranchDeleted {
-		t.Error("BranchDeleted should be true for session branch")
+	if result.BranchDeleted {
+		t.Error("BranchDeleted should remain false without explicit worktree ownership")
 	}
 	if !result.SandboxBranchDeleted {
 		t.Error("SandboxBranchDeleted should be true for agm/<sessionID> branch")
 	}
 
-	// Verify both branches are gone
+	// The system-owned sandbox branch is positively attributed by session ID,
+	// while the merely name-matching session branch must be preserved.
 	cmd := exec.Command("git", "-C", repoDir, "branch", "--list", "my-session")
 	output, _ := cmd.Output()
-	if strings.TrimSpace(string(output)) != "" {
-		t.Error("Session branch should be deleted")
+	if strings.TrimSpace(string(output)) == "" {
+		t.Error("Session branch should be preserved without worktree ownership")
 	}
 
 	cmd = exec.Command("git", "-C", repoDir, "branch", "--list", sandboxBranch)
@@ -321,10 +322,14 @@ func TestCleanupAfterArchive_WithRealGitWorktree(t *testing.T) {
 	wtDir := filepath.Join(t.TempDir(), "test-wt")
 	runGit(t, repoDir, "worktree", "add", wtDir, "-b", "test-branch")
 	runGit(t, wtDir, "commit", "--allow-empty", "-m", "worker commit")
+	nestedWorkDir := filepath.Join(wtDir, "agm", "cmd", "agm")
+	if err := os.MkdirAll(nestedWorkDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	result := CleanupAfterArchive(
 		"sess-test", "test-session",
-		wtDir, repoDir, "", "test-branch",
+		nestedWorkDir, repoDir, "", "test-branch",
 		false,
 	)
 
@@ -341,6 +346,131 @@ func TestCleanupAfterArchive_WithRealGitWorktree(t *testing.T) {
 	// Verify worktree is actually gone
 	if _, err := os.Stat(wtDir); !os.IsNotExist(err) {
 		t.Errorf("Worktree dir should be removed, stat err: %v", err)
+	}
+}
+
+func TestCleanupAfterArchive_PreservesPrimaryCheckout(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found in PATH")
+	}
+
+	repoDir := t.TempDir()
+	runGit(t, repoDir, "init", "-b", "main")
+	runGit(t, repoDir, "commit", "--allow-empty", "-m", "init")
+	runGit(t, repoDir, "branch", "primary-session")
+	nestedWorkDir := filepath.Join(repoDir, "agm", "cmd", "agm")
+	if err := os.MkdirAll(nestedWorkDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	result := CleanupAfterArchive(
+		"primary-session-id", "primary-session",
+		nestedWorkDir, repoDir, "", "primary-session",
+		false,
+	)
+
+	if !result.PrimaryWorktreeKept {
+		t.Fatal("PrimaryWorktreeKept should prove the primary checkout was classified and preserved")
+	}
+	if result.WorktreesRemoved != 0 {
+		t.Fatalf("WorktreesRemoved = %d, want 0 for primary checkout", result.WorktreesRemoved)
+	}
+	if _, err := os.Stat(repoDir); err != nil {
+		t.Fatalf("primary checkout was not preserved: %v", err)
+	}
+	cmd := exec.Command("git", "-C", repoDir, "branch", "--list", "primary-session")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("list preserved session-named branch: %v\n%s", err, output)
+	}
+	if strings.TrimSpace(string(output)) == "" {
+		t.Fatal("session-named branch was deleted even though the session did not own a linked worktree")
+	}
+}
+
+func TestCleanupAfterArchive_UsesContextProjectWhenWorkingDirectoryMissing(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found in PATH")
+	}
+
+	repoDir := t.TempDir()
+	runGit(t, repoDir, "init", "-b", "main")
+	runGit(t, repoDir, "commit", "--allow-empty", "-m", "init")
+	runGit(t, repoDir, "branch", "context-session")
+
+	result := CleanupAfterArchive(
+		"context-session-id", "context-session",
+		"", repoDir, "", "context-session",
+		false,
+	)
+	if !result.PrimaryWorktreeKept || result.WorktreesRemoved != 0 || result.BranchDeleted {
+		t.Fatalf("unsafe context-project cleanup result = %+v", result)
+	}
+	cmd := exec.Command("git", "-C", repoDir, "branch", "--list", "context-session")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(output)) == "" {
+		t.Fatal("context project branch was deleted without explicit worktree ownership")
+	}
+}
+
+func TestCleanupAfterArchive_PreservesBranchNotOwnedByRemovedWorktree(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found in PATH")
+	}
+
+	repoDir := t.TempDir()
+	runGit(t, repoDir, "init", "-b", "main")
+	runGit(t, repoDir, "commit", "--allow-empty", "-m", "init")
+	worktreeDir := filepath.Join(t.TempDir(), "owned-worktree")
+	runGit(t, repoDir, "worktree", "add", worktreeDir, "-b", "actual-worktree-branch")
+	runGit(t, repoDir, "branch", "session-name")
+
+	result := CleanupAfterArchive(
+		"mismatch-id", "session-name",
+		worktreeDir, repoDir, "", "session-name",
+		false,
+	)
+	if result.WorktreesRemoved != 1 || result.BranchDeleted {
+		t.Fatalf("mismatched ownership cleanup result = %+v", result)
+	}
+	cmd := exec.Command("git", "-C", repoDir, "branch", "--list", "session-name")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(output)) == "" {
+		t.Fatal("session-named branch was deleted after removing a differently owned worktree")
+	}
+}
+
+func TestCleanupAfterArchive_PreservesBranchWhenWorktreeCannotBeClassified(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found in PATH")
+	}
+
+	repoDir := t.TempDir()
+	runGit(t, repoDir, "init", "-b", "main")
+	runGit(t, repoDir, "commit", "--allow-empty", "-m", "init")
+	runGit(t, repoDir, "branch", "unclassified-session")
+
+	result := CleanupAfterArchive(
+		"unclassified-id", "unclassified-session",
+		t.TempDir(), repoDir, "", "unclassified-session",
+		false,
+	)
+	if result.WorktreesRemoved != 0 || result.BranchDeleted {
+		t.Fatalf("unsafe cleanup result = %+v, want worktree and branch preserved", result)
+	}
+	cmd := exec.Command("git", "-C", repoDir, "branch", "--list", "unclassified-session")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(output)) == "" {
+		t.Fatal("branch was deleted after worktree classification failed")
 	}
 }
 

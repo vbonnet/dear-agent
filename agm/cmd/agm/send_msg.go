@@ -18,6 +18,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/messages"
 	"github.com/vbonnet/dear-agent/agm/internal/monitoring"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/safety"
 	"github.com/vbonnet/dear-agent/agm/internal/send"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
@@ -262,7 +263,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 		return runSendSingle(cmd.Context(), recipientSession)
 	}
 
-	// Multi-recipient path: resolve and deliver in parallel
+	// Multi-recipient path: resolve and deliver sequentially under shared tmux safety.
 	return runSendMulti(cmd.Context(), spec)
 }
 
@@ -604,18 +605,27 @@ func queueMessage(ctx context.Context, recipientSession, senderName, messageID, 
 	return nil
 }
 
-// sendDirectly sends a message directly to a session without queuing.
-// Supports both tmux-based (Claude, Gemini) and API-based (OpenAI) sessions.
-//
-// For DONE-state sends, the underlying tmux send does not emit an ESC keystroke
-// because the session is already at the prompt — sending ESC is redundant and
-// can exit plan mode.
+// sendDirectly sends a message directly to a registered session without
+// queuing. CLI harnesses use the shared operations layer so their readiness
+// proof and exact-pane delivery cannot drift from MCP or Skills behavior.
 func sendDirectly(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, adapter *dolt.Adapter) error {
-	// Try to load manifest to determine agent type
-	m, _, err := session.ResolveIdentifier(recipientSession, cfg.SessionsDir, adapter)
+	return sendDirectlyWithTmux(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, adapter, session.NewRealTmux())
+}
+
+func sendDirectlyWithTmux(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, adapter *dolt.Adapter, tmuxClient session.TmuxInterface) error {
+	if adapter == nil {
+		return fmt.Errorf("verified delivery requires session storage")
+	}
+
+	// Load the manifest to determine the delivery surface. An unregistered tmux
+	// session has no trustworthy harness identity, so it cannot be sent input.
+	sessionsDir := ""
+	if cfg != nil {
+		sessionsDir = cfg.SessionsDir
+	}
+	m, _, err := session.ResolveIdentifier(recipientSession, sessionsDir, adapter)
 	if err != nil {
-		// No manifest found - fall back to tmux-based send for legacy sessions
-		return sendViaTmux(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, false)
+		return fmt.Errorf("resolve %q for verified delivery: %w", recipientSession, err)
 	}
 
 	// Determine delivery method based on harness type
@@ -630,12 +640,20 @@ func sendDirectly(ctx context.Context, recipientSession, senderName, messageID, 
 		return sendViaAgent(m, senderName, messageID, formattedMessage, promptFile)
 	}
 
-	// Fall back to tmux for CLI-based harnesses (Claude Code, Codex, AGY, OpenCode, Pi, and Gemini compatibility)
-	if err := sendViaTmux(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, false); err != nil {
+	// CLI-based harnesses share one atomic readiness-and-delivery operation.
+	sharedRecipient := m.Name
+	if sharedRecipient == "" {
+		sharedRecipient = recipientSession
+	}
+	if err := sendViaSharedOperations(ctx, sharedRecipient, senderName, messageID, formattedMessage, promptFile, msgForce, adapter, tmuxClient); err != nil {
 		return err
 	}
 	if harnessType == "agy" && (m.Agy == nil || m.Agy.ConversationID == "") {
-		if err := waitForAgyMetadataBackfill(ctx, recipientSession, tmux.WaitForAgyPromptAfterInput); err != nil {
+		agyTmuxName := m.Tmux.SessionName
+		if agyTmuxName == "" {
+			agyTmuxName = sharedRecipient
+		}
+		if err := waitForAgyMetadataBackfill(ctx, agyTmuxName, tmux.WaitForAgyPromptAfterInput); err != nil {
 			return err
 		}
 		if err := associateSpawnedAgySessionWithRetry(ctx, m.Name, 20, 500*time.Millisecond); err != nil {
@@ -655,20 +673,41 @@ func waitForAgyMetadataBackfill(ctx context.Context, sessionName string, wait fu
 	return nil
 }
 
-// sendViaTmux sends a message via tmux (for CLI-based agents like Claude, Gemini)
-// Bug fix (2026-03-14): Added shouldInterrupt parameter to control ESC behavior
-func sendViaTmux(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, shouldInterrupt bool) error {
+// sendViaSharedOperations routes CLI delivery through ops.SendMessage. The
+// supplied tmux capability must atomically prove harness ownership and send to
+// the exact verified pane; weaker transports fail closed inside shared ops.
+func sendViaSharedOperations(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, force bool, storage dolt.Storage, tmuxClient session.TmuxInterface) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	// Write pending file for hook-based delivery (best-effort, in addition to tmux)
-	if err := messages.WritePendingFile(recipientSession, messageID, formattedMessage); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to write pending file: %v\n", err)
+	if storage == nil {
+		return fmt.Errorf("verified CLI delivery requires session storage")
+	}
+	if tmuxClient == nil {
+		return fmt.Errorf("verified CLI delivery requires tmux")
 	}
 
-	// Send using SAFE method (waits for prompt, with conditional interrupt)
-	if err := sendMultiLinePromptSafeContext(ctx, recipientSession, formattedMessage, shouldInterrupt); err != nil {
-		return fmt.Errorf("failed to send prompt: %w", err)
+	result, err := ops.SendMessage(&ops.OpContext{
+		Context: ctx,
+		Storage: storage,
+		Tmux:    tmuxClient,
+	}, &ops.SendMessageRequest{
+		Recipient: recipientSession,
+		Message:   formattedMessage,
+		Force:     force,
+	})
+	if err != nil {
+		return fmt.Errorf("shared CLI send: %w", err)
+	}
+	if result == nil || !result.Delivered {
+		return fmt.Errorf("shared CLI send did not deliver to %q", recipientSession)
+	}
+
+	// Preserve the existing hook-visible audit artifact only after verified
+	// delivery. A failed readiness check must not create an alternate path that
+	// can inject the message later.
+	if err := messages.WritePendingFile(recipientSession, messageID, formattedMessage); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to write pending file: %v\n", err)
 	}
 
 	// Print success message with message ID
@@ -820,7 +859,10 @@ func runSendMulti(ctx context.Context, spec *send.RecipientSpec) (retErr error) 
 
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	results := send.SequentialDeliver(ctx, jobs, deliveryFunc)
+	tmuxClient := session.NewRealTmux()
+	results := send.SequentialDeliver(ctx, jobs, func(ctx context.Context, job *send.DeliveryJob) error {
+		return deliveryFuncWithDependencies(ctx, job, adapter, tmuxClient)
+	})
 
 	report := send.GenerateReport(results)
 	report.PrintReport()
@@ -950,18 +992,19 @@ func logMultiResults(homeDir, senderName, message string, jobs []*send.DeliveryJ
 // deliveryFunc implements the actual message delivery for a single recipient
 // This is used by SequentialDeliver for sequential message sending
 func deliveryFunc(ctx context.Context, job *send.DeliveryJob) error {
-	// Check recipient session exists in tmux
-	exists, err := tmux.HasSession(job.Recipient)
+	adapter, err := getStorage()
 	if err != nil {
-		return fmt.Errorf("failed to check tmux session: %w", err)
+		return fmt.Errorf("open storage for verified delivery: %w", err)
 	}
-	if !exists {
-		return fmt.Errorf("session '%s' does not exist in tmux", job.Recipient)
-	}
+	defer func() { _ = adapter.Close() }()
 
-	// Use the existing sendDirectly logic for actual delivery
-	// This ensures consistent behavior with single-recipient sends
-	return sendViaTmux(ctx, job.Recipient, job.Sender, job.MessageID, job.FormattedMessage, job.PromptFile, job.ShouldInterrupt)
+	return deliveryFuncWithDependencies(ctx, job, adapter, session.NewRealTmux())
+}
+
+func deliveryFuncWithDependencies(ctx context.Context, job *send.DeliveryJob, adapter *dolt.Adapter, tmuxClient session.TmuxInterface) error {
+	// Multi-recipient sends intentionally use the same manifest resolution and
+	// shared operations boundary as single-recipient sends.
+	return sendDirectlyWithTmux(ctx, job.Recipient, job.Sender, job.MessageID, job.FormattedMessage, job.PromptFile, adapter, tmuxClient)
 }
 
 // recordDelegation records a delegation if --delegate flag is set.

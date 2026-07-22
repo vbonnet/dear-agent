@@ -164,7 +164,13 @@ func (b *TmuxBackend) AttachSession(_ context.Context, id manager.SessionID) err
 // --- MessageBroker ---
 
 // SendMessage sends a message to a tmux session via send-keys.
-func (b *TmuxBackend) SendMessage(_ context.Context, id manager.SessionID, message string) (manager.SendResult, error) {
+func (b *TmuxBackend) SendMessage(ctx context.Context, id manager.SessionID, message string) (manager.SendResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return manager.SendResult{Delivered: false, Error: err}, err
+	}
 	err := tmux.SendCommand(string(id), message)
 	if err != nil {
 		return manager.SendResult{Delivered: false, Error: err}, fmt.Errorf("send message: %w", err)
@@ -254,17 +260,26 @@ func (b *TmuxBackend) GetState(_ context.Context, id manager.SessionID) (manager
 }
 
 // CheckDelivery determines if a session can receive input right now.
-func (b *TmuxBackend) CheckDelivery(_ context.Context, id manager.SessionID) (manager.CanReceive, error) {
+func (b *TmuxBackend) CheckDelivery(ctx context.Context, id manager.SessionID) (manager.CanReceive, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return manager.CanReceiveQueue, err
+	}
 	name := string(id)
 
 	exists, err := tmux.HasSession(name)
-	if err != nil || !exists {
-		return manager.CanReceiveNotFound, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
+	if err != nil {
+		return manager.CanReceiveQueue, fmt.Errorf("check tmux session %q: %w", name, err)
+	}
+	if !exists {
+		return manager.CanReceiveNotFound, nil
 	}
 
-	paneContent, err := tmux.CapturePaneOutput(name, 30)
+	paneContent, err := tmux.CapturePaneOutputContext(ctx, name, 30)
 	if err != nil {
-		return manager.CanReceiveQueue, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
+		return manager.CanReceiveQueue, fmt.Errorf("capture tmux session %q: %w", name, err)
 	}
 
 	detector := state.NewDetector()

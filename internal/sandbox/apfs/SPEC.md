@@ -31,6 +31,10 @@ isolation where Linux union mounts are not available.
 
 **APFS-10** When a sandbox is validated, the system shall require an active registry entry, an existing merged symlink, and an existing symlink target.
 
+**APFS-11** When a request names a working directory inside lower directory number N, the provider shall return `merged/repoN/<relative-directory>` as the harness working directory.
+
+**APFS-12** When a lower directory is a linked Git worktree whose `.git` entry redirects to host metadata, the provider shall replace that redirect with independent copy-on-write Git metadata before returning the sandbox so index and ref mutations remain inside the sandbox.
+
 ## BDD Traceability
 
 - `agm/test/bdd/features/sandbox_provider_guardrails.feature` enforces that this

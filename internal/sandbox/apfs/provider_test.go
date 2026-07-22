@@ -5,6 +5,7 @@ package apfs
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -102,6 +103,129 @@ func TestProvider_Create(t *testing.T) {
 	// Clean up
 	if err := p.Destroy(ctx, sb.ID); err != nil {
 		t.Fatalf("Destroy() failed: %v", err)
+	}
+}
+
+func TestProvider_CreateMapsRequestedWorkingDirectoryIntoMatchingClone(t *testing.T) {
+	root := t.TempDir()
+	otherRepo := filepath.Join(root, "other")
+	targetRepo := filepath.Join(root, "dear-agent")
+	requestedDir := filepath.Join(targetRepo, ".agents", "skills")
+	if err := os.MkdirAll(otherRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(requestedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(requestedDir, "SKILL.md")
+	if err := os.WriteFile(marker, []byte("sandbox discovery marker"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	provider := NewProvider()
+	sb, err := provider.Create(context.Background(), sandbox.SandboxRequest{
+		SessionID:    "mapped-workdir",
+		LowerDirs:    []string{otherRepo, targetRepo},
+		WorkingDir:   requestedDir,
+		WorkspaceDir: filepath.Join(root, "workspace"),
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if destroyErr := provider.Destroy(context.Background(), sb.ID); destroyErr != nil {
+			t.Errorf("Destroy() error = %v", destroyErr)
+		}
+	})
+
+	wantWorkingDir := filepath.Join(sb.MergedPath, "repo1", ".agents", "skills")
+	if sb.WorkingDir != wantWorkingDir {
+		t.Fatalf("WorkingDir = %q, want %q", sb.WorkingDir, wantWorkingDir)
+	}
+	if _, err := os.Stat(filepath.Join(sb.WorkingDir, "SKILL.md")); err != nil {
+		t.Fatalf("mapped repository instructions are not visible from WorkingDir: %v", err)
+	}
+}
+
+func TestProvider_CreateDetachesLinkedWorktreeGitMetadata(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is unavailable")
+	}
+	root := t.TempDir()
+	primary := filepath.Join(root, "primary")
+	linked := filepath.Join(root, "linked")
+	runAPFSGit(t, root, "init", "-b", "main", primary)
+	runAPFSGit(t, primary, "config", "user.name", "APFS test")
+	runAPFSGit(t, primary, "config", "user.email", "apfs-test@example.invalid")
+	tracked := filepath.Join(primary, "tracked.txt")
+	if err := os.WriteFile(tracked, []byte("host content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runAPFSGit(t, primary, "add", "tracked.txt")
+	runAPFSGit(t, primary, "commit", "-m", "initial")
+	runAPFSGit(t, primary, "worktree", "add", "-b", "feature", linked)
+	runAPFSGit(t, primary, "config", "extensions.worktreeConfig", "true")
+	runAPFSGit(t, linked, "config", "--worktree", "sandbox.test-marker", "linked")
+	hostHead := strings.TrimSpace(runAPFSGit(t, linked, "rev-parse", "HEAD"))
+
+	provider := NewProvider()
+	sb, err := provider.Create(context.Background(), sandbox.SandboxRequest{
+		SessionID:    "linked-worktree-metadata",
+		LowerDirs:    []string{linked},
+		WorkingDir:   linked,
+		WorkspaceDir: filepath.Join(root, "workspace"),
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if destroyErr := provider.Destroy(context.Background(), sb.ID); destroyErr != nil {
+			t.Errorf("Destroy() error = %v", destroyErr)
+		}
+	})
+
+	cloneRoot := filepath.Join(sb.MergedPath, "repo0")
+	gitInfo, err := os.Stat(filepath.Join(cloneRoot, ".git"))
+	if err != nil {
+		t.Fatalf("stat detached .git: %v", err)
+	}
+	if !gitInfo.IsDir() {
+		t.Fatalf("sandbox .git mode = %s, want independent directory", gitInfo.Mode())
+	}
+	commonDir := strings.TrimSpace(runAPFSGit(t, cloneRoot, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+	commonInfo, err := os.Stat(commonDir)
+	if err != nil {
+		t.Fatalf("stat sandbox common Git directory: %v", err)
+	}
+	if !os.SameFile(commonInfo, gitInfo) {
+		t.Fatalf("sandbox common Git directory = %q, want %q", commonDir, filepath.Join(cloneRoot, ".git"))
+	}
+	configuredWorktree := strings.TrimSpace(runAPFSGit(t, cloneRoot, "config", "--get", "core.worktree"))
+	configuredInfo, err := os.Stat(configuredWorktree)
+	if err != nil {
+		t.Fatalf("stat configured sandbox worktree: %v", err)
+	}
+	cloneInfo, err := os.Stat(cloneRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(configuredInfo, cloneInfo) {
+		t.Fatalf("sandbox core.worktree = %q, want %q", configuredWorktree, cloneRoot)
+	}
+	if got := strings.TrimSpace(runAPFSGit(t, cloneRoot, "config", "--worktree", "--get", "sandbox.test-marker")); got != "linked" {
+		t.Fatalf("sandbox worktree-specific config marker = %q, want linked", got)
+	}
+
+	if err := os.WriteFile(filepath.Join(cloneRoot, "tracked.txt"), []byte("sandbox content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runAPFSGit(t, cloneRoot, "add", "tracked.txt")
+	runAPFSGit(t, cloneRoot, "commit", "-m", "sandbox-only")
+	if got := strings.TrimSpace(runAPFSGit(t, linked, "rev-parse", "HEAD")); got != hostHead {
+		t.Fatalf("host linked-worktree HEAD changed to %s, want %s", got, hostHead)
+	}
+	if got := strings.TrimSpace(runAPFSGit(t, linked, "status", "--porcelain")); got != "" {
+		t.Fatalf("host linked-worktree index changed through sandbox Git metadata: %q", got)
 	}
 }
 
@@ -399,6 +523,17 @@ func TestIsClonefileError(t *testing.T) {
 			}
 		})
 	}
+}
+
+func runAPFSGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
+	}
+	return string(output)
 }
 
 // contains checks if a string contains a substring.

@@ -208,7 +208,10 @@ AGM automatically installs state management hooks during session creation. To ma
 
 ```bash
 # Copy hooks to Claude config directory
-cp ~/.agm/hooks/claude/* ~/.claude/hooks/
+# rsync, not cp: it writes each file to a temporary name and renames it into
+# place, so a hook that is compiled and already running is never overwritten
+# in place (ce-77ip.8). A glob copy can expand to binaries.
+rsync -a ~/.agm/hooks/claude/ ~/.claude/hooks/
 
 # Verify hooks installed
 ls -la ~/.claude/hooks/session-start/
@@ -262,7 +265,8 @@ AGM provides **at-least-once delivery**:
 - ✅ Messages persist in SQLite queue (survives daemon restarts)
 - ✅ Automatic retry (3 attempts with exponential backoff)
 - ✅ Acknowledgment protocol (confirms delivery)
-- ⚠️ No guarantee of ordering (parallel delivery possible)
+- ✅ Fan-out delivery is attempted in resolved recipient order, one recipient at a time
+- ✅ Each CLI recipient must pass shared harness readiness before exact-pane input
 - ⚠️ Duplicate delivery possible (on network errors, use idempotency)
 
 ### Acknowledgment Protocol

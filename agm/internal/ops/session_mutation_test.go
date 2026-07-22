@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -885,11 +886,72 @@ func TestSendMessage_Success(t *testing.T) {
 		t.Error("expected Delivered=true via tmux delivery")
 	}
 	mt := ctx.Tmux.(*mockTmux)
+	if len(mt.readinessChecks) != 1 || mt.readinessChecks[0] != "my-session:claude-code" {
+		t.Fatalf("readiness checks = %v, want [my-session:claude-code]", mt.readinessChecks)
+	}
 	if len(mt.sent) != 1 {
 		t.Fatalf("expected 1 send-keys call, got %d", len(mt.sent))
 	}
-	if mt.sent[0].session != "my-session" || mt.sent[0].keys != "hello world" {
+	if mt.sent[0].session != "%1" || mt.sent[0].keys != "hello world" {
 		t.Errorf("unexpected send-keys: %+v", mt.sent[0])
+	}
+}
+
+func TestSendMessage_NotReadyReturnsTypedNonDeliveryWithoutInput(t *testing.T) {
+	for _, readiness := range []string{"NO", "QUEUE", "OVERLAY", "NOT_FOUND"} {
+		t.Run(readiness, func(t *testing.T) {
+			ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")}, "my-session")
+			tm := ctx.Tmux.(*mockTmux)
+			tm.readiness = session.InputReadiness{Ready: false, State: readiness}
+
+			result, err := SendMessage(ctx, &SendMessageRequest{Recipient: "id-1", Message: "must not send"})
+			if result == nil || result.Delivered {
+				t.Fatalf("result = %#v, want typed non-delivery", result)
+			}
+			opErr := &OpError{}
+			if !errors.As(err, &opErr) || opErr.Code != ErrCodeSessionNotReady {
+				t.Fatalf("error = %v, want %s", err, ErrCodeSessionNotReady)
+			}
+			if len(tm.sent) != 0 {
+				t.Fatalf("not-ready pane received input: %v", tm.sent)
+			}
+		})
+	}
+}
+
+func TestSendMessage_ReadinessProbeFailureDoesNotSend(t *testing.T) {
+	wantErr := errors.New("capture failed")
+	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")}, "my-session")
+	tm := ctx.Tmux.(*mockTmux)
+	tm.readinessErr = wantErr
+
+	result, err := SendMessage(ctx, &SendMessageRequest{Recipient: "id-1", Message: "must not send"})
+	if result == nil || result.Delivered {
+		t.Fatalf("result = %#v, want non-delivery", result)
+	}
+	if err == nil || !strings.Contains(err.Error(), wantErr.Error()) {
+		t.Fatalf("error = %v, want readiness probe failure", err)
+	}
+	if len(tm.sent) != 0 {
+		t.Fatalf("failed readiness probe sent input: %v", tm.sent)
+	}
+}
+
+func TestSendMessage_RequiresReadinessCapabilityBeforeTmuxDelivery(t *testing.T) {
+	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")}, "my-session")
+	base := ctx.Tmux.(*mockTmux)
+	ctx.Tmux = &createOnlyTmux{TmuxInterface: base}
+
+	result, err := SendMessage(ctx, &SendMessageRequest{Recipient: "id-1", Message: "must not send"})
+	if result == nil || result.Delivered {
+		t.Fatalf("result = %#v, want non-delivery", result)
+	}
+	opErr := &OpError{}
+	if !errors.As(err, &opErr) || opErr.Code != ErrCodeSessionNotReady {
+		t.Fatalf("error = %v, want %s", err, ErrCodeSessionNotReady)
+	}
+	if len(base.sent) != 0 {
+		t.Fatalf("unverified pane received input: %v", base.sent)
 	}
 }
 

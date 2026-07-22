@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
@@ -28,7 +28,10 @@ func maybeProvisionSandbox(ctx context.Context, sessionID, workDir string) (*man
 				"  • Check ~/.agm/sandboxes/ directory permissions")
 		return nil, workDir, err
 	}
-	workDir = sandboxInfo.MergedPath
+	if sandboxInfo.WorkingDir == "" {
+		return nil, workDir, fmt.Errorf("sandbox provider %s returned an empty working directory", sandboxInfo.Provider)
+	}
+	workDir = sandboxInfo.WorkingDir
 	fmt.Printf("Using sandbox workspace: %s\n", workDir)
 	return sandboxInfo, workDir, nil
 }
@@ -81,11 +84,11 @@ func provisionSandbox(ctx context.Context, providerName string, sessionID string
 		return nil, fmt.Errorf("failed to resolve sandbox lower directories: %w", err)
 	}
 
-	// Determine the primary/target repo: prefer a repo that has go.mod at root
-	// (the monorepo) to avoid alphabetical scanning picking the wrong repo.
-	targetRepo := findPrimaryRepo(lowerDirs)
+	// Determine the primary/target repo: the repository containing the requested
+	// directory wins, then the legacy monorepo fallbacks apply.
+	targetRepo := findPrimaryRepo(lowerDirs, workDir)
 	if targetRepo != "" {
-		debug.Log("Target repo (has go.mod): %s", targetRepo)
+		debug.Log("Target repo: %s", targetRepo)
 	}
 
 	// Create sandbox
@@ -94,6 +97,7 @@ func provisionSandbox(ctx context.Context, providerName string, sessionID string
 	sb, err := provider.Create(ctx, sandbox.SandboxRequest{
 		SessionID:    sessionID,
 		LowerDirs:    lowerDirs,
+		WorkingDir:   workDir,
 		WorkspaceDir: sandboxWorkspace,
 		Secrets:      cfg.Sandbox.Secrets,
 		TargetRepo:   targetRepo,
@@ -104,6 +108,14 @@ func provisionSandbox(ctx context.Context, providerName string, sessionID string
 
 	debug.Log("Sandbox created successfully")
 	debug.Log("Merged path: %s", sb.MergedPath)
+	debug.Log("Working directory: %s", sb.WorkingDir)
+	if sb.WorkingDir == "" {
+		contractErr := fmt.Errorf("sandbox provider %s returned an empty working directory", provider.Name())
+		if cleanupErr := provider.Destroy(ctx, sb.ID); cleanupErr != nil {
+			return nil, errors.Join(contractErr, fmt.Errorf("cleanup failed: %w", cleanupErr))
+		}
+		return nil, contractErr
+	}
 	ui.PrintSuccess(fmt.Sprintf("Sandbox provisioned: %s", provider.Name()))
 
 	// Write onboarding CLAUDE.md with worktree instructions
@@ -119,10 +131,10 @@ func provisionSandbox(ctx context.Context, providerName string, sessionID string
 		}
 		if onboardErr != nil {
 			debug.Log("Warning: failed to generate onboarding content: %v", onboardErr)
-		} else if err := sandbox.WriteOnboardingClaudeMd(sb.MergedPath, content); err != nil {
+		} else if err := sandbox.WriteOnboardingClaudeMd(sb.WorkingDir, content); err != nil {
 			debug.Log("Warning: failed to write onboarding CLAUDE.md: %v", err)
 		} else {
-			debug.Log("Wrote sandbox onboarding to ~/.claude/projects/ for %s", sb.MergedPath)
+			debug.Log("Wrote sandbox onboarding to ~/.claude/projects/ for %s", sb.WorkingDir)
 		}
 	}
 
@@ -131,16 +143,17 @@ func provisionSandbox(ctx context.Context, providerName string, sessionID string
 		ID:         sb.ID,
 		Provider:   provider.Name(),
 		MergedPath: sb.MergedPath,
+		WorkingDir: sb.WorkingDir,
 		CreatedAt:  sb.CreatedAt,
 	}, nil
 }
 
-// resolveSandboxLowerDirs returns the OverlayFS lower directories for a new
+// resolveSandboxLowerDirs returns the provider lower directories for a new
 // sandbox: prefer cfg.Sandbox.Repos, otherwise scan ~/src/ws/oss/repos for
-// git repos, otherwise fall back to workDir — but only if workDir is itself
-// a git repository. If nothing usable is configured or found, resolution
-// fails loud (sandbox.ErrCodeNoLowerDirs) rather than silently cloning
-// workDir: an unset/misresolved workDir (e.g. launchd's default cwd of
+// git repos and ensure the repository containing workDir remains included.
+// If nothing usable is configured or found, resolution
+// fails loud (sandbox.ErrCodeNoLowerDirs) rather than silently cloning an
+// arbitrary directory: an unset/misresolved workDir (e.g. launchd's default cwd of
 // $HOME, with no --directory or $PWD) would otherwise trigger an unbounded
 // clone of the wrong directory tree.
 func resolveSandboxLowerDirs(workDir string) ([]string, error) {
@@ -161,59 +174,89 @@ func resolveSandboxLowerDirs(workDir string) ([]string, error) {
 		}
 	}
 	if len(lowerDirs) > 0 {
-		debug.Log("Found %d repos in workspace: %v", len(lowerDirs), lowerDirs)
+		if _, matchErr := sandbox.MatchWorkingDir(workDir, lowerDirs); matchErr == nil {
+			debug.Log("Found %d repos in workspace including requested project: %v", len(lowerDirs), lowerDirs)
+			return lowerDirs, nil
+		}
+		requestedRoot, reason := sandboxFallbackRoot(workDir)
+		if reason != "" {
+			return nil, sandbox.NewNoSandboxLowerDirsError(workDir, reason)
+		}
+		lowerDirs = append([]string{requestedRoot}, lowerDirs...)
+		debug.Log("Added requested project root to %d scanned repos: %v", len(lowerDirs)-1, lowerDirs)
 		return lowerDirs, nil
 	}
 
-	if reason := unsafeSandboxFallbackReason(workDir); reason != "" {
+	fallbackRoot, reason := sandboxFallbackRoot(workDir)
+	if reason != "" {
 		return nil, sandbox.NewNoSandboxLowerDirsError(workDir, reason)
 	}
-	debug.Log("No repos found, using workDir as lower dir: %s", workDir)
-	return []string{workDir}, nil
+	debug.Log("No repos found, using containing git repo as lower dir: %s", fallbackRoot)
+	return []string{fallbackRoot}, nil
 }
 
 // unsafeSandboxFallbackReason returns a non-empty reason if workDir is unsafe
 // to use as a sandbox lower dir fallback (empty, resolves to $HOME, or is not
 // a git repository), or "" if workDir is safe to clone.
 func unsafeSandboxFallbackReason(workDir string) string {
+	_, reason := sandboxFallbackRoot(workDir)
+	return reason
+}
+
+// sandboxFallbackRoot returns the nearest containing Git repository. This
+// preserves an explicitly requested subdirectory while ensuring providers
+// clone only the repository boundary, never an arbitrary ancestor tree.
+func sandboxFallbackRoot(workDir string) (string, string) {
 	if workDir == "" {
-		return "workDir is empty"
+		return "", "workDir is empty"
+	}
+	resolvedWorkDir, err := filepath.EvalSymlinks(workDir)
+	if err != nil {
+		return "", fmt.Sprintf("cannot resolve workDir: %v", err)
+	}
+	resolvedWorkDir, err = filepath.Abs(resolvedWorkDir)
+	if err != nil {
+		return "", fmt.Sprintf("cannot make workDir absolute: %v", err)
 	}
 	if homeDir, err := os.UserHomeDir(); err == nil {
-		resolvedWorkDir, _ := filepath.EvalSymlinks(workDir)
 		resolvedHome, _ := filepath.EvalSymlinks(homeDir)
-		if workDir == homeDir || (resolvedWorkDir != "" && resolvedWorkDir == resolvedHome) {
-			return "resolved to $HOME — refusing to clone the entire home directory"
+		if resolvedWorkDir == resolvedHome {
+			return "", "resolved to $HOME — refusing to clone the entire home directory"
 		}
 	}
-	if _, err := os.Stat(filepath.Join(workDir, ".git")); err != nil {
-		return "not a git repository (no .git directory)"
+	for candidate := resolvedWorkDir; ; candidate = filepath.Dir(candidate) {
+		if _, statErr := os.Stat(filepath.Join(candidate, ".git")); statErr == nil {
+			if homeDir, homeErr := os.UserHomeDir(); homeErr == nil {
+				resolvedHome, _ := filepath.EvalSymlinks(homeDir)
+				if candidate == resolvedHome {
+					return "", "Git root resolved to $HOME — refusing to clone the entire home directory"
+				}
+			}
+			return candidate, ""
+		}
+		parent := filepath.Dir(candidate)
+		if parent == candidate {
+			break
+		}
 	}
-	return ""
+	return "", "not inside a git repository (no .git entry in workDir or its parents)"
 }
 
 // findPrimaryRepo selects the preferred repo from a list of repo paths.
 // It uses a priority cascade to avoid picking the wrong repo when multiple
 // repos have go.mod (e.g. ai-conversation-logs vs ai-tools):
-//  1. The repo matching the current working directory (or its symlink target)
+//  1. The repo containing the requested session directory
 //  2. The repo named "ai-tools" (AGM's own monorepo — the right default)
 //  3. Any repo with go.mod at root
 //  4. The first repo as a last resort
 //
 // Returns empty string if no suitable repo is found.
-func findPrimaryRepo(repoDirs []string) string {
-	// 1. Check if the current working directory is inside one of the repos.
-	//    In a sandbox the cwd may be a symlink, so resolve it first.
-	if cwd, err := os.Getwd(); err == nil {
-		resolvedCwd, _ := filepath.EvalSymlinks(cwd)
-		for _, dir := range repoDirs {
-			resolvedDir, _ := filepath.EvalSymlinks(dir)
-			if strings.HasPrefix(cwd, dir+"/") || cwd == dir ||
-				(resolvedDir != "" && (strings.HasPrefix(resolvedCwd, resolvedDir+"/") || resolvedCwd == resolvedDir)) {
-				debug.Log("findPrimaryRepo: cwd %s is inside repo %s", cwd, dir)
-				return dir
-			}
-		}
+func findPrimaryRepo(repoDirs []string, workDir string) string {
+	// 1. The explicitly requested session directory is authoritative, even
+	//    when AGM itself was invoked from another checkout.
+	if match, err := sandbox.MatchWorkingDir(workDir, repoDirs); err == nil {
+		debug.Log("findPrimaryRepo: requested directory %s is inside repo %s", workDir, match.LowerDir)
+		return match.LowerDir
 	}
 
 	// 2. Prefer the repo named "ai-tools" — AGM lives in this monorepo,

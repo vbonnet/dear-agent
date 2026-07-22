@@ -1,8 +1,10 @@
+include ../mk/install-go-bin.mk
+
 .PHONY: build test lint install clean test-unit test-coverage coverage test-e2e-docker test-all install-skills init test-hooks test-bdd verify-contracts
 
 # Version information
 VERSION ?= 2.0.0-dev
-GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+GIT_COMMIT ?= $(shell commit=$$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown); if [ "$$commit" != unknown ] && [ -n "$$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then printf '%s-dirty' "$$commit"; else printf '%s' "$$commit"; fi)
 BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 BUILT_BY ?= $(shell whoami)
 
@@ -42,11 +44,14 @@ install: build
 	@rm -f $(HOME)/bin/csm $(HOME)/.local/bin/csm 2>/dev/null || true  # Remove legacy csm binaries
 	@rm -f $(HOME)/bin/agm-reaper $(HOME)/.local/bin/agm-reaper 2>/dev/null || true
 	@rm -f $(HOME)/bin/agm-mcp-server $(HOME)/.local/bin/agm-mcp-server 2>/dev/null || true
-	@# Install to standard Go binary location (using install for atomic replacement)
+	@# Install to the standard Go binary location. `install -m` was NOT atomic
+	@# enough: like cp it rewrites the destination inode, so on macOS a rebuilt
+	@# binary fails the cached code-signing check and is SIGKILLed before main()
+	@# runs. install-go-bin stages, signs and renames instead (ce-77ip.8).
 	mkdir -p $(HOME)/go/bin
-	install -m 755 bin/agm $(HOME)/go/bin/agm
-	install -m 755 bin/agm-reaper $(HOME)/go/bin/agm-reaper
-	install -m 755 bin/agm-mcp-server $(HOME)/go/bin/agm-mcp-server
+	$(call install-go-bin,bin/agm)
+	$(call install-go-bin,bin/agm-reaper)
+	$(call install-go-bin,bin/agm-mcp-server)
 	@echo "✓ agm binary installed to $(HOME)/go/bin/agm"
 	@echo "✓ agm-reaper binary installed to $(HOME)/go/bin/agm-reaper"
 	@echo "✓ agm-mcp-server binary installed to $(HOME)/go/bin/agm-mcp-server"

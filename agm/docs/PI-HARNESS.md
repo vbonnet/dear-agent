@@ -14,7 +14,7 @@ marketplace, config-directory, quota, and BDD parity contracts.
 agm admin install-harness pi
 agm session new pi-work --harness pi-cli -C /absolute/project/path
 agm session new pi-plan --harness pi-cli --permission-mode plan -C /absolute/project/path
-agm session send msg pi-work "Inspect the failing test"
+agm send msg pi-work --prompt "Inspect the failing test"
 agm session resume pi-work
 ```
 
@@ -76,7 +76,7 @@ they can be pre-approved without weakening plan mode. Patterns are anchored;
 wildcards must be explicit. Bash calls containing unquoted command chaining,
 redirection, or command substitution are never pre-approved by an allowlist;
 default mode asks interactively and a non-interactive caller fails closed.
-Runtime transitions use `agm session send mode`,
+Runtime transitions use `agm send mode <mode> <session-name>`,
 which sends the managed `/agm-mode plan|default|auto` command. Model transitions use
 `/agm-model provider/model` and are persisted only after AGM observes the
 managed transition result.
@@ -138,7 +138,25 @@ models and authentication configured in Pi.
 
 AGM reads Pi's native JSONL usage and provider-reported cost. It uses the latest
 assistant prompt footprint for context, the audited Pi 0.81.1 model-catalog
-window for the recorded model, and sums native cost records for the session.
+window for the recorded direct or nested OpenRouter model route, and sums
+native cost records for the session. Route identity matters: Pi's nested
+OpenRouter OpenAI entries can expose a different context window than the same
+model through direct OpenAI. Provider and model IDs remain case-sensitive and
+separate; a custom raw model ID may repeat its provider prefix without AGM
+collapsing that opaque segment.
+For models declared in Pi's `models.json`, AGM reads only the bounded model ID,
+`contextWindow`, and `modelOverrides` data: it never evaluates credential or
+command fields. A custom model with an omitted window uses Pi's 128000-token
+default. Mathematically integral JSON decimal and exponent spellings are
+accepted exactly like Pi, while explicit null, fractional, or otherwise invalid
+windows are rejected without floating-point rounding. An override
+matching the exact provider-qualified route recorded by Pi applies even when
+the provider or model is newer than AGM's static tables; unqualified orphan
+overrides remain conservative. Malformed, oversized, symlinked,
+group- or other-writable, ambiguous, or invalid catalog data retains AGM's
+conservative 200000-token fallback. An unqualified legacy model is accepted
+only when exactly one provider matches; a second match remains ambiguous even
+when both windows are equal or one declaration is invalid.
 Pi does not expose a provider quota/rate-limit API, so those fields are
 reported as unavailable rather than populated with Claude-specific values.
 

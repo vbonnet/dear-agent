@@ -297,7 +297,10 @@ func eachSafePRTransactionShouldHaveOneAccurateAuditRecord(ctx context.Context) 
 func runLocalGuardrailGoTest(parent context.Context, pattern string, packages ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
 	defer cancel()
-	commandArgs := []string{"test", "-count=1", "-timeout=90s", "-run", pattern}
+	// Verbose output is part of the guardrail contract: callers can prove that
+	// their exact named regression ran instead of accepting Go's successful
+	// "no tests to run" result after a stale pattern.
+	commandArgs := []string{"test", "-v", "-count=1", "-timeout=90s", "-run", pattern}
 	commandArgs = append(commandArgs, packages...)
 	cmd := exec.CommandContext(ctx, "go", commandArgs...)
 	cmd.Dir = localDevBDDRepoRoot()
@@ -312,6 +315,9 @@ func runLocalGuardrailGoTest(parent context.Context, pattern string, packages ..
 	out, err := cmd.CombinedOutput()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return string(out), fmt.Errorf("go test timed out after 2m")
+	}
+	if err == nil && !strings.Contains(string(out), "=== RUN") {
+		return string(out), fmt.Errorf("go test pattern %q did not run a named regression", pattern)
 	}
 	return string(out), err
 }

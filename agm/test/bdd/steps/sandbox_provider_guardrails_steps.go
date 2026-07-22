@@ -2,8 +2,12 @@ package steps
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -51,6 +55,14 @@ func RegisterSandboxProviderGuardrailSteps(ctx *godog.ScenarioContext) {
 	})
 	ctx.Step(`^AGM runs the sandbox provider cleanup retry regressions$`, agmRunsSandboxProviderCleanupRetryRegressions)
 	ctx.Step(`^failed destruction should resume at the unfinished cleanup phase$`, failedSandboxDestructionShouldResumeAtUnfinishedPhase)
+	ctx.Step(`^AGM runs the sandbox working directory regressions$`, agmRunsSandboxWorkingDirectoryRegressions)
+	ctx.Step(`^sandbox providers should preserve the requested project directory$`, sandboxProvidersShouldPreserveRequestedProjectDirectory)
+	ctx.Step(`^flat Linux providers should reject host-symlink fallbacks$`, flatLinuxProvidersShouldRejectHostSymlinkFallbacks)
+	ctx.Step(`^flat Linux providers should preserve private worktree failure diagnostics$`, flatLinuxProvidersShouldPreservePrivateWorktreeFailureDiagnostics)
+	ctx.Step(`^APFS should detach linked worktree Git metadata on macOS$`, apfsShouldDetachLinkedWorktreeGitMetadataOnMacOS)
+	ctx.Step(`^AGM should route the mapped directory through the shared harness lifecycle$`, agmShouldRouteMappedDirectoryThroughSharedHarnessLifecycle)
+	ctx.Step(`^AGM runs the retired sandbox provider regressions$`, agmRunsRetiredSandboxProviderRegressions)
+	ctx.Step(`^claudecode-worktree should be rejected before workspace creation$`, claudeCodeWorktreeShouldBeRejectedBeforeWorkspaceCreation)
 	ctx.Step(`^the invoking repository worktree inventory is captured$`, captureInvokingRepositoryWorktrees)
 	ctx.Step(`^Wayfinder sandbox isolation regressions run$`, runWayfinderSandboxIsolationRegressions)
 	ctx.Step(`^the Wayfinder sandbox isolation regressions should pass$`, wayfinderSandboxIsolationRegressionsShouldPass)
@@ -80,12 +92,155 @@ func failedSandboxDestructionShouldResumeAtUnfinishedPhase(ctx context.Context) 
 	return nil
 }
 
+func agmRunsSandboxWorkingDirectoryRegressions(ctx context.Context) error {
+	state, ok := ctx.Value(sandboxProviderCleanupStateKey{}).(*sandboxProviderCleanupState)
+	if !ok || state == nil {
+		return fmt.Errorf("sandbox provider cleanup state not initialized")
+	}
+	state.output, state.err = runSandboxProviderCommand(ctx, 2*time.Minute,
+		"go", "test", "-v", "-count=1", "-timeout=90s", "-run",
+		`^(TestMatchWorkingDir.*|TestMapFlatWorkingDir.*|TestPrioritizeLowerDir.*|TestBubblewrap(RejectsMatchedNonGitLowerDir|RejectsConfigRepoOutsideLowerDirs|PreservesGitWorktreeCreationFailure)|TestGVisor(RejectsMatchedNonGitLowerDir|PreservesGitWorktreeCreationFailure)|TestNativeOverlayFSRequestPrioritizesMatchedLowerDir|TestProvider_CreateMapsRequestedWorkingDirectoryIntoMatchingClone|TestProvider_CreateDetachesLinkedWorktreeGitMetadata|TestResolveSandboxLowerDirs_(FallsBackToContainingGitRepoForSubdirectory|ScansWorkspaceRepos|IncludesRequestedRepoAlongsideWorkspaceScan)|TestFindPrimaryRepoUsesRequestedDirectoryInsteadOfProcessCWD|TestMaybeProvisionSandboxReturnsProviderMappedWorkingDirectory|TestProvisionSandbox.*)$`,
+		"./internal/sandbox", "./internal/sandbox/apfs", "./internal/sandbox/bubblewrap", "./internal/sandbox/gvisor", "./agm/cmd/agm",
+	)
+	return nil
+}
+
+func flatLinuxProvidersShouldPreservePrivateWorktreeFailureDiagnostics(ctx context.Context) error {
+	state, ok := ctx.Value(sandboxProviderCleanupStateKey{}).(*sandboxProviderCleanupState)
+	if !ok || state == nil {
+		return fmt.Errorf("sandbox provider cleanup state not initialized")
+	}
+	names := []string{"TestBubblewrapPreservesGitWorktreeCreationFailure"}
+	if runtime.GOOS == "linux" {
+		names = append(names, "TestGVisorPreservesGitWorktreeCreationFailure")
+	}
+	for _, name := range names {
+		if !strings.Contains(state.output, "--- PASS: "+name) {
+			return fmt.Errorf("sandbox working directory output does not show %s passing:\n%s", name, state.output)
+		}
+	}
+	return nil
+}
+
+func flatLinuxProvidersShouldRejectHostSymlinkFallbacks(ctx context.Context) error {
+	state, ok := ctx.Value(sandboxProviderCleanupStateKey{}).(*sandboxProviderCleanupState)
+	if !ok || state == nil {
+		return fmt.Errorf("sandbox provider cleanup state not initialized")
+	}
+	names := []string{
+		"TestBubblewrapRejectsMatchedNonGitLowerDir",
+		"TestBubblewrapRejectsConfigRepoOutsideLowerDirs",
+	}
+	if runtime.GOOS == "linux" {
+		names = append(names,
+			"TestGVisorRejectsMatchedNonGitLowerDir",
+			"TestNativeOverlayFSRequestPrioritizesMatchedLowerDir",
+		)
+	}
+	for _, name := range names {
+		if !strings.Contains(state.output, "--- PASS: "+name) {
+			return fmt.Errorf("sandbox working directory output does not show %s passing:\n%s", name, state.output)
+		}
+	}
+	return nil
+}
+
+func apfsShouldDetachLinkedWorktreeGitMetadataOnMacOS(ctx context.Context) error {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	state, ok := ctx.Value(sandboxProviderCleanupStateKey{}).(*sandboxProviderCleanupState)
+	if !ok || state == nil {
+		return fmt.Errorf("sandbox provider cleanup state not initialized")
+	}
+	if !strings.Contains(state.output, "--- PASS: TestProvider_CreateDetachesLinkedWorktreeGitMetadata") {
+		return fmt.Errorf("sandbox working directory output does not show APFS linked-worktree isolation passing:\n%s", state.output)
+	}
+	return nil
+}
+
+func sandboxProvidersShouldPreserveRequestedProjectDirectory(ctx context.Context) error {
+	state, ok := ctx.Value(sandboxProviderCleanupStateKey{}).(*sandboxProviderCleanupState)
+	if !ok || state == nil {
+		return fmt.Errorf("sandbox provider cleanup state not initialized")
+	}
+	if state.err != nil {
+		return fmt.Errorf("sandbox working directory regressions: %w: %s", state.err, state.output)
+	}
+	for _, name := range []string{
+		"TestMatchWorkingDirPreservesNestedRelativePath",
+		"TestMatchWorkingDirSelectsMostSpecificConfiguredRepository",
+		"TestMatchWorkingDirResolvesSymlinkAliases",
+		"TestPrioritizeLowerDirMovesMappedRepositoryFirstWithoutMutatingRequest",
+	} {
+		if !strings.Contains(state.output, "--- PASS: "+name) {
+			return fmt.Errorf("sandbox working directory output does not show %s passing:\n%s", name, state.output)
+		}
+	}
+	return nil
+}
+
+func agmShouldRouteMappedDirectoryThroughSharedHarnessLifecycle(ctx context.Context) error {
+	state, ok := ctx.Value(sandboxProviderCleanupStateKey{}).(*sandboxProviderCleanupState)
+	if !ok || state == nil {
+		return fmt.Errorf("sandbox provider cleanup state not initialized")
+	}
+	for _, name := range []string{
+		"TestResolveSandboxLowerDirs_FallsBackToContainingGitRepoForSubdirectory",
+		"TestFindPrimaryRepoUsesRequestedDirectoryInsteadOfProcessCWD",
+		"TestMaybeProvisionSandboxReturnsProviderMappedWorkingDirectory",
+		"TestProvisionSandboxCleansUpProviderThatViolatesWorkingDirectoryContract",
+		"TestProvisionSandboxPreservesContractAndCleanupFailures",
+	} {
+		if !strings.Contains(state.output, "--- PASS: "+name) {
+			return fmt.Errorf("AGM sandbox lifecycle output does not show %s passing:\n%s", name, state.output)
+		}
+	}
+	return nil
+}
+
+func agmRunsRetiredSandboxProviderRegressions(ctx context.Context) error {
+	state, ok := ctx.Value(sandboxProviderCleanupStateKey{}).(*sandboxProviderCleanupState)
+	if !ok || state == nil {
+		return fmt.Errorf("sandbox provider cleanup state not initialized")
+	}
+	state.output, state.err = runSandboxProviderCommand(ctx, 2*time.Minute,
+		"go", "test", "-v", "-count=1", "-timeout=90s", "-run",
+		`^(TestProviderLookup_RetiredClaudeCodeWorktree|TestProvisionSandboxRejectsRetiredClaudeCodeProviderBeforeWorkspaceCreation)$`,
+		"./internal/sandbox", "./agm/cmd/agm",
+	)
+	return nil
+}
+
+func claudeCodeWorktreeShouldBeRejectedBeforeWorkspaceCreation(ctx context.Context) error {
+	state, ok := ctx.Value(sandboxProviderCleanupStateKey{}).(*sandboxProviderCleanupState)
+	if !ok || state == nil {
+		return fmt.Errorf("sandbox provider cleanup state not initialized")
+	}
+	if state.err != nil {
+		return fmt.Errorf("retired sandbox provider regressions: %w: %s", state.err, state.output)
+	}
+	for _, name := range []string{
+		"TestProviderLookup_RetiredClaudeCodeWorktree",
+		"TestProvisionSandboxRejectsRetiredClaudeCodeProviderBeforeWorkspaceCreation",
+	} {
+		if !strings.Contains(state.output, "--- PASS: "+name) {
+			return fmt.Errorf("retired provider output does not show %s passing:\n%s", name, state.output)
+		}
+	}
+	return nil
+}
+
 func captureInvokingRepositoryWorktrees(ctx context.Context) error {
 	state, err := getSandboxProviderRuntimeState(ctx)
 	if err != nil {
 		return err
 	}
-	state.worktreesBefore, err = runSandboxProviderCommand(ctx, 10*time.Second, "git", "worktree", "list", "--porcelain")
+	raw, err := runSandboxProviderCommand(ctx, 10*time.Second, "git", "worktree", "list", "--porcelain")
+	if err != nil {
+		return err
+	}
+	state.worktreesBefore, err = scopedWorktreeInventory(packageSpecBDDRepoRoot(), raw)
 	return err
 }
 
@@ -101,7 +256,12 @@ func runWayfinderSandboxIsolationRegressions(ctx context.Context) error {
 		"-run", `^Test(CreateSandbox|ListSandboxes|CleanupSandbox|BasicSandboxOperationsDoNotMutateHostRepository|SandboxGitWorktreeLifecycleIsIsolated)$`,
 		"-count=1", "-timeout=90s",
 	)
-	state.worktreesAfter, state.inventoryErr = runSandboxProviderCommand(ctx, 10*time.Second, "git", "worktree", "list", "--porcelain")
+	raw, err := runSandboxProviderCommand(ctx, 10*time.Second, "git", "worktree", "list", "--porcelain")
+	if err != nil {
+		state.inventoryErr = err
+		return err
+	}
+	state.worktreesAfter, state.inventoryErr = scopedWorktreeInventory(packageSpecBDDRepoRoot(), raw)
 	return nil
 }
 
@@ -139,6 +299,75 @@ func invokingRepositoryWorktreesShouldBeUnchanged(ctx context.Context) error {
 		return fmt.Errorf("invoking repository worktree inventory changed:\nbefore:\n%s\nafter:\n%s", state.worktreesBefore, state.worktreesAfter)
 	}
 	return nil
+}
+
+func scopedWorktreeInventory(root, porcelain string) (string, error) {
+	root = filepath.Clean(root)
+	var scoped []string
+	for record := range strings.SplitSeq(strings.TrimSpace(porcelain), "\n\n") {
+		if strings.TrimSpace(record) == "" {
+			continue
+		}
+		firstLine, _, _ := strings.Cut(record, "\n")
+		path, ok := strings.CutPrefix(firstLine, "worktree ")
+		if !ok || strings.TrimSpace(path) == "" {
+			return "", fmt.Errorf("malformed worktree record: %q", record)
+		}
+		within, err := pathWithinDirectory(root, strings.TrimSpace(path))
+		if err != nil {
+			return "", err
+		}
+		if within {
+			scoped = append(scoped, record)
+		}
+	}
+	return strings.Join(scoped, "\n\n"), nil
+}
+
+func pathWithinDirectory(root, path string) (bool, error) {
+	canonicalRoot, err := canonicalPathAllowMissing(root)
+	if err != nil {
+		return false, fmt.Errorf("resolve invoking repository root %q: %w", root, err)
+	}
+	canonicalPath, err := canonicalPathAllowMissing(path)
+	if err != nil {
+		return false, fmt.Errorf("resolve worktree path %q: %w", path, err)
+	}
+	rel, err := filepath.Rel(canonicalRoot, canonicalPath)
+	if err != nil {
+		return false, fmt.Errorf("compare worktree path %q with root %q: %w", path, root, err)
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))), nil
+}
+
+// canonicalPathAllowMissing resolves every existing prefix while retaining a
+// missing suffix. Git can report a concurrently removed, prunable worktree;
+// its absent path must still be classified lexically against the physical
+// invoking root instead of turning unrelated shared-repository churn into a
+// BDD failure.
+func canonicalPathAllowMissing(path string) (string, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	current := filepath.Clean(absolute)
+	var suffix []string
+	for {
+		resolved, resolveErr := filepath.EvalSymlinks(current)
+		if resolveErr == nil {
+			parts := append([]string{resolved}, suffix...)
+			return filepath.Join(parts...), nil
+		}
+		if !errors.Is(resolveErr, os.ErrNotExist) {
+			return "", resolveErr
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", resolveErr
+		}
+		suffix = append([]string{filepath.Base(current)}, suffix...)
+		current = parent
+	}
 }
 
 func getSandboxProviderRuntimeState(ctx context.Context) (*sandboxProviderRuntimeState, error) {

@@ -354,7 +354,11 @@ cat .git/ci-gate-bypass.log
 1. **Install enhanced hook:**
    ```bash
    go install ./cmd/agm-hooks/pre-merge-commit
-   cp $(go env GOPATH)/bin/pre-merge-commit .git/hooks/
+   # Stage and rename so a hook that is mid-execution is never overwritten
+   # in place (ce-77ip.8).
+   stage=$(mktemp .git/hooks/pre-merge-commit.XXXXXX) \
+     && cp "$(go env GOPATH)/bin/pre-merge-commit" "$stage" \
+     && chmod 755 "$stage" && mv -f "$stage" .git/hooks/pre-merge-commit
    ```
 
 2. **Create policy file:**

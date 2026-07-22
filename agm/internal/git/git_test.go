@@ -389,6 +389,25 @@ func TestFindGitRoot(t *testing.T) {
 	}
 }
 
+func TestWorktreeRootResolvesNestedProjectDirectory(t *testing.T) {
+	repo := t.TempDir()
+	if err := exec.Command("git", "init", repo).Run(); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(repo, "agm", "cmd", "agm")
+	if err := os.MkdirAll(nested, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := WorktreeRoot(nested)
+	if err != nil {
+		t.Fatalf("WorktreeRoot() error = %v", err)
+	}
+	if got != repo {
+		t.Fatalf("WorktreeRoot() = %q, want %q", got, repo)
+	}
+}
+
 // TestIsInGitRepo verifies IsInGitRepo convenience function
 func TestIsInGitRepo(t *testing.T) {
 	// Test case 1: Not in git repo

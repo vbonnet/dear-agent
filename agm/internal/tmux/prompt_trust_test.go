@@ -47,7 +47,7 @@ read -r answer
 # After Enter, render the Claude prompt.
 sleep 0.2
 printf '\n❯ '
-sleep 5
+sleep 30
 `
 	require.NoError(t, writeExecutableFile(script, scriptContent))
 
@@ -67,12 +67,14 @@ sleep 5
 	//  1. See the trust prompt
 	//  2. Send Enter to answer it
 	//  3. See the ❯ prompt that the script prints after Enter
-	// All within 10s — far below the 90s production timeout.
+	// All within 15s — far below the 90s production timeout. Keep the fake
+	// harness alive beyond this deadline so a loaded host cannot erase the
+	// prompt before the polling assertion observes it.
 	start := time.Now()
-	err = WaitForClaudePrompt(sessionName, 10*time.Second)
+	err = WaitForClaudePrompt(sessionName, 15*time.Second)
 	elapsed := time.Since(start)
 	require.NoError(t, err, "should detect ❯ after auto-answering trust prompt (waited %v)", elapsed)
-	require.Less(t, elapsed, 10*time.Second, "should complete well under timeout")
+	require.Less(t, elapsed, 15*time.Second, "should complete well under timeout")
 }
 
 // TestWaitForClaudePrompt_NoTrustPrompt verifies the existing behavior is
@@ -92,7 +94,7 @@ func TestWaitForClaudePrompt_NoTrustPrompt(t *testing.T) {
 echo "Welcome to Claude Code"
 sleep 0.2
 printf '\n❯ '
-sleep 5
+sleep 30
 `
 	require.NoError(t, writeExecutableFile(script, scriptContent))
 
@@ -105,7 +107,9 @@ sleep 5
 	require.NoError(t, cmd.Run())
 
 	start := time.Now()
-	err = WaitForClaudePrompt(sessionName, 5*time.Second)
+	// The fixture stays alive beyond the deadline so host scheduling delay
+	// cannot remove the prompt while readiness polling is still bounded.
+	err = WaitForClaudePrompt(sessionName, 15*time.Second)
 	elapsed := time.Since(start)
 	require.NoError(t, err, "should detect ❯ without trust prompt (waited %v)", elapsed)
 }

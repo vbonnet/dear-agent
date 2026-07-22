@@ -43,6 +43,8 @@ hide the rest of the cleanup result.
 
 **CLEANUP-13** When dry run is enabled, the system shall report removable worktrees without removing them.
 
+**CLEANUP-14** When a tracked worktree was removed or was already absent, the system shall delete only that record's non-empty branch, deduplicate identical repository-and-branch targets, and preserve every inferred session-name branch and every branch whose worktree removal failed.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

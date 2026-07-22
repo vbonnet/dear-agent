@@ -664,11 +664,11 @@ defaults:
 
 ## Session Communication
 
-### agm session send
+### agm send msg
 
-Send message/prompt to running session, interrupting active thinking.
+Send a message to a registered session when its harness composer can safely receive input.
 
-**Usage**: `agm session send <session-name> [flags]`
+**Usage**: `agm send msg <session-name> [flags]`
 
 **Flags**:
 - `--prompt <text>` - Prompt text to send
@@ -678,31 +678,31 @@ Send message/prompt to running session, interrupting active thinking.
 
 ```bash
 # Send inline prompt
-agm session send my-session --prompt "Please review the code"
+agm send msg my-session --prompt "Please review the code"
 
 # Send from file (large prompts)
-agm session send my-session --prompt-file ~/prompts/diagnosis.txt
+agm send msg my-session --prompt-file ~/prompts/diagnosis.txt
 
 # Send multi-line prompt
-agm session send research --prompt "Analyze the following:
+agm send msg research --prompt "Analyze the following:
 1. Authentication flow
 2. Error handling
 3. Security concerns"
 
-# Interrupt and redirect stuck session
-agm session send my-session --prompt "Stop and list all files in current directory"
+# Send when the registered harness composer is ready
+agm send msg my-session --prompt "List all files in the current directory"
 
 # Send code review request
-agm session send code-review --prompt "Review src/auth/login.py for security issues"
+agm send msg code-review --prompt "Review src/auth/login.py for security issues"
 
 # Send research task
-agm session send research-task --prompt-file ~/tasks/api-analysis.md
+agm send msg research-task --prompt-file ~/tasks/api-analysis.md
 ```
 
 **Features**:
-- Auto-interrupt: Sends ESC to stop thinking
-- Literal mode: Prevents special character interpretation
-- Reliable execution: Prompt runs as command, not pasted text
+- Harness-aware readiness: Refuses input unless the registered harness owns the current composer
+- Exact-pane delivery: Pins readiness and input to the same pane
+- Non-disruptive routing: Busy or blocked sessions are queued or rejected without sending ESC
 - Large prompts: Supports up to 10KB files
 
 **Use Cases**:
@@ -1433,7 +1433,7 @@ agm resume research-task
 agm new --harness claude-code code-review-auth-refactor
 
 # Send code for review
-agm session send code-review-auth-refactor --prompt "Review the authentication refactor in src/auth/"
+agm send msg code-review-auth-refactor --prompt "Review the authentication refactor in src/auth/"
 
 # Resume to see results
 agm resume code-review-auth-refactor
@@ -1449,7 +1449,7 @@ agm archive code-review-auth-refactor
 agm new --harness gemini-cli --workflow deep-research api-research
 
 # Send URLs for research
-agm session send api-research --prompt "Analyze these API design patterns: https://..."
+agm send msg api-research --prompt "Analyze these API design patterns: https://..."
 
 # Resume to review findings
 agm resume api-research
@@ -1551,7 +1551,7 @@ agm list --all
 agm new task --harness claude-code --prompt "Review security vulnerabilities"
 
 # Send follow-up commands
-agm session send task --prompt-file ~/prompts/security-checklist.txt
+agm send msg task --prompt-file ~/prompts/security-checklist.txt
 
 # Reject permission with guidance
 agm session reject task --reason "Use Read tool instead of cat command"

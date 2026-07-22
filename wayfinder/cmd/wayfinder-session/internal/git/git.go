@@ -30,6 +30,16 @@ func (g *GitIntegrator) IsGitRepo() bool {
 	return err == nil
 }
 
+// IsGitWorktree reports whether the project directory is inside a Git work
+// tree. Unlike IsGitRepo, it rejects bare repositories, which cannot retain
+// Wayfinder lifecycle artifacts as working-tree files.
+func (g *GitIntegrator) IsGitWorktree() bool {
+	cmd := exec.Command("git", "rev-parse", "--is-inside-work-tree")
+	cmd.Dir = g.projectDir
+	output, err := cmd.Output()
+	return err == nil && strings.TrimSpace(string(output)) == "true"
+}
+
 // CommitPhaseCompletion creates a scoped git commit for phase completion.
 // It includes canonical marker files and the phase's Markdown artifacts while
 // preserving unrelated staged or unstaged user changes.

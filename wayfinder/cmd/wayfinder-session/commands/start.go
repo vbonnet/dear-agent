@@ -69,6 +69,9 @@ func runStart(cmd *cobra.Command, args []string) error {
 
 	// Get project directory
 	projectDir := GetProjectDirectory()
+	if !git.New(projectDir).IsGitWorktree() {
+		return fmt.Errorf("wayfinder session project directory must be inside a Git work tree: %s", projectDir)
+	}
 
 	// Check --force flag
 	forceFlag, _ := cmd.Flags().GetBool("force")

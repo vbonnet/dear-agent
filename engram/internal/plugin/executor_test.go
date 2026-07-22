@@ -11,6 +11,8 @@ import (
 
 // TestExecutor_Timeout verifies that plugin execution respects timeout
 func TestExecutor_Timeout(t *testing.T) {
+	requireExecutableSandbox(t)
+
 	// Create temporary directory for test plugin
 	tmpDir := t.TempDir()
 
@@ -104,6 +106,8 @@ commands:
 
 // TestExecutor_ContextCancellation verifies that parent context cancellation is respected
 func TestExecutor_ContextCancellation(t *testing.T) {
+	requireExecutableSandbox(t)
+
 	tmpDir := t.TempDir()
 
 	pluginDir := filepath.Join(tmpDir, "test-cancel")
@@ -175,6 +179,8 @@ commands:
 
 // TestExecutor_TimeoutVsCompletion verifies timeout behavior with fast and slow commands
 func TestExecutor_TimeoutVsCompletion(t *testing.T) {
+	requireExecutableSandbox(t)
+
 	tmpDir := t.TempDir()
 
 	pluginDir := filepath.Join(tmpDir, "test-timing")
@@ -275,6 +281,8 @@ func TestExecutor_CustomTimeout(t *testing.T) {
 
 // TestExecutor_TimeoutErrorMessage verifies timeout error messages are descriptive
 func TestExecutor_TimeoutErrorMessage(t *testing.T) {
+	requireExecutableSandbox(t)
+
 	tmpDir := t.TempDir()
 
 	pluginDir := filepath.Join(tmpDir, "my-plugin")

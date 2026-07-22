@@ -151,6 +151,82 @@ func TestQueueCurrentTmuxCodexDoesNotWaitForReadiness(t *testing.T) {
 	}
 }
 
+func TestCurrentTmuxLaunchResultDefersEveryQueuedHarness(t *testing.T) {
+	t.Parallel()
+
+	for _, harness := range []string{"claude-code", "codex-cli", "opencode-cli", "pi-cli", "gemini-cli"} {
+		if got := currentTmuxLaunchResult(harness).Readiness; got != ops.CreateSessionReadinessDeferredUntilCallerExit {
+			t.Errorf("currentTmuxLaunchResult(%q) readiness = %q, want deferred", harness, got)
+		}
+	}
+	if got := currentTmuxLaunchResult("agy").Readiness; got != "" {
+		t.Fatalf("current-tmux AGY readiness = %q, want unsupported/unverified", got)
+	}
+}
+
+func TestQueueCurrentTmuxHarnessCommandUsesCanonicalCommandWithoutWaiting(t *testing.T) {
+	t.Parallel()
+
+	for harness, executable := range map[string]string{"claude-code": "claude", "opencode-cli": "opencode", "gemini-cli": "gemini"} {
+		t.Run(harness, func(t *testing.T) {
+			t.Parallel()
+			spec := ops.HarnessLaunchSpec{Harness: harness, SessionName: "current", WorkDir: "/tmp/current"}
+			var gotExecutable, gotSession, gotCommand string
+			err := queueCurrentTmuxHarnessCommand(t.Context(), spec, currentTmuxCommandQueueRuntime{
+				lookPath: func(file string) (string, error) {
+					gotExecutable = file
+					return "/usr/local/bin/" + file, nil
+				},
+				sendCommand: func(sessionName, command string) error {
+					gotSession, gotCommand = sessionName, command
+					return nil
+				},
+			})
+			if err != nil {
+				t.Fatalf("queueCurrentTmuxHarnessCommand() error = %v", err)
+			}
+			if gotExecutable != executable {
+				t.Fatalf("executable lookup = %q, want %q", gotExecutable, executable)
+			}
+			if gotSession != spec.SessionName || gotCommand != ops.BuildHarnessLaunchCommand(spec).Command {
+				t.Fatalf("queued (%q, %q), want canonical command for %#v", gotSession, gotCommand, spec)
+			}
+		})
+	}
+}
+
+func TestQueueCurrentTmuxHarnessCommandRejectsMissingExecutable(t *testing.T) {
+	t.Parallel()
+
+	for harness, executable := range map[string]string{"claude-code": "claude", "opencode-cli": "opencode", "gemini-cli": "gemini"} {
+		t.Run(harness, func(t *testing.T) {
+			t.Parallel()
+			wantErr := errors.New(executable + " not found")
+			var gotExecutable string
+			sent := false
+			err := queueCurrentTmuxHarnessCommand(t.Context(), ops.HarnessLaunchSpec{Harness: harness}, currentTmuxCommandQueueRuntime{
+				lookPath: func(file string) (string, error) {
+					gotExecutable = file
+					return "", wantErr
+				},
+				sendCommand: func(string, string) error {
+					sent = true
+					return nil
+				},
+			})
+			if !errors.Is(err, wantErr) {
+				t.Fatalf("error = %v, want executable lookup error %v", err, wantErr)
+			}
+			if gotExecutable != executable {
+				t.Fatalf("executable lookup = %q, want %q", gotExecutable, executable)
+			}
+			if sent {
+				t.Fatal("command was queued after executable preflight failed")
+			}
+		})
+	}
+}
+
 func TestQueueCurrentTmuxCodexRejectsMissingExecutable(t *testing.T) {
 	t.Parallel()
 

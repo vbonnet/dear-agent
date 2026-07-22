@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
+	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 )
@@ -78,34 +79,38 @@ func runClaudePostCreate(ctx context.Context, sessionName string, modeAppliedAtS
 	return deliverInitialPrompt(ctx, sessionName, true, true)
 }
 
-// deliverInitialPrompt sends the user-supplied --prompt or --prompt-file to the
-// session. The multiLine flag selects SendMultiLinePromptSafeContext (Claude) vs
-// SendPromptLiteral (Gemini/OpenCode/Codex). verifyDelivery enables the generic
-// retry verifier, which depends on Claude-style prompt echo/processing signals.
+// deliverInitialPrompt sends the user-supplied --prompt or --prompt-file only
+// after atomically revalidating the registered harness and current composer on
+// one exact pane. verifyDelivery enables the generic retry verifier, which
+// depends on Claude-style prompt echo/processing signals. multiLine remains in
+// the call shape for harness post-create compatibility; exact-pane delivery is
+// multiline-safe for every supported CLI harness.
 func deliverInitialPrompt(ctx context.Context, sessionName string, multiLine, verifyDelivery bool) error {
+	return deliverInitialPromptWithSender(ctx, sessionName, multiLine, verifyDelivery, session.NewRealTmux())
+}
+
+func deliverInitialPromptWithSender(ctx context.Context, sessionName string, multiLine, verifyDelivery bool, sender session.AtomicInputSender) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	switch {
 	case prompt != "":
-		return deliverInitialPromptText(ctx, sessionName, multiLine, verifyDelivery)
+		return deliverInitialPromptTextWithSender(ctx, sessionName, multiLine, verifyDelivery, sender)
 	case promptFile != "":
-		return deliverInitialPromptFile(ctx, sessionName, verifyDelivery)
+		return deliverInitialPromptFileWithSender(ctx, sessionName, verifyDelivery, sender)
 	default:
 		return nil
 	}
 }
 
 func deliverInitialPromptText(ctx context.Context, sessionName string, multiLine, verifyDelivery bool) error {
+	return deliverInitialPromptTextWithSender(ctx, sessionName, multiLine, verifyDelivery, session.NewRealTmux())
+}
+
+func deliverInitialPromptTextWithSender(ctx context.Context, sessionName string, _ bool, verifyDelivery bool, sender session.AtomicInputSender) error {
 	debug.Log("Sending prompt from --prompt flag")
 	send := func() error {
-		if multiLine {
-			return tmux.SendMultiLinePromptSafeContext(ctx, sessionName, prompt, false)
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		return tmux.SendPromptLiteral(sessionName, prompt, false)
+		return sendInitialPromptAtomically(ctx, sender, sessionName, harnessName, prompt)
 	}
 	if err := send(); err != nil {
 		return reportInitialPromptSendFailure(ctx, err, "Failed to send prompt", "")
@@ -117,10 +122,17 @@ func deliverInitialPromptText(ctx context.Context, sessionName string, multiLine
 }
 
 func deliverInitialPromptFile(ctx context.Context, sessionName string, verifyDelivery bool) error {
+	return deliverInitialPromptFileWithSender(ctx, sessionName, verifyDelivery, session.NewRealTmux())
+}
+
+func deliverInitialPromptFileWithSender(ctx context.Context, sessionName string, verifyDelivery bool, sender session.AtomicInputSender) error {
 	debug.Log("Sending prompt from --prompt-file flag: %s", promptFile)
 	promptContent, readable := readPromptForVerification(promptFile)
+	if !readable {
+		return reportInitialPromptSendFailure(ctx, fmt.Errorf("read prompt file %q", promptFile), "Failed to send prompt from file", promptFile)
+	}
 	send := func() error {
-		return tmux.SendPromptFileSafeContext(ctx, sessionName, promptFile, false)
+		return sendInitialPromptAtomically(ctx, sender, sessionName, harnessName, string(promptContent))
 	}
 	if err := send(); err != nil {
 		return reportInitialPromptSendFailure(ctx, err, "Failed to send prompt from file", promptFile)
@@ -129,6 +141,26 @@ func deliverInitialPromptFile(ctx context.Context, sessionName string, verifyDel
 		return nil
 	}
 	return verifyAndRetryPromptDelivery(ctx, sessionName, string(promptContent), send)
+}
+
+func sendInitialPromptAtomically(ctx context.Context, sender session.AtomicInputSender, sessionName, harness, message string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if sender == nil {
+		return fmt.Errorf("verified initial prompt delivery requires atomic tmux readiness")
+	}
+	readiness, err := sender.SendKeysIfInputReady(ctx, sessionName, harness, message, session.InputDeliveryOptions{})
+	if err != nil {
+		return fmt.Errorf("atomic initial prompt delivery: %w", err)
+	}
+	if !readiness.Ready {
+		return fmt.Errorf("initial prompt target is not ready: %s", readiness.State)
+	}
+	if readiness.PaneID == "" {
+		return fmt.Errorf("initial prompt delivery did not verify an exact pane")
+	}
+	return nil
 }
 
 func readPromptForVerification(file string) ([]byte, bool) {

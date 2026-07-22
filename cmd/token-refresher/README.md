@@ -17,7 +17,9 @@ token-refresher -force       # refresh even if the current token is still fresh
 ```
 
 Default (print) mode emits **only** the access token on stdout (all logs go to
-stderr), so it satisfies the Claude Code `apiKeyHelper` contract.
+stderr), so it composes cleanly with any caller that wants to capture the token.
+(This is *not* an invitation to wire it up as an `apiKeyHelper` — see
+"Retired wiring" below.)
 
 ## Flags
 
@@ -41,19 +43,37 @@ stderr), so it satisfies the Claude Code `apiKeyHelper` contract.
 
 ## Wiring options
 
-- **`apiKeyHelper` (on-demand):** point Claude Code's `apiKeyHelper` setting at
-  this binary; the CLI then drives the cadence (every
-  `CLAUDE_CODE_API_KEY_HELPER_TTL_MS`, or on HTTP 401). This covers *active*
-  sessions.
 - **launchd (idle backstop):** schedule `token-refresher -force` so the
   credentials file stays fresh — and the single-use refresh-token family stays
-  alive — even when no session is running. This covers *idle* time.
+  alive — even when no session is running. This covers *idle* time. **This is
+  the only sanctioned wiring.**
 - **In-process:** callers already using `auth.ResolveOAuthToken()` get the same
   refresh for free.
 
-Both the `apiKeyHelper` and the launchd job run the same binary and share its
-cross-process credentials lock, so they never race or double-spend the refresh
-token (ce-rnpt / ce-f3e3).
+### Retired wiring: `apiKeyHelper` — do not reintroduce
+
+This binary was previously wired in as Claude Code's `apiKeyHelper` (ce-cs3v,
+PR #560) and no longer is. **That wiring was removed from the host on
+2026-07-10 and must not be restored.**
+
+Since claude-code 2.1.205, a configured `apiKeyHelper` is treated as an external
+API key that takes precedence over — and *shadows* — a healthy `claude.ai` OAuth
+login, and the CLI refuses to fall back to that login. The result is that
+`claude -p` fails with `Invalid API key · claude.ai connectors are disabled
+because ANTHROPIC_API_KEY or another auth source is set` even when
+`~/.claude/.credentials.json` is perfectly fresh. Upstream:
+[#11587](https://github.com/anthropics/claude-code/issues/11587),
+[#9694](https://github.com/anthropics/claude-code/issues/9694),
+[#23568](https://github.com/anthropics/claude-code/issues/23568).
+
+It also masked real errors: with the helper in front, a dead token family
+surfaced as `apiKeyHelper failed: exited 2` and not as a legible auth failure,
+which cost days of misdirected debugging (see the ce-77ip epic's "four-layer
+auth failure" retro).
+
+The stdout contract below is unchanged and still useful — it is what makes the
+binary composable — but it must **never** be consumed via a retired
+`apiKeyHelper` setting.
 
 ### Wire it into the mesh (ce-cs3v)
 
@@ -62,15 +82,11 @@ make install-token-refresher-launchagent
 ```
 
 Stages [`deploy/launchd/com.dear-agent.token-refresher.plist`](../../deploy/launchd/com.dear-agent.token-refresher.plist)
-(a 30-minute idle backstop) into `~/Library/LaunchAgents` and prints the two
-ask-gated host steps to run yourself:
+(a 30-minute idle backstop) into `~/Library/LaunchAgents` and prints the single
+ask-gated host step to run yourself:
 
 ```
-# 1. schedule the idle backstop
 launchctl load ~/Library/LaunchAgents/com.dear-agent.token-refresher.plist
-
-# 2. point Claude Code's apiKeyHelper at the refresher (on-demand refresh)
-configure-claude-settings set apiKeyHelper '"$HOME/go/bin/token-refresher"'
 ```
 
 The scheduled job routes stdout (the access token) to `/dev/null` and keeps
