@@ -278,8 +278,7 @@ func HasSessionIdentityStrict(identity SessionIdentity) (bool, error) {
 func isMissingSessionOutput(output []byte) bool {
 	lowerOutput := strings.ToLower(string(output))
 	return strings.Contains(lowerOutput, "can't find session") ||
-		strings.Contains(lowerOutput, "no current target") ||
-		strings.Contains(lowerOutput, "no server running")
+		strings.Contains(lowerOutput, "no current target")
 }
 
 func tmuxCommandError(operation, sessionName string, output []byte, err error) error {

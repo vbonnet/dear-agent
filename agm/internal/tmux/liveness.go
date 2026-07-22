@@ -17,7 +17,6 @@ package tmux
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -287,16 +286,9 @@ type activePaneTarget struct {
 // so later capture and delivery cannot drift if pane focus changes.
 func resolveActivePaneTarget(ctx context.Context, sessionName, socketPath string) (activePaneTarget, bool, error) {
 	normalized := NormalizeTmuxSessionName(sessionName)
-	has := exec.CommandContext(ctx, "tmux", "-S", socketPath, "has-session", "-t", FormatSessionTarget(normalized))
-	if err := has.Run(); err != nil {
-		if ctx.Err() != nil {
-			return activePaneTarget{}, false, fmt.Errorf("tmux has-session timed out: %w", ctx.Err())
-		}
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return activePaneTarget{}, false, nil
-		}
-		return activePaneTarget{}, false, fmt.Errorf("tmux has-session failed: %w", err)
+	exists, err := tmuxSessionExistsOnSocket(ctx, normalized, socketPath)
+	if err != nil || !exists {
+		return activePaneTarget{}, exists, err
 	}
 	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "list-panes", "-t", FormatSessionTarget(normalized), "-f", "#{pane_active}", "-F", "#{pane_id}\t#{pane_pid}")
 	out, err := cmd.Output()
@@ -322,19 +314,12 @@ func resolveActivePaneTarget(ctx context.Context, sessionName, socketPath string
 // "session is dead".
 func listPanePIDs(ctx context.Context, sessionName, socketPath string) ([]int, error) {
 	normalized := NormalizeTmuxSessionName(sessionName)
-	has := exec.CommandContext(ctx, "tmux", "-S", socketPath, "has-session", "-t", FormatSessionTarget(normalized))
-	if err := has.Run(); err != nil {
-		// Check the context FIRST: a context-kill also surfaces as an
-		// *exec.ExitError (signal: killed), which must not be mistaken for
-		// "session does not exist".
-		if ctx.Err() != nil {
-			return nil, fmt.Errorf("tmux has-session timed out: %w", ctx.Err())
-		}
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return nil, nil // tmux ran and said: session does not exist
-		}
-		return nil, fmt.Errorf("tmux has-session failed: %w", err)
+	exists, err := tmuxSessionExistsOnSocket(ctx, normalized, socketPath)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, nil
 	}
 	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "list-panes", "-s", "-t", FormatSessionTarget(normalized), "-F", "#{pane_pid}")
 	out, err := cmd.Output()
@@ -354,6 +339,25 @@ func listPanePIDs(ctx context.Context, sessionName, socketPath string) ([]int, e
 		pids = append(pids, pid)
 	}
 	return pids, nil
+}
+
+func tmuxSessionExistsOnSocket(ctx context.Context, normalizedName, socketPath string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "has-session", "-t", FormatSessionTarget(normalizedName))
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return false, fmt.Errorf("tmux has-session timed out: %w", ctx.Err())
+	}
+	return tmuxSessionExistenceResult(normalizedName, output, err)
+}
+
+func tmuxSessionExistenceResult(normalizedName string, output []byte, err error) (bool, error) {
+	if err == nil {
+		return true, nil
+	}
+	if isMissingSessionOutput(output) {
+		return false, nil
+	}
+	return false, tmuxCommandError("check session", normalizedName, output, err)
 }
 
 // readProcessTable runs `ps -axo pid=,ppid=,comm=` and parses the result.
@@ -885,23 +889,12 @@ func CheckPaneLivenessBatch(sessionNames []string, socketPath string) (map[strin
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "list-panes", "-a", "-F", "#{session_name}\t#{pane_pid}")
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("tmux list-panes -a timed out: %w", ctx.Err())
 		}
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			// tmux ran but failed — most commonly "no server running", which
-			// means no session exists at all. That IS a verdict for every
-			// requested name.
-			results := make(map[string]PaneLiveness, len(sessionNames))
-			for _, name := range sessionNames {
-				results[name] = PaneLiveness{SessionExists: false}
-			}
-			return results, nil
-		}
-		return nil, fmt.Errorf("tmux list-panes -a failed: %w", err)
+		return nil, tmuxCommandError("list panes", "all sessions", out, err)
 	}
 
 	pidsBySession := make(map[string][]int)

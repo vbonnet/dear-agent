@@ -21,6 +21,63 @@ func TestCheckPaneLivenessContextHonorsCallerCancellation(t *testing.T) {
 	}
 }
 
+func TestTmuxSessionExistenceResultDistinguishesOperationalFailures(t *testing.T) {
+	t.Parallel()
+
+	exitErr := errors.New("exit status 1")
+	tests := []struct {
+		name       string
+		output     string
+		err        error
+		wantExists bool
+		wantErr    string
+	}{
+		{name: "session exists", wantExists: true},
+		{name: "explicit missing target", output: "can't find session: absent", err: exitErr},
+		{name: "server unavailable", output: "no server running on /tmp/agm.sock", err: exitErr, wantErr: "no server running"},
+		{name: "socket inaccessible", output: "error connecting to /tmp/agm.sock (Permission denied)", err: exitErr, wantErr: "Permission denied"},
+		{name: "unclassified failure", err: exitErr, wantErr: "exit status 1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			exists, err := tmuxSessionExistenceResult("target", []byte(tt.output), tt.err)
+			if exists != tt.wantExists {
+				t.Fatalf("exists = %v, want %v", exists, tt.wantExists)
+			}
+			if tt.wantErr == "" && err != nil {
+				t.Fatalf("error = %v, want nil", err)
+			}
+			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestTmuxSessionExistsOnSocketDistinguishesMissingSessionFromSocketFailure(t *testing.T) {
+	skipIfNoTmux(t)
+	socketPath, cleanup := setupTestSocket(t)
+	defer cleanup()
+	if output, err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", "existence-seed", "sleep", "30").CombinedOutput(); err != nil {
+		t.Fatalf("create seed tmux session: %v: %s", err, output)
+	}
+
+	exists, err := tmuxSessionExistsOnSocket(t.Context(), "absent", socketPath)
+	if err != nil || exists {
+		t.Fatalf("explicit missing target = (exists=%v, err=%v), want (false, nil)", exists, err)
+	}
+
+	missingSocket := filepath.Join(socketDir(t), "missing.sock")
+	exists, err = tmuxSessionExistsOnSocket(t.Context(), "absent", missingSocket)
+	if err == nil || exists {
+		t.Fatalf("missing socket = (exists=%v, err=%v), want backend error", exists, err)
+	}
+	if _, err := CheckPaneLivenessBatch([]string{"absent"}, missingSocket); err == nil {
+		t.Fatal("batch liveness reported a dead session when the tmux socket was unavailable")
+	}
+}
+
 func TestIsPiProcessInPaneTreeContextHonorsCallerCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

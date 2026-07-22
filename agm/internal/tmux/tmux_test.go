@@ -380,17 +380,17 @@ func TestRenameSessionIdentityRejectsIDReuseAfterServerRestart(t *testing.T) {
 	}
 }
 
-func TestIsMissingSessionOutputIncludesEmptyServerVerdict(t *testing.T) {
+func TestIsMissingSessionOutputRequiresExplicitMissingTarget(t *testing.T) {
 	for _, output := range []string{
 		"can't find session: missing",
 		"no current target",
-		"no server running on /private/tmp/agm.sock",
 	} {
 		if !isMissingSessionOutput([]byte(output)) {
 			t.Fatalf("isMissingSessionOutput(%q) = false, want true", output)
 		}
 	}
 	for _, output := range []string{
+		"no server running on /private/tmp/agm.sock",
 		"permission denied",
 		"failed to connect to server",
 		"server exited unexpectedly",

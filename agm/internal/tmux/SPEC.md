@@ -98,6 +98,8 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-45** When expected harness liveness is checked for input delivery, the system shall require a matching harness process to belong to the terminal's current foreground process group and not be stopped; a suspended or background harness descendant and a stale composer rendered above the foreground shell shall be classified as `WRONG_HARNESS` and shall never authorize input.
 
+**TMUX-46** When shared input readiness or pane liveness checks verify tmux session existence, the system shall classify only an explicit missing-target response as absence and shall return inaccessible-socket, unavailable-server, timeout, permission, and other backend failures instead of reporting `NOT_FOUND` or a dead session.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
