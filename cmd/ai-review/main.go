@@ -119,6 +119,9 @@ func run(c config) int {
 	if strings.TrimSpace(c.apiKey) == "" {
 		if c.override {
 			fmt.Println("::warning::ANTHROPIC_API_KEY missing but 'ai-review:override' label present; passing on human authority.")
+			// AIREV-03: the gate always posts its result before passing on
+			// human authority, so the override leaves a sticky audit trail.
+			postComment(c, overrideComment("the ANTHROPIC_API_KEY secret is not configured, so no automated review could run"))
 			return 0
 		}
 		fmt.Println("::error::ANTHROPIC_API_KEY is not set; the AI review gate cannot run and fails closed. Set the secret, or apply the 'ai-review:override' label after a human review.")

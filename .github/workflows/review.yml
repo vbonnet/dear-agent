@@ -41,16 +41,42 @@ jobs:
     timeout-minutes: 25
 
     steps:
-      - name: Checkout (full history for diff)
+      # SECURITY: check out the *base* (protected) revision, not the PR merge
+      # revision. The reviewer is the thing enforcing the gate, so it must never
+      # be code the PR under review controls: a PR could otherwise replace
+      # main() with a bare success to neuter its own gate, or exfiltrate the
+      # ANTHROPIC_API_KEY / GH_TOKEN handed to the run step. The PR revision is
+      # fetched below as *data* only (the diff), never executed.
+      - name: Checkout trusted base revision
         uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
           go-version-file: 'go.mod'
           cache: true
+
+      # Fetch the untrusted head as data. refs/pull/<n>/head works for both
+      # fork and same-repo PRs; merge-group heads live on origin already.
+      - name: Fetch PR head for diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          origin="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+          if [ -n "${PR:-}" ]; then
+            git fetch --no-tags "$origin" "+refs/pull/${PR}/head:refs/ai-review/head"
+          else
+            git fetch --no-tags "$origin" "+${HEAD_SHA}:refs/ai-review/head"
+          fi
+          git cat-file -e "${HEAD_SHA}^{commit}"
 
       # The override must survive the merge queue: a merge_group run cannot see
       # the originating PR's labels, so without this a human-overridden PR would

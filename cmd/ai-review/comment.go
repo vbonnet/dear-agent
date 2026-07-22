@@ -59,6 +59,16 @@ func forkComment() string {
 		"<sub>Required gate per REVIEW.md §2/§5.</sub>\n"
 }
 
+// overrideComment is posted when the gate passes purely on human authority,
+// so every override leaves a sticky, auditable trail on the PR even when no
+// automated review could run.
+func overrideComment(reason string) string {
+	return commentMarker + "\n## ⚠️ AI Code Review — passed by human override\n\n" +
+		"> The `ai-review:override` label is present, so this required gate passed on **human authority**: " + reason + ".\n\n" +
+		"No automated 5-dimension review backs this result. The override is recorded on this PR as a label.\n\n" +
+		"<sub>Required gate per REVIEW.md §2/§5.</sub>\n"
+}
+
 // oversizeComment is posted when the diff exceeds the auto-review size limit.
 func oversizeComment(size, limit int) string {
 	return fmt.Sprintf(commentMarker+"\n## ⚠️ AI Code Review — diff too large\n\n"+

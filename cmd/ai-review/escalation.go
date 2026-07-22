@@ -53,8 +53,17 @@ var escalationRules = []escalationRule{
 		reason: "security boundary change (write guard, deny rules, PII manifest)",
 		match: func(p string) bool {
 			lower := strings.ToLower(p)
+			// Match the packages that *own* the boundary, not just filename
+			// spellings — internal/fsguard owns the pre-tool write guards and
+			// ~/src enforcement, and its path contains none of the spellings.
+			for _, owner := range securityBoundaryDirs {
+				if strings.Contains(lower, owner) {
+					return true
+				}
+			}
 			return strings.Contains(lower, "write-guard") ||
 				strings.Contains(lower, "write_guard") ||
+				strings.Contains(lower, "writeguard") ||
 				strings.Contains(lower, "pii-manifest") ||
 				strings.Contains(lower, "pii_manifest") ||
 				strings.Contains(lower, "codeowners")
@@ -83,6 +92,15 @@ var escalationRules = []escalationRule{
 				strings.Contains(lower, "/systemd/")
 		},
 	},
+}
+
+// securityBoundaryDirs are the packages that own a security boundary. A change
+// anywhere inside one escalates, regardless of the individual filename.
+var securityBoundaryDirs = []string{
+	"internal/fsguard/",
+	"internal/safegit/",
+	"internal/writeguard/",
+	"pkg/fsguard/",
 }
 
 // basename returns the final path element.

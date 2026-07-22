@@ -14,6 +14,10 @@ func TestEscalationTriggers_Paths(t *testing.T) {
 		{"hook script", []string{".config/claude-code/hooks/pretool-bash-write-guard"}, true},
 		{"pretool prefix", []string{"cmd/pretool-fs-write-guard/main.go"}, true},
 		{"write guard", []string{"internal/writeguard/write-guard.go"}, true},
+		// The package that owns the boundary must escalate even though its
+		// filename contains none of the guard spellings.
+		{"fsguard package", []string{"internal/fsguard/fsguard.go"}, true},
+		{"safegit package", []string{"internal/safegit/merge.go"}, true},
 		{"codeowners", []string{"CODEOWNERS"}, true},
 		{"pii manifest", []string{".config/dear-agent/pii-manifest.yaml"}, true},
 		{"terraform", []string{"infra/modules/managed-repo/main.tf"}, true},
