@@ -18,6 +18,9 @@ func readProcessArgv(pid int) ([]string, error) {
 		return nil, fmt.Errorf("kern.procargs2 %d: short response", pid)
 	}
 	argc := int(binary.NativeEndian.Uint32(raw[:4]))
+	if argc <= 0 || argc > 1<<20 {
+		return nil, fmt.Errorf("kern.procargs2 %d: invalid argc %d", pid, argc)
+	}
 	position := 4
 	for position < len(raw) && raw[position] != 0 {
 		position++

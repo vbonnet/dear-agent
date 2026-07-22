@@ -272,6 +272,9 @@ func readProcessCommandTable(ctx context.Context) ([]procCommandEntry, error) {
 	}
 	entries := parsePSCommandTable(string(out))
 	for index := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("read process argv: %w", err)
+		}
 		if processCommandExecutable(entries[index].Command) != "node" {
 			continue
 		}
