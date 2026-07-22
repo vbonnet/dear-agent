@@ -49,36 +49,49 @@ func CleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandbox
 	result := &CleanupResult{}
 	logger := newCleanupLogger()
 	primaryWorktree := false
+	branchDeletionSafe := worktreePath == ""
 
 	// 1. Remove the git worktree (force to handle uncommitted changes).
 	if worktreePath != "" {
-		isPrimary, classifyErr := isPrimaryWorktree(worktreePath)
-		if classifyErr == nil && isPrimary {
+		worktreeRoot, isPrimary, classifyErr := classifyWorktree(worktreePath)
+		if classifyErr != nil {
+			logAction(logger, CleanupAction{
+				SessionID:   sessionID,
+				SessionName: sessionName,
+				Action:      "remove_worktree",
+				Target:      worktreePath,
+				Success:     false,
+				Error:       classifyErr.Error(),
+			})
+			slog.Warn("Preserving unclassified worktree and branch during archive cleanup",
+				"path", worktreePath, "error", classifyErr)
+		} else if isPrimary {
 			primaryWorktree = true
 			result.PrimaryWorktreeKept = true
 			logAction(logger, CleanupAction{
 				SessionID:   sessionID,
 				SessionName: sessionName,
 				Action:      "keep_primary_worktree",
-				Target:      worktreePath,
+				Target:      worktreeRoot,
 				Success:     true,
 			})
-			slog.Info("Preserving primary checkout during archive cleanup", "path", worktreePath)
+			slog.Info("Preserving primary checkout during archive cleanup", "path", worktreeRoot)
 		} else {
-			err := removeWorktreeCmd(repoPath, worktreePath)
+			err := removeWorktreeCmd(repoPath, worktreeRoot)
 			logAction(logger, CleanupAction{
 				SessionID:   sessionID,
 				SessionName: sessionName,
 				Action:      "remove_worktree",
-				Target:      worktreePath,
+				Target:      worktreeRoot,
 				Success:     err == nil,
 				Error:       errStr(err),
 			})
 			if err == nil {
 				result.WorktreesRemoved++
+				branchDeletionSafe = true
 			} else {
 				slog.Warn("Failed to remove worktree during archive cleanup",
-					"path", worktreePath, "error", err)
+					"path", worktreeRoot, "error", err)
 			}
 		}
 	}
@@ -105,7 +118,7 @@ func CleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandbox
 	// 3. Force-delete the session branch. We use -D (force) because archived
 	// session branches are almost never fast-forward merged (squash-merge via
 	// PR is the norm), so the safe -d would silently fail in most cases.
-	if branchName != "" && repoPath != "" && !primaryWorktree {
+	if branchName != "" && repoPath != "" && !primaryWorktree && branchDeletionSafe {
 		err := forceDeleteBranch(repoPath, branchName)
 		logAction(logger, CleanupAction{
 			SessionID:   sessionID,
@@ -168,24 +181,27 @@ func CleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandbox
 	return result
 }
 
-// isPrimaryWorktree proves whether path names the repository's primary
-// checkout. The git worktree inventory is authoritative and os.SameFile keeps
-// symlink or spelling differences from turning the primary checkout into an
-// apparent linked worktree.
-func isPrimaryWorktree(path string) (bool, error) {
-	mainPath, err := gitpkg.MainWorktreePath(path)
+// classifyWorktree resolves a possibly nested project directory to its actual
+// worktree root, then proves whether that inventory entry is the primary
+// checkout. os.SameFile keeps symlink and spelling aliases identity-safe.
+func classifyWorktree(path string) (string, bool, error) {
+	worktreeRoot, err := gitpkg.WorktreeRoot(path)
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
-	pathInfo, err := os.Stat(path)
+	mainPath, err := gitpkg.MainWorktreePath(worktreeRoot)
 	if err != nil {
-		return false, fmt.Errorf("stat candidate worktree: %w", err)
+		return "", false, err
+	}
+	pathInfo, err := os.Stat(worktreeRoot)
+	if err != nil {
+		return "", false, fmt.Errorf("stat candidate worktree: %w", err)
 	}
 	mainInfo, err := os.Stat(mainPath)
 	if err != nil {
-		return false, fmt.Errorf("stat primary worktree: %w", err)
+		return "", false, fmt.Errorf("stat primary worktree: %w", err)
 	}
-	return os.SameFile(pathInfo, mainInfo), nil
+	return worktreeRoot, os.SameFile(pathInfo, mainInfo), nil
 }
 
 // removeWorktreeCmd runs `git worktree remove --force`.

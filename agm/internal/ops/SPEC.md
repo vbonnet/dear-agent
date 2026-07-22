@@ -79,7 +79,7 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-55** When an async reaper validates an active session before stopping its pane, the system shall permit that expected active pane only for preflight while preserving supervisor, completion-verification, and pending-delegation guards; the final archive shall enforce pane death again.
 
-**OPS-81** When archive cleanup receives the repository primary checkout as a session working directory, the system shall preserve that checkout and any merely name-matching branch, record the intentional preservation, and continue safe non-worktree cleanup; linked session worktrees shall retain their existing cleanup behavior.
+**OPS-81** When archive cleanup receives a directory inside the repository primary checkout, the system shall resolve and preserve that checkout and any merely name-matching branch, record the intentional preservation, and continue safe non-worktree cleanup; for linked worktrees, the system shall delete the session branch only after resolving and successfully removing the owning worktree root.
 
 **OPS-56** When `ArchiveSession` uses an isolated SQLite store or archives a manifest marked as a test session, the system shall preserve lifecycle, explicit legacy-directory moves, and injected external-archive behavior without mutating host trust, monitor, process, pending-message, worktree, branch, temporary-file, sandbox, or configuration state.
 
