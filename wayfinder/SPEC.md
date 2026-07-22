@@ -1,6 +1,6 @@
 # Wayfinder requirements specification
 
-<!-- Last audited at: 2026-07-19 -->
+<!-- Last audited at: 2026-07-22 -->
 
 **Status:** Active
 **Scope:** The canonical Wayfinder session lifecycle and its AI-facing contract.
@@ -42,6 +42,8 @@
 **WAY-17** When active command guidance names the Wayfinder executable, the system shall use the canonical `wayfinder session` entrypoint and reject the retired standalone binary.
 
 **WAY-18** When repository validation surfaces are inventoried, the system shall reject validators built for retired Wayfinder artifact or retrospective schemas.
+
+**WAY-19** When a phase document contains canonical leading YAML frontmatter, the document quality gate shall review the Markdown body after the closing delimiter.
 
 ## Traceability
 
