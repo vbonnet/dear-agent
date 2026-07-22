@@ -113,6 +113,24 @@ func TestCleanStaleSocket_RefusesWhenScanFails(t *testing.T) {
 	assert.FileExists(t, path, "socket must survive an inconclusive scan")
 }
 
+// ServerAliveOrRecover must not flatten an orphan into generic "server dead"
+// advice, because that advice is `rm -f <socket>` — the exact action that
+// creates the orphan and strands its sessions.
+func TestServerAliveOrRecover_PropagatesOrphanError(t *testing.T) {
+	path, cleanup := newSocketFile(t)
+	defer cleanup()
+	t.Setenv("AGM_TMUX_SOCKET", path)
+
+	stubProbes(t, false, false, []int{4242}, nil)
+
+	err := ServerAliveOrRecover()
+
+	var lsb *LiveServerBoundError
+	require.ErrorAs(t, err, &lsb, "orphan error must survive ServerAliveOrRecover")
+	assert.NotContains(t, err.Error(), "rm -f", "must never advise removing a bound socket")
+	assert.FileExists(t, path)
+}
+
 func TestDetectOrphanedServer(t *testing.T) {
 	t.Setenv("AGM_TMUX_SOCKET", "/tmp/agm-detect-test.sock")
 

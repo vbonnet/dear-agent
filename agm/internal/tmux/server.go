@@ -1,13 +1,9 @@
 package tmux
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"net"
-	"os/exec"
 	"strings"
-	"time"
 )
 
 // ServerDeadError indicates the tmux server has crashed or is unreachable.
@@ -68,28 +64,23 @@ func ServerAlive() error {
 	socketPath := GetSocketPath()
 
 	// Fast path: try to connect to socket directly (avoids spawning tmux process)
-	conn, err := net.DialTimeout("unix", socketPath, 2*time.Second) //nolint:noctx // TODO(context): plumb ctx through this layer
-	if err != nil {
-		// Socket connection failed — try tmux command as fallback
-		// (socket might be temporarily busy but server still alive)
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-
-		cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "list-sessions")
-		if cmdErr := cmd.Run(); cmdErr != nil {
-			// Both checks failed — server is dead
-			return &ServerDeadError{
-				Reason: fmt.Sprintf("socket unreachable (%v) and list-sessions failed (%v)", err, cmdErr),
-				Recovery: fmt.Sprintf("  1. Remove stale socket: rm -f %s\n"+
-					"  2. Restart tmux: tmux -S %s new-session -d\n"+
-					"  3. Or let AGM recreate: agm session new <name>", socketPath, socketPath),
-			}
-		}
-		// tmux command succeeded even though socket connect failed — server is alive
+	if probeDialable(socketPath) {
 		return nil
 	}
-	conn.Close()
-	return nil
+
+	// Socket connection failed — try tmux command as fallback
+	// (socket might be temporarily busy but server still alive)
+	if probeTmuxCommand(socketPath) {
+		return nil
+	}
+
+	// Both checks failed — server is unreachable.
+	return &ServerDeadError{
+		Reason: fmt.Sprintf("socket %s is unreachable by both connect and list-sessions", socketPath),
+		Recovery: fmt.Sprintf("  1. Check for an orphaned server: agm admin doctor\n"+
+			"  2. If none, remove the stale socket: rm -f %s\n"+
+			"  3. Or let AGM recreate it: agm session new <name>", socketPath),
+	}
 }
 
 // ServerAliveOrRecover checks if the tmux server is alive. If dead, attempts
@@ -101,8 +92,16 @@ func ServerAliveOrRecover() error {
 		return nil
 	}
 
-	// Server is dead — attempt to clean stale socket
+	// Server is unreachable — attempt to clean the socket if it is truly stale.
 	if err := CleanStaleSocket(); err != nil {
+		// An orphaned server (live, but its socket is unreachable) must be
+		// propagated verbatim: the generic advice below is `rm -f` the socket,
+		// which is precisely the action that created the orphan in the first
+		// place and would strand its sessions for good. See ce-7ep9.
+		var bound *LiveServerBoundError
+		if errors.As(err, &bound) {
+			return err
+		}
 		return &ServerDeadError{
 			Reason:   "server crashed and socket cleanup failed",
 			Recovery: fmt.Sprintf("  rm -f %s\n  agm session new <name>", GetSocketPath()),
