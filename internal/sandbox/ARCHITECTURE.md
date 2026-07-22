@@ -65,19 +65,17 @@ must not imply that a fallback sandbox was created.
 
 | Registry name | Platform | Current workspace strategy |
 |---|---|---|
-| `bubblewrap` | Linux host with `bwrap` | Materialize the requested lower directory as a git worktree when possible, validate namespace support, and use matched-first symlink population only when that directory is not a repository. |
+| `bubblewrap` | Linux host with `bwrap` | Materialize the requested lower directory as a private git worktree, validate namespace support, and fail creation when that isolation boundary cannot be built. |
 | `overlayfs`, `overlayfs-native` | Linux 5.11+ | Mount lower directories with an upper and work layer, giving the requested lower directory collision precedence. |
-| `gvisor` | Linux with `runsc` | Materialize the requested lower directory as a git worktree when possible, otherwise preserve it through matched-first symlink population, and validate gVisor availability; callers own later command wrapping. |
+| `gvisor` | Linux with `runsc` | Materialize the requested lower directory as a private git worktree and fail creation when that isolation boundary cannot be built; callers own later command wrapping. |
 | `apfs` | macOS | Clone source trees into an upper directory and expose it through a merged symlink. |
 | `mock` | tests | In-memory lifecycle with configurable failures and delays. |
 
-Bubblewrap and gVisor providers materialize a writable git worktree for the
-requested repository. A matched non-Git lower directory stays authoritative and
-uses their symlink fallback instead of being replaced by another repository.
-Their fallback symlink layout is not equivalent to
-copy-on-write isolation: writes through a symlink can reach the source. Callers
-requiring a hard isolation guarantee must verify the provider and creation mode,
-not infer it from the word “sandbox.”
+Bubblewrap and gVisor providers require a writable private git worktree for the
+requested repository. They reject a matched non-Git lower directory instead of
+substituting another repository or exposing host files through symlinks. A
+successful provider creation therefore cannot report a host-symlink directory
+as an isolated workspace.
 
 The former `claudecode-worktree` registry entry is intentionally retired. It
 created only an empty metadata directory and relied on a later Claude-specific
