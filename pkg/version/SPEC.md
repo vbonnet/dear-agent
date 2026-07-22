@@ -18,9 +18,12 @@
 
 **VERSION-07** While binaries serve any supported harness and model family, the system shall expose identical version and staleness semantics.
 
+**VERSION-08** When exact companion-process compatibility is compared, the system shall shorten the commit hash while preserving any dirty-source marker so clean and modified builds cannot be treated as identical.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/validation_workspace_parity.feature`
+- Feature: `agm/test/bdd/features/hook_parity.feature`
 
 ## Test Traceability
 

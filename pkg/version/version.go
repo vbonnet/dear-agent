@@ -71,3 +71,18 @@ func PopulateFromBuildInfo() {
 func Short() string {
 	return strings.TrimSuffix(GitCommit, "-dirty")
 }
+
+// RevisionIdentity returns a bounded revision suitable for exact companion
+// comparisons while preserving dirty provenance. Short intentionally drops
+// the marker for ancestry checks; process-boundary compatibility must not.
+func RevisionIdentity(commit string) string {
+	dirty := strings.HasSuffix(commit, "-dirty")
+	commit = strings.TrimSuffix(commit, "-dirty")
+	if len(commit) > 12 {
+		commit = commit[:12]
+	}
+	if dirty {
+		commit += "-dirty"
+	}
+	return commit
+}

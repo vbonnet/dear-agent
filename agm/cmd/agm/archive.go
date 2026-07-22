@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -21,6 +22,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 	"github.com/vbonnet/dear-agent/internal/override"
 	"github.com/vbonnet/dear-agent/internal/telemetry"
+	pkgversion "github.com/vbonnet/dear-agent/pkg/version"
 )
 
 var (
@@ -706,18 +708,47 @@ func spawnReaper(sessionName, harness string, outcome manifest.SessionOutcome) e
 			"agm-reaper binary not found",
 			fmt.Sprintf("  • Expected location: %s\n"+
 				"  • Log file: %s\n"+
-				"  • Build reaper: make build\n"+
-				"  • Or install: make install\n"+
+				"  • Reinstall the coherent pair: make install-agm\n"+
+				"  • Or from agm/: make install\n"+
 				"  • Or use synchronous archive: agm session archive %s (without --async)",
 				reaperPath, logFile, sessionName))
 		return fmt.Errorf("agm-reaper binary not found (log: %s): %w", logFile, err)
 	}
 
+	// The CLI and detached reaper share lifecycle serialization code. Refuse to
+	// cross the process boundary unless the exact binary at reaperPath proves it
+	// was built from the same VCS revision. The reaper repeats this check after
+	// exec so a post-merge rename between this probe and cmd.Start still fails
+	// closed instead of running mixed lifecycle schemas.
+	expectedRevision := pkgversion.RevisionIdentity(GitCommit)
+	if expectedRevision == "" || expectedRevision == "unknown" || expectedRevision == "unknown-dirty" {
+		return fmt.Errorf("cannot verify agm-reaper revision: agm has no embedded VCS revision")
+	}
+	check := exec.Command(reaperPath, "--check-revision", expectedRevision)
+	if out, err := check.CombinedOutput(); err != nil {
+		detail := strings.TrimSpace(string(out))
+		if detail == "" {
+			detail = err.Error()
+		}
+		return fmt.Errorf("agm-reaper revision mismatch: %s", detail)
+	}
+
 	// Get sessions directory from config
 	sessionsDir := cfg.SessionsDir
+	startupRead, startupWrite, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("create agm-reaper startup acknowledgement pipe: %w", err)
+	}
+	defer func() { _ = startupRead.Close() }()
+
+	reaperLog, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		_ = startupWrite.Close()
+		return fmt.Errorf("open agm-reaper log %s: %w", logFile, err)
+	}
 
 	// Build command with detachment
-	reaperArgs := []string{"--session", sessionName, "--log-file", logFile, "--sessions-dir", sessionsDir}
+	reaperArgs := []string{"--session", sessionName, "--log-file", logFile, "--sessions-dir", sessionsDir, "--expected-revision", expectedRevision, "--startup-fd", "3"}
 	if forceArchive {
 		reaperArgs = append(reaperArgs, "--force")
 	}
@@ -735,13 +766,18 @@ func spawnReaper(sessionName, harness string, outcome manifest.SessionOutcome) e
 		Setsid: true, // Create new session (detach from terminal)
 	}
 
-	// Redirect stdout/stderr to /dev/null (all logging goes to file)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
+	// The first inherited descriptor is fd 3. The child writes one readiness
+	// record only after validating its revision and opening the durable log.
+	cmd.ExtraFiles = []*os.File{startupWrite}
+	cmd.Stdout = reaperLog
+	cmd.Stderr = reaperLog
 	cmd.Stdin = nil
 
-	// Start process without waiting
+	// Start the detached process, then wait only for its bounded startup
+	// acknowledgement. Lifecycle work continues asynchronously after that gate.
 	if err := cmd.Start(); err != nil {
+		_ = startupWrite.Close()
+		_ = reaperLog.Close()
 		ui.PrintError(err,
 			"Failed to spawn reaper process",
 			fmt.Sprintf("  • Command: %s --session %s --log-file %s --sessions-dir %s\n"+
@@ -750,6 +786,13 @@ func spawnReaper(sessionName, harness string, outcome manifest.SessionOutcome) e
 				"  • Test manually: %s --help",
 				reaperPath, sessionName, logFile, sessionsDir, reaperPath, reaperPath, reaperPath))
 		return fmt.Errorf("failed to start reaper: %w", err)
+	}
+	_ = startupWrite.Close()
+	_ = reaperLog.Close()
+	if err := awaitReaperStartup(startupRead, 5*time.Second); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return fmt.Errorf("agm-reaper startup failed (log: %s): %w", logFile, err)
 	}
 
 	// Don't wait for process - it's detached
@@ -776,6 +819,29 @@ func spawnReaper(sessionName, harness string, outcome manifest.SessionOutcome) e
 	fmt.Printf("\nMonitor progress: tail -f %s\n", logFile)
 
 	return nil
+}
+
+func awaitReaperStartup(reader *os.File, timeout time.Duration) error {
+	result := make(chan error, 1)
+	go func() {
+		line, err := bufio.NewReader(reader).ReadString('\n')
+		if err != nil {
+			result <- fmt.Errorf("startup acknowledgement closed before readiness: %w", err)
+			return
+		}
+		if line != "ready\n" {
+			result <- fmt.Errorf("invalid startup acknowledgement %q", strings.TrimSpace(line))
+			return
+		}
+		result <- nil
+	}()
+
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(timeout):
+		return fmt.Errorf("startup acknowledgement timed out after %s", timeout)
+	}
 }
 
 func archiveHarnessDisplayName(harness string) string {
