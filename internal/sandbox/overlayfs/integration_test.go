@@ -220,6 +220,13 @@ func TestOverlayFS_MultiRepo(t *testing.T) {
 // TestOverlayFSWorkingDirectoryPrioritizesMatchedLowerDir verifies that the
 // provider's path mapping and its OverlayFS precedence select the same repo.
 func TestOverlayFSWorkingDirectoryPrioritizesMatchedLowerDir(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("OverlayFS only available on Linux")
+	}
+	if os.Getuid() != 0 {
+		t.Skip("overlayfs requires root")
+	}
+
 	provider := overlayfs.NewProvider()
 	ctx := context.Background()
 
