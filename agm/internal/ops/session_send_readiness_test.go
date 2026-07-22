@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/agm/internal/manager"
@@ -157,6 +158,13 @@ func TestSendMessage_PiPermissionPromptBlocksAtomicDelivery(t *testing.T) {
 	opErr := &OpError{}
 	if !errors.As(err, &opErr) || opErr.Code != ErrCodeSessionNotReady {
 		t.Fatalf("error = %v, want %s", err, ErrCodeSessionNotReady)
+	}
+	retryAdvice := strings.Join(opErr.Suggestions, "\n")
+	if !strings.Contains(retryAdvice, "agm send msg pi-session --prompt <text>") {
+		t.Fatalf("retry advice does not use the registered --prompt flag: %q", retryAdvice)
+	}
+	if strings.Contains(retryAdvice, "--message") {
+		t.Fatalf("retry advice uses unregistered --message flag: %q", retryAdvice)
 	}
 	if len(tmuxMock.atomicChecks) != 1 || tmuxMock.atomicChecks[0] != "pi-session:pi-cli" {
 		t.Fatalf("atomic input checks = %v, want [pi-session:pi-cli]", tmuxMock.atomicChecks)

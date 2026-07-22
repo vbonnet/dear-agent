@@ -198,7 +198,7 @@ func ErrSessionNotReady(name, readiness string) *OpError {
 		Instance: "session/send",
 		Suggestions: []string{
 			fmt.Sprintf("Inspect the pane: `agm capture %s`.", name),
-			fmt.Sprintf("Wait until the harness composer is ready, then retry: `agm send msg %s --message <text>`.", name),
+			fmt.Sprintf("Wait until the harness composer is ready, then retry: `agm send msg %s --prompt <text>`.", name),
 		},
 		Parameters: map[string]string{
 			"session":   name,
