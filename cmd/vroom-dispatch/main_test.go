@@ -173,6 +173,25 @@ func TestSpawnSessionWithRetry(t *testing.T) {
 		}
 	})
 
+	t.Run("retries a resource governor pause then succeeds", func(t *testing.T) {
+		calls, sleeps := 0, 0
+		sleepFor = func(time.Duration) { sleeps++ }
+		runSpawn = func(supervisor, string) ([]byte, error) {
+			calls++
+			if calls == 1 {
+				return []byte("circuit breaker: spawn refused\n  • [spawn_stagger] spawns paused by resource governor; admission resumes automatically at 2026-07-22T02:00:00-07:00"), cbErr
+			}
+			return []byte("created"), nil
+		}
+
+		if err := spawnSessionWithRetry(sup, "sonnet-200k"); err != nil {
+			t.Fatalf("expected success after governor-pause retry, got %v", err)
+		}
+		if calls != 2 || sleeps != 1 {
+			t.Errorf("governor pause: want 2 calls/1 sleep, got %d calls/%d sleeps", calls, sleeps)
+		}
+	})
+
 	t.Run("gives up after maxSpawnAttempts of persistent refusal", func(t *testing.T) {
 		calls, sleeps := 0, 0
 		sleepFor = func(time.Duration) { sleeps++ }
@@ -1033,8 +1052,8 @@ func TestSpawnRetryDoesNotSwallowSafetyRefusals(t *testing.T) {
 
 	for name, output := range refusals {
 		t.Run(name, func(t *testing.T) {
-			if strings.Contains(output, spawnTooSoonMarker) {
-				t.Fatalf("refusal text contains %q and would be retried as a stagger pause", spawnTooSoonMarker)
+			if isRetryableSpawnRefusal(output) {
+				t.Fatalf("refusal text would be retried as transient spawn backpressure: %q", output)
 			}
 
 			calls, sleeps := 0, 0

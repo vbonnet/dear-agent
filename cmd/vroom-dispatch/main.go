@@ -510,6 +510,16 @@ const spawnCommandTimeout = 5 * time.Minute
 // keeps us decoupled from agm's internal error taxonomy.
 const spawnTooSoonMarker = "spawn too soon"
 
+// governorPauseMarker is the stable AGM diagnostic for the other transient
+// spawn-stagger condition. It is intentionally narrower than "resource
+// governor" so unrelated governor safety failures do not become retryable.
+const governorPauseMarker = "spawns paused by resource governor"
+
+func isRetryableSpawnRefusal(output string) bool {
+	return strings.Contains(output, spawnTooSoonMarker) ||
+		strings.Contains(output, governorPauseMarker)
+}
+
 // runSpawn executes `agm session new` for one supervisor and returns the
 // combined output. It is a package var so tests can stub the spawn without
 // shelling out to agm.
@@ -529,13 +539,12 @@ var runSpawn = func(sup supervisor, model string) ([]byte, error) {
 // var so tests can avoid waiting out the real 2-minute window.
 var sleepFor = time.Sleep
 
-// spawnSessionWithRetry runs `agm session new` for a supervisor, retrying when
-// agm's circuit breaker refuses the spawn as "spawn too soon" (ce-mu36). On a
-// refusal it waits out the full minSpawnInterval window before retrying, up to
-// maxSpawnAttempts times. Waiting the full window (rather than only the
-// remainder) keeps the fix simple and safe: we don't track the prior spawn's
-// timestamp, and an over-wait only costs time, never correctness. Any other
-// failure (or success) returns immediately — only the breaker refusal retries.
+// spawnSessionWithRetry runs `agm session new` for a supervisor, retrying the
+// two transient spawn-stagger refusals: a recent successful spawn and a
+// governor-owned pause. On refusal it waits the full minSpawnInterval before
+// retrying, up to maxSpawnAttempts. Waiting the full window (rather than parsing
+// a human diagnostic) keeps the retry contract bounded and fail-safe. Any
+// other failure (or success) returns immediately.
 func spawnSessionWithRetry(sup supervisor, model string) error {
 	var lastErr error
 	for attempt := 1; attempt <= maxSpawnAttempts; attempt++ {
@@ -544,7 +553,7 @@ func spawnSessionWithRetry(sup supervisor, model string) error {
 			return nil
 		}
 		lastErr = fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
-		if !strings.Contains(string(output), spawnTooSoonMarker) {
+		if !isRetryableSpawnRefusal(string(output)) {
 			return lastErr
 		}
 		if attempt < maxSpawnAttempts {
