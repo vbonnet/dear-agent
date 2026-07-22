@@ -108,9 +108,6 @@ func ClassifyHarnessInput(content, harness string) (bool, string, error) {
 	}
 	styledTail := paneRawInputTail(content, 12)
 	tail := stripANSI(styledTail)
-	if hasTailOwnedPermissionPrompt(tail) {
-		return false, HarnessInputPermission, nil
-	}
 
 	var ready bool
 	switch harness {
@@ -135,6 +132,9 @@ func ClassifyHarnessInput(content, harness string) (bool, string, error) {
 	}
 	if hasOnboardingPrompt(tail, harness) {
 		return false, HarnessInputOnboarding, nil
+	}
+	if hasTailOwnedPermissionPrompt(tail) {
+		return false, HarnessInputPermission, nil
 	}
 	return false, HarnessInputBusy, nil
 }
@@ -256,10 +256,21 @@ func validateReadinessHarness(harness string) error {
 
 func expectedHarnessProcessMatcher(harness string) func(ProcEntry) bool {
 	return func(process ProcEntry) bool {
+		if !processOwnsForegroundTerminal(process) {
+			return false
+		}
 		base := filepath.Base(strings.TrimSpace(process.Comm))
 		return processBaseMatchesHarness(base, harness) ||
-			base == "node" && nodeProcessMatchesHarness(process.Args, harness)
+			nodeProcessMatchesHarness(process.Args, harness)
 	}
+}
+
+// processOwnsForegroundTerminal rejects a matching harness that is merely a
+// stopped or background descendant. Only a process in the terminal's current
+// foreground process group can own the composer that will receive input.
+func processOwnsForegroundTerminal(process ProcEntry) bool {
+	return process.PGID > 0 && process.TPGID == process.PGID &&
+		!strings.Contains(strings.ToUpper(process.State), "T")
 }
 
 func processBaseMatchesHarness(base, harness string) bool {
@@ -284,6 +295,20 @@ func processBaseMatchesHarness(base, harness string) bool {
 func nodeProcessMatchesHarness(args, harness string) bool {
 	if harness == "pi-cli" {
 		return isPiProcessCommand(args)
+	}
+	fields := strings.Fields(args)
+	if len(fields) == 0 {
+		return false
+	}
+	executable := 0
+	if filepath.Base(strings.Trim(fields[0], "'\"")) == "env" {
+		executable++
+		for executable < len(fields) && strings.Contains(fields[executable], "=") {
+			executable++
+		}
+	}
+	if executable >= len(fields) || filepath.Base(strings.Trim(fields[executable], "'\"")) != "node" {
+		return false
 	}
 	args = strings.ToLower(args)
 	patterns := map[string][]string{

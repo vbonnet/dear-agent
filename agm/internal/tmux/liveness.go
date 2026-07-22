@@ -29,13 +29,17 @@ import (
 // livenessScanTimeout bounds the tmux + ps round-trips for one scan.
 const livenessScanTimeout = 2 * time.Second
 
-// ProcEntry is one row of a process table: a PID, its parent, the command name
-// (comm), and optional full arguments. Comm may be a bare name or a full path.
+// ProcEntry is one row of a process table. PGID, TPGID, and State are populated
+// for input-readiness scans, which must distinguish a foreground harness from
+// a stopped or background descendant. Comm may be a bare name or a full path.
 type ProcEntry struct {
-	PID  int
-	PPID int
-	Comm string
-	Args string
+	PID   int
+	PPID  int
+	PGID  int
+	TPGID int
+	State string
+	Comm  string
+	Args  string
 }
 
 // procCommandEntry is one process-table row with the full command line. Pi's
@@ -133,6 +137,31 @@ func ParsePSTable(out string) []ProcEntry {
 			continue
 		}
 		entries = append(entries, ProcEntry{PID: pid, PPID: ppid, Comm: comm})
+	}
+	return entries
+}
+
+// ParsePSForegroundTable parses the process identity and terminal-ownership
+// fields used by readiness scans. The first five columns are fixed-width
+// scalar fields; the remainder is the comm value and may contain spaces.
+func ParsePSForegroundTable(out string) []ProcEntry {
+	var entries []ProcEntry
+	for line := range strings.SplitSeq(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 6 {
+			continue
+		}
+		pid, pidErr := strconv.Atoi(fields[0])
+		ppid, ppidErr := strconv.Atoi(fields[1])
+		pgid, pgidErr := strconv.Atoi(fields[2])
+		tpgid, tpgidErr := strconv.Atoi(fields[3])
+		if pidErr != nil || ppidErr != nil || pgidErr != nil || tpgidErr != nil {
+			continue
+		}
+		entries = append(entries, ProcEntry{
+			PID: pid, PPID: ppid, PGID: pgid, TPGID: tpgid,
+			State: fields[4], Comm: strings.Join(fields[5:], " "),
+		})
 	}
 	return entries
 }
@@ -798,12 +827,14 @@ func piProcessInPaneTree(panePIDs []int, procs []procCommandEntry) bool {
 }
 
 func readProcessTableWithArgs(ctx context.Context) ([]ProcEntry, error) {
-	procs, err := readProcessTable(ctx)
-	if err != nil {
-		return nil, err
-	}
-	cmd := exec.CommandContext(ctx, "ps", "-axo", "pid=,args=")
+	cmd := exec.CommandContext(ctx, "ps", "-axo", "pid=,ppid=,pgid=,tpgid=,stat=,comm=")
 	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("ps foreground table: %w", err)
+	}
+	procs := ParsePSForegroundTable(string(out))
+	cmd = exec.CommandContext(ctx, "ps", "-axo", "pid=,args=")
+	out, err = cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("ps args: %w", err)
 	}

@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -195,6 +198,67 @@ func TestDeliverInitialPromptReturnsCallerCancellation(t *testing.T) {
 	err := deliverInitialPrompt(ctx, "claude-create", true, true)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("deliverInitialPrompt() error = %v, want context.Canceled", err)
+	}
+}
+
+func TestDeliverInitialPromptUsesAtomicExactPaneReadiness(t *testing.T) {
+	originalPrompt, originalPromptFile, originalHarness := prompt, promptFile, harnessName
+	prompt, promptFile, harnessName = "startup prompt", "", "codex-cli"
+	t.Cleanup(func() { prompt, promptFile, harnessName = originalPrompt, originalPromptFile, originalHarness })
+	tmuxClient := session.NewMockTmux()
+	tmuxClient.InputReadiness = session.InputReadiness{Ready: true, State: "YES", PaneID: "%9"}
+
+	callerCtx := context.WithValue(t.Context(), struct{ name string }{"startup"}, "caller")
+	if err := deliverInitialPromptWithSender(callerCtx, "codex-create", false, false, tmuxClient); err != nil {
+		t.Fatalf("deliverInitialPromptWithSender() error = %v", err)
+	}
+	if tmuxClient.InputContext != callerCtx || tmuxClient.PaneSendContext != callerCtx {
+		t.Fatal("startup prompt atomic delivery did not preserve the caller context")
+	}
+	if got, want := tmuxClient.AtomicInputChecks, []string{"codex-create:codex-cli"}; !slices.Equal(got, want) {
+		t.Fatalf("startup prompt readiness checks = %v, want %v", got, want)
+	}
+	if got, want := tmuxClient.ExactPaneDeliveries, []string{"%9"}; !slices.Equal(got, want) {
+		t.Fatalf("startup prompt exact-pane deliveries = %v, want %v", got, want)
+	}
+	if got, want := tmuxClient.SentCommands, []string{"startup prompt"}; !slices.Equal(got, want) {
+		t.Fatalf("startup prompt commands = %v, want %v", got, want)
+	}
+}
+
+func TestDeliverInitialPromptFileUsesAtomicExactPaneReadiness(t *testing.T) {
+	originalPrompt, originalPromptFile, originalHarness := prompt, promptFile, harnessName
+	prompt = ""
+	promptFile = filepath.Join(t.TempDir(), "startup.md")
+	harnessName = "claude-code"
+	t.Cleanup(func() { prompt, promptFile, harnessName = originalPrompt, originalPromptFile, originalHarness })
+	if err := os.WriteFile(promptFile, []byte("first line\nsecond line"), 0o600); err != nil {
+		t.Fatalf("write startup prompt file: %v", err)
+	}
+	tmuxClient := session.NewMockTmux()
+	tmuxClient.InputReadiness = session.InputReadiness{Ready: true, State: "YES", PaneID: "%10"}
+
+	if err := deliverInitialPromptWithSender(t.Context(), "claude-create", true, false, tmuxClient); err != nil {
+		t.Fatalf("deliverInitialPromptWithSender(file) error = %v", err)
+	}
+	if got, want := tmuxClient.ExactPaneDeliveries, []string{"%10"}; !slices.Equal(got, want) {
+		t.Fatalf("startup prompt file exact-pane deliveries = %v, want %v", got, want)
+	}
+	if got, want := tmuxClient.SentCommands, []string{"first line\nsecond line"}; !slices.Equal(got, want) {
+		t.Fatalf("startup prompt file commands = %q, want %q", got, want)
+	}
+}
+
+func TestDeliverInitialPromptFailsClosedWhenHarnessDoesNotOwnTerminal(t *testing.T) {
+	tmuxClient := session.NewMockTmux()
+	tmuxClient.InputReadiness = session.InputReadiness{State: "WRONG_HARNESS", PaneID: "%4"}
+
+	err := sendInitialPromptAtomically(t.Context(), tmuxClient, "claude-create", "claude-code", "do not inject")
+	if err == nil || !strings.Contains(err.Error(), "WRONG_HARNESS") {
+		t.Fatalf("sendInitialPromptAtomically() error = %v, want WRONG_HARNESS", err)
+	}
+	if len(tmuxClient.SentCommands) != 0 || len(tmuxClient.ExactPaneDeliveries) != 0 {
+		t.Fatalf("unready startup prompt was delivered: commands=%v panes=%v", tmuxClient.SentCommands, tmuxClient.ExactPaneDeliveries)
 	}
 }
 

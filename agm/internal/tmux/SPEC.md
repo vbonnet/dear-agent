@@ -94,6 +94,10 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-42** When shared startup readiness waits, the system shall honor caller cancellation and the total deadline while the launch shell or wrapper remains visible before the expected harness is first observed, fail promptly if an observed harness later stops or an observation fails, and mutate input only for documented trust, model-upgrade, or AGY-survey transitions on the exact verified pane; Gemini first-run directory trust shall select option `1` and then submit Enter before composer readiness can succeed.
 
+**TMUX-43** When expected harness liveness is checked for shared input readiness, the system shall identify supported Node-hosted harnesses from their harness-specific runtime arguments even when the operating system reports a non-`node` command name such as `MainThread`, including the canonical npm-hosted Pi entrypoint, while rejecting unrelated Node command lines and shell wrappers that merely mention a harness.
+
+**TMUX-44** When expected harness liveness is checked for input delivery, the system shall require a matching harness process to belong to the terminal's current foreground process group and not be stopped; a suspended or background harness descendant and a stale composer rendered above the foreground shell shall be classified as `WRONG_HARNESS` and shall never authorize input.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

@@ -294,6 +294,21 @@ func TestParsePSArgsTable(t *testing.T) {
 	}
 }
 
+func TestParsePSForegroundTable(t *testing.T) {
+	t.Parallel()
+
+	out := "  10 1 10 11 Ss /bin/zsh\n  11 10 11 11 S+ MainThread\n  12 10 12 11 T /path/with spaces/claude\nmalformed\n"
+	got := ParsePSForegroundTable(out)
+	want := []ProcEntry{
+		{PID: 10, PPID: 1, PGID: 10, TPGID: 11, State: "Ss", Comm: "/bin/zsh"},
+		{PID: 11, PPID: 10, PGID: 11, TPGID: 11, State: "S+", Comm: "MainThread"},
+		{PID: 12, PPID: 10, PGID: 12, TPGID: 11, State: "T", Comm: "/path/with spaces/claude"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ParsePSForegroundTable() = %#v, want %#v", got, want)
+	}
+}
+
 func TestIsHarnessComm(t *testing.T) {
 	tests := []struct {
 		comm string

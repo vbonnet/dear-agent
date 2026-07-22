@@ -69,6 +69,12 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			state:   HarnessInputReady,
 		},
 		{
+			name:    "Claude trust owns input before generic permission choices",
+			harness: "claude-code",
+			content: "Do you trust the files in this folder?\n❯ 1. Yes, proceed\n  2. No, exit",
+			state:   HarnessInputOnboarding,
+		},
+		{
 			name:    "Claude permission wins over prompt glyph",
 			harness: "claude-code",
 			content: "Do you want to proceed?\n❯ 1. Yes\n  2. No",
@@ -287,7 +293,7 @@ func TestClassifyHarnessInputRejectsStalePromptOutsideTail(t *testing.T) {
 func TestExpectedHarnessMatcherRejectsWrongProcess(t *testing.T) {
 	procs := []ProcEntry{
 		{PID: 10, PPID: 1, Comm: "zsh"},
-		{PID: 11, PPID: 10, Comm: "agy"},
+		{PID: 11, PPID: 10, PGID: 11, TPGID: 11, State: "S+", Comm: "agy"},
 	}
 	codex := classifyPaneLivenessProcesses([]int{10}, procs, expectedHarnessProcessMatcher("codex-cli"))
 	if codex.HarnessAlive {
@@ -299,8 +305,8 @@ func TestExpectedHarnessMatcherRejectsWrongProcess(t *testing.T) {
 	}
 	piProcs := []ProcEntry{
 		{PID: 10, PPID: 1, Comm: "zsh"},
-		{PID: 11, PPID: 10, Comm: "agy"},
-		{PID: 12, PPID: 10, Comm: "pi", Args: "pi --session-id native"},
+		{PID: 11, PPID: 10, PGID: 11, TPGID: 11, State: "S+", Comm: "agy"},
+		{PID: 12, PPID: 10, PGID: 12, TPGID: 12, State: "S+", Comm: "pi", Args: "pi --session-id native"},
 	}
 	pi := classifyPaneLivenessProcesses([]int{10}, piProcs, expectedHarnessProcessMatcher("pi-cli"))
 	if !pi.HarnessAlive {
@@ -324,7 +330,7 @@ func TestExpectedHarnessMatcherAcceptsIdentifiedNodeBackedHarness(t *testing.T) 
 	for _, tt := range tests {
 		procs := []ProcEntry{
 			{PID: 10, PPID: 1, Comm: "zsh"},
-			{PID: 11, PPID: 10, Comm: "/usr/local/bin/node", Args: tt.args},
+			{PID: 11, PPID: 10, PGID: 11, TPGID: 11, State: "S+", Comm: "MainThread", Args: tt.args},
 		}
 		got := classifyPaneLivenessProcesses([]int{10}, procs, expectedHarnessProcessMatcher(tt.harness))
 		if !got.HarnessAlive {
@@ -338,12 +344,27 @@ func TestExpectedHarnessMatcherRejectsUnrelatedNodeProcess(t *testing.T) {
 
 	procs := []ProcEntry{
 		{PID: 10, PPID: 1, Comm: "zsh", Args: "zsh"},
-		{PID: 11, PPID: 10, Comm: "/usr/local/bin/node", Args: "/usr/local/bin/node /srv/telemetry-worker.js"},
+		{PID: 11, PPID: 10, PGID: 11, TPGID: 11, State: "S+", Comm: "MainThread", Args: "/usr/local/bin/node /srv/telemetry-worker.js"},
 	}
 	for _, harness := range []string{"claude-code", "codex-cli", "gemini-cli", "opencode-cli", "pi-cli"} {
 		got := classifyPaneLivenessProcesses([]int{10}, procs, expectedHarnessProcessMatcher(harness))
 		if got.HarnessAlive {
 			t.Errorf("unrelated Node process classified as %s: %#v", harness, got)
+		}
+	}
+}
+
+func TestExpectedHarnessMatcherRequiresForegroundTerminalOwnership(t *testing.T) {
+	t.Parallel()
+
+	for _, process := range []ProcEntry{
+		{PID: 11, PPID: 10, PGID: 11, TPGID: 10, State: "S", Comm: "claude"},
+		{PID: 11, PPID: 10, PGID: 11, TPGID: 11, State: "T+", Comm: "claude"},
+	} {
+		procs := []ProcEntry{{PID: 10, PPID: 1, PGID: 10, TPGID: 10, State: "S+", Comm: "zsh"}, process}
+		got := classifyPaneLivenessProcesses([]int{10}, procs, expectedHarnessProcessMatcher("claude-code"))
+		if got.HarnessAlive {
+			t.Errorf("non-foreground Claude process classified alive: %#v", process)
 		}
 	}
 }

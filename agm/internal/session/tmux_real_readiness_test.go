@@ -321,6 +321,40 @@ func TestRealTmuxReadinessIdentifiesNodeBackedCodex(t *testing.T) {
 	}
 }
 
+func TestRealTmuxReadinessRejectsSuspendedHarnessWithStaleComposer(t *testing.T) {
+	socketPath := setupRealReadinessTmux(t)
+	sessionName := "suspended-ready-claude"
+	if err := tmux.NewSession(sessionName, t.TempDir()); err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	t.Cleanup(func() { tmux.KillSession(sessionName) })
+
+	fakeClaude := installFakeHarnessProcess(t, "claude")
+	command := fmt.Sprintf("PS1=''; export PS1; printf '❯\\n────────────────\\n? for shortcuts\\n'; %q", fakeClaude)
+	sendReadinessTestCommand(t, socketPath, sessionName, command)
+	realTmux := NewRealTmux()
+	if err := realTmux.WaitForHarnessReady(t.Context(), sessionName, "claude-code", 5*time.Second); err != nil {
+		t.Fatalf("WaitForHarnessReady(fake Claude) error = %v", err)
+	}
+
+	target := tmux.NormalizeTmuxSessionName(sessionName)
+	if output, err := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", target, "C-z").CombinedOutput(); err != nil {
+		t.Fatalf("suspend fake Claude: %v\n%s", err, output)
+	}
+	time.Sleep(300 * time.Millisecond)
+	sendReadinessTestCommand(t, socketPath, sessionName, "printf '❯\\n────────────────\\n? for shortcuts\\n'")
+	time.Sleep(200 * time.Millisecond)
+
+	readiness, err := realTmux.CheckInputReadiness(t.Context(), sessionName, "claude-code")
+	if err != nil {
+		t.Fatalf("CheckInputReadiness(suspended Claude) error = %v", err)
+	}
+	if readiness.Ready || readiness.State != "WRONG_HARNESS" {
+		pane, captureErr := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", target, "-p", "-S", "-30").CombinedOutput()
+		t.Fatalf("suspended Claude readiness = %#v, want WRONG_HARNESS; capture error = %v; pane:\n%s", readiness, captureErr, pane)
+	}
+}
+
 func TestRealTmuxInputReadinessReportsMissingSession(t *testing.T) {
 	setupRealReadinessTmux(t)
 
