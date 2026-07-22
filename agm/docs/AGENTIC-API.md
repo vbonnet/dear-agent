@@ -32,11 +32,15 @@ before any pending artifact when status is unavailable, suspended, or
 terminated. Under a provider-appropriate stable session-ID lock, API delivery
 reloads lifecycle before adapter construction and shares that boundary with
 archive: an in-flight completed turn commits before archive, or delivery sees
-the archived lifecycle before paid provider work. The lock wait and provider
+the reaping or archived lifecycle before paid provider work. The lock wait and provider
 completion honor request cancellation, and the provider call has a finite
 ceiling. Direct adapter callers use a context-aware store-scoped session lock
 and the same provider ceiling. Provider failures, cancellation, and timeouts
 leave no provisional user message in durable history.
+
+Clearing OpenAI-compatible history atomically empties only the message stream
+under the store lock. It preserves the model, title, working directory, and
+non-secret runtime configuration used by later process reconstruction.
 
 ## Error Code Catalog
 

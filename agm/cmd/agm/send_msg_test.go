@@ -15,6 +15,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/send"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/state"
@@ -559,6 +560,40 @@ func TestAPIDeliveryReloadsLifecycleInsideStableSessionLock(t *testing.T) {
 	}
 	if factoryCalled {
 		t.Fatal("stale active API delivery constructed adapter after locked lifecycle reload")
+	}
+}
+
+func TestAPIDeliveryRejectsReapingLifecycleInsideStableSessionLock(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	storage := dolt.NewMockAdapter()
+	staleActive := &manifest.Manifest{
+		SessionID: "reaping-api-lifecycle-id",
+		Name:      "reaping-api-lifecycle",
+		Harness:   "openai",
+	}
+	if err := storage.CreateSession(staleActive); err != nil {
+		t.Fatalf("create API session: %v", err)
+	}
+	reaping, err := storage.GetSession(staleActive.SessionID)
+	if err != nil {
+		t.Fatalf("get API session: %v", err)
+	}
+	reaping.Lifecycle = manifest.LifecycleReaping
+	if err := storage.UpdateSession(reaping); err != nil {
+		t.Fatalf("mark API session reaping: %v", err)
+	}
+
+	factoryCalled := false
+	err = sendToAPIAgentIfReady(t.Context(), staleActive, staleActive.Name, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+		factoryCalled = true
+		return &mockAgentAdapter{}, nil
+	})
+	var opErr *ops.OpError
+	if !errors.As(err, &opErr) || opErr.Code != ops.ErrCodeSessionNotReady || opErr.Parameters["readiness"] != "LIFECYCLE_reaping" {
+		t.Fatalf("reaping API delivery error = %v, want typed lifecycle not-ready rejection", err)
+	}
+	if factoryCalled {
+		t.Fatal("reaping API delivery constructed adapter after locked lifecycle reload")
 	}
 }
 

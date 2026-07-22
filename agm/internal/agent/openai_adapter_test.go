@@ -1559,10 +1559,23 @@ func TestExecuteCommand(t *testing.T) {
 	}
 }
 
-// TestClearHistory tests clearing conversation history
-func TestClearHistory(t *testing.T) {
+// TestClearHistoryPreservesRuntimeConfig tests clearing conversation history
+// without discarding the metadata needed to reconstruct the delivery adapter.
+func TestClearHistoryPreservesRuntimeConfig(t *testing.T) {
 	tmpDir := t.TempDir()
-	adapter := createTestAdapter(t, tmpDir)
+	adapter, err := NewOpenAIAdapter(t.Context(), &OpenAIConfig{
+		APIKey:          "test-key",
+		Model:           "gpt-4",
+		SessionsDir:     tmpDir,
+		Temperature:     1.1,
+		MaxTokens:       321,
+		BaseURL:         "https://azure.example.test",
+		IsAzure:         true,
+		AzureAPIVersion: "2024-06-01",
+	})
+	if err != nil {
+		t.Fatalf("create configured adapter: %v", err)
+	}
 
 	// Create session and add messages
 	sessionID, err := adapter.CreateSession(SessionContext{
@@ -1611,6 +1624,35 @@ func TestClearHistory(t *testing.T) {
 	}
 	if len(history) != 0 {
 		t.Errorf("expected 0 messages after clear, got %d", len(history))
+	}
+
+	clearedInfo, err := openaiAdapter.sessionManager.GetSession(string(sessionID))
+	if err != nil {
+		t.Fatalf("get cleared session metadata: %v", err)
+	}
+	wantRuntime := openai.SessionRuntimeConfig{
+		Temperature:     1.1,
+		MaxTokens:       321,
+		BaseURL:         "https://azure.example.test",
+		IsAzure:         true,
+		AzureAPIVersion: "2024-06-01",
+	}
+	if clearedInfo.RuntimeConfig == nil || *clearedInfo.RuntimeConfig != wantRuntime {
+		t.Fatalf("cleared session runtime config = %#v, want %#v", clearedInfo.RuntimeConfig, wantRuntime)
+	}
+	if clearedInfo.Title != "clear-test" || clearedInfo.Model != "gpt-4" || clearedInfo.WorkingDirectory != "/tmp" {
+		t.Fatalf("cleared session identity metadata changed: %#v", clearedInfo)
+	}
+
+	reconstructed, err := NewOpenAIAdapterForSession(t.Context(), sessionID, &OpenAIConfig{
+		APIKey:      "test-key",
+		SessionsDir: tmpDir,
+	})
+	if err != nil {
+		t.Fatalf("reconstruct adapter after clear: %v", err)
+	}
+	if got := reconstructed.(*OpenAIAdapter).runtimeConfig; got != wantRuntime {
+		t.Fatalf("reconstructed runtime config after clear = %#v, want %#v", got, wantRuntime)
 	}
 }
 

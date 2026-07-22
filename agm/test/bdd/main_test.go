@@ -16,15 +16,26 @@ import (
 func TestFeatures(t *testing.T) {
 	suite := godog.TestSuite{
 		ScenarioInitializer: InitializeScenario,
-		Options: &godog.Options{
-			Format:   "pretty",
-			Paths:    []string{"features"},
-			TestingT: t,
-		},
+		Options:             featureTestOptions(t),
 	}
 
 	if suite.Run() != 0 {
 		t.Fatal("non-zero status returned, failed to run feature tests")
+	}
+}
+
+func featureTestOptions(t *testing.T) *godog.Options {
+	return &godog.Options{
+		Format:   "pretty",
+		Paths:    []string{"features"},
+		Strict:   true,
+		TestingT: t,
+	}
+}
+
+func TestFeatureRunnerUsesStrictUndefinedStepPolicy(t *testing.T) {
+	if !featureTestOptions(t).Strict {
+		t.Fatal("BDD runner must fail pending, undefined, and ambiguous steps")
 	}
 }
 

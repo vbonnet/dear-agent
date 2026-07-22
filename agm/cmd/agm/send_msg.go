@@ -797,12 +797,15 @@ func sendToAPIAgentIfReady(ctx context.Context, m *manifest.Manifest, recipientS
 		if current == nil {
 			return ops.ErrSessionNotFound(m.SessionID)
 		}
-		if current.Lifecycle == manifest.LifecycleArchived {
-			archivedName := current.Name
-			if archivedName == "" {
-				archivedName = recipientSession
+		if current.Lifecycle != "" {
+			currentName := current.Name
+			if currentName == "" {
+				currentName = recipientSession
 			}
-			return ops.ErrSessionArchived(archivedName)
+			if current.Lifecycle == manifest.LifecycleArchived {
+				return ops.ErrSessionArchived(currentName)
+			}
+			return ops.ErrSessionNotReady(currentName, "LIFECYCLE_"+current.Lifecycle)
 		}
 
 		agentAdapter, err := newAPIAgent(ctx, current)

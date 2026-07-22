@@ -211,6 +211,41 @@ func (sm *SessionManager) AddMessages(sessionID string, messages ...Message) err
 	return nil
 }
 
+// ClearMessages atomically empties one session history while preserving every
+// metadata field, including the non-secret runtime configuration required for
+// later adapter reconstruction.
+func (sm *SessionManager) ClearMessages(sessionID string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	info, exists := sm.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+	currentMessages, err := sm.loadMessagesFromFile(sessionID)
+	if err != nil {
+		return err
+	}
+	if err := sm.writeMessagesToFile(sessionID, nil); err != nil {
+		return err
+	}
+
+	previousMessages := info.messages
+	previousMessageCount := info.MessageCount
+	previousUpdatedAt := info.UpdatedAt
+	info.messages = nil
+	info.MessageCount = 0
+	info.UpdatedAt = time.Now()
+	if err := sm.saveMetadata(sessionID); err != nil {
+		info.messages = previousMessages
+		info.MessageCount = previousMessageCount
+		info.UpdatedAt = previousUpdatedAt
+		rollbackErr := sm.writeMessagesToFile(sessionID, currentMessages)
+		return errors.Join(err, rollbackErr)
+	}
+	return nil
+}
+
 // GetMessages retrieves all messages for a session.
 func (sm *SessionManager) GetMessages(sessionID string) ([]Message, error) {
 	sm.mu.Lock()

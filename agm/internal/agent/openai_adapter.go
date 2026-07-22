@@ -600,22 +600,14 @@ func (a *OpenAIAdapter) openAISetDir(cmd Command, sessionIDStr string) error {
 }
 
 func (a *OpenAIAdapter) openAIClearHistory(sessionIDStr string) error {
-	sessionInfo, err := a.sessionManager.GetSession(sessionIDStr)
-	if err != nil {
-		return fmt.Errorf("failed to get session info: %w", err)
-	}
-	if err := a.sessionManager.DeleteSession(sessionIDStr); err != nil {
-		return fmt.Errorf("failed to delete session: %w", err)
-	}
-	if _, err := a.sessionManager.CreateSession(sessionIDStr, sessionInfo.Model, sessionInfo.WorkingDirectory); err != nil {
-		return fmt.Errorf("failed to recreate session: %w", err)
-	}
-	if sessionInfo.Title != "" {
-		if err := a.sessionManager.UpdateTitle(sessionIDStr, sessionInfo.Title); err != nil {
-			return fmt.Errorf("failed to restore session title: %w", err)
+	clearCtx, cancel := context.WithTimeout(context.Background(), OpenAICompletionTimeout)
+	defer cancel()
+	return a.sessionManager.WithSessionLockContext(clearCtx, sessionIDStr, func() error {
+		if err := a.sessionManager.ClearMessages(sessionIDStr); err != nil {
+			return fmt.Errorf("failed to clear session history: %w", err)
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 func (a *OpenAIAdapter) openAISetSystemPrompt(cmd Command, sessionIDStr string) error {
