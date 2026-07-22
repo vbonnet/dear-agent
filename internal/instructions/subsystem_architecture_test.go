@@ -85,7 +85,20 @@ func TestAGMMCPArchitectureMatchesRegisteredTools(t *testing.T) {
 		"engram_list_wayfinder_sessions",
 		"engram_get_wayfinder_session",
 	}
+	wantRegistrations := []string{
+		"ListSessions",
+		"SearchSessions",
+		"GetSessionMetadata",
+		"ArchiveSession",
+		"KillSession",
+		"CreateSession",
+		"SendMessage",
+		"ListOps",
+		"ListWayfinderSessions",
+		"GetWayfinderSession",
+	}
 	registrations := uniqueMatches(mainSource, regexp.MustCompile(`add([A-Za-z0-9]+)Tool\(server,\s*cfg\)`))
+	assertSameStrings(t, "AGM MCP registered helpers", registrations, wantRegistrations)
 	declarations := uniqueMatches(toolSource, regexp.MustCompile(`func add([A-Za-z0-9]+)Tool\(`))
 	declared := make(map[string]struct{}, len(declarations))
 	for _, declaration := range declarations {
