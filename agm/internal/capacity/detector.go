@@ -120,6 +120,9 @@ func readMeminfo(path string) (total, available uint64, err error) {
 	if !foundAvailable {
 		return 0, 0, fmt.Errorf("MemAvailable not found in %s", path)
 	}
+	if total == 0 {
+		return 0, 0, fmt.Errorf("MemTotal in %s returned zero bytes", path)
+	}
 	return total, available, nil
 }
 

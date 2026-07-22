@@ -952,8 +952,8 @@ current Linux or macOS test host.
 
 **Key scenarios:**
 - Supported development platforms resolve native total and available memory.
-- Total and available memory are positive, and available memory never exceeds
-  total memory.
+- Total memory is positive, available memory is non-negative, and available
+  memory never exceeds total memory.
 
 **Why this matters:** `agm capacity` is an operator-facing safety surface. A
 Linux-only `/proc` probe made the command unusable on macOS even though AGM's

@@ -3,6 +3,7 @@ package capacity
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -62,6 +63,22 @@ func TestDetector_MissingMemTotal(t *testing.T) {
 	_, _, err := readMeminfo(meminfo)
 	if err == nil {
 		t.Fatal("expected error for missing MemTotal")
+	}
+}
+
+func TestDetector_ZeroMemTotal(t *testing.T) {
+	dir := t.TempDir()
+	meminfo := filepath.Join(dir, "meminfo")
+	content := `MemTotal:       0 kB
+MemAvailable:   0 kB
+`
+	if err := os.WriteFile(meminfo, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := readMeminfo(meminfo)
+	if err == nil || !strings.Contains(err.Error(), "returned zero bytes") {
+		t.Fatalf("readMeminfo() error = %v, want zero-total error", err)
 	}
 }
 
