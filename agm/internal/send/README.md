@@ -4,34 +4,32 @@ Multi-recipient message delivery system for AGM sessions.
 
 ## Overview
 
-This package provides the core functionality for sending messages to one or more AGM sessions with parallel execution, comprehensive error handling, and 100% backward compatibility.
+This package provides the core functionality for sending messages to one or more AGM sessions with sequential delivery and per-recipient error handling.
 
 ## Components
 
 ### Core Files
 
-- **`multi_recipient.go`** (~240 lines)
+- **`multi_recipient.go`**
   - Recipient parsing and resolution
   - Glob pattern matching
   - Session validation and deduplication
 
-- **`delivery.go`** (~100 lines)
-  - Parallel message delivery with worker pool
-  - Concurrency control (max 5 workers)
+- **`delivery.go`**
+  - Sequential message delivery under the shared tmux mutation boundary
+  - Caller-context propagation and cancellation
   - Per-recipient error isolation
 
-- **`result_collector.go`** (~130 lines)
+- **`result_collector.go`**
   - Delivery result aggregation
   - Color-coded reporting
   - Success/failure tracking
 
 ### Test Files
 
-- **`multi_recipient_test.go`** (~400 lines, 29 tests)
-- **`delivery_test.go`** (~350 lines, 10 tests)
-- **`result_collector_test.go`** (~400 lines, 15 tests)
-
-**Total: 54 tests, all passing**
+- **`multi_recipient_test.go`**
+- **`delivery_test.go`**
+- **`result_collector_test.go`**
 
 ## Usage
 
@@ -62,10 +60,11 @@ jobs := []*send.DeliveryJob{
     },
 }
 
-// Execute parallel delivery with timeout
+// Execute sequential delivery with timeout. The CLI delivery function routes
+// each job through shared ops atomic readiness and exact-pane input.
 ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 defer cancel()
-results := send.ParallelDeliver(ctx, jobs, deliveryFunc)
+results := send.SequentialDeliver(ctx, jobs, deliveryFunc)
 
 // Generate report
 report := send.GenerateReport(results)
@@ -82,11 +81,11 @@ Supports multiple input formats:
 - **Glob patterns**: `*research*`, `test-*`
 - **Wildcard**: `*` (all sessions)
 
-### Parallel Delivery
+### Sequential Delivery
 
-- Worker pool with max 5 concurrent goroutines
-- Semaphore-based concurrency control
-- Channel-based result collection
+- One recipient is processed at a time because tmux mutation is serialized
+- Each registered CLI harness uses shared ops atomic readiness and delivery
+- The exact verified pane remains pinned for each input operation
 - Per-recipient error isolation
 
 ### Error Handling
@@ -163,12 +162,12 @@ type DeliveryReport struct {
 
 Run tests:
 ```bash
-go test ./internal/send/... -v
+go test ./agm/internal/send -v
 ```
 
 Run with coverage:
 ```bash
-go test ./internal/send/... -cover
+go test ./agm/internal/send -cover
 ```
 
 ## Integration
@@ -192,26 +191,12 @@ func (r *doltSessionResolver) ListAllSessions() ([]*manifest.Manifest, error) {
 }
 ```
 
-## Performance
+## Delivery Policy
 
-### Parallel vs. Sequential
-
-- **Sequential**: 3 recipients × 500ms = 1.5s
-- **Parallel**: max(500ms) + overhead ≈ 600ms
-- **Speedup**: ~2.5x
-
-### Concurrency Control
-
-- Max 5 workers prevents resource exhaustion
-- Handles any number of recipients gracefully
-- Bounded memory usage
-
-## Future Enhancements
-
-1. **Workspace filtering**: Complete implementation
-2. **API-based delivery**: Support for OpenAI/GPT agents
-3. **Progress reporting**: Live progress for large lists
-4. **Delivery retries**: Automatic retry with backoff
+- Recipients are processed in resolved order.
+- Each delivery finishes its readiness check and tmux mutation before the next begins.
+- Cancellation stops undispatched jobs and records a result for each recipient.
+- A recipient failure is reported without preventing later recipients from being attempted.
 
 ## See Also
 

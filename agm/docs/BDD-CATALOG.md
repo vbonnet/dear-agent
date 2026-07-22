@@ -222,10 +222,47 @@ creation, and terminal state detection.
 - A newer tail-owned initial composer remains ready after stale post-turn
   footer history from a prior Codex process.
 - A Codex trust prompt is queued rather than treated as a sendable prompt.
-- The top-level new command routes in-tmux, non-detached Codex creation into
-  the current pane, validates credentials and the executable, and queues the
-  canonical launch command without waiting behind the AGM process that owns
-  the pane.
+- The top-level new command routes in-tmux, non-detached Claude, Codex,
+  OpenCode, Pi, and deprecated Gemini creation into the current pane and queues
+  canonical launch commands without an impossible wait behind the AGM process
+  that owns the pane; Codex also validates credentials and its executable,
+  Pi uses its managed canonical launch contract, while Claude's SessionStart
+  hook persists the conversation UUID after the queued launch begins.
+- Shared creation requires process and composer readiness before registration
+  or startup-prompt delivery even when a CLI or MCP surface runtime owns the
+  launch. Prompt-free current-pane Claude, Codex, OpenCode, Pi, and deprecated
+  Gemini creation explicitly defer readiness until the foreground AGM process
+  exits because each command is queued behind that process.
+- Shared tmux sends serialize exact-pane readiness with delivery under one
+  mutation boundary, and MCP creation atomically revalidates the harness and
+  composer after registration immediately before delivering its startup prompt.
+  A concurrent sender or readiness change cannot reuse the earlier proof.
+- Shared startup readiness honors its total deadline while a slow launch
+  wrapper still owns the pane, but fails promptly if an already-observed
+  harness process later stops.
+- Shared readiness rejects a retained Claude prompt followed by current
+  working output, recognizes styled Claude ghost placeholders as empty without
+  accepting unstyled human drafts, requires structural tail-owned Gemini and
+  OpenCode composers rather than generic glyphs or borders, requires AGY's bare
+  prompt to own the tail, requires Pi's latest managed state to be ready rather
+  than stale readiness followed by work, and distinguishes harness-specific
+  Node launch arguments from unrelated background Node descendants. Permission,
+  onboarding, model-upgrade, and survey prompts block only while their UI owns
+  the tail; resolved dialogs and ordinary Allow/Deny output before a newer
+  composer do not. Liveness, styled capture, and delivery stay pinned to one
+  resolved pane ID even if session focus changes. Legacy AGY manifest names
+  normalize to canonical `agy`, and the `pi` alias normalizes to canonical
+  `pi-cli`, before shared send readiness.
+- MCP AGY's native onboarding wait remains an unverified transition; shared
+  creation still proves the live AGY process and tail-owned composer before
+  registration or prompt delivery.
+- Claude SessionStart association retries asynchronously across the detached
+  registration race for longer than the maximum launch-readiness window and
+  reports READY only after the payload UUID is persisted; the installable
+  command hook is the sole repository source for that destination.
+- Shared Gemini startup detects first-run directory trust, sends option `1`
+  plus Enter to the exact pane that displayed the dialog, and still requires a
+  later tail-owned Gemini composer before reporting readiness.
 - Active harnesses are exactly Claude Code, Codex CLI, AGY, OpenCode, and Pi.
 - Gemini CLI remains deprecated compatibility, not active parity.
 - Active harness factories use canonical names.

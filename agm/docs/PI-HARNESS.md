@@ -14,7 +14,7 @@ marketplace, config-directory, quota, and BDD parity contracts.
 agm admin install-harness pi
 agm session new pi-work --harness pi-cli -C /absolute/project/path
 agm session new pi-plan --harness pi-cli --permission-mode plan -C /absolute/project/path
-agm session send msg pi-work "Inspect the failing test"
+agm send msg pi-work --prompt "Inspect the failing test"
 agm session resume pi-work
 ```
 
@@ -76,7 +76,7 @@ they can be pre-approved without weakening plan mode. Patterns are anchored;
 wildcards must be explicit. Bash calls containing unquoted command chaining,
 redirection, or command substitution are never pre-approved by an allowlist;
 default mode asks interactively and a non-interactive caller fails closed.
-Runtime transitions use `agm session send mode`,
+Runtime transitions use `agm send mode <mode> <session-name>`,
 which sends the managed `/agm-mode plan|default|auto` command. Model transitions use
 `/agm-model provider/model` and are persisted only after AGM observes the
 managed transition result.

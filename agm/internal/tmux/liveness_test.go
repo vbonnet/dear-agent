@@ -21,6 +21,63 @@ func TestCheckPaneLivenessContextHonorsCallerCancellation(t *testing.T) {
 	}
 }
 
+func TestTmuxSessionExistenceResultDistinguishesOperationalFailures(t *testing.T) {
+	t.Parallel()
+
+	exitErr := errors.New("exit status 1")
+	tests := []struct {
+		name       string
+		output     string
+		err        error
+		wantExists bool
+		wantErr    string
+	}{
+		{name: "session exists", wantExists: true},
+		{name: "explicit missing target", output: "can't find session: absent", err: exitErr},
+		{name: "server unavailable", output: "no server running on /tmp/agm.sock", err: exitErr, wantErr: "no server running"},
+		{name: "socket inaccessible", output: "error connecting to /tmp/agm.sock (Permission denied)", err: exitErr, wantErr: "Permission denied"},
+		{name: "unclassified failure", err: exitErr, wantErr: "exit status 1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			exists, err := tmuxSessionExistenceResult("target", []byte(tt.output), tt.err)
+			if exists != tt.wantExists {
+				t.Fatalf("exists = %v, want %v", exists, tt.wantExists)
+			}
+			if tt.wantErr == "" && err != nil {
+				t.Fatalf("error = %v, want nil", err)
+			}
+			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestTmuxSessionExistsOnSocketDistinguishesMissingSessionFromSocketFailure(t *testing.T) {
+	skipIfNoTmux(t)
+	socketPath, cleanup := setupTestSocket(t)
+	defer cleanup()
+	if output, err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", "existence-seed", "sleep", "30").CombinedOutput(); err != nil {
+		t.Fatalf("create seed tmux session: %v: %s", err, output)
+	}
+
+	exists, err := tmuxSessionExistsOnSocket(t.Context(), "absent", socketPath)
+	if err != nil || exists {
+		t.Fatalf("explicit missing target = (exists=%v, err=%v), want (false, nil)", exists, err)
+	}
+
+	missingSocket := filepath.Join(socketDir(t), "missing.sock")
+	exists, err = tmuxSessionExistsOnSocket(t.Context(), "absent", missingSocket)
+	if err == nil || exists {
+		t.Fatalf("missing socket = (exists=%v, err=%v), want backend error", exists, err)
+	}
+	if _, err := CheckPaneLivenessBatch([]string{"absent"}, missingSocket); err == nil {
+		t.Fatal("batch liveness reported a dead session when the tmux socket was unavailable")
+	}
+}
+
 func TestIsPiProcessInPaneTreeContextHonorsCallerCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -276,6 +333,36 @@ func TestClassifyPaneLiveness_CustomPredicate(t *testing.T) {
 	got = ClassifyPaneLiveness([]int{100}, procs, predMiss)
 	if got.HarnessAlive {
 		t.Error("expected non-matching predicate to report dead")
+	}
+}
+
+func TestParsePSArgsTable(t *testing.T) {
+	t.Parallel()
+
+	got := ParsePSArgsTable("  10 /usr/local/bin/node /opt/node_modules/@openai/codex/bin/codex.js --flag value\nmalformed\n  11 zsh\n")
+	if got[10] != "/usr/local/bin/node /opt/node_modules/@openai/codex/bin/codex.js --flag value" {
+		t.Fatalf("PID 10 args = %q", got[10])
+	}
+	if got[11] != "zsh" {
+		t.Fatalf("PID 11 args = %q", got[11])
+	}
+	if len(got) != 2 {
+		t.Fatalf("parsed args rows = %v, want two valid rows", got)
+	}
+}
+
+func TestParsePSForegroundTable(t *testing.T) {
+	t.Parallel()
+
+	out := "  10 1 10 11 Ss /bin/zsh\n  11 10 11 11 S+ MainThread\n  12 10 12 11 T /path/with spaces/claude\nmalformed\n"
+	got := ParsePSForegroundTable(out)
+	want := []ProcEntry{
+		{PID: 10, PPID: 1, PGID: 10, TPGID: 11, State: "Ss", Comm: "/bin/zsh"},
+		{PID: 11, PPID: 10, PGID: 11, TPGID: 11, State: "S+", Comm: "MainThread"},
+		{PID: 12, PPID: 10, PGID: 12, TPGID: 11, State: "T", Comm: "/path/with spaces/claude"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ParsePSForegroundTable() = %#v, want %#v", got, want)
 	}
 }
 

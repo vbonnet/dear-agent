@@ -21,6 +21,20 @@ func TestCapturePaneArgsUseCanonicalSocketAndNormalizedTarget(t *testing.T) {
 	}
 }
 
+func TestCapturePaneANSIArgsPreserveStyles(t *testing.T) {
+	t.Setenv("AGM_TMUX_SOCKET", "/tmp/agm-capture-test.sock")
+
+	want := []string{
+		"-S", "/tmp/agm-capture-test.sock",
+		"capture-pane", "-t", "session-with-separators",
+		"-p", "-e", "-S", "-12",
+	}
+	got := CapturePaneANSICommandArgs("session.with:separators", 12)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CapturePaneANSICommandArgs() = %#v, want %#v", got, want)
+	}
+}
+
 func TestCapturePaneArgsUseFullHistoryForNonPositiveLines(t *testing.T) {
 	t.Setenv("AGM_TMUX_SOCKET", "/tmp/agm-capture-test.sock")
 

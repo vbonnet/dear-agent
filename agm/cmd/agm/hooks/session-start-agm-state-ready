@@ -2,23 +2,55 @@
 # Claude Code hook: Notify AGM when session starts
 # Triggered when Claude Code session initialization completes
 #
-# Purpose: Update AGM session state to READY when Claude is ready for input
+# Purpose: Associate Claude's conversation UUID and mark the AGM session READY
 #
 # Installation: Copy to ~/.claude/hooks/session-start/agm-state-ready
 # Permissions: chmod +x ~/.claude/hooks/session-start/agm-state-ready
 
 set -euo pipefail
 
-# Get current tmux session name
-AGM_SESSION=$(tmux display-message -p '#S' 2>/dev/null || echo "")
+HOOK_PAYLOAD=$(cat)
+
+# AGM launch commands provide the durable session name. Fall back to tmux for
+# manually launched sessions that still use the installed hook.
+AGM_SESSION=${AGM_SESSION_NAME:-}
+if [ -z "$AGM_SESSION" ]; then
+    AGM_SESSION=$(tmux display-message -p '#S' 2>/dev/null || echo "")
+fi
 
 if [ -z "$AGM_SESSION" ]; then
     # Not in tmux - skip hook
     exit 0
 fi
 
-# Notify AGM of state transition to READY
-# Silent failure is OK - AGM might not be installed or session might not be AGM-managed
+# The SessionStart payload identifies the session that actually invoked this
+# hook. A child Claude process can inherit CLAUDE_SESSION_ID from its parent, so
+# use the environment only when the authoritative payload omits a UUID.
+CLAUDE_UUID=$(printf '%s\n' "$HOOK_PAYLOAD" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+if [ -z "$CLAUDE_UUID" ]; then
+    CLAUDE_UUID=${CLAUDE_SESSION_ID:-}
+fi
+if [ -n "$CLAUDE_UUID" ]; then
+    (
+        attempt=0
+        # Detached creation can spend up to 90 seconds waiting for Claude's
+        # prompt before AGM registers the session. Keep this handoff alive
+        # beyond that entire window so a valid SessionStart payload is not
+        # discarded merely because registration is still in flight.
+        while [ "$attempt" -lt 120 ]; do
+            attempt=$((attempt + 1))
+            if agm session associate "$AGM_SESSION" --uuid "$CLAUDE_UUID" >/dev/null 2>&1; then
+                agm session state set "$AGM_SESSION" "READY" --source hook 2>/dev/null || true
+                exit 0
+            fi
+            sleep 1
+        done
+    ) >/dev/null 2>&1 &
+    exit 0
+fi
+
+# A payload without a UUID cannot establish association, but the legacy state
+# notification remains best-effort for manually launched sessions.
 agm session state set "$AGM_SESSION" "READY" --source hook 2>/dev/null || true
 
 exit 0

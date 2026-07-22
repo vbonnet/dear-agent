@@ -167,6 +167,14 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-76** When a fresh AGY session has a startup prompt, `CreateSessionWithContext` shall deliver that prompt once after native readiness but before identity discovery, discover and register the resulting provider identity while retaining the workspace lock, and mark the prompt consumed so CLI, MCP, and fallback completion paths cannot resend it; bootstrap failure or caller cancellation shall roll back the owned tmux session before registration, and a fresh AGY request without a startup prompt shall fail before mutation.
 
+**OPS-77** When shared session creation launches a harness, the system shall prove the expected harness process and harness-specific prompt or composer readiness after launch and before registration, and shall atomically revalidate the exact pane immediately before initial prompt delivery, regardless of whether a surface `CreateSessionRuntime` is present; a runtime may skip the shared startup observation only by explicitly reporting that it already verified both process and composer ownership, an MCP AGY text-only onboarding wait shall remain unverified, and either readiness failure shall enter the existing creation rollback transaction.
+
+**OPS-78** When supported current-tmux creation queues a harness behind the foreground AGM process, the runtime may explicitly defer readiness until the caller exits only for a reused tmux pane with no initial prompt; unsupported harnesses and every other deferred-readiness claim shall fail before registration.
+
+**OPS-79** When `SendMessage` has a configured tmux delivery mechanism, the system shall normalize supported legacy harness names and serialize exact-pane readiness with delivery under one mutation boundary, proving the expected canonical harness process and current composer in the resolved active pane immediately before sending to that same pane ID; an explicit force request may override only a `QUEUE` verdict caused by queued or stale composer input inside that atomic boundary, while a shell, wrong or dead harness, stale prompt, onboarding or permission prompt, busy state without that override, overlay, missing session, missing atomic delivery capability, or unverified readiness shall return typed non-delivery without sending input or Enter.
+
+**OPS-80** If the request is cancelled, or the tmux backend cannot provide or complete a required startup or input-readiness check, the shared create or send operation shall return an error rather than report a successful launch or delivery; CLI and MCP surfaces shall propagate their request context through the shared readiness boundary.
+
 **OPS-36** While a session's state is OFFLINE, READY, or DONE, the stall detector shall skip error-loop detection for that session.
 
 ### Field Mask Projection

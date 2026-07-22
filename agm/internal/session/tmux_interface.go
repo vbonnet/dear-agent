@@ -1,6 +1,9 @@
 package session
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // SessionInfo holds information about a tmux session
 type SessionInfo struct {
@@ -64,6 +67,51 @@ type TmuxSessionKiller interface {
 // use this capability so backend failure cannot be mistaken for absence.
 type StrictSessionExistenceChecker interface {
 	HasSessionStrict(ctx context.Context, name string) (bool, error)
+}
+
+// HarnessReadinessWaiter is the optional startup capability used by shared
+// lifecycle operations that launch a harness without a surface runtime. A nil
+// error means the named harness has reached its interactive prompt/composer.
+type HarnessReadinessWaiter interface {
+	WaitForHarnessReady(ctx context.Context, sessionName, harness string, timeout time.Duration) error
+}
+
+// InputReadiness is the observable result of inspecting a tmux pane before
+// message delivery. State is the detector verdict (for example YES, NO,
+// QUEUE, OVERLAY, or NOT_FOUND).
+type InputReadiness struct {
+	Ready  bool
+	State  string
+	PaneID string
+	Forced bool
+}
+
+// InputDeliveryOptions controls narrowly scoped exceptions inside the atomic
+// readiness-and-delivery boundary. AllowBusyComposer accepts only QUEUE; it
+// never bypasses process ownership, permission, overlay, onboarding, missing
+// target, or other fail-closed states.
+type InputDeliveryOptions struct {
+	AllowBusyComposer bool
+}
+
+// InputReadinessChecker is the optional pre-delivery capability used by
+// shared message operations. Delivery is safe only when Ready is true.
+type InputReadinessChecker interface {
+	CheckInputReadiness(ctx context.Context, sessionName, harness string) (InputReadiness, error)
+}
+
+// AtomicInputSender checks harness input ownership and delivers to the
+// resulting exact pane while holding one tmux mutation boundary. If Ready is
+// false, no input was sent; if Ready is true, delivery completed successfully.
+// A forced result is valid only for a verified QUEUE state.
+type AtomicInputSender interface {
+	SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string, options InputDeliveryOptions) (InputReadiness, error)
+}
+
+// VerifiedPaneSender delivers to the exact pane returned by
+// InputReadinessChecker, preventing active-pane changes from redirecting input.
+type VerifiedPaneSender interface {
+	SendKeysToPane(ctx context.Context, paneID, keys string) error
 }
 
 // TmuxInterface provides an abstraction for tmux operations
