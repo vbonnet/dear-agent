@@ -18,6 +18,14 @@ Feature: Pi custom model context
     Then the Pi context should report 3562 of 8192 tokens used
     And the Pi context model should be "ollama/qwen2.5-coder:7b"
 
+  Scenario: Context uses the session's persisted catalog instead of the status caller environment
+    Given a managed Pi transcript uses provider "ollama" model "qwen2.5-coder:7b"
+    And the Pi custom model catalog declares an 8192 token window with an inert credential command
+    And the status caller Pi catalog declares a 4096 token window
+    When AGM detects the managed Pi context
+    Then the Pi context should report 3562 of 8192 tokens used
+    And the Pi context model should be "ollama/qwen2.5-coder:7b"
+
   Scenario: A native provider model outside AGM's static window table honors its override
     Given a managed Pi transcript uses provider "openai" model "gpt-4.1"
     And the Pi model catalog overrides "openai/gpt-4.1" to 4096 tokens

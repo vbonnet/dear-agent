@@ -215,32 +215,35 @@ func (a *PiAdapter) ResumeSession(sessionID SessionID) error {
 			return fmt.Errorf("validate Pi resume transcript: %w", err)
 		}
 	}
-	codingAgentDir := metadata.CodingAgentDir
-	if codingAgentDir == "" {
-		codingAgentDir = os.Getenv("PI_CODING_AGENT_DIR")
-	}
-	codingAgentDir, err = pisession.ValidateCodingAgentDir(codingAgentDir)
-	if err != nil {
-		return err
-	}
-	permissionPolicyJSON, err := normalizePiPermissionPolicy(metadata.PermissionPolicyJSON)
-	if err != nil {
-		return err
-	}
-	extensionPath, err := piadapter.EnsureExtension(os.Getenv("AGM_PI_EXTENSION_ROOT"))
-	if err != nil {
-		return fmt.Errorf("install Pi authorization extension: %w", err)
-	}
-	policyFile, err := piadapter.EnsurePolicyFile(os.Getenv("AGM_PI_EXTENSION_ROOT"), metadata.UUID, permissionPolicyJSON)
-	if err != nil {
-		return fmt.Errorf("install Pi permission policy: %w", err)
-	}
 	exists, running, err := piResumeTargetState(sessionID, metadata.TmuxName)
 	if err != nil {
 		return err
 	}
 	created := false
 	launch := !running
+	codingAgentDir, extensionPath, policyFile := "", "", ""
+	if launch {
+		codingAgentDir = metadata.CodingAgentDir
+		if codingAgentDir == "" {
+			codingAgentDir = os.Getenv("PI_CODING_AGENT_DIR")
+		}
+		codingAgentDir, err = pisession.ValidateCodingAgentDir(codingAgentDir)
+		if err != nil {
+			return err
+		}
+		permissionPolicyJSON, policyErr := normalizePiPermissionPolicy(metadata.PermissionPolicyJSON)
+		if policyErr != nil {
+			return policyErr
+		}
+		extensionPath, err = piadapter.EnsureExtension(os.Getenv("AGM_PI_EXTENSION_ROOT"))
+		if err != nil {
+			return fmt.Errorf("install Pi authorization extension: %w", err)
+		}
+		policyFile, err = piadapter.EnsurePolicyFile(os.Getenv("AGM_PI_EXTENSION_ROOT"), metadata.UUID, permissionPolicyJSON)
+		if err != nil {
+			return fmt.Errorf("install Pi permission policy: %w", err)
+		}
+	}
 	if !exists {
 		if err := piNewSession(metadata.TmuxName, metadata.WorkingDir); err != nil {
 			return fmt.Errorf("create Pi resume tmux session: %w", err)
