@@ -392,14 +392,8 @@ func isPiProcessArgsWithResolver(args []string, resolve func(string) (string, er
 	if len(args) == 0 {
 		return false
 	}
-	executable := 0
-	if filepath.Base(args[0]) == "env" {
-		executable++
-		for executable < len(args) && strings.Contains(args[executable], "=") {
-			executable++
-		}
-	}
-	if executable >= len(args) {
+	executable, ok := executableArg(args)
+	if !ok {
 		return false
 	}
 	base := filepath.Base(args[executable])
@@ -440,6 +434,18 @@ func isPiProcessArgsWithResolver(args []string, resolve func(string) (string, er
 		}
 	}
 	return false
+}
+
+func executableArg(args []string) (int, bool) {
+	executable := 0
+	if filepath.Base(args[0]) != "env" {
+		return executable, true
+	}
+	executable++
+	for executable < len(args) && strings.Contains(args[executable], "=") {
+		executable++
+	}
+	return executable, executable < len(args)
 }
 
 func isPiScriptPath(script string, resolve func(string) (string, error)) bool {

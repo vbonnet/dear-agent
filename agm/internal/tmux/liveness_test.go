@@ -413,6 +413,8 @@ func TestPiProcessArgsPreserveSpacedScriptAndOptionValues(t *testing.T) {
 		{name: "spaced preload", args: []string{"node", "--require", "/tmp/My Projects/register.cjs", piEntry}, want: true},
 		{name: "Pi is only preload value", args: []string{"node", "--require", piEntry, "/tmp/worker.js"}},
 		{name: "runtime flags", args: []string{"node", "--enable-source-maps", "--inspect=127.0.0.1:0", piEntry}, want: true},
+		{name: "env assignments", args: []string{"env", "PI_OFFLINE=1", "NODE_NO_WARNINGS=1", "node", piEntry}, want: true},
+		{name: "env without executable", args: []string{"env", "PI_OFFLINE=1"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
