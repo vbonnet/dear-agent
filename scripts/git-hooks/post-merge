@@ -119,6 +119,7 @@ fi
 #
 #   agm + reaper    ./agm/cmd/{agm,agm-reaper} ← agm/ pkg/ internal/ go.mod go.sum
 #   vroom-dispatch  ./cmd/vroom-dispatch ← cmd/vroom-dispatch/ pkg/ internal/ go.mod go.sum
+#   wayfinder       ./wayfinder/cmd/wayfinder ← wayfinder/ pkg/ internal/ go.mod go.sum
 
 # is_build_relevant: a changed file that cannot affect a compiled binary
 # (markdown, test files) is ignored even when it sits under a source prefix.
@@ -463,7 +464,7 @@ rebuild_changed_binaries() {
   # Scope the global hook: if neither binary package exists in this repo, this
   # is not dear-agent — stay completely silent.
   any_target=0
-  for _pkg in agm/cmd/agm agm/cmd/agm-reaper cmd/vroom-dispatch; do
+  for _pkg in agm/cmd/agm agm/cmd/agm-reaper cmd/vroom-dispatch wayfinder/cmd/wayfinder; do
     [ -d "${repo_root}/${_pkg}" ] && any_target=1
   done
   [ "${any_target}" = "1" ] || return 0
@@ -514,6 +515,7 @@ rebuild_changed_binaries() {
     maybe_rebuild "agm/cmd/agm-reaper" agm/cmd/agm-reaper/ agm/internal/ pkg/ internal/ go.mod go.sum
   fi
   maybe_rebuild "cmd/vroom-dispatch" cmd/vroom-dispatch/ pkg/ internal/ go.mod go.sum
+  maybe_rebuild "wayfinder/cmd/wayfinder" wayfinder/ pkg/ internal/ go.mod go.sum
   # Self-update the deploy tool: keep ~/go/bin/dear-deploy current so on-demand /
   # Orchestrator invocations (Layer 2, ce-33sy) run trunk. Stage 1.6 below does
   # not depend on this — it builds dear-deploy from the trunk worktree itself —

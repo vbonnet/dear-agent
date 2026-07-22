@@ -251,18 +251,18 @@ func revParse(t *testing.T, dir, ref string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// newRebuildRepo builds a repo that looks like dear-agent: it has the two
+// newRebuildRepo builds a repo that looks like dear-agent: it has the managed
 // binary package dirs and a baseline commit on main. It returns the repo path.
 func newRebuildRepo(t *testing.T) string {
 	t.Helper()
 	repo := newRepo(t)
-	for _, p := range []string{"agm/cmd/agm", "agm/cmd/agm-reaper", "agm/internal/tmux", "cmd/vroom-dispatch", "pkg/llm/auth", "internal/x", "docs"} {
+	for _, p := range []string{"agm/cmd/agm", "agm/cmd/agm-reaper", "agm/internal/tmux", "cmd/vroom-dispatch", "wayfinder/cmd/wayfinder", "pkg/llm/auth", "internal/x", "docs"} {
 		if err := os.MkdirAll(filepath.Join(repo, p), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// Seed each package dir with a tracked file so later diffs are meaningful.
-	for _, f := range []string{"agm/cmd/agm/main.go", "agm/cmd/agm-reaper/main.go", "agm/internal/tmux/prompt.go", "cmd/vroom-dispatch/main.go", "pkg/llm/auth/auth.go", "internal/x/x.go", "docs/readme.md"} {
+	for _, f := range []string{"agm/cmd/agm/main.go", "agm/cmd/agm-reaper/main.go", "agm/internal/tmux/prompt.go", "cmd/vroom-dispatch/main.go", "wayfinder/cmd/wayfinder/main.go", "pkg/llm/auth/auth.go", "internal/x/x.go", "docs/readme.md"} {
 		if err := os.WriteFile(filepath.Join(repo, f), []byte("package x\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -368,12 +368,12 @@ func TestRebuild_AtomicInstall_NewInode(t *testing.T) {
 	}
 }
 
-// A change under a root shared source tree (pkg/) rebuilds all three consumers.
+// A change under a root shared source tree (pkg/) rebuilds every consumer.
 func TestRebuild_SharedSource_RebuildsAllConsumers(t *testing.T) {
 	repo := newRebuildRepo(t)
 	mergeBranchChanging(t, repo, map[string]string{"pkg/llm/auth/auth.go": "package auth // v2\n"})
 	got := runRebuild(t, repo)
-	if !slices.Contains(got, "./agm/cmd/agm") || !slices.Contains(got, "./agm/cmd/agm-reaper") || !slices.Contains(got, "./cmd/vroom-dispatch") {
+	if !slices.Contains(got, "./agm/cmd/agm") || !slices.Contains(got, "./agm/cmd/agm-reaper") || !slices.Contains(got, "./cmd/vroom-dispatch") || !slices.Contains(got, "./wayfinder/cmd/wayfinder") {
 		t.Fatalf("expected all consumers rebuilt on a pkg/ change, got %v", got)
 	}
 }
@@ -694,6 +694,26 @@ func TestRebuild_ScopedSource_RebuildsOnlyAffected(t *testing.T) {
 	if !slices.Contains(got, "./cmd/vroom-dispatch") {
 		t.Fatalf("vroom-dispatch not rebuilt for its own change: %v", got)
 	}
+	if slices.Contains(got, "./wayfinder/cmd/wayfinder") {
+		t.Fatalf("wayfinder rebuilt for a vroom-dispatch-only change: %v", got)
+	}
+}
+
+// A Wayfinder runtime change rebuilds Wayfinder and no unrelated executable.
+// This is the exact boundary missed when PR #1024 changed validator Go files
+// but the installed binary remained at the prior revision.
+func TestRebuild_WayfinderOnly(t *testing.T) {
+	repo := newRebuildRepo(t)
+	mergeBranchChanging(t, repo, map[string]string{"wayfinder/cmd/wayfinder/main.go": "package main // v2\n"})
+	got := runRebuild(t, repo)
+	if !slices.Contains(got, "./wayfinder/cmd/wayfinder") {
+		t.Fatalf("wayfinder not rebuilt for its own runtime change: %v", got)
+	}
+	for _, unrelated := range []string{"./agm/cmd/agm", "./agm/cmd/agm-reaper", "./cmd/vroom-dispatch"} {
+		if slices.Contains(got, unrelated) {
+			t.Fatalf("%s rebuilt for a wayfinder-only change: %v", unrelated, got)
+		}
+	}
 }
 
 // Any compiled AGM change rebuilds the coherent CLI/reaper pair. Even when a
@@ -705,6 +725,9 @@ func TestRebuild_AgmOnly(t *testing.T) {
 	got := runRebuild(t, repo)
 	if slices.Contains(got, "./cmd/vroom-dispatch") {
 		t.Fatalf("vroom-dispatch rebuilt for an agm-only change: %v", got)
+	}
+	if slices.Contains(got, "./wayfinder/cmd/wayfinder") {
+		t.Fatalf("wayfinder rebuilt for an agm-only change: %v", got)
 	}
 	if !slices.Contains(got, "./agm/cmd/agm") {
 		t.Fatalf("agm not rebuilt for its own change: %v", got)
