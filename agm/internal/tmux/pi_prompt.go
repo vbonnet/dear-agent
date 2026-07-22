@@ -103,7 +103,7 @@ func realPiPromptRuntime() piPromptRuntime {
 			return exec.CommandContext(ctx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", NormalizeTmuxSessionName(sessionName), "-p", "-S", "-30").Output()
 		},
 		alive: func(ctx context.Context, sessionName string) (bool, error) {
-			return IsProcessInPaneTreeContext(ctx, sessionName, GetSocketPath(), "pi")
+			return IsPiProcessInPaneTreeContext(ctx, sessionName, GetSocketPath())
 		},
 		sleep: sleepWithContext,
 	}

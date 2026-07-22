@@ -17,6 +17,15 @@ func TestCheckPaneLivenessContextHonorsCallerCancellation(t *testing.T) {
 	}
 }
 
+func TestIsPiProcessInPaneTreeContextHonorsCallerCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := IsPiProcessInPaneTreeContext(ctx, "canceled-pi-liveness", filepath.Join(t.TempDir(), "tmux.sock"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("IsPiProcessInPaneTreeContext() error = %v, want context.Canceled", err)
+	}
+}
+
 // TestClassifyPaneLiveness covers the false-green class from ce-axsr/ce-qkf7:
 // a tmux session that exists must only count as alive when a harness process
 // is actually running in the pane's descendant tree.
@@ -273,5 +282,57 @@ func TestParsePSTable(t *testing.T) {
 	}
 	if entries[2].PPID != 200 {
 		t.Errorf("bad third entry: %+v", entries[2])
+	}
+}
+
+func TestPiProcessCommandRequiresPiSpecificIdentity(t *testing.T) {
+	tests := []struct {
+		command string
+		want    bool
+	}{
+		{command: "pi --session-id abc", want: true},
+		{command: "/opt/homebrew/bin/pi --session-id abc", want: true},
+		{command: "/opt/homebrew/bin/node /opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js --session-id abc", want: true},
+		{command: "env PI_OFFLINE=1 node /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", want: true},
+		{command: "node /usr/local/lib/node_modules/@openai/codex/dist/cli.js"},
+		{command: "node /tmp/pi"},
+		{command: "node -e console.log('/opt/homebrew/bin/pi')"},
+		{command: "zsh -l"},
+	}
+	for _, test := range tests {
+		if got := isPiProcessCommand(test.command); got != test.want {
+			t.Errorf("isPiProcessCommand(%q) = %v, want %v", test.command, got, test.want)
+		}
+	}
+}
+
+func TestPiProcessCommandAcceptsOnlyShimResolvingToPackageEntry(t *testing.T) {
+	resolve := func(path string) (string, error) {
+		if path == "/opt/homebrew/bin/pi" {
+			return "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", nil
+		}
+		return "", errors.New("not a Pi package shim")
+	}
+	if !isPiProcessCommandWithResolver("node /opt/homebrew/bin/pi --session-id abc", resolve) {
+		t.Fatal("Pi npm shim resolving to the package entry was rejected")
+	}
+	if isPiProcessCommandWithResolver("node /tmp/bin/pi --session-id abc", resolve) {
+		t.Fatal("unrelated Node script named pi was accepted")
+	}
+}
+
+func TestParsePSCommandTableAndPiProcessTree(t *testing.T) {
+	procs := parsePSCommandTable("  100     1 /bin/zsh -l\n" +
+		"  200   100 /opt/homebrew/bin/node /opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js --session-id abc\n" +
+		"  300     1 /opt/homebrew/bin/node /work/codex.js\n" +
+		"bad row\n")
+	if len(procs) != 3 {
+		t.Fatalf("parsePSCommandTable() returned %d rows: %+v", len(procs), procs)
+	}
+	if !piProcessInPaneTree([]int{100}, procs) {
+		t.Fatal("Pi Node entrypoint was not found below the pane shell")
+	}
+	if piProcessInPaneTree([]int{300}, procs) {
+		t.Fatal("generic Node process was accepted as Pi")
 	}
 }

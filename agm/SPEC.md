@@ -121,8 +121,10 @@ For `pi-cli`, AGM treats Pi as a real interactive CLI harness:
   process-exit policy
 - create and cold-resume readiness MUST carry a unique per-process launch ID;
   an older managed footer in pane history MUST NOT satisfy a new launch, and
-  existing panes MUST be reused only after exact Pi liveness or restartable-
-  shell proof
+  existing panes MUST be reused only after Pi-specific process identity
+  (including the npm Node entrypoint without accepting generic Node) or
+  restartable-shell proof; command cancellation MUST stop those scans before
+  delivery or attachment
 - manifests and Dolt rows MUST preserve Pi session ID, private session
   directory, and exact transcript path; lookup and import MUST read the JSONL
   header and reject newest-file heuristics, duplicate identities, symlinks,

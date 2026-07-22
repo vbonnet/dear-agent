@@ -71,9 +71,11 @@ compatibility.
 
 **AGP-47** When AGM cold-resumes a Pi session before Pi has persisted a native transcript, the system shall preserve the configured model or use the Pi harness default; when a persisted transcript exists without model provenance, the system shall omit `--model` so Pi retains native session truth.
 
-**AGP-48** When any Pi lifecycle entry point finds an existing tmux session during cold resume, the system shall preserve it only after proving an exact `pi` process, otherwise require a positively classified restartable shell before command delivery, and fail without pane mutation when another harness, a non-shell foreground, a disappeared pane, or a liveness-scan error is observed.
+**AGP-48** When any Pi lifecycle entry point finds an existing tmux session during cold resume, the system shall preserve it only after proving Pi-specific process identity, including the canonical npm Node entrypoint without accepting a generic `node` process, otherwise require a positively classified restartable shell before command delivery, and fail without pane mutation when another harness, a non-shell foreground, a disappeared pane, or a liveness-scan error is observed.
 
 **AGP-49** When AGM launches Pi for create or cold resume, the system shall generate a unique launch ID, pass it through the canonical command and managed extension, and require readiness carrying that exact ID before registration, attachment, or success.
+
+**AGP-50** When the root AGM command classifies an existing Pi pane during resume, the system shall propagate the command context through Pi identity and generic pane-liveness scans and shall return cancellation before command delivery, attachment, or metadata mutation.
 
 ### AGY Model and Adapter Lifecycle
 

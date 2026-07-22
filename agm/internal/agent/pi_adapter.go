@@ -31,7 +31,7 @@ var (
 	piSendPromptLiteral  = tmux.SendPromptLiteral
 	piWaitForPrompt      = tmux.WaitForPiLaunchPromptContext
 	piKillSession        = tmux.KillSessionWithError
-	piCheckProcess       = tmux.CheckProcessInPaneTree
+	piCheckProcess       = tmux.IsPiProcessInPaneTree
 	piCheckHarness       = tmux.CheckPaneLiveness
 	piAttachSession      = tmux.AttachSession
 	piIsIdle             = tmux.IsPiIdle
@@ -265,7 +265,7 @@ func piResumeTargetState(sessionID SessionID, tmuxName string) (bool, bool, erro
 	if !exists {
 		return false, false, nil
 	}
-	running, err := piCheckProcess(tmuxName, tmux.GetSocketPath(), "pi")
+	running, err := piCheckProcess(tmuxName, tmux.GetSocketPath())
 	if err != nil {
 		return true, false, fmt.Errorf("check exact Pi process liveness: %w", err)
 	}
