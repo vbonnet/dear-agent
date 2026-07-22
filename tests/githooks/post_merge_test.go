@@ -204,6 +204,26 @@ func stubGo(t *testing.T, recordFile string) string {
 	return dir
 }
 
+// stubLockf models stock macOS lockf's file-and-command CLI. It records the
+// invocation and executes the command after the lock-file argument, rejecting
+// the invalid open-file-descriptor shape that prompted the regression.
+func stubLockf(t *testing.T, recordFile string) string {
+	t.Helper()
+	dir := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$*\" > \"" + recordFile + "\"\n" +
+		"[ \"$1\" = -t ] || exit 64\n" +
+		"shift 2\n" +
+		"[ -n \"$1\" ] || exit 64\n" +
+		"shift\n" +
+		"[ $# -gt 0 ] || exit 64\n" +
+		"exec \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "lockf"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 // installRecord is one captured `go install` invocation: the package and the
 // HEAD commit of the directory the build actually ran in.
 type installRecord struct {
@@ -712,6 +732,45 @@ func TestRebuild_WayfinderOnly(t *testing.T) {
 	for _, unrelated := range []string{"./agm/cmd/agm", "./agm/cmd/agm-reaper", "./cmd/vroom-dispatch"} {
 		if slices.Contains(got, unrelated) {
 			t.Fatalf("%s rebuilt for a wayfinder-only change: %v", unrelated, got)
+		}
+	}
+}
+
+func TestRebuild_WayfinderUsesMacOSLockfFileAndCommandForm(t *testing.T) {
+	repo := newRebuildRepo(t)
+	mergeBranchChanging(t, repo, map[string]string{"wayfinder/cmd/wayfinder/main.go": "package main // v2\n"})
+	gobin := t.TempDir()
+	installRecord := filepath.Join(t.TempDir(), "installed")
+	lockfRecord := filepath.Join(t.TempDir(), "lockf-args")
+	goDir := stubGo(t, installRecord)
+	lockfDir := stubLockf(t, lockfRecord)
+
+	cmd := exec.Command("bash", hookPath(t))
+	cmd.Dir = repo
+	cmd.Env = append(os.Environ(),
+		"HOME="+t.TempDir(),
+		"GOBIN="+gobin,
+		"PATH="+goDir+string(os.PathListSeparator)+lockfDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"AGM_POST_MERGE_SWEEP=0",
+		"DEAR_AGENT_INSTALL_LOCK_TOOL=lockf",
+	)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("Wayfinder lockf-form rebuild failed: %v\n%s", err, output)
+	}
+	if got := installed(t, installRecord); !slices.Contains(got, "./wayfinder/cmd/wayfinder") {
+		t.Fatalf("Wayfinder was not installed through lockf command form: %v", got)
+	}
+	args, err := os.ReadFile(lockfRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"-t 300 " + filepath.Join(gobin, ".wayfinder-install.lock"),
+		"env DEAR_AGENT_POST_MERGE_INTERNAL_MODE=wayfinder DEAR_AGENT_POST_MERGE_REBUILD=1 bash",
+		hookPath(t),
+	} {
+		if !strings.Contains(string(args), want) {
+			t.Fatalf("lockf invocation missing %q: %s", want, args)
 		}
 	}
 }
