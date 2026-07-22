@@ -144,8 +144,10 @@ func TestSpawnSessionWithRetry(t *testing.T) {
 	sup := supervisor{Name: "vroom-orchestrator", Role: "orchestrator"}
 
 	// Save and restore the injectable spawn/sleep hooks.
-	origRun, origSleep := runSpawn, sleepFor
-	t.Cleanup(func() { runSpawn, sleepFor = origRun, origSleep })
+	origRun, origSleep, origNow := runSpawn, sleepFor, spawnRetryNow
+	t.Cleanup(func() {
+		runSpawn, sleepFor, spawnRetryNow = origRun, origSleep, origNow
+	})
 
 	refusal := []byte("circuit breaker: spawn refused — spawn too soon")
 	cbErr := errors.New("exit status 1")
@@ -174,12 +176,17 @@ func TestSpawnSessionWithRetry(t *testing.T) {
 	})
 
 	t.Run("retries a resource governor pause then succeeds", func(t *testing.T) {
-		calls, sleeps := 0, 0
-		sleepFor = func(time.Duration) { sleeps++ }
+		calls := 0
+		now := time.Date(2026, 7, 22, 2, 0, 0, 0, time.FixedZone("PDT", -7*60*60))
+		boundary := now.Add(7 * time.Minute)
+		spawnRetryNow = func() time.Time { return now }
+		defer func() { spawnRetryNow = origNow }()
+		var sleeps []time.Duration
+		sleepFor = func(delay time.Duration) { sleeps = append(sleeps, delay) }
 		runSpawn = func(supervisor, string) ([]byte, error) {
 			calls++
 			if calls == 1 {
-				return []byte("circuit breaker: spawn refused\n  • [spawn_stagger] spawns paused by resource governor; earliest possible admission is 2026-07-22T02:00:00-07:00 if the governor does not extend the hold"), cbErr
+				return []byte("circuit breaker: spawn refused\n  • [spawn_stagger] spawns paused by resource governor; earliest possible admission is " + boundary.Format(time.RFC3339) + " if the governor does not extend the hold"), cbErr
 			}
 			return []byte("created"), nil
 		}
@@ -187,8 +194,11 @@ func TestSpawnSessionWithRetry(t *testing.T) {
 		if err := spawnSessionWithRetry(sup, "sonnet-200k"); err != nil {
 			t.Fatalf("expected success after governor-pause retry, got %v", err)
 		}
-		if calls != 2 || sleeps != 1 {
-			t.Errorf("governor pause: want 2 calls/1 sleep, got %d calls/%d sleeps", calls, sleeps)
+		if calls != 2 || len(sleeps) != 1 {
+			t.Fatalf("governor pause: want 2 calls/1 sleep, got %d calls/%d sleeps", calls, len(sleeps))
+		}
+		if sleeps[0] != 7*time.Minute {
+			t.Errorf("governor retry delay = %s, want advertised 7m boundary", sleeps[0])
 		}
 	})
 
@@ -247,6 +257,39 @@ func TestSpawnSessionWithRetry(t *testing.T) {
 			t.Errorf("happy path: want 1 call/0 sleeps, got %d calls/%d sleeps", calls, sleeps)
 		}
 	})
+}
+
+func TestSpawnRetryDelayFallbacks(t *testing.T) {
+	origNow := spawnRetryNow
+	t.Cleanup(func() { spawnRetryNow = origNow })
+	now := time.Date(2026, 7, 22, 2, 0, 0, 0, time.UTC)
+	spawnRetryNow = func() time.Time { return now }
+
+	tests := map[string]struct {
+		output string
+		want   time.Duration
+	}{
+		"recent spawn": {
+			output: "circuit breaker: spawn refused — spawn too soon",
+			want:   minSpawnInterval,
+		},
+		"malformed governor boundary": {
+			output: "spawns paused by resource governor; earliest possible admission is not-a-time",
+			want:   minSpawnInterval,
+		},
+		"expired governor boundary": {
+			output: "spawns paused by resource governor; earliest possible admission is " + now.Add(-time.Minute).Format(time.RFC3339),
+			want:   minSpawnInterval,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := spawnRetryDelay(tt.output); got != tt.want {
+				t.Errorf("spawnRetryDelay() = %s, want %s", got, tt.want)
+			}
+		})
+	}
 }
 
 // TestMinSpawnIntervalMatchesAgm pins the assumption ce-mu36 relies on: the

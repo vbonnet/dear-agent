@@ -515,6 +515,14 @@ const spawnTooSoonMarker = "spawn too soon"
 // governor" so unrelated governor safety failures do not become retryable.
 const governorPauseMarker = "spawns paused by resource governor"
 
+// governorAdmissionMarker introduces the machine-parseable RFC3339 boundary
+// in AGM's governor-pause diagnostic.
+const governorAdmissionMarker = "earliest possible admission is "
+
+// spawnRetryNow is the clock used to turn AGM's advertised governor boundary
+// into a delay. It is injectable so the retry contract has deterministic tests.
+var spawnRetryNow = time.Now
+
 func isRetryableSpawnRefusal(output string) bool {
 	hasTransientMarker := strings.Contains(output, spawnTooSoonMarker) ||
 		strings.Contains(output, governorPauseMarker)
@@ -548,6 +556,22 @@ func isRetryableSpawnRefusal(output string) bool {
 	return true
 }
 
+func spawnRetryDelay(output string) time.Duration {
+	if strings.Contains(output, governorPauseMarker) {
+		if _, suffix, ok := strings.Cut(output, governorAdmissionMarker); ok {
+			fields := strings.Fields(suffix)
+			if len(fields) > 0 {
+				if boundary, err := time.Parse(time.RFC3339, fields[0]); err == nil {
+					if remaining := boundary.Sub(spawnRetryNow()); remaining > 0 {
+						return remaining
+					}
+				}
+			}
+		}
+	}
+	return minSpawnInterval
+}
+
 // runSpawn executes `agm session new` for one supervisor and returns the
 // combined output. It is a package var so tests can stub the spawn without
 // shelling out to agm.
@@ -564,15 +588,16 @@ var runSpawn = func(sup supervisor, model string) ([]byte, error) {
 }
 
 // sleepFor is the backoff sleep used by spawnSessionWithRetry. It is a package
-// var so tests can avoid waiting out the real 2-minute window.
+// var so tests can avoid waiting out the real admission window.
 var sleepFor = time.Sleep
 
 // spawnSessionWithRetry runs `agm session new` for a supervisor, retrying the
 // two transient spawn-stagger refusals: a recent successful spawn and a
-// governor-owned pause. On refusal it waits the full minSpawnInterval before
-// retrying, up to maxSpawnAttempts. Waiting the full window (rather than parsing
-// a human diagnostic) keeps the retry contract bounded and fail-safe. Any
-// other failure (or success) returns immediately.
+// governor-owned pause. It waits the fixed spawn interval for a recent spawn
+// and the advertised earliest admission boundary for a governor pause, up to
+// maxSpawnAttempts. A missing, malformed, or expired governor boundary falls
+// back to the fixed interval. Any other failure (or success) returns
+// immediately.
 func spawnSessionWithRetry(sup supervisor, model string) error {
 	var lastErr error
 	for attempt := 1; attempt <= maxSpawnAttempts; attempt++ {
@@ -585,9 +610,10 @@ func spawnSessionWithRetry(sup supervisor, model string) error {
 			return lastErr
 		}
 		if attempt < maxSpawnAttempts {
+			delay := spawnRetryDelay(string(output))
 			fmt.Printf("\n    %s: spawn refused by circuit breaker (attempt %d/%d); waiting %s for the spawn window to clear... ",
-				sup.Name, attempt, maxSpawnAttempts, minSpawnInterval)
-			sleepFor(minSpawnInterval)
+				sup.Name, attempt, maxSpawnAttempts, delay)
+			sleepFor(delay)
 		}
 	}
 	return fmt.Errorf("circuit breaker still refusing after %d attempts: %w", maxSpawnAttempts, lastErr)

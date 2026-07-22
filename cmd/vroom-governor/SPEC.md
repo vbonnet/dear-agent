@@ -14,7 +14,7 @@
 
 **VGOVR-06** When a resource limit is exceeded, the governor shall write a future RFC3339 timestamp to AGM's shared spawn timer so admission remains paused for the configured interval.
 
-**VGOVR-07** When resource limits clear, the governor shall stop extending the shared spawn timer so admission resumes automatically after the existing pause expires.
+**VGOVR-07** When resource limits clear, the governor shall stop extending the shared spawn timer; admission shall remain blocked until the existing hold and the circuit breaker's spawn safety interval have elapsed, and shall still require every other admission gate to pass.
 
 ## BDD Traceability
 
