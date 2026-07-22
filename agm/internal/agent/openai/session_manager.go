@@ -19,16 +19,29 @@ type SessionManager struct {
 
 // SessionInfo contains metadata and conversation history for a session.
 type SessionInfo struct {
-	ID               string    `json:"id"`
-	Title            string    `json:"title,omitempty"`
-	Model            string    `json:"model"`
-	WorkingDirectory string    `json:"working_directory"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
-	MessageCount     int       `json:"message_count"`
+	ID               string                `json:"id"`
+	Title            string                `json:"title,omitempty"`
+	Model            string                `json:"model"`
+	WorkingDirectory string                `json:"working_directory"`
+	CreatedAt        time.Time             `json:"created_at"`
+	UpdatedAt        time.Time             `json:"updated_at"`
+	MessageCount     int                   `json:"message_count"`
+	RuntimeConfig    *SessionRuntimeConfig `json:"runtime_config,omitempty"`
 
 	// In-memory message cache (not persisted in metadata)
 	messages []Message
+}
+
+// SessionRuntimeConfig is the non-secret client configuration required to
+// deliver future messages with the same semantics as the adapter that created
+// the session. API credentials are deliberately excluded and must be supplied
+// at runtime.
+type SessionRuntimeConfig struct {
+	Temperature     float32 `json:"temperature"`
+	MaxTokens       int     `json:"max_tokens"`
+	BaseURL         string  `json:"base_url,omitempty"`
+	IsAzure         bool    `json:"is_azure,omitempty"`
+	AzureAPIVersion string  `json:"azure_api_version,omitempty"`
 }
 
 // NewSessionManager creates a new session manager.
@@ -220,6 +233,23 @@ func (sm *SessionManager) UpdateWorkingDirectory(sessionID, workingDir string) e
 	}
 
 	info.WorkingDirectory = workingDir
+	info.UpdatedAt = time.Now()
+
+	return sm.saveMetadata(sessionID)
+}
+
+// UpdateRuntimeConfig persists the non-secret client settings used by a
+// session so another AGM process can reconstruct its delivery adapter.
+func (sm *SessionManager) UpdateRuntimeConfig(sessionID string, runtimeConfig SessionRuntimeConfig) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	info, exists := sm.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+
+	info.RuntimeConfig = &runtimeConfig
 	info.UpdatedAt = time.Now()
 
 	return sm.saveMetadata(sessionID)

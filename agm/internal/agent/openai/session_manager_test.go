@@ -632,3 +632,36 @@ func TestCreateSession_ModelPersistence(t *testing.T) {
 		t.Errorf("expected persisted model %q, got %q", testModel, loaded.Model)
 	}
 }
+
+func TestUpdateRuntimeConfigPersistence(t *testing.T) {
+	tempDir := t.TempDir()
+	sm, err := NewSessionManager(tempDir)
+	if err != nil {
+		t.Fatalf("NewSessionManager failed: %v", err)
+	}
+	if _, err := sm.CreateSession("runtime-config-session", "gpt-4o", "/work"); err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+	want := SessionRuntimeConfig{
+		Temperature:     1.15,
+		MaxTokens:       2048,
+		BaseURL:         "https://azure.example.test",
+		IsAzure:         true,
+		AzureAPIVersion: "2025-01-01-preview",
+	}
+	if err := sm.UpdateRuntimeConfig("runtime-config-session", want); err != nil {
+		t.Fatalf("UpdateRuntimeConfig failed: %v", err)
+	}
+
+	reloaded, err := NewSessionManager(tempDir)
+	if err != nil {
+		t.Fatalf("reload SessionManager failed: %v", err)
+	}
+	info, err := reloaded.GetSession("runtime-config-session")
+	if err != nil {
+		t.Fatalf("GetSession after reload failed: %v", err)
+	}
+	if info.RuntimeConfig == nil || *info.RuntimeConfig != want {
+		t.Fatalf("persisted runtime config = %#v, want %#v", info.RuntimeConfig, want)
+	}
+}

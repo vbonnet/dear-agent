@@ -25,9 +25,10 @@ type Manifest struct {
 	Workspace               string            `yaml:"workspace,omitempty"` // Workspace name (e.g., "oss", "acme")
 	Context                 Context           `yaml:"context"`
 	Claude                  Claude            `yaml:"claude"`
-	Codex                   *Codex            `yaml:"codex,omitempty" json:"codex,omitempty"` // Codex CLI saved-session metadata
-	Agy                     *Agy              `yaml:"agy,omitempty" json:"agy,omitempty"`     // AGY saved-conversation metadata
-	Pi                      *Pi               `yaml:"pi,omitempty" json:"pi,omitempty"`       // Pi native session metadata
+	Codex                   *Codex            `yaml:"codex,omitempty" json:"codex,omitempty"`   // Codex CLI saved-session metadata
+	OpenAI                  *OpenAI           `yaml:"openai,omitempty" json:"openai,omitempty"` // Pure OpenAI API session runtime locator and legacy fallback configuration
+	Agy                     *Agy              `yaml:"agy,omitempty" json:"agy,omitempty"`       // AGY saved-conversation metadata
+	Pi                      *Pi               `yaml:"pi,omitempty" json:"pi,omitempty"`         // Pi native session metadata
 	Tmux                    Tmux              `yaml:"tmux"`
 	OpenCode                *OpenCode         `yaml:"opencode,omitempty"`   // OpenCode session metadata
 	Harness                 string            `yaml:"harness,omitempty"`    // Harness specifies the AI harness (claude-code, codex-cli, agy, opencode-cli, pi-cli; gemini-cli deprecated)
@@ -153,6 +154,20 @@ type Claude struct {
 type Codex struct {
 	SessionID      string `yaml:"session_id,omitempty"`      // Codex saved-session UUID (required for codex resume)
 	TranscriptPath string `yaml:"transcript_path,omitempty"` // Resolved rollout JSONL path at import time
+}
+
+// OpenAI records the non-secret information needed to locate and reconstruct a
+// pure OpenAI API session. New sessions persist the authoritative client
+// settings in their own metadata; these fields remain a backward-compatible
+// fallback for sessions created before that metadata existed. API keys are
+// never stored in manifests.
+type OpenAI struct {
+	SessionsDir     string  `yaml:"sessions_dir,omitempty" json:"sessions_dir,omitempty"`
+	BaseURL         string  `yaml:"base_url,omitempty" json:"base_url,omitempty"`
+	IsAzure         bool    `yaml:"is_azure,omitempty" json:"is_azure,omitempty"`
+	AzureAPIVersion string  `yaml:"azure_api_version,omitempty" json:"azure_api_version,omitempty"`
+	Temperature     float32 `yaml:"temperature,omitempty" json:"temperature,omitempty"`
+	MaxTokens       int     `yaml:"max_tokens,omitempty" json:"max_tokens,omitempty"`
 }
 
 // Agy represents AGY saved-conversation metadata.

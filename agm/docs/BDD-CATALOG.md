@@ -237,6 +237,11 @@ creation, and terminal state detection.
   mutation boundary, and MCP creation atomically revalidates the harness and
   composer after registration immediately before delivering its startup prompt.
   A concurrent sender or readiness change cannot reuse the earlier proof.
+- Pure API single-send preflight resolves the registered delivery surface
+  before any tmux probe, while both single-recipient and fan-out delivery
+  restore the session's persisted model, storage locator, endpoint, and Azure
+  settings without persisting credentials, then fail closed unless adapter
+  status is active or idle.
 - Shared startup readiness honors its total deadline while a slow launch
   wrapper still owns the pane, but fails promptly if an already-observed
   harness process later stops.

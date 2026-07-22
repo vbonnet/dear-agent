@@ -23,6 +23,7 @@ type OpenAIAdapter struct {
 	client         openai.ClientInterface
 	sessionManager *openai.SessionManager
 	model          string
+	runtimeConfig  openai.SessionRuntimeConfig
 }
 
 // OpenAIConfig holds configuration for creating an OpenAI adapter.
@@ -65,23 +66,68 @@ type OpenAIConfig struct {
 // If config is nil, uses default configuration (gpt-4-turbo-preview).
 // Returns error if API key is missing or client initialization fails.
 func NewOpenAIAdapter(ctx context.Context, config *OpenAIConfig) (Agent, error) {
-	if config == nil {
-		config = &OpenAIConfig{
-			Model:       "gpt-4-turbo-preview",
-			Temperature: 0.7,
-			MaxTokens:   1000,
-		}
+	resolvedConfig := resolveOpenAIConfig(config)
+	return newOpenAIAdapter(ctx, resolvedConfig)
+}
+
+// NewOpenAIAdapterForSession reconstructs an adapter from a session's
+// persisted non-secret runtime configuration. API credentials are intentionally
+// resolved from config or the environment on each process invocation.
+func NewOpenAIAdapterForSession(ctx context.Context, sessionID SessionID, config *OpenAIConfig) (Agent, error) {
+	resolvedConfig := resolveOpenAIConfig(config)
+	sessionManager, err := openai.NewSessionManager(resolvedConfig.SessionsDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create session manager: %w", err)
+	}
+
+	info, err := sessionManager.GetSession(string(sessionID))
+	if err != nil {
+		return nil, fmt.Errorf("load OpenAI session %q: %w", sessionID, err)
+	}
+	resolvedConfig.Model = info.Model
+	if info.RuntimeConfig != nil {
+		resolvedConfig.Temperature = info.RuntimeConfig.Temperature
+		resolvedConfig.MaxTokens = info.RuntimeConfig.MaxTokens
+		resolvedConfig.BaseURL = info.RuntimeConfig.BaseURL
+		resolvedConfig.IsAzure = info.RuntimeConfig.IsAzure
+		resolvedConfig.AzureAPIVersion = info.RuntimeConfig.AzureAPIVersion
+	}
+
+	return newOpenAIAdapter(ctx, resolvedConfig)
+}
+
+func resolveOpenAIConfig(config *OpenAIConfig) OpenAIConfig {
+	resolved := OpenAIConfig{}
+	if config != nil {
+		resolved = *config
 	}
 
 	// Read API key from environment if not provided
-	apiKey := config.APIKey
-	if apiKey == "" {
-		apiKey = os.Getenv("OPENAI_API_KEY")
+	if resolved.APIKey == "" {
+		resolved.APIKey = os.Getenv("OPENAI_API_KEY")
 	}
+	if resolved.Model == "" {
+		resolved.Model = os.Getenv("OPENAI_MODEL")
+		if resolved.Model == "" {
+			resolved.Model = "gpt-4-turbo-preview"
+		}
+	}
+	if resolved.Temperature == 0 {
+		resolved.Temperature = 0.7
+	}
+	if resolved.MaxTokens == 0 {
+		resolved.MaxTokens = 1000
+	}
+	if resolved.IsAzure && resolved.AzureAPIVersion == "" {
+		resolved.AzureAPIVersion = "2024-02-15-preview"
+	}
+	return resolved
+}
 
+func newOpenAIAdapter(ctx context.Context, config OpenAIConfig) (*OpenAIAdapter, error) {
 	// Create OpenAI client
 	clientConfig := openai.Config{
-		APIKey:          apiKey,
+		APIKey:          config.APIKey,
 		Model:           config.Model,
 		Temperature:     config.Temperature,
 		MaxTokens:       config.MaxTokens,
@@ -102,15 +148,17 @@ func NewOpenAIAdapter(ctx context.Context, config *OpenAIConfig) (Agent, error) 
 	}
 
 	// Determine model name
-	model := config.Model
-	if model == "" {
-		model = "gpt-4-turbo-preview"
-	}
-
 	return &OpenAIAdapter{
 		client:         client,
 		sessionManager: sessionManager,
-		model:          model,
+		model:          config.Model,
+		runtimeConfig: openai.SessionRuntimeConfig{
+			Temperature:     config.Temperature,
+			MaxTokens:       config.MaxTokens,
+			BaseURL:         config.BaseURL,
+			IsAzure:         config.IsAzure,
+			AzureAPIVersion: config.AzureAPIVersion,
+		},
 	}, nil
 }
 
@@ -121,6 +169,10 @@ func newOpenAIAdapterWithClient(client openai.ClientInterface, sessionManager *o
 		client:         client,
 		sessionManager: sessionManager,
 		model:          "gpt-4",
+		runtimeConfig: openai.SessionRuntimeConfig{
+			Temperature: 0.7,
+			MaxTokens:   1000,
+		},
 	}
 }
 
@@ -156,6 +208,10 @@ func (a *OpenAIAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to create session: %w", err)
+	}
+	if err := a.sessionManager.UpdateRuntimeConfig(string(sessionID), a.runtimeConfig); err != nil {
+		_ = a.sessionManager.DeleteSession(string(sessionID))
+		return "", fmt.Errorf("failed to persist session runtime configuration: %w", err)
 	}
 
 	// Update title if provided

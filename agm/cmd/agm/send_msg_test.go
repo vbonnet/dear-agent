@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/send"
@@ -183,6 +184,33 @@ func TestAPIDeliveryUsesAdapterReadinessInsteadOfTmuxState(t *testing.T) {
 	}
 }
 
+func TestEnsureRecipientReadyDoesNotRequireTmuxForPureAPISession(t *testing.T) {
+	previousConfig := cfg
+	cfg = &config.Config{SessionsDir: t.TempDir()}
+	t.Cleanup(func() { cfg = previousConfig })
+
+	for _, harnessType := range []string{"openai", "gpt"} {
+		t.Run(harnessType, func(t *testing.T) {
+			storage, err := dolt.NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+			if err != nil {
+				t.Fatalf("open session storage: %v", err)
+			}
+			t.Cleanup(func() { _ = storage.Close() })
+			if err := storage.CreateSession(&manifest.Manifest{
+				SessionID: "api-id-" + harnessType,
+				Name:      "api-no-tmux-" + harnessType,
+				Harness:   harnessType,
+			}); err != nil {
+				t.Fatalf("create API session: %v", err)
+			}
+
+			if err := ensureRecipientReady("api-no-tmux-"+harnessType, storage); err != nil {
+				t.Fatalf("ensure API recipient ready without tmux: %v", err)
+			}
+		})
+	}
+}
+
 func TestFailedAPIAdapterReadinessCreatesNoDelegation(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
@@ -305,7 +333,11 @@ func TestSingleAndMultiRecipientAPIDeliveryUsesAdapterReadiness(t *testing.T) {
 		SessionID: "multi-api-id",
 		Name:      "multi-api",
 		Harness:   "openai",
-		Tmux:      manifest.Tmux{SessionName: "multi-api-tmux"},
+		OpenAI: &manifest.OpenAI{
+			SessionsDir: "/api/sessions",
+			BaseURL:     "https://api.example.test",
+		},
+		Tmux: manifest.Tmux{SessionName: "multi-api-tmux"},
 	}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -355,9 +387,12 @@ func TestSingleAndMultiRecipientAPIDeliveryUsesAdapterReadiness(t *testing.T) {
 					statusError:   testCase.statusError,
 					sendError:     testCase.sendError,
 				}
-				err := surface.deliver(t, func(_ context.Context, harnessType string) (agent.Agent, error) {
-					if harnessType != "openai" {
-						t.Fatalf("API factory harness = %q, want openai", harnessType)
+				err := surface.deliver(t, func(_ context.Context, apiManifest *manifest.Manifest) (agent.Agent, error) {
+					if apiManifest.Harness != "openai" {
+						t.Fatalf("API factory harness = %q, want openai", apiManifest.Harness)
+					}
+					if apiManifest.OpenAI == nil || apiManifest.OpenAI.SessionsDir != "/api/sessions" || apiManifest.OpenAI.BaseURL != "https://api.example.test" {
+						t.Fatalf("API factory lost persisted runtime locator: %#v", apiManifest.OpenAI)
 					}
 					return mockAgent, nil
 				})
@@ -392,13 +427,39 @@ func TestNewAPIHarnessAdapterReportsPureAPISessionReadyWithoutTmux(t *testing.T)
 
 	for _, harnessType := range []string{"openai", "gpt"} {
 		t.Run(harnessType, func(t *testing.T) {
-			adapter, err := newAPIHarnessAdapter(t.Context(), harnessType)
+			sessionsDir := t.TempDir()
+			creator, err := agent.NewOpenAIAdapter(t.Context(), &agent.OpenAIConfig{
+				APIKey:          "test-api-key",
+				Model:           "gpt-4o",
+				Temperature:     1.1,
+				MaxTokens:       321,
+				SessionsDir:     sessionsDir,
+				BaseURL:         "https://azure.example.test",
+				IsAzure:         true,
+				AzureAPIVersion: "2025-01-01-preview",
+			})
+			if err != nil {
+				t.Fatalf("create configured OpenAI adapter: %v", err)
+			}
+			sessionID, err := creator.CreateSession(agent.SessionContext{Name: "pure-api-" + harnessType})
+			if err != nil {
+				t.Fatalf("create pure API session for %q: %v", harnessType, err)
+			}
+			adapter, err := newAPIHarnessAdapter(t.Context(), &manifest.Manifest{
+				SessionID: string(sessionID),
+				Name:      "pure-api-" + harnessType,
+				Harness:   harnessType,
+				Model:     "gpt-3.5-turbo",
+				OpenAI: &manifest.OpenAI{
+					SessionsDir: sessionsDir,
+					BaseURL:     "https://wrong.example.test",
+				},
+			})
 			if err != nil {
 				t.Fatalf("newAPIHarnessAdapter(%q): %v", harnessType, err)
 			}
-			sessionID, err := adapter.CreateSession(agent.SessionContext{Name: "pure-api-" + harnessType})
-			if err != nil {
-				t.Fatalf("create pure API session for %q: %v", harnessType, err)
+			if got := adapter.Version(); got != "gpt-4o" {
+				t.Fatalf("restored API model = %q, want persisted gpt-4o", got)
 			}
 			status, err := adapter.GetSessionStatus(sessionID)
 			if err != nil {

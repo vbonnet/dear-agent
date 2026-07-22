@@ -379,35 +379,37 @@ func enforceSendRateLimit(senderName string) error {
 	return nil
 }
 
-// ensureRecipientReady verifies the recipient tmux session exists, runs the
-// safety guards, records the recipient harness for the non-blocking human_typing
-// stash, and wakes any stale monitors.
+// ensureRecipientReady verifies the recipient exists on its delivery surface.
+// Pure API sessions have no tmux pane, so their final adapter-status check is
+// performed by sendDirectly. CLI sessions retain the tmux and safety guards.
 //
 // human_typing is advisory now (it over-captures; see internal/tmux/stash.go), so
 // it never blocks a send and --force no longer needs to bypass it. --force still
 // sets ForceDelivery, which forces through the SEPARATE queued-input / post-submit
 // cooldown checks for genuinely-stuck supervisors (ce-5sow).
 func ensureRecipientReady(recipientSession string, adapter *dolt.Adapter) error {
-	exists, err := tmux.HasSession(recipientSession)
-	if err != nil {
-		return fmt.Errorf("failed to check tmux session: %w", err)
-	}
-	if !exists {
-		return fmt.Errorf("session '%s' does not exist in tmux.\n\nSuggestions:\n  • List sessions: agm session list\n  • Create session: agm session new %s", recipientSession, recipientSession)
-	}
-
-	// ce-7mxn: auto-detect autonomous recipients. The human_typing guard exists to
-	// avoid clobbering a human at the keyboard; a session tagged with a non-human
-	// role (worker/orchestrator/overseer) never has one, so the guard is pure noise.
-	// Enabling autonomous mode here makes the dark factory work without every send
-	// passing --autonomous or AGM_AUTONOMOUS=1 (which still take precedence via
-	// runSend). Resolve failures fall through harmlessly to the default guard.
+	// Resolve the registered delivery surface before touching tmux. API sessions
+	// intentionally have no pane; requiring one here would reject them before
+	// their adapter can report authoritative readiness. ce-7mxn also auto-detects
+	// autonomous recipients: the human_typing guard is irrelevant to a session
+	// tagged with a non-human role (worker/orchestrator/overseer).
 	harnessType := ""
 	if m, _, resolveErr := session.ResolveIdentifier(recipientSession, cfg.SessionsDir, adapter); resolveErr == nil {
 		harnessType = m.Harness
 		if isAutonomousRole(m.Context.Tags) {
 			tmux.SetAutonomousMode(true)
 		}
+		if isAPIBasedAgent(harnessType) {
+			return nil
+		}
+	}
+
+	exists, err := tmux.HasSession(recipientSession)
+	if err != nil {
+		return fmt.Errorf("failed to check tmux session: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("session '%s' does not exist in tmux.\n\nSuggestions:\n  • List sessions: agm session list\n  • Create session: agm session new %s", recipientSession, recipientSession)
 	}
 
 	// Record the recipient harness so the non-blocking human_typing stash in the
@@ -692,7 +694,7 @@ func sendDirectlyWithTmux(ctx context.Context, recipientSession, senderName, mes
 	return sendDirectlyWithDependencies(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, adapter, tmuxClient, newAPIHarnessAdapter)
 }
 
-type apiAgentFactory func(context.Context, string) (agent.Agent, error)
+type apiAgentFactory func(context.Context, *manifest.Manifest) (agent.Agent, error)
 
 func sendDirectlyWithDependencies(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, adapter *dolt.Adapter, tmuxClient session.TmuxInterface, newAPIAgent apiAgentFactory) error {
 	if adapter == nil {
@@ -745,12 +747,21 @@ func sendDirectlyWithDependencies(ctx context.Context, recipientSession, senderN
 	return nil
 }
 
-func newAPIHarnessAdapter(ctx context.Context, harnessType string) (agent.Agent, error) {
-	switch harnessType {
+func newAPIHarnessAdapter(ctx context.Context, m *manifest.Manifest) (agent.Agent, error) {
+	switch m.Harness {
 	case "openai", "gpt":
-		return agent.NewOpenAIAdapter(ctx, nil)
+		apiConfig := &agent.OpenAIConfig{Model: m.Model}
+		if m.OpenAI != nil {
+			apiConfig.SessionsDir = m.OpenAI.SessionsDir
+			apiConfig.BaseURL = m.OpenAI.BaseURL
+			apiConfig.IsAzure = m.OpenAI.IsAzure
+			apiConfig.AzureAPIVersion = m.OpenAI.AzureAPIVersion
+			apiConfig.Temperature = m.OpenAI.Temperature
+			apiConfig.MaxTokens = m.OpenAI.MaxTokens
+		}
+		return agent.NewOpenAIAdapterForSession(ctx, agent.SessionID(m.SessionID), apiConfig)
 	default:
-		return agent.GetHarness(harnessType)
+		return agent.GetHarness(m.Harness)
 	}
 }
 
@@ -758,7 +769,7 @@ func sendToAPIAgentIfReady(ctx context.Context, m *manifest.Manifest, recipientS
 	// Pure API sessions intentionally have no tmux pane. Their adapter's session
 	// status is therefore the only delivery readiness authority shared by
 	// single-recipient and fan-out sends.
-	agentAdapter, err := newAPIAgent(ctx, m.Harness)
+	agentAdapter, err := newAPIAgent(ctx, m)
 	if err != nil {
 		return fmt.Errorf("create API harness adapter for %q: %w", recipientSession, err)
 	}

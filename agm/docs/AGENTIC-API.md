@@ -23,7 +23,10 @@ pane or a later focus change cannot validate or redirect input.
 single-recipient and fan-out delivery; it does not retain a weaker CLI-only
 tmux path or deliver to unregistered sessions whose harness identity cannot be
 proven. Pure API recipients intentionally have no tmux pane: single-recipient
-and fan-out sends use the adapter's session status at the final common delivery
+preflight resolves the registered delivery surface before any tmux probe, and
+single-recipient plus fan-out sends reconstruct the adapter from the session's
+persisted model, storage location, endpoint, and Azure settings. Credentials
+remain runtime-only. The adapter's session status is the final common delivery
 boundary, delivering only while it reports active or idle and failing closed
 before any pending artifact when status is unavailable, suspended, or
 terminated.

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -128,6 +130,99 @@ func TestNewOpenAIAdapter(t *testing.T) {
 				tt.checkFunc(t, adapter)
 			}
 		})
+	}
+}
+
+func TestNewOpenAIAdapterForSessionRestoresPersistedRuntimeConfig(t *testing.T) {
+	sessionsDir := t.TempDir()
+	creatorAgent, err := NewOpenAIAdapter(t.Context(), &OpenAIConfig{
+		APIKey:          "creation-secret",
+		Model:           "gpt-4o",
+		Temperature:     1.25,
+		MaxTokens:       4321,
+		SessionsDir:     sessionsDir,
+		BaseURL:         "https://azure.example.test",
+		IsAzure:         true,
+		AzureAPIVersion: "2025-01-01-preview",
+	})
+	if err != nil {
+		t.Fatalf("create configured adapter: %v", err)
+	}
+	sessionID, err := creatorAgent.CreateSession(SessionContext{Name: "persisted-runtime"})
+	if err != nil {
+		t.Fatalf("create configured session: %v", err)
+	}
+
+	metadata, err := os.ReadFile(filepath.Join(sessionsDir, string(sessionID), "metadata.json"))
+	if err != nil {
+		t.Fatalf("read session metadata: %v", err)
+	}
+	if strings.Contains(string(metadata), "creation-secret") {
+		t.Fatal("session metadata persisted an API credential")
+	}
+
+	restoredAgent, err := NewOpenAIAdapterForSession(t.Context(), sessionID, &OpenAIConfig{
+		APIKey:          "rotated-runtime-secret",
+		Model:           "gpt-3.5-turbo",
+		Temperature:     0.2,
+		MaxTokens:       12,
+		SessionsDir:     sessionsDir,
+		BaseURL:         "https://wrong.example.test",
+		AzureAPIVersion: "wrong-version",
+	})
+	if err != nil {
+		t.Fatalf("restore adapter from session: %v", err)
+	}
+	restored, ok := restoredAgent.(*OpenAIAdapter)
+	if !ok {
+		t.Fatalf("restored adapter type = %T, want *OpenAIAdapter", restoredAgent)
+	}
+	if got := restored.Version(); got != "gpt-4o" {
+		t.Fatalf("restored model = %q, want persisted gpt-4o", got)
+	}
+	if got := restored.runtimeConfig; got != (openai.SessionRuntimeConfig{
+		Temperature:     1.25,
+		MaxTokens:       4321,
+		BaseURL:         "https://azure.example.test",
+		IsAzure:         true,
+		AzureAPIVersion: "2025-01-01-preview",
+	}) {
+		t.Fatalf("restored runtime config = %#v", got)
+	}
+	if !restored.client.IsAzure() || restored.client.Model() != "gpt-4o" {
+		t.Fatalf("restored client azure=%t model=%q", restored.client.IsAzure(), restored.client.Model())
+	}
+}
+
+func TestNewOpenAIAdapterForLegacySessionUsesManifestFallback(t *testing.T) {
+	sessionsDir := t.TempDir()
+	sessionManager, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create legacy session manager: %v", err)
+	}
+	if _, err := sessionManager.CreateSession("legacy-session", "gpt-4.1", "/work"); err != nil {
+		t.Fatalf("create legacy session: %v", err)
+	}
+
+	restoredAgent, err := NewOpenAIAdapterForSession(t.Context(), "legacy-session", &OpenAIConfig{
+		APIKey:          "runtime-secret",
+		Model:           "gpt-3.5-turbo",
+		Temperature:     0.9,
+		MaxTokens:       987,
+		SessionsDir:     sessionsDir,
+		BaseURL:         "https://legacy.example.test",
+		IsAzure:         true,
+		AzureAPIVersion: "2024-06-01",
+	})
+	if err != nil {
+		t.Fatalf("restore legacy adapter: %v", err)
+	}
+	restored := restoredAgent.(*OpenAIAdapter)
+	if restored.Version() != "gpt-4.1" {
+		t.Fatalf("legacy restored model = %q, want session model gpt-4.1", restored.Version())
+	}
+	if got := restored.runtimeConfig; got.BaseURL != "https://legacy.example.test" || !got.IsAzure || got.AzureAPIVersion != "2024-06-01" || got.Temperature != 0.9 || got.MaxTokens != 987 {
+		t.Fatalf("legacy fallback runtime config = %#v", got)
 	}
 }
 
