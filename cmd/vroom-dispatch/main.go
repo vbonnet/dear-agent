@@ -516,8 +516,36 @@ const spawnTooSoonMarker = "spawn too soon"
 const governorPauseMarker = "spawns paused by resource governor"
 
 func isRetryableSpawnRefusal(output string) bool {
-	return strings.Contains(output, spawnTooSoonMarker) ||
+	hasTransientMarker := strings.Contains(output, spawnTooSoonMarker) ||
 		strings.Contains(output, governorPauseMarker)
+	if !hasTransientMarker {
+		return false
+	}
+
+	// AGM's FormatDenied output emits one bullet for every failed gate. A
+	// spawn-stagger pause can coexist with a hard safety denial, so checking for
+	// any transient marker would incorrectly retry disk, process-cap, or
+	// admission-brake failures. If structured gate bullets are present, require
+	// every failed gate to be the recognized transient spawn-stagger gate.
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "• [") {
+			continue
+		}
+		closeBracket := strings.IndexByte(line, ']')
+		if closeBracket < len("• [") {
+			return false
+		}
+		if line[len("• ["):closeBracket] != "spawn_stagger" ||
+			(!strings.Contains(line, spawnTooSoonMarker) && !strings.Contains(line, governorPauseMarker)) {
+			return false
+		}
+	}
+
+	// Retain compatibility with the older single-line AGM diagnostic while
+	// enforcing the complete gate set whenever current structured output is
+	// available.
+	return true
 }
 
 // runSpawn executes `agm session new` for one supervisor and returns the
