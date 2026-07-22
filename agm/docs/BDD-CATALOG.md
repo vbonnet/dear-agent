@@ -1075,6 +1075,8 @@ model catalog.
 - A managed Pi transcript preserves the provider-qualified custom model ID.
 - AGM reports the latest native prompt footprint against the exact configured
   custom model context window.
+- A built-in provider model outside AGM's static window table still honors
+  Pi's topmost user override.
 - Credential command strings in Pi's model catalog remain inert data.
 
 **Why this matters:** Custom providers are a supported Pi route. Using a static
