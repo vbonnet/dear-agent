@@ -124,6 +124,12 @@ type SessionContext struct {
 	// Optional.
 	Model string
 
+	// InitialPrompt is the optional first user message. Harnesses that create
+	// their durable native identity lazily may require it before CreateSession
+	// can safely persist the session mapping.
+	// Optional for harnesses with eager native identity creation.
+	InitialPrompt string
+
 	// AuthorizedDirs are directories pre-authorized for agent access.
 	// Optional. If empty, agent may prompt for directory authorization.
 	AuthorizedDirs []string

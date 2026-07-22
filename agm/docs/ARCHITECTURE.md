@@ -1,6 +1,6 @@
 # AGM architecture
 
-<!-- Last audited at: 2026-07-17 -->
+<!-- Last audited at: 2026-07-21 -->
 
 AGM is a local-first session coordinator for interactive AI command-line
 harnesses. It owns session lifecycle, persistent metadata, tmux process
@@ -87,6 +87,11 @@ CLI or MCP request
 The CLI runtime hooks are in `agm/cmd/agm/new_session.go`; MCP supplies its own
 runtime dependencies from `agm/cmd/agm-mcp-server/tools.go`. Both identify their
 caller provenance and use the shared operation.
+
+Fresh AGY sessions require a startup prompt because AGY persists native identity
+lazily on first input. Shared creation delivers that prompt once after native
+readiness and before identity discovery and registration, then marks it consumed
+so surface-specific completion cannot resend it.
 
 Sandbox provisioning occurs before the shared creation lifecycle when requested.
 `agm/cmd/agm/new.go` imports platform provider packages so their `init`

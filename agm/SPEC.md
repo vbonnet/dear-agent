@@ -78,8 +78,10 @@ For `codex-cli`, AGM treats Codex as a real interactive CLI harness:
 
 For `agy`, AGM treats Antigravity as a real interactive CLI harness:
 
-- create paths MUST launch `agy` in tmux with the AGM working directory and
-  wait for an AGY prompt before detached startup-prompt delivery
+- fresh create paths MUST require a startup prompt, launch bare `agy` in tmux
+  with the AGM working directory, wait for an AGY prompt, deliver the startup
+  prompt exactly once before provider-identity discovery, and keep the prompt
+  out of the launch command and process arguments
 - state detection MUST recognize an idle AGY `>` prompt as ready/sendable
 - state detection MUST NOT treat the AGY trust prompt (`Do you trust the
   contents of this project?`) as ready
@@ -101,8 +103,12 @@ For `agy`, AGM treats Antigravity as a real interactive CLI harness:
   launch `agy --conversation <conversation_id>` instead of starting a fresh
   conversation
 - AGM MUST capture and persist the spawned AGY conversation ID after `agm
-  session new --harness agy` so later `resume`, `list`, and `archive`
+  session new --harness agy --prompt <prompt>` so later `resume`, `list`, and `archive`
   operations target the same saved conversation
+- AGM MUST retain the canonical workspace lock while the first prompt causes
+  AGY to persist its native conversation and while that identity is discovered
+  and registered; completion MUST NOT resend a prompt consumed by this
+  identity-bootstrap phase
 - AGM adapter creation MUST normalize the workspace to an absolute path,
   share one cancellation-aware provider identity lock across CLI, MCP, and
   adapter launch surfaces, and reject unsafe native conversation identifiers

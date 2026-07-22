@@ -1,9 +1,9 @@
 # agm/internal/ops — Requirements Specification (EARS)
 
-<!-- Last audited at: 2026-07-18 -->
+<!-- Last audited at: 2026-07-21 -->
 
 **Version**: 1.0
-**Last Updated**: 2026-07-18
+**Last Updated**: 2026-07-21
 **Status**: Baseline (derived from tests + code, not design-forward)
 **Scope**: Shared business-logic layer for AGM CLI, MCP, and Skills surfaces
 
@@ -157,13 +157,15 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-66** When an optional manifest directory cannot be created, the system shall continue without registration and shall provide no manifest path to runtime completion.
 
-**OPS-67** When AGM creates an AGY session, the shared launch-command owner shall preserve the selected model, permission mode, work directory, additional directories, and persistence policy while using AGY's native bare interactive entry point.
+**OPS-77** When AGM creates an AGY session, the shared launch-command owner shall preserve the selected model, permission mode, work directory, additional directories, and persistence policy while using AGY's native bare interactive entry point.
 
-**OPS-68** When AGM cold-resumes an AGY conversation, the shared AGY command owner shall preserve a known stored model and permission mode, include the canonical conversation ID, and apply the same quoting, directory, and persistence policy used by creation; if the native model is unknown, the command shall omit `--model` so AGY retains the conversation's saved selection.
+**OPS-78** When AGM cold-resumes an AGY conversation, the shared AGY command owner shall preserve a known stored model and permission mode, include the canonical conversation ID, and apply the same quoting, directory, and persistence policy used by creation; if the native model is unknown, the command shall omit `--model` so AGY retains the conversation's saved selection.
 
-**OPS-69** When a creation request is canceled after registration but before runtime completion, the shared lifecycle shall skip completion and enter rollback before a startup prompt or other completion side effect can run.
+**OPS-79** When a creation request is canceled after registration but before runtime completion, the shared lifecycle shall skip completion and enter rollback before a startup prompt or other completion side effect can run.
 
-**OPS-70** When any shared creation surface launches AGY, the system shall use `CreateSessionWithContext` to resolve the existing workspace to one canonical physical path for locking, tmux creation, launch, identity correlation, registration, and persisted metadata while holding the workspace-create lock across the fail-closed pre-launch snapshot through registration and releasing it before surface-specific completion, including any blocking interactive attach, without surrendering normal rollback ownership.
+**OPS-80** When any shared creation surface launches AGY, the system shall use `CreateSessionWithContext` to resolve the existing workspace to one canonical physical path for locking, tmux creation, launch, identity correlation, registration, and persisted metadata while holding the workspace-create lock across the fail-closed pre-launch snapshot through registration and releasing it before surface-specific completion, including any blocking interactive attach, without surrendering normal rollback ownership.
+
+**OPS-76** When a fresh AGY session has a startup prompt, `CreateSessionWithContext` shall deliver that prompt once after native readiness but before identity discovery, discover and register the resulting provider identity while retaining the workspace lock, and mark the prompt consumed so CLI, MCP, and fallback completion paths cannot resend it; bootstrap failure or caller cancellation shall roll back the owned tmux session before registration, and a fresh AGY request without a startup prompt shall fail before mutation.
 
 **OPS-36** While a session's state is OFFLINE, READY, or DONE, the stall detector shall skip error-loop detection for that session.
 
@@ -205,8 +207,9 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
   through `OpContext` functions for shared operations; adapters are limited to
   dependency construction and the `CreateSessionRuntime` seam.
 - **Creation has one owner.** A runtime adapter may launch a harness and
-  complete surface-specific work after registration, but cannot insert,
-  reorder, or skip lifecycle phases owned by `CreateSessionWithContext`.
+  safely deliver AGY's identity-creating startup prompt when explicitly asked
+  by `CreateSessionWithContext`, and complete surface-specific work after
+  registration, but cannot insert, reorder, or skip shared lifecycle phases.
 - **GC skip priority is deterministic.** The `gcSkipReason` function applies
   checks in a fixed order: already-archived → reaping → protected-role →
   active-tmux → active-state → too-recent. The first matching check wins.

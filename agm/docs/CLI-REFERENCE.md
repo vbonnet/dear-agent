@@ -145,11 +145,11 @@ agm new
 agm new my-session
 
 # Specify harness
-agm new --harness agy research-task
+agm new --harness agy --prompt "Start the research task" research-task
 
 # Specify harness and model
 agm new coding-session --harness claude-code --model opus
-agm new research --harness agy --model 3.1-pro-high
+agm new research --harness agy --model 3.1-pro-high --prompt "Research the requested topic"
 agm new design --harness codex-cli --model 5.4-mini
 agm new pi-task --harness pi-cli --model sonnet
 
@@ -166,6 +166,10 @@ agm new background-task --detached
 # Skip UUID auto-detection
 agm new test-session --no-uuid
 ```
+
+Fresh AGY sessions require `--prompt` or `--prompt-file`. AGY creates its
+durable native conversation only after first input, so AGM submits that prompt
+once before registering the session identity.
 
 **Interactive form fields:**
 1. Session name (required)
