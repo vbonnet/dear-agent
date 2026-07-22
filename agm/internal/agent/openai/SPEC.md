@@ -35,6 +35,8 @@ errors for callers that need harness-neutral failure handling.
 
 **OAI-12** When documenting the legacy OpenAI API adapter, the system shall distinguish direct Go adapter construction from the supported AGM control plane, shall limit production delivery to already-registered `openai` or `gpt` manifests, and shall not advertise public CLI creation or resume commands that harness validation rejects.
 
+**OAI-13** When an OpenAI session is deleted while another adapter may deliver to the same store and session ID, deletion shall acquire the store-scoped session lock shared with provider completion, and delivery shall revalidate authoritative on-disk metadata under that lock before provider work; either a started completed turn shall commit before deletion or a completed deletion shall reject the send without calling the provider.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

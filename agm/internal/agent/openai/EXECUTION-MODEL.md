@@ -132,12 +132,13 @@ Since API-based execution has no shell access, hooks are **synthetic**:
 1. User sends to an already-registered legacy session through an AGM surface
 2. AGM: Calls OpenAIAdapter.SendMessage(sessionID, message)
 3. Adapter: Acquires the context-aware store-scoped stable session lock
-4. SessionManager: Reloads completed conversation history from JSONL
+4. SessionManager: Revalidates on-disk metadata and reloads completed JSONL history
 5. Client: Calls OpenAI API with completed history plus the new user message under a finite deadline
 6. Client: Receives the complete response
 7. SessionManager: Atomically commits the user and assistant messages as one turn
 8. Hook: Fires MessageSent synthetic hook
 9. Return: Display response to user
+```
 
 If completion fails, is canceled, or times out, neither provisional message is
 persisted and the store lock is released. AGM CLI sends also hold a longer,
@@ -145,7 +146,11 @@ provider-appropriate stable session-ID mutation lock across a locked lifecycle
 reload, reconstruction, readiness, bounded completion, and the completed-turn
 commit. Archive uses the same boundary, so it cannot race a stale pre-lock
 lifecycle snapshot against paid provider work.
-```
+
+Adapter deletion uses the same store-scoped lock. A completion that has already
+started commits before deletion removes the store; a sender that acquires the
+lock after deletion revalidates the missing metadata and rejects without a
+provider call.
 
 ### Persisted Session Reload
 

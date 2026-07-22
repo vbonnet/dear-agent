@@ -794,6 +794,104 @@ func TestSendMessageSerializesIndependentManagersAndCommitsCompleteTurns(t *test
 	}
 }
 
+func TestSendMessageRejectsSessionDeletedByIndependentManagerBeforeProvider(t *testing.T) {
+	sessionsDir := t.TempDir()
+	creator, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create session manager: %v", err)
+	}
+	sessionID := SessionID("deleted-before-provider")
+	if _, err := creator.CreateSession(string(sessionID), "gpt-4", t.TempDir()); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	senderManager, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("reconstruct sender manager: %v", err)
+	}
+	deletingManager, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("reconstruct deleting manager: %v", err)
+	}
+	if err := deletingManager.DeleteSession(string(sessionID)); err != nil {
+		t.Fatalf("delete session through independent manager: %v", err)
+	}
+
+	client := &mockOpenAIClient{}
+	adapter := newOpenAIAdapterWithClient(client, senderManager)
+	err = adapter.SendMessage(sessionID, Message{Role: RoleUser, Content: "must not reach provider"})
+	if err == nil || !strings.Contains(err.Error(), "session "+string(sessionID)+" not found") {
+		t.Fatalf("send after independent deletion error = %v, want session not found", err)
+	}
+	if client.callCount != 0 {
+		t.Fatalf("send after independent deletion made %d provider calls, want 0", client.callCount)
+	}
+	status, err := adapter.GetSessionStatus(sessionID)
+	if err != nil {
+		t.Fatalf("status after independent deletion: %v", err)
+	}
+	if status != StatusTerminated {
+		t.Fatalf("status after independent deletion = %s, want %s", status, StatusTerminated)
+	}
+}
+
+func TestDeleteSessionWaitsForCompletedTurnFromIndependentManager(t *testing.T) {
+	sessionsDir := t.TempDir()
+	creator, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create session manager: %v", err)
+	}
+	sessionID := SessionID("delete-after-completed-turn")
+	if _, err := creator.CreateSession(string(sessionID), "gpt-4", t.TempDir()); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	senderManager, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("reconstruct sender manager: %v", err)
+	}
+	deletingManager, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("reconstruct deleting manager: %v", err)
+	}
+	providerEntered := make(chan struct{}, 1)
+	releaseProvider := make(chan struct{})
+	adapter := newOpenAIAdapterWithClient(&blockingOpenAIClient{
+		response: &openai.ChatCompletionResponse{Content: "committed before delete", Model: "gpt-4", FinishReason: "stop"},
+		entered:  providerEntered,
+		release:  releaseProvider,
+	}, senderManager)
+
+	sendDone := make(chan error, 1)
+	go func() {
+		sendDone <- adapter.SendMessage(sessionID, Message{Role: RoleUser, Content: "complete me"})
+	}()
+	select {
+	case <-providerEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("provider completion did not start")
+	}
+
+	deleteDone := make(chan error, 1)
+	go func() { deleteDone <- deletingManager.DeleteSession(string(sessionID)) }()
+	select {
+	case err := <-deleteDone:
+		close(releaseProvider)
+		t.Fatalf("deletion completed before in-flight turn committed: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	close(releaseProvider)
+	if err := <-sendDone; err != nil {
+		t.Fatalf("completed turn before deletion: %v", err)
+	}
+	if err := <-deleteDone; err != nil {
+		t.Fatalf("delete after completed turn: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sessionsDir, string(sessionID))); !os.IsNotExist(err) {
+		t.Fatalf("session directory remains after serialized deletion: %v", err)
+	}
+}
+
 func TestSendMessageCompletionFailureLeavesHistoryUnchanged(t *testing.T) {
 	sessionsDir := t.TempDir()
 	sessionManager, err := openai.NewSessionManager(sessionsDir)

@@ -334,13 +334,9 @@ func (a *OpenAIAdapter) SendMessageContext(ctx context.Context, sessionID Sessio
 	defer cancel()
 
 	return a.sessionManager.WithSessionLockContext(completionCtx, string(sessionID), func() error {
-		if _, err := a.sessionManager.GetSession(string(sessionID)); err != nil {
-			return fmt.Errorf("session not found: %w", err)
-		}
-
-		history, err := a.sessionManager.GetMessages(string(sessionID))
+		history, err := a.sessionManager.GetMessagesUnderLock(string(sessionID))
 		if err != nil {
-			return fmt.Errorf("failed to get conversation history: %w", err)
+			return fmt.Errorf("failed to revalidate session and get conversation history: %w", err)
 		}
 		userMsg := openai.Message{
 			Role:      string(message.Role),

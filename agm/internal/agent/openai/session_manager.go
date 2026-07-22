@@ -134,14 +134,33 @@ func (sm *SessionManager) CreateSession(id, model, workingDir string) (*SessionI
 
 // GetSession retrieves session information.
 func (sm *SessionManager) GetSession(id string) (*SessionInfo, error) {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
+	var info *SessionInfo
+	err := sm.WithSessionLock(id, func() error {
+		var err error
+		info, err = sm.GetSessionUnderLock(id)
+		return err
+	})
+	return info, err
+}
 
-	info, exists := sm.sessions[id]
-	if !exists {
-		return nil, fmt.Errorf("session %s not found", id)
+// GetSessionUnderLock reloads authoritative metadata while the caller holds
+// the store-scoped session lock across a larger transaction.
+func (sm *SessionManager) GetSessionUnderLock(id string) (*SessionInfo, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	info, err := sm.loadMetadataFromFile(id)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			delete(sm.sessions, id)
+			return nil, fmt.Errorf("session %s not found: %w", id, err)
+		}
+		return nil, err
 	}
-
+	if cached := sm.sessions[id]; cached != nil {
+		info.messages = append([]Message(nil), cached.messages...)
+	}
+	sm.sessions[id] = info
 	return info, nil
 }
 
@@ -264,12 +283,28 @@ func (sm *SessionManager) ClearMessagesUnderLock(sessionID string) error {
 
 // GetMessages retrieves all messages for a session.
 func (sm *SessionManager) GetMessages(sessionID string) ([]Message, error) {
+	var messages []Message
+	err := sm.WithSessionLock(sessionID, func() error {
+		var err error
+		messages, err = sm.GetMessagesUnderLock(sessionID)
+		return err
+	})
+	return messages, err
+}
+
+// GetMessagesUnderLock reloads authoritative metadata and history while the
+// caller holds the store-scoped session lock across a larger transaction.
+func (sm *SessionManager) GetMessagesUnderLock(sessionID string) ([]Message, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	info, exists := sm.sessions[sessionID]
-	if !exists {
-		return nil, fmt.Errorf("session %s not found", sessionID)
+	info, err := sm.loadMetadataFromFile(sessionID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			delete(sm.sessions, sessionID)
+			return nil, fmt.Errorf("session %s not found: %w", sessionID, err)
+		}
+		return nil, err
 	}
 
 	messages, err := sm.loadMessagesFromFile(sessionID)
@@ -278,6 +313,7 @@ func (sm *SessionManager) GetMessages(sessionID string) ([]Message, error) {
 	}
 	info.messages = append([]Message(nil), messages...)
 	info.MessageCount = len(messages)
+	sm.sessions[sessionID] = info
 	return append([]Message(nil), messages...), nil
 }
 
@@ -380,6 +416,14 @@ func (sm *SessionManager) updateMetadata(sessionID string, update func(*SessionI
 
 // DeleteSession removes a session and its data.
 func (sm *SessionManager) DeleteSession(sessionID string) error {
+	return sm.WithSessionLock(sessionID, func() error {
+		return sm.DeleteSessionUnderLock(sessionID)
+	})
+}
+
+// DeleteSessionUnderLock removes a session while the caller holds the
+// store-scoped lock shared with provider completion and history persistence.
+func (sm *SessionManager) DeleteSessionUnderLock(sessionID string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -387,11 +431,13 @@ func (sm *SessionManager) DeleteSession(sessionID string) error {
 		return fmt.Errorf("session %s not found", sessionID)
 	}
 
-	delete(sm.sessions, sessionID)
-
 	// Remove session directory
 	sessionDir := sm.getSessionDir(sessionID)
-	return os.RemoveAll(sessionDir)
+	if err := os.RemoveAll(sessionDir); err != nil {
+		return err
+	}
+	delete(sm.sessions, sessionID)
+	return nil
 }
 
 // getSessionDir returns the directory path for a session.
