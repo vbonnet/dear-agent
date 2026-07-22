@@ -222,6 +222,40 @@ func TestMCPCreateSessionRuntimeWaitsForAgyBeforePrompt(t *testing.T) {
 	}
 }
 
+func TestMCPCreateSessionRuntimeBootstrapsAgyIdentityPromptExactlyOnce(t *testing.T) {
+	tmuxMock := session.NewMockTmux()
+	runtime := &mcpCreateSessionRuntime{
+		tmux:             tmuxMock,
+		lookPath:         func(string) (string, error) { return "/usr/local/bin/agy", nil },
+		sleep:            func(time.Duration) {},
+		waitForAgyPrompt: func(context.Context, string, time.Duration) error { return nil },
+	}
+	ctx := t.Context()
+	launch, err := runtime.Launch(ctx, ops.HarnessLaunchSpec{
+		Harness: "agy", Model: "3.5-flash-low", SessionName: "mcp-agy-lazy", WorkDir: "/tmp/mcp-agy-lazy",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.BootstrapAgyCreateIdentity(ctx, ops.AgyCreateIdentityBootstrap{
+		SessionName: "mcp-agy-lazy", Prompt: "persist once",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	launch.PromptDelivered = true
+	if err := runtime.Complete(ctx, ops.CreateSessionCompletion{
+		Manifest: &manifest.Manifest{Name: "mcp-agy-lazy"}, Prompt: "persist once", Launch: launch,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(tmuxMock.SentCommands) != 2 || tmuxMock.SentCommands[1] != "persist once" {
+		t.Fatalf("MCP commands = %v, want bare launch and one identity-bootstrap prompt", tmuxMock.SentCommands)
+	}
+	if strings.Contains(tmuxMock.SentCommands[0], "persist once") || strings.Contains(tmuxMock.SentCommands[0], "--prompt-interactive") {
+		t.Fatalf("MCP launch leaked startup prompt into process arguments: %q", tmuxMock.SentCommands[0])
+	}
+}
+
 func TestMCPCreateSessionRuntimeStopsBeforePromptAfterCancellation(t *testing.T) {
 	t.Parallel()
 

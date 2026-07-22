@@ -984,7 +984,9 @@ claude --add-dir ~/projects/myapp --resume abc-123
 **Codex**: Native `-C` plus Codex project trust and workspace sandbox.
 
 **AGY**: Native working directory with an explicit trust prompt handled before
-detached delivery.
+detached delivery. Fresh sessions require an initial prompt; shared creation
+delivers it once before native-identity discovery and registration because AGY
+persists its conversation lazily on first input.
 
 **OpenCode**: Native support via `-C` flag
 ```bash

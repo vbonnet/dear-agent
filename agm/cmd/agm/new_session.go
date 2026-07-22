@@ -31,8 +31,9 @@ import (
 var resolvedSessionPermissionPolicy *manifest.PermissionPolicy
 
 type cliCreateSessionRuntime struct {
-	launch   func(context.Context, ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error)
-	complete func(context.Context, ops.CreateSessionCompletion) error
+	launch               func(context.Context, ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error)
+	bootstrapAgyIdentity func(context.Context, ops.AgyCreateIdentityBootstrap) error
+	complete             func(context.Context, ops.CreateSessionCompletion) error
 }
 
 type cliCreateFinalizationRuntime struct {
@@ -49,10 +50,23 @@ func (r *cliCreateSessionRuntime) Complete(ctx context.Context, completion ops.C
 	return r.complete(ctx, completion)
 }
 
+func (r *cliCreateSessionRuntime) BootstrapAgyCreateIdentity(ctx context.Context, input ops.AgyCreateIdentityBootstrap) error {
+	if r.bootstrapAgyIdentity == nil {
+		return fmt.Errorf("CLI runtime does not support AGY identity bootstrap")
+	}
+	return r.bootstrapAgyIdentity(ctx, input)
+}
+
 func newCLICreateSessionRuntime(sessionName string, existed, trustPreConfigured bool) *cliCreateSessionRuntime {
 	return &cliCreateSessionRuntime{
 		launch: func(ctx context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
 			return launchCLICreateSession(ctx, spec, existed, trustPreConfigured)
+		},
+		bootstrapAgyIdentity: func(ctx context.Context, input ops.AgyCreateIdentityBootstrap) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return tmux.SendPromptLiteral(input.SessionName, input.Prompt, false)
 		},
 		complete: func(ctx context.Context, completion ops.CreateSessionCompletion) error {
 			return completeCLICreateSession(ctx, sessionName, completion)
@@ -83,7 +97,7 @@ func completeCLICreateSession(ctx context.Context, sessionName string, completio
 		modelrouter.RecordRoutingDecision(ctx, m.Harness, d)
 	}
 	telemetry.SessionStarted(ctx, m.SessionID, m.Model, m.Harness, m.State, roleName)
-	if err := runHarnessPostCreate(ctx, sessionName, completion.Launch.ModeAppliedAtStartup); err != nil {
+	if err := runHarnessPostCreate(ctx, sessionName, completion.Launch.ModeAppliedAtStartup, completion.Launch.PromptDelivered); err != nil {
 		return err
 	}
 	if modeFlagValue != "" && !completion.Launch.ModeAppliedAtStartup && (harnessName != "claude-code" || os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "") {
@@ -166,6 +180,10 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 		}
 	}
 	manifestDir := filepath.Join(getSessionsDir(), sessionName)
+	createPrompt, err := resolveCreateLifecyclePrompt(harnessName, prompt, promptFile)
+	if err != nil {
+		return err
+	}
 	runtime := newCLICreateSessionRuntime(sessionName, exists, trustPreConfigured)
 	opCtx := &ops.OpContext{
 		Tmux:            session.NewRealTmux(),
@@ -178,9 +196,9 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 			return adapter, func() { _ = adapter.Close() }, nil
 		},
 	}
-	_, err := ops.CreateSessionWithContext(ctx, opCtx, &ops.CreateSessionRequest{
+	_, err = ops.CreateSessionWithContext(ctx, opCtx, &ops.CreateSessionRequest{
 		Cwd:                 workDir,
-		Prompt:              prompt,
+		Prompt:              createPrompt,
 		Title:               sessionName,
 		Model:               modelName,
 		Harness:             harnessName,
@@ -213,6 +231,21 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 		},
 	})
 	return err
+}
+
+func resolveCreateLifecyclePrompt(harness, promptText, promptPath string) (string, error) {
+	if harness != "agy" || promptText != "" || promptPath == "" {
+		return promptText, nil
+	}
+	content, err := os.ReadFile(promptPath)
+	if err != nil {
+		return "", fmt.Errorf("read AGY startup prompt file %s: %w", promptPath, err)
+	}
+	const maxPromptFileSize = 10 * 1024
+	if len(content) > maxPromptFileSize {
+		return "", fmt.Errorf("prompt file too large: %d bytes (max 10KB)", len(content))
+	}
+	return string(content), nil
 }
 
 // preflight runs the per-session checks that must succeed before we start
