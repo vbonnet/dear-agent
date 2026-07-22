@@ -139,6 +139,11 @@ models and authentication configured in Pi.
 AGM reads Pi's native JSONL usage and provider-reported cost. It uses the latest
 assistant prompt footprint for context, the audited Pi 0.81.1 model-catalog
 window for the recorded model, and sums native cost records for the session.
+For models declared in Pi's `models.json`, AGM reads only the bounded model ID,
+`contextWindow`, and `modelOverrides` data: it never evaluates credential or
+command fields. A custom model without an explicit window uses Pi's 128000-token
+default. Malformed, oversized, symlinked, group- or other-writable, ambiguous,
+or invalid catalog data retains AGM's conservative 200000-token fallback.
 Pi does not expose a provider quota/rate-limit API, so those fields are
 reported as unavailable rather than populated with Claude-specific values.
 

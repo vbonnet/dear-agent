@@ -29,6 +29,8 @@ directly, including the optional harness-process liveness capability
 
 **SESS-08** When AGM converts Pi native usage into context percentage, the system shall use the exact Pi 0.81 model-catalog window for known provider-qualified models and a conservative documented fallback for unknown models.
 
+**SESS-09** When a Pi transcript identifies a configured custom provider model, the system shall read only a bounded non-symlink regular `models.json` that is not writable by group or other users, shall resolve the provider-qualified model with Pi 0.81 declaration and override precedence, shall accept only positive integral context windows no larger than 16,777,216 tokens, and shall fall back without evaluating credential or header values when the catalog or match is absent, ambiguous, malformed, unsafe, or oversized.
+
 ## Key Invariants
 
 - **Capability, not contract widening.** `HarnessLivenessChecker` is a
@@ -41,3 +43,4 @@ directly, including the optional harness-process liveness capability
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
+- Feature: `agm/test/bdd/features/pi_custom_context.feature`

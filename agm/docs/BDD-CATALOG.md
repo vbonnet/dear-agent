@@ -1063,6 +1063,25 @@ model-family context windows, and provider-neutral compaction defaults.
 non-Claude harnesses return not-implemented errors or silently inherit a Claude
 summarizer model.
 
+### Pi Custom Model Context
+
+**File:** [`pi_custom_context.feature`](../test/bdd/features/pi_custom_context.feature)
+
+**Drives:** `agm/internal/pisession` provider provenance and
+`agm/internal/session` native Pi context-window selection from a bounded custom
+model catalog.
+
+**Key scenarios:**
+- A managed Pi transcript preserves the provider-qualified custom model ID.
+- AGM reports the latest native prompt footprint against the exact configured
+  custom model context window.
+- Credential command strings in Pi's model catalog remain inert data.
+
+**Why this matters:** Custom providers are a supported Pi route. Using a static
+fallback for their configured windows makes AGM's percentage disagree with Pi,
+while evaluating unrelated credential configuration would cross the harness
+permission boundary.
+
 ### Shared Runtime Policy Package Guardrails
 
 **File:** [`shared_runtime_policy_guardrails.feature`](../test/bdd/features/shared_runtime_policy_guardrails.feature)

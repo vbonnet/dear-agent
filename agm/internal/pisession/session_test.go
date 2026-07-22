@@ -233,6 +233,22 @@ func TestReadUsageUsesLatestAssistantContextAndNativeCost(t *testing.T) {
 	}
 }
 
+func TestReadUsagePreservesLatestAssistantProviderProvenance(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	writeFixture(t, path,
+		`{"type":"session","id":"usage-provider-id","cwd":"/work"}`+"\n"+
+			`{"type":"message","timestamp":"2026-07-21T00:00:01Z","message":{"role":"assistant","provider":"ollama","model":"qwen2.5-coder:7b","usage":{"input":100,"output":20}}}`+"\n"+
+			`{"type":"message","timestamp":"2026-07-21T00:00:02Z","message":{"role":"assistant","provider":"openrouter","model":"qwen/qwen3.6-max-preview","usage":{"input":200,"output":30}}}`+"\n")
+
+	usage, err := ReadUsage(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.Model != "openrouter/qwen/qwen3.6-max-preview" {
+		t.Fatalf("usage model = %q, want provider-qualified latest model", usage.Model)
+	}
+}
+
 func TestReadModelUsesLatestNativeProviderProvenance(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	writeFixture(t, path,
