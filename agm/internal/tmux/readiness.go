@@ -433,7 +433,10 @@ func piQueuedMarkerIsHistorical(region string) bool {
 }
 
 func codexInitialQueuedComposerOwnsTail(content string) bool {
-	lines := strings.Split(strings.TrimSpace(content), "\n")
+	// capture-pane -p appends one framing newline. Remove only that terminator:
+	// trailing whitespace inside the queued payload contributes to Codex's
+	// native pasted-character extent and must remain observable.
+	lines := strings.Split(strings.TrimSuffix(content, "\n"), "\n")
 	for i, line := range lines {
 		if !strings.Contains(line, CodexPromptPatterns[0]) {
 			continue

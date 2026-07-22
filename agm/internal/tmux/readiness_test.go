@@ -217,6 +217,12 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			state:   HarnessInputQueuedAGM,
 		},
 		{
+			name:    "initial Codex queue preserves payload-ending newline in extent",
+			harness: "codex-cli",
+			content: "│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.6 /model to change │\n╰──────────────────────────╯\n› [Pasted Content 91 chars]\n[From: orchestrator | ID: 1774872000000-orchestr-002 | Sent: 2026-07-21T12:00:00Z]\nrecover\n\n",
+			state:   HarnessInputQueuedAGM,
+		},
+		{
 			name:    "active output after initial Codex queue suppresses recovery",
 			harness: "codex-cli",
 			content: "│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.6 /model to change │\n╰──────────────────────────╯\n› [Pasted Content 90 chars]\n[From: orchestrator | ID: 1774872000000-orchestr-002 | Sent: 2026-07-21T12:00:00Z]\nrecover\nordinary active-work output",
