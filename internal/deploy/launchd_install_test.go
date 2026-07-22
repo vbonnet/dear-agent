@@ -54,8 +54,16 @@ func TestLaunchdBinariesUseHardenedInstall(t *testing.T) {
 	}
 	makefile := string(raw)
 
-	if !strings.Contains(makefile, "define install-go-bin") {
-		t.Fatal("Makefile has no install-go-bin macro: the hardened install path is gone")
+	var macroDefined bool
+	for _, rel := range trackedMakefiles(t, repoRoot) {
+		raw, err := os.ReadFile(filepath.Join(repoRoot, rel))
+		if err == nil && strings.Contains(string(raw), "define install-go-bin") {
+			macroDefined = true
+			break
+		}
+	}
+	if !macroDefined {
+		t.Fatal("no tracked build file defines install-go-bin: the hardened install path is gone")
 	}
 
 	for _, bin := range binaries {
@@ -84,15 +92,26 @@ func TestLaunchdBinariesUseHardenedInstall(t *testing.T) {
 	// of this check. Asserting that no install target uses a raw copy into any
 	// install root covers every scheduled binary regardless of how its plist
 	// names it.
+	// Scanned across EVERY tracked Makefile, not just the root one. agm/Makefile
+	// had its own `install -m 755` path for agm, agm-reaper and agm-mcp-server
+	// -- agm being launchd-scheduled -- and a root-only scan never saw it. Its
+	// comment even claimed `install` gave "atomic replacement", which is the
+	// misconception this whole change exists to correct.
 	t.Run("no-bare-installs", func(t *testing.T) {
 		bareCopy := regexp.MustCompile(
 			`(?m)^\t@?(?:cp|install)\b[^\n]*\$\((?:HOME\)/(?:go/bin|\.local/bin)|HOOKS_DIR\))[^\n]*$`)
-		for _, m := range bareCopy.FindAllString(makefile, -1) {
-			t.Errorf("install target copies into an install root without the hardened macro:\n\t%s\n"+
-				"Use $(call install-go-bin,bin/<name>[,<dest-dir>]). A raw cp/install rewrites "+
-				"the existing inode; macOS then kills the rebuilt binary with "+
-				"OS_REASON_CODESIGNING before main() runs — silently, for a launchd job.",
-				strings.TrimSpace(m))
+		for _, rel := range trackedMakefiles(t, repoRoot) {
+			raw, err := os.ReadFile(filepath.Join(repoRoot, rel))
+			if err != nil {
+				continue
+			}
+			for _, m := range bareCopy.FindAllString(string(raw), -1) {
+				t.Errorf("%s copies into an install root without the hardened macro:\n\t%s\n"+
+					"Use $(call install-go-bin,bin/<name>[,<dest-dir>]) from mk/install-go-bin.mk. "+
+					"A raw cp/install rewrites the existing inode; macOS then kills the rebuilt "+
+					"binary with OS_REASON_CODESIGNING before main() runs — silently, for a "+
+					"launchd job.", rel, strings.TrimSpace(m))
+			}
 		}
 	})
 }
@@ -341,4 +360,22 @@ func isBinary(path string) bool {
 	buf := make([]byte, 8192)
 	n, _ := f.Read(buf)
 	return bytes.IndexByte(buf[:n], 0) >= 0
+}
+
+// trackedMakefiles lists every tracked Makefile and .mk fragment, so a nested
+// build file cannot keep its own unhardened install path out of sight.
+func trackedMakefiles(t *testing.T, repoRoot string) []string {
+	t.Helper()
+
+	var out []string
+	for _, rel := range trackedTextFiles(t, repoRoot) {
+		base := filepath.Base(rel)
+		if base == "Makefile" || strings.HasSuffix(base, ".mk") {
+			out = append(out, rel)
+		}
+	}
+	if len(out) == 0 {
+		t.Fatal("no tracked Makefiles found; the scan is broken")
+	}
+	return out
 }
