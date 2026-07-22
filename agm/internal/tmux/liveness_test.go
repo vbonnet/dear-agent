@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -347,6 +348,8 @@ func TestPiProcessCommandRequiresPiSpecificIdentity(t *testing.T) {
 		{command: "node --enable-source-maps /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", want: true},
 		{command: "node --max-old-space-size=1024 --inspect=127.0.0.1:0 /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", want: true},
 		{command: "node --preserve-symlinks --require /tmp/register.cjs /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", want: true},
+		{command: "node --require /tmp/My Projects/register.cjs /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", want: true},
+		{command: "node --require /tmp/support.js Files/register.js /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", want: true},
 		{command: "/opt/homebrew/bin/node '/Users/me/My Projects/node_modules/@earendil-works/pi-coding-agent/dist/cli.js' --session-id quoted", want: true},
 		{command: "env PI_OFFLINE=1 node /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", want: true},
 		{command: "node /usr/local/lib/node_modules/@openai/codex/dist/cli.js"},
@@ -381,6 +384,43 @@ func TestPiProcessCommandAcceptsExistingUnquotedSpacedPackageEntry(t *testing.T)
 	}
 }
 
+func TestPiProcessArgsPreserveSpacedScriptAndOptionValues(t *testing.T) {
+	piEntry := "/Users/me/My Projects/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "spaced Pi script", args: []string{"node", piEntry}, want: true},
+		{name: "spaced preload", args: []string{"node", "--require", "/tmp/My Projects/register.cjs", piEntry}, want: true},
+		{name: "Pi is only preload value", args: []string{"node", "--require", piEntry, "/tmp/worker.js"}},
+		{name: "runtime flags", args: []string{"node", "--enable-source-maps", "--inspect=127.0.0.1:0", piEntry}, want: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isPiProcessArgsWithResolver(test.args, filepath.EvalSymlinks); got != test.want {
+				t.Fatalf("isPiProcessArgsWithResolver(%q) = %v, want %v", test.args, got, test.want)
+			}
+		})
+	}
+}
+
+func TestProcessCommandExecutableFindsNodeThroughEnv(t *testing.T) {
+	if got := processCommandExecutable("env PI_OFFLINE=1 /opt/homebrew/bin/node /tmp/pi.js"); got != "node" {
+		t.Fatalf("processCommandExecutable through env = %q, want node", got)
+	}
+}
+
+func TestReadProcessArgvCurrentProcess(t *testing.T) {
+	args, err := readProcessArgv(os.Getpid())
+	if err != nil {
+		t.Fatalf("read current process argv: %v", err)
+	}
+	if !reflect.DeepEqual(args, os.Args) {
+		t.Fatalf("current process argv = %q, want %q", args, os.Args)
+	}
+}
+
 func TestPiProcessCommandAcceptsOnlyShimResolvingToPackageEntry(t *testing.T) {
 	resolve := func(path string) (string, error) {
 		if path == "/opt/homebrew/bin/pi" {
@@ -409,5 +449,41 @@ func TestParsePSCommandTableAndPiProcessTree(t *testing.T) {
 	}
 	if piProcessInPaneTree([]int{300}, procs) {
 		t.Fatal("generic Node process was accepted as Pi")
+	}
+}
+
+func TestPiProcessTreeUsesLosslessNodeArgvAndFailsClosed(t *testing.T) {
+	piEntry := "/Users/me/My Projects/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
+	procs := []procCommandEntry{
+		{PID: 100, PPID: 1, Command: "/bin/zsh -l"},
+		{
+			PID:           200,
+			PPID:          100,
+			Command:       "node --require /tmp/My Projects/register.cjs " + piEntry,
+			Args:          []string{"node", "--require", "/tmp/My Projects/register.cjs", piEntry},
+			ArgvInspected: true,
+		},
+		{
+			PID:           300,
+			PPID:          1,
+			Command:       "node " + piEntry,
+			Args:          []string{"node", "/tmp/worker.js", piEntry},
+			ArgvInspected: true,
+		},
+		{
+			PID:           400,
+			PPID:          1,
+			Command:       "node " + piEntry,
+			ArgvInspected: true,
+		},
+	}
+	if !piProcessInPaneTree([]int{100}, procs) {
+		t.Fatal("lossless Pi argv beneath the pane shell was rejected")
+	}
+	if piProcessInPaneTree([]int{300}, procs) {
+		t.Fatal("flattened command text overrode the lossless non-Pi argv")
+	}
+	if piProcessInPaneTree([]int{400}, procs) {
+		t.Fatal("failed lossless argv inspection fell back to flattened command text")
 	}
 }

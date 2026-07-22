@@ -87,8 +87,10 @@ report readiness, so an older footer retained in tmux history cannot authorize
 a new process. Every cold-resume entry point also proves Pi-specific process
 identity before attaching. This recognizes the canonical npm package's Node
 entrypoint, including installations beneath npm prefixes containing spaces,
-and permits supported Node runtime flags and preload options without treating
-an option value, unrelated `node` process, or later Pi-looking argument as Pi.
+and permits supported Node runtime flags and whitespace-bearing preload paths
+without treating an option value, unrelated `node` process, or later Pi-looking
+argument as Pi. AGM reads lossless process argv from the host OS for this
+decision; flattened tmux or `ps` display text is not liveness evidence.
 When Pi has exited, AGM relaunches only in a positively classified bare
 shell and rejects retained pane start-command metadata or any other foreground
 process. Ctrl-C and root shutdown cancel both identity and pane-classification
@@ -108,7 +110,9 @@ Repository hooks load only from the explicitly approved working directory.
 `PreToolUse` failures block the native call before auto or allowlist decisions.
 Every invocation receives the shared event name, native Pi session ID, approved
 working directory, loop state, and native event payload. Structured hook
-decisions are honored even when the command exits successfully. In particular,
+decisions are honored even when the command exits successfully. A hook
+execution error or timeout takes precedence over advisory context in its
+fail-closed diagnostic. In particular,
 a blocked `UserPromptSubmit` is consumed before the model sees it, a blocked
 `PreCompact` cancels compaction, and a blocking `Stop` result is delivered back
 to Pi as a follow-up user turn so the shared bounded guardrail-feedback loop can

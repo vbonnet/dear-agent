@@ -41,9 +41,11 @@ type ProcEntry struct {
 // npm entrypoint is a Node script, so comm alone is not always sufficient to
 // distinguish it from another Node-hosted harness.
 type procCommandEntry struct {
-	PID     int
-	PPID    int
-	Command string
+	PID           int
+	PPID          int
+	Command       string
+	Args          []string
+	ArgvInspected bool
 }
 
 // PaneLiveness is the verdict of a harness-process liveness scan for one
@@ -268,7 +270,36 @@ func readProcessCommandTable(ctx context.Context) ([]procCommandEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ps command table: %w", err)
 	}
-	return parsePSCommandTable(string(out)), nil
+	entries := parsePSCommandTable(string(out))
+	for index := range entries {
+		if processCommandExecutable(entries[index].Command) != "node" {
+			continue
+		}
+		entries[index].ArgvInspected = true
+		args, argvErr := readProcessArgv(entries[index].PID)
+		if argvErr == nil {
+			entries[index].Args = args
+		}
+	}
+	return entries, nil
+}
+
+func processCommandExecutable(command string) string {
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return ""
+	}
+	executable := 0
+	if filepath.Base(strings.Trim(fields[0], "'\"")) == "env" {
+		executable++
+		for executable < len(fields) && strings.Contains(fields[executable], "=") {
+			executable++
+		}
+	}
+	if executable >= len(fields) {
+		return ""
+	}
+	return filepath.Base(strings.Trim(fields[executable], "'\""))
 }
 
 func parsePSCommandTable(out string) []procCommandEntry {
@@ -335,6 +366,68 @@ func isPiProcessCommandWithResolver(command string, resolve func(string) (string
 		return false
 	}
 	if !mustResolve && isPiPackageEntry(script) {
+		return true
+	}
+	resolved, err := resolve(script)
+	return err == nil && isPiPackageEntry(resolved)
+}
+
+func isPiProcessArgsWithResolver(args []string, resolve func(string) (string, error)) bool {
+	if len(args) == 0 {
+		return false
+	}
+	executable := 0
+	if filepath.Base(args[0]) == "env" {
+		executable++
+		for executable < len(args) && strings.Contains(args[executable], "=") {
+			executable++
+		}
+	}
+	if executable >= len(args) {
+		return false
+	}
+	base := filepath.Base(args[executable])
+	if base == "pi" {
+		return true
+	}
+	if base != "node" {
+		return false
+	}
+	for index := executable + 1; index < len(args); index++ {
+		token := args[index]
+		if token == "--" {
+			index++
+			if index >= len(args) {
+				return false
+			}
+			return isPiScriptPath(args[index], resolve)
+		}
+		if !strings.HasPrefix(token, "-") {
+			return isPiScriptPath(token, resolve)
+		}
+		name, _, hasInlineValue := strings.Cut(token, "=")
+		if nodeNonScriptOptions[name] {
+			return false
+		}
+		if hasInlineValue {
+			continue
+		}
+		if nodeValueOptions[name] {
+			index++
+			if index >= len(args) {
+				return false
+			}
+			continue
+		}
+		if !nodeFlagOptions[name] {
+			return false
+		}
+	}
+	return false
+}
+
+func isPiScriptPath(script string, resolve func(string) (string, error)) bool {
+	if isPiPackageEntry(script) {
 		return true
 	}
 	resolved, err := resolve(script)
@@ -463,7 +556,7 @@ func trimNodeRuntimeOptions(tail string) (string, bool) {
 			continue
 		}
 		if nodeValueOptions[name] {
-			_, remainder, ok = commandToken(remainder)
+			remainder, ok = consumeNodeOptionValue(name, remainder)
 			if !ok {
 				return "", false
 			}
@@ -475,6 +568,50 @@ func trimNodeRuntimeOptions(tail string) (string, bool) {
 		}
 		tail = remainder
 	}
+}
+
+var nodeModulePathOptions = map[string]bool{
+	"-r":                    true,
+	"--experimental-loader": true,
+	"--import":              true,
+	"--loader":              true,
+	"--require":             true,
+}
+
+// consumeNodeOptionValue handles ps output that flattened a whitespace-bearing
+// preload path. Module-valued options have a bounded file suffix, so consume
+// through the last such suffix before the canonical Pi entrypoint; otherwise
+// retain Node's ordinary one-token semantics.
+func consumeNodeOptionValue(name, input string) (string, bool) {
+	if !nodeModulePathOptions[name] || input == "" || input[0] == '\'' || input[0] == '"' {
+		_, remainder, ok := commandToken(input)
+		return remainder, ok
+	}
+	limit := strings.Index(filepath.ToSlash(input), piPackageEntrySuffix)
+	if limit < 0 {
+		_, remainder, ok := commandToken(input)
+		return remainder, ok
+	}
+	valueEnd := -1
+	for _, suffix := range []string{".cjs", ".mjs", ".js", ".node"} {
+		search := input[:limit]
+		for offset := 0; offset < len(search); {
+			index := strings.Index(search[offset:], suffix)
+			if index < 0 {
+				break
+			}
+			end := offset + index + len(suffix)
+			if end == len(search) || search[end] == ' ' || search[end] == '\t' {
+				valueEnd = max(valueEnd, end)
+			}
+			offset = end
+		}
+	}
+	if valueEnd >= 0 {
+		return strings.TrimSpace(input[valueEnd:]), true
+	}
+	_, remainder, ok := commandToken(input)
+	return remainder, ok
 }
 
 func commandToken(input string) (token, remainder string, ok bool) {
@@ -553,7 +690,11 @@ func piProcessInPaneTree(panePIDs []int, procs []procCommandEntry) bool {
 		if !ok {
 			continue
 		}
-		if isPiProcessCommand(process.Command) {
+		if process.ArgvInspected {
+			if isPiProcessArgsWithResolver(process.Args, filepath.EvalSymlinks) {
+				return true
+			}
+		} else if isPiProcessCommand(process.Command) {
 			return true
 		}
 		queue = append(queue, children[pid]...)
