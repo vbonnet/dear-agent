@@ -107,7 +107,7 @@ func TestRenameRejectsControlCharacters(t *testing.T) {
 
 			err := a.exec(store)(Command{
 				Type: CommandRename,
-				Params: map[string]interface{}{
+				Params: map[string]any{
 					"session_id": string(sessionID),
 					"name":       hostileName,
 				},

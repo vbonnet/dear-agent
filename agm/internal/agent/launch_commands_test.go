@@ -154,7 +154,7 @@ func TestInjectionNeutralized(t *testing.T) {
 		{
 			name:     "opencode resume",
 			harness:  "opencode",
-			build:    func(wd string) string { return buildOpenCodeResumeCommand(wd) },
+			build:    buildOpenCodeResumeCommand,
 			wantArgv: []string{"attach"},
 		},
 	}
