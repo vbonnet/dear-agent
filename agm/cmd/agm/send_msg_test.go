@@ -129,6 +129,7 @@ func TestBusySingleSendReachesAtomicDeliveryForForceAndAutonomous(t *testing.T) 
 				state.CanReceiveQueue,
 				nil,
 				testCase.policy,
+				true,
 				func() error {
 					directCalls++
 					return nil
@@ -141,6 +142,57 @@ func TestBusySingleSendReachesAtomicDeliveryForForceAndAutonomous(t *testing.T) 
 				t.Fatalf("atomic direct calls = %d, want 1", directCalls)
 			}
 		})
+	}
+}
+
+func TestAPIForceAndAutonomousPreservePreliminaryDeliveryState(t *testing.T) {
+	previousDelegate := msgDelegate
+	msgDelegate = false
+	t.Cleanup(func() { msgDelegate = previousDelegate })
+
+	for _, policyCase := range []struct {
+		name   string
+		policy cliInputDeliveryPolicy
+	}{
+		{name: "force", policy: cliInputDeliveryPolicy{Force: true}},
+		{name: "autonomous", policy: cliInputDeliveryPolicy{Autonomous: true}},
+	} {
+		for _, canReceive := range []state.CanReceive{state.CanReceiveQueue, state.CanReceiveNo, state.CanReceiveNotFound} {
+			t.Run(policyCase.name+"/"+string(canReceive), func(t *testing.T) {
+				t.Setenv("HOME", t.TempDir())
+				directCalls := 0
+				err := dispatchSendByCanReceiveWithDirect(
+					t.Context(), "api-session", "api-session-tmux", "sender", "message-id",
+					"formatted message", "message", "working", canReceive, nil, policyCase.policy, false,
+					func() error {
+						directCalls++
+						return nil
+					},
+				)
+				if err == nil {
+					t.Fatalf("unavailable API delivery state %s error = nil", canReceive)
+				}
+				if canReceive != state.CanReceiveNotFound && !strings.Contains(err.Error(), "refusing direct delivery") {
+					t.Fatalf("API delivery state %s error = %v, want fail-closed queue error", canReceive, err)
+				}
+				if directCalls != 0 {
+					t.Fatalf("API delivery state %s direct calls = %d, want 0", canReceive, directCalls)
+				}
+			})
+		}
+	}
+}
+
+func TestSharedAtomicInputSupportIsCLIOnly(t *testing.T) {
+	for _, harness := range []string{"claude-code", "codex-cli", "agy", "agy-cli", "antigravity", "gemini-cli", "opencode-cli", "pi-cli"} {
+		if !supportsSharedAtomicInput(harness) {
+			t.Errorf("supportsSharedAtomicInput(%q) = false", harness)
+		}
+	}
+	for _, harness := range []string{"openai", "gpt", "", "unknown"} {
+		if supportsSharedAtomicInput(harness) {
+			t.Errorf("supportsSharedAtomicInput(%q) = true", harness)
+		}
 	}
 }
 
