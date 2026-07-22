@@ -218,6 +218,12 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			state:   HarnessInputReady,
 		},
 		{
+			name:    "Pi managed permission prompt wins over ready status",
+			harness: "pi-cli",
+			content: "AGM permission required\nAllow bash?\nAGM default/ready",
+			state:   HarnessInputPermission,
+		},
+		{
 			name:    "stale Pi ready status before working status",
 			harness: "pi-cli",
 			content: "AGM plan/ready launch-old\nAGM plan/working launch-current",

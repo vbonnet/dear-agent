@@ -143,6 +143,29 @@ func TestSendMessage_AtomicReadinessAndDeliveryPrecedesGenericManagerCheck(t *te
 	}
 }
 
+func TestSendMessage_PiPermissionPromptBlocksAtomicDelivery(t *testing.T) {
+	m := newManifest("id-1", "pi-session", "~/project")
+	m.Harness = "pi-cli"
+	ctx := testCtx([]*manifest.Manifest{m}, "pi-session")
+	tmuxMock := ctx.Tmux.(*mockTmux)
+	tmuxMock.readiness = session.InputReadiness{State: "PERMISSION", PaneID: "%1"}
+
+	result, err := SendMessage(ctx, &SendMessageRequest{Recipient: "id-1", Message: "must not authorize"})
+	if result == nil || result.Delivered {
+		t.Fatalf("result = %#v, want non-delivery", result)
+	}
+	opErr := &OpError{}
+	if !errors.As(err, &opErr) || opErr.Code != ErrCodeSessionNotReady {
+		t.Fatalf("error = %v, want %s", err, ErrCodeSessionNotReady)
+	}
+	if len(tmuxMock.atomicChecks) != 1 || tmuxMock.atomicChecks[0] != "pi-session:pi-cli" {
+		t.Fatalf("atomic input checks = %v, want [pi-session:pi-cli]", tmuxMock.atomicChecks)
+	}
+	if len(tmuxMock.sent) != 0 {
+		t.Fatalf("Pi permission prompt received input: %v", tmuxMock.sent)
+	}
+}
+
 func TestSendMessage_ReadyWithoutVerifiedPaneFailsClosed(t *testing.T) {
 	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")}, "my-session")
 	tmuxMock := ctx.Tmux.(*mockTmux)

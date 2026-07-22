@@ -109,6 +109,13 @@ func ClassifyHarnessInput(content, harness string) (bool, string, error) {
 	styledTail := paneRawInputTail(content, 12)
 	tail := stripANSI(styledTail)
 
+	// Pi's managed ready footer remains visible while its native confirmation
+	// dialog owns input. Treat that dialog as authoritative before consulting
+	// the footer so automated input can never become an authorization answer.
+	if harness == "pi-cli" && hasPiManagedPermissionPrompt(tail) {
+		return false, HarnessInputPermission, nil
+	}
+
 	var ready bool
 	switch harness {
 	case "claude-code":
@@ -462,6 +469,11 @@ func hasTailOwnedPermissionPrompt(content string) bool {
 		return true
 	}
 	return unanchoredPermissionChoicesOwnTail(lines)
+}
+
+func hasPiManagedPermissionPrompt(content string) bool {
+	return strings.Contains(strings.ToLower(content), "agm permission required") ||
+		hasTailOwnedPermissionPrompt(content)
 }
 
 func permissionChoicesOwnTail(lines []string) bool {
