@@ -4,7 +4,7 @@
 # on the repo's DEFAULT branch:
 #
 #   Stage 1 — rebuild affected Go binaries (this repo only).
-#     After a PR lands on main, the `agm` / `vroom-dispatch` binaries in
+#     After a PR lands on main, the `agm` / `agm-reaper` / `vroom-dispatch` binaries in
 #     ~/go/bin are stale until someone remembers to `go install`. This stage
 #     closes that gap: it inspects what changed in the merge and reinstalls
 #     ONLY the binaries whose source actually changed. Docs/tests/config-only
@@ -117,7 +117,7 @@ fi
 # only when inputs changed — but we additionally gate on the diff so we don't
 # even invoke `go` on a docs/tests/config-only merge.
 #
-#   agm             ./agm/cmd/agm       ← agm/ pkg/ internal/ go.mod go.sum
+#   agm + reaper    ./agm/cmd/{agm,agm-reaper} ← agm/ pkg/ internal/ go.mod go.sum
 #   vroom-dispatch  ./cmd/vroom-dispatch ← cmd/vroom-dispatch/ pkg/ internal/ go.mod go.sum
 
 # is_build_relevant: a changed file that cannot affect a compiled binary
@@ -217,6 +217,175 @@ maybe_rebuild() {
   fi
 }
 
+# acquire_agm_pair_lock: hold a kernel-released advisory lock on fd 9. flock is
+# standard on Linux and lockf is standard on macOS; both release automatically
+# if the hook is killed, so there is no owner-file creation gap or stale PID to
+# recover. A missing primitive fails closed without touching the installed pair.
+acquire_agm_pair_lock() {
+  _pair_lock_timeout="${AGM_PAIR_LOCK_TIMEOUT_SECONDS:-300}"
+  case "${_pair_lock_timeout}" in ''|*[!0-9]*) _pair_lock_timeout=300 ;; esac
+
+  # Migrate a lock directory left by the previous PID-directory protocol. An
+  # ownerless/malformed directory is safe to remove with rmdir (which fails if
+  # any unexpected entry appears); a live legacy owner gets the same bounded
+  # wait as the advisory lock below. If we remove the directory during the old
+  # mkdir/write gap, that owner fails its PID write and leaves the pair intact.
+  _pair_legacy_wait=0
+  while [ -d "${_pair_lock}" ]; do
+    _pair_legacy_owner="$(cat "${_pair_lock}/pid" 2>/dev/null || true)"
+    case "${_pair_legacy_owner}" in ''|*[!0-9]*) _pair_legacy_owner="" ;; esac
+    if [ -z "${_pair_legacy_owner}" ] || ! kill -0 "${_pair_legacy_owner}" 2>/dev/null; then
+      rm -f "${_pair_lock}/pid" 2>/dev/null || true
+      rmdir "${_pair_lock}" 2>/dev/null || return 1
+      break
+    fi
+    [ "${_pair_legacy_wait}" -lt "${_pair_lock_timeout}" ] || return 1
+    sleep 1
+    _pair_legacy_wait=$((_pair_legacy_wait + 1))
+  done
+
+  if ! exec 9>"${_pair_lock}"; then
+    return 1
+  fi
+  if command -v flock >/dev/null 2>&1; then
+    flock -w "${_pair_lock_timeout}" 9 && return 0
+  elif command -v lockf >/dev/null 2>&1; then
+    lockf -t "${_pair_lock_timeout}" 9 && return 0
+  else
+    echo "[post-merge:rebuild] neither flock nor lockf is available for AGM pair deployment." >&2
+  fi
+  exec 9>&-
+  return 1
+}
+
+release_agm_pair_lock() {
+  exec 9>&-
+}
+
+# maybe_rebuild_agm_pair serializes pair deployment across every checkout that
+# shares GOBIN. Every affected contender waits, reacquires, refreshes canonical
+# trunk, and installs that latest revision rather than deferring a newer merge.
+maybe_rebuild_agm_pair() {
+  agm_pair_handled=0
+  _pair_gobin="${GOBIN:-${HOME}/go/bin}"
+  mkdir -p "${_pair_gobin}" 2>/dev/null || true
+  _pair_lock="${_pair_gobin}/.agm-pair-install.lock"
+  if ! acquire_agm_pair_lock; then
+    agm_pair_handled=1
+    echo "[post-merge:rebuild] could not acquire AGM pair deployment lock — installed pair unchanged." >&2
+    return 0
+  fi
+
+  maybe_rebuild_agm_pair_locked
+  _pair_status=$?
+  release_agm_pair_lock
+  return "${_pair_status}"
+}
+
+# maybe_rebuild_agm_pair_locked stages the CLI and detached archive companion
+# while the shared install lock is held. Neither installed binary is touched
+# unless both builds succeed.
+maybe_rebuild_agm_pair_locked() {
+  agm_pair_handled=0
+  [ -d "${repo_root}/agm/cmd/agm" ] || return 0
+  [ -d "${repo_root}/agm/cmd/agm-reaper" ] || return 0
+
+  _affected=0
+  _trigger=""
+  if [ "${indeterminate}" = "1" ]; then
+    _affected=1
+    _trigger="could not determine diff — rebuilding to be safe"
+  else
+    while IFS= read -r _f; do
+      [ -n "${_f}" ] || continue
+      is_build_relevant "${_f}" || continue
+      if under_prefix "${_f}" agm/ pkg/ internal/ go.mod go.sum; then
+        _affected=1
+        [ -z "${_trigger}" ] && _trigger="$(dirname "${_f}")/"
+      fi
+    done < <(printf '%s\n' "${changed}")
+  fi
+
+  [ "${_affected}" = "1" ] || return 0
+  agm_pair_handled=1
+
+  # The hook may have waited behind an older merge. Refresh origin/main only
+  # after acquiring the lock so the last contender cannot reinstall an older
+  # ancestor over a newer coherent pair.
+  fetch_trunk_commit
+  ensure_build_dir
+
+  _gobin="${GOBIN:-${HOME}/go/bin}"
+  mkdir -p "${_gobin}" 2>/dev/null || true
+  _agm_tmp="${_gobin}/.agm.install.$$.pair"
+  _reaper_tmp="${_gobin}/.agm-reaper.install.$$.pair"
+  _agm_target="${_gobin}/agm"
+  _reaper_target="${_gobin}/agm-reaper"
+  _agm_backup="${_gobin}/.agm.rollback.$$.pair"
+  _reaper_backup="${_gobin}/.agm-reaper.rollback.$$.pair"
+  _had_agm=0
+  _had_reaper=0
+
+  _pair_revision="$(git -C "${build_dir}" rev-parse --short=12 HEAD 2>/dev/null || true)"
+  if [ -z "${_pair_revision}" ]; then
+    echo "[post-merge:rebuild] ✗ cannot resolve AGM pair revision — installed pair unchanged." >&2
+    return 0
+  fi
+  _pair_ldflags="-X github.com/vbonnet/dear-agent/pkg/version.GitCommit=${_pair_revision}"
+
+  echo "[post-merge:rebuild] Staging agm + agm-reaper (source changed in ${_trigger})..." >&2
+  if ! ( cd "${build_dir}" && go build -ldflags "${_pair_ldflags}" -o "${_agm_tmp}" ./agm/cmd/agm ); then
+    rm -f "${_agm_tmp}" "${_reaper_tmp}" 2>/dev/null || true
+    echo "[post-merge:rebuild] ✗ agm pair staging FAILED — installed pair unchanged." >&2
+    return 0
+  fi
+  if ! ( cd "${build_dir}" && go build -ldflags "${_pair_ldflags}" -o "${_reaper_tmp}" ./agm/cmd/agm-reaper ); then
+    rm -f "${_agm_tmp}" "${_reaper_tmp}" 2>/dev/null || true
+    echo "[post-merge:rebuild] ✗ agm-reaper pair staging FAILED — installed pair unchanged." >&2
+    return 0
+  fi
+
+  if [ -e "${_agm_target}" ]; then
+    _had_agm=1
+    ln "${_agm_target}" "${_agm_backup}" 2>/dev/null || cp -p "${_agm_target}" "${_agm_backup}" 2>/dev/null || {
+      rm -f "${_agm_tmp}" "${_reaper_tmp}" "${_agm_backup}" 2>/dev/null || true
+      echo "[post-merge:rebuild] ✗ could not stage agm rollback — installed pair unchanged." >&2
+      return 0
+    }
+  fi
+  if [ -e "${_reaper_target}" ]; then
+    _had_reaper=1
+    ln "${_reaper_target}" "${_reaper_backup}" 2>/dev/null || cp -p "${_reaper_target}" "${_reaper_backup}" 2>/dev/null || {
+      rm -f "${_agm_tmp}" "${_reaper_tmp}" "${_agm_backup}" "${_reaper_backup}" 2>/dev/null || true
+      echo "[post-merge:rebuild] ✗ could not stage agm-reaper rollback — installed pair unchanged." >&2
+      return 0
+    }
+  fi
+
+  if ! mv -f "${_agm_tmp}" "${_agm_target}"; then
+    rm -f "${_agm_tmp}" "${_reaper_tmp}" "${_agm_backup}" "${_reaper_backup}" 2>/dev/null || true
+    echo "[post-merge:rebuild] ✗ agm pair activation FAILED — installed pair unchanged." >&2
+    return 0
+  fi
+  if ! mv -f "${_reaper_tmp}" "${_reaper_target}"; then
+    if [ "${_had_agm}" = "1" ]; then
+      mv -f "${_agm_backup}" "${_agm_target}" 2>/dev/null || true
+    else
+      rm -f "${_agm_target}" 2>/dev/null || true
+    fi
+    if [ "${_had_reaper}" = "1" ]; then
+      mv -f "${_reaper_backup}" "${_reaper_target}" 2>/dev/null || true
+    fi
+    rm -f "${_agm_tmp}" "${_reaper_tmp}" "${_agm_backup}" "${_reaper_backup}" 2>/dev/null || true
+    echo "[post-merge:rebuild] ✗ agm-reaper pair activation FAILED — prior pair restored." >&2
+    return 0
+  fi
+
+  rm -f "${_agm_backup}" "${_reaper_backup}" 2>/dev/null || true
+  rebuilt_any=1
+  echo "[post-merge:rebuild] ✓ installed agm + agm-reaper as one revision-coherent pair (atomic files)" >&2
+}
+
 # _pick_timeout: echo the first available timeout wrapper (gtimeout on macOS
 # coreutils, then GNU timeout), or nothing if neither exists. Used to cap the
 # trunk fetch so a hung network probe can never wedge the merge.
@@ -294,7 +463,7 @@ rebuild_changed_binaries() {
   # Scope the global hook: if neither binary package exists in this repo, this
   # is not dear-agent — stay completely silent.
   any_target=0
-  for _pkg in agm/cmd/agm cmd/vroom-dispatch; do
+  for _pkg in agm/cmd/agm agm/cmd/agm-reaper cmd/vroom-dispatch; do
     [ -d "${repo_root}/${_pkg}" ] && any_target=1
   done
   [ "${any_target}" = "1" ] || return 0
@@ -339,7 +508,11 @@ rebuild_changed_binaries() {
   fetch_trunk_commit
 
   rebuilt_any=0
-  maybe_rebuild "agm/cmd/agm"        agm/ pkg/ internal/ go.mod go.sum
+  maybe_rebuild_agm_pair
+  if [ "${agm_pair_handled}" != "1" ]; then
+    maybe_rebuild "agm/cmd/agm"        agm/ pkg/ internal/ go.mod go.sum
+    maybe_rebuild "agm/cmd/agm-reaper" agm/cmd/agm-reaper/ agm/internal/ pkg/ internal/ go.mod go.sum
+  fi
   maybe_rebuild "cmd/vroom-dispatch" cmd/vroom-dispatch/ pkg/ internal/ go.mod go.sum
   # Self-update the deploy tool: keep ~/go/bin/dear-deploy current so on-demand /
   # Orchestrator invocations (Layer 2, ce-33sy) run trunk. Stage 1.6 below does

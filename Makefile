@@ -13,7 +13,7 @@ export GOMEMLIMIT GOMAXPROCS GOGC
 # `<binary> --version` reports the actual build provenance.
 # Override on the CLI: make build-safe-pr VERSION=1.2.3
 VERSION    ?= dev
-GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+GIT_COMMIT ?= $(shell commit=$$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown); if [ "$$commit" != unknown ] && [ -n "$$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then printf '%s-dirty' "$$commit"; else printf '%s' "$$commit"; fi)
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 PKG_VERSION := github.com/vbonnet/dear-agent/pkg/version
@@ -967,18 +967,19 @@ build-vroom-governor:
 install-vroom-governor: build-vroom-governor
 	$(call install-go-bin,bin/vroom-governor)
 
-# Build agm + agm-mcp-server with version stamping (ce-wy1q).
-# These binaries are also installable via `go install ./agm/cmd/agm` but that
-# path omits version info; prefer `make build-agm && make install-agm` so that
-# `agm version` shows the correct commit and build date.
+# Build the AGM CLI and its detached archive companion with one version stamp.
+# A standalone `go install ./agm/cmd/agm` omits both the stamp and companion;
+# prefer `make install-agm` so async archive compatibility remains coherent.
 build-agm:
-	@echo "Building agm..."
+	@echo "Building agm + agm-reaper..."
 	@mkdir -p bin
 	go build $(GOFLAGS) -o bin/agm ./agm/cmd/agm/
-	@echo "Built: bin/agm"
+	go build $(GOFLAGS) -o bin/agm-reaper ./agm/cmd/agm-reaper/
+	@echo "Built: bin/agm bin/agm-reaper"
 
 install-agm: build-agm
 	$(call install-go-bin,bin/agm)
+	$(call install-go-bin,bin/agm-reaper)
 
 build-agm-mcp-server:
 	@echo "Building agm-mcp-server..."
