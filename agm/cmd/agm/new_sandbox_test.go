@@ -289,7 +289,8 @@ func TestMaybeProvisionSandboxReturnsProviderMappedWorkingDirectory(t *testing.T
 }
 
 type emptyWorkingDirProvider struct {
-	destroyed *bool
+	destroyed  *bool
+	destroyErr error
 }
 
 func (p *emptyWorkingDirProvider) Create(_ context.Context, req sandbox.SandboxRequest) (*sandbox.Sandbox, error) {
@@ -302,7 +303,28 @@ func (p *emptyWorkingDirProvider) Create(_ context.Context, req sandbox.SandboxR
 
 func (p *emptyWorkingDirProvider) Destroy(_ context.Context, _ string) error {
 	*p.destroyed = true
-	return nil
+	return p.destroyErr
+}
+
+func TestProvisionSandboxPreservesContractAndCleanupFailures(t *testing.T) {
+	originalCfg := cfg
+	t.Cleanup(func() { cfg = originalCfg })
+	t.Setenv("HOME", t.TempDir())
+	repoRoot := t.TempDir()
+	destroyed := false
+	cleanupErr := errors.New("fixture cleanup failure")
+	sandbox.RegisterProvider("empty-working-dir-cleanup-failure-test", func() sandbox.Provider {
+		return &emptyWorkingDirProvider{destroyed: &destroyed, destroyErr: cleanupErr}
+	})
+	cfg = &config.Config{Sandbox: config.SandboxConfig{Enabled: true, Repos: []string{repoRoot}}}
+
+	_, err := provisionSandbox(context.Background(), "empty-working-dir-cleanup-failure-test", "contract-session", repoRoot)
+	if err == nil || !errors.Is(err, cleanupErr) {
+		t.Fatalf("provisionSandbox() error = %v, want joined cleanup failure", err)
+	}
+	if !destroyed {
+		t.Fatal("provisionSandbox() did not attempt cleanup after provider contract failure")
+	}
 }
 
 func (*emptyWorkingDirProvider) Validate(context.Context, string) error { return nil }

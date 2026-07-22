@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -111,7 +112,7 @@ func provisionSandbox(ctx context.Context, providerName string, sessionID string
 	if sb.WorkingDir == "" {
 		contractErr := fmt.Errorf("sandbox provider %s returned an empty working directory", provider.Name())
 		if cleanupErr := provider.Destroy(ctx, sb.ID); cleanupErr != nil {
-			return nil, fmt.Errorf("%w; cleanup failed: %v", contractErr, cleanupErr)
+			return nil, errors.Join(contractErr, fmt.Errorf("cleanup failed: %w", cleanupErr))
 		}
 		return nil, contractErr
 	}
