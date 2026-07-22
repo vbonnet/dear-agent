@@ -271,20 +271,33 @@ func readProcessCommandTable(ctx context.Context) ([]procCommandEntry, error) {
 		return nil, fmt.Errorf("ps command table: %w", err)
 	}
 	entries := parsePSCommandTable(string(out))
+	if err := inspectNodeProcessArgs(ctx, entries, readProcessArgv); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func inspectNodeProcessArgs(ctx context.Context, entries []procCommandEntry, readArgv func(int) ([]string, error)) error {
 	for index := range entries {
 		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("read process argv: %w", err)
+			return fmt.Errorf("read process argv: %w", err)
 		}
 		if processCommandExecutable(entries[index].Command) != "node" {
 			continue
 		}
 		entries[index].ArgvInspected = true
-		args, argvErr := readProcessArgv(entries[index].PID)
+		args, argvErr := readArgv(entries[index].PID)
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("read process argv: %w", err)
+		}
 		if argvErr == nil {
 			entries[index].Args = args
 		}
 	}
-	return entries, nil
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("read process argv: %w", err)
+	}
+	return nil
 }
 
 func processCommandExecutable(command string) string {

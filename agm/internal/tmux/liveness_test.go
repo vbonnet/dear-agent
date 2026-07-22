@@ -30,6 +30,24 @@ func TestIsPiProcessInPaneTreeContextHonorsCallerCancellation(t *testing.T) {
 	}
 }
 
+func TestInspectNodeProcessArgsHonorsCancellationDuringFinalRead(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	entries := []procCommandEntry{{PID: 42, Command: "node /tmp/worker.js"}}
+	err := inspectNodeProcessArgs(ctx, entries, func(pid int) ([]string, error) {
+		if pid != 42 {
+			t.Fatalf("read argv pid = %d, want 42", pid)
+		}
+		cancel()
+		return []string{"node", "/tmp/worker.js"}, nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("inspectNodeProcessArgs() error = %v, want context.Canceled", err)
+	}
+	if entries[0].Args != nil {
+		t.Fatalf("argv was committed after cancellation: %q", entries[0].Args)
+	}
+}
+
 func TestIsPiProcessInPaneTreeRejectsDeadPaneWithPiStartCommand(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping tmux integration test in short mode")
