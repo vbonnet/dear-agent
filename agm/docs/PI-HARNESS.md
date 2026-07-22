@@ -1,6 +1,6 @@
 # Pi Harness
 
-<!-- Last audited at: 2026-07-21 against Pi 0.81.0 -->
+<!-- Last audited at: 2026-07-21 against Pi 0.81.1 -->
 
 AGM supports [Pi](https://github.com/earendil-works/pi) as the canonical
 `pi-cli` harness. `pi` is accepted as an input alias and normalized before
@@ -136,10 +136,16 @@ their canonical OpenRouter routes. Provider availability still depends on the
 models and authentication configured in Pi.
 
 AGM reads Pi's native JSONL usage and provider-reported cost. It uses the latest
-assistant prompt footprint for context, the audited Pi 0.81.0 model-catalog
+assistant prompt footprint for context, the audited Pi 0.81.1 model-catalog
 window for the recorded model, and sums native cost records for the session.
 Pi does not expose a provider quota/rate-limit API, so those fields are
 reported as unavailable rather than populated with Claude-specific values.
+
+Pi 0.81.1 adds native retry lifecycle events for compaction and branch
+summarization and defers background model-catalog refresh until after
+interactive startup. AGM does not reinterpret native retry output as a
+readiness transition: the latest managed `AGM <mode>/<state> <launch-id>`
+status remains the sole readiness authority.
 
 Pi does not require a background server. Archive stops the managed tmux
 process while preserving its private native transcript. Deleting transcript
