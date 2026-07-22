@@ -521,7 +521,8 @@ func TestScriptHeredocVisibilityTracksDescriptorsPipelinesAndCapturedVariables(t
 		"read message <<'VISIBLE_READ'",
 		"gh pr close 135",
 		"VISIBLE_READ",
-		`printf '%s\n' "$message"`,
+		"copy=$message",
+		`printf '%s\n' "$copy"`,
 	}, "\n"))
 
 	var text []string

@@ -167,6 +167,7 @@ func parseScriptSegments(source []byte) []Segment {
 				delete(state.pendingHeredocs, path)
 			}
 		}
+		state.propagatePendingVariables(value)
 		if agentVisibleScriptCommand(value, state.visibleHelpers) {
 			for variable, pending := range state.pendingVariables {
 				if scriptReferencesVariable(value, variable) {
@@ -277,6 +278,28 @@ func (state *scriptParseState) updatePersistentDescriptors(value string) {
 		}
 		applyScriptRedirections(tokens[1:], state.descriptors)
 	}
+}
+
+func (state *scriptParseState) propagatePendingVariables(value string) {
+	assignment := stripShellDeclaration(strings.TrimSpace(value))
+	if !shellAssignment.MatchString(assignment) {
+		return
+	}
+	name, right, found := strings.Cut(assignment, "=")
+	if !found {
+		return
+	}
+	var propagated []Segment
+	for variable, pending := range state.pendingVariables {
+		if scriptReferencesVariable(right, variable) {
+			propagated = append(propagated, pending...)
+		}
+	}
+	if len(propagated) == 0 {
+		delete(state.pendingVariables, name)
+		return
+	}
+	state.pendingVariables[name] = slices.Clone(propagated)
 }
 
 func (state *scriptParseState) consumeOngoing(raw, value string) (include, handled bool) {
