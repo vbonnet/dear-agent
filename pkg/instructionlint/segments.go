@@ -141,6 +141,7 @@ func parseScriptSegments(source []byte) []Segment {
 		visibleHelpers:   agentVisibleScriptHelpers(source),
 		pendingHeredocs:  map[string][]Segment{},
 		pendingVariables: map[string][]Segment{},
+		variableAliases:  map[string]string{},
 		descriptors:      defaultScriptDescriptors(),
 	}
 	line := 0
@@ -166,15 +167,23 @@ func parseScriptSegments(source []byte) []Segment {
 		}
 		state.updatePersistentDescriptors(value)
 		state.updatePendingFileWrites(value)
+		state.propagatePendingVariables(value)
+		state.updateVariableAliases(value)
 		for path, pending := range state.pendingHeredocs {
-			if scriptLinePrintsPath(value, path, state.descriptors) {
+			if variable, captured := scriptAssignedSubstitutionReadsPath(value, path, state.descriptors); captured {
+				state.pendingVariables[variable] = append(state.pendingVariables[variable], pending...)
+				delete(state.pendingHeredocs, path)
+				continue
+			}
+			if scriptLineExecutesPath(value, path) || scriptLinePrintsPath(value, path, state.descriptors) {
 				segments = append(segments, pending...)
 				delete(state.pendingHeredocs, path)
 			}
 		}
-		state.propagatePendingVariables(value)
 		for variable, pending := range state.pendingVariables {
-			if scriptLinePrintsVariable(value, variable, state.visibleHelpers, state.descriptors) {
+			if scriptLinePrintsVariable(
+				value, variable, state.visibleHelpers, state.variableAliases, state.descriptors,
+			) {
 				segments = append(segments, pending...)
 				delete(state.pendingVariables, variable)
 			}
@@ -237,6 +246,7 @@ type scriptParseState struct {
 	heredocs            []scriptHeredoc
 	pendingHeredocs     map[string][]Segment
 	pendingVariables    map[string][]Segment
+	variableAliases     map[string]string
 	descriptors         map[int]scriptOutputDestination
 	visibleContinuation bool
 	continuedCommand    string
@@ -346,6 +356,19 @@ func (state *scriptParseState) propagatePendingVariables(value string) {
 	state.pendingVariables[name] = slices.Clone(propagated)
 }
 
+func (state *scriptParseState) updateVariableAliases(value string) {
+	assignment := stripShellDeclaration(strings.TrimSpace(value))
+	if !shellAssignment.MatchString(assignment) {
+		return
+	}
+	name, right, found := strings.Cut(assignment, "=")
+	if !found || !shellVariableName.MatchString(right) {
+		delete(state.variableAliases, name)
+		return
+	}
+	state.variableAliases[name] = right
+}
+
 func (state *scriptParseState) consumeOngoing(raw, value string) (include, handled bool) {
 	if state.visibleContinuation {
 		state.continuedCommand = state.continuedWith(value)
@@ -401,11 +424,13 @@ func agentVisibleScriptCommand(value string, helpers map[string]bool) bool {
 func scriptLinePrintsVariable(
 	value, variable string,
 	helpers map[string]bool,
+	aliases map[string]string,
 	descriptors map[int]scriptOutputDestination,
 ) bool {
 	commands := splitScriptCommandParts(value)
 	for index, command := range commands {
-		if !scriptReferencesVariable(command.text, variable) {
+		if !scriptReferencesVariable(command.text, variable) &&
+			!scriptIndirectExpansionSelectsVariable(command.text, variable, aliases) {
 			continue
 		}
 		if !agentVisibleScriptCommand(command.text, helpers) &&
@@ -420,6 +445,10 @@ func scriptLinePrintsVariable(
 }
 
 func scriptHereStringReferencesVariable(command, variable string) bool {
+	fields := stripCommandPrefixes(parseShellWords(command))
+	if len(fields) == 0 || slices.Contains([]string{"read", "readarray", "mapfile"}, executableBase(fields[0])) {
+		return false
+	}
 	remaining := command
 	for {
 		index := strings.Index(remaining, "<<<")
@@ -432,6 +461,17 @@ func scriptHereStringReferencesVariable(command, variable string) bool {
 		}
 		remaining = remaining[index+3:]
 	}
+}
+
+var shellIndirectExpansion = regexp.MustCompile(`\$\{!([A-Za-z_][A-Za-z0-9_]*)\}`)
+
+func scriptIndirectExpansionSelectsVariable(command, variable string, aliases map[string]string) bool {
+	for _, match := range shellIndirectExpansion.FindAllStringSubmatch(command, -1) {
+		if len(match) == 2 && aliases[match[1]] == variable {
+			return true
+		}
+	}
+	return false
 }
 
 var shellAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
@@ -1361,6 +1401,45 @@ func scriptRedirectDestination(target string, descriptors map[int]scriptOutputDe
 func scriptCommandPrintsPath(command, path string, descriptors map[int]scriptOutputDestination) bool {
 	return scriptCommandReadsPath(command, path, descriptors) &&
 		scriptHeredocCommandOutputDestination([]scriptCommandPart{{text: command}}, 0, descriptors).visible
+}
+
+func scriptAssignedSubstitutionReadsPath(
+	command, path string,
+	descriptors map[int]scriptOutputDestination,
+) (string, bool) {
+	assignment := stripShellDeclaration(strings.TrimSpace(command))
+	if !shellAssignment.MatchString(assignment) {
+		return "", false
+	}
+	name, right, found := strings.Cut(assignment, "=")
+	if !found || !scriptCommandSubstitutionsReadPath(right, path, descriptors) {
+		return "", false
+	}
+	return name, true
+}
+
+func scriptLineExecutesPath(value, path string) bool {
+	for _, command := range splitScriptCommandParts(value) {
+		fields := stripCommandPrefixes(parseShellWords(command.text))
+		if len(fields) < 2 {
+			continue
+		}
+		executable := executableBase(fields[0])
+		if !slices.Contains([]string{".", "bash", "dash", "ksh", "sh", "source", "zsh"}, executable) {
+			continue
+		}
+		payloadFields := slices.Clone(fields)
+		payloadFields[0] = executable
+		if _, inlinePayload := shellCommandPayload(payloadFields); inlinePayload {
+			continue
+		}
+		for _, argument := range fields[1:] {
+			if sameScriptPath(argument, path) || strings.ContainsAny(argument, "$`") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func scriptCommandReadsPath(command, path string, descriptors map[int]scriptOutputDestination) bool {

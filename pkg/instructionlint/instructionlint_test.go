@@ -697,6 +697,28 @@ func TestScriptHeredocStateHandlesPipelineSideOutputsAndShellCaptures(t *testing
 		"git push origin filtered-value",
 		"FILTERED_VALUE",
 		`sed 's/^//' <<<"$filtered"`,
+		"cat >source-fixture <<'SOURCE_FIXTURE'",
+		"gh pr reopen 642",
+		"SOURCE_FIXTURE",
+		"source source-fixture",
+		"cat >shell-script-fixture <<'SHELL_SCRIPT_FIXTURE'",
+		"git push origin executed-shell-script",
+		"SHELL_SCRIPT_FIXTURE",
+		"bash shell-script-fixture",
+		"indirect=$(cat <<'INDIRECT_CAPTURE'",
+		"gh pr close 753",
+		"INDIRECT_CAPTURE",
+		")",
+		"name=indirect",
+		`printf '%s\n' "${!name}"`,
+		"cat >silent-substitution-fixture <<'SILENT_SUBSTITUTION'",
+		"git push origin silent-substitution",
+		"SILENT_SUBSTITUTION",
+		"silent=$(cat silent-substitution-fixture)",
+		"read original <<'SILENT_HERE_STRING'",
+		"safe-pr create --emergency --reason silent-here-string",
+		"SILENT_HERE_STRING",
+		`read copy <<<"$original"`,
 	}, "\n"))
 
 	var text []string
@@ -705,10 +727,13 @@ func TestScriptHeredocStateHandlesPipelineSideOutputsAndShellCaptures(t *testing
 	}
 	for _, visible := range []string{
 		"gh pr reopen 864",
-		"bd ready",
+		"git push origin executed-shell-script",
 		"gh pr close 531",
 		"gh pr merge 975",
 		"git push origin filtered-value",
+		"gh pr reopen 642",
+		"bd ready",
+		"gh pr close 753",
 	} {
 		if !slices.Contains(text, visible) {
 			t.Errorf("visible line %q was hidden: %v", visible, text)
@@ -717,6 +742,8 @@ func TestScriptHeredocStateHandlesPipelineSideOutputsAndShellCaptures(t *testing
 	for _, hidden := range []string{
 		"git push origin captured-hidden",
 		"safe-pr create --emergency --reason prompt-is-not-a-variable",
+		"git push origin silent-substitution",
+		"safe-pr create --emergency --reason silent-here-string",
 	} {
 		if slices.Contains(text, hidden) {
 			t.Errorf("non-visible line %q was exposed: %v", hidden, text)
