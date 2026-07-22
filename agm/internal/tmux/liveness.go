@@ -41,9 +41,11 @@ type ProcEntry struct {
 // npm entrypoint is a Node script, so comm alone is not always sufficient to
 // distinguish it from another Node-hosted harness.
 type procCommandEntry struct {
-	PID     int
-	PPID    int
-	Command string
+	PID           int
+	PPID          int
+	Command       string
+	Args          []string
+	ArgvInspected bool
 }
 
 // PaneLiveness is the verdict of a harness-process liveness scan for one
@@ -268,7 +270,52 @@ func readProcessCommandTable(ctx context.Context) ([]procCommandEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ps command table: %w", err)
 	}
-	return parsePSCommandTable(string(out)), nil
+	entries := parsePSCommandTable(string(out))
+	if err := inspectNodeProcessArgs(ctx, entries, readProcessArgv); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func inspectNodeProcessArgs(ctx context.Context, entries []procCommandEntry, readArgv func(int) ([]string, error)) error {
+	for index := range entries {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("read process argv: %w", err)
+		}
+		if processCommandExecutable(entries[index].Command) != "node" {
+			continue
+		}
+		entries[index].ArgvInspected = true
+		args, argvErr := readArgv(entries[index].PID)
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("read process argv: %w", err)
+		}
+		if argvErr == nil {
+			entries[index].Args = args
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("read process argv: %w", err)
+	}
+	return nil
+}
+
+func processCommandExecutable(command string) string {
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return ""
+	}
+	executable := 0
+	if filepath.Base(strings.Trim(fields[0], "'\"")) == "env" {
+		executable++
+		for executable < len(fields) && strings.Contains(fields[executable], "=") {
+			executable++
+		}
+	}
+	if executable >= len(fields) {
+		return ""
+	}
+	return filepath.Base(strings.Trim(fields[executable], "'\""))
 }
 
 func parsePSCommandTable(out string) []procCommandEntry {
@@ -330,18 +377,307 @@ func isPiProcessCommandWithResolver(command string, resolve func(string) (string
 	if base != "node" {
 		return false
 	}
-	for _, raw := range fields[executable+1:] {
-		if strings.HasPrefix(raw, "-") {
+	script, mustResolve, ok := nodeScriptArgument(command, fields, executable)
+	if !ok {
+		return false
+	}
+	if !mustResolve && isPiPackageEntry(script) {
+		return true
+	}
+	resolved, err := resolve(script)
+	return err == nil && isPiPackageEntry(resolved)
+}
+
+func isPiProcessArgsWithResolver(args []string, resolve func(string) (string, error)) bool {
+	if len(args) == 0 {
+		return false
+	}
+	executable, ok := executableArg(args)
+	if !ok {
+		return false
+	}
+	base := filepath.Base(args[executable])
+	if base == "pi" {
+		return true
+	}
+	if base != "node" {
+		return false
+	}
+	for index := executable + 1; index < len(args); index++ {
+		token := args[index]
+		if token == "--" {
+			index++
+			if index >= len(args) {
+				return false
+			}
+			return isPiScriptPath(args[index], resolve)
+		}
+		if !strings.HasPrefix(token, "-") {
+			return isPiScriptPath(token, resolve)
+		}
+		name, _, hasInlineValue := strings.Cut(token, "=")
+		if nodeNonScriptOptions[name] {
+			return false
+		}
+		if hasInlineValue {
 			continue
 		}
-		script := strings.Trim(raw, "'\"")
-		if isPiPackageEntry(script) {
-			return true
+		if nodeValueOptions[name] {
+			index++
+			if index >= len(args) {
+				return false
+			}
+			continue
 		}
-		resolved, err := resolve(script)
-		return err == nil && isPiPackageEntry(resolved)
+		if !nodeFlagOptions[name] {
+			return false
+		}
 	}
 	return false
+}
+
+func executableArg(args []string) (int, bool) {
+	executable := 0
+	if filepath.Base(args[0]) != "env" {
+		return executable, true
+	}
+	executable++
+	for executable < len(args) && strings.Contains(args[executable], "=") {
+		executable++
+	}
+	return executable, executable < len(args)
+}
+
+func isPiScriptPath(script string, resolve func(string) (string, error)) bool {
+	if isPiPackageEntry(script) {
+		return true
+	}
+	resolved, err := resolve(script)
+	return err == nil && isPiPackageEntry(resolved)
+}
+
+// nodeScriptArgument recovers Node's entry-script argument from ps command
+// text. ps flattens argv with spaces, so an unquoted npm prefix such as
+// "/Users/me/My Projects" cannot be reconstructed with strings.Fields. The
+// canonical package suffix gives us a bounded endpoint while the start stays
+// anchored to Node's first non-option argument. An earlier JavaScript entry
+// makes the reconstructed path require filesystem resolution so a generic
+// Node worker cannot smuggle a later Pi path in its ordinary arguments.
+func nodeScriptArgument(command string, fields []string, executable int) (script string, mustResolve, ok bool) {
+	tail, ok := commandTailAfterField(command, fields, executable)
+	if !ok {
+		return "", false, false
+	}
+	tail, ok = trimNodeRuntimeOptions(tail)
+	if !ok {
+		return "", false, false
+	}
+	if script, quoted := quotedNodeScript(tail); quoted {
+		return script, false, true
+	}
+	if strings.Contains(filepath.ToSlash(tail), piPackageEntrySuffix) {
+		return unquotedPiPackageEntry(tail)
+	}
+	return strings.Trim(strings.Fields(tail)[0], "'\""), false, true
+}
+
+func commandTailAfterField(command string, fields []string, fieldIndex int) (string, bool) {
+	offset := 0
+	for i := 0; i <= fieldIndex; i++ {
+		index := strings.Index(command[offset:], fields[i])
+		if index < 0 {
+			return "", false
+		}
+		offset += index + len(fields[i])
+	}
+	return strings.TrimSpace(command[offset:]), true
+}
+
+var nodeFlagOptions = map[string]bool{
+	"--abort-on-uncaught-exception":           true,
+	"--disallow-code-generation-from-strings": true,
+	"--enable-source-maps":                    true,
+	"--expose-gc":                             true,
+	"--frozen-intrinsics":                     true,
+	"--inspect":                               true,
+	"--inspect-brk":                           true,
+	"--inspect-wait":                          true,
+	"--jitless":                               true,
+	"--no-deprecation":                        true,
+	"--no-warnings":                           true,
+	"--openssl-legacy-provider":               true,
+	"--openssl-shared-config":                 true,
+	"--pending-deprecation":                   true,
+	"--preserve-symlinks":                     true,
+	"--preserve-symlinks-main":                true,
+	"--throw-deprecation":                     true,
+	"--trace-deprecation":                     true,
+	"--trace-exit":                            true,
+	"--trace-uncaught":                        true,
+	"--trace-warnings":                        true,
+	"--use-bundled-ca":                        true,
+	"--use-openssl-ca":                        true,
+	"--use-system-ca":                         true,
+	"--zero-fill-buffers":                     true,
+}
+
+var nodeValueOptions = map[string]bool{
+	"-C":                    true,
+	"-r":                    true,
+	"--conditions":          true,
+	"--experimental-loader": true,
+	"--import":              true,
+	"--inspect-port":        true,
+	"--debug-port":          true,
+	"--loader":              true,
+	"--require":             true,
+}
+
+var nodeNonScriptOptions = map[string]bool{
+	"-":                 true,
+	"-e":                true,
+	"-i":                true,
+	"-p":                true,
+	"--check":           true,
+	"--completion-bash": true,
+	"--eval":            true,
+	"--help":            true,
+	"--interactive":     true,
+	"--print":           true,
+	"--prof-process":    true,
+	"--run":             true,
+	"--version":         true,
+	"--v8-options":      true,
+}
+
+// trimNodeRuntimeOptions locates Node's script argument without allowing an
+// option value to masquerade as that script. Known boolean runtime flags are
+// skipped, known preload options consume their following value, evaluator and
+// other non-script modes are rejected, and unknown options fail closed.
+func trimNodeRuntimeOptions(tail string) (string, bool) {
+	for {
+		token, remainder, ok := commandToken(tail)
+		if !ok {
+			return "", false
+		}
+		if token == "--" {
+			return strings.TrimSpace(remainder), strings.TrimSpace(remainder) != ""
+		}
+		if !strings.HasPrefix(token, "-") {
+			return tail, true
+		}
+		name, _, hasInlineValue := strings.Cut(token, "=")
+		if nodeNonScriptOptions[name] {
+			return "", false
+		}
+		if hasInlineValue {
+			// The value is bound to this option, so it cannot be mistaken for
+			// the later script argument. This also safely supports V8 and
+			// future Node options that follow the --name=value convention.
+			tail = remainder
+			continue
+		}
+		if nodeValueOptions[name] {
+			remainder, ok = consumeNodeOptionValue(name, remainder)
+			if !ok {
+				return "", false
+			}
+			tail = remainder
+			continue
+		}
+		if !nodeFlagOptions[name] {
+			return "", false
+		}
+		tail = remainder
+	}
+}
+
+var nodeModulePathOptions = map[string]bool{
+	"-r":                    true,
+	"--experimental-loader": true,
+	"--import":              true,
+	"--loader":              true,
+	"--require":             true,
+}
+
+// consumeNodeOptionValue handles ps output that flattened a whitespace-bearing
+// preload path. Module-valued options have a bounded file suffix, so consume
+// through the last such suffix before the canonical Pi entrypoint; otherwise
+// retain Node's ordinary one-token semantics.
+func consumeNodeOptionValue(name, input string) (string, bool) {
+	if !nodeModulePathOptions[name] || input == "" || input[0] == '\'' || input[0] == '"' {
+		_, remainder, ok := commandToken(input)
+		return remainder, ok
+	}
+	limit := strings.Index(filepath.ToSlash(input), piPackageEntrySuffix)
+	if limit < 0 {
+		_, remainder, ok := commandToken(input)
+		return remainder, ok
+	}
+	valueEnd := -1
+	for _, suffix := range []string{".cjs", ".mjs", ".js", ".node"} {
+		search := input[:limit]
+		for offset := 0; offset < len(search); {
+			index := strings.Index(search[offset:], suffix)
+			if index < 0 {
+				break
+			}
+			end := offset + index + len(suffix)
+			if end == len(search) || search[end] == ' ' || search[end] == '\t' {
+				valueEnd = max(valueEnd, end)
+			}
+			offset = end
+		}
+	}
+	if valueEnd >= 0 {
+		return strings.TrimSpace(input[valueEnd:]), true
+	}
+	_, remainder, ok := commandToken(input)
+	return remainder, ok
+}
+
+func commandToken(input string) (token, remainder string, ok bool) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return "", "", false
+	}
+	if input[0] == '\'' || input[0] == '"' {
+		quote := input[0]
+		if end := strings.IndexByte(input[1:], quote); end >= 0 {
+			return input[1 : end+1], strings.TrimSpace(input[end+2:]), true
+		}
+		return "", "", false
+	}
+	if end := strings.IndexAny(input, " \t"); end >= 0 {
+		return input[:end], strings.TrimSpace(input[end:]), true
+	}
+	return input, "", true
+}
+
+func quotedNodeScript(tail string) (string, bool) {
+	if tail[0] == '\'' || tail[0] == '"' {
+		quote := tail[0]
+		if end := strings.IndexByte(tail[1:], quote); end >= 0 {
+			return tail[1 : end+1], true
+		}
+	}
+	return "", false
+}
+
+const piPackageEntrySuffix = "/@earendil-works/pi-coding-agent/dist/cli.js"
+
+func unquotedPiPackageEntry(tail string) (script string, mustResolve, ok bool) {
+	normalized := filepath.ToSlash(tail)
+	index := strings.Index(normalized, piPackageEntrySuffix)
+	end := index + len(piPackageEntrySuffix)
+	if index < 0 || (end < len(normalized) && normalized[end] != ' ' && normalized[end] != '\t') {
+		return "", false, false
+	}
+	candidate := strings.Trim(normalized[:end], "'\"")
+	if strings.HasPrefix(candidate, "/") || strings.HasPrefix(candidate, "./") || strings.HasPrefix(candidate, "../") {
+		return candidate, strings.ContainsAny(strings.TrimSpace(normalized[:index]), " \t"), true
+	}
+	return "", false, false
 }
 
 // IsPiProcessCommand is the pure process-identity contract used by BDD. A
@@ -353,7 +689,7 @@ func IsPiProcessCommand(command string) bool {
 
 func isPiPackageEntry(path string) bool {
 	normalized := filepath.ToSlash(filepath.Clean(path))
-	return strings.HasSuffix(normalized, "/@earendil-works/pi-coding-agent/dist/cli.js")
+	return strings.HasSuffix(normalized, piPackageEntrySuffix)
 }
 
 func piProcessInPaneTree(panePIDs []int, procs []procCommandEntry) bool {
@@ -376,7 +712,11 @@ func piProcessInPaneTree(panePIDs []int, procs []procCommandEntry) bool {
 		if !ok {
 			continue
 		}
-		if isPiProcessCommand(process.Command) {
+		if process.ArgvInspected {
+			if isPiProcessArgsWithResolver(process.Args, filepath.EvalSymlinks) {
+				return true
+			}
+		} else if isPiProcessCommand(process.Command) {
 			return true
 		}
 		queue = append(queue, children[pid]...)
@@ -493,8 +833,10 @@ func IsPiProcessInPaneTree(sessionName, socketPath string) (bool, error) {
 }
 
 // IsPiProcessInPaneTreeContext distinguishes Pi from other Node-hosted
-// harnesses by inspecting the pane commands and descendant argv values under
-// the caller's lifetime. A generic node comm is never sufficient proof.
+// harnesses by inspecting live descendant argv values under the caller's
+// lifetime. Tmux pane command metadata is deliberately not identity evidence:
+// remain-on-exit preserves it after the process has died. A generic node comm
+// is never sufficient proof either.
 func IsPiProcessInPaneTreeContext(parent context.Context, sessionName, socketPath string) (bool, error) {
 	ctx, cancel := context.WithTimeout(parent, livenessScanTimeout)
 	defer cancel()
@@ -502,16 +844,6 @@ func IsPiProcessInPaneTreeContext(parent context.Context, sessionName, socketPat
 	pids, err := listPanePIDs(ctx, sessionName, socketPath)
 	if err != nil || len(pids) == 0 {
 		return false, err
-	}
-	command := exec.CommandContext(ctx, "tmux", "-S", socketPath, "list-panes", "-s", "-t", FormatSessionTarget(NormalizeTmuxSessionName(sessionName)), "-F", "#{pane_current_command}\t#{pane_start_command}")
-	if output, commandErr := command.Output(); commandErr == nil {
-		for line := range strings.SplitSeq(string(output), "\n") {
-			for paneCommand := range strings.SplitSeq(line, "\t") {
-				if isPiProcessCommand(strings.TrimSpace(paneCommand)) {
-					return true, nil
-				}
-			}
-		}
 	}
 	procs, err := readProcessCommandTable(ctx)
 	if err != nil {

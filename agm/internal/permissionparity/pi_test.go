@@ -166,7 +166,7 @@ func TestEmbeddedPiExtensionDecisionParity(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(project, ".pi"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	const hooks = `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"printf '{\"hookSpecificOutput\":{\"additionalContext\":\"first guard ran\"}}\\n'","timeout":1},{"type":"command","command":"printf 'project guard rejected' >&2; exit 42","timeout":1}]}],"SessionStart":[{"hooks":[{"type":"command","command":"tee \"$PI_HOOK_CAPTURE\" >/dev/null","timeout":1}]}],"UserPromptSubmit":[{"hooks":[{"type":"command","command":"printf '{\"decision\":\"block\",\"reason\":\"prompt rejected\"}\\n'","timeout":1}]}],"PreCompact":[{"hooks":[{"type":"command","command":"printf '{\"hookSpecificOutput\":{\"permissionDecision\":\"deny\",\"additionalContext\":\"compaction rejected\"}}\\n'","timeout":1}]}],"Stop":[{"hooks":[{"type":"command","command":"printf '{\"decision\":\"block\",\"reason\":\"finish the regression\"}\\n'","timeout":1}]}],"SubagentStop":[{"hooks":[{"type":"command","command":"printf '{\"decision\":\"block\",\"reason\":\"review the delegated result\"}\\n'","timeout":1}]}]}}`
+	const hooks = `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"hookSpecificOutput\":{\"additionalContext\":\"first guard ran\"}}\\n'","timeout":1},{"type":"command","command":"cat >/dev/null; printf 'project guard rejected' >&2; exit 42","timeout":1}]}],"SessionStart":[{"hooks":[{"type":"command","command":"tee \"$PI_HOOK_CAPTURE\" >/dev/null","timeout":1}]}],"UserPromptSubmit":[{"hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"decision\":\"block\",\"reason\":\"prompt rejected\"}\\n'","timeout":1}]}],"PreCompact":[{"hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"hookSpecificOutput\":{\"permissionDecision\":\"deny\",\"additionalContext\":\"compaction rejected\"}}\\n'","timeout":1}]}],"Stop":[{"hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"decision\":\"block\",\"reason\":\"finish the regression\"}\\n'","timeout":1}]}],"SubagentStop":[{"hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"decision\":\"block\",\"reason\":\"review the delegated result\"}\\n'","timeout":1}]}]}}`
 	if err := os.WriteFile(filepath.Join(project, ".pi", "hooks.json"), []byte(hooks), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -175,6 +175,22 @@ func TestEmbeddedPiExtensionDecisionParity(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(malformedProject, ".pi", "hooks.json"), []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	timeoutProject := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(timeoutProject, ".pi"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const timeoutHooks = `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"hookSpecificOutput\":{\"additionalContext\":\"timeout context\"}}\\n'; printf 'timeout stderr' >&2; while :; do :; done","timeout":1}]}]}}`
+	if err := os.WriteFile(filepath.Join(timeoutProject, ".pi", "hooks.json"), []byte(timeoutHooks), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	nonzeroProject := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(nonzeroProject, ".pi"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const nonzeroHooks = `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"cat >/dev/null; printf '{\"hookSpecificOutput\":{\"additionalContext\":\"advisory only\"}}\\n'; exit 42","timeout":1}]}]}}`
+	if err := os.WriteFile(filepath.Join(nonzeroProject, ".pi", "hooks.json"), []byte(nonzeroHooks), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	capturePath := filepath.Join(t.TempDir(), "hook-input.json")
@@ -197,8 +213,16 @@ for (const [mode, allow, call, interactive, want] of cases) {
   const got = mod.decide(mode, allow, call, interactive).action;
   if (got !== want) throw new Error(mode + ": got " + got + ", want " + want);
 }
-const hookResult = mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git push"}}, process.argv[2]);
-if (!hookResult?.block || !hookResult.reason.includes("project guard rejected")) throw new Error("project hook did not fail closed");
+let hookResult;
+for (let attempt = 0; attempt < 3; attempt++) {
+  hookResult = mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git push"}}, process.argv[2]);
+  if (hookResult?.reason?.includes("project guard rejected") || !hookResult?.reason?.includes("ETIMEDOUT")) break;
+}
+if (!hookResult?.block || !hookResult.reason.includes("project guard rejected")) throw new Error("project hook did not fail closed with its declared reason: " + JSON.stringify(hookResult));
+const timeoutHook = mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git push"}}, process.argv[5]);
+if (!timeoutHook?.block || !timeoutHook.reason.includes("ETIMEDOUT") || !timeoutHook.reason.includes("timeout stderr") || timeoutHook.reason.includes("timeout context")) throw new Error("project hook timeout masked its execution failure: " + JSON.stringify(timeoutHook));
+const nonzeroHook = mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git push"}}, process.argv[6]);
+if (!nonzeroHook?.block || !nonzeroHook.reason.startsWith("PreToolUse hook exited with status 42") || !nonzeroHook.reason.includes("advisory only")) throw new Error("project hook nonzero status was masked by advisory context: " + JSON.stringify(nonzeroHook));
 const unmatchedHook = mod.runProjectHooks("PreToolUse", {toolName:"read", input:{path:"README.md"}}, process.argv[2]);
 if (unmatchedHook !== undefined) throw new Error("matcher ran for an unrelated tool");
 const malformedHook = mod.runProjectHooks("PreToolUse", {toolName:"bash", input:{command:"git status"}}, process.argv[3]);
@@ -249,7 +273,7 @@ if (userMessages.length !== 2 || userMessages[1][0] !== "review the delegated re
 await commands.get("agm-model")("openai/gpt-5.6-terra", ctx);
 if (selectedModel !== model || notifications.at(-1) !== "AGM model: openai/gpt-5.6-terra") throw new Error("model transition failed");
 `
-	command := exec.Command(node, "--input-type=module", "-e", script, filepath.Clean(path), filepath.Clean(project), filepath.Clean(malformedProject), filepath.Clean(capturePath))
+	command := exec.Command(node, "--input-type=module", "-e", script, filepath.Clean(path), filepath.Clean(project), filepath.Clean(malformedProject), filepath.Clean(capturePath), filepath.Clean(timeoutProject), filepath.Clean(nonzeroProject))
 	command.Env = append(os.Environ(),
 		"AGM_PI_PROJECT_DIR="+filepath.Clean(project),
 		"AGM_PI_PERMISSION_POLICY_FILE="+filepath.Clean(policyPath),

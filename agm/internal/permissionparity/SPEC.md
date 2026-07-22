@@ -47,6 +47,8 @@ harness can represent.
 
 **APP-15** When AGM approves a Pi working directory, the system shall treat project-resource trust, tool availability, per-call authorization, runtime isolation, and repository guardrails as independent enforcement layers.
 
+**APP-16** When a Pi project hook errors, times out, terminates by signal, or exits nonzero after emitting stderr or advisory context, the system shall fail closed and report the execution failure ahead of partial hook output instead of presenting that output as the rejection reason.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/permission_parity.feature`

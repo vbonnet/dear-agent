@@ -3,9 +3,13 @@ package tmux
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCheckPaneLivenessContextHonorsCallerCancellation(t *testing.T) {
@@ -23,6 +27,72 @@ func TestIsPiProcessInPaneTreeContextHonorsCallerCancellation(t *testing.T) {
 	_, err := IsPiProcessInPaneTreeContext(ctx, "canceled-pi-liveness", filepath.Join(t.TempDir(), "tmux.sock"))
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("IsPiProcessInPaneTreeContext() error = %v, want context.Canceled", err)
+	}
+}
+
+func TestInspectNodeProcessArgsHonorsCancellationDuringFinalRead(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	entries := []procCommandEntry{{PID: 42, Command: "node /tmp/worker.js"}}
+	err := inspectNodeProcessArgs(ctx, entries, func(pid int) ([]string, error) {
+		if pid != 42 {
+			t.Fatalf("read argv pid = %d, want 42", pid)
+		}
+		cancel()
+		return []string{"node", "/tmp/worker.js"}, nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("inspectNodeProcessArgs() error = %v, want context.Canceled", err)
+	}
+	if entries[0].Args != nil {
+		t.Fatalf("argv was committed after cancellation: %q", entries[0].Args)
+	}
+}
+
+func TestIsPiProcessInPaneTreeRejectsDeadPaneWithPiStartCommand(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping tmux integration test in short mode")
+	}
+	skipIfNoTmux(t)
+	socketPath, cleanup := setupTestSocket(t)
+	defer cleanup()
+
+	tempDir := t.TempDir()
+	piPath := filepath.Join(tempDir, "pi")
+	if err := os.Symlink("/usr/bin/false", piPath); err != nil {
+		t.Fatalf("create fake Pi executable: %v", err)
+	}
+	if output, err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", "dead-pi-seed", "sleep", "30").CombinedOutput(); err != nil {
+		t.Fatalf("create tmux seed session: %v: %s", err, output)
+	}
+	if output, err := exec.Command("tmux", "-S", socketPath, "set-option", "-g", "remain-on-exit", "on").CombinedOutput(); err != nil {
+		t.Fatalf("set global remain-on-exit: %v: %s", err, output)
+	}
+	const sessionName = "dead-pi-start-command"
+	if output, err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", sessionName, piPath).CombinedOutput(); err != nil {
+		t.Fatalf("create fake Pi session: %v: %s", err, output)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	var paneState string
+	for time.Now().Before(deadline) {
+		output, err := exec.Command("tmux", "-S", socketPath, "list-panes", "-t", sessionName, "-F", "#{pane_dead}\t#{pane_start_command}").Output()
+		if err == nil {
+			paneState = strings.TrimSpace(string(output))
+			if strings.HasPrefix(paneState, "1\t") {
+				break
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !strings.HasPrefix(paneState, "1\t") || !strings.Contains(paneState, piPath) {
+		t.Fatalf("pane did not retain the dead Pi start command: %q", paneState)
+	}
+	running, err := IsPiProcessInPaneTreeContext(t.Context(), sessionName, socketPath)
+	if err != nil {
+		t.Fatalf("Pi liveness scan: %v", err)
+	}
+	if running {
+		t.Fatal("dead pane's retained Pi start command was accepted as live Pi")
 	}
 }
 
@@ -293,8 +363,18 @@ func TestPiProcessCommandRequiresPiSpecificIdentity(t *testing.T) {
 		{command: "pi --session-id abc", want: true},
 		{command: "/opt/homebrew/bin/pi --session-id abc", want: true},
 		{command: "/opt/homebrew/bin/node /opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js --session-id abc", want: true},
+		{command: "node --enable-source-maps /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", want: true},
+		{command: "node --max-old-space-size=1024 --inspect=127.0.0.1:0 /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", want: true},
+		{command: "node --preserve-symlinks --require /tmp/register.cjs /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", want: true},
+		{command: "node --require /tmp/My Projects/register.cjs /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", want: true},
+		{command: "node --require /tmp/support.js Files/register.js /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", want: true},
+		{command: "/opt/homebrew/bin/node '/Users/me/My Projects/node_modules/@earendil-works/pi-coding-agent/dist/cli.js' --session-id quoted", want: true},
 		{command: "env PI_OFFLINE=1 node /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", want: true},
 		{command: "node /usr/local/lib/node_modules/@openai/codex/dist/cli.js"},
+		{command: "node /tmp/worker.js /Users/me/My Projects/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"},
+		{command: "node /tmp/worker /Users/me/My Projects/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"},
+		{command: "node --require /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js /tmp/worker.js"},
+		{command: "node --future-option /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"},
 		{command: "node /tmp/pi"},
 		{command: "node -e console.log('/opt/homebrew/bin/pi')"},
 		{command: "zsh -l"},
@@ -303,6 +383,61 @@ func TestPiProcessCommandRequiresPiSpecificIdentity(t *testing.T) {
 		if got := isPiProcessCommand(test.command); got != test.want {
 			t.Errorf("isPiProcessCommand(%q) = %v, want %v", test.command, got, test.want)
 		}
+	}
+}
+
+func TestPiProcessCommandAcceptsExistingUnquotedSpacedPackageEntry(t *testing.T) {
+	entry := filepath.Join(t.TempDir(), "My Projects", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js")
+	if err := os.MkdirAll(filepath.Dir(entry), 0o755); err != nil {
+		t.Fatalf("create spaced Pi package path: %v", err)
+	}
+	if err := os.WriteFile(entry, []byte("// Pi test entrypoint\n"), 0o644); err != nil {
+		t.Fatalf("write spaced Pi package entrypoint: %v", err)
+	}
+	if !isPiProcessCommand("node --enable-source-maps " + entry + " --session-id spaced") {
+		t.Fatal("existing unquoted Pi package path containing spaces was rejected")
+	}
+	if isPiProcessCommand("node /tmp/worker " + entry) {
+		t.Fatal("unrelated extensionless Node entrypoint smuggled a later Pi path")
+	}
+}
+
+func TestPiProcessArgsPreserveSpacedScriptAndOptionValues(t *testing.T) {
+	piEntry := "/Users/me/My Projects/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "spaced Pi script", args: []string{"node", piEntry}, want: true},
+		{name: "spaced preload", args: []string{"node", "--require", "/tmp/My Projects/register.cjs", piEntry}, want: true},
+		{name: "Pi is only preload value", args: []string{"node", "--require", piEntry, "/tmp/worker.js"}},
+		{name: "runtime flags", args: []string{"node", "--enable-source-maps", "--inspect=127.0.0.1:0", piEntry}, want: true},
+		{name: "env assignments", args: []string{"env", "PI_OFFLINE=1", "NODE_NO_WARNINGS=1", "node", piEntry}, want: true},
+		{name: "env without executable", args: []string{"env", "PI_OFFLINE=1"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isPiProcessArgsWithResolver(test.args, filepath.EvalSymlinks); got != test.want {
+				t.Fatalf("isPiProcessArgsWithResolver(%q) = %v, want %v", test.args, got, test.want)
+			}
+		})
+	}
+}
+
+func TestProcessCommandExecutableFindsNodeThroughEnv(t *testing.T) {
+	if got := processCommandExecutable("env PI_OFFLINE=1 /opt/homebrew/bin/node /tmp/pi.js"); got != "node" {
+		t.Fatalf("processCommandExecutable through env = %q, want node", got)
+	}
+}
+
+func TestReadProcessArgvCurrentProcess(t *testing.T) {
+	args, err := readProcessArgv(os.Getpid())
+	if err != nil {
+		t.Fatalf("read current process argv: %v", err)
+	}
+	if !reflect.DeepEqual(args, os.Args) {
+		t.Fatalf("current process argv = %q, want %q", args, os.Args)
 	}
 }
 
@@ -334,5 +469,41 @@ func TestParsePSCommandTableAndPiProcessTree(t *testing.T) {
 	}
 	if piProcessInPaneTree([]int{300}, procs) {
 		t.Fatal("generic Node process was accepted as Pi")
+	}
+}
+
+func TestPiProcessTreeUsesLosslessNodeArgvAndFailsClosed(t *testing.T) {
+	piEntry := "/Users/me/My Projects/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
+	procs := []procCommandEntry{
+		{PID: 100, PPID: 1, Command: "/bin/zsh -l"},
+		{
+			PID:           200,
+			PPID:          100,
+			Command:       "node --require /tmp/My Projects/register.cjs " + piEntry,
+			Args:          []string{"node", "--require", "/tmp/My Projects/register.cjs", piEntry},
+			ArgvInspected: true,
+		},
+		{
+			PID:           300,
+			PPID:          1,
+			Command:       "node " + piEntry,
+			Args:          []string{"node", "/tmp/worker.js", piEntry},
+			ArgvInspected: true,
+		},
+		{
+			PID:           400,
+			PPID:          1,
+			Command:       "node " + piEntry,
+			ArgvInspected: true,
+		},
+	}
+	if !piProcessInPaneTree([]int{100}, procs) {
+		t.Fatal("lossless Pi argv beneath the pane shell was rejected")
+	}
+	if piProcessInPaneTree([]int{300}, procs) {
+		t.Fatal("flattened command text overrode the lossless non-Pi argv")
+	}
+	if piProcessInPaneTree([]int{400}, procs) {
+		t.Fatal("failed lossless argv inspection fell back to flattened command text")
 	}
 }

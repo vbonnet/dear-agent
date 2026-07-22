@@ -84,7 +84,7 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-38** When AGM waits to send to Pi, the system shall require the latest managed `AGM <mode>/ready` status, reject permission or selection overlays, and not accept stale readiness that precedes a newer working status.
 
-**TMUX-39** When AGM verifies Pi liveness, the system shall scan the pane process tree for Pi-specific executable identity, including the canonical npm Node entrypoint, and shall not accept tmux existence, a generic shell prompt, or a generic `node` process as proof.
+**TMUX-39** When AGM verifies Pi liveness, the system shall scan the live pane process tree with lossless operating-system argv for Pi-specific executable identity, including the canonical npm Node entrypoint when its absolute package path or a supported preload path contains whitespace, and shall not accept tmux existence, retained pane start-command metadata, a generic shell prompt, a generic `node` process, an option value, or an unrelated Node script carrying a later Pi-looking argument as proof.
 
 **TMUX-40** When AGM waits for a newly launched Pi process, the system shall accept only a managed ready marker containing that launch's unique ID, reject stale ready markers from earlier pane history, and fail closed when Pi-specific process liveness cannot be proved.
 
