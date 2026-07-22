@@ -156,6 +156,10 @@ presence marker for that empty native-default choice, so a later shell cannot
 silently replace it; only legacy metadata written before the marker existed
 uses the current caller variable as a cold-resume and status compatibility
 fallback.
+Direct adapter callers may provide `PI_CODING_AGENT_DIR` in the session
+environment. Its presence, including an explicit empty value, takes precedence
+over the adapter process environment before the same validation and persistence
+rules are applied.
 For models declared in Pi's `models.json`, AGM reads only the bounded model ID,
 `contextWindow`, and `modelOverrides` data: it never evaluates credential or
 command fields. A custom model with an omitted window uses Pi's 128000-token
