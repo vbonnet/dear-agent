@@ -77,10 +77,13 @@ func (rb *ringBuffer) ReadLast(n int) []string {
 	if n > rb.count {
 		n = rb.count
 	}
-	result := make([]string, n)
+	// Allocate from the stored count, which is maintained by the bounded ring
+	// buffer, rather than from the caller-controlled request. ReadAll follows
+	// the same bounded-allocation pattern.
+	result := make([]string, rb.count)
 	start := (rb.head - n + rb.size) % rb.size
 	for i := 0; i < n; i++ {
 		result[i] = rb.items[(start+i)%rb.size]
 	}
-	return result
+	return result[:n]
 }
