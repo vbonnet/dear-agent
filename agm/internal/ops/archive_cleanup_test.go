@@ -344,6 +344,41 @@ func TestCleanupAfterArchive_WithRealGitWorktree(t *testing.T) {
 	}
 }
 
+func TestCleanupAfterArchive_PreservesPrimaryCheckout(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found in PATH")
+	}
+
+	repoDir := t.TempDir()
+	runGit(t, repoDir, "init", "-b", "main")
+	runGit(t, repoDir, "commit", "--allow-empty", "-m", "init")
+	runGit(t, repoDir, "branch", "primary-session")
+
+	result := CleanupAfterArchive(
+		"primary-session-id", "primary-session",
+		repoDir, repoDir, "", "primary-session",
+		false,
+	)
+
+	if !result.PrimaryWorktreeKept {
+		t.Fatal("PrimaryWorktreeKept should prove the primary checkout was classified and preserved")
+	}
+	if result.WorktreesRemoved != 0 {
+		t.Fatalf("WorktreesRemoved = %d, want 0 for primary checkout", result.WorktreesRemoved)
+	}
+	if _, err := os.Stat(repoDir); err != nil {
+		t.Fatalf("primary checkout was not preserved: %v", err)
+	}
+	cmd := exec.Command("git", "-C", repoDir, "branch", "--list", "primary-session")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("list preserved session-named branch: %v\n%s", err, output)
+	}
+	if strings.TrimSpace(string(output)) == "" {
+		t.Fatal("session-named branch was deleted even though the session did not own a linked worktree")
+	}
+}
+
 // runGit is a test helper that runs a git command in the given directory.
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
