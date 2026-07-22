@@ -147,7 +147,7 @@ func TestBusySingleSendReachesAtomicDeliveryForForceAndAutonomous(t *testing.T) 
 
 func TestAPIForceAndAutonomousPreservePreliminaryDeliveryState(t *testing.T) {
 	previousDelegate := msgDelegate
-	msgDelegate = false
+	msgDelegate = true
 	t.Cleanup(func() { msgDelegate = previousDelegate })
 
 	for _, policyCase := range []struct {
@@ -157,9 +157,10 @@ func TestAPIForceAndAutonomousPreservePreliminaryDeliveryState(t *testing.T) {
 		{name: "force", policy: cliInputDeliveryPolicy{Force: true}},
 		{name: "autonomous", policy: cliInputDeliveryPolicy{Autonomous: true}},
 	} {
-		for _, canReceive := range []state.CanReceive{state.CanReceiveQueue, state.CanReceiveNo, state.CanReceiveNotFound} {
+		for _, canReceive := range []state.CanReceive{state.CanReceiveQueue, state.CanReceiveNo, state.CanReceiveOverlay, state.CanReceiveNotFound} {
 			t.Run(policyCase.name+"/"+string(canReceive), func(t *testing.T) {
-				t.Setenv("HOME", t.TempDir())
+				homeDir := t.TempDir()
+				t.Setenv("HOME", homeDir)
 				directCalls := 0
 				err := dispatchSendByCanReceiveWithDirect(
 					t.Context(), "api-session", "api-session-tmux", "sender", "message-id",
@@ -172,11 +173,14 @@ func TestAPIForceAndAutonomousPreservePreliminaryDeliveryState(t *testing.T) {
 				if err == nil {
 					t.Fatalf("unavailable API delivery state %s error = nil", canReceive)
 				}
-				if canReceive != state.CanReceiveNotFound && !strings.Contains(err.Error(), "refusing direct delivery") {
-					t.Fatalf("API delivery state %s error = %v, want fail-closed queue error", canReceive, err)
+				if !strings.Contains(err.Error(), "deferred API delivery is unsupported") {
+					t.Fatalf("API delivery state %s error = %v, want unsupported deferred-delivery error", canReceive, err)
 				}
 				if directCalls != 0 {
 					t.Fatalf("API delivery state %s direct calls = %d, want 0", canReceive, directCalls)
+				}
+				if _, statErr := os.Stat(filepath.Join(homeDir, ".agm", "delegations")); !os.IsNotExist(statErr) {
+					t.Fatalf("failed API delivery state %s created delegation state: %v", canReceive, statErr)
 				}
 			})
 		}

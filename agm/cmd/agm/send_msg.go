@@ -578,6 +578,9 @@ func dispatchSendByCanReceiveWithDirect(ctx context.Context, recipientSession, t
 		recordDelegation(senderName, recipientSession, messageID, message)
 		return nil
 	}
+	if !sharedAtomicInput && canReceive != state.CanReceiveYes {
+		return fmt.Errorf("API session %q is not ready for direct delivery (state %s); deferred API delivery is unsupported", recipientSession, canReceive)
+	}
 
 	switch canReceive {
 	case state.CanReceiveYes:
@@ -589,15 +592,12 @@ func dispatchSendByCanReceiveWithDirect(ctx context.Context, recipientSession, t
 	case state.CanReceiveNotFound:
 		return fmt.Errorf("session '%s' tmux session disappeared during delivery", recipientSession)
 	case state.CanReceiveQueue:
-		if err := queueMessage(ctx, recipientSession, senderName, messageID, formattedMessage, currentState, sharedAtomicInput); err != nil {
+		if err := queueMessage(ctx, recipientSession, senderName, messageID, formattedMessage, currentState); err != nil {
 			return err
 		}
 		recordDelegation(senderName, recipientSession, messageID, message)
 		return nil
 	case state.CanReceiveOverlay:
-		if !sharedAtomicInput {
-			return queueMessage(ctx, recipientSession, senderName, messageID, formattedMessage, currentState, false)
-		}
 		fmt.Fprintf(os.Stderr, "⚠ Session '%s' has an active dismissible overlay — attempting auto-recovery\n", recipientSession)
 		if err := dismissOverlayAndDeliver(ctx, tmuxName, recipientSession, senderName, messageID, formattedMessage, sessionSendPromptFile, adapter); err != nil {
 			return err
@@ -606,10 +606,10 @@ func dispatchSendByCanReceiveWithDirect(ctx context.Context, recipientSession, t
 		return nil
 	case state.CanReceiveNo:
 		fmt.Fprintf(os.Stderr, "⚠ Session '%s' has active permission prompt — message queued for delivery after resolution\n", recipientSession)
-		return queueMessage(ctx, recipientSession, senderName, messageID, formattedMessage, currentState, sharedAtomicInput)
+		return queueMessage(ctx, recipientSession, senderName, messageID, formattedMessage, currentState)
 	default:
 		fmt.Fprintf(os.Stderr, "Warning: unknown CanReceive state '%s', queueing\n", canReceive)
-		if err := queueMessage(ctx, recipientSession, senderName, messageID, formattedMessage, currentState, sharedAtomicInput); err != nil {
+		if err := queueMessage(ctx, recipientSession, senderName, messageID, formattedMessage, currentState); err != nil {
 			return err
 		}
 		recordDelegation(senderName, recipientSession, messageID, message)
@@ -618,13 +618,10 @@ func dispatchSendByCanReceiveWithDirect(ctx context.Context, recipientSession, t
 }
 
 // queueMessage queues a message for later delivery (non-disruptive default)
-func queueMessage(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, currentState string, allowVerifiedDirectFallback bool) error {
+func queueMessage(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, currentState string) error {
 	// Create message queue
 	queue, err := messages.NewMessageQueue()
 	if err != nil {
-		if !allowVerifiedDirectFallback {
-			return fmt.Errorf("message queue unavailable for unverified API delivery to %q: %w", recipientSession, err)
-		}
 		// CLI fallback re-enters shared atomic exact-pane readiness.
 		fmt.Fprintf(os.Stderr, "Warning: failed to create message queue: %v\n", err)
 		fallbackAdapter, _ := getStorage()
@@ -640,13 +637,9 @@ func queueMessage(ctx context.Context, recipientSession, senderName, messageID, 
 	pidFile := filepath.Join(homeDir, ".agm", "daemon.pid")
 	daemonRunning := daemon.IsRunning(pidFile)
 
-	// Only CLI delivery may fall back when the daemon is absent because that
-	// fallback re-enters shared atomic readiness. API delivery has no equivalent
-	// proof and must reject rather than bypass its preliminary state.
+	// Only CLI delivery reaches this queue path; daemon-absent fallback re-enters
+	// shared atomic readiness before sending any replacement input.
 	if !daemonRunning {
-		if !allowVerifiedDirectFallback {
-			return fmt.Errorf("message queue daemon is not running; refusing direct delivery to unverified API session %q", recipientSession)
-		}
 		fmt.Fprintf(os.Stderr, "⚠ Daemon not running — falling back to direct tmux delivery for '%s'\n", recipientSession)
 		fallbackAdapter, _ := getStorage()
 		if fallbackAdapter != nil {
@@ -1189,12 +1182,12 @@ func dismissOverlayAndDeliver(ctx context.Context, tmuxName, recipientSession, s
 		}
 		// Give up — queue the message
 		fmt.Fprintf(os.Stderr, "⚠ Could not dismiss overlay on '%s' (state: %s) — queueing message\n", recipientSession, canReceive)
-		return queueMessage(ctx, recipientSession, senderName, messageID, formattedMessage, "BACKGROUND_TASKS", true)
+		return queueMessage(ctx, recipientSession, senderName, messageID, formattedMessage, "BACKGROUND_TASKS")
 
 	default:
 		// Overlay dismissed but session is in unexpected state — queue for safety
 		fmt.Fprintf(os.Stderr, "⚠ Overlay dismissed but session '%s' is %s — queueing message\n", recipientSession, canReceive)
-		return queueMessage(ctx, recipientSession, senderName, messageID, formattedMessage, string(canReceive), true)
+		return queueMessage(ctx, recipientSession, senderName, messageID, formattedMessage, string(canReceive))
 	}
 }
 
