@@ -64,6 +64,7 @@ func TestDetectContextFromManifestOrLogUsesTrustedPiCustomCatalog(t *testing.T) 
 
 	usage, err := DetectContextFromManifestOrLog(&manifest.Manifest{Pi: &manifest.Pi{
 		SessionID: "pi-custom-context", SessionDir: dir, TranscriptPath: path,
+		CodingAgentDir: catalogDir, CodingAgentDirSet: true,
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -76,6 +77,52 @@ func TestDetectContextFromManifestOrLogUsesTrustedPiCustomCatalog(t *testing.T) 
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("models.json apiKey command was evaluated: %v", err)
+	}
+}
+
+func TestDetectContextFromManifestOrLogUsesPersistedPiCatalogInsteadOfCallerEnvironment(t *testing.T) {
+	persistedDir := t.TempDir()
+	writePiModelCatalogFixture(t, persistedDir, `{"providers":{"ollama":{"models":[{"id":"qwen2.5-coder:7b","contextWindow":8192}]}}}`)
+	callerDir := t.TempDir()
+	writePiModelCatalogFixture(t, callerDir, `{"providers":{"ollama":{"models":[{"id":"qwen2.5-coder:7b","contextWindow":4096}]}}}`)
+	t.Setenv("PI_CODING_AGENT_DIR", callerDir)
+
+	sessionDir := t.TempDir()
+	transcript := filepath.Join(sessionDir, "pi.jsonl")
+	content := `{"type":"session","id":"pi-persisted-catalog","cwd":"/work"}` + "\n" +
+		`{"type":"message","timestamp":"2026-07-22T10:11:52Z","message":{"role":"assistant","provider":"ollama","model":"qwen2.5-coder:7b","usage":{"input":1000,"output":1}}}` + "\n"
+	if err := os.WriteFile(transcript, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := &manifest.Manifest{Pi: &manifest.Pi{
+		SessionID: "pi-persisted-catalog", SessionDir: sessionDir,
+		TranscriptPath: transcript, CodingAgentDir: persistedDir, CodingAgentDirSet: true,
+	}}
+	usage, err := DetectContextFromManifestOrLog(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.TotalTokens != 8192 {
+		t.Fatalf("persisted Pi catalog context = %d, want 8192", usage.TotalTokens)
+	}
+
+	t.Setenv("HOME", t.TempDir())
+	m.Pi.CodingAgentDir = ""
+	usage, err = DetectContextFromManifestOrLog(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.TotalTokens != 200000 {
+		t.Fatalf("default Pi catalog context inherited caller environment: %d", usage.TotalTokens)
+	}
+
+	m.Pi.CodingAgentDirSet = false
+	usage, err = DetectContextFromManifestOrLog(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.TotalTokens != 4096 {
+		t.Fatalf("legacy Pi catalog compatibility context = %d, want 4096", usage.TotalTokens)
 	}
 }
 
@@ -265,7 +312,7 @@ func TestPiConfiguredModelContextWindowTrustBoundaries(t *testing.T) {
 			dir := t.TempDir()
 			t.Setenv("PI_CODING_AGENT_DIR", dir)
 			test.prepare(t, dir)
-			if got := piModelContextWindow(test.model); got != test.want {
+			if got := piModelContextWindow(test.model, dir); got != test.want {
 				t.Fatalf("piModelContextWindow(%q) = %d, want %d", test.model, got, test.want)
 			}
 		})
@@ -313,7 +360,7 @@ func TestPiModelContextWindowMatchesNativeCatalog(t *testing.T) {
 		"custom/model":                                 200000,
 	}
 	for model, want := range tests {
-		if got := piModelContextWindow(model); got != want {
+		if got := piModelContextWindow(model, os.Getenv("PI_CODING_AGENT_DIR")); got != want {
 			t.Errorf("piModelContextWindow(%q) = %d, want %d", model, got, want)
 		}
 	}

@@ -28,6 +28,8 @@
 
 **LAUNCH-PARITY-12** When AGM constructs a Pi create or resume command, the system shall pass a unique launch ID to the managed extension without reusing the persistent native session ID as process-readiness identity.
 
+**LAUNCH-PARITY-13** When AGM constructs a Pi create or cold-resume command, the canonical builder shall unset any inherited `PI_CODING_AGENT_DIR` from the tmux server and, when the session has an explicit validated coding-agent directory, shall then safely quote and assign that persisted path to the Pi process; when the directory is absent, the cleared environment shall preserve Pi's native default discovery.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

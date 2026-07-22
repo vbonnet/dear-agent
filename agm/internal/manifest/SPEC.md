@@ -25,6 +25,8 @@ cross-harness session lifecycle state.
 
 **MAN-07** When a pure OpenAI API session is registered, the manifest shall preserve its session-store locator and non-secret backward-compatible client fallback settings without storing an API credential.
 
+**MAN-08** When AGM creates or imports a Pi session, the manifest and storage adapter shall preserve both the validated coding-agent directory and an explicit presence marker, including when the directory is intentionally empty for Pi's native default, so cold resume can distinguish new session state from legacy metadata and does not depend on the invoking shell or tmux server environment.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

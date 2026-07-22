@@ -26,6 +26,8 @@ this deep module instead of reconstructing Pi paths or selecting recent files.
 
 **PI-SESSION-08** When AGM imports, reports usage for, or cold-resumes Pi history, the system shall preserve the native provider separately from the complete opaque model ID even when that model ID begins with the provider name, and shall leave the override empty when the transcript establishes no model.
 
+**PI-SESSION-09** When a Pi coding-agent directory is supplied for create, import, or cold resume, the system shall normalize it to an absolute path, require an existing non-symlink directory, and preserve the validated path as native session metadata; an explicitly present per-session adapter value shall take precedence over the adapter process environment, create and import shall persist field presence when no directory is supplied so Pi's native default remains intentional, and metadata that genuinely predates that marker shall retain the invoking environment fallback for compatibility.
+
 ## Traceability
 
 - Package tests: `agm/internal/pisession/session_test.go`

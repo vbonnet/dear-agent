@@ -52,6 +52,9 @@ func RegisterPiCustomContextSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^a managed Pi transcript omits its provider for model "([^"]*)"$`, managedPiTranscriptOmitsProvider)
 	ctx.Step(`^the Pi custom model catalog declares an (\d+) token window with an inert credential command$`, piCatalogDeclaresInertWindow)
 	ctx.Step(`^the Pi custom model catalog declares an integral exponent context window$`, piCatalogDeclaresIntegralExponentWindow)
+	ctx.Step(`^the status caller Pi catalog declares a (\d+) token window$`, statusCallerPiCatalogDeclaresWindow)
+	ctx.Step(`^the Pi session persists native default configuration$`, piSessionPersistsNativeDefaultConfiguration)
+	ctx.Step(`^the Pi session predates configuration presence metadata$`, piSessionPredatesConfigurationPresenceMetadata)
 	ctx.Step(`^the Pi custom model catalog for provider "([^"]*)" declares model "([^"]*)" with an (\d+) token window$`, piCatalogDeclaresModelWindow)
 	ctx.Step(`^the Pi custom model catalog declares a null context window$`, piCatalogDeclaresNullWindow)
 	ctx.Step(`^two Pi catalog providers declare "([^"]*)" with the same (\d+) token window$`, piCatalogDeclaresEqualProviderDuplicates)
@@ -82,6 +85,7 @@ func managedPiTranscriptUsesModel(ctx context.Context, provider, model string) e
 	}
 	state.manifest = &manifest.Manifest{Pi: &manifest.Pi{
 		SessionID: "pi-bdd-context", SessionDir: sessionDir, TranscriptPath: transcriptPath,
+		CodingAgentDir: state.root, CodingAgentDirSet: true,
 	}}
 	return nil
 }
@@ -106,6 +110,7 @@ func managedPiTranscriptOmitsProvider(ctx context.Context, model string) error {
 	}
 	state.manifest = &manifest.Manifest{Pi: &manifest.Pi{
 		SessionID: "pi-bdd-context", SessionDir: sessionDir, TranscriptPath: transcriptPath,
+		CodingAgentDir: state.root, CodingAgentDirSet: true,
 	}}
 	return nil
 }
@@ -141,6 +146,42 @@ func piCatalogDeclaresIntegralExponentWindow(ctx context.Context) error {
 	}
 	catalog := `{"providers":{"ollama":{"models":[{"id":"qwen2.5-coder:7b","contextWindow":8.192e3}]}}}`
 	return os.WriteFile(filepath.Join(state.root, "models.json"), []byte(catalog), 0o600)
+}
+
+func statusCallerPiCatalogDeclaresWindow(ctx context.Context, window int) error {
+	state, err := getPiCustomContextState(ctx)
+	if err != nil {
+		return err
+	}
+	callerDir := filepath.Join(state.root, "status-caller")
+	if err := os.Mkdir(callerDir, 0o700); err != nil {
+		return err
+	}
+	catalog := fmt.Sprintf(`{"providers":{"ollama":{"models":[{"id":"qwen2.5-coder:7b","contextWindow":%d}]}}}`, window)
+	if err := os.WriteFile(filepath.Join(callerDir, "models.json"), []byte(catalog), 0o600); err != nil {
+		return err
+	}
+	return os.Setenv("PI_CODING_AGENT_DIR", callerDir)
+}
+
+func piSessionPersistsNativeDefaultConfiguration(ctx context.Context) error {
+	state, err := getPiCustomContextState(ctx)
+	if err != nil {
+		return err
+	}
+	state.manifest.Pi.CodingAgentDir = ""
+	state.manifest.Pi.CodingAgentDirSet = true
+	return nil
+}
+
+func piSessionPredatesConfigurationPresenceMetadata(ctx context.Context) error {
+	state, err := getPiCustomContextState(ctx)
+	if err != nil {
+		return err
+	}
+	state.manifest.Pi.CodingAgentDir = ""
+	state.manifest.Pi.CodingAgentDirSet = false
+	return nil
 }
 
 func piCatalogDeclaresModelWindow(ctx context.Context, provider, model string, window int) error {

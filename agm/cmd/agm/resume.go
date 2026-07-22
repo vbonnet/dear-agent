@@ -1237,10 +1237,21 @@ func buildPiResumeCommand(m *manifest.Manifest, health *HealthStatus, launchID s
 	if model == "" && !hasTranscript {
 		model = agent.HarnessDefaults["pi-cli"]
 	}
+	codingAgentDir := pisession.ResolveCodingAgentDir(
+		m.Pi.CodingAgentDir, m.Pi.CodingAgentDirSet,
+		os.Getenv("PI_CODING_AGENT_DIR"),
+	)
+	codingAgentDir, err = pisession.ValidateCodingAgentDir(codingAgentDir)
+	if err != nil {
+		return "", err
+	}
+	piMeta := *m.Pi
+	piMeta.CodingAgentDir = codingAgentDir
+	piMeta.CodingAgentDirSet = true
 	return ops.BuildHarnessLaunchCommand(ops.HarnessLaunchSpec{
 		Harness: "pi-cli", Model: model, SessionName: health.TmuxSessionName,
 		SessionID: m.Pi.SessionID, WorkDir: health.WorktreePath,
-		PermissionMode: m.PermissionMode, Pi: m.Pi,
+		PermissionMode: m.PermissionMode, Pi: &piMeta,
 		PiLaunchID:  launchID,
 		PiExtension: extensionPath, PiPolicyJSON: policyJSON, PiPolicyFile: policyFile,
 	}).Command, nil
