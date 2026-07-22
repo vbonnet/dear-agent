@@ -20,8 +20,12 @@ Cached:          8901234 kB
 		t.Fatal(err)
 	}
 
+	expectedTotal := uint64(32456780) * 1024
+	expectedAvail := uint64(16228390) * 1024
 	d := &Detector{
-		procMeminfo:     meminfo,
+		memoryInfoFunc: func() (uint64, uint64, error) {
+			return readMeminfo(meminfo)
+		},
 		cpuCountFunc:    func() int { return 8 },
 		claudeCountFunc: func() (int, error) { return 3, nil },
 	}
@@ -32,12 +36,10 @@ Cached:          8901234 kB
 	}
 
 	// MemTotal: 32456780 kB = 32456780 * 1024 bytes
-	expectedTotal := uint64(32456780) * 1024
 	if info.TotalRAMBytes != expectedTotal {
 		t.Errorf("TotalRAMBytes = %d, want %d", info.TotalRAMBytes, expectedTotal)
 	}
 
-	expectedAvail := uint64(16228390) * 1024
 	if info.AvailableRAMBytes != expectedAvail {
 		t.Errorf("AvailableRAMBytes = %d, want %d", info.AvailableRAMBytes, expectedAvail)
 	}
@@ -57,13 +59,7 @@ func TestDetector_MissingMemTotal(t *testing.T) {
 `
 	os.WriteFile(meminfo, []byte(content), 0644)
 
-	d := &Detector{
-		procMeminfo:     meminfo,
-		cpuCountFunc:    func() int { return 4 },
-		claudeCountFunc: func() (int, error) { return 0, nil },
-	}
-
-	_, err := d.Detect()
+	_, _, err := readMeminfo(meminfo)
 	if err == nil {
 		t.Fatal("expected error for missing MemTotal")
 	}

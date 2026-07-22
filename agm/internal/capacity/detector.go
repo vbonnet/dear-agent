@@ -14,7 +14,7 @@ import (
 // SystemInfo holds detected hardware and process information.
 type SystemInfo struct {
 	TotalRAMBytes     uint64 // Total system RAM in bytes
-	AvailableRAMBytes uint64 // Available RAM in bytes (MemAvailable from /proc/meminfo)
+	AvailableRAMBytes uint64 // Available RAM in bytes from the platform-native probe
 	NumCPUs           int    // Number of logical CPU cores
 	ClaudeProcesses   int    // Number of running Claude processes
 }
@@ -47,7 +47,7 @@ func (s SystemInfo) RAMUsagePercent() float64 {
 
 // Detector reads system resource information.
 type Detector struct {
-	procMeminfo     string // path to /proc/meminfo (overridable for testing)
+	memoryInfoFunc  func() (total, available uint64, err error)
 	cpuCountFunc    func() int
 	claudeCountFunc func() (int, error)
 }
@@ -55,7 +55,7 @@ type Detector struct {
 // NewDetector creates a Detector using real system sources.
 func NewDetector() *Detector {
 	return &Detector{
-		procMeminfo:     "/proc/meminfo",
+		memoryInfoFunc:  readPlatformMemoryInfo,
 		cpuCountFunc:    runtime.NumCPU,
 		claudeCountFunc: countClaudeProcesses,
 	}
@@ -63,7 +63,7 @@ func NewDetector() *Detector {
 
 // Detect gathers current system information.
 func (d *Detector) Detect() (SystemInfo, error) {
-	total, available, err := d.readMeminfo()
+	total, available, err := d.memoryInfoFunc()
 	if err != nil {
 		return SystemInfo{}, fmt.Errorf("reading memory info: %w", err)
 	}
@@ -83,10 +83,10 @@ func (d *Detector) Detect() (SystemInfo, error) {
 }
 
 // readMeminfo parses /proc/meminfo for MemTotal and MemAvailable (in bytes).
-func (d *Detector) readMeminfo() (total, available uint64, err error) {
-	f, err := os.Open(d.procMeminfo)
+func readMeminfo(path string) (total, available uint64, err error) {
+	f, err := os.Open(path)
 	if err != nil {
-		return 0, 0, fmt.Errorf("opening %s: %w", d.procMeminfo, err)
+		return 0, 0, fmt.Errorf("opening %s: %w", path, err)
 	}
 	defer f.Close()
 
@@ -112,13 +112,13 @@ func (d *Detector) readMeminfo() (total, available uint64, err error) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return 0, 0, fmt.Errorf("scanning %s: %w", d.procMeminfo, err)
+		return 0, 0, fmt.Errorf("scanning %s: %w", path, err)
 	}
 	if !foundTotal {
-		return 0, 0, fmt.Errorf("MemTotal not found in %s", d.procMeminfo)
+		return 0, 0, fmt.Errorf("MemTotal not found in %s", path)
 	}
 	if !foundAvailable {
-		return 0, 0, fmt.Errorf("MemAvailable not found in %s", d.procMeminfo)
+		return 0, 0, fmt.Errorf("MemAvailable not found in %s", path)
 	}
 	return total, available, nil
 }
