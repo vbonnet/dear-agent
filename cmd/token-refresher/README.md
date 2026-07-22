@@ -72,7 +72,8 @@ which cost days of misdirected debugging (see the ce-77ip epic's "four-layer
 auth failure" retro).
 
 The stdout contract below is unchanged and still useful — it is what makes the
-binary composable — but nothing should consume it via `apiKeyHelper`.
+binary composable — but it must **never** be consumed via a retired
+`apiKeyHelper` setting.
 
 ### Wire it into the mesh (ce-cs3v)
 

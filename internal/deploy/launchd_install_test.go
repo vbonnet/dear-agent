@@ -141,15 +141,20 @@ func TestNoAPIKeyHelperInstructions(t *testing.T) {
 	// The setting command in any form — this is what must never reappear.
 	setCommand := regexp.MustCompile(`configure-claude-settings\s+set\s+apiKeyHelper`)
 
-	// Prose that offers the helper as a destination for this binary. Checked
-	// per-mention, not per-file: a file-level "does it contain a warning
-	// somewhere" test is too weak, because the exact defect review found was a
-	// package doc that carried a retirement note at the top AND still said
-	// "designed for use as a Claude Code apiKeyHelper" further down.
-	recommends := regexp.MustCompile(`(?i)(designed for use as|drives this on a schedule or as|points? Claude Code's [^.\n]*at)`)
-
-	// A recommendation reads as retired when the surrounding lines disclaim it.
-	disclaimed := regexp.MustCompile(`(?i)\b(not|never|retired|removed|no longer|void|originally|instead of)\b`)
+	// Default-deny, per mention. An earlier version of this guard blocklisted a
+	// handful of observed recommending phrasings, which is default-allow: a new
+	// wording like "Use token-refresher as Claude Code's apiKeyHelper" sails
+	// straight through. Enumerating the ways prose can recommend something is
+	// unwinnable.
+	//
+	// So instead: EVERY mention of apiKeyHelper must be disclaimed by its own
+	// local context. A file may discuss the helper as much as it likes, but
+	// never without saying, right there, that the wiring is retired.
+	//
+	// Checked per mention rather than per file on purpose. The defect review
+	// found was a package doc carrying a retirement note at the top while still
+	// recommending the helper further down — a file-level check passes that.
+	disclaimed := regexp.MustCompile(`(?i)(\b(not|never|retired|removed|remove|no longer|void|originally|instead|prohibit\w*|forbid\w*|unwire|stop)\b|shadow\w*)`)
 
 	for _, path := range operatorFacingFiles(t, repoRoot) {
 		rel, _ := filepath.Rel(repoRoot, path)
@@ -184,10 +189,15 @@ func TestNoAPIKeyHelperInstructions(t *testing.T) {
 					hi = len(lines)
 				}
 				window := strings.Join(lines[lo:hi], "\n")
-				if recommends.MatchString(window) && !disclaimed.MatchString(window) {
-					t.Errorf("%s:%d presents apiKeyHelper as a supported wiring:\n\t%s\n"+
-						"Describe it only as retired, with the reason, so a reader cannot "+
-						"reconstruct the auth-shadowing configuration.",
+				if !disclaimed.MatchString(window) {
+					t.Errorf("%s:%d mentions apiKeyHelper without disclaiming it:\n\t%s\n"+
+						"Every mention must say, in its own immediate context, that this "+
+						"wiring is retired — otherwise a reader can reconstruct the "+
+						"auth-shadowing configuration. claude-code >= 2.1.205 treats a "+
+						"configured helper as an external API key that shadows healthy "+
+						"OAuth (anthropics/claude-code#11587); it was removed from the "+
+						"host on 2026-07-10. Cleanup guidance "+
+						"(`configure-claude-settings remove apiKeyHelper`) is fine.",
 						rel, i+1, strings.TrimSpace(line))
 				}
 			}
