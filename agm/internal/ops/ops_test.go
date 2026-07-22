@@ -116,10 +116,11 @@ func (m *mockTmux) SendKeysIfInputReady(ctx context.Context, sessionName, harnes
 		return readiness, err
 	}
 	if !readiness.Ready {
-		if !options.AllowBusyComposer || readiness.State != "QUEUE" {
+		if !options.AllowQueuedAGM || readiness.State != "QUEUED_AGM" {
 			return readiness, nil
 		}
 		readiness.Ready = true
+		readiness.State = "YES"
 		readiness.Forced = true
 	}
 	if readiness.PaneID == "" {

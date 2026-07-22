@@ -279,12 +279,13 @@ ok  	github.com/vbonnet/dear-agent/agm/internal/agent	0.035s
 | `agy` | Active parity | tmux + Antigravity CLI | Replacement path for non-enterprise Gemini CLI users |
 | `opencode-cli` | Active parity | tmux + `opencode attach` | Requires a running OpenCode server |
 | `gemini-cli` | Deprecated compatibility | tmux + Gemini CLI | Kept for old sessions only |
+| `openai` / `gpt` | Legacy compatibility | OpenAI Chat Completions API + local JSONL | Separate from the `codex-cli` harness |
 
 ## Future Extensions
 
 ### Additional Agents
 The interface supports any AI provider:
-- GPT-4 via OpenAI API (planned)
+- GPT models via the legacy OpenAI API adapter (implemented compatibility path)
 - Local models via Ollama
 - Custom agents via plugin system
 

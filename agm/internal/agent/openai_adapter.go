@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,7 +12,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/agent/openai"
-	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 // OpenAIAdapter implements Agent interface for OpenAI API.
@@ -23,7 +23,14 @@ type OpenAIAdapter struct {
 	client         openai.ClientInterface
 	sessionManager *openai.SessionManager
 	model          string
+	runtimeConfig  openai.SessionRuntimeConfig
 }
+
+var (
+	_ Agent                      = (*OpenAIAdapter)(nil)
+	_ ContextMessageSender       = (*OpenAIAdapter)(nil)
+	_ ContextSessionStatusGetter = (*OpenAIAdapter)(nil)
+)
 
 // OpenAIConfig holds configuration for creating an OpenAI adapter.
 type OpenAIConfig struct {
@@ -65,23 +72,71 @@ type OpenAIConfig struct {
 // If config is nil, uses default configuration (gpt-4-turbo-preview).
 // Returns error if API key is missing or client initialization fails.
 func NewOpenAIAdapter(ctx context.Context, config *OpenAIConfig) (Agent, error) {
-	if config == nil {
-		config = &OpenAIConfig{
-			Model:       "gpt-4-turbo-preview",
-			Temperature: 0.7,
-			MaxTokens:   1000,
-		}
+	resolvedConfig := resolveOpenAIConfig(config)
+	return newOpenAIAdapter(ctx, resolvedConfig)
+}
+
+// NewOpenAIAdapterForSession reconstructs an adapter from a session's
+// persisted non-secret runtime configuration. API credentials are intentionally
+// resolved from config or the environment on each process invocation.
+func NewOpenAIAdapterForSession(ctx context.Context, sessionID SessionID, config *OpenAIConfig) (Agent, error) {
+	resolvedConfig := resolveOpenAIConfig(config)
+	sessionManager, info, err := openai.NewSessionManagerForSession(ctx, resolvedConfig.SessionsDir, string(sessionID))
+	if err != nil {
+		return nil, fmt.Errorf("load OpenAI session %q: %w", sessionID, err)
+	}
+	resolvedConfig.Model = info.Model
+	if info.RuntimeConfig != nil {
+		resolvedConfig.Temperature = info.RuntimeConfig.Temperature
+		resolvedConfig.MaxTokens = info.RuntimeConfig.MaxTokens
+		resolvedConfig.BaseURL = info.RuntimeConfig.BaseURL
+		resolvedConfig.IsAzure = info.RuntimeConfig.IsAzure
+		resolvedConfig.AzureAPIVersion = info.RuntimeConfig.AzureAPIVersion
+	}
+
+	return newOpenAIAdapterWithSessionManager(ctx, resolvedConfig, sessionManager)
+}
+
+func resolveOpenAIConfig(config *OpenAIConfig) OpenAIConfig {
+	resolved := OpenAIConfig{}
+	if config != nil {
+		resolved = *config
 	}
 
 	// Read API key from environment if not provided
-	apiKey := config.APIKey
-	if apiKey == "" {
-		apiKey = os.Getenv("OPENAI_API_KEY")
+	if resolved.APIKey == "" {
+		resolved.APIKey = os.Getenv("OPENAI_API_KEY")
 	}
+	if resolved.Model == "" {
+		resolved.Model = os.Getenv("OPENAI_MODEL")
+		if resolved.Model == "" {
+			resolved.Model = "gpt-4-turbo-preview"
+		}
+	}
+	if resolved.Temperature == 0 {
+		resolved.Temperature = 0.7
+	}
+	if resolved.MaxTokens == 0 {
+		resolved.MaxTokens = 1000
+	}
+	if resolved.IsAzure && resolved.AzureAPIVersion == "" {
+		resolved.AzureAPIVersion = "2024-02-15-preview"
+	}
+	return resolved
+}
 
+func newOpenAIAdapter(ctx context.Context, config OpenAIConfig) (*OpenAIAdapter, error) {
+	sessionManager, err := openai.NewSessionManager(config.SessionsDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create session manager: %w", err)
+	}
+	return newOpenAIAdapterWithSessionManager(ctx, config, sessionManager)
+}
+
+func newOpenAIAdapterWithSessionManager(ctx context.Context, config OpenAIConfig, sessionManager *openai.SessionManager) (*OpenAIAdapter, error) {
 	// Create OpenAI client
 	clientConfig := openai.Config{
-		APIKey:          apiKey,
+		APIKey:          config.APIKey,
 		Model:           config.Model,
 		Temperature:     config.Temperature,
 		MaxTokens:       config.MaxTokens,
@@ -95,22 +150,18 @@ func NewOpenAIAdapter(ctx context.Context, config *OpenAIConfig) (Agent, error) 
 		return nil, fmt.Errorf("failed to create OpenAI client: %w", err)
 	}
 
-	// Create session manager
-	sessionManager, err := openai.NewSessionManager(config.SessionsDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create session manager: %w", err)
-	}
-
 	// Determine model name
-	model := config.Model
-	if model == "" {
-		model = "gpt-4-turbo-preview"
-	}
-
 	return &OpenAIAdapter{
 		client:         client,
 		sessionManager: sessionManager,
-		model:          model,
+		model:          config.Model,
+		runtimeConfig: openai.SessionRuntimeConfig{
+			Temperature:     config.Temperature,
+			MaxTokens:       config.MaxTokens,
+			BaseURL:         config.BaseURL,
+			IsAzure:         config.IsAzure,
+			AzureAPIVersion: config.AzureAPIVersion,
+		},
 	}, nil
 }
 
@@ -121,6 +172,10 @@ func newOpenAIAdapterWithClient(client openai.ClientInterface, sessionManager *o
 		client:         client,
 		sessionManager: sessionManager,
 		model:          "gpt-4",
+		runtimeConfig: openai.SessionRuntimeConfig{
+			Temperature: 0.7,
+			MaxTokens:   1000,
+		},
 	}
 }
 
@@ -156,6 +211,10 @@ func (a *OpenAIAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to create session: %w", err)
+	}
+	if err := a.sessionManager.UpdateRuntimeConfig(string(sessionID), a.runtimeConfig); err != nil {
+		_ = a.sessionManager.DeleteSession(string(sessionID))
+		return "", fmt.Errorf("failed to persist session runtime configuration: %w", err)
 	}
 
 	// Update title if provided
@@ -235,29 +294,24 @@ func (a *OpenAIAdapter) TerminateSession(sessionID SessionID) error {
 //
 // For pure API-based sessions, status is either Active (exists) or Terminated
 // (doesn't exist) — Suspended is not applicable to stateless API sessions.
-//
-// This adapter also backs the codex-cli harness, whose session actually runs as
-// a Codex TUI inside a tmux pane named after the session. When such a pane is
-// alive and showing its composer (ready for input) we refine Active into Idle
-// so the supervisor can tell an idle Codex worker from a working one. The tmux
-// session name is the session's title (set to the AGM session name at create
-// time); for plain API sessions no such pane exists, so the check is skipped
-// and the prior Active behaviour is preserved.
+// The tmux-backed codex-cli harness has its own adapter and status projection;
+// this pure API adapter must never capture or otherwise depend on a pane.
 func (a *OpenAIAdapter) GetSessionStatus(sessionID SessionID) (Status, error) {
-	info, err := a.sessionManager.GetSession(string(sessionID))
-	if err != nil {
-		// Session not found = terminated
-		return StatusTerminated, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
-	}
+	return a.GetSessionStatusContext(context.Background(), sessionID)
+}
 
-	// For codex-cli the title carries the tmux session name. If that pane is
-	// alive and the Codex composer is visible, the worker is idle/ready; any
-	// capture error (no such pane, e.g. a plain API session) falls through to
-	// the default Active status.
-	if info.Title != "" {
-		if idle, err := tmux.IsCodexIdle(info.Title); err == nil && idle {
-			return StatusIdle, nil
+// GetSessionStatusContext reports pure API readiness without tmux while
+// honoring cancellation during authoritative store-lock acquisition.
+func (a *OpenAIAdapter) GetSessionStatusContext(ctx context.Context, sessionID SessionID) (Status, error) {
+	_, err := a.sessionManager.GetSessionContext(ctx, string(sessionID))
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return "", err
 		}
+		if errors.Is(err, os.ErrNotExist) {
+			return StatusTerminated, nil
+		}
+		return "", fmt.Errorf("load OpenAI session status: %w", err)
 	}
 
 	// Session exists = active
@@ -267,54 +321,64 @@ func (a *OpenAIAdapter) GetSessionStatus(sessionID SessionID) (Status, error) {
 // SendMessage sends a message to OpenAI and stores both the user message
 // and assistant response in the conversation history.
 //
-// This method:
-// 1. Adds user message to session history
-// 2. Retrieves full conversation history
-// 3. Sends to OpenAI API
-// 4. Stores assistant response
+// The complete history read, provider completion, and completed-turn commit are
+// serialized across adapter instances and processes. A failed completion does
+// not persist its provisional user message.
 func (a *OpenAIAdapter) SendMessage(sessionID SessionID, message Message) error {
-	// Verify session exists
-	_, err := a.sessionManager.GetSession(string(sessionID))
-	if err != nil {
-		return fmt.Errorf("session not found: %w", err)
-	}
+	return a.SendMessageContext(context.Background(), sessionID, message)
+}
 
-	// Add user message to history
-	userMsg := openai.Message{
-		Role:      string(message.Role),
-		Content:   message.Content,
-		Timestamp: time.Now(),
-	}
+// OpenAICompletionTimeout is the maximum duration of one provider-backed
+// completed-turn transaction, including a contended store-lock wait.
+const OpenAICompletionTimeout = 2 * time.Minute
 
-	if err := a.sessionManager.AddMessage(string(sessionID), userMsg); err != nil {
-		return fmt.Errorf("failed to add user message: %w", err)
-	}
+// OpenAIPreflightTimeout bounds stable-lock acquisition, reconstruction, and
+// readiness before a provider-backed completed turn starts.
+const OpenAIPreflightTimeout = time.Minute
 
-	// Get full conversation history for API call
-	history, err := a.sessionManager.GetMessages(string(sessionID))
-	if err != nil {
-		return fmt.Errorf("failed to get conversation history: %w", err)
-	}
+// OpenAIDeliveryTimeout bounds the surrounding reconstruction, readiness, and
+// stable lifecycle transaction. It exceeds the independently bounded
+// preflight and completion phases so scheduling overhead cannot shorten the
+// adapter's full completed-turn ceiling.
+const OpenAIDeliveryTimeout = OpenAIPreflightTimeout + OpenAICompletionTimeout + time.Minute
 
-	// Send to OpenAI API
-	ctx := context.Background()
-	response, err := a.client.CreateChatCompletion(ctx, history)
-	if err != nil {
-		return fmt.Errorf("OpenAI API call failed: %w", err)
+// SendMessageContext is the request-aware OpenAI delivery transaction. The
+// adapter applies a finite provider ceiling even when a legacy direct caller
+// supplies a background context, so a stalled provider cannot retain the
+// cross-process session lock indefinitely.
+func (a *OpenAIAdapter) SendMessageContext(ctx context.Context, sessionID SessionID, message Message) error {
+	if ctx == nil {
+		ctx = context.Background()
 	}
+	completionCtx, cancel := context.WithTimeout(ctx, OpenAICompletionTimeout)
+	defer cancel()
 
-	// Store assistant response
-	assistantMsg := openai.Message{
-		Role:      "assistant",
-		Content:   response.Content,
-		Timestamp: time.Now(),
-	}
+	return a.sessionManager.WithSessionLockContext(completionCtx, string(sessionID), func() error {
+		history, err := a.sessionManager.GetMessagesUnderLock(string(sessionID))
+		if err != nil {
+			return fmt.Errorf("failed to revalidate session and get conversation history: %w", err)
+		}
+		userMsg := openai.Message{
+			Role:      string(message.Role),
+			Content:   message.Content,
+			Timestamp: time.Now(),
+		}
+		requestHistory := append(append([]openai.Message(nil), history...), userMsg)
 
-	if err := a.sessionManager.AddMessage(string(sessionID), assistantMsg); err != nil {
-		return fmt.Errorf("failed to add assistant response: %w", err)
-	}
-
-	return nil
+		response, err := a.client.CreateChatCompletion(completionCtx, requestHistory)
+		if err != nil {
+			return fmt.Errorf("OpenAI API call failed: %w", err)
+		}
+		assistantMsg := openai.Message{
+			Role:      "assistant",
+			Content:   response.Content,
+			Timestamp: time.Now(),
+		}
+		if err := a.sessionManager.AddMessagesUnderLock(string(sessionID), userMsg, assistantMsg); err != nil {
+			return fmt.Errorf("failed to commit completed OpenAI turn: %w", err)
+		}
+		return nil
+	})
 }
 
 // GetHistory retrieves conversation history for a session.
@@ -424,20 +488,28 @@ func (a *OpenAIAdapter) ImportConversation(data []byte, format ConversationForma
 		return "", fmt.Errorf("failed to create session: %w", err)
 	}
 
-	// Import messages
-	for _, msg := range messages {
-		openaiMsg := openai.Message{
-			Role:      string(msg.Role),
-			Content:   msg.Content,
-			Timestamp: msg.Timestamp,
-		}
-
-		if err := a.sessionManager.AddMessage(string(sessionID), openaiMsg); err != nil {
-			return "", fmt.Errorf("failed to import message: %w", err)
-		}
+	if err := addImportedOpenAIMessages(messages, func(imported ...openai.Message) error {
+		return a.sessionManager.AddMessages(string(sessionID), imported...)
+	}); err != nil {
+		return "", fmt.Errorf("failed to import messages: %w", err)
 	}
 
 	return sessionID, nil
+}
+
+func addImportedOpenAIMessages(messages []Message, add func(...openai.Message) error) error {
+	if len(messages) == 0 {
+		return nil
+	}
+	imported := make([]openai.Message, 0, len(messages))
+	for _, msg := range messages {
+		imported = append(imported, openai.Message{
+			Role:      string(msg.Role),
+			Content:   msg.Content,
+			Timestamp: msg.Timestamp,
+		})
+	}
+	return add(imported...)
 }
 
 // Capabilities returns OpenAI's feature capabilities.
@@ -535,22 +607,14 @@ func (a *OpenAIAdapter) openAISetDir(cmd Command, sessionIDStr string) error {
 }
 
 func (a *OpenAIAdapter) openAIClearHistory(sessionIDStr string) error {
-	sessionInfo, err := a.sessionManager.GetSession(sessionIDStr)
-	if err != nil {
-		return fmt.Errorf("failed to get session info: %w", err)
-	}
-	if err := a.sessionManager.DeleteSession(sessionIDStr); err != nil {
-		return fmt.Errorf("failed to delete session: %w", err)
-	}
-	if _, err := a.sessionManager.CreateSession(sessionIDStr, sessionInfo.Model, sessionInfo.WorkingDirectory); err != nil {
-		return fmt.Errorf("failed to recreate session: %w", err)
-	}
-	if sessionInfo.Title != "" {
-		if err := a.sessionManager.UpdateTitle(sessionIDStr, sessionInfo.Title); err != nil {
-			return fmt.Errorf("failed to restore session title: %w", err)
+	clearCtx, cancel := context.WithTimeout(context.Background(), OpenAICompletionTimeout)
+	defer cancel()
+	return a.sessionManager.WithSessionLockContext(clearCtx, sessionIDStr, func() error {
+		if err := a.sessionManager.ClearMessagesUnderLock(sessionIDStr); err != nil {
+			return fmt.Errorf("failed to clear session history: %w", err)
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 func (a *OpenAIAdapter) openAISetSystemPrompt(cmd Command, sessionIDStr string) error {

@@ -21,6 +21,21 @@ type sendReadinessBackend struct {
 	sendCtx      context.Context
 }
 
+type postRecoveryReadyTmux struct {
+	*mockTmux
+	result session.InputReadiness
+}
+
+func (t *postRecoveryReadyTmux) SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string, options session.InputDeliveryOptions) (session.InputReadiness, error) {
+	t.atomicChecks = append(t.atomicChecks, sessionName+":"+harness)
+	t.atomicOptions = append(t.atomicOptions, options)
+	t.paneSendCtx = ctx
+	if t.result.Ready {
+		t.sent = append(t.sent, sentKey{session: t.result.PaneID, keys: keys})
+	}
+	return t.result, nil
+}
+
 func (b *sendReadinessBackend) CreateSession(context.Context, manager.SessionConfig) (manager.SessionID, error) {
 	return "", nil
 }
@@ -174,29 +189,64 @@ func TestSendMessage_PiPermissionPromptBlocksAtomicDelivery(t *testing.T) {
 	}
 }
 
-func TestSendMessage_ForceDeliversOnlyThroughVerifiedBusyComposer(t *testing.T) {
+func TestSendMessage_QueuedAGMRecoveryPolicies(t *testing.T) {
+	t.Parallel()
+
+	for _, testCase := range []struct {
+		name    string
+		request SendMessageRequest
+	}{
+		{name: "force", request: SendMessageRequest{Force: true}},
+		{name: "autonomous", request: SendMessageRequest{Autonomous: true}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")}, "my-session")
+			tmuxMock := ctx.Tmux.(*mockTmux)
+			tmuxMock.readiness = session.InputReadiness{State: "QUEUED_AGM", PaneID: "%7"}
+			testCase.request.Recipient = "id-1"
+			testCase.request.Message = "recovery message"
+
+			result, err := SendMessage(ctx, &testCase.request)
+			if err != nil || result == nil || !result.Delivered {
+				t.Fatalf("SendMessage(%s queued AGM) = (%#v, %v), want exact-pane delivery", testCase.name, result, err)
+			}
+			if len(tmuxMock.atomicOptions) != 1 || !tmuxMock.atomicOptions[0].AllowQueuedAGM {
+				t.Fatalf("atomic delivery options = %#v, want %s queued-AGM recovery", tmuxMock.atomicOptions, testCase.name)
+			}
+			if len(tmuxMock.sent) != 1 || tmuxMock.sent[0].session != "%7" || tmuxMock.sent[0].keys != "recovery message" {
+				t.Fatalf("%s exact-pane sends = %#v, want %%7 recovery message", testCase.name, tmuxMock.sent)
+			}
+		})
+	}
+}
+
+func TestSendMessage_AcceptsPostRecoveryReadyState(t *testing.T) {
 	t.Parallel()
 
 	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")}, "my-session")
-	tmuxMock := ctx.Tmux.(*mockTmux)
-	tmuxMock.readiness = session.InputReadiness{State: "QUEUE", PaneID: "%7"}
+	tmuxClient := &postRecoveryReadyTmux{
+		mockTmux: ctx.Tmux.(*mockTmux),
+		result:   session.InputReadiness{Ready: true, State: "YES", PaneID: "%7", Forced: true},
+	}
+	ctx.Tmux = tmuxClient
 
-	result, err := SendMessage(ctx, &SendMessageRequest{Recipient: "id-1", Message: "forced message", Force: true})
+	result, err := SendMessage(ctx, &SendMessageRequest{Recipient: "id-1", Message: "replacement", Force: true})
 	if err != nil || result == nil || !result.Delivered {
-		t.Fatalf("SendMessage(force busy) = (%#v, %v), want exact-pane delivery", result, err)
+		t.Fatalf("SendMessage(post-recovery YES) = (%#v, %v), want delivered", result, err)
 	}
-	if len(tmuxMock.atomicOptions) != 1 || !tmuxMock.atomicOptions[0].AllowBusyComposer {
-		t.Fatalf("atomic delivery options = %#v, want busy-composer override", tmuxMock.atomicOptions)
+	if len(tmuxClient.atomicOptions) != 1 || !tmuxClient.atomicOptions[0].AllowQueuedAGM {
+		t.Fatalf("atomic options = %#v, want queued-AGM recovery", tmuxClient.atomicOptions)
 	}
-	if len(tmuxMock.sent) != 1 || tmuxMock.sent[0].session != "%7" || tmuxMock.sent[0].keys != "forced message" {
-		t.Fatalf("forced exact-pane sends = %#v, want %%7 forced message", tmuxMock.sent)
+	if len(tmuxClient.sent) != 1 || tmuxClient.sent[0] != (sentKey{session: "%7", keys: "replacement"}) {
+		t.Fatalf("post-recovery sends = %#v, want one exact-pane replacement", tmuxClient.sent)
 	}
 }
 
 func TestSendMessage_ForceDoesNotBypassProtectedInputStates(t *testing.T) {
 	t.Parallel()
 
-	for _, readinessState := range []string{"PERMISSION", "OVERLAY", "ONBOARDING", "WRONG_HARNESS", "NOT_FOUND"} {
+	for _, readinessState := range []string{"QUEUE", "PERMISSION", "OVERLAY", "ONBOARDING", "WRONG_HARNESS", "NOT_FOUND"} {
 		t.Run(readinessState, func(t *testing.T) {
 			t.Parallel()
 			ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")}, "my-session")
@@ -209,6 +259,27 @@ func TestSendMessage_ForceDoesNotBypassProtectedInputStates(t *testing.T) {
 			}
 			if len(tmuxMock.sent) != 0 {
 				t.Fatalf("force bypassed %s: %#v", readinessState, tmuxMock.sent)
+			}
+		})
+	}
+}
+
+func TestSendMessage_AutonomousDoesNotBypassProtectedInputStates(t *testing.T) {
+	t.Parallel()
+
+	for _, readinessState := range []string{"QUEUE", "PERMISSION", "OVERLAY", "ONBOARDING", "WRONG_HARNESS", "NOT_FOUND"} {
+		t.Run(readinessState, func(t *testing.T) {
+			t.Parallel()
+			ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")}, "my-session")
+			tmuxMock := ctx.Tmux.(*mockTmux)
+			tmuxMock.readiness = session.InputReadiness{State: readinessState, PaneID: "%8"}
+
+			result, err := SendMessage(ctx, &SendMessageRequest{Recipient: "id-1", Message: "must not send", Autonomous: true})
+			if result == nil || result.Delivered || err == nil {
+				t.Fatalf("SendMessage(autonomous %s) = (%#v, %v), want non-delivery", readinessState, result, err)
+			}
+			if len(tmuxMock.sent) != 0 {
+				t.Fatalf("autonomous mode bypassed %s: %#v", readinessState, tmuxMock.sent)
 			}
 		})
 	}

@@ -101,7 +101,7 @@ func (t *RealTmux) CheckInputReadiness(ctx context.Context, sessionName, harness
 // delivery so another AGM sender cannot invalidate the observation.
 func (t *RealTmux) SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string, options InputDeliveryOptions) (InputReadiness, error) {
 	readiness, err := tmux.CheckExpectedHarnessInputAndSend(ctx, sessionName, harness, keys, tmux.InputDeliveryOptions{
-		AllowBusyComposer: options.AllowBusyComposer,
+		AllowQueuedAGM: options.AllowQueuedAGM,
 	})
 	if err != nil {
 		return InputReadiness{}, err

@@ -1,6 +1,6 @@
 # AGM MCP Server - Specification
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-07-21 -->
 
 ## Overview
 
@@ -35,9 +35,12 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
 
 **MCS-10** When `agm_kill_session` receives a request, the MCP adapter shall propagate the request context and the explicit `force` and `confirmed_stuck` safety controls to the shared kill operation; cancellation observed before mutation shall leave tmux unchanged.
 
+**MCS-11** When `agm_send_message` resolves a pure API manifest while the MCP operation context also carries tmux, the MCP adapter shall delegate to shared operations, which shall perform the stable-ID lifecycle, adapter-readiness, and context-aware provider transaction before any tmux probe or delivery.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/mcp_parity.feature`
+- Feature: `agm/test/bdd/features/harness_parity.feature`
 
 ## Use Cases
 

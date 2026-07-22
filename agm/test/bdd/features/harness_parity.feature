@@ -9,6 +9,7 @@
 # RELATED-SPEC: agm/internal/monitor/opencode/SPEC.md
 # RELATED-SPEC: agm/internal/monitor/tmux/SPEC.md
 # RELATED-SPEC: agm/cmd/agm/SPEC.md
+# RELATED-SPEC: agm/cmd/agm-mcp-server/SPEC.md
 # RELATED-SPEC: agm/cmd/agm/hooks/SPEC.md
 # RELATED-SPEC: agm/cmd/agm/parity/SPEC.md
 # RELATED-SPEC: cmd/vroom-dispatch/SPEC.md
@@ -320,7 +321,9 @@ Feature: Harness parity
     Then shared startup readiness should honor the total deadline
     And shared input readiness should serialize exact-pane delivery and preserve rendered composer ownership without treating resolved prompts as live
     And CLI message and startup prompt sends should use shared atomic readiness for exact-pane delivery
-    And forced CLI message sends should override only verified busy composers
+    And forced CLI message sends should preserve the measured queued AGM anchor across prompt-like payload lines
+    And autonomous CLI message sends should preserve only positively identified queued AGM recovery
+    And API delivery should restore persisted configuration without scanning unrelated sessions, linearize archive and deletion with bounded completed turns, renew fan-out deadlines with separate preflight and full provider budgets, honor request cancellation during reconstruction and readiness, preserve large JSONL records, batch imports, require adapter readiness without tmux, and document its compatibility-only control plane
     And shared Gemini readiness should advance first-run trust on the verified pane
     And legacy AGY names should reach canonical shared send readiness
     And the Pi alias should reach canonical shared send readiness

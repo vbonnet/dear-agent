@@ -39,6 +39,7 @@ func buildSessionMetadata(session *manifest.Manifest) map[string]any {
 			metadata["codex_transcript_path"] = session.Codex.TranscriptPath
 		}
 	}
+	addOpenAISessionMetadata(metadata, session.OpenAI)
 	if session.Agy != nil {
 		if session.Agy.ConversationID != "" {
 			metadata["agy_conversation_id"] = session.Agy.ConversationID
@@ -75,6 +76,12 @@ func buildSessionMetadata(session *manifest.Manifest) map[string]any {
 		metadata["outcome"] = string(session.Outcome)
 	}
 	return metadata
+}
+
+func addOpenAISessionMetadata(metadata map[string]any, openAI *manifest.OpenAI) {
+	if openAI != nil {
+		metadata["openai"] = openAI
+	}
 }
 
 // marshalCreateSessionJSON serializes the JSON-typed fields needed by the
@@ -1171,6 +1178,9 @@ func unmarshalEngramMetadata(session *manifest.Manifest, metadataJSON []byte) er
 			TranscriptPath: codexTranscriptPath,
 		}
 	}
+	if err := unmarshalOpenAISessionMetadata(session, metadata); err != nil {
+		return err
+	}
 	agyConversationID, _ := metadata["agy_conversation_id"].(string)
 	agyWorkspacePath, _ := metadata["agy_workspace_path"].(string)
 	agyConversationDBPath, _ := metadata["agy_conversation_db_path"].(string)
@@ -1217,6 +1227,23 @@ func unmarshalEngramMetadata(session *manifest.Manifest, metadataJSON []byte) er
 			session.EngramMetadata.LoadedAt = loadedAt
 		}
 	}
+	return nil
+}
+
+func unmarshalOpenAISessionMetadata(session *manifest.Manifest, metadata map[string]any) error {
+	openAIRaw, ok := metadata["openai"]
+	if !ok {
+		return nil
+	}
+	openAIJSON, err := json.Marshal(openAIRaw)
+	if err != nil {
+		return fmt.Errorf("failed to marshal OpenAI session metadata: %w", err)
+	}
+	var openAI manifest.OpenAI
+	if err := json.Unmarshal(openAIJSON, &openAI); err != nil {
+		return fmt.Errorf("failed to unmarshal OpenAI session metadata: %w", err)
+	}
+	session.OpenAI = &openAI
 	return nil
 }
 

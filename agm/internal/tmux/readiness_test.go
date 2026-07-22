@@ -2,9 +2,13 @@ package tmux
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
+	"time"
+	"unicode/utf8"
 )
 
 func TestHandleHarnessStartupStateWaitsForSlowInitialProcess(t *testing.T) {
@@ -154,6 +158,104 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			state:   HarnessInputBusy,
 		},
 		{
+			name:    "Claude human queued paste remains generic busy",
+			harness: "claude-code",
+			content: "response\n❯ [Pasted text #1 +2 lines]\nplease fix the bug in auth.go\n────────────────\n? for shortcuts",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "Claude queued AGM paste is positively identified",
+			harness: "claude-code",
+			content: "response\n❯ [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-001 | Sent: 2026-07-21T12:00:00Z]\nrecover\n────────────────\n? for shortcuts",
+			state:   HarnessInputQueuedAGM,
+		},
+		{
+			name:    "long Claude queued AGM paste is classified beyond the display tail",
+			harness: "claude-code",
+			content: "response\n❯ [Pasted text #1 +14 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-001 | Sent: 2026-07-21T12:00:00Z]\n" + strings.Repeat("payload line\n", 13) + "────────────────\n? for shortcuts",
+			state:   HarnessInputQueuedAGM,
+		},
+		{
+			name:    "historical AGM paste cannot occupy current empty Claude composer",
+			harness: "claude-code",
+			content: "❯ [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-001 | Sent: 2026-07-21T12:00:00Z]\nrecover\nshort response\n❯\n────────────────\n? for shortcuts",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "historical AGM header cannot own current human Claude paste",
+			harness: "claude-code",
+			content: "❯ [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-001 | Sent: 2026-07-21T12:00:00Z]\nrecover\nshort response\n❯ [Pasted text #2 +1 lines]\nplease preserve my draft\n────────────────\n? for shortcuts",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "partial AGM header cannot authorize Claude recovery",
+			harness: "claude-code",
+			content: "response\n❯ [Pasted text #1 +1 lines]\n[From: notes | ID:\n────────────────\n? for shortcuts",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "opaque Codex pasted-content chip remains protected",
+			harness: "codex-cli",
+			content: "response\n› [Pasted Content 2172 chars]\n  gpt-5.6 xhigh · /repo",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "post-turn Codex queue without empty cursor remains protected",
+			harness: "codex-cli",
+			content: "response\n› [Pasted Content 2172 chars]\n[From: orchestrator | ID: 1774872000000-orchestr-002 | Sent: 2026-07-21T12:00:00Z]\nrecover\ngpt-5.6 xhigh · /repo",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "active Codex turn with queued AGM paste remains protected",
+			harness: "codex-cli",
+			content: "response\n• Working on tests\n› [Pasted Content 2172 chars]\n[From: orchestrator | ID: 1774872000000-orchestr-002 | Sent: 2026-07-21T12:00:00Z]\nrecover\ngpt-5.6 xhigh · /repo",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "initial Codex composer can own observable queued AGM paste",
+			harness: "codex-cli",
+			content: "│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.6 /model to change │\n╰──────────────────────────╯\n› [Pasted Content 90 chars]\n[From: orchestrator | ID: 1774872000000-orchestr-002 | Sent: 2026-07-21T12:00:00Z]\nrecover",
+			state:   HarnessInputQueuedAGM,
+		},
+		{
+			name:    "initial Codex queue preserves payload-ending newline in extent",
+			harness: "codex-cli",
+			content: "│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.6 /model to change │\n╰──────────────────────────╯\n› [Pasted Content 91 chars]\n[From: orchestrator | ID: 1774872000000-orchestr-002 | Sent: 2026-07-21T12:00:00Z]\nrecover\n\n",
+			state:   HarnessInputQueuedAGM,
+		},
+		{
+			name:    "active output after initial Codex queue suppresses recovery",
+			harness: "codex-cli",
+			content: "│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.6 /model to change │\n╰──────────────────────────╯\n› [Pasted Content 90 chars]\n[From: orchestrator | ID: 1774872000000-orchestr-002 | Sent: 2026-07-21T12:00:00Z]\nrecover\nordinary active-work output",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "stale initial Codex header cannot own newer queued input",
+			harness: "codex-cli",
+			content: "│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.6 /model to change │\nold response\n› [Pasted Content 2172 chars]\n[From: orchestrator | ID: 1774872000000-orchestr-002 | Sent: 2026-07-21T12:00:00Z]\nrecover",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "historical Codex paste cannot occupy current empty composer",
+			harness: "codex-cli",
+			content: "› [Pasted Content 2172 chars]\n[From: orchestrator | ID: 1774872000000-orchestr-002 | Sent: 2026-07-21T12:00:00Z]\nrecover\nshort response\n›\ngpt-5.6 xhigh · /repo",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "active work suppresses stale queued AGM recovery",
+			harness: "claude-code",
+			content: "❯ [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-001 | Sent: 2026-07-21T12:00:00Z]\nrecover\n✻ Working…\nRunning tests",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "active output after stale Claude footer suppresses recovery",
+			harness: "claude-code",
+			content: "❯ [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-001 | Sent: 2026-07-21T12:00:00Z]\nrecover\n────────────────\n? for shortcuts\nordinary active-work output",
+			state:   HarnessInputBusy,
+		},
+		{
 			name:    "stale Claude composer before working view",
 			harness: "claude-code",
 			content: "response\n❯\n✻ Working…\nRunning tests",
@@ -176,6 +278,18 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			name:    "stale Gemini composer before working view",
 			harness: "gemini-cli",
 			content: ">   Type your message or @path/to/file\nWorking on request",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "Gemini queued AGM paste is positively identified",
+			harness: "gemini-cli",
+			content: "│ > [Pasted text #1 +2 lines] │\n[From: orchestrator | ID: 1774872000000-orchestr-003 | Sent: 2026-07-21T12:00:00Z]\nrecover\n╰────────────────╯\n? for shortcuts",
+			state:   HarnessInputQueuedAGM,
+		},
+		{
+			name:    "active output after stale Gemini footer suppresses recovery",
+			harness: "gemini-cli",
+			content: "│ > [Pasted text #1 +2 lines] │\n[From: orchestrator | ID: 1774872000000-orchestr-003 | Sent: 2026-07-21T12:00:00Z]\nrecover\n? for shortcuts\nordinary active-work output",
 			state:   HarnessInputBusy,
 		},
 		{
@@ -211,6 +325,25 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			state:   HarnessInputBusy,
 		},
 		{
+			name:    "OpenCode queued AGM paste is positively identified",
+			harness: "opencode-cli",
+			content: "> [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-004 | Sent: 2026-07-21T12:00:00Z]\nrecover",
+			state:   HarnessInputQueuedAGM,
+		},
+		{
+			name:    "historical OpenCode paste followed by output suppresses recovery",
+			harness: "opencode-cli",
+			content: "> [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-004 | Sent: 2026-07-21T12:00:00Z]\nrecover\nordinary active-work output",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "historical OpenCode paste cannot occupy current empty composer",
+			harness: "opencode-cli",
+			content: "> [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-004 | Sent: 2026-07-21T12:00:00Z]\nrecover\nshort response\n>",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
 			name:    "Pi managed ready status owns tail",
 			harness: "pi-cli",
 			content: "/work • pi-worker\nAGM plan/ready launch-current",
@@ -227,6 +360,31 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			name:    "stale Pi ready status before working status",
 			harness: "pi-cli",
 			content: "AGM plan/ready launch-old\nAGM plan/working launch-current",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "Pi queued AGM paste is positively identified",
+			harness: "pi-cli",
+			content: "[Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-005 | Sent: 2026-07-21T12:00:00Z]\nrecover\n/work • pi-worker\n0.0%/0 (auto) AGM plan/ready launch-current",
+			state:   HarnessInputQueuedAGM,
+		},
+		{
+			name:    "Pi queued human paste remains generic busy",
+			harness: "pi-cli",
+			content: "[Pasted text #1 +1 line]\nplease preserve my draft\nAGM plan/ready launch-current",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "historical Pi paste cannot occupy current managed ready state",
+			harness: "pi-cli",
+			content: "[Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-005 | Sent: 2026-07-21T12:00:00Z]\nrecover\nshort response\nAGM plan/ready launch-current",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "historical Pi paste followed by output suppresses recovery",
+			harness: "pi-cli",
+			content: "[Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-005 | Sent: 2026-07-21T12:00:00Z]\nrecover\nAGM plan/ready launch-current\nordinary active-work output",
 			state:   HarnessInputBusy,
 		},
 		{
@@ -248,6 +406,24 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			content: ">\nprocessing request\nresponse chunk",
 			state:   HarnessInputBusy,
 		},
+		{
+			name:    "AGY queued AGM paste is positively identified",
+			harness: "agy",
+			content: "> [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-006 | Sent: 2026-07-21T12:00:00Z]\nrecover",
+			state:   HarnessInputQueuedAGM,
+		},
+		{
+			name:    "AGY queued human paste remains generic busy",
+			harness: "agy",
+			content: "> [Pasted text #1 +1 line]\nplease preserve my draft",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "historical AGY paste followed by output suppresses recovery",
+			harness: "agy",
+			content: "> [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-006 | Sent: 2026-07-21T12:00:00Z]\nrecover\nordinary active-work output",
+			state:   HarnessInputBusy,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -257,6 +433,37 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			}
 			if ready != tt.ready || state != tt.state {
 				t.Fatalf("ClassifyHarnessInput() = (%v, %q), want (%v, %q)", ready, state, tt.ready, tt.state)
+			}
+		})
+	}
+}
+
+func TestQueuedComposerPayloadPromptGlyphsRemainBoundToPasteAnchor(t *testing.T) {
+	codexPayload := "[From: orchestrator | ID: 1774872000000-orchestr-002 | Sent: 2026-07-21T12:00:00Z]\n› explain this glyph without moving the anchor"
+	tests := []struct {
+		name    string
+		harness string
+		content string
+	}{
+		{
+			name:    "Claude",
+			harness: "claude-code",
+			content: "response\n❯ [Pasted text #1 +2 lines]\n[From: orchestrator | ID: 1774872000000-orchestr-001 | Sent: 2026-07-21T12:00:00Z]\n❯ explain this glyph without moving the anchor\n────────────────\n? for shortcuts",
+		},
+		{
+			name:    "Codex",
+			harness: "codex-cli",
+			content: fmt.Sprintf("│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.6 /model to change │\n╰──────────────────────────╯\n› [Pasted Content %d chars]\n%s", utf8.RuneCountInString(codexPayload), codexPayload),
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			ready, state, err := ClassifyHarnessInput(testCase.content, testCase.harness)
+			if err != nil {
+				t.Fatalf("ClassifyHarnessInput() error = %v", err)
+			}
+			if ready || state != HarnessInputQueuedAGM {
+				t.Fatalf("ClassifyHarnessInput() = (%t, %q), want (false, %q)", ready, state, HarnessInputQueuedAGM)
 			}
 		})
 	}
@@ -385,7 +592,7 @@ func TestExpectedHarnessMatcherRequiresForegroundTerminalOwnership(t *testing.T)
 	}
 }
 
-func TestInputDeliveryAllowedForceOverridesOnlyBusyComposer(t *testing.T) {
+func TestInputDeliveryAllowedOverridesOnlyPositivelyIdentifiedAGMQueue(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -397,8 +604,10 @@ func TestInputDeliveryAllowedForceOverridesOnlyBusyComposer(t *testing.T) {
 	}{
 		{name: "ready", readiness: HarnessInputReadiness{Ready: true, State: HarnessInputReady}, allowed: true},
 		{name: "ready with force", readiness: HarnessInputReadiness{Ready: true, State: HarnessInputReady}, force: true, allowed: true},
-		{name: "busy without force", readiness: HarnessInputReadiness{State: HarnessInputBusy}},
-		{name: "busy with force", readiness: HarnessInputReadiness{State: HarnessInputBusy}, force: true, allowed: true, forced: true},
+		{name: "generic busy without policy", readiness: HarnessInputReadiness{State: HarnessInputBusy}},
+		{name: "generic busy with policy", readiness: HarnessInputReadiness{State: HarnessInputBusy}, force: true},
+		{name: "queued AGM without policy", readiness: HarnessInputReadiness{State: HarnessInputQueuedAGM}},
+		{name: "queued AGM with policy", readiness: HarnessInputReadiness{State: HarnessInputQueuedAGM}, force: true, allowed: true, forced: true},
 		{name: "permission with force", readiness: HarnessInputReadiness{State: HarnessInputPermission}, force: true},
 		{name: "overlay with force", readiness: HarnessInputReadiness{State: HarnessInputOverlay}, force: true},
 		{name: "onboarding with force", readiness: HarnessInputReadiness{State: HarnessInputOnboarding}, force: true},
@@ -408,10 +617,107 @@ func TestInputDeliveryAllowedForceOverridesOnlyBusyComposer(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			allowed, forced := inputDeliveryAllowed(tt.readiness, InputDeliveryOptions{AllowBusyComposer: tt.force})
+			allowed, forced := inputDeliveryAllowed(tt.readiness, InputDeliveryOptions{AllowQueuedAGM: tt.force})
 			if allowed != tt.allowed || forced != tt.forced {
 				t.Fatalf("inputDeliveryAllowed() = (%t, %t), want (%t, %t)", allowed, forced, tt.allowed, tt.forced)
 			}
 		})
+	}
+}
+
+func TestQueuedAGMRecoveryClearsBeforeReplacement(t *testing.T) {
+	t.Parallel()
+
+	var events []string
+	runtime := queuedAGMRecoveryRuntime{
+		sendKey: func(_ context.Context, pane, key string) error {
+			events = append(events, "key:"+pane+":"+key)
+			return nil
+		},
+		wait: func(_ context.Context, delay time.Duration) error {
+			events = append(events, "wait:"+delay.String())
+			return nil
+		},
+		recheck: func() (HarnessInputReadiness, error) {
+			events = append(events, "recheck")
+			return HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%7", Content: "empty composer"}, nil
+		},
+		deliver: func(_ context.Context, pane, command string) error {
+			events = append(events, "deliver:"+pane+":"+command)
+			return nil
+		},
+	}
+
+	got, err := replaceQueuedAGMInputLocked(context.Background(), "%7", "replacement", runtime)
+	if err != nil {
+		t.Fatalf("replaceQueuedAGMInputLocked() error = %v", err)
+	}
+	want := []string{
+		"key:%7:C-c", "wait:200ms", "key:%7:C-u", "wait:100ms",
+		"key:%7:C-a", "key:%7:C-k", "wait:300ms", "recheck",
+		"deliver:%7:replacement",
+	}
+	if !slices.Equal(events, want) {
+		t.Fatalf("replacement events = %#v, want %#v", events, want)
+	}
+	if !got.Ready || got.State != HarnessInputReady || !got.Forced || got.TargetPane != "%7" {
+		t.Fatalf("replacement readiness = %#v, want forced ready on %%7", got)
+	}
+}
+
+func TestQueuedAGMRecoveryDoesNotReplaceUntilExactPaneIsEmpty(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		recheck HarnessInputReadiness
+	}{
+		{name: "queue remains", recheck: HarnessInputReadiness{State: HarnessInputQueuedAGM, TargetPane: "%7"}},
+		{name: "human input appears", recheck: HarnessInputReadiness{State: HarnessInputBusy, TargetPane: "%7"}},
+		{name: "active pane changes", recheck: HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%8"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			delivered := false
+			runtime := queuedAGMRecoveryRuntime{
+				sendKey: func(context.Context, string, string) error { return nil },
+				wait:    func(context.Context, time.Duration) error { return nil },
+				recheck: func() (HarnessInputReadiness, error) { return tt.recheck, nil },
+				deliver: func(context.Context, string, string) error {
+					delivered = true
+					return nil
+				},
+			}
+			got, err := replaceQueuedAGMInputLocked(context.Background(), "%7", "replacement", runtime)
+			if err == nil {
+				t.Fatal("replaceQueuedAGMInputLocked() error = nil, want failed closed")
+			}
+			if delivered {
+				t.Fatal("replacement was delivered before exact empty-composer proof")
+			}
+			if got.Ready {
+				t.Fatalf("failed recovery readiness = %#v, want Ready=false", got)
+			}
+		})
+	}
+}
+
+func TestQueuedAGMRecoveryDoesNotReportReadyWhenReplacementFails(t *testing.T) {
+	t.Parallel()
+
+	runtime := queuedAGMRecoveryRuntime{
+		sendKey: func(context.Context, string, string) error { return nil },
+		wait:    func(context.Context, time.Duration) error { return nil },
+		recheck: func() (HarnessInputReadiness, error) {
+			return HarnessInputReadiness{Ready: true, State: HarnessInputReady, TargetPane: "%7"}, nil
+		},
+		deliver: func(context.Context, string, string) error { return errors.New("paste failed") },
+	}
+	got, err := replaceQueuedAGMInputLocked(context.Background(), "%7", "replacement", runtime)
+	if err == nil || !strings.Contains(err.Error(), "paste failed") {
+		t.Fatalf("replaceQueuedAGMInputLocked() error = %v, want paste failure", err)
+	}
+	if got.Ready {
+		t.Fatalf("failed replacement readiness = %#v, want Ready=false", got)
 	}
 }

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"time"
 )
 
@@ -103,6 +104,20 @@ type Agent interface {
 	// Command translation happens in adapter implementation.
 	// Returns error if command unsupported or execution fails.
 	ExecuteCommand(cmd Command) error
+}
+
+// ContextMessageSender is implemented by agents whose delivery surface can
+// honor caller cancellation and deadlines. Callers should prefer this optional
+// interface and fall back to Agent.SendMessage for legacy CLI adapters.
+type ContextMessageSender interface {
+	SendMessageContext(ctx context.Context, sessionID SessionID, message Message) error
+}
+
+// ContextSessionStatusGetter is implemented by agents whose readiness lookup
+// can honor caller cancellation and deadlines. Pure API delivery requires this
+// contract so a contended adapter store cannot pin the outer lifecycle lock.
+type ContextSessionStatusGetter interface {
+	GetSessionStatusContext(ctx context.Context, sessionID SessionID) (Status, error)
 }
 
 // SessionContext provides parameters for creating a new agent session.

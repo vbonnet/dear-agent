@@ -97,6 +97,47 @@ func ArchiveSession(ctx *OpContext, req *ArchiveSessionRequest) (*ArchiveSession
 		return nil, ErrSessionNotFound(req.Identifier)
 	}
 
+	if m.SessionID == "" {
+		return nil, ErrStorageError("archive_session", fmt.Errorf("resolved session has no stable session ID"))
+	}
+
+	// Archive and API delivery share the stable session-ID mutation boundary.
+	// Reloading after acquisition makes the lifecycle decision authoritative:
+	// either an in-flight paid completion commits before archive, or archive wins
+	// and a later delivery observes the archived lifecycle before provider work.
+	requestCtx := archiveOperationContext(ctx)
+	lock := WithSessionLockContext
+	if isAPISessionManifest(m) {
+		lock = WithAPISessionLockContext
+	}
+	var result *ArchiveSessionResult
+	err = lock(requestCtx, m.SessionID, func() error {
+		if err := requestCtx.Err(); err != nil {
+			return err
+		}
+		current, err := ctx.Storage.GetSession(m.SessionID)
+		if err != nil {
+			return ErrStorageError("archive_session_reload", err)
+		}
+		if current == nil {
+			return ErrSessionNotFound(m.SessionID)
+		}
+		result, err = archiveResolvedSession(ctx, current, req)
+		return err
+	})
+	return result, err
+}
+
+func isAPISessionManifest(m *manifest.Manifest) bool {
+	if m == nil {
+		return false
+	}
+	return m.Harness == "openai" || m.Harness == "gpt"
+}
+
+// archiveResolvedSession validates and mutates one current session snapshot
+// while its stable-ID lifecycle lock is held.
+func archiveResolvedSession(ctx *OpContext, m *manifest.Manifest, req *ArchiveSessionRequest) (*ArchiveSessionResult, error) {
 	// Check if already archived
 	if m.Lifecycle == manifest.LifecycleArchived {
 		if req.Idempotent {

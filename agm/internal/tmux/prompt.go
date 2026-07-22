@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/messages"
 )
 
 const maxPromptFileSize = 10 * 1024 // 10KB
@@ -172,8 +174,10 @@ func isGreyRGB(r, g, b int) bool {
 
 // hasQueuedInput checks if the session has queued pasted text or user input
 func hasQueuedInput(paneContent string) bool {
-	// Look for "[Pasted text" pattern which indicates queued input
-	if strings.Contains(paneContent, "[Pasted text") {
+	// Claude and older harnesses use "[Pasted text"; current Codex collapses
+	// large unsubmitted input into a "[Pasted Content N chars]" chip.
+	if strings.Contains(paneContent, "[Pasted text") ||
+		strings.Contains(paneContent, "[Pasted Content") {
 		return true
 	}
 
@@ -185,6 +189,11 @@ func hasQueuedInput(paneContent string) bool {
 	return false
 }
 
+var (
+	agmMessageHeaderPattern = regexp.MustCompile(`^\[From: ([A-Za-z0-9_-]{1,64}) \| ID: ([^ |\]]+) \| Sent: ([^|\]]+?)(?: \| Reply-To: ([^ |\]]+))?\]$`)
+	agmMessageIDPattern     = regexp.MustCompile(`^(\d{13})-([A-Za-z0-9_-]{1,8})-(\d{3,})$`)
+)
+
 // ClassifyQueuedInput inspects pane content to determine whether queued input
 // is a stuck AGM message or human-typed text. Returns the classification and
 // a user-facing error message.
@@ -193,17 +202,69 @@ func ClassifyQueuedInput(paneContent string) (QueuedInputType, string) {
 		return QueuedInputNone, ""
 	}
 
-	// Look for AGM message header pattern: [From: sender | ID: ... | Sent: ...]
+	// Bind identity to the most recent queued marker. A historical AGM header
+	// elsewhere in the capture must not turn a newer human paste into AGM-owned
+	// input. The generated header is always the first non-empty line after its
+	// marker; any other intervening content makes the association unprovable.
 	lines := strings.Split(paneContent, "\n")
-	for _, line := range lines {
+	marker := -1
+	for i, line := range lines {
+		if hasQueuedInputMarker(line) {
+			marker = i
+		}
+	}
+	for _, line := range lines[marker+1:] {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "[From:") && strings.Contains(trimmed, "| ID:") {
-			sender := extractSender(trimmed)
+		if trimmed == "" {
+			continue
+		}
+		if sender, ok := parseCompleteAGMHeader(trimmed); ok {
 			return QueuedInputAGM, fmt.Sprintf("session has queued AGM message (stuck paste-buffer from %s). Use agm send clear-input SESSION or retry with --force", sender)
 		}
+		break
 	}
 
 	return QueuedInputHuman, "session has human input in progress - not sending. Retry later"
+}
+
+func hasQueuedInputMarker(line string) bool {
+	return strings.Contains(line, "[Pasted text") ||
+		strings.Contains(line, "[Pasted Content") ||
+		strings.Contains(line, "Press up to edit queued messages")
+}
+
+func parseCompleteAGMHeader(line string) (string, bool) {
+	matches := agmMessageHeaderPattern.FindStringSubmatch(line)
+	if matches == nil || !validGeneratedMessageID(matches[2], matches[1]) {
+		return "", false
+	}
+	if _, err := time.Parse(time.RFC3339, strings.TrimSpace(matches[3])); err != nil {
+		return "", false
+	}
+	// Reply-To is caller-supplied and follows the public message-ID contract,
+	// which intentionally accepts legacy IDs that are not generator-shaped.
+	if matches[4] != "" && !messages.ValidateMessageID(matches[4]) {
+		return "", false
+	}
+	return matches[1], true
+}
+
+func validGeneratedMessageID(messageID, sender string) bool {
+	matches := agmMessageIDPattern.FindStringSubmatch(messageID)
+	if matches == nil {
+		return false
+	}
+	if _, err := strconv.ParseInt(matches[1], 10, 64); err != nil {
+		return false
+	}
+	if sender == "" {
+		return true
+	}
+	senderShort := sender
+	if len(senderShort) > 8 {
+		senderShort = senderShort[:8]
+	}
+	return matches[2] == senderShort
 }
 
 // extractSender pulls the sender name from an AGM message header line.

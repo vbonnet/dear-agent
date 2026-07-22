@@ -41,6 +41,17 @@ func CapturePaneANSIOutputTargetContext(ctx context.Context, paneID string, line
 	return capturePaneTarget(ctx, paneID, lines, true)
 }
 
+// CapturePaneLogicalANSIOutputTargetContext captures all available scrollback
+// for one already-resolved pane, preserving styles and joining terminal-wrapped
+// rows back into logical lines. Composer ownership uses this form so a narrow
+// pane cannot split a queued marker or generated AGM header out of view.
+func CapturePaneLogicalANSIOutputTargetContext(ctx context.Context, paneID string) (string, error) {
+	if !isPaneID(paneID) {
+		return "", fmt.Errorf("invalid tmux pane ID %q", paneID)
+	}
+	return capturePaneTargetWithOptions(ctx, paneID, 0, true, true)
+}
+
 // CapturePaneHistoryOutput captures all available scrollback from a session's
 // active pane.
 func CapturePaneHistoryOutput(sessionName string) (string, error) {
@@ -78,6 +89,10 @@ func capturePane(parent context.Context, sessionName string, lines int, preserve
 }
 
 func capturePaneTarget(parent context.Context, target string, lines int, preserveStyle bool) (string, error) {
+	return capturePaneTargetWithOptions(parent, target, lines, preserveStyle, false)
+}
+
+func capturePaneTargetWithOptions(parent context.Context, target string, lines int, preserveStyle, joinWrapped bool) (string, error) {
 	if parent == nil {
 		parent = context.Background()
 	}
@@ -85,7 +100,7 @@ func capturePaneTarget(parent context.Context, target string, lines int, preserv
 	policy := CapturePanePolicy()
 	ctx, cancel := context.WithTimeout(parent, policy.Timeout)
 	defer cancel()
-	cmd := newCapturePaneTargetCommandWithStyle(ctx, target, lines, policy, preserveStyle)
+	cmd := newCapturePaneTargetCommandWithOptions(ctx, target, lines, policy, preserveStyle, joinWrapped)
 
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
@@ -122,7 +137,11 @@ func newCapturePaneCommandWithStyle(ctx context.Context, sessionName string, lin
 }
 
 func newCapturePaneTargetCommandWithStyle(ctx context.Context, target string, lines int, policy CapturePolicy, preserveStyle bool) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "tmux", capturePaneTargetCommandArgs(target, lines, preserveStyle)...)
+	return newCapturePaneTargetCommandWithOptions(ctx, target, lines, policy, preserveStyle, false)
+}
+
+func newCapturePaneTargetCommandWithOptions(ctx context.Context, target string, lines int, policy CapturePolicy, preserveStyle, joinWrapped bool) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "tmux", capturePaneTargetCommandArgsWithOptions(target, lines, preserveStyle, joinWrapped)...)
 	if policy.IsolateProcessGroup {
 		cmd.SysProcAttr = procguard.ProcessGroupAttr()
 		cmd.Cancel = func() error {
@@ -154,6 +173,10 @@ func capturePaneCommandArgs(sessionName string, lines int, preserveStyle bool) [
 }
 
 func capturePaneTargetCommandArgs(target string, lines int, preserveStyle bool) []string {
+	return capturePaneTargetCommandArgsWithOptions(target, lines, preserveStyle, false)
+}
+
+func capturePaneTargetCommandArgsWithOptions(target string, lines int, preserveStyle, joinWrapped bool) []string {
 	start := "-"
 	if lines > 0 {
 		start = fmt.Sprintf("-%d", lines)
@@ -166,6 +189,9 @@ func capturePaneTargetCommandArgs(target string, lines int, preserveStyle bool) 
 	}
 	if preserveStyle {
 		args = append(args, "-e")
+	}
+	if joinWrapped {
+		args = append(args, "-J")
 	}
 	return append(args, "-S", start)
 }

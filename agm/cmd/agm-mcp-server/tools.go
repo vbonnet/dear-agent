@@ -428,6 +428,13 @@ func createSessionRequestFromMCP(input CreateSessionInput) *ops.CreateSessionReq
 }
 
 func addSendMessageTool(server *mcp.Server, _ *Config) {
+	addSendMessageToolWithFactory(server, newMCPOpContextWithTmux)
+}
+
+// addSendMessageToolWithFactory exercises the complete MCP transport while
+// allowing tests to prove that a context carrying tmux still routes pure API
+// manifests through the shared adapter transaction first.
+func addSendMessageToolWithFactory(server *mcp.Server, newOpContext mcpOpContextFactory) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "agm_send_message",
 		Description: "Send a message to a running AGM session. Use when you need to deliver a prompt or instruction to an existing session.",
@@ -447,7 +454,7 @@ func addSendMessageTool(server *mcp.Server, _ *Config) {
 			return mcpError(ops.ErrInvalidInput("message", "Message text is required.")), nil, nil
 		}
 
-		opCtx, cleanup, err := newMCPOpContextWithTmux()
+		opCtx, cleanup, err := newOpContext()
 		if err != nil {
 			span.RecordError(err)
 			return mcpError(err), nil, nil
