@@ -57,6 +57,7 @@ type createReadinessTmux struct {
 	order   *[]string
 	waitErr error
 	waitCtx context.Context
+	atomic  func()
 }
 
 func (t *createReadinessTmux) SendKeys(sessionName, keys string) error {
@@ -76,6 +77,18 @@ func (t *createReadinessTmux) WaitForHarnessReady(ctx context.Context, sessionNa
 		return fmt.Errorf("readiness timeout = %v, want %v", timeout, sharedHarnessReadyTimeout)
 	}
 	return t.waitErr
+}
+
+func (t *createReadinessTmux) SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string) (session.InputReadiness, error) {
+	if t.atomic != nil {
+		t.atomic()
+	}
+	sentBefore := len(t.SentCommands)
+	readiness, err := t.MockTmux.SendKeysIfInputReady(ctx, sessionName, harness, keys)
+	if len(t.SentCommands) > sentBefore {
+		*t.order = append(*t.order, "prompt")
+	}
+	return readiness, err
 }
 
 func TestWaitForCreatedHarnessReadyPropagatesRequestContext(t *testing.T) {
@@ -909,6 +922,76 @@ func TestCreateSession_LifecycleOrder(t *testing.T) {
 	want := []string{"launch", "ready", "storage", "register", "complete", "cleanup"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("lifecycle order = %v, want %v", order, want)
+	}
+}
+
+func TestCreateSession_NoRuntimeInitialPromptRevalidatesAfterRegistration(t *testing.T) {
+	t.Parallel()
+
+	callerCtx := t.Context()
+	var order []string
+	registered := false
+	tmuxMock := &createReadinessTmux{MockTmux: session.NewMockTmux(), order: &order}
+	tmuxMock.InputReadiness = session.InputReadiness{State: "PERMISSION", PaneID: "%42"}
+	tmuxMock.atomic = func() {
+		if !registered {
+			t.Fatal("atomic initial-prompt readiness ran before registration")
+		}
+	}
+	store := &createMockStorage{createOrder: &order, onCreate: func() { registered = true }}
+
+	_, err := CreateSessionWithContext(callerCtx, &OpContext{Tmux: tmuxMock, Storage: store}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "atomic-prompt", SessionID: "atomic-prompt-id",
+		Harness: "claude-code", Model: "sonnet", Prompt: "do not inject",
+	})
+	if err == nil || !strings.Contains(err.Error(), "harness input is PERMISSION") {
+		t.Fatalf("CreateSessionWithContext() error = %v, want post-registration permission rejection", err)
+	}
+	if !reflect.DeepEqual(tmuxMock.AtomicInputChecks, []string{"atomic-prompt:claude-code"}) {
+		t.Fatalf("atomic input checks = %v", tmuxMock.AtomicInputChecks)
+	}
+	if tmuxMock.InputContext != callerCtx {
+		t.Fatal("atomic initial-prompt readiness did not receive the caller context")
+	}
+	if len(tmuxMock.SentCommands) != 1 || len(tmuxMock.ExactPaneDeliveries) != 0 {
+		t.Fatalf("tmux deliveries = commands %v panes %v, want launch only", tmuxMock.SentCommands, tmuxMock.ExactPaneDeliveries)
+	}
+	if !reflect.DeepEqual(store.deleted, []string{"atomic-prompt-id"}) || tmuxMock.Sessions["atomic-prompt"] {
+		t.Fatalf("failed prompt rollback = deleted %v sessionExists %v", store.deleted, tmuxMock.Sessions["atomic-prompt"])
+	}
+}
+
+func TestCreateSession_NoRuntimeInitialPromptUsesAtomicExactPaneDelivery(t *testing.T) {
+	t.Parallel()
+
+	callerCtx := t.Context()
+	var order []string
+	registered := false
+	tmuxMock := &createReadinessTmux{MockTmux: session.NewMockTmux(), order: &order}
+	tmuxMock.InputReadiness = session.InputReadiness{Ready: true, State: "YES", PaneID: "%42"}
+	tmuxMock.atomic = func() {
+		if !registered {
+			t.Fatal("atomic initial-prompt readiness ran before registration")
+		}
+	}
+	store := &createMockStorage{createOrder: &order, onCreate: func() { registered = true }}
+
+	_, err := CreateSessionWithContext(callerCtx, &OpContext{Tmux: tmuxMock, Storage: store}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "atomic-prompt", SessionID: "atomic-prompt-id",
+		Harness: "claude-code", Model: "sonnet", Prompt: "deliver exactly once",
+	})
+	if err != nil {
+		t.Fatalf("CreateSessionWithContext() error = %v", err)
+	}
+	if !reflect.DeepEqual(tmuxMock.AtomicInputChecks, []string{"atomic-prompt:claude-code"}) ||
+		!reflect.DeepEqual(tmuxMock.ExactPaneDeliveries, []string{"%42"}) {
+		t.Fatalf("atomic input = checks %v panes %v", tmuxMock.AtomicInputChecks, tmuxMock.ExactPaneDeliveries)
+	}
+	if tmuxMock.InputContext != callerCtx || tmuxMock.PaneSendContext != callerCtx {
+		t.Fatal("atomic initial-prompt delivery did not retain the caller context")
+	}
+	if len(tmuxMock.SentCommands) != 2 || tmuxMock.SentCommands[1] != "deliver exactly once" {
+		t.Fatalf("tmux commands = %v, want launch then exact initial prompt", tmuxMock.SentCommands)
 	}
 }
 

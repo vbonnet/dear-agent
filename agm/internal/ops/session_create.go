@@ -636,10 +636,7 @@ func completeCreatedSession(callCtx context.Context, opCtx *OpContext, req *Crea
 	if req.Prompt == "" || launchResult.PromptDelivered {
 		return nil
 	}
-	if err := opCtx.Tmux.SendKeys(name, req.Prompt); err != nil {
-		return ErrStorageError("tmux.SendKeys(prompt)", err)
-	}
-	return nil
+	return sendCreatedInputAtomically(callCtx, opCtx, name, m.Harness, req.Prompt, "create.initial-prompt")
 }
 
 func bootstrapAgyCreateIdentity(callCtx context.Context, opCtx *OpContext, sessionName, prompt string) error {
@@ -656,22 +653,29 @@ func bootstrapAgyCreateIdentity(callCtx context.Context, opCtx *OpContext, sessi
 		}
 		return nil
 	}
+	return sendCreatedInputAtomically(callCtx, opCtx, sessionName, "agy", prompt, "agy.identity.bootstrap-prompt")
+}
+
+func sendCreatedInputAtomically(callCtx context.Context, opCtx *OpContext, sessionName, harness, input, operation string) error {
+	if err := callCtx.Err(); err != nil {
+		return err
+	}
 	sender, ok := opCtx.Tmux.(session.AtomicInputSender)
 	if !ok {
-		return ErrStorageError("agy.identity.bootstrap-prompt", fmt.Errorf("tmux backend does not expose atomic input delivery"))
+		return ErrStorageError(operation, fmt.Errorf("tmux backend does not expose atomic input delivery"))
 	}
-	readiness, err := sender.SendKeysIfInputReady(callCtx, sessionName, "agy", prompt)
+	readiness, err := sender.SendKeysIfInputReady(callCtx, sessionName, harness, input)
 	if err != nil {
 		if ctxErr := callCtx.Err(); ctxErr != nil {
 			return ctxErr
 		}
-		return ErrStorageError("agy.identity.bootstrap-prompt", err)
+		return ErrStorageError(operation, err)
 	}
 	if !readiness.Ready {
-		return ErrStorageError("agy.identity.bootstrap-prompt", fmt.Errorf("harness input is %s", readiness.State))
+		return ErrStorageError(operation, fmt.Errorf("harness input is %s", readiness.State))
 	}
 	if readiness.PaneID == "" {
-		return ErrStorageError("agy.identity.bootstrap-prompt", fmt.Errorf("harness returned no verified pane"))
+		return ErrStorageError(operation, fmt.Errorf("harness returned no verified pane"))
 	}
 	return nil
 }
