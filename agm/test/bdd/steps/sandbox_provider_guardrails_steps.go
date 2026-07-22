@@ -175,7 +175,15 @@ func scopedWorktreeInventory(root, porcelain string) (string, error) {
 }
 
 func pathWithinDirectory(root, path string) (bool, error) {
-	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
+	canonicalRoot, err := filepath.EvalSymlinks(filepath.Clean(root))
+	if err != nil {
+		return false, fmt.Errorf("resolve invoking repository root %q: %w", root, err)
+	}
+	canonicalPath, err := filepath.EvalSymlinks(filepath.Clean(path))
+	if err != nil {
+		return false, fmt.Errorf("resolve worktree path %q: %w", path, err)
+	}
+	rel, err := filepath.Rel(canonicalRoot, canonicalPath)
 	if err != nil {
 		return false, fmt.Errorf("compare worktree path %q with root %q: %w", path, root, err)
 	}
