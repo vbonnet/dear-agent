@@ -111,6 +111,8 @@ Provide a production-ready CLI that:
 
 **CLI-40** When CLI session creation has registered a supported harness and must deliver `--prompt` or `--prompt-file`, the completion boundary shall atomically revalidate that the expected harness owns the foreground terminal and an empty composer, then send to the exact verified pane under the same mutation boundary; an unready, background, suspended, wrong, or missing harness, a focus change, an invalid pane proof, or caller cancellation shall not deliver the startup prompt.
 
+**CLI-41** When `agm session new` provisions a sandbox for any harness, the system shall start the shared harness lifecycle from the provider-mapped counterpart of the requested project directory and shall persist both that directory and the sandbox workspace root.
+
 ## Requirements
 
 ### Functional Requirements

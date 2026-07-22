@@ -188,7 +188,8 @@ type SandboxConfig struct {
 	Enabled    bool      `yaml:"enabled"`               // Whether sandbox is enabled for this session
 	ID         string    `yaml:"id,omitempty"`          // Sandbox ID (usually matches SessionID)
 	Provider   string    `yaml:"provider,omitempty"`    // Provider type (overlayfs, apfs, mock)
-	MergedPath string    `yaml:"merged_path,omitempty"` // Path where agents operate
+	MergedPath string    `yaml:"merged_path,omitempty"` // Root and cleanup boundary of the materialized workspace
+	WorkingDir string    `yaml:"working_dir,omitempty"` // Provider-mapped directory where the harness operates
 	CreatedAt  time.Time `yaml:"created_at,omitempty"`  // When sandbox was created
 }
 

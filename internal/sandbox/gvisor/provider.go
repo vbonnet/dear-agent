@@ -70,13 +70,23 @@ func (p *Provider) Create(ctx context.Context, req sandbox.SandboxRequest) (*san
 	upperDir := filepath.Join(req.WorkspaceDir, "upper")
 	workDir := filepath.Join(req.WorkspaceDir, "work")
 	mergedDir := filepath.Join(req.WorkspaceDir, "merged")
+	workingDir, matchedRepo, err := sandbox.MapFlatWorkingDir(req.WorkingDir, req.LowerDirs, mergedDir)
+	if err != nil {
+		return nil, err
+	}
+	targetRepo := req.TargetRepo
+	if matchedRepo != "" {
+		// The requested directory is authoritative. Materializing a different
+		// target repository would make the mapped path point at unrelated data.
+		targetRepo = matchedRepo
+	}
 
 	if err := p.createDirectories(upperDir, workDir, mergedDir); err != nil {
 		return nil, sandbox.WrapError(sandbox.ErrCodePermissionDenied,
 			"failed to create sandbox directories", err)
 	}
 
-	worktreeRepo, worktreeCreated := p.tryCreateWorktree(req.LowerDirs, req.SessionID, mergedDir, req.TargetRepo)
+	worktreeRepo, worktreeCreated := p.tryCreateWorktree(req.LowerDirs, req.SessionID, mergedDir, targetRepo)
 	if !worktreeCreated {
 		fmt.Fprintf(os.Stderr, "gvisor: no git repo in lower dirs, falling back to symlinks\n")
 		if err := p.populateMergedDir(req.LowerDirs, mergedDir); err != nil {
@@ -116,6 +126,7 @@ func (p *Provider) Create(ctx context.Context, req sandbox.SandboxRequest) (*san
 	sb := &sandbox.Sandbox{
 		ID:          req.SessionID,
 		MergedPath:  mergedDir,
+		WorkingDir:  workingDir,
 		UpperPath:   upperDir,
 		WorkPath:    workDir,
 		Type:        p.Name(),

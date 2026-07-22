@@ -26,6 +26,11 @@ Feature: Sandbox provider guardrails
     When AGM runs the sandbox provider cleanup retry regressions
     Then failed destruction should resume at the unfinished cleanup phase
 
+  Scenario: Sandbox sessions preserve the requested project directory
+    When AGM runs the sandbox working directory regressions
+    Then sandbox providers should preserve the requested project directory
+    And AGM should route the mapped directory through the shared harness lifecycle
+
   Scenario: Wayfinder sandbox regressions preserve the invoking repository
     Given the invoking repository worktree inventory is captured
     When Wayfinder sandbox isolation regressions run

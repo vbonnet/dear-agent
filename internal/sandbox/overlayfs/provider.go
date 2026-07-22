@@ -60,6 +60,10 @@ func (p *Provider) Create(ctx context.Context, req sandbox.SandboxRequest) (*san
 	upperDir := filepath.Join(req.WorkspaceDir, "upper")
 	workDir := filepath.Join(req.WorkspaceDir, "work")
 	mergedDir := filepath.Join(req.WorkspaceDir, "merged")
+	workingDir, _, err := sandbox.MapFlatWorkingDir(req.WorkingDir, req.LowerDirs, mergedDir)
+	if err != nil {
+		return nil, err
+	}
 
 	if err := p.createDirectories(upperDir, workDir, mergedDir); err != nil {
 		return nil, sandbox.WrapError(sandbox.ErrCodePermissionDenied,
@@ -98,6 +102,7 @@ func (p *Provider) Create(ctx context.Context, req sandbox.SandboxRequest) (*san
 	sb := &sandbox.Sandbox{
 		ID:         req.SessionID,
 		MergedPath: mergedDir,
+		WorkingDir: workingDir,
 		UpperPath:  upperDir,
 		WorkPath:   workDir,
 		Type:       p.Name(),

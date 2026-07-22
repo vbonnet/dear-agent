@@ -63,6 +63,10 @@ func (p *OverlayFSProvider) Create(ctx context.Context, req SandboxRequest) (*Sa
 	upperDir := filepath.Join(req.WorkspaceDir, "upper")
 	workDir := filepath.Join(req.WorkspaceDir, "work")
 	mergedDir := filepath.Join(req.WorkspaceDir, "merged")
+	workingDir, _, err := MapFlatWorkingDir(req.WorkingDir, req.LowerDirs, mergedDir)
+	if err != nil {
+		return nil, err
+	}
 
 	if err := p.createDirectories(upperDir, workDir, mergedDir); err != nil {
 		return nil, WrapError(ErrCodePermissionDenied,
@@ -101,6 +105,7 @@ func (p *OverlayFSProvider) Create(ctx context.Context, req SandboxRequest) (*Sa
 	sb := &Sandbox{
 		ID:         req.SessionID,
 		MergedPath: mergedDir,
+		WorkingDir: workingDir,
 		UpperPath:  upperDir,
 		WorkPath:   workDir,
 		Type:       p.Name(),

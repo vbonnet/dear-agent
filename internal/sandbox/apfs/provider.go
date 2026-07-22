@@ -69,6 +69,14 @@ func (p *Provider) Create(ctx context.Context, req sandbox.SandboxRequest) (*san
 	// Create directory structure
 	upperDir := filepath.Join(req.WorkspaceDir, "upper")
 	mergedDir := filepath.Join(req.WorkspaceDir, "merged")
+	workingDir := mergedDir
+	if req.WorkingDir != "" {
+		match, matchErr := sandbox.MatchWorkingDir(req.WorkingDir, req.LowerDirs)
+		if matchErr != nil {
+			return nil, matchErr
+		}
+		workingDir = filepath.Join(mergedDir, fmt.Sprintf("repo%d", match.LowerIndex), match.RelativeDir)
+	}
 
 	if err := os.MkdirAll(upperDir, 0755); err != nil {
 		return nil, sandbox.WrapError(sandbox.ErrCodePermissionDenied,
@@ -119,6 +127,7 @@ func (p *Provider) Create(ctx context.Context, req sandbox.SandboxRequest) (*san
 	sb := &sandbox.Sandbox{
 		ID:         req.SessionID,
 		MergedPath: mergedDir,
+		WorkingDir: workingDir,
 		UpperPath:  upperDir,
 		WorkPath:   "", // Not used on macOS (no overlay workdir)
 		Type:       p.Name(),

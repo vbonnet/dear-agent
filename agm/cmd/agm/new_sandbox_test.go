@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/internal/sandbox"
@@ -101,7 +103,7 @@ func TestSandboxIntegration_Documentation(t *testing.T) {
 	t.Log("BEHAVIOR:")
 	t.Log("- Default: Sandbox enabled (config.Sandbox.Enabled=true)")
 	t.Log("- If --no-sandbox: Sandbox disabled")
-	t.Log("- If sandbox enabled: workDir changed to sandbox merged path")
+	t.Log("- If sandbox enabled: workDir changed to the provider-mapped project directory")
 	t.Log("- If error during creation: Sandbox cleaned up automatically")
 }
 
@@ -199,8 +201,131 @@ func TestResolveSandboxLowerDirs_FallsBackToWorkDirWhenGitRepo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveSandboxLowerDirs(%s) error = %v, want nil (valid git repo)", workDir, err)
 	}
-	if len(dirs) != 1 || dirs[0] != workDir {
-		t.Errorf("resolveSandboxLowerDirs() = %v, want [%s]", dirs, workDir)
+	wantRoot, err := filepath.EvalSymlinks(workDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dirs) != 1 || dirs[0] != wantRoot {
+		t.Errorf("resolveSandboxLowerDirs() = %v, want [%s]", dirs, wantRoot)
+	}
+}
+
+func TestResolveSandboxLowerDirs_FallsBackToContainingGitRepoForSubdirectory(t *testing.T) {
+	withEmptySandboxRepoConfig(t)
+	t.Setenv("HOME", t.TempDir())
+	repoRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	workDir := filepath.Join(repoRoot, "agm", "cmd", "agm")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	dirs, err := resolveSandboxLowerDirs(workDir)
+	if err != nil {
+		t.Fatalf("resolveSandboxLowerDirs(%s) error = %v", workDir, err)
+	}
+	wantRoot, err := filepath.EvalSymlinks(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dirs) != 1 || dirs[0] != wantRoot {
+		t.Fatalf("resolveSandboxLowerDirs() = %v, want containing repo [%s]", dirs, wantRoot)
+	}
+}
+
+func TestFindPrimaryRepoUsesRequestedDirectoryInsteadOfProcessCWD(t *testing.T) {
+	firstRepo := t.TempDir()
+	targetRepo := t.TempDir()
+	targetWorkDir := filepath.Join(targetRepo, "wayfinder")
+	if err := os.MkdirAll(targetWorkDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := findPrimaryRepo([]string{firstRepo, targetRepo}, targetWorkDir); got != targetRepo {
+		t.Fatalf("findPrimaryRepo() = %q, want requested repo %q", got, targetRepo)
+	}
+}
+
+func TestMaybeProvisionSandboxReturnsProviderMappedWorkingDirectory(t *testing.T) {
+	originalCfg := cfg
+	originalEnableSandbox := enableSandbox
+	originalNoSandbox := noSandbox
+	originalProvider := sandboxProvider
+	t.Cleanup(func() {
+		cfg = originalCfg
+		enableSandbox = originalEnableSandbox
+		noSandbox = originalNoSandbox
+		sandboxProvider = originalProvider
+	})
+
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	repoRoot := t.TempDir()
+	requestedDir := filepath.Join(repoRoot, ".agents", "skills")
+	if err := os.MkdirAll(requestedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg = &config.Config{Sandbox: config.SandboxConfig{Enabled: true, Repos: []string{repoRoot}}}
+	enableSandbox = false
+	noSandbox = false
+	sandboxProvider = "mock"
+
+	sandboxInfo, workingDir, err := maybeProvisionSandbox(context.Background(), "mapped-session", requestedDir)
+	if err != nil {
+		t.Fatalf("maybeProvisionSandbox() error = %v", err)
+	}
+	wantWorkingDir := filepath.Join(homeDir, ".agm", "sandboxes", "mapped-session", "merged", ".agents", "skills")
+	if workingDir != wantWorkingDir {
+		t.Fatalf("workingDir = %q, want %q", workingDir, wantWorkingDir)
+	}
+	if sandboxInfo == nil || sandboxInfo.WorkingDir != wantWorkingDir {
+		t.Fatalf("SandboxConfig = %+v, want persisted mapped working directory %q", sandboxInfo, wantWorkingDir)
+	}
+	if sandboxInfo.MergedPath == sandboxInfo.WorkingDir {
+		t.Fatalf("merged root %q must remain distinct from nested working directory", sandboxInfo.MergedPath)
+	}
+}
+
+type emptyWorkingDirProvider struct {
+	destroyed *bool
+}
+
+func (p *emptyWorkingDirProvider) Create(_ context.Context, req sandbox.SandboxRequest) (*sandbox.Sandbox, error) {
+	return &sandbox.Sandbox{
+		ID:         req.SessionID,
+		MergedPath: filepath.Join(req.WorkspaceDir, "merged"),
+		CreatedAt:  time.Now(),
+	}, nil
+}
+
+func (p *emptyWorkingDirProvider) Destroy(_ context.Context, _ string) error {
+	*p.destroyed = true
+	return nil
+}
+
+func (*emptyWorkingDirProvider) Validate(context.Context, string) error { return nil }
+func (*emptyWorkingDirProvider) Name() string                           { return "empty-working-dir-test" }
+
+func TestProvisionSandboxCleansUpProviderThatViolatesWorkingDirectoryContract(t *testing.T) {
+	originalCfg := cfg
+	t.Cleanup(func() { cfg = originalCfg })
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	repoRoot := t.TempDir()
+	destroyed := false
+	sandbox.RegisterProvider("empty-working-dir-test", func() sandbox.Provider {
+		return &emptyWorkingDirProvider{destroyed: &destroyed}
+	})
+	cfg = &config.Config{Sandbox: config.SandboxConfig{Enabled: true, Repos: []string{repoRoot}}}
+
+	_, err := provisionSandbox(context.Background(), "empty-working-dir-test", "contract-session", repoRoot)
+	if err == nil {
+		t.Fatal("provisionSandbox() error = nil, want provider contract failure")
+	}
+	if !destroyed {
+		t.Fatal("provisionSandbox() did not clean up workspace after provider contract failure")
 	}
 }
 

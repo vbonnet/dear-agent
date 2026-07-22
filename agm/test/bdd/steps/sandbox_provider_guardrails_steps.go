@@ -54,6 +54,9 @@ func RegisterSandboxProviderGuardrailSteps(ctx *godog.ScenarioContext) {
 	})
 	ctx.Step(`^AGM runs the sandbox provider cleanup retry regressions$`, agmRunsSandboxProviderCleanupRetryRegressions)
 	ctx.Step(`^failed destruction should resume at the unfinished cleanup phase$`, failedSandboxDestructionShouldResumeAtUnfinishedPhase)
+	ctx.Step(`^AGM runs the sandbox working directory regressions$`, agmRunsSandboxWorkingDirectoryRegressions)
+	ctx.Step(`^sandbox providers should preserve the requested project directory$`, sandboxProvidersShouldPreserveRequestedProjectDirectory)
+	ctx.Step(`^AGM should route the mapped directory through the shared harness lifecycle$`, agmShouldRouteMappedDirectoryThroughSharedHarnessLifecycle)
 	ctx.Step(`^the invoking repository worktree inventory is captured$`, captureInvokingRepositoryWorktrees)
 	ctx.Step(`^Wayfinder sandbox isolation regressions run$`, runWayfinderSandboxIsolationRegressions)
 	ctx.Step(`^the Wayfinder sandbox isolation regressions should pass$`, wayfinderSandboxIsolationRegressionsShouldPass)
@@ -79,6 +82,57 @@ func failedSandboxDestructionShouldResumeAtUnfinishedPhase(ctx context.Context) 
 	}
 	if state.err != nil {
 		return fmt.Errorf("sandbox provider cleanup retry regressions: %w: %s", state.err, state.output)
+	}
+	return nil
+}
+
+func agmRunsSandboxWorkingDirectoryRegressions(ctx context.Context) error {
+	state, ok := ctx.Value(sandboxProviderCleanupStateKey{}).(*sandboxProviderCleanupState)
+	if !ok || state == nil {
+		return fmt.Errorf("sandbox provider cleanup state not initialized")
+	}
+	state.output, state.err = runSandboxProviderCommand(ctx, 2*time.Minute,
+		"go", "test", "-v", "-count=1", "-timeout=90s", "-run",
+		`^(TestMatchWorkingDir.*|TestMapFlatWorkingDir.*|TestProvider_CreateMapsRequestedWorkingDirectoryIntoMatchingClone|TestResolveSandboxLowerDirs_FallsBackToContainingGitRepoForSubdirectory|TestFindPrimaryRepoUsesRequestedDirectoryInsteadOfProcessCWD|TestMaybeProvisionSandboxReturnsProviderMappedWorkingDirectory|TestProvisionSandboxCleansUpProviderThatViolatesWorkingDirectoryContract)$`,
+		"./internal/sandbox", "./internal/sandbox/apfs", "./agm/cmd/agm",
+	)
+	return nil
+}
+
+func sandboxProvidersShouldPreserveRequestedProjectDirectory(ctx context.Context) error {
+	state, ok := ctx.Value(sandboxProviderCleanupStateKey{}).(*sandboxProviderCleanupState)
+	if !ok || state == nil {
+		return fmt.Errorf("sandbox provider cleanup state not initialized")
+	}
+	if state.err != nil {
+		return fmt.Errorf("sandbox working directory regressions: %w: %s", state.err, state.output)
+	}
+	for _, name := range []string{
+		"TestMatchWorkingDirPreservesNestedRelativePath",
+		"TestMatchWorkingDirSelectsMostSpecificConfiguredRepository",
+		"TestMatchWorkingDirResolvesSymlinkAliases",
+	} {
+		if !strings.Contains(state.output, "--- PASS: "+name) {
+			return fmt.Errorf("sandbox working directory output does not show %s passing:\n%s", name, state.output)
+		}
+	}
+	return nil
+}
+
+func agmShouldRouteMappedDirectoryThroughSharedHarnessLifecycle(ctx context.Context) error {
+	state, ok := ctx.Value(sandboxProviderCleanupStateKey{}).(*sandboxProviderCleanupState)
+	if !ok || state == nil {
+		return fmt.Errorf("sandbox provider cleanup state not initialized")
+	}
+	for _, name := range []string{
+		"TestResolveSandboxLowerDirs_FallsBackToContainingGitRepoForSubdirectory",
+		"TestFindPrimaryRepoUsesRequestedDirectoryInsteadOfProcessCWD",
+		"TestMaybeProvisionSandboxReturnsProviderMappedWorkingDirectory",
+		"TestProvisionSandboxCleansUpProviderThatViolatesWorkingDirectoryContract",
+	} {
+		if !strings.Contains(state.output, "--- PASS: "+name) {
+			return fmt.Errorf("AGM sandbox lifecycle output does not show %s passing:\n%s", name, state.output)
+		}
 	}
 	return nil
 }

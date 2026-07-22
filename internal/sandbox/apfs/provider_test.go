@@ -105,6 +105,47 @@ func TestProvider_Create(t *testing.T) {
 	}
 }
 
+func TestProvider_CreateMapsRequestedWorkingDirectoryIntoMatchingClone(t *testing.T) {
+	root := t.TempDir()
+	otherRepo := filepath.Join(root, "other")
+	targetRepo := filepath.Join(root, "dear-agent")
+	requestedDir := filepath.Join(targetRepo, ".agents", "skills")
+	if err := os.MkdirAll(otherRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(requestedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(requestedDir, "SKILL.md")
+	if err := os.WriteFile(marker, []byte("sandbox discovery marker"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	provider := NewProvider()
+	sb, err := provider.Create(context.Background(), sandbox.SandboxRequest{
+		SessionID:    "mapped-workdir",
+		LowerDirs:    []string{otherRepo, targetRepo},
+		WorkingDir:   requestedDir,
+		WorkspaceDir: filepath.Join(root, "workspace"),
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if destroyErr := provider.Destroy(context.Background(), sb.ID); destroyErr != nil {
+			t.Errorf("Destroy() error = %v", destroyErr)
+		}
+	})
+
+	wantWorkingDir := filepath.Join(sb.MergedPath, "repo1", ".agents", "skills")
+	if sb.WorkingDir != wantWorkingDir {
+		t.Fatalf("WorkingDir = %q, want %q", sb.WorkingDir, wantWorkingDir)
+	}
+	if _, err := os.Stat(filepath.Join(sb.WorkingDir, "SKILL.md")); err != nil {
+		t.Fatalf("mapped repository instructions are not visible from WorkingDir: %v", err)
+	}
+}
+
 func TestProvider_Validate(t *testing.T) {
 	tmpDir := t.TempDir()
 	lowerDir := filepath.Join(tmpDir, "lower")

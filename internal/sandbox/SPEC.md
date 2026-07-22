@@ -8,6 +8,10 @@
 
 **SNDBR-03** When Git worktree removal succeeds but subsequent sandbox directory cleanup fails, the system shall resume a retry at directory cleanup without repeating the completed Git removal phase.
 
+**SNDBR-04** When a sandbox request names a working directory inside a configured lower directory, the provider shall return the corresponding isolated directory while preserving its repository-relative path.
+
+**SNDBR-05** If a requested working directory is outside every configured lower directory, the provider shall fail before materializing a workspace rather than launch from an unrelated repository.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
@@ -81,6 +85,7 @@ if err != nil {
 sb, err := provider.Create(ctx, sandbox.SandboxRequest{
     SessionID:    "session-abc123",
     LowerDirs:    []string{"/path/to/repo1", "/path/to/repo2"},
+    WorkingDir:   "/path/to/repo2/agm",
     WorkspaceDir: "/tmp/sandboxes",
     Secrets: map[string]string{
         "ANTHROPIC_API_KEY": "sk-ant-...",
@@ -88,7 +93,7 @@ sb, err := provider.Create(ctx, sandbox.SandboxRequest{
     },
 })
 
-// Agent operates in sb.MergedPath
+// Harness operates in sb.WorkingDir; sb.MergedPath remains the workspace root.
 // All modifications go to sb.UpperPath (isolated)
 ```
 

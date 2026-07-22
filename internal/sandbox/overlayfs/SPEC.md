@@ -30,6 +30,8 @@ operate.
 
 **OVERLAYFS-09** When a sandbox is validated, the system shall require an active registry entry, an existing merged path, and a corresponding mount entry in `/proc/mounts`.
 
+**OVERLAYFS-10** When a request names a working directory inside a lower directory, the provider shall return `merged/<relative-directory>` as the harness working directory.
+
 ## BDD Traceability
 
 - `agm/test/bdd/features/sandbox_provider_guardrails.feature` enforces that this

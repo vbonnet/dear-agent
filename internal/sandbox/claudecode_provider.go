@@ -61,6 +61,7 @@ func (p *ClaudeCodeProvider) Create(ctx context.Context, req SandboxRequest) (*S
 	sb := &Sandbox{
 		ID:         req.SessionID,
 		MergedPath: mergedPath,
+		WorkingDir: mergedPath,
 		UpperPath:  "", // Not applicable for worktree mode
 		WorkPath:   "", // Not applicable for worktree mode
 		Type:       "claudecode-worktree",

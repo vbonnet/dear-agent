@@ -14,8 +14,8 @@ agm new
    -> maybeProvisionSandbox
    -> choose configured provider or auto-detect
    -> Provider.Create(SandboxRequest)
-   -> persist provider name and merged path in the session manifest
-   -> run the harness from the returned merged path
+   -> persist provider name, workspace root, and mapped working directory
+   -> run the harness from the returned working directory
 ```
 
 `agm/cmd/agm/new.go` blank-imports the platform provider packages so their
@@ -31,9 +31,13 @@ not register those subpackages.
 - `Validate` checks tracked workspace health;
 - `Name` reports the implementation identity stored in manifests.
 
-`SandboxRequest` supplies a session ID, lower/source directories, workspace
-directory, optional secrets, network-sharing request, and preferred target
-repository. `Sandbox` reports the merged, upper, and work paths when applicable.
+`SandboxRequest` supplies a session ID, lower/source directories, requested
+working directory, workspace directory, optional secrets, network-sharing
+request, and preferred target repository. `Sandbox` reports the workspace root,
+provider-mapped harness working directory, upper path, and work path when
+applicable. The provider owns this mapping seam because only its adapter knows
+whether repositories are overlaid at the root, cloned under `repoN`, or
+materialized as a selected worktree.
 
 Provider instances keep in-memory ownership maps. Reconstructing a provider and
 calling `Destroy` does not guarantee it can discover resources created by an
@@ -99,7 +103,9 @@ commands run under gVisor.
 
 The Darwin provider clones each lower directory under `upper` and makes
 `merged` a symlink to that directory. It is not a union filesystem. Multiple
-repositories remain separate children.
+repositories remain separate children. The returned working directory points
+through `merged/repoN` to the clone corresponding to the requested host path,
+including any repository-relative subdirectory.
 
 ### Claude Code worktree
 
