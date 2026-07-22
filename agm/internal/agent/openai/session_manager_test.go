@@ -1,11 +1,53 @@
 package openai
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestWithSessionLockContextCancelsContendedWait(t *testing.T) {
+	sm, err := NewSessionManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewSessionManager() error: %v", err)
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- sm.WithSessionLock("context-lock", func() error {
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first session lock was not acquired")
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Millisecond)
+	defer cancel()
+	callbackCalled := false
+	err = sm.WithSessionLockContext(ctx, "context-lock", func() error {
+		callbackCalled = true
+		return nil
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("contended context lock error = %v, want deadline exceeded", err)
+	}
+	if callbackCalled {
+		t.Fatal("contended callback ran after its context expired")
+	}
+	close(release)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("release first session lock: %v", err)
+	}
+}
 
 func TestNewSessionManager(t *testing.T) {
 	tempDir := t.TempDir()

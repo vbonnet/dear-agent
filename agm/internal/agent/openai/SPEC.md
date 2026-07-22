@@ -25,6 +25,8 @@ errors for callers that need harness-neutral failure handling.
 
 **OAI-07** When an OpenAI adapter sends to a session, the system shall serialize the complete history-read, provider-completion, and persistence transaction across adapter instances and processes; it shall send the latest completed history plus the new user message, commit the user and assistant messages as one completed turn only after provider success, and leave durable history unchanged when completion fails.
 
+**OAI-08** When an OpenAI adapter waits for the store-scoped session lock or calls the provider, the system shall honor the caller's context and apply a finite provider deadline even for legacy callers without one; cancellation or timeout shall release the lock and shall leave durable history unchanged.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

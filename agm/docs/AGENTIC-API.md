@@ -29,11 +29,14 @@ persisted model, storage location, endpoint, and Azure settings. Credentials
 remain runtime-only. The adapter's session status is the final common delivery
 boundary, delivering only while it reports active or idle and failing closed
 before any pending artifact when status is unavailable, suspended, or
-terminated. Archived API sessions fail before adapter construction. A stable
-session-ID lock serializes reconstruction, readiness, provider completion, and
-completed-turn persistence across AGM processes; direct adapter callers use a
-store-scoped session lock as the same protection. Provider failures leave no
-provisional user message in durable history.
+terminated. Under a provider-appropriate stable session-ID lock, API delivery
+reloads lifecycle before adapter construction and shares that boundary with
+archive: an in-flight completed turn commits before archive, or delivery sees
+the archived lifecycle before paid provider work. The lock wait and provider
+completion honor request cancellation, and the provider call has a finite
+ceiling. Direct adapter callers use a context-aware store-scoped session lock
+and the same provider ceiling. Provider failures, cancellation, and timeouts
+leave no provisional user message in durable history.
 
 ## Error Code Catalog
 

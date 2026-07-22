@@ -26,6 +26,11 @@ type OpenAIAdapter struct {
 	runtimeConfig  openai.SessionRuntimeConfig
 }
 
+var (
+	_ Agent                = (*OpenAIAdapter)(nil)
+	_ ContextMessageSender = (*OpenAIAdapter)(nil)
+)
+
 // OpenAIConfig holds configuration for creating an OpenAI adapter.
 type OpenAIConfig struct {
 	// APIKey is the OpenAI API key.
@@ -327,7 +332,25 @@ func (a *OpenAIAdapter) GetSessionStatus(sessionID SessionID) (Status, error) {
 // serialized across adapter instances and processes. A failed completion does
 // not persist its provisional user message.
 func (a *OpenAIAdapter) SendMessage(sessionID SessionID, message Message) error {
-	return a.sessionManager.WithSessionLock(string(sessionID), func() error {
+	return a.SendMessageContext(context.Background(), sessionID, message)
+}
+
+// OpenAICompletionTimeout is the maximum duration of one provider-backed
+// completed-turn transaction, including a contended store-lock wait.
+const OpenAICompletionTimeout = 2 * time.Minute
+
+// SendMessageContext is the request-aware OpenAI delivery transaction. The
+// adapter applies a finite provider ceiling even when a legacy direct caller
+// supplies a background context, so a stalled provider cannot retain the
+// cross-process session lock indefinitely.
+func (a *OpenAIAdapter) SendMessageContext(ctx context.Context, sessionID SessionID, message Message) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	completionCtx, cancel := context.WithTimeout(ctx, OpenAICompletionTimeout)
+	defer cancel()
+
+	return a.sessionManager.WithSessionLockContext(completionCtx, string(sessionID), func() error {
 		if _, err := a.sessionManager.GetSession(string(sessionID)); err != nil {
 			return fmt.Errorf("session not found: %w", err)
 		}
@@ -343,7 +366,7 @@ func (a *OpenAIAdapter) SendMessage(sessionID SessionID, message Message) error 
 		}
 		requestHistory := append(append([]openai.Message(nil), history...), userMsg)
 
-		response, err := a.client.CreateChatCompletion(context.Background(), requestHistory)
+		response, err := a.client.CreateChatCompletion(completionCtx, requestHistory)
 		if err != nil {
 			return fmt.Errorf("OpenAI API call failed: %w", err)
 		}

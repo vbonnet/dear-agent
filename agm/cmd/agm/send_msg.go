@@ -720,7 +720,7 @@ func sendDirectlyWithDependencies(ctx context.Context, recipientSession, senderN
 
 	// Check if this is an API-based harness (OpenAI, etc.)
 	if isAPIBasedAgent(harnessType) {
-		return sendToAPIAgentIfReady(ctx, m, recipientSession, senderName, messageID, formattedMessage, promptFile, newAPIAgent)
+		return sendToAPIAgentIfReady(ctx, m, recipientSession, senderName, messageID, formattedMessage, promptFile, adapter, newAPIAgent)
 	}
 
 	// CLI-based harnesses share one atomic readiness-and-delivery operation.
@@ -780,18 +780,36 @@ func newAPIHarnessAdapter(ctx context.Context, m *manifest.Manifest) (agent.Agen
 	}
 }
 
-func sendToAPIAgentIfReady(ctx context.Context, m *manifest.Manifest, recipientSession, senderName, messageID, formattedMessage, promptFile string, newAPIAgent apiAgentFactory) error {
+func sendToAPIAgentIfReady(ctx context.Context, m *manifest.Manifest, recipientSession, senderName, messageID, formattedMessage, promptFile string, storage dolt.Storage, newAPIAgent apiAgentFactory) error {
+	if storage == nil {
+		return fmt.Errorf("verified API delivery requires session storage")
+	}
 	// Pure API sessions intentionally have no tmux pane. Their adapter's session
 	// status is therefore the only delivery readiness authority shared by
 	// single-recipient and fan-out sends. The stable session lock covers adapter
 	// reconstruction, readiness, provider completion, and history persistence so
 	// separate AGM processes cannot fork or corrupt one conversation.
-	return ops.WithSessionLockContext(ctx, m.SessionID, func() error {
-		agentAdapter, err := newAPIAgent(ctx, m)
+	return ops.WithAPISessionLockContext(ctx, m.SessionID, func() error {
+		current, err := storage.GetSession(m.SessionID)
+		if err != nil {
+			return fmt.Errorf("reload API session %q under mutation lock: %w", recipientSession, err)
+		}
+		if current == nil {
+			return ops.ErrSessionNotFound(m.SessionID)
+		}
+		if current.Lifecycle == manifest.LifecycleArchived {
+			archivedName := current.Name
+			if archivedName == "" {
+				archivedName = recipientSession
+			}
+			return ops.ErrSessionArchived(archivedName)
+		}
+
+		agentAdapter, err := newAPIAgent(ctx, current)
 		if err != nil {
 			return fmt.Errorf("create API harness adapter for %q: %w", recipientSession, err)
 		}
-		sessionID := agent.SessionID(m.SessionID)
+		sessionID := agent.SessionID(current.SessionID)
 		status, err := agentAdapter.GetSessionStatus(sessionID)
 		if err != nil {
 			return fmt.Errorf("check API session %q readiness: %w", recipientSession, err)
@@ -799,7 +817,7 @@ func sendToAPIAgentIfReady(ctx context.Context, m *manifest.Manifest, recipientS
 		if status != agent.StatusActive && status != agent.StatusIdle {
 			return fmt.Errorf("API session %q is not ready for direct delivery (status %s)", recipientSession, status)
 		}
-		return sendViaAgent(m, senderName, messageID, formattedMessage, promptFile, agentAdapter)
+		return sendViaAgentContext(ctx, current, senderName, messageID, formattedMessage, promptFile, agentAdapter)
 	})
 }
 
@@ -861,8 +879,7 @@ func sendViaSharedOperations(ctx context.Context, recipientSession, senderName, 
 	return nil
 }
 
-// sendViaAgent sends a message via Agent interface (for API-based harnesses like OpenAI)
-func sendViaAgent(m *manifest.Manifest, senderName, messageID, formattedMessage, promptFile string, agentAdapter agent.Agent) error {
+func sendViaAgentContext(ctx context.Context, m *manifest.Manifest, senderName, messageID, formattedMessage, promptFile string, agentAdapter agent.Agent) error {
 	// Create message
 	msg := agent.Message{
 		ID:        messageID,
@@ -878,7 +895,11 @@ func sendViaAgent(m *manifest.Manifest, senderName, messageID, formattedMessage,
 
 	// Send message via Agent interface
 	sessionID := agent.SessionID(m.SessionID)
-	if err := agentAdapter.SendMessage(sessionID, msg); err != nil {
+	contextSender, ok := agentAdapter.(agent.ContextMessageSender)
+	if !ok {
+		return fmt.Errorf("API harness adapter does not support context-aware delivery")
+	}
+	if err := contextSender.SendMessageContext(ctx, sessionID, msg); err != nil {
 		return fmt.Errorf("failed to send message via harness: %w", err)
 	}
 

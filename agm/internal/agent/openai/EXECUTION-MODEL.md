@@ -115,17 +115,20 @@ Since API-based execution has no shell access, hooks are **synthetic**:
 ```
 1. User types message in tmux/terminal
 2. AGM: Calls OpenAIAdapter.SendMessage(sessionID, message)
-3. Adapter: Acquires the store-scoped stable session lock
+3. Adapter: Acquires the context-aware store-scoped stable session lock
 4. SessionManager: Reloads completed conversation history from JSONL
-5. Client: Calls OpenAI API with completed history plus the new user message
+5. Client: Calls OpenAI API with completed history plus the new user message under a finite deadline
 6. Client: Receives the complete response
 7. SessionManager: Atomically commits the user and assistant messages as one turn
 8. Hook: Fires MessageSent synthetic hook
 9. Return: Display response to user
 
-If completion fails, neither provisional message is persisted. AGM CLI sends
-also hold the global stable session-ID mutation lock across reconstruction,
-readiness, completion, and the completed-turn commit.
+If completion fails, is canceled, or times out, neither provisional message is
+persisted and the store lock is released. AGM CLI sends also hold a longer,
+provider-appropriate stable session-ID mutation lock across a locked lifecycle
+reload, reconstruction, readiness, bounded completion, and the completed-turn
+commit. Archive uses the same boundary, so it cannot race a stale pre-lock
+lifecycle snapshot against paid provider work.
 ```
 
 ### Session Resumption

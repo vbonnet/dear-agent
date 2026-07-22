@@ -2,6 +2,8 @@ package ops
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -23,6 +25,76 @@ func TestArchiveOperationContextPropagatesCancellation(t *testing.T) {
 	}
 	if fallback := archiveOperationContext(&OpContext{}); fallback == nil {
 		t.Fatal("archive operation context fallback is nil")
+	}
+}
+
+func TestArchiveSessionSerializesWithAPIDeliveryMutationLock(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	storage := dolt.NewMockAdapter()
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "api-archive-lock-id",
+		Name:          "api-archive-lock",
+		Harness:       "openai",
+		IsTest:        true,
+		CreatedAt:     time.Now().Add(-time.Hour),
+		UpdatedAt:     time.Now().Add(-time.Hour),
+		Context:       manifest.Context{Project: t.TempDir()},
+	}
+	if err := storage.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+
+	type archiveOutcome struct {
+		result *ArchiveSessionResult
+		err    error
+	}
+	archiveStarted := make(chan struct{})
+	archiveDone := make(chan archiveOutcome, 1)
+	err := WithAPISessionLockContext(t.Context(), m.SessionID, func() error {
+		go func() {
+			close(archiveStarted)
+			result, archiveErr := ArchiveSession(&OpContext{Context: t.Context(), Storage: storage}, &ArchiveSessionRequest{
+				Identifier: m.SessionID,
+				Force:      true,
+			})
+			archiveDone <- archiveOutcome{result: result, err: archiveErr}
+		}()
+		<-archiveStarted
+		select {
+		case outcome := <-archiveDone:
+			return errors.Join(fmt.Errorf("archive crossed the API delivery mutation lock: result=%#v", outcome.result), outcome.err)
+		case <-time.After(100 * time.Millisecond):
+		}
+		current, getErr := storage.GetSession(m.SessionID)
+		if getErr != nil {
+			return getErr
+		}
+		if current.Lifecycle == manifest.LifecycleArchived {
+			return fmt.Errorf("archive mutated lifecycle before acquiring the shared lock")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("hold API delivery mutation lock: %v", err)
+	}
+	select {
+	case outcome := <-archiveDone:
+		if outcome.err != nil {
+			t.Fatalf("ArchiveSession() error: %v", outcome.err)
+		}
+		if outcome.result == nil || outcome.result.SessionID != m.SessionID {
+			t.Fatalf("ArchiveSession() result = %#v", outcome.result)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("archive did not continue after API delivery mutation lock released")
+	}
+	current, err := storage.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() error: %v", err)
+	}
+	if current.Lifecycle != manifest.LifecycleArchived {
+		t.Fatalf("archive lifecycle = %q, want archived", current.Lifecycle)
 	}
 }
 

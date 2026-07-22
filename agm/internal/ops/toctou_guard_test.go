@@ -10,7 +10,20 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/contracts"
 )
+
+func TestAPISessionLockUsesProviderAppropriateWaitPolicy(t *testing.T) {
+	ordinaryTimeout := contracts.Load().SessionLifecycle.LockTimeout.Duration
+	if apiSessionMutationLockTimeout <= ordinaryTimeout {
+		t.Fatalf("API mutation lock timeout = %s, must exceed ordinary lifecycle timeout %s", apiSessionMutationLockTimeout, ordinaryTimeout)
+	}
+	if apiSessionMutationLockTimeout <= agent.OpenAICompletionTimeout {
+		t.Fatalf("API mutation lock timeout = %s, must exceed provider completion ceiling %s", apiSessionMutationLockTimeout, agent.OpenAICompletionTimeout)
+	}
+}
 
 func TestWithSessionLock_ExecutesFn(t *testing.T) {
 	called := false

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -197,6 +198,13 @@ func (m *mockAgentAdapter) SendMessage(sessionID agent.SessionID, message agent.
 
 	m.sentMessages = append(m.sentMessages, message)
 	return nil
+}
+
+func (m *mockAgentAdapter) SendMessageContext(ctx context.Context, sessionID agent.SessionID, message agent.Message) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return m.SendMessage(sessionID, message)
 }
 
 func (m *mockAgentAdapter) GetHistory(sessionID agent.SessionID) ([]agent.Message, error) {

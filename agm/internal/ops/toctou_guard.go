@@ -8,8 +8,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/contracts"
 )
+
+// apiSessionMutationLockTimeout exceeds the bounded provider transaction so a
+// second send or archive can wait for one in-flight API completion instead of
+// failing at the ordinary short lifecycle-operation threshold.
+const apiSessionMutationLockTimeout = agent.OpenAICompletionTimeout + time.Minute
 
 // lockDir returns the directory where session lock files are stored.
 func lockDir() string {
@@ -56,6 +62,12 @@ func WithSessionLock(sessionName string, fn func() error) error {
 func WithSessionLockContext(ctx context.Context, sessionName string, fn func() error) error {
 	slo := contracts.Load()
 	return WithSessionLockTimeoutContext(ctx, sessionName, slo.SessionLifecycle.LockTimeout.Duration, fn)
+}
+
+// WithAPISessionLockContext serializes API delivery and lifecycle mutations
+// using a provider-appropriate wait while still honoring request cancellation.
+func WithAPISessionLockContext(ctx context.Context, sessionName string, fn func() error) error {
+	return WithSessionLockTimeoutContext(ctx, sessionName, apiSessionMutationLockTimeout, fn)
 }
 
 // WithSessionLockTimeout is like WithSessionLock but accepts a custom timeout.

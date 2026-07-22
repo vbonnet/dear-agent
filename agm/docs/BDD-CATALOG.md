@@ -240,12 +240,14 @@ creation, and terminal state detection.
 - Pure API single-send preflight resolves the registered delivery surface
   before any tmux probe, while both single-recipient and fan-out delivery
   restore the session's persisted model, storage locator, endpoint, and Azure
-  settings without persisting credentials. Archived sessions fail before
-  adapter construction; stable session-ID locking serializes readiness,
-  completion, and completed-turn persistence across AGM processes; direct
-  adapter callers retain store-level serialization; and completion errors
-  leave history unchanged. Delivery otherwise fails closed unless adapter
-  status is active or idle.
+  settings without persisting credentials. Under the same stable session-ID
+  boundary as archive, delivery reloads lifecycle before adapter construction
+  and uses a provider-appropriate wait, so archive linearizes before or after
+  a bounded completed turn. Lock acquisition and provider work honor caller
+  cancellation; direct adapter callers retain context-aware store-level
+  serialization and a finite provider ceiling; completion errors, cancellation,
+  and timeout leave history unchanged. Delivery otherwise fails closed unless
+  adapter status is active or idle.
 - Shared startup readiness honors its total deadline while a slow launch
   wrapper still owns the pane, but fails promptly if an already-observed
   harness process later stops.

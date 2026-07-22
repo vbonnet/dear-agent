@@ -805,6 +805,51 @@ func TestSendMessageCompletionFailureLeavesHistoryUnchanged(t *testing.T) {
 	}
 }
 
+func TestSendMessageContextCancelsProviderAndReleasesSessionLock(t *testing.T) {
+	sessionsDir := t.TempDir()
+	sessionManager, err := openai.NewSessionManager(sessionsDir)
+	if err != nil {
+		t.Fatalf("create session manager: %v", err)
+	}
+	sessionID := SessionID("canceled-completion")
+	if _, err := sessionManager.CreateSession(string(sessionID), "gpt-4", t.TempDir()); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	providerEntered := make(chan struct{}, 1)
+	neverRelease := make(chan struct{})
+	adapter := newOpenAIAdapterWithClient(&blockingOpenAIClient{
+		response: &openai.ChatCompletionResponse{Content: "must not commit", Model: "gpt-4", FinishReason: "stop"},
+		entered:  providerEntered,
+		release:  neverRelease,
+	}, sessionManager)
+	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Millisecond)
+	defer cancel()
+	err = adapter.SendMessageContext(ctx, sessionID, Message{Role: RoleUser, Content: "cancel me"})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("canceled provider send error = %v, want deadline exceeded", err)
+	}
+	select {
+	case <-providerEntered:
+	default:
+		t.Fatal("provider was not entered before cancellation")
+	}
+	history, err := adapter.GetHistory(sessionID)
+	if err != nil {
+		t.Fatalf("get history after cancellation: %v", err)
+	}
+	if len(history) != 0 {
+		t.Fatalf("canceled completion history = %#v, want empty", history)
+	}
+
+	secondAdapter := newOpenAIAdapterWithClient(&mockOpenAIClient{
+		responses: []*openai.ChatCompletionResponse{{Content: "committed", Model: "gpt-4", FinishReason: "stop"}},
+	}, sessionManager)
+	if err := secondAdapter.SendMessageContext(t.Context(), sessionID, Message{Role: RoleUser, Content: "after cancellation"}); err != nil {
+		t.Fatalf("send after canceled provider retained lock: %v", err)
+	}
+}
+
 // TestSendMessage_NonExistentSession tests sending to non-existent session
 func TestSendMessage_NonExistentSession(t *testing.T) {
 	tmpDir := t.TempDir()

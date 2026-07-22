@@ -3,6 +3,7 @@ package openai
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,8 @@ import (
 
 	agmlock "github.com/vbonnet/dear-agent/agm/internal/lock"
 )
+
+const sessionLockPollInterval = 25 * time.Millisecond
 
 // SessionManager manages OpenAI conversation sessions with JSONL storage.
 type SessionManager struct {
@@ -230,15 +233,43 @@ func (sm *SessionManager) GetMessages(sessionID string) ([]Message, error) {
 // WithSessionLock serializes one OpenAI session across adapter instances and
 // processes for the complete provider completion and history commit.
 func (sm *SessionManager) WithSessionLock(sessionID string, fn func() error) error {
+	return sm.WithSessionLockContext(context.Background(), sessionID, fn)
+}
+
+// WithSessionLockContext is the request-aware form of WithSessionLock. It
+// polls the cross-process file lock so cancellation can stop a contended wait
+// without leaving a goroutine that later acquires and abandons the lock.
+func (sm *SessionManager) WithSessionLockContext(ctx context.Context, sessionID string, fn func() error) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	digest := sha256.Sum256([]byte(sessionID))
 	lockPath := filepath.Join(sm.baseDir, ".locks", fmt.Sprintf("%x.lock", digest[:16]))
 	sessionLock, err := agmlock.New(lockPath)
 	if err != nil {
 		return fmt.Errorf("create OpenAI session lock: %w", err)
 	}
-	if err := sessionLock.Lock(); err != nil {
-		_ = sessionLock.Unlock()
-		return fmt.Errorf("acquire OpenAI session lock: %w", err)
+	for {
+		err = sessionLock.TryLock()
+		if err == nil {
+			break
+		}
+		var lockErr *agmlock.LockError
+		if !errors.As(err, &lockErr) {
+			_ = sessionLock.Unlock()
+			return fmt.Errorf("acquire OpenAI session lock: %w", err)
+		}
+		timer := time.NewTimer(sessionLockPollInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			_ = sessionLock.Unlock()
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
 	// Unlock/close cannot safely turn a successfully persisted provider turn
 	// into a retryable send failure. The OS releases this advisory lock when the

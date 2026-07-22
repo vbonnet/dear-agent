@@ -430,6 +430,10 @@ func TestAPIDeliverySerializesReadinessCompletionAndPersistenceByStableSessionID
 		Name:      "renamable-api-session",
 		Harness:   "openai",
 	}
+	storage := dolt.NewMockAdapter()
+	if err := storage.CreateSession(m); err != nil {
+		t.Fatalf("create API session: %v", err)
+	}
 
 	var calls atomic.Int32
 	factoryEntered := make(chan int32, 2)
@@ -449,7 +453,7 @@ func TestAPIDeliverySerializesReadinessCompletionAndPersistenceByStableSessionID
 
 	firstDone := make(chan error, 1)
 	go func() {
-		firstDone <- sendToAPIAgentIfReady(t.Context(), m, m.Name, "sender", "first-id", "first", "", factory)
+		firstDone <- sendToAPIAgentIfReady(t.Context(), m, m.Name, "sender", "first-id", "first", "", storage, factory)
 	}()
 	select {
 	case call := <-factoryEntered:
@@ -467,7 +471,7 @@ func TestAPIDeliverySerializesReadinessCompletionAndPersistenceByStableSessionID
 
 	secondDone := make(chan error, 1)
 	go func() {
-		secondDone <- sendToAPIAgentIfReady(t.Context(), m, m.Name, "sender", "second-id", "second", "", factory)
+		secondDone <- sendToAPIAgentIfReady(t.Context(), m, m.Name, "sender", "second-id", "second", "", storage, factory)
 	}()
 	select {
 	case call := <-factoryEntered:
@@ -522,6 +526,64 @@ func TestDirectAPIDeliveryRejectsArchivedSessionBeforeAdapterConstruction(t *tes
 	}
 	if _, statErr := os.Stat(filepath.Join(homeDir, ".agm", "pending", "archived-api-id")); !os.IsNotExist(statErr) {
 		t.Fatalf("archived API send created a pending artifact: %v", statErr)
+	}
+}
+
+func TestAPIDeliveryReloadsLifecycleInsideStableSessionLock(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	storage := dolt.NewMockAdapter()
+	staleActive := &manifest.Manifest{
+		SessionID: "reload-api-lifecycle-id",
+		Name:      "reload-api-lifecycle",
+		Harness:   "openai",
+	}
+	if err := storage.CreateSession(staleActive); err != nil {
+		t.Fatalf("create API session: %v", err)
+	}
+	archived, err := storage.GetSession(staleActive.SessionID)
+	if err != nil {
+		t.Fatalf("get API session: %v", err)
+	}
+	archived.Lifecycle = manifest.LifecycleArchived
+	if err := storage.UpdateSession(archived); err != nil {
+		t.Fatalf("archive API session: %v", err)
+	}
+
+	factoryCalled := false
+	err = sendToAPIAgentIfReady(t.Context(), staleActive, staleActive.Name, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+		factoryCalled = true
+		return &mockAgentAdapter{}, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "archived") {
+		t.Fatalf("stale active API delivery error = %v, want archived rejection", err)
+	}
+	if factoryCalled {
+		t.Fatal("stale active API delivery constructed adapter after locked lifecycle reload")
+	}
+}
+
+func TestAPIDeliveryRejectsAdapterWithoutContextDelivery(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	storage := dolt.NewMockAdapter()
+	m := &manifest.Manifest{
+		SessionID: "unbounded-api-adapter-id",
+		Name:      "unbounded-api-adapter",
+		Harness:   "openai",
+	}
+	if err := storage.CreateSession(m); err != nil {
+		t.Fatalf("create API session: %v", err)
+	}
+	legacy := &mockAgentAdapter{sessionStatus: agent.StatusActive}
+	legacyAgentOnly := struct{ agent.Agent }{Agent: legacy}
+
+	err := sendToAPIAgentIfReady(t.Context(), m, m.Name, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+		return legacyAgentOnly, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not support context-aware delivery") {
+		t.Fatalf("unbounded API adapter error = %v, want fail-closed context rejection", err)
+	}
+	if len(legacy.sentMessages) != 0 {
+		t.Fatalf("unbounded API adapter received %d messages, want none", len(legacy.sentMessages))
 	}
 }
 
