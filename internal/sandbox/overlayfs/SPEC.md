@@ -32,6 +32,8 @@ operate.
 
 **OVERLAYFS-10** When a request names a working directory inside a lower directory, the provider shall return `merged/<relative-directory>` as the harness working directory.
 
+**OVERLAYFS-11** When multiple lower directories contain colliding paths and a sandbox request names one repository as its working directory, the provider shall give that matched repository overlay precedence while preserving the order of all remaining lower directories.
+
 ## BDD Traceability
 
 - `agm/test/bdd/features/sandbox_provider_guardrails.feature` enforces that this

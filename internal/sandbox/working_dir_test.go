@@ -100,3 +100,29 @@ func TestMapFlatWorkingDirDefaultsToMergedRootForLegacyRequest(t *testing.T) {
 		t.Fatalf("MapFlatWorkingDir() = %q, %q; want legacy merged root", mapped, matchedRepo)
 	}
 }
+
+func TestPrioritizeLowerDirMovesMappedRepositoryFirstWithoutMutatingRequest(t *testing.T) {
+	lowerDirs := []string{"repo-a", "repo-b", "repo-c"}
+	got := PrioritizeLowerDir(lowerDirs, "repo-b")
+	want := []string{"repo-b", "repo-a", "repo-c"}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("PrioritizeLowerDir() = %v, want %v", got, want)
+		}
+	}
+	if lowerDirs[0] != "repo-a" || lowerDirs[1] != "repo-b" {
+		t.Fatalf("PrioritizeLowerDir() mutated request: %v", lowerDirs)
+	}
+}
+
+func TestPrioritizeLowerDirPreservesOrderWithoutMappedRepository(t *testing.T) {
+	lowerDirs := []string{"repo-a", "repo-b"}
+	got := PrioritizeLowerDir(lowerDirs, "")
+	if got[0] != lowerDirs[0] || got[1] != lowerDirs[1] {
+		t.Fatalf("PrioritizeLowerDir() = %v, want %v", got, lowerDirs)
+	}
+	got[0] = "changed"
+	if lowerDirs[0] != "repo-a" {
+		t.Fatalf("PrioritizeLowerDir() returned aliased slice: %v", lowerDirs)
+	}
+}

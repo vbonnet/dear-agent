@@ -60,7 +60,7 @@ func (p *Provider) Create(ctx context.Context, req sandbox.SandboxRequest) (*san
 	upperDir := filepath.Join(req.WorkspaceDir, "upper")
 	workDir := filepath.Join(req.WorkspaceDir, "work")
 	mergedDir := filepath.Join(req.WorkspaceDir, "merged")
-	workingDir, _, err := sandbox.MapFlatWorkingDir(req.WorkingDir, req.LowerDirs, mergedDir)
+	workingDir, selectedLowerDir, err := sandbox.MapFlatWorkingDir(req.WorkingDir, req.LowerDirs, mergedDir)
 	if err != nil {
 		return nil, err
 	}
@@ -77,8 +77,11 @@ func (p *Provider) Create(ctx context.Context, req sandbox.SandboxRequest) (*san
 		return nil, err
 	}
 
-	// Build lowerdir string (colon-separated, reverse order for priority)
-	lowerDirStr := strings.Join(req.LowerDirs, ":")
+	// OverlayFS gives the first lower directory precedence. When a request names
+	// a project, that matched repository must also win colliding paths in the
+	// flat union; mapping only its relative path is not sufficient.
+	orderedLowerDirs := sandbox.PrioritizeLowerDir(req.LowerDirs, selectedLowerDir)
+	lowerDirStr := strings.Join(orderedLowerDirs, ":")
 
 	// Mount OverlayFS with xino=auto flag for inotify propagation
 	if err := p.mountOverlay(lowerDirStr, upperDir, workDir, mergedDir); err != nil {

@@ -95,7 +95,7 @@ func agmRunsSandboxWorkingDirectoryRegressions(ctx context.Context) error {
 	}
 	state.output, state.err = runSandboxProviderCommand(ctx, 2*time.Minute,
 		"go", "test", "-v", "-count=1", "-timeout=90s", "-run",
-		`^(TestMatchWorkingDir.*|TestMapFlatWorkingDir.*|TestProvider_CreateMapsRequestedWorkingDirectoryIntoMatchingClone|TestResolveSandboxLowerDirs_FallsBackToContainingGitRepoForSubdirectory|TestFindPrimaryRepoUsesRequestedDirectoryInsteadOfProcessCWD|TestMaybeProvisionSandboxReturnsProviderMappedWorkingDirectory|TestProvisionSandbox.*)$`,
+		`^(TestMatchWorkingDir.*|TestMapFlatWorkingDir.*|TestPrioritizeLowerDir.*|TestProvider_CreateMapsRequestedWorkingDirectoryIntoMatchingClone|TestResolveSandboxLowerDirs_FallsBackToContainingGitRepoForSubdirectory|TestFindPrimaryRepoUsesRequestedDirectoryInsteadOfProcessCWD|TestMaybeProvisionSandboxReturnsProviderMappedWorkingDirectory|TestProvisionSandbox.*)$`,
 		"./internal/sandbox", "./internal/sandbox/apfs", "./agm/cmd/agm",
 	)
 	return nil
@@ -113,6 +113,7 @@ func sandboxProvidersShouldPreserveRequestedProjectDirectory(ctx context.Context
 		"TestMatchWorkingDirPreservesNestedRelativePath",
 		"TestMatchWorkingDirSelectsMostSpecificConfiguredRepository",
 		"TestMatchWorkingDirResolvesSymlinkAliases",
+		"TestPrioritizeLowerDirMovesMappedRepositoryFirstWithoutMutatingRequest",
 	} {
 		if !strings.Contains(state.output, "--- PASS: "+name) {
 			return fmt.Errorf("sandbox working directory output does not show %s passing:\n%s", name, state.output)

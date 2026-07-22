@@ -217,7 +217,36 @@ func TestOverlayFS_MultiRepo(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-// TestOverlayFS_Isolation verifies destructive operations don't affect host
+// TestOverlayFSWorkingDirectoryPrioritizesMatchedLowerDir verifies that the
+// provider's path mapping and its OverlayFS precedence select the same repo.
+func TestOverlayFSWorkingDirectoryPrioritizesMatchedLowerDir(t *testing.T) {
+	provider := overlayfs.NewProvider()
+	ctx := context.Background()
+
+	firstRepo := t.TempDir()
+	targetRepo := t.TempDir()
+	for path, content := range map[string]string{
+		filepath.Join(firstRepo, "shared.txt"):  "from-first",
+		filepath.Join(targetRepo, "shared.txt"): "from-target",
+	} {
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+	}
+
+	sb, err := provider.Create(ctx, sandbox.SandboxRequest{
+		SessionID:    "matched-lower-priority",
+		LowerDirs:    []string{firstRepo, targetRepo},
+		WorkingDir:   targetRepo,
+		WorkspaceDir: t.TempDir(),
+	})
+	require.NoError(t, err, "matched repository precedence must be exercised by a real OverlayFS mount")
+	t.Cleanup(func() { _ = provider.Destroy(context.Background(), sb.ID) })
+
+	content, err := os.ReadFile(filepath.Join(sb.WorkingDir, "shared.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "from-target", string(content), "mapped repository must win colliding lower paths")
+}
+
+// TestOverlayFS_Isolation verifies destructive operations don't affect host.
 func TestOverlayFS_Isolation(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("OverlayFS only available on Linux")

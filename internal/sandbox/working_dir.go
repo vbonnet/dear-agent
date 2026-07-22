@@ -71,6 +71,26 @@ func MapFlatWorkingDir(workingDir string, lowerDirs []string, mergedRoot string)
 	return filepath.Join(mergedRoot, match.RelativeDir), match.LowerDir, nil
 }
 
+// PrioritizeLowerDir returns a copy with selected first while retaining the
+// relative order of every other lower directory. Flat union providers use this
+// after MapFlatWorkingDir so the mapped project is also the visible repository
+// when lower directories contain colliding paths.
+func PrioritizeLowerDir(lowerDirs []string, selected string) []string {
+	ordered := append([]string(nil), lowerDirs...)
+	if selected == "" {
+		return ordered
+	}
+	for index, lowerDir := range ordered {
+		if lowerDir != selected || index == 0 {
+			continue
+		}
+		copy(ordered[1:index+1], ordered[0:index])
+		ordered[0] = selected
+		break
+	}
+	return ordered
+}
+
 func canonicalExistingPath(path string) (string, error) {
 	absolute, err := filepath.Abs(path)
 	if err != nil {
