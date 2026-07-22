@@ -131,7 +131,7 @@ type StatusLineConfig struct {
 // SandboxConfig holds configuration for sandbox isolation
 type SandboxConfig struct {
 	Enabled    bool              `yaml:"enabled"`              // Default: true (sandbox-by-default)
-	Provider   string            `yaml:"provider"`             // Provider type: "auto", "overlayfs", "apfs", "claudecode-worktree", "mock"
+	Provider   string            `yaml:"provider"`             // Provider type: "auto", "bubblewrap", "overlayfs", "gvisor", "apfs", "mock"
 	Repos      []string          `yaml:"repos"`                // Repositories to include as lower dirs
 	Secrets    map[string]string `yaml:"secrets,omitempty"`    // Secrets to inject into sandbox
 	Onboarding OnboardingConfig  `yaml:"onboarding,omitempty"` // Onboarding CLAUDE.md injection

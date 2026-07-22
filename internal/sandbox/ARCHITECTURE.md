@@ -14,8 +14,8 @@ agm new
    -> maybeProvisionSandbox
    -> choose configured provider or auto-detect
    -> Provider.Create(SandboxRequest)
-   -> persist provider name and merged path in the session manifest
-   -> run the harness from the returned merged path
+   -> persist provider name, workspace root, and mapped working directory
+   -> run the harness from the returned working directory
 ```
 
 `agm/cmd/agm/new.go` blank-imports the platform provider packages so their
@@ -31,9 +31,13 @@ not register those subpackages.
 - `Validate` checks tracked workspace health;
 - `Name` reports the implementation identity stored in manifests.
 
-`SandboxRequest` supplies a session ID, lower/source directories, workspace
-directory, optional secrets, network-sharing request, and preferred target
-repository. `Sandbox` reports the merged, upper, and work paths when applicable.
+`SandboxRequest` supplies a session ID, lower/source directories, requested
+working directory, workspace directory, optional secrets, network-sharing
+request, and preferred target repository. `Sandbox` reports the workspace root,
+provider-mapped harness working directory, upper path, and work path when
+applicable. The provider owns this mapping seam because only its adapter knows
+whether repositories are overlaid at the root, cloned under `repoN`, or
+materialized as a selected worktree.
 
 Provider instances keep in-memory ownership maps. Reconstructing a provider and
 calling `Destroy` does not guarantee it can discover resources created by an
@@ -61,18 +65,25 @@ must not imply that a fallback sandbox was created.
 
 | Registry name | Platform | Current workspace strategy |
 |---|---|---|
-| `bubblewrap` | Linux host with `bwrap` | Create a git worktree when possible, validate namespace support, and use symlink population only when no repository is found. |
-| `overlayfs`, `overlayfs-native` | Linux 5.11+ | Mount lower directories with an upper and work layer. |
-| `gvisor` | Linux with `runsc` | Create a git worktree when possible and validate gVisor availability; callers own later command wrapping. |
+| `bubblewrap` | Linux host with `bwrap` | Materialize the requested lower directory as a git worktree when possible, validate namespace support, and use matched-first symlink population only when that directory is not a repository. |
+| `overlayfs`, `overlayfs-native` | Linux 5.11+ | Mount lower directories with an upper and work layer, giving the requested lower directory collision precedence. |
+| `gvisor` | Linux with `runsc` | Materialize the requested lower directory as a git worktree when possible, otherwise preserve it through matched-first symlink population, and validate gVisor availability; callers own later command wrapping. |
 | `apfs` | macOS | Clone source trees into an upper directory and expose it through a merged symlink. |
-| `claudecode-worktree` | all | Create a workspace directory and map selected `SandboxSpec` values to Claude Code arguments; Claude Code owns actual worktree isolation. |
 | `mock` | tests | In-memory lifecycle with configurable failures and delays. |
 
 Bubblewrap and gVisor providers materialize a writable git worktree for the
-target repository. Their fallback symlink layout is not equivalent to
+requested repository. A matched non-Git lower directory stays authoritative and
+uses their symlink fallback instead of being replaced by another repository.
+Their fallback symlink layout is not equivalent to
 copy-on-write isolation: writes through a symlink can reach the source. Callers
 requiring a hard isolation guarantee must verify the provider and creation mode,
 not infer it from the word “sandbox.”
+
+The former `claudecode-worktree` registry entry is intentionally retired. It
+created only an empty metadata directory and relied on a later Claude-specific
+launch mode to materialize isolation, while AGM launched every harness directly
+from the returned path. Provider creation must return a real, provider-owned
+workspace; harness-specific launch flags are not a sandbox provider.
 
 ## Provider-specific boundaries
 
@@ -99,22 +110,9 @@ commands run under gVisor.
 
 The Darwin provider clones each lower directory under `upper` and makes
 `merged` a symlink to that directory. It is not a union filesystem. Multiple
-repositories remain separate children.
-
-### Claude Code worktree
-
-This provider creates directory metadata for a worktree-mode caller. It maps
-allowed write directories and budget configuration to CLI arguments and exposes
-tool preset data to callers. It does not directly enforce denied reads, domain
-allowlists, timeouts, or tool restrictions.
-
-## SandboxSpec
-
-`SandboxSpec` is a declarative cross-provider shape with filesystem, network,
-resource, and tool fields plus read-only, code-only, and full-access presets.
-Support is not uniform. A field is effective only when the selected provider or
-its caller explicitly consumes it. Adding a field to the struct is not an
-isolation guarantee.
+repositories remain separate children. The returned working directory points
+through `merged/repoN` to the clone corresponding to the requested host path,
+including any repository-relative subdirectory.
 
 ## Secrets
 
@@ -130,9 +128,8 @@ separate caller and harness responsibilities.
 | Registry and platform selection | `factory.go` |
 | Provider interface | `provider.go` |
 | Request and result shapes | `types.go` |
-| Declarative settings and presets | `spec.go` |
 | AGM wiring | `agm/cmd/agm/new_sandbox.go` |
-| Implementations | `apfs`, `bubblewrap`, `gvisor`, `overlayfs`, `claudecode_provider.go` |
+| Implementations | `apfs`, `bubblewrap`, `gvisor`, `overlayfs` |
 
 ## Verification
 
