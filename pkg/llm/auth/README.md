@@ -112,8 +112,15 @@ expired:
   `CLAUDE_OAUTH_TOKEN_ENDPOINT`, `CLAUDE_OAUTH_CLIENT_ID`, and
   `CLAUDE_OAUTH_USER_AGENT` (the endpoint and client ID have migrated before).
 
-The standalone `cmd/token-refresher` binary drives this on a schedule or as a
-Claude Code `apiKeyHelper`. See its package doc for modes and exit codes.
+The standalone `cmd/token-refresher` binary drives this on a schedule (the
+launchd idle backstop). See its package doc for modes and exit codes.
+
+It must **not** be wired in as a Claude Code `apiKeyHelper`. That wiring was
+retired on 2026-07-10: since claude-code 2.1.205 a configured helper is treated
+as an external API key that shadows a healthy claude.ai OAuth login and refuses
+to fall back to it (anthropics/claude-code#11587). See
+[`cmd/token-refresher/README.md`](../../../cmd/token-refresher/README.md)
+("Retired wiring").
 
 ## Future Enhancements
 

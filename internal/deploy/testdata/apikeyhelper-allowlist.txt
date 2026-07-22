@@ -1,0 +1,55 @@
+# Sanctioned apiKeyHelper mentions, keyed by a hash of FILE + CLAUSE + which
+# OCCURRENCE of that clause in that file (whitespace-normalised, so reflowing
+# prose does not churn this file but rewording does).
+#
+# WHY AN ALLOWLIST. apiKeyHelper shadows a healthy claude.ai OAuth login on
+# claude-code >= 2.1.205 and was retired on 2026-07-10 after a multi-day mesh
+# outage (anthropics/claude-code#11587, ce-77ip). Earlier versions of the guard
+# tried to judge whether prose recommended or disclaimed the wiring and were
+# defeated repeatedly; distinguishing those needs parsing, not pattern matching.
+# So every mention is listed here, which makes adding or rewording one a
+# deliberate act a human reviews.
+#
+# WHY FILE + CLAUSE + OCCURRENCE. Keying on text alone lets one entry authorise
+# that sentence anywhere in the repository. Adding the file was not enough
+# either: a warning duplicated verbatim later in the SAME file hashes
+# identically and would exempt an active use. The ordinal makes each site
+# reviewable on its own.
+#
+# To add an entry: run
+#   go test ./internal/deploy/ -run TestNoAPIKeyHelperInstructions
+# The failure prints the clause and the exact line to paste. Read the clause
+# first -- if it recommends the wiring, delete the prose instead of listing it.
+#
+# Stale entries fail the test, so this file cannot drift into fiction.
+
+
+# Makefile
+01c7bc626a04c009  # Do NOT also point Claude
+bae947e2bde676c4  # install-token-refresher-launchagent: install-token-refresher
+c8f96be19438874a  # \
+8cead35022de0ee3  # \
+42c9733c8ff71839  # \
+f507b8ede53de32e  # uninstall-token-refresher-launchagent:
+
+# cmd/token-refresher/README.md
+a9b0448e2ed64731  # (This is *not* an invitation to wire it up as an `apiKeyHelper` — see
+44ca89ab2c5af622  # ### Retired wiring: `apiKeyHelper` — do not reintroduce
+f9d5de49f76a0783  # **That wiring was removed from the host on
+bbf66e0ee73d6003  # It also masked real errors: with the helper in front, a dead token fam
+b106e59519114890  # The stdout contract below is unchanged and still useful — it is what m
+
+# cmd/token-refresher/main.go
+fe58fd3715c8ee25  # Since apiKeyHelper was removed on
+1792ca424cdfb061  # //
+
+# deploy/launchd/com.dear-agent.token-refresher.plist
+f3cc557cd162a916  # It assumed a retired `apiKeyHelper` (not to be restored) drove on-dema
+9d01e5de3432fd7c  # That apiKeyHelper was removed on 2026-07-10 because Claude Code
+
+# docs/runbooks/oauth-token-family-death.md
+7ac4a61802f0bd15  # It was wired in as Claude Code's `apiKeyHelper` so
+349a2ce48bc1d738  # ## Do NOT "fix" this by re-adding apiKeyHelper
+
+# pkg/llm/auth/README.md
+944063075ab88c36  # It must **not** be wired in as a Claude Code `apiKeyHelper`

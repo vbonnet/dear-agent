@@ -51,8 +51,12 @@ default:
 The pre-merge-commit hook is automatically installed when you set up the AGM sandbox. To manually install:
 
 ```bash
-# Copy hook to .git/hooks/
-cp cmd/agm-hooks/pre-merge-commit/pre-merge-commit .git/hooks/
+# Copy hook to .git/hooks/. Stage and rename: this is a compiled binary, and
+# overwriting one that has already run can leave a stale code-signing cache
+# entry that macOS kills on next exec (ce-77ip.8).
+stage=$(mktemp .git/hooks/pre-merge-commit.XXXXXX) \
+  && cp cmd/agm-hooks/pre-merge-commit/pre-merge-commit "$stage" \
+  && chmod 755 "$stage" && mv -f "$stage" .git/hooks/pre-merge-commit
 
 # Make executable
 chmod +x .git/hooks/pre-merge-commit

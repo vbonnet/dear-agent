@@ -1,0 +1,27 @@
+# Sanctioned examples of the RETIRED raw-install form, keyed by a hash of FILE +
+# COMMAND + which OCCURRENCE of that command in that file.
+#
+# WHY THIS FILE EXISTS. TestNoRawCopyIntoInstallRoots forbids copying a binary
+# straight over an install root. Without an escape hatch it would also forbid
+# DOCUMENTING that form -- so nobody could write "do not do this: cp X <root>/X"
+# in a warning, and the guard would prevent explaining the failure it exists to
+# prevent.
+#
+# Deciding from surrounding prose whether a command is endorsed or prohibited is
+# not something a regex can do (the same conclusion reached for apiKeyHelper
+# mentions). Each sanctioned example is listed here instead, which makes adding
+# one a deliberate act a human reviews.
+#
+# WHY FILE + COMMAND + OCCURRENCE. Text alone would let one warning authorise
+# that command anywhere in the repository. File+text was still not enough: the
+# same warning duplicated verbatim later in the SAME file hashes identically and
+# would exempt an active install. The ordinal makes each site reviewable alone.
+#
+# To add an entry: run
+#   go test ./internal/deploy/ -run TestNoRawCopyIntoInstallRoots
+# The failure prints the command and the exact line to paste. Read it first --
+# if it is real install guidance rather than a warning, fix the guidance.
+#
+# Stale entries fail the test, so this file cannot drift into fiction.
+
+bb2c2fd173d16de6  # mk/install-go-bin.mk: the retired form, shown in its "do NOT use it" warning
