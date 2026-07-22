@@ -91,3 +91,6 @@ WAYFINDER-HISTORY.md
 infra/*.tfvars
 !infra/*.tfvars.example
 !infra/*.auto.tfvars.example
+
+# Compiled token-refresher binary (built into the repo root by `go build ./cmd/token-refresher`)
+/token-refresher

@@ -6,10 +6,22 @@
   Claude Code sessions sharing one credentials file) survives access-token
   expiry without a human re-running /login. This is the IDLE BACKSTOP: it runs
   even when no session is active, so the credentials file never goes stale and
-  the single-use refresh-token family never dies of neglect. During active
-  sessions the Claude Code `apiKeyHelper` (which also points at this binary)
-  drives on-demand refresh on TTL / HTTP 401; both paths share the same
-  cross-process file lock, so they never race or double-spend the refresh token.
+  the single-use refresh-token family never dies of neglect.
+
+  WARNING -- the single-writer invariant this job was designed around is VOID.
+  It originally read: "during active sessions the Claude Code `apiKeyHelper`
+  (which also points at this binary) drives on-demand refresh; both paths share
+  the same cross-process file lock, so they never race or double-spend the
+  refresh token." apiKeyHelper was removed on 2026-07-10 because Claude Code
+  >=2.1.205 treats it as an external API key that shadows healthy OAuth
+  (anthropics/claude-code#11587). Since then this binary is the ONLY refresher
+  that takes the lock, while ~15 other OAuth clients on the host (the
+  Desktop-embedded claude-code runtime, CLI sessions, agm sandbox spawns) each
+  refresh independently against the same credentials file. Nothing prevents one
+  of them from presenting an already-spent refresh token, which the server
+  treats as replay and answers by revoking the entire family. Restoring a real
+  single-writer guarantee is tracked in ce-77ip; until then this job carries
+  -cadence so a death is at least ALERTED and SURVIVED rather than silent.
 
   Runs with -force so every tick guarantees a fresh token regardless of the
   remaining lifetime (the binary is the single-owner, file-locked refresher
@@ -31,6 +43,7 @@
   <array>
     <string>__HOME__/go/bin/token-refresher</string>
     <string>-force</string>
+    <string>-cadence</string>
   </array>
 
   <key>EnvironmentVariables</key>
