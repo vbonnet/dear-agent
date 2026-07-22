@@ -376,12 +376,30 @@ type piModelCatalogProvider struct {
 }
 
 type piModelCatalogModel struct {
-	ID            string `json:"id"`
-	ContextWindow *int   `json:"contextWindow"`
+	ID            string                      `json:"id"`
+	ContextWindow piModelCatalogContextWindow `json:"contextWindow"`
 }
 
 type piModelCatalogOverride struct {
-	ContextWindow *int `json:"contextWindow"`
+	ContextWindow piModelCatalogContextWindow `json:"contextWindow"`
+}
+
+type piModelCatalogContextWindow struct {
+	value   int
+	present bool
+	valid   bool
+}
+
+func (window *piModelCatalogContextWindow) UnmarshalJSON(data []byte) error {
+	window.present = true
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		return nil
+	}
+	if err := json.Unmarshal(data, &window.value); err != nil {
+		return err
+	}
+	window.valid = true
+	return nil
 }
 
 func piModelContextWindow(model string) int {
@@ -607,7 +625,7 @@ func piProviderModelContextWindow(provider piModelCatalogProvider, modelID strin
 		// duplicate is effective before modelOverrides are applied.
 		window, matched = candidate, true
 	}
-	if override, ok := provider.ModelOverrides[modelID]; ok && override.ContextWindow != nil {
+	if override, ok := provider.ModelOverrides[modelID]; ok && override.ContextWindow.present {
 		if !matched && !nativeProvider {
 			return 0, false
 		}
@@ -616,17 +634,17 @@ func piProviderModelContextWindow(provider piModelCatalogProvider, modelID strin
 	return window, matched
 }
 
-func validPiModelContextWindow(value *int, useDefault bool) (int, bool) {
-	if value == nil {
+func validPiModelContextWindow(value piModelCatalogContextWindow, useDefault bool) (int, bool) {
+	if !value.present {
 		if useDefault {
 			return piCustomModelDefaultContext, true
 		}
 		return 0, false
 	}
-	if *value <= 0 || *value > piModelCatalogMaxContextWindow {
+	if !value.valid || value.value <= 0 || value.value > piModelCatalogMaxContextWindow {
 		return 0, false
 	}
-	return *value, true
+	return value.value, true
 }
 
 // findConversationLog locates the conversation log file for a session.

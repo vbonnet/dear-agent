@@ -139,6 +139,18 @@ func TestPiConfiguredModelContextWindowTrustBoundaries(t *testing.T) {
 			},
 		},
 		{
+			name: "explicit null window falls back", model: "ollama/qwen2.5-coder:7b", want: 200000,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"ollama":{"models":[{"id":"qwen2.5-coder:7b","contextWindow":null}]}}}`)
+			},
+		},
+		{
+			name: "explicit null override falls back", model: "openai/gpt-5.4", want: 272000,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"openai":{"modelOverrides":{"gpt-5.4":{"contextWindow":null}}}}}`)
+			},
+		},
+		{
 			name: "malformed catalog falls back", model: "ollama/qwen2.5-coder:7b", want: 200000,
 			prepare: func(t *testing.T, dir string) {
 				writePiModelCatalogFixture(t, dir, `{"providers":`)

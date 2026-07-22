@@ -1081,6 +1081,8 @@ model catalog.
   route-specific native context window rather than a direct-provider default.
 - A custom model ID remains opaque when it begins with its own provider name;
   AGM does not collapse the repeated provider segment during qualification.
+- An explicit null custom context window is rejected instead of receiving the
+  default reserved for an omitted field.
 - Credential command strings in Pi's model catalog remain inert data.
 
 **Why this matters:** Custom providers are a supported Pi route. Using a static

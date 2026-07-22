@@ -146,8 +146,9 @@ separate; a custom raw model ID may repeat its provider prefix without AGM
 collapsing that opaque segment.
 For models declared in Pi's `models.json`, AGM reads only the bounded model ID,
 `contextWindow`, and `modelOverrides` data: it never evaluates credential or
-command fields. A custom model without an explicit window uses Pi's 128000-token
-default. Overrides for Pi 0.81.1 built-in providers apply even when a native
+command fields. A custom model with an omitted window uses Pi's 128000-token
+default; an explicit null or otherwise invalid window is rejected. Overrides
+for Pi 0.81.1 built-in providers apply even when a native
 model is newer than AGM's smaller static window table; orphan overrides for
 custom-only providers remain ignored like Pi. Malformed, oversized, symlinked,
 group- or other-writable, ambiguous, or invalid catalog data retains AGM's

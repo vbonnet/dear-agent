@@ -30,3 +30,10 @@ Feature: Pi custom model context
     When AGM detects the managed Pi context
     Then the Pi context should report 3562 of 8192 tokens used
     And the Pi context model should be "acme/acme/foo"
+
+  Scenario: An explicit null context window is rejected
+    Given a managed Pi transcript uses provider "ollama" model "qwen2.5-coder:7b"
+    And the Pi custom model catalog declares a null context window
+    When AGM detects the managed Pi context
+    Then the Pi context should report 3562 of 200000 tokens used
+    And the Pi context model should be "ollama/qwen2.5-coder:7b"
