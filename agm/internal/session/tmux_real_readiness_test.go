@@ -357,6 +357,13 @@ func TestRealTmuxReadinessRejectsSuspendedHarnessWithStaleComposer(t *testing.T)
 
 func TestRealTmuxInputReadinessReportsMissingSession(t *testing.T) {
 	setupRealReadinessTmux(t)
+	// NOT_FOUND is an absent target on a reachable tmux server. An absent
+	// socket/server is an operational failure and must not satisfy this test.
+	anchorSession := "missing-readiness-anchor"
+	if err := tmux.NewSession(anchorSession, t.TempDir()); err != nil {
+		t.Fatalf("start readiness anchor session: %v", err)
+	}
+	t.Cleanup(func() { tmux.KillSession(anchorSession) })
 
 	readiness, err := NewRealTmux().CheckInputReadiness(context.Background(), "missing-readiness-session", "codex-cli")
 	if err != nil {
