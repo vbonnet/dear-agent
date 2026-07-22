@@ -43,14 +43,14 @@ Published `SessionStateChangeEvent` values contain:
 Broadcast is non-blocking and best effort. This package does not persist
 events or prove that every subscriber accepted them.
 
-## Health and fallback
+## Health
 
 `Health` reports connection state, last event, last heartbeat, and the server
 and session identifiers. Heartbeats are tracked separately so an idle session
 does not look disconnected merely because it emitted no work event.
 
-`FallbackTmux` does not start a tmux monitor. When the health probe fails it
-annotates the returned error so the caller can choose its fallback explicitly.
+When the startup health probe fails, `Start` returns an error and leaves the
+adapter inactive. This package does not implement or advertise tmux failover.
 
 ## Current limitation
 

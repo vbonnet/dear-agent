@@ -4,7 +4,7 @@
 
 AGM can adapt an OpenCode server's `/event` stream into harness-neutral session
 state events. This optional monitor does not launch OpenCode, persist sessions,
-or own fallback selection.
+or activate another monitor when startup fails.
 
 ## Configure the monitor
 
@@ -25,12 +25,11 @@ adapters:
       initial_delay: 5s
       max_delay: 5m
       multiplier: 2
-    fallback_to_tmux: true
 ```
 
-`fallback_to_tmux: true` changes the error context returned after a failed startup
-probe. It does not start Astrocyte or any other tmux monitor. The caller must
-select and start a fallback explicitly.
+If the startup health probe fails, the adapter stays inactive and the daemon
+reports that OpenCode sessions are not being monitored. AGM does not currently
+implement automatic tmux failover for OpenCode.
 
 ## State mapping
 

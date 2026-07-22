@@ -5,7 +5,7 @@
 ## Purpose
 
 `agm/internal/daemon` owns background queue delivery, state polling, OpenCode SSE
-adapter startup, fallback behavior, PID-file exclusivity, retry handling, health,
+adapter startup, PID-file exclusivity, retry handling, health,
 and daemon metrics. The daemon must preserve the shared message-delivery contract
 across harnesses so non-Claude harnesses do not depend on Claude-specific hooks
 to receive queued work.
@@ -20,9 +20,9 @@ to receive queued work.
 
 **DAEMON-04** When OpenCode adapter support is enabled and an event bus is configured, the system shall initialize the OpenCode SSE adapter from shared configuration.
 
-**DAEMON-05** When OpenCode adapter startup fails and fallback is enabled, the system shall report that the caller may select a tmux fallback and shall not claim that a fallback monitor started automatically.
+**DAEMON-05** When OpenCode adapter initialization or startup fails, the system shall report that OpenCode sessions remain unmonitored until the adapter succeeds.
 
-**DAEMON-06** When OpenCode adapter startup fails and fallback is disabled, the system shall report that OpenCode sessions will not be monitored until the adapter succeeds.
+**DAEMON-06** When OpenCode adapter startup fails, the system shall not claim that another monitor started unless it actually activated one.
 
 **DAEMON-07** When the daemon starts, the system shall retry recently failed messages before entering the periodic poll loop.
 

@@ -262,7 +262,6 @@ func TestAdapter_Start_HealthProbeFailure(t *testing.T) {
 		SessionID:      "test-session",
 		HealthProbeURL: "/health",
 		HealthTimeout:  5 * time.Second,
-		FallbackTmux:   false, // Disable fallback
 	}
 
 	adapter, err := NewAdapter(eventBus, config)
@@ -280,41 +279,6 @@ func TestAdapter_Start_HealthProbeFailure(t *testing.T) {
 
 	if !contains(err.Error(), "health check failed") {
 		t.Errorf("Start() error = %q, want error containing 'health check failed'", err.Error())
-	}
-}
-
-func TestAdapter_Start_WithFallback(t *testing.T) {
-	// Create mock server that returns error
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusServiceUnavailable)
-	}))
-	defer server.Close()
-
-	eventBus := &mockEventBus{}
-	config := Config{
-		ServerURL:      server.URL,
-		SessionID:      "test-session",
-		HealthProbeURL: "/health",
-		HealthTimeout:  5 * time.Second,
-		FallbackTmux:   true, // Enable fallback
-	}
-
-	adapter, err := NewAdapter(eventBus, config)
-	if err != nil {
-		t.Fatalf("NewAdapter() error = %v", err)
-	}
-
-	ctx := context.Background()
-	err = adapter.Start(ctx)
-
-	// Should return error but with fallback message
-	if err == nil {
-		t.Error("Start() expected error with fallback message, got nil")
-		return
-	}
-
-	if !contains(err.Error(), "tmux fallback available to caller") {
-		t.Errorf("Start() error = %q, want error containing 'tmux fallback available to caller'", err.Error())
 	}
 }
 
@@ -523,8 +487,5 @@ func TestDefaultConfig(t *testing.T) {
 	}
 	if config.HealthTimeout == 0 {
 		t.Error("DefaultConfig() HealthTimeout is zero")
-	}
-	if !config.FallbackTmux {
-		t.Error("DefaultConfig() FallbackTmux = false, want true")
 	}
 }

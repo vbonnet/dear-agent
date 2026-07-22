@@ -84,10 +84,9 @@ type AdaptersConfig struct {
 
 // OpenCodeConfig holds configuration for OpenCode SSE adapter
 type OpenCodeConfig struct {
-	Enabled      bool         `yaml:"enabled"`
-	ServerURL    string       `yaml:"server_url"`
-	Reconnect    ReconnectCfg `yaml:"reconnect"`
-	FallbackTmux bool         `yaml:"fallback_to_tmux"`
+	Enabled   bool         `yaml:"enabled"`
+	ServerURL string       `yaml:"server_url"`
+	Reconnect ReconnectCfg `yaml:"reconnect"`
 }
 
 // ReconnectCfg holds reconnection configuration for SSE adapter
@@ -205,7 +204,6 @@ func Default() *Config {
 					MaxDelay:     30 * time.Second,
 					Multiplier:   2,
 				},
-				FallbackTmux: true,
 			},
 			ClaudeHooks: ClaudeHooksConfig{
 				Enabled:    false,

@@ -142,8 +142,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - EventBus integration as canonical state change layer
   - Automatic agent type detection from manifest.yaml
   - Astrocyte filtering: skips OpenCode sessions (handled by SSE adapter)
-  - Fallback signal: startup errors tell the caller when it may select tmux; AGM does not start a fallback monitor automatically
-  - Configuration: `adapters.opencode.enabled`, `server_url`, `fallback_to_tmux`
+  - Startup failures leave OpenCode monitoring inactive; AGM does not start a fallback monitor automatically
+  - Configuration: `adapters.opencode.enabled`, `server_url`, and reconnect timing
   - Auto-reconnect with exponential backoff for resilient SSE connections
   - Health checks: `GetAdapterHealth()` exposes adapter status
   - **Benefits**: Event-driven state detection without tmux scraping

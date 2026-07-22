@@ -65,9 +65,8 @@ first heartbeat, more than five minutes without another reports an error. A
 connected stream that has never emitted a heartbeat remains healthy based on
 connection state alone.
 
-The top-level startup probe is not a tmux failover implementation.
-`FallbackTmux` changes the returned error context only; the caller remains
-responsible for selecting another monitor.
+The top-level startup probe is not a tmux failover implementation. A failed
+probe returns an error and leaves the adapter inactive.
 
 ## Delivery and observability constraints
 
@@ -86,7 +85,7 @@ and a dated reproducible verification command.
 - Add event mappings in `EventParser` and cover their safe-state semantics.
 - Preserve monotonic publisher sequence values and the `opencode-sse` source.
 - Do not infer permission approval from a state event.
-- Keep fallback selection above this adapter so monitor ownership is explicit.
+- Add an explicit monitor-selection owner before introducing any fallback mode.
 - If EventBus delivery acknowledgement becomes required, deepen the publisher
   interface instead of presenting best-effort broadcast as a queue guarantee.
 
