@@ -1,8 +1,11 @@
 package deploy
 
 import (
-	"io/fs"
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -12,16 +15,6 @@ import (
 // programArgumentsBinary matches a ~/go/bin path inside a launchd template's
 // ProgramArguments, e.g. <string>__HOME__/go/bin/token-refresher</string>.
 var programArgumentsBinary = regexp.MustCompile(`(?:__HOME__|\$\{?HOME\}?|/Users/[^/<]+)/go/bin/([A-Za-z0-9._-]+)`)
-
-// scannedExtensions are the file types the apiKeyHelper guard reads: prose and
-// code, plus the configuration and script surfaces that can set the key or run
-// the wiring command directly (.json above all — apiKeyHelper is a
-// settings.json key).
-var scannedExtensions = map[string]bool{
-	".go": true, ".md": true, ".plist": true,
-	".json": true, ".yaml": true, ".yml": true, ".toml": true,
-	".sh": true, ".bash": true, ".zsh": true,
-}
 
 // TestLaunchdBinariesUseHardenedInstall asserts that every binary launchd runs
 // is installed into ~/go/bin through the install-go-bin macro rather than a
@@ -128,8 +121,24 @@ func launchdManagedBinaries(t *testing.T, dir string) []string {
 	return out
 }
 
-// TestNoAPIKeyHelperInstructions asserts that no build or documentation path
-// tells an operator to wire token-refresher in as Claude Code's apiKeyHelper.
+// apiKeyHelperAllowlist names the file recording every sanctioned mention of
+// apiKeyHelper in the repository, keyed by a hash of the surrounding clause.
+const apiKeyHelperAllowlist = "testdata/apikeyhelper-allowlist.txt"
+
+// setCommand is the operator command that must never reappear anywhere.
+var setCommand = regexp.MustCompile(`configure-claude-settings\s+set\s+apiKeyHelper`)
+
+// configKey matches apiKeyHelper used as a settings key in JSON/YAML/TOML —
+// the most direct route to the failure, needing no prose and no Makefile.
+var configKey = regexp.MustCompile(`["']?apiKeyHelper["']?\s*[:=]`)
+
+// clauseSplit ends a clause at ";" or at sentence punctuation followed by
+// whitespace. Requiring the trailing whitespace keeps "claude-code 2.1.205"
+// and "settings.json" from splitting mid-token.
+var clauseSplit = regexp.MustCompile(`;|[.!?]\s`)
+
+// TestNoAPIKeyHelperInstructions asserts that nothing in the repository can
+// lead an operator to wire token-refresher in as Claude Code's apiKeyHelper.
 //
 // Since claude-code 2.1.205 a configured apiKeyHelper is treated as an external
 // API key that shadows a healthy claude.ai OAuth login and refuses to fall back
@@ -138,185 +147,187 @@ func launchdManagedBinaries(t *testing.T, dir string) []string {
 // #23568). That wiring caused a multi-day mesh outage and was removed from the
 // host on 2026-07-10.
 //
-// The Makefile used to print the wiring command as activation step 2, so an
-// operator following the documented install path reconstructed the outage.
-// Prose warnings sitting next to a copy-pasteable fatal command are not a
-// control; this test is.
+// The check has two tiers, because they carry different weight:
 //
-// It scans every operator-facing surface in the repository rather than a
-// hand-listed pair of files: the first version of this guard checked only the
-// Makefile and one README, and review caught three further surfaces
-// (the package doc, the launchd template, and pkg/llm/auth/README.md) that
-// still recommended the setting. A guard narrower than the invariant it
-// defends is how the invariant comes back.
+//   - HARD, and not gameable: the `configure-claude-settings set apiKeyHelper`
+//     command, and apiKeyHelper used as a config KEY. These are the forms that
+//     actually re-enable the shadowing.
+//
+//   - STRUCTURED: every remaining mention must be listed in an allowlist keyed
+//     by a hash of its clause. Earlier revisions tried to judge prose polarity
+//     and were defeated four times over — by a new phrasing, by a disclaimer in
+//     a neighbouring clause, by a first-occurrence shortcut, and finally by
+//     "apiKeyHelper is retired, but use token-refresher as apiKeyHelper", where
+//     one clause holds both a disclaimer and a recommendation. Deciding that
+//     last case needs parsing, not pattern matching. So the guard stops
+//     guessing: a new or reworded mention fails until a human adds it to the
+//     allowlist, which is the deliberate review step the invariant deserves.
 func TestNoAPIKeyHelperInstructions(t *testing.T) {
 	repoRoot := filepath.Join("..", "..")
 
-	// The setting command in any form — this is what must never reappear.
-	setCommand := regexp.MustCompile(`configure-claude-settings\s+set\s+apiKeyHelper`)
+	allowed, err := loadAllowlist(filepath.Join("testdata", "apikeyhelper-allowlist.txt"))
+	if err != nil {
+		t.Fatalf("read allowlist: %v", err)
+	}
+	seen := map[string]bool{}
 
-	// Default-deny, per mention. An earlier version of this guard blocklisted a
-	// handful of observed recommending phrasings, which is default-allow: a new
-	// wording like "Use token-refresher as Claude Code's apiKeyHelper" sails
-	// straight through. Enumerating the ways prose can recommend something is
-	// unwinnable.
-	//
-	// So instead: EVERY mention of apiKeyHelper must be disclaimed by its own
-	// local context. A file may discuss the helper as much as it likes, but
-	// never without saying, right there, that the wiring is retired.
-	//
-	// Checked per mention rather than per file on purpose. The defect review
-	// found was a package doc carrying a retirement note at the top while still
-	// recommending the helper further down — a file-level check passes that.
-	//
-	// The accepted tokens must be genuinely NEGATIVE about the wiring. An
-	// earlier revision also accepted polarity-free words — "instead", "stop",
-	// "originally", "remove", "void" — which let affirmative guidance through:
-	// "Instead, use token-refresher as Claude Code's apiKeyHelper" contains no
-	// `set` command and would have passed. Every token below asserts the wiring
-	// is absent, forbidden, or harmful; none of them can appear in a sentence
-	// that recommends it.
-	disclaimed := regexp.MustCompile(`(?i)(\b(not|never|retired|removed|deprecated|disabled|no longer|prohibit\w*|forbid\w*|must\s+not|do\s+not|don't)\b|shadow\w*|\bharmful\b)`)
+	for _, rel := range trackedTextFiles(t, repoRoot) {
+		raw, err := os.ReadFile(filepath.Join(repoRoot, rel))
+		if err != nil {
+			continue // deleted between listing and reading
+		}
+		body := string(raw)
+		if !strings.Contains(strings.ToLower(body), "apikeyhelper") {
+			continue
+		}
 
-	for _, path := range operatorFacingFiles(t, repoRoot) {
-		rel, _ := filepath.Rel(repoRoot, path)
-		t.Run(rel, func(t *testing.T) {
-			raw, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("read %s: %v", path, err)
-			}
-			body := string(raw)
-
-			if loc := setCommand.FindString(body); loc != "" {
-				t.Errorf("%s instructs wiring apiKeyHelper (%q).\n"+
-					"apiKeyHelper shadows healthy OAuth on claude-code >= 2.1.205 and was "+
-					"retired on 2026-07-10 (anthropics/claude-code#11587). "+
-					"The launchd idle backstop is the only sanctioned wiring.\n"+
-					"Cleanup guidance (`configure-claude-settings remove apiKeyHelper`) is "+
-					"still allowed — hosts that followed the old instructions need it.",
+		if loc := setCommand.FindString(body); loc != "" {
+			t.Errorf("%s instructs wiring apiKeyHelper (%q).\n"+
+				"It shadows healthy OAuth on claude-code >= 2.1.205 and was retired on "+
+				"2026-07-10 (anthropics/claude-code#11587). The launchd idle backstop is "+
+				"the only sanctioned wiring. Cleanup (`... remove apiKeyHelper`) is fine.",
+				rel, loc)
+		}
+		if isConfig(rel) {
+			if loc := configKey.FindString(body); loc != "" {
+				t.Errorf("%s sets apiKeyHelper as a configuration key (%q).\n"+
+					"This re-enables OAuth shadowing directly, with no prose and no "+
+					"Makefile change. It must not appear in tracked configuration.",
 					rel, loc)
 			}
-			// Check EVERY mention against its OWN clause.
-			//
-			// The disclaimer must describe the helper, not merely share a
-			// paragraph with it: "Do not use launchd; use token-refresher as
-			// apiKeyHelper" puts the negation in a different clause entirely.
-			// Clauses split on ";" and on sentence punctuation followed by
-			// whitespace — the trailing-space requirement keeps version strings
-			// ("2.1.205") and filenames ("settings.json") intact.
-			//
-			// Enumerating occurrences rather than lines matters: an earlier
-			// implementation resolved each line to the FIRST clause mentioning
-			// the helper, so in "apiKeyHelper is retired. Use token-refresher
-			// as apiKeyHelper" the affirmative second mention re-validated
-			// against the disclaimed first one and passed.
-			for _, m := range clauseMentions(body, "apikeyhelper") {
-				if disclaimed.MatchString(m.clause) {
-					continue
-				}
-				t.Errorf("%s:%d mentions apiKeyHelper without disclaiming it:\n\t%s\n"+
-					"Every mention must say, in its own clause, that this wiring is "+
-					"retired — otherwise a reader can reconstruct the auth-shadowing "+
-					"configuration. claude-code >= 2.1.205 treats a configured helper "+
-					"as an external API key that shadows healthy OAuth "+
-					"(anthropics/claude-code#11587); it was removed from the host on "+
-					"2026-07-10. Cleanup guidance "+
-					"(`configure-claude-settings remove apiKeyHelper`) is fine.",
-					rel, m.line, strings.TrimSpace(m.clause))
+		}
+
+		for _, m := range clauseMentions(body) {
+			key := clauseKey(m.clause)
+			seen[key] = true
+			if allowed[key] {
+				continue
 			}
-		})
+			t.Errorf("%s:%d has an unrecognised apiKeyHelper mention:\n\t%s\n\n"+
+				"Every mention is allowlisted by clause hash so that adding or rewording "+
+				"one is a deliberate, reviewed act. If this mention makes clear the wiring "+
+				"is RETIRED, add this line to internal/deploy/%s:\n\n\t%s  # %s\n\n"+
+				"If it recommends the wiring, delete it instead: claude-code >= 2.1.205 "+
+				"treats a configured helper as an external API key that shadows healthy "+
+				"OAuth (anthropics/claude-code#11587).",
+				rel, m.line, strings.TrimSpace(m.clause), apiKeyHelperAllowlist, key, rel)
+		}
+	}
+
+	for key := range allowed {
+		if !seen[key] {
+			t.Errorf("allowlist entry %s in internal/deploy/%s matches no mention any more.\n"+
+				"Remove it so the file keeps describing the repository as it is.",
+				key, apiKeyHelperAllowlist)
+		}
 	}
 }
 
-// operatorFacingFiles returns the repository files an operator could act on:
-// prose, code, and — critically — the configuration and script surfaces that
-// can enable the setting directly. Vendored, generated, and VCS trees are
-// skipped, as are this guard's own sources (which necessarily contain the
-// forbidden strings as test fixtures).
-//
-// Configuration types are included because they are the most direct route to
-// the failure, not an afterthought: `apiKeyHelper` is a key in
-// `.claude/settings.json`, so a tracked settings file could restore OAuth
-// shadowing with no prose and no Makefile change at all. Shell installers can
-// likewise print or run the wiring command. A guard limited to prose, Go, and
-// plists would watch every door but the one the setting actually walks
-// through.
-func operatorFacingFiles(t *testing.T, repoRoot string) []string {
-	t.Helper()
-
-	skipDirs := map[string]bool{
-		".git": true, "node_modules": true, "vendor": true, "testdata": true,
-		"bin": true, "dist": true,
-	}
-
-	var out []string
-	err := filepath.WalkDir(repoRoot, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil // unreadable entries are not this test's concern
-		}
-		if d.IsDir() {
-			if skipDirs[d.Name()] {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		name := d.Name()
-		// The guard's own file states the forbidden patterns verbatim.
-		if strings.HasSuffix(name, "_test.go") {
-			return nil
-		}
-		if name == "Makefile" || scannedExtensions[filepath.Ext(name)] {
-			out = append(out, path)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk %s: %v", repoRoot, err)
-	}
-	if len(out) == 0 {
-		t.Fatal("no operator-facing files found; the walk is broken")
-	}
-	return out
-}
-
-// clauseSplit ends a clause at ";" or at sentence punctuation followed by
-// whitespace. The trailing-whitespace requirement is deliberate: it keeps
-// "claude-code 2.1.205" and "settings.json" from being split mid-token.
-var clauseSplit = regexp.MustCompile(`;|[.!?]\s`)
-
-// mention is one occurrence of a term, with the clause it sits in and the
-// 1-based line it starts on.
+// mention is one clause containing apiKeyHelper, with the line it starts on.
 type mention struct {
 	clause string
 	line   int
 }
 
-// clauseMentions returns EVERY clause of text that contains needle (compared
-// lower-cased), each with its line number.
-//
-// Returning every occurrence rather than the first is the point: a guard that
-// resolves all mentions in a region to one clause lets a disclaimed mention
-// vouch for an undisclaimed one next to it.
-func clauseMentions(text, needle string) []mention {
+// clauseMentions returns every clause of body containing apiKeyHelper.
+func clauseMentions(body string) []mention {
 	var out []mention
-
 	add := func(clause string, start int) {
-		if !strings.Contains(strings.ToLower(clause), needle) {
+		if !strings.Contains(strings.ToLower(clause), "apikeyhelper") {
 			return
 		}
-		out = append(out, mention{
-			clause: clause,
-			line:   1 + strings.Count(text[:start], "\n"),
-		})
+		out = append(out, mention{clause: clause, line: 1 + strings.Count(body[:start], "\n")})
 	}
-
 	start := 0
-	for _, sep := range clauseSplit.FindAllStringIndex(text, -1) {
-		add(text[start:sep[0]], start)
+	for _, sep := range clauseSplit.FindAllStringIndex(body, -1) {
+		add(body[start:sep[0]], start)
 		start = sep[1]
 	}
-	if start < len(text) {
-		add(text[start:], start)
+	if start < len(body) {
+		add(body[start:], start)
 	}
 	return out
+}
+
+// clauseKey hashes a clause with whitespace collapsed, so reflowing prose does
+// not churn the allowlist but changing the words does.
+func clauseKey(clause string) string {
+	norm := strings.Join(strings.Fields(clause), " ")
+	sum := sha256.Sum256([]byte(norm))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+// loadAllowlist reads the sanctioned clause hashes. Blank lines and comments
+// are ignored; each entry is the hash, optionally followed by a comment.
+func loadAllowlist(path string) (map[string]bool, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	for line := range strings.SplitSeq(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		out[strings.Fields(line)[0]] = true
+	}
+	return out, nil
+}
+
+// isConfig reports whether a path is a configuration file, where apiKeyHelper
+// appearing as a key would directly re-enable the shadowing.
+func isConfig(rel string) bool {
+	switch filepath.Ext(rel) {
+	case ".json", ".yaml", ".yml", ".toml":
+		return true
+	}
+	return false
+}
+
+// trackedTextFiles lists every git-tracked text file, so the guard covers
+// extensionless executables too — the .claude/hooks/* scripts are tracked,
+// operator-facing, and have no extension, so an extension allowlist silently
+// skipped them.
+func trackedTextFiles(t *testing.T, repoRoot string) []string {
+	t.Helper()
+
+	cmd := exec.Command("git", "ls-files", "-z")
+	cmd.Dir = repoRoot
+	raw, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git ls-files: %v", err)
+	}
+
+	var out []string
+	for rel := range strings.SplitSeq(string(raw), "\x00") {
+		if rel == "" || strings.HasSuffix(rel, "_test.go") {
+			continue // the guard's own fixtures state the forbidden strings
+		}
+		if strings.Contains(rel, "/testdata/") || strings.HasPrefix(rel, "testdata/") ||
+			strings.Contains(rel, "node_modules/") || strings.Contains(rel, "vendor/") {
+			continue
+		}
+		if isBinary(filepath.Join(repoRoot, rel)) {
+			continue
+		}
+		out = append(out, rel)
+	}
+	if len(out) == 0 {
+		t.Fatal("git ls-files returned nothing; the scan is broken")
+	}
+	return out
+}
+
+// isBinary reports whether a file looks binary (a NUL byte in its first 8KB).
+func isBinary(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return true
+	}
+	defer func() { _ = f.Close() }()
+
+	buf := make([]byte, 8192)
+	n, _ := f.Read(buf)
+	return bytes.IndexByte(buf[:n], 0) >= 0
 }
