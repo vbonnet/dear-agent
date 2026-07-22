@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -116,7 +117,7 @@ func TestLaunchdBinariesUseHardenedInstall(t *testing.T) {
 			for _, m := range bareCopy.FindAllString(joinContinuations(string(raw)), -1) {
 				// Scripts are immune to the stale-signature kill; see
 				// interpretedSource.
-				if interpretedSource.MatchString(m) {
+				if allSourcesInterpreted(m) {
 					continue
 				}
 				t.Errorf("%s copies into an install root without the hardened macro:\n\t%s\n"+
@@ -197,11 +198,6 @@ const installRootPattern = `(?:(?:\$\(HOME\)|\$\{HOME\}|\$HOME|~)/(?:go/bin|\.lo
 // clauseSplit ends a clause at ";" or at sentence punctuation followed by
 // whitespace. Requiring the trailing whitespace keeps "claude-code 2.1.205"
 // and "settings.json" from splitting mid-token.
-// interpretedSource matches a copy whose source is a script or a glob. Scripts
-// are immune to the stale-signature kill (see above); globs are directory
-// restores rather than binary installs.
-var interpretedSource = regexp.MustCompile(`\b(?:cp|install)\s+[^\n]*?(?:\.(?:sh|py|rb|pl|js|ts|bash|zsh)\b|\*)`)
-
 // commandSplit separates the commands within one shell line.
 var commandSplit = regexp.MustCompile(`&&|\|\||;|\|`)
 
@@ -273,8 +269,10 @@ func TestNoAPIKeyHelperInstructions(t *testing.T) {
 			}
 		}
 
+		occurrence := map[string]int{}
 		for _, m := range clauseMentions(body) {
-			key := siteKey(rel, m.clause)
+			occurrence[m.clause]++
+			key := siteKey(rel, m.clause, occurrence[m.clause])
 			seen[key] = true
 			if allowed[key] {
 				continue
@@ -325,15 +323,71 @@ func clauseMentions(body string) []mention {
 	return out
 }
 
-// siteKey identifies one sanctioned occurrence: its file AND its text.
+// scriptOrGlob matches a copy source that is immune to the stale-signature kill
+// -- an interpreted file, or a glob (a directory restore, not a binary install).
+var scriptOrGlob = regexp.MustCompile(`(?:\.(?:sh|py|rb|pl|js|ts|bash|zsh)$|\*)`)
+
+// flagTakesArg lists install(1) flags whose following token is a value, not a
+// source path.
+var flagTakesArg = map[string]bool{"-m": true, "-o": true, "-g": true, "--mode": true, "--owner": true, "--group": true}
+
+// allSourcesInterpreted reports whether EVERY source operand of a copy is a
+// script or a glob.
+//
+// Checking "any source is interpreted" was bypassable: `cp hook.sh agm
+// /usr/local/bin/` exempted the whole command on hook.sh while agm was
+// overwritten in place. An exemption is only sound if it covers every operand
+// it excuses.
+func allSourcesInterpreted(cmd string) bool {
+	if i := strings.Index(cmd, "#"); i >= 0 {
+		cmd = cmd[:i]
+	}
+	fields := strings.Fields(cmd)
+	for len(fields) > 0 && fields[0] == "sudo" {
+		fields = fields[1:]
+	}
+	if len(fields) < 3 {
+		return false // verb + at least one source + destination
+	}
+	fields = fields[1:]             // drop the verb
+	fields = fields[:len(fields)-1] // drop the destination
+
+	var sources []string
+	for i := 0; i < len(fields); i++ {
+		f := strings.Trim(fields[i], `"'`)
+		if strings.HasPrefix(f, "-") {
+			if flagTakesArg[f] {
+				i++
+			}
+			continue
+		}
+		sources = append(sources, f)
+	}
+	if len(sources) == 0 {
+		return false
+	}
+	for _, src := range sources {
+		if !scriptOrGlob.MatchString(src) {
+			return false
+		}
+	}
+	return true
+}
+
+// siteKey identifies one sanctioned occurrence: its file, its text, AND which
+// occurrence of that text it is.
+//
+// File+text alone still let a warning duplicated verbatim later in the SAME
+// file exempt an active copy, because both occurrences hash identically. The
+// ordinal makes each site reviewable on its own.
 //
 // Keying on text alone would let a single allowlisted entry authorise the same
 // command or clause ANYWHERE in the repository -- so a warning example could
 // silently bless real install guidance elsewhere, and moving the command out of
 // its warning would still satisfy the stale-entry check. Binding the exemption
 // to a location means each site is reviewed on its own.
-func siteKey(path, text string) string {
-	return clauseKey(path + "\x00" + text)
+func siteKey(path, text string, ordinal int) string {
+	return clauseKey(fmt.Sprintf("%s\x00%s\x00%d", path, text, ordinal))
 }
 
 // clauseKey hashes a clause with whitespace collapsed, so reflowing prose does
@@ -481,13 +535,14 @@ func TestNoRawCopyIntoInstallRoots(t *testing.T) {
 	// rather than obeyed.
 	rawCopy := regexp.MustCompile(
 		`\b(?:sudo\s+)?(?:cp|install)\s+(?:[^\s;|&]+\s+)*?(?:sudo\s+)?["']?` +
-			installRootPattern + `[^\s"';|&]*["']?\s*(?:$|[;|&])`)
+			installRootPattern + `[^\s"';|&#]*["']?\s*(?:$|[;|&#])`)
 
 	for _, rel := range trackedTextFiles(t, repoRoot) {
 		raw, err := os.ReadFile(filepath.Join(repoRoot, rel))
 		if err != nil {
 			continue
 		}
+		occurrence := map[string]int{}
 		for _, lg := range logicalLines(string(raw)) {
 			line, i := lg.text, lg.line-1
 			// Evaluate each COMMAND separately. Checking the whole logical line
@@ -498,7 +553,7 @@ func TestNoRawCopyIntoInstallRoots(t *testing.T) {
 			// exemption to the command that earned it.
 			var offending string
 			for _, cmd := range splitCommands(line) {
-				if rawCopy.MatchString(cmd) && !interpretedSource.MatchString(cmd) {
+				if rawCopy.MatchString(cmd) && !allSourcesInterpreted(cmd) {
 					offending = cmd
 					break
 				}
@@ -506,7 +561,8 @@ func TestNoRawCopyIntoInstallRoots(t *testing.T) {
 			if offending == "" {
 				continue
 			}
-			if key := siteKey(rel, offending); allowed[key] {
+			occurrence[offending]++
+			if key := siteKey(rel, offending, occurrence[offending]); allowed[key] {
 				seenExempt[key] = true
 				continue
 			}
@@ -522,7 +578,7 @@ func TestNoRawCopyIntoInstallRoots(t *testing.T) {
 				"If this is a WARNING showing the retired form rather than guidance to "+
 				"follow, add this line to internal/deploy/testdata/rawcopy-allowlist.txt:\n\n"+
 				"\t%s  # %s\n",
-				rel, i+1, strings.TrimSpace(line), siteKey(rel, line), rel)
+				rel, i+1, strings.TrimSpace(line), siteKey(rel, line, occurrence[offending]), rel)
 		}
 	}
 
