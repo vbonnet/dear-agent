@@ -69,10 +69,30 @@ func sendThroughTmux(t *testing.T, sessionName, cmdText, harnessName, paneDir st
 		_ = exec.Command("tmux", "-S", socket, "kill-server").Run()
 	})
 
+	// Every built command ends in `&& exit`, so the pane's shell terminates as
+	// soon as the command runs. tmux.SendCommand does not treat Enter as
+	// fire-and-forget: it captures the pane afterwards to confirm the prompt was
+	// submitted, and retries the send if it cannot tell. Against a pane that has
+	// already exited, that retry hits a destroyed session and the call reports
+	// "prompt submission acknowledgement is uncertain" even though the command
+	// ran correctly — which is what happened on Linux CI while macOS raced the
+	// other way. remain-on-exit keeps the dead pane addressable so the
+	// acknowledgement path stays meaningful.
+	setRemain := exec.Command("tmux", "-S", socket, "set-option", "-t", sessionName, "remain-on-exit", "on")
+	if out, err := setRemain.CombinedOutput(); err != nil {
+		t.Fatalf("tmux set-option remain-on-exit: %v: %s", err, out)
+	}
+
 	// tmux.SendCommand reads the socket from the environment.
 	t.Setenv("AGM_TMUX_SOCKET", socket)
+	// A send error is logged rather than fatal. What this test asserts is what
+	// the harness received, and the stub's argv file is the authoritative
+	// evidence of that; SendCommand's own delivery-acknowledgement heuristic is
+	// a separate concern with its own tests. If the bytes really did not arrive,
+	// the poll below fails with the pane contents attached, which is a better
+	// diagnostic than the send error alone.
 	if err := tmux.SendCommand(sessionName, cmdText); err != nil {
-		t.Fatalf("tmux.SendCommand: %v", err)
+		t.Logf("tmux.SendCommand reported %v; falling through to what the harness actually received", err)
 	}
 
 	// The pane runs asynchronously; poll for the stub's argv file.
