@@ -106,6 +106,56 @@ func TestCodexCreateSessionStoresMetadataEvenIfComposerWaitTimesOut(t *testing.T
 	}
 }
 
+func TestCodexCreateSessionCleansUpWhenLaunchPreparationFails(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	stateFile := t.TempDir() + "/not-a-directory"
+	if err := os.WriteFile(stateFile, []byte("occupied"), 0o600); err != nil {
+		t.Fatalf("write state file: %v", err)
+	}
+	t.Setenv("AGM_STATE_DIR", stateFile)
+
+	origLookPath := lookPath
+	origHasSession := codexHasSession
+	origNewSession := codexNewSession
+	origSendCommand := codexSendCommand
+	t.Cleanup(func() {
+		lookPath = origLookPath
+		codexHasSession = origHasSession
+		codexNewSession = origNewSession
+		codexSendCommand = origSendCommand
+	})
+
+	lookPath = func(file string) (string, error) {
+		if file == "codex" {
+			return "/fake/codex", nil
+		}
+		return "", os.ErrNotExist
+	}
+	codexHasSession = func(string) (bool, error) { return false, nil }
+	created := false
+	codexNewSession = func(string, string) error {
+		created = true
+		return nil
+	}
+	var sent []string
+	codexSendCommand = func(_ string, command string) error {
+		sent = append(sent, command)
+		return nil
+	}
+
+	adapter := &CodexCLIAdapter{sessionStore: &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}}
+	_, err := adapter.CreateSession(SessionContext{Name: "codex-prepare-failure", WorkingDirectory: "/work"})
+	if err == nil || !strings.Contains(err.Error(), "prepare Codex CLI launch") {
+		t.Fatalf("CreateSession error = %v, want launch preparation failure", err)
+	}
+	if !created {
+		t.Fatal("CreateSession did not create the tmux session before the injected preparation failure")
+	}
+	if len(sent) != 1 || sent[0] != "exit\r" {
+		t.Fatalf("cleanup commands = %q, want [exit\\r]", sent)
+	}
+}
+
 func TestCodexResumeSessionRestartsDeadProcess(t *testing.T) {
 	t.Setenv("TMUX", "/tmp/fake-tmux")
 	// Isolate the codex trust pre-write from the developer's real ~/.codex.
@@ -169,6 +219,52 @@ func TestCodexResumeSessionRestartsDeadProcess(t *testing.T) {
 	}
 	if !waited {
 		t.Fatal("ResumeSession did not wait for Codex prompt after restart")
+	}
+}
+
+func TestCodexResumeSessionCleansUpWhenLaunchPreparationFails(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/fake-tmux")
+	t.Setenv("CODEX_HOME", t.TempDir())
+	stateFile := t.TempDir() + "/not-a-directory"
+	if err := os.WriteFile(stateFile, []byte("occupied"), 0o600); err != nil {
+		t.Fatalf("write state file: %v", err)
+	}
+	t.Setenv("AGM_STATE_DIR", stateFile)
+
+	origHasSession := codexHasSession
+	origNewSession := codexNewSession
+	origSendCommand := codexSendCommand
+	t.Cleanup(func() {
+		codexHasSession = origHasSession
+		codexNewSession = origNewSession
+		codexSendCommand = origSendCommand
+	})
+
+	codexHasSession = func(string) (bool, error) { return false, nil }
+	created := false
+	codexNewSession = func(string, string) error {
+		created = true
+		return nil
+	}
+	var sent []string
+	codexSendCommand = func(_ string, command string) error {
+		sent = append(sent, command)
+		return nil
+	}
+
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{
+		"session-id": {TmuxName: "codex-resume-prepare-failure", WorkingDir: "/work"},
+	}}
+	adapter := &CodexCLIAdapter{sessionStore: store}
+	err := adapter.ResumeSession("session-id")
+	if err == nil || !strings.Contains(err.Error(), "prepare Codex CLI resume") {
+		t.Fatalf("ResumeSession error = %v, want launch preparation failure", err)
+	}
+	if !created {
+		t.Fatal("ResumeSession did not create the tmux session before the injected preparation failure")
+	}
+	if len(sent) != 1 || sent[0] != "exit\r" {
+		t.Fatalf("cleanup commands = %q, want [exit\\r]", sent)
 	}
 }
 

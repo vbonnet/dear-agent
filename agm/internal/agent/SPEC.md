@@ -1,6 +1,6 @@
 # Agent Harness and Model Parity Specification
 
-<!-- Last audited at: 2026-07-21 -->
+<!-- Last audited at: 2026-07-22 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -133,6 +133,8 @@ compatibility.
 
 **AGP-17** If pre-trusting the working directory fails, the codex-cli adapter shall warn and still attempt the launch.
 
+**AGP-53** When the Codex CLI adapter creates a tmux session for a fresh create or cold resume and private launch preparation or command delivery fails, the system shall clean up the session it created without terminating a pre-existing session.
+
 ### Harness Doctor Health
 
 **AGP-19** When AGM doctor inspects an AGY session, including one stored with the legacy `agy-cli` or `antigravity` spelling, the system shall normalize the harness, derive `agy` from the shared harness binary registry, and use `$HOME/.gemini/antigravity-cli` as its advisory configuration directory rather than classify the session as unknown.
@@ -144,4 +146,4 @@ compatibility.
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
-- Package tests: `agm/internal/agent/agy_adapter_test.go`, `agm/internal/agent/pi_adapter_test.go`
+- Package tests: `agm/internal/agent/agy_adapter_test.go`, `agm/internal/agent/codex_cli_adapter_test.go`, `agm/internal/agent/pi_adapter_test.go`
