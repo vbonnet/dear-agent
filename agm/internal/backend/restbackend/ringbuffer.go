@@ -71,6 +71,9 @@ func (rb *ringBuffer) ReadLast(n int) []string {
 	if n <= 0 {
 		return nil
 	}
+	if n > maxRingBufferSize {
+		n = maxRingBufferSize
+	}
 	if n > rb.count {
 		n = rb.count
 	}

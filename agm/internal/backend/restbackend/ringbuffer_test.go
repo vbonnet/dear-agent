@@ -58,4 +58,14 @@ func TestRingBuffer_BoundsChecking(t *testing.T) {
 			t.Errorf("expected 2 items, got %d", len(result))
 		}
 	})
+
+	t.Run("ReadLast excessive request is capped before allocation", func(t *testing.T) {
+		rb := newRingBuffer(10)
+		rb.Write("x")
+		rb.Write("y")
+		result := rb.ReadLast(maxRingBufferSize + 1)
+		if len(result) != 2 {
+			t.Errorf("expected 2 items, got %d", len(result))
+		}
+	})
 }
