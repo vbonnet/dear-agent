@@ -77,7 +77,7 @@ Provide a production-ready CLI that:
 
 **CLI-24** When AGM command tests execute Cobra commands or mutate command flags, the system shall use fresh command instances or restore the complete shared command state so test results remain independent of execution order.
 
-**CLI-25** When `agm new` runs inside tmux without `--detached` for Claude Code, Codex, OpenCode, Pi, or deprecated Gemini compatibility, the system shall route into current-pane creation, queue the canonical launch command behind the invoking AGM process, and finalize session metadata without synchronously waiting for the composer, because the pane shell cannot consume the command until AGM returns; Codex shall additionally require its executable before queueing, Pi shall use its managed canonical launch contract, and Claude's SessionStart hook shall persist the resulting conversation UUID.
+**CLI-25** When `agm new` runs inside tmux without `--detached` for Claude Code, Codex, OpenCode, Pi, or deprecated Gemini compatibility, the system shall route into current-pane creation, require the harness's canonical executable, queue the canonical launch command behind the invoking AGM process, and finalize session metadata without synchronously waiting for the composer, because the pane shell cannot consume the command until AGM returns; Pi shall use its managed canonical launch contract, and Claude's SessionStart hook shall persist the resulting conversation UUID.
 
 **CLI-26** When `agm audit resources --fix` cannot remove a linked worktree through a one-force Git operation, including when the worktree is locked, the system shall preserve the checkout and report the cleanup error instead of deleting the directory directly.
 

@@ -574,7 +574,7 @@ func agmValidatesCurrentTmuxCodexLaunchWiring(ctx context.Context) error {
 	// to compile both production packages under integration-graph contention.
 	testCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/ops", "-run", `^(Test(StartCurrentTmuxHarnessCodex(UsesRealLauncherContract|StopsAfterCredentialFailure|PropagatesQueueFailure)|QueueCurrentTmuxCodex(DoesNotWaitForReadiness|RejectsMissingExecutable)|QueueCurrentTmuxPi(UsesManagedLaunchContract|RejectsMissingExecutable)|CurrentTmuxLaunchResultDefersEveryQueuedHarness|QueueCurrentTmuxHarnessCommandUsesCanonicalCommandWithoutWaiting|StartNewSessionForContextRoutesCurrentTmux|SessionStartHook(AssociatesClaudeUUIDBeforeReadyState|RetriesAssociationUntilRegistration|RetryWindowCoversMaximumStartup|HasSingleCanonicalSource))|Test(CreateSession_RollsBackEveryPostTmuxFailure|EstablishCreatedHarnessReadinessAllowsOnlyQueuedCurrentTmuxDeferral))$`, "-count=1", "-v")
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/ops", "-run", `^(Test(StartCurrentTmuxHarnessCodex(UsesRealLauncherContract|StopsAfterCredentialFailure|PropagatesQueueFailure)|QueueCurrentTmuxCodex(DoesNotWaitForReadiness|RejectsMissingExecutable)|QueueCurrentTmuxPi(UsesManagedLaunchContract|RejectsMissingExecutable)|CurrentTmuxLaunchResultDefersEveryQueuedHarness|QueueCurrentTmuxHarnessCommand(UsesCanonicalCommandWithoutWaiting|RejectsMissingExecutable)|StartNewSessionForContextRoutesCurrentTmux|SessionStartHook(AssociatesClaudeUUIDBeforeReadyState|RetriesAssociationUntilRegistration|RetryWindowCoversMaximumStartup|HasSingleCanonicalSource))|Test(CreateSession_RollsBackEveryPostTmuxFailure|EstablishCreatedHarnessReadinessAllowsOnlyQueuedCurrentTmuxDeferral))$`, "-count=1", "-v")
 	cmd.Dir = bddRepoRoot()
 	output, runErr := cmd.CombinedOutput()
 	harnessState.currentTmuxTestOutput = string(output)
@@ -633,6 +633,7 @@ func everyQueuedCurrentTmuxHarnessShouldDeferReadinessUntilAGMExits(ctx context.
 	for _, behavior := range []string{
 		"TestCurrentTmuxLaunchResultDefersEveryQueuedHarness",
 		"TestQueueCurrentTmuxHarnessCommandUsesCanonicalCommandWithoutWaiting",
+		"TestQueueCurrentTmuxHarnessCommandRejectsMissingExecutable",
 		"TestQueueCurrentTmuxPiUsesManagedLaunchContract",
 		"TestQueueCurrentTmuxPiRejectsMissingExecutable",
 		"TestEstablishCreatedHarnessReadinessAllowsOnlyQueuedCurrentTmuxDeferral",

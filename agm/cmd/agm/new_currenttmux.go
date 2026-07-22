@@ -260,17 +260,46 @@ func startCurrentTmuxHarnessWithRuntime(ctx context.Context, spec ops.HarnessLau
 
 type currentTmuxCommandSender func(sessionName, command string) error
 
-func queueCurrentTmuxHarnessCommand(ctx context.Context, spec ops.HarnessLaunchSpec, send currentTmuxCommandSender) error {
+type currentTmuxCommandQueueRuntime struct {
+	sendCommand currentTmuxCommandSender
+	lookPath    func(file string) (string, error)
+}
+
+func realCurrentTmuxCommandQueueRuntime() currentTmuxCommandQueueRuntime {
+	return currentTmuxCommandQueueRuntime{sendCommand: tmux.SendCommand, lookPath: exec.LookPath}
+}
+
+func currentTmuxHarnessExecutable(harness string) (string, error) {
+	switch harness {
+	case "claude-code":
+		return "claude", nil
+	case "opencode-cli":
+		return "opencode", nil
+	case "gemini-cli":
+		return "gemini", nil
+	default:
+		return "", fmt.Errorf("current-tmux command queue does not support harness %q", harness)
+	}
+}
+
+func queueCurrentTmuxHarnessCommand(ctx context.Context, spec ops.HarnessLaunchSpec, runtime currentTmuxCommandQueueRuntime) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return send(spec.SessionName, ops.BuildHarnessLaunchCommand(spec).Command)
+	executable, err := currentTmuxHarnessExecutable(spec.Harness)
+	if err != nil {
+		return err
+	}
+	if _, err := runtime.lookPath(executable); err != nil {
+		return fmt.Errorf("%s executable is unavailable: %w", executable, err)
+	}
+	return runtime.sendCommand(spec.SessionName, ops.BuildHarnessLaunchCommand(spec).Command)
 }
 
 // startCurrentTmuxClaude queues Claude behind the foreground AGM process. The
 // command cannot execute until AGM returns, so readiness is explicitly deferred.
 func startCurrentTmuxClaude(ctx context.Context, spec ops.HarnessLaunchSpec) error {
-	if err := queueCurrentTmuxHarnessCommand(ctx, spec, tmux.SendCommand); err != nil {
+	if err := queueCurrentTmuxHarnessCommand(ctx, spec, realCurrentTmuxCommandQueueRuntime()); err != nil {
 		ui.PrintError(err,
 			"Failed to queue Claude in current tmux pane",
 			"  • Verify Claude is installed: which claude\n"+
@@ -286,7 +315,7 @@ func startCurrentTmuxClaude(ctx context.Context, spec ops.HarnessLaunchSpec) err
 
 // startCurrentTmuxOpenCode queues OpenCode behind the foreground AGM process.
 func startCurrentTmuxOpenCode(ctx context.Context, spec ops.HarnessLaunchSpec) error {
-	if err := queueCurrentTmuxHarnessCommand(ctx, spec, tmux.SendCommand); err != nil {
+	if err := queueCurrentTmuxHarnessCommand(ctx, spec, realCurrentTmuxCommandQueueRuntime()); err != nil {
 		ui.PrintError(err,
 			"Failed to queue OpenCode in current tmux pane",
 			"  • Verify OpenCode server is running: curl http://localhost:4096/health\n"+
@@ -303,7 +332,7 @@ func startCurrentTmuxOpenCode(ctx context.Context, spec ops.HarnessLaunchSpec) e
 // startCurrentTmuxGemini queues deprecated Gemini compatibility behind the
 // foreground AGM process.
 func startCurrentTmuxGemini(ctx context.Context, spec ops.HarnessLaunchSpec) error {
-	if err := queueCurrentTmuxHarnessCommand(ctx, spec, tmux.SendCommand); err != nil {
+	if err := queueCurrentTmuxHarnessCommand(ctx, spec, realCurrentTmuxCommandQueueRuntime()); err != nil {
 		ui.PrintError(err,
 			"Failed to queue Gemini in current tmux pane",
 			"  • Verify Gemini is installed: which gemini\n"+
