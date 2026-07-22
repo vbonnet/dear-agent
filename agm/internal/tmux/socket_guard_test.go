@@ -31,7 +31,9 @@ func stubProbes(t *testing.T, dialable, tmuxOK bool, pids []int, pidErr error) {
 // sockaddr_un paths at ~104 bytes, which t.TempDir() can exceed.
 func newSocketFile(t *testing.T) (path string, closeFn func()) {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "agmsock")
+	// Not t.TempDir(): macOS caps sockaddr_un paths near 104 bytes and the
+	// per-test temp path overflows it ("invalid argument" on bind).
+	dir, err := os.MkdirTemp("/tmp", "agmsock") //nolint:usetesting // see above
 	require.NoError(t, err)
 	path = filepath.Join(dir, "s.sock")
 
@@ -161,7 +163,7 @@ func TestFindServerPIDs_RealServer(t *testing.T) {
 		t.Skip("tmux not installed")
 	}
 
-	dir, err := os.MkdirTemp("/tmp", "agmreal")
+	dir, err := os.MkdirTemp("/tmp", "agmreal") //nolint:usetesting // sockaddr_un path limit, see newSocketFile
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	sock := filepath.Join(dir, "r.sock")
@@ -169,7 +171,7 @@ func TestFindServerPIDs_RealServer(t *testing.T) {
 	session := fmt.Sprintf("ce7ep9-%d", os.Getpid())
 	require.NoError(t, exec.Command("tmux", "-S", sock, "new-session", "-d",
 		"-s", session, "sleep", "120").Run())
-	defer exec.Command("tmux", "-S", sock, "kill-server").Run() //nolint:errcheck // best-effort cleanup
+	t.Cleanup(func() { _ = exec.Command("tmux", "-S", sock, "kill-server").Run() })
 
 	require.Eventually(t, func() bool {
 		pids, _ := FindServerPIDs(sock)
