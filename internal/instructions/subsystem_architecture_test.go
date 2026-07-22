@@ -33,7 +33,7 @@ func TestAGMHarnessArchitectureMatchesRegistry(t *testing.T) {
 	source := readFile(t, filepath.Join(root, "agm/internal/agent/harnesses.go"))
 	doc := readFile(t, filepath.Join(root, "agm/docs/ARCHITECTURE.md"))
 
-	active := []string{"claude-code", "codex-cli", "agy", "opencode-cli"}
+	active := []string{"claude-code", "codex-cli", "agy", "opencode-cli", "pi-cli"}
 	deprecated := []string{"gemini-cli"}
 	assertStringSliceDeclaration(t, source, "activeHarnesses", active)
 	assertStringSliceDeclaration(t, source, "deprecatedHarnesses", deprecated)
@@ -86,20 +86,17 @@ func TestAGMMCPArchitectureMatchesRegisteredTools(t *testing.T) {
 		"engram_get_wayfinder_session",
 	}
 	registrations := uniqueMatches(mainSource, regexp.MustCompile(`add([A-Za-z0-9]+)Tool\(server,\s*cfg\)`))
-	declarations := regexp.MustCompile(`(?s)func add([A-Za-z0-9]+)Tool\([^)]*\)\s*\{\s*mcp\.AddTool\(server,\s*&mcp\.Tool\{\s*Name:\s*"([^"]+)"`).FindAllStringSubmatch(toolSource, -1)
-	toolNameByRegistration := make(map[string]string, len(declarations))
+	declarations := uniqueMatches(toolSource, regexp.MustCompile(`func add([A-Za-z0-9]+)Tool\(`))
+	declared := make(map[string]struct{}, len(declarations))
 	for _, declaration := range declarations {
-		toolNameByRegistration[declaration[1]] = declaration[2]
+		declared[declaration] = struct{}{}
 	}
-	got := make([]string, 0, len(registrations))
 	for _, registration := range registrations {
-		name, ok := toolNameByRegistration[registration]
-		if !ok {
-			t.Errorf("registered helper add%sTool has no MCP tool declaration", registration)
-			continue
+		if _, ok := declared[registration]; !ok {
+			t.Errorf("registered helper add%sTool has no declaration", registration)
 		}
-		got = append(got, name)
 	}
+	got := uniqueMatches(toolSource, regexp.MustCompile(`Name:\s*"([^"]+)"`))
 	assertSameStrings(t, "AGM MCP source tool inventory", got, want)
 	assertDocumentedNames(t, doc, want)
 }

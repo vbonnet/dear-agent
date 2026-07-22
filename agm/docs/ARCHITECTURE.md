@@ -65,6 +65,7 @@ Harness names and lifecycle status come only from
 | `codex-cli` | active | Codex CLI in tmux |
 | `agy` | active | AGY CLI in tmux |
 | `opencode-cli` | active | OpenCode CLI in tmux, with optional SSE monitoring |
+| `pi-cli` | active | Pi CLI in tmux |
 | `gemini-cli` | deprecated compatibility | Gemini CLI in tmux |
 
 Active harnesses are the parity set. A deprecated harness can remain accepted
