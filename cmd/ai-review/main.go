@@ -127,11 +127,10 @@ func main() {
 	os.Exit(run(loadConfig()))
 }
 
-// run executes the review and returns the process exit code. It is separated
-// from main so tests can exercise the env-driven control flow. Every failure
-// path returns a non-zero code (fail closed); only an Approved outcome, an
-// empty diff, or the audited override yields 0.
-func run(c config) int {
+// preflightGates runs the checks that decide the outcome without any model
+// call: fork access and secret presence. It returns the exit code and whether
+// it handled the run.
+func preflightGates(c config) (int, bool) {
 	// Fork PRs cannot read repo secrets, so the review cannot run. A required
 	// check that silently skips would leave the PR pending forever; instead we
 	// fail closed with an explanation (SPEC R8). A human maintainer reviews and
@@ -139,7 +138,7 @@ func run(c config) int {
 	if c.isFork && !c.override {
 		fmt.Println("::error::This PR originates from a fork; the automated AI review cannot run (no secret access). A maintainer must review and apply the 'ai-review:override' label to merge.")
 		logCommentErr(postComment(c, forkComment()))
-		return 1
+		return 1, true
 	}
 
 	// Missing secret fails closed (SPEC R4) — no silent skip.
@@ -149,12 +148,38 @@ func run(c config) int {
 			// AIREV-03: the gate always posts its result before passing on
 			// human authority, so the override leaves a sticky audit trail.
 			if !requireComment(c, overrideComment("the ANTHROPIC_API_KEY secret is not configured, so no automated review could run")) {
-				return 1
+				return 1, true
 			}
-			return 0
+			return 0, true
 		}
 		fmt.Println("::error::ANTHROPIC_API_KEY is not set; the AI review gate cannot run and fails closed. Set the secret, or apply the 'ai-review:override' label after a human review.")
-		return 1
+		return 1, true
+	}
+	return 0, false
+}
+
+// handleEmptyDiff resolves a run whose tree change is empty. An explicit
+// escalation marker still forces needs-human-review (AIREV-08).
+func handleEmptyDiff(c config, metaTriggers []string) int {
+	if len(metaTriggers) > 0 {
+		fmt.Printf("::warning::empty diff, but REVIEW.md §3 escalation triggered: %s\n", strings.Join(metaTriggers, "; "))
+		logCommentErr(postComment(c, buildComment(NeedsHumanReview, "Empty diff, but an explicit escalation marker is present.", nil, c.override, metaTriggers)))
+		if c.override && !requireComment(c, overrideComment("an explicit escalation marker is present on an empty diff")) {
+			return 1
+		}
+		return ExitFor(NeedsHumanReview, c.override)
+	}
+	fmt.Println("::notice::empty diff; nothing to review.")
+	return 0
+}
+
+// run executes the review and returns the process exit code. It is separated
+// from main so tests can exercise the env-driven control flow. Every failure
+// path returns a non-zero code (fail closed); only an Approved outcome, an
+// empty diff with no escalation marker, or the audited override yields 0.
+func run(c config) int {
+	if code, handled := preflightGates(c); handled {
+		return code
 	}
 
 	diff, err := gitDiff(c.baseSHA, c.headSHA)
@@ -163,10 +188,14 @@ func run(c config) int {
 		return failClosed(c, "the PR diff could not be computed")
 	}
 
-	// Empty diff: nothing to review (SPEC R11).
+	// Metadata escalation is evaluated BEFORE the empty-diff shortcut: an
+	// explicit HUMAN REVIEW REQUIRED marker in the PR body or a commit message
+	// must force escalation even when the tree change is empty (AIREV-08).
+	metaTriggers := EscalationTriggers(nil, c.prBody, gitCommitMessages(c.baseSHA, c.headSHA))
+
+	// Empty diff: nothing to review (SPEC R11), unless a marker escalated.
 	if strings.TrimSpace(diff) == "" {
-		fmt.Println("::notice::empty diff; nothing to review.")
-		return 0
+		return handleEmptyDiff(c, metaTriggers)
 	}
 
 	// Oversize diff fails closed rather than truncating (SPEC R10).
@@ -210,8 +239,18 @@ func run(c config) int {
 	}
 	outcome = ApplyEscalation(outcome, triggers)
 
-	// Comment is best-effort and never changes the exit code.
+	// Reporting the outcome is best-effort: the exit code already carries the
+	// verdict, so a comment outage must not change it.
 	logCommentErr(postComment(c, buildComment(outcome, synthesis, reports, c.override, triggers)))
+
+	// But when an override is what converts a NON-approved outcome into a pass,
+	// the audit record is load-bearing (AIREV-03) — the check would otherwise
+	// go green with no sticky explanation of what was overridden.
+	if outcome != Approved && c.override {
+		if !requireComment(c, overrideComment(fmt.Sprintf("the review outcome was %s", outcome))) {
+			return 1
+		}
+	}
 
 	code := ExitFor(outcome, c.override)
 	fmt.Printf("::notice::AI review outcome: %s (exit %d, override=%t)\n", outcome, code, c.override)
