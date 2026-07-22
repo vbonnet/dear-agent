@@ -10,7 +10,10 @@ intercepted before normal AGM startup and is not a user-facing command surface.
 
 ## Security Boundary
 
-The executor protects credentials from ambient cross-harness inheritance and
+For Codex, the executor prevents ambient cross-harness credential inheritance
+with a deny-by-default child environment. For Claude, it treats authentication
+and OpenTelemetry state as a complete caller snapshot, but otherwise preserves
+the harness environment. For both harnesses, it protects transported values
 from shell command, process-argument, pane-scrollback, and debug-log exposure.
 It assumes the installed AGM and harness executables, the user's environment,
 and the user's configuration and credential files are trusted. It does not
