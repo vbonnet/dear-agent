@@ -532,9 +532,12 @@ func ReadModel(path string) (string, error) {
 func qualifyModel(provider, model string) string {
 	provider = strings.TrimSpace(provider)
 	model = strings.TrimSpace(model)
-	if provider == "" || strings.HasPrefix(model, provider+"/") {
+	if provider == "" || model == "" {
 		return model
 	}
+	// Pi persists provider and model as separate native fields. Model IDs are
+	// opaque and may themselves begin with the provider name, so an apparent
+	// prefix match must not erase that boundary.
 	return provider + "/" + model
 }
 

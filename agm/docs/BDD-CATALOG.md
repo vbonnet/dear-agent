@@ -1079,6 +1079,8 @@ model catalog.
   Pi's topmost user override.
 - An OpenRouter route with a nested vendor-qualified model ID retains its own
   route-specific native context window rather than a direct-provider default.
+- A custom model ID remains opaque when it begins with its own provider name;
+  AGM does not collapse the repeated provider segment during qualification.
 - Credential command strings in Pi's model catalog remain inert data.
 
 **Why this matters:** Custom providers are a supported Pi route. Using a static

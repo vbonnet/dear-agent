@@ -249,6 +249,21 @@ func TestReadUsagePreservesLatestAssistantProviderProvenance(t *testing.T) {
 	}
 }
 
+func TestReadUsagePreservesOpaqueProviderPrefixedModelID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	writeFixture(t, path,
+		`{"type":"session","id":"usage-opaque-model-id","cwd":"/work"}`+"\n"+
+			`{"type":"message","timestamp":"2026-07-21T00:00:01Z","message":{"role":"assistant","provider":"acme","model":"acme/foo","usage":{"input":100,"output":20}}}`+"\n")
+
+	usage, err := ReadUsage(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.Model != "acme/acme/foo" {
+		t.Fatalf("usage model = %q, want provider plus complete opaque model ID", usage.Model)
+	}
+}
+
 func TestReadModelUsesLatestNativeProviderProvenance(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	writeFixture(t, path,
@@ -261,6 +276,21 @@ func TestReadModelUsesLatestNativeProviderProvenance(t *testing.T) {
 	}
 	if model != "openai/gpt-5.6-terra" {
 		t.Fatalf("ReadModel = %q", model)
+	}
+}
+
+func TestReadModelPreservesOpaqueProviderPrefixedModelID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	writeFixture(t, path,
+		`{"type":"session","id":"model-opaque-id","cwd":"/work"}`+"\n"+
+			`{"type":"model_change","provider":"acme","modelId":"acme/foo"}`+"\n")
+
+	model, err := ReadModel(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model != "acme/acme/foo" {
+		t.Fatalf("ReadModel = %q, want provider plus complete opaque model ID", model)
 	}
 }
 

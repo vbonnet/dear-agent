@@ -23,3 +23,10 @@ Feature: Pi custom model context
     When AGM detects the managed Pi context
     Then the Pi context should report 3562 of 1050000 tokens used
     And the Pi context model should be "openrouter/openai/gpt-5.4"
+
+  Scenario: A custom model ID that begins with its provider remains opaque
+    Given a managed Pi transcript uses provider "acme" model "acme/foo"
+    And the Pi custom model catalog for provider "acme" declares model "acme/foo" with an 8192 token window
+    When AGM detects the managed Pi context
+    Then the Pi context should report 3562 of 8192 tokens used
+    And the Pi context model should be "acme/acme/foo"

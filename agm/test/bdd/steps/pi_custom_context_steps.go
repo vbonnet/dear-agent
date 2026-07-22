@@ -50,6 +50,7 @@ func RegisterPiCustomContextSteps(ctx *godog.ScenarioContext) {
 
 	ctx.Step(`^a managed Pi transcript uses provider "([^"]*)" model "([^"]*)"$`, managedPiTranscriptUsesModel)
 	ctx.Step(`^the Pi custom model catalog declares an (\d+) token window with an inert credential command$`, piCatalogDeclaresInertWindow)
+	ctx.Step(`^the Pi custom model catalog for provider "([^"]*)" declares model "([^"]*)" with an (\d+) token window$`, piCatalogDeclaresModelWindow)
 	ctx.Step(`^the Pi model catalog overrides "([^"]*)" to (\d+) tokens$`, piCatalogOverridesWindow)
 	ctx.Step(`^AGM detects the managed Pi context$`, agmDetectsManagedPiContext)
 	ctx.Step(`^the Pi context should report (\d+) of (\d+) tokens used$`, piContextShouldReportUsage)
@@ -102,6 +103,15 @@ func piCatalogDeclaresInertWindow(ctx context.Context, window int) error {
 	}
 	state.markerPath = filepath.Join(state.root, "credential-command-ran")
 	catalog := fmt.Sprintf(`{"providers":{"ollama":{"apiKey":"!touch %s","models":[{"id":"qwen2.5-coder:7b","contextWindow":%d}]}}}`, state.markerPath, window)
+	return os.WriteFile(filepath.Join(state.root, "models.json"), []byte(catalog), 0o600)
+}
+
+func piCatalogDeclaresModelWindow(ctx context.Context, provider, model string, window int) error {
+	state, err := getPiCustomContextState(ctx)
+	if err != nil {
+		return err
+	}
+	catalog := fmt.Sprintf(`{"providers":{%q:{"models":[{"id":%q,"contextWindow":%d}]}}}`, provider, model, window)
 	return os.WriteFile(filepath.Join(state.root, "models.json"), []byte(catalog), 0o600)
 }
 

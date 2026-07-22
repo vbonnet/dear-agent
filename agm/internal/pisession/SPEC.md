@@ -24,7 +24,7 @@ this deep module instead of reconstructing Pi paths or selecting recent files.
 
 **PI-SESSION-07** When AGM reports Pi context or cost, the system shall read bounded native usage records, use the latest assistant prompt footprint for context, and sum provider-reported native costs without substituting another harness's pricing.
 
-**PI-SESSION-08** When AGM imports or cold-resumes Pi history, the system shall preserve the latest provider-qualified model established by native model-change or assistant records and shall leave the override empty when the transcript establishes none.
+**PI-SESSION-08** When AGM imports, reports usage for, or cold-resumes Pi history, the system shall preserve the native provider separately from the complete opaque model ID even when that model ID begins with the provider name, and shall leave the override empty when the transcript establishes no model.
 
 ## Traceability
 
