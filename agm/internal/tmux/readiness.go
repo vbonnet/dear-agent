@@ -112,7 +112,7 @@ func CheckExpectedHarnessInputAndSend(ctx context.Context, sessionName, harness,
 		if !isPaneID(readiness.TargetPane) {
 			return fmt.Errorf("ready harness returned invalid tmux pane ID %q", readiness.TargetPane)
 		}
-		return sendCommandToTargetLocked(ctx, readiness.TargetPane, command)
+		return sendCommandToTargetForHarnessLocked(ctx, readiness.TargetPane, command, harness)
 	})
 	return readiness, err
 }

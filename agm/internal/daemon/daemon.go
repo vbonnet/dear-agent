@@ -75,6 +75,7 @@ type Daemon struct {
 	metrics         *MetricsCollector
 	alerts          []AlertRule
 	opencodeAdapter *opencode.Adapter
+	sendPrompt      func(string, string, bool, string) error
 }
 
 // NewDaemon creates a new daemon instance with the given configuration
@@ -82,11 +83,12 @@ func NewDaemon(cfg Config) *Daemon {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	d := &Daemon{
-		cfg:     cfg,
-		ctx:     ctx,
-		cancel:  cancel,
-		metrics: NewMetricsCollector(),
-		alerts:  GetDefaultAlertRules(),
+		cfg:        cfg,
+		ctx:        ctx,
+		cancel:     cancel,
+		metrics:    NewMetricsCollector(),
+		alerts:     GetDefaultAlertRules(),
+		sendPrompt: tmux.SendMultiLinePromptSafeForHarness,
 	}
 
 	// Initialize OpenCode adapter if enabled
@@ -338,7 +340,7 @@ func (d *Daemon) deliverMessage(entry messages.QueueEntry) error {
 	case state.CanReceiveYes:
 		// Prompt visible, no dialog blocking → deliver now
 		deliveryStart := time.Now()
-		if err := d.sendMessage(recipientManifest.Tmux.SessionName, entry.Message); err != nil {
+		if err := d.sendMessage(recipientManifest.Tmux.SessionName, entry.Message, recipientManifest.Harness); err != nil {
 			d.cfg.Logger.Warn("Failed to send message", "session", entry.To, "error", err)
 			return d.retryLater(entry, err)
 		}
@@ -389,10 +391,10 @@ func (d *Daemon) deliverMessage(entry messages.QueueEntry) error {
 }
 
 // sendMessage delivers a message to the specified tmux session
-func (d *Daemon) sendMessage(sessionName, message string) error {
+func (d *Daemon) sendMessage(sessionName, message, harness string) error {
 	d.cfg.Logger.Info("Sending message to session", "session", sessionName, "message_preview", truncateMessage(message, 60))
 
-	if err := tmux.SendMultiLinePromptSafe(sessionName, message, false); err != nil {
+	if err := d.sendPrompt(sessionName, message, false, harness); err != nil {
 		return fmt.Errorf("tmux send failed: %w", err)
 	}
 

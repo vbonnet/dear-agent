@@ -703,6 +703,7 @@ agm send msg research-task --prompt-file ~/tasks/api-analysis.md
 - Harness-aware readiness: Refuses input unless the registered harness owns the current composer
 - Exact-pane delivery: Pins readiness and input to the same pane
 - Non-disruptive routing: Busy or blocked sessions are queued or rejected without sending ESC
+- AGY multiline safety: Preserves attribution and body as one bracketed request
 - Large prompts: Supports up to 10KB files
 
 **Use Cases**:

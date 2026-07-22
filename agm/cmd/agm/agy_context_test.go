@@ -124,7 +124,7 @@ func TestSendViaSharedOperationsUsesCallerContext(t *testing.T) {
 	type callerContextKey struct{}
 	callerCtx := context.WithValue(t.Context(), callerContextKey{}, "direct-send")
 
-	err := sendViaSharedOperations(callerCtx, "agy-send", "sender", "message-id", "message", "", false, storage, tmuxClient)
+	err := sendViaSharedOperations(callerCtx, "agy-send", "sender", "message-id", "header\nmessage body", "", false, storage, tmuxClient)
 	if err != nil {
 		t.Fatalf("sendViaSharedOperations() error = %v", err)
 	}
@@ -137,28 +137,38 @@ func TestSendViaSharedOperationsUsesCallerContext(t *testing.T) {
 	if got, want := tmuxClient.ExactPaneDeliveries, []string{"%7"}; !slices.Equal(got, want) {
 		t.Fatalf("exact-pane deliveries = %v, want %v", got, want)
 	}
-	if got, want := tmuxClient.SentCommands, []string{"message"}; !slices.Equal(got, want) {
+	if got, want := tmuxClient.SentCommands, []string{"header\nmessage body"}; !slices.Equal(got, want) {
 		t.Fatalf("sent commands = %v, want %v", got, want)
 	}
 }
 
 func TestStructuredPromptUsesCallerContext(t *testing.T) {
-	original := sendMultiLinePromptSafeContext
-	t.Cleanup(func() { sendMultiLinePromptSafeContext = original })
+	originalSend := sendMultiLinePromptSafeForHarnessContext
+	originalResolve := resolveSendRecipientHarness
+	t.Cleanup(func() {
+		sendMultiLinePromptSafeForHarnessContext = originalSend
+		resolveSendRecipientHarness = originalResolve
+	})
 	type callerContextKey struct{}
 	callerCtx, cancel := context.WithCancel(context.WithValue(t.Context(), callerContextKey{}, "structured-send"))
-	sendMultiLinePromptSafeContext = func(ctx context.Context, sessionName, message string, shouldInterrupt bool) error {
+	resolveSendRecipientHarness = func(recipient string) string {
+		if recipient != "recipient" {
+			t.Fatalf("resolve recipient = %q, want recipient", recipient)
+		}
+		return "agy"
+	}
+	sendMultiLinePromptSafeForHarnessContext = func(ctx context.Context, sessionName, message string, shouldInterrupt bool, harness string) error {
 		if ctx != callerCtx {
 			t.Fatal("structured delivery did not receive the caller context")
 		}
-		if sessionName != "recipient" || message != "payload" || !shouldInterrupt {
-			t.Fatalf("structured delivery = %q/%q/%t", sessionName, message, shouldInterrupt)
+		if sessionName != "recipient" || message != "header\npayload" || !shouldInterrupt || harness != "agy" {
+			t.Fatalf("structured delivery = %q/%q/%t/%q", sessionName, message, shouldInterrupt, harness)
 		}
 		cancel()
 		return ctx.Err()
 	}
 
-	err := sendStructuredPrompt(callerCtx, "recipient", "payload", true)
+	err := sendStructuredPrompt(callerCtx, "recipient", "header\npayload", true)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("sendStructuredPrompt() error = %v, want context.Canceled", err)
 	}

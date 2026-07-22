@@ -750,6 +750,13 @@ func sendCommandToTarget(ctx context.Context, target, command string) error {
 // sendCommandToTargetLocked performs exact-target delivery while the caller
 // owns both the tmux concurrency slot and server-mutation lock.
 func sendCommandToTargetLocked(ctx context.Context, target, command string) error {
+	return sendCommandToTargetForHarnessLocked(ctx, target, command, "")
+}
+
+// sendCommandToTargetForHarnessLocked performs exact-target delivery with the
+// native paste semantics required by harness while the caller owns both the
+// tmux concurrency slot and server-mutation lock.
+func sendCommandToTargetForHarnessLocked(ctx context.Context, target, command, harness string) error {
 	socketPath := GetSocketPath()
 
 	// Ensure buffer is cleaned up on any error path.
@@ -799,7 +806,7 @@ func sendCommandToTargetLocked(ctx context.Context, target, command string) erro
 
 	// Step 2: Paste buffer to session (atomic operation, -d deletes buffer after paste)
 	// Note: paste-buffer targets panes, not sessions, so we don't use FormatSessionTarget (=prefix)
-	cmdPaste, cancel2 := CommandWithTimeout(ctx, timeout, "tmux", "-S", socketPath, "paste-buffer", "-b", "agm-cmd", "-t", target, "-d")
+	cmdPaste, cancel2 := CommandWithTimeout(ctx, timeout, "tmux", pasteBufferArgs(socketPath, target, harness)...)
 	defer cancel2()
 	if err := cmdPaste.Run(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
