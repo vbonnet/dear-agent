@@ -147,7 +147,9 @@ collapsing that opaque segment.
 For models declared in Pi's `models.json`, AGM reads only the bounded model ID,
 `contextWindow`, and `modelOverrides` data: it never evaluates credential or
 command fields. A custom model with an omitted window uses Pi's 128000-token
-default; an explicit null or otherwise invalid window is rejected. An override
+default. Mathematically integral JSON decimal and exponent spellings are
+accepted exactly like Pi, while explicit null, fractional, or otherwise invalid
+windows are rejected without floating-point rounding. An override
 matching the exact provider-qualified route recorded by Pi applies even when
 the provider or model is newer than AGM's static tables; unqualified orphan
 overrides remain conservative. Malformed, oversized, symlinked,

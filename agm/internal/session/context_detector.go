@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/big"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -391,13 +392,23 @@ type piModelCatalogContextWindow struct {
 }
 
 func (window *piModelCatalogContextWindow) UnmarshalJSON(data []byte) error {
-	window.present = true
+	*window = piModelCatalogContextWindow{present: true}
 	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
 		return nil
 	}
-	if err := json.Unmarshal(data, &window.value); err != nil {
+	var number json.Number
+	if err := json.Unmarshal(data, &number); err != nil {
 		return err
 	}
+	var exact big.Rat
+	if _, ok := exact.SetString(number.String()); !ok || !exact.IsInt() || !exact.Num().IsInt64() {
+		return nil
+	}
+	value := exact.Num().Int64()
+	if value <= 0 || value > piModelCatalogMaxContextWindow {
+		return nil
+	}
+	window.value = int(value)
 	window.valid = true
 	return nil
 }

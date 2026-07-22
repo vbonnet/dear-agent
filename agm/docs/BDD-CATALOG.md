@@ -1085,6 +1085,8 @@ model catalog.
   AGM does not collapse the repeated provider segment during qualification.
 - An explicit null custom context window is rejected instead of receiving the
   default reserved for an omitted field.
+- An integral exponent-spelled context window resolves to the same exact token
+  count that Pi uses, without accepting nearby fractional values.
 - Credential command strings in Pi's model catalog remain inert data.
 
 **Why this matters:** Custom providers are a supported Pi route. Using a static

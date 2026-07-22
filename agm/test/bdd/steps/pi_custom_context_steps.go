@@ -50,6 +50,7 @@ func RegisterPiCustomContextSteps(ctx *godog.ScenarioContext) {
 
 	ctx.Step(`^a managed Pi transcript uses provider "([^"]*)" model "([^"]*)"$`, managedPiTranscriptUsesModel)
 	ctx.Step(`^the Pi custom model catalog declares an (\d+) token window with an inert credential command$`, piCatalogDeclaresInertWindow)
+	ctx.Step(`^the Pi custom model catalog declares an integral exponent context window$`, piCatalogDeclaresIntegralExponentWindow)
 	ctx.Step(`^the Pi custom model catalog for provider "([^"]*)" declares model "([^"]*)" with an (\d+) token window$`, piCatalogDeclaresModelWindow)
 	ctx.Step(`^the Pi custom model catalog declares a null context window$`, piCatalogDeclaresNullWindow)
 	ctx.Step(`^the Pi model catalog overrides "([^"]*)" to (\d+) tokens$`, piCatalogOverridesWindow)
@@ -104,6 +105,15 @@ func piCatalogDeclaresInertWindow(ctx context.Context, window int) error {
 	}
 	state.markerPath = filepath.Join(state.root, "credential-command-ran")
 	catalog := fmt.Sprintf(`{"providers":{"ollama":{"apiKey":"!touch %s","models":[{"id":"qwen2.5-coder:7b","contextWindow":%d}]}}}`, state.markerPath, window)
+	return os.WriteFile(filepath.Join(state.root, "models.json"), []byte(catalog), 0o600)
+}
+
+func piCatalogDeclaresIntegralExponentWindow(ctx context.Context) error {
+	state, err := getPiCustomContextState(ctx)
+	if err != nil {
+		return err
+	}
+	catalog := `{"providers":{"ollama":{"models":[{"id":"qwen2.5-coder:7b","contextWindow":8.192e3}]}}}`
 	return os.WriteFile(filepath.Join(state.root, "models.json"), []byte(catalog), 0o600)
 }
 

@@ -97,9 +97,33 @@ func TestPiConfiguredModelContextWindowTrustBoundaries(t *testing.T) {
 			},
 		},
 		{
+			name: "integral decimal window matches Pi JSON semantics", model: "ollama/qwen2.5-coder:7b", want: 8192,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"ollama":{"models":[{"id":"qwen2.5-coder:7b","contextWindow":8192.0}]}}}`)
+			},
+		},
+		{
+			name: "integral exponent window matches Pi JSON semantics", model: "ollama/qwen2.5-coder:7b", want: 8192,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"ollama":{"models":[{"id":"qwen2.5-coder:7b","contextWindow":8.192e3}]}}}`)
+			},
+		},
+		{
+			name: "fractional window remains invalid without float rounding", model: "ollama/qwen2.5-coder:7b", want: 200000,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"ollama":{"models":[{"id":"qwen2.5-coder:7b","contextWindow":8192.000000000000001}]}}}`)
+			},
+		},
+		{
 			name: "provider model override wins", model: "openai/gpt-5.4", want: 4096,
 			prepare: func(t *testing.T, dir string) {
 				writePiModelCatalogFixture(t, dir, `{"providers":{"openai":{"modelOverrides":{"gpt-5.4":{"contextWindow":4096}}}}}`)
+			},
+		},
+		{
+			name: "integral exponent override matches Pi JSON semantics", model: "openai/gpt-5.4", want: 4096,
+			prepare: func(t *testing.T, dir string) {
+				writePiModelCatalogFixture(t, dir, `{"providers":{"openai":{"modelOverrides":{"gpt-5.4":{"contextWindow":4.096e3}}}}}`)
 			},
 		},
 		{
