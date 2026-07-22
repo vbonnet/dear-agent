@@ -215,7 +215,7 @@ func TestResumeHelpMentionsPromptFlags(t *testing.T) {
 // TestSendPostResumePrompt_FileNotFound verifies an error is returned when the
 // prompt file does not exist, before any tmux operations occur.
 func TestSendPostResumePrompt_FileNotFound(t *testing.T) {
-	err := sendPostResumePrompt(context.Background(), "any-session", "", "/nonexistent/path/prompt.txt", false)
+	err := sendPostResumePrompt(context.Background(), "any-session", "claude-code", "", "/nonexistent/path/prompt.txt", false)
 	if err == nil {
 		t.Fatal("expected error for missing prompt file, got nil")
 		return
@@ -238,7 +238,7 @@ func TestSendPostResumePrompt_FileTooLarge(t *testing.T) {
 		t.Fatalf("failed to write temp file: %v", err)
 	}
 
-	err := sendPostResumePrompt(context.Background(), "any-session", "", tmp, false)
+	err := sendPostResumePrompt(context.Background(), "any-session", "claude-code", "", tmp, false)
 	if err == nil {
 		t.Fatal("expected error for oversized prompt file, got nil")
 		return
@@ -251,15 +251,37 @@ func TestSendPostResumePrompt_FileTooLarge(t *testing.T) {
 func TestSendPostResumePromptUsesCallerContext(t *testing.T) {
 	original := sendResumePromptSafe
 	t.Cleanup(func() { sendResumePromptSafe = original })
-	sendResumePromptSafe = func(ctx context.Context, _, _ string, _ bool) error {
+	sendResumePromptSafe = func(ctx context.Context, _, _ string, _ bool, _ string) error {
 		return ctx.Err()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := sendPostResumePrompt(ctx, "resume-context", "continue", "", false)
+	err := sendPostResumePrompt(ctx, "resume-context", "claude-code", "continue", "", false)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("sendPostResumePrompt() error = %v, want context.Canceled", err)
+	}
+}
+
+func TestSendPostResumePromptUsesHarnessAwareAgyDelivery(t *testing.T) {
+	original := sendResumePromptSafe
+	t.Cleanup(func() { sendResumePromptSafe = original })
+
+	wantPrompt := "resume line one\nresume line two"
+	called := 0
+	sendResumePromptSafe = func(_ context.Context, sessionName, prompt string, interrupt bool, harness string) error {
+		called++
+		if sessionName != "agy-resume" || prompt != wantPrompt || interrupt || harness != "agy" {
+			t.Fatalf("resume delivery = %q/%q/%t/%q", sessionName, prompt, interrupt, harness)
+		}
+		return nil
+	}
+
+	if err := sendPostResumePrompt(context.Background(), "agy-resume", "agy", wantPrompt, "", false); err != nil {
+		t.Fatalf("sendPostResumePrompt() error = %v", err)
+	}
+	if called != 1 {
+		t.Fatalf("harness-aware resume deliveries = %d, want 1", called)
 	}
 }
 

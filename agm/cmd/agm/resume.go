@@ -37,7 +37,7 @@ var (
 	resumePrompt           string
 	resumePromptFile       string
 	resumeDeletePromptFile bool
-	sendResumePromptSafe   = tmux.SendMultiLinePromptSafeContext
+	sendResumePromptSafe   = tmux.SendMultiLinePromptSafeForHarnessContext
 	agyResumeWorkspaceLock = agysession.AcquireWorkspaceCreateLock
 )
 
@@ -435,9 +435,9 @@ func shouldSendResumeCommands(tmuxExists bool) bool {
 
 // sendPostResumePrompt delivers a prompt to the session after it is ready.
 // It reads the prompt from promptText (inline) or promptFile, then uses
-// the context-aware multiline path, which waits for the active harness prompt
-// before sending.
-func sendPostResumePrompt(ctx context.Context, sessionName, promptText, promptFile string, deletePromptFile bool) error {
+// the context- and harness-aware multiline path, which waits for the active
+// harness prompt and preserves its native composer semantics before sending.
+func sendPostResumePrompt(ctx context.Context, sessionName, harnessName, promptText, promptFile string, deletePromptFile bool) error {
 	var message string
 	if promptText != "" {
 		message = promptText
@@ -450,7 +450,7 @@ func sendPostResumePrompt(ctx context.Context, sessionName, promptText, promptFi
 	}
 
 	ui.PrintSuccess("Sending post-resume prompt...")
-	if err := sendResumePromptSafe(ctx, sessionName, message, false); err != nil {
+	if err := sendResumePromptSafe(ctx, sessionName, message, false, agent.NormalizeHarnessName(harnessName)); err != nil {
 		return fmt.Errorf("failed to send prompt: %w", err)
 	}
 	return nil
@@ -573,7 +573,7 @@ func resumeResolvedSessionLocked(ctx context.Context, adapter *dolt.Adapter, ses
 
 	// Run the transactional resume under the lock, but return attachment work to
 	// the caller so an interactive terminal cannot hold the operation lock.
-	attachment, err := resumeSessionTransactionWithRuntime(ctx, adapter, sessionID, manifestPath, harnessName, health, realResumeSessionRuntime(ctx))
+	attachment, err := resumeSessionTransactionWithRuntime(ctx, adapter, sessionID, manifestPath, harnessName, health, realResumeSessionRuntime(ctx, harnessName))
 	if err != nil {
 		ui.PrintError(err,
 			"Failed to resume session",
@@ -622,7 +622,7 @@ type resumeTmuxNameChange struct {
 	Change  dolt.TmuxSessionNameChange
 }
 
-func realResumeSessionRuntime(ctx context.Context) resumeSessionRuntime {
+func realResumeSessionRuntime(ctx context.Context, harnessName string) resumeSessionRuntime {
 	return resumeSessionRuntime{
 		loadManifest: getResumeManifest,
 		createTmux:   tmux.NewSessionWithIdentity,
@@ -638,7 +638,7 @@ func realResumeSessionRuntime(ctx context.Context) resumeSessionRuntime {
 		updateActivity:    updateManifestActivity,
 		updateTabTitle:    updateVSCodeTabTitle,
 		deliverPrompt: func(sessionName, promptText, promptFile string, deletePromptFile bool) error {
-			return sendPostResumePrompt(ctx, sessionName, promptText, promptFile, deletePromptFile)
+			return sendPostResumePrompt(ctx, sessionName, harnessName, promptText, promptFile, deletePromptFile)
 		},
 		attachTmux:     tmux.AttachSession,
 		checkPiProcess: tmux.IsPiProcessInPaneTreeContext,
