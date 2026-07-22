@@ -33,8 +33,7 @@
         "InitialDelay": 0,
         "MaxDelay": 0,
         "Multiplier": 0
-      },
-      "FallbackTmux": false
+      }
     },
     "ClaudeHooks": {
       "Enabled": false,

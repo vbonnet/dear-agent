@@ -66,10 +66,6 @@ func TestDefault(t *testing.T) {
 	if cfg.Adapters.OpenCode.Reconnect.Multiplier != 2 {
 		t.Errorf("Adapters.OpenCode.Reconnect.Multiplier = %d, expected 2", cfg.Adapters.OpenCode.Reconnect.Multiplier)
 	}
-	if !cfg.Adapters.OpenCode.FallbackTmux {
-		t.Error("Adapters.OpenCode.FallbackTmux should be true by default")
-	}
-
 	// Check Claude hooks
 	if cfg.Adapters.ClaudeHooks.Enabled {
 		t.Error("Adapters.ClaudeHooks.Enabled should be false by default")
@@ -297,7 +293,6 @@ func TestLoad_OpenCodeAdapterConfig(t *testing.T) {
       initial_delay: 2s
       max_delay: 60s
       multiplier: 3
-    fallback_to_tmux: false
   claude_hooks:
     enabled: true
     listen_addr: "0.0.0.0:9999"
@@ -331,10 +326,6 @@ func TestLoad_OpenCodeAdapterConfig(t *testing.T) {
 	if cfg.Adapters.OpenCode.Reconnect.Multiplier != 3 {
 		t.Errorf("Adapters.OpenCode.Reconnect.Multiplier = %d, expected 3", cfg.Adapters.OpenCode.Reconnect.Multiplier)
 	}
-	if cfg.Adapters.OpenCode.FallbackTmux {
-		t.Error("Adapters.OpenCode.FallbackTmux should be false")
-	}
-
 	// Verify Claude hooks
 	if !cfg.Adapters.ClaudeHooks.Enabled {
 		t.Error("Adapters.ClaudeHooks.Enabled should be true")
@@ -389,9 +380,6 @@ func TestLoad_PartialOpenCodeConfig(t *testing.T) {
 	}
 	if cfg.Adapters.OpenCode.Reconnect.Multiplier != 2 {
 		t.Errorf("Adapters.OpenCode.Reconnect.Multiplier = %d, expected default 2", cfg.Adapters.OpenCode.Reconnect.Multiplier)
-	}
-	if !cfg.Adapters.OpenCode.FallbackTmux {
-		t.Error("Adapters.OpenCode.FallbackTmux should be true by default")
 	}
 }
 

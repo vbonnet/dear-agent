@@ -33,8 +33,7 @@
         "InitialDelay": 1000000000,
         "MaxDelay": 30000000000,
         "Multiplier": 2
-      },
-      "FallbackTmux": true
+      }
     },
     "ClaudeHooks": {
       "Enabled": false,
