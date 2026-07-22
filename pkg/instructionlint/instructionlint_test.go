@@ -680,6 +680,11 @@ func TestScriptHeredocStateHandlesPipelineSideOutputsAndShellCaptures(t *testing
 		"CAPTURED_VISIBLE",
 		")",
 		`printf '%s\n' "$visible"`,
+		`quoted="$(cat <<'QUOTED_CAPTURE'`,
+		"gh pr close 531",
+		"QUOTED_CAPTURE",
+		`)"`,
+		`printf '%s\n' "$quoted"`,
 		"read -p prompt value <<'READ_PROMPT_ONLY'",
 		"safe-pr create --emergency --reason prompt-is-not-a-variable",
 		"READ_PROMPT_ONLY",
@@ -688,13 +693,23 @@ func TestScriptHeredocStateHandlesPipelineSideOutputsAndShellCaptures(t *testing
 		"gh pr merge 975",
 		"READ_VALUE",
 		`printf '%s\n' "$value"`,
+		"read filtered <<'FILTERED_VALUE'",
+		"git push origin filtered-value",
+		"FILTERED_VALUE",
+		`sed 's/^//' <<<"$filtered"`,
 	}, "\n"))
 
 	var text []string
 	for _, segment := range parseScriptSegments(source) {
 		text = append(text, segment.Text)
 	}
-	for _, visible := range []string{"gh pr reopen 864", "bd ready", "gh pr merge 975"} {
+	for _, visible := range []string{
+		"gh pr reopen 864",
+		"bd ready",
+		"gh pr close 531",
+		"gh pr merge 975",
+		"git push origin filtered-value",
+	} {
 		if !slices.Contains(text, visible) {
 			t.Errorf("visible line %q was hidden: %v", visible, text)
 		}

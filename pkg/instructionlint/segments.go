@@ -173,12 +173,10 @@ func parseScriptSegments(source []byte) []Segment {
 			}
 		}
 		state.propagatePendingVariables(value)
-		if agentVisibleScriptCommand(value, state.visibleHelpers) {
-			for variable, pending := range state.pendingVariables {
-				if scriptReferencesVariable(value, variable) {
-					segments = append(segments, pending...)
-					delete(state.pendingVariables, variable)
-				}
+		for variable, pending := range state.pendingVariables {
+			if scriptLinePrintsVariable(value, variable, state.visibleHelpers, state.descriptors) {
+				segments = append(segments, pending...)
+				delete(state.pendingVariables, variable)
 			}
 		}
 		if state.visibleContinuation {
@@ -400,6 +398,42 @@ func agentVisibleScriptCommand(value string, helpers map[string]bool) bool {
 	return false
 }
 
+func scriptLinePrintsVariable(
+	value, variable string,
+	helpers map[string]bool,
+	descriptors map[int]scriptOutputDestination,
+) bool {
+	commands := splitScriptCommandParts(value)
+	for index, command := range commands {
+		if !scriptReferencesVariable(command.text, variable) {
+			continue
+		}
+		if !agentVisibleScriptCommand(command.text, helpers) &&
+			!scriptHereStringReferencesVariable(command.text, variable) {
+			continue
+		}
+		if scriptHeredocCommandOutputDestination(commands, index, descriptors).visible {
+			return true
+		}
+	}
+	return false
+}
+
+func scriptHereStringReferencesVariable(command, variable string) bool {
+	remaining := command
+	for {
+		index := strings.Index(remaining, "<<<")
+		if index < 0 {
+			return false
+		}
+		fields := parseShellWords(remaining[index+3:])
+		if len(fields) > 0 && scriptReferencesVariable(fields[0], variable) {
+			return true
+		}
+		remaining = remaining[index+3:]
+	}
+}
+
 var shellAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 var shellVariableName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 var shellDeclaration = regexp.MustCompile(`^(?:local|export|readonly|typeset|declare)(?:\s+-[A-Za-z]+)*\s+`)
@@ -531,6 +565,10 @@ func scriptHeredocRedirects(value string) []scriptHeredocRedirect {
 	scanner := scriptHeredocScanner{}
 	for index := 0; index+1 < len(value); index++ {
 		current := value[index]
+		if consumed, advance := scanner.consumeQuotedCommandSubstitution(value, index); consumed {
+			index += advance
+			continue
+		}
 		if scanner.consumeQuotedOrEscaped(current) {
 			continue
 		}
@@ -572,6 +610,10 @@ func scriptHasLaterStdinRedirect(value string, after int) bool {
 	scanner := scriptHeredocScanner{}
 	for index := 0; index < len(value); index++ {
 		current := value[index]
+		if consumed, advance := scanner.consumeQuotedCommandSubstitution(value, index); consumed {
+			index += advance
+			continue
+		}
 		if scanner.consumeQuotedOrEscaped(current) {
 			continue
 		}
@@ -606,9 +648,45 @@ func scriptHeredocMarkerAt(value string, index int) (string, bool) {
 }
 
 type scriptHeredocScanner struct {
-	quote           byte
-	escaped         bool
-	arithmeticDepth int
+	quote                   byte
+	escaped                 bool
+	arithmeticDepth         int
+	quotedSubstitutionDepth int
+}
+
+func (scanner *scriptHeredocScanner) consumeQuotedCommandSubstitution(
+	value string,
+	index int,
+) (bool, int) {
+	if scanner.quotedSubstitutionDepth == 0 {
+		if scanner.quote != '"' || !strings.HasPrefix(value[index:], "$(") ||
+			strings.HasPrefix(value[index:], "$((") {
+			return false, 0
+		}
+		scanner.quote = 0
+		scanner.quotedSubstitutionDepth = 1
+		return true, 1
+	}
+	if scanner.quote != 0 {
+		return false, 0
+	}
+	if strings.HasPrefix(value[index:], "$(") && !strings.HasPrefix(value[index:], "$((") {
+		scanner.quotedSubstitutionDepth++
+		return true, 1
+	}
+	switch value[index] {
+	case '(':
+		scanner.quotedSubstitutionDepth++
+		return true, 0
+	case ')':
+		scanner.quotedSubstitutionDepth--
+		if scanner.quotedSubstitutionDepth == 0 {
+			scanner.quote = '"'
+		}
+		return true, 0
+	default:
+		return false, 0
+	}
 }
 
 func (scanner *scriptHeredocScanner) consumeQuotedOrEscaped(current byte) bool {
