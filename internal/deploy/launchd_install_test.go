@@ -274,7 +274,7 @@ func TestNoAPIKeyHelperInstructions(t *testing.T) {
 		}
 
 		for _, m := range clauseMentions(body) {
-			key := clauseKey(m.clause)
+			key := siteKey(rel, m.clause)
 			seen[key] = true
 			if allowed[key] {
 				continue
@@ -323,6 +323,17 @@ func clauseMentions(body string) []mention {
 		add(body[start:], start)
 	}
 	return out
+}
+
+// siteKey identifies one sanctioned occurrence: its file AND its text.
+//
+// Keying on text alone would let a single allowlisted entry authorise the same
+// command or clause ANYWHERE in the repository -- so a warning example could
+// silently bless real install guidance elsewhere, and moving the command out of
+// its warning would still satisfy the stale-entry check. Binding the exemption
+// to a location means each site is reviewed on its own.
+func siteKey(path, text string) string {
+	return clauseKey(path + "\x00" + text)
 }
 
 // clauseKey hashes a clause with whitespace collapsed, so reflowing prose does
@@ -495,7 +506,7 @@ func TestNoRawCopyIntoInstallRoots(t *testing.T) {
 			if offending == "" {
 				continue
 			}
-			if key := clauseKey(offending); allowed[key] {
+			if key := siteKey(rel, offending); allowed[key] {
 				seenExempt[key] = true
 				continue
 			}
@@ -507,8 +518,11 @@ func TestNoRawCopyIntoInstallRoots(t *testing.T) {
 				"relevant install target), or stage into a UNIQUE path and rename: "+
 				"`stage=$(mktemp <dest>.XXXXXX) && cp X \"$stage\" && chmod 755 \"$stage\" "+
 				"&& mv -f \"$stage\" <dest>` — a fixed `<dest>.new` is itself racy when two "+
-				"jobs run it at once.",
-				rel, i+1, strings.TrimSpace(line))
+				"jobs run it at once.\n\n"+
+				"If this is a WARNING showing the retired form rather than guidance to "+
+				"follow, add this line to internal/deploy/testdata/rawcopy-allowlist.txt:\n\n"+
+				"\t%s  # %s\n",
+				rel, i+1, strings.TrimSpace(line), siteKey(rel, line), rel)
 		}
 	}
 

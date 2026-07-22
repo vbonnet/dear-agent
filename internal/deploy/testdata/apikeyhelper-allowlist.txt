@@ -1,51 +1,53 @@
-# Sanctioned apiKeyHelper mentions, keyed by a hash of the clause containing
-# them (whitespace-normalised, so reflowing prose does not churn this file but
-# rewording does).
+# Sanctioned apiKeyHelper mentions, keyed by a hash of FILE + the clause
+# containing them (whitespace-normalised, so reflowing prose does not churn this
+# file but rewording does).
 #
 # WHY AN ALLOWLIST. apiKeyHelper shadows a healthy claude.ai OAuth login on
 # claude-code >= 2.1.205 and was retired on 2026-07-10 after a multi-day mesh
 # outage (anthropics/claude-code#11587, ce-77ip). Earlier versions of the guard
 # tried to judge whether prose recommended or disclaimed the wiring, and were
-# defeated four times: by an unseen phrasing, by a disclaimer in a neighbouring
-# clause, by a first-occurrence shortcut, and finally by a single clause holding
-# both ("apiKeyHelper is retired, but use token-refresher as apiKeyHelper").
-# Distinguishing those needs parsing, not pattern matching.
+# defeated four times over. Distinguishing those needs parsing, not pattern
+# matching, so the guard stops guessing: every mention must be listed here,
+# which makes adding or rewording one a deliberate act a human reviews.
 #
-# So the guard stops guessing. Every mention must be listed here, which makes
-# adding or rewording one a deliberate act a human reviews. Each entry below was
-# read and confirmed to describe the wiring as RETIRED, or to narrate its
-# history, never to recommend it.
+# WHY FILE + CLAUSE, NOT CLAUSE ALONE. A text-only key lets one entry authorise
+# the same sentence ANYWHERE in the repository, so a warning example could
+# silently bless real guidance elsewhere. Each site is reviewed on its own.
 #
-# To add an entry: run `go test ./internal/deploy/ -run TestNoAPIKeyHelperInstructions`.
+# To add an entry: run
+#   go test ./internal/deploy/ -run TestNoAPIKeyHelperInstructions
 # The failure prints the clause and the exact line to paste. Read the clause
-# first — if it recommends the wiring, delete the prose instead of listing it.
+# first -- if it recommends the wiring, delete the prose instead of listing it.
+#
+# Stale entries fail the test, so this file cannot drift into fiction.
 
-# Makefile — install target warns against it; uninstall keeps cleanup guidance.
-0eb7adc892922b89  # Makefile: "Do NOT also point Claude Code's apiKeyHelper at this binary..."
-f65970f84219ca2f  # Makefile: install-token-refresher-launchagent, no apiKeyHelper step
-16f3b251bdeda3f2  # Makefile: upgrade path detects a leftover apiKeyHelper in settings.json
-abc130424f637e69  # Makefile: warns a retired apiKeyHelper still shadows OAuth
-3c623e0080984716  # Makefile: prints "configure-claude-settings remove apiKeyHelper"
-f436665c337f64f7  # Makefile: uninstall still clears the retired apiKeyHelper
 
-# cmd/token-refresher/README.md — the retirement is documented here.
-5f7b12811f6d565e  # README: "not an invitation to wire it up as an apiKeyHelper"
-c4b2c3f8eed7cc1c  # README: "### Retired wiring: apiKeyHelper — do not reintroduce"
-48452e1f776ac17e  # README: "That wiring was removed from the host on 2026-07-10..."
-dfec5ae9366ca09c  # README: how the helper masked real errors as "exited 2"
-aec4debc24816fc3  # README: stdout contract "must never be consumed via a retired apiKeyHelper"
+# Makefile
+297a3c60bfcf1e71  # "Do NOT also point Claude Code's apiKeyHelper at this binary..."
+30b0399a20b7e52a  # install-token-refresher-launchagent, no apiKeyHelper step
+5364b93fadc4cb0a  # upgrade path detects a leftover apiKeyHelper in settings.json
+d583d08841fdc5c2  # warns that a retired apiKeyHelper still shadows OAuth
+d60db046563731f0  # prints "configure-claude-settings remove apiKeyHelper"
+ead5136d1f13ea01  # uninstall still clears the retired apiKeyHelper
 
-# cmd/token-refresher/main.go — package doc.
-f0c08e1c8ded1694  # main.go: "Since apiKeyHelper was removed on 2026-07-10..."
-b014535b1918063e  # main.go: "Do NOT wire this binary in as a Claude Code apiKeyHelper"
+# cmd/token-refresher/README.md
+632fdaa52b893ae1  # "not an invitation to wire it up as an apiKeyHelper"
+efa88182534d63a0  # "### Retired wiring: apiKeyHelper - do not reintroduce"
+d6819277ac845f00  # "That wiring was removed from the host on 2026-07-10..."
+114293c7a0549af4  # how the helper masked real errors as "exited 2"
+0a2e28c321d8dacb  # stdout contract "must never be consumed via a retired apiKeyHelper"
 
-# deploy/launchd — the plist records why single-writer no longer holds.
-c9bfe7a43821dd73  # plist: "assumed a retired apiKeyHelper (not to be restored)..."
-894a8d19f3e2fc5d  # plist: "That apiKeyHelper was removed on 2026-07-10..."
+# cmd/token-refresher/main.go
+1af1738819a9c795  # "Since apiKeyHelper was removed on 2026-07-10..."
+172aa5d608ef7520  # "Do NOT wire this binary in as a Claude Code apiKeyHelper"
 
-# docs/runbooks — historical narration of the outage, plus an explicit warning.
-448c1a00e425d93d  # runbook: history — "was wired in as apiKeyHelper ... but was removed"
-01168cc1695ec8c6  # runbook: '## Do NOT "fix" this by re-adding apiKeyHelper'
+# deploy/launchd/com.dear-agent.token-refresher.plist
+43dd05f573dfca71  # "assumed a retired apiKeyHelper (not to be restored)..."
+5a782920101fd57c  # "That apiKeyHelper was removed on 2026-07-10..."
 
-# pkg/llm/auth/README.md — points at the retirement.
-e7ed094baac796ba  # auth README: "must not be wired in as a Claude Code apiKeyHelper"
+# docs/runbooks/oauth-token-family-death.md
+85fce0dd69f29796  # history - "was wired in as apiKeyHelper ... but was removed"
+90c7c0ef9fc1827e  # '## Do NOT "fix" this by re-adding apiKeyHelper'
+
+# pkg/llm/auth/README.md
+61bf7117eae35a26  # "must not be wired in as a Claude Code apiKeyHelper"
