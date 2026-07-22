@@ -205,8 +205,12 @@ func queueCurrentTmuxCodexWithRuntime(spec ops.HarnessLaunchSpec, runtime curren
 	if _, err := runtime.lookPath("codex"); err != nil {
 		return false, fmt.Errorf("codex executable is unavailable: %w", err)
 	}
-	launch := ops.BuildHarnessLaunchCommand(spec)
+	launch, err := ops.PrepareHarnessLaunchCommand(spec)
+	if err != nil {
+		return false, fmt.Errorf("prepare Codex launch: %w", err)
+	}
 	if err := runtime.sendCommand(spec.SessionName, launch.Command); err != nil {
+		_ = launch.CancelUndelivered()
 		ui.PrintError(err,
 			"Failed to queue Codex in current tmux pane",
 			"  • Verify Codex is installed: which codex\n"+
@@ -293,7 +297,15 @@ func queueCurrentTmuxHarnessCommand(ctx context.Context, spec ops.HarnessLaunchS
 	if _, err := runtime.lookPath(executable); err != nil {
 		return fmt.Errorf("%s executable is unavailable: %w", executable, err)
 	}
-	return runtime.sendCommand(spec.SessionName, ops.BuildHarnessLaunchCommand(spec).Command)
+	launch, err := ops.PrepareHarnessLaunchCommand(spec)
+	if err != nil {
+		return fmt.Errorf("prepare %s launch: %w", spec.Harness, err)
+	}
+	if err := runtime.sendCommand(spec.SessionName, launch.Command); err != nil {
+		_ = launch.CancelUndelivered()
+		return err
+	}
+	return nil
 }
 
 // startCurrentTmuxClaude queues Claude behind the foreground AGM process. The

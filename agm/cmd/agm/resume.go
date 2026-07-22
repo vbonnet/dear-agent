@@ -19,6 +19,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/discovery"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/git"
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
@@ -1152,6 +1153,7 @@ func getResumeManifest(ctx context.Context, adapter *dolt.Adapter, sessionID, ha
 // stored UUID is missing.
 func dispatchResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, harnessName string, health *HealthStatus) error {
 	var fullCmd string
+	var preparedLaunch *ops.HarnessLaunchCommand
 	switch agent.NormalizeHarnessName(harnessName) {
 	case "opencode-cli":
 		fullCmd = ops.BuildHarnessLaunchCommand(ops.HarnessLaunchSpec{
@@ -1164,7 +1166,12 @@ func dispatchResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, harnessN
 		if err := agent.EnsureCodexWorkdirTrusted(health.WorktreePath); err != nil {
 			ui.PrintWarning(fmt.Sprintf("Could not pre-trust Codex workdir %s: %v", health.WorktreePath, err))
 		}
-		fullCmd = buildCodexResumeCommand(m, health)
+		launch, err := prepareCodexResumeCommand(m, health)
+		if err != nil {
+			return err
+		}
+		preparedLaunch = &launch
+		fullCmd = launch.Command
 	case "agy":
 		fullCmd = buildAgyResumeCommand(m, health)
 	case "pi-cli":
@@ -1175,12 +1182,20 @@ func dispatchResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, harnessN
 			return err
 		}
 	case "claude-code":
-		fullCmd = buildClaudeResumeCommand(adapter, m, health)
+		launch, err := prepareClaudeResumeCommand(adapter, m, health)
+		if err != nil {
+			return err
+		}
+		preparedLaunch = &launch
+		fullCmd = launch.Command
 	default:
 		fullCmd = fmt.Sprintf("cd %s && exit", launchparity.ShellQuote(health.WorktreePath))
 		ui.PrintWarning(fmt.Sprintf("Harness '%s' does not support resume - starting in working directory", harnessName))
 	}
 	if err := tmux.SendCommand(health.TmuxSessionName, fullCmd); err != nil {
+		if preparedLaunch != nil {
+			_ = preparedLaunch.CancelUndelivered()
+		}
 		return fmt.Errorf("failed to send resume command: %w", err)
 	}
 	return nil
@@ -1268,6 +1283,21 @@ func buildCodexResumeCommand(m *manifest.Manifest, health *HealthStatus) string 
 	}).Command
 }
 
+func prepareCodexResumeCommand(m *manifest.Manifest, health *HealthStatus) (ops.HarnessLaunchCommand, error) {
+	model := m.Model
+	if model == "" {
+		model = agent.HarnessDefaults["codex-cli"]
+	}
+	launch, err := ops.PrepareHarnessLaunchCommand(ops.HarnessLaunchSpec{
+		Harness: "codex-cli", Model: model, SessionName: health.TmuxSessionName,
+		WorkDir: health.WorktreePath, PermissionMode: m.PermissionMode, Codex: m.Codex,
+	})
+	if err != nil {
+		return ops.HarnessLaunchCommand{}, fmt.Errorf("prepare Codex resume launch: %w", err)
+	}
+	return launch, nil
+}
+
 func buildAgyResumeCommand(m *manifest.Manifest, health *HealthStatus) string {
 	if m.Agy != nil && m.Agy.ConversationID != "" {
 		model := m.Model
@@ -1315,9 +1345,22 @@ func migrateAmbiguousLegacyAgyModel(adapter *dolt.Adapter, m *manifest.Manifest,
 	return nil
 }
 
-// buildClaudeResumeCommand assembles `claude --resume <uuid>` (or a bare
-// `claude` if no UUID can be discovered).
+// buildClaudeResumeCommand builds the token-free private executor command used
+// by tests and diagnostics. Runtime resume paths call prepareClaudeResumeCommand
+// so caller-only authentication and telemetry cross stale tmux state.
 func buildClaudeResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, health *HealthStatus) string {
+	return harnessexec.BuildClaudeCommand(claudeResumeLaunch(adapter, m, health))
+}
+
+func prepareClaudeResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, health *HealthStatus) (ops.HarnessLaunchCommand, error) {
+	prepared, err := harnessexec.PrepareClaudeCommand(claudeResumeLaunch(adapter, m, health), os.Environ())
+	if err != nil {
+		return ops.HarnessLaunchCommand{}, fmt.Errorf("prepare Claude resume launch: %w", err)
+	}
+	return ops.HarnessLaunchCommand{Command: prepared.Command, Cancel: prepared.Cancel}, nil
+}
+
+func claudeResumeLaunch(adapter *dolt.Adapter, m *manifest.Manifest, health *HealthStatus) harnessexec.ClaudeLaunch {
 	resumeUUID := m.Claude.UUID
 	if resumeUUID == "" {
 		findInManifests := func(name string) (*manifest.Manifest, error) {
@@ -1338,19 +1381,26 @@ func buildClaudeResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, healt
 			ui.PrintSuccess(fmt.Sprintf("Discovered Claude UUID via fallback: %s", resumeUUID[:8]))
 		}
 	}
+	resumeDir := health.WorktreePath
 	if resumeUUID != "" {
 		// `claude --resume` is scoped to the current directory's project slug.
 		// If the conversation was started in a different directory than the
 		// recorded worktree (e.g. an associated pre-existing session), resuming
 		// from the worktree yields "No conversation found". Resume from the
 		// conversation's actual cwd when it can be located.
-		resumeDir := resolveResumeDir(resumeUUID, health.WorktreePath)
-		return fmt.Sprintf("cd %s && claude --resume %s && exit",
-			launchparity.ShellQuote(resumeDir),
-			launchparity.ShellQuote(resumeUUID))
+		resumeDir = resolveResumeDir(resumeUUID, health.WorktreePath)
+	} else {
+		ui.PrintWarning("No Claude UUID found - starting new Claude session")
 	}
-	ui.PrintWarning("No Claude UUID found - starting new Claude session")
-	return fmt.Sprintf("cd %s && claude && exit", launchparity.ShellQuote(health.WorktreePath))
+	return harnessexec.ClaudeLaunch{
+		SessionName: health.TmuxSessionName,
+		SessionID:   m.SessionID,
+		ResumeID:    resumeUUID,
+		WorkDir:     resumeDir,
+		// Resume preserves the native conversation's model instead of forcing
+		// AGM's current default over an older or imported session.
+		ForwardTelemetry: true,
+	}
 }
 
 // resolveResumeDir returns the directory `claude --resume` should run from for

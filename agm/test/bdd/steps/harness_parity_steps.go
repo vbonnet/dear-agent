@@ -146,6 +146,8 @@ type harnessParityState struct {
 	privateChildEnvironment    []string
 	privateAllowedCanaries     []string
 	privateRejectedCanaries    []string
+	privateHandoffTestOutput   string
+	privateHandoffTestErr      error
 }
 
 type harnessParityStateKey struct{}
@@ -365,6 +367,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM builds the Codex private launch boundary$`, agmBuildsTheCodexPrivateLaunchBoundary)
 	ctx.Step(`^the launch command should contain no credential values$`, launchCommandShouldContainNoCredentialValues)
 	ctx.Step(`^the Codex child should receive only allowlisted credentials$`, codexChildShouldReceiveOnlyAllowlistedCredentials)
+	ctx.Step(`^caller-only credentials and telemetry should cross stale tmux state through the pinned AGM executor$`, callerOnlyCredentialsAndTelemetryShouldCrossStaleTmuxStateThroughThePinnedAGMExecutor)
 	ctx.Step(`^an existing tmux session running Codex CLI$`, anExistingTmuxSessionRunningCodexCLI)
 	ctx.Step(`^an existing tmux session running AGY$`, anExistingTmuxSessionRunningAGY)
 	ctx.Step(`^/agm:agm-assoc runs in that session$`, agmAssocRunsInThatSession)
@@ -1030,6 +1033,19 @@ func agmBuildsTheCodexPrivateLaunchBoundary(ctx context.Context) error {
 		"SSH_AUTH_SOCK=ssh-bdd-canary",
 		"ARBITRARY_SECRET=arbitrary-bdd-canary",
 	}, "bdd-private-codex")
+	testCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/harnessexec",
+		"-run", `^(TestPrepared(ClaudeCommand(CarriesCallerOnlyOAuthAndTelemetry|ClearsCallerAbsentPaneState)|CodexCommand(CarriesCallerAllowlistAndPreservesPaneIdentity|ClearsCallerAbsentPaneCredentials)|Command(CancelRemovesUndeliveredHandoff|UsesCoInstalledAGMFromCompanionBinary|UsesRenamedCurrentAGMExecutable|MakesRelativeStateDirectoryAbsolute))|TestClaudeResumeChangesDirectoryBeforeDirectReplacement)$`,
+		"-count=1", "-v",
+	)
+	cmd.Dir = bddRepoRoot()
+	output, err := cmd.CombinedOutput()
+	state.privateHandoffTestOutput = string(output)
+	state.privateHandoffTestErr = err
+	if testCtx.Err() != nil {
+		return fmt.Errorf("private handoff behavior timed out: %w", testCtx.Err())
+	}
 	return nil
 }
 
@@ -1057,6 +1073,29 @@ func codexChildShouldReceiveOnlyAllowlistedCredentials(ctx context.Context) erro
 	for _, canary := range state.privateRejectedCanaries {
 		if strings.Contains(joined, canary) {
 			return fmt.Errorf("codex child environment inherited rejected canary %q", canary)
+		}
+	}
+	return nil
+}
+
+func callerOnlyCredentialsAndTelemetryShouldCrossStaleTmuxStateThroughThePinnedAGMExecutor(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if state.privateHandoffTestErr != nil {
+		return fmt.Errorf("private handoff behavior failed: %w\n%s", state.privateHandoffTestErr, state.privateHandoffTestOutput)
+	}
+	for _, behavior := range []string{
+		"TestPreparedClaudeCommandCarriesCallerOnlyOAuthAndTelemetry",
+		"TestPreparedClaudeCommandClearsCallerAbsentPaneState",
+		"TestPreparedCodexCommandCarriesCallerAllowlistAndPreservesPaneIdentity",
+		"TestPreparedCodexCommandClearsCallerAbsentPaneCredentials",
+		"TestPreparedCommandCancelRemovesUndeliveredHandoff",
+		"TestPreparedCommandUsesCoInstalledAGMFromCompanionBinary",
+		"TestPreparedCommandUsesRenamedCurrentAGMExecutable",
+		"TestPreparedCommandMakesRelativeStateDirectoryAbsolute",
+		"TestClaudeResumeChangesDirectoryBeforeDirectReplacement",
+	} {
+		if !strings.Contains(state.privateHandoffTestOutput, "--- PASS: "+behavior) {
+			return fmt.Errorf("private handoff behavior %s did not pass:\n%s", behavior, state.privateHandoffTestOutput)
 		}
 	}
 	return nil

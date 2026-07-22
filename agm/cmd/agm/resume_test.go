@@ -368,6 +368,39 @@ func TestBuildCodexResumeCommand_DefaultModel(t *testing.T) {
 	}
 }
 
+func TestPrepareClaudeResumeCommandUsesCallerOnlyPrivateState(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "claude-resume-oauth-canary")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "claude-resume-otel-canary")
+	m := &manifest.Manifest{
+		SessionID: "agm-session-id",
+		Claude:    manifest.Claude{UUID: "native-claude-id"},
+	}
+	health := &HealthStatus{TmuxSessionName: "claude-resume", WorktreePath: "/tmp/resume-work"}
+
+	launch, err := prepareClaudeResumeCommand(nil, m, health)
+	if err != nil {
+		t.Fatalf("prepare Claude resume: %v", err)
+	}
+	t.Cleanup(func() { _ = launch.CancelUndelivered() })
+	for _, want := range []string{
+		"__exec-claude", "--handoff", "--resume-id 'native-claude-id'", "--workdir '/tmp/resume-work'",
+		"--forward-telemetry",
+	} {
+		if !strings.Contains(launch.Command, want) {
+			t.Errorf("prepared Claude resume %q missing %q", launch.Command, want)
+		}
+	}
+	for _, secret := range []string{"claude-resume-oauth-canary", "claude-resume-otel-canary"} {
+		if strings.Contains(launch.Command, secret) {
+			t.Fatalf("prepared Claude resume exposed %q: %s", secret, launch.Command)
+		}
+	}
+	if strings.Contains(launch.Command, " claude --resume ") {
+		t.Fatalf("Claude resume bypassed the private executor: %s", launch.Command)
+	}
+}
+
 func TestBuildPiResumeCommandPreservesExactIdentityModelModeAndPolicy(t *testing.T) {
 	t.Setenv("AGM_PI_EXTENSION_ROOT", t.TempDir())
 	sessionDir := t.TempDir()

@@ -33,12 +33,38 @@ const (
 var (
 	lookPath           = exec.LookPath
 	replaceProcess     = syscall.Exec
+	changeDirectory    = os.Chdir
 	resolveClaudeOAuth = auth.ResolveOAuthToken
 )
+
+var codexAllowedEnvironment = []string{
+	"HOME", "PATH", "PWD", "SHELL", "USER", "LOGNAME",
+	"TMPDIR", "TMP", "TEMP",
+	"TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "NO_COLOR",
+	"LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES",
+	"TMUX", "TMUX_PANE",
+	"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+	"http_proxy", "https_proxy", "all_proxy", "no_proxy",
+	"CODEX_HOME", "CODEX_SQLITE_HOME", "CODEX_ACCESS_TOKEN",
+	"CODEX_CA_CERTIFICATE", "SSL_CERT_FILE", "RUST_LOG",
+	"OPENAI_API_KEY",
+	"AGM_HOME", "AGM_CONFIG_DIR", "AGM_DB_PATH", "AGM_SESSIONS_DIR",
+	"AGM_STATE_DIR", "AGM_TMUX_SOCKET", "AGM_BUS_SOCKET", "AGM_TEAM",
+	"AGM_SESSION_BACKEND", "WORKSPACE",
+}
+
+var paneIdentityEnvironment = map[string]bool{"TMUX": true, "TMUX_PANE": true}
+
+var claudeHandoffEnvironment = map[string]bool{
+	auth.OAuthEnvVar: true, "ANTHROPIC_API_KEY": true,
+	"OTEL_EXPORTER_OTLP_ENDPOINT": true, "OTEL_EXPORTER_OTLP_HEADERS": true,
+}
 
 // CodexLaunch contains the non-secret metadata AGM may place in a tmux launch
 // command. The executor constructs the real Codex argv after parsing it.
 type CodexLaunch struct {
+	Executable  string
+	HandoffPath string
 	SessionName string
 	Model       string
 	WorkDir     string
@@ -53,8 +79,12 @@ type CodexLaunch struct {
 // ClaudeLaunch contains the non-secret metadata AGM may place in a tmux launch
 // command. OAuth values are resolved only inside the executor.
 type ClaudeLaunch struct {
+	Executable       string
+	HandoffPath      string
 	SessionName      string
 	SessionID        string
+	ResumeID         string
+	WorkDir          string
 	Model            string
 	AddDirs          []string
 	AutoMode         bool
@@ -73,7 +103,10 @@ func IsProtocol(arg string) bool {
 // BuildCodexCommand returns the token-free shell command pasted into tmux.
 func BuildCodexCommand(launch CodexLaunch) string {
 	var b strings.Builder
-	b.WriteString("agm " + CodexProtocol)
+	b.WriteString(privateCommandPrefix(launch.Executable, CodexProtocol))
+	if launch.HandoffPath != "" {
+		appendShellFlag(&b, "--handoff", launch.HandoffPath)
+	}
 	appendShellFlag(&b, "--session", launch.SessionName)
 	appendShellFlag(&b, "--model", launch.Model)
 	appendShellFlag(&b, "--workdir", launch.WorkDir)
@@ -99,12 +132,23 @@ func BuildCodexCommand(launch CodexLaunch) string {
 // BuildClaudeCommand returns the token-free shell command pasted into tmux.
 func BuildClaudeCommand(launch ClaudeLaunch) string {
 	var b strings.Builder
-	b.WriteString("agm " + ClaudeProtocol)
+	b.WriteString(privateCommandPrefix(launch.Executable, ClaudeProtocol))
+	if launch.HandoffPath != "" {
+		appendShellFlag(&b, "--handoff", launch.HandoffPath)
+	}
 	appendShellFlag(&b, "--session", launch.SessionName)
 	if launch.SessionID != "" {
 		appendShellFlag(&b, "--session-id", launch.SessionID)
 	}
-	appendShellFlag(&b, "--model", launch.Model)
+	if launch.ResumeID != "" {
+		appendShellFlag(&b, "--resume-id", launch.ResumeID)
+	}
+	if launch.WorkDir != "" {
+		appendShellFlag(&b, "--workdir", launch.WorkDir)
+	}
+	if launch.Model != "" {
+		appendShellFlag(&b, "--model", launch.Model)
+	}
 	for _, dir := range launch.AddDirs {
 		appendShellFlag(&b, "--add-dir", dir)
 	}
@@ -140,46 +184,87 @@ func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
+func privateCommandPrefix(executable, protocol string) string {
+	resolved := privateExecutable(executable)
+	if resolved == "agm" {
+		return "agm " + protocol
+	}
+	return shellQuote(resolved) + " " + protocol
+}
+
 // Run validates a private protocol request and replaces the current AGM
 // process with the fixed harness executable. A successful call does not return.
 func Run(protocol string, args []string) error {
 	switch protocol {
 	case CodexProtocol:
-		request, err := parseCodex(args)
-		if err != nil {
-			return err
-		}
-		path, err := lookPath("codex")
-		if err != nil {
-			return fmt.Errorf("resolve codex executable: %w", err)
-		}
-		argv := append([]string{"codex"}, request.argv()...)
-		if err := replaceProcess(path, argv, CodexEnvironment(os.Environ(), request.SessionName)); err != nil {
-			return fmt.Errorf("execute codex: %w", err)
-		}
-		return errors.New("codex executor returned unexpectedly")
+		return runCodex(args)
 	case ClaudeProtocol:
-		request, err := parseClaude(args)
-		if err != nil {
-			return err
-		}
-		path, err := lookPath("claude")
-		if err != nil {
-			return fmt.Errorf("resolve claude executable: %w", err)
-		}
-		token := ""
-		if !request.DisableOAuth {
-			token = resolveClaudeOAuth()
-		}
-		argv := append([]string{"claude"}, request.argv()...)
-		env := ClaudeEnvironment(os.Environ(), request.launch(), token)
-		if err := replaceProcess(path, argv, env); err != nil {
-			return fmt.Errorf("execute claude: %w", err)
-		}
-		return errors.New("claude executor returned unexpectedly")
+		return runClaude(args)
 	default:
 		return fmt.Errorf("unsupported private harness protocol %q", protocol)
 	}
+}
+
+func runCodex(args []string) error {
+	request, err := parseCodex(args)
+	if err != nil {
+		return err
+	}
+	environ := CodexEnvironment(os.Environ(), request.SessionName)
+	if request.HandoffPath != "" {
+		handoff, handoffErr := consumeHandoff(request.HandoffPath, CodexProtocol)
+		if handoffErr != nil {
+			return handoffErr
+		}
+		environ = CodexEnvironment(handoff.Environment, request.SessionName)
+		environ = overlayEnvironment(environ, selectedEnvironment(os.Environ(), paneIdentityEnvironment), nil)
+	}
+	path, err := lookPath("codex")
+	if err != nil {
+		return fmt.Errorf("resolve codex executable: %w", err)
+	}
+	argv := append([]string{"codex"}, request.argv()...)
+	if err := replaceProcess(path, argv, environ); err != nil {
+		return fmt.Errorf("execute codex: %w", err)
+	}
+	return errors.New("codex executor returned unexpectedly")
+}
+
+func runClaude(args []string) error {
+	request, err := parseClaude(args)
+	if err != nil {
+		return err
+	}
+	parent := os.Environ()
+	token := ""
+	if request.HandoffPath != "" {
+		handoff, handoffErr := consumeHandoff(request.HandoffPath, ClaudeProtocol)
+		if handoffErr != nil {
+			return handoffErr
+		}
+		parent = removeEnvironment(parent, claudeHandoffEnvironment)
+		parent = overlayEnvironment(parent, handoff.Environment, nil)
+		token = environmentMap(handoff.Environment)[auth.OAuthEnvVar]
+	}
+	if token == "" && !request.DisableOAuth && request.HandoffPath == "" {
+		token = resolveClaudeOAuth()
+	}
+	path, err := lookPath("claude")
+	if err != nil {
+		return fmt.Errorf("resolve claude executable: %w", err)
+	}
+	argv := append([]string{"claude"}, request.argv()...)
+	env := ClaudeEnvironment(parent, request.launch(), token)
+	if request.WorkDir != "" {
+		if err := changeDirectory(request.WorkDir); err != nil {
+			return fmt.Errorf("enter Claude working directory: %w", err)
+		}
+		env = overlayEnvironment(env, []string{"PWD=" + request.WorkDir}, nil)
+	}
+	if err := replaceProcess(path, argv, env); err != nil {
+		return fmt.Errorf("execute claude: %w", err)
+	}
+	return errors.New("claude executor returned unexpectedly")
 }
 
 type stringList []string
@@ -191,6 +276,7 @@ func (s *stringList) Set(value string) error {
 }
 
 type codexRequest struct {
+	HandoffPath string
 	SessionName string
 	Model       string
 	WorkDir     string
@@ -205,6 +291,7 @@ func parseCodex(args []string) (codexRequest, error) {
 	var request codexRequest
 	set := flag.NewFlagSet(CodexProtocol, flag.ContinueOnError)
 	set.SetOutput(io.Discard)
+	set.StringVar(&request.HandoffPath, "handoff", "", "")
 	set.StringVar(&request.SessionName, "session", "", "")
 	set.StringVar(&request.Model, "model", "", "")
 	set.StringVar(&request.WorkDir, "workdir", "", "")
@@ -219,35 +306,40 @@ func parseCodex(args []string) (codexRequest, error) {
 	if set.NArg() != 0 {
 		return codexRequest{}, errors.New("invalid Codex launch request: positional arguments are not allowed")
 	}
-	if err := validateText("session", request.SessionName); err != nil {
+	if err := validateCodexRequest(request); err != nil {
 		return codexRequest{}, err
-	}
-	if err := validateText("model", request.Model); err != nil {
-		return codexRequest{}, err
-	}
-	if err := validateText("workdir", request.WorkDir); err != nil {
-		return codexRequest{}, err
-	}
-	if !oneOf(request.Sandbox, "read-only", "workspace-write", "danger-full-access") {
-		return codexRequest{}, fmt.Errorf("invalid Codex sandbox %q", request.Sandbox)
-	}
-	if request.Approval != "" && !oneOf(request.Approval, "untrusted", "on-request", "never") {
-		return codexRequest{}, fmt.Errorf("invalid Codex approval policy %q", request.Approval)
-	}
-	for _, dir := range request.AddDirs {
-		if err := validateText("add-dir", dir); err != nil {
-			return codexRequest{}, err
-		}
-	}
-	if request.Remote && request.ResumeID == "" {
-		return codexRequest{}, errors.New("invalid Codex launch request: remote resume requires a session id")
-	}
-	if request.ResumeID != "" {
-		if err := validateText("resume-id", request.ResumeID); err != nil {
-			return codexRequest{}, err
-		}
 	}
 	return request, nil
+}
+
+func validateCodexRequest(request codexRequest) error {
+	for _, field := range []struct{ name, value string }{
+		{"session", request.SessionName}, {"model", request.Model}, {"workdir", request.WorkDir},
+	} {
+		if err := validateText(field.name, field.value); err != nil {
+			return err
+		}
+	}
+	if !oneOf(request.Sandbox, "read-only", "workspace-write", "danger-full-access") {
+		return fmt.Errorf("invalid Codex sandbox %q", request.Sandbox)
+	}
+	if request.Approval != "" && !oneOf(request.Approval, "untrusted", "on-request", "never") {
+		return fmt.Errorf("invalid Codex approval policy %q", request.Approval)
+	}
+	if err := validateTextList("add-dir", request.AddDirs); err != nil {
+		return err
+	}
+	if request.Remote && request.ResumeID == "" {
+		return errors.New("invalid Codex launch request: remote resume requires a session id")
+	}
+	for _, field := range []struct{ name, value string }{
+		{"resume-id", request.ResumeID}, {"handoff", request.HandoffPath},
+	} {
+		if err := validateOptionalText(field.name, field.value); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r codexRequest) argv() []string {
@@ -272,8 +364,11 @@ func (r codexRequest) argv() []string {
 }
 
 type claudeRequest struct {
+	HandoffPath      string
 	SessionName      string
 	SessionID        string
+	ResumeID         string
+	WorkDir          string
 	Model            string
 	AddDirs          stringList
 	AutoMode         bool
@@ -288,8 +383,11 @@ func parseClaude(args []string) (claudeRequest, error) {
 	var maxBudget string
 	set := flag.NewFlagSet(ClaudeProtocol, flag.ContinueOnError)
 	set.SetOutput(io.Discard)
+	set.StringVar(&request.HandoffPath, "handoff", "", "")
 	set.StringVar(&request.SessionName, "session", "", "")
 	set.StringVar(&request.SessionID, "session-id", "", "")
+	set.StringVar(&request.ResumeID, "resume-id", "", "")
+	set.StringVar(&request.WorkDir, "workdir", "", "")
 	set.StringVar(&request.Model, "model", "", "")
 	set.Var(&request.AddDirs, "add-dir", "")
 	set.BoolVar(&request.AutoMode, "auto-mode", false, "")
@@ -310,37 +408,50 @@ func parseClaude(args []string) (claudeRequest, error) {
 }
 
 func validateClaudeRequest(r *claudeRequest, maxBudget string) error {
+	if err := validateOptionalText("handoff", r.HandoffPath); err != nil {
+		return err
+	}
 	if err := validateText("session", r.SessionName); err != nil {
 		return err
 	}
-	if err := validateText("model", r.Model); err != nil {
+	for _, field := range []struct{ name, value string }{
+		{"session-id", r.SessionID}, {"resume-id", r.ResumeID},
+		{"workdir", r.WorkDir}, {"model", r.Model},
+	} {
+		if err := validateOptionalText(field.name, field.value); err != nil {
+			return err
+		}
+	}
+	if err := validateTextList("add-dir", r.AddDirs); err != nil {
 		return err
-	}
-	if r.SessionID != "" {
-		if err := validateText("session-id", r.SessionID); err != nil {
-			return err
-		}
-	}
-	for _, dir := range r.AddDirs {
-		if err := validateText("add-dir", dir); err != nil {
-			return err
-		}
 	}
 	if r.Permission != "" && !oneOf(r.Permission, "auto", "plan", "default") {
 		return fmt.Errorf("invalid Claude permission mode %q", r.Permission)
 	}
-	if maxBudget != "" {
-		budget, err := strconv.ParseFloat(maxBudget, 64)
-		if err != nil || budget <= 0 || math.IsNaN(budget) || math.IsInf(budget, 0) {
-			return fmt.Errorf("invalid Claude max budget %q", maxBudget)
-		}
-		r.MaxBudgetUSD = budget
+	budget, err := parsePositiveBudget(maxBudget)
+	if err != nil {
+		return err
 	}
+	r.MaxBudgetUSD = budget
 	return nil
 }
 
+func parsePositiveBudget(value string) (float64, error) {
+	if value == "" {
+		return 0, nil
+	}
+	budget, err := strconv.ParseFloat(value, 64)
+	if err != nil || budget <= 0 || math.IsNaN(budget) || math.IsInf(budget, 0) {
+		return 0, fmt.Errorf("invalid Claude max budget %q", value)
+	}
+	return budget, nil
+}
+
 func (r claudeRequest) argv() []string {
-	args := []string{"--model", r.Model}
+	args := make([]string, 0, 12+len(r.AddDirs)*2)
+	if r.Model != "" {
+		args = append(args, "--model", r.Model)
+	}
 	for _, dir := range r.AddDirs {
 		args = append(args, "--add-dir", dir)
 	}
@@ -353,13 +464,19 @@ func (r claudeRequest) argv() []string {
 	if r.MaxBudgetUSD > 0 {
 		args = append(args, "--max-budget-usd", fmt.Sprintf("%.2f", r.MaxBudgetUSD))
 	}
+	if r.ResumeID != "" {
+		args = append(args, "--resume", r.ResumeID)
+	}
 	return args
 }
 
 func (r claudeRequest) launch() ClaudeLaunch {
 	return ClaudeLaunch{
+		HandoffPath:      r.HandoffPath,
 		SessionName:      r.SessionName,
 		SessionID:        r.SessionID,
+		ResumeID:         r.ResumeID,
+		WorkDir:          r.WorkDir,
 		Model:            r.Model,
 		AddDirs:          append([]string(nil), r.AddDirs...),
 		AutoMode:         r.AutoMode,
@@ -380,6 +497,22 @@ func validateText(name, value string) error {
 	return nil
 }
 
+func validateOptionalText(name, value string) error {
+	if value == "" {
+		return nil
+	}
+	return validateText(name, value)
+}
+
+func validateTextList(name string, values []string) error {
+	for _, value := range values {
+		if err := validateText(name, value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func oneOf(value string, allowed ...string) bool {
 	return slices.Contains(allowed, value)
 }
@@ -389,23 +522,8 @@ func oneOf(value string, allowed ...string) bool {
 // never need to inspect the developer's real environment.
 func CodexEnvironment(parent []string, sessionName string) []string {
 	values := environmentMap(parent)
-	allowed := []string{
-		"HOME", "PATH", "PWD", "SHELL", "USER", "LOGNAME",
-		"TMPDIR", "TMP", "TEMP",
-		"TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "NO_COLOR",
-		"LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES",
-		"TMUX", "TMUX_PANE",
-		"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
-		"http_proxy", "https_proxy", "all_proxy", "no_proxy",
-		"CODEX_HOME", "CODEX_SQLITE_HOME", "CODEX_ACCESS_TOKEN",
-		"CODEX_CA_CERTIFICATE", "SSL_CERT_FILE", "RUST_LOG",
-		"OPENAI_API_KEY",
-		"AGM_HOME", "AGM_CONFIG_DIR", "AGM_DB_PATH", "AGM_SESSIONS_DIR",
-		"AGM_STATE_DIR", "AGM_TMUX_SOCKET", "AGM_BUS_SOCKET", "AGM_TEAM",
-		"AGM_SESSION_BACKEND", "WORKSPACE",
-	}
-	env := make([]string, 0, len(allowed)+1)
-	for _, name := range allowed {
+	env := make([]string, 0, len(codexAllowedEnvironment)+1)
+	for _, name := range codexAllowedEnvironment {
 		if value, ok := values[name]; ok {
 			env = append(env, name+"="+value)
 		}
@@ -417,6 +535,7 @@ func CodexEnvironment(parent []string, sessionName string) []string {
 // ClaudeEnvironment injects runtime-only Claude metadata and OAuth without
 // placing either credential values or telemetry endpoints in command text.
 func ClaudeEnvironment(parent []string, launch ClaudeLaunch, oauthToken string) []string {
+	parentValues := environmentMap(parent)
 	remove := map[string]bool{
 		"CLAUDECODE":                          true,
 		"AGM_SESSION_NAME":                    true,
@@ -425,6 +544,8 @@ func ClaudeEnvironment(parent []string, launch ClaudeLaunch, oauthToken string) 
 		"CLAUDE_CODE_ENHANCED_TELEMETRY_BETA": true,
 		"OTEL_TRACES_EXPORTER":                true,
 		"OTEL_EXPORTER_OTLP_PROTOCOL":         true,
+		"OTEL_EXPORTER_OTLP_ENDPOINT":         true,
+		"OTEL_EXPORTER_OTLP_HEADERS":          true,
 		auth.OAuthEnvVar:                      true,
 	}
 	if oauthToken != "" {
@@ -439,13 +560,17 @@ func ClaudeEnvironment(parent []string, launch ClaudeLaunch, oauthToken string) 
 		if launch.SessionID != "" {
 			env = append(env, "ENGRAM_SESSION_ID="+launch.SessionID)
 		}
-		if _, ok := environmentMap(parent)["OTEL_EXPORTER_OTLP_ENDPOINT"]; ok {
+		if endpoint := parentValues["OTEL_EXPORTER_OTLP_ENDPOINT"]; endpoint != "" {
 			env = append(env,
+				"OTEL_EXPORTER_OTLP_ENDPOINT="+endpoint,
 				"CLAUDE_CODE_ENABLE_TELEMETRY=1",
 				"CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1",
 				"OTEL_TRACES_EXPORTER=otlp",
 				"OTEL_EXPORTER_OTLP_PROTOCOL=grpc",
 			)
+			if headers := parentValues["OTEL_EXPORTER_OTLP_HEADERS"]; headers != "" {
+				env = append(env, "OTEL_EXPORTER_OTLP_HEADERS="+headers)
+			}
 		}
 	}
 	return env

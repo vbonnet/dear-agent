@@ -10,6 +10,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/agm/internal/contracts"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/transcript"
@@ -72,20 +73,15 @@ func Resume(identifier string, cfg *config.Config, adapter *dolt.Adapter) error 
 
 	// 5. Send commands to tmux only if needed
 	if sendCommands {
-		// Build combined command: cd <project-dir> && claude --resume <uuid> && exit
-		// This ensures the directory change happens in the same shell as the Claude command
-		var fullCmd string
-		if m.Claude.UUID != "" {
-			fullCmd = fmt.Sprintf("cd %s && claude --resume %s && exit",
-				shellQuote(m.Context.Project),
-				shellQuote(m.Claude.UUID))
-		} else {
-			// Fallback to starting a new Claude session if UUID is not set
-			fullCmd = fmt.Sprintf("cd %s && claude && exit", shellQuote(m.Context.Project))
+		prepared, err := harnessexec.PrepareClaudeCommand(harnessexec.ClaudeLaunch{
+			SessionName: m.Tmux.SessionName, SessionID: m.SessionID,
+			ResumeID: m.Claude.UUID, WorkDir: m.Context.Project, ForwardTelemetry: true,
+		}, os.Environ())
+		if err != nil {
+			return fmt.Errorf("prepare Claude resume command: %w", err)
 		}
-
-		// Send combined command to tmux
-		if err := tmux.SendCommand(m.Tmux.SessionName, fullCmd); err != nil {
+		if err := tmux.SendCommand(m.Tmux.SessionName, prepared.Command); err != nil {
+			_ = prepared.Cancel()
 			return fmt.Errorf("failed to send resume command: %w", err)
 		}
 

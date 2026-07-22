@@ -198,6 +198,7 @@ func TestClaudeRequestReconstructsValidatedNativeArguments(t *testing.T) {
 		"--session", "session", "--session-id", "session-id", "--model", "claude-test",
 		"--add-dir", "/tmp/one", "--add-dir", "/tmp/two", "--auto-mode",
 		"--permission", "plan", "--max-budget-usd", "12.50", "--forward-telemetry",
+		"--resume-id", "native-claude-id", "--workdir", "/tmp/resume",
 	})
 	if err != nil {
 		t.Fatalf("parse Claude request: %v", err)
@@ -205,13 +206,57 @@ func TestClaudeRequestReconstructsValidatedNativeArguments(t *testing.T) {
 	want := []string{
 		"--model", "claude-test", "--add-dir", "/tmp/one", "--add-dir", "/tmp/two",
 		"--enable-auto-mode", "--permission-mode", "plan", "--max-budget-usd", "12.50",
+		"--resume", "native-claude-id",
 	}
 	if got := request.argv(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Claude argv = %q, want %q", got, want)
 	}
 	launch := request.launch()
-	if launch.SessionName != "session" || launch.SessionID != "session-id" || !launch.ForwardTelemetry {
+	if launch.SessionName != "session" || launch.SessionID != "session-id" ||
+		launch.ResumeID != "native-claude-id" || launch.WorkDir != "/tmp/resume" || !launch.ForwardTelemetry {
 		t.Fatalf("Claude launch metadata not preserved: %+v", launch)
+	}
+}
+
+func TestClaudeResumeChangesDirectoryBeforeDirectReplacement(t *testing.T) {
+	originalLookPath := lookPath
+	originalReplaceProcess := replaceProcess
+	originalChangeDirectory := changeDirectory
+	originalResolveClaudeOAuth := resolveClaudeOAuth
+	t.Cleanup(func() {
+		lookPath = originalLookPath
+		replaceProcess = originalReplaceProcess
+		changeDirectory = originalChangeDirectory
+		resolveClaudeOAuth = originalResolveClaudeOAuth
+	})
+	lookPath = func(string) (string, error) { return "/fixed/claude", nil }
+	resolveClaudeOAuth = func() string { return "" }
+	var changedTo string
+	changeDirectory = func(path string) error {
+		changedTo = path
+		return nil
+	}
+	var gotArgv, gotEnv []string
+	replaceProcess = func(_ string, argv, env []string) error {
+		gotArgv = append([]string(nil), argv...)
+		gotEnv = append([]string(nil), env...)
+		return nil
+	}
+
+	err := Run(ClaudeProtocol, []string{
+		"--session", "claude-resume", "--resume-id", "native-claude-id", "--workdir", "/tmp/resume",
+	})
+	if err == nil || !strings.Contains(err.Error(), "returned unexpectedly") {
+		t.Fatalf("Claude resume Run error = %v", err)
+	}
+	if changedTo != "/tmp/resume" {
+		t.Fatalf("Claude resume working directory = %q, want /tmp/resume", changedTo)
+	}
+	if want := []string{"claude", "--resume", "native-claude-id"}; !reflect.DeepEqual(gotArgv, want) {
+		t.Fatalf("Claude resume argv = %q, want %q", gotArgv, want)
+	}
+	if got := environmentMap(gotEnv)["PWD"]; got != "/tmp/resume" {
+		t.Fatalf("Claude resume PWD = %q, want /tmp/resume", got)
 	}
 }
 
@@ -221,7 +266,7 @@ func TestEnvironmentContracts(t *testing.T) {
 		"CODEX_ACCESS_TOKEN=codex-allowed", "GITHUB_TOKEN=github-rejected",
 		"CLAUDE_CODE_OAUTH_TOKEN=old-claude", "ANTHROPIC_API_KEY=old-anthropic",
 		"CLAUDECODE=nested", "OTEL_EXPORTER_OTLP_ENDPOINT=collector:4317",
-		"OTEL_TRACES_EXPORTER=old", "ENGRAM_SESSION_ID=old-session",
+		"OTEL_EXPORTER_OTLP_HEADERS=authorization=old", "OTEL_TRACES_EXPORTER=old", "ENGRAM_SESSION_ID=old-session",
 		"ARBITRARY_VALUE=preserved-for-claude",
 	}
 	codex := environmentMap(CodexEnvironment(parent, "codex-session"))
@@ -248,7 +293,8 @@ func TestEnvironmentContracts(t *testing.T) {
 	for name, want := range map[string]string{
 		"CLAUDE_CODE_OAUTH_TOKEN": "fresh-oauth", "AGM_SESSION_NAME": "claude-session",
 		"ENGRAM_SESSION_ID": "new-session", "OTEL_EXPORTER_OTLP_ENDPOINT": "collector:4317",
-		"OTEL_TRACES_EXPORTER": "otlp", "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+		"OTEL_EXPORTER_OTLP_HEADERS": "authorization=old",
+		"OTEL_TRACES_EXPORTER":       "otlp", "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
 		"CLAUDE_CODE_ENABLE_TELEMETRY": "1", "CLAUDE_CODE_ENHANCED_TELEMETRY_BETA": "1",
 		"ARBITRARY_VALUE": "preserved-for-claude",
 	} {
@@ -270,6 +316,11 @@ func TestEnvironmentContracts(t *testing.T) {
 	}
 	if got := disabled["ANTHROPIC_API_KEY"]; got != "old-anthropic" {
 		t.Fatalf("disabled Claude OAuth environment lost API key: %q", got)
+	}
+	for _, name := range []string{"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_HEADERS"} {
+		if _, ok := disabled[name]; ok {
+			t.Fatalf("disabled Claude telemetry retained %s", name)
+		}
 	}
 }
 
@@ -346,6 +397,7 @@ func TestExecutorRejectsUnvalidatedArguments(t *testing.T) {
 		{name: "escape control character", protocol: ClaudeProtocol, args: []string{"--session", "s\x1bnext", "--model", "m"}},
 		{name: "sandbox", protocol: CodexProtocol, args: []string{"--session", "s", "--model", "m", "--workdir", "/tmp", "--sandbox", "unsafe"}},
 		{name: "permission", protocol: ClaudeProtocol, args: []string{"--session", "s", "--model", "m", "--permission", "unsafe"}},
+		{name: "resume control character", protocol: ClaudeProtocol, args: []string{"--session", "s", "--resume-id", "id\nnext"}},
 		{name: "non-finite budget", protocol: ClaudeProtocol, args: []string{"--session", "s", "--model", "m", "--max-budget-usd", "NaN"}},
 	}
 	for _, test := range tests {

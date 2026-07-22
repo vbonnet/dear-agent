@@ -63,7 +63,7 @@ func TestCodexCreateSessionWaitsForComposer(t *testing.T) {
 	if !waited {
 		t.Fatal("CreateSession did not wait for the Codex composer")
 	}
-	if len(sent) == 0 || !strings.Contains(sent[0], "agm __exec-codex") {
+	if len(sent) == 0 || !strings.Contains(sent[0], "__exec-codex") {
 		t.Fatalf("CreateSession sent commands = %v, want Codex launch", sent)
 	}
 }
@@ -164,7 +164,7 @@ func TestCodexResumeSessionRestartsDeadProcess(t *testing.T) {
 	if err := adapter.ResumeSession("session-id"); err != nil {
 		t.Fatalf("ResumeSession returned error: %v", err)
 	}
-	if !strings.Contains(sent, "agm __exec-codex") || !strings.Contains(sent, "--resume-id 'native-codex-session'") {
+	if !strings.Contains(sent, "__exec-codex") || !strings.Contains(sent, "--resume-id 'native-codex-session'") {
 		t.Fatalf("ResumeSession sent %q, want Codex resume command", sent)
 	}
 	if !waited {

@@ -1,6 +1,6 @@
 # Private Harness Executor Specification
 
-<!-- Last audited at: 2026-07-19 -->
+<!-- Last audited at: 2026-07-22 -->
 
 ## Overview
 
@@ -28,9 +28,17 @@ sandbox the harness beyond the native permission mode requested by AGM.
 
 **HEXEC-05** When explicit OpenAI authentication is configured for AGM's built-in Codex provider, the system shall pass it only through the child environment and shall not expose the value in command text, argv, pane scrollback, or debug logs.
 
-**HEXEC-06** When the private executor launches Claude with OAuth, the system shall resolve the current token inside the executor, remove a competing Anthropic API key, and pass the OAuth value only through the child environment.
+**HEXEC-06** When the private executor launches Claude with OAuth, the system shall resolve the current token in the invoking AGM process, remove a competing Anthropic API key, and pass the OAuth value to the executor and child only through an owner-only one-shot handoff and child environment.
 
 **HEXEC-07** When an executor request contains an unknown flag, positional argument, unsupported permission value, or control character, the system shall reject it before resolving or starting the harness executable.
+
+**HEXEC-08** When caller authentication or telemetry differs from a long-lived tmux server's environment, the system shall treat the caller's Codex allowlist and Claude authentication and telemetry state as a complete snapshot, including removals, for fresh and resumed sessions without exposing values in command text or process arguments.
+
+**HEXEC-09** When AGM or a co-installed companion prepares a private harness command, the system shall invoke the absolute current AGM executable regardless of its filename, or the co-installed AGM executable for a known companion, so the pane cannot resolve a missing or different installation through `PATH`.
+
+**HEXEC-10** When AGM stages a private launch handoff, the system shall store it at an absolute path in an owner-only directory and file, bind it to one harness protocol and a bounded lifetime, remove it before harness execution, and remove an undelivered handoff when command delivery fails.
+
+**HEXEC-11** When Claude telemetry forwarding is disabled, the system shall remove ambient OpenTelemetry endpoint and header configuration; when forwarding is enabled, it shall use the invoking AGM process's endpoint and headers.
 
 ## BDD Traceability
 

@@ -85,13 +85,17 @@ func (a *CodexCLIAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	if err := ensureCodexTrusted(workDir); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not pre-trust Codex workdir %s: %v\n", workDir, err)
 	}
-	cmd := harnessexec.BuildCodexCommand(harnessexec.CodexLaunch{
+	prepared, err := harnessexec.PrepareCodexCommand(harnessexec.CodexLaunch{
 		SessionName: tmuxName,
 		Model:       resolvedModel,
 		WorkDir:     workDir,
 		Sandbox:     "workspace-write",
-	})
-	if err := codexSendCommand(tmuxName, cmd); err != nil {
+	}, os.Environ())
+	if err != nil {
+		return "", fmt.Errorf("prepare Codex CLI launch: %w", err)
+	}
+	if err := codexSendCommand(tmuxName, prepared.Command); err != nil {
+		_ = prepared.Cancel()
 		if !exists {
 			if cleanupErr := codexSendCommand(tmuxName, "exit\r"); cleanupErr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: failed to clean up Codex tmux session: %v\n", cleanupErr)
@@ -152,14 +156,18 @@ func (a *CodexCLIAdapter) ResumeSession(sessionID SessionID) error {
 		if err := ensureCodexTrusted(metadata.WorkingDir); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not pre-trust Codex workdir %s: %v\n", metadata.WorkingDir, err)
 		}
-		cmd := harnessexec.BuildCodexCommand(harnessexec.CodexLaunch{
+		prepared, err := harnessexec.PrepareCodexCommand(harnessexec.CodexLaunch{
 			SessionName: metadata.TmuxName,
 			Model:       resolvedModel,
 			WorkDir:     metadata.WorkingDir,
 			Sandbox:     "workspace-write",
 			ResumeID:    metadata.UUID,
-		})
-		if err := codexSendCommand(metadata.TmuxName, cmd); err != nil {
+		}, os.Environ())
+		if err != nil {
+			return fmt.Errorf("prepare Codex CLI resume: %w", err)
+		}
+		if err := codexSendCommand(metadata.TmuxName, prepared.Command); err != nil {
+			_ = prepared.Cancel()
 			return fmt.Errorf("failed to send Codex resume command: %w", err)
 		}
 		if err := codexWaitForPrompt(metadata.TmuxName, 5*time.Second); err != nil {

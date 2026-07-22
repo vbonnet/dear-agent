@@ -244,7 +244,7 @@ func TestCodexCreateSessionPreTrustsWorkdir(t *testing.T) {
 	workDir := t.TempDir()
 	trustedWhenSent := false
 	codexSendCommand = func(_ string, cmd string) error {
-		if strings.Contains(cmd, "agm __exec-codex") {
+		if strings.Contains(cmd, "__exec-codex") {
 			data, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
 			trustedWhenSent = err == nil && projectTrusted(t, data, workDir)
 		}

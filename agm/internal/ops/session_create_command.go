@@ -2,6 +2,7 @@ package ops
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
@@ -18,6 +19,7 @@ type HarnessLaunchSpec struct {
 	Model            string
 	SessionName      string
 	SessionID        string
+	ResumeID         string
 	WorkDir          string
 	Persistent       bool
 	PermissionMode   string
@@ -39,6 +41,16 @@ type HarnessLaunchSpec struct {
 type HarnessLaunchCommand struct {
 	Command              string
 	ModeAppliedAtStartup bool
+	Cancel               func() error
+}
+
+// CancelUndelivered removes a private handoff when its pane command could not
+// be queued. Once delivery succeeds, the executor owns one-shot consumption.
+func (c HarnessLaunchCommand) CancelUndelivered() error {
+	if c.Cancel == nil {
+		return nil
+	}
+	return c.Cancel()
 }
 
 // BuildHarnessLaunchCommand builds the one canonical shell command for a
@@ -61,6 +73,35 @@ func BuildHarnessLaunchCommand(spec HarnessLaunchSpec) HarnessLaunchCommand {
 		return HarnessLaunchCommand{Command: fmt.Sprintf("gemini -m %s%s", launchparity.ShellQuote(resolvedModel), exitSuffix)}
 	default:
 		return HarnessLaunchCommand{Command: fmt.Sprintf("echo %s && exit 1", launchparity.ShellQuote("Unknown harness: "+spec.Harness))}
+	}
+}
+
+// PrepareHarnessLaunchCommand stages caller-only credentials and telemetry for
+// private Codex and Claude execution. The returned command contains only the
+// absolute current AGM path, validated non-secret metadata, and an opaque
+// owner-only handoff path. Call Cancel only when the command was not delivered.
+func PrepareHarnessLaunchCommand(spec HarnessLaunchSpec) (HarnessLaunchCommand, error) {
+	switch agent.NormalizeHarnessName(spec.Harness) {
+	case "claude-code":
+		launch, modeApplied := claudeLaunch(spec)
+		prepared, err := harnessexec.PrepareClaudeCommand(launch, os.Environ())
+		if err != nil {
+			return HarnessLaunchCommand{}, err
+		}
+		return HarnessLaunchCommand{
+			Command: prepared.Command, ModeAppliedAtStartup: modeApplied, Cancel: prepared.Cancel,
+		}, nil
+	case "codex-cli":
+		launch, modeApplied := codexLaunch(spec)
+		prepared, err := harnessexec.PrepareCodexCommand(launch, os.Environ())
+		if err != nil {
+			return HarnessLaunchCommand{}, err
+		}
+		return HarnessLaunchCommand{
+			Command: prepared.Command, ModeAppliedAtStartup: modeApplied, Cancel: prepared.Cancel,
+		}, nil
+	default:
+		return BuildHarnessLaunchCommand(spec), nil
 	}
 }
 
@@ -90,6 +131,11 @@ func buildPiLaunchCommand(spec HarnessLaunchSpec) HarnessLaunchCommand {
 }
 
 func buildClaudeLaunchCommand(spec HarnessLaunchSpec, _ string) HarnessLaunchCommand {
+	launch, modeApplied := claudeLaunch(spec)
+	return HarnessLaunchCommand{Command: harnessexec.BuildClaudeCommand(launch), ModeAppliedAtStartup: modeApplied}
+}
+
+func claudeLaunch(spec HarnessLaunchSpec) (harnessexec.ClaudeLaunch, bool) {
 	resolvedModel := agent.ResolveModelFullName("claude-code", spec.Model)
 	addDirs := make([]string, 0, len(spec.ExtraAddDirs)+1)
 	addDirs = append(addDirs, spec.WorkDir)
@@ -100,9 +146,11 @@ func buildClaudeLaunchCommand(spec HarnessLaunchSpec, _ string) HarnessLaunchCom
 		permission = spec.PermissionMode
 		modeApplied = true
 	}
-	command := harnessexec.BuildClaudeCommand(harnessexec.ClaudeLaunch{
+	launch := harnessexec.ClaudeLaunch{
 		SessionName:      spec.SessionName,
 		SessionID:        spec.SessionID,
+		ResumeID:         spec.ResumeID,
+		WorkDir:          spec.WorkDir,
 		Model:            resolvedModel,
 		AddDirs:          addDirs,
 		AutoMode:         !spec.DisableAutoMode,
@@ -111,11 +159,16 @@ func buildClaudeLaunchCommand(spec HarnessLaunchSpec, _ string) HarnessLaunchCom
 		DisableOAuth:     spec.DisableOAuth,
 		ForwardTelemetry: spec.ForwardTelemetry,
 		Persistent:       spec.Persistent,
-	})
-	return HarnessLaunchCommand{Command: command, ModeAppliedAtStartup: modeApplied}
+	}
+	return launch, modeApplied
 }
 
 func buildCodexLaunchCommand(spec HarnessLaunchSpec, _ string) HarnessLaunchCommand {
+	launch, modeApplied := codexLaunch(spec)
+	return HarnessLaunchCommand{Command: harnessexec.BuildCodexCommand(launch), ModeAppliedAtStartup: modeApplied}
+}
+
+func codexLaunch(spec HarnessLaunchSpec) (harnessexec.CodexLaunch, bool) {
 	resolvedModel := agent.ResolveModelFullName("codex-cli", spec.Model)
 	sandboxMode := launchparity.CodexSandboxMode(spec.PermissionMode)
 	resumeID := ""
@@ -128,7 +181,7 @@ func buildCodexLaunchCommand(spec HarnessLaunchSpec, _ string) HarnessLaunchComm
 		approval = strings.TrimPrefix(flag, "-a ")
 		modeApplied = true
 	}
-	command := harnessexec.BuildCodexCommand(harnessexec.CodexLaunch{
+	launch := harnessexec.CodexLaunch{
 		SessionName: spec.SessionName,
 		Model:       resolvedModel,
 		WorkDir:     spec.WorkDir,
@@ -138,8 +191,8 @@ func buildCodexLaunchCommand(spec HarnessLaunchSpec, _ string) HarnessLaunchComm
 		ResumeID:    resumeID,
 		Remote:      resumeID != "",
 		Persistent:  spec.Persistent,
-	})
-	return HarnessLaunchCommand{Command: command, ModeAppliedAtStartup: modeApplied}
+	}
+	return launch, modeApplied
 }
 
 func buildAgyLaunchCommand(spec HarnessLaunchSpec, _ string) HarnessLaunchCommand {

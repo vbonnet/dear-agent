@@ -402,11 +402,12 @@ Feature: Harness parity
     Then the shared send result should be "cancelled"
     And shared send should emit 0 tmux commands
 
-  Scenario: Codex launch excludes ambient provider credentials
+  Scenario: Private launches preserve caller state without exposing credentials
     Given synthetic ambient credentials from multiple harnesses
     When AGM builds the Codex private launch boundary
     Then the launch command should contain no credential values
     And the Codex child should receive only allowlisted credentials
+    And caller-only credentials and telemetry should cross stale tmux state through the pinned AGM executor
 
   Scenario: AGY detached session receives startup prompt
     Given AGY is available

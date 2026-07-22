@@ -9,11 +9,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/lock"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
@@ -81,9 +83,17 @@ func testSessionResume(m *manifest.Manifest, timeout time.Duration) (string, err
 	// 2. Ensure cleanup happens
 	defer killSession(sessionName)
 
-	// 3. Send resume command (UUID is validated, safe to use)
-	resumeCmd := fmt.Sprintf("claude --resume %s", m.Claude.UUID)
-	if err := tmux.SendCommand(sessionName, resumeCmd); err != nil {
+	// 3. Send resume command through the same private boundary as normal
+	// lifecycle operations so validation exercises caller-only credentials.
+	prepared, err := harnessexec.PrepareClaudeCommand(harnessexec.ClaudeLaunch{
+		SessionName: sessionName, SessionID: m.SessionID,
+		ResumeID: m.Claude.UUID, WorkDir: m.Context.Project, ForwardTelemetry: true,
+	}, os.Environ())
+	if err != nil {
+		return "", fmt.Errorf("failed to prepare resume command: %w", err)
+	}
+	if err := tmux.SendCommand(sessionName, prepared.Command); err != nil {
+		_ = prepared.Cancel()
 		output, captureErr := capturePane(sessionName)
 		if captureErr != nil {
 			return "", fmt.Errorf("failed to send resume command: %w (capture error: %w)", err, captureErr)
@@ -252,6 +262,7 @@ func RunValidation(manifests []*manifest.Manifest, opts *Options) (*Report, erro
 }
 
 // classifyResumeError analyzes tmux output and error to determine the specific issue type.
+//
 //nolint:gocyclo // reason: linear classification — switch over many error patterns is the clearest representation
 func classifyResumeError(output string, err error) *Issue {
 	// Check for specific error patterns in tmux output

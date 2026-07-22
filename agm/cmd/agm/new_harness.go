@@ -103,10 +103,14 @@ func startClaudeHarness(ctx context.Context, spec ops.HarnessLaunchSpec, trustPr
 	}
 
 	debug.Phase("Start Claude")
-	launch := ops.BuildHarnessLaunchCommand(spec)
+	launch, err := ops.PrepareHarnessLaunchCommand(spec)
+	if err != nil {
+		return false, false, fmt.Errorf("prepare Claude launch: %w", err)
+	}
 	claudeCmd, modeAppliedAtStartup := launch.Command, launch.ModeAppliedAtStartup
 	debug.Log("Sending command: %s", claudeCmd)
 	if err := tmux.SendCommand(spec.SessionName, claudeCmd); err != nil {
+		_ = launch.CancelUndelivered()
 		ui.PrintError(err,
 			"Failed to start Claude in tmux session",
 			"  • Verify Claude is installed: which claude\n"+
@@ -335,10 +339,14 @@ func startAgyHarnessWithRuntime(ctx context.Context, spec ops.HarnessLaunchSpec,
 // The shared ops lifecycle owns teardown on failure.
 func startCodexHarness(ctx context.Context, spec ops.HarnessLaunchSpec) (bool, error) {
 	debug.Phase("Start Codex")
-	launch := ops.BuildHarnessLaunchCommand(spec)
+	launch, err := ops.PrepareHarnessLaunchCommand(spec)
+	if err != nil {
+		return false, fmt.Errorf("prepare Codex launch: %w", err)
+	}
 	codexCmd := launch.Command
 	debug.Log("Sending command: %s", codexCmd)
 	if err := tmux.SendCommand(spec.SessionName, codexCmd); err != nil {
+		_ = launch.CancelUndelivered()
 		ui.PrintError(err,
 			"Failed to start Codex in tmux session",
 			"  • Verify Codex is installed: which codex\n"+
