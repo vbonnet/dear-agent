@@ -134,7 +134,7 @@ func TestProvider_checkBubblewrapInstalled(t *testing.T) {
 	}
 }
 
-func TestBubblewrapMatchedNonGitLowerDirRemainsAuthoritative(t *testing.T) {
+func TestBubblewrapRejectsMatchedNonGitLowerDir(t *testing.T) {
 	base := t.TempDir()
 	gitRepo := filepath.Join(base, "git-repo")
 	requestedRepo := filepath.Join(base, "requested-non-git")
@@ -147,13 +147,12 @@ func TestBubblewrapMatchedNonGitLowerDirRemainsAuthoritative(t *testing.T) {
 
 	p := NewProvider()
 	orderedLowerDirs := sandbox.PrioritizeLowerDir([]string{gitRepo, requestedRepo}, requestedRepo)
-	_, worktreeCreated := p.tryCreateWorktree(orderedLowerDirs, "non-git-authority", mergedDir, requestedRepo)
-	require.False(t, worktreeCreated, "matched non-Git lower directory was replaced by another Git repository")
-	require.NoError(t, p.populateMergedDir(orderedLowerDirs, mergedDir))
-
-	content, err := os.ReadFile(filepath.Join(mergedDir, "project.txt"))
-	require.NoError(t, err)
-	assert.Equal(t, "requested repo\n", string(content))
+	_, err := p.createPrivateWorktree(orderedLowerDirs, "non-git-authority", mergedDir, requestedRepo)
+	require.Error(t, err)
+	assert.Equal(t, sandbox.ErrCodeMountFailed, errCode(t, err))
+	assert.Contains(t, err.Error(), "refusing host-symlink fallback")
+	_, statErr := os.Lstat(filepath.Join(mergedDir, "project.txt"))
+	assert.ErrorIs(t, statErr, os.ErrNotExist, "failed isolation must not expose either host repository")
 }
 
 func TestProvider_DestroyPreservesLockedWorktreeForRetry(t *testing.T) {

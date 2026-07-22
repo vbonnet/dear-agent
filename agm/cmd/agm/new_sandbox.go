@@ -150,8 +150,8 @@ func provisionSandbox(ctx context.Context, providerName string, sessionID string
 
 // resolveSandboxLowerDirs returns the provider lower directories for a new
 // sandbox: prefer cfg.Sandbox.Repos, otherwise scan ~/src/ws/oss/repos for
-// git repos, otherwise fall back to workDir — but only if workDir is itself
-// a git repository. If nothing usable is configured or found, resolution
+// git repos and ensure the repository containing workDir remains included.
+// If nothing usable is configured or found, resolution
 // fails loud (sandbox.ErrCodeNoLowerDirs) rather than silently cloning an
 // arbitrary directory: an unset/misresolved workDir (e.g. launchd's default cwd of
 // $HOME, with no --directory or $PWD) would otherwise trigger an unbounded
@@ -174,7 +174,16 @@ func resolveSandboxLowerDirs(workDir string) ([]string, error) {
 		}
 	}
 	if len(lowerDirs) > 0 {
-		debug.Log("Found %d repos in workspace: %v", len(lowerDirs), lowerDirs)
+		if _, matchErr := sandbox.MatchWorkingDir(workDir, lowerDirs); matchErr == nil {
+			debug.Log("Found %d repos in workspace including requested project: %v", len(lowerDirs), lowerDirs)
+			return lowerDirs, nil
+		}
+		requestedRoot, reason := sandboxFallbackRoot(workDir)
+		if reason != "" {
+			return nil, sandbox.NewNoSandboxLowerDirsError(workDir, reason)
+		}
+		lowerDirs = append([]string{requestedRoot}, lowerDirs...)
+		debug.Log("Added requested project root to %d scanned repos: %v", len(lowerDirs)-1, lowerDirs)
 		return lowerDirs, nil
 	}
 

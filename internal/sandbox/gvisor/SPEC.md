@@ -21,7 +21,7 @@ gVisor.
 
 **GVISOR-05** When an explicit target repository is configured or a git repository can be found under the lower directories, the system shall replace the merged directory with a git worktree on an `agm/<session>` branch.
 
-**GVISOR-06** When no git repository can be resolved, the system shall populate the merged directory with top-level symlinks from the lower directories.
+**GVISOR-06** When no private git worktree can be materialized, the system shall fail with a structured mount error, remove partial sandbox directories, and never expose host files through a symlink-populated merged directory.
 
 **GVISOR-07** When validating runtime availability, the system shall run `runsc --version` and require output that identifies `runsc`, without requiring privileged `runsc run` execution during provider creation.
 
@@ -35,7 +35,7 @@ gVisor.
 
 **GVISOR-12** When Git worktree removal succeeds but sandbox directory cleanup fails during destruction, the system shall retain the provider registry entry and retry only the unfinished directory cleanup phase.
 
-**GVISOR-13** When a request names a working directory inside a lower directory, the provider shall materialize that lower directory instead of a conflicting target repository and return `merged/<relative-directory>` as the harness working directory; if the matched lower directory is not a Git repository, the provider shall not substitute another Git repository and shall give the matched directory precedence in the symlink fallback.
+**GVISOR-13** When a request names a working directory inside a lower directory, the provider shall materialize that lower directory instead of a conflicting target repository and return `merged/<relative-directory>` as the harness working directory; if the matched lower directory is not a Git repository, the provider shall reject creation instead of substituting another repository or exposing the host directory through symlinks.
 
 ## BDD Traceability
 

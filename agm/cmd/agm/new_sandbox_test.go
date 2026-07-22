@@ -408,8 +408,7 @@ func TestProvisionSandboxCleansUpProviderThatViolatesWorkingDirectoryContract(t 
 }
 
 // TestResolveSandboxLowerDirs_ScansWorkspaceRepos verifies the ~/src/ws/oss/repos
-// scan still finds repos and takes priority over the workDir fallback, even
-// when workDir itself would be unsafe.
+// scan finds the requested repository without adding a duplicate fallback.
 func TestResolveSandboxLowerDirs_ScansWorkspaceRepos(t *testing.T) {
 	withEmptySandboxRepoConfig(t)
 	home := t.TempDir()
@@ -420,12 +419,47 @@ func TestResolveSandboxLowerDirs_ScansWorkspaceRepos(t *testing.T) {
 		t.Fatalf("failed to create scanned repo: %v", err)
 	}
 
-	// workDir is deliberately unsafe (not a repo) to prove the scan wins.
-	dirs, err := resolveSandboxLowerDirs(t.TempDir())
+	workDir := filepath.Join(repoDir, "agm", "cmd", "agm")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dirs, err := resolveSandboxLowerDirs(workDir)
 	if err != nil {
-		t.Fatalf("resolveSandboxLowerDirs() error = %v, want nil (scan should find a repo)", err)
+		t.Fatalf("resolveSandboxLowerDirs() error = %v, want nil", err)
 	}
 	if len(dirs) != 1 || dirs[0] != repoDir {
 		t.Errorf("resolveSandboxLowerDirs() = %v, want [%s]", dirs, repoDir)
+	}
+}
+
+func TestResolveSandboxLowerDirs_IncludesRequestedRepoAlongsideWorkspaceScan(t *testing.T) {
+	withEmptySandboxRepoConfig(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	scannedRepo := filepath.Join(home, "src", "ws", "oss", "repos", "scanned-repo")
+	if err := os.MkdirAll(filepath.Join(scannedRepo, ".git"), 0o755); err != nil {
+		t.Fatalf("failed to create scanned repo: %v", err)
+	}
+	requestedRepo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(requestedRepo, ".git"), 0o755); err != nil {
+		t.Fatalf("failed to create requested repo: %v", err)
+	}
+	workDir := filepath.Join(requestedRepo, "agm", "cmd", "agm")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	dirs, err := resolveSandboxLowerDirs(workDir)
+	if err != nil {
+		t.Fatalf("resolveSandboxLowerDirs() error = %v, want nil", err)
+	}
+	resolvedRequestedRepo, err := filepath.EvalSymlinks(requestedRepo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{resolvedRequestedRepo, scannedRepo}
+	if len(dirs) != len(want) || dirs[0] != want[0] || dirs[1] != want[1] {
+		t.Fatalf("resolveSandboxLowerDirs() = %v, want %v", dirs, want)
 	}
 }

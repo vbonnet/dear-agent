@@ -131,7 +131,7 @@ func TestProvider_Create_FailsWithoutRunsc(t *testing.T) {
 	}
 }
 
-func TestGVisorMatchedNonGitLowerDirRemainsAuthoritative(t *testing.T) {
+func TestGVisorRejectsMatchedNonGitLowerDir(t *testing.T) {
 	base := t.TempDir()
 	gitRepo := filepath.Join(base, "git-repo")
 	requestedRepo := filepath.Join(base, "requested-non-git")
@@ -152,20 +152,19 @@ func TestGVisorMatchedNonGitLowerDirRemainsAuthoritative(t *testing.T) {
 
 	p := NewProvider()
 	orderedLowerDirs := sandbox.PrioritizeLowerDir([]string{gitRepo, requestedRepo}, requestedRepo)
-	_, worktreeCreated := p.tryCreateWorktree(orderedLowerDirs, "non-git-authority", mergedDir, requestedRepo)
-	if worktreeCreated {
-		t.Fatal("matched non-Git lower directory was replaced by another Git repository")
+	_, err := p.createPrivateWorktree(orderedLowerDirs, "non-git-authority", mergedDir, requestedRepo)
+	if err == nil {
+		t.Fatal("createPrivateWorktree() error = nil, want isolation failure")
 	}
-	if err := p.populateMergedDir(orderedLowerDirs, mergedDir); err != nil {
-		t.Fatal(err)
+	var sbErr *sandbox.Error
+	if !errors.As(err, &sbErr) || sbErr.Code != sandbox.ErrCodeMountFailed {
+		t.Fatalf("error = %v, want structured %v error", err, sandbox.ErrCodeMountFailed)
 	}
-
-	content, err := os.ReadFile(filepath.Join(mergedDir, "project.txt"))
-	if err != nil {
-		t.Fatal(err)
+	if !strings.Contains(err.Error(), "refusing host-symlink fallback") {
+		t.Fatalf("error = %v, want host-symlink refusal", err)
 	}
-	if got := string(content); got != "requested repo\n" {
-		t.Fatalf("project.txt = %q, want requested repository content", got)
+	if _, statErr := os.Lstat(filepath.Join(mergedDir, "project.txt")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("failed isolation exposed a host repository: stat error = %v", statErr)
 	}
 }
 

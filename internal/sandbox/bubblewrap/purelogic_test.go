@@ -14,10 +14,8 @@ import (
 
 // This file extends provider_test.go with coverage of the remaining
 // cross-platform, pure-logic surface of the Bubblewrap provider: git-repo
-// discovery, the workspace-content fallback chain, directory lifecycle, and
-// secret materialisation. None of these paths invoke bwrap, so they run on
-// every platform. They are security-relevant because together they decide
-// which host content is exposed into a sandbox and how secrets land on disk.
+// discovery, directory lifecycle, and secret materialisation. None of these
+// paths invoke bwrap, so they run on every platform.
 
 // gitInit turns dir into a real git repository. isGitRepo and the discovery
 // helpers shell out to `git rev-parse`, so a bare .git directory is not
@@ -261,35 +259,6 @@ func TestProvider_cleanup(t *testing.T) {
 	assert.NoDirExists(t, upper)
 }
 
-// --- isMergedDirEffectivelyEmpty --------------------------------------------
-
-func TestProvider_isMergedDirEffectivelyEmpty(t *testing.T) {
-	p := NewProvider()
-
-	t.Run("truly empty", func(t *testing.T) {
-		assert.True(t, p.isMergedDirEffectivelyEmpty(t.TempDir()))
-	})
-
-	t.Run("only dotfiles and CLAUDE.md", func(t *testing.T) {
-		d := t.TempDir()
-		writeFile(t, filepath.Join(d, ".claude"), "x")
-		writeFile(t, filepath.Join(d, ".gitignore"), "x")
-		writeFile(t, filepath.Join(d, "CLAUDE.md"), "# instructions")
-		assert.True(t, p.isMergedDirEffectivelyEmpty(d))
-	})
-
-	t.Run("real content present", func(t *testing.T) {
-		d := t.TempDir()
-		writeFile(t, filepath.Join(d, "CLAUDE.md"), "# instructions")
-		writeFile(t, filepath.Join(d, "main.go"), "package main")
-		assert.False(t, p.isMergedDirEffectivelyEmpty(d))
-	})
-
-	t.Run("unreadable/missing dir treated as empty", func(t *testing.T) {
-		assert.True(t, p.isMergedDirEffectivelyEmpty(filepath.Join(t.TempDir(), "nope")))
-	})
-}
-
 // --- scanForRepos -----------------------------------------------------------
 
 func TestProvider_scanForRepos(t *testing.T) {
@@ -361,43 +330,6 @@ func TestProvider_findReposFromAGMConfig(t *testing.T) {
 		home := t.TempDir()
 		writeFile(t, filepath.Join(home, ".agm", "config.yaml"), "version: 1\n")
 		assert.Nil(t, p.findReposFromAGMConfig(home))
-	})
-}
-
-// --- symlinkRepoContents ----------------------------------------------------
-
-func TestProvider_symlinkRepoContents(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink semantics differ on Windows")
-	}
-	p := NewProvider()
-
-	t.Run("links top-level entries, earlier repo wins on conflict", func(t *testing.T) {
-		repo1 := t.TempDir()
-		writeFile(t, filepath.Join(repo1, "shared.txt"), "from-repo1")
-		writeFile(t, filepath.Join(repo1, "only1.txt"), "one")
-
-		repo2 := t.TempDir()
-		writeFile(t, filepath.Join(repo2, "shared.txt"), "from-repo2")
-		writeFile(t, filepath.Join(repo2, "only2.txt"), "two")
-
-		merged := t.TempDir()
-		require.NoError(t, p.symlinkRepoContents([]string{repo1, repo2}, merged))
-
-		// All three distinct names are linked.
-		for _, name := range []string{"shared.txt", "only1.txt", "only2.txt"} {
-			assert.FileExists(t, filepath.Join(merged, name))
-		}
-		// The conflicting name resolves to repo1 (processed first, not overwritten).
-		got, err := os.ReadFile(filepath.Join(merged, "shared.txt"))
-		require.NoError(t, err)
-		assert.Equal(t, "from-repo1", string(got))
-	})
-
-	t.Run("errors when nothing could be linked", func(t *testing.T) {
-		// A repo dir that does not exist yields zero links -> error.
-		err := p.symlinkRepoContents([]string{filepath.Join(t.TempDir(), "absent")}, t.TempDir())
-		require.Error(t, err)
 	})
 }
 
