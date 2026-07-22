@@ -1,4 +1,5 @@
 # SPEC: pkg/vroom/escalation/SPEC.md
+# RELATED-SPEC: pkg/vroom/admission/SPEC.md
 # RELATED-SPEC: pkg/vroom/decisiontrail/SPEC.md
 # RELATED-SPEC: pkg/vroom/goplswatch/SPEC.md
 # RELATED-SPEC: pkg/vroom/supervisor/SPEC.md
@@ -14,6 +15,7 @@ Feature: VROOM runtime guardrails
 
     Examples:
       | package                     |
+      | pkg/vroom/admission         |
       | pkg/vroom/decisiontrail     |
       | pkg/vroom/escalation        |
       | pkg/vroom/goplswatch        |
