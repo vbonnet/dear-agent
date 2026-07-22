@@ -626,6 +626,45 @@ func TestScriptHeredocStateHandlesEmptySupersededAndDeferredInputs(t *testing.T)
 	}
 }
 
+func TestScriptHeredocStateHandlesCopiedAndConditionallyRoutedInputs(t *testing.T) {
+	source := []byte(strings.Join([]string{
+		"tee tee-attached>/dev/null <<'TEE_ATTACHED_REDIRECT'",
+		"gh pr reopen 246",
+		"TEE_ATTACHED_REDIRECT",
+		"cat tee-attached",
+		"cat >legacy-substitution <<'LEGACY_SUBSTITUTION'",
+		"git push origin legacy-substitution",
+		"LEGACY_SUBSTITUTION",
+		"message=`cat legacy-substitution`",
+		`printf '%s\n' "$message"`,
+		"cat >copy-source <<'REDIRECTED_COPY'",
+		"gh pr close 135",
+		"REDIRECTED_COPY",
+		"cat copy-source >copy-destination",
+		"cat copy-destination",
+		"exec 3>&1",
+		"false && exec 3>conditional-fixture",
+		"cat >&3 <<'CONDITIONAL_EXEC'",
+		"safe-pr create --emergency --reason conditional-exec",
+		"CONDITIONAL_EXEC",
+	}, "\n"))
+
+	var text []string
+	for _, segment := range parseScriptSegments(source) {
+		text = append(text, segment.Text)
+	}
+	for _, visible := range []string{
+		"gh pr reopen 246",
+		"git push origin legacy-substitution",
+		"gh pr close 135",
+		"safe-pr create --emergency --reason conditional-exec",
+	} {
+		if !slices.Contains(text, visible) {
+			t.Errorf("visible line %q was hidden: %v", visible, text)
+		}
+	}
+}
+
 func TestCheckRepositoryGovernsSkillAgentMetadata(t *testing.T) {
 	repo := t.TempDir()
 	runGit(t, repo, "init", "-q")

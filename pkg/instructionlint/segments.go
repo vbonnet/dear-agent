@@ -278,8 +278,14 @@ func (state *scriptParseState) commitHeredoc(segments []Segment, heredoc scriptH
 }
 
 func (state *scriptParseState) updatePersistentDescriptors(value string) {
-	for _, command := range splitShellCommands(value) {
-		tokens := parseShellTokens(command)
+	commands := splitScriptCommandParts(value)
+	for index, command := range commands {
+		if index > 0 && commands[index-1].separator != ";" {
+			// A pipeline, background job, or conditional command may not execute in
+			// this shell. Do not let its hypothetical exec mutate later routing.
+			continue
+		}
+		tokens := parseShellTokens(command.text)
 		for len(tokens) > 0 && tokens[0].text == "{" {
 			tokens = tokens[1:]
 		}
@@ -291,10 +297,31 @@ func (state *scriptParseState) updatePersistentDescriptors(value string) {
 }
 
 func (state *scriptParseState) updatePendingFileWrites(value string) {
-	for _, command := range splitScriptCommandParts(value) {
+	commands := splitScriptCommandParts(value)
+	for index, command := range commands {
 		destination := scriptCommandOutputDestination(command.text, state.descriptors)
 		if destination.redirected && destination.path != "" && !destination.append {
 			delete(state.pendingHeredocs, destination.path)
+		}
+
+		pipelineDestination := scriptHeredocCommandOutputDestination(commands, index, state.descriptors)
+		if pipelineDestination.visible || !pipelineDestination.redirected || pipelineDestination.path == "" {
+			continue
+		}
+		var copied []Segment
+		for path, pending := range state.pendingHeredocs {
+			if scriptCommandReadsPath(command.text, path, state.descriptors) {
+				copied = append(copied, pending...)
+			}
+		}
+		if len(copied) == 0 {
+			continue
+		}
+		if pipelineDestination.append {
+			state.pendingHeredocs[pipelineDestination.path] = append(
+				state.pendingHeredocs[pipelineDestination.path], copied...)
+		} else {
+			state.pendingHeredocs[pipelineDestination.path] = slices.Clone(copied)
 		}
 	}
 }
@@ -377,6 +404,7 @@ var shellAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 var shellVariableName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 var shellDeclaration = regexp.MustCompile(`^(?:local|export|readonly|typeset|declare)(?:\s+-[A-Za-z]+)*\s+`)
 var shellCommandSubstitution = regexp.MustCompile(`\$\(([^()]*)\)`)
+var legacyShellCommandSubstitution = regexp.MustCompile("`([^`]*)`")
 var shellFunction = regexp.MustCompile(`^(?:function\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*\(\))?|([A-Za-z_][A-Za-z0-9_]*)\s*\(\))\s*\{`)
 
 func agentVisibleScriptHelpers(source []byte) map[string]bool {
@@ -799,7 +827,7 @@ func scriptCommandIgnoresHeredocInput(command string) bool {
 }
 
 func scriptTeeFileDestinations(command string) []scriptOutputDestination {
-	fields := stripCommandPrefixes(parseShellWords(command))
+	fields := stripCommandPrefixes(scriptCommandWords(command))
 	if len(fields) == 0 || executableBase(fields[0]) != "tee" {
 		return nil
 	}
@@ -826,6 +854,47 @@ func scriptTeeFileDestinations(command string) []scriptOutputDestination {
 		destinations = append(destinations, scriptOutputDestination{path: filepath.Clean(field), append: appendMode})
 	}
 	return destinations
+}
+
+func scriptCommandWords(command string) []string {
+	tokens := parseShellTokens(command)
+	words := make([]string, 0, len(tokens))
+	skipTarget := false
+	for _, token := range tokens {
+		if skipTarget {
+			skipTarget = false
+			continue
+		}
+		if redirect, hasTarget := scriptRedirectionToken(token.raw); redirect {
+			skipTarget = !hasTarget
+			continue
+		}
+		words = append(words, token.text)
+	}
+	return words
+}
+
+func scriptRedirectionToken(raw string) (redirect, hasTarget bool) {
+	value := strings.Trim(raw, "()")
+	if strings.HasPrefix(value, "&>") {
+		value = value[1:]
+	} else {
+		value = strings.TrimLeft(value, "0123456789")
+	}
+	if value == "" || value[0] != '<' && value[0] != '>' {
+		return false, false
+	}
+	index := 0
+	for index < len(value) && (value[index] == '<' || value[index] == '>') {
+		index++
+	}
+	if index < len(value) && (value[index] == '|' || value[index] == '-') {
+		index++
+	}
+	if index < len(value) && value[index] == '&' {
+		index++
+	}
+	return true, index < len(value)
 }
 
 func scriptHeredocCommandOutputDestination(
@@ -1141,11 +1210,8 @@ func scriptCommandPrintsPath(command, path string, descriptors map[int]scriptOut
 }
 
 func scriptCommandReadsPath(command, path string, descriptors map[int]scriptOutputDestination) bool {
-	for _, match := range shellCommandSubstitution.FindAllStringSubmatch(command, -1) {
-		if len(match) == 2 && (scriptLinePrintsPath(match[1], path, descriptors) ||
-			scriptInputOnlySubstitutionReadsPath(match[1], path)) {
-			return true
-		}
+	if scriptCommandSubstitutionsReadPath(command, path, descriptors) {
+		return true
 	}
 	fields := stripCommandPrefixes(parseShellWords(command))
 	if len(fields) > 0 {
@@ -1173,6 +1239,21 @@ func scriptCommandReadsPath(command, path string, descriptors map[int]scriptOutp
 		redirect := strings.TrimLeft(field, "0123456789")
 		if strings.HasPrefix(redirect, "<") && sameScriptPath(strings.TrimLeft(redirect, "<"), path) {
 			return true
+		}
+	}
+	return false
+}
+
+func scriptCommandSubstitutionsReadPath(
+	command, path string,
+	descriptors map[int]scriptOutputDestination,
+) bool {
+	for _, matcher := range []*regexp.Regexp{shellCommandSubstitution, legacyShellCommandSubstitution} {
+		for _, match := range matcher.FindAllStringSubmatch(command, -1) {
+			if len(match) == 2 && (scriptLinePrintsPath(match[1], path, descriptors) ||
+				scriptInputOnlySubstitutionReadsPath(match[1], path)) {
+				return true
+			}
 		}
 	}
 	return false
