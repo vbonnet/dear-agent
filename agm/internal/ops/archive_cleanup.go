@@ -54,7 +54,8 @@ func CleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandbox
 	// 1. Remove the git worktree (force to handle uncommitted changes).
 	if worktreePath != "" {
 		worktreeRoot, isPrimary, classifyErr := classifyWorktree(worktreePath)
-		if classifyErr != nil {
+		switch {
+		case classifyErr != nil:
 			logAction(logger, CleanupAction{
 				SessionID:   sessionID,
 				SessionName: sessionName,
@@ -65,7 +66,7 @@ func CleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandbox
 			})
 			slog.Warn("Preserving unclassified worktree and branch during archive cleanup",
 				"path", worktreePath, "error", classifyErr)
-		} else if isPrimary {
+		case isPrimary:
 			primaryWorktree = true
 			result.PrimaryWorktreeKept = true
 			logAction(logger, CleanupAction{
@@ -76,7 +77,7 @@ func CleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandbox
 				Success:     true,
 			})
 			slog.Info("Preserving primary checkout during archive cleanup", "path", worktreeRoot)
-		} else {
+		default:
 			err := removeWorktreeCmd(repoPath, worktreeRoot)
 			logAction(logger, CleanupAction{
 				SessionID:   sessionID,
