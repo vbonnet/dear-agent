@@ -150,8 +150,10 @@ func TestDetectAgentType(t *testing.T) {
 
 // mockAgentAdapter is a mock implementation of the Agent interface for testing
 type mockAgentAdapter struct {
-	sentMessages []agent.Message
-	sendError    error
+	sentMessages  []agent.Message
+	sendError     error
+	sessionStatus agent.Status
+	statusError   error
 }
 
 func (m *mockAgentAdapter) Name() string {
@@ -175,7 +177,13 @@ func (m *mockAgentAdapter) TerminateSession(sessionID agent.SessionID) error {
 }
 
 func (m *mockAgentAdapter) GetSessionStatus(sessionID agent.SessionID) (agent.Status, error) {
-	return agent.StatusActive, nil
+	if m.statusError != nil {
+		return "", m.statusError
+	}
+	if m.sessionStatus == "" {
+		return agent.StatusActive, nil
+	}
+	return m.sessionStatus, nil
 }
 
 func (m *mockAgentAdapter) SendMessage(sessionID agent.SessionID, message agent.Message) error {

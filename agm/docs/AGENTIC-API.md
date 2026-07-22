@@ -22,9 +22,11 @@ pane or a later focus change cannot validate or redirect input.
 `agm send msg` uses that shared operation for every CLI recipient in both
 single-recipient and fan-out delivery; it does not retain a weaker CLI-only
 tmux path or deliver to unregistered sessions whose harness identity cannot be
-proven. API recipients use their adapter only after a preliminary ready verdict
-and a fail-closed recheck at the final common delivery boundary, including
-fan-out sends.
+proven. Pure API recipients intentionally have no tmux pane: single-recipient
+and fan-out sends use the adapter's session status at the final common delivery
+boundary, delivering only while it reports active or idle and failing closed
+before any pending artifact when status is unavailable, suspended, or
+terminated.
 
 ## Error Code Catalog
 

@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/send"
@@ -130,6 +133,7 @@ func TestBusySingleSendReachesAtomicDeliveryForForceAndAutonomous(t *testing.T) 
 				nil,
 				testCase.policy,
 				true,
+				false,
 				func() error {
 					directCalls++
 					return nil
@@ -145,9 +149,9 @@ func TestBusySingleSendReachesAtomicDeliveryForForceAndAutonomous(t *testing.T) 
 	}
 }
 
-func TestAPIForceAndAutonomousPreservePreliminaryDeliveryState(t *testing.T) {
+func TestAPIDeliveryUsesAdapterReadinessInsteadOfTmuxState(t *testing.T) {
 	previousDelegate := msgDelegate
-	msgDelegate = true
+	msgDelegate = false
 	t.Cleanup(func() { msgDelegate = previousDelegate })
 
 	for _, policyCase := range []struct {
@@ -159,31 +163,44 @@ func TestAPIForceAndAutonomousPreservePreliminaryDeliveryState(t *testing.T) {
 	} {
 		for _, canReceive := range []state.CanReceive{state.CanReceiveQueue, state.CanReceiveNo, state.CanReceiveOverlay, state.CanReceiveNotFound} {
 			t.Run(policyCase.name+"/"+string(canReceive), func(t *testing.T) {
-				homeDir := t.TempDir()
-				t.Setenv("HOME", homeDir)
 				directCalls := 0
 				err := dispatchSendByCanReceiveWithDirect(
 					t.Context(), "api-session", "api-session-tmux", "sender", "message-id",
-					"formatted message", "message", "working", canReceive, nil, policyCase.policy, false,
+					"formatted message", "message", "working", canReceive, nil, policyCase.policy, false, true,
 					func() error {
 						directCalls++
 						return nil
 					},
 				)
-				if err == nil {
-					t.Fatalf("unavailable API delivery state %s error = nil", canReceive)
+				if err != nil {
+					t.Fatalf("API delivery with tmux state %s error = %v", canReceive, err)
 				}
-				if !strings.Contains(err.Error(), "deferred API delivery is unsupported") {
-					t.Fatalf("API delivery state %s error = %v, want unsupported deferred-delivery error", canReceive, err)
-				}
-				if directCalls != 0 {
-					t.Fatalf("API delivery state %s direct calls = %d, want 0", canReceive, directCalls)
-				}
-				if _, statErr := os.Stat(filepath.Join(homeDir, ".agm", "delegations")); !os.IsNotExist(statErr) {
-					t.Fatalf("failed API delivery state %s created delegation state: %v", canReceive, statErr)
+				if directCalls != 1 {
+					t.Fatalf("API delivery with tmux state %s direct calls = %d, want 1 adapter-status check", canReceive, directCalls)
 				}
 			})
 		}
+	}
+}
+
+func TestFailedAPIAdapterReadinessCreatesNoDelegation(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	previousDelegate := msgDelegate
+	msgDelegate = true
+	t.Cleanup(func() { msgDelegate = previousDelegate })
+
+	err := dispatchSendByCanReceiveWithDirect(
+		t.Context(), "api-session", "api-session", "sender", "message-id",
+		"formatted message", "message", "working", state.CanReceiveNotFound, nil,
+		cliInputDeliveryPolicy{Force: true}, false, true,
+		func() error { return errors.New("adapter session is terminated") },
+	)
+	if err == nil || !strings.Contains(err.Error(), "adapter session is terminated") {
+		t.Fatalf("failed API adapter readiness error = %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(homeDir, ".agm", "delegations")); !os.IsNotExist(statErr) {
+		t.Fatalf("failed API adapter readiness created delegation state: %v", statErr)
 	}
 }
 
@@ -278,8 +295,7 @@ func TestMultiRecipientAgyDeliveryUsesSharedAtomicReadiness(t *testing.T) {
 	}
 }
 
-func TestSingleAndMultiRecipientAPIDeliveryRecheckCurrentReadiness(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+func TestSingleAndMultiRecipientAPIDeliveryUsesAdapterReadiness(t *testing.T) {
 	adapter, err := dolt.NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
 	if err != nil {
 		t.Fatalf("open SQLite adapter: %v", err)
@@ -302,39 +318,96 @@ func TestSingleAndMultiRecipientAPIDeliveryRecheckCurrentReadiness(t *testing.T)
 
 	for _, surface := range []struct {
 		name    string
-		deliver func(t *testing.T, checkDelivery deliveryStateChecker) error
+		deliver func(t *testing.T, newAPIAgent apiAgentFactory) error
 	}{
 		{
 			name: "single",
-			deliver: func(t *testing.T, checkDelivery deliveryStateChecker) error {
-				return sendDirectlyWithDependencies(t.Context(), job.Recipient, job.Sender, job.MessageID, job.FormattedMessage, job.PromptFile, adapter, session.NewMockTmux(), checkDelivery)
+			deliver: func(t *testing.T, newAPIAgent apiAgentFactory) error {
+				return sendDirectlyWithDependencies(t.Context(), job.Recipient, job.Sender, job.MessageID, job.FormattedMessage, job.PromptFile, adapter, session.NewMockTmux(), newAPIAgent)
 			},
 		},
 		{
 			name: "fan-out",
-			deliver: func(t *testing.T, checkDelivery deliveryStateChecker) error {
-				return deliveryFuncWithStateChecker(t.Context(), job, adapter, session.NewMockTmux(), checkDelivery)
+			deliver: func(t *testing.T, newAPIAgent apiAgentFactory) error {
+				return deliveryFuncWithAgentFactory(t.Context(), job, adapter, session.NewMockTmux(), newAPIAgent)
 			},
 		},
 	} {
-		for _, canReceive := range []state.CanReceive{state.CanReceiveQueue, state.CanReceiveNo, state.CanReceiveOverlay, state.CanReceiveNotFound} {
-			t.Run(surface.name+"/"+string(canReceive), func(t *testing.T) {
-				checkedTmuxName := ""
-				err := surface.deliver(t, func(tmuxName string) state.CanReceive {
-					checkedTmuxName = tmuxName
-					return canReceive
+		for _, testCase := range []struct {
+			name        string
+			status      agent.Status
+			statusError error
+			sendError   error
+			wantSuccess bool
+		}{
+			{name: "active", status: agent.StatusActive, wantSuccess: true},
+			{name: "idle", status: agent.StatusIdle, wantSuccess: true},
+			{name: "suspended", status: agent.StatusSuspended},
+			{name: "terminated", status: agent.StatusTerminated},
+			{name: "status-error", statusError: errors.New("status unavailable")},
+			{name: "send-error", status: agent.StatusActive, sendError: errors.New("send unavailable")},
+		} {
+			t.Run(surface.name+"/"+testCase.name, func(t *testing.T) {
+				homeDir := t.TempDir()
+				t.Setenv("HOME", homeDir)
+				mockAgent := &mockAgentAdapter{
+					sessionStatus: testCase.status,
+					statusError:   testCase.statusError,
+					sendError:     testCase.sendError,
+				}
+				err := surface.deliver(t, func(_ context.Context, harnessType string) (agent.Agent, error) {
+					if harnessType != "openai" {
+						t.Fatalf("API factory harness = %q, want openai", harnessType)
+					}
+					return mockAgent, nil
 				})
-				if err == nil || !strings.Contains(err.Error(), "deferred API delivery is unsupported") {
-					t.Fatalf("%s API delivery state %s error = %v, want unsupported deferred-delivery error", surface.name, canReceive, err)
+				if testCase.wantSuccess && err != nil {
+					t.Fatalf("%s API delivery status %s error = %v", surface.name, testCase.status, err)
 				}
-				if checkedTmuxName != "multi-api-tmux" {
-					t.Fatalf("%s API delivery checked tmux name %q, want multi-api-tmux", surface.name, checkedTmuxName)
+				if !testCase.wantSuccess && err == nil {
+					t.Fatalf("%s API delivery %s error = nil", surface.name, testCase.name)
 				}
-				if _, statErr := os.Stat(filepath.Join(os.Getenv("HOME"), ".agm", "pending", "multi-api")); !os.IsNotExist(statErr) {
-					t.Fatalf("failed %s API delivery state %s created pending delivery state: %v", surface.name, canReceive, statErr)
+				wantMessages := 0
+				if testCase.wantSuccess {
+					wantMessages = 1
+				}
+				if len(mockAgent.sentMessages) != wantMessages {
+					t.Fatalf("%s API delivery %s sent messages = %d, want %d", surface.name, testCase.name, len(mockAgent.sentMessages), wantMessages)
+				}
+				_, statErr := os.Stat(filepath.Join(homeDir, ".agm", "pending", "multi-api"))
+				if testCase.wantSuccess && statErr != nil {
+					t.Fatalf("successful %s API delivery %s pending artifact: %v", surface.name, testCase.name, statErr)
+				}
+				if !testCase.wantSuccess && !os.IsNotExist(statErr) {
+					t.Fatalf("failed %s API delivery %s created pending artifact: %v", surface.name, testCase.name, statErr)
 				}
 			})
 		}
+	}
+}
+
+func TestNewAPIHarnessAdapterReportsPureAPISessionReadyWithoutTmux(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("OPENAI_API_KEY", "test-api-key")
+
+	for _, harnessType := range []string{"openai", "gpt"} {
+		t.Run(harnessType, func(t *testing.T) {
+			adapter, err := newAPIHarnessAdapter(t.Context(), harnessType)
+			if err != nil {
+				t.Fatalf("newAPIHarnessAdapter(%q): %v", harnessType, err)
+			}
+			sessionID, err := adapter.CreateSession(agent.SessionContext{Name: "pure-api-" + harnessType})
+			if err != nil {
+				t.Fatalf("create pure API session for %q: %v", harnessType, err)
+			}
+			status, err := adapter.GetSessionStatus(sessionID)
+			if err != nil {
+				t.Fatalf("get pure API session status for %q: %v", harnessType, err)
+			}
+			if status != agent.StatusActive {
+				t.Fatalf("pure API session status for %q = %s, want %s", harnessType, status, agent.StatusActive)
+			}
+		})
 	}
 }
 

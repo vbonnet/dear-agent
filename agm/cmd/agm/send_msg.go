@@ -553,7 +553,7 @@ func dispatchSendByCanReceive(ctx context.Context, recipientSession, tmuxName, h
 	directDelivery := func() error {
 		return sendDirectly(ctx, recipientSession, senderName, messageID, formattedMessage, sessionSendPromptFile, adapter)
 	}
-	return dispatchSendByCanReceiveWithDirect(ctx, recipientSession, tmuxName, senderName, messageID, formattedMessage, message, currentState, canReceive, adapter, currentCLIInputDeliveryPolicy(), supportsSharedAtomicInput(harnessType), directDelivery)
+	return dispatchSendByCanReceiveWithDirect(ctx, recipientSession, tmuxName, senderName, messageID, formattedMessage, message, currentState, canReceive, adapter, currentCLIInputDeliveryPolicy(), supportsSharedAtomicInput(harnessType), isAPIBasedAgent(harnessType), directDelivery)
 }
 
 func supportsSharedAtomicInput(harnessType string) bool {
@@ -565,12 +565,19 @@ func supportsSharedAtomicInput(harnessType string) bool {
 	}
 }
 
-func dispatchSendByCanReceiveWithDirect(ctx context.Context, recipientSession, tmuxName, senderName, messageID, formattedMessage, message, currentState string, canReceive state.CanReceive, adapter *dolt.Adapter, policy cliInputDeliveryPolicy, sharedAtomicInput bool, directDelivery func() error) error {
+func dispatchSendByCanReceiveWithDirect(ctx context.Context, recipientSession, tmuxName, senderName, messageID, formattedMessage, message, currentState string, canReceive state.CanReceive, adapter *dolt.Adapter, policy cliInputDeliveryPolicy, sharedAtomicInput, apiBased bool, directDelivery func() error) error {
 	// Force and autonomous sends must reach the shared atomic classifier before
 	// legacy pane-state routing. Otherwise a preliminary QUEUE verdict diverts
 	// them into the daemon queue and makes their narrowly scoped stuck-AGM
-	// recovery policy unreachable. API harnesses have no such classifier and
-	// must preserve preliminary queue, permission, overlay, and absence states.
+	// recovery policy unreachable. Pure API harnesses have no tmux pane, so
+	// their adapter status is the final readiness authority instead.
+	if apiBased {
+		if err := directDelivery(); err != nil {
+			return err
+		}
+		recordDelegation(senderName, recipientSession, messageID, message)
+		return nil
+	}
 	if sharedAtomicInput && policy.allowsQueuedAGM() {
 		if err := directDelivery(); err != nil {
 			return err
@@ -578,10 +585,6 @@ func dispatchSendByCanReceiveWithDirect(ctx context.Context, recipientSession, t
 		recordDelegation(senderName, recipientSession, messageID, message)
 		return nil
 	}
-	if !sharedAtomicInput && canReceive != state.CanReceiveYes {
-		return fmt.Errorf("API session %q is not ready for direct delivery (state %s); deferred API delivery is unsupported", recipientSession, canReceive)
-	}
-
 	switch canReceive {
 	case state.CanReceiveYes:
 		if err := directDelivery(); err != nil {
@@ -686,12 +689,12 @@ func sendDirectly(ctx context.Context, recipientSession, senderName, messageID, 
 }
 
 func sendDirectlyWithTmux(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, adapter *dolt.Adapter, tmuxClient session.TmuxInterface) error {
-	return sendDirectlyWithDependencies(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, adapter, tmuxClient, session.CheckSessionDelivery)
+	return sendDirectlyWithDependencies(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, adapter, tmuxClient, newAPIHarnessAdapter)
 }
 
-type deliveryStateChecker func(string) state.CanReceive
+type apiAgentFactory func(context.Context, string) (agent.Agent, error)
 
-func sendDirectlyWithDependencies(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, adapter *dolt.Adapter, tmuxClient session.TmuxInterface, checkDelivery deliveryStateChecker) error {
+func sendDirectlyWithDependencies(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, adapter *dolt.Adapter, tmuxClient session.TmuxInterface, newAPIAgent apiAgentFactory) error {
 	if adapter == nil {
 		return fmt.Errorf("verified delivery requires session storage")
 	}
@@ -715,7 +718,7 @@ func sendDirectlyWithDependencies(ctx context.Context, recipientSession, senderN
 
 	// Check if this is an API-based harness (OpenAI, etc.)
 	if isAPIBasedAgent(harnessType) {
-		return sendToAPIAgentIfReady(m, recipientSession, senderName, messageID, formattedMessage, promptFile, checkDelivery)
+		return sendToAPIAgentIfReady(ctx, m, recipientSession, senderName, messageID, formattedMessage, promptFile, newAPIAgent)
 	}
 
 	// CLI-based harnesses share one atomic readiness-and-delivery operation.
@@ -742,20 +745,32 @@ func sendDirectlyWithDependencies(ctx context.Context, recipientSession, senderN
 	return nil
 }
 
-func sendToAPIAgentIfReady(m *manifest.Manifest, recipientSession, senderName, messageID, formattedMessage, promptFile string, checkDelivery deliveryStateChecker) error {
-	// API delivery has no atomic tmux operation that can close the gap between
-	// the command's preliminary pane check and adapter delivery. Recheck at this
-	// final shared seam so fan-out sends cannot bypass the readiness policy and
-	// single sends fail closed if state changes.
-	tmuxName := m.Tmux.SessionName
-	if tmuxName == "" {
-		tmuxName = recipientSession
+func newAPIHarnessAdapter(ctx context.Context, harnessType string) (agent.Agent, error) {
+	switch harnessType {
+	case "openai", "gpt":
+		return agent.NewOpenAIAdapter(ctx, nil)
+	default:
+		return agent.GetHarness(harnessType)
 	}
-	canReceive := checkDelivery(tmuxName)
-	if canReceive != state.CanReceiveYes {
-		return fmt.Errorf("API session %q is not ready for direct delivery (state %s); deferred API delivery is unsupported", recipientSession, canReceive)
+}
+
+func sendToAPIAgentIfReady(ctx context.Context, m *manifest.Manifest, recipientSession, senderName, messageID, formattedMessage, promptFile string, newAPIAgent apiAgentFactory) error {
+	// Pure API sessions intentionally have no tmux pane. Their adapter's session
+	// status is therefore the only delivery readiness authority shared by
+	// single-recipient and fan-out sends.
+	agentAdapter, err := newAPIAgent(ctx, m.Harness)
+	if err != nil {
+		return fmt.Errorf("create API harness adapter for %q: %w", recipientSession, err)
 	}
-	return sendViaAgent(m, senderName, messageID, formattedMessage, promptFile)
+	sessionID := agent.SessionID(m.SessionID)
+	status, err := agentAdapter.GetSessionStatus(sessionID)
+	if err != nil {
+		return fmt.Errorf("check API session %q readiness: %w", recipientSession, err)
+	}
+	if status != agent.StatusActive && status != agent.StatusIdle {
+		return fmt.Errorf("API session %q is not ready for direct delivery (status %s)", recipientSession, status)
+	}
+	return sendViaAgent(m, senderName, messageID, formattedMessage, promptFile, agentAdapter)
 }
 
 func waitForAgyMetadataBackfill(ctx context.Context, sessionName string, wait func(context.Context, string, time.Duration) error) error {
@@ -817,19 +832,7 @@ func sendViaSharedOperations(ctx context.Context, recipientSession, senderName, 
 }
 
 // sendViaAgent sends a message via Agent interface (for API-based harnesses like OpenAI)
-func sendViaAgent(m *manifest.Manifest, senderName, messageID, formattedMessage, promptFile string) error {
-	// Get harness type from manifest
-	harnessType := m.Harness
-	if harnessType == "" {
-		return fmt.Errorf("manifest missing harness type")
-	}
-
-	// Create harness adapter via factory
-	agentAdapter, err := agent.GetHarness(harnessType)
-	if err != nil {
-		return fmt.Errorf("failed to create harness adapter for type '%s': %w", harnessType, err)
-	}
-
+func sendViaAgent(m *manifest.Manifest, senderName, messageID, formattedMessage, promptFile string, agentAdapter agent.Agent) error {
 	// Create message
 	msg := agent.Message{
 		ID:        messageID,
@@ -843,15 +846,16 @@ func sendViaAgent(m *manifest.Manifest, senderName, messageID, formattedMessage,
 		},
 	}
 
-	// Write pending file for hook-based delivery (best-effort, in addition to API)
-	if err := messages.WritePendingFile(m.Name, messageID, formattedMessage); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to write pending file: %v\n", err)
-	}
-
 	// Send message via Agent interface
 	sessionID := agent.SessionID(m.SessionID)
 	if err := agentAdapter.SendMessage(sessionID, msg); err != nil {
 		return fmt.Errorf("failed to send message via harness: %w", err)
+	}
+
+	// Preserve the hook-visible audit artifact only after successful API
+	// delivery. A failed adapter call must not leave an alternate delivery path.
+	if err := messages.WritePendingFile(m.Name, messageID, formattedMessage); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to write pending file: %v\n", err)
 	}
 
 	// Print success message with message ID
@@ -1098,13 +1102,13 @@ func deliveryFunc(ctx context.Context, job *send.DeliveryJob) error {
 }
 
 func deliveryFuncWithDependencies(ctx context.Context, job *send.DeliveryJob, adapter *dolt.Adapter, tmuxClient session.TmuxInterface) error {
-	return deliveryFuncWithStateChecker(ctx, job, adapter, tmuxClient, session.CheckSessionDelivery)
+	return deliveryFuncWithAgentFactory(ctx, job, adapter, tmuxClient, newAPIHarnessAdapter)
 }
 
-func deliveryFuncWithStateChecker(ctx context.Context, job *send.DeliveryJob, adapter *dolt.Adapter, tmuxClient session.TmuxInterface, checkDelivery deliveryStateChecker) error {
+func deliveryFuncWithAgentFactory(ctx context.Context, job *send.DeliveryJob, adapter *dolt.Adapter, tmuxClient session.TmuxInterface, newAPIAgent apiAgentFactory) error {
 	// Multi-recipient sends intentionally use the same manifest resolution and
 	// final readiness boundary as single-recipient sends.
-	return sendDirectlyWithDependencies(ctx, job.Recipient, job.Sender, job.MessageID, job.FormattedMessage, job.PromptFile, adapter, tmuxClient, checkDelivery)
+	return sendDirectlyWithDependencies(ctx, job.Recipient, job.Sender, job.MessageID, job.FormattedMessage, job.PromptFile, adapter, tmuxClient, newAPIAgent)
 }
 
 // recordDelegation records a delegation if --delegate flag is set.
