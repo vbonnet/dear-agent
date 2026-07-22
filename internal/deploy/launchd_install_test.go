@@ -177,7 +177,7 @@ var configKey = regexp.MustCompile(`["']?apiKeyHelper["']?\s*[:=]`)
 // system roots and the GOPATH form as well as the home-relative ones, and both
 // the Makefile and the documentation scanners share it so they cannot drift
 // apart.
-const installRootPattern = `(?:(?:\$\(HOME\)|\$\{HOME\}|\$HOME|~)/(?:go/bin|\.local/bin)` +
+const installRootPattern = `(?:(?:\$\(HOME\)|\$\{HOME\}|\$HOME|~)/(?:go/bin|\.local/bin|bin)` +
 	`|\$\((?:HOOKS_DIR|GOPATH)\)(?:/bin)?` +
 	`|(?:\$GOPATH|\$\{GOPATH\})/bin` +
 	`|/usr/local/bin|/opt/homebrew/bin)`
@@ -393,16 +393,34 @@ func isBinary(path string) bool {
 func TestNoRawCopyIntoInstallRoots(t *testing.T) {
 	repoRoot := filepath.Join("..", "..")
 
-	// `cp <src> <install-root>/<name>` anywhere on the line — including inside a
-	// quoted echo, which is how the flagged instance was written.
-	rawCopy := regexp.MustCompile(`\b(?:cp|install)\s+[^\n]*?` + installRootPattern + `/[A-Za-z0-9._-]+`)
-	// The SAFE form is: allocate a unique staging path with mktemp, copy into
-	// it, then rename it onto the destination. Requiring mktemp AND mv — rather
-	// than "some mv appears later on the line" — is what binds the rename to the
-	// staged copy. A bare `cp bin/foo /usr/local/bin/foo && mv log log.old` has
-	// an unrelated rename and must still fail.
-	staged := regexp.MustCompile(`\bmktemp\b`)
-	renamed := regexp.MustCompile(`\b(?:sudo\s+)?mv\b`)
+	// Match on the copy's DESTINATION, not on tokens that happen to share the
+	// line.
+	//
+	// Two earlier attempts exempted "safe-looking" neighbours — first any later
+	// `mv`, then `mktemp` and `mv` matched independently — and both were
+	// bypassable, because neither was tied to the copy. `mktemp /tmp/x.XXXXXX;
+	// cp agm /usr/local/bin/agm; mv log log.old` satisfies both while
+	// overwriting the binary in place.
+	//
+	// Anchoring on the destination removes the need for an exemption entirely:
+	// the safe form copies into the staging path (`cp bin/foo "$stage"`), whose
+	// destination is not an install root, so it never matches. Only a copy whose
+	// final argument IS an install-root path is flagged. An mktemp allocating a
+	// staging name under an install root is likewise not a copy, so it does not
+	// match either.
+	//
+	// Intervening tokens are consumed non-greedily and must not cross a command
+	// separator, so `install -m 755 agm <root>/agm` is caught (flags may take
+	// arguments) while `cp agm "$stage" && mv ...` is not (the separator stops
+	// the scan before any install root later on the line).
+	//
+	// The trailing group accepts only end-of-command, never another argument, so
+	// the matched path must be the DESTINATION. That distinction matters:
+	// `cp ~/go/bin/agm.backup "$stage"` reads FROM an install root and is
+	// perfectly safe.
+	rawCopy := regexp.MustCompile(
+		`\b(?:sudo\s+)?(?:cp|install)\s+(?:[^\s;|&]+\s+)*?(?:sudo\s+)?` +
+			installRootPattern + `[^\s"';|&]*\s*(?:$|[;|&])`)
 
 	for _, rel := range trackedTextFiles(t, repoRoot) {
 		raw, err := os.ReadFile(filepath.Join(repoRoot, rel))
@@ -411,7 +429,7 @@ func TestNoRawCopyIntoInstallRoots(t *testing.T) {
 		}
 		for _, lg := range logicalLines(string(raw)) {
 			line, i := lg.text, lg.line-1
-			if !rawCopy.MatchString(line) || (staged.MatchString(line) && renamed.MatchString(line)) {
+			if !rawCopy.MatchString(line) {
 				continue
 			}
 			t.Errorf("%s:%d tells an operator to copy straight over an install root:\n\t%s\n"+

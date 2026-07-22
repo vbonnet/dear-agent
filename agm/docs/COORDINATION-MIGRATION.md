@@ -97,9 +97,11 @@ cd ./agm
 # Build daemon binary
 go build -o agm-daemon cmd/agm-daemon/*.go
 
-# Install to user bin
-cp agm-daemon ~/bin/
-chmod +x ~/bin/agm-daemon
+# Install to user bin. Stage and rename: overwriting an already-executed
+# binary can leave a stale code-signing cache entry that macOS kills on next
+# exec (ce-77ip.8).
+stage=$(mktemp ~/bin/agm-daemon.XXXXXX) && cp agm-daemon "$stage" \
+  && chmod 755 "$stage" && mv -f "$stage" ~/bin/agm-daemon
 ```
 
 #### Step 2: Install Claude Hooks
