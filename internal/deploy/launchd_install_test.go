@@ -271,8 +271,9 @@ func TestNoAPIKeyHelperInstructions(t *testing.T) {
 
 		occurrence := map[string]int{}
 		for _, m := range clauseMentions(body) {
-			occurrence[m.clause]++
-			key := siteKey(rel, m.clause, occurrence[m.clause])
+			norm := normalizeText(m.clause)
+			occurrence[norm]++
+			key := siteKey(rel, m.clause, occurrence[norm])
 			seen[key] = true
 			if allowed[key] {
 				continue
@@ -388,6 +389,38 @@ func allSourcesInterpreted(cmd string) bool {
 // to a location means each site is reviewed on its own.
 func siteKey(path, text string, ordinal int) string {
 	return clauseKey(fmt.Sprintf("%s\x00%s\x00%d", path, text, ordinal))
+}
+
+// normalizeText collapses whitespace exactly as clauseKey does, so occurrence
+// counters and hashes agree. Counting raw text while hashing normalised text
+// gave two mentions differing only in reflow the same ordinal AND the same
+// hash, so one reviewed warning could exempt an unreviewed duplicate.
+func normalizeText(text string) string {
+	return strings.Join(strings.Fields(text), " ")
+}
+
+// retiredExampleMarker is the explicit annotation an author must place beside a
+// sanctioned example of the retired install form.
+const retiredExampleMarker = "RETIRED-EXAMPLE"
+
+// hasRetiredExampleMarker reports whether the marker appears on the exempted
+// line or the two lines above it.
+//
+// The allowlist says "this text at this place is sanctioned"; the marker says
+// "and it is still presented as a warning". Without it, deleting the
+// surrounding "do NOT use it" prose -- or rewriting it as a recommendation --
+// leaves the key unchanged and the exemption intact, so retired guidance could
+// go live under an old approval.
+//
+// A marker rather than a hash of the surrounding prose: hashing context would
+// churn the allowlist on any nearby edit, and would re-import the judge-the-prose
+// problem this design exists to avoid. The marker is a deliberate author
+// assertion, which is exactly what an exemption should require.
+func hasRetiredExampleMarker(lg logicalLine, body string) bool {
+	lines := strings.Split(body, "\n")
+	lo := max(lg.line-3, 0)
+	hi := min(lg.line, len(lines))
+	return strings.Contains(strings.Join(lines[lo:hi], "\n"), retiredExampleMarker)
 }
 
 // clauseKey hashes a clause with whitespace collapsed, so reflowing prose does
@@ -561,8 +594,9 @@ func TestNoRawCopyIntoInstallRoots(t *testing.T) {
 			if offending == "" {
 				continue
 			}
-			occurrence[offending]++
-			if key := siteKey(rel, offending, occurrence[offending]); allowed[key] {
+			norm := normalizeText(offending)
+			occurrence[norm]++
+			if key := siteKey(rel, offending, occurrence[norm]); allowed[key] && hasRetiredExampleMarker(lg, string(raw)) {
 				seenExempt[key] = true
 				continue
 			}
@@ -578,7 +612,7 @@ func TestNoRawCopyIntoInstallRoots(t *testing.T) {
 				"If this is a WARNING showing the retired form rather than guidance to "+
 				"follow, add this line to internal/deploy/testdata/rawcopy-allowlist.txt:\n\n"+
 				"\t%s  # %s\n",
-				rel, i+1, strings.TrimSpace(line), siteKey(rel, line, occurrence[offending]), rel)
+				rel, i+1, strings.TrimSpace(line), siteKey(rel, line, occurrence[norm]), rel)
 		}
 	}
 

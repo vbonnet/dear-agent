@@ -48,7 +48,9 @@
 #
 # What NOT to write, and what to write instead:
 #
-# Retired form, shown so the failure mode is documented -- do NOT use it:
+# Retired form, shown so the failure mode is documented -- do NOT use it.
+# RETIRED-EXAMPLE (this marker is what authorises the line below; deleting the
+# warning deletes the exemption with it):
 #   cp bin/token-refresher /usr/local/bin/token-refresher
 # Correct form:
 #   stage=$(mktemp /usr/local/bin/tr.XXXXXX) && cp bin/token-refresher "$stage" \
