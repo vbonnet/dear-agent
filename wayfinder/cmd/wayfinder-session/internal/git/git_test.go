@@ -92,6 +92,61 @@ func TestIsGitRepo(t *testing.T) {
 	}
 }
 
+func TestIsGitWorktree(t *testing.T) {
+	tests := []struct {
+		name     string
+		setup    func() string
+		expected bool
+	}{
+		{
+			name: "worktree root",
+			setup: func() string {
+				return setupGitRepo(t)
+			},
+			expected: true,
+		},
+		{
+			name: "subdirectory within worktree",
+			setup: func() string {
+				repoDir := setupGitRepo(t)
+				subDir := filepath.Join(repoDir, "wf", "my-project")
+				if err := os.MkdirAll(subDir, 0o755); err != nil {
+					t.Fatalf("create project directory: %v", err)
+				}
+				return subDir
+			},
+			expected: true,
+		},
+		{
+			name: "non-git directory",
+			setup: func() string {
+				return t.TempDir()
+			},
+			expected: false,
+		},
+		{
+			name: "bare repository",
+			setup: func() string {
+				dir := t.TempDir()
+				cmd := exec.Command("git", "init", "--bare", dir)
+				if err := cmd.Run(); err != nil {
+					t.Fatalf("git init --bare: %v", err)
+				}
+				return dir
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := New(tt.setup()).IsGitWorktree(); got != tt.expected {
+				t.Errorf("IsGitWorktree() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestCommitPhaseCompletion(t *testing.T) {
 	// Setup git repo
 	repoDir := setupGitRepo(t)
