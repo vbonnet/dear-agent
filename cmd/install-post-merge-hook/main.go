@@ -1,8 +1,9 @@
 // install-post-merge-hook installs the post-merge trigger into the hooks
 // directory git actually consults — honouring core.hooksPath, and refusing to
-// clobber a chezmoi-managed hooks dir. The hook rebuilds the Go binaries whose
-// source changed (Stage 1) and reaps provably-merged worktrees (Stage 2) after
-// a PR lands on the default branch.
+// clobber a chezmoi-managed hooks dir. The hook rebuilds the managed AGM,
+// AGM reaper, VROOM dispatch, and Wayfinder binaries whose source changed
+// (Stage 1) and reaps provably-merged worktrees (Stage 2) after a PR lands on
+// the default branch.
 //
 // Why this is its own tool (not `agm admin install-hooks`): install-hooks
 // manages Claude Code hooks under ~/.claude/hooks. This is a *git* hook, and on
@@ -79,7 +80,7 @@ func run(stdout, stderr *os.File) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "✓ Installed: %s (default-branch merges only)\n", hookDst)
-	fmt.Fprintln(stdout, "    Stage 1: rebuild Go binaries whose source changed (agm, vroom-dispatch)")
+	fmt.Fprintln(stdout, "    Stage 1: rebuild Go binaries whose source changed (agm, agm-reaper, vroom-dispatch, wayfinder)")
 	fmt.Fprintln(stdout, "    Stage 2: agm worktree sweep --execute (reap provably-merged worktrees)")
 	fmt.Fprintln(stdout, "    Stage 3: bd close beads cited by Closes/Fixes/Resolves in the merge")
 	fmt.Fprintln(stdout, "")

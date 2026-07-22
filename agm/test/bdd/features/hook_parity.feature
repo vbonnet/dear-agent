@@ -91,6 +91,7 @@ Feature: Hook harness parity
       | atomic-binary-install   |
       | trunk-build-context     |
       | agm-companion-coherence |
+      | wayfinder-runtime-deploy |
       | host-artifact-deploy    |
       | deployment-verification |
       | bead-transition         |
