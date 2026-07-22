@@ -119,6 +119,22 @@ func basename(p string) string {
 	return p
 }
 
+// BinaryEscalationTriggers returns a trigger per binary path. A binary change
+// cannot be reviewed from a text diff — git renders it as a bare "Binary files
+// differ" marker — so the five dimensions never see the payload. Rather than
+// let an unreviewed executable or asset ride an "approved" outcome, escalate.
+func BinaryEscalationTriggers(binaryPaths []string) []string {
+	var triggers []string
+	for _, p := range binaryPaths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		triggers = append(triggers, fmt.Sprintf("binary file not reviewable from a text diff (%s)", p))
+	}
+	return triggers
+}
+
 // EscalationTriggers returns the REVIEW.md §3 triggers fired by the changed
 // paths and the PR/commit text. A non-empty result means the outcome must be
 // forced to needs-human-review regardless of what the model concluded.

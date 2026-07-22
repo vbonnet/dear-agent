@@ -91,6 +91,27 @@ func gitChangedPaths(base, head string) ([]string, error) {
 	return strings.Split(strings.TrimSpace(string(out)), "\n"), nil
 }
 
+// gitBinaryPaths lists files whose change git could not express as a text
+// diff. `git diff` renders these as a one-line "Binary files ... differ"
+// marker, so the payload never reaches the reviewers and its real size never
+// counts toward the size limit — an unreviewed executable or asset could
+// otherwise be approved. These are escalated to a human instead.
+func gitBinaryPaths(base, head string) []string {
+	out, err := exec.Command("git", "diff", "--no-renames", "--numstat", base, head).Output()
+	if err != nil {
+		return nil
+	}
+	var bins []string
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+		// numstat marks binary entries with "-\t-\t<path>".
+		fields := strings.SplitN(line, "\t", 3)
+		if len(fields) == 3 && fields[0] == "-" && fields[1] == "-" {
+			bins = append(bins, strings.TrimSpace(fields[2]))
+		}
+	}
+	return bins
+}
+
 // gitCommitMessages returns the commit messages in base..head so the explicit
 // "HUMAN REVIEW REQUIRED" marker can be detected (REVIEW.md §3).
 func gitCommitMessages(base, head string) string {
@@ -117,7 +138,7 @@ func run(c config) int {
 	// applies the override label to merge.
 	if c.isFork && !c.override {
 		fmt.Println("::error::This PR originates from a fork; the automated AI review cannot run (no secret access). A maintainer must review and apply the 'ai-review:override' label to merge.")
-		postComment(c, forkComment())
+		logCommentErr(postComment(c, forkComment()))
 		return 1
 	}
 
@@ -127,7 +148,9 @@ func run(c config) int {
 			fmt.Println("::warning::ANTHROPIC_API_KEY missing but 'ai-review:override' label present; passing on human authority.")
 			// AIREV-03: the gate always posts its result before passing on
 			// human authority, so the override leaves a sticky audit trail.
-			postComment(c, overrideComment("the ANTHROPIC_API_KEY secret is not configured, so no automated review could run"))
+			if !requireComment(c, overrideComment("the ANTHROPIC_API_KEY secret is not configured, so no automated review could run")) {
+				return 1
+			}
 			return 0
 		}
 		fmt.Println("::error::ANTHROPIC_API_KEY is not set; the AI review gate cannot run and fails closed. Set the secret, or apply the 'ai-review:override' label after a human review.")
@@ -150,7 +173,7 @@ func run(c config) int {
 	if len(diff) > c.maxDiff {
 		msg := fmt.Sprintf("diff is %d bytes, over the %d-byte auto-review limit. Split the PR into smaller reviewable changes, or apply the 'ai-review:override' label after a human review.", len(diff), c.maxDiff)
 		fmt.Printf("::error::%s\n", msg)
-		postComment(c, oversizeComment(len(diff), c.maxDiff))
+		logCommentErr(postComment(c, oversizeComment(len(diff), c.maxDiff)))
 		return failClosed(c, "the diff exceeded the auto-review size limit")
 	}
 
@@ -181,13 +204,14 @@ func run(c config) int {
 		return failClosed(c, "the changed-path list could not be computed")
 	}
 	triggers := EscalationTriggers(changed, c.prBody, gitCommitMessages(c.baseSHA, c.headSHA))
+	triggers = append(triggers, BinaryEscalationTriggers(gitBinaryPaths(c.baseSHA, c.headSHA))...)
 	if len(triggers) > 0 {
 		fmt.Printf("::warning::REVIEW.md §3 escalation triggered: %s\n", strings.Join(triggers, "; "))
 	}
 	outcome = ApplyEscalation(outcome, triggers)
 
 	// Comment is best-effort and never changes the exit code.
-	postComment(c, buildComment(outcome, synthesis, reports, c.override, triggers))
+	logCommentErr(postComment(c, buildComment(outcome, synthesis, reports, c.override, triggers)))
 
 	code := ExitFor(outcome, c.override)
 	fmt.Printf("::notice::AI review outcome: %s (exit %d, override=%t)\n", outcome, code, c.override)
@@ -204,7 +228,9 @@ func run(c config) int {
 func failClosed(c config, reason string) int {
 	if c.override {
 		fmt.Println("::warning::failure overridden by 'ai-review:override' label.")
-		postComment(c, overrideComment(reason))
+		if !requireComment(c, overrideComment(reason)) {
+			return 1
+		}
 		return 0
 	}
 	return 1

@@ -59,6 +59,25 @@ func TestEscalationTriggers_ExplicitMarker(t *testing.T) {
 	}
 }
 
+// TestBinaryEscalationTriggers guards the binary bypass: git renders a binary
+// change as a bare "Binary files differ" marker, so the reviewers never see the
+// payload and it must escalate instead of riding an "approved".
+func TestBinaryEscalationTriggers(t *testing.T) {
+	if got := BinaryEscalationTriggers([]string{"build/tool", "assets/logo.png"}); len(got) != 2 {
+		t.Fatalf("expected 2 binary triggers, got %v", got)
+	}
+	if got := BinaryEscalationTriggers(nil); len(got) != 0 {
+		t.Fatalf("expected no triggers, got %v", got)
+	}
+	if got := BinaryEscalationTriggers([]string{"", "  "}); len(got) != 0 {
+		t.Fatalf("blank paths must not trigger, got %v", got)
+	}
+	// A binary addition must block even when the model said approved.
+	if ApplyEscalation(Approved, BinaryEscalationTriggers([]string{"build/tool"})) != NeedsHumanReview {
+		t.Fatal("binary change must escalate an approved outcome")
+	}
+}
+
 func TestApplyEscalation(t *testing.T) {
 	// Escalation forces needs-human-review from any outcome...
 	for _, o := range []Outcome{Approved, NeedsWork, Rejected, NeedsHumanReview} {

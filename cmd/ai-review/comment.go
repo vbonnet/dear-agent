@@ -77,32 +77,73 @@ func oversizeComment(size, limit int) string {
 		"<sub>Required gate per REVIEW.md §2/§5.</sub>\n", size, limit)
 }
 
-// postComment upserts the sticky comment via the gh CLI. It is best-effort:
-// any failure is logged but never changes the review's exit code, so a comment
-// outage can neither block nor unblock a merge.
-func postComment(c config, body string) {
+// postComment upserts the sticky comment and reports whether the result was
+// durably recorded. The new comment is posted BEFORE older ones are deleted, so
+// a mid-flight failure can never destroy the previous audit record and leave
+// nothing in its place.
+//
+// Callers that merely report a result may ignore the error; the override paths
+// must not — see requireComment.
+func postComment(c config, body string) error {
 	if c.pr == "" || c.repo == "" {
-		return
+		// No PR context (e.g. merge_group): nothing to post to.
+		return nil
 	}
 	if _, err := exec.LookPath("gh"); err != nil {
-		fmt.Println("::warning::gh not available; skipping PR comment.")
-		return
+		return fmt.Errorf("gh not available")
 	}
-	// Delete any prior marked comment, then post the new one.
-	del := exec.Command("gh", "api",
-		fmt.Sprintf("repos/%s/issues/%s/comments", c.repo, c.pr),
-		"--jq", fmt.Sprintf(`.[] | select(.body | startswith("%s")) | .id`, commentMarker))
-	if out, err := del.Output(); err == nil {
-		for id := range strings.FieldsSeq(string(out)) {
-			_ = exec.Command("gh", "api", "-X", "DELETE",
-				fmt.Sprintf("repos/%s/issues/comments/%s", c.repo, id)).Run()
-		}
-	}
+
+	// Post first so the audit record exists before anything is removed.
 	post := exec.Command("gh", "pr", "comment", c.pr, "--repo", c.repo, "--body-file", "-")
 	post.Stdin = strings.NewReader(body)
 	post.Stdout = os.Stdout
 	post.Stderr = os.Stderr
 	if err := post.Run(); err != nil {
 		fmt.Printf("::warning::failed to post PR comment: %v\n", err)
+		return fmt.Errorf("post comment: %w", err)
+	}
+
+	// Then prune older marked comments, keeping the one just posted. Pruning is
+	// cosmetic — the audit record already exists — so failures are ignored.
+	pruneOldComments(c)
+	return nil
+}
+
+// pruneOldComments removes all but the newest marked sticky comment. Best
+// effort by design: the freshly posted comment is the audit record, and losing
+// a tidy-up must never turn into a gate failure.
+func pruneOldComments(c config) {
+	list := exec.Command("gh", "api",
+		fmt.Sprintf("repos/%s/issues/%s/comments", c.repo, c.pr),
+		"--jq", fmt.Sprintf(`.[] | select(.body | startswith("%s")) | .id`, commentMarker))
+	out, err := list.Output()
+	if err != nil {
+		return
+	}
+	ids := strings.Fields(string(out))
+	for _, id := range ids[:max(len(ids)-1, 0)] { // all but the newest
+		_ = exec.Command("gh", "api", "-X", "DELETE",
+			fmt.Sprintf("repos/%s/issues/comments/%s", c.repo, id)).Run()
+	}
+}
+
+// requireComment posts a comment that MUST be durably recorded. It reports
+// whether the audit record exists. An override that cannot be recorded is not
+// an acceptable override: a required check must never pass on human authority
+// with no sticky explanation of what was overridden (AIREV-03).
+func requireComment(c config, body string) bool {
+	if err := postComment(c, body); err != nil {
+		fmt.Printf("::error::could not record the override audit comment (%v); refusing to pass on an unrecorded override.\n", err)
+		return false
+	}
+	return true
+}
+
+// logCommentErr surfaces a failed informational comment as a warning. These
+// comments report a result the exit code already carries, so a posting failure
+// is visible but never changes the gate's verdict.
+func logCommentErr(err error) {
+	if err != nil {
+		fmt.Printf("::warning::could not post review comment: %v\n", err)
 	}
 }
