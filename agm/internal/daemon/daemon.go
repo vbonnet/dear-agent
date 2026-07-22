@@ -115,7 +115,7 @@ func NewDaemon(cfg Config) *Daemon {
 			if err != nil {
 				cfg.Logger.Error("Failed to create OpenCode adapter", "error", err)
 				if adapterConfig.FallbackTmux {
-					cfg.Logger.Info("Fallback enabled: Will use Astrocyte tmux monitoring for OpenCode sessions")
+					cfg.Logger.Info("Tmux fallback is available to the caller; no fallback monitor was started")
 				} else {
 					cfg.Logger.Warn("OpenCode adapter creation failed and fallback disabled")
 					cfg.Logger.Warn("OpenCode sessions will NOT be monitored until adapter is fixed")
@@ -187,7 +187,7 @@ func (d *Daemon) startOpenCodeAdapter() {
 		if d.cfg.AppConfig != nil && d.cfg.AppConfig.Adapters.OpenCode.Enabled {
 			d.cfg.Logger.Warn("OpenCode adapter enabled but not initialized (initialization failed)")
 			if d.cfg.AppConfig.Adapters.OpenCode.FallbackTmux {
-				d.cfg.Logger.Info("Using Astrocyte tmux monitoring as fallback for OpenCode sessions")
+				d.cfg.Logger.Info("Tmux fallback requires explicit caller selection; no fallback monitor is active")
 			}
 		}
 		return
@@ -196,8 +196,7 @@ func (d *Daemon) startOpenCodeAdapter() {
 	if err := d.opencodeAdapter.Start(d.ctx); err != nil {
 		d.cfg.Logger.Warn("OpenCode adapter failed to start", "error", err)
 		if d.cfg.AppConfig != nil && d.cfg.AppConfig.Adapters.OpenCode.FallbackTmux {
-			d.cfg.Logger.Info("Fallback enabled: OpenCode adapter will retry in background")
-			d.cfg.Logger.Info("Using Astrocyte tmux monitoring for OpenCode sessions until SSE adapter connects")
+			d.cfg.Logger.Info("Tmux fallback is available to the caller; no fallback monitor was started")
 		} else {
 			d.cfg.Logger.Error("OpenCode adapter start failed and fallback disabled")
 			d.cfg.Logger.Warn("OpenCode sessions will NOT be monitored until adapter successfully starts")
