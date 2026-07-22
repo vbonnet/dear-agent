@@ -53,7 +53,7 @@ func (p *Provider) Name() string {
 // The merged path is materialized as a git worktree of the first git repo in
 // LowerDirs (matching bubblewrap), giving callers a writable working tree on
 // an isolated branch with a proper .git directory. If no git repo is found,
-// falls back to a symlink-populated merged dir.
+// creation fails because a host-symlink directory is not isolated.
 func (p *Provider) Create(ctx context.Context, req sandbox.SandboxRequest) (*sandbox.Sandbox, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -87,15 +87,12 @@ func (p *Provider) Create(ctx context.Context, req sandbox.SandboxRequest) (*san
 			"failed to create sandbox directories", err)
 	}
 
-	worktreeRepo, worktreeCreated := p.tryCreateWorktree(orderedLowerDirs, req.SessionID, mergedDir, targetRepo)
-	if !worktreeCreated {
-		fmt.Fprintf(os.Stderr, "gvisor: no git repo in lower dirs, falling back to symlinks\n")
-		if err := p.populateMergedDir(orderedLowerDirs, mergedDir); err != nil {
-			_ = p.cleanupDirectories(upperDir, workDir, mergedDir)
-			return nil, sandbox.WrapError(sandbox.ErrCodeMountFailed,
-				"failed to populate merged directory with repo symlinks", err)
-		}
+	worktreeRepo, err := p.createPrivateWorktree(orderedLowerDirs, req.SessionID, mergedDir, targetRepo)
+	if err != nil {
+		_ = p.cleanupDirectories(upperDir, workDir, mergedDir)
+		return nil, err
 	}
+	worktreeCreated := true
 
 	if err := p.testRunsc(ctx); err != nil {
 		if worktreeCreated {
@@ -239,35 +236,34 @@ func (p *Provider) testRunsc(ctx context.Context) error {
 	return nil
 }
 
-// tryCreateWorktree attempts to create a git worktree in mergedDir from the
-// first git repo found in lowerDirs. Returns the repo path and true on
-// success. If targetRepo is set, it is used directly instead of scanning.
-func (p *Provider) tryCreateWorktree(lowerDirs []string, sessionID, mergedDir, targetRepo string) (string, bool) {
+func (p *Provider) createPrivateWorktree(lowerDirs []string, sessionID, mergedDir, targetRepo string) (string, error) {
 	var repoPath string
 	if targetRepo != "" {
 		if !p.isGitRepo(targetRepo) {
-			return "", false
+			return "", sandbox.NewError(sandbox.ErrCodeMountFailed,
+				"gvisor requires a private Git worktree; refusing host-symlink fallback")
 		}
 		repoPath = targetRepo
 	} else {
 		repoPath = p.findGitRepo(lowerDirs)
 	}
 	if repoPath == "" {
-		return "", false
+		return "", sandbox.NewError(sandbox.ErrCodeMountFailed,
+			"gvisor requires a private Git worktree; refusing host-symlink fallback")
 	}
 
 	if err := os.RemoveAll(mergedDir); err != nil {
-		fmt.Fprintf(os.Stderr, "gvisor: failed to remove mergedDir for worktree: %v\n", err)
-		return "", false
+		return "", sandbox.WrapError(sandbox.ErrCodeMountFailed,
+			"gvisor failed to prepare private Git worktree", err)
 	}
 
 	branchName := "agm/" + sessionID
 	if err := p.addWorktree(repoPath, mergedDir, branchName); err != nil {
-		fmt.Fprintf(os.Stderr, "gvisor: git worktree add failed: %v\n", err)
 		_ = os.MkdirAll(mergedDir, 0755)
-		return "", false
+		return "", sandbox.WrapError(sandbox.ErrCodeMountFailed,
+			"gvisor failed to create private Git worktree", err)
 	}
-	return repoPath, true
+	return repoPath, nil
 }
 
 // findGitRepo finds the first git repository among the lower directories.
@@ -336,35 +332,6 @@ func (p *Provider) removeWorktree(repoPath, worktreePath string) error {
 	cmd := exec.Command("git", "-C", repoPath, "worktree", "remove", "--force", worktreePath)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git worktree remove failed: %w\nOutput: %s", err, string(output))
-	}
-	return nil
-}
-
-// populateMergedDir creates symlinks in mergedDir pointing to each top-level
-// entry from all lower directories (fallback when no git repo is present).
-func (p *Provider) populateMergedDir(lowerDirs []string, mergedDir string) error {
-	for i := len(lowerDirs) - 1; i >= 0; i-- {
-		dir := lowerDirs[i]
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			return fmt.Errorf("failed to read lower dir %s: %w", dir, err)
-		}
-		for _, entry := range entries {
-			name := entry.Name()
-			linkPath := filepath.Join(mergedDir, name)
-			targetPath := filepath.Join(dir, name)
-			if resolved, err := filepath.EvalSymlinks(targetPath); err == nil {
-				targetPath = resolved
-			}
-			if _, err := os.Lstat(linkPath); err == nil {
-				if err := os.Remove(linkPath); err != nil {
-					return fmt.Errorf("failed to remove existing entry %s: %w", linkPath, err)
-				}
-			}
-			if err := os.Symlink(targetPath, linkPath); err != nil {
-				return fmt.Errorf("failed to create symlink %s -> %s: %w", linkPath, targetPath, err)
-			}
-		}
 	}
 	return nil
 }

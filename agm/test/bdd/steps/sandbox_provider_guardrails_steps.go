@@ -57,7 +57,8 @@ func RegisterSandboxProviderGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^failed destruction should resume at the unfinished cleanup phase$`, failedSandboxDestructionShouldResumeAtUnfinishedPhase)
 	ctx.Step(`^AGM runs the sandbox working directory regressions$`, agmRunsSandboxWorkingDirectoryRegressions)
 	ctx.Step(`^sandbox providers should preserve the requested project directory$`, sandboxProvidersShouldPreserveRequestedProjectDirectory)
-	ctx.Step(`^flat Linux providers should keep the matched lower directory authoritative$`, flatLinuxProvidersShouldKeepMatchedLowerDirectoryAuthoritative)
+	ctx.Step(`^flat Linux providers should reject host-symlink fallbacks$`, flatLinuxProvidersShouldRejectHostSymlinkFallbacks)
+	ctx.Step(`^flat Linux providers should preserve private worktree failure diagnostics$`, flatLinuxProvidersShouldPreservePrivateWorktreeFailureDiagnostics)
 	ctx.Step(`^APFS should detach linked worktree Git metadata on macOS$`, apfsShouldDetachLinkedWorktreeGitMetadataOnMacOS)
 	ctx.Step(`^AGM should route the mapped directory through the shared harness lifecycle$`, agmShouldRouteMappedDirectoryThroughSharedHarnessLifecycle)
 	ctx.Step(`^AGM runs the retired sandbox provider regressions$`, agmRunsRetiredSandboxProviderRegressions)
@@ -98,21 +99,41 @@ func agmRunsSandboxWorkingDirectoryRegressions(ctx context.Context) error {
 	}
 	state.output, state.err = runSandboxProviderCommand(ctx, 2*time.Minute,
 		"go", "test", "-v", "-count=1", "-timeout=90s", "-run",
-		`^(TestMatchWorkingDir.*|TestMapFlatWorkingDir.*|TestPrioritizeLowerDir.*|TestBubblewrapMatchedNonGitLowerDirRemainsAuthoritative|TestGVisorMatchedNonGitLowerDirRemainsAuthoritative|TestNativeOverlayFSRequestPrioritizesMatchedLowerDir|TestProvider_CreateMapsRequestedWorkingDirectoryIntoMatchingClone|TestProvider_CreateDetachesLinkedWorktreeGitMetadata|TestResolveSandboxLowerDirs_FallsBackToContainingGitRepoForSubdirectory|TestFindPrimaryRepoUsesRequestedDirectoryInsteadOfProcessCWD|TestMaybeProvisionSandboxReturnsProviderMappedWorkingDirectory|TestProvisionSandbox.*)$`,
+		`^(TestMatchWorkingDir.*|TestMapFlatWorkingDir.*|TestPrioritizeLowerDir.*|TestBubblewrap(RejectsMatchedNonGitLowerDir|RejectsConfigRepoOutsideLowerDirs|PreservesGitWorktreeCreationFailure)|TestGVisor(RejectsMatchedNonGitLowerDir|PreservesGitWorktreeCreationFailure)|TestNativeOverlayFSRequestPrioritizesMatchedLowerDir|TestProvider_CreateMapsRequestedWorkingDirectoryIntoMatchingClone|TestProvider_CreateDetachesLinkedWorktreeGitMetadata|TestResolveSandboxLowerDirs_(FallsBackToContainingGitRepoForSubdirectory|ScansWorkspaceRepos|IncludesRequestedRepoAlongsideWorkspaceScan)|TestFindPrimaryRepoUsesRequestedDirectoryInsteadOfProcessCWD|TestMaybeProvisionSandboxReturnsProviderMappedWorkingDirectory|TestProvisionSandbox.*)$`,
 		"./internal/sandbox", "./internal/sandbox/apfs", "./internal/sandbox/bubblewrap", "./internal/sandbox/gvisor", "./agm/cmd/agm",
 	)
 	return nil
 }
 
-func flatLinuxProvidersShouldKeepMatchedLowerDirectoryAuthoritative(ctx context.Context) error {
+func flatLinuxProvidersShouldPreservePrivateWorktreeFailureDiagnostics(ctx context.Context) error {
 	state, ok := ctx.Value(sandboxProviderCleanupStateKey{}).(*sandboxProviderCleanupState)
 	if !ok || state == nil {
 		return fmt.Errorf("sandbox provider cleanup state not initialized")
 	}
-	names := []string{"TestBubblewrapMatchedNonGitLowerDirRemainsAuthoritative"}
+	names := []string{"TestBubblewrapPreservesGitWorktreeCreationFailure"}
+	if runtime.GOOS == "linux" {
+		names = append(names, "TestGVisorPreservesGitWorktreeCreationFailure")
+	}
+	for _, name := range names {
+		if !strings.Contains(state.output, "--- PASS: "+name) {
+			return fmt.Errorf("sandbox working directory output does not show %s passing:\n%s", name, state.output)
+		}
+	}
+	return nil
+}
+
+func flatLinuxProvidersShouldRejectHostSymlinkFallbacks(ctx context.Context) error {
+	state, ok := ctx.Value(sandboxProviderCleanupStateKey{}).(*sandboxProviderCleanupState)
+	if !ok || state == nil {
+		return fmt.Errorf("sandbox provider cleanup state not initialized")
+	}
+	names := []string{
+		"TestBubblewrapRejectsMatchedNonGitLowerDir",
+		"TestBubblewrapRejectsConfigRepoOutsideLowerDirs",
+	}
 	if runtime.GOOS == "linux" {
 		names = append(names,
-			"TestGVisorMatchedNonGitLowerDirRemainsAuthoritative",
+			"TestGVisorRejectsMatchedNonGitLowerDir",
 			"TestNativeOverlayFSRequestPrioritizesMatchedLowerDir",
 		)
 	}

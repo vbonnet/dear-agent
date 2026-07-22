@@ -115,6 +115,8 @@ Provide a production-ready CLI that:
 
 **CLI-42** When sandbox onboarding is enabled for a nested harness working directory, the system shall render onboarding template workspace-root data from the provider's merged path while writing the generated instructions to the harness working directory's project-scoped configuration.
 
+**CLI-43** When automatic workspace discovery finds repositories that do not contain the requested project directory, the system shall retain those repositories, prepend the nearest Git repository containing the requested directory, and reject sandbox creation if the requested directory has no safe containing Git repository.
+
 ## Requirements
 
 ### Functional Requirements
