@@ -764,10 +764,10 @@ func isVisibleContent(s string) bool {
 
 	// If content is mostly escape sequences, don't consider it visible
 	// Escape sequences typically start with \x1b or \033
-	if strings.HasPrefix(trimmed, "\x1b") || strings.HasPrefix(trimmed, "\033") {
+	if strings.HasPrefix(trimmed, "\x1b") {
 		// Check if there's any non-escape content
 		// Simple heuristic: if more than 50% is escape codes, skip it
-		escapeCount := strings.Count(trimmed, "\x1b") + strings.Count(trimmed, "\033")
+		escapeCount := strings.Count(trimmed, "\x1b")
 		if escapeCount*4 > len(trimmed) { // Escape sequences are typically 4+ chars
 			return false
 		}

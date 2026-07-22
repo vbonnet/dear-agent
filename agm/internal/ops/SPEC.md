@@ -83,6 +83,14 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-57** When an archive caller supplies a request context, the system shall propagate its cancellation through tracked-worktree storage cleanup instead of replacing it with a background context.
 
+### Claude UI Archive Reconciliation
+
+**OPS-67** When `ArchiveUISessions` evaluates a desktop record whose `cliSessionId` or `sessionId` belongs to a running process, the system shall skip that record regardless of the requested status; working-directory equality shall not be treated as session liveness because multiple historical sessions may share one directory.
+
+**OPS-68** When `ArchiveUISessions` uses the default `idle` status, the system shall mutate only records that differ from the requested archive state, have no matching live session identity, and are older than the configured threshold.
+
+**OPS-69** When Claude UI storage has an unknown schema or ambiguous device or account selection, the system shall refuse or skip the affected record without rewriting it.
+
 ### Garbage Collection
 
 **OPS-21** When `GC` is called, the system shall perform a pre-flight health check by listing all sessions; if storage is unreachable it shall abort with a 503-equivalent error before touching any session.
@@ -149,13 +157,13 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-66** When an optional manifest directory cannot be created, the system shall continue without registration and shall provide no manifest path to runtime completion.
 
-**OPS-67** When AGM creates an AGY session, the shared launch-command owner shall preserve the selected model, permission mode, work directory, additional directories, and persistence policy while using AGY's native bare interactive entry point.
+**OPS-77** When AGM creates an AGY session, the shared launch-command owner shall preserve the selected model, permission mode, work directory, additional directories, and persistence policy while using AGY's native bare interactive entry point.
 
-**OPS-68** When AGM cold-resumes an AGY conversation, the shared AGY command owner shall preserve a known stored model and permission mode, include the canonical conversation ID, and apply the same quoting, directory, and persistence policy used by creation; if the native model is unknown, the command shall omit `--model` so AGY retains the conversation's saved selection.
+**OPS-78** When AGM cold-resumes an AGY conversation, the shared AGY command owner shall preserve a known stored model and permission mode, include the canonical conversation ID, and apply the same quoting, directory, and persistence policy used by creation; if the native model is unknown, the command shall omit `--model` so AGY retains the conversation's saved selection.
 
-**OPS-69** When a creation request is canceled after registration but before runtime completion, the shared lifecycle shall skip completion and enter rollback before a startup prompt or other completion side effect can run.
+**OPS-79** When a creation request is canceled after registration but before runtime completion, the shared lifecycle shall skip completion and enter rollback before a startup prompt or other completion side effect can run.
 
-**OPS-70** When any shared creation surface launches AGY, the system shall use `CreateSessionWithContext` to resolve the existing workspace to one canonical physical path for locking, tmux creation, launch, identity correlation, registration, and persisted metadata while holding the workspace-create lock across the fail-closed pre-launch snapshot through registration and releasing it before surface-specific completion, including any blocking interactive attach, without surrendering normal rollback ownership.
+**OPS-80** When any shared creation surface launches AGY, the system shall use `CreateSessionWithContext` to resolve the existing workspace to one canonical physical path for locking, tmux creation, launch, identity correlation, registration, and persisted metadata while holding the workspace-create lock across the fail-closed pre-launch snapshot through registration and releasing it before surface-specific completion, including any blocking interactive attach, without surrendering normal rollback ownership.
 
 **OPS-76** When a fresh AGY session has a startup prompt, `CreateSessionWithContext` shall deliver that prompt once after native readiness but before identity discovery, discover and register the resulting provider identity while retaining the workspace lock, and mark the prompt consumed so CLI, MCP, and fallback completion paths cannot resend it; bootstrap failure or caller cancellation shall roll back the owned tmux session before registration, and a fresh AGY request without a startup prompt shall fail before mutation.
 

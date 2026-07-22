@@ -34,7 +34,9 @@ to receive queued work.
 
 **DAEMON-11** When standalone health status is requested, the system shall report daemon running state, PID when available, queue statistics when a queue is provided, and an overall health level derived from configured queue-depth thresholds.
 
-**DAEMON-12** When queued delivery targets AGY, the daemon shall preserve the resolved harness through the shared multiline tmux send so attribution and the complete message body are submitted as one native request.
+**DAEMON-12** When retry accounting or terminal-state persistence fails, the system shall log the failure and leave the durable queue record eligible for later processing rather than claiming that the configured attempt bound was recorded.
+
+**DAEMON-13** When queued delivery targets AGY, the daemon shall preserve the resolved harness through the shared multiline tmux send so attribution and the complete message body are submitted as one native request.
 
 ## BDD Traceability
 

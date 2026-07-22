@@ -479,7 +479,8 @@ agm doctor  # Now checks /tmp/agm.sock specifically
 - `cmd/agm/new.go` - Set `PromptVerified=true`
 - Tests added to prevent regression
 
-**Related**: ADR-0003
+**Related**: The prompt-verification invariant is retained in this regression
+record and the listed source/tests.
 
 ---
 
@@ -496,7 +497,8 @@ agm doctor  # Now checks /tmp/agm.sock specifically
 
 **Note**: containsTrustPromptPattern() exists in prompt_detector.go but is not yet wired into init_sequence.go. The current implementation uses inline string checks. Wiring the existing function is a follow-up task.
 
-**Related**: ADR-0003 (update), Retrospective 2026-03-26
+**Related**: The trust-dialog invariant is retained in this regression record
+and the listed source/tests.
 
 ---
 

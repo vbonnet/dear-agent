@@ -12,6 +12,7 @@
   "pnpm": {
     "overrides": {
       "brace-expansion@5.0.6": "5.0.7",
+      "body-parser": "2.3.0",
       "hono": "^4.12.25",
       "qs@6.15.1": "6.15.2",
       "tar@7.5.15": "7.5.19",

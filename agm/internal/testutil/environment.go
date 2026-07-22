@@ -73,6 +73,7 @@ func SetupTestEnvironment(t *testing.T) {
 
 	// Set WORKSPACE to test workspace
 	t.Setenv("WORKSPACE", testWorkspace)
+	t.Setenv("DOLT_DATABASE", testWorkspace)
 
 	// Register cleanup to restore original WORKSPACE
 	t.Cleanup(func() {

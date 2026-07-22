@@ -103,8 +103,8 @@ type SeverityRule struct {
 	Notify          bool
 }
 
-// DefaultSeverityPolicy returns the recommended defaults from
-// ADR-011 §5. Operators may override per-repo; this is the fallback
+// DefaultSeverityPolicy returns the package's recommended defaults.
+// Operators may override per-repo; this is the fallback
 // when no policy block exists.
 func DefaultSeverityPolicy() map[Severity]SeverityRule {
 	return map[Severity]SeverityRule{

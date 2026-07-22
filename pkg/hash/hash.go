@@ -29,7 +29,11 @@ import (
 //	fmt.Println(path) // /home/username/Documents/file.txt
 func ExpandPath(path string) (string, error) {
 	if !strings.HasPrefix(path, "~") {
-		return filepath.Abs(path)
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve absolute path: %w", err)
+		}
+		return absolute, nil
 	}
 
 	// Get home directory
@@ -40,7 +44,7 @@ func ExpandPath(path string) (string, error) {
 
 	// Replace ~ with home directory
 	if path == "~" {
-		return home, nil
+		return filepath.Clean(home), nil
 	}
 	if strings.HasPrefix(path, "~/") {
 		return filepath.Join(home, path[2:]), nil

@@ -1,7 +1,7 @@
 // Package checks ships the built-in audit checks. Each check is a
 // small file that implements audit.Check, registers itself with
 // audit.Default in init(), and ships an offline test under
-// testdata/. See ADR-011 §D9 — a check that cannot be replayed
+// testdata/. A check that cannot be replayed
 // offline is rejected at code review.
 //
 // The package intentionally has no exported surface beyond Register

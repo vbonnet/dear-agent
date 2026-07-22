@@ -2,11 +2,14 @@
 package dod
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -20,8 +23,9 @@ type BeadDoD struct {
 	FilesMustExist      []string       `yaml:"files_must_exist"`
 	TestsMustPass       bool           `yaml:"tests_must_pass"`
 	CommandsMustSucceed []CommandCheck `yaml:"commands_must_succeed"`
-	// Phase 2 placeholder for benchmarking:
-	// BenchmarksMustImprove []BenchmarkCheck `yaml:"benchmarks_must_improve,omitempty"`
+	// Extensions preserves future check families so older binaries can load
+	// and round-trip newer DoD files without claiming to execute those checks.
+	Extensions map[string]yaml.Node `yaml:",inline"`
 }
 
 // CommandCheck represents a command that must succeed with a specific exit code.
@@ -40,7 +44,7 @@ type ValidationResult struct {
 
 // CheckResult represents the result of a single check.
 type CheckResult struct {
-	Type    string // "file", "test", "command"
+	Type    string // "file", "test", "command", "extension"
 	Name    string // file path or command
 	Success bool
 	Error   string
@@ -54,7 +58,15 @@ func LoadDoD(path string) (*BeadDoD, error) {
 	}
 
 	var dod BeadDoD
-	if err := yaml.Unmarshal(data, &dod); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&dod); err != nil {
+		return nil, fmt.Errorf("failed to parse DoD YAML: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err == nil {
+		return nil, fmt.Errorf("failed to parse DoD YAML: multiple YAML documents are not supported")
+	} else if !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("failed to parse DoD YAML: %w", err)
 	}
 
@@ -64,6 +76,15 @@ func LoadDoD(path string) (*BeadDoD, error) {
 // Validate runs all DoD checks and returns the aggregated result.
 func (d *BeadDoD) Validate() (*ValidationResult, error) {
 	start := time.Now()
+
+	if unsupported := d.checkUnsupportedExtensions(); len(unsupported) > 0 {
+		return &ValidationResult{
+			Success:  false,
+			Checks:   unsupported,
+			Error:    unsupported[0].Error,
+			Duration: time.Since(start),
+		}, nil
+	}
 
 	var allChecks []CheckResult
 
@@ -91,6 +112,25 @@ func (d *BeadDoD) Validate() (*ValidationResult, error) {
 		Error:    errorMsg,
 		Duration: time.Since(start),
 	}, nil
+}
+
+func (d *BeadDoD) checkUnsupportedExtensions() []CheckResult {
+	keys := make([]string, 0, len(d.Extensions))
+	for key := range d.Extensions {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	results := make([]CheckResult, 0, len(keys))
+	for _, key := range keys {
+		results = append(results, CheckResult{
+			Type:    "extension",
+			Name:    key,
+			Success: false,
+			Error:   fmt.Sprintf("unsupported DoD check family %q; validation cannot certify an unexecuted check", key),
+		})
+	}
+	return results
 }
 
 // checkFilesExist verifies that all required files exist.

@@ -26,8 +26,8 @@ type EngramPublisher interface {
 // `dear-agent search "topic"` can surface the runs that produced or
 // referenced that topic.
 //
-// Failures from the publisher do not halt the run — see ADR-010 §D3
-// "failure of one sink doesn't break the run". The sink stores the last
+// Failures from the publisher do not halt the run; audit fan-out is
+// best-effort after the durable transition is recorded. The sink stores the last
 // error for tests/diagnostics via LastErr.
 type EngramAuditSink struct {
 	Publisher EngramPublisher

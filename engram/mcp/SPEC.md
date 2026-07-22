@@ -33,6 +33,7 @@ canonical Wayfinder status. It does not mutate Beads or project state.
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
+- Feature: `agm/test/bdd/features/cross_language_implementation_guardrails.feature`
 
 ## Configuration
 

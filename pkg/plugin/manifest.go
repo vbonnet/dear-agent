@@ -54,8 +54,8 @@ func (c Capability) IsValid() bool {
 	return false
 }
 
-// Permissions is the manifest's bounded-permissions declaration. The
-// fields piggy-back on ADR-010 §D5: when a plugin participates in node
+// Permissions is the manifest's bounded-permissions declaration. Following
+// ADR-010, when a plugin participates in node
 // execution (e.g. via OnEnforce), its declared permissions are unioned
 // into the node's permissions for the duration of the call. The
 // existing PermissionEnforcer in pkg/workflow remains the enforcer;
@@ -73,7 +73,7 @@ type Permissions struct {
 	FSWrite []string `yaml:"fs_write,omitempty"`
 	// Network indicates whether the plugin expects to reach the network.
 	// True is informational at the plugin layer; the workflow runner is
-	// the actual gate (see ADR-010 §D5).
+	// the actual gate (see ADR-010).
 	Network bool `yaml:"network,omitempty"`
 	// Tools is the list of tool ids (audit.* check ids, MCP tool names,
 	// etc.) the plugin expects to invoke. Empty means "no tools".

@@ -164,7 +164,7 @@ The package provides a simple parser that reads .ai.md files, splits frontmatter
    - YAML library populates fields based on yaml tags
 
 4. **Backward Compatibility**:
-   - If `encoding_strength == 0.0`, set to `1.0` (neutral default)
+   - If `encoding_strength` is absent, set to `1.0` (neutral default); preserve explicit zero
    - If `created_at.IsZero()`, set from file mtime (legacy engrams)
    - `retrieval_count` defaults to 0 (zero value is correct)
    - `last_accessed` defaults to zero (never accessed)
@@ -291,7 +291,7 @@ type Frontmatter struct {
     Modified    time.Time `yaml:"modified,omitempty"`
 
     // Memory strength tracking
-    EncodingStrength float64   `yaml:"encoding_strength,omitempty"`  // 0.0-2.0, default 1.0
+    EncodingStrength float64   `yaml:"encoding_strength"`  // 0.0-2.0, default 1.0 when absent
     RetrievalCount   int       `yaml:"retrieval_count,omitempty"`    // Usage counter
     CreatedAt        time.Time `yaml:"created_at,omitempty"`          // Creation timestamp
     LastAccessed     time.Time `yaml:"last_accessed,omitempty"`       // Last retrieval
