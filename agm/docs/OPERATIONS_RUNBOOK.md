@@ -139,7 +139,10 @@ tree ~/.agm
 
 ```bash
 # Copy hooks from AGM installation
-cp -r /usr/share/agm/hooks/claude/* ~/.claude/hooks/
+# rsync, not cp: it writes each file to a temporary name and renames it into
+# place, so a hook that is compiled and already running is never overwritten
+# in place (ce-77ip.8). A glob copy can expand to binaries.
+rsync -a /usr/share/agm/hooks/claude/ ~/.claude/hooks/
 
 # Or install manually
 agm admin install-hooks --global

@@ -63,7 +63,10 @@ brew install tmux git
 git clone https://github.com/vbonnet/dear-agent.git
 cd ai-tools/agm
 go build -o agm ./cmd/agm
-sudo install -m 755 agm /usr/local/bin/agm
+# Staged rename: overwriting an already-executed binary can leave a stale
+# code-signing cache entry that macOS kills on next exec (ce-77ip.8).
+stage=$(sudo mktemp /usr/local/bin/agm.XXXXXX) && sudo cp agm "$stage" \
+  && sudo chmod 755 "$stage" && sudo mv -f "$stage" /usr/local/bin/agm
 
 # Verify installation
 agm --version

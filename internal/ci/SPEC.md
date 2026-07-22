@@ -195,9 +195,12 @@ if !result.Success {
 
 **Installation**:
 ```bash
-# Copy hook to repository
-cp pre-merge-commit .git/hooks/
-chmod +x .git/hooks/pre-merge-commit
+# Copy hook to repository. Stage and rename: this is a compiled binary, and
+# overwriting one that has already run can leave a stale code-signing cache
+# entry that macOS kills on next exec (ce-77ip.8).
+stage=$(mktemp .git/hooks/pre-merge-commit.XXXXXX) \
+  && cp pre-merge-commit "$stage" \
+  && chmod 755 "$stage" && mv -f "$stage" .git/hooks/pre-merge-commit
 
 # Test merge
 git merge feature-branch

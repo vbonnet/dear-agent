@@ -97,9 +97,11 @@ cd ./agm
 # Build daemon binary
 go build -o agm-daemon cmd/agm-daemon/*.go
 
-# Install to user bin
-cp agm-daemon ~/bin/
-chmod +x ~/bin/agm-daemon
+# Install to user bin. Stage and rename: overwriting an already-executed
+# binary can leave a stale code-signing cache entry that macOS kills on next
+# exec (ce-77ip.8).
+stage=$(mktemp ~/bin/agm-daemon.XXXXXX) && cp agm-daemon "$stage" \
+  && chmod 755 "$stage" && mv -f "$stage" ~/bin/agm-daemon
 ```
 
 #### Step 2: Install Claude Hooks
@@ -379,7 +381,10 @@ cp -r "$BACKUP_DIR/sessions" ~/.agm/sessions
 sqlite3 ~/.agm/queue.db ".restore '$BACKUP_DIR/queue.db'"
 
 # Restore hooks
-cp -r "$BACKUP_DIR/claude-hooks"/* ~/.claude/hooks/
+# rsync, not cp: it writes each file to a temporary name and renames it into
+# place, so a hook that is compiled and already running is never overwritten
+# in place (ce-77ip.8). A glob copy can expand to binaries.
+rsync -a "$BACKUP_DIR/claude-hooks/" ~/.claude/hooks/
 
 # Restart daemon
 systemctl --user start agm-daemon
