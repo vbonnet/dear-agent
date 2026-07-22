@@ -61,8 +61,9 @@ type blockingKillTmux struct {
 }
 
 type mcpAPIProbeAgent struct {
-	status agent.Status
-	sent   []agent.Message
+	status            agent.Status
+	readinessContexts []context.Context
+	sent              []agent.Message
 }
 
 func (a *mcpAPIProbeAgent) Name() string    { return "api-probe" }
@@ -73,6 +74,13 @@ func (a *mcpAPIProbeAgent) CreateSession(agent.SessionContext) (agent.SessionID,
 func (a *mcpAPIProbeAgent) ResumeSession(agent.SessionID) error    { return nil }
 func (a *mcpAPIProbeAgent) TerminateSession(agent.SessionID) error { return nil }
 func (a *mcpAPIProbeAgent) GetSessionStatus(agent.SessionID) (agent.Status, error) {
+	return a.status, nil
+}
+func (a *mcpAPIProbeAgent) GetSessionStatusContext(ctx context.Context, _ agent.SessionID) (agent.Status, error) {
+	a.readinessContexts = append(a.readinessContexts, ctx)
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	return a.status, nil
 }
 func (a *mcpAPIProbeAgent) SendMessage(_ agent.SessionID, message agent.Message) error {
@@ -881,6 +889,9 @@ func TestSendMessageTool_RoutesPureAPIBeforeTmux(t *testing.T) {
 	}
 	if len(apiAgent.sent) != 1 || apiAgent.sent[0].Content != "API delivery" {
 		t.Fatalf("API messages = %#v, want one delivery", apiAgent.sent)
+	}
+	if len(apiAgent.readinessContexts) != 1 {
+		t.Fatalf("API readiness contexts = %d, want one context-aware check", len(apiAgent.readinessContexts))
 	}
 	if len(tmuxClient.AtomicInputChecks) != 0 || len(tmuxClient.ExactPaneDeliveries) != 0 || len(tmuxClient.SentCommands) != 0 {
 		t.Fatalf("pure API MCP delivery touched tmux: checks=%v panes=%v commands=%v",
