@@ -9,7 +9,7 @@ func TestParseOutcome(t *testing.T) {
 		want Outcome
 	}{
 		{"approved plain", "approved", Approved},
-		{"approved sentence", "Approved — no blocking findings.", Approved},
+		{"approved sentence is not verdict-only", "Approved — no blocking findings.", NeedsHumanReview},
 		{"needs-work hyphen", "needs-work", NeedsWork},
 		{"needs work space", "Needs work: missing tests", NeedsWork},
 		{"rejected", "rejected: fundamental design problem", Rejected},
@@ -23,11 +23,17 @@ func TestParseOutcome(t *testing.T) {
 		{"resolve down rejected beats approved", "not approved, rejected", Rejected},
 		{"resolve down needs-work beats approved", "mostly approved but needs-work", NeedsWork},
 
-		// The leading token is the verdict; a summary naming ruled-out
-		// outcomes must not flip a valid approval into a spurious block.
-		{"approved with ruled-out summary", "approved — no rejected or needs-work findings", Approved},
-		{"approved summary mentions human review", "approved; no needs-human-review triggers fired", Approved},
+		// A first line that is not a BARE verdict is a contract violation and
+		// fails closed. This is deliberately stricter than "leading token
+		// wins": position alone cannot separate "approved — no needs-work
+		// findings" from "approved is not warranted; needs-work", so the
+		// prompt demands the verdict alone on line 1 and anything else blocks.
+		{"approved with same-line summary blocks", "approved — no rejected or needs-work findings", Rejected},
+		{"approved with human-review mention blocks", "approved; no needs-human-review triggers fired", NeedsHumanReview},
 		{"leading needs-work wins", "needs-work — not approved yet", NeedsWork},
+		// Regression: a negated leading approval must never approve.
+		{"negated leading approval", "approved is not warranted; needs-work", NeedsWork},
+		{"negated leading approval bare", "approved is not warranted", NeedsHumanReview},
 
 		// Regression guards for the fail-open substring hole: these lines all
 		// CONTAIN "approve" but must never be classified as Approved.

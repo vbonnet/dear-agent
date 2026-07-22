@@ -24,7 +24,7 @@ Per `docs/design-safe-merge.md` §4.1 / §5 (P1), this replaces the legacy
 | Require linear history | yes (`required_linear_history` + `non_fast_forward`) |
 | Block branch deletion | yes (`deletion`) |
 | Require status checks | yes, strict (branch must be up to date) |
-| Required checks | the six contexts below |
+| Required checks | the seven contexts below |
 
 ### Required status checks
 
@@ -40,8 +40,9 @@ mode behind the [phantom Trivy check](https://github.com/vbonnet/engram-research
 | `govulncheck` | `ci.yml` |
 | `Bash Script Size Check (20-line limit)` | `language-policy.yml` |
 | `Vulnerability Scan` | `sbom-scan.yml` |
+| `5-Dimension AI Review` | `review.yml` |
 
-All six run on `pull_request` targeting `main`. **Before adding/removing a
+All seven run on `pull_request` targeting `main`. **Before adding/removing a
 required check, confirm a job emits a check run with that exact context name**
 (matrix suffixes included) on PRs to `main` — otherwise the gate becomes
 unsatisfiable.

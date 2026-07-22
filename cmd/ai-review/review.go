@@ -157,8 +157,8 @@ func synthesize(ctx context.Context, client anthropic.Client, model anthropic.Mo
 	sb.WriteString("Escalate to needs-human-review regardless of severity when the diff touches any of: agent permissions; pre/post-tool hooks or hook registration; ")
 	sb.WriteString("security boundaries (write guards, deny rules, CODEOWNERS, PII manifests); infrastructure that is expensive to reverse (IaC, schema changes, CI/CD pipeline edits); ")
 	sb.WriteString("or an explicit HUMAN REVIEW REQUIRED marker.\n")
-	sb.WriteString("Output exactly one outcome word (approved | needs-work | rejected | needs-human-review) as the FIRST WORD of the first line, then a brief summary. ")
-	sb.WriteString("Do not prefix it with any other word, and do not negate it.\n\n")
+	sb.WriteString("FORMAT (strict): the FIRST LINE must contain exactly one outcome word (approved | needs-work | rejected | needs-human-review) and NOTHING ELSE — no prefix, no punctuation, no explanation. ")
+	sb.WriteString("Begin the brief summary on the SECOND line. A first line that is not a bare outcome word is treated as a failure and blocks the merge.\n\n")
 	for _, r := range reports {
 		sb.WriteString(strings.ToUpper(r.key))
 		sb.WriteString(":\n")
@@ -166,8 +166,9 @@ func synthesize(ctx context.Context, client anthropic.Client, model anthropic.Mo
 		sb.WriteString("\n\n")
 	}
 
-	const synthSystem = "You are a synthesis agent. Output exactly one outcome word " +
-		"(approved/needs-work/rejected/needs-human-review) on the first line, then a brief summary."
+	const synthSystem = "You are a synthesis agent. The first line of your reply must be exactly one " +
+		"outcome word (approved/needs-work/rejected/needs-human-review) and nothing else; " +
+		"start the brief summary on the second line."
 
 	text, err := callClaude(ctx, client, model, effort, synthSystem, sb.String())
 	if err != nil {

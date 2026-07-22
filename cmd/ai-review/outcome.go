@@ -103,21 +103,31 @@ var labelWords = map[string]bool{
 func ParseOutcome(s string) Outcome {
 	words := outcomeWords(s)
 
-	// The leading token is the verdict. The synthesis prompt requires the
-	// outcome word first, followed by a brief summary — and that summary may
-	// legitimately name the outcomes it ruled out ("approved — no rejected or
-	// needs-work findings"). Scanning the whole line would let that summary
-	// prose override an explicit verdict, so the verdict is read positionally.
-	if lead := leadingOutcomeToken(words); lead != "" {
-		if o, ok := outcomeTokens[lead]; ok {
+	// The first line must be the verdict token ALONE (the synthesis prompt
+	// demands exactly that, with the summary starting on the second line).
+	// Requiring verdict-only — rather than merely verdict-leading — is what
+	// keeps malformed output from opening the gate: a line such as
+	// "approved is not warranted; needs-work" leads with `approved` but plainly
+	// is not an approval, and a line such as "approved — no rejected or
+	// needs-work findings" cannot be distinguished from it by position alone.
+	// Anything that is not a bare verdict falls through to the conservative
+	// scan below, where approval is impossible.
+	if len(words) == 1 {
+		if o, ok := outcomeTokens[words[0]]; ok {
+			return o
+		}
+	}
+	// Tolerate a single leading label word ("Outcome: approved").
+	if len(words) == 2 && labelWords[words[0]] {
+		if o, ok := outcomeTokens[words[1]]; ok {
 			return o
 		}
 	}
 
-	// No leading verdict: the model broke its contract. Fall back to a
+	// Not a bare verdict: the model broke its contract. Fall back to a
 	// conservative scan — any blocking token anywhere blocks, and a merely
-	// mentioned "approved" (e.g. "cannot be considered approved") never
-	// approves, because approval requires the leading position.
+	// mentioned "approved" never approves, because approval requires a
+	// verdict-only first line.
 	found := map[Outcome]bool{}
 	for _, w := range words {
 		if o, ok := outcomeTokens[w]; ok {
@@ -135,19 +145,6 @@ func ParseOutcome(s string) Outcome {
 		// No token, or only a non-leading "approved" — fail closed.
 		return NeedsHumanReview
 	}
-}
-
-// leadingOutcomeToken returns the first meaningful token, skipping an optional
-// label word such as "outcome" in "Outcome: approved". It returns "" when the
-// line has no tokens.
-func leadingOutcomeToken(words []string) string {
-	for _, w := range words {
-		if labelWords[w] {
-			continue
-		}
-		return w
-	}
-	return ""
 }
 
 // ExitFor is the enforcement contract: it maps an outcome (and whether a human
