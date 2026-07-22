@@ -217,6 +217,8 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the primary checkout and session-named branch should remain$`, primaryCheckoutAndSessionNamedBranchShouldRemain)
 	ctx.Step(`^a linked session worktree should still be removed$`, linkedSessionWorktreeShouldStillBeRemoved)
 	ctx.Step(`^an unclassified worktree should not authorize branch deletion$`, unclassifiedWorktreeShouldNotAuthorizeBranchDeletion)
+	ctx.Step(`^a context-only checkout should not authorize branch deletion$`, contextOnlyCheckoutShouldNotAuthorizeBranchDeletion)
+	ctx.Step(`^branch deletion should require attributed worktree ownership$`, branchDeletionShouldRequireAttributedWorktreeOwnership)
 	ctx.Step(`^the retained A2A coordination implementation$`, retainedA2ACoordinationImplementation)
 	ctx.Step(`^AGM validates A2A coordination specification drift$`, agmValidatesA2ACoordinationSpecificationDrift)
 	ctx.Step(`^A2A coordination specifications should describe only retained behavior$`, a2aCoordinationSpecificationsShouldDescribeOnlyRetainedBehavior)
@@ -1508,8 +1510,8 @@ func agmValidatesPrimaryCheckoutCleanupSafety(ctx context.Context) error {
 	}
 	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/ops",
-		"-run", `^TestCleanupAfterArchive_(PreservesPrimaryCheckout|WithRealGitWorktree|PreservesBranchWhenWorktreeCannotBeClassified)$`,
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/ops", "./agm/internal/cleanup",
+		"-run", `^(TestCleanupAfterArchive_(PreservesPrimaryCheckout|WithRealGitWorktree|PreservesBranchWhenWorktreeCannotBeClassified|UsesContextProjectWhenWorkingDirectoryMissing|PreservesBranchNotOwnedByRemovedWorktree)|TestSessionResources_(BranchCleanup|WorktreeRemoveError))$`,
 		"-count=1", "-v")
 	cmd.Dir = bddRepoRoot()
 	output, runErr := cmd.CombinedOutput()
@@ -1559,6 +1561,40 @@ func unclassifiedWorktreeShouldNotAuthorizeBranchDeletion(ctx context.Context) e
 	}
 	if !strings.Contains(harnessState.archiveCleanupTestOutput, "--- PASS: TestCleanupAfterArchive_PreservesBranchWhenWorktreeCannotBeClassified") {
 		return fmt.Errorf("unclassified worktree fail-closed regression did not run:\n%s", harnessState.archiveCleanupTestOutput)
+	}
+	return nil
+}
+
+func contextOnlyCheckoutShouldNotAuthorizeBranchDeletion(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.archiveCleanupTestErr != nil {
+		return fmt.Errorf("archive cleanup safety suite failed: %w\n%s", harnessState.archiveCleanupTestErr, harnessState.archiveCleanupTestOutput)
+	}
+	if !strings.Contains(harnessState.archiveCleanupTestOutput, "--- PASS: TestCleanupAfterArchive_UsesContextProjectWhenWorkingDirectoryMissing") {
+		return fmt.Errorf("context-only cleanup fail-closed regression did not run:\n%s", harnessState.archiveCleanupTestOutput)
+	}
+	return nil
+}
+
+func branchDeletionShouldRequireAttributedWorktreeOwnership(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.archiveCleanupTestErr != nil {
+		return fmt.Errorf("archive cleanup safety suite failed: %w\n%s", harnessState.archiveCleanupTestErr, harnessState.archiveCleanupTestOutput)
+	}
+	for _, testName := range []string{
+		"TestCleanupAfterArchive_PreservesBranchNotOwnedByRemovedWorktree",
+		"TestSessionResources_BranchCleanup",
+		"TestSessionResources_WorktreeRemoveError",
+	} {
+		if !strings.Contains(harnessState.archiveCleanupTestOutput, "--- PASS: "+testName) {
+			return fmt.Errorf("attributed branch cleanup regression %s did not run:\n%s", testName, harnessState.archiveCleanupTestOutput)
+		}
 	}
 	return nil
 }

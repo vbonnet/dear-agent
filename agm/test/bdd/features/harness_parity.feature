@@ -229,6 +229,8 @@ Feature: Harness parity
     Then the primary checkout and session-named branch should remain
     And a linked session worktree should still be removed
     And an unclassified worktree should not authorize branch deletion
+    And a context-only checkout should not authorize branch deletion
+    And branch deletion should require attributed worktree ownership
 
   Scenario Outline: Supported model families have default routes
     Given model family "<family>" is configured

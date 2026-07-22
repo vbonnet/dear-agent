@@ -49,50 +49,70 @@ func CleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandbox
 	result := &CleanupResult{}
 	logger := newCleanupLogger()
 	primaryWorktree := false
-	branchDeletionSafe := worktreePath == ""
+	branchDeletionSafe := false
+	candidatePath := worktreePath
+	if candidatePath == "" {
+		candidatePath = repoPath
+	}
 
-	// 1. Remove the git worktree (force to handle uncommitted changes).
-	if worktreePath != "" {
-		worktreeRoot, isPrimary, classifyErr := classifyWorktree(worktreePath)
+	// 1. Classify the checkout before authorizing any destructive cleanup. A
+	// missing explicit worktree path falls back to the manifest project path,
+	// but that fallback is evidence for preservation only: it never authorizes
+	// worktree or branch deletion.
+	if candidatePath != "" {
+		identity, classifyErr := classifyWorktree(candidatePath)
 		switch {
 		case classifyErr != nil:
 			logAction(logger, CleanupAction{
 				SessionID:   sessionID,
 				SessionName: sessionName,
-				Action:      "remove_worktree",
-				Target:      worktreePath,
+				Action:      "classify_worktree",
+				Target:      candidatePath,
 				Success:     false,
 				Error:       classifyErr.Error(),
 			})
 			slog.Warn("Preserving unclassified worktree and branch during archive cleanup",
-				"path", worktreePath, "error", classifyErr)
-		case isPrimary:
+				"path", candidatePath, "error", classifyErr)
+		case identity.IsPrimary:
 			primaryWorktree = true
 			result.PrimaryWorktreeKept = true
 			logAction(logger, CleanupAction{
 				SessionID:   sessionID,
 				SessionName: sessionName,
 				Action:      "keep_primary_worktree",
-				Target:      worktreeRoot,
+				Target:      identity.Root,
 				Success:     true,
 			})
-			slog.Info("Preserving primary checkout during archive cleanup", "path", worktreeRoot)
+			slog.Info("Preserving primary checkout during archive cleanup", "path", identity.Root)
+		case worktreePath == "":
+			logAction(logger, CleanupAction{
+				SessionID:   sessionID,
+				SessionName: sessionName,
+				Action:      "keep_context_worktree",
+				Target:      identity.Root,
+				Success:     true,
+			})
+			slog.Info("Preserving context worktree without explicit ownership metadata", "path", identity.Root)
 		default:
-			err := removeWorktreeCmd(repoPath, worktreeRoot)
+			err := removeWorktreeCmd(repoPath, identity.Root)
 			logAction(logger, CleanupAction{
 				SessionID:   sessionID,
 				SessionName: sessionName,
 				Action:      "remove_worktree",
-				Target:      worktreeRoot,
+				Target:      identity.Root,
 				Success:     err == nil,
 				Error:       errStr(err),
 			})
 			if err == nil {
 				result.WorktreesRemoved++
-				branchDeletionSafe = true
+				branchDeletionSafe = identity.Branch != "" && identity.Branch == branchName
+				if !branchDeletionSafe {
+					slog.Info("Preserving branch not owned by removed worktree",
+						"requested_branch", branchName, "worktree_branch", identity.Branch)
+				}
 			} else {
 				slog.Warn("Failed to remove worktree during archive cleanup",
-					"path", worktreeRoot, "error", err)
+					"path", identity.Root, "error", err)
 			}
 		}
 	}
@@ -135,6 +155,14 @@ func CleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandbox
 			slog.Debug("Branch not deleted (may not exist)",
 				"branch", branchName, "error", err)
 		}
+	} else if branchName != "" && repoPath != "" {
+		logAction(logger, CleanupAction{
+			SessionID:   sessionID,
+			SessionName: sessionName,
+			Action:      "keep_unowned_branch",
+			Target:      branchName,
+			Success:     true,
+		})
 	}
 
 	// 3b. Delete the agm/<sessionID> sandbox branch if it exists.
@@ -185,24 +213,42 @@ func CleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandbox
 // classifyWorktree resolves a possibly nested project directory to its actual
 // worktree root, then proves whether that inventory entry is the primary
 // checkout. os.SameFile keeps symlink and spelling aliases identity-safe.
-func classifyWorktree(path string) (string, bool, error) {
+type worktreeIdentity struct {
+	Root      string
+	Branch    string
+	IsPrimary bool
+}
+
+func classifyWorktree(path string) (worktreeIdentity, error) {
 	worktreeRoot, err := gitpkg.WorktreeRoot(path)
 	if err != nil {
-		return "", false, err
+		return worktreeIdentity{}, err
 	}
-	mainPath, err := gitpkg.MainWorktreePath(worktreeRoot)
+	worktrees, err := gitpkg.ListWorktrees(worktreeRoot)
 	if err != nil {
-		return "", false, err
+		return worktreeIdentity{}, fmt.Errorf("list worktrees for %s: %w", worktreeRoot, err)
+	}
+	if len(worktrees) == 0 {
+		return worktreeIdentity{}, fmt.Errorf("no worktree inventory found for %s", worktreeRoot)
 	}
 	pathInfo, err := os.Stat(worktreeRoot)
 	if err != nil {
-		return "", false, fmt.Errorf("stat candidate worktree: %w", err)
+		return worktreeIdentity{}, fmt.Errorf("stat candidate worktree: %w", err)
 	}
-	mainInfo, err := os.Stat(mainPath)
-	if err != nil {
-		return "", false, fmt.Errorf("stat primary worktree: %w", err)
+	for _, worktree := range worktrees {
+		inventoryInfo, statErr := os.Stat(worktree.Path)
+		if statErr != nil {
+			continue
+		}
+		if os.SameFile(pathInfo, inventoryInfo) {
+			return worktreeIdentity{
+				Root:      worktreeRoot,
+				Branch:    worktree.Branch,
+				IsPrimary: worktree.IsMain,
+			}, nil
+		}
 	}
-	return worktreeRoot, os.SameFile(pathInfo, mainInfo), nil
+	return worktreeIdentity{}, fmt.Errorf("worktree root %s is absent from Git inventory", worktreeRoot)
 }
 
 // removeWorktreeCmd runs `git worktree remove --force`.
