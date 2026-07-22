@@ -29,6 +29,7 @@ import (
 )
 
 var resolvedSessionPermissionPolicy *manifest.PermissionPolicy
+var sendPromptLiteralForHarness = tmux.SendPromptLiteralForHarness
 
 type cliCreateSessionRuntime struct {
 	launch               func(context.Context, ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error)
@@ -66,7 +67,7 @@ func newCLICreateSessionRuntime(sessionName string, existed, trustPreConfigured 
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			return tmux.SendPromptLiteral(input.SessionName, input.Prompt, false)
+			return sendPromptLiteralForHarness(input.SessionName, input.Prompt, false, "agy")
 		},
 		complete: func(ctx context.Context, completion ops.CreateSessionCompletion) error {
 			return completeCLICreateSession(ctx, sessionName, completion)

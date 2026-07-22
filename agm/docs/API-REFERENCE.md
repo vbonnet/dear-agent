@@ -460,7 +460,18 @@ func (c *ControlModeSession) Close() error
 
 ```go
 // SendPromptLiteral sends prompt to tmux session (literal mode)
-func SendPromptLiteral(target, prompt string) error
+func SendPromptLiteral(target, prompt string, shouldInterrupt bool) error
+
+// SendPromptLiteralForHarness preserves harness-specific composer paste semantics.
+func SendPromptLiteralForHarness(target, prompt string, shouldInterrupt bool, harness string) error
+
+// SendMultiLinePromptSafeForHarness waits for readiness and preserves
+// harness-specific multiline composer semantics.
+func SendMultiLinePromptSafeForHarness(sessionName, prompt string, shouldInterrupt bool, harness string) error
+
+// SendMultiLinePromptSafeForHarnessContext waits for readiness and preserves
+// harness-specific multiline composer semantics using the caller context.
+func SendMultiLinePromptSafeForHarnessContext(ctx context.Context, sessionName, prompt string, shouldInterrupt bool, harness string) error
 
 // SendPromptFromFile sends prompt from file (max 10KB)
 func SendPromptFromFile(target, filePath string) error

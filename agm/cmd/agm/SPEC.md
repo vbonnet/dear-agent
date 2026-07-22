@@ -11,7 +11,7 @@
 
 **Version:** 2.0
 **Status:** Production (Phase 6 Complete - Dolt-Only Architecture, YAML Backend Removed)
-**Last Updated:** 2026-07-19
+**Last Updated:** 2026-07-21
 
 ## Overview
 
@@ -104,6 +104,8 @@ Provide a production-ready CLI that:
 **CLI-37** When `agm session rename` moves a live tmux session, the system shall resolve its stable session ID, hold the same per-session lifecycle lock as resume while reloading current state and completing every rename effect, first claim that exact tmux creation with its server-local ID plus a random marker, then persist the user-visible and tmux names together through a narrow compare-and-swap against the exact storage revision read before the move. If either the tmux client or storage loses its success response, the command shall use bounded cancellation-independent ownership checks before deciding whether forward progress completed or compensation is safe: tmux shall still carry the claimed identity at the expected name, and storage shall first fence the observed revision with a competing compare-and-swap before re-reading it. If another writer advanced to a different identity, the claimed tmux identity is lost or replaced, or the caller is canceled after the move and storage is fenced as unchanged, the command shall report the primary failure, compensate only the claimed live tmux session, join any fencing, probe, or rollback failure, and never report rename success with metadata pointing at a nonexistent or unrelated tmux session.
 
 **CLI-38** When `agm admin link-session-parent` or `agm admin backfill-plan-sessions` assigns a parent and optionally inherits its display name, the command shall persist both changes through one narrow compare-and-swap against the child identity revision it read and shall report a concurrent identity change as a failure instead of reporting a link or rename that storage did not apply.
+
+**CLI-39** When direct, fan-out, structured, or fresh-startup delivery targets an AGY session, the command shall propagate the resolved `agy` harness through the shared tmux delivery boundary so attribution and multiline bodies remain one native request; unresolved and non-AGY sessions shall retain backward-compatible delivery semantics.
 
 ## Requirements
 

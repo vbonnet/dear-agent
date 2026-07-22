@@ -5,6 +5,7 @@ package tmux_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,9 +13,96 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
+	"golang.org/x/term"
 )
+
+func TestAgyMultilinePasteIntegrationPreservesOneBracketedSubmission(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolve integration test executable: %v", err)
+	}
+	fixtureDir := t.TempDir()
+	socketDir, err := os.MkdirTemp("", "agm-agy-paste-")
+	if err != nil {
+		t.Fatalf("create short tmux socket directory: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(socketDir); err != nil {
+			t.Logf("remove tmux socket directory: %v", err)
+		}
+	})
+	socketPath := filepath.Join(socketDir, "agm.sock")
+	outputPath := filepath.Join(fixtureDir, "input.bin")
+	t.Setenv("AGM_TMUX_SOCKET", socketPath)
+
+	const sessionName = "agy-multiline-paste-fixture"
+	if err := tmux.NewSession(sessionName, fixtureDir); err != nil {
+		t.Fatalf("create isolated tmux session: %v", err)
+	}
+	t.Cleanup(func() { cleanupAgyFixtureTmuxServer(t, socketPath) })
+	command := fmt.Sprintf("AGY_BRACKETED_PASTE_HELPER=1 AGY_BRACKETED_PASTE_OUTPUT=%s %s -test.run '^TestAgyBracketedPasteHelper$'",
+		launchparity.ShellQuote(outputPath), launchparity.ShellQuote(executable))
+	if err := tmux.SendCommand(sessionName, command); err != nil {
+		t.Fatalf("launch bracketed-paste fixture: %v", err)
+	}
+
+	prompt := "[From: codex | ID: regression]\n\nReply exactly: AGM_AGY_MULTILINE_OK"
+	if err := tmux.SendMultiLinePromptSafeForHarnessContext(t.Context(), sessionName, prompt, false, "agy"); err != nil {
+		output, _ := tmux.CapturePaneOutput(sessionName, 30)
+		t.Fatalf("send AGY multiline prompt: %v\npane output:\n%s", err, output)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		got, readErr := os.ReadFile(outputPath)
+		if readErr == nil {
+			want := "\x1b[200~" + prompt + "\x1b[201~\r"
+			if string(got) != want {
+				t.Fatalf("AGY received %q, want one bracketed submission %q", got, want)
+			}
+			return
+		}
+		if !errors.Is(readErr, os.ErrNotExist) {
+			t.Fatalf("read fixture input: %v", readErr)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for AGY bracketed-paste fixture input")
+}
+
+func TestAgyBracketedPasteHelper(t *testing.T) {
+	if os.Getenv("AGY_BRACKETED_PASTE_HELPER") != "1" {
+		return
+	}
+	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	if err != nil {
+		t.Fatalf("make fixture terminal raw: %v", err)
+	}
+	defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
+	if _, err := fmt.Fprint(os.Stdout, "\x1b[?2004h>\r\n"); err != nil {
+		t.Fatalf("enable bracketed paste: %v", err)
+	}
+	var input []byte
+	one := make([]byte, 1)
+	for {
+		if _, err := os.Stdin.Read(one); err != nil {
+			t.Fatalf("read fixture input: %v", err)
+		}
+		input = append(input, one[0])
+		if one[0] == '\r' {
+			break
+		}
+	}
+	if err := os.WriteFile(os.Getenv("AGY_BRACKETED_PASTE_OUTPUT"), input, 0o600); err != nil {
+		t.Fatalf("persist fixture input: %v", err)
+	}
+}
 
 func TestAgyLifecycleIntegrationRejectsOnboardingWithoutInput(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {

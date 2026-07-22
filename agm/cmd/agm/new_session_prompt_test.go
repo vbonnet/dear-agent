@@ -65,3 +65,26 @@ func TestCLICreateSessionRuntimeUsesCallerContextForAgyIdentityBootstrap(t *test
 		t.Fatal("CLI AGY identity bootstrap was not called")
 	}
 }
+
+func TestCLICreateSessionRuntimeUsesAgyBracketedRawPaste(t *testing.T) {
+	original := sendPromptLiteralForHarness
+	t.Cleanup(func() { sendPromptLiteralForHarness = original })
+	called := false
+	sendPromptLiteralForHarness = func(sessionName, prompt string, shouldInterrupt bool, harness string) error {
+		called = true
+		if sessionName != "agy-bootstrap" || prompt != "first line\nsecond line" || shouldInterrupt || harness != "agy" {
+			t.Fatalf("bootstrap paste = %q/%q/%t/%q", sessionName, prompt, shouldInterrupt, harness)
+		}
+		return nil
+	}
+	runtime := newCLICreateSessionRuntime("agy-bootstrap", false, true)
+	if err := runtime.BootstrapAgyCreateIdentity(t.Context(), ops.AgyCreateIdentityBootstrap{
+		SessionName: "agy-bootstrap",
+		Prompt:      "first line\nsecond line",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("CLI AGY identity bootstrap did not use harness-aware literal paste")
+	}
+}

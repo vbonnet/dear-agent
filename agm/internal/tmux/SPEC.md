@@ -90,6 +90,8 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-41** When a command-scoped Pi identity or pane-liveness scan runs, the system shall derive tmux and process-table subprocesses from the caller context so cancellation returns before command delivery, attachment, or metadata mutation.
 
+**TMUX-42** When a multiline prompt is delivered to AGY, the system shall ask tmux to preserve line feeds and emit bracketed-paste delimiters when the application requested them, then send one Enter after the complete paste; other harnesses shall retain the established paste behavior.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
@@ -100,4 +102,6 @@ because the tmux server's own cwd has been deleted.
 - Package tests: `agm/internal/tmux/linger_test.go`
 - Package tests: `agm/internal/tmux/capture_test.go`
 - Package tests: `agm/internal/tmux/agy_prompt_test.go`
+- Package tests: `agm/internal/tmux/prompt_test.go`
+- Integration tests: `agm/internal/tmux/agy_lifecycle_integration_test.go`
 - Package tests: `agm/internal/tmux/pi_prompt_test.go`

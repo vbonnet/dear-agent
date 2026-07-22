@@ -9,6 +9,7 @@ import (
 
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/send"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
@@ -104,39 +105,49 @@ func TestWaitForAgyMetadataBackfillUsesCallerContext(t *testing.T) {
 
 func TestSendViaTmuxUsesCallerContext(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	original := sendMultiLinePromptSafeContext
-	t.Cleanup(func() { sendMultiLinePromptSafeContext = original })
+	original := sendMultiLinePromptSafeForHarnessContext
+	t.Cleanup(func() { sendMultiLinePromptSafeForHarnessContext = original })
 
 	type callerContextKey struct{}
 	callerCtx, cancel := context.WithCancel(context.WithValue(t.Context(), callerContextKey{}, "direct-send"))
-	sendMultiLinePromptSafeContext = func(ctx context.Context, sessionName, message string, shouldInterrupt bool) error {
+	sendMultiLinePromptSafeForHarnessContext = func(ctx context.Context, sessionName, message string, shouldInterrupt bool, harness string) error {
 		if ctx != callerCtx {
 			t.Fatal("tmux delivery did not receive the caller context")
 		}
-		if sessionName != "agy-send" || message != "message" || shouldInterrupt {
-			t.Fatalf("tmux delivery = %q/%q/%t", sessionName, message, shouldInterrupt)
+		if sessionName != "agy-send" || message != "header\nmessage body" || shouldInterrupt || harness != "agy" {
+			t.Fatalf("tmux delivery = %q/%q/%t/%q", sessionName, message, shouldInterrupt, harness)
 		}
 		cancel()
 		return ctx.Err()
 	}
 
-	err := sendViaTmux(callerCtx, "agy-send", "sender", "message-id", "message", "", false)
+	err := sendViaTmux(callerCtx, "agy-send", "sender", "message-id", "header\nmessage body", "", false, "agy")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("sendViaTmux error = %v, want context.Canceled", err)
 	}
 }
 
 func TestStructuredPromptUsesCallerContext(t *testing.T) {
-	original := sendMultiLinePromptSafeContext
-	t.Cleanup(func() { sendMultiLinePromptSafeContext = original })
+	originalSend := sendMultiLinePromptSafeForHarnessContext
+	originalResolve := resolveSendRecipientHarness
+	t.Cleanup(func() {
+		sendMultiLinePromptSafeForHarnessContext = originalSend
+		resolveSendRecipientHarness = originalResolve
+	})
 	type callerContextKey struct{}
 	callerCtx, cancel := context.WithCancel(context.WithValue(t.Context(), callerContextKey{}, "structured-send"))
-	sendMultiLinePromptSafeContext = func(ctx context.Context, sessionName, message string, shouldInterrupt bool) error {
+	resolveSendRecipientHarness = func(recipient string) string {
+		if recipient != "recipient" {
+			t.Fatalf("resolve recipient = %q, want recipient", recipient)
+		}
+		return "agy"
+	}
+	sendMultiLinePromptSafeForHarnessContext = func(ctx context.Context, sessionName, message string, shouldInterrupt bool, harness string) error {
 		if ctx != callerCtx {
 			t.Fatal("structured delivery did not receive the caller context")
 		}
-		if sessionName != "recipient" || message != "payload" || !shouldInterrupt {
-			t.Fatalf("structured delivery = %q/%q/%t", sessionName, message, shouldInterrupt)
+		if sessionName != "recipient" || message != "payload" || !shouldInterrupt || harness != "agy" {
+			t.Fatalf("structured delivery = %q/%q/%t/%q", sessionName, message, shouldInterrupt, harness)
 		}
 		cancel()
 		return ctx.Err()
@@ -145,6 +156,31 @@ func TestStructuredPromptUsesCallerContext(t *testing.T) {
 	err := sendStructuredPrompt(callerCtx, "recipient", "payload", true)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("sendStructuredPrompt() error = %v, want context.Canceled", err)
+	}
+}
+
+func TestDeliveryFuncPreservesAgyHarness(t *testing.T) {
+	originalHasSession := hasTmuxSessionForDelivery
+	originalSend := sendDeliveryViaTmux
+	t.Cleanup(func() {
+		hasTmuxSessionForDelivery = originalHasSession
+		sendDeliveryViaTmux = originalSend
+	})
+	hasTmuxSessionForDelivery = func(sessionName string) (bool, error) {
+		return sessionName == "agy-fanout", nil
+	}
+	sendDeliveryViaTmux = func(ctx context.Context, recipient, sender, messageID, message, promptFile string, shouldInterrupt bool, harness string) error {
+		if ctx != t.Context() || recipient != "agy-fanout" || sender != "codex" || messageID != "msg-1" || message != "header\nbody" || promptFile != "prompt.txt" || shouldInterrupt || harness != "agy" {
+			t.Fatalf("fan-out delivery = context:%t %q/%q/%q/%q/%q/%t/%q", ctx == t.Context(), recipient, sender, messageID, message, promptFile, shouldInterrupt, harness)
+		}
+		return nil
+	}
+	err := deliveryFunc(t.Context(), &send.DeliveryJob{
+		Recipient: "agy-fanout", Sender: "codex", MessageID: "msg-1",
+		FormattedMessage: "header\nbody", PromptFile: "prompt.txt", Harness: "agy",
+	})
+	if err != nil {
+		t.Fatalf("deliveryFunc() error = %v", err)
 	}
 }
 

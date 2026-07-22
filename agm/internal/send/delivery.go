@@ -16,6 +16,7 @@ type DeliveryJob struct {
 	PromptFile       string
 	ShouldInterrupt  bool
 	SessionsDir      string
+	Harness          string
 }
 
 // DeliveryResult represents delivery outcome

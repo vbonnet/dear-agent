@@ -89,6 +89,10 @@ For `agy`, AGM treats Antigravity as a real interactive CLI harness:
   session creation does not race prompt delivery
 - send paths MUST route `agy` through tmux delivery, not through Claude-only
   assumptions or API adapters
+- every direct, fan-out, queued, structured, and startup-prompt send to `agy`
+  MUST preserve embedded line feeds inside one bracketed composer paste and
+  MUST submit exactly once; sender attribution MUST NOT become a standalone
+  request separated from the message body
 - send safety MUST evaluate `agy` readiness with AGY-specific prompt and
   onboarding detection, never by requiring a Claude process
 - manifest and Dolt metadata MUST preserve the AGY conversation ID for both

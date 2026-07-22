@@ -46,10 +46,29 @@ var (
 	msgAutonomous          bool   // --autonomous flag: session is unattended, skip human_typing detection
 )
 
-var sendMultiLinePromptSafeContext = tmux.SendMultiLinePromptSafeContext
+var sendMultiLinePromptSafeForHarnessContext = tmux.SendMultiLinePromptSafeForHarnessContext
+var resolveSendRecipientHarness = bestEffortSendRecipientHarness
+var hasTmuxSessionForDelivery = tmux.HasSession
+var sendDeliveryViaTmux = sendViaTmux
 
 func sendStructuredPrompt(ctx context.Context, recipient, message string, shouldInterrupt bool) error {
-	return sendMultiLinePromptSafeContext(ctx, recipient, message, shouldInterrupt)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return sendMultiLinePromptSafeForHarnessContext(ctx, recipient, message, shouldInterrupt, resolveSendRecipientHarness(recipient))
+}
+
+func bestEffortSendRecipientHarness(recipient string) string {
+	adapter, err := getStorage()
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = adapter.Close() }()
+	m, _, err := session.ResolveIdentifier(recipient, cfg.SessionsDir, adapter)
+	if err != nil {
+		return ""
+	}
+	return m.Harness
 }
 
 // Priority levels and their instructions injected into message headers
@@ -615,7 +634,7 @@ func sendDirectly(ctx context.Context, recipientSession, senderName, messageID, 
 	m, _, err := session.ResolveIdentifier(recipientSession, cfg.SessionsDir, adapter)
 	if err != nil {
 		// No manifest found - fall back to tmux-based send for legacy sessions
-		return sendViaTmux(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, false)
+		return sendViaTmux(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, false, "")
 	}
 
 	// Determine delivery method based on harness type
@@ -631,7 +650,7 @@ func sendDirectly(ctx context.Context, recipientSession, senderName, messageID, 
 	}
 
 	// Fall back to tmux for CLI-based harnesses (Claude Code, Codex, AGY, OpenCode, Pi, and Gemini compatibility)
-	if err := sendViaTmux(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, false); err != nil {
+	if err := sendViaTmux(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, false, harnessType); err != nil {
 		return err
 	}
 	if harnessType == "agy" && (m.Agy == nil || m.Agy.ConversationID == "") {
@@ -655,9 +674,9 @@ func waitForAgyMetadataBackfill(ctx context.Context, sessionName string, wait fu
 	return nil
 }
 
-// sendViaTmux sends a message via tmux (for CLI-based agents like Claude, Gemini)
+// sendViaTmux sends a message via tmux for CLI-based harnesses.
 // Bug fix (2026-03-14): Added shouldInterrupt parameter to control ESC behavior
-func sendViaTmux(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, shouldInterrupt bool) error {
+func sendViaTmux(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, shouldInterrupt bool, harness string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -667,7 +686,7 @@ func sendViaTmux(ctx context.Context, recipientSession, senderName, messageID, f
 	}
 
 	// Send using SAFE method (waits for prompt, with conditional interrupt)
-	if err := sendMultiLinePromptSafeContext(ctx, recipientSession, formattedMessage, shouldInterrupt); err != nil {
+	if err := sendMultiLinePromptSafeForHarnessContext(ctx, recipientSession, formattedMessage, shouldInterrupt, harness); err != nil {
 		return fmt.Errorf("failed to send prompt: %w", err)
 	}
 
@@ -813,7 +832,7 @@ func runSendMulti(ctx context.Context, spec *send.RecipientSpec) (retErr error) 
 		return err
 	}
 
-	jobs, homeDir, err := buildMultiDeliveryJobs(senderName, message, resolvedSpec.Recipients)
+	jobs, homeDir, err := buildMultiDeliveryJobs(senderName, message, resolvedSpec.Recipients, adapter)
 	if err != nil {
 		return err
 	}
@@ -892,7 +911,7 @@ func readMultiSendMessageContent() (string, error) {
 // buildMultiDeliveryJobs creates one DeliveryJob per recipient with a unique
 // message ID. Returns the jobs, the resolved homeDir (used by the caller for
 // logging), and any error from ID generation.
-func buildMultiDeliveryJobs(senderName, message string, recipients []string) ([]*send.DeliveryJob, string, error) {
+func buildMultiDeliveryJobs(senderName, message string, recipients []string, adapter *dolt.Adapter) ([]*send.DeliveryJob, string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to get home directory: %w", err)
@@ -904,6 +923,10 @@ func buildMultiDeliveryJobs(senderName, message string, recipients []string) ([]
 	}
 	jobs := make([]*send.DeliveryJob, 0, len(recipients))
 	for _, recipient := range recipients {
+		harness := ""
+		if m, _, resolveErr := session.ResolveIdentifier(recipient, cfg.SessionsDir, adapter); resolveErr == nil {
+			harness = m.Harness
+		}
 		msgID, err := idGen.Next()
 		if err != nil {
 			return nil, homeDir, fmt.Errorf("failed to generate message ID: %w", err)
@@ -917,6 +940,7 @@ func buildMultiDeliveryJobs(senderName, message string, recipients []string) ([]
 			PromptFile:       sessionSendPromptFile,
 			ShouldInterrupt:  false,
 			SessionsDir:      cfg.SessionsDir,
+			Harness:          harness,
 		})
 	}
 	return jobs, homeDir, nil
@@ -951,7 +975,7 @@ func logMultiResults(homeDir, senderName, message string, jobs []*send.DeliveryJ
 // This is used by SequentialDeliver for sequential message sending
 func deliveryFunc(ctx context.Context, job *send.DeliveryJob) error {
 	// Check recipient session exists in tmux
-	exists, err := tmux.HasSession(job.Recipient)
+	exists, err := hasTmuxSessionForDelivery(job.Recipient)
 	if err != nil {
 		return fmt.Errorf("failed to check tmux session: %w", err)
 	}
@@ -961,7 +985,7 @@ func deliveryFunc(ctx context.Context, job *send.DeliveryJob) error {
 
 	// Use the existing sendDirectly logic for actual delivery
 	// This ensures consistent behavior with single-recipient sends
-	return sendViaTmux(ctx, job.Recipient, job.Sender, job.MessageID, job.FormattedMessage, job.PromptFile, job.ShouldInterrupt)
+	return sendDeliveryViaTmux(ctx, job.Recipient, job.Sender, job.MessageID, job.FormattedMessage, job.PromptFile, job.ShouldInterrupt, job.Harness)
 }
 
 // recordDelegation records a delegation if --delegate flag is set.

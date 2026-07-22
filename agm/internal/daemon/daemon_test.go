@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,6 +11,19 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/logging"
 	"github.com/vbonnet/dear-agent/agm/internal/messages"
 )
+
+func TestDaemonSendMessagePreservesAgyHarnessDelivery(t *testing.T) {
+	d := &Daemon{cfg: Config{Logger: logging.NewTextLogger(io.Discard)}}
+	d.sendPrompt = func(sessionName, message string, shouldInterrupt bool, harness string) error {
+		if sessionName != "agy-session" || message != "header\nmessage body" || shouldInterrupt || harness != "agy" {
+			t.Fatalf("send prompt = %q/%q/%t/%q", sessionName, message, shouldInterrupt, harness)
+		}
+		return nil
+	}
+	if err := d.sendMessage("agy-session", "header\nmessage body", "agy"); err != nil {
+		t.Fatalf("sendMessage() error = %v", err)
+	}
+}
 
 func TestNewDaemon(t *testing.T) {
 	tmpDir := t.TempDir()
