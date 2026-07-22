@@ -311,6 +311,7 @@ Feature: Harness parity
     Then shared startup readiness should honor the total deadline
     And shared input readiness should serialize exact-pane delivery and preserve rendered composer ownership without treating resolved prompts as live
     And CLI message and startup prompt sends should use shared atomic readiness for exact-pane delivery
+    And forced CLI message sends should override only verified busy composers
     And shared Gemini readiness should advance first-run trust on the verified pane
     And legacy AGY names should reach canonical shared send readiness
     And the Pi alias should reach canonical shared send readiness

@@ -158,12 +158,12 @@ func (a *BackendAdapter) CheckInputReadiness(ctx context.Context, sessionName, h
 
 // SendKeysIfInputReady preserves atomic readiness and exact-pane delivery
 // through the production backend adapter chain.
-func (a *BackendAdapter) SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string) (session.InputReadiness, error) {
+func (a *BackendAdapter) SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string, options session.InputDeliveryOptions) (session.InputReadiness, error) {
 	sender, ok := a.backend.(session.AtomicInputSender)
 	if !ok {
 		return session.InputReadiness{}, fmt.Errorf("backend %T does not expose atomic input delivery", a.backend)
 	}
-	return sender.SendKeysIfInputReady(ctx, sessionName, harness, keys)
+	return sender.SendKeysIfInputReady(ctx, sessionName, harness, keys, options)
 }
 
 // GetDefaultBackendAdapter returns a BackendAdapter using the default backend

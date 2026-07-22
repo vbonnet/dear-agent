@@ -645,7 +645,7 @@ func sendDirectlyWithTmux(ctx context.Context, recipientSession, senderName, mes
 	if sharedRecipient == "" {
 		sharedRecipient = recipientSession
 	}
-	if err := sendViaSharedOperations(ctx, sharedRecipient, senderName, messageID, formattedMessage, promptFile, adapter, tmuxClient); err != nil {
+	if err := sendViaSharedOperations(ctx, sharedRecipient, senderName, messageID, formattedMessage, promptFile, msgForce, adapter, tmuxClient); err != nil {
 		return err
 	}
 	if harnessType == "agy" && (m.Agy == nil || m.Agy.ConversationID == "") {
@@ -676,7 +676,7 @@ func waitForAgyMetadataBackfill(ctx context.Context, sessionName string, wait fu
 // sendViaSharedOperations routes CLI delivery through ops.SendMessage. The
 // supplied tmux capability must atomically prove harness ownership and send to
 // the exact verified pane; weaker transports fail closed inside shared ops.
-func sendViaSharedOperations(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, storage dolt.Storage, tmuxClient session.TmuxInterface) error {
+func sendViaSharedOperations(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, force bool, storage dolt.Storage, tmuxClient session.TmuxInterface) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -694,6 +694,7 @@ func sendViaSharedOperations(ctx context.Context, recipientSession, senderName, 
 	}, &ops.SendMessageRequest{
 		Recipient: recipientSession,
 		Message:   formattedMessage,
+		Force:     force,
 	})
 	if err != nil {
 		return fmt.Errorf("shared CLI send: %w", err)

@@ -384,3 +384,34 @@ func TestExpectedHarnessMatcherRequiresForegroundTerminalOwnership(t *testing.T)
 		}
 	}
 }
+
+func TestInputDeliveryAllowedForceOverridesOnlyBusyComposer(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		readiness HarnessInputReadiness
+		force     bool
+		allowed   bool
+		forced    bool
+	}{
+		{name: "ready", readiness: HarnessInputReadiness{Ready: true, State: HarnessInputReady}, allowed: true},
+		{name: "ready with force", readiness: HarnessInputReadiness{Ready: true, State: HarnessInputReady}, force: true, allowed: true},
+		{name: "busy without force", readiness: HarnessInputReadiness{State: HarnessInputBusy}},
+		{name: "busy with force", readiness: HarnessInputReadiness{State: HarnessInputBusy}, force: true, allowed: true, forced: true},
+		{name: "permission with force", readiness: HarnessInputReadiness{State: HarnessInputPermission}, force: true},
+		{name: "overlay with force", readiness: HarnessInputReadiness{State: HarnessInputOverlay}, force: true},
+		{name: "onboarding with force", readiness: HarnessInputReadiness{State: HarnessInputOnboarding}, force: true},
+		{name: "wrong harness with force", readiness: HarnessInputReadiness{State: HarnessInputWrongHarness}, force: true},
+		{name: "missing with force", readiness: HarnessInputReadiness{State: HarnessInputNotFound}, force: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			allowed, forced := inputDeliveryAllowed(tt.readiness, InputDeliveryOptions{AllowBusyComposer: tt.force})
+			if allowed != tt.allowed || forced != tt.forced {
+				t.Fatalf("inputDeliveryAllowed() = (%t, %t), want (%t, %t)", allowed, forced, tt.allowed, tt.forced)
+			}
+		})
+	}
+}

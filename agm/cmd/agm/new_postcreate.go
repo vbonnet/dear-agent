@@ -150,7 +150,7 @@ func sendInitialPromptAtomically(ctx context.Context, sender session.AtomicInput
 	if sender == nil {
 		return fmt.Errorf("verified initial prompt delivery requires atomic tmux readiness")
 	}
-	readiness, err := sender.SendKeysIfInputReady(ctx, sessionName, harness, message)
+	readiness, err := sender.SendKeysIfInputReady(ctx, sessionName, harness, message, session.InputDeliveryOptions{})
 	if err != nil {
 		return fmt.Errorf("atomic initial prompt delivery: %w", err)
 	}

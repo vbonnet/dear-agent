@@ -51,7 +51,7 @@ func TestSendViaSharedOperationsFailsClosedWhenHarnessIsNotReady(t *testing.T) {
 	tmuxClient := session.NewMockTmux()
 	tmuxClient.InputReadiness = session.InputReadiness{Ready: false, State: "WRONG_HARNESS", PaneID: "%4"}
 
-	err := sendViaSharedOperations(t.Context(), "codex-send", "sender", "message-id", "message", "", storage, tmuxClient)
+	err := sendViaSharedOperations(t.Context(), "codex-send", "sender", "message-id", "message", "", false, storage, tmuxClient)
 	if err == nil || !strings.Contains(err.Error(), "WRONG_HARNESS") {
 		t.Fatalf("sendViaSharedOperations() error = %v, want WRONG_HARNESS", err)
 	}
@@ -63,6 +63,31 @@ func TestSendViaSharedOperationsFailsClosedWhenHarnessIsNotReady(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(homeDir, ".agm", "pending", "codex-send")); !os.IsNotExist(statErr) {
 		t.Fatalf("failed readiness created a pending delivery path: %v", statErr)
+	}
+}
+
+func TestSendViaSharedOperationsPreservesForceForBusyComposer(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	storage := dolt.NewMockAdapter()
+	if err := storage.CreateSession(&manifest.Manifest{
+		SessionID: "codex-send-id",
+		Name:      "codex-send",
+		Harness:   "codex-cli",
+		Tmux:      manifest.Tmux{SessionName: "codex-send-tmux"},
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	tmuxClient := session.NewMockTmux()
+	tmuxClient.InputReadiness = session.InputReadiness{State: "QUEUE", PaneID: "%9"}
+
+	if err := sendViaSharedOperations(t.Context(), "codex-send", "sender", "message-id", "forced message", "", true, storage, tmuxClient); err != nil {
+		t.Fatalf("sendViaSharedOperations(force busy) error = %v", err)
+	}
+	if len(tmuxClient.AtomicInputOptions) != 1 || !tmuxClient.AtomicInputOptions[0].AllowBusyComposer {
+		t.Fatalf("atomic delivery options = %#v, want busy-composer override", tmuxClient.AtomicInputOptions)
+	}
+	if got, want := tmuxClient.ExactPaneDeliveries, []string{"%9"}; !slices.Equal(got, want) {
+		t.Fatalf("forced exact-pane deliveries = %v, want %v", got, want)
 	}
 }
 

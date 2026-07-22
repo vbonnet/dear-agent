@@ -247,7 +247,7 @@ func TestRealTmuxReadinessPinsLivenessAndDeliveryToActivePane(t *testing.T) {
 	if output, err := exec.Command("tmux", "-S", socketPath, "select-pane", "-t", claudePane).CombinedOutput(); err != nil {
 		t.Fatalf("select Claude pane: %v\n%s\nall panes: %v", err, output, listPaneIDs())
 	}
-	ready, err := realTmux.SendKeysIfInputReady(t.Context(), sessionName, "claude-code", "pane-pinned-message")
+	ready, err := realTmux.SendKeysIfInputReady(t.Context(), sessionName, "claude-code", "pane-pinned-message", InputDeliveryOptions{})
 	if err != nil {
 		t.Fatalf("SendKeysIfInputReady(Claude pane) error = %v", err)
 	}

@@ -19,6 +19,7 @@ type MockTmux struct {
 	WaitedHarnesses      []string
 	CheckedInputSessions []string
 	AtomicInputChecks    []string
+	AtomicInputOptions   []InputDeliveryOptions
 	ExactPaneDeliveries  []string
 	InputReadiness       InputReadiness
 	WaitContext          context.Context
@@ -157,11 +158,19 @@ func (m *MockTmux) CheckInputReadiness(ctx context.Context, sessionName, harness
 }
 
 // SendKeysIfInputReady models the atomic readiness-and-delivery capability.
-func (m *MockTmux) SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string) (InputReadiness, error) {
+func (m *MockTmux) SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string, options InputDeliveryOptions) (InputReadiness, error) {
 	m.AtomicInputChecks = append(m.AtomicInputChecks, sessionName+":"+harness)
+	m.AtomicInputOptions = append(m.AtomicInputOptions, options)
 	readiness, err := m.CheckInputReadiness(ctx, sessionName, harness)
-	if err != nil || !readiness.Ready {
+	if err != nil {
 		return readiness, err
+	}
+	if !readiness.Ready {
+		if !options.AllowBusyComposer || readiness.State != "QUEUE" {
+			return readiness, nil
+		}
+		readiness.Ready = true
+		readiness.Forced = true
 	}
 	if readiness.PaneID == "" {
 		return readiness, nil

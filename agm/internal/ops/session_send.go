@@ -13,6 +13,11 @@ type SendMessageRequest struct {
 
 	// Message is the text to send.
 	Message string `json:"message"`
+
+	// Force permits delivery only when the verified harness owns the exact pane
+	// and QUEUE is the sole readiness blocker. It does not bypass permission or
+	// any other fail-closed state.
+	Force bool `json:"force,omitempty"`
 }
 
 // SendMessageResult is the output of SendMessage.
@@ -84,12 +89,17 @@ func SendMessage(ctx *OpContext, req *SendMessageRequest) (*SendMessageResult, e
 		if !ok {
 			return newResult(false), ErrSessionNotReady(m.Name, "ATOMIC_DELIVERY_UNAVAILABLE")
 		}
-		readiness, readinessErr := sender.SendKeysIfInputReady(callCtx, tmuxName, harness, req.Message)
+		readiness, readinessErr := sender.SendKeysIfInputReady(callCtx, tmuxName, harness, req.Message, session.InputDeliveryOptions{
+			AllowBusyComposer: req.Force,
+		})
 		if readinessErr != nil {
 			return newResult(false), ErrStorageError("tmux.SendKeysIfInputReady", readinessErr)
 		}
 		if !readiness.Ready {
 			return newResult(false), ErrSessionNotReady(m.Name, readiness.State)
+		}
+		if readiness.Forced && (!req.Force || readiness.State != "QUEUE") {
+			return newResult(false), ErrSessionNotReady(m.Name, "INVALID_FORCE_DELIVERY")
 		}
 		if readiness.PaneID == "" {
 			return newResult(false), ErrSessionNotReady(m.Name, "UNVERIFIED_PANE")

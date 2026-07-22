@@ -30,6 +30,7 @@ type mockTmux struct {
 	readinessErr    error
 	readinessChecks []string
 	atomicChecks    []string
+	atomicOptions   []session.InputDeliveryOptions
 	inputCtx        context.Context
 	paneSendCtx     context.Context
 }
@@ -107,11 +108,19 @@ func (m *mockTmux) CheckInputReadiness(ctx context.Context, sessionName, harness
 	return m.readiness, nil
 }
 
-func (m *mockTmux) SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string) (session.InputReadiness, error) {
+func (m *mockTmux) SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string, options session.InputDeliveryOptions) (session.InputReadiness, error) {
 	m.atomicChecks = append(m.atomicChecks, sessionName+":"+harness)
+	m.atomicOptions = append(m.atomicOptions, options)
 	readiness, err := m.CheckInputReadiness(ctx, sessionName, harness)
-	if err != nil || !readiness.Ready {
+	if err != nil {
 		return readiness, err
+	}
+	if !readiness.Ready {
+		if !options.AllowBusyComposer || readiness.State != "QUEUE" {
+			return readiness, nil
+		}
+		readiness.Ready = true
+		readiness.Forced = true
 	}
 	if readiness.PaneID == "" {
 		return readiness, nil

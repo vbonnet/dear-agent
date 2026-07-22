@@ -45,7 +45,7 @@ func (b *readinessBackend) CheckInputReadiness(ctx context.Context, _, _ string)
 	return session.InputReadiness{Ready: true, State: "YES", PaneID: "%1"}, nil
 }
 
-func (b *readinessBackend) SendKeysIfInputReady(ctx context.Context, _, _, _ string) (session.InputReadiness, error) {
+func (b *readinessBackend) SendKeysIfInputReady(ctx context.Context, _, _, _ string, _ session.InputDeliveryOptions) (session.InputReadiness, error) {
 	b.atomicCtx = ctx
 	return session.InputReadiness{Ready: true, State: "YES", PaneID: "%1"}, nil
 }
@@ -301,7 +301,7 @@ func TestBackendAdapter_ForwardsReadinessCapabilities(t *testing.T) {
 	if err != nil || !readiness.Ready {
 		t.Fatalf("CheckInputReadiness() = (%#v, %v)", readiness, err)
 	}
-	atomic, err := adapter.SendKeysIfInputReady(wantCtx, "worker", "codex-cli", "hello")
+	atomic, err := adapter.SendKeysIfInputReady(wantCtx, "worker", "codex-cli", "hello", session.InputDeliveryOptions{})
 	if err != nil || !atomic.Ready || atomic.PaneID != "%1" {
 		t.Fatalf("SendKeysIfInputReady() = (%#v, %v)", atomic, err)
 	}
@@ -318,7 +318,7 @@ func TestBackendAdapter_ReadinessFailsClosedWhenCapabilityMissing(t *testing.T) 
 	if _, err := adapter.CheckInputReadiness(context.Background(), "worker", "codex-cli"); err == nil {
 		t.Fatal("CheckInputReadiness() succeeded without backend capability")
 	}
-	if _, err := adapter.SendKeysIfInputReady(context.Background(), "worker", "codex-cli", "hello"); err == nil {
+	if _, err := adapter.SendKeysIfInputReady(context.Background(), "worker", "codex-cli", "hello", session.InputDeliveryOptions{}); err == nil {
 		t.Fatal("SendKeysIfInputReady() succeeded without backend capability")
 	}
 }
@@ -334,7 +334,7 @@ func TestTmuxBackend_ForwardsReadinessCapabilities(t *testing.T) {
 	if _, err := backend.CheckInputReadiness(wantCtx, "worker", "codex-cli"); err != nil {
 		t.Fatalf("CheckInputReadiness() error = %v", err)
 	}
-	if _, err := backend.SendKeysIfInputReady(wantCtx, "worker", "codex-cli", "hello"); err != nil {
+	if _, err := backend.SendKeysIfInputReady(wantCtx, "worker", "codex-cli", "hello", session.InputDeliveryOptions{}); err != nil {
 		t.Fatalf("SendKeysIfInputReady() error = %v", err)
 	}
 	if tmuxMock.WaitContext != wantCtx || tmuxMock.InputContext != wantCtx {

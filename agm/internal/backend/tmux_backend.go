@@ -165,12 +165,12 @@ func (b *TmuxBackend) CheckInputReadiness(ctx context.Context, sessionName, harn
 }
 
 // SendKeysIfInputReady forwards the atomic readiness-and-delivery boundary.
-func (b *TmuxBackend) SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string) (session.InputReadiness, error) {
+func (b *TmuxBackend) SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string, options session.InputDeliveryOptions) (session.InputReadiness, error) {
 	sender, ok := b.tmux.(session.AtomicInputSender)
 	if !ok {
 		return session.InputReadiness{}, fmt.Errorf("tmux implementation %T does not expose atomic input delivery", b.tmux)
 	}
-	return sender.SendKeysIfInputReady(ctx, sessionName, harness, keys)
+	return sender.SendKeysIfInputReady(ctx, sessionName, harness, keys, options)
 }
 
 func init() {

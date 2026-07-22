@@ -348,7 +348,7 @@ func (r *mcpCreateSessionRuntime) sendPromptAtomically(ctx context.Context, sess
 	if !ok {
 		return fmt.Errorf("MCP tmux runtime does not expose atomic input delivery")
 	}
-	readiness, err := sender.SendKeysIfInputReady(ctx, sessionName, harness, prompt)
+	readiness, err := sender.SendKeysIfInputReady(ctx, sessionName, harness, prompt, session.InputDeliveryOptions{})
 	if err != nil {
 		return fmt.Errorf("revalidate MCP %s: %w", operation, err)
 	}

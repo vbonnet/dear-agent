@@ -34,6 +34,14 @@ type HarnessInputReadiness struct {
 	State      string
 	Content    string
 	TargetPane string
+	Forced     bool
+}
+
+// InputDeliveryOptions controls narrowly scoped exceptions inside the tmux
+// mutation boundary. AllowBusyComposer accepts only HarnessInputBusy after the
+// expected foreground harness and exact pane have already been proved.
+type InputDeliveryOptions struct {
+	AllowBusyComposer bool
 }
 
 // CheckExpectedHarnessInput proves that the exact session exists, an expected
@@ -75,8 +83,9 @@ func CheckExpectedHarnessInput(ctx context.Context, sessionName, harness string)
 
 // CheckExpectedHarnessInputAndSend serializes the readiness observation and
 // exact-pane delivery under the same tmux mutation lock. A non-ready result
-// never sends input; a ready result is returned only after delivery succeeds.
-func CheckExpectedHarnessInputAndSend(ctx context.Context, sessionName, harness, command string) (HarnessInputReadiness, error) {
+// never sends input unless options explicitly allow the verified QUEUE state;
+// a ready result is returned only after delivery succeeds.
+func CheckExpectedHarnessInputAndSend(ctx context.Context, sessionName, harness, command string, options InputDeliveryOptions) (HarnessInputReadiness, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -89,8 +98,16 @@ func CheckExpectedHarnessInputAndSend(ctx context.Context, sessionName, harness,
 	err := withTmuxLock(func() error {
 		var err error
 		readiness, err = CheckExpectedHarnessInput(ctx, sessionName, harness)
-		if err != nil || !readiness.Ready {
+		if err != nil {
 			return err
+		}
+		allowed, forced := inputDeliveryAllowed(readiness, options)
+		if !allowed {
+			return nil
+		}
+		if forced {
+			readiness.Ready = true
+			readiness.Forced = true
 		}
 		if !isPaneID(readiness.TargetPane) {
 			return fmt.Errorf("ready harness returned invalid tmux pane ID %q", readiness.TargetPane)
@@ -98,6 +115,16 @@ func CheckExpectedHarnessInputAndSend(ctx context.Context, sessionName, harness,
 		return sendCommandToTargetLocked(ctx, readiness.TargetPane, command)
 	})
 	return readiness, err
+}
+
+func inputDeliveryAllowed(readiness HarnessInputReadiness, options InputDeliveryOptions) (allowed, forced bool) {
+	if readiness.Ready {
+		return true, false
+	}
+	if options.AllowBusyComposer && readiness.State == HarnessInputBusy {
+		return true, true
+	}
+	return false, false
 }
 
 // ClassifyHarnessInput is the pure composer classifier. Readiness is scoped to

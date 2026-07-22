@@ -664,7 +664,7 @@ func sendCreatedInputAtomically(callCtx context.Context, opCtx *OpContext, sessi
 	if !ok {
 		return ErrStorageError(operation, fmt.Errorf("tmux backend does not expose atomic input delivery"))
 	}
-	readiness, err := sender.SendKeysIfInputReady(callCtx, sessionName, harness, input)
+	readiness, err := sender.SendKeysIfInputReady(callCtx, sessionName, harness, input, session.InputDeliveryOptions{})
 	if err != nil {
 		if ctxErr := callCtx.Err(); ctxErr != nil {
 			return ctxErr

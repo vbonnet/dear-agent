@@ -66,7 +66,7 @@ func newCLICreateSessionRuntime(sessionName string, existed, trustPreConfigured 
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			readiness, err := tmux.CheckExpectedHarnessInputAndSend(ctx, input.SessionName, "agy", input.Prompt)
+			readiness, err := tmux.CheckExpectedHarnessInputAndSend(ctx, input.SessionName, "agy", input.Prompt, tmux.InputDeliveryOptions{})
 			if err != nil {
 				return fmt.Errorf("revalidate CLI AGY identity bootstrap prompt: %w", err)
 			}

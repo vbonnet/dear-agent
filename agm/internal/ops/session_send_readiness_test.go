@@ -174,6 +174,47 @@ func TestSendMessage_PiPermissionPromptBlocksAtomicDelivery(t *testing.T) {
 	}
 }
 
+func TestSendMessage_ForceDeliversOnlyThroughVerifiedBusyComposer(t *testing.T) {
+	t.Parallel()
+
+	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")}, "my-session")
+	tmuxMock := ctx.Tmux.(*mockTmux)
+	tmuxMock.readiness = session.InputReadiness{State: "QUEUE", PaneID: "%7"}
+
+	result, err := SendMessage(ctx, &SendMessageRequest{Recipient: "id-1", Message: "forced message", Force: true})
+	if err != nil || result == nil || !result.Delivered {
+		t.Fatalf("SendMessage(force busy) = (%#v, %v), want exact-pane delivery", result, err)
+	}
+	if len(tmuxMock.atomicOptions) != 1 || !tmuxMock.atomicOptions[0].AllowBusyComposer {
+		t.Fatalf("atomic delivery options = %#v, want busy-composer override", tmuxMock.atomicOptions)
+	}
+	if len(tmuxMock.sent) != 1 || tmuxMock.sent[0].session != "%7" || tmuxMock.sent[0].keys != "forced message" {
+		t.Fatalf("forced exact-pane sends = %#v, want %%7 forced message", tmuxMock.sent)
+	}
+}
+
+func TestSendMessage_ForceDoesNotBypassProtectedInputStates(t *testing.T) {
+	t.Parallel()
+
+	for _, readinessState := range []string{"PERMISSION", "OVERLAY", "ONBOARDING", "WRONG_HARNESS", "NOT_FOUND"} {
+		readinessState := readinessState
+		t.Run(readinessState, func(t *testing.T) {
+			t.Parallel()
+			ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")}, "my-session")
+			tmuxMock := ctx.Tmux.(*mockTmux)
+			tmuxMock.readiness = session.InputReadiness{State: readinessState, PaneID: "%7"}
+
+			result, err := SendMessage(ctx, &SendMessageRequest{Recipient: "id-1", Message: "must not send", Force: true})
+			if result == nil || result.Delivered || err == nil {
+				t.Fatalf("SendMessage(force %s) = (%#v, %v), want non-delivery", readinessState, result, err)
+			}
+			if len(tmuxMock.sent) != 0 {
+				t.Fatalf("force bypassed %s: %#v", readinessState, tmuxMock.sent)
+			}
+		})
+	}
+}
+
 func TestSendMessage_ReadyWithoutVerifiedPaneFailsClosed(t *testing.T) {
 	ctx := testCtx([]*manifest.Manifest{newManifest("id-1", "my-session", "~/project")}, "my-session")
 	tmuxMock := ctx.Tmux.(*mockTmux)

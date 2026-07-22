@@ -79,12 +79,12 @@ func (t *createReadinessTmux) WaitForHarnessReady(ctx context.Context, sessionNa
 	return t.waitErr
 }
 
-func (t *createReadinessTmux) SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string) (session.InputReadiness, error) {
+func (t *createReadinessTmux) SendKeysIfInputReady(ctx context.Context, sessionName, harness, keys string, options session.InputDeliveryOptions) (session.InputReadiness, error) {
 	if t.atomic != nil {
 		t.atomic()
 	}
 	sentBefore := len(t.SentCommands)
-	readiness, err := t.MockTmux.SendKeysIfInputReady(ctx, sessionName, harness, keys)
+	readiness, err := t.MockTmux.SendKeysIfInputReady(ctx, sessionName, harness, keys, options)
 	if len(t.SentCommands) > sentBefore {
 		*t.order = append(*t.order, "prompt")
 	}
