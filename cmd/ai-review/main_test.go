@@ -142,6 +142,58 @@ func TestRun_OversizeDiffWithOverridePasses(t *testing.T) {
 	}
 }
 
+// TestGitChangedPaths_IncludesRenameSource is the regression guard for the
+// rename bypass: moving a protected file to an ordinary path must still expose
+// the protected SOURCE path to escalation scanning.
+func TestGitChangedPaths_IncludesRenameSource(t *testing.T) {
+	dir := t.TempDir()
+	git := func(args ...string) string {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+		return string(out)
+	}
+	git("init", "-q")
+	if err := os.MkdirAll(filepath.Join(dir, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Content long enough that git would otherwise detect a 100% rename.
+	body := "{\n  \"permissions\": { \"allow\": [\"a\",\"b\",\"c\"], \"deny\": [\"d\"] }\n}\n"
+	if err := os.WriteFile(filepath.Join(dir, ".claude/settings.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "-A")
+	git("commit", "-q", "-m", "base")
+	base := trim(git("rev-parse", "HEAD"))
+	git("mv", ".claude/settings.json", "safe-config.json")
+	git("commit", "-q", "-m", "move")
+	head := trim(git("rev-parse", "HEAD"))
+
+	chdir(t, dir)
+	paths, err := gitChangedPaths(base, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawSource bool
+	for _, p := range paths {
+		if p == ".claude/settings.json" {
+			sawSource = true
+		}
+	}
+	if !sawSource {
+		t.Fatalf("rename source .claude/settings.json missing from changed paths %v", paths)
+	}
+	if got := EscalationTriggers(paths, "", ""); len(got) == 0 {
+		t.Fatal("renaming a protected settings file away must still escalate")
+	}
+}
+
 func chdir(t *testing.T, dir string) {
 	t.Helper()
 	t.Chdir(dir)

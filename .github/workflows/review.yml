@@ -131,6 +131,16 @@ jobs:
           if [ ! -d cmd/ai-review ]; then
             if [ "${OVERRIDE:-false}" = "true" ]; then
               echo "::warning::cmd/ai-review is absent from the trusted base revision (bootstrap); passing on 'ai-review:override'."
+              # AIREV-03: a human override always leaves a sticky audit result,
+              # never just an ephemeral workflow log.
+              if [ -n "${PR:-}" ]; then
+                printf '%s\n' "<!-- ai-review-5d -->" \
+                  "## ⚠️ AI Code Review — passed by human override (bootstrap)" "" \
+                  "> The \`ai-review:override\` label is present and the trusted base revision does not yet contain \`cmd/ai-review\`, so no automated review could run." "" \
+                  "This is the rollout PR that introduces the gate. The override is recorded on this PR as a label." "" \
+                  "<sub>Required gate per REVIEW.md §2/§5.</sub>" > /tmp/ai-review-bootstrap.md
+                gh pr comment "$PR" --repo "$REPO" --body-file /tmp/ai-review-bootstrap.md || true
+              fi
               exit 0
             fi
             echo "::error::cmd/ai-review is absent from the trusted base revision. This is expected only on the rollout PR that introduces it: apply the 'ai-review:override' label after a human review to land it. Thereafter the gate runs from protected base code."

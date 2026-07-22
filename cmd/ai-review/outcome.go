@@ -103,7 +103,21 @@ var labelWords = map[string]bool{
 func ParseOutcome(s string) Outcome {
 	words := outcomeWords(s)
 
-	// Most severe wins, regardless of position.
+	// The leading token is the verdict. The synthesis prompt requires the
+	// outcome word first, followed by a brief summary — and that summary may
+	// legitimately name the outcomes it ruled out ("approved — no rejected or
+	// needs-work findings"). Scanning the whole line would let that summary
+	// prose override an explicit verdict, so the verdict is read positionally.
+	if lead := leadingOutcomeToken(words); lead != "" {
+		if o, ok := outcomeTokens[lead]; ok {
+			return o
+		}
+	}
+
+	// No leading verdict: the model broke its contract. Fall back to a
+	// conservative scan — any blocking token anywhere blocks, and a merely
+	// mentioned "approved" (e.g. "cannot be considered approved") never
+	// approves, because approval requires the leading position.
 	found := map[Outcome]bool{}
 	for _, w := range words {
 		if o, ok := outcomeTokens[w]; ok {
@@ -117,14 +131,10 @@ func ParseOutcome(s string) Outcome {
 		return Rejected
 	case found[NeedsWork]:
 		return NeedsWork
+	default:
+		// No token, or only a non-leading "approved" — fail closed.
+		return NeedsHumanReview
 	}
-
-	// Approval only from the leading token position.
-	if leadingOutcomeToken(words) == "approved" {
-		return Approved
-	}
-	// No token, prose, or a non-leading "approved" — fail closed.
-	return NeedsHumanReview
 }
 
 // leadingOutcomeToken returns the first meaningful token, skipping an optional

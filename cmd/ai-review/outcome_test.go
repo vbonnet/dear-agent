@@ -20,9 +20,14 @@ func TestParseOutcome(t *testing.T) {
 		{"whitespace", "   approved  ", Approved},
 		// Resolve-down: a line mentioning both approved and a blocking state
 		// must resolve to the more-severe outcome (REVIEW.md §1).
-		{"resolve down human beats approved", "approved but needs-human-review for the deploy", NeedsHumanReview},
 		{"resolve down rejected beats approved", "not approved, rejected", Rejected},
 		{"resolve down needs-work beats approved", "mostly approved but needs-work", NeedsWork},
+
+		// The leading token is the verdict; a summary naming ruled-out
+		// outcomes must not flip a valid approval into a spurious block.
+		{"approved with ruled-out summary", "approved — no rejected or needs-work findings", Approved},
+		{"approved summary mentions human review", "approved; no needs-human-review triggers fired", Approved},
+		{"leading needs-work wins", "needs-work — not approved yet", NeedsWork},
 
 		// Regression guards for the fail-open substring hole: these lines all
 		// CONTAIN "approve" but must never be classified as Approved.

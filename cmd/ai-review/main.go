@@ -77,8 +77,14 @@ func gitDiff(base, head string) (string, error) {
 
 // gitChangedPaths lists the files changed between base and head. Used for the
 // deterministic REVIEW.md §3 escalation triggers.
+//
+// --no-renames is load-bearing: with rename detection on, `git mv
+// .claude/settings.json safe/config.json` reports only the *destination* path,
+// so moving a protected file to an ordinary path would slip past escalation.
+// Disabling detection reports the rename as a delete of the old path plus an
+// add of the new one, so the protected source is always scanned.
 func gitChangedPaths(base, head string) ([]string, error) {
-	out, err := exec.Command("git", "diff", "--name-only", base, head).Output()
+	out, err := exec.Command("git", "diff", "--no-renames", "--name-only", base, head).Output()
 	if err != nil {
 		return nil, fmt.Errorf("git diff --name-only %s %s: %w", base, head, err)
 	}
