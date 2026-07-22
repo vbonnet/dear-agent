@@ -23,7 +23,7 @@ type Config struct {
 	ServerURL      string          // OpenCode server URL (e.g., "http://localhost:4096")
 	SessionID      string          // AGM session ID
 	Reconnect      ReconnectConfig // Auto-reconnect configuration
-	FallbackTmux   bool            // Fall back to tmux monitoring if SSE fails
+	FallbackTmux   bool            // Annotate startup errors so the caller can select a tmux fallback
 	HealthProbeURL string          // Health probe endpoint (default: "/health")
 	HealthTimeout  time.Duration   // Health probe timeout (default: 5s)
 	MaxRetries     int             // Max reconnect attempts (0 = unlimited)

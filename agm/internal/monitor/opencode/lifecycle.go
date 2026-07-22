@@ -123,8 +123,8 @@ func (a *Adapter) Start(ctx context.Context) error {
 	// Health probe to OpenCode server
 	if err := a.healthProbe(ctx); err != nil {
 		if a.config.FallbackTmux {
-			slog.Warn("OpenCode SSE adapter health check failed", "error", err, "fallback", "tmux")
-			return fmt.Errorf("health check failed (tmux fallback active): %w", err)
+			slog.Warn("OpenCode SSE adapter health check failed", "error", err, "fallback", "caller-selects-tmux")
+			return fmt.Errorf("health check failed (tmux fallback available to caller): %w", err)
 		}
 		return fmt.Errorf("server health check failed: %w", err)
 	}
