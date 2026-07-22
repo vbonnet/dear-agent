@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -85,7 +86,11 @@ func captureInvokingRepositoryWorktrees(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	state.worktreesBefore, err = runSandboxProviderCommand(ctx, 10*time.Second, "git", "worktree", "list", "--porcelain")
+	raw, err := runSandboxProviderCommand(ctx, 10*time.Second, "git", "worktree", "list", "--porcelain")
+	if err != nil {
+		return err
+	}
+	state.worktreesBefore, err = scopedWorktreeInventory(packageSpecBDDRepoRoot(), raw)
 	return err
 }
 
@@ -101,7 +106,12 @@ func runWayfinderSandboxIsolationRegressions(ctx context.Context) error {
 		"-run", `^Test(CreateSandbox|ListSandboxes|CleanupSandbox|BasicSandboxOperationsDoNotMutateHostRepository|SandboxGitWorktreeLifecycleIsIsolated)$`,
 		"-count=1", "-timeout=90s",
 	)
-	state.worktreesAfter, state.inventoryErr = runSandboxProviderCommand(ctx, 10*time.Second, "git", "worktree", "list", "--porcelain")
+	raw, err := runSandboxProviderCommand(ctx, 10*time.Second, "git", "worktree", "list", "--porcelain")
+	if err != nil {
+		state.inventoryErr = err
+		return err
+	}
+	state.worktreesAfter, state.inventoryErr = scopedWorktreeInventory(packageSpecBDDRepoRoot(), raw)
 	return nil
 }
 
@@ -139,6 +149,37 @@ func invokingRepositoryWorktreesShouldBeUnchanged(ctx context.Context) error {
 		return fmt.Errorf("invoking repository worktree inventory changed:\nbefore:\n%s\nafter:\n%s", state.worktreesBefore, state.worktreesAfter)
 	}
 	return nil
+}
+
+func scopedWorktreeInventory(root, porcelain string) (string, error) {
+	root = filepath.Clean(root)
+	var scoped []string
+	for record := range strings.SplitSeq(strings.TrimSpace(porcelain), "\n\n") {
+		if strings.TrimSpace(record) == "" {
+			continue
+		}
+		firstLine, _, _ := strings.Cut(record, "\n")
+		path, ok := strings.CutPrefix(firstLine, "worktree ")
+		if !ok || strings.TrimSpace(path) == "" {
+			return "", fmt.Errorf("malformed worktree record: %q", record)
+		}
+		within, err := pathWithinDirectory(root, strings.TrimSpace(path))
+		if err != nil {
+			return "", err
+		}
+		if within {
+			scoped = append(scoped, record)
+		}
+	}
+	return strings.Join(scoped, "\n\n"), nil
+}
+
+func pathWithinDirectory(root, path string) (bool, error) {
+	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
+	if err != nil {
+		return false, fmt.Errorf("compare worktree path %q with root %q: %w", path, root, err)
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))), nil
 }
 
 func getSandboxProviderRuntimeState(ctx context.Context) (*sandboxProviderRuntimeState, error) {

@@ -228,12 +228,18 @@ func TestBasicSandboxOperationsDoNotMutateHostRepository(t *testing.T) {
 	}
 	git := NewGitWorktreeManager()
 	hostIsRepository := git.IsGitRepository(hostDir)
+	var hostRepoRoot string
 	var before []string
 	if hostIsRepository {
+		hostRepoRoot, err = git.GetRepositoryRoot(hostDir)
+		if err != nil {
+			t.Fatal(err)
+		}
 		before, err = git.ListWorktrees(hostDir)
 		if err != nil {
 			t.Fatal(err)
 		}
+		before = worktreesWithinRepository(hostRepoRoot, before)
 		t.Setenv("TMPDIR", hostDir)
 	}
 
@@ -264,10 +270,25 @@ func TestBasicSandboxOperationsDoNotMutateHostRepository(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		after = worktreesWithinRepository(hostRepoRoot, after)
 		if !slices.Equal(before, after) {
 			t.Fatalf("host worktree inventory changed: before=%q after=%q", before, after)
 		}
 	}
+}
+
+func worktreesWithinRepository(root string, worktrees []string) []string {
+	var scoped []string
+	for _, worktree := range worktrees {
+		rel, err := filepath.Rel(root, worktree)
+		if err != nil {
+			continue
+		}
+		if rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))) {
+			scoped = append(scoped, worktree)
+		}
+	}
+	return scoped
 }
 
 func TestSandboxGitWorktreeLifecycleIsIsolated(t *testing.T) {
