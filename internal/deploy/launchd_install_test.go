@@ -419,6 +419,19 @@ func isBinary(path string) bool {
 func TestNoRawCopyIntoInstallRoots(t *testing.T) {
 	repoRoot := filepath.Join("..", "..")
 
+	// Documentation must be able to SHOW the retired form in order to warn
+	// against it. Without an escape hatch this guard forbids explaining the very
+	// failure it exists to prevent, so each sanctioned example is allowlisted by
+	// a hash of the command — the same structured-exemption approach used for
+	// apiKeyHelper mentions, and for the same reason: deciding from surrounding
+	// prose whether a command is endorsed or prohibited is not something a
+	// regex can do.
+	allowed, err := loadAllowlist(filepath.Join("testdata", "rawcopy-allowlist.txt"))
+	if err != nil {
+		t.Fatalf("read allowlist: %v", err)
+	}
+	seenExempt := map[string]bool{}
+
 	// Match on the copy's DESTINATION, not on tokens that happen to share the
 	// line.
 	//
@@ -482,6 +495,10 @@ func TestNoRawCopyIntoInstallRoots(t *testing.T) {
 			if offending == "" {
 				continue
 			}
+			if key := clauseKey(offending); allowed[key] {
+				seenExempt[key] = true
+				continue
+			}
 			line = offending
 			t.Errorf("%s:%d tells an operator to copy straight over an install root:\n\t%s\n"+
 				"Copying over an already-executed binary can leave a stale code-signing "+
@@ -492,6 +509,14 @@ func TestNoRawCopyIntoInstallRoots(t *testing.T) {
 				"&& mv -f \"$stage\" <dest>` — a fixed `<dest>.new` is itself racy when two "+
 				"jobs run it at once.",
 				rel, i+1, strings.TrimSpace(line))
+		}
+	}
+
+	for key := range allowed {
+		if !seenExempt[key] {
+			t.Errorf("allowlist entry %s in internal/deploy/testdata/rawcopy-allowlist.txt "+
+				"matches no command any more. Remove it so the file keeps describing the "+
+				"repository as it is.", key)
 		}
 	}
 }

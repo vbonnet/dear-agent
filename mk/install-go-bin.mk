@@ -46,6 +46,18 @@
 # The whole sequence runs in ONE shell so the trap can remove the staging file
 # if any step fails, rather than leaving debris in ~/go/bin.
 #
+# What NOT to write, and what to write instead:
+#
+# Retired form, shown so the failure mode is documented -- do NOT use it:
+#   cp bin/token-refresher /usr/local/bin/token-refresher
+# Correct form:
+#   stage=$(mktemp /usr/local/bin/tr.XXXXXX) && cp bin/token-refresher "$stage" \
+#     && chmod 755 "$stage" && mv -f "$stage" /usr/local/bin/token-refresher
+#
+# (The retired line above is allowlisted in
+# internal/deploy/testdata/rawcopy-allowlist.txt so this warning can show the
+# form it warns about.)
+#
 # Usage: $(call install-go-bin,bin/<name>[,<dest-dir>])
 # dest-dir defaults to ~/go/bin; pass it for hooks and other install roots.
 define install-go-bin
