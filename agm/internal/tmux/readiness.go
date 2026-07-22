@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -345,6 +346,7 @@ func queuedComposerOwnsTail(region, content, harness string) bool {
 }
 
 var queuedPastedTextLinePattern = regexp.MustCompile(`\[Pasted text(?: #\d+)? \+(\d+) lines?\]`)
+var codexQueuedPasteCharPattern = regexp.MustCompile(`^[›>]\s+\[Pasted Content (\d+) chars\]$`)
 
 func queuedPastePayloadOwnsTail(lines []string, isChrome func(string) bool) bool {
 	if len(lines) == 0 {
@@ -440,14 +442,14 @@ func codexInitialQueuedComposerOwnsTail(content string) bool {
 			if !strings.Contains(lines[j], CodexPromptPatterns[1]) {
 				continue
 			}
-			for _, tailLine := range lines[j+1:] {
+			for k, tailLine := range lines[j+1:] {
 				candidate := strings.TrimSpace(tailLine)
 				switch {
 				case candidate == "":
 				case strings.HasPrefix(candidate, "│") && strings.HasSuffix(candidate, "│"):
 				case strings.HasPrefix(candidate, "╰") && strings.HasSuffix(candidate, "╯"):
 				case (strings.HasPrefix(candidate, "› ") || strings.HasPrefix(candidate, "> ")) && hasQueuedInputMarker(candidate):
-					return true
+					return codexQueuedPastePayloadOwnsTail(lines[j+1+k:])
 				default:
 					return false
 				}
@@ -455,6 +457,21 @@ func codexInitialQueuedComposerOwnsTail(content string) bool {
 		}
 	}
 	return false
+}
+
+func codexQueuedPastePayloadOwnsTail(lines []string) bool {
+	if len(lines) < 2 {
+		return false
+	}
+	matches := codexQueuedPasteCharPattern.FindStringSubmatch(strings.TrimSpace(lines[0]))
+	if matches == nil {
+		return false
+	}
+	want, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return false
+	}
+	return utf8.RuneCountInString(strings.Join(lines[1:], "\n")) == want
 }
 
 // CheckExpectedHarnessLiveness scans the exact session's process tree and

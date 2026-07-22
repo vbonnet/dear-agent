@@ -213,8 +213,14 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 		{
 			name:    "initial Codex composer can own observable queued AGM paste",
 			harness: "codex-cli",
-			content: "│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.6 /model to change │\n╰──────────────────────────╯\n› [Pasted Content 2172 chars]\n[From: orchestrator | ID: 1774872000000-orchestr-002 | Sent: 2026-07-21T12:00:00Z]\nrecover",
+			content: "│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.6 /model to change │\n╰──────────────────────────╯\n› [Pasted Content 90 chars]\n[From: orchestrator | ID: 1774872000000-orchestr-002 | Sent: 2026-07-21T12:00:00Z]\nrecover",
 			state:   HarnessInputQueuedAGM,
+		},
+		{
+			name:    "active output after initial Codex queue suppresses recovery",
+			harness: "codex-cli",
+			content: "│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.6 /model to change │\n╰──────────────────────────╯\n› [Pasted Content 90 chars]\n[From: orchestrator | ID: 1774872000000-orchestr-002 | Sent: 2026-07-21T12:00:00Z]\nrecover\nordinary active-work output",
+			state:   HarnessInputBusy,
 		},
 		{
 			name:    "stale initial Codex header cannot own newer queued input",
