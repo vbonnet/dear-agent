@@ -24,10 +24,6 @@ adapters:
       max_delay: 5m                # Maximum backoff delay
       multiplier: 2                # Exponential backoff factor
 
-    # Annotate startup failures so the caller can select a tmux fallback.
-    # This flag does not start Astrocyte or another monitor by itself.
-    fallback_to_tmux: true
-
   # Future adapters can be added here:
   # gemini:
   #   enabled: true
@@ -217,7 +213,6 @@ advanced:
 # adapters:
 #   opencode:
 #     enabled: true
-#     fallback_to_tmux: false  # Do not annotate startup errors with fallback context
 #
 # multi_agent:
 #   default_agent: opencode
@@ -229,7 +224,6 @@ advanced:
 # adapters:
 #   opencode:
 #     enabled: true
-#     fallback_to_tmux: true  # Caller receives fallback-aware error context
 #
 # multi_agent:
 #   default_agent: claude

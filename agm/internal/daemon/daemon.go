@@ -106,7 +106,6 @@ func NewDaemon(cfg Config) *Daemon {
 					Multiplier:   cfg.AppConfig.Adapters.OpenCode.Reconnect.Multiplier,
 				},
 				MaxRetries:     0, // Unlimited retries for daemon
-				FallbackTmux:   cfg.AppConfig.Adapters.OpenCode.FallbackTmux,
 				HealthProbeURL: "/health",
 				HealthTimeout:  5 * time.Second,
 			}
@@ -114,12 +113,7 @@ func NewDaemon(cfg Config) *Daemon {
 			adapter, err := opencode.NewAdapter(cfg.EventBus, adapterConfig)
 			if err != nil {
 				cfg.Logger.Error("Failed to create OpenCode adapter", "error", err)
-				if adapterConfig.FallbackTmux {
-					cfg.Logger.Info("Tmux fallback is available to the caller; no fallback monitor was started")
-				} else {
-					cfg.Logger.Warn("OpenCode adapter creation failed and fallback disabled")
-					cfg.Logger.Warn("OpenCode sessions will NOT be monitored until adapter is fixed")
-				}
+				cfg.Logger.Warn("OpenCode sessions will NOT be monitored until adapter initialization succeeds")
 			} else {
 				d.opencodeAdapter = adapter
 				cfg.Logger.Info("OpenCode SSE adapter initialized", "server", adapterConfig.ServerURL)
@@ -179,28 +173,20 @@ func (d *Daemon) Start() error {
 	}
 }
 
-// startOpenCodeAdapter starts the OpenCode SSE adapter (when initialized) and
-// logs the appropriate fallback messaging when start fails or the adapter was
-// enabled but not initialized.
+// startOpenCodeAdapter starts the OpenCode SSE adapter when initialized and
+// reports explicitly when OpenCode monitoring remains inactive.
 func (d *Daemon) startOpenCodeAdapter() {
 	if d.opencodeAdapter == nil {
 		if d.cfg.AppConfig != nil && d.cfg.AppConfig.Adapters.OpenCode.Enabled {
 			d.cfg.Logger.Warn("OpenCode adapter enabled but not initialized (initialization failed)")
-			if d.cfg.AppConfig.Adapters.OpenCode.FallbackTmux {
-				d.cfg.Logger.Info("Tmux fallback requires explicit caller selection; no fallback monitor is active")
-			}
+			d.cfg.Logger.Warn("OpenCode sessions will NOT be monitored until adapter initialization succeeds")
 		}
 		return
 	}
 	d.cfg.Logger.Info("Starting OpenCode SSE adapter...")
 	if err := d.opencodeAdapter.Start(d.ctx); err != nil {
-		d.cfg.Logger.Warn("OpenCode adapter failed to start", "error", err)
-		if d.cfg.AppConfig != nil && d.cfg.AppConfig.Adapters.OpenCode.FallbackTmux {
-			d.cfg.Logger.Info("Tmux fallback is available to the caller; no fallback monitor was started")
-		} else {
-			d.cfg.Logger.Error("OpenCode adapter start failed and fallback disabled")
-			d.cfg.Logger.Warn("OpenCode sessions will NOT be monitored until adapter successfully starts")
-		}
+		d.cfg.Logger.Error("OpenCode adapter failed to start", "error", err)
+		d.cfg.Logger.Warn("OpenCode sessions will NOT be monitored until adapter successfully starts")
 		return
 	}
 	d.cfg.Logger.Info("OpenCode SSE adapter started successfully")
