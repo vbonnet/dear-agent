@@ -69,7 +69,6 @@ must not imply that a fallback sandbox was created.
 | `overlayfs`, `overlayfs-native` | Linux 5.11+ | Mount lower directories with an upper and work layer. |
 | `gvisor` | Linux with `runsc` | Create a git worktree when possible and validate gVisor availability; callers own later command wrapping. |
 | `apfs` | macOS | Clone source trees into an upper directory and expose it through a merged symlink. |
-| `claudecode-worktree` | all | Create a workspace directory and map selected `SandboxSpec` values to Claude Code arguments; Claude Code owns actual worktree isolation. |
 | `mock` | tests | In-memory lifecycle with configurable failures and delays. |
 
 Bubblewrap and gVisor providers materialize a writable git worktree for the
@@ -77,6 +76,12 @@ target repository. Their fallback symlink layout is not equivalent to
 copy-on-write isolation: writes through a symlink can reach the source. Callers
 requiring a hard isolation guarantee must verify the provider and creation mode,
 not infer it from the word “sandbox.”
+
+The former `claudecode-worktree` registry entry is intentionally retired. It
+created only an empty metadata directory and relied on a later Claude-specific
+launch mode to materialize isolation, while AGM launched every harness directly
+from the returned path. Provider creation must return a real, provider-owned
+workspace; harness-specific launch flags are not a sandbox provider.
 
 ## Provider-specific boundaries
 
@@ -107,21 +112,6 @@ repositories remain separate children. The returned working directory points
 through `merged/repoN` to the clone corresponding to the requested host path,
 including any repository-relative subdirectory.
 
-### Claude Code worktree
-
-This provider creates directory metadata for a worktree-mode caller. It maps
-allowed write directories and budget configuration to CLI arguments and exposes
-tool preset data to callers. It does not directly enforce denied reads, domain
-allowlists, timeouts, or tool restrictions.
-
-## SandboxSpec
-
-`SandboxSpec` is a declarative cross-provider shape with filesystem, network,
-resource, and tool fields plus read-only, code-only, and full-access presets.
-Support is not uniform. A field is effective only when the selected provider or
-its caller explicitly consumes it. Adding a field to the struct is not an
-isolation guarantee.
-
 ## Secrets
 
 Filesystem providers may write request secrets to a provider-owned `.env` file.
@@ -136,7 +126,6 @@ separate caller and harness responsibilities.
 | Registry and platform selection | `factory.go` |
 | Provider interface | `provider.go` |
 | Request and result shapes | `types.go` |
-| Declarative settings and presets | `spec.go` |
 | AGM wiring | `agm/cmd/agm/new_sandbox.go` |
 | Implementations | `apfs`, `bubblewrap`, `gvisor`, `overlayfs`, `claudecode_provider.go` |
 

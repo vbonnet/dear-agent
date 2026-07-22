@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -92,19 +93,51 @@ func TestSandboxIntegration_Documentation(t *testing.T) {
 	t.Log("1. Sandbox is ON by default (config.Sandbox.Enabled=true)")
 	t.Log("2. --sandbox flag REMOVED (breaking change)")
 	t.Log("3. --no-sandbox flag disables sandbox")
-	t.Log("4. --sandbox-provider selects provider (auto, overlayfs, apfs, claudecode-worktree, mock)")
-	t.Log("5. SandboxSpec type added for provider-agnostic configuration")
-	t.Log("6. ClaudeCodeProvider wraps Claude Code native worktree isolation")
+	t.Log("4. --sandbox-provider selects a materializing provider (auto, bubblewrap, overlayfs, gvisor, apfs, mock)")
 	t.Log("")
 	t.Log("FLAGS:")
 	t.Log("--no-sandbox        Disable sandbox isolation (sandbox is ON by default)")
-	t.Log("--sandbox-provider  Specify provider (auto, overlayfs, apfs, claudecode-worktree, mock)")
+	t.Log("--sandbox-provider  Specify provider (auto, bubblewrap, overlayfs, gvisor, apfs, mock)")
 	t.Log("")
 	t.Log("BEHAVIOR:")
 	t.Log("- Default: Sandbox enabled (config.Sandbox.Enabled=true)")
 	t.Log("- If --no-sandbox: Sandbox disabled")
 	t.Log("- If sandbox enabled: workDir changed to the provider-mapped project directory")
 	t.Log("- If error during creation: Sandbox cleaned up automatically")
+
+	flag := newCmd.Flags().Lookup("sandbox-provider")
+	if flag == nil {
+		t.Fatal("new command is missing --sandbox-provider")
+	}
+	for _, name := range []string{"auto", "bubblewrap", "overlayfs", "gvisor", "apfs", "mock"} {
+		if !strings.Contains(flag.Usage, name) {
+			t.Errorf("--sandbox-provider usage %q omits %q", flag.Usage, name)
+		}
+	}
+	if strings.Contains(flag.Usage, "claudecode-worktree") {
+		t.Errorf("--sandbox-provider usage still advertises retired provider: %q", flag.Usage)
+	}
+}
+
+func TestProvisionSandboxRejectsRetiredClaudeCodeProviderBeforeWorkspaceCreation(t *testing.T) {
+	testHome := t.TempDir()
+	t.Setenv("HOME", testHome)
+
+	const sessionID = "retired-claudecode-provider"
+	got, err := provisionSandbox(context.Background(), "claudecode-worktree", sessionID, testHome)
+	if err == nil {
+		t.Fatal("provisionSandbox() error = nil, want retired provider rejection")
+	}
+	if got != nil {
+		t.Fatalf("provisionSandbox() sandbox = %#v, want nil", got)
+	}
+	var sandboxErr *sandbox.Error
+	if !errors.As(err, &sandboxErr) || sandboxErr.Code != sandbox.ErrCodeUnsupportedPlatform {
+		t.Fatalf("provisionSandbox() error = %v, want unsupported-platform sandbox error", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(testHome, ".agm", "sandboxes", sessionID)); !os.IsNotExist(statErr) {
+		t.Fatalf("retired provider materialized a workspace: %v", statErr)
+	}
 }
 
 // withEmptySandboxRepoConfig points cfg at an empty Sandbox.Repos list (so

@@ -57,6 +57,8 @@ func RegisterSandboxProviderGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM runs the sandbox working directory regressions$`, agmRunsSandboxWorkingDirectoryRegressions)
 	ctx.Step(`^sandbox providers should preserve the requested project directory$`, sandboxProvidersShouldPreserveRequestedProjectDirectory)
 	ctx.Step(`^AGM should route the mapped directory through the shared harness lifecycle$`, agmShouldRouteMappedDirectoryThroughSharedHarnessLifecycle)
+	ctx.Step(`^AGM runs the retired sandbox provider regressions$`, agmRunsRetiredSandboxProviderRegressions)
+	ctx.Step(`^claudecode-worktree should be rejected before workspace creation$`, claudeCodeWorktreeShouldBeRejectedBeforeWorkspaceCreation)
 	ctx.Step(`^the invoking repository worktree inventory is captured$`, captureInvokingRepositoryWorktrees)
 	ctx.Step(`^Wayfinder sandbox isolation regressions run$`, runWayfinderSandboxIsolationRegressions)
 	ctx.Step(`^the Wayfinder sandbox isolation regressions should pass$`, wayfinderSandboxIsolationRegressionsShouldPass)
@@ -133,6 +135,38 @@ func agmShouldRouteMappedDirectoryThroughSharedHarnessLifecycle(ctx context.Cont
 	} {
 		if !strings.Contains(state.output, "--- PASS: "+name) {
 			return fmt.Errorf("AGM sandbox lifecycle output does not show %s passing:\n%s", name, state.output)
+		}
+	}
+	return nil
+}
+
+func agmRunsRetiredSandboxProviderRegressions(ctx context.Context) error {
+	state, ok := ctx.Value(sandboxProviderCleanupStateKey{}).(*sandboxProviderCleanupState)
+	if !ok || state == nil {
+		return fmt.Errorf("sandbox provider cleanup state not initialized")
+	}
+	state.output, state.err = runSandboxProviderCommand(ctx, 2*time.Minute,
+		"go", "test", "-v", "-count=1", "-timeout=90s", "-run",
+		`^(TestProviderLookup_RetiredClaudeCodeWorktree|TestProvisionSandboxRejectsRetiredClaudeCodeProviderBeforeWorkspaceCreation)$`,
+		"./internal/sandbox", "./agm/cmd/agm",
+	)
+	return nil
+}
+
+func claudeCodeWorktreeShouldBeRejectedBeforeWorkspaceCreation(ctx context.Context) error {
+	state, ok := ctx.Value(sandboxProviderCleanupStateKey{}).(*sandboxProviderCleanupState)
+	if !ok || state == nil {
+		return fmt.Errorf("sandbox provider cleanup state not initialized")
+	}
+	if state.err != nil {
+		return fmt.Errorf("retired sandbox provider regressions: %w: %s", state.err, state.output)
+	}
+	for _, name := range []string{
+		"TestProviderLookup_RetiredClaudeCodeWorktree",
+		"TestProvisionSandboxRejectsRetiredClaudeCodeProviderBeforeWorkspaceCreation",
+	} {
+		if !strings.Contains(state.output, "--- PASS: "+name) {
+			return fmt.Errorf("retired provider output does not show %s passing:\n%s", name, state.output)
 		}
 	}
 	return nil

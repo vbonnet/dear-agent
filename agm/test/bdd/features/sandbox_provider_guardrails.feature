@@ -31,6 +31,10 @@ Feature: Sandbox provider guardrails
     Then sandbox providers should preserve the requested project directory
     And AGM should route the mapped directory through the shared harness lifecycle
 
+  Scenario: Retired pseudo-providers fail before workspace creation
+    When AGM runs the retired sandbox provider regressions
+    Then claudecode-worktree should be rejected before workspace creation
+
   Scenario: Wayfinder sandbox regressions preserve the invoking repository
     Given the invoking repository worktree inventory is captured
     When Wayfinder sandbox isolation regressions run

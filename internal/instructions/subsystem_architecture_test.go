@@ -151,7 +151,7 @@ func TestSandboxArchitectureMatchesSelectionOrder(t *testing.T) {
 	if strings.Index(source, "case hasBubblewrap():") > strings.Index(source, "case info.HasOverlayFS:") {
 		t.Fatal("sandbox factory no longer prefers bubblewrap before OverlayFS")
 	}
-	for _, provider := range []string{"bubblewrap", "overlayfs", "gvisor", "apfs", "claudecode-worktree", "mock"} {
+	for _, provider := range []string{"bubblewrap", "overlayfs", "gvisor", "apfs", "mock"} {
 		if !strings.Contains(doc, "`"+provider+"`") {
 			t.Errorf("sandbox architecture omits provider %q", provider)
 		}
