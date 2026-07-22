@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"golang.org/x/term"
@@ -51,8 +50,18 @@ func TestAgyMultilinePasteIntegrationPreservesOneBracketedSubmission(t *testing.
 		t.Fatalf("create isolated tmux session: %v", err)
 	}
 	t.Cleanup(func() { cleanupAgyFixtureTmuxServer(t, socketPath) })
-	command := fmt.Sprintf("AGY_BRACKETED_PASTE_HELPER=1 AGY_BRACKETED_PASTE_OUTPUT=%s %s -test.run '^TestAgyBracketedPasteHelper$'",
-		launchparity.ShellQuote(outputPath), launchparity.ShellQuote(fixtureExecutable))
+	for _, export := range []string{
+		"export AGY_BRACKETED_PASTE_HELPER=1",
+		"export AGY_BRACKETED_PASTE_OUTPUT=input.bin",
+	} {
+		if err := tmux.SendCommand(sessionName, export); err != nil {
+			t.Fatalf("set fixture environment with %q: %v", export, err)
+		}
+	}
+	// Keep the shell composer input short. A long inline environment prefix can
+	// wrap across the zsh prompt and make the setup itself exercise Enter retry
+	// heuristics instead of the AGY bracketed-paste behavior this test owns.
+	command := "./agy -test.run '^TestAgyBracketedPasteHelper$'"
 	if err := tmux.SendCommand(sessionName, command); err != nil {
 		t.Fatalf("launch bracketed-paste fixture: %v", err)
 	}
