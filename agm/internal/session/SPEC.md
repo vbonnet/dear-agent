@@ -27,7 +27,9 @@ directly, including the optional harness-process liveness capability
 
 **SESS-07** When AGM detects context for a Pi manifest, the system shall resolve the exact persisted native transcript identity and reject a transcript-path mismatch.
 
-**SESS-08** When AGM converts Pi native usage into context percentage, the system shall use the exact Pi 0.81 model-catalog window for known provider-qualified models and a conservative documented fallback for unknown models.
+**SESS-08** When AGM converts Pi native usage into context percentage, the system shall preserve case-sensitive route identity and the exact route-specific Pi 0.81 model-catalog window for known direct or nested OpenRouter provider-qualified models and a conservative documented fallback for unknown or multiply qualified direct-provider models.
+
+**SESS-09** When a Pi transcript identifies a configured model declaration or an override matching its exact provider-qualified route, the system shall read only a bounded non-symlink regular `models.json` that is not writable by group or other users, shall resolve the case-sensitive provider separately from the complete opaque model ID with Pi declaration and override precedence independently of AGM's static model-window and provider tables, shall distinguish an omitted custom-model window from an explicit null, shall accept positive integral explicit context windows no larger than 16,777,216 tokens regardless of equivalent JSON integer, decimal, or exponent spelling, and shall fall back without evaluating credential or header values when the catalog or match is absent, ambiguous, malformed, unsafe, fractional, invalid, or oversized.
 
 ## Key Invariants
 
@@ -41,3 +43,4 @@ directly, including the optional harness-process liveness capability
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
+- Feature: `agm/test/bdd/features/pi_custom_context.feature`

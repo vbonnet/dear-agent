@@ -2,10 +2,12 @@ package session
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"math"
+	"math/big"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -358,31 +360,284 @@ func detectPiContext(pi *manifest.Pi) (*manifest.ContextUsage, error) {
 	}, nil
 }
 
+const (
+	piModelCatalogMaxBytes         = 1 << 20
+	piModelCatalogMaxModels        = 4096
+	piCustomModelDefaultContext    = 128000
+	piModelCatalogMaxContextWindow = 16 * 1024 * 1024
+)
+
+type piModelCatalog struct {
+	Providers map[string]piModelCatalogProvider `json:"providers"`
+}
+
+type piModelCatalogProvider struct {
+	Models         []piModelCatalogModel             `json:"models"`
+	ModelOverrides map[string]piModelCatalogOverride `json:"modelOverrides"`
+}
+
+type piModelCatalogModel struct {
+	ID            string                      `json:"id"`
+	ContextWindow piModelCatalogContextWindow `json:"contextWindow"`
+}
+
+type piModelCatalogOverride struct {
+	ContextWindow piModelCatalogContextWindow `json:"contextWindow"`
+}
+
+type piModelCatalogContextWindow struct {
+	value   int
+	present bool
+	valid   bool
+}
+
+func (window *piModelCatalogContextWindow) UnmarshalJSON(data []byte) error {
+	*window = piModelCatalogContextWindow{present: true}
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		return nil
+	}
+	var number json.Number
+	if err := json.Unmarshal(data, &number); err != nil {
+		return err
+	}
+	var exact big.Rat
+	if _, ok := exact.SetString(number.String()); !ok || !exact.IsInt() || !exact.Num().IsInt64() {
+		return nil
+	}
+	value := exact.Num().Int64()
+	if value <= 0 || value > piModelCatalogMaxContextWindow {
+		return nil
+	}
+	window.value = int(value)
+	window.valid = true
+	return nil
+}
+
 func piModelContextWindow(model string) int {
-	model = strings.TrimPrefix(strings.ToLower(model), "anthropic/")
-	model = strings.TrimPrefix(model, "openai/")
-	model = strings.TrimPrefix(model, "google/")
-	model = strings.TrimPrefix(model, "openrouter/")
+	if contextWindow, ok := piConfiguredModelContextWindow(model); ok {
+		return contextWindow
+	}
+	return piNativeModelContextWindow(model)
+}
+
+func piNativeModelContextWindow(model string) int {
+	if contextWindow, ok := piKnownNativeModelContextWindow(model); ok {
+		return contextWindow
+	}
+	return 200000
+}
+
+func piKnownNativeModelContextWindow(model string) (int, bool) {
+	// Pi provider/model IDs are case-sensitive. Only OpenRouter owns a nested
+	// vendor route here; direct providers may remove at most one prefix.
+	model = strings.TrimSpace(model)
+	if route, ok := strings.CutPrefix(model, "openrouter/"); ok {
+		return piKnownOpenRouterModelContextWindow(route)
+	}
+	for _, provider := range []string{"anthropic/", "openai/", "google/"} {
+		if route, ok := strings.CutPrefix(model, provider); ok {
+			return piKnownDirectModelContextWindow(route)
+		}
+	}
+	return piKnownDirectModelContextWindow(model)
+}
+
+func piKnownDirectModelContextWindow(model string) (int, bool) {
 	switch model {
 	case "claude-fable-5", "claude-opus-4-8", "claude-sonnet-4-6":
-		return 1000000
+		return 1000000, true
 	case "gpt-5.3-chat-latest", "gpt-5.3-codex-spark":
-		return 128000
+		return 128000, true
 	case "gpt-5.3-codex", "gpt-5.4-mini", "gpt-5.4-nano":
-		return 400000
+		return 400000, true
 	case "gpt-5.4", "gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna":
-		return 272000
+		return 272000, true
 	case "gpt-5.4-pro", "gpt-5.5-pro":
-		return 1050000
+		return 1050000, true
 	case "gemini-3.5-flash", "gemini-3.1-flash-lite", "z-ai/glm-5.2", "deepseek/deepseek-v4-pro":
-		return 1048576
+		return 1048576, true
 	case "nvidia/nemotron-3-ultra-550b-a55b":
-		return 512288
+		return 512288, true
 	case "qwen/qwen3.6-max-preview":
-		return 262144
+		return 262144, true
 	default:
-		return 200000
+		return 0, false
 	}
+}
+
+// OpenRouter vendor routes have their own Pi catalog entries. In particular,
+// OpenRouter exposes the long-context OpenAI routes while direct OpenAI keeps
+// several models at 272k for short-context pricing, so nested routes must not
+// be collapsed into direct-provider defaults.
+func piKnownOpenRouterModelContextWindow(route string) (int, bool) {
+	switch route {
+	case "anthropic/claude-fable-5":
+		return 1000000, true
+	case "openai/gpt-5.3-codex", "openai/gpt-5.4-mini", "openai/gpt-5.4-nano":
+		return 400000, true
+	case "openai/gpt-5.4", "openai/gpt-5.5", "openai/gpt-5.6-sol",
+		"openai/gpt-5.6-terra", "openai/gpt-5.6-luna", "openai/gpt-5.4-pro",
+		"openai/gpt-5.5-pro":
+		return 1050000, true
+	case "google/gemini-3.5-flash", "google/gemini-3.1-flash-lite",
+		"z-ai/glm-5.2", "deepseek/deepseek-v4-pro":
+		return 1048576, true
+	case "nvidia/nemotron-3-ultra-550b-a55b":
+		return 512288, true
+	case "qwen/qwen3.6-max-preview":
+		return 262144, true
+	default:
+		return 0, false
+	}
+}
+
+func piConfiguredModelContextWindow(model string) (int, bool) {
+	catalog, ok := readPiModelCatalog()
+	if !ok {
+		return 0, false
+	}
+	provider, modelID, qualified := strings.Cut(strings.TrimSpace(model), "/")
+	if qualified {
+		configured, exists := catalog.Providers[provider]
+		if !exists {
+			return 0, false
+		}
+		return piProviderModelContextWindow(configured, modelID, true)
+	}
+	modelID = provider
+
+	window, matched := 0, false
+	for providerID, configured := range catalog.Providers {
+		_, knownNativeModel := piKnownNativeModelContextWindow(providerID + "/" + modelID)
+		candidate, exists := piProviderModelContextWindow(configured, modelID, knownNativeModel)
+		if !exists {
+			continue
+		}
+		if matched && candidate != window {
+			return 0, false
+		}
+		window, matched = candidate, true
+	}
+	return window, matched
+}
+func readPiModelCatalog() (piModelCatalog, bool) {
+	path, err := piModelCatalogPath()
+	if err != nil {
+		return piModelCatalog{}, false
+	}
+	data, ok := readSafePiModelCatalog(path)
+	if !ok {
+		return piModelCatalog{}, false
+	}
+	return decodePiModelCatalog(data)
+}
+
+func readSafePiModelCatalog(path string) ([]byte, bool) {
+	before, err := os.Lstat(path)
+	if err != nil || !safePiModelCatalogFile(before) {
+		return nil, false
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, false
+	}
+	defer file.Close()
+	pathAfterOpen, err := os.Lstat(path)
+	if err != nil || !safePiModelCatalogFile(pathAfterOpen) || !os.SameFile(before, pathAfterOpen) {
+		return nil, false
+	}
+	after, err := file.Stat()
+	if err != nil || !safePiModelCatalogFile(after) || !os.SameFile(before, after) {
+		return nil, false
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, piModelCatalogMaxBytes+1))
+	if err != nil || len(data) > piModelCatalogMaxBytes {
+		return nil, false
+	}
+	return data, true
+}
+
+func decodePiModelCatalog(data []byte) (piModelCatalog, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	var catalog piModelCatalog
+	if err := decoder.Decode(&catalog); err != nil {
+		return piModelCatalog{}, false
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return piModelCatalog{}, false
+	}
+	modelCount := 0
+	for _, provider := range catalog.Providers {
+		modelCount += len(provider.Models) + len(provider.ModelOverrides)
+		if modelCount > piModelCatalogMaxModels {
+			return piModelCatalog{}, false
+		}
+	}
+	return catalog, true
+}
+
+func safePiModelCatalogFile(info os.FileInfo) bool {
+	return info.Mode()&os.ModeSymlink == 0 &&
+		info.Mode().IsRegular() &&
+		info.Mode().Perm()&0o022 == 0 &&
+		info.Size() >= 0 && info.Size() <= piModelCatalogMaxBytes
+}
+
+func piModelCatalogPath() (string, error) {
+	root := strings.TrimSpace(os.Getenv("PI_CODING_AGENT_DIR"))
+	if root == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		root = filepath.Join(home, ".pi", "agent")
+	}
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "models.json"), nil
+}
+
+func piProviderModelContextWindow(provider piModelCatalogProvider, modelID string, recordedRoute bool) (int, bool) {
+	window, matched := 0, false
+	for _, model := range provider.Models {
+		if strings.TrimSpace(model.ID) != modelID {
+			continue
+		}
+		candidate, ok := validPiModelContextWindow(model.ContextWindow, true)
+		if !ok {
+			return 0, false
+		}
+		// Pi upserts custom definitions in declaration order, so the last
+		// duplicate is effective before modelOverrides are applied.
+		window, matched = candidate, true
+	}
+	if override, ok := provider.ModelOverrides[modelID]; ok && override.ContextWindow.present {
+		// A provider-qualified native transcript proves Pi knew this exact route.
+		// That evidence remains valid when a newer Pi adds providers after AGM's
+		// release; unqualified IDs still require a declaration to avoid guessing.
+		if !matched && !recordedRoute {
+			return 0, false
+		}
+		return validPiModelContextWindow(override.ContextWindow, false)
+	}
+	return window, matched
+}
+
+func validPiModelContextWindow(value piModelCatalogContextWindow, useDefault bool) (int, bool) {
+	if !value.present {
+		if useDefault {
+			return piCustomModelDefaultContext, true
+		}
+		return 0, false
+	}
+	if !value.valid || value.value <= 0 || value.value > piModelCatalogMaxContextWindow {
+		return 0, false
+	}
+	return value.value, true
 }
 
 // findConversationLog locates the conversation log file for a session.
