@@ -3,6 +3,7 @@
 package lifecycle_test
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,11 +32,7 @@ func TestCodexLifecycleUsesIsolatedSourceEnvironment(t *testing.T) {
 		t.Skipf("tmux cannot create an isolated server in this environment: %v", err)
 	}
 
-	const fakeCodex = `#!/bin/sh
-printf 'OpenAI Codex (v0.144.0)\n'
-exec sleep 300
-`
-	if err := env.WriteExecutable("codex", fakeCodex); err != nil {
+	if err := installFakeCodex(env); err != nil {
 		t.Fatalf("install fake Codex: %v", err)
 	}
 
@@ -120,4 +117,31 @@ exec sleep 300
 	if _, err := os.Stat(env.Context.BaseDir); !os.IsNotExist(err) {
 		t.Fatalf("isolated root survived cleanup: %v", err)
 	}
+}
+
+func installFakeCodex(env *helpers.IsolatedEnvironment) error {
+	const source = `package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func main() {
+	fmt.Println("│ >_ OpenAI Codex (v0.144.0) │")
+	fmt.Println("│ model: gpt-5.4 /model to change │")
+	fmt.Println("›")
+	time.Sleep(5 * time.Minute)
+}
+`
+	sourcePath := filepath.Join(env.Context.BaseDir, "fake-codex.go")
+	if err := os.WriteFile(sourcePath, []byte(source), 0600); err != nil {
+		return err
+	}
+	command := exec.Command("go", "build", "-o", filepath.Join(env.BinDir, "codex"), sourcePath)
+	command.Env = env.Environ()
+	if output, err := command.CombinedOutput(); err != nil {
+		return fmt.Errorf("build fake Codex process: %w: %s", err, output)
+	}
+	return nil
 }
