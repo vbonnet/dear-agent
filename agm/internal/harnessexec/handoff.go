@@ -97,7 +97,7 @@ func PrepareCodexCommand(launch CodexLaunch, parent []string) (PreparedCommand, 
 	if err != nil {
 		return PreparedCommand{}, fmt.Errorf("resolve AGM private executor: %w", err)
 	}
-	snapshot := removeEnvironment(CodexEnvironment(parent, launch.SessionName), paneIdentityEnvironment)
+	snapshot := removeEnvironment(CodexEnvironment(parent, launch.SessionName), paneRuntimeEnvironment)
 	handoffPath, err := stageHandoff(CodexProtocol, snapshot, launch.DeferUntilProducerExit)
 	if err != nil {
 		return PreparedCommand{}, err

@@ -136,12 +136,16 @@ func TestPreparedClaudeCommandCarriesCallerOnlyOAuthAndTelemetry(t *testing.T) {
 	}
 }
 
-func TestPreparedCodexCommandCarriesCallerAllowlistAndPreservesPaneIdentity(t *testing.T) {
+func TestPreparedCodexCommandCarriesCallerAllowlistAndPreservesPaneRuntime(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
 	t.Setenv("OPENAI_API_KEY", "stale-pane-openai")
 	t.Setenv("CODEX_ACCESS_TOKEN", "stale-pane-codex")
 	t.Setenv("TMUX", "live-pane-tmux")
 	t.Setenv("TMUX_PANE", "%9")
+	t.Setenv("TERM", "tmux-256color")
+	t.Setenv("COLORTERM", "truecolor")
+	t.Setenv("TERM_PROGRAM", "tmux")
+	t.Setenv("TERM_PROGRAM_VERSION", "3.6a")
 
 	originalExecutablePath := executablePath
 	originalLookPathInEnvironment := lookPathInEnvironment
@@ -158,6 +162,8 @@ func TestPreparedCodexCommandCarriesCallerAllowlistAndPreservesPaneIdentity(t *t
 	}, []string{
 		"PATH=/caller/bin", "HOME=/caller/home", "PWD=/stale/caller/work",
 		"TMUX=stale-caller-tmux", "TMUX_PANE=%1",
+		"TERM=dumb", "COLORTERM=stale-caller-color",
+		"TERM_PROGRAM=CodexDesktop", "TERM_PROGRAM_VERSION=0.0",
 		"OPENAI_API_KEY=caller-openai", "CODEX_ACCESS_TOKEN=caller-codex",
 		"ANTHROPIC_API_KEY=rejected-anthropic",
 	})
@@ -186,11 +192,15 @@ func TestPreparedCodexCommandCarriesCallerAllowlistAndPreservesPaneIdentity(t *t
 	}
 	values := environmentMap(childEnvironment)
 	for name, want := range map[string]string{
-		"OPENAI_API_KEY":     "caller-openai",
-		"CODEX_ACCESS_TOKEN": "caller-codex",
-		"TMUX":               "live-pane-tmux",
-		"TMUX_PANE":          "%9",
-		"PWD":                "/tmp/work",
+		"OPENAI_API_KEY":       "caller-openai",
+		"CODEX_ACCESS_TOKEN":   "caller-codex",
+		"TMUX":                 "live-pane-tmux",
+		"TMUX_PANE":            "%9",
+		"TERM":                 "tmux-256color",
+		"COLORTERM":            "truecolor",
+		"TERM_PROGRAM":         "tmux",
+		"TERM_PROGRAM_VERSION": "3.6a",
+		"PWD":                  "/tmp/work",
 	} {
 		if got := values[name]; got != want {
 			t.Errorf("Codex child %s = %q, want %q", name, got, want)
