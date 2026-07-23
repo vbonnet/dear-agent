@@ -56,7 +56,16 @@ var codexAllowedEnvironment = []string{
 	"AGM_SESSION_BACKEND", "WORKSPACE",
 }
 
-var paneIdentityEnvironment = map[string]bool{"TMUX": true, "TMUX_PANE": true}
+// paneRuntimeEnvironment names terminal state that belongs to the target pane,
+// not the process that prepared a private handoff. In particular, a non-TTY
+// caller can report TERM=dumb even though tmux has created a fully capable
+// tmux-256color pane. Restoring the caller value would make interactive
+// harnesses reject their actual terminal.
+var paneRuntimeEnvironment = map[string]bool{
+	"TMUX": true, "TMUX_PANE": true,
+	"TERM": true, "COLORTERM": true,
+	"TERM_PROGRAM": true, "TERM_PROGRAM_VERSION": true,
+}
 
 var claudeHandoffEnvironment = map[string]bool{
 	auth.OAuthEnvVar: true, "ANTHROPIC_API_KEY": true,
@@ -263,7 +272,7 @@ func runCodex(args []string) error {
 			return handoffErr
 		}
 		environ = CodexEnvironment(handoff.Environment, request.SessionName)
-		environ = overlayEnvironment(environ, selectedEnvironment(os.Environ(), paneIdentityEnvironment))
+		environ = overlayEnvironment(environ, selectedEnvironment(os.Environ(), paneRuntimeEnvironment))
 	}
 	// The caller snapshot can come from a process outside the target pane.
 	// Keep the child's logical working directory aligned with the validated
