@@ -3,13 +3,39 @@ package codexcontrol
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
+
+func TestCodexProxyHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_CODEX_PROXY_HELPER") != "1" {
+		return
+	}
+
+	conn, err := net.Dial("tcp", os.Args[len(os.Args)-1])
+	if err != nil {
+		os.Exit(1)
+	}
+	copyDone := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(conn, os.Stdin)
+		_ = conn.Close()
+		close(copyDone)
+	}()
+	_, _ = io.Copy(os.Stdout, conn)
+	<-copyDone
+	os.Exit(0)
+}
 
 func TestStartRemoteControlAcceptsDaemonStatusWhenStdoutClosesLate(t *testing.T) {
 	script := filepath.Join(t.TempDir(), "codex")
@@ -132,4 +158,97 @@ func TestReadResponseReturnsRPCError(t *testing.T) {
 	if !strings.Contains(err.Error(), "bad params") {
 		t.Fatalf("error = %q, want bad params", err.Error())
 	}
+}
+
+func TestRequestUsesWebSocketProxy(t *testing.T) {
+	serverErr := make(chan error, 1)
+	report := func(err error) {
+		select {
+		case serverErr <- err:
+		default:
+		}
+	}
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			report(err)
+			return
+		}
+		defer conn.Close()
+
+		var initialize rpcRequest
+		if err := conn.ReadJSON(&initialize); err != nil {
+			report(err)
+			return
+		}
+		if initialize.ID != 1 || initialize.Method != "initialize" {
+			report(&unexpectedRequestError{got: initialize, wantID: 1, wantMethod: "initialize"})
+			return
+		}
+		if err := conn.WriteJSON(rpcNotification{Method: "remoteControl/status/changed", Params: map[string]any{}}); err != nil {
+			report(err)
+			return
+		}
+		if err := conn.WriteJSON(rpcResponse{ID: 1, Result: json.RawMessage(`{}`)}); err != nil {
+			report(err)
+			return
+		}
+
+		var initialized rpcNotification
+		if err := conn.ReadJSON(&initialized); err != nil {
+			report(err)
+			return
+		}
+		if initialized.Method != "initialized" {
+			report(&unexpectedRequestError{got: initialized, wantMethod: "initialized"})
+			return
+		}
+
+		var list rpcRequest
+		if err := conn.ReadJSON(&list); err != nil {
+			report(err)
+			return
+		}
+		if list.ID != 2 || list.Method != "thread/list" {
+			report(&unexpectedRequestError{got: list, wantID: 2, wantMethod: "thread/list"})
+			return
+		}
+		if err := conn.WriteJSON(rpcResponse{ID: 2, Result: json.RawMessage(`{"data":[{"id":"thr_123"}]}`)}); err != nil {
+			report(err)
+		}
+	}))
+	defer server.Close()
+
+	originalExec := execCommandContext
+	execCommandContext = func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=TestCodexProxyHelperProcess", "--", strings.TrimPrefix(server.URL, "http://"))
+		cmd.Env = append(os.Environ(), "GO_WANT_CODEX_PROXY_HELPER=1")
+		return cmd
+	}
+	t.Cleanup(func() { execCommandContext = originalExec })
+
+	archived := false
+	threads, err := (&Client{Timeout: 5 * time.Second}).ListThreads(context.Background(), ListThreadsOptions{Archived: &archived, Limit: 5})
+	if err != nil {
+		t.Fatalf("ListThreads returned error: %v", err)
+	}
+	if len(threads.Data) != 1 || threads.Data[0].ID != "thr_123" {
+		t.Fatalf("ListThreads data = %#v, want thread thr_123", threads.Data)
+	}
+	select {
+	case err := <-serverErr:
+		t.Fatalf("WebSocket proxy received unexpected request: %v", err)
+	default:
+	}
+}
+
+type unexpectedRequestError struct {
+	got        any
+	wantID     int
+	wantMethod string
+}
+
+func (e *unexpectedRequestError) Error() string {
+	return "unexpected request"
 }

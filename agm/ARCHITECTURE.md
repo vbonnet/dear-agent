@@ -52,7 +52,7 @@ The adapter pattern enables AGM to support multiple AI agents with a unified int
 
 - **Claude Adapter**: CLI integration, UUID detection, slash commands, history.jsonl parsing
 - **Gemini Adapter**: API integration, session file management, command translation
-- **Codex Adapter**: OpenAI API integration, thread management
+- **Codex Adapter**: Codex CLI app-server control, remote thread management
 - **OpenCode Adapter**: SSE event stream integration, server port management, real-time state updates
 
 Each adapter implements the unified `Agent` interface, allowing AGM to:
