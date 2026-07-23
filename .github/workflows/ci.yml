@@ -256,9 +256,6 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      - name: Install source AGM for legacy host-dependent packages
-        run: go install ./agm/cmd/agm
-
       - name: Run credential-free contract graph
         run: go test -race -count=1 -timeout=20m -tags=contract ./agm/test/contract/...
 

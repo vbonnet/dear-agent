@@ -571,6 +571,21 @@ func legacySuiteOptOutsDoNotSuppressRequiredIntegrationContracts() error {
 			return fmt.Errorf("CI does not invoke required integration package or test selector %s", required)
 		}
 	}
+	sweepStart := strings.Index(ci, "  agm-tagged-sweep:")
+	sweepEnd := strings.Index(ci, "\n  engram-storage-hardening:")
+	if sweepStart < 0 || sweepEnd <= sweepStart {
+		return errors.New("CI tagged-sweep job boundary is missing")
+	}
+	taggedSweep := ci[sweepStart:sweepEnd]
+	for _, banned := range []string{
+		"SKIP_E2E",
+		"Install source AGM for legacy host-dependent packages",
+		"go install ./agm/cmd/agm",
+	} {
+		if strings.Contains(taggedSweep, banned) {
+			return fmt.Errorf("CI tagged sweep retains obsolete integration bypass %s", banned)
+		}
+	}
 	return nil
 }
 
