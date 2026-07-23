@@ -16,6 +16,8 @@
 
 **LIFEI-06** When Codex lifecycle behavior is exercised through the real CLI, the suite shall use a compiled fake Codex process inside a fully isolated source-built AGM environment, shall exercise create, list, send, kill, resume, and archive through that environment, and shall verify tmux and SQLite postconditions before exact cleanup.
 
+**LIFEI-07** When a required process-table or tmux prerequisite cannot start, the isolated Codex lifecycle shall skip only for a missing executable or an explicit permission denial and shall fail for every other setup error.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/test_support_package_guardrails.feature`

@@ -87,6 +87,7 @@ func RegisterTestSupportPackageGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates real lifecycle isolation$`, agmValidatesRealLifecycleIsolation)
 	ctx.Step(`^the lifecycle should use a source-built AGM and unique tmux socket$`, lifecycleUsesSourceBuiltAGMAndUniqueTmuxSocket)
 	ctx.Step(`^the lifecycle should exercise send kill resume and archive through the source-built AGM$`, lifecycleExercisesCompleteCodexLifecycle)
+	ctx.Step(`^unexpected lifecycle setup failures should fail the test$`, unexpectedLifecycleSetupFailuresFail)
 	ctx.Step(`^cleanup should target only owned test resources$`, cleanupTargetsOnlyOwnedTestResources)
 	ctx.Step(`^named test environment lifecycle sources are configured$`, namedTestEnvironmentLifecycleSourcesAreConfigured)
 	ctx.Step(`^AGM validates named test environment ownership$`, agmValidatesNamedTestEnvironmentOwnership)
@@ -290,6 +291,27 @@ func lifecycleExercisesCompleteCodexLifecycle() error {
 	}
 	if strings.Contains(legacy[start:end], `"codex-cli"`) {
 		return fmt.Errorf("legacy comprehensive lifecycle still routes Codex through the installed harness")
+	}
+	return nil
+}
+
+func unexpectedLifecycleSetupFailuresFail() error {
+	root := packageSpecBDDRepoRoot()
+	data, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "lifecycle", "codex_isolated_lifecycle_test.go"))
+	if err != nil {
+		return err
+	}
+	source := string(data)
+	for _, required := range []string{
+		`if testPrerequisiteUnavailable(err)`,
+		`t.Fatalf("probe process-table inspection: %v", err)`,
+		`t.Fatalf("start isolated tmux server: %v", err)`,
+		`errors.Is(err, exec.ErrNotFound)`,
+		`errors.Is(err, os.ErrPermission)`,
+	} {
+		if !strings.Contains(source, required) {
+			return fmt.Errorf("isolated lifecycle lacks fail-closed prerequisite guard %s", required)
+		}
 	}
 	return nil
 }

@@ -118,6 +118,7 @@ Feature: Test support package guardrails
     When AGM validates real lifecycle isolation
     Then the lifecycle should use a source-built AGM and unique tmux socket
     And the lifecycle should exercise send kill resume and archive through the source-built AGM
+    And unexpected lifecycle setup failures should fail the test
     And cleanup should target only owned test resources
 
   Scenario: Named test environments remain inside one owned root

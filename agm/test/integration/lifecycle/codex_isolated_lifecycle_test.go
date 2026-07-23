@@ -3,6 +3,8 @@
 package lifecycle_test
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,13 +25,19 @@ func TestCodexLifecycleUsesIsolatedSourceEnvironment(t *testing.T) {
 		t.Skip("skipping real-tmux Codex lifecycle in short mode")
 	}
 	if err := exec.Command("/bin/ps", "-axo", "command=").Run(); err != nil {
-		t.Skipf("process-table inspection is unavailable to the fail-closed spawn guard: %v", err)
+		if testPrerequisiteUnavailable(err) {
+			t.Skipf("process-table inspection is unavailable to the fail-closed spawn guard: %v", err)
+		}
+		t.Fatalf("probe process-table inspection: %v", err)
 	}
 
 	env := helpers.NewIsolatedEnvironment(t)
 	probe := env.SessionName("tmux-probe")
 	if err := env.StartTmuxServer(probe); err != nil {
-		t.Skipf("tmux cannot create an isolated server in this environment: %v", err)
+		if testPrerequisiteUnavailable(err) {
+			t.Skipf("tmux cannot create an isolated server in this environment: %v", err)
+		}
+		t.Fatalf("start isolated tmux server: %v", err)
 	}
 
 	const fakeCodex = `package main
@@ -213,4 +221,35 @@ func main() {
 	if _, err := os.Stat(env.Context.BaseDir); !os.IsNotExist(err) {
 		t.Fatalf("isolated root survived cleanup: %v", err)
 	}
+}
+
+func TestPrerequisiteUnavailableClassifier(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "missing executable", err: fmt.Errorf("wrapped: %w", exec.ErrNotFound), want: true},
+		{name: "filesystem permission", err: fmt.Errorf("wrapped: %w", os.ErrPermission), want: true},
+		{name: "sandbox denial", err: errors.New("start server: operation not permitted"), want: true},
+		{name: "invalid arguments", err: errors.New("start server: invalid tmux option"), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := testPrerequisiteUnavailable(tt.err); got != tt.want {
+				t.Fatalf("testPrerequisiteUnavailable(%q) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func testPrerequisiteUnavailable(err error) bool {
+	if errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrPermission) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "operation not permitted") ||
+		strings.Contains(message, "permission denied")
 }
