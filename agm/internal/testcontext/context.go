@@ -97,6 +97,9 @@ func NewNamed(name string) (*TestContext, error) {
 	if err := ValidateName(name); err != nil {
 		return nil, err
 	}
+	if err := rejectRetiredNamedEnvironmentCollision(name); err != nil {
+		return nil, err
+	}
 	return newNamedWithRoot(name, canonicalEnvironmentRoot())
 }
 
@@ -321,6 +324,42 @@ func resolveNamedEnvironmentRoot(name string) (string, error) {
 		}
 	}
 	return canonicalEnvironmentRoot(), nil
+}
+
+func rejectRetiredNamedEnvironmentCollision(name string) error {
+	canonicalRoot := canonicalEnvironmentRoot()
+	for _, root := range namedEnvironmentRoots() {
+		if root == canonicalRoot {
+			continue
+		}
+		exists, err := validateNamedEnvironmentRoot(root)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			continue
+		}
+		for _, candidate := range []struct {
+			path             string
+			requireDirectory bool
+		}{
+			{path: filepath.Join(root, testEnvironmentPrefix+name), requireDirectory: true},
+			{path: filepath.Join(root, testEnvironmentPrefix+name+".sock"), requireDirectory: false},
+		} {
+			owned, err := ownedPath(candidate.path, candidate.requireDirectory)
+			if err != nil {
+				return err
+			}
+			if owned {
+				return fmt.Errorf(
+					"retired test environment %q already exists at %s; destroy it before creating a canonical environment",
+					name,
+					candidate.path,
+				)
+			}
+		}
+	}
+	return nil
 }
 
 func validateNamedEnvironmentRoot(root string) (bool, error) {

@@ -233,10 +233,11 @@ func TestLoadNamedResolvesGlobalShortRootBeforeCanonicalFallback(t *testing.T) {
 	assert.Equal(t, retired.SocketPath, loaded.SocketPath)
 	assert.NotEqual(t, filepath.Join(canonicalEnvironmentRoot(), testEnvironmentPrefix+name), loaded.BaseDir)
 
-	created, err := NewNamed(name)
-	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(canonicalEnvironmentRoot(), testEnvironmentPrefix+name), created.BaseDir)
-	assert.NotEqual(t, retired.BaseDir, created.BaseDir)
+	_, err = NewNamed(name)
+	require.ErrorContains(t, err, "retired test environment")
+	canonicalBase := filepath.Join(canonicalEnvironmentRoot(), testEnvironmentPrefix+name)
+	_, err = os.Lstat(canonicalBase)
+	require.ErrorIs(t, err, os.ErrNotExist, "legacy collision created a second canonical environment")
 }
 
 func TestListNamedPrefersCanonicalPerUserRootForDuplicate(t *testing.T) {

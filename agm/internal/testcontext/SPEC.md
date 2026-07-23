@@ -1,6 +1,6 @@
 # AGM Test Context Specification
 
-<!-- Last audited at: 2026-07-10 -->
+<!-- Last audited at: 2026-07-23 -->
 
 ## Requirements
 
@@ -25,6 +25,8 @@
 **TCTX-10** When the canonical short test root is resolved, created, reused, or cleaned, the system shall verify it is a real directory owned by the effective user and enforce owner-only permissions before traversing environment state beneath it.
 
 **TCTX-11** When a retired host temporary root is considered for compatibility, the system shall require a real owner-only directory owned by the effective user before resolving or cleaning any named child.
+
+**TCTX-12** If an owned retired environment already uses a requested name, then the system shall reject new canonical creation while retaining reconstruction and explicit-destroy access to the existing environment.
 
 ## BDD Traceability
 

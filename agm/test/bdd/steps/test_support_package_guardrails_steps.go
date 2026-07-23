@@ -95,6 +95,7 @@ func RegisterTestSupportPackageGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^canonical creation reconstruction discovery and cleanup should share one root$`, namedTestEnvironmentLifecycleSharesOneRoot)
 	ctx.Step(`^the canonical short root should be private and scoped to the effective user$`, canonicalTestEnvironmentRootIsPrivatePerUser)
 	ctx.Step(`^existing retired named environments should activate in place$`, retiredNamedTestEnvironmentsActivateInPlace)
+	ctx.Step(`^new canonical creation should refuse a retired same-name collision$`, canonicalCreationRejectsRetiredCollision)
 	ctx.Step(`^retired named environment paths should be discovered and removed exactly$`, retiredNamedTestEnvironmentPathsAreRemoved)
 	ctx.Step(`^overlong names should be rejected only for new environments$`, overlongNamesAreRejectedOnlyForNewEnvironments)
 	ctx.Step(`^unsafe named test environment paths should be rejected before mutation$`, unsafeNamedTestEnvironmentPathsAreRejected)
@@ -480,6 +481,13 @@ func retiredNamedTestEnvironmentsActivateInPlace(ctx context.Context) error {
 		"TestLoadNamedResolvesGlobalShortRootBeforeCanonicalFallback",
 		"TestLoadNamedRejectsSymlinkedRetiredRootBeforeResolvingChild",
 		"TestRetiredNamedEnvironmentIsDiscoveredAndCleanedExactly",
+	)
+}
+
+func canonicalCreationRejectsRetiredCollision(ctx context.Context) error {
+	return requireNamedTestEnvironmentTests(
+		ctx,
+		"TestLoadNamedResolvesGlobalShortRootBeforeCanonicalFallback",
 	)
 }
 

@@ -127,6 +127,7 @@ Feature: Test support package guardrails
     Then canonical creation reconstruction discovery and cleanup should share one root
     And the canonical short root should be private and scoped to the effective user
     And existing retired named environments should activate in place
+    And new canonical creation should refuse a retired same-name collision
     And retired named environment paths should be discovered and removed exactly
     And overlong names should be rejected only for new environments
     And unsafe named test environment paths should be rejected before mutation
