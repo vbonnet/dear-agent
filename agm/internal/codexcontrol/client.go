@@ -2,18 +2,20 @@
 package codexcontrol
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os/exec"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/vbonnet/dear-agent/agm/internal/procguard"
 )
 
@@ -21,7 +23,9 @@ const defaultTimeout = 20 * time.Second
 
 var execCommandContext = exec.CommandContext
 
-// Client controls Codex threads through `codex app-server proxy`.
+// Client controls Codex threads through `codex app-server proxy`. The proxy
+// bridges raw WebSocket-over-UDS bytes, so the client performs the HTTP Upgrade
+// and exchanges JSON-RPC as WebSocket messages over its stdin/stdout pipes.
 type Client struct {
 	CodexPath string
 	Timeout   time.Duration
@@ -240,9 +244,14 @@ func (c *Client) request(ctx context.Context, method string, params any, result 
 		_ = cmd.Wait()
 	}()
 
-	enc := json.NewEncoder(stdin)
-	dec := json.NewDecoder(bufio.NewReader(stdout))
-	if err := enc.Encode(rpcRequest{
+	proxyConn := &proxyPipeConn{reader: stdout, writer: stdin}
+	conn, err := dialProxyWebSocket(timeoutCtx, proxyConn, c.timeout())
+	if err != nil {
+		return addProxyStderr(fmt.Errorf("connect codex app-server WebSocket: %w", err), stderr.String())
+	}
+	defer func() { _ = conn.Close() }()
+
+	if err := conn.WriteJSON(rpcRequest{
 		ID:     1,
 		Method: "initialize",
 		Params: map[string]any{
@@ -256,20 +265,76 @@ func (c *Client) request(ctx context.Context, method string, params any, result 
 	}); err != nil {
 		return fmt.Errorf("send codex initialize: %w", err)
 	}
-	if err := readResponse(dec, 1, nil); err != nil {
+	if err := readWebSocketResponse(conn, 1, nil); err != nil {
 		return addProxyStderr(err, stderr.String())
 	}
-	if err := enc.Encode(rpcNotification{Method: "initialized", Params: map[string]any{}}); err != nil {
+	if err := conn.WriteJSON(rpcNotification{Method: "initialized", Params: map[string]any{}}); err != nil {
 		return fmt.Errorf("send codex initialized: %w", err)
 	}
-	if err := enc.Encode(rpcRequest{ID: 2, Method: method, Params: params}); err != nil {
+	if err := conn.WriteJSON(rpcRequest{ID: 2, Method: method, Params: params}); err != nil {
 		return fmt.Errorf("send codex %s: %w", method, err)
 	}
-	if err := readResponse(dec, 2, result); err != nil {
+	if err := readWebSocketResponse(conn, 2, result); err != nil {
 		return addProxyStderr(err, stderr.String())
 	}
 	return nil
 }
+
+// dialProxyWebSocket performs the documented WebSocket HTTP Upgrade over the
+// raw byte stream provided by `codex app-server proxy`. The proxy owns control
+// socket discovery; AGM only supplies a net.Conn facade over the process pipes.
+func dialProxyWebSocket(ctx context.Context, raw net.Conn, handshakeTimeout time.Duration) (*websocket.Conn, error) {
+	dialer := websocket.Dialer{
+		Proxy:            nil,
+		HandshakeTimeout: handshakeTimeout,
+		NetDialContext: func(context.Context, string, string) (net.Conn, error) {
+			return raw, nil
+		},
+	}
+	conn, response, err := dialer.DialContext(ctx, "ws://localhost/rpc", nil)
+	if response != nil {
+		defer response.Body.Close()
+	}
+	if err != nil {
+		return nil, err
+	}
+	return conn, nil
+}
+
+// proxyPipeConn adapts the proxy process pipes to the net.Conn interface
+// Gorilla uses to write the HTTP Upgrade and WebSocket frames. Context-driven
+// proxy process cancellation bounds reads because pipes cannot set deadlines.
+type proxyPipeConn struct {
+	reader io.ReadCloser
+	writer io.WriteCloser
+	close  sync.Once
+}
+
+func (c *proxyPipeConn) Read(p []byte) (int, error)       { return c.reader.Read(p) }
+func (c *proxyPipeConn) Write(p []byte) (int, error)      { return c.writer.Write(p) }
+func (c *proxyPipeConn) LocalAddr() net.Addr              { return proxyPipeAddr("proxy-stdin") }
+func (c *proxyPipeConn) RemoteAddr() net.Addr             { return proxyPipeAddr("codex-app-server") }
+func (c *proxyPipeConn) SetDeadline(time.Time) error      { return nil }
+func (c *proxyPipeConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *proxyPipeConn) SetWriteDeadline(time.Time) error { return nil }
+
+func (c *proxyPipeConn) Close() error {
+	var closeErr error
+	c.close.Do(func() {
+		if err := c.writer.Close(); err != nil {
+			closeErr = err
+		}
+		if err := c.reader.Close(); err != nil && closeErr == nil {
+			closeErr = err
+		}
+	})
+	return closeErr
+}
+
+type proxyPipeAddr string
+
+func (a proxyPipeAddr) Network() string { return "codex-app-server-proxy" }
+func (a proxyPipeAddr) String() string  { return string(a) }
 
 type rpcRequest struct {
 	ID     int    `json:"id"`
@@ -295,9 +360,17 @@ type rpcError struct {
 }
 
 func readResponse(dec *json.Decoder, id int, result any) error {
+	return readResponseMessage(dec.Decode, id, result)
+}
+
+func readWebSocketResponse(conn *websocket.Conn, id int, result any) error {
+	return readResponseMessage(conn.ReadJSON, id, result)
+}
+
+func readResponseMessage(read func(any) error, id int, result any) error {
 	for {
 		var raw json.RawMessage
-		if err := dec.Decode(&raw); err != nil {
+		if err := read(&raw); err != nil {
 			if errors.Is(err, io.EOF) {
 				return fmt.Errorf("codex app-server closed before response %d", id)
 			}
