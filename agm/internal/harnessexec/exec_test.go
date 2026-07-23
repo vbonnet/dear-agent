@@ -219,17 +219,17 @@ func TestClaudeRequestReconstructsValidatedNativeArguments(t *testing.T) {
 }
 
 func TestClaudeResumeChangesDirectoryBeforeDirectReplacement(t *testing.T) {
-	originalLookPath := lookPath
+	originalLookPathInEnvironment := lookPathInEnvironment
 	originalReplaceProcess := replaceProcess
 	originalChangeDirectory := changeDirectory
 	originalResolveClaudeOAuth := resolveClaudeOAuth
 	t.Cleanup(func() {
-		lookPath = originalLookPath
+		lookPathInEnvironment = originalLookPathInEnvironment
 		replaceProcess = originalReplaceProcess
 		changeDirectory = originalChangeDirectory
 		resolveClaudeOAuth = originalResolveClaudeOAuth
 	})
-	lookPath = func(string) (string, error) { return "/fixed/claude", nil }
+	lookPathInEnvironment = func(string, []string) (string, error) { return "/fixed/claude", nil }
 	resolveClaudeOAuth = func() string { return "" }
 	var changedTo string
 	changeDirectory = func(path string) error {
@@ -257,6 +257,61 @@ func TestClaudeResumeChangesDirectoryBeforeDirectReplacement(t *testing.T) {
 	}
 	if got := environmentMap(gotEnv)["PWD"]; got != "/tmp/resume" {
 		t.Fatalf("Claude resume PWD = %q, want /tmp/resume", got)
+	}
+}
+
+func TestClaudeResolvesRelativePATHAfterEnteringWorkDir(t *testing.T) {
+	workDir := t.TempDir()
+	binDir := filepath.Join(workDir, "bin")
+	if err := os.Mkdir(binDir, 0o700); err != nil {
+		t.Fatalf("create project-local bin: %v", err)
+	}
+	claudePath := filepath.Join(binDir, "claude")
+	if err := os.WriteFile(claudePath, []byte("test executable"), 0o700); err != nil {
+		t.Fatalf("write project-local Claude: %v", err)
+	}
+	t.Setenv("PATH", "bin")
+	t.Setenv("PWD", "/stale/pane/work")
+
+	originalLookPathInEnvironment := lookPathInEnvironment
+	originalReplaceProcess := replaceProcess
+	originalChangeDirectory := changeDirectory
+	originalResolveClaudeOAuth := resolveClaudeOAuth
+	t.Cleanup(func() {
+		lookPathInEnvironment = originalLookPathInEnvironment
+		replaceProcess = originalReplaceProcess
+		changeDirectory = originalChangeDirectory
+		resolveClaudeOAuth = originalResolveClaudeOAuth
+	})
+	entered := false
+	changeDirectory = func(path string) error {
+		if path != workDir {
+			t.Fatalf("Claude working directory = %q, want %q", path, workDir)
+		}
+		entered = true
+		return nil
+	}
+	lookPathInEnvironment = func(name string, environment []string) (string, error) {
+		if !entered {
+			t.Fatal("Claude executable resolved before entering the target workdir")
+		}
+		return resolveExecutableInEnvironment(name, environment)
+	}
+	resolveClaudeOAuth = func() string { return "" }
+	var gotPath string
+	replaceProcess = func(path string, _ []string, _ []string) error {
+		gotPath = path
+		return nil
+	}
+
+	err := Run(ClaudeProtocol, []string{
+		"--session", "relative-path-claude", "--workdir", workDir,
+	})
+	if err == nil || !strings.Contains(err.Error(), "returned unexpectedly") {
+		t.Fatalf("Claude Run error = %v", err)
+	}
+	if gotPath != claudePath {
+		t.Fatalf("Claude executable = %q, want project-local %q", gotPath, claudePath)
 	}
 }
 
@@ -325,12 +380,10 @@ func TestEnvironmentContracts(t *testing.T) {
 }
 
 func TestRunUsesFixedExecutablesAndDirectReplacement(t *testing.T) {
-	originalLookPath := lookPath
 	originalLookPathInEnvironment := lookPathInEnvironment
 	originalReplaceProcess := replaceProcess
 	originalResolveClaudeOAuth := resolveClaudeOAuth
 	t.Cleanup(func() {
-		lookPath = originalLookPath
 		lookPathInEnvironment = originalLookPathInEnvironment
 		replaceProcess = originalReplaceProcess
 		resolveClaudeOAuth = originalResolveClaudeOAuth
@@ -338,7 +391,6 @@ func TestRunUsesFixedExecutablesAndDirectReplacement(t *testing.T) {
 
 	var gotPath string
 	var gotArgv, gotEnv []string
-	lookPath = func(name string) (string, error) { return "/fixed/" + name, nil }
 	lookPathInEnvironment = func(name string, _ []string) (string, error) { return "/fixed/" + name, nil }
 	replaceProcess = func(path string, argv, env []string) error {
 		gotPath = path
@@ -375,7 +427,6 @@ func TestRunUsesFixedExecutablesAndDirectReplacement(t *testing.T) {
 		t.Fatalf("Claude replacement OAuth = %q", got)
 	}
 
-	lookPath = func(string) (string, error) { return "", errors.New("not found") }
 	lookPathInEnvironment = func(string, []string) (string, error) { return "", errors.New("not found") }
 	if err := Run(CodexProtocol, []string{
 		"--session", "session", "--model", "model", "--workdir", "/tmp/work",

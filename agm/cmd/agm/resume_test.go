@@ -410,10 +410,13 @@ func TestArchitectureUsesPreparedClaudeResumeBoundary(t *testing.T) {
 	if strings.Contains(text, `tmux.SendKeys(sessionName, "claude --resume`) {
 		t.Fatal("AGM architecture still teaches raw Claude resume through tmux")
 	}
-	for _, want := range []string{"prepareClaudeResumeCommand", "launch.Command", "launch.CancelUndelivered"} {
+	for _, want := range []string{"prepareClaudeResumeCommand", "launch.Command", "ResolveHarnessLaunchSubmission"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("AGM architecture private resume example missing %q", want)
 		}
+	}
+	if strings.Contains(text, "_ = launch.CancelUndelivered()") {
+		t.Fatal("AGM architecture cancels a private handoff without resolving uncertain submission")
 	}
 }
 

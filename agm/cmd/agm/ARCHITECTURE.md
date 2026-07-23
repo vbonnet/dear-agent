@@ -517,9 +517,10 @@ launch, err := prepareClaudeResumeCommand(adapter, session, health)
 if err != nil {
     return err
 }
-if err := tmux.SendKeys(sessionName, launch.Command); err != nil {
-    _ = launch.CancelUndelivered()
-    return err
+if submissionErr := tmux.SendKeys(sessionName, launch.Command); submissionErr != nil {
+    if _, err := ops.ResolveHarnessLaunchSubmission(launch, submissionErr); err != nil {
+        return err
+    }
 }
 
 // Check tmux session status

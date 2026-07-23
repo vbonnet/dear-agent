@@ -1057,7 +1057,7 @@ func agmBuildsTheCodexPrivateLaunchBoundary(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/harnessexec", "./agm/internal/agent", "./agm/internal/session", "./agm/internal/validate", "./agm/cmd/agm", "./agm/cmd/agm-mcp-server",
-		"-run", `^(TestPrepared(ClaudeCommand(CarriesCallerOnlyOAuthAndTelemetry|ClearsCallerAbsentPaneState)|CodexCommand(CarriesCallerAllowlistAndPreservesPaneIdentity|ClearsCallerAbsentPaneCredentials|ResolvesExecutableFromCallerPATH)|Command(CancelRemovesUndeliveredHandoff|UsesCoInstalledAGMFromCompanionBinary|RejectsCompanionWithoutCoInstalledAGM|UsesRenamedCurrentAGMExecutable|MakesRelativeStateDirectoryAbsolute|SchedulesIndependentExpiration|RemovesHandoffWhenExpirationCannotBeScheduled)|DeferredCommandSchedulesProducerLease)|Test(ResolveSubmissionPreservesUncertainAndCancelsConfirmedFailure|DeferredHandoffRemainsLiveUntilProducerExitThenExpires|ExpiryProtocolRemovesUnconsumedHandoffAtDeadline|DetachedExpiryHelper(InterceptsGoTestBinaryBeforeTestsRun|IsReapedAsynchronously)|ConsumeHandoff(UsesDeferredLeaseFreshnessAndUnlinksRejections|PreservesFilesOutsidePrivateStagingNamespace)|ClaudeResumeChangesDirectoryBeforeDirectReplacement|ClaudeAdapter(Create|Resume)PreservesHandoffAfterUncertainSubmission|Codex(CreateSession|ResumeSession)PreservesHandoffAfterUncertainSubmission|ClaudeResumePreservesHandoffAndCreatedTmuxAfterUncertainSubmission|ResumabilityValidatorPreservesHandoffAfterUncertainSubmission|QueueCurrentTmux(Codex|Claude)PreservesHandoffAfterUncertainSubmission|MCPCreateSessionRuntimePreservesUncertainPrivateLaunch))$`,
+		"-run", `^(TestPrepared(ClaudeCommand(CarriesCallerOnlyOAuthAndTelemetry|ClearsCallerAbsentPaneState)|CodexCommand(CarriesCallerAllowlistAndPreservesPaneIdentity|ClearsCallerAbsentPaneCredentials|ResolvesExecutableFromCallerPATH)|Command(CancelRemovesUndeliveredHandoff|UsesCoInstalledAGMFromCompanionBinary|UsesMatchingVersionedAGMFromReleaseCompanion|RejectsCompanionWithoutCoInstalledAGM|UsesRenamedCurrentAGMExecutable|MakesRelativeStateDirectoryAbsolute|SchedulesIndependentExpiration|RemovesHandoffWhenExpirationCannotBeScheduled)|DeferredCommandSchedulesProducerLease)|Test(ResolveSubmissionPreservesUncertainAndCancelsConfirmedFailure|DeferredHandoffRemainsLiveUntilProducerExitThenExpires|ExpiryProtocolRemovesUnconsumedHandoffAtDeadline|DetachedExpiryHelper(InterceptsGoTestBinaryBeforeTestsRun|IsReapedAsynchronously)|ConsumeHandoff(UsesDeferredLeaseFreshnessAndUnlinksRejections|PreservesFilesOutsidePrivateStagingNamespace)|ClaudeResumeChangesDirectoryBeforeDirectReplacement|ClaudeResolvesRelativePATHAfterEnteringWorkDir|ArchitectureUsesPreparedClaudeResumeBoundary|ClaudeAdapter(Create|Resume)PreservesHandoffAfterUncertainSubmission|Codex(CreateSession|ResumeSession)PreservesHandoffAfterUncertainSubmission|ClaudeResumePreservesHandoffAndCreatedTmuxAfterUncertainSubmission|ResumabilityValidatorPreservesHandoffAfterUncertainSubmission|QueueCurrentTmux(Codex|Claude)PreservesHandoffAfterUncertainSubmission|MCPCreateSessionRuntimePreservesUncertainPrivateLaunch))$`,
 		"-count=1", "-v",
 	)
 	cmd.Dir = bddRepoRoot()
@@ -1112,9 +1112,11 @@ func callerOnlyCredentialsAndTelemetryShouldCrossStaleTmuxStateThroughThePinnedA
 		"TestPreparedCodexCommandResolvesExecutableFromCallerPATH",
 		"TestPreparedCommandCancelRemovesUndeliveredHandoff",
 		"TestPreparedCommandUsesCoInstalledAGMFromCompanionBinary",
+		"TestPreparedCommandUsesMatchingVersionedAGMFromReleaseCompanion",
 		"TestPreparedCommandUsesRenamedCurrentAGMExecutable",
 		"TestPreparedCommandMakesRelativeStateDirectoryAbsolute",
 		"TestClaudeResumeChangesDirectoryBeforeDirectReplacement",
+		"TestClaudeResolvesRelativePATHAfterEnteringWorkDir",
 	} {
 		if !strings.Contains(state.privateHandoffTestOutput, "--- PASS: "+behavior) {
 			return fmt.Errorf("private handoff behavior %s did not pass:\n%s", behavior, state.privateHandoffTestOutput)
@@ -1131,7 +1133,10 @@ func privateLaunchesShouldNormalizeTheTargetWorkingDirectoryAndRequireAVerifiedE
 	for _, behavior := range []string{
 		"TestPreparedCodexCommandCarriesCallerAllowlistAndPreservesPaneIdentity",
 		"TestPreparedCommandUsesCoInstalledAGMFromCompanionBinary",
+		"TestPreparedCommandUsesMatchingVersionedAGMFromReleaseCompanion",
 		"TestPreparedCommandRejectsCompanionWithoutCoInstalledAGM",
+		"TestClaudeResolvesRelativePATHAfterEnteringWorkDir",
+		"TestArchitectureUsesPreparedClaudeResumeBoundary",
 	} {
 		if !strings.Contains(state.privateHandoffTestOutput, "--- PASS: "+behavior) {
 			return fmt.Errorf("private executor boundary behavior %s did not pass:\n%s", behavior, state.privateHandoffTestOutput)

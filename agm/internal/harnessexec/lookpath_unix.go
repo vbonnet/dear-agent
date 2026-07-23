@@ -26,16 +26,32 @@ func resolveExecutableInEnvironment(file string, environment []string) (string, 
 		return file, nil
 	}
 	path := environmentMap(environment)["PATH"]
+	baseDir := environmentMap(environment)["PWD"]
+	if baseDir == "" {
+		baseDir, _ = os.Getwd()
+	}
+	if !filepath.IsAbs(baseDir) {
+		if absoluteBase, err := filepath.Abs(baseDir); err == nil {
+			baseDir = absoluteBase
+		}
+	}
 	for _, dir := range filepath.SplitList(path) {
 		if dir == "" {
 			dir = "."
 		}
+		if !filepath.IsAbs(dir) {
+			dir = filepath.Join(baseDir, dir)
+		}
 		candidate := filepath.Join(dir, file)
+		if !filepath.IsAbs(candidate) {
+			absoluteCandidate, err := filepath.Abs(candidate)
+			if err != nil {
+				continue
+			}
+			candidate = absoluteCandidate
+		}
 		if err := environmentExecutable(candidate); err != nil {
 			continue
-		}
-		if !filepath.IsAbs(candidate) {
-			return "", &exec.Error{Name: file, Err: exec.ErrDot}
 		}
 		return candidate, nil
 	}

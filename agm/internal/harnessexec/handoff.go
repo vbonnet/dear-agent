@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -356,12 +357,17 @@ func resolvePrivateExecutable() (string, error) {
 		return "", err
 	}
 	name := filepath.Base(current)
-	if name != "agm-mcp-server" {
+	suffix := ""
+	switch name {
+	case "agm-mcp-server":
+	case "agm-mcp-server-" + runtime.GOOS + "-" + runtime.GOARCH:
+		suffix = "-" + runtime.GOOS + "-" + runtime.GOARCH
+	default:
 		return current, nil
 	}
 	// Companion binaries such as agm-mcp-server must execute the co-installed
 	// AGM binary, because they do not intercept the private protocol themselves.
-	sibling := filepath.Join(filepath.Dir(current), "agm")
+	sibling := filepath.Join(filepath.Dir(current), "agm"+suffix)
 	if isExecutableFile(sibling) {
 		return sibling, nil
 	}

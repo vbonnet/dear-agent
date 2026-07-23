@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -69,12 +70,12 @@ func TestPreparedClaudeCommandCarriesCallerOnlyOAuthAndTelemetry(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "stale-pane-endpoint")
 
 	originalExecutablePath := executablePath
-	originalLookPath := lookPath
+	originalLookPathInEnvironment := lookPathInEnvironment
 	originalReplaceProcess := replaceProcess
 	originalResolveClaudeOAuth := resolveClaudeOAuth
 	t.Cleanup(func() {
 		executablePath = originalExecutablePath
-		lookPath = originalLookPath
+		lookPathInEnvironment = originalLookPathInEnvironment
 		replaceProcess = originalReplaceProcess
 		resolveClaudeOAuth = originalResolveClaudeOAuth
 	})
@@ -103,7 +104,7 @@ func TestPreparedClaudeCommandCarriesCallerOnlyOAuthAndTelemetry(t *testing.T) {
 	assertPrivateHandoffMode(t, prepared.path)
 
 	var childEnvironment []string
-	lookPath = func(string) (string, error) { return "/fixed/claude", nil }
+	lookPathInEnvironment = func(string, []string) (string, error) { return "/fixed/claude", nil }
 	replaceProcess = func(_ string, _ []string, env []string) error {
 		childEnvironment = append([]string(nil), env...)
 		return nil
@@ -265,12 +266,12 @@ func TestPreparedClaudeCommandClearsCallerAbsentPaneState(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_HEADERS", "stale-pane-headers")
 
 	originalExecutablePath := executablePath
-	originalLookPath := lookPath
+	originalLookPathInEnvironment := lookPathInEnvironment
 	originalReplaceProcess := replaceProcess
 	originalResolveClaudeOAuth := resolveClaudeOAuth
 	t.Cleanup(func() {
 		executablePath = originalExecutablePath
-		lookPath = originalLookPath
+		lookPathInEnvironment = originalLookPathInEnvironment
 		replaceProcess = originalReplaceProcess
 		resolveClaudeOAuth = originalResolveClaudeOAuth
 	})
@@ -282,7 +283,7 @@ func TestPreparedClaudeCommandClearsCallerAbsentPaneState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepare Claude command: %v", err)
 	}
-	lookPath = func(string) (string, error) { return "/fixed/claude", nil }
+	lookPathInEnvironment = func(string, []string) (string, error) { return "/fixed/claude", nil }
 	var childEnvironment []string
 	replaceProcess = func(_ string, _ []string, env []string) error {
 		childEnvironment = append([]string(nil), env...)
@@ -667,6 +668,32 @@ func TestPreparedCommandUsesCoInstalledAGMFromCompanionBinary(t *testing.T) {
 	t.Cleanup(func() { _ = prepared.Cancel() })
 	if !strings.HasPrefix(prepared.Command, shellQuote(agmPath)+" "+CodexProtocol) {
 		t.Fatalf("companion command did not pin co-installed AGM: %s", prepared.Command)
+	}
+}
+
+func TestPreparedCommandUsesMatchingVersionedAGMFromReleaseCompanion(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	binDir := t.TempDir()
+	suffix := "-" + runtime.GOOS + "-" + runtime.GOARCH
+	agmPath := filepath.Join(binDir, "agm"+suffix)
+	if err := os.WriteFile(agmPath, []byte("test executable"), 0700); err != nil {
+		t.Fatalf("write versioned co-installed AGM: %v", err)
+	}
+	originalExecutablePath := executablePath
+	t.Cleanup(func() { executablePath = originalExecutablePath })
+	executablePath = func() (string, error) {
+		return filepath.Join(binDir, "agm-mcp-server"+suffix), nil
+	}
+
+	prepared, err := PrepareClaudeCommand(ClaudeLaunch{
+		SessionName: "release-companion-claude", WorkDir: "/tmp/work",
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepare Claude command from versioned release companion: %v", err)
+	}
+	t.Cleanup(func() { _ = prepared.Cancel() })
+	if !strings.HasPrefix(prepared.Command, shellQuote(agmPath)+" "+ClaudeProtocol) {
+		t.Fatalf("versioned companion command did not pin matching AGM artifact: %s", prepared.Command)
 	}
 }
 

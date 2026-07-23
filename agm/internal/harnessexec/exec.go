@@ -9,7 +9,6 @@ import (
 	"io"
 	"math"
 	"os"
-	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
@@ -35,7 +34,6 @@ const (
 )
 
 var (
-	lookPath              = exec.LookPath
 	lookPathInEnvironment = resolveExecutableInEnvironment
 	replaceProcess        = syscall.Exec
 	changeDirectory       = os.Chdir
@@ -301,10 +299,6 @@ func runClaude(args []string) error {
 	if token == "" && !request.DisableOAuth && request.HandoffPath == "" {
 		token = resolveClaudeOAuth()
 	}
-	path, err := lookPath("claude")
-	if err != nil {
-		return fmt.Errorf("resolve claude executable: %w", err)
-	}
 	argv := append([]string{"claude"}, request.argv()...)
 	env := ClaudeEnvironment(parent, request.launch(), token)
 	if request.WorkDir != "" {
@@ -312,6 +306,10 @@ func runClaude(args []string) error {
 			return fmt.Errorf("enter Claude working directory: %w", err)
 		}
 		env = overlayEnvironment(env, []string{"PWD=" + request.WorkDir})
+	}
+	path, err := lookPathInEnvironment("claude", env)
+	if err != nil {
+		return fmt.Errorf("resolve claude executable: %w", err)
 	}
 	if err := replaceProcess(path, argv, env); err != nil {
 		return fmt.Errorf("execute claude: %w", err)
