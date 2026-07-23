@@ -18,6 +18,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 // createMockStorage implements dolt.Storage for CreateSession tests.
@@ -1281,6 +1282,36 @@ func TestCreateSession_ReadinessFailureRollsBackBeforeRegistrationOrPrompt(t *te
 	}
 	if len(store.created) != 0 {
 		t.Fatalf("readiness failure registered sessions: %d", len(store.created))
+	}
+	if len(tmuxMock.SentCommands) != 1 {
+		t.Fatalf("commands = %v, want harness launch only", tmuxMock.SentCommands)
+	}
+	if want := []string{"launch", "ready"}; !reflect.DeepEqual(order, want) {
+		t.Fatalf("creation order = %v, want %v", order, want)
+	}
+}
+
+func TestCreateSession_CodexHookReviewPropagatesBeforeRegistrationOrPrompt(t *testing.T) {
+	var order []string
+	tmuxMock := &createReadinessTmux{
+		MockTmux: session.NewMockTmux(),
+		order:    &order,
+		waitErr:  tmux.CodexHookReviewError(),
+	}
+	store := &createMockStorage{createOrder: &order}
+
+	_, err := CreateSession(&OpContext{Tmux: tmuxMock, Storage: store}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "hook-review", Model: "5.6", Harness: "codex-cli", Prompt: "must not send",
+		SkipCodexRemoteControl: true,
+	})
+	if !errors.Is(err, tmux.ErrCodexHookReviewRequired) {
+		t.Fatalf("CreateSession() error = %v, want ErrCodexHookReviewRequired", err)
+	}
+	if tmuxMock.Sessions["hook-review"] {
+		t.Fatal("new tmux session survived Codex hook review failure")
+	}
+	if len(store.created) != 0 {
+		t.Fatalf("Codex hook review registered sessions: %d", len(store.created))
 	}
 	if len(tmuxMock.SentCommands) != 1 {
 		t.Fatalf("commands = %v, want harness launch only", tmuxMock.SentCommands)

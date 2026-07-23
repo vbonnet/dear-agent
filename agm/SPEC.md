@@ -50,6 +50,9 @@ For `codex-cli`, AGM treats Codex as a real interactive CLI harness:
 - create paths MUST wait for the Codex composer before detached startup-prompt
   delivery; that wait MUST auto-accept the default Codex directory trust prompt
   and keep explicitly requested models through Codex model-upgrade interstitials
+- create and resume readiness MUST fail promptly when Codex requires review of
+  new or changed executable hooks, MUST tell the operator to inspect them
+  interactively, and MUST NOT send input or trust hooks on the operator's behalf
 - resume paths MUST recreate a missing Codex tmux session with the same launch
   contract used by create paths
 - send paths MUST route `codex-cli` through tmux delivery, not the OpenAI API

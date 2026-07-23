@@ -78,6 +78,45 @@ var CodexModelUpgradePromptPatterns = []string{
 	"Use existing model",
 }
 
+// ErrCodexHookReviewRequired marks the security-sensitive Codex startup screen
+// that requires an operator to inspect new or changed executable hooks.
+var ErrCodexHookReviewRequired = errors.New("codex hooks require explicit review")
+
+const codexHookReviewGuidance = "open Codex interactively in this directory, review every new or changed hook, and choose whether to trust the audited hooks or continue without them; AGM will not trust executable hooks automatically"
+
+// IsCodexHookReviewRequired reports whether content ends in Codex's structured
+// hook-review selector. Requiring the title and both safe menu choices avoids
+// interpreting ordinary transcript text about hooks as an active blocker. A
+// newer tail-owned composer supersedes retained review text.
+func IsCodexHookReviewRequired(content string) bool {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return false
+	}
+	lower := strings.ToLower(trimmed)
+	start := strings.LastIndex(lower, "hooks need review")
+	if start < 0 {
+		return false
+	}
+	review := trimmed[start:]
+	lowerReview := lower[start:]
+	if !strings.Contains(lowerReview, "review hooks") ||
+		!strings.Contains(lowerReview, "continue without trusting") ||
+		!strings.Contains(lowerReview, "press enter to confirm") {
+		return false
+	}
+
+	// Codex retains prior TUI output in scrollback. Once a later composer owns
+	// the pane tail, the earlier review selector is no longer active.
+	return !IsCodexComposerReady(review)
+}
+
+// CodexHookReviewError returns the typed, actionable startup failure used by
+// every Codex readiness path.
+func CodexHookReviewError() error {
+	return fmt.Errorf("%w: %s", ErrCodexHookReviewRequired, codexHookReviewGuidance)
+}
+
 // IsCodexComposerReady reports whether content contains a complete Codex
 // composer-ready signal. It is the single owner of Codex visual readiness for
 // tmux waits, generic delivery, and shared state classification.
@@ -267,6 +306,14 @@ func WaitForCodexPromptContext(parent context.Context, sessionName string, timeo
 		}
 
 		content := string(output)
+
+		// Executable hooks can run outside Codex's sandbox after they are
+		// trusted. This decision belongs to an operator who has inspected the
+		// hook definitions; AGM must neither press the highlighted choice nor
+		// wait until the generic readiness deadline obscures the cause.
+		if IsCodexHookReviewRequired(content) {
+			return CodexHookReviewError()
+		}
 
 		// A first-run trust prompt must be answered before the composer renders.
 		// Auto-accept the default ("1. Yes, continue") with Enter, then keep

@@ -211,6 +211,8 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-75** The system shall assign a unique code to every stable RFC 7807 error in the shared operations catalog so programmatic callers can distinguish lifecycle guards and failures without parsing human-readable text.
 
+**OPS-76** When a shared operation wraps a typed backend failure in its stable RFC 7807 error envelope, the in-process error chain shall preserve the original cause for `errors.Is` and `errors.As` while JSON and human-readable output retain the stable operation code and actionable detail.
+
 **OPS-47** When a process-liveness scan fails or the tmux backend cannot verify process liveness, status and kill decisions shall fall back to tmux session existence (fail-safe: an unverifiable session is treated as active).
 
 ---

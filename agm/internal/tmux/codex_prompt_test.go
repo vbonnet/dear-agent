@@ -1,6 +1,9 @@
 package tmux
 
 import (
+	"errors"
+	"fmt"
+	"os"
 	"os/exec"
 	"slices"
 	"strings"
@@ -228,6 +231,60 @@ func TestContainsCodexModelUpgradePromptPattern(t *testing.T) {
 	}
 }
 
+func TestIsCodexHookReviewRequired(t *testing.T) {
+	const activeReview = `Hooks need review
+
+4 hooks are new or changed.
+
+Hooks can run outside the sandbox after you trust them.
+
+› 1. Review hooks
+  2. Trust all and continue
+  3. Continue without trusting (hooks won't run)
+
+Press enter to confirm or esc to go back`
+
+	tests := []struct {
+		name     string
+		content  string
+		expected bool
+	}{
+		{
+			name:     "Codex 0.145 structured hook review",
+			content:  activeReview,
+			expected: true,
+		},
+		{
+			name:     "weak transcript text is not an active selector",
+			content:  "The release notes say hooks need review before use.",
+			expected: false,
+		},
+		{
+			name: "newer composer supersedes retained selector",
+			content: activeReview + `
+review completed
+│ >_ OpenAI Codex (v0.145.0) │
+│ model: gpt-5.6 high /model to change │
+╰──────────────────────────────╯
+›`,
+			expected: false,
+		},
+		{
+			name:     "empty content",
+			content:  "",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsCodexHookReviewRequired(tt.content); got != tt.expected {
+				t.Fatalf("IsCodexHookReviewRequired() = %t, want %t", got, tt.expected)
+			}
+		})
+	}
+}
+
 // CodexPromptPatterns must include the stable composer header so detection does
 // not rely solely on box-drawing corners (which Codex shares with Gemini).
 func TestCodexPromptPatternsIncludeHeader(t *testing.T) {
@@ -407,5 +464,43 @@ func TestWaitForCodexPromptSelectsExistingModel(t *testing.T) {
 
 	if err := WaitForCodexPrompt(sessionName, 10*time.Second); err != nil {
 		t.Errorf("WaitForCodexPrompt failed after model upgrade selection: %v", err)
+	}
+}
+
+func TestWaitForCodexPromptFailsFastForHookReviewWithoutInput(t *testing.T) {
+	sessionName := "test-codex-hook-review"
+	inputPath := fmt.Sprintf("%s/input-byte", t.TempDir())
+	script := fmt.Sprintf(`stty -echo -icanon min 1 time 0
+printf "Hooks need review\n\n4 hooks are new or changed.\n\nHooks can run outside the sandbox after you trust them.\n\n› 1. Review hooks\n  2. Trust all and continue\n  3. Continue without trusting (hooks won't run)\n\nPress enter to confirm or esc to go back\n"
+dd bs=1 count=1 of=%q 2>/dev/null
+sleep 30`, inputPath)
+	newCodexTestSession(t, sessionName, "sh", "-c", script)
+
+	start := time.Now()
+	err := WaitForCodexPrompt(sessionName, 10*time.Second)
+	elapsed := time.Since(start)
+	if !errors.Is(err, ErrCodexHookReviewRequired) {
+		t.Fatalf("WaitForCodexPrompt() error = %v, want ErrCodexHookReviewRequired", err)
+	}
+	if !strings.Contains(err.Error(), "AGM will not trust executable hooks automatically") {
+		t.Fatalf("WaitForCodexPrompt() error = %q, want actionable no-auto-trust guidance", err)
+	}
+	if elapsed > 3*time.Second {
+		t.Fatalf("hook review failure took %v, want prompt failure", elapsed)
+	}
+
+	// The fake TUI records the first input byte. Its empty output file proves
+	// the readiness wait did not press Enter, move the selector, or otherwise
+	// answer this security decision.
+	time.Sleep(100 * time.Millisecond)
+	info, statErr := os.Stat(inputPath)
+	if errors.Is(statErr, os.ErrNotExist) {
+		return
+	}
+	if statErr != nil {
+		t.Fatalf("stat input recorder: %v", statErr)
+	}
+	if info.Size() != 0 {
+		t.Fatalf("hook review received %d input bytes, want none", info.Size())
 	}
 }

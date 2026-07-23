@@ -26,6 +26,9 @@ const (
 	HarnessInputOverlay = "OVERLAY"
 	// HarnessInputOnboarding means a documented first-run prompt currently owns input.
 	HarnessInputOnboarding = "ONBOARDING"
+	// HarnessInputReviewRequired means executable hooks require explicit
+	// operator inspection before Codex startup may continue.
+	HarnessInputReviewRequired = "REVIEW_REQUIRED"
 	// HarnessInputNotFound means the exact tmux session does not exist.
 	HarnessInputNotFound = "NOT_FOUND"
 	// HarnessInputWrongHarness means the expected harness process is not alive.
@@ -211,6 +214,13 @@ func ClassifyHarnessInput(content, harness string) (bool, string, error) {
 	styledTail := paneRawInputTail(content, 12)
 	tail := stripANSI(styledTail)
 	queuedInput, _ := classifyCurrentQueuedInput(content, harness)
+
+	// Codex hooks can execute outside the sandbox after trust is granted. Treat
+	// the structured review selector as a dedicated fail-closed state before
+	// generic composer readiness or startup auto-advance can send any key.
+	if harness == "codex-cli" && IsCodexHookReviewRequired(tail) {
+		return false, HarnessInputReviewRequired, nil
+	}
 
 	// Pi's managed ready footer remains visible while its native confirmation
 	// dialog owns input. Treat that dialog as authoritative before consulting
@@ -572,6 +582,9 @@ func handleHarnessStartupState(
 		if *observedHarness {
 			return false, fmt.Errorf("expected %s process stopped in tmux session %q after startup", harness, sessionName)
 		}
+	case HarnessInputReviewRequired:
+		*observedHarness = true
+		return false, CodexHookReviewError()
 	case HarnessInputOnboarding, HarnessInputOverlay:
 		*observedHarness = true
 		if !canAdvanceHarnessStartup(readiness.State, harness, readiness.Content) {

@@ -222,6 +222,9 @@ creation, and terminal state detection.
 - A newer tail-owned initial composer remains ready after stale post-turn
   footer history from a prior Codex process.
 - A Codex trust prompt is queued rather than treated as a sendable prompt.
+- A Codex executable-hook review selector fails startup promptly with explicit
+  operator guidance, is classified as review-required, and receives no
+  automated input; a later live composer supersedes retained selector text.
 - The top-level new command routes in-tmux, non-detached Claude, Codex,
   OpenCode, Pi, and deprecated Gemini creation into the current pane and queues
   canonical launch commands without an impossible wait behind the AGM process
