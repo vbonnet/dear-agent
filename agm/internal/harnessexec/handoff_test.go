@@ -754,6 +754,38 @@ func TestConsumeHandoffRejectsCrossHarnessAndPublicState(t *testing.T) {
 	}
 }
 
+func TestConsumeHandoffPreservesFilesOutsidePrivateStagingNamespace(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("AGM_STATE_DIR", stateDir)
+	stagingDir := filepath.Join(stateDir, "private-launch")
+	if err := os.Mkdir(stagingDir, 0700); err != nil {
+		t.Fatalf("create staging directory: %v", err)
+	}
+	tests := map[string]string{
+		"unrelated owner-only file":        filepath.Join(t.TempDir(), "id_ed25519"),
+		"staging-shaped file outside root": filepath.Join(t.TempDir(), "launch-forged.json"),
+		"invalid name inside staging root": filepath.Join(stagingDir, "config.json"),
+	}
+	for name, path := range tests {
+		t.Run(name, func(t *testing.T) {
+			const content = "owner-only content that must survive"
+			if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+				t.Fatalf("write protected test file: %v", err)
+			}
+			if _, err := consumeHandoff(path, CodexProtocol); err == nil {
+				t.Fatal("executor accepted a file outside the private staging namespace")
+			}
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("rejected file was removed: %v", err)
+			}
+			if string(got) != content {
+				t.Fatalf("rejected file content changed: %q", got)
+			}
+		})
+	}
+}
+
 func TestConsumeHandoffRejectsTrailingAndOversizedContent(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
 

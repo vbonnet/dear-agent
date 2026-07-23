@@ -39,7 +39,7 @@ sandbox the harness beyond the native permission mode requested by AGM.
 
 **HEXEC-09** When AGM or a co-installed companion prepares a private harness command, the system shall invoke the absolute current AGM executable regardless of its filename, or the co-installed AGM executable for a known companion, so the pane cannot resolve a missing or different installation through `PATH`.
 
-**HEXEC-10** When AGM stages a private launch handoff, the system shall store it at an absolute path in an owner-only directory and file, bind it to one harness protocol and a bounded lifetime, unlink it immediately after securely opening the exact file so successful and rejected reads are both one-shot, and remove an undelivered handoff when command delivery fails.
+**HEXEC-10** When AGM stages a private launch handoff, the system shall store it at a canonical absolute path in a current-user-owned, owner-only `private-launch` directory and file, reject paths or names outside that staging namespace without removing them, bind an accepted handoff to one harness protocol and a bounded lifetime, unlink it immediately after securely opening the exact file so successful and rejected reads are both one-shot, and remove an undelivered handoff when command delivery fails.
 
 **HEXEC-11** When Claude telemetry forwarding is disabled, the system shall remove ambient OpenTelemetry endpoint and header configuration; when forwarding is enabled, it shall use the invoking AGM process's endpoint and headers.
 

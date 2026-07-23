@@ -401,6 +401,22 @@ func TestPrepareClaudeResumeCommandUsesCallerOnlyPrivateState(t *testing.T) {
 	}
 }
 
+func TestArchitectureUsesPreparedClaudeResumeBoundary(t *testing.T) {
+	architecture, err := os.ReadFile("ARCHITECTURE.md")
+	if err != nil {
+		t.Fatalf("read AGM architecture: %v", err)
+	}
+	text := string(architecture)
+	if strings.Contains(text, `tmux.SendKeys(sessionName, "claude --resume`) {
+		t.Fatal("AGM architecture still teaches raw Claude resume through tmux")
+	}
+	for _, want := range []string{"prepareClaudeResumeCommand", "launch.Command", "launch.CancelUndelivered"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("AGM architecture private resume example missing %q", want)
+		}
+	}
+}
+
 func TestBuildPiResumeCommandPreservesExactIdentityModelModeAndPolicy(t *testing.T) {
 	t.Setenv("AGM_PI_EXTENSION_ROOT", t.TempDir())
 	sessionDir := t.TempDir()

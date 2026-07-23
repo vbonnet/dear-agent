@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -314,16 +315,14 @@ func refreshExpiryTarget(path string, original os.FileInfo, now time.Time) error
 }
 
 func expiryTarget(path string) (os.FileInfo, error) {
-	if !filepath.IsAbs(path) || filepath.Base(filepath.Dir(path)) != "private-launch" {
-		return nil, errors.New("private launch handoff expiration requires an absolute private-launch path")
+	if err := validatePrivateHandoffLocation(path); err != nil {
+		return nil, err
 	}
 	info, err := os.Lstat(path)
 	if err != nil {
 		return nil, err
 	}
-	name := filepath.Base(path)
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 ||
-		!strings.HasPrefix(name, "launch-") || !strings.HasSuffix(name, ".json") {
+	if !isOwnerOnlyHandoffFile(info) {
 		return nil, errors.New("private launch handoff expiration target is invalid")
 	}
 	return info, nil
@@ -449,11 +448,14 @@ func consumeHandoff(path, protocol string) (launchHandoff, error) {
 }
 
 func openPrivateHandoff(path string) (*os.File, error) {
+	if err := validatePrivateHandoffLocation(path); err != nil {
+		return nil, err
+	}
 	info, err := os.Lstat(path)
 	if err != nil {
 		return nil, fmt.Errorf("inspect private launch handoff: %w", err)
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+	if !isOwnerOnlyHandoffFile(info) {
 		return nil, errors.New("private launch handoff is not an owner-only regular file")
 	}
 	file, err := os.Open(path)
@@ -465,11 +467,49 @@ func openPrivateHandoff(path string) (*os.File, error) {
 		_ = file.Close()
 		return nil, fmt.Errorf("inspect opened private launch handoff: %w", err)
 	}
-	if !openedInfo.Mode().IsRegular() || openedInfo.Mode().Perm()&0077 != 0 || !os.SameFile(info, openedInfo) {
+	if !isOwnerOnlyHandoffFile(openedInfo) || !os.SameFile(info, openedInfo) {
 		_ = file.Close()
 		return nil, errors.New("private launch handoff changed while it was being opened")
 	}
 	return file, nil
+}
+
+func validatePrivateHandoffLocation(path string) error {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return errors.New("private launch handoff requires a canonical absolute path")
+	}
+	name := filepath.Base(path)
+	if !strings.HasPrefix(name, "launch-") || !strings.HasSuffix(name, ".json") {
+		return errors.New("private launch handoff name is outside the staging namespace")
+	}
+	directory := filepath.Dir(path)
+	if filepath.Base(directory) != "private-launch" {
+		return errors.New("private launch handoff is outside a private-launch staging directory")
+	}
+	canonicalDirectory, err := filepath.EvalSymlinks(directory)
+	if err != nil {
+		return fmt.Errorf("resolve private launch handoff directory: %w", err)
+	}
+	if filepath.Base(canonicalDirectory) != "private-launch" {
+		return errors.New("private launch handoff directory resolves outside the staging namespace")
+	}
+	directoryInfo, err := os.Stat(canonicalDirectory)
+	if err != nil {
+		return fmt.Errorf("inspect private launch handoff directory: %w", err)
+	}
+	if !directoryInfo.IsDir() || directoryInfo.Mode().Perm()&0077 != 0 || !ownedByCurrentUser(directoryInfo) {
+		return errors.New("private launch handoff directory is not owner-only and current-user-owned")
+	}
+	return nil
+}
+
+func isOwnerOnlyHandoffFile(info os.FileInfo) bool {
+	return info.Mode().IsRegular() && info.Mode().Perm()&0077 == 0 && ownedByCurrentUser(info)
+}
+
+func ownedByCurrentUser(info os.FileInfo) bool {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && int(stat.Uid) == os.Getuid()
 }
 
 func decodeHandoff(file *os.File) (launchHandoff, error) {

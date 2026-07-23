@@ -509,9 +509,18 @@ The CLI integrates with tmux through the `internal/tmux` package:
 // Create or attach to tmux session
 tmux.CreateOrAttach(sessionName)
 
-// Send commands to tmux pane
+// Send ordinary commands to the tmux pane
 tmux.SendKeys(sessionName, "cd /path/to/project")
-tmux.SendKeys(sessionName, "claude --resume uuid")
+
+// Resume Claude through the owner-only private executor boundary
+launch, err := prepareClaudeResumeCommand(adapter, session, health)
+if err != nil {
+    return err
+}
+if err := tmux.SendKeys(sessionName, launch.Command); err != nil {
+    _ = launch.CancelUndelivered()
+    return err
+}
 
 // Check tmux session status
 status := tmux.SessionExists(sessionName)

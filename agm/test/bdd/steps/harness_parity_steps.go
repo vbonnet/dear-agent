@@ -1056,7 +1056,7 @@ func agmBuildsTheCodexPrivateLaunchBoundary(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/harnessexec",
-		"-run", `^(TestPrepared(ClaudeCommand(CarriesCallerOnlyOAuthAndTelemetry|ClearsCallerAbsentPaneState)|CodexCommand(CarriesCallerAllowlistAndPreservesPaneIdentity|ClearsCallerAbsentPaneCredentials|ResolvesExecutableFromCallerPATH)|Command(CancelRemovesUndeliveredHandoff|UsesCoInstalledAGMFromCompanionBinary|RejectsCompanionWithoutCoInstalledAGM|UsesRenamedCurrentAGMExecutable|MakesRelativeStateDirectoryAbsolute|SchedulesIndependentExpiration|RemovesHandoffWhenExpirationCannotBeScheduled)|DeferredCommandSchedulesProducerLease)|Test(DeferredHandoffRemainsLiveUntilProducerExitThenExpires|ExpiryProtocolRemovesUnconsumedHandoffAtDeadline|DetachedExpiryHelper(InterceptsGoTestBinaryBeforeTestsRun|IsReapedAsynchronously)|ConsumeHandoffUsesDeferredLeaseFreshnessAndUnlinksRejections|ClaudeResumeChangesDirectoryBeforeDirectReplacement))$`,
+		"-run", `^(TestPrepared(ClaudeCommand(CarriesCallerOnlyOAuthAndTelemetry|ClearsCallerAbsentPaneState)|CodexCommand(CarriesCallerAllowlistAndPreservesPaneIdentity|ClearsCallerAbsentPaneCredentials|ResolvesExecutableFromCallerPATH)|Command(CancelRemovesUndeliveredHandoff|UsesCoInstalledAGMFromCompanionBinary|RejectsCompanionWithoutCoInstalledAGM|UsesRenamedCurrentAGMExecutable|MakesRelativeStateDirectoryAbsolute|SchedulesIndependentExpiration|RemovesHandoffWhenExpirationCannotBeScheduled)|DeferredCommandSchedulesProducerLease)|Test(DeferredHandoffRemainsLiveUntilProducerExitThenExpires|ExpiryProtocolRemovesUnconsumedHandoffAtDeadline|DetachedExpiryHelper(InterceptsGoTestBinaryBeforeTestsRun|IsReapedAsynchronously)|ConsumeHandoff(UsesDeferredLeaseFreshnessAndUnlinksRejections|PreservesFilesOutsidePrivateStagingNamespace)|ClaudeResumeChangesDirectoryBeforeDirectReplacement))$`,
 		"-count=1", "-v",
 	)
 	cmd.Dir = bddRepoRoot()
@@ -1167,6 +1167,7 @@ func deferredAndRejectedHandoffsShouldPreserveBoundedOneShotCleanup(ctx context.
 		"TestDeferredHandoffRemainsLiveUntilProducerExitThenExpires",
 		"TestDetachedExpiryHelperIsReapedAsynchronously",
 		"TestConsumeHandoffUsesDeferredLeaseFreshnessAndUnlinksRejections",
+		"TestConsumeHandoffPreservesFilesOutsidePrivateStagingNamespace",
 	} {
 		if !strings.Contains(state.privateHandoffTestOutput, "--- PASS: "+behavior) {
 			return fmt.Errorf("private deferred-handoff behavior %s did not pass:\n%s", behavior, state.privateHandoffTestOutput)
