@@ -340,11 +340,11 @@ func TestBuildCodexResumeCommand(t *testing.T) {
 	cmd := buildCodexResumeCommand(m, health)
 
 	for _, want := range []string{
-		"env -u CLAUDECODE",
-		"AGM_SESSION_NAME='codex-session'",
-		"codex -m 'gpt-5.4'",
-		"-C '/tmp/work'",
-		"-s workspace-write",
+		"agm __exec-codex",
+		"--session 'codex-session'",
+		"--model 'gpt-5.4'",
+		"--workdir '/tmp/work'",
+		"--sandbox 'workspace-write'",
 		"&& exit",
 	} {
 		if !strings.Contains(cmd, want) {
@@ -363,8 +363,60 @@ func TestBuildCodexResumeCommand_DefaultModel(t *testing.T) {
 	}
 
 	cmd := buildCodexResumeCommand(&manifest.Manifest{}, health)
-	if !strings.Contains(cmd, "codex -m 'gpt-5.5'") {
+	if !strings.Contains(cmd, "--model 'gpt-5.5'") {
 		t.Errorf("default Codex model not resolved: %s", cmd)
+	}
+}
+
+func TestPrepareClaudeResumeCommandUsesCallerOnlyPrivateState(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "claude-resume-oauth-canary")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "claude-resume-otel-canary")
+	m := &manifest.Manifest{
+		SessionID: "agm-session-id",
+		Claude:    manifest.Claude{UUID: "native-claude-id"},
+	}
+	health := &HealthStatus{TmuxSessionName: "claude-resume", WorktreePath: "/tmp/resume-work"}
+
+	launch, err := prepareClaudeResumeCommand(nil, m, health)
+	if err != nil {
+		t.Fatalf("prepare Claude resume: %v", err)
+	}
+	t.Cleanup(func() { _ = launch.CancelUndelivered() })
+	for _, want := range []string{
+		"__exec-claude", "--handoff", "--resume-id 'native-claude-id'", "--workdir '/tmp/resume-work'",
+		"--forward-telemetry",
+	} {
+		if !strings.Contains(launch.Command, want) {
+			t.Errorf("prepared Claude resume %q missing %q", launch.Command, want)
+		}
+	}
+	for _, secret := range []string{"claude-resume-oauth-canary", "claude-resume-otel-canary"} {
+		if strings.Contains(launch.Command, secret) {
+			t.Fatalf("prepared Claude resume exposed %q: %s", secret, launch.Command)
+		}
+	}
+	if strings.Contains(launch.Command, " claude --resume ") {
+		t.Fatalf("Claude resume bypassed the private executor: %s", launch.Command)
+	}
+}
+
+func TestArchitectureUsesPreparedClaudeResumeBoundary(t *testing.T) {
+	architecture, err := os.ReadFile("ARCHITECTURE.md")
+	if err != nil {
+		t.Fatalf("read AGM architecture: %v", err)
+	}
+	text := string(architecture)
+	if strings.Contains(text, `tmux.SendKeys(sessionName, "claude --resume`) {
+		t.Fatal("AGM architecture still teaches raw Claude resume through tmux")
+	}
+	for _, want := range []string{"prepareClaudeResumeCommand", "launch.Command", "ResolveHarnessLaunchSubmission"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("AGM architecture private resume example missing %q", want)
+		}
+	}
+	if strings.Contains(text, "_ = launch.CancelUndelivered()") {
+		t.Fatal("AGM architecture cancels a private handoff without resolving uncertain submission")
 	}
 }
 
@@ -666,21 +718,21 @@ func TestBuildCodexResumeCommand_ImportedSessionUsesCodexResume(t *testing.T) {
 	cmd := buildCodexResumeCommand(m, health)
 
 	for _, want := range []string{
-		"env -u CLAUDECODE",
-		"AGM_SESSION_NAME='codex-session'",
-		"codex resume",
-		"-m 'gpt-5.4'",
-		"-C '/tmp/work'",
-		"-s workspace-write",
-		"'" + sessionID + "'",
+		"agm __exec-codex",
+		"--session 'codex-session'",
+		"--resume-id '" + sessionID + "'",
+		"--remote",
+		"--model 'gpt-5.4'",
+		"--workdir '/tmp/work'",
+		"--sandbox 'workspace-write'",
 		"&& exit",
 	} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("command %q missing %q", cmd, want)
 		}
 	}
-	if strings.Contains(cmd, "codex -m") {
-		t.Errorf("imported Codex session started a new conversation instead of resuming: %s", cmd)
+	if !strings.Contains(cmd, "--resume-id") {
+		t.Errorf("imported Codex session did not preserve the saved session id: %s", cmd)
 	}
 }
 

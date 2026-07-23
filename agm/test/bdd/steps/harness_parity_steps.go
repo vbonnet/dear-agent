@@ -19,6 +19,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/configdirparity"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/engramparity"
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/marketplaceparity"
@@ -141,6 +142,12 @@ type harnessParityState struct {
 	startupReadinessTestOutput string
 	startupReadinessTestErr    error
 	gracefulExitCommand        string
+	privateLaunchCommand       string
+	privateChildEnvironment    []string
+	privateAllowedCanaries     []string
+	privateRejectedCanaries    []string
+	privateHandoffTestOutput   string
+	privateHandoffTestErr      error
 }
 
 type harnessParityStateKey struct{}
@@ -186,6 +193,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the top-level new command should route into current tmux$`, topLevelNewCommandShouldRouteIntoCurrentTmux)
 	ctx.Step(`^Codex current-tmux launch should require the executable without waiting behind its own AGM process$`, codexCurrentTmuxLaunchShouldRequireExecutableWithoutWaiting)
 	ctx.Step(`^every queued current-tmux harness should defer readiness until AGM exits$`, everyQueuedCurrentTmuxHarnessShouldDeferReadinessUntilAGMExits)
+	ctx.Step(`^queued private handoffs should carry producer-exit liveness$`, queuedPrivateHandoffsShouldCarryProducerExitLiveness)
 	ctx.Step(`^current-tmux Claude should associate its UUID on SessionStart$`, currentTmuxClaudeShouldAssociateItsUUIDOnSessionStart)
 	ctx.Step(`^Codex queue failures should propagate to shared creation rollback$`, codexQueueFailuresShouldPropagateToSharedCreationRollback)
 	ctx.Step(`^current-tmux creation selects AGY$`, currentTmuxCreationSelectsAGY)
@@ -356,6 +364,15 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^shared Gemini readiness should advance first-run trust on the verified pane$`, sharedGeminiReadinessShouldAdvanceFirstRunTrustOnTheVerifiedPane)
 	ctx.Step(`^legacy AGY names should reach canonical shared send readiness$`, legacyAgyNamesShouldReachCanonicalSharedSendReadiness)
 	ctx.Step(`^the Pi alias should reach canonical shared send readiness$`, piAliasShouldReachCanonicalSharedSendReadiness)
+	ctx.Step(`^synthetic ambient credentials from multiple harnesses$`, syntheticAmbientCredentialsFromMultipleHarnesses)
+	ctx.Step(`^AGM builds the Codex private launch boundary$`, agmBuildsTheCodexPrivateLaunchBoundary)
+	ctx.Step(`^the launch command should contain no credential values$`, launchCommandShouldContainNoCredentialValues)
+	ctx.Step(`^the Codex child should receive only allowlisted credentials$`, codexChildShouldReceiveOnlyAllowlistedCredentials)
+	ctx.Step(`^caller-only credentials and telemetry should cross stale tmux state through the pinned AGM executor$`, callerOnlyCredentialsAndTelemetryShouldCrossStaleTmuxStateThroughThePinnedAGMExecutor)
+	ctx.Step(`^private launches should normalize the target working directory and require a verified executor$`, privateLaunchesShouldNormalizeTheTargetWorkingDirectoryAndRequireAVerifiedExecutor)
+	ctx.Step(`^an unconsumed credential handoff should expire independently of later launches$`, anUnconsumedCredentialHandoffShouldExpireIndependentlyOfLaterLaunches)
+	ctx.Step(`^deferred and rejected handoffs should preserve bounded one-shot cleanup$`, deferredAndRejectedHandoffsShouldPreserveBoundedOneShotCleanup)
+	ctx.Step(`^uncertain submission across private launch surfaces should preserve the handoff$`, uncertainSubmissionAcrossPrivateLaunchSurfacesShouldPreserveTheHandoff)
 	ctx.Step(`^an existing tmux session running Codex CLI$`, anExistingTmuxSessionRunningCodexCLI)
 	ctx.Step(`^an existing tmux session running AGY$`, anExistingTmuxSessionRunningAGY)
 	ctx.Step(`^/agm:agm-assoc runs in that session$`, agmAssocRunsInThatSession)
@@ -675,6 +692,22 @@ func everyQueuedCurrentTmuxHarnessShouldDeferReadinessUntilAGMExits(ctx context.
 	return nil
 }
 
+func queuedPrivateHandoffsShouldCarryProducerExitLiveness(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if state.currentTmuxTestErr != nil {
+		return fmt.Errorf("current-tmux behavior suite failed: %w\n%s", state.currentTmuxTestErr, state.currentTmuxTestOutput)
+	}
+	for _, behavior := range []string{
+		"TestQueueCurrentTmuxCodexDoesNotWaitForReadiness",
+		"TestQueueCurrentTmuxHarnessCommandUsesCanonicalCommandWithoutWaiting",
+	} {
+		if !strings.Contains(state.currentTmuxTestOutput, "--- PASS: "+behavior) {
+			return fmt.Errorf("producer-exit liveness behavior %s did not pass:\n%s", behavior, state.currentTmuxTestOutput)
+		}
+	}
+	return nil
+}
+
 func currentTmuxClaudeShouldAssociateItsUUIDOnSessionStart(ctx context.Context) error {
 	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
 	if state.currentTmuxTestErr != nil {
@@ -935,6 +968,17 @@ func agmValidatesSlowHarnessStartupReadiness(ctx context.Context) error {
 	return nil
 }
 
+func syntheticAmbientCredentialsFromMultipleHarnesses(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	state.privateAllowedCanaries = []string{"openai-bdd-canary", "codex-bdd-canary"}
+	state.privateRejectedCanaries = []string{
+		"claude-bdd-canary", "anthropic-bdd-canary", "github-bdd-canary",
+		"google-bdd-canary", "engram-bdd-canary", "otel-bdd-canary",
+		"ssh-bdd-canary", "arbitrary-bdd-canary",
+	}
+	return nil
+}
+
 func sharedStartupReadinessShouldHonorTheTotalDeadline(ctx context.Context) error {
 	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
 	if harnessState.startupReadinessTestErr != nil {
@@ -986,6 +1030,177 @@ func sharedInputReadinessShouldRejectStaleClaudeComposerAndUnrelatedNodeProcess(
 	} {
 		if !realTmuxReadinessBehaviorSatisfied(harnessState.startupReadinessTestOutput, behavior) {
 			return fmt.Errorf("shared real-tmux readiness behavior %s did not pass or use the configured CI skip:\n%s", behavior, harnessState.startupReadinessTestOutput)
+		}
+	}
+	return nil
+}
+
+func agmBuildsTheCodexPrivateLaunchBoundary(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	state.privateLaunchCommand = ops.BuildHarnessLaunchCommand(ops.HarnessLaunchSpec{
+		Harness: "codex-cli", Model: "5.4", SessionName: "bdd-private-codex", WorkDir: "/tmp/bdd-work",
+	}).Command
+	state.privateChildEnvironment = harnessexec.CodexEnvironment([]string{
+		"PATH=/usr/bin:/bin",
+		"HOME=/tmp/bdd-home",
+		"OPENAI_API_KEY=openai-bdd-canary",
+		"CODEX_ACCESS_TOKEN=codex-bdd-canary",
+		"CLAUDE_CODE_OAUTH_TOKEN=claude-bdd-canary",
+		"ANTHROPIC_API_KEY=anthropic-bdd-canary",
+		"GITHUB_TOKEN=github-bdd-canary",
+		"GOOGLE_API_KEY=google-bdd-canary",
+		"ENGRAM_TOKEN=engram-bdd-canary",
+		"OTEL_EXPORTER_OTLP_HEADERS=otel-bdd-canary",
+		"SSH_AUTH_SOCK=ssh-bdd-canary",
+		"ARBITRARY_SECRET=arbitrary-bdd-canary",
+	}, "bdd-private-codex")
+	testCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/harnessexec", "./agm/internal/agent", "./agm/internal/session", "./agm/internal/validate", "./agm/cmd/agm", "./agm/cmd/agm-mcp-server",
+		"-run", `^(TestPrepared(ClaudeCommand(CarriesCallerOnlyOAuthAndTelemetry|ClearsCallerAbsentPaneState)|CodexCommand(CarriesCallerAllowlistAndPreservesPaneIdentity|ClearsCallerAbsentPaneCredentials|ResolvesExecutableFromCallerPATH)|Command(CancelRemovesUndeliveredHandoff|UsesCoInstalledAGMFromCompanionBinary|UsesMatchingVersionedAGMFromReleaseCompanion|RejectsCompanionWithoutCoInstalledAGM|UsesRenamedCurrentAGMExecutable|MakesRelativeStateDirectoryAbsolute|SchedulesIndependentExpiration|RemovesHandoffWhenExpirationCannotBeScheduled)|DeferredCommandSchedulesProducerLease)|Test(ResolveSubmissionPreservesUncertainAndCancelsConfirmedFailure|DeferredHandoffRemainsLiveUntilProducerExitThenExpires|ExpiryProtocolRemovesUnconsumedHandoffAtDeadline|DetachedExpiryHelper(InterceptsGoTestBinaryBeforeTestsRun|IsReapedAsynchronously)|ConsumeHandoff(UsesDeferredLeaseFreshnessAndUnlinksRejections|PreservesFilesOutsidePrivateStagingNamespace)|ClaudeResumeChangesDirectoryBeforeDirectReplacement|ClaudeResolvesRelativePATHAfterEnteringWorkDir|ArchitectureUsesPreparedClaudeResumeBoundary|ClaudeAdapter(Create|Resume)PreservesHandoffAfterUncertainSubmission|Codex(CreateSession|ResumeSession)PreservesHandoffAfterUncertainSubmission|ClaudeResumePreservesHandoffAndCreatedTmuxAfterUncertainSubmission|ResumabilityValidatorPreservesHandoffAfterUncertainSubmission|QueueCurrentTmux(Codex|Claude)PreservesHandoffAfterUncertainSubmission|MCPCreateSessionRuntimePreservesUncertainPrivateLaunch))$`,
+		"-count=1", "-v",
+	)
+	cmd.Dir = bddRepoRoot()
+	output, err := cmd.CombinedOutput()
+	state.privateHandoffTestOutput = string(output)
+	state.privateHandoffTestErr = err
+	if testCtx.Err() != nil {
+		return fmt.Errorf("private handoff behavior timed out: %w", testCtx.Err())
+	}
+	return nil
+}
+
+func launchCommandShouldContainNoCredentialValues(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	for _, canary := range append(append([]string{}, state.privateAllowedCanaries...), state.privateRejectedCanaries...) {
+		if strings.Contains(state.privateLaunchCommand, canary) {
+			return fmt.Errorf("private launch command exposed credential canary %q", canary)
+		}
+	}
+	if !strings.Contains(state.privateLaunchCommand, "agm "+harnessexec.CodexProtocol) {
+		return fmt.Errorf("codex launch bypassed the private executor: %s", state.privateLaunchCommand)
+	}
+	return nil
+}
+
+func codexChildShouldReceiveOnlyAllowlistedCredentials(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	joined := strings.Join(state.privateChildEnvironment, "\n")
+	for _, canary := range state.privateAllowedCanaries {
+		if !strings.Contains(joined, canary) {
+			return fmt.Errorf("codex child environment omitted allowlisted canary %q", canary)
+		}
+	}
+	for _, canary := range state.privateRejectedCanaries {
+		if strings.Contains(joined, canary) {
+			return fmt.Errorf("codex child environment inherited rejected canary %q", canary)
+		}
+	}
+	return nil
+}
+
+func callerOnlyCredentialsAndTelemetryShouldCrossStaleTmuxStateThroughThePinnedAGMExecutor(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if state.privateHandoffTestErr != nil {
+		return fmt.Errorf("private handoff behavior failed: %w\n%s", state.privateHandoffTestErr, state.privateHandoffTestOutput)
+	}
+	for _, behavior := range []string{
+		"TestPreparedClaudeCommandCarriesCallerOnlyOAuthAndTelemetry",
+		"TestPreparedClaudeCommandClearsCallerAbsentPaneState",
+		"TestPreparedCodexCommandCarriesCallerAllowlistAndPreservesPaneIdentity",
+		"TestPreparedCodexCommandClearsCallerAbsentPaneCredentials",
+		"TestPreparedCodexCommandResolvesExecutableFromCallerPATH",
+		"TestPreparedCommandCancelRemovesUndeliveredHandoff",
+		"TestPreparedCommandUsesCoInstalledAGMFromCompanionBinary",
+		"TestPreparedCommandUsesMatchingVersionedAGMFromReleaseCompanion",
+		"TestPreparedCommandUsesRenamedCurrentAGMExecutable",
+		"TestPreparedCommandMakesRelativeStateDirectoryAbsolute",
+		"TestClaudeResumeChangesDirectoryBeforeDirectReplacement",
+		"TestClaudeResolvesRelativePATHAfterEnteringWorkDir",
+	} {
+		if !strings.Contains(state.privateHandoffTestOutput, "--- PASS: "+behavior) {
+			return fmt.Errorf("private handoff behavior %s did not pass:\n%s", behavior, state.privateHandoffTestOutput)
+		}
+	}
+	return nil
+}
+
+func privateLaunchesShouldNormalizeTheTargetWorkingDirectoryAndRequireAVerifiedExecutor(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if state.privateHandoffTestErr != nil {
+		return fmt.Errorf("private executor boundary behavior failed: %w\n%s", state.privateHandoffTestErr, state.privateHandoffTestOutput)
+	}
+	for _, behavior := range []string{
+		"TestPreparedCodexCommandCarriesCallerAllowlistAndPreservesPaneIdentity",
+		"TestPreparedCommandUsesCoInstalledAGMFromCompanionBinary",
+		"TestPreparedCommandUsesMatchingVersionedAGMFromReleaseCompanion",
+		"TestPreparedCommandRejectsCompanionWithoutCoInstalledAGM",
+		"TestClaudeResolvesRelativePATHAfterEnteringWorkDir",
+		"TestArchitectureUsesPreparedClaudeResumeBoundary",
+	} {
+		if !strings.Contains(state.privateHandoffTestOutput, "--- PASS: "+behavior) {
+			return fmt.Errorf("private executor boundary behavior %s did not pass:\n%s", behavior, state.privateHandoffTestOutput)
+		}
+	}
+	return nil
+}
+
+func anUnconsumedCredentialHandoffShouldExpireIndependentlyOfLaterLaunches(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if state.privateHandoffTestErr != nil {
+		return fmt.Errorf("private handoff expiration behavior failed: %w\n%s", state.privateHandoffTestErr, state.privateHandoffTestOutput)
+	}
+	for _, behavior := range []string{
+		"TestPreparedCommandSchedulesIndependentExpiration",
+		"TestPreparedCommandRemovesHandoffWhenExpirationCannotBeScheduled",
+		"TestExpiryProtocolRemovesUnconsumedHandoffAtDeadline",
+		"TestDetachedExpiryHelperInterceptsGoTestBinaryBeforeTestsRun",
+	} {
+		if !strings.Contains(state.privateHandoffTestOutput, "--- PASS: "+behavior) {
+			return fmt.Errorf("private handoff expiration behavior %s did not pass:\n%s", behavior, state.privateHandoffTestOutput)
+		}
+	}
+	return nil
+}
+
+func deferredAndRejectedHandoffsShouldPreserveBoundedOneShotCleanup(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if state.privateHandoffTestErr != nil {
+		return fmt.Errorf("private deferred-handoff behavior failed: %w\n%s", state.privateHandoffTestErr, state.privateHandoffTestOutput)
+	}
+	for _, behavior := range []string{
+		"TestPreparedDeferredCommandSchedulesProducerLease",
+		"TestDeferredHandoffRemainsLiveUntilProducerExitThenExpires",
+		"TestDetachedExpiryHelperIsReapedAsynchronously",
+		"TestConsumeHandoffUsesDeferredLeaseFreshnessAndUnlinksRejections",
+		"TestConsumeHandoffPreservesFilesOutsidePrivateStagingNamespace",
+	} {
+		if !strings.Contains(state.privateHandoffTestOutput, "--- PASS: "+behavior) {
+			return fmt.Errorf("private deferred-handoff behavior %s did not pass:\n%s", behavior, state.privateHandoffTestOutput)
+		}
+	}
+	return nil
+}
+
+func uncertainSubmissionAcrossPrivateLaunchSurfacesShouldPreserveTheHandoff(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if state.privateHandoffTestErr != nil {
+		return fmt.Errorf("private uncertain-submission behavior failed: %w\n%s", state.privateHandoffTestErr, state.privateHandoffTestOutput)
+	}
+	for _, behavior := range []string{
+		"TestResolveSubmissionPreservesUncertainAndCancelsConfirmedFailure",
+		"TestQueueCurrentTmuxCodexPreservesHandoffAfterUncertainSubmission",
+		"TestQueueCurrentTmuxClaudePreservesHandoffAfterUncertainSubmission",
+		"TestMCPCreateSessionRuntimePreservesUncertainPrivateLaunch",
+		"TestClaudeAdapterCreatePreservesHandoffAfterUncertainSubmission",
+		"TestClaudeAdapterResumePreservesHandoffAfterUncertainSubmission",
+		"TestCodexCreateSessionPreservesHandoffAfterUncertainSubmission",
+		"TestCodexResumeSessionPreservesHandoffAfterUncertainSubmission",
+		"TestClaudeResumePreservesHandoffAndCreatedTmuxAfterUncertainSubmission",
+		"TestResumabilityValidatorPreservesHandoffAfterUncertainSubmission",
+	} {
+		if !strings.Contains(state.privateHandoffTestOutput, "--- PASS: "+behavior) {
+			return fmt.Errorf("private uncertain-submission behavior %s did not pass:\n%s", behavior, state.privateHandoffTestOutput)
 		}
 	}
 	return nil

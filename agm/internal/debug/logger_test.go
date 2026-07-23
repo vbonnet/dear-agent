@@ -51,6 +51,10 @@ func TestInit_Enabled(t *testing.T) {
 	// Override HOME so we write to a temp dir
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	debugDir := filepath.Join(tmpDir, ".agm", "debug")
+	if err := os.MkdirAll(debugDir, 0755); err != nil {
+		t.Fatalf("pre-create broad debug directory: %v", err)
+	}
 
 	err := Init(true, "test-session")
 	if err != nil {
@@ -73,13 +77,26 @@ func TestInit_Enabled(t *testing.T) {
 	mu.Unlock()
 
 	// Verify debug directory was created
-	debugDir := filepath.Join(tmpDir, ".agm", "debug")
 	info, err := os.Stat(debugDir)
 	if err != nil {
 		t.Fatalf("debug directory not created: %v", err)
 	}
 	if !info.IsDir() {
 		t.Error("debug path should be a directory")
+	}
+	if got := info.Mode().Perm(); got != 0700 {
+		t.Errorf("debug directory mode = %04o, want 0700", got)
+	}
+
+	mu.Lock()
+	logPath := globalLogger.file.Name()
+	mu.Unlock()
+	logInfo, err := os.Stat(logPath)
+	if err != nil {
+		t.Fatalf("debug log not created: %v", err)
+	}
+	if got := logInfo.Mode().Perm(); got != 0600 {
+		t.Errorf("debug log mode = %04o, want 0600", got)
 	}
 }
 

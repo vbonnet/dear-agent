@@ -1,6 +1,6 @@
 # agm/internal/session — Requirements Specification (EARS)
 
-<!-- Last audited at: 2026-07-21 -->
+<!-- Last audited at: 2026-07-22 -->
 
 ## Purpose
 
@@ -33,6 +33,8 @@ directly, including the optional harness-process liveness capability
 
 **SESS-10** When AGM calculates context usage for a Pi session, the system shall resolve custom model metadata from the coding-agent directory persisted with that session, including an explicitly present empty value for Pi's native default, rather than from the status caller's current `PI_CODING_AGENT_DIR` environment; only metadata that genuinely predates the presence marker may use the caller environment as a compatibility fallback.
 
+**SESS-11** When legacy Claude resume must create a replacement tmux session, the system shall stage the private launch handoff before allocating tmux; if command delivery then fails, the system shall cancel the handoff, remove only the session created by that attempt, and report any cleanup failure with the primary delivery error.
+
 ## Key Invariants
 
 - **Capability, not contract widening.** `HarnessLivenessChecker` is a
@@ -46,3 +48,4 @@ directly, including the optional harness-process liveness capability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
 - Feature: `agm/test/bdd/features/pi_custom_context.feature`
+- Package regression: `agm/internal/session/resume_test.go`

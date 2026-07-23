@@ -5,6 +5,7 @@
 # RELATED-SPEC: agm/internal/agysession/SPEC.md
 # RELATED-SPEC: agm/internal/codexsession/SPEC.md
 # RELATED-SPEC: agm/internal/agent/openai/SPEC.md
+# RELATED-SPEC: agm/internal/harnessexec/SPEC.md
 # RELATED-SPEC: agm/internal/command/SPEC.md
 # RELATED-SPEC: agm/internal/monitor/opencode/SPEC.md
 # RELATED-SPEC: agm/internal/monitor/tmux/SPEC.md
@@ -363,6 +364,7 @@ Feature: Harness parity
     And the top-level new command should route into current tmux
     And Codex current-tmux launch should require the executable without waiting behind its own AGM process
     And every queued current-tmux harness should defer readiness until AGM exits
+    And queued private handoffs should carry producer-exit liveness
     And current-tmux Claude should associate its UUID on SessionStart
     And Codex queue failures should propagate to shared creation rollback
 
@@ -400,6 +402,17 @@ Feature: Harness parity
     When AGM sends a message through shared operations
     Then the shared send result should be "cancelled"
     And shared send should emit 0 tmux commands
+
+  Scenario: Private launches preserve caller state without exposing credentials
+    Given synthetic ambient credentials from multiple harnesses
+    When AGM builds the Codex private launch boundary
+    Then the launch command should contain no credential values
+    And the Codex child should receive only allowlisted credentials
+    And caller-only credentials and telemetry should cross stale tmux state through the pinned AGM executor
+    And private launches should normalize the target working directory and require a verified executor
+    And an unconsumed credential handoff should expire independently of later launches
+    And deferred and rejected handoffs should preserve bounded one-shot cleanup
+    And uncertain submission across private launch surfaces should preserve the handoff
 
   Scenario: AGY detached session receives startup prompt
     Given AGY is available

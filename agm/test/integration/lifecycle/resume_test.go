@@ -9,6 +9,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/test/integration/helpers"
 )
@@ -108,7 +109,7 @@ var _ = Describe("Resume Session", func() {
 					Expect(err).ToNot(HaveOccurred(), "tmux session creation should succeed")
 					defer helpers.KillTmuxSession(sessionName)
 				} else {
-					// Scenario B: Tmux NOT exists -> send resume command
+					// Scenario B: Tmux NOT exists -> send private resume command
 					err := helpers.EnsureNoTmuxSession(sessionName)
 					Expect(err).ToNot(HaveOccurred(), "tmux session should not exist")
 				}
@@ -125,8 +126,14 @@ var _ = Describe("Resume Session", func() {
 				sendCommands := !exists
 
 				if sendCommands {
-					// Scenario B: Send claude --resume command
-					resumeCmd := filepath.Join(testEnv.SessionsDir, sessionName, "project") + " && claude --resume " + uuid + " && exit"
+					workDir := filepath.Join(testEnv.SessionsDir, sessionName, "project")
+					resumeCmd := harnessexec.BuildClaudeCommand(harnessexec.ClaudeLaunch{
+						Executable:  "/opt/agm/bin/agm",
+						HandoffPath: "/tmp/agm-test/private-launch/launch-test.json",
+						SessionName: sessionName,
+						ResumeID:    uuid,
+						WorkDir:     workDir,
+					})
 					mockSender.SendCommand(sessionName, resumeCmd)
 				}
 
@@ -138,17 +145,19 @@ var _ = Describe("Resume Session", func() {
 						"Expected tmux session to exist for attach scenario")
 				} else {
 					Expect(mockSender.CommandsSent).To(HaveLen(1),
-						"Expected claude --resume command sent when tmux NOT exists")
-					Expect(mockSender.CommandsSent[0]).To(ContainSubstring("claude --resume "+uuid),
-						"Expected correct UUID in resume command")
-					Expect(mockSender.CommandsSent[0]).To(ContainSubstring("&&"),
-						"Expected command chain (cd && claude --resume && exit)")
+						"Expected private resume command sent when tmux NOT exists")
+					Expect(mockSender.CommandsSent[0]).To(ContainSubstring("__exec-claude"),
+						"Expected private executor protocol")
+					Expect(mockSender.CommandsSent[0]).To(ContainSubstring("--resume-id '"+uuid+"'"),
+						"Expected correct UUID in private resume command")
+					Expect(mockSender.CommandsSent[0]).ToNot(ContainSubstring(" claude --resume "),
+						"Expected no raw Claude resume command")
 					Expect(exists).To(BeFalse(),
 						"Expected tmux session NOT to exist for resume scenario")
 				}
 			},
 			Entry("Tmux exists -> attach only (no command sent)", true, "attach"),
-			Entry("Tmux NOT exists -> send claude --resume", false, "resume"),
+			Entry("Tmux NOT exists -> send private Claude resume", false, "resume"),
 		)
 	})
 })

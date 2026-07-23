@@ -1558,7 +1558,7 @@ func TestBuildHarnessCommand_ClaudeCode(t *testing.T) {
 	if cmd == "" {
 		t.Fatal("empty command")
 	}
-	for _, want := range []string{"claude", "--model '" + agent.ResolveModelFullName("claude-code", "opus") + "'", "AGM_SESSION_NAME='my-session'", "--enable-auto-mode", "--add-dir '/tmp/work'", "&& exit"} {
+	for _, want := range []string{"agm __exec-claude", "--model '" + agent.ResolveModelFullName("claude-code", "opus") + "'", "--session 'my-session'", "--auto-mode", "--add-dir '/tmp/work'", "&& exit"} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("command %q missing %q", cmd, want)
 		}
@@ -1578,11 +1578,11 @@ func TestBuildHarnessCommand_GeminiCli(t *testing.T) {
 func TestBuildHarnessCommand_CodexCli(t *testing.T) {
 	cmd := testHarnessCommand("codex-cli", "5.4", "codex-session", "/tmp/work", false)
 	for _, want := range []string{
-		"env -u CLAUDECODE",
-		"AGM_SESSION_NAME='codex-session'",
-		"codex -m 'gpt-5.4'",
-		"-C '/tmp/work'",
-		"-s workspace-write",
+		"agm __exec-codex",
+		"--session 'codex-session'",
+		"--model 'gpt-5.4'",
+		"--workdir '/tmp/work'",
+		"--sandbox 'workspace-write'",
 		"&& exit",
 	} {
 		if !strings.Contains(cmd, want) {
@@ -1597,13 +1597,13 @@ func TestBuildHarnessCommand_CodexCli(t *testing.T) {
 func TestBuildHarnessCommand_CodexCliRemoteThread(t *testing.T) {
 	cmd := testHarnessCommandWithCodex("codex-cli", "5.4", "codex-session", "/tmp/work", false, &manifest.Codex{SessionID: "thr_123"})
 	for _, want := range []string{
-		"env -u CLAUDECODE",
-		"AGM_SESSION_NAME='codex-session'",
-		"codex resume --remote unix://",
-		"-m 'gpt-5.4'",
-		"-C '/tmp/work'",
-		"-s workspace-write",
-		"'thr_123'",
+		"agm __exec-codex",
+		"--session 'codex-session'",
+		"--model 'gpt-5.4'",
+		"--workdir '/tmp/work'",
+		"--sandbox 'workspace-write'",
+		"--resume-id 'thr_123'",
+		"--remote",
 		"&& exit",
 	} {
 		if !strings.Contains(cmd, want) {

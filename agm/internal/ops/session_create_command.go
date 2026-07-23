@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
-	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
 
 // HarnessLaunchSpec is the harness-neutral launch contract used by every
@@ -19,12 +19,12 @@ type HarnessLaunchSpec struct {
 	Model            string
 	SessionName      string
 	SessionID        string
+	ResumeID         string
 	WorkDir          string
 	Persistent       bool
 	PermissionMode   string
 	DisableAutoMode  bool
 	DisableOAuth     bool
-	OAuthToken       string
 	MaxBudgetUSD     float64
 	ExtraAddDirs     []string
 	ForwardTelemetry bool
@@ -34,6 +34,9 @@ type HarnessLaunchSpec struct {
 	PiExtension      string
 	PiPolicyJSON     string
 	PiPolicyFile     string
+	// DeferredUntilCallerExit is set only by current-pane launchers whose
+	// queued command cannot run until the producing AGM process releases tmux.
+	DeferredUntilCallerExit bool
 }
 
 // HarnessLaunchCommand is the command plus the startup-policy outcome needed
@@ -41,6 +44,25 @@ type HarnessLaunchSpec struct {
 type HarnessLaunchCommand struct {
 	Command              string
 	ModeAppliedAtStartup bool
+	Cancel               func() error
+}
+
+// CancelUndelivered removes a private handoff when its pane command is
+// positively known not to have been queued. Once delivery succeeds or becomes
+// uncertain, the executor owns one-shot consumption.
+func (c HarnessLaunchCommand) CancelUndelivered() error {
+	if c.Cancel == nil {
+		return nil
+	}
+	return c.Cancel()
+}
+
+// ResolveHarnessLaunchSubmission converts tmux's irreversible submission
+// boundary into launch ownership. An uncertain acknowledgement is successful
+// for compensation purposes because the command may already be queued; only a
+// positively failed submission may remove the staged handoff.
+func ResolveHarnessLaunchSubmission(command HarnessLaunchCommand, submissionErr error) (bool, error) {
+	return harnessexec.ResolveSubmission(submissionErr, command.CancelUndelivered)
 }
 
 // BuildHarnessLaunchCommand builds the one canonical shell command for a
@@ -63,6 +85,35 @@ func BuildHarnessLaunchCommand(spec HarnessLaunchSpec) HarnessLaunchCommand {
 		return HarnessLaunchCommand{Command: fmt.Sprintf("gemini -m %s%s", launchparity.ShellQuote(resolvedModel), exitSuffix)}
 	default:
 		return HarnessLaunchCommand{Command: fmt.Sprintf("echo %s && exit 1", launchparity.ShellQuote("Unknown harness: "+spec.Harness))}
+	}
+}
+
+// PrepareHarnessLaunchCommand stages caller-only credentials and telemetry for
+// private Codex and Claude execution. The returned command contains only the
+// absolute current AGM path, validated non-secret metadata, and an opaque
+// owner-only handoff path. Call Cancel only when the command was not delivered.
+func PrepareHarnessLaunchCommand(spec HarnessLaunchSpec) (HarnessLaunchCommand, error) {
+	switch agent.NormalizeHarnessName(spec.Harness) {
+	case "claude-code":
+		launch, modeApplied := claudeLaunch(spec)
+		prepared, err := harnessexec.PrepareClaudeCommand(launch, os.Environ())
+		if err != nil {
+			return HarnessLaunchCommand{}, err
+		}
+		return HarnessLaunchCommand{
+			Command: prepared.Command, ModeAppliedAtStartup: modeApplied, Cancel: prepared.Cancel,
+		}, nil
+	case "codex-cli":
+		launch, modeApplied := codexLaunch(spec)
+		prepared, err := harnessexec.PrepareCodexCommand(launch, os.Environ())
+		if err != nil {
+			return HarnessLaunchCommand{}, err
+		}
+		return HarnessLaunchCommand{
+			Command: prepared.Command, ModeAppliedAtStartup: modeApplied, Cancel: prepared.Cancel,
+		}, nil
+	default:
+		return BuildHarnessLaunchCommand(spec), nil
 	}
 }
 
@@ -91,65 +142,71 @@ func buildPiLaunchCommand(spec HarnessLaunchSpec) HarnessLaunchCommand {
 	return HarnessLaunchCommand{Command: command.Command, ModeAppliedAtStartup: command.ModeAppliedAtStartup}
 }
 
-func buildClaudeLaunchCommand(spec HarnessLaunchSpec, exitSuffix string) HarnessLaunchCommand {
-	resolvedModel := agent.ResolveModelFullName("claude-code", spec.Model)
-	oauthToken := spec.OAuthToken
-	if oauthToken == "" && !spec.DisableOAuth {
-		oauthToken = auth.ResolveOAuthToken()
-	}
-	envUnset := "-u CLAUDECODE"
-	oauthArg := ""
-	if oauthToken != "" {
-		envUnset += " -u ANTHROPIC_API_KEY"
-		oauthArg = " CLAUDE_CODE_OAUTH_TOKEN=" + launchparity.ShellQuote(oauthToken)
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "env %s AGM_SESSION_NAME=%s", envUnset, launchparity.ShellQuote(spec.SessionName))
-	if spec.ForwardTelemetry {
-		appendTelemetryEnv(&b, spec.SessionID)
-	}
-	b.WriteString(oauthArg)
-	fmt.Fprintf(&b, " claude --model %s --add-dir %s", launchparity.ShellQuote(resolvedModel), launchparity.ShellQuote(spec.WorkDir))
-	if !spec.DisableAutoMode {
-		b.WriteString(" --enable-auto-mode")
-	}
-	for _, dir := range spec.ExtraAddDirs {
-		fmt.Fprintf(&b, " --add-dir %s", launchparity.ShellQuote(dir))
-	}
-	modeApplied := false
-	if spec.PermissionMode == "auto" || spec.PermissionMode == "plan" || spec.PermissionMode == "default" {
-		fmt.Fprintf(&b, " --permission-mode %s", spec.PermissionMode)
-		modeApplied = true
-	}
-	if spec.MaxBudgetUSD > 0 {
-		fmt.Fprintf(&b, " --max-budget-usd %.2f", spec.MaxBudgetUSD)
-	}
-	b.WriteString(exitSuffix)
-	return HarnessLaunchCommand{Command: b.String(), ModeAppliedAtStartup: modeApplied}
+func buildClaudeLaunchCommand(spec HarnessLaunchSpec, _ string) HarnessLaunchCommand {
+	launch, modeApplied := claudeLaunch(spec)
+	return HarnessLaunchCommand{Command: harnessexec.BuildClaudeCommand(launch), ModeAppliedAtStartup: modeApplied}
 }
 
-func buildCodexLaunchCommand(spec HarnessLaunchSpec, exitSuffix string) HarnessLaunchCommand {
-	resolvedModel := agent.ResolveModelFullName("codex-cli", spec.Model)
-	sandboxMode := launchparity.CodexSandboxMode(spec.PermissionMode)
-	var b strings.Builder
-	fmt.Fprintf(&b, "env -u CLAUDECODE AGM_SESSION_NAME=%s codex", launchparity.ShellQuote(spec.SessionName))
-	if spec.Codex != nil && spec.Codex.SessionID != "" {
-		b.WriteString(" resume --remote unix://")
-	}
-	fmt.Fprintf(&b, " -m %s -C %s -s %s", launchparity.ShellQuote(resolvedModel), launchparity.ShellQuote(spec.WorkDir), sandboxMode)
-	for _, dir := range spec.ExtraAddDirs {
-		fmt.Fprintf(&b, " --add-dir %s", launchparity.ShellQuote(dir))
-	}
+func claudeLaunch(spec HarnessLaunchSpec) (harnessexec.ClaudeLaunch, bool) {
+	resolvedModel := agent.ResolveModelFullName("claude-code", spec.Model)
+	addDirs := make([]string, 0, len(spec.ExtraAddDirs)+1)
+	addDirs = append(addDirs, spec.WorkDir)
+	addDirs = append(addDirs, spec.ExtraAddDirs...)
+	permission := ""
 	modeApplied := false
-	if flag := launchparity.CodexPermissionModeFlag(spec.PermissionMode); flag != "" {
-		b.WriteString(" " + flag)
+	if spec.PermissionMode == "auto" || spec.PermissionMode == "plan" || spec.PermissionMode == "default" {
+		permission = spec.PermissionMode
 		modeApplied = true
 	}
-	if spec.Codex != nil && spec.Codex.SessionID != "" {
-		fmt.Fprintf(&b, " %s", launchparity.ShellQuote(spec.Codex.SessionID))
+	launch := harnessexec.ClaudeLaunch{
+		SessionName:            spec.SessionName,
+		SessionID:              spec.SessionID,
+		ResumeID:               spec.ResumeID,
+		WorkDir:                spec.WorkDir,
+		Model:                  resolvedModel,
+		AddDirs:                addDirs,
+		AutoMode:               !spec.DisableAutoMode,
+		Permission:             permission,
+		MaxBudgetUSD:           spec.MaxBudgetUSD,
+		DisableOAuth:           spec.DisableOAuth,
+		ForwardTelemetry:       spec.ForwardTelemetry,
+		Persistent:             spec.Persistent,
+		DeferUntilProducerExit: spec.DeferredUntilCallerExit,
 	}
-	b.WriteString(exitSuffix)
-	return HarnessLaunchCommand{Command: b.String(), ModeAppliedAtStartup: modeApplied}
+	return launch, modeApplied
+}
+
+func buildCodexLaunchCommand(spec HarnessLaunchSpec, _ string) HarnessLaunchCommand {
+	launch, modeApplied := codexLaunch(spec)
+	return HarnessLaunchCommand{Command: harnessexec.BuildCodexCommand(launch), ModeAppliedAtStartup: modeApplied}
+}
+
+func codexLaunch(spec HarnessLaunchSpec) (harnessexec.CodexLaunch, bool) {
+	resolvedModel := agent.ResolveModelFullName("codex-cli", spec.Model)
+	sandboxMode := launchparity.CodexSandboxMode(spec.PermissionMode)
+	resumeID := ""
+	if spec.Codex != nil {
+		resumeID = spec.Codex.SessionID
+	}
+	modeApplied := false
+	approval := ""
+	if flag := launchparity.CodexPermissionModeFlag(spec.PermissionMode); flag != "" {
+		approval = strings.TrimPrefix(flag, "-a ")
+		modeApplied = true
+	}
+	launch := harnessexec.CodexLaunch{
+		SessionName:            spec.SessionName,
+		Model:                  resolvedModel,
+		WorkDir:                spec.WorkDir,
+		Sandbox:                sandboxMode,
+		Approval:               approval,
+		AddDirs:                spec.ExtraAddDirs,
+		ResumeID:               resumeID,
+		Remote:                 resumeID != "",
+		Persistent:             spec.Persistent,
+		DeferUntilProducerExit: spec.DeferredUntilCallerExit,
+	}
+	return launch, modeApplied
 }
 
 func buildAgyLaunchCommand(spec HarnessLaunchSpec, _ string) HarnessLaunchCommand {
@@ -173,17 +230,4 @@ func buildAgyCommand(spec HarnessLaunchSpec, conversationID string) HarnessLaunc
 		Persistent:     spec.Persistent,
 	})
 	return HarnessLaunchCommand{Command: command.Command, ModeAppliedAtStartup: command.ModeAppliedAtStartup}
-}
-
-func appendTelemetryEnv(b *strings.Builder, sessionID string) {
-	if endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); endpoint != "" {
-		fmt.Fprintf(b, " OTEL_EXPORTER_OTLP_ENDPOINT=%s", launchparity.ShellQuote(endpoint))
-		b.WriteString(" CLAUDE_CODE_ENABLE_TELEMETRY=1")
-		b.WriteString(" CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1")
-		b.WriteString(" OTEL_TRACES_EXPORTER=otlp")
-		b.WriteString(" OTEL_EXPORTER_OTLP_PROTOCOL=grpc")
-	}
-	if sessionID != "" {
-		fmt.Fprintf(b, " ENGRAM_SESSION_ID=%s", launchparity.ShellQuote(sessionID))
-	}
 }

@@ -154,14 +154,14 @@ func TestBuildCodexCommand_ModelResolved(t *testing.T) {
 		Harness: "codex-cli", Model: "5.4", SessionName: "test-session", WorkDir: "/tmp/work",
 	})
 
-	if !strings.Contains(cmd, "-m 'gpt-5.4'") {
+	if !strings.Contains(cmd, "--model 'gpt-5.4'") {
 		t.Errorf("resolved model not present in command: %s", cmd)
 	}
 	// Cross-harness alias should resolve too (opus -> 5.5 -> gpt-5.5).
 	cmd = testLaunchCommand(ops.HarnessLaunchSpec{
 		Harness: "codex-cli", Model: "opus", SessionName: "test-session", WorkDir: "/tmp/work",
 	})
-	if !strings.Contains(cmd, "-m 'gpt-5.5'") {
+	if !strings.Contains(cmd, "--model 'gpt-5.5'") {
 		t.Errorf("cross-harness alias not resolved in command: %s", cmd)
 	}
 }
@@ -178,11 +178,11 @@ func TestBuildCodexCommand_ShellQuoting(t *testing.T) {
 	})
 
 	// The -C value must be wrapped in single quotes with the embedded quote escaped.
-	if !strings.Contains(cmd, "-C '/tmp/work dir/'\"'\"'; rm -rf ~ #'") {
+	if !strings.Contains(cmd, "--workdir '/tmp/work dir/'\"'\"'; rm -rf ~ #'") {
 		t.Errorf("workdir not safely shell-quoted: %s", cmd)
 	}
 	// The raw unquoted injection must NOT appear as a bare token.
-	if strings.Contains(cmd, "-C /tmp/work dir") {
+	if strings.Contains(cmd, "--workdir /tmp/work dir") {
 		t.Errorf("unquoted workdir would allow shell word-splitting/injection: %s", cmd)
 	}
 	// Extra add-dir must be quoted as well.
@@ -193,14 +193,14 @@ func TestBuildCodexCommand_ShellQuoting(t *testing.T) {
 	cmd = testLaunchCommand(ops.HarnessLaunchSpec{
 		Harness: "codex-cli", Model: "5.4", SessionName: "my session", WorkDir: workDir,
 	})
-	if !strings.Contains(cmd, "AGM_SESSION_NAME='my session'") {
+	if !strings.Contains(cmd, "--session 'my session'") {
 		t.Errorf("session name not shell-quoted: %s", cmd)
 	}
 }
 
 // TestBuildCodexCommand_NoClaudeEnvLeak is the security regression for the design
-// invariant: the Codex command must never carry Claude OAuth, Anthropic keys, or
-// engram/OTEL telemetry env. Codex authenticates via ~/.codex / OPENAI_API_KEY.
+// invariant: the Codex command must never carry credentials or telemetry env.
+// Authentication is injected only by the private executor.
 func TestBuildCodexCommand_NoClaudeEnvLeak(t *testing.T) {
 	cmd := testLaunchCommand(ops.HarnessLaunchSpec{
 		Harness: "codex-cli", Model: "5.4", SessionName: "test-session",
@@ -219,12 +219,10 @@ func TestBuildCodexCommand_NoClaudeEnvLeak(t *testing.T) {
 		}
 	}
 
-	// Only CLAUDECODE should be unset, and the default sandbox is workspace-write
-	// (no silent full-autonomy bypass).
-	if !strings.Contains(cmd, "env -u CLAUDECODE ") {
-		t.Errorf("expected CLAUDECODE to be unset: %s", cmd)
+	if !strings.Contains(cmd, "agm __exec-codex") {
+		t.Errorf("expected private Codex executor: %s", cmd)
 	}
-	if !strings.Contains(cmd, "-s workspace-write") {
+	if !strings.Contains(cmd, "--sandbox 'workspace-write'") {
 		t.Errorf("expected default workspace-write sandbox: %s", cmd)
 	}
 	if strings.Contains(cmd, "dangerously-bypass") {
@@ -239,13 +237,14 @@ func TestBuildCodexCommand_RemoteThreadResume(t *testing.T) {
 	})
 
 	for _, want := range []string{
-		"AGM_SESSION_NAME='codex-session'",
-		"codex resume --remote unix://",
-		"-m 'gpt-5.4'",
-		"-C '/tmp/work'",
-		"-s workspace-write",
+		"agm __exec-codex",
+		"--session 'codex-session'",
+		"--model 'gpt-5.4'",
+		"--workdir '/tmp/work'",
+		"--sandbox 'workspace-write'",
 		"--add-dir '/tmp/extra dir'",
-		"'thr_123'",
+		"--resume-id 'thr_123'",
+		"--remote",
 	} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("remote Codex command missing %q: %s", want, cmd)
@@ -315,7 +314,7 @@ func TestActiveHarnessBuildersHonorPersistentStartupContracts(t *testing.T) {
 		cmd  string
 		want string
 	}{
-		{name: "Codex", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "codex-cli", Model: "5.4", SessionName: "worker", WorkDir: "/tmp/work", Persistent: true, PermissionMode: "auto"}), want: "-a never"},
+		{name: "Codex", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "codex-cli", Model: "5.4", SessionName: "worker", WorkDir: "/tmp/work", Persistent: true, PermissionMode: "auto"}), want: "--approval 'never'"},
 		{name: "AGY", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "agy", Model: "3.5-flash", SessionName: "worker", WorkDir: "/tmp/work", Persistent: true, PermissionMode: "auto"}), want: "agy --model 'Gemini 3.5 Flash (Medium)' --dangerously-skip-permissions"},
 		{name: "OpenCode", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "opencode-cli", Model: "glm-5.2", SessionName: "worker", WorkDir: "/tmp/work", Persistent: true}), want: "opencode attach"},
 		{name: "Pi", cmd: testLaunchCommand(ops.HarnessLaunchSpec{Harness: "pi-cli", Model: "sonnet", SessionName: "worker", SessionID: "native", WorkDir: "/tmp/work", Persistent: true, Pi: &manifest.Pi{SessionID: "native", SessionDir: "/tmp/pi"}}), want: "pi --session-id 'native'"},

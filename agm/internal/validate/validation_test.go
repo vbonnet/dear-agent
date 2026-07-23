@@ -1,8 +1,67 @@
 package validate
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
+
+func TestResumabilityValidatorPreservesHandoffAfterUncertainSubmission(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("AGM_STATE_DIR", stateDir)
+	origNewSession := validateNewSession
+	origSendCommand := validateSendCommand
+	origWaitForReady := validateWaitForReady
+	origPrepareCommand := validatePrepareCommand
+	origCapturePane := validateCapturePane
+	origKillSession := validateKillSession
+	t.Cleanup(func() {
+		validateNewSession = origNewSession
+		validateSendCommand = origSendCommand
+		validateWaitForReady = origWaitForReady
+		validatePrepareCommand = origPrepareCommand
+		validateCapturePane = origCapturePane
+		validateKillSession = origKillSession
+	})
+	validateNewSession = func(string, string) error { return nil }
+	validatePrepareCommand = harnessexec.PrepareClaudeCommand
+	validateSendCommand = func(string, string) error {
+		return tmux.MarkPromptSubmissionUncertain(errors.New("lost acknowledgement"))
+	}
+	waited := false
+	validateWaitForReady = func(string, time.Duration) error {
+		waited = true
+		return nil
+	}
+	validateCapturePane = func(string) (string, error) { return "ready", nil }
+	validateKillSession = func(string) error { return nil }
+
+	output, err := testSessionResume(&manifest.Manifest{
+		SessionID: "agm-session-id",
+		Name:      "validator-uncertain",
+		Context:   manifest.Context{Project: "/tmp/work"},
+		Claude:    manifest.Claude{UUID: "d47174c8-0d57-4421-ba76-c2400fb58ba1"},
+	}, time.Second)
+	if err != nil {
+		t.Fatalf("testSessionResume returned uncertain submission as failure: %v", err)
+	}
+	if output != "ready" || !waited {
+		t.Fatalf("output/waited = %q/%v, want ready/true", output, waited)
+	}
+	entries, err := os.ReadDir(filepath.Join(stateDir, "private-launch"))
+	if err != nil {
+		t.Fatalf("read private handoff directory: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("private handoffs = %v, want exactly one preserved handoff", entries)
+	}
+}
 
 func TestValidateUUID(t *testing.T) {
 	tests := []struct {
