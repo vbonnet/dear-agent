@@ -8,7 +8,7 @@
 
 **CCTL-01** When a client starts remote control, the package shall invoke `codex remote-control start --json`, accept a valid daemon-status JSON response only when `exec.ErrWaitDelay` reports inherited stdout delayed an otherwise successful process completion, and otherwise return command failures with stderr context.
 
-**CCTL-02** When a client sends an app-server request, the package shall initialize the JSON-RPC proxy before sending thread operations.
+**CCTL-02** When a client sends an app-server request, the package shall perform the proxy's WebSocket HTTP Upgrade and initialize JSON-RPC before sending thread operations.
 
 **CCTL-03** When creating a Codex thread, the package shall pass the requested cwd, model, and `workspace-write` sandbox to `thread/start`.
 
