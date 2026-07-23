@@ -5,14 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 
 	"github.com/cucumber/godog"
+	"github.com/vbonnet/dear-agent/internal/earsbdd"
 )
-
-var harnessRequirementPattern = regexp.MustCompile(`(?m)^\*\*(AGP-[0-9]+)\*\*`)
 
 type harnessSpecGuardrailState struct {
 	duplicateIDs  []string
@@ -47,20 +45,11 @@ func agmValidatesHarnessRequirementIdentifiersAndLifecycleOwnership(ctx context.
 	}
 	root := packageSpecBDDRepoRoot()
 
-	spec, err := os.ReadFile(filepath.Join(root, "agm", "internal", "agent", "SPEC.md"))
+	requirements, err := earsbdd.ExtractFile(filepath.Join(root, "agm", "internal", "agent", "SPEC.md"))
 	if err != nil {
-		return fmt.Errorf("read harness parity SPEC: %w", err)
+		return fmt.Errorf("extract harness parity requirements: %w", err)
 	}
-	counts := make(map[string]int)
-	for _, match := range harnessRequirementPattern.FindAllStringSubmatch(string(spec), -1) {
-		counts[match[1]]++
-	}
-	for id, count := range counts {
-		if count > 1 {
-			state.duplicateIDs = append(state.duplicateIDs, id)
-		}
-	}
-	slices.Sort(state.duplicateIDs)
+	state.duplicateIDs = duplicateHarnessRequirementIDs(requirements)
 
 	state.ownershipErr = requireLifecycleDelegation(root)
 	resumeSource, err := os.ReadFile(filepath.Join(root, "agm", "cmd", "agm", "resume.go"))
@@ -71,8 +60,28 @@ func agmValidatesHarnessRequirementIdentifiersAndLifecycleOwnership(ctx context.
 	return nil
 }
 
+func duplicateHarnessRequirementIDs(requirements []earsbdd.Requirement) []string {
+	counts := make(map[string]int)
+	for _, requirement := range requirements {
+		if strings.HasPrefix(requirement.ID, "AGP-") {
+			counts[requirement.ID]++
+		}
+	}
+	var duplicates []string
+	for id, count := range counts {
+		if count > 1 {
+			duplicates = append(duplicates, id)
+		}
+	}
+	slices.Sort(duplicates)
+	return duplicates
+}
+
 func requireLifecycleDelegation(root string) error {
 	checks := map[string][]string{
+		"agm/cmd/agm/create_child.go": {
+			"ops.CreateSessionWithContext(",
+		},
 		"agm/cmd/agm/new_session.go": {
 			"ops.CreateSessionWithContext(",
 		},

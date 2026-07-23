@@ -52,6 +52,9 @@ type CreateSessionMetadata struct {
 	Workspace        string
 	ModelTier        string
 	Tags             []string
+	ContextPurpose   string
+	ContextNotes     string
+	ParentSessionID  *string
 	PermissionPolicy *manifest.PermissionPolicy
 	Sandbox          *manifest.SandboxConfig
 	IsTest           bool
@@ -770,13 +773,19 @@ func buildCreateSessionManifest(req *CreateSessionRequest, params *createSession
 		tags = appendUniqueString(tags, "source:"+source)
 	}
 	m := &manifest.Manifest{
-		SchemaVersion:    manifest.SchemaVersion,
-		SessionID:        sessionID,
-		Name:             params.name,
-		CreatedAt:        now,
-		UpdatedAt:        now,
-		Workspace:        req.Metadata.Workspace,
-		Context:          manifest.Context{Project: req.Cwd, Tags: tags},
+		SchemaVersion:   manifest.SchemaVersion,
+		SessionID:       sessionID,
+		Name:            params.name,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		Workspace:       req.Metadata.Workspace,
+		ParentSessionID: cloneCreateString(req.Metadata.ParentSessionID),
+		Context: manifest.Context{
+			Project: req.Cwd,
+			Purpose: req.Metadata.ContextPurpose,
+			Tags:    tags,
+			Notes:   req.Metadata.ContextNotes,
+		},
 		Tmux:             manifest.Tmux{SessionName: params.name},
 		Harness:          params.harness,
 		Model:            params.model,
@@ -814,6 +823,14 @@ func buildCreateSessionManifest(req *CreateSessionRequest, params *createSession
 		m.OpenCode = &manifest.OpenCode{ServerPort: 4096, ServerHost: host, AttachTime: now}
 	}
 	return m
+}
+
+func cloneCreateString(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	return &clone
 }
 
 func cloneCreatePermissionPolicy(policy *manifest.PermissionPolicy) *manifest.PermissionPolicy {

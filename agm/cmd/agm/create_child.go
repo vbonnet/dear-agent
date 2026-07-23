@@ -1,21 +1,21 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/charmbracelet/huh"
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
-	"github.com/vbonnet/dear-agent/agm/internal/backend"
 	"github.com/vbonnet/dear-agent/agm/internal/db"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/git"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
+	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 )
@@ -124,33 +124,8 @@ func runCreateChild(cmd *cobra.Command, args []string) error {
 	workDir := parentManifest.Context.Project
 	debug.Log("Inheriting working directory from parent: %s", workDir)
 
-	backendAdapter, err := getBackendAndCheckSessionFree(childSessionName)
+	_, err = createChildSession(cmd.Context(), adapter, parentManifest, childSessionName, selectedHarness)
 	if err != nil {
-		return err
-	}
-
-	childManifest, err := buildAndPersistChildManifest(adapter, parentManifest, childSessionName, workDir, selectedHarness)
-	if err != nil {
-		return err
-	}
-
-	// Write to database with parent reference
-	if err := writeSessionToDatabase(childManifest, &parentSessionID); err != nil {
-		// Non-fatal - manifest already created
-		ui.PrintWarning(fmt.Sprintf("Failed to write to database: %v", err))
-		debug.Log("Database write failed (non-fatal): %v", err)
-	} else {
-		debug.Log("Child session written to database with parent_session_id: %s", parentSessionID)
-		ui.PrintSuccess("Session registered in database")
-	}
-
-	// Create backend session (tmux)
-	debug.Phase("Create Backend Session")
-	if err := backendAdapter.CreateSession(childSessionName, workDir); err != nil {
-		ui.PrintError(err,
-			"Failed to create backend session",
-			"  • Verify backend is available (tmux)\n"+
-				"  • Check working directory exists: "+workDir)
 		return err
 	}
 
@@ -172,58 +147,75 @@ func runCreateChild(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// buildAndPersistChildManifest creates the manifest directory, builds the v2
-// manifest (optionally inheriting parent context), writes it to Dolt, and
-// auto-commits it. Returns the persisted manifest.
-func buildAndPersistChildManifest(adapter *dolt.Adapter, parentManifest *manifest.Manifest, childSessionName, workDir, selectedHarness string) (*manifest.Manifest, error) {
-	debug.Phase("Create Child Session Manifest")
-	sessionsDir := getSessionsDir()
-	manifestDir := filepath.Join(sessionsDir, childSessionName)
-	manifestPath := filepath.Join(manifestDir, "manifest.yaml")
-	if err := os.MkdirAll(manifestDir, 0700); err != nil {
+func createChildSession(ctx context.Context, adapter *dolt.Adapter, parentManifest *manifest.Manifest, childSessionName, selectedHarness string) (*ops.CreateSessionResult, error) {
+	request := buildChildCreateRequest(parentManifest, childSessionName, selectedHarness, inheritContext)
+	manifestDir := filepath.Join(getSessionsDir(), childSessionName)
+	request.ManifestDir = manifestDir
+	result, err := ops.CreateSessionWithContext(ctx, &ops.OpContext{
+		Tmux:    session.NewRealTmux(),
+		Storage: adapter,
+	}, request)
+	if err != nil {
 		ui.PrintError(err,
-			"Failed to create manifest directory",
-			"  • Check permissions on sessions directory\n"+
-				"  • Verify disk space available")
+			"Failed to create child session",
+			"  • Verify tmux and the selected harness are available\n"+
+				"  • Check the working directory exists: "+parentManifest.Context.Project)
 		return nil, err
 	}
-	childSessionID := uuid.New().String()
-	debug.Log("Generated child session ID: %s", childSessionID)
-	childManifest := &manifest.Manifest{
-		SchemaVersion: manifest.SchemaVersion,
-		SessionID:     childSessionID,
-		Name:          childSessionName,
-		CreatedAt:     time.Now(),
-		UpdatedAt:     time.Now(),
-		Lifecycle:     "",
-		Context: manifest.Context{
-			Project: workDir,
-			Purpose: fmt.Sprintf("Child session of %s", parentManifest.Name),
-		},
-		Tmux:    manifest.Tmux{SessionName: childSessionName},
-		Harness: selectedHarness,
-		Claude:  manifest.Claude{},
+
+	childManifest, getErr := adapter.GetSession(result.SessionID)
+	if getErr != nil {
+		ui.PrintWarning(fmt.Sprintf("Failed to load registered child session for compatibility storage: %v", getErr))
+		debug.Log("Registered child session lookup failed (non-fatal): %v", getErr)
+		return result, nil
 	}
-	if inheritContext {
-		debug.Log("Inheriting context from parent")
-		childManifest.Context.Purpose = parentManifest.Context.Purpose
+	if err := writeSessionToDatabase(childManifest, childManifest.ParentSessionID); err != nil {
+		ui.PrintWarning(fmt.Sprintf("Failed to write to compatibility database: %v", err))
+		debug.Log("Compatibility database write failed (non-fatal): %v", err)
+	} else {
+		debug.Log("Child session written to compatibility database with parent_session_id: %s", parentManifest.SessionID)
+	}
+	manifestPath := filepath.Join(manifestDir, "manifest.yaml")
+	if err := git.CommitManifest(manifestPath, "create-child", childManifest.Name); err != nil {
+		debug.Log("manifest commit skipped: %v", err)
+	}
+	return result, nil
+}
+
+func buildChildCreateRequest(parentManifest *manifest.Manifest, childSessionName, selectedHarness string, withContext bool) *ops.CreateSessionRequest {
+	parentSessionID := parentManifest.SessionID
+	purpose := fmt.Sprintf("Child session of %s", parentManifest.Name)
+	var tags []string
+	var notes string
+	if withContext {
+		purpose = parentManifest.Context.Purpose
 		if len(parentManifest.Context.Tags) > 0 {
-			childManifest.Context.Tags = append([]string{}, parentManifest.Context.Tags...)
+			tags = append([]string{}, parentManifest.Context.Tags...)
 		}
-		childManifest.Context.Notes = fmt.Sprintf("Child of %s\n\n%s",
+		notes = fmt.Sprintf("Child of %s\n\n%s",
 			parentManifest.Name, parentManifest.Context.Notes)
 	}
-	if err := adapter.CreateSession(childManifest); err != nil {
-		ui.PrintError(err,
-			"Failed to create session in Dolt",
-			"  • Check Dolt server is running\n"+
-				"  • Verify database connection")
-		return nil, err
+	model := ""
+	if selectedHarness == parentManifest.Harness {
+		model = parentManifest.Model
 	}
-	_ = git.CommitManifest(manifestPath, "create-child", childManifest.Name)
-	debug.Log("Child session created in Dolt: %s", childSessionID)
-	ui.PrintSuccess(fmt.Sprintf("Created child session: %s", childSessionID))
-	return childManifest, nil
+	return &ops.CreateSessionRequest{
+		Cwd:                parentManifest.Context.Project,
+		Title:              childSessionName,
+		Model:              model,
+		Harness:            selectedHarness,
+		Caller:             ops.CreateSessionCaller{Surface: ops.CreateSurfaceCLI, Source: "session.create-child"},
+		ForwardClaudeOAuth: true,
+		AllowEmptyPrompt:   true,
+		AllowUnsafeTitle:   true,
+		RequireStorage:     true,
+		Metadata: ops.CreateSessionMetadata{
+			Tags:            tags,
+			ContextPurpose:  purpose,
+			ContextNotes:    notes,
+			ParentSessionID: &parentSessionID,
+		},
+	}
 }
 
 // selectChildHarness picks the harness for the child session: --harness flag
@@ -248,36 +240,6 @@ func selectChildHarness(parentManifest *manifest.Manifest) (string, error) {
 		ui.PrintWarning(fmt.Sprintf("⚠️  %s", err.Error()))
 	}
 	return selectedHarness, nil
-}
-
-// getBackendAndCheckSessionFree returns the default backend adapter and
-// guarantees the requested child session name is not already in use.
-func getBackendAndCheckSessionFree(childSessionName string) (*backend.BackendAdapter, error) {
-	backendAdapter, err := backend.GetDefaultBackendAdapter()
-	if err != nil {
-		ui.PrintError(err,
-			"Failed to get backend adapter",
-			"  • Check AGM_SESSION_BACKEND environment variable\n"+
-				"  • Valid backends: tmux")
-		return nil, err
-	}
-	exists, err := backendAdapter.HasSession(childSessionName)
-	if err != nil {
-		ui.PrintError(err,
-			"Failed to check for existing session",
-			"  • Verify backend is available (tmux)\n"+
-				"  • Check session name is valid")
-		return nil, err
-	}
-	if exists {
-		ui.PrintError(
-			fmt.Errorf("session already exists: %s", childSessionName),
-			"Session name conflict",
-			"  • Choose a different name\n"+
-				"  • Run 'agm session list' to see existing sessions")
-		return nil, fmt.Errorf("session already exists: %s", childSessionName)
-	}
-	return backendAdapter, nil
 }
 
 // resolveParentAndChild determines parentSessionID (from args[0] or by detecting
@@ -403,8 +365,8 @@ func writeSessionToDatabase(session *manifest.Manifest, parentSessionID *string)
 	}
 	defer func() { _ = database.Close() }()
 
-	// Note: The current db.CreateSession doesn't support parent_session_id parameter
-	// We need to create the session first, then update it with the parent reference
+	// The legacy SQLite store does not persist Manifest.ParentSessionID during
+	// CreateSession, so preserve the compatibility write as a follow-up update.
 	if err := database.CreateSession(session); err != nil {
 		return fmt.Errorf("failed to create session in database: %w", err)
 	}

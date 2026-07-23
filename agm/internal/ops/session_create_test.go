@@ -1690,3 +1690,35 @@ func TestSharedShellQuote(t *testing.T) {
 		t.Errorf("ShellQuote = %q", got)
 	}
 }
+
+func TestBuildCreateSessionManifestPreservesRelationshipMetadata(t *testing.T) {
+	parentID := "parent-session-id"
+	req := &CreateSessionRequest{
+		Cwd:    "/tmp/work",
+		Caller: CreateSessionCaller{Surface: CreateSurfaceCLI, Source: "session.create-child"},
+		Metadata: CreateSessionMetadata{
+			Tags:            []string{"inherited"},
+			ContextPurpose:  "Inherited purpose",
+			ContextNotes:    "Inherited notes",
+			ParentSessionID: &parentID,
+		},
+	}
+	params := &createSessionParams{name: "child", harness: "codex-cli", model: "gpt-5.3-codex"}
+
+	got := buildCreateSessionManifest(req, params, "child-id", nil)
+
+	if got.ParentSessionID == nil || *got.ParentSessionID != parentID {
+		t.Fatalf("ParentSessionID = %v, want %q", got.ParentSessionID, parentID)
+	}
+	if got.ParentSessionID == req.Metadata.ParentSessionID {
+		t.Fatal("ParentSessionID aliases request metadata")
+	}
+	if got.Context.Purpose != req.Metadata.ContextPurpose || got.Context.Notes != req.Metadata.ContextNotes {
+		t.Fatalf("Context = %#v, want purpose and notes from metadata", got.Context)
+	}
+	for _, want := range []string{"inherited", "source:session.create-child"} {
+		if !slices.Contains(got.Context.Tags, want) {
+			t.Fatalf("Context.Tags = %v, missing %q", got.Context.Tags, want)
+		}
+	}
+}

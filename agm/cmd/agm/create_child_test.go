@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -471,6 +472,42 @@ func TestCreateChildCommand_InheritanceLogic(t *testing.T) {
 			tt.validateChild(t, childManifest)
 		})
 	}
+}
+
+func TestBuildChildCreateRequestPreservesRelationshipAndContext(t *testing.T) {
+	parentID := uuid.New().String()
+	parent := &manifest.Manifest{
+		SessionID: parentID,
+		Name:      "parent-session",
+		Harness:   "codex-cli",
+		Model:     "gpt-5.3-codex",
+		Context: manifest.Context{
+			Project: "/path/to/project",
+			Purpose: "Parent purpose",
+			Tags:    []string{"tag1", "tag2"},
+			Notes:   "Parent notes",
+		},
+	}
+
+	withoutContext := buildChildCreateRequest(parent, "child-default", "codex-cli", false)
+	assert.Equal(t, parent.Context.Project, withoutContext.Cwd)
+	assert.Equal(t, parent.Model, withoutContext.Model)
+	assert.Equal(t, parent.Harness, withoutContext.Harness)
+	assert.Equal(t, "Child session of parent-session", withoutContext.Metadata.ContextPurpose)
+	assert.Empty(t, withoutContext.Metadata.ContextNotes)
+	assert.Empty(t, withoutContext.Metadata.Tags)
+	require.NotNil(t, withoutContext.Metadata.ParentSessionID)
+	assert.Equal(t, parentID, *withoutContext.Metadata.ParentSessionID)
+
+	withContext := buildChildCreateRequest(parent, "child-context", "codex-cli", true)
+	assert.Equal(t, parent.Context.Purpose, withContext.Metadata.ContextPurpose)
+	assert.Equal(t, parent.Context.Notes, strings.TrimPrefix(withContext.Metadata.ContextNotes, "Child of parent-session\n\n"))
+	assert.Equal(t, parent.Context.Tags, withContext.Metadata.Tags)
+	parent.Context.Tags[0] = "mutated"
+	assert.Equal(t, "tag1", withContext.Metadata.Tags[0], "child tags must not alias parent storage")
+
+	overriddenHarness := buildChildCreateRequest(parent, "child-claude", "claude-code", false)
+	assert.Empty(t, overriddenHarness.Model, "a parent model must not cross harness boundaries")
 }
 
 // TestCreateChildCommand_ErrorHandling tests error handling scenarios
