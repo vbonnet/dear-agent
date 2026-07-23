@@ -131,6 +131,13 @@ Feature: Harness parity
     Then Codex factory should use the Codex CLI adapter
     And OpenAI API status should not inspect Codex tmux state
 
+  Scenario: Harness lifecycle ownership is explicit and requirement identifiers are unique
+    Given AGM harness parity specification and lifecycle surfaces
+    When AGM validates harness requirement identifiers and lifecycle ownership
+    Then harness requirement identifiers should be unique
+    And CLI and MCP lifecycle surfaces should delegate to shared operations
+    And CLI resume should retain its focused transactional owner
+
   Scenario Outline: Active harness launch commands preserve startup mode and persistence
     Given active harness "<harness>" uses startup mode "<mode>"
     When AGM builds the harness launch command with persistence enabled

@@ -8,10 +8,12 @@
 
 ## Overview
 
-`agm/internal/agent` owns the harness adapter contract used by AGM to create,
-resume, send to, inspect, export, import, and terminate AI agent sessions. It
-also owns the model alias registry used by CLI creation flows, OpenCode model
-selection, and cross-harness tier aliases.
+`agm/internal/agent` owns harness identity, capabilities, model routing, and
+the adapter contract for harness-native lifecycle primitives. Cross-surface
+create, kill, archive, and message-delivery ordering belongs to
+`agm/internal/ops`; the root CLI retains the focused transactional resume
+workflow. The agent package also owns the model alias registry used by CLI
+creation flows, OpenCode model selection, and cross-harness tier aliases.
 
 Claude Code is the reference implementation. Codex CLI, AGY, OpenCode, and Pi are
 active parity harnesses. Gemini CLI is accepted only for deprecated
@@ -33,7 +35,9 @@ compatibility.
 
 **AGP-13** When AGM validates active harness adapter conformance, the system shall run the same non-I/O adapter contract across every active harness and require canonical identity, non-empty version, sane capabilities, default model coverage, test model coverage, model aliases, and model family coverage.
 
-**AGP-39** When AGM resolves the `codex-cli` harness, the system shall use `CodexCLIAdapter` and shall not route Codex terminal status through the OpenAI API adapter.
+**AGP-54** When AGM resolves the `codex-cli` harness, the system shall use `CodexCLIAdapter` and shall not route Codex terminal status through the OpenAI API adapter.
+
+**AGP-56** When a CLI or MCP surface exposes create, kill, archive, or message-delivery behavior, the surface shall delegate lifecycle ordering, rollback, and verified postconditions to `agm/internal/ops` rather than implement a competing surface-specific lifecycle.
 
 ### Model Families
 
@@ -123,7 +127,7 @@ compatibility.
 
 **AGP-38** When the AGY adapter creates or cold-resumes through a symlinked workspace, the system shall use the canonical physical workspace path consistently for locking, tmux creation, command construction, identity correlation, and newly persisted metadata.
 
-**AGP-39** When the AGY adapter delivers an initial prompt or a later message, the system shall use AGY's harness-aware literal paste path, preserve embedded line feeds as one bracketed-paste submission, and send exactly one final Enter.
+**AGP-55** When the AGY adapter delivers an initial prompt or a later message, the system shall use AGY's harness-aware literal paste path, preserve embedded line feeds as one bracketed-paste submission, and send exactly one final Enter.
 
 ### Codex Workdir Trust (ce-cmsq)
 
@@ -144,6 +148,8 @@ compatibility.
 ### BDD Enforcement
 
 **AGP-12** When a new active harness or model family is added, the system shall require BDD scenarios and registry tests that cross-cut the active parity matrix before the change is complete.
+
+**AGP-57** When AGM validates the harness parity specification, the system shall reject any `AGP` requirement identifier that does not occur exactly once so executable evidence can address one unambiguous contract.
 
 ## BDD Traceability
 
