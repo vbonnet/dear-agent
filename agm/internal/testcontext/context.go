@@ -16,9 +16,11 @@
 package testcontext
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -75,6 +77,9 @@ type TestContext struct {
 	DBPath      string
 	StateDir    string
 	LockPath    string
+
+	cleanupBaseDirs    []string
+	cleanupSocketPaths []string
 }
 
 // New creates a new TestContext with a unique run ID and isolated paths.
@@ -90,31 +95,44 @@ func NewNamed(name string) (*TestContext, error) {
 	if err := ValidateName(name); err != nil {
 		return nil, err
 	}
-	return newWithID(name), nil
+	return newNamedWithRoot(name, testEnvironmentRoot), nil
 }
 
-// newWithID is the shared constructor for New and NewNamed.
+// newWithID constructs a random context beneath the canonical short root.
 func newWithID(id string) *TestContext {
+	return newWithRoot(id, testEnvironmentRoot)
+}
+
+func newWithRoot(id, root string) *TestContext {
 	// Keep tmux socket paths below macOS's Unix-domain socket limit. os.TempDir
 	// expands to a much longer /var/folders path there, while /tmp is stable on
 	// every Unix platform on which AGM's tmux integration runs.
-	baseDir := filepath.Join(testEnvironmentRoot, testEnvironmentPrefix+id)
+	baseDir := filepath.Join(root, testEnvironmentPrefix+id)
+	socketPath := filepath.Join(root, testEnvironmentPrefix+id+".sock")
 	return &TestContext{
 		RunID:       id,
 		BaseDir:     baseDir,
 		HomeDir:     filepath.Join(baseDir, "home"),
-		SocketPath:  filepath.Join(testEnvironmentRoot, testEnvironmentPrefix+id+".sock"),
+		SocketPath:  socketPath,
 		SessionsDir: filepath.Join(baseDir, "sessions"),
 		DBPath:      filepath.Join(baseDir, "agm.db"),
 		StateDir:    filepath.Join(baseDir, "state"),
 		LockPath:    filepath.Join(baseDir, "agm.lock"),
+
+		cleanupBaseDirs:    []string{baseDir},
+		cleanupSocketPaths: []string{socketPath},
 	}
 }
 
 // LoadNamed reconstructs a TestContext from a validated known name.
-// It does not verify that the directory exists.
+// It does not verify that the directory exists. Cleanup includes the exact
+// same-name path under the retired os.TempDir root so pre-migration
+// environments cannot be reported destroyed while left behind.
 func LoadNamed(name string) (*TestContext, error) {
-	return NewNamed(name)
+	if err := ValidateName(name); err != nil {
+		return nil, err
+	}
+	return newNamedWithRoot(name, testEnvironmentRoot), nil
 }
 
 // ValidateName rejects names that could escape the owned temporary root,
@@ -138,25 +156,61 @@ func ValidateName(name string) error {
 	return nil
 }
 
-// ListNamed returns the centrally validated environments created beneath the
-// same short root used by NewNamed, LoadNamed, and Cleanup.
+// ListNamed returns centrally validated environments from the canonical short
+// root plus the exact retired os.TempDir root used before the socket-path
+// migration. Canonical entries win when both roots contain the same name.
 func ListNamed() ([]*TestContext, error) {
-	entries, err := os.ReadDir(testEnvironmentRoot)
-	if err != nil {
-		return nil, err
-	}
 	contexts := make([]*TestContext, 0)
-	for _, entry := range entries {
-		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), testEnvironmentPrefix) {
-			continue
+	seen := make(map[string]struct{})
+	for _, root := range namedEnvironmentRoots() {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
 		}
-		name := strings.TrimPrefix(entry.Name(), testEnvironmentPrefix)
-		if err := ValidateName(name); err != nil {
-			continue
+		for _, entry := range entries {
+			if !entry.IsDir() || !strings.HasPrefix(entry.Name(), testEnvironmentPrefix) {
+				continue
+			}
+			name := strings.TrimPrefix(entry.Name(), testEnvironmentPrefix)
+			if err := ValidateName(name); err != nil {
+				continue
+			}
+			if _, exists := seen[name]; exists {
+				continue
+			}
+			seen[name] = struct{}{}
+			contexts = append(contexts, newNamedWithRoot(name, root))
 		}
-		contexts = append(contexts, newWithID(name))
 	}
+	sort.Slice(contexts, func(i, j int) bool { return contexts[i].RunID < contexts[j].RunID })
 	return contexts, nil
+}
+
+func newNamedWithRoot(name, primaryRoot string) *TestContext {
+	tc := newWithRoot(name, primaryRoot)
+	for _, root := range namedEnvironmentRoots() {
+		baseDir := filepath.Join(root, testEnvironmentPrefix+name)
+		socketPath := filepath.Join(root, testEnvironmentPrefix+name+".sock")
+		if baseDir != tc.BaseDir {
+			tc.cleanupBaseDirs = append(tc.cleanupBaseDirs, baseDir)
+		}
+		if socketPath != tc.SocketPath {
+			tc.cleanupSocketPaths = append(tc.cleanupSocketPaths, socketPath)
+		}
+	}
+	return tc
+}
+
+func namedEnvironmentRoots() []string {
+	roots := []string{testEnvironmentRoot}
+	retired := filepath.Clean(os.TempDir())
+	if retired != testEnvironmentRoot && filepath.IsAbs(retired) && retired != string(filepath.Separator) {
+		roots = append(roots, retired)
+	}
+	return roots
 }
 
 // FromEnv reconstructs a TestContext from environment variables.
@@ -252,11 +306,31 @@ func (tc *TestContext) EnsureDirs() error {
 	return os.MkdirAll(tc.HomeDir, 0700)
 }
 
-// Cleanup removes the socket file and the entire base directory tree.
+// Cleanup removes only the context's exact socket and directory paths. Named
+// contexts also remove their exact same-name paths from the retired os.TempDir
+// root so the fixed-root migration does not orphan credentials or tmux state.
 func (tc *TestContext) Cleanup() error {
-	// Remove socket (lives outside baseDir)
-	os.Remove(tc.SocketPath)
-	return os.RemoveAll(tc.BaseDir)
+	socketPaths := tc.cleanupSocketPaths
+	if len(socketPaths) == 0 {
+		socketPaths = []string{tc.SocketPath}
+	}
+	baseDirs := tc.cleanupBaseDirs
+	if len(baseDirs) == 0 {
+		baseDirs = []string{tc.BaseDir}
+	}
+
+	var cleanupErr error
+	for _, socketPath := range socketPaths {
+		if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("remove test socket %s: %w", socketPath, err))
+		}
+	}
+	for _, baseDir := range baseDirs {
+		if err := os.RemoveAll(baseDir); err != nil {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("remove test environment %s: %w", baseDir, err))
+		}
+	}
+	return cleanupErr
 }
 
 // ForwardAuth symlinks LLM credential directories from the host HOME into

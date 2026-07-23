@@ -124,6 +124,51 @@ func TestListNamedSharesLifecycleRoot(t *testing.T) {
 	}
 }
 
+func TestRetiredNamedEnvironmentIsDiscoveredAndCleanedExactly(t *testing.T) {
+	roots := namedEnvironmentRoots()
+	if len(roots) < 2 {
+		t.Skip("canonical and retired test-environment roots are identical")
+	}
+	retiredRoot := roots[1]
+	name := "retired-" + New().RunID
+	retired := newWithRoot(name, retiredRoot)
+	require.NoError(t, retired.EnsureDirs())
+	t.Cleanup(func() { require.NoError(t, retired.Cleanup()) })
+
+	credentialTarget := t.TempDir()
+	require.NoError(t, os.Symlink(credentialTarget, filepath.Join(retired.HomeDir, ".codex")))
+	require.NoError(t, os.WriteFile(retired.SocketPath, []byte("retired socket"), 0600))
+
+	sibling := newWithRoot("sibling-"+New().RunID, retiredRoot)
+	require.NoError(t, sibling.EnsureDirs())
+	require.NoError(t, os.WriteFile(filepath.Join(sibling.HomeDir, "preserve"), []byte("unrelated"), 0600))
+	t.Cleanup(func() { require.NoError(t, sibling.Cleanup()) })
+
+	contexts, err := ListNamed()
+	require.NoError(t, err)
+	found := false
+	for _, candidate := range contexts {
+		if candidate.RunID == name {
+			assert.Equal(t, retired.BaseDir, candidate.BaseDir)
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "retired environment was not discoverable for cleanup")
+
+	loaded, err := LoadNamed(name)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(testEnvironmentRoot, testEnvironmentPrefix+name), loaded.BaseDir)
+	require.NoError(t, loaded.Cleanup())
+
+	for _, removed := range []string{retired.BaseDir, retired.SocketPath} {
+		_, err := os.Lstat(removed)
+		require.ErrorIs(t, err, os.ErrNotExist, "retired resource survived exact cleanup: %s", removed)
+	}
+	_, err = os.Stat(filepath.Join(sibling.HomeDir, "preserve"))
+	require.NoError(t, err, "retired compatibility cleanup removed an unrelated sibling")
+}
+
 func TestSetEnvAndFromEnv(t *testing.T) {
 	tc := New()
 

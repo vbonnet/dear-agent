@@ -35,10 +35,11 @@ type IsolatedEnvironment struct {
 	BinDir        string
 	AGMBinary     string
 
-	mu          sync.Mutex
-	owned       map[string]struct{}
-	cleanupOnce sync.Once
-	cleanupErr  error
+	mu              sync.Mutex
+	owned           map[string]struct{}
+	tmuxUnavailable bool
+	cleanupOnce     sync.Once
+	cleanupErr      error
 }
 
 // NewIsolatedEnvironment allocates an isolated runtime and builds the AGM
@@ -168,7 +169,13 @@ func (e *IsolatedEnvironment) StartTmuxServer(sentinel string) error {
 		return err
 	}
 	if output, err := e.TmuxCommand("new-session", "-d", "-s", sentinel, "sleep 300").CombinedOutput(); err != nil {
-		return fmt.Errorf("start isolated tmux server: %w: %s", err, output)
+		startErr := fmt.Errorf("start isolated tmux server: %w: %s", err, output)
+		if IsUnavailablePrerequisite(startErr) {
+			e.mu.Lock()
+			e.tmuxUnavailable = true
+			e.mu.Unlock()
+		}
+		return startErr
 	}
 	settings := [][]string{
 		{"set-option", "-g", "default-shell", "/bin/sh"},
@@ -181,6 +188,26 @@ func (e *IsolatedEnvironment) StartTmuxServer(sentinel string) error {
 		}
 	}
 	return nil
+}
+
+// IsUnavailablePrerequisite reports only missing-executable and explicit
+// permission-denial errors that make an external test prerequisite unavailable.
+// Invalid arguments and other setup regressions deliberately return false.
+func IsUnavailablePrerequisite(err error) bool {
+	if errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrPermission) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "operation not permitted") ||
+		strings.Contains(message, "permission denied")
+}
+
+// TmuxUnavailable reports whether the owned tmux server could not be created
+// because tmux was missing or denied before any server existed.
+func (e *IsolatedEnvironment) TmuxUnavailable() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.tmuxUnavailable
 }
 
 // SessionName returns an owned, run-specific tmux session name.
@@ -265,16 +292,19 @@ func (e *IsolatedEnvironment) Cleanup() error {
 		for name := range e.owned {
 			names = append(names, name)
 		}
+		tmuxUnavailable := e.tmuxUnavailable
 		e.mu.Unlock()
 		sort.Strings(names)
 
-		for _, name := range names {
-			if output, err := e.TmuxCommand("kill-session", "-t", name).CombinedOutput(); err != nil && !missingTmuxTarget(output) {
-				e.cleanupErr = errors.Join(e.cleanupErr, fmt.Errorf("kill owned tmux session %q: %w: %s", name, err, output))
+		if !tmuxUnavailable {
+			for _, name := range names {
+				if output, err := e.TmuxCommand("kill-session", "-t", name).CombinedOutput(); err != nil && !missingTmuxTarget(output) {
+					e.cleanupErr = errors.Join(e.cleanupErr, fmt.Errorf("kill owned tmux session %q: %w: %s", name, err, output))
+				}
 			}
-		}
-		if output, err := e.TmuxCommand("kill-server").CombinedOutput(); err != nil && !missingTmuxTarget(output) {
-			e.cleanupErr = errors.Join(e.cleanupErr, fmt.Errorf("kill owned tmux server: %w: %s", err, output))
+			if output, err := e.TmuxCommand("kill-server").CombinedOutput(); err != nil && !missingTmuxTarget(output) {
+				e.cleanupErr = errors.Join(e.cleanupErr, fmt.Errorf("kill owned tmux server: %w: %s", err, output))
+			}
 		}
 		e.cleanupErr = errors.Join(e.cleanupErr, e.Context.Cleanup())
 	})

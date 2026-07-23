@@ -3,7 +3,10 @@
 package helpers
 
 import (
+	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -87,5 +90,46 @@ func TestIsolatedEnvironmentTmuxServersDoNotOverlap(t *testing.T) {
 	}
 	if !second.HasSession(secondName) {
 		t.Fatal("cleaning the first environment removed the second environment's session")
+	}
+}
+
+func TestIsUnavailablePrerequisite(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "missing executable", err: fmt.Errorf("wrapped: %w", exec.ErrNotFound), want: true},
+		{name: "filesystem permission", err: fmt.Errorf("wrapped: %w", os.ErrPermission), want: true},
+		{name: "sandbox denial", err: errors.New("start server: operation not permitted"), want: true},
+		{name: "invalid arguments", err: errors.New("start server: invalid tmux option"), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := IsUnavailablePrerequisite(tt.err); got != tt.want {
+				t.Fatalf("IsUnavailablePrerequisite(%q) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUnavailableTmuxPrerequisiteCleansWithoutFailure(t *testing.T) {
+	env := NewIsolatedEnvironment(t)
+	t.Setenv("PATH", t.TempDir())
+
+	err := env.StartTmuxServer(env.SessionName("unavailable"))
+	if err == nil {
+		t.Fatal("StartTmuxServer succeeded without tmux on PATH")
+	}
+	if !IsUnavailablePrerequisite(err) || !env.TmuxUnavailable() {
+		t.Fatalf("missing tmux was not classified unavailable: %v", err)
+	}
+	if err := env.Cleanup(); err != nil {
+		t.Fatalf("cleanup unavailable tmux prerequisite: %v", err)
+	}
+	if _, err := os.Stat(env.Context.BaseDir); !os.IsNotExist(err) {
+		t.Fatalf("isolated root survived unavailable-prerequisite cleanup: %v", err)
 	}
 }

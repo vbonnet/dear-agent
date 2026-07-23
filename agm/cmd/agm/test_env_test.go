@@ -73,3 +73,30 @@ func TestTestEnvironmentCommandsRejectTraversalNames(t *testing.T) {
 	_, err = os.Stat(sentinel)
 	require.NoError(t, err, "rejected destroy mutated a sibling outside the owned environment")
 }
+
+func TestTestEnvironmentDestroyRemovesRetiredRoot(t *testing.T) {
+	retiredRoot := filepath.Clean(os.TempDir())
+	if retiredRoot == "/tmp" {
+		t.Skip("canonical and retired test-environment roots are identical")
+	}
+	name := "legacy-cli-" + testcontext.New().RunID
+	retiredBase := filepath.Join(retiredRoot, "agm-test-"+name)
+	retiredSocket := filepath.Join(retiredRoot, "agm-test-"+name+".sock")
+	require.NoError(t, os.MkdirAll(filepath.Join(retiredBase, "home"), 0700))
+	require.NoError(t, os.WriteFile(retiredSocket, []byte("retired socket"), 0600))
+	t.Cleanup(func() {
+		require.NoError(t, os.RemoveAll(retiredBase))
+		if err := os.Remove(retiredSocket); err != nil && !os.IsNotExist(err) {
+			t.Errorf("remove retired socket: %v", err)
+		}
+	})
+
+	destroyOutput := captureStdout(t, func() {
+		require.NoError(t, testEnvDestroyCmd.RunE(testEnvDestroyCmd, []string{name}))
+	})
+	require.Contains(t, destroyOutput, "Destroyed test environment: "+name)
+	for _, removed := range []string{retiredBase, retiredSocket} {
+		_, err := os.Lstat(removed)
+		require.ErrorIs(t, err, os.ErrNotExist)
+	}
+}

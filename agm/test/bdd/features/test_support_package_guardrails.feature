@@ -124,5 +124,6 @@ Feature: Test support package guardrails
   Scenario: Named test environments remain inside one owned root
     Given named test environment lifecycle sources are configured
     When AGM validates named test environment ownership
-    Then creation reconstruction discovery and cleanup should share one root
+    Then canonical creation reconstruction discovery and cleanup should share one root
+    And retired named environment paths should be discovered and removed exactly
     And unsafe named test environment paths should be rejected before mutation

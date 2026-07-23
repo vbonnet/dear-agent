@@ -3,13 +3,12 @@
 package lifecycle_test
 
 import (
-	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/test/integration/helpers"
@@ -25,7 +24,7 @@ func TestCodexLifecycleUsesIsolatedSourceEnvironment(t *testing.T) {
 		t.Skip("skipping real-tmux Codex lifecycle in short mode")
 	}
 	if err := exec.Command("/bin/ps", "-axo", "command=").Run(); err != nil {
-		if testPrerequisiteUnavailable(err) {
+		if helpers.IsUnavailablePrerequisite(err) {
 			t.Skipf("process-table inspection is unavailable to the fail-closed spawn guard: %v", err)
 		}
 		t.Fatalf("probe process-table inspection: %v", err)
@@ -34,7 +33,7 @@ func TestCodexLifecycleUsesIsolatedSourceEnvironment(t *testing.T) {
 	env := helpers.NewIsolatedEnvironment(t)
 	probe := env.SessionName("tmux-probe")
 	if err := env.StartTmuxServer(probe); err != nil {
-		if testPrerequisiteUnavailable(err) {
+		if env.TmuxUnavailable() && helpers.IsUnavailablePrerequisite(err) {
 			t.Skipf("tmux cannot create an isolated server in this environment: %v", err)
 		}
 		t.Fatalf("start isolated tmux server: %v", err)
@@ -144,6 +143,7 @@ func main() {
 	if err != nil {
 		t.Fatalf("send to isolated Codex session with source AGM: %v\n%s", err, sendOutput)
 	}
+	requirePaneContains(t, env, sessionName, "accepted isolated input")
 
 	kill := env.Command(
 		"session", "kill", sessionName,
@@ -223,33 +223,17 @@ func main() {
 	}
 }
 
-func TestPrerequisiteUnavailableClassifier(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{name: "missing executable", err: fmt.Errorf("wrapped: %w", exec.ErrNotFound), want: true},
-		{name: "filesystem permission", err: fmt.Errorf("wrapped: %w", os.ErrPermission), want: true},
-		{name: "sandbox denial", err: errors.New("start server: operation not permitted"), want: true},
-		{name: "invalid arguments", err: errors.New("start server: invalid tmux option"), want: false},
+func requirePaneContains(t *testing.T, env *helpers.IsolatedEnvironment, sessionName, marker string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var lastPane string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		lastPane, lastErr = env.CapturePane(sessionName)
+		if lastErr == nil && strings.Contains(lastPane, marker) {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			if got := testPrerequisiteUnavailable(tt.err); got != tt.want {
-				t.Fatalf("testPrerequisiteUnavailable(%q) = %v, want %v", tt.err, got, tt.want)
-			}
-		})
-	}
-}
-
-func testPrerequisiteUnavailable(err error) bool {
-	if errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrPermission) {
-		return true
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "operation not permitted") ||
-		strings.Contains(message, "permission denied")
+	t.Fatalf("isolated pane never contained %q: err=%v\n%s", marker, lastErr, lastPane)
 }

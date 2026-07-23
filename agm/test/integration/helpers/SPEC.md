@@ -18,6 +18,8 @@
 
 **IHELP-07** When a production liveness probe distinguishes harness processes by executable name, the helper shall compile a test-owned executable with the required basename inside the isolated environment.
 
+**IHELP-08** If tmux is missing or permission is denied before server creation, then the helper shall remove owned filesystem state without invoking tmux or converting an intended skip into failure.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/test_support_package_guardrails.feature`

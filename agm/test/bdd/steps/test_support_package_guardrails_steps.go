@@ -91,7 +91,8 @@ func RegisterTestSupportPackageGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^cleanup should target only owned test resources$`, cleanupTargetsOnlyOwnedTestResources)
 	ctx.Step(`^named test environment lifecycle sources are configured$`, namedTestEnvironmentLifecycleSourcesAreConfigured)
 	ctx.Step(`^AGM validates named test environment ownership$`, agmValidatesNamedTestEnvironmentOwnership)
-	ctx.Step(`^creation reconstruction discovery and cleanup should share one root$`, namedTestEnvironmentLifecycleSharesOneRoot)
+	ctx.Step(`^canonical creation reconstruction discovery and cleanup should share one root$`, namedTestEnvironmentLifecycleSharesOneRoot)
+	ctx.Step(`^retired named environment paths should be discovered and removed exactly$`, retiredNamedTestEnvironmentPathsAreRemoved)
 	ctx.Step(`^unsafe named test environment paths should be rejected before mutation$`, unsafeNamedTestEnvironmentPathsAreRejected)
 }
 
@@ -271,6 +272,7 @@ func lifecycleExercisesCompleteCodexLifecycle() error {
 		`"session", "kill"`,
 		`env.Command("session", "resume"`,
 		`env.Command("session", "archive"`,
+		`requirePaneContains(t, env, sessionName, "accepted isolated input")`,
 		`archived.Lifecycle != "archived"`,
 		`archived.Outcome != "killed"`,
 	} {
@@ -303,14 +305,29 @@ func unexpectedLifecycleSetupFailuresFail() error {
 	}
 	source := string(data)
 	for _, required := range []string{
-		`if testPrerequisiteUnavailable(err)`,
+		`helpers.IsUnavailablePrerequisite(err)`,
+		`env.TmuxUnavailable()`,
 		`t.Fatalf("probe process-table inspection: %v", err)`,
 		`t.Fatalf("start isolated tmux server: %v", err)`,
-		`errors.Is(err, exec.ErrNotFound)`,
-		`errors.Is(err, os.ErrPermission)`,
 	} {
 		if !strings.Contains(source, required) {
 			return fmt.Errorf("isolated lifecycle lacks fail-closed prerequisite guard %s", required)
+		}
+	}
+
+	helperData, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "helpers", "isolated_environment.go"))
+	if err != nil {
+		return err
+	}
+	helper := string(helperData)
+	for _, required := range []string{
+		`errors.Is(err, exec.ErrNotFound)`,
+		`errors.Is(err, os.ErrPermission)`,
+		`tmuxUnavailable = true`,
+		`if !tmuxUnavailable`,
+	} {
+		if !strings.Contains(helper, required) {
+			return fmt.Errorf("isolated helper lacks unavailable-prerequisite guard %s", required)
 		}
 	}
 	return nil
@@ -363,7 +380,7 @@ func agmValidatesNamedTestEnvironmentOwnership(ctx context.Context) error {
 		"go", "test",
 		"./agm/internal/testcontext",
 		"./agm/cmd/agm",
-		"-run", `^(TestListNamedSharesLifecycleRoot|TestNamedEnvironmentRejectsUnownedPaths|TestFromEnvRejectsUnownedRunID|TestTestEnvironmentCreateListDestroySharesOwnedRoot|TestTestEnvironmentCommandsRejectTraversalNames)$`,
+		"-run", `^(TestListNamedSharesLifecycleRoot|TestRetiredNamedEnvironmentIsDiscoveredAndCleanedExactly|TestNamedEnvironmentRejectsUnownedPaths|TestFromEnvRejectsUnownedRunID|TestTestEnvironmentCreateListDestroySharesOwnedRoot|TestTestEnvironmentCommandsRejectTraversalNames|TestTestEnvironmentDestroyRemovesRetiredRoot)$`,
 		"-count=1",
 		"-v",
 	)
@@ -379,6 +396,14 @@ func namedTestEnvironmentLifecycleSharesOneRoot(ctx context.Context) error {
 		ctx,
 		"TestListNamedSharesLifecycleRoot",
 		"TestTestEnvironmentCreateListDestroySharesOwnedRoot",
+	)
+}
+
+func retiredNamedTestEnvironmentPathsAreRemoved(ctx context.Context) error {
+	return requireNamedTestEnvironmentTests(
+		ctx,
+		"TestRetiredNamedEnvironmentIsDiscoveredAndCleanedExactly",
+		"TestTestEnvironmentDestroyRemovesRetiredRoot",
 	)
 }
 
