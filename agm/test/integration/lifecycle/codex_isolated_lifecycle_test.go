@@ -3,7 +3,6 @@
 package lifecycle_test
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,9 +14,10 @@ import (
 )
 
 // TestCodexLifecycleUsesIsolatedSourceEnvironment replaces the Codex branch of
-// the legacy comprehensive test. It exercises the production CLI with a
-// source-built AGM, fake Codex process, isolated HOME/state/SQLite/manifests,
-// unique tmux socket, and exact owned cleanup.
+// the legacy comprehensive test. It exercises production create, list, send,
+// kill, resume, and archive commands with a source-built AGM, fake Codex
+// process, isolated HOME/state/SQLite/manifests, unique tmux socket, and exact
+// owned cleanup.
 func TestCodexLifecycleUsesIsolatedSourceEnvironment(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping real-tmux Codex lifecycle in short mode")
@@ -32,7 +32,30 @@ func TestCodexLifecycleUsesIsolatedSourceEnvironment(t *testing.T) {
 		t.Skipf("tmux cannot create an isolated server in this environment: %v", err)
 	}
 
-	if err := installFakeCodex(env); err != nil {
+	const fakeCodex = `package main
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+)
+
+func composer() {
+	fmt.Println("│ >_ OpenAI Codex (v0.144.0) │")
+	fmt.Println("│ model: gpt-5.4 /model to change │")
+	fmt.Println("›")
+}
+
+func main() {
+	composer()
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		fmt.Println("accepted isolated input")
+		composer()
+	}
+}
+`
+	if err := env.BuildGoExecutable("codex", fakeCodex); err != nil {
 		t.Fatalf("install fake Codex: %v", err)
 	}
 
@@ -108,6 +131,79 @@ func TestCodexLifecycleUsesIsolatedSourceEnvironment(t *testing.T) {
 	}
 	storeClosed = true
 
+	send := env.Command("send", "msg", sessionName, "--sender", "integration-test", "--prompt", "isolated lifecycle message")
+	sendOutput, err := send.CombinedOutput()
+	if err != nil {
+		t.Fatalf("send to isolated Codex session with source AGM: %v\n%s", err, sendOutput)
+	}
+
+	kill := env.Command(
+		"session", "kill", sessionName,
+		"--confirmed-stuck", "--force",
+		"--reason", "isolated lifecycle test",
+		"--no-agent",
+	)
+	killOutput, err := kill.CombinedOutput()
+	if err != nil {
+		t.Fatalf("kill isolated Codex session with source AGM: %v\n%s", err, killOutput)
+	}
+	if env.HasSession(sessionName) {
+		t.Fatalf("source AGM reported kill success while exact tmux target %q survived", sessionName)
+	}
+
+	resume := env.Command("session", "resume", sessionName, "--detached")
+	resume.Env = append(resume.Env,
+		"OPENAI_API_KEY=sk-test-only-not-real",
+		"AGM_CODEX_REMOTE_CONTROL=0",
+	)
+	resumeOutput, err := resume.CombinedOutput()
+	if err != nil {
+		t.Fatalf("resume isolated Codex session with source AGM: %v\n%s", err, resumeOutput)
+	}
+	if !env.HasSession(sessionName) {
+		t.Fatalf("source AGM reported resume success without exact tmux target %q", sessionName)
+	}
+	resumedPane, err := env.CapturePane(sessionName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(resumedPane, "│ >_ OpenAI Codex") || !strings.Contains(resumedPane, "/model to change") {
+		t.Fatalf("resumed Codex composer missing from isolated pane:\n%s", resumedPane)
+	}
+
+	kill = env.Command(
+		"session", "kill", sessionName,
+		"--confirmed-stuck", "--force",
+		"--reason", "isolated lifecycle test",
+		"--no-agent",
+	)
+	if killOutput, err = kill.CombinedOutput(); err != nil {
+		t.Fatalf("kill resumed isolated Codex session with source AGM: %v\n%s", err, killOutput)
+	}
+
+	archive := env.Command("session", "archive", sessionName, "--outcome", "killed")
+	archive.Env = append(archive.Env, "AGM_CODEX_REMOTE_CONTROL=0")
+	archiveOutput, err := archive.CombinedOutput()
+	if err != nil {
+		t.Fatalf("archive isolated Codex session with source AGM: %v\n%s", err, archiveOutput)
+	}
+	archivedStore, err := dolt.NewSQLiteAdapter(env.DBPath)
+	if err != nil {
+		t.Fatalf("reopen isolated SQLite database: %v", err)
+	}
+	archived, err := archivedStore.GetSession(sessionManifest.SessionID)
+	if err != nil {
+		_ = archivedStore.Close()
+		t.Fatalf("read archived isolated Codex registration: %v", err)
+	}
+	if archived == nil || archived.Lifecycle != "archived" || archived.Outcome != "killed" {
+		_ = archivedStore.Close()
+		t.Fatalf("archived manifest = %+v, want lifecycle archived and outcome killed", archived)
+	}
+	if err := archivedStore.Close(); err != nil {
+		t.Fatalf("close archived isolated SQLite database: %v", err)
+	}
+
 	if err := env.Cleanup(); err != nil {
 		t.Fatalf("cleanup isolated Codex lifecycle: %v", err)
 	}
@@ -117,31 +213,4 @@ func TestCodexLifecycleUsesIsolatedSourceEnvironment(t *testing.T) {
 	if _, err := os.Stat(env.Context.BaseDir); !os.IsNotExist(err) {
 		t.Fatalf("isolated root survived cleanup: %v", err)
 	}
-}
-
-func installFakeCodex(env *helpers.IsolatedEnvironment) error {
-	const source = `package main
-
-import (
-	"fmt"
-	"time"
-)
-
-func main() {
-	fmt.Println("│ >_ OpenAI Codex (v0.144.0) │")
-	fmt.Println("│ model: gpt-5.4 /model to change │")
-	fmt.Println("›")
-	time.Sleep(5 * time.Minute)
-}
-`
-	sourcePath := filepath.Join(env.Context.BaseDir, "fake-codex.go")
-	if err := os.WriteFile(sourcePath, []byte(source), 0600); err != nil {
-		return err
-	}
-	command := exec.Command("go", "build", "-o", filepath.Join(env.BinDir, "codex"), sourcePath)
-	command.Env = env.Environ()
-	if output, err := command.CombinedOutput(); err != nil {
-		return fmt.Errorf("build fake Codex process: %w: %s", err, output)
-	}
-	return nil
 }

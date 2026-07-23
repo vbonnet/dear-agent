@@ -86,6 +86,7 @@ func RegisterTestSupportPackageGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^isolated Codex lifecycle test sources are configured$`, isolatedCodexLifecycleTestSourcesAreConfigured)
 	ctx.Step(`^AGM validates real lifecycle isolation$`, agmValidatesRealLifecycleIsolation)
 	ctx.Step(`^the lifecycle should use a source-built AGM and unique tmux socket$`, lifecycleUsesSourceBuiltAGMAndUniqueTmuxSocket)
+	ctx.Step(`^the lifecycle should exercise send kill resume and archive through the source-built AGM$`, lifecycleExercisesCompleteCodexLifecycle)
 	ctx.Step(`^cleanup should target only owned test resources$`, cleanupTargetsOnlyOwnedTestResources)
 	ctx.Step(`^named test environment lifecycle sources are configured$`, namedTestEnvironmentLifecycleSourcesAreConfigured)
 	ctx.Step(`^AGM validates named test environment ownership$`, agmValidatesNamedTestEnvironmentOwnership)
@@ -252,6 +253,43 @@ func lifecycleUsesSourceBuiltAGMAndUniqueTmuxSocket() error {
 		if !strings.Contains(lifecycle, required) {
 			return fmt.Errorf("codex lifecycle bypasses isolated environment guard %s", required)
 		}
+	}
+	return nil
+}
+
+func lifecycleExercisesCompleteCodexLifecycle() error {
+	root := packageSpecBDDRepoRoot()
+	lifecycleData, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "lifecycle", "codex_isolated_lifecycle_test.go"))
+	if err != nil {
+		return err
+	}
+	lifecycle := string(lifecycleData)
+	for _, required := range []string{
+		`BuildGoExecutable("codex"`,
+		`env.Command("send", "msg"`,
+		`"session", "kill"`,
+		`env.Command("session", "resume"`,
+		`env.Command("session", "archive"`,
+		`archived.Lifecycle != "archived"`,
+		`archived.Outcome != "killed"`,
+	} {
+		if !strings.Contains(lifecycle, required) {
+			return fmt.Errorf("isolated Codex lifecycle lacks complete source-built phase %s", required)
+		}
+	}
+
+	legacyData, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "lifecycle", "comprehensive_session_lifecycle_test.go"))
+	if err != nil {
+		return err
+	}
+	legacy := string(legacyData)
+	start := strings.Index(legacy, "func TestSessionLifecycle_ComprehensiveCreateResumeTerminate(")
+	end := strings.Index(legacy, "func TestSessionStateTransitions(")
+	if start < 0 || end <= start {
+		return fmt.Errorf("legacy comprehensive lifecycle boundary is missing")
+	}
+	if strings.Contains(legacy[start:end], `"codex-cli"`) {
+		return fmt.Errorf("legacy comprehensive lifecycle still routes Codex through the installed harness")
 	}
 	return nil
 }

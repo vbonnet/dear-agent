@@ -52,6 +52,9 @@ func TestIsolatedEnvironmentUsesSourceBinaryAndOwnedPaths(t *testing.T) {
 	if err := env.WriteExecutable("../escape", "#!/bin/sh\n"); err == nil {
 		t.Fatal("wrote an executable outside the owned bin directory")
 	}
+	if err := env.BuildGoExecutable("../escape", "package main\nfunc main() {}\n"); err == nil {
+		t.Fatal("built an executable outside the owned bin directory")
+	}
 }
 
 func TestIsolatedEnvironmentTmuxServersDoNotOverlap(t *testing.T) {

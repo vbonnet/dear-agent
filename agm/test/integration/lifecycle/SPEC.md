@@ -14,7 +14,7 @@
 
 **LIFEI-05** When the integration test binary or a child AGM command opens Dolt storage, the suite shall select explicit test mode, test workspace, and test database values before adapter construction.
 
-**LIFEI-06** When Codex lifecycle behavior is exercised through the real CLI, the suite shall use a fake Codex process inside a fully isolated source-built AGM environment and shall verify tmux and SQLite postconditions before exact cleanup.
+**LIFEI-06** When Codex lifecycle behavior is exercised through the real CLI, the suite shall use a compiled fake Codex process inside a fully isolated source-built AGM environment, shall exercise create, list, send, kill, resume, and archive through that environment, and shall verify tmux and SQLite postconditions before exact cleanup.
 
 ## BDD Traceability
 

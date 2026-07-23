@@ -16,6 +16,8 @@
 
 **IHELP-06** When isolated integration cleanup runs, the helper shall target only exact registered session names and its owned tmux server and paths; it shall not scan or mutate the user's default tmux server.
 
+**IHELP-07** When a production liveness probe distinguishes harness processes by executable name, the helper shall compile a test-owned executable with the required basename inside the isolated environment.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/test_support_package_guardrails.feature`

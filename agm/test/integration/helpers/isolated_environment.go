@@ -218,6 +218,30 @@ func (e *IsolatedEnvironment) WriteExecutable(name, script string) error {
 	return os.WriteFile(filepath.Join(e.BinDir, name), []byte(script), 0700)
 }
 
+// BuildGoExecutable compiles a test-owned process whose executable basename is
+// name. Use this instead of a shell script when production liveness checks must
+// observe the harness process name through tmux or the OS process table.
+func (e *IsolatedEnvironment) BuildGoExecutable(name, source string) error {
+	if name == "" || filepath.Base(name) != name {
+		return fmt.Errorf("invalid executable name %q", name)
+	}
+	sourceDir := filepath.Join(e.Context.BaseDir, "fake-"+name)
+	if err := os.MkdirAll(sourceDir, 0700); err != nil {
+		return fmt.Errorf("create fake executable source directory: %w", err)
+	}
+	sourcePath := filepath.Join(sourceDir, "main.go")
+	if err := os.WriteFile(sourcePath, []byte(source), 0600); err != nil {
+		return fmt.Errorf("write fake executable source: %w", err)
+	}
+	command := exec.Command("go", "build", "-o", filepath.Join(e.BinDir, name), sourcePath)
+	command.Dir = e.SourceRoot
+	command.Env = os.Environ()
+	if output, err := command.CombinedOutput(); err != nil {
+		return fmt.Errorf("build fake executable %q: %w: %s", name, err, output)
+	}
+	return nil
+}
+
 // HasSession checks this environment's socket only.
 func (e *IsolatedEnvironment) HasSession(name string) bool {
 	return e.TmuxCommand("has-session", "-t", name).Run() == nil

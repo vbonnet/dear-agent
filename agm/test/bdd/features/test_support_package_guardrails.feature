@@ -117,6 +117,7 @@ Feature: Test support package guardrails
     Given isolated Codex lifecycle test sources are configured
     When AGM validates real lifecycle isolation
     Then the lifecycle should use a source-built AGM and unique tmux socket
+    And the lifecycle should exercise send kill resume and archive through the source-built AGM
     And cleanup should target only owned test resources
 
   Scenario: Named test environments remain inside one owned root
