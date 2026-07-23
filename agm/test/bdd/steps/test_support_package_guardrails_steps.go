@@ -530,6 +530,7 @@ func requireNamedTestEnvironmentTests(ctx context.Context, tests ...string) erro
 func legacySuiteOptOutsDoNotSuppressRequiredIntegrationContracts() error {
 	root := packageSpecBDDRepoRoot()
 	for _, path := range []string{
+		"agm/internal/tmux/claude_ready_test.go",
 		"agm/test/integration/ci_skip_test.go",
 		"agm/test/integration/integration_suite_test.go",
 		"agm/test/integration/lifecycle/ci_skip_test.go",
@@ -576,7 +577,18 @@ func legacySuiteOptOutsDoNotSuppressRequiredIntegrationContracts() error {
 	if sweepStart < 0 || sweepEnd <= sweepStart {
 		return errors.New("CI tagged-sweep job boundary is missing")
 	}
-	taggedSweep := ci[sweepStart:sweepEnd]
+	return taggedSweepRetainsCompleteIntegrationContracts(ci[sweepStart:sweepEnd])
+}
+
+func taggedSweepRetainsCompleteIntegrationContracts(taggedSweep string) error {
+	for _, required := range []string{
+		"Compile complete AGM integration-tagged graph",
+		"go test -run '^$' -tags=integration ./agm/...",
+	} {
+		if !strings.Contains(taggedSweep, required) {
+			return fmt.Errorf("CI tagged sweep is missing complete tagged compilation contract %s", required)
+		}
+	}
 	for _, banned := range []string{
 		"SKIP_E2E",
 		"Install source AGM for legacy host-dependent packages",

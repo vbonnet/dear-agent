@@ -256,6 +256,9 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      - name: Compile complete AGM integration-tagged graph
+        run: go test -run '^$' -tags=integration ./agm/...
+
       - name: Run credential-free contract graph
         run: go test -race -count=1 -timeout=20m -tags=contract ./agm/test/contract/...
 
