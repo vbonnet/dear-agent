@@ -27,6 +27,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 )
@@ -268,6 +269,20 @@ func TestMCPCreateSessionRuntimeWaitsForAgyBeforePrompt(t *testing.T) {
 	}
 	if len(tmuxMock.SentCommands) != 2 || tmuxMock.SentCommands[1] != "startup prompt" {
 		t.Fatalf("commands after completion = %v, want launch then startup prompt", tmuxMock.SentCommands)
+	}
+}
+
+func TestMCPCreateSessionRuntimePreservesUncertainPrivateLaunch(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	tmuxMock := session.NewMockTmux()
+	tmuxMock.SendKeysError = tmux.MarkPromptSubmissionUncertain(errors.New("lost tmux acknowledgement"))
+	runtime := &mcpCreateSessionRuntime{tmux: tmuxMock}
+
+	if _, err := runtime.Launch(t.Context(), ops.HarnessLaunchSpec{
+		Harness: "codex-cli", SessionName: "mcp-codex-uncertain",
+		WorkDir: "/tmp/mcp-codex-uncertain",
+	}); err != nil {
+		t.Fatalf("uncertain MCP private launch returned an error: %v", err)
 	}
 }
 

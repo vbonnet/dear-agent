@@ -372,6 +372,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^private launches should normalize the target working directory and require a verified executor$`, privateLaunchesShouldNormalizeTheTargetWorkingDirectoryAndRequireAVerifiedExecutor)
 	ctx.Step(`^an unconsumed credential handoff should expire independently of later launches$`, anUnconsumedCredentialHandoffShouldExpireIndependentlyOfLaterLaunches)
 	ctx.Step(`^deferred and rejected handoffs should preserve bounded one-shot cleanup$`, deferredAndRejectedHandoffsShouldPreserveBoundedOneShotCleanup)
+	ctx.Step(`^uncertain current-pane submission should preserve the private handoff$`, uncertainCurrentPaneSubmissionShouldPreserveThePrivateHandoff)
 	ctx.Step(`^an existing tmux session running Codex CLI$`, anExistingTmuxSessionRunningCodexCLI)
 	ctx.Step(`^an existing tmux session running AGY$`, anExistingTmuxSessionRunningAGY)
 	ctx.Step(`^/agm:agm-assoc runs in that session$`, agmAssocRunsInThatSession)
@@ -1055,8 +1056,8 @@ func agmBuildsTheCodexPrivateLaunchBoundary(ctx context.Context) error {
 	}, "bdd-private-codex")
 	testCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/harnessexec",
-		"-run", `^(TestPrepared(ClaudeCommand(CarriesCallerOnlyOAuthAndTelemetry|ClearsCallerAbsentPaneState)|CodexCommand(CarriesCallerAllowlistAndPreservesPaneIdentity|ClearsCallerAbsentPaneCredentials|ResolvesExecutableFromCallerPATH)|Command(CancelRemovesUndeliveredHandoff|UsesCoInstalledAGMFromCompanionBinary|RejectsCompanionWithoutCoInstalledAGM|UsesRenamedCurrentAGMExecutable|MakesRelativeStateDirectoryAbsolute|SchedulesIndependentExpiration|RemovesHandoffWhenExpirationCannotBeScheduled)|DeferredCommandSchedulesProducerLease)|Test(DeferredHandoffRemainsLiveUntilProducerExitThenExpires|ExpiryProtocolRemovesUnconsumedHandoffAtDeadline|DetachedExpiryHelper(InterceptsGoTestBinaryBeforeTestsRun|IsReapedAsynchronously)|ConsumeHandoff(UsesDeferredLeaseFreshnessAndUnlinksRejections|PreservesFilesOutsidePrivateStagingNamespace)|ClaudeResumeChangesDirectoryBeforeDirectReplacement))$`,
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/harnessexec", "./agm/cmd/agm", "./agm/cmd/agm-mcp-server",
+		"-run", `^(TestPrepared(ClaudeCommand(CarriesCallerOnlyOAuthAndTelemetry|ClearsCallerAbsentPaneState)|CodexCommand(CarriesCallerAllowlistAndPreservesPaneIdentity|ClearsCallerAbsentPaneCredentials|ResolvesExecutableFromCallerPATH)|Command(CancelRemovesUndeliveredHandoff|UsesCoInstalledAGMFromCompanionBinary|RejectsCompanionWithoutCoInstalledAGM|UsesRenamedCurrentAGMExecutable|MakesRelativeStateDirectoryAbsolute|SchedulesIndependentExpiration|RemovesHandoffWhenExpirationCannotBeScheduled)|DeferredCommandSchedulesProducerLease)|Test(DeferredHandoffRemainsLiveUntilProducerExitThenExpires|ExpiryProtocolRemovesUnconsumedHandoffAtDeadline|DetachedExpiryHelper(InterceptsGoTestBinaryBeforeTestsRun|IsReapedAsynchronously)|ConsumeHandoff(UsesDeferredLeaseFreshnessAndUnlinksRejections|PreservesFilesOutsidePrivateStagingNamespace)|ClaudeResumeChangesDirectoryBeforeDirectReplacement|QueueCurrentTmux(Codex|Claude)PreservesHandoffAfterUncertainSubmission|MCPCreateSessionRuntimePreservesUncertainPrivateLaunch))$`,
 		"-count=1", "-v",
 	)
 	cmd.Dir = bddRepoRoot()
@@ -1171,6 +1172,23 @@ func deferredAndRejectedHandoffsShouldPreserveBoundedOneShotCleanup(ctx context.
 	} {
 		if !strings.Contains(state.privateHandoffTestOutput, "--- PASS: "+behavior) {
 			return fmt.Errorf("private deferred-handoff behavior %s did not pass:\n%s", behavior, state.privateHandoffTestOutput)
+		}
+	}
+	return nil
+}
+
+func uncertainCurrentPaneSubmissionShouldPreserveThePrivateHandoff(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if state.privateHandoffTestErr != nil {
+		return fmt.Errorf("private uncertain-submission behavior failed: %w\n%s", state.privateHandoffTestErr, state.privateHandoffTestOutput)
+	}
+	for _, behavior := range []string{
+		"TestQueueCurrentTmuxCodexPreservesHandoffAfterUncertainSubmission",
+		"TestQueueCurrentTmuxClaudePreservesHandoffAfterUncertainSubmission",
+		"TestMCPCreateSessionRuntimePreservesUncertainPrivateLaunch",
+	} {
+		if !strings.Contains(state.privateHandoffTestOutput, "--- PASS: "+behavior) {
+			return fmt.Errorf("private uncertain-submission behavior %s did not pass:\n%s", behavior, state.privateHandoffTestOutput)
 		}
 	}
 	return nil

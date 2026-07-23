@@ -412,6 +412,7 @@ Feature: Harness parity
     And private launches should normalize the target working directory and require a verified executor
     And an unconsumed credential handoff should expire independently of later launches
     And deferred and rejected handoffs should preserve bounded one-shot cleanup
+    And uncertain current-pane submission should preserve the private handoff
 
   Scenario: AGY detached session receives startup prompt
     Given AGY is available

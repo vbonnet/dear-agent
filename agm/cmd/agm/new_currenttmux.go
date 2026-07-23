@@ -171,7 +171,7 @@ func queueCurrentTmuxPiWithRuntime(spec ops.HarnessLaunchSpec, runtime currentTm
 		return false, fmt.Errorf("pi executable is unavailable: %w", err)
 	}
 	launch := ops.BuildHarnessLaunchCommand(spec)
-	if err := runtime.sendCommand(spec.SessionName, launch.Command); err != nil {
+	if err := resolveHarnessLaunchSubmission("Pi", launch, runtime.sendCommand(spec.SessionName, launch.Command)); err != nil {
 		ui.PrintError(err,
 			"Failed to queue Pi in current tmux pane",
 			"  • Verify Pi is installed: which pi\n"+
@@ -210,8 +210,7 @@ func queueCurrentTmuxCodexWithRuntime(spec ops.HarnessLaunchSpec, runtime curren
 	if err != nil {
 		return false, fmt.Errorf("prepare Codex launch: %w", err)
 	}
-	if err := runtime.sendCommand(spec.SessionName, launch.Command); err != nil {
-		_ = launch.CancelUndelivered()
+	if err := resolveHarnessLaunchSubmission("Codex", launch, runtime.sendCommand(spec.SessionName, launch.Command)); err != nil {
 		ui.PrintError(err,
 			"Failed to queue Codex in current tmux pane",
 			"  • Verify Codex is installed: which codex\n"+
@@ -303,8 +302,7 @@ func queueCurrentTmuxHarnessCommand(ctx context.Context, spec ops.HarnessLaunchS
 	if err != nil {
 		return fmt.Errorf("prepare %s launch: %w", spec.Harness, err)
 	}
-	if err := runtime.sendCommand(spec.SessionName, launch.Command); err != nil {
-		_ = launch.CancelUndelivered()
+	if err := resolveHarnessLaunchSubmission(spec.Harness, launch, runtime.sendCommand(spec.SessionName, launch.Command)); err != nil {
 		return err
 	}
 	return nil

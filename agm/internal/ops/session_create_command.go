@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 // HarnessLaunchSpec is the harness-neutral launch contract used by every
@@ -47,13 +49,28 @@ type HarnessLaunchCommand struct {
 	Cancel               func() error
 }
 
-// CancelUndelivered removes a private handoff when its pane command could not
-// be queued. Once delivery succeeds, the executor owns one-shot consumption.
+// CancelUndelivered removes a private handoff when its pane command is
+// positively known not to have been queued. Once delivery succeeds or becomes
+// uncertain, the executor owns one-shot consumption.
 func (c HarnessLaunchCommand) CancelUndelivered() error {
 	if c.Cancel == nil {
 		return nil
 	}
 	return c.Cancel()
+}
+
+// ResolveHarnessLaunchSubmission converts tmux's irreversible submission
+// boundary into launch ownership. An uncertain acknowledgement is successful
+// for compensation purposes because the command may already be queued; only a
+// positively failed submission may remove the staged handoff.
+func ResolveHarnessLaunchSubmission(command HarnessLaunchCommand, submissionErr error) (bool, error) {
+	if submissionErr == nil {
+		return false, nil
+	}
+	if tmux.PromptSubmissionMayHaveOccurred(submissionErr) {
+		return true, nil
+	}
+	return false, errors.Join(submissionErr, command.CancelUndelivered())
 }
 
 // BuildHarnessLaunchCommand builds the one canonical shell command for a

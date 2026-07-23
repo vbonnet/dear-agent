@@ -15,6 +15,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 func TestSupportedHarnessesHaveCurrentTmuxLauncher(t *testing.T) {
@@ -153,6 +154,53 @@ func TestQueueCurrentTmuxCodexDoesNotWaitForReadiness(t *testing.T) {
 	assertPreparedHarnessCommand(t, gotCommand, "__exec-codex")
 }
 
+func TestQueueCurrentTmuxCodexPreservesHandoffAfterUncertainSubmission(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	var handoffPath string
+	_, err := queueCurrentTmuxCodexWithRuntime(
+		ops.HarnessLaunchSpec{
+			Harness: "codex-cli", SessionName: "codex-uncertain", WorkDir: "/tmp/codex-uncertain",
+		},
+		currentTmuxCodexQueueRuntime{
+			lookPath: func(string) (string, error) { return "/usr/local/bin/codex", nil },
+			sendCommand: func(_, command string) error {
+				handoffPath = preparedHandoffPath(t, command)
+				return tmux.MarkPromptSubmissionUncertain(errors.New("lost tmux acknowledgement"))
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("uncertain Codex submission returned an error: %v", err)
+	}
+	if _, err := os.Stat(handoffPath); err != nil {
+		t.Fatalf("uncertain Codex submission removed its handoff: %v", err)
+	}
+}
+
+func TestQueueCurrentTmuxClaudePreservesHandoffAfterUncertainSubmission(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	var handoffPath string
+	err := queueCurrentTmuxHarnessCommand(
+		t.Context(),
+		ops.HarnessLaunchSpec{
+			Harness: "claude-code", SessionName: "claude-uncertain", WorkDir: "/tmp/claude-uncertain",
+		},
+		currentTmuxCommandQueueRuntime{
+			lookPath: func(string) (string, error) { return "/usr/local/bin/claude", nil },
+			sendCommand: func(_, command string) error {
+				handoffPath = preparedHandoffPath(t, command)
+				return tmux.MarkPromptSubmissionUncertain(errors.New("lost tmux acknowledgement"))
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("uncertain Claude submission returned an error: %v", err)
+	}
+	if _, err := os.Stat(handoffPath); err != nil {
+		t.Fatalf("uncertain Claude submission removed its handoff: %v", err)
+	}
+}
+
 func TestCurrentTmuxLaunchResultDefersEveryQueuedHarness(t *testing.T) {
 	t.Parallel()
 
@@ -213,11 +261,8 @@ func assertPreparedHarnessCommand(t *testing.T, command, protocol string) {
 			t.Fatalf("prepared command %q does not contain %q", command, want)
 		}
 	}
-	match := regexp.MustCompile(`--handoff '([^']+)'`).FindStringSubmatch(command)
-	if len(match) != 2 {
-		t.Fatalf("prepared command %q does not contain a quoted handoff path", command)
-	}
-	payload, err := os.ReadFile(match[1])
+	handoffPath := preparedHandoffPath(t, command)
+	payload, err := os.ReadFile(handoffPath)
 	if err != nil {
 		t.Fatalf("read current-tmux handoff: %v", err)
 	}
@@ -230,6 +275,15 @@ func assertPreparedHarnessCommand(t *testing.T, command, protocol string) {
 	if !handoff.DeferredUntilProducerExit {
 		t.Fatal("current-tmux handoff omitted its producer-liveness lease marker")
 	}
+}
+
+func preparedHandoffPath(t *testing.T, command string) string {
+	t.Helper()
+	match := regexp.MustCompile(`--handoff '([^']+)'`).FindStringSubmatch(command)
+	if len(match) != 2 {
+		t.Fatalf("prepared command %q does not contain a quoted handoff path", command)
+	}
+	return match[1]
 }
 
 func TestQueueCurrentTmuxHarnessCommandRejectsMissingExecutable(t *testing.T) {

@@ -2,7 +2,6 @@ package ops
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -711,8 +710,10 @@ func launchCreateSession(callCtx context.Context, opCtx *OpContext, spec Harness
 	if err != nil {
 		return CreateSessionLaunchResult{}, ErrStorageError("prepare harness launch", err)
 	}
-	if err := opCtx.Tmux.SendKeys(spec.SessionName, cmd.Command); err != nil {
-		return CreateSessionLaunchResult{}, ErrStorageError("tmux.SendKeys(harness)", errors.Join(err, cmd.CancelUndelivered()))
+	if submissionErr := opCtx.Tmux.SendKeys(spec.SessionName, cmd.Command); submissionErr != nil {
+		if _, err := ResolveHarnessLaunchSubmission(cmd, submissionErr); err != nil {
+			return CreateSessionLaunchResult{}, ErrStorageError("tmux.SendKeys(harness)", err)
+		}
 	}
 	return CreateSessionLaunchResult{ModeAppliedAtStartup: cmd.ModeAppliedAtStartup}, nil
 }

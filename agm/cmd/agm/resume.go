@@ -1192,10 +1192,11 @@ func dispatchResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, harnessN
 		fullCmd = fmt.Sprintf("cd %s && exit", launchparity.ShellQuote(health.WorktreePath))
 		ui.PrintWarning(fmt.Sprintf("Harness '%s' does not support resume - starting in working directory", harnessName))
 	}
-	if err := tmux.SendCommand(health.TmuxSessionName, fullCmd); err != nil {
-		if preparedLaunch != nil {
-			_ = preparedLaunch.CancelUndelivered()
-		}
+	launch := ops.HarnessLaunchCommand{Command: fullCmd}
+	if preparedLaunch != nil {
+		launch = *preparedLaunch
+	}
+	if err := resolveHarnessLaunchSubmission(harnessName, launch, tmux.SendCommand(health.TmuxSessionName, fullCmd)); err != nil {
 		return fmt.Errorf("failed to send resume command: %w", err)
 	}
 	return nil
