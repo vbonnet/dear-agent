@@ -411,15 +411,19 @@ func TestIntegration_CreateSession_AgyBootstrapsLazyIdentityBeforeRegistrationEx
 }
 
 func TestCreateSession_AgyRejectsMissingIdentityBootstrapPromptBeforeMutation(t *testing.T) {
-	tmuxMock := session.NewMockTmux()
-	_, err := CreateSessionWithContext(t.Context(), &OpContext{Tmux: tmuxMock}, &CreateSessionRequest{
-		Cwd: t.TempDir(), Prompt: " \n\t", Title: "agy-no-prompt", Harness: "agy", Model: "3.5-flash-low", AllowEmptyPrompt: true,
-	})
-	if err == nil || !strings.Contains(err.Error(), "startup prompt is required") {
-		t.Fatalf("CreateSessionWithContext error = %v, want actionable AGY prompt requirement", err)
-	}
-	if len(tmuxMock.CreatedSessions) != 0 || len(tmuxMock.SentCommands) != 0 {
-		t.Fatalf("missing-prompt create mutated tmux: created=%v sent=%v", tmuxMock.CreatedSessions, tmuxMock.SentCommands)
+	for _, harness := range []string{"agy", "agy-cli", "antigravity"} {
+		t.Run(harness, func(t *testing.T) {
+			tmuxMock := session.NewMockTmux()
+			_, err := CreateSessionWithContext(t.Context(), &OpContext{Tmux: tmuxMock}, &CreateSessionRequest{
+				Cwd: t.TempDir(), Prompt: " \n\t", Title: "agy-no-prompt", Harness: harness, Model: "3.5-flash-low", AllowEmptyPrompt: true,
+			})
+			if err == nil || !strings.Contains(err.Error(), "startup prompt is required") {
+				t.Fatalf("CreateSessionWithContext error = %v, want actionable AGY prompt requirement", err)
+			}
+			if len(tmuxMock.CreatedSessions) != 0 || len(tmuxMock.SentCommands) != 0 {
+				t.Fatalf("missing-prompt create mutated tmux: created=%v sent=%v", tmuxMock.CreatedSessions, tmuxMock.SentCommands)
+			}
+		})
 	}
 }
 
@@ -1688,5 +1692,37 @@ func TestSharedShellQuote(t *testing.T) {
 	got := launchparity.ShellQuote("a'b")
 	if got != `'a'"'"'b'` {
 		t.Errorf("ShellQuote = %q", got)
+	}
+}
+
+func TestBuildCreateSessionManifestPreservesRelationshipMetadata(t *testing.T) {
+	parentID := "parent-session-id"
+	req := &CreateSessionRequest{
+		Cwd:    "/tmp/work",
+		Caller: CreateSessionCaller{Surface: CreateSurfaceCLI, Source: "session.create-child"},
+		Metadata: CreateSessionMetadata{
+			Tags:            []string{"inherited"},
+			ContextPurpose:  "Inherited purpose",
+			ContextNotes:    "Inherited notes",
+			ParentSessionID: &parentID,
+		},
+	}
+	params := &createSessionParams{name: "child", harness: "codex-cli", model: "gpt-5.3-codex"}
+
+	got := buildCreateSessionManifest(req, params, "child-id", nil)
+
+	if got.ParentSessionID == nil || *got.ParentSessionID != parentID {
+		t.Fatalf("ParentSessionID = %v, want %q", got.ParentSessionID, parentID)
+	}
+	if got.ParentSessionID == req.Metadata.ParentSessionID {
+		t.Fatal("ParentSessionID aliases request metadata")
+	}
+	if got.Context.Purpose != req.Metadata.ContextPurpose || got.Context.Notes != req.Metadata.ContextNotes {
+		t.Fatalf("Context = %#v, want purpose and notes from metadata", got.Context)
+	}
+	for _, want := range []string{"inherited", "source:session.create-child"} {
+		if !slices.Contains(got.Context.Tags, want) {
+			t.Fatalf("Context.Tags = %v, missing %q", got.Context.Tags, want)
+		}
 	}
 }

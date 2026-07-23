@@ -143,7 +143,7 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 ### Shared Session Creation Lifecycle
 
-**OPS-58** When the CLI or MCP surface creates a session, the surface shall delegate tmux creation, optional Codex remote setup, launch-command construction, manifest registration, completion ordering, and rollback to `CreateSessionWithContext`.
+**OPS-58** When a CLI creation surface, including `session create-child` and current-tmux creation, or the MCP surface creates a session, the surface shall delegate tmux creation, optional Codex remote setup, launch-command construction, manifest registration, completion ordering, and rollback to `CreateSessionWithContext`; child creation shall carry its parent relationship, selected context, and explicit initial prompt through the shared creation request, and shared validation shall reject every normalized AGY child without that identity-creating prompt before mutation.
 
 **OPS-59** When `CreateSessionWithContext` advances a new session, the system shall order the durable lifecycle as tmux creation, bounded Codex setup when applicable, runtime launch, manifest registration, and runtime completion.
 
