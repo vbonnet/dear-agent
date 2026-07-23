@@ -12,7 +12,30 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/vbonnet/dear-agent/agm/internal/testcontext"
 )
+
+func useOwnedTmuxSocket(t *testing.T) string {
+	t.Helper()
+
+	tc := testcontext.New()
+	require.NoError(t, tc.EnsureDirs())
+	socket := tc.SocketPath
+	t.Setenv("AGM_TMUX_SOCKET", socket)
+	t.Cleanup(func() {
+		_ = KillTmuxServer()
+		_ = tc.Cleanup()
+	})
+	return socket
+}
+
+func TestUseOwnedTmuxSocket_AvoidsDefaultServer(t *testing.T) {
+	socket := useOwnedTmuxSocket(t)
+
+	require.NotEqual(t, "/tmp/agm.sock", socket)
+	require.Equal(t, socket, os.Getenv("AGM_TMUX_SOCKET"))
+	require.Less(t, len(socket), 100, "socket path must fit conservative Unix limits")
+}
 
 // TestKillSessionProcesses_KillsChildProcesses verifies that KillSessionProcesses
 // kills all processes running inside a tmux session's panes, including children.
@@ -21,6 +44,7 @@ func TestKillSessionProcesses_KillsChildProcesses(t *testing.T) {
 	if !IsTmuxAvailable() {
 		t.Skip("Tmux not available")
 	}
+	useOwnedTmuxSocket(t)
 
 	sessionName := "test-kill-procs-" + RandomString(6)
 
@@ -80,12 +104,7 @@ func TestKillSessionProcesses_KillsChildProcesses(t *testing.T) {
 // TestKillTmuxServer_KillsAllSessions verifies that KillTmuxServer kills the
 // entire tmux server, terminating all sessions and their processes.
 func TestKillTmuxServer_KillsAllSessions(t *testing.T) {
-	// Use an isolated socket for this test to avoid killing user sessions
-	isolatedSocket := "/tmp/test-kill-server-" + RandomString(6) + ".sock"
-	defer os.Remove(isolatedSocket)
-
-	// Override socket for this test
-	t.Setenv("AGM_TMUX_SOCKET", isolatedSocket)
+	isolatedSocket := useOwnedTmuxSocket(t)
 
 	// Create multiple sessions on the isolated server
 	for i := 0; i < 3; i++ {
@@ -116,6 +135,8 @@ func TestKillTmuxServer_KillsAllSessions(t *testing.T) {
 // TestKillSessionProcesses_NilSafety verifies that KillSessionProcesses handles
 // non-existent sessions gracefully without errors or panics.
 func TestKillSessionProcesses_NilSafety(t *testing.T) {
+	useOwnedTmuxSocket(t)
+
 	// Should not panic or error with non-existent session
 	err := KillSessionProcesses("nonexistent-session-" + RandomString(8))
 	require.NoError(t, err, "Should handle non-existent session gracefully")

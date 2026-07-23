@@ -3,7 +3,9 @@ package testcontext
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -21,17 +23,54 @@ func TestNew(t *testing.T) {
 	assert.Contains(t, tc.SocketPath, tc.RunID)
 	assert.Contains(t, tc.SessionsDir, tc.RunID)
 	assert.Contains(t, tc.DBPath, tc.RunID)
+	assert.Contains(t, tc.StateDir, tc.RunID)
 	assert.Contains(t, tc.LockPath, tc.RunID)
 
-	// Socket should be at /tmp/agm-test-{id}.sock (outside baseDir)
-	assert.Equal(t, filepath.Join(os.TempDir(), "agm-test-"+tc.RunID+".sock"), tc.SocketPath)
+	// Socket should be beneath the short per-user root (outside baseDir).
+	assert.Equal(t, filepath.Join(canonicalEnvironmentRoot(), "agm-test-"+tc.RunID+".sock"), tc.SocketPath)
 
 	// SessionsDir should be under baseDir
 	assert.Equal(t, filepath.Join(tc.BaseDir, "sessions"), tc.SessionsDir)
 
 	// DB and lock should be under baseDir
 	assert.Equal(t, filepath.Join(tc.BaseDir, "agm.db"), tc.DBPath)
+	assert.Equal(t, filepath.Join(tc.BaseDir, "state"), tc.StateDir)
 	assert.Equal(t, filepath.Join(tc.BaseDir, "agm.lock"), tc.LockPath)
+}
+
+func TestCanonicalEnvironmentRootIsShortPrivateAndUserScoped(t *testing.T) {
+	root := canonicalEnvironmentRoot()
+	assert.Equal(t, filepath.Join("/tmp", "agm-u-"+strconv.Itoa(os.Geteuid())), root)
+	assert.NotEqual(t, canonicalEnvironmentRootForUID(501), canonicalEnvironmentRootForUID(502))
+
+	tc := New()
+	require.NoError(t, tc.EnsureDirs())
+	t.Cleanup(func() { require.NoError(t, tc.Cleanup()) })
+	require.Less(t, len(tc.SocketPath), 100, "socket path must fit conservative Unix limits")
+
+	info, err := os.Lstat(root)
+	require.NoError(t, err)
+	require.True(t, info.IsDir())
+	assert.Equal(t, os.FileMode(0700), info.Mode().Perm())
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	require.True(t, ok)
+	assert.Equal(t, uint32(os.Geteuid()), stat.Uid)
+}
+
+func TestEnsureOwnedEnvironmentRootSecuresModeAndRejectsSymlink(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "owned-root")
+	require.NoError(t, os.Mkdir(root, 0755))
+	require.NoError(t, ensureOwnedEnvironmentRoot(root))
+	info, err := os.Lstat(root)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0700), info.Mode().Perm())
+
+	target := t.TempDir()
+	symlink := filepath.Join(t.TempDir(), "root-link")
+	require.NoError(t, os.Symlink(target, symlink))
+	require.ErrorContains(t, ensureOwnedEnvironmentRoot(symlink), "not a directory")
+	_, err = validateExistingOwnedEnvironmentRoot(symlink)
+	require.ErrorContains(t, err, "not a directory")
 }
 
 func TestNew_HasHomeDir(t *testing.T) {
@@ -49,7 +88,8 @@ func TestNew_UniqueIDs(t *testing.T) {
 }
 
 func TestNewNamed(t *testing.T) {
-	tc := NewNamed("my-test")
+	tc, err := NewNamed("my-test")
+	require.NoError(t, err)
 
 	assert.Equal(t, "my-test", tc.RunID)
 	assert.Contains(t, tc.BaseDir, "agm-test-my-test")
@@ -58,11 +98,235 @@ func TestNewNamed(t *testing.T) {
 }
 
 func TestLoadNamed(t *testing.T) {
-	tc := LoadNamed("existing-env")
+	tc, err := LoadNamed("existing-env")
+	require.NoError(t, err)
 
 	assert.Equal(t, "existing-env", tc.RunID)
 	assert.Contains(t, tc.BaseDir, "agm-test-existing-env")
 	assert.Equal(t, filepath.Join(tc.BaseDir, "home"), tc.HomeDir)
+}
+
+func TestNamedEnvironmentRejectsUnownedPaths(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{
+		"",
+		"../escape",
+		`..\escape`,
+		"/absolute",
+		"line\nbreak",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := NewNamed(name); err == nil {
+				t.Fatalf("NewNamed(%q) accepted an unsafe name", name)
+			}
+			if _, err := LoadNamed(name); err == nil {
+				t.Fatalf("LoadNamed(%q) accepted an unsafe name", name)
+			}
+		})
+	}
+}
+
+func TestNewNamedRejectsOverlongButLoadNamedRetainsCleanupAccess(t *testing.T) {
+	t.Parallel()
+	name := strings.Repeat("x", maxNewEnvironmentName+1)
+	if _, err := NewNamed(name); err == nil {
+		t.Fatalf("NewNamed accepted %d-byte name", len(name))
+	}
+	if _, err := LoadNamed(name); err != nil {
+		t.Fatalf("LoadNamed rejected path-safe legacy name: %v", err)
+	}
+}
+
+func TestListNamedSharesLifecycleRoot(t *testing.T) {
+	name := "list-" + New().RunID
+	tc, err := NewNamed(name)
+	require.NoError(t, err)
+	require.NoError(t, tc.EnsureDirs())
+	t.Cleanup(func() { require.NoError(t, tc.Cleanup()) })
+
+	reconstructed, err := LoadNamed(name)
+	require.NoError(t, err)
+	assert.Equal(t, tc.BaseDir, reconstructed.BaseDir)
+	assert.Equal(t, tc.SocketPath, reconstructed.SocketPath)
+
+	contexts, err := ListNamed()
+	require.NoError(t, err)
+	found := false
+	for _, candidate := range contexts {
+		if candidate.RunID == name {
+			assert.Equal(t, tc.BaseDir, candidate.BaseDir)
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "ListNamed did not return the created environment")
+
+	require.NoError(t, tc.Cleanup())
+	contexts, err = ListNamed()
+	require.NoError(t, err)
+	for _, candidate := range contexts {
+		assert.NotEqual(t, name, candidate.RunID, "cleaned environment remained discoverable")
+	}
+}
+
+func TestRetiredNamedEnvironmentIsDiscoveredAndCleanedExactly(t *testing.T) {
+	retiredRootFixture := t.TempDir()
+	require.NoError(t, os.Chmod(retiredRootFixture, 0700))
+	t.Setenv("TMPDIR", retiredRootFixture)
+	roots := namedEnvironmentRoots()
+	require.Len(t, roots, 3)
+	retiredRoot := roots[2]
+	name := New().RunID + strings.Repeat("l", maxNewEnvironmentName)
+	retired := newWithRoot(name, retiredRoot)
+	require.NoError(t, retired.EnsureDirs())
+	t.Cleanup(func() { require.NoError(t, retired.Cleanup()) })
+
+	credentialTarget := t.TempDir()
+	require.NoError(t, os.Symlink(credentialTarget, filepath.Join(retired.HomeDir, ".codex")))
+	require.NoError(t, os.WriteFile(retired.SocketPath, []byte("retired socket"), 0600))
+
+	sibling := newWithRoot("sibling-"+New().RunID, retiredRoot)
+	require.NoError(t, sibling.EnsureDirs())
+	require.NoError(t, os.WriteFile(filepath.Join(sibling.HomeDir, "preserve"), []byte("unrelated"), 0600))
+	t.Cleanup(func() { require.NoError(t, sibling.Cleanup()) })
+
+	contexts, err := ListNamed()
+	require.NoError(t, err)
+	found := false
+	for _, candidate := range contexts {
+		if candidate.RunID == name {
+			assert.Equal(t, retired.BaseDir, candidate.BaseDir)
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "retired environment was not discoverable for cleanup")
+
+	loaded, err := LoadNamed(name)
+	require.NoError(t, err)
+	_, err = NewNamed(name)
+	require.ErrorContains(t, err, "must not exceed")
+	assert.Equal(t, retired.BaseDir, loaded.BaseDir)
+	assert.Equal(t, retired.SocketPath, loaded.SocketPath)
+	assert.Equal(t, retired.SessionsDir, loaded.SessionsDir)
+	require.NoError(t, loaded.Cleanup())
+
+	for _, removed := range []string{retired.BaseDir, retired.SocketPath} {
+		_, err := os.Lstat(removed)
+		require.ErrorIs(t, err, os.ErrNotExist, "retired resource survived exact cleanup: %s", removed)
+	}
+	_, err = os.Stat(filepath.Join(sibling.HomeDir, "preserve"))
+	require.NoError(t, err, "retired compatibility cleanup removed an unrelated sibling")
+}
+
+func TestLoadNamedResolvesGlobalShortRootBeforeCanonicalFallback(t *testing.T) {
+	name := "global-" + New().RunID
+	retired := newWithRoot(name, shortTestEnvironmentRoot)
+	require.NoError(t, retired.EnsureDirs())
+	t.Cleanup(func() { require.NoError(t, retired.Cleanup()) })
+
+	loaded, err := LoadNamed(name)
+	require.NoError(t, err)
+	assert.Equal(t, retired.BaseDir, loaded.BaseDir)
+	assert.Equal(t, retired.SocketPath, loaded.SocketPath)
+	assert.NotEqual(t, filepath.Join(canonicalEnvironmentRoot(), testEnvironmentPrefix+name), loaded.BaseDir)
+
+	_, err = NewNamed(name)
+	require.ErrorContains(t, err, "retired test environment")
+	canonicalBase := filepath.Join(canonicalEnvironmentRoot(), testEnvironmentPrefix+name)
+	_, err = os.Lstat(canonicalBase)
+	require.ErrorIs(t, err, os.ErrNotExist, "legacy collision created a second canonical environment")
+}
+
+func TestListNamedPrefersCanonicalPerUserRootForDuplicate(t *testing.T) {
+	name := "duplicate-" + New().RunID
+	canonical, err := NewNamed(name)
+	require.NoError(t, err)
+	require.NoError(t, canonical.EnsureDirs())
+	retired := newWithRoot(name, shortTestEnvironmentRoot)
+	require.NoError(t, retired.EnsureDirs())
+	t.Cleanup(func() {
+		require.NoError(t, canonical.Cleanup())
+		require.NoError(t, retired.Cleanup())
+	})
+
+	contexts, err := ListNamed()
+	require.NoError(t, err)
+	for _, candidate := range contexts {
+		if candidate.RunID == name {
+			assert.Equal(t, canonical.BaseDir, candidate.BaseDir)
+			return
+		}
+	}
+	t.Fatalf("duplicate named environment %q was not listed", name)
+}
+
+func TestCanonicalCleanupRejectsSymlinkedRootBeforeRemovingChild(t *testing.T) {
+	name := "symlink-" + New().RunID
+	target := t.TempDir()
+	baseDir := filepath.Join(target, testEnvironmentPrefix+name)
+	require.NoError(t, os.MkdirAll(baseDir, 0700))
+	sentinel := filepath.Join(baseDir, "preserve")
+	require.NoError(t, os.WriteFile(sentinel, []byte("owned"), 0600))
+
+	symlinkRoot := filepath.Join(t.TempDir(), "canonical-link")
+	require.NoError(t, os.Symlink(target, symlinkRoot))
+	tc := newWithRoot(name, symlinkRoot)
+	require.ErrorContains(t, tc.Cleanup(), "not a directory")
+	_, err := os.Stat(sentinel)
+	require.NoError(t, err, "cleanup followed a symlinked canonical root")
+}
+
+func TestCleanupRejectsSymlinkedBaseBeforeRemovingTarget(t *testing.T) {
+	name := "base-link-" + New().RunID
+	target := t.TempDir()
+	sentinel := filepath.Join(target, "preserve")
+	require.NoError(t, os.WriteFile(sentinel, []byte("owned"), 0600))
+
+	tc := newWithRoot(name, shortTestEnvironmentRoot)
+	require.NoError(t, os.Symlink(target, tc.BaseDir))
+	t.Cleanup(func() { require.NoError(t, os.Remove(tc.BaseDir)) })
+
+	require.ErrorContains(t, tc.Cleanup(), "not a directory")
+	_, err := os.Stat(sentinel)
+	require.NoError(t, err, "cleanup followed a symlinked environment base")
+}
+
+func TestRetiredCleanupRevalidatesRootBeforeRemovingChild(t *testing.T) {
+	retiredRoot := filepath.Join(t.TempDir(), "retired-root")
+	require.NoError(t, os.Mkdir(retiredRoot, 0700))
+	name := "retired-swap-" + New().RunID
+	tc := newWithRoot(name, retiredRoot)
+	require.NoError(t, tc.EnsureDirs())
+	sentinel := filepath.Join(tc.BaseDir, "preserve")
+	require.NoError(t, os.WriteFile(sentinel, []byte("owned"), 0600))
+
+	movedRoot := retiredRoot + "-moved"
+	require.NoError(t, os.Rename(retiredRoot, movedRoot))
+	require.NoError(t, os.Symlink(movedRoot, retiredRoot))
+
+	require.ErrorContains(t, tc.Cleanup(), "not a directory")
+	_, err := os.Stat(filepath.Join(movedRoot, testEnvironmentPrefix+name, "preserve"))
+	require.NoError(t, err, "cleanup followed a retired root replaced by a symlink")
+}
+
+func TestLoadNamedRejectsSymlinkedRetiredRootBeforeResolvingChild(t *testing.T) {
+	name := "retired-link-" + New().RunID
+	target := t.TempDir()
+	baseDir := filepath.Join(target, testEnvironmentPrefix+name)
+	require.NoError(t, os.MkdirAll(baseDir, 0700))
+	sentinel := filepath.Join(baseDir, "preserve")
+	require.NoError(t, os.WriteFile(sentinel, []byte("owned"), 0600))
+
+	symlinkRoot := filepath.Join(t.TempDir(), "retired-link")
+	require.NoError(t, os.Symlink(target, symlinkRoot))
+	t.Setenv("TMPDIR", symlinkRoot)
+	_, err := LoadNamed(name)
+	require.ErrorContains(t, err, "not a directory")
+	_, err = os.Stat(sentinel)
+	require.NoError(t, err, "resolution followed a symlinked retired root")
 }
 
 func TestSetEnvAndFromEnv(t *testing.T) {
@@ -80,6 +344,7 @@ func TestSetEnvAndFromEnv(t *testing.T) {
 	assert.Equal(t, tc.SocketPath, os.Getenv(EnvTmuxSocket))
 	assert.Equal(t, tc.SessionsDir, os.Getenv(EnvSessionsDir))
 	assert.Equal(t, tc.DBPath, os.Getenv(EnvDBPath))
+	assert.Equal(t, tc.StateDir, os.Getenv(EnvStateDir))
 	assert.Equal(t, tc.LockPath, os.Getenv(EnvLockPath))
 	assert.Equal(t, tc.HomeDir, os.Getenv("HOME"))
 
@@ -90,6 +355,7 @@ func TestSetEnvAndFromEnv(t *testing.T) {
 	assert.Equal(t, tc.SocketPath, tc2.SocketPath)
 	assert.Equal(t, tc.SessionsDir, tc2.SessionsDir)
 	assert.Equal(t, tc.DBPath, tc2.DBPath)
+	assert.Equal(t, tc.StateDir, tc2.StateDir)
 	assert.Equal(t, tc.LockPath, tc2.LockPath)
 	assert.Equal(t, tc.BaseDir, tc2.BaseDir)
 	assert.Equal(t, tc.HomeDir, tc2.HomeDir)
@@ -116,6 +382,16 @@ func TestFromEnv_NotSet(t *testing.T) {
 	assert.Nil(t, tc)
 }
 
+func TestFromEnvRejectsUnownedRunID(t *testing.T) {
+	t.Setenv(EnvTestRunID, "../outside")
+	t.Setenv(EnvTestEnv, "")
+	t.Setenv(EnvSessionsDir, "")
+
+	tc, ok := FromEnv()
+	assert.False(t, ok)
+	assert.Nil(t, tc)
+}
+
 func TestFromEnv_ViaTestEnv(t *testing.T) {
 	// Test that FromEnv works with AGM_TEST_ENV even without AGM_TEST_RUN_ID
 	os.Unsetenv(EnvTestRunID)
@@ -139,6 +415,7 @@ func TestUnsetEnv(t *testing.T) {
 	assert.Empty(t, os.Getenv(EnvTmuxSocket))
 	assert.Empty(t, os.Getenv(EnvSessionsDir))
 	assert.Empty(t, os.Getenv(EnvDBPath))
+	assert.Empty(t, os.Getenv(EnvStateDir))
 	assert.Empty(t, os.Getenv(EnvLockPath))
 }
 
@@ -146,7 +423,7 @@ func TestEnviron(t *testing.T) {
 	tc := New()
 	env := tc.Environ()
 
-	assert.Len(t, env, 7, "should return 7 environment variables (5 original + AGM_TEST_ENV + HOME)")
+	assert.Len(t, env, 8, "should return all isolated paths, run markers, and HOME")
 
 	// Check each var is present as KEY=VALUE
 	found := map[string]bool{}
@@ -160,6 +437,7 @@ func TestEnviron(t *testing.T) {
 	assert.True(t, found[EnvTmuxSocket])
 	assert.True(t, found[EnvSessionsDir])
 	assert.True(t, found[EnvDBPath])
+	assert.True(t, found[EnvStateDir])
 	assert.True(t, found[EnvLockPath])
 	assert.True(t, found["HOME"])
 }
@@ -187,6 +465,11 @@ func TestEnsureDirs(t *testing.T) {
 	assert.True(t, info.IsDir())
 
 	// Permissions should be 0700
+	assert.Equal(t, os.FileMode(0700), info.Mode().Perm())
+
+	info, err = os.Stat(tc.StateDir)
+	require.NoError(t, err)
+	assert.True(t, info.IsDir())
 	assert.Equal(t, os.FileMode(0700), info.Mode().Perm())
 }
 

@@ -12,6 +12,8 @@
 
 **INTG-04** When integration resources are created, the suite shall register cleanup that removes processes, sessions, and temporary artifacts.
 
+**INTG-05** When an integration scenario claims CLI lifecycle behavior, the suite shall execute an AGM binary built from the checkout under test rather than whichever installed binary appears on PATH.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/test_support_package_guardrails.feature`

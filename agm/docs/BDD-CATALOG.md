@@ -1470,6 +1470,8 @@ surfaces, migrations, infrastructure, test suites, and Wayfinder shell support.
 - Every specification retains reciprocal executable BDD traceability.
 - Claude Code, Codex, Antigravity, and OpenCode preserve the same contract
   across Anthropic, OpenAI, Gemini, GLM, DeepSeek, Nemotron, and Qwen families.
+- End-to-end harness lookup retains exact CLI mappings while running under the
+  macOS system Bash 3.2 baseline.
 
 **Why this matters:** Repository-wide coverage cannot exclude behavior merely
 because it is implemented outside a Go package. Hooks, installers, migrations,
@@ -1493,6 +1495,10 @@ and Wayfinder test-support package boundaries.
 - Trust hooks run only for trust scenarios, restore process environment, reuse
   shared Go caches, and remove only their exact owned temporary directory,
   including read-only module trees.
+- Real Codex lifecycle tests own their source binary, short tmux socket,
+  provider fixture, persisted state, and exact cleanup.
+- Named test environments validate paths, use a private effective-user short
+  root, activate owned legacy environments in place, and remove exact state.
 
 **Why this matters:** Test infrastructure is an enforcement surface. Ungoverned
 helpers and suites can silently skip harnesses, consume the wrong provider
