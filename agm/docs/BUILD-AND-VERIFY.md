@@ -121,18 +121,17 @@ go test ./internal/dolt/... -v
 # ok      github.com/vbonnet/dear-agent/agm/internal/dolt
 ```
 
-### 3.2 Integration Tests (Optional)
+### 3.2 Archive and Lifecycle Tests
 
 ```bash
-# Enable integration tests
-export DOLT_TEST_INTEGRATION=1
+# Run archive-focused production and regression tests
+go test -count=1 ./agm/cmd/agm ./agm/internal/ops ./agm/test/regression \
+  -run 'Archive|ResolveIdentifier'
 
-# Run archive integration tests
-go test ./test/integration/lifecycle/... -tags=integration -v -run Archive
-
-# Expected: All tests pass
-# PASS
-# ok      github.com/vbonnet/dear-agent/agm/test/integration/lifecycle
+# Run the isolated source-built Codex lifecycle
+go test -race -count=1 -tags=integration \
+  ./agm/test/integration/isolated \
+  -run '^TestCodexLifecycleUsesIsolatedSourceEnvironment$'
 ```
 
 ### 3.3 Check for Errors
@@ -240,7 +239,7 @@ Complete this checklist to confirm the fix is working:
 ### Build & Tests
 - [ ] AGM builds without errors: `go build ./...`
 - [ ] Unit tests pass: `go test ./internal/dolt/... -v`
-- [ ] Integration tests pass (if enabled): `DOLT_TEST_INTEGRATION=1 go test ./test/integration/lifecycle/... -tags=integration`
+- [ ] Archive production and regression tests pass: `go test -count=1 ./agm/cmd/agm ./agm/internal/ops ./agm/test/regression -run 'Archive|ResolveIdentifier'`
 - [ ] No lint errors: `golangci-lint run ./...`
 
 ### Functionality
@@ -393,7 +392,7 @@ The fix is successfully deployed when:
 
 ✅ **All tests pass**
 - Unit tests: `go test ./internal/dolt/... -v`
-- Integration tests: `DOLT_TEST_INTEGRATION=1 go test ./test/integration/lifecycle/... -tags=integration`
+- Archive production and regression tests: `go test -count=1 ./agm/cmd/agm ./agm/internal/ops ./agm/test/regression -run 'Archive|ResolveIdentifier'`
 
 ✅ **Manual verification complete**
 - Can archive by session ID

@@ -14,6 +14,12 @@
 
 **INTG-05** When an integration scenario claims CLI lifecycle behavior, the suite shall execute an AGM binary built from the checkout under test rather than whichever installed binary appears on PATH.
 
+**INTG-06** When the integration-tagged adapter parity suite runs without host credentials or services, the system shall execute the portable contract for every active harness, including Codex, and scope prerequisite skips to individual host-dependent harness tests.
+
+**INTG-07** When an integration scenario encodes a retired manifest layout, CLI flag, shared-host tmux route, or unimplemented placeholder, the suite shall remove that obsolete scenario rather than suppress its package with a global opt-out; current behavior shall remain covered at the production unit, BDD, portable, or isolated lifecycle boundary.
+
+**INTG-08** When the scheduled or manually dispatched tagged sweep claims to run the full integration graph, the system shall not set a package-wide opt-out; unavailable provider, binary, service, or host prerequisites shall skip only their affected tests.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/test_support_package_guardrails.feature`

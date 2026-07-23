@@ -1,5 +1,6 @@
 # SPEC: cmd/ears-lint/SPEC.md
 # RELATED-SPEC: cmd/ears-to-bdd/SPEC.md
+# RELATED-SPEC: cmd/coverage-ratchet/SPEC.md
 # RELATED-SPEC: cmd/test-affected/SPEC.md
 # RELATED-SPEC: cmd/repo-health/SPEC.md
 # RELATED-SPEC: cmd/structural-health/SPEC.md
@@ -18,6 +19,7 @@ Feature: Quality command guardrails
       | command               |
       | cmd/ears-lint         |
       | cmd/ears-to-bdd       |
+      | cmd/coverage-ratchet  |
       | cmd/test-affected     |
       | cmd/repo-health       |
       | cmd/structural-health |
@@ -37,8 +39,9 @@ Feature: Quality command guardrails
     Then quality command package SPEC should declare requirement "<requirement>" containing "<contract>"
 
     Examples:
-      | command           | requirement      | contract                  |
-      | cmd/test-affected | TEST-AFFECTED-08 | bounded by a timeout      |
-      | cmd/src-health    | SRC-HEALTH-06    | noninteractive            |
-      | cmd/repo-health   | REPO-HEALTH-05   | bounded by a timeout      |
-      | cmd/repo-health   | REPO-HEALTH-11   | canonical extensionless  |
+      | command               | requirement         | contract                   |
+      | cmd/coverage-ratchet  | COVERAGE-RATCHET-01 | minimum statement coverage |
+      | cmd/test-affected     | TEST-AFFECTED-08    | bounded by a timeout       |
+      | cmd/src-health        | SRC-HEALTH-06       | noninteractive             |
+      | cmd/repo-health       | REPO-HEALTH-05      | bounded by a timeout       |
+      | cmd/repo-health       | REPO-HEALTH-11      | canonical extensionless   |
