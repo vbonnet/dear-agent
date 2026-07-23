@@ -108,15 +108,23 @@ func ensureClaudeResumeProcess(m *manifest.Manifest, exists bool) error {
 		created = true
 	}
 
-	if err := resumeSendCommand(m.Tmux.SessionName, prepared.Command); err != nil {
-		primaryErr := errors.Join(fmt.Errorf("failed to send resume command: %w", err), cancelPreparedResume(prepared))
-		if !created {
+	if submissionErr := resumeSendCommand(m.Tmux.SessionName, prepared.Command); submissionErr != nil {
+		uncertain, err := harnessexec.ResolveSubmission(submissionErr, prepared.Cancel)
+		if uncertain {
+			fmt.Fprintf(os.Stderr,
+				"Warning: Claude resume submission acknowledgement was lost; preserving the private handoff because the command may be queued: %v\n",
+				submissionErr)
+		}
+		if err != nil {
+			primaryErr := fmt.Errorf("failed to send resume command: %w", err)
+			if !created {
+				return primaryErr
+			}
+			if cleanupErr := resumeKillSession(m.Tmux.SessionName); cleanupErr != nil {
+				return errors.Join(primaryErr, fmt.Errorf("clean up created tmux session: %w", cleanupErr))
+			}
 			return primaryErr
 		}
-		if cleanupErr := resumeKillSession(m.Tmux.SessionName); cleanupErr != nil {
-			return errors.Join(primaryErr, fmt.Errorf("clean up created tmux session: %w", cleanupErr))
-		}
-		return primaryErr
 	}
 
 	if err := resumeWaitForClaudeReady(m.Tmux.SessionName, contracts.Load().SessionLifecycle.ResumeReadyTimeout.Duration); err != nil {

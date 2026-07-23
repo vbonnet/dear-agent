@@ -97,8 +97,7 @@ func (a *CodexCLIAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 		}
 		return "", fmt.Errorf("prepare Codex CLI launch: %w", err)
 	}
-	if err := codexSendCommand(tmuxName, prepared.Command); err != nil {
-		_ = prepared.Cancel()
+	if err := resolvePrivateLaunchSubmission("Codex", prepared, codexSendCommand(tmuxName, prepared.Command)); err != nil {
 		if !exists {
 			cleanupCodexCreatedSession(tmuxName)
 		}
@@ -178,8 +177,7 @@ func (a *CodexCLIAdapter) ResumeSession(sessionID SessionID) error {
 			}
 			return fmt.Errorf("prepare Codex CLI resume: %w", err)
 		}
-		if err := codexSendCommand(metadata.TmuxName, prepared.Command); err != nil {
-			_ = prepared.Cancel()
+		if err := resolvePrivateLaunchSubmission("Codex", prepared, codexSendCommand(metadata.TmuxName, prepared.Command)); err != nil {
 			if created {
 				cleanupCodexCreatedSession(metadata.TmuxName)
 			}

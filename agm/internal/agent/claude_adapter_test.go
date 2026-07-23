@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 // TestClaudeAdapterImplementsAgentInterface verifies ClaudeAdapter implements Agent interface.
@@ -151,6 +153,32 @@ func TestClaudeAdapterCreateCancelsUndeliveredHandoff(t *testing.T) {
 	}
 }
 
+func TestClaudeAdapterCreatePreservesHandoffAfterUncertainSubmission(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("AGM_STATE_DIR", stateDir)
+	restoreClaudeAdapterRuntime(t)
+	claudeHasSession = func(string) (bool, error) { return false, nil }
+	claudeNewSession = func(string, string) error { return nil }
+	var sent []string
+	claudeSendCommand = func(_ string, command string) error {
+		sent = append(sent, command)
+		if strings.Contains(command, "__exec-claude") {
+			return tmux.MarkPromptSubmissionUncertain(errors.New("lost acknowledgement"))
+		}
+		return nil
+	}
+	claudeWaitForReady = func(string, time.Duration) error { return nil }
+
+	adapter := &ClaudeAdapter{sessionStore: &MockSessionStore{sessions: make(map[SessionID]*SessionMetadata)}}
+	if _, err := adapter.CreateSession(SessionContext{Name: "claude-uncertain", WorkingDirectory: "/tmp/work"}); err != nil {
+		t.Fatalf("CreateSession returned uncertain submission as failure: %v", err)
+	}
+	if len(sent) != 1 || !strings.Contains(sent[0], "__exec-claude") {
+		t.Fatalf("commands = %q, want one private launch and no compensating exit", sent)
+	}
+	assertOnePrivateHandoff(t, stateDir)
+}
+
 func TestClaudeAdapterResumeUsesPreparedNativeIdentity(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
 	t.Setenv("TMUX", "/tmp/test-tmux")
@@ -177,6 +205,47 @@ func TestClaudeAdapterResumeUsesPreparedNativeIdentity(t *testing.T) {
 		if !strings.Contains(sent, want) {
 			t.Errorf("prepared Claude resume %q missing %q", sent, want)
 		}
+	}
+}
+
+func TestClaudeAdapterResumePreservesHandoffAfterUncertainSubmission(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("AGM_STATE_DIR", stateDir)
+	t.Setenv("TMUX", "/tmp/test-tmux")
+	restoreClaudeAdapterRuntime(t)
+	claudeHasSession = func(string) (bool, error) { return false, nil }
+	claudeNewSession = func(string, string) error { return nil }
+	var sent []string
+	claudeSendCommand = func(_ string, command string) error {
+		sent = append(sent, command)
+		if strings.Contains(command, "__exec-claude") {
+			return tmux.MarkPromptSubmissionUncertain(errors.New("lost acknowledgement"))
+		}
+		return nil
+	}
+	claudeWaitForReady = func(string, time.Duration) error { return nil }
+
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{
+		"agm-session": {TmuxName: "claude-resume-uncertain", WorkingDir: "/tmp/resume", UUID: "native-claude-id"},
+	}}
+	adapter := &ClaudeAdapter{sessionStore: store}
+	if err := adapter.ResumeSession("agm-session"); err != nil {
+		t.Fatalf("ResumeSession returned uncertain submission as failure: %v", err)
+	}
+	if len(sent) != 1 || !strings.Contains(sent[0], "__exec-claude") {
+		t.Fatalf("commands = %q, want one private resume and no compensating exit", sent)
+	}
+	assertOnePrivateHandoff(t, stateDir)
+}
+
+func assertOnePrivateHandoff(t *testing.T, stateDir string) {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(stateDir, "private-launch"))
+	if err != nil {
+		t.Fatalf("read private handoff directory: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("private handoffs = %v, want exactly one preserved handoff", entries)
 	}
 }
 

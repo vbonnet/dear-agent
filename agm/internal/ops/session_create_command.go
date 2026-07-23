@@ -1,7 +1,6 @@
 package ops
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -10,7 +9,6 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
-	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 // HarnessLaunchSpec is the harness-neutral launch contract used by every
@@ -64,13 +62,7 @@ func (c HarnessLaunchCommand) CancelUndelivered() error {
 // for compensation purposes because the command may already be queued; only a
 // positively failed submission may remove the staged handoff.
 func ResolveHarnessLaunchSubmission(command HarnessLaunchCommand, submissionErr error) (bool, error) {
-	if submissionErr == nil {
-		return false, nil
-	}
-	if tmux.PromptSubmissionMayHaveOccurred(submissionErr) {
-		return true, nil
-	}
-	return false, errors.Join(submissionErr, command.CancelUndelivered())
+	return harnessexec.ResolveSubmission(submissionErr, command.CancelUndelivered)
 }
 
 // BuildHarnessLaunchCommand builds the one canonical shell command for a

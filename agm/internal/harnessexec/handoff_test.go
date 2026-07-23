@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 func TestMain(m *testing.M) {
@@ -18,6 +20,46 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	scheduleHandoffExpiry = original
 	os.Exit(code)
+}
+
+func TestResolveSubmissionPreservesUncertainAndCancelsConfirmedFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		submissionErr error
+		wantUncertain bool
+		wantErr       bool
+		wantCancelled bool
+	}{
+		{
+			name:          "uncertain acknowledgement preserves handoff",
+			submissionErr: tmux.MarkPromptSubmissionUncertain(errors.New("lost acknowledgement")),
+			wantUncertain: true,
+		},
+		{
+			name:          "confirmed failure cancels handoff",
+			submissionErr: errors.New("send rejected"),
+			wantErr:       true,
+			wantCancelled: true,
+		},
+		{name: "confirmed success"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cancelled := false
+			uncertain, err := ResolveSubmission(tc.submissionErr, func() error {
+				cancelled = true
+				return nil
+			})
+			if uncertain != tc.wantUncertain {
+				t.Fatalf("uncertain = %v, want %v", uncertain, tc.wantUncertain)
+			}
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tc.wantErr)
+			}
+			if cancelled != tc.wantCancelled {
+				t.Fatalf("cancelled = %v, want %v", cancelled, tc.wantCancelled)
+			}
+		})
+	}
 }
 
 func TestPreparedClaudeCommandCarriesCallerOnlyOAuthAndTelemetry(t *testing.T) {

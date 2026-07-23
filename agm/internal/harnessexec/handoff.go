@@ -17,6 +17,7 @@ import (
 	"unicode"
 
 	"github.com/vbonnet/dear-agent/agm/internal/procguard"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
 
@@ -59,6 +60,23 @@ func (p PreparedCommand) Cancel() error {
 		leaseErr = p.lease.Close()
 	}
 	return errors.Join(removeErr, leaseErr)
+}
+
+// ResolveSubmission transfers ownership of a staged private launch across
+// tmux's irreversible Enter boundary. An uncertain acknowledgement may mean
+// the executor is already queued, so only a confirmed submission failure may
+// cancel the one-shot handoff.
+func ResolveSubmission(submissionErr error, cancelUndelivered func() error) (bool, error) {
+	if submissionErr == nil {
+		return false, nil
+	}
+	if tmux.PromptSubmissionMayHaveOccurred(submissionErr) {
+		return true, nil
+	}
+	if cancelUndelivered == nil {
+		return false, submissionErr
+	}
+	return false, errors.Join(submissionErr, cancelUndelivered())
 }
 
 type launchHandoff struct {

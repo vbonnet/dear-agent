@@ -2,11 +2,15 @@ package session
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 func TestClaudeResumeStagesHandoffBeforeCreatingTmux(t *testing.T) {
@@ -104,6 +108,52 @@ func TestClaudeResumePreservesExistingTmuxOnDeliveryFailure(t *testing.T) {
 	err := ensureClaudeResumeProcess(testClaudeResumeManifest(), true)
 	if !errors.Is(err, deliveryErr) {
 		t.Fatalf("ensureClaudeResumeProcess error = %v, want delivery error", err)
+	}
+}
+
+func TestClaudeResumePreservesHandoffAndCreatedTmuxAfterUncertainSubmission(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("AGM_STATE_DIR", stateDir)
+	origPrepare := resumePrepareClaudeCommand
+	origNewSession := resumeNewSession
+	origSendCommand := resumeSendCommand
+	origWaitForReady := resumeWaitForClaudeReady
+	origKillSession := resumeKillSession
+	t.Cleanup(func() {
+		resumePrepareClaudeCommand = origPrepare
+		resumeNewSession = origNewSession
+		resumeSendCommand = origSendCommand
+		resumeWaitForClaudeReady = origWaitForReady
+		resumeKillSession = origKillSession
+	})
+
+	resumePrepareClaudeCommand = harnessexec.PrepareClaudeCommand
+	resumeNewSession = func(string, string) error { return nil }
+	resumeSendCommand = func(string, string) error {
+		return tmux.MarkPromptSubmissionUncertain(errors.New("lost acknowledgement"))
+	}
+	waited := false
+	resumeWaitForClaudeReady = func(string, time.Duration) error {
+		waited = true
+		return nil
+	}
+	resumeKillSession = func(string) error {
+		t.Fatal("uncertain submission killed the attempt-created tmux session")
+		return nil
+	}
+
+	if err := ensureClaudeResumeProcess(testClaudeResumeManifest(), false); err != nil {
+		t.Fatalf("ensureClaudeResumeProcess returned uncertain submission as failure: %v", err)
+	}
+	if !waited {
+		t.Fatal("uncertain submission did not continue to readiness")
+	}
+	entries, err := os.ReadDir(filepath.Join(stateDir, "private-launch"))
+	if err != nil {
+		t.Fatalf("read private handoff directory: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("private handoffs = %v, want exactly one preserved handoff", entries)
 	}
 }
 

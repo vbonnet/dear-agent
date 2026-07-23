@@ -32,7 +32,13 @@ var (
 	// UUID v4 format: 8-4-4-4-12 hexadecimal characters
 	uuidRegex = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 	// Safe session name: alphanumeric, dash, underscore only
-	safeNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+	safeNameRegex          = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+	validateNewSession     = tmux.NewSession
+	validateSendCommand    = tmux.SendCommand
+	validateWaitForReady   = tmux.WaitForClaudeReady
+	validatePrepareCommand = harnessexec.PrepareClaudeCommand
+	validateCapturePane    = capturePane
+	validateKillSession    = killSession
 )
 
 // validateUUID checks if the UUID is in valid v4 format to prevent command injection.
@@ -76,35 +82,46 @@ func testSessionResume(m *manifest.Manifest, timeout time.Duration) (string, err
 	}
 
 	// 1. Create test session
-	if err := tmux.NewSession(sessionName, m.Context.Project); err != nil {
+	if err := validateNewSession(sessionName, m.Context.Project); err != nil {
 		return "", fmt.Errorf("failed to create test session: %w", err)
 	}
 
 	// 2. Ensure cleanup happens
-	defer killSession(sessionName)
+	defer func() {
+		if err := validateKillSession(sessionName); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to clean up validation tmux session %s: %v\n", sessionName, err)
+		}
+	}()
 
 	// 3. Send resume command through the same private boundary as normal
 	// lifecycle operations so validation exercises caller-only credentials.
-	prepared, err := harnessexec.PrepareClaudeCommand(harnessexec.ClaudeLaunch{
+	prepared, err := validatePrepareCommand(harnessexec.ClaudeLaunch{
 		SessionName: sessionName, SessionID: m.SessionID,
 		ResumeID: m.Claude.UUID, WorkDir: m.Context.Project, ForwardTelemetry: true,
 	}, os.Environ())
 	if err != nil {
 		return "", fmt.Errorf("failed to prepare resume command: %w", err)
 	}
-	if err := tmux.SendCommand(sessionName, prepared.Command); err != nil {
-		_ = prepared.Cancel()
-		output, captureErr := capturePane(sessionName)
-		if captureErr != nil {
-			return "", fmt.Errorf("failed to send resume command: %w (capture error: %w)", err, captureErr)
+	if submissionErr := validateSendCommand(sessionName, prepared.Command); submissionErr != nil {
+		uncertain, err := harnessexec.ResolveSubmission(submissionErr, prepared.Cancel)
+		if uncertain {
+			fmt.Fprintf(os.Stderr,
+				"Warning: validation resume submission acknowledgement was lost; preserving the private handoff because the command may be queued: %v\n",
+				submissionErr)
 		}
-		return output, fmt.Errorf("failed to send resume command: %w", err)
+		if err != nil {
+			output, captureErr := validateCapturePane(sessionName)
+			if captureErr != nil {
+				return "", fmt.Errorf("failed to send resume command: %w (capture error: %w)", err, captureErr)
+			}
+			return output, fmt.Errorf("failed to send resume command: %w", err)
+		}
 	}
 
 	// 4. Wait for process with timeout
 	if timeout > 0 {
-		if err := tmux.WaitForClaudeReady(sessionName, timeout); err != nil {
-			output, captureErr := capturePane(sessionName)
+		if err := validateWaitForReady(sessionName, timeout); err != nil {
+			output, captureErr := validateCapturePane(sessionName)
 			if captureErr != nil {
 				return "", fmt.Errorf("process not ready: %w (capture error: %w)", err, captureErr)
 			}
@@ -113,7 +130,7 @@ func testSessionResume(m *manifest.Manifest, timeout time.Duration) (string, err
 	}
 
 	// 5. Capture pane output
-	output, err := capturePane(sessionName)
+	output, err := validateCapturePane(sessionName)
 	if err != nil {
 		return "", fmt.Errorf("failed to capture pane output: %w", err)
 	}

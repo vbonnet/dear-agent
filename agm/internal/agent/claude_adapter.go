@@ -105,8 +105,7 @@ func (a *ClaudeAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	}
 
 	// Start Claude in the tmux session
-	if err := claudeSendCommand(tmuxName, prepared.Command); err != nil {
-		_ = prepared.Cancel()
+	if err := resolvePrivateLaunchSubmission("Claude", prepared, claudeSendCommand(tmuxName, prepared.Command)); err != nil {
 		// Clean up tmux session on error if we created it
 		if !exists {
 			warnClaudeCleanup(tmuxName, claudeSendCommand(tmuxName, "exit\r"))
@@ -196,8 +195,7 @@ func (a *ClaudeAdapter) ResumeSession(sessionID SessionID) error {
 			}
 			return fmt.Errorf("prepare Claude resume: %w", err)
 		}
-		if err := claudeSendCommand(metadata.TmuxName, prepared.Command); err != nil {
-			_ = prepared.Cancel()
+		if err := resolvePrivateLaunchSubmission("Claude", prepared, claudeSendCommand(metadata.TmuxName, prepared.Command)); err != nil {
 			if created {
 				warnClaudeCleanup(metadata.TmuxName, claudeSendCommand(metadata.TmuxName, "exit\r"))
 			}

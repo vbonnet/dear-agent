@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 func TestCodexCreateSessionWaitsForComposer(t *testing.T) {
@@ -156,6 +158,54 @@ func TestCodexCreateSessionCleansUpWhenLaunchPreparationFails(t *testing.T) {
 	}
 }
 
+func TestCodexCreateSessionPreservesHandoffAfterUncertainSubmission(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("AGM_STATE_DIR", stateDir)
+	t.Setenv("HOME", t.TempDir())
+
+	origLookPath := lookPath
+	origHasSession := codexHasSession
+	origNewSession := codexNewSession
+	origSendCommand := codexSendCommand
+	origWaitForPrompt := codexWaitForPrompt
+	origEnsureTrusted := ensureCodexTrusted
+	t.Cleanup(func() {
+		lookPath = origLookPath
+		codexHasSession = origHasSession
+		codexNewSession = origNewSession
+		codexSendCommand = origSendCommand
+		codexWaitForPrompt = origWaitForPrompt
+		ensureCodexTrusted = origEnsureTrusted
+	})
+	lookPath = func(file string) (string, error) {
+		if file == "codex" {
+			return "/fake/codex", nil
+		}
+		return "", os.ErrNotExist
+	}
+	codexHasSession = func(string) (bool, error) { return false, nil }
+	codexNewSession = func(string, string) error { return nil }
+	ensureCodexTrusted = func(string) error { return nil }
+	var sent []string
+	codexSendCommand = func(_ string, command string) error {
+		sent = append(sent, command)
+		if strings.Contains(command, "__exec-codex") {
+			return tmux.MarkPromptSubmissionUncertain(errors.New("lost acknowledgement"))
+		}
+		return nil
+	}
+	codexWaitForPrompt = func(string, time.Duration) error { return nil }
+
+	adapter := &CodexCLIAdapter{sessionStore: &MockSessionStore{sessions: make(map[SessionID]*SessionMetadata)}}
+	if _, err := adapter.CreateSession(SessionContext{Name: "codex-uncertain", WorkingDirectory: "/tmp/work"}); err != nil {
+		t.Fatalf("CreateSession returned uncertain submission as failure: %v", err)
+	}
+	if len(sent) != 1 || !strings.Contains(sent[0], "__exec-codex") {
+		t.Fatalf("commands = %q, want one private launch and no compensating exit", sent)
+	}
+	assertOnePrivateHandoff(t, stateDir)
+}
+
 func TestCodexResumeSessionRestartsDeadProcess(t *testing.T) {
 	t.Setenv("TMUX", "/tmp/fake-tmux")
 	// Isolate the codex trust pre-write from the developer's real ~/.codex.
@@ -266,6 +316,50 @@ func TestCodexResumeSessionCleansUpWhenLaunchPreparationFails(t *testing.T) {
 	if len(sent) != 1 || sent[0] != "exit\r" {
 		t.Fatalf("cleanup commands = %q, want [exit\\r]", sent)
 	}
+}
+
+func TestCodexResumeSessionPreservesHandoffAfterUncertainSubmission(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("AGM_STATE_DIR", stateDir)
+	t.Setenv("TMUX", "/tmp/fake-tmux")
+	t.Setenv("CODEX_HOME", t.TempDir())
+
+	origHasSession := codexHasSession
+	origNewSession := codexNewSession
+	origSendCommand := codexSendCommand
+	origWaitForPrompt := codexWaitForPrompt
+	origEnsureTrusted := ensureCodexTrusted
+	t.Cleanup(func() {
+		codexHasSession = origHasSession
+		codexNewSession = origNewSession
+		codexSendCommand = origSendCommand
+		codexWaitForPrompt = origWaitForPrompt
+		ensureCodexTrusted = origEnsureTrusted
+	})
+	codexHasSession = func(string) (bool, error) { return false, nil }
+	codexNewSession = func(string, string) error { return nil }
+	ensureCodexTrusted = func(string) error { return nil }
+	var sent []string
+	codexSendCommand = func(_ string, command string) error {
+		sent = append(sent, command)
+		if strings.Contains(command, "__exec-codex") {
+			return tmux.MarkPromptSubmissionUncertain(errors.New("lost acknowledgement"))
+		}
+		return nil
+	}
+	codexWaitForPrompt = func(string, time.Duration) error { return nil }
+
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{
+		"session-id": {TmuxName: "codex-resume-uncertain", WorkingDir: "/tmp/work", UUID: "native-codex-id"},
+	}}
+	adapter := &CodexCLIAdapter{sessionStore: store}
+	if err := adapter.ResumeSession("session-id"); err != nil {
+		t.Fatalf("ResumeSession returned uncertain submission as failure: %v", err)
+	}
+	if len(sent) != 1 || !strings.Contains(sent[0], "__exec-codex") {
+		t.Fatalf("commands = %q, want one private resume and no compensating exit", sent)
+	}
+	assertOnePrivateHandoff(t, stateDir)
 }
 
 func TestCodexResumeSessionSkipsRunningProcess(t *testing.T) {
