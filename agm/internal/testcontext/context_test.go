@@ -51,7 +51,8 @@ func TestNew_UniqueIDs(t *testing.T) {
 }
 
 func TestNewNamed(t *testing.T) {
-	tc := NewNamed("my-test")
+	tc, err := NewNamed("my-test")
+	require.NoError(t, err)
 
 	assert.Equal(t, "my-test", tc.RunID)
 	assert.Contains(t, tc.BaseDir, "agm-test-my-test")
@@ -60,11 +61,67 @@ func TestNewNamed(t *testing.T) {
 }
 
 func TestLoadNamed(t *testing.T) {
-	tc := LoadNamed("existing-env")
+	tc, err := LoadNamed("existing-env")
+	require.NoError(t, err)
 
 	assert.Equal(t, "existing-env", tc.RunID)
 	assert.Contains(t, tc.BaseDir, "agm-test-existing-env")
 	assert.Equal(t, filepath.Join(tc.BaseDir, "home"), tc.HomeDir)
+}
+
+func TestNamedEnvironmentRejectsUnownedPaths(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{
+		"",
+		"../escape",
+		`..\escape`,
+		"/absolute",
+		"line\nbreak",
+		strings.Repeat("x", maxNamedEnvironment+1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := NewNamed(name); err == nil {
+				t.Fatalf("NewNamed(%q) accepted an unsafe name", name)
+			}
+			if _, err := LoadNamed(name); err == nil {
+				t.Fatalf("LoadNamed(%q) accepted an unsafe name", name)
+			}
+		})
+	}
+}
+
+func TestListNamedSharesLifecycleRoot(t *testing.T) {
+	name := "list-" + New().RunID
+	tc, err := NewNamed(name)
+	require.NoError(t, err)
+	require.NoError(t, tc.EnsureDirs())
+	t.Cleanup(func() { require.NoError(t, tc.Cleanup()) })
+
+	reconstructed, err := LoadNamed(name)
+	require.NoError(t, err)
+	assert.Equal(t, tc.BaseDir, reconstructed.BaseDir)
+	assert.Equal(t, tc.SocketPath, reconstructed.SocketPath)
+
+	contexts, err := ListNamed()
+	require.NoError(t, err)
+	found := false
+	for _, candidate := range contexts {
+		if candidate.RunID == name {
+			assert.Equal(t, tc.BaseDir, candidate.BaseDir)
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "ListNamed did not return the created environment")
+
+	require.NoError(t, tc.Cleanup())
+	contexts, err = ListNamed()
+	require.NoError(t, err)
+	for _, candidate := range contexts {
+		assert.NotEqual(t, name, candidate.RunID, "cleaned environment remained discoverable")
+	}
 }
 
 func TestSetEnvAndFromEnv(t *testing.T) {
@@ -117,6 +174,16 @@ func TestFromEnv_NotSet(t *testing.T) {
 
 	tc, ok := FromEnv()
 	assert.False(t, ok, "FromEnv should return false when env vars not set")
+	assert.Nil(t, tc)
+}
+
+func TestFromEnvRejectsUnownedRunID(t *testing.T) {
+	t.Setenv(EnvTestRunID, "../outside")
+	t.Setenv(EnvTestEnv, "")
+	t.Setenv(EnvSessionsDir, "")
+
+	tc, ok := FromEnv()
+	assert.False(t, ok)
 	assert.Nil(t, tc)
 }
 

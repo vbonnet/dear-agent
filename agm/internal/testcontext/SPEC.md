@@ -14,6 +14,10 @@
 
 **TCTX-05** When a test context exports its environment, the system shall route runtime readiness and lock state through its run-specific state directory instead of the user's AGM state directory.
 
+**TCTX-06** When a named test environment is constructed or reconstructed, the system shall reject empty, overlong, absolute, path-separated, or control-character names before deriving any filesystem path.
+
+**TCTX-07** When named test environments are enumerated, the system shall discover only centrally validated environments beneath the same short root used by creation, reconstruction, and cleanup.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/test_support_package_guardrails.feature`

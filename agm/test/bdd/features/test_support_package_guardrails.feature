@@ -118,3 +118,9 @@ Feature: Test support package guardrails
     When AGM validates real lifecycle isolation
     Then the lifecycle should use a source-built AGM and unique tmux socket
     And cleanup should target only owned test resources
+
+  Scenario: Named test environments remain inside one owned root
+    Given named test environment lifecycle sources are configured
+    When AGM validates named test environment ownership
+    Then creation reconstruction discovery and cleanup should share one root
+    And unsafe named test environment paths should be rejected before mutation

@@ -55,7 +55,10 @@ Examples:
 		}
 		// Load named test environment if --test-env flag is set
 		if listTestEnv != "" {
-			tc := testcontext.LoadNamed(listTestEnv)
+			tc, err := testcontext.LoadNamed(listTestEnv)
+			if err != nil {
+				return fmt.Errorf("invalid test environment %q: %w", listTestEnv, err)
+			}
 			if err := tc.SetEnv(); err != nil {
 				return fmt.Errorf("failed to activate test environment %q: %w", listTestEnv, err)
 			}

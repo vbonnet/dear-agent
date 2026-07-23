@@ -201,7 +201,10 @@ func TestScanCycleResultFindings(t *testing.T) {
 
 func TestScanCommandCanBeExecuted(t *testing.T) {
 	// Setup test environment
-	tc := testcontext.NewNamed("scan-cmd-test")
+	tc, err := testcontext.NewNamed("scan-cmd-test")
+	if err != nil {
+		t.Fatalf("create named test environment: %v", err)
+	}
 	if err := tc.SetEnv(); err != nil {
 		t.Fatalf("failed to setup test environment: %v", err)
 	}

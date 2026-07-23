@@ -165,7 +165,10 @@ Examples:
 func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
 	operationCtx := archiveCommandContext(cmd)
 	if archiveTestEnv != "" {
-		tc := testcontext.LoadNamed(archiveTestEnv)
+		tc, err := testcontext.LoadNamed(archiveTestEnv)
+		if err != nil {
+			return fmt.Errorf("invalid test environment %q: %w", archiveTestEnv, err)
+		}
 		if err := tc.SetEnv(); err != nil {
 			return fmt.Errorf("failed to activate test environment %q: %w", archiveTestEnv, err)
 		}

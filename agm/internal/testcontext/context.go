@@ -19,8 +19,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"unicode"
 
 	"github.com/google/uuid"
+)
+
+const (
+	testEnvironmentPrefix = "agm-test-"
+	testEnvironmentRoot   = "/tmp"
+	maxNamedEnvironment   = 64
 )
 
 // Environment variable names for test sandbox isolation.
@@ -75,9 +83,14 @@ func New() *TestContext {
 	return newWithID(id)
 }
 
-// NewNamed creates a TestContext with a user-chosen name instead of a random ID.
-func NewNamed(name string) *TestContext {
-	return newWithID(name)
+// NewNamed creates a TestContext with a validated user-chosen name instead of
+// a random ID. Validation happens before any path is derived so a cleanup can
+// never escape the test-environment root through a crafted name.
+func NewNamed(name string) (*TestContext, error) {
+	if err := ValidateName(name); err != nil {
+		return nil, err
+	}
+	return newWithID(name), nil
 }
 
 // newWithID is the shared constructor for New and NewNamed.
@@ -85,12 +98,12 @@ func newWithID(id string) *TestContext {
 	// Keep tmux socket paths below macOS's Unix-domain socket limit. os.TempDir
 	// expands to a much longer /var/folders path there, while /tmp is stable on
 	// every Unix platform on which AGM's tmux integration runs.
-	baseDir := filepath.Join("/tmp", fmt.Sprintf("agm-test-%s", id))
+	baseDir := filepath.Join(testEnvironmentRoot, testEnvironmentPrefix+id)
 	return &TestContext{
 		RunID:       id,
 		BaseDir:     baseDir,
 		HomeDir:     filepath.Join(baseDir, "home"),
-		SocketPath:  filepath.Join("/tmp", fmt.Sprintf("agm-test-%s.sock", id)),
+		SocketPath:  filepath.Join(testEnvironmentRoot, testEnvironmentPrefix+id+".sock"),
 		SessionsDir: filepath.Join(baseDir, "sessions"),
 		DBPath:      filepath.Join(baseDir, "agm.db"),
 		StateDir:    filepath.Join(baseDir, "state"),
@@ -98,10 +111,52 @@ func newWithID(id string) *TestContext {
 	}
 }
 
-// LoadNamed reconstructs a TestContext from a known name.
+// LoadNamed reconstructs a TestContext from a validated known name.
 // It does not verify that the directory exists.
-func LoadNamed(name string) *TestContext {
+func LoadNamed(name string) (*TestContext, error) {
 	return NewNamed(name)
+}
+
+// ValidateName rejects names that could escape the owned temporary root,
+// inject terminal control characters, or exceed the short macOS socket budget.
+func ValidateName(name string) error {
+	switch {
+	case name == "":
+		return fmt.Errorf("test environment name must not be empty")
+	case len(name) > maxNamedEnvironment:
+		return fmt.Errorf("test environment name must not exceed %d bytes", maxNamedEnvironment)
+	case filepath.IsAbs(name):
+		return fmt.Errorf("test environment name must be relative")
+	case strings.ContainsAny(name, `/\`):
+		return fmt.Errorf("test environment name must not contain path separators")
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("test environment name must not contain control characters")
+		}
+	}
+	return nil
+}
+
+// ListNamed returns the centrally validated environments created beneath the
+// same short root used by NewNamed, LoadNamed, and Cleanup.
+func ListNamed() ([]*TestContext, error) {
+	entries, err := os.ReadDir(testEnvironmentRoot)
+	if err != nil {
+		return nil, err
+	}
+	contexts := make([]*TestContext, 0)
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), testEnvironmentPrefix) {
+			continue
+		}
+		name := strings.TrimPrefix(entry.Name(), testEnvironmentPrefix)
+		if err := ValidateName(name); err != nil {
+			continue
+		}
+		contexts = append(contexts, newWithID(name))
+	}
+	return contexts, nil
 }
 
 // FromEnv reconstructs a TestContext from environment variables.
@@ -114,10 +169,13 @@ func FromEnv() (*TestContext, bool) {
 	if runID == "" {
 		return nil, false
 	}
+	if err := ValidateName(runID); err != nil {
+		return nil, false
+	}
 	sessionsDir := os.Getenv(EnvSessionsDir)
 	baseDir := filepath.Dir(sessionsDir)
 	if sessionsDir == "" {
-		baseDir = filepath.Join("/tmp", fmt.Sprintf("agm-test-%s", runID))
+		baseDir = filepath.Join(testEnvironmentRoot, testEnvironmentPrefix+runID)
 	}
 	stateDir := os.Getenv(EnvStateDir)
 	if stateDir == "" {

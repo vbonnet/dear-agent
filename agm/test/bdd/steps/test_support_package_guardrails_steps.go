@@ -50,6 +50,8 @@ type testSupportRouteState struct {
 	family               string
 	trustIsolationOutput string
 	trustIsolationErr    error
+	testEnvOutput        string
+	testEnvErr           error
 }
 
 // RegisterTestSupportPackageGuardrailSteps registers residual package coverage steps.
@@ -85,6 +87,10 @@ func RegisterTestSupportPackageGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates real lifecycle isolation$`, agmValidatesRealLifecycleIsolation)
 	ctx.Step(`^the lifecycle should use a source-built AGM and unique tmux socket$`, lifecycleUsesSourceBuiltAGMAndUniqueTmuxSocket)
 	ctx.Step(`^cleanup should target only owned test resources$`, cleanupTargetsOnlyOwnedTestResources)
+	ctx.Step(`^named test environment lifecycle sources are configured$`, namedTestEnvironmentLifecycleSourcesAreConfigured)
+	ctx.Step(`^AGM validates named test environment ownership$`, agmValidatesNamedTestEnvironmentOwnership)
+	ctx.Step(`^creation reconstruction discovery and cleanup should share one root$`, namedTestEnvironmentLifecycleSharesOneRoot)
+	ctx.Step(`^unsafe named test environment paths should be rejected before mutation$`, unsafeNamedTestEnvironmentPathsAreRejected)
 }
 
 func trustProtocolSetupShouldBeScoped(ctx context.Context) error {
@@ -265,6 +271,77 @@ func cleanupTargetsOnlyOwnedTestResources() error {
 	for _, banned := range []string{`ListTmuxSessions(`, `"test-"`, `"agm-test-*"`} {
 		if strings.Contains(source, banned) {
 			return fmt.Errorf("isolated cleanup retains broad target %s", banned)
+		}
+	}
+	return nil
+}
+
+func namedTestEnvironmentLifecycleSourcesAreConfigured() error {
+	root := packageSpecBDDRepoRoot()
+	for _, relative := range []string{
+		"agm/internal/testcontext/context.go",
+		"agm/internal/testcontext/context_test.go",
+		"agm/cmd/agm/test_env.go",
+		"agm/cmd/agm/test_env_test.go",
+	} {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(relative))); err != nil {
+			return fmt.Errorf("named test environment source %s: %w", relative, err)
+		}
+	}
+	return nil
+}
+
+func agmValidatesNamedTestEnvironmentOwnership(ctx context.Context) error {
+	state, err := getTestSupportRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	command := exec.CommandContext(
+		testCtx,
+		"go", "test",
+		"./agm/internal/testcontext",
+		"./agm/cmd/agm",
+		"-run", `^(TestListNamedSharesLifecycleRoot|TestNamedEnvironmentRejectsUnownedPaths|TestFromEnvRejectsUnownedRunID|TestTestEnvironmentCreateListDestroySharesOwnedRoot|TestTestEnvironmentCommandsRejectTraversalNames)$`,
+		"-count=1",
+		"-v",
+	)
+	command.Dir = packageSpecBDDRepoRoot()
+	output, runErr := command.CombinedOutput()
+	state.testEnvOutput = string(output)
+	state.testEnvErr = runErr
+	return nil
+}
+
+func namedTestEnvironmentLifecycleSharesOneRoot(ctx context.Context) error {
+	return requireNamedTestEnvironmentTests(
+		ctx,
+		"TestListNamedSharesLifecycleRoot",
+		"TestTestEnvironmentCreateListDestroySharesOwnedRoot",
+	)
+}
+
+func unsafeNamedTestEnvironmentPathsAreRejected(ctx context.Context) error {
+	return requireNamedTestEnvironmentTests(
+		ctx,
+		"TestNamedEnvironmentRejectsUnownedPaths",
+		"TestFromEnvRejectsUnownedRunID",
+		"TestTestEnvironmentCommandsRejectTraversalNames",
+	)
+}
+
+func requireNamedTestEnvironmentTests(ctx context.Context, tests ...string) error {
+	state, err := getTestSupportRouteState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.testEnvErr != nil {
+		return fmt.Errorf("named test environment ownership tests failed: %w\n%s", state.testEnvErr, state.testEnvOutput)
+	}
+	for _, test := range tests {
+		if !strings.Contains(state.testEnvOutput, "--- PASS: "+test) {
+			return fmt.Errorf("named test environment ownership test %s did not pass:\n%s", test, state.testEnvOutput)
 		}
 	}
 	return nil
