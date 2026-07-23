@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
@@ -125,9 +124,6 @@ func runCreateChild(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := validateChildCreatePrompt(selectedHarness, childPrompt); err != nil {
-		return err
-	}
 
 	workDir := parentManifest.Context.Project
 	debug.Log("Inheriting working directory from parent: %s", workDir)
@@ -188,13 +184,6 @@ func createChildSession(ctx context.Context, adapter *dolt.Adapter, parentManife
 		debug.Log("manifest commit skipped: %v", err)
 	}
 	return result, nil
-}
-
-func validateChildCreatePrompt(selectedHarness, initialPrompt string) error {
-	if selectedHarness == "agy" && strings.TrimSpace(initialPrompt) == "" {
-		return fmt.Errorf("AGY child sessions require an initial prompt; provide --prompt")
-	}
-	return nil
 }
 
 func buildChildCreateRequest(parentManifest *manifest.Manifest, childSessionName, selectedHarness, initialPrompt string, withContext bool) *ops.CreateSessionRequest {

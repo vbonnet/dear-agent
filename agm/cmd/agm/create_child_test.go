@@ -511,12 +511,6 @@ func TestBuildChildCreateRequestPreservesRelationshipAndContext(t *testing.T) {
 	assert.Empty(t, overriddenHarness.Model, "a parent model must not cross harness boundaries")
 }
 
-func TestValidateChildCreatePrompt(t *testing.T) {
-	assert.NoError(t, validateChildCreatePrompt("codex-cli", ""))
-	assert.NoError(t, validateChildCreatePrompt("agy", "Inspect the failing tests"))
-	assert.ErrorContains(t, validateChildCreatePrompt("agy", " \t"), "--prompt")
-}
-
 // TestCreateChildCommand_ErrorHandling tests error handling scenarios
 func TestCreateChildCommand_ErrorHandling(t *testing.T) {
 	tests := []struct {

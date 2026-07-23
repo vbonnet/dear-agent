@@ -411,15 +411,19 @@ func TestIntegration_CreateSession_AgyBootstrapsLazyIdentityBeforeRegistrationEx
 }
 
 func TestCreateSession_AgyRejectsMissingIdentityBootstrapPromptBeforeMutation(t *testing.T) {
-	tmuxMock := session.NewMockTmux()
-	_, err := CreateSessionWithContext(t.Context(), &OpContext{Tmux: tmuxMock}, &CreateSessionRequest{
-		Cwd: t.TempDir(), Prompt: " \n\t", Title: "agy-no-prompt", Harness: "agy", Model: "3.5-flash-low", AllowEmptyPrompt: true,
-	})
-	if err == nil || !strings.Contains(err.Error(), "startup prompt is required") {
-		t.Fatalf("CreateSessionWithContext error = %v, want actionable AGY prompt requirement", err)
-	}
-	if len(tmuxMock.CreatedSessions) != 0 || len(tmuxMock.SentCommands) != 0 {
-		t.Fatalf("missing-prompt create mutated tmux: created=%v sent=%v", tmuxMock.CreatedSessions, tmuxMock.SentCommands)
+	for _, harness := range []string{"agy", "agy-cli", "antigravity"} {
+		t.Run(harness, func(t *testing.T) {
+			tmuxMock := session.NewMockTmux()
+			_, err := CreateSessionWithContext(t.Context(), &OpContext{Tmux: tmuxMock}, &CreateSessionRequest{
+				Cwd: t.TempDir(), Prompt: " \n\t", Title: "agy-no-prompt", Harness: harness, Model: "3.5-flash-low", AllowEmptyPrompt: true,
+			})
+			if err == nil || !strings.Contains(err.Error(), "startup prompt is required") {
+				t.Fatalf("CreateSessionWithContext error = %v, want actionable AGY prompt requirement", err)
+			}
+			if len(tmuxMock.CreatedSessions) != 0 || len(tmuxMock.SentCommands) != 0 {
+				t.Fatalf("missing-prompt create mutated tmux: created=%v sent=%v", tmuxMock.CreatedSessions, tmuxMock.SentCommands)
+			}
+		})
 	}
 }
 
