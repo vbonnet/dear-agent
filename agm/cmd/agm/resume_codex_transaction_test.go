@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -376,6 +377,42 @@ func TestResumeSessionCodexRollsBackNewTmuxBeforeActivityUpdate(t *testing.T) {
 				t.Fatalf("UpdatedAt changed after failed resume: before=%v after=%v", storedBefore.UpdatedAt, storedAfter.UpdatedAt)
 			}
 		})
+	}
+}
+
+func TestResumeSessionCodexPropagatesHookReviewBeforeActivityUpdate(t *testing.T) {
+	setDetachedResumeTestGlobals(t, true)
+	adapter, m, health := setupCodexResumeTransaction(t)
+	storedBefore, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() before resume error = %v", err)
+	}
+
+	var calls []string
+	runtime := recordingResumeRuntime(&calls)
+	runtime.wait = func(string, *HealthStatus) error {
+		calls = append(calls, "wait")
+		return tmux.CodexHookReviewError()
+	}
+
+	err = resumeSessionWithRuntime(t.Context(), adapter, m.SessionID, "manifest.yaml", m.Harness, health, runtime)
+	if !errors.Is(err, tmux.ErrCodexHookReviewRequired) {
+		t.Fatalf("resumeSessionWithRuntime() error = %v, want ErrCodexHookReviewRequired", err)
+	}
+	if len(calls) == 0 || calls[len(calls)-1] != "kill" {
+		t.Fatalf("resume calls = %v, want rollback as final effect", calls)
+	}
+	for _, forbidden := range []string{"restore", "update", "tab", "prompt", "attach"} {
+		if slices.Contains(calls, forbidden) {
+			t.Fatalf("resume calls = %v, %q must not run after hook review failure", calls, forbidden)
+		}
+	}
+	storedAfter, getErr := adapter.GetSession(m.SessionID)
+	if getErr != nil {
+		t.Fatalf("GetSession() after resume error = %v", getErr)
+	}
+	if !storedAfter.UpdatedAt.Equal(storedBefore.UpdatedAt) {
+		t.Fatalf("UpdatedAt changed after failed resume: before=%v after=%v", storedBefore.UpdatedAt, storedAfter.UpdatedAt)
 	}
 }
 

@@ -32,6 +32,29 @@ func TestHandleHarnessStartupStateWaitsForSlowInitialProcess(t *testing.T) {
 	}
 }
 
+func TestHandleHarnessStartupStateFailsHookReviewWithoutAdvancing(t *testing.T) {
+	t.Parallel()
+
+	observedHarness := false
+	advanced := make(map[string]bool)
+	ready, err := handleHarnessStartupState(context.Background(), "hooks", "codex-cli", HarnessInputReadiness{
+		State:   HarnessInputReviewRequired,
+		Content: "Hooks need review",
+	}, &observedHarness, advanced)
+	if ready {
+		t.Fatal("hook review startup reported ready")
+	}
+	if !errors.Is(err, ErrCodexHookReviewRequired) {
+		t.Fatalf("hook review startup error = %v, want ErrCodexHookReviewRequired", err)
+	}
+	if !observedHarness {
+		t.Fatal("hook review did not record the observed Codex harness")
+	}
+	if len(advanced) != 0 {
+		t.Fatalf("hook review advanced transitions = %v, want none", advanced)
+	}
+}
+
 func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -64,6 +87,12 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			harness: "codex-cli",
 			content: "Do you trust the contents of this directory?\n› 1. Yes, continue",
 			state:   HarnessInputOnboarding,
+		},
+		{
+			name:    "Codex hook review requires operator",
+			harness: "codex-cli",
+			content: "Hooks need review\n4 hooks are new or changed.\nHooks can run outside the sandbox after you trust them.\n› 1. Review hooks\n  2. Trust all and continue\n  3. Continue without trusting (hooks won't run)\nPress enter to confirm or esc to go back",
+			state:   HarnessInputReviewRequired,
 		},
 		{
 			name:    "resolved Codex onboarding before live composer",

@@ -370,6 +370,12 @@ Feature: Harness parity
     Then AGM should auto-accept the Codex trust prompt before prompt delivery
     And AGM should wait for the Codex composer
 
+  Scenario: Codex hook review requires explicit operator action
+    Given Codex hooks require explicit review
+    When AGM evaluates Codex hook review startup
+    Then Codex startup should fail fast with explicit review guidance
+    And Codex hook review should receive no automated input
+
   Scenario: Codex current-tmux creation launches before registration
     Given current-tmux creation selects Codex CLI
     When AGM validates current-tmux Codex launch wiring
