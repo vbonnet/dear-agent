@@ -626,6 +626,30 @@ func TestPreparedCommandUsesCoInstalledAGMFromCompanionBinary(t *testing.T) {
 	}
 }
 
+func TestPreparedCommandRejectsCompanionWithoutCoInstalledAGM(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	binDir := t.TempDir()
+	pathDir := t.TempDir()
+	pathAGM := filepath.Join(pathDir, "agm")
+	if err := os.WriteFile(pathAGM, []byte("stale executable"), 0700); err != nil {
+		t.Fatalf("write PATH AGM: %v", err)
+	}
+	t.Setenv("PATH", pathDir)
+	originalExecutablePath := executablePath
+	t.Cleanup(func() { executablePath = originalExecutablePath })
+	executablePath = func() (string, error) { return filepath.Join(binDir, "agm-mcp-server"), nil }
+
+	_, err := PrepareCodexCommand(CodexLaunch{
+		SessionName: "missing-companion-agm", Model: "gpt-test", WorkDir: "/tmp/work", Sandbox: "workspace-write",
+	}, nil)
+	if err == nil {
+		t.Fatal("companion without a co-installed AGM used an unverified PATH fallback")
+	}
+	if !strings.Contains(err.Error(), "find co-installed AGM private executor") {
+		t.Fatalf("unexpected companion resolution error: %v", err)
+	}
+}
+
 func TestPreparedCommandUsesRenamedCurrentAGMExecutable(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
 	originalExecutablePath := executablePath

@@ -348,11 +348,7 @@ func resolvePrivateExecutable() (string, error) {
 	if isExecutableFile(sibling) {
 		return sibling, nil
 	}
-	installed, err := exec.LookPath("agm")
-	if err != nil {
-		return "", fmt.Errorf("find AGM private executor beside %s or on PATH: %w", current, err)
-	}
-	return filepath.Abs(installed)
+	return "", fmt.Errorf("find co-installed AGM private executor beside %s", current)
 }
 
 func isExecutableFile(path string) bool {
