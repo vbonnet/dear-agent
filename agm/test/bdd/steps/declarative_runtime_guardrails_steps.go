@@ -151,6 +151,17 @@ func scheduledCIShouldRunCredentialFreeTaggedGraphs(ctx context.Context) error {
 			return fmt.Errorf("scheduled CI does not retain %s", required)
 		}
 	}
+	sweepStart := strings.Index(state.ci, "  agm-tagged-sweep:")
+	if sweepStart < 0 {
+		return fmt.Errorf("scheduled CI tagged sweep job is missing")
+	}
+	sweep, _, found := strings.Cut(state.ci[sweepStart:], "\n  engram-storage-hardening:")
+	if !found {
+		return fmt.Errorf("scheduled CI tagged sweep job boundary is missing")
+	}
+	if strings.Contains(sweep, "SKIP_E2E") {
+		return fmt.Errorf("scheduled CI full integration graph still sets a package-wide opt-out")
+	}
 	return nil
 }
 

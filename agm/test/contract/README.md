@@ -4,7 +4,7 @@ The `contract` build tag contains two distinct boundaries:
 
 - `TestActiveHarnessRegistryContract` is credential-free and always verifies
   the production registry for `claude-code`, `codex-cli`, `agy`, and
-  `opencode-cli`.
+  `opencode-cli`, and `pi-cli`.
 - Provider-hosted scenarios are optional probes for Claude, OpenCode, and the
   deprecated Gemini compatibility adapter. Each probe skips only when its own
   binary, credential, server, or quota is unavailable.

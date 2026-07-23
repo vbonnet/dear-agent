@@ -262,11 +262,7 @@ jobs:
       - name: Run credential-free contract graph
         run: go test -race -count=1 -timeout=20m -tags=contract ./agm/test/contract/...
 
-      - name: Run full credential-free integration graph
-        env:
-          # Legacy provider-hosted Ginkgo scenarios remain explicit opt-in;
-          # portable tests and the isolated source-built Codex lifecycle run.
-          SKIP_E2E: "1"
+      - name: Run full integration graph with per-test prerequisite skips
         run: go test -race -count=1 -timeout=20m -tags=integration ./agm/test/integration/...
 
   engram-storage-hardening:

@@ -4,7 +4,7 @@ The integration-tagged parity boundary has two layers:
 
 1. `portable/active_harness_test.go` always checks the shared non-I/O adapter
    contract for every active harness: `claude-code`, `codex-cli`, `agy`, and
-   `opencode-cli`.
+   `opencode-cli`, and `pi-cli`.
 2. Host-dependent lifecycle tests live beside their isolated harness fixtures.
    Each test owns its binary, credential, service, tmux socket, state, and
    cleanup prerequisites; an unavailable prerequisite skips only that harness.

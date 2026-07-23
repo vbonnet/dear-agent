@@ -18,6 +18,8 @@
 
 **INTG-07** When legacy integration scenarios are disabled by package-level opt-out, the system shall keep required portable parity and isolated lifecycle tests in independently executable child packages.
 
+**INTG-08** When the scheduled or manually dispatched tagged sweep claims to run the full integration graph, the system shall not set a package-wide opt-out; unavailable provider, binary, service, or host prerequisites shall skip only their affected tests.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/test_support_package_guardrails.feature`
