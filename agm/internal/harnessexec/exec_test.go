@@ -150,7 +150,7 @@ func TestBuildCommandsContainNoAmbientCredentialValues(t *testing.T) {
 }
 
 func TestProtocolRecognition(t *testing.T) {
-	for _, protocol := range []string{CodexProtocol, ClaudeProtocol} {
+	for _, protocol := range []string{CodexProtocol, ClaudeProtocol, ExpiryProtocol} {
 		if !IsProtocol(protocol) {
 			t.Errorf("IsProtocol(%q) = false", protocol)
 		}

@@ -39,7 +39,9 @@ Manages the full lifecycle of AGM sessions: creation (via `agm session new` / `a
    selected authentication and telemetry snapshot in an owner-only one-shot
    handoff and sends a non-secret command for the absolute AGM private executor
    to tmux; after consuming the handoff, the executor changes to the project
-   directory and directly replaces itself with `claude --resume <uuid>`
+   directory and directly replaces itself with `claude --resume <uuid>`. A
+   credential-free helper independently expires the handoff if tmux never
+   executes the queued command.
 5. Wait up to 5s for Claude readiness
 6. Update `UpdatedAt` in Dolt
 7. Display transcript context (last 3 exchanges)

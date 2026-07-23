@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/vbonnet/dear-agent/agm/internal/procguard"
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
 
@@ -23,7 +24,10 @@ const (
 	handoffMaxSize = 64 << 10
 )
 
-var executablePath = os.Executable
+var (
+	executablePath        = os.Executable
+	scheduleHandoffExpiry = startHandoffExpiry
+)
 
 // PreparedCommand is a token-free pane command plus cleanup for a handoff that
 // was never delivered. Once the command executes, the private executor removes
@@ -66,6 +70,9 @@ func PrepareCodexCommand(launch CodexLaunch, parent []string) (PreparedCommand, 
 	if err != nil {
 		return PreparedCommand{}, err
 	}
+	if err := scheduleHandoffExpiry(executable, handoffPath, time.Now().Add(handoffMaxAge)); err != nil {
+		return PreparedCommand{}, cleanupFailedHandoff(handoffPath, err)
+	}
 	launch.Executable = executable
 	launch.HandoffPath = handoffPath
 	return PreparedCommand{Command: BuildCodexCommand(launch), path: handoffPath}, nil
@@ -100,9 +107,90 @@ func PrepareClaudeCommand(launch ClaudeLaunch, parent []string) (PreparedCommand
 	if err != nil {
 		return PreparedCommand{}, err
 	}
+	if err := scheduleHandoffExpiry(executable, handoffPath, time.Now().Add(handoffMaxAge)); err != nil {
+		return PreparedCommand{}, cleanupFailedHandoff(handoffPath, err)
+	}
 	launch.Executable = executable
 	launch.HandoffPath = handoffPath
 	return PreparedCommand{Command: BuildClaudeCommand(launch), path: handoffPath}, nil
+}
+
+func cleanupFailedHandoff(path string, scheduleErr error) error {
+	removeErr := os.Remove(path)
+	if errors.Is(removeErr, os.ErrNotExist) {
+		removeErr = nil
+	}
+	return errors.Join(fmt.Errorf("schedule private launch handoff expiration: %w", scheduleErr), removeErr)
+}
+
+func startHandoffExpiry(executable, path string, expiresAt time.Time) error {
+	cmd := exec.Command( // #nosec G204 -- executable is the resolved current/co-installed AGM binary.
+		executable,
+		ExpiryProtocol,
+		"--handoff", path,
+		"--expires-at", expiresAt.UTC().Format(time.RFC3339Nano),
+	)
+	// The expiry helper needs neither caller credentials nor terminal ownership.
+	// Its isolated process group and released handle let it outlive an AGM caller
+	// that exits immediately after queuing a tmux command.
+	cmd.Env = []string{}
+	cmd.SysProcAttr = procguard.ProcessGroupAttr()
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start expiration helper: %w", err)
+	}
+	if err := cmd.Process.Release(); err != nil {
+		return fmt.Errorf("release expiration helper: %w", err)
+	}
+	return nil
+}
+
+func expireHandoff(path string, expiresAt time.Time, now func() time.Time, wait func(time.Duration)) error {
+	original, err := expiryTarget(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for {
+		current, statErr := os.Lstat(path)
+		if errors.Is(statErr, os.ErrNotExist) {
+			return nil
+		}
+		if statErr != nil {
+			return fmt.Errorf("inspect expiring private launch handoff: %w", statErr)
+		}
+		if !os.SameFile(original, current) {
+			return errors.New("private launch handoff changed before expiration")
+		}
+		remaining := expiresAt.Sub(now())
+		if remaining <= 0 {
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("expire private launch handoff: %w", err)
+			}
+			return nil
+		}
+		if remaining > 250*time.Millisecond {
+			remaining = 250 * time.Millisecond
+		}
+		wait(remaining)
+	}
+}
+
+func expiryTarget(path string) (os.FileInfo, error) {
+	if !filepath.IsAbs(path) || filepath.Base(filepath.Dir(path)) != "private-launch" {
+		return nil, errors.New("private launch handoff expiration requires an absolute private-launch path")
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	name := filepath.Base(path)
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 ||
+		!strings.HasPrefix(name, "launch-") || !strings.HasSuffix(name, ".json") {
+		return nil, errors.New("private launch handoff expiration target is invalid")
+	}
+	return info, nil
 }
 
 func resolvePrivateExecutable() (string, error) {

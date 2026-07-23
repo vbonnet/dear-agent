@@ -1,11 +1,21 @@
 package harnessexec
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestMain(m *testing.M) {
+	original := scheduleHandoffExpiry
+	scheduleHandoffExpiry = func(string, string, time.Time) error { return nil }
+	code := m.Run()
+	scheduleHandoffExpiry = original
+	os.Exit(code)
+}
 
 func TestPreparedClaudeCommandCarriesCallerOnlyOAuthAndTelemetry(t *testing.T) {
 	stateDir := t.TempDir()
@@ -258,6 +268,81 @@ func TestPreparedCommandCancelRemovesUndeliveredHandoff(t *testing.T) {
 	}
 	if _, err := os.Stat(prepared.path); !os.IsNotExist(err) {
 		t.Fatalf("cancelled handoff still exists: %v", err)
+	}
+}
+
+func TestPreparedCommandSchedulesIndependentExpiration(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	originalExecutablePath := executablePath
+	originalScheduler := scheduleHandoffExpiry
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		scheduleHandoffExpiry = originalScheduler
+	})
+	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+	var gotExecutable, gotPath string
+	var gotDeadline time.Time
+	scheduleHandoffExpiry = func(executable, path string, deadline time.Time) error {
+		gotExecutable, gotPath, gotDeadline = executable, path, deadline
+		return nil
+	}
+
+	startedAt := time.Now()
+	prepared, err := PrepareCodexCommand(CodexLaunch{
+		SessionName: "expiring-codex", Model: "gpt-test", WorkDir: "/tmp/work", Sandbox: "workspace-write",
+	}, []string{"OPENAI_API_KEY=expiry-canary"})
+	if err != nil {
+		t.Fatalf("prepare Codex command: %v", err)
+	}
+	t.Cleanup(func() { _ = prepared.Cancel() })
+	if gotExecutable != "/opt/agm/bin/agm" || gotPath != prepared.path {
+		t.Fatalf("expiration scheduled for executable=%q path=%q, want current AGM and %q", gotExecutable, gotPath, prepared.path)
+	}
+	if gotDeadline.Before(startedAt.Add(handoffMaxAge)) || gotDeadline.After(time.Now().Add(handoffMaxAge)) {
+		t.Fatalf("expiration deadline %s is not one bounded lifetime from preparation", gotDeadline)
+	}
+}
+
+func TestPreparedCommandRemovesHandoffWhenExpirationCannotBeScheduled(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("AGM_STATE_DIR", stateDir)
+	originalExecutablePath := executablePath
+	originalScheduler := scheduleHandoffExpiry
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		scheduleHandoffExpiry = originalScheduler
+	})
+	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+	scheduleHandoffExpiry = func(string, string, time.Time) error { return errors.New("scheduler unavailable") }
+
+	_, err := PrepareClaudeCommand(ClaudeLaunch{SessionName: "expiry-failure"}, nil)
+	if err == nil || !strings.Contains(err.Error(), "schedule private launch handoff expiration") {
+		t.Fatalf("prepare error = %v, want expiration scheduling failure", err)
+	}
+	entries, readErr := os.ReadDir(filepath.Join(stateDir, "private-launch"))
+	if readErr != nil {
+		t.Fatalf("read private launch directory: %v", readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("unscheduled private handoff remained on disk: %v", entries)
+	}
+}
+
+func TestExpiryProtocolRemovesUnconsumedHandoffAtDeadline(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	path, err := stageHandoff(CodexProtocol, []string{"OPENAI_API_KEY=expiry-canary"})
+	if err != nil {
+		t.Fatalf("stage handoff: %v", err)
+	}
+	err = Run(ExpiryProtocol, []string{
+		"--handoff", path,
+		"--expires-at", time.Now().Add(-time.Second).UTC().Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		t.Fatalf("run expiration protocol: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expired private handoff still exists: %v", err)
 	}
 }
 

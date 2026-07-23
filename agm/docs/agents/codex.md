@@ -29,7 +29,9 @@ copies only the documented Codex environment allowlist into an owner-only,
 one-shot handoff and sends a non-secret command for the absolute AGM private
 executor. The executor consumes and removes the handoff before resolving the
 fixed `codex` executable, constructs validated model, workdir, and sandbox
-arguments, and directly replaces itself with Codex without another shell.
+arguments, and directly replaces itself with Codex without another shell. A
+credential-free helper independently removes an unconsumed handoff after its
+bounded lifetime, including when the queued tmux command never executes.
 
 When Codex app-server remote control is available, AGM first creates a Codex
 thread through `codex app-server`, sets the Codex thread name to the AGM session

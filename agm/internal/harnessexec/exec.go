@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 	"unicode"
 
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
@@ -28,6 +29,9 @@ const (
 	// configuration, telemetry, or debug logging starts. It carries only
 	// non-secret Claude metadata; OAuth is resolved inside the executor.
 	ClaudeProtocol = "__exec-claude"
+	// ExpiryProtocol is the private cleanup protocol used by a detached,
+	// credential-free helper to expire an unconsumed launch handoff.
+	ExpiryProtocol = "__expire-harness-handoff"
 )
 
 var (
@@ -97,7 +101,7 @@ type ClaudeLaunch struct {
 
 // IsProtocol reports whether arg names one of the private launch protocols.
 func IsProtocol(arg string) bool {
-	return arg == CodexProtocol || arg == ClaudeProtocol
+	return arg == CodexProtocol || arg == ClaudeProtocol || arg == ExpiryProtocol
 }
 
 // BuildCodexCommand returns the token-free shell command pasted into tmux.
@@ -200,9 +204,37 @@ func Run(protocol string, args []string) error {
 		return runCodex(args)
 	case ClaudeProtocol:
 		return runClaude(args)
+	case ExpiryProtocol:
+		return runExpiry(args)
 	default:
 		return fmt.Errorf("unsupported private harness protocol %q", protocol)
 	}
+}
+
+func runExpiry(args []string) error {
+	var path, expiresAtValue string
+	set := flag.NewFlagSet(ExpiryProtocol, flag.ContinueOnError)
+	set.SetOutput(io.Discard)
+	set.StringVar(&path, "handoff", "", "")
+	set.StringVar(&expiresAtValue, "expires-at", "", "")
+	if err := set.Parse(args); err != nil {
+		return fmt.Errorf("invalid private handoff expiration request: %w", err)
+	}
+	if set.NArg() != 0 || path == "" || expiresAtValue == "" {
+		return errors.New("invalid private handoff expiration request")
+	}
+	if err := validateText("handoff", path); err != nil {
+		return err
+	}
+	expiresAt, err := time.Parse(time.RFC3339Nano, expiresAtValue)
+	if err != nil {
+		return errors.New("invalid private handoff expiration deadline")
+	}
+	now := time.Now()
+	if expiresAt.After(now.Add(handoffMaxAge + time.Minute)) {
+		return errors.New("private handoff expiration deadline exceeds the maximum lifetime")
+	}
+	return expireHandoff(path, expiresAt, time.Now, time.Sleep)
 }
 
 func runCodex(args []string) error {
