@@ -196,14 +196,10 @@ go test -C ./agm ./test/integration/... -run TestConcurrent -v
 
 **Validation**:
 ```bash
-# Before test
-tmux ls | wc -l
-
-# Run session lifecycle test
-go test -C ./agm ./test/integration/lifecycle/... -run TestSessionLifecycle -v
-
-# After test - count should be same
-tmux ls | wc -l
+# The test builds AGM from the checkout and uses a unique tmux socket.
+go test -race -count=1 -tags=integration \
+  ./agm/test/integration/isolated \
+  -run '^TestCodexLifecycleUsesIsolatedSourceEnvironment$'
 ```
 
 ### 5.2 Temporary Files

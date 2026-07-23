@@ -33,7 +33,6 @@ var residualTestSupportPackages = []string{
 	"agm/test/integration",
 	"agm/test/integration/helpers",
 	"agm/test/integration/isolated",
-	"agm/test/integration/lifecycle",
 	"agm/test/integration/portable",
 	"agm/test/performance",
 	"agm/test/regression",
@@ -289,20 +288,6 @@ func lifecycleExercisesCompleteCodexLifecycle() error {
 			return fmt.Errorf("isolated Codex lifecycle lacks complete source-built phase %s", required)
 		}
 	}
-
-	legacyData, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "lifecycle", "comprehensive_session_lifecycle_test.go"))
-	if err != nil {
-		return err
-	}
-	legacy := string(legacyData)
-	start := strings.Index(legacy, "func TestSessionLifecycle_ComprehensiveCreateResumeTerminate(")
-	end := strings.Index(legacy, "func TestSessionStateTransitions(")
-	if start < 0 || end <= start {
-		return fmt.Errorf("legacy comprehensive lifecycle boundary is missing")
-	}
-	if strings.Contains(legacy[start:end], `"codex-cli"`) {
-		return fmt.Errorf("legacy comprehensive lifecycle still routes Codex through the installed harness")
-	}
 	return nil
 }
 
@@ -382,18 +367,25 @@ func cleanupTargetsOnlyOwnedTestResources() error {
 		}
 	}
 
-	processCleanupData, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "helpers", "process_cleanup_integration_test.go"))
+	helperTestData, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "helpers", "isolated_environment_test.go"))
 	if err != nil {
 		return err
 	}
-	processCleanup := string(processCleanupData)
-	for _, required := range []string{`tc := testcontext.New()`, `require.NoError(t, tc.EnsureDirs())`, `socket := tc.SocketPath`, `_ = tc.Cleanup()`} {
-		if !strings.Contains(processCleanup, required) {
-			return fmt.Errorf("process-cleanup regression lacks bounded owned socket %s", required)
+	helperTest := string(helperTestData)
+	for _, required := range []string{
+		`func TestIsolatedEnvironmentUsesSourceBinaryAndOwnedPaths(`,
+		`if err := env.RegisterSession("unowned-session"); err == nil`,
+		`func TestIsolatedEnvironmentTmuxServersDoNotOverlap(`,
+		`if !second.HasSession(secondName)`,
+		`func TestUnavailableTmuxPrerequisiteCleansWithoutFailure(`,
+		`os.Stat(env.Context.BaseDir)`,
+	} {
+		if !strings.Contains(helperTest, required) {
+			return fmt.Errorf("isolated cleanup regression lacks ownership assertion %s", required)
 		}
 	}
-	if strings.Contains(processCleanup, `filepath.Join(os.TempDir()`) {
-		return errors.New("process-cleanup regression derives a tmux socket from the unbounded host temp root")
+	if strings.Contains(helperTest, `filepath.Join(os.TempDir()`) {
+		return errors.New("isolated cleanup regression derives a tmux socket from the unbounded host temp root")
 	}
 	return nil
 }
@@ -537,6 +529,20 @@ func requireNamedTestEnvironmentTests(ctx context.Context, tests ...string) erro
 
 func legacySuiteOptOutsDoNotSuppressRequiredIntegrationContracts() error {
 	root := packageSpecBDDRepoRoot()
+	for _, path := range []string{
+		"agm/test/integration/ci_skip_test.go",
+		"agm/test/integration/integration_suite_test.go",
+		"agm/test/integration/lifecycle/ci_skip_test.go",
+		"agm/test/integration/lifecycle/lifecycle_suite_test.go",
+		"agm/test/integration/orchestration_test.go",
+		"agm/test/integration/session_import_test.go",
+	} {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(path))); err == nil {
+			return fmt.Errorf("obsolete package-level integration opt-out still exists at %s", path)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect obsolete integration opt-out %s: %w", path, err)
+		}
+	}
 	for _, path := range []string{
 		"agm/test/integration/portable/active_harness_test.go",
 		"agm/test/integration/isolated/codex_lifecycle_test.go",

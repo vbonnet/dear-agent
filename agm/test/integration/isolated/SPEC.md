@@ -4,7 +4,7 @@
 
 ## Requirements
 
-**IISO-01** When scheduled integration runs disable legacy end-to-end scenarios, the suite shall still execute the isolated source-built Codex lifecycle.
+**IISO-01** When required integration evidence runs in CI, the suite shall execute the isolated source-built Codex lifecycle without host credentials or an installed AGM.
 
 **IISO-02** When the isolated Codex lifecycle completes, the suite shall verify exact tmux, filesystem, and SQLite cleanup without reading or mutating host session state.
 

@@ -183,16 +183,15 @@ AGM_DEBUG=true          # Debug mode
 12. **BDD-CATALOG.md** - Living documentation (8 feature files, 20+ scenarios)
 13. **ACCESSIBILITY.md** - WCAG compliance (screen readers, high contrast)
 14. **COMMAND-TRANSLATION-DESIGN.md** - Multi-agent abstraction design
-15. **SESSION_LIFECYCLE_TESTS.md** - Session lifecycle testing documentation
-16. **CLI-REFERENCE.md** - Extended CLI reference (additional details)
+15. **CLI-REFERENCE.md** - Extended CLI reference (additional details)
 
 ### Specialized Documentation
-17. **agm-environment-management-spec.md** - Environment management specification
-18. **gemini-readiness-detection.md** - Gemini agent readiness detection
-19. **engram-integration.md** - Engram integration guide
-20. **UX_PATTERNS.md** - User experience patterns
-21. **ux-style-guide.md** - UX style guide
-22. **performance-benchmarks.md** - Performance benchmarks
+16. **agm-environment-management-spec.md** - Environment management specification
+17. **gemini-readiness-detection.md** - Gemini agent readiness detection
+18. **engram-integration.md** - Engram integration guide
+19. **UX_PATTERNS.md** - User experience patterns
+20. **ux-style-guide.md** - UX style guide
+21. **performance-benchmarks.md** - Performance benchmarks
 23. **unified-storage-migration.md** - Unified storage migration spec
 24. **tmux-lock-refactoring.md** - Tmux lock refactoring documentation
 25. **lock-improvements.md** - Lock improvements documentation
@@ -249,7 +248,7 @@ Agent Comparison ──> Examples (Multi-Agent sections)
 
 Architecture ──> API Reference ──> Command Translation Design
 
-BDD Catalog ──> SESSION_LIFECYCLE_TESTS ──> Troubleshooting
+BDD Catalog ──> test/integration/README.md ──> Troubleshooting
 
 Accessibility ──> Command Reference (Global Flags)
 ```

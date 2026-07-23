@@ -3,9 +3,6 @@
 # RELATED-SPEC: agm/internal/testdata/mock-manifests/SPEC.md
 # RELATED-SPEC: agm/internal/testdata/orphan-recovery/SPEC.md
 # RELATED-SPEC: agm/test/golden/agent-interactions/SPEC.md
-# RELATED-SPEC: agm/test/integration/testdata/archived_sessions/claude-001/SPEC.md
-# RELATED-SPEC: agm/test/integration/testdata/archived_sessions/corrupted/SPEC.md
-# RELATED-SPEC: agm/test/integration/testdata/manifests/SPEC.md
 # RELATED-SPEC: agm/tests/e2e-install/Dockerfiles/SPEC.md
 # RELATED-SPEC: benchmarks/baselines/SPEC.md
 # RELATED-SPEC: engram/internal/health/testdata/SPEC.md
@@ -33,9 +30,6 @@ Feature: Declarative fixture guardrails
       | agm/internal/testdata/orphan-recovery                                            |
       | agm/test/golden                                                                  |
       | agm/test/golden/agent-interactions                                               |
-      | agm/test/integration/testdata/archived_sessions/claude-001                       |
-      | agm/test/integration/testdata/archived_sessions/corrupted                        |
-      | agm/test/integration/testdata/manifests                                          |
       | agm/tests/e2e-install/Dockerfiles                                                |
       | benchmarks/baselines                                                             |
       | engram/internal/health/testdata                                                  |

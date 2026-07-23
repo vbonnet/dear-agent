@@ -207,7 +207,7 @@ func TestRegression_BothBugsDocumented(t *testing.T) {
 	t.Log("RELATED FILES:")
 	t.Log("  - cmd/agm/new_integration_test.go (Bug 1 tests)")
 	t.Log("  - internal/tmux/prompt_test.go (Bug 2 unit tests)")
-	t.Log("  - cmd/agm/send_interrupt_test.go (Bug 2 integration tests)")
+	t.Log("  - cmd/agm/send_test.go (removed interrupt-flag contract)")
 	t.Log("  - internal/tmux/init_sequence_test.go (timing tests)")
-	t.Log("  - cmd/agm/send_test.go (state detection tests)")
+	t.Log("  - internal/tmux/send_interrupt_hang_test.go (literal-send regression tests)")
 }

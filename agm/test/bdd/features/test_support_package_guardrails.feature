@@ -10,7 +10,6 @@
 # RELATED-SPEC: agm/test/helpers/SPEC.md
 # RELATED-SPEC: agm/test/integration/SPEC.md
 # RELATED-SPEC: agm/test/integration/helpers/SPEC.md
-# RELATED-SPEC: agm/test/integration/lifecycle/SPEC.md
 # RELATED-SPEC: agm/test/integration/isolated/SPEC.md
 # RELATED-SPEC: agm/test/integration/portable/SPEC.md
 # RELATED-SPEC: agm/test/performance/SPEC.md
@@ -44,7 +43,6 @@ Feature: Test support package guardrails
       | agm/test/integration                                      |
       | agm/test/integration/helpers                              |
       | agm/test/integration/isolated                             |
-      | agm/test/integration/lifecycle                            |
       | agm/test/integration/portable                             |
       | agm/test/performance                                      |
       | agm/test/regression                                       |
