@@ -2,17 +2,20 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 func TestSupportedHarnessesHaveCurrentTmuxLauncher(t *testing.T) {
@@ -126,13 +129,12 @@ func TestStartCurrentTmuxHarnessCodexUsesRealLauncherContract(t *testing.T) {
 }
 
 func TestQueueCurrentTmuxCodexDoesNotWaitForReadiness(t *testing.T) {
-	t.Parallel()
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
 
 	var gotSession, gotCommand string
 	spec := ops.HarnessLaunchSpec{
 		Harness: "codex-cli", SessionName: "codex-current", WorkDir: "/tmp/codex-current",
 	}
-	wantCommand := ops.BuildHarnessLaunchCommand(spec).Command
 	modeApplied, err := queueCurrentTmuxCodexWithRuntime(spec, currentTmuxCodexQueueRuntime{
 		lookPath: func(string) (string, error) { return "/usr/local/bin/codex", nil },
 		sendCommand: func(sessionName, command string) error {
@@ -146,8 +148,56 @@ func TestQueueCurrentTmuxCodexDoesNotWaitForReadiness(t *testing.T) {
 	if modeApplied {
 		t.Fatal("mode applied at startup = true, want false for default launch spec")
 	}
-	if gotSession != spec.SessionName || gotCommand != wantCommand {
-		t.Fatalf("queued (%q, %q), want (%q, %q)", gotSession, gotCommand, spec.SessionName, wantCommand)
+	if gotSession != spec.SessionName {
+		t.Fatalf("queued session = %q, want %q", gotSession, spec.SessionName)
+	}
+	assertPreparedHarnessCommand(t, gotCommand, "__exec-codex")
+}
+
+func TestQueueCurrentTmuxCodexPreservesHandoffAfterUncertainSubmission(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	var handoffPath string
+	_, err := queueCurrentTmuxCodexWithRuntime(
+		ops.HarnessLaunchSpec{
+			Harness: "codex-cli", SessionName: "codex-uncertain", WorkDir: "/tmp/codex-uncertain",
+		},
+		currentTmuxCodexQueueRuntime{
+			lookPath: func(string) (string, error) { return "/usr/local/bin/codex", nil },
+			sendCommand: func(_, command string) error {
+				handoffPath = preparedHandoffPath(t, command)
+				return tmux.MarkPromptSubmissionUncertain(errors.New("lost tmux acknowledgement"))
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("uncertain Codex submission returned an error: %v", err)
+	}
+	if _, err := os.Stat(handoffPath); err != nil {
+		t.Fatalf("uncertain Codex submission removed its handoff: %v", err)
+	}
+}
+
+func TestQueueCurrentTmuxClaudePreservesHandoffAfterUncertainSubmission(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	var handoffPath string
+	err := queueCurrentTmuxHarnessCommand(
+		t.Context(),
+		ops.HarnessLaunchSpec{
+			Harness: "claude-code", SessionName: "claude-uncertain", WorkDir: "/tmp/claude-uncertain",
+		},
+		currentTmuxCommandQueueRuntime{
+			lookPath: func(string) (string, error) { return "/usr/local/bin/claude", nil },
+			sendCommand: func(_, command string) error {
+				handoffPath = preparedHandoffPath(t, command)
+				return tmux.MarkPromptSubmissionUncertain(errors.New("lost tmux acknowledgement"))
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("uncertain Claude submission returned an error: %v", err)
+	}
+	if _, err := os.Stat(handoffPath); err != nil {
+		t.Fatalf("uncertain Claude submission removed its handoff: %v", err)
 	}
 }
 
@@ -165,11 +215,11 @@ func TestCurrentTmuxLaunchResultDefersEveryQueuedHarness(t *testing.T) {
 }
 
 func TestQueueCurrentTmuxHarnessCommandUsesCanonicalCommandWithoutWaiting(t *testing.T) {
-	t.Parallel()
-
 	for harness, executable := range map[string]string{"claude-code": "claude", "opencode-cli": "opencode", "gemini-cli": "gemini"} {
 		t.Run(harness, func(t *testing.T) {
-			t.Parallel()
+			if harness == "claude-code" {
+				t.Setenv("AGM_STATE_DIR", t.TempDir())
+			}
 			spec := ops.HarnessLaunchSpec{Harness: harness, SessionName: "current", WorkDir: "/tmp/current"}
 			var gotExecutable, gotSession, gotCommand string
 			err := queueCurrentTmuxHarnessCommand(t.Context(), spec, currentTmuxCommandQueueRuntime{
@@ -188,11 +238,52 @@ func TestQueueCurrentTmuxHarnessCommandUsesCanonicalCommandWithoutWaiting(t *tes
 			if gotExecutable != executable {
 				t.Fatalf("executable lookup = %q, want %q", gotExecutable, executable)
 			}
-			if gotSession != spec.SessionName || gotCommand != ops.BuildHarnessLaunchCommand(spec).Command {
-				t.Fatalf("queued (%q, %q), want canonical command for %#v", gotSession, gotCommand, spec)
+			if gotSession != spec.SessionName {
+				t.Fatalf("queued session = %q, want %q", gotSession, spec.SessionName)
+			}
+			if harness == "claude-code" {
+				assertPreparedHarnessCommand(t, gotCommand, "__exec-claude")
+			} else if gotCommand != ops.BuildHarnessLaunchCommand(spec).Command {
+				t.Fatalf("queued command = %q, want canonical command for %#v", gotCommand, spec)
 			}
 		})
 	}
+}
+
+func assertPreparedHarnessCommand(t *testing.T, command, protocol string) {
+	t.Helper()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolve test executable: %v", err)
+	}
+	for _, want := range []string{executable, protocol, "--handoff"} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("prepared command %q does not contain %q", command, want)
+		}
+	}
+	handoffPath := preparedHandoffPath(t, command)
+	payload, err := os.ReadFile(handoffPath)
+	if err != nil {
+		t.Fatalf("read current-tmux handoff: %v", err)
+	}
+	var handoff struct {
+		DeferredUntilProducerExit bool `json:"deferred_until_producer_exit"`
+	}
+	if err := json.Unmarshal(payload, &handoff); err != nil {
+		t.Fatalf("decode current-tmux handoff: %v", err)
+	}
+	if !handoff.DeferredUntilProducerExit {
+		t.Fatal("current-tmux handoff omitted its producer-liveness lease marker")
+	}
+}
+
+func preparedHandoffPath(t *testing.T, command string) string {
+	t.Helper()
+	match := regexp.MustCompile(`--handoff '([^']+)'`).FindStringSubmatch(command)
+	if len(match) != 2 {
+		t.Fatalf("prepared command %q does not contain a quoted handoff path", command)
+	}
+	return match[1]
 }
 
 func TestQueueCurrentTmuxHarnessCommandRejectsMissingExecutable(t *testing.T) {

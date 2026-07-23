@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
@@ -84,13 +85,21 @@ func (a *CodexCLIAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	if err := ensureCodexTrusted(workDir); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not pre-trust Codex workdir %s: %v\n", workDir, err)
 	}
-	cmd := fmt.Sprintf("env -u CLAUDECODE AGM_SESSION_NAME=%s codex -m %s -C %s -s workspace-write && exit",
-		shellQuote(tmuxName), shellQuote(resolvedModel), shellQuote(workDir))
-	if err := codexSendCommand(tmuxName, cmd); err != nil {
+	prepared, err := harnessexec.PrepareCodexCommand(harnessexec.CodexLaunch{
+		SessionName: tmuxName,
+		Model:       resolvedModel,
+		WorkDir:     workDir,
+		Sandbox:     "workspace-write",
+	}, os.Environ())
+	if err != nil {
 		if !exists {
-			if cleanupErr := codexSendCommand(tmuxName, "exit\r"); cleanupErr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to clean up Codex tmux session: %v\n", cleanupErr)
-			}
+			cleanupCodexCreatedSession(tmuxName)
+		}
+		return "", fmt.Errorf("prepare Codex CLI launch: %w", err)
+	}
+	if err := resolvePrivateLaunchSubmission("Codex", prepared, codexSendCommand(tmuxName, prepared.Command)); err != nil {
+		if !exists {
+			cleanupCodexCreatedSession(tmuxName)
 		}
 		return "", fmt.Errorf("failed to start Codex CLI in tmux session: %w", err)
 	}
@@ -116,6 +125,12 @@ func (a *CodexCLIAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	return sessionID, nil
 }
 
+func cleanupCodexCreatedSession(tmuxName string) {
+	if cleanupErr := codexSendCommand(tmuxName, "exit\r"); cleanupErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to clean up Codex tmux session: %v\n", cleanupErr)
+	}
+}
+
 // ResumeSession resumes a stored Codex CLI session.
 func (a *CodexCLIAdapter) ResumeSession(sessionID SessionID) error {
 	metadata, err := a.sessionStore.Get(sessionID)
@@ -128,11 +143,13 @@ func (a *CodexCLIAdapter) ResumeSession(sessionID SessionID) error {
 		return fmt.Errorf("failed to check tmux session: %w", err)
 	}
 	sendCommands := false
+	created := false
 	if !exists {
 		if err := codexNewSession(metadata.TmuxName, metadata.WorkingDir); err != nil {
 			return fmt.Errorf("failed to create tmux session: %w", err)
 		}
 		sendCommands = true
+		created = true
 	} else {
 		running, err := codexIsProcessRunning(metadata.TmuxName, "codex")
 		if err != nil || !running {
@@ -147,13 +164,23 @@ func (a *CodexCLIAdapter) ResumeSession(sessionID SessionID) error {
 		if err := ensureCodexTrusted(metadata.WorkingDir); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not pre-trust Codex workdir %s: %v\n", metadata.WorkingDir, err)
 		}
-		cmd := fmt.Sprintf("env -u CLAUDECODE AGM_SESSION_NAME=%s codex -m %s -C %s -s workspace-write",
-			shellQuote(metadata.TmuxName), shellQuote(resolvedModel), shellQuote(metadata.WorkingDir))
-		if metadata.UUID != "" {
-			cmd = fmt.Sprintf("env -u CLAUDECODE AGM_SESSION_NAME=%s codex -m %s -C %s -s workspace-write resume %s",
-				shellQuote(metadata.TmuxName), shellQuote(resolvedModel), shellQuote(metadata.WorkingDir), shellQuote(metadata.UUID))
+		prepared, err := harnessexec.PrepareCodexCommand(harnessexec.CodexLaunch{
+			SessionName: metadata.TmuxName,
+			Model:       resolvedModel,
+			WorkDir:     metadata.WorkingDir,
+			Sandbox:     "workspace-write",
+			ResumeID:    metadata.UUID,
+		}, os.Environ())
+		if err != nil {
+			if created {
+				cleanupCodexCreatedSession(metadata.TmuxName)
+			}
+			return fmt.Errorf("prepare Codex CLI resume: %w", err)
 		}
-		if err := codexSendCommand(metadata.TmuxName, cmd+" && exit"); err != nil {
+		if err := resolvePrivateLaunchSubmission("Codex", prepared, codexSendCommand(metadata.TmuxName, prepared.Command)); err != nil {
+			if created {
+				cleanupCodexCreatedSession(metadata.TmuxName)
+			}
 			return fmt.Errorf("failed to send Codex resume command: %w", err)
 		}
 		if err := codexWaitForPrompt(metadata.TmuxName, 5*time.Second); err != nil {

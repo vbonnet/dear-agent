@@ -315,10 +315,15 @@ func (r *mcpCreateSessionRuntime) Launch(ctx context.Context, spec ops.HarnessLa
 			return ops.CreateSessionLaunchResult{}, fmt.Errorf("find AGY executable: %w", err)
 		}
 	}
-	launch := ops.BuildHarnessLaunchCommand(spec)
+	launch, err := ops.PrepareHarnessLaunchCommand(spec)
+	if err != nil {
+		return ops.CreateSessionLaunchResult{}, fmt.Errorf("prepare harness launch: %w", err)
+	}
 	result := ops.CreateSessionLaunchResult{ModeAppliedAtStartup: launch.ModeAppliedAtStartup}
-	if err := r.tmux.SendKeys(spec.SessionName, launch.Command); err != nil {
-		return result, err
+	if submissionErr := r.tmux.SendKeys(spec.SessionName, launch.Command); submissionErr != nil {
+		if _, err := ops.ResolveHarnessLaunchSubmission(launch, submissionErr); err != nil {
+			return result, err
+		}
 	}
 	if spec.Harness != "agy" {
 		return result, nil

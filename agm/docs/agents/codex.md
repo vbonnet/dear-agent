@@ -24,19 +24,27 @@ Anthropic API keys, or Claude-specific environment.
 agm session new --harness=codex-cli --model=5.5 my-codex-session
 ```
 
-AGM launches Codex with:
-
-```bash
-env -u CLAUDECODE AGM_SESSION_NAME='<session>' codex -m '<model>' -C '<workdir>' -s workspace-write
-```
+AGM does not paste a raw `codex` command into tmux. The invoking AGM process
+copies only the documented Codex environment allowlist into an owner-only,
+one-shot handoff and sends a non-secret command for the absolute AGM private
+executor. The executor consumes and removes the handoff before resolving the
+fixed `codex` executable against the invoking AGM process's handed-off `PATH`,
+constructs validated model, workdir, and sandbox arguments, and directly
+replaces itself with Codex without another shell. A
+credential-free helper independently removes an unconsumed handoff after its
+bounded lifetime, including when the queued tmux command never executes. For a
+current-pane launch, a credential-free inherited pipe keeps the handoff valid
+only while the producing AGM process still owns the pane; the normal bounded
+lifetime starts when that process exits. The executor unlinks a securely opened
+handoff before decoding it, so malformed, expired, and protocol-mismatched
+handoffs cannot retain credentials.
 
 When Codex app-server remote control is available, AGM first creates a Codex
 thread through `codex app-server`, sets the Codex thread name to the AGM session
-name, stores that Codex thread id in AGM metadata, and launches the tmux UI with:
-
-```bash
-env -u CLAUDECODE AGM_SESSION_NAME='<session>' codex resume --remote unix:// -m '<model>' -C '<workdir>' -s workspace-write '<codex-thread-id>'
-```
+name, stores that Codex thread id in AGM metadata, and gives the private
+executor the non-secret remote resume metadata. The executor then directly
+starts the matching Codex remote UI; the raw resume command and credentials
+are never pasted into tmux.
 
 Set `AGM_CODEX_REMOTE_CONTROL=0` to skip this bridge. Set
 `AGM_CODEX_REQUIRE_REMOTE_CONTROL=1` to fail creation instead of falling back to
@@ -56,7 +64,11 @@ Important launch invariants:
   entries — including explicit `untrusted` — are never overwritten.
 - app-server-backed starts preserve the same thread in Codex remote-control
   surfaces and in the AGM tmux pane
-- no Claude, Anthropic, Engram, or OpenTelemetry environment is injected
+- the Codex child receives only the fixed allowlist; ambient Claude, Anthropic,
+  Google, GitHub, Engram, OpenTelemetry, SSH-agent, and arbitrary variables
+  are excluded
+- credential values never appear in the tmux command, process arguments, pane
+  scrollback, or debug logs
 
 ## Send
 
