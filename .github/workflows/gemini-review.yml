@@ -1,0 +1,97 @@
+name: Gemini PR Review
+
+# Gemini-powered PR review via Google's official run-gemini-cli action, using
+# the `code-review` extension + GitHub MCP server to post INLINE review
+# comments — the same experience the (now-sunset, 2026-07-17) consumer
+# gemini-code-assist GitHub app provided, but driven by our own API key.
+#
+# Auth: GEMINI_API_KEY secret — an AI Studio "Gemini Developer API" key.
+#   The free tier costs nothing within its rate limits; if those prove too
+#   tight, the same key can be upgraded to pay-as-you-go billing on the
+#   brain-v2-gmail project. (Google AI Ultra is a consumer-app entitlement and
+#   is NOT reachable from a GitHub Action, so it cannot back this workflow.)
+#
+# Model: set the repo/org Actions VARIABLE `GEMINI_MODEL` to override (e.g.
+#   `gemini-2.5-flash` for the most generous free-tier limits, or
+#   `gemini-2.5-pro` for the strongest review). Unset → the action's default.
+#
+# The job no-ops cleanly until GEMINI_API_KEY is present, and skips PRs from
+# forks (which have no access to repo secrets), mirroring review.yml.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: gemini-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  review:
+    name: Gemini Review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Skip forks — they can't read repo secrets, so the review would fail anyway.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Gate on secret presence
+        id: gate
+        env:
+          KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::notice::GEMINI_API_KEY not set; skipping Gemini review."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout repository
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Run Gemini PR review
+        if: steps.gate.outputs.skip != 'true'
+        uses: google-github-actions/run-gemini-cli@v0
+        env:
+          GEMINI_CLI_TRUST_WORKSPACE: 'true'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        with:
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          gemini_model: ${{ vars.GEMINI_MODEL }}
+          github_pr_number: ${{ github.event.pull_request.number }}
+          workflow_name: gemini-review
+          settings: |-
+            {
+              "model": { "maxSessionTurns": 25 },
+              "mcpServers": {
+                "github": {
+                  "command": "docker",
+                  "args": [
+                    "run", "-i", "--rm",
+                    "-e", "GITHUB_PERSONAL_ACCESS_TOKEN",
+                    "ghcr.io/github/github-mcp-server:v0.27.0"
+                  ],
+                  "includeTools": [
+                    "add_comment_to_pending_review",
+                    "pull_request_read",
+                    "pull_request_review_write"
+                  ],
+                  "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}" }
+                }
+              },
+              "tools": { "core": [] }
+            }
+          extensions: |
+            [
+              "https://github.com/gemini-cli-extensions/code-review"
+            ]
+          prompt: '/pr-code-review'
