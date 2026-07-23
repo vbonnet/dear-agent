@@ -13,6 +13,8 @@
 # RELATED-SPEC: agm/internal/dolt/migrations/SPEC.md
 # RELATED-SPEC: agm/migrations/SPEC.md
 # RELATED-SPEC: agm/scripts/hooks/SPEC.md
+# RELATED-SPEC: agm/test/bdd/steps/SPEC.md
+# RELATED-SPEC: agm/test/e2e/SPEC.md
 # RELATED-SPEC: agm/test/e2e/docker/scripts/SPEC.md
 # RELATED-SPEC: agm/test/e2e/lib/SPEC.md
 # RELATED-SPEC: agm/test/e2e/suites/SPEC.md
