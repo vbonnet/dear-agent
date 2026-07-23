@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -72,6 +73,47 @@ func RegisterCrossLanguageImplementationGuardrailSteps(ctx *godog.ScenarioContex
 	ctx.Step(`^cross-language coverage runs through "([^"]*)" with "([^"]*)"$`, configureCrossLanguageRoute)
 	ctx.Step(`^AGM validates cross-language route parity$`, validateCrossLanguageRoute)
 	ctx.Step(`^every cross-language implementation should retain strict SPEC and BDD traceability$`, validateCrossLanguageSpecs)
+	ctx.Step(`^the AGM end-to-end harness detection helper is configured$`, agmE2EHarnessDetectionHelperIsConfigured)
+	ctx.Step(`^AGM validates portable harness command lookup$`, agmValidatesPortableHarnessCommandLookup)
+	ctx.Step(`^the exact harness mapping should run under macOS system Bash$`, exactHarnessMappingRunsUnderSystemBash)
+}
+
+func agmE2EHarnessDetectionHelperIsConfigured() error {
+	helper := filepath.Join(packageSpecBDDRepoRoot(), "agm", "test", "e2e", "lib", "harness-detect.sh")
+	data, err := os.ReadFile(helper)
+	if err != nil {
+		return err
+	}
+	if strings.Contains(string(data), "declare -A") {
+		return fmt.Errorf("harness detection uses associative arrays unsupported by macOS system Bash")
+	}
+	return nil
+}
+
+func agmValidatesPortableHarnessCommandLookup() error {
+	helper := filepath.Join(packageSpecBDDRepoRoot(), "agm", "test", "e2e", "lib", "harness-detect.sh")
+	const assertions = `
+set -euo pipefail
+source "$1"
+test "$(harness_command claude-code)" = claude
+test "$(harness_command codex-cli)" = codex
+test "$(harness_command gemini-cli)" = gemini
+test "$(harness_command opencode-cli)" = opencode
+if harness_command unknown-harness; then
+    exit 1
+fi
+`
+	// #nosec G204 -- executable, script, and assertions are repository-owned constants.
+	cmd := exec.Command("/bin/bash", "-c", assertions, "harness-detect-bdd", helper)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("portable harness lookup: %w\n%s", err, output)
+	}
+	return nil
+}
+
+func exactHarnessMappingRunsUnderSystemBash() error {
+	return agmValidatesPortableHarnessCommandLookup()
 }
 
 func configureCrossLanguageRoute(ctx context.Context, harness, family string) error {

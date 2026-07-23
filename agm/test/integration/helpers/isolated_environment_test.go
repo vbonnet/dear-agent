@@ -24,8 +24,12 @@ func TestIsolatedEnvironmentUsesSourceBinaryAndOwnedPaths(t *testing.T) {
 			t.Errorf("isolated path %q is outside owned root %q", path, env.Context.BaseDir)
 		}
 	}
-	if filepath.Dir(env.TmuxSocket) != "/tmp" {
-		t.Fatalf("tmux socket %q is not on the short /tmp path", env.TmuxSocket)
+	socketRoot := filepath.Dir(env.TmuxSocket)
+	if socketRoot != filepath.Dir(env.Context.BaseDir) || filepath.Dir(socketRoot) != "/tmp" {
+		t.Fatalf("tmux socket %q does not share the short per-user root for %q", env.TmuxSocket, env.Context.BaseDir)
+	}
+	if len(env.TmuxSocket) >= 100 {
+		t.Fatalf("tmux socket %q exceeds the conservative Unix path budget", env.TmuxSocket)
 	}
 	if info, err := os.Stat(env.AGMBinary); err != nil || info.Mode()&0111 == 0 {
 		t.Fatalf("source AGM binary is not executable: info=%v err=%v", info, err)

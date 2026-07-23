@@ -397,6 +397,7 @@ func namedTestEnvironmentLifecycleSourcesAreConfigured() error {
 		"agm/internal/testcontext/context_test.go",
 		"agm/cmd/agm/test_env.go",
 		"agm/cmd/agm/test_env_test.go",
+		"agm/test/e2e/suites/13-test-env.sh",
 	} {
 		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(relative))); err != nil {
 			return fmt.Errorf("named test environment source %s: %w", relative, err)
@@ -437,12 +438,34 @@ func namedTestEnvironmentLifecycleSharesOneRoot(ctx context.Context) error {
 }
 
 func canonicalTestEnvironmentRootIsPrivatePerUser(ctx context.Context) error {
-	return requireNamedTestEnvironmentTests(
+	if err := requireNamedTestEnvironmentTests(
 		ctx,
 		"TestCanonicalEnvironmentRootIsShortPrivateAndUserScoped",
 		"TestEnsureOwnedEnvironmentRootSecuresModeAndRejectsSymlink",
 		"TestListNamedPrefersCanonicalPerUserRootForDuplicate",
-	)
+	); err != nil {
+		return err
+	}
+
+	suiteData, err := os.ReadFile(filepath.Join(packageSpecBDDRepoRoot(), "agm", "test", "e2e", "suites", "13-test-env.sh"))
+	if err != nil {
+		return err
+	}
+	suite := string(suiteData)
+	for _, required := range []string{
+		`TEST_ENV_BASE=$(printf`,
+		`-d "$TEST_ENV_BASE"`,
+		`! -e "$TEST_ENV_BASE"`,
+		`! -e "$TEST_ENV_BASE.sock"`,
+	} {
+		if !strings.Contains(suite, required) {
+			return fmt.Errorf("test-env E2E suite lacks reported-base assertion %s", required)
+		}
+	}
+	if strings.Contains(suite, `/tmp/agm-test-$TEST_ENV_NAME`) {
+		return errors.New("test-env E2E suite still asserts against the retired global root")
+	}
+	return nil
 }
 
 func retiredNamedTestEnvironmentsActivateInPlace(ctx context.Context) error {

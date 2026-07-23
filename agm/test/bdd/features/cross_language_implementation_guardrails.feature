@@ -114,3 +114,8 @@ Feature: Cross-language implementation guardrails
       | pi-cli       | deepseek  |
       | pi-cli       | nemotron  |
       | pi-cli       | qwen      |
+
+  Scenario: End-to-end harness lookup supports the platform system shell
+    Given the AGM end-to-end harness detection helper is configured
+    When AGM validates portable harness command lookup
+    Then the exact harness mapping should run under macOS system Bash
