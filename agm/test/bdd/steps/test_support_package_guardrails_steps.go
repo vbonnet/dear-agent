@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -330,6 +331,24 @@ func unexpectedLifecycleSetupFailuresFail() error {
 		if !strings.Contains(helper, required) {
 			return fmt.Errorf("isolated helper lacks unavailable-prerequisite guard %s", required)
 		}
+	}
+
+	helperTestData, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "helpers", "isolated_environment_test.go"))
+	if err != nil {
+		return err
+	}
+	helperTest := string(helperTestData)
+	for _, required := range []string{
+		`first.StartTmuxServer(firstName)`,
+		`IsUnavailablePrerequisite(err) && first.TmuxUnavailable()`,
+		`second.StartTmuxServer(secondName)`,
+	} {
+		if !strings.Contains(helperTest, required) {
+			return fmt.Errorf("tmux overlap regression bypasses prerequisite-aware startup %s", required)
+		}
+	}
+	if strings.Contains(helperTest, `TmuxCommand("new-session"`) {
+		return errors.New("tmux overlap regression creates a server outside prerequisite-aware startup")
 	}
 	return nil
 }

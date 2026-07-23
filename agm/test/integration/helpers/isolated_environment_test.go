@@ -72,11 +72,14 @@ func TestIsolatedEnvironmentTmuxServersDoNotOverlap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if output, err := first.TmuxCommand("new-session", "-d", "-s", firstName, "sleep 30").CombinedOutput(); err != nil {
-		t.Skipf("tmux cannot create an isolated server in this environment: %v: %s", err, output)
+	if err := first.StartTmuxServer(firstName); err != nil {
+		if IsUnavailablePrerequisite(err) && first.TmuxUnavailable() {
+			t.Skipf("tmux cannot create an isolated server in this environment: %v", err)
+		}
+		t.Fatalf("create first isolated tmux session: %v", err)
 	}
-	if output, err := second.TmuxCommand("new-session", "-d", "-s", secondName, "sleep 30").CombinedOutput(); err != nil {
-		t.Fatalf("create second isolated tmux session: %v: %s", err, output)
+	if err := second.StartTmuxServer(secondName); err != nil {
+		t.Fatalf("create second isolated tmux session: %v", err)
 	}
 	if !first.HasSession(firstName) || !second.HasSession(secondName) {
 		t.Fatal("an isolated tmux session exited before the cleanup assertion")
