@@ -125,6 +125,12 @@ Feature: Harness parity
     When AGM validates active harness adapter conformance
     Then every active harness adapter should satisfy the shared conformance suite
 
+  Scenario: Codex CLI and the OpenAI API adapter remain separate
+    Given AGM Codex and OpenAI adapter sources
+    When AGM validates Codex adapter routing
+    Then Codex factory should use the Codex CLI adapter
+    And OpenAI API status should not inspect Codex tmux state
+
   Scenario Outline: Active harness launch commands preserve startup mode and persistence
     Given active harness "<harness>" uses startup mode "<mode>"
     When AGM builds the harness launch command with persistence enabled
@@ -494,7 +500,7 @@ Feature: Harness parity
 
   Scenario: AGY auto permission mode is preserved on resume
     Given an imported AGY session with permission mode "auto"
-    When AGM resumes the session
+    When AGM resumes the AGY session
     Then AGM should launch a tmux pane that resumes the AGY conversation
     And the AGY resume command should include "--dangerously-skip-permissions"
 
@@ -532,11 +538,10 @@ Feature: Harness parity
     And each session row should include the requested fields
     And the output should not collapse to an empty object
 
-  Scenario: Codex lifecycle commands work end to end
+  Scenario: Codex shared lifecycle operations use production state transitions
     Given a Codex CLI session created by AGM
     When AGM sends a message to the session
-    And AGM resumes the session
     And AGM kills the session
     And AGM archives the stopped session
-    Then Dolt should reflect the expected lifecycle transitions
+    Then the durable AGM store should reflect the expected lifecycle transitions
     And the matching Codex saved session should be archived

@@ -28,12 +28,12 @@ var residualTestSupportPackages = []string{
 	"agm/test/bdd",
 	"agm/test/bdd/steps",
 	"agm/test/contract",
-	"agm/test/contracts",
 	"agm/test/e2e",
 	"agm/test/helpers",
 	"agm/test/integration",
 	"agm/test/integration/helpers",
-	"agm/test/integration/lifecycle",
+	"agm/test/integration/isolated",
+	"agm/test/integration/portable",
 	"agm/test/performance",
 	"agm/test/regression",
 	"agm/test/unit",
@@ -84,12 +84,15 @@ func RegisterTestSupportPackageGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates performance client readiness$`, agmValidatesPerformanceClientReadiness)
 	ctx.Step(`^performance workloads should use bounded hub client readiness$`, performanceWorkloadsUseBoundedHubClientReadiness)
 	ctx.Step(`^churn cleanup should be observed before stable clients disconnect$`, churnCleanupIsObservedBeforeStableClientsDisconnect)
+	ctx.Step(`^the credential-free active registry contract should always remain runnable$`, activeRegistryContractRemainsRunnable)
+	ctx.Step(`^mock-only Pact tests should not be reported as adapter coverage$`, mockOnlyPactTestsAreAbsent)
 	ctx.Step(`^isolated Codex lifecycle test sources are configured$`, isolatedCodexLifecycleTestSourcesAreConfigured)
 	ctx.Step(`^AGM validates real lifecycle isolation$`, agmValidatesRealLifecycleIsolation)
 	ctx.Step(`^the lifecycle should use a source-built AGM and unique tmux socket$`, lifecycleUsesSourceBuiltAGMAndUniqueTmuxSocket)
 	ctx.Step(`^the lifecycle should exercise send kill resume and archive through the source-built AGM$`, lifecycleExercisesCompleteCodexLifecycle)
 	ctx.Step(`^unexpected lifecycle setup failures should fail the test$`, unexpectedLifecycleSetupFailuresFail)
 	ctx.Step(`^cleanup should target only owned test resources$`, cleanupTargetsOnlyOwnedTestResources)
+	ctx.Step(`^legacy suite opt-outs should not suppress required integration contracts$`, legacySuiteOptOutsDoNotSuppressRequiredIntegrationContracts)
 	ctx.Step(`^named test environment lifecycle sources are configured$`, namedTestEnvironmentLifecycleSourcesAreConfigured)
 	ctx.Step(`^AGM validates named test environment ownership$`, agmValidatesNamedTestEnvironmentOwnership)
 	ctx.Step(`^canonical creation reconstruction discovery and cleanup should share one root$`, namedTestEnvironmentLifecycleSharesOneRoot)
@@ -222,7 +225,7 @@ func isolatedCodexLifecycleTestSourcesAreConfigured() error {
 	root := packageSpecBDDRepoRoot()
 	for _, path := range []string{
 		"agm/test/integration/helpers/isolated_environment.go",
-		"agm/test/integration/lifecycle/codex_isolated_lifecycle_test.go",
+		"agm/test/integration/isolated/codex_lifecycle_test.go",
 	} {
 		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(path))); err != nil {
 			return fmt.Errorf("isolated lifecycle source %s: %w", path, err)
@@ -251,7 +254,7 @@ func lifecycleUsesSourceBuiltAGMAndUniqueTmuxSocket() error {
 		}
 	}
 
-	lifecycleData, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "lifecycle", "codex_isolated_lifecycle_test.go"))
+	lifecycleData, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "isolated", "codex_lifecycle_test.go"))
 	if err != nil {
 		return err
 	}
@@ -266,7 +269,7 @@ func lifecycleUsesSourceBuiltAGMAndUniqueTmuxSocket() error {
 
 func lifecycleExercisesCompleteCodexLifecycle() error {
 	root := packageSpecBDDRepoRoot()
-	lifecycleData, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "lifecycle", "codex_isolated_lifecycle_test.go"))
+	lifecycleData, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "isolated", "codex_lifecycle_test.go"))
 	if err != nil {
 		return err
 	}
@@ -285,26 +288,12 @@ func lifecycleExercisesCompleteCodexLifecycle() error {
 			return fmt.Errorf("isolated Codex lifecycle lacks complete source-built phase %s", required)
 		}
 	}
-
-	legacyData, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "lifecycle", "comprehensive_session_lifecycle_test.go"))
-	if err != nil {
-		return err
-	}
-	legacy := string(legacyData)
-	start := strings.Index(legacy, "func TestSessionLifecycle_ComprehensiveCreateResumeTerminate(")
-	end := strings.Index(legacy, "func TestSessionStateTransitions(")
-	if start < 0 || end <= start {
-		return fmt.Errorf("legacy comprehensive lifecycle boundary is missing")
-	}
-	if strings.Contains(legacy[start:end], `"codex-cli"`) {
-		return fmt.Errorf("legacy comprehensive lifecycle still routes Codex through the installed harness")
-	}
 	return nil
 }
 
 func unexpectedLifecycleSetupFailuresFail() error {
 	root := packageSpecBDDRepoRoot()
-	data, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "lifecycle", "codex_isolated_lifecycle_test.go"))
+	data, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "isolated", "codex_lifecycle_test.go"))
 	if err != nil {
 		return err
 	}
@@ -378,18 +367,25 @@ func cleanupTargetsOnlyOwnedTestResources() error {
 		}
 	}
 
-	processCleanupData, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "helpers", "process_cleanup_integration_test.go"))
+	helperTestData, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "helpers", "isolated_environment_test.go"))
 	if err != nil {
 		return err
 	}
-	processCleanup := string(processCleanupData)
-	for _, required := range []string{`tc := testcontext.New()`, `require.NoError(t, tc.EnsureDirs())`, `socket := tc.SocketPath`, `_ = tc.Cleanup()`} {
-		if !strings.Contains(processCleanup, required) {
-			return fmt.Errorf("process-cleanup regression lacks bounded owned socket %s", required)
+	helperTest := string(helperTestData)
+	for _, required := range []string{
+		`func TestIsolatedEnvironmentUsesSourceBinaryAndOwnedPaths(`,
+		`if err := env.RegisterSession("unowned-session"); err == nil`,
+		`func TestIsolatedEnvironmentTmuxServersDoNotOverlap(`,
+		`if !second.HasSession(secondName)`,
+		`func TestUnavailableTmuxPrerequisiteCleansWithoutFailure(`,
+		`os.Stat(env.Context.BaseDir)`,
+	} {
+		if !strings.Contains(helperTest, required) {
+			return fmt.Errorf("isolated cleanup regression lacks ownership assertion %s", required)
 		}
 	}
-	if strings.Contains(processCleanup, `filepath.Join(os.TempDir()`) {
-		return errors.New("process-cleanup regression derives a tmux socket from the unbounded host temp root")
+	if strings.Contains(helperTest, `filepath.Join(os.TempDir()`) {
+		return errors.New("isolated cleanup regression derives a tmux socket from the unbounded host temp root")
 	}
 	return nil
 }
@@ -531,6 +527,80 @@ func requireNamedTestEnvironmentTests(ctx context.Context, tests ...string) erro
 	return nil
 }
 
+func legacySuiteOptOutsDoNotSuppressRequiredIntegrationContracts() error {
+	root := packageSpecBDDRepoRoot()
+	for _, path := range []string{
+		"agm/internal/tmux/claude_ready_test.go",
+		"agm/test/integration/ci_skip_test.go",
+		"agm/test/integration/integration_suite_test.go",
+		"agm/test/integration/lifecycle/ci_skip_test.go",
+		"agm/test/integration/lifecycle/lifecycle_suite_test.go",
+		"agm/test/integration/orchestration_test.go",
+		"agm/test/integration/session_import_test.go",
+	} {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(path))); err == nil {
+			return fmt.Errorf("obsolete package-level integration opt-out still exists at %s", path)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect obsolete integration opt-out %s: %w", path, err)
+		}
+	}
+	for _, path := range []string{
+		"agm/test/integration/portable/active_harness_test.go",
+		"agm/test/integration/isolated/codex_lifecycle_test.go",
+	} {
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+		if err != nil {
+			return fmt.Errorf("read required integration contract %s: %w", path, err)
+		}
+		if strings.Contains(string(data), "func TestMain(") || strings.Contains(string(data), `os.Getenv("SKIP_E2E")`) {
+			return fmt.Errorf("required integration contract %s is shadowed by a legacy suite opt-out", path)
+		}
+	}
+
+	workflow, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "ci.yml"))
+	if err != nil {
+		return fmt.Errorf("read CI workflow: %w", err)
+	}
+	ci := string(workflow)
+	for _, required := range []string{
+		"./agm/test/integration/portable",
+		"TestActiveHarnessParityContract|TestHarnessPrerequisitesAreScoped",
+		"./agm/test/integration/isolated",
+		"^TestCodexLifecycleUsesIsolatedSourceEnvironment$",
+	} {
+		if !strings.Contains(ci, required) {
+			return fmt.Errorf("CI does not invoke required integration package or test selector %s", required)
+		}
+	}
+	sweepStart := strings.Index(ci, "  agm-tagged-sweep:")
+	sweepEnd := strings.Index(ci, "\n  engram-storage-hardening:")
+	if sweepStart < 0 || sweepEnd <= sweepStart {
+		return errors.New("CI tagged-sweep job boundary is missing")
+	}
+	return taggedSweepRetainsCompleteIntegrationContracts(ci[sweepStart:sweepEnd])
+}
+
+func taggedSweepRetainsCompleteIntegrationContracts(taggedSweep string) error {
+	for _, required := range []string{
+		"Compile complete AGM integration-tagged graph",
+		"go test -run '^$' -tags=integration ./agm/...",
+	} {
+		if !strings.Contains(taggedSweep, required) {
+			return fmt.Errorf("CI tagged sweep is missing complete tagged compilation contract %s", required)
+		}
+	}
+	for _, banned := range []string{
+		"SKIP_E2E",
+		"Install source AGM for legacy host-dependent packages",
+		"go install ./agm/cmd/agm",
+	} {
+		if strings.Contains(taggedSweep, banned) {
+			return fmt.Errorf("CI tagged sweep retains obsolete integration bypass %s", banned)
+		}
+	}
+	return nil
+}
+
 func liveHarnessContractSourcesAreConfigured() error {
 	root := filepath.Join(packageSpecBDDRepoRoot(), "agm", "test", "contract")
 	for _, name := range []string{"claude_contract_test.go", "gemini_contract_test.go", "opencode_contract_test.go", "cli_helpers_test.go"} {
@@ -590,6 +660,33 @@ func unavailableLiveHarnessDependenciesAreSkipped() error {
 	}
 	if count := strings.Count(string(opencodeData), "requireOpenCodeServer(t)"); count != 5 {
 		return fmt.Errorf("OpenCode live contracts guard %d tests, want 5", count)
+	}
+	return nil
+}
+
+func activeRegistryContractRemainsRunnable() error {
+	path := filepath.Join(packageSpecBDDRepoRoot(), "agm", "test", "contract", "active_harness_contract_test.go")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	source := string(data)
+	for _, required := range []string{"TestActiveHarnessRegistryContract", "agent.ActiveHarnesses()", `"codex-cli"`} {
+		if !strings.Contains(source, required) {
+			return fmt.Errorf("active registry contract lacks %s", required)
+		}
+	}
+	return nil
+}
+
+func mockOnlyPactTestsAreAbsent() error {
+	pattern := filepath.Join(packageSpecBDDRepoRoot(), "agm", "test", "contracts", "*_test.go")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return err
+	}
+	if len(matches) != 0 {
+		return fmt.Errorf("retired mock-only Pact tests still exist: %v", matches)
 	}
 	return nil
 }

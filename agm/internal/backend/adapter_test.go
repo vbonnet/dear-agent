@@ -33,6 +33,23 @@ type readinessBackend struct {
 	atomicCtx context.Context
 }
 
+type livenessBackend struct {
+	*fakeBackend
+	wantName  string
+	wantNames []string
+	info      session.LivenessInfo
+}
+
+func (b *livenessBackend) HarnessLiveness(name string) (session.LivenessInfo, error) {
+	b.wantName = name
+	return b.info, nil
+}
+
+func (b *livenessBackend) HarnessLivenessBatch(names []string) (map[string]session.LivenessInfo, error) {
+	b.wantNames = append([]string(nil), names...)
+	return map[string]session.LivenessInfo{names[0]: b.info}, nil
+}
+
 type adapterContextKey struct{}
 
 func (b *readinessBackend) WaitForHarnessReady(ctx context.Context, _, _ string, _ time.Duration) error {
@@ -95,6 +112,19 @@ type strictMockTmux struct {
 	strictCalls int
 }
 
+type livenessMockTmux struct {
+	*session.MockTmux
+	info session.LivenessInfo
+}
+
+func (m *livenessMockTmux) HarnessLiveness(string) (session.LivenessInfo, error) {
+	return m.info, nil
+}
+
+func (m *livenessMockTmux) HarnessLivenessBatch(names []string) (map[string]session.LivenessInfo, error) {
+	return map[string]session.LivenessInfo{names[0]: m.info}, nil
+}
+
 func (m *strictMockTmux) HasSessionStrict(_ context.Context, name string) (bool, error) {
 	m.strictCalls++
 	return m.HasSession(name)
@@ -114,6 +144,58 @@ func TestBackendAdapter_PreservesTmuxKillAndStrictProbeThroughProductionChain(t 
 	}
 	if inner.Sessions["exact-target"] {
 		t.Fatal("production adapter chain left exact target running")
+	}
+}
+
+func TestBackendAdapter_ForwardsLivenessCapabilities(t *testing.T) {
+	want := session.LivenessInfo{SessionExists: true, HarnessAlive: true, Evidence: "codex"}
+	backend := &livenessBackend{fakeBackend: &fakeBackend{}, info: want}
+	adapter := NewBackendAdapter(backend)
+
+	got, err := adapter.HarnessLiveness("worker")
+	if err != nil || got != want || backend.wantName != "worker" {
+		t.Fatalf("HarnessLiveness() = (%#v, %v), target %q", got, err, backend.wantName)
+	}
+	batch, err := adapter.HarnessLivenessBatch([]string{"worker", "reviewer"})
+	if err != nil || batch["worker"] != want {
+		t.Fatalf("HarnessLivenessBatch() = (%#v, %v)", batch, err)
+	}
+	if len(backend.wantNames) != 2 || backend.wantNames[0] != "worker" || backend.wantNames[1] != "reviewer" {
+		t.Fatalf("batch targets = %v", backend.wantNames)
+	}
+}
+
+func TestBackendAdapter_LivenessFailsClosedWhenCapabilityMissing(t *testing.T) {
+	adapter := NewBackendAdapter(&fakeBackend{})
+	if _, err := adapter.HarnessLiveness("worker"); err == nil {
+		t.Fatal("HarnessLiveness() succeeded without backend capability")
+	}
+	if _, err := adapter.HarnessLivenessBatch([]string{"worker"}); err == nil {
+		t.Fatal("HarnessLivenessBatch() succeeded without backend capability")
+	}
+}
+
+func TestTmuxBackend_ForwardsLivenessCapabilities(t *testing.T) {
+	want := session.LivenessInfo{SessionExists: true, HarnessAlive: true, Evidence: "codex"}
+	backend := NewTmuxBackendWithClient(&livenessMockTmux{MockTmux: session.NewMockTmux(), info: want})
+
+	got, err := backend.HarnessLiveness("worker")
+	if err != nil || got != want {
+		t.Fatalf("HarnessLiveness() = (%#v, %v)", got, err)
+	}
+	batch, err := backend.HarnessLivenessBatch([]string{"worker"})
+	if err != nil || batch["worker"] != want {
+		t.Fatalf("HarnessLivenessBatch() = (%#v, %v)", batch, err)
+	}
+}
+
+func TestTmuxBackend_LivenessFailsClosedWhenCapabilityMissing(t *testing.T) {
+	backend := NewTmuxBackendWithClient(session.NewMockTmux())
+	if _, err := backend.HarnessLiveness("worker"); err == nil {
+		t.Fatal("HarnessLiveness() succeeded without tmux capability")
+	}
+	if _, err := backend.HarnessLivenessBatch([]string{"worker"}); err == nil {
+		t.Fatal("HarnessLivenessBatch() succeeded without tmux capability")
 	}
 }
 

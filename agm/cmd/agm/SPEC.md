@@ -377,7 +377,7 @@ Provide a production-ready CLI that:
   - Tmux unavailable → Clear error message with remediation steps
 - **Test Coverage:**
   - Unit tests: `cmd/agm/resume_all_test.go` - filterNonArchived(), filterByWorkspace(), edge cases
-  - Integration tests: `test/integration/lifecycle/resume_all_test.go` - basic functionality, workspace filtering, archived handling, error scenarios, large scale (50 sessions)
+  - Command tests: `cmd/agm/resume_all_test.go` - workspace filtering, archived handling, and edge cases through production filtering logic
   - BDD scenarios: (future) End-to-end resume-all flows
 - **References:**
   - Implementation: `cmd/agm/resume_all.go`

@@ -57,8 +57,6 @@ type harnessParityState struct {
 	sendSafetyRequiresClaude   bool
 	sessionListFields          []string
 	sessionListHasArray        bool
-	lifecycleReflected         bool
-	codexArchiveInvoked        bool
 	tmuxResumeLaunched         bool
 	tmuxSessionExists          bool
 	configuredHarness          string
@@ -148,6 +146,15 @@ type harnessParityState struct {
 	privateRejectedCanaries    []string
 	privateHandoffTestOutput   string
 	privateHandoffTestErr      error
+	lifecycleDir               string
+	lifecycleStore             *dolt.Adapter
+	lifecycleTmux              *bddLifecycleTmux
+	lifecycleRuntime           *bddLifecycleRuntime
+	lifecycleArchiver          *bddCodexArchiver
+	lifecycleOps               *ops.OpContext
+	lifecycleSessionID         string
+	lifecycleSessionName       string
+	lifecycleTransitions       []string
 }
 
 type harnessParityStateKey struct{}
@@ -172,6 +179,23 @@ func (r *bddCreateSessionRuntime) Complete(_ context.Context, completion ops.Cre
 func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
 		return context.WithValue(ctx, harnessParityStateKey{}, &harnessParityState{}), nil
+	})
+	ctx.After(func(ctx context.Context, _ *godog.Scenario, scenarioErr error) (context.Context, error) {
+		harnessState, ok := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+		if !ok || harnessState == nil {
+			return ctx, nil
+		}
+		if harnessState.lifecycleStore != nil {
+			if err := harnessState.lifecycleStore.Close(); err != nil && scenarioErr == nil {
+				return ctx, err
+			}
+		}
+		if harnessState.lifecycleDir != "" {
+			if err := os.RemoveAll(harnessState.lifecycleDir); err != nil && scenarioErr == nil {
+				return ctx, err
+			}
+		}
+		return ctx, nil
 	})
 
 	ctx.Step(`^a Codex CLI composer pane$`, aCodexCLIComposerPane)
@@ -201,6 +225,10 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^current-tmux AGY creation should fail before launch with detached guidance$`, currentTmuxAGYCreationShouldFailBeforeLaunchWithDetachedGuidance)
 	ctx.Step(`^AGM validates active harness adapter conformance$`, agmValidatesActiveHarnessAdapterConformance)
 	ctx.Step(`^every active harness adapter should satisfy the shared conformance suite$`, everyActiveHarnessAdapterShouldSatisfySharedConformanceSuite)
+	ctx.Step(`^AGM Codex and OpenAI adapter sources$`, agmCodexAndOpenAIAdapterSources)
+	ctx.Step(`^AGM validates Codex adapter routing$`, agmValidatesCodexAdapterRouting)
+	ctx.Step(`^Codex factory should use the Codex CLI adapter$`, codexFactoryShouldUseCodexCLIAdapter)
+	ctx.Step(`^OpenAI API status should not inspect Codex tmux state$`, openAIAPIStatusShouldNotInspectCodexTmuxState)
 	ctx.Step(`^AGM validates the pane capture invocation$`, agmValidatesPaneCaptureInvocation)
 	ctx.Step(`^pane capture should use the canonical AGM tmux socket$`, paneCaptureShouldUseCanonicalAGMTmuxSocket)
 	ctx.Step(`^pane capture should normalize the session target$`, paneCaptureShouldNormalizeSessionTarget)
@@ -385,6 +413,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the record should preserve the Codex session UUID$`, recordShouldPreserveCodexSessionUUID)
 	ctx.Step(`^the record should preserve the AGY conversation ID$`, recordShouldPreserveAGYConversationID)
 	ctx.Step(`^an imported AGY session with permission mode "([^"]*)"$`, anImportedAGYSessionWithPermissionMode)
+	ctx.Step(`^AGM resumes the AGY session$`, agmResumesTheAGYSession)
 	ctx.Step(`^AGM should launch a tmux pane that resumes the Codex conversation$`, agmShouldLaunchTmuxPaneResumingCodexConversation)
 	ctx.Step(`^AGM should launch a tmux pane that resumes the AGY conversation$`, agmShouldLaunchTmuxPaneResumingAGYConversation)
 	ctx.Step(`^the AGY resume command should include "([^"]*)"$`, theAGYResumeCommandShouldInclude)
@@ -406,10 +435,9 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the output should not collapse to an empty object$`, outputShouldNotCollapseToEmptyObject)
 	ctx.Step(`^a Codex CLI session created by AGM$`, aCodexCLISessionCreatedByAGM)
 	ctx.Step(`^AGM sends a message to the session$`, agmSendsMessageToTheSession)
-	ctx.Step(`^AGM resumes the session$`, agmResumesTheSession)
 	ctx.Step(`^AGM kills the session$`, agmKillsTheSession)
 	ctx.Step(`^AGM archives the stopped session$`, agmArchivesTheStoppedSession)
-	ctx.Step(`^Dolt should reflect the expected lifecycle transitions$`, doltShouldReflectLifecycleTransitions)
+	ctx.Step(`^the durable AGM store should reflect the expected lifecycle transitions$`, durableAGMStoreShouldReflectLifecycleTransitions)
 	ctx.Step(`^the matching Codex saved session should be archived$`, matchingCodexSavedSessionShouldBeArchived)
 	ctx.Step(`^a stopped Codex CLI session without a tmux pane$`, aStoppedCodexCLISessionWithoutTmuxPane)
 	ctx.Step(`^AGM validates the Codex resume transaction$`, agmValidatesTheCodexResumeTransaction)
@@ -421,6 +449,115 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^ambiguous final Codex prompt submission should preserve work that may have started$`, ambiguousFinalCodexPromptSubmissionShouldPreserveStartedWork)
 	ctx.Step(`^failed Codex prompt delivery should not suppress a later attach failure$`, failedCodexPromptDeliveryShouldNotSuppressALaterAttachFailure)
 	ctx.Step(`^Codex activity updates should follow resume readiness$`, codexActivityUpdatesShouldFollowResumeReadiness)
+}
+
+type bddLifecycleTmux struct {
+	sessions map[string]bool
+	sent     []string
+	events   []string
+	waited   []string
+}
+
+func newBDDLifecycleTmux() *bddLifecycleTmux {
+	return &bddLifecycleTmux{sessions: make(map[string]bool)}
+}
+
+func (t *bddLifecycleTmux) HasSession(name string) (bool, error) { return t.sessions[name], nil }
+func (t *bddLifecycleTmux) ListSessions() ([]string, error) {
+	var names []string
+	for name := range t.sessions {
+		names = append(names, name)
+	}
+	return names, nil
+}
+func (t *bddLifecycleTmux) ListSessionsWithInfo() ([]session.SessionInfo, error) {
+	var infos []session.SessionInfo
+	for name := range t.sessions {
+		infos = append(infos, session.SessionInfo{Name: name})
+	}
+	return infos, nil
+}
+func (t *bddLifecycleTmux) ListClients(string) ([]session.ClientInfo, error) { return nil, nil }
+func (t *bddLifecycleTmux) CreateSession(name, _ string) error {
+	t.sessions[name] = true
+	return nil
+}
+func (t *bddLifecycleTmux) AttachSession(string) error { return nil }
+func (t *bddLifecycleTmux) WaitForHarnessReady(_ context.Context, name, harness string, timeout time.Duration) error {
+	if !t.sessions[name] {
+		return fmt.Errorf("tmux target %q does not exist", name)
+	}
+	if harness != "codex-cli" {
+		return fmt.Errorf("unexpected lifecycle harness %q", harness)
+	}
+	if timeout <= 0 {
+		return fmt.Errorf("readiness timeout must be positive")
+	}
+	t.waited = append(t.waited, name+":"+harness)
+	return nil
+}
+func (t *bddLifecycleTmux) CheckInputReadiness(_ context.Context, name, harness string) (session.InputReadiness, error) {
+	t.events = append(t.events, "readiness:"+name+":"+harness)
+	if !t.sessions[name] {
+		return session.InputReadiness{State: "NOT_FOUND"}, nil
+	}
+	if harness != "codex-cli" {
+		return session.InputReadiness{}, fmt.Errorf("unexpected lifecycle harness %q", harness)
+	}
+	return session.InputReadiness{Ready: true, State: "YES", PaneID: name}, nil
+}
+func (t *bddLifecycleTmux) SendKeysIfInputReady(ctx context.Context, name, harness, keys string, _ session.InputDeliveryOptions) (session.InputReadiness, error) {
+	readiness, err := t.CheckInputReadiness(ctx, name, harness)
+	if err != nil || !readiness.Ready {
+		return readiness, err
+	}
+	if err := t.SendKeys(name, keys); err != nil {
+		return readiness, err
+	}
+	return readiness, nil
+}
+func (t *bddLifecycleTmux) SendKeys(name, keys string) error {
+	if !t.sessions[name] {
+		return fmt.Errorf("tmux target %q does not exist", name)
+	}
+	t.events = append(t.events, "send:"+name)
+	t.sent = append(t.sent, name+"\x00"+keys)
+	return nil
+}
+func (t *bddLifecycleTmux) KillSession(name string) error {
+	if !t.sessions[name] {
+		return fmt.Errorf("tmux target %q does not exist", name)
+	}
+	delete(t.sessions, name)
+	return nil
+}
+
+type bddLifecycleRuntime struct {
+	launches    []ops.HarnessLaunchSpec
+	completions []ops.CreateSessionCompletion
+}
+
+func (r *bddLifecycleRuntime) Launch(_ context.Context, spec ops.HarnessLaunchSpec) (ops.CreateSessionLaunchResult, error) {
+	r.launches = append(r.launches, spec)
+	return ops.CreateSessionLaunchResult{}, nil
+}
+
+func (r *bddLifecycleRuntime) Complete(_ context.Context, completion ops.CreateSessionCompletion) error {
+	r.completions = append(r.completions, completion)
+	return nil
+}
+
+type bddCodexArchiver struct {
+	targets []string
+}
+
+func (a *bddCodexArchiver) ArchiveExternalSession(_ context.Context, m *manifest.Manifest) []ops.ExternalArchiveOutcome {
+	target := ""
+	if m.Codex != nil {
+		target = m.Codex.SessionID
+	}
+	a.targets = append(a.targets, target)
+	return []ops.ExternalArchiveOutcome{{Provider: "codex", Status: ops.ExternalArchiveArchived, Target: target}}
 }
 
 func aStoppedCodexCLISessionWithoutTmuxPane(ctx context.Context) error {
@@ -1820,6 +1957,41 @@ func everyActiveHarnessAdapterShouldSatisfySharedConformanceSuite(ctx context.Co
 		messages = append(messages, finding.Error())
 	}
 	return fmt.Errorf("active harness conformance failed:\n%s", strings.Join(messages, "\n"))
+}
+
+func agmCodexAndOpenAIAdapterSources() error {
+	return nil
+}
+
+func agmValidatesCodexAdapterRouting() error {
+	return nil
+}
+
+func codexFactoryShouldUseCodexCLIAdapter() error {
+	data, err := os.ReadFile(filepath.Join(packageSpecBDDRepoRoot(), "agm", "internal", "agent", "factory.go"))
+	if err != nil {
+		return fmt.Errorf("read agent factory: %w", err)
+	}
+	source := string(data)
+	if !strings.Contains(source, `"codex-cli": func() (Agent, error) {`) ||
+		!strings.Contains(source, "return NewCodexCLIAdapter(nil)") {
+		return fmt.Errorf("codex-cli factory does not use CodexCLIAdapter")
+	}
+	return nil
+}
+
+func openAIAPIStatusShouldNotInspectCodexTmuxState() error {
+	data, err := os.ReadFile(filepath.Join(packageSpecBDDRepoRoot(), "agm", "internal", "agent", "openai_adapter.go"))
+	if err != nil {
+		return fmt.Errorf("read OpenAI adapter: %w", err)
+	}
+	source := string(data)
+	for _, forbidden := range []string{"internal/tmux", "IsCodexIdle"} {
+		if strings.Contains(source, forbidden) {
+			return fmt.Errorf("OpenAI API adapter still depends on Codex tmux state through %q", forbidden)
+		}
+	}
+	return nil
 }
 
 func agmRuntimeHelperCommandIsConfigured(ctx context.Context, command string) error {
@@ -3899,6 +4071,18 @@ func anImportedAGYSessionWithPermissionMode(ctx context.Context, mode string) er
 	return nil
 }
 
+func agmResumesTheAGYSession(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.harness != "agy" {
+		return fmt.Errorf("cannot resume AGY session for harness %q", harnessState.harness)
+	}
+	harnessState.tmuxResumeLaunched = true
+	return nil
+}
+
 func agmShouldLaunchTmuxPaneResumingCodexConversation(ctx context.Context) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
@@ -4003,13 +4187,78 @@ func aCodexCLISessionCreatedByAGM(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	lifecycleDir, err := os.MkdirTemp("", "agm-bdd-codex-lifecycle-")
+	if err != nil {
+		return err
+	}
+	store, err := dolt.NewSQLiteAdapter(filepath.Join(lifecycleDir, "agm.db"))
+	if err != nil {
+		_ = os.RemoveAll(lifecycleDir)
+		return fmt.Errorf("open isolated lifecycle store: %w", err)
+	}
+	tmuxRuntime := newBDDLifecycleTmux()
+	createRuntime := &bddLifecycleRuntime{}
+	archiver := &bddCodexArchiver{}
+	opCtx := &ops.OpContext{
+		Context:                 ctx,
+		Storage:                 store,
+		Tmux:                    tmuxRuntime,
+		CreationRuntime:         createRuntime,
+		ExternalSessionArchiver: archiver,
+	}
+	harnessState.lifecycleDir = lifecycleDir
+	harnessState.lifecycleStore = store
+	harnessState.lifecycleTmux = tmuxRuntime
+	harnessState.lifecycleRuntime = createRuntime
+	harnessState.lifecycleArchiver = archiver
+	harnessState.lifecycleOps = opCtx
+	harnessState.lifecycleSessionID = "bdd-codex-session"
+	harnessState.lifecycleSessionName = "bdd-codex-lifecycle"
 	harnessState.harness = "codex-cli"
+
+	result, err := ops.CreateSessionWithContext(ctx, opCtx, &ops.CreateSessionRequest{
+		Cwd:                    lifecycleDir,
+		Title:                  harnessState.lifecycleSessionName,
+		Harness:                "codex-cli",
+		Model:                  "5.4",
+		SessionID:              harnessState.lifecycleSessionID,
+		AllowEmptyPrompt:       true,
+		RequireStorage:         true,
+		SkipCodexRemoteControl: true,
+		ManifestDir:            filepath.Join(lifecycleDir, "manifest"),
+		Metadata: ops.CreateSessionMetadata{
+			Workspace: "bdd",
+			IsTest:    true,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("production create operation: %w", err)
+	}
+	if result.Harness != "codex-cli" || result.SessionID != harnessState.lifecycleSessionID {
+		return fmt.Errorf("unexpected create result: %+v", result)
+	}
+	stored, err := store.GetSession(harnessState.lifecycleSessionID)
+	if err != nil {
+		return fmt.Errorf("read created lifecycle record: %w", err)
+	}
+	stored.Codex = &manifest.Codex{SessionID: "bdd-codex-saved-thread"}
+	if err := store.UpdateSession(stored); err != nil {
+		return fmt.Errorf("persist Codex saved-thread identity: %w", err)
+	}
+	if exists, _ := tmuxRuntime.HasSession(harnessState.lifecycleSessionName); !exists {
+		return fmt.Errorf("create reported success without tmux target")
+	}
+	if len(createRuntime.launches) != 1 || createRuntime.launches[0].Harness != "codex-cli" || len(createRuntime.completions) != 1 {
+		return fmt.Errorf("create did not traverse the Codex production runtime: launches=%d completions=%d", len(createRuntime.launches), len(createRuntime.completions))
+	}
+	if !slices.Equal(tmuxRuntime.waited, []string{harnessState.lifecycleSessionName + ":codex-cli"}) {
+		return fmt.Errorf("create did not wait for exact Codex readiness: %q", tmuxRuntime.waited)
+	}
+	harnessState.lifecycleTransitions = append(harnessState.lifecycleTransitions, "created")
 	return nil
 }
 
-func agmSendsMessageToTheSession(ctx context.Context) error { return nil }
-
-func agmResumesTheSession(ctx context.Context) error {
+func agmSendsMessageToTheSession(ctx context.Context) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
 		return err
@@ -4018,8 +4267,29 @@ func agmResumesTheSession(ctx context.Context) error {
 		if harnessState.agyResumeCommand == "" {
 			return fmt.Errorf("AGY resume command was not built from the imported session")
 		}
+		harnessState.tmuxResumeLaunched = true
+		return nil
 	}
-	harnessState.tmuxResumeLaunched = true
+	const message = "BDD lifecycle message"
+	result, err := ops.SendMessage(harnessState.lifecycleOps, &ops.SendMessageRequest{
+		Recipient: harnessState.lifecycleSessionID,
+		Message:   message,
+	})
+	if err != nil {
+		return fmt.Errorf("production send operation: %w", err)
+	}
+	want := harnessState.lifecycleSessionName + "\x00" + message
+	if !result.Delivered || len(harnessState.lifecycleTmux.sent) != 1 || harnessState.lifecycleTmux.sent[0] != want {
+		return fmt.Errorf("send did not reach exact tmux target: result=%+v calls=%q", result, harnessState.lifecycleTmux.sent)
+	}
+	wantEvents := []string{
+		"readiness:" + harnessState.lifecycleSessionName + ":codex-cli",
+		"send:" + harnessState.lifecycleSessionName,
+	}
+	if !slices.Equal(harnessState.lifecycleTmux.events, wantEvents) {
+		return fmt.Errorf("send lifecycle events = %q, want %q", harnessState.lifecycleTmux.events, wantEvents)
+	}
+	harnessState.lifecycleTransitions = append(harnessState.lifecycleTransitions, "message-delivered")
 	return nil
 }
 
@@ -4028,7 +4298,20 @@ func agmKillsTheSession(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	harnessState.lifecycleReflected = true
+	result, err := ops.KillSession(harnessState.lifecycleOps, &ops.KillSessionRequest{
+		Identifier:     harnessState.lifecycleSessionID,
+		ConfirmedStuck: true,
+	})
+	if err != nil {
+		return fmt.Errorf("production kill operation: %w", err)
+	}
+	if !result.WasRunning || result.TmuxSessionName != harnessState.lifecycleSessionName {
+		return fmt.Errorf("kill result lacks exact running target: %+v", result)
+	}
+	if exists, _ := harnessState.lifecycleTmux.HasSession(harnessState.lifecycleSessionName); exists {
+		return fmt.Errorf("kill reported success while exact tmux target survived")
+	}
+	harnessState.lifecycleTransitions = append(harnessState.lifecycleTransitions, "tmux-killed")
 	return nil
 }
 
@@ -4037,18 +4320,36 @@ func agmArchivesTheStoppedSession(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	harnessState.lifecycleReflected = true
-	harnessState.codexArchiveInvoked = true
+	result, err := ops.ArchiveSession(harnessState.lifecycleOps, &ops.ArchiveSessionRequest{
+		Identifier: harnessState.lifecycleSessionID,
+		Force:      true,
+		Outcome:    manifest.OutcomeKilled,
+	})
+	if err != nil {
+		return fmt.Errorf("production archive operation: %w", err)
+	}
+	if result.Outcome != manifest.OutcomeKilled || len(result.ExternalArchives) != 1 || result.ExternalArchives[0].Status != ops.ExternalArchiveArchived {
+		return fmt.Errorf("archive result lacks durable and external outcomes: %+v", result)
+	}
+	harnessState.lifecycleTransitions = append(harnessState.lifecycleTransitions, "archived")
 	return nil
 }
 
-func doltShouldReflectLifecycleTransitions(ctx context.Context) error {
+func durableAGMStoreShouldReflectLifecycleTransitions(ctx context.Context) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
 		return err
 	}
-	if !harnessState.lifecycleReflected {
-		return fmt.Errorf("expected lifecycle transitions to be reflected")
+	want := []string{"created", "message-delivered", "tmux-killed", "archived"}
+	if !slices.Equal(harnessState.lifecycleTransitions, want) {
+		return fmt.Errorf("lifecycle transitions = %v, want %v", harnessState.lifecycleTransitions, want)
+	}
+	stored, err := harnessState.lifecycleStore.GetSession(harnessState.lifecycleSessionID)
+	if err != nil {
+		return fmt.Errorf("read archived lifecycle record: %w", err)
+	}
+	if stored.Lifecycle != manifest.LifecycleArchived || stored.Outcome != manifest.OutcomeKilled {
+		return fmt.Errorf("durable lifecycle = %q outcome = %q, want archived/killed", stored.Lifecycle, stored.Outcome)
 	}
 	return nil
 }
@@ -4058,8 +4359,8 @@ func matchingCodexSavedSessionShouldBeArchived(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if !harnessState.codexArchiveInvoked {
-		return fmt.Errorf("expected matching Codex saved session archive")
+	if len(harnessState.lifecycleArchiver.targets) != 1 || harnessState.lifecycleArchiver.targets[0] != "bdd-codex-saved-thread" {
+		return fmt.Errorf("external Codex archive targets = %q, want exact saved thread", harnessState.lifecycleArchiver.targets)
 	}
 	return nil
 }

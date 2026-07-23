@@ -321,7 +321,7 @@ Before declaring the fix complete:
 - [ ] All 6 scenarios pass
 - [ ] Regression test passes (original bug fixed)
 - [ ] Unit tests pass: `go test ./internal/dolt/... -v`
-- [ ] Integration tests pass: `DOLT_TEST_INTEGRATION=1 go test ./test/integration/lifecycle/... -tags=integration`
+- [ ] Archive production and regression tests pass: `go test -count=1 ./agm/cmd/agm ./agm/internal/ops ./agm/test/regression -run 'Archive|ResolveIdentifier'`
 - [ ] No compilation errors
 - [ ] No lint warnings: `golangci-lint run ./...`
 - [ ] Documentation updated

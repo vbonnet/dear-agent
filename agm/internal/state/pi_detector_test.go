@@ -38,3 +38,31 @@ func TestPiManagedPermissionPromptBlocksDelivery(t *testing.T) {
 		t.Fatalf("delivery = %s, want %s", got, CanReceiveNo)
 	}
 }
+
+func TestLatestPiManagedStateRejectsMalformedAndStaleFooters(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		output string
+		want   string
+	}{
+		{name: "missing marker", output: "Pi footer unknown"},
+		{name: "missing state", output: "Pi footer\nAGM"},
+		{name: "missing separator", output: "AGM ready"},
+		{name: "unknown mode", output: "AGM manual/ready"},
+		{name: "unknown state", output: "AGM plan/waiting"},
+		{name: "default ready", output: "AGM default/ready", want: "ready"},
+		{name: "last marker wins", output: "AGM plan/ready\nAGM auto/working", want: "working"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := latestPiManagedState(test.output); got != test.want {
+				t.Fatalf("latestPiManagedState(%q) = %q, want %q", test.output, got, test.want)
+			}
+		})
+	}
+}
+
+func TestStateStringPreservesContractValue(t *testing.T) {
+	if got := StateBlockedPermission.String(); got != string(StateBlockedPermission) {
+		t.Fatalf("State.String() = %q, want %q", got, StateBlockedPermission)
+	}
+}

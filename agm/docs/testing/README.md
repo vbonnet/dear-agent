@@ -65,26 +65,27 @@ go tool cover -html=coverage.out
 **Location**: `test/integration/**/*_test.go`
 
 **Prerequisites**:
-- Dolt server running
-- `DOLT_TEST_INTEGRATION=1` environment variable set
-- Test workspace configured
+- Go and tmux for the isolated lifecycle
+- Provider credentials or external services only for their individually scoped
+  host probes
 
 **Run All Integration Tests**:
 ```bash
-export DOLT_TEST_INTEGRATION=1
-go test ./test/integration/... -tags=integration -v
+go test -race -count=1 -timeout=20m \
+  -tags=integration ./agm/test/integration/...
 ```
 
-**Run Lifecycle Tests**:
+**Run the Source-Built Codex Lifecycle**:
 ```bash
-export DOLT_TEST_INTEGRATION=1
-go test ./test/integration/lifecycle/... -tags=integration -v
+go test -race -count=1 -tags=integration \
+  ./agm/test/integration/isolated \
+  -run '^TestCodexLifecycleUsesIsolatedSourceEnvironment$'
 ```
 
 **Key Test Files**:
-- `test/integration/lifecycle/archive_test.go` - Archive command integration tests
-- `test/integration/lifecycle/lifecycle_suite_test.go` - Full lifecycle tests
-- `test/integration/lifecycle/list_test.go` - List command tests
+- `test/integration/isolated/codex_lifecycle_test.go` - Source-built Codex lifecycle
+- `test/integration/portable/active_harness_test.go` - Credential-free active-harness parity
+- `internal/ops/session_archive_test.go` - Durable archive lifecycle and safety
 
 ---
 

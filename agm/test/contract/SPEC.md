@@ -18,6 +18,10 @@
 
 **CTEST-07** When the installed Pi binary loads dear-agent project resources, the suite shall exit its non-interactive model-list probe without entering the reserved legacy `hooks/` migration prompt.
 
+**CTEST-08** When provider credentials are absent, the contract-tagged suite shall still compile and execute the credential-free active-harness registry contract.
+
+**CTEST-09** When a test only configures a provider mock server without invoking production adapter behavior, the system shall not report it as adapter contract coverage.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/test_support_package_guardrails.feature`
