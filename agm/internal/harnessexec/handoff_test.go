@@ -346,6 +346,33 @@ func TestExpiryProtocolRemovesUnconsumedHandoffAtDeadline(t *testing.T) {
 	}
 }
 
+func TestDetachedExpiryHelperInterceptsGoTestBinaryBeforeTestsRun(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	path, err := stageHandoff(CodexProtocol, []string{"OPENAI_API_KEY=detached-expiry-canary"})
+	if err != nil {
+		t.Fatalf("stage handoff: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(path) })
+
+	if err := startHandoffExpiry(os.Args[0], path, time.Now().Add(250*time.Millisecond)); err != nil {
+		t.Fatalf("start detached expiration helper from Go test binary: %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		_, statErr := os.Stat(path)
+		if os.IsNotExist(statErr) {
+			return
+		}
+		if statErr != nil {
+			t.Fatalf("inspect detached handoff: %v", statErr)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("detached expiration helper re-entered tests or failed to remove the handoff")
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
 func TestPreparedCommandUsesCoInstalledAGMFromCompanionBinary(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
 	binDir := t.TempDir()

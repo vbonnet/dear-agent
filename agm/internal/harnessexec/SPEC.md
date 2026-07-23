@@ -43,7 +43,7 @@ sandbox the harness beyond the native permission mode requested by AGM.
 
 **HEXEC-11** When Claude telemetry forwarding is disabled, the system shall remove ambient OpenTelemetry endpoint and header configuration; when forwarding is enabled, it shall use the invoking AGM process's endpoint and headers.
 
-**HEXEC-12** When AGM stages a credential-bearing launch handoff, the system shall start an independent, credential-free expiration helper before returning the command, shall fail closed and remove the handoff if that helper cannot start, and shall remove the same unconsumed handoff no later than its bounded lifetime without relying on a later AGM launch.
+**HEXEC-12** When AGM stages a credential-bearing launch handoff, the system shall start an independent, credential-free expiration helper before returning the command, shall intercept that helper before application or test main execution, shall fail closed and remove the handoff if the helper cannot start, and shall remove the same unconsumed handoff no later than its bounded lifetime without relying on a later AGM launch.
 
 ## BDD Traceability
 

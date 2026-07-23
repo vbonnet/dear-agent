@@ -1037,7 +1037,7 @@ func agmBuildsTheCodexPrivateLaunchBoundary(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/harnessexec",
-		"-run", `^(TestPrepared(ClaudeCommand(CarriesCallerOnlyOAuthAndTelemetry|ClearsCallerAbsentPaneState)|CodexCommand(CarriesCallerAllowlistAndPreservesPaneIdentity|ClearsCallerAbsentPaneCredentials)|Command(CancelRemovesUndeliveredHandoff|UsesCoInstalledAGMFromCompanionBinary|UsesRenamedCurrentAGMExecutable|MakesRelativeStateDirectoryAbsolute|SchedulesIndependentExpiration|RemovesHandoffWhenExpirationCannotBeScheduled))|TestExpiryProtocolRemovesUnconsumedHandoffAtDeadline|TestClaudeResumeChangesDirectoryBeforeDirectReplacement)$`,
+		"-run", `^(TestPrepared(ClaudeCommand(CarriesCallerOnlyOAuthAndTelemetry|ClearsCallerAbsentPaneState)|CodexCommand(CarriesCallerAllowlistAndPreservesPaneIdentity|ClearsCallerAbsentPaneCredentials)|Command(CancelRemovesUndeliveredHandoff|UsesCoInstalledAGMFromCompanionBinary|UsesRenamedCurrentAGMExecutable|MakesRelativeStateDirectoryAbsolute|SchedulesIndependentExpiration|RemovesHandoffWhenExpirationCannotBeScheduled))|TestExpiryProtocolRemovesUnconsumedHandoffAtDeadline|TestDetachedExpiryHelperInterceptsGoTestBinaryBeforeTestsRun|TestClaudeResumeChangesDirectoryBeforeDirectReplacement)$`,
 		"-count=1", "-v",
 	)
 	cmd.Dir = bddRepoRoot()
@@ -1111,6 +1111,7 @@ func anUnconsumedCredentialHandoffShouldExpireIndependentlyOfLaterLaunches(ctx c
 		"TestPreparedCommandSchedulesIndependentExpiration",
 		"TestPreparedCommandRemovesHandoffWhenExpirationCannotBeScheduled",
 		"TestExpiryProtocolRemovesUnconsumedHandoffAtDeadline",
+		"TestDetachedExpiryHelperInterceptsGoTestBinaryBeforeTestsRun",
 	} {
 		if !strings.Contains(state.privateHandoffTestOutput, "--- PASS: "+behavior) {
 			return fmt.Errorf("private handoff expiration behavior %s did not pass:\n%s", behavior, state.privateHandoffTestOutput)

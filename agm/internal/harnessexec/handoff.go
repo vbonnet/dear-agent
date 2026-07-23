@@ -19,9 +19,10 @@ import (
 )
 
 const (
-	handoffVersion = 1
-	handoffMaxAge  = 10 * time.Minute
-	handoffMaxSize = 64 << 10
+	handoffVersion  = 1
+	handoffMaxAge   = 10 * time.Minute
+	handoffMaxSize  = 64 << 10
+	expiryHelperEnv = "AGM_PRIVATE_HANDOFF_EXPIRY_HELPER"
 )
 
 var (
@@ -124,7 +125,7 @@ func cleanupFailedHandoff(path string, scheduleErr error) error {
 }
 
 func startHandoffExpiry(executable, path string, expiresAt time.Time) error {
-	cmd := exec.Command( // #nosec G204 -- executable is the resolved current/co-installed AGM binary.
+	cmd := exec.Command( // #nosec G204,G702 -- executable is the resolved current/co-installed AGM binary.
 		executable,
 		ExpiryProtocol,
 		"--handoff", path,
@@ -133,7 +134,7 @@ func startHandoffExpiry(executable, path string, expiresAt time.Time) error {
 	// The expiry helper needs neither caller credentials nor terminal ownership.
 	// Its isolated process group and released handle let it outlive an AGM caller
 	// that exits immediately after queuing a tmux command.
-	cmd.Env = []string{}
+	cmd.Env = []string{expiryHelperEnv + "=1"}
 	cmd.SysProcAttr = procguard.ProcessGroupAttr()
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start expiration helper: %w", err)
