@@ -47,7 +47,7 @@ sandbox the harness beyond the native permission mode requested by AGM.
 
 **HEXEC-13** When a current-pane launch command cannot execute until its producing AGM process exits, the system shall give the expiration helper a credential-free producer-liveness pipe, keep the handoff fresh only while that pipe remains open, and begin one bounded post-exit lifetime when the producer exits; cancellation shall release the pipe and remove the handoff.
 
-**HEXEC-14** When tmux accepts a private launch submission but its acknowledgement is lost, every current-pane, detached CLI, MCP, shared operations, agent adapter, legacy resume, and resumability-validation surface shall treat the launch as potentially delivered, preserve its handoff and producer lease, and continue the lifecycle without retrying or compensating the possibly queued command.
+**HEXEC-14** When tmux accepts a private launch submission but its acknowledgement is lost, the system shall require every current-pane, detached CLI, MCP, shared operations, agent adapter, legacy resume, and resumability-validation surface to treat the launch as potentially delivered, preserve its handoff and producer lease, and continue the lifecycle without retrying or compensating the possibly queued command.
 
 ## BDD Traceability
 
