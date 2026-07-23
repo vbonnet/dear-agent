@@ -3911,6 +3911,9 @@ func codexHookReviewShouldReceiveNoAutomatedInput(ctx context.Context) error {
 			"-count=1", "-v",
 		)
 		cmd.Dir = bddRepoRoot()
+		if os.Getenv("CI_SKIP_TMUX") != "true" {
+			cmd.Env = append(os.Environ(), "AGM_TEST_TMUX=1")
+		}
 		output, runErr := cmd.CombinedOutput()
 		harnessState.codexHookReviewTestOutput = string(output)
 		harnessState.codexHookReviewTestErr = runErr
