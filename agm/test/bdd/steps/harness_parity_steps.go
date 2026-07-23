@@ -455,6 +455,7 @@ type bddLifecycleTmux struct {
 	sessions map[string]bool
 	sent     []string
 	events   []string
+	waited   []string
 }
 
 func newBDDLifecycleTmux() *bddLifecycleTmux {
@@ -482,6 +483,19 @@ func (t *bddLifecycleTmux) CreateSession(name, _ string) error {
 	return nil
 }
 func (t *bddLifecycleTmux) AttachSession(string) error { return nil }
+func (t *bddLifecycleTmux) WaitForHarnessReady(_ context.Context, name, harness string, timeout time.Duration) error {
+	if !t.sessions[name] {
+		return fmt.Errorf("tmux target %q does not exist", name)
+	}
+	if harness != "codex-cli" {
+		return fmt.Errorf("unexpected lifecycle harness %q", harness)
+	}
+	if timeout <= 0 {
+		return fmt.Errorf("readiness timeout must be positive")
+	}
+	t.waited = append(t.waited, name+":"+harness)
+	return nil
+}
 func (t *bddLifecycleTmux) CheckInputReadiness(_ context.Context, name, harness string) (session.InputReadiness, error) {
 	t.events = append(t.events, "readiness:"+name+":"+harness)
 	if !t.sessions[name] {
@@ -490,7 +504,17 @@ func (t *bddLifecycleTmux) CheckInputReadiness(_ context.Context, name, harness 
 	if harness != "codex-cli" {
 		return session.InputReadiness{}, fmt.Errorf("unexpected lifecycle harness %q", harness)
 	}
-	return session.InputReadiness{Ready: true, State: "YES"}, nil
+	return session.InputReadiness{Ready: true, State: "YES", PaneID: name}, nil
+}
+func (t *bddLifecycleTmux) SendKeysIfInputReady(ctx context.Context, name, harness, keys string, _ session.InputDeliveryOptions) (session.InputReadiness, error) {
+	readiness, err := t.CheckInputReadiness(ctx, name, harness)
+	if err != nil || !readiness.Ready {
+		return readiness, err
+	}
+	if err := t.SendKeys(name, keys); err != nil {
+		return readiness, err
+	}
+	return readiness, nil
 }
 func (t *bddLifecycleTmux) SendKeys(name, keys string) error {
 	if !t.sessions[name] {
@@ -4226,6 +4250,9 @@ func aCodexCLISessionCreatedByAGM(ctx context.Context) error {
 	}
 	if len(createRuntime.launches) != 1 || createRuntime.launches[0].Harness != "codex-cli" || len(createRuntime.completions) != 1 {
 		return fmt.Errorf("create did not traverse the Codex production runtime: launches=%d completions=%d", len(createRuntime.launches), len(createRuntime.completions))
+	}
+	if !slices.Equal(tmuxRuntime.waited, []string{harnessState.lifecycleSessionName + ":codex-cli"}) {
+		return fmt.Errorf("create did not wait for exact Codex readiness: %q", tmuxRuntime.waited)
 	}
 	harnessState.lifecycleTransitions = append(harnessState.lifecycleTransitions, "created")
 	return nil

@@ -270,7 +270,7 @@ func lifecycleUsesSourceBuiltAGMAndUniqueTmuxSocket() error {
 
 func lifecycleExercisesCompleteCodexLifecycle() error {
 	root := packageSpecBDDRepoRoot()
-	lifecycleData, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "lifecycle", "codex_isolated_lifecycle_test.go"))
+	lifecycleData, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "isolated", "codex_lifecycle_test.go"))
 	if err != nil {
 		return err
 	}
@@ -308,7 +308,7 @@ func lifecycleExercisesCompleteCodexLifecycle() error {
 
 func unexpectedLifecycleSetupFailuresFail() error {
 	root := packageSpecBDDRepoRoot()
-	data, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "lifecycle", "codex_isolated_lifecycle_test.go"))
+	data, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "isolated", "codex_lifecycle_test.go"))
 	if err != nil {
 		return err
 	}
