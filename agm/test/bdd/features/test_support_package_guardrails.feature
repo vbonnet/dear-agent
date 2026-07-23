@@ -126,4 +126,5 @@ Feature: Test support package guardrails
     When AGM validates named test environment ownership
     Then canonical creation reconstruction discovery and cleanup should share one root
     And retired named environment paths should be discovered and removed exactly
+    And overlong names should be rejected only for new environments
     And unsafe named test environment paths should be rejected before mutation

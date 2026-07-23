@@ -30,7 +30,7 @@ import (
 const (
 	testEnvironmentPrefix = "agm-test-"
 	testEnvironmentRoot   = "/tmp"
-	maxNamedEnvironment   = 64
+	maxNewEnvironmentName = 64
 )
 
 // Environment variable names for test sandbox isolation.
@@ -129,20 +129,30 @@ func newWithRoot(id, root string) *TestContext {
 // same-name path under the retired os.TempDir root so pre-migration
 // environments cannot be reported destroyed while left behind.
 func LoadNamed(name string) (*TestContext, error) {
-	if err := ValidateName(name); err != nil {
+	if err := validatePathSafeName(name); err != nil {
 		return nil, err
 	}
 	return newNamedWithRoot(name, testEnvironmentRoot), nil
 }
 
-// ValidateName rejects names that could escape the owned temporary root,
+// ValidateName rejects new names that could escape the owned temporary root,
 // inject terminal control characters, or exceed the short macOS socket budget.
+// LoadNamed and ListNamed deliberately retain path-safe access to longer names
+// created before the socket-path limit existed so they can still be destroyed.
 func ValidateName(name string) error {
+	if err := validatePathSafeName(name); err != nil {
+		return err
+	}
+	if len(name) > maxNewEnvironmentName {
+		return fmt.Errorf("test environment name must not exceed %d bytes", maxNewEnvironmentName)
+	}
+	return nil
+}
+
+func validatePathSafeName(name string) error {
 	switch {
 	case name == "":
 		return fmt.Errorf("test environment name must not be empty")
-	case len(name) > maxNamedEnvironment:
-		return fmt.Errorf("test environment name must not exceed %d bytes", maxNamedEnvironment)
 	case filepath.IsAbs(name):
 		return fmt.Errorf("test environment name must be relative")
 	case strings.ContainsAny(name, `/\`):
@@ -175,7 +185,7 @@ func ListNamed() ([]*TestContext, error) {
 				continue
 			}
 			name := strings.TrimPrefix(entry.Name(), testEnvironmentPrefix)
-			if err := ValidateName(name); err != nil {
+			if err := validatePathSafeName(name); err != nil {
 				continue
 			}
 			if _, exists := seen[name]; exists {
@@ -223,7 +233,7 @@ func FromEnv() (*TestContext, bool) {
 	if runID == "" {
 		return nil, false
 	}
-	if err := ValidateName(runID); err != nil {
+	if err := validatePathSafeName(runID); err != nil {
 		return nil, false
 	}
 	sessionsDir := os.Getenv(EnvSessionsDir)

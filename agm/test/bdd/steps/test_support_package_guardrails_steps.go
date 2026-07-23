@@ -93,6 +93,7 @@ func RegisterTestSupportPackageGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates named test environment ownership$`, agmValidatesNamedTestEnvironmentOwnership)
 	ctx.Step(`^canonical creation reconstruction discovery and cleanup should share one root$`, namedTestEnvironmentLifecycleSharesOneRoot)
 	ctx.Step(`^retired named environment paths should be discovered and removed exactly$`, retiredNamedTestEnvironmentPathsAreRemoved)
+	ctx.Step(`^overlong names should be rejected only for new environments$`, overlongNamesAreRejectedOnlyForNewEnvironments)
 	ctx.Step(`^unsafe named test environment paths should be rejected before mutation$`, unsafeNamedTestEnvironmentPathsAreRejected)
 }
 
@@ -380,7 +381,7 @@ func agmValidatesNamedTestEnvironmentOwnership(ctx context.Context) error {
 		"go", "test",
 		"./agm/internal/testcontext",
 		"./agm/cmd/agm",
-		"-run", `^(TestListNamedSharesLifecycleRoot|TestRetiredNamedEnvironmentIsDiscoveredAndCleanedExactly|TestNamedEnvironmentRejectsUnownedPaths|TestFromEnvRejectsUnownedRunID|TestTestEnvironmentCreateListDestroySharesOwnedRoot|TestTestEnvironmentCommandsRejectTraversalNames|TestTestEnvironmentDestroyRemovesRetiredRoot)$`,
+		"-run", `^(TestListNamedSharesLifecycleRoot|TestRetiredNamedEnvironmentIsDiscoveredAndCleanedExactly|TestNamedEnvironmentRejectsUnownedPaths|TestNewNamedRejectsOverlongButLoadNamedRetainsCleanupAccess|TestFromEnvRejectsUnownedRunID|TestTestEnvironmentCreateListDestroySharesOwnedRoot|TestTestEnvironmentCommandsRejectTraversalNames|TestTestEnvironmentDestroyRemovesRetiredRoot)$`,
 		"-count=1",
 		"-v",
 	)
@@ -404,6 +405,13 @@ func retiredNamedTestEnvironmentPathsAreRemoved(ctx context.Context) error {
 		ctx,
 		"TestRetiredNamedEnvironmentIsDiscoveredAndCleanedExactly",
 		"TestTestEnvironmentDestroyRemovesRetiredRoot",
+	)
+}
+
+func overlongNamesAreRejectedOnlyForNewEnvironments(ctx context.Context) error {
+	return requireNamedTestEnvironmentTests(
+		ctx,
+		"TestNewNamedRejectsOverlongButLoadNamedRetainsCleanupAccess",
 	)
 }
 

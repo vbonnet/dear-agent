@@ -75,11 +75,10 @@ func TestTestEnvironmentCommandsRejectTraversalNames(t *testing.T) {
 }
 
 func TestTestEnvironmentDestroyRemovesRetiredRoot(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
 	retiredRoot := filepath.Clean(os.TempDir())
-	if retiredRoot == "/tmp" {
-		t.Skip("canonical and retired test-environment roots are identical")
-	}
-	name := "legacy-cli-" + testcontext.New().RunID
+	require.NotEqual(t, "/tmp", retiredRoot)
+	name := testcontext.New().RunID + strings.Repeat("l", 64)
 	retiredBase := filepath.Join(retiredRoot, "agm-test-"+name)
 	retiredSocket := filepath.Join(retiredRoot, "agm-test-"+name+".sock")
 	require.NoError(t, os.MkdirAll(filepath.Join(retiredBase, "home"), 0700))

@@ -78,7 +78,6 @@ func TestNamedEnvironmentRejectsUnownedPaths(t *testing.T) {
 		`..\escape`,
 		"/absolute",
 		"line\nbreak",
-		strings.Repeat("x", maxNamedEnvironment+1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -89,6 +88,17 @@ func TestNamedEnvironmentRejectsUnownedPaths(t *testing.T) {
 				t.Fatalf("LoadNamed(%q) accepted an unsafe name", name)
 			}
 		})
+	}
+}
+
+func TestNewNamedRejectsOverlongButLoadNamedRetainsCleanupAccess(t *testing.T) {
+	t.Parallel()
+	name := strings.Repeat("x", maxNewEnvironmentName+1)
+	if _, err := NewNamed(name); err == nil {
+		t.Fatalf("NewNamed accepted %d-byte name", len(name))
+	}
+	if _, err := LoadNamed(name); err != nil {
+		t.Fatalf("LoadNamed rejected path-safe legacy name: %v", err)
 	}
 }
 
@@ -125,12 +135,11 @@ func TestListNamedSharesLifecycleRoot(t *testing.T) {
 }
 
 func TestRetiredNamedEnvironmentIsDiscoveredAndCleanedExactly(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
 	roots := namedEnvironmentRoots()
-	if len(roots) < 2 {
-		t.Skip("canonical and retired test-environment roots are identical")
-	}
+	require.Len(t, roots, 2)
 	retiredRoot := roots[1]
-	name := "retired-" + New().RunID
+	name := New().RunID + strings.Repeat("l", maxNewEnvironmentName)
 	retired := newWithRoot(name, retiredRoot)
 	require.NoError(t, retired.EnsureDirs())
 	t.Cleanup(func() { require.NoError(t, retired.Cleanup()) })
@@ -158,6 +167,8 @@ func TestRetiredNamedEnvironmentIsDiscoveredAndCleanedExactly(t *testing.T) {
 
 	loaded, err := LoadNamed(name)
 	require.NoError(t, err)
+	_, err = NewNamed(name)
+	require.ErrorContains(t, err, "must not exceed")
 	assert.Equal(t, filepath.Join(testEnvironmentRoot, testEnvironmentPrefix+name), loaded.BaseDir)
 	require.NoError(t, loaded.Cleanup())
 

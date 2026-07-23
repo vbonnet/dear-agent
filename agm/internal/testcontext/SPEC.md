@@ -14,11 +14,13 @@
 
 **TCTX-05** When a test context exports its environment, the system shall route runtime readiness and lock state through its run-specific state directory instead of the user's AGM state directory.
 
-**TCTX-06** When a named test environment is constructed or reconstructed, the system shall reject empty, overlong, absolute, path-separated, or control-character names before deriving any filesystem path.
+**TCTX-06** When a named test environment is constructed or reconstructed, the system shall reject empty, absolute, path-separated, or control-character names before deriving any filesystem path.
 
 **TCTX-07** When named test environments are created or reconstructed, the system shall derive their canonical paths beneath one short root shared by discovery and cleanup.
 
 **TCTX-08** When a named environment exists beneath the retired host temporary root, discovery and explicit destroy shall remove that exact validated legacy directory and socket without mutating sibling paths.
+
+**TCTX-09** When a new named environment exceeds the socket-length budget, the system shall reject creation while retaining discovery and cleanup access for a path-safe legacy name.
 
 ## BDD Traceability
 
