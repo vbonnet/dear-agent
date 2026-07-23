@@ -13,6 +13,8 @@
 # RELATED-SPEC: agm/internal/dolt/migrations/SPEC.md
 # RELATED-SPEC: agm/migrations/SPEC.md
 # RELATED-SPEC: agm/scripts/hooks/SPEC.md
+# RELATED-SPEC: agm/test/bdd/steps/SPEC.md
+# RELATED-SPEC: agm/test/e2e/SPEC.md
 # RELATED-SPEC: agm/test/e2e/docker/scripts/SPEC.md
 # RELATED-SPEC: agm/test/e2e/lib/SPEC.md
 # RELATED-SPEC: agm/test/e2e/suites/SPEC.md
@@ -114,3 +116,8 @@ Feature: Cross-language implementation guardrails
       | pi-cli       | deepseek  |
       | pi-cli       | nemotron  |
       | pi-cli       | qwen      |
+
+  Scenario: End-to-end harness lookup supports the platform system shell
+    Given the AGM end-to-end harness detection helper is configured
+    When AGM validates portable harness command lookup
+    Then the exact harness mapping should run under macOS system Bash

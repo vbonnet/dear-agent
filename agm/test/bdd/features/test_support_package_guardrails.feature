@@ -112,3 +112,22 @@ Feature: Test support package guardrails
     When AGM validates performance client readiness
     Then performance workloads should use bounded hub client readiness
     And churn cleanup should be observed before stable clients disconnect
+
+  Scenario: Real Codex lifecycle tests own their complete runtime
+    Given isolated Codex lifecycle test sources are configured
+    When AGM validates real lifecycle isolation
+    Then the lifecycle should use a source-built AGM and unique tmux socket
+    And the lifecycle should exercise send kill resume and archive through the source-built AGM
+    And unexpected lifecycle setup failures should fail the test
+    And cleanup should target only owned test resources
+
+  Scenario: Named test environments remain inside one owned root
+    Given named test environment lifecycle sources are configured
+    When AGM validates named test environment ownership
+    Then canonical creation reconstruction discovery and cleanup should share one root
+    And the canonical short root should be private and scoped to the effective user
+    And existing retired named environments should activate in place
+    And new canonical creation should refuse a retired same-name collision
+    And retired named environment paths should be discovered and removed exactly
+    And overlong names should be rejected only for new environments
+    And unsafe named test environment paths should be rejected before mutation

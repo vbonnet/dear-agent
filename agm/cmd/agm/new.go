@@ -154,9 +154,9 @@ Examples:
 		// This must happen early so SetEnv() configures the tmux socket, sessions dir,
 		// etc. before any tmux operations occur.
 		if testEnvName != "" {
-			tc := testcontext.LoadNamed(testEnvName)
-			if tc == nil {
-				return fmt.Errorf("test environment '%s' not found. Create with: agm test-env create --name=%s", testEnvName, testEnvName)
+			tc, err := testcontext.LoadNamed(testEnvName)
+			if err != nil {
+				return fmt.Errorf("invalid test environment %q: %w", testEnvName, err)
 			}
 			if err := tc.SetEnv(); err != nil {
 				return fmt.Errorf("failed to activate test environment: %w", err)
