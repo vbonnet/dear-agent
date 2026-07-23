@@ -42,6 +42,25 @@ func TestIsCodexComposerReady(t *testing.T) {
 			expected: true,
 		},
 		{
+			name: "Codex 0.145 welcome composer with styled suggestion",
+			content: "\x1b[2m╭────────────────────────────────────────────╮\x1b[0m\n" +
+				"\x1b[2m│ >_ \x1b[0;1mOpenAI Codex\x1b[0;2m (v0.145.0)                 │\x1b[0m\n" +
+				"\x1b[2m│ model:     \x1b[0mgpt-5.5 high\x1b[2m   \x1b[0m/model to change │\n" +
+				"\x1b[2m╰────────────────────────────────────────────╯\x1b[0m\n" +
+				"  To get started, describe a task or try /review\n\n" +
+				"\x1b[1m›\x1b[0m \x1b[2mRun /review on my current changes\x1b[0m\n\n" +
+				"  gpt-5.5 high · ~/.agm/sandboxes/example/merged/repo0",
+			expected: true,
+		},
+		{
+			name: "Codex 0.145 welcome composer with human draft",
+			content: "\x1b[2m│ >_ \x1b[0;1mOpenAI Codex\x1b[0;2m (v0.145.0) │\x1b[0m\n" +
+				"\x1b[2m│ model: \x1b[0mgpt-5.5 high\x1b[2m \x1b[0m/model to change │\n" +
+				"\x1b[1m›\x1b[0m Run /review on my current changes\n\n" +
+				"  gpt-5.5 high · ~/src/project",
+			expected: false,
+		},
+		{
 			name:     "typed initial draft is not ready",
 			content:  "│ >_ OpenAI Codex (v0.141.0) │\n│ model: gpt-5.5 xhigh /model to change │\n╰──────────────────────────────╯\n› Continue the task",
 			expected: false,
@@ -232,7 +251,7 @@ func TestContainsCodexModelUpgradePromptPattern(t *testing.T) {
 }
 
 func TestIsCodexHookReviewRequired(t *testing.T) {
-	const activeReview = `Hooks need review
+	const activeSelector = `Hooks need review
 
 4 hooks are new or changed.
 
@@ -243,6 +262,27 @@ Hooks can run outside the sandbox after you trust them.
   3. Continue without trusting (hooks won't run)
 
 Press enter to confirm or esc to go back`
+	const hookDashboard = `Hooks
+Lifecycle hooks from config and enabled plugins.
+
+⚠ 11 hooks need review before they can run.
+
+Event                 Installed   Active      Review      Description
+PreToolUse            5           0           5           Before a tool exec
+SessionStart          1           0           1           When a new session
+
+Press t to trust all; enter to review hooks; esc to close`
+	const composer = `│ >_ OpenAI Codex (v0.145.0) │
+│ model: gpt-5.6 high /model to change │
+╰──────────────────────────────╯
+›
+
+gpt-5.6 high · ~/src/project`
+	const styledGhostComposer = "\x1b[2m│ >_ \x1b[0;1mOpenAI Codex\x1b[0;2m (v0.145.0) │\x1b[0m\n" +
+		"\x1b[2m│ model: \x1b[0mgpt-5.6 high\x1b[2m \x1b[0m/model to change │\n" +
+		"To get started, describe a task or try /review\n\n" +
+		"\x1b[1m›\x1b[0m \x1b[2mRun /review on my current changes\x1b[0m\n\n" +
+		"gpt-5.6 high · ~/src/project"
 
 	tests := []struct {
 		name     string
@@ -251,7 +291,17 @@ Press enter to confirm or esc to go back`
 	}{
 		{
 			name:     "Codex 0.145 structured hook review",
-			content:  activeReview,
+			content:  activeSelector,
+			expected: true,
+		},
+		{
+			name:     "numbered selector above blank terminal rows",
+			content:  activeSelector + strings.Repeat("\n", 18),
+			expected: true,
+		},
+		{
+			name:     "active dashboard redraw below retained composer",
+			content:  hookDashboard + "\n" + composer + "\n" + hookDashboard,
 			expected: true,
 		},
 		{
@@ -260,13 +310,28 @@ Press enter to confirm or esc to go back`
 			expected: false,
 		},
 		{
+			name:     "incomplete dashboard prose is not active",
+			content:  "Hooks\nLifecycle hooks from config and enabled plugins.\n11 hooks need review before they can run.",
+			expected: false,
+		},
+		{
 			name: "newer composer supersedes retained selector",
-			content: activeReview + `
+			content: activeSelector + `
 review completed
 │ >_ OpenAI Codex (v0.145.0) │
 │ model: gpt-5.6 high /model to change │
 ╰──────────────────────────────╯
 ›`,
+			expected: false,
+		},
+		{
+			name:     "newer composer supersedes retained dashboard",
+			content:  hookDashboard + "\n" + composer,
+			expected: false,
+		},
+		{
+			name:     "newer styled ghost composer supersedes retained dashboard",
+			content:  hookDashboard + "\n" + styledGhostComposer,
 			expected: false,
 		},
 		{
@@ -454,6 +519,21 @@ func TestWaitForCodexPromptAutoAcceptsTrust(t *testing.T) {
 	}
 }
 
+func TestWaitForCodexPromptAcceptsCurrentWelcomeGhostComposer(t *testing.T) {
+	sessionName := "test-codex-current-welcome"
+	script := `printf '\033[2m│ >_ \033[0;1mOpenAI Codex\033[0;2m (v0.145.0) │\033[0m\n'
+printf '\033[2m│ model: \033[0mgpt-5.5 high\033[2m \033[0m/model to change │\n'
+printf 'To get started, describe a task or try /review\n\n'
+printf '\033[1m›\033[0m \033[2mRun /review on my current changes\033[0m\n\n'
+printf 'gpt-5.5 high · ~/.agm/sandboxes/example/merged/repo0\n'
+sleep 30`
+	newCodexTestSession(t, sessionName, "sh", "-c", script)
+
+	if err := WaitForCodexPrompt(sessionName, 10*time.Second); err != nil {
+		t.Errorf("WaitForCodexPrompt failed to detect current styled welcome composer: %v", err)
+	}
+}
+
 // TestWaitForCodexPromptSelectsExistingModel verifies that the Codex
 // model-upgrade prompt does not block startup. AGM must choose the explicitly
 // requested existing model instead of accepting the highlighted upgrade option.
@@ -502,5 +582,38 @@ sleep 30`, inputPath)
 	}
 	if info.Size() != 0 {
 		t.Fatalf("hook review received %d input bytes, want none", info.Size())
+	}
+}
+
+func TestWaitForCodexPromptFailsFastForHookDashboardWithoutInput(t *testing.T) {
+	sessionName := "test-codex-hook-dashboard"
+	inputPath := fmt.Sprintf("%s/input-byte", t.TempDir())
+	script := fmt.Sprintf(`stty -echo -icanon min 1 time 0
+printf "OpenAI Codex (v0.145.0)\n/model to change\n›\ngpt-5.6 high · ~/src/project\n"
+printf "Hooks\nLifecycle hooks from config and enabled plugins.\n\n⚠ 11 hooks need review before they can run.\n\nEvent Installed Active Review Description\nPreToolUse 5 0 5 Before a tool exec\n\nPress t to trust all; enter to review hooks; esc to close\n"
+dd bs=1 count=1 of=%q 2>/dev/null
+sleep 30`, inputPath)
+	newCodexTestSession(t, sessionName, "sh", "-c", script)
+
+	start := time.Now()
+	err := WaitForCodexPrompt(sessionName, 10*time.Second)
+	elapsed := time.Since(start)
+	if !errors.Is(err, ErrCodexHookReviewRequired) {
+		t.Fatalf("WaitForCodexPrompt() error = %v, want ErrCodexHookReviewRequired", err)
+	}
+	if elapsed > 3*time.Second {
+		t.Fatalf("hook dashboard failure took %v, want prompt failure", elapsed)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	info, statErr := os.Stat(inputPath)
+	if errors.Is(statErr, os.ErrNotExist) {
+		return
+	}
+	if statErr != nil {
+		t.Fatalf("stat input recorder: %v", statErr)
+	}
+	if info.Size() != 0 {
+		t.Fatalf("hook dashboard received %d input bytes, want none", info.Size())
 	}
 }

@@ -349,7 +349,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates deprecated configuration directory parity$`, agmValidatesDeprecatedConfigurationDirectoryParity)
 	ctx.Step(`^harness "([^"]*)" should have configuration directory "([^"]*)"$`, harnessShouldHaveConfigurationDirectory)
 	ctx.Step(`^a Codex CLI trust prompt$`, aCodexCLITrustPrompt)
-	ctx.Step(`^Codex hooks require explicit review$`, codexHooksRequireExplicitReview)
+	ctx.Step(`^Codex hooks require explicit review in the "([^"]*)" surface$`, codexHooksRequireExplicitReview)
 	ctx.Step(`^an AGY ready prompt$`, anAGYReadyPrompt)
 	ctx.Step(`^an AGY trust prompt$`, anAGYTrustPrompt)
 	ctx.Step(`^an AGY feedback survey over a ready prompt$`, anAGYFeedbackSurveyOverAReadyPrompt)
@@ -597,7 +597,7 @@ func codexResumeSuccessShouldRequireProcessAndComposerReadiness(ctx context.Cont
 		testCtx,
 		"go", "test",
 		"./agm/cmd/agm", "./agm/internal/tmux", "./agm/internal/state",
-		"-run", `^(TestWaitForResumedCodexRequiresProcessAndComposer|TestWaitForCodexPromptRejectsEchoedLaunchModel|TestIsCodexComposerReady|TestIsProcessReadyWithRuntimePreservesCancellation(Before|During)CodexFallback|TestDetector_CodexReadinessRequiresStructuredComposer)$`,
+		"-run", `^(TestWaitForResumedCodexRequiresProcessAndComposer|TestWaitForCodexPrompt(RejectsEchoedLaunchModel|AcceptsCurrentWelcomeGhostComposer)|TestIsCodexComposerReady|TestIsProcessReadyWithRuntimePreservesCancellation(Before|During)CodexFallback|TestDetector_CodexReadinessRequiresStructuredComposer)$`,
 		"-count=1",
 	)
 	cmd.Dir = bddRepoRoot()
@@ -3276,11 +3276,13 @@ func aCodexCLIComposerPane(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	harnessState.paneOutput = `╭────────────────────────────────────────────────────╮
-│ >_ OpenAI Codex                                    │
-│  /model to change model                            │
-╰────────────────────────────────────────────────────╯
-›`
+	harnessState.paneOutput = "\x1b[2m╭────────────────────────────────────────────╮\x1b[0m\n" +
+		"\x1b[2m│ >_ \x1b[0;1mOpenAI Codex\x1b[0;2m (v0.145.0)                 │\x1b[0m\n" +
+		"\x1b[2m│ model:     \x1b[0mgpt-5.5 high\x1b[2m   \x1b[0m/model to change │\n" +
+		"\x1b[2m╰────────────────────────────────────────────╯\x1b[0m\n" +
+		"  To get started, describe a task or try /review\n\n" +
+		"\x1b[1m›\x1b[0m \x1b[2mRun /review on my current changes\x1b[0m\n\n" +
+		"  gpt-5.5 high · ~/.agm/sandboxes/example/merged/repo0"
 	return nil
 }
 
@@ -3308,13 +3310,15 @@ func aCodexCLITrustPrompt(ctx context.Context) error {
 	return nil
 }
 
-func codexHooksRequireExplicitReview(ctx context.Context) error {
+func codexHooksRequireExplicitReview(ctx context.Context, surface string) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
 		return err
 	}
 	harnessState.harness = "codex-cli"
-	harnessState.paneOutput = `Hooks need review
+	switch surface {
+	case "numbered selector":
+		harnessState.paneOutput = `Hooks need review
 
 4 hooks are new or changed.
 
@@ -3324,7 +3328,28 @@ Hooks can run outside the sandbox after you trust them.
   2. Trust all and continue
   3. Continue without trusting (hooks won't run)
 
-Press enter to confirm or esc to go back`
+Press enter to confirm or esc to go back` + strings.Repeat("\n", 18)
+	case "hooks dashboard":
+		const dashboard = `Hooks
+Lifecycle hooks from config and enabled plugins.
+
+⚠ 11 hooks need review before they can run.
+
+Event                 Installed   Active      Review      Description
+PreToolUse            5           0           5           Before a tool exec
+SessionStart          1           0           1           When a new session
+
+Press t to trust all; enter to review hooks; esc to close`
+		harnessState.paneOutput = dashboard + `
+│ >_ OpenAI Codex (v0.145.0) │
+│ model: gpt-5.6 high /model to change │
+╰──────────────────────────────╯
+›
+gpt-5.6 high · ~/src/project
+` + dashboard
+	default:
+		return fmt.Errorf("unknown Codex hook-review surface %q", surface)
+	}
 	return nil
 }
 
@@ -3919,8 +3944,8 @@ func codexHookReviewShouldReceiveNoAutomatedInput(ctx context.Context) error {
 	if harnessState.codexHookReviewTestOutput == "" && harnessState.codexHookReviewTestErr == nil {
 		testCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/tmux", "./agm/internal/ops", "./agm/cmd/agm",
-			"-run", `^(TestWaitForCodexPromptFailsFastForHookReviewWithoutInput|TestHandleHarnessStartupStateFailsHookReviewWithoutAdvancing|TestCreateSession_CodexHookReviewPropagatesBeforeRegistrationOrPrompt|TestResumeSessionCodexPropagatesHookReviewBeforeActivityUpdate)$`,
+		cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/tmux", "./agm/internal/session", "./agm/internal/ops", "./agm/cmd/agm",
+			"-run", `^(TestWaitForCodexPromptFailsFastForHookReviewWithoutInput|TestWaitForCodexPromptFailsFastForHookDashboardWithoutInput|TestHandleHarnessStartupStateFailsHookReviewWithoutAdvancing|TestRealTmuxReadinessFailsFastForCodexHookReviewAboveBlankRows|TestCreateSession_CodexHookReviewPropagatesBeforeRegistrationOrPrompt|TestResumeSessionCodexPropagatesHookReviewBeforeActivityUpdate)$`,
 			"-count=1", "-v",
 		)
 		cmd.Dir = bddRepoRoot()
@@ -3939,12 +3964,16 @@ func codexHookReviewShouldReceiveNoAutomatedInput(ctx context.Context) error {
 	}
 	for _, testName := range []string{
 		"TestWaitForCodexPromptFailsFastForHookReviewWithoutInput",
+		"TestWaitForCodexPromptFailsFastForHookDashboardWithoutInput",
 		"TestHandleHarnessStartupStateFailsHookReviewWithoutAdvancing",
+		"TestRealTmuxReadinessFailsFastForCodexHookReviewAboveBlankRows",
 		"TestCreateSession_CodexHookReviewPropagatesBeforeRegistrationOrPrompt",
 		"TestResumeSessionCodexPropagatesHookReviewBeforeActivityUpdate",
 	} {
 		passed := strings.Contains(harnessState.codexHookReviewTestOutput, "--- PASS: "+testName)
-		policySkipped := testName == "TestWaitForCodexPromptFailsFastForHookReviewWithoutInput" &&
+		policySkipped := (testName == "TestWaitForCodexPromptFailsFastForHookReviewWithoutInput" ||
+			testName == "TestWaitForCodexPromptFailsFastForHookDashboardWithoutInput" ||
+			testName == "TestRealTmuxReadinessFailsFastForCodexHookReviewAboveBlankRows") &&
 			os.Getenv("CI_SKIP_TMUX") == "true" &&
 			strings.Contains(harnessState.codexHookReviewTestOutput, "--- SKIP: "+testName)
 		if !passed && !policySkipped {

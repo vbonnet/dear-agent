@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -127,6 +128,29 @@ func TestRealTmuxReadinessDetectsFakeCodexComposer(t *testing.T) {
 	sendReadinessTestCommand(t, socketPath, sessionName, command)
 	if err := realTmux.WaitForHarnessReady(context.Background(), sessionName, "codex-cli", 3*time.Second); err != nil {
 		t.Fatalf("WaitForHarnessReady(fake Codex) error = %v", err)
+	}
+}
+
+func TestRealTmuxReadinessFailsFastForCodexHookReviewAboveBlankRows(t *testing.T) {
+	socketPath := setupRealReadinessTmux(t)
+	sessionName := "real-ready-codex-hooks"
+	if err := tmux.NewSession(sessionName, t.TempDir()); err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	t.Cleanup(func() { tmux.KillSession(sessionName) })
+
+	fakeCodex := installFakeCodexProcess(t)
+	command := fmt.Sprintf("printf 'Hooks need review\\n\\n11 hooks are new or changed.\\n\\nHooks can run outside the sandbox after you trust them.\\n\\n› 1. Review hooks\\n  2. Trust all and continue\\n  3. Continue without trusting (hooks will not run)\\n\\nPress enter to confirm or esc to go back\\n'; exec %q", fakeCodex)
+	sendReadinessTestCommand(t, socketPath, sessionName, command)
+
+	start := time.Now()
+	err := NewRealTmux().WaitForHarnessReady(t.Context(), sessionName, "codex-cli", 10*time.Second)
+	if !errors.Is(err, tmux.ErrCodexHookReviewRequired) {
+		pane, captureErr := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", tmux.NormalizeTmuxSessionName(sessionName), "-p", "-S", "-30").CombinedOutput()
+		t.Fatalf("WaitForHarnessReady(hook review) error = %v, want ErrCodexHookReviewRequired; capture error = %v; pane:\n%s", err, captureErr, pane)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("shared hook-review failure took %v, want prompt failure", elapsed)
 	}
 }
 

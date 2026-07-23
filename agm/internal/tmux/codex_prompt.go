@@ -84,31 +84,45 @@ var ErrCodexHookReviewRequired = errors.New("codex hooks require explicit review
 
 const codexHookReviewGuidance = "open Codex interactively in this directory, review every new or changed hook, and choose whether to trust the audited hooks or continue without them; AGM will not trust executable hooks automatically"
 
-// IsCodexHookReviewRequired reports whether content ends in Codex's structured
-// hook-review selector. Requiring the title and both safe menu choices avoids
-// interpreting ordinary transcript text about hooks as an active blocker. A
-// newer tail-owned composer supersedes retained review text.
+// IsCodexHookReviewRequired reports whether Codex's numbered hook-review
+// selector or interactive hooks dashboard currently owns input. Requiring each
+// surface's complete controls avoids interpreting ordinary transcript text
+// about hooks as an active blocker. A newer tail-owned composer supersedes a
+// retained selector or dashboard, while the dashboard may itself be redrawn
+// below an older composer that remains in scrollback.
 func IsCodexHookReviewRequired(content string) bool {
 	trimmed := strings.TrimSpace(content)
 	if trimmed == "" {
 		return false
 	}
 	lower := strings.ToLower(trimmed)
-	start := strings.LastIndex(lower, "hooks need review")
-	if start < 0 {
+
+	if dashboardStart := strings.LastIndex(lower, "lifecycle hooks from config and enabled plugins."); dashboardStart >= 0 {
+		dashboard := trimmed[dashboardStart:]
+		lowerDashboard := lower[dashboardStart:]
+		controls := strings.LastIndex(lowerDashboard, "press t to trust all; enter to review hooks; esc to close")
+		if controls >= 0 &&
+			strings.Contains(lowerDashboard[:controls], "hooks need review before they can run") &&
+			!IsCodexComposerReady(dashboard[controls:]) {
+			return true
+		}
+	}
+
+	selectorStart := strings.LastIndex(lower, "hooks need review")
+	if selectorStart < 0 {
 		return false
 	}
-	review := trimmed[start:]
-	lowerReview := lower[start:]
-	if !strings.Contains(lowerReview, "review hooks") ||
-		!strings.Contains(lowerReview, "continue without trusting") ||
-		!strings.Contains(lowerReview, "press enter to confirm") {
+	selector := trimmed[selectorStart:]
+	lowerSelector := lower[selectorStart:]
+	if !strings.Contains(lowerSelector, "review hooks") ||
+		!strings.Contains(lowerSelector, "continue without trusting") ||
+		!strings.Contains(lowerSelector, "press enter to confirm") {
 		return false
 	}
 
 	// Codex retains prior TUI output in scrollback. Once a later composer owns
 	// the pane tail, the earlier review selector is no longer active.
-	return !IsCodexComposerReady(review)
+	return !IsCodexComposerReady(selector)
 }
 
 // CodexHookReviewError returns the typed, actionable startup failure used by
@@ -131,7 +145,7 @@ func IsCodexComposerReady(content string) bool {
 	// last one first so stale ready footer text above a newer working footer
 	// or shell output cannot produce a false-ready result.
 	for i, line := range slices.Backward(lines) {
-		if !codexFooterPattern.MatchString(strings.TrimSpace(line)) {
+		if !codexFooterPattern.MatchString(strings.TrimSpace(stripANSI(line))) {
 			continue
 		}
 		if i != len(lines)-1 {
@@ -143,14 +157,17 @@ func IsCodexComposerReady(content string) bool {
 		// The footer is ready only when paired with the nearby composer cursor.
 		// A working view has the same footer but a "Working" status line.
 		for j := i - 1; j >= 0 && j >= i-3; j-- {
-			candidate := strings.TrimSpace(lines[j])
+			candidate := strings.TrimSpace(stripANSI(lines[j]))
 			if candidate == "" {
 				continue
 			}
 			// Only an empty cursor is idle. Typed drafts and collapsed paste chips
 			// use the same glyph but accepting them would append a second prompt to
-			// input the user has not submitted yet.
-			return candidate == "›"
+			// input the user has not submitted yet. Codex 0.145 renders current
+			// welcome suggestions as dim placeholder text after the cursor; retain
+			// ANSI so that placeholder remains distinguishable from human input.
+			return candidate == "›" ||
+				strings.HasPrefix(candidate, "›") && isCodexGhostComposerLine(lines[j])
 		}
 		return false
 	}
@@ -160,11 +177,11 @@ func IsCodexComposerReady(content string) bool {
 	// same compact block; either substring alone can occur in stale or echoed
 	// output, while an occupied cursor is an unsubmitted draft.
 	for i, line := range lines {
-		if !strings.Contains(line, CodexPromptPatterns[0]) {
+		if !strings.Contains(stripANSI(line), CodexPromptPatterns[0]) {
 			continue
 		}
 		for j := i + 1; j < len(lines) && j <= i+4; j++ {
-			if strings.Contains(lines[j], CodexPromptPatterns[1]) && codexInitialComposerOwnsTail(lines[j+1:]) {
+			if strings.Contains(stripANSI(lines[j]), CodexPromptPatterns[1]) && codexInitialComposerOwnsTail(lines[j+1:]) {
 				return true
 			}
 		}
@@ -179,12 +196,14 @@ func IsCodexComposerReady(content string) bool {
 func codexInitialComposerOwnsTail(lines []string) bool {
 	emptyCursor := false
 	for _, line := range lines {
-		candidate := strings.TrimSpace(line)
+		candidate := strings.TrimSpace(stripANSI(line))
 		switch {
 		case candidate == "":
 		case strings.HasPrefix(candidate, "│") && strings.HasSuffix(candidate, "│"):
 		case strings.HasPrefix(candidate, "╰") && strings.HasSuffix(candidate, "╯"):
 		case candidate == "›":
+			emptyCursor = true
+		case strings.HasPrefix(candidate, "›") && isCodexGhostComposerLine(line):
 			emptyCursor = true
 		case strings.HasPrefix(candidate, "›"):
 			return false
@@ -193,6 +212,11 @@ func codexInitialComposerOwnsTail(lines []string) bool {
 		}
 	}
 	return emptyCursor
+}
+
+func isCodexGhostComposerLine(line string) bool {
+	idx := strings.Index(line, "›")
+	return idx >= 0 && IsDimOrGreySGR(line[idx:])
 }
 
 // IsCodexIdle reports whether the Codex TUI composer is currently visible in
@@ -293,7 +317,7 @@ func WaitForCodexPromptContext(parent context.Context, sessionName string, timeo
 		// Capture the recent pane tail (10 lines into scrollback through the
 		// visible region) so a trust dialog and the composer that follows are
 		// both observable across consecutive checks.
-		output, err := exec.CommandContext(ctx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-S", "-10").Output()
+		output, err := exec.CommandContext(ctx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-e", "-S", "-10").Output()
 		if err != nil {
 			if ctx.Err() != nil {
 				continue
@@ -306,6 +330,7 @@ func WaitForCodexPromptContext(parent context.Context, sessionName string, timeo
 		}
 
 		content := string(output)
+		plainContent := stripANSI(content)
 
 		// Executable hooks can run outside Codex's sandbox after they are
 		// trusted. This decision belongs to an operator who has inspected the
@@ -320,7 +345,7 @@ func WaitForCodexPromptContext(parent context.Context, sessionName string, timeo
 		// polling for the composer. Check this BEFORE the ready patterns: the
 		// trust dialog has no input box, so it can never be mistaken for ready,
 		// and answering it is what lets the box appear.
-		if !trustAccepted && containsCodexTrustPromptPattern(content) {
+		if !trustAccepted && containsCodexTrustPromptPattern(plainContent) {
 			debug.Log("🛡️  Codex trust prompt detected (check #%d) — auto-answering with Enter", checkCount)
 			if err := SendKeys(sessionName, "Enter"); err != nil {
 				debug.Log("⚠️  Failed to answer Codex trust prompt: %v", err)
@@ -334,7 +359,7 @@ func WaitForCodexPromptContext(parent context.Context, sessionName string, timeo
 			continue
 		}
 
-		if !modelUpgradeAnswered && containsCodexModelUpgradePromptPattern(content) {
+		if !modelUpgradeAnswered && containsCodexModelUpgradePromptPattern(plainContent) {
 			debug.Log("⬇️  Codex model upgrade prompt detected (check #%d) — selecting existing model", checkCount)
 			if err := SendKeys(sessionName, "Down"); err != nil {
 				debug.Log("⚠️  Failed to select existing Codex model: %v", err)

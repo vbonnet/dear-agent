@@ -71,6 +71,19 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			state:   HarnessInputReady,
 		},
 		{
+			name:    "current Codex welcome ghost composer",
+			harness: "codex-cli",
+			content: "\x1b[2m│ >_ \x1b[0;1mOpenAI Codex\x1b[0;2m (v0.145.0) │\x1b[0m\n\x1b[2m│ model: \x1b[0mgpt-5.5 high\x1b[2m \x1b[0m/model to change │\nTo get started, describe a task or try /review\n\n\x1b[1m›\x1b[0m \x1b[2mRun /review on my current changes\x1b[0m\n\ngpt-5.5 high · ~/.agm/sandboxes/example/merged/repo0",
+			ready:   true,
+			state:   HarnessInputReady,
+		},
+		{
+			name:    "current Codex welcome human draft",
+			harness: "codex-cli",
+			content: "\x1b[2m│ >_ \x1b[0;1mOpenAI Codex\x1b[0;2m (v0.145.0) │\x1b[0m\n\x1b[2m│ model: \x1b[0mgpt-5.5 high\x1b[2m \x1b[0m/model to change │\n\x1b[1m›\x1b[0m Run /review on my current changes\n\ngpt-5.5 high · ~/src/project",
+			state:   HarnessInputBusy,
+		},
+		{
 			name:    "Codex model footer without input owner",
 			harness: "codex-cli",
 			content: "Working (12s)\ngpt-5.5 xhigh · /repo",
@@ -91,8 +104,21 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 		{
 			name:    "Codex hook review requires operator",
 			harness: "codex-cli",
-			content: "Hooks need review\n4 hooks are new or changed.\nHooks can run outside the sandbox after you trust them.\n› 1. Review hooks\n  2. Trust all and continue\n  3. Continue without trusting (hooks won't run)\nPress enter to confirm or esc to go back",
+			content: "Hooks need review\n4 hooks are new or changed.\nHooks can run outside the sandbox after you trust them.\n› 1. Review hooks\n  2. Trust all and continue\n  3. Continue without trusting (hooks won't run)\nPress enter to confirm or esc to go back" + strings.Repeat("\n", 18),
 			state:   HarnessInputReviewRequired,
+		},
+		{
+			name:    "Codex active hooks dashboard overrides retained composer",
+			harness: "codex-cli",
+			content: "Hooks\nLifecycle hooks from config and enabled plugins.\n⚠ 11 hooks need review before they can run.\nEvent Installed Active Review Description\nPress t to trust all; enter to review hooks; esc to close\n│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.6 high /model to change │\n›\ngpt-5.6 high · ~/src/project\nHooks\nLifecycle hooks from config and enabled plugins.\n⚠ 11 hooks need review before they can run.\nEvent Installed Active Review Description\nPress t to trust all; enter to review hooks; esc to close",
+			state:   HarnessInputReviewRequired,
+		},
+		{
+			name:    "Codex closed hooks dashboard yields to newer composer",
+			harness: "codex-cli",
+			content: "Hooks\nLifecycle hooks from config and enabled plugins.\n⚠ 11 hooks need review before they can run.\nEvent Installed Active Review Description\nPress t to trust all; enter to review hooks; esc to close\n│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.6 high /model to change │\n›\ngpt-5.6 high · ~/src/project",
+			ready:   true,
+			state:   HarnessInputReady,
 		},
 		{
 			name:    "resolved Codex onboarding before live composer",
