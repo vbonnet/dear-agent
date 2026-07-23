@@ -101,11 +101,11 @@ func TestPreparedCodexCommandCarriesCallerAllowlistAndPreservesPaneIdentity(t *t
 	t.Setenv("TMUX_PANE", "%9")
 
 	originalExecutablePath := executablePath
-	originalLookPath := lookPath
+	originalLookPathInEnvironment := lookPathInEnvironment
 	originalReplaceProcess := replaceProcess
 	t.Cleanup(func() {
 		executablePath = originalExecutablePath
-		lookPath = originalLookPath
+		lookPathInEnvironment = originalLookPathInEnvironment
 		replaceProcess = originalReplaceProcess
 	})
 	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
@@ -128,7 +128,7 @@ func TestPreparedCodexCommandCarriesCallerAllowlistAndPreservesPaneIdentity(t *t
 	assertPrivateHandoffMode(t, prepared.path)
 
 	var childEnvironment []string
-	lookPath = func(string) (string, error) { return "/fixed/codex", nil }
+	lookPathInEnvironment = func(string, []string) (string, error) { return "/fixed/codex", nil }
 	replaceProcess = func(_ string, _ []string, env []string) error {
 		childEnvironment = append([]string(nil), env...)
 		return nil
@@ -159,6 +159,57 @@ func TestPreparedCodexCommandCarriesCallerAllowlistAndPreservesPaneIdentity(t *t
 	}
 	if _, err := os.Stat(prepared.path); !os.IsNotExist(err) {
 		t.Fatalf("consumed Codex handoff still exists: %v", err)
+	}
+}
+
+func TestPreparedCodexCommandResolvesExecutableFromCallerPATH(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	staleBin := t.TempDir()
+	callerBin := t.TempDir()
+	for _, path := range []string{
+		filepath.Join(staleBin, "codex"),
+		filepath.Join(callerBin, "codex"),
+	} {
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+			t.Fatalf("write fake Codex executable: %v", err)
+		}
+	}
+	t.Setenv("PATH", staleBin)
+
+	originalExecutablePath := executablePath
+	originalReplaceProcess := replaceProcess
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		replaceProcess = originalReplaceProcess
+	})
+	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+
+	prepared, err := PrepareCodexCommand(CodexLaunch{
+		SessionName: "caller-path", Model: "gpt-test", WorkDir: "/tmp/work", Sandbox: "workspace-write",
+	}, []string{"PATH=" + callerBin, "HOME=/caller/home"})
+	if err != nil {
+		t.Fatalf("prepare Codex command: %v", err)
+	}
+	var gotPath string
+	var gotEnvironment []string
+	replaceProcess = func(path string, _ []string, environment []string) error {
+		gotPath = path
+		gotEnvironment = append([]string(nil), environment...)
+		return nil
+	}
+	err = Run(CodexProtocol, []string{
+		"--handoff", prepared.path,
+		"--session", "caller-path", "--model", "gpt-test",
+		"--workdir", "/tmp/work", "--sandbox", "workspace-write",
+	})
+	if err == nil || !strings.Contains(err.Error(), "returned unexpectedly") {
+		t.Fatalf("run prepared Codex command: %v", err)
+	}
+	if want := filepath.Join(callerBin, "codex"); gotPath != want {
+		t.Fatalf("Codex executable = %q, want caller PATH executable %q (stale pane PATH was %q)", gotPath, want, staleBin)
+	}
+	if got := environmentMap(gotEnvironment)["PATH"]; got != callerBin {
+		t.Fatalf("Codex child PATH = %q, want caller PATH %q", got, callerBin)
 	}
 }
 
@@ -216,11 +267,11 @@ func TestPreparedCodexCommandClearsCallerAbsentPaneCredentials(t *testing.T) {
 	t.Setenv("CODEX_ACCESS_TOKEN", "stale-pane-codex")
 
 	originalExecutablePath := executablePath
-	originalLookPath := lookPath
+	originalLookPathInEnvironment := lookPathInEnvironment
 	originalReplaceProcess := replaceProcess
 	t.Cleanup(func() {
 		executablePath = originalExecutablePath
-		lookPath = originalLookPath
+		lookPathInEnvironment = originalLookPathInEnvironment
 		replaceProcess = originalReplaceProcess
 	})
 	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
@@ -230,7 +281,7 @@ func TestPreparedCodexCommandClearsCallerAbsentPaneCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepare Codex command: %v", err)
 	}
-	lookPath = func(string) (string, error) { return "/fixed/codex", nil }
+	lookPathInEnvironment = func(string, []string) (string, error) { return "/fixed/codex", nil }
 	var childEnvironment []string
 	replaceProcess = func(_ string, _ []string, env []string) error {
 		childEnvironment = append([]string(nil), env...)
@@ -618,13 +669,13 @@ func TestPreparedCommandMakesRelativeStateDirectoryAbsolute(t *testing.T) {
 func TestExecutorConsumesHandoffBeforeHarnessLookup(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
 	originalExecutablePath := executablePath
-	originalLookPath := lookPath
+	originalLookPathInEnvironment := lookPathInEnvironment
 	t.Cleanup(func() {
 		executablePath = originalExecutablePath
-		lookPath = originalLookPath
+		lookPathInEnvironment = originalLookPathInEnvironment
 	})
 	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
-	lookPath = func(string) (string, error) { return "", os.ErrNotExist }
+	lookPathInEnvironment = func(string, []string) (string, error) { return "", os.ErrNotExist }
 
 	prepared, err := PrepareCodexCommand(CodexLaunch{
 		SessionName: "missing-codex", Model: "gpt-test", WorkDir: "/tmp/work", Sandbox: "workspace-write",

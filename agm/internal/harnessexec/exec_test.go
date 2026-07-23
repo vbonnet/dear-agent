@@ -326,10 +326,12 @@ func TestEnvironmentContracts(t *testing.T) {
 
 func TestRunUsesFixedExecutablesAndDirectReplacement(t *testing.T) {
 	originalLookPath := lookPath
+	originalLookPathInEnvironment := lookPathInEnvironment
 	originalReplaceProcess := replaceProcess
 	originalResolveClaudeOAuth := resolveClaudeOAuth
 	t.Cleanup(func() {
 		lookPath = originalLookPath
+		lookPathInEnvironment = originalLookPathInEnvironment
 		replaceProcess = originalReplaceProcess
 		resolveClaudeOAuth = originalResolveClaudeOAuth
 	})
@@ -337,6 +339,7 @@ func TestRunUsesFixedExecutablesAndDirectReplacement(t *testing.T) {
 	var gotPath string
 	var gotArgv, gotEnv []string
 	lookPath = func(name string) (string, error) { return "/fixed/" + name, nil }
+	lookPathInEnvironment = func(name string, _ []string) (string, error) { return "/fixed/" + name, nil }
 	replaceProcess = func(path string, argv, env []string) error {
 		gotPath = path
 		gotArgv = append([]string(nil), argv...)
@@ -373,6 +376,7 @@ func TestRunUsesFixedExecutablesAndDirectReplacement(t *testing.T) {
 	}
 
 	lookPath = func(string) (string, error) { return "", errors.New("not found") }
+	lookPathInEnvironment = func(string, []string) (string, error) { return "", errors.New("not found") }
 	if err := Run(CodexProtocol, []string{
 		"--session", "session", "--model", "model", "--workdir", "/tmp/work",
 		"--sandbox", "workspace-write",

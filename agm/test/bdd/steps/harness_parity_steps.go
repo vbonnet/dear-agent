@@ -1055,7 +1055,7 @@ func agmBuildsTheCodexPrivateLaunchBoundary(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/harnessexec",
-		"-run", `^(TestPrepared(ClaudeCommand(CarriesCallerOnlyOAuthAndTelemetry|ClearsCallerAbsentPaneState)|CodexCommand(CarriesCallerAllowlistAndPreservesPaneIdentity|ClearsCallerAbsentPaneCredentials)|Command(CancelRemovesUndeliveredHandoff|UsesCoInstalledAGMFromCompanionBinary|UsesRenamedCurrentAGMExecutable|MakesRelativeStateDirectoryAbsolute|SchedulesIndependentExpiration|RemovesHandoffWhenExpirationCannotBeScheduled)|DeferredCommandSchedulesProducerLease)|Test(DeferredHandoffRemainsLiveUntilProducerExitThenExpires|ExpiryProtocolRemovesUnconsumedHandoffAtDeadline|DetachedExpiryHelper(InterceptsGoTestBinaryBeforeTestsRun|IsReapedAsynchronously)|ConsumeHandoffUsesDeferredLeaseFreshnessAndUnlinksRejections|ClaudeResumeChangesDirectoryBeforeDirectReplacement))$`,
+		"-run", `^(TestPrepared(ClaudeCommand(CarriesCallerOnlyOAuthAndTelemetry|ClearsCallerAbsentPaneState)|CodexCommand(CarriesCallerAllowlistAndPreservesPaneIdentity|ClearsCallerAbsentPaneCredentials|ResolvesExecutableFromCallerPATH)|Command(CancelRemovesUndeliveredHandoff|UsesCoInstalledAGMFromCompanionBinary|UsesRenamedCurrentAGMExecutable|MakesRelativeStateDirectoryAbsolute|SchedulesIndependentExpiration|RemovesHandoffWhenExpirationCannotBeScheduled)|DeferredCommandSchedulesProducerLease)|Test(DeferredHandoffRemainsLiveUntilProducerExitThenExpires|ExpiryProtocolRemovesUnconsumedHandoffAtDeadline|DetachedExpiryHelper(InterceptsGoTestBinaryBeforeTestsRun|IsReapedAsynchronously)|ConsumeHandoffUsesDeferredLeaseFreshnessAndUnlinksRejections|ClaudeResumeChangesDirectoryBeforeDirectReplacement))$`,
 		"-count=1", "-v",
 	)
 	cmd.Dir = bddRepoRoot()
@@ -1107,6 +1107,7 @@ func callerOnlyCredentialsAndTelemetryShouldCrossStaleTmuxStateThroughThePinnedA
 		"TestPreparedClaudeCommandClearsCallerAbsentPaneState",
 		"TestPreparedCodexCommandCarriesCallerAllowlistAndPreservesPaneIdentity",
 		"TestPreparedCodexCommandClearsCallerAbsentPaneCredentials",
+		"TestPreparedCodexCommandResolvesExecutableFromCallerPATH",
 		"TestPreparedCommandCancelRemovesUndeliveredHandoff",
 		"TestPreparedCommandUsesCoInstalledAGMFromCompanionBinary",
 		"TestPreparedCommandUsesRenamedCurrentAGMExecutable",

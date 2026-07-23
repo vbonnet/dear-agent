@@ -35,10 +35,11 @@ const (
 )
 
 var (
-	lookPath           = exec.LookPath
-	replaceProcess     = syscall.Exec
-	changeDirectory    = os.Chdir
-	resolveClaudeOAuth = auth.ResolveOAuthToken
+	lookPath              = exec.LookPath
+	lookPathInEnvironment = resolveExecutableInEnvironment
+	replaceProcess        = syscall.Exec
+	changeDirectory       = os.Chdir
+	resolveClaudeOAuth    = auth.ResolveOAuthToken
 )
 
 var codexAllowedEnvironment = []string{
@@ -266,7 +267,7 @@ func runCodex(args []string) error {
 		environ = CodexEnvironment(handoff.Environment, request.SessionName)
 		environ = overlayEnvironment(environ, selectedEnvironment(os.Environ(), paneIdentityEnvironment), nil)
 	}
-	path, err := lookPath("codex")
+	path, err := lookPathInEnvironment("codex", environ)
 	if err != nil {
 		return fmt.Errorf("resolve codex executable: %w", err)
 	}

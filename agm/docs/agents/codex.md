@@ -28,8 +28,9 @@ AGM does not paste a raw `codex` command into tmux. The invoking AGM process
 copies only the documented Codex environment allowlist into an owner-only,
 one-shot handoff and sends a non-secret command for the absolute AGM private
 executor. The executor consumes and removes the handoff before resolving the
-fixed `codex` executable, constructs validated model, workdir, and sandbox
-arguments, and directly replaces itself with Codex without another shell. A
+fixed `codex` executable against the invoking AGM process's handed-off `PATH`,
+constructs validated model, workdir, and sandbox arguments, and directly
+replaces itself with Codex without another shell. A
 credential-free helper independently removes an unconsumed handoff after its
 bounded lifetime, including when the queued tmux command never executes. For a
 current-pane launch, a credential-free inherited pipe keeps the handoff valid
