@@ -1,12 +1,12 @@
 // Package testcontext provides per-run test sandbox isolation for AGM.
 //
 // Each test run gets a unique ID and fully isolated paths:
-//   - Tmux socket:   /tmp/agm-test-{id}.sock
-//   - Sessions dir:  /tmp/agm-test-{id}/sessions/
-//   - Home dir:      /tmp/agm-test-{id}/home/
-//   - SQLite DB:     /tmp/agm-test-{id}/agm.db
-//   - State dir:     /tmp/agm-test-{id}/state/
-//   - Lock file:     /tmp/agm-test-{id}/agm.lock
+//   - Tmux socket:   /tmp/agm-u-{uid}/agm-test-{id}.sock
+//   - Sessions dir:  /tmp/agm-u-{uid}/agm-test-{id}/sessions/
+//   - Home dir:      /tmp/agm-u-{uid}/agm-test-{id}/home/
+//   - SQLite DB:     /tmp/agm-u-{uid}/agm-test-{id}/agm.db
+//   - State dir:     /tmp/agm-u-{uid}/agm-test-{id}/state/
+//   - Lock file:     /tmp/agm-u-{uid}/agm-test-{id}/agm.lock
 //
 // Environment variables are propagated to child commands so all AGM
 // components use the isolated paths:
@@ -21,16 +21,18 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"syscall"
 	"unicode"
 
 	"github.com/google/uuid"
 )
 
 const (
-	testEnvironmentPrefix = "agm-test-"
-	testEnvironmentRoot   = "/tmp"
-	maxNewEnvironmentName = 64
+	testEnvironmentPrefix    = "agm-test-"
+	shortTestEnvironmentRoot = "/tmp"
+	maxNewEnvironmentName    = 64
 )
 
 // Environment variable names for test sandbox isolation.
@@ -95,18 +97,22 @@ func NewNamed(name string) (*TestContext, error) {
 	if err := ValidateName(name); err != nil {
 		return nil, err
 	}
-	return newNamedWithRoot(name, testEnvironmentRoot), nil
+	root, err := resolveNamedEnvironmentRoot(name)
+	if err != nil {
+		return nil, err
+	}
+	return newNamedWithRoot(name, root)
 }
 
 // newWithID constructs a random context beneath the canonical short root.
 func newWithID(id string) *TestContext {
-	return newWithRoot(id, testEnvironmentRoot)
+	return newWithRoot(id, canonicalEnvironmentRoot())
 }
 
 func newWithRoot(id, root string) *TestContext {
-	// Keep tmux socket paths below macOS's Unix-domain socket limit. os.TempDir
-	// expands to a much longer /var/folders path there, while /tmp is stable on
-	// every Unix platform on which AGM's tmux integration runs.
+	// Keep tmux socket paths below macOS's Unix-domain socket limit. The
+	// canonical root is a short effective-user namespace beneath /tmp rather
+	// than the much longer host os.TempDir path.
 	baseDir := filepath.Join(root, testEnvironmentPrefix+id)
 	socketPath := filepath.Join(root, testEnvironmentPrefix+id+".sock")
 	return &TestContext{
@@ -124,15 +130,19 @@ func newWithRoot(id, root string) *TestContext {
 	}
 }
 
-// LoadNamed reconstructs a TestContext from a validated known name.
-// It does not verify that the directory exists. Cleanup includes the exact
-// same-name path under the retired os.TempDir root so pre-migration
-// environments cannot be reported destroyed while left behind.
+// LoadNamed reconstructs a TestContext from a validated known name. Existing
+// environments are resolved in canonical-first order across the current
+// per-user root and the retired short and host temporary roots. If no directory
+// exists, it returns canonical paths without creating them.
 func LoadNamed(name string) (*TestContext, error) {
 	if err := validatePathSafeName(name); err != nil {
 		return nil, err
 	}
-	return newNamedWithRoot(name, testEnvironmentRoot), nil
+	root, err := resolveNamedEnvironmentRoot(name)
+	if err != nil {
+		return nil, err
+	}
+	return newNamedWithRoot(name, root)
 }
 
 // ValidateName rejects new names that could escape the owned temporary root,
@@ -166,9 +176,9 @@ func validatePathSafeName(name string) error {
 	return nil
 }
 
-// ListNamed returns centrally validated environments from the canonical short
-// root plus the exact retired os.TempDir root used before the socket-path
-// migration. Canonical entries win when both roots contain the same name.
+// ListNamed returns centrally validated, current-user environments from the
+// canonical per-user short root plus the retired global short and host
+// temporary roots. Canonical entries win when roots contain the same name.
 func ListNamed() ([]*TestContext, error) {
 	contexts := make([]*TestContext, 0)
 	seen := make(map[string]struct{})
@@ -191,36 +201,116 @@ func ListNamed() ([]*TestContext, error) {
 			if _, exists := seen[name]; exists {
 				continue
 			}
+			owned, err := ownedPath(filepath.Join(root, entry.Name()), true)
+			if err != nil {
+				return nil, err
+			}
+			if !owned {
+				continue
+			}
 			seen[name] = struct{}{}
-			contexts = append(contexts, newNamedWithRoot(name, root))
+			tc, err := newNamedWithRoot(name, root)
+			if err != nil {
+				return nil, err
+			}
+			contexts = append(contexts, tc)
 		}
 	}
 	sort.Slice(contexts, func(i, j int) bool { return contexts[i].RunID < contexts[j].RunID })
 	return contexts, nil
 }
 
-func newNamedWithRoot(name, primaryRoot string) *TestContext {
+func newNamedWithRoot(name, primaryRoot string) (*TestContext, error) {
 	tc := newWithRoot(name, primaryRoot)
 	for _, root := range namedEnvironmentRoots() {
 		baseDir := filepath.Join(root, testEnvironmentPrefix+name)
 		socketPath := filepath.Join(root, testEnvironmentPrefix+name+".sock")
 		if baseDir != tc.BaseDir {
-			tc.cleanupBaseDirs = append(tc.cleanupBaseDirs, baseDir)
+			owned, err := ownedPath(baseDir, true)
+			if err != nil {
+				return nil, err
+			}
+			if owned {
+				tc.cleanupBaseDirs = append(tc.cleanupBaseDirs, baseDir)
+			}
 		}
 		if socketPath != tc.SocketPath {
-			tc.cleanupSocketPaths = append(tc.cleanupSocketPaths, socketPath)
+			owned, err := ownedPath(socketPath, false)
+			if err != nil {
+				return nil, err
+			}
+			if owned {
+				tc.cleanupSocketPaths = append(tc.cleanupSocketPaths, socketPath)
+			}
 		}
 	}
-	return tc
+	return tc, nil
 }
 
 func namedEnvironmentRoots() []string {
-	roots := []string{testEnvironmentRoot}
-	retired := filepath.Clean(os.TempDir())
-	if retired != testEnvironmentRoot && filepath.IsAbs(retired) && retired != string(filepath.Separator) {
-		roots = append(roots, retired)
+	candidates := []string{
+		canonicalEnvironmentRoot(),
+		shortTestEnvironmentRoot,
+		filepath.Clean(os.TempDir()),
+	}
+	roots := make([]string, 0, len(candidates))
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		candidate = filepath.Clean(candidate)
+		if !filepath.IsAbs(candidate) || candidate == string(filepath.Separator) {
+			continue
+		}
+		if _, exists := seen[candidate]; exists {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		roots = append(roots, candidate)
 	}
 	return roots
+}
+
+func canonicalEnvironmentRoot() string {
+	return canonicalEnvironmentRootForUID(os.Geteuid())
+}
+
+func canonicalEnvironmentRootForUID(uid int) string {
+	return filepath.Join(
+		shortTestEnvironmentRoot,
+		"agm-u-"+strconv.Itoa(uid),
+	)
+}
+
+func resolveNamedEnvironmentRoot(name string) (string, error) {
+	for _, root := range namedEnvironmentRoots() {
+		baseDir := filepath.Join(root, testEnvironmentPrefix+name)
+		owned, err := ownedPath(baseDir, true)
+		if err != nil {
+			return "", err
+		}
+		if owned {
+			return root, nil
+		}
+	}
+	return canonicalEnvironmentRoot(), nil
+}
+
+func ownedPath(path string, requireDirectory bool) (bool, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("inspect test environment path %s: %w", path, err)
+	}
+	if requireDirectory && !info.IsDir() {
+		return false, fmt.Errorf("test environment path is not a directory: %s", path)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return false, fmt.Errorf("test environment path has unsupported ownership metadata: %s", path)
+	}
+	// #nosec G115 -- effective Unix user IDs are non-negative and Stat_t.Uid is uint32.
+	return stat.Uid == uint32(os.Geteuid()), nil
 }
 
 // FromEnv reconstructs a TestContext from environment variables.
@@ -239,7 +329,7 @@ func FromEnv() (*TestContext, bool) {
 	sessionsDir := os.Getenv(EnvSessionsDir)
 	baseDir := filepath.Dir(sessionsDir)
 	if sessionsDir == "" {
-		baseDir = filepath.Join(testEnvironmentRoot, testEnvironmentPrefix+runID)
+		baseDir = filepath.Join(canonicalEnvironmentRoot(), testEnvironmentPrefix+runID)
 	}
 	stateDir := os.Getenv(EnvStateDir)
 	if stateDir == "" {
@@ -307,6 +397,11 @@ func (tc *TestContext) Environ() []string {
 
 // EnsureDirs creates the base directory, home directory, and sessions subdirectory.
 func (tc *TestContext) EnsureDirs() error {
+	if filepath.Dir(tc.BaseDir) == canonicalEnvironmentRoot() {
+		if err := ensureCanonicalEnvironmentRoot(); err != nil {
+			return err
+		}
+	}
 	if err := os.MkdirAll(tc.SessionsDir, 0700); err != nil {
 		return err
 	}
@@ -316,9 +411,37 @@ func (tc *TestContext) EnsureDirs() error {
 	return os.MkdirAll(tc.HomeDir, 0700)
 }
 
+func ensureCanonicalEnvironmentRoot() error {
+	return ensureOwnedEnvironmentRoot(canonicalEnvironmentRoot())
+}
+
+func ensureOwnedEnvironmentRoot(root string) error {
+	if err := os.Mkdir(root, 0700); err != nil && !os.IsExist(err) {
+		return fmt.Errorf("create per-user test environment root %s: %w", root, err)
+	}
+	owned, err := ownedPath(root, true)
+	if err != nil {
+		return err
+	}
+	if !owned {
+		return fmt.Errorf("per-user test environment root is not owned by uid %d: %s", os.Geteuid(), root)
+	}
+	info, err := os.Lstat(root)
+	if err != nil {
+		return fmt.Errorf("inspect per-user test environment root %s: %w", root, err)
+	}
+	if info.Mode().Perm() != 0700 {
+		// #nosec G302 -- directories need execute permission; 0700 is owner-only.
+		if err := os.Chmod(root, 0700); err != nil {
+			return fmt.Errorf("secure per-user test environment root %s: %w", root, err)
+		}
+	}
+	return nil
+}
+
 // Cleanup removes only the context's exact socket and directory paths. Named
-// contexts also remove their exact same-name paths from the retired os.TempDir
-// root so the fixed-root migration does not orphan credentials or tmux state.
+// contexts also remove owned exact same-name paths from retired roots so root
+// migrations do not orphan credentials or tmux state.
 func (tc *TestContext) Cleanup() error {
 	socketPaths := tc.cleanupSocketPaths
 	if len(socketPaths) == 0 {

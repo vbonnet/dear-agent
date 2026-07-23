@@ -104,6 +104,7 @@ func TestIsUnavailablePrerequisite(t *testing.T) {
 		want bool
 	}{
 		{name: "missing executable", err: fmt.Errorf("wrapped: %w", exec.ErrNotFound), want: true},
+		{name: "missing explicit path", err: &os.PathError{Op: "fork/exec", Path: "/bin/ps", Err: os.ErrNotExist}, want: true},
 		{name: "filesystem permission", err: fmt.Errorf("wrapped: %w", os.ErrPermission), want: true},
 		{name: "sandbox denial", err: errors.New("start server: operation not permitted"), want: true},
 		{name: "invalid arguments", err: errors.New("start server: invalid tmux option"), want: false},

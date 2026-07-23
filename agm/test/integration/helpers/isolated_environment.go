@@ -194,7 +194,9 @@ func (e *IsolatedEnvironment) StartTmuxServer(sentinel string) error {
 // permission-denial errors that make an external test prerequisite unavailable.
 // Invalid arguments and other setup regressions deliberately return false.
 func IsUnavailablePrerequisite(err error) bool {
-	if errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrPermission) {
+	if errors.Is(err, exec.ErrNotFound) ||
+		errors.Is(err, os.ErrNotExist) ||
+		errors.Is(err, os.ErrPermission) {
 		return true
 	}
 	message := strings.ToLower(err.Error())

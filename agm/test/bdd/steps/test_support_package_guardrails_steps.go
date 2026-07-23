@@ -93,6 +93,8 @@ func RegisterTestSupportPackageGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^named test environment lifecycle sources are configured$`, namedTestEnvironmentLifecycleSourcesAreConfigured)
 	ctx.Step(`^AGM validates named test environment ownership$`, agmValidatesNamedTestEnvironmentOwnership)
 	ctx.Step(`^canonical creation reconstruction discovery and cleanup should share one root$`, namedTestEnvironmentLifecycleSharesOneRoot)
+	ctx.Step(`^the canonical short root should be private and scoped to the effective user$`, canonicalTestEnvironmentRootIsPrivatePerUser)
+	ctx.Step(`^existing retired named environments should activate in place$`, retiredNamedTestEnvironmentsActivateInPlace)
 	ctx.Step(`^retired named environment paths should be discovered and removed exactly$`, retiredNamedTestEnvironmentPathsAreRemoved)
 	ctx.Step(`^overlong names should be rejected only for new environments$`, overlongNamesAreRejectedOnlyForNewEnvironments)
 	ctx.Step(`^unsafe named test environment paths should be rejected before mutation$`, unsafeNamedTestEnvironmentPathsAreRejected)
@@ -324,6 +326,7 @@ func unexpectedLifecycleSetupFailuresFail() error {
 	helper := string(helperData)
 	for _, required := range []string{
 		`errors.Is(err, exec.ErrNotFound)`,
+		`errors.Is(err, os.ErrNotExist)`,
 		`errors.Is(err, os.ErrPermission)`,
 		`tmuxUnavailable = true`,
 		`if !tmuxUnavailable`,
@@ -370,6 +373,20 @@ func cleanupTargetsOnlyOwnedTestResources() error {
 			return fmt.Errorf("isolated cleanup retains broad target %s", banned)
 		}
 	}
+
+	processCleanupData, err := os.ReadFile(filepath.Join(root, "agm", "test", "integration", "helpers", "process_cleanup_integration_test.go"))
+	if err != nil {
+		return err
+	}
+	processCleanup := string(processCleanupData)
+	for _, required := range []string{`tc := testcontext.New()`, `require.NoError(t, tc.EnsureDirs())`, `socket := tc.SocketPath`, `_ = tc.Cleanup()`} {
+		if !strings.Contains(processCleanup, required) {
+			return fmt.Errorf("process-cleanup regression lacks bounded owned socket %s", required)
+		}
+	}
+	if strings.Contains(processCleanup, `filepath.Join(os.TempDir()`) {
+		return errors.New("process-cleanup regression derives a tmux socket from the unbounded host temp root")
+	}
 	return nil
 }
 
@@ -400,7 +417,7 @@ func agmValidatesNamedTestEnvironmentOwnership(ctx context.Context) error {
 		"go", "test",
 		"./agm/internal/testcontext",
 		"./agm/cmd/agm",
-		"-run", `^(TestListNamedSharesLifecycleRoot|TestRetiredNamedEnvironmentIsDiscoveredAndCleanedExactly|TestNamedEnvironmentRejectsUnownedPaths|TestNewNamedRejectsOverlongButLoadNamedRetainsCleanupAccess|TestFromEnvRejectsUnownedRunID|TestTestEnvironmentCreateListDestroySharesOwnedRoot|TestTestEnvironmentCommandsRejectTraversalNames|TestTestEnvironmentDestroyRemovesRetiredRoot)$`,
+		"-run", `^(TestListNamedSharesLifecycleRoot|TestCanonicalEnvironmentRootIsShortPrivateAndUserScoped|TestEnsureOwnedEnvironmentRootSecuresModeAndRejectsSymlink|TestRetiredNamedEnvironmentIsDiscoveredAndCleanedExactly|TestLoadNamedResolvesGlobalShortRootBeforeCanonicalFallback|TestListNamedPrefersCanonicalPerUserRootForDuplicate|TestNamedEnvironmentRejectsUnownedPaths|TestNewNamedRejectsOverlongButLoadNamedRetainsCleanupAccess|TestFromEnvRejectsUnownedRunID|TestTestEnvironmentCreateListDestroySharesOwnedRoot|TestTestEnvironmentCommandsRejectTraversalNames|TestTestEnvironmentDestroyRemovesRetiredRoot)$`,
 		"-count=1",
 		"-v",
 	)
@@ -416,6 +433,23 @@ func namedTestEnvironmentLifecycleSharesOneRoot(ctx context.Context) error {
 		ctx,
 		"TestListNamedSharesLifecycleRoot",
 		"TestTestEnvironmentCreateListDestroySharesOwnedRoot",
+	)
+}
+
+func canonicalTestEnvironmentRootIsPrivatePerUser(ctx context.Context) error {
+	return requireNamedTestEnvironmentTests(
+		ctx,
+		"TestCanonicalEnvironmentRootIsShortPrivateAndUserScoped",
+		"TestEnsureOwnedEnvironmentRootSecuresModeAndRejectsSymlink",
+		"TestListNamedPrefersCanonicalPerUserRootForDuplicate",
+	)
+}
+
+func retiredNamedTestEnvironmentsActivateInPlace(ctx context.Context) error {
+	return requireNamedTestEnvironmentTests(
+		ctx,
+		"TestLoadNamedResolvesGlobalShortRootBeforeCanonicalFallback",
+		"TestRetiredNamedEnvironmentIsDiscoveredAndCleanedExactly",
 	)
 }
 

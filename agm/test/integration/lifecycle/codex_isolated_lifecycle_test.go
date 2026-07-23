@@ -23,7 +23,7 @@ func TestCodexLifecycleUsesIsolatedSourceEnvironment(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping real-tmux Codex lifecycle in short mode")
 	}
-	if err := exec.Command("/bin/ps", "-axo", "command=").Run(); err != nil {
+	if err := exec.Command("ps", "-axo", "command=").Run(); err != nil {
 		if helpers.IsUnavailablePrerequisite(err) {
 			t.Skipf("process-table inspection is unavailable to the fail-closed spawn guard: %v", err)
 		}

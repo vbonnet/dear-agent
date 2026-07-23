@@ -16,11 +16,13 @@
 
 **TCTX-06** When a named test environment is constructed or reconstructed, the system shall reject empty, absolute, path-separated, or control-character names before deriving any filesystem path.
 
-**TCTX-07** When named test environments are created or reconstructed, the system shall derive their canonical paths beneath one short root shared by discovery and cleanup.
+**TCTX-07** When named test environments are created or reconstructed, the system shall derive canonical paths beneath one short effective-user root shared by activation, discovery, and cleanup, with canonical entries taking precedence over legacy duplicates.
 
-**TCTX-08** When a named environment exists beneath the retired host temporary root, discovery and explicit destroy shall remove that exact validated legacy directory and socket without mutating sibling paths.
+**TCTX-08** When a named environment exists beneath a retired short or host temporary root, the system shall activate that exact validated environment during reconstruction and remove its directory and socket during explicit destroy without mutating sibling paths.
 
 **TCTX-09** When a new named environment exceeds the socket-length budget, the system shall reject creation while retaining discovery and cleanup access for a path-safe legacy name.
+
+**TCTX-10** When the canonical short test root is created or reused, the system shall verify it is a real directory owned by the effective user and enforce owner-only permissions before creating environment state beneath it.
 
 ## BDD Traceability
 

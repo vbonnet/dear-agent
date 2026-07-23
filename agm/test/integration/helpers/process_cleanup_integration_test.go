@@ -5,7 +5,6 @@ package helpers
 import (
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -13,16 +12,19 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/vbonnet/dear-agent/agm/internal/testcontext"
 )
 
 func useOwnedTmuxSocket(t *testing.T) string {
 	t.Helper()
 
-	socket := filepath.Join(os.TempDir(), "agm-cleanup-"+RandomString(12)+".sock")
+	tc := testcontext.New()
+	require.NoError(t, tc.EnsureDirs())
+	socket := tc.SocketPath
 	t.Setenv("AGM_TMUX_SOCKET", socket)
 	t.Cleanup(func() {
 		_ = KillTmuxServer()
-		_ = os.Remove(socket)
+		_ = tc.Cleanup()
 	})
 	return socket
 }
