@@ -34,6 +34,9 @@ type HarnessLaunchSpec struct {
 	PiExtension      string
 	PiPolicyJSON     string
 	PiPolicyFile     string
+	// DeferredUntilCallerExit is set only by current-pane launchers whose
+	// queued command cannot run until the producing AGM process releases tmux.
+	DeferredUntilCallerExit bool
 }
 
 // HarnessLaunchCommand is the command plus the startup-policy outcome needed
@@ -147,18 +150,19 @@ func claudeLaunch(spec HarnessLaunchSpec) (harnessexec.ClaudeLaunch, bool) {
 		modeApplied = true
 	}
 	launch := harnessexec.ClaudeLaunch{
-		SessionName:      spec.SessionName,
-		SessionID:        spec.SessionID,
-		ResumeID:         spec.ResumeID,
-		WorkDir:          spec.WorkDir,
-		Model:            resolvedModel,
-		AddDirs:          addDirs,
-		AutoMode:         !spec.DisableAutoMode,
-		Permission:       permission,
-		MaxBudgetUSD:     spec.MaxBudgetUSD,
-		DisableOAuth:     spec.DisableOAuth,
-		ForwardTelemetry: spec.ForwardTelemetry,
-		Persistent:       spec.Persistent,
+		SessionName:            spec.SessionName,
+		SessionID:              spec.SessionID,
+		ResumeID:               spec.ResumeID,
+		WorkDir:                spec.WorkDir,
+		Model:                  resolvedModel,
+		AddDirs:                addDirs,
+		AutoMode:               !spec.DisableAutoMode,
+		Permission:             permission,
+		MaxBudgetUSD:           spec.MaxBudgetUSD,
+		DisableOAuth:           spec.DisableOAuth,
+		ForwardTelemetry:       spec.ForwardTelemetry,
+		Persistent:             spec.Persistent,
+		DeferUntilProducerExit: spec.DeferredUntilCallerExit,
 	}
 	return launch, modeApplied
 }
@@ -182,15 +186,16 @@ func codexLaunch(spec HarnessLaunchSpec) (harnessexec.CodexLaunch, bool) {
 		modeApplied = true
 	}
 	launch := harnessexec.CodexLaunch{
-		SessionName: spec.SessionName,
-		Model:       resolvedModel,
-		WorkDir:     spec.WorkDir,
-		Sandbox:     sandboxMode,
-		Approval:    approval,
-		AddDirs:     spec.ExtraAddDirs,
-		ResumeID:    resumeID,
-		Remote:      resumeID != "",
-		Persistent:  spec.Persistent,
+		SessionName:            spec.SessionName,
+		Model:                  resolvedModel,
+		WorkDir:                spec.WorkDir,
+		Sandbox:                sandboxMode,
+		Approval:               approval,
+		AddDirs:                spec.ExtraAddDirs,
+		ResumeID:               resumeID,
+		Remote:                 resumeID != "",
+		Persistent:             spec.Persistent,
+		DeferUntilProducerExit: spec.DeferredUntilCallerExit,
 	}
 	return launch, modeApplied
 }

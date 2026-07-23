@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -28,6 +29,9 @@ const (
 var (
 	executablePath        = os.Executable
 	scheduleHandoffExpiry = startHandoffExpiry
+	reapExpiryProcess     = func(cmd *exec.Cmd) {
+		go func() { _ = cmd.Wait() }()
+	}
 )
 
 // PreparedCommand is a token-free pane command plus cleanup for a handoff that
@@ -36,25 +40,32 @@ var (
 type PreparedCommand struct {
 	Command string
 	path    string
+	lease   io.Closer
 }
 
-// Cancel removes an undelivered one-shot handoff. It is safe after consumption.
+// Cancel removes an undelivered one-shot handoff and releases any producer
+// liveness lease. It is safe after consumption.
 func (p PreparedCommand) Cancel() error {
-	if p.path == "" {
-		return nil
+	var removeErr error
+	if p.path != "" {
+		removeErr = os.Remove(p.path)
+		if errors.Is(removeErr, os.ErrNotExist) {
+			removeErr = nil
+		}
 	}
-	err := os.Remove(p.path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
+	var leaseErr error
+	if p.lease != nil {
+		leaseErr = p.lease.Close()
 	}
-	return err
+	return errors.Join(removeErr, leaseErr)
 }
 
 type launchHandoff struct {
-	Version     int      `json:"version"`
-	Protocol    string   `json:"protocol"`
-	CreatedAt   string   `json:"created_at"`
-	Environment []string `json:"environment"`
+	Version                   int      `json:"version"`
+	Protocol                  string   `json:"protocol"`
+	CreatedAt                 string   `json:"created_at"`
+	DeferredUntilProducerExit bool     `json:"deferred_until_producer_exit,omitempty"`
+	Environment               []string `json:"environment"`
 }
 
 // PrepareCodexCommand snapshots only Codex's documented allowlist from the
@@ -67,16 +78,19 @@ func PrepareCodexCommand(launch CodexLaunch, parent []string) (PreparedCommand, 
 		return PreparedCommand{}, fmt.Errorf("resolve AGM private executor: %w", err)
 	}
 	snapshot := removeEnvironment(CodexEnvironment(parent, launch.SessionName), paneIdentityEnvironment)
-	handoffPath, err := stageHandoff(CodexProtocol, snapshot)
+	handoffPath, err := stageHandoff(CodexProtocol, snapshot, launch.DeferUntilProducerExit)
 	if err != nil {
 		return PreparedCommand{}, err
 	}
-	if err := scheduleHandoffExpiry(executable, handoffPath, time.Now().Add(handoffMaxAge)); err != nil {
+	lease, err := scheduleHandoffExpiry(
+		executable, handoffPath, time.Now().Add(handoffMaxAge), launch.DeferUntilProducerExit,
+	)
+	if err != nil {
 		return PreparedCommand{}, cleanupFailedHandoff(handoffPath, err)
 	}
 	launch.Executable = executable
 	launch.HandoffPath = handoffPath
-	return PreparedCommand{Command: BuildCodexCommand(launch), path: handoffPath}, nil
+	return PreparedCommand{Command: BuildCodexCommand(launch), path: handoffPath, lease: lease}, nil
 }
 
 // PrepareClaudeCommand snapshots the caller's selected authentication and
@@ -104,16 +118,19 @@ func PrepareClaudeCommand(launch ClaudeLaunch, parent []string) (PreparedCommand
 			}
 		}
 	}
-	handoffPath, err := stageHandoff(ClaudeProtocol, forward)
+	handoffPath, err := stageHandoff(ClaudeProtocol, forward, launch.DeferUntilProducerExit)
 	if err != nil {
 		return PreparedCommand{}, err
 	}
-	if err := scheduleHandoffExpiry(executable, handoffPath, time.Now().Add(handoffMaxAge)); err != nil {
+	lease, err := scheduleHandoffExpiry(
+		executable, handoffPath, time.Now().Add(handoffMaxAge), launch.DeferUntilProducerExit,
+	)
+	if err != nil {
 		return PreparedCommand{}, cleanupFailedHandoff(handoffPath, err)
 	}
 	launch.Executable = executable
 	launch.HandoffPath = handoffPath
-	return PreparedCommand{Command: BuildClaudeCommand(launch), path: handoffPath}, nil
+	return PreparedCommand{Command: BuildClaudeCommand(launch), path: handoffPath, lease: lease}, nil
 }
 
 func cleanupFailedHandoff(path string, scheduleErr error) error {
@@ -124,25 +141,87 @@ func cleanupFailedHandoff(path string, scheduleErr error) error {
 	return errors.Join(fmt.Errorf("schedule private launch handoff expiration: %w", scheduleErr), removeErr)
 }
 
-func startHandoffExpiry(executable, path string, expiresAt time.Time) error {
-	cmd := exec.Command( // #nosec G204,G702 -- executable is the resolved current/co-installed AGM binary.
-		executable,
+func startHandoffExpiry(executable, path string, expiresAt time.Time, deferred bool) (io.Closer, error) {
+	var leaseReader, leaseWriter *os.File
+	if deferred {
+		var err error
+		leaseReader, leaseWriter, err = os.Pipe()
+		if err != nil {
+			return nil, fmt.Errorf("create producer liveness lease: %w", err)
+		}
+	}
+	closeLease := func() {
+		if leaseReader != nil {
+			_ = leaseReader.Close()
+		}
+		if leaseWriter != nil {
+			_ = leaseWriter.Close()
+		}
+	}
+	args := []string{
 		ExpiryProtocol,
 		"--handoff", path,
 		"--expires-at", expiresAt.UTC().Format(time.RFC3339Nano),
+	}
+	if deferred {
+		// ExtraFiles begins at descriptor 3 on the supported Unix platforms.
+		args = append(args, "--producer-lease-fd", "3")
+	}
+	cmd := exec.Command( // #nosec G204,G702 -- executable is the resolved current/co-installed AGM binary.
+		executable,
+		args...,
 	)
 	// The expiry helper needs neither caller credentials nor terminal ownership.
-	// Its isolated process group and released handle let it outlive an AGM caller
-	// that exits immediately after queuing a tmux command.
+	// Its isolated process group lets it outlive an AGM caller that exits
+	// immediately after queuing a tmux command.
 	cmd.Env = []string{expiryHelperEnv + "=1"}
 	cmd.SysProcAttr = procguard.ProcessGroupAttr()
+	if deferred {
+		cmd.ExtraFiles = []*os.File{leaseReader}
+	}
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start expiration helper: %w", err)
+		closeLease()
+		return nil, fmt.Errorf("start expiration helper: %w", err)
 	}
-	if err := cmd.Process.Release(); err != nil {
-		return fmt.Errorf("release expiration helper: %w", err)
+	if leaseReader != nil {
+		_ = leaseReader.Close()
 	}
-	return nil
+	// Wait asynchronously: short-lived CLI callers may exit first, while
+	// long-lived MCP callers must reap every completed helper.
+	reapExpiryProcess(cmd)
+	if !deferred {
+		return nil, nil
+	}
+	return newProducerLease(leaseWriter), nil
+}
+
+// producerLease deliberately keeps the pipe writer reachable until explicit
+// cancellation or process exit. For current-pane launchers, process exit is
+// the exact event that permits the queued shell command to run.
+type producerLease struct {
+	writer *os.File
+	done   chan struct{}
+	once   sync.Once
+	err    error
+}
+
+func newProducerLease(writer *os.File) *producerLease {
+	lease := &producerLease{writer: writer, done: make(chan struct{})}
+	go func(held *os.File, done <-chan struct{}) {
+		<-done
+		// Reference held after the receive so garbage collection cannot close
+		// the file while the producing AGM process remains alive.
+		_ = held.Name()
+	}(writer, lease.done)
+	return lease
+}
+
+func (l *producerLease) Close() error {
+	l.once.Do(func() {
+		l.err = l.writer.Close()
+		close(l.done)
+	})
+	return l.err
 }
 
 func expireHandoff(path string, expiresAt time.Time, now func() time.Time, wait func(time.Duration)) error {
@@ -176,6 +255,62 @@ func expireHandoff(path string, expiresAt time.Time, now func() time.Time, wait 
 		}
 		wait(remaining)
 	}
+}
+
+func expireDeferredHandoff(path string, lease io.Reader, lifetime, heartbeat time.Duration) error {
+	original, err := expiryTarget(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	producerExited := make(chan struct{}, 1)
+	go func() {
+		_, _ = io.Copy(io.Discard, lease)
+		producerExited <- struct{}{}
+	}()
+	ticker := time.NewTicker(heartbeat)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-producerExited:
+			now := time.Now()
+			if err := refreshExpiryTarget(path, original, now); errors.Is(err, os.ErrNotExist) {
+				return nil
+			} else if err != nil {
+				return err
+			}
+			return expireHandoff(path, now.Add(lifetime), time.Now, time.Sleep)
+		case now := <-ticker.C:
+			if err := refreshExpiryTarget(path, original, now); errors.Is(err, os.ErrNotExist) {
+				return nil
+			} else if err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func refreshExpiryTarget(path string, original os.FileInfo, now time.Time) error {
+	current, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(original, current) {
+		return errors.New("private launch handoff changed while producer lease was live")
+	}
+	if err := os.Chtimes(path, now, now); err != nil {
+		return fmt.Errorf("refresh deferred private launch handoff: %w", err)
+	}
+	current, err = os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(original, current) {
+		return errors.New("private launch handoff changed while producer lease was refreshed")
+	}
+	return nil
 }
 
 func expiryTarget(path string) (os.FileInfo, error) {
@@ -232,7 +367,7 @@ func privateExecutable(configured string) string {
 	return "agm"
 }
 
-func stageHandoff(protocol string, environment []string) (string, error) {
+func stageHandoff(protocol string, environment []string, deferred bool) (string, error) {
 	if err := validateHandoffEnvironment(protocol, environment); err != nil {
 		return "", err
 	}
@@ -266,8 +401,9 @@ func stageHandoff(protocol string, environment []string) (string, error) {
 	}
 	payload := launchHandoff{
 		Version: handoffVersion, Protocol: protocol,
-		CreatedAt:   time.Now().UTC().Format(time.RFC3339Nano),
-		Environment: append([]string(nil), environment...),
+		CreatedAt:                 time.Now().UTC().Format(time.RFC3339Nano),
+		DeferredUntilProducerExit: deferred,
+		Environment:               append([]string(nil), environment...),
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -296,15 +432,22 @@ func consumeHandoff(path, protocol string) (launchHandoff, error) {
 		return launchHandoff{}, err
 	}
 	defer func() { _ = file.Close() }()
+	// Unlink immediately after securely opening the exact owner-only file. The
+	// open descriptor remains readable, while every decode or validation
+	// rejection is still one-shot and cannot leave credentials on disk.
+	if err := os.Remove(path); err != nil {
+		return launchHandoff{}, fmt.Errorf("consume private launch handoff: %w", err)
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return launchHandoff{}, fmt.Errorf("inspect opened private launch handoff: %w", err)
+	}
 	handoff, err := decodeHandoff(file)
 	if err != nil {
 		return launchHandoff{}, err
 	}
-	if err := validateHandoff(handoff, protocol, time.Now()); err != nil {
+	if err := validateHandoff(handoff, protocol, time.Now(), info.ModTime()); err != nil {
 		return launchHandoff{}, err
-	}
-	if err := os.Remove(path); err != nil {
-		return launchHandoff{}, fmt.Errorf("consume private launch handoff: %w", err)
 	}
 	return handoff, nil
 }
@@ -353,9 +496,13 @@ func decodeHandoff(file *os.File) (launchHandoff, error) {
 	return handoff, nil
 }
 
-func validateHandoff(handoff launchHandoff, protocol string, now time.Time) error {
+func validateHandoff(handoff launchHandoff, protocol string, now, modifiedAt time.Time) error {
 	createdAt, err := time.Parse(time.RFC3339Nano, handoff.CreatedAt)
-	age := now.Sub(createdAt)
+	validAt := createdAt
+	if handoff.DeferredUntilProducerExit {
+		validAt = modifiedAt
+	}
+	age := now.Sub(validAt)
 	if err != nil || age < 0 || age > handoffMaxAge {
 		return errors.New("private launch handoff is expired or has an invalid timestamp")
 	}

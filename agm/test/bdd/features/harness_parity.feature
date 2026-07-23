@@ -364,6 +364,7 @@ Feature: Harness parity
     And the top-level new command should route into current tmux
     And Codex current-tmux launch should require the executable without waiting behind its own AGM process
     And every queued current-tmux harness should defer readiness until AGM exits
+    And queued private handoffs should carry producer-exit liveness
     And current-tmux Claude should associate its UUID on SessionStart
     And Codex queue failures should propagate to shared creation rollback
 
@@ -409,6 +410,7 @@ Feature: Harness parity
     And the Codex child should receive only allowlisted credentials
     And caller-only credentials and telemetry should cross stale tmux state through the pinned AGM executor
     And an unconsumed credential handoff should expire independently of later launches
+    And deferred and rejected handoffs should preserve bounded one-shot cleanup
 
   Scenario: AGY detached session receives startup prompt
     Given AGY is available

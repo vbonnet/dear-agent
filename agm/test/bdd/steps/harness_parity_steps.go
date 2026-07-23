@@ -193,6 +193,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the top-level new command should route into current tmux$`, topLevelNewCommandShouldRouteIntoCurrentTmux)
 	ctx.Step(`^Codex current-tmux launch should require the executable without waiting behind its own AGM process$`, codexCurrentTmuxLaunchShouldRequireExecutableWithoutWaiting)
 	ctx.Step(`^every queued current-tmux harness should defer readiness until AGM exits$`, everyQueuedCurrentTmuxHarnessShouldDeferReadinessUntilAGMExits)
+	ctx.Step(`^queued private handoffs should carry producer-exit liveness$`, queuedPrivateHandoffsShouldCarryProducerExitLiveness)
 	ctx.Step(`^current-tmux Claude should associate its UUID on SessionStart$`, currentTmuxClaudeShouldAssociateItsUUIDOnSessionStart)
 	ctx.Step(`^Codex queue failures should propagate to shared creation rollback$`, codexQueueFailuresShouldPropagateToSharedCreationRollback)
 	ctx.Step(`^current-tmux creation selects AGY$`, currentTmuxCreationSelectsAGY)
@@ -369,6 +370,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the Codex child should receive only allowlisted credentials$`, codexChildShouldReceiveOnlyAllowlistedCredentials)
 	ctx.Step(`^caller-only credentials and telemetry should cross stale tmux state through the pinned AGM executor$`, callerOnlyCredentialsAndTelemetryShouldCrossStaleTmuxStateThroughThePinnedAGMExecutor)
 	ctx.Step(`^an unconsumed credential handoff should expire independently of later launches$`, anUnconsumedCredentialHandoffShouldExpireIndependentlyOfLaterLaunches)
+	ctx.Step(`^deferred and rejected handoffs should preserve bounded one-shot cleanup$`, deferredAndRejectedHandoffsShouldPreserveBoundedOneShotCleanup)
 	ctx.Step(`^an existing tmux session running Codex CLI$`, anExistingTmuxSessionRunningCodexCLI)
 	ctx.Step(`^an existing tmux session running AGY$`, anExistingTmuxSessionRunningAGY)
 	ctx.Step(`^/agm:agm-assoc runs in that session$`, agmAssocRunsInThatSession)
@@ -683,6 +685,22 @@ func everyQueuedCurrentTmuxHarnessShouldDeferReadinessUntilAGMExits(ctx context.
 	} {
 		if !strings.Contains(state.currentTmuxTestOutput, "--- PASS: "+behavior) {
 			return fmt.Errorf("current-tmux deferred readiness behavior %s did not pass:\n%s", behavior, state.currentTmuxTestOutput)
+		}
+	}
+	return nil
+}
+
+func queuedPrivateHandoffsShouldCarryProducerExitLiveness(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if state.currentTmuxTestErr != nil {
+		return fmt.Errorf("current-tmux behavior suite failed: %w\n%s", state.currentTmuxTestErr, state.currentTmuxTestOutput)
+	}
+	for _, behavior := range []string{
+		"TestQueueCurrentTmuxCodexDoesNotWaitForReadiness",
+		"TestQueueCurrentTmuxHarnessCommandUsesCanonicalCommandWithoutWaiting",
+	} {
+		if !strings.Contains(state.currentTmuxTestOutput, "--- PASS: "+behavior) {
+			return fmt.Errorf("producer-exit liveness behavior %s did not pass:\n%s", behavior, state.currentTmuxTestOutput)
 		}
 	}
 	return nil
@@ -1037,7 +1055,7 @@ func agmBuildsTheCodexPrivateLaunchBoundary(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/harnessexec",
-		"-run", `^(TestPrepared(ClaudeCommand(CarriesCallerOnlyOAuthAndTelemetry|ClearsCallerAbsentPaneState)|CodexCommand(CarriesCallerAllowlistAndPreservesPaneIdentity|ClearsCallerAbsentPaneCredentials)|Command(CancelRemovesUndeliveredHandoff|UsesCoInstalledAGMFromCompanionBinary|UsesRenamedCurrentAGMExecutable|MakesRelativeStateDirectoryAbsolute|SchedulesIndependentExpiration|RemovesHandoffWhenExpirationCannotBeScheduled))|TestExpiryProtocolRemovesUnconsumedHandoffAtDeadline|TestDetachedExpiryHelperInterceptsGoTestBinaryBeforeTestsRun|TestClaudeResumeChangesDirectoryBeforeDirectReplacement)$`,
+		"-run", `^(TestPrepared(ClaudeCommand(CarriesCallerOnlyOAuthAndTelemetry|ClearsCallerAbsentPaneState)|CodexCommand(CarriesCallerAllowlistAndPreservesPaneIdentity|ClearsCallerAbsentPaneCredentials)|Command(CancelRemovesUndeliveredHandoff|UsesCoInstalledAGMFromCompanionBinary|UsesRenamedCurrentAGMExecutable|MakesRelativeStateDirectoryAbsolute|SchedulesIndependentExpiration|RemovesHandoffWhenExpirationCannotBeScheduled)|DeferredCommandSchedulesProducerLease)|Test(DeferredHandoffRemainsLiveUntilProducerExitThenExpires|ExpiryProtocolRemovesUnconsumedHandoffAtDeadline|DetachedExpiryHelper(InterceptsGoTestBinaryBeforeTestsRun|IsReapedAsynchronously)|ConsumeHandoffUsesDeferredLeaseFreshnessAndUnlinksRejections|ClaudeResumeChangesDirectoryBeforeDirectReplacement))$`,
 		"-count=1", "-v",
 	)
 	cmd.Dir = bddRepoRoot()
@@ -1115,6 +1133,24 @@ func anUnconsumedCredentialHandoffShouldExpireIndependentlyOfLaterLaunches(ctx c
 	} {
 		if !strings.Contains(state.privateHandoffTestOutput, "--- PASS: "+behavior) {
 			return fmt.Errorf("private handoff expiration behavior %s did not pass:\n%s", behavior, state.privateHandoffTestOutput)
+		}
+	}
+	return nil
+}
+
+func deferredAndRejectedHandoffsShouldPreserveBoundedOneShotCleanup(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if state.privateHandoffTestErr != nil {
+		return fmt.Errorf("private deferred-handoff behavior failed: %w\n%s", state.privateHandoffTestErr, state.privateHandoffTestOutput)
+	}
+	for _, behavior := range []string{
+		"TestPreparedDeferredCommandSchedulesProducerLease",
+		"TestDeferredHandoffRemainsLiveUntilProducerExitThenExpires",
+		"TestDetachedExpiryHelperIsReapedAsynchronously",
+		"TestConsumeHandoffUsesDeferredLeaseFreshnessAndUnlinksRejections",
+	} {
+		if !strings.Contains(state.privateHandoffTestOutput, "--- PASS: "+behavior) {
+			return fmt.Errorf("private deferred-handoff behavior %s did not pass:\n%s", behavior, state.privateHandoffTestOutput)
 		}
 	}
 	return nil

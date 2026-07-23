@@ -39,11 +39,13 @@ sandbox the harness beyond the native permission mode requested by AGM.
 
 **HEXEC-09** When AGM or a co-installed companion prepares a private harness command, the system shall invoke the absolute current AGM executable regardless of its filename, or the co-installed AGM executable for a known companion, so the pane cannot resolve a missing or different installation through `PATH`.
 
-**HEXEC-10** When AGM stages a private launch handoff, the system shall store it at an absolute path in an owner-only directory and file, bind it to one harness protocol and a bounded lifetime, remove it before harness execution, and remove an undelivered handoff when command delivery fails.
+**HEXEC-10** When AGM stages a private launch handoff, the system shall store it at an absolute path in an owner-only directory and file, bind it to one harness protocol and a bounded lifetime, unlink it immediately after securely opening the exact file so successful and rejected reads are both one-shot, and remove an undelivered handoff when command delivery fails.
 
 **HEXEC-11** When Claude telemetry forwarding is disabled, the system shall remove ambient OpenTelemetry endpoint and header configuration; when forwarding is enabled, it shall use the invoking AGM process's endpoint and headers.
 
-**HEXEC-12** When AGM stages a credential-bearing launch handoff, the system shall start an independent, credential-free expiration helper before returning the command, shall intercept that helper before application or test main execution, shall fail closed and remove the handoff if the helper cannot start, and shall remove the same unconsumed handoff no later than its bounded lifetime without relying on a later AGM launch.
+**HEXEC-12** When AGM stages a credential-bearing launch handoff, the system shall start an independent, credential-free expiration helper before returning the command, shall intercept that helper before application or test main execution, shall fail closed and remove the handoff if the helper cannot start, shall asynchronously reap the helper when a long-lived caller survives it, and shall remove the same unconsumed handoff no later than its bounded lifetime without relying on a later AGM launch.
+
+**HEXEC-13** When a current-pane launch command cannot execute until its producing AGM process exits, the system shall give the expiration helper a credential-free producer-liveness pipe, keep the handoff fresh only while that pipe remains open, and begin one bounded post-exit lifetime when the producer exits; cancellation shall release the pipe and remove the handoff.
 
 ## BDD Traceability
 

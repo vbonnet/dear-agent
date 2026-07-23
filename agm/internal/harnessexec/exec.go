@@ -67,36 +67,38 @@ var claudeHandoffEnvironment = map[string]bool{
 // CodexLaunch contains the non-secret metadata AGM may place in a tmux launch
 // command. The executor constructs the real Codex argv after parsing it.
 type CodexLaunch struct {
-	Executable  string
-	HandoffPath string
-	SessionName string
-	Model       string
-	WorkDir     string
-	Sandbox     string
-	Approval    string
-	AddDirs     []string
-	ResumeID    string
-	Remote      bool
-	Persistent  bool
+	Executable             string
+	HandoffPath            string
+	SessionName            string
+	Model                  string
+	WorkDir                string
+	Sandbox                string
+	Approval               string
+	AddDirs                []string
+	ResumeID               string
+	Remote                 bool
+	Persistent             bool
+	DeferUntilProducerExit bool
 }
 
 // ClaudeLaunch contains the non-secret metadata AGM may place in a tmux launch
 // command. OAuth values are resolved only inside the executor.
 type ClaudeLaunch struct {
-	Executable       string
-	HandoffPath      string
-	SessionName      string
-	SessionID        string
-	ResumeID         string
-	WorkDir          string
-	Model            string
-	AddDirs          []string
-	AutoMode         bool
-	Permission       string
-	MaxBudgetUSD     float64
-	DisableOAuth     bool
-	ForwardTelemetry bool
-	Persistent       bool
+	Executable             string
+	HandoffPath            string
+	SessionName            string
+	SessionID              string
+	ResumeID               string
+	WorkDir                string
+	Model                  string
+	AddDirs                []string
+	AutoMode               bool
+	Permission             string
+	MaxBudgetUSD           float64
+	DisableOAuth           bool
+	ForwardTelemetry       bool
+	Persistent             bool
+	DeferUntilProducerExit bool
 }
 
 // IsProtocol reports whether arg names one of the private launch protocols.
@@ -213,10 +215,12 @@ func Run(protocol string, args []string) error {
 
 func runExpiry(args []string) error {
 	var path, expiresAtValue string
+	producerLeaseFD := -1
 	set := flag.NewFlagSet(ExpiryProtocol, flag.ContinueOnError)
 	set.SetOutput(io.Discard)
 	set.StringVar(&path, "handoff", "", "")
 	set.StringVar(&expiresAtValue, "expires-at", "", "")
+	set.IntVar(&producerLeaseFD, "producer-lease-fd", -1, "")
 	if err := set.Parse(args); err != nil {
 		return fmt.Errorf("invalid private handoff expiration request: %w", err)
 	}
@@ -233,6 +237,17 @@ func runExpiry(args []string) error {
 	now := time.Now()
 	if expiresAt.After(now.Add(handoffMaxAge + time.Minute)) {
 		return errors.New("private handoff expiration deadline exceeds the maximum lifetime")
+	}
+	if producerLeaseFD != -1 {
+		if producerLeaseFD != 3 {
+			return errors.New("invalid private handoff producer lease descriptor")
+		}
+		lease := os.NewFile(uintptr(producerLeaseFD), "private-handoff-producer-lease")
+		if lease == nil {
+			return errors.New("open private handoff producer lease")
+		}
+		defer func() { _ = lease.Close() }()
+		return expireDeferredHandoff(path, lease, handoffMaxAge, time.Minute)
 	}
 	return expireHandoff(path, expiresAt, time.Now, time.Sleep)
 }

@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -210,6 +212,23 @@ func assertPreparedHarnessCommand(t *testing.T, command, protocol string) {
 		if !strings.Contains(command, want) {
 			t.Fatalf("prepared command %q does not contain %q", command, want)
 		}
+	}
+	match := regexp.MustCompile(`--handoff '([^']+)'`).FindStringSubmatch(command)
+	if len(match) != 2 {
+		t.Fatalf("prepared command %q does not contain a quoted handoff path", command)
+	}
+	payload, err := os.ReadFile(match[1])
+	if err != nil {
+		t.Fatalf("read current-tmux handoff: %v", err)
+	}
+	var handoff struct {
+		DeferredUntilProducerExit bool `json:"deferred_until_producer_exit"`
+	}
+	if err := json.Unmarshal(payload, &handoff); err != nil {
+		t.Fatalf("decode current-tmux handoff: %v", err)
+	}
+	if !handoff.DeferredUntilProducerExit {
+		t.Fatal("current-tmux handoff omitted its producer-liveness lease marker")
 	}
 }
 

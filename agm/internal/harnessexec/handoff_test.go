@@ -1,8 +1,11 @@
 package harnessexec
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,7 +14,7 @@ import (
 
 func TestMain(m *testing.M) {
 	original := scheduleHandoffExpiry
-	scheduleHandoffExpiry = func(string, string, time.Time) error { return nil }
+	scheduleHandoffExpiry = func(string, string, time.Time, bool) (io.Closer, error) { return nil, nil }
 	code := m.Run()
 	scheduleHandoffExpiry = original
 	os.Exit(code)
@@ -282,9 +285,11 @@ func TestPreparedCommandSchedulesIndependentExpiration(t *testing.T) {
 	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
 	var gotExecutable, gotPath string
 	var gotDeadline time.Time
-	scheduleHandoffExpiry = func(executable, path string, deadline time.Time) error {
+	var gotDeferred bool
+	scheduleHandoffExpiry = func(executable, path string, deadline time.Time, deferred bool) (io.Closer, error) {
 		gotExecutable, gotPath, gotDeadline = executable, path, deadline
-		return nil
+		gotDeferred = deferred
+		return nil, nil
 	}
 
 	startedAt := time.Now()
@@ -301,6 +306,54 @@ func TestPreparedCommandSchedulesIndependentExpiration(t *testing.T) {
 	if gotDeadline.Before(startedAt.Add(handoffMaxAge)) || gotDeadline.After(time.Now().Add(handoffMaxAge)) {
 		t.Fatalf("expiration deadline %s is not one bounded lifetime from preparation", gotDeadline)
 	}
+	if gotDeferred {
+		t.Fatal("ordinary detached launch unexpectedly requested a producer liveness lease")
+	}
+}
+
+func TestPreparedDeferredCommandSchedulesProducerLease(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	originalExecutablePath := executablePath
+	originalScheduler := scheduleHandoffExpiry
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		scheduleHandoffExpiry = originalScheduler
+	})
+	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+	lease := &recordingCloser{}
+	var gotDeferred bool
+	scheduleHandoffExpiry = func(_ string, _ string, _ time.Time, deferred bool) (io.Closer, error) {
+		gotDeferred = deferred
+		return lease, nil
+	}
+
+	prepared, err := PrepareCodexCommand(CodexLaunch{
+		SessionName: "deferred-codex", Model: "gpt-test", WorkDir: "/tmp/work",
+		Sandbox: "workspace-write", DeferUntilProducerExit: true,
+	}, []string{"OPENAI_API_KEY=deferred-canary"})
+	if err != nil {
+		t.Fatalf("prepare deferred Codex command: %v", err)
+	}
+	if !gotDeferred {
+		t.Fatal("deferred launch did not request a producer liveness lease")
+	}
+	payload, err := os.ReadFile(prepared.path)
+	if err != nil {
+		t.Fatalf("read deferred handoff: %v", err)
+	}
+	var handoff launchHandoff
+	if err := json.Unmarshal(payload, &handoff); err != nil {
+		t.Fatalf("decode deferred handoff: %v", err)
+	}
+	if !handoff.DeferredUntilProducerExit {
+		t.Fatal("deferred handoff omitted its producer-liveness marker")
+	}
+	if err := prepared.Cancel(); err != nil {
+		t.Fatalf("cancel deferred command: %v", err)
+	}
+	if !lease.closed {
+		t.Fatal("cancelling a deferred command did not release its producer lease")
+	}
 }
 
 func TestPreparedCommandRemovesHandoffWhenExpirationCannotBeScheduled(t *testing.T) {
@@ -313,7 +366,9 @@ func TestPreparedCommandRemovesHandoffWhenExpirationCannotBeScheduled(t *testing
 		scheduleHandoffExpiry = originalScheduler
 	})
 	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
-	scheduleHandoffExpiry = func(string, string, time.Time) error { return errors.New("scheduler unavailable") }
+	scheduleHandoffExpiry = func(string, string, time.Time, bool) (io.Closer, error) {
+		return nil, errors.New("scheduler unavailable")
+	}
 
 	_, err := PrepareClaudeCommand(ClaudeLaunch{SessionName: "expiry-failure"}, nil)
 	if err == nil || !strings.Contains(err.Error(), "schedule private launch handoff expiration") {
@@ -328,9 +383,64 @@ func TestPreparedCommandRemovesHandoffWhenExpirationCannotBeScheduled(t *testing
 	}
 }
 
+func TestDeferredHandoffRemainsLiveUntilProducerExitThenExpires(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	path, err := stageHandoff(CodexProtocol, []string{"OPENAI_API_KEY=deferred-expiry-canary"}, true)
+	if err != nil {
+		t.Fatalf("stage deferred handoff: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(path) })
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create producer lease: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = reader.Close()
+		_ = writer.Close()
+	})
+	oldModTime := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(path, oldModTime, oldModTime); err != nil {
+		t.Fatalf("age deferred handoff before lease refresh: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- expireDeferredHandoff(path, reader, 125*time.Millisecond, 25*time.Millisecond)
+	}()
+
+	initial, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat initial deferred handoff: %v", err)
+	}
+	time.Sleep(175 * time.Millisecond)
+	live, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("deferred handoff expired while producer was live: %v", err)
+	}
+	if !live.ModTime().After(initial.ModTime()) {
+		t.Fatalf("deferred handoff lease did not refresh mtime: initial=%s live=%s", initial.ModTime(), live.ModTime())
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("release producer lease: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("deferred handoff vanished without its bounded post-exit lifetime: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("expire deferred handoff: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("deferred handoff did not expire after producer exit")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("post-exit deferred handoff still exists: %v", err)
+	}
+}
+
 func TestExpiryProtocolRemovesUnconsumedHandoffAtDeadline(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
-	path, err := stageHandoff(CodexProtocol, []string{"OPENAI_API_KEY=expiry-canary"})
+	path, err := stageHandoff(CodexProtocol, []string{"OPENAI_API_KEY=expiry-canary"}, false)
 	if err != nil {
 		t.Fatalf("stage handoff: %v", err)
 	}
@@ -346,15 +456,42 @@ func TestExpiryProtocolRemovesUnconsumedHandoffAtDeadline(t *testing.T) {
 	}
 }
 
+func TestDetachedExpiryHelperIsReapedAsynchronously(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	path, err := stageHandoff(CodexProtocol, nil, false)
+	if err != nil {
+		t.Fatalf("stage handoff: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(path) })
+	originalReaper := reapExpiryProcess
+	t.Cleanup(func() { reapExpiryProcess = originalReaper })
+	reaped := make(chan error, 1)
+	reapExpiryProcess = func(cmd *exec.Cmd) {
+		go func() { reaped <- cmd.Wait() }()
+	}
+
+	if _, err := startHandoffExpiry(os.Args[0], path, time.Now().Add(50*time.Millisecond), false); err != nil {
+		t.Fatalf("start asynchronously reaped helper: %v", err)
+	}
+	select {
+	case err := <-reaped:
+		if err != nil {
+			t.Fatalf("expiration helper exit: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("expiration helper was not asynchronously reaped")
+	}
+}
+
 func TestDetachedExpiryHelperInterceptsGoTestBinaryBeforeTestsRun(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
-	path, err := stageHandoff(CodexProtocol, []string{"OPENAI_API_KEY=detached-expiry-canary"})
+	path, err := stageHandoff(CodexProtocol, []string{"OPENAI_API_KEY=detached-expiry-canary"}, false)
 	if err != nil {
 		t.Fatalf("stage handoff: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Remove(path) })
 
-	if err := startHandoffExpiry(os.Args[0], path, time.Now().Add(250*time.Millisecond)); err != nil {
+	if _, err := startHandoffExpiry(os.Args[0], path, time.Now().Add(250*time.Millisecond), false); err != nil {
 		t.Fatalf("start detached expiration helper from Go test binary: %v", err)
 	}
 	deadline := time.Now().Add(5 * time.Second)
@@ -370,6 +507,48 @@ func TestDetachedExpiryHelperInterceptsGoTestBinaryBeforeTestsRun(t *testing.T) 
 			t.Fatal("detached expiration helper re-entered tests or failed to remove the handoff")
 		}
 		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func TestConsumeHandoffUsesDeferredLeaseFreshnessAndUnlinksRejections(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	for name, deferred := range map[string]bool{
+		"ordinary": false,
+		"deferred": true,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path, err := stageHandoff(CodexProtocol, nil, deferred)
+			if err != nil {
+				t.Fatalf("stage handoff: %v", err)
+			}
+			payload, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read handoff: %v", err)
+			}
+			var handoff launchHandoff
+			if err := json.Unmarshal(payload, &handoff); err != nil {
+				t.Fatalf("decode handoff: %v", err)
+			}
+			handoff.CreatedAt = time.Now().Add(-2 * handoffMaxAge).UTC().Format(time.RFC3339Nano)
+			payload, err = json.Marshal(handoff)
+			if err != nil {
+				t.Fatalf("encode handoff: %v", err)
+			}
+			if err := os.WriteFile(path, append(payload, '\n'), 0600); err != nil {
+				t.Fatalf("rewrite handoff timestamp: %v", err)
+			}
+
+			_, consumeErr := consumeHandoff(path, CodexProtocol)
+			if deferred && consumeErr != nil {
+				t.Fatalf("deferred handoff rejected recent producer lease freshness: %v", consumeErr)
+			}
+			if !deferred && consumeErr == nil {
+				t.Fatal("ordinary handoff accepted expired creation time")
+			}
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Fatalf("consumed or rejected one-shot handoff still exists: %v", err)
+			}
+		})
 	}
 }
 
@@ -468,22 +647,22 @@ func TestExecutorConsumesHandoffBeforeHarnessLookup(t *testing.T) {
 func TestConsumeHandoffRejectsCrossHarnessAndPublicState(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
 
-	if _, err := stageHandoff(CodexProtocol, []string{"ANTHROPIC_API_KEY=must-not-cross"}); err == nil {
+	if _, err := stageHandoff(CodexProtocol, []string{"ANTHROPIC_API_KEY=must-not-cross"}, false); err == nil {
 		t.Fatal("Codex staging accepted an Anthropic credential")
 	}
 
-	wrongProtocol, err := stageHandoff(ClaudeProtocol, nil)
+	wrongProtocol, err := stageHandoff(ClaudeProtocol, nil, false)
 	if err != nil {
 		t.Fatalf("stage wrong-protocol handoff: %v", err)
 	}
 	if _, err := consumeHandoff(wrongProtocol, CodexProtocol); err == nil {
 		t.Fatal("Codex executor accepted a Claude handoff")
 	}
-	if err := os.Remove(wrongProtocol); err != nil {
-		t.Fatalf("remove rejected wrong-protocol handoff: %v", err)
+	if _, err := os.Stat(wrongProtocol); !os.IsNotExist(err) {
+		t.Fatalf("rejected wrong-protocol handoff still exists: %v", err)
 	}
 
-	public, err := stageHandoff(CodexProtocol, nil)
+	public, err := stageHandoff(CodexProtocol, nil, false)
 	if err != nil {
 		t.Fatalf("stage public-mode handoff: %v", err)
 	}
@@ -506,7 +685,7 @@ func TestConsumeHandoffRejectsTrailingAndOversizedContent(t *testing.T) {
 		"oversized":     strings.Repeat(" ", handoffMaxSize),
 	} {
 		t.Run(name, func(t *testing.T) {
-			path, err := stageHandoff(CodexProtocol, nil)
+			path, err := stageHandoff(CodexProtocol, nil, false)
 			if err != nil {
 				t.Fatalf("stage handoff: %v", err)
 			}
@@ -524,8 +703,8 @@ func TestConsumeHandoffRejectsTrailingAndOversizedContent(t *testing.T) {
 			if _, err := consumeHandoff(path, CodexProtocol); err == nil {
 				t.Fatal("executor accepted a corrupted handoff")
 			}
-			if err := os.Remove(path); err != nil {
-				t.Fatalf("remove rejected handoff: %v", err)
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Fatalf("rejected corrupted handoff still exists: %v", err)
 			}
 		})
 	}
@@ -547,4 +726,13 @@ func assertPrivateHandoffMode(t *testing.T, path string) {
 	if got := dirInfo.Mode().Perm(); got != 0700 {
 		t.Fatalf("handoff directory mode = %o, want 700", got)
 	}
+}
+
+type recordingCloser struct {
+	closed bool
+}
+
+func (c *recordingCloser) Close() error {
+	c.closed = true
+	return nil
 }

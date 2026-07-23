@@ -31,7 +31,12 @@ executor. The executor consumes and removes the handoff before resolving the
 fixed `codex` executable, constructs validated model, workdir, and sandbox
 arguments, and directly replaces itself with Codex without another shell. A
 credential-free helper independently removes an unconsumed handoff after its
-bounded lifetime, including when the queued tmux command never executes.
+bounded lifetime, including when the queued tmux command never executes. For a
+current-pane launch, a credential-free inherited pipe keeps the handoff valid
+only while the producing AGM process still owns the pane; the normal bounded
+lifetime starts when that process exits. The executor unlinks a securely opened
+handoff before decoding it, so malformed, expired, and protocol-mismatched
+handoffs cannot retain credentials.
 
 When Codex app-server remote control is available, AGM first creates a Codex
 thread through `codex app-server`, sets the Codex thread name to the AGM session
