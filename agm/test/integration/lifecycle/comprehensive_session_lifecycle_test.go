@@ -18,16 +18,14 @@ import (
 	"github.com/vbonnet/dear-agent/agm/test/integration/helpers"
 )
 
-// TestSessionLifecycle_ComprehensiveCreateResumeTerminate retains the legacy
-// host-dependent Claude and Gemini coverage. Codex uses the source-built,
-// uniquely socketed TestCodexLifecycleUsesIsolatedSourceEnvironment instead.
+// TestSessionLifecycle_ComprehensiveCreateResumeTerminate tests complete lifecycle for all agents
 func TestSessionLifecycle_ComprehensiveCreateResumeTerminate(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping comprehensive lifecycle test in short mode")
 	}
 
 	// Harness identifiers as accepted by `agm session new --harness`.
-	agents := []string{"claude-code", "gemini-cli"}
+	agents := []string{"claude-code", "gemini-cli", "codex-cli"}
 
 	for _, agent := range agents {
 		t.Run(fmt.Sprintf("Agent_%s", agent), func(t *testing.T) {
