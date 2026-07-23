@@ -8,6 +8,8 @@ The integration-tagged parity boundary has two layers:
 2. Host-dependent lifecycle tests live beside their isolated harness fixtures.
    Each test owns its binary, credential, service, tmux socket, state, and
    cleanup prerequisites; an unavailable prerequisite skips only that harness.
+   The portable `TestHarnessPrerequisitesAreScoped` matrix includes Pi, so an
+   unavailable `pi` executable skips only the `pi-cli` host probe.
 
 The portable layer intentionally does not create sessions or use host
 credentials. It validates canonical identity, versions, capabilities, default

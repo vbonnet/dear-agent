@@ -8,6 +8,9 @@ The `contract` build tag contains two distinct boundaries:
 - Provider-hosted scenarios are optional probes for Claude, OpenCode, and the
   deprecated Gemini compatibility adapter. Each probe skips only when its own
   binary, credential, server, or quota is unavailable.
+- Pi's host-dependent probes execute the installed binary's version and
+  project-loader paths, each with an explicit installation skip. Its managed
+  authorization-extension contract remains credential-free and always runs.
 
 Codex lifecycle behavior is CLI/tmux-backed rather than OpenAI-API-backed. Its
 real source-binary coverage therefore lives in
