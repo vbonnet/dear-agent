@@ -69,6 +69,8 @@ func TestEnsureOwnedEnvironmentRootSecuresModeAndRejectsSymlink(t *testing.T) {
 	symlink := filepath.Join(t.TempDir(), "root-link")
 	require.NoError(t, os.Symlink(target, symlink))
 	require.ErrorContains(t, ensureOwnedEnvironmentRoot(symlink), "not a directory")
+	_, err = validateExistingOwnedEnvironmentRoot(symlink)
+	require.ErrorContains(t, err, "not a directory")
 }
 
 func TestNew_HasHomeDir(t *testing.T) {
@@ -170,7 +172,9 @@ func TestListNamedSharesLifecycleRoot(t *testing.T) {
 }
 
 func TestRetiredNamedEnvironmentIsDiscoveredAndCleanedExactly(t *testing.T) {
-	t.Setenv("TMPDIR", t.TempDir())
+	retiredRootFixture := t.TempDir()
+	require.NoError(t, os.Chmod(retiredRootFixture, 0700))
+	t.Setenv("TMPDIR", retiredRootFixture)
 	roots := namedEnvironmentRoots()
 	require.Len(t, roots, 3)
 	retiredRoot := roots[2]
@@ -228,6 +232,11 @@ func TestLoadNamedResolvesGlobalShortRootBeforeCanonicalFallback(t *testing.T) {
 	assert.Equal(t, retired.BaseDir, loaded.BaseDir)
 	assert.Equal(t, retired.SocketPath, loaded.SocketPath)
 	assert.NotEqual(t, filepath.Join(canonicalEnvironmentRoot(), testEnvironmentPrefix+name), loaded.BaseDir)
+
+	created, err := NewNamed(name)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(canonicalEnvironmentRoot(), testEnvironmentPrefix+name), created.BaseDir)
+	assert.NotEqual(t, retired.BaseDir, created.BaseDir)
 }
 
 func TestListNamedPrefersCanonicalPerUserRootForDuplicate(t *testing.T) {
@@ -251,6 +260,72 @@ func TestListNamedPrefersCanonicalPerUserRootForDuplicate(t *testing.T) {
 		}
 	}
 	t.Fatalf("duplicate named environment %q was not listed", name)
+}
+
+func TestCanonicalCleanupRejectsSymlinkedRootBeforeRemovingChild(t *testing.T) {
+	name := "symlink-" + New().RunID
+	target := t.TempDir()
+	baseDir := filepath.Join(target, testEnvironmentPrefix+name)
+	require.NoError(t, os.MkdirAll(baseDir, 0700))
+	sentinel := filepath.Join(baseDir, "preserve")
+	require.NoError(t, os.WriteFile(sentinel, []byte("owned"), 0600))
+
+	symlinkRoot := filepath.Join(t.TempDir(), "canonical-link")
+	require.NoError(t, os.Symlink(target, symlinkRoot))
+	tc := newWithRoot(name, symlinkRoot)
+	require.ErrorContains(t, tc.Cleanup(), "not a directory")
+	_, err := os.Stat(sentinel)
+	require.NoError(t, err, "cleanup followed a symlinked canonical root")
+}
+
+func TestCleanupRejectsSymlinkedBaseBeforeRemovingTarget(t *testing.T) {
+	name := "base-link-" + New().RunID
+	target := t.TempDir()
+	sentinel := filepath.Join(target, "preserve")
+	require.NoError(t, os.WriteFile(sentinel, []byte("owned"), 0600))
+
+	tc := newWithRoot(name, shortTestEnvironmentRoot)
+	require.NoError(t, os.Symlink(target, tc.BaseDir))
+	t.Cleanup(func() { require.NoError(t, os.Remove(tc.BaseDir)) })
+
+	require.ErrorContains(t, tc.Cleanup(), "not a directory")
+	_, err := os.Stat(sentinel)
+	require.NoError(t, err, "cleanup followed a symlinked environment base")
+}
+
+func TestRetiredCleanupRevalidatesRootBeforeRemovingChild(t *testing.T) {
+	retiredRoot := filepath.Join(t.TempDir(), "retired-root")
+	require.NoError(t, os.Mkdir(retiredRoot, 0700))
+	name := "retired-swap-" + New().RunID
+	tc := newWithRoot(name, retiredRoot)
+	require.NoError(t, tc.EnsureDirs())
+	sentinel := filepath.Join(tc.BaseDir, "preserve")
+	require.NoError(t, os.WriteFile(sentinel, []byte("owned"), 0600))
+
+	movedRoot := retiredRoot + "-moved"
+	require.NoError(t, os.Rename(retiredRoot, movedRoot))
+	require.NoError(t, os.Symlink(movedRoot, retiredRoot))
+
+	require.ErrorContains(t, tc.Cleanup(), "not a directory")
+	_, err := os.Stat(filepath.Join(movedRoot, testEnvironmentPrefix+name, "preserve"))
+	require.NoError(t, err, "cleanup followed a retired root replaced by a symlink")
+}
+
+func TestLoadNamedRejectsSymlinkedRetiredRootBeforeResolvingChild(t *testing.T) {
+	name := "retired-link-" + New().RunID
+	target := t.TempDir()
+	baseDir := filepath.Join(target, testEnvironmentPrefix+name)
+	require.NoError(t, os.MkdirAll(baseDir, 0700))
+	sentinel := filepath.Join(baseDir, "preserve")
+	require.NoError(t, os.WriteFile(sentinel, []byte("owned"), 0600))
+
+	symlinkRoot := filepath.Join(t.TempDir(), "retired-link")
+	require.NoError(t, os.Symlink(target, symlinkRoot))
+	t.Setenv("TMPDIR", symlinkRoot)
+	_, err := LoadNamed(name)
+	require.ErrorContains(t, err, "not a directory")
+	_, err = os.Stat(sentinel)
+	require.NoError(t, err, "resolution followed a symlinked retired root")
 }
 
 func TestSetEnvAndFromEnv(t *testing.T) {

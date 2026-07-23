@@ -3,6 +3,7 @@
 package lifecycle_test
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,7 +24,7 @@ func TestCodexLifecycleUsesIsolatedSourceEnvironment(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping real-tmux Codex lifecycle in short mode")
 	}
-	if err := exec.Command("ps", "-axo", "command=").Run(); err != nil {
+	if err := probeProcessTable(); err != nil {
 		if helpers.IsUnavailablePrerequisite(err) {
 			t.Skipf("process-table inspection is unavailable to the fail-closed spawn guard: %v", err)
 		}
@@ -221,6 +222,32 @@ func main() {
 	if _, err := os.Stat(env.Context.BaseDir); !os.IsNotExist(err) {
 		t.Fatalf("isolated root survived cleanup: %v", err)
 	}
+}
+
+func TestProcessTableProbePreservesDeniedStderr(t *testing.T) {
+	fakeBin := t.TempDir()
+	fakePS := filepath.Join(fakeBin, "ps")
+	// #nosec G306 -- the test fixture must be executable to model a denied ps command.
+	if err := os.WriteFile(fakePS, []byte("#!/bin/sh\necho 'permission denied' >&2\nexit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fakeBin)
+
+	err := probeProcessTable()
+	if err == nil {
+		t.Fatal("denied process-table probe succeeded")
+	}
+	if !helpers.IsUnavailablePrerequisite(err) {
+		t.Fatalf("denied process-table stderr was not classified unavailable: %v", err)
+	}
+}
+
+func probeProcessTable() error {
+	output, err := exec.Command("ps", "-axo", "command=").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("run process-table probe: %w: %s", err, output)
+	}
+	return nil
 }
 
 func requirePaneContains(t *testing.T, env *helpers.IsolatedEnvironment, sessionName, marker string) {

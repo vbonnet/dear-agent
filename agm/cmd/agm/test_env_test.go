@@ -75,7 +75,9 @@ func TestTestEnvironmentCommandsRejectTraversalNames(t *testing.T) {
 }
 
 func TestTestEnvironmentDestroyRemovesRetiredRoot(t *testing.T) {
-	t.Setenv("TMPDIR", t.TempDir())
+	retiredRootFixture := t.TempDir()
+	require.NoError(t, os.Chmod(retiredRootFixture, 0700))
+	t.Setenv("TMPDIR", retiredRootFixture)
 	retiredRoot := filepath.Clean(os.TempDir())
 	require.NotEqual(t, "/tmp", retiredRoot)
 	name := testcontext.New().RunID + strings.Repeat("l", 64)

@@ -310,6 +310,9 @@ func unexpectedLifecycleSetupFailuresFail() error {
 	source := string(data)
 	for _, required := range []string{
 		`helpers.IsUnavailablePrerequisite(err)`,
+		`probeProcessTable()`,
+		`.CombinedOutput()`,
+		`"run process-table probe: %w: %s"`,
 		`env.TmuxUnavailable()`,
 		`t.Fatalf("probe process-table inspection: %v", err)`,
 		`t.Fatalf("start isolated tmux server: %v", err)`,
@@ -418,7 +421,7 @@ func agmValidatesNamedTestEnvironmentOwnership(ctx context.Context) error {
 		"go", "test",
 		"./agm/internal/testcontext",
 		"./agm/cmd/agm",
-		"-run", `^(TestListNamedSharesLifecycleRoot|TestCanonicalEnvironmentRootIsShortPrivateAndUserScoped|TestEnsureOwnedEnvironmentRootSecuresModeAndRejectsSymlink|TestRetiredNamedEnvironmentIsDiscoveredAndCleanedExactly|TestLoadNamedResolvesGlobalShortRootBeforeCanonicalFallback|TestListNamedPrefersCanonicalPerUserRootForDuplicate|TestNamedEnvironmentRejectsUnownedPaths|TestNewNamedRejectsOverlongButLoadNamedRetainsCleanupAccess|TestFromEnvRejectsUnownedRunID|TestTestEnvironmentCreateListDestroySharesOwnedRoot|TestTestEnvironmentCommandsRejectTraversalNames|TestTestEnvironmentDestroyRemovesRetiredRoot)$`,
+		"-run", `^(TestListNamedSharesLifecycleRoot|TestCanonicalEnvironmentRootIsShortPrivateAndUserScoped|TestEnsureOwnedEnvironmentRootSecuresModeAndRejectsSymlink|TestCanonicalCleanupRejectsSymlinkedRootBeforeRemovingChild|TestCleanupRejectsSymlinkedBaseBeforeRemovingTarget|TestRetiredCleanupRevalidatesRootBeforeRemovingChild|TestLoadNamedRejectsSymlinkedRetiredRootBeforeResolvingChild|TestRetiredNamedEnvironmentIsDiscoveredAndCleanedExactly|TestLoadNamedResolvesGlobalShortRootBeforeCanonicalFallback|TestListNamedPrefersCanonicalPerUserRootForDuplicate|TestNamedEnvironmentRejectsUnownedPaths|TestNewNamedRejectsOverlongButLoadNamedRetainsCleanupAccess|TestFromEnvRejectsUnownedRunID|TestTestEnvironmentCreateListDestroySharesOwnedRoot|TestTestEnvironmentCommandsRejectTraversalNames|TestTestEnvironmentDestroyRemovesRetiredRoot)$`,
 		"-count=1",
 		"-v",
 	)
@@ -442,6 +445,9 @@ func canonicalTestEnvironmentRootIsPrivatePerUser(ctx context.Context) error {
 		ctx,
 		"TestCanonicalEnvironmentRootIsShortPrivateAndUserScoped",
 		"TestEnsureOwnedEnvironmentRootSecuresModeAndRejectsSymlink",
+		"TestCanonicalCleanupRejectsSymlinkedRootBeforeRemovingChild",
+		"TestCleanupRejectsSymlinkedBaseBeforeRemovingTarget",
+		"TestRetiredCleanupRevalidatesRootBeforeRemovingChild",
 		"TestListNamedPrefersCanonicalPerUserRootForDuplicate",
 	); err != nil {
 		return err
@@ -472,6 +478,7 @@ func retiredNamedTestEnvironmentsActivateInPlace(ctx context.Context) error {
 	return requireNamedTestEnvironmentTests(
 		ctx,
 		"TestLoadNamedResolvesGlobalShortRootBeforeCanonicalFallback",
+		"TestLoadNamedRejectsSymlinkedRetiredRootBeforeResolvingChild",
 		"TestRetiredNamedEnvironmentIsDiscoveredAndCleanedExactly",
 	)
 }

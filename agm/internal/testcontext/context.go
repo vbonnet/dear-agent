@@ -97,11 +97,7 @@ func NewNamed(name string) (*TestContext, error) {
 	if err := ValidateName(name); err != nil {
 		return nil, err
 	}
-	root, err := resolveNamedEnvironmentRoot(name)
-	if err != nil {
-		return nil, err
-	}
-	return newNamedWithRoot(name, root)
+	return newNamedWithRoot(name, canonicalEnvironmentRoot())
 }
 
 // newWithID constructs a random context beneath the canonical short root.
@@ -183,6 +179,13 @@ func ListNamed() ([]*TestContext, error) {
 	contexts := make([]*TestContext, 0)
 	seen := make(map[string]struct{})
 	for _, root := range namedEnvironmentRoots() {
+		exists, err := validateNamedEnvironmentRoot(root)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			continue
+		}
 		entries, err := os.ReadDir(root)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -221,8 +224,27 @@ func ListNamed() ([]*TestContext, error) {
 }
 
 func newNamedWithRoot(name, primaryRoot string) (*TestContext, error) {
+	primaryExists, err := validateNamedEnvironmentRoot(primaryRoot)
+	if err != nil {
+		return nil, err
+	}
+	if !primaryExists && primaryRoot != canonicalEnvironmentRoot() {
+		return nil, fmt.Errorf("retired test environment root does not exist: %s", primaryRoot)
+	}
+	if primaryRoot == canonicalEnvironmentRoot() {
+		if _, err := ownedPath(filepath.Join(primaryRoot, testEnvironmentPrefix+name), true); err != nil {
+			return nil, err
+		}
+	}
 	tc := newWithRoot(name, primaryRoot)
 	for _, root := range namedEnvironmentRoots() {
+		exists, err := validateNamedEnvironmentRoot(root)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			continue
+		}
 		baseDir := filepath.Join(root, testEnvironmentPrefix+name)
 		socketPath := filepath.Join(root, testEnvironmentPrefix+name+".sock")
 		if baseDir != tc.BaseDir {
@@ -282,6 +304,13 @@ func canonicalEnvironmentRootForUID(uid int) string {
 
 func resolveNamedEnvironmentRoot(name string) (string, error) {
 	for _, root := range namedEnvironmentRoots() {
+		exists, err := validateNamedEnvironmentRoot(root)
+		if err != nil {
+			return "", err
+		}
+		if !exists {
+			continue
+		}
 		baseDir := filepath.Join(root, testEnvironmentPrefix+name)
 		owned, err := ownedPath(baseDir, true)
 		if err != nil {
@@ -292,6 +321,38 @@ func resolveNamedEnvironmentRoot(name string) (string, error) {
 		}
 	}
 	return canonicalEnvironmentRoot(), nil
+}
+
+func validateNamedEnvironmentRoot(root string) (bool, error) {
+	if root == shortTestEnvironmentRoot {
+		return true, nil
+	}
+	return validateExistingOwnedEnvironmentRoot(root)
+}
+
+func validateExistingOwnedEnvironmentRoot(root string) (bool, error) {
+	info, err := os.Lstat(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("inspect per-user test environment root %s: %w", root, err)
+	}
+	if !info.IsDir() {
+		return false, fmt.Errorf("per-user test environment root is not a directory: %s", root)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return false, fmt.Errorf("per-user test environment root has unsupported ownership metadata: %s", root)
+	}
+	// #nosec G115 -- effective Unix user IDs are non-negative and Stat_t.Uid is uint32.
+	if stat.Uid != uint32(os.Geteuid()) {
+		return false, fmt.Errorf("per-user test environment root is not owned by uid %d: %s", os.Geteuid(), root)
+	}
+	if info.Mode().Perm() != 0700 {
+		return false, fmt.Errorf("per-user test environment root is not owner-only: %s", root)
+	}
+	return true, nil
 }
 
 func ownedPath(path string, requireDirectory bool) (bool, error) {
@@ -398,7 +459,7 @@ func (tc *TestContext) Environ() []string {
 // EnsureDirs creates the base directory, home directory, and sessions subdirectory.
 func (tc *TestContext) EnsureDirs() error {
 	if filepath.Dir(tc.BaseDir) == canonicalEnvironmentRoot() {
-		if err := ensureCanonicalEnvironmentRoot(); err != nil {
+		if err := ensureOwnedEnvironmentRoot(canonicalEnvironmentRoot()); err != nil {
 			return err
 		}
 	}
@@ -409,10 +470,6 @@ func (tc *TestContext) EnsureDirs() error {
 		return err
 	}
 	return os.MkdirAll(tc.HomeDir, 0700)
-}
-
-func ensureCanonicalEnvironmentRoot() error {
-	return ensureOwnedEnvironmentRoot(canonicalEnvironmentRoot())
 }
 
 func ensureOwnedEnvironmentRoot(root string) error {
@@ -454,16 +511,42 @@ func (tc *TestContext) Cleanup() error {
 
 	var cleanupErr error
 	for _, socketPath := range socketPaths {
+		if ok, err := pathSafeForCleanup(socketPath, false); err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+			continue
+		} else if !ok {
+			continue
+		}
 		if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
 			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("remove test socket %s: %w", socketPath, err))
 		}
 	}
 	for _, baseDir := range baseDirs {
+		if ok, err := pathSafeForCleanup(baseDir, true); err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+			continue
+		} else if !ok {
+			continue
+		}
 		if err := os.RemoveAll(baseDir); err != nil {
 			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("remove test environment %s: %w", baseDir, err))
 		}
 	}
 	return cleanupErr
+}
+
+func pathSafeForCleanup(path string, requireDirectory bool) (bool, error) {
+	root := filepath.Dir(path)
+	if root != shortTestEnvironmentRoot {
+		exists, err := validateExistingOwnedEnvironmentRoot(root)
+		if err != nil {
+			return false, err
+		}
+		if !exists {
+			return false, nil
+		}
+	}
+	return ownedPath(path, requireDirectory)
 }
 
 // ForwardAuth symlinks LLM credential directories from the host HOME into
