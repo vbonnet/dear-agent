@@ -291,7 +291,10 @@ func dialProxyWebSocket(ctx context.Context, raw net.Conn, handshakeTimeout time
 			return raw, nil
 		},
 	}
-	conn, _, err := dialer.DialContext(ctx, "ws://localhost/rpc", nil)
+	conn, response, err := dialer.DialContext(ctx, "ws://localhost/rpc", nil)
+	if response != nil {
+		defer response.Body.Close()
+	}
 	if err != nil {
 		return nil, err
 	}
