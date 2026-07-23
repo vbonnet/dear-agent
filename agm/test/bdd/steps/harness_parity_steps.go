@@ -54,6 +54,10 @@ type harnessParityState struct {
 	waitedForAgyPrompt         bool
 	startupDelivered           bool
 	trustAutoAccepted          bool
+	codexHookReviewErr         error
+	codexHookReviewState       string
+	codexHookReviewTestOutput  string
+	codexHookReviewTestErr     error
 	sendSafetyRequiresClaude   bool
 	sessionListFields          []string
 	sessionListHasArray        bool
@@ -345,6 +349,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates deprecated configuration directory parity$`, agmValidatesDeprecatedConfigurationDirectoryParity)
 	ctx.Step(`^harness "([^"]*)" should have configuration directory "([^"]*)"$`, harnessShouldHaveConfigurationDirectory)
 	ctx.Step(`^a Codex CLI trust prompt$`, aCodexCLITrustPrompt)
+	ctx.Step(`^Codex hooks require explicit review$`, codexHooksRequireExplicitReview)
 	ctx.Step(`^an AGY ready prompt$`, anAGYReadyPrompt)
 	ctx.Step(`^an AGY trust prompt$`, anAGYTrustPrompt)
 	ctx.Step(`^an AGY feedback survey over a ready prompt$`, anAGYFeedbackSurveyOverAReadyPrompt)
@@ -361,6 +366,9 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM should wait for the AGY prompt$`, agmShouldWaitForTheAGYPrompt)
 	ctx.Step(`^AGM should deliver the startup prompt even though the session is detached$`, agmShouldDeliverStartupPromptDetached)
 	ctx.Step(`^AGM should auto-accept the Codex trust prompt before prompt delivery$`, agmShouldAutoAcceptCodexTrustPromptBeforePromptDelivery)
+	ctx.Step(`^AGM evaluates Codex hook review startup$`, agmEvaluatesCodexHookReviewStartup)
+	ctx.Step(`^Codex startup should fail fast with explicit review guidance$`, codexStartupShouldFailFastWithExplicitReviewGuidance)
+	ctx.Step(`^Codex hook review should receive no automated input$`, codexHookReviewShouldReceiveNoAutomatedInput)
 	ctx.Step(`^AGM should auto-accept the AGY trust prompt before prompt delivery$`, agmShouldAutoAcceptAGYTrustPromptBeforePromptDelivery)
 	ctx.Step(`^AGM runs send safety for the configured harness$`, agmRunsSendSafetyForTheConfiguredHarness)
 	ctx.Step(`^send safety should not require a Claude process$`, sendSafetyShouldNotRequireClaudeProcess)
@@ -3287,6 +3295,26 @@ func aCodexCLITrustPrompt(ctx context.Context) error {
 	return nil
 }
 
+func codexHooksRequireExplicitReview(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.harness = "codex-cli"
+	harnessState.paneOutput = `Hooks need review
+
+4 hooks are new or changed.
+
+Hooks can run outside the sandbox after you trust them.
+
+› 1. Review hooks
+  2. Trust all and continue
+  3. Continue without trusting (hooks won't run)
+
+Press enter to confirm or esc to go back`
+	return nil
+}
+
 func anAGYReadyPrompt(ctx context.Context) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
@@ -3830,6 +3858,82 @@ func agmShouldAutoAcceptCodexTrustPromptBeforePromptDelivery(ctx context.Context
 	}
 	if !harnessState.trustAutoAccepted || !harnessState.startupDelivered {
 		return fmt.Errorf("expected Codex trust prompt to be auto-accepted before startup prompt delivery")
+	}
+	return nil
+}
+
+func agmEvaluatesCodexHookReviewStartup(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if tmux.IsCodexHookReviewRequired(harnessState.paneOutput) {
+		harnessState.codexHookReviewErr = tmux.CodexHookReviewError()
+	}
+	_, state, classifyErr := tmux.ClassifyHarnessInput(harnessState.paneOutput, "codex-cli")
+	if classifyErr != nil {
+		return classifyErr
+	}
+	harnessState.codexHookReviewState = state
+	return nil
+}
+
+func codexStartupShouldFailFastWithExplicitReviewGuidance(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !errors.Is(harnessState.codexHookReviewErr, tmux.ErrCodexHookReviewRequired) {
+		if harnessState.codexHookReviewErr == nil {
+			return errors.New("codex hook review returned no typed review-required failure")
+		}
+		return fmt.Errorf("codex hook review returned the wrong failure: %w", harnessState.codexHookReviewErr)
+	}
+	if !strings.Contains(harnessState.codexHookReviewErr.Error(), "AGM will not trust executable hooks automatically") {
+		return fmt.Errorf("codex hook review error lacks no-auto-trust guidance: %w", harnessState.codexHookReviewErr)
+	}
+	if harnessState.codexHookReviewState != tmux.HarnessInputReviewRequired {
+		return fmt.Errorf("codex hook review state = %q, want %q", harnessState.codexHookReviewState, tmux.HarnessInputReviewRequired)
+	}
+	return nil
+}
+
+func codexHookReviewShouldReceiveNoAutomatedInput(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.codexHookReviewTestOutput == "" && harnessState.codexHookReviewTestErr == nil {
+		testCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/tmux", "./agm/internal/ops", "./agm/cmd/agm",
+			"-run", `^(TestWaitForCodexPromptFailsFastForHookReviewWithoutInput|TestHandleHarnessStartupStateFailsHookReviewWithoutAdvancing|TestCreateSession_CodexHookReviewPropagatesBeforeRegistrationOrPrompt|TestResumeSessionCodexPropagatesHookReviewBeforeActivityUpdate)$`,
+			"-count=1", "-v",
+		)
+		cmd.Dir = bddRepoRoot()
+		output, runErr := cmd.CombinedOutput()
+		harnessState.codexHookReviewTestOutput = string(output)
+		harnessState.codexHookReviewTestErr = runErr
+		if testCtx.Err() != nil {
+			return fmt.Errorf("codex hook review behavior suite timed out: %w", testCtx.Err())
+		}
+	}
+	if harnessState.codexHookReviewTestErr != nil {
+		return fmt.Errorf("codex hook review behavior suite failed: %w\n%s", harnessState.codexHookReviewTestErr, harnessState.codexHookReviewTestOutput)
+	}
+	for _, testName := range []string{
+		"TestWaitForCodexPromptFailsFastForHookReviewWithoutInput",
+		"TestHandleHarnessStartupStateFailsHookReviewWithoutAdvancing",
+		"TestCreateSession_CodexHookReviewPropagatesBeforeRegistrationOrPrompt",
+		"TestResumeSessionCodexPropagatesHookReviewBeforeActivityUpdate",
+	} {
+		passed := strings.Contains(harnessState.codexHookReviewTestOutput, "--- PASS: "+testName)
+		policySkipped := testName == "TestWaitForCodexPromptFailsFastForHookReviewWithoutInput" &&
+			os.Getenv("CI_SKIP_TMUX") == "true" &&
+			strings.Contains(harnessState.codexHookReviewTestOutput, "--- SKIP: "+testName)
+		if !passed && !policySkipped {
+			return fmt.Errorf("codex hook review behavior suite did not execute %s:\n%s", testName, harnessState.codexHookReviewTestOutput)
+		}
 	}
 	return nil
 }

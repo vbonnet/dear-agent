@@ -36,10 +36,18 @@ type OpError struct {
 
 	// Parameters echo back the input that caused the error.
 	Parameters map[string]string `json:"parameters,omitempty"`
+
+	cause error
 }
 
 func (e *OpError) Error() string {
 	return fmt.Sprintf("[%s] %s: %s", e.Code, e.Title, e.Detail)
+}
+
+// Unwrap preserves typed backend failures for in-process callers while the
+// stable RFC 7807 envelope remains suitable for CLI, MCP, and JSON surfaces.
+func (e *OpError) Unwrap() error {
+	return e.cause
 }
 
 // JSON returns the error as a JSON byte slice for programmatic consumers.
@@ -140,6 +148,7 @@ func ErrStorageError(operation string, cause error) *OpError {
 			"Run `agm admin doctor` to check storage health.",
 			"Verify Dolt server is running: `agm admin dolt-status`.",
 		},
+		cause: cause,
 	}
 }
 

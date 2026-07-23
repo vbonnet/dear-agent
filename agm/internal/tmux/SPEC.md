@@ -102,6 +102,8 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-47** When a multiline prompt is delivered to AGY, including through the atomic exact-pane delivery boundary, the system shall ask tmux to preserve line feeds and emit bracketed-paste delimiters when the application requested them, then send one Enter after the complete paste; other harnesses shall retain the established paste behavior.
 
+**TMUX-48** When Codex startup shows the structured selector for new or changed executable hooks that need review, every direct and shared readiness wait shall stop promptly with a typed, actionable error that requires interactive operator review, shall classify the pane as review-required rather than ready or generically busy, and shall not send keys, trust hooks, register the session, deliver a startup prompt, attach, or update lifecycle metadata; retained selector text followed by a newer tail-owned composer shall not remain a blocker.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

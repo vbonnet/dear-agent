@@ -2,6 +2,7 @@ package ops
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -141,6 +142,17 @@ func TestErrorFormat_RFC7807Compliance(t *testing.T) {
 		} else if arr, ok := suggestions.([]interface{}); !ok || len(arr) == 0 {
 			t.Errorf("error %s has empty suggestions", err.Code)
 		}
+	}
+}
+
+func TestErrStorageErrorPreservesTypedCauseWithoutSerializingIt(t *testing.T) {
+	sentinel := errors.New("typed backend failure")
+	err := ErrStorageError("typed-operation", sentinel)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("errors.Is(%v, sentinel) = false", err)
+	}
+	if strings.Contains(string(err.JSON()), "cause") {
+		t.Fatalf("RFC 7807 JSON exposed private cause: %s", err.JSON())
 	}
 }
 
