@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/cucumber/godog"
 
+	e2etest "github.com/vbonnet/dear-agent/agm/test/e2e"
 	"github.com/vbonnet/dear-agent/internal/earslint"
 )
 
@@ -80,36 +80,13 @@ func RegisterCrossLanguageImplementationGuardrailSteps(ctx *godog.ScenarioContex
 
 func agmE2EHarnessDetectionHelperIsConfigured() error {
 	helper := filepath.Join(packageSpecBDDRepoRoot(), "agm", "test", "e2e", "lib", "harness-detect.sh")
-	data, err := os.ReadFile(helper)
-	if err != nil {
-		return err
-	}
-	if strings.Contains(string(data), "declare -A") {
-		return fmt.Errorf("harness detection uses associative arrays unsupported by macOS system Bash")
-	}
-	return nil
+	_, err := os.Stat(helper)
+	return err
 }
 
 func agmValidatesPortableHarnessCommandLookup() error {
 	helper := filepath.Join(packageSpecBDDRepoRoot(), "agm", "test", "e2e", "lib", "harness-detect.sh")
-	const assertions = `
-set -euo pipefail
-source "$1"
-test "$(harness_command claude-code)" = claude
-test "$(harness_command codex-cli)" = codex
-test "$(harness_command gemini-cli)" = gemini
-test "$(harness_command opencode-cli)" = opencode
-if harness_command unknown-harness; then
-    exit 1
-fi
-`
-	// #nosec G204 -- executable, script, and assertions are repository-owned constants.
-	cmd := exec.Command("/bin/bash", "-c", assertions, "harness-detect-bdd", helper)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("portable harness lookup: %w\n%s", err, output)
-	}
-	return nil
+	return e2etest.ValidatePortableHarnessDetection(helper)
 }
 
 func exactHarnessMappingRunsUnderSystemBash() error {
