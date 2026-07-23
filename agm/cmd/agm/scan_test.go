@@ -201,12 +201,18 @@ func TestScanCycleResultFindings(t *testing.T) {
 
 func TestScanCommandCanBeExecuted(t *testing.T) {
 	// Setup test environment
-	tc, err := testcontext.NewNamed("scan-cmd-test")
-	if err != nil {
-		t.Fatalf("create named test environment: %v", err)
-	}
-	if err := tc.SetEnv(); err != nil {
-		t.Fatalf("failed to setup test environment: %v", err)
+	tc, err := testcontext.NewNamed("scan-cmd-test-" + testcontext.New().RunID)
+	require.NoError(t, err)
+	require.NoError(t, tc.EnsureDirs())
+	t.Cleanup(func() {
+		require.NoError(t, tc.Cleanup())
+	})
+	for _, environment := range tc.Environ() {
+		key, value, ok := strings.Cut(environment, "=")
+		if !ok {
+			t.Fatalf("invalid test environment entry %q", environment)
+		}
+		t.Setenv(key, value)
 	}
 
 	// Note: This test just verifies the command structure and flag parsing
