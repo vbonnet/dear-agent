@@ -369,6 +369,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the launch command should contain no credential values$`, launchCommandShouldContainNoCredentialValues)
 	ctx.Step(`^the Codex child should receive only allowlisted credentials$`, codexChildShouldReceiveOnlyAllowlistedCredentials)
 	ctx.Step(`^caller-only credentials and telemetry should cross stale tmux state through the pinned AGM executor$`, callerOnlyCredentialsAndTelemetryShouldCrossStaleTmuxStateThroughThePinnedAGMExecutor)
+	ctx.Step(`^private launches should normalize the target working directory and require a verified executor$`, privateLaunchesShouldNormalizeTheTargetWorkingDirectoryAndRequireAVerifiedExecutor)
 	ctx.Step(`^an unconsumed credential handoff should expire independently of later launches$`, anUnconsumedCredentialHandoffShouldExpireIndependentlyOfLaterLaunches)
 	ctx.Step(`^deferred and rejected handoffs should preserve bounded one-shot cleanup$`, deferredAndRejectedHandoffsShouldPreserveBoundedOneShotCleanup)
 	ctx.Step(`^an existing tmux session running Codex CLI$`, anExistingTmuxSessionRunningCodexCLI)
@@ -1055,7 +1056,7 @@ func agmBuildsTheCodexPrivateLaunchBoundary(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/harnessexec",
-		"-run", `^(TestPrepared(ClaudeCommand(CarriesCallerOnlyOAuthAndTelemetry|ClearsCallerAbsentPaneState)|CodexCommand(CarriesCallerAllowlistAndPreservesPaneIdentity|ClearsCallerAbsentPaneCredentials|ResolvesExecutableFromCallerPATH)|Command(CancelRemovesUndeliveredHandoff|UsesCoInstalledAGMFromCompanionBinary|UsesRenamedCurrentAGMExecutable|MakesRelativeStateDirectoryAbsolute|SchedulesIndependentExpiration|RemovesHandoffWhenExpirationCannotBeScheduled)|DeferredCommandSchedulesProducerLease)|Test(DeferredHandoffRemainsLiveUntilProducerExitThenExpires|ExpiryProtocolRemovesUnconsumedHandoffAtDeadline|DetachedExpiryHelper(InterceptsGoTestBinaryBeforeTestsRun|IsReapedAsynchronously)|ConsumeHandoffUsesDeferredLeaseFreshnessAndUnlinksRejections|ClaudeResumeChangesDirectoryBeforeDirectReplacement))$`,
+		"-run", `^(TestPrepared(ClaudeCommand(CarriesCallerOnlyOAuthAndTelemetry|ClearsCallerAbsentPaneState)|CodexCommand(CarriesCallerAllowlistAndPreservesPaneIdentity|ClearsCallerAbsentPaneCredentials|ResolvesExecutableFromCallerPATH)|Command(CancelRemovesUndeliveredHandoff|UsesCoInstalledAGMFromCompanionBinary|RejectsCompanionWithoutCoInstalledAGM|UsesRenamedCurrentAGMExecutable|MakesRelativeStateDirectoryAbsolute|SchedulesIndependentExpiration|RemovesHandoffWhenExpirationCannotBeScheduled)|DeferredCommandSchedulesProducerLease)|Test(DeferredHandoffRemainsLiveUntilProducerExitThenExpires|ExpiryProtocolRemovesUnconsumedHandoffAtDeadline|DetachedExpiryHelper(InterceptsGoTestBinaryBeforeTestsRun|IsReapedAsynchronously)|ConsumeHandoffUsesDeferredLeaseFreshnessAndUnlinksRejections|ClaudeResumeChangesDirectoryBeforeDirectReplacement))$`,
 		"-count=1", "-v",
 	)
 	cmd.Dir = bddRepoRoot()
@@ -1116,6 +1117,23 @@ func callerOnlyCredentialsAndTelemetryShouldCrossStaleTmuxStateThroughThePinnedA
 	} {
 		if !strings.Contains(state.privateHandoffTestOutput, "--- PASS: "+behavior) {
 			return fmt.Errorf("private handoff behavior %s did not pass:\n%s", behavior, state.privateHandoffTestOutput)
+		}
+	}
+	return nil
+}
+
+func privateLaunchesShouldNormalizeTheTargetWorkingDirectoryAndRequireAVerifiedExecutor(ctx context.Context) error {
+	state := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
+	if state.privateHandoffTestErr != nil {
+		return fmt.Errorf("private executor boundary behavior failed: %w\n%s", state.privateHandoffTestErr, state.privateHandoffTestOutput)
+	}
+	for _, behavior := range []string{
+		"TestPreparedCodexCommandCarriesCallerAllowlistAndPreservesPaneIdentity",
+		"TestPreparedCommandUsesCoInstalledAGMFromCompanionBinary",
+		"TestPreparedCommandRejectsCompanionWithoutCoInstalledAGM",
+	} {
+		if !strings.Contains(state.privateHandoffTestOutput, "--- PASS: "+behavior) {
+			return fmt.Errorf("private executor boundary behavior %s did not pass:\n%s", behavior, state.privateHandoffTestOutput)
 		}
 	}
 	return nil

@@ -35,7 +35,7 @@ sandbox the harness beyond the native permission mode requested by AGM.
 
 **HEXEC-07** When an executor request contains an unknown flag, positional argument, unsupported permission value, or control character, the system shall reject it before resolving or starting the harness executable.
 
-**HEXEC-08** When caller authentication, executable search path, or telemetry differs from a long-lived tmux server's environment, the system shall treat the caller's Codex allowlist, including `PATH` for fixed-name `codex` resolution, and Claude authentication and telemetry state as a complete snapshot, including removals, for fresh and resumed sessions without exposing values in command text or process arguments.
+**HEXEC-08** When caller authentication, executable search path, working directory, or telemetry differs from a long-lived tmux server's environment, the system shall treat the caller's Codex allowlist, including `PATH` for fixed-name `codex` resolution, and Claude authentication and telemetry state as a complete snapshot, including removals, for fresh and resumed sessions without exposing values in command text or process arguments, except that the Codex child `PWD` shall be normalized to the validated target working directory.
 
 **HEXEC-09** When AGM or a co-installed companion prepares a private harness command, the system shall invoke the absolute current AGM executable regardless of its filename, or the co-installed AGM executable for a known companion, so the pane cannot resolve a missing or different installation through `PATH`.
 

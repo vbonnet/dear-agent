@@ -567,11 +567,11 @@ func removeStaleHandoffs(root string, now time.Time) {
 	}
 }
 
-func overlayEnvironment(base, overrides []string, preserve map[string]bool) []string {
+func overlayEnvironment(base, overrides []string) []string {
 	values := environmentMap(base)
 	for _, entry := range overrides {
 		name, value, ok := strings.Cut(entry, "=")
-		if ok && name != "" && !preserve[name] {
+		if ok && name != "" {
 			values[name] = value
 		}
 	}

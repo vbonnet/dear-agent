@@ -265,8 +265,12 @@ func runCodex(args []string) error {
 			return handoffErr
 		}
 		environ = CodexEnvironment(handoff.Environment, request.SessionName)
-		environ = overlayEnvironment(environ, selectedEnvironment(os.Environ(), paneIdentityEnvironment), nil)
+		environ = overlayEnvironment(environ, selectedEnvironment(os.Environ(), paneIdentityEnvironment))
 	}
+	// The caller snapshot can come from a process outside the target pane.
+	// Keep the child's logical working directory aligned with the validated
+	// -C target instead of forwarding a stale caller PWD.
+	environ = overlayEnvironment(environ, []string{"PWD=" + request.WorkDir})
 	path, err := lookPathInEnvironment("codex", environ)
 	if err != nil {
 		return fmt.Errorf("resolve codex executable: %w", err)
@@ -291,7 +295,7 @@ func runClaude(args []string) error {
 			return handoffErr
 		}
 		parent = removeEnvironment(parent, claudeHandoffEnvironment)
-		parent = overlayEnvironment(parent, handoff.Environment, nil)
+		parent = overlayEnvironment(parent, handoff.Environment)
 		token = environmentMap(handoff.Environment)[auth.OAuthEnvVar]
 	}
 	if token == "" && !request.DisableOAuth && request.HandoffPath == "" {
@@ -307,7 +311,7 @@ func runClaude(args []string) error {
 		if err := changeDirectory(request.WorkDir); err != nil {
 			return fmt.Errorf("enter Claude working directory: %w", err)
 		}
-		env = overlayEnvironment(env, []string{"PWD=" + request.WorkDir}, nil)
+		env = overlayEnvironment(env, []string{"PWD=" + request.WorkDir})
 	}
 	if err := replaceProcess(path, argv, env); err != nil {
 		return fmt.Errorf("execute claude: %w", err)

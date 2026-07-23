@@ -409,6 +409,7 @@ Feature: Harness parity
     Then the launch command should contain no credential values
     And the Codex child should receive only allowlisted credentials
     And caller-only credentials and telemetry should cross stale tmux state through the pinned AGM executor
+    And private launches should normalize the target working directory and require a verified executor
     And an unconsumed credential handoff should expire independently of later launches
     And deferred and rejected handoffs should preserve bounded one-shot cleanup
 

@@ -113,7 +113,8 @@ func TestPreparedCodexCommandCarriesCallerAllowlistAndPreservesPaneIdentity(t *t
 	prepared, err := PrepareCodexCommand(CodexLaunch{
 		SessionName: "handoff-codex", Model: "gpt-test", WorkDir: "/tmp/work", Sandbox: "workspace-write",
 	}, []string{
-		"PATH=/caller/bin", "HOME=/caller/home", "TMUX=stale-caller-tmux", "TMUX_PANE=%1",
+		"PATH=/caller/bin", "HOME=/caller/home", "PWD=/stale/caller/work",
+		"TMUX=stale-caller-tmux", "TMUX_PANE=%1",
 		"OPENAI_API_KEY=caller-openai", "CODEX_ACCESS_TOKEN=caller-codex",
 		"ANTHROPIC_API_KEY=rejected-anthropic",
 	})
@@ -146,6 +147,7 @@ func TestPreparedCodexCommandCarriesCallerAllowlistAndPreservesPaneIdentity(t *t
 		"CODEX_ACCESS_TOKEN": "caller-codex",
 		"TMUX":               "live-pane-tmux",
 		"TMUX_PANE":          "%9",
+		"PWD":                "/tmp/work",
 	} {
 		if got := values[name]; got != want {
 			t.Errorf("Codex child %s = %q, want %q", name, got, want)
