@@ -489,7 +489,7 @@ func TestBuildChildCreateRequestPreservesRelationshipAndContext(t *testing.T) {
 		},
 	}
 
-	withoutContext := buildChildCreateRequest(parent, "child-default", "codex-cli", false)
+	withoutContext := buildChildCreateRequest(parent, "child-default", "codex-cli", "", false)
 	assert.Equal(t, parent.Context.Project, withoutContext.Cwd)
 	assert.Equal(t, parent.Model, withoutContext.Model)
 	assert.Equal(t, parent.Harness, withoutContext.Harness)
@@ -499,15 +499,22 @@ func TestBuildChildCreateRequestPreservesRelationshipAndContext(t *testing.T) {
 	require.NotNil(t, withoutContext.Metadata.ParentSessionID)
 	assert.Equal(t, parentID, *withoutContext.Metadata.ParentSessionID)
 
-	withContext := buildChildCreateRequest(parent, "child-context", "codex-cli", true)
+	withContext := buildChildCreateRequest(parent, "child-context", "codex-cli", "Inspect the failing tests", true)
+	assert.Equal(t, "Inspect the failing tests", withContext.Prompt)
 	assert.Equal(t, parent.Context.Purpose, withContext.Metadata.ContextPurpose)
 	assert.Equal(t, parent.Context.Notes, strings.TrimPrefix(withContext.Metadata.ContextNotes, "Child of parent-session\n\n"))
 	assert.Equal(t, parent.Context.Tags, withContext.Metadata.Tags)
 	parent.Context.Tags[0] = "mutated"
 	assert.Equal(t, "tag1", withContext.Metadata.Tags[0], "child tags must not alias parent storage")
 
-	overriddenHarness := buildChildCreateRequest(parent, "child-claude", "claude-code", false)
+	overriddenHarness := buildChildCreateRequest(parent, "child-claude", "claude-code", "", false)
 	assert.Empty(t, overriddenHarness.Model, "a parent model must not cross harness boundaries")
+}
+
+func TestValidateChildCreatePrompt(t *testing.T) {
+	assert.NoError(t, validateChildCreatePrompt("codex-cli", ""))
+	assert.NoError(t, validateChildCreatePrompt("agy", "Inspect the failing tests"))
+	assert.ErrorContains(t, validateChildCreatePrompt("agy", " \t"), "--prompt")
 }
 
 // TestCreateChildCommand_ErrorHandling tests error handling scenarios

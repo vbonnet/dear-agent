@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
@@ -22,6 +23,7 @@ import (
 
 var (
 	inheritContext bool
+	childPrompt    string
 	testDBPath     string // Test-only: Override database path for testing
 )
 
@@ -45,11 +47,13 @@ Flags:
   --context         - Inherit context and files from parent session
   --detached        - Create session without attaching (useful when inside tmux)
   --harness        - Harness to use (defaults to parent's harness)
+  --prompt         - Initial prompt (required for AGY child identity creation)
 
 Examples:
   agm session create-child parent-uuid                    # Prompt for child name
   agm session create-child parent-uuid child-task         # Create with specific name
   agm session create-child parent-uuid child-task --context  # Inherit context too
+  agm session create-child parent-uuid child-task --harness agy --prompt "Inspect the failing tests"
   agm session create-child --detached                     # Create from current tmux session
 
 Behavior:
@@ -65,6 +69,7 @@ func init() {
 	createChildCmd.Flags().BoolVar(&inheritContext, "context", false, "Inherit context and files from parent session")
 	createChildCmd.Flags().BoolVar(&detached, "detached", false, "Create detached session without attaching")
 	createChildCmd.Flags().StringVar(&harnessName, "harness", "", "Harness to use (defaults to parent's harness)")
+	createChildCmd.Flags().StringVar(&childPrompt, "prompt", "", "Initial prompt (required for AGY child sessions)")
 }
 
 func runCreateChild(cmd *cobra.Command, args []string) error {
@@ -120,6 +125,9 @@ func runCreateChild(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := validateChildCreatePrompt(selectedHarness, childPrompt); err != nil {
+		return err
+	}
 
 	workDir := parentManifest.Context.Project
 	debug.Log("Inheriting working directory from parent: %s", workDir)
@@ -148,7 +156,7 @@ func runCreateChild(cmd *cobra.Command, args []string) error {
 }
 
 func createChildSession(ctx context.Context, adapter *dolt.Adapter, parentManifest *manifest.Manifest, childSessionName, selectedHarness string) (*ops.CreateSessionResult, error) {
-	request := buildChildCreateRequest(parentManifest, childSessionName, selectedHarness, inheritContext)
+	request := buildChildCreateRequest(parentManifest, childSessionName, selectedHarness, childPrompt, inheritContext)
 	manifestDir := filepath.Join(getSessionsDir(), childSessionName)
 	request.ManifestDir = manifestDir
 	result, err := ops.CreateSessionWithContext(ctx, &ops.OpContext{
@@ -182,7 +190,14 @@ func createChildSession(ctx context.Context, adapter *dolt.Adapter, parentManife
 	return result, nil
 }
 
-func buildChildCreateRequest(parentManifest *manifest.Manifest, childSessionName, selectedHarness string, withContext bool) *ops.CreateSessionRequest {
+func validateChildCreatePrompt(selectedHarness, initialPrompt string) error {
+	if selectedHarness == "agy" && strings.TrimSpace(initialPrompt) == "" {
+		return fmt.Errorf("AGY child sessions require an initial prompt; provide --prompt")
+	}
+	return nil
+}
+
+func buildChildCreateRequest(parentManifest *manifest.Manifest, childSessionName, selectedHarness, initialPrompt string, withContext bool) *ops.CreateSessionRequest {
 	parentSessionID := parentManifest.SessionID
 	purpose := fmt.Sprintf("Child session of %s", parentManifest.Name)
 	var tags []string
@@ -201,6 +216,7 @@ func buildChildCreateRequest(parentManifest *manifest.Manifest, childSessionName
 	}
 	return &ops.CreateSessionRequest{
 		Cwd:                parentManifest.Context.Project,
+		Prompt:             initialPrompt,
 		Title:              childSessionName,
 		Model:              model,
 		Harness:            selectedHarness,
