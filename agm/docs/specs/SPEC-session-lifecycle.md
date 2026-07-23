@@ -34,17 +34,18 @@ Manages the full lifecycle of AGM sessions: creation (via `agm session new` / `a
 **Flow:**
 1. Resolve identifier to manifest (tries: session ID -> tmux name -> manifest Name; skips archived)
 2. Health check (`CheckHealth`) — validates working directory exists, checks for Claude Code session file bloat (>100MB / >1000 progress entries)
-3. Ensure tmux session exists; create if missing
-4. If Claude is not already running, the invoking AGM process stages its
-   selected authentication and telemetry snapshot in an owner-only one-shot
-   handoff and sends a non-secret command for the absolute AGM private executor
-   to tmux; after consuming the handoff, the executor changes to the project
-   directory and directly replaces itself with `claude --resume <uuid>`. A
-   credential-free helper independently expires the handoff if tmux never
-   executes the queued command. For a current-pane launch that cannot run until
-   AGM returns, an inherited credential-free pipe keeps the handoff live while
-   the producing AGM process exists; its normal bounded lifetime begins when
-   that process exits.
+3. Inspect whether the tmux session exists and whether Claude is already running.
+4. If Claude needs delivery, the invoking AGM process first stages its selected
+   authentication and telemetry snapshot in an owner-only one-shot handoff. If
+   tmux is missing, AGM creates it only after staging succeeds, so a preparation
+   failure cannot orphan a new shell session. AGM then sends a non-secret
+   command for the absolute AGM private executor to tmux; after consuming the
+   handoff, the executor changes to the project directory and directly replaces
+   itself with `claude --resume <uuid>`. A credential-free helper independently
+   expires the handoff if tmux never executes the queued command. For a
+   current-pane launch that cannot run until AGM returns, an inherited
+   credential-free pipe keeps the handoff live while the producing AGM process
+   exists; its normal bounded lifetime begins when that process exits.
 5. Wait up to 5s for Claude readiness
 6. Update `UpdatedAt` in Dolt
 7. Display transcript context (last 3 exchanges)
