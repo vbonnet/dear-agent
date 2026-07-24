@@ -106,6 +106,8 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-49** When Codex renders its current welcome view with instructions between the composer header and cursor, the system shall use a style-preserving logical capture that rejoins terminal-wrapped rows and classify the structured terminal footer paired with suggestion text styled dim or grey from its first visible character as an empty composer while treating identical unstyled text, structurally occupied paste chips, and human drafts with only later styled tokens as occupied input; direct startup and generic prompt waits, idle probes, shared readiness, session and backend state detection, and prompt delivery shall use the same distinction even in narrow panes.
 
+**TMUX-50** When atomic initial delivery of a Codex prompt with no extractable verification keyword is followed by a styled idle composer at the first delayed verification capture, the verifier shall treat the outcome as an ambiguous successful return and shall not resend the prompt, because the turn may already have completed; observable processing, prompt keywords, and prompt disappearance shall remain stronger confirmation signals, while an extractable keyword that remains absent shall retain retry behavior.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
@@ -116,7 +118,9 @@ because the tmux server's own cwd has been deleted.
 - Package tests: `agm/internal/tmux/linger_test.go`
 - Package tests: `agm/internal/tmux/capture_test.go`
 - Package tests: `agm/internal/tmux/agy_prompt_test.go`
+- Package tests: `agm/internal/tmux/codex_prompt_test.go`
 - Package tests: `agm/internal/tmux/prompt_test.go`
+- Package tests: `agm/internal/tmux/verify_delivery_test.go`
 - Integration tests: `agm/internal/tmux/agy_lifecycle_integration_test.go`
 - Package tests: `agm/internal/tmux/pi_prompt_test.go`
 - Package tests: `agm/internal/tmux/readiness_test.go`

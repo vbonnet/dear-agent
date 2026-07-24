@@ -11,9 +11,9 @@ import (
 
 // PromptDeliveryResult describes the outcome of a prompt delivery verification.
 type PromptDeliveryResult struct {
-	Delivered bool   // true if prompt was verified as delivered
+	Delivered bool   // true if delivery was confirmed or conservatively accepted without a risky resend
 	Attempt   int    // which attempt succeeded (1-indexed), 0 if all failed
-	Method    string // how delivery was confirmed ("processing", "keyword_match", "content_echo")
+	Method    string // how delivery was confirmed, or conservatively accepted when an idle Codex return is ambiguous
 }
 
 // VerifyPromptDelivery checks that a prompt was actually delivered to the session
@@ -25,6 +25,8 @@ type PromptDeliveryResult struct {
 //  1. Session is processing: spinner visible, no idle prompt
 //  2. Keyword match: one or more keywords from the prompt appear in scrollback
 //  3. Prompt gone: the harness prompt character disappeared (session accepted input)
+//  4. Ambiguous Codex idle return: a prompt without searchable keywords may
+//     already have completed before the first capture, so it must not be resent
 //
 // Parameters:
 //   - sessionName: tmux session to verify
@@ -67,27 +69,9 @@ func VerifyPromptDeliveryContext(ctx context.Context, sessionName, promptText st
 		if err != nil {
 			return PromptDeliveryResult{}, fmt.Errorf("capture-pane failed during delivery verification: %w", err)
 		}
-		content := stripANSI(styledContent)
-
-		// Check 1: Is the session processing? (spinner visible = prompt was accepted)
-		if hasActiveSpinner(content) {
-			debug.Log("✓ Delivery verified (attempt %d): session is processing (spinner active)", attempt)
-			return PromptDeliveryResult{Delivered: true, Attempt: attempt, Method: "processing"}, nil
-		}
-
-		// Check 2: Do keywords from the prompt appear in the scrollback?
-		// Claude Code echoes user messages in the pane, so if we see our keywords,
-		// the prompt was delivered.
-		if len(keywords) > 0 && keywordsFoundInContent(keywords, content) {
-			debug.Log("✓ Delivery verified (attempt %d): keywords found in pane content", attempt)
-			return PromptDeliveryResult{Delivered: true, Attempt: attempt, Method: "keyword_match"}, nil
-		}
-
-		// Check 3: Has the prompt character disappeared? (session accepted input)
-		// If no harness prompt is visible, the session is processing something.
-		if !containsAnyHarnessPromptPattern(styledContent) {
-			debug.Log("✓ Delivery verified (attempt %d): prompt character gone (session processing)", attempt)
-			return PromptDeliveryResult{Delivered: true, Attempt: attempt, Method: "content_echo"}, nil
+		if delivered, method := promptDeliveryEvidence(styledContent, keywords); delivered {
+			debug.Log("✓ Delivery accepted (attempt %d, method: %s)", attempt, method)
+			return PromptDeliveryResult{Delivered: true, Attempt: attempt, Method: method}, nil
 		}
 
 		// Delivery not confirmed — prompt might be stuck
@@ -110,6 +94,28 @@ func VerifyPromptDeliveryContext(ctx context.Context, sessionName, promptText st
 	// All attempts exhausted
 	debug.Log("✗ Delivery verification failed after %d attempts", maxRetries+1)
 	return PromptDeliveryResult{Delivered: false, Attempt: 0, Method: ""}, nil
+}
+
+func promptDeliveryEvidence(styledContent string, keywords []string) (bool, string) {
+	content := stripANSI(styledContent)
+	if hasActiveSpinner(content) {
+		return true, "processing"
+	}
+	if len(keywords) > 0 && keywordsFoundInContent(keywords, content) {
+		return true, "keyword_match"
+	}
+	if !containsAnyHarnessPromptPattern(styledContent) {
+		return true, "content_echo"
+	}
+	// The atomic sender already accepted the initial write. For a short prompt
+	// with no searchable keyword, a fast Codex turn can finish before this first
+	// capture and restore the styled idle composer. That state cannot distinguish
+	// "never delivered" from "already completed", so retrying risks duplicating
+	// completed work. Conservatively accept the ambiguous return without resend.
+	if len(keywords) == 0 && IsCodexComposerReady(styledContent) {
+		return true, "codex_idle_ambiguous"
+	}
+	return false, ""
 }
 
 // extractKeywords pulls significant words from the prompt text for verification.
