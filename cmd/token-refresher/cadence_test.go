@@ -14,7 +14,7 @@ func TestCadenceExit_TokenFamilyDeathReportsSuccess(t *testing.T) {
 	dir := t.TempDir()
 	var stderr bytes.Buffer
 
-	if got := cadenceExit(exitTokenFamilyDead, dir, &stderr); got != exitOK {
+	if got := cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, &stderr); got != exitOK {
 		t.Errorf("cadenceExit(family dead) = %d, want %d so launchd keeps the schedule", got, exitOK)
 	}
 	if _, err := os.Stat(filepath.Join(dir, deathSentinelName)); err != nil {
@@ -28,13 +28,13 @@ func TestCadenceExit_AlertsOncePerEpisode(t *testing.T) {
 	sentinel := filepath.Join(dir, deathSentinelName)
 	var stderr bytes.Buffer
 
-	cadenceExit(exitTokenFamilyDead, dir, &stderr)
+	cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, &stderr)
 	first, err := os.ReadFile(sentinel)
 	if err != nil {
 		t.Fatalf("read sentinel: %v", err)
 	}
 
-	cadenceExit(exitTokenFamilyDead, dir, &stderr)
+	cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, &stderr)
 	second, err := os.ReadFile(sentinel)
 	if err != nil {
 		t.Fatalf("read sentinel: %v", err)
@@ -51,8 +51,8 @@ func TestCadenceExit_SuccessClearsSentinel(t *testing.T) {
 	sentinel := filepath.Join(dir, deathSentinelName)
 	var stderr bytes.Buffer
 
-	cadenceExit(exitTokenFamilyDead, dir, &stderr)
-	cadenceExit(exitOK, dir, &stderr)
+	cadenceExit(exitTokenFamilyDead, dir, deathSentinelName, &stderr)
+	cadenceExit(exitOK, dir, deathSentinelName, &stderr)
 
 	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
 		t.Error("sentinel survived a successful refresh — the next death would be silent")
@@ -66,13 +66,13 @@ func TestClearCadenceSentinel(t *testing.T) {
 		t.Fatalf("write sentinel: %v", err)
 	}
 
-	if err := clearCadenceSentinel(dir); err != nil {
+	if err := clearCadenceSentinel(dir, deathSentinelName); err != nil {
 		t.Fatalf("clear cadence sentinel: %v", err)
 	}
 	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
 		t.Error("sentinel survived explicit re-arm")
 	}
-	if err := clearCadenceSentinel(dir); err != nil {
+	if err := clearCadenceSentinel(dir, deathSentinelName); err != nil {
 		t.Fatalf("clearing an absent sentinel: %v", err)
 	}
 }
@@ -82,10 +82,10 @@ func TestCadenceExit_PassesThroughOtherFailures(t *testing.T) {
 	dir := t.TempDir()
 	var stderr bytes.Buffer
 
-	if got := cadenceExit(exitNotPersisted, dir, &stderr); got != exitNotPersisted {
+	if got := cadenceExit(exitNotPersisted, dir, deathSentinelName, &stderr); got != exitNotPersisted {
 		t.Errorf("cadenceExit(not persisted) = %d, want %d", got, exitNotPersisted)
 	}
-	if got := cadenceExit(exitError, dir, &stderr); got != exitError {
+	if got := cadenceExit(exitError, dir, deathSentinelName, &stderr); got != exitError {
 		t.Errorf("cadenceExit(generic error) = %d, want %d", got, exitError)
 	}
 }

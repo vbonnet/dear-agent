@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -19,8 +20,16 @@ const deathSentinelName = "token-family-dead"
 // clearCadenceSentinel re-arms the next cadence alert after an operator has
 // explicitly cleared quarantine. A missing sentinel means there is nothing to
 // re-arm and is therefore successful.
-func clearCadenceSentinel(stateDir string) error {
-	err := os.Remove(filepath.Join(stateDir, deathSentinelName))
+func cadenceSentinelName(quarantinePath string) string {
+	if quarantinePath == "" {
+		return deathSentinelName
+	}
+	sum := sha256.Sum256([]byte(quarantinePath))
+	return fmt.Sprintf("%s-%x", deathSentinelName, sum[:8])
+}
+
+func clearCadenceSentinel(stateDir, name string) error {
+	err := os.Remove(filepath.Join(stateDir, name))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -46,8 +55,8 @@ func clearCadenceSentinel(stateDir string) error {
 //
 // The real exit code still reaches the audit log and stderr; only the process
 // status is flattened, and only for the cadence caller.
-func cadenceExit(code int, stateDir string, stderr io.Writer) int {
-	sentinel := filepath.Join(stateDir, deathSentinelName)
+func cadenceExit(code int, stateDir, sentinelName string, stderr io.Writer) int {
+	sentinel := filepath.Join(stateDir, sentinelName)
 
 	switch code {
 	case exitTokenFamilyDead:
@@ -79,7 +88,7 @@ func cadenceExit(code int, stateDir string, stderr io.Writer) int {
 
 	case exitOK:
 		// Family is healthy again; arm the alert for the next episode.
-		_ = clearCadenceSentinel(stateDir)
+		_ = clearCadenceSentinel(stateDir, sentinelName)
 		return exitOK
 	}
 

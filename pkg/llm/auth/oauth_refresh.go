@@ -405,7 +405,16 @@ func atomicWriteCredentials(path string, creds fullCredentials) error {
 // defaultRefreshingResolver is the package-level resolver used by
 // ResolveOAuthToken. It has a real HTTP client so it can perform token refresh.
 var defaultRefreshingResolver = &OAuthResolver{
-	HTTPClient: &http.Client{Timeout: 30 * time.Second},
+	HTTPClient:     &http.Client{Timeout: 30 * time.Second},
+	QuarantinePath: defaultQuarantinePath(),
+}
+
+func defaultQuarantinePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".local", "state", "dear-agent", "refresh-token-quarantine.json")
 }
 
 // resolveWithRefresh is Resolve() plus an automatic, file-locked refresh

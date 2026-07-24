@@ -106,6 +106,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if !quarantineExplicit {
 		*quarPath = defaultQuarantinePathForCredentials(*credPath)
 	}
+	if *check && *clearQuar {
+		fmt.Fprintln(stderr, "token-refresher: -check and -clear-quarantine are mutually exclusive")
+		return exitError
+	}
 
 	var logger *slog.Logger
 	if !*quiet {
@@ -138,7 +142,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "token-refresher: could not clear quarantine: %v\n", err)
 			return exitError
 		}
-		if err := clearCadenceSentinel(defaultStateDir()); err != nil {
+		if err := clearCadenceSentinel(defaultStateDir(), cadenceSentinelName(*quarPath)); err != nil {
 			fmt.Fprintf(stderr, "token-refresher: could not re-arm cadence alert: %v\n", err)
 			return exitError
 		}
@@ -155,7 +159,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	// cadence.go: it alerts on a dead family and keeps launchd's schedule alive.
 	finish := func(code int) int {
 		if *cadence {
-			return cadenceExit(code, defaultStateDir(), stderr)
+			return cadenceExit(code, defaultStateDir(), cadenceSentinelName(*quarPath), stderr)
 		}
 		return code
 	}
