@@ -55,7 +55,18 @@ func GetReadSocketPaths() []string {
 // If (3) finds a tmux process configured for the path, the socket is left alone
 // and LiveServerBoundError is returned. This result is deliberately
 // non-destructive because a busy server can be temporarily unresponsive.
+//
+// Cleanup shares the tmux mutation lock with server creation. Without that
+// boundary, one process can create a server after another process probes an
+// apparently stale socket but before it unlinks the path.
 func CleanStaleSocket() error {
+	return withTmuxLock(cleanStaleSocketLocked)
+}
+
+// cleanStaleSocketLocked implements CleanStaleSocket while the tmux mutation
+// lock is held. Callers that will create a server in the same critical section
+// must use this helper to avoid releasing the lock between cleanup and start.
+func cleanStaleSocketLocked() error {
 	socketPath := GetSocketPath()
 
 	// Check if socket file exists
