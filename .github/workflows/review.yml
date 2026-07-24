@@ -34,6 +34,7 @@ on:
   merge_group:
 
 permissions:
+  checks: write
   contents: read
   pull-requests: write
 
@@ -163,6 +164,8 @@ jobs:
           fi
 
       - name: Run AI review gate
+        id: gate
+        continue-on-error: true
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -200,3 +203,30 @@ jobs:
             exit 1
           fi
           go run ./cmd/ai-review
+
+      # pull_request_target is pinned to trusted base code, but GitHub attaches
+      # its job check suite to that base revision. Publish the authoritative
+      # result explicitly on the reviewed PR (or merge-group) head so the
+      # ruleset's required context is both trusted and satisfiable.
+      - name: Publish required check on reviewed head
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          REPO: ${{ github.repository }}
+          OUTCOME: ${{ steps.gate.outcome }}
+        run: |
+          set -euo pipefail
+          conclusion=failure
+          [ "$OUTCOME" = success ] && conclusion=success
+          gh api --method POST "repos/$REPO/check-runs" \
+            -f name='5-Dimension AI Review' \
+            -f head_sha="$HEAD_SHA" \
+            -f status=completed \
+            -f conclusion="$conclusion" \
+            -f output[title]='5-Dimension AI Review' \
+            -f output[summary]="Trusted review gate completed with outcome: $OUTCOME."
+
+      - name: Fail if review gate failed
+        if: steps.gate.outcome != 'success'
+        run: exit 1
