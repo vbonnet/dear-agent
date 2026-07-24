@@ -14,7 +14,7 @@ everything else is codified (workflow files + OpenTofu).
 |---|---|---|
 | Claude review workflow file (`.github/workflows/claude-code-review.yml`) | Hand-committed in dear-agent (reference repo); staged on a dedicated rollout branch via `github_repository_file`, then opened as a normal PR by `infra/modules/managed-repo` | ✅ IaC stages it; a human merges the rollout PR |
 | `CLAUDE_CODE_OAUTH_TOKEN` repo secret | `github_actions_secret` in the same module, value from `TF_VAR_claude_code_oauth_token` | ✅ IaC, given the token value |
-| Claude GitHub App install | One-time `claude setup-token` (CLI) — this repo does NOT use the separate GitHub App flow; see below | ⚠️ Manual, one-time, per Anthropic account (not per repo) |
+| Claude GitHub App install | Install the Claude GitHub App on every opted-in repository | ⚠️ Manual, one-time, per repository |
 | Codex cloud review enablement | Toggle at `chatgpt.com/codex/settings/code-review` per repo | ❌ Click-ops only — no public API/CLI as of 2026-07 |
 | Codex review guidelines | Optional `## Review guidelines` section in the repo's `AGENTS.md` | ✅ Just a file edit, but repo-owned content — not something this infra should overwrite |
 | Which repos get Claude review | `enable_claude_review = true` per repo in `infra/repos.auto.tfvars`; set `claude_review_rollout = true` only while staging its workflow PR | ✅ IaC |
@@ -34,12 +34,12 @@ everything else is codified (workflow files + OpenTofu).
    `TF_VAR_claude_code_oauth_token` for `tofu apply` (see below) — GitHub
    secrets are per-repo, there's no fleet-wide secret on a personal account.
 
-2. **Nothing else is required for Claude.** Unlike the `/install-github-app`
-   flow (which provisions its own GitHub App + token), this setup uses the
-   OAuth token directly in the workflow's `with:` block — no separate GitHub
-   App install step. If a repo ever needs `@claude` PR/issue mentions (the
-   `claude.yml` assistant workflow, separate from review), it reuses the same
-   secret; no additional install.
+2. **Install the Claude GitHub App in every opted-in rollout repository.**
+   The OAuth token authenticates the workflow to Anthropic, but the App grants
+   Claude GitHub-side authorization to publish review comments. Complete the
+   App installation for each repository selected by `enable_claude_review`
+   before merging that repository's rollout PR. Terraform can stage the
+   workflow and secret, but it cannot perform this App installation.
 
 3. **Enable Codex cloud review** at
    <https://chatgpt.com/codex/settings/code-review> (per repo, click-ops —
