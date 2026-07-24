@@ -419,6 +419,14 @@ func WaitForPromptSimple(sessionName string, timeout time.Duration) error {
 // WaitForPromptSimpleContext is the command-scoped variant of
 // WaitForPromptSimple. It stops polling when the caller cancels.
 func WaitForPromptSimpleContext(parent context.Context, sessionName string, timeout time.Duration) error {
+	return WaitForPromptSimpleForHarnessContext(parent, sessionName, timeout, "")
+}
+
+// WaitForPromptSimpleForHarnessContext scopes harness-specific blockers while
+// retaining the shared composer polling used by generic delivery.
+//
+//nolint:gocyclo // Stateful readiness keeps capture, liveness, harness-specific blockers, and cancellation in one polling protocol.
+func WaitForPromptSimpleForHarnessContext(parent context.Context, sessionName string, timeout time.Duration, expectedHarness string) error {
 	debug.Log("\n🔍 Starting simple prompt detection for session: %s", sessionName)
 
 	ctx, cancel := context.WithTimeout(parent, timeout)
@@ -456,7 +464,7 @@ func WaitForPromptSimpleContext(parent context.Context, sessionName string, time
 		}
 
 		styledContent := string(output)
-		if IsCodexHookReviewRequired(styledContent) {
+		if expectedHarness == "codex-cli" && IsCodexHookReviewRequired(styledContent) {
 			return CodexHookReviewError()
 		}
 		if IsCodexComposerReady(styledContent) {
@@ -556,6 +564,14 @@ func WaitForPromptOrResumeFailure(sessionName string, timeout time.Duration) err
 // WaitForPromptOrResumeFailureContext is the command-scoped variant of
 // WaitForPromptOrResumeFailure. It stops polling when the caller cancels.
 func WaitForPromptOrResumeFailureContext(parent context.Context, sessionName string, timeout time.Duration) error {
+	return WaitForPromptOrResumeFailureForHarnessContext(parent, sessionName, timeout, "")
+}
+
+// WaitForPromptOrResumeFailureForHarnessContext scopes harness-specific
+// blockers while retaining generic fatal-resume and composer detection.
+//
+//nolint:gocyclo // Stateful resume readiness keeps fatal output, harness blockers, composer detection, and cancellation in one polling protocol.
+func WaitForPromptOrResumeFailureForHarnessContext(parent context.Context, sessionName string, timeout time.Duration, expectedHarness string) error {
 	debug.Log("\n🔍 Starting resume-aware prompt detection for session: %s", sessionName)
 
 	ctx, cancel := context.WithTimeout(parent, timeout)
@@ -595,7 +611,7 @@ func WaitForPromptOrResumeFailureContext(parent context.Context, sessionName str
 			}
 		}
 
-		if IsCodexHookReviewRequired(styledContent) {
+		if expectedHarness == "codex-cli" && IsCodexHookReviewRequired(styledContent) {
 			return CodexHookReviewError()
 		}
 		if IsCodexComposerReady(styledContent) {

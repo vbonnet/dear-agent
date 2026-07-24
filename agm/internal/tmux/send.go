@@ -187,7 +187,7 @@ func SendMultiLinePromptSafeContext(ctx context.Context, sessionName string, pro
 // embedded newlines stay inside one composer submission.
 func SendMultiLinePromptSafeForHarnessContext(ctx context.Context, sessionName string, prompt string, shouldInterrupt bool, harness string) error {
 	// Wait for the active harness composer (consistent with other *Safe functions).
-	if err := WaitForPromptSimpleContext(ctx, sessionName, 60*time.Second); err != nil {
+	if err := WaitForPromptSimpleForHarnessContext(ctx, sessionName, 60*time.Second, harness); err != nil {
 		return fmt.Errorf("session not ready for multi-line prompt: %w", err)
 	}
 

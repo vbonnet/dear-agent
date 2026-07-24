@@ -722,8 +722,18 @@ func TestGenericPromptWaitsFailFastForStyledCodexHookDashboard(t *testing.T) {
 		name string
 		wait func(context.Context, string, time.Duration) error
 	}{
-		{name: "simple", wait: WaitForPromptSimpleContext},
-		{name: "resume-aware", wait: WaitForPromptOrResumeFailureContext},
+		{
+			name: "simple",
+			wait: func(ctx context.Context, sessionName string, timeout time.Duration) error {
+				return WaitForPromptSimpleForHarnessContext(ctx, sessionName, timeout, "codex-cli")
+			},
+		},
+		{
+			name: "resume-aware",
+			wait: func(ctx context.Context, sessionName string, timeout time.Duration) error {
+				return WaitForPromptOrResumeFailureForHarnessContext(ctx, sessionName, timeout, "codex-cli")
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -741,6 +751,46 @@ func TestGenericPromptWaitsFailFastForStyledCodexHookDashboard(t *testing.T) {
 				t.Fatalf("hook dashboard failure took %v, want prompt failure", elapsed)
 			}
 			assertCodexFixtureReceivedNoInput(t, inputPath)
+		})
+	}
+}
+
+func TestGenericPromptWaitsIgnoreCopiedCodexHookDashboardForOtherHarnesses(t *testing.T) {
+	tests := []struct {
+		name    string
+		harness string
+		prompt  string
+		wait    func(context.Context, string, time.Duration, string) error
+	}{
+		{
+			name:    "simple Claude",
+			harness: "claude-code",
+			prompt:  "❯",
+			wait:    WaitForPromptSimpleForHarnessContext,
+		},
+		{
+			name:    "simple Gemini",
+			harness: "gemini-cli",
+			prompt:  ">   Type your message",
+			wait:    WaitForPromptSimpleForHarnessContext,
+		},
+		{
+			name:    "resume-aware Claude",
+			harness: "claude-code",
+			prompt:  "❯",
+			wait:    WaitForPromptOrResumeFailureForHarnessContext,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sessionName := "test-copied-hook-" + strings.ReplaceAll(tt.name, " ", "-")
+			script := fmt.Sprintf("printf 'Hooks\\nLifecycle hooks from config and enabled plugins.\\n⚠ 11 hooks need review before they can run.\\nPress t to trust all; enter to review hooks; esc to close\\n%s\\n'; sleep 30", tt.prompt)
+			newCodexTestSession(t, sessionName, "sh", "-c", script)
+
+			if err := tt.wait(t.Context(), sessionName, 3*time.Second, tt.harness); err != nil {
+				t.Fatalf("generic %s wait rejected copied Codex dashboard: %v", tt.harness, err)
+			}
 		})
 	}
 }
