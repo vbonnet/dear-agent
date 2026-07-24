@@ -93,8 +93,10 @@ func TestNoUnsandboxedGitInTests(t *testing.T) {
 	}
 }
 
-// gitCommandLines returns the lines in path that call exec.Command or
-// exec.CommandContext with "git" as the program.
+// gitCommandLines returns the lines in path that build a Git command directly
+// or pass "git" through a local helper that builds one. The latter catches
+// wrappers such as run(t, dir, name, args...) which otherwise hide Git behind
+// an identifier and inherit host hooks just as surely as a literal command.
 func gitCommandLines(path string) ([]int, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, path, nil, 0)
@@ -102,44 +104,90 @@ func gitCommandLines(path string) ([]int, error) {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 
+	helperProgramArg := gitCommandHelpers(file)
 	var lines []int
 	ast.Inspect(file, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
 			return true
 		}
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		pkg, ok := sel.X.(*ast.Ident)
-		if !ok || pkg.Name != "exec" {
-			return true
-		}
-		var nameArg ast.Expr
-		switch sel.Sel.Name {
-		case "Command", "LookPath":
-			if len(call.Args) > 0 {
-				nameArg = call.Args[0]
+		if name, ok := call.Fun.(*ast.Ident); ok {
+			if argIndex, helper := helperProgramArg[name.Name]; helper && len(call.Args) > argIndex && isGitLiteral(call.Args[argIndex]) {
+				lines = append(lines, fset.Position(call.Pos()).Line)
 			}
-		case "CommandContext":
-			if len(call.Args) > 1 {
-				nameArg = call.Args[1]
-			}
-		default:
 			return true
 		}
-		// LookPath("git") is a capability probe, not an invocation; it runs
-		// nothing and so cannot reach a hook.
-		if sel.Sel.Name == "LookPath" {
-			return true
-		}
-		if isGitLiteral(nameArg) {
+		if gitProgramArg(call) != nil && isGitLiteral(gitProgramArg(call)) {
 			lines = append(lines, fset.Position(call.Pos()).Line)
 		}
 		return true
 	})
 	return lines, nil
+}
+
+// gitCommandHelpers reports local functions whose named parameter becomes the
+// program argument to exec.Command or exec.CommandContext. Callers passing
+// "git" to one of these wrappers need the same sandbox as direct commands.
+func gitCommandHelpers(file *ast.File) map[string]int {
+	helpers := make(map[string]int)
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil || fn.Type.Params == nil {
+			continue
+		}
+		params := make(map[string]int)
+		index := 0
+		for _, field := range fn.Type.Params.List {
+			for _, name := range field.Names {
+				params[name.Name] = index
+				index++
+			}
+		}
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			program := gitProgramArgFromCall(n)
+			name, ok := program.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			if paramIndex, ok := params[name.Name]; ok {
+				helpers[fn.Name.Name] = paramIndex
+			}
+			return true
+		})
+	}
+	return helpers
+}
+
+func gitProgramArgFromCall(n ast.Node) ast.Expr {
+	call, ok := n.(*ast.CallExpr)
+	if !ok {
+		return nil
+	}
+	return gitProgramArg(call)
+}
+
+// gitProgramArg returns the executable argument for an exec command call.
+// LookPath is excluded because it does not execute a hook-capable process.
+func gitProgramArg(call *ast.CallExpr) ast.Expr {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return nil
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	if !ok || pkg.Name != "exec" {
+		return nil
+	}
+	switch sel.Sel.Name {
+	case "Command":
+		if len(call.Args) > 0 {
+			return call.Args[0]
+		}
+	case "CommandContext":
+		if len(call.Args) > 1 {
+			return call.Args[1]
+		}
+	}
+	return nil
 }
 
 func isGitLiteral(e ast.Expr) bool {
@@ -152,6 +200,25 @@ func isGitLiteral(e ast.Expr) bool {
 		return false
 	}
 	return value == "git"
+}
+
+func TestGitCommandLines_DetectsGitWrapper(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "wrapper_test.go")
+	content := `package fixture
+import ("os/exec"; "testing")
+func run(t testing.TB, name string, args ...string) { _ = exec.Command(name, args...) }
+func TestGit(t *testing.T) { run(t, "git", "init") }
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lines, err := gitCommandLines(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) != 1 {
+		t.Fatalf("gitCommandLines wrapper = %v, want one call site", lines)
+	}
 }
 
 func skipDir(name string) bool {

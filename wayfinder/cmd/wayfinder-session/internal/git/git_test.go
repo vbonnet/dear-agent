@@ -17,6 +17,9 @@ func setupGitRepo(t *testing.T) string {
 
 	// Initialize git repo (hermetically: no host hooks, no host config)
 	gittest.Run(t, tmpDir, "init")
+	// The package under test starts its own Git processes, so persist the
+	// sandbox hook path in this repository as well as applying it to setup.
+	gittest.HardenRepo(t, tmpDir)
 
 	// Configure git user (required for commits). The gittest sandbox already
 	// supplies an identity to the Git commands this file runs, but the package
