@@ -56,6 +56,12 @@ module "dearlabs_repos" {
 | `name` | `string` | — | Repository name (slug, without owner). |
 | `visibility` | `string` | — | `"public"` or `"private"`. Secret scanning + push protection are enabled for public repos only (private requires GitHub Advanced Security). |
 | `required_checks` | `list(string)` | `[]` | Exact check-run names required before merge. Empty = PR-required protection with no status-check gate. |
+| `default_branch` | `string` | `"main"` | Target branch for Claude-review rollout PRs. |
+| `enable_claude_review` | `bool` | `false` | Installs the `CLAUDE_CODE_OAUTH_TOKEN` secret. Advisory only — never added to `required_checks`. See `../../claude_review.tf` for the fleet rollout list. |
+| `claude_review_rollout` | `bool` | `false` | Transiently stages `.github/workflows/claude-code-review.yml` and opens its rollout PR. Set false after merge so the deleted rollout branch is not recreated. |
+| `claude_review_workflow_content` | `string` | `null` | Workflow file content. Required when `claude_review_rollout = true`; the caller (`../../claude_review.tf`) sources it from dear-agent's own hand-maintained copy. |
+| `claude_review_rollout_branch` | `string` | `"automation/claude-code-review"` | Unprotected branch used to stage the workflow before its rollout PR. |
+| `claude_code_oauth_token` | `string` (sensitive) | `null` | Claude Code OAuth token (from `claude setup-token`). Required when `enable_claude_review = true`. |
 
 ## Outputs
 
@@ -65,6 +71,7 @@ module "dearlabs_repos" {
 | `repository_node_id` | GraphQL node ID (for resources that key on `node_id`). |
 | `repository_full_name` | `owner/name` slug. |
 | `ruleset_id` | ID of the branch-protection ruleset. |
+| `claude_review_enabled` | Whether the Claude Code review workflow + secret are installed on this repo. |
 
 ## Constraints
 
