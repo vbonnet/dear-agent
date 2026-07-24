@@ -20,6 +20,7 @@ func setupTestRepo(t *testing.T) string {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to init git repo: %v", err)
 	}
+	gittest.HardenRepo(t, tmpDir)
 
 	// Configure git user (required for commits by the code under test, which
 	// runs git outside the sandbox).

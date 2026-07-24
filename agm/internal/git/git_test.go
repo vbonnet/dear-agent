@@ -38,6 +38,7 @@ func TestCommitManifest_InGitRepo(t *testing.T) {
 	if err := gitInit.Run(); err != nil {
 		t.Fatalf("Failed to init git repo: %v", err)
 	}
+	gittest.HardenRepo(t, tmpDir)
 
 	// Configure git user (required for commits)
 	configUser := gittest.Command(t, tmpDir, "config", "user.name", "Test User")
@@ -97,6 +98,7 @@ func TestCommitManifest_WithUnstagedFiles(t *testing.T) {
 	if err := gitInit.Run(); err != nil {
 		t.Fatalf("Failed to init git repo: %v", err)
 	}
+	gittest.HardenRepo(t, tmpDir)
 
 	// Configure git
 	configUser := gittest.Command(t, tmpDir, "config", "user.name", "Test User")
@@ -174,6 +176,7 @@ func TestCommitManifest_WithStagedFiles(t *testing.T) {
 	if err := gitInit.Run(); err != nil {
 		t.Fatalf("Failed to init git repo: %v", err)
 	}
+	gittest.HardenRepo(t, tmpDir)
 
 	// Configure git
 	configUser := gittest.Command(t, tmpDir, "config", "user.name", "Test User")
@@ -255,6 +258,7 @@ func TestCommitManifest_NoChanges(t *testing.T) {
 	if err := gitInit.Run(); err != nil {
 		t.Fatalf("Failed to init git repo: %v", err)
 	}
+	gittest.HardenRepo(t, tmpDir)
 
 	// Configure git
 	configUser := gittest.Command(t, tmpDir, "config", "user.name", "Test User")
@@ -296,6 +300,7 @@ func TestCommitManifest_InSubdirectory(t *testing.T) {
 	if err := gitInit.Run(); err != nil {
 		t.Fatalf("Failed to init git repo: %v", err)
 	}
+	gittest.HardenRepo(t, tmpDir)
 
 	// Configure git
 	configUser := gittest.Command(t, tmpDir, "config", "user.name", "Test User")
@@ -366,6 +371,7 @@ func TestFindGitRoot(t *testing.T) {
 	if err := gitInit.Run(); err != nil {
 		t.Fatalf("Failed to init git repo: %v", err)
 	}
+	gittest.HardenRepo(t, tmpDir)
 
 	root, err := findGitRoot(tmpDir)
 	if err != nil {
@@ -421,6 +427,7 @@ func TestIsInGitRepo(t *testing.T) {
 	if err := gitInit.Run(); err != nil {
 		t.Fatalf("Failed to init git repo: %v", err)
 	}
+	gittest.HardenRepo(t, tmpDir)
 
 	if !IsInGitRepo(tmpDir) {
 		t.Error("Expected true for git directory")
