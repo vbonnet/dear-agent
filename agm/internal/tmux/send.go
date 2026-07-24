@@ -187,7 +187,7 @@ func SendMultiLinePromptSafeContext(ctx context.Context, sessionName string, pro
 // embedded newlines stay inside one composer submission.
 func SendMultiLinePromptSafeForHarnessContext(ctx context.Context, sessionName string, prompt string, shouldInterrupt bool, harness string) error {
 	// Wait for the active harness composer (consistent with other *Safe functions).
-	if err := WaitForPromptSimpleContext(ctx, sessionName, 60*time.Second); err != nil {
+	if err := WaitForPromptSimpleForHarnessContext(ctx, sessionName, 60*time.Second, harness); err != nil {
 		return fmt.Errorf("session not ready for multi-line prompt: %w", err)
 	}
 
@@ -213,7 +213,7 @@ func SendMultiLinePromptSafeForHarnessContext(ctx context.Context, sessionName s
 		// Re-capture pane to verify composer stability
 		cmdCtx, cmdCancel := context.WithTimeout(ctx, 5*time.Second)
 		recheck, err := exec.CommandContext(cmdCtx, "tmux", "-S", GetSocketPath(), "capture-pane",
-			"-t", NormalizeTmuxSessionName(sessionName), "-p", "-S", "-30").Output()
+			"-t", NormalizeTmuxSessionName(sessionName), "-p", "-e", "-J", "-S", "-30").Output()
 		cmdErr := cmdCtx.Err()
 		cmdCancel()
 		if cmdErr != nil {

@@ -216,9 +216,12 @@ func ClassifyHarnessInput(content, harness string) (bool, string, error) {
 	queuedInput, _ := classifyCurrentQueuedInput(content, harness)
 
 	// Codex hooks can execute outside the sandbox after trust is granted. Treat
-	// the structured review selector as a dedicated fail-closed state before
-	// generic composer readiness or startup auto-advance can send any key.
-	if harness == "codex-cli" && IsCodexHookReviewRequired(tail) {
+	// either complete review surface as a dedicated fail-closed state before
+	// generic composer readiness or startup auto-advance can send any key. Use
+	// the complete logical capture because a large pane can place the selector
+	// above more than twelve trailing blank rows; the detector itself requires
+	// current ownership and rejects retained review text above a newer composer.
+	if harness == "codex-cli" && IsCodexHookReviewRequired(content) {
 		return false, HarnessInputReviewRequired, nil
 	}
 
@@ -234,7 +237,7 @@ func ClassifyHarnessInput(content, harness string) (bool, string, error) {
 	case "claude-code":
 		ready = hasTailOwnedClaudeComposer(styledTail)
 	case "codex-cli":
-		ready = isCodexInputComposerReady(tail)
+		ready = isCodexInputComposerReady(styledTail)
 	case "agy":
 		ready = hasTailOwnedAgyComposer(tail)
 	case "gemini-cli":
