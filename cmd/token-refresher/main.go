@@ -110,6 +110,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "token-refresher: -check and -clear-quarantine are mutually exclusive")
 		return exitError
 	}
+	resolvedCredPath := canonicalCredentialsPath(*credPath)
 
 	var logger *slog.Logger
 	if !*quiet {
@@ -128,7 +129,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	defer span.End()
 
 	r := auth.OAuthResolver{
-		CredentialsPath: *credPath,
+		CredentialsPath: resolvedCredPath,
 		TokenEndpoint:   *endpoint,
 		ClientID:        *clientID,
 		LockTimeout:     *lockTimeout,
@@ -157,13 +158,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	// Fingerprint the on-disk refresh token BEFORE doing anything, so the audit
 	// line records the token this tick was about to present. See fingerprint.go.
-	fp, credMod := credentialsFingerprint(*credPath)
+	fp, credMod := credentialsFingerprint(resolvedCredPath)
 
 	// finish adapts the exit code for the unattended cadence caller. See
 	// cadence.go: it alerts on a dead family and keeps launchd's schedule alive.
 	finish := func(code int) int {
 		if *cadence {
 			if code == exitNotPersisted {
+				notifyOperator("Claude auth AT RISK", "Refresh quarantine could not be persisted; cadence has been stopped. Run token-refresher -clear-quarantine after remediation.")
 				if err := writeCadenceStop(*credPath); err != nil {
 					fmt.Fprintf(stderr, "token-refresher: CRITICAL — could not persist cadence stop: %v\n", err)
 					return exitNotPersisted
