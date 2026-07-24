@@ -57,12 +57,13 @@ That is exactly how the 2026-07-18 family death happened (ce-77ip.7): a
 `Client.Timeout exceeded while awaiting headers` at 08:58:37Z, then the same
 token presented again at 10:29:06Z.
 
-So the refresher distinguishes the two network failure modes precisely, using
-`httptrace` rather than error text:
+So the refresher observes whether the transport consumed the refresh-token body
+rather than parsing error text. This is deliberately conservative: consumption
+does not prove bytes reached the server.
 
 - **Request never transmitted** (TLS handshake timeout, connection refused, DNS):
   the token is untouched. Ordinary retryable error.
-- **Request transmitted, no usable response** (timeout awaiting headers, 5xx, an
+- **Request body consumed, no usable response** (timeout awaiting headers, 5xx, an
   unreadable 200): the token may be spent. It is **quarantined** — recorded by
   fingerprint and never presented again automatically.
 

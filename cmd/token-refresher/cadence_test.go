@@ -77,6 +77,25 @@ func TestClearCadenceSentinel(t *testing.T) {
 	}
 }
 
+func TestCadenceStopPersistsBesideCredentialsAndRearmsExplicitly(t *testing.T) {
+	credentials := filepath.Join(t.TempDir(), "credentials.json")
+	if err := os.WriteFile(credentials, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeCadenceStop(credentials); err != nil {
+		t.Fatal(err)
+	}
+	if stopped, err := cadenceStopped(credentials); err != nil || !stopped {
+		t.Fatalf("cadence stop = (%v, %v), want (true, nil)", stopped, err)
+	}
+	if err := clearCadenceStop(credentials); err != nil {
+		t.Fatal(err)
+	}
+	if stopped, err := cadenceStopped(credentials); err != nil || stopped {
+		t.Fatalf("cadence stop after clear = (%v, %v), want (false, nil)", stopped, err)
+	}
+}
+
 // Only the dead-family code is flattened; other failures still surface.
 func TestCadenceExit_PassesThroughOtherFailures(t *testing.T) {
 	dir := t.TempDir()

@@ -94,7 +94,8 @@ That `Client.Timeout exceeded while awaiting headers` is the only occurrence in
 33 days of log, and it sits 90 minutes before the only clean death onset.
 
 **Fixed by the refresh-token quarantine.** The refresher now distinguishes the
-two failure modes with `httptrace` (was the request actually transmitted?) and
+two failure modes by observing whether the transport consumed the refresh-token
+body (a conservative signal, not proof of wire transmission) and
 refuses to re-present a token whose fate is unknown. See
 `cmd/token-refresher/README.md`. If you see exit code 4 or a `refresh_quarantined`
 audit outcome, that is the protection working — the family is alive *because* the

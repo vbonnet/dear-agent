@@ -36,6 +36,34 @@ func clearCadenceSentinel(stateDir, name string) error {
 	return err
 }
 
+// cadenceStopPath lives beside credentials, which were readable for the tick
+// that discovered the ambiguous refresh. It is deliberately independent of
+// the quarantine directory: that directory is unavailable in the failure this
+// marker protects against.
+func cadenceStopPath(credentialsPath string) string {
+	return canonicalCredentialsPath(credentialsPath) + ".refresh-stop"
+}
+
+func writeCadenceStop(credentialsPath string) error {
+	return os.WriteFile(cadenceStopPath(credentialsPath), []byte("refresh outcome unknown; operator must clear quarantine\n"), 0o600)
+}
+
+func clearCadenceStop(credentialsPath string) error {
+	err := os.Remove(cadenceStopPath(credentialsPath))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
+func cadenceStopped(credentialsPath string) (bool, error) {
+	_, err := os.Stat(cadenceStopPath(credentialsPath))
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // cadenceExit adapts a run's exit code for the unattended launchd cadence job.
 //
 // Two problems it solves, both observed on 2026-07-19 (ce-77ip):

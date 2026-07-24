@@ -146,6 +146,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "token-refresher: could not re-arm cadence alert: %v\n", err)
 			return exitError
 		}
+		if err := clearCadenceStop(*credPath); err != nil {
+			fmt.Fprintf(stderr, "token-refresher: could not re-arm cadence refresh: %v\n", err)
+			return exitError
+		}
 		fmt.Fprintln(stderr, "token-refresher: refresh-token quarantine cleared; automatic refresh re-armed.")
 		writeAudit(*auditPath, auditRecord{Mode: "clear-quarantine", Outcome: "ok"})
 		return exitOK
@@ -159,6 +163,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 	// cadence.go: it alerts on a dead family and keeps launchd's schedule alive.
 	finish := func(code int) int {
 		if *cadence {
+			if code == exitNotPersisted {
+				if err := writeCadenceStop(*credPath); err != nil {
+					fmt.Fprintf(stderr, "token-refresher: CRITICAL — could not persist cadence stop: %v\n", err)
+					return exitNotPersisted
+				}
+				fmt.Fprintln(stderr, "token-refresher: cadence refresh STOPPED until -clear-quarantine re-arms it.")
+				return exitOK
+			}
 			return cadenceExit(code, defaultStateDir(), cadenceSentinelName(*quarPath), stderr)
 		}
 		return code
@@ -186,6 +198,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 			RefreshTokenFP: fp, CredentialsModTime: credMod,
 		})
 		return exitOK
+	}
+	if *cadence {
+		stopped, stopErr := cadenceStopped(*credPath)
+		if stopErr != nil {
+			fmt.Fprintf(stderr, "token-refresher: could not inspect cadence stop: %v\n", stopErr)
+			return exitNotPersisted
+		}
+		if stopped {
+			fmt.Fprintln(stderr, "token-refresher: cadence refresh is STOPPED after an unpersisted quarantine; run -clear-quarantine after remediation.")
+			return exitOK
+		}
 	}
 
 	if *force {
