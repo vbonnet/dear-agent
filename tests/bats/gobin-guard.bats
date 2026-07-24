@@ -31,7 +31,7 @@ teardown() {
 
 # run_guard invokes the guard against the isolated fixture HOME/trail.
 run_guard() {
-    run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" "$SCRIPT" "$@"
+    run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_NOTIFY=0 "$SCRIPT" "$@"
 }
 
 trail_lines() {
