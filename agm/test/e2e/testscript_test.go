@@ -121,10 +121,15 @@ func installedAGMPath() string {
 func e2eBuildCacheKey() string {
 	_, testFile, _, _ := runtime.Caller(0)
 	moduleRoot := filepath.Clean(filepath.Join(filepath.Dir(testFile), "../.."))
-	return e2eBuildCacheKeyForRoot(moduleRoot)
+	key, err := e2eBuildCacheKeyForRoot(moduleRoot)
+	if err != nil {
+		// Never reuse a cache entry when the source fingerprint is incomplete.
+		return fmt.Sprintf("uncacheable-%d", time.Now().UnixNano())
+	}
+	return key
 }
 
-func e2eBuildCacheKeyForRoot(moduleRoot string) string {
+func e2eBuildCacheKeyForRoot(moduleRoot string) (string, error) {
 	var inputs []string
 	if err := filepath.WalkDir(moduleRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -147,20 +152,20 @@ func e2eBuildCacheKeyForRoot(moduleRoot string) string {
 		inputs = append(inputs, rel)
 		return nil
 	}); err != nil {
-		return "unknown"
+		return "", err
 	}
 	sort.Strings(inputs)
 	h := sha256.New()
 	for _, rel := range inputs {
 		data, err := os.ReadFile(filepath.Join(moduleRoot, rel))
 		if err != nil {
-			return "unknown"
+			return "", err
 		}
 		_, _ = io.WriteString(h, filepath.ToSlash(rel)+"\x00")
 		_, _ = h.Write(data)
 		_, _ = io.WriteString(h, "\x00")
 	}
-	return fmt.Sprintf("%x", h.Sum(nil)[:8])
+	return fmt.Sprintf("%x", h.Sum(nil)[:8]), nil
 }
 
 func TestE2EBuildCacheKeyIncludesEmbeddedAssets(t *testing.T) {
@@ -175,12 +180,25 @@ func TestE2EBuildCacheKeyIncludesEmbeddedAssets(t *testing.T) {
 	if err := os.WriteFile(asset, []byte("first"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	before := e2eBuildCacheKeyForRoot(root)
+	before, err := e2eBuildCacheKeyForRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(asset, []byte("second"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if after := e2eBuildCacheKeyForRoot(root); after == before {
+	after, err := e2eBuildCacheKeyForRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after == before {
 		t.Fatal("embedded asset change must invalidate the fallback AGM build key")
+	}
+}
+
+func TestE2EBuildCacheKeyRejectsUnreadableRoot(t *testing.T) {
+	if _, err := e2eBuildCacheKeyForRoot(filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Fatal("missing build root must not produce a reusable cache key")
 	}
 }
 
