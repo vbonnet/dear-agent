@@ -142,6 +142,17 @@ func setupArchiveTest(t *testing.T) (tmpDir string, sessionsDir string, cleanup 
 	return tmpDir, sessionsDir, cleanup
 }
 
+// setupArchiveDryRunTest keeps the CLI regression contract independent of the
+// developer or CI machine's Dolt service. The BDD catalog executes these tests
+// in a subprocess, so the isolation must be established by each test itself.
+func setupArchiveDryRunTest(t *testing.T) (tmpDir string, sessionsDir string, cleanup func()) {
+	t.Helper()
+
+	tmpDir, sessionsDir, cleanup = setupArchiveTest(t)
+	t.Setenv("AGM_DB_PATH", filepath.Join(tmpDir, "agm.db"))
+	return tmpDir, sessionsDir, cleanup
+}
+
 // createArchiveTestSession creates a test session with manifest
 // testingTB is an interface that both *testing.T and *testing.B implement
 type testingTB interface {
@@ -753,7 +764,7 @@ func TestArchiveSession_EmptySessionsDir(t *testing.T) {
 }
 
 func TestArchiveSession_DryRunCLITextIsSideEffectFree(t *testing.T) {
-	_, sessionsDir, cleanup := setupArchiveTest(t)
+	_, sessionsDir, cleanup := setupArchiveDryRunTest(t)
 	defer cleanup()
 	configureSingleArchiveDryRun(t)
 	setHumanText(t)
@@ -787,7 +798,7 @@ func TestArchiveSession_DryRunCLITextIsSideEffectFree(t *testing.T) {
 }
 
 func TestArchiveSession_DryRunCLIJSONReturnsStableEnvelope(t *testing.T) {
-	_, sessionsDir, cleanup := setupArchiveTest(t)
+	_, sessionsDir, cleanup := setupArchiveDryRunTest(t)
 	defer cleanup()
 	configureSingleArchiveDryRun(t)
 	setAgentJSON(t)
@@ -826,7 +837,7 @@ func TestArchiveSession_DryRunCLIJSONReturnsStableEnvelope(t *testing.T) {
 }
 
 func TestArchiveSession_DryRunCLIActiveAsyncDoesNotStartReaper(t *testing.T) {
-	_, sessionsDir, cleanup := setupArchiveTest(t)
+	_, sessionsDir, cleanup := setupArchiveDryRunTest(t)
 	defer cleanup()
 	configureSingleArchiveDryRun(t)
 	setHumanText(t)
@@ -862,7 +873,7 @@ func TestArchiveSession_DryRunCLIActiveAsyncDoesNotStartReaper(t *testing.T) {
 }
 
 func TestArchiveSession_DryRunCLIActiveRequiresAsync(t *testing.T) {
-	_, sessionsDir, cleanup := setupArchiveTest(t)
+	_, sessionsDir, cleanup := setupArchiveDryRunTest(t)
 	defer cleanup()
 	configureSingleArchiveDryRun(t)
 
@@ -885,7 +896,7 @@ func TestArchiveSession_DryRunCLIActiveRequiresAsync(t *testing.T) {
 }
 
 func TestArchiveSession_DryRunCLIStoppedRejectsAsync(t *testing.T) {
-	_, sessionsDir, cleanup := setupArchiveTest(t)
+	_, sessionsDir, cleanup := setupArchiveDryRunTest(t)
 	defer cleanup()
 	configureSingleArchiveDryRun(t)
 
