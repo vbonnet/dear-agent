@@ -121,6 +121,18 @@ func TestClassifyHarnessInputRequiresCurrentHarnessComposer(t *testing.T) {
 			state:   HarnessInputReady,
 		},
 		{
+			name:    "Codex closed hooks dashboard yields to occupied composer",
+			harness: "codex-cli",
+			content: "Hooks\nLifecycle hooks from config and enabled plugins.\n⚠ 11 hooks need review before they can run.\nEvent Installed Active Review Description\nPress t to trust all; enter to review hooks; esc to close\n› preserve this human draft\ngpt-5.6 high · ~/src/project",
+			state:   HarnessInputBusy,
+		},
+		{
+			name:    "Codex closed hooks dashboard yields to working turn",
+			harness: "codex-cli",
+			content: "Hooks\nLifecycle hooks from config and enabled plugins.\n⚠ 11 hooks need review before they can run.\nEvent Installed Active Review Description\nPress t to trust all; enter to review hooks; esc to close\n› inspect the release\n• Working (3s • esc to interrupt)\ngpt-5.6 high · ~/src/project",
+			state:   HarnessInputBusy,
+		},
+		{
 			name:    "resolved Codex onboarding before live composer",
 			harness: "codex-cli",
 			content: "Do you trust the contents of this directory?\n› 1. Yes, continue\napproved\n│ >_ OpenAI Codex (vtest) │\n│ model: gpt-5.5 /model to change │\n›",

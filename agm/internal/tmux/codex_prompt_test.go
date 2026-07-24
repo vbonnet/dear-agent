@@ -392,6 +392,26 @@ review completed
 			expected: false,
 		},
 		{
+			name: "newer occupied composer supersedes retained dashboard",
+			content: hookDashboard + `
+
+› preserve this human draft
+
+gpt-5.6 high · ~/src/project`,
+			expected: false,
+		},
+		{
+			name: "newer working turn supersedes retained dashboard",
+			content: hookDashboard + `
+
+› inspect the release
+
+• Working (3s • esc to interrupt)
+
+gpt-5.6 high · ~/src/project`,
+			expected: false,
+		},
+		{
 			name:     "empty content",
 			content:  "",
 			expected: false,

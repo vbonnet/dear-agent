@@ -104,7 +104,7 @@ func IsCodexHookReviewRequired(content string) bool {
 		controls := strings.LastIndex(lowerDashboard, dashboardControls)
 		if controls >= 0 &&
 			strings.Contains(lowerDashboard[:controls], "hooks need review before they can run") &&
-			!IsCodexComposerReady(styledContentAfterLastLineContaining(trimmed, dashboardControls)) {
+			!hasCodexPaneOwnership(styledContentAfterLastLineContaining(trimmed, dashboardControls)) {
 			return true
 		}
 	}
@@ -121,18 +121,24 @@ func IsCodexHookReviewRequired(content string) bool {
 	}
 
 	// Codex retains prior TUI output in scrollback. Once a later composer owns
-	// the pane tail, the earlier review selector is no longer active.
-	return !IsCodexComposerReady(styledContentFromLastLineContaining(trimmed, "hooks need review"))
+	// the pane tail or a submitted turn is working, the earlier review selector
+	// is no longer active. Start after the selector's controls so its highlighted
+	// choice cannot be mistaken for a Codex composer.
+	return !hasCodexPaneOwnership(styledContentAfterLastLineContaining(trimmed, "press enter to confirm"))
 }
 
-func styledContentFromLastLineContaining(content, lowerNeedle string) string {
-	lines := strings.Split(content, "\n")
-	for i, line := range slices.Backward(lines) {
-		if strings.Contains(strings.ToLower(stripANSI(line)), lowerNeedle) {
-			return strings.Join(lines[i:], "\n")
+// hasCodexPaneOwnership reports whether Codex rendered a newer composer or
+// working footer after a completed hook-review surface. Ownership is distinct
+// from readiness: an occupied composer and an in-flight turn both prove that a
+// retained dashboard no longer owns input even though neither accepts delivery.
+func hasCodexPaneOwnership(content string) bool {
+	for line := range strings.SplitSeq(content, "\n") {
+		plain := strings.TrimSpace(stripANSI(line))
+		if isCodexComposerAnchor(plain) || codexFooterPattern.MatchString(plain) {
+			return true
 		}
 	}
-	return ""
+	return false
 }
 
 func styledContentAfterLastLineContaining(content, lowerNeedle string) string {
