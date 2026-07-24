@@ -115,6 +115,7 @@ func TestHookEscalationIsScoped(t *testing.T) {
 		".claude/hooks/pretool-guard",
 		".config/claude-code/hooks/pretool-bash-write-guard",
 		"agm/cmd/agm-hooks/pretool-bash-blocker/main.go",
+		"agm/hooks/cmd/posttool-cost-guard/main.go",
 		".agents/hooks.json",
 	}
 	for _, p := range shouldEscalate {

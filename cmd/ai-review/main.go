@@ -66,11 +66,22 @@ func loadConfig() config {
 	return c
 }
 
-// gitDiff returns the full diff between base and head. No truncation.
-func gitDiff(base, head string) (string, error) {
-	out, err := exec.Command("git", "diff", base, head).Output()
+// gitMergeBase finds the common ancestor of the current base and PR head.
+// Reviewing from that point excludes unrelated commits that landed on the base
+// branch after the PR forked, and makes every review input describe the PR.
+func gitMergeBase(base, head string) (string, error) {
+	out, err := exec.Command("git", "merge-base", base, head).Output()
 	if err != nil {
-		return "", fmt.Errorf("git diff %s %s: %w", base, head, err)
+		return "", fmt.Errorf("git merge-base %s %s: %w", base, head, err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// gitDiff returns the full diff between merge base and head. No truncation.
+func gitDiff(mergeBase, head string) (string, error) {
+	out, err := exec.Command("git", "diff", mergeBase, head).Output()
+	if err != nil {
+		return "", fmt.Errorf("git diff %s %s: %w", mergeBase, head, err)
 	}
 	return string(out), nil
 }
@@ -213,7 +224,13 @@ func run(c config) int {
 		return code
 	}
 
-	diff, err := gitDiff(c.baseSHA, c.headSHA)
+	mergeBase, err := gitMergeBase(c.baseSHA, c.headSHA)
+	if err != nil {
+		fmt.Printf("::error::could not determine PR merge base: %v\n", err)
+		return failClosed(c, "the PR merge base could not be computed")
+	}
+
+	diff, err := gitDiff(mergeBase, c.headSHA)
 	if err != nil {
 		fmt.Printf("::error::could not compute diff: %v\n", err)
 		return failClosed(c, "the PR diff could not be computed")
@@ -222,7 +239,7 @@ func run(c config) int {
 	// Metadata escalation is evaluated BEFORE the empty-diff shortcut: an
 	// explicit HUMAN REVIEW REQUIRED marker in the PR body or a commit message
 	// must force escalation even when the tree change is empty (AIREV-08).
-	metaTriggers := EscalationTriggers(nil, c.prBody, gitCommitMessages(c.baseSHA, c.headSHA))
+	metaTriggers := EscalationTriggers(nil, c.prBody, gitCommitMessages(mergeBase, c.headSHA))
 
 	// Empty diff: nothing to review (SPEC R11), unless a marker escalated.
 	if strings.TrimSpace(diff) == "" {
@@ -258,14 +275,14 @@ func run(c config) int {
 
 	// REVIEW.md §3 escalation is mandatory "regardless of finding severity", so
 	// it is enforced deterministically here rather than trusted to the model.
-	changed, err := gitChangedPaths(c.baseSHA, c.headSHA)
+	changed, err := gitChangedPaths(mergeBase, c.headSHA)
 	if err != nil {
 		fmt.Printf("::error::could not list changed paths: %v\n", err)
 		return failClosed(c, "the changed-path list could not be computed")
 	}
-	triggers := EscalationTriggers(changed, c.prBody, gitCommitMessages(c.baseSHA, c.headSHA))
-	triggers = append(triggers, BinaryEscalationTriggers(gitBinaryPaths(c.baseSHA, c.headSHA))...)
-	triggers = append(triggers, GitlinkEscalationTriggers(gitGitlinkPaths(c.baseSHA, c.headSHA))...)
+	triggers := EscalationTriggers(changed, c.prBody, gitCommitMessages(mergeBase, c.headSHA))
+	triggers = append(triggers, BinaryEscalationTriggers(gitBinaryPaths(mergeBase, c.headSHA))...)
+	triggers = append(triggers, GitlinkEscalationTriggers(gitGitlinkPaths(mergeBase, c.headSHA))...)
 	if len(triggers) > 0 {
 		fmt.Printf("::warning::REVIEW.md §3 escalation triggered: %s\n", strings.Join(triggers, "; "))
 	}

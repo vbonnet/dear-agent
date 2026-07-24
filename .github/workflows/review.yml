@@ -81,6 +81,24 @@ jobs:
           fi
           git cat-file -e "${HEAD_SHA}^{commit}"
 
+      # A human override approves one reviewed revision, not a mutable branch.
+      # Remove it as soon as a contributor pushes a new head; the resulting
+      # unlabeled event reruns this gate without an override, and a maintainer
+      # must deliberately reapply the label after reviewing that new revision.
+      # Fork tokens may not be allowed to mutate labels, so the subsequent
+      # detection step also treats synchronize as inactive even if removal
+      # fails.
+      - name: Clear override for a new pull request revision
+        if: github.event_name == 'pull_request' && github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'ai-review:override')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh pr edit "$PR" --repo "$REPO" --remove-label 'ai-review:override' || \
+            echo "::warning::could not remove ai-review:override after a new revision; this run will still ignore it."
+
       # The override must survive the merge queue: a merge_group run cannot see
       # the originating PR's labels, so without this a human-overridden PR would
       # pass its PR check and then fail again on the synthetic merge-group SHA,
@@ -93,9 +111,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
         run: |
           set -euo pipefail
           labels="${LABELS:-}"
+          # Even if a fork's token could not remove the label above, a push
+          # never inherits an override granted for a previous SHA.
+          if [ "$EVENT" = "pull_request" ] && [ "$ACTION" = "synchronize" ]; then
+            echo "active=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "$EVENT" = "merge_group" ]; then
             # gh-readonly-queue/<base>/pr-<number>-<sha>
             pr="$(printf '%s' "$HEAD_REF" | sed -n 's|.*/pr-\([0-9]\{1,\}\)-[0-9a-f]\{1,\}$|\1|p')"

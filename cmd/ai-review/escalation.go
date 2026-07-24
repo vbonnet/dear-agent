@@ -129,6 +129,7 @@ var toolHookDirs = []string{
 	".config/git/hooks/",
 	".agents/hooks",
 	".codex/hooks",
+	"agm/hooks/",
 	"-hooks/",
 }
 

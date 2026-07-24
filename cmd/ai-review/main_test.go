@@ -142,6 +142,46 @@ func TestRun_OversizeDiffWithOverridePasses(t *testing.T) {
 	}
 }
 
+func TestGitMergeBase_ExcludesBaseOnlyChanges(t *testing.T) {
+	dir, base, _ := initRepo(t, "feature change\n")
+	chdir(t, dir)
+	git := func(args ...string) string {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+		return string(out)
+	}
+	feature := trim(git("rev-parse", "HEAD"))
+	git("checkout", "-q", "-b", "base-advanced", base)
+	if err := os.WriteFile(filepath.Join(dir, "base-only.txt"), []byte("base advance\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "base-only.txt")
+	git("commit", "-q", "-m", "base advance")
+	advancedBase := trim(git("rev-parse", "HEAD"))
+
+	mergeBase, err := gitMergeBase(advancedBase, feature)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mergeBase != base {
+		t.Fatalf("merge base = %s, want %s", mergeBase, base)
+	}
+	paths, err := gitChangedPaths(mergeBase, feature)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 1 || paths[0] != "a.txt" {
+		t.Fatalf("PR paths = %v, want only a.txt", paths)
+	}
+}
+
 // TestGitChangedPaths_IncludesRenameSource is the regression guard for the
 // rename bypass: moving a protected file to an ordinary path must still expose
 // the protected SOURCE path to escalation scanning.
