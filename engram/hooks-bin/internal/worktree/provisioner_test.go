@@ -27,6 +27,7 @@ func setupTestRepo(t *testing.T) (string, func()) {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to git init: %v", err)
 	}
+	gittest.HardenRepo(t, repoPath)
 
 	// Create initial commit (required for worktree)
 	readmeFile := filepath.Join(repoPath, "README.md")

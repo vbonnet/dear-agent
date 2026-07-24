@@ -144,7 +144,14 @@ is_managed_repo() {
   _top="$(real_path "${_top}")"
   [ -n "${_top}" ] || return 1
 
-  _roots="${DEAR_AGENT_MANAGED_REPO_ROOTS:-${HOME}/src:${HOME}/worktrees}"
+	_roots="${DEAR_AGENT_MANAGED_REPO_ROOTS:-}"
+	if [ -z "${_roots}" ]; then
+		# A globally installed hook can run in a sanitized environment. Without
+		# HOME there is no safe default managed-root set, so leave the checkout
+		# alone rather than failing under set -u.
+		[ -n "${HOME:-}" ] || return 1
+		_roots="${HOME}/src:${HOME}/worktrees"
+	fi
   _rest="${_roots}"
   while [ -n "${_rest}" ]; do
     case "${_rest}" in
