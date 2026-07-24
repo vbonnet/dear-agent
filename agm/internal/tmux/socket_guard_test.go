@@ -63,7 +63,8 @@ func TestCleanStaleSocket_KeepsSocketWhenServerBound(t *testing.T) {
 	var lsb *LiveServerBoundError
 	require.ErrorAs(t, err, &lsb, "should report the orphaned-server state")
 	assert.Equal(t, []int{4242}, lsb.PIDs)
-	assert.Contains(t, err.Error(), "kill 4242", "should tell the operator to kill the server")
+	assert.NotContains(t, err.Error(), "kill 4242", "a busy server must not be treated as disposable")
+	assert.Contains(t, err.Error(), "socket was retained")
 
 	assert.FileExists(t, path, "socket must survive: deleting it orphans the live server")
 }
@@ -113,10 +114,9 @@ func TestCleanStaleSocket_RefusesWhenScanFails(t *testing.T) {
 	assert.FileExists(t, path, "socket must survive an inconclusive scan")
 }
 
-// ServerAliveOrRecover must not flatten an orphan into generic "server dead"
-// advice, because that advice is `rm -f <socket>` — the exact action that
-// creates the orphan and strands its sessions.
-func TestServerAliveOrRecover_PropagatesOrphanError(t *testing.T) {
+// ServerAliveOrRecover must preserve inconclusive cleanup errors instead of
+// replacing them with generic removal advice.
+func TestServerAliveOrRecover_PreservesUnresponsiveServerError(t *testing.T) {
 	path, cleanup := newSocketFile(t)
 	defer cleanup()
 	t.Setenv("AGM_TMUX_SOCKET", path)
@@ -126,8 +126,22 @@ func TestServerAliveOrRecover_PropagatesOrphanError(t *testing.T) {
 	err := ServerAliveOrRecover()
 
 	var lsb *LiveServerBoundError
-	require.ErrorAs(t, err, &lsb, "orphan error must survive ServerAliveOrRecover")
-	assert.NotContains(t, err.Error(), "rm -f", "must never advise removing a bound socket")
+	require.ErrorAs(t, err, &lsb, "unresponsive-server error must survive ServerAliveOrRecover")
+	assert.NotContains(t, err.Error(), "rm -f", "must never advise removing an existing socket")
+	assert.FileExists(t, path)
+}
+
+func TestServerAliveOrRecover_PreservesScanFailure(t *testing.T) {
+	path, cleanup := newSocketFile(t)
+	defer cleanup()
+	t.Setenv("AGM_TMUX_SOCKET", path)
+
+	stubProbes(t, false, false, nil, errors.New("ps unavailable"))
+
+	err := ServerAliveOrRecover()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "refusing to remove socket")
+	assert.NotContains(t, err.Error(), "rm -f")
 	assert.FileExists(t, path)
 }
 

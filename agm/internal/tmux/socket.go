@@ -52,8 +52,9 @@ func GetReadSocketPaths() []string {
 //  2. `tmux list-sessions` fails — the real client, a slower second opinion;
 //  3. no tmux process in the table is bound to the path — authoritative.
 //
-// If (3) finds a live server, the socket is left alone and LiveServerBoundError
-// is returned: that server must be killed, not its socket unlinked.
+// If (3) finds a tmux process configured for the path, the socket is left alone
+// and LiveServerBoundError is returned. This result is deliberately
+// non-destructive because a busy server can be temporarily unresponsive.
 func CleanStaleSocket() error {
 	socketPath := GetSocketPath()
 

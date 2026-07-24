@@ -47,10 +47,10 @@ var (
 	probeServerPIDs  = FindServerPIDs
 )
 
-// LiveServerBoundError reports that a socket is unreachable while a live tmux
-// server process is still bound to it — the orphaned-server state. Removing the
-// socket file cannot fix this and makes it permanent, so the caller must kill
-// the bound server instead.
+// LiveServerBoundError reports that a tmux process is configured for an
+// existing but currently unreachable socket. The process scan cannot establish
+// that the server is orphaned: a loaded server can fail both short reachability
+// probes. Keep the socket and require non-destructive investigation or retry.
 type LiveServerBoundError struct {
 	SocketPath string
 	PIDs       []int
@@ -63,12 +63,11 @@ func (e *LiveServerBoundError) Error() string {
 	}
 	joined := strings.Join(pids, " ")
 	return fmt.Sprintf(
-		"tmux server is bound to %s but unreachable (orphaned): pid(s) %s\n\n"+
-			"Removing the socket file will NOT recover these sessions and makes the\n"+
-			"orphan permanent. Kill the bound server so a fresh socket can be created:\n"+
-			"  kill %s\n"+
-			"  agm session list    # verify recovery",
-		e.SocketPath, joined, joined)
+		"tmux server may be bound to %s but is currently unreachable: pid(s) %s\n\n"+
+			"The socket was retained because a busy server can fail short probes. Do\n"+
+			"not remove the socket or kill the process based on this result alone;\n"+
+			"retry after load subsides, then inspect with: agm admin doctor",
+		e.SocketPath, joined)
 }
 
 // FindServerPIDs returns the PIDs of live tmux processes bound to socketPath.

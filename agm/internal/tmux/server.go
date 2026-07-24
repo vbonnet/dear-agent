@@ -92,20 +92,11 @@ func ServerAliveOrRecover() error {
 		return nil
 	}
 
-	// Server is unreachable — attempt to clean the socket if it is truly stale.
+	// Server is unreachable — attempt to clean the socket only if it is truly
+	// stale. Any cleanup error is already a conservative diagnosis or a failed
+	// deletion; do not replace it with generic destructive recovery advice.
 	if err := CleanStaleSocket(); err != nil {
-		// An orphaned server (live, but its socket is unreachable) must be
-		// propagated verbatim: the generic advice below is `rm -f` the socket,
-		// which is precisely the action that created the orphan in the first
-		// place and would strand its sessions for good. See ce-7ep9.
-		var bound *LiveServerBoundError
-		if errors.As(err, &bound) {
-			return err
-		}
-		return &ServerDeadError{
-			Reason:   "server crashed and socket cleanup failed",
-			Recovery: fmt.Sprintf("  rm -f %s\n  agm session new <name>", GetSocketPath()),
-		}
+		return err
 	}
 
 	return nil
