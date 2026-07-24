@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -185,6 +186,12 @@ func TestIsTmuxCommand(t *testing.T) {
 	} {
 		assert.Equal(t, tc.want, isTmuxCommand(tc.arg0), "arg0=%s", tc.arg0)
 	}
+}
+
+func TestProcessExited(t *testing.T) {
+	assert.True(t, processExited(os.ErrNotExist))
+	assert.True(t, processExited(syscall.ESRCH))
+	assert.False(t, processExited(errors.New("permission denied")))
 }
 
 // TestFindServerPIDs_RealServer proves the process scan against a real tmux

@@ -2,12 +2,14 @@ package tmux
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -86,7 +88,10 @@ func FindServerPIDs(socketPath string) ([]int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), pidProbeTimeout)
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, "ps", "-axo", "pid=,command=").Output()
+	// -x limits the snapshot to the current user, avoiding unrelated accounts'
+	// tmux clients and argv-access boundaries. It includes processes without a
+	// controlling terminal, which covers tmux servers.
+	out, err := exec.CommandContext(ctx, "ps", "-xo", "pid=,command=").Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan process table: %w", err)
 	}
@@ -114,6 +119,12 @@ func FindServerPIDs(socketPath string) ([]int, error) {
 		// to locate the process, then read the platform's native argv data.
 		argv, err := readProcessArgv(pid)
 		if err != nil {
+			// A short-lived client can exit after ps emitted it. It cannot own
+			// the socket anymore, so it is safe to ignore this stale snapshot
+			// entry. Other read errors remain inconclusive and retain the socket.
+			if processExited(err) {
+				continue
+			}
 			// This scan is the final proof before a destructive unlink. An argv
 			// read failure is inconclusive, so retain the socket and retry later.
 			return nil, fmt.Errorf("read argv for tmux candidate pid %d: %w", pid, err)
@@ -129,6 +140,10 @@ func FindServerPIDs(socketPath string) ([]int, error) {
 		}
 	}
 	return pids, nil
+}
+
+func processExited(err error) bool {
+	return errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH)
 }
 
 // isTmuxCommand reports whether an argv[0] names the tmux binary, with or
