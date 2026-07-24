@@ -5,10 +5,13 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -113,28 +116,73 @@ func installedAGMPath() string {
 	return filepath.Join(home, "go", "bin", "agm")
 }
 
-// e2eBuildCacheKey returns an 8-hex-char fingerprint of the module's go.sum.
-// Different git worktrees or dependency revisions produce different keys so a
-// cached binary from another worktree is never silently reused.
+// e2eBuildCacheKey returns a fingerprint of every Go build input in the AGM
+// module. Dependency-only keys allow source-only revisions to reuse stale code.
 func e2eBuildCacheKey() string {
 	_, testFile, _, _ := runtime.Caller(0)
-	goSum := filepath.Join(filepath.Dir(testFile), "../../go.sum")
-	if data, err := os.ReadFile(goSum); err == nil {
-		h := sha256.Sum256(data)
-		return fmt.Sprintf("%x", h[:4])
+	moduleRoot := filepath.Clean(filepath.Join(filepath.Dir(testFile), "../.."))
+	var inputs []string
+	if err := filepath.WalkDir(moduleRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case ".git", "vendor", "node_modules", "build", "dist":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(d.Name(), ".go") || d.Name() == "go.mod" || d.Name() == "go.sum" {
+			rel, relErr := filepath.Rel(moduleRoot, path)
+			if relErr != nil {
+				return relErr
+			}
+			inputs = append(inputs, rel)
+		}
+		return nil
+	}); err != nil {
+		return "unknown"
 	}
-	return "unknown"
+	sort.Strings(inputs)
+	h := sha256.New()
+	for _, rel := range inputs {
+		data, err := os.ReadFile(filepath.Join(moduleRoot, rel))
+		if err != nil {
+			return "unknown"
+		}
+		_, _ = io.WriteString(h, filepath.ToSlash(rel)+"\x00")
+		_, _ = h.Write(data)
+		_, _ = io.WriteString(h, "\x00")
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)[:8])
 }
 
-// e2eBuildCacheDir is a stable, isolated directory for the fallback agm build.
-// It lives under the OS temp dir — NEVER the real GOBIN — so a testscript run
-// can never create, overwrite, or remove anything in ~/go/bin. The directory is
-// keyed by the go.sum fingerprint so different worktrees or dependency versions
-// cannot share a stale binary. A fixed path (rather than a per-process temp
-// dir) lets the many short-lived agmMain subprocesses in a single `go test` run
-// share one build instead of each recompiling agm.
+// e2eBuildCacheDir is a private, per-user fallback build cache. Its source key
+// permits sharing only by subprocesses that build the same AGM source.
 func e2eBuildCacheDir() string {
-	return filepath.Join(os.TempDir(), "agm-e2e-build-"+e2eBuildCacheKey())
+	cacheRoot, err := os.UserCacheDir()
+	if err != nil || cacheRoot == "" {
+		cacheRoot = filepath.Join(os.Getenv("HOME"), ".cache")
+	}
+	return filepath.Join(cacheRoot, "dear-agent", "e2e", "agm-"+e2eBuildCacheKey())
+}
+
+func ensurePrivateBuildCacheDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o077 != 0 {
+		return fmt.Errorf("unsafe build cache directory %q", dir)
+	}
+	return nil
 }
 
 // buildAGMToCache builds ./cmd/agm into the isolated e2e build cache and
@@ -148,12 +196,16 @@ func buildAGMToCache() (string, error) {
 	dir := e2eBuildCacheDir()
 	dest := filepath.Join(dir, "agm")
 
-	// Fast path: a previous subprocess in this run already built it.
-	if _, err := os.Stat(dest); err == nil {
-		return dest, nil
+	if err := ensurePrivateBuildCacheDir(dir); err != nil {
+		return "", fmt.Errorf("prepare private build cache: %w", err)
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("create build cache dir: %w", err)
+	if info, err := os.Lstat(dest); err == nil {
+		if info.Mode().IsRegular() && info.Mode().Perm()&0o077 == 0 {
+			return dest, nil
+		}
+		return "", fmt.Errorf("unsafe cached AGM binary %q", dest)
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("stat cached AGM binary: %w", err)
 	}
 
 	_, testFile, _, _ := runtime.Caller(0)
@@ -178,12 +230,16 @@ func buildAGMToCache() (string, error) {
 		os.Remove(tmpPath)
 		return "", fmt.Errorf("go build: %w\n%s", err, out)
 	}
+	if err := os.Chmod(tmpPath, 0o700); err != nil {
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("restrict build artifact permissions: %w", err)
+	}
 
 	// Atomically publish. If a concurrent builder won the race, reuse its
 	// result rather than failing — both binaries are equivalent.
 	if err := os.Rename(tmpPath, dest); err != nil {
 		os.Remove(tmpPath)
-		if _, statErr := os.Stat(dest); statErr == nil {
+		if info, statErr := os.Lstat(dest); statErr == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o077 == 0 {
 			return dest, nil
 		}
 		return "", fmt.Errorf("publish build: %w", err)

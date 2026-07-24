@@ -116,11 +116,10 @@ escalate() {
 		echo "$PROG: warning: cannot create trail dir $trail_dir" >&2
 		return 0
 	fi
-	# Mirror pkg/vroom/decisiontrail.OpenJSONL: create the trail file with 0600
-	# (owner-read/write only) if it does not yet exist.
-	if [ ! -f "$trail_path" ]; then
-		(umask 0177 && : >"$trail_path") 2>/dev/null || true
-	fi
+	# Mirror pkg/vroom/decisiontrail.OpenJSONL: create or tighten the shared
+	# trail with owner-only permissions. touch is deliberately non-truncating:
+	# another VROOM writer may append between our mkdir and this creation step.
+	(umask 0177 && touch "$trail_path" && chmod 600 "$trail_path") 2>/dev/null || true
 	event_id=$(new_event_id)
 	ts=$(now_utc)
 	esc_dir=$(json_escape "$gobin_dir")

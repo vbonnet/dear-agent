@@ -12,14 +12,17 @@ import (
 // The e2e harness must NEVER build its fallback agm binary into the live
 // ~/go/bin: doing so let an unsandboxed `go test ./...` mutate the user's real
 // toolchain directory, the mechanism implicated in the 2026-07-15 ~/go/bin
-// wipe. The fallback build target must live under the OS temp dir and must not
-// resolve into any "go/bin" directory.
+// wipe. The fallback build target must live in the current user's private cache
+// and must not resolve into any "go/bin" directory.
 func TestBuildCacheDirNeverGOBIN(t *testing.T) {
 	dir := e2eBuildCacheDir()
 
-	tmp := os.TempDir()
-	if !strings.HasPrefix(filepath.Clean(dir)+string(os.PathSeparator), filepath.Clean(tmp)+string(os.PathSeparator)) {
-		t.Fatalf("build cache dir %q is not under os.TempDir() %q", dir, tmp)
+	cacheRoot, err := os.UserCacheDir()
+	if err != nil || cacheRoot == "" {
+		cacheRoot = filepath.Join(os.Getenv("HOME"), ".cache")
+	}
+	if !strings.HasPrefix(filepath.Clean(dir)+string(os.PathSeparator), filepath.Clean(cacheRoot)+string(os.PathSeparator)) {
+		t.Fatalf("build cache dir %q is not under the user cache root %q", dir, cacheRoot)
 	}
 
 	// Belt and suspenders: the resolved build target must not contain a
@@ -32,6 +35,20 @@ func TestBuildCacheDirNeverGOBIN(t *testing.T) {
 	// It must specifically differ from the live installed GOBIN path.
 	if filepath.Clean(dest) == filepath.Clean(installedAGMPath()) {
 		t.Fatalf("build target %q equals the installed GOBIN path", dest)
+	}
+}
+
+func TestEnsurePrivateBuildCacheDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "cache")
+	if err := ensurePrivateBuildCacheDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		t.Fatalf("cache permissions = %o, want owner-only", info.Mode().Perm())
 	}
 }
 
@@ -76,5 +93,8 @@ func TestBuildAGMToCacheStaysIsolated(t *testing.T) {
 	}
 	if info.Mode()&0o111 == 0 {
 		t.Fatalf("built agm %q is not executable (mode %v)", got, info.Mode())
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		t.Fatalf("built agm %q is not private (mode %v)", got, info.Mode())
 	}
 }
