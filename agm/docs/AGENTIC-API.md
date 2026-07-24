@@ -165,13 +165,20 @@ $ agm session archive my-project --dry-run -o json
   "code": "AGM-100",
   "title": "Dry run",
   "detail": "Would archive session \"my-project\".",
-  "suggestions": ["Remove --dry-run flag to execute."]
+  "instance": "session/archive",
+  "suggestions": ["Remove `--dry-run` to execute."],
+  "parameters": {
+    "session_id": "01234567-89ab-cdef-0123-456789abcdef",
+    "session_name": "my-project"
+  }
 }
 ```
 
 Dry-run returns an AGM-100 `OpError` with status 200. Agents can parse
-the `detail` field to confirm the intended action before re-running
-without the flag.
+the `detail` and `parameters` fields to confirm the exact resolved target before
+re-running without the flag. Single-session archive previews execute the shared
+archive guards but return before any AGM, provider, process, worktree, branch,
+sandbox, settings, telemetry, or reaper mutation.
 
 ## Progressive Disclosure (Skills)
 

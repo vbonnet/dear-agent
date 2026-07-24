@@ -101,6 +101,9 @@ Examples:
   # Archive an active session (--async required)
   agm session archive --async my-active-session
 
+  # Preview archiving one stopped session without changing it
+  agm session archive my-old-session --dry-run
+
   # Archive all inactive sessions older than 30 days (preview only)
   agm session archive --all --older-than=30d --dry-run
 
@@ -232,6 +235,10 @@ func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
 		return getErr
 	}
 
+	if dryRun {
+		return previewSingleSessionArchive(opCtx, sessionName, getResult, outcome)
+	}
+
 	if handled, err := handleAlreadyArchivedOrAsync(opCtx, sessionName, getResult, outcome); handled {
 		return err
 	}
@@ -296,11 +303,54 @@ func archiveAuditArgs() map[string]string {
 		if olderThan != "" {
 			auditArgs["older_than"] = olderThan
 		}
-		if dryRun {
-			auditArgs["dry_run"] = "true"
-		}
+	}
+	if dryRun {
+		auditArgs["dry_run"] = "true"
 	}
 	return auditArgs
+}
+
+// previewSingleSessionArchive runs the same shared guards as a real archive,
+// but returns before provider archival, lifecycle writes, cleanup, telemetry,
+// settings changes, or detached reaper startup.
+func previewSingleSessionArchive(opCtx *ops.OpContext, sessionName string, getResult *ops.GetSessionResult, outcome manifest.SessionOutcome) error {
+	isActive := getResult.Session.Status == "active"
+	if isActive && !asyncArchive {
+		return fmt.Errorf("session '%s' is active; use --async to archive an active session", sessionName)
+	}
+	if !isActive && asyncArchive {
+		return fmt.Errorf("--async should only be used for active sessions; omit --async for stopped sessions")
+	}
+
+	dryRunCtx := *opCtx
+	dryRunCtx.DryRun = true
+	result, err := ops.ArchiveSession(&dryRunCtx, &ops.ArchiveSessionRequest{
+		Identifier:      sessionName,
+		Force:           forceArchive,
+		KeepSandbox:     keepSandbox,
+		Outcome:         outcome,
+		AllowActiveTmux: asyncArchive,
+	})
+	if err != nil {
+		return handleError(err)
+	}
+
+	preview := ops.NewDryRunPreview(
+		"session/archive",
+		fmt.Sprintf("Would archive session %q.", result.Name),
+		map[string]string{
+			"session_id":   result.SessionID,
+			"session_name": result.Name,
+		},
+	)
+	if isJSONOutput() {
+		fmt.Println(string(preview.JSON()))
+		return nil
+	}
+
+	ui.PrintSuccess(fmt.Sprintf("%s: %s", preview.Title, preview.Detail))
+	fmt.Println("No changes were made.")
+	return nil
 }
 
 // handleAlreadyArchivedOrAsync handles three early-exit cases for archive:
@@ -896,7 +946,7 @@ func init() {
 	archiveCmd.Flags().StringVar(&olderThan, "older-than", "",
 		"Archive sessions inactive for N days (e.g., 30d, 7d, 1w, 24h)")
 	archiveCmd.Flags().BoolVar(&dryRun, "dry-run", false,
-		"Preview sessions to be archived without executing")
+		"Preview the session or sessions to be archived without executing")
 	archiveCmd.Flags().BoolVar(&cleanupWorktrees, "cleanup-worktrees", false,
 		"Clean up merged git worktrees after archiving")
 	archiveCmd.Flags().BoolVarP(&forceArchive, "force", "f", false,

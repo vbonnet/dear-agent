@@ -111,6 +111,8 @@ type harnessParityState struct {
 	cleanupSupportSpec         string
 	archiveCleanupTestOutput   string
 	archiveCleanupTestErr      error
+	archiveDryRunTestOutput    string
+	archiveDryRunTestErr       error
 	a2aCoordinationSpecsValid  bool
 	captureInvocationArgs      []string
 	captureSessionName         string
@@ -274,6 +276,12 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^an unclassified worktree should not authorize branch deletion$`, unclassifiedWorktreeShouldNotAuthorizeBranchDeletion)
 	ctx.Step(`^a context-only checkout should not authorize branch deletion$`, contextOnlyCheckoutShouldNotAuthorizeBranchDeletion)
 	ctx.Step(`^branch deletion should require attributed worktree ownership$`, branchDeletionShouldRequireAttributedWorktreeOwnership)
+	ctx.Step(`^AGM has a single-session archive dry-run contract$`, agmHasSingleSessionArchiveDryRunContract)
+	ctx.Step(`^AGM validates single-session archive dry-run safety$`, agmValidatesSingleSessionArchiveDryRunSafety)
+	ctx.Step(`^durable and provider archive state should remain unchanged$`, durableAndProviderArchiveStateShouldRemainUnchanged)
+	ctx.Step(`^archive preview should return stable AGM-100 output$`, archivePreviewShouldReturnStableAGM100Output)
+	ctx.Step(`^active async preview should not start a detached reaper$`, activeAsyncPreviewShouldNotStartDetachedReaper)
+	ctx.Step(`^dry-run preview should preserve async state validation$`, dryRunPreviewShouldPreserveAsyncStateValidation)
 	ctx.Step(`^the retained A2A coordination implementation$`, retainedA2ACoordinationImplementation)
 	ctx.Step(`^AGM validates A2A coordination specification drift$`, agmValidatesA2ACoordinationSpecificationDrift)
 	ctx.Step(`^A2A coordination specifications should describe only retained behavior$`, a2aCoordinationSpecificationsShouldDescribeOnlyRetainedBehavior)
@@ -2135,6 +2143,104 @@ func cleanupSupportPackageShouldHaveCoLocatedSPEC(ctx context.Context, pkg strin
 func agmArchiveCleanupTargetsRepositoryCheckout(ctx context.Context) error {
 	_, err := getHarnessParityState(ctx)
 	return err
+}
+
+func agmHasSingleSessionArchiveDryRunContract(ctx context.Context) error {
+	_, err := getHarnessParityState(ctx)
+	return err
+}
+
+func agmValidatesSingleSessionArchiveDryRunSafety(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/ops",
+		"-run", `^(TestArchiveSession_DryRunCLI(TextIsSideEffectFree|JSONReturnsStableEnvelope|ActiveAsyncDoesNotStartReaper|ActiveRequiresAsync|StoppedRejectsAsync)|TestArchiveAuditArgs_RecordsSingleSessionDryRun|TestArchiveSession_DryRunDoesNotArchiveExternalRepresentation|TestNewDryRunPreview)$`,
+		"-count=1", "-v")
+	cmd.Dir = bddRepoRoot()
+	output, runErr := cmd.CombinedOutput()
+	harnessState.archiveDryRunTestOutput = string(output)
+	harnessState.archiveDryRunTestErr = runErr
+	if testCtx.Err() != nil {
+		return fmt.Errorf("single-session archive dry-run suite timed out: %w", testCtx.Err())
+	}
+	return nil
+}
+
+func durableAndProviderArchiveStateShouldRemainUnchanged(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.archiveDryRunTestErr != nil {
+		return fmt.Errorf("single-session archive dry-run suite failed: %w\n%s", harnessState.archiveDryRunTestErr, harnessState.archiveDryRunTestOutput)
+	}
+	for _, testName := range []string{
+		"TestArchiveSession_DryRunCLITextIsSideEffectFree",
+		"TestArchiveSession_DryRunDoesNotArchiveExternalRepresentation",
+	} {
+		if !strings.Contains(harnessState.archiveDryRunTestOutput, "--- PASS: "+testName) {
+			return fmt.Errorf("%s did not run:\n%s", testName, harnessState.archiveDryRunTestOutput)
+		}
+	}
+	return nil
+}
+
+func archivePreviewShouldReturnStableAGM100Output(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.archiveDryRunTestErr != nil {
+		return fmt.Errorf("single-session archive dry-run suite failed: %w\n%s", harnessState.archiveDryRunTestErr, harnessState.archiveDryRunTestOutput)
+	}
+	for _, testName := range []string{
+		"TestArchiveSession_DryRunCLIJSONReturnsStableEnvelope",
+		"TestArchiveAuditArgs_RecordsSingleSessionDryRun",
+		"TestNewDryRunPreview",
+	} {
+		if !strings.Contains(harnessState.archiveDryRunTestOutput, "--- PASS: "+testName) {
+			return fmt.Errorf("%s did not run:\n%s", testName, harnessState.archiveDryRunTestOutput)
+		}
+	}
+	return nil
+}
+
+func activeAsyncPreviewShouldNotStartDetachedReaper(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.archiveDryRunTestErr != nil {
+		return fmt.Errorf("single-session archive dry-run suite failed: %w\n%s", harnessState.archiveDryRunTestErr, harnessState.archiveDryRunTestOutput)
+	}
+	const testName = "TestArchiveSession_DryRunCLIActiveAsyncDoesNotStartReaper"
+	if !strings.Contains(harnessState.archiveDryRunTestOutput, "--- PASS: "+testName) {
+		return fmt.Errorf("%s did not run:\n%s", testName, harnessState.archiveDryRunTestOutput)
+	}
+	return nil
+}
+
+func dryRunPreviewShouldPreserveAsyncStateValidation(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.archiveDryRunTestErr != nil {
+		return fmt.Errorf("single-session archive dry-run suite failed: %w\n%s", harnessState.archiveDryRunTestErr, harnessState.archiveDryRunTestOutput)
+	}
+	for _, testName := range []string{
+		"TestArchiveSession_DryRunCLIActiveRequiresAsync",
+		"TestArchiveSession_DryRunCLIStoppedRejectsAsync",
+	} {
+		if !strings.Contains(harnessState.archiveDryRunTestOutput, "--- PASS: "+testName) {
+			return fmt.Errorf("%s did not run:\n%s", testName, harnessState.archiveDryRunTestOutput)
+		}
+	}
+	return nil
 }
 
 func agmValidatesPrimaryCheckoutCleanupSafety(ctx context.Context) error {

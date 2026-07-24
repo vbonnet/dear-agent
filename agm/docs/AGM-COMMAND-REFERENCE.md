@@ -583,6 +583,9 @@ agm session archive old-project
 # Archive an active session (--async required)
 agm session archive --async active-session
 
+# Preview one stopped session without changing AGM or provider state
+agm session archive old-project --dry-run
+
 # Archive all inactive sessions older than 30 days (preview)
 agm session archive --all --older-than=30d --dry-run
 
@@ -594,9 +597,12 @@ agm session archive --all --older-than=30d
 1. Validates session exists
 2. Checks whether session is active in tmux
 3. Enforces `--async` mutual exclusivity with session state
-4. Updates lifecycle status to "archived"
-5. Preserves all session data
-6. Hides from default `agm session list` output
+4. With `--dry-run`, runs shared archive guards and returns before every AGM,
+   provider, process, worktree, branch, sandbox, settings, telemetry, or reaper
+   mutation
+5. Updates lifecycle status to "archived"
+6. Preserves all session data
+7. Hides from default `agm session list` output
 
 ---
 

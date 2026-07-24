@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -226,6 +228,56 @@ func readSessionFromDolt(t testingTB, sessionID string) *manifest.Manifest {
 	}
 
 	return m
+}
+
+func configureSingleArchiveDryRun(t *testing.T) {
+	t.Helper()
+	oldDryRun := dryRun
+	oldAsync := asyncArchive
+	oldArchiveAll := archiveAll
+	oldForce := forceArchive
+	oldKeepSandbox := keepSandbox
+	oldCleanupWorktrees := cleanupWorktrees
+	oldArchiveOutcome := archiveOutcome
+	dryRun = true
+	asyncArchive = false
+	archiveAll = false
+	forceArchive = false
+	keepSandbox = false
+	cleanupWorktrees = false
+	archiveOutcome = ""
+	t.Cleanup(func() {
+		dryRun = oldDryRun
+		asyncArchive = oldAsync
+		archiveAll = oldArchiveAll
+		forceArchive = oldForce
+		keepSandbox = oldKeepSandbox
+		cleanupWorktrees = oldCleanupWorktrees
+		archiveOutcome = oldArchiveOutcome
+	})
+}
+
+func setArchiveTestProject(t *testing.T, sessionID, projectDir string) *manifest.Manifest {
+	t.Helper()
+	adapter, err := getStorage()
+	if err != nil {
+		t.Fatalf("getStorage() error: %v", err)
+	}
+	defer adapter.Close()
+	m, err := adapter.GetSession(sessionID)
+	if err != nil {
+		t.Fatalf("GetSession(%q) error: %v", sessionID, err)
+	}
+	m.Context.Project = projectDir
+	m.WorkingDirectory = projectDir
+	if err := adapter.UpdateSession(m); err != nil {
+		t.Fatalf("UpdateSession(%q) error: %v", sessionID, err)
+	}
+	stored, err := adapter.GetSession(sessionID)
+	if err != nil {
+		t.Fatalf("GetSession(%q) after update error: %v", sessionID, err)
+	}
+	return stored
 }
 
 // TestArchiveSession_Success tests successful archive of an active session
@@ -697,6 +749,169 @@ func TestArchiveSession_EmptySessionsDir(t *testing.T) {
 	err := archiveSession(nil, []string{"nonexistent"})
 	if err == nil {
 		t.Fatal("Expected error for session in empty directory, got nil")
+	}
+}
+
+func TestArchiveSession_DryRunCLITextIsSideEffectFree(t *testing.T) {
+	_, sessionsDir, cleanup := setupArchiveTest(t)
+	defer cleanup()
+	configureSingleArchiveDryRun(t)
+	setHumanText(t)
+
+	const sessionID = "single-dry-run-text"
+	const sessionName = "dry-run-text"
+	sessionDir := createArchiveTestSession(t, sessionsDir, sessionID, sessionName, "dry-run-text-tmux", "")
+	before := setArchiveTestProject(t, sessionID, t.TempDir())
+
+	var archiveErr error
+	output := captureStdout(t, func() {
+		archiveErr = archiveSession(nil, []string{sessionName})
+	})
+	if archiveErr != nil {
+		t.Fatalf("archiveSession() error: %v\noutput: %s", archiveErr, output)
+	}
+	if !strings.Contains(output, `Dry run: Would archive session "dry-run-text".`) {
+		t.Fatalf("text preview missing exact target: %q", output)
+	}
+	if !strings.Contains(output, "No changes were made.") {
+		t.Fatalf("text preview missing no-change result: %q", output)
+	}
+
+	after := readSessionFromDolt(t, sessionID)
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("durable session changed during dry run:\nbefore=%#v\nafter=%#v", before, after)
+	}
+	if _, err := os.Stat(sessionDir); err != nil {
+		t.Fatalf("session directory changed during dry run: %v", err)
+	}
+}
+
+func TestArchiveSession_DryRunCLIJSONReturnsStableEnvelope(t *testing.T) {
+	_, sessionsDir, cleanup := setupArchiveTest(t)
+	defer cleanup()
+	configureSingleArchiveDryRun(t)
+	setAgentJSON(t)
+
+	const sessionID = "single-dry-run-json"
+	const sessionName = "dry-run-json"
+	createArchiveTestSession(t, sessionsDir, sessionID, sessionName, "dry-run-json-tmux", "")
+	before := setArchiveTestProject(t, sessionID, t.TempDir())
+
+	var archiveErr error
+	output := captureStdout(t, func() {
+		archiveErr = archiveSession(nil, []string{sessionName})
+	})
+	if archiveErr != nil {
+		t.Fatalf("archiveSession() error: %v\noutput: %s", archiveErr, output)
+	}
+	var preview ops.OpError
+	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &preview); err != nil {
+		t.Fatalf("stdout is not a dry-run problem-details envelope: %v\noutput: %q", err, output)
+	}
+	if preview.Status != 200 || preview.Type != "dry_run" || preview.Code != ops.ErrCodeDryRun ||
+		preview.Title != "Dry run" || preview.Instance != "session/archive" {
+		t.Fatalf("preview envelope = %#v", preview)
+	}
+	if preview.Detail != `Would archive session "dry-run-json".` {
+		t.Fatalf("preview detail = %q", preview.Detail)
+	}
+	if preview.Parameters["session_id"] != sessionID || preview.Parameters["session_name"] != sessionName {
+		t.Fatalf("preview parameters = %#v", preview.Parameters)
+	}
+
+	after := readSessionFromDolt(t, sessionID)
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("durable session changed during dry run:\nbefore=%#v\nafter=%#v", before, after)
+	}
+}
+
+func TestArchiveSession_DryRunCLIActiveAsyncDoesNotStartReaper(t *testing.T) {
+	_, sessionsDir, cleanup := setupArchiveTest(t)
+	defer cleanup()
+	configureSingleArchiveDryRun(t)
+	setHumanText(t)
+
+	const sessionID = "single-dry-run-active"
+	const sessionName = "dry-run-active"
+	createArchiveTestSession(t, sessionsDir, sessionID, sessionName, sessionName, "")
+	before := setArchiveTestProject(t, sessionID, t.TempDir())
+
+	oldTmuxClient := tmuxClient
+	tmuxClient = &session.MockTmux{Sessions: map[string]bool{sessionName: true}}
+	t.Cleanup(func() { tmuxClient = oldTmuxClient })
+	asyncArchive = true
+
+	var archiveErr error
+	output := captureStdout(t, func() {
+		archiveErr = archiveSession(nil, []string{sessionName})
+	})
+	if archiveErr != nil {
+		t.Fatalf("active async dry run reached reaper or failed: %v\noutput: %s", archiveErr, output)
+	}
+	if !strings.Contains(output, `Dry run: Would archive session "dry-run-active".`) {
+		t.Fatalf("active async preview missing exact target: %q", output)
+	}
+
+	after := readSessionFromDolt(t, sessionID)
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("active durable session changed during dry run:\nbefore=%#v\nafter=%#v", before, after)
+	}
+	if has, err := tmuxClient.HasSession(sessionName); err != nil || !has {
+		t.Fatalf("active tmux session changed during dry run: has=%v err=%v", has, err)
+	}
+}
+
+func TestArchiveSession_DryRunCLIActiveRequiresAsync(t *testing.T) {
+	_, sessionsDir, cleanup := setupArchiveTest(t)
+	defer cleanup()
+	configureSingleArchiveDryRun(t)
+
+	const sessionID = "single-dry-run-active-no-async"
+	const sessionName = "dry-run-active-no-async"
+	createArchiveTestSession(t, sessionsDir, sessionID, sessionName, sessionName, "")
+	setArchiveTestProject(t, sessionID, t.TempDir())
+
+	oldTmuxClient := tmuxClient
+	tmuxClient = &session.MockTmux{Sessions: map[string]bool{sessionName: true}}
+	t.Cleanup(func() { tmuxClient = oldTmuxClient })
+
+	err := archiveSession(nil, []string{sessionName})
+	if err == nil || !strings.Contains(err.Error(), "use --async to archive an active session") {
+		t.Fatalf("archiveSession() error = %v, want active-session --async guidance", err)
+	}
+	if after := readSessionFromDolt(t, sessionID); after.Lifecycle == manifest.LifecycleArchived {
+		t.Fatal("active session was archived after rejected dry-run preview")
+	}
+}
+
+func TestArchiveSession_DryRunCLIStoppedRejectsAsync(t *testing.T) {
+	_, sessionsDir, cleanup := setupArchiveTest(t)
+	defer cleanup()
+	configureSingleArchiveDryRun(t)
+
+	const sessionID = "single-dry-run-stopped-async"
+	const sessionName = "dry-run-stopped-async"
+	createArchiveTestSession(t, sessionsDir, sessionID, sessionName, sessionName, "")
+	setArchiveTestProject(t, sessionID, t.TempDir())
+	asyncArchive = true
+
+	err := archiveSession(nil, []string{sessionName})
+	if err == nil || !strings.Contains(err.Error(), "--async should only be used for active sessions") {
+		t.Fatalf("archiveSession() error = %v, want stopped-session --async guidance", err)
+	}
+	if after := readSessionFromDolt(t, sessionID); after.Lifecycle == manifest.LifecycleArchived {
+		t.Fatal("stopped session was archived after rejected dry-run preview")
+	}
+}
+
+func TestArchiveAuditArgs_RecordsSingleSessionDryRun(t *testing.T) {
+	configureSingleArchiveDryRun(t)
+	args := archiveAuditArgs()
+	if args["dry_run"] != "true" {
+		t.Fatalf("archive audit args = %#v, want dry_run=true", args)
+	}
+	if _, ok := args["bulk"]; ok {
+		t.Fatalf("archive audit args = %#v, single archive must not be marked bulk", args)
 	}
 }
 
