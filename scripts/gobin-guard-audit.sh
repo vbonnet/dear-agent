@@ -19,5 +19,4 @@ if [ ! -e "$alarm" ] && [ "${GOBIN_GUARD_NOTIFY:-1}" = 1 ] && [ "$(uname -s)" = 
   osascript -e 'display notification "The GOBIN detector has stopped reporting. See gobin-guard-audit.err.log." with title "DEAR Agent GOBIN guard stale"' >/dev/null 2>&1 && delivered=0 || true
 fi
 if [ "$delivered" -eq 0 ]; then (umask 0177 && mkdir -p "$(dirname "$alarm")" && : >"$alarm") 2>/dev/null || true; fi
-echo "gobin-guard-audit: ALARM: $reason" >&2
-exit 1
+echo "gobin-guard-audit: ALARM: $reason" >&2; exit 1
