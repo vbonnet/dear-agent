@@ -102,7 +102,11 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-47** When a multiline prompt is delivered to AGY, including through the atomic exact-pane delivery boundary, the system shall ask tmux to preserve line feeds and emit bracketed-paste delimiters when the application requested them, then send one Enter after the complete paste; other harnesses shall retain the established paste behavior.
 
-**TMUX-48** When Codex startup shows the structured selector for new or changed executable hooks that need review, every direct and shared readiness wait shall stop promptly with a typed, actionable error that requires interactive operator review, shall classify the pane as review-required rather than ready or generically busy, and shall not send keys, trust hooks, register the session, deliver a startup prompt, attach, or update lifecycle metadata; retained selector text followed by a newer tail-owned composer shall not remain a blocker.
+**TMUX-48** When Codex startup shows either the structured selector for new or changed executable hooks or the active hooks dashboard with review-required hooks, every direct and shared readiness wait for an expected Codex harness shall inspect the complete captured screen, stop promptly with a typed, actionable error that requires interactive operator review, classify the pane as review-required rather than ready or generically busy, and not send keys, trust hooks, register the session, deliver a startup prompt, attach, or update lifecycle metadata; trailing blank terminal rows and terminal styling within structural controls shall not hide an active review surface, an active dashboard redraw below an older composer shall remain authoritative, retained selector or dashboard text followed by a newer empty or occupied composer or an in-flight turn shall not remain a blocker, and copied Codex dashboard text in another expected harness's scrollback shall not impose a Codex-specific blocker.
+
+**TMUX-49** When Codex renders its current welcome view with instructions between the composer header and cursor, the system shall use a style-preserving logical capture that rejoins terminal-wrapped rows and classify the structured terminal footer paired with suggestion text styled dim or grey from its first visible character as an empty composer while treating identical unstyled text, structurally occupied paste chips, and human drafts with only later styled tokens as occupied input; direct startup and generic prompt waits, idle probes, shared readiness, session and backend state detection, and prompt delivery shall use the same distinction even in narrow panes.
+
+**TMUX-50** When atomic initial delivery of a Codex prompt with no extractable verification keyword is followed by a styled idle composer at the first delayed verification capture, the verifier shall treat the outcome as an ambiguous successful return and shall not resend the prompt, because the turn may already have completed; observable processing, prompt keywords, and prompt disappearance shall remain stronger confirmation signals, while an extractable keyword that remains absent shall retain retry behavior.
 
 ## BDD Traceability
 
@@ -114,7 +118,9 @@ because the tmux server's own cwd has been deleted.
 - Package tests: `agm/internal/tmux/linger_test.go`
 - Package tests: `agm/internal/tmux/capture_test.go`
 - Package tests: `agm/internal/tmux/agy_prompt_test.go`
+- Package tests: `agm/internal/tmux/codex_prompt_test.go`
 - Package tests: `agm/internal/tmux/prompt_test.go`
+- Package tests: `agm/internal/tmux/verify_delivery_test.go`
 - Integration tests: `agm/internal/tmux/agy_lifecycle_integration_test.go`
 - Package tests: `agm/internal/tmux/pi_prompt_test.go`
 - Package tests: `agm/internal/tmux/readiness_test.go`

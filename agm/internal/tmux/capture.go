@@ -24,11 +24,40 @@ func CapturePaneOutputContext(ctx context.Context, sessionName string, lines int
 	return capturePane(ctx, sessionName, lines, false)
 }
 
+// CapturePaneANSIOutput captures the last N lines from a session's active pane
+// with rendered styles intact.
+func CapturePaneANSIOutput(sessionName string, lines int) (string, error) {
+	return CapturePaneANSIOutputContext(context.Background(), sessionName, lines)
+}
+
 // CapturePaneANSIOutputContext captures pane output with tmux's escaped style
 // sequences intact. Consumers that distinguish rendered placeholder text from
 // human-authored input must use this single-capture form to avoid a state race.
 func CapturePaneANSIOutputContext(ctx context.Context, sessionName string, lines int) (string, error) {
 	return capturePane(ctx, sessionName, lines, true)
+}
+
+// CapturePaneLogicalANSIOutput captures the last N lines from a session's
+// active pane with styles intact and terminal-wrapped rows rejoined.
+func CapturePaneLogicalANSIOutput(sessionName string, lines int) (string, error) {
+	return CapturePaneLogicalANSIOutputContext(context.Background(), sessionName, lines)
+}
+
+// CapturePaneLogicalANSIOutputContext is the command-scoped logical capture.
+// Codex readiness uses it so styled placeholder text remains attached to its
+// composer cursor even when a narrow pane wraps the rendered suggestion.
+func CapturePaneLogicalANSIOutputContext(ctx context.Context, sessionName string, lines int) (string, error) {
+	if sessionName == "" {
+		return "", fmt.Errorf("session name cannot be empty")
+	}
+	return capturePaneTargetWithOptions(ctx, NormalizeTmuxSessionName(sessionName), lines, true, true)
+}
+
+// PlainPaneText removes terminal styling and control sequences from one pane
+// capture. State detectors preserve the styled capture for classifiers that
+// need rendered-input ownership, then use this view for ordinary text patterns.
+func PlainPaneText(content string) string {
+	return stripANSI(content)
 }
 
 // CapturePaneANSIOutputTargetContext captures one already-resolved pane target

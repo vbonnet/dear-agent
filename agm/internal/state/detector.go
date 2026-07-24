@@ -167,6 +167,8 @@ func NewDetector() *Detector {
 // DetectState analyzes pane output to determine current state
 func (d *Detector) DetectState(output string, lastOutputTime time.Time) DetectionResult {
 	now := time.Now()
+	styledOutput := output
+	output = tmux.PlainPaneText(output)
 
 	// Priority order: Permission > Ready > Thinking > Blocked > Stuck > Unknown
 	//
@@ -223,7 +225,7 @@ func (d *Detector) DetectState(output string, lastOutputTime time.Time) Detectio
 		}
 	}
 
-	if tmux.IsCodexComposerReady(output) {
+	if tmux.IsCodexComposerReady(styledOutput) {
 		return DetectionResult{
 			State:      StateReady,
 			Timestamp:  now,
@@ -391,6 +393,9 @@ func (s State) IsWaiting() bool {
 //
 // Note: Alive status (Stopped/Archived/NotFound) is checked at the session level.
 func (d *Detector) CheckCanReceive(output string) CanReceive {
+	styledOutput := output
+	output = tmux.PlainPaneText(output)
+
 	// Permission dialog blocks input — ❯ appears as selector, not prompt
 	if d.blockedPermissionPattern.MatchString(output) {
 		return CanReceiveNo
@@ -416,7 +421,7 @@ func (d *Detector) CheckCanReceive(output string) CanReceive {
 	}
 
 	// Complete Codex composer visible = session is at idle prompt, can receive.
-	if tmux.IsCodexComposerReady(output) {
+	if tmux.IsCodexComposerReady(styledOutput) {
 		return CanReceiveYes
 	}
 

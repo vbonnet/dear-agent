@@ -100,6 +100,9 @@ func TestCapturePaneRejectsEmptySession(t *testing.T) {
 	if _, err := CapturePaneHistoryOutput(""); err == nil {
 		t.Fatal("CapturePaneHistoryOutput() error = nil, want empty-session error")
 	}
+	if _, err := CapturePaneLogicalANSIOutput("", 50); err == nil {
+		t.Fatal("CapturePaneLogicalANSIOutput() error = nil, want empty-session error")
+	}
 }
 
 func TestCapturePaneCommandIsBoundedAndIsolated(t *testing.T) {

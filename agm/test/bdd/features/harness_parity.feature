@@ -370,11 +370,16 @@ Feature: Harness parity
     Then AGM should auto-accept the Codex trust prompt before prompt delivery
     And AGM should wait for the Codex composer
 
-  Scenario: Codex hook review requires explicit operator action
-    Given Codex hooks require explicit review
+  Scenario Outline: Codex hook review requires explicit operator action
+    Given Codex hooks require explicit review in the "<surface>" surface
     When AGM evaluates Codex hook review startup
     Then Codex startup should fail fast with explicit review guidance
     And Codex hook review should receive no automated input
+
+    Examples:
+      | surface           |
+      | numbered selector |
+      | hooks dashboard   |
 
   Scenario: Codex current-tmux creation launches before registration
     Given current-tmux creation selects Codex CLI
@@ -496,7 +501,7 @@ Feature: Harness parity
   Scenario: Failed Codex resume is rolled back before success effects
     Given a stopped Codex CLI session without a tmux pane
     When AGM validates the Codex resume transaction
-    Then Codex resume success should require process and composer readiness
+    Then Codex resume, state, and prompt waits should preserve process and styled composer readiness
     And a failed Codex resume should serialize concurrent attempts through every production entry point, release the session lock before attachment, preserve canonical tmux identity from stale full-session updates, reconcile ambiguous metadata commits, compensate owned provisional metadata before removing its creation-specific tmux identity even when tmux ID output is lost, and preserve tmux whenever metadata cleanup is unproven
     And authoritative session renames should serialize with cold resume, fence ambiguous storage writes, preserve both identity names from stale writers, preserve claimed tmux identity across lost replies and server restarts, reject stale identity revisions, and compensate tmux after storage conflicts
     And administrative hierarchy repairs should atomically link parents and inherited names through the observed identity revision
