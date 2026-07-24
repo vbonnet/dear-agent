@@ -14,23 +14,27 @@ import (
 	"testing"
 )
 
-// allowedUnsandboxedGitTests lists the test files permitted to build a Git
-// command without internal/gittest, each with the reason it is exempt. The
-// list is a ratchet: adding an entry is a deliberate, reviewed act, and the
-// guard fails on a stale entry so the list cannot rot.
+// allowedUnsandboxedGitTests lists the exact direct-Git call sites permitted
+// without internal/gittest, each with the reason it is exempt. The list is a
+// ratchet: adding a call site is a deliberate, reviewed act, and the guard
+// fails on a stale entry so the list cannot rot.
 //
 // Paths are slash-separated and relative to the repository root.
-var allowedUnsandboxedGitTests = map[string]string{
-	"internal/gittest/gittest_test.go": "positive control: proves host hooks fire for an unisolated repository, " +
+var allowedUnsandboxedGitTests = map[string]map[int]string{
+	"internal/gittest/gittest_test.go": {75: "positive control: proves host hooks fire for an unisolated repository, " +
 		"without which the isolation assertion would pass vacuously",
-	"agm/cmd/agm/scan_test.go": "read-only capability probe: `git rev-parse --git-dir` decides whether to skip " +
+	},
+	"agm/cmd/agm/scan_test.go": {118: "read-only capability probe: `git rev-parse --git-dir` decides whether to skip " +
 		"tests that deliberately read the INVOKING repository. Sandboxing the probe would answer a " +
 		"question about a different repository than the one under test. It creates nothing and " +
-		"mutates nothing, so no hook can fire",
-	"internal/deploy/launchd_install_test.go": "read-only `git ls-files` inventories the repository under test; it creates " +
+		"mutates nothing, so no hook can fire", 234: "same read-only capability probe as line 118",
+	},
+	"internal/deploy/launchd_install_test.go": {526: "read-only `git ls-files` inventories the repository under test; it creates " +
 		"nothing and cannot execute a Git hook",
-	"pkg/instructionlint/instructionlint_test.go": "read-only `git rev-parse --show-toplevel` locates the checked-out fixture root; " +
+	},
+	"pkg/instructionlint/instructionlint_test.go": {1750: "read-only `git rev-parse --show-toplevel` locates the checked-out fixture root; " +
 		"it creates nothing and cannot execute a Git hook",
+	},
 }
 
 // TestNoUnsandboxedGitInTests is the ce-3knl.1 ratchet. A test that shells out
@@ -43,7 +47,7 @@ func TestNoUnsandboxedGitInTests(t *testing.T) {
 	root := repoRoot(t)
 
 	unexpected := map[string][]int{}
-	seenAllowed := map[string]bool{}
+	seenAllowed := map[string]map[int]bool{}
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -71,8 +75,17 @@ func TestNoUnsandboxedGitInTests(t *testing.T) {
 		if len(lines) == 0 {
 			return nil
 		}
-		if _, ok := allowedUnsandboxedGitTests[rel]; ok {
-			seenAllowed[rel] = true
+		if allowed, ok := allowedUnsandboxedGitTests[rel]; ok {
+			for _, line := range lines {
+				if _, allowed := allowed[line]; !allowed {
+					unexpected[rel] = append(unexpected[rel], line)
+					continue
+				}
+				if seenAllowed[rel] == nil {
+					seenAllowed[rel] = map[int]bool{}
+				}
+				seenAllowed[rel][line] = true
+			}
 			return nil
 		}
 		unexpected[rel] = lines
@@ -82,10 +95,12 @@ func TestNoUnsandboxedGitInTests(t *testing.T) {
 		t.Fatalf("walk %s: %v", root, err)
 	}
 
-	for rel := range allowedUnsandboxedGitTests {
-		if !seenAllowed[rel] {
-			t.Errorf("stale exemption: %s no longer builds a Git command directly — remove it from "+
-				"allowedUnsandboxedGitTests", rel)
+	for rel, allowed := range allowedUnsandboxedGitTests {
+		for line := range allowed {
+			if !seenAllowed[rel][line] {
+				t.Errorf("stale exemption: %s:%d no longer builds the reviewed Git command directly — remove it from "+
+					"allowedUnsandboxedGitTests", rel, line)
+			}
 		}
 	}
 
