@@ -132,18 +132,50 @@ resource "github_repository_ruleset" "branch_protection" {
 # .github/workflows/claude-code-review.yml (see ../../claude_review.tf, which
 # reads that file as the single source of truth) plus the OAuth secret it
 # needs. Not applied to dear-agent itself — it owns that file directly in git.
+#
+# The workflow never writes directly to the protected default branch. OpenTofu
+# updates a dedicated rollout branch and opens (or updates) a normal PR. A
+# maintainer must review and merge that PR under the repository's ruleset.
 # -----------------------------------------------------------------------------
+resource "github_branch" "claude_code_review_rollout" {
+  count = var.enable_claude_review ? 1 : 0
+
+  repository    = github_repository.this.name
+  branch        = var.claude_review_rollout_branch
+  source_branch = var.default_branch
+}
+
 resource "github_repository_file" "claude_code_review_workflow" {
   count = var.enable_claude_review ? 1 : 0
 
   repository          = github_repository.this.name
-  branch              = var.default_branch
+  branch              = github_branch.claude_code_review_rollout[0].branch
   file                = ".github/workflows/claude-code-review.yml"
   content             = var.claude_review_workflow_content
-  commit_message      = "chore(claude-review): sync claude-code-review.yml (IaC, dear-agent#infra)"
+  commit_message      = "chore(claude-review): sync claude-code-review.yml"
   commit_author       = "OpenTofu"
   commit_email        = "opentofu@users.noreply.github.com"
   overwrite_on_create = true
+
+  lifecycle {
+    precondition {
+      condition     = try(trimspace(var.claude_review_workflow_content) != "", false)
+      error_message = "claude_review_workflow_content must be non-empty when enable_claude_review is true."
+    }
+  }
+}
+
+resource "github_repository_pull_request" "claude_code_review_rollout" {
+  count = var.enable_claude_review ? 1 : 0
+
+  base_repository       = github_repository.this.name
+  base_ref              = var.default_branch
+  head_ref              = github_branch.claude_code_review_rollout[0].branch
+  title                 = "chore(claude-review): roll out Claude Code review workflow"
+  body                  = "Managed by OpenTofu. This rollout PR intentionally requires the repository's normal review and merge policy; do not bypass branch protection."
+  maintainer_can_modify = true
+
+  depends_on = [github_repository_file.claude_code_review_workflow]
 }
 
 resource "github_actions_secret" "claude_code_oauth_token" {
@@ -152,4 +184,11 @@ resource "github_actions_secret" "claude_code_oauth_token" {
   repository      = github_repository.this.name
   secret_name     = "CLAUDE_CODE_OAUTH_TOKEN"
   plaintext_value = var.claude_code_oauth_token
+
+  lifecycle {
+    precondition {
+      condition     = try(trimspace(var.claude_code_oauth_token) != "", false)
+      error_message = "claude_code_oauth_token must be non-empty when enable_claude_review is true."
+    }
+  }
 }

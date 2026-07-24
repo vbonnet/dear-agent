@@ -1,6 +1,6 @@
 # Automated PR code review — Claude + Codex setup
 
-**Status:** authoritative · **Last updated:** 2026-07-19
+**Status:** authoritative · **Last audited:** 2026-07-23
 
 Two independent, advisory (non-blocking) review bots comment on PRs across the
 fleet: Claude (via `anthropics/claude-code-action`) and OpenAI Codex cloud
@@ -12,7 +12,7 @@ everything else is codified (workflow files + OpenTofu).
 
 | Piece | Mechanism | Reproducible? |
 |---|---|---|
-| Claude review workflow file (`.github/workflows/claude-code-review.yml`) | Hand-committed in dear-agent (reference repo); pushed to other repos via `github_repository_file` in `infra/modules/managed-repo` | ✅ IaC (`tofu apply`) |
+| Claude review workflow file (`.github/workflows/claude-code-review.yml`) | Hand-committed in dear-agent (reference repo); staged on a dedicated rollout branch via `github_repository_file`, then opened as a normal PR by `infra/modules/managed-repo` | ✅ IaC stages it; a human merges the rollout PR |
 | `CLAUDE_CODE_OAUTH_TOKEN` repo secret | `github_actions_secret` in the same module, value from `TF_VAR_claude_code_oauth_token` | ✅ IaC, given the token value |
 | Claude GitHub App install | One-time `claude setup-token` (CLI) — this repo does NOT use the separate GitHub App flow; see below | ⚠️ Manual, one-time, per Anthropic account (not per repo) |
 | Codex cloud review enablement | Toggle at `chatgpt.com/codex/settings/code-review` per repo | ❌ Click-ops only — no public API/CLI as of 2026-07 |
@@ -68,7 +68,7 @@ everything else is codified (workflow files + OpenTofu).
    export TF_VAR_claude_code_oauth_token="<token from step 1>"
    tofu init -backend-config=backend.hcl
    tofu plan   # review before applying
-   tofu apply
+   tofu apply  # opens or updates a rollout PR; review and merge that PR normally
    ```
 
 ## What PR #944 got right, and what this change fixes
@@ -77,10 +77,10 @@ PR #944 added two workflows using the current (2026-07) recommended
 `claude_code_oauth_token` auth path and the official `code-review` plugin —
 that part didn't need replacing. What was missing:
 
-- **No fork/same-repo guard.** dear-agent is public; a `pull_request`-triggered
-  workflow from a fork still receives repo secrets (only the auto
-  `GITHUB_TOKEN` is read-only for forks). Added a guard so the review only
-  runs for same-repo branches, plus a draft-PR skip.
+- **No fork/same-repo guard.** dear-agent is public; GitHub does not pass
+  Actions secrets to a `pull_request` workflow from a fork. Added a guard so
+  the privileged review action only runs for same-repo branches, plus a
+  draft-PR skip.
 - **`claude.yml`'s `@claude` mention trigger had no author check** — any
   GitHub user commenting "@claude" on this public repo could trigger it
   (subscription cost + prompt-injection surface). Added an

@@ -16,12 +16,12 @@ concurrency:
 
 jobs:
   claude-review:
-    # Skip drafts (no point spending review budget on WIP) and fork PRs (a
-    # `pull_request`-triggered job from a fork still receives repo secrets —
-    # only the auto GITHUB_TOKEN is read-only — so this repo, being public,
-    # only runs the review for same-repo branches. Revisit if external
+    # Skip drafts (no point spending review budget on WIP) and fork PRs.
+    # GitHub does not pass Actions secrets to pull_request workflows from
+    # forks; the same-repository condition also avoids running a privileged
+    # review action against untrusted fork content. Revisit if external
     # contributions are ever welcomed; see docs/anthropics/claude-code-action
-    # security guidance on fork handling).
+    # security guidance on fork handling.
     if: |
       github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name == github.repository
@@ -49,4 +49,3 @@ jobs:
           prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
-

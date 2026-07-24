@@ -31,7 +31,7 @@ variable "required_checks" {
 }
 
 variable "default_branch" {
-  description = "Default branch name, used as the target branch for github_repository_file writes (e.g. the Claude review workflow)."
+  description = "Default branch name, used as the target branch for rollout pull requests (e.g. the Claude review workflow)."
   type        = string
   default     = "main"
 }
@@ -46,6 +46,12 @@ variable "claude_review_workflow_content" {
   description = "Raw content for .github/workflows/claude-code-review.yml. Required when enable_claude_review = true; ignored otherwise."
   type        = string
   default     = null
+}
+
+variable "claude_review_rollout_branch" {
+  description = "Unprotected branch OpenTofu uses to stage Claude review workflow updates before opening a PR to default_branch."
+  type        = string
+  default     = "automation/claude-code-review"
 }
 
 variable "claude_code_oauth_token" {
