@@ -235,8 +235,56 @@ func codexInitialComposerOwnsTail(lines []string) bool {
 }
 
 func isCodexGhostComposerLine(line string) bool {
-	idx := strings.Index(line, "›")
-	return idx >= 0 && IsDimOrGreySGR(line[idx:])
+	_, afterPrompt, found := strings.Cut(line, "›")
+	if !found {
+		return false
+	}
+	plainInput := strings.TrimSpace(stripANSI(afterPrompt))
+	if plainInput == "" || hasQueuedInput(plainInput) {
+		return false
+	}
+
+	dim, grey := false, false
+	for afterPrompt != "" {
+		afterPrompt = strings.TrimLeft(afterPrompt, " \t")
+		match := sgrParamRe.FindStringSubmatchIndex(afterPrompt)
+		if match == nil || match[0] != 0 {
+			return dim || grey
+		}
+		params := ""
+		if match[2] >= 0 {
+			params = afterPrompt[match[2]:match[3]]
+		}
+		dim, grey = updateCodexGhostStyle(strings.Split(params, ";"), dim, grey)
+		afterPrompt = afterPrompt[match[1]:]
+	}
+	return false
+}
+
+func updateCodexGhostStyle(params []string, dim, grey bool) (bool, bool) {
+	for i := 0; i < len(params); i++ {
+		switch params[i] {
+		case "", "0":
+			dim, grey = false, false
+		case "2":
+			dim = true
+		case "22":
+			dim = false
+		case "90":
+			grey = true
+		case "30", "31", "32", "33", "34", "35", "36", "37",
+			"39", "91", "92", "93", "94", "95", "96", "97":
+			grey = false
+		case "38":
+			var skip int
+			grey, skip = consumeExtendedColor(params, i)
+			i += skip
+		case "48":
+			_, skip := consumeExtendedColor(params, i)
+			i += skip
+		}
+	}
+	return dim, grey
 }
 
 // IsCodexIdle reports whether the Codex TUI composer is currently visible in

@@ -456,6 +456,9 @@ func WaitForPromptSimpleContext(parent context.Context, sessionName string, time
 		}
 
 		styledContent := string(output)
+		if IsCodexHookReviewRequired(styledContent) {
+			return CodexHookReviewError()
+		}
 		if IsCodexComposerReady(styledContent) {
 			debug.Log("✓ Codex composer detected (check #%d)", checkCount)
 			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
@@ -592,6 +595,9 @@ func WaitForPromptOrResumeFailureContext(parent context.Context, sessionName str
 			}
 		}
 
+		if IsCodexHookReviewRequired(styledContent) {
+			return CodexHookReviewError()
+		}
 		if IsCodexComposerReady(styledContent) {
 			debug.Log("✓ Codex composer detected (check #%d)", checkCount)
 			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {

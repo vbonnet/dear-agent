@@ -794,6 +794,21 @@ func TestDetector_CheckCanReceive(t *testing.T) {
 ›`,
 			expected: CanReceiveYes,
 		},
+		{
+			name:     "Codex styled ghost composer = YES",
+			output:   "\x1b[2m│ >_ \x1b[0;1mOpenAI Codex\x1b[0;2m (v0.145.0) │\x1b[0m\n\x1b[2m│ model: \x1b[0mgpt-5.5 high\x1b[2m \x1b[0m/model to change │\n\x1b[1m›\x1b[0m \x1b[2mRun /review on my current changes\x1b[0m\n\ngpt-5.5 high · ~/src/project",
+			expected: CanReceiveYes,
+		},
+		{
+			name:     "Codex styled paste chip = QUEUE",
+			output:   "\x1b[2m│ >_ \x1b[0;1mOpenAI Codex\x1b[0;2m (v0.145.0) │\x1b[0m\n\x1b[2m│ model: \x1b[0mgpt-5.5 high\x1b[2m \x1b[0m/model to change │\n\x1b[1m›\x1b[0m \x1b[2m[Pasted Content 2172 chars]\x1b[0m\n\ngpt-5.5 high · ~/src/project",
+			expected: CanReceiveQueue,
+		},
+		{
+			name:     "Codex human draft with later dim token = QUEUE",
+			output:   "\x1b[2m│ >_ \x1b[0;1mOpenAI Codex\x1b[0;2m (v0.145.0) │\x1b[0m\n\x1b[2m│ model: \x1b[0mgpt-5.5 high\x1b[2m \x1b[0m/model to change │\n\x1b[1m›\x1b[0m Review \x1b[2mthis\x1b[0m change\n\ngpt-5.5 high · ~/src/project",
+			expected: CanReceiveQueue,
+		},
 	}
 
 	for _, tt := range tests {

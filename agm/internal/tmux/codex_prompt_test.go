@@ -91,6 +91,22 @@ func TestIsCodexComposerReady(t *testing.T) {
 			expected: false,
 		},
 		{
+			name: "human draft with later dim token is not ready",
+			content: "\x1b[2m│ >_ \x1b[0;1mOpenAI Codex\x1b[0;2m (v0.145.0) │\x1b[0m\n" +
+				"\x1b[2m│ model: \x1b[0mgpt-5.5 high\x1b[2m \x1b[0m/model to change │\n" +
+				"\x1b[1m›\x1b[0m Review \x1b[2mthis\x1b[0m change\n\n" +
+				"  gpt-5.5 high · ~/src/project",
+			expected: false,
+		},
+		{
+			name: "styled initial paste chip is not ready",
+			content: "\x1b[2m│ >_ \x1b[0;1mOpenAI Codex\x1b[0;2m (v0.145.0) │\x1b[0m\n" +
+				"\x1b[2m│ model: \x1b[0mgpt-5.5 high\x1b[2m \x1b[0m/model to change │\n" +
+				"\x1b[1m›\x1b[0m \x1b[2m[Pasted Content 2172 chars]\x1b[0m\n\n" +
+				"  gpt-5.5 high · ~/src/project",
+			expected: false,
+		},
+		{
 			name:     "typed initial draft is not ready",
 			content:  "│ >_ OpenAI Codex (v0.141.0) │\n│ model: gpt-5.5 xhigh /model to change │\n╰──────────────────────────────╯\n› Continue the task",
 			expected: false,
@@ -686,11 +702,7 @@ sleep 30`, inputPath)
 func TestWaitForCodexPromptFailsFastForHookDashboardWithoutInput(t *testing.T) {
 	sessionName := "test-codex-hook-dashboard"
 	inputPath := fmt.Sprintf("%s/input-byte", t.TempDir())
-	script := fmt.Sprintf(`stty -echo -icanon min 1 time 0
-printf "OpenAI Codex (v0.145.0)\n/model to change\n›\ngpt-5.6 high · ~/src/project\n"
-printf "Hooks\nLifecycle hooks from config and enabled plugins.\n\n⚠ 11 hooks need review before they can run.\n\nEvent Installed Active Review Description\nPreToolUse 5 0 5 Before a tool exec\n\nPress \033[1mt\033[0m to trust all; enter to review hooks; esc to close\n"
-dd bs=1 count=1 of=%q 2>/dev/null
-sleep 30`, inputPath)
+	script := styledCodexHookDashboardScript(inputPath)
 	newCodexTestSession(t, sessionName, "sh", "-c", script)
 
 	start := time.Now()
@@ -702,7 +714,47 @@ sleep 30`, inputPath)
 	if elapsed > 3*time.Second {
 		t.Fatalf("hook dashboard failure took %v, want prompt failure", elapsed)
 	}
+	assertCodexFixtureReceivedNoInput(t, inputPath)
+}
 
+func TestGenericPromptWaitsFailFastForStyledCodexHookDashboard(t *testing.T) {
+	tests := []struct {
+		name string
+		wait func(context.Context, string, time.Duration) error
+	}{
+		{name: "simple", wait: WaitForPromptSimpleContext},
+		{name: "resume-aware", wait: WaitForPromptOrResumeFailureContext},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sessionName := "test-codex-generic-hook-" + tt.name
+			inputPath := fmt.Sprintf("%s/input-byte", t.TempDir())
+			newCodexTestSession(t, sessionName, "sh", "-c", styledCodexHookDashboardScript(inputPath))
+
+			start := time.Now()
+			err := tt.wait(t.Context(), sessionName, 10*time.Second)
+			if !errors.Is(err, ErrCodexHookReviewRequired) {
+				t.Fatalf("generic wait error = %v, want ErrCodexHookReviewRequired", err)
+			}
+			if elapsed := time.Since(start); elapsed > 3*time.Second {
+				t.Fatalf("hook dashboard failure took %v, want prompt failure", elapsed)
+			}
+			assertCodexFixtureReceivedNoInput(t, inputPath)
+		})
+	}
+}
+
+func styledCodexHookDashboardScript(inputPath string) string {
+	return fmt.Sprintf(`stty -echo -icanon min 1 time 0
+printf "OpenAI Codex (v0.145.0)\n/model to change\n›\ngpt-5.6 high · ~/src/project\n"
+printf "Hooks\nLifecycle hooks from config and enabled plugins.\n\n⚠ 11 hooks need review before they can run.\n\nEvent Installed Active Review Description\nPreToolUse 5 0 5 Before a tool exec\n\nPress \033[1mt\033[0m to trust all; enter to review hooks; esc to close\n"
+dd bs=1 count=1 of=%q 2>/dev/null
+sleep 30`, inputPath)
+}
+
+func assertCodexFixtureReceivedNoInput(t *testing.T, inputPath string) {
+	t.Helper()
 	time.Sleep(100 * time.Millisecond)
 	info, statErr := os.Stat(inputPath)
 	if errors.Is(statErr, os.ErrNotExist) {
