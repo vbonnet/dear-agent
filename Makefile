@@ -886,23 +886,23 @@ uninstall-disk-watchdog-launchagent:
 # is meant to detect — a compiled guard living in ~/go/bin would be deleted with
 # everything else.
 install-gobin-guard:
-	@mkdir -p $(HOME)/.local/state/dear-agent/bin
-	install -m 0755 scripts/gobin-guard.sh $(HOME)/.local/state/dear-agent/bin/gobin-guard.sh
-	@echo "Installed: $(HOME)/.local/state/dear-agent/bin/gobin-guard.sh"
+	@$(MAKE) build-dear-deploy
+	./bin/dear-deploy sync gobin-guard gobin-guard-audit
+	@echo "Installed: GOBIN guard and independent liveness auditor"
 
 install-gobin-guard-launchagent: install-gobin-guard
-	@mkdir -p $(HOME)/Library/LaunchAgents
-	@mkdir -p $(HOME)/.local/state/dear-agent
-	@sed 's|__HOME__|$(HOME)|g' deploy/launchd/com.dear-agent.gobin-guard.plist \
-		> $(HOME)/Library/LaunchAgents/com.dear-agent.gobin-guard.plist
-	@echo "Staged: $(HOME)/Library/LaunchAgents/com.dear-agent.gobin-guard.plist"
-	@echo "Activate it yourself (ask-gated host action):"
+	./bin/dear-deploy sync com.dear-agent.gobin-guard com.dear-agent.gobin-guard-audit
+	@echo "Staged: GOBIN guard and liveness-audit launch agents"
+	@echo "Activate them yourself (ask-gated host action):"
 	@echo "  launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/com.dear-agent.gobin-guard.plist"
+	@echo "  launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/com.dear-agent.gobin-guard-audit.plist"
 
 uninstall-gobin-guard-launchagent:
 	@launchctl bootout gui/$$(id -u)/com.dear-agent.gobin-guard 2>/dev/null || true
+	@launchctl bootout gui/$$(id -u)/com.dear-agent.gobin-guard-audit 2>/dev/null || true
 	@rm -f $(HOME)/Library/LaunchAgents/com.dear-agent.gobin-guard.plist
-	@echo "Removed: com.dear-agent.gobin-guard launch agent"
+	@rm -f $(HOME)/Library/LaunchAgents/com.dear-agent.gobin-guard-audit.plist
+	@echo "Removed: GOBIN guard launch agents"
 
 build-vroom-dispatch:
 	@echo "Building vroom-dispatch..."

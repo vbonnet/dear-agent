@@ -14,10 +14,12 @@ setup() {
     BATS_TEST_DIRNAME="$(cd "$(dirname "$BATS_TEST_FILENAME")" && pwd)"
     PROJECT_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
     SCRIPT="$PROJECT_ROOT/scripts/gobin-guard.sh"
+    AUDIT_SCRIPT="$PROJECT_ROOT/scripts/gobin-guard-audit.sh"
 
     TEST_DIR="$(mktemp -d)"
     export FAKE_HOME="$TEST_DIR/home"
     export TRAIL="$TEST_DIR/trail.jsonl"
+	export HEARTBEAT="$TEST_DIR/gobin-guard.heartbeat"
     mkdir -p "$FAKE_HOME"
 	MOCK_BIN="$TEST_DIR/mock-bin"
 	mkdir -p "$MOCK_BIN"
@@ -29,7 +31,7 @@ teardown() {
 
 # run_guard invokes the guard against the isolated fixture HOME/trail.
 run_guard() {
-    run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" "$SCRIPT" "$@"
+    run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" "$SCRIPT" "$@"
 }
 
 trail_lines() {
@@ -55,6 +57,22 @@ trail_lines() {
     run_guard --quiet
     assert_success
     assert_output ""
+	assert_file_exists "$HEARTBEAT"
+}
+
+@test "independent auditor alarms when guard heartbeat is missing" {
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" \
+		GOBIN_GUARD_NOTIFY=0 /bin/sh "$AUDIT_SCRIPT"
+	assert_failure 1
+	assert_output --partial "heartbeat is missing or invalid"
+	assert_file_contains "$TRAIL" '"kind":"watchdog.gobin_guard.stale"'
+}
+
+@test "independent auditor accepts a fresh guard heartbeat" {
+	date +%s >"$HEARTBEAT"
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" \
+		GOBIN_GUARD_NOTIFY=0 /bin/sh "$AUDIT_SCRIPT"
+	assert_success
 }
 
 @test "missing GOBIN directory: exit 1, escalates" {

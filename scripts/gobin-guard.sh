@@ -27,6 +27,7 @@
 #   GOBIN_GUARD_DIR      GOBIN directory to check   (default: $HOME/go/bin)
 #   GOBIN_GUARD_BINARY   sentinel executable name   (default: agm)
 #   GOBIN_GUARD_TRAIL    decision-trail JSONL path  (default: $HOME/.agm/vroom/trail.jsonl)
+#   GOBIN_GUARD_HEARTBEAT freshness record path     (default: $HOME/.local/state/dear-agent/gobin-guard.heartbeat)
 #   GOBIN_GUARD_ROLE     role recorded in the trail (default: watchdog)
 #   GOBIN_GUARD_NOTIFY   set to 0 to suppress the macOS notification (default: 1)
 #
@@ -75,7 +76,29 @@ gobin_dir="${GOBIN_GUARD_DIR:-$HOME_DIR/go/bin}"
 sentinel_name="${GOBIN_GUARD_BINARY:-agm}"
 sentinel_path="$gobin_dir/$sentinel_name"
 trail_path="${GOBIN_GUARD_TRAIL:-$HOME_DIR/.agm/vroom/trail.jsonl}"
+heartbeat_path="${GOBIN_GUARD_HEARTBEAT:-$HOME_DIR/.local/state/dear-agent/gobin-guard.heartbeat}"
 role="${GOBIN_GUARD_ROLE:-watchdog}"
+
+# A distinct launchd agent audits this bounded freshness record. Write it before
+# classification so a failing detector is distinguishable from an unloaded or
+# missing detector; use rename so the auditor never reads a partial timestamp.
+write_heartbeat() {
+	heartbeat_dir=$(dirname "$heartbeat_path")
+	if ! mkdir -p "$heartbeat_dir" 2>/dev/null; then
+		echo "$PROG: warning: cannot create heartbeat dir $heartbeat_dir" >&2
+		return 0
+	fi
+	tmp=$(mktemp "$heartbeat_dir/.gobin-guard.heartbeat.XXXXXX" 2>/dev/null) || {
+		echo "$PROG: warning: cannot create heartbeat" >&2
+		return 0
+	}
+	(umask 0177 && printf '%s\n' "$(date +%s)" >"$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$heartbeat_path") || {
+		rm -f "$tmp"
+		echo "$PROG: warning: cannot publish heartbeat" >&2
+	}
+}
+
+write_heartbeat
 
 # Classify the GOBIN state.
 status="ok"

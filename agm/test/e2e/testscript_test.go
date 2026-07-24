@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -116,11 +115,16 @@ func installedAGMPath() string {
 	return filepath.Join(home, "go", "bin", "agm")
 }
 
-// e2eBuildCacheKey returns a fingerprint of every Go build input in the AGM
-// module. Dependency-only keys allow source-only revisions to reuse stale code.
+// e2eBuildCacheKey returns a fingerprint of every tracked build input in the
+// AGM module. //go:embed accepts non-Go assets, so a Go-only key can reuse a
+// binary with stale hooks, schedules, schemas, migrations, or JavaScript.
 func e2eBuildCacheKey() string {
 	_, testFile, _, _ := runtime.Caller(0)
 	moduleRoot := filepath.Clean(filepath.Join(filepath.Dir(testFile), "../.."))
+	return e2eBuildCacheKeyForRoot(moduleRoot)
+}
+
+func e2eBuildCacheKeyForRoot(moduleRoot string) string {
 	var inputs []string
 	if err := filepath.WalkDir(moduleRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -133,13 +137,14 @@ func e2eBuildCacheKey() string {
 			}
 			return nil
 		}
-		if strings.HasSuffix(d.Name(), ".go") || d.Name() == "go.mod" || d.Name() == "go.sum" {
-			rel, relErr := filepath.Rel(moduleRoot, path)
-			if relErr != nil {
-				return relErr
-			}
-			inputs = append(inputs, rel)
+		if !d.Type().IsRegular() {
+			return nil
 		}
+		rel, relErr := filepath.Rel(moduleRoot, path)
+		if relErr != nil {
+			return relErr
+		}
+		inputs = append(inputs, rel)
 		return nil
 	}); err != nil {
 		return "unknown"
@@ -156,6 +161,27 @@ func e2eBuildCacheKey() string {
 		_, _ = io.WriteString(h, "\x00")
 	}
 	return fmt.Sprintf("%x", h.Sum(nil)[:8])
+}
+
+func TestE2EBuildCacheKeyIncludesEmbeddedAssets(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "hooks"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	asset := filepath.Join(root, "hooks", "guard.sh")
+	if err := os.WriteFile(asset, []byte("first"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before := e2eBuildCacheKeyForRoot(root)
+	if err := os.WriteFile(asset, []byte("second"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if after := e2eBuildCacheKeyForRoot(root); after == before {
+		t.Fatal("embedded asset change must invalidate the fallback AGM build key")
+	}
 }
 
 // e2eBuildCacheDir is a private, per-user fallback build cache. Its source key

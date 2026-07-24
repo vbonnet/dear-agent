@@ -21,6 +21,34 @@
 # ~/.config/claude-code/hooks/pretool-*).
 
 artifacts:
+  # --- GOBIN guard and independent liveness auditor (ce-24f1) -------------
+  # Both scripts intentionally live outside ~/go/bin so a GOBIN wipe cannot
+  # remove the detector or its observer. dear-deploy owns installation and
+  # drift auditing; launchd activation remains an explicit operator action.
+  - name: gobin-guard
+    source: scripts/gobin-guard.sh
+    deployed: ~/.local/state/dear-agent/bin/gobin-guard.sh
+    mode: "0755"
+
+  - name: gobin-guard-audit
+    source: scripts/gobin-guard-audit.sh
+    deployed: ~/.local/state/dear-agent/bin/gobin-guard-audit.sh
+    mode: "0755"
+
+  - name: com.dear-agent.gobin-guard
+    source: deploy/launchd/com.dear-agent.gobin-guard.plist
+    deployed: ~/Library/LaunchAgents/com.dear-agent.gobin-guard.plist
+    mode: "0644"
+    tokens:
+      __HOME__: ${HOME}
+
+  - name: com.dear-agent.gobin-guard-audit
+    source: deploy/launchd/com.dear-agent.gobin-guard-audit.plist
+    deployed: ~/Library/LaunchAgents/com.dear-agent.gobin-guard-audit.plist
+    mode: "0644"
+    tokens:
+      __HOME__: ${HOME}
+
   # --- launchd plists --------------------------------------------------------
   # The Ralph Wiggum persistent PR-merge loop (ADR-029). The plist is a template:
   # __HOME__ is rendered to the real home directory before it is installed, so the
