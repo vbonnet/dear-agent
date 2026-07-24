@@ -53,11 +53,16 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # NOTE: we deliberately do NOT check out the PR tree. The reviewer reads
-      # the pull request through the GitHub MCP server (API), the same way the
-      # sunset gemini-code-assist app did. Skipping checkout is the security
-      # control (see the trust note below): with no PR-controlled files on disk,
-      # there is no attacker `.gemini/` config to load or execute.
+      # Check out only the trusted base revision. The reviewer reads the PR
+      # diff through the GitHub MCP server; this checkout supplies canonical
+      # GEMINI.md/AGENTS.md instructions without putting PR-controlled files
+      # (including a malicious .gemini config) in the trusted workspace.
+      - name: Checkout trusted base instructions
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
 
       - name: Run Gemini PR review
         if: steps.gate.outputs.skip != 'true'
@@ -68,10 +73,11 @@ jobs:
           # code-review extension; with trust 'false' the install hangs on an
           # interactive confirmation until the job times out. The exfiltration
           # risk that trust guards against needs attacker-controlled files in
-          # the workspace — which we remove structurally by NOT checking out the
-          # PR tree (see above), and by gating this job to same-repo,
+          # the workspace — which we remove structurally by checking out only
+          # the trusted base revision (see above), and by gating this job to same-repo,
           # non-fork PRs only. Per the advisory this is the sanctioned
-          # trusted-input configuration. Keep 'true' AND keep checkout removed.
+          # trusted-input configuration. Keep 'true' AND the checkout pinned
+          # to the trusted base revision.
           GEMINI_CLI_TRUST_WORKSPACE: 'true'
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
