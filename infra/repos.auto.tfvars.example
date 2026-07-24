@@ -15,12 +15,22 @@ active_repos = {
     default_branch  = "main"
     # Exact GitHub Actions check-run names required on main.
     required_checks = ["Build & Test"]
+    # Installs the Claude Code review workflow through a normal rollout PR
+    # (advisory, never required). Reset this to false after that PR merges so
+    # its deleted rollout branch is not recreated. See claude_review.tf for
+    # the default non-PII rollout list.
+    enable_claude_review = true
+    claude_review_rollout = true
   }
   "example-private-repo" = {
     visibility     = "private"
     default_branch = "main"
     # Empty = branch protection applies but no CI gate (repo has no workflows).
     required_checks = []
+    # PII / private-research repos: leave this false (the default) — enabling
+    # ships code to Anthropic's API for review, a data-handling call a human
+    # must make explicitly. See claude_review.tf's PII list.
+    # enable_claude_review = false
   }
 }
 
