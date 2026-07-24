@@ -136,17 +136,6 @@ func requireComment(c config, body string) bool {
 	if err == nil {
 		return true
 	}
-	if c.isFork {
-		// Fork PRs receive a read-only GITHUB_TOKEN, so this comment can never
-		// succeed no matter how healthy the API is. Refusing here would make
-		// the documented fork fallback impossible to use at all — strictly
-		// worse than a missing comment. The `ai-review:override` label is
-		// itself an audited, human-applied record on the PR, and the run
-		// annotation below is durable in the check output, so both halves of
-		// the audit requirement are still met.
-		fmt.Printf("::warning::could not post the override audit comment on a fork run (%v); the 'ai-review:override' label on this PR is the audit record.\n", err)
-		return true
-	}
 	fmt.Printf("::error::could not record the override audit comment (%v); refusing to pass on an unrecorded override.\n", err)
 	return false
 }

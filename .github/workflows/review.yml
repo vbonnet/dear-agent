@@ -31,8 +31,6 @@ on:
     # gate rather than leave a stale pass on the current head SHA.
     types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled, edited]
     branches: [main]
-  merge_group:
-
 permissions:
   checks: write
   contents: read

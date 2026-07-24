@@ -30,8 +30,8 @@ CI check is a real merge gate rather than an advisory comment.
 
 ## Enforcement wiring
 
-- `.github/workflows/review.yml` invokes this command on every PR revision and
-  on `merge_group`; the job name `5-Dimension AI Review` is the required-check
+- `.github/workflows/review.yml` invokes this command from trusted
+  `pull_request_target` PR revisions; the job name `5-Dimension AI Review` is the required-check
   context.
 - `.github/rulesets/main.json` lists that context under
   `required_status_checks`.
