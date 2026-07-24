@@ -299,6 +299,7 @@ func TestSandboxGitWorktreeLifecycleIsIsolated(t *testing.T) {
 	repo := filepath.Join(base, "repo")
 	runSandboxTestGit(t, "init", "-q", "-b", "main", repo)
 	repo = canonicalSandboxTestPath(t, repo)
+	gittest.HardenRepo(t, repo)
 	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("sandbox test\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -291,11 +291,12 @@ func CommandContext(ctx context.Context, dir string, args ...string) *exec.Cmd {
 		}
 		env = append(env, kv)
 	}
-	cmd.Env = append(env,
+	env = append(env,
 		"GIT_CONFIG_GLOBAL="+os.DevNull,
 		"GIT_CONFIG_SYSTEM="+os.DevNull,
 		"GIT_CONFIG_NOSYSTEM=1",
 	)
+	cmd.Env = env
 	return cmd
 }
 

@@ -483,6 +483,7 @@ func BenchmarkRedirector_RedirectIfNeeded(b *testing.B) {
 	repoPath := filepath.Join(tmpDir, "repo")
 	os.Mkdir(repoPath, 0755)
 	gittest.Command(b, tmpDir, "init", repoPath).Run()
+	gittest.HardenRepo(b, repoPath)
 
 	readme := filepath.Join(repoPath, "README.md")
 	os.WriteFile(readme, []byte("bench"), 0644)
