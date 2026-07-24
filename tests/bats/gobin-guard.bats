@@ -66,6 +66,7 @@ trail_lines() {
 	assert_failure 1
 	assert_output --partial "heartbeat is missing or invalid"
 	assert_file_contains "$TRAIL" '"kind":"watchdog.gobin_guard.stale"'
+	assert_file_contains "$TRAIL" '"event_id":"gobin-guard-audit-'
 }
 
 @test "independent auditor accepts a fresh guard heartbeat" {

@@ -120,7 +120,9 @@ func installedAGMPath() string {
 // binary with stale hooks, schedules, schemas, migrations, or JavaScript.
 func e2eBuildCacheKey() string {
 	_, testFile, _, _ := runtime.Caller(0)
-	moduleRoot := filepath.Clean(filepath.Join(filepath.Dir(testFile), "../.."))
+	// The AGM command is built from agm/, but its Go module root is the
+	// repository root: root packages and go.mod/go.sum are build inputs too.
+	moduleRoot := filepath.Clean(filepath.Join(filepath.Dir(testFile), "../../.."))
 	key, err := e2eBuildCacheKeyForRoot(moduleRoot)
 	if err != nil {
 		// Never reuse a cache entry when the source fingerprint is incomplete.

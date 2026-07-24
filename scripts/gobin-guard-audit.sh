@@ -10,7 +10,8 @@ case "$last" in ''|*[!0-9]*) reason="heartbeat is missing or invalid: $heartbeat
 trail_dir=$(dirname "$trail")
 if mkdir -p "$trail_dir" 2>/dev/null; then
   (umask 0177 && touch "$trail" && chmod 600 "$trail") 2>/dev/null || true
-  printf '{"timestamp":"%s","role":"watchdog","kind":"watchdog.gobin_guard.stale","payload":{"heartbeat":"%s","reason":"%s"}}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$heartbeat" "$reason" >>"$trail" 2>/dev/null || true
+  event_id="gobin-guard-audit-$(date -u +%Y%m%d%H%M%S)-$$"
+  printf '{"event_id":"%s","timestamp":"%s","role":"watchdog","kind":"watchdog.gobin_guard.stale","payload":{"heartbeat":"%s","reason":"%s"}}\n' "$event_id" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$heartbeat" "$reason" >>"$trail" 2>/dev/null || true
 fi
 if [ "${GOBIN_GUARD_NOTIFY:-1}" = 1 ] && [ "$(uname -s)" = Darwin ] && command -v osascript >/dev/null 2>&1; then
   osascript -e 'display notification "The GOBIN detector has stopped reporting. See gobin-guard-audit.err.log." with title "DEAR Agent GOBIN guard stale"' >/dev/null 2>&1 || true
