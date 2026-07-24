@@ -438,7 +438,7 @@ func WaitForPromptSimpleContext(parent context.Context, sessionName string, time
 		// composers. Codex's stable readiness marker ("OpenAI Codex") can sit
 		// well above the footer line after previous prompts/responses.
 		cmdCtx, cmdCancel := context.WithTimeout(ctx, 5*time.Second)
-		output, err := exec.CommandContext(cmdCtx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-S", "-30").Output()
+		output, err := exec.CommandContext(cmdCtx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-e", "-S", "-30").Output()
 		cmdErr := cmdCtx.Err()
 		cmdCancel()
 		if cmdErr != nil {
@@ -455,7 +455,15 @@ func WaitForPromptSimpleContext(parent context.Context, sessionName string, time
 			continue
 		}
 
-		content := string(output)
+		styledContent := string(output)
+		if IsCodexComposerReady(styledContent) {
+			debug.Log("✓ Codex composer detected (check #%d)", checkCount)
+			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+				return err
+			}
+			return nil
+		}
+		content := stripANSI(styledContent)
 		if containsPiReadyPattern(content) {
 			debug.Log("✓ Managed Pi prompt detected (check #%d)", checkCount)
 			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
@@ -465,14 +473,8 @@ func WaitForPromptSimpleContext(parent context.Context, sessionName string, time
 		}
 		// Codex readiness is a multi-line contract: the initial header must be
 		// paired with its hint, and the post-turn cursor with its footer. Evaluate
-		// the captured pane before the legacy line-oriented harness checks.
-		if IsCodexComposerReady(content) {
-			debug.Log("✓ Codex composer detected (check #%d)", checkCount)
-			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
-				return err
-			}
-			return nil
-		}
+		// the styled pane before stripping terminal controls for legacy
+		// line-oriented harness checks.
 		lines := strings.Split(content, "\n")
 
 		// Check each line for any harness prompt pattern (Claude or Gemini)
@@ -569,7 +571,7 @@ func WaitForPromptOrResumeFailureContext(parent context.Context, sessionName str
 		// Capture the recent pane tail (from 10 lines into scrollback through
 		// the visible region) so a multi-line failure message - the error plus
 		// the returned shell prompt - is visible in a single check.
-		output, err := exec.CommandContext(ctx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-S", "-10").Output()
+		output, err := exec.CommandContext(ctx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-e", "-S", "-10").Output()
 		if err != nil {
 			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
 				continue
@@ -577,7 +579,8 @@ func WaitForPromptOrResumeFailureContext(parent context.Context, sessionName str
 			continue
 		}
 
-		content := string(output)
+		styledContent := string(output)
+		content := stripANSI(styledContent)
 		lines := strings.Split(content, "\n")
 
 		// Check for a fatal resume failure first - it is the more specific
@@ -589,7 +592,7 @@ func WaitForPromptOrResumeFailureContext(parent context.Context, sessionName str
 			}
 		}
 
-		if IsCodexComposerReady(content) {
+		if IsCodexComposerReady(styledContent) {
 			debug.Log("✓ Codex composer detected (check #%d)", checkCount)
 			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
 				return err
@@ -949,13 +952,14 @@ func WaitForGeminiPrompt(sessionName string, timeout time.Duration) error {
 // ANY supported harness (Claude, Gemini, OpenCode, Codex, AGY, or Pi). Used by SendMultiLinePromptSafe and
 // SendPromptLiteral which don't know the harness type but need to detect readiness.
 func containsAnyHarnessPromptPattern(content string) bool {
-	return containsAnyNonPiHarnessPromptPattern(content) || containsPiReadyPattern(content)
+	return containsAnyNonPiHarnessPromptPattern(content) || containsPiReadyPattern(stripANSI(content))
 }
 
 func containsAnyNonPiHarnessPromptPattern(content string) bool {
-	return containsClaudePromptPattern(content) || containsGeminiPromptPattern(content) ||
-		containsOpenCodePromptPattern(content) || IsCodexComposerReady(content) ||
-		containsAgyPromptPattern(content)
+	plainContent := stripANSI(content)
+	return containsClaudePromptPattern(plainContent) || containsGeminiPromptPattern(plainContent) ||
+		containsOpenCodePromptPattern(plainContent) || IsCodexComposerReady(content) ||
+		containsAgyPromptPattern(plainContent)
 }
 
 // containsGeminiPromptPattern checks if content contains any Gemini prompt pattern

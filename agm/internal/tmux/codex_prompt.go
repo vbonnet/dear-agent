@@ -237,7 +237,7 @@ func isCodexGhostComposerLine(line string) bool {
 // know the session is alive can treat that as "not idle".
 func IsCodexIdle(sessionName string) (bool, error) {
 	output, err := exec.Command("tmux", "-S", GetSocketPath(),
-		"capture-pane", "-t", NormalizeTmuxSessionName(sessionName), "-p").Output()
+		"capture-pane", "-t", NormalizeTmuxSessionName(sessionName), "-p", "-e").Output()
 	if err != nil {
 		return false, fmt.Errorf("capture-pane failed: %w", err)
 	}

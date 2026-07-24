@@ -450,7 +450,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the matching Codex saved session should be archived$`, matchingCodexSavedSessionShouldBeArchived)
 	ctx.Step(`^a stopped Codex CLI session without a tmux pane$`, aStoppedCodexCLISessionWithoutTmuxPane)
 	ctx.Step(`^AGM validates the Codex resume transaction$`, agmValidatesTheCodexResumeTransaction)
-	ctx.Step(`^Codex resume success should require process and composer readiness$`, codexResumeSuccessShouldRequireProcessAndComposerReadiness)
+	ctx.Step(`^Codex resume, state, and prompt waits should preserve process and styled composer readiness$`, codexResumeSuccessShouldRequireProcessAndComposerReadiness)
 	ctx.Step(`^a failed Codex resume should serialize concurrent attempts through every production entry point, release the session lock before attachment, preserve canonical tmux identity from stale full-session updates, reconcile ambiguous metadata commits, compensate owned provisional metadata before removing its creation-specific tmux identity even when tmux ID output is lost, and preserve tmux whenever metadata cleanup is unproven$`, aFailedCodexResumeShouldRemoveOnlyItsNewlyCreatedTmuxSession)
 	ctx.Step(`^authoritative session renames should serialize with cold resume, fence ambiguous storage writes, preserve both identity names from stale writers, preserve claimed tmux identity across lost replies and server restarts, reject stale identity revisions, and compensate tmux after storage conflicts$`, authoritativeSessionRenamesShouldRejectStaleIdentityRevisions)
 	ctx.Step(`^administrative hierarchy repairs should atomically link parents and inherited names through the observed identity revision$`, administrativeHierarchyRepairsShouldUseObservedIdentityRevision)
@@ -596,8 +596,8 @@ func codexResumeSuccessShouldRequireProcessAndComposerReadiness(ctx context.Cont
 	cmd := exec.CommandContext(
 		testCtx,
 		"go", "test",
-		"./agm/cmd/agm", "./agm/internal/tmux", "./agm/internal/state",
-		"-run", `^(TestWaitForResumedCodexRequiresProcessAndComposer|TestWaitForCodexPrompt(RejectsEchoedLaunchModel|AcceptsCurrentWelcomeGhostComposer)|TestIsCodexComposerReady|TestIsProcessReadyWithRuntimePreservesCancellation(Before|During)CodexFallback|TestDetector_CodexReadinessRequiresStructuredComposer)$`,
+		"./agm/cmd/agm", "./agm/internal/tmux", "./agm/internal/state", "./agm/internal/session", "./agm/internal/manager/tmuxbackend",
+		"-run", `^(TestWaitForResumedCodexRequiresProcessAndComposer|TestWaitForCodexPrompt(RejectsEchoedLaunchModel|AcceptsCurrentWelcomeGhostComposer)|TestIsCodex(ComposerReady|IdlePreservesCurrentWelcomeGhostStyle)|TestWaitForPrompt(Simple|OrResumeFailure)PreservesCurrentCodexWelcomeGhostStyle|TestSendMultiLinePromptSafePreservesCurrentCodexWelcomeGhostStyle|TestIsProcessReadyWithRuntimePreservesCancellation(Before|During)CodexFallback|TestDetector_CodexReadinessRequiresStructuredComposer|TestStateAndDeliveryPreserveCurrentCodexWelcomeGhostStyle|TestBackendStateAndDeliveryPreserveCurrentCodexWelcomeGhostStyle)$`,
 		"-count=1",
 	)
 	cmd.Dir = bddRepoRoot()

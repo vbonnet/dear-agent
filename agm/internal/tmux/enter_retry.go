@@ -31,7 +31,7 @@ func retryEnterAfterPaste(socketPath, normalizedName string, maxRetries int) err
 		time.Sleep(delay)
 
 		// Capture recent pane content to check if paste is stuck
-		cmd := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedName, "-p", "-S", "-3")
+		cmd := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedName, "-p", "-e", "-S", "-3")
 		output, err := cmd.Output()
 		if err != nil {
 			// Can't capture pane — nothing we can do, but don't fail the send.
@@ -68,19 +68,21 @@ func retryEnterAfterPaste(socketPath, normalizedName string, maxRetries int) err
 //  2. Content on the input line after the prompt character — text pasted but
 //     not submitted (only checked when prompt is visible)
 func isPasteStuck(paneContent string) bool {
+	plainContent := stripANSI(paneContent)
+
 	// Signal 1: Explicit paste indicator. Different harnesses render a queued
 	// paste differently — tmux/older CLIs show "[Pasted text", while codex
 	// >=0.144.1 collapses a large paste into a "[Pasted Content N chars]" chip.
 	// Missing the codex form was the ce-mjk9 root cause: the chip sat unsubmitted
 	// and the retry never fired because this check didn't recognise it.
-	if strings.Contains(paneContent, "[Pasted text") ||
-		strings.Contains(paneContent, "[Pasted Content") {
+	if strings.Contains(plainContent, "[Pasted text") ||
+		strings.Contains(plainContent, "[Pasted Content") {
 		return true
 	}
 
 	// Signal 2: Content sitting on the prompt input line (paste landed but Enter missed)
 	// Only meaningful if a prompt character is visible (session is at input)
-	if containsAnyHarnessPromptPattern(paneContent) && InputLineHasContent(paneContent) {
+	if containsAnyHarnessPromptPattern(paneContent) && InputLineHasContent(plainContent) {
 		return true
 	}
 

@@ -78,6 +78,26 @@ func TestDetector_CodexReadinessRequiresStructuredComposer(t *testing.T) {
 			wantReceive: CanReceiveYes,
 		},
 		{
+			name: "styled welcome suggestion is an empty composer",
+			output: "\x1b[2m│ >_ \x1b[0;1mOpenAI Codex\x1b[0;2m (v0.145.0) │\x1b[0m\n" +
+				"\x1b[2m│ model: \x1b[0mgpt-5.6 high\x1b[2m \x1b[0m/model to change │\n" +
+				"To get started, describe a task or try /review\n\n" +
+				"\x1b[1m›\x1b[0m \x1b[2mRun /review on my current changes\x1b[0m\n\n" +
+				"gpt-5.6 high · ~/src/project",
+			wantState:   StateReady,
+			wantReceive: CanReceiveYes,
+		},
+		{
+			name: "identical unstyled welcome text is a human draft",
+			output: "│ >_ OpenAI Codex (v0.145.0) │\n" +
+				"│ model: gpt-5.6 high /model to change │\n" +
+				"To get started, describe a task or try /review\n\n" +
+				"› Run /review on my current changes\n\n" +
+				"gpt-5.6 high · ~/src/project",
+			wantState:   StateUnknown,
+			wantReceive: CanReceiveQueue,
+		},
+		{
 			name:        "typed post-turn draft and footer are not ready",
 			output:      "› Continue the task\n\n  gpt-5.6 xhigh · ~/src/project",
 			wantState:   StateUnknown,

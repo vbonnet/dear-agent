@@ -63,10 +63,11 @@ func VerifyPromptDeliveryContext(ctx context.Context, sessionName, promptText st
 		if err := ctx.Err(); err != nil {
 			return PromptDeliveryResult{}, err
 		}
-		content, err := CapturePaneOutputContext(ctx, sessionName, 50)
+		styledContent, err := CapturePaneANSIOutputContext(ctx, sessionName, 50)
 		if err != nil {
 			return PromptDeliveryResult{}, fmt.Errorf("capture-pane failed during delivery verification: %w", err)
 		}
+		content := stripANSI(styledContent)
 
 		// Check 1: Is the session processing? (spinner visible = prompt was accepted)
 		if hasActiveSpinner(content) {
@@ -84,7 +85,7 @@ func VerifyPromptDeliveryContext(ctx context.Context, sessionName, promptText st
 
 		// Check 3: Has the prompt character disappeared? (session accepted input)
 		// If no harness prompt is visible, the session is processing something.
-		if !containsAnyHarnessPromptPattern(content) {
+		if !containsAnyHarnessPromptPattern(styledContent) {
 			debug.Log("✓ Delivery verified (attempt %d): prompt character gone (session processing)", attempt)
 			return PromptDeliveryResult{Delivered: true, Attempt: attempt, Method: "content_echo"}, nil
 		}

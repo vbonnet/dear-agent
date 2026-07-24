@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -28,6 +29,14 @@ func newCodexTestSession(t *testing.T, sessionName string, cmd ...string) string
 		exec.Command("tmux", "-S", socketPath, "kill-session", "-t", sessionName).Run()
 	})
 	return socketPath
+}
+
+func currentCodexWelcomeGhostScript() string {
+	return "printf '\\033[2m│ >_ \\033[0;1mOpenAI Codex\\033[0;2m (v0.145.0) │\\033[0m\\n" +
+		"\\033[2m│ model: \\033[0mgpt-5.6 high\\033[2m \\033[0m/model to change │\\n" +
+		"To get started, describe a task or try /review\\n\\n" +
+		"\\033[1m›\\033[0m \\033[2mRun /review on my current changes\\033[0m\\n\\n" +
+		"gpt-5.6 high · ~/src/project\\n'; sleep 30"
 }
 
 func TestIsCodexComposerReady(t *testing.T) {
@@ -364,6 +373,16 @@ func TestContainsAnyHarnessPromptPatternMatchesCodex(t *testing.T) {
 	if !containsAnyHarnessPromptPattern("│ >_ OpenAI Codex (v0.141.0) │\n│ /model to change │\n›") {
 		t.Error("containsAnyHarnessPromptPattern should match the Codex composer header")
 	}
+	styledGhost := "\x1b[2m│ >_ \x1b[0;1mOpenAI Codex\x1b[0;2m (v0.145.0) │\x1b[0m\n" +
+		"\x1b[2m│ model: \x1b[0mgpt-5.6 high\x1b[2m \x1b[0m/model to change │\n" +
+		"\x1b[1m›\x1b[0m \x1b[2mRun /review on my current changes\x1b[0m\n\n" +
+		"gpt-5.6 high · ~/src/project"
+	if !containsAnyHarnessPromptPattern(styledGhost) {
+		t.Error("containsAnyHarnessPromptPattern should preserve the styled Codex welcome suggestion")
+	}
+	if containsAnyHarnessPromptPattern(stripANSI(styledGhost)) {
+		t.Error("containsAnyHarnessPromptPattern should treat identical unstyled Codex text as a human draft")
+	}
 }
 
 // TestWaitForCodexPromptPolling verifies WaitForCodexPrompt detects the Codex
@@ -409,19 +428,13 @@ func TestGetPaneCommandsIncludesStartCommand(t *testing.T) {
 	}
 }
 
-// TestIsCodexIdleComposerVisible verifies IsCodexIdle reports true once the
-// Codex composer header is showing in the pane.
-func TestIsCodexIdleComposerVisible(t *testing.T) {
+// TestIsCodexIdlePreservesCurrentWelcomeGhostStyle verifies the live capture
+// keeps the style that distinguishes Codex's suggestion from a human draft.
+func TestIsCodexIdlePreservesCurrentWelcomeGhostStyle(t *testing.T) {
 	sessionName := "test-codex-idle-composer"
-	socketPath := newCodexTestSession(t, sessionName)
+	newCodexTestSession(t, sessionName, "sh", "-c", currentCodexWelcomeGhostScript())
 
-	// Render the Codex composer header into the pane.
-	sendCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "printf 'OpenAI Codex (v0.141.0)\\n/model to change\\n›\\n'; sleep 30", "Enter")
-	if err := sendCmd.Run(); err != nil {
-		t.Fatalf("Failed to send composer signal: %v", err)
-	}
-
-	// Poll briefly: the keystroke takes a moment to render in the pane.
+	// Poll briefly: the process takes a moment to render in the pane.
 	deadline := time.Now().Add(5 * time.Second)
 	var idle bool
 	for time.Now().Before(deadline) {
@@ -437,6 +450,50 @@ func TestIsCodexIdleComposerVisible(t *testing.T) {
 	}
 	if !idle {
 		t.Error("IsCodexIdle = false, want true when composer is visible")
+	}
+}
+
+func TestWaitForPromptSimplePreservesCurrentCodexWelcomeGhostStyle(t *testing.T) {
+	sessionName := "test-codex-simple-ghost"
+	newCodexTestSession(t, sessionName, "sh", "-c", currentCodexWelcomeGhostScript())
+
+	if err := WaitForPromptSimpleContext(t.Context(), sessionName, 3*time.Second); err != nil {
+		t.Fatalf("WaitForPromptSimpleContext() error = %v, want styled ghost composer readiness", err)
+	}
+}
+
+func TestWaitForPromptOrResumeFailurePreservesCurrentCodexWelcomeGhostStyle(t *testing.T) {
+	sessionName := "test-codex-resume-ghost"
+	newCodexTestSession(t, sessionName, "sh", "-c", currentCodexWelcomeGhostScript())
+
+	if err := WaitForPromptOrResumeFailureContext(t.Context(), sessionName, 3*time.Second); err != nil {
+		t.Fatalf("WaitForPromptOrResumeFailureContext() error = %v, want styled ghost composer readiness", err)
+	}
+}
+
+func TestSendMultiLinePromptSafePreservesCurrentCodexWelcomeGhostStyle(t *testing.T) {
+	sessionName := "test-codex-send-ghost"
+	const marker = "AGM-CODEX-GHOST-DELIVERY"
+	script := strings.TrimSuffix(currentCodexWelcomeGhostScript(), "sleep 30") +
+		"IFS= read -r line; printf '\\nreceived:%s\\n' \"$line\"; sleep 30"
+	newCodexTestSession(t, sessionName, "sh", "-c", script)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+	defer cancel()
+	if err := SendMultiLinePromptSafeContext(ctx, sessionName, marker, false); err != nil {
+		t.Fatalf("SendMultiLinePromptSafeContext() error = %v, want styled composer delivery", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		content, err := CapturePaneOutput(sessionName, 30)
+		if err == nil && strings.Contains(content, "received:"+marker) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("delivered marker did not reach fixture; capture error = %v; pane:\n%s", err, content)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
