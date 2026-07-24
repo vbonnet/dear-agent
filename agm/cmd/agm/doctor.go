@@ -129,6 +129,10 @@ Examples:
 		switch {
 		case orphanErr != nil:
 			ui.PrintWarning(fmt.Sprintf("Failed to check for orphaned tmux server: %v", orphanErr))
+			// The socket check is a safety gate: an inconclusive process scan
+			// cannot prove that no sessions are stranded, so it must not leave
+			// the overall diagnosis green.
+			allHealthy = false
 		case orphanedServer != nil:
 			ui.PrintError(
 				fmt.Errorf("tmux server running but unreachable: pid(s) %v", orphanedServer.PIDs),
