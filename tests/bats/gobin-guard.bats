@@ -19,6 +19,8 @@ setup() {
     export FAKE_HOME="$TEST_DIR/home"
     export TRAIL="$TEST_DIR/trail.jsonl"
     mkdir -p "$FAKE_HOME"
+	MOCK_BIN="$TEST_DIR/mock-bin"
+	mkdir -p "$MOCK_BIN"
 }
 
 teardown() {
@@ -119,4 +121,21 @@ trail_lines() {
     # Timestamp must end with Z (UTC).
     run grep '"timestamp":"[^"]*Z"' "$TRAIL"
     assert_success
+}
+
+@test "macOS launchd alarm posts an active notification" {
+	cat >"$MOCK_BIN/uname" <<'EOF'
+#!/bin/sh
+echo Darwin
+EOF
+	cat >"$MOCK_BIN/osascript" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"$NOTIFY_LOG"
+EOF
+	chmod +x "$MOCK_BIN/uname" "$MOCK_BIN/osascript"
+	export NOTIFY_LOG="$TEST_DIR/notifications.log"
+
+	run env PATH="$MOCK_BIN:$PATH" HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" "$SCRIPT" --quiet
+	assert_failure 1
+	assert_file_contains "$NOTIFY_LOG" 'DEAR Agent GOBIN alarm'
 }

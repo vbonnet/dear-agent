@@ -6,7 +6,8 @@
   Runs `gobin-guard.sh` every 60 seconds. Each tick verifies that ~/go/bin
   exists and that a sentinel binary inside it (agm) is executable. If the
   directory or sentinel has disappeared, it appends one watchdog.gobin.missing
-  record to ~/.agm/vroom/trail.jsonl and exits non-zero, turning "the whole
+  record to ~/.agm/vroom/trail.jsonl, posts a macOS notification, and exits
+  non-zero, turning "the whole
   GOBIN directory vanished" into a first-class, near-real-time SENSE condition
   instead of the reactive, per-binary launchd "No such file or directory"
   errors that were the only signal when ~/go/bin was wiped on 2026-07-15.

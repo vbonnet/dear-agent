@@ -11,8 +11,9 @@
 #   1. the GOBIN directory exists, and
 #   2. a sentinel binary inside it (agm, by default) is an executable file.
 # On failure it ESCALATEs by appending one watchdog.gobin.missing record to the
-# VROOM decision trail (the same JSONL the disk-watchdog and Overseer write to)
-# and printing to stderr, then exits non-zero.
+# VROOM decision trail (the same JSONL the disk-watchdog and Overseer write to),
+# prints to stderr, and posts a macOS notification from its launchd agent, then
+# exits non-zero.
 #
 # It is deliberately a dependency-free POSIX shell script installed OUTSIDE
 # ~/go/bin (see the launchd plist / Makefile install target): a compiled
@@ -27,6 +28,7 @@
 #   GOBIN_GUARD_BINARY   sentinel executable name   (default: agm)
 #   GOBIN_GUARD_TRAIL    decision-trail JSONL path  (default: $HOME/.agm/vroom/trail.jsonl)
 #   GOBIN_GUARD_ROLE     role recorded in the trail (default: watchdog)
+#   GOBIN_GUARD_NOTIFY   set to 0 to suppress the macOS notification (default: 1)
 #
 # Flags:
 #   --json     emit a machine-readable status object to stdout
@@ -134,6 +136,17 @@ escalate() {
 	fi
 }
 
+notify_operator() {
+	# The launchd agent runs on macOS. A durable trail is useful for audit, but
+	# a notification is the active observation loop: the owner sees a GOBIN wipe
+	# without waiting for another VROOM process or a manual log inspection.
+	[ "${GOBIN_GUARD_NOTIFY:-1}" = "1" ] || return 0
+	if [ "$(uname -s)" = "Darwin" ] && command -v osascript >/dev/null 2>&1; then
+		osascript -e 'display notification "The Go toolchain binary directory needs repair. See gobin-guard.err.log." with title "DEAR Agent GOBIN alarm"' >/dev/null 2>&1 || \
+			echo "$PROG: warning: macOS notification failed" >&2
+	fi
+}
+
 if [ "$status" = "ok" ]; then
 	if [ "$json_output" -eq 1 ]; then
 		printf '{"status":"ok","gobin_dir":"%s","sentinel":"%s"}\n' \
@@ -146,6 +159,7 @@ fi
 
 # Degraded: escalate then report.
 escalate
+notify_operator
 
 if [ "$json_output" -eq 1 ]; then
 	printf '{"status":"%s","gobin_dir":"%s","sentinel":"%s","reason":"%s"}\n' \
