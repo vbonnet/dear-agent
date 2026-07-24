@@ -142,15 +142,17 @@ real_path() {
 is_managed_repo() {
   _top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
   [ -n "${_top}" ] || return 1
-  _top="$(real_path "${_top}")"
-  [ -n "${_top}" ] || return 1
+	_top="$(real_path "${_top}")"
+	[ -n "${_top}" ] || return 1
+	# Every enabled stage below expands HOME. A caller-supplied root scopes the
+	# repository set but cannot make a sanitized hook environment safe.
+	[ -n "${HOME:-}" ] || return 1
 
 	_roots="${DEAR_AGENT_MANAGED_REPO_ROOTS:-}"
 	if [ -z "${_roots}" ]; then
 		# A globally installed hook can run in a sanitized environment. Without
 		# HOME there is no safe default managed-root set, so leave the checkout
 		# alone rather than failing under set -u.
-		[ -n "${HOME:-}" ] || return 1
 		_roots="${HOME}/src:${HOME}/worktrees"
 	fi
   _rest="${_roots}"

@@ -233,6 +233,17 @@ func TestPostMerge_UnsetHome_UnmanagedRepo_NoOp(t *testing.T) {
 	}
 }
 
+func TestPostMerge_UnsetHome_ExplicitManagedRoot_NoOp(t *testing.T) {
+	repo := newRepo(t)
+	sentinel := sentinelPath(t)
+	agmDir := stubAGM(t, sentinel)
+	runHookUnscoped(t, repo, agmDir,
+		"HOME=", "DEAR_AGENT_MANAGED_REPO_ROOTS="+repo)
+	if swept(t, sentinel) {
+		t.Fatal("sweep ran when HOME was unavailable despite an explicit managed root")
+	}
+}
+
 // A repository nested under a managed root is managed. ~/worktrees/<repo>/<wt>
 // is the normal shape, so the gate must match by path prefix, not equality.
 func TestPostMerge_NestedUnderManagedRoot_Sweeps(t *testing.T) {
