@@ -15,6 +15,7 @@
 package gittest
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -272,6 +273,31 @@ func HardenRepo(t testing.TB, dir string) { t.Helper(); Default(t).HardenRepo(t,
 // NewRepo initializes a sandboxed repository in a fresh temporary directory
 // using t's default sandbox.
 func NewRepo(t testing.TB) string { t.Helper(); return Default(t).NewRepo(t) }
+
+// CommandContext returns a hermetic Git command for test helpers that cannot
+// receive a testing.TB (for example, BDD step implementations).  The command
+// cannot inherit the developer's Git configuration or hooks.  Callers retain
+// ownership of the context and of any command-specific process handling.
+func CommandContext(ctx context.Context, dir string, args ...string) *exec.Cmd {
+	full := make([]string, 0, len(args)+2)
+	full = append(full, "-c", "core.hooksPath="+os.DevNull)
+	full = append(full, args...)
+	cmd := exec.CommandContext(ctx, "git", full...)
+	cmd.Dir = dir
+	env := make([]string, 0, len(os.Environ())+3)
+	for _, kv := range os.Environ() {
+		if hasAnyPrefix(kv, dropEnvPrefixes) {
+			continue
+		}
+		env = append(env, kv)
+	}
+	cmd.Env = append(env,
+		"GIT_CONFIG_GLOBAL="+os.DevNull,
+		"GIT_CONFIG_SYSTEM="+os.DevNull,
+		"GIT_CONFIG_NOSYSTEM=1",
+	)
+	return cmd
+}
 
 func hasAnyPrefix(s string, prefixes []string) bool {
 	for _, p := range prefixes {

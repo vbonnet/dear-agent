@@ -17,6 +17,7 @@ import (
 
 	"github.com/cucumber/godog"
 	"github.com/vbonnet/dear-agent/agm/internal/procguard"
+	"github.com/vbonnet/dear-agent/internal/gittest"
 	"github.com/vbonnet/dear-agent/internal/safepr"
 	wayfindersandbox "github.com/vbonnet/dear-agent/wayfinder/pkg/sandbox"
 )
@@ -472,7 +473,7 @@ func canonicalSafePRBDDPath(path string) string {
 func runSafePRBDDGit(parent context.Context, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := gittest.CommandContext(ctx, "", args...)
 	cmd.SysProcAttr = procguard.ProcessGroupAttr()
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {

@@ -59,14 +59,14 @@ func TestNoUnsandboxedGitInTests(t *testing.T) {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(d.Name(), "_test.go") {
-			return nil
-		}
 		rel, relErr := filepath.Rel(root, path)
 		if relErr != nil {
 			return relErr
 		}
 		rel = filepath.ToSlash(rel)
+		if !strings.HasSuffix(d.Name(), "_test.go") && !isBDDStepSource(rel) {
+			return nil
+		}
 
 		lines, scanErr := gitCommandLines(path)
 		if scanErr != nil {
@@ -242,10 +242,14 @@ func TestGit(t *testing.T) { run(t, "git", "init") }
 
 func skipDir(name string) bool {
 	switch name {
-	case ".git", "node_modules", "vendor", "testdata", "build", "dist":
+	case ".git", ".worktrees", "node_modules", "vendor", "testdata", "build", "dist":
 		return true
 	}
 	return false
+}
+
+func isBDDStepSource(rel string) bool {
+	return strings.HasPrefix(rel, "agm/test/bdd/steps/") && strings.HasSuffix(rel, ".go")
 }
 
 // repoRoot walks up from the test's working directory to the module root.
