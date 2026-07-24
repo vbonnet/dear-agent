@@ -126,6 +126,7 @@ path_within() {
     "$2") return 0 ;;
     "$2"/*) return 0 ;;
   esac
+  [ "$2" = / ] && case "$1" in /*) return 0 ;; esac
   return 1
 }
 

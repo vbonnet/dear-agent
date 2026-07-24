@@ -246,6 +246,16 @@ func TestPostMerge_NestedUnderManagedRoot_Sweeps(t *testing.T) {
 	}
 }
 
+func TestPostMerge_FilesystemRootManaged_Sweeps(t *testing.T) {
+	repo := newRepo(t)
+	sentinel := sentinelPath(t)
+	agmDir := stubAGM(t, sentinel)
+	runHookUnscoped(t, repo, agmDir, "DEAR_AGENT_MANAGED_REPO_ROOTS=/")
+	if !swept(t, sentinel) {
+		t.Fatal("a repository beneath the filesystem root must be managed when / is configured")
+	}
+}
+
 // A root that merely shares a textual prefix with the repo path is not a
 // parent of it: ~/src must not manage a repository in ~/src-scratch.
 func TestPostMerge_SiblingPrefixRoot_NoOp(t *testing.T) {
