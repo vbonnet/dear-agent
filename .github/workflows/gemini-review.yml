@@ -53,25 +53,32 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Checkout repository
+      # Check out only the trusted base revision. The reviewer reads the PR
+      # diff through the GitHub MCP server; this checkout supplies canonical
+      # GEMINI.md/AGENTS.md instructions without putting PR-controlled files
+      # (including a malicious .gemini config) in the trusted workspace.
+      - name: Checkout trusted base instructions
         if: steps.gate.outputs.skip != 'true'
         uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
 
       - name: Run Gemini PR review
         if: steps.gate.outputs.skip != 'true'
         uses: google-github-actions/run-gemini-cli@v0
         env:
-          # SECURITY: must stay 'false'. The checked-out tree is the PR author's
-          # merge result, so a PR could add a project `.gemini/settings.json`
-          # declaring a malicious MCP server. Trusting the workspace would let
-          # Gemini CLI launch that command with GEMINI_API_KEY and the
-          # write-scoped GITHUB_TOKEN in scope — a secret-exfiltration path.
-          # With trust off, only the inline `settings:` and pinned `extensions:`
-          # below (both workflow-controlled) are honored; PR-provided config is
-          # ignored. Do not flip this to 'true'.
-          GEMINI_CLI_TRUST_WORKSPACE: 'false'
+          # SECURITY / trust model — read before editing (GHSA-wpqr-6v78-jr5g):
+          # Headless Gemini CLI REQUIRES a trusted workspace to install the
+          # code-review extension; with trust 'false' the install hangs on an
+          # interactive confirmation until the job times out. The exfiltration
+          # risk that trust guards against needs attacker-controlled files in
+          # the workspace — which we remove structurally by checking out only
+          # the trusted base revision (see above), and by gating this job to same-repo,
+          # non-fork PRs only. Per the advisory this is the sanctioned
+          # trusted-input configuration. Keep 'true' AND the checkout pinned
+          # to the trusted base revision.
+          GEMINI_CLI_TRUST_WORKSPACE: 'true'
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         with:
