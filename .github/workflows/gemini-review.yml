@@ -15,12 +15,14 @@ name: Gemini PR Review
 #   `gemini-2.5-flash` for the most generous free-tier limits, or
 #   `gemini-2.5-pro` for the strongest review). Unset → the action's default.
 #
-# The job no-ops cleanly until GEMINI_API_KEY is present, and skips PRs from
-# forks (which have no access to repo secrets), mirroring review.yml.
+# The job no-ops cleanly until GEMINI_API_KEY is present, skips PRs from forks
+# (which have no access to repo secrets), and skips drafts until GitHub emits
+# the ready_for_review event. The retired Code Assist configuration is not an
+# input to this workflow; the review policy below is its single owner.
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
   group: gemini-review-${{ github.event.pull_request.number }}
@@ -36,8 +38,8 @@ jobs:
     name: Gemini Review
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Skip forks — they can't read repo secrets, so the review would fail anyway.
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Forks cannot read repository secrets; defer drafts until ready_for_review.
+    if: github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft
     steps:
       - name: Gate on secret presence
         id: gate
@@ -94,4 +96,10 @@ jobs:
             [
               "https://github.com/gemini-cli-extensions/code-review"
             ]
-          prompt: '/pr-code-review'
+          prompt: |-
+            /pr-code-review
+
+            Repository review policy:
+            - Report only medium- or high-severity actionable findings.
+            - Do not review generated protobufs, generated Go files, mocks,
+              testdata, vendored files, lockfiles, or minified JavaScript.
