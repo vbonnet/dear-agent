@@ -207,6 +207,10 @@ func TestE2EBuildCacheKeyRejectsUnreadableRoot(t *testing.T) {
 // e2eBuildCacheDir is a private, per-user fallback build cache. Its source key
 // permits sharing only by subprocesses that build the same AGM source.
 func e2eBuildCacheDir() string {
+	cacheHome := os.Getenv("REAL_HOME")
+	if cacheHome != "" {
+		return filepath.Join(cacheHome, ".cache", "dear-agent", "e2e", "agm-"+e2eBuildCacheKey())
+	}
 	cacheRoot, err := os.UserCacheDir()
 	if err != nil || cacheRoot == "" {
 		cacheRoot = filepath.Join(os.Getenv("HOME"), ".cache")

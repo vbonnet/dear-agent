@@ -77,6 +77,7 @@ sentinel_name="${GOBIN_GUARD_BINARY:-agm}"
 sentinel_path="$gobin_dir/$sentinel_name"
 trail_path="${GOBIN_GUARD_TRAIL:-$HOME_DIR/.agm/vroom/trail.jsonl}"
 heartbeat_path="${GOBIN_GUARD_HEARTBEAT:-$HOME_DIR/.local/state/dear-agent/gobin-guard.heartbeat}"
+alarm_path="${GOBIN_GUARD_ALARM_STATE:-$HOME_DIR/.local/state/dear-agent/gobin-guard.alarm}"
 role="${GOBIN_GUARD_ROLE:-watchdog}"
 
 # A distinct launchd agent audits this bounded freshness record. Write it before
@@ -171,6 +172,7 @@ notify_operator() {
 }
 
 if [ "$status" = "ok" ]; then
+	rm -f "$alarm_path" 2>/dev/null || true
 	if [ "$json_output" -eq 1 ]; then
 		printf '{"status":"ok","gobin_dir":"%s","sentinel":"%s"}\n' \
 			"$(json_escape "$gobin_dir")" "$(json_escape "$sentinel_path")"
@@ -180,9 +182,14 @@ if [ "$status" = "ok" ]; then
 	exit 0
 fi
 
-# Degraded: escalate then report.
-escalate
-notify_operator
+# Degraded: report only the healthy-to-degraded transition. A missing GOBIN
+# can persist for hours; repeating notifications and trail entries each tick
+# obscures the original event rather than improving observability.
+if [ ! -e "$alarm_path" ]; then
+	(umask 0177 && mkdir -p "$(dirname "$alarm_path")" && : >"$alarm_path") 2>/dev/null || true
+	escalate
+	notify_operator
+fi
 
 if [ "$json_output" -eq 1 ]; then
 	printf '{"status":"%s","gobin_dir":"%s","sentinel":"%s","reason":"%s"}\n' \
