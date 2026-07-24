@@ -132,14 +132,34 @@ func FindServerPIDs(socketPath string) ([]int, error) {
 		if len(argv) == 0 || !isTmuxCommand(argv[0]) {
 			continue
 		}
-		for i := 0; i < len(argv)-1; i++ {
-			if argv[i] == "-S" && argv[i+1] == socketPath {
-				pids = append(pids, pid)
-				break
-			}
+		if tmuxServerOwnsSocket(argv, socketPath) {
+			pids = append(pids, pid)
 		}
 	}
 	return pids, nil
+}
+
+// tmuxServerOwnsSocket excludes durable client processes from the orphaned
+// server proof. In particular, `tmux -S <socket> attach-session` can stay
+// attached after an unlink; it is a route to recover work, not the server that
+// owns the listening socket and must never be included in kill advice.
+func tmuxServerOwnsSocket(argv []string, socketPath string) bool {
+	matchedSocket := false
+	for i := 0; i < len(argv)-1; i++ {
+		if argv[i] == "-S" && argv[i+1] == socketPath {
+			matchedSocket = true
+			break
+		}
+	}
+	if !matchedSocket {
+		return false
+	}
+	for _, arg := range argv[1:] {
+		if arg == "attach" || arg == "attach-session" {
+			return false
+		}
+	}
+	return true
 }
 
 func processExited(err error) bool {

@@ -194,6 +194,13 @@ func TestProcessExited(t *testing.T) {
 	assert.False(t, processExited(errors.New("permission denied")))
 }
 
+func TestTmuxServerOwnsSocket_ExcludesAttachedClient(t *testing.T) {
+	path := "/tmp/agm.sock"
+	assert.True(t, tmuxServerOwnsSocket([]string{"tmux", "-S", path, "server"}, path))
+	assert.False(t, tmuxServerOwnsSocket([]string{"tmux", "-S", path, "attach-session", "-t", "work"}, path))
+	assert.False(t, tmuxServerOwnsSocket([]string{"tmux", "-S", path + ".bak", "server"}, path))
+}
+
 // TestFindServerPIDs_RealServer proves the process scan against a real tmux
 // server, and — critically — that it still finds the server after the socket
 // file has been unlinked. That is the state no socket-based probe can see.
