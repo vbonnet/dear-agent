@@ -37,7 +37,13 @@ variable "default_branch" {
 }
 
 variable "enable_claude_review" {
-  description = "Install the Claude Code PR-review workflow + OAuth secret on this repo. Advisory-only review; never wired into required_checks."
+  description = "Install the Claude Code OAuth secret on this repo. Set claude_review_rollout temporarily to stage the workflow through a PR. Advisory-only review; never wired into required_checks."
+  type        = bool
+  default     = false
+}
+
+variable "claude_review_rollout" {
+  description = "Transiently stage the Claude review workflow on a rollout branch and open its PR. Set false after that PR merges so GitHub's deleted head branch is not recreated."
   type        = bool
   default     = false
 }

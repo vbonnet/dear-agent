@@ -23,6 +23,7 @@ module "managed_repos" {
   default_branch                 = try(each.value.default_branch, "main")
   required_checks                = try(each.value.required_checks, [])
   enable_claude_review           = try(each.value.enable_claude_review, false)
+  claude_review_rollout          = try(each.value.claude_review_rollout, false)
   claude_review_workflow_content = local.claude_review_workflow_content
   claude_code_oauth_token        = var.claude_code_oauth_token
 

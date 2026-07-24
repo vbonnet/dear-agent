@@ -17,7 +17,7 @@ everything else is codified (workflow files + OpenTofu).
 | Claude GitHub App install | One-time `claude setup-token` (CLI) — this repo does NOT use the separate GitHub App flow; see below | ⚠️ Manual, one-time, per Anthropic account (not per repo) |
 | Codex cloud review enablement | Toggle at `chatgpt.com/codex/settings/code-review` per repo | ❌ Click-ops only — no public API/CLI as of 2026-07 |
 | Codex review guidelines | Optional `## Review guidelines` section in the repo's `AGENTS.md` | ✅ Just a file edit, but repo-owned content — not something this infra should overwrite |
-| Which repos get Claude review | `enable_claude_review = true` per repo in `infra/repos.auto.tfvars` | ✅ IaC |
+| Which repos get Claude review | `enable_claude_review = true` per repo in `infra/repos.auto.tfvars`; set `claude_review_rollout = true` only while staging its workflow PR | ✅ IaC |
 | Branch protection / required checks | `infra/modules/managed-repo` ruleset | ✅ IaC (already existed; deliberately NOT extended to include either review bot) |
 
 ## One-time manual steps (do these once, in order)
@@ -70,6 +70,10 @@ everything else is codified (workflow files + OpenTofu).
    tofu plan   # review before applying
    tofu apply  # opens or updates a rollout PR; review and merge that PR normally
    ```
+   After the rollout PR merges, set `claude_review_rollout = false` and apply
+   again. GitHub deletes merged PR branches, so this removes the transient
+   branch/PR resources from Terraform state without recreating them; the secret
+   remains managed by `enable_claude_review = true`.
 
 ## What PR #944 got right, and what this change fixes
 

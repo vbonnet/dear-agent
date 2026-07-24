@@ -138,7 +138,7 @@ resource "github_repository_ruleset" "branch_protection" {
 # maintainer must review and merge that PR under the repository's ruleset.
 # -----------------------------------------------------------------------------
 resource "github_branch" "claude_code_review_rollout" {
-  count = var.enable_claude_review ? 1 : 0
+  count = var.enable_claude_review && var.claude_review_rollout ? 1 : 0
 
   repository    = github_repository.this.name
   branch        = var.claude_review_rollout_branch
@@ -146,7 +146,7 @@ resource "github_branch" "claude_code_review_rollout" {
 }
 
 resource "github_repository_file" "claude_code_review_workflow" {
-  count = var.enable_claude_review ? 1 : 0
+  count = var.enable_claude_review && var.claude_review_rollout ? 1 : 0
 
   repository          = github_repository.this.name
   branch              = github_branch.claude_code_review_rollout[0].branch
@@ -166,7 +166,7 @@ resource "github_repository_file" "claude_code_review_workflow" {
 }
 
 resource "github_repository_pull_request" "claude_code_review_rollout" {
-  count = var.enable_claude_review ? 1 : 0
+  count = var.enable_claude_review && var.claude_review_rollout ? 1 : 0
 
   base_repository       = github_repository.this.name
   base_ref              = var.default_branch

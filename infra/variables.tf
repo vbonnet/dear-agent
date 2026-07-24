@@ -26,13 +26,13 @@ variable "active_repos" {
     visibility      = string
     default_branch  = optional(string, "main")
     required_checks = optional(list(string), [])
-    # Installs .github/workflows/claude-code-review.yml (content sourced from
-    # dear-agent's own hand-maintained copy, the reference implementation —
-    # see claude_review.tf) plus the CLAUDE_CODE_OAUTH_TOKEN secret. Advisory
-    # review only; never added to required_checks. dear-agent itself is
-    # deliberately excluded from this flag (see claude_review.tf) since it
-    # hand-maintains its own workflow files as the source of truth.
-    enable_claude_review = optional(bool, false)
+    # Installs the CLAUDE_CODE_OAUTH_TOKEN secret. Set claude_review_rollout
+    # temporarily to stage the hand-maintained workflow through a normal PR;
+    # reset it after merge so GitHub's deleted rollout branch is not recreated.
+    # Advisory review only; never added to required_checks. dear-agent itself
+    # is deliberately excluded since it hand-maintains its workflow files.
+    enable_claude_review  = optional(bool, false)
+    claude_review_rollout = optional(bool, false)
   }))
 }
 

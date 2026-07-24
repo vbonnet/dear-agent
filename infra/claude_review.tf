@@ -5,9 +5,11 @@
 # .github/workflows/claude-code-review.yml directly in git (see that file for
 # the actual trigger/permissions/action config). This file reads that same
 # content and republishes it, byte-for-byte, to every OTHER repo that opts in
-# via `enable_claude_review = true` in its infra/repos.auto.tfvars entry — one
+# via `enable_claude_review = true` plus a temporary
+# `claude_review_rollout = true` in its infra/repos.auto.tfvars entry — one
 # source of truth, no drift between "the repo everyone copy-pastes from" and
-# what's actually deployed elsewhere.
+# what's actually deployed elsewhere. Reset the rollout flag after its PR
+# merges so Terraform does not recreate GitHub's deleted head branch.
 #
 # dear-agent is deliberately NOT in this fan-out (see modules/managed-repo's
 # claude_code_review_workflow resource, applied per repo via for_each over
