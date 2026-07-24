@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vbonnet/dear-agent/internal/gittest"
 	"github.com/vbonnet/dear-agent/internal/sandbox"
 )
 
@@ -527,13 +528,7 @@ func TestIsClonefileError(t *testing.T) {
 
 func runAPFSGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
-	}
-	return string(output)
+	return gittest.Run(t, dir, args...)
 }
 
 // contains checks if a string contains a substring.

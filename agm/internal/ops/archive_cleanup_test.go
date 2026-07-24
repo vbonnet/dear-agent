@@ -413,7 +413,7 @@ func TestCleanupAfterArchive_PreservesPrimaryCheckout(t *testing.T) {
 	if _, err := os.Stat(repoDir); err != nil {
 		t.Fatalf("primary checkout was not preserved: %v", err)
 	}
-	cmd := exec.Command("git", "-C", repoDir, "branch", "--list", "primary-session")
+	cmd := gittest.Command(t, repoDir, "branch", "--list", "primary-session")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("list preserved session-named branch: %v\n%s", err, output)
@@ -441,7 +441,7 @@ func TestCleanupAfterArchive_UsesContextProjectWhenWorkingDirectoryMissing(t *te
 	if !result.PrimaryWorktreeKept || result.WorktreesRemoved != 0 || result.BranchDeleted {
 		t.Fatalf("unsafe context-project cleanup result = %+v", result)
 	}
-	cmd := exec.Command("git", "-C", repoDir, "branch", "--list", "context-session")
+	cmd := gittest.Command(t, repoDir, "branch", "--list", "context-session")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatal(err)
@@ -471,7 +471,7 @@ func TestCleanupAfterArchive_PreservesBranchNotOwnedByRemovedWorktree(t *testing
 	if result.WorktreesRemoved != 1 || result.BranchDeleted {
 		t.Fatalf("mismatched ownership cleanup result = %+v", result)
 	}
-	cmd := exec.Command("git", "-C", repoDir, "branch", "--list", "session-name")
+	cmd := gittest.Command(t, repoDir, "branch", "--list", "session-name")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatal(err)
@@ -499,7 +499,7 @@ func TestCleanupAfterArchive_PreservesBranchWhenWorktreeCannotBeClassified(t *te
 	if result.WorktreesRemoved != 0 || result.BranchDeleted {
 		t.Fatalf("unsafe cleanup result = %+v, want worktree and branch preserved", result)
 	}
-	cmd := exec.Command("git", "-C", repoDir, "branch", "--list", "unclassified-session")
+	cmd := gittest.Command(t, repoDir, "branch", "--list", "unclassified-session")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatal(err)

@@ -122,7 +122,7 @@ func TestIsGitWorktree(t *testing.T) {
 			name: "bare repository",
 			setup: func() string {
 				dir := t.TempDir()
-				cmd := exec.Command("git", "init", "--bare", dir)
+				cmd := gittest.Command(t, "", "init", "--bare", dir)
 				if err := cmd.Run(); err != nil {
 					t.Fatalf("git init --bare: %v", err)
 				}

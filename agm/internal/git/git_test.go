@@ -392,9 +392,8 @@ func TestFindGitRoot(t *testing.T) {
 
 func TestWorktreeRootResolvesNestedProjectDirectory(t *testing.T) {
 	repo := t.TempDir()
-	if err := exec.Command("git", "init", repo).Run(); err != nil {
-		t.Fatal(err)
-	}
+	gittest.Run(t, "", "init", repo)
+	gittest.HardenRepo(t, repo)
 	nested := filepath.Join(repo, "agm", "cmd", "agm")
 	if err := os.MkdirAll(nested, 0o700); err != nil {
 		t.Fatal(err)
