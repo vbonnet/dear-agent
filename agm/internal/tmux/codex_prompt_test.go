@@ -19,7 +19,7 @@ import (
 func newCodexTestSession(t *testing.T, sessionName string, cmd ...string) string {
 	t.Helper()
 	skipIfNoTmux(t)
-	socketDir, err := os.MkdirTemp("", "agm-codex-test")
+	socketDir, err := newShortCodexTestSocketDir()
 	if err != nil {
 		t.Fatalf("create private tmux socket directory: %v", err)
 	}
@@ -37,6 +37,12 @@ func newCodexTestSession(t *testing.T, sessionName string, cmd ...string) string
 		os.RemoveAll(socketDir)
 	})
 	return socketPath
+}
+
+// Keep the socket under the system temporary directory: macOS limits Unix
+// socket paths, while testing.T.TempDir can include a long test-name prefix.
+func newShortCodexTestSocketDir() (string, error) {
+	return os.MkdirTemp("", "agm-codex-test")
 }
 
 func currentCodexWelcomeGhostScript() string {
