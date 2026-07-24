@@ -140,7 +140,7 @@ escalate() {
 	trail_dir=$(dirname "$trail_path")
 	if ! mkdir -p "$trail_dir" 2>/dev/null; then
 		echo "$PROG: warning: cannot create trail dir $trail_dir" >&2
-		return 0
+		return 1
 	fi
 	# Mirror pkg/vroom/decisiontrail.OpenJSONL: create or tighten the shared
 	# trail with owner-only permissions. touch is deliberately non-truncating:
@@ -157,18 +157,24 @@ escalate() {
 		"$event_id" "$ts" "$esc_role" "$esc_status" "$esc_dir" "$esc_sentinel" "$esc_reason" \
 		>>"$trail_path" 2>/dev/null; then
 		echo "$PROG: warning: trail append failed: $trail_path" >&2
+		return 1
 	fi
+	return 0
 }
 
 notify_operator() {
 	# The launchd agent runs on macOS. A durable trail is useful for audit, but
 	# a notification is the active observation loop: the owner sees a GOBIN wipe
 	# without waiting for another VROOM process or a manual log inspection.
-	[ "${GOBIN_GUARD_NOTIFY:-1}" = "1" ] || return 0
+	[ "${GOBIN_GUARD_NOTIFY:-1}" = "1" ] || return 1
 	if [ "$(uname -s)" = "Darwin" ] && command -v osascript >/dev/null 2>&1; then
-		osascript -e 'display notification "The Go toolchain binary directory needs repair. See gobin-guard.err.log." with title "DEAR Agent GOBIN alarm"' >/dev/null 2>&1 || \
+		if ! osascript -e 'display notification "The Go toolchain binary directory needs repair. See gobin-guard.err.log." with title "DEAR Agent GOBIN alarm"' >/dev/null 2>&1; then
 			echo "$PROG: warning: macOS notification failed" >&2
+			return 1
+		fi
+		return 0
 	fi
+	return 1
 }
 
 if [ "$status" = "ok" ]; then
@@ -186,9 +192,13 @@ fi
 # can persist for hours; repeating notifications and trail entries each tick
 # obscures the original event rather than improving observability.
 if [ ! -e "$alarm_path" ]; then
-	(umask 0177 && mkdir -p "$(dirname "$alarm_path")" && : >"$alarm_path") 2>/dev/null || true
-	escalate
-	notify_operator
+	delivered=1
+	escalate && delivered=0
+	notify_operator && delivered=0
+	if [ "$delivered" -eq 0 ]; then
+		(umask 0177 && mkdir -p "$(dirname "$alarm_path")" && : >"$alarm_path") 2>/dev/null || \
+			echo "$PROG: warning: cannot persist alarm state: $alarm_path" >&2
+	fi
 fi
 
 if [ "$json_output" -eq 1 ]; then
