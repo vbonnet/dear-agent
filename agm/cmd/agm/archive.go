@@ -261,10 +261,10 @@ func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
 	}
 	reportExternalArchives(archiveResult.ExternalArchives)
 
-	ui.PrintSuccess(fmt.Sprintf("Archived session: %s", sessionName))
+	ui.PrintSuccess(fmt.Sprintf("Archived session: %s", archiveResult.Name))
 	fmt.Printf("\nThe session is now hidden from 'agm session list'.\n")
 	fmt.Printf("Use 'agm session list --all' to see archived sessions.\n")
-	fmt.Printf("\nTo restore: agm session unarchive %s\n", sessionName)
+	fmt.Printf("\nTo restore: agm session unarchive %s\n", archiveResult.Name)
 
 	// Telemetry: agm.session.complete span + terminal metrics (active -1,
 	// completed +1{status=archived}).

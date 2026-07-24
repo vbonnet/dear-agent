@@ -281,6 +281,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^durable and provider archive state should remain unchanged$`, durableAndProviderArchiveStateShouldRemainUnchanged)
 	ctx.Step(`^archive preview should return stable AGM-100 output$`, archivePreviewShouldReturnStableAGM100Output)
 	ctx.Step(`^archive preview should retain the resolved stable session identity$`, archivePreviewShouldRetainResolvedStableSessionIdentity)
+	ctx.Step(`^archive completion guidance should use the resolved stable session identity$`, archiveCompletionGuidanceShouldUseResolvedStableSessionIdentity)
 	ctx.Step(`^archive preview should honor global JSON field masks$`, archivePreviewShouldHonorGlobalJSONFieldMasks)
 	ctx.Step(`^active async preview should not start a detached reaper$`, activeAsyncPreviewShouldNotStartDetachedReaper)
 	ctx.Step(`^dry-run preview should preserve async state validation$`, dryRunPreviewShouldPreserveAsyncStateValidation)
@@ -2160,7 +2161,7 @@ func agmValidatesSingleSessionArchiveDryRunSafety(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/ops",
-		"-run", `^(TestArchiveSession_DryRunCLI(TextIsSideEffectFree|JSONReturnsStableEnvelope|JSONHonorsFieldMask|ClaudeUUIDUsesResolvedSessionID|ActiveAsyncDoesNotStartReaper|ActiveRequiresAsync|StoppedRejectsAsync)|TestArchiveAuditArgs_RecordsSingleSessionDryRun|TestArchiveSession_DryRunDoesNotArchiveExternalRepresentation|TestNewDryRunPreview)$`,
+		"-run", `^(TestArchiveSession_DryRunCLI(TextIsSideEffectFree|JSONReturnsStableEnvelope|JSONHonorsFieldMask|ClaudeUUIDUsesResolvedSessionID|ActiveAsyncDoesNotStartReaper|ActiveRequiresAsync|StoppedRejectsAsync)|TestArchiveSession_ClaudeUUIDUsesResolvedSessionID|TestArchiveAuditArgs_RecordsSingleSessionDryRun|TestArchiveSession_DryRunDoesNotArchiveExternalRepresentation|TestNewDryRunPreview)$`,
 		"-count=1", "-v")
 	cmd.Dir = bddRepoRoot()
 	output, runErr := cmd.CombinedOutput()
@@ -2220,6 +2221,21 @@ func archivePreviewShouldRetainResolvedStableSessionIdentity(ctx context.Context
 		return fmt.Errorf("single-session archive dry-run suite failed: %w\n%s", harnessState.archiveDryRunTestErr, harnessState.archiveDryRunTestOutput)
 	}
 	const testName = "TestArchiveSession_DryRunCLIClaudeUUIDUsesResolvedSessionID"
+	if !strings.Contains(harnessState.archiveDryRunTestOutput, "--- PASS: "+testName) {
+		return fmt.Errorf("%s did not run:\n%s", testName, harnessState.archiveDryRunTestOutput)
+	}
+	return nil
+}
+
+func archiveCompletionGuidanceShouldUseResolvedStableSessionIdentity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.archiveDryRunTestErr != nil {
+		return fmt.Errorf("single-session archive dry-run suite failed: %w\n%s", harnessState.archiveDryRunTestErr, harnessState.archiveDryRunTestOutput)
+	}
+	const testName = "TestArchiveSession_ClaudeUUIDUsesResolvedSessionID"
 	if !strings.Contains(harnessState.archiveDryRunTestOutput, "--- PASS: "+testName) {
 		return fmt.Errorf("%s did not run:\n%s", testName, harnessState.archiveDryRunTestOutput)
 	}

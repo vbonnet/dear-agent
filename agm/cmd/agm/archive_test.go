@@ -964,6 +964,15 @@ func TestArchiveSession_ClaudeUUIDUsesResolvedSessionID(t *testing.T) {
 	if after.Lifecycle != "archived" {
 		t.Fatalf("lifecycle = %q, want archived", after.Lifecycle)
 	}
+	if !strings.Contains(output, "Archived session: "+sessionName) {
+		t.Fatalf("success output does not name resolved session: %q", output)
+	}
+	if !strings.Contains(output, "agm session unarchive "+sessionName) {
+		t.Fatalf("restore guidance does not use resolved session name: %q", output)
+	}
+	if strings.Contains(output, "agm session unarchive "+claudeUUID) {
+		t.Fatalf("restore guidance uses unresolved Claude UUID: %q", output)
+	}
 }
 
 func TestArchiveSession_DryRunCLIActiveAsyncDoesNotStartReaper(t *testing.T) {
