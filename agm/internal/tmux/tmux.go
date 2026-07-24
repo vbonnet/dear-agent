@@ -466,13 +466,14 @@ func NewSessionWithIdentity(name string, workDir string) (SessionIdentity, error
 	// Sanitize session name (tmux only allows alphanumeric, dash, underscore).
 	sanitizedName := sanitizeNewSessionName(name)
 
-	// Clean stale socket if exists
-	if err := CleanStaleSocket(); err != nil {
-		return SessionIdentity{}, fmt.Errorf("failed to clean stale socket: %w", err)
-	}
-
-	// Lock tmux server for session creation + settings (prevent parallel mutations)
+	// Lock cleanup, server creation, and settings together. Releasing the lock
+	// between a stale-socket probe and creation would let another process unlink
+	// the newly-created server socket.
 	err = withTmuxLock(func() error {
+		if err := cleanStaleSocketLocked(); err != nil {
+			return fmt.Errorf("failed to clean stale socket: %w", err)
+		}
+
 		// Create under the random provisional name before storing the same token
 		// and renaming. If either later command fails, the surviving session still
 		// has an ownership marker that strict compensation can prove.
