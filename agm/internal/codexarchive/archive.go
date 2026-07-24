@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vbonnet/dear-agent/agm/internal/codexcontrol"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
@@ -28,17 +27,8 @@ const (
 )
 
 var (
-	archiveCodexThreadFn    = archiveCodexThread
-	newThreadArchiver       = func() codexThreadArchiver { return codexcontrol.New() }
 	runCodexRemoteArchiveFn = runCodexRemoteArchive
 )
-
-// codexThreadArchiver deliberately exposes only the session-scoped archive
-// operation. In particular, it excludes device-global remote-control methods
-// so archival cannot accidentally enable or disable another session's relay.
-type codexThreadArchiver interface {
-	ArchiveThread(context.Context, string) error
-}
 
 // Result describes the Codex-side archive operation paired with AGM archive.
 type Result struct {
@@ -90,7 +80,7 @@ func Archive(ctx context.Context, req Request) (*Result, error) {
 	}
 
 	if req.CodexSessionID != "" {
-		if err := archiveCodexThreadFn(ctx, req.CodexSessionID); err != nil {
+		if err := runCodexRemoteArchiveFn(ctx, req.CodexSessionID); err != nil {
 			return nil, err
 		}
 		return &Result{Target: req.CodexSessionID}, nil
@@ -112,15 +102,6 @@ func Archive(ctx context.Context, req Request) (*Result, error) {
 		return nil, err
 	}
 	return &Result{Target: target, TranscriptPath: match.path}, nil
-}
-
-func archiveCodexThread(ctx context.Context, threadID string) error {
-	if err := newThreadArchiver().ArchiveThread(ctx, threadID); err == nil {
-		return nil
-	} else if ctx.Err() != nil {
-		return err
-	}
-	return runCodexRemoteArchiveFn(ctx, threadID)
 }
 
 func (r Request) candidateDirs() []string {

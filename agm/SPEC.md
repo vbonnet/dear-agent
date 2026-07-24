@@ -68,7 +68,8 @@ For `codex-cli`, AGM treats Codex as a real interactive CLI harness:
   composers
 - archive paths MUST archive the matching Codex saved session by resolving the
   Codex transcript `session_meta.cwd` to the AGM working directory or sandbox
-  merged path, then invoking the supported `codex archive` control surface
+  merged path, then invoking the supported `codex archive --remote unix://
+  <thread-id>` control surface (or the explicit `AGM_CODEX_REMOTE` override)
 - import/register paths MUST support orphaned `codex-cli` conversations by
   resolving `~/.codex/sessions/**/rollout-*.jsonl` from
   `session_meta.session_id`, preserving that Codex session ID in AGM storage,

@@ -2,7 +2,6 @@ package codexarchive
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,11 +19,11 @@ func TestArchiveSkipsNonCodexHarness(t *testing.T) {
 }
 
 func TestArchiveUsesPersistedCodexSessionID(t *testing.T) {
-	orig := archiveCodexThreadFn
-	t.Cleanup(func() { archiveCodexThreadFn = orig })
+	orig := runCodexRemoteArchiveFn
+	t.Cleanup(func() { runCodexRemoteArchiveFn = orig })
 
 	var got string
-	archiveCodexThreadFn = func(_ context.Context, threadID string) error {
+	runCodexRemoteArchiveFn = func(_ context.Context, threadID string) error {
 		got = threadID
 		return nil
 	}
@@ -46,45 +45,20 @@ func TestArchiveUsesPersistedCodexSessionID(t *testing.T) {
 	}
 }
 
-func TestArchiveCodexThreadUsesOnlyThreadScopedControl(t *testing.T) {
-	origArchiver := newThreadArchiver
-	origFallback := runCodexRemoteArchiveFn
-	t.Cleanup(func() {
-		newThreadArchiver = origArchiver
-		runCodexRemoteArchiveFn = origFallback
-	})
-
-	fake := &fakeThreadArchiver{}
-	newThreadArchiver = func() codexThreadArchiver { return fake }
-	runCodexRemoteArchiveFn = func(context.Context, string) error {
-		t.Fatal("CLI fallback must not run when the thread archive succeeds")
-		return nil
-	}
-
-	if err := archiveCodexThread(context.Background(), "thread-123"); err != nil {
-		t.Fatalf("archiveCodexThread() error = %v", err)
-	}
-	if fake.threadID != "thread-123" {
-		t.Fatalf("thread archive target = %q, want thread-123", fake.threadID)
-	}
-}
-
-func TestArchiveCodexThreadFallsBackThroughUnixRemote(t *testing.T) {
-	origArchiver := newThreadArchiver
-	origFallback := runCodexRemoteArchiveFn
-	t.Cleanup(func() {
-		newThreadArchiver = origArchiver
-		runCodexRemoteArchiveFn = origFallback
-	})
-
+func TestArchivePersistedCodexSessionUsesUnixRemote(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("PATH", fakeCodexPath(t, home))
-	newThreadArchiver = func() codexThreadArchiver { return failingThreadArchiver{} }
-	runCodexRemoteArchiveFn = runCodexRemoteArchive
 
-	if err := archiveCodexThread(context.Background(), "thread-456"); err != nil {
-		t.Fatalf("archiveCodexThread() error = %v", err)
+	result, err := Archive(context.Background(), Request{
+		Harness:        "codex-cli",
+		CodexSessionID: "thread-456",
+	})
+	if err != nil {
+		t.Fatalf("Archive() error = %v", err)
+	}
+	if result.Target != "thread-456" {
+		t.Fatalf("target = %q, want thread-456", result.Target)
 	}
 
 	args := strings.TrimSpace(readFakeCodexArgs(t, home))
@@ -92,43 +66,6 @@ func TestArchiveCodexThreadFallsBackThroughUnixRemote(t *testing.T) {
 	if args != want {
 		t.Fatalf("codex args = %q, want %q", args, want)
 	}
-}
-
-func TestArchiveCodexThreadDoesNotFallBackAfterContextCancellation(t *testing.T) {
-	origArchiver := newThreadArchiver
-	origFallback := runCodexRemoteArchiveFn
-	t.Cleanup(func() {
-		newThreadArchiver = origArchiver
-		runCodexRemoteArchiveFn = origFallback
-	})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	newThreadArchiver = func() codexThreadArchiver { return failingThreadArchiver{} }
-	runCodexRemoteArchiveFn = func(context.Context, string) error {
-		t.Fatal("CLI fallback must not run after context cancellation")
-		return nil
-	}
-
-	err := archiveCodexThread(ctx, "thread-789")
-	if !errors.Is(err, os.ErrClosed) {
-		t.Fatalf("archiveCodexThread() error = %v, want original archive error", err)
-	}
-}
-
-type fakeThreadArchiver struct {
-	threadID string
-}
-
-func (f *fakeThreadArchiver) ArchiveThread(_ context.Context, threadID string) error {
-	f.threadID = threadID
-	return nil
-}
-
-type failingThreadArchiver struct{}
-
-func (failingThreadArchiver) ArchiveThread(context.Context, string) error {
-	return os.ErrClosed
 }
 
 func TestArchiveResolvesCodexSessionByWorkingDirectory(t *testing.T) {
