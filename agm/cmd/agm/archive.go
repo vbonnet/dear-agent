@@ -344,8 +344,7 @@ func previewSingleSessionArchive(opCtx *ops.OpContext, sessionName string, getRe
 		},
 	)
 	if isJSONOutput() {
-		fmt.Println(string(preview.JSON()))
-		return nil
+		return printJSON(preview)
 	}
 
 	ui.PrintSuccess(fmt.Sprintf("%s: %s", preview.Title, preview.Detail))

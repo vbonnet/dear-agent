@@ -280,6 +280,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates single-session archive dry-run safety$`, agmValidatesSingleSessionArchiveDryRunSafety)
 	ctx.Step(`^durable and provider archive state should remain unchanged$`, durableAndProviderArchiveStateShouldRemainUnchanged)
 	ctx.Step(`^archive preview should return stable AGM-100 output$`, archivePreviewShouldReturnStableAGM100Output)
+	ctx.Step(`^archive preview should honor global JSON field masks$`, archivePreviewShouldHonorGlobalJSONFieldMasks)
 	ctx.Step(`^active async preview should not start a detached reaper$`, activeAsyncPreviewShouldNotStartDetachedReaper)
 	ctx.Step(`^dry-run preview should preserve async state validation$`, dryRunPreviewShouldPreserveAsyncStateValidation)
 	ctx.Step(`^the retained A2A coordination implementation$`, retainedA2ACoordinationImplementation)
@@ -2158,7 +2159,7 @@ func agmValidatesSingleSessionArchiveDryRunSafety(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/ops",
-		"-run", `^(TestArchiveSession_DryRunCLI(TextIsSideEffectFree|JSONReturnsStableEnvelope|ActiveAsyncDoesNotStartReaper|ActiveRequiresAsync|StoppedRejectsAsync)|TestArchiveAuditArgs_RecordsSingleSessionDryRun|TestArchiveSession_DryRunDoesNotArchiveExternalRepresentation|TestNewDryRunPreview)$`,
+		"-run", `^(TestArchiveSession_DryRunCLI(TextIsSideEffectFree|JSONReturnsStableEnvelope|JSONHonorsFieldMask|ActiveAsyncDoesNotStartReaper|ActiveRequiresAsync|StoppedRejectsAsync)|TestArchiveAuditArgs_RecordsSingleSessionDryRun|TestArchiveSession_DryRunDoesNotArchiveExternalRepresentation|TestNewDryRunPreview)$`,
 		"-count=1", "-v")
 	cmd.Dir = bddRepoRoot()
 	output, runErr := cmd.CombinedOutput()
@@ -2205,6 +2206,21 @@ func archivePreviewShouldReturnStableAGM100Output(ctx context.Context) error {
 		if !strings.Contains(harnessState.archiveDryRunTestOutput, "--- PASS: "+testName) {
 			return fmt.Errorf("%s did not run:\n%s", testName, harnessState.archiveDryRunTestOutput)
 		}
+	}
+	return nil
+}
+
+func archivePreviewShouldHonorGlobalJSONFieldMasks(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.archiveDryRunTestErr != nil {
+		return fmt.Errorf("single-session archive dry-run suite failed: %w\n%s", harnessState.archiveDryRunTestErr, harnessState.archiveDryRunTestOutput)
+	}
+	const testName = "TestArchiveSession_DryRunCLIJSONHonorsFieldMask"
+	if !strings.Contains(harnessState.archiveDryRunTestOutput, "--- PASS: "+testName) {
+		return fmt.Errorf("%s did not run:\n%s", testName, harnessState.archiveDryRunTestOutput)
 	}
 	return nil
 }

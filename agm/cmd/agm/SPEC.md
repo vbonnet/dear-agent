@@ -119,7 +119,7 @@ Provide a production-ready CLI that:
 
 **CLI-44** When direct, fan-out, structured, daemon-queued, fresh-startup, or post-resume delivery targets an AGY session, the command shall propagate the resolved `agy` harness through the shared tmux delivery boundary so attribution and multiline bodies remain one native request; unresolved and non-AGY sessions shall retain their established delivery semantics.
 
-**CLI-45** When `agm session archive <session> --dry-run` resolves an archivable session and the shared archive guards succeed, the system shall return a successful preview before lifecycle writes, external provider archival, tmux or process changes, worktree or branch cleanup, sandbox or settings cleanup, telemetry, or detached reaper startup; active and stopped `--async` validation shall remain enforced, and both text and JSON output shall name the exact resolved target.
+**CLI-45** When `agm session archive <session> --dry-run` resolves an archivable session and the shared archive guards succeed, the system shall return a successful preview before lifecycle writes, external provider archival, tmux or process changes, worktree or branch cleanup, sandbox or settings cleanup, telemetry, or detached reaper startup; active and stopped `--async` validation shall remain enforced, both text and JSON output shall name the exact resolved target, and JSON previews shall honor the global `--fields` projection contract.
 
 ## Requirements
 

@@ -836,6 +836,48 @@ func TestArchiveSession_DryRunCLIJSONReturnsStableEnvelope(t *testing.T) {
 	}
 }
 
+func TestArchiveSession_DryRunCLIJSONHonorsFieldMask(t *testing.T) {
+	_, sessionsDir, cleanup := setupArchiveDryRunTest(t)
+	defer cleanup()
+	configureSingleArchiveDryRun(t)
+	setAgentJSON(t)
+	origFields := fieldsFlag
+	fieldsFlag = []string{"parameters"}
+	t.Cleanup(func() { fieldsFlag = origFields })
+
+	const sessionID = "single-dry-run-fields"
+	const sessionName = "dry-run-fields"
+	createArchiveTestSession(t, sessionsDir, sessionID, sessionName, "dry-run-fields-tmux", "")
+	before := setArchiveTestProject(t, sessionID, t.TempDir())
+
+	var archiveErr error
+	output := captureStdout(t, func() {
+		archiveErr = archiveSession(nil, []string{sessionName})
+	})
+	if archiveErr != nil {
+		t.Fatalf("archiveSession() error: %v\noutput: %s", archiveErr, output)
+	}
+	var projected map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &projected); err != nil {
+		t.Fatalf("stdout is not projected JSON: %v\noutput: %q", err, output)
+	}
+	if len(projected) != 1 {
+		t.Fatalf("projected fields = %#v, want parameters only", projected)
+	}
+	var parameters map[string]string
+	if err := json.Unmarshal(projected["parameters"], &parameters); err != nil {
+		t.Fatalf("parameters are not JSON: %v\noutput: %q", err, output)
+	}
+	if parameters["session_id"] != sessionID || parameters["session_name"] != sessionName {
+		t.Fatalf("preview parameters = %#v", parameters)
+	}
+
+	after := readSessionFromDolt(t, sessionID)
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("durable session changed during field-masked dry run:\nbefore=%#v\nafter=%#v", before, after)
+	}
+}
+
 func TestArchiveSession_DryRunCLIActiveAsyncDoesNotStartReaper(t *testing.T) {
 	_, sessionsDir, cleanup := setupArchiveDryRunTest(t)
 	defer cleanup()
