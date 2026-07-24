@@ -1,6 +1,7 @@
 {
   "skills": [
     "../agm/plugins",
-    "../wayfinder/skills"
+    "../wayfinder/skills",
+    "../research-pipeline/skills"
   ]
 }

@@ -46,3 +46,17 @@ the status file manually or rely on retired phase identifiers.
 - [PHASES.md](PHASES.md): phase intent and artifact names
 - [ARCHITECTURE.md](ARCHITECTURE.md): current implementation map
 - [SPEC.md](SPEC.md): observable requirements
+
+## Related: research-pipeline
+
+`research-pipeline` (top-level `research-pipeline/` plugin) is a separate,
+standalone skill for turning an external source (a talk, article, paper) into
+verified, executable work. It is not a Wayfinder phase and Wayfinder's own
+RESEARCH phase does not delegate to it — Wayfinder's RESEARCH means "search
+existing solutions for an already-charter'd project," a narrower thing than
+research-pipeline's source-ingestion stages. The one real overlap is
+decomposition: `research-pipeline`'s Stage 4 routes large, phased
+decompositions through this PLAN phase's Beads adapter rather than
+reimplementing bead filing. See
+[the incorporate-vs-delegate assessment](https://github.com/vbonnet/dear-agent/pull/947)
+for the full reasoning.
