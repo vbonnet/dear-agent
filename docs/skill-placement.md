@@ -7,7 +7,8 @@ Companion to `docs/skill-tiers.md` (model/effort contract) and
 what a skill must *declare*. This one says where it must *live*.
 
 Derived from a cross-model pass (synthesis + adversarial review) on a real
-case: `vbonnet/dotfiles` PR #51, a `research-pipeline` orchestrator skill.
+case: a `research-pipeline` orchestrator skill proposed in a private,
+single-operator dotfiles repo.
 
 ---
 
@@ -54,9 +55,10 @@ required checks plus bot review are not free. Do not pay them for a cheat sheet.
 ### Trust boundary
 
 dotfiles is private and single-operator. dear-agent is the shared product repo.
-A skill that hard-codes machine-specific topology (`~/beads/context-engine/.beads`,
-`~/src/engram-research`) publishes that topology when it moves. Either
-parameterize the paths or accept the disclosure knowingly.
+A skill that hard-codes machine-specific topology (a beads database path such
+as `$BEADS_DIR`, or an absolute checkout path for a private knowledge-base
+repo) publishes that topology when it moves. Either parameterize the paths or
+accept the disclosure knowingly.
 
 ---
 
@@ -109,7 +111,7 @@ re-installing the plugin and restarting the harness.
 
 | Skill | Rule it enforces | Owner |
 |---|---|---|
-| `research-pipeline` (dotfiles #51) | cross-model verification, human gate before execution, beads sized for one run — DEAR process discipline | **dear-agent** |
+| `research-pipeline` (a candidate skill proposed in a private dotfiles repo) | cross-model verification, human gate before execution, beads sized for one run — DEAR process discipline | **dear-agent** |
 | writing pipeline, `linkedin-cross-post` | Valentin's voice and cadence | dotfiles (+ a Cowork distribution gap to close) |
 | `github-thread-resolver` | verify the fix landed before resolving — generic PR hygiene | dotfiles |
 | a hypothetical `deploy-vbonnet-ai` | vbonnet.ai's release policy (even though it calls `safe-pr`) | vbonnet.ai |
