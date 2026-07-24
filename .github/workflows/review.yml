@@ -18,7 +18,11 @@ name: AI Code Review (5-dimension)
 # .github/rulesets/main.json.
 
 on:
-  pull_request:
+  # pull_request_target is deliberate: this workflow checks out and executes
+  # only the protected base revision, while treating the PR head as diff data.
+  # That trusted context can both attest an override to the exact head SHA and
+  # remove a stale override label from fork PRs.
+  pull_request_target:
     # `labeled`/`unlabeled` matter: applying the documented `ai-review:override`
     # label must produce a NEW check run on the same head SHA, otherwise the
     # advertised escape hatch is unusable without an unrelated push.
@@ -85,19 +89,34 @@ jobs:
       # Remove it as soon as a contributor pushes a new head; the resulting
       # unlabeled event reruns this gate without an override, and a maintainer
       # must deliberately reapply the label after reviewing that new revision.
-      # Fork tokens may not be allowed to mutate labels, so the subsequent
-      # detection step also treats synchronize as inactive even if removal
-      # fails.
+      # The trusted pull_request_target token has the write permission declared
+      # above, and the subsequent SHA attestation is a second fail-closed guard.
       - name: Clear override for a new pull request revision
-        if: github.event_name == 'pull_request' && github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'ai-review:override')
+        if: github.event_name == 'pull_request_target' && github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'ai-review:override')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          gh pr edit "$PR" --repo "$REPO" --remove-label 'ai-review:override' || \
-            echo "::warning::could not remove ai-review:override after a new revision; this run will still ignore it."
+          gh pr edit "$PR" --repo "$REPO" --remove-label 'ai-review:override'
+
+      # A label records who authorized an exception, but not which mutable PR
+      # revision they reviewed. Record that revision in a bot-authored comment
+      # from the trusted workflow. The detection step below accepts an override
+      # only when this attestation matches the current PR head.
+      - name: Attest override to the reviewed revision
+        if: github.event_name == 'pull_request_target' && github.event.action == 'labeled' && github.event.label.name == 'ai-review:override'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api --method POST "repos/$REPO/issues/$PR/comments" \
+            -f body="<!-- ai-review-override-sha:$HEAD_SHA -->
+          Human override attested by the trusted review workflow for `$HEAD_SHA`."
 
       # The override must survive the merge queue: a merge_group run cannot see
       # the originating PR's labels, so without this a human-overridden PR would
@@ -112,23 +131,32 @@ jobs:
           REPO: ${{ github.repository }}
           EVENT: ${{ github.event_name }}
           ACTION: ${{ github.event.action }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
         run: |
           set -euo pipefail
           labels="${LABELS:-}"
-          # Even if a fork's token could not remove the label above, a push
-          # never inherits an override granted for a previous SHA.
-          if [ "$EVENT" = "pull_request" ] && [ "$ACTION" = "synchronize" ]; then
+          # A new head must never inherit an override, even if a prior runner
+          # was interrupted before it could remove the label.
+          if [ "$EVENT" = "pull_request_target" ] && [ "$ACTION" = "synchronize" ]; then
             echo "active=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          reviewed_head="$HEAD_SHA"
           if [ "$EVENT" = "merge_group" ]; then
             # gh-readonly-queue/<base>/pr-<number>-<sha>
             pr="$(printf '%s' "$HEAD_REF" | sed -n 's|.*/pr-\([0-9]\{1,\}\)-[0-9a-f]\{1,\}$|\1|p')"
             if [ -n "$pr" ]; then
+              PR="$pr"
               labels="$(gh api "repos/$REPO/pulls/$pr" --jq '[.labels[].name]' 2>/dev/null || echo '[]')"
+              reviewed_head="$(gh api "repos/$REPO/pulls/$pr" --jq '.head.sha' 2>/dev/null || true)"
             fi
           fi
-          if printf '%s\n' "$labels" | grep -q '"ai-review:override"'; then
+          attested_head="$(gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" \
+            --jq '.[] | select(.user.login == "github-actions[bot]") | .body' 2>/dev/null | \
+            sed -n 's/^<!-- ai-review-override-sha:\([0-9a-f]\{40\}\) -->$/\1/p' | \
+            grep -Fx "$reviewed_head" | tail -n 1 || true)"
+          if printf '%s\n' "$labels" | grep -q '"ai-review:override"' && [ "$attested_head" = "$reviewed_head" ]; then
             echo "active=true" >> "$GITHUB_OUTPUT"
           else
             echo "active=false" >> "$GITHUB_OUTPUT"
@@ -143,7 +171,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
-          IS_FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+          IS_FORK: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository }}
           OVERRIDE: ${{ steps.override.outputs.active }}
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |

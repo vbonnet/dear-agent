@@ -114,9 +114,11 @@ is not a defence against a malicious maintainer with push access.
 ### Human override (the verified fallback)
 
 A maintainer who has consciously reviewed the change can apply the
-`ai-review:override` label. The gate then posts its comment and passes on human
-authority. The override is recorded on the PR (auditable) and requires a human
-action (verified) — it is the sanctioned path to merge a fork PR, a
+`ai-review:override` label. The trusted workflow records the current head SHA
+in a bot-authored PR comment, and the gate passes only while that attestation
+matches the current head. A later push removes the label and invalidates the
+attestation. The override is therefore auditable, revision-bound, and requires
+a human action — it is the sanctioned path to merge a fork PR, a
 `needs-human-review` escalation, or a change the automated review could not
 process.
 
