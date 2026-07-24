@@ -152,6 +152,43 @@ func TestDefaultQuarantinePathForExplicitDefaultCredentials(t *testing.T) {
 	}
 }
 
+func TestDefaultQuarantinePathForCredentialSymlink(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "credentials.json")
+	if err := os.WriteFile(target, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "credentials-link.json")
+	if err := os.Symlink(target, alias); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := defaultQuarantinePathForCredentials(alias), defaultQuarantinePathForCredentials(target); got != want {
+		t.Errorf("symlink quarantine path = %q, want %q", got, want)
+	}
+}
+
+func TestRun_UnknownOutcomeWithDisabledQuarantineExplainsRetryRisk(t *testing.T) {
+	srv := lostResponseServer(t)
+	defer srv.Close()
+	creds := writeCreds(t, "old", staleMs(), "old-rt")
+	audit := filepath.Join(t.TempDir(), "audit.jsonl")
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"-credentials", creds, "-endpoint", srv.URL,
+		"-audit-log", audit, "-quarantine", "",
+	}, &stdout, &stderr)
+
+	if code != exitNotPersisted {
+		t.Errorf("exit code = %d, want %d", code, exitNotPersisted)
+	}
+	if !strings.Contains(stderr.String(), "Quarantine is DISABLED") {
+		t.Errorf("stderr should explain retry risk, got: %s", stderr.String())
+	}
+	if rec := lastAuditRecord(t, audit); rec["outcome"] != "refresh_outcome_unknown_unquarantined" {
+		t.Errorf("audit outcome = %v, want refresh_outcome_unknown_unquarantined", rec["outcome"])
+	}
+}
+
 // -check must surface an active quarantine; it is how an operator finds out why
 // refreshes stopped.
 func TestRun_CheckReportsQuarantine(t *testing.T) {

@@ -258,6 +258,16 @@ func handleRefreshError(err error, mode, auditPath string, stderr io.Writer, fp,
 		return exitQuarantined
 
 	case errors.Is(err, auth.ErrRefreshOutcomeUnknown):
+		if quarPath == "" {
+			fmt.Fprintf(stderr, "token-refresher: refresh outcome UNKNOWN — the request may have reached the server but the response did not.\n"+
+				"  Quarantine is DISABLED, so the next tick may re-present this possibly spent token.\n"+
+				"  Re-run with a quarantine path or re-authenticate with `claude /login` before retrying.\n  cause: %v\n", err)
+			writeAudit(auditPath, auditRecord{
+				Mode: mode, Outcome: "refresh_outcome_unknown_unquarantined", Error: err.Error(),
+				RefreshTokenFP: fp, CredentialsModTime: credMod,
+			})
+			return exitNotPersisted
+		}
 		fmt.Fprintf(stderr, "token-refresher: refresh outcome UNKNOWN — the request reached the server but the response did not.\n"+
 			"  The refresh token may already be spent. It has been quarantined (fingerprint %s) so the next tick will NOT\n"+
 			"  present it again; replaying a spent token is what revokes the whole token family.\n"+
@@ -410,7 +420,7 @@ func defaultQuarantinePath() string {
 // -quarantine path remains an operator-controlled shared marker when needed.
 func defaultQuarantinePathForCredentials(credentialsPath string) string {
 	credentialsPath = canonicalCredentialsPath(credentialsPath)
-	if credentialsPath == defaultCredentialsPath() {
+	if credentialsPath == canonicalCredentialsPath(defaultCredentialsPath()) {
 		return defaultQuarantinePath()
 	}
 	return credentialsPath + ".refresh-quarantine.json"
@@ -429,9 +439,13 @@ func canonicalCredentialsPath(path string) string {
 		return defaultCredentialsPath()
 	}
 	if absolute, err := filepath.Abs(path); err == nil {
-		return filepath.Clean(absolute)
+		path = absolute
 	}
-	return filepath.Clean(path)
+	path = filepath.Clean(path)
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return filepath.Clean(resolved)
+	}
+	return path
 }
 
 func msOrZero(t time.Time) int64 {

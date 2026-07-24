@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptrace"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -281,27 +281,14 @@ func (r OAuthResolver) exchange(ctx context.Context, refreshToken string) (token
 		"scope":         {defaultRefreshScopes},
 	}
 
-	// wroteRequest records whether the request actually went out on the wire.
-	// This is the difference between a harmless failure and one that kills the
-	// token family: if the request was never transmitted the refresh token is
-	// untouched and retrying is safe, but if it WAS transmitted the server may
-	// have consumed the single-use token and returned a replacement we never
-	// read. Tracing it is exact, unlike matching on error text — "TLS handshake
-	// timeout" and "Client.Timeout exceeded while awaiting headers" are both
-	// plain transport errors from the caller's side but sit on opposite sides of
-	// this line. See ce-77ip.7 and ErrRefreshOutcomeUnknown.
-	var wroteRequest bool
-	trace := &httptrace.ClientTrace{
-		WroteRequest: func(info httptrace.WroteRequestInfo) {
-			// A write error does not prove zero transmission: the server can
-			// consume part or all of the request before the client reports it.
-			// Once this callback fires, retrying a single-use refresh token is
-			// unsafe unless the transport can prove no bytes were sent.
-			wroteRequest = true
-		},
-	}
-	ctx = httptrace.WithClientTrace(ctx, trace)
-
+	// Observe consumption of the request body synchronously. httptrace's
+	// WroteRequest callback can run concurrently with, or after, Do returns an
+	// error, which makes a false "not transmitted" decision race-prone. The
+	// refresh token is in this non-empty form body: once a transport reads it,
+	// conservatively treat the token as possibly transmitted. This may
+	// quarantine after a locally failed write, but can never retry a token whose
+	// body was already handed to the transport.
+	body := &observedReadCloser{ReadCloser: io.NopCloser(strings.NewReader(form.Encode()))}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.endpoint(), strings.NewReader(form.Encode()))
 	if err != nil {
 		return tokenResponse{}, fmt.Errorf("build token refresh request: %w", err)
@@ -311,12 +298,13 @@ func (r OAuthResolver) exchange(ctx context.Context, refreshToken string) (token
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", r.userAgent())
+	req.Body = body
 
 	resp, err := r.HTTPClient.Do(req)
 	if err != nil {
-		if wroteRequest {
-			// The token is on the wire and we will never learn what the server
-			// did with it. Treat it as possibly spent.
+		if body.read.Load() {
+			// The refresh-token body reached the transport and we will never
+			// learn what the server did with it. Treat it as possibly spent.
 			return tokenResponse{}, fmt.Errorf("%w: %w", ErrRefreshOutcomeUnknown, err)
 		}
 		return tokenResponse{}, fmt.Errorf("token refresh request failed: %w", err)
@@ -351,6 +339,19 @@ func (r OAuthResolver) exchange(ctx context.Context, refreshToken string) (token
 		return tokenResponse{}, fmt.Errorf("%w: token response contained no access_token", ErrRefreshOutcomeUnknown)
 	}
 	return tok, nil
+}
+
+type observedReadCloser struct {
+	io.ReadCloser
+	read atomic.Bool
+}
+
+func (r *observedReadCloser) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	if n > 0 {
+		r.read.Store(true)
+	}
+	return n, err
 }
 
 // backupCredentials copies the credentials file to <path>.bak (mode 0600)

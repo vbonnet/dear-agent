@@ -88,7 +88,9 @@ func cadenceExit(code int, stateDir, sentinelName string, stderr io.Writer) int 
 
 	case exitOK:
 		// Family is healthy again; arm the alert for the next episode.
-		_ = clearCadenceSentinel(stateDir, sentinelName)
+		if err := clearCadenceSentinel(stateDir, sentinelName); err != nil {
+			fmt.Fprintf(stderr, "token-refresher: could not clear cadence alert state: %v\n", err)
+		}
 		return exitOK
 	}
 
