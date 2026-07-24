@@ -99,6 +99,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return exitError
 	}
+	quarantineExplicit := false
+	fs.Visit(func(f *flag.Flag) {
+		quarantineExplicit = quarantineExplicit || f.Name == "quarantine"
+	})
+	if !quarantineExplicit {
+		*quarPath = defaultQuarantinePathForCredentials(*credPath)
+	}
 
 	var logger *slog.Logger
 	if !*quiet {
@@ -129,6 +136,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if *clearQuar {
 		if err := r.ClearQuarantine(); err != nil {
 			fmt.Fprintf(stderr, "token-refresher: could not clear quarantine: %v\n", err)
+			return exitError
+		}
+		if err := clearCadenceSentinel(defaultStateDir()); err != nil {
+			fmt.Fprintf(stderr, "token-refresher: could not re-arm cadence alert: %v\n", err)
 			return exitError
 		}
 		fmt.Fprintln(stderr, "token-refresher: refresh-token quarantine cleared; automatic refresh re-armed.")
@@ -388,6 +399,16 @@ func defaultQuarantinePath() string {
 		return ""
 	}
 	return filepath.Join(home, ".local", "state", "dear-agent", "refresh-token-quarantine.json")
+}
+
+// defaultQuarantinePathForCredentials keeps separate credentials files from
+// clearing one another's quarantine marker. An explicitly supplied
+// -quarantine path remains an operator-controlled shared marker when needed.
+func defaultQuarantinePathForCredentials(credentialsPath string) string {
+	if credentialsPath == "" {
+		return defaultQuarantinePath()
+	}
+	return credentialsPath + ".refresh-quarantine.json"
 }
 
 func msOrZero(t time.Time) int64 {

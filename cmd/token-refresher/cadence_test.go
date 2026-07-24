@@ -59,6 +59,24 @@ func TestCadenceExit_SuccessClearsSentinel(t *testing.T) {
 	}
 }
 
+func TestClearCadenceSentinel(t *testing.T) {
+	dir := t.TempDir()
+	sentinel := filepath.Join(dir, deathSentinelName)
+	if err := os.WriteFile(sentinel, []byte("alerted\n"), 0o600); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+
+	if err := clearCadenceSentinel(dir); err != nil {
+		t.Fatalf("clear cadence sentinel: %v", err)
+	}
+	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
+		t.Error("sentinel survived explicit re-arm")
+	}
+	if err := clearCadenceSentinel(dir); err != nil {
+		t.Fatalf("clearing an absent sentinel: %v", err)
+	}
+}
+
 // Only the dead-family code is flattened; other failures still surface.
 func TestCadenceExit_PassesThroughOtherFailures(t *testing.T) {
 	dir := t.TempDir()

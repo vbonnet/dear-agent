@@ -139,6 +139,13 @@ func TestRun_ClearQuarantineOverride(t *testing.T) {
 	}
 }
 
+func TestDefaultQuarantinePathForCredentials(t *testing.T) {
+	credentials := filepath.Join(t.TempDir(), "credentials.json")
+	if got, want := defaultQuarantinePathForCredentials(credentials), credentials+".refresh-quarantine.json"; got != want {
+		t.Errorf("quarantine path = %q, want %q", got, want)
+	}
+}
+
 // -check must surface an active quarantine; it is how an operator finds out why
 // refreshes stopped.
 func TestRun_CheckReportsQuarantine(t *testing.T) {

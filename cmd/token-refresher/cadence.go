@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,17 @@ import (
 // the operator has already been alerted for this episode, so the 30-minute
 // cadence does not re-notify every tick; a successful refresh clears it.
 const deathSentinelName = "token-family-dead"
+
+// clearCadenceSentinel re-arms the next cadence alert after an operator has
+// explicitly cleared quarantine. A missing sentinel means there is nothing to
+// re-arm and is therefore successful.
+func clearCadenceSentinel(stateDir string) error {
+	err := os.Remove(filepath.Join(stateDir, deathSentinelName))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
+}
 
 // cadenceExit adapts a run's exit code for the unattended launchd cadence job.
 //
@@ -67,7 +79,7 @@ func cadenceExit(code int, stateDir string, stderr io.Writer) int {
 
 	case exitOK:
 		// Family is healthy again; arm the alert for the next episode.
-		_ = os.Remove(sentinel)
+		_ = clearCadenceSentinel(stateDir)
 		return exitOK
 	}
 
