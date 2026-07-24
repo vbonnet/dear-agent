@@ -105,8 +105,20 @@ func FindServerPIDs(socketPath string) ([]int, error) {
 		if pid == os.Getpid() {
 			continue
 		}
-		argv := fields[1:]
-		if !isTmuxCommand(argv[0]) {
+		if !isTmuxCommand(fields[1]) {
+			continue
+		}
+		// ps renders command text for people, not lossless argv. In particular,
+		// a socket path containing whitespace cannot be reconstructed with
+		// strings.Fields, and ps may truncate a long command. Use its PID only
+		// to locate the process, then read the platform's native argv data.
+		argv, err := readProcessArgv(pid)
+		if err != nil {
+			// This scan is the final proof before a destructive unlink. An argv
+			// read failure is inconclusive, so retain the socket and retry later.
+			return nil, fmt.Errorf("read argv for tmux candidate pid %d: %w", pid, err)
+		}
+		if len(argv) == 0 || !isTmuxCommand(argv[0]) {
 			continue
 		}
 		for i := 0; i < len(argv)-1; i++ {

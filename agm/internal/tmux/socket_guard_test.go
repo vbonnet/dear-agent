@@ -195,7 +195,9 @@ func TestFindServerPIDs_RealServer(t *testing.T) {
 		t.Skip("tmux not installed")
 	}
 
-	dir, err := os.MkdirTemp("/tmp", "agmreal") //nolint:usetesting // sockaddr_un path limit, see newSocketFile
+	// The whitespace exercises the lossless argv path. ps's display-oriented
+	// command column cannot preserve this as one -S argument.
+	dir, err := os.MkdirTemp("/tmp", "agm real") //nolint:usetesting // sockaddr_un path limit, see newSocketFile
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 	sock := filepath.Join(dir, "r.sock")
@@ -203,10 +205,24 @@ func TestFindServerPIDs_RealServer(t *testing.T) {
 	session := fmt.Sprintf("ce7ep9-%d", os.Getpid())
 	require.NoError(t, exec.Command("tmux", "-S", sock, "new-session", "-d",
 		"-s", session, "sleep", "120").Run())
-	t.Cleanup(func() { _ = exec.Command("tmux", "-S", sock, "kill-server").Run() })
+	var serverPIDs []int
+	t.Cleanup(func() {
+		// After the test unlinks sock, tmux -S can no longer reach this server.
+		// Kill the discovered server PID directly so successful runs do not leak
+		// an orphan and its sleep process until the command's timeout expires.
+		for _, pid := range serverPIDs {
+			if process, err := os.FindProcess(pid); err == nil {
+				_ = process.Kill()
+			}
+		}
+		// Before a PID is discovered (for example, if setup fails), the socket
+		// still exists and tmux can clean up normally.
+		_ = exec.Command("tmux", "-S", sock, "kill-server").Run()
+	})
 
 	require.Eventually(t, func() bool {
 		pids, _ := FindServerPIDs(sock)
+		serverPIDs = pids
 		return len(pids) > 0
 	}, 5*time.Second, 100*time.Millisecond, "should find the live server")
 
