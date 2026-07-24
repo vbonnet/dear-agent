@@ -12,6 +12,8 @@
 
 **REPO-SCRIPT-04** When stale-worktree removal fails, the system shall preserve the associated local and remote branches and report the removal failure.
 
+**REPO-SCRIPT-05** When the GOBIN guard runs and the Go toolchain bin directory or its sentinel binary is absent, the system shall append an escalation record to the decision trail and exit non-zero.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/cross_language_implementation_guardrails.feature`
