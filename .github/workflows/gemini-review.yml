@@ -63,7 +63,15 @@ jobs:
         if: steps.gate.outputs.skip != 'true'
         uses: google-github-actions/run-gemini-cli@v0
         env:
-          GEMINI_CLI_TRUST_WORKSPACE: 'true'
+          # SECURITY: must stay 'false'. The checked-out tree is the PR author's
+          # merge result, so a PR could add a project `.gemini/settings.json`
+          # declaring a malicious MCP server. Trusting the workspace would let
+          # Gemini CLI launch that command with GEMINI_API_KEY and the
+          # write-scoped GITHUB_TOKEN in scope — a secret-exfiltration path.
+          # With trust off, only the inline `settings:` and pinned `extensions:`
+          # below (both workflow-controlled) are honored; PR-provided config is
+          # ignored. Do not flip this to 'true'.
+          GEMINI_CLI_TRUST_WORKSPACE: 'false'
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         with:
