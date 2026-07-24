@@ -176,7 +176,7 @@ func sendEnterReliableContext(parent context.Context, socketPath, target string)
 	// capture reuses the exported, policy-compliant pane capture (isolated process
 	// group + bounded WaitDelay per CapturePanePolicy).
 	capture := func() (string, error) {
-		return CapturePaneANSIOutputContext(parent, target, 5)
+		return CapturePaneLogicalANSIOutputContext(parent, target, 5)
 	}
 	return verifyingEnter(sendEnter, capture, defaultEnterVerifyConfig())
 }

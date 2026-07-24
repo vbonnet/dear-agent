@@ -213,7 +213,7 @@ func SendMultiLinePromptSafeForHarnessContext(ctx context.Context, sessionName s
 		// Re-capture pane to verify composer stability
 		cmdCtx, cmdCancel := context.WithTimeout(ctx, 5*time.Second)
 		recheck, err := exec.CommandContext(cmdCtx, "tmux", "-S", GetSocketPath(), "capture-pane",
-			"-t", NormalizeTmuxSessionName(sessionName), "-p", "-e", "-S", "-30").Output()
+			"-t", NormalizeTmuxSessionName(sessionName), "-p", "-e", "-J", "-S", "-30").Output()
 		cmdErr := cmdCtx.Err()
 		cmdCancel()
 		if cmdErr != nil {

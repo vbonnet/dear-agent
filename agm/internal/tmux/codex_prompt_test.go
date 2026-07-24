@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -18,15 +19,22 @@ import (
 func newCodexTestSession(t *testing.T, sessionName string, cmd ...string) string {
 	t.Helper()
 	skipIfNoTmux(t)
-	socketPath := GetSocketPath()
-	exec.Command("tmux", "-S", socketPath, "kill-session", "-t", sessionName).Run()
+	socketDir, err := os.MkdirTemp("", "agm-codex-test")
+	if err != nil {
+		t.Fatalf("create private tmux socket directory: %v", err)
+	}
+	socketPath := filepath.Join(socketDir, "agm.sock")
+	t.Setenv("AGM_TMUX_SOCKET", socketPath)
+	workDir := t.TempDir()
 
-	args := append([]string{"-S", socketPath, "new-session", "-d", "-s", sessionName}, cmd...)
-	if err := exec.Command("tmux", args...).Run(); err != nil {
-		t.Fatalf("Failed to create test session: %v", err)
+	args := append([]string{"-S", socketPath, "new-session", "-d", "-s", sessionName, "-c", workDir}, cmd...)
+	if output, err := exec.Command("tmux", args...).CombinedOutput(); err != nil {
+		os.RemoveAll(socketDir)
+		t.Fatalf("Failed to create test session: %v\n%s", err, output)
 	}
 	t.Cleanup(func() {
-		exec.Command("tmux", "-S", socketPath, "kill-session", "-t", sessionName).Run()
+		exec.Command("tmux", "-S", socketPath, "kill-server").Run()
+		os.RemoveAll(socketDir)
 	})
 	return socketPath
 }
@@ -37,6 +45,13 @@ func currentCodexWelcomeGhostScript() string {
 		"To get started, describe a task or try /review\\n\\n" +
 		"\\033[1m›\\033[0m \\033[2mRun /review on my current changes\\033[0m\\n\\n" +
 		"gpt-5.6 high · ~/src/project\\n'; sleep 30"
+}
+
+func resizeCodexTestWindow(t *testing.T, socketPath, sessionName string) {
+	t.Helper()
+	if output, err := exec.Command("tmux", "-S", socketPath, "resize-window", "-t", sessionName, "-x", "28", "-y", "20").CombinedOutput(); err != nil {
+		t.Fatalf("resize Codex fixture to narrow pane: %v\n%s", err, output)
+	}
 }
 
 func TestIsCodexComposerReady(t *testing.T) {
@@ -432,12 +447,17 @@ func TestGetPaneCommandsIncludesStartCommand(t *testing.T) {
 // keeps the style that distinguishes Codex's suggestion from a human draft.
 func TestIsCodexIdlePreservesCurrentWelcomeGhostStyle(t *testing.T) {
 	sessionName := "test-codex-idle-composer"
-	newCodexTestSession(t, sessionName, "sh", "-c", currentCodexWelcomeGhostScript())
+	socketPath := newCodexTestSession(t, sessionName, "sh", "-c", currentCodexWelcomeGhostScript())
+	resizeCodexTestWindow(t, socketPath, sessionName)
 
 	// Poll briefly: the process takes a moment to render in the pane.
 	deadline := time.Now().Add(5 * time.Second)
 	var idle bool
 	for time.Now().Before(deadline) {
+		raw, captureErr := CapturePaneANSIOutput(sessionName, 30)
+		if captureErr == nil && strings.Contains(stripANSI(raw), "OpenAI Codex") && IsCodexComposerReady(raw) {
+			t.Fatal("physical-row capture unexpectedly classified a wrapped Codex composer as ready")
+		}
 		var err error
 		idle, err = IsCodexIdle(sessionName)
 		if err != nil {
@@ -455,7 +475,8 @@ func TestIsCodexIdlePreservesCurrentWelcomeGhostStyle(t *testing.T) {
 
 func TestWaitForPromptSimplePreservesCurrentCodexWelcomeGhostStyle(t *testing.T) {
 	sessionName := "test-codex-simple-ghost"
-	newCodexTestSession(t, sessionName, "sh", "-c", currentCodexWelcomeGhostScript())
+	socketPath := newCodexTestSession(t, sessionName, "sh", "-c", currentCodexWelcomeGhostScript())
+	resizeCodexTestWindow(t, socketPath, sessionName)
 
 	if err := WaitForPromptSimpleContext(t.Context(), sessionName, 3*time.Second); err != nil {
 		t.Fatalf("WaitForPromptSimpleContext() error = %v, want styled ghost composer readiness", err)
@@ -464,7 +485,8 @@ func TestWaitForPromptSimplePreservesCurrentCodexWelcomeGhostStyle(t *testing.T)
 
 func TestWaitForPromptOrResumeFailurePreservesCurrentCodexWelcomeGhostStyle(t *testing.T) {
 	sessionName := "test-codex-resume-ghost"
-	newCodexTestSession(t, sessionName, "sh", "-c", currentCodexWelcomeGhostScript())
+	socketPath := newCodexTestSession(t, sessionName, "sh", "-c", currentCodexWelcomeGhostScript())
+	resizeCodexTestWindow(t, socketPath, sessionName)
 
 	if err := WaitForPromptOrResumeFailureContext(t.Context(), sessionName, 3*time.Second); err != nil {
 		t.Fatalf("WaitForPromptOrResumeFailureContext() error = %v, want styled ghost composer readiness", err)
@@ -476,7 +498,8 @@ func TestSendMultiLinePromptSafePreservesCurrentCodexWelcomeGhostStyle(t *testin
 	const marker = "AGM-CODEX-GHOST-DELIVERY"
 	script := strings.TrimSuffix(currentCodexWelcomeGhostScript(), "sleep 30") +
 		"IFS= read -r line; printf '\\nreceived:%s\\n' \"$line\"; sleep 30"
-	newCodexTestSession(t, sessionName, "sh", "-c", script)
+	socketPath := newCodexTestSession(t, sessionName, "sh", "-c", script)
+	resizeCodexTestWindow(t, socketPath, sessionName)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
 	defer cancel()
@@ -486,8 +509,8 @@ func TestSendMultiLinePromptSafePreservesCurrentCodexWelcomeGhostStyle(t *testin
 
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		content, err := CapturePaneOutput(sessionName, 30)
-		if err == nil && strings.Contains(content, "received:"+marker) {
+		content, err := CapturePaneLogicalANSIOutput(sessionName, 30)
+		if err == nil && strings.Contains(stripANSI(content), "received:"+marker) {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -584,7 +607,8 @@ printf 'To get started, describe a task or try /review\n\n'
 printf '\033[1m›\033[0m \033[2mRun /review on my current changes\033[0m\n\n'
 printf 'gpt-5.5 high · ~/.agm/sandboxes/example/merged/repo0\n'
 sleep 30`
-	newCodexTestSession(t, sessionName, "sh", "-c", script)
+	socketPath := newCodexTestSession(t, sessionName, "sh", "-c", script)
+	resizeCodexTestWindow(t, socketPath, sessionName)
 
 	if err := WaitForCodexPrompt(sessionName, 10*time.Second); err != nil {
 		t.Errorf("WaitForCodexPrompt failed to detect current styled welcome composer: %v", err)

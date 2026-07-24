@@ -28,7 +28,7 @@ func DetectState(sessionName string) (string, error) {
 	}
 
 	// Parse terminal content for accurate state detection
-	paneContent, err := tmux.CapturePaneANSIOutput(sessionName, 30)
+	paneContent, err := tmux.CapturePaneLogicalANSIOutput(sessionName, 30)
 	if err != nil {
 		// Can't read pane — fall back to DONE (safe default)
 		return manifest.StateDone, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
@@ -76,7 +76,7 @@ func DetectStateWithConfidence(sessionName string) (*DetectionResult, error) {
 		}, nil
 	}
 
-	paneContent, err := tmux.CapturePaneANSIOutput(sessionName, 30)
+	paneContent, err := tmux.CapturePaneLogicalANSIOutput(sessionName, 30)
 	if err != nil {
 		return &DetectionResult{ //nolint:nilerr // intentional: caller signals via separate bool/optional
 			State:      manifest.StateDone,
@@ -197,7 +197,7 @@ func CheckSessionDelivery(tmuxName string) state.CanReceive {
 	}
 
 	// Axis 2: Can we type into it right now?
-	paneContent, err := tmux.CapturePaneANSIOutput(tmuxName, 30)
+	paneContent, err := tmux.CapturePaneLogicalANSIOutput(tmuxName, 30)
 	if err != nil {
 		// Session exists but can't read pane — assume busy, queue
 		return state.CanReceiveQueue

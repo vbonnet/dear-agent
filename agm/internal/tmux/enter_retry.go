@@ -31,7 +31,7 @@ func retryEnterAfterPaste(socketPath, normalizedName string, maxRetries int) err
 		time.Sleep(delay)
 
 		// Capture recent pane content to check if paste is stuck
-		cmd := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedName, "-p", "-e", "-S", "-3")
+		cmd := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedName, "-p", "-e", "-J", "-S", "-3")
 		output, err := cmd.Output()
 		if err != nil {
 			// Can't capture pane — nothing we can do, but don't fail the send.

@@ -109,6 +109,9 @@ func TestStateAndDeliveryPreserveCurrentCodexWelcomeGhostStyle(t *testing.T) {
 		t.Fatalf("create styled Codex fixture: %v\n%s", err, output)
 	}
 	t.Cleanup(func() { tmux.KillSession(sessionName) })
+	if output, err := exec.Command("tmux", "-S", socketPath, "resize-window", "-t", sessionName, "-x", "28", "-y", "20").CombinedOutput(); err != nil {
+		t.Fatalf("resize styled Codex fixture: %v\n%s", err, output)
+	}
 
 	deadline := time.Now().Add(3 * time.Second)
 	for {

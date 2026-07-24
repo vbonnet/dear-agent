@@ -438,7 +438,7 @@ func WaitForPromptSimpleContext(parent context.Context, sessionName string, time
 		// composers. Codex's stable readiness marker ("OpenAI Codex") can sit
 		// well above the footer line after previous prompts/responses.
 		cmdCtx, cmdCancel := context.WithTimeout(ctx, 5*time.Second)
-		output, err := exec.CommandContext(cmdCtx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-e", "-S", "-30").Output()
+		output, err := exec.CommandContext(cmdCtx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-e", "-J", "-S", "-30").Output()
 		cmdErr := cmdCtx.Err()
 		cmdCancel()
 		if cmdErr != nil {
@@ -571,7 +571,7 @@ func WaitForPromptOrResumeFailureContext(parent context.Context, sessionName str
 		// Capture the recent pane tail (from 10 lines into scrollback through
 		// the visible region) so a multi-line failure message - the error plus
 		// the returned shell prompt - is visible in a single check.
-		output, err := exec.CommandContext(ctx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-e", "-S", "-10").Output()
+		output, err := exec.CommandContext(ctx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-e", "-J", "-S", "-10").Output()
 		if err != nil {
 			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
 				continue

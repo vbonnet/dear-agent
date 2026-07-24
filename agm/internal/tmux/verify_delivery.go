@@ -63,7 +63,7 @@ func VerifyPromptDeliveryContext(ctx context.Context, sessionName, promptText st
 		if err := ctx.Err(); err != nil {
 			return PromptDeliveryResult{}, err
 		}
-		styledContent, err := CapturePaneANSIOutputContext(ctx, sessionName, 50)
+		styledContent, err := CapturePaneLogicalANSIOutputContext(ctx, sessionName, 50)
 		if err != nil {
 			return PromptDeliveryResult{}, fmt.Errorf("capture-pane failed during delivery verification: %w", err)
 		}

@@ -229,7 +229,7 @@ func (b *TmuxBackend) GetState(_ context.Context, id manager.SessionID) (manager
 		}, nil
 	}
 
-	paneContent, err := tmux.CapturePaneANSIOutput(name, 30)
+	paneContent, err := tmux.CapturePaneLogicalANSIOutput(name, 30)
 	if err != nil {
 		return manager.StateResult{ //nolint:nilerr // intentional: caller signals via separate bool/optional
 			State:      manager.StateIdle,
@@ -277,7 +277,7 @@ func (b *TmuxBackend) CheckDelivery(ctx context.Context, id manager.SessionID) (
 		return manager.CanReceiveNotFound, nil
 	}
 
-	paneContent, err := tmux.CapturePaneANSIOutputContext(ctx, name, 30)
+	paneContent, err := tmux.CapturePaneLogicalANSIOutputContext(ctx, name, 30)
 	if err != nil {
 		return manager.CanReceiveQueue, fmt.Errorf("capture tmux session %q: %w", name, err)
 	}

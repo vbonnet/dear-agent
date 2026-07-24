@@ -493,7 +493,7 @@ func checkPaneForQueuedInput(ansiContent string, shouldInterrupt bool) error {
 func verifyAndResubmitQueuedPrompt(socketPath, normalizedTarget string) {
 	for retry := 0; retry < 5; retry++ {
 		time.Sleep(500 * time.Millisecond)
-		cmdCheck := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedTarget, "-p", "-e", "-S", "-5")
+		cmdCheck := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedTarget, "-p", "-e", "-J", "-S", "-5")
 		checkOutput, err := cmdCheck.Output()
 		if err != nil {
 			return
@@ -511,7 +511,7 @@ func verifyAndResubmitQueuedPrompt(socketPath, normalizedTarget string) {
 		cmdResubmit := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedTarget, "-H", "0d")
 		_ = cmdResubmit.Run()
 		time.Sleep(300 * time.Millisecond)
-		cmdVerify := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedTarget, "-p", "-e", "-S", "-5")
+		cmdVerify := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedTarget, "-p", "-e", "-J", "-S", "-5")
 		verifyOutput, err := cmdVerify.Output()
 		if err == nil && !hasQueuedInput(stripANSI(string(verifyOutput))) {
 			return

@@ -99,6 +99,9 @@ func TestBackendStateAndDeliveryPreserveCurrentCodexWelcomeGhostStyle(t *testing
 	if output, err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", sessionName, "sh", "-c", script).CombinedOutput(); err != nil {
 		t.Fatalf("create styled Codex fixture: %v\n%s", err, output)
 	}
+	if output, err := exec.Command("tmux", "-S", socketPath, "resize-window", "-t", sessionName, "-x", "28", "-y", "20").CombinedOutput(); err != nil {
+		t.Fatalf("resize styled Codex fixture: %v\n%s", err, output)
+	}
 
 	backend := New()
 	deadline := time.Now().Add(3 * time.Second)

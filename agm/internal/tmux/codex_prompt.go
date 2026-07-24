@@ -237,7 +237,7 @@ func isCodexGhostComposerLine(line string) bool {
 // know the session is alive can treat that as "not idle".
 func IsCodexIdle(sessionName string) (bool, error) {
 	output, err := exec.Command("tmux", "-S", GetSocketPath(),
-		"capture-pane", "-t", NormalizeTmuxSessionName(sessionName), "-p", "-e").Output()
+		"capture-pane", "-t", NormalizeTmuxSessionName(sessionName), "-p", "-e", "-J").Output()
 	if err != nil {
 		return false, fmt.Errorf("capture-pane failed: %w", err)
 	}
@@ -317,7 +317,7 @@ func WaitForCodexPromptContext(parent context.Context, sessionName string, timeo
 		// Capture the recent pane tail (10 lines into scrollback through the
 		// visible region) so a trust dialog and the composer that follows are
 		// both observable across consecutive checks.
-		output, err := exec.CommandContext(ctx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-e", "-S", "-10").Output()
+		output, err := exec.CommandContext(ctx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-e", "-J", "-S", "-10").Output()
 		if err != nil {
 			if ctx.Err() != nil {
 				continue
