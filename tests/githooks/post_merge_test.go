@@ -9,12 +9,32 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/vbonnet/dear-agent/internal/gittest"
 )
+
+// lockedBuffer safely captures concurrently copied stdout and stderr from a
+// child hook while the test polls its output for a timeout diagnostic.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.String()
+}
 
 // hookPath resolves scripts/git-hooks/post-merge relative to this test file so
 // the test is independent of the working directory `go test` chooses.
@@ -135,7 +155,7 @@ func swept(t *testing.T, sentinel string) bool {
 	return err == nil
 }
 
-func waitForFile(t *testing.T, path string, timeout time.Duration, message string, output *bytes.Buffer) {
+func waitForFile(t *testing.T, path string, timeout time.Duration, message string, output *lockedBuffer) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for {
@@ -511,6 +531,7 @@ func TestRebuild_AGMPairBuildFailurePreservesInstalledPair(t *testing.T) {
 		"HOME="+t.TempDir(),
 		"GOBIN="+gobin,
 		"PATH="+goDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"DEAR_AGENT_MANAGED_REPO_ROOTS="+repo,
 		"AGM_POST_MERGE_SWEEP=0",
 		"STUB_GO_FAIL_PKG=./agm/cmd/agm-reaper",
 	)
@@ -541,13 +562,14 @@ func TestRebuild_AGMPairActivationIsSerializedAcrossHookProcesses(t *testing.T) 
 		"HOME="+t.TempDir(),
 		"GOBIN="+gobin,
 		"PATH="+goDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"DEAR_AGENT_MANAGED_REPO_ROOTS="+repo,
 		"AGM_POST_MERGE_SWEEP=0",
 		"STUB_GO_BLOCK_PKG=./agm/cmd/agm",
 		"STUB_GO_BLOCK_READY="+ready,
 		"STUB_GO_BLOCK_RELEASE="+release,
 	)
 
-	var firstOutput bytes.Buffer
+	var firstOutput lockedBuffer
 	first := exec.Command("bash", hookPath(t))
 	first.Dir = repo
 	first.Env = baseEnv
@@ -575,7 +597,7 @@ func TestRebuild_AGMPairActivationIsSerializedAcrossHookProcesses(t *testing.T) 
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	var secondOutput bytes.Buffer
+	var secondOutput lockedBuffer
 	second := exec.CommandContext(ctx, "bash", hookPath(t))
 	second.Dir = repo
 	second.Env = baseEnv
@@ -634,13 +656,14 @@ func TestRebuild_AGMPairRefreshesTrunkAfterWaitingForLock(t *testing.T) {
 		"HOME="+t.TempDir(),
 		"GOBIN="+gobin,
 		"PATH="+goDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"DEAR_AGENT_MANAGED_REPO_ROOTS="+firstCheckout+string(os.PathListSeparator)+secondCheckout,
 		"AGM_POST_MERGE_SWEEP=0",
 		"STUB_GO_BLOCK_PKG=./agm/cmd/agm",
 		"STUB_GO_BLOCK_READY="+ready,
 		"STUB_GO_BLOCK_RELEASE="+release,
 	)
 
-	var firstOutput bytes.Buffer
+	var firstOutput lockedBuffer
 	first := exec.Command("bash", hookPath(t))
 	first.Dir = firstCheckout
 	first.Env = baseEnv
@@ -666,7 +689,7 @@ func TestRebuild_AGMPairRefreshesTrunkAfterWaitingForLock(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	var secondOutput bytes.Buffer
+	var secondOutput lockedBuffer
 	second := exec.CommandContext(ctx, "bash", hookPath(t))
 	second.Dir = secondCheckout
 	second.Env = baseEnv
@@ -870,13 +893,14 @@ func TestRebuild_WayfinderRefreshesTrunkAfterWaitingForLock(t *testing.T) {
 		"HOME="+t.TempDir(),
 		"GOBIN="+gobin,
 		"PATH="+goDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"DEAR_AGENT_MANAGED_REPO_ROOTS="+firstCheckout+string(os.PathListSeparator)+secondCheckout,
 		"AGM_POST_MERGE_SWEEP=0",
 		"STUB_GO_BLOCK_PKG=./wayfinder/cmd/wayfinder",
 		"STUB_GO_BLOCK_READY="+ready,
 		"STUB_GO_BLOCK_RELEASE="+release,
 	)
 
-	var firstOutput bytes.Buffer
+	var firstOutput lockedBuffer
 	first := exec.Command("bash", hookPath(t))
 	first.Dir = firstCheckout
 	first.Env = baseEnv
@@ -902,7 +926,7 @@ func TestRebuild_WayfinderRefreshesTrunkAfterWaitingForLock(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	var secondOutput bytes.Buffer
+	var secondOutput lockedBuffer
 	second := exec.CommandContext(ctx, "bash", hookPath(t))
 	second.Dir = secondCheckout
 	second.Env = baseEnv
