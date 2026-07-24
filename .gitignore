@@ -97,3 +97,6 @@ infra/*.tfvars
 
 # Compiled token-refresher binary (built into the repo root by `go build ./cmd/token-refresher`)
 /token-refresher
+
+# Compiled ai-review binary (built into the repo root by `go build ./cmd/ai-review`)
+/ai-review
