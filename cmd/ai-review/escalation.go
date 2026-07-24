@@ -40,7 +40,8 @@ var escalationRules = []escalationRule{
 			// allowlist of specific packages is structurally incomplete (a new
 			// owner can always be added). Over-escalation here is the safe
 			// direction — REVIEW.md §3 calls escalation "a correct outcome".
-			return base == "settings.json" || base == "settings.local.json" ||
+			return strings.HasPrefix(lower, "agm/internal/rbac/") ||
+				base == "settings.json" || base == "settings.local.json" ||
 				strings.Contains(lower, "permission") ||
 				strings.Contains(lower, "authorization") ||
 				strings.Contains(lower, "authz")
@@ -100,7 +101,8 @@ var escalationRules = []escalationRule{
 		match: func(p string) bool {
 			lower := strings.ToLower(p)
 			base := basename(lower)
-			return strings.HasSuffix(lower, ".sql") ||
+			return strings.HasPrefix(lower, "agm/internal/dolt/") ||
+				strings.HasSuffix(lower, ".sql") ||
 				strings.Contains(lower, "/migrations/") ||
 				strings.Contains(lower, "/migration/") ||
 				base == "schema.sql" || base == "schema.go" ||

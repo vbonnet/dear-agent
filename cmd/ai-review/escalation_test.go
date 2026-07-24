@@ -15,6 +15,7 @@ func TestEscalationTriggers_Paths(t *testing.T) {
 		// Permission/authorization surfaces are matched by concept, so a new
 		// owning package does not silently escape escalation.
 		{"permission parity pkg", []string{"agm/internal/permissionparity/parity.go"}, true},
+		{"RBAC policy owner", []string{"agm/internal/rbac/profiles.go"}, true},
 		{"pi authorization ext", []string{"agm/internal/permissionparity/piadapter/pi_authorization_extension.js"}, true},
 		{"hook installer", []string{"agm/cmd/agm/install_hooks.go"}, true},
 		{"hook script", []string{".config/claude-code/hooks/pretool-bash-write-guard"}, true},
@@ -35,6 +36,7 @@ func TestEscalationTriggers_Paths(t *testing.T) {
 		// REVIEW.md §3 lists database schema changes explicitly.
 		{"sql migration", []string{"agm/internal/dolt/migrations/0007_add_col.sql"}, true},
 		{"schema.sql", []string{"agm/internal/db/schema.sql"}, true},
+		{"Dolt schema owner", []string{"agm/internal/dolt/adapter.go"}, true},
 		{"migrations dir go file", []string{"internal/store/migrations/002_users.go"}, true},
 		{"launchd plist", []string{"deploy/launchd/com.example.plist"}, true},
 		{"systemd service", []string{"agm/systemd/git-auto-sync.service"}, true},
