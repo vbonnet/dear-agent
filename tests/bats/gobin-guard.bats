@@ -75,6 +75,13 @@ trail_lines() {
 	assert_success
 }
 
+@test "independent auditor rejects a multi-line heartbeat" {
+	printf '1\n2\n' >"$HEARTBEAT"
+	run env HOME="$FAKE_HOME" GOBIN_GUARD_TRAIL="$TRAIL" GOBIN_GUARD_HEARTBEAT="$HEARTBEAT" GOBIN_GUARD_NOTIFY=0 /bin/sh "$AUDIT_SCRIPT"
+	assert_failure 1
+	assert_output --partial "heartbeat is missing or invalid"
+}
+
 @test "missing GOBIN directory: exit 1, escalates" {
     # No go/bin at all — the exact 2026-07-15 failure mode.
     run_guard

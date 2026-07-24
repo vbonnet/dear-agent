@@ -5,8 +5,7 @@ home=${HOME:?HOME is not set}; heartbeat=${GOBIN_GUARD_HEARTBEAT:-$home/.local/s
 trail=${GOBIN_GUARD_TRAIL:-$home/.agm/vroom/trail.jsonl}; max_age=${GOBIN_GUARD_MAX_AGE:-180}
 case "$max_age" in *[!0-9]*|'') echo "gobin-guard-audit: invalid GOBIN_GUARD_MAX_AGE" >&2; exit 2;; esac
 now=$(date +%s); last=$(cat "$heartbeat" 2>/dev/null || true); reason=
-if [ -z "$last" ] || printf %s "$last" | grep -q '[^0-9]'; then reason="heartbeat is missing or invalid: $heartbeat"
-elif [ "$last" -gt "$now" ] || [ $((now-last)) -gt "$max_age" ]; then reason="heartbeat is stale: $heartbeat"; fi
+case "$last" in ''|*[!0-9]*) reason="heartbeat is missing or invalid: $heartbeat";; *) [ "$last" -gt "$now" ] || [ $((now-last)) -gt "$max_age" ] && reason="heartbeat is stale: $heartbeat";; esac
 [ -z "$reason" ] && exit 0
 trail_dir=$(dirname "$trail")
 if mkdir -p "$trail_dir" 2>/dev/null; then

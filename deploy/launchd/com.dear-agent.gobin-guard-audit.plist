@@ -8,7 +8,7 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/sh</string>
-    <string>__HOME__/.local/state/dear-agent/bin/gobin-guard-audit.sh</string>
+    <string>__HOME__/.local/lib/dear-agent/gobin-guard-audit.sh</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>

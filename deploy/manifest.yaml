@@ -23,7 +23,8 @@
 artifacts:
   # --- GOBIN guard and independent liveness auditor (ce-24f1) -------------
   # Both scripts intentionally live outside ~/go/bin so a GOBIN wipe cannot
-  # remove the detector or its observer. dear-deploy owns installation and
+  # remove them. The auditor has a separate install directory from the guard,
+  # so a failed guard deployment cannot also remove its observer. dear-deploy owns installation and
   # drift auditing; launchd activation remains an explicit operator action.
   - name: gobin-guard
     source: scripts/gobin-guard.sh
@@ -32,7 +33,7 @@ artifacts:
 
   - name: gobin-guard-audit
     source: scripts/gobin-guard-audit.sh
-    deployed: ~/.local/state/dear-agent/bin/gobin-guard-audit.sh
+    deployed: ~/.local/lib/dear-agent/gobin-guard-audit.sh
     mode: "0755"
 
   - name: com.dear-agent.gobin-guard
