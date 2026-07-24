@@ -61,11 +61,9 @@ it keeps the access token so fresh that other clients rarely need to refresh at
 all. Removing it without evidence would widen the window in which some other
 client decides to refresh on its own.
 
-Both observed deaths instead sit across a **machine sleep/wake boundary**, which
-is consistent with a wake-time thundering herd: every client wakes with an
-expired access token, they all read the same refresh token before any of them
-writes back, one wins and the rest replay. This is a hypothesis, not a confirmed
-cause — see "Identifying the culprit" below.
+An earlier sleep/wake thundering-herd hypothesis was superseded by the
+fingerprint evidence below. The many-client structure is a standing risk, but
+it was not the cause of either observed death.
 
 ## The confirmed cause (2026-07-21, ce-77ip.7)
 

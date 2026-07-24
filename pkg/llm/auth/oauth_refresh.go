@@ -293,9 +293,11 @@ func (r OAuthResolver) exchange(ctx context.Context, refreshToken string) (token
 	var wroteRequest bool
 	trace := &httptrace.ClientTrace{
 		WroteRequest: func(info httptrace.WroteRequestInfo) {
-			if info.Err == nil {
-				wroteRequest = true
-			}
+			// A write error does not prove zero transmission: the server can
+			// consume part or all of the request before the client reports it.
+			// Once this callback fires, retrying a single-use refresh token is
+			// unsafe unless the transport can prove no bytes were sent.
+			wroteRequest = true
 		},
 	}
 	ctx = httptrace.WithClientTrace(ctx, trace)

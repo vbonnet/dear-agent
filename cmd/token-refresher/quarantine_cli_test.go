@@ -146,6 +146,12 @@ func TestDefaultQuarantinePathForCredentials(t *testing.T) {
 	}
 }
 
+func TestDefaultQuarantinePathForExplicitDefaultCredentials(t *testing.T) {
+	if got, want := defaultQuarantinePathForCredentials(defaultCredentialsPath()), defaultQuarantinePath(); got != want {
+		t.Errorf("explicit default credential marker = %q, want %q", got, want)
+	}
+}
+
 // -check must surface an active quarantine; it is how an operator finds out why
 // refreshes stopped.
 func TestRun_CheckReportsQuarantine(t *testing.T) {

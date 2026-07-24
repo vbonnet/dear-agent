@@ -409,10 +409,29 @@ func defaultQuarantinePath() string {
 // clearing one another's quarantine marker. An explicitly supplied
 // -quarantine path remains an operator-controlled shared marker when needed.
 func defaultQuarantinePathForCredentials(credentialsPath string) string {
-	if credentialsPath == "" {
+	credentialsPath = canonicalCredentialsPath(credentialsPath)
+	if credentialsPath == defaultCredentialsPath() {
 		return defaultQuarantinePath()
 	}
 	return credentialsPath + ".refresh-quarantine.json"
+}
+
+func defaultCredentialsPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".claude", ".credentials.json")
+}
+
+func canonicalCredentialsPath(path string) string {
+	if path == "" {
+		return defaultCredentialsPath()
+	}
+	if absolute, err := filepath.Abs(path); err == nil {
+		return filepath.Clean(absolute)
+	}
+	return filepath.Clean(path)
 }
 
 func msOrZero(t time.Time) int64 {
