@@ -302,6 +302,12 @@ PreToolUse            5           0           5           Before a tool exec
 SessionStart          1           0           1           When a new session
 
 Press t to trust all; enter to review hooks; esc to close`
+	styledHookDashboardControls := strings.Replace(
+		hookDashboard,
+		"Press t to trust all",
+		"Press \x1b[1mt\x1b[0m to trust all",
+		1,
+	)
 	const composer = `│ >_ OpenAI Codex (v0.145.0) │
 │ model: gpt-5.6 high /model to change │
 ╰──────────────────────────────╯
@@ -332,6 +338,11 @@ gpt-5.6 high · ~/src/project`
 		{
 			name:     "active dashboard redraw below retained composer",
 			content:  hookDashboard + "\n" + composer + "\n" + hookDashboard,
+			expected: true,
+		},
+		{
+			name:     "styled dashboard control remains review-required",
+			content:  styledHookDashboardControls,
 			expected: true,
 		},
 		{
@@ -677,7 +688,7 @@ func TestWaitForCodexPromptFailsFastForHookDashboardWithoutInput(t *testing.T) {
 	inputPath := fmt.Sprintf("%s/input-byte", t.TempDir())
 	script := fmt.Sprintf(`stty -echo -icanon min 1 time 0
 printf "OpenAI Codex (v0.145.0)\n/model to change\n›\ngpt-5.6 high · ~/src/project\n"
-printf "Hooks\nLifecycle hooks from config and enabled plugins.\n\n⚠ 11 hooks need review before they can run.\n\nEvent Installed Active Review Description\nPreToolUse 5 0 5 Before a tool exec\n\nPress t to trust all; enter to review hooks; esc to close\n"
+printf "Hooks\nLifecycle hooks from config and enabled plugins.\n\n⚠ 11 hooks need review before they can run.\n\nEvent Installed Active Review Description\nPreToolUse 5 0 5 Before a tool exec\n\nPress \033[1mt\033[0m to trust all; enter to review hooks; esc to close\n"
 dd bs=1 count=1 of=%q 2>/dev/null
 sleep 30`, inputPath)
 	newCodexTestSession(t, sessionName, "sh", "-c", script)

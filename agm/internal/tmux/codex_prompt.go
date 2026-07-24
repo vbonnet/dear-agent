@@ -95,15 +95,16 @@ func IsCodexHookReviewRequired(content string) bool {
 	if trimmed == "" {
 		return false
 	}
-	lower := strings.ToLower(trimmed)
+	plain := stripANSI(trimmed)
+	lower := strings.ToLower(plain)
 
 	if dashboardStart := strings.LastIndex(lower, "lifecycle hooks from config and enabled plugins."); dashboardStart >= 0 {
-		dashboard := trimmed[dashboardStart:]
 		lowerDashboard := lower[dashboardStart:]
-		controls := strings.LastIndex(lowerDashboard, "press t to trust all; enter to review hooks; esc to close")
+		const dashboardControls = "press t to trust all; enter to review hooks; esc to close"
+		controls := strings.LastIndex(lowerDashboard, dashboardControls)
 		if controls >= 0 &&
 			strings.Contains(lowerDashboard[:controls], "hooks need review before they can run") &&
-			!IsCodexComposerReady(dashboard[controls:]) {
+			!IsCodexComposerReady(styledContentAfterLastLineContaining(trimmed, dashboardControls)) {
 			return true
 		}
 	}
@@ -112,7 +113,6 @@ func IsCodexHookReviewRequired(content string) bool {
 	if selectorStart < 0 {
 		return false
 	}
-	selector := trimmed[selectorStart:]
 	lowerSelector := lower[selectorStart:]
 	if !strings.Contains(lowerSelector, "review hooks") ||
 		!strings.Contains(lowerSelector, "continue without trusting") ||
@@ -122,7 +122,27 @@ func IsCodexHookReviewRequired(content string) bool {
 
 	// Codex retains prior TUI output in scrollback. Once a later composer owns
 	// the pane tail, the earlier review selector is no longer active.
-	return !IsCodexComposerReady(selector)
+	return !IsCodexComposerReady(styledContentFromLastLineContaining(trimmed, "hooks need review"))
+}
+
+func styledContentFromLastLineContaining(content, lowerNeedle string) string {
+	lines := strings.Split(content, "\n")
+	for i, line := range slices.Backward(lines) {
+		if strings.Contains(strings.ToLower(stripANSI(line)), lowerNeedle) {
+			return strings.Join(lines[i:], "\n")
+		}
+	}
+	return ""
+}
+
+func styledContentAfterLastLineContaining(content, lowerNeedle string) string {
+	lines := strings.Split(content, "\n")
+	for i, line := range slices.Backward(lines) {
+		if strings.Contains(strings.ToLower(stripANSI(line)), lowerNeedle) {
+			return strings.Join(lines[i+1:], "\n")
+		}
+	}
+	return ""
 }
 
 // CodexHookReviewError returns the typed, actionable startup failure used by
