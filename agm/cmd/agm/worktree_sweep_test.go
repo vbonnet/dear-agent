@@ -155,12 +155,21 @@ func TestPrintSweepReport_OrphanBranch(t *testing.T) {
 // withSweepFlags restores the package-level sweep flags and the live-set seam
 // after a test mutates them, so ordering between tests stays irrelevant.
 func withSweepFlags(t *testing.T, dir string, execute bool, lookup func(context.Context) (map[string]bool, error)) {
+	withSweepLookups(t, dir, execute, lookup, lookup)
+}
+
+func withSweepLookups(t *testing.T, dir string, execute bool,
+	lookup, executableLookup func(context.Context) (map[string]bool, error),
+) {
 	t.Helper()
-	prevDir, prevExecute, prevLookup := sweepWorktreesDir, sweepExecute, sweepActiveSessions
+	prevDir, prevExecute, prevLookup, prevExecutableLookup :=
+		sweepWorktreesDir, sweepExecute, sweepActiveSessions, sweepExecutableActiveSessions
 	t.Cleanup(func() {
-		sweepWorktreesDir, sweepExecute, sweepActiveSessions = prevDir, prevExecute, prevLookup
+		sweepWorktreesDir, sweepExecute, sweepActiveSessions, sweepExecutableActiveSessions =
+			prevDir, prevExecute, prevLookup, prevExecutableLookup
 	})
-	sweepWorktreesDir, sweepExecute, sweepActiveSessions = dir, execute, lookup
+	sweepWorktreesDir, sweepExecute, sweepActiveSessions, sweepExecutableActiveSessions =
+		dir, execute, lookup, executableLookup
 }
 
 func failingActiveSessions(context.Context) (map[string]bool, error) {
@@ -182,6 +191,21 @@ func TestWorktreeSweep_ExecuteFailsClosedOnActiveLookupFailure(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}
+	}
+}
+
+func TestWorktreeSweep_ExecuteRejectsTmuxOnlyLiveSet(t *testing.T) {
+	tmuxOnly := func(context.Context) (map[string]bool, error) {
+		return map[string]bool{"tmux-session": true}, nil
+	}
+	withSweepLookups(t, t.TempDir(), true, tmuxOnly, failingActiveSessions)
+
+	err := runWorktreeSweep(worktreeSweepCmd, nil)
+	if err == nil {
+		t.Fatal("--execute must reject a tmux-only live-session lookup")
+	}
+	if !strings.Contains(err.Error(), "refusing to execute") {
+		t.Errorf("error %q does not refuse execution", err)
 	}
 }
 

@@ -1,8 +1,9 @@
 package safegit
 
 import (
-	"os/exec"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestIsProtectedBranch(t *testing.T) {
@@ -68,18 +69,10 @@ func TestSafeRebase_DryRun(t *testing.T) {
 
 func setupGitRepo(t *testing.T, dir, branch string) {
 	t.Helper()
-	cmds := [][]string{
-		{"git", "-C", dir, "init", "-b", branch},
-		{"git", "-C", dir, "config", "user.email", "test@test.com"},
-		{"git", "-C", dir, "config", "user.name", "Test"},
-		{"git", "-C", dir, "commit", "--allow-empty", "-m", "initial"},
-	}
-	for _, args := range cmds {
-		cmd := exec.Command(args[0], args[1:]...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%v failed: %v\n%s", args, err, out)
-		}
-	}
+	gittest.Run(t, dir, "init", "-b", branch)
+	gittest.Run(t, dir, "config", "user.email", "test@test.com")
+	gittest.Run(t, dir, "config", "user.name", "Test")
+	gittest.Run(t, dir, "commit", "--allow-empty", "-m", "initial")
 }
 
 func contains(s, sub string) bool {

@@ -104,9 +104,12 @@ func init() {
 		"Print only orphan branches (commits above main merge-base, no open or merged PR)")
 }
 
-// sweepActiveSessions is the seam the live-set lookup goes through so the
-// fail-closed path can be exercised without a Dolt or tmux host.
-var sweepActiveSessions = getActiveSessions
+// The regular lookup preserves tmux fallback for dry-run reporting. Execute
+// must use the authoritative store: a live API-only session has no tmux pane.
+var (
+	sweepActiveSessions           = getActiveSessions
+	sweepExecutableActiveSessions = getActiveSessionsFromDolt
+)
 
 func runWorktreeSweep(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
@@ -118,14 +121,18 @@ func runWorktreeSweep(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Active-session set: reused from the audit-resources path so the sweep
-	// shares one definition of "live" (Dolt, tmux fallback). A failed lookup
-	// is fatal for --execute: fewer ACTIVE matches is not "more
+	// Active-session set: dry-run reporting may fall back to tmux, but --execute
+	// must use Dolt's authoritative lifecycle records. A failed lookup is fatal
+	// for --execute: fewer ACTIVE matches is not "more
 	// conservative" for a command that deletes — it is exactly how two live
 	// worktrees were reaped during the 2026-07-10 audit (ce-3knl.1). The
 	// merge/dirty guards do not compensate, because a live worktree sitting
 	// clean at origin/main classifies as MERGED (ce-3ch7).
-	active, err := sweepActiveSessions(ctx)
+	lookup := sweepActiveSessions
+	if sweepExecute {
+		lookup = sweepExecutableActiveSessions
+	}
+	active, err := lookup(ctx)
 	activeKnown := err == nil
 	if err != nil {
 		if sweepExecute {

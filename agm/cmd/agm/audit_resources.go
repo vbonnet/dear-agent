@@ -248,31 +248,44 @@ func scanPrunableRefs(repoDirs []string) []orphanedWorktree {
 	return orphans
 }
 
-// getActiveSessions returns a set of active session names from Dolt, falling
-// back to tmux session names if Dolt is unavailable.
-func getActiveSessions(ctx context.Context) (map[string]bool, error) {
+// getActiveSessionsFromDolt returns the authoritative active-session set.
+// Callers that perform destructive maintenance must use this rather than a
+// process-local fallback, because API-only sessions do not own a tmux pane.
+func getActiveSessionsFromDolt(ctx context.Context) (map[string]bool, error) {
 	active := make(map[string]bool)
 
-	// Try Dolt first
 	doltConfig, err := dolt.DefaultConfig()
+	if err != nil {
+		return active, fmt.Errorf("load Dolt config: %w", err)
+	}
+	adapter, err := dolt.New(doltConfig)
+	if err != nil {
+		return active, fmt.Errorf("open Dolt session store: %w", err)
+	}
+	defer func() { _ = adapter.Close() }()
+	sessions, err := adapter.ListActiveSessions(ctx)
+	if err != nil {
+		return active, fmt.Errorf("list active sessions from Dolt: %w", err)
+	}
+	for _, s := range sessions {
+		active[s] = true
+	}
+	return active, nil
+}
+
+// getActiveSessions returns a set of active session names from Dolt, falling
+// back to tmux session names if Dolt is unavailable. This is suitable for
+// read-only auditing, but not for destructive maintenance.
+func getActiveSessions(ctx context.Context) (map[string]bool, error) {
+	active, err := getActiveSessionsFromDolt(ctx)
 	if err == nil {
-		adapter, err := dolt.New(doltConfig)
-		if err == nil {
-			defer func() { _ = adapter.Close() }()
-			sessions, err := adapter.ListActiveSessions(ctx)
-			if err == nil {
-				for _, s := range sessions {
-					active[s] = true
-				}
-				return active, nil
-			}
-		}
+		return active, nil
 	}
 
 	// Fallback: tmux sessions
 	tmuxSessions, tmuxErr := listTmuxSessionNames()
 	if tmuxErr != nil {
-		return active, fmt.Errorf("dolt unavailable and tmux fallback failed: %w", tmuxErr)
+		return active, fmt.Errorf("Dolt active-session lookup failed (%v) and tmux fallback failed: %w", err, tmuxErr)
 	}
 	for _, name := range tmuxSessions {
 		active[name] = true
