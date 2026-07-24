@@ -285,7 +285,7 @@ func getActiveSessions(ctx context.Context) (map[string]bool, error) {
 	// Fallback: tmux sessions
 	tmuxSessions, tmuxErr := listTmuxSessionNames()
 	if tmuxErr != nil {
-		return active, fmt.Errorf("Dolt active-session lookup failed (%w) and tmux fallback failed: %w", err, tmuxErr)
+		return active, fmt.Errorf("dolt active-session lookup failed (%w) and tmux fallback failed: %w", err, tmuxErr)
 	}
 	for _, name := range tmuxSessions {
 		active[name] = true
