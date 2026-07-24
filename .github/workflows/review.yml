@@ -49,6 +49,20 @@ jobs:
     timeout-minutes: 25
 
     steps:
+      # This is intentionally first. Native pull_request_target checks attach
+      # to the protected base, so a previous head success must be superseded
+      # before any fallible checkout, fetch, or override preparation runs.
+      - name: Mark reviewed head pending
+        id: pending
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          check_id="$(gh api --method POST "repos/$REPO/check-runs" -f name='5-Dimension AI Review' -f head_sha="$HEAD_SHA" -f status=in_progress -f output[title]='5-Dimension AI Review' -f output[summary]='Trusted review gate is running.' --jq .id)"
+          echo "check_id=$check_id" >> "$GITHUB_OUTPUT"
+
       # SECURITY: check out the *base* (protected) revision, not the PR merge
       # revision. The reviewer is the thing enforcing the gate, so it must never
       # be code the PR under review controls: a PR could otherwise replace
@@ -157,22 +171,21 @@ jobs:
             --jq '.[] | select(.user.login == "github-actions[bot]") | .body' 2>/dev/null | \
             sed -n 's/^<!-- ai-review-override-sha:\([0-9a-f]\{40\}\) -->$/\1/p' | \
             grep -Fx "$reviewed_head" | tail -n 1 || true)"
-          if printf '%s\n' "$labels" | grep -q '"ai-review:override"' && [ "$attested_head" = "$reviewed_head" ]; then
+          # PR-controlled pull_request workflows can post as
+          # github-actions[bot], so a bot-authored marker alone is not an
+          # authorization decision. Bind the active label to its latest actor
+          # and require GitHub to verify that actor has maintainer authority.
+          label_actor="$(gh api --paginate "repos/$REPO/issues/$PR/events?per_page=100" \
+            --jq '.[] | select(.event == "labeled" and .label.name == "ai-review:override") | .actor.login' 2>/dev/null | tail -n 1 || true)"
+          label_permission=""
+          if [ -n "$label_actor" ]; then
+            label_permission="$(gh api "repos/$REPO/collaborators/$label_actor/permission" --jq .permission 2>/dev/null || true)"
+          fi
+          if printf '%s\n' "$labels" | grep -q '"ai-review:override"' && [ "$attested_head" = "$reviewed_head" ] && { [ "$label_permission" = maintain ] || [ "$label_permission" = admin ]; }; then
             echo "active=true" >> "$GITHUB_OUTPUT"
           else
             echo "active=false" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Mark reviewed head pending
-        id: pending
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          check_id="$(gh api --method POST "repos/$REPO/check-runs" -f name='5-Dimension AI Review' -f head_sha="$HEAD_SHA" -f status=in_progress -f output[title]='5-Dimension AI Review' -f output[summary]='Trusted review gate is running.' --jq .id)"
-          echo "check_id=$check_id" >> "$GITHUB_OUTPUT"
 
       - name: Run AI review gate
         id: gate

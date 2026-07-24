@@ -106,8 +106,9 @@ malicious maintainer with push access.
 
 ### Human override (the verified fallback)
 
-A maintainer who has consciously reviewed the change can apply the
-`ai-review:override` label. The trusted workflow records the current head SHA
+A repository maintainer or administrator who has consciously reviewed the
+change can apply the `ai-review:override` label. The trusted workflow verifies
+that label actor's GitHub permission, then records the current head SHA
 in a bot-authored PR comment, and the gate passes only while that attestation
 matches the current head. A later push removes the label and invalidates the
 attestation. The override is therefore auditable, revision-bound, and requires
