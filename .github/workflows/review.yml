@@ -163,6 +163,17 @@ jobs:
             echo "active=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Mark reviewed head pending
+        id: pending
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          check_id="$(gh api --method POST "repos/$REPO/check-runs" -f name='5-Dimension AI Review' -f head_sha="$HEAD_SHA" -f status=in_progress -f output[title]='5-Dimension AI Review' -f output[summary]='Trusted review gate is running.' --jq .id)"
+          echo "check_id=$check_id" >> "$GITHUB_OUTPUT"
+
       - name: Run AI review gate
         id: gate
         continue-on-error: true
@@ -219,9 +230,7 @@ jobs:
           set -euo pipefail
           conclusion=failure
           [ "$OUTCOME" = success ] && conclusion=success
-          gh api --method POST "repos/$REPO/check-runs" \
-            -f name='5-Dimension AI Review' \
-            -f head_sha="$HEAD_SHA" \
+          gh api --method PATCH "repos/$REPO/check-runs/${{ steps.pending.outputs.check_id }}" \
             -f status=completed \
             -f conclusion="$conclusion" \
             -f output[title]='5-Dimension AI Review' \

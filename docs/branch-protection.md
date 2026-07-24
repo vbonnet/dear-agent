@@ -42,7 +42,9 @@ mode behind the [phantom Trivy check](https://github.com/vbonnet/engram-research
 | `Vulnerability Scan` | `sbom-scan.yml` |
 | `5-Dimension AI Review` | `review.yml` |
 
-All seven run on `pull_request` targeting `main`. **Before adding/removing a
+Six checks run on `pull_request` targeting `main`; `5-Dimension AI Review`
+runs on `pull_request_target` and publishes its trusted result explicitly on
+the reviewed head. **Before adding/removing a
 required check, confirm a job emits a check run with that exact context name**
 (matrix suffixes included) on PRs to `main` — otherwise the gate becomes
 unsatisfiable.

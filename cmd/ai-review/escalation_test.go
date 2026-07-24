@@ -9,6 +9,7 @@ func TestEscalationTriggers_Paths(t *testing.T) {
 		want  bool
 	}{
 		{"workflow edit", []string{".github/workflows/review.yml"}, true},
+		{"review gate implementation", []string{"cmd/ai-review/escalation.go"}, true},
 		{"ruleset edit", []string{".github/rulesets/main.json"}, true},
 		{"settings.json", []string{".claude/settings.json"}, true},
 		// Permission/authorization surfaces are matched by concept, so a new

@@ -140,6 +140,7 @@ var securityBoundaryDirs = []string{
 	"internal/safegit/",
 	"internal/writeguard/",
 	"pkg/fsguard/",
+	"cmd/ai-review/",
 }
 
 // basename returns the final path element.

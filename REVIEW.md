@@ -95,21 +95,14 @@ API failure, synthesis failure, an unparseable outcome, or an oversize diff, all
 
 ### Known residual risk: workflow-definition trust
 
-The reviewer *binary* is built from the protected base revision, and the PR
-revision is only ever diffed, never executed. But GitHub evaluates a
-`pull_request` workflow **definition** from the PR's own revision, so an author
-with push access to a same-repo branch can still edit `review.yml` itself.
+The reviewer binary and workflow definition are loaded from the protected base
+revision; the PR revision is only ever diffed, never executed.
 
-Two things bound this, neither of which fully closes it:
+Changes to either `.github/workflows/` or `cmd/ai-review/` are deterministic
+§3 escalation triggers, so they require human review before becoming trusted.
 
-- Any change under `.github/workflows/` is a deterministic §3 escalation
-  trigger, so such a PR is forced to `needs-human-review`.
-- The check is required, so removing or renaming the job leaves the required
-  context unreported and the PR blocked rather than merged.
-
-Closing it completely requires an organization-level required workflow (whose
-definition is pinned outside the PR's ref). Tracked as follow-up work; the gate
-is not a defence against a malicious maintainer with push access.
+An organization-level required workflow remains defence in depth against a
+malicious maintainer with push access.
 
 ### Human override (the verified fallback)
 
