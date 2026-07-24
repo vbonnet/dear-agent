@@ -167,6 +167,22 @@ func e2eBuildCacheKeyForRoot(moduleRoot string) (string, error) {
 		_, _ = h.Write(data)
 		_, _ = io.WriteString(h, "\x00")
 	}
+	// The same source can produce a different binary under another compiler,
+	// target, cgo setting, or effective build flags. Keep those inputs in the
+	// persistent cache key rather than reusing an artifact built elsewhere.
+	for _, input := range []string{
+		"go=" + runtime.Version(),
+		"goos=" + os.Getenv("GOOS"),
+		"goarch=" + os.Getenv("GOARCH"),
+		"runtime-goos=" + runtime.GOOS,
+		"runtime-goarch=" + runtime.GOARCH,
+		"goflags=" + os.Getenv("GOFLAGS"),
+		"cgo=" + os.Getenv("CGO_ENABLED"),
+		"goamd64=" + os.Getenv("GOAMD64"),
+		"goarm=" + os.Getenv("GOARM"),
+	} {
+		_, _ = io.WriteString(h, input+"\x00")
+	}
 	return fmt.Sprintf("%x", h.Sum(nil)[:8]), nil
 }
 
@@ -204,9 +220,32 @@ func TestE2EBuildCacheKeyRejectsUnreadableRoot(t *testing.T) {
 	}
 }
 
+func TestE2EBuildCacheKeyIncludesBuildFlags(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOFLAGS", "")
+	before, err := e2eBuildCacheKeyForRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOFLAGS", "-tags=e2e_cache_test")
+	after, err := e2eBuildCacheKeyForRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before == after {
+		t.Fatal("build flags must invalidate the fallback AGM build key")
+	}
+}
+
 // e2eBuildCacheDir is a private, per-user fallback build cache. Its source key
 // permits sharing only by subprocesses that build the same AGM source.
 func e2eBuildCacheDir() string {
+	if dir := os.Getenv("AGM_E2E_BUILD_CACHE_DIR"); dir != "" {
+		return dir
+	}
 	cacheHome := os.Getenv("REAL_HOME")
 	if cacheHome != "" {
 		return filepath.Join(cacheHome, ".cache", "dear-agent", "e2e", "agm-"+e2eBuildCacheKey())
@@ -235,6 +274,32 @@ func ensurePrivateBuildCacheDir(dir string) error {
 	return nil
 }
 
+// acquireE2EBuildLock serializes first-time builds of one cache key. Flock is
+// released by the kernel if a helper process exits, unlike a mkdir lock that
+// can strand every later E2E subprocess after a timeout or crash.
+func acquireE2EBuildLock(ctx context.Context, dir string) (*os.File, error) {
+	lock, err := os.OpenFile(filepath.Join(dir, "agm.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open build lock: %w", err)
+	}
+	for {
+		err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return lock, nil
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
+			_ = lock.Close()
+			return nil, fmt.Errorf("lock build cache: %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			_ = lock.Close()
+			return nil, fmt.Errorf("wait for build lock: %w", ctx.Err())
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
 // buildAGMToCache builds ./cmd/agm into the isolated e2e build cache and
 // returns the path to the built binary. It is safe to call from the many
 // concurrent agmMain subprocesses testscript spawns: the build goes to a
@@ -258,6 +323,24 @@ func buildAGMToCache() (string, error) {
 		return "", fmt.Errorf("stat cached AGM binary: %w", err)
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	lock, err := acquireE2EBuildLock(ctx, dir)
+	if err != nil {
+		return "", err
+	}
+	defer lock.Close()
+
+	// A peer may have completed while we waited for the lock.
+	if info, err := os.Lstat(dest); err == nil {
+		if info.Mode().IsRegular() && info.Mode().Perm()&0o077 == 0 {
+			return dest, nil
+		}
+		return "", fmt.Errorf("unsafe cached AGM binary %q", dest)
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("stat cached AGM binary: %w", err)
+	}
+
 	_, testFile, _, _ := runtime.Caller(0)
 	// testFile: agm/test/e2e/testscript_test.go → up 3 dirs to reach agm/.
 	// "go install <module-path>" is avoided: the testscript work dir is
@@ -272,8 +355,6 @@ func buildAGMToCache() (string, error) {
 	tmpPath := tmp.Name()
 	tmp.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
 	buildCmd := exec.CommandContext(ctx, "go", "build", "-o", tmpPath, "./cmd/agm")
 	buildCmd.Dir = agmModRoot
 	if out, err := buildCmd.CombinedOutput(); err != nil {
@@ -310,6 +391,10 @@ func TestAGM(t *testing.T) {
 		os.RemoveAll(e2eSocketDir)
 	})
 
+	// Compute the source/build-environment fingerprint once in the parent, then
+	// pass its cache directory to every testscript helper subprocess. Without
+	// this, each `exec agm` walked and hashed the repository independently.
+	cacheDir := e2eBuildCacheDir()
 	testscript.Run(t, testscript.Params{
 		Dir: "testdata",
 		Setup: func(env *testscript.Env) error {
@@ -320,6 +405,7 @@ func TestAGM(t *testing.T) {
 			if realHome := os.Getenv("HOME"); realHome != "" {
 				env.Setenv("REAL_HOME", realHome)
 			}
+			env.Setenv("AGM_E2E_BUILD_CACHE_DIR", cacheDir)
 
 			// Set AGM environment variables for testing
 			workDir := env.Getenv("WORK")
