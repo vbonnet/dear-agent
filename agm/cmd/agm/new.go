@@ -775,8 +775,10 @@ func resolveEnvVarDefaults(cmd *cobra.Command) {
 // gates. Adding a spawn path without calling this is the ce-93lw.18 bug.
 func enforceCircuitBreakers() error {
 	cfg := circuitbreaker.DefaultConfig()
-<<<<<<< HEAD
 	lr := circuitbreaker.DefaultLoadReader()
+	// The worker cap defaults to disabled. Do not open session storage merely to
+	// enrich a best-effort status message in that mode; prefix counting remains
+	// sufficient until an operator enables the cap.
 	wc := circuitbreaker.TmuxWorkerCounter{}
 	if cfg.MaxWorkers > 0 {
 		wc.KnownWorkers = taggedWorkerSessions
