@@ -839,7 +839,6 @@ func taggedWorkerSessions() (map[string]bool, error) {
 	manifests, err := opCtx.Storage.ListSessions(&dolt.SessionFilter{
 		Tags:            []string{"role:worker"},
 		ExcludeArchived: true,
-		Limit:           1000,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("listing worker sessions: %w", err)
