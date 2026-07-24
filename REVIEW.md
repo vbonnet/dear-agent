@@ -63,6 +63,13 @@ diff touches any of the following:
 Escalation is not a failure state — it is a correct outcome that preserves
 human authority over irreversible decisions.
 
+These triggers are enforced **deterministically in code** (`cmd/ai-review`
+inspects the changed paths, the PR body, and the commit messages), not left to
+the synthesis agent's judgement — §3 says escalation is mandatory "regardless of
+finding severity", so it must not depend on a nondeterministic model call. A
+diff that trips any trigger is forced to `needs-human-review` even if all five
+dimensions report clean.
+
 ---
 
 ## 4. Review agent invocation
@@ -77,9 +84,37 @@ human authority over irreversible decisions.
 - `--comment` posts findings as inline GitHub PR comments.
 - `--fix` applies fixable findings to the working tree (style, trivial bugs).
 
-The review protocol is wired into CI via `.github/workflows/review.yml` (when
-present). On PRs that skip CI review, CODEOWNERS requires at least one human
-approval before merge.
+The review protocol is wired into CI via `.github/workflows/review.yml`, which
+invokes the `cmd/ai-review` Go command. That check is **fail-closed and
+required** (registered in `.github/rulesets/main.json`): the command maps the
+§1 outcome to a process exit code, and only `approved` — or the audited human
+override below — lets the check pass. `needs-work`, `rejected`, and
+`needs-human-review`, as well as a missing API key, a fork PR, a per-dimension
+API failure, synthesis failure, an unparseable outcome, or an oversize diff, all
+**block the merge**.
+
+### Known residual risk: workflow-definition trust
+
+The reviewer binary and workflow definition are loaded from the protected base
+revision; the PR revision is only ever diffed, never executed.
+
+Changes to either `.github/workflows/` or `cmd/ai-review/` are deterministic
+§3 escalation triggers, so they require human review before becoming trusted.
+
+An organization-level required workflow remains defence in depth against a
+malicious maintainer with push access.
+
+### Human override (the verified fallback)
+
+A repository maintainer or administrator who has consciously reviewed the
+change can apply the `ai-review:override` label. The trusted workflow verifies
+that label actor's GitHub permission, then records the current head SHA
+in a bot-authored PR comment, and the gate passes only while that attestation
+matches the current head. A later push removes the label and invalidates the
+attestation. The override is therefore auditable, revision-bound, and requires
+a human action — it is the sanctioned path to merge a fork PR, a
+`needs-human-review` escalation, or a change the automated review could not
+process.
 
 ---
 
@@ -98,8 +133,11 @@ approval before merge.
 ```
 
 No PR merges while any dimension has an unresolved finding with severity
-`blocking` or higher. Advisory findings (style, minor perf) may be deferred
-to a follow-up bead.
+`blocking` or higher. This is enforced, not aspirational: the required
+`5-Dimension AI Review` check fails closed on every non-`approved` outcome (see
+§4). Advisory findings (style, minor perf) may be deferred to a follow-up bead.
+Every pushed revision is re-reviewed, so the check that gates the current head
+SHA reflects that SHA — not an earlier draft.
 
 ---
 
@@ -164,7 +202,8 @@ them here so they version-control alongside the protocol.
 
 - [Autonomous merge policy](docs/policies/autonomous-merge.ai.md) — merge boundaries after review.
 - `vbonnet/engram-research` `retrospectives/` — past incidents that shaped this protocol.
-- `.github/workflows/review.yml` — CI wiring (when present).
+- `.github/workflows/review.yml` + `cmd/ai-review/` — the fail-closed CI gate.
+- `.github/rulesets/main.json` — registers `5-Dimension AI Review` as a required check.
 - Chezmoi `docs/REVIEW.md` — the *dotfiles* review protocol (different bar,
   same philosophy).
 
