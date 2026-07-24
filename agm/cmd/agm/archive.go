@@ -251,7 +251,7 @@ func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
 	}
 
 	archiveResult, archiveErr := ops.ArchiveSession(opCtx, &ops.ArchiveSessionRequest{
-		Identifier:  sessionName,
+		Identifier:  getResult.Session.ID,
 		Force:       forceArchive,
 		KeepSandbox: keepSandbox,
 		Outcome:     outcome,
@@ -325,7 +325,7 @@ func previewSingleSessionArchive(opCtx *ops.OpContext, sessionName string, getRe
 	dryRunCtx := *opCtx
 	dryRunCtx.DryRun = true
 	result, err := ops.ArchiveSession(&dryRunCtx, &ops.ArchiveSessionRequest{
-		Identifier:      sessionName,
+		Identifier:      getResult.Session.ID,
 		Force:           forceArchive,
 		KeepSandbox:     keepSandbox,
 		Outcome:         outcome,

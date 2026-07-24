@@ -250,6 +250,7 @@ func configureSingleArchiveDryRun(t *testing.T) {
 	oldKeepSandbox := keepSandbox
 	oldCleanupWorktrees := cleanupWorktrees
 	oldArchiveOutcome := archiveOutcome
+	oldArchiveReason := archiveReason
 	dryRun = true
 	asyncArchive = false
 	archiveAll = false
@@ -257,6 +258,7 @@ func configureSingleArchiveDryRun(t *testing.T) {
 	keepSandbox = false
 	cleanupWorktrees = false
 	archiveOutcome = ""
+	archiveReason = ""
 	t.Cleanup(func() {
 		dryRun = oldDryRun
 		asyncArchive = oldAsync
@@ -265,6 +267,7 @@ func configureSingleArchiveDryRun(t *testing.T) {
 		keepSandbox = oldKeepSandbox
 		cleanupWorktrees = oldCleanupWorktrees
 		archiveOutcome = oldArchiveOutcome
+		archiveReason = oldArchiveReason
 	})
 }
 
@@ -281,6 +284,28 @@ func setArchiveTestProject(t *testing.T, sessionID, projectDir string) *manifest
 	}
 	m.Context.Project = projectDir
 	m.WorkingDirectory = projectDir
+	if err := adapter.UpdateSession(m); err != nil {
+		t.Fatalf("UpdateSession(%q) error: %v", sessionID, err)
+	}
+	stored, err := adapter.GetSession(sessionID)
+	if err != nil {
+		t.Fatalf("GetSession(%q) after update error: %v", sessionID, err)
+	}
+	return stored
+}
+
+func setArchiveTestClaudeUUID(t *testing.T, sessionID, claudeUUID string) *manifest.Manifest {
+	t.Helper()
+	adapter, err := getStorage()
+	if err != nil {
+		t.Fatalf("getStorage() error: %v", err)
+	}
+	defer adapter.Close()
+	m, err := adapter.GetSession(sessionID)
+	if err != nil {
+		t.Fatalf("GetSession(%q) error: %v", sessionID, err)
+	}
+	m.Claude.UUID = claudeUUID
 	if err := adapter.UpdateSession(m); err != nil {
 		t.Fatalf("UpdateSession(%q) error: %v", sessionID, err)
 	}
@@ -875,6 +900,69 @@ func TestArchiveSession_DryRunCLIJSONHonorsFieldMask(t *testing.T) {
 	after := readSessionFromDolt(t, sessionID)
 	if !reflect.DeepEqual(after, before) {
 		t.Fatalf("durable session changed during field-masked dry run:\nbefore=%#v\nafter=%#v", before, after)
+	}
+}
+
+func TestArchiveSession_DryRunCLIClaudeUUIDUsesResolvedSessionID(t *testing.T) {
+	_, sessionsDir, cleanup := setupArchiveDryRunTest(t)
+	defer cleanup()
+	configureSingleArchiveDryRun(t)
+	setAgentJSON(t)
+
+	const sessionID = "single-dry-run-claude-uuid"
+	const sessionName = "dry-run-claude-uuid"
+	const claudeUUID = "550e8400-e29b-41d4-a716-446655440042"
+	createArchiveTestSession(t, sessionsDir, sessionID, sessionName, "dry-run-claude-uuid-tmux", "")
+	setArchiveTestProject(t, sessionID, t.TempDir())
+	before := setArchiveTestClaudeUUID(t, sessionID, claudeUUID)
+
+	var archiveErr error
+	output := captureStdout(t, func() {
+		archiveErr = archiveSession(nil, []string{claudeUUID})
+	})
+	if archiveErr != nil {
+		t.Fatalf("archiveSession() error: %v\noutput: %s", archiveErr, output)
+	}
+	var preview ops.OpError
+	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &preview); err != nil {
+		t.Fatalf("stdout is not a dry-run problem-details envelope: %v\noutput: %q", err, output)
+	}
+	if preview.Parameters["session_id"] != sessionID || preview.Parameters["session_name"] != sessionName {
+		t.Fatalf("preview parameters = %#v", preview.Parameters)
+	}
+
+	after := readSessionFromDolt(t, sessionID)
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("durable session changed during UUID dry run:\nbefore=%#v\nafter=%#v", before, after)
+	}
+}
+
+func TestArchiveSession_ClaudeUUIDUsesResolvedSessionID(t *testing.T) {
+	_, sessionsDir, cleanup := setupArchiveDryRunTest(t)
+	defer cleanup()
+	configureSingleArchiveDryRun(t)
+	dryRun = false
+	forceArchive = true
+	archiveReason = "verify resolved stable session identity"
+	setHumanText(t)
+
+	const sessionID = "single-archive-claude-uuid"
+	const sessionName = "archive-claude-uuid"
+	const claudeUUID = "550e8400-e29b-41d4-a716-446655440043"
+	createArchiveTestSession(t, sessionsDir, sessionID, sessionName, "archive-claude-uuid-tmux", "")
+	setArchiveTestProject(t, sessionID, t.TempDir())
+	setArchiveTestClaudeUUID(t, sessionID, claudeUUID)
+
+	var archiveErr error
+	output := captureStdout(t, func() {
+		archiveErr = archiveSession(nil, []string{claudeUUID})
+	})
+	if archiveErr != nil {
+		t.Fatalf("archiveSession() error: %v\noutput: %s", archiveErr, output)
+	}
+	after := readSessionFromDolt(t, sessionID)
+	if after.Lifecycle != "archived" {
+		t.Fatalf("lifecycle = %q, want archived", after.Lifecycle)
 	}
 }
 
