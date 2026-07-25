@@ -26,6 +26,8 @@ name: Gemini PR Review
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited, ready_for_review]
+  pull_request_review:
+    types: [submitted]
 
 concurrency:
   group: gemini-review-${{ github.event.pull_request.number }}
@@ -41,7 +43,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Forks cannot read repository secrets; defer drafts until ready_for_review.
-    if: github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft
+    # A repository-owner fallback attestation must retrigger this gate itself.
+    # Restrict review events to the attestation marker so the review submitted
+    # by this workflow cannot recursively launch another API review.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !github.event.pull_request.draft &&
+      (
+        github.event_name == 'pull_request' ||
+        (
+          github.event_name == 'pull_request_review' &&
+          github.event.review.user.login == github.repository_owner &&
+          github.event.review.state == 'commented' &&
+          startsWith(github.event.review.body, 'Reviewed head: ') &&
+          contains(github.event.review.body, 'Gemini quota fallback attestation')
+        )
+      )
     steps:
       - name: Gate on secret presence
         id: gate
