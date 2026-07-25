@@ -137,6 +137,14 @@ jobs:
           gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
             -H 'Accept: application/vnd.github.v3.diff' \
             > .gemini/pr.diff
+          # These tracked base files are required trusted inputs. Never replace
+          # missing review policy with empty content.
+          for instruction_file in AGENTS.md GEMINI.md; do
+            if [ ! -f "$instruction_file" ]; then
+              echo "::error::Required trusted instruction file is missing: ${instruction_file}"
+              exit 1
+            fi
+          done
           jq -n \
             --arg policy "$REVIEW_POLICY" \
             --rawfile agents AGENTS.md \
