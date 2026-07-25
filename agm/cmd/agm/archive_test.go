@@ -1333,6 +1333,31 @@ func TestSpawnReaper_SessionNameSanitization(t *testing.T) {
 	}
 }
 
+func TestBuildReaperArgsSeparatesStableAndTmuxIdentities(t *testing.T) {
+	args := buildReaperArgs(
+		"stable-session-id",
+		"resolved-tmux",
+		"/tmp/reaper.log",
+		"/tmp/sessions",
+		"0123456789ab",
+		true,
+		true,
+		manifest.OutcomeKilled,
+	)
+	got := strings.Join(args, " ")
+	for _, want := range []string{
+		"--session-id stable-session-id",
+		"--session resolved-tmux",
+		"--force",
+		"--keep-sandbox",
+		"--outcome killed",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("reaper args %q do not contain %q", got, want)
+		}
+	}
+}
+
 func TestArchiveHarnessDisplayName(t *testing.T) {
 	tests := map[string]string{
 		"claude-code":  "Claude Code",

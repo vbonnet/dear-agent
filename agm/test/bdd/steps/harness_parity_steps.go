@@ -2162,7 +2162,7 @@ func agmValidatesSingleSessionArchiveDryRunSafety(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/cmd/agm-reaper", "./agm/internal/ops", "./agm/internal/reaper",
-		"-run", `^(TestArchiveSession_DryRunCLI(TextIsSideEffectFree|JSONReturnsStableEnvelope|JSONHonorsFieldMask|ClaudeUUIDUsesResolvedSessionID|ActiveAsyncDoesNotStartReaper|ActiveRequiresAsync|StoppedRejectsAsync)|TestArchiveSession_(ClaudeUUIDUsesResolvedSessionID|AsyncClaudeUUIDUsesResolvedIdentities)|TestArchiveAuditArgs_RecordsSingleSessionDryRun|TestArchiveSession_DryRunDoesNotArchiveExternalRepresentation|TestNewDryRunPreview|TestRun_UsesStableSessionIDAndResolvedTmuxIdentity|TestValidateResolvedTargets)$`,
+		"-run", `^(TestArchiveSession_DryRunCLI(TextIsSideEffectFree|JSONReturnsStableEnvelope|JSONHonorsFieldMask|ClaudeUUIDUsesResolvedSessionID|ActiveAsyncDoesNotStartReaper|ActiveRequiresAsync|StoppedRejectsAsync)|TestArchiveSession_(ClaudeUUIDUsesResolvedSessionID|AsyncClaudeUUIDUsesResolvedIdentities)|TestArchiveAuditArgs_RecordsSingleSessionDryRun|TestArchiveSession_DryRunDoesNotArchiveExternalRepresentation|TestNewDryRunPreview|TestRun_UsesStableSessionIDAndResolvedTmuxIdentity|TestValidateResolvedTargets|TestBuildReaperArgsSeparatesStableAndTmuxIdentities)$`,
 		"-count=1", "-v")
 	cmd.Dir = bddRepoRoot()
 	output, runErr := cmd.CombinedOutput()
@@ -2253,6 +2253,7 @@ func activeAsyncArchiveShouldSeparateStableAndTmuxIdentities(ctx context.Context
 	}
 	for _, testName := range []string{
 		"TestArchiveSession_AsyncClaudeUUIDUsesResolvedIdentities",
+		"TestBuildReaperArgsSeparatesStableAndTmuxIdentities",
 		"TestRun_UsesStableSessionIDAndResolvedTmuxIdentity",
 		"TestValidateResolvedTargets",
 	} {

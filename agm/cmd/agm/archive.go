@@ -745,21 +745,7 @@ func spawnReaper(sessionID, tmuxSession, harness string, outcome manifest.Sessio
 
 	reaperPath := filepath.Join(filepath.Dir(agmPath), "agm-reaper")
 
-	// Create log file path with sanitized session name to prevent path traversal
-	// This must happen before binary check so error messages include sanitized path
-	// Handle both forward slashes and backslashes for cross-platform security
-	sanitized := tmuxSession
-	// Remove directory components with forward slashes
-	if idx := strings.LastIndex(sanitized, "/"); idx != -1 {
-		sanitized = sanitized[idx+1:]
-	}
-	// Remove directory components with backslashes (Windows-style paths)
-	if idx := strings.LastIndex(sanitized, "\\"); idx != -1 {
-		sanitized = sanitized[idx+1:]
-	}
-	// Use filepath.Base as final cleanup for any platform-specific separators
-	sanitized = filepath.Base(sanitized)
-	logFile := filepath.Join(os.TempDir(), fmt.Sprintf("agm-reaper-%s.log", sanitized))
+	logFile := reaperLogPath(tmuxSession)
 
 	// Check if reaper binary exists
 	if _, err := os.Stat(reaperPath); err != nil {
@@ -807,16 +793,7 @@ func spawnReaper(sessionID, tmuxSession, harness string, outcome manifest.Sessio
 	}
 
 	// Build command with detachment
-	reaperArgs := []string{"--session-id", sessionID, "--session", tmuxSession, "--log-file", logFile, "--sessions-dir", sessionsDir, "--expected-revision", expectedRevision, "--startup-fd", "3"}
-	if forceArchive {
-		reaperArgs = append(reaperArgs, "--force")
-	}
-	if keepSandbox {
-		reaperArgs = append(reaperArgs, "--keep-sandbox")
-	}
-	if outcome != manifest.OutcomeUnknown {
-		reaperArgs = append(reaperArgs, "--outcome", string(outcome))
-	}
+	reaperArgs := buildReaperArgs(sessionID, tmuxSession, logFile, sessionsDir, expectedRevision, forceArchive, keepSandbox, outcome)
 	cmd := exec.Command(reaperPath, reaperArgs...)
 
 	// Detach process from parent using setsid
@@ -879,6 +856,33 @@ func spawnReaper(sessionID, tmuxSession, harness string, outcome manifest.Sessio
 	fmt.Printf("\nMonitor progress: tail -f %s\n", logFile)
 
 	return nil
+}
+
+// reaperLogPath confines the detached reaper log to the system temp directory
+// even if a malformed tmux identity contains Unix or Windows path separators.
+func reaperLogPath(tmuxSession string) string {
+	sanitized := tmuxSession
+	if idx := strings.LastIndex(sanitized, "/"); idx != -1 {
+		sanitized = sanitized[idx+1:]
+	}
+	if idx := strings.LastIndex(sanitized, "\\"); idx != -1 {
+		sanitized = sanitized[idx+1:]
+	}
+	return filepath.Join(os.TempDir(), fmt.Sprintf("agm-reaper-%s.log", filepath.Base(sanitized)))
+}
+
+func buildReaperArgs(sessionID, tmuxSession, logFile, sessionsDir, expectedRevision string, force, keepSandbox bool, outcome manifest.SessionOutcome) []string {
+	args := []string{"--session-id", sessionID, "--session", tmuxSession, "--log-file", logFile, "--sessions-dir", sessionsDir, "--expected-revision", expectedRevision, "--startup-fd", "3"}
+	if force {
+		args = append(args, "--force")
+	}
+	if keepSandbox {
+		args = append(args, "--keep-sandbox")
+	}
+	if outcome != manifest.OutcomeUnknown {
+		args = append(args, "--outcome", string(outcome))
+	}
+	return args
 }
 
 func awaitReaperStartup(reader *os.File, timeout time.Duration) error {
