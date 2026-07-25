@@ -76,14 +76,14 @@ jobs:
                 and .commit_id == $head
                 and .state == "COMMENTED"
                 and (
-                  (.body | startswith(
+                  ((.body // "") | startswith(
                     "Reviewed head: " + $head
                     + "\n\nGemini quota fallback attestation"
                     + "\nReviewer: Gemini Flash-Lite web"
                     + "\nInput: complete exact diff"
                   ))
                   or
-                  (.body | startswith(
+                  ((.body // "") | startswith(
                     "Reviewed head: " + $head
                     + "\n\nGemini quota fallback attestation"
                     + "\nReviewer: Gemini 3.6 Flash High via Agy"
