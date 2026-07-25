@@ -46,7 +46,9 @@ jobs:
   review:
     name: Gemini Review
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Four 180-second API attempts plus three 60-second quota waits require up
+    # to 15 minutes; leave setup/cleanup headroom so failure remains explicit.
+    timeout-minutes: 20
     # Forks cannot read repository secrets; defer drafts until ready_for_review.
     # A repository-owner fallback attestation must retrigger this gate itself.
     # Restrict submitted reviews to the attestation marker so this workflow's
