@@ -68,7 +68,8 @@ type contextDetectorCache struct {
 // More-specific prefixes must be checked before less-specific ones;
 // getModelContextWindow uses longest-prefix matching to ensure correctness.
 var modelContextWindows = map[string]int{
-	// Opus 4.8+ and 4.6 have a 1M context window by default.
+	// Opus 5, Opus 4.8+, and 4.6 have a 1M context window by default.
+	"claude-opus-5":   1000000,
 	"claude-opus-4-8": 1000000,
 	"claude-opus-4-6": 1000000,
 	"claude-opus-4":   200000,
@@ -448,7 +449,7 @@ func piKnownNativeModelContextWindow(model string) (int, bool) {
 
 func piKnownDirectModelContextWindow(model string) (int, bool) {
 	switch model {
-	case "claude-fable-5", "claude-opus-4-8", "claude-sonnet-4-6":
+	case "claude-fable-5", "claude-opus-5", "claude-opus-4-8", "claude-sonnet-4-6":
 		return 1000000, true
 	case "gpt-5.3-chat-latest", "gpt-5.3-codex-spark":
 		return 128000, true
@@ -475,7 +476,7 @@ func piKnownDirectModelContextWindow(model string) (int, bool) {
 // be collapsed into direct-provider defaults.
 func piKnownOpenRouterModelContextWindow(route string) (int, bool) {
 	switch route {
-	case "anthropic/claude-fable-5":
+	case "anthropic/claude-fable-5", "anthropic/claude-opus-5":
 		return 1000000, true
 	case "openai/gpt-5.3-codex", "openai/gpt-5.4-mini", "openai/gpt-5.4-nano":
 		return 400000, true
@@ -835,6 +836,8 @@ type modelPricing struct {
 // doesn't fire. For interactive sessions, the exact cost comes from CC's
 // statusLine JSON (total_cost_usd) via agm-statusline-capture.
 var pricingTable = map[string]modelPricing{
+	// claude-opus-5 pricing is unchanged from claude-opus-4 (Opus 4.8) per Mtok.
+	"claude-opus-5":   {InputPerM: 15.0, OutputPerM: 75.0, CacheReadPerM: 1.50, CacheWritePerM: 18.75},
 	"claude-opus-4":   {InputPerM: 15.0, OutputPerM: 75.0, CacheReadPerM: 1.50, CacheWritePerM: 18.75},
 	"claude-sonnet-4": {InputPerM: 3.0, OutputPerM: 15.0, CacheReadPerM: 0.30, CacheWritePerM: 3.75},
 	"claude-haiku-4":  {InputPerM: 0.80, OutputPerM: 4.0, CacheReadPerM: 0.08, CacheWritePerM: 1.0},

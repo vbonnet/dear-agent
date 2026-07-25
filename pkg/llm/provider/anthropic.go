@@ -174,6 +174,7 @@ func (p *AnthropicProvider) Capabilities() Capabilities {
 		MaxTokensPerRequest:   200000, // Claude context window
 		MaxConcurrentRequests: 5,      // Conservative rate limit
 		SupportedModels: []string{
+			"claude-opus-5",
 			"claude-opus-4-8",
 			"claude-opus-4-6",
 			"claude-3-5-sonnet-20241022",
