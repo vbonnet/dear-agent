@@ -273,6 +273,7 @@ jobs:
           trusted_files=(
             AGENTS.md
             GEMINI.md
+            .gemini/styleguide.md
             docs/policies/broken-windows.ai.md
             docs/policies/harness-hygiene.ai.md
             docs/policies/anti-stall.ai.md
