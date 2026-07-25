@@ -25,7 +25,7 @@ name: Gemini PR Review
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
 
 concurrency:
   group: gemini-review-${{ github.event.pull_request.number }}
@@ -64,13 +64,16 @@ jobs:
         id: attestation
         if: steps.gate.outputs.skip != 'true'
         env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if gh api --paginate \
             "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/reviews" |
-            jq --slurp --exit-status --arg head "$HEAD_SHA" '
+            jq --slurp --exit-status \
+              --arg base "$BASE_SHA" \
+              --arg head "$HEAD_SHA" '
               add | any(.[];
                 .user.login == "vbonnet"
                 and .commit_id == $head
@@ -81,6 +84,7 @@ jobs:
                     + "\n\nGemini quota fallback attestation"
                     + "\nReviewer: Gemini Flash-Lite web"
                     + "\nInput: complete exact diff"
+                    + "\nBase SHA: " + $base
                   ))
                   or
                   ((.body // "") | startswith(
@@ -88,6 +92,7 @@ jobs:
                     + "\n\nGemini quota fallback attestation"
                     + "\nReviewer: Gemini 3.6 Flash High via Agy"
                     + "\nInput: complete exact diff"
+                    + "\nBase SHA: " + $base
                   ))
                 )
               )
@@ -138,10 +143,13 @@ jobs:
           gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
             --jq '{number, title, body, base_sha: .base.sha, head_sha: .head.sha, changed_files}' \
             > .gemini/pr.json
-          if ! jq -e --arg head "$HEAD_SHA" '.head_sha == $head' \
+          if ! jq -e \
+            --arg base "$BASE_SHA" \
+            --arg head "$HEAD_SHA" \
+            '.base_sha == $base and .head_sha == $head' \
             .gemini/pr.json >/dev/null
           then
-            echo "::error::PR head advanced while preparing review input; the newer run must review it."
+            echo "::error::PR base or head changed while preparing review input; the newer run must review it."
             exit 1
           fi
           # Fetch objects only; never check out PR-controlled files into the
