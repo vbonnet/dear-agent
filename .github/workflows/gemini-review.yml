@@ -114,7 +114,10 @@ jobs:
       - name: Prepare review input
         if: steps.gate.outputs.skip != 'true' && steps.attestation.outputs.valid != 'true'
         env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MAX_DIFF_BYTES: '750000'
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REVIEW_POLICY: |-
             You are a principal engineer performing a security-conscious code review.
@@ -134,9 +137,37 @@ jobs:
           gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
             --jq '{number, title, body, base_sha: .base.sha, head_sha: .head.sha, changed_files}' \
             > .gemini/pr.json
-          gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
-            -H 'Accept: application/vnd.github.v3.diff' \
+          if ! jq -e --arg head "$HEAD_SHA" '.head_sha == $head' \
+            .gemini/pr.json >/dev/null
+          then
+            echo "::error::PR head advanced while preparing review input; the newer run must review it."
+            exit 1
+          fi
+          # Fetch objects only; never check out PR-controlled files into the
+          # trusted workspace. Build the diff from immutable event SHAs.
+          git fetch --no-tags --depth=1 origin "$HEAD_SHA"
+          git diff --no-ext-diff --no-textconv --unified=80 \
+            "$BASE_SHA" "$HEAD_SHA" -- . \
+            ':(exclude,glob)**/*.pb.*' \
+            ':(exclude,glob)**/*.gen.go' \
+            ':(exclude,glob)**/*.generated.go' \
+            ':(exclude,glob)**/zz_generated*.go' \
+            ':(exclude,glob)**/*_mock.go' \
+            ':(exclude,glob)**/mocks/**' \
+            ':(exclude,glob)**/testdata/**' \
+            ':(exclude,glob)**/vendor/**' \
+            ':(exclude,glob)**/*.lock' \
+            ':(exclude,glob)**/go.sum' \
+            ':(exclude,glob)**/package-lock.json' \
+            ':(exclude,glob)**/pnpm-lock.yaml' \
+            ':(exclude,glob)**/yarn.lock' \
+            ':(exclude,glob)**/*.min.js' \
             > .gemini/pr.diff
+          diff_bytes="$(wc -c < .gemini/pr.diff | tr -d ' ')"
+          if [ "$diff_bytes" -gt "$MAX_DIFF_BYTES" ]; then
+            echo "::error::Reviewable diff is ${diff_bytes} bytes; limit is ${MAX_DIFF_BYTES}. Split the PR."
+            exit 1
+          fi
           # These tracked base files are required trusted inputs. Never replace
           # missing review policy with empty content.
           for instruction_file in AGENTS.md GEMINI.md; do
@@ -218,6 +249,7 @@ jobs:
             --rawfile review .gemini/review.md \
             '{
               event: "COMMENT",
+              commit_id: $head,
               body: ("Reviewed head: " + $head + "\n\n" + $review)
             }' |
           gh api --method POST \
