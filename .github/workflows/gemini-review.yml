@@ -182,26 +182,40 @@ jobs:
             echo "::error::Reviewable diff is ${diff_bytes} bytes; limit is ${MAX_DIFF_BYTES}. Split the PR."
             exit 1
           fi
-          # These tracked base files are required trusted inputs. Never replace
-          # missing review policy with empty content.
-          for instruction_file in AGENTS.md GEMINI.md; do
+          # Root AGENTS.md is a router to these canonical policies. The model
+          # has no repository tools, so materialize every routed instruction
+          # from the trusted base checkout instead of silently omitting them.
+          trusted_files=(
+            AGENTS.md
+            GEMINI.md
+            docs/policies/broken-windows.ai.md
+            docs/policies/harness-hygiene.ai.md
+            docs/policies/anti-stall.ai.md
+            docs/policies/dear-retro.ai.md
+            docs/policies/definition-of-done.ai.md
+            docs/policies/wayfinder-v2-canonical.ai.md
+            docs/policies/autonomous-merge.ai.md
+          )
+          for instruction_file in "${trusted_files[@]}"; do
             if [ ! -f "$instruction_file" ]; then
               echo "::error::Required trusted instruction file is missing: ${instruction_file}"
               exit 1
             fi
           done
+          for instruction_file in "${trusted_files[@]}"; do
+            printf '\n\n## %s\n\n' "$instruction_file"
+            sed -n '1,$p' "$instruction_file"
+          done > .gemini/trusted-instructions.md
           jq -n \
             --arg policy "$REVIEW_POLICY" \
-            --rawfile agents AGENTS.md \
-            --rawfile gemini GEMINI.md \
+            --rawfile trusted .gemini/trusted-instructions.md \
             --rawfile metadata .gemini/pr.json \
             --rawfile diff .gemini/pr.diff \
             '{
               systemInstruction: {
                 parts: [{
                   text: ($policy
-                    + "\n\nTrusted repository instructions:\n" + $agents
-                    + "\n\nTrusted Gemini guidance:\n" + $gemini)
+                    + "\n\nTrusted repository instructions:" + $trusted)
                 }]
               },
               contents: [{
@@ -237,7 +251,6 @@ jobs:
             --retry 3 \
             --retry-delay 60 \
             --retry-max-time 300 \
-            --retry-all-errors \
             -H 'Content-Type: application/json' \
             -H "x-goog-api-key: ${GEMINI_API_KEY}" \
             --data-binary @.gemini/request.json \
@@ -248,7 +261,11 @@ jobs:
             exit 1
           fi
           jq -er \
-            '[.candidates[0].content.parts[]?.text] | join("\n") | select(length > 0)' \
+            '.candidates[0]
+              | select(.finishReason == "STOP")
+              | [.content.parts[]?.text]
+              | join("\n")
+              | select(length > 0)' \
             .gemini/response.json > .gemini/review.md
 
       - name: Submit Gemini PR review

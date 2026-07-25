@@ -205,7 +205,12 @@ func TestTmuxServerOwnsSocket_ExcludesAttachedClient(t *testing.T) {
 // server, and — critically — that it still finds the server after the socket
 // file has been unlinked. That is the state no socket-based probe can see.
 func TestFindServerPIDs_RealServer(t *testing.T) {
-	skipIfNoTmux(t)
+	// This regression is intentionally enabled in Linux integration CI, which
+	// installs tmux but does not opt into the package's broader tmux suite.
+	// Only the explicit macOS skip gate or a missing binary suppresses it.
+	if !isTmuxAvailable() {
+		t.Skip("tmux process-scan integration is unavailable")
+	}
 
 	// The whitespace exercises the lossless argv path. ps's display-oriented
 	// command column cannot preserve this as one -S argument.
