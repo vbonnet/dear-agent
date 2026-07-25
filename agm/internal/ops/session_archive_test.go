@@ -11,6 +11,7 @@ import (
 
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/sandboxgc"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
@@ -187,6 +188,45 @@ func TestArchiveSession_TestManifestSkipsHostCleanup(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatalf("test manifest archive removed host pending marker: %v", err)
+	}
+}
+
+func TestCleanupSandboxDirWithChecker_RemovesOwnedSandbox(t *testing.T) {
+	home := t.TempDir()
+	base := filepath.Join(home, ".agm", "sandboxes")
+	sessionID := "sandbox-cleanup-owned-session"
+	sandboxDir := filepath.Join(base, sessionID)
+	mergedPath := filepath.Join(sandboxDir, "merged")
+	if err := os.MkdirAll(filepath.Join(mergedPath, "repo0"), 0o700); err != nil {
+		t.Fatalf("MkdirAll(sandbox) error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(mergedPath, "repo0", "marker"), []byte("owned"), 0o600); err != nil {
+		t.Fatalf("WriteFile(marker) error: %v", err)
+	}
+
+	var unmounted []string
+	checker := &sandboxgc.Checker{
+		Base: base,
+		ListMounts: func() ([]string, error) {
+			return nil, nil
+		},
+		ListProcPaths: func() ([]sandboxgc.ProcPath, error) {
+			return nil, nil
+		},
+		Unmount: func(path string) error {
+			unmounted = append(unmounted, path)
+			return nil
+		},
+		Remove: os.RemoveAll,
+	}
+	if !cleanupSandboxDirWithChecker(sessionID, mergedPath, base, checker) {
+		t.Fatal("cleanupSandboxDirWithChecker() = false, want owned sandbox removed")
+	}
+	if _, err := os.Stat(sandboxDir); !os.IsNotExist(err) {
+		t.Fatalf("sandbox still exists after cleanup: %v", err)
+	}
+	if len(unmounted) == 0 || unmounted[0] != mergedPath {
+		t.Fatalf("unmount calls = %v, want explicit merged path first", unmounted)
 	}
 }
 

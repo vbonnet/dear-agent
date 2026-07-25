@@ -31,6 +31,9 @@ func buildSessionMetadata(session *manifest.Manifest) map[string]any {
 	if session.WorkingDirectory != "" {
 		metadata["working_directory"] = session.WorkingDirectory
 	}
+	if session.Sandbox != nil {
+		metadata["sandbox"] = session.Sandbox
+	}
 	if session.Codex != nil {
 		if session.Codex.SessionID != "" {
 			metadata["codex_session_id"] = session.Codex.SessionID
@@ -1174,6 +1177,9 @@ func unmarshalEngramMetadata(session *manifest.Manifest, metadataJSON []byte) er
 	if workingDirectory, ok := metadata["working_directory"].(string); ok {
 		session.WorkingDirectory = workingDirectory
 	}
+	if err := unmarshalSandboxMetadata(session, metadata); err != nil {
+		return err
+	}
 	codexSessionID, _ := metadata["codex_session_id"].(string)
 	codexTranscriptPath, _ := metadata["codex_transcript_path"].(string)
 	if codexSessionID != "" || codexTranscriptPath != "" {
@@ -1235,6 +1241,23 @@ func unmarshalEngramMetadata(session *manifest.Manifest, metadataJSON []byte) er
 			session.EngramMetadata.LoadedAt = loadedAt
 		}
 	}
+	return nil
+}
+
+func unmarshalSandboxMetadata(session *manifest.Manifest, metadata map[string]any) error {
+	sandboxRaw, ok := metadata["sandbox"]
+	if !ok {
+		return nil
+	}
+	sandboxJSON, err := json.Marshal(sandboxRaw)
+	if err != nil {
+		return fmt.Errorf("failed to marshal sandbox metadata: %w", err)
+	}
+	var sandbox manifest.SandboxConfig
+	if err := json.Unmarshal(sandboxJSON, &sandbox); err != nil {
+		return fmt.Errorf("failed to unmarshal sandbox metadata: %w", err)
+	}
+	session.Sandbox = &sandbox
 	return nil
 }
 

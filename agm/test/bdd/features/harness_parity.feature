@@ -279,6 +279,7 @@ Feature: Harness parity
     And archive preview should honor global JSON field masks
     And active async preview should not start a detached reaper
     And dry-run preview should preserve async state validation
+    And persisted sandbox ownership should survive the archive reload boundary
 
   Scenario Outline: Supported model families have default routes
     Given model family "<family>" is configured

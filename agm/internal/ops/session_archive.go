@@ -520,7 +520,10 @@ func cleanupSandboxDir(sessionID, mergedPath string) bool {
 		slog.Warn("Failed to get home dir for sandbox cleanup", "error", err)
 		return false
 	}
+	return cleanupSandboxDirWithChecker(sessionID, mergedPath, base, sandboxgc.NewChecker(base, nil))
+}
 
+func cleanupSandboxDirWithChecker(sessionID, mergedPath, base string, checker *sandboxgc.Checker) bool {
 	sandboxDir := filepath.Join(base, sessionID)
 	if _, err := os.Lstat(sandboxDir); os.IsNotExist(err) {
 		return false
@@ -533,12 +536,11 @@ func cleanupSandboxDir(sessionID, mergedPath string) bool {
 	// Unmount merged path if known (checker.Reap also unmounts <dir>/merged,
 	// but mergedPath from the manifest may differ from the default layout).
 	if mergedPath != "" {
-		if err := unmountBestEffort(mergedPath); err != nil {
+		if err := checker.Unmount(mergedPath); err != nil {
 			slog.Warn("Failed to unmount sandbox", "path", mergedPath, "error", err)
 		}
 	}
 
-	checker := sandboxgc.NewChecker(base, nil)
 	if err := checker.Reap(sandboxDir); err != nil {
 		slog.Warn("Sandbox not removed during archive cleanup — periodic sandbox gc will retry",
 			"session", sessionID, "path", sandboxDir, "error", err)

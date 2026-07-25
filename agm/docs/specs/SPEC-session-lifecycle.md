@@ -173,3 +173,4 @@ Manages the full lifecycle of AGM sessions: creation (via `agm session new` / `a
 6. **GC is logged** — every GC skip and archive action is written to `gc.jsonl` with session ID, name, and reason.
 7. **Lifecycle state transitions are unidirectional** — `"" -> "reaping" -> "archived"`. There is no path from archived back to active except via `unarchive`.
 8. **Manifest resolution skips archived sessions** — `ResolveIdentifier` only matches active sessions to prevent accidental operations on archived data.
+9. **Sandbox cleanup uses persisted ownership** — sandbox ID, provider, merged cleanup boundary, mapped working directory, enabled state, and creation time round-trip through session storage. Archive removes only that reloaded, attributed sandbox unless `KeepSandbox` is set; legacy records without ownership metadata never authorize an inferred deletion.

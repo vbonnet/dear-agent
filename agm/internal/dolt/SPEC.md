@@ -24,6 +24,8 @@
 
 **DOLTR-11** When AGM stores Pi native metadata in the session metadata document, the Dolt adapter shall round-trip the session ID, session directory, transcript path, coding-agent directory, and its explicit presence marker, including an intentional empty native-default value, without a harness-specific schema migration.
 
+**DOLTR-12** When AGM stores a sandboxed session, the storage adapter shall round-trip the complete non-secret sandbox ownership record across create, read, and update so a later archive reload retains the exact sandbox ID, provider, cleanup boundary, mapped working directory, enabled state, and creation time required for owned cleanup.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`

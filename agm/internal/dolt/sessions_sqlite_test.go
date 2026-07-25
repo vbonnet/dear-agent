@@ -754,6 +754,109 @@ func TestSQLiteUpdateSessionRoundTripsModel(t *testing.T) {
 	}
 }
 
+func TestSQLiteSandboxOwnershipMetadataRoundTripsForArchive(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	createdAt := time.Now().UTC().Truncate(time.Microsecond)
+	wantSandbox := &manifest.SandboxConfig{
+		Enabled:    true,
+		ID:         "sandbox-roundtrip-session",
+		Provider:   "apfs-reflink",
+		MergedPath: "/tmp/agm-sandbox/merged",
+		WorkingDir: "/tmp/agm-sandbox/merged/repo0",
+		CreatedAt:  createdAt,
+	}
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "sandbox-roundtrip-session",
+		Name:          "sandbox-roundtrip-session",
+		Harness:       "codex-cli",
+		CreatedAt:     createdAt,
+		UpdatedAt:     createdAt,
+		Context:       manifest.Context{Project: wantSandbox.WorkingDir},
+		Tmux:          manifest.Tmux{SessionName: "sandbox-roundtrip-session"},
+		Sandbox:       wantSandbox,
+	}
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+
+	assertSandbox := func(t *testing.T, got, want *manifest.SandboxConfig) {
+		t.Helper()
+		if got == nil {
+			t.Fatal("Sandbox = nil, want persisted ownership metadata")
+		}
+		if got.Enabled != want.Enabled ||
+			got.ID != want.ID ||
+			got.Provider != want.Provider ||
+			got.MergedPath != want.MergedPath ||
+			got.WorkingDir != want.WorkingDir ||
+			!got.CreatedAt.Equal(want.CreatedAt) {
+			t.Fatalf("Sandbox = %#v, want %#v", got, want)
+		}
+	}
+
+	stored, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after create error: %v", err)
+	}
+	assertSandbox(t, stored.Sandbox, wantSandbox)
+
+	wantSandbox = &manifest.SandboxConfig{
+		Enabled:    true,
+		ID:         m.SessionID,
+		Provider:   "mock-updated",
+		MergedPath: "/tmp/agm-sandbox-updated/merged",
+		WorkingDir: "/tmp/agm-sandbox-updated/merged/repo0",
+		CreatedAt:  createdAt.Add(time.Second),
+	}
+	stored.Sandbox = wantSandbox
+	if err := adapter.UpdateSession(stored); err != nil {
+		t.Fatalf("UpdateSession() error: %v", err)
+	}
+	updated, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() after update error: %v", err)
+	}
+	assertSandbox(t, updated.Sandbox, wantSandbox)
+}
+
+func TestSQLiteMissingSandboxMetadataDoesNotInferOwnership(t *testing.T) {
+	adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	now := time.Now()
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "legacy-session-without-sandbox-metadata",
+		Name:          "legacy-session-without-sandbox-metadata",
+		Harness:       "codex-cli",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		Context: manifest.Context{
+			Project: "/Users/example/.agm/sandboxes/unowned/merged/repo0",
+		},
+		Tmux: manifest.Tmux{SessionName: "legacy-session-without-sandbox-metadata"},
+	}
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+	stored, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() error: %v", err)
+	}
+	if stored.Sandbox != nil {
+		t.Fatalf("Sandbox = %#v, want nil without persisted ownership", stored.Sandbox)
+	}
+}
+
 func TestSQLiteCreateSessionDefaultsModelOnlyForClaude(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
