@@ -18,6 +18,11 @@ name: Gemini PR Review
 #   selected model in repository configuration avoids an implicit workflow
 #   default becoming stale as Gemini model availability changes.
 #
+# Fallback reviewer: the repo/org Actions VARIABLE `GEMINI_FALLBACK_REVIEWER`
+#   must name the single GitHub login allowed to attest an interactive Gemini
+#   review. An explicit login remains valid if the repository moves between a
+#   personal account and an organization; an unset value fails closed.
+#
 # The job no-ops cleanly until GEMINI_API_KEY is present, skips PRs from forks
 # (which have no access to repo secrets), and skips drafts until GitHub emits
 # the ready_for_review event. The retired Code Assist configuration is not an
@@ -53,7 +58,8 @@ jobs:
         github.event_name == 'pull_request' ||
         (
           github.event_name == 'pull_request_review' &&
-          github.event.review.user.login == github.repository_owner &&
+          vars.GEMINI_FALLBACK_REVIEWER != '' &&
+          github.event.review.user.login == vars.GEMINI_FALLBACK_REVIEWER &&
           github.event.review.state == 'commented' &&
           startsWith(github.event.review.body, 'Reviewed head: ') &&
           contains(github.event.review.body, 'Gemini quota fallback attestation')
@@ -84,7 +90,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          OWNER: ${{ github.repository_owner }}
+          REVIEWER: ${{ vars.GEMINI_FALLBACK_REVIEWER }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if gh api --paginate \
@@ -92,9 +98,10 @@ jobs:
             jq --slurp --exit-status \
               --arg base "$BASE_SHA" \
               --arg head "$HEAD_SHA" \
-              --arg owner "$OWNER" '
+              --arg reviewer "$REVIEWER" '
               add | any(.[];
-                .user.login == $owner
+                ($reviewer | length) > 0
+                and .user.login == $reviewer
                 and .commit_id == $head
                 and .state == "COMMENTED"
                 and (
