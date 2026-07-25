@@ -275,6 +275,7 @@ Feature: Harness parity
     And archive preview should return stable AGM-100 output
     And archive preview should retain the resolved stable session identity
     And archive completion guidance should use the resolved stable session identity
+    And active async archive should separate stable and tmux identities
     And archive preview should honor global JSON field masks
     And active async preview should not start a detached reaper
     And dry-run preview should preserve async state validation

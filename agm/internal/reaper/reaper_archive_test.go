@@ -156,3 +156,52 @@ func TestArchiveSession_AlreadyArchivedIsIdempotent(t *testing.T) {
 		t.Fatalf("archiveSession() idempotent error: %v", err)
 	}
 }
+
+func TestRun_UsesStableSessionIDAndResolvedTmuxIdentity(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "agm.db")
+	t.Setenv("AGM_DB_PATH", dbPath)
+	t.Setenv("HOME", t.TempDir())
+
+	adapter, err := dolt.NewSQLiteAdapter(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteAdapter() error: %v", err)
+	}
+	t.Cleanup(func() { _ = adapter.Close() })
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     "stable-reaper-session-id",
+		Name:          "renamed-after-reaper-spawn",
+		Harness:       "codex-cli",
+		CreatedAt:     time.Now().Add(-time.Hour),
+		UpdatedAt:     time.Now().Add(-time.Hour),
+		Context:       manifest.Context{Project: t.TempDir()},
+		Tmux:          manifest.Tmux{SessionName: "renamed-tmux-after-reaper-spawn"},
+	}
+	if err := adapter.CreateSession(m); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+
+	const resolvedTmuxAtSpawn = "resolved-tmux-at-spawn"
+	f := &fakeBoundary{}
+	f.install(t)
+	r := NewWithOptions(resolvedTmuxAtSpawn, t.TempDir(), ArchiveOptions{
+		SessionID: m.SessionID,
+		Force:     true,
+	})
+	if got := r.archiveRequest().Identifier; got != m.SessionID {
+		t.Fatalf("archive request identifier = %q, want stable ID %q", got, m.SessionID)
+	}
+	if err := r.Run(); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	stored, err := adapter.GetSession(m.SessionID)
+	if err != nil {
+		t.Fatalf("GetSession() error: %v", err)
+	}
+	if stored.Lifecycle != manifest.LifecycleArchived {
+		t.Fatalf("Lifecycle = %q, want archived", stored.Lifecycle)
+	}
+	if r.SessionName != resolvedTmuxAtSpawn {
+		t.Fatalf("tmux identity = %q, want %q", r.SessionName, resolvedTmuxAtSpawn)
+	}
+}

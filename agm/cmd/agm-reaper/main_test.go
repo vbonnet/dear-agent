@@ -10,6 +10,33 @@ import (
 // TestBuildSentinel verifies the agm-reaper binary compiles.
 func TestBuildSentinel(t *testing.T) {}
 
+func TestValidateResolvedTargets(t *testing.T) {
+	tests := []struct {
+		name        string
+		sessionID   string
+		tmuxSession string
+		wantErr     string
+	}{
+		{name: "resolved", sessionID: "stable-id", tmuxSession: "resolved-tmux"},
+		{name: "missing tmux", sessionID: "stable-id", wantErr: "--session flag is required"},
+		{name: "missing stable id", tmuxSession: "resolved-tmux", wantErr: "--session-id flag is required"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateResolvedTargets(tc.sessionID, tc.tmuxSession)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("validateResolvedTargets() error = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("validateResolvedTargets() error = %v, want substring %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidateRevision(t *testing.T) {
 	tests := []struct {
 		name     string

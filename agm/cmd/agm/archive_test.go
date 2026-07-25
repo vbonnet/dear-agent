@@ -316,6 +316,23 @@ func setArchiveTestClaudeUUID(t *testing.T, sessionID, claudeUUID string) *manif
 	return stored
 }
 
+func setArchiveTestHarness(t *testing.T, sessionID, harness string) {
+	t.Helper()
+	adapter, err := getStorage()
+	if err != nil {
+		t.Fatalf("getStorage() error: %v", err)
+	}
+	defer adapter.Close()
+	m, err := adapter.GetSession(sessionID)
+	if err != nil {
+		t.Fatalf("GetSession(%q) error: %v", sessionID, err)
+	}
+	m.Harness = harness
+	if err := adapter.UpdateSession(m); err != nil {
+		t.Fatalf("UpdateSession(%q) error: %v", sessionID, err)
+	}
+}
+
 // TestArchiveSession_Success tests successful archive of an active session
 func TestArchiveSession_Success(t *testing.T) {
 	if testing.Short() {
@@ -975,6 +992,50 @@ func TestArchiveSession_ClaudeUUIDUsesResolvedSessionID(t *testing.T) {
 	}
 }
 
+func TestArchiveSession_AsyncClaudeUUIDUsesResolvedIdentities(t *testing.T) {
+	_, sessionsDir, cleanup := setupArchiveDryRunTest(t)
+	defer cleanup()
+	configureSingleArchiveDryRun(t)
+	dryRun = false
+	asyncArchive = true
+	setHumanText(t)
+
+	const sessionID = "single-async-claude-uuid"
+	const sessionName = "async-claude-uuid"
+	const tmuxSession = "async-claude-uuid-tmux"
+	const claudeUUID = "550e8400-e29b-41d4-a716-446655440044"
+	createArchiveTestSession(t, sessionsDir, sessionID, sessionName, tmuxSession, "")
+	setArchiveTestProject(t, sessionID, t.TempDir())
+	setArchiveTestHarness(t, sessionID, "claude-code")
+	before := setArchiveTestClaudeUUID(t, sessionID, claudeUUID)
+
+	oldTmuxClient := tmuxClient
+	tmuxClient = &session.MockTmux{Sessions: map[string]bool{tmuxSession: true}}
+	t.Cleanup(func() { tmuxClient = oldTmuxClient })
+
+	oldSpawnReaper := spawnReaperFn
+	var gotSessionID, gotTmuxSession, gotHarness string
+	spawnReaperFn = func(stableID, resolvedTmux, harness string, _ manifest.SessionOutcome) error {
+		gotSessionID = stableID
+		gotTmuxSession = resolvedTmux
+		gotHarness = harness
+		return nil
+	}
+	t.Cleanup(func() { spawnReaperFn = oldSpawnReaper })
+
+	if err := archiveSession(nil, []string{claudeUUID}); err != nil {
+		t.Fatalf("archiveSession() error: %v", err)
+	}
+	if gotSessionID != sessionID || gotTmuxSession != tmuxSession || gotHarness != "claude-code" {
+		t.Fatalf("spawnReaper identities = (%q, %q, %q), want (%q, %q, %q)",
+			gotSessionID, gotTmuxSession, gotHarness, sessionID, tmuxSession, "claude-code")
+	}
+	after := readSessionFromDolt(t, sessionID)
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("async preflight changed durable session before reaper:\nbefore=%#v\nafter=%#v", before, after)
+	}
+}
+
 func TestArchiveSession_DryRunCLIActiveAsyncDoesNotStartReaper(t *testing.T) {
 	_, sessionsDir, cleanup := setupArchiveDryRunTest(t)
 	defer cleanup()
@@ -1250,7 +1311,7 @@ func TestSpawnReaper_SessionNameSanitization(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Note: spawnReaper() will fail because agm-reaper binary doesn't exist
 			// in test environment. We're testing the path sanitization logic.
-			err := spawnReaper(tc.sessionName, "codex-cli", manifest.OutcomeUnknown)
+			err := spawnReaper("stable-session-id", tc.sessionName, "codex-cli", manifest.OutcomeUnknown)
 
 			// Should get error about missing binary (expected in tests)
 			if err == nil {

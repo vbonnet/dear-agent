@@ -5,10 +5,10 @@
 - Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
 - Feature: `agm/test/bdd/features/harness_parity.feature`
 
-<!-- Last audited at: 2026-07-22 -->
+<!-- Last audited at: 2026-07-24 -->
 
-**Version**: 1.1
-**Last Updated**: 2026-07-22
+**Version**: 1.2
+**Last Updated**: 2026-07-24
 **Status**: Living
 **Scope**: Two-phase stop-then-archive lifecycle for AGM-managed harness sessions
 
@@ -76,6 +76,8 @@ send it via `tmux.SendMultiLinePromptSafe`: Pi (`pi-cli` and legacy `pi`) uses
 **REA-20** When `agm session archive --async` supplies force, keep-sandbox, or outcome options, the system shall propagate those options across the detached `agm-reaper` process boundary and apply them to shared preflight and final archival.
 
 **REA-21** When one reaper run performs preflight, writes the reaping tombstone, and finalizes archival, the system shall reuse one migrated lifecycle-storage connection across those phases.
+
+**REA-22** When an active archive is resolved by ID, name, tmux name, or conversation UUID, the detached reaper shall use the stable AGM session ID for preflight, reaping, and final archive storage operations while using the separately resolved tmux session name only for pane safety, prompt, exit, and kill operations.
 
 ### Timing Constants (regression-pinned)
 

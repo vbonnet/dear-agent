@@ -119,7 +119,7 @@ Provide a production-ready CLI that:
 
 **CLI-44** When direct, fan-out, structured, daemon-queued, fresh-startup, or post-resume delivery targets an AGY session, the command shall propagate the resolved `agy` harness through the shared tmux delivery boundary so attribution and multiline bodies remain one native request; unresolved and non-AGY sessions shall retain their established delivery semantics.
 
-**CLI-45** When `agm session archive <session> --dry-run` resolves an archivable session and the shared archive guards succeed, the system shall return a successful preview before lifecycle writes, external provider archival, tmux or process changes, worktree or branch cleanup, sandbox or settings cleanup, telemetry, or detached reaper startup; after initial ID, name, tmux-name, or conversation-UUID resolution, preview and execution shall address the same stable AGM session ID so aliases and concurrent renames cannot redirect or invalidate the operation; active and stopped `--async` validation shall remain enforced, both text and JSON output shall name the exact resolved target, successful archive and restore guidance shall use the resolved session identity rather than the original alias, and JSON previews shall honor the global `--fields` projection contract.
+**CLI-45** When `agm session archive <session> --dry-run` resolves an archivable session and the shared archive guards succeed, the system shall return a successful preview before lifecycle writes, external provider archival, tmux or process changes, worktree or branch cleanup, sandbox or settings cleanup, telemetry, or detached reaper startup; after initial ID, name, tmux-name, or conversation-UUID resolution, preview and execution shall address the same stable AGM session ID so aliases and concurrent renames cannot redirect or invalidate the operation; active asynchronous execution shall carry that stable ID separately from the resolved tmux identity across the detached reaper boundary; active and stopped `--async` validation shall remain enforced, both text and JSON output shall name the exact resolved target, successful archive and restore guidance shall use the resolved session identity rather than the original alias, and JSON previews shall honor the global `--fields` projection contract.
 
 ## Requirements
 
@@ -890,10 +890,10 @@ SQLite when `AGM_DB_PATH` is set by a named test environment)
    provider representation without repeating AGM lifecycle mutation
 7. For stopped sessions, call ops.ArchiveSession immediately
 8. For active sessions with --async:
-   - preflight through ops.ArchiveSession without mutating
+   - preflight through ops.ArchiveSession with the resolved stable AGM ID without mutating
    - require the detached agm-reaper binary to prove the same embedded VCS revision and clean or dirty provenance as agm
    - wait for the exact detached child to acknowledge revision validation and durable log initialization before reporting success
-   - spawn agm-reaper with force/keep-sandbox/outcome options preserved
+   - spawn agm-reaper with the stable AGM ID for lifecycle storage, the separately resolved tmux session for pane control, and force/keep-sandbox/outcome options preserved
    - mark lifecycle=reaping before stopping the pane
    - after pane death, call ops.ArchiveSession for the final transition
 9. For --all, select inactive candidates and call ops.ArchiveSession once per

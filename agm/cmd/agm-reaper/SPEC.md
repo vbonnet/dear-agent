@@ -1,9 +1,9 @@
 # AGM Reaper Command Specification
 
-<!-- Last audited at: 2026-07-17 -->
+<!-- Last audited at: 2026-07-24 -->
 
-**Version:** 1.0
-**Status:** Baseline
+**Version:** 1.1
+**Status:** Living
 **Scope:** `agm-reaper` archived-session cleanup command.
 
 ## Overview
@@ -37,6 +37,8 @@ depend on its flags and exit behavior.
 **AGM-REAPER-10** When AGM supplies a startup acknowledgement descriptor, the system shall acknowledge readiness only after revision validation and durable log initialization succeed.
 
 **AGM-REAPER-11** When the canonical root AGM install target is invoked, the system shall build and install both `agm` and `agm-reaper` with the same revision identity.
+
+**AGM-REAPER-12** When asynchronous archive execution crosses into `agm-reaper`, the command shall require both `--session-id` with the stable AGM lifecycle identifier and `--session` with the resolved tmux target, and shall pass those identities to storage and pane-control paths without conflating them.
 
 ## BDD Traceability
 

@@ -178,7 +178,9 @@ Dry-run returns an AGM-100 `OpError` with status 200. Agents can parse
 the `detail` and `parameters` fields to confirm the exact resolved target before
 re-running without the flag. Single-session archive previews execute the shared
 archive guards but return before any AGM, provider, process, worktree, branch,
-sandbox, settings, telemetry, or reaper mutation.
+sandbox, settings, telemetry, or reaper mutation. Execution reuses the returned
+stable AGM session ID; active asynchronous execution carries its resolved tmux
+identity separately to the detached reaper.
 
 ## Progressive Disclosure (Skills)
 

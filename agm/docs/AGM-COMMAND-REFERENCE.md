@@ -569,6 +569,9 @@ Archive a session (marks as archived, keeps all data).
 
 - **Stopped sessions**: Archive directly without confirmation. Do NOT use `--async`.
 - **Active sessions**: MUST use `--async`. Spawns a background reaper for graceful shutdown.
+- **Resolved identities**: Async execution carries the stable AGM session ID
+  for lifecycle storage separately from the resolved tmux session used for
+  pane control, including when the input is a conversation UUID alias.
 
 **Error cases**:
 - Active session without `--async`: `session is active; use --async to archive an active session`
@@ -600,9 +603,11 @@ agm session archive --all --older-than=30d
 4. With `--dry-run`, runs shared archive guards and returns before every AGM,
    provider, process, worktree, branch, sandbox, settings, telemetry, or reaper
    mutation
-5. Updates lifecycle status to "archived"
-6. Preserves all session data
-7. Hides from default `agm session list` output
+5. Reuses the resolved stable AGM ID for synchronous or asynchronous lifecycle
+   mutation; asynchronous reaping carries the tmux identity separately
+6. Updates lifecycle status to "archived"
+7. Preserves all session data
+8. Hides from default `agm session list` output
 
 ---
 
