@@ -75,6 +75,7 @@ var (
 // It waits for the harness to return to prompt, sends its native graceful-exit
 // command, and archives the session.
 type Reaper struct {
+	SessionID   string
 	SessionName string
 	SessionsDir string
 	SocketPath  string
@@ -85,6 +86,7 @@ type Reaper struct {
 // ArchiveOptions are the lifecycle choices captured by the parent archive
 // command and propagated into the detached reaper process.
 type ArchiveOptions struct {
+	SessionID   string
 	Force       bool
 	KeepSandbox bool
 	Outcome     manifest.SessionOutcome
@@ -99,6 +101,7 @@ func New(sessionName, sessionsDir string) *Reaper {
 // detached process boundary.
 func NewWithOptions(sessionName, sessionsDir string, options ArchiveOptions) *Reaper {
 	return &Reaper{
+		SessionID:   options.SessionID,
 		SessionName: sessionName,
 		SessionsDir: sessionsDir,
 		SocketPath:  tmux.GetSocketPath(),
@@ -310,7 +313,7 @@ func (r *Reaper) forceKillPaneProcess() {
 // This must happen BEFORE killing tmux so that if the reaper crashes,
 // the GC startup scan can detect and archive the orphaned session.
 func (r *Reaper) markReaping(adapter *dolt.Adapter, sessionsDir string) (string, error) {
-	m, _, err := session.ResolveIdentifier(r.SessionName, sessionsDir, adapter)
+	m, _, err := session.ResolveIdentifier(r.archiveIdentifier(), sessionsDir, adapter)
 	if err != nil {
 		return "", fmt.Errorf("session not found: %w", err)
 	}
@@ -424,11 +427,18 @@ func (r *Reaper) archiveSessionWithStorage(adapter *dolt.Adapter, sessionsDir st
 
 func (r *Reaper) archiveRequest() ops.ArchiveSessionRequest {
 	return ops.ArchiveSessionRequest{
-		Identifier:  r.SessionName,
+		Identifier:  r.archiveIdentifier(),
 		Force:       r.Options.Force,
 		KeepSandbox: r.Options.KeepSandbox,
 		Outcome:     r.Options.Outcome,
 	}
+}
+
+func (r *Reaper) archiveIdentifier() string {
+	if r.SessionID != "" {
+		return r.SessionID
+	}
+	return r.SessionName
 }
 
 // openStorage selects the same isolated SQLite lifecycle store used by AGM

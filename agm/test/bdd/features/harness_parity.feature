@@ -268,6 +268,18 @@ Feature: Harness parity
     And a context-only checkout should not authorize branch deletion
     And branch deletion should require attributed worktree ownership
 
+  Scenario: Single-session archive dry run is side-effect-free
+    Given AGM has a single-session archive dry-run contract
+    When AGM validates single-session archive dry-run safety
+    Then durable and provider archive state should remain unchanged
+    And archive preview should return stable AGM-100 output
+    And archive preview should retain the resolved stable session identity
+    And archive completion guidance should use the resolved stable session identity
+    And active async archive should separate stable and tmux identities
+    And archive preview should honor global JSON field masks
+    And active async preview should not start a detached reaper
+    And dry-run preview should preserve async state validation
+
   Scenario Outline: Supported model families have default routes
     Given model family "<family>" is configured
     When AGM validates model family parity support

@@ -23,7 +23,8 @@ func main() {
 }
 
 func run() error {
-	sessionName := flag.String("session", "", "Session name to archive")
+	sessionID := flag.String("session-id", "", "Stable AGM session ID to archive")
+	sessionName := flag.String("session", "", "Resolved tmux session name to stop")
 	logFile := flag.String("log-file", "", "Log file path")
 	sessionsDir := flag.String("sessions-dir", "", "Sessions directory")
 	force := flag.Bool("force", false, "Override archive verification guards (propagated from agm session archive --force)")
@@ -45,10 +46,10 @@ func run() error {
 		}
 	}
 
-	// Validate required flags
-	if *sessionName == "" {
+	// Validate required stable-storage and tmux-control identities.
+	if err := validateResolvedTargets(*sessionID, *sessionName); err != nil {
 		flag.Usage()
-		return fmt.Errorf("--session flag is required")
+		return err
 	}
 
 	// Set up logging
@@ -66,13 +67,14 @@ func run() error {
 
 	// Log startup
 	logger.Info("Reaper started", "timestamp", time.Now().UTC().Format(time.RFC3339))
-	logger.Info("Reaper configuration", "session", *sessionName, "pid", os.Getpid(), "log_file", *logFile, "sessions_dir", *sessionsDir)
+	logger.Info("Reaper configuration", "session_id", *sessionID, "tmux_session", *sessionName, "pid", os.Getpid(), "log_file", *logFile, "sessions_dir", *sessionsDir)
 	if err := acknowledgeStartup(*startupFD); err != nil {
 		return err
 	}
 
 	// Create and run reaper
 	r := reaper.NewWithOptions(*sessionName, *sessionsDir, reaper.ArchiveOptions{
+		SessionID:   *sessionID,
 		Force:       *force,
 		KeepSandbox: *keepSandbox,
 		Outcome:     manifest.SessionOutcome(*outcome),
@@ -82,6 +84,16 @@ func run() error {
 	}
 
 	logger.Info("Reaper completed successfully")
+	return nil
+}
+
+func validateResolvedTargets(sessionID, tmuxSession string) error {
+	if tmuxSession == "" {
+		return fmt.Errorf("--session flag is required")
+	}
+	if sessionID == "" {
+		return fmt.Errorf("--session-id flag is required")
+	}
 	return nil
 }
 

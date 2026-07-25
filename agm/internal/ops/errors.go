@@ -79,6 +79,23 @@ const (
 
 // Constructor functions for common errors.
 
+// NewDryRunPreview returns the stable successful problem-details envelope used
+// when a mutation command has validated a target without changing it.
+func NewDryRunPreview(instance, detail string, parameters map[string]string) *OpError {
+	return &OpError{
+		Status:   200,
+		Type:     "dry_run",
+		Code:     ErrCodeDryRun,
+		Title:    "Dry run",
+		Detail:   detail,
+		Instance: instance,
+		Suggestions: []string{
+			"Remove `--dry-run` to execute.",
+		},
+		Parameters: parameters,
+	}
+}
+
 // ErrSessionNotFound returns an error indicating no session matches the given identifier.
 func ErrSessionNotFound(identifier string) *OpError {
 	return &OpError{
