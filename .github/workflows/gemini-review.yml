@@ -3,9 +3,9 @@ name: Gemini PR Review
 # Gemini-powered PR review through the Gemini Developer API. GitHub prepares
 # immutable PR metadata/diff files, the no-tool API call returns a review body,
 # and a separate step submits it against the exact reviewed head. A
-# revision-bound owner attestation from the Gemini web surface can satisfy the
-# gate during Developer API quota incidents. Keeping credentials out of model
-# reach avoids prompt-injected GitHub mutations and removes the
+# revision-bound owner attestation from an interactive Gemini surface can
+# satisfy the gate during Developer API quota incidents. Keeping credentials
+# out of model reach avoids prompt-injected GitHub mutations and removes the
 # CLI/extension/MCP tool loop from the required check.
 #
 # Auth: GEMINI_API_KEY secret — an AI Studio "Gemini Developer API" key.
@@ -55,11 +55,12 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # The Developer API and Gemini web app have independent quota pools. A
-      # repository-owner review proves that Gemini web reviewed the complete
-      # diff at this exact revision. The strict author, commit, and body markers
-      # prevent stale or PR-authored comments from bypassing the API review.
-      - name: Detect revision-bound Gemini web attestation
+      # Interactive Gemini surfaces can remain available during Developer API
+      # quota incidents. A repository-owner review proves that a named Gemini
+      # surface reviewed the complete diff at this exact revision. The strict
+      # author, commit, and body markers prevent stale or PR-authored comments
+      # from bypassing the API review.
+      - name: Detect revision-bound Gemini fallback attestation
         id: attestation
         if: steps.gate.outputs.skip != 'true'
         env:
@@ -74,16 +75,25 @@ jobs:
                 .user.login == "vbonnet"
                 and .commit_id == $head
                 and .state == "COMMENTED"
-                and (.body | startswith(
-                  "Reviewed head: " + $head
-                  + "\n\nGemini quota fallback attestation"
-                  + "\nReviewer: Gemini Flash-Lite web"
-                  + "\nInput: complete exact diff"
-                ))
+                and (
+                  (.body | startswith(
+                    "Reviewed head: " + $head
+                    + "\n\nGemini quota fallback attestation"
+                    + "\nReviewer: Gemini Flash-Lite web"
+                    + "\nInput: complete exact diff"
+                  ))
+                  or
+                  (.body | startswith(
+                    "Reviewed head: " + $head
+                    + "\n\nGemini quota fallback attestation"
+                    + "\nReviewer: Gemini 3.6 Flash High via Agy"
+                    + "\nInput: complete exact diff"
+                  ))
+                )
               )
             ' >/dev/null
           then
-            echo "::notice::Using revision-bound Gemini web attestation for ${HEAD_SHA}."
+            echo "::notice::Using revision-bound Gemini fallback attestation for ${HEAD_SHA}."
             echo "valid=true" >> "$GITHUB_OUTPUT"
           else
             echo "valid=false" >> "$GITHUB_OUTPUT"
