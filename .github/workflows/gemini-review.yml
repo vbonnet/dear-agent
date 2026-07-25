@@ -67,8 +67,9 @@ permissions:
 
 jobs:
   review:
-    # A skipped job still emits a check. Give ignored review events a distinct
-    # context so they cannot satisfy the canonical Gemini Review gate.
+    # The job always starts so GitHub evaluates this name before applicability
+    # is decided. Fork/draft PRs retain the canonical no-op context; unrelated
+    # review events get a distinct context and cannot satisfy the real gate.
     name: >-
       ${{
         (
@@ -93,39 +94,43 @@ jobs:
     # Four 180-second API attempts plus three 60-second quota waits require up
     # to 15 minutes; leave setup/cleanup headroom so failure remains explicit.
     timeout-minutes: 20
-    # Forks cannot read repository secrets; defer drafts until ready_for_review.
-    # A repository-owner fallback attestation must retrigger this gate itself.
-    # Restrict submitted reviews to the attestation marker so this workflow's
-    # bot review cannot recurse. Edits and dismissals by the configured human
-    # still rerun the detector so withdrawing an attestation fails closed.
-    if: >-
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      !github.event.pull_request.draft &&
-      (
-        github.event_name == 'pull_request' ||
-        (
-          github.event_name == 'pull_request_review' &&
-          vars.GEMINI_FALLBACK_REVIEWER != '' &&
-          github.event.review.user.login == vars.GEMINI_FALLBACK_REVIEWER &&
-          (
-            (
-              github.event.action == 'submitted' &&
-              github.event.review.state == 'commented' &&
-              startsWith(github.event.review.body, 'Reviewed head: ') &&
-              contains(github.event.review.body, 'Gemini quota fallback attestation')
-            ) ||
-            github.event.action == 'edited' ||
-            github.event.action == 'dismissed'
-          )
-        )
-      )
     steps:
-      - name: Gate on secret presence
+      - name: Gate on applicability and secret presence
         id: gate
         env:
+          APPLICABLE_EVENT: >-
+            ${{
+              github.event_name == 'pull_request' ||
+              (
+                github.event_name == 'pull_request_review' &&
+                vars.GEMINI_FALLBACK_REVIEWER != '' &&
+                github.event.review.user.login == vars.GEMINI_FALLBACK_REVIEWER &&
+                (
+                  (
+                    github.event.action == 'submitted' &&
+                    github.event.review.state == 'commented' &&
+                    startsWith(github.event.review.body, 'Reviewed head: ') &&
+                    contains(github.event.review.body, 'Gemini quota fallback attestation')
+                  ) ||
+                  github.event.action == 'edited' ||
+                  github.event.action == 'dismissed'
+                )
+              )
+            }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
           KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          if [ -z "$KEY" ]; then
+          if [ "$HEAD_REPOSITORY" != "$GITHUB_REPOSITORY" ]; then
+            echo "::notice::Fork pull request has no repository secrets; skipping Gemini review."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [ "$DRAFT" = "true" ]; then
+            echo "::notice::Draft pull request is deferred until ready_for_review."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [ "$APPLICABLE_EVENT" != "true" ]; then
+            echo "::notice::Unrelated review event cannot alter the Gemini review gate."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [ -z "$KEY" ]; then
             echo "::notice::GEMINI_API_KEY not set; skipping Gemini review."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
