@@ -135,6 +135,7 @@ func TestAnthropicProvider_Capabilities(t *testing.T) {
 
 	t.Run("Supported models", func(t *testing.T) {
 		expectedModels := []string{
+			"claude-opus-5",
 			"claude-opus-4-8",
 			"claude-opus-4-6",
 			"claude-3-5-sonnet-20241022",
