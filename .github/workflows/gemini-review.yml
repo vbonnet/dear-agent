@@ -53,8 +53,24 @@ concurrency:
               startsWith(github.event.review.body, 'Reviewed head: ') &&
               contains(github.event.review.body, 'Gemini quota fallback attestation')
             ) ||
-            github.event.action == 'edited' ||
-            github.event.action == 'dismissed'
+            (
+              github.event.action == 'edited' &&
+              (
+                (
+                  startsWith(github.event.review.body, 'Reviewed head: ') &&
+                  contains(github.event.review.body, 'Gemini quota fallback attestation')
+                ) ||
+                (
+                  startsWith(github.event.changes.body.from, 'Reviewed head: ') &&
+                  contains(github.event.changes.body.from, 'Gemini quota fallback attestation')
+                )
+              )
+            ) ||
+            (
+              github.event.action == 'dismissed' &&
+              startsWith(github.event.review.body, 'Reviewed head: ') &&
+              contains(github.event.review.body, 'Gemini quota fallback attestation')
+            )
           )
         )
       ) && 'gate' || github.run_id
@@ -84,8 +100,24 @@ jobs:
                 startsWith(github.event.review.body, 'Reviewed head: ') &&
                 contains(github.event.review.body, 'Gemini quota fallback attestation')
               ) ||
-              github.event.action == 'edited' ||
-              github.event.action == 'dismissed'
+              (
+                github.event.action == 'edited' &&
+                (
+                  (
+                    startsWith(github.event.review.body, 'Reviewed head: ') &&
+                    contains(github.event.review.body, 'Gemini quota fallback attestation')
+                  ) ||
+                  (
+                    startsWith(github.event.changes.body.from, 'Reviewed head: ') &&
+                    contains(github.event.changes.body.from, 'Gemini quota fallback attestation')
+                  )
+                )
+              ) ||
+              (
+                github.event.action == 'dismissed' &&
+                startsWith(github.event.review.body, 'Reviewed head: ') &&
+                contains(github.event.review.body, 'Gemini quota fallback attestation')
+              )
             )
           )
         ) && 'Gemini Review' || 'Gemini Review ignored event'
@@ -112,8 +144,24 @@ jobs:
                     startsWith(github.event.review.body, 'Reviewed head: ') &&
                     contains(github.event.review.body, 'Gemini quota fallback attestation')
                   ) ||
-                  github.event.action == 'edited' ||
-                  github.event.action == 'dismissed'
+                  (
+                    github.event.action == 'edited' &&
+                    (
+                      (
+                        startsWith(github.event.review.body, 'Reviewed head: ') &&
+                        contains(github.event.review.body, 'Gemini quota fallback attestation')
+                      ) ||
+                      (
+                        startsWith(github.event.changes.body.from, 'Reviewed head: ') &&
+                        contains(github.event.changes.body.from, 'Gemini quota fallback attestation')
+                      )
+                    )
+                  ) ||
+                  (
+                    github.event.action == 'dismissed' &&
+                    startsWith(github.event.review.body, 'Reviewed head: ') &&
+                    contains(github.event.review.body, 'Gemini quota fallback attestation')
+                  )
                 )
               )
             }}
