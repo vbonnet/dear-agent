@@ -762,12 +762,13 @@ func TestSQLiteSandboxOwnershipMetadataRoundTripsForArchive(t *testing.T) {
 	t.Cleanup(func() { _ = adapter.Close() })
 
 	createdAt := time.Now().UTC().Truncate(time.Microsecond)
+	sandboxBase := filepath.Join(t.TempDir(), ".agm", "sandboxes")
 	wantSandbox := &manifest.SandboxConfig{
 		Enabled:    true,
 		ID:         "sandbox-roundtrip-session",
 		Provider:   "apfs-reflink",
-		MergedPath: "/tmp/agm-sandbox/merged",
-		WorkingDir: "/tmp/agm-sandbox/merged/repo0",
+		MergedPath: filepath.Join(sandboxBase, "sandbox-roundtrip-session", "merged"),
+		WorkingDir: filepath.Join(sandboxBase, "sandbox-roundtrip-session", "merged", "repo0"),
 		CreatedAt:  createdAt,
 	}
 	m := &manifest.Manifest{
@@ -810,8 +811,8 @@ func TestSQLiteSandboxOwnershipMetadataRoundTripsForArchive(t *testing.T) {
 		Enabled:    true,
 		ID:         m.SessionID,
 		Provider:   "mock-updated",
-		MergedPath: "/tmp/agm-sandbox-updated/merged",
-		WorkingDir: "/tmp/agm-sandbox-updated/merged/repo0",
+		MergedPath: filepath.Join(sandboxBase, m.SessionID, "merged"),
+		WorkingDir: filepath.Join(sandboxBase, m.SessionID, "merged", "repo1"),
 		CreatedAt:  createdAt.Add(time.Second),
 	}
 	stored.Sandbox = wantSandbox
@@ -854,6 +855,83 @@ func TestSQLiteMissingSandboxMetadataDoesNotInferOwnership(t *testing.T) {
 	}
 	if stored.Sandbox != nil {
 		t.Fatalf("Sandbox = %#v, want nil without persisted ownership", stored.Sandbox)
+	}
+}
+
+func TestSQLiteInvalidSandboxMetadataDoesNotAuthorizeCleanup(t *testing.T) {
+	tests := []struct {
+		name    string
+		sandbox func(sessionID, base string) *manifest.SandboxConfig
+	}{
+		{
+			name: "partial record",
+			sandbox: func(sessionID, base string) *manifest.SandboxConfig {
+				return &manifest.SandboxConfig{
+					Enabled:    true,
+					ID:         sessionID,
+					MergedPath: filepath.Join(base, sessionID, "merged"),
+				}
+			},
+		},
+		{
+			name: "mismatched ID",
+			sandbox: func(_ string, base string) *manifest.SandboxConfig {
+				return &manifest.SandboxConfig{
+					Enabled:    true,
+					ID:         "other-session",
+					Provider:   "mock",
+					MergedPath: filepath.Join(base, "other-session", "merged"),
+					WorkingDir: filepath.Join(base, "other-session", "merged", "repo0"),
+					CreatedAt:  time.Now(),
+				}
+			},
+		},
+		{
+			name: "working directory outside merged boundary",
+			sandbox: func(sessionID, base string) *manifest.SandboxConfig {
+				return &manifest.SandboxConfig{
+					Enabled:    true,
+					ID:         sessionID,
+					Provider:   "mock",
+					MergedPath: filepath.Join(base, sessionID, "merged"),
+					WorkingDir: filepath.Join(base, "unowned"),
+					CreatedAt:  time.Now(),
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			adapter, err := NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+			if err != nil {
+				t.Fatalf("NewSQLiteAdapter() error: %v", err)
+			}
+			t.Cleanup(func() { _ = adapter.Close() })
+
+			sessionID := "invalid-sandbox-" + strings.ReplaceAll(tt.name, " ", "-")
+			now := time.Now()
+			base := filepath.Join(t.TempDir(), ".agm", "sandboxes")
+			m := &manifest.Manifest{
+				SchemaVersion: manifest.SchemaVersion,
+				SessionID:     sessionID,
+				Name:          sessionID,
+				Harness:       "codex-cli",
+				CreatedAt:     now,
+				UpdatedAt:     now,
+				Context:       manifest.Context{Project: t.TempDir()},
+				Sandbox:       tt.sandbox(sessionID, base),
+			}
+			if err := adapter.CreateSession(m); err != nil {
+				t.Fatalf("CreateSession() error: %v", err)
+			}
+			stored, err := adapter.GetSession(sessionID)
+			if err != nil {
+				t.Fatalf("GetSession() error: %v", err)
+			}
+			if stored.Sandbox != nil {
+				t.Fatalf("Sandbox = %#v, want nil without complete valid ownership", stored.Sandbox)
+			}
+		})
 	}
 }
 

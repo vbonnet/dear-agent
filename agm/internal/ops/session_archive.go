@@ -247,10 +247,7 @@ func runArchiveCleanup(ctx *OpContext, m *manifest.Manifest, req *ArchiveSession
 	recordArchiveTrust(m.Name, m.WorkingDirectory, m.Context.Project, m.SessionID, m.CreatedAt)
 	deregisterMonitor(ctx, m.Name)
 
-	sandboxPath := ""
-	if m.Sandbox != nil {
-		sandboxPath = m.Sandbox.MergedPath
-	}
+	sandboxPath := ownedSandboxPathForArchive(m)
 	mcpKilled, mcpErr := mcp.CleanupSessionMCPProcesses(
 		&mcp.ProcFSFinder{}, &mcp.SignalKiller{},
 		m.SessionID, sandboxPath,
@@ -264,10 +261,14 @@ func runArchiveCleanup(ctx *OpContext, m *manifest.Manifest, req *ArchiveSession
 
 	killTmuxAndProcessGroup(m)
 
-	postCleanup := CleanupAfterArchive(
+	cleanSandbox := sandboxCleanupFunc(cleanupSandboxDir)
+	if ctx.archiveSandboxCleaner != nil {
+		cleanSandbox = ctx.archiveSandboxCleaner
+	}
+	postCleanup := cleanupAfterArchive(
 		m.SessionID, m.Name,
 		m.WorkingDirectory, m.Context.Project, sandboxPath, m.Name,
-		req.KeepSandbox,
+		req.KeepSandbox, cleanSandbox,
 	)
 	sessionCleanup := cleanupTrackedSessionResources(ctx, m.Name)
 	cleanupPendingDir(m.Name)
@@ -525,6 +526,20 @@ func cleanupSandboxDir(sessionID, mergedPath string) bool {
 
 func cleanupSandboxDirWithChecker(sessionID, mergedPath, base string, checker *sandboxgc.Checker) bool {
 	sandboxDir := filepath.Join(base, sessionID)
+	if checker == nil || filepath.Clean(checker.Base) != filepath.Clean(base) {
+		slog.Warn("Refusing sandbox cleanup with a mismatched safety checker", "session", sessionID)
+		return false
+	}
+	if err := sandboxgc.ValidateSandboxPath(base, sandboxDir); err != nil {
+		slog.Warn("Refusing sandbox cleanup outside the allowlisted base", "session", sessionID, "error", err)
+		return false
+	}
+	expectedMergedPath := filepath.Join(sandboxDir, "merged")
+	if mergedPath != expectedMergedPath {
+		slog.Warn("Refusing sandbox cleanup with an unattributed merged path",
+			"session", sessionID, "path", mergedPath, "expected", expectedMergedPath)
+		return false
+	}
 	if _, err := os.Lstat(sandboxDir); os.IsNotExist(err) {
 		return false
 	}
@@ -549,6 +564,35 @@ func cleanupSandboxDirWithChecker(sessionID, mergedPath, base string, checker *s
 
 	slog.Info("Removed sandbox directory", "session", sessionID, "path", sandboxDir)
 	return true
+}
+
+func ownedSandboxPathForArchive(m *manifest.Manifest) string {
+	if m == nil || m.Sandbox == nil {
+		return ""
+	}
+	if err := manifest.ValidateSandboxOwnership(m.SessionID, m.Sandbox); err != nil {
+		slog.Warn("Ignoring invalid sandbox ownership metadata during archive",
+			"session", m.SessionID, "error", err)
+		return ""
+	}
+	base, err := sandboxgc.DefaultBase()
+	if err != nil {
+		slog.Warn("Ignoring sandbox ownership without a resolvable cleanup base",
+			"session", m.SessionID, "error", err)
+		return ""
+	}
+	sandboxDir := filepath.Dir(m.Sandbox.MergedPath)
+	if sandboxDir != filepath.Join(base, m.SessionID) {
+		slog.Warn("Ignoring sandbox ownership outside the current host cleanup base",
+			"session", m.SessionID, "path", m.Sandbox.MergedPath)
+		return ""
+	}
+	if err := sandboxgc.ValidateSandboxPath(base, sandboxDir); err != nil {
+		slog.Warn("Ignoring sandbox ownership outside the allowlisted cleanup base",
+			"session", m.SessionID, "error", err)
+		return ""
+	}
+	return m.Sandbox.MergedPath
 }
 
 // preserveSettingsFromUpper copies .claude/settings.local.json from the sandbox

@@ -286,7 +286,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^archive preview should honor global JSON field masks$`, archivePreviewShouldHonorGlobalJSONFieldMasks)
 	ctx.Step(`^active async preview should not start a detached reaper$`, activeAsyncPreviewShouldNotStartDetachedReaper)
 	ctx.Step(`^dry-run preview should preserve async state validation$`, dryRunPreviewShouldPreserveAsyncStateValidation)
-	ctx.Step(`^persisted sandbox ownership should survive the archive reload boundary$`, persistedSandboxOwnershipShouldSurviveArchiveReloadBoundary)
+	ctx.Step(`^validated persisted sandbox ownership should control archive cleanup after reload$`, validatedPersistedSandboxOwnershipShouldControlArchiveCleanupAfterReload)
 	ctx.Step(`^the retained A2A coordination implementation$`, retainedA2ACoordinationImplementation)
 	ctx.Step(`^AGM validates A2A coordination specification drift$`, agmValidatesA2ACoordinationSpecificationDrift)
 	ctx.Step(`^A2A coordination specifications should describe only retained behavior$`, a2aCoordinationSpecificationsShouldDescribeOnlyRetainedBehavior)
@@ -2163,7 +2163,7 @@ func agmValidatesSingleSessionArchiveDryRunSafety(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/cmd/agm-reaper", "./agm/internal/dolt", "./agm/internal/ops", "./agm/internal/reaper",
-		"-run", `^(TestArchiveSession_DryRunCLI(TextIsSideEffectFree|JSONReturnsStableEnvelope|JSONHonorsFieldMask|ClaudeUUIDUsesResolvedSessionID|ActiveAsyncDoesNotStartReaper|ActiveRequiresAsync|StoppedRejectsAsync)|TestArchiveSession_(ClaudeUUIDUsesResolvedSessionID|AsyncClaudeUUIDUsesResolvedIdentities)|TestArchiveAuditArgs_RecordsSingleSessionDryRun|TestArchiveSession_DryRunDoesNotArchiveExternalRepresentation|TestNewDryRunPreview|TestRun_UsesStableSessionIDAndResolvedTmuxIdentity|TestValidateResolvedTargets|TestBuildReaperArgsSeparatesStableAndTmuxIdentities|TestSQLiteSandboxOwnershipMetadataRoundTripsForArchive|TestSQLiteMissingSandboxMetadataDoesNotInferOwnership|TestCleanupSandboxDirWithChecker_RemovesOwnedSandbox)$`,
+		"-run", `^(TestArchiveSession_DryRunCLI(TextIsSideEffectFree|JSONReturnsStableEnvelope|JSONHonorsFieldMask|ClaudeUUIDUsesResolvedSessionID|ActiveAsyncDoesNotStartReaper|ActiveRequiresAsync|StoppedRejectsAsync)|TestArchiveSession_(ClaudeUUIDUsesResolvedSessionID|AsyncClaudeUUIDUsesResolvedIdentities|ReloadedSandboxOwnershipControlsCleanup)|TestArchiveAuditArgs_RecordsSingleSessionDryRun|TestArchiveSession_DryRunDoesNotArchiveExternalRepresentation|TestNewDryRunPreview|TestRun_UsesStableSessionIDAndResolvedTmuxIdentity|TestValidateResolvedTargets|TestBuildReaperArgsSeparatesStableAndTmuxIdentities|TestSQLite(SandboxOwnershipMetadataRoundTripsForArchive|MissingSandboxMetadataDoesNotInferOwnership|InvalidSandboxMetadataDoesNotAuthorizeCleanup)|TestCleanupSandboxDirWithChecker_(RemovesOwnedSandbox|RejectsUnownedMergedPath))$`,
 		"-count=1", "-v")
 	cmd.Dir = bddRepoRoot()
 	output, runErr := cmd.CombinedOutput()
@@ -2314,7 +2314,7 @@ func dryRunPreviewShouldPreserveAsyncStateValidation(ctx context.Context) error 
 	return nil
 }
 
-func persistedSandboxOwnershipShouldSurviveArchiveReloadBoundary(ctx context.Context) error {
+func validatedPersistedSandboxOwnershipShouldControlArchiveCleanupAfterReload(ctx context.Context) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
 		return err
@@ -2325,7 +2325,10 @@ func persistedSandboxOwnershipShouldSurviveArchiveReloadBoundary(ctx context.Con
 	for _, testName := range []string{
 		"TestSQLiteSandboxOwnershipMetadataRoundTripsForArchive",
 		"TestSQLiteMissingSandboxMetadataDoesNotInferOwnership",
+		"TestSQLiteInvalidSandboxMetadataDoesNotAuthorizeCleanup",
 		"TestCleanupSandboxDirWithChecker_RemovesOwnedSandbox",
+		"TestCleanupSandboxDirWithChecker_RejectsUnownedMergedPath",
+		"TestArchiveSession_ReloadedSandboxOwnershipControlsCleanup",
 	} {
 		if !strings.Contains(harnessState.archiveDryRunTestOutput, "--- PASS: "+testName) {
 			return fmt.Errorf("%s did not run:\n%s", testName, harnessState.archiveDryRunTestOutput)

@@ -1257,6 +1257,12 @@ func unmarshalSandboxMetadata(session *manifest.Manifest, metadata map[string]an
 	if err := json.Unmarshal(sandboxJSON, &sandbox); err != nil {
 		return fmt.Errorf("failed to unmarshal sandbox metadata: %w", err)
 	}
+	if manifest.ValidateSandboxOwnership(session.SessionID, &sandbox) != nil {
+		// Partial, legacy, manually repaired, or corrupt metadata is not proof
+		// of ownership. Ignore it so archive can proceed without authorizing
+		// any inferred sandbox cleanup.
+		return nil //nolint:nilerr // invalid ownership is deliberately ignored so cleanup fails closed
+	}
 	session.Sandbox = &sandbox
 	return nil
 }

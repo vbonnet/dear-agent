@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -227,6 +228,181 @@ func TestCleanupSandboxDirWithChecker_RemovesOwnedSandbox(t *testing.T) {
 	}
 	if len(unmounted) == 0 || unmounted[0] != mergedPath {
 		t.Fatalf("unmount calls = %v, want explicit merged path first", unmounted)
+	}
+}
+
+func TestCleanupSandboxDirWithChecker_RejectsUnownedMergedPath(t *testing.T) {
+	home := t.TempDir()
+	base := filepath.Join(home, ".agm", "sandboxes")
+	sessionID := "sandbox-cleanup-boundary-session"
+	sandboxDir := filepath.Join(base, sessionID)
+	if err := os.MkdirAll(filepath.Join(sandboxDir, "merged"), 0o700); err != nil {
+		t.Fatalf("MkdirAll(sandbox) error: %v", err)
+	}
+	unownedPath := filepath.Join(home, "unowned", "merged")
+	if err := os.MkdirAll(unownedPath, 0o700); err != nil {
+		t.Fatalf("MkdirAll(unowned) error: %v", err)
+	}
+
+	var unmounted, removed []string
+	checker := &sandboxgc.Checker{
+		Base:          base,
+		ListMounts:    func() ([]string, error) { return nil, nil },
+		ListProcPaths: func() ([]sandboxgc.ProcPath, error) { return nil, nil },
+		Unmount: func(path string) error {
+			unmounted = append(unmounted, path)
+			return nil
+		},
+		Remove: func(path string) error {
+			removed = append(removed, path)
+			return os.RemoveAll(path)
+		},
+	}
+	if cleanupSandboxDirWithChecker(sessionID, unownedPath, base, checker) {
+		t.Fatal("cleanupSandboxDirWithChecker() = true for unattributed merged path")
+	}
+	if len(unmounted) != 0 || len(removed) != 0 {
+		t.Fatalf("destructive calls for unattributed path: unmounted=%v removed=%v", unmounted, removed)
+	}
+	if _, err := os.Stat(sandboxDir); err != nil {
+		t.Fatalf("owned sandbox was not preserved: %v", err)
+	}
+	if _, err := os.Stat(unownedPath); err != nil {
+		t.Fatalf("unowned path was not preserved: %v", err)
+	}
+}
+
+type archiveReloadStorage struct {
+	dolt.Storage
+}
+
+func TestArchiveSession_ReloadedSandboxOwnershipControlsCleanup(t *testing.T) {
+	tests := []struct {
+		name        string
+		keepSandbox bool
+		invalid     bool
+		outOfBase   bool
+		wantRemoved bool
+	}{
+		{name: "complete ownership removes exact sandbox", wantRemoved: true},
+		{name: "keep sandbox preserves complete ownership", keepSandbox: true},
+		{name: "incomplete ownership preserves sandbox", invalid: true},
+		{name: "out of host base ownership preserves sandbox", outOfBase: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			base := filepath.Join(home, ".agm", "sandboxes")
+			sessionID := "archive-reload-" + strings.ReplaceAll(tt.name, " ", "-")
+			ownershipBase := base
+			if tt.outOfBase {
+				ownershipBase = filepath.Join(t.TempDir(), ".agm", "sandboxes")
+			}
+			sandboxDir := filepath.Join(ownershipBase, sessionID)
+			mergedPath := filepath.Join(sandboxDir, "merged")
+			workingDir := filepath.Join(mergedPath, "repo0")
+			if err := os.MkdirAll(workingDir, 0o700); err != nil {
+				t.Fatalf("MkdirAll(sandbox) error: %v", err)
+			}
+			marker := filepath.Join(workingDir, "marker")
+			if err := os.WriteFile(marker, []byte("owned"), 0o600); err != nil {
+				t.Fatalf("WriteFile(marker) error: %v", err)
+			}
+
+			adapter, err := dolt.NewSQLiteAdapter(filepath.Join(t.TempDir(), "agm.db"))
+			if err != nil {
+				t.Fatalf("NewSQLiteAdapter() error: %v", err)
+			}
+			t.Cleanup(func() { _ = adapter.Close() })
+
+			now := time.Now().UTC().Truncate(time.Microsecond)
+			sandbox := &manifest.SandboxConfig{
+				Enabled:    true,
+				ID:         sessionID,
+				Provider:   "mock",
+				MergedPath: mergedPath,
+				WorkingDir: workingDir,
+				CreatedAt:  now,
+			}
+			if tt.invalid {
+				sandbox.Provider = ""
+			}
+			m := &manifest.Manifest{
+				SchemaVersion: manifest.SchemaVersion,
+				SessionID:     sessionID,
+				Name:          sessionID,
+				Harness:       "codex-cli",
+				CreatedAt:     now,
+				UpdatedAt:     now,
+				Sandbox:       sandbox,
+			}
+			if err := adapter.CreateSession(m); err != nil {
+				t.Fatalf("CreateSession() error: %v", err)
+			}
+
+			reloaded, err := adapter.GetSession(sessionID)
+			if err != nil {
+				t.Fatalf("GetSession() before archive error: %v", err)
+			}
+			if tt.invalid && reloaded.Sandbox != nil {
+				t.Fatalf("invalid Sandbox = %#v, want nil after reload", reloaded.Sandbox)
+			}
+			if !tt.invalid && reloaded.Sandbox == nil {
+				t.Fatal("valid Sandbox = nil after reload")
+			}
+
+			var cleanupCalls int
+			checker := &sandboxgc.Checker{
+				Base:          base,
+				ListMounts:    func() ([]string, error) { return nil, nil },
+				ListProcPaths: func() ([]sandboxgc.ProcPath, error) { return nil, nil },
+				Unmount:       func(string) error { return nil },
+				Remove:        os.RemoveAll,
+			}
+			ctx := &OpContext{
+				Storage: archiveReloadStorage{Storage: adapter},
+				ExternalSessionArchiver: testExternalArchiver(func(context.Context, *manifest.Manifest) []ExternalArchiveOutcome {
+					return []ExternalArchiveOutcome{{Provider: "test", Status: ExternalArchiveSkipped}}
+				}),
+				archiveSandboxCleaner: func(id, merged string) bool {
+					cleanupCalls++
+					return cleanupSandboxDirWithChecker(id, merged, base, checker)
+				},
+			}
+			result, err := ArchiveSession(ctx, &ArchiveSessionRequest{
+				Identifier:  sessionID,
+				Force:       true,
+				KeepSandbox: tt.keepSandbox,
+			})
+			if err != nil {
+				t.Fatalf("ArchiveSession() error: %v", err)
+			}
+			if result.SandboxCleaned != tt.wantRemoved {
+				t.Fatalf("SandboxCleaned = %v, want %v", result.SandboxCleaned, tt.wantRemoved)
+			}
+			wantCleanupCalls := 0
+			if tt.wantRemoved {
+				wantCleanupCalls = 1
+			}
+			if cleanupCalls != wantCleanupCalls {
+				t.Fatalf("cleanup calls = %d, want %d", cleanupCalls, wantCleanupCalls)
+			}
+			_, statErr := os.Stat(sandboxDir)
+			if tt.wantRemoved && !os.IsNotExist(statErr) {
+				t.Fatalf("sandbox still exists after owned cleanup: %v", statErr)
+			}
+			if !tt.wantRemoved && statErr != nil {
+				t.Fatalf("sandbox was not preserved: %v", statErr)
+			}
+			archived, err := adapter.GetSession(sessionID)
+			if err != nil {
+				t.Fatalf("GetSession() after archive error: %v", err)
+			}
+			if archived.Lifecycle != manifest.LifecycleArchived {
+				t.Fatalf("Lifecycle = %q, want archived", archived.Lifecycle)
+			}
+		})
 	}
 }
 

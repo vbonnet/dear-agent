@@ -39,6 +39,8 @@ type CleanupResult struct {
 	SandboxBranchDeleted bool `json:"sandbox_branch_deleted"`
 }
 
+type sandboxCleanupFunc func(sessionID, mergedPath string) bool
+
 // CleanupAfterArchive performs best-effort resource cleanup after a session
 // has been archived. It removes the git worktree, prunes orphaned worktrees,
 // deletes the session branch (if fully merged), and removes the sandbox
@@ -46,6 +48,14 @@ type CleanupResult struct {
 //
 // If keepSandbox is true the sandbox directory is preserved for debugging.
 func CleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandboxPath, branchName string, keepSandbox bool) *CleanupResult {
+	return cleanupAfterArchive(
+		sessionID, sessionName, worktreePath, repoPath, sandboxPath, branchName,
+		keepSandbox, cleanupSandboxDir,
+	)
+}
+
+//nolint:gocyclo // linear cleanup transaction keeps attribution, worktree, branch, and sandbox decisions in execution order
+func cleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandboxPath, branchName string, keepSandbox bool, cleanSandbox sandboxCleanupFunc) *CleanupResult {
 	result := &CleanupResult{}
 	logger := newCleanupLogger()
 	primaryWorktree := false
@@ -187,7 +197,7 @@ func CleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandbox
 
 	// 4. Remove the sandbox directory (unless --keep-sandbox).
 	if sandboxPath != "" && !keepSandbox {
-		removed := cleanupSandboxDir(sessionID, sandboxPath)
+		removed := cleanSandbox != nil && cleanSandbox(sessionID, sandboxPath)
 		logAction(logger, CleanupAction{
 			SessionID:   sessionID,
 			SessionName: sessionName,

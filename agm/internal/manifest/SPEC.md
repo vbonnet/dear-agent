@@ -27,6 +27,8 @@ cross-harness session lifecycle state.
 
 **MAN-08** When AGM creates or imports a Pi session, the manifest and storage adapter shall preserve both the validated coding-agent directory and an explicit presence marker, including when the directory is intentionally empty for Pi's native default, so cold resume can distinguish new session state from legacy metadata and does not depend on the invoking shell or tmux server environment.
 
+**MAN-09** When sandbox metadata is used as cleanup ownership evidence, the manifest shall require an enabled record whose sandbox ID matches the stable session ID, whose provider and creation time are present, whose clean absolute merged boundary is the identified sandbox's `merged` child, and whose clean absolute working directory is contained by that boundary.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
