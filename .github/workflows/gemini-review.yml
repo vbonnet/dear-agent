@@ -84,15 +84,17 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          OWNER: ${{ github.repository_owner }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if gh api --paginate \
             "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/reviews" |
             jq --slurp --exit-status \
               --arg base "$BASE_SHA" \
-              --arg head "$HEAD_SHA" '
+              --arg head "$HEAD_SHA" \
+              --arg owner "$OWNER" '
               add | any(.[];
-                .user.login == "vbonnet"
+                .user.login == $owner
                 and .commit_id == $head
                 and .state == "COMMENTED"
                 and (
