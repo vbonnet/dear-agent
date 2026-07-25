@@ -72,24 +72,19 @@ jobs:
     name: >-
       ${{
         (
-          github.event.pull_request.head.repo.full_name == github.repository &&
-          !github.event.pull_request.draft &&
+          github.event_name != 'pull_request_review' ||
           (
-            github.event_name == 'pull_request' ||
+            vars.GEMINI_FALLBACK_REVIEWER != '' &&
+            github.event.review.user.login == vars.GEMINI_FALLBACK_REVIEWER &&
             (
-              github.event_name == 'pull_request_review' &&
-              vars.GEMINI_FALLBACK_REVIEWER != '' &&
-              github.event.review.user.login == vars.GEMINI_FALLBACK_REVIEWER &&
               (
-                (
-                  github.event.action == 'submitted' &&
-                  github.event.review.state == 'commented' &&
-                  startsWith(github.event.review.body, 'Reviewed head: ') &&
-                  contains(github.event.review.body, 'Gemini quota fallback attestation')
-                ) ||
-                github.event.action == 'edited' ||
-                github.event.action == 'dismissed'
-              )
+                github.event.action == 'submitted' &&
+                github.event.review.state == 'commented' &&
+                startsWith(github.event.review.body, 'Reviewed head: ') &&
+                contains(github.event.review.body, 'Gemini quota fallback attestation')
+              ) ||
+              github.event.action == 'edited' ||
+              github.event.action == 'dismissed'
             )
           )
         ) && 'Gemini Review' || 'Gemini Review ignored event'
