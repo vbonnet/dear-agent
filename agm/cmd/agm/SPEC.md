@@ -119,6 +119,8 @@ Provide a production-ready CLI that:
 
 **CLI-44** When direct, fan-out, structured, daemon-queued, fresh-startup, or post-resume delivery targets an AGY session, the command shall propagate the resolved `agy` harness through the shared tmux delivery boundary so attribution and multiline bodies remain one native request; unresolved and non-AGY sessions shall retain their established delivery semantics.
 
+**CLI-45** When `agm session archive <session> --dry-run` resolves an archivable session and the shared archive guards succeed, the system shall return a successful preview before lifecycle writes, external provider archival, tmux or process changes, worktree or branch cleanup, sandbox or settings cleanup, telemetry, or detached reaper startup; after initial ID, name, tmux-name, or conversation-UUID resolution, preview and execution shall address the same stable AGM session ID so aliases and concurrent renames cannot redirect or invalidate the operation; active asynchronous execution shall carry that stable ID separately from the resolved tmux identity across the detached reaper boundary; active and stopped `--async` validation shall remain enforced, both text and JSON output shall name the exact resolved target, successful archive and restore guidance shall use the resolved session identity rather than the original alias, and JSON previews shall honor the global `--fields` projection contract.
+
 ## Requirements
 
 ### Functional Requirements
@@ -876,24 +878,29 @@ SQLite when `AGM_DB_PATH` is set by a named test environment)
 ```
 1. Connect to Dolt storage adapter
 2. Resolve session identifier through the shared ops storage contract
-3. Check if already archived (error if yes)
+3. Enforce active/stopped `--async` validation
 4. Run shared supervisor, active-pane, completion-verification, and pending-
    delegation guards
    - Active sessions MUST use --async flag (error if omitted)
    - Stopped sessions do NOT use --async (error if included)
-5. For stopped sessions, call ops.ArchiveSession immediately
-6. For active sessions with --async:
-   - preflight through ops.ArchiveSession without mutating
+5. With `--dry-run`, call `ops.ArchiveSession` with dry-run context and return
+   an AGM-100 preview naming the resolved session before provider reconciliation,
+   lifecycle writes, cleanup, telemetry, settings mutation, or reaper startup
+6. Without `--dry-run`, check if already archived and reconcile its external
+   provider representation without repeating AGM lifecycle mutation
+7. For stopped sessions, call ops.ArchiveSession immediately
+8. For active sessions with --async:
+   - preflight through ops.ArchiveSession with the resolved stable AGM ID without mutating
    - require the detached agm-reaper binary to prove the same embedded VCS revision and clean or dirty provenance as agm
    - wait for the exact detached child to acknowledge revision validation and durable log initialization before reporting success
-   - spawn agm-reaper with force/keep-sandbox/outcome options preserved
+   - spawn agm-reaper with the stable AGM ID for lifecycle storage, the separately resolved tmux session for pane control, and force/keep-sandbox/outcome options preserved
    - mark lifecycle=reaping before stopping the pane
    - after pane death, call ops.ArchiveSession for the final transition
-7. For --all, select inactive candidates and call ops.ArchiveSession once per
+9. For --all, select inactive candidates and call ops.ArchiveSession once per
    candidate; aggregate success/failure counts without direct storage updates
-8. The shared operation stamps the outcome, updates lifecycle storage, reports
+10. The shared operation stamps the outcome, updates lifecycle storage, reports
    external provider archive outcomes, and performs cleanup
-9. Print success message with restore instructions
+11. Print success message with restore instructions
 ```
 
 ### Cross-Harness Association Flow (agm session associate [session-name])
