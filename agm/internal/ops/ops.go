@@ -54,6 +54,10 @@ type OpContext struct {
 	// persisted non-secret runtime configuration. Nil selects the production
 	// factory. Tests and non-CLI surfaces may inject a deterministic adapter.
 	APIAgentFactory APISessionAgentFactory
+	// archiveSandboxCleaner is an internal archive-boundary seam. Production
+	// uses the host sandbox safety checker; package tests inject the same
+	// allowlist behavior without consulting the real process or mount tables.
+	archiveSandboxCleaner sandboxCleanupFunc
 }
 
 func requestContext(opCtx *OpContext) context.Context {
