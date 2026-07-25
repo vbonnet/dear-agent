@@ -269,23 +269,45 @@ jobs:
               exit 1
               ;;
           esac
-          # Gemini enforces a regional requests-per-minute window. Retrying
-          # sooner extends the outage; a minute-spaced retry clears it.
-          if ! curl --silent --show-error --fail-with-body \
-            --connect-timeout 15 \
-            --max-time 180 \
-            --retry 3 \
-            --retry-delay 60 \
-            --retry-max-time 300 \
-            -H 'Content-Type: application/json' \
-            -H "x-goog-api-key: ${GEMINI_API_KEY}" \
-            --data-binary @.gemini/request.json \
-            --output .gemini/response.json \
-            "https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent"
-          then
-            jq -r '.error.message // .' .gemini/response.json >&2
-            exit 1
-          fi
+          # Gemini enforces a regional requests-per-minute window. Retry only
+          # after an explicit 429/5xx response. A timeout or other transport
+          # failure has an ambiguous server outcome, so replaying that POST
+          # could duplicate a paid generation and must fail immediately.
+          for attempt in 1 2 3 4; do
+            if ! http_status="$(
+              curl --silent --show-error \
+                --connect-timeout 15 \
+                --max-time 180 \
+                --write-out '%{http_code}' \
+                -H 'Content-Type: application/json' \
+                -H "x-goog-api-key: ${GEMINI_API_KEY}" \
+                --data-binary @.gemini/request.json \
+                --output .gemini/response.json \
+                "https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent"
+            )"
+            then
+              echo "::error::Gemini request ended without an HTTP response; refusing to replay it."
+              exit 1
+            fi
+            case "$http_status" in
+              200)
+                break
+                ;;
+              429|5??)
+                if [ "$attempt" -eq 4 ]; then
+                  jq -r '.error.message // .' .gemini/response.json >&2 || true
+                  echo "::error::Gemini remained unavailable after explicit retryable HTTP responses."
+                  exit 1
+                fi
+                sleep 60
+                ;;
+              *)
+                jq -r '.error.message // .' .gemini/response.json >&2 || true
+                echo "::error::Gemini returned non-retryable HTTP status ${http_status}."
+                exit 1
+                ;;
+            esac
+          done
           jq -er \
             '.candidates[0]
               | select(.finishReason == "STOP")
