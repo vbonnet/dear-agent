@@ -23,6 +23,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
@@ -65,6 +66,16 @@ type mcpAPIProbeAgent struct {
 	status            agent.Status
 	readinessContexts []context.Context
 	sent              []agent.Message
+}
+
+type emptyAgyIdentityTracker struct{}
+
+func (emptyAgyIdentityTracker) Snapshot(context.Context, string) (string, error) {
+	return "", nil
+}
+
+func (emptyAgyIdentityTracker) Discover(context.Context, string, string) (*agysession.Metadata, error) {
+	return nil, errors.New("unexpected AGY identity discovery after readiness failure")
 }
 
 func (a *mcpAPIProbeAgent) Name() string    { return "api-probe" }
@@ -392,6 +403,7 @@ func TestMCPCreateSessionRuntimeCannotBypassSharedAgyReadiness(t *testing.T) {
 
 	_, err := ops.CreateSessionWithContext(t.Context(), &ops.OpContext{
 		Tmux: tmuxMock, Storage: store, CreationRuntime: runtime,
+		AgyCreateIdentityTracker: emptyAgyIdentityTracker{},
 	}, &ops.CreateSessionRequest{
 		Cwd: t.TempDir(), Title: "mcp-agy-readiness", Harness: "agy",
 		Model: "3.5-flash-low", Prompt: "must not send",

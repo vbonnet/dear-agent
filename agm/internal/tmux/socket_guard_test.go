@@ -205,8 +205,11 @@ func TestTmuxServerOwnsSocket_ExcludesAttachedClient(t *testing.T) {
 // server, and — critically — that it still finds the server after the socket
 // file has been unlinked. That is the state no socket-based probe can see.
 func TestFindServerPIDs_RealServer(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux not installed")
+	// This regression is intentionally enabled in Linux integration CI, which
+	// installs tmux but does not opt into the package's broader tmux suite.
+	// Only the explicit macOS skip gate or a missing binary suppresses it.
+	if !isTmuxAvailable() {
+		t.Skip("tmux process-scan integration is unavailable")
 	}
 
 	// The whitespace exercises the lossless argv path. ps's display-oriented
@@ -234,11 +237,17 @@ func TestFindServerPIDs_RealServer(t *testing.T) {
 		_ = exec.Command("tmux", "-S", sock, "kill-server").Run()
 	})
 
-	require.Eventually(t, func() bool {
-		pids, _ := FindServerPIDs(sock)
-		serverPIDs = pids
-		return len(pids) > 0
-	}, 5*time.Second, 100*time.Millisecond, "should find the live server")
+	deadline := time.Now().Add(5 * time.Second)
+	var scanErr error
+	for time.Now().Before(deadline) {
+		serverPIDs, scanErr = FindServerPIDs(sock)
+		if scanErr == nil && len(serverPIDs) > 0 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	require.NoError(t, scanErr, "scan live tmux server process")
+	require.NotEmpty(t, serverPIDs, "should find the live server")
 
 	// An unrelated socket path must not match.
 	other, err := FindServerPIDs(sock + ".bak")
