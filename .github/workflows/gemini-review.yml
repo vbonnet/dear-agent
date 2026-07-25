@@ -64,24 +64,15 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
 
-      # A timed-out Gemini invocation can strand its bot-owned pending review.
-      # The extension is designed to reuse that draft, but retries can then
-      # block indefinitely before submitting it. Human drafts are never
-      # visible to this token and are also excluded explicitly.
-      - name: Clear stale Gemini pending review
+      # The review command starts this container lazily while its stderr is
+      # redirected by the action. A registry or image-start stall is otherwise
+      # silent until the whole job times out. Pre-pull it at an observable,
+      # bounded boundary and make the later tool launch local-only.
+      - name: Prepare GitHub MCP server
         if: steps.gate.outputs.skip != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          gh api --paginate \
-            "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/reviews" \
-            --jq '.[] | select(.state == "PENDING" and .user.login == "github-actions[bot]") | .id' |
-          while IFS= read -r review_id; do
-            [ -z "$review_id" ] ||
-              gh api --method DELETE \
-                "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/reviews/${review_id}"
-          done
+          timeout 2m docker pull \
+            ghcr.io/github/github-mcp-server:v0.27.0
 
       - name: Run Gemini PR review
         if: steps.gate.outputs.skip != 'true'
@@ -112,7 +103,7 @@ jobs:
                 "github": {
                   "command": "docker",
                   "args": [
-                    "run", "-i", "--rm",
+                    "run", "--pull=never", "-i", "--rm",
                     "-e", "GITHUB_PERSONAL_ACCESS_TOKEN",
                     "ghcr.io/github/github-mcp-server:v0.27.0"
                   ],
