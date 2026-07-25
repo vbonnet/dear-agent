@@ -35,7 +35,30 @@ on:
     types: [submitted, edited, dismissed]
 
 concurrency:
-  group: gemini-review-${{ github.event.pull_request.number }}
+  # Only a real PR review request or a trusted fallback-attestation mutation
+  # may cancel the in-flight gate for this revision. Every unrelated review
+  # event gets an isolated group so it cannot cancel or replace the gate.
+  group: >-
+    gemini-review-${{ github.event.pull_request.number }}-${{
+      (
+        github.event_name == 'pull_request' ||
+        (
+          github.event_name == 'pull_request_review' &&
+          vars.GEMINI_FALLBACK_REVIEWER != '' &&
+          github.event.review.user.login == vars.GEMINI_FALLBACK_REVIEWER &&
+          (
+            (
+              github.event.action == 'submitted' &&
+              github.event.review.state == 'commented' &&
+              startsWith(github.event.review.body, 'Reviewed head: ') &&
+              contains(github.event.review.body, 'Gemini quota fallback attestation')
+            ) ||
+            github.event.action == 'edited' ||
+            github.event.action == 'dismissed'
+          )
+        )
+      ) && 'gate' || github.run_id
+    }}
   cancel-in-progress: true
 
 permissions:
@@ -44,7 +67,33 @@ permissions:
 
 jobs:
   review:
-    name: Gemini Review
+    # A skipped job still emits a check. Give ignored review events a distinct
+    # context so they cannot satisfy the canonical Gemini Review gate.
+    name: >-
+      ${{
+        (
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          !github.event.pull_request.draft &&
+          (
+            github.event_name == 'pull_request' ||
+            (
+              github.event_name == 'pull_request_review' &&
+              vars.GEMINI_FALLBACK_REVIEWER != '' &&
+              github.event.review.user.login == vars.GEMINI_FALLBACK_REVIEWER &&
+              (
+                (
+                  github.event.action == 'submitted' &&
+                  github.event.review.state == 'commented' &&
+                  startsWith(github.event.review.body, 'Reviewed head: ') &&
+                  contains(github.event.review.body, 'Gemini quota fallback attestation')
+                ) ||
+                github.event.action == 'edited' ||
+                github.event.action == 'dismissed'
+              )
+            )
+          )
+        ) && 'Gemini Review' || 'Gemini Review ignored event'
+      }}
     runs-on: ubuntu-latest
     # Four 180-second API attempts plus three 60-second quota waits require up
     # to 15 minutes; leave setup/cleanup headroom so failure remains explicit.
