@@ -14,9 +14,9 @@ name: Gemini PR Review
 #   brain-v2-gmail project. (Google AI Ultra is a consumer-app entitlement and
 #   is NOT reachable from a GitHub Action, so it cannot back this workflow.)
 #
-# Model: set the repo/org Actions VARIABLE `GEMINI_MODEL` to override (e.g.
-#   `gemini-2.5-flash` for the most generous free-tier limits, or
-#   `gemini-2.5-pro` for the strongest review). Unset → the action's default.
+# Model: the repo/org Actions VARIABLE `GEMINI_MODEL` is required. Keeping the
+#   selected model in repository configuration avoids an implicit workflow
+#   default becoming stale as Gemini model availability changes.
 #
 # The job no-ops cleanly until GEMINI_API_KEY is present, skips PRs from forks
 # (which have no access to repo secrets), and skips drafts until GitHub emits
