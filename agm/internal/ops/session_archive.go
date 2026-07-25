@@ -2,6 +2,7 @@ package ops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -21,6 +22,8 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	inttmux "github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
+
+const archiveSandboxCleanupAttempts = 5
 
 // ArchiveSessionRequest defines the input for archiving a session.
 type ArchiveSessionRequest struct {
@@ -519,8 +522,11 @@ func killTmuxAndProcessGroup(m *manifest.Manifest) {
 // mount point left inside (deleting through a live overlay mount can destroy
 // the source repo, per ~/.agm/cleanup-runbook.md). The live-session gate is
 // intentionally nil here: the caller archived this session immediately before
-// invoking cleanup. A refused reap keeps the sandbox for the periodic
-// `agm sandbox gc` sweep to retry once the blocker is gone.
+// invoking cleanup. A specific live-process refusal is retried for a bounded
+// grace window because a just-terminated harness may briefly retain the
+// sandbox as it exits; every retry re-runs all checker safety gates. Every
+// other refusal keeps the sandbox for the periodic `agm sandbox gc` sweep to
+// retry once the blocker is gone.
 //
 // Returns (removed, existed, reason): existed is false only when there was
 // no sandbox directory to remove in the first place (not a failure); every
@@ -541,6 +547,24 @@ func cleanupSandboxDir(sessionID, mergedPath string) (removed bool, existed bool
 }
 
 func cleanupSandboxDirWithChecker(sessionID, mergedPath, base string, checker *sandboxgc.Checker) (removed bool, existed bool, reason string) {
+	return cleanupSandboxDirWithCheckerAndRetry(
+		sessionID,
+		mergedPath,
+		base,
+		checker,
+		archiveSandboxCleanupAttempts,
+		contracts.Load().SessionLifecycle.ProcessKillGracePeriod.Duration,
+		time.Sleep,
+	)
+}
+
+func cleanupSandboxDirWithCheckerAndRetry(
+	sessionID, mergedPath, base string,
+	checker *sandboxgc.Checker,
+	attempts int,
+	retryDelay time.Duration,
+	sleep func(time.Duration),
+) (removed bool, existed bool, reason string) {
 	sandboxDir := filepath.Join(base, sessionID)
 	if checker == nil || filepath.Clean(checker.Base) != filepath.Clean(base) {
 		slog.Warn("Refusing sandbox cleanup with a mismatched safety checker", "session", sessionID)
@@ -569,14 +593,35 @@ func cleanupSandboxDirWithChecker(sessionID, mergedPath, base string, checker *s
 		slog.Warn("Failed to unmount sandbox", "path", mergedPath, "error", err)
 	}
 
-	if err := checker.Reap(sandboxDir); err != nil {
-		slog.Warn("Sandbox not removed during archive cleanup — periodic sandbox gc will retry",
-			"session", sessionID, "path", sandboxDir, "error", err)
-		return false, true, err.Error()
+	if attempts < 1 {
+		attempts = 1
+	}
+	for attempt := 1; attempt <= attempts; attempt++ {
+		err := checker.Reap(sandboxDir)
+		if err == nil {
+			slog.Info("Removed sandbox directory", "session", sessionID, "path", sandboxDir)
+			return true, true, ""
+		}
+		if attempt == attempts || !retryableArchiveSandboxRefusal(err) {
+			slog.Warn("Sandbox not removed during archive cleanup — periodic sandbox gc will retry",
+				"session", sessionID, "path", sandboxDir, "attempts", attempt, "error", err)
+			return false, true, err.Error()
+		}
+		slog.Info("Waiting for transient sandbox holder to exit before retrying cleanup",
+			"session", sessionID, "path", sandboxDir, "attempt", attempt, "max_attempts", attempts,
+			"retry_delay", retryDelay, "error", err)
+		sleep(retryDelay)
 	}
 
-	slog.Info("Removed sandbox directory", "session", sessionID, "path", sandboxDir)
-	return true, true, ""
+	return false, true, "exhausted sandbox cleanup retries"
+}
+
+func retryableArchiveSandboxRefusal(err error) bool {
+	var refusal *sandboxgc.RefusalError
+	return errors.As(err, &refusal) &&
+		refusal.Reason == sandboxgc.ReasonLiveProcess &&
+		refusal.ProcessID > 0
+
 }
 
 func ownedSandboxPathForArchive(m *manifest.Manifest) string {

@@ -68,6 +68,7 @@ type RefusalError struct {
 	// them apart: a probe failure means the sweep could not evaluate this
 	// sandbox at all, not that it correctly found the sandbox in use.
 	ProbeFailure bool
+	ProcessID    int // non-zero only when a specific live process caused the refusal
 }
 
 func (e *RefusalError) Error() string {
@@ -218,7 +219,7 @@ func (c *Checker) CheckReapable(dir string) error {
 	}
 	if pp, found := ProcessInside(procs, dir); found {
 		return &RefusalError{Path: dir, Reason: ReasonLiveProcess,
-			Detail: fmt.Sprintf("pid %d holds %s", pp.PID, pp.Path)}
+			Detail: fmt.Sprintf("pid %d holds %s", pp.PID, pp.Path), ProcessID: pp.PID}
 	}
 
 	return nil

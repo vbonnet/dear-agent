@@ -310,6 +310,133 @@ func TestCleanupSandboxDirWithChecker_AbsentSandboxIsNotAFailure(t *testing.T) {
 	}
 }
 
+func TestCleanupSandboxDirWithChecker_RetriesOnlyTransientLiveProcess(t *testing.T) {
+	type testCase struct {
+		name           string
+		attempts       int
+		listProcPaths  func(sandboxDir string, call int) ([]sandboxgc.ProcPath, error)
+		listMounts     func(sandboxDir string) ([]string, error)
+		wantRemoved    bool
+		wantProcScans  int
+		wantMountScans int
+		wantSleeps     int
+	}
+	tests := []testCase{
+		{
+			name:     "transient holder exits within grace",
+			attempts: 5,
+			listProcPaths: func(sandboxDir string, call int) ([]sandboxgc.ProcPath, error) {
+				if call < 3 {
+					return []sandboxgc.ProcPath{{PID: 25153, Path: filepath.Join(sandboxDir, "upper", "repo0")}}, nil
+				}
+				return nil, nil
+			},
+			wantRemoved:    true,
+			wantProcScans:  3,
+			wantMountScans: 1,
+			wantSleeps:     2,
+		},
+		{
+			name:     "persistent holder exhausts grace",
+			attempts: 3,
+			listProcPaths: func(sandboxDir string, _ int) ([]sandboxgc.ProcPath, error) {
+				return []sandboxgc.ProcPath{{PID: 30001, Path: filepath.Join(sandboxDir, "merged", "repo0")}}, nil
+			},
+			wantProcScans: 3,
+			wantSleeps:    2,
+		},
+		{
+			name:     "unreadable process state fails closed without retry",
+			attempts: 5,
+			listProcPaths: func(string, int) ([]sandboxgc.ProcPath, error) {
+				return nil, errors.New("lsof unavailable")
+			},
+			wantProcScans: 1,
+		},
+		{
+			name:     "surviving mount fails closed without retry",
+			attempts: 5,
+			listProcPaths: func(string, int) ([]sandboxgc.ProcPath, error) {
+				return nil, nil
+			},
+			listMounts: func(sandboxDir string) ([]string, error) {
+				return []string{filepath.Join(sandboxDir, "merged")}, nil
+			},
+			wantProcScans:  1,
+			wantMountScans: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			base := filepath.Join(home, ".agm", "sandboxes")
+			sessionID := "sandbox-cleanup-retry"
+			sandboxDir := filepath.Join(base, sessionID)
+			mergedPath := filepath.Join(sandboxDir, "merged")
+			if err := os.MkdirAll(filepath.Join(mergedPath, "repo0"), 0o700); err != nil {
+				t.Fatalf("MkdirAll(sandbox) error: %v", err)
+			}
+
+			var procScans, mountScans, sleeps, removes int
+			checker := &sandboxgc.Checker{
+				Base: base,
+				ListProcPaths: func() ([]sandboxgc.ProcPath, error) {
+					procScans++
+					return tt.listProcPaths(sandboxDir, procScans)
+				},
+				ListMounts: func() ([]string, error) {
+					mountScans++
+					if tt.listMounts != nil {
+						return tt.listMounts(sandboxDir)
+					}
+					return nil, nil
+				},
+				Unmount: func(string) error { return nil },
+				Remove: func(path string) error {
+					removes++
+					return os.RemoveAll(path)
+				},
+			}
+			got, _, _ := cleanupSandboxDirWithCheckerAndRetry(
+				sessionID,
+				mergedPath,
+				base,
+				checker,
+				tt.attempts,
+				10*time.Millisecond,
+				func(time.Duration) { sleeps++ },
+			)
+			if got != tt.wantRemoved {
+				t.Fatalf("cleanup result = %v, want %v", got, tt.wantRemoved)
+			}
+			if procScans != tt.wantProcScans {
+				t.Fatalf("process scans = %d, want %d", procScans, tt.wantProcScans)
+			}
+			if mountScans != tt.wantMountScans {
+				t.Fatalf("mount scans = %d, want %d", mountScans, tt.wantMountScans)
+			}
+			if sleeps != tt.wantSleeps {
+				t.Fatalf("sleeps = %d, want %d", sleeps, tt.wantSleeps)
+			}
+			wantRemoves := 0
+			if tt.wantRemoved {
+				wantRemoves = 1
+			}
+			if removes != wantRemoves {
+				t.Fatalf("remove calls = %d, want %d", removes, wantRemoves)
+			}
+			_, statErr := os.Stat(sandboxDir)
+			if tt.wantRemoved && !os.IsNotExist(statErr) {
+				t.Fatalf("sandbox still exists after cleanup: %v", statErr)
+			}
+			if !tt.wantRemoved && statErr != nil {
+				t.Fatalf("sandbox was not preserved: %v", statErr)
+			}
+		})
+	}
+}
+
 type archiveReloadStorage struct {
 	dolt.Storage
 }

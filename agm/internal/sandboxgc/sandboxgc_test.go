@@ -206,6 +206,7 @@ func TestCheckReapable(t *testing.T) {
 		liveGate      bool
 		wantReason    string // "" = reapable
 		wantProbeFail bool
+		wantPID       int
 	}{
 		{
 			name:     "reapable: no session, no process, no mount",
@@ -248,6 +249,7 @@ func TestCheckReapable(t *testing.T) {
 			dir:        dir,
 			liveGate:   true,
 			wantReason: ReasonLiveProcess,
+			wantPID:    7,
 		},
 		{
 			name:       "refused: open fd inside",
@@ -255,6 +257,7 @@ func TestCheckReapable(t *testing.T) {
 			dir:        dir,
 			liveGate:   true,
 			wantReason: ReasonLiveProcess,
+			wantPID:    7,
 		},
 		{
 			name:          "refused (fail closed): lsof unavailable",
@@ -297,6 +300,9 @@ func TestCheckReapable(t *testing.T) {
 			}
 			if ref.ProbeFailure != tt.wantProbeFail {
 				t.Errorf("ProbeFailure = %v, want %v (detail: %s)", ref.ProbeFailure, tt.wantProbeFail, ref.Detail)
+			}
+			if ref.ProcessID != tt.wantPID {
+				t.Errorf("refusal process ID = %d, want %d (detail: %s)", ref.ProcessID, tt.wantPID, ref.Detail)
 			}
 		})
 	}

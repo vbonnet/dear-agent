@@ -158,6 +158,8 @@ Manages the full lifecycle of AGM sessions: creation (via `agm session new` / `a
 | Claude already running on resume | Skip sending commands, just attach |
 | Archive with active tmux (no --force) | Rejected with error suggesting `--force` |
 | Sandbox unmount fails | Logged as warning, archive proceeds (best-effort) |
+| Archive sandbox is held by an exiting child process | Retry within the bounded process-grace window, re-running all cleanup safety gates; preserve it if the holder persists |
+| Sandbox process or mount state cannot be proven safe | Preserve the sandbox for periodic GC; never remove it through unknown process state or a surviving mount |
 | MCP cleanup fails | Logged as warning, archive proceeds (best-effort) |
 | Trust event recording fails on archive | Logged as warning, archive proceeds |
 | Branch delete fails (unmerged) | Logged at debug level, archive proceeds |
@@ -174,3 +176,4 @@ Manages the full lifecycle of AGM sessions: creation (via `agm session new` / `a
 7. **Lifecycle state transitions are unidirectional** — `"" -> "reaping" -> "archived"`. There is no path from archived back to active except via `unarchive`.
 8. **Manifest resolution skips archived sessions** — `ResolveIdentifier` only matches active sessions to prevent accidental operations on archived data.
 9. **Sandbox cleanup uses validated persisted ownership** — sandbox ID, provider, merged cleanup boundary, mapped working directory, enabled state, and creation time round-trip through session storage. Archive removes only a complete reloaded record whose ID matches the stable session and whose merged boundary is the current host sandbox base's identified `merged` child, unless `KeepSandbox` is set; legacy, partial, mismatched, or out-of-base records never authorize an inferred deletion.
+10. **Archive cleanup retries only proven transient holders** — a refusal naming a specific live process is retried for a bounded process-grace window, with every path, process, unmount, and mount gate re-run before removal. Persistent holders, unreadable process state, invalid paths, or surviving mounts preserve the sandbox.
