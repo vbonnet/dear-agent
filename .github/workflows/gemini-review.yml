@@ -64,6 +64,25 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
 
+      # A timed-out Gemini invocation can strand its bot-owned pending review.
+      # The extension is designed to reuse that draft, but retries can then
+      # block indefinitely before submitting it. Human drafts are never
+      # visible to this token and are also excluded explicitly.
+      - name: Clear stale Gemini pending review
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/reviews" \
+            --jq '.[] | select(.state == "PENDING" and .user.login == "github-actions[bot]") | .id' |
+          while IFS= read -r review_id; do
+            [ -z "$review_id" ] ||
+              gh api --method DELETE \
+                "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/reviews/${review_id}"
+          done
+
       - name: Run Gemini PR review
         if: steps.gate.outputs.skip != 'true'
         uses: google-github-actions/run-gemini-cli@v0
