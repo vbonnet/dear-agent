@@ -27,6 +27,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -39,10 +40,23 @@ import (
 	pkgversion "github.com/vbonnet/dear-agent/pkg/version"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"golang.org/x/sys/unix"
+)
+
+const (
+	preflightGuardVerb          = "__safe-pr-preflight-guard"
+	preflightTransactionGuardFD = 3
 )
 
 func main() {
 	pkgversion.PopulateFromBuildInfo()
+	if len(os.Args) == 3 && os.Args[1] == preflightGuardVerb {
+		if err := runPreflightGuard(os.Args[2]); err != nil {
+			fmt.Fprintf(os.Stderr, "safe-pr preflight guard: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "\nsafe-pr: %v\n", err)
 		os.Exit(1)
@@ -227,11 +241,20 @@ func validateRemoteURL(dir string) error {
 const preflightTimeout = 30 * time.Minute
 
 // runPreflightFull runs `make -C dir preflight-full` and returns a clear error
-// on failure. Assigned to a var so tests can replace it without spawning make.
+// on failure. The protected child is a guard runner rather than make itself:
+// AGM's test suite intentionally launches detached tmux servers, and directly
+// passing it the transaction descriptor leaves the worktree lock live after
+// make exits. The runner retains the descriptor while make runs, but marks it
+// close-on-exec before launching make so descendants cannot retain it.
+// Assigned to a var so tests can replace it without spawning make.
 var runPreflightFull = func(dir string, transaction *safepr.WorktreeTransaction) error {
 	ctx, cancel := context.WithTimeout(context.Background(), preflightTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "make", "-C", dir, "preflight-full")
+	executable, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("preflight-full resolve safe-pr executable: %w", err)
+	}
+	cmd := exec.CommandContext(ctx, executable, preflightGuardVerb, dir)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := protectTransactionCommand(transaction, cmd); err != nil {
@@ -244,6 +267,49 @@ var runPreflightFull = func(dir string, transaction *safepr.WorktreeTransaction)
 		return fmt.Errorf("preflight-full failed — fix issues before creating PR: %w", err)
 	}
 	return nil
+}
+
+// runPreflightGuard is the protected preflight child. ExtraFiles are placed at
+// fd 3 in a child that otherwise has only stdin/stdout/stderr; close that
+// descriptor on the next exec while this runner keeps it open for its lifetime.
+func runPreflightGuard(dir string) error {
+	guardDir, err := preflightGuardDirectory(dir)
+	if err != nil {
+		return err
+	}
+	if err := closeOnExec(preflightTransactionGuardFD); err != nil {
+		return fmt.Errorf("mark transaction guard close-on-exec: %w", err)
+	}
+	cmd := exec.Command("make", "-C", guardDir, "preflight-full")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// preflightGuardDirectory binds the hidden guard verb to the caller's working
+// directory. The parent passes its cwd only as an integrity assertion; make
+// always receives the runner-derived directory rather than command-line input.
+func preflightGuardDirectory(dir string) (string, error) {
+	if dir == "" {
+		return "", errors.New("preflight directory is required")
+	}
+	currentDir, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("resolve preflight working directory: %w", err)
+	}
+	if filepath.Clean(dir) != filepath.Clean(currentDir) {
+		return "", errors.New("preflight directory must match the guard working directory")
+	}
+	return currentDir, nil
+}
+
+func closeOnExec(fd int) error {
+	flags, err := unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0)
+	if err != nil {
+		return err
+	}
+	_, err = unix.FcntlInt(uintptr(fd), unix.F_SETFD, flags|unix.FD_CLOEXEC)
+	return err
 }
 
 // prURLRe matches the PR URL gh prints on success. Anchored to a word
