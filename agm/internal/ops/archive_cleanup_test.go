@@ -349,6 +349,39 @@ func TestCleanupAfterArchive_WithRealGitWorktree(t *testing.T) {
 	}
 }
 
+func TestCleanupAfterArchive_UsesSurvivingRepoAfterRemovingLinkedRepoPath(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found in PATH")
+	}
+
+	repoDir := t.TempDir()
+	runGit(t, repoDir, "init", "-b", "main")
+	runGit(t, repoDir, "commit", "--allow-empty", "-m", "init")
+	runGit(t, repoDir, "branch", "agm/sess-linked-repo")
+
+	wtDir := filepath.Join(t.TempDir(), "detached-wt")
+	runGit(t, repoDir, "worktree", "add", "--detach", wtDir)
+
+	result := CleanupAfterArchive(
+		"sess-linked-repo", "linked-repo-session",
+		wtDir, wtDir, "", "linked-repo-session",
+		false,
+	)
+
+	if result.WorktreesRemoved != 1 {
+		t.Fatalf("WorktreesRemoved = %d, want 1", result.WorktreesRemoved)
+	}
+	if !result.WorktreesPruned {
+		t.Fatal("WorktreesPruned should use the surviving primary checkout")
+	}
+	if !result.SandboxBranchDeleted {
+		t.Fatal("SandboxBranchDeleted should use the surviving primary checkout")
+	}
+	if _, err := os.Stat(wtDir); !os.IsNotExist(err) {
+		t.Fatalf("linked worktree should be removed, stat err: %v", err)
+	}
+}
+
 func TestCleanupAfterArchive_PreservesPrimaryCheckout(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not found in PATH")

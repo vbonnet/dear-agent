@@ -264,6 +264,7 @@ Feature: Harness parity
     When AGM validates primary checkout cleanup safety
     Then the primary checkout and session-named branch should remain
     And a linked session worktree should still be removed
+    And linked worktree cleanup should continue through the surviving checkout
     And an unclassified worktree should not authorize branch deletion
     And a context-only checkout should not authorize branch deletion
     And branch deletion should require attributed worktree ownership
