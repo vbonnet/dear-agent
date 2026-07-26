@@ -60,6 +60,7 @@ func cleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandbox
 	logger := newCleanupLogger()
 	primaryWorktree := false
 	branchDeletionSafe := false
+	cleanupRepoPath := repoPath
 	candidatePath := worktreePath
 	if candidatePath == "" {
 		candidatePath = repoPath
@@ -104,37 +105,53 @@ func cleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandbox
 			})
 			slog.Info("Preserving context worktree without explicit ownership metadata", "path", identity.Root)
 		default:
-			err := removeWorktreeCmd(repoPath, identity.Root)
-			logAction(logger, CleanupAction{
-				SessionID:   sessionID,
-				SessionName: sessionName,
-				Action:      "remove_worktree",
-				Target:      identity.Root,
-				Success:     err == nil,
-				Error:       errStr(err),
-			})
-			if err == nil {
-				result.WorktreesRemoved++
-				branchDeletionSafe = identity.Branch != "" && identity.Branch == branchName
-				if !branchDeletionSafe {
-					slog.Info("Preserving branch not owned by removed worktree",
-						"requested_branch", branchName, "worktree_branch", identity.Branch)
-				}
+			survivingRepoPath, resolveErr := gitpkg.MainWorktreePath(identity.Root)
+			if resolveErr != nil {
+				cleanupRepoPath = ""
+				logAction(logger, CleanupAction{
+					SessionID:   sessionID,
+					SessionName: sessionName,
+					Action:      "resolve_surviving_repo",
+					Target:      identity.Root,
+					Success:     false,
+					Error:       resolveErr.Error(),
+				})
+				slog.Warn("Could not resolve surviving repository path before removing linked worktree",
+					"path", identity.Root, "error", resolveErr)
 			} else {
-				slog.Warn("Failed to remove worktree during archive cleanup",
-					"path", identity.Root, "error", err)
+				cleanupRepoPath = survivingRepoPath
+				err := removeWorktreeCmd(cleanupRepoPath, identity.Root)
+				logAction(logger, CleanupAction{
+					SessionID:   sessionID,
+					SessionName: sessionName,
+					Action:      "remove_worktree",
+					Target:      identity.Root,
+					Success:     err == nil,
+					Error:       errStr(err),
+				})
+				if err == nil {
+					result.WorktreesRemoved++
+					branchDeletionSafe = identity.Branch != "" && identity.Branch == branchName
+					if !branchDeletionSafe {
+						slog.Info("Preserving branch not owned by removed worktree",
+							"requested_branch", branchName, "worktree_branch", identity.Branch)
+					}
+				} else {
+					slog.Warn("Failed to remove worktree during archive cleanup",
+						"path", identity.Root, "error", err)
+				}
 			}
 		}
 	}
 
 	// 2. Prune orphaned worktrees from the repo.
-	if repoPath != "" {
-		err := pruneWorktrees(repoPath)
+	if cleanupRepoPath != "" {
+		err := pruneWorktrees(cleanupRepoPath)
 		logAction(logger, CleanupAction{
 			SessionID:   sessionID,
 			SessionName: sessionName,
 			Action:      "prune_worktrees",
-			Target:      repoPath,
+			Target:      cleanupRepoPath,
 			Success:     err == nil,
 			Error:       errStr(err),
 		})
@@ -142,15 +159,15 @@ func cleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandbox
 			result.WorktreesPruned = true
 		} else {
 			slog.Warn("Failed to prune worktrees during archive cleanup",
-				"repo", repoPath, "error", err)
+				"repo", cleanupRepoPath, "error", err)
 		}
 	}
 
 	// 3. Force-delete the session branch. We use -D (force) because archived
 	// session branches are almost never fast-forward merged (squash-merge via
 	// PR is the norm), so the safe -d would silently fail in most cases.
-	if branchName != "" && repoPath != "" && !primaryWorktree && branchDeletionSafe {
-		err := forceDeleteBranch(repoPath, branchName)
+	if branchName != "" && cleanupRepoPath != "" && !primaryWorktree && branchDeletionSafe {
+		err := forceDeleteBranch(cleanupRepoPath, branchName)
 		logAction(logger, CleanupAction{
 			SessionID:   sessionID,
 			SessionName: sessionName,
@@ -165,7 +182,7 @@ func cleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandbox
 			slog.Debug("Branch not deleted (may not exist)",
 				"branch", branchName, "error", err)
 		}
-	} else if branchName != "" && repoPath != "" {
+	} else if branchName != "" && cleanupRepoPath != "" {
 		logAction(logger, CleanupAction{
 			SessionID:   sessionID,
 			SessionName: sessionName,
@@ -176,9 +193,9 @@ func cleanupAfterArchive(sessionID, sessionName, worktreePath, repoPath, sandbox
 	}
 
 	// 3b. Delete the agm/<sessionID> sandbox branch if it exists.
-	if sessionID != "" && repoPath != "" {
+	if sessionID != "" && cleanupRepoPath != "" {
 		sandboxBranch := "agm/" + sessionID
-		err := forceDeleteBranch(repoPath, sandboxBranch)
+		err := forceDeleteBranch(cleanupRepoPath, sandboxBranch)
 		logAction(logger, CleanupAction{
 			SessionID:   sessionID,
 			SessionName: sessionName,

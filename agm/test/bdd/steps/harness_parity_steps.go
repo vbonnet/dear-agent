@@ -273,6 +273,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates primary checkout cleanup safety$`, agmValidatesPrimaryCheckoutCleanupSafety)
 	ctx.Step(`^the primary checkout and session-named branch should remain$`, primaryCheckoutAndSessionNamedBranchShouldRemain)
 	ctx.Step(`^a linked session worktree should still be removed$`, linkedSessionWorktreeShouldStillBeRemoved)
+	ctx.Step(`^linked worktree cleanup should continue through the surviving checkout$`, linkedWorktreeCleanupShouldContinueThroughTheSurvivingCheckout)
 	ctx.Step(`^an unclassified worktree should not authorize branch deletion$`, unclassifiedWorktreeShouldNotAuthorizeBranchDeletion)
 	ctx.Step(`^a context-only checkout should not authorize branch deletion$`, contextOnlyCheckoutShouldNotAuthorizeBranchDeletion)
 	ctx.Step(`^branch deletion should require attributed worktree ownership$`, branchDeletionShouldRequireAttributedWorktreeOwnership)
@@ -2345,7 +2346,7 @@ func agmValidatesPrimaryCheckoutCleanupSafety(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/ops", "./agm/internal/cleanup",
-		"-run", `^(TestCleanupAfterArchive_(PreservesPrimaryCheckout|WithRealGitWorktree|PreservesBranchWhenWorktreeCannotBeClassified|UsesContextProjectWhenWorkingDirectoryMissing|PreservesBranchNotOwnedByRemovedWorktree)|TestSessionResources_(BranchCleanup|WorktreeRemoveError))$`,
+		"-run", `^(TestCleanupAfterArchive_(PreservesPrimaryCheckout|WithRealGitWorktree|UsesSurvivingRepoAfterRemovingLinkedRepoPath|PreservesBranchWhenWorktreeCannotBeClassified|UsesContextProjectWhenWorkingDirectoryMissing|PreservesBranchNotOwnedByRemovedWorktree)|TestSessionResources_(BranchCleanup|WorktreeRemoveError))$`,
 		"-count=1", "-v")
 	cmd.Dir = bddRepoRoot()
 	output, runErr := cmd.CombinedOutput()
@@ -2381,6 +2382,20 @@ func linkedSessionWorktreeShouldStillBeRemoved(ctx context.Context) error {
 	}
 	if !strings.Contains(harnessState.archiveCleanupTestOutput, "--- PASS: TestCleanupAfterArchive_WithRealGitWorktree") {
 		return fmt.Errorf("linked worktree cleanup regression did not run:\n%s", harnessState.archiveCleanupTestOutput)
+	}
+	return nil
+}
+
+func linkedWorktreeCleanupShouldContinueThroughTheSurvivingCheckout(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.archiveCleanupTestErr != nil {
+		return fmt.Errorf("archive cleanup safety suite failed: %w\n%s", harnessState.archiveCleanupTestErr, harnessState.archiveCleanupTestOutput)
+	}
+	if !strings.Contains(harnessState.archiveCleanupTestOutput, "--- PASS: TestCleanupAfterArchive_UsesSurvivingRepoAfterRemovingLinkedRepoPath") {
+		return fmt.Errorf("surviving checkout cleanup regression did not run:\n%s", harnessState.archiveCleanupTestOutput)
 	}
 	return nil
 }
