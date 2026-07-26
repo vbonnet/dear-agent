@@ -28,6 +28,7 @@ const (
 
 var (
 	runCodexRemoteArchiveFn = runCodexRemoteArchive
+	runCodexLocalArchiveFn  = runCodexLocalArchive
 )
 
 // Result describes the Codex-side archive operation paired with AGM archive.
@@ -80,7 +81,7 @@ func Archive(ctx context.Context, req Request) (*Result, error) {
 	}
 
 	if req.CodexSessionID != "" {
-		if err := runCodexRemoteArchiveFn(ctx, req.CodexSessionID); err != nil {
+		if err := archivePersistedCodexSession(ctx, req.CodexSessionID); err != nil {
 			return nil, err
 		}
 		return &Result{Target: req.CodexSessionID}, nil
@@ -104,6 +105,26 @@ func Archive(ctx context.Context, req Request) (*Result, error) {
 	return &Result{Target: target, TranscriptPath: match.path}, nil
 }
 
+func archivePersistedCodexSession(ctx context.Context, target string) error {
+	remoteErr := runCodexRemoteArchiveFn(ctx, target)
+	if remoteErr == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return remoteErr
+	}
+
+	localErr := runCodexLocalArchiveFn(ctx, target)
+	if localErr == nil {
+		return nil
+	}
+	return fmt.Errorf("codex archive %q failed through both supported paths: %w", target, errors.Join(
+		fmt.Errorf("remote control: %w", remoteErr),
+		fmt.Errorf("local saved-session fallback: %w", localErr),
+	),
+	)
+}
+
 func (r Request) candidateDirs() []string {
 	return uniqueCleanPaths([]string{
 		r.WorkingDirectory,
@@ -114,6 +135,10 @@ func (r Request) candidateDirs() []string {
 
 func runCodexArchive(ctx context.Context, target string) error {
 	return runCodexArchiveWithRemote(ctx, target, os.Getenv(envRemote))
+}
+
+func runCodexLocalArchive(ctx context.Context, target string) error {
+	return runCodexArchiveWithRemote(ctx, target, "")
 }
 
 func runCodexRemoteArchive(ctx context.Context, target string) error {

@@ -21,12 +21,20 @@ func TestArchiveSkipsNonCodexHarness(t *testing.T) {
 }
 
 func TestArchiveUsesPersistedCodexSessionID(t *testing.T) {
-	orig := runCodexRemoteArchiveFn
-	t.Cleanup(func() { runCodexRemoteArchiveFn = orig })
+	origRemote := runCodexRemoteArchiveFn
+	origLocal := runCodexLocalArchiveFn
+	t.Cleanup(func() {
+		runCodexRemoteArchiveFn = origRemote
+		runCodexLocalArchiveFn = origLocal
+	})
 
 	var got string
 	runCodexRemoteArchiveFn = func(_ context.Context, threadID string) error {
 		got = threadID
+		return nil
+	}
+	runCodexLocalArchiveFn = func(context.Context, string) error {
+		t.Fatal("local fallback must not run after remote archive succeeds")
 		return nil
 	}
 
@@ -44,6 +52,69 @@ func TestArchiveUsesPersistedCodexSessionID(t *testing.T) {
 	}
 	if res.Target != "thr_123" {
 		t.Fatalf("result target = %q, want thr_123", res.Target)
+	}
+}
+
+func TestArchivePersistedCodexSessionFallsBackToLocalSavedSession(t *testing.T) {
+	origRemote := runCodexRemoteArchiveFn
+	origLocal := runCodexLocalArchiveFn
+	t.Cleanup(func() {
+		runCodexRemoteArchiveFn = origRemote
+		runCodexLocalArchiveFn = origLocal
+	})
+
+	runCodexRemoteArchiveFn = func(_ context.Context, threadID string) error {
+		if threadID != "local-import" {
+			t.Fatalf("remote archive target = %q, want local-import", threadID)
+		}
+		return errors.New("remote control unavailable")
+	}
+	var localTarget string
+	runCodexLocalArchiveFn = func(_ context.Context, threadID string) error {
+		localTarget = threadID
+		return nil
+	}
+
+	result, err := Archive(context.Background(), Request{
+		Harness:        "codex-cli",
+		CodexSessionID: "local-import",
+	})
+	if err != nil {
+		t.Fatalf("Archive() error = %v", err)
+	}
+	if localTarget != "local-import" {
+		t.Fatalf("local archive target = %q, want local-import", localTarget)
+	}
+	if result.Target != "local-import" {
+		t.Fatalf("result target = %q, want local-import", result.Target)
+	}
+}
+
+func TestArchivePersistedCodexSessionReportsBothArchiveFailures(t *testing.T) {
+	origRemote := runCodexRemoteArchiveFn
+	origLocal := runCodexLocalArchiveFn
+	t.Cleanup(func() {
+		runCodexRemoteArchiveFn = origRemote
+		runCodexLocalArchiveFn = origLocal
+	})
+
+	remoteErr := errors.New("remote control unavailable")
+	localErr := errors.New("saved session unavailable")
+	runCodexRemoteArchiveFn = func(context.Context, string) error { return remoteErr }
+	runCodexLocalArchiveFn = func(context.Context, string) error { return localErr }
+
+	_, err := Archive(context.Background(), Request{
+		Harness:        "codex-cli",
+		CodexSessionID: "missing-session",
+	})
+	if !errors.Is(err, localErr) {
+		t.Fatalf("Archive() error = %v, want local error", err)
+	}
+	if !errors.Is(err, remoteErr) {
+		t.Fatalf("Archive() error = %v, want remote error", err)
+	}
+	if !strings.Contains(err.Error(), remoteErr.Error()) {
+		t.Fatalf("Archive() error = %v, want remote failure context", err)
 	}
 }
 
@@ -70,10 +141,41 @@ func TestArchivePersistedCodexSessionUsesUnixRemote(t *testing.T) {
 	}
 }
 
+func TestArchivePersistedCodexSessionLocalFallbackIgnoresRemoteOverride(t *testing.T) {
+	origRemote := runCodexRemoteArchiveFn
+	t.Cleanup(func() { runCodexRemoteArchiveFn = origRemote })
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", fakeCodexPath(t, home))
+	t.Setenv(envRemote, "unix:///custom/remote.sock")
+	runCodexRemoteArchiveFn = func(context.Context, string) error {
+		return errors.New("remote control unavailable")
+	}
+
+	_, err := Archive(context.Background(), Request{
+		Harness:        "codex-cli",
+		CodexSessionID: "local-import",
+	})
+	if err != nil {
+		t.Fatalf("Archive() error = %v", err)
+	}
+	args := strings.TrimSpace(readFakeCodexArgs(t, home))
+	if args != "archive local-import" {
+		t.Fatalf("local fallback args = %q, want archive without --remote", args)
+	}
+}
+
 func TestArchivePreservesCallerContextError(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("PATH", fakeCodexPath(t, home))
+	origLocal := runCodexLocalArchiveFn
+	t.Cleanup(func() { runCodexLocalArchiveFn = origLocal })
+	runCodexLocalArchiveFn = func(context.Context, string) error {
+		t.Fatal("local fallback must not run after caller cancellation")
+		return nil
+	}
 
 	tests := []struct {
 		name    string
