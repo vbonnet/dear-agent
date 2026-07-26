@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/internal/safepr"
+	"golang.org/x/sys/unix"
 )
 
 // run is exercised only on paths that fail before any gh execution; the gh
@@ -272,6 +273,42 @@ func TestProtectTransactionCommandIsGroupCancelable(t *testing.T) {
 	}
 	if err := cmd.Cancel(); err != nil {
 		t.Fatalf("cancel before start = %v", err)
+	}
+}
+
+func TestCloseOnExecMarksDescriptor(t *testing.T) {
+	file, err := os.CreateTemp(t.TempDir(), "transaction-guard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+
+	if err := closeOnExec(int(file.Fd())); err != nil {
+		t.Fatal(err)
+	}
+	flags, err := unix.FcntlInt(file.Fd(), unix.F_GETFD, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flags&unix.FD_CLOEXEC == 0 {
+		t.Fatal("transaction guard descriptor is inheritable after closeOnExec")
+	}
+}
+
+func TestPreflightGuardDirectory(t *testing.T) {
+	currentDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := preflightGuardDirectory(currentDir)
+	if err != nil {
+		t.Fatalf("preflightGuardDirectory(%q): %v", currentDir, err)
+	}
+	if got != currentDir {
+		t.Fatalf("preflightGuardDirectory(%q) = %q, want %q", currentDir, got, currentDir)
+	}
+	if _, err := preflightGuardDirectory(filepath.Join(t.TempDir(), "other")); err == nil || !strings.Contains(err.Error(), "must match") {
+		t.Fatalf("preflightGuardDirectory(unrelated) = %v, want working-directory error", err)
 	}
 }
 

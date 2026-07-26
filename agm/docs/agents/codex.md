@@ -123,6 +123,22 @@ Codex does not support Claude runtime permission-mode cycling. AGM stores and
 resumes the session shell/tmux environment, then lets Codex load its own local
 state.
 
+## Archive
+
+AGM first commits its own archived lifecycle, then reports a best-effort
+external Codex archive outcome without rolling back that durable state when the
+provider operation fails. For a persisted Codex session id, it first uses the
+supported `codex archive --remote unix:// <codex-thread-id>` surface. If Remote
+Control is unavailable while the caller is still active, it retries the same id
+through the local saved-session `codex archive <codex-thread-id>` surface so
+imported and local-only sessions remain archivable. The archive operation never
+starts, stops, or otherwise changes device-global Remote Control state.
+
+Older sessions without persisted Codex metadata are resolved from saved
+transcript cwd metadata and use the local saved-session command by default, or
+the explicit `AGM_CODEX_REMOTE` override when configured. AGM refuses to guess
+when neither that metadata nor a persisted id identifies the external session.
+
 ## Reconcile Codex-Originated Threads
 
 Codex threads created outside AGM can be imported into AGM metadata with:
