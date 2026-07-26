@@ -745,11 +745,12 @@ func printReport(t *testing.T, report PerformanceReport) {
 	fmt.Printf("  NumGC:               %d\n", report.MemoryUsage.NumGC)
 
 	fmt.Printf("\nPerformance Status:\n")
-	if raceEnabled {
+	switch {
+	case raceEnabled:
 		fmt.Printf("  ℹ️ OBSERVED: p99 latency (%v); the <1s SLA is enforced without race instrumentation\n", report.EventDeliveryLatency.P99)
-	} else if report.EventDeliveryLatency.P99 < time.Second {
+	case report.EventDeliveryLatency.P99 < time.Second:
 		fmt.Printf("  ✅ PASS: p99 latency (%v) is below 1s requirement\n", report.EventDeliveryLatency.P99)
-	} else {
+	default:
 		fmt.Printf("  ❌ FAIL: p99 latency (%v) exceeds 1s requirement\n", report.EventDeliveryLatency.P99)
 	}
 
