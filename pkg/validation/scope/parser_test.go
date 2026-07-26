@@ -360,6 +360,10 @@ func TestParser_FindSections(t *testing.T) {
 }
 
 func TestParser_Performance(t *testing.T) {
+	if raceEnabled {
+		t.Skip("wall-clock parser latency is enforced without race instrumentation")
+	}
+
 	parser := NewParser()
 
 	t.Run("parses large document quickly", func(t *testing.T) {

@@ -75,6 +75,9 @@ func TestRealJSONLParsing_Performance(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping performance test in short mode")
 	}
+	if raceEnabled {
+		t.Skip("wall-clock JSONL throughput is enforced without race instrumentation")
+	}
 
 	// Create temp directory for large JSONL file
 	tmpDir := t.TempDir()
