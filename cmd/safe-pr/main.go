@@ -27,6 +27,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -272,16 +273,34 @@ var runPreflightFull = func(dir string, transaction *safepr.WorktreeTransaction)
 // fd 3 in a child that otherwise has only stdin/stdout/stderr; close that
 // descriptor on the next exec while this runner keeps it open for its lifetime.
 func runPreflightGuard(dir string) error {
-	if dir == "" {
-		return errors.New("preflight directory is required")
+	guardDir, err := preflightGuardDirectory(dir)
+	if err != nil {
+		return err
 	}
 	if err := closeOnExec(preflightTransactionGuardFD); err != nil {
 		return fmt.Errorf("mark transaction guard close-on-exec: %w", err)
 	}
-	cmd := exec.Command("make", "-C", dir, "preflight-full")
+	cmd := exec.Command("make", "-C", guardDir, "preflight-full")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// preflightGuardDirectory binds the hidden guard verb to the caller's working
+// directory. The parent passes its cwd only as an integrity assertion; make
+// always receives the runner-derived directory rather than command-line input.
+func preflightGuardDirectory(dir string) (string, error) {
+	if dir == "" {
+		return "", errors.New("preflight directory is required")
+	}
+	currentDir, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("resolve preflight working directory: %w", err)
+	}
+	if filepath.Clean(dir) != filepath.Clean(currentDir) {
+		return "", errors.New("preflight directory must match the guard working directory")
+	}
+	return currentDir, nil
 }
 
 func closeOnExec(fd int) error {

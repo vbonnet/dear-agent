@@ -295,6 +295,23 @@ func TestCloseOnExecMarksDescriptor(t *testing.T) {
 	}
 }
 
+func TestPreflightGuardDirectory(t *testing.T) {
+	currentDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := preflightGuardDirectory(currentDir)
+	if err != nil {
+		t.Fatalf("preflightGuardDirectory(%q): %v", currentDir, err)
+	}
+	if got != currentDir {
+		t.Fatalf("preflightGuardDirectory(%q) = %q, want %q", currentDir, got, currentDir)
+	}
+	if _, err := preflightGuardDirectory(filepath.Join(t.TempDir(), "other")); err == nil || !strings.Contains(err.Error(), "must match") {
+		t.Fatalf("preflightGuardDirectory(unrelated) = %v, want working-directory error", err)
+	}
+}
+
 func TestRun_PreflightFail_BlocksPRCreate(t *testing.T) {
 	bypassCreateWorktreeProtection(t)
 	captureSafePRAudits(t)
