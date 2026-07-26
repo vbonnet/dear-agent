@@ -1,11 +1,13 @@
 package deploy
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // stubBuild swaps buildBinary for the duration of a test. The stub writes the
@@ -158,6 +160,25 @@ func TestAtomicInstall_LinkedWorktreeRetriesCleanCloneForUnstampedBuild(t *testi
 	}
 	if got, err := os.ReadFile(target); err != nil || string(got) != "stamped" {
 		t.Fatalf("installed content = %q, %v; want stamped", got, err)
+	}
+}
+
+func TestRunGitCheckout_UsesCloneFallbackDeadline(t *testing.T) {
+	orig := gitCheckout
+	gitCheckout = func(ctx context.Context, _ string) ([]byte, error) {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("checkout context must have a deadline")
+		}
+		if remaining := time.Until(deadline); remaining < cloneTimeout-time.Second {
+			t.Fatalf("checkout deadline leaves %s; want approximately %s", remaining, cloneTimeout)
+		}
+		return nil, nil
+	}
+	t.Cleanup(func() { gitCheckout = orig })
+
+	if err := runGitCheckout(t.TempDir()); err != nil {
+		t.Fatalf("checkout must receive the standalone-clone deadline: %v", err)
 	}
 }
 
