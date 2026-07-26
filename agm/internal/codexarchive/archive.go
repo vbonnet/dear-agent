@@ -135,7 +135,10 @@ func runCodexArchiveWithRemote(ctx context.Context, target, remote string) error
 
 	cmd := exec.CommandContext(timeoutCtx, "codex", args...) // #nosec G702 -- fixed executable; args are passed without a shell.
 	output, err := cmd.CombinedOutput()
-	if timeoutCtx.Err() != nil {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return fmt.Errorf("codex archive %q interrupted: %w", target, ctxErr)
+	}
+	if errors.Is(timeoutCtx.Err(), context.DeadlineExceeded) {
 		return fmt.Errorf("codex archive timed out after %s", defaultTimeout)
 	}
 	if err != nil {

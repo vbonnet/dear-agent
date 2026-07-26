@@ -17,3 +17,5 @@
 **CAX-05** When neither a persisted Codex id nor a transcript cwd match can identify the Codex session, the archive bridge shall return an error without guessing a target.
 
 **CAX-06** While archiving a Codex thread, the archive bridge shall not start, stop, or otherwise change device-global remote-control state.
+
+**CAX-07** When the caller cancels or its deadline expires during Codex archival, the archive bridge shall preserve the caller's context error; it shall report the bridge's 30-second timeout only when that internal deadline expires first.

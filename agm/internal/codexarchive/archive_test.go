@@ -2,10 +2,12 @@ package codexarchive
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestArchiveSkipsNonCodexHarness(t *testing.T) {
@@ -65,6 +67,53 @@ func TestArchivePersistedCodexSessionUsesUnixRemote(t *testing.T) {
 	want := "archive --remote unix:// thread-456"
 	if args != want {
 		t.Fatalf("codex args = %q, want %q", args, want)
+	}
+}
+
+func TestArchivePreservesCallerContextError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", fakeCodexPath(t, home))
+
+	tests := []struct {
+		name    string
+		context func() (context.Context, context.CancelFunc)
+		want    error
+	}{
+		{
+			name: "canceled",
+			context: func() (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx, func() {}
+			},
+			want: context.Canceled,
+		},
+		{
+			name: "caller deadline",
+			context: func() (context.Context, context.CancelFunc) {
+				return context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+			},
+			want: context.DeadlineExceeded,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := tt.context()
+			defer cancel()
+
+			_, err := Archive(ctx, Request{
+				Harness:        "codex-cli",
+				CodexSessionID: "thread-canceled",
+			})
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("Archive() error = %v, want %v", err, tt.want)
+			}
+			if strings.Contains(err.Error(), "timed out after") {
+				t.Fatalf("Archive() mislabeled caller context error as helper timeout: %v", err)
+			}
+		})
 	}
 }
 
