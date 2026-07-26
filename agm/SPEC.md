@@ -66,10 +66,18 @@ For `codex-cli`, AGM treats Codex as a real interactive CLI harness:
   non-composer pane output MUST remain non-ready
 - state detection MUST NOT treat Codex trust prompts or menu selectors as idle
   composers
-- archive paths MUST archive the matching Codex saved session by resolving the
-  Codex transcript `session_meta.cwd` to the AGM working directory or sandbox
-  merged path, then invoking the supported `codex archive --remote unix://
-  <thread-id>` control surface (or the explicit `AGM_CODEX_REMOTE` override)
+- archive paths MUST target the persisted Codex session ID when available;
+  otherwise they MUST resolve the Codex transcript `session_meta.cwd` to the
+  AGM working directory or sandbox merged path and MUST NOT guess when neither
+  identity is available
+- archive paths with a persisted Codex session ID MUST first invoke the
+  supported `codex archive --remote unix:// <thread-id>` control surface (or
+  the explicit `AGM_CODEX_REMOTE` override), then retry the public local
+  saved-session command while the caller context remains active if Remote
+  Control is unavailable
+- archive paths that resolve an older session only by transcript cwd MUST use
+  the public local saved-session archive command by default, while honoring an
+  explicit `AGM_CODEX_REMOTE` override
 - import/register paths MUST support orphaned `codex-cli` conversations by
   resolving `~/.codex/sessions/**/rollout-*.jsonl` from
   `session_meta.session_id`, preserving that Codex session ID in AGM storage,
