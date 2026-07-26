@@ -179,14 +179,6 @@ func (c *Client) SetThreadName(ctx context.Context, threadID, name string) error
 	}, nil)
 }
 
-// ArchiveThread archives a Codex thread.
-func (c *Client) ArchiveThread(ctx context.Context, threadID string) error {
-	if threadID == "" {
-		return errors.New("thread id is required")
-	}
-	return c.request(ctx, "thread/archive", map[string]any{"threadId": threadID}, nil)
-}
-
 // ListThreads lists Codex threads.
 func (c *Client) ListThreads(ctx context.Context, opts ListThreadsOptions) (*ThreadList, error) {
 	params := map[string]any{}
