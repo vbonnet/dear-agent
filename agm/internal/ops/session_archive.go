@@ -548,12 +548,9 @@ func cleanupSandboxDirWithChecker(sessionID, mergedPath, base string, checker *s
 	// This file contains RBAC permission rules written by ConfigureProjectPermissions.
 	preserveSettingsFromUpper(sandboxDir)
 
-	// Unmount merged path if known (checker.Reap also unmounts <dir>/merged,
-	// but mergedPath from the manifest may differ from the default layout).
-	if mergedPath != "" {
-		if err := checker.Unmount(mergedPath); err != nil {
-			slog.Warn("Failed to unmount sandbox", "path", mergedPath, "error", err)
-		}
+	// Unmount the validated merged path before checker.Reap retries the default path.
+	if err := checker.Unmount(mergedPath); err != nil {
+		slog.Warn("Failed to unmount sandbox", "path", mergedPath, "error", err)
 	}
 
 	if err := checker.Reap(sandboxDir); err != nil {
