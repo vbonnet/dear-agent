@@ -46,10 +46,17 @@ added by #991, then paused 2026-07-27 — `ANTHROPIC_API_KEY` was never funded
 (no quota outside the Max plan, which the workflow can't bill against), so the
 gate ran fail-closed on every PR. It was removed here rather than left in
 `main.json` unapplied, so a routine `gh api ... --method PUT` sync of this file
-can't silently start blocking merges on a check nobody is funding. See the
-PAUSED comment at the top of `review.yml` for the reversible mechanics
-(`if: secrets.ANTHROPIC_API_KEY != ''`) and how to re-enable both the workflow
-and this required check.
+can't silently start blocking merges on a check nobody is funding.
+
+To re-enable: set the `ANTHROPIC_API_KEY` repo secret, and re-add the context
+to `main.json` + re-apply (below) if you also want it required again. Nothing
+else changes — the workflow gates itself on a `Detect review key` preflight
+step that reads the secret via `env:` and writes `present=true|false` to
+`$GITHUB_OUTPUT`, which the review step then tests as
+`steps.key.outputs.present == 'true'`. That indirection is load-bearing:
+GitHub does **not** expose the `secrets` context inside a step `if:`, so
+`if: secrets.ANTHROPIC_API_KEY != ''` does not work. See the PAUSED comment at
+the top of `review.yml`.
 
 **Before adding/removing a required check, confirm a job emits a check run
 with that exact context name** (matrix suffixes included) on PRs to `main` —

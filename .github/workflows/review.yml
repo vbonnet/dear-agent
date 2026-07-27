@@ -26,7 +26,12 @@ name: AI Code Review (5-dimension)
 # skipped outright (steps.gate.outcome=skipped) when the key is absent and no
 # 'ai-review:override' label is active. The published check gets an honest
 # `neutral` conclusion (never a fabricated `success`) explaining why, and the
-# job does not fail. cmd/ai-review's Go fail-closed logic is untouched — it
+# job does not fail. That neutral is narrowly scoped: it requires the key
+# preflight to have RUN and affirmatively reported no key. A skip caused by an
+# earlier step failing still publishes `failure`, because GitHub counts
+# `neutral` as satisfying a required check — so a broad "skip => neutral" would
+# let an infra failure pass the gate unreviewed once it is required again.
+# cmd/ai-review's Go fail-closed logic is untouched — it
 # still fails closed if actually invoked with no key, which still happens on
 # the override path (AIREV-03's audited pass-through still applies there).
 # "5-Dimension AI Review" was also dropped from the required-checks list in
@@ -260,7 +265,7 @@ jobs:
                   "## ⚠️ AI Code Review — passed by human override (bootstrap)" "" \
                   "> The \`ai-review:override\` label is present and the trusted base revision does not yet contain \`cmd/ai-review\`, so no automated review could run." "" \
                   "This is the rollout PR that introduces the gate. The override is recorded on this PR as a label." "" \
-                  "<sub>Review gate per REVIEW.md §2/§5 (paused 2026-07-27 — not a required check; see §4).</sub>" > /tmp/ai-review-bootstrap.md
+                  "<sub>Review gate per REVIEW.md §2/§5.</sub>" > /tmp/ai-review-bootstrap.md
                 gh pr comment "$PR" --repo "$REPO" --body-file /tmp/ai-review-bootstrap.md || true
               fi
               exit 0
@@ -282,17 +287,27 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           REPO: ${{ github.repository }}
           OUTCOME: ${{ steps.gate.outcome }}
+          KEY_OUTCOME: ${{ steps.key.outcome }}
+          KEY_PRESENT: ${{ steps.key.outputs.present }}
+          OVERRIDE: ${{ steps.override.outputs.active }}
         run: |
           set -euo pipefail
           conclusion=failure
           summary="Trusted review gate completed with outcome: $OUTCOME."
           if [ "$OUTCOME" = success ]; then
             conclusion=success
-          elif [ "$OUTCOME" = skipped ]; then
-            # Honest `neutral`, never a fabricated `success` — SPEC R4 forbids
-            # a silent pass. See the PAUSED note at the top of this file.
+          elif [ "$OUTCOME" = skipped ] && [ "$KEY_OUTCOME" = success ] && [ "$KEY_PRESENT" = false ] && [ "$OVERRIDE" != true ]; then
+            # The ONLY non-failure skip: key detection ran, succeeded, and
+            # affirmatively reported no key, with no override in play. Any
+            # other skip means an earlier step (checkout / setup-go / fetch /
+            # override or key detection) failed and GitHub's implicit
+            # success() guard skipped the gate — that must stay `failure`.
+            # GitHub counts `neutral` as satisfying a required check, so
+            # treating every skip as neutral would let an infrastructure
+            # failure pass the gate unreviewed once it is required again.
+            # Honest `neutral`, never a fabricated `success` (SPEC R4).
             conclusion=neutral
-            summary='Paused: ANTHROPIC_API_KEY is not configured (cost/quota decision, 2026-07-27). Not required for merge. Re-enable by setting the secret, or run a single PR under human authority with the ai-review:override label.'
+            summary='Paused: ANTHROPIC_API_KEY is not configured (cost/quota decision, 2026-07-27). Re-enable by setting the secret, or run a single PR under human authority with the ai-review:override label.'
           fi
           gh api --method PATCH "repos/$REPO/check-runs/${{ steps.pending.outputs.check_id }}" \
             -f status=completed \
