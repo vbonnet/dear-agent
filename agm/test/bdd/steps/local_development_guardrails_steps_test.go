@@ -217,3 +217,54 @@ func TestFullPreflightDiscoversEveryRaceSuppressedSLAPackage(t *testing.T) {
 		t.Fatal("ordinary SLA gate does not clear inherited GOFLAGS and force ordinary test modes")
 	}
 }
+
+func TestValidateGoToolInstallResolutionHonorsGOBINBeforeGOPATH(t *testing.T) {
+	valid := strings.Join([]string{
+		`GOVULNCHECK_BIN="$(command -v govulncheck || true)"`,
+		`GO_TOOL_INSTALL_BIN="$(go env GOBIN)"`,
+		`if [[ -z "$GO_TOOL_INSTALL_BIN" ]]; then`,
+		`GOPATH_VALUE="$(go env GOPATH)"`,
+		`GO_TOOL_INSTALL_BIN="${GOPATH_VALUE%%:*}/bin"`,
+		`GOVULNCHECK_CANDIDATE="$GO_TOOL_INSTALL_BIN/govulncheck"`,
+		`[[ -x "$GOVULNCHECK_CANDIDATE" ]]`,
+		`GOVULNCHECK_BIN="$GOVULNCHECK_CANDIDATE"`,
+		`"$GOVULNCHECK_BIN" -format json -scan package ./...`,
+	}, "\n")
+
+	if err := validateGoToolInstallResolution(valid); err != nil {
+		t.Fatalf("valid resolution contract rejected: %v", err)
+	}
+
+	for _, test := range []struct {
+		name   string
+		source string
+	}{
+		{
+			name:   "missing configured GOBIN",
+			source: strings.Replace(valid, `GO_TOOL_INSTALL_BIN="$(go env GOBIN)"`, "", 1),
+		},
+		{
+			name: "GOPATH probed before GOBIN",
+			source: strings.Replace(
+				valid,
+				"GO_TOOL_INSTALL_BIN=\"$(go env GOBIN)\"\n"+
+					"if [[ -z \"$GO_TOOL_INSTALL_BIN\" ]]; then\n"+
+					"GOPATH_VALUE=\"$(go env GOPATH)\"",
+				"GOPATH_VALUE=\"$(go env GOPATH)\"\n"+
+					"GO_TOOL_INSTALL_BIN=\"$(go env GOBIN)\"\n"+
+					"if [[ -z \"$GO_TOOL_INSTALL_BIN\" ]]; then",
+				1,
+			),
+		},
+		{
+			name:   "whole GOPATH list used as directory",
+			source: strings.Replace(valid, `GO_TOOL_INSTALL_BIN="${GOPATH_VALUE%%:*}/bin"`, `GO_TOOL_INSTALL_BIN="$GOPATH_VALUE/bin"`, 1),
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := validateGoToolInstallResolution(test.source); err == nil {
+				t.Fatal("invalid resolution contract accepted")
+			}
+		})
+	}
+}

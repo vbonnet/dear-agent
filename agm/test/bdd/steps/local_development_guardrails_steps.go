@@ -137,7 +137,7 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^local and required CI govulncheck allowlists are configured$`, localAndRequiredCIGovulncheckAllowlistsAreConfigured)
 	ctx.Step(`^AGM validates govulncheck policy parity$`, agmValidatesGovulncheckPolicyParity)
 	ctx.Step(`^the local and required CI govulncheck allowlists should match$`, localAndRequiredCIGovulncheckAllowlistsShouldMatch)
-	ctx.Step(`^local preflight should resolve standard Go tool installs outside PATH$`, localPreflightShouldResolveStandardGoToolInstallsOutsidePATH)
+	ctx.Step(`^local preflight should resolve configured GOBIN and first-GOPATH Go tool installs outside PATH$`, localPreflightShouldResolveStandardGoToolInstallsOutsidePATH)
 }
 
 func safePRLinkedWorktreeWithLockOwnership(ctx context.Context, initial string) error {
@@ -778,15 +778,31 @@ func localPreflightShouldResolveStandardGoToolInstallsOutsidePATH(ctx context.Co
 	if err != nil {
 		return fmt.Errorf("read local preflight: %w", err)
 	}
-	for _, required := range []string{
+	return validateGoToolInstallResolution(string(source))
+}
+
+func validateGoToolInstallResolution(source string) error {
+	requiredInOrder := []string{
 		`GOVULNCHECK_BIN="$(command -v govulncheck || true)"`,
-		`GOPATH_GOVULNCHECK="$(go env GOPATH)/bin/govulncheck"`,
-		`[[ -x "$GOPATH_GOVULNCHECK" ]]`,
+		`GO_TOOL_INSTALL_BIN="$(go env GOBIN)"`,
+		`if [[ -z "$GO_TOOL_INSTALL_BIN" ]]; then`,
+		`GOPATH_VALUE="$(go env GOPATH)"`,
+		`GO_TOOL_INSTALL_BIN="${GOPATH_VALUE%%:*}/bin"`,
+		`GOVULNCHECK_CANDIDATE="$GO_TOOL_INSTALL_BIN/govulncheck"`,
+		`[[ -x "$GOVULNCHECK_CANDIDATE" ]]`,
+		`GOVULNCHECK_BIN="$GOVULNCHECK_CANDIDATE"`,
 		`"$GOVULNCHECK_BIN" -format json -scan package ./...`,
-	} {
-		if !strings.Contains(string(source), required) {
+	}
+	previous := -1
+	for _, required := range requiredInOrder {
+		index := strings.Index(source, required)
+		if index < 0 {
 			return fmt.Errorf("local preflight is missing govulncheck resolution contract %q", required)
 		}
+		if index <= previous {
+			return fmt.Errorf("local preflight govulncheck resolution contract is out of order at %q", required)
+		}
+		previous = index
 	}
 	return nil
 }

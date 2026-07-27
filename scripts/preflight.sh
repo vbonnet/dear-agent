@@ -152,9 +152,16 @@ if [[ "$MODE" == "full" ]]; then
   step "govulncheck ./..."
   GOVULNCHECK_BIN="$(command -v govulncheck || true)"
   if [[ -z "$GOVULNCHECK_BIN" ]]; then
-    GOPATH_GOVULNCHECK="$(go env GOPATH)/bin/govulncheck"
-    if [[ -x "$GOPATH_GOVULNCHECK" ]]; then
-      GOVULNCHECK_BIN="$GOPATH_GOVULNCHECK"
+    # `go install` writes to GOBIN when configured; only an empty GOBIN falls
+    # back to the first GOPATH entry's bin directory.
+    GO_TOOL_INSTALL_BIN="$(go env GOBIN)"
+    if [[ -z "$GO_TOOL_INSTALL_BIN" ]]; then
+      GOPATH_VALUE="$(go env GOPATH)"
+      GO_TOOL_INSTALL_BIN="${GOPATH_VALUE%%:*}/bin"
+    fi
+    GOVULNCHECK_CANDIDATE="$GO_TOOL_INSTALL_BIN/govulncheck"
+    if [[ -x "$GOVULNCHECK_CANDIDATE" ]]; then
+      GOVULNCHECK_BIN="$GOVULNCHECK_CANDIDATE"
     fi
   fi
   if [[ -z "$GOVULNCHECK_BIN" ]]; then

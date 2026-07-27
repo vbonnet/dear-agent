@@ -924,9 +924,14 @@ policy packages.
 **Key scenarios:**
 - Safe local development command packages keep co-located SPEC coverage.
 - Safe local development internal policy packages keep co-located SPEC coverage.
+- Local and required CI test and vulnerability policies remain aligned.
+- Full preflight resolves Go-installed security tools from configured `GOBIN`
+  before the first `GOPATH` entry when the tool is outside `PATH`.
 
 **Why this matters:** Agents must use audited wrappers for push, PR, merge,
-rebase, and stale-lock cleanup instead of raw mutation commands.
+rebase, and stale-lock cleanup instead of raw mutation commands, and the full
+publication gate must recognize the Go toolchain's documented install
+locations.
 
 ### Workflow Tooling Guardrails
 
