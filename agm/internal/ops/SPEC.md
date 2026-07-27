@@ -201,6 +201,8 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-107** When archive sandbox cleanup receives a live-process refusal for a specific process immediately after owned session shutdown, the system shall retry only before an absolute bounded process-grace deadline while re-running every path, process, unmount, and mount safety gate in that order without any caller-side pre-unmount; the system shall propagate the remaining shared budget into each in-flight process and mount scan and re-check it before removal, and persistent holders, expired or unreadable process state, bad paths, or surviving mounts shall preserve the sandbox.
 
+**OPS-108** When archive sandbox cleanup retries after a live holder, the system shall refresh the owned upper-layer settings snapshot before every safety attempt so permission rules written during shutdown survive a later successful removal.
+
 ### Shared Session Resume Lifecycle
 
 **OPS-99** When `ResumeSession` receives a stable session ID, the operation shall acquire that ID's lifecycle lock before its first mutable storage read, reload the current session under the lock, classify worktree and tmux health before mutation, and reject archived, unhealthy, or unverifiable targets without creating or commanding a tmux session.

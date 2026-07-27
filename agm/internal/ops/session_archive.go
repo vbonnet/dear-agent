@@ -586,10 +586,6 @@ func cleanupSandboxDirWithCheckerAndRetry(
 		return false, false, ""
 	}
 
-	// Preserve .claude/settings.local.json from the upper layer before removal.
-	// This file contains RBAC permission rules written by ConfigureProjectPermissions.
-	preserveSettingsFromUpper(sandboxDir)
-
 	// ReapContext owns the only unmount boundary. It first proves that no live
 	// process holds the sandbox, then unmounts this exact merged child and the
 	// sandbox root before re-reading the mount table. Do not pre-unmount here:
@@ -626,6 +622,11 @@ func reapSandboxWithRetry(
 			}
 			attemptCtx, cancelAttempt = context.WithTimeout(attemptCtx, remaining)
 		}
+		// A holder may update permission rules while shutting down during the
+		// retry grace period. Refresh the upper-layer snapshot on every attempt;
+		// if that holder is still live, the following process gate refuses and a
+		// later attempt copies its final write before the successful reap.
+		preserveSettingsFromUpper(sandboxDir)
 		err := checker.ReapContext(attemptCtx, sandboxDir)
 		cancelAttempt()
 		if err == nil {

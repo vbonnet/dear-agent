@@ -149,6 +149,8 @@ Provide a production-ready CLI that:
 
 **CLI-54** When `agm supervisor run` reaches its launch boundary, the CLI shall repeat final live admission, seal any supervisor OAuth-check and admission-brake reservations plus the spawn-recording obligation into a one-shot private Claude executor, re-resolve the configured Claude executable there, and commit those effects immediately before exec so a confirmed executor-start or executable-resolution failure consumes neither quota nor spawn stagger.
 
+**CLI-61** When `agm session unarchive` restores a selected session, the command shall acquire the same stable session-ID lifecycle lock held by archive, reload the current lifecycle under that lock, and keep the lock through durable reactivation and legacy manifest relocation so archive cleanup cannot delete a sandbox after it becomes active again.
+
 ## Requirements
 
 ### Functional Requirements

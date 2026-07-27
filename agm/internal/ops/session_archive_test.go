@@ -474,6 +474,71 @@ func TestCleanupSandboxDirWithChecker_RetriesOnlyTransientLiveProcess(t *testing
 	}
 }
 
+func TestCleanupSandboxDirWithChecker_RefreshesSettingsDuringRetryGrace(t *testing.T) {
+	home := t.TempDir()
+	base := filepath.Join(home, ".agm", "sandboxes")
+	sessionID := "sandbox-settings-retry"
+	sandboxDir := filepath.Join(base, sessionID)
+	mergedPath := filepath.Join(sandboxDir, "merged")
+	upperClaude := filepath.Join(sandboxDir, "upper", ".claude")
+	targetClaude := filepath.Join(home, "repo", ".claude")
+	for _, dir := range []string{mergedPath, upperClaude, targetClaude} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatalf("MkdirAll(%s) error: %v", dir, err)
+		}
+	}
+	if err := os.Symlink(targetClaude, filepath.Join(mergedPath, ".claude")); err != nil {
+		t.Fatalf("Symlink(merged .claude) error: %v", err)
+	}
+	upperSettings := filepath.Join(upperClaude, "settings.local.json")
+	if err := os.WriteFile(upperSettings, []byte("initial"), 0o600); err != nil {
+		t.Fatalf("WriteFile(initial settings) error: %v", err)
+	}
+
+	var procScans int
+	checker := &sandboxgc.Checker{
+		Base: base,
+		ListProcPaths: func(context.Context) ([]sandboxgc.ProcPath, error) {
+			procScans++
+			if procScans == 1 {
+				return []sandboxgc.ProcPath{{PID: 25153, Path: filepath.Join(sandboxDir, "upper")}}, nil
+			}
+			return nil, nil
+		},
+		ListMounts: func(context.Context) ([]string, error) { return nil, nil },
+		Unmount:    func(string) error { return nil },
+		Remove:     os.RemoveAll,
+	}
+	currentTime := time.Unix(1_000, 0)
+	var shutdownWriteErr error
+	removed := cleanupSandboxDirWithCheckerAndRetry(
+		sessionID,
+		mergedPath,
+		base,
+		checker,
+		3,
+		10*time.Millisecond,
+		func(delay time.Duration) {
+			shutdownWriteErr = os.WriteFile(upperSettings, []byte("final shutdown rules"), 0o600)
+			currentTime = currentTime.Add(delay)
+		},
+		func() time.Time { return currentTime },
+	)
+	if shutdownWriteErr != nil {
+		t.Fatalf("WriteFile(shutdown settings) error: %v", shutdownWriteErr)
+	}
+	if !removed {
+		t.Fatal("cleanup did not remove sandbox after transient holder exited")
+	}
+	preserved, err := os.ReadFile(filepath.Join(targetClaude, "settings.local.json"))
+	if err != nil {
+		t.Fatalf("ReadFile(preserved settings) error: %v", err)
+	}
+	if string(preserved) != "final shutdown rules" {
+		t.Fatalf("preserved settings = %q, want final shutdown rules", preserved)
+	}
+}
+
 type archiveReloadStorage struct {
 	dolt.Storage
 }
