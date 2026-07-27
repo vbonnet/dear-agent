@@ -24,7 +24,7 @@ Per `docs/design-safe-merge.md` §4.1 / §5 (P1), this replaces the legacy
 | Require linear history | yes (`required_linear_history` + `non_fast_forward`) |
 | Block branch deletion | yes (`deletion`) |
 | Require status checks | yes, strict (branch must be up to date) |
-| Required checks | the seven contexts below |
+| Required checks | the contexts below |
 
 ### Required status checks
 
@@ -40,14 +40,20 @@ mode behind the [phantom Trivy check](https://github.com/vbonnet/engram-research
 | `govulncheck` | `ci.yml` |
 | `Bash Script Size Check (20-line limit)` | `language-policy.yml` |
 | `Vulnerability Scan` | `sbom-scan.yml` |
-| `5-Dimension AI Review` | `review.yml` |
 
-Six checks run on `pull_request` targeting `main`; `5-Dimension AI Review`
-runs on `pull_request_target` and publishes its trusted result explicitly on
-the reviewed head. **Before adding/removing a
-required check, confirm a job emits a check run with that exact context name**
-(matrix suffixes included) on PRs to `main` — otherwise the gate becomes
-unsatisfiable.
+`5-Dimension AI Review` (`review.yml`) is **not** currently in this list. It was
+added by #991, then paused 2026-07-27 — `ANTHROPIC_API_KEY` was never funded
+(no quota outside the Max plan, which the workflow can't bill against), so the
+gate ran fail-closed on every PR. It was removed here rather than left in
+`main.json` unapplied, so a routine `gh api ... --method PUT` sync of this file
+can't silently start blocking merges on a check nobody is funding. See the
+PAUSED comment at the top of `review.yml` for the reversible mechanics
+(`if: secrets.ANTHROPIC_API_KEY != ''`) and how to re-enable both the workflow
+and this required check.
+
+**Before adding/removing a required check, confirm a job emits a check run
+with that exact context name** (matrix suffixes included) on PRs to `main` —
+otherwise the gate becomes unsatisfiable.
 
 ## Applying the ruleset
 
