@@ -136,7 +136,10 @@ if [[ "$MODE" == "full" ]]; then
   # The broad full suite intentionally uses -race for data-race parity. Race
   # instrumentation distorts wall-clock latency, so re-run every package that
   # skips a wall-clock SLA under race as a required ordinary publication gate.
-  CI= go test -count=1 -timeout="${TEST_TIMEOUT}" \
+  # Serialize these latency-sensitive packages so they measure the code under
+  # test rather than competing package test processes.
+  CI='' go test -p=1 -count=1 -timeout="${TEST_TIMEOUT}" \
+    ./pkg/workflow \
     ./agm/test/performance \
     ./internal/telemetry/enrichment \
     ./pkg/validation/scope ||

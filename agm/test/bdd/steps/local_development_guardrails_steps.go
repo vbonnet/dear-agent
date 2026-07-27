@@ -851,14 +851,22 @@ func fullPreflightOrdinaryPerformanceGateIsConfigured(ctx context.Context) error
 		if readErr != nil {
 			return readErr
 		}
-		if !strings.Contains(string(source), `t.Skip("wall-clock`) {
+		sourceText := string(source)
+		raceSuppressedSLA := strings.Contains(sourceText, "raceEnabled") &&
+			(strings.Contains(sourceText, "enforced without race instrumentation") ||
+				strings.Contains(sourceText, "skipped under race instrumentation") ||
+				strings.Contains(sourceText, "SLA enforcement remains in the ordinary test pass"))
+		if !raceSuppressedSLA {
 			return nil
 		}
 		relativeDir, relativeErr := filepath.Rel(root, filepath.Dir(path))
 		if relativeErr != nil {
 			return relativeErr
 		}
-		state.raceSkippedSLAs = append(state.raceSkippedSLAs, "./"+filepath.ToSlash(relativeDir))
+		packagePath := "./" + filepath.ToSlash(relativeDir)
+		if !slices.Contains(state.raceSkippedSLAs, packagePath) {
+			state.raceSkippedSLAs = append(state.raceSkippedSLAs, packagePath)
+		}
 		return nil
 	})
 }
