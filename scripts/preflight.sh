@@ -138,7 +138,10 @@ if [[ "$MODE" == "full" ]]; then
   # skips a wall-clock SLA under race as a required ordinary publication gate.
   # Serialize these latency-sensitive packages so they measure the code under
   # test rather than competing package test processes.
-  CI='' go test -p=1 -count=1 -timeout="${TEST_TIMEOUT}" \
+  # Clear inherited Go test flags as well as CI: GOFLAGS=-race, -short, -run,
+  # or custom tags can otherwise skip the exact assertions this gate exists to
+  # enforce while `go test` still exits successfully.
+  GOFLAGS='' CI='' go test -race=false -short=false -p=1 -count=1 -timeout="${TEST_TIMEOUT}" \
     ./pkg/workflow \
     ./agm/test/performance \
     ./internal/telemetry/enrichment \

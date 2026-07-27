@@ -609,18 +609,26 @@ func reapSandboxWithRetry(
 	if attempts < 1 {
 		attempts = 1
 	}
+	bounded := retryDelay > 0
 	if retryDelay <= 0 {
 		attempts = 1
 	}
 	retryDeadline := now().Add(time.Duration(attempts) * retryDelay)
 	for attempt := 1; attempt <= attempts; attempt++ {
-		if attempt > 1 && !now().Before(retryDeadline) {
-			slog.Warn("Sandbox not removed before archive cleanup grace deadline — periodic sandbox gc will retry",
-				"session", sessionID, "path", sandboxDir, "attempts", attempt-1,
-				"retry_deadline", retryDeadline)
-			return false, true, "sandbox cleanup grace deadline exceeded"
+		attemptCtx := context.Background()
+		cancelAttempt := func() {}
+		if bounded {
+			remaining := retryDeadline.Sub(now())
+			if remaining <= 0 {
+				slog.Warn("Sandbox not removed before archive cleanup grace deadline — periodic sandbox gc will retry",
+					"session", sessionID, "path", sandboxDir, "attempts", attempt-1,
+					"retry_deadline", retryDeadline)
+				return false, true, "sandbox cleanup grace deadline exceeded"
+			}
+			attemptCtx, cancelAttempt = context.WithTimeout(attemptCtx, remaining)
 		}
-		err := checker.Reap(sandboxDir)
+		err := checker.ReapContext(attemptCtx, sandboxDir)
+		cancelAttempt()
 		if err == nil {
 			slog.Info("Removed sandbox directory", "session", sessionID, "path", sandboxDir)
 			return true, true, ""

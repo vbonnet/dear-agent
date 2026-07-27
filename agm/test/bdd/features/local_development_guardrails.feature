@@ -93,7 +93,7 @@ Feature: Local development guardrails
   Scenario: Full preflight enforces every race-skipped wall-clock SLA
     Given the full preflight ordinary performance gate is configured
     When AGM validates race-skipped wall-clock SLA coverage
-    Then every race-skipped SLA package should run without race instrumentation
+    Then every race-skipped SLA package should run without inherited test modes or race instrumentation
 
   Scenario Outline: Safe PR creation preserves worktree lock ownership
     Given a safe-pr linked worktree with "<initial_lock>" lock ownership

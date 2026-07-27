@@ -213,4 +213,7 @@ func TestFullPreflightDiscoversEveryRaceSuppressedSLAPackage(t *testing.T) {
 	if !slices.Equal(state.raceSkippedSLAs, want) {
 		t.Fatalf("race-skipped SLA packages = %v, want %v", state.raceSkippedSLAs, want)
 	}
+	if !state.ordinarySLASanitized {
+		t.Fatal("ordinary SLA gate does not clear inherited GOFLAGS and force ordinary test modes")
+	}
 }

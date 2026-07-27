@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -54,8 +55,8 @@ func mkSandbox(t *testing.T, base, name string, age time.Duration) string {
 func newTestChecker(base string, live map[string]bool, liveErr error) *sandboxgc.Checker {
 	return &sandboxgc.Checker{
 		Base:           base,
-		ListMounts:     func() ([]string, error) { return []string{"/"}, nil },
-		ListProcPaths:  func() ([]sandboxgc.ProcPath, error) { return nil, nil },
+		ListMounts:     func(context.Context) ([]string, error) { return []string{"/"}, nil },
+		ListProcPaths:  func(context.Context) ([]sandboxgc.ProcPath, error) { return nil, nil },
 		LiveSessionIDs: func() (map[string]bool, error) { return live, liveErr },
 		Unmount:        func(string) error { return nil },
 		Remove:         os.RemoveAll,
@@ -149,7 +150,7 @@ func TestSandboxGCKeepsMountedSandbox(t *testing.T) {
 	mounted := mkSandbox(t, base, "deadbeef", 24*time.Hour)
 	checker := newTestChecker(base, map[string]bool{}, nil)
 	// Simulate an overlay mount that survives the unmount attempt.
-	checker.ListMounts = func() ([]string, error) {
+	checker.ListMounts = func(context.Context) ([]string, error) {
 		return []string{"/", filepath.Join(mounted, "merged")}, nil
 	}
 
@@ -175,7 +176,7 @@ func TestSandboxGCKeepsSandboxWithLiveProcess(t *testing.T) {
 	base := sandboxTestBase(t)
 	busy := mkSandbox(t, base, "deadbeef", 24*time.Hour)
 	checker := newTestChecker(base, map[string]bool{}, nil)
-	checker.ListProcPaths = func() ([]sandboxgc.ProcPath, error) {
+	checker.ListProcPaths = func(context.Context) ([]sandboxgc.ProcPath, error) {
 		return []sandboxgc.ProcPath{{PID: 42, Path: filepath.Join(busy, "merged")}}, nil
 	}
 

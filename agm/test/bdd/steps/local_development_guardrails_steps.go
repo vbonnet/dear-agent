@@ -72,6 +72,7 @@ type localDevGuardrailState struct {
 	mergeLoopCIError       error
 	raceSkippedSLAs        []string
 	ordinarySLAPackages    []string
+	ordinarySLASanitized   bool
 }
 
 type localDevGuardrailStateKey struct{}
@@ -110,7 +111,7 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^safe-pr should allow at least (\d+) minutes for preflight-full$`, safePRShouldAllowAtLeastMinutesForPreflightFull)
 	ctx.Step(`^the full preflight ordinary performance gate is configured$`, fullPreflightOrdinaryPerformanceGateIsConfigured)
 	ctx.Step(`^AGM validates race-skipped wall-clock SLA coverage$`, agmValidatesRaceSkippedWallClockSLACoverage)
-	ctx.Step(`^every race-skipped SLA package should run without race instrumentation$`, everyRaceSkippedSLAPackageShouldRunWithoutRaceInstrumentation)
+	ctx.Step(`^every race-skipped SLA package should run without inherited test modes or race instrumentation$`, everyRaceSkippedSLAPackageShouldRunWithoutRaceInstrumentation)
 	ctx.Step(`^a safe-pr linked worktree with "([^"]*)" lock ownership$`, safePRLinkedWorktreeWithLockOwnership)
 	ctx.Step(`^safe-pr protects a "([^"]*)" preflight and PR creation transaction$`, safePRProtectsTransaction)
 	ctx.Step(`^the worktree should be protected during preflight and PR creation$`, worktreeShouldBeProtectedDuringTransaction)
@@ -823,6 +824,10 @@ func fullPreflightOrdinaryPerformanceGateIsConfigured(ctx context.Context) error
 	if !strings.Contains(string(preflight), "ordinary performance SLA packages") {
 		return fmt.Errorf("ordinary performance SLA publication gate is not configured")
 	}
+	state.ordinarySLASanitized = strings.Contains(
+		string(preflight),
+		"GOFLAGS='' CI='' go test -race=false -short=false",
+	)
 	rootFS, err := os.OpenRoot(root)
 	if err != nil {
 		return fmt.Errorf("open repository root: %w", err)
@@ -906,6 +911,9 @@ func everyRaceSkippedSLAPackageShouldRunWithoutRaceInstrumentation(ctx context.C
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("ordinary performance SLA gate omits race-skipped packages: %s", strings.Join(missing, ", "))
+	}
+	if !state.ordinarySLASanitized {
+		return fmt.Errorf("ordinary performance SLA gate does not neutralize inherited Go test modes")
 	}
 	return nil
 }

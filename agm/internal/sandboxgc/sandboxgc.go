@@ -52,6 +52,7 @@ const (
 	ReasonLiveSession = "live-session"
 	ReasonLiveProcess = "live-process"
 	ReasonMountInside = "mount-inside"
+	ReasonDeadline    = "deadline-expired"
 )
 
 // RefusalError explains why a sandbox was NOT reaped. It is a refusal, not a
@@ -87,10 +88,10 @@ type Checker struct {
 	// Base is the absolute sandbox base directory (~/.agm/sandboxes).
 	Base string
 	// ListMounts returns the mount points currently in the mount table.
-	ListMounts func() ([]string, error)
+	ListMounts func(context.Context) ([]string, error)
 	// ListProcPaths returns every (pid, path) the process table currently
 	// holds open (cwd + open fds).
-	ListProcPaths func() ([]ProcPath, error)
+	ListProcPaths func(context.Context) ([]ProcPath, error)
 	// LiveSessionIDs returns the set of session IDs that are NOT archived.
 	// A nil function disables the live-session gate (only valid for the
 	// archive path, where the owning session was just archived by the caller).
@@ -191,6 +192,15 @@ func ProcessInside(procs []ProcPath, dir string) (ProcPath, bool) {
 // enforced in Reap, on a mount table RE-READ after the unmount attempt —
 // immediately before the only RemoveAll in this package.
 func (c *Checker) CheckReapable(dir string) error {
+	return c.CheckReapableContext(context.Background(), dir)
+}
+
+// CheckReapableContext is CheckReapable with caller cancellation propagated
+// through host process-table inspection.
+func (c *Checker) CheckReapableContext(ctx context.Context, dir string) error {
+	if err := contextRefusal(ctx, dir, "before safety checks"); err != nil {
+		return err
+	}
 	if err := ValidateSandboxPath(c.Base, dir); err != nil {
 		return &RefusalError{Path: dir, Reason: ReasonBadPath, Detail: err.Error()}
 	}
@@ -210,12 +220,15 @@ func (c *Checker) CheckReapable(dir string) error {
 		}
 	}
 
-	procs, err := c.ListProcPaths()
+	procs, err := c.ListProcPaths(ctx)
 	if err != nil {
 		// Fail CLOSED: unknown process state means the dir may be in use.
 		return &RefusalError{Path: dir, Reason: ReasonLiveProcess,
 			Detail:       fmt.Sprintf("cannot enumerate process paths: %v", err),
 			ProbeFailure: true}
+	}
+	if err := contextRefusal(ctx, dir, "after process inspection"); err != nil {
+		return err
 	}
 	if pp, found := ProcessInside(procs, dir); found {
 		return &RefusalError{Path: dir, Reason: ReasonLiveProcess,
@@ -230,9 +243,18 @@ func (c *Checker) CheckReapable(dir string) error {
 // with probeFailure=true so callers can tell "table unreadable" apart from
 // "table read fine and a mount was actually found".
 func (c *Checker) MountedInside(dir string) (mountPoint string, mounted bool, probeFailure bool) {
-	mounts, err := c.ListMounts()
+	return c.MountedInsideContext(context.Background(), dir)
+}
+
+// MountedInsideContext is MountedInside with caller cancellation propagated
+// through host mount-table inspection.
+func (c *Checker) MountedInsideContext(ctx context.Context, dir string) (mountPoint string, mounted bool, probeFailure bool) {
+	mounts, err := c.ListMounts(ctx)
 	if err != nil {
 		return fmt.Sprintf("unreadable mount table: %v", err), true, true
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Sprintf("mount inspection deadline: %v", err), true, true
 	}
 	mp, found := MountInside(mounts, dir)
 	return mp, found, false
@@ -251,12 +273,23 @@ func (c *Checker) MountedInside(dir string) (mountPoint string, mounted bool, pr
 // A *RefusalError means the sandbox was intentionally skipped; any other
 // error means removal was attempted and failed.
 func (c *Checker) Reap(dir string) error {
-	if err := c.CheckReapable(dir); err != nil {
+	return c.ReapContext(context.Background(), dir)
+}
+
+// ReapContext is Reap with one caller-owned lifetime for every safety scan.
+// Cancellation always fails closed, and the context is checked again
+// immediately before recursive removal so an expired scan budget can never
+// authorize a late delete.
+func (c *Checker) ReapContext(ctx context.Context, dir string) error {
+	if err := c.CheckReapableContext(ctx, dir); err != nil {
 		return err
 	}
 
 	// Best-effort unmount: overlay providers mount at <dir>/merged.
 	for _, mp := range []string{filepath.Join(dir, "merged"), dir} {
+		if err := contextRefusal(ctx, dir, "before unmount"); err != nil {
+			return err
+		}
 		if err := c.Unmount(mp); err != nil {
 			// Not fatal by itself — the re-read below decides.
 			continue
@@ -267,12 +300,15 @@ func (c *Checker) Reap(dir string) error {
 	// still mounted at or under dir, refuse — deleting through a live mount
 	// can destroy the mount's source (per ~/.agm/cleanup-runbook.md).
 	// MountedInside fails closed on an unreadable mount table.
-	if m, mounted, probeFailure := c.MountedInside(dir); mounted {
+	if m, mounted, probeFailure := c.MountedInsideContext(ctx, dir); mounted {
 		return &RefusalError{Path: dir, Reason: ReasonMountInside,
 			Detail:       fmt.Sprintf("mount survived unmount: %s", m),
 			ProbeFailure: probeFailure}
 	}
 
+	if err := contextRefusal(ctx, dir, "before removal"); err != nil {
+		return err
+	}
 	if err := c.Remove(dir); err != nil {
 		return fmt.Errorf("removing sandbox %s: %w", dir, err)
 	}
@@ -281,11 +317,22 @@ func (c *Checker) Reap(dir string) error {
 
 // --- real host implementations ---
 
+func contextRefusal(ctx context.Context, dir, phase string) error {
+	if err := ctx.Err(); err != nil {
+		return &RefusalError{
+			Path:   dir,
+			Reason: ReasonDeadline,
+			Detail: fmt.Sprintf("%s: %v", phase, err),
+		}
+	}
+	return nil
+}
+
 // listMountsFromMountCmd shells out to `mount` and parses the mount points.
 // Timeout-bounded: a hung mount-table read must not wedge GC, and the
 // resulting error fails closed at the caller.
-func listMountsFromMountCmd() ([]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), mountCmdTimeout)
+func listMountsFromMountCmd(parent context.Context) ([]string, error) {
+	ctx, cancel := context.WithTimeout(parent, mountCmdTimeout)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "mount").Output()
 	if err != nil {
@@ -341,8 +388,8 @@ func ParseMountOutput(out string) []string {
 // non-zero exit with usable output is tolerated; no output at all is an error
 // (fail closed at the caller). Timeout-bounded so a hung filesystem cannot
 // wedge GC; a timeout also fails closed — partial output is never trusted.
-func listProcPathsFromLsof() ([]ProcPath, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), lsofCmdTimeout)
+func listProcPathsFromLsof(parent context.Context) ([]ProcPath, error) {
+	ctx, cancel := context.WithTimeout(parent, lsofCmdTimeout)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "lsof", "-n", "-P", "-F", "pn").Output()
 	if ctxErr := ctx.Err(); ctxErr != nil {

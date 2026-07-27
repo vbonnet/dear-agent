@@ -208,10 +208,10 @@ func TestCleanupSandboxDirWithChecker_RemovesOwnedSandbox(t *testing.T) {
 	var unmounted []string
 	checker := &sandboxgc.Checker{
 		Base: base,
-		ListMounts: func() ([]string, error) {
+		ListMounts: func(context.Context) ([]string, error) {
 			return nil, nil
 		},
-		ListProcPaths: func() ([]sandboxgc.ProcPath, error) {
+		ListProcPaths: func(context.Context) ([]sandboxgc.ProcPath, error) {
 			return nil, nil
 		},
 		Unmount: func(path string) error {
@@ -251,8 +251,8 @@ func TestCleanupSandboxDirWithChecker_RejectsUnownedMergedPath(t *testing.T) {
 	var unmounted, removed []string
 	checker := &sandboxgc.Checker{
 		Base:          base,
-		ListMounts:    func() ([]string, error) { return nil, nil },
-		ListProcPaths: func() ([]sandboxgc.ProcPath, error) { return nil, nil },
+		ListMounts:    func(context.Context) ([]string, error) { return nil, nil },
+		ListProcPaths: func(context.Context) ([]sandboxgc.ProcPath, error) { return nil, nil },
 		Unmount: func(path string) error {
 			unmounted = append(unmounted, path)
 			return nil
@@ -314,19 +314,19 @@ func TestCleanupSandboxDirWithChecker_RetriesOnlyTransientLiveProcess(t *testing
 	type testCase struct {
 		name           string
 		attempts       int
-		listProcPaths  func(sandboxDir string, call int) ([]sandboxgc.ProcPath, error)
+		retryDelay     time.Duration
+		listProcPaths  func(context.Context, string, int) ([]sandboxgc.ProcPath, error)
 		listMounts     func(sandboxDir string) ([]string, error)
 		wantRemoved    bool
 		wantProcScans  int
 		wantMountScans int
 		wantSleeps     int
-		procScanDelay  time.Duration
 	}
 	tests := []testCase{
 		{
 			name:     "transient holder exits within grace",
 			attempts: 5,
-			listProcPaths: func(sandboxDir string, call int) ([]sandboxgc.ProcPath, error) {
+			listProcPaths: func(_ context.Context, sandboxDir string, call int) ([]sandboxgc.ProcPath, error) {
 				if call < 3 {
 					return []sandboxgc.ProcPath{{PID: 25153, Path: filepath.Join(sandboxDir, "upper", "repo0")}}, nil
 				}
@@ -340,7 +340,7 @@ func TestCleanupSandboxDirWithChecker_RetriesOnlyTransientLiveProcess(t *testing
 		{
 			name:     "persistent holder exhausts grace",
 			attempts: 3,
-			listProcPaths: func(sandboxDir string, _ int) ([]sandboxgc.ProcPath, error) {
+			listProcPaths: func(_ context.Context, sandboxDir string, _ int) ([]sandboxgc.ProcPath, error) {
 				return []sandboxgc.ProcPath{{PID: 30001, Path: filepath.Join(sandboxDir, "merged", "repo0")}}, nil
 			},
 			wantProcScans: 3,
@@ -349,7 +349,7 @@ func TestCleanupSandboxDirWithChecker_RetriesOnlyTransientLiveProcess(t *testing
 		{
 			name:     "unreadable process state fails closed without retry",
 			attempts: 5,
-			listProcPaths: func(string, int) ([]sandboxgc.ProcPath, error) {
+			listProcPaths: func(context.Context, string, int) ([]sandboxgc.ProcPath, error) {
 				return nil, errors.New("lsof unavailable")
 			},
 			wantProcScans: 1,
@@ -357,7 +357,7 @@ func TestCleanupSandboxDirWithChecker_RetriesOnlyTransientLiveProcess(t *testing
 		{
 			name:     "surviving mount fails closed without retry",
 			attempts: 5,
-			listProcPaths: func(string, int) ([]sandboxgc.ProcPath, error) {
+			listProcPaths: func(context.Context, string, int) ([]sandboxgc.ProcPath, error) {
 				return nil, nil
 			},
 			listMounts: func(sandboxDir string) ([]string, error) {
@@ -367,13 +367,14 @@ func TestCleanupSandboxDirWithChecker_RetriesOnlyTransientLiveProcess(t *testing
 			wantMountScans: 1,
 		},
 		{
-			name:     "slow process scan exhausts grace without amplification",
-			attempts: 5,
-			listProcPaths: func(sandboxDir string, _ int) ([]sandboxgc.ProcPath, error) {
-				return []sandboxgc.ProcPath{{PID: 30002, Path: filepath.Join(sandboxDir, "upper", "repo0")}}, nil
+			name:       "in-flight process scan is canceled at shared deadline",
+			attempts:   5,
+			retryDelay: 2 * time.Millisecond,
+			listProcPaths: func(ctx context.Context, _ string, _ int) ([]sandboxgc.ProcPath, error) {
+				<-ctx.Done()
+				return nil, ctx.Err()
 			},
 			wantProcScans: 1,
-			procScanDelay: 60 * time.Millisecond,
 		},
 	}
 
@@ -388,16 +389,19 @@ func TestCleanupSandboxDirWithChecker_RetriesOnlyTransientLiveProcess(t *testing
 				t.Fatalf("MkdirAll(sandbox) error: %v", err)
 			}
 
+			retryDelay := tt.retryDelay
+			if retryDelay == 0 {
+				retryDelay = 10 * time.Millisecond
+			}
 			var procScans, mountScans, sleeps, removes int
 			currentTime := time.Unix(1_000, 0)
 			checker := &sandboxgc.Checker{
 				Base: base,
-				ListProcPaths: func() ([]sandboxgc.ProcPath, error) {
+				ListProcPaths: func(ctx context.Context) ([]sandboxgc.ProcPath, error) {
 					procScans++
-					currentTime = currentTime.Add(tt.procScanDelay)
-					return tt.listProcPaths(sandboxDir, procScans)
+					return tt.listProcPaths(ctx, sandboxDir, procScans)
 				},
-				ListMounts: func() ([]string, error) {
+				ListMounts: func(context.Context) ([]string, error) {
 					mountScans++
 					if tt.listMounts != nil {
 						return tt.listMounts(sandboxDir)
@@ -416,7 +420,7 @@ func TestCleanupSandboxDirWithChecker_RetriesOnlyTransientLiveProcess(t *testing
 				base,
 				checker,
 				tt.attempts,
-				10*time.Millisecond,
+				retryDelay,
 				func(delay time.Duration) {
 					sleeps++
 					currentTime = currentTime.Add(delay)
@@ -536,8 +540,8 @@ func TestArchiveSession_ReloadedSandboxOwnershipControlsCleanup(t *testing.T) {
 			var cleanupCalls int
 			checker := &sandboxgc.Checker{
 				Base:          base,
-				ListMounts:    func() ([]string, error) { return nil, nil },
-				ListProcPaths: func() ([]sandboxgc.ProcPath, error) { return nil, nil },
+				ListMounts:    func(context.Context) ([]string, error) { return nil, nil },
+				ListProcPaths: func(context.Context) ([]sandboxgc.ProcPath, error) { return nil, nil },
 				Unmount:       func(string) error { return nil },
 				Remove:        os.RemoveAll,
 			}

@@ -12,7 +12,7 @@
 
 **REPO-SCRIPT-05** When the GOBIN guard runs and the Go toolchain bin directory or its sentinel binary is absent, the system shall append an escalation record to the decision trail and exit non-zero.
 
-**REPO-SCRIPT-06** When full local preflight skips wall-clock performance assertions under race instrumentation, the system shall re-run every affected package without race instrumentation before publication succeeds.
+**REPO-SCRIPT-06** When full local preflight skips wall-clock performance assertions under race instrumentation, the system shall re-run every affected package with inherited Go test modes neutralized and explicit ordinary non-race, non-short settings before publication succeeds.
 
 ## BDD Traceability
 

@@ -63,7 +63,9 @@ go test ./test/bdd/...
    registers its own per-scenario `ctx.Before` for state — there is no shared
    test environment to wire.
 3. If you created a new feature file, register its step group in
-   `InitializeScenario` (`main_test.go`).
+   `RegisterScenarioDefinitions` (`main_test.go`); the suite initializer
+   installs that immutable definition set once and Godog copies it into each
+   scenario.
 4. Run `go test ./test/bdd/...`. An unimplemented step shows up as `undefined`
    and fails the build — that is the point.
 
