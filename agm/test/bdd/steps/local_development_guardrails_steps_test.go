@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"context"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -165,17 +166,17 @@ func TestSourceHasRaceSuppressedSLARecognizesMaintainedMarkers(t *testing.T) {
 	}{
 		{
 			name:   "skip enforced without race",
-			source: `if raceEnabled { t.Skip("wall-clock parser latency is enforced without race instrumentation") }`,
+			source: `if race` + `Enabled { t.Skip("wall-clock parser latency is enforced without race instrumentation") }`,
 			want:   true,
 		},
 		{
 			name:   "skip under race",
-			source: `if raceEnabled { t.Skip("perf P95 test skipped under race instrumentation") }`,
+			source: `if race` + `Enabled { t.Skip("perf P95 test skipped under race instrumentation") }`,
 			want:   true,
 		},
 		{
 			name:   "observe under race",
-			source: `if raceEnabled { t.Log("SLA enforcement remains in the ordinary test pass") }`,
+			source: `if race` + `Enabled { t.Log("SLA enforcement remains in the ordinary test pass") }`,
 			want:   true,
 		},
 		{
@@ -184,7 +185,7 @@ func TestSourceHasRaceSuppressedSLARecognizesMaintainedMarkers(t *testing.T) {
 		},
 		{
 			name:   "race guard without SLA marker",
-			source: `if raceEnabled { t.Skip("unrelated test") }`,
+			source: `if race` + `Enabled { t.Skip("unrelated test") }`,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -192,5 +193,24 @@ func TestSourceHasRaceSuppressedSLARecognizesMaintainedMarkers(t *testing.T) {
 				t.Fatalf("sourceHasRaceSuppressedSLA() = %t, want %t", got, test.want)
 			}
 		})
+	}
+}
+
+func TestFullPreflightDiscoversEveryRaceSuppressedSLAPackage(t *testing.T) {
+	state := &localDevGuardrailState{}
+	ctx := context.WithValue(context.Background(), localDevGuardrailStateKey{}, state)
+	if err := fullPreflightOrdinaryPerformanceGateIsConfigured(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	slices.Sort(state.raceSkippedSLAs)
+	want := []string{
+		"./agm/test/performance",
+		"./internal/telemetry/enrichment",
+		"./pkg/validation/scope",
+		"./pkg/workflow",
+	}
+	if !slices.Equal(state.raceSkippedSLAs, want) {
+		t.Fatalf("race-skipped SLA packages = %v, want %v", state.raceSkippedSLAs, want)
 	}
 }
