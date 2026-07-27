@@ -25,7 +25,7 @@ func TestSessionOutcome_MetadataRoundTrip(t *testing.T) {
 			}
 
 			var got manifest.Manifest
-			if err := unmarshalEngramMetadata(&got, b); err != nil {
+			if err := unmarshalSessionMetadata(&got, b); err != nil {
 				t.Fatalf("unmarshal metadata: %v", err)
 			}
 			if got.Outcome != want {
@@ -57,7 +57,7 @@ func TestSessionOutcome_ReadAlongsideEngram(t *testing.T) {
 	}
 
 	var got manifest.Manifest
-	if err := unmarshalEngramMetadata(&got, b); err != nil {
+	if err := unmarshalSessionMetadata(&got, b); err != nil {
 		t.Fatalf("unmarshal metadata: %v", err)
 	}
 	if got.Outcome != manifest.OutcomeGCStale {
@@ -81,7 +81,7 @@ func TestSessionMetadata_CodexRoundTrip(t *testing.T) {
 	}
 
 	var got manifest.Manifest
-	if err := unmarshalEngramMetadata(&got, b); err != nil {
+	if err := unmarshalSessionMetadata(&got, b); err != nil {
 		t.Fatalf("unmarshal metadata: %v", err)
 	}
 	if got.Codex == nil {
@@ -112,7 +112,7 @@ func TestSessionMetadata_OpenAIRoundTrip(t *testing.T) {
 	}
 
 	var got manifest.Manifest
-	if err := unmarshalEngramMetadata(&got, metadata); err != nil {
+	if err := unmarshalSessionMetadata(&got, metadata); err != nil {
 		t.Fatalf("unmarshal metadata: %v", err)
 	}
 	if got.OpenAI == nil || *got.OpenAI != *src.OpenAI {
@@ -135,7 +135,7 @@ func TestSessionMetadata_AgyRoundTrip(t *testing.T) {
 	}
 
 	var got manifest.Manifest
-	if err := unmarshalEngramMetadata(&got, b); err != nil {
+	if err := unmarshalSessionMetadata(&got, b); err != nil {
 		t.Fatalf("unmarshal metadata: %v", err)
 	}
 	if got.Agy == nil {
@@ -168,7 +168,7 @@ func TestSessionMetadata_PiRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := &manifest.Manifest{}
-	if err := unmarshalEngramMetadata(got, metadata); err != nil {
+	if err := unmarshalSessionMetadata(got, metadata); err != nil {
 		t.Fatal(err)
 	}
 	if got.Pi == nil || *got.Pi != *src.Pi {
@@ -185,7 +185,7 @@ func TestSessionMetadata_PiNativeDefaultPresenceRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := &manifest.Manifest{}
-	if err := unmarshalEngramMetadata(got, metadata); err != nil {
+	if err := unmarshalSessionMetadata(got, metadata); err != nil {
 		t.Fatal(err)
 	}
 	if got.Pi == nil || got.Pi.CodingAgentDir != "" || !got.Pi.CodingAgentDirSet {

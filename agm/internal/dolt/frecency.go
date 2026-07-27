@@ -215,7 +215,7 @@ func scanSessionFrecency(row scanner) (*manifest.Manifest, int, *time.Time, erro
 	if err := unmarshalContextTags(&m, contextTagsJSON); err != nil {
 		return nil, 0, nil, err
 	}
-	if err := unmarshalEngramMetadata(&m, metadataJSON); err != nil {
+	if err := unmarshalSessionMetadata(&m, metadataJSON); err != nil {
 		return nil, 0, nil, err
 	}
 
