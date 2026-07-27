@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cucumber/godog"
@@ -169,6 +170,26 @@ type harnessParityState struct {
 }
 
 type harnessParityStateKey struct{}
+
+type agyLifecycleBehaviorSuiteResult struct {
+	output       string
+	testErr      error
+	executionErr error
+}
+
+type agyLifecycleBehaviorSuiteCache struct {
+	once   sync.Once
+	result agyLifecycleBehaviorSuiteResult
+}
+
+func (c *agyLifecycleBehaviorSuiteCache) load(run func() agyLifecycleBehaviorSuiteResult) agyLifecycleBehaviorSuiteResult {
+	c.once.Do(func() {
+		c.result = run()
+	})
+	return c.result
+}
+
+var sharedAgyLifecycleBehaviorSuite agyLifecycleBehaviorSuiteCache
 
 type bddCreateSessionRuntime struct {
 	tmux *session.MockTmux
@@ -3778,6 +3799,15 @@ func runAgyLifecycleBehaviorSuite(ctx context.Context, harnessState *harnessPari
 	if harnessState.agyLifecycleTestOutput != "" || harnessState.agyLifecycleTestErr != nil {
 		return nil
 	}
+	result := sharedAgyLifecycleBehaviorSuite.load(func() agyLifecycleBehaviorSuiteResult {
+		return executeAgyLifecycleBehaviorSuite(ctx)
+	})
+	harnessState.agyLifecycleTestOutput = result.output
+	harnessState.agyLifecycleTestErr = result.testErr
+	return result.executionErr
+}
+
+func executeAgyLifecycleBehaviorSuite(ctx context.Context) agyLifecycleBehaviorSuiteResult {
 	testCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test",
@@ -3822,7 +3852,7 @@ func runAgyLifecycleBehaviorSuite(ctx context.Context, harnessState *harnessPari
 	)
 	lockCmd.Dir = bddRepoRoot()
 	lockOutput, lockErr := lockCmd.CombinedOutput()
-	harnessState.agyLifecycleTestOutput = string(output) + "\n" + string(transcriptOutput) + "\n" + string(resumeOnboardingOutput) + "\n" + string(sharedReadinessOutput) + "\n" + string(lockOutput)
+	combinedOutput := string(output) + "\n" + string(transcriptOutput) + "\n" + string(resumeOnboardingOutput) + "\n" + string(sharedReadinessOutput) + "\n" + string(lockOutput)
 	if runErr == nil {
 		runErr = transcriptErr
 	}
@@ -3835,11 +3865,17 @@ func runAgyLifecycleBehaviorSuite(ctx context.Context, harnessState *harnessPari
 	if runErr == nil {
 		runErr = lockErr
 	}
-	harnessState.agyLifecycleTestErr = runErr
 	if testCtx.Err() != nil {
-		return fmt.Errorf("AGY lifecycle behavior suite timed out: %w", testCtx.Err())
+		return agyLifecycleBehaviorSuiteResult{
+			output:       combinedOutput,
+			testErr:      runErr,
+			executionErr: fmt.Errorf("AGY lifecycle behavior suite timed out: %w", testCtx.Err()),
+		}
 	}
-	return nil
+	return agyLifecycleBehaviorSuiteResult{
+		output:  combinedOutput,
+		testErr: runErr,
+	}
 }
 
 func agmValidatesTheAgyAdapterLifecycle(ctx context.Context) error {
