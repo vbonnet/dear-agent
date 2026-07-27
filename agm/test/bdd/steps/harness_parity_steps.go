@@ -171,25 +171,30 @@ type harnessParityState struct {
 
 type harnessParityStateKey struct{}
 
-type agyLifecycleBehaviorSuiteResult struct {
+type bddBehaviorSuiteResult struct {
 	output       string
 	testErr      error
 	executionErr error
 }
 
-type agyLifecycleBehaviorSuiteCache struct {
+type bddBehaviorSuiteCache struct {
 	once   sync.Once
-	result agyLifecycleBehaviorSuiteResult
+	result bddBehaviorSuiteResult
 }
 
-func (c *agyLifecycleBehaviorSuiteCache) load(run func() agyLifecycleBehaviorSuiteResult) agyLifecycleBehaviorSuiteResult {
+func (c *bddBehaviorSuiteCache) load(run func() bddBehaviorSuiteResult) bddBehaviorSuiteResult {
 	c.once.Do(func() {
 		c.result = run()
 	})
 	return c.result
 }
 
-var sharedAgyLifecycleBehaviorSuite agyLifecycleBehaviorSuiteCache
+var (
+	sharedAgyLifecycleBehaviorSuite    bddBehaviorSuiteCache
+	sharedCodexHookReviewBehaviorSuite bddBehaviorSuiteCache
+)
+
+const codexHookReviewBehaviorSuiteTimeout = 2 * time.Minute
 
 type bddCreateSessionRuntime struct {
 	tmux *session.MockTmux
@@ -3799,7 +3804,7 @@ func runAgyLifecycleBehaviorSuite(ctx context.Context, harnessState *harnessPari
 	if harnessState.agyLifecycleTestOutput != "" || harnessState.agyLifecycleTestErr != nil {
 		return nil
 	}
-	result := sharedAgyLifecycleBehaviorSuite.load(func() agyLifecycleBehaviorSuiteResult {
+	result := sharedAgyLifecycleBehaviorSuite.load(func() bddBehaviorSuiteResult {
 		return executeAgyLifecycleBehaviorSuite(ctx)
 	})
 	harnessState.agyLifecycleTestOutput = result.output
@@ -3807,7 +3812,7 @@ func runAgyLifecycleBehaviorSuite(ctx context.Context, harnessState *harnessPari
 	return result.executionErr
 }
 
-func executeAgyLifecycleBehaviorSuite(ctx context.Context) agyLifecycleBehaviorSuiteResult {
+func executeAgyLifecycleBehaviorSuite(ctx context.Context) bddBehaviorSuiteResult {
 	testCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test",
@@ -3866,13 +3871,13 @@ func executeAgyLifecycleBehaviorSuite(ctx context.Context) agyLifecycleBehaviorS
 		runErr = lockErr
 	}
 	if testCtx.Err() != nil {
-		return agyLifecycleBehaviorSuiteResult{
+		return bddBehaviorSuiteResult{
 			output:       combinedOutput,
 			testErr:      runErr,
 			executionErr: fmt.Errorf("AGY lifecycle behavior suite timed out: %w", testCtx.Err()),
 		}
 	}
-	return agyLifecycleBehaviorSuiteResult{
+	return bddBehaviorSuiteResult{
 		output:  combinedOutput,
 		testErr: runErr,
 	}
@@ -4255,23 +4260,13 @@ func codexHookReviewShouldReceiveNoAutomatedInput(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if harnessState.codexHookReviewTestOutput == "" && harnessState.codexHookReviewTestErr == nil {
-		testCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-		cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/tmux", "./agm/internal/session", "./agm/internal/ops", "./agm/cmd/agm",
-			"-run", `^(TestWaitForCodexPromptFailsFastForHookReviewWithoutInput|TestWaitForCodexPromptFailsFastForHookDashboardWithoutInput|TestHandleHarnessStartupStateFailsHookReviewWithoutAdvancing|TestRealTmuxReadinessFailsFastForCodexHookReviewAboveBlankRows|TestCreateSession_CodexHookReviewPropagatesBeforeRegistrationOrPrompt|TestResumeSessionCodexHookReviewFailsBeforeActivityUpdate)$`,
-			"-count=1", "-v",
-		)
-		cmd.Dir = bddRepoRoot()
-		if os.Getenv("CI_SKIP_TMUX") != "true" {
-			cmd.Env = append(os.Environ(), "AGM_TEST_TMUX=1")
-		}
-		output, runErr := cmd.CombinedOutput()
-		harnessState.codexHookReviewTestOutput = string(output)
-		harnessState.codexHookReviewTestErr = runErr
-		if testCtx.Err() != nil {
-			return fmt.Errorf("codex hook review behavior suite timed out: %w", testCtx.Err())
-		}
+	result := sharedCodexHookReviewBehaviorSuite.load(func() bddBehaviorSuiteResult {
+		return executeCodexHookReviewBehaviorSuite(ctx)
+	})
+	harnessState.codexHookReviewTestOutput = result.output
+	harnessState.codexHookReviewTestErr = result.testErr
+	if result.executionErr != nil {
+		return result.executionErr
 	}
 	if harnessState.codexHookReviewTestErr != nil {
 		return fmt.Errorf("codex hook review behavior suite failed: %w\n%s", harnessState.codexHookReviewTestErr, harnessState.codexHookReviewTestOutput)
@@ -4295,6 +4290,28 @@ func codexHookReviewShouldReceiveNoAutomatedInput(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func executeCodexHookReviewBehaviorSuite(ctx context.Context) bddBehaviorSuiteResult {
+	testCtx, cancel := context.WithTimeout(ctx, codexHookReviewBehaviorSuiteTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/tmux", "./agm/internal/session", "./agm/internal/ops", "./agm/cmd/agm",
+		"-run", `^(TestWaitForCodexPromptFailsFastForHookReviewWithoutInput|TestWaitForCodexPromptFailsFastForHookDashboardWithoutInput|TestHandleHarnessStartupStateFailsHookReviewWithoutAdvancing|TestRealTmuxReadinessFailsFastForCodexHookReviewAboveBlankRows|TestCreateSession_CodexHookReviewPropagatesBeforeRegistrationOrPrompt|TestResumeSessionCodexPropagatesHookReviewBeforeActivityUpdate)$`,
+		"-count=1", "-v",
+	)
+	cmd.Dir = bddRepoRoot()
+	if os.Getenv("CI_SKIP_TMUX") != "true" {
+		cmd.Env = append(os.Environ(), "AGM_TEST_TMUX=1")
+	}
+	output, runErr := cmd.CombinedOutput()
+	result := bddBehaviorSuiteResult{
+		output:  string(output),
+		testErr: runErr,
+	}
+	if testCtx.Err() != nil {
+		result.executionErr = fmt.Errorf("codex hook review behavior suite timed out: %w", testCtx.Err())
+	}
+	return result
 }
 
 func agmShouldAutoAcceptAGYTrustPromptBeforePromptDelivery(ctx context.Context) error {
