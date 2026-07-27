@@ -1,6 +1,9 @@
 # SPEC: .github/workflows/SPEC.md
 # RELATED-SPEC: agm/test/coverage/SPEC.md
 # RELATED-SPEC: .agents/skills/beads/agents/SPEC.md
+# RELATED-SPEC: .agents/skills/research-pipeline/agents/SPEC.md
+# RELATED-SPEC: research-pipeline/.claude-plugin/SPEC.md
+# RELATED-SPEC: research-pipeline/skills/research-pipeline/SPEC.md
 # RELATED-SPEC: .github/SPEC.md
 # RELATED-SPEC: .github/act/SPEC.md
 # RELATED-SPEC: .github/rulesets/SPEC.md
