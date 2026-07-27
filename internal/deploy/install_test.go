@@ -182,6 +182,32 @@ func TestRunGitCheckout_UsesCloneFallbackDeadline(t *testing.T) {
 	}
 }
 
+func TestGoBuild_UsesColdBuildDeadline(t *testing.T) {
+	if buildTimeout != 10*time.Minute {
+		t.Fatalf("buildTimeout = %s; want 10m", buildTimeout)
+	}
+
+	orig := goBuildCommand
+	goBuildCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("build context must have a deadline")
+		}
+		if remaining := time.Until(deadline); remaining < buildTimeout-time.Second {
+			t.Fatalf("build deadline leaves %s; want approximately %s", remaining, buildTimeout)
+		}
+		if name != "go" || strings.Join(args, " ") != "build -buildvcs=true -o /tmp/agm ./agm/cmd/agm" {
+			t.Fatalf("build command = %q %q", name, args)
+		}
+		return exec.CommandContext(ctx, "true")
+	}
+	t.Cleanup(func() { goBuildCommand = orig })
+
+	if err := goBuild(t.TempDir(), "./agm/cmd/agm", "/tmp/agm"); err != nil {
+		t.Fatalf("goBuild: %v", err)
+	}
+}
+
 func TestAtomicInstall_FailsLoudOnBadSourceRef(t *testing.T) {
 	repo, _, _ := gitRepo(t)
 	stubBuild(t, "fresh", nil)
