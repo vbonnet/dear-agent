@@ -43,10 +43,16 @@ func TestReconcileLifecycleMismatchSerializesWithArchiveCleanup(t *testing.T) {
 		}()
 		select {
 		case early := <-reconcileDone:
+			if early.err != nil {
+				return fmt.Errorf(
+					"reconcile crossed archive cleanup lock: changed=%t: %w",
+					early.changed,
+					early.err,
+				)
+			}
 			return fmt.Errorf(
-				"reconcile crossed archive cleanup lock: changed=%t err=%v",
+				"reconcile crossed archive cleanup lock: changed=%t",
 				early.changed,
-				early.err,
 			)
 		case <-time.After(100 * time.Millisecond):
 		}

@@ -202,24 +202,26 @@ func applyReconcileFixes(adapter reconcileLifecycleStorage, mismatches []mismatc
 		case "zombie":
 			fmt.Printf("Fixing zombie: unarchiving %s in Dolt...", mm.DoltName)
 			changed, err := reconcileLifecycleMismatch(adapter, mm)
-			if err != nil {
+			switch {
+			case err != nil:
 				fmt.Printf(" FAILED: %v\n", err)
 				failed++
-			} else if !changed {
+			case !changed:
 				fmt.Printf(" SKIPPED: mismatch changed\n")
-			} else {
+			default:
 				fmt.Printf(" OK\n")
 				fixed++
 			}
 		case "orphan":
 			fmt.Printf("Fixing orphan: archiving %s in Dolt...", mm.DoltName)
 			changed, err := reconcileLifecycleMismatch(adapter, mm)
-			if err != nil {
+			switch {
+			case err != nil:
 				fmt.Printf(" FAILED: %v\n", err)
 				failed++
-			} else if !changed {
+			case !changed:
 				fmt.Printf(" SKIPPED: mismatch changed\n")
-			} else {
+			default:
 				fmt.Printf(" OK\n")
 				fixed++
 			}
