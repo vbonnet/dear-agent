@@ -281,6 +281,7 @@ jobs:
       # context is both trusted and satisfiable — a prerequisite for it being
       # usable as a required check again once the gate is un-paused.
       - name: Publish check on reviewed head
+        id: publish
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -309,11 +310,43 @@ jobs:
             conclusion=neutral
             summary='Paused: ANTHROPIC_API_KEY is not configured (cost/quota decision, 2026-07-27). Re-enable by setting the secret, or run a single PR under human authority with the ai-review:override label.'
           fi
+          echo "conclusion=$conclusion" >> "$GITHUB_OUTPUT"
           gh api --method PATCH "repos/$REPO/check-runs/${{ steps.pending.outputs.check_id }}" \
             -f status=completed \
             -f conclusion="$conclusion" \
             -f output[title]='5-Dimension AI Review' \
             -f output[summary]="$summary"
+
+      # An earlier revision may have left a sticky review comment — including a
+      # "passed by human override" one, since applying the label makes the gate
+      # run even with no key. Pushing a new revision clears that label and (with
+      # no key) skips the gate entirely, so cmd/ai-review never runs to upsert
+      # the record. Without this step the PR would show a neutral check next to
+      # a stale comment still claiming a human override passed it. Retire the
+      # marked comment here so the PR-facing audit trail matches the check.
+      # Best-effort by design: the check conclusion already carries the verdict,
+      # so a comment outage must not turn a paused revision into a red job.
+      - name: Replace stale sticky comment when paused
+        if: always() && steps.publish.outputs.conclusion == 'neutral' && github.event.pull_request.number
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' '<!-- ai-review-5d -->' \
+            '## ⏸️ AI Code Review — paused (no automated review ran)' '' \
+            "> \`ANTHROPIC_API_KEY\` is not configured, so no automated review ran for \`$HEAD_SHA\`." '' \
+            'Any earlier review result or `ai-review:override` on this PR applied to an earlier revision and does **not** carry to this one.' '' \
+            '<sub>Review gate per REVIEW.md §2/§5.</sub>' > /tmp/ai-review-paused.md
+          gh pr comment "$PR" --repo "$REPO" --body-file /tmp/ai-review-paused.md \
+            || echo "::warning::could not post the paused review comment; the neutral check still carries the verdict."
+          # Prune older marked comments, keeping the one just posted. Cosmetic.
+          ( gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" \
+              --jq '.[] | select(.body | startswith("<!-- ai-review-5d -->")) | .id' \
+            | head -n -1 \
+            | while read -r id; do gh api -X DELETE "repos/$REPO/issues/comments/$id" >/dev/null || true; done ) || true
 
       - name: Fail if review gate failed
         if: steps.gate.outcome == 'failure'
