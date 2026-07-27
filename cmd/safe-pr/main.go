@@ -238,7 +238,7 @@ func validateRemoteURL(dir string) error {
 
 // preflightTimeout bounds `make preflight-full` while covering the repository's
 // cold race suite, long-running SQLite package, and vulnerability scan.
-const preflightTimeout = 30 * time.Minute
+const preflightTimeout = 45 * time.Minute
 
 // runPreflightFull runs `make -C dir preflight-full` and returns a clear error
 // on failure. The protected child is a guard runner rather than make itself:
