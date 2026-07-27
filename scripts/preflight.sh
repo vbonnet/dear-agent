@@ -132,11 +132,14 @@ if [[ "$MODE" == "tests" || "$MODE" == "race" || "$MODE" == "full" ]]; then
 fi
 
 if [[ "$MODE" == "full" ]]; then
-  step "go test ./agm/test/performance (ordinary SLA enforcement)"
+  step "go test ordinary performance SLA packages"
   # The broad full suite intentionally uses -race for data-race parity. Race
-  # instrumentation distorts wall-clock latency, so run the dedicated
-  # performance package once without it as a required publication gate.
-  CI= go test -count=1 -timeout="${TEST_TIMEOUT}" ./agm/test/performance ||
+  # instrumentation distorts wall-clock latency, so re-run every package that
+  # skips a wall-clock SLA under race as a required ordinary publication gate.
+  CI= go test -count=1 -timeout="${TEST_TIMEOUT}" \
+    ./agm/test/performance \
+    ./internal/telemetry/enrichment \
+    ./pkg/validation/scope ||
     fail "ordinary performance SLA tests failed"
   ok "ordinary performance SLAs pass"
 

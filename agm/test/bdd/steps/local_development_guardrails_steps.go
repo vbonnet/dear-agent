@@ -35,6 +35,11 @@ type localDevGuardrailState struct {
 	localTestTimeout       string
 	affectedTestTimeout    string
 	ciTestTimeout          string
+	affectedPackageMins    int
+	affectedListMins       int
+	affectedStartupMins    int
+	affectedCommandMins    int
+	affectedJobMins        int
 	localVulnAllowlist     []string
 	ciVulnAllowlist        []string
 	worktreeBase           string
@@ -65,6 +70,8 @@ type localDevGuardrailState struct {
 	requiredCIError        error
 	mergeLoopCIRegression  string
 	mergeLoopCIError       error
+	raceSkippedSLAs        []string
+	ordinarySLAPackages    []string
 }
 
 type localDevGuardrailStateKey struct{}
@@ -101,6 +108,9 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the safe-pr full preflight timeout is configured$`, safePRFullPreflightTimeoutIsConfigured)
 	ctx.Step(`^AGM validates the safe-pr preflight budget$`, agmValidatesSafePRPreflightBudget)
 	ctx.Step(`^safe-pr should allow at least (\d+) minutes for preflight-full$`, safePRShouldAllowAtLeastMinutesForPreflightFull)
+	ctx.Step(`^the full preflight ordinary performance gate is configured$`, fullPreflightOrdinaryPerformanceGateIsConfigured)
+	ctx.Step(`^AGM validates race-skipped wall-clock SLA coverage$`, agmValidatesRaceSkippedWallClockSLACoverage)
+	ctx.Step(`^every race-skipped SLA package should run without race instrumentation$`, everyRaceSkippedSLAPackageShouldRunWithoutRaceInstrumentation)
 	ctx.Step(`^a safe-pr linked worktree with "([^"]*)" lock ownership$`, safePRLinkedWorktreeWithLockOwnership)
 	ctx.Step(`^safe-pr protects a "([^"]*)" preflight and PR creation transaction$`, safePRProtectsTransaction)
 	ctx.Step(`^the worktree should be protected during preflight and PR creation$`, worktreeShouldBeProtectedDuringTransaction)
@@ -796,6 +806,96 @@ func safePRShouldAllowAtLeastMinutesForPreflightFull(ctx context.Context, minimu
 	}
 	if state.preflightMinutes < minimum {
 		return fmt.Errorf("safe-pr preflight timeout = %dm, want at least %dm", state.preflightMinutes, minimum)
+	}
+	return nil
+}
+
+func fullPreflightOrdinaryPerformanceGateIsConfigured(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	root := localDevBDDRepoRoot()
+	preflight, err := os.ReadFile(filepath.Join(root, "scripts", "preflight.sh"))
+	if err != nil {
+		return fmt.Errorf("read local preflight: %w", err)
+	}
+	if !strings.Contains(string(preflight), "ordinary performance SLA packages") {
+		return fmt.Errorf("ordinary performance SLA publication gate is not configured")
+	}
+	rootFS, err := os.OpenRoot(root)
+	if err != nil {
+		return fmt.Errorf("open repository root: %w", err)
+	}
+	defer func() {
+		_ = rootFS.Close()
+	}()
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if entry.Name() == ".git" || entry.Name() == "node_modules" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(entry.Name(), "_test.go") {
+			return nil
+		}
+		relativeFile, relativeErr := filepath.Rel(root, path)
+		if relativeErr != nil {
+			return relativeErr
+		}
+		source, readErr := rootFS.ReadFile(relativeFile)
+		if readErr != nil {
+			return readErr
+		}
+		if !strings.Contains(string(source), `t.Skip("wall-clock`) {
+			return nil
+		}
+		relativeDir, relativeErr := filepath.Rel(root, filepath.Dir(path))
+		if relativeErr != nil {
+			return relativeErr
+		}
+		state.raceSkippedSLAs = append(state.raceSkippedSLAs, "./"+filepath.ToSlash(relativeDir))
+		return nil
+	})
+}
+
+func agmValidatesRaceSkippedWallClockSLACoverage(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if len(state.raceSkippedSLAs) == 0 {
+		return fmt.Errorf("no race-skipped wall-clock SLA packages discovered")
+	}
+	preflight, err := os.ReadFile(filepath.Join(localDevBDDRepoRoot(), "scripts", "preflight.sh"))
+	if err != nil {
+		return fmt.Errorf("read local preflight: %w", err)
+	}
+	for _, packagePath := range state.raceSkippedSLAs {
+		if strings.Contains(string(preflight), packagePath) {
+			state.ordinarySLAPackages = append(state.ordinarySLAPackages, packagePath)
+		}
+	}
+	return nil
+}
+
+func everyRaceSkippedSLAPackageShouldRunWithoutRaceInstrumentation(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	missing := make([]string, 0)
+	for _, packagePath := range state.raceSkippedSLAs {
+		if !slices.Contains(state.ordinarySLAPackages, packagePath) {
+			missing = append(missing, packagePath)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("ordinary performance SLA gate omits race-skipped packages: %s", strings.Join(missing, ", "))
 	}
 	return nil
 }

@@ -90,6 +90,11 @@ Feature: Local development guardrails
     When AGM validates the safe-pr preflight budget
     Then safe-pr should allow at least 60 minutes for preflight-full
 
+  Scenario: Full preflight enforces every race-skipped wall-clock SLA
+    Given the full preflight ordinary performance gate is configured
+    When AGM validates race-skipped wall-clock SLA coverage
+    Then every race-skipped SLA package should run without race instrumentation
+
   Scenario Outline: Safe PR creation preserves worktree lock ownership
     Given a safe-pr linked worktree with "<initial_lock>" lock ownership
     When safe-pr protects a "<outcome>" preflight and PR creation transaction
