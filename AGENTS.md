@@ -52,6 +52,15 @@ current code, and repair or quarantine the stale living document in scope.
 - Correctness, privacy, and security outrank speed or cost.
 - Go is the default for code we own. Rust or TypeScript require an explicit
   ecosystem justification; do not add Python.
+- Agent-authored code inverts the human-ease tax: Python, prose docs, and
+  simple choices were concessions to human convenience. When agents write
+  and maintain the code, typed languages, living docs, and complex policy
+  languages (e.g. Rego/OPA) become *more* viable, not less — but only gated
+  on (a) deterministic Enforcement and (b) a deterministic Definition of
+  Done (see [`definition-of-done.ai.md`](docs/policies/definition-of-done.ai.md)).
+  Without both gates, the tax is just paid by whoever debugs it later.
+  (Context: bead 0d1b3ed0, the Rego re-evaluation, and 435fc71b /
+  decision-enforcement.)
 - Prefer deep modules and typed commands over long prompts, shell pipelines,
   or duplicated flag catalogs.
 - Use deterministic, positive enforcement: state what was attempted, the safe
