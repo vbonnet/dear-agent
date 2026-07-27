@@ -105,8 +105,11 @@ type harnessParityState struct {
 	harnessHealth              agent.HarnessHealth
 	runtimeHelperCommand       string
 	runtimeHelperSpec          string
-	backendImplementation      string
-	backendImplementationSpec  string
+	runtimeMainSource          string
+	runtimeOpsSource           string
+	runtimeSendSource          string
+	runtimeTmuxSource          string
+	runtimeExecSource          string
 	cleanupSupportPackage      string
 	cleanupSupportSpec         string
 	archiveCleanupTestOutput   string
@@ -263,9 +266,12 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM runtime helper command "([^"]*)" is configured$`, agmRuntimeHelperCommandIsConfigured)
 	ctx.Step(`^AGM validates runtime helper command coverage$`, agmValidatesRuntimeHelperCommandCoverage)
 	ctx.Step(`^runtime helper command "([^"]*)" should have a co-located SPEC$`, runtimeHelperCommandShouldHaveCoLocatedSPEC)
-	ctx.Step(`^AGM backend implementation "([^"]*)" is configured$`, agmBackendImplementationIsConfigured)
-	ctx.Step(`^AGM validates backend implementation coverage$`, agmValidatesBackendImplementationCoverage)
-	ctx.Step(`^backend implementation "([^"]*)" should have a co-located SPEC$`, backendImplementationShouldHaveCoLocatedSPEC)
+	ctx.Step(`^AGM production local runtime sources$`, agmProductionLocalRuntimeSources)
+	ctx.Step(`^AGM validates single runtime ownership$`, agmValidatesSingleRuntimeOwnership)
+	ctx.Step(`^production should inject one direct session tmux runtime$`, productionShouldInjectOneDirectSessionTmuxRuntime)
+	ctx.Step(`^shared operations should expose no parallel manager runtime$`, sharedOperationsShouldExposeNoParallelManagerRuntime)
+	ctx.Step(`^the direct tmux runtime should prove its safety capabilities$`, directTmuxRuntimeShouldProveSafetyCapabilities)
+	ctx.Step(`^retired generalized runtimes and selection setting should be absent$`, retiredGeneralizedRuntimesAndSelectionSettingShouldBeAbsent)
 	ctx.Step(`^AGM cleanup support package "([^"]*)" is configured$`, agmCleanupSupportPackageIsConfigured)
 	ctx.Step(`^AGM validates cleanup support package coverage$`, agmValidatesCleanupSupportPackageCoverage)
 	ctx.Step(`^cleanup support package "([^"]*)" should have a co-located SPEC$`, cleanupSupportPackageShouldHaveCoLocatedSPEC)
@@ -1175,7 +1181,7 @@ func sharedInputReadinessShouldRejectStaleClaudeComposerAndUnrelatedNodeProcess(
 		"TestExpectedHarnessMatcherAcceptsIdentifiedNodeBackedHarness",
 		"TestExpectedHarnessMatcherRequiresForegroundTerminalOwnership",
 		"TestParsePSForegroundTable",
-		"TestSendMessage_AtomicReadinessAndDeliveryPrecedesGenericManagerCheck",
+		"TestSendMessage_AtomicReadinessAndDeliveryIsTheLocalRuntimePath",
 		"TestSendMessage_AcceptsPostRecoveryReadyState",
 		"TestSendMessage_PiPermissionPromptBlocksAtomicDelivery",
 		"TestMCPCreateSessionRuntimeRevalidatesStartupPromptAtomically",
@@ -2073,41 +2079,139 @@ func runtimeHelperCommandShouldHaveCoLocatedSPEC(ctx context.Context, command st
 	return nil
 }
 
-func agmBackendImplementationIsConfigured(ctx context.Context, backend string) error {
+func agmProductionLocalRuntimeSources(ctx context.Context) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
 		return err
 	}
-	harnessState.backendImplementation = backend
-	harnessState.backendImplementationSpec = filepath.Join(bddRepoRoot(), "agm", "internal", filepath.FromSlash(backend), "SPEC.md")
+	sources := []struct {
+		path string
+		dst  *string
+	}{
+		{path: filepath.Join("agm", "cmd", "agm", "main.go"), dst: &harnessState.runtimeMainSource},
+		{path: filepath.Join("agm", "internal", "ops", "ops.go"), dst: &harnessState.runtimeOpsSource},
+		{path: filepath.Join("agm", "internal", "ops", "session_send.go"), dst: &harnessState.runtimeSendSource},
+		{path: filepath.Join("agm", "internal", "session", "tmux_real.go"), dst: &harnessState.runtimeTmuxSource},
+		{path: filepath.Join("agm", "internal", "harnessexec", "exec.go"), dst: &harnessState.runtimeExecSource},
+	}
+	for _, source := range sources {
+		data, readErr := os.ReadFile(filepath.Join(bddRepoRoot(), source.path))
+		if readErr != nil {
+			return fmt.Errorf("read runtime ownership source %s: %w", source.path, readErr)
+		}
+		*source.dst = string(data)
+	}
 	return nil
 }
 
-func agmValidatesBackendImplementationCoverage(ctx context.Context) error {
+func agmValidatesSingleRuntimeOwnership(ctx context.Context) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
 		return err
 	}
-	if harnessState.backendImplementationSpec == "" {
-		return fmt.Errorf("no AGM backend implementation configured")
-	}
-	if _, err := os.Stat(harnessState.backendImplementationSpec); err != nil {
-		return fmt.Errorf("backend implementation SPEC %s: %w", harnessState.backendImplementationSpec, err)
+	if harnessState.runtimeMainSource == "" ||
+		harnessState.runtimeOpsSource == "" ||
+		harnessState.runtimeSendSource == "" ||
+		harnessState.runtimeTmuxSource == "" ||
+		harnessState.runtimeExecSource == "" {
+		return fmt.Errorf("runtime ownership sources were not loaded")
 	}
 	return nil
 }
 
-func backendImplementationShouldHaveCoLocatedSPEC(ctx context.Context, backend string) error {
+func productionShouldInjectOneDirectSessionTmuxRuntime(ctx context.Context) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
 		return err
 	}
-	if backend != harnessState.backendImplementation {
-		return fmt.Errorf("configured backend implementation = %q, want %q", harnessState.backendImplementation, backend)
+	const construction = "ExecuteWithDeps(session.NewRealTmux())"
+	if count := strings.Count(harnessState.runtimeMainSource, construction); count != 1 {
+		return fmt.Errorf("direct production tmux constructions = %d, want 1", count)
 	}
-	wantSuffix := filepath.Join("agm", "internal", filepath.FromSlash(backend), "SPEC.md")
-	if !strings.HasSuffix(harnessState.backendImplementationSpec, wantSuffix) {
-		return fmt.Errorf("backend implementation SPEC = %q, want suffix %q", harnessState.backendImplementationSpec, wantSuffix)
+	for _, retired := range []string{
+		"internal/backend",
+		"internal/manager",
+		"managerBackend",
+		"GetDefaultBackendAdapter",
+		"manager.GetDefault",
+	} {
+		if strings.Contains(harnessState.runtimeMainSource, retired) {
+			return fmt.Errorf("production composition still references retired runtime %q", retired)
+		}
+	}
+	return nil
+}
+
+func sharedOperationsShouldExposeNoParallelManagerRuntime(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	for sourceName, source := range map[string]string{
+		"OpContext":   harnessState.runtimeOpsSource,
+		"SendMessage": harnessState.runtimeSendSource,
+	} {
+		for _, retired := range []string{"manager.Backend", "ctx.Manager", "internal/manager"} {
+			if strings.Contains(source, retired) {
+				return fmt.Errorf("%s still references parallel manager runtime %q", sourceName, retired)
+			}
+		}
+	}
+	if !strings.Contains(harnessState.runtimeSendSource, "SendKeysIfInputReady") {
+		return fmt.Errorf("shared local send no longer uses atomic tmux delivery")
+	}
+	return nil
+}
+
+func directTmuxRuntimeShouldProveSafetyCapabilities(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	for _, capability := range []string{
+		"TmuxInterface",
+		"TmuxSessionKiller",
+		"StrictSessionExistenceChecker",
+		"HarnessLivenessChecker",
+		"HarnessLivenessBatchChecker",
+		"HarnessReadinessWaiter",
+		"InputReadinessChecker",
+		"AtomicInputSender",
+		"VerifiedPaneSender",
+	} {
+		assertion := fmt.Sprintf("_ %s", capability)
+		if !strings.Contains(harnessState.runtimeTmuxSource, assertion) {
+			return fmt.Errorf("RealTmux is missing compile-time capability proof %s", capability)
+		}
+	}
+	return nil
+}
+
+func retiredGeneralizedRuntimesAndSelectionSettingShouldBeAbsent(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	for _, dir := range []string{
+		filepath.Join(bddRepoRoot(), "agm", "internal", "backend"),
+		filepath.Join(bddRepoRoot(), "agm", "internal", "manager"),
+	} {
+		if _, statErr := os.Stat(dir); !os.IsNotExist(statErr) {
+			if statErr != nil {
+				return fmt.Errorf("stat retired runtime directory %s: %w", dir, statErr)
+			}
+			return fmt.Errorf("retired runtime directory still exists: %s", dir)
+		}
+	}
+	for sourceName, source := range map[string]string{
+		"main":        harnessState.runtimeMainSource,
+		"OpContext":   harnessState.runtimeOpsSource,
+		"SendMessage": harnessState.runtimeSendSource,
+		"harnessexec": harnessState.runtimeExecSource,
+	} {
+		if strings.Contains(source, "AGM_SESSION_BACKEND") {
+			return fmt.Errorf("%s still references retired AGM_SESSION_BACKEND", sourceName)
+		}
 	}
 	return nil
 }

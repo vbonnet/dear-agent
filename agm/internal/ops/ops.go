@@ -12,7 +12,6 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
-	"github.com/vbonnet/dear-agent/agm/internal/manager"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
@@ -24,7 +23,6 @@ type OpContext struct {
 	Context    context.Context
 	Storage    dolt.Storage
 	Tmux       session.TmuxInterface
-	Manager    manager.Backend // New abstraction layer (optional, nil = legacy path)
 	Config     *config.Config
 	DryRun     bool
 	Fields     []string // field mask: if non-empty, only include these fields in output

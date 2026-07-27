@@ -59,7 +59,7 @@ Behavior:
   • Parent session must exist and be valid
   • Child session inherits harness type from parent (unless --harness specified)
   • Child session's parent_session_id field references the parent
-  • Uses tmux backend`,
+  • Uses the local tmux runtime`,
 	RunE: runCreateChild,
 }
 

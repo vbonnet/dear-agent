@@ -254,7 +254,7 @@ User → Completion verified (no pending work)
 | Extension | How |
 |-----------|-----|
 | New AI harness | Add a concrete adapter plus metadata and finite-catalog entries in `agm/internal/agent/` |
-| New backend | Implement the `Backend` interface in `agm/internal/backend/` |
+| New local runtime | Start with a production caller and define its smallest consumer-owned seam; see AGM ADR-032 |
 | New sandbox provider | Implement the `Provider` interface in `internal/sandbox/` |
 | New storage backend | Implement the storage interface in `agm/internal/dolt/` |
 | New workflow | Add workflow definition in `agm/internal/workflow/` |

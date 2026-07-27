@@ -152,20 +152,14 @@ AGM: {
     }
   }
 
-  # Layer 5: Backend Abstraction
-  BackendAdapter: {
-    label: "Backend Adapter"
+  # Layer 5: Local Runtime Boundary
+  LocalRuntime: {
+    label: "Local Runtime"
     style.fill: "#438dd5"
     style.stroke: "#2e5f8f"
 
-    TmuxBackend: {
-      label: "Tmux Backend\n[Component: Backend Interface]\n\nSession management,\npane control, key sending"
-      shape: rectangle
-      style.fill: "#85bbf0"
-    }
-
-    TemporalBackend: {
-      label: "Temporal Backend\n[Component: Backend Interface]\n\nWorkflow orchestration,\ndurable execution (future)"
+    SessionTmuxRuntime: {
+      label: "Session Tmux Runtime\n[Component: session.RealTmux]\n\nStrict existence, liveness,\nreadiness, exact-pane control"
       shape: rectangle
       style.fill: "#85bbf0"
     }
@@ -286,13 +280,12 @@ AGM.CoordinationLayer.CoordinationDaemon -> AGM.CoordinationLayer.MessageQueue: 
 AGM.CoordinationLayer.CoordinationDaemon -> AGM.CoordinationLayer.StateMonitor: "Detects session state"
 AGM.CoordinationLayer.CoordinationDaemon -> AGM.CoordinationLayer.ManifestStore: "Updates state metadata"
 
-AGM.CoordinationLayer.StateMonitor -> AGM.BackendAdapter.TmuxBackend: "Monitors tmux panes"
+AGM.CoordinationLayer.StateMonitor -> AGM.LocalRuntime.SessionTmuxRuntime: "Monitors tmux panes"
 AGM.CoordinationLayer.StateMonitor -> AGM.AdapterRegistry.OpenCodeAdapter: "Receives SSE events"
 
-# Backend Layer
-AGM.BusinessLogic.SessionManager -> AGM.BackendAdapter.TmuxBackend: "Creates/attaches sessions"
-AGM.BackendAdapter.TmuxBackend -> TmuxServer: "Controls sessions\n[tmux commands]"
-AGM.BackendAdapter.TemporalBackend -> AGM.BackendAdapter.TmuxBackend: "Future: orchestration fallback"
+# Local Runtime Layer
+AGM.BusinessLogic.SessionManager -> AGM.LocalRuntime.SessionTmuxRuntime: "Creates/attaches sessions"
+AGM.LocalRuntime.SessionTmuxRuntime -> TmuxServer: "Controls sessions\n[tmux commands]"
 
 # Storage
 AGM.CoordinationLayer.ManifestStore -> FileSystem: "Reads/writes YAML\n[Atomic operations]"

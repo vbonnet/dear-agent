@@ -28,11 +28,6 @@
 # RELATED-SPEC: agm/internal/eventbus/SPEC.md
 # RELATED-SPEC: agm/internal/interrupt/SPEC.md
 # RELATED-SPEC: agm/internal/lifecycle/SPEC.md
-# RELATED-SPEC: agm/internal/backend/SPEC.md
-# RELATED-SPEC: agm/internal/backend/restbackend/SPEC.md
-# RELATED-SPEC: agm/internal/manager/SPEC.md
-# RELATED-SPEC: agm/internal/manager/tmuxbackend/SPEC.md
-# RELATED-SPEC: agm/internal/manager/dockerbackend/SPEC.md
 # RELATED-SPEC: agm/internal/readiness/SPEC.md
 # RELATED-SPEC: agm/internal/send/SPEC.md
 # RELATED-SPEC: agm/internal/manifest/SPEC.md
@@ -243,16 +238,13 @@ Feature: Harness parity
       | agm-statusline         |
       | agm-statusline-capture |
 
-  Scenario Outline: AGM backend implementations declare SPEC coverage
-    Given AGM backend implementation "<backend>" is configured
-    When AGM validates backend implementation coverage
-    Then backend implementation "<backend>" should have a co-located SPEC
-
-    Examples:
-      | backend                         |
-      | backend/restbackend             |
-      | manager/tmuxbackend             |
-      | manager/dockerbackend           |
+  Scenario: AGM has one earned local runtime owner
+    Given AGM production local runtime sources
+    When AGM validates single runtime ownership
+    Then production should inject one direct session tmux runtime
+    And shared operations should expose no parallel manager runtime
+    And the direct tmux runtime should prove its safety capabilities
+    And retired generalized runtimes and selection setting should be absent
 
   Scenario Outline: AGM cleanup and process support packages declare SPEC coverage
     Given AGM cleanup support package "<package>" is configured
