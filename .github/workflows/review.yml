@@ -260,7 +260,7 @@ jobs:
                   "## ⚠️ AI Code Review — passed by human override (bootstrap)" "" \
                   "> The \`ai-review:override\` label is present and the trusted base revision does not yet contain \`cmd/ai-review\`, so no automated review could run." "" \
                   "This is the rollout PR that introduces the gate. The override is recorded on this PR as a label." "" \
-                  "<sub>Required gate per REVIEW.md §2/§5.</sub>" > /tmp/ai-review-bootstrap.md
+                  "<sub>Review gate per REVIEW.md §2/§5 (paused 2026-07-27 — not a required check; see §4).</sub>" > /tmp/ai-review-bootstrap.md
                 gh pr comment "$PR" --repo "$REPO" --body-file /tmp/ai-review-bootstrap.md || true
               fi
               exit 0
@@ -273,8 +273,9 @@ jobs:
       # pull_request_target is pinned to trusted base code, but GitHub attaches
       # its job check suite to that base revision. Publish the authoritative
       # result explicitly on the reviewed PR (or merge-group) head so the
-      # ruleset's required context is both trusted and satisfiable.
-      - name: Publish required check on reviewed head
+      # context is both trusted and satisfiable — a prerequisite for it being
+      # usable as a required check again once the gate is un-paused.
+      - name: Publish check on reviewed head
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
