@@ -321,6 +321,7 @@ func TestCleanupSandboxDirWithChecker_RetriesOnlyTransientLiveProcess(t *testing
 		wantProcScans  int
 		wantMountScans int
 		wantSleeps     int
+		wantUnmounts   int
 	}
 	tests := []testCase{
 		{
@@ -336,6 +337,7 @@ func TestCleanupSandboxDirWithChecker_RetriesOnlyTransientLiveProcess(t *testing
 			wantProcScans:  3,
 			wantMountScans: 1,
 			wantSleeps:     2,
+			wantUnmounts:   2,
 		},
 		{
 			name:     "persistent holder exhausts grace",
@@ -365,6 +367,7 @@ func TestCleanupSandboxDirWithChecker_RetriesOnlyTransientLiveProcess(t *testing
 			},
 			wantProcScans:  1,
 			wantMountScans: 1,
+			wantUnmounts:   2,
 		},
 		{
 			name:       "in-flight process scan is canceled at shared deadline",
@@ -393,7 +396,8 @@ func TestCleanupSandboxDirWithChecker_RetriesOnlyTransientLiveProcess(t *testing
 			if retryDelay == 0 {
 				retryDelay = 10 * time.Millisecond
 			}
-			var procScans, mountScans, sleeps, removes int
+			var procScans, mountScans, sleeps, unmounts, removes int
+			firstUnmountProcScans := -1
 			currentTime := time.Unix(1_000, 0)
 			checker := &sandboxgc.Checker{
 				Base: base,
@@ -408,7 +412,13 @@ func TestCleanupSandboxDirWithChecker_RetriesOnlyTransientLiveProcess(t *testing
 					}
 					return nil, nil
 				},
-				Unmount: func(string) error { return nil },
+				Unmount: func(string) error {
+					if firstUnmountProcScans < 0 {
+						firstUnmountProcScans = procScans
+					}
+					unmounts++
+					return nil
+				},
 				Remove: func(path string) error {
 					removes++
 					return os.RemoveAll(path)
@@ -438,6 +448,13 @@ func TestCleanupSandboxDirWithChecker_RetriesOnlyTransientLiveProcess(t *testing
 			}
 			if sleeps != tt.wantSleeps {
 				t.Fatalf("sleeps = %d, want %d", sleeps, tt.wantSleeps)
+			}
+			if unmounts != tt.wantUnmounts {
+				t.Fatalf("unmount calls = %d, want %d", unmounts, tt.wantUnmounts)
+			}
+			if unmounts > 0 && firstUnmountProcScans != tt.wantProcScans {
+				t.Fatalf("first unmount followed %d process scan(s), want %d complete process gate(s)",
+					firstUnmountProcScans, tt.wantProcScans)
 			}
 			wantRemoves := 0
 			if tt.wantRemoved {

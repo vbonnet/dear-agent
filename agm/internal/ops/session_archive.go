@@ -590,11 +590,10 @@ func cleanupSandboxDirWithCheckerAndRetry(
 	// This file contains RBAC permission rules written by ConfigureProjectPermissions.
 	preserveSettingsFromUpper(sandboxDir)
 
-	// Unmount the validated merged path before checker.Reap retries the default path.
-	if err := checker.Unmount(mergedPath); err != nil {
-		slog.Warn("Failed to unmount sandbox", "path", mergedPath, "error", err)
-	}
-
+	// ReapContext owns the only unmount boundary. It first proves that no live
+	// process holds the sandbox, then unmounts this exact merged child and the
+	// sandbox root before re-reading the mount table. Do not pre-unmount here:
+	// that would violate SGC-06 and weaken every retry's complete safety proof.
 	return reapSandboxWithRetry(sessionID, sandboxDir, checker, attempts, retryDelay, sleep, now)
 }
 
