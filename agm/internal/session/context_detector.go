@@ -836,13 +836,9 @@ type modelPricing struct {
 // doesn't fire. For interactive sessions, the exact cost comes from CC's
 // statusLine JSON (total_cost_usd) via agm-statusline-capture.
 var pricingTable = map[string]modelPricing{
-	// $5/$25 per Mtok per Anthropic's own docs (both Opus 4.8 and Opus 5 —
-	// platform.claude.com/docs/en/about-claude/models/whats-new-opus-5 states
-	// Opus 5 pricing is "unchanged from Claude Opus 4.8"). These two entries
-	// previously carried a stale $15/$75 rate that doesn't match either
-	// model's real published price.
 	"claude-opus-5":   {InputPerM: 5.0, OutputPerM: 25.0, CacheReadPerM: 0.50, CacheWritePerM: 6.25},
-	"claude-opus-4":   {InputPerM: 5.0, OutputPerM: 25.0, CacheReadPerM: 0.50, CacheWritePerM: 6.25},
+	"claude-opus-4-8": {InputPerM: 5.0, OutputPerM: 25.0, CacheReadPerM: 0.50, CacheWritePerM: 6.25},
+	"claude-opus-4":   {InputPerM: 15.0, OutputPerM: 75.0, CacheReadPerM: 1.50, CacheWritePerM: 18.75},
 	"claude-sonnet-4": {InputPerM: 3.0, OutputPerM: 15.0, CacheReadPerM: 0.30, CacheWritePerM: 3.75},
 	"claude-haiku-4":  {InputPerM: 0.80, OutputPerM: 4.0, CacheReadPerM: 0.08, CacheWritePerM: 1.0},
 }

@@ -32,6 +32,7 @@ type Pricing struct {
 // no price, so cost here is an estimate for quota visibility, not billing.
 var (
 	opusPricing   = Pricing{InputPerM: 15.00, OutputPerM: 75.00, CacheReadPerM: 1.50, CacheWritePerM: 18.75}
+	opus5Pricing  = Pricing{InputPerM: 5.00, OutputPerM: 25.00, CacheReadPerM: 0.50, CacheWritePerM: 6.25}
 	sonnetPricing = Pricing{InputPerM: 3.00, OutputPerM: 15.00, CacheReadPerM: 0.30, CacheWritePerM: 3.75}
 	haikuPricing  = Pricing{InputPerM: 1.00, OutputPerM: 5.00, CacheReadPerM: 0.10, CacheWritePerM: 1.25}
 	// Fable pricing is not public; treat it at the Opus frontier tier as a
@@ -44,6 +45,8 @@ var (
 func PriceFor(model string) Pricing {
 	m := strings.ToLower(model)
 	switch {
+	case strings.Contains(m, "opus-5"):
+		return opus5Pricing
 	case strings.Contains(m, "opus"):
 		return opusPricing
 	case strings.Contains(m, "sonnet"):

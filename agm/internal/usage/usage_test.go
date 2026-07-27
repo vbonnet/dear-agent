@@ -15,6 +15,7 @@ func TestPriceFor(t *testing.T) {
 		want  Pricing
 	}{
 		{"claude-opus-4-8", opusPricing},
+		{"claude-opus-5", opus5Pricing},
 		{"claude-sonnet-4-6", sonnetPricing},
 		{"claude-haiku-4-5-20251001", haikuPricing},
 		{"claude-fable-5", fablePricing},
