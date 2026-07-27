@@ -33,7 +33,7 @@ creation.
 
 **SAFE-PR-09** When safe-pr control flow is tested, the system shall replace the GitHub mutation boundary so unit tests cannot create real pull requests.
 
-**SAFE-PR-10** When safe-pr runs the repository full preflight, the system shall allow at least forty-five minutes before terminating the gate.
+**SAFE-PR-10** When safe-pr runs the repository full preflight, the system shall allow at least sixty minutes before terminating the gate.
 
 **SAFE-PR-11** When `create --draft` succeeds, the system shall leave the pull request unarmed for a human to advance.
 
