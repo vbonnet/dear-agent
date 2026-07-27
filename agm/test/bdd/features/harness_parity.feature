@@ -135,7 +135,7 @@ Feature: Harness parity
     Given AGM harness parity specification and lifecycle surfaces
     When AGM validates harness requirement identifiers and lifecycle ownership
     Then harness requirement identifiers should be unique
-    And CLI and MCP lifecycle surfaces should delegate to shared operations
+    And CLI, MCP, and daemon lifecycle surfaces should delegate to shared operations
     And CLI resume should retain its focused transactional owner
 
   Scenario Outline: Active harness launch commands preserve startup mode and persistence

@@ -1,6 +1,6 @@
 # ADR-001: Queue delivery loop
 
-Status: Accepted
+Status: Superseded by [ADR-002](ADR-002-shared-direct-delivery.md)
 
 Date: 2026-07-17
 
