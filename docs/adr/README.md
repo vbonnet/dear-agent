@@ -39,5 +39,6 @@ to close them.
 | [034](ADR-034-squash-only-merge-contract.md) | Squash-only merge contract + auto-merge arming | Accepted |
 | [035](ADR-035-dear-terminology-disambiguation.md) | DEAR Terminology Disambiguation | Accepted |
 | [036](ADR-036-wayfinder-enforcement.md) | Wayfinder trace at the delivery boundary | Accepted |
+| [037](ADR-037-cedar-policy-language.md) | Cedar as the persona/policy-enforcement language | Accepted |
 
 Subsystem ADR directories have independent scoped numbering and indexes.
