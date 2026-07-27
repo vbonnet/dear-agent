@@ -284,6 +284,7 @@ Feature: Harness parity
     And archive cleanup should wait for transient child exit without weakening safety gates
     And archive cleanup should preserve settings written during retry grace
     And unarchive should serialize with archive cleanup
+    And admin reconcile fixes should serialize and revalidate under the archive lock
 
   Scenario Outline: Supported model families have default routes
     Given model family "<family>" is configured

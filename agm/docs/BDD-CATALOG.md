@@ -341,6 +341,9 @@ creation, and terminal state detection.
 - CLI and MCP lifecycle surfaces delegate to shared operations. Resume uses one
   stable-ID `internal/ops.ResumeSession` transaction; the CLI retains only
   identifier and prompt-file input, presentation, and post-operation attach.
+- Archive, unarchive, and administrative reconcile fixes share the stable
+  session-ID lifecycle lock; reconcile reloads lifecycle and revalidates tmux
+  presence under that lock before applying a still-current mismatch.
 - Harness parity requirement identifiers are unique.
 - Active harness launch commands preserve native startup mode and persistence.
 - Imported AGY conversations preserve unknown native-model provenance through

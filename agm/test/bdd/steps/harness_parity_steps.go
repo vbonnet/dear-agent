@@ -325,6 +325,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^archive cleanup should wait for transient child exit without weakening safety gates$`, archiveCleanupShouldWaitForTransientChildExitWithoutWeakeningSafetyGates)
 	ctx.Step(`^archive cleanup should preserve settings written during retry grace$`, archiveCleanupShouldPreserveSettingsWrittenDuringRetryGrace)
 	ctx.Step(`^unarchive should serialize with archive cleanup$`, unarchiveShouldSerializeWithArchiveCleanup)
+	ctx.Step(`^admin reconcile fixes should serialize and revalidate under the archive lock$`, adminReconcileFixesShouldSerializeAndRevalidateUnderTheArchiveLock)
 	ctx.Step(`^the retained A2A coordination implementation$`, retainedA2ACoordinationImplementation)
 	ctx.Step(`^AGM validates A2A coordination specification drift$`, agmValidatesA2ACoordinationSpecificationDrift)
 	ctx.Step(`^A2A coordination specifications should describe only retained behavior$`, a2aCoordinationSpecificationsShouldDescribeOnlyRetainedBehavior)
@@ -2333,7 +2334,7 @@ func agmValidatesSingleSessionArchiveDryRunSafety(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/cmd/agm-reaper", "./agm/internal/dolt", "./agm/internal/ops", "./agm/internal/reaper",
-		"-run", `^(TestArchiveSession_DryRunCLI(TextIsSideEffectFree|JSONReturnsStableEnvelope|JSONHonorsFieldMask|ClaudeUUIDUsesResolvedSessionID|ActiveAsyncDoesNotStartReaper|ActiveRequiresAsync|StoppedRejectsAsync)|TestArchiveSession_(ClaudeUUIDUsesResolvedSessionID|AsyncClaudeUUIDUsesResolvedIdentities|ReloadedSandboxOwnershipControlsCleanup)|TestArchiveAuditArgs_RecordsSingleSessionDryRun|TestArchiveSession_DryRunDoesNotArchiveExternalRepresentation|TestNewDryRunPreview|TestRun_UsesStableSessionIDAndResolvedTmuxIdentity|TestValidateResolvedTargets|TestBuildReaperArgsSeparatesStableAndTmuxIdentities|TestSQLite(SandboxOwnershipMetadataRoundTripsForArchive|MissingSandboxMetadataDoesNotInferOwnership|InvalidSandboxMetadataDoesNotAuthorizeCleanup)|TestCleanupSandboxDirWithChecker_(RemovesOwnedSandbox|RejectsUnownedMergedPath|RetriesOnlyTransientLiveProcess|RefreshesSettingsDuringRetryGrace)|TestRestoreArchivedSessionSerializesWithArchiveCleanup)$`,
+		"-run", `^(TestArchiveSession_DryRunCLI(TextIsSideEffectFree|JSONReturnsStableEnvelope|JSONHonorsFieldMask|ClaudeUUIDUsesResolvedSessionID|ActiveAsyncDoesNotStartReaper|ActiveRequiresAsync|StoppedRejectsAsync)|TestArchiveSession_(ClaudeUUIDUsesResolvedSessionID|AsyncClaudeUUIDUsesResolvedIdentities|ReloadedSandboxOwnershipControlsCleanup)|TestArchiveAuditArgs_RecordsSingleSessionDryRun|TestArchiveSession_DryRunDoesNotArchiveExternalRepresentation|TestNewDryRunPreview|TestRun_UsesStableSessionIDAndResolvedTmuxIdentity|TestValidateResolvedTargets|TestBuildReaperArgsSeparatesStableAndTmuxIdentities|TestSQLite(SandboxOwnershipMetadataRoundTripsForArchive|MissingSandboxMetadataDoesNotInferOwnership|InvalidSandboxMetadataDoesNotAuthorizeCleanup)|TestCleanupSandboxDirWithChecker_(RemovesOwnedSandbox|RejectsUnownedMergedPath|RetriesOnlyTransientLiveProcess|RefreshesSettingsDuringRetryGrace)|TestRestoreArchivedSessionSerializesWithArchiveCleanup|TestReconcileLifecycleMismatch(SerializesWithArchiveCleanup|RevalidatesTmuxUnderLock))$`,
 		"-count=1", "-v")
 	cmd.Dir = bddRepoRoot()
 	output, runErr := cmd.CombinedOutput()
@@ -2460,6 +2461,25 @@ func unarchiveShouldSerializeWithArchiveCleanup(ctx context.Context) error {
 	const testName = "TestRestoreArchivedSessionSerializesWithArchiveCleanup"
 	if !strings.Contains(harnessState.archiveDryRunTestOutput, "--- PASS: "+testName) {
 		return fmt.Errorf("%s did not run:\n%s", testName, harnessState.archiveDryRunTestOutput)
+	}
+	return nil
+}
+
+func adminReconcileFixesShouldSerializeAndRevalidateUnderTheArchiveLock(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.archiveDryRunTestErr != nil {
+		return fmt.Errorf("single-session archive dry-run suite failed: %w\n%s", harnessState.archiveDryRunTestErr, harnessState.archiveDryRunTestOutput)
+	}
+	for _, testName := range []string{
+		"TestReconcileLifecycleMismatchSerializesWithArchiveCleanup",
+		"TestReconcileLifecycleMismatchRevalidatesTmuxUnderLock",
+	} {
+		if !strings.Contains(harnessState.archiveDryRunTestOutput, "--- PASS: "+testName) {
+			return fmt.Errorf("%s did not run:\n%s", testName, harnessState.archiveDryRunTestOutput)
+		}
 	}
 	return nil
 }
