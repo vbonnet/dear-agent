@@ -156,3 +156,41 @@ func TestWorkflowJobTimeoutMinutesStaysWithinNamedJob(t *testing.T) {
 		})
 	}
 }
+
+func TestSourceHasRaceSuppressedSLARecognizesMaintainedMarkers(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		source string
+		want   bool
+	}{
+		{
+			name:   "skip enforced without race",
+			source: `if raceEnabled { t.Skip("wall-clock parser latency is enforced without race instrumentation") }`,
+			want:   true,
+		},
+		{
+			name:   "skip under race",
+			source: `if raceEnabled { t.Skip("perf P95 test skipped under race instrumentation") }`,
+			want:   true,
+		},
+		{
+			name:   "observe under race",
+			source: `if raceEnabled { t.Log("SLA enforcement remains in the ordinary test pass") }`,
+			want:   true,
+		},
+		{
+			name:   "marker without race guard",
+			source: `t.Skip("wall-clock parser latency is enforced without race instrumentation")`,
+		},
+		{
+			name:   "race guard without SLA marker",
+			source: `if raceEnabled { t.Skip("unrelated test") }`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := sourceHasRaceSuppressedSLA(test.source); got != test.want {
+				t.Fatalf("sourceHasRaceSuppressedSLA() = %t, want %t", got, test.want)
+			}
+		})
+	}
+}

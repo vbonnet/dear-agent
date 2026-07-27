@@ -851,12 +851,7 @@ func fullPreflightOrdinaryPerformanceGateIsConfigured(ctx context.Context) error
 		if readErr != nil {
 			return readErr
 		}
-		sourceText := string(source)
-		raceSuppressedSLA := strings.Contains(sourceText, "raceEnabled") &&
-			(strings.Contains(sourceText, "enforced without race instrumentation") ||
-				strings.Contains(sourceText, "skipped under race instrumentation") ||
-				strings.Contains(sourceText, "SLA enforcement remains in the ordinary test pass"))
-		if !raceSuppressedSLA {
+		if !sourceHasRaceSuppressedSLA(string(source)) {
 			return nil
 		}
 		relativeDir, relativeErr := filepath.Rel(root, filepath.Dir(path))
@@ -869,6 +864,13 @@ func fullPreflightOrdinaryPerformanceGateIsConfigured(ctx context.Context) error
 		}
 		return nil
 	})
+}
+
+func sourceHasRaceSuppressedSLA(source string) bool {
+	return strings.Contains(source, "raceEnabled") &&
+		(strings.Contains(source, "enforced without race instrumentation") ||
+			strings.Contains(source, "skipped under race instrumentation") ||
+			strings.Contains(source, "SLA enforcement remains in the ordinary test pass"))
 }
 
 func agmValidatesRaceSkippedWallClockSLACoverage(ctx context.Context) error {
