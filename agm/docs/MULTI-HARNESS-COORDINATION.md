@@ -130,11 +130,11 @@ Implement full feature parity for Codex, OpenCode, and Gemini harnesses using Cl
 - Pattern: Table-driven tests with harness parameter
 - Example:
   ```go
-  func TestAgentInterface(t *testing.T) {
-      agents := []string{"claude", "codex", "opencode", "gemini"}
-      for _, agent := range agents {
-          t.Run(agent, func(t *testing.T) {
-              // Common interface tests
+  func TestHarnessMetadata(t *testing.T) {
+      harnesses := agent.ActiveHarnesses()
+      for _, harness := range harnesses {
+          t.Run(harness, func(t *testing.T) {
+              // Shared name, version, capability, and model assertions
           })
       }
   }
@@ -307,10 +307,11 @@ If two sessions need to modify the same files:
 - [ ] User experience consistent across harnesses
 
 ### Code Quality
-- [ ] All harness adapters implement Agent interface
+- [ ] All harness adapters implement the metadata-only `Harness` contract
+- [ ] Behavioral interfaces are capability-sized and owned by their consumers
 - [ ] No code duplication across adapters (shared patterns extracted)
 - [ ] Harness-specific code clearly isolated
-- [ ] Backend registration consistent
+- [ ] The finite harness constructor catalog is consistent
 
 ---
 

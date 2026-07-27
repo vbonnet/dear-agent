@@ -131,6 +131,13 @@ Feature: Harness parity
     Then Codex factory should use the Codex CLI adapter
     And OpenAI API status should not inspect Codex tmux state
 
+  Scenario: Harness contracts stay capability-sized
+    Given AGM harness adapter contract sources
+    When AGM validates harness capability ownership
+    Then harness discovery should expose metadata without a universal lifecycle facade
+    And pure API delivery should require only context-aware readiness and message delivery
+    And adapter constructors should return concrete types from one finite discovery catalog
+
   Scenario: Harness lifecycle ownership is explicit and requirement identifiers are unique
     Given AGM harness parity specification and lifecycle surfaces
     When AGM validates harness requirement identifiers and lifecycle ownership

@@ -50,10 +50,10 @@ type OpContext struct {
 	// conversation while the shared workspace lock is held. Nil selects the
 	// production tracker.
 	AgyCreateIdentityTracker agysession.CreateIdentityTracker
-	// APIAgentFactory reconstructs a pure API adapter from the session's
+	// APIDeliveryFactory reconstructs a pure API adapter from the session's
 	// persisted non-secret runtime configuration. Nil selects the production
 	// factory. Tests and non-CLI surfaces may inject a deterministic adapter.
-	APIAgentFactory APISessionAgentFactory
+	APIDeliveryFactory APISessionDeliveryFactory
 	// archiveSandboxCleaner is an internal archive-boundary seam. Production
 	// uses the host sandbox safety checker; package tests inject the same
 	// allowlist behavior without consulting the real process or mount tables.

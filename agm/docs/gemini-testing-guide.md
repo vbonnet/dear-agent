@@ -66,13 +66,14 @@ go tool cover -html=coverage.out
 
 ## Test Categories
 
-### 1. Interface Compliance Tests
+### 1. Metadata and Adapter Contract Tests
 **File:** `gemini_parity_test.go`
 
-Tests that Gemini implements all Agent interface methods correctly.
+Tests that Gemini exposes canonical harness metadata and that its concrete
+adapter behavior satisfies the supported Gemini lifecycle contracts.
 
 ```go
-TestGeminiAdapter_FeatureParity_AgentInterface
+TestGeminiAdapter_FeatureParity_HarnessMetadata
 ```
 
 ### 2. Session Lifecycle Tests
@@ -435,12 +436,12 @@ A:
 ## Resources
 
 ### Documentation
-- [Agent Interface](../internal/agent/interface.go) - Interface definition
+- [Harness Contracts](../internal/agent/interface.go) - Metadata and capability definitions
 
 ### Related Code
 - [Gemini Adapter](../internal/agent/gemini_adapter.go) - Implementation
 - [Claude Adapter](../internal/agent/claude_adapter.go) - Reference implementation
-- [Mock Agent](../internal/agent/interface_test.go) - Test utilities
+- [Mock Harness](../internal/agent/interface_test.go) - Metadata test utility
 
 ## Contributing
 

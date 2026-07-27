@@ -1118,7 +1118,7 @@ agm 3.0.0 (/usr/local/bin/agm)
 ## References
 
 - [AGM Architecture](ARCHITECTURE.md)
-- [Agent Interface](../../internal/agent/interface.go)
+- [Harness metadata and consumer capabilities](../../internal/agent/interface.go)
 - [Manifest Schema](../../internal/manifest/manifest.go)
 - [Cobra CLI Framework](https://github.com/spf13/cobra)
 - [Huh TUI Library](https://github.com/charmbracelet/huh)

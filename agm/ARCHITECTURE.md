@@ -47,19 +47,21 @@ Skills (.md)   →  CLI --json    →  internal/ops  →  Dolt Storage
 
 See `docs/AGENTIC-API.md` for the complete agentic API reference.
 
-#### 4. Adapter Registry (Multi-CLI Support)
-The adapter pattern enables AGM to support multiple AI agents with a unified interface:
+#### 4. Concrete Harness Adapters (Multi-CLI Support)
+The adapter pattern enables AGM to support multiple interactive harnesses
+without claiming that every lifecycle mechanism is interchangeable:
 
 - **Claude Adapter**: CLI integration, UUID detection, slash commands, history.jsonl parsing
-- **Gemini Adapter**: API integration, session file management, command translation
-- **Codex Adapter**: Codex CLI app-server control, remote thread management
+- **Codex Adapter**: Codex CLI launch, native session identity, and composer delivery
+- **AGY Adapter**: AGY CLI launch, provider conversation identity, and native readiness
 - **OpenCode Adapter**: SSE event stream integration, server port management, real-time state updates
+- **Pi Adapter**: Pi CLI launch, managed extension readiness, and native JSONL sessions
+- **Gemini Adapter**: Deprecated CLI compatibility for existing sessions
 
-Each adapter implements the unified `Agent` interface, allowing AGM to:
-- Abstract away CLI-specific differences
-- Provide consistent session management across providers
-- Enable seamless switching between agents
-- Translate generic commands to agent-specific actions
+Constructors return concrete adapters. `agent.Harness` exposes only name,
+version, and descriptive capabilities for heterogeneous discovery and
+conformance. Shared operation owners define capability-sized interfaces when
+they need behavior; they do not depend on a universal lifecycle facade.
 
 #### 5. Coordination & Storage Layer
 - **Dolt Storage**: Session metadata persistence with transactional database operations (Git-like versioned SQL)
@@ -80,18 +82,17 @@ Each adapter implements the unified `Agent` interface, allowing AGM to:
 The adapter pattern is central to AGM's architecture:
 
 ```
-Generic AGM Command → Command Translator → Agent Adapter → Agent-Specific Action
-     "resume"              ↓                      ↓               ↓
-                    Analyze session       Claude Adapter:   `/resume {uuid}\r`
-                    metadata              Gemini Adapter:   API call with history
-                                         Codex Adapter:    Thread continuation
+Generic AGM Operation → Transaction Owner → Required Capability → Harness Action
+       "resume"                 ↓                    ↓                 ↓
+                        Validate lifecycle      tmux/session seam   native resume
+                        and postconditions      or concrete adapter  mechanism
 ```
 
 **Benefits:**
-- **Extensibility**: Adding new agents requires only implementing the `Agent` interface
-- **Maintainability**: Agent-specific logic is isolated in adapters
-- **Testability**: Each adapter can be tested independently with mocks
-- **Flexibility**: Users can switch agents without changing workflows
+- **Explicit substitutability**: Consumers request only behavior they invoke
+- **Maintainability**: Harness-specific mechanisms stay isolated in concrete adapters
+- **Testability**: Shared operations use small, consumer-owned test seams
+- **Discovery**: Metadata remains comparable across the finite harness catalog
 
 ### Session Lifecycle Flow
 

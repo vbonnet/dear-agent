@@ -11,8 +11,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
-// TestClaudeAdapterImplementsAgentInterface verifies ClaudeAdapter implements Agent interface.
-func TestClaudeAdapterImplementsAgentInterface(t *testing.T) {
+func TestClaudeAdapterImplementsHarnessContract(t *testing.T) {
 	// Create adapter with mock store
 	mockStore := &MockSessionStore{
 		sessions: make(map[SessionID]*SessionMetadata),
@@ -23,8 +22,7 @@ func TestClaudeAdapterImplementsAgentInterface(t *testing.T) {
 		t.Fatalf("NewClaudeAdapter failed: %v", err)
 	}
 
-	// Verify adapter implements Agent interface
-	var _ = adapter
+	var _ Harness = adapter
 }
 
 // TestClaudeAdapterName tests Name() method.

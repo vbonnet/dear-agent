@@ -20,8 +20,8 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
-func sendAPIViaSharedOperation(ctx context.Context, recipient, senderName, messageID, formattedMessage, promptFile string, storage dolt.Storage, newAPIAgent apiAgentFactory) error {
-	_, err := sendViaSharedOperationsWithFactory(ctx, recipient, senderName, messageID, formattedMessage, promptFile, false, false, storage, nil, newAPIAgent)
+func sendAPIViaSharedOperation(ctx context.Context, recipient, senderName, messageID, formattedMessage, promptFile string, storage dolt.Storage, newAPIDelivery apiDeliveryFactory) error {
+	_, err := sendViaSharedOperationsWithFactory(ctx, recipient, senderName, messageID, formattedMessage, promptFile, false, false, storage, nil, newAPIDelivery)
 	return err
 }
 
@@ -430,7 +430,7 @@ func TestAPIDeliveryReservesFullCompletionBudgetAfterPreflight(t *testing.T) {
 	jobs := []*send.DeliveryJob{{Recipient: m.Name, MessageID: "budget-message"}}
 	var factoryCtx context.Context
 	results := deliverMultiRecipientJobs(t.Context(), jobs, agent.OpenAIDeliveryTimeout, func(deliveryCtx context.Context, _ *send.DeliveryJob) error {
-		return sendAPIViaSharedOperation(deliveryCtx, m.Name, "sender", "budget-message", "message", "", storage, func(ctx context.Context, _ *manifest.Manifest) (agent.Agent, error) {
+		return sendAPIViaSharedOperation(deliveryCtx, m.Name, "sender", "budget-message", "message", "", storage, func(ctx context.Context, _ *manifest.Manifest) (ops.APISessionDeliveryAdapter, error) {
 			factoryCtx = ctx
 			timer := time.NewTimer(50 * time.Millisecond)
 			defer timer.Stop()
@@ -491,18 +491,18 @@ func TestSingleAndMultiRecipientAPIDeliveryUsesAdapterReadiness(t *testing.T) {
 
 	for _, surface := range []struct {
 		name    string
-		deliver func(t *testing.T, newAPIAgent apiAgentFactory) error
+		deliver func(t *testing.T, newAPIDelivery apiDeliveryFactory) error
 	}{
 		{
 			name: "single",
-			deliver: func(t *testing.T, newAPIAgent apiAgentFactory) error {
-				return sendDirectlyWithDependencies(t.Context(), job.Recipient, job.Sender, job.MessageID, job.FormattedMessage, job.PromptFile, adapter, session.NewMockTmux(), newAPIAgent)
+			deliver: func(t *testing.T, newAPIDelivery apiDeliveryFactory) error {
+				return sendDirectlyWithDependencies(t.Context(), job.Recipient, job.Sender, job.MessageID, job.FormattedMessage, job.PromptFile, adapter, session.NewMockTmux(), newAPIDelivery)
 			},
 		},
 		{
 			name: "fan-out",
-			deliver: func(t *testing.T, newAPIAgent apiAgentFactory) error {
-				return deliveryFuncWithAgentFactory(t.Context(), job, adapter, session.NewMockTmux(), newAPIAgent)
+			deliver: func(t *testing.T, newAPIDelivery apiDeliveryFactory) error {
+				return deliveryFuncWithDeliveryFactory(t.Context(), job, adapter, session.NewMockTmux(), newAPIDelivery)
 			},
 		},
 	} {
@@ -528,7 +528,7 @@ func TestSingleAndMultiRecipientAPIDeliveryUsesAdapterReadiness(t *testing.T) {
 					statusError:   testCase.statusError,
 					sendError:     testCase.sendError,
 				}
-				err := surface.deliver(t, func(_ context.Context, apiManifest *manifest.Manifest) (agent.Agent, error) {
+				err := surface.deliver(t, func(_ context.Context, apiManifest *manifest.Manifest) (ops.APISessionDeliveryAdapter, error) {
 					if apiManifest.Harness != "openai" {
 						t.Fatalf("API factory harness = %q, want openai", apiManifest.Harness)
 					}
@@ -578,7 +578,7 @@ func TestAPIDeliverySerializesReadinessCompletionAndPersistenceByStableSessionID
 	factoryEntered := make(chan int32, 2)
 	firstSendEntered := make(chan struct{}, 1)
 	releaseFirst := make(chan struct{})
-	factory := func(_ context.Context, _ *manifest.Manifest) (agent.Agent, error) {
+	factory := func(_ context.Context, _ *manifest.Manifest) (ops.APISessionDeliveryAdapter, error) {
 		call := calls.Add(1)
 		factoryEntered <- call
 		return &mockAgentAdapter{sendFunc: func(_ agent.SessionID, _ agent.Message) error {
@@ -649,7 +649,7 @@ func TestAPIDeliveryPassesCallerContextToReadiness(t *testing.T) {
 		t.Fatalf("create API session: %v", err)
 	}
 	mockAgent := &mockAgentAdapter{sessionStatus: agent.StatusActive}
-	err := sendAPIViaSharedOperation(wantCtx, m.Name, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+	err := sendAPIViaSharedOperation(wantCtx, m.Name, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (ops.APISessionDeliveryAdapter, error) {
 		return mockAgent, nil
 	})
 	if err != nil {
@@ -678,7 +678,7 @@ func TestDirectAPIDeliveryRejectsArchivedSessionBeforeAdapterConstruction(t *tes
 	}
 
 	factoryCalled := false
-	err = sendDirectlyWithDependencies(t.Context(), "archived-api-id", "sender", "message-id", "message", "", adapter, session.NewMockTmux(), func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+	err = sendDirectlyWithDependencies(t.Context(), "archived-api-id", "sender", "message-id", "message", "", adapter, session.NewMockTmux(), func(context.Context, *manifest.Manifest) (ops.APISessionDeliveryAdapter, error) {
 		factoryCalled = true
 		return &mockAgentAdapter{}, nil
 	})
@@ -714,7 +714,7 @@ func TestAPIDeliveryReloadsLifecycleInsideStableSessionLock(t *testing.T) {
 	}
 
 	factoryCalled := false
-	err = sendAPIViaSharedOperation(t.Context(), staleActive.SessionID, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+	err = sendAPIViaSharedOperation(t.Context(), staleActive.SessionID, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (ops.APISessionDeliveryAdapter, error) {
 		factoryCalled = true
 		return &mockAgentAdapter{}, nil
 	})
@@ -747,7 +747,7 @@ func TestAPIDeliveryUsesLockedManifestForAuditArtifact(t *testing.T) {
 		t.Fatalf("rename API session: %v", err)
 	}
 
-	err = sendAPIViaSharedOperation(t.Context(), stale.SessionID, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+	err = sendAPIViaSharedOperation(t.Context(), stale.SessionID, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (ops.APISessionDeliveryAdapter, error) {
 		return &mockAgentAdapter{sessionStatus: agent.StatusActive}, nil
 	})
 	if err != nil {
@@ -782,7 +782,7 @@ func TestAPIDeliveryRejectsReapingLifecycleInsideStableSessionLock(t *testing.T)
 	}
 
 	factoryCalled := false
-	err = sendAPIViaSharedOperation(t.Context(), staleActive.SessionID, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+	err = sendAPIViaSharedOperation(t.Context(), staleActive.SessionID, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (ops.APISessionDeliveryAdapter, error) {
 		factoryCalled = true
 		return &mockAgentAdapter{}, nil
 	})
@@ -792,34 +792,6 @@ func TestAPIDeliveryRejectsReapingLifecycleInsideStableSessionLock(t *testing.T)
 	}
 	if factoryCalled {
 		t.Fatal("reaping API delivery constructed adapter after locked lifecycle reload")
-	}
-}
-
-func TestAPIDeliveryRejectsAdapterWithoutContextDelivery(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	storage := dolt.NewMockAdapter()
-	m := &manifest.Manifest{
-		SessionID: "unbounded-api-adapter-id",
-		Name:      "unbounded-api-adapter",
-		Harness:   "openai",
-	}
-	if err := storage.CreateSession(m); err != nil {
-		t.Fatalf("create API session: %v", err)
-	}
-	legacy := &mockAgentAdapter{sessionStatus: agent.StatusActive}
-	legacyAgentOnly := struct {
-		agent.Agent
-		agent.ContextSessionStatusGetter
-	}{Agent: legacy, ContextSessionStatusGetter: legacy}
-
-	err := sendAPIViaSharedOperation(t.Context(), m.Name, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
-		return legacyAgentOnly, nil
-	})
-	if err == nil || !strings.Contains(err.Error(), "does not support context-aware delivery") {
-		t.Fatalf("unbounded API adapter error = %v, want fail-closed context rejection", err)
-	}
-	if len(legacy.sentMessages) != 0 {
-		t.Fatalf("unbounded API adapter received %d messages, want none", len(legacy.sentMessages))
 	}
 }
 
@@ -847,7 +819,7 @@ func TestNewAPIHarnessAdapterReportsPureAPISessionReadyWithoutTmux(t *testing.T)
 			if err != nil {
 				t.Fatalf("create pure API session for %q: %v", harnessType, err)
 			}
-			adapter, err := newAPIHarnessAdapter(t.Context(), &manifest.Manifest{
+			adapter, err := newAPIDeliveryAdapter(t.Context(), &manifest.Manifest{
 				SessionID: string(sessionID),
 				Name:      "pure-api-" + harnessType,
 				Harness:   harnessType,
@@ -858,12 +830,16 @@ func TestNewAPIHarnessAdapterReportsPureAPISessionReadyWithoutTmux(t *testing.T)
 				},
 			})
 			if err != nil {
-				t.Fatalf("newAPIHarnessAdapter(%q): %v", harnessType, err)
+				t.Fatalf("newAPIDeliveryAdapter(%q): %v", harnessType, err)
 			}
-			if got := adapter.Version(); got != "gpt-4o" {
+			openAIAdapter, ok := adapter.(*agent.OpenAIAdapter)
+			if !ok {
+				t.Fatalf("newAPIDeliveryAdapter(%q) = %T, want *agent.OpenAIAdapter", harnessType, adapter)
+			}
+			if got := openAIAdapter.Version(); got != "gpt-4o" {
 				t.Fatalf("restored API model = %q, want persisted gpt-4o", got)
 			}
-			status, err := adapter.GetSessionStatus(sessionID)
+			status, err := openAIAdapter.GetSessionStatus(sessionID)
 			if err != nil {
 				t.Fatalf("get pure API session status for %q: %v", harnessType, err)
 			}

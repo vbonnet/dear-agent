@@ -67,7 +67,7 @@ Complete guide to AGM (AI/Agent Gateway Manager) documentation.
 **I want to extend AGM:**
 - **[Architecture](ARCHITECTURE.md)** - Extensibility section
 - **[Command Translation](COMMAND-TRANSLATION-DESIGN.md)** - Multi-agent abstraction
-- **[API Reference](API-REFERENCE.md)** - Agent interface
+- **[API Reference](API-REFERENCE.md)** - harness metadata and consumer interfaces
 
 ### For Contributors
 

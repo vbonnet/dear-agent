@@ -11,75 +11,31 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
-type apiDeliveryTestAgent struct {
-	status     agent.Status
-	statusErr  error
-	sendErr    error
-	statusCtx  context.Context
-	sendCtx    context.Context
-	statusID   agent.SessionID
-	sendID     agent.SessionID
-	sent       agent.Message
-	legacySend int
+type apiDeliveryTestAdapter struct {
+	status    agent.Status
+	statusErr error
+	sendErr   error
+	statusCtx context.Context
+	sendCtx   context.Context
+	statusID  agent.SessionID
+	sendID    agent.SessionID
+	sent      agent.Message
 }
 
-func (a *apiDeliveryTestAgent) Name() string { return "api-delivery-test" }
-
-func (a *apiDeliveryTestAgent) Version() string { return "test" }
-
-func (a *apiDeliveryTestAgent) CreateSession(agent.SessionContext) (agent.SessionID, error) {
-	return "", nil
-}
-
-func (a *apiDeliveryTestAgent) ResumeSession(agent.SessionID) error { return nil }
-
-func (a *apiDeliveryTestAgent) TerminateSession(agent.SessionID) error { return nil }
-
-func (a *apiDeliveryTestAgent) GetSessionStatus(agent.SessionID) (agent.Status, error) {
-	return a.status, a.statusErr
-}
-
-func (a *apiDeliveryTestAgent) SendMessage(agent.SessionID, agent.Message) error {
-	a.legacySend++
-	return nil
-}
-
-func (a *apiDeliveryTestAgent) GetHistory(agent.SessionID) ([]agent.Message, error) {
-	return nil, nil
-}
-
-func (a *apiDeliveryTestAgent) ExportConversation(agent.SessionID, agent.ConversationFormat) ([]byte, error) {
-	return nil, nil
-}
-
-func (a *apiDeliveryTestAgent) ImportConversation([]byte, agent.ConversationFormat) (agent.SessionID, error) {
-	return "", nil
-}
-
-func (a *apiDeliveryTestAgent) Capabilities() agent.Capabilities { return agent.Capabilities{} }
-
-func (a *apiDeliveryTestAgent) ExecuteCommand(agent.Command) error { return nil }
-
-type readyAPIDeliveryTestAgent struct {
-	*apiDeliveryTestAgent
-}
-
-func (a *readyAPIDeliveryTestAgent) GetSessionStatusContext(ctx context.Context, sessionID agent.SessionID) (agent.Status, error) {
+func (a *apiDeliveryTestAdapter) GetSessionStatusContext(ctx context.Context, sessionID agent.SessionID) (agent.Status, error) {
 	a.statusCtx = ctx
 	a.statusID = sessionID
 	return a.status, a.statusErr
 }
 
-type sendableAPIDeliveryTestAgent struct {
-	*readyAPIDeliveryTestAgent
-}
-
-func (a *sendableAPIDeliveryTestAgent) SendMessageContext(ctx context.Context, sessionID agent.SessionID, message agent.Message) error {
+func (a *apiDeliveryTestAdapter) SendMessageContext(ctx context.Context, sessionID agent.SessionID, message agent.Message) error {
 	a.sendCtx = ctx
 	a.sendID = sessionID
 	a.sent = message
 	return a.sendErr
 }
+
+var _ APISessionDeliveryAdapter = (*apiDeliveryTestAdapter)(nil)
 
 func newAPIDeliveryTestSession(t *testing.T, lifecycle string) (*dolt.MockAdapter, *manifest.Manifest) {
 	t.Helper()
@@ -98,12 +54,12 @@ func newAPIDeliveryTestSession(t *testing.T, lifecycle string) (*dolt.MockAdapte
 	return storage, current
 }
 
-func TestNewAPISessionAgentRejectsMissingOrNonAPISession(t *testing.T) {
-	if _, err := NewAPISessionAgent(t.Context(), nil); err == nil || !strings.Contains(err.Error(), "manifest is required") {
-		t.Fatalf("NewAPISessionAgent(nil) error = %v, want required-manifest error", err)
+func TestNewAPISessionDeliveryAdapterRejectsMissingOrNonAPISession(t *testing.T) {
+	if _, err := NewAPISessionDeliveryAdapter(t.Context(), nil); err == nil || !strings.Contains(err.Error(), "manifest is required") {
+		t.Fatalf("NewAPISessionDeliveryAdapter(nil) error = %v, want required-manifest error", err)
 	}
-	if _, err := NewAPISessionAgent(t.Context(), &manifest.Manifest{Harness: "codex-cli"}); err == nil || !strings.Contains(err.Error(), "not a pure API session") {
-		t.Fatalf("NewAPISessionAgent(codex-cli) error = %v, want pure-API error", err)
+	if _, err := NewAPISessionDeliveryAdapter(t.Context(), &manifest.Manifest{Harness: "codex-cli"}); err == nil || !strings.Contains(err.Error(), "not a pure API session") {
+		t.Fatalf("NewAPISessionDeliveryAdapter(codex-cli) error = %v, want pure-API error", err)
 	}
 }
 
@@ -137,14 +93,11 @@ func TestDeliverAPISessionMessageReloadsCurrentManifestAndUsesContextContracts(t
 				Name:      "stale-api-session",
 				Harness:   current.Harness,
 			}
-			base := &apiDeliveryTestAgent{status: status}
-			adapter := &sendableAPIDeliveryTestAgent{
-				readyAPIDeliveryTestAgent: &readyAPIDeliveryTestAgent{apiDeliveryTestAgent: base},
-			}
+			adapter := &apiDeliveryTestAdapter{status: status}
 			var factoryManifest *manifest.Manifest
 			message := agent.Message{Role: agent.RoleUser, Content: "verified delivery"}
 
-			delivered, err := DeliverAPISessionMessage(t.Context(), storage, stale, message, func(_ context.Context, got *manifest.Manifest) (agent.Agent, error) {
+			delivered, err := DeliverAPISessionMessage(t.Context(), storage, stale, message, func(_ context.Context, got *manifest.Manifest) (APISessionDeliveryAdapter, error) {
 				factoryManifest = got
 				return adapter, nil
 			})
@@ -172,24 +125,18 @@ func TestDeliverAPISessionMessageReloadsCurrentManifestAndUsesContextContracts(t
 			if adapter.sent.Content != message.Content || adapter.sent.Role != message.Role {
 				t.Fatalf("sent message = %#v, want %#v", adapter.sent, message)
 			}
-			if base.legacySend != 0 {
-				t.Fatalf("legacy SendMessage called %d times, want context-aware delivery", base.legacySend)
-			}
 		})
 	}
 }
 
 func TestSendMessageAPIResultIncludesStableSessionID(t *testing.T) {
 	storage, current := newAPIDeliveryTestSession(t, "")
-	base := &apiDeliveryTestAgent{status: agent.StatusActive}
-	adapter := &sendableAPIDeliveryTestAgent{
-		readyAPIDeliveryTestAgent: &readyAPIDeliveryTestAgent{apiDeliveryTestAgent: base},
-	}
+	adapter := &apiDeliveryTestAdapter{status: agent.StatusActive}
 
 	result, err := SendMessage(&OpContext{
 		Context: t.Context(),
 		Storage: storage,
-		APIAgentFactory: func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+		APIDeliveryFactory: func(context.Context, *manifest.Manifest) (APISessionDeliveryAdapter, error) {
 			return adapter, nil
 		},
 	}, &SendMessageRequest{
@@ -211,7 +158,7 @@ func TestDeliverAPISessionMessageRejectsReloadAndLifecycleChanges(t *testing.T) 
 		_, err := DeliverAPISessionMessage(t.Context(), storage, &manifest.Manifest{
 			SessionID: "missing-api-session",
 			Name:      "missing",
-		}, agent.Message{}, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+		}, agent.Message{}, func(context.Context, *manifest.Manifest) (APISessionDeliveryAdapter, error) {
 			t.Fatal("factory called after reload failure")
 			return nil, nil
 		})
@@ -233,7 +180,7 @@ func TestDeliverAPISessionMessageRejectsReloadAndLifecycleChanges(t *testing.T) 
 			_, err := DeliverAPISessionMessage(t.Context(), storage, &manifest.Manifest{
 				SessionID: current.SessionID,
 				Name:      current.Name,
-			}, agent.Message{}, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+			}, agent.Message{}, func(context.Context, *manifest.Manifest) (APISessionDeliveryAdapter, error) {
 				t.Fatal("factory called for non-active lifecycle")
 				return nil, nil
 			})
@@ -245,59 +192,41 @@ func TestDeliverAPISessionMessageRejectsReloadAndLifecycleChanges(t *testing.T) 
 	}
 }
 
-func TestDeliverAPISessionMessageRejectsIncompleteOrFailedAdapter(t *testing.T) {
+func TestDeliverAPISessionMessageRejectsFailedAdapter(t *testing.T) {
 	factoryErr := errors.New("factory failed")
 	readinessErr := errors.New("readiness failed")
 	sendErr := errors.New("send failed")
 
 	for _, test := range []struct {
 		name    string
-		factory APISessionAgentFactory
+		factory APISessionDeliveryFactory
 		want    string
 	}{
 		{
 			name: "factory failure",
-			factory: func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+			factory: func(context.Context, *manifest.Manifest) (APISessionDeliveryAdapter, error) {
 				return nil, factoryErr
 			},
 			want: factoryErr.Error(),
 		},
 		{
-			name: "missing readiness contract",
-			factory: func(context.Context, *manifest.Manifest) (agent.Agent, error) {
-				return &apiDeliveryTestAgent{}, nil
-			},
-			want: "does not support context-aware readiness",
-		},
-		{
 			name: "readiness failure",
-			factory: func(context.Context, *manifest.Manifest) (agent.Agent, error) {
-				return &readyAPIDeliveryTestAgent{apiDeliveryTestAgent: &apiDeliveryTestAgent{statusErr: readinessErr}}, nil
+			factory: func(context.Context, *manifest.Manifest) (APISessionDeliveryAdapter, error) {
+				return &apiDeliveryTestAdapter{statusErr: readinessErr}, nil
 			},
 			want: readinessErr.Error(),
 		},
 		{
 			name: "not ready",
-			factory: func(context.Context, *manifest.Manifest) (agent.Agent, error) {
-				return &readyAPIDeliveryTestAgent{apiDeliveryTestAgent: &apiDeliveryTestAgent{status: agent.StatusSuspended}}, nil
+			factory: func(context.Context, *manifest.Manifest) (APISessionDeliveryAdapter, error) {
+				return &apiDeliveryTestAdapter{status: agent.StatusSuspended}, nil
 			},
 			want: "is not ready for direct delivery",
 		},
 		{
-			name: "missing delivery contract",
-			factory: func(context.Context, *manifest.Manifest) (agent.Agent, error) {
-				return &readyAPIDeliveryTestAgent{apiDeliveryTestAgent: &apiDeliveryTestAgent{status: agent.StatusIdle}}, nil
-			},
-			want: "does not support context-aware delivery",
-		},
-		{
 			name: "delivery failure",
-			factory: func(context.Context, *manifest.Manifest) (agent.Agent, error) {
-				return &sendableAPIDeliveryTestAgent{
-					readyAPIDeliveryTestAgent: &readyAPIDeliveryTestAgent{
-						apiDeliveryTestAgent: &apiDeliveryTestAgent{status: agent.StatusIdle, sendErr: sendErr},
-					},
-				}, nil
+			factory: func(context.Context, *manifest.Manifest) (APISessionDeliveryAdapter, error) {
+				return &apiDeliveryTestAdapter{status: agent.StatusIdle, sendErr: sendErr}, nil
 			},
 			want: sendErr.Error(),
 		},

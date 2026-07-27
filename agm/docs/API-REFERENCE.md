@@ -3,14 +3,14 @@
 Complete API reference for developers integrating with or extending AGM.
 
 **Version**: 3.0
-**Last Updated**: 2026-02-04
+**Last Updated**: 2026-07-27
 
 ---
 
 ## Table of Contents
 
 - [Go Package API](#go-package-api)
-- [Agent Interface](#agent-interface)
+- [Harness Metadata Interface](#harness-metadata-interface)
 - [CommandTranslator Interface](#commandtranslator-interface)
 - [Session Manager API](#session-manager-api)
 - [Manifest API](#manifest-api)
@@ -37,82 +37,43 @@ import (
 
 ---
 
-## Agent Interface
+## Harness Metadata Interface
 
 ### Interface Definition
 
 ```go
-// Agent represents an AI agent (Claude, Gemini, GPT)
-type Agent interface {
-    // Start initializes and starts the agent session
-    Start(ctx context.Context, sessionID string, opts *StartOptions) error
-
-    // IsAvailable checks if agent is configured (API keys, CLI installed)
-    IsAvailable() bool
-
-    // GetMetadata returns agent metadata (name, version, capabilities)
-    GetMetadata() *AgentMetadata
-
-    // GetTranslator returns the command translator for this agent
-    GetTranslator() command.Translator
+// Harness exposes descriptive facts for heterogeneous discovery.
+// Lifecycle behavior stays on concrete adapters or operation-owned interfaces.
+type Harness interface {
+    Name() string
+    Version() string
+    Capabilities() Capabilities
 }
 ```
 
-### StartOptions
+Adapter constructors return concrete pointers such as `*ClaudeAdapter` and
+`*CodexCLIAdapter`. `GetHarness` intentionally returns only `Harness`.
 
 ```go
-type StartOptions struct {
-    ProjectDir  string            // Working directory
-    InitPrompt  string            // Initial prompt to send
-    Environment map[string]string // Environment variables
-    Detached    bool              // Create without attaching
+type ContextMessageSender interface {
+    SendMessageContext(context.Context, SessionID, Message) error
+}
+
+type ContextSessionStatusGetter interface {
+    GetSessionStatusContext(context.Context, SessionID) (Status, error)
 }
 ```
 
-### AgentMetadata
+Pure API message delivery composes only these two cancellation-aware
+capabilities in `internal/ops`; it does not accept a universal lifecycle
+object.
 
 ```go
-type AgentMetadata struct {
-    Name         string   // "claude", "gemini", "gpt"
-    DisplayName  string   // "Claude (Anthropic)"
-    Version      string   // Agent version
-    ContextLimit int      // Max context tokens
-    Capabilities []string // Supported features
-    Available    bool     // API key configured
+harness, err := agent.GetHarness("codex-cli")
+if err != nil {
+    return err
 }
-```
-
-### Example Usage
-
-```go
-package main
-
-import (
-    "context"
-    "github.com/vbonnet/dear-agent/agm/internal/agent"
-)
-
-func main() {
-    // Get Claude agent
-    claudeAgent := agent.NewClaudeAdapter()
-
-    // Check availability
-    if !claudeAgent.IsAvailable() {
-        panic("Claude API key not configured")
-    }
-
-    // Start session
-    opts := &agent.StartOptions{
-        ProjectDir: "~/projects/myapp",
-        InitPrompt: "Please review the authentication code",
-    }
-
-    ctx := context.Background()
-    err := claudeAgent.Start(ctx, "my-session-uuid", opts)
-    if err != nil {
-        panic(err)
-    }
-}
+fmt.Printf("%s %s\n", harness.Name(), harness.Version())
 ```
 
 ---
@@ -163,9 +124,7 @@ import (
     "github.com/vbonnet/dear-agent/agm/internal/agent"
 )
 
-func renameSession(agent agent.Agent, sessionID, newName string) error {
-    translator := agent.GetTranslator()
-
+func renameSession(translator command.CommandTranslator, sessionID, newName string) error {
     ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
     defer cancel()
 
@@ -791,8 +750,8 @@ package testing
 // CreateTestSession creates isolated test session
 func CreateTestSession(t *testing.T, name string) (sessionDir string, cleanup func())
 
-// MockAgent creates mock agent for testing
-func MockAgent(t *testing.T, agentType string) agent.Agent
+// MockHarness creates metadata-only harness discovery test data
+func MockHarness(t *testing.T, harnessType string) agent.Harness
 
 // MockTmux creates mock tmux environment
 func MockTmux(t *testing.T) (socketPath string, cleanup func())

@@ -1,6 +1,6 @@
 # Agent Harness and Model Parity Specification
 
-<!-- Last audited at: 2026-07-22 -->
+<!-- Last audited at: 2026-07-27 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -8,9 +8,11 @@
 
 ## Overview
 
-`agm/internal/agent` owns harness identity, capabilities, model routing, and
-the adapter contract for harness-native lifecycle primitives. Cross-surface
-create, kill, archive, and message-delivery ordering belongs to
+`agm/internal/agent` owns harness identity, descriptive capabilities, model
+routing, concrete harness adapters, and the finite discovery catalog.
+Consumers define narrow capability interfaces for the behavior they invoke;
+there is no universal harness lifecycle facade. Cross-surface create, kill,
+archive, and message-delivery ordering belongs to
 `agm/internal/ops`; the root CLI retains the focused transactional resume
 workflow. The agent package also owns the model alias registry used by CLI
 creation flows, OpenCode model selection, and cross-harness tier aliases.
@@ -38,6 +40,14 @@ compatibility.
 **AGP-54** When AGM resolves the `codex-cli` harness, the system shall use `CodexCLIAdapter` and shall not route Codex terminal status through the OpenAI API adapter.
 
 **AGP-56** When a CLI or MCP surface exposes create, kill, archive, or message-delivery behavior, the surface shall delegate lifecycle ordering, rollback, and verified postconditions to `agm/internal/ops` rather than implement a competing surface-specific lifecycle.
+
+**AGP-58** When AGM discovers or compares harness adapters, the system shall expose only canonical name, version, and descriptive capabilities through `agent.Harness` rather than require a universal lifecycle interface.
+
+**AGP-59** When an AGM consumer needs harness behavior, the consumer shall depend on a capability interface containing only the methods that operation invokes or on a concrete adapter when the behavior is harness-specific.
+
+**AGP-60** When the pure API message transaction reconstructs an adapter, the system shall require context-aware readiness and context-aware message delivery at compile time without requiring create, resume, terminate, history, import, export, or command behavior.
+
+**AGP-61** When AGM constructs a harness adapter, the adapter constructor shall return its concrete adapter type, while heterogeneous discovery shall use the single finite harness constructor catalog without a second mutable runtime registry.
 
 ### Model Families
 
@@ -69,7 +79,7 @@ compatibility.
 
 **AGP-43** When AGM evaluates Pi capabilities, the system shall expose native AGENTS.md loading, project skills, exact model routing, resumable JSONL sessions, managed hooks, and bridged tool authorization without claiming native quota or rate-limit telemetry that Pi does not provide.
 
-**AGP-44** When AGM exports Pi history through the shared Agent message model, the system shall include user and assistant text without mislabeling tool results as assistant speech, while native export shall preserve the original JSONL.
+**AGP-44** When AGM exports Pi history through the shared message model, the system shall include user and assistant text without mislabeling tool results as assistant speech, while native export shall preserve the original JSONL.
 
 **AGP-45** When OpenCode resolves an alias aggregated from multiple harness catalogs, the system shall use stable explicit precedence and prefer provider-qualified routes instead of depending on map iteration order.
 
