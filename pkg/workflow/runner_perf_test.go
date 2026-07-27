@@ -41,7 +41,11 @@ func skipUnreliablePerfEnvironment(t *testing.T) {
 // floor every backend must clear.
 
 const (
-	perfSampleCount    = 200
+	// Five thousand observations keep the P95 estimator representative when
+	// occasional host scheduling pauses affect a handful of SQLite commits.
+	// Smaller 200-observation windows made the 1ms audit floor depend on as
+	// few as ten samples and failed intermittently on an otherwise idle host.
+	perfSampleCount    = 5000
 	statusReadP95      = 5 * time.Millisecond
 	auditAppendP95     = 1 * time.Millisecond
 	listRecentP95      = 10 * time.Millisecond
