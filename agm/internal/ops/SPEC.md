@@ -1,9 +1,9 @@
 # agm/internal/ops — Requirements Specification (EARS)
 
-<!-- Last audited at: 2026-07-21 -->
+<!-- Last audited at: 2026-07-27 -->
 
 **Version**: 1.0
-**Last Updated**: 2026-07-21
+**Last Updated**: 2026-07-27
 **Status**: Baseline (derived from tests + code, not design-forward)
 **Scope**: Shared business-logic layer for AGM CLI, MCP, and Skills surfaces
 
@@ -188,6 +188,24 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 **OPS-81** When `ArchiveSession` resolves a session, the system shall lock its immutable session ID, reload mutable lifecycle state under that lock, and serialize the archive mutation with delivery; for a pure API session, archive and delivery shall use a provider-appropriate bounded lock wait that exceeds the ordinary lifecycle wait while honoring caller cancellation, so either an in-flight completed turn commits before archive or delivery observes archive before provider work.
 
 **OPS-82** When `ArchiveSession` reloads sandbox ownership metadata, the system shall authorize sandbox cleanup only for a complete valid record whose ID matches the stable session ID and whose merged boundary is exactly the current host sandbox base's identified `merged` child; incomplete, mismatched, legacy, or out-of-base metadata shall preserve every sandbox path.
+
+### Shared Session Resume Lifecycle
+
+**OPS-83** When `ResumeSession` receives a stable session ID, the operation shall acquire that ID's lifecycle lock before its first mutable storage read, reload the current session under the lock, classify worktree and tmux health before mutation, and reject archived, unhealthy, or unverifiable targets without creating or commanding a tmux session.
+
+**OPS-84** When `ResumeSession` cold-starts a harness, the operation shall create one exact tmux identity, build the native resume command from persisted harness metadata, wait for the harness-specific process and composer boundary, and persist the canonical tmux name only after readiness; when the expected runtime already exists, the operation shall preserve it and shall not submit another launch command except for a proven restartable Pi shell.
+
+**OPS-85** If cold resume fails before an irreversible prompt boundary, the operation shall restore only the metadata revision owned by that attempt and remove only its exact tmux creation identity; if metadata compensation is rejected or otherwise unproven, it shall preserve the ready runtime rather than leave canonical metadata pointing at a resource it destroyed.
+
+**OPS-86** When optional Codex prompt submission is confirmed or its final acknowledgement is lost, `ResumeSession` shall treat work as possibly started, complete ownership with a cancellation-independent context, and return success with the uncertainty fact; a positive pre-submission failure shall roll back an owned cold runtime, while the same failure against a pre-existing runtime shall warn and preserve attachment behavior.
+
+**OPS-87** When `ResumeSession` cold-resumes AGY, it shall hold the canonical workspace lifecycle lock across command submission and native readiness, preserve a known stored model and permission mode, and omit an unknown or ambiguous legacy model override; when it evaluates an existing Pi pane, it shall require exact configured-harness liveness or a proven restartable shell.
+
+**OPS-88** When `ResumeSession` reports progress, the system shall provide observer callbacks only read-only lifecycle facts, prevent those callbacks from authorizing, skipping, reordering, or aborting operation phases, and permit interactive terminal attachment only in the caller after the operation returns and releases the stable-session lock.
+
+**OPS-89** While `ResumeSession` remains before its irreversible prompt boundary, the system shall honor caller cancellation before each later lifecycle phase and compensate any owned cold runtime; after work may have started, later cancellation shall not convert the operation into a retryable failure.
+
+**OPS-90** When `ResumeSession` reports a successful lifecycle result, the system shall update durable activity only after native readiness and canonical runtime ownership, and shall return the exact stable ID, harness, tmux name, creation and launch facts, health facts, prompt uncertainty, and warnings needed by non-owning surfaces.
 
 **OPS-76** When a fresh AGY session has a startup prompt, `CreateSessionWithContext` shall deliver that prompt once after native readiness but before identity discovery, discover and register the resulting provider identity while retaining the workspace lock, and mark the prompt consumed so CLI, MCP, and fallback completion paths cannot resend it; bootstrap failure or caller cancellation shall roll back the owned tmux session before registration, and a fresh AGY request without a startup prompt shall fail before mutation.
 
