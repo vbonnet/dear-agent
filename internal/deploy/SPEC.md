@@ -40,4 +40,4 @@ broken.
 
 **DEP-09** When any `AtomicInstall` step fails before the rename, the system shall remove the temporary file it created.
 
-**DEP-10** When a clean linked-worktree build succeeds without a `vcs.revision`, the system shall rebuild in a temporary standalone clone and apply the same provenance gate before installation.
+**DEP-10** When a clean linked-worktree build succeeds without a `vcs.revision`, the system shall rebuild in a temporary standalone clone and apply the same provenance gate before installation. The fallback clone and its detached checkout shall use the finite clone-fallback deadline.

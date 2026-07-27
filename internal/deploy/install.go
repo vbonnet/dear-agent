@@ -28,6 +28,12 @@ var buildBinary = goBuild
 // can exercise the gate without creating a real clone.
 var buildFromCleanClone = goBuildFromCleanClone
 
+// gitCheckout is replaceable so timeout selection can be verified without a
+// filesystem-sized checkout in a unit test.
+var gitCheckout = func(ctx context.Context, cloneDir string) ([]byte, error) {
+	return exec.CommandContext(ctx, "git", "-C", cloneDir, "checkout", "--detach", "HEAD").CombinedOutput()
+}
+
 func goBuild(repoRoot, pkg, outPath string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), buildTimeout)
 	defer cancel()
@@ -99,11 +105,14 @@ func runGitClone(repoRoot, cloneDir string) error {
 }
 
 func runGitCheckout(cloneDir string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
+	// The checkout is part of the standalone-clone fallback, and may need to
+	// materialize a large working tree. Keep its finite deadline aligned with
+	// the clone rather than the short timeout for ordinary git probes.
+	ctx, cancel := context.WithTimeout(context.Background(), cloneTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "git", "-C", cloneDir, "checkout", "--detach", "HEAD").CombinedOutput()
+	out, err := gitCheckout(ctx, cloneDir)
 	if ctx.Err() != nil {
-		return fmt.Errorf("checkout standalone clone timed out after %s: %w", gitTimeout, ctx.Err())
+		return fmt.Errorf("checkout standalone clone timed out after %s: %w", cloneTimeout, ctx.Err())
 	}
 	if err != nil {
 		return fmt.Errorf("checkout standalone clone: %w\n%s", err, out)
