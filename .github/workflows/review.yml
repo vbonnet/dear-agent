@@ -16,6 +16,28 @@ name: AI Code Review (5-dimension)
 #
 # Required status check: "5-Dimension AI Review" — registered in
 # .github/rulesets/main.json.
+#
+# PAUSED 2026-07-27: ANTHROPIC_API_KEY is intentionally unset (no API quota
+# outside the Max plan subscription, which this workflow cannot use — it would
+# bill pay-per-token, not the subscription). SPEC R4 in cmd/ai-review says a
+# missing secret fails closed with no silent skip, because a secret vanishing
+# is normally a sign of tampering. But an owner who has never funded this gate
+# and isn't about to isn't "tampering" — so the "Run AI review gate" step below
+# is skipped outright (steps.gate.outcome=skipped) when the key is absent and
+# no 'ai-review:override' label is active. The published check gets an honest
+# `neutral` conclusion (never a fabricated `success`) explaining why, and the
+# job does not fail. cmd/ai-review's Go fail-closed logic is untouched — it
+# still fails closed if actually invoked with no key, which still happens on
+# the override path (AIREV-03's audited pass-through still applies there).
+# "5-Dimension AI Review" was also dropped from the required-checks list in
+# .github/rulesets/main.json so a future ruleset sync can't start blocking
+# merges on a check nobody is funding (as of this change, live GitHub does not
+# require it either — see docs/branch-protection.md).
+#
+# Re-enable: set the ANTHROPIC_API_KEY repo secret. That alone makes the `if:`
+# below true again — no other change needed. To make it a required merge gate
+# again too, re-add "5-Dimension AI Review" to .github/rulesets/main.json and
+# re-apply per docs/branch-protection.md.
 
 on:
   # pull_request_target is deliberate: this workflow checks out and executes
@@ -188,6 +210,11 @@ jobs:
       - name: Run AI review gate
         id: gate
         continue-on-error: true
+        # Skip entirely (not fail-closed) when the key is unset and no human
+        # has overridden — see the PAUSED note at the top of this file. The
+        # override path still runs so its audited pass-through keeps working
+        # even with no key.
+        if: ${{ secrets.ANTHROPIC_API_KEY != '' || steps.override.outputs.active == 'true' }}
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -240,13 +267,21 @@ jobs:
         run: |
           set -euo pipefail
           conclusion=failure
-          [ "$OUTCOME" = success ] && conclusion=success
+          summary="Trusted review gate completed with outcome: $OUTCOME."
+          if [ "$OUTCOME" = success ]; then
+            conclusion=success
+          elif [ "$OUTCOME" = skipped ]; then
+            # Honest `neutral`, never a fabricated `success` — SPEC R4 forbids
+            # a silent pass. See the PAUSED note at the top of this file.
+            conclusion=neutral
+            summary='Paused: ANTHROPIC_API_KEY is not configured (cost/quota decision, 2026-07-27). Not required for merge. Re-enable by setting the secret, or run a single PR under human authority with the ai-review:override label.'
+          fi
           gh api --method PATCH "repos/$REPO/check-runs/${{ steps.pending.outputs.check_id }}" \
             -f status=completed \
             -f conclusion="$conclusion" \
             -f output[title]='5-Dimension AI Review' \
-            -f output[summary]="Trusted review gate completed with outcome: $OUTCOME."
+            -f output[summary]="$summary"
 
       - name: Fail if review gate failed
-        if: steps.gate.outcome != 'success'
+        if: steps.gate.outcome == 'failure'
         run: exit 1

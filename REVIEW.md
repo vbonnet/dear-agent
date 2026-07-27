@@ -85,13 +85,21 @@ dimensions report clean.
 - `--fix` applies fixable findings to the working tree (style, trivial bugs).
 
 The review protocol is wired into CI via `.github/workflows/review.yml`, which
-invokes the `cmd/ai-review` Go command. That check is **fail-closed and
-required** (registered in `.github/rulesets/main.json`): the command maps the
-§1 outcome to a process exit code, and only `approved` — or the audited human
-override below — lets the check pass. `needs-work`, `rejected`, and
-`needs-human-review`, as well as a missing API key, a fork PR, a per-dimension
-API failure, synthesis failure, an unparseable outcome, or an oversize diff, all
-**block the merge**.
+invokes the `cmd/ai-review` Go command. That check is **fail-closed** when it
+runs: the command maps the §1 outcome to a process exit code, and only
+`approved` — or the audited human override below — lets the check pass.
+`needs-work`, `rejected`, and `needs-human-review`, as well as a fork PR, a
+per-dimension API failure, synthesis failure, an unparseable outcome, or an
+oversize diff, all **block the merge**.
+
+> [!NOTE]
+> **Paused 2026-07-27**: `ANTHROPIC_API_KEY` is unset (no funded API quota),
+> so `review.yml` now skips invoking `cmd/ai-review` entirely rather than
+> failing closed on a missing key — see the PAUSED comment at the top of that
+> file. It is also no longer registered in `.github/rulesets/main.json`, i.e.
+> it is **not currently a required check**. `cmd/ai-review`'s own fail-closed
+> behavior on a missing key (SPEC R4) is unchanged; it's just not invoked in
+> that case anymore. Re-enable by setting the secret.
 
 ### Known residual risk: workflow-definition trust
 
