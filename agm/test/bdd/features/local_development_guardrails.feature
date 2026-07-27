@@ -161,3 +161,4 @@ Feature: Local development guardrails
     Given local and required CI govulncheck allowlists are configured
     When AGM validates govulncheck policy parity
     Then the local and required CI govulncheck allowlists should match
+    And local preflight should resolve standard Go tool installs outside PATH

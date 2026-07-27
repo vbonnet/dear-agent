@@ -150,7 +150,14 @@ if [[ "$MODE" == "full" ]]; then
   ok "ordinary performance SLAs pass"
 
   step "govulncheck ./..."
-  if ! command -v govulncheck >/dev/null 2>&1; then
+  GOVULNCHECK_BIN="$(command -v govulncheck || true)"
+  if [[ -z "$GOVULNCHECK_BIN" ]]; then
+    GOPATH_GOVULNCHECK="$(go env GOPATH)/bin/govulncheck"
+    if [[ -x "$GOPATH_GOVULNCHECK" ]]; then
+      GOVULNCHECK_BIN="$GOPATH_GOVULNCHECK"
+    fi
+  fi
+  if [[ -z "$GOVULNCHECK_BIN" ]]; then
     fail "govulncheck not installed. Run: go install golang.org/x/vuln/cmd/govulncheck@latest"
   fi
   if ! command -v jq >/dev/null 2>&1; then
@@ -171,7 +178,7 @@ if [[ "$MODE" == "full" ]]; then
   # silently pass through with $TMP_VULN empty and jq returning "no
   # findings" — a security-critical false-positive.
   VULN_EXIT=0
-  govulncheck -format json -scan package ./... > "$TMP_VULN" || VULN_EXIT=$?
+  "$GOVULNCHECK_BIN" -format json -scan package ./... > "$TMP_VULN" || VULN_EXIT=$?
   if [[ $VULN_EXIT -ne 0 && $VULN_EXIT -ne 3 ]]; then
     fail "govulncheck failed to run (exit code $VULN_EXIT)"
   fi

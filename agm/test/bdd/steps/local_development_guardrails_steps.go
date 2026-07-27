@@ -137,6 +137,7 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^local and required CI govulncheck allowlists are configured$`, localAndRequiredCIGovulncheckAllowlistsAreConfigured)
 	ctx.Step(`^AGM validates govulncheck policy parity$`, agmValidatesGovulncheckPolicyParity)
 	ctx.Step(`^the local and required CI govulncheck allowlists should match$`, localAndRequiredCIGovulncheckAllowlistsShouldMatch)
+	ctx.Step(`^local preflight should resolve standard Go tool installs outside PATH$`, localPreflightShouldResolveStandardGoToolInstallsOutsidePATH)
 }
 
 func safePRLinkedWorktreeWithLockOwnership(ctx context.Context, initial string) error {
@@ -764,6 +765,28 @@ func localAndRequiredCIGovulncheckAllowlistsShouldMatch(ctx context.Context) err
 	}
 	if !slices.Equal(state.localVulnAllowlist, state.ciVulnAllowlist) {
 		return fmt.Errorf("local govulncheck allowlist %v does not match required CI %v", state.localVulnAllowlist, state.ciVulnAllowlist)
+	}
+	return nil
+}
+
+func localPreflightShouldResolveStandardGoToolInstallsOutsidePATH(ctx context.Context) error {
+	if _, err := getLocalDevGuardrailState(ctx); err != nil {
+		return err
+	}
+	sourcePath := filepath.Join(localDevBDDRepoRoot(), "scripts", "preflight.sh")
+	source, err := os.ReadFile(sourcePath)
+	if err != nil {
+		return fmt.Errorf("read local preflight: %w", err)
+	}
+	for _, required := range []string{
+		`GOVULNCHECK_BIN="$(command -v govulncheck || true)"`,
+		`GOPATH_GOVULNCHECK="$(go env GOPATH)/bin/govulncheck"`,
+		`[[ -x "$GOPATH_GOVULNCHECK" ]]`,
+		`"$GOVULNCHECK_BIN" -format json -scan package ./...`,
+	} {
+		if !strings.Contains(string(source), required) {
+			return fmt.Errorf("local preflight is missing govulncheck resolution contract %q", required)
+		}
 	}
 	return nil
 }
