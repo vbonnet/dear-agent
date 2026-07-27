@@ -251,12 +251,10 @@ func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
 		fmt.Printf("  Project: %s\n", getResult.Session.Project)
 	}
 
-	archiveResult, archiveErr := ops.ArchiveSession(opCtx, &ops.ArchiveSessionRequest{
-		Identifier:  getResult.Session.ID,
-		Force:       forceArchive,
-		KeepSandbox: keepSandbox,
-		Outcome:     outcome,
-	})
+	archiveResult, archiveErr := ops.ArchiveSession(
+		opCtx,
+		newSingleSessionArchiveRequest(getResult.Session.ID, outcome, false),
+	)
 	if archiveErr != nil {
 		return handleError(archiveErr)
 	}
@@ -316,22 +314,16 @@ func archiveAuditArgs() map[string]string {
 // settings changes, or detached reaper startup.
 func previewSingleSessionArchive(opCtx *ops.OpContext, sessionName string, getResult *ops.GetSessionResult, outcome manifest.SessionOutcome) error {
 	isActive := getResult.Session.Status == "active"
-	if isActive && !asyncArchive {
-		return fmt.Errorf("session '%s' is active; use --async to archive an active session", sessionName)
-	}
-	if !isActive && asyncArchive {
-		return fmt.Errorf("--async should only be used for active sessions; omit --async for stopped sessions")
+	if err := validateSingleSessionArchiveMode(sessionName, isActive, asyncArchive); err != nil {
+		return err
 	}
 
 	dryRunCtx := *opCtx
 	dryRunCtx.DryRun = true
-	result, err := ops.ArchiveSession(&dryRunCtx, &ops.ArchiveSessionRequest{
-		Identifier:      getResult.Session.ID,
-		Force:           forceArchive,
-		KeepSandbox:     keepSandbox,
-		Outcome:         outcome,
-		AllowActiveTmux: asyncArchive,
-	})
+	result, err := ops.ArchiveSession(
+		&dryRunCtx,
+		newSingleSessionArchiveRequest(getResult.Session.ID, outcome, asyncArchive),
+	)
 	if err != nil {
 		return handleError(err)
 	}
@@ -373,22 +365,16 @@ func handleAlreadyArchivedOrAsync(opCtx *ops.OpContext, sessionName string, getR
 		return true, nil
 	}
 	isActive := getResult.Session.Status == "active"
-	if isActive && !asyncArchive {
-		return true, fmt.Errorf("session '%s' is active; use --async to archive an active session", sessionName)
-	}
-	if !isActive && asyncArchive {
-		return true, fmt.Errorf("--async should only be used for active sessions; omit --async for stopped sessions")
+	if err := validateSingleSessionArchiveMode(sessionName, isActive, asyncArchive); err != nil {
+		return true, err
 	}
 	if asyncArchive {
 		preflightCtx := *opCtx
 		preflightCtx.DryRun = true
-		if _, err := ops.ArchiveSession(&preflightCtx, &ops.ArchiveSessionRequest{
-			Identifier:      getResult.Session.ID,
-			Force:           forceArchive,
-			KeepSandbox:     keepSandbox,
-			Outcome:         outcome,
-			AllowActiveTmux: true,
-		}); err != nil {
+		if _, err := ops.ArchiveSession(
+			&preflightCtx,
+			newSingleSessionArchiveRequest(getResult.Session.ID, outcome, true),
+		); err != nil {
 			return true, handleError(err)
 		}
 		tmuxSession := getResult.Session.TmuxSession
@@ -398,6 +384,26 @@ func handleAlreadyArchivedOrAsync(opCtx *ops.OpContext, sessionName string, getR
 		return true, spawnReaperFn(getResult.Session.ID, tmuxSession, getResult.Session.Harness, outcome)
 	}
 	return false, nil
+}
+
+func validateSingleSessionArchiveMode(sessionName string, isActive, async bool) error {
+	if isActive && !async {
+		return fmt.Errorf("session '%s' is active; use --async to archive an active session", sessionName)
+	}
+	if !isActive && async {
+		return fmt.Errorf("--async should only be used for active sessions; omit --async for stopped sessions")
+	}
+	return nil
+}
+
+func newSingleSessionArchiveRequest(sessionID string, outcome manifest.SessionOutcome, allowActiveTmux bool) *ops.ArchiveSessionRequest {
+	return &ops.ArchiveSessionRequest{
+		Identifier:      sessionID,
+		Force:           forceArchive,
+		KeepSandbox:     keepSandbox,
+		Outcome:         outcome,
+		AllowActiveTmux: allowActiveTmux,
+	}
 }
 
 // reportPostCleanup prints the per-step cleanup results from ops.ArchiveSession.
