@@ -252,8 +252,8 @@ func TestValidateRemoteURL_NonGitDir(t *testing.T) {
 }
 
 func TestPreflightTimeoutCoversRepositoryFullGate(t *testing.T) {
-	if preflightTimeout < 20*time.Minute {
-		t.Fatalf("preflightTimeout = %s, want at least 20m", preflightTimeout)
+	if preflightTimeout < 60*time.Minute {
+		t.Fatalf("preflightTimeout = %s, want at least 60m", preflightTimeout)
 	}
 }
 
