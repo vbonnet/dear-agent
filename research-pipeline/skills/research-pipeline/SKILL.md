@@ -144,17 +144,23 @@ couldn't break.
 **How beads actually get filed depends on size:**
 
 - **Small decomposition (a handful of beads, no phasing needed):** file
-  directly via `bd create …`, respecting whatever database the operator has
-  configured (e.g. `BEADS_DIR`, or a `-C <path>` override) — don't hardcode a
-  specific database path in this skill. Full Wayfinder session overhead
-  isn't warranted for 2-3 beads.
+  directly, using this repository's own canonical Beads invocation. Check
+  its `AGENTS.md`/equivalent first — e.g. dear-agent itself requires the
+  explicit form
+  `bd --db ~/beads/context-engine/.beads --dolt-auto-commit on <subcommand>`
+  for every invocation; use that exact form here. For a repo with no such
+  documented policy, respect whatever database the operator has configured
+  (`BEADS_DIR`, a `-C <path>` override) instead of hardcoding a path — but
+  that fallback is for the *absence* of repo policy, not license to skip a
+  repo's own required flags where one exists. Full Wayfinder session
+  overhead isn't warranted for 2-3 beads.
 - **Large decomposition (needs phased sequencing, dependency graphs,
   multiple work-streams):** drive it through a `wayfinder` session's
   **PLAN** phase (see `wayfinder/PHASES.md` for the nine-phase model —
   CHARTER through RETRO), which files beads through Wayfinder's own
   canonical Beads adapter (`wayfinder/cmd/wayfinder-session/internal/beads`
-  in this repo — non-interactive `bd create`, no shell interpolation, empty
-  titles rejected). Don't reimplement phased sequencing or a second beads
+  in this repo — a non-interactive filing path with no shell interpolation
+  and empty titles rejected). Don't reimplement phased sequencing or a second beads
   filing path in this skill; Wayfinder already owns that mechanic. This is
   the one stage of this pipeline that genuinely overlaps a Wayfinder phase
   (see `docs/design/research-pipeline-wayfinder-integration.md`, once
@@ -241,7 +247,7 @@ after this pipeline runs to completion for a given source:
 - [ ] If Stage 4 review recorded a blocking verdict at any point, a later
       artifact shows the specific corrections applied and a follow-up
       review confirming they're resolved (no bead trail that jumps from
-      "blocked" straight to `bd create` with no fix-and-reverify step)
+      "blocked" straight to bead filing with no fix-and-reverify step)
 
 ## References
 
@@ -255,6 +261,9 @@ after this pipeline runs to completion for a given source:
   execution, sized beads — DEAR process discipline, not personal taste).
 - `wayfinder/PHASES.md` and `wayfinder/cmd/wayfinder-session/internal/beads/SPEC.md`
   — the Beads adapter Stage 4 delegates to for large decompositions.
-- `docs/design/research-pipeline-wayfinder-integration.md` — the
-  incorporate-vs-delegate assessment for this pipeline's one real overlap
-  with Wayfinder (decomposition only).
+- [vbonnet/dear-agent#947](https://github.com/vbonnet/dear-agent/pull/947) —
+  the incorporate-vs-delegate assessment for this pipeline's one real overlap
+  with Wayfinder (decomposition only), landing at
+  `docs/design/research-pipeline-wayfinder-integration.md`. Still open at
+  the time this skill shipped; once #947 merges, prefer the in-repo path
+  over this PR link.
