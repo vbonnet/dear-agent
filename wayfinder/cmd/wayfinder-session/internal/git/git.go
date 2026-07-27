@@ -50,7 +50,7 @@ func (g *GitIntegrator) CommitPhaseCompletion(phase, outcome, context string) er
 
 	files := []string{
 		"WAYFINDER-STATUS.md",
-		"WAYFINDER-HISTORY.md",
+		"WAYFINDER-HISTORY.jsonl",
 	}
 	artifacts, err := filepath.Glob(filepath.Join(g.projectDir, phase+"-*.md"))
 	if err != nil {
@@ -85,13 +85,13 @@ func (g *GitIntegrator) CommitRewind(fromPhase, toPhase string) error {
 	message := fmt.Sprintf("wayfinder: rewind %s to %s\n\nWayfinder-Event: rewind", fromPhase, toPhase)
 	return g.commitScoped(message, []string{
 		"WAYFINDER-STATUS.md",
-		"WAYFINDER-HISTORY.md",
+		"WAYFINDER-HISTORY.jsonl",
 		"RETRO-retrospective.md",
 	})
 }
 
 // CommitPhaseStart creates a git commit for phase start.
-// Adds WAYFINDER-STATUS.md and WAYFINDER-HISTORY.md to staging and commits so
+// Adds WAYFINDER-STATUS.md and WAYFINDER-HISTORY.jsonl to staging and commits so
 // the worktree is clean before any deliverable work begins. Without this, the
 // next start-phase call finds uncommitted marker files and refuses (ce-fvkz).
 func (g *GitIntegrator) CommitPhaseStart(phase string) error {
@@ -101,7 +101,7 @@ func (g *GitIntegrator) CommitPhaseStart(phase string) error {
 
 	markerFiles := []string{
 		"WAYFINDER-STATUS.md",
-		"WAYFINDER-HISTORY.md",
+		"WAYFINDER-HISTORY.jsonl",
 	}
 
 	// Track which files were successfully staged so we can scope the commit to

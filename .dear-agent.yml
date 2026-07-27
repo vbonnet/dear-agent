@@ -273,7 +273,7 @@ forbidden-paths:
     # retro (engram-research) for why these globs exist.
     - "**/.wayfinder/**"
     - "**/WAYFINDER-STATUS.md"
-    - "**/WAYFINDER-HISTORY.md"
+    - "**/WAYFINDER-HISTORY.jsonl"
 
 # Framework-level defaults applied to every task in this repo. These
 # travel with the session, not the prompt, so a worker (and any

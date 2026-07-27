@@ -86,7 +86,7 @@ tests/test_helper/
 /wf/
 **/.wayfinder/
 WAYFINDER-STATUS.md
-WAYFINDER-HISTORY.md
+WAYFINDER-HISTORY.jsonl
 
 # Private infra inventory (repo names + per-repo security posture).
 # The real file must NEVER be committed to this PUBLIC repo; the .example

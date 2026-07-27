@@ -16,7 +16,7 @@ import (
 // 1. Magnitude calculation (skip if magnitude 0)
 // 2. User prompting (if needed)
 // 3. Context capture (parallel)
-// 4. Dual logging: WAYFINDER-HISTORY.md (JSON) + RETRO-retrospective.md (markdown)
+// 4. Dual logging: WAYFINDER-HISTORY.jsonl (JSON Lines) + RETRO-retrospective.md (markdown)
 //
 // Errors are logged to stderr but don't block rewind operation (fail-gracefully).
 func LogRewindEvent(projectDir string, fromPhase, toPhase string, flags RewindFlags) error {
@@ -118,7 +118,7 @@ func findPhaseIndex(allPhases []string, phase string) int {
 	return -1
 }
 
-// LogToHistory logs rewind event to WAYFINDER-HISTORY.md (JSON)
+// LogToHistory logs rewind event to WAYFINDER-HISTORY.jsonl (JSON Lines)
 //
 // Marshals RewindEventData to map[string]interface{} for history.Event.Data field.
 // Reuses existing history.go infrastructure.

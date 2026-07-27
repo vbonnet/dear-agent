@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// History manages append-only event logging to WAYFINDER-HISTORY.md
+// History manages append-only event logging to WAYFINDER-HISTORY.jsonl
 type History struct {
 	path string
 }

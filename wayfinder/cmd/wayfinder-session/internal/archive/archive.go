@@ -41,9 +41,9 @@ func (a *ArchiveManager) ArchivePhase(phaseName string) error {
 	}
 
 	// Archive HISTORY file if it exists
-	historySrc := filepath.Join(a.projectDir, "WAYFINDER-HISTORY.md")
+	historySrc := filepath.Join(a.projectDir, "WAYFINDER-HISTORY.jsonl")
 	if _, err := os.Stat(historySrc); err == nil {
-		historyDst := filepath.Join(archiveDir, "WAYFINDER-HISTORY.md")
+		historyDst := filepath.Join(archiveDir, "WAYFINDER-HISTORY.jsonl")
 		if err := copyFile(historySrc, historyDst); err != nil {
 			return fmt.Errorf("failed to archive HISTORY file: %w", err)
 		}

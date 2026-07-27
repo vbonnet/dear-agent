@@ -22,4 +22,4 @@ const (
 )
 
 // HistoryFilename is the name of the history log file
-const HistoryFilename = "WAYFINDER-HISTORY.md"
+const HistoryFilename = "WAYFINDER-HISTORY.jsonl"

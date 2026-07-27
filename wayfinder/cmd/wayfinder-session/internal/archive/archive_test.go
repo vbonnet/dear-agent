@@ -25,7 +25,7 @@ func TestArchivePhase(t *testing.T) {
 		t.Fatalf("failed to create STATUS file: %v", err)
 	}
 
-	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.md")
+	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.jsonl")
 	if err := os.WriteFile(historyPath, []byte("{\"event\":\"test\"}\n"), 0644); err != nil {
 		t.Fatalf("failed to create HISTORY file: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestArchivePhase(t *testing.T) {
 	}
 
 	// Verify archive contains HISTORY file
-	archivedHistory := filepath.Join(archivePath, "WAYFINDER-HISTORY.md")
+	archivedHistory := filepath.Join(archivePath, "WAYFINDER-HISTORY.jsonl")
 	historyData, err := os.ReadFile(archivedHistory)
 	if err != nil {
 		t.Fatalf("failed to read archived HISTORY: %v", err)
