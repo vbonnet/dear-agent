@@ -11,8 +11,10 @@ import (
 )
 
 // buildTimeout bounds the `go build` invoked by AtomicInstall so a wedged build
-// can never hang a deploy (the post-merge hook runs it synchronously).
-const buildTimeout = 5 * time.Minute
+// can never hang a deploy (the post-merge hook runs it synchronously). AGM's
+// first clean build on the deployment host can exceed five minutes while
+// compiling provider SDKs, so this budget must cover that cold path too.
+const buildTimeout = 10 * time.Minute
 
 // cloneTimeout bounds the local clone used only to work around Go toolchains
 // that omit VCS metadata for linked worktrees.
@@ -22,6 +24,10 @@ const cloneTimeout = 30 * time.Second
 // VCS stamping required, so AtomicInstall's ancestry gate can read the built
 // revision. It is a package var so tests substitute a stub without a toolchain.
 var buildBinary = goBuild
+
+// goBuildCommand is replaceable so tests can verify the cold-build deadline
+// without invoking the toolchain.
+var goBuildCommand = exec.CommandContext
 
 // buildFromCleanClone is the worktree-safe fallback for a successful but
 // unstamped build from a clean linked worktree. It is a package var so tests
@@ -39,7 +45,7 @@ func goBuild(repoRoot, pkg, outPath string) error {
 	defer cancel()
 	// -buildvcs=true forces the stamp: a checkout that cannot be VCS-stamped
 	// fails the build here rather than producing an unprovable binary.
-	cmd := exec.CommandContext(ctx, "go", "build", "-buildvcs=true", "-o", outPath, pkg)
+	cmd := goBuildCommand(ctx, "go", "build", "-buildvcs=true", "-o", outPath, pkg)
 	cmd.Dir = repoRoot
 	cmd.Env = os.Environ()
 	out, err := cmd.CombinedOutput()
