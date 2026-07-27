@@ -183,6 +183,10 @@ func TestRunGitCheckout_UsesCloneFallbackDeadline(t *testing.T) {
 }
 
 func TestGoBuild_UsesColdBuildDeadline(t *testing.T) {
+	if buildTimeout != 10*time.Minute {
+		t.Fatalf("buildTimeout = %s; want 10m", buildTimeout)
+	}
+
 	orig := goBuildCommand
 	goBuildCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		deadline, ok := ctx.Deadline()
