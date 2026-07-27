@@ -141,11 +141,17 @@ process.
 ```
 
 No PR merges while any dimension has an unresolved finding with severity
-`blocking` or higher. This is enforced, not aspirational: the required
-`5-Dimension AI Review` check fails closed on every non-`approved` outcome (see
-§4). Advisory findings (style, minor perf) may be deferred to a follow-up bead.
-Every pushed revision is re-reviewed, so the check that gates the current head
-SHA reflects that SHA — not an earlier draft.
+`blocking` or higher. Advisory findings (style, minor perf) may be deferred to
+a follow-up bead. Every pushed revision is re-reviewed, so the check that
+reports on the current head SHA reflects that SHA — not an earlier draft.
+
+> [!WARNING]
+> As of 2026-07-27 this is **policy, not machine enforcement**. The
+> `5-Dimension AI Review` check is paused and is not a required status check
+> (see the note in §4), so nothing mechanically blocks a merge on a
+> non-`approved` outcome. When the gate is running it still fails closed on
+> every non-`approved` outcome; restoring it as a *required* check is the
+> separate step described in §4.
 
 ---
 
@@ -210,8 +216,10 @@ them here so they version-control alongside the protocol.
 
 - [Autonomous merge policy](docs/policies/autonomous-merge.ai.md) — merge boundaries after review.
 - `vbonnet/engram-research` `retrospectives/` — past incidents that shaped this protocol.
-- `.github/workflows/review.yml` + `cmd/ai-review/` — the fail-closed CI gate.
-- `.github/rulesets/main.json` — registers `5-Dimension AI Review` as a required check.
+- `.github/workflows/review.yml` + `cmd/ai-review/` — the fail-closed CI gate
+  (paused 2026-07-27; see §4).
+- `.github/rulesets/main.json` — the required-check list. It no longer
+  registers `5-Dimension AI Review`.
 - Chezmoi `docs/REVIEW.md` — the *dotfiles* review protocol (different bar,
   same philosophy).
 

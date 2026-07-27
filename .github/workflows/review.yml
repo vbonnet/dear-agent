@@ -1,43 +1,44 @@
 name: AI Code Review (5-dimension)
 
-# Five-dimension multi-persona review per REVIEW.md §2, wired as a FAIL-CLOSED
-# required merge gate. The review logic lives in cmd/ai-review (Go); this
-# workflow is a thin wrapper whose job exit status is the enforcement signal.
+# Five-dimension multi-persona review per REVIEW.md §2. The review logic lives
+# in cmd/ai-review (Go); this workflow is a thin wrapper whose job exit status
+# is the enforcement signal.
 #
-# Fail-closed contract (see cmd/ai-review):
+# Fail-closed contract (see cmd/ai-review), in force whenever the gate runs:
 #   - only an "approved" outcome (or the audited 'ai-review:override' label)
 #     exits 0; needs-work / rejected / needs-human-review block the merge.
-#   - missing secret, fork PRs, per-dimension API failure, synthesis failure,
-#     unparseable outcome, and oversize diffs all fail closed.
+#   - fork PRs, per-dimension API failure, synthesis failure, unparseable
+#     outcome, and oversize diffs all fail closed. (A missing secret also fails
+#     closed inside cmd/ai-review, but see PAUSED below — the gate is no longer
+#     invoked at all in that case.)
 #
 # Runs on every PR revision (opened/synchronize/reopened/ready_for_review), not
 # just the draft->ready edge, so the check that gates the current head SHA
 # actually reflects the current head SHA.
 #
-# Required status check: "5-Dimension AI Review" — registered in
-# .github/rulesets/main.json.
-#
-# PAUSED 2026-07-27: ANTHROPIC_API_KEY is intentionally unset (no API quota
-# outside the Max plan subscription, which this workflow cannot use — it would
-# bill pay-per-token, not the subscription). SPEC R4 in cmd/ai-review says a
-# missing secret fails closed with no silent skip, because a secret vanishing
-# is normally a sign of tampering. But an owner who has never funded this gate
-# and isn't about to isn't "tampering" — so the "Run AI review gate" step below
-# is skipped outright (steps.gate.outcome=skipped) when the key is absent and
-# no 'ai-review:override' label is active. The published check gets an honest
+# PAUSED 2026-07-27 — "5-Dimension AI Review" is NOT currently a required
+# status check. ANTHROPIC_API_KEY is intentionally unset (no API quota outside
+# the Max plan subscription, which this workflow cannot use — it would bill
+# pay-per-token, not the subscription). SPEC R4 in cmd/ai-review says a missing
+# secret fails closed with no silent skip, because a secret vanishing is
+# normally a sign of tampering. But an owner who has never funded this gate and
+# isn't about to isn't "tampering" — so the "Run AI review gate" step below is
+# skipped outright (steps.gate.outcome=skipped) when the key is absent and no
+# 'ai-review:override' label is active. The published check gets an honest
 # `neutral` conclusion (never a fabricated `success`) explaining why, and the
 # job does not fail. cmd/ai-review's Go fail-closed logic is untouched — it
 # still fails closed if actually invoked with no key, which still happens on
 # the override path (AIREV-03's audited pass-through still applies there).
 # "5-Dimension AI Review" was also dropped from the required-checks list in
 # .github/rulesets/main.json so a future ruleset sync can't start blocking
-# merges on a check nobody is funding (as of this change, live GitHub does not
-# require it either — see docs/branch-protection.md).
+# merges on a check nobody is funding (live GitHub does not require it either
+# — see docs/branch-protection.md).
 #
-# Re-enable: set the ANTHROPIC_API_KEY repo secret. That alone makes the `if:`
-# below true again — no other change needed. To make it a required merge gate
-# again too, re-add "5-Dimension AI Review" to .github/rulesets/main.json and
-# re-apply per docs/branch-protection.md.
+# Re-enable: set the ANTHROPIC_API_KEY repo secret. That alone flips the
+# "Detect review key" preflight below and re-arms the gate — no other change
+# needed. To make it a required merge gate again too, re-add "5-Dimension AI
+# Review" to .github/rulesets/main.json and re-apply per
+# docs/branch-protection.md.
 
 on:
   # pull_request_target is deliberate: this workflow checks out and executes
@@ -207,6 +208,22 @@ jobs:
             echo "active=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # The `secrets` context is NOT available in a step `if:` condition, so
+      # key presence has to be resolved into a step output first. Same pattern
+      # as .github/workflows/infra-repo-reconcile.yml's preflight. Emits only
+      # the boolean — never the secret itself — into the step output.
+      - name: Detect review key
+        id: key
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run AI review gate
         id: gate
         continue-on-error: true
@@ -214,7 +231,7 @@ jobs:
         # has overridden — see the PAUSED note at the top of this file. The
         # override path still runs so its audited pass-through keeps working
         # even with no key.
-        if: ${{ secrets.ANTHROPIC_API_KEY != '' || steps.override.outputs.active == 'true' }}
+        if: steps.key.outputs.present == 'true' || steps.override.outputs.active == 'true'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
