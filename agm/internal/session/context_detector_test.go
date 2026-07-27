@@ -1114,7 +1114,7 @@ func TestGetModelPricing(t *testing.T) {
 		wantOK  bool
 		wantIn  float64 // InputPerM
 	}{
-		{"opus model", "claude-opus-4-6-20251001", true, 15.0},
+		{"opus model", "claude-opus-4-6-20251001", true, 5.0},
 		{"sonnet model", "claude-sonnet-4-5-20250929", true, 3.0},
 		{"haiku model", "claude-haiku-4-20260101", true, 0.80},
 		{"unknown model", "gpt-4o-2024-05", false, 0},
