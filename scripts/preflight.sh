@@ -10,7 +10,7 @@
 #   scripts/preflight.sh            # fast tier: vet + build + AI skills + lint
 #   scripts/preflight.sh --tests    # fast tier + go test (no -race, no vuln)
 #   scripts/preflight.sh --race     # fast tier + go test -race (no vuln)
-#   scripts/preflight.sh --full     # add: go test -race + govulncheck  (full CI parity)
+#   scripts/preflight.sh --full     # add: race tests + ordinary performance SLA + govulncheck
 #
 # Exits non-zero on the first failing gate so a pre-push hook can chain it.
 
@@ -132,6 +132,14 @@ if [[ "$MODE" == "tests" || "$MODE" == "race" || "$MODE" == "full" ]]; then
 fi
 
 if [[ "$MODE" == "full" ]]; then
+  step "go test ./agm/test/performance (ordinary SLA enforcement)"
+  # The broad full suite intentionally uses -race for data-race parity. Race
+  # instrumentation distorts wall-clock latency, so run the dedicated
+  # performance package once without it as a required publication gate.
+  CI= go test -count=1 -timeout="${TEST_TIMEOUT}" ./agm/test/performance ||
+    fail "ordinary performance SLA tests failed"
+  ok "ordinary performance SLAs pass"
+
   step "govulncheck ./..."
   if ! command -v govulncheck >/dev/null 2>&1; then
     fail "govulncheck not installed. Run: go install golang.org/x/vuln/cmd/govulncheck@latest"

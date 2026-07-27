@@ -199,7 +199,7 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-98** When `ArchiveSession` reloads sandbox ownership metadata, the system shall authorize sandbox cleanup only for a complete valid record whose ID matches the stable session ID and whose merged boundary is the current host sandbox base's identified `merged` child; a recorded boundary spelled differently from that child shall be authorized only when both spellings are proven to be one existing host directory, and shall then be addressed in the host cleanup base's spelling so every downstream allowlist gate and reaper validates the same path; incomplete, mismatched, unresolvable, legacy, or out-of-base metadata shall preserve every sandbox path.
 
-**OPS-107** When archive sandbox cleanup receives a live-process refusal for a specific process immediately after owned session shutdown, the system shall retry for a bounded process-grace window while re-running every path, process, unmount, and mount safety gate; persistent holders, unreadable process state, bad paths, or surviving mounts shall preserve the sandbox.
+**OPS-107** When archive sandbox cleanup receives a live-process refusal for a specific process immediately after owned session shutdown, the system shall retry only before an absolute bounded process-grace deadline while re-running every path, process, unmount, and mount safety gate; a slow scan shall consume that shared budget rather than reset it, and persistent holders, unreadable process state, bad paths, or surviving mounts shall preserve the sandbox.
 
 ### Shared Session Resume Lifecycle
 

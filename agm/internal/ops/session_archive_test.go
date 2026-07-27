@@ -320,6 +320,7 @@ func TestCleanupSandboxDirWithChecker_RetriesOnlyTransientLiveProcess(t *testing
 		wantProcScans  int
 		wantMountScans int
 		wantSleeps     int
+		procScanDelay  time.Duration
 	}
 	tests := []testCase{
 		{
@@ -365,6 +366,15 @@ func TestCleanupSandboxDirWithChecker_RetriesOnlyTransientLiveProcess(t *testing
 			wantProcScans:  1,
 			wantMountScans: 1,
 		},
+		{
+			name:     "slow process scan exhausts grace without amplification",
+			attempts: 5,
+			listProcPaths: func(sandboxDir string, _ int) ([]sandboxgc.ProcPath, error) {
+				return []sandboxgc.ProcPath{{PID: 30002, Path: filepath.Join(sandboxDir, "upper", "repo0")}}, nil
+			},
+			wantProcScans: 1,
+			procScanDelay: 60 * time.Millisecond,
+		},
 	}
 
 	for _, tt := range tests {
@@ -379,10 +389,12 @@ func TestCleanupSandboxDirWithChecker_RetriesOnlyTransientLiveProcess(t *testing
 			}
 
 			var procScans, mountScans, sleeps, removes int
+			currentTime := time.Unix(1_000, 0)
 			checker := &sandboxgc.Checker{
 				Base: base,
 				ListProcPaths: func() ([]sandboxgc.ProcPath, error) {
 					procScans++
+					currentTime = currentTime.Add(tt.procScanDelay)
 					return tt.listProcPaths(sandboxDir, procScans)
 				},
 				ListMounts: func() ([]string, error) {
@@ -405,7 +417,11 @@ func TestCleanupSandboxDirWithChecker_RetriesOnlyTransientLiveProcess(t *testing
 				checker,
 				tt.attempts,
 				10*time.Millisecond,
-				func(time.Duration) { sleeps++ },
+				func(delay time.Duration) {
+					sleeps++
+					currentTime = currentTime.Add(delay)
+				},
+				func() time.Time { return currentTime },
 			)
 			if got != tt.wantRemoved {
 				t.Fatalf("cleanup result = %v, want %v", got, tt.wantRemoved)

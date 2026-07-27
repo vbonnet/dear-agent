@@ -555,6 +555,7 @@ func cleanupSandboxDirWithChecker(sessionID, mergedPath, base string, checker *s
 		archiveSandboxCleanupAttempts,
 		contracts.Load().SessionLifecycle.ProcessKillGracePeriod.Duration,
 		time.Sleep,
+		time.Now,
 	)
 }
 
@@ -564,6 +565,7 @@ func cleanupSandboxDirWithCheckerAndRetry(
 	attempts int,
 	retryDelay time.Duration,
 	sleep func(time.Duration),
+	now func() time.Time,
 ) (removed bool, existed bool, reason string) {
 	sandboxDir := filepath.Join(base, sessionID)
 	if checker == nil || filepath.Clean(checker.Base) != filepath.Clean(base) {
@@ -593,10 +595,31 @@ func cleanupSandboxDirWithCheckerAndRetry(
 		slog.Warn("Failed to unmount sandbox", "path", mergedPath, "error", err)
 	}
 
+	return reapSandboxWithRetry(sessionID, sandboxDir, checker, attempts, retryDelay, sleep, now)
+}
+
+func reapSandboxWithRetry(
+	sessionID, sandboxDir string,
+	checker *sandboxgc.Checker,
+	attempts int,
+	retryDelay time.Duration,
+	sleep func(time.Duration),
+	now func() time.Time,
+) (removed bool, existed bool, reason string) {
 	if attempts < 1 {
 		attempts = 1
 	}
+	if retryDelay <= 0 {
+		attempts = 1
+	}
+	retryDeadline := now().Add(time.Duration(attempts) * retryDelay)
 	for attempt := 1; attempt <= attempts; attempt++ {
+		if attempt > 1 && !now().Before(retryDeadline) {
+			slog.Warn("Sandbox not removed before archive cleanup grace deadline — periodic sandbox gc will retry",
+				"session", sessionID, "path", sandboxDir, "attempts", attempt-1,
+				"retry_deadline", retryDeadline)
+			return false, true, "sandbox cleanup grace deadline exceeded"
+		}
 		err := checker.Reap(sandboxDir)
 		if err == nil {
 			slog.Info("Removed sandbox directory", "session", sessionID, "path", sandboxDir)
@@ -607,10 +630,18 @@ func cleanupSandboxDirWithCheckerAndRetry(
 				"session", sessionID, "path", sandboxDir, "attempts", attempt, "error", err)
 			return false, true, err.Error()
 		}
+		remaining := retryDeadline.Sub(now())
+		if remaining <= 0 {
+			slog.Warn("Sandbox not removed before archive cleanup grace deadline — periodic sandbox gc will retry",
+				"session", sessionID, "path", sandboxDir, "attempts", attempt,
+				"retry_deadline", retryDeadline, "error", err)
+			return false, true, err.Error()
+		}
+		delay := min(retryDelay, remaining)
 		slog.Info("Waiting for transient sandbox holder to exit before retrying cleanup",
 			"session", sessionID, "path", sandboxDir, "attempt", attempt, "max_attempts", attempts,
-			"retry_delay", retryDelay, "error", err)
-		sleep(retryDelay)
+			"retry_delay", delay, "retry_deadline", retryDeadline, "error", err)
+		sleep(delay)
 	}
 
 	return false, true, "exhausted sandbox cleanup retries"
@@ -621,7 +652,6 @@ func retryableArchiveSandboxRefusal(err error) bool {
 	return errors.As(err, &refusal) &&
 		refusal.Reason == sandboxgc.ReasonLiveProcess &&
 		refusal.ProcessID > 0
-
 }
 
 func ownedSandboxPathForArchive(m *manifest.Manifest) string {

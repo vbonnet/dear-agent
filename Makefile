@@ -275,9 +275,9 @@ preflight-tests:
 preflight-race:
 	@./scripts/preflight.sh --race
 
-# Full CI parity: preflight + `go test -race -count=1` + govulncheck with
-# the same allowlist as ci.yml. Slower but gives the highest confidence
-# before pushing.
+# Publication gate: CI-parity race tests, ordinary (non-race) performance SLA
+# enforcement, and govulncheck with the same allowlist as ci.yml. Slower but
+# gives the highest confidence before pushing.
 preflight-full:
 	@./scripts/preflight.sh --full
 
