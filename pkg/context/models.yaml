@@ -125,6 +125,40 @@ models:
       evaluator_required: false
       lite_process_eligible: true
 
+  - model_id: "claude-opus-5"
+    provider: "anthropic"
+    max_context_tokens: 1000000
+    sweet_spot_threshold: 0.50
+    warning_threshold: 0.60
+    danger_threshold: 0.75
+    critical_threshold: 0.85
+    benchmark_sources:
+      - "Anthropic Claude Opus 5 documentation"
+    notes: "1M-token context window; thresholds conservatively align with other 1M entries."
+    confidence: "MEDIUM"
+    last_updated: "2026-07-24T00:00:00Z"
+    capabilities:
+      context_stability: medium
+      self_eval_quality: medium
+      long_context: true
+
+  - model_id: "anthropic/claude-opus-5"
+    provider: "anthropic"
+    max_context_tokens: 1000000
+    sweet_spot_threshold: 0.50
+    warning_threshold: 0.60
+    danger_threshold: 0.75
+    critical_threshold: 0.85
+    benchmark_sources:
+      - "Anthropic Claude Opus 5 documentation"
+    notes: "Provider-qualified alias for the 1M-token context window."
+    confidence: "MEDIUM"
+    last_updated: "2026-07-24T00:00:00Z"
+    capabilities:
+      context_stability: medium
+      self_eval_quality: medium
+      long_context: true
+
   - model_id: "claude-opus-4-6"
     provider: "anthropic"
     max_context_tokens: 200000
