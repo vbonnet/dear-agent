@@ -81,7 +81,8 @@ func (a *GeminiCLIAdapter) CreateSession(ctx SessionContext) (SessionID, error) 
 	geminiCmd := buildGeminiStartCommand(ctx.WorkingDirectory, ctx.AuthorizedDirs)
 
 	// Start Gemini CLI in tmux
-	if err := tmux.SendCommand(tmuxName, geminiCmd); err != nil {
+	values := append([]string{ctx.WorkingDirectory}, ctx.AuthorizedDirs...)
+	if err := sendPastedShellCommand(tmuxName, geminiCmd, values...); err != nil {
 		// Clean up tmux session on error if we created it
 		if !exists {
 			_ = tmux.SendCommand(tmuxName, "exit\r")
@@ -162,7 +163,7 @@ func (a *GeminiCLIAdapter) ResumeSession(sessionID SessionID) error {
 		// If UUID is stored, use it. Otherwise fall back to "latest".
 		resumeCmd := buildGeminiResumeCommand(metadata.WorkingDir, metadata.UUID)
 
-		if err := tmux.SendCommand(metadata.TmuxName, resumeCmd); err != nil {
+		if err := sendPastedShellCommand(metadata.TmuxName, resumeCmd, metadata.WorkingDir, metadata.UUID); err != nil {
 			return fmt.Errorf("failed to resume Gemini: %w", err)
 		}
 
@@ -449,7 +450,7 @@ func (a *GeminiCLIAdapter) cmdSetDir(cmd Command, sessionIDStr string, metadata 
 	if err := ValidateSendDirPath(newPath); err != nil {
 		return fmt.Errorf("setdir command: %w", err)
 	}
-	if err := tmux.SendCommand(metadata.TmuxName, buildSetDirCommand(newPath)); err != nil {
+	if err := sendPastedShellCommand(metadata.TmuxName, buildSetDirCommand(newPath), newPath); err != nil {
 		return fmt.Errorf("failed to send cd command: %w", err)
 	}
 	metadata.WorkingDir = newPath

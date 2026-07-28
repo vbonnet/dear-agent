@@ -1,9 +1,13 @@
 package agent
 
 import (
+	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 // Shell command construction for the legacy tmux-backed adapters.
@@ -22,6 +26,38 @@ import (
 // These commands are pasted into a live tmux pane, where a shell parses them by
 // construction, so an argv builder in the style of cmd/safe-pr is not available
 // here. One quoting function applied at every interpolation is.
+
+// sendPastedShellCommand validates every interpolated value at the terminal
+// boundary before tmux pastes the already shell-quoted command. Shell quoting
+// prevents shell metacharacter injection, but cannot make terminal controls
+// safe: ESC can end bracketed paste and a newline can then submit a new command.
+func sendPastedShellCommand(sessionName, command string, values ...string) error {
+	if err := validatePastedShellValues(values...); err != nil {
+		return err
+	}
+	return tmux.SendCommand(sessionName, command)
+}
+
+func validatePastedShellValues(values ...string) error {
+	for index, value := range values {
+		if err := validatePastedShellValue(value); err != nil {
+			return fmt.Errorf("pasted shell value %d: %w", index+1, err)
+		}
+	}
+	return nil
+}
+
+func validatePastedShellValue(value string) error {
+	if !utf8.ValidString(value) {
+		return fmt.Errorf("invalid UTF-8")
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("terminal control character %q is not allowed", r)
+		}
+	}
+	return nil
+}
 
 // buildClaudeStartCommand returns the command that starts Claude in a fresh
 // tmux session, pre-authorizing the workspace so Claude does not block on its

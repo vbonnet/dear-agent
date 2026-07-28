@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
@@ -549,6 +550,9 @@ func (r claudeRequest) launch() ClaudeLaunch {
 func validateText(name, value string) error {
 	if value == "" {
 		return fmt.Errorf("invalid harness launch request: %s is required", name)
+	}
+	if !utf8.ValidString(value) {
+		return fmt.Errorf("invalid harness launch request: %s contains invalid UTF-8", name)
 	}
 	if strings.IndexFunc(value, unicode.IsControl) >= 0 {
 		return fmt.Errorf("invalid harness launch request: %s contains control characters", name)

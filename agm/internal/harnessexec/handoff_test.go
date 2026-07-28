@@ -357,6 +357,63 @@ func TestPreparedCodexCommandClearsCallerAbsentPaneCredentials(t *testing.T) {
 	}
 }
 
+func TestPrepareCommandsRejectTerminalControlsBeforeStagingHandoff(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "must-not-exist")
+	t.Setenv("AGM_STATE_DIR", stateDir)
+
+	tests := []struct {
+		name    string
+		prepare func() (PreparedCommand, error)
+	}{
+		{
+			name: "Codex newline in workdir",
+			prepare: func() (PreparedCommand, error) {
+				return PrepareCodexCommand(CodexLaunch{
+					SessionName: "codex", Model: "gpt-test", WorkDir: "/tmp/safe\ninjected",
+					Sandbox: "workspace-write",
+				}, nil)
+			},
+		},
+		{
+			name: "Claude bracketed paste escape in add-dir",
+			prepare: func() (PreparedCommand, error) {
+				return PrepareClaudeCommand(ClaudeLaunch{
+					SessionName: "claude", WorkDir: "/tmp/work",
+					AddDirs: []string{"/tmp/safe\x1b[201~\n"},
+				}, nil)
+			},
+		},
+		{
+			name: "Claude invalid UTF-8 resume ID",
+			prepare: func() (PreparedCommand, error) {
+				return PrepareClaudeCommand(ClaudeLaunch{
+					SessionName: "claude", ResumeID: string([]byte{'i', 'd', 0xff}),
+				}, nil)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prepared, err := tt.prepare()
+			if err == nil {
+				_ = prepared.Cancel()
+				t.Fatal("Prepare command succeeded, want terminal-control rejection")
+			}
+			if prepared.Command != "" {
+				t.Fatalf("prepared pane command %q before validation", prepared.Command)
+			}
+			if !strings.Contains(err.Error(), "invalid harness launch request") {
+				t.Fatalf("Prepare error = %v, want launch validation", err)
+			}
+		})
+	}
+
+	if _, err := os.Stat(stateDir); !os.IsNotExist(err) {
+		t.Fatalf("private handoff state created before validation: %v", err)
+	}
+}
+
 func TestPreparedCommandCancelRemovesUndeliveredHandoff(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
 	originalExecutablePath := executablePath

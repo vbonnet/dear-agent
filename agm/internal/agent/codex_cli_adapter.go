@@ -80,6 +80,12 @@ func (a *CodexCLIAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 		model, _ = DefaultModelForHarness("codex-cli")
 	}
 	resolvedModel := ResolveModelFullName("codex-cli", model)
+	if err := validatePastedShellValues(tmuxName, resolvedModel, workDir); err != nil {
+		if !exists {
+			cleanupCodexCreatedSession(tmuxName)
+		}
+		return "", fmt.Errorf("validate Codex CLI launch: %w", err)
+	}
 	// Pre-trust the workdir so Codex does not block on its interactive trust
 	// prompt in fresh non-git sandbox dirs (ce-cmsq). Best-effort.
 	if err := ensureCodexTrusted(workDir); err != nil {
@@ -159,6 +165,12 @@ func (a *CodexCLIAdapter) ResumeSession(sessionID SessionID) error {
 	if sendCommands {
 		model, _ := DefaultModelForHarness("codex-cli")
 		resolvedModel := ResolveModelFullName("codex-cli", model)
+		if err := validatePastedShellValues(metadata.TmuxName, resolvedModel, metadata.WorkingDir, metadata.UUID); err != nil {
+			if created {
+				cleanupCodexCreatedSession(metadata.TmuxName)
+			}
+			return fmt.Errorf("validate Codex CLI resume: %w", err)
+		}
 		// Pre-trust the workdir so the Codex relaunch does not block on its
 		// interactive trust prompt in non-git sandbox dirs (ce-cmsq).
 		if err := ensureCodexTrusted(metadata.WorkingDir); err != nil {
@@ -322,6 +334,9 @@ func (a *CodexCLIAdapter) ExecuteCommand(cmd Command) error {
 		}
 		if err := ValidateSendDirPath(path); err != nil {
 			return fmt.Errorf("invalid set_directory path: %w", err)
+		}
+		if err := validatePastedShellValues(path); err != nil {
+			return err
 		}
 		return codexSendCommand(metadata.TmuxName, buildSetDirCommand(path))
 	case CommandRunHook:

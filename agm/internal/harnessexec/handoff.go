@@ -93,6 +93,9 @@ type launchHandoff struct {
 // authentication authoritative even when a long-lived tmux server has stale
 // environment state.
 func PrepareCodexCommand(launch CodexLaunch, parent []string) (PreparedCommand, error) {
+	if err := validateCodexPastedValues(launch); err != nil {
+		return PreparedCommand{}, err
+	}
 	executable, err := resolvePrivateExecutable()
 	if err != nil {
 		return PreparedCommand{}, fmt.Errorf("resolve AGM private executor: %w", err)
@@ -116,6 +119,9 @@ func PrepareCodexCommand(launch CodexLaunch, parent []string) (PreparedCommand, 
 // PrepareClaudeCommand snapshots the caller's selected authentication and
 // telemetry configuration into an owner-only, one-shot handoff.
 func PrepareClaudeCommand(launch ClaudeLaunch, parent []string) (PreparedCommand, error) {
+	if err := validateClaudePastedValues(launch); err != nil {
+		return PreparedCommand{}, err
+	}
 	executable, err := resolvePrivateExecutable()
 	if err != nil {
 		return PreparedCommand{}, fmt.Errorf("resolve AGM private executor: %w", err)
@@ -151,6 +157,44 @@ func PrepareClaudeCommand(launch ClaudeLaunch, parent []string) (PreparedCommand
 	launch.Executable = executable
 	launch.HandoffPath = handoffPath
 	return PreparedCommand{Command: BuildClaudeCommand(launch), path: handoffPath, lease: lease}, nil
+}
+
+func validateCodexPastedValues(launch CodexLaunch) error {
+	for _, field := range []struct{ name, value string }{
+		{"session", launch.SessionName},
+		{"model", launch.Model},
+		{"workdir", launch.WorkDir},
+		{"sandbox", launch.Sandbox},
+		{"approval", launch.Approval},
+		{"resume-id", launch.ResumeID},
+	} {
+		if err := validateOptionalText(field.name, field.value); err != nil {
+			return fmt.Errorf("validate Codex pane command: %w", err)
+		}
+	}
+	if err := validateTextList("add-dir", launch.AddDirs); err != nil {
+		return fmt.Errorf("validate Codex pane command: %w", err)
+	}
+	return nil
+}
+
+func validateClaudePastedValues(launch ClaudeLaunch) error {
+	for _, field := range []struct{ name, value string }{
+		{"session", launch.SessionName},
+		{"session-id", launch.SessionID},
+		{"resume-id", launch.ResumeID},
+		{"workdir", launch.WorkDir},
+		{"model", launch.Model},
+		{"permission", launch.Permission},
+	} {
+		if err := validateOptionalText(field.name, field.value); err != nil {
+			return fmt.Errorf("validate Claude pane command: %w", err)
+		}
+	}
+	if err := validateTextList("add-dir", launch.AddDirs); err != nil {
+		return fmt.Errorf("validate Claude pane command: %w", err)
+	}
+	return nil
 }
 
 func cleanupFailedHandoff(path string, scheduleErr error) error {

@@ -287,3 +287,30 @@ func TestSetDirQuotesEvenThoughValidatorGuardsIt(t *testing.T) {
 		t.Errorf("got  %q\nwant %q", got, want)
 	}
 }
+
+func TestPastedLaunchRejectsTerminalControlsBeforeTmux(t *testing.T) {
+	root := t.TempDir()
+	sentinel := filepath.Join(root, "terminal-paste-pwned")
+	payloads := []string{
+		"safe\x1b[201~\x15touch " + sentinel + "\n",
+		"safe\rcommand",
+		"safe\tcompletion",
+		string([]byte{'s', 'a', 'f', 'e', 0xff}),
+	}
+	for _, payload := range payloads {
+		err := sendPastedShellCommand(
+			"missing-session-must-not-be-contacted",
+			buildClaudeStartCommand(payload, nil),
+			payload,
+		)
+		if err == nil {
+			t.Fatalf("sendPastedShellCommand(%q) = nil, want rejection", payload)
+		}
+		if !strings.Contains(err.Error(), "pasted shell value") {
+			t.Fatalf("sendPastedShellCommand(%q) error = %v, want pre-tmux validation", payload, err)
+		}
+	}
+	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
+		t.Fatalf("terminal paste payload executed or sentinel check failed: %v", err)
+	}
+}

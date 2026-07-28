@@ -211,7 +211,7 @@ func (a *OpenCodeAdapter) ResumeSession(sessionID SessionID) error {
 		// The OpenCode server maintains session state internally
 		fullCmd := buildOpenCodeResumeCommand(metadata.WorkingDir)
 
-		if err := tmux.SendCommand(metadata.TmuxName, fullCmd); err != nil {
+		if err := sendPastedShellCommand(metadata.TmuxName, fullCmd, metadata.WorkingDir); err != nil {
 			return fmt.Errorf("failed to send attach command: %w", err)
 		}
 	}
