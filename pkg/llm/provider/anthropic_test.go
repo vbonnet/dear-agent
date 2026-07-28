@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"testing"
+
+	"github.com/anthropics/anthropic-sdk-go"
 )
 
 func TestNewAnthropicProvider(t *testing.T) {
@@ -83,6 +85,18 @@ func TestNewAnthropicProvider(t *testing.T) {
 		// Default model should be claude-3-5-haiku-20241022
 		// We'll verify in integration tests
 	})
+}
+
+func TestCalculateUsageUsesRequestSelectedModel(t *testing.T) {
+	usage := calculateUsage("claude-opus-5", &anthropic.Message{
+		Usage: anthropic.Usage{
+			InputTokens:  1_000_000,
+			OutputTokens: 1_000_000,
+		},
+	})
+	if usage.CostUSD != 30 {
+		t.Fatalf("CostUSD = %v, want 30 for a 1M input + 1M output Opus 5 request", usage.CostUSD)
+	}
 }
 
 func TestAnthropicProvider_Name(t *testing.T) {

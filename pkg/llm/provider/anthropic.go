@@ -140,7 +140,7 @@ func (p *AnthropicProvider) Generate(ctx context.Context, req *GenerateRequest) 
 	}
 
 	// Calculate usage and cost
-	usage := p.calculateUsage(resp)
+	usage := calculateUsage(model, resp)
 
 	// Record cost if sink is configured
 	if p.costSink != nil {
@@ -185,13 +185,13 @@ func (p *AnthropicProvider) Capabilities() Capabilities {
 }
 
 // calculateUsage extracts usage information from API response.
-func (p *AnthropicProvider) calculateUsage(resp *anthropic.Message) Usage {
+func calculateUsage(model string, resp *anthropic.Message) Usage {
 	inputTokens := int(resp.Usage.InputTokens)
 	outputTokens := int(resp.Usage.OutputTokens)
 	totalTokens := inputTokens + outputTokens
 
 	// Get pricing for model
-	pricing := costtrack.GetPricingOrDefault(p.model)
+	pricing := costtrack.GetPricingOrDefault(model)
 
 	// Calculate cost
 	tokens := costtrack.Tokens{
