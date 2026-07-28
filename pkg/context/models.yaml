@@ -1,5 +1,5 @@
 # Context Window Model Registry
-# Last updated: 2026-03-18
+# Last updated: 2026-07-28
 #
 # This file contains sweet spot thresholds for LLM context windows based on academic
 # and community benchmarks. Thresholds indicate percentages of max context where
