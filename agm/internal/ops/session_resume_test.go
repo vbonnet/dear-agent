@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
+	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
@@ -389,6 +391,32 @@ func TestResumeSessionCodexHookReviewFailsBeforeActivityUpdate(t *testing.T) {
 	}
 	if !after.UpdatedAt.Equal(before.UpdatedAt) || after.Tmux.SessionName != before.Tmux.SessionName {
 		t.Fatalf("hook review committed resume effects: before=%#v after=%#v", before, after)
+	}
+}
+
+func TestPrepareResumeLaunchDefaultsModelLessCodexSession(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	m := &manifest.Manifest{
+		SessionID: "legacy-codex-session",
+		Harness:   "codex-cli",
+		Codex:     &manifest.Codex{SessionID: "native-codex-session"},
+	}
+	launch, _, _, err := prepareResumeLaunch(
+		nil,
+		m,
+		"codex-cli",
+		ResumeSessionHealth{
+			TmuxSessionName: "legacy-codex",
+			WorktreePath:    t.TempDir(),
+		},
+	)
+	if err != nil {
+		t.Fatalf("prepareResumeLaunch() error: %v", err)
+	}
+	wantModel := agent.ResolveModelFullName("codex-cli", agent.HarnessDefaults["codex-cli"])
+	want := "--model " + launchparity.ShellQuote(wantModel)
+	if !strings.Contains(launch.Command, want) {
+		t.Fatalf("prepareResumeLaunch() command = %q, want %q", launch.Command, want)
 	}
 }
 

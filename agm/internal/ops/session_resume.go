@@ -704,6 +704,9 @@ func prepareResumeLaunch(store dolt.Storage, m *manifest.Manifest, harnessName s
 		if err := agent.EnsureCodexWorkdirTrusted(health.WorktreePath); err != nil {
 			warnings = append(warnings, fmt.Sprintf("Could not pre-trust Codex workdir %s: %v", health.WorktreePath, err))
 		}
+		if spec.Model == "" {
+			spec.Model = agent.HarnessDefaults["codex-cli"]
+		}
 		launch, err := PrepareHarnessLaunchCommand(spec)
 		if err != nil {
 			return HarnessLaunchCommand{}, "", warnings, fmt.Errorf("prepare Codex resume launch: %w", err)
