@@ -115,7 +115,7 @@ define any behavioral capability interfaces they consume:
 | Adapter | Harness | Key Capabilities |
 |---------|---------|-----------------|
 | Claude | Claude Code | UUID detection, slash commands, history.jsonl parsing |
-| Gemini | Gemini CLI | API integration, session file management |
+| Gemini | Gemini CLI | Deprecated tmux compatibility, session file management |
 | Codex | Codex CLI | CLI launch/resume, composer readiness detection, model alias resolution |
 | OpenCode | OpenCode CLI | SSE event streams, server port management |
 
