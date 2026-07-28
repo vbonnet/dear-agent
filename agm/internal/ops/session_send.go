@@ -60,7 +60,7 @@ func SendMessage(ctx *OpContext, req *SendMessageRequest) (*SendMessageResult, e
 	// Validate that the recipient session exists
 	m, err := ctx.Storage.GetSession(req.Recipient)
 	if err != nil {
-		m, err = findByName(ctx, req.Recipient)
+		m, err = findActiveByName(ctx, req.Recipient)
 		if err != nil {
 			return nil, err
 		}

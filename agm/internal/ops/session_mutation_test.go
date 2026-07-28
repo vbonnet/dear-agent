@@ -1126,3 +1126,18 @@ func TestSendMessage_ArchivedSession(t *testing.T) {
 		t.Errorf("expected code %s, got %s", ErrCodeSessionArchived, opErr.Code)
 	}
 }
+
+func TestSendMessage_ByReusedNameExcludesArchivedSession(t *testing.T) {
+	archived := newManifest("id-archived", "reused-session", "~/old-project")
+	archived.Lifecycle = manifest.LifecycleArchived
+	active := newManifest("id-active", "reused-session", "~/current-project")
+	ctx := testCtx([]*manifest.Manifest{archived, active}, "reused-session")
+
+	result, err := SendMessage(ctx, &SendMessageRequest{Recipient: "reused-session", Message: "hello"})
+	if err != nil {
+		t.Fatalf("SendMessage() error: %v", err)
+	}
+	if !result.Delivered || result.SessionID != active.SessionID {
+		t.Fatalf("SendMessage() result = %#v, want active reused identity", result)
+	}
+}
