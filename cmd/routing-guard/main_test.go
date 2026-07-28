@@ -55,6 +55,7 @@ var testPatterns = []string{
 	"**/.wayfinder/**",
 	"**/WAYFINDER-STATUS.md",
 	"**/WAYFINDER-HISTORY.jsonl",
+	"**/WAYFINDER-HISTORY.md",
 }
 
 func TestForbidden(t *testing.T) {
@@ -69,6 +70,7 @@ func TestForbidden(t *testing.T) {
 		{".wayfinder/run/D1.md", true},
 		{"agm/wayfinder-oss-agm-g2/WAYFINDER-STATUS.md", true},
 		{"agm/wayfinder-oss-agm-g2/WAYFINDER-HISTORY.jsonl", true},
+		{"agm/wayfinder-oss-agm-g2/WAYFINDER-HISTORY.md", true},
 		{"WAYFINDER-STATUS.md", true}, // root-level still caught
 		// Other temporal artifacts.
 		{"docs/retros/2026-06-19-x.md", true},

@@ -1,6 +1,7 @@
 package history
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sync"
@@ -59,6 +60,34 @@ func TestAppendEvent(t *testing.T) {
 	// JSON numbers are unmarshaled as float64
 	if event.Data["num"] != float64(42) {
 		t.Errorf("event.Data[num] = %v, want %v", event.Data["num"], float64(42))
+	}
+}
+
+func TestAppendEventMigratesLegacyHistoryBeforeWriting(t *testing.T) {
+	tmpDir := t.TempDir()
+	legacyPath := filepath.Join(tmpDir, LegacyHistoryFilename)
+	legacy := Event{Timestamp: time.Now(), Type: EventTypeSessionStarted}
+	legacyData, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("json.Marshal() error: %v", err)
+	}
+	if err := os.WriteFile(legacyPath, append(legacyData, '\n'), 0o600); err != nil {
+		t.Fatalf("write legacy history: %v", err)
+	}
+
+	h := New(tmpDir)
+	if err := h.AppendEvent(EventTypePhaseStarted, "PROBLEM", nil); err != nil {
+		t.Fatalf("AppendEvent() error: %v", err)
+	}
+	if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
+		t.Fatalf("legacy history stat error = %v, want not exists", err)
+	}
+	events, err := h.Read()
+	if err != nil {
+		t.Fatalf("Read() error: %v", err)
+	}
+	if len(events) != 2 || events[0].Type != EventTypeSessionStarted || events[1].Type != EventTypePhaseStarted {
+		t.Fatalf("migrated events = %#v, want legacy event followed by appended event", events)
 	}
 }
 

@@ -23,9 +23,37 @@ func New(dir string) *History {
 	}
 }
 
+// EnsureCurrentFile atomically migrates the legacy JSON Lines filename before
+// the history is read, appended, or archived.
+func (h *History) EnsureCurrentFile() error {
+	if _, err := os.Stat(h.path); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat history file: %w", err)
+	}
+
+	legacyPath := filepath.Join(filepath.Dir(h.path), LegacyHistoryFilename)
+	if _, err := os.Stat(legacyPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat legacy history file: %w", err)
+	}
+	if err := os.Rename(legacyPath, h.path); err != nil {
+		if _, statErr := os.Stat(h.path); statErr == nil {
+			return nil
+		}
+		return fmt.Errorf("migrate legacy history file: %w", err)
+	}
+	return nil
+}
+
 // AppendEvent appends a new event to the history log
 // Uses O_APPEND flag for concurrent-safe writes
 func (h *History) AppendEvent(eventType, phase string, data map[string]interface{}) error {
+	if err := h.EnsureCurrentFile(); err != nil {
+		return err
+	}
 	event := Event{
 		Timestamp: time.Now(),
 		Type:      eventType,
@@ -56,6 +84,9 @@ func (h *History) AppendEvent(eventType, phase string, data map[string]interface
 
 // Read reads all events from the history log
 func (h *History) Read() ([]Event, error) {
+	if err := h.EnsureCurrentFile(); err != nil {
+		return nil, err
+	}
 	// Check if file exists
 	if _, err := os.Stat(h.path); os.IsNotExist(err) {
 		return []Event{}, nil // Empty history

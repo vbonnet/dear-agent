@@ -274,6 +274,7 @@ forbidden-paths:
     - "**/.wayfinder/**"
     - "**/WAYFINDER-STATUS.md"
     - "**/WAYFINDER-HISTORY.jsonl"
+    - "**/WAYFINDER-HISTORY.md"
 
 # Framework-level defaults applied to every task in this repo. These
 # travel with the session, not the prompt, so a worker (and any

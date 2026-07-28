@@ -21,5 +21,9 @@ const (
 	EventTypeSessionAborted   = "session.aborted"
 )
 
-// HistoryFilename is the name of the history log file
-const HistoryFilename = "WAYFINDER-HISTORY.jsonl"
+const (
+	// HistoryFilename is the name of the history log file.
+	HistoryFilename = "WAYFINDER-HISTORY.jsonl"
+	// LegacyHistoryFilename is retained only for lossless on-disk migration.
+	LegacyHistoryFilename = "WAYFINDER-HISTORY.md"
+)

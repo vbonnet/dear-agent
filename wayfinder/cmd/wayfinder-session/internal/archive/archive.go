@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/history"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
 
@@ -41,9 +42,13 @@ func (a *ArchiveManager) ArchivePhase(phaseName string) error {
 	}
 
 	// Archive HISTORY file if it exists
-	historySrc := filepath.Join(a.projectDir, "WAYFINDER-HISTORY.jsonl")
+	historyLog := history.New(a.projectDir)
+	if err := historyLog.EnsureCurrentFile(); err != nil {
+		return fmt.Errorf("failed to migrate HISTORY file: %w", err)
+	}
+	historySrc := filepath.Join(a.projectDir, history.HistoryFilename)
 	if _, err := os.Stat(historySrc); err == nil {
-		historyDst := filepath.Join(archiveDir, "WAYFINDER-HISTORY.jsonl")
+		historyDst := filepath.Join(archiveDir, history.HistoryFilename)
 		if err := copyFile(historySrc, historyDst); err != nil {
 			return fmt.Errorf("failed to archive HISTORY file: %w", err)
 		}
