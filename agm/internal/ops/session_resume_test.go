@@ -654,6 +654,39 @@ func TestResumeSessionCancellationBeforePromptRollsBackColdRuntime(t *testing.T)
 	}
 }
 
+func TestSubmitAndAwaitResumeCancellationDoesNotLaunchPreparedCommand(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	fakeTmux := &resumeTestTmux{}
+	cancelCalls := 0
+	err := submitAndAwaitResume(
+		ctx,
+		fakeTmux,
+		nil,
+		&ResumeSessionRequest{},
+		&ResumeSessionResult{},
+		"pi-cli",
+		ResumeSessionHealth{TmuxSessionName: "pi-session", WorktreePath: t.TempDir()},
+		"",
+		HarnessLaunchCommand{
+			Command: "pi --session session-id",
+			Cancel: func() error {
+				cancelCalls++
+				return nil
+			},
+		},
+	)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("submitAndAwaitResume() error = %v, want context.Canceled", err)
+	}
+	if len(fakeTmux.commands) != 0 {
+		t.Fatalf("submitted commands after cancellation: %v", fakeTmux.commands)
+	}
+	if cancelCalls != 1 {
+		t.Fatalf("prepared launch cancellation calls = %d, want 1", cancelCalls)
+	}
+}
+
 func TestResumeSessionPreservesColdRuntimeWhenMetadataCompensationIsUnproven(t *testing.T) {
 	adapter, m, fakeTmux := setupResumeOperation(t, "codex-cli", false)
 	t.Setenv("AGM_STATE_DIR", t.TempDir())

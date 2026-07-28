@@ -403,6 +403,12 @@ func submitAndAwaitResume(
 	launch HarnessLaunchCommand,
 ) error {
 	return withResumeWorkspaceLock(ctx, harnessName, health.WorktreePath, agyLocker, result, req, func() error {
+		if err := ctx.Err(); err != nil {
+			if cancelErr := launch.CancelUndelivered(); cancelErr != nil {
+				return errors.Join(err, fmt.Errorf("cancel undelivered %s resume launch: %w", harnessName, cancelErr))
+			}
+			return err
+		}
 		uncertain, err := ResolveHarnessLaunchSubmission(launch, tmuxAdapter.SendKeys(health.TmuxSessionName, launch.Command))
 		if uncertain {
 			addResumeWarning(result, req, fmt.Sprintf("%s launch submission acknowledgement was lost; preserving the launch because the command may already be queued", harnessName))
