@@ -273,6 +273,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates primary checkout cleanup safety$`, agmValidatesPrimaryCheckoutCleanupSafety)
 	ctx.Step(`^the primary checkout and session-named branch should remain$`, primaryCheckoutAndSessionNamedBranchShouldRemain)
 	ctx.Step(`^a linked session worktree should still be removed$`, linkedSessionWorktreeShouldStillBeRemoved)
+	ctx.Step(`^linked worktree cleanup should continue through the surviving checkout$`, linkedWorktreeCleanupShouldContinueThroughTheSurvivingCheckout)
 	ctx.Step(`^an unclassified worktree should not authorize branch deletion$`, unclassifiedWorktreeShouldNotAuthorizeBranchDeletion)
 	ctx.Step(`^a context-only checkout should not authorize branch deletion$`, contextOnlyCheckoutShouldNotAuthorizeBranchDeletion)
 	ctx.Step(`^branch deletion should require attributed worktree ownership$`, branchDeletionShouldRequireAttributedWorktreeOwnership)
@@ -2176,160 +2177,72 @@ func agmValidatesSingleSessionArchiveDryRunSafety(ctx context.Context) error {
 }
 
 func durableAndProviderArchiveStateShouldRemainUnchanged(ctx context.Context) error {
-	harnessState, err := getHarnessParityState(ctx)
-	if err != nil {
-		return err
-	}
-	if harnessState.archiveDryRunTestErr != nil {
-		return fmt.Errorf("single-session archive dry-run suite failed: %w\n%s", harnessState.archiveDryRunTestErr, harnessState.archiveDryRunTestOutput)
-	}
-	for _, testName := range []string{
+	return requireArchiveDryRunTests(ctx,
 		"TestArchiveSession_DryRunCLITextIsSideEffectFree",
 		"TestArchiveSession_DryRunDoesNotArchiveExternalRepresentation",
-	} {
-		if !strings.Contains(harnessState.archiveDryRunTestOutput, "--- PASS: "+testName) {
-			return fmt.Errorf("%s did not run:\n%s", testName, harnessState.archiveDryRunTestOutput)
-		}
-	}
-	return nil
+	)
 }
 
 func archivePreviewShouldReturnStableAGM100Output(ctx context.Context) error {
-	harnessState, err := getHarnessParityState(ctx)
-	if err != nil {
-		return err
-	}
-	if harnessState.archiveDryRunTestErr != nil {
-		return fmt.Errorf("single-session archive dry-run suite failed: %w\n%s", harnessState.archiveDryRunTestErr, harnessState.archiveDryRunTestOutput)
-	}
-	for _, testName := range []string{
+	return requireArchiveDryRunTests(ctx,
 		"TestArchiveSession_DryRunCLIJSONReturnsStableEnvelope",
 		"TestArchiveAuditArgs_RecordsSingleSessionDryRun",
 		"TestNewDryRunPreview",
-	} {
-		if !strings.Contains(harnessState.archiveDryRunTestOutput, "--- PASS: "+testName) {
-			return fmt.Errorf("%s did not run:\n%s", testName, harnessState.archiveDryRunTestOutput)
-		}
-	}
-	return nil
+	)
 }
 
 func archivePreviewShouldRetainResolvedStableSessionIdentity(ctx context.Context) error {
-	harnessState, err := getHarnessParityState(ctx)
-	if err != nil {
-		return err
-	}
-	if harnessState.archiveDryRunTestErr != nil {
-		return fmt.Errorf("single-session archive dry-run suite failed: %w\n%s", harnessState.archiveDryRunTestErr, harnessState.archiveDryRunTestOutput)
-	}
-	const testName = "TestArchiveSession_DryRunCLIClaudeUUIDUsesResolvedSessionID"
-	if !strings.Contains(harnessState.archiveDryRunTestOutput, "--- PASS: "+testName) {
-		return fmt.Errorf("%s did not run:\n%s", testName, harnessState.archiveDryRunTestOutput)
-	}
-	return nil
+	return requireArchiveDryRunTests(ctx, "TestArchiveSession_DryRunCLIClaudeUUIDUsesResolvedSessionID")
 }
 
 func archiveCompletionGuidanceShouldUseResolvedStableSessionIdentity(ctx context.Context) error {
-	harnessState, err := getHarnessParityState(ctx)
-	if err != nil {
-		return err
-	}
-	if harnessState.archiveDryRunTestErr != nil {
-		return fmt.Errorf("single-session archive dry-run suite failed: %w\n%s", harnessState.archiveDryRunTestErr, harnessState.archiveDryRunTestOutput)
-	}
-	const testName = "TestArchiveSession_ClaudeUUIDUsesResolvedSessionID"
-	if !strings.Contains(harnessState.archiveDryRunTestOutput, "--- PASS: "+testName) {
-		return fmt.Errorf("%s did not run:\n%s", testName, harnessState.archiveDryRunTestOutput)
-	}
-	return nil
+	return requireArchiveDryRunTests(ctx, "TestArchiveSession_ClaudeUUIDUsesResolvedSessionID")
 }
 
 func activeAsyncArchiveShouldSeparateStableAndTmuxIdentities(ctx context.Context) error {
-	harnessState, err := getHarnessParityState(ctx)
-	if err != nil {
-		return err
-	}
-	if harnessState.archiveDryRunTestErr != nil {
-		return fmt.Errorf("single-session archive dry-run suite failed: %w\n%s", harnessState.archiveDryRunTestErr, harnessState.archiveDryRunTestOutput)
-	}
-	for _, testName := range []string{
+	return requireArchiveDryRunTests(ctx,
 		"TestArchiveSession_AsyncClaudeUUIDUsesResolvedIdentities",
 		"TestBuildReaperArgsSeparatesStableAndTmuxIdentities",
 		"TestRun_UsesStableSessionIDAndResolvedTmuxIdentity",
 		"TestValidateResolvedTargets",
-	} {
-		if !strings.Contains(harnessState.archiveDryRunTestOutput, "--- PASS: "+testName) {
-			return fmt.Errorf("%s did not run:\n%s", testName, harnessState.archiveDryRunTestOutput)
-		}
-	}
-	return nil
+	)
 }
 
 func archivePreviewShouldHonorGlobalJSONFieldMasks(ctx context.Context) error {
-	harnessState, err := getHarnessParityState(ctx)
-	if err != nil {
-		return err
-	}
-	if harnessState.archiveDryRunTestErr != nil {
-		return fmt.Errorf("single-session archive dry-run suite failed: %w\n%s", harnessState.archiveDryRunTestErr, harnessState.archiveDryRunTestOutput)
-	}
-	const testName = "TestArchiveSession_DryRunCLIJSONHonorsFieldMask"
-	if !strings.Contains(harnessState.archiveDryRunTestOutput, "--- PASS: "+testName) {
-		return fmt.Errorf("%s did not run:\n%s", testName, harnessState.archiveDryRunTestOutput)
-	}
-	return nil
+	return requireArchiveDryRunTests(ctx, "TestArchiveSession_DryRunCLIJSONHonorsFieldMask")
 }
 
 func activeAsyncPreviewShouldNotStartDetachedReaper(ctx context.Context) error {
-	harnessState, err := getHarnessParityState(ctx)
-	if err != nil {
-		return err
-	}
-	if harnessState.archiveDryRunTestErr != nil {
-		return fmt.Errorf("single-session archive dry-run suite failed: %w\n%s", harnessState.archiveDryRunTestErr, harnessState.archiveDryRunTestOutput)
-	}
-	const testName = "TestArchiveSession_DryRunCLIActiveAsyncDoesNotStartReaper"
-	if !strings.Contains(harnessState.archiveDryRunTestOutput, "--- PASS: "+testName) {
-		return fmt.Errorf("%s did not run:\n%s", testName, harnessState.archiveDryRunTestOutput)
-	}
-	return nil
+	return requireArchiveDryRunTests(ctx, "TestArchiveSession_DryRunCLIActiveAsyncDoesNotStartReaper")
 }
 
 func dryRunPreviewShouldPreserveAsyncStateValidation(ctx context.Context) error {
-	harnessState, err := getHarnessParityState(ctx)
-	if err != nil {
-		return err
-	}
-	if harnessState.archiveDryRunTestErr != nil {
-		return fmt.Errorf("single-session archive dry-run suite failed: %w\n%s", harnessState.archiveDryRunTestErr, harnessState.archiveDryRunTestOutput)
-	}
-	for _, testName := range []string{
+	return requireArchiveDryRunTests(ctx,
 		"TestArchiveSession_DryRunCLIActiveRequiresAsync",
 		"TestArchiveSession_DryRunCLIStoppedRejectsAsync",
-	} {
-		if !strings.Contains(harnessState.archiveDryRunTestOutput, "--- PASS: "+testName) {
-			return fmt.Errorf("%s did not run:\n%s", testName, harnessState.archiveDryRunTestOutput)
-		}
-	}
-	return nil
+	)
 }
 
 func validatedPersistedSandboxOwnershipShouldControlArchiveCleanupAfterReload(ctx context.Context) error {
-	harnessState, err := getHarnessParityState(ctx)
-	if err != nil {
-		return err
-	}
-	if harnessState.archiveDryRunTestErr != nil {
-		return fmt.Errorf("single-session archive dry-run suite failed: %w\n%s", harnessState.archiveDryRunTestErr, harnessState.archiveDryRunTestOutput)
-	}
-	for _, testName := range []string{
+	return requireArchiveDryRunTests(ctx,
 		"TestSQLiteSandboxOwnershipMetadataRoundTripsForArchive",
 		"TestSQLiteMissingSandboxMetadataDoesNotInferOwnership",
 		"TestSQLiteInvalidSandboxMetadataDoesNotAuthorizeCleanup",
 		"TestCleanupSandboxDirWithChecker_RemovesOwnedSandbox",
 		"TestCleanupSandboxDirWithChecker_RejectsUnownedMergedPath",
 		"TestArchiveSession_ReloadedSandboxOwnershipControlsCleanup",
-	} {
+	)
+}
+
+func requireArchiveDryRunTests(ctx context.Context, testNames ...string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.archiveDryRunTestErr != nil {
+		return fmt.Errorf("single-session archive dry-run suite failed: %w\n%s", harnessState.archiveDryRunTestErr, harnessState.archiveDryRunTestOutput)
+	}
+	for _, testName := range testNames {
 		if !strings.Contains(harnessState.archiveDryRunTestOutput, "--- PASS: "+testName) {
 			return fmt.Errorf("%s did not run:\n%s", testName, harnessState.archiveDryRunTestOutput)
 		}
@@ -2345,7 +2258,7 @@ func agmValidatesPrimaryCheckoutCleanupSafety(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/ops", "./agm/internal/cleanup",
-		"-run", `^(TestCleanupAfterArchive_(PreservesPrimaryCheckout|WithRealGitWorktree|PreservesBranchWhenWorktreeCannotBeClassified|UsesContextProjectWhenWorkingDirectoryMissing|PreservesBranchNotOwnedByRemovedWorktree)|TestSessionResources_(BranchCleanup|WorktreeRemoveError))$`,
+		"-run", `^(TestCleanupAfterArchive_(PreservesPrimaryCheckout|WithRealGitWorktree|UsesSurvivingRepoAfterRemovingLinkedRepoPath|PreservesBranchWhenWorktreeCannotBeClassified|UsesContextProjectWhenWorkingDirectoryMissing|PreservesBranchNotOwnedByRemovedWorktree)|TestSessionResources_(BranchCleanup|WorktreeRemoveError))$`,
 		"-count=1", "-v")
 	cmd.Dir = bddRepoRoot()
 	output, runErr := cmd.CombinedOutput()
@@ -2381,6 +2294,20 @@ func linkedSessionWorktreeShouldStillBeRemoved(ctx context.Context) error {
 	}
 	if !strings.Contains(harnessState.archiveCleanupTestOutput, "--- PASS: TestCleanupAfterArchive_WithRealGitWorktree") {
 		return fmt.Errorf("linked worktree cleanup regression did not run:\n%s", harnessState.archiveCleanupTestOutput)
+	}
+	return nil
+}
+
+func linkedWorktreeCleanupShouldContinueThroughTheSurvivingCheckout(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.archiveCleanupTestErr != nil {
+		return fmt.Errorf("archive cleanup safety suite failed: %w\n%s", harnessState.archiveCleanupTestErr, harnessState.archiveCleanupTestOutput)
+	}
+	if !strings.Contains(harnessState.archiveCleanupTestOutput, "--- PASS: TestCleanupAfterArchive_UsesSurvivingRepoAfterRemovingLinkedRepoPath") {
+		return fmt.Errorf("surviving checkout cleanup regression did not run:\n%s", harnessState.archiveCleanupTestOutput)
 	}
 	return nil
 }

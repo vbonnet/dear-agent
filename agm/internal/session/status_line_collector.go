@@ -33,11 +33,11 @@ type StatusLineData struct {
 
 // formatTokenCount formats a token count for display: 1000000 → "1M", 200000 → "200k", 5000 → "5k"
 func formatTokenCount(tokens int) string {
-	if tokens >= 1000000 {
-		if tokens%1000000 == 0 {
-			return fmt.Sprintf("%dM", tokens/1000000)
+	if tokens >= extendedContextWindowTokens {
+		if tokens%extendedContextWindowTokens == 0 {
+			return fmt.Sprintf("%dM", tokens/extendedContextWindowTokens)
 		}
-		return fmt.Sprintf("%.1fM", float64(tokens)/1000000.0)
+		return fmt.Sprintf("%.1fM", float64(tokens)/float64(extendedContextWindowTokens))
 	}
 	if tokens >= 1000 {
 		if tokens%1000 == 0 {

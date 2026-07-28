@@ -1097,7 +1097,7 @@ func (a *Adapter) scanSession(row scanner) (*manifest.Manifest, error) {
 	if err := unmarshalMonitors(&session, monitorsJSON); err != nil {
 		return nil, err
 	}
-	if err := unmarshalEngramMetadata(&session, metadataJSON); err != nil {
+	if err := unmarshalSessionMetadata(&session, metadataJSON); err != nil {
 		return nil, err
 	}
 	return &session, nil
@@ -1161,7 +1161,7 @@ func unmarshalMonitors(session *manifest.Manifest, monitorsJSON sql.NullString) 
 	return nil
 }
 
-func unmarshalEngramMetadata(session *manifest.Manifest, metadataJSON []byte) error {
+func unmarshalSessionMetadata(session *manifest.Manifest, metadataJSON []byte) error {
 	if len(metadataJSON) == 0 {
 		return nil
 	}
@@ -1180,17 +1180,28 @@ func unmarshalEngramMetadata(session *manifest.Manifest, metadataJSON []byte) er
 	if err := unmarshalSandboxMetadata(session, metadata); err != nil {
 		return err
 	}
-	codexSessionID, _ := metadata["codex_session_id"].(string)
-	codexTranscriptPath, _ := metadata["codex_transcript_path"].(string)
-	if codexSessionID != "" || codexTranscriptPath != "" {
-		session.Codex = &manifest.Codex{
-			SessionID:      codexSessionID,
-			TranscriptPath: codexTranscriptPath,
-		}
-	}
+	applyCodexMetadata(session, metadata)
 	if err := unmarshalOpenAISessionMetadata(session, metadata); err != nil {
 		return err
 	}
+	applyAgyMetadata(session, metadata)
+	applyPiMetadata(session, metadata)
+	applyEngramMetadata(session, metadata)
+	return nil
+}
+
+func applyCodexMetadata(session *manifest.Manifest, metadata map[string]any) {
+	sessionID, _ := metadata["codex_session_id"].(string)
+	transcriptPath, _ := metadata["codex_transcript_path"].(string)
+	if sessionID != "" || transcriptPath != "" {
+		session.Codex = &manifest.Codex{
+			SessionID:      sessionID,
+			TranscriptPath: transcriptPath,
+		}
+	}
+}
+
+func applyAgyMetadata(session *manifest.Manifest, metadata map[string]any) {
 	agyConversationID, _ := metadata["agy_conversation_id"].(string)
 	agyWorkspacePath, _ := metadata["agy_workspace_path"].(string)
 	agyConversationDBPath, _ := metadata["agy_conversation_db_path"].(string)
@@ -1203,6 +1214,9 @@ func unmarshalEngramMetadata(session *manifest.Manifest, metadataJSON []byte) er
 			TranscriptPath: agyTranscriptPath,
 		}
 	}
+}
+
+func applyPiMetadata(session *manifest.Manifest, metadata map[string]any) {
 	piSessionID, _ := metadata["pi_session_id"].(string)
 	piSessionDir, _ := metadata["pi_session_dir"].(string)
 	piTranscriptPath, _ := metadata["pi_transcript_path"].(string)
@@ -1217,9 +1231,12 @@ func unmarshalEngramMetadata(session *manifest.Manifest, metadataJSON []byte) er
 			CodingAgentDirSet: piCodingAgentDirSet,
 		}
 	}
+}
+
+func applyEngramMetadata(session *manifest.Manifest, metadata map[string]any) {
 	enabled, ok := metadata["engram_enabled"].(bool)
 	if !ok || !enabled {
-		return nil
+		return
 	}
 	session.EngramMetadata = &manifest.EngramMetadata{Enabled: enabled}
 	if query, ok := metadata["engram_query"].(string); ok {
@@ -1241,7 +1258,6 @@ func unmarshalEngramMetadata(session *manifest.Manifest, metadataJSON []byte) er
 			session.EngramMetadata.LoadedAt = loadedAt
 		}
 	}
-	return nil
 }
 
 func unmarshalSandboxMetadata(session *manifest.Manifest, metadata map[string]any) error {

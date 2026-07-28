@@ -11,8 +11,10 @@ import (
 )
 
 // buildTimeout bounds the `go build` invoked by AtomicInstall so a wedged build
-// can never hang a deploy (the post-merge hook runs it synchronously).
-const buildTimeout = 5 * time.Minute
+// can never hang a deploy (the post-merge hook runs it synchronously). AGM's
+// first clean build on the deployment host can exceed five minutes while
+// compiling provider SDKs, so this budget must cover that cold path too.
+const buildTimeout = 10 * time.Minute
 
 // cloneTimeout bounds the local clone used only to work around Go toolchains
 // that omit VCS metadata for linked worktrees.
@@ -23,17 +25,27 @@ const cloneTimeout = 30 * time.Second
 // revision. It is a package var so tests substitute a stub without a toolchain.
 var buildBinary = goBuild
 
+// goBuildCommand is replaceable so tests can verify the cold-build deadline
+// without invoking the toolchain.
+var goBuildCommand = exec.CommandContext
+
 // buildFromCleanClone is the worktree-safe fallback for a successful but
 // unstamped build from a clean linked worktree. It is a package var so tests
 // can exercise the gate without creating a real clone.
 var buildFromCleanClone = goBuildFromCleanClone
+
+// gitCheckout is replaceable so timeout selection can be verified without a
+// filesystem-sized checkout in a unit test.
+var gitCheckout = func(ctx context.Context, cloneDir string) ([]byte, error) {
+	return exec.CommandContext(ctx, "git", "-C", cloneDir, "checkout", "--detach", "HEAD").CombinedOutput()
+}
 
 func goBuild(repoRoot, pkg, outPath string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), buildTimeout)
 	defer cancel()
 	// -buildvcs=true forces the stamp: a checkout that cannot be VCS-stamped
 	// fails the build here rather than producing an unprovable binary.
-	cmd := exec.CommandContext(ctx, "go", "build", "-buildvcs=true", "-o", outPath, pkg)
+	cmd := goBuildCommand(ctx, "go", "build", "-buildvcs=true", "-o", outPath, pkg)
 	cmd.Dir = repoRoot
 	cmd.Env = os.Environ()
 	out, err := cmd.CombinedOutput()
@@ -99,11 +111,14 @@ func runGitClone(repoRoot, cloneDir string) error {
 }
 
 func runGitCheckout(cloneDir string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
+	// The checkout is part of the standalone-clone fallback, and may need to
+	// materialize a large working tree. Keep its finite deadline aligned with
+	// the clone rather than the short timeout for ordinary git probes.
+	ctx, cancel := context.WithTimeout(context.Background(), cloneTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "git", "-C", cloneDir, "checkout", "--detach", "HEAD").CombinedOutput()
+	out, err := gitCheckout(ctx, cloneDir)
 	if ctx.Err() != nil {
-		return fmt.Errorf("checkout standalone clone timed out after %s: %w", gitTimeout, ctx.Err())
+		return fmt.Errorf("checkout standalone clone timed out after %s: %w", cloneTimeout, ctx.Err())
 	}
 	if err != nil {
 		return fmt.Errorf("checkout standalone clone: %w\n%s", err, out)

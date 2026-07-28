@@ -31,10 +31,17 @@ CI check is a real merge gate rather than an advisory comment.
 ## Enforcement wiring
 
 - `.github/workflows/review.yml` invokes this command from trusted
-  `pull_request_target` PR revisions; the job name `5-Dimension AI Review` is the required-check
-  context.
-- `.github/rulesets/main.json` lists that context under
-  `required_status_checks`.
+  `pull_request_target` PR revisions, publishing its result on the reviewed
+  head under the check context `5-Dimension AI Review`.
+- **Paused 2026-07-27**: that context is **not** currently listed under
+  `required_status_checks` in `.github/rulesets/main.json`, so it does not
+  block merges. The workflow also no longer invokes this command at all when
+  `ANTHROPIC_API_KEY` is unset and no `ai-review:override` label is active — it
+  publishes a `neutral` check instead. Every requirement above still holds
+  whenever the command *is* invoked; AIREV-04's fail-closed-on-missing-key
+  behavior is unchanged and still applies on the override path. Re-enable by
+  setting the secret, and re-add the context to `main.json` per
+  `docs/branch-protection.md` to make it required again.
 
 ## BDD Traceability
 

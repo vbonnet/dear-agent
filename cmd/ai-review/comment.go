@@ -32,7 +32,11 @@ func buildComment(outcome Outcome, synthesis string, reports []dimensionReport, 
 	var b strings.Builder
 	fmt.Fprintln(&b, commentMarker)
 	fmt.Fprintf(&b, "## %s AI Code Review — %s\n\n", emojiFor(outcome), outcome)
-	fmt.Fprintf(&b, "> Automated 5-dimension review per [REVIEW.md](REVIEW.md). This is a **required, fail-closed** check: any non-approved outcome blocks merge.\n\n")
+	// Deliberately says nothing about whether this context is a *required*
+	// status check: that lives in .github/rulesets/main.json and changes
+	// independently of this binary. Wording that hard-codes either state
+	// would make the PR-facing audit record false the moment it flips.
+	fmt.Fprintf(&b, "> Automated 5-dimension review per [REVIEW.md](REVIEW.md). This check is **fail-closed**: any non-approved outcome fails it.\n\n")
 	if len(triggers) > 0 {
 		fmt.Fprintf(&b, "### 🔴 Mandatory escalation (REVIEW.md §3)\n\nThis diff trips escalation triggers, so the outcome is forced to `needs-human-review` regardless of the dimension findings:\n\n")
 		for _, t := range triggers {
@@ -47,7 +51,7 @@ func buildComment(outcome Outcome, synthesis string, reports []dimensionReport, 
 	for _, r := range reports {
 		fmt.Fprintf(&b, "<details>\n<summary>%s dimension</summary>\n\n%s\n\n</details>\n\n", r.key, r.text)
 	}
-	fmt.Fprintf(&b, "<sub>Required gate per REVIEW.md §2/§5.</sub>\n")
+	fmt.Fprintf(&b, "<sub>Review gate per REVIEW.md §2/§5.</sub>\n")
 	return b.String()
 }
 
@@ -56,7 +60,7 @@ func forkComment() string {
 	return commentMarker + "\n## 🔴 AI Code Review — needs-human-review\n\n" +
 		"> This PR originates from a fork, so the automated review cannot access repository secrets and did not run.\n\n" +
 		"A maintainer must review this change and, to merge, apply the `ai-review:override` label (recorded on the PR).\n\n" +
-		"<sub>Required gate per REVIEW.md §2/§5.</sub>\n"
+		"<sub>Review gate per REVIEW.md §2/§5.</sub>\n"
 }
 
 // overrideComment is posted when the gate passes purely on human authority,
@@ -64,9 +68,9 @@ func forkComment() string {
 // automated review could run.
 func overrideComment(reason string) string {
 	return commentMarker + "\n## ⚠️ AI Code Review — passed by human override\n\n" +
-		"> The `ai-review:override` label is present, so this required gate passed on **human authority**: " + reason + ".\n\n" +
+		"> The `ai-review:override` label is present, so this gate passed on **human authority**: " + reason + ".\n\n" +
 		"No automated 5-dimension review backs this result. The override is recorded on this PR as a label.\n\n" +
-		"<sub>Required gate per REVIEW.md §2/§5.</sub>\n"
+		"<sub>Review gate per REVIEW.md §2/§5.</sub>\n"
 }
 
 // oversizeComment is posted when the diff exceeds the auto-review size limit.
@@ -74,7 +78,7 @@ func oversizeComment(size, limit int) string {
 	return fmt.Sprintf(commentMarker+"\n## ⚠️ AI Code Review — diff too large\n\n"+
 		"> The diff is %d bytes, over the %d-byte auto-review limit, so it was **not** reviewed (the gate refuses to review a truncated diff).\n\n"+
 		"Split this PR into smaller reviewable changes, or apply the `ai-review:override` label after a human review.\n\n"+
-		"<sub>Required gate per REVIEW.md §2/§5.</sub>\n", size, limit)
+		"<sub>Review gate per REVIEW.md §2/§5.</sub>\n", size, limit)
 }
 
 // postComment upserts the sticky comment and reports whether the result was

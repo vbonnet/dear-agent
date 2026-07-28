@@ -1,11 +1,13 @@
 package deploy
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // stubBuild swaps buildBinary for the duration of a test. The stub writes the
@@ -158,6 +160,51 @@ func TestAtomicInstall_LinkedWorktreeRetriesCleanCloneForUnstampedBuild(t *testi
 	}
 	if got, err := os.ReadFile(target); err != nil || string(got) != "stamped" {
 		t.Fatalf("installed content = %q, %v; want stamped", got, err)
+	}
+}
+
+func TestRunGitCheckout_UsesCloneFallbackDeadline(t *testing.T) {
+	orig := gitCheckout
+	gitCheckout = func(ctx context.Context, _ string) ([]byte, error) {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("checkout context must have a deadline")
+		}
+		if remaining := time.Until(deadline); remaining < cloneTimeout-time.Second {
+			t.Fatalf("checkout deadline leaves %s; want approximately %s", remaining, cloneTimeout)
+		}
+		return nil, nil
+	}
+	t.Cleanup(func() { gitCheckout = orig })
+
+	if err := runGitCheckout(t.TempDir()); err != nil {
+		t.Fatalf("checkout must receive the standalone-clone deadline: %v", err)
+	}
+}
+
+func TestGoBuild_UsesColdBuildDeadline(t *testing.T) {
+	if buildTimeout != 10*time.Minute {
+		t.Fatalf("buildTimeout = %s; want 10m", buildTimeout)
+	}
+
+	orig := goBuildCommand
+	goBuildCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("build context must have a deadline")
+		}
+		if remaining := time.Until(deadline); remaining < buildTimeout-time.Second {
+			t.Fatalf("build deadline leaves %s; want approximately %s", remaining, buildTimeout)
+		}
+		if name != "go" || strings.Join(args, " ") != "build -buildvcs=true -o /tmp/agm ./agm/cmd/agm" {
+			t.Fatalf("build command = %q %q", name, args)
+		}
+		return exec.CommandContext(ctx, "true")
+	}
+	t.Cleanup(func() { goBuildCommand = orig })
+
+	if err := goBuild(t.TempDir(), "./agm/cmd/agm", "/tmp/agm"); err != nil {
+		t.Fatalf("goBuild: %v", err)
 	}
 }
 
