@@ -121,7 +121,6 @@ import (
     "errors"
     "time"
     "github.com/vbonnet/dear-agent/agm/internal/command"
-    "github.com/vbonnet/dear-agent/agm/internal/agent"
 )
 
 func renameSession(translator command.CommandTranslator, sessionID, newName string) error {
