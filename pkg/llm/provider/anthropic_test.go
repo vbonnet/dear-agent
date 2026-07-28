@@ -173,6 +173,19 @@ func TestAnthropicProvider_Capabilities(t *testing.T) {
 	})
 }
 
+func TestAnthropicProvider_Capabilities_Opus5ContextWindow(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test123")
+
+	provider, err := NewAnthropicProvider(AnthropicConfig{Model: "claude-opus-5"})
+	if err != nil {
+		t.Fatalf("Setup failed: %v", err)
+	}
+
+	if got := provider.Capabilities().MaxTokensPerRequest; got != 1_000_000 {
+		t.Errorf("MaxTokensPerRequest = %d, want 1000000", got)
+	}
+}
+
 func TestAnthropicProvider_Generate(t *testing.T) {
 	// Skip if no API key (integration test)
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
