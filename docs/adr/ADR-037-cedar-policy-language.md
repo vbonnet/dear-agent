@@ -66,9 +66,40 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   decision, and the interceptor applies the fixed precedence
   `deny > ask > allow`. The mapping is runtime glue, not a third Cedar effect
   or an additional policy source.
+- Keep **authored decisions separate from evaluator health**. A Cedar response
+  with evaluation diagnostics is `policy_unavailable`, not a policy-authored
+  deny from either ordered decision. In an interactive harness the interceptor
+  maps that state to an explicit confirmation/escalation path; if confirmation
+  is unavailable, it fails closed with an evaluator-error diagnostic rather
+  than reporting that policy denied the call.
+- Publish policy bundles atomically only after they parse, validate against the
+  Cedar schema, and pass the deterministic policy fixture suite. A rejected
+  candidate never replaces the active bundle. The evaluator retains a durable
+  last-known-good bundle across restart; reload readers observe either the
+  complete old bundle or the complete new bundle, never a partial update.
 - Rego/OPA remains the documented fallback if Cedar's younger ecosystem
   (smaller `cedar-go`, no turnkey `cedar test`-equivalent at research time)
-  proves insufficient in implementation.
+proves insufficient in implementation.
+
+## Implementation acceptance gates
+
+Before a Cedar interceptor can become a blocking runtime path, executable
+tests must prove all of the following:
+
+1. A malformed or fixture-failing candidate bundle leaves the active
+   last-known-good bundle and its version unchanged.
+2. Concurrent evaluation during reload observes one whole validated bundle,
+   never mixed schema and policy generations.
+3. A Cedar diagnostic or evaluation exception returns
+   `policy_unavailable`, not `deny`, and records the bundle version and
+   diagnostic without request secrets.
+4. Interactive `policy_unavailable` requests enter the harness confirmation
+   path; non-interactive requests fail closed with a distinct evaluator error.
+5. Restart restores the last-known-good bundle before the interceptor accepts
+   tool calls.
+
+The shared evaluator SPEC and per-harness interceptor BDD scenarios must carry
+these cases; unit tests of Cedar Allow/Deny alone do not satisfy this gate.
 
 ## Alternatives
 
@@ -104,7 +135,8 @@ Implementation work is now scoped as: a Cedar policy schema for
 tool/resource/context, a shared evaluation library, and one interceptor per
 harness hook point (starting with dear-agent's own pretool hooks). Cedar's
 thinner ecosystem and unproven testing tooling (relative to `opa test` or
-Cerbos's YAML test suites) are accepted risks — Rego/OPA is the fallback if
-they block implementation. The historical `0d1b3ed0` Rego re-evaluation
-identifier could not be resolved in the canonical Beads store; this ADR
-supersedes that unverified follow-up as the durable decision record.
+Cerbos's YAML test suites) are accepted risks, bounded by atomic validation,
+last-known-good recovery, and the executable liveness gates above. Rego/OPA is
+the fallback if Cedar blocks implementation. The historical `0d1b3ed0` Rego
+re-evaluation identifier could not be resolved in the canonical Beads store;
+this ADR supersedes that unverified follow-up as the durable decision record.
