@@ -19,6 +19,11 @@ type AnthropicProvider struct {
 	costSink costtrack.CostSink
 }
 
+const (
+	anthropicDefaultContextWindowTokens = 200_000
+	anthropicOpus5ContextWindowTokens   = 1_000_000
+)
+
 // AnthropicConfig contains configuration for Anthropic provider.
 type AnthropicConfig struct {
 	// Model is the Claude model identifier (e.g., "claude-3-5-sonnet-20241022")
@@ -140,7 +145,7 @@ func (p *AnthropicProvider) Generate(ctx context.Context, req *GenerateRequest) 
 	}
 
 	// Calculate usage and cost
-	usage := p.calculateUsage(resp)
+	usage := calculateUsage(model, resp)
 
 	// Record cost if sink is configured
 	if p.costSink != nil {
@@ -168,12 +173,18 @@ func (p *AnthropicProvider) Generate(ctx context.Context, req *GenerateRequest) 
 
 // Capabilities returns provider capabilities.
 func (p *AnthropicProvider) Capabilities() Capabilities {
+	maxTokensPerRequest := anthropicDefaultContextWindowTokens
+	if p.model == "claude-opus-5" {
+		maxTokensPerRequest = anthropicOpus5ContextWindowTokens
+	}
+
 	return Capabilities{
 		SupportsCaching:       true,
 		SupportsStreaming:     true,
-		MaxTokensPerRequest:   200000, // Claude context window
-		MaxConcurrentRequests: 5,      // Conservative rate limit
+		MaxTokensPerRequest:   maxTokensPerRequest,
+		MaxConcurrentRequests: 5, // Conservative rate limit
 		SupportedModels: []string{
+			"claude-opus-5",
 			"claude-opus-4-8",
 			"claude-opus-4-6",
 			"claude-3-5-sonnet-20241022",
@@ -184,13 +195,13 @@ func (p *AnthropicProvider) Capabilities() Capabilities {
 }
 
 // calculateUsage extracts usage information from API response.
-func (p *AnthropicProvider) calculateUsage(resp *anthropic.Message) Usage {
+func calculateUsage(model string, resp *anthropic.Message) Usage {
 	inputTokens := int(resp.Usage.InputTokens)
 	outputTokens := int(resp.Usage.OutputTokens)
 	totalTokens := inputTokens + outputTokens
 
 	// Get pricing for model
-	pricing := costtrack.GetPricingOrDefault(p.model)
+	pricing := costtrack.GetPricingOrDefault(model)
 
 	// Calculate cost
 	tokens := costtrack.Tokens{

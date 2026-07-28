@@ -17,6 +17,7 @@ import (
 
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/pisession"
+	"github.com/vbonnet/dear-agent/pkg/costtrack"
 )
 
 // ConversationEntry represents a single entry in conversation.jsonl
@@ -68,16 +69,17 @@ type contextDetectorCache struct {
 // More-specific prefixes must be checked before less-specific ones;
 // getModelContextWindow uses longest-prefix matching to ensure correctness.
 var modelContextWindows = map[string]int{
-	// Opus 4.8+ and 4.6 have a 1M context window by default.
-	"claude-opus-4-8": 1000000,
-	"claude-opus-4-6": 1000000,
-	"claude-opus-4":   200000,
-	"claude-sonnet-4": 200000,
-	"claude-haiku-4":  200000,
-	"claude-3-5":      200000,
-	"claude-3-opus":   200000,
-	"claude-3-sonnet": 200000,
-	"claude-3-haiku":  200000,
+	// Opus 5, Opus 4.8+, and 4.6 have a 1M context window by default.
+	"claude-opus-5":   extendedContextWindowTokens,
+	"claude-opus-4-8": extendedContextWindowTokens,
+	"claude-opus-4-6": extendedContextWindowTokens,
+	"claude-opus-4":   standardContextWindowTokens,
+	"claude-sonnet-4": standardContextWindowTokens,
+	"claude-haiku-4":  standardContextWindowTokens,
+	"claude-3-5":      standardContextWindowTokens,
+	"claude-3-opus":   standardContextWindowTokens,
+	"claude-3-sonnet": standardContextWindowTokens,
+	"claude-3-haiku":  standardContextWindowTokens,
 }
 
 // statusLineDir is the directory where statusline JSON files are written.
@@ -428,7 +430,7 @@ func piNativeModelContextWindow(model string) int {
 	if contextWindow, ok := piKnownNativeModelContextWindow(model); ok {
 		return contextWindow
 	}
-	return 200000
+	return standardContextWindowTokens
 }
 
 func piKnownNativeModelContextWindow(model string) (int, bool) {
@@ -448,8 +450,8 @@ func piKnownNativeModelContextWindow(model string) (int, bool) {
 
 func piKnownDirectModelContextWindow(model string) (int, bool) {
 	switch model {
-	case "claude-fable-5", "claude-opus-4-8", "claude-sonnet-4-6":
-		return 1000000, true
+	case "claude-fable-5", "claude-opus-5", "claude-opus-4-8", "claude-sonnet-4-6":
+		return extendedContextWindowTokens, true
 	case "gpt-5.3-chat-latest", "gpt-5.3-codex-spark":
 		return 128000, true
 	case "gpt-5.3-codex", "gpt-5.4-mini", "gpt-5.4-nano":
@@ -475,8 +477,8 @@ func piKnownDirectModelContextWindow(model string) (int, bool) {
 // be collapsed into direct-provider defaults.
 func piKnownOpenRouterModelContextWindow(route string) (int, bool) {
 	switch route {
-	case "anthropic/claude-fable-5":
-		return 1000000, true
+	case "anthropic/claude-fable-5", "anthropic/claude-opus-5":
+		return extendedContextWindowTokens, true
 	case "openai/gpt-5.3-codex", "openai/gpt-5.4-mini", "openai/gpt-5.4-nano":
 		return 400000, true
 	case "openai/gpt-5.4", "openai/gpt-5.5", "openai/gpt-5.6-sol",
@@ -779,7 +781,7 @@ func extractUsageFromJSONL(line string) *manifest.ContextUsage {
 	// Claude models have two context tiers: 200k (standard) and 1M (extended).
 	// If observed tokens exceed standard, the session is using extended context.
 	if totalInput > contextWindow && strings.Contains(msg.Model, "claude") {
-		contextWindow = 1000000
+		contextWindow = extendedContextWindowTokens
 	}
 
 	percentage := float64(totalInput) / float64(contextWindow) * 100.0
@@ -815,7 +817,7 @@ func getModelContextWindow(model string) int {
 	}
 	// Default: assume 200K for any claude model
 	if strings.Contains(model, "claude") {
-		return 200000
+		return standardContextWindowTokens
 	}
 	return 0
 }
@@ -835,6 +837,8 @@ type modelPricing struct {
 // doesn't fire. For interactive sessions, the exact cost comes from CC's
 // statusLine JSON (total_cost_usd) via agm-statusline-capture.
 var pricingTable = map[string]modelPricing{
+	"claude-opus-5":   modelPricingFromCosttrack("claude-opus-5"),
+	"claude-opus-4-8": {InputPerM: 5.0, OutputPerM: 25.0, CacheReadPerM: 0.50, CacheWritePerM: 6.25},
 	"claude-opus-4":   {InputPerM: 15.0, OutputPerM: 75.0, CacheReadPerM: 1.50, CacheWritePerM: 18.75},
 	"claude-sonnet-4": {InputPerM: 3.0, OutputPerM: 15.0, CacheReadPerM: 0.30, CacheWritePerM: 3.75},
 	"claude-haiku-4":  {InputPerM: 0.80, OutputPerM: 4.0, CacheReadPerM: 0.08, CacheWritePerM: 1.0},
@@ -851,6 +855,16 @@ func getModelPricing(modelID string) (modelPricing, bool) {
 		}
 	}
 	return bestPricing, bestLen > 0
+}
+
+func modelPricingFromCosttrack(model string) modelPricing {
+	p := costtrack.PricingTable[model]
+	return modelPricing{
+		InputPerM:      p.Input,
+		OutputPerM:     p.Output,
+		CacheReadPerM:  p.CacheRead,
+		CacheWritePerM: p.CacheWrite,
+	}
 }
 
 // estimateCostFromUsage parses a JSONL line for token counts and estimates cost.

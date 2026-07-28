@@ -1114,7 +1114,9 @@ func TestGetModelPricing(t *testing.T) {
 		wantOK  bool
 		wantIn  float64 // InputPerM
 	}{
-		{"opus model", "claude-opus-4-6-20251001", true, 15.0},
+		{"Opus 5", "claude-opus-5", true, 5.0},
+		{"Opus 4.8", "claude-opus-4-8", true, 5.0},
+		{"earlier Opus 4", "claude-opus-4-6-20251001", true, 15.0},
 		{"sonnet model", "claude-sonnet-4-5-20250929", true, 3.0},
 		{"haiku model", "claude-haiku-4-20260101", true, 0.80},
 		{"unknown model", "gpt-4o-2024-05", false, 0},
@@ -1130,6 +1132,17 @@ func TestGetModelPricing(t *testing.T) {
 				t.Errorf("InputPerM = %f, want %f", pricing.InputPerM, tt.wantIn)
 			}
 		})
+	}
+}
+
+func TestOpus5FallbackPricingUsesCanonicalCosttrackRate(t *testing.T) {
+	got, ok := getModelPricing("claude-opus-5")
+	if !ok {
+		t.Fatal("getModelPricing(claude-opus-5) returned no pricing")
+	}
+	want := modelPricingFromCosttrack("claude-opus-5")
+	if got != want {
+		t.Fatalf("getModelPricing(claude-opus-5) = %+v, want canonical pricing %+v", got, want)
 	}
 }
 

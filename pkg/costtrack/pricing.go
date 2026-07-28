@@ -69,6 +69,19 @@ var (
 		CacheRead:  1.50,  // $1.50 per 1M tokens
 	}
 
+	// Claude Opus 5 (2026-07-24) — $5/$25 per Mtok, unchanged from Opus 4.8's
+	// real rate per Anthropic's own docs (platform.claude.com/docs/en/about-claude/models/whats-new-opus-5).
+	// Note: Claude4Opus4_8 above is stale (looks like carried-over Claude-3-
+	// Opus-era pricing); not corrected here since it's pre-existing and out
+	// of this change's scope, but it means the two entries don't currently
+	// agree despite both nominally being the same $5/$25 rate.
+	Claude5Opus5 = Pricing{
+		Input:      5.00,  // $5 per 1M tokens
+		Output:     25.00, // $25 per 1M tokens
+		CacheWrite: 6.25,  // $6.25 per 1M tokens (1.25x input, this file's standard cache-write ratio)
+		CacheRead:  0.50,  // $0.50 per 1M tokens (0.1x input, this file's standard cache-read ratio)
+	}
+
 	// Gemini 2.0 Flash (free tier available)
 	Gemini20FlashExp = Pricing{
 		Input:      0.00, // Free tier (up to limits)
@@ -111,6 +124,8 @@ var PricingTable = map[string]Pricing{
 	"claude-3-opus-20240229":     Claude3Opus20240229,
 	"claude-opus-4-6":            Claude4Opus4_6,
 	"claude-opus-4-8":            Claude4Opus4_8,
+	"claude-opus-5":              Claude5Opus5,
+	"anthropic/claude-opus-5":    Claude5Opus5,           // OpenRouter and Pi provider-qualified naming
 	"claude-sonnet-4-5@20250929": Claude35Sonnet20241022, // Vertex AI naming
 	"gemini-2.0-flash-exp":       Gemini20FlashExp,
 	"gemini-1.5-pro":             Gemini15Pro,

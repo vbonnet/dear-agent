@@ -42,6 +42,7 @@ var HarnessModels = map[string][]ModelSpec{
 	"claude-code": {
 		{Alias: "fable", FullName: "claude-fable-5", Description: "Mythos-class, most capable, 1M context, 128k max output (free on Pro/Max/Team through 2026-06-23)"},
 		{Alias: "opus", FullName: "claude-opus-4-8[1m]", Description: "Latest Opus, 1M context"},
+		{Alias: "opus5", FullName: "claude-opus-5", Description: "Claude Opus 5, 1M context (default and only context size, no smaller variant), same price as Opus 4.8 ($5/$25 per Mtok)"},
 		{Alias: "sonnet", FullName: "claude-sonnet-4-6[1m]", Description: "Latest Sonnet, 1M context"},
 		{Alias: "haiku", FullName: "claude-haiku-4-5", Description: "Fast, 200k context"},
 		{Alias: "opus-200k", FullName: "claude-opus-4-8", Description: "Opus with default 200k context"},
@@ -90,6 +91,7 @@ var HarnessModels = map[string][]ModelSpec{
 		{Alias: "fable", FullName: "anthropic/claude-fable-5", Description: "Claude Fable 5 through Pi's Anthropic provider"},
 		{Alias: "sonnet", FullName: "anthropic/claude-sonnet-4-6", Description: "Claude Sonnet 4.6 through Pi's Anthropic provider"},
 		{Alias: "opus", FullName: "anthropic/claude-opus-4-8", Description: "Claude Opus 4.8 through Pi's Anthropic provider"},
+		{Alias: "opus5", FullName: "anthropic/claude-opus-5", Description: "Claude Opus 5 through Pi's Anthropic provider"},
 		{Alias: "haiku", FullName: "anthropic/claude-haiku-4-5", Description: "Claude Haiku 4.5 through Pi's Anthropic provider"},
 		{Alias: "gpt-frontier", FullName: "openai/gpt-5.6-sol", Description: "GPT-5.6 Sol through Pi's OpenAI provider"},
 		{Alias: "gpt", FullName: "openai/gpt-5.6-terra", Description: "GPT-5.6 Terra through Pi's OpenAI provider"},
@@ -116,6 +118,7 @@ var HarnessModels = map[string][]ModelSpec{
 		{Alias: "gemini-flash", FullName: "google/gemini-flash-1.5", Description: "Gemini Flash — fast, cheap, good for extraction"},
 		{Alias: "gemini-pro", FullName: "google/gemini-pro-1.5", Description: "Gemini Pro — mid-tier via OpenRouter"},
 		{Alias: "opus", FullName: "anthropic/claude-opus-4", Description: "Claude Opus via OpenRouter — expensive tier"},
+		{Alias: "opus5", FullName: "anthropic/claude-opus-5", Description: "Claude Opus 5 via OpenRouter — expensive tier"},
 	},
 	// opencode-cli: aggregated from all other harnesses (built dynamically)
 }

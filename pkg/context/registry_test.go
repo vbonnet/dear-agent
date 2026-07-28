@@ -565,6 +565,20 @@ func TestModelsYAMLAllEntriesParse(t *testing.T) {
 	}
 }
 
+func TestModelsYAMLOpus5ContextWindows(t *testing.T) {
+	registry, err := loadRegistry(filepath.Join(".", "models.yaml"))
+	require.NoError(t, err)
+
+	for _, modelID := range []string{"claude-opus-5", "anthropic/claude-opus-5"} {
+		t.Run(modelID, func(t *testing.T) {
+			model := registry.GetModel(modelID)
+			require.NotNil(t, model)
+			assert.Equal(t, 1_000_000, model.MaxContextTokens)
+			assert.True(t, model.Capabilities.LongContext)
+		})
+	}
+}
+
 func TestModelsYAMLProviderCoverage(t *testing.T) {
 	registryPath := filepath.Join(".", "models.yaml")
 	if _, err := os.Stat(registryPath); os.IsNotExist(err) {
