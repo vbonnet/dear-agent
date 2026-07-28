@@ -55,12 +55,14 @@ current code, and repair or quarantine the stale living document in scope.
 - Agent-authored code inverts the human-ease tax: Python, prose docs, and
   simple choices were concessions to human convenience. When agents write
   and maintain the code, typed languages, living docs, and complex policy
-  languages (e.g. Rego/OPA) become *more* viable, not less — provided their
-  complexity is continuously earned under Harness Hygiene, enforcement is
-  deterministic, and Definition of Done is deterministic (see
+  languages (e.g. Rego/OPA) become *more* viable, not less. Their complexity
+  must remain continuously earned under the Harness Hygiene review lens;
+  deterministic enforcement and a deterministic Definition of Done remain
+  delivery gates (see
   [`harness-hygiene.ai.md`](docs/policies/harness-hygiene.ai.md) and
   [`definition-of-done.ai.md`](docs/policies/definition-of-done.ai.md)).
-  Without all three gates, the tax is just paid by whoever debugs it later.
+  Without that lens and both gates, the tax is just paid by whoever debugs it
+  later.
 - Prefer deep modules and typed commands over long prompts, shell pipelines,
   or duplicated flag catalogs.
 - Use deterministic, positive enforcement: state what was attempted, the safe
