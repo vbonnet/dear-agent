@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/history"
 )
 
 // GitIntegrator handles git operations for wayfinder sessions
@@ -50,7 +52,8 @@ func (g *GitIntegrator) CommitPhaseCompletion(phase, outcome, context string) er
 
 	files := []string{
 		"WAYFINDER-STATUS.md",
-		"WAYFINDER-HISTORY.jsonl",
+		history.HistoryFilename,
+		history.LegacyHistoryFilename,
 	}
 	artifacts, err := filepath.Glob(filepath.Join(g.projectDir, phase+"-*.md"))
 	if err != nil {
@@ -85,7 +88,8 @@ func (g *GitIntegrator) CommitRewind(fromPhase, toPhase string) error {
 	message := fmt.Sprintf("wayfinder: rewind %s to %s\n\nWayfinder-Event: rewind", fromPhase, toPhase)
 	return g.commitScoped(message, []string{
 		"WAYFINDER-STATUS.md",
-		"WAYFINDER-HISTORY.jsonl",
+		history.HistoryFilename,
+		history.LegacyHistoryFilename,
 		"RETRO-retrospective.md",
 	})
 }
@@ -101,7 +105,8 @@ func (g *GitIntegrator) CommitPhaseStart(phase string) error {
 
 	markerFiles := []string{
 		"WAYFINDER-STATUS.md",
-		"WAYFINDER-HISTORY.jsonl",
+		history.HistoryFilename,
+		history.LegacyHistoryFilename,
 	}
 
 	// Track which files were successfully staged so we can scope the commit to
@@ -109,13 +114,17 @@ func (g *GitIntegrator) CommitPhaseStart(phase string) error {
 	// sweeping up any other staged changes the user may have queued separately.
 	var staged []string
 	for _, file := range markerFiles {
-		filePath := filepath.Join(g.projectDir, file)
-		if _, err := os.Stat(filePath); err == nil {
-			if err := g.gitAdd(file); err != nil {
-				return fmt.Errorf("failed to add %s: %w", file, err)
-			}
-			staged = append(staged, file)
+		present, err := g.pathExistsOrTracked(file)
+		if err != nil {
+			return err
 		}
+		if !present {
+			continue
+		}
+		if err := g.gitAdd(file); err != nil {
+			return fmt.Errorf("failed to add %s: %w", file, err)
+		}
+		staged = append(staged, file)
 	}
 
 	if len(staged) == 0 {
@@ -194,7 +203,7 @@ func (g *GitIntegrator) formatCommitMessage(phase, outcome, context string) stri
 
 // gitAdd runs git add for a file
 func (g *GitIntegrator) gitAdd(file string) error {
-	cmd := exec.Command("git", "add", file)
+	cmd := exec.Command("git", "add", "--", file)
 	cmd.Dir = g.projectDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -211,11 +220,12 @@ func (g *GitIntegrator) commitScoped(message string, candidates []string) error 
 			continue
 		}
 		seen[file] = true
-		if _, err := os.Stat(filepath.Join(g.projectDir, file)); err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return fmt.Errorf("stat %s: %w", file, err)
+		present, err := g.pathExistsOrTracked(file)
+		if err != nil {
+			return err
+		}
+		if !present {
+			continue
 		}
 		if err := g.gitAdd(file); err != nil {
 			return fmt.Errorf("failed to add %s: %w", file, err)
@@ -236,6 +246,23 @@ func (g *GitIntegrator) commitScoped(message string, candidates []string) error 
 		return fmt.Errorf("git commit failed: %w (output: %s)", err, string(output))
 	}
 	return nil
+}
+
+func (g *GitIntegrator) pathExistsOrTracked(file string) (bool, error) {
+	if _, err := os.Stat(filepath.Join(g.projectDir, file)); err == nil {
+		return true, nil
+	} else if !os.IsNotExist(err) {
+		return false, fmt.Errorf("stat %s: %w", file, err)
+	}
+	cmd := exec.Command("git", "ls-files", "--error-unmatch", "--", file)
+	cmd.Dir = g.projectDir
+	if err := cmd.Run(); err == nil {
+		return true, nil
+	} else if _, ok := err.(*exec.ExitError); ok {
+		return false, nil
+	} else {
+		return false, fmt.Errorf("check tracked path %s: %w", file, err)
+	}
 }
 
 // GetCommitHash returns the current HEAD commit hash

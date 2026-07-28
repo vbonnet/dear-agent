@@ -250,12 +250,12 @@ func TestCommitPhaseCompletionIncludesDesignADRs(t *testing.T) {
 	}
 
 	for name, content := range map[string]string{
-		"WAYFINDER-STATUS.md":  "# Status\n",
+		"WAYFINDER-STATUS.md":     "# Status\n",
 		"WAYFINDER-HISTORY.jsonl": "{}\n",
-		"DESIGN-overview.md":   "# Design\n",
-		"ARCHITECTURE.md":      "# Architecture\n",
-		"ADR-001-storage.md":   "# ADR-001 Storage\n",
-		"user-notes.md":        "private notes\n",
+		"DESIGN-overview.md":      "# Design\n",
+		"ARCHITECTURE.md":         "# Architecture\n",
+		"ADR-001-storage.md":      "# ADR-001 Storage\n",
+		"user-notes.md":           "private notes\n",
 	} {
 		if err := os.WriteFile(filepath.Join(repoDir, name), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
@@ -295,10 +295,10 @@ func TestCommitRewindCommitsCanonicalMarkersOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, content := range map[string]string{
-		"WAYFINDER-STATUS.md":    "status: in-progress\n",
-		"WAYFINDER-HISTORY.jsonl":   "{}\n",
-		"RETRO-retrospective.md": "# Retro\n",
-		"user-notes.md":          "private\n",
+		"WAYFINDER-STATUS.md":     "status: in-progress\n",
+		"WAYFINDER-HISTORY.jsonl": "{}\n",
+		"RETRO-retrospective.md":  "# Retro\n",
+		"user-notes.md":           "private\n",
 	} {
 		if err := os.WriteFile(filepath.Join(repoDir, name), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
@@ -451,6 +451,73 @@ func TestCommitPhaseStart(t *testing.T) {
 	}
 	if len(strings.TrimSpace(string(statusOut))) != 0 {
 		t.Errorf("worktree should be clean after CommitPhaseStart, got:\n%s", string(statusOut))
+	}
+}
+
+func TestLifecycleCommitsStageLegacyHistoryDeletion(t *testing.T) {
+	tests := map[string]func(*GitIntegrator) error{
+		"start": func(g *GitIntegrator) error {
+			return g.CommitPhaseStart("CHARTER")
+		},
+		"completion": func(g *GitIntegrator) error {
+			return g.CommitPhaseCompletion("PROBLEM", "success", "")
+		},
+		"rewind": func(g *GitIntegrator) error {
+			if err := os.WriteFile(filepath.Join(g.projectDir, "RETRO-retrospective.md"), []byte("# Retro\n"), 0o644); err != nil {
+				return err
+			}
+			return g.CommitRewind("BUILD", "DESIGN")
+		},
+	}
+
+	for name, commitLifecycle := range tests {
+		t.Run(name, func(t *testing.T) {
+			repoDir := setupGitRepo(t)
+			for path, content := range map[string]string{
+				"WAYFINDER-STATUS.md":  "# Status\n",
+				"WAYFINDER-HISTORY.md": "{}\n",
+			} {
+				if err := os.WriteFile(filepath.Join(repoDir, path), []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := exec.Command("git", "-C", repoDir, "add", ".").Run(); err != nil {
+				t.Fatal(err)
+			}
+			if err := exec.Command("git", "-C", repoDir, "commit", "-m", "legacy history").Run(); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := os.Rename(
+				filepath.Join(repoDir, "WAYFINDER-HISTORY.md"),
+				filepath.Join(repoDir, "WAYFINDER-HISTORY.jsonl"),
+			); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(repoDir, "WAYFINDER-STATUS.md"), []byte("# Updated status\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := commitLifecycle(New(repoDir)); err != nil {
+				t.Fatalf("lifecycle commit: %v", err)
+			}
+			status, err := exec.Command("git", "-C", repoDir, "status", "--porcelain").Output()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.TrimSpace(string(status)) != "" {
+				t.Fatalf("legacy migration left dirty worktree:\n%s", status)
+			}
+			names, err := exec.Command("git", "-C", repoDir, "show", "--no-renames", "--name-only", "--format=", "HEAD").Output()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{"WAYFINDER-HISTORY.md", "WAYFINDER-HISTORY.jsonl"} {
+				if !strings.Contains(string(names), want) {
+					t.Errorf("migration commit missing %s:\n%s", want, names)
+				}
+			}
+		})
 	}
 }
 
