@@ -3,6 +3,7 @@
 package wayfinderparity
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -105,6 +106,27 @@ func ValidateAssets(root string) error {
 	} {
 		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
 			return fmt.Errorf("wayfinder asset %s: %w", rel, err)
+		}
+	}
+	return ValidatePiSkillDiscovery(root)
+}
+
+// ValidatePiSkillDiscovery verifies Pi reads the living skill trees instead of
+// relying on copied or harness-specific skill definitions.
+func ValidatePiSkillDiscovery(root string) error {
+	data, err := os.ReadFile(filepath.Join(root, ".pi", "settings.json"))
+	if err != nil {
+		return fmt.Errorf("read Pi settings: %w", err)
+	}
+	var settings struct {
+		Skills []string `json:"skills"`
+	}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return fmt.Errorf("parse Pi settings: %w", err)
+	}
+	for _, required := range []string{"../agm/plugins", "../wayfinder/skills", "../research-pipeline/skills"} {
+		if !slices.Contains(settings.Skills, required) {
+			return fmt.Errorf("Pi settings missing native skill discovery path %q", required)
 		}
 	}
 	return nil

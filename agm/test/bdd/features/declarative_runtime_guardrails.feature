@@ -39,6 +39,7 @@ Feature: Declarative runtime guardrails
     Examples:
       | directory                                                                    |
       | .agents/skills/beads/agents                                                  |
+      | .agents/skills/research-pipeline/agents                                      |
       | .github                                                                      |
       | .github/act                                                                  |
       | .github/rulesets                                                             |
@@ -61,6 +62,8 @@ Feature: Declarative runtime guardrails
       | pkg/codeintel/rules/go                                                       |
       | pkg/codeintel/rules/python                                                   |
       | pkg/codeintel/rules/typescript                                               |
+      | research-pipeline/.claude-plugin                                             |
+      | research-pipeline/skills/research-pipeline                                   |
       | wayfinder/.claude-plugin                                                     |
 
   Scenario Outline: Declarative contracts are invariant across active routes

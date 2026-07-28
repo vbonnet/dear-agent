@@ -16,6 +16,7 @@ const declarativeRuntimeFeaturePath = "agm/test/bdd/features/declarative_runtime
 
 var declarativeRuntimeDirs = []string{
 	".agents/skills/beads/agents",
+	".agents/skills/research-pipeline/agents",
 	".github",
 	".github/act",
 	".github/rulesets",
@@ -38,6 +39,8 @@ var declarativeRuntimeDirs = []string{
 	"pkg/codeintel/rules/go",
 	"pkg/codeintel/rules/python",
 	"pkg/codeintel/rules/typescript",
+	"research-pipeline/.claude-plugin",
+	"research-pipeline/skills/research-pipeline",
 	"wayfinder/.claude-plugin",
 }
 

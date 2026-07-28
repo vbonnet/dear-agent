@@ -54,9 +54,10 @@ standalone skill for turning an external source (a talk, article, paper) into
 verified, executable work. It is not a Wayfinder phase and Wayfinder's own
 RESEARCH phase does not delegate to it — Wayfinder's RESEARCH means "search
 existing solutions for an already-charter'd project," a narrower thing than
-research-pipeline's source-ingestion stages. The one real overlap is
-decomposition: `research-pipeline`'s Stage 4 routes large, phased
-decompositions through this PLAN phase's Beads adapter rather than
-reimplementing bead filing. See
+research-pipeline's source-ingestion stages. Its Stage 4 files every
+decomposition through the target repository's canonical Beads interface;
+Wayfinder's PLAN phase is not a bead-decomposition API. A large research
+initiative may start a separate Wayfinder session after its reviewed bead
+graph exists when the full multi-phase SDLC is warranted. See
 [the incorporate-vs-delegate assessment](https://github.com/vbonnet/dear-agent/pull/947)
 for the full reasoning.

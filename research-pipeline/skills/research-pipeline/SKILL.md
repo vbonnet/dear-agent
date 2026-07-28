@@ -28,9 +28,9 @@ navigable.
  │ provider- │──▶│ goal-oriented │──▶│ independent model:  │──▶│ independent model:  │──▶│  Codex   │
  │ routed    │   │ web research  │   │ adversarial fact-   │   │ re-verify plan,     │   │ dark-    │
  │ ingest    │   │ (fan out,     │   │ check + codebase-   │   │ split into sized    │   │ factory  │
- │           │   │  cite, verify)│   │ grounded plan       │   │ beads, file via     │   │ via      │
- │           │   │               │   │                     │   │ `bd create` or a    │   │ safe-pr  │
- │           │   │               │   │                     │   │ wayfinder PLAN phase│   │          │
+ │           │   │  cite, verify)│   │ grounded plan       │   │ beads, file through │   │ via      │
+ │           │   │               │   │                     │   │ the repository's    │   │ safe-pr  │
+ │           │   │               │   │                     │   │ canonical Beads CLI │   │          │
  └───────────┘   └───────────────┘   └──────────┬──────────┘   └──────────┬─────────┘   └──────────┘
                                                   │                        │
                                                   ├──▶ loop back to fix ◀──┤  (repeat until reviewer
@@ -72,10 +72,13 @@ the destination is genuinely a codebase change.
 
 **Rule: name the provider that's actually right for the source type — never
 silently let whichever harness is running absorb the task.** YouTube/video →
-a video-capable provider first (e.g. Gemini). If the running harness can't
-reach that provider natively (no tool, confirmation denied, headless mode
-blocks it), fall back — but the fallback and the reason MUST be recorded,
-not silently swallowed.
+a video-capable provider first (e.g. Gemini). If the running harness lacks
+that provider capability, use an available fallback and record both the
+capability gap and the fallback. If the provider call is denied by the user or
+the permission system, stop and defer or escalate that stage; denial is not
+authorization to bypass the decision with another provider. A headless run
+may fall back only when the named provider is genuinely unavailable, not when
+an approval request was rejected.
 
 Store artifacts in the operator's designated private research/notes
 repository — not this repo; dear-agent is the shared product repo, and
@@ -89,7 +92,7 @@ research/<YYYYMMDD-HHMMSS>-<sourcetype>-<id>/
   metadata.json      # title, author/speaker, source URL, date, duration
   provenance.json     # extract_method, and if the named provider was NOT
                        # used: which provider was attempted first, why it
-                       # failed (tool absent / denied / not multimodal),
+                       # was unavailable (tool absent / not multimodal),
                        # what extraction path was used instead
   transcript.txt | raw.*
 ```
@@ -141,36 +144,24 @@ author (Stage 3's model) already spent its independence, and a plan
 that "looks done" is not the same as a plan an adversarial reader
 couldn't break.
 
-**How beads actually get filed depends on size:**
+**File every decomposition through the target repository's canonical Beads
+interface.** Check its `AGENTS.md`/equivalent first — e.g. dear-agent itself
+requires the explicit form
+`bd --db ~/beads/context-engine/.beads --dolt-auto-commit on <subcommand>`
+for every invocation; use that exact form here. For a repo with no documented
+policy, respect the operator's configured database (`BEADS_DIR`, a
+`-C <path>` override) instead of hardcoding a path. That fallback is for the
+*absence* of repo policy, not license to skip required flags.
 
-- **Small decomposition (a handful of beads, no phasing needed):** file
-  directly, using this repository's own canonical Beads invocation. Check
-  its `AGENTS.md`/equivalent first — e.g. dear-agent itself requires the
-  explicit form
-  `bd --db ~/beads/context-engine/.beads --dolt-auto-commit on <subcommand>`
-  for every invocation; use that exact form here. For a repo with no such
-  documented policy, respect whatever database the operator has configured
-  (`BEADS_DIR`, a `-C <path>` override) instead of hardcoding a path — but
-  that fallback is for the *absence* of repo policy, not license to skip a
-  repo's own required flags where one exists. Full Wayfinder session
-  overhead isn't warranted for 2-3 beads.
-- **Large decomposition (needs phased sequencing, dependency graphs,
-  multiple work-streams):** drive it through a `wayfinder` session's
-  **PLAN** phase (see `wayfinder/PHASES.md` for the nine-phase model —
-  CHARTER through RETRO), which files beads through Wayfinder's own
-  canonical Beads adapter (`wayfinder/cmd/wayfinder-session/internal/beads`
-  in this repo — a non-interactive filing path with no shell interpolation
-  and empty titles rejected). Don't reimplement phased sequencing or a second beads
-  filing path in this skill; Wayfinder already owns that mechanic. This is
-  the one stage of this pipeline that genuinely overlaps a Wayfinder phase
-  (see `docs/design/research-pipeline-wayfinder-integration.md`, once
-  merged, for the full incorporate-vs-delegate assessment) — Wayfinder is
-  a >1-day, single-project SDLC methodology and this pipeline is not, so
-  only this one decomposition mechanic is shared, not a session model.
-  Do NOT confuse this with `wayfinder/lib/wayfinder-decompose` — that's an
-  unrelated tool that splits one **XL charter** into several **sub-project
-  charters** by platform/layer/concern, not for turning a research plan
-  into sized beads.
+For a small decomposition, create the handful of beads directly. For a large
+decomposition, still create the beads directly, then encode its phases,
+dependency edges, and parallel work-streams with the canonical Beads
+subcommands. Do not route bead creation to Wayfinder's PLAN phase:
+`wayfinder-session start_phase` creates a single session-level bead during
+SETUP or BUILD, and PLAN cannot start until SPEC; it is not a research-plan
+decomposition API. A Wayfinder session may be started separately after the
+reviewed bead graph exists when the project merits the full multi-phase SDLC,
+but it does not replace or own Stage 4 filing.
 
 Every bead, however filed, needs:
 

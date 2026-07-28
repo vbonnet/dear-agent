@@ -48,6 +48,12 @@ func TestValidateAssets(t *testing.T) {
 	}
 }
 
+func TestValidatePiSkillDiscovery(t *testing.T) {
+	if err := ValidatePiSkillDiscovery(repoRoot(t)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestValidateMCPOperations(t *testing.T) {
 	if err := ValidateMCPOperations(); err != nil {
 		t.Fatal(err)
