@@ -125,6 +125,7 @@ var PricingTable = map[string]Pricing{
 	"claude-opus-4-6":            Claude4Opus4_6,
 	"claude-opus-4-8":            Claude4Opus4_8,
 	"claude-opus-5":              Claude5Opus5,
+	"anthropic/claude-opus-5":    Claude5Opus5,           // OpenRouter and Pi provider-qualified naming
 	"claude-sonnet-4-5@20250929": Claude35Sonnet20241022, // Vertex AI naming
 	"gemini-2.0-flash-exp":       Gemini20FlashExp,
 	"gemini-1.5-pro":             Gemini15Pro,
