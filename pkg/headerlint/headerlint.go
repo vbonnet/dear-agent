@@ -223,35 +223,11 @@ func fenceContentOffset(line string) (int, bool) {
 		return 0, false
 	}
 	for offset < len(line) {
-		if line[offset] == '>' {
-			offset++
-			if offset < len(line) && (line[offset] == ' ' || line[offset] == '\t') {
-				offset++
-			}
-			var indentOK bool
-			offset, indentOK = skipFenceIndent(line, offset, 3)
-			if !indentOK {
-				return 0, false
-			}
-			continue
+		markerEnd, found := fenceContainerMarkerEnd(line, offset)
+		if !found {
+			return offset, true
 		}
-
-		markerEnd := offset
-		if strings.ContainsRune("-+*", rune(line[offset])) {
-			markerEnd++
-		} else {
-			for markerEnd < len(line) && markerEnd-offset < 9 && line[markerEnd] >= '0' && line[markerEnd] <= '9' {
-				markerEnd++
-			}
-			if markerEnd == offset || markerEnd >= len(line) || (line[markerEnd] != '.' && line[markerEnd] != ')') {
-				break
-			}
-			markerEnd++
-		}
-		if markerEnd >= len(line) || (line[markerEnd] != ' ' && line[markerEnd] != '\t') {
-			break
-		}
-		offset = markerEnd + 1
+		offset = markerEnd
 		var indentOK bool
 		offset, indentOK = skipFenceIndent(line, offset, 3)
 		if !indentOK {
@@ -259,6 +235,33 @@ func fenceContentOffset(line string) (int, bool) {
 		}
 	}
 	return offset, true
+}
+
+func fenceContainerMarkerEnd(line string, offset int) (int, bool) {
+	if line[offset] == '>' {
+		offset++
+		if offset < len(line) && (line[offset] == ' ' || line[offset] == '\t') {
+			offset++
+		}
+		return offset, true
+	}
+
+	markerEnd := offset
+	if strings.ContainsRune("-+*", rune(line[offset])) {
+		markerEnd++
+	} else {
+		for markerEnd < len(line) && markerEnd-offset < 9 && line[markerEnd] >= '0' && line[markerEnd] <= '9' {
+			markerEnd++
+		}
+		if markerEnd == offset || markerEnd >= len(line) || (line[markerEnd] != '.' && line[markerEnd] != ')') {
+			return 0, false
+		}
+		markerEnd++
+	}
+	if markerEnd >= len(line) || (line[markerEnd] != ' ' && line[markerEnd] != '\t') {
+		return 0, false
+	}
+	return markerEnd + 1, true
 }
 
 func skipFenceIndent(line string, offset, maxSpaces int) (int, bool) {
