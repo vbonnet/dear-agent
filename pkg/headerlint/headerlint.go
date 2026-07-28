@@ -245,19 +245,24 @@ func fenceContainerMarkerEnd(line string, offset int) (int, bool) {
 		}
 		return offset, true
 	}
-
-	markerEnd := offset
 	if strings.ContainsRune("-+*", rune(line[offset])) {
-		markerEnd++
-	} else {
-		for markerEnd < len(line) && markerEnd-offset < 9 && line[markerEnd] >= '0' && line[markerEnd] <= '9' {
-			markerEnd++
-		}
-		if markerEnd == offset || markerEnd >= len(line) || (line[markerEnd] != '.' && line[markerEnd] != ')') {
-			return 0, false
-		}
+		return terminatedListMarkerEnd(line, offset+1)
+	}
+	return orderedListMarkerEnd(line, offset)
+}
+
+func orderedListMarkerEnd(line string, offset int) (int, bool) {
+	markerEnd := offset
+	for markerEnd < len(line) && markerEnd-offset < 9 && line[markerEnd] >= '0' && line[markerEnd] <= '9' {
 		markerEnd++
 	}
+	if markerEnd == offset || markerEnd >= len(line) || (line[markerEnd] != '.' && line[markerEnd] != ')') {
+		return 0, false
+	}
+	return terminatedListMarkerEnd(line, markerEnd+1)
+}
+
+func terminatedListMarkerEnd(line string, markerEnd int) (int, bool) {
 	if markerEnd >= len(line) || (line[markerEnd] != ' ' && line[markerEnd] != '\t') {
 		return 0, false
 	}
