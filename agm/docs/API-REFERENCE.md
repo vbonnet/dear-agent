@@ -585,34 +585,47 @@ func main() {
 package agent
 
 type ClaudeAdapter struct {
-    apiKey string
+    // internal session store
 }
 
-func NewClaudeAdapter() *ClaudeAdapter
+func NewClaudeAdapter(sessionStore SessionStore) (*ClaudeAdapter, error)
 
-func (a *ClaudeAdapter) Start(ctx context.Context, sessionID string, opts *StartOptions) error
-func (a *ClaudeAdapter) IsAvailable() bool
-func (a *ClaudeAdapter) GetMetadata() *AgentMetadata
-func (a *ClaudeAdapter) GetTranslator() command.Translator
+func (a *ClaudeAdapter) Name() string
+func (a *ClaudeAdapter) Version() string
+func (a *ClaudeAdapter) Capabilities() Capabilities
+func (a *ClaudeAdapter) CreateSession(ctx SessionContext) (SessionID, error)
+func (a *ClaudeAdapter) ResumeSession(sessionID SessionID) error
+func (a *ClaudeAdapter) SendMessage(sessionID SessionID, message Message) error
+func (a *ClaudeAdapter) TerminateSession(sessionID SessionID) error
 ```
 
-### Gemini Adapter
+Passing a nil store selects the default JSON-backed session store. Cross-surface
+lifecycle transactions belong to `agm/internal/ops`; the concrete adapter
+methods are compatibility mechanisms, not a shared lifecycle interface.
+
+### Gemini CLI Adapter
 
 ```go
 package agent
 
-type GeminiAdapter struct {
-    apiKey    string
-    projectID string
+type GeminiCLIAdapter struct {
+    // internal session store
 }
 
-func NewGeminiAdapter() *GeminiAdapter
+func NewGeminiCLIAdapter(sessionStore SessionStore) (*GeminiCLIAdapter, error)
 
-func (a *GeminiAdapter) Start(ctx context.Context, sessionID string, opts *StartOptions) error
-func (a *GeminiAdapter) IsAvailable() bool
-func (a *GeminiAdapter) GetMetadata() *AgentMetadata
-func (a *GeminiAdapter) GetTranslator() command.Translator
+func (a *GeminiCLIAdapter) Name() string
+func (a *GeminiCLIAdapter) Version() string
+func (a *GeminiCLIAdapter) Capabilities() Capabilities
+func (a *GeminiCLIAdapter) CreateSession(ctx SessionContext) (SessionID, error)
+func (a *GeminiCLIAdapter) ResumeSession(sessionID SessionID) error
+func (a *GeminiCLIAdapter) SendMessage(sessionID SessionID, message Message) error
+func (a *GeminiCLIAdapter) TerminateSession(sessionID SessionID) error
 ```
+
+Passing a nil store selects the default JSON-backed session store. Both
+adapters satisfy the narrow `Harness` metadata/capability contract; consumers
+define any smaller operational interface they need.
 
 ---
 
