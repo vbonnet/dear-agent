@@ -30,7 +30,7 @@ transaction.
 
 **DAEMON-09** When the daemon polls a queued message, the system shall invoke `internal/ops.SendMessage` as the sole direct-delivery transaction.
 
-**DAEMON-10** When a queued message is delivered successfully, the system shall update state by the returned stable session ID, mark the queue entry delivered, and acknowledge it when an acknowledgment manager is configured.
+**DAEMON-10** When a queued message is delivered successfully, the system shall update state by the returned stable session ID only while an asynchronous response remains pending, preserve the post-turn state of a completed API delivery, mark the queue entry delivered, and acknowledge it when an acknowledgment manager is configured.
 
 **DAEMON-11** When standalone health status is requested, the system shall report daemon running state, PID when available, queue statistics when a queue is provided, and an overall health level derived from configured queue-depth thresholds.
 

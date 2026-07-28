@@ -73,10 +73,11 @@ func TestDaemonDeliveryUsesSharedOperationAndStableResult(t *testing.T) {
 			t.Fatalf("operation request = %#v, want queue entry", req)
 		}
 		return &ops.SendMessageResult{
-			Operation: "send_message",
-			Recipient: entry.To,
-			SessionID: "stable-session-id",
-			Delivered: true,
+			Operation:       "send_message",
+			Recipient:       entry.To,
+			SessionID:       "stable-session-id",
+			Delivered:       true,
+			ResponsePending: true,
 		}, nil
 	}
 
@@ -92,6 +93,39 @@ func TestDaemonDeliveryUsesSharedOperationAndStableResult(t *testing.T) {
 	pending, err := queue.GetAllPending()
 	if err != nil || len(pending) != 0 {
 		t.Fatalf("pending after delivery = %#v, %v; want empty", pending, err)
+	}
+}
+
+func TestDaemonDeliveryDoesNotMarkCompletedAPITurnWorking(t *testing.T) {
+	entry := messages.QueueEntry{
+		MessageID: "api-message-id",
+		From:      "sender",
+		To:        "api-recipient",
+		Message:   "message body",
+		Priority:  messages.PriorityMedium,
+		QueuedAt:  time.Now(),
+	}
+	queue := newDaemonDeliveryQueue(t, entry)
+	d := NewDaemon(Config{Queue: queue, Logger: logging.NewTextLogger(io.Discard)})
+	d.updateState = func(string, string, string, string, *dolt.Adapter) error {
+		t.Fatal("completed API turn was marked WORKING")
+		return nil
+	}
+	d.deliverDirect = func(*ops.OpContext, *ops.SendMessageRequest) (*ops.SendMessageResult, error) {
+		return &ops.SendMessageResult{
+			Operation: "send_message",
+			Recipient: entry.To,
+			SessionID: "api-session-id",
+			Delivered: true,
+		}, nil
+	}
+
+	if err := d.deliverMessage(entry); err != nil {
+		t.Fatalf("deliverMessage() error: %v", err)
+	}
+	pending, err := queue.GetAllPending()
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("pending after API delivery = %#v, %v; want empty", pending, err)
 	}
 }
 

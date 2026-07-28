@@ -332,8 +332,10 @@ func (d *Daemon) deliverMessage(entry messages.QueueEntry) error {
 		return d.retryLater(entry, fmt.Errorf("shared delivery returned incomplete result for %q", entry.To))
 	}
 
-	if err := d.updateState("", manifest.StateWorking, "daemon", result.SessionID, d.cfg.DoltAdapter); err != nil {
-		d.cfg.Logger.Warn("Could not update session state", "error", err)
+	if result.ResponsePending {
+		if err := d.updateState("", manifest.StateWorking, "daemon", result.SessionID, d.cfg.DoltAdapter); err != nil {
+			d.cfg.Logger.Warn("Could not update session state", "error", err)
+		}
 	}
 	if err := d.cfg.Queue.MarkDelivered(entry.MessageID); err != nil {
 		d.cfg.Logger.Warn("Could not mark message as delivered", "error", err)

@@ -34,11 +34,12 @@ type SendMessageRequest struct {
 
 // SendMessageResult is the output of SendMessage.
 type SendMessageResult struct {
-	Operation     string `json:"operation"`
-	Recipient     string `json:"recipient"`
-	SessionID     string `json:"session_id"`
-	MessageLength int    `json:"message_length"`
-	Delivered     bool   `json:"delivered"`
+	Operation       string `json:"operation"`
+	Recipient       string `json:"recipient"`
+	SessionID       string `json:"session_id"`
+	MessageLength   int    `json:"message_length"`
+	Delivered       bool   `json:"delivered"`
+	ResponsePending bool   `json:"response_pending"`
 }
 
 // SendMessage resolves one stable recipient and performs direct delivery.
@@ -203,7 +204,9 @@ func sendResolvedTmuxMessage(callCtx context.Context, opCtx *OpContext, m *manif
 	if readiness.PaneID == "" {
 		return newResult(false), ErrSessionNotReady(m.Name, "UNVERIFIED_PANE")
 	}
-	return newResult(true), nil
+	result := newResult(true)
+	result.ResponsePending = true
+	return result, nil
 }
 
 // sendResolvedManagerMessage is the structured-backend fallback used when a
@@ -223,7 +226,9 @@ func sendResolvedManagerMessage(callCtx context.Context, opCtx *OpContext, m *ma
 		return newResult(false), ErrStorageError("send_message context", err)
 	}
 	backendResult, err := opCtx.Manager.SendMessage(callCtx, manager.SessionID(tmuxName), req.Message)
-	return newResult(err == nil && backendResult.Delivered), err
+	result := newResult(err == nil && backendResult.Delivered)
+	result.ResponsePending = result.Delivered
+	return result, err
 }
 
 func managerReadinessName(readiness manager.CanReceive) string {
