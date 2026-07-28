@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/pkg/costtrack"
 )
 
 func TestPriceFor(t *testing.T) {
@@ -26,6 +28,14 @@ func TestPriceFor(t *testing.T) {
 		if got := PriceFor(tt.model); got != tt.want {
 			t.Errorf("PriceFor(%q) = %+v, want %+v", tt.model, got, tt.want)
 		}
+	}
+}
+
+func TestOpus5PricingUsesCanonicalCosttrackRate(t *testing.T) {
+	got := PriceFor("claude-opus-5")
+	want := costtrack.PricingTable["claude-opus-5"]
+	if got.InputPerM != want.Input || got.OutputPerM != want.Output || got.CacheReadPerM != want.CacheRead || got.CacheWritePerM != want.CacheWrite {
+		t.Fatalf("PriceFor(claude-opus-5) = %+v, want canonical pricing %+v", got, want)
 	}
 }
 

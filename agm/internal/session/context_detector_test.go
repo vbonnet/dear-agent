@@ -1135,6 +1135,17 @@ func TestGetModelPricing(t *testing.T) {
 	}
 }
 
+func TestOpus5FallbackPricingUsesCanonicalCosttrackRate(t *testing.T) {
+	got, ok := getModelPricing("claude-opus-5")
+	if !ok {
+		t.Fatal("getModelPricing(claude-opus-5) returned no pricing")
+	}
+	want := modelPricingFromCosttrack("claude-opus-5")
+	if got != want {
+		t.Fatalf("getModelPricing(claude-opus-5) = %+v, want canonical pricing %+v", got, want)
+	}
+}
+
 // TestEstimateCostFromUsage tests cost estimation from JSONL lines
 func TestEstimateCostFromUsage(t *testing.T) {
 	t.Run("valid sonnet line", func(t *testing.T) {

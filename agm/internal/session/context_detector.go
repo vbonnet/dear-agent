@@ -17,6 +17,7 @@ import (
 
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/pisession"
+	"github.com/vbonnet/dear-agent/pkg/costtrack"
 )
 
 // ConversationEntry represents a single entry in conversation.jsonl
@@ -836,7 +837,6 @@ type modelPricing struct {
 // doesn't fire. For interactive sessions, the exact cost comes from CC's
 // statusLine JSON (total_cost_usd) via agm-statusline-capture.
 var pricingTable = map[string]modelPricing{
-	"claude-opus-5":   {InputPerM: 5.0, OutputPerM: 25.0, CacheReadPerM: 0.50, CacheWritePerM: 6.25},
 	"claude-opus-4-8": {InputPerM: 5.0, OutputPerM: 25.0, CacheReadPerM: 0.50, CacheWritePerM: 6.25},
 	"claude-opus-4":   {InputPerM: 15.0, OutputPerM: 75.0, CacheReadPerM: 1.50, CacheWritePerM: 18.75},
 	"claude-sonnet-4": {InputPerM: 3.0, OutputPerM: 15.0, CacheReadPerM: 0.30, CacheWritePerM: 3.75},
@@ -845,6 +845,9 @@ var pricingTable = map[string]modelPricing{
 
 // getModelPricing returns pricing for a model using longest-prefix matching.
 func getModelPricing(modelID string) (modelPricing, bool) {
+	if strings.HasPrefix(modelID, "claude-opus-5") {
+		return modelPricingFromCosttrack("claude-opus-5"), true
+	}
 	bestLen := 0
 	var bestPricing modelPricing
 	for prefix, p := range pricingTable {
@@ -854,6 +857,16 @@ func getModelPricing(modelID string) (modelPricing, bool) {
 		}
 	}
 	return bestPricing, bestLen > 0
+}
+
+func modelPricingFromCosttrack(model string) modelPricing {
+	p := costtrack.PricingTable[model]
+	return modelPricing{
+		InputPerM:      p.Input,
+		OutputPerM:     p.Output,
+		CacheReadPerM:  p.CacheRead,
+		CacheWritePerM: p.CacheWrite,
+	}
 }
 
 // estimateCostFromUsage parses a JSONL line for token counts and estimates cost.

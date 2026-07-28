@@ -16,6 +16,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/vbonnet/dear-agent/pkg/costtrack"
 )
 
 // Pricing is the per-million-token USD price for a model tier.
@@ -32,13 +34,25 @@ type Pricing struct {
 // no price, so cost here is an estimate for quota visibility, not billing.
 var (
 	opusPricing   = Pricing{InputPerM: 15.00, OutputPerM: 75.00, CacheReadPerM: 1.50, CacheWritePerM: 18.75}
-	opus5Pricing  = Pricing{InputPerM: 5.00, OutputPerM: 25.00, CacheReadPerM: 0.50, CacheWritePerM: 6.25}
+	opus5Pricing  = pricingFromCosttrack("claude-opus-5")
 	sonnetPricing = Pricing{InputPerM: 3.00, OutputPerM: 15.00, CacheReadPerM: 0.30, CacheWritePerM: 3.75}
 	haikuPricing  = Pricing{InputPerM: 1.00, OutputPerM: 5.00, CacheReadPerM: 0.10, CacheWritePerM: 1.25}
 	// Fable pricing is not public; treat it at the Opus frontier tier as a
 	// conservative upper-bound estimate.
 	fablePricing = Pricing{InputPerM: 15.00, OutputPerM: 75.00, CacheReadPerM: 1.50, CacheWritePerM: 18.75}
 )
+
+// pricingFromCosttrack adapts the canonical per-million-token pricing to the
+// transcript estimator's local representation.
+func pricingFromCosttrack(model string) Pricing {
+	p := costtrack.PricingTable[model]
+	return Pricing{
+		InputPerM:      p.Input,
+		OutputPerM:     p.Output,
+		CacheReadPerM:  p.CacheRead,
+		CacheWritePerM: p.CacheWrite,
+	}
+}
 
 // PriceFor returns the pricing tier for a model id by substring match. Unknown
 // models (including "<synthetic>") price at zero so they never inflate cost.
