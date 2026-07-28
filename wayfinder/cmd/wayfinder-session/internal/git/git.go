@@ -2,6 +2,7 @@
 package git
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -256,13 +257,15 @@ func (g *GitIntegrator) pathExistsOrTracked(file string) (bool, error) {
 	}
 	cmd := exec.Command("git", "ls-files", "--error-unmatch", "--", file)
 	cmd.Dir = g.projectDir
-	if err := cmd.Run(); err == nil {
+	err := cmd.Run()
+	if err == nil {
 		return true, nil
-	} else if _, ok := err.(*exec.ExitError); ok {
-		return false, nil
-	} else {
-		return false, fmt.Errorf("check tracked path %s: %w", file, err)
 	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return false, nil
+	}
+	return false, fmt.Errorf("check tracked path %s: %w", file, err)
 }
 
 // GetCommitHash returns the current HEAD commit hash
