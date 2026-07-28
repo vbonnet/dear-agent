@@ -192,11 +192,8 @@ func checkData(path string, data []byte) []Violation {
 }
 
 func fenceDelimiter(line string) (byte, int, string, bool) {
-	offset := 0
-	for offset < len(line) && line[offset] == ' ' {
-		offset++
-	}
-	if offset > 3 || offset == len(line) {
+	offset, ok := fenceContentOffset(line)
+	if !ok || offset == len(line) {
 		return 0, 0, "", false
 	}
 	marker := line[offset]
@@ -216,6 +213,61 @@ func fenceDelimiter(line string) (byte, int, string, bool) {
 		return 0, 0, "", false
 	}
 	return marker, length, trailing, true
+}
+
+// fenceContentOffset skips the indentation and block/list container markers
+// that Markdown permits before a fenced code delimiter.
+func fenceContentOffset(line string) (int, bool) {
+	offset, ok := skipFenceIndent(line, 0, 3)
+	if !ok {
+		return 0, false
+	}
+	for offset < len(line) {
+		if line[offset] == '>' {
+			offset++
+			if offset < len(line) && (line[offset] == ' ' || line[offset] == '\t') {
+				offset++
+			}
+			var indentOK bool
+			offset, indentOK = skipFenceIndent(line, offset, 3)
+			if !indentOK {
+				return 0, false
+			}
+			continue
+		}
+
+		markerEnd := offset
+		if strings.ContainsRune("-+*", rune(line[offset])) {
+			markerEnd++
+		} else {
+			for markerEnd < len(line) && markerEnd-offset < 9 && line[markerEnd] >= '0' && line[markerEnd] <= '9' {
+				markerEnd++
+			}
+			if markerEnd == offset || markerEnd >= len(line) || (line[markerEnd] != '.' && line[markerEnd] != ')') {
+				break
+			}
+			markerEnd++
+		}
+		if markerEnd >= len(line) || (line[markerEnd] != ' ' && line[markerEnd] != '\t') {
+			break
+		}
+		offset = markerEnd + 1
+		var indentOK bool
+		offset, indentOK = skipFenceIndent(line, offset, 3)
+		if !indentOK {
+			return 0, false
+		}
+	}
+	return offset, true
+}
+
+func skipFenceIndent(line string, offset, maxSpaces int) (int, bool) {
+	spaces := 0
+	for offset < len(line) && line[offset] == ' ' {
+		offset++
+		spaces++
+	}
+	return offset, spaces <= maxSpaces
 }
 
 func sortViolations(violations []Violation) {
