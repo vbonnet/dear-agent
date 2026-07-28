@@ -179,6 +179,47 @@ func TestCheckFile_DoesNotFlagQuotedExampleInsideFence(t *testing.T) {
 	}
 }
 
+func TestCheckFile_DoesNotCloseLongFenceWithShortOrDifferentDelimiter(t *testing.T) {
+	const content = "# Doc-header format\n" +
+		"\n" +
+		"````markdown\n" +
+		"```go\n" +
+		"~~~\n" +
+		"**Status:** authoritative · **Last updated:** 2026-06-11\n" +
+		"```\n" +
+		"````\n" +
+		"\n" +
+		"## Rationale\n"
+
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "format.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("want 0 violations, got %d: %v", len(violations), violations)
+	}
+}
+
+func TestCheckFile_IndentedHeadingEndsHeaderZone(t *testing.T) {
+	const content = "# Design options\n" +
+		"\n" +
+		"   ## Trade-offs\n" +
+		"\n" +
+		"**Complexity:** Low. **Timeline:** Comparable.\n"
+
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "design.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("want 0 violations, got %d: %v", len(violations), violations)
+	}
+}
+
 func TestCheckFile_DoesNotFlagPastHeaderZoneLineCap(t *testing.T) {
 	// No heading at all, but the violation line is well past the header-zone
 	// line cap — treated as body text, not a metadata block.

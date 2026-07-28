@@ -4,10 +4,10 @@
 
 ## The anti-pattern
 
-Several docs in this repo (and many more in the sibling `engram-research`
-repo) open with a metadata block written as inline bold `key: value` pairs
+Two docs in this repo previously (and many more in the sibling
+`engram-research` repo still) opened with a metadata block written as inline bold `key: value` pairs
 crammed onto one physical line, separated only by `·`, `|`, or nothing
-consistent. Two real examples from this repo, unchanged:
+consistent. These were the two real examples before this check landed:
 
 `REVIEW.md:3`:
 
@@ -127,17 +127,9 @@ or directly:
 go run ./tools/header-lint -repo .
 ```
 
-It runs in CI via `.github/workflows/doc-header-lint.yml` on every pull
-request and on push to `main`/`develop`. It starts in an informational
-posture (`continue-on-error: true`, same pattern as `doc-proximity.yml`)
-because it finds the two pre-existing violations quoted above at
-introduction time — failing the build today would block every PR on
-unrelated pre-existing debt. Once those two files (and this repo's own
-future backlog, if any accumulates before the check is flipped) are fixed,
-flip `continue-on-error` off and add the job to branch-protection
-required-status-checks so it blocks new violations outright.
-
-This document defines the format and ships the lint check that catches new
-violations. It does not itself fix the two examples quoted above, or the
-~67 files with this pattern in `engram-research` — that backfill is tracked
-separately.
+It runs in fast preflight and in CI via
+`.github/workflows/doc-header-lint.yml` on every pull request and on push to
+`main`/`develop`. The two pre-existing dear-agent violations quoted above
+were fixed with the linter's introduction, so both enforcement paths fail on
+any tracked violation from the first revision. The roughly 67 files with this
+pattern in `engram-research` remain a separate repository backfill.

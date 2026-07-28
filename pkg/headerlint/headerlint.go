@@ -55,14 +55,10 @@ var (
 	// inside a longer sentence.
 	boldField = regexp.MustCompile(`\*\*[^*\n:]{1,60}:\*\*`)
 
-	// headingH2Plus matches a level-2-through-6 ATX heading, which marks the
-	// end of the header zone. A level-1 title (# Title) does not end the
-	// zone, since the metadata block conventionally follows it.
-	headingH2Plus = regexp.MustCompile(`^#{2,6}\s`)
-
-	// fenceMarker matches a fenced-code-block delimiter so quoted examples of
-	// the anti-pattern (e.g. in this package's own docs) are never flagged.
-	fenceMarker = regexp.MustCompile("^(```|~~~)")
+	// headingH2Plus matches a level-2-through-6 ATX heading, including the
+	// zero-to-three leading spaces Markdown permits. A level-1 title does not
+	// end the zone, since the metadata block conventionally follows it.
+	headingH2Plus = regexp.MustCompile(`^ {0,3}#{2,6}([ \t]|$)`)
 )
 
 // CheckFile validates one Markdown file. Content defects are returned as
@@ -165,14 +161,21 @@ func gitOutput(ctx context.Context, dir string, args ...string) ([]byte, error) 
 func checkData(path string, data []byte) []Violation {
 	var violations []Violation
 	lines := strings.Split(string(data), "\n")
-	inFence := false
+	var fenceByte byte
+	fenceLength := 0
 	for i, line := range lines {
 		lineNo := i + 1
-		if fenceMarker.MatchString(strings.TrimSpace(line)) {
-			inFence = !inFence
+		marker, length, trailing, isFence := fenceDelimiter(line)
+		if fenceByte != 0 {
+			if isFence && marker == fenceByte && length >= fenceLength && strings.TrimSpace(trailing) == "" {
+				fenceByte = 0
+				fenceLength = 0
+			}
 			continue
 		}
-		if inFence {
+		if isFence {
+			fenceByte = marker
+			fenceLength = length
 			continue
 		}
 		if headingH2Plus.MatchString(line) {
@@ -186,6 +189,33 @@ func checkData(path string, data []byte) []Violation {
 		}
 	}
 	return violations
+}
+
+func fenceDelimiter(line string) (byte, int, string, bool) {
+	offset := 0
+	for offset < len(line) && line[offset] == ' ' {
+		offset++
+	}
+	if offset > 3 || offset == len(line) {
+		return 0, 0, "", false
+	}
+	marker := line[offset]
+	if marker != '`' && marker != '~' {
+		return 0, 0, "", false
+	}
+	end := offset
+	for end < len(line) && line[end] == marker {
+		end++
+	}
+	length := end - offset
+	if length < 3 {
+		return 0, 0, "", false
+	}
+	trailing := line[end:]
+	if marker == '`' && strings.Contains(trailing, "`") {
+		return 0, 0, "", false
+	}
+	return marker, length, trailing, true
 }
 
 func sortViolations(violations []Violation) {
