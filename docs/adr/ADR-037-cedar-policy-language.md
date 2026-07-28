@@ -57,6 +57,15 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   The policy decision is made outside the agent's own reasoning, the same
   "deterministic enforcement over agent judgment" principle already on
   dear-agent's anti-pattern watchlist.
+- Encode the three runtime outcomes as two ordered Cedar authorization
+  decisions because Cedar itself returns only Allow or Deny. First evaluate
+  whether the principal may invoke the tool at all; Deny maps to **deny**.
+  If invocation is allowed, evaluate whether the invocation may proceed
+  without confirmation; Allow maps to **allow**, while Deny maps to **ask**.
+  Cedar's normal forbid-overrides-permit rule resolves conflicts within each
+  decision, and the interceptor applies the fixed precedence
+  `deny > ask > allow`. The mapping is runtime glue, not a third Cedar effect
+  or an additional policy source.
 - Rego/OPA remains the documented fallback if Cedar's younger ecosystem
   (smaller `cedar-go`, no turnkey `cedar test`-equivalent at research time)
   proves insufficient in implementation.
@@ -96,5 +105,6 @@ tool/resource/context, a shared evaluation library, and one interceptor per
 harness hook point (starting with dear-agent's own pretool hooks). Cedar's
 thinner ecosystem and unproven testing tooling (relative to `opa test` or
 Cerbos's YAML test suites) are accepted risks — Rego/OPA is the fallback if
-they block implementation. Follow-up: bead `0d1b3ed0` (Rego re-evaluation)
-is updated to record Cedar as the chosen answer.
+they block implementation. The historical `0d1b3ed0` Rego re-evaluation
+identifier could not be resolved in the canonical Beads store; this ADR
+supersedes that unverified follow-up as the durable decision record.
