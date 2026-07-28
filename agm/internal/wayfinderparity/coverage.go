@@ -126,7 +126,7 @@ func ValidatePiSkillDiscovery(root string) error {
 	}
 	for _, required := range []string{"../agm/plugins", "../wayfinder/skills", "../research-pipeline/skills"} {
 		if !slices.Contains(settings.Skills, required) {
-			return fmt.Errorf("Pi settings missing native skill discovery path %q", required)
+			return fmt.Errorf("pi settings missing native skill discovery path %q", required)
 		}
 	}
 	return nil
