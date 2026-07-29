@@ -1147,6 +1147,23 @@ func TestCheckFile_TypeSixHTMLDoesNotInterruptParagraph(t *testing.T) {
 	}
 }
 
+func TestCheckFile_ConsecutiveTypeSixHTMLDoesNotInterruptParagraph(t *testing.T) {
+	const content = "# Doc\n" +
+		"intro\n" +
+		"<div>\n" +
+		"<div>\n" +
+		"**Status:** draft · **Owner:** docs\n"
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "consecutive-type-six-paragraph.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 1 || violations[0].Line != 5 {
+		t.Fatalf("want field violation after consecutive type-6 tags, got %v", violations)
+	}
+}
+
 func TestCheckFile_TypeSixHTMLAfterBlankRemainsBlock(t *testing.T) {
 	const content = "# Doc\n" +
 		"intro\n" +

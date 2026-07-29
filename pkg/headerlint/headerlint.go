@@ -254,48 +254,53 @@ func headerBoldFieldCounts(
 }
 
 func goldmarkAnalysisSource(source []byte) []byte {
-	document := goldmark.DefaultParser().Parse(text.NewReader(source))
 	masked := append([]byte(nil), source...)
-	changed := false
-	_ = ast.Walk(document, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
-		htmlBlock, ok := node.(*ast.HTMLBlock)
-		if !entering || !ok ||
-			(htmlBlock.HTMLBlockType != ast.HTMLBlockType6 &&
-				htmlBlock.HTMLBlockType != ast.HTMLBlockType7) {
-			return ast.WalkContinue, nil
-		}
-		paragraphBefore, paragraphOK := htmlBlock.PreviousSibling().(*ast.Paragraph)
-		if !paragraphOK || htmlBlock.Lines().Len() == 0 ||
-			paragraphBefore.Lines().Len() == 0 {
-			return ast.WalkContinue, nil
-		}
-		start := htmlBlock.Lines().At(0).Start
-		paragraphStop := paragraphBefore.Lines().At(paragraphBefore.Lines().Len() - 1).Stop
-		if bytes.Count(source[paragraphStop:start], []byte{'\n'}) >= 2 {
-			// Goldmark omits blank lines from the sibling list. A real blank
-			// between the paragraph and tag still allows a type-6/7 HTML block
-			// to interrupt, so preserve the block and everything it contains.
-			return ast.WalkContinue, nil
-		}
-		stop := htmlBlock.Lines().At(htmlBlock.Lines().Len() - 1).Stop
-		tagEnd := inlineHTMLTagEnd(source, start, stop)
-		if tagEnd < 0 {
+	for {
+		document := goldmark.DefaultParser().Parse(text.NewReader(masked))
+		changed := false
+		_ = ast.Walk(document, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+			htmlBlock, ok := node.(*ast.HTMLBlock)
+			if !entering || !ok ||
+				(htmlBlock.HTMLBlockType != ast.HTMLBlockType6 &&
+					htmlBlock.HTMLBlockType != ast.HTMLBlockType7) {
+				return ast.WalkContinue, nil
+			}
+			paragraphBefore, paragraphOK := htmlBlock.PreviousSibling().(*ast.Paragraph)
+			if !paragraphOK || htmlBlock.Lines().Len() == 0 ||
+				paragraphBefore.Lines().Len() == 0 {
+				return ast.WalkContinue, nil
+			}
+			start := htmlBlock.Lines().At(0).Start
+			paragraphStop := paragraphBefore.Lines().At(paragraphBefore.Lines().Len() - 1).Stop
+			if bytes.Count(source[paragraphStop:start], []byte{'\n'}) >= 2 {
+				// Goldmark omits blank lines from the sibling list. A real blank
+				// between the paragraph and tag still allows a type-6/7 HTML block
+				// to interrupt, so preserve the block and everything it contains.
+				return ast.WalkContinue, nil
+			}
+			stop := htmlBlock.Lines().At(htmlBlock.Lines().Len() - 1).Stop
+			tagEnd := inlineHTMLTagEnd(source, start, stop)
+			if tagEnd < 0 {
+				masked[start] = 'x'
+				changed = true
+				return ast.WalkContinue, nil
+			}
+			for index := start; index < tagEnd; index++ {
+				if masked[index] != '\n' {
+					masked[index] = ' '
+				}
+			}
+			// Keep the downgraded source line nonblank. Otherwise a following
+			// type-6/7 tag can become a new HTML-block opener on the next parse,
+			// even though both tags belonged to the original open paragraph.
 			masked[start] = 'x'
 			changed = true
 			return ast.WalkContinue, nil
+		})
+		if !changed {
+			return masked
 		}
-		for index := start; index < tagEnd; index++ {
-			if masked[index] != '\n' {
-				masked[index] = ' '
-			}
-		}
-		changed = true
-		return ast.WalkContinue, nil
-	})
-	if changed {
-		return masked
 	}
-	return source
 }
 
 func inlineHTMLTagEnd(source []byte, start, stop int) int {
