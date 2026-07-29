@@ -1,6 +1,6 @@
 # ADR-037: Cedar as the persona/policy-enforcement language
 
-Status: Accepted (2026-07-27)
+Status: Proposed (2026-07-27; implementation and migration pending)
 
 ## Context
 
@@ -85,9 +85,22 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   candidate never replaces the active bundle. The evaluator retains a durable
   last-known-good bundle across restart; reload readers observe either the
   complete old bundle or the complete new bundle, never a partial update.
+- Acquire one immutable bundle snapshot and version for each intercepted tool
+  request before the invocation decision. Reuse that exact snapshot for the
+  confirmation-free decision, even if a validated reload publishes a newer
+  bundle between the two gates. A request never composes authorization results
+  from different policy generations.
 - Rego/OPA remains the documented fallback if Cedar's younger ecosystem
   (smaller `cedar-go`, no turnkey `cedar test`-equivalent at research time)
-proves insufficient in implementation.
+  proves insufficient in implementation.
+
+This proposal does not yet supersede the active permission-parity contract.
+Until the Cedar evaluator, migration, and acceptance gates land together,
+`agm/internal/permissionparity/SPEC.md` and the manifest
+`permission_policy` projections remain the authoritative implemented control
+plane. Acceptance of this ADR requires updating that SPEC, its executable
+surface inventory, and the harness BDD contract in the same migration change;
+there must never be two live policy owners.
 
 ## Implementation acceptance gates
 
@@ -98,15 +111,18 @@ tests must prove all of the following:
    last-known-good bundle and its version unchanged.
 2. Concurrent evaluation during reload observes one whole validated bundle,
    never mixed schema and policy generations.
-3. A Cedar response containing both a proven invocation `forbid` reason and
+3. A reload forced between the invocation and confirmation-free decisions does
+   not change the request's pinned bundle version; both decisions use the same
+   immutable snapshot.
+4. A Cedar response containing both a proven invocation `forbid` reason and
    diagnostics remains `deny`; an invocation response with no proven
    applicable `permit` also remains `deny`. Only diagnostics encountered
    after positive invocation authorization may return `policy_unavailable`.
    All paths record the bundle version and sanitized diagnostics.
-4. Positively invocation-authorized interactive `policy_unavailable` requests
+5. Positively invocation-authorized interactive `policy_unavailable` requests
    enter the harness confirmation path; non-interactive requests fail closed
    with a distinct evaluator error.
-5. Restart restores the last-known-good bundle before the interceptor accepts
+6. Restart restores the last-known-good bundle before the interceptor accepts
    tool calls.
 
 The shared evaluator SPEC and per-harness interceptor BDD scenarios must carry
@@ -140,9 +156,9 @@ matches Stage 1's own finding for the Pi adapter.
 
 ## Consequences
 
-The persona/policy layer gets one deterministic, formally-analyzable source
-of truth instead of N harness-specific permission configs to keep in sync.
-Implementation work is now scoped as: a Cedar policy schema for
+If accepted after migration, the persona/policy layer gets one deterministic,
+formally-analyzable source of truth instead of N harness-specific permission
+configs to keep in sync. Implementation work is scoped as: a Cedar policy schema for
 tool/resource/context, a shared evaluation library, and one interceptor per
 harness hook point (starting with dear-agent's own pretool hooks). Cedar's
 thinner ecosystem and unproven testing tooling (relative to `opa test` or
