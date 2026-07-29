@@ -205,6 +205,13 @@ func (r OAuthResolver) Refresh(ctx context.Context) (string, error) {
 						wrapRefreshStopWriteError(stopErr),
 					)
 				}
+				if r.QuarantinePath == "" {
+					stopErr := r.WriteRefreshStop(err.Error())
+					return errors.Join(
+						fmt.Errorf("%w: quarantine is disabled (original refresh failure: %w)", ErrQuarantineNotPersisted, err),
+						wrapRefreshStopWriteError(stopErr),
+					)
+				}
 			}
 			return err
 		}
@@ -232,9 +239,17 @@ func (r OAuthResolver) Refresh(ctx context.Context) (string, error) {
 			r.log("oauth.refresh.persist_failed", "error", werr.Error())
 			reason := fmt.Sprintf("%s: %v", ErrRefreshNotPersisted, werr)
 			qerr := r.writeQuarantine(creds.ClaudeAIOAuth.RefreshToken, reason)
+			var stopErr error
+			if qerr != nil {
+				// If the token-specific marker cannot be written, fall back to
+				// the credential-scoped stop so a later resolver cannot replay
+				// the definitely spent on-disk token.
+				stopErr = r.WriteRefreshStop(reason)
+			}
 			return errors.Join(
 				fmt.Errorf("%w: %w", ErrRefreshNotPersisted, werr),
 				wrapQuarantineWriteError(qerr),
+				wrapRefreshStopWriteError(stopErr),
 			)
 		}
 

@@ -265,6 +265,9 @@ func TestRefresh_QuarantineDisabledByDefault(t *testing.T) {
 	if _, _, _, ok := r.QuarantineStatus(); ok {
 		t.Error("quarantine must stay disabled when QuarantinePath is empty")
 	}
+	if stopped, err := r.RefreshStopped(); err != nil || !stopped {
+		t.Fatalf("durable fallback stop = (%v, %v), want (true, nil)", stopped, err)
+	}
 }
 
 // A marker that exists but cannot be parsed might be naming the token on disk,

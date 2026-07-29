@@ -40,7 +40,9 @@ provider credential handling.
 
 **CTR-17** When a server-successful refresh cannot persist rotated credentials, the system shall quarantine the on-disk refresh token before returning the non-persistence error, and every shared resolver entry point shall honor that quarantine.
 
-**CTR-18** While a credential-scoped refresh-stop marker exists, every shared resolver entry point shall decline to present that credential set's refresh token until an operator explicitly clears the stop.
+**CTR-18** While a credential-scoped refresh-stop marker exists, the system shall prevent every shared resolver entry point from presenting that credential set's refresh token until an operator explicitly clears the stop.
+
+**CTR-19** When cadence mode receives a non-persistence error, the system shall report that refreshing stopped only when the credential-scoped refresh-stop marker exists.
 
 **CTR-09** When provider credentials are not Claude Code OAuth credentials, the system shall use the corresponding provider or harness credential surface instead of this adapter.
 

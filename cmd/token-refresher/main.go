@@ -165,9 +165,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 	finish := func(code int) int {
 		if *cadence {
 			if code == exitNotPersisted {
-				notifyOperator("Claude auth AT RISK", "Refresh quarantine could not be persisted; cadence has been stopped. Run token-refresher -clear-quarantine after remediation.")
-				fmt.Fprintln(stderr, "token-refresher: cadence refresh STOPPED until -clear-quarantine re-arms it.")
-				return exitOK
+				stopped, stopErr := r.RefreshStopped()
+				if stopErr == nil && stopped {
+					notifyOperator("Claude auth AT RISK", "Refresh quarantine could not be persisted; the durable refresh stop is active. Run token-refresher -clear-quarantine after remediation.")
+					fmt.Fprintln(stderr, "token-refresher: cadence refresh STOPPED until -clear-quarantine re-arms it.")
+					return exitOK
+				}
+				notifyOperator("Claude auth AT RISK", "Neither quarantine nor the durable refresh stop could be confirmed; automatic retry remains unsafe.")
+				fmt.Fprintln(stderr, "token-refresher: cadence refresh stop was NOT persisted; refusing to report a safe stop.")
+				return exitNotPersisted
 			}
 			return cadenceExit(code, defaultStateDir(), cadenceSentinelName(*quarPath), stderr)
 		}
@@ -245,10 +251,16 @@ func handleRefreshError(err error, mode, auditPath string, stderr io.Writer, fp,
 		})
 		return exitTokenFamilyDead
 	case errors.Is(err, auth.ErrQuarantineNotPersisted):
-		fmt.Fprintf(stderr, "token-refresher: CRITICAL — the refresh token may be spent and the quarantine marker could NOT be written.\n"+
-			"  Nothing will stop the next tick from presenting it again, which would revoke the whole token family.\n"+
-			"  Fix the state directory (%s) now, or re-authenticate with `claude /login` to retire the token.\n  cause: %v\n",
-			quarPath, err)
+		if errors.Is(err, auth.ErrRefreshStopNotPersisted) {
+			fmt.Fprintf(stderr, "token-refresher: CRITICAL — neither the quarantine nor the durable refresh stop could be written.\n"+
+				"  The next tick may present the token again and revoke the whole token family.\n"+
+				"  Fix the credential/state directories now, or re-authenticate with `claude /login`.\n  cause: %v\n", err)
+		} else {
+			fmt.Fprintf(stderr, "token-refresher: the refresh token could not be quarantined at %s.\n"+
+				"  A credential-scoped durable refresh stop was requested; unattended cadence verifies that marker before reporting STOPPED.\n"+
+				"  Quarantine is DISABLED or unavailable; run -clear-quarantine only after remediation.\n  cause: %v\n",
+				quarPath, err)
+		}
 		writeAudit(auditPath, auditRecord{
 			Mode: mode, Outcome: "quarantine_not_persisted", Error: err.Error(),
 			RefreshTokenFP: fp, CredentialsModTime: credMod,

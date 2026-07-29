@@ -184,8 +184,33 @@ func TestRun_UnknownOutcomeWithDisabledQuarantineExplainsRetryRisk(t *testing.T)
 	if !strings.Contains(stderr.String(), "Quarantine is DISABLED") {
 		t.Errorf("stderr should explain retry risk, got: %s", stderr.String())
 	}
-	if rec := lastAuditRecord(t, audit); rec["outcome"] != "refresh_outcome_unknown_unquarantined" {
-		t.Errorf("audit outcome = %v, want refresh_outcome_unknown_unquarantined", rec["outcome"])
+	if rec := lastAuditRecord(t, audit); rec["outcome"] != "quarantine_not_persisted" {
+		t.Errorf("audit outcome = %v, want quarantine_not_persisted", rec["outcome"])
+	}
+	if _, err := os.Stat(creds + ".refresh-stop"); err != nil {
+		t.Fatalf("disabled quarantine must fall back to the credential-scoped stop: %v", err)
+	}
+}
+
+func TestRun_CadenceWithDisabledQuarantineConfirmsDurableStop(t *testing.T) {
+	srv := lostResponseServer(t)
+	defer srv.Close()
+	creds := writeCreds(t, "old", staleMs(), "old-rt")
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"-cadence", "-credentials", creds, "-endpoint", srv.URL,
+		"-audit-log", filepath.Join(t.TempDir(), "audit.jsonl"), "-quarantine", "",
+	}, &stdout, &stderr)
+
+	if code != exitOK {
+		t.Errorf("exit code = %d, want %d after durable stop", code, exitOK)
+	}
+	if !strings.Contains(stderr.String(), "cadence refresh STOPPED") {
+		t.Errorf("stderr should confirm the durable stop, got: %s", stderr.String())
+	}
+	if _, err := os.Stat(creds + ".refresh-stop"); err != nil {
+		t.Fatalf("refresh stop missing: %v", err)
 	}
 }
 
