@@ -30,6 +30,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Violation describes one detected header-block line.
@@ -60,11 +62,13 @@ var (
 	// headingH2Plus matches a level-2-through-6 ATX heading, including the
 	// zero-to-three leading spaces Markdown permits. A level-1 title does not
 	// end the zone, since the metadata block conventionally follows it.
-	headingH2Plus = regexp.MustCompile(`^ {0,3}#{2,6}([ \t]|$)`)
-	atxHeading    = regexp.MustCompile(`^ {0,3}#{1,6}([ \t]|$)`)
-	setextHeading = regexp.MustCompile(`^ {0,3}(?:=+|-+)[ \t]*$`)
-	thematicBreak = regexp.MustCompile(`^ {0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$`)
-	htmlBlockTag  = regexp.MustCompile(`(?i)^</?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t/>]|$)`)
+	headingH2Plus     = regexp.MustCompile(`^ {0,3}#{2,6}([ \t]|$)`)
+	atxHeading        = regexp.MustCompile(`^ {0,3}#{1,6}([ \t]|$)`)
+	setextHeading     = regexp.MustCompile(`^ {0,3}(?:=+|-+)[ \t]*$`)
+	thematicBreak     = regexp.MustCompile(`^ {0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$`)
+	htmlBlockTag      = regexp.MustCompile(`(?i)^</?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t/>]|$)`)
+	htmlType7OpenTag  = regexp.MustCompile(`(?i)^<[a-z][a-z0-9-]*(?:[ \t]+[a-z_:][a-z0-9_.:-]*(?:[ \t]*=[ \t]*(?:"[^"]*"|'[^']*'|[^ \t"'=<>]+))?)*[ \t]*/?>[ \t]*$`)
+	htmlType7CloseTag = regexp.MustCompile(`(?i)^</[a-z][a-z0-9-]*[ \t]*>[ \t]*$`)
 )
 
 // CheckFile validates one Markdown file. Content defects are returned as
@@ -194,7 +198,7 @@ func checkData(path string, data []byte) []Violation {
 			paragraphContainer = fenceContainerContext{}
 			continue
 		}
-		if htmlBlocks.consume(line) {
+		if htmlBlocks.consume(line, paragraphOpen) {
 			inlineCode = inlineCodeSpanState{}
 			paragraphOpen = false
 			paragraphContainer = fenceContainerContext{}
@@ -618,9 +622,14 @@ func matchesContainerBlockPattern(line string, container fenceContainerContext, 
 func unescapedBoldFieldCount(line string) int {
 	count := 0
 	for _, match := range boldField.FindAllStringIndex(line, -1) {
-		if !escapedAt(line, match[0]) {
-			count++
+		if escapedAt(line, match[0]) {
+			continue
 		}
+		first, _ := utf8.DecodeRuneInString(line[match[0]+2:])
+		if unicode.IsSpace(first) {
+			continue
+		}
+		count++
 	}
 	return count
 }
@@ -685,7 +694,7 @@ func isInterruptingHTMLBlockStart(line string, container fenceContainerContext) 
 	if !ok {
 		return false
 	}
-	return isHTMLBlockStart(content)
+	return isHTMLBlockStart(content, true)
 }
 
 type htmlBlockState struct {
@@ -694,7 +703,7 @@ type htmlBlockState struct {
 	container  fenceContainerContext
 }
 
-func (s *htmlBlockState) consume(line string) bool {
+func (s *htmlBlockState) consume(line string, paragraphOpen bool) bool {
 	if (s.endMarker != "" || s.untilBlank) && !s.container.contains(line) {
 		// Raw HTML nested in a quote or list cannot outlive that Markdown
 		// container. Reprocess the first line outside it as ordinary Markdown.
@@ -712,7 +721,10 @@ func (s *htmlBlockState) consume(line string) bool {
 		}
 		return true
 	}
+	return s.consumeOpening(line, paragraphOpen)
+}
 
+func (s *htmlBlockState) consumeOpening(line string, paragraphOpen bool) bool {
 	offset, ok := containerContentOffset(line, false)
 	if !ok {
 		return false
@@ -730,7 +742,10 @@ func (s *htmlBlockState) consume(line string) bool {
 		}
 		return true
 	}
-	if htmlBlockTag.MatchString(content) {
+	if htmlBlockAtBoundary(line, paragraphOpen) &&
+		(htmlBlockTag.MatchString(content) ||
+			htmlType7OpenTag.MatchString(content) ||
+			htmlType7CloseTag.MatchString(content)) {
 		s.untilBlank = true
 		s.container = parseFenceContainerContext(line)
 		return true
@@ -771,7 +786,7 @@ func commonMarkBlockContent(content string) (string, bool) {
 	return content[indent:], true
 }
 
-func isHTMLBlockStart(content string) bool {
+func isHTMLBlockStart(content string, paragraphOpen bool) bool {
 	lower := strings.ToLower(content)
 	for _, tag := range []string{"script", "pre", "style", "textarea"} {
 		prefix := "<" + tag
@@ -787,7 +802,24 @@ func isHTMLBlockStart(content string) bool {
 		content[2] >= 'A' && content[2] <= 'Z' {
 		return true
 	}
-	return htmlBlockTag.MatchString(content)
+	if paragraphOpen {
+		return false
+	}
+	return htmlBlockTag.MatchString(content) ||
+		htmlType7OpenTag.MatchString(content) ||
+		htmlType7CloseTag.MatchString(content)
+}
+
+func htmlBlockAtBoundary(line string, paragraphOpen bool) bool {
+	if !paragraphOpen {
+		return true
+	}
+	offset, ok := skipFenceIndent(line, 0)
+	if !ok || offset >= len(line) || nonInterruptingOrderedListMarker(line, offset) {
+		return false
+	}
+	_, found := fenceContainerMarkerEnd(line, offset)
+	return found
 }
 
 func htmlTagBoundary(value string, offset int) bool {

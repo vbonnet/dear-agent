@@ -650,6 +650,18 @@ func TestCheckFile_DoesNotFlagEscapedBoldFieldExamples(t *testing.T) {
 	}
 }
 
+func TestCheckFile_DoesNotFlagInvalidStrongOpeners(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "invalid-strong.md", "# Doc\n\n** Status:** draft · ** Owner:** docs\n")
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("want whitespace-after-opener examples ignored, got %v", violations)
+	}
+}
+
 func TestCheckFile_DoesNotCloseListFenceWithOverIndentedDelimiter(t *testing.T) {
 	const content = "# Doc\n\n- ```markdown\n      ```\n  **Status:** draft · **Owner:** docs\n  ```\n"
 	dir := t.TempDir()
@@ -855,5 +867,38 @@ func TestCheckFile_MarkedContainerBlankEndsTypeSixHTMLBlock(t *testing.T) {
 	}
 	if len(violations) != 1 || violations[0].Line != 4 {
 		t.Fatalf("want field violation after marked HTML block break, got %v", violations)
+	}
+}
+
+func TestCheckFile_TypeSixHTMLDoesNotInterruptParagraph(t *testing.T) {
+	const content = "# Doc\n" +
+		"intro\n" +
+		"<div>\n" +
+		"**Status:** draft · **Owner:** docs\n"
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "type-six-paragraph.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 1 || violations[0].Line != 4 {
+		t.Fatalf("want type-6 tag retained as paragraph text, got %v", violations)
+	}
+}
+
+func TestCheckFile_TypeSevenHTMLMasksHeadingsUntilBlank(t *testing.T) {
+	const content = "# Doc\n" +
+		"<custom-element data-value=\"example\">\n" +
+		"## literal raw HTML content\n" +
+		"\n" +
+		"**Status:** draft · **Owner:** docs\n"
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "type-seven-html.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 1 || violations[0].Line != 5 {
+		t.Fatalf("want field violation after type-7 HTML block, got %v", violations)
 	}
 }
