@@ -86,15 +86,40 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   invocation forbid or the absence of an invocation permit into
   user-overridable confirmation.
 - Publish policy bundles atomically only after they parse, validate against the
-  Cedar schema, and pass the deterministic policy fixture suite. A rejected
-  candidate never replaces the active bundle. The evaluator retains a durable
-  last-known-good bundle across restart; reload readers observe either the
-  complete old bundle or the complete new bundle, never a partial update.
+  Cedar schema, and pass the deterministic policy fixture suite. Publication
+  is a privileged control-plane operation, not an agent tool: the publisher
+  authenticates a signed bundle envelope against a configured operator trust
+  root, records its signer and digest, and is the only process identity allowed
+  to replace the active bundle. The publisher's candidate staging input, the
+  trust root, and the durable active-bundle directory live outside
+  agent-writable workspaces and are not exposed through any harness file-write
+  or reload capability. A
+  syntactically valid bundle from an untrusted writer is rejected before
+  validation and can never become active. A rejected candidate never replaces
+  the active bundle. The evaluator retains a durable last-known-good bundle
+  across restart; reload readers observe either the complete old bundle or the
+  complete new bundle, never a partial update.
 - Acquire one immutable bundle snapshot and version for each intercepted tool
   request before the invocation decision. Reuse that exact snapshot for the
   confirmation-free decision, even if a validated reload publishes a newer
   bundle between the two gates. A request never composes authorization results
-  from different policy generations.
+  from different policy generations. An `ask` result is not an execution
+  authorization: after confirmation, the dispatcher reacquires the current
+  active snapshot at its final dispatch boundary. If its version differs, the
+  prior confirmation is invalidated and both ordered decisions are rerun
+  against the new snapshot; `deny` stops, `allow` proceeds, and `ask` requires
+  a new confirmation bound to that version. The active generation is checked
+  atomically when the dispatcher consumes that authorization; a concurrent
+  reload restarts the loop instead of permitting a stale confirmed request.
+- Project every path-bearing resource into one canonical filesystem identity
+  before Cedar evaluation. The shared projector expands supported home forms,
+  anchors relative paths to the interceptor's verified working directory,
+  cleans traversal components, makes the path absolute, and resolves symlinks.
+  For a missing leaf it resolves the deepest existing ancestor and reattaches
+  the missing components, preserving the invariant already enforced by
+  `internal/fsguard`. The lexical input may be retained only as audit context;
+  policies receive the canonical identity. Failure to obtain that identity is
+  deny, and no per-harness interceptor may evaluate the raw path as a fallback.
 - Rego/OPA remains the documented fallback if Cedar's younger ecosystem
   (smaller `cedar-go`, no turnkey `cedar test`-equivalent at research time)
   proves insufficient in implementation.
@@ -112,14 +137,23 @@ there must never be two live policy owners.
 Before a Cedar interceptor can become a blocking runtime path, executable
 tests must prove all of the following:
 
-1. A malformed or fixture-failing candidate bundle leaves the active
+1. The publisher rejects an otherwise valid bundle whose envelope is unsigned,
+   signed by an untrusted identity, or supplied through an agent-writable
+   candidate path. The active bundle, version, and durable bytes remain
+   unchanged, and harness tool surfaces cannot write the active-bundle
+   directory or invoke publication.
+2. A malformed or fixture-failing candidate bundle leaves the active
    last-known-good bundle and its version unchanged.
-2. Concurrent evaluation during reload observes one whole validated bundle,
+3. Concurrent evaluation during reload observes one whole validated bundle,
    never mixed schema and policy generations.
-3. A reload forced between the invocation and confirmation-free decisions does
+4. A reload forced between the invocation and confirmation-free decisions does
    not change the request's pinned bundle version; both decisions use the same
    immutable snapshot.
-4. A Cedar response containing both a proven invocation `forbid` reason and
+5. A reload that adds an invocation `forbid` while a request waits for
+   confirmation invalidates the old confirmation and denies final dispatch.
+   A reload at the final dispatch boundary likewise causes reevaluation; tests
+   must prove there is no stale-version check/use window.
+6. A Cedar response containing both a proven invocation `forbid` reason and
    diagnostics remains `deny`; an invocation response with no proven
    applicable `permit` also remains `deny`. An invocation Allow whose
    diagnostics report an errored policy — including a `forbid` that failed to
@@ -128,10 +162,15 @@ tests must prove all of the following:
    encountered after positive invocation authorization may return
    `policy_unavailable`.
    All paths record the bundle version and sanitized diagnostics.
-5. Positively invocation-authorized interactive `policy_unavailable` requests
+7. Every harness interceptor produces the same canonical resource for
+   equivalent absolute, relative, and traversal-containing paths. A worktree
+   symlink into a protected source tree is evaluated as the protected target,
+   and a missing leaf beneath a symlinked ancestor is resolved through that
+   ancestor. Canonicalization failures deny before Cedar is called.
+8. Positively invocation-authorized interactive `policy_unavailable` requests
    enter the harness confirmation path; non-interactive requests fail closed
    with a distinct evaluator error.
-6. Restart restores the last-known-good bundle before the interceptor accepts
+9. Restart restores the last-known-good bundle before the interceptor accepts
    tool calls.
 
 The shared evaluator SPEC and per-harness interceptor BDD scenarios must carry
