@@ -165,18 +165,26 @@ func run(args []string, stdout, stderr io.Writer) int {
 	finish := func(code int) int {
 		if *cadence {
 			if code == exitNotPersisted {
+				stateDir := defaultStateDir()
+				sentinelName := cadenceSentinelName(*quarPath)
 				if _, _, _, quarantined := r.QuarantineStatus(); quarantined {
-					notifyOperator("Claude auth AT RISK", "Credential persistence failed; the refresh-token quarantine is active. Run token-refresher -clear-quarantine after remediation.")
+					notifyCadenceOnce(stateDir, sentinelName,
+						"Claude auth AT RISK",
+						"Credential persistence failed; the refresh-token quarantine is active. Run token-refresher -clear-quarantine after remediation.")
 					fmt.Fprintln(stderr, "token-refresher: cadence refresh QUARANTINED until -clear-quarantine re-arms it.")
 					return exitOK
 				}
 				stopped, stopErr := r.RefreshStopped()
 				if stopErr == nil && stopped {
-					notifyOperator("Claude auth AT RISK", "Refresh quarantine could not be persisted; the durable refresh stop is active. Run token-refresher -clear-quarantine after remediation.")
+					notifyCadenceOnce(stateDir, sentinelName,
+						"Claude auth AT RISK",
+						"Refresh quarantine could not be persisted; the durable refresh stop is active. Run token-refresher -clear-quarantine after remediation.")
 					fmt.Fprintln(stderr, "token-refresher: cadence refresh STOPPED until -clear-quarantine re-arms it.")
 					return exitOK
 				}
-				notifyOperator("Claude auth AT RISK", "Neither quarantine nor the durable refresh stop could be confirmed; automatic retry remains unsafe.")
+				notifyCadenceOnce(stateDir, sentinelName,
+					"Claude auth AT RISK",
+					"Neither quarantine nor the durable refresh stop could be confirmed; automatic retry remains unsafe.")
 				fmt.Fprintln(stderr, "token-refresher: cadence refresh stop was NOT persisted; refusing to report a safe stop.")
 				return exitNotPersisted
 			}

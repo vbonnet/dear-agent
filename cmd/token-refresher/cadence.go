@@ -71,18 +71,10 @@ func cadenceStopped(credentialsPath string) (bool, error) {
 // The real exit code still reaches the audit log and stderr; only the process
 // status is flattened, and only for the cadence caller.
 func cadenceExit(code int, stateDir, sentinelName string, stderr io.Writer) int {
-	sentinel := filepath.Join(stateDir, sentinelName)
-
 	switch code {
 	case exitTokenFamilyDead:
-		if _, err := os.Stat(sentinel); err != nil {
-			// First tick of this death episode: alert, then record that we did.
-			notifyOperator("Claude auth DOWN", "OAuth token family is dead. Run: claude /login")
-			if err := os.MkdirAll(stateDir, 0o700); err == nil {
-				stamp := time.Now().UTC().Format(time.RFC3339)
-				_ = os.WriteFile(sentinel, []byte(stamp+"\n"), 0o600)
-			}
-		}
+		notifyCadenceOnce(stateDir, sentinelName,
+			"Claude auth DOWN", "OAuth token family is dead. Run: claude /login")
 		fmt.Fprintf(stderr, "token-refresher: cadence mode — reporting success so launchd keeps the schedule.\n")
 		return exitOK
 
@@ -90,14 +82,9 @@ func cadenceExit(code int, stateDir, sentinelName string, stderr io.Writer) int 
 		// A near-miss, and the alert that matters most: the family is still
 		// alive precisely because we declined to replay the token. Reuse the
 		// death sentinel so one episode raises one notification.
-		if _, err := os.Stat(sentinel); err != nil {
-			notifyOperator("Claude auth AT RISK",
-				"Refresh outcome unknown; token quarantined to protect the family. Check token-refresher -check")
-			if err := os.MkdirAll(stateDir, 0o700); err == nil {
-				stamp := time.Now().UTC().Format(time.RFC3339)
-				_ = os.WriteFile(sentinel, []byte(stamp+"\n"), 0o600)
-			}
-		}
+		notifyCadenceOnce(stateDir, sentinelName,
+			"Claude auth AT RISK",
+			"Refresh outcome unknown; token quarantined to protect the family. Check token-refresher -check")
 		fmt.Fprintf(stderr, "token-refresher: cadence mode — reporting success so launchd keeps the schedule.\n")
 		return exitOK
 
@@ -110,6 +97,21 @@ func cadenceExit(code int, stateDir, sentinelName string, stderr io.Writer) int 
 	}
 
 	return code
+}
+
+// notifyCadenceOnce records the episode after its first best-effort alert.
+// Every cadence failure path uses this helper so a durable quarantine/stop does
+// not notify again on every launchd tick.
+func notifyCadenceOnce(stateDir, sentinelName, title, message string) {
+	sentinel := filepath.Join(stateDir, sentinelName)
+	if _, err := os.Stat(sentinel); err == nil {
+		return
+	}
+	notifyOperator(title, message)
+	if err := os.MkdirAll(stateDir, 0o700); err == nil {
+		stamp := time.Now().UTC().Format(time.RFC3339)
+		_ = os.WriteFile(sentinel, []byte(stamp+"\n"), 0o600)
+	}
 }
 
 // notifyNotifyTimeout bounds the osascript call. A launchd job runs without a

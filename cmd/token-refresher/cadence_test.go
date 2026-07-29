@@ -45,6 +45,26 @@ func TestCadenceExit_AlertsOncePerEpisode(t *testing.T) {
 	}
 }
 
+func TestNotifyCadenceOnce_StampsNonStandardFailurePath(t *testing.T) {
+	dir := t.TempDir()
+	notifyCadenceOnce(dir, deathSentinelName, "test title", "test message")
+
+	sentinel := filepath.Join(dir, deathSentinelName)
+	first, err := os.ReadFile(sentinel)
+	if err != nil {
+		t.Fatalf("read sentinel: %v", err)
+	}
+
+	notifyCadenceOnce(dir, deathSentinelName, "test title", "test message")
+	second, err := os.ReadFile(sentinel)
+	if err != nil {
+		t.Fatalf("read sentinel after second alert: %v", err)
+	}
+	if string(first) != string(second) {
+		t.Error("non-standard cadence alert rewrote its sentinel on the second tick")
+	}
+}
+
 // A successful refresh must re-arm the alert so the NEXT death notifies again.
 func TestCadenceExit_SuccessClearsSentinel(t *testing.T) {
 	dir := t.TempDir()

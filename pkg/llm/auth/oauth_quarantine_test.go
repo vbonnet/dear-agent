@@ -189,6 +189,32 @@ func TestRefresh_AsynchronousBodyConsumptionIsOutcomeUnknown(t *testing.T) {
 	}
 }
 
+type asynchronousUntouchedBodyErrorTransport struct{}
+
+func (asynchronousUntouchedBodyErrorTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		_ = req.Body.Close()
+	}()
+	return nil, errors.New("connection failed before request body was consumed")
+}
+
+func TestRefresh_AsynchronousUntouchedBodyCloseIsOrdinaryError(t *testing.T) {
+	r, _, quarPath := quarantineResolver(t, "http://token.invalid", "rt-untouched")
+	r.HTTPClient = &http.Client{Transport: asynchronousUntouchedBodyErrorTransport{}}
+
+	_, err := r.Refresh(context.Background())
+	if err == nil {
+		t.Fatal("expected transport error")
+	}
+	if errors.Is(err, ErrRefreshOutcomeUnknown) {
+		t.Fatalf("untouched asynchronously closed body must remain retryable: %v", err)
+	}
+	if _, statErr := os.Stat(quarPath); !os.IsNotExist(statErr) {
+		t.Fatal("untouched asynchronously closed body must not quarantine the token")
+	}
+}
+
 // A 200 whose body cannot be parsed still means the server rotated the token, so
 // the on-disk one is spent and must be quarantined.
 func TestRefresh_UnparseableSuccessBody_Quarantines(t *testing.T) {

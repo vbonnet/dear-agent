@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -52,6 +53,11 @@ const (
 	// maxErrBodyBytes caps how much of a non-2xx response body we read for
 	// diagnostics, so a hostile/oversized error page can't exhaust memory.
 	maxErrBodyBytes = 4 << 10
+
+	// A RoundTripper may close a request body asynchronously after RoundTrip
+	// returns an error. Give that conforming close a bounded observation window
+	// before conservatively classifying the refresh outcome as unknown.
+	requestBodyCloseGracePeriod = 100 * time.Millisecond
 )
 
 // ErrTokenFamilyDead signals an unrecoverable refresh: the OAuth server
@@ -335,7 +341,10 @@ func (r OAuthResolver) exchange(ctx context.Context, refreshToken string) (token
 	// conservatively treat the token as possibly transmitted. This may
 	// quarantine after a locally failed write, but can never retry a token whose
 	// body was already handed to the transport.
-	body := &observedReadCloser{ReadCloser: io.NopCloser(strings.NewReader(form.Encode()))}
+	body := &observedReadCloser{
+		ReadCloser: io.NopCloser(strings.NewReader(form.Encode())),
+		closedCh:   make(chan struct{}),
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.endpoint(), strings.NewReader(form.Encode()))
 	if err != nil {
 		return tokenResponse{}, fmt.Errorf("build token refresh request: %w", err)
@@ -349,6 +358,7 @@ func (r OAuthResolver) exchange(ctx context.Context, refreshToken string) (token
 
 	resp, err := r.HTTPClient.Do(req)
 	if err != nil {
+		body.waitForClose(ctx)
 		if body.read.Load() || !body.closed.Load() {
 			// The refresh-token body reached the transport and we will never
 			// learn what the server did with it, or a conforming transport is
@@ -392,8 +402,10 @@ func (r OAuthResolver) exchange(ctx context.Context, refreshToken string) (token
 
 type observedReadCloser struct {
 	io.ReadCloser
-	read   atomic.Bool
-	closed atomic.Bool
+	read      atomic.Bool
+	closed    atomic.Bool
+	closeOnce sync.Once
+	closedCh  chan struct{}
 }
 
 func (r *observedReadCloser) Read(p []byte) (int, error) {
@@ -407,7 +419,23 @@ func (r *observedReadCloser) Read(p []byte) (int, error) {
 func (r *observedReadCloser) Close() error {
 	err := r.ReadCloser.Close()
 	r.closed.Store(true)
+	r.closeOnce.Do(func() {
+		close(r.closedCh)
+	})
 	return err
+}
+
+func (r *observedReadCloser) waitForClose(ctx context.Context) {
+	if r.closed.Load() {
+		return
+	}
+	timer := time.NewTimer(requestBodyCloseGracePeriod)
+	defer timer.Stop()
+	select {
+	case <-r.closedCh:
+	case <-ctx.Done():
+	case <-timer.C:
+	}
 }
 
 // backupCredentials copies the credentials file to <path>.bak (mode 0600)
