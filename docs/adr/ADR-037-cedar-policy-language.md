@@ -57,6 +57,15 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   The policy decision is made outside the agent's own reasoning, the same
   "deterministic enforcement over agent judgment" principle already on
   dear-agent's anti-pattern watchlist.
+- Treat the interceptor executable and its harness registration as privileged
+  enforcement assets, not project files. Each blocking integration must load
+  both from an operator-managed location outside the workspace and every
+  agent-writable root, authenticate their expected identity at startup, and
+  fail closed if either changes or disappears. Project-local registrations
+  such as `.codex/hooks.json` or `.claude/settings.json` may remain advisory,
+  but they cannot be the sole Cedar enforcement boundary. A harness that
+  cannot provide an integrity-protected registration or dispatcher boundary
+  does not qualify for blocking Cedar enforcement.
 - Encode the three runtime outcomes as two ordered Cedar authorization
   decisions because Cedar itself returns only Allow or Deny. First evaluate
   whether the principal may invoke the tool at all; Deny maps to **deny**.
@@ -120,6 +129,15 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   `internal/fsguard`. The lexical input may be retained only as audit context;
   policies receive the canonical identity. Failure to obtain that identity is
   deny, and no per-harness interceptor may evaluate the raw path as a fallback.
+  Authorization must remain bound to that same filesystem object through
+  execution: an existing target is consumed through a race-resistant handle
+  opened without following replacement symlinks, while creation beneath a
+  missing leaf is performed relative to a similarly pinned existing ancestor.
+  The dispatcher must never authorize one canonical path and then reopen the
+  caller's lexical path. Where a harness cannot pass such a handle, an
+  independently enforced OS sandbox must constrain the final open to the
+  authorized identity; otherwise the operation is denied. A path-string check
+  followed by an ordinary open is not a conforming interceptor.
 - Rego/OPA remains the documented fallback if Cedar's younger ecosystem
   (smaller `cedar-go`, no turnkey `cedar test`-equivalent at research time)
   proves insufficient in implementation.
@@ -172,6 +190,16 @@ tests must prove all of the following:
    with a distinct evaluator error.
 9. Restart restores the last-known-good bundle before the interceptor accepts
    tool calls.
+10. For every harness, replacing or removing the interceptor executable or its
+    registration from an agent-writable session cannot disable enforcement.
+    The tamper attempt either has no effect because the assets are outside the
+    writable boundary or makes startup/tool dispatch fail closed; tests must
+    cover both the executable and registration.
+11. A concurrent process that swaps an authorized target or any writable
+    ancestor for a symlink between projection and dispatch cannot redirect the
+    operation into a protected tree. Tests must exercise existing targets and
+    missing-leaf creation and prove execution consumes the pinned object or
+    ancestor rather than reopening the lexical path.
 
 The shared evaluator SPEC and per-harness interceptor BDD scenarios must carry
 these cases; unit tests of Cedar Allow/Deny alone do not satisfy this gate.
