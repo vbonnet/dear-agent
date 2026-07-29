@@ -94,6 +94,17 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   denied the call. A diagnostic can therefore never turn an authored
   invocation forbid or the absence of an invocation permit into
   user-overridable confirmation.
+- Bound every evaluator call by a harness-independent deadline and treat a
+  panic, process crash, signal, nonzero exit, EOF, transport closure, timeout,
+  cancellation without a complete decision, or structurally incomplete
+  response as a typed evaluator-unavailable result that executes nothing.
+  Failure before a complete positive invocation authorization is never
+  user-confirmable: it fails closed directly because no permit was proven.
+  Failure at the confirmation-free gate may use the explicit escalation path
+  only because the same immutable snapshots already produced positive
+  invocation authorization. Per-harness adapters may translate presentation,
+  but they may neither inherit a native fail-open default nor wait without a
+  finite deadline.
 - Publish policy bundles atomically only after they parse, validate against the
   Cedar schema, and pass the deterministic policy fixture suite. Publication
   is a privileged control-plane operation, not an agent tool: the publisher
@@ -129,24 +140,36 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   result that executes nothing. An unbounded restart loop is not conforming:
   every request must dispatch, deny, or return a typed unavailable result in
   bounded attempts.
-- Project every path-bearing resource into one canonical filesystem identity
-  before Cedar evaluation. The shared projector expands supported home forms,
-  anchors relative paths to the interceptor's verified working directory,
-  cleans traversal components, makes the path absolute, and resolves symlinks.
-  For a missing leaf it resolves the deepest existing ancestor and reattaches
-  the missing components, preserving the invariant already enforced by
-  `internal/fsguard`. The lexical input may be retained only as audit context;
-  policies receive the canonical identity. Failure to obtain that identity is
-  deny, and no per-harness interceptor may evaluate the raw path as a fallback.
-  Authorization must remain bound to that same filesystem object through
-  execution: an existing target is consumed through a race-resistant handle
-  opened without following replacement symlinks, while creation beneath a
-  missing leaf is performed relative to a similarly pinned existing ancestor.
-  The dispatcher must never authorize one canonical path and then reopen the
-  caller's lexical path. Where a harness cannot pass such a handle, an
-  independently enforced OS sandbox must constrain the final open to the
-  authorized identity; otherwise the operation is denied. A path-string check
-  followed by an ordinary open is not a conforming interceptor.
+- Project every path-bearing resource into operation-specific canonical
+  filesystem identities before Cedar evaluation. The shared projector expands
+  supported home forms, anchors relative paths to the interceptor's verified
+  working directory, cleans traversal components, and makes the path absolute.
+  Operations that consume the target object, such as read or ordinary open,
+  resolve symlinks and authorize the referent. For a missing leaf they resolve
+  the deepest existing ancestor and reattach the missing components, preserving
+  the invariant already enforced by `internal/fsguard`.
+- Directory-entry operations use a no-follow projection instead. `unlink`,
+  replacement, and each side of `rename` authorize the canonical parent
+  directory plus the leaf entry without resolving the leaf symlink; rename
+  authorizes both source and destination parent/entry resources. If an
+  operation also reads or mutates the referent, that referent is a separate
+  required resource rather than a substitute for the directory entry. Thus a
+  symlink to an allowed temporary file cannot authorize deletion from a
+  protected directory, and a protected referent does not by itself forbid
+  removing an otherwise allowed symlink entry.
+- The lexical input may be retained only as audit context; policies receive
+  the operation-appropriate canonical identities. Failure to obtain every
+  required identity is deny, and no per-harness interceptor may evaluate the
+  raw path as a fallback. Authorization must remain bound to those same
+  filesystem objects through execution: existing referents are consumed
+  through race-resistant handles, while entry operations execute relative to
+  pinned parent-directory handles with no-follow semantics. Creation beneath a
+  missing leaf likewise uses a pinned existing ancestor. The dispatcher must
+  never authorize one identity and then reopen the caller's lexical path.
+  Where a harness cannot pass such handles, an independently enforced OS
+  sandbox must constrain the final operation to every authorized identity;
+  otherwise the operation is denied. A path-string check followed by an
+  ordinary open, unlink, or rename is not a conforming interceptor.
 - Rego/OPA remains the documented fallback if Cedar's younger ecosystem
   (smaller `cedar-go`, no turnkey `cedar test`-equivalent at research time)
   proves insufficient in implementation.
@@ -199,7 +222,13 @@ tests must prove all of the following:
    ancestor. Canonicalization failures deny before Cedar is called.
 8. Positively invocation-authorized interactive `policy_unavailable` requests
    enter the harness confirmation path; non-interactive requests fail closed
-   with a distinct evaluator error.
+   with a distinct evaluator error. Separately, every harness must force an
+   evaluator panic, process crash, signal, nonzero exit, EOF, timeout, and
+   incomplete response at each ordered gate. Before positive invocation
+   authorization, each case returns a typed non-confirmable unavailable result
+   within the configured deadline and executes nothing; after positive
+   invocation authorization, only confirmation-free-gate failure may enter the
+   explicit interactive escalation path.
 9. Restart restores the last-known-good bundle before the interceptor accepts
    tool calls.
 10. For every harness, replacing or removing the interceptor executable or its
@@ -217,6 +246,12 @@ tests must prove all of the following:
     invalidations than the configured limit and observe a typed
     `policy_churn` result, no dispatch, and a bounded evaluation count; a
     non-churning request still makes progress while publications occur.
+13. Entry-mutating operations use no-follow resource projection: tests cover
+    unlinking an allowed-directory symlink whose referent is protected,
+    rejecting deletion of a protected-directory symlink whose referent is
+    allowed, and rename/replacement across independently authorized source and
+    destination parents. Concurrent leaf swaps cannot change the entry or
+    parent consumed through the pinned directory handles.
 
 The shared evaluator SPEC and per-harness interceptor BDD scenarios must carry
 these cases; unit tests of Cedar Allow/Deny alone do not satisfy this gate.
