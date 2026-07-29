@@ -116,24 +116,6 @@ func TestInjectionNeutralized(t *testing.T) {
 		wantArgv []string
 	}{
 		{
-			name:     "claude start",
-			harness:  "claude",
-			build:    func(wd string) string { return buildClaudeStartCommand(wd, nil) },
-			wantArgv: []string{"--add-dir", "%s"},
-		},
-		{
-			name:     "claude start with authorized dir",
-			harness:  "claude",
-			build:    func(wd string) string { return buildClaudeStartCommand(wd, []string{injectionPayload}) },
-			wantArgv: []string{"--add-dir", "%s", "--add-dir", injectionPayload},
-		},
-		{
-			name:     "claude resume",
-			harness:  "claude",
-			build:    func(wd string) string { return buildClaudeResumeCommand(wd, injectionPayload) },
-			wantArgv: []string{"--resume", injectionPayload},
-		},
-		{
 			name:     "gemini start",
 			harness:  "gemini",
 			build:    func(wd string) string { return buildGeminiStartCommand(wd, nil) },
@@ -226,21 +208,6 @@ func TestWellFormedCommandsUnchanged(t *testing.T) {
 		want string
 	}{
 		{
-			name: "claude start",
-			got:  buildClaudeStartCommand(wd, nil),
-			want: "claude --add-dir '/home/user/work' && exit",
-		},
-		{
-			name: "claude start skips duplicate authorized dir",
-			got:  buildClaudeStartCommand(wd, []string{wd, "/srv/extra"}),
-			want: "claude --add-dir '/home/user/work' --add-dir '/srv/extra' && exit",
-		},
-		{
-			name: "claude resume",
-			got:  buildClaudeResumeCommand(wd, "abc-123"),
-			want: "cd '/home/user/work' && claude --resume 'abc-123' && exit",
-		},
-		{
 			name: "gemini start",
 			got:  buildGeminiStartCommand(wd, nil),
 			want: "gemini --include-directories '/home/user/work' && exit",
@@ -300,7 +267,7 @@ func TestPastedLaunchRejectsTerminalControlsBeforeTmux(t *testing.T) {
 	for _, payload := range payloads {
 		err := sendPastedShellCommand(
 			"missing-session-must-not-be-contacted",
-			buildClaudeStartCommand(payload, nil),
+			"quoted command",
 			payload,
 		)
 		if err == nil {

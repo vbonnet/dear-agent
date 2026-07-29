@@ -93,6 +93,9 @@ func BuildHarnessLaunchCommand(spec HarnessLaunchSpec) HarnessLaunchCommand {
 // absolute current AGM path, validated non-secret metadata, and an opaque
 // owner-only handoff path. Call Cancel only when the command was not delivered.
 func PrepareHarnessLaunchCommand(spec HarnessLaunchSpec) (HarnessLaunchCommand, error) {
+	if err := validateHarnessLaunchSpec(spec); err != nil {
+		return HarnessLaunchCommand{}, err
+	}
 	switch agent.NormalizeHarnessName(spec.Harness) {
 	case "claude-code":
 		launch, modeApplied := claudeLaunch(spec)
@@ -115,6 +118,40 @@ func PrepareHarnessLaunchCommand(spec HarnessLaunchSpec) (HarnessLaunchCommand, 
 	default:
 		return BuildHarnessLaunchCommand(spec), nil
 	}
+}
+
+func validateHarnessLaunchSpec(spec HarnessLaunchSpec) error {
+	fields := []struct{ name, value string }{
+		{"harness", spec.Harness},
+		{"model", spec.Model},
+		{"session name", spec.SessionName},
+		{"session id", spec.SessionID},
+		{"resume id", spec.ResumeID},
+		{"workdir", spec.WorkDir},
+		{"permission mode", spec.PermissionMode},
+		{"pi launch id", spec.PiLaunchID},
+		{"pi extension", spec.PiExtension},
+		{"pi policy file", spec.PiPolicyFile},
+	}
+	if spec.Codex != nil {
+		fields = append(fields, struct{ name, value string }{"codex session id", spec.Codex.SessionID})
+	}
+	if spec.Pi != nil {
+		fields = append(fields,
+			struct{ name, value string }{"pi session id", spec.Pi.SessionID},
+			struct{ name, value string }{"pi session dir", spec.Pi.SessionDir},
+			struct{ name, value string }{"pi coding-agent dir", spec.Pi.CodingAgentDir},
+		)
+	}
+	for _, field := range fields {
+		if err := harnessexec.ValidatePastedText(field.name, field.value); err != nil {
+			return fmt.Errorf("validate harness launch: %w", err)
+		}
+	}
+	if err := harnessexec.ValidatePastedTextList("add-dir", spec.ExtraAddDirs); err != nil {
+		return fmt.Errorf("validate harness launch: %w", err)
+	}
+	return nil
 }
 
 func buildPiLaunchCommand(spec HarnessLaunchSpec) HarnessLaunchCommand {

@@ -20,6 +20,8 @@ func TestValidateSendKeysText(t *testing.T) {
 		{"escape starts a terminal sequence", "ok\x1b[2J", true},
 		{"tab triggers completion rather than inserting", "ok\tevil", true},
 		{"DEL", "ok\x7f", true},
+		{"C1 next-line control", "ok\u0085evil", true},
+		{"C1 control-sequence introducer", "ok\u009bevil", true},
 		{"invalid UTF-8", string([]byte{'o', 'k', 0xff}), true},
 		{"bare carriage return", "\r", true},
 		{"empty", "", true},

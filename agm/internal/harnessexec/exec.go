@@ -573,6 +573,18 @@ func validateTextList(name string, values []string) error {
 	return nil
 }
 
+// ValidatePastedText rejects terminal controls and invalid UTF-8 before a
+// caller-controlled value is interpolated into a command pasted into tmux.
+// Empty optional fields are permitted.
+func ValidatePastedText(name, value string) error {
+	return validateOptionalText(name, value)
+}
+
+// ValidatePastedTextList applies ValidatePastedText to a repeated field.
+func ValidatePastedTextList(name string, values []string) error {
+	return validateTextList(name, values)
+}
+
 func oneOf(value string, allowed ...string) bool {
 	return slices.Contains(allowed, value)
 }

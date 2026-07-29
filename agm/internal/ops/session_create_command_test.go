@@ -2,6 +2,7 @@ package ops
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
@@ -44,6 +45,20 @@ func TestResolveHarnessLaunchSubmissionPreservesUncertainAndCancelsConfirmedFail
 			}
 			if cancelled != tc.wantCancel {
 				t.Fatalf("cancelled = %v, want %v", cancelled, tc.wantCancel)
+			}
+		})
+	}
+}
+
+func TestPrepareHarnessLaunchCommandRejectsControlsForSharedHarnesses(t *testing.T) {
+	for _, harness := range []string{"agy", "pi-cli", "opencode-cli"} {
+		t.Run(harness, func(t *testing.T) {
+			_, err := PrepareHarnessLaunchCommand(HarnessLaunchSpec{
+				Harness: harness,
+				WorkDir: "/safe\x1b[201~\nunsafe",
+			})
+			if err == nil || !strings.Contains(err.Error(), "control characters") {
+				t.Fatalf("PrepareHarnessLaunchCommand() error = %v, want terminal-control rejection", err)
 			}
 		})
 	}

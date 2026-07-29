@@ -63,34 +63,6 @@ func validatePastedShellValue(value string) error {
 	return nil
 }
 
-// buildClaudeStartCommand returns the command that starts Claude in a fresh
-// tmux session, pre-authorizing the workspace so Claude does not block on its
-// interactive trust prompt.
-func buildClaudeStartCommand(workDir string, authorizedDirs []string) string {
-	var b strings.Builder
-	b.WriteString("claude --add-dir ")
-	b.WriteString(launchparity.ShellQuote(workDir))
-
-	for _, dir := range authorizedDirs {
-		if dir == workDir {
-			continue
-		}
-		b.WriteString(" --add-dir ")
-		b.WriteString(launchparity.ShellQuote(dir))
-	}
-
-	b.WriteString(" && exit")
-	return b.String()
-}
-
-// buildClaudeResumeCommand returns the command that resumes a Claude session by
-// UUID after its tmux session has been recreated.
-func buildClaudeResumeCommand(workDir, sessionID string) string {
-	return "cd " + launchparity.ShellQuote(workDir) +
-		" && claude --resume " + launchparity.ShellQuote(sessionID) +
-		" && exit"
-}
-
 // buildGeminiStartCommand returns the command that starts Gemini CLI in a fresh
 // tmux session with the workspace pre-authorized.
 func buildGeminiStartCommand(workDir string, authorizedDirs []string) string {

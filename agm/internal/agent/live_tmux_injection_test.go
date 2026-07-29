@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
@@ -117,23 +118,33 @@ func requireTmux(t *testing.T) {
 	}
 }
 
-// TestInjectionNeutralizedThroughTmux is the end-to-end form of
-// TestInjectionNeutralized: a hostile working directory must reach the harness
-// as one inert argument after travelling through a real tmux paste buffer.
-func TestInjectionNeutralizedThroughTmux(t *testing.T) {
+// TestProductionClaudeCommandNeutralizedThroughTmux sends the same private
+// executor command shape produced by PrepareClaudeCommand through a live tmux
+// paste buffer. The private executor itself is covered in harnessexec tests;
+// this test owns the terminal-delivery boundary.
+func TestProductionClaudeCommandNeutralizedThroughTmux(t *testing.T) {
 	requirePOSIXShell(t)
 	requireTmux(t)
 
 	root, workDir := hostileWorkDir(t)
-	argv := sendThroughTmux(t, "ce93lw1-fixed", buildClaudeStartCommand(workDir, nil), "claude", root)
+	command := harnessexec.BuildClaudeCommand(harnessexec.ClaudeLaunch{
+		Executable:  "claude",
+		SessionName: "ce93lw1-fixed",
+		WorkDir:     workDir,
+		AddDirs:     []string{workDir},
+	})
+	argv := sendThroughTmux(t, "ce93lw1-fixed", command, "claude", root)
 
-	want := []string{"--add-dir", workDir}
-	if len(argv) != len(want) {
-		t.Fatalf("argv = %q, want %q", argv, want)
-	}
-	for i := range want {
-		if argv[i] != want[i] {
-			t.Errorf("argv[%d] = %q, want %q", i, argv[i], want[i])
+	for _, flag := range []string{"--workdir", "--add-dir"} {
+		found := false
+		for i := 0; i+1 < len(argv); i++ {
+			if argv[i] == flag && argv[i+1] == workDir {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("argv = %q, want %s followed by hostile workdir", argv, flag)
 		}
 	}
 	assertNoPwned(t, root)

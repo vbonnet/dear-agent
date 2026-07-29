@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -333,10 +334,10 @@ func ValidateSendKeysText(kind, s string) error {
 		return fmt.Errorf("%s contains invalid UTF-8", kind)
 	}
 	for _, r := range s {
-		// All C0 controls and DEL are rejected, tab included: in a TUI, tab
-		// triggers completion rather than inserting a character, so it mangles
-		// the value just as surely as \r submits it.
-		if r < 0x20 || r == 0x7f {
+		// Every Unicode control is rejected, including C1 controls. In a TUI,
+		// tab triggers completion rather than inserting a character, and C1
+		// values such as CSI can be interpreted as terminal controls.
+		if unicode.IsControl(r) {
 			return fmt.Errorf("%s contains control character %q", kind, r)
 		}
 	}
