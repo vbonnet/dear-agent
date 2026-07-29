@@ -8,8 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
+
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 )
 
 // Known harness names. Active parity harnesses come first; deprecated harnesses
@@ -330,16 +330,5 @@ func ValidateSendKeysText(kind, s string) error {
 	if s == "" {
 		return fmt.Errorf("%s is empty", kind)
 	}
-	if !utf8.ValidString(s) {
-		return fmt.Errorf("%s contains invalid UTF-8", kind)
-	}
-	for _, r := range s {
-		// Every Unicode control is rejected, including C1 controls. In a TUI,
-		// tab triggers completion rather than inserting a character, and C1
-		// values such as CSI can be interpreted as terminal controls.
-		if unicode.IsControl(r) {
-			return fmt.Errorf("%s contains control character %q", kind, r)
-		}
-	}
-	return nil
+	return harnessexec.ValidatePastedText(kind, s)
 }
