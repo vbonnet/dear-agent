@@ -84,8 +84,7 @@ func TestNewSession_RepairsWorkDirWhenServerCwdDeleted(t *testing.T) {
 
 	// The actual assertion: NewSession must leave the pane in workDir even on
 	// the wedged server (verify + `cd` repair).
-	workDir := filepath.Join(t.TempDir(), "valid\tworkdir")
-	require.NoError(t, os.Mkdir(workDir, 0o755))
+	workDir := t.TempDir()
 	sessionName := "test-workdir-repair"
 	require.NoError(t, NewSession(sessionName, workDir))
 	defer killSession(sessionName)
@@ -104,7 +103,10 @@ func TestNewSession_WorkDirHonored(t *testing.T) {
 	defer cleanup()
 	setupTestState(t)
 
-	workDir := t.TempDir()
+	// A healthy server never needs to paste a corrective `cd`, so a path with
+	// terminal control bytes remains a valid liveness counter-check here.
+	workDir := filepath.Join(t.TempDir(), "valid\tworkdir")
+	require.NoError(t, os.Mkdir(workDir, 0o755))
 	sessionName := "test-workdir-honored"
 	start := time.Now()
 	require.NoError(t, NewSession(sessionName, workDir))
