@@ -69,7 +69,12 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
 - Keep **authored decisions separate from evaluator health** without
   weakening default deny or hard forbids. The interceptor advances past the
   invocation gate only when the response proves a validated applicable
-  `permit` and returns Allow. A proven applicable `forbid` remains **deny**
+  `permit`, returns Allow, **and carries no policy-evaluation diagnostics**.
+  An Allow whose diagnostics report any errored policy is **deny**: a `forbid`
+  that failed to evaluate — for example because the request entity lacked an
+  attribute it tested — is neither proven applicable nor proven inapplicable,
+  so treating that response as authorization would let an authored hard deny
+  fail open. A proven applicable `forbid` remains **deny**
   even when another policy emits diagnostics; a Deny with no applicable
   permit also remains **deny**, regardless of diagnostics. Only after positive
   invocation authorization may diagnostics that prevent a trustworthy
@@ -116,8 +121,12 @@ tests must prove all of the following:
    immutable snapshot.
 4. A Cedar response containing both a proven invocation `forbid` reason and
    diagnostics remains `deny`; an invocation response with no proven
-   applicable `permit` also remains `deny`. Only diagnostics encountered
-   after positive invocation authorization may return `policy_unavailable`.
+   applicable `permit` also remains `deny`. An invocation Allow whose
+   diagnostics report an errored policy — including a `forbid` that failed to
+   evaluate against an incomplete request entity — also remains `deny` and
+   never advances to the confirmation-free decision. Only diagnostics
+   encountered after positive invocation authorization may return
+   `policy_unavailable`.
    All paths record the bundle version and sanitized diagnostics.
 5. Positively invocation-authorized interactive `policy_unavailable` requests
    enter the harness confirmation path; non-interactive requests fail closed
