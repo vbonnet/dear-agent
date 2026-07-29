@@ -69,7 +69,7 @@ func DeliverAPISessionMessage(ctx context.Context, storage dolt.Storage, stale *
 		if current == nil {
 			return ErrSessionNotFound(stale.SessionID)
 		}
-		if err := requireActiveAPISession(current, recipient); err != nil {
+		if err := requireActiveDeliverySession(current, recipient); err != nil {
 			return err
 		}
 		if err := deliverThroughAPIAdapter(preflightCtx, ctx, current, recipient, message, newAgent); err != nil {
@@ -79,20 +79,6 @@ func DeliverAPISessionMessage(ctx context.Context, storage dolt.Storage, stale *
 		return nil
 	})
 	return delivered, err
-}
-
-func requireActiveAPISession(current *manifest.Manifest, fallbackName string) error {
-	if current.Lifecycle == "" {
-		return nil
-	}
-	currentName := current.Name
-	if currentName == "" {
-		currentName = fallbackName
-	}
-	if current.Lifecycle == manifest.LifecycleArchived {
-		return ErrSessionArchived(currentName)
-	}
-	return ErrSessionNotReady(currentName, "LIFECYCLE_"+current.Lifecycle)
 }
 
 func deliverThroughAPIAdapter(preflightCtx, deliveryCtx context.Context, current *manifest.Manifest, recipient string, message agent.Message, newAgent APISessionAgentFactory) error {

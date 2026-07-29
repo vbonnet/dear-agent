@@ -24,3 +24,9 @@ func TestDuplicateHarnessRequirementIDsRecognizesSupportedMarkdownPrefixes(t *te
 		t.Fatalf("duplicateHarnessRequirementIDs() = %v, want [AGP-01 AGP-02]", got)
 	}
 }
+
+func TestLifecycleSurfacesDelegateToSharedOperations(t *testing.T) {
+	if err := requireLifecycleDelegation(packageSpecBDDRepoRoot()); err != nil {
+		t.Fatal(err)
+	}
+}

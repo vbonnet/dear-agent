@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -22,7 +23,6 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/safety"
 	"github.com/vbonnet/dear-agent/agm/internal/send"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
-	"github.com/vbonnet/dear-agent/agm/internal/state"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 	"github.com/vbonnet/dear-agent/internal/telemetry"
@@ -319,9 +319,7 @@ func runSendSingle(ctx context.Context, recipientSession string) (retErr error) 
 	if err := enforceSendRateLimit(senderName); err != nil {
 		return err
 	}
-	if err := ensureRecipientReady(recipientSession, adapter); err != nil {
-		return err
-	}
+	prepareRecipientDelivery(recipientSession, adapter)
 
 	message, err := readSendMessageContent()
 	if err != nil {
@@ -333,9 +331,8 @@ func runSendSingle(ctx context.Context, recipientSession string) (retErr error) 
 		return err
 	}
 
-	currentState, tmuxName, harnessType := resolveRecipientState(recipientSession, adapter)
-	canReceive := recipientCanReceive(harnessType, tmuxName, session.CheckSessionDelivery)
-	return dispatchSendByCanReceive(ctx, recipientSession, tmuxName, harnessType, senderName, messageID, formattedMessage, message, currentState, canReceive, adapter)
+	currentState, tmuxName, _ := resolveRecipientState(recipientSession, adapter)
+	return dispatchSend(ctx, recipientSession, tmuxName, senderName, messageID, formattedMessage, message, currentState, adapter)
 }
 
 // sendSingleAuditArgs builds the audit arg map for runSendSingle.
@@ -379,69 +376,47 @@ func enforceSendRateLimit(senderName string) error {
 	return nil
 }
 
-// ensureRecipientReady verifies the recipient exists on its delivery surface.
-// Pure API sessions have no tmux pane, so their final adapter-status check is
-// performed by sendDirectly. CLI sessions retain the tmux and safety guards.
-//
-// human_typing is advisory now (it over-captures; see internal/tmux/stash.go), so
-// it never blocks a send and --force no longer needs to bypass it. --force still
-// sets ForceDelivery, which forces through the SEPARATE queued-input / post-submit
-// cooldown checks for genuinely-stuck supervisors (ce-5sow).
-func ensureRecipientReady(recipientSession string, adapter *dolt.Adapter) error {
-	// Resolve the registered delivery surface before touching tmux. API sessions
-	// intentionally have no pane; requiring one here would reject them before
-	// their adapter can report authoritative readiness. ce-7mxn also auto-detects
-	// autonomous recipients: the human_typing guard is irrelevant to a session
-	// tagged with a non-human role (worker/orchestrator/overseer).
+// prepareRecipientDelivery records advisory telemetry and caller policy without
+// deciding whether a send is safe. ops.SendMessage is the sole direct-delivery
+// readiness authority for both API and tmux sessions.
+func prepareRecipientDelivery(recipientSession string, adapter *dolt.Adapter) {
 	harnessType := ""
-	if m, _, resolveErr := session.ResolveIdentifier(recipientSession, cfg.SessionsDir, adapter); resolveErr == nil {
+	sessionsDir := ""
+	if cfg != nil {
+		sessionsDir = cfg.SessionsDir
+	}
+	if m, _, resolveErr := session.ResolveIdentifier(recipientSession, sessionsDir, adapter); resolveErr == nil {
 		harnessType = m.Harness
 		if isAutonomousRole(m.Context.Tags) {
 			tmux.SetAutonomousMode(true)
 		}
 		if isAPIBasedAgent(harnessType) {
-			return nil
+			checkAndWakeMonitors(recipientSession, adapter)
+			return
 		}
-	}
-
-	exists, err := tmux.HasSession(recipientSession)
-	if err != nil {
-		return fmt.Errorf("failed to check tmux session: %w", err)
-	}
-	if !exists {
-		return fmt.Errorf("session '%s' does not exist in tmux.\n\nSuggestions:\n  • List sessions: agm session list\n  • Create session: agm session new %s", recipientSession, recipientSession)
 	}
 
 	// Record the recipient harness so the non-blocking human_typing stash in the
 	// tmux send path picks the right stash key (ce-subs).
 	tmux.SetStashHarness(harnessType)
 
-	// tmux.AutonomousMode() is the single source of truth, set in runSend from
-	// either --autonomous or AGM_AUTONOMOUS=1 (ce-v9in) and, for autonomous-role
-	// recipients, the role auto-detection above (ce-7mxn).
-	guardOpts := safety.GuardOptions{SkipMidResponse: true, AutonomousMode: tmux.AutonomousMode(), Harness: harnessType}
+	guardOpts := safety.GuardOptions{
+		SkipUninitialized: true,
+		SkipMidResponse:   true,
+		AutonomousMode:    tmux.AutonomousMode(),
+		Harness:           harnessType,
+	}
 	if msgForce {
-		// ce-5sow: --force forces delivery through the SEPARATE queued-input /
-		// post-submit cooldown checks for genuinely-stuck supervisors. It no
-		// longer bypasses human_typing (advisory/non-blocking now), so no audit
-		// override is required — nothing is being overridden.
 		tmux.SetForceDelivery(true)
 	}
 
 	guardResult := safety.Check(recipientSession, guardOpts)
-	// human_typing is advisory (over-captures): count it for telemetry, never
-	// block. Only genuine blocking violations (uninitialized/mid-response) abort.
 	for _, adv := range guardResult.Advisories {
 		if adv.Guard == safety.ViolationHumanTyping {
 			telemetry.RecordHumanTypingDetected(context.Background(), harnessType)
 		}
 	}
-	if !guardResult.Safe {
-		return fmt.Errorf("safety guard blocked send on session '%s':\n\n%s",
-			recipientSession, guardResult.Error())
-	}
 	checkAndWakeMonitors(recipientSession, adapter)
-	return nil
 }
 
 // isAutonomousRole reports whether the session tags include a non-human role.
@@ -549,13 +524,6 @@ func resolveRecipientStateWithDependencies(
 	return currentState, tmuxName, harnessType
 }
 
-func recipientCanReceive(harnessType, tmuxName string, checkTmux func(string) state.CanReceive) state.CanReceive {
-	if isAPIBasedAgent(harnessType) {
-		return state.CanReceiveYes
-	}
-	return checkTmux(tmuxName)
-}
-
 type cliInputDeliveryPolicy struct {
 	Force      bool
 	Autonomous bool
@@ -568,81 +536,62 @@ func currentCLIInputDeliveryPolicy() cliInputDeliveryPolicy {
 	}
 }
 
-func (p cliInputDeliveryPolicy) allowsQueuedAGM() bool {
-	return p.Force || p.Autonomous
-}
-
-// dispatchSendByCanReceive routes the formatted message to the appropriate
-// delivery path based on the CanReceive state read from the recipient pane.
-func dispatchSendByCanReceive(ctx context.Context, recipientSession, tmuxName, harnessType, senderName, messageID, formattedMessage, message, currentState string, canReceive state.CanReceive, adapter *dolt.Adapter) error {
+// dispatchSend attempts the shared direct-delivery transaction first, then
+// translates its typed outcome into CLI-owned queue or overlay policy.
+func dispatchSend(ctx context.Context, recipientSession, tmuxName, senderName, messageID, formattedMessage, message, currentState string, adapter *dolt.Adapter) error {
 	directDelivery := func() error {
 		return sendDirectly(ctx, recipientSession, senderName, messageID, formattedMessage, sessionSendPromptFile, adapter)
 	}
-	return dispatchSendByCanReceiveWithDirect(ctx, recipientSession, tmuxName, senderName, messageID, formattedMessage, message, currentState, canReceive, adapter, currentCLIInputDeliveryPolicy(), supportsSharedAtomicInput(harnessType), isAPIBasedAgent(harnessType), directDelivery)
-}
-
-func supportsSharedAtomicInput(harnessType string) bool {
-	switch agent.NormalizeHarnessName(harnessType) {
-	case "claude-code", "codex-cli", "agy", "gemini-cli", "opencode-cli", "pi-cli":
-		return true
-	default:
-		return false
+	queueDelivery := func(readiness string) error {
+		queueState := currentState
+		if queueState == "" {
+			queueState = readiness
+		}
+		if readiness == "PERMISSION" || readiness == "NO" {
+			fmt.Fprintf(os.Stderr, "⚠ Session '%s' has an active permission prompt — message queued for delivery after resolution\n", recipientSession)
+		}
+		return queueMessage(ctx, recipientSession, senderName, messageID, formattedMessage, queueState)
 	}
-}
-
-func dispatchSendByCanReceiveWithDirect(ctx context.Context, recipientSession, tmuxName, senderName, messageID, formattedMessage, message, currentState string, canReceive state.CanReceive, adapter *dolt.Adapter, policy cliInputDeliveryPolicy, sharedAtomicInput, apiBased bool, directDelivery func() error) error {
-	// Force and autonomous sends must reach the shared atomic classifier before
-	// legacy pane-state routing. Otherwise a preliminary QUEUE verdict diverts
-	// them into the daemon queue and makes their narrowly scoped stuck-AGM
-	// recovery policy unreachable. Pure API harnesses have no tmux pane, so
-	// their adapter status is the final readiness authority instead.
-	if apiBased {
-		if err := directDelivery(); err != nil {
-			return err
-		}
-		recordDelegation(senderName, recipientSession, messageID, message)
-		return nil
-	}
-	if sharedAtomicInput && policy.allowsQueuedAGM() {
-		if err := directDelivery(); err != nil {
-			return err
-		}
-		recordDelegation(senderName, recipientSession, messageID, message)
-		return nil
-	}
-	switch canReceive {
-	case state.CanReceiveYes:
-		if err := directDelivery(); err != nil {
-			return err
-		}
-		recordDelegation(senderName, recipientSession, messageID, message)
-		return nil
-	case state.CanReceiveNotFound:
-		return fmt.Errorf("session '%s' tmux session disappeared during delivery", recipientSession)
-	case state.CanReceiveQueue:
-		if err := queueMessage(ctx, recipientSession, senderName, messageID, formattedMessage, currentState); err != nil {
-			return err
-		}
-		recordDelegation(senderName, recipientSession, messageID, message)
-		return nil
-	case state.CanReceiveOverlay:
+	overlayRecovery := func() error {
 		fmt.Fprintf(os.Stderr, "⚠ Session '%s' has an active dismissible overlay — attempting auto-recovery\n", recipientSession)
-		if err := dismissOverlayAndDeliver(ctx, tmuxName, recipientSession, senderName, messageID, formattedMessage, sessionSendPromptFile, adapter); err != nil {
-			return err
-		}
-		recordDelegation(senderName, recipientSession, messageID, message)
-		return nil
-	case state.CanReceiveNo:
-		fmt.Fprintf(os.Stderr, "⚠ Session '%s' has active permission prompt — message queued for delivery after resolution\n", recipientSession)
-		return queueMessage(ctx, recipientSession, senderName, messageID, formattedMessage, currentState)
-	default:
-		fmt.Fprintf(os.Stderr, "Warning: unknown CanReceive state '%s', queueing\n", canReceive)
-		if err := queueMessage(ctx, recipientSession, senderName, messageID, formattedMessage, currentState); err != nil {
-			return err
-		}
-		recordDelegation(senderName, recipientSession, messageID, message)
+		return dismissOverlayAndDeliver(tmuxName, recipientSession, directDelivery, queueDelivery)
+	}
+	if err := dispatchSendByOperationOutcome(directDelivery, queueDelivery, overlayRecovery); err != nil {
+		return err
+	}
+	recordDelegation(senderName, recipientSession, messageID, message)
+	return nil
+}
+
+func dispatchSendByOperationOutcome(directDelivery func() error, queueDelivery func(string) error, overlayRecovery func() error) error {
+	err := directDelivery()
+	if err == nil {
 		return nil
 	}
+	readiness, ok := operationReadiness(err)
+	if !ok {
+		return err
+	}
+	switch readiness {
+	case "QUEUE", "QUEUED_AGM", "PERMISSION", "ONBOARDING", "NO", "UNKNOWN":
+		return queueDelivery(readiness)
+	case "OVERLAY":
+		return overlayRecovery()
+	default:
+		return err
+	}
+}
+
+func operationReadiness(err error) (string, bool) {
+	var opErr *ops.OpError
+	if !errors.As(err, &opErr) || opErr.Code != ops.ErrCodeSessionNotReady {
+		return "", false
+	}
+	readiness := opErr.Parameters["readiness"]
+	if readiness == "" {
+		readiness = "UNKNOWN"
+	}
+	return readiness, true
 }
 
 // queueMessage queues a message for later delivery (non-disruptive default)
@@ -723,42 +672,20 @@ func sendDirectlyWithDependencies(ctx context.Context, recipientSession, senderN
 	if adapter == nil {
 		return fmt.Errorf("verified delivery requires session storage")
 	}
-
-	// Load the manifest to determine the delivery surface. An unregistered tmux
-	// session has no trustworthy harness identity, so it cannot be sent input.
-	sessionsDir := ""
-	if cfg != nil {
-		sessionsDir = cfg.SessionsDir
-	}
-	m, err := resolveDirectDeliveryManifest(recipientSession, sessionsDir, adapter)
+	policy := currentCLIInputDeliveryPolicy()
+	result, err := sendViaSharedOperationsWithFactory(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, policy.Force, policy.Autonomous, adapter, tmuxClient, newAPIAgent)
 	if err != nil {
 		return err
 	}
 
-	// Determine delivery method based on harness type
-	harnessType := m.Harness
-	if harnessType == "" {
-		harnessType = "claude-code" // Default to Claude Code for backward compatibility
-	}
-
-	// Check if this is an API-based harness (OpenAI, etc.)
-	if isAPIBasedAgent(harnessType) {
-		return sendToAPIAgentIfReady(ctx, m, senderName, messageID, formattedMessage, promptFile, adapter, newAPIAgent)
-	}
-
-	// CLI-based harnesses share one atomic readiness-and-delivery operation.
-	sharedRecipient := m.Name
-	if sharedRecipient == "" {
-		sharedRecipient = recipientSession
-	}
-	policy := currentCLIInputDeliveryPolicy()
-	if err := sendViaSharedOperations(ctx, sharedRecipient, senderName, messageID, formattedMessage, promptFile, policy.Force, policy.Autonomous, adapter, tmuxClient); err != nil {
-		return err
-	}
-	if harnessType == "agy" && (m.Agy == nil || m.Agy.ConversationID == "") {
+	// AGY metadata association is caller-specific post-delivery work. Reload by
+	// the stable ID returned by the operation; this lookup does not participate
+	// in transport selection or readiness.
+	m, loadErr := adapter.GetSession(result.SessionID)
+	if loadErr == nil && m != nil && agent.NormalizeHarnessName(m.Harness) == "agy" && (m.Agy == nil || m.Agy.ConversationID == "") {
 		agyTmuxName := m.Tmux.SessionName
 		if agyTmuxName == "" {
-			agyTmuxName = sharedRecipient
+			agyTmuxName = result.Recipient
 		}
 		if err := waitForAgyMetadataBackfill(ctx, agyTmuxName, tmux.WaitForAgyPromptAfterInput); err != nil {
 			return err
@@ -770,54 +697,8 @@ func sendDirectlyWithDependencies(ctx context.Context, recipientSession, senderN
 	return nil
 }
 
-func resolveDirectDeliveryManifest(recipientSession, sessionsDir string, adapter *dolt.Adapter) (*manifest.Manifest, error) {
-	m, _, err := session.ResolveIdentifier(recipientSession, sessionsDir, adapter)
-	if err != nil {
-		return nil, fmt.Errorf("resolve %q for verified delivery: %w", recipientSession, err)
-	}
-	if m.Lifecycle != manifest.LifecycleArchived {
-		return m, nil
-	}
-	archivedName := m.Name
-	if archivedName == "" {
-		archivedName = recipientSession
-	}
-	return nil, ops.ErrSessionArchived(archivedName)
-}
-
 func newAPIHarnessAdapter(ctx context.Context, m *manifest.Manifest) (agent.Agent, error) {
 	return ops.NewAPISessionAgent(ctx, m)
-}
-
-func sendToAPIAgentIfReady(ctx context.Context, m *manifest.Manifest, senderName, messageID, formattedMessage, promptFile string, storage dolt.Storage, newAPIAgent apiAgentFactory) error {
-	message := agent.Message{
-		ID:        messageID,
-		Role:      agent.RoleUser,
-		Content:   formattedMessage,
-		Timestamp: time.Now(),
-		Metadata: map[string]any{
-			"sender":    senderName,
-			"source":    "agm_send",
-			"file_path": promptFile,
-		},
-	}
-	current, err := ops.DeliverAPISessionMessage(ctx, storage, m, message, newAPIAgent)
-	if err != nil {
-		return err
-	}
-
-	// Preserve the hook-visible audit artifact only after successful API
-	// delivery. A failed adapter call must not leave an alternate delivery path.
-	if err := messages.WritePendingFile(current.Name, messageID, formattedMessage); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to write pending file: %v\n", err)
-	}
-
-	successMsg := fmt.Sprintf("✓ Sent to '%s' from '%s' (%d chars) [ID: %s] [via: %s API]", current.Name, senderName, len(formattedMessage), messageID, current.Harness)
-	if promptFile != "" {
-		successMsg += fmt.Sprintf(" [file: %s]", promptFile)
-	}
-	ui.PrintSuccess(successMsg)
-	return nil
 }
 
 func waitForAgyMetadataBackfill(ctx context.Context, sessionName string, wait func(context.Context, string, time.Duration) error) error {
@@ -834,20 +715,23 @@ func waitForAgyMetadataBackfill(ctx context.Context, sessionName string, wait fu
 // supplied tmux capability must atomically prove harness ownership and send to
 // the exact verified pane; weaker transports fail closed inside shared ops.
 func sendViaSharedOperations(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, force, autonomous bool, storage dolt.Storage, tmuxClient session.TmuxInterface) error {
+	_, err := sendViaSharedOperationsWithFactory(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, force, autonomous, storage, tmuxClient, newAPIHarnessAdapter)
+	return err
+}
+
+func sendViaSharedOperationsWithFactory(ctx context.Context, recipientSession, senderName, messageID, formattedMessage, promptFile string, force, autonomous bool, storage dolt.Storage, tmuxClient session.TmuxInterface, newAPIAgent apiAgentFactory) (*ops.SendMessageResult, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
 	if storage == nil {
-		return fmt.Errorf("verified CLI delivery requires session storage")
-	}
-	if tmuxClient == nil {
-		return fmt.Errorf("verified CLI delivery requires tmux")
+		return nil, fmt.Errorf("verified CLI delivery requires session storage")
 	}
 
 	result, err := ops.SendMessage(&ops.OpContext{
-		Context: ctx,
-		Storage: storage,
-		Tmux:    tmuxClient,
+		Context:         ctx,
+		Storage:         storage,
+		Tmux:            tmuxClient,
+		APIAgentFactory: newAPIAgent,
 	}, &ops.SendMessageRequest{
 		Recipient:  recipientSession,
 		Message:    formattedMessage,
@@ -855,27 +739,30 @@ func sendViaSharedOperations(ctx context.Context, recipientSession, senderName, 
 		Autonomous: autonomous,
 	})
 	if err != nil {
-		return fmt.Errorf("shared CLI send: %w", err)
+		return result, fmt.Errorf("shared CLI send: %w", err)
 	}
 	if result == nil || !result.Delivered {
-		return fmt.Errorf("shared CLI send did not deliver to %q", recipientSession)
+		return result, fmt.Errorf("shared CLI send did not deliver to %q", recipientSession)
 	}
 
 	// Preserve the existing hook-visible audit artifact only after verified
 	// delivery. A failed readiness check must not create an alternate path that
 	// can inject the message later.
-	if err := messages.WritePendingFile(recipientSession, messageID, formattedMessage); err != nil {
+	if err := messages.WritePendingFile(result.Recipient, messageID, formattedMessage); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to write pending file: %v\n", err)
 	}
 
-	// Print success message with message ID
-	successMsg := fmt.Sprintf("✓ Sent to '%s' from '%s' (%d chars) [ID: %s] [via: tmux]", recipientSession, senderName, len(formattedMessage), messageID)
+	via := "tmux"
+	if current, getErr := storage.GetSession(result.SessionID); getErr == nil && current != nil && isAPIBasedAgent(current.Harness) {
+		via = current.Harness + " API"
+	}
+	successMsg := fmt.Sprintf("✓ Sent to '%s' from '%s' (%d chars) [ID: %s] [via: %s]", result.Recipient, senderName, len(formattedMessage), messageID, via)
 	if promptFile != "" {
 		successMsg += fmt.Sprintf(" [file: %s]", promptFile)
 	}
 	ui.PrintSuccess(successMsg)
 
-	return nil
+	return result, nil
 }
 
 // isAPIBasedAgent returns true if the harness type uses API-based communication
@@ -1174,68 +1061,83 @@ func recordDelegation(sender, recipient, messageID, message string) {
 	fmt.Fprintf(os.Stderr, "   Resolve with: agm delegation resolve %s %s\n", sender, messageID)
 }
 
-// dismissOverlayAndDeliver dismisses a UI overlay (e.g., Background Tasks view)
-// by sending Left arrow key, waiting for the overlay to close, re-checking
-// delivery readiness, and then delivering the message.
-//
-// Recovery sequence:
-//  1. Send Left arrow key to dismiss the overlay
-//  2. Wait 200ms for the overlay to close
-//  3. Re-check delivery readiness (pane content)
-//  4. If ready, deliver the message directly
-//  5. If still blocked, queue for later delivery
-func dismissOverlayAndDeliver(ctx context.Context, tmuxName, recipientSession, senderName, messageID, formattedMessage, promptFile string, adapter *dolt.Adapter) error {
+// dismissOverlayAndDeliver preserves CLI-owned overlay recovery while every
+// readiness retry re-enters the shared direct-delivery transaction.
+func dismissOverlayAndDeliver(tmuxName, recipientSession string, directDelivery func() error, queueDelivery func(string) error) error {
 	if paneContent, err := tmux.CapturePaneOutput(tmuxName, 30); err == nil {
 		if dismissed, dismissErr := tmux.DismissAgySurveyIfPresent(tmuxName, paneContent); dismissErr != nil {
 			return dismissErr
 		} else if dismissed {
 			time.Sleep(200 * time.Millisecond)
-			if session.CheckSessionDelivery(tmuxName) == state.CanReceiveYes {
+			deliveryErr := directDelivery()
+			if deliveryErr == nil {
 				fmt.Fprintf(os.Stderr, "✓ AGY feedback survey skipped on '%s' — delivering message\n", recipientSession)
-				return sendDirectly(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, adapter)
+				return nil
+			}
+			if readiness, ok := operationReadiness(deliveryErr); !ok || readiness != "OVERLAY" {
+				return queueAfterOverlay(deliveryErr, queueDelivery)
 			}
 		}
 	}
-	// Step 1: Send Left arrow to dismiss the overlay
-	if err := tmux.SendKeys(tmuxName, "Left"); err != nil {
-		return fmt.Errorf("failed to send Left key to dismiss overlay: %w", err)
+
+	return retryOverlayDelivery(
+		recipientSession,
+		func() error {
+			if err := tmux.SendKeys(tmuxName, "Left"); err != nil {
+				return fmt.Errorf("failed to send Left key to dismiss overlay: %w", err)
+			}
+			return nil
+		},
+		func() error {
+			if err := tmux.SendKeys(tmuxName, "Escape"); err != nil {
+				return fmt.Errorf("failed to send Escape key to dismiss overlay: %w", err)
+			}
+			return nil
+		},
+		func() { time.Sleep(200 * time.Millisecond) },
+		directDelivery,
+		queueDelivery,
+	)
+}
+
+func retryOverlayDelivery(recipientSession string, dismissLeft, dismissEscape func() error, pause func(), directDelivery func() error, queueDelivery func(string) error) error {
+	if err := dismissLeft(); err != nil {
+		return err
+	}
+	pause()
+
+	deliveryErr := directDelivery()
+	if deliveryErr == nil {
+		fmt.Fprintf(os.Stderr, "✓ Overlay dismissed on '%s' — delivering message\n", recipientSession)
+		return nil
+	}
+	if readiness, ok := operationReadiness(deliveryErr); !ok || readiness != "OVERLAY" {
+		return queueAfterOverlay(deliveryErr, queueDelivery)
 	}
 
-	// Step 2: Wait for overlay to close
-	time.Sleep(200 * time.Millisecond)
+	fmt.Fprintln(os.Stderr, "⚠ Overlay still active, trying Escape key...")
+	if err := dismissEscape(); err != nil {
+		return err
+	}
+	pause()
+	deliveryErr = directDelivery()
+	if deliveryErr == nil {
+		fmt.Fprintf(os.Stderr, "✓ Overlay dismissed with Escape on '%s' — delivering message\n", recipientSession)
+		return nil
+	}
+	return queueAfterOverlay(deliveryErr, queueDelivery)
+}
 
-	// Step 3: Re-check delivery readiness
-	canReceive := session.CheckSessionDelivery(tmuxName)
-
-	//nolint:exhaustive // intentional partial: handles the relevant subset
-	switch canReceive {
-	case state.CanReceiveYes:
-		// Overlay dismissed, prompt visible — deliver directly
-		fmt.Fprintf(os.Stderr, "✓ Overlay dismissed on '%s' — delivering message\n", recipientSession)
-		return sendDirectly(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, adapter)
-
-	case state.CanReceiveOverlay:
-		// Overlay still visible — try Escape as fallback
-		fmt.Fprintf(os.Stderr, "⚠ Overlay still active, trying Escape key...\n")
-		if err := tmux.SendKeys(tmuxName, "Escape"); err != nil {
-			return fmt.Errorf("failed to send Escape key to dismiss overlay: %w", err)
-		}
-		time.Sleep(200 * time.Millisecond)
-
-		// Final re-check
-		canReceive = session.CheckSessionDelivery(tmuxName)
-		if canReceive == state.CanReceiveYes {
-			fmt.Fprintf(os.Stderr, "✓ Overlay dismissed with Escape on '%s' — delivering message\n", recipientSession)
-			return sendDirectly(ctx, recipientSession, senderName, messageID, formattedMessage, promptFile, adapter)
-		}
-		// Give up — queue the message
-		fmt.Fprintf(os.Stderr, "⚠ Could not dismiss overlay on '%s' (state: %s) — queueing message\n", recipientSession, canReceive)
-		return queueMessage(ctx, recipientSession, senderName, messageID, formattedMessage, "BACKGROUND_TASKS")
-
+func queueAfterOverlay(err error, queueDelivery func(string) error) error {
+	readiness, ok := operationReadiness(err)
+	if !ok {
+		return err
+	}
+	switch readiness {
+	case "OVERLAY", "QUEUE", "QUEUED_AGM", "PERMISSION", "ONBOARDING", "NO", "UNKNOWN":
+		return queueDelivery(readiness)
 	default:
-		// Overlay dismissed but session is in unexpected state — queue for safety
-		fmt.Fprintf(os.Stderr, "⚠ Overlay dismissed but session '%s' is %s — queueing message\n", recipientSession, canReceive)
-		return queueMessage(ctx, recipientSession, senderName, messageID, formattedMessage, string(canReceive))
+		return err
 	}
 }
 
