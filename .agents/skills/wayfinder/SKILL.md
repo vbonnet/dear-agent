@@ -1,6 +1,6 @@
 ---
 name: wayfinder
-description: Use when AGY needs the Wayfinder lifecycle through the repository fallback skill surface.
+description: Use when an AGENTS-compatible harness needs the Wayfinder lifecycle through the repository skill surface.
 ---
 
 # Wayfinder

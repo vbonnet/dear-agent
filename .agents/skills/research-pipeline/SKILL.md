@@ -8,7 +8,8 @@ description: >
 
 # Research Pipeline
 
-This regular-file entrypoint supplies AGY's repository fallback discovery.
+This regular-file entrypoint supplies the shared AGENTS-compatible repository
+discovery used by Codex and AGY.
 
 ## Workflow
 

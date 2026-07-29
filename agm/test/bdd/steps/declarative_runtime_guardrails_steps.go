@@ -20,7 +20,6 @@ const declarativeRuntimeFeaturePath = "agm/test/bdd/features/declarative_runtime
 var declarativeRuntimeDirs = []string{
 	".agents/skills/beads/agents",
 	".agents/skills/research-pipeline/agents",
-	".codex/skills/research-pipeline",
 	".github",
 	".github/act",
 	".github/rulesets",
@@ -51,7 +50,6 @@ var declarativeRuntimeDirs = []string{
 
 var declarativeRuntimeAssets = map[string][]string{
 	".agents/skills/research-pipeline/agents":    {"openai.yaml"},
-	".codex/skills/research-pipeline":            {"SKILL.md"},
 	".opencode/skills/research-pipeline":         {"SKILL.md"},
 	"research-pipeline/.claude-plugin":           {"plugin.json"},
 	"research-pipeline/skills/research-pipeline": {"SKILL.md", "evals.json"},

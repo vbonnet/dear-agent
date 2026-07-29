@@ -45,7 +45,7 @@
     {
       "name": "codex-cli",
       "mode": "native-codex-skill",
-      "catalog": ".codex/skills"
+      "catalog": ".agents/skills"
     },
     {
       "name": "agy",

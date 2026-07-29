@@ -10,9 +10,9 @@
 
 Wayfinder parity means every active AGM harness can discover and operate the
 same SDLC workflow surfaces. Claude Code consumes native plugin commands and
-skills. Codex CLI and OpenCode consume regular native skill entrypoints under
-their repository skill directories. AGY uses the neutral marketplace plus
-AGENTS.md fallback guidance, while Pi uses its configured native skill path.
+skills. Codex CLI and AGY consume the single regular-file entrypoint under
+`.agents/skills`; OpenCode consumes its native repository skill directory,
+while Pi uses its configured native skill path.
 All harnesses retain the `wayfinder-session` CLI, and MCP tools expose
 Wayfinder session status without requiring the caller to be Claude Code.
 
@@ -36,7 +36,7 @@ Wayfinder session status without requiring the caller to be Claude Code.
 
 **WFP-09** When Pi loads repository skills, the system shall discover the living Wayfinder skill tree through `.pi/settings.json` and retain the harness-neutral `wayfinder-session` and MCP status paths.
 
-**WFP-10** When Codex CLI or OpenCode loads repository skills, the system shall publish and validate its harness-native regular-file Wayfinder entrypoint.
+**WFP-10** When Codex CLI, AGY, or OpenCode loads repository skills, the system shall publish and validate its regular-file Wayfinder entrypoint without duplicating Codex-visible skill trees.
 
 ## BDD Traceability
 

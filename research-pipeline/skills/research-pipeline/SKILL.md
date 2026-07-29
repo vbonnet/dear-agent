@@ -29,8 +29,8 @@ navigable.
  │ routed    │   │ web research  │   │ adversarial fact-   │   │ re-verify plan,     │   │ dark-    │
  │ ingest    │   │ (fan out,     │   │ check + codebase-   │   │ split into sized    │   │ factory  │
  │           │   │  cite, verify)│   │ grounded plan       │   │ beads, file through │   │ via      │
- │           │   │               │   │                     │   │ the repository's    │   │ safe-pr  │
- │           │   │               │   │                     │   │ canonical Beads CLI │   │          │
+ │           │   │               │   │                     │   │ the repository's    │   │ repo     │
+ │           │   │               │   │                     │   │ canonical Beads CLI │   │ gates    │
  └───────────┘   └───────────────┘   └──────────┬──────────┘   └──────────┬─────────┘   └──────────┘
                                                   │                        │
                                                   ├──▶ loop back to fix ◀──┤  (repeat until reviewer
@@ -51,7 +51,8 @@ navigable.
    it re-checks hard claims and writes a codebase-grounded application plan.
 4. **Decompose** — a third independent model reviews the plan and splits it
    into sized beads with testable acceptance criteria.
-5. **Execute** — beads move through normal `safe-pr`/`safe-merge` execution.
+5. **Execute** — beads move through the target repository's documented
+   delivery interface (`safe-*` only where provided).
 
 ## Not every task needs all five stages
 
@@ -61,7 +62,7 @@ navigable.
 | Raw source already saved, need it understood          | Stage 2 (research)                     |
 | A research doc you're not sure is trustworthy         | Stage 3 (independent verify + plan)    |
 | A verified plan, need it actionable                   | Stage 4 (decompose into beads)         |
-| Sized beads with a DoD, ready to build                | Stage 5 (Codex / safe-pr execution)    |
+| Sized beads with a DoD, ready to build                | Stage 5 (Codex / repository gates)     |
 | Just "what does this video say"                       | Stop after Stage 1-2 — don't chain     |
 
 Chain forward only as far as the concrete downstream goal requires. A
@@ -199,11 +200,14 @@ no beads at all.
 
 ## Stage 5 — Execution (Codex, dark-factory)
 
-Codex agents pick up beads and execute through the normal `safe-pr` /
-`safe-merge` gates — no shortcuts because the bead came from this pipeline.
-Before dispatching the first bead, satisfy every target-repository prerequisite
-for those gates, including establishing the required in-progress Wayfinder
-session when `safe-pr` mandates one.
+Codex agents pick up beads and execute through the target repository's
+documented delivery interface—without shortcuts because the bead came from
+this pipeline. Use `safe-pr` / `safe-merge` only when that repository actually
+provides and requires those wrappers; otherwise use its documented equivalent
+commit, push, review, and merge-readiness gates. Before dispatching the first
+bead, satisfy every target-repository prerequisite for that interface,
+including establishing an in-progress Wayfinder session when its delivery
+policy mandates one.
 The plan's own proposed gates (if the initiative is about enforcement, e.g.
 an eval or lint gate) should apply to the PRs this stage produces, not just
 to future work — dogfood the thing you just designed.
