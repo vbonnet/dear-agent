@@ -795,7 +795,7 @@ func TestAPIDeliveryRejectsReapingLifecycleInsideStableSessionLock(t *testing.T)
 	}
 }
 
-func TestNewAPIHarnessAdapterReportsPureAPISessionReadyWithoutTmux(t *testing.T) {
+func TestNewAPISessionDeliveryAdapterReportsPureAPISessionReadyWithoutTmux(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("OPENAI_API_KEY", "test-api-key")
 
