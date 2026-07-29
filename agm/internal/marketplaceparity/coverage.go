@@ -232,6 +232,9 @@ func requireNativeSkillEntrypoint(entrypoint, pluginName, skillName string) (str
 
 func loadExportedSkills(root string, plugin PluginEntry) ([]exportedSkill, error) {
 	source := filepath.Join(root, filepath.FromSlash(plugin.Source))
+	if _, err := resolvedPathWithin(root, source); err != nil {
+		return nil, fmt.Errorf("plugin %q source %q: %w", plugin.Name, plugin.Source, err)
+	}
 	manifest, err := loadClaudePluginManifest(source, plugin.Name)
 	if err != nil {
 		return nil, err

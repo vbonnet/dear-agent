@@ -87,6 +87,8 @@ work until you also install:
   github.com/vbonnet/dear-agent/agm/cmd/agm@latest`) and `tmux`.
 - **`youtube` plugin** — `yt-dlp` (`brew install yt-dlp` /
   `pipx install yt-dlp`).
+- **`research-pipeline` plugin** — the Beads `bd` CLI on `PATH`; Stage 4 uses
+  it to validate and file the approved decomposition.
 
 ## See also
 

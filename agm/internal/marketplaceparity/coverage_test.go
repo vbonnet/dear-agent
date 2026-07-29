@@ -267,6 +267,71 @@ func TestNativeSkillEntrypointRejectsCatalogRootOutsideRepository(t *testing.T) 
 	}
 }
 
+func TestLoadExportedSkillsRejectsPluginSourceOutsideRepository(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		source func(t *testing.T, root, outside string) string
+	}{
+		{
+			name: "dot-dot",
+			source: func(t *testing.T, root, outside string) string {
+				t.Helper()
+				relative, err := filepath.Rel(root, outside)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return filepath.ToSlash(relative)
+			},
+		},
+		{
+			name: "intermediate-symlink",
+			source: func(t *testing.T, root, outside string) string {
+				t.Helper()
+				if err := os.Symlink(outside, filepath.Join(root, "external-plugin")); err != nil {
+					t.Fatal(err)
+				}
+				return "./external-plugin"
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			outside := t.TempDir()
+			manifestDir := filepath.Join(outside, ".claude-plugin")
+			skillDir := filepath.Join(outside, "skills", "example")
+			if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(skillDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(
+				filepath.Join(manifestDir, "plugin.json"),
+				[]byte(`{"name":"example","skills":["./skills/"]}`),
+				0o644,
+			); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(
+				filepath.Join(skillDir, "SKILL.md"),
+				[]byte("---\nname: example\ndescription: Use for an escaping source test.\n---\n# Example\n"),
+				0o644,
+			); err != nil {
+				t.Fatal(err)
+			}
+			plugin := PluginEntry{
+				Name:         "example",
+				Source:       test.source(t, root, outside),
+				Capabilities: []string{"skills"},
+			}
+			if _, err := loadExportedSkills(root, plugin); err == nil ||
+				!strings.Contains(err.Error(), "escapes") {
+				t.Fatalf("loadExportedSkills() error = %v, want escaping source rejection", err)
+			}
+		})
+	}
+}
+
 func TestPiConfiguredSkillRootRejectsSymlinkOutsideRepository(t *testing.T) {
 	root := t.TempDir()
 	settingsDir := filepath.Join(root, ".pi")
