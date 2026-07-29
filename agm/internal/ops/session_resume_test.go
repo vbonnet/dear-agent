@@ -424,6 +424,63 @@ func TestPrepareResumeLaunchDefaultsModelLessCodexSession(t *testing.T) {
 	}
 }
 
+func TestPrepareResumeLaunchRestoresSandboxCodexPolicy(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	extraAddDir := filepath.Join(t.TempDir(), "real worktree")
+	m := &manifest.Manifest{
+		SessionID: "sandbox-codex-session",
+		Harness:   "codex-cli",
+		Codex:     &manifest.Codex{SessionID: "native-codex-session"},
+		Sandbox: &manifest.SandboxConfig{
+			Enabled:      true,
+			ExtraAddDirs: []string{extraAddDir},
+		},
+	}
+	launch, _, _, err := prepareResumeLaunch(
+		nil,
+		m,
+		"codex-cli",
+		ResumeSessionHealth{
+			TmuxSessionName: "sandbox-codex",
+			WorktreePath:    t.TempDir(),
+		},
+	)
+	if err != nil {
+		t.Fatalf("prepareResumeLaunch() error: %v", err)
+	}
+	want := "--add-dir " + launchparity.ShellQuote(extraAddDir)
+	if !strings.Contains(launch.Command, want) {
+		t.Fatalf("prepareResumeLaunch() command = %q, want %q", launch.Command, want)
+	}
+}
+
+func TestPrepareResumeLaunchDoesNotRestoreCodexPolicyWithoutEnabledSandbox(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	m := &manifest.Manifest{
+		SessionID: "unsandboxed-codex-session",
+		Harness:   "codex-cli",
+		Codex:     &manifest.Codex{SessionID: "native-codex-session"},
+		Sandbox: &manifest.SandboxConfig{
+			ExtraAddDirs: []string{"/tmp/untrusted"},
+		},
+	}
+	launch, _, _, err := prepareResumeLaunch(
+		nil,
+		m,
+		"codex-cli",
+		ResumeSessionHealth{
+			TmuxSessionName: "unsandboxed-codex",
+			WorktreePath:    t.TempDir(),
+		},
+	)
+	if err != nil {
+		t.Fatalf("prepareResumeLaunch() error: %v", err)
+	}
+	if strings.Contains(launch.Command, "--add-dir") {
+		t.Fatalf("prepareResumeLaunch() command = %q, unexpectedly contains --add-dir", launch.Command)
+	}
+}
+
 func TestPrepareResumeLaunchAuthorizesAgyWorktree(t *testing.T) {
 	worktreePath := filepath.Join(t.TempDir(), "agy worktree")
 	m := &manifest.Manifest{

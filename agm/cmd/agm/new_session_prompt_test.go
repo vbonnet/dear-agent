@@ -4,12 +4,45 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/vbonnet/dear-agent/agm/internal/config"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
+
+func TestCollectExtraAddDirsScopesWritableDirsToCodex(t *testing.T) {
+	originalCfg := cfg
+	originalHarness := harnessName
+	t.Cleanup(func() {
+		cfg = originalCfg
+		harnessName = originalHarness
+	})
+	cfg = &config.Config{Sandbox: config.SandboxConfig{
+		Repos:        []string{"/source"},
+		WritableDirs: []string{"/worktrees", "/beads"},
+	}}
+
+	for _, test := range []struct {
+		harness string
+		want    []string
+	}{
+		{harness: "codex-cli", want: []string{"/source", "/worktrees", "/beads"}},
+		{harness: "claude-code", want: []string{"/source"}},
+		{harness: "agy", want: []string{"/source"}},
+	} {
+		t.Run(test.harness, func(t *testing.T) {
+			harnessName = test.harness
+			got, _ := collectExtraAddDirs(&manifest.SandboxConfig{Enabled: true})
+			if !slices.Equal(got, test.want) {
+				t.Fatalf("collectExtraAddDirs() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
 
 func TestResolveCreateLifecyclePromptLoadsAgyPromptFileBeforeMutation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "prompt.txt")

@@ -239,8 +239,20 @@ func TestContainsCodexTrustPromptPattern(t *testing.T) {
 			expected: true,
 		},
 		{
+			name:     "active trust selector numbered choice is not a composer",
+			content:  "Do you trust the contents of this directory?\n› 1. Yes, continue\n  2. No, quit",
+			expected: true,
+		},
+		{
 			name:     "ready composer is not a trust prompt",
 			content:  "│ >_ OpenAI Codex (v0.141.0)            │",
+			expected: false,
+		},
+		{
+			name: "stale trust prompt above current composer",
+			content: "Do you trust the contents of this directory?\n" +
+				"› 1. Yes, continue\n  2. No, quit\n\nPress enter to continue\n" +
+				"OpenAI Codex (v0.141.0)\n/model to change\n›",
 			expected: false,
 		},
 		{
@@ -278,6 +290,12 @@ func TestContainsCodexModelUpgradePromptPattern(t *testing.T) {
 		{
 			name:     "ready composer is not a model upgrade prompt",
 			content:  "│ >_ OpenAI Codex (v0.141.0)            │",
+			expected: false,
+		},
+		{
+			name: "stale model selector above current composer",
+			content: "Choose how you'd like Codex to proceed.\n\n› 1. Try new model\n  2. Use existing model\n" +
+				"OpenAI Codex (v0.141.0)\n/model to change\n›",
 			expected: false,
 		},
 		{
