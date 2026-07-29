@@ -12,9 +12,10 @@
 routing, concrete harness adapters, and the finite discovery catalog.
 Consumers define narrow capability interfaces for the behavior they invoke;
 there is no universal harness lifecycle facade. Cross-surface create, kill,
-archive, and message-delivery ordering belongs to
-`agm/internal/ops`; the root CLI retains the focused transactional resume
-workflow. The agent package also owns the model alias registry used by CLI
+archive, resume, and message-delivery ordering belongs to
+`agm/internal/ops`; the root CLI retains only interactive resume attachment
+after the shared operation returns and releases the stable-session lock.
+The agent package also owns the model alias registry used by CLI
 creation flows, OpenCode model selection, and cross-harness tier aliases.
 
 Claude Code is the reference implementation. Codex CLI, AGY, OpenCode, and Pi are
