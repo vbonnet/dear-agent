@@ -259,11 +259,19 @@ type activeSessionStore interface {
 }
 
 var (
-	activeSessionStoreConfigs = dolt.ConfiguredWorkspaceConfigs
+	activeSessionStoreConfigs = configuredActiveSessionStoreConfigs
 	openActiveSessionStore    = func(config *dolt.Config) (activeSessionStore, error) {
 		return dolt.New(config)
 	}
 )
+
+func configuredActiveSessionStoreConfigs() ([]*dolt.Config, error) {
+	path, err := getWorkspaceConfigPath()
+	if err != nil {
+		return nil, fmt.Errorf("resolve AGM workspace config path: %w", err)
+	}
+	return dolt.ConfiguredWorkspaceConfigsAt(path)
+}
 
 // getActiveSessionsFromDolt returns the authoritative active-session set.
 // Callers that perform destructive maintenance must use this rather than a

@@ -157,6 +157,49 @@ workspaces:
 	}
 }
 
+func TestConfiguredWorkspaceConfigsAtUsesCustomRegistry(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	t.Cleanup(func() {
+		lookupEnv = originalLookupEnv
+	})
+
+	configPath := t.TempDir() + "/custom-workspaces.yaml"
+	if err := os.WriteFile(configPath, []byte(`version: 1
+default_workspace: custom
+workspaces:
+  - name: custom
+    enabled: true
+  - name: api-only
+    enabled: true
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lookupEnv = func(key string) (string, bool) {
+		switch key {
+		case "ENGRAM_TEST_MODE":
+			return "1", true
+		case "ENGRAM_TEST_WORKSPACE":
+			return "custom", true
+		default:
+			return "", false
+		}
+	}
+
+	configs, err := ConfiguredWorkspaceConfigsAt(configPath)
+	if err != nil {
+		t.Fatalf("ConfiguredWorkspaceConfigsAt: %v", err)
+	}
+	got := make(map[string]bool, len(configs))
+	for _, config := range configs {
+		got[config.Workspace] = true
+	}
+	for _, workspace := range []string{"custom", "api-only"} {
+		if !got[workspace] {
+			t.Errorf("custom registry omitted %q: %#v", workspace, got)
+		}
+	}
+}
+
 func TestConfiguredWorkspaceConfigsRejectsExplicitDatabaseAcrossWorkspaces(t *testing.T) {
 	originalLookupEnv := lookupEnv
 	originalAgmConfigPath := agmConfigPath

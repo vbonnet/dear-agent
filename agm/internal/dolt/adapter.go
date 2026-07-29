@@ -197,7 +197,10 @@ var agmConfigPath = "~/.agm/config.yaml"
 // readDefaultWorkspaceFromConfig reads default_workspace from the AGM config file.
 // Returns empty string on any error (file missing, malformed YAML, etc.).
 func readDefaultWorkspaceFromConfig() string {
-	path := agmConfigPath
+	return readDefaultWorkspaceFromConfigAt(agmConfigPath)
+}
+
+func readDefaultWorkspaceFromConfigAt(path string) string {
 	if strings.HasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -220,6 +223,10 @@ func readDefaultWorkspaceFromConfig() string {
 
 // DefaultConfig returns default configuration from environment
 func DefaultConfig() (*Config, error) {
+	return defaultConfigAt(agmConfigPath)
+}
+
+func defaultConfigAt(workspaceConfigPath string) (*Config, error) {
 	workspace := getEnv("WORKSPACE", "")
 	if testModeEnabled(getEnv("ENGRAM_TEST_MODE", "")) {
 		if testWorkspace := getEnv("ENGRAM_TEST_WORKSPACE", ""); testWorkspace != "" {
@@ -230,7 +237,7 @@ func DefaultConfig() (*Config, error) {
 		// Fall back to default_workspace from ~/.agm/config.yaml so the MCP
 		// server works when invoked outside a workspace context (e.g. Dispatch
 		// or Cowork where WORKSPACE is not set in the environment).
-		workspace = readDefaultWorkspaceFromConfig()
+		workspace = readDefaultWorkspaceFromConfigAt(workspaceConfigPath)
 	}
 	database := getEnv("DOLT_DATABASE", workspace)
 	if workspace == "" {
@@ -283,12 +290,19 @@ func DefaultConfig() (*Config, error) {
 // workspace configs would silently invent a cross-workspace mapping. Without
 // that override, each workspace uses its conventional same-name database.
 func ConfiguredWorkspaceConfigs() ([]*Config, error) {
-	base, err := DefaultConfig()
+	return ConfiguredWorkspaceConfigsAt(agmConfigPath)
+}
+
+// ConfiguredWorkspaceConfigsAt is the explicit-path variant used by AGM
+// commands after loading their configured workspace registry. Destructive
+// inventory must query the same registry that session creation uses.
+func ConfiguredWorkspaceConfigsAt(workspaceConfigPath string) ([]*Config, error) {
+	base, err := defaultConfigAt(workspaceConfigPath)
 	if err != nil {
 		return nil, err
 	}
 
-	path := expandTilde(agmConfigPath)
+	path := expandTilde(workspaceConfigPath)
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return []*Config{base}, nil
