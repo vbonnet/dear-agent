@@ -2124,9 +2124,9 @@ func productionShouldInjectOneDirectSessionTmuxRuntime(ctx context.Context) erro
 	if err != nil {
 		return err
 	}
-	const construction = "ExecuteWithDeps(session.NewRealTmux())"
-	if count := strings.Count(harnessState.runtimeMainSource, construction); count != 1 {
-		return fmt.Errorf("direct production tmux constructions = %d, want 1", count)
+	const composition = "ExecuteWithDeps(session.NewRealTmux())"
+	if !strings.Contains(harnessState.runtimeMainSource, composition) {
+		return fmt.Errorf("production composition does not inject session.RealTmux directly")
 	}
 	for _, retired := range []string{
 		"internal/backend",

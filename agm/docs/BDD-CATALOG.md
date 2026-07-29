@@ -405,7 +405,8 @@ creation, and terminal state detection.
   sessions created by a failed operation, and use exact AGY process and native
   transcript truth for status and history.
 - AGM runtime helper commands keep co-located SPEC coverage.
-- AGM backend implementations keep co-located SPEC coverage.
+- AGM has one direct `session.RealTmux` local-runtime adapter type with no
+  parallel manager or backend runtime.
 - AGM cleanup and process support packages keep co-located SPEC coverage.
 - Supported model families include Anthropic, OpenAI, Gemini, GLM, DeepSeek,
   Nemotron, and Qwen.
