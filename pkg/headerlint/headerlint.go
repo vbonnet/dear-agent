@@ -164,6 +164,8 @@ func checkData(path string, data []byte) []Violation {
 	var fenceByte byte
 	fenceLength := 0
 	var fenceContainer fenceContainerContext
+	var listContinuation fenceContainerContext
+	var inlineCode inlineCodeSpanState
 	for i, line := range lines {
 		lineNo := i + 1
 		if fenceByte != 0 {
@@ -182,20 +184,36 @@ func checkData(path string, data []byte) []Violation {
 			fenceLength = 0
 			fenceContainer = fenceContainerContext{}
 		}
+		lineContainer := parseFenceContainerContext(line)
+		switch {
+		case lineContainer.hasList:
+			listContinuation = lineContainer
+		case strings.TrimSpace(line) == "":
+			// Blank lines do not end a list container.
+		case listContinuation.hasList:
+			if _, ok := listContinuation.contentStart(line); !ok {
+				listContinuation = fenceContainerContext{}
+			}
+		}
 		marker, length, _, isFence := fenceDelimiter(line)
 		if isFence {
 			fenceByte = marker
 			fenceLength = length
 			fenceContainer = parseFenceContainerContext(line)
+			if !fenceContainer.hasList && listContinuation.hasList {
+				if _, ok := listContinuation.contentStart(line); ok {
+					fenceContainer = listContinuation
+				}
+			}
 			continue
 		}
-		if headingH2Plus.MatchString(line) {
+		scannable := stripInlineCodeSpans(line, &inlineCode)
+		if headingH2Plus.MatchString(scannable) {
 			break
 		}
 		if lineNo > headerZoneMaxLines {
 			break
 		}
-		scannable := stripInlineCodeSpans(line)
 		if matches := boldField.FindAllString(scannable, -1); len(matches) >= 2 {
 			violations = append(violations, Violation{Path: path, Line: lineNo, Text: strings.TrimSpace(line)})
 		}
@@ -348,9 +366,29 @@ func consumeQuotePrefix(line string, depth int) (int, bool) {
 	return offset, true
 }
 
-func stripInlineCodeSpans(line string) string {
+type inlineCodeSpanState struct {
+	delimiterLength int
+}
+
+func stripInlineCodeSpans(line string, state *inlineCodeSpanState) string {
 	masked := []byte(line)
-	for opener := 0; opener < len(line); {
+	cursor := 0
+	if state.delimiterLength > 0 {
+		closer := matchingBacktickRun(line, 0, state.delimiterLength)
+		if closer < 0 {
+			for index := range masked {
+				masked[index] = ' '
+			}
+			return string(masked)
+		}
+		spanEnd := closer + state.delimiterLength
+		for index := 0; index < spanEnd; index++ {
+			masked[index] = ' '
+		}
+		cursor = spanEnd
+		state.delimiterLength = 0
+	}
+	for opener := cursor; opener < len(line); {
 		if line[opener] != '`' || escapedAt(line, opener) {
 			opener++
 			continue
@@ -362,8 +400,11 @@ func stripInlineCodeSpans(line string) string {
 		runLength := runEnd - opener
 		closer := matchingBacktickRun(line, runEnd, runLength)
 		if closer < 0 {
-			opener = runEnd
-			continue
+			for index := opener; index < len(masked); index++ {
+				masked[index] = ' '
+			}
+			state.delimiterLength = runLength
+			break
 		}
 		spanEnd := closer + runLength
 		for index := opener; index < spanEnd; index++ {

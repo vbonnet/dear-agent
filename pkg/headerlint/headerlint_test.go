@@ -261,6 +261,24 @@ func TestCheckFile_UnclosedListFenceEndsAtSiblingItem(t *testing.T) {
 	}
 }
 
+func TestCheckFile_UnclosedContinuationListFenceEndsAtSiblingItem(t *testing.T) {
+	const content = "# Doc\n\n" +
+		"- Example:\n" +
+		"  ```markdown\n" +
+		"  quoted code\n" +
+		"- **Status:** draft · **Owner:** docs\n"
+
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "format.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 1 || violations[0].Line != 6 {
+		t.Fatalf("want violation on sibling list item at line 6, got %v", violations)
+	}
+}
+
 func TestCheckFile_DoesNotFlagFourSpaceListFenceContent(t *testing.T) {
 	const content = "# Doc\n\n" +
 		"- ```markdown\n" +
@@ -283,6 +301,24 @@ func TestCheckFile_DoesNotFlagBoldFieldsInsideInlineCode(t *testing.T) {
 	const content = "# Doc\n\n" +
 		"The old form is `**Status:** draft · **Owner:** docs`.\n" +
 		"A real **Status:** field beside that example is still only one field.\n" +
+		"\n## Body\n"
+
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "format.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("want 0 violations, got %d: %v", len(violations), violations)
+	}
+}
+
+func TestCheckFile_DoesNotFlagBoldFieldsInsideMultilineCodeSpan(t *testing.T) {
+	const content = "# Doc\n\n" +
+		"The old form is `example\n" +
+		"**Status:** draft · **Owner:** docs\n" +
+		"continues here` and is code.\n" +
 		"\n## Body\n"
 
 	dir := t.TempDir()
