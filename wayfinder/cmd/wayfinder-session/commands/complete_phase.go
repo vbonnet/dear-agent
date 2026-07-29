@@ -84,7 +84,7 @@ func runCompletePhase(cmd *cobra.Command, args []string) (retErr error) {
 		// canonical log already exists so a rejected completion is read-only.
 		currentHistory := filepath.Join(projectDir, history.HistoryFilename)
 		if _, statErr := os.Stat(currentHistory); statErr == nil {
-			failureData := map[string]interface{}{
+			failureData := map[string]any{
 				"error": err.Error(),
 			}
 			if logErr := hist.AppendEvent(history.EventTypeValidationFailed, phaseName, failureData); logErr != nil {
