@@ -2114,6 +2114,8 @@ func agmProductionLocalRuntimeSources(ctx context.Context) error {
 			if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 				return nil
 			}
+			// #nosec G122 -- path comes from a read-only walk rooted in the
+			// checked-out repository used as this BDD scenario's test fixture.
 			data, readErr := os.ReadFile(path)
 			if readErr != nil {
 				return readErr
