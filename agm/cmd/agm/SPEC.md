@@ -7,11 +7,11 @@
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`
 - Feature: `agm/test/bdd/features/harness_parity.feature`
 
-<!-- Last audited at: 2026-07-21 -->
+<!-- Last audited at: 2026-07-27 -->
 
 **Version:** 2.0
 **Status:** Production (Phase 6 Complete - Dolt-Only Architecture, YAML Backend Removed)
-**Last Updated:** 2026-07-21
+**Last Updated:** 2026-07-27
 
 ## Overview
 
@@ -99,7 +99,7 @@ Provide a production-ready CLI that:
 
 **CLI-34** When current-pane creation selects AGY, the system shall fail before harness launch or session registration and direct the user to create a detached session with a different name, because the provider-native conversation identity cannot be safely correlated until the foreground AGM command exits.
 
-**CLI-35** When AGM resumes a stopped `codex-cli` session, the system shall report success, update activity, deliver an optional prompt, or attach only after both the Codex process (including its Node wrapper) and interactive composer have been observed as ready, allowing up to 60 seconds for each readiness phase so a healthy cold startup is not rejected at the former advisory threshold.
+**CLI-35** When the CLI asks the shared resume operation to resume a stopped `codex-cli` session, it shall report success, render activity or prompt outcomes, or attach only after the operation has observed both the Codex process (including its Node wrapper) and interactive composer as ready, allowing up to 60 seconds for each readiness phase so a healthy cold startup is not rejected at the former advisory threshold.
 
 **CLI-36** If AGM creates a tmux session for a resume attempt and creation finalization, command dispatch, harness readiness, ordinary or caller-canceled prompt delivery, or canonical-name persistence fails, the system shall route every production resume entry, including last-session and bulk resume, through the stable session-ID operation lock before resume reads, serialize the resolved transaction through finalization, release that lock before interactive attachment, compensate only the creation-specific tmux identity created by that attempt, and return the primary failure together with any cleanup failure. The identity shall include the server-local session ID and a random per-creation token represented by a provisional creation name until stored on the session, so every partial command boundary is cleanable; when ID output is lost, the exact random provisional name shall remain cleanable, and a replacement after a server restart shall be preserved. After successful readiness, canonical-name persistence shall use an opaque cross-dialect ownership revision before optional Codex prompt submission; a prompt failure proven to occur before submission or while the paste remains positively parked shall restore only that exact provisional metadata revision and its prior activity timestamp before removing the created tmux identity. A successful restore compare-and-swap shall be sufficient proof for tmux cleanup and shall not depend on a fallible follow-up metadata read. If commit reports an error, storage shall re-read the exact revision and retain the pending ownership change unless the complete prior state proves the write did not commit. If the post-write metadata reload fails, the system shall retain the exact pending ownership revision through rollback unless an immediate compensation was proven successful. If a newer writer superseded metadata ownership or restoration otherwise cannot be proven, the system shall preserve the ready tmux session so canonical metadata never points at a resource the failed transaction destroyed. Every full-session writer shall advance the tmux identity revision, including after a lost compare-and-swap, so any number of older snapshots remain unable to restore a stale tmux name. Confirmed prompt delivery or a lost acknowledgement after the final Enter shall rotate away from the provisional revision, shall become an irreversible success boundary, and shall not be reported as a retryable failure because of later caller cancellation or attachment failure; the latter shall warn that work may have started and preserve the pane. A failed prompt delivery on a pre-existing session shall not suppress a later attachment failure. A same-named replacement tmux session or a tmux session that existed before the attempt shall not be removed.
 
@@ -126,6 +126,8 @@ Provide a production-ready CLI that:
 **CLI-47** When `agm worktree sweep` runs without `--execute` and the complete active-session lookup fails, the system shall classify and report normally and shall warn that `--execute` would refuse to run.
 
 **CLI-48** When destructive worktree maintenance scans repositories across the shared worktree base, the system shall aggregate active lifecycle records from every enabled configured workspace store and shall refuse execution if any configured store cannot be queried.
+
+**CLI-49** When any production CLI entry resumes a session, the CLI shall resolve human-facing identifiers and prompt-file input, invoke `internal/ops.ResumeSession` exactly once with the stable session ID, render only returned lifecycle facts, and perform optional interactive attachment only after the operation returns; it shall not own health, tmux creation, harness dispatch, readiness, rollback, canonical-name persistence, permission restoration, prompt submission, or activity ordering.
 
 ## Requirements
 
@@ -856,24 +858,29 @@ TECHNICAL IMPLEMENTATION:
 ### Resume Session Flow (agm resume [identifier])
 
 ```
-1. Resolve identifier:
+CLI adapter:
+1. Resolve the human identifier to one stable session ID:
    - Exact session name match
    - UUID prefix match
    - Tmux session name match
    - Fuzzy name match
    - Interactive picker (if no identifier)
-2. Read manifest
-3. Check lifecycle (error if archived)
-4. Validate agent availability (warn if unavailable)
-5. Check session health:
+2. Validate direct or file-backed prompt input.
+3. Call internal/ops.ResumeSession exactly once.
+
+Shared operation, under the stable session-ID lock:
+4. Reload the current session and reject archived state.
+5. Validate harness availability and classify health:
    - Worktree exists
-   - Agent directories present
-   - Tmux session state
-6. Create/attach tmux session
-7. Send cd command to worktree
-8. Send agent resume command (with UUID/conversation_id)
-9. Update manifest timestamp
-10. Attach to tmux session
+   - Tmux state is known
+6. Preserve an existing runtime or create one exact tmux identity.
+7. Build and submit the native resume command, then wait for native readiness.
+8. Persist canonical tmux ownership, restore saved mode, submit an optional
+   harness-aware prompt, and update activity.
+9. Return typed lifecycle and uncertainty facts; release the lock.
+
+CLI adapter:
+10. Render returned facts and optionally attach to the exact tmux result.
 ```
 
 ### Archive Session Flow (agm session archive [session-name])
@@ -1118,7 +1125,7 @@ agm 3.0.0 (/usr/local/bin/agm)
 ## References
 
 - [AGM Architecture](ARCHITECTURE.md)
-- [Agent Interface](../../internal/agent/interface.go)
+- [Harness metadata and consumer capabilities](../../internal/agent/interface.go)
 - [Manifest Schema](../../internal/manifest/manifest.go)
 - [Cobra CLI Framework](https://github.com/spf13/cobra)
 - [Huh TUI Library](https://github.com/charmbracelet/huh)

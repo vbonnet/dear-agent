@@ -69,23 +69,27 @@ func runCompletePhase(cmd *cobra.Command, args []string) (retErr error) {
 	// Get project directory
 	projectDir := GetProjectDirectory()
 
+	hist := history.New(projectDir)
+
 	st, err := status.ParseV2FromDir(projectDir)
 	if err != nil {
 		return fmt.Errorf("failed to read canonical status file: %w", err)
 	}
 
-	// Initialize history logger
-	hist := history.New(projectDir)
-
 	// Validate phase can be completed
 	v := validator.NewValidator(st)
 	if err := v.CanCompletePhase(phaseName, projectDir, hashMismatchReason); err != nil {
-		// Log validation failure
-		failureData := map[string]interface{}{
-			"error": err.Error(),
-		}
-		if logErr := hist.AppendEvent(history.EventTypeValidationFailed, phaseName, failureData); logErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to log validation failure: %v\n", logErr)
+		// A legacy history rename is part of a successful transition, not
+		// validation. Preserve best-effort failure logging only when the
+		// canonical log already exists so a rejected completion is read-only.
+		currentHistory := filepath.Join(projectDir, history.HistoryFilename)
+		if _, statErr := os.Stat(currentHistory); statErr == nil {
+			failureData := map[string]any{
+				"error": err.Error(),
+			}
+			if logErr := hist.AppendEvent(history.EventTypeValidationFailed, phaseName, failureData); logErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to log validation failure: %v\n", logErr)
+			}
 		}
 		return fmt.Errorf("validation failed: %w", err)
 	}
@@ -99,6 +103,10 @@ func runCompletePhase(cmd *cobra.Command, args []string) (retErr error) {
 		return fmt.Errorf("failed to initialize tracker: %w", err)
 	}
 	defer func() { _ = tr.Close(context.Background()) }()
+
+	if err := hist.EnsureCurrentFile(); err != nil {
+		return fmt.Errorf("prepare history for phase transition: %w", err)
+	}
 
 	// Collect phase-specific metadata
 	metadata := map[string]interface{}{

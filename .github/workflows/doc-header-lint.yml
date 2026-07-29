@@ -1,0 +1,43 @@
+name: Doc Header Lint
+
+# Flags the single-line bold metadata "header block" anti-pattern in
+# Markdown docs: two or more **Label:** bold-field markers crammed onto one
+# physical line, with no line break between fields, near the top of a file
+# (e.g. "**Status:** authoritative · **Last updated:** 2026-06-11"). See
+# docs/doc-header-format.md for the canonical replacement format.
+#
+# The two pre-existing dear-agent violations were fixed with the linter's
+# introduction, so this workflow is blocking from its first revision.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  merge_group:
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  header-lint:
+    name: Header block format
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Validate doc metadata header format
+        run: go run ./tools/header-lint -repo .

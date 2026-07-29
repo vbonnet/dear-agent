@@ -202,12 +202,13 @@ type OpenCode struct {
 
 // SandboxConfig represents sandbox isolation metadata for a session
 type SandboxConfig struct {
-	Enabled    bool      `yaml:"enabled" json:"enabled"`           // Whether sandbox is enabled for this session
-	ID         string    `yaml:"id,omitempty" json:"id,omitempty"` // Sandbox ID (usually matches SessionID)
-	Provider   string    `yaml:"provider,omitempty" json:"provider,omitempty"`
-	MergedPath string    `yaml:"merged_path,omitempty" json:"merged_path,omitempty"` // Root and cleanup boundary
-	WorkingDir string    `yaml:"working_dir,omitempty" json:"working_dir,omitempty"` // Provider-mapped harness directory
-	CreatedAt  time.Time `yaml:"created_at,omitempty" json:"created_at,omitzero"`
+	Enabled      bool      `yaml:"enabled" json:"enabled"`           // Whether sandbox is enabled for this session
+	ID           string    `yaml:"id,omitempty" json:"id,omitempty"` // Sandbox ID (usually matches SessionID)
+	Provider     string    `yaml:"provider,omitempty" json:"provider,omitempty"`
+	MergedPath   string    `yaml:"merged_path,omitempty" json:"merged_path,omitempty"` // Root and cleanup boundary
+	WorkingDir   string    `yaml:"working_dir,omitempty" json:"working_dir,omitempty"` // Provider-mapped harness directory
+	CreatedAt    time.Time `yaml:"created_at,omitempty" json:"created_at,omitzero"`
+	ExtraAddDirs []string  `yaml:"extra_add_dirs,omitempty" json:"extra_add_dirs,omitempty"`
 }
 
 // ResourceManifest records git worktrees and branches created during a session.

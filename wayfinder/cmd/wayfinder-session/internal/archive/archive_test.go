@@ -6,6 +6,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/history"
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
 
 func TestNew(t *testing.T) {
@@ -25,7 +28,7 @@ func TestArchivePhase(t *testing.T) {
 		t.Fatalf("failed to create STATUS file: %v", err)
 	}
 
-	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.md")
+	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.jsonl")
 	if err := os.WriteFile(historyPath, []byte("{\"event\":\"test\"}\n"), 0644); err != nil {
 		t.Fatalf("failed to create HISTORY file: %v", err)
 	}
@@ -60,7 +63,7 @@ func TestArchivePhase(t *testing.T) {
 	}
 
 	// Verify archive contains HISTORY file
-	archivedHistory := filepath.Join(archivePath, "WAYFINDER-HISTORY.md")
+	archivedHistory := filepath.Join(archivePath, "WAYFINDER-HISTORY.jsonl")
 	historyData, err := os.ReadFile(archivedHistory)
 	if err != nil {
 		t.Fatalf("failed to read archived HISTORY: %v", err)
@@ -69,6 +72,28 @@ func TestArchivePhase(t *testing.T) {
 	expectedHistory := "{\"event\":\"test\"}\n"
 	if string(historyData) != expectedHistory {
 		t.Errorf("archived HISTORY content = %q, want %q", string(historyData), expectedHistory)
+	}
+}
+
+func TestArchivePhaseMigratesLegacyHistory(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, status.StatusFilename), []byte("status"), 0o600); err != nil {
+		t.Fatalf("write status: %v", err)
+	}
+	legacyPath := filepath.Join(tmpDir, history.LegacyHistoryFilename)
+	if err := os.WriteFile(legacyPath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatalf("write legacy history: %v", err)
+	}
+
+	if err := New(tmpDir).ArchivePhase("BUILD"); err != nil {
+		t.Fatalf("ArchivePhase() error: %v", err)
+	}
+	if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
+		t.Fatalf("legacy history stat error = %v, want not exists", err)
+	}
+	archives, err := filepath.Glob(filepath.Join(tmpDir, ".wayfinder", "archives", "BUILD-*", history.HistoryFilename))
+	if err != nil || len(archives) != 1 {
+		t.Fatalf("archived histories = %v, %v; want one", archives, err)
 	}
 }
 

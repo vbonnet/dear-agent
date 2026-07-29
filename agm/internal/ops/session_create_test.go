@@ -15,9 +15,9 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
-	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
+	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
@@ -698,6 +698,27 @@ func TestCreateSession_RejectsRelativeCwd(t *testing.T) {
 	}
 	if !strings.Contains(opErr.Detail, "absolute path") {
 		t.Errorf("error should mention absolute path, got: %s", opErr.Detail)
+	}
+}
+
+func TestCreateSession_GeminiAllowsControlWorkdirWhenNoRepairIsNeeded(t *testing.T) {
+	workdir := filepath.Join(t.TempDir(), "valid\tpath")
+	if err := os.Mkdir(workdir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tmuxMock := session.NewMockTmux()
+
+	result, err := CreateSession(&OpContext{Tmux: tmuxMock}, &CreateSessionRequest{
+		Cwd:     workdir,
+		Prompt:  "test",
+		Title:   "safe-title",
+		Harness: "gemini-cli",
+	})
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v, want healthy non-repair creation", err)
+	}
+	if result == nil || len(tmuxMock.CreatedSessions) != 1 {
+		t.Fatalf("CreateSession() result = %#v, sessions = %v", result, tmuxMock.CreatedSessions)
 	}
 }
 
@@ -1530,6 +1551,34 @@ func TestCreateSession_CodexRemoteBootIsBounded(t *testing.T) {
 	}
 }
 
+func TestCreateSession_CodexRejectsUnsafeLaunchInputBeforeRemoteOrTmuxMutation(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Setenv("AGM_CODEX_REMOTE_CONTROL", "1")
+	t.Setenv("AGM_CODEX_REQUIRE_REMOTE_CONTROL", "1")
+	tmuxMock := session.NewMockTmux()
+	remoteCalls := 0
+
+	_, err := CreateSessionWithContext(context.Background(), &OpContext{
+		Tmux: tmuxMock,
+		CodexThreadCreator: func(context.Context, string, string, string) (*manifest.Codex, error) {
+			remoteCalls++
+			return &manifest.Codex{SessionID: "must-not-exist"}, nil
+		},
+	}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "prevalidate", Model: "5.4", Harness: "codex-cli",
+		AllowEmptyPrompt: true, ExtraAddDirs: []string{"/tmp/unsafe\x1bdir"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "validate harness launch") {
+		t.Fatalf("CreateSessionWithContext error = %v, want terminal-control rejection", err)
+	}
+	if remoteCalls != 0 {
+		t.Fatalf("Codex remote thread creations = %d, want 0", remoteCalls)
+	}
+	if tmuxMock.Sessions["prevalidate"] {
+		t.Fatal("unsafe Codex request created a tmux session")
+	}
+}
+
 func TestCreateSession_CLIAndMCPShareCoreContract(t *testing.T) {
 	sharedDir := t.TempDir()
 	type surfaceResult struct {
@@ -1720,7 +1769,7 @@ func TestBuildHarnessCommand_NonPersistentHasExit(t *testing.T) {
 }
 
 func TestSharedShellQuote(t *testing.T) {
-	got := launchparity.ShellQuote("a'b")
+	got := shellquote.Quote("a'b")
 	if got != `'a'"'"'b'` {
 		t.Errorf("ShellQuote = %q", got)
 	}
@@ -1755,5 +1804,31 @@ func TestBuildCreateSessionManifestPreservesRelationshipMetadata(t *testing.T) {
 		if !slices.Contains(got.Context.Tags, want) {
 			t.Fatalf("Context.Tags = %v, missing %q", got.Context.Tags, want)
 		}
+	}
+}
+
+func TestBuildCreateSessionManifestPersistsSandboxLaunchPolicyWithoutAliasing(t *testing.T) {
+	sandbox := &manifest.SandboxConfig{
+		Enabled: true,
+		ID:      "sandbox-session",
+	}
+	req := &CreateSessionRequest{
+		Cwd:          "/tmp/sandbox",
+		ExtraAddDirs: []string{"/tmp/worktree", "/tmp/beads"},
+		Metadata:     CreateSessionMetadata{Sandbox: sandbox},
+	}
+	params := &createSessionParams{name: "sandbox", harness: "codex-cli", model: "gpt-5.5"}
+
+	got := buildCreateSessionManifest(req, params, "sandbox-session", nil)
+
+	if got.Sandbox == sandbox {
+		t.Fatal("Sandbox aliases request metadata")
+	}
+	if !slices.Equal(got.Sandbox.ExtraAddDirs, req.ExtraAddDirs) {
+		t.Fatalf("ExtraAddDirs = %v, want %v", got.Sandbox.ExtraAddDirs, req.ExtraAddDirs)
+	}
+	req.ExtraAddDirs[0] = "/tmp/mutated"
+	if got.Sandbox.ExtraAddDirs[0] != "/tmp/worktree" {
+		t.Fatalf("persisted ExtraAddDirs aliases request: %v", got.Sandbox.ExtraAddDirs)
 	}
 }

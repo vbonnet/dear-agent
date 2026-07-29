@@ -3,6 +3,7 @@ package agent
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/agm/test/helpers"
@@ -547,6 +548,79 @@ func TestGeminiCLIAdapter_ResumeSession_WithoutUUID(t *testing.T) {
 
 	// This test primarily validates the code path doesn't panic with empty UUID
 	// Integration tests will verify actual --resume latest behavior
+}
+
+func TestGeminiCLIAdapter_ResumeSessionValidatesBeforeTmuxCreation(t *testing.T) {
+	originalHasSession := geminiResumeHasSession
+	originalNewSession := geminiResumeNewSession
+	originalIsProcessRunning := geminiResumeIsProcessRunning
+	t.Cleanup(func() {
+		geminiResumeHasSession = originalHasSession
+		geminiResumeNewSession = originalNewSession
+		geminiResumeIsProcessRunning = originalIsProcessRunning
+	})
+	geminiResumeHasSession = func(string) (bool, error) { return false, nil }
+	created := false
+	geminiResumeNewSession = func(string, string) error {
+		created = true
+		return nil
+	}
+
+	store, err := NewJSONSessionStore(filepath.Join(t.TempDir(), "sessions.json"))
+	if err != nil {
+		t.Fatalf("create session store: %v", err)
+	}
+	sessionID := SessionID("invalid-resume")
+	if err := store.Set(sessionID, &SessionMetadata{
+		TmuxName:   "gemini-invalid-resume",
+		WorkingDir: "/safe\x1b[201~\nunsafe",
+		UUID:       "uuid",
+	}); err != nil {
+		t.Fatalf("store metadata: %v", err)
+	}
+	adapter := &GeminiCLIAdapter{sessionStore: store}
+	err = adapter.ResumeSession(sessionID)
+	if err == nil || !strings.Contains(err.Error(), "validate Gemini resume") {
+		t.Fatalf("ResumeSession() error = %v, want pre-tmux validation rejection", err)
+	}
+	if created {
+		t.Fatal("ResumeSession() created tmux session before validating pasted metadata")
+	}
+}
+
+func TestGeminiCLIAdapter_ResumeSessionSkipsValidationForRunningProcess(t *testing.T) {
+	originalHasSession := geminiResumeHasSession
+	originalNewSession := geminiResumeNewSession
+	originalIsProcessRunning := geminiResumeIsProcessRunning
+	t.Cleanup(func() {
+		geminiResumeHasSession = originalHasSession
+		geminiResumeNewSession = originalNewSession
+		geminiResumeIsProcessRunning = originalIsProcessRunning
+	})
+	geminiResumeHasSession = func(string) (bool, error) { return true, nil }
+	geminiResumeIsProcessRunning = func(string, string) (bool, error) { return true, nil }
+	geminiResumeNewSession = func(string, string) error {
+		t.Fatal("ResumeSession() replaced a healthy Gemini session")
+		return nil
+	}
+
+	store, err := NewJSONSessionStore(filepath.Join(t.TempDir(), "sessions.json"))
+	if err != nil {
+		t.Fatalf("create session store: %v", err)
+	}
+	sessionID := SessionID("running-invalid-resume")
+	if err := store.Set(sessionID, &SessionMetadata{
+		TmuxName:   "gemini-running-invalid-resume",
+		WorkingDir: "/legacy\x1b[201~\nmetadata",
+		UUID:       "uuid",
+	}); err != nil {
+		t.Fatalf("store metadata: %v", err)
+	}
+
+	adapter := &GeminiCLIAdapter{sessionStore: store}
+	if err := adapter.ResumeSession(sessionID); err != nil {
+		t.Fatalf("ResumeSession() rejected metadata it did not paste: %v", err)
+	}
 }
 
 // TestGeminiCLIAdapter_ExecuteCommand_ClearHistory tests CommandClearHistory.

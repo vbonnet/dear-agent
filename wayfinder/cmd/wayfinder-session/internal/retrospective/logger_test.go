@@ -1,7 +1,11 @@
 package retrospective
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/history"
 )
 
 func TestCalculateMagnitude(t *testing.T) {
@@ -78,6 +82,10 @@ func TestFindPhaseIndex(t *testing.T) {
 
 func TestLogRewindEvent_Magnitude0(t *testing.T) {
 	tmpDir := t.TempDir()
+	legacyPath := filepath.Join(tmpDir, history.LegacyHistoryFilename)
+	if err := os.WriteFile(legacyPath, []byte("{\"event\":\"seed\"}\n"), 0o600); err != nil {
+		t.Fatalf("seed legacy history: %v", err)
+	}
 
 	// Create minimal WAYFINDER-STATUS.md for ReadFrom
 	// (LogRewindEvent should skip early for magnitude 0)
@@ -91,4 +99,10 @@ func TestLogRewindEvent_Magnitude0(t *testing.T) {
 
 	// RETRO-retrospective.md should not be created (magnitude 0 skips logging)
 	// This test validates early return logic
+	if _, err := os.Stat(legacyPath); err != nil {
+		t.Fatalf("no-op rewind migrated the legacy history file: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, history.HistoryFilename)); !os.IsNotExist(err) {
+		t.Fatalf("no-op rewind created %s (stat err: %v)", history.HistoryFilename, err)
+	}
 }

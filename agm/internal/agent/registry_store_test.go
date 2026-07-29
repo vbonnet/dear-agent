@@ -11,57 +11,6 @@ import (
 	"time"
 )
 
-// --- Registry tests ---
-
-func TestRegisterAndGet(t *testing.T) {
-	// Save and restore original registry
-	orig := snapshotRegistryForTest()
-	resetRegistryForTest(make(map[string]Agent))
-	defer func() { resetRegistryForTest(orig) }()
-
-	mock := &registryMockAgent{name: "test-agent", version: "1.0"}
-	Register("test", mock)
-
-	got, ok := Get("test")
-	if !ok {
-		t.Fatal("Get() returned false for registered agent")
-	}
-	if got.Name() != "test-agent" {
-		t.Errorf("Get().Name() = %q, want %q", got.Name(), "test-agent")
-	}
-}
-
-func TestGet_NotFound(t *testing.T) {
-	orig := snapshotRegistryForTest()
-	resetRegistryForTest(make(map[string]Agent))
-	defer func() { resetRegistryForTest(orig) }()
-
-	_, ok := Get("nonexistent")
-	if ok {
-		t.Error("Get() should return false for unregistered agent")
-	}
-}
-
-func TestRegister_Replaces(t *testing.T) {
-	orig := snapshotRegistryForTest()
-	resetRegistryForTest(make(map[string]Agent))
-	defer func() { resetRegistryForTest(orig) }()
-
-	mock1 := &registryMockAgent{name: "v1", version: "1.0"}
-	mock2 := &registryMockAgent{name: "v2", version: "2.0"}
-
-	Register("agent", mock1)
-	Register("agent", mock2)
-
-	got, ok := Get("agent")
-	if !ok {
-		t.Fatal("Get() returned false after re-registration")
-	}
-	if got.Name() != "v2" {
-		t.Errorf("Register should replace: got Name()=%q, want %q", got.Name(), "v2")
-	}
-}
-
 // --- Factory tests ---
 
 func TestGetHarness_Known(t *testing.T) {
@@ -391,36 +340,3 @@ func TestTestModelForHarness(t *testing.T) {
 		t.Error("TestModelForHarness should return false for unknown harness")
 	}
 }
-
-// --- Helper types ---
-
-// registryMockAgent implements the Agent interface for testing
-type registryMockAgent struct {
-	name    string
-	version string
-}
-
-func (m *registryMockAgent) Name() string    { return m.name }
-func (m *registryMockAgent) Version() string { return m.version }
-func (m *registryMockAgent) CreateSession(ctx SessionContext) (SessionID, error) {
-	return SessionID("mock-session"), nil
-}
-func (m *registryMockAgent) ResumeSession(sessionID SessionID) error    { return nil }
-func (m *registryMockAgent) TerminateSession(sessionID SessionID) error { return nil }
-func (m *registryMockAgent) GetSessionStatus(sessionID SessionID) (Status, error) {
-	return StatusActive, nil
-}
-func (m *registryMockAgent) SendMessage(sessionID SessionID, message Message) error { return nil }
-func (m *registryMockAgent) GetHistory(sessionID SessionID) ([]Message, error) {
-	return nil, nil
-}
-func (m *registryMockAgent) ExportConversation(sessionID SessionID, format ConversationFormat) ([]byte, error) {
-	return nil, ErrNotImplemented
-}
-func (m *registryMockAgent) ImportConversation(data []byte, format ConversationFormat) (SessionID, error) {
-	return "", ErrNotImplemented
-}
-func (m *registryMockAgent) Capabilities() Capabilities {
-	return Capabilities{ModelName: m.version}
-}
-func (m *registryMockAgent) ExecuteCommand(cmd Command) error { return nil }

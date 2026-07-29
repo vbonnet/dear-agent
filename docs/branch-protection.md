@@ -40,6 +40,8 @@ mode behind the [phantom Trivy check](https://github.com/vbonnet/engram-research
 | `govulncheck` | `ci.yml` |
 | `Bash Script Size Check (20-line limit)` | `language-policy.yml` |
 | `Vulnerability Scan` | `sbom-scan.yml` |
+| `Identity, index, and lifecycle parity` | `adr-integrity.yml` |
+| `Header block format` | `doc-header-lint.yml` |
 
 `5-Dimension AI Review` (`review.yml`) is **not** currently in this list. It was
 added by #991, then paused 2026-07-27 — `ANTHROPIC_API_KEY` was never funded

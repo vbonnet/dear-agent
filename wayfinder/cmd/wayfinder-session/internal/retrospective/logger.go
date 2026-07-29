@@ -2,6 +2,7 @@ package retrospective
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -16,7 +17,7 @@ import (
 // 1. Magnitude calculation (skip if magnitude 0)
 // 2. User prompting (if needed)
 // 3. Context capture (parallel)
-// 4. Dual logging: WAYFINDER-HISTORY.md (JSON) + RETRO-retrospective.md (markdown)
+// 4. Dual logging: WAYFINDER-HISTORY.jsonl (JSON Lines) + RETRO-retrospective.md (markdown)
 //
 // Errors are logged to stderr but don't block rewind operation (fail-gracefully).
 func LogRewindEvent(projectDir string, fromPhase, toPhase string, flags RewindFlags) error {
@@ -37,6 +38,13 @@ func LogRewindEvent(projectDir string, fromPhase, toPhase string, flags RewindFl
 	// Skip logging for magnitude 0 (no-op rewind)
 	if magnitude == 0 {
 		return nil
+	}
+
+	if err := history.New(projectDir).EnsureCurrentFile(); err != nil {
+		if errors.Is(err, history.ErrAmbiguousHistory) {
+			return fmt.Errorf("refuse rewind logging with ambiguous history: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Warning: failed to prepare history: %v\n", err)
 	}
 
 	// Read status for context capture
@@ -118,7 +126,7 @@ func findPhaseIndex(allPhases []string, phase string) int {
 	return -1
 }
 
-// LogToHistory logs rewind event to WAYFINDER-HISTORY.md (JSON)
+// LogToHistory logs rewind event to WAYFINDER-HISTORY.jsonl (JSON Lines)
 //
 // Marshals RewindEventData to map[string]interface{} for history.Event.Data field.
 // Reuses existing history.go infrastructure.

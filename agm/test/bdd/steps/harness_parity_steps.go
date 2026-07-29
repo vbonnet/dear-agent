@@ -32,6 +32,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/reaper"
 	"github.com/vbonnet/dear-agent/agm/internal/recovery"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
+	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 	"github.com/vbonnet/dear-agent/agm/internal/state"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/wayfinderparity"
@@ -463,7 +464,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the durable AGM store should reflect the expected lifecycle transitions$`, durableAGMStoreShouldReflectLifecycleTransitions)
 	ctx.Step(`^the matching Codex saved session should be archived$`, matchingCodexSavedSessionShouldBeArchived)
 	ctx.Step(`^a stopped Codex CLI session without a tmux pane$`, aStoppedCodexCLISessionWithoutTmuxPane)
-	ctx.Step(`^AGM validates the Codex resume transaction$`, agmValidatesTheCodexResumeTransaction)
+	ctx.Step(`^AGM validates the shared Codex resume operation$`, agmValidatesTheCodexResumeTransaction)
 	ctx.Step(`^Codex resume, state, and prompt waits should preserve process and styled composer readiness$`, codexResumeSuccessShouldRequireProcessAndComposerReadiness)
 	ctx.Step(`^a failed Codex resume should serialize concurrent attempts through every production entry point, release the session lock before attachment, preserve canonical tmux identity from stale full-session updates, reconcile ambiguous metadata commits, compensate owned provisional metadata before removing its creation-specific tmux identity even when tmux ID output is lost, and preserve tmux whenever metadata cleanup is unproven$`, aFailedCodexResumeShouldRemoveOnlyItsNewlyCreatedTmuxSession)
 	ctx.Step(`^authoritative session renames should serialize with cold resume, fence ambiguous storage writes, preserve both identity names from stale writers, preserve claimed tmux identity across lost replies and server restarts, reject stale identity revisions, and compensate tmux after storage conflicts$`, authoritativeSessionRenamesShouldRejectStaleIdentityRevisions)
@@ -595,10 +596,19 @@ func agmValidatesTheCodexResumeTransaction(ctx context.Context) error {
 	if harnessState.harness != "codex-cli" || harnessState.tmuxSessionExists {
 		return fmt.Errorf("scenario requires a stopped codex-cli session without tmux")
 	}
-	path := filepath.Join(bddRepoRoot(), "agm", "cmd", "agm", "resume.go")
-	data, err := os.ReadFile(path)
+	operationPath := filepath.Join(bddRepoRoot(), "agm", "internal", "ops", "session_resume.go")
+	data, err := os.ReadFile(operationPath)
 	if err != nil {
-		return fmt.Errorf("read resume production source: %w", err)
+		return fmt.Errorf("read shared resume operation source: %w", err)
+	}
+	cliPath := filepath.Join(bddRepoRoot(), "agm", "cmd", "agm", "resume.go")
+	cliData, err := os.ReadFile(cliPath)
+	if err != nil {
+		return fmt.Errorf("read CLI resume adapter source: %w", err)
+	}
+	if !strings.Contains(string(data), "WithSessionLockContext(ctx, req.SessionID") ||
+		strings.Count(string(cliData), "ops.ResumeSession(") != 1 {
+		return fmt.Errorf("resume lifecycle is not owned by one stable-ID shared operation with one CLI delegation")
 	}
 	harnessState.resumeSource = string(data)
 	return nil
@@ -610,8 +620,8 @@ func codexResumeSuccessShouldRequireProcessAndComposerReadiness(ctx context.Cont
 	cmd := exec.CommandContext(
 		testCtx,
 		"go", "test",
-		"./agm/cmd/agm", "./agm/internal/tmux", "./agm/internal/state", "./agm/internal/session", "./agm/internal/manager/tmuxbackend",
-		"-run", `^(TestWaitForResumedCodexRequiresProcessAndComposer|TestWaitForCodexPrompt(RejectsEchoedLaunchModel|AcceptsCurrentWelcomeGhostComposer)|TestIsCodex(ComposerReady|IdlePreservesCurrentWelcomeGhostStyle)|TestWaitForPrompt(Simple|OrResumeFailure)PreservesCurrentCodexWelcomeGhostStyle|TestSendMultiLinePromptSafePreservesCurrentCodexWelcomeGhostStyle|TestIsProcessReadyWithRuntimePreservesCancellation(Before|During)CodexFallback|TestDetector_CodexReadinessRequiresStructuredComposer|TestStateAndDeliveryPreserveCurrentCodexWelcomeGhostStyle|TestBackendStateAndDeliveryPreserveCurrentCodexWelcomeGhostStyle)$`,
+		"./agm/internal/tmux", "./agm/internal/state", "./agm/internal/session", "./agm/internal/manager/tmuxbackend",
+		"-run", `^(TestCodexResumeReadiness(RequiresProcessThenComposer|StopsBeforeComposerWithoutProcess)|TestWaitForCodexPrompt(RejectsEchoedLaunchModel|AcceptsCurrentWelcomeGhostComposer)|TestIsCodex(ComposerReady|IdlePreservesCurrentWelcomeGhostStyle)|TestWaitForPrompt(Simple|OrResumeFailure)PreservesCurrentCodexWelcomeGhostStyle|TestSendMultiLinePromptSafePreservesCurrentCodexWelcomeGhostStyle|TestIsProcessReadyWithRuntimePreservesCancellation(Before|During)CodexFallback|TestDetector_CodexReadinessRequiresStructuredComposer|TestStateAndDeliveryPreserveCurrentCodexWelcomeGhostStyle|TestBackendStateAndDeliveryPreserveCurrentCodexWelcomeGhostStyle)$`,
 		"-count=1",
 	)
 	cmd.Dir = bddRepoRoot()
@@ -628,7 +638,7 @@ func codexResumeSuccessShouldRequireProcessAndComposerReadiness(ctx context.Cont
 func aFailedCodexResumeShouldRemoveOnlyItsNewlyCreatedTmuxSession(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/dolt", "./agm/internal/ops", "./agm/internal/tmux", "-run", `^(TestProductionResumeEntryPointsUseLockedResolvedSession|TestPersistResumeTmuxName(RetainsPendingChangeUntilReloadCompensationIsProven|RetainsChangeWhenBeginCommitIsAmbiguous)|TestRestoreResumeTmuxNameTreatsSuccessfulSwapAsComplete|TestResumeResolvedSessionAcquiresSessionLockBeforeReads|TestResumeAttachmentRunsAfterSessionLockReleases|TestWithSessionLock_MutualExclusion|TestResumeSession(Codex(RollsBackNewTmuxBeforeActivityUpdate|RollsBackPromptlessCancellation(BeforeFinalization|AfterActivityTouch)|JoinsCleanupFailure|RollbackUsesCreatedCanonicalTmuxName|PersistsCreatedCanonicalTmuxName|TmuxPersistencePreservesConcurrentMetadata|CompensatesCanonicalNameWhenOrdinaryPromptDeliveryFails|CompensationPreservesNewerMetadata|PreservesTmuxWhenPersistenceCompensationIsUnproven|RollsBackCreationFailureWhen(TmuxReturnedIdentity|OnlyProvisionalIdentityReturned)|RollsBackWhen(PromptDeliveryIsCanceled|CanonicalNamePersistenceFails)|ReadinessFailureRemovesIsolatedTmux|RollbackReportsInaccessibleSocketAndPreservesHiddenTarget)|PreservesPreexistingTmuxOnLaterFailure)|TestKillCreatedResumeTmuxPreserves(SameNamedReplacement|IDReusedAfterServerRestart)|TestSessionIdentityCleansCreation(BeforeTokenWrite|WhenSessionIDOutputIsLost)|TestNewSessionWithIdentityReturnsIDWhenQueuedInitializationFails|TestResolveTmuxSessionNameChangeCommitErrorPreservesUncertainOwnership|TestSQLite(AdapterUpgradesLegacySessionRevisionColumn|TouchSessionActivityPreservesProvisionalTmuxRevision|TmuxSessionName(ChangeOwnsAndRestoresExactWrite|CompensationRejectsNewerMetadata|ChangeCompletesOwnershipToken|StaleFullUpdatePreservesOwnership))|TestMigration018AddsTmuxSessionRevision)$`, "-count=1")
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/dolt", "./agm/internal/ops", "./agm/internal/tmux", "-run", `^(TestProductionResumeEntryPointsUseSharedResumeOperation|TestResumeSourceDelegatesLifecycleToOperation|TestWithSessionLock_MutualExclusion|TestResumeSession(ReadinessFailureRemovesExactColdRuntime|CanonicalNameFailureRemovesExactColdRuntime|CreationErrorWithIdentityStillRollsBackExactRuntime|JoinsExactRuntimeCleanupFailure|AmbiguousCanonicalNameCommitRestoresBeforeCleanup|ReloadFailureCompensatesMetadataBeforeCleanup|ReportsMetadataOwnershipFinalizationFailure|PreservesExistingRuntime|CodexPromptFailureRollsBackColdRuntime|CancellationBeforePromptRollsBackColdRuntime|PreservesColdRuntimeWhenMetadataCompensationIsUnproven|AcquiresStableLockBeforeStorageRead)|TestSessionIdentityCleansCreation(BeforeTokenWrite|WhenSessionIDOutputIsLost)|TestResolveTmuxSessionNameChangeCommitErrorPreservesUncertainOwnership|TestSQLite(AdapterUpgradesLegacySessionRevisionColumn|TouchSessionActivityPreservesProvisionalTmuxRevision|TmuxSessionName(ChangeOwnsAndRestoresExactWrite|CompensationRejectsNewerMetadata|ChangeCompletesOwnershipToken|StaleFullUpdatePreservesOwnership))|TestMigration018AddsTmuxSessionRevision)$`, "-count=1")
 	cmd.Dir = bddRepoRoot()
 	output, err := cmd.CombinedOutput()
 	if testCtx.Err() != nil {
@@ -673,7 +683,7 @@ func administrativeHierarchyRepairsShouldUseObservedIdentityRevision(ctx context
 func successfulCodexPromptDeliveryShouldRemainSuccessfulAfterLaterCallerCancellation(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "-run", `^TestResumeSessionCodexDoesNotReturn(Cancellation|AttachFailure)AfterPromptDelivery$`, "-count=1")
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/ops", "./agm/cmd/agm", "-run", `^(TestResumeSessionIgnoresCancellationAfterPromptStarts|TestFinishResumeAttachmentUsesOnlyOperationResult)$`, "-count=1")
 	cmd.Dir = bddRepoRoot()
 	output, err := cmd.CombinedOutput()
 	if testCtx.Err() != nil {
@@ -688,7 +698,7 @@ func successfulCodexPromptDeliveryShouldRemainSuccessfulAfterLaterCallerCancella
 func ambiguousFinalCodexPromptSubmissionShouldPreserveStartedWork(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/tmux", "-run", `^(TestResumeSessionCodexPreservesStartedWorkWhenPromptAcknowledgementIsLost|TestRunPromptEnterCommand(StartFailureIsDefinite|ExplicitRejectionIsDefinite|TimeoutAfterStartIsUncertain)|TestVerifyingEnter_PreservesUncertaintyAcrossLater(DefiniteFailure|ParkedCaptures))$`, "-count=1")
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/ops", "./agm/internal/tmux", "-run", `^(TestResumeSessionCodexPromptAcknowledgementLossIsIrreversibleSuccess|TestRunPromptEnterCommand(StartFailureIsDefinite|ExplicitRejectionIsDefinite|TimeoutAfterStartIsUncertain)|TestVerifyingEnter_PreservesUncertaintyAcrossLater(DefiniteFailure|ParkedCaptures))$`, "-count=1")
 	cmd.Dir = bddRepoRoot()
 	output, err := cmd.CombinedOutput()
 	if testCtx.Err() != nil {
@@ -703,7 +713,7 @@ func ambiguousFinalCodexPromptSubmissionShouldPreserveStartedWork(ctx context.Co
 func failedCodexPromptDeliveryShouldNotSuppressALaterAttachFailure(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "-run", `^TestResumeSessionCodexReturnsAttachFailureAfterPromptDeliveryFails$`, "-count=1")
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/ops", "./agm/cmd/agm", "-run", `^(TestResumeSessionCodexPromptPositiveFailurePreservesExistingRuntime|TestFinishResumeAttachmentReturnsAttachFailure)$`, "-count=1")
 	cmd.Dir = bddRepoRoot()
 	output, err := cmd.CombinedOutput()
 	if testCtx.Err() != nil {
@@ -718,7 +728,7 @@ func failedCodexPromptDeliveryShouldNotSuppressALaterAttachFailure(ctx context.C
 func codexActivityUpdatesShouldFollowResumeReadiness(ctx context.Context) error {
 	testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/cmd/agm", "./agm/internal/dolt", "-run", `^(TestResumeSessionCodex(CommitsEffectsOnlyAfterReadiness|RollsBackNewTmuxBeforeActivityUpdate|RollsBackPromptlessCancellation(BeforeFinalization|AfterActivityTouch))|TestSQLiteTouchSessionActivityPreservesProvisionalTmuxRevision)$`, "-count=1")
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/ops", "./agm/internal/dolt", "-run", `^(TestResumeSession(ColdStartCommitsPublicOutcome|ReadinessFailureRemovesExactColdRuntime|CancellationBeforePromptRollsBackColdRuntime)|TestSQLiteTouchSessionActivityPreservesProvisionalTmuxRevision)$`, "-count=1")
 	cmd.Dir = bddRepoRoot()
 	output, err := cmd.CombinedOutput()
 	if testCtx.Err() != nil {
@@ -1105,7 +1115,7 @@ func agmValidatesSlowHarnessStartupReadiness(ctx context.Context) error {
 	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
 	testCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(testCtx, "go", "test", "-p", "1", "./agm/cmd/agm", "./agm/cmd/agm-mcp-server", "./agm/internal/agent", "./agm/internal/agent/openai", "./agm/internal/dolt", "./agm/internal/session", "./agm/internal/tmux", "./agm/internal/ops", "-run", `^(TestMCPCreateSessionRuntimeRevalidatesStartupPromptAtomically|TestRealTmux(InputReadinessReportsMissingSession|LogicalANSICaptureJoinsNarrowPaneWraps|ReadinessAdvancesGeminiTrustOnVerifiedPane|ReadinessDetectsManagedPiComposer|ReadinessIdentifiesNodeBackedCodex|ReadinessPinsLivenessAndDeliveryToActivePane|ReadinessPreservesClaudeGhostComposer|ReadinessRejectsSuspendedHarnessWithStaleComposer|WaitForHarnessReadyAllowsSlowProcessStart)|TestCapturePaneLogicalANSIArgsJoinFullExactPaneHistory|TestClassifyHarnessInputRequiresCurrentHarnessComposer|TestClassifyQueuedInputBindsCompleteHeaderToLatestMarker|TestQueuedComposerPayloadPromptGlyphsRemainBoundToPasteAnchor|TestHarnessStartupAdvanceKeys|TestInputDeliveryAllowedOverridesOnlyPositivelyIdentifiedAGMQueue|TestQueuedAGMRecovery(ClearsBeforeReplacement|DoesNotReplaceUntilExactPaneIsEmpty|DoesNotReportReadyWhenReplacementFails)|TestParsePSForegroundTable|TestExpectedHarnessMatcher(RejectsUnrelatedNodeProcess|AcceptsIdentifiedNodeBackedHarness|RequiresForegroundTerminalOwnership)|TestSendMessage_(AcceptsPostRecoveryReadyState|AtomicReadinessAndDeliveryPrecedesGenericManagerCheck|QueuedAGMRecoveryPolicies|ForceDoesNotBypassProtectedInputStates|AutonomousDoesNotBypassProtectedInputStates|PiPermissionPromptBlocksAtomicDelivery|Normalizes(LegacyAgyHarness|PiHarnessAlias)BeforeReadiness)|TestSendMessage(CompletionFailureLeavesHistoryUnchanged|ContextCancelsProviderAndReleasesSessionLock|SerializesIndependentManagersAndCommitsCompleteTurns|RejectsSessionDeletedByIndependentManagerBeforeProvider)|TestDeleteSessionWaitsForCompletedTurnFromIndependentManager|TestOpenAIRequestContextCancelsReconstructionAndReadinessLockWait|TestSendMessageTool_RoutesPureAPIBeforeTmux|TestGetSessionStatusIsTmuxIndependent|TestWithSessionLockContextCancelsContendedWait|TestMetadataUpdatesSerializeAndPreserveIndependentFields|TestSessionHistoryReloadSupportsLargeJSONLRecords|TestImportedOpenAIMessagesUseOneHistoryTransaction|TestAPISessionLockUsesProviderAppropriateWaitPolicy|TestArchiveSessionSerializesWithAPIDeliveryMutationLock|TestSendViaSharedOperations(UsesCallerContext|FailsClosedWhenHarnessIsNotReady|PreservesQueuedAGMRecoveryPolicy)|TestAPIDelivery(PassesCallerContextToReadiness|ReloadsLifecycleInsideStableSessionLock|RejectsAdapterWithoutContextDelivery|RejectsReapingLifecycleInsideStableSessionLock|ReservesFullCompletionBudgetAfterPreflight|SerializesReadinessCompletionAndPersistenceByStableSessionID|UsesLockedManifestForAuditArtifact)|TestAPIRecipientStateSkipsTmuxPersistence|TestClearHistoryPreservesRuntimeConfig|TestDirectAPIDeliveryRejectsArchivedSessionBeforeAdapterConstruction|TestMultiRecipientDelivery(AllowsFullProviderDeadline|UsesSharedAtomicReadiness|RenewsDeadlinePerRecipient)|TestSingleAndMultiRecipientAPIDeliveryUsesAdapterReadiness|TestNewAPIHarnessAdapterReportsPureAPISessionReadyWithoutTmux|TestNewOpenAIAdapterForSession(RestoresPersistedRuntimeConfig|DoesNotScanUnrelatedSessions)|TestNewOpenAIAdapterForLegacySessionUsesManifestFallback|TestOpenAIExecutionModelDocumentsCompatibilityOnlyControlPlane|TestUpdateRuntimeConfigPersistence|TestSessionMetadata_OpenAIRoundTrip|TestDirectCLIDeliveryRejectsUnregisteredTmuxSession|TestCreateSession_NoRuntimeInitialPrompt(RevalidatesAfterRegistration|UsesAtomicExactPaneDelivery)|TestDeliverInitialPrompt(UsesAtomicExactPaneReadiness|FileUsesAtomicExactPaneReadiness|FailsClosedWhenHarnessDoesNotOwnTerminal))$`, "-count=1", "-v")
+	cmd := exec.CommandContext(testCtx, "go", "test", "-p", "1", "./agm/cmd/agm", "./agm/cmd/agm-mcp-server", "./agm/internal/agent", "./agm/internal/agent/openai", "./agm/internal/dolt", "./agm/internal/session", "./agm/internal/tmux", "./agm/internal/ops", "-run", `^(TestMCPCreateSessionRuntimeRevalidatesStartupPromptAtomically|TestRealTmux(InputReadinessReportsMissingSession|LogicalANSICaptureJoinsNarrowPaneWraps|ReadinessAdvancesGeminiTrustOnVerifiedPane|ReadinessDetectsManagedPiComposer|ReadinessIdentifiesNodeBackedCodex|ReadinessPinsLivenessAndDeliveryToActivePane|ReadinessPreservesClaudeGhostComposer|ReadinessRejectsSuspendedHarnessWithStaleComposer|WaitForHarnessReadyAllowsSlowProcessStart)|TestCapturePaneLogicalANSIArgsJoinFullExactPaneHistory|TestClassifyHarnessInputRequiresCurrentHarnessComposer|TestClassifyQueuedInputBindsCompleteHeaderToLatestMarker|TestQueuedComposerPayloadPromptGlyphsRemainBoundToPasteAnchor|TestHarnessStartupAdvanceKeys|TestInputDeliveryAllowedOverridesOnlyPositivelyIdentifiedAGMQueue|TestQueuedAGMRecovery(ClearsBeforeReplacement|DoesNotReplaceUntilExactPaneIsEmpty|DoesNotReportReadyWhenReplacementFails)|TestParsePSForegroundTable|TestExpectedHarnessMatcher(RejectsUnrelatedNodeProcess|AcceptsIdentifiedNodeBackedHarness|RequiresForegroundTerminalOwnership)|TestSendMessage_(AcceptsPostRecoveryReadyState|AtomicReadinessAndDeliveryPrecedesGenericManagerCheck|QueuedAGMRecoveryPolicies|ForceDoesNotBypassProtectedInputStates|AutonomousDoesNotBypassProtectedInputStates|PiPermissionPromptBlocksAtomicDelivery|Normalizes(LegacyAgyHarness|PiHarnessAlias)BeforeReadiness)|TestSendMessage(CompletionFailureLeavesHistoryUnchanged|ContextCancelsProviderAndReleasesSessionLock|SerializesIndependentManagersAndCommitsCompleteTurns|RejectsSessionDeletedByIndependentManagerBeforeProvider)|TestDeleteSessionWaitsForCompletedTurnFromIndependentManager|TestOpenAIRequestContextCancelsReconstructionAndReadinessLockWait|TestSendMessageTool_RoutesPureAPIBeforeTmux|TestGetSessionStatusIsTmuxIndependent|TestWithSessionLockContextCancelsContendedWait|TestMetadataUpdatesSerializeAndPreserveIndependentFields|TestSessionHistoryReloadSupportsLargeJSONLRecords|TestImportedOpenAIMessagesUseOneHistoryTransaction|TestAPISessionLockUsesProviderAppropriateWaitPolicy|TestArchiveSessionSerializesWithAPIDeliveryMutationLock|TestSendViaSharedOperations(UsesCallerContext|FailsClosedWhenHarnessIsNotReady|PreservesQueuedAGMRecoveryPolicy)|TestAPIDelivery(PassesCallerContextToReadiness|ReloadsLifecycleInsideStableSessionLock|RejectsReapingLifecycleInsideStableSessionLock|ReservesFullCompletionBudgetAfterPreflight|SerializesReadinessCompletionAndPersistenceByStableSessionID|UsesLockedManifestForAuditArtifact)|TestNewAPISessionDeliveryAdapterRejectsMissingOrNonAPISession|TestDeliverAPISessionMessage(ReloadsCurrentManifestAndUsesContextContracts|RejectsFailedAdapter)|TestAPIRecipientStateSkipsTmuxPersistence|TestClearHistoryPreservesRuntimeConfig|TestDirectAPIDeliveryRejectsArchivedSessionBeforeAdapterConstruction|TestMultiRecipientDelivery(AllowsFullProviderDeadline|UsesSharedAtomicReadiness|RenewsDeadlinePerRecipient)|TestSingleAndMultiRecipientAPIDeliveryUsesAdapterReadiness|TestNewAPISessionDeliveryAdapterReportsPureAPISessionReadyWithoutTmux|TestNewOpenAIAdapterForSession(RestoresPersistedRuntimeConfig|DoesNotScanUnrelatedSessions)|TestNewOpenAIAdapterForLegacySessionUsesManifestFallback|TestOpenAIExecutionModelDocumentsCompatibilityOnlyControlPlane|TestUpdateRuntimeConfigPersistence|TestSessionMetadata_OpenAIRoundTrip|TestDirectCLIDeliveryRejectsUnregisteredTmuxSession|TestCreateSession_NoRuntimeInitialPrompt(RevalidatesAfterRegistration|UsesAtomicExactPaneDelivery)|TestDeliverInitialPrompt(UsesAtomicExactPaneReadiness|FileUsesAtomicExactPaneReadiness|FailsClosedWhenHarnessDoesNotOwnTerminal))$`, "-count=1", "-v")
 	cmd.Dir = bddRepoRoot()
 	if os.Getenv("CI_SKIP_TMUX") != "true" {
 		cmd.Env = append(os.Environ(), "AGM_TEST_TMUX=1")
@@ -1216,7 +1226,7 @@ func agmBuildsTheCodexPrivateLaunchBoundary(ctx context.Context) error {
 	}, "bdd-private-codex")
 	testCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/harnessexec", "./agm/internal/agent", "./agm/internal/session", "./agm/internal/validate", "./agm/cmd/agm", "./agm/cmd/agm-mcp-server",
+	cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/harnessexec", "./agm/internal/agent", "./agm/internal/ops", "./agm/internal/session", "./agm/internal/validate", "./agm/cmd/agm", "./agm/cmd/agm-mcp-server",
 		"-run", `^(TestPrepared(ClaudeCommand(CarriesCallerOnlyOAuthAndTelemetry|ClearsCallerAbsentPaneState)|CodexCommand(CarriesCallerAllowlistAndPreservesPaneRuntime|ClearsCallerAbsentPaneCredentials|ResolvesExecutableFromCallerPATH)|Command(CancelRemovesUndeliveredHandoff|UsesCoInstalledAGMFromCompanionBinary|UsesMatchingVersionedAGMFromReleaseCompanion|RejectsCompanionWithoutCoInstalledAGM|UsesRenamedCurrentAGMExecutable|MakesRelativeStateDirectoryAbsolute|SchedulesIndependentExpiration|RemovesHandoffWhenExpirationCannotBeScheduled)|DeferredCommandSchedulesProducerLease)|Test(ResolveSubmissionPreservesUncertainAndCancelsConfirmedFailure|DeferredHandoffRemainsLiveUntilProducerExitThenExpires|ExpiryProtocolRemovesUnconsumedHandoffAtDeadline|DetachedExpiryHelper(InterceptsGoTestBinaryBeforeTestsRun|IsReapedAsynchronously)|ConsumeHandoff(UsesDeferredLeaseFreshnessAndUnlinksRejections|PreservesFilesOutsidePrivateStagingNamespace)|ClaudeResumeChangesDirectoryBeforeDirectReplacement|ClaudeResolvesRelativePATHAfterEnteringWorkDir|ArchitectureUsesPreparedClaudeResumeBoundary|ClaudeAdapter(Create|Resume)PreservesHandoffAfterUncertainSubmission|Codex(CreateSession|ResumeSession)PreservesHandoffAfterUncertainSubmission|ClaudeResumePreservesHandoffAndCreatedTmuxAfterUncertainSubmission|ResumabilityValidatorPreservesHandoffAfterUncertainSubmission|QueueCurrentTmux(Codex|Claude)PreservesHandoffAfterUncertainSubmission|MCPCreateSessionRuntimePreservesUncertainPrivateLaunch))$`,
 		"-count=1", "-v",
 	)
@@ -1446,7 +1456,7 @@ func singleAndFanOutAPISendsShouldUseAdapterSessionReadinessWithoutRequiringTmux
 		"TestMultiRecipientDeliveryRenewsDeadlinePerRecipient",
 		"TestMultiRecipientDeliveryAllowsFullProviderDeadline",
 		"TestSingleAndMultiRecipientAPIDeliveryUsesAdapterReadiness",
-		"TestNewAPIHarnessAdapterReportsPureAPISessionReadyWithoutTmux",
+		"TestNewAPISessionDeliveryAdapterReportsPureAPISessionReadyWithoutTmux",
 		"TestNewOpenAIAdapterForSessionRestoresPersistedRuntimeConfig",
 		"TestNewOpenAIAdapterForSessionDoesNotScanUnrelatedSessions",
 		"TestNewOpenAIAdapterForLegacySessionUsesManifestFallback",
@@ -1467,7 +1477,9 @@ func singleAndFanOutAPISendsShouldUseAdapterSessionReadinessWithoutRequiringTmux
 		"TestAPIDeliverySerializesReadinessCompletionAndPersistenceByStableSessionID",
 		"TestAPIDeliveryReloadsLifecycleInsideStableSessionLock",
 		"TestAPIDeliveryUsesLockedManifestForAuditArtifact",
-		"TestAPIDeliveryRejectsAdapterWithoutContextDelivery",
+		"TestNewAPISessionDeliveryAdapterRejectsMissingOrNonAPISession",
+		"TestDeliverAPISessionMessageReloadsCurrentManifestAndUsesContextContracts",
+		"TestDeliverAPISessionMessageRejectsFailedAdapter",
 		"TestAPIDeliveryRejectsReapingLifecycleInsideStableSessionLock",
 		"TestAPIRecipientStateSkipsTmuxPersistence",
 		"TestSendMessageTool_RoutesPureAPIBeforeTmux",
@@ -1638,7 +1650,7 @@ func bothPiCommandsShouldForwardCodingAgentDirectory(ctx context.Context) error 
 	if err != nil {
 		return err
 	}
-	want := "PI_CODING_AGENT_DIR=" + launchparity.ShellQuote(state.piCodingAgentDir)
+	want := "PI_CODING_AGENT_DIR=" + shellquote.Quote(state.piCodingAgentDir)
 	for name, command := range map[string]string{"create": state.piCreateCommand, "resume": state.piResumeCommand} {
 		if !strings.Contains(command, want) {
 			return fmt.Errorf("pi %s command omitted %q: %s", name, want, command)
@@ -2002,8 +2014,8 @@ func codexFactoryShouldUseCodexCLIAdapter() error {
 		return fmt.Errorf("read agent factory: %w", err)
 	}
 	source := string(data)
-	if !strings.Contains(source, `"codex-cli": func() (Agent, error) {`) ||
-		!strings.Contains(source, "return NewCodexCLIAdapter(nil)") {
+	if !strings.Contains(source, `case "codex-cli":`) ||
+		!strings.Contains(source, "return NewCodexCLIAdapter(store)") {
 		return fmt.Errorf("codex-cli factory does not use CodexCLIAdapter")
 	}
 	return nil
@@ -3629,10 +3641,10 @@ func runAgyLifecycleBehaviorSuite(ctx context.Context, harnessState *harnessPari
 		"./agm/internal/ops",
 		"./agm/internal/safety",
 		"./agm/internal/send",
+		"./agm/internal/session",
 		"./agm/internal/state",
 		"./agm/internal/tmux",
-		"-run", `^(Test(StartAgyHarness(UsesCanonicalLaunchAndWaits|PropagatesReadinessFailure)|StartNewSessionForContextRejectsCurrentTmuxAgyBeforeLaunch|BuildAgyCommand_(AutoPermissionMode|DefaultPermissionMode)|AgyModelCatalogMatchesPublicCLI|BuildAgyImportedManifest(LeavesUnknownModelUnset|PreservesConversationAndCurrentDefaults)|Integration_CreateSession_AgyBootstrapsLazyIdentityBeforeRegistrationExactlyOnce|CreateSession_AgyDetachedPromptUsesCanonicalCommand|CreateSession_Agy(WorkspaceLockReleasesBeforeSurfaceCompletion|IdentitySnapshotFailsBeforeTmuxMutation|IdentityDiscoveryFailureRollsBackBeforeRegistration|RejectsMissingIdentityBootstrapPromptBeforeMutation|BootstrapFailureRollsBackBeforeDiscoveryAndRegistration|CancellationDuringIdentityBootstrapRollsBackWithCallerError)|CreateSession_CancellationAfterRegistrationRollsBackBeforeCompletion|BuildAgyResumeCommandPreservesModelConversationAndMode|BuildAgyResumeCommand_(TranslatesLegacyModels|PreservesImportedConversationModel)|MigrateAmbiguousLegacyAgyModelClearsStoredOverride|GetResumeManifestStopsCanceledMigration|NormalizeModelInput(PreservesAgyPublicLabels|CanonicalizesCrossHarnessAliases)|ResolveCreateLifecyclePrompt(LoadsAgyPromptFileBeforeMutation|RejectsUnreadableAndOversizedAgyFiles|PreservesOtherHarnessAndDirectPromptBehavior)|ResolveSetModelInstruction_(PreservesAgyPublicLabel|NormalizesCrossHarnessAliasCase)|NewAgyModelConfirmationRejectsStaleOrMismatchedOutput|PersistAgyModelSwitchPreservesOnlyConfirmedProvenance|SQLite(CreateSessionDefaultsModelOnlyForClaude|UpdateSessionRoundTripsModel)|MCPCreateSessionRuntime(WaitsForAgyBeforePrompt|StopsBeforePromptAfterCancellation|BootstrapsAgyIdentityPromptExactlyOnce)|CLICreateSessionRuntimeUses(CallerContextForAgyIdentityBootstrap|AgyBracketedRawPaste)|ExecuteWithSignalContextPropagatesCancellation|RootCommandOwnsProcessSignalHandling|LongRunningCommandsConsumeRootContext|CommandHandlersAvoidBackgroundMultilineDelivery|RunScanLoopUsesCallerContext|RunHeartbeatWatchdogUsesCallerContext|ExecuteRestartContextUsesCallerContext|RunWatchUsesCallerContext|VerifyCompactionUsesCallerContext|MonitorCompactionUsesCallerContext|ResumeSessionStopsCancellationAfterManifestRead|FinalizeCLICreateSessionStopsCancellationAfterLiveness|WithAgyResumeWorkspaceLockCoversLifecycle|WaitForResumed(Agy|Claude|Codex)UsesCallerContext|WaitForResumedAgy(PropagatesOnboardingRequired|ToleratesSlowStartup)|WaitForAgyMetadataBackfillUsesCallerContext|WaitForAgyAssociationRetryDelayUsesCallerContext|Run(AgyPostCreate(ReturnsCancellationBeforeSideEffects|MetadataRetryUsesCallerContext|SkipsPromptAlreadyDeliveredForIdentityBootstrap|Propagates(ReadinessFailure|PostPromptReadinessFailure))|ClaudePostCreateReturnsCallerCancellationBeforeSideEffects|CodexPostCreateReturnsCancellationBeforePromptDelivery|SendSetModelUsesCallerContextBeforeSlashCommandDelivery)|DeliverInitialPromptReturnsCallerCancellation|DispatchModeSwitchContextStopsBeforeSlashCommandDelivery|CommandScoped(ReadinessWaitsReturnCallerCancellation|SafeDeliveryReturnsCallerCancellation)|StructuredPromptUsesCallerContext|Send(PostResumePromptUses(CallerContext|HarnessAwareAgyDelivery)|MultiLinePromptSafeContextReturnsCallerCancellation)|DaemonDeliveryUsesSharedOperationAndStableResult|PasteBufferArgsPreserveAgyMultilineAsBracketedRaw|SequentialDeliverPassesCallerContext|NewNonClaudeAssociationManifestLeavesAgyModelUnknown|UpdateNonClaudeAssociationManifestLeavesAgyModelUnknown|AgyCreateSession(UsesCanonicalModelAwareCommand|ImportedConversationOmitsUnknownModel|RejectsExistingTmuxAndUnsafeModelBeforeMutation|PropagatesReadinessFailureAndRollsBack|ReportsRollbackFailure|CapturesNativeConversationIdentity|BootstrapsLazyNativeIdentityWithInitialPrompt|RollsBackWhenInitialPromptBootstrapFails|NormalizesWorkingDirectoryForLaunchAndDiscovery|SerializesWorkspaceIdentityDiscovery|RollsBackWhenNativeIdentityCannotBeCaptured|DoesNotReuseStaleNativeConversationIdentity)|AgySendMessage(UsesHarnessAwareMultilineDelivery|PropagatesHarnessAwareDeliveryFailure)|AgyResumePolicyPersistsInJSONSessionStore|AgyResumeSession(PreservesNativeIdentityModelAndMode|OmitsModelWhenProvenanceUnknown|DoesNotInventNativeIdentity|RejectsUnsafeNativeIdentityBeforeMutation|RejectsAnotherLiveHarnessBeforeMutation|RejectsNonShellForegroundBeforeMutation|RestartsInExistingBareShell|HoldsWorkspaceLockThroughReadiness|SerializesPaneProofWithCommandDelivery|UsesExactProcessLivenessAndFailsSafe|LeavesLiveAgyUntouched|UsesTranscriptSafeReadinessPolicy|PropagatesReadinessFailureBeforeAttach)|AgyGetSessionStatusRequiresAgyProcess|AgyGetHistory(ReadsNativeTranscript|FallsBackToFullTranscript|RequiresNativeIdentity|RejectsUnsafeNativeIdentity)|AgyAdapterRejectsUnsupportedRunHook|DetectAgySessionUninitialized|NormalizeHarnessForSafety|Agy(StaleSurveyAllowsLaterReadyPrompt|PromptBeforeSurveyRemainsOverlay)|ContainsAgyPromptAfterSurveyRequiresLaterPrompt|ClassifyPaneLiveness|CheckPaneLivenessContextHonorsCallerCancellation|WaitForAgyPrompt(AcceptsTrustBeforeReady|DismissesSurveyBeforeReady|DoesNotRedismissStaleSurvey|RejectsFirstRunOnboardingWithoutInput|ReturnsCancellationAfterReadyStabilityDelay)))$`,
-		"-count=1", "-v",
+		"-run", `^(Test(StartAgyHarness(UsesCanonicalLaunchAndWaits|PropagatesReadinessFailure)|StartNewSessionForContextRejectsCurrentTmuxAgyBeforeLaunch|BuildAgyCommand_(AutoPermissionMode|DefaultPermissionMode)|AgyModelCatalogMatchesPublicCLI|BuildAgyImportedManifest(LeavesUnknownModelUnset|PreservesConversationAndCurrentDefaults)|Integration_CreateSession_AgyBootstrapsLazyIdentityBeforeRegistrationExactlyOnce|CreateSession_AgyDetachedPromptUsesCanonicalCommand|CreateSession_Agy(WorkspaceLockReleasesBeforeSurfaceCompletion|IdentitySnapshotFailsBeforeTmuxMutation|IdentityDiscoveryFailureRollsBackBeforeRegistration|RejectsMissingIdentityBootstrapPromptBeforeMutation|BootstrapFailureRollsBackBeforeDiscoveryAndRegistration|CancellationDuringIdentityBootstrapRollsBackWithCallerError)|CreateSession_CancellationAfterRegistrationRollsBackBeforeCompletion|BuildAgyResumeCommandPreservesModelConversationAndMode|ResumeSession(AgyUnknownModelDoesNotInventOverride|MigratesAmbiguousAgyModelInsideOperation|AgyWorkspaceLockCoversSubmissionAndReadiness|AgyPromptUsesHarnessAwareDelivery|CancellationBeforePromptRollsBackColdRuntime|IgnoresCancellationAfterPromptStarts|AcquiresStableLockBeforeStorageRead)|NormalizeModelInput(PreservesAgyPublicLabels|CanonicalizesCrossHarnessAliases)|ResolveCreateLifecyclePrompt(LoadsAgyPromptFileBeforeMutation|RejectsUnreadableAndOversizedAgyFiles|PreservesOtherHarnessAndDirectPromptBehavior)|ResolveSetModelInstruction_(PreservesAgyPublicLabel|NormalizesCrossHarnessAliasCase)|NewAgyModelConfirmationRejectsStaleOrMismatchedOutput|PersistAgyModelSwitchPreservesOnlyConfirmedProvenance|SQLite(CreateSessionDefaultsModelOnlyForClaude|UpdateSessionRoundTripsModel)|MCPCreateSessionRuntime(WaitsForAgyBeforePrompt|StopsBeforePromptAfterCancellation|BootstrapsAgyIdentityPromptExactlyOnce)|CLICreateSessionRuntimeUses(CallerContextForAgyIdentityBootstrap|AgyBracketedRawPaste)|ExecuteWithSignalContextPropagatesCancellation|RootCommandOwnsProcessSignalHandling|LongRunningCommandsConsumeRootContext|CommandHandlersAvoidBackgroundMultilineDelivery|RunScanLoopUsesCallerContext|RunHeartbeatWatchdogUsesCallerContext|ExecuteRestartContextUsesCallerContext|RunWatchUsesCallerContext|VerifyCompactionUsesCallerContext|MonitorCompactionUsesCallerContext|FinalizeCLICreateSessionStopsCancellationAfterLiveness|RealTmuxResumeReadinessReturnsCallerCancellation|AgyResumeReadinessPreservesOnboardingAndSlowStartupPolicy|WaitForAgyMetadataBackfillUsesCallerContext|WaitForAgyAssociationRetryDelayUsesCallerContext|Run(AgyPostCreate(ReturnsCancellationBeforeSideEffects|MetadataRetryUsesCallerContext|SkipsPromptAlreadyDeliveredForIdentityBootstrap|Propagates(ReadinessFailure|PostPromptReadinessFailure))|ClaudePostCreateReturnsCallerCancellationBeforeSideEffects|CodexPostCreateReturnsCancellationBeforePromptDelivery|SendSetModelUsesCallerContextBeforeSlashCommandDelivery)|DeliverInitialPromptReturnsCallerCancellation|DispatchModeSwitchContextStopsBeforeSlashCommandDelivery|CommandScoped(ReadinessWaitsReturnCallerCancellation|SafeDeliveryReturnsCallerCancellation)|StructuredPromptUsesCallerContext|SendMultiLinePromptSafeContextReturnsCallerCancellation|DaemonDelivery(UsesSharedOperationAndStableResult|DoesNotMarkCompletedAPITurnWorking)|PasteBufferArgsPreserveAgyMultilineAsBracketedRaw|SequentialDeliverPassesCallerContext|NewNonClaudeAssociationManifestLeavesAgyModelUnknown|UpdateNonClaudeAssociationManifestLeavesAgyModelUnknown|AgyCreateSession(UsesCanonicalModelAwareCommand|ImportedConversationOmitsUnknownModel|RejectsExistingTmuxAndUnsafeModelBeforeMutation|PropagatesReadinessFailureAndRollsBack|ReportsRollbackFailure|CapturesNativeConversationIdentity|BootstrapsLazyNativeIdentityWithInitialPrompt|RollsBackWhenInitialPromptBootstrapFails|NormalizesWorkingDirectoryForLaunchAndDiscovery|SerializesWorkspaceIdentityDiscovery|RollsBackWhenNativeIdentityCannotBeCaptured|DoesNotReuseStaleNativeConversationIdentity)|AgySendMessage(UsesHarnessAwareMultilineDelivery|PropagatesHarnessAwareDeliveryFailure)|AgyResumePolicyPersistsInJSONSessionStore|AgyResumeSession(PreservesNativeIdentityModelAndMode|OmitsModelWhenProvenanceUnknown|DoesNotInventNativeIdentity|RejectsUnsafeNativeIdentityBeforeMutation|RejectsAnotherLiveHarnessBeforeMutation|RejectsNonShellForegroundBeforeMutation|RestartsInExistingBareShell|HoldsWorkspaceLockThroughReadiness|SerializesPaneProofWithCommandDelivery|UsesExactProcessLivenessAndFailsSafe|LeavesLiveAgyUntouched|UsesTranscriptSafeReadinessPolicy|PropagatesReadinessFailureBeforeAttach)|AgyGetSessionStatusRequiresAgyProcess|AgyGetHistory(ReadsNativeTranscript|FallsBackToFullTranscript|RequiresNativeIdentity|RejectsUnsafeNativeIdentity)|AgyAdapterRejectsUnsupportedRunHook|DetectAgySessionUninitialized|NormalizeHarnessForSafety|Agy(StaleSurveyAllowsLaterReadyPrompt|PromptBeforeSurveyRemainsOverlay)|ContainsAgyPromptAfterSurveyRequiresLaterPrompt|ClassifyPaneLiveness|CheckPaneLivenessContextHonorsCallerCancellation|WaitForAgyPrompt(AcceptsTrustBeforeReady|DismissesSurveyBeforeReady|DoesNotRedismissStaleSurvey|RejectsFirstRunOnboardingWithoutInput|ReturnsCancellationAfterReadyStabilityDelay)))$`, "-count=1", "-v",
 	)
 	cmd.Dir = bddRepoRoot()
 	output, runErr := cmd.CombinedOutput()
@@ -3707,7 +3719,7 @@ func agyAdapterShouldPreserveCanonicalLaunchAndResumePolicy(ctx context.Context)
 		"TestAgyCreateSessionReportsRollbackFailure",
 		"TestFileLockTryLockPreservesPermanentFlockError",
 		"TestAcquireWorkspaceCreateLockStopsOnPermanentFlockError",
-		"TestWithAgyResumeWorkspaceLockCoversLifecycle",
+		"TestResumeSessionAgyWorkspaceLockCoversSubmissionAndReadiness",
 		"TestAgyResumePolicyPersistsInJSONSessionStore",
 		"TestAgyResumeSessionPreservesNativeIdentityModelAndMode",
 		"TestAgyResumeSessionOmitsModelWhenProvenanceUnknown",
@@ -3722,8 +3734,7 @@ func agyAdapterShouldPreserveCanonicalLaunchAndResumePolicy(ctx context.Context)
 		"TestAgyResumeSessionLeavesLiveAgyUntouched",
 		"TestAgyResumeSessionUsesTranscriptSafeReadinessPolicy",
 		"TestAgyResumeSessionPropagatesReadinessFailureBeforeAttach",
-		"TestWaitForResumedAgyPropagatesOnboardingRequired",
-		"TestWaitForResumedAgyToleratesSlowStartup",
+		"TestAgyResumeReadinessPreservesOnboardingAndSlowStartupPolicy",
 		"TestWaitForAgyPromptOnResumeIgnoresTransientQuotedOnboarding",
 		"TestWaitForAgyPromptOnResumeConfirmsPersistentOnboardingWithoutInput",
 	)
@@ -3772,7 +3783,7 @@ func retiredAGYManifestModelsShouldMapToCurrentPublicLabels(ctx context.Context)
 	if err != nil {
 		return err
 	}
-	return requireAgyLifecycleBehaviors(harnessState, "TestBuildAgyResumeCommand_TranslatesLegacyModels")
+	return requireAgyLifecycleBehaviors(harnessState, "TestResumeSessionMigratesAmbiguousAgyModelInsideOperation")
 }
 
 func exactAGYPublicLabelsShouldRemainUnchanged(ctx context.Context) error {
@@ -3806,8 +3817,8 @@ func importedAGYConversationsShouldPreserveUnknownModelProvenance(ctx context.Co
 		"TestBuildAgyImportedManifestLeavesUnknownModelUnset",
 		"TestNewNonClaudeAssociationManifestLeavesAgyModelUnknown",
 		"TestUpdateNonClaudeAssociationManifestLeavesAgyModelUnknown",
-		"TestBuildAgyResumeCommand_PreservesImportedConversationModel",
-		"TestMigrateAmbiguousLegacyAgyModelClearsStoredOverride",
+		"TestResumeSessionAgyUnknownModelDoesNotInventOverride",
+		"TestResumeSessionMigratesAmbiguousAgyModelInsideOperation",
 		"TestSQLiteCreateSessionDefaultsModelOnlyForClaude",
 	)
 }
@@ -3936,10 +3947,10 @@ func rootSignalCancellationShouldReachEveryCommandScopedReadinessWait(ctx contex
 		"TestMonitorCompactionUsesCallerContext",
 		"TestCreateSession_CancellationAfterRegistrationRollsBackBeforeCompletion",
 		"TestMCPCreateSessionRuntimeStopsBeforePromptAfterCancellation",
-		"TestGetResumeManifestStopsCanceledMigration",
-		"TestResumeSessionStopsCancellationAfterManifestRead",
+		"TestResumeSessionAcquiresStableLockBeforeStorageRead",
+		"TestResumeSessionCancellationBeforePromptRollsBackColdRuntime",
 		"TestFinalizeCLICreateSessionStopsCancellationAfterLiveness",
-		"TestWaitForResumedAgyUsesCallerContext",
+		"TestRealTmuxResumeReadinessReturnsCallerCancellation",
 		"TestWaitForAgyMetadataBackfillUsesCallerContext",
 		"TestWaitForAgyAssociationRetryDelayUsesCallerContext",
 		"TestRunAgyPostCreateReturnsCancellationBeforeSideEffects",
@@ -3952,15 +3963,14 @@ func rootSignalCancellationShouldReachEveryCommandScopedReadinessWait(ctx contex
 		"TestDispatchModeSwitchContextStopsBeforeSlashCommandDelivery",
 		"TestCommandScopedReadinessWaitsReturnCallerCancellation",
 		"TestCommandScopedSafeDeliveryReturnsCallerCancellation",
-		"TestWaitForResumedClaudeUsesCallerContext",
-		"TestWaitForResumedCodexUsesCallerContext",
+		"TestRealTmuxResumeReadinessReturnsCallerCancellation",
 		"TestRunCodexPostCreateReturnsCancellationBeforePromptDelivery",
 		"TestWaitForAgyPromptReturnsCancellationAfterReadyStabilityDelay",
 		"TestSendViaSharedOperationsUsesCallerContext",
 		"TestStructuredPromptUsesCallerContext",
 		"TestSequentialDeliverPassesCallerContext",
-		"TestSendPostResumePromptUsesCallerContext",
-		"TestSendPostResumePromptUsesHarnessAwareAgyDelivery",
+		"TestResumeSessionIgnoresCancellationAfterPromptStarts",
+		"TestResumeSessionAgyPromptUsesHarnessAwareDelivery",
 		"TestSendMultiLinePromptSafeContextReturnsCallerCancellation",
 		"TestCheckPaneLivenessContextHonorsCallerCancellation",
 		"TestAgyStaleSurveyAllowsLaterReadyPrompt",
@@ -4063,7 +4073,7 @@ func codexHookReviewShouldReceiveNoAutomatedInput(ctx context.Context) error {
 		testCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		cmd := exec.CommandContext(testCtx, "go", "test", "./agm/internal/tmux", "./agm/internal/session", "./agm/internal/ops", "./agm/cmd/agm",
-			"-run", `^(TestWaitForCodexPromptFailsFastForHookReviewWithoutInput|TestWaitForCodexPromptFailsFastForHookDashboardWithoutInput|TestHandleHarnessStartupStateFailsHookReviewWithoutAdvancing|TestRealTmuxReadinessFailsFastForCodexHookReviewAboveBlankRows|TestCreateSession_CodexHookReviewPropagatesBeforeRegistrationOrPrompt|TestResumeSessionCodexPropagatesHookReviewBeforeActivityUpdate)$`,
+			"-run", `^(TestWaitForCodexPromptFailsFastForHookReviewWithoutInput|TestWaitForCodexPromptFailsFastForHookDashboardWithoutInput|TestHandleHarnessStartupStateFailsHookReviewWithoutAdvancing|TestRealTmuxReadinessFailsFastForCodexHookReviewAboveBlankRows|TestCreateSession_CodexHookReviewPropagatesBeforeRegistrationOrPrompt|TestResumeSessionCodexHookReviewFailsBeforeActivityUpdate)$`,
 			"-count=1", "-v",
 		)
 		cmd.Dir = bddRepoRoot()
@@ -4086,7 +4096,7 @@ func codexHookReviewShouldReceiveNoAutomatedInput(ctx context.Context) error {
 		"TestHandleHarnessStartupStateFailsHookReviewWithoutAdvancing",
 		"TestRealTmuxReadinessFailsFastForCodexHookReviewAboveBlankRows",
 		"TestCreateSession_CodexHookReviewPropagatesBeforeRegistrationOrPrompt",
-		"TestResumeSessionCodexPropagatesHookReviewBeforeActivityUpdate",
+		"TestResumeSessionCodexHookReviewFailsBeforeActivityUpdate",
 	} {
 		passed := strings.Contains(harnessState.codexHookReviewTestOutput, "--- PASS: "+testName)
 		policySkipped := (testName == "TestWaitForCodexPromptFailsFastForHookReviewWithoutInput" ||
@@ -4183,7 +4193,7 @@ func everyAGYMessageSurfaceShouldPreserveOneBracketedMultilineSubmission(ctx con
 		"TestCLICreateSessionRuntimeUsesAgyBracketedRawPaste",
 		"TestAgyCreateSessionBootstrapsLazyNativeIdentityWithInitialPrompt",
 		"TestAgySendMessageUsesHarnessAwareMultilineDelivery",
-		"TestSendPostResumePromptUsesHarnessAwareAgyDelivery",
+		"TestResumeSessionAgyPromptUsesHarnessAwareDelivery",
 	)
 }
 
@@ -4298,7 +4308,7 @@ func agmImportsAGYConversationIDWithHarness(ctx context.Context, harness string)
 	}
 	if err := requireAgyLifecycleBehaviors(harnessState,
 		"TestBuildAgyImportedManifestLeavesUnknownModelUnset",
-		"TestBuildAgyResumeCommand_PreservesImportedConversationModel",
+		"TestResumeSessionAgyUnknownModelDoesNotInventOverride",
 	); err != nil {
 		return err
 	}

@@ -4,6 +4,7 @@ package history
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,7 +12,12 @@ import (
 	"time"
 )
 
-// History manages append-only event logging to WAYFINDER-HISTORY.md
+// ErrAmbiguousHistory means both the legacy and canonical append-only logs
+// exist. Lifecycle transitions must stop before mutating status until an
+// operator reconciles the two histories.
+var ErrAmbiguousHistory = errors.New("ambiguous history state")
+
+// History manages append-only event logging to WAYFINDER-HISTORY.jsonl
 type History struct {
 	path string
 }
@@ -23,9 +29,42 @@ func New(dir string) *History {
 	}
 }
 
+// EnsureCurrentFile atomically migrates the legacy JSON Lines filename before
+// the history is read, appended, or archived.
+func (h *History) EnsureCurrentFile() error {
+	legacyPath := filepath.Join(filepath.Dir(h.path), LegacyHistoryFilename)
+	if _, err := os.Stat(h.path); err == nil {
+		if _, legacyErr := os.Stat(legacyPath); legacyErr == nil {
+			return fmt.Errorf("%w: both %s and %s exist; reconcile them before continuing", ErrAmbiguousHistory, h.path, legacyPath)
+		} else if !os.IsNotExist(legacyErr) {
+			return fmt.Errorf("stat legacy history file: %w", legacyErr)
+		}
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat history file: %w", err)
+	}
+
+	if _, err := os.Stat(legacyPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat legacy history file: %w", err)
+	}
+	if err := os.Rename(legacyPath, h.path); err != nil {
+		if _, statErr := os.Stat(h.path); statErr == nil {
+			return nil
+		}
+		return fmt.Errorf("migrate legacy history file: %w", err)
+	}
+	return nil
+}
+
 // AppendEvent appends a new event to the history log
 // Uses O_APPEND flag for concurrent-safe writes
 func (h *History) AppendEvent(eventType, phase string, data map[string]interface{}) error {
+	if err := h.EnsureCurrentFile(); err != nil {
+		return err
+	}
 	event := Event{
 		Timestamp: time.Now(),
 		Type:      eventType,
@@ -56,6 +95,9 @@ func (h *History) AppendEvent(eventType, phase string, data map[string]interface
 
 // Read reads all events from the history log
 func (h *History) Read() ([]Event, error) {
+	if err := h.EnsureCurrentFile(); err != nil {
+		return nil, err
+	}
 	// Check if file exists
 	if _, err := os.Stat(h.path); os.IsNotExist(err) {
 		return []Event{}, nil // Empty history

@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/archive"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/git"
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/history"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/retrospective"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
@@ -81,6 +82,14 @@ func runRewind(cmd *cobra.Command, args []string) error {
 
 	if err := validateRewindTarget(st, targetPhase); err != nil {
 		return err
+	}
+
+	// Migrate a legacy history filename only after every rewind precondition
+	// holds. A rejected rewind must leave the project byte-for-byte unchanged;
+	// renaming first strands an uncommitted rename that the next start-phase
+	// refuses to migrate because its dirty-worktree check runs first.
+	if err := history.New(projectDir).EnsureCurrentFile(); err != nil {
+		return fmt.Errorf("prepare history for rewind: %w", err)
 	}
 
 	// Archive current state before rewinding

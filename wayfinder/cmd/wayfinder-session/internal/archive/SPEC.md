@@ -17,9 +17,9 @@ listed without requiring callers to know the on-disk archive naming convention.
 
 **WAYFINDER-ARCHIVE-03** When a phase is archived, the system shall copy `WAYFINDER-STATUS.md` into the archive and shall fail if the status file cannot be read or written.
 
-**WAYFINDER-ARCHIVE-04** When `WAYFINDER-HISTORY.md` exists, the system shall copy it into the same archive directory as the status snapshot.
+**WAYFINDER-ARCHIVE-04** When `WAYFINDER-HISTORY.jsonl` exists, the system shall copy it into the same archive directory as the status snapshot.
 
-**WAYFINDER-ARCHIVE-05** When `WAYFINDER-HISTORY.md` does not exist, the system shall still complete the archive if the status snapshot succeeds.
+**WAYFINDER-ARCHIVE-05** When `WAYFINDER-HISTORY.jsonl` does not exist, the system shall still complete the archive if the status snapshot succeeds.
 
 **WAYFINDER-ARCHIVE-06** When archives are listed and the archive root does not exist, the system shall return an empty archive list rather than an error.
 

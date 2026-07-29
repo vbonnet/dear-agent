@@ -325,6 +325,13 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 			return nil, err
 		}
 	}
+	// Validate every request-derived terminal value before acquiring lifecycle
+	// locks or creating either a tmux session or a remote provider thread.
+	// Provider-derived metadata is validated again when the final command is
+	// prepared after remote setup.
+	if err := validateHarnessLaunchSpec(buildHarnessLaunchSpec(req, params, req.SessionID, nil)); err != nil {
+		return nil, ErrStorageError("prepare harness launch", err)
+	}
 	var agyIdentityTracker agysession.CreateIdentityTracker
 	var previousAgyConversationID string
 	var releaseAgyWorkspaceLock func() error
@@ -599,6 +606,18 @@ func buildHarnessLaunchSpec(req *CreateSessionRequest, params *createSessionPara
 	return spec
 }
 
+func cloneCreateSandbox(req *CreateSessionRequest) *manifest.SandboxConfig {
+	if req.Metadata.Sandbox == nil {
+		return nil
+	}
+	sandbox := *req.Metadata.Sandbox
+	sandbox.ExtraAddDirs = nil
+	if sandbox.Enabled {
+		sandbox.ExtraAddDirs = append([]string{}, req.ExtraAddDirs...)
+	}
+	return &sandbox
+}
+
 func prepareCreateManifestDir(req *CreateSessionRequest) (manifestPath string, registrationAllowed, created bool, err error) {
 	if req.ManifestDir == "" {
 		return "", true, false, nil
@@ -792,7 +811,7 @@ func buildCreateSessionManifest(req *CreateSessionRequest, params *createSession
 		ModelTier:        req.Metadata.ModelTier,
 		Claude:           manifest.Claude{},
 		PermissionPolicy: cloneCreatePermissionPolicy(req.Metadata.PermissionPolicy),
-		Sandbox:          req.Metadata.Sandbox,
+		Sandbox:          cloneCreateSandbox(req),
 		IsTest:           req.Metadata.IsTest,
 		Disposable:       req.Metadata.Disposable,
 		DisposableTTL:    req.Metadata.DisposableTTL,

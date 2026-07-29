@@ -166,7 +166,7 @@ func TestCommitPhaseCompletion(t *testing.T) {
 		t.Fatalf("failed to write STATUS: %v", err)
 	}
 
-	historyPath := filepath.Join(repoDir, "WAYFINDER-HISTORY.md")
+	historyPath := filepath.Join(repoDir, "WAYFINDER-HISTORY.jsonl")
 	if err := os.WriteFile(historyPath, []byte("{}\n"), 0644); err != nil {
 		t.Fatalf("failed to write HISTORY: %v", err)
 	}
@@ -250,12 +250,12 @@ func TestCommitPhaseCompletionIncludesDesignADRs(t *testing.T) {
 	}
 
 	for name, content := range map[string]string{
-		"WAYFINDER-STATUS.md":  "# Status\n",
-		"WAYFINDER-HISTORY.md": "{}\n",
-		"DESIGN-overview.md":   "# Design\n",
-		"ARCHITECTURE.md":      "# Architecture\n",
-		"ADR-001-storage.md":   "# ADR-001 Storage\n",
-		"user-notes.md":        "private notes\n",
+		"WAYFINDER-STATUS.md":     "# Status\n",
+		"WAYFINDER-HISTORY.jsonl": "{}\n",
+		"DESIGN-overview.md":      "# Design\n",
+		"ARCHITECTURE.md":         "# Architecture\n",
+		"ADR-001-storage.md":      "# ADR-001 Storage\n",
+		"user-notes.md":           "private notes\n",
 	} {
 		if err := os.WriteFile(filepath.Join(repoDir, name), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
@@ -273,7 +273,7 @@ func TestCommitPhaseCompletionIncludesDesignADRs(t *testing.T) {
 		t.Fatal(err)
 	}
 	committed := string(showOutput)
-	for _, name := range []string{"WAYFINDER-STATUS.md", "WAYFINDER-HISTORY.md", "DESIGN-overview.md", "ARCHITECTURE.md", "ADR-001-storage.md"} {
+	for _, name := range []string{"WAYFINDER-STATUS.md", "WAYFINDER-HISTORY.jsonl", "DESIGN-overview.md", "ARCHITECTURE.md", "ADR-001-storage.md"} {
 		if !strings.Contains(committed, name) {
 			t.Errorf("DESIGN commit missing %s:\n%s", name, committed)
 		}
@@ -295,10 +295,10 @@ func TestCommitRewindCommitsCanonicalMarkersOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, content := range map[string]string{
-		"WAYFINDER-STATUS.md":    "status: in-progress\n",
-		"WAYFINDER-HISTORY.md":   "{}\n",
-		"RETRO-retrospective.md": "# Retro\n",
-		"user-notes.md":          "private\n",
+		"WAYFINDER-STATUS.md":     "status: in-progress\n",
+		"WAYFINDER-HISTORY.jsonl": "{}\n",
+		"RETRO-retrospective.md":  "# Retro\n",
+		"user-notes.md":           "private\n",
 	} {
 		if err := os.WriteFile(filepath.Join(repoDir, name), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
@@ -315,7 +315,7 @@ func TestCommitRewindCommitsCanonicalMarkersOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	committed := string(showOutput)
-	for _, name := range []string{"WAYFINDER-STATUS.md", "WAYFINDER-HISTORY.md", "RETRO-retrospective.md"} {
+	for _, name := range []string{"WAYFINDER-STATUS.md", "WAYFINDER-HISTORY.jsonl", "RETRO-retrospective.md"} {
 		if !strings.Contains(committed, name) {
 			t.Errorf("rewind commit missing %s:\n%s", name, committed)
 		}
@@ -407,7 +407,7 @@ func TestCommitSessionInit_MissingStatusFile(t *testing.T) {
 }
 
 // TestCommitPhaseStart verifies that CommitPhaseStart creates a commit
-// containing WAYFINDER-STATUS.md and WAYFINDER-HISTORY.md with the correct
+// containing WAYFINDER-STATUS.md and WAYFINDER-HISTORY.jsonl with the correct
 // "wayfinder: start <PHASE>" subject line.
 func TestCommitPhaseStart(t *testing.T) {
 	repoDir := setupGitRepo(t)
@@ -427,7 +427,7 @@ func TestCommitPhaseStart(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repoDir, "WAYFINDER-STATUS.md"), []byte("# Status\n"), 0644); err != nil {
 		t.Fatalf("failed to write STATUS: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(repoDir, "WAYFINDER-HISTORY.md"), []byte("{}\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(repoDir, "WAYFINDER-HISTORY.jsonl"), []byte("{}\n"), 0644); err != nil {
 		t.Fatalf("failed to write HISTORY: %v", err)
 	}
 
@@ -454,6 +454,109 @@ func TestCommitPhaseStart(t *testing.T) {
 	}
 }
 
+func TestCommitPhaseStartForceAddsIgnoredCanonicalHistory(t *testing.T) {
+	repoDir := setupGitRepo(t)
+	g := New(repoDir)
+
+	for path, content := range map[string]string{
+		".gitignore":              "*.jsonl\n",
+		"README.md":               "# Test Project\n",
+		"WAYFINDER-STATUS.md":     "# Status\n",
+		"WAYFINDER-HISTORY.jsonl": "{}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(repoDir, path), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	if err := gittest.Command(t, repoDir, "add", ".gitignore", "README.md").Run(); err != nil {
+		t.Fatalf("stage initial files: %v", err)
+	}
+	if err := gittest.Command(t, repoDir, "commit", "-m", "Initial commit").Run(); err != nil {
+		t.Fatalf("initial commit: %v", err)
+	}
+
+	if err := g.CommitPhaseStart("CHARTER"); err != nil {
+		t.Fatalf("CommitPhaseStart() error = %v", err)
+	}
+
+	names, err := gittest.Command(t, repoDir, "show", "--name-only", "--format=", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("git show: %v", err)
+	}
+	for _, marker := range []string{"WAYFINDER-STATUS.md", "WAYFINDER-HISTORY.jsonl"} {
+		if !strings.Contains(string(names), marker) {
+			t.Errorf("lifecycle commit missing ignored canonical marker %s:\n%s", marker, names)
+		}
+	}
+}
+
+func TestLifecycleCommitsStageLegacyHistoryDeletion(t *testing.T) {
+	tests := map[string]func(*GitIntegrator) error{
+		"start": func(g *GitIntegrator) error {
+			return g.CommitPhaseStart("CHARTER")
+		},
+		"completion": func(g *GitIntegrator) error {
+			return g.CommitPhaseCompletion("PROBLEM", "success", "")
+		},
+		"rewind": func(g *GitIntegrator) error {
+			if err := os.WriteFile(filepath.Join(g.projectDir, "RETRO-retrospective.md"), []byte("# Retro\n"), 0o644); err != nil {
+				return err
+			}
+			return g.CommitRewind("BUILD", "DESIGN")
+		},
+	}
+
+	for name, commitLifecycle := range tests {
+		t.Run(name, func(t *testing.T) {
+			repoDir := setupGitRepo(t)
+			for path, content := range map[string]string{
+				"WAYFINDER-STATUS.md":  "# Status\n",
+				"WAYFINDER-HISTORY.md": "{}\n",
+			} {
+				if err := os.WriteFile(filepath.Join(repoDir, path), []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := gittest.Command(t, repoDir, "add", ".").Run(); err != nil {
+				t.Fatal(err)
+			}
+			if err := gittest.Command(t, repoDir, "commit", "-m", "legacy history").Run(); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := os.Rename(
+				filepath.Join(repoDir, "WAYFINDER-HISTORY.md"),
+				filepath.Join(repoDir, "WAYFINDER-HISTORY.jsonl"),
+			); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(repoDir, "WAYFINDER-STATUS.md"), []byte("# Updated status\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := commitLifecycle(New(repoDir)); err != nil {
+				t.Fatalf("lifecycle commit: %v", err)
+			}
+			status, err := gittest.Command(t, repoDir, "status", "--porcelain").Output()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.TrimSpace(string(status)) != "" {
+				t.Fatalf("legacy migration left dirty worktree:\n%s", status)
+			}
+			names, err := gittest.Command(t, repoDir, "show", "--no-renames", "--name-only", "--format=", "HEAD").Output()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{"WAYFINDER-HISTORY.md", "WAYFINDER-HISTORY.jsonl"} {
+				if !strings.Contains(string(names), want) {
+					t.Errorf("migration commit missing %s:\n%s", want, names)
+				}
+			}
+		})
+	}
+}
+
 // TestCommitPhaseStart_NonGitRepo verifies CommitPhaseStart returns an error
 // when the directory is not inside a git repository.
 func TestCommitPhaseStart_NonGitRepo(t *testing.T) {
@@ -471,7 +574,7 @@ func TestCommitPhaseStart_NothingToCommit(t *testing.T) {
 
 	// Create initial commit with the marker files already committed.
 	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-STATUS.md"), []byte("# Status\n"), 0644)
-	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-HISTORY.md"), []byte("{}\n"), 0644)
+	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-HISTORY.jsonl"), []byte("{}\n"), 0644)
 	gittest.Command(t, repoDir, "add", ".").Run()
 	gittest.Command(t, repoDir, "commit", "-m", "Add wayfinder files").Run()
 
@@ -482,7 +585,7 @@ func TestCommitPhaseStart_NothingToCommit(t *testing.T) {
 }
 
 // TestCommitPhaseStart_ScopedToMarkerFiles verifies CommitPhaseStart only
-// commits WAYFINDER-STATUS.md and WAYFINDER-HISTORY.md, leaving any other
+// commits WAYFINDER-STATUS.md and WAYFINDER-HISTORY.jsonl, leaving any other
 // staged files untouched in the index (ce-fvkz regression guard).
 func TestCommitPhaseStart_ScopedToMarkerFiles(t *testing.T) {
 	repoDir := setupGitRepo(t)
@@ -500,7 +603,7 @@ func TestCommitPhaseStart_ScopedToMarkerFiles(t *testing.T) {
 
 	// Write and let CommitPhaseStart commit only the marker files.
 	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-STATUS.md"), []byte("# Status\n"), 0644)
-	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-HISTORY.md"), []byte("{}\n"), 0644)
+	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-HISTORY.jsonl"), []byte("{}\n"), 0644)
 
 	if err := g.CommitPhaseStart("DESIGN"); err != nil {
 		t.Fatalf("CommitPhaseStart() error = %v", err)
@@ -540,7 +643,7 @@ func TestCommitPhaseStart_LeavesWorktreeCleanForNextTransition(t *testing.T) {
 
 	// Simulate what start-phase does: write marker files then auto-commit.
 	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-STATUS.md"), []byte("status: in_progress\n"), 0644)
-	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-HISTORY.md"), []byte("[]\n"), 0644)
+	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-HISTORY.jsonl"), []byte("[]\n"), 0644)
 
 	if err := g.CommitPhaseStart("CHARTER"); err != nil {
 		t.Fatalf("CommitPhaseStart() error = %v", err)

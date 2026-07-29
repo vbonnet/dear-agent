@@ -3,10 +3,13 @@ package commands
 import (
 	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/history"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
 
@@ -114,5 +117,33 @@ func TestValidateRewindTargetRejectsConfiguredSkip(t *testing.T) {
 	err := validateRewindTarget(st, status.WaypointV2Design)
 	if err == nil || err.Error() != "cannot rewind to phase DESIGN: phase is configured to be skipped" {
 		t.Fatalf("validateRewindTarget() error = %v, want configured-skip rejection", err)
+	}
+}
+
+func TestRunRewindLeavesLegacyHistoryUntouchedWhenTargetIsRejected(t *testing.T) {
+	projectDir := t.TempDir()
+	previous := projectDirectory
+	projectDirectory = projectDir
+	t.Cleanup(func() { projectDirectory = previous })
+
+	st := status.NewStatusV2("rewind-guard", "service", "low")
+	if err := status.WriteV2ToDir(st, projectDir); err != nil {
+		t.Fatalf("seed status file: %v", err)
+	}
+
+	legacyPath := filepath.Join(projectDir, history.LegacyHistoryFilename)
+	if err := os.WriteFile(legacyPath, []byte("{\"event\":\"seed\"}\n"), 0o600); err != nil {
+		t.Fatalf("seed legacy history: %v", err)
+	}
+
+	if err := runRewind(nil, []string{"NOT-A-PHASE"}); err == nil {
+		t.Fatal("runRewind accepted an invalid target phase")
+	}
+
+	if _, err := os.Stat(legacyPath); err != nil {
+		t.Fatalf("rejected rewind migrated the legacy history file: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projectDir, history.HistoryFilename)); !os.IsNotExist(err) {
+		t.Fatalf("rejected rewind created %s (stat err: %v)", history.HistoryFilename, err)
 	}
 }
