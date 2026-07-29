@@ -78,10 +78,10 @@ skill actually discovers and triggers.
 
 | Surface | Reaches | Mechanism |
 |---|---|---|
-| `wayfinder/skills/`, `agm/agm-plugin/skills/` | Claude Code, machine-wide | `.claude-plugin/marketplace.json` → per-plugin `plugin.json` declaring `"skills": ["./skills/"]` |
+| `wayfinder/skills/`, `agm/agm-plugin/skills/` | Claude Code sessions with the plugins installed | `.claude-plugin/marketplace.json` → per-plugin `plugin.json` declaring its skills directory |
 | `agm/plugins/`, `wayfinder/skills/` | Pi | `.pi/settings.json` |
-| `.agents/skills/` | **AGY only** | `.agents/SPEC.md` AGENTS-DIR-04 — AGY fallback assets. Not in the Claude plugin manifests, not in `.pi/settings.json`. |
-| `.claude/skills/` | sessions cwd'd in this repo | holds a worked example today; no cross-repo reach |
+| `.agents/skills/` | Codex, AGY, OpenCode, and Pi fallback discovery | `.dear-agent/marketplace.json` declares `agents-md-skill-fallback` for those harnesses; `.agents/SPEC.md` owns the fallback assets |
+| `.claude/skills/` | Claude Code sessions cwd'd in this repo | holds a worked example today; no cross-repo reach |
 | `cmd/vroom-dispatch/skills/` | VROOM supervisors | shipped with the dispatcher |
 | Cowork / Desktop Dispatch | **undetermined** | no repository evidence establishes any of the above reaches Cowork. Verify with a live session before promising it. |
 
@@ -100,10 +100,11 @@ two divergent copies of a skill.
 ### Version skew is real
 
 Source checkout, installed Go binaries, and the installed plugin snapshot are
-independent deployment states. `.claude-plugin/marketplace.json` currently
-declares wayfinder 0.3.0 while the installed plugin cache holds 0.2.0. Merging a
-skill to `main` does not put it in a session. The distribution step includes
-re-installing the plugin and restarting the harness.
+independent deployment states. The repository catalogs and plugin manifests
+agree on their declared versions, but that does not prove any local plugin
+cache is current. Merging a skill to `main` does not put it in a session. The
+distribution step includes reinstalling the plugin and restarting the harness,
+followed by a discovery smoke test in each claimed consumer.
 
 ---
 
