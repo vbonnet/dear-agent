@@ -20,6 +20,8 @@
 
 **WAYFINDER-GIT-06** When a rewind changes canonical status, history, or retrospective markers in a Git repository, the system shall commit those files without sweeping unrelated staged changes.
 
+**WAYFINDER-GIT-07** When a repository ignore rule matches a canonical Wayfinder lifecycle marker, the system shall force-stage that owned marker while continuing to honor ignore rules for user-authored phase artifacts.
+
 **WAYFINDER-GIT-07** When modified source files are queried, the system shall distinguish source code from Wayfinder artifacts and unrelated paths.
 
 **WAYFINDER-GIT-08** When a worktree lifecycle is exercised, the system shall prevent conflicting paths and preserve repository integrity.

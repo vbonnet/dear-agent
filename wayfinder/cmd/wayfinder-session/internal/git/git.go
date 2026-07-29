@@ -202,15 +202,33 @@ func (g *GitIntegrator) formatCommitMessage(phase, outcome, context string) stri
 	return msg.String()
 }
 
-// gitAdd runs git add for a file
+// gitAdd stages one scoped lifecycle artifact. Canonical Wayfinder markers are
+// owned by this component, so force-add them even when a repository-wide
+// ignore rule (for example, *.jsonl) would otherwise hide lifecycle state.
+// User-authored phase artifacts continue to obey the repository's ignore
+// policy.
 func (g *GitIntegrator) gitAdd(file string) error {
-	cmd := exec.Command("git", "add", "--", file)
+	args := []string{"add"}
+	if isCanonicalMarker(file) {
+		args = append(args, "--force")
+	}
+	args = append(args, "--", file)
+	cmd := exec.Command("git", args...)
 	cmd.Dir = g.projectDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git add failed: %w (output: %s)", err, string(output))
 	}
 	return nil
+}
+
+func isCanonicalMarker(file string) bool {
+	switch file {
+	case "WAYFINDER-STATUS.md", history.HistoryFilename, history.LegacyHistoryFilename:
+		return true
+	default:
+		return false
+	}
 }
 
 func (g *GitIntegrator) commitScoped(message string, candidates []string) error {

@@ -454,6 +454,42 @@ func TestCommitPhaseStart(t *testing.T) {
 	}
 }
 
+func TestCommitPhaseStartForceAddsIgnoredCanonicalHistory(t *testing.T) {
+	repoDir := setupGitRepo(t)
+	g := New(repoDir)
+
+	for path, content := range map[string]string{
+		".gitignore":              "*.jsonl\n",
+		"README.md":               "# Test Project\n",
+		"WAYFINDER-STATUS.md":     "# Status\n",
+		"WAYFINDER-HISTORY.jsonl": "{}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(repoDir, path), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	if err := exec.Command("git", "-C", repoDir, "add", ".gitignore", "README.md").Run(); err != nil {
+		t.Fatalf("stage initial files: %v", err)
+	}
+	if err := exec.Command("git", "-C", repoDir, "commit", "-m", "Initial commit").Run(); err != nil {
+		t.Fatalf("initial commit: %v", err)
+	}
+
+	if err := g.CommitPhaseStart("CHARTER"); err != nil {
+		t.Fatalf("CommitPhaseStart() error = %v", err)
+	}
+
+	names, err := exec.Command("git", "-C", repoDir, "show", "--name-only", "--format=", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("git show: %v", err)
+	}
+	for _, marker := range []string{"WAYFINDER-STATUS.md", "WAYFINDER-HISTORY.jsonl"} {
+		if !strings.Contains(string(names), marker) {
+			t.Errorf("lifecycle commit missing ignored canonical marker %s:\n%s", marker, names)
+		}
+	}
+}
+
 func TestLifecycleCommitsStageLegacyHistoryDeletion(t *testing.T) {
 	tests := map[string]func(*GitIntegrator) error{
 		"start": func(g *GitIntegrator) error {
