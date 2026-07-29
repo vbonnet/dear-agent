@@ -17,8 +17,9 @@ did not exist.
 
 ## Decision
 
-`session.RealTmux` is AGM's one production local runtime adapter. The CLI
-constructs it once and injects it directly through `session.TmuxInterface`.
+`session.RealTmux` is AGM's one production local runtime adapter type. Production
+callers construct it directly through `session.TmuxInterface`; its focused
+capabilities remain the only local-runtime seam.
 Shared operations discover focused capabilities for checked termination,
 strict existence, liveness, startup readiness, input readiness, atomic input
 delivery, and exact-pane send.
@@ -43,10 +44,10 @@ the deterministic session-owned test seam.
 
 ## Consequences
 
-Production has one runtime construction and one semantic owner. New tmux safety
-capabilities are proved directly on `RealTmux` instead of forwarded through
-intermediate types. Dormant process, Docker, and nonexistent Temporal choices
-are no longer advertised.
+Production has one local-runtime adapter type and one semantic owner. New tmux
+safety capabilities are proved directly on `RealTmux` instead of forwarded
+through intermediate types. Dormant process, Docker, and nonexistent Temporal
+choices are no longer advertised.
 
 AGM remains intentionally dependent on tmux for local interactive harnesses.
 Adding a real alternative now requires an explicit architecture change and
