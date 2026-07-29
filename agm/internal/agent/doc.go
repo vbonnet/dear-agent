@@ -1,36 +1,30 @@
-// Package agent provides the Agent interface for multi-agent support in AGM.
+// Package agent provides concrete harness adapters, harness identity metadata,
+// model routing, and shared adapter data types for AGM.
 //
 // # Architecture
 //
-// AGM uses the Agent interface to present a unified session contract over local
-// AI command-line harnesses.
+// Concrete adapters expose harness-specific lifecycle mechanisms. Shared
+// cross-surface lifecycle ordering belongs to internal/ops, whose consumers
+// define capability-sized interfaces for the mechanisms they need.
 //
-//	┌─────────────────┐
-//	│   AGM CLI       │
-//	│ (new, resume)   │
-//	└────────┬────────┘
-//	         │
-//	┌────────▼────────┐
-//	│ Session Manager │
-//	│ (orchestration) │
-//	└────────┬────────┘
-//	         │
-//	┌────────▼────────┐
-//	│ Agent Interface │ <-- This package
-//	└────────┬────────┘
-//	         │
-//	  ┌──────┴──────┬───────────┐
-//	  │             │           │
-//	┌─▼────┐   ┌────▼────┐  ┌───▼────┐
-//	│Claude│   │ Codex   │  │ others │
-//	│ Code │   │ CLI     │  │ in registry
-//	└──────┘   └─────────┘  └────────┘
+//	    metadata discovery
+//	           │
+//	           ▼
+//	   Harness interface
+//	name/version/capabilities
+//	           ▲
+//	           │
+//	concrete harness adapters
+//	           │
+//	           ▼
+//	consumer-owned ops interfaces
 //
 // # Usage
 //
 // Implementations live in sibling *_adapter.go files. The canonical active and
-// deprecated harness sets are in harnesses.go. Some subdirectories contain
-// compatibility documentation rather than Go implementations.
+// deprecated harness sets are in harnesses.go. GetHarness returns only the
+// descriptive Harness contract; callers needing behavior construct the
+// concrete adapter or use an operation-specific consumer interface.
 //
 // Example:
 //
@@ -38,12 +32,5 @@
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
-//	ctx := SessionContext{
-//	    Name:             "my-session",
-//	    WorkingDirectory: "~/project",
-//	}
-//	sessionID, err := harness.CreateSession(ctx)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
+//	log.Printf("%s %s", harness.Name(), harness.Version())
 package agent

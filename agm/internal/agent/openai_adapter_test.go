@@ -15,13 +15,13 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agent/openai"
 )
 
-// TestOpenAIAdapterImplementsAgentInterface verifies OpenAIAdapter implements Agent interface.
-func TestOpenAIAdapterImplementsAgentInterface(t *testing.T) {
+func TestOpenAIAdapterImplementsNarrowContracts(t *testing.T) {
 	tmpDir := t.TempDir()
 	adapter := createTestAdapter(t, tmpDir)
 
-	// Verify adapter implements Agent interface
-	var _ = adapter
+	var _ Harness = adapter
+	var _ ContextMessageSender = adapter
+	var _ ContextSessionStatusGetter = adapter
 }
 
 func TestOpenAIExecutionModelDocumentsCompatibilityOnlyControlPlane(t *testing.T) {
@@ -58,7 +58,7 @@ func TestNewOpenAIAdapter(t *testing.T) {
 		setupEnv  func()
 		wantErr   bool
 		errType   string
-		checkFunc func(*testing.T, Agent)
+		checkFunc func(*testing.T, *OpenAIAdapter)
 	}{
 		{
 			name: "default config with env API key",
@@ -69,7 +69,7 @@ func TestNewOpenAIAdapter(t *testing.T) {
 				t.Setenv("OPENAI_API_KEY", "test-key-123")
 			},
 			wantErr: false,
-			checkFunc: func(t *testing.T, a Agent) {
+			checkFunc: func(t *testing.T, a *OpenAIAdapter) {
 				if a.Name() != "openai" {
 					t.Errorf("expected name 'openai', got %s", a.Name())
 				}
@@ -85,7 +85,7 @@ func TestNewOpenAIAdapter(t *testing.T) {
 				Model:  "gpt-3.5-turbo",
 			},
 			wantErr: false,
-			checkFunc: func(t *testing.T, a Agent) {
+			checkFunc: func(t *testing.T, a *OpenAIAdapter) {
 				if a.Version() != "gpt-3.5-turbo" {
 					t.Errorf("expected version 'gpt-3.5-turbo', got %s", a.Version())
 				}
@@ -104,7 +104,7 @@ func TestNewOpenAIAdapter(t *testing.T) {
 				t.Setenv("OPENAI_API_KEY", "test-key-789")
 			},
 			wantErr: false,
-			checkFunc: func(t *testing.T, a Agent) {
+			checkFunc: func(t *testing.T, a *OpenAIAdapter) {
 				if a.Version() != "gpt-4-turbo-preview" {
 					t.Errorf("expected default version 'gpt-4-turbo-preview', got %s", a.Version())
 				}
@@ -198,10 +198,7 @@ func TestNewOpenAIAdapterForSessionRestoresPersistedRuntimeConfig(t *testing.T) 
 	if err != nil {
 		t.Fatalf("restore adapter from session: %v", err)
 	}
-	restored, ok := restoredAgent.(*OpenAIAdapter)
-	if !ok {
-		t.Fatalf("restored adapter type = %T, want *OpenAIAdapter", restoredAgent)
-	}
+	restored := restoredAgent
 	if got := restored.Version(); got != "gpt-4o" {
 		t.Fatalf("restored model = %q, want persisted gpt-4o", got)
 	}
@@ -248,7 +245,7 @@ func TestNewOpenAIAdapterForSessionDoesNotScanUnrelatedSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("targeted reconstruction inspected unrelated session: %v", err)
 	}
-	restored := restoredAgent.(*OpenAIAdapter)
+	restored := restoredAgent
 	if ids := restored.sessionManager.ListSessions(); len(ids) != 1 || ids[0] != string(sessionID) {
 		t.Fatalf("targeted manager sessions = %v, want only %q", ids, sessionID)
 	}
@@ -277,7 +274,7 @@ func TestNewOpenAIAdapterForLegacySessionUsesManifestFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("restore legacy adapter: %v", err)
 	}
-	restored := restoredAgent.(*OpenAIAdapter)
+	restored := restoredAgent
 	if restored.Version() != "gpt-4.1" {
 		t.Fatalf("legacy restored model = %q, want session model gpt-4.1", restored.Version())
 	}
@@ -1271,7 +1268,7 @@ func TestExportConversation(t *testing.T) {
 	}
 
 	// Manually add a message to history for testing
-	openaiAdapter := adapter.(*OpenAIAdapter)
+	openaiAdapter := adapter
 	msg := openai.Message{
 		Role:      "user",
 		Content:   "Hello, world!",
@@ -1665,7 +1662,7 @@ func TestExecuteCommand(t *testing.T) {
 			wantErr: false,
 			check: func(t *testing.T) {
 				// Verify title was updated
-				openaiAdapter := adapter.(*OpenAIAdapter)
+				openaiAdapter := adapter
 				info, err := openaiAdapter.sessionManager.GetSession(string(sessionID))
 				if err != nil {
 					t.Errorf("failed to get session: %v", err)
@@ -1686,7 +1683,7 @@ func TestExecuteCommand(t *testing.T) {
 			},
 			wantErr: false,
 			check: func(t *testing.T) {
-				openaiAdapter := adapter.(*OpenAIAdapter)
+				openaiAdapter := adapter
 				info, err := openaiAdapter.sessionManager.GetSession(string(sessionID))
 				if err != nil {
 					t.Errorf("failed to get session: %v", err)
@@ -1850,7 +1847,7 @@ func TestClearHistoryPreservesRuntimeConfig(t *testing.T) {
 	}
 
 	// Add test messages
-	openaiAdapter := adapter.(*OpenAIAdapter)
+	openaiAdapter := adapter
 	msg := openai.Message{
 		Role:      "user",
 		Content:   "Test message",
@@ -1930,7 +1927,7 @@ func TestClearHistoryPreservesRuntimeConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reconstruct adapter after clear: %v", err)
 	}
-	if got := reconstructed.(*OpenAIAdapter).runtimeConfig; got != wantRuntime {
+	if got := reconstructed.runtimeConfig; got != wantRuntime {
 		t.Fatalf("reconstructed runtime config after clear = %#v, want %#v", got, wantRuntime)
 	}
 }
@@ -1981,7 +1978,7 @@ func TestSetSystemPrompt(t *testing.T) {
 // TestOpenAIAdapter_RunHook tests the RunHook method.
 func TestOpenAIAdapter_RunHook(t *testing.T) {
 	tmpDir := t.TempDir()
-	adapter := createTestAdapter(t, tmpDir).(*OpenAIAdapter)
+	adapter := createTestAdapter(t, tmpDir)
 
 	// Create test session
 	sessionID, err := adapter.CreateSession(SessionContext{
@@ -2191,7 +2188,7 @@ func TestOpenAIAdapter_SessionEndHook(t *testing.T) {
 // TestOpenAIAdapter_HookFailureGraceful tests that hook failures don't block operations.
 func TestOpenAIAdapter_HookFailureGraceful(t *testing.T) {
 	tmpDir := t.TempDir()
-	adapter := createTestAdapter(t, tmpDir).(*OpenAIAdapter)
+	adapter := createTestAdapter(t, tmpDir)
 
 	// Create session
 	sessionID, err := adapter.CreateSession(SessionContext{
@@ -2372,11 +2369,11 @@ func TestTerminateSession_NonExistent(t *testing.T) {
 
 // Helper functions
 
-func createTestAdapter(t *testing.T, tmpDir string) Agent {
+func createTestAdapter(t *testing.T, tmpDir string) *OpenAIAdapter {
 	return createTestAdapterWithModel(t, tmpDir, "gpt-4-turbo-preview")
 }
 
-func createTestAdapterWithModel(t *testing.T, tmpDir string, model string) Agent {
+func createTestAdapterWithModel(t *testing.T, tmpDir string, model string) *OpenAIAdapter {
 	t.Helper()
 
 	config := &OpenAIConfig{

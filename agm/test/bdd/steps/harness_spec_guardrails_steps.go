@@ -13,9 +13,12 @@ import (
 )
 
 type harnessSpecGuardrailState struct {
-	duplicateIDs  []string
-	ownershipErr  error
-	resumeOwnerOK bool
+	duplicateIDs       []string
+	ownershipErr       error
+	resumeOwnerOK      bool
+	harnessBoundaryErr error
+	apiDeliveryErr     error
+	constructionErr    error
 }
 
 type harnessSpecGuardrailStateKey struct{}
@@ -32,9 +35,30 @@ func RegisterHarnessSpecGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^harness requirement identifiers should be unique$`, harnessRequirementIdentifiersShouldBeUnique)
 	ctx.Step(`^CLI, MCP, and daemon lifecycle surfaces should delegate to shared operations$`, lifecycleSurfacesShouldDelegateToSharedOperations)
 	ctx.Step(`^CLI resume should delegate its transaction to shared operations$`, cliResumeShouldDelegateItsTransactionToSharedOperations)
+	ctx.Step(`^AGM harness adapter contract sources$`, agmHarnessAdapterContractSources)
+	ctx.Step(`^AGM validates harness capability ownership$`, agmValidatesHarnessCapabilityOwnership)
+	ctx.Step(`^harness discovery should expose metadata without a universal lifecycle facade$`, harnessDiscoveryShouldExposeMetadataWithoutAUniversalLifecycleFacade)
+	ctx.Step(`^pure API delivery should require only context-aware readiness and message delivery$`, pureAPIDeliveryShouldRequireOnlyContextAwareReadinessAndMessageDelivery)
+	ctx.Step(`^adapter constructors should return concrete types from one finite discovery catalog$`, adapterConstructorsShouldReturnConcreteTypesFromOneFiniteDiscoveryCatalog)
 }
 
 func agmHarnessParitySpecificationAndLifecycleSurfaces(context.Context) error {
+	return nil
+}
+
+func agmHarnessAdapterContractSources(context.Context) error {
+	return nil
+}
+
+func agmValidatesHarnessCapabilityOwnership(ctx context.Context) error {
+	state, err := requireHarnessSpecGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	root := packageSpecBDDRepoRoot()
+	state.harnessBoundaryErr = requireMetadataOnlyHarnessBoundary(root)
+	state.apiDeliveryErr = requireAPIDeliveryBoundary(root)
+	state.constructionErr = requireConcreteHarnessConstruction(root)
 	return nil
 }
 
@@ -65,6 +89,146 @@ func agmValidatesHarnessRequirementIdentifiersAndLifecycleOwnership(ctx context.
 			!strings.Contains(string(resumeSource), "resumeSessionTransactionWithRuntime(") &&
 			strings.Contains(string(operationSource), "func ResumeSession(") &&
 			strings.Contains(string(operationSource), "WithSessionLockContext(ctx, req.SessionID")
+	return nil
+}
+
+func requireMetadataOnlyHarnessBoundary(root string) error {
+	interfaceSource, err := os.ReadFile(filepath.Join(root, "agm", "internal", "agent", "interface.go"))
+	if err != nil {
+		return fmt.Errorf("read harness interface source: %w", err)
+	}
+	source := string(interfaceSource)
+	if strings.Contains(source, "type Agent interface") {
+		return fmt.Errorf("agent package still exposes a universal Agent lifecycle facade")
+	}
+	start := strings.Index(source, "type Harness interface {")
+	if start < 0 {
+		return fmt.Errorf("agent package does not expose the Harness metadata contract")
+	}
+	end := strings.Index(source[start:], "\n}")
+	if end < 0 {
+		return fmt.Errorf("harness metadata contract is not terminated")
+	}
+	block := source[start : start+end]
+	for _, method := range []string{"Name() string", "Version() string", "Capabilities() Capabilities"} {
+		if !strings.Contains(block, method) {
+			return fmt.Errorf("harness metadata contract is missing %s", method)
+		}
+	}
+	for _, method := range []string{
+		"CreateSession(",
+		"ResumeSession(",
+		"TerminateSession(",
+		"GetSessionStatus(",
+		"SendMessage(",
+		"GetHistory(",
+		"ExportConversation(",
+		"ImportConversation(",
+		"ExecuteCommand(",
+	} {
+		if strings.Contains(block, method) {
+			return fmt.Errorf("harness metadata contract includes lifecycle method %s", method)
+		}
+	}
+
+	workflowSource, err := os.ReadFile(filepath.Join(root, "agm", "internal", "workflow", "interface.go"))
+	if err != nil {
+		return fmt.Errorf("read workflow harness boundary: %w", err)
+	}
+	if !strings.Contains(string(workflowSource), "Harness agent.Harness") {
+		return fmt.Errorf("workflow selection does not use the metadata-only Harness contract")
+	}
+	return nil
+}
+
+func requireAPIDeliveryBoundary(root string) error {
+	data, err := os.ReadFile(filepath.Join(root, "agm", "internal", "ops", "api_session_delivery.go"))
+	if err != nil {
+		return fmt.Errorf("read API delivery boundary: %w", err)
+	}
+	source := string(data)
+	for _, contract := range []string{
+		"type APISessionDeliveryAdapter interface {",
+		"agent.ContextSessionStatusGetter",
+		"agent.ContextMessageSender",
+		"(APISessionDeliveryAdapter, error)",
+	} {
+		if !strings.Contains(source, contract) {
+			return fmt.Errorf("API delivery boundary is missing %s", contract)
+		}
+	}
+	if strings.Contains(source, "adapter.(") {
+		return fmt.Errorf("API delivery still discovers required capabilities through runtime type assertions")
+	}
+	return nil
+}
+
+func requireConcreteHarnessConstruction(root string) error {
+	signatures := map[string][]string{
+		"agm/internal/agent/claude_adapter.go": {
+			"func NewClaudeAdapter(sessionStore SessionStore) (*ClaudeAdapter, error)",
+		},
+		"agm/internal/agent/gemini_cli_adapter.go": {
+			"func NewGeminiCLIAdapter(sessionStore SessionStore) (*GeminiCLIAdapter, error)",
+		},
+		"agm/internal/agent/codex_cli_adapter.go": {
+			"func NewCodexCLIAdapter(sessionStore SessionStore) (*CodexCLIAdapter, error)",
+		},
+		"agm/internal/agent/opencode_adapter.go": {
+			"func NewOpenCodeAdapter(config *OpenCodeConfig) (*OpenCodeAdapter, error)",
+		},
+		"agm/internal/agent/agy_adapter.go": {
+			"func NewAgyAdapter(sessionStore SessionStore) (*AgyAdapter, error)",
+		},
+		"agm/internal/agent/pi_adapter.go": {
+			"func NewPiAdapter(sessionStore SessionStore) (*PiAdapter, error)",
+		},
+		"agm/internal/agent/openai_adapter.go": {
+			"func NewOpenAIAdapter(ctx context.Context, config *OpenAIConfig) (*OpenAIAdapter, error)",
+			"func NewOpenAIAdapterForSession(ctx context.Context, sessionID SessionID, config *OpenAIConfig) (*OpenAIAdapter, error)",
+		},
+	}
+	for path, required := range signatures {
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+		if err != nil {
+			return fmt.Errorf("read adapter constructor %s: %w", path, err)
+		}
+		for _, signature := range required {
+			if !strings.Contains(string(data), signature) {
+				return fmt.Errorf("%s does not return its concrete adapter: missing %s", path, signature)
+			}
+		}
+	}
+
+	if _, err := os.Stat(filepath.Join(root, "agm", "internal", "agent", "registry.go")); !os.IsNotExist(err) {
+		if err != nil {
+			return fmt.Errorf("inspect duplicate runtime registry: %w", err)
+		}
+		return fmt.Errorf("duplicate mutable runtime adapter registry still exists")
+	}
+	factorySource, err := os.ReadFile(filepath.Join(root, "agm", "internal", "agent", "factory.go"))
+	if err != nil {
+		return fmt.Errorf("read harness discovery catalog: %w", err)
+	}
+	factory := string(factorySource)
+	if !strings.Contains(factory, "func newHarnessWithStore(name string, store SessionStore) (Harness, error)") {
+		return fmt.Errorf("finite harness discovery catalog is missing")
+	}
+	for _, harness := range []string{
+		`case "claude-code":`,
+		`case "gemini-cli":`,
+		`case "codex-cli":`,
+		`case "opencode-cli":`,
+		`case "agy":`,
+		`case "pi-cli":`,
+	} {
+		if !strings.Contains(factory, harness) {
+			return fmt.Errorf("finite harness discovery catalog is missing %s", harness)
+		}
+	}
+	if strings.Contains(factory, "func Register(") || strings.Contains(factory, "map[string]func()") {
+		return fmt.Errorf("harness discovery catalog is mutable at runtime")
+	}
 	return nil
 }
 
@@ -177,6 +341,30 @@ func cliResumeShouldDelegateItsTransactionToSharedOperations(ctx context.Context
 		return fmt.Errorf("resume lifecycle is not owned by one stable-ID shared operation with a single CLI delegation")
 	}
 	return nil
+}
+
+func harnessDiscoveryShouldExposeMetadataWithoutAUniversalLifecycleFacade(ctx context.Context) error {
+	state, err := requireHarnessSpecGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	return state.harnessBoundaryErr
+}
+
+func pureAPIDeliveryShouldRequireOnlyContextAwareReadinessAndMessageDelivery(ctx context.Context) error {
+	state, err := requireHarnessSpecGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	return state.apiDeliveryErr
+}
+
+func adapterConstructorsShouldReturnConcreteTypesFromOneFiniteDiscoveryCatalog(ctx context.Context) error {
+	state, err := requireHarnessSpecGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	return state.constructionErr
 }
 
 func requireHarnessSpecGuardrailState(ctx context.Context) (*harnessSpecGuardrailState, error) {

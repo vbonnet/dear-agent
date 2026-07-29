@@ -895,7 +895,7 @@ func TestSendMessageTool_RoutesPureAPIBeforeTmux(t *testing.T) {
 			return &ops.OpContext{
 				Storage: storage,
 				Tmux:    tmuxClient,
-				APIAgentFactory: func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+				APIDeliveryFactory: func(context.Context, *manifest.Manifest) (ops.APISessionDeliveryAdapter, error) {
 					return apiAgent, nil
 				},
 			}, func() {}, nil

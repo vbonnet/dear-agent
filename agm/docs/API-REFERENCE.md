@@ -10,7 +10,7 @@ Complete API reference for developers integrating with or extending AGM.
 ## Table of Contents
 
 - [Go Package API](#go-package-api)
-- [Agent Interface](#agent-interface)
+- [Harness Metadata Interface](#harness-metadata-interface)
 - [CommandTranslator Interface](#commandtranslator-interface)
 - [Session Manager API](#session-manager-api)
 - [Manifest API](#manifest-api)
@@ -37,82 +37,43 @@ import (
 
 ---
 
-## Agent Interface
+## Harness Metadata Interface
 
 ### Interface Definition
 
 ```go
-// Agent represents an AI agent (Claude, Gemini, GPT)
-type Agent interface {
-    // Start initializes and starts the agent session
-    Start(ctx context.Context, sessionID string, opts *StartOptions) error
-
-    // IsAvailable checks if agent is configured (API keys, CLI installed)
-    IsAvailable() bool
-
-    // GetMetadata returns agent metadata (name, version, capabilities)
-    GetMetadata() *AgentMetadata
-
-    // GetTranslator returns the command translator for this agent
-    GetTranslator() command.Translator
+// Harness exposes descriptive facts for heterogeneous discovery.
+// Lifecycle behavior stays on concrete adapters or operation-owned interfaces.
+type Harness interface {
+    Name() string
+    Version() string
+    Capabilities() Capabilities
 }
 ```
 
-### StartOptions
+Adapter constructors return concrete pointers such as `*ClaudeAdapter` and
+`*CodexCLIAdapter`. `GetHarness` intentionally returns only `Harness`.
 
 ```go
-type StartOptions struct {
-    ProjectDir  string            // Working directory
-    InitPrompt  string            // Initial prompt to send
-    Environment map[string]string // Environment variables
-    Detached    bool              // Create without attaching
+type ContextMessageSender interface {
+    SendMessageContext(context.Context, SessionID, Message) error
+}
+
+type ContextSessionStatusGetter interface {
+    GetSessionStatusContext(context.Context, SessionID) (Status, error)
 }
 ```
 
-### AgentMetadata
+Pure API message delivery composes only these two cancellation-aware
+capabilities in `internal/ops`; it does not accept a universal lifecycle
+object.
 
 ```go
-type AgentMetadata struct {
-    Name         string   // "claude", "gemini", "gpt"
-    DisplayName  string   // "Claude (Anthropic)"
-    Version      string   // Agent version
-    ContextLimit int      // Max context tokens
-    Capabilities []string // Supported features
-    Available    bool     // API key configured
+harness, err := agent.GetHarness("codex-cli")
+if err != nil {
+    return err
 }
-```
-
-### Example Usage
-
-```go
-package main
-
-import (
-    "context"
-    "github.com/vbonnet/dear-agent/agm/internal/agent"
-)
-
-func main() {
-    // Get Claude agent
-    claudeAgent := agent.NewClaudeAdapter()
-
-    // Check availability
-    if !claudeAgent.IsAvailable() {
-        panic("Claude API key not configured")
-    }
-
-    // Start session
-    opts := &agent.StartOptions{
-        ProjectDir: "~/projects/myapp",
-        InitPrompt: "Please review the authentication code",
-    }
-
-    ctx := context.Background()
-    err := claudeAgent.Start(ctx, "my-session-uuid", opts)
-    if err != nil {
-        panic(err)
-    }
-}
+fmt.Printf("%s %s\n", harness.Name(), harness.Version())
 ```
 
 ---
@@ -160,12 +121,9 @@ import (
     "errors"
     "time"
     "github.com/vbonnet/dear-agent/agm/internal/command"
-    "github.com/vbonnet/dear-agent/agm/internal/agent"
 )
 
-func renameSession(agent agent.Agent, sessionID, newName string) error {
-    translator := agent.GetTranslator()
-
+func renameSession(translator command.CommandTranslator, sessionID, newName string) error {
     ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
     defer cancel()
 
@@ -626,34 +584,47 @@ func main() {
 package agent
 
 type ClaudeAdapter struct {
-    apiKey string
+    // internal session store
 }
 
-func NewClaudeAdapter() *ClaudeAdapter
+func NewClaudeAdapter(sessionStore SessionStore) (*ClaudeAdapter, error)
 
-func (a *ClaudeAdapter) Start(ctx context.Context, sessionID string, opts *StartOptions) error
-func (a *ClaudeAdapter) IsAvailable() bool
-func (a *ClaudeAdapter) GetMetadata() *AgentMetadata
-func (a *ClaudeAdapter) GetTranslator() command.Translator
+func (a *ClaudeAdapter) Name() string
+func (a *ClaudeAdapter) Version() string
+func (a *ClaudeAdapter) Capabilities() Capabilities
+func (a *ClaudeAdapter) CreateSession(ctx SessionContext) (SessionID, error)
+func (a *ClaudeAdapter) ResumeSession(sessionID SessionID) error
+func (a *ClaudeAdapter) SendMessage(sessionID SessionID, message Message) error
+func (a *ClaudeAdapter) TerminateSession(sessionID SessionID) error
 ```
 
-### Gemini Adapter
+Passing a nil store selects the default JSON-backed session store. Cross-surface
+lifecycle transactions belong to `agm/internal/ops`; the concrete adapter
+methods are compatibility mechanisms, not a shared lifecycle interface.
+
+### Gemini CLI Adapter
 
 ```go
 package agent
 
-type GeminiAdapter struct {
-    apiKey    string
-    projectID string
+type GeminiCLIAdapter struct {
+    // internal session store
 }
 
-func NewGeminiAdapter() *GeminiAdapter
+func NewGeminiCLIAdapter(sessionStore SessionStore) (*GeminiCLIAdapter, error)
 
-func (a *GeminiAdapter) Start(ctx context.Context, sessionID string, opts *StartOptions) error
-func (a *GeminiAdapter) IsAvailable() bool
-func (a *GeminiAdapter) GetMetadata() *AgentMetadata
-func (a *GeminiAdapter) GetTranslator() command.Translator
+func (a *GeminiCLIAdapter) Name() string
+func (a *GeminiCLIAdapter) Version() string
+func (a *GeminiCLIAdapter) Capabilities() Capabilities
+func (a *GeminiCLIAdapter) CreateSession(ctx SessionContext) (SessionID, error)
+func (a *GeminiCLIAdapter) ResumeSession(sessionID SessionID) error
+func (a *GeminiCLIAdapter) SendMessage(sessionID SessionID, message Message) error
+func (a *GeminiCLIAdapter) TerminateSession(sessionID SessionID) error
 ```
+
+Passing a nil store selects the default JSON-backed session store. Both
+adapters satisfy the narrow `Harness` metadata/capability contract; consumers
+define any smaller operational interface they need.
 
 ---
 
@@ -786,16 +757,11 @@ const (
 ### Test Helpers
 
 ```go
-package testing
+package session
 
-// CreateTestSession creates isolated test session
-func CreateTestSession(t *testing.T, name string) (sessionDir string, cleanup func())
-
-// MockAgent creates mock agent for testing
-func MockAgent(t *testing.T, agentType string) agent.Agent
-
-// MockTmux creates mock tmux environment
-func MockTmux(t *testing.T) (socketPath string, cleanup func())
+// NewMockTmux creates an in-memory tmux client for session and operation tests.
+// Tests configure its exported state and inject it through TmuxInterface.
+func NewMockTmux() *MockTmux
 ```
 
 ### Example Test
@@ -805,15 +771,15 @@ package mypackage_test
 
 import (
     "testing"
-    "github.com/vbonnet/dear-agent/agm/internal/testing"
+
+    "github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
 func TestSessionCreation(t *testing.T) {
-    sessionDir, cleanup := testing.CreateTestSession(t, "test-session")
-    defer cleanup()
+    tmux := session.NewMockTmux()
 
-    // Test session operations
-    // ...
+    // Inject tmux into the operation or backend under test.
+    _ = tmux
 }
 ```
 

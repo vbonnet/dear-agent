@@ -246,7 +246,7 @@ ok      github.com/vbonnet/dear-agent/agm/internal/agent      0.394s
 This implementation aligns with:
 - **ADR-007:** Hook-Based State Detection (synthetic hooks for API agents)
 - **Gemini CLI Adapter:** File-based hook pattern (consistency)
-- **Agent Interface:** ExecuteCommand(CommandRunHook) contract
+- **Concrete OpenAI adapter:** ExecuteCommand(CommandRunHook) behavior
 - **Phase 3 Requirements:** Hook support for all adapters
 
 ## Usage Example

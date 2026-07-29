@@ -19,7 +19,7 @@ const (
 )
 
 // DecidePiPaneResume centralizes the fail-closed existing-pane invariant used
-// by the Agent adapter, root CLI resume path, and cross-harness BDD suite.
+// by the Pi adapter, root CLI resume path, and cross-harness BDD suite.
 func DecidePiPaneResume(exactPiProcess bool, liveness tmux.PaneLiveness) (PiPaneResumeAction, error) {
 	if exactPiProcess {
 		return PiPanePreserve, nil

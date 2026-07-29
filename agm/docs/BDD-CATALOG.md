@@ -213,6 +213,11 @@ generated surface metadata, workflow-bus signaling, and accessible operator UIs.
 creation, and terminal state detection.
 
 **Key scenarios:**
+- Harness discovery exposes only name, version, and descriptive capabilities;
+  required behavior is expressed through consumer-owned capability interfaces.
+- Pure API delivery requires context-aware readiness and message delivery at
+  compile time, while adapter constructors return concrete types and the finite
+  discovery catalog has no duplicate mutable runtime registry.
 - A Codex CLI composer pane is detected as `ready` only with an explicit empty
   cursor on both the initial and post-turn forms.
 - An idle Codex composer allows direct delivery.

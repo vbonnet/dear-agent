@@ -12,7 +12,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
-// CodexCLIAdapter implements Agent for the interactive OpenAI Codex CLI.
+// CodexCLIAdapter is the concrete adapter for the interactive OpenAI Codex CLI.
 //
 // It is intentionally tmux-backed. The OpenAI API adapter remains available as
 // a legacy API implementation, but it is not the codex-cli harness.
@@ -32,7 +32,7 @@ var (
 )
 
 // NewCodexCLIAdapter creates a Codex CLI adapter.
-func NewCodexCLIAdapter(sessionStore SessionStore) (Agent, error) {
+func NewCodexCLIAdapter(sessionStore SessionStore) (*CodexCLIAdapter, error) {
 	if sessionStore == nil {
 		store, err := NewJSONSessionStore("")
 		if err != nil {
