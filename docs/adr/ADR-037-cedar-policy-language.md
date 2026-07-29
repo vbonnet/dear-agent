@@ -230,6 +230,10 @@ tests must prove all of the following:
    nothing; only later confirmation-free-gate failure may enter escalation.
    Tests inject terminal keys, harness callbacks, and agent messages while an
    `ask` is pending and prove none can mint the required human receipt.
+   A positive end-to-end case proves the authenticated out-of-band human
+   channel can mint that receipt and, with unchanged bundle, input, principal,
+   action, resource, and filesystem snapshots, final reauthorization permits
+   exactly one dispatch.
 9. Restart restores the last-known-good bundle before the interceptor accepts
    tool calls.
 10. For every harness, replacing or removing the interceptor executable or its
