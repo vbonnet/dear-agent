@@ -789,10 +789,11 @@ func TestRebuild_AGMPairRecoversLegacyLockDirectories(t *testing.T) {
 			goDir := stubGo(t, record)
 			cmd := exec.Command("bash", hookPath(t))
 			cmd.Dir = repo
-			cmd.Env = append(os.Environ(),
+			cmd.Env = append(gittest.Env(t),
 				"HOME="+t.TempDir(),
 				"GOBIN="+gobin,
 				"PATH="+goDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+				"DEAR_AGENT_MANAGED_REPO_ROOTS="+repo,
 				"AGM_POST_MERGE_SWEEP=0",
 			)
 			if output, err := cmd.CombinedOutput(); err != nil {
@@ -870,10 +871,11 @@ func TestRebuild_WayfinderUsesMacOSLockfFileAndCommandForm(t *testing.T) {
 
 	cmd := exec.Command("bash", hookPath(t))
 	cmd.Dir = repo
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(gittest.Env(t),
 		"HOME="+t.TempDir(),
 		"GOBIN="+gobin,
 		"PATH="+goDir+string(os.PathListSeparator)+lockfDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"DEAR_AGENT_MANAGED_REPO_ROOTS="+repo,
 		"AGM_POST_MERGE_SWEEP=0",
 		"DEAR_AGENT_INSTALL_LOCK_TOOL=lockf",
 	)
