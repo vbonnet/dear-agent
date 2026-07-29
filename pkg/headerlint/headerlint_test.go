@@ -457,6 +457,58 @@ func TestCheckFile_IndentedHeadingEndsHeaderZone(t *testing.T) {
 	}
 }
 
+func TestCheckFile_NonOneOrderedMarkerDoesNotInterruptParagraph(t *testing.T) {
+	const content = "# Design options\n" +
+		"\n" +
+		"Introductory paragraph\n" +
+		"2. ## literal text, not a list heading\n" +
+		"**Complexity:** Low. **Timeline:** Comparable.\n"
+
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "design.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 1 || violations[0].Line != 5 {
+		t.Fatalf("want violation after noninterrupting ordered marker, got %v", violations)
+	}
+}
+
+func TestCheckFile_NonOneOrderedListHeadingAfterBlankEndsHeaderZone(t *testing.T) {
+	const content = "# Design options\n" +
+		"\n" +
+		"2. ## Nested body heading\n" +
+		"**Complexity:** Low. **Timeline:** Comparable.\n"
+
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "design.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("want ordered-list heading after blank to end header zone, got %v", violations)
+	}
+}
+
+func TestCheckFile_CRLFHeadingEndsHeaderZone(t *testing.T) {
+	const content = "# Design options\r\n" +
+		"\r\n" +
+		"##\r\n" +
+		"**Complexity:** Low. **Timeline:** Comparable.\r\n"
+
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "design.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("want CRLF heading to end header zone, got %v", violations)
+	}
+}
+
 func TestCheckFile_DoesNotFlagPastHeaderZoneLineCap(t *testing.T) {
 	// No heading at all, but the violation line is well past the header-zone
 	// line cap — treated as body text, not a metadata block.

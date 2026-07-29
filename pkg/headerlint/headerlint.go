@@ -170,8 +170,15 @@ func gitOutput(ctx context.Context, dir string, args ...string) ([]byte, error) 
 func checkData(path string, data []byte) []Violation {
 	var violations []Violation
 	lines := strings.Split(string(data), "\n")
+	for i := range lines {
+		// A CRLF checkout leaves '\r' behind when splitting on '\n'. Markdown
+		// block parsing is line-ending agnostic, so normalize before matching
+		// headings, fences, or inline-code boundaries.
+		lines[i] = strings.TrimSuffix(lines[i], "\r")
+	}
 	var fences fenceState
 	var inlineCode inlineCodeSpanState
+	paragraphOpen := false
 	for i, line := range lines {
 		lineNo := i + 1
 		if fences.consume(line) {
@@ -179,10 +186,11 @@ func checkData(path string, data []byte) []Violation {
 			// opener in earlier prose cannot consume a closer from this block
 			// or retain span state across it.
 			inlineCode = inlineCodeSpanState{}
+			paragraphOpen = false
 			continue
 		}
 		scannable := stripInlineCodeSpans(line, lines[i+1:], &inlineCode)
-		if matchesContainerATXHeading(scannable, headingH2Plus) {
+		if matchesContainerATXHeading(scannable, headingH2Plus, paragraphOpen) {
 			break
 		}
 		if lineNo > headerZoneMaxLines {
@@ -191,6 +199,7 @@ func checkData(path string, data []byte) []Violation {
 		if unescapedBoldFieldCount(scannable) >= 2 {
 			violations = append(violations, Violation{Path: path, Line: lineNo, Text: strings.TrimSpace(line)})
 		}
+		paragraphOpen = lineLeavesParagraphOpen(scannable)
 	}
 	return violations
 }
@@ -526,7 +535,7 @@ func inlineCodeBlockBoundary(line string, container fenceContainerContext) bool 
 	if !sameInlineCodeContainer(container, line) {
 		return true
 	}
-	if matchesContainerATXHeading(line, atxHeading) {
+	if matchesContainerATXHeading(line, atxHeading, true) {
 		return true
 	}
 	if matchesContainerBlockPattern(line, container, setextHeading) {
@@ -590,12 +599,30 @@ func inlineCodeContentStart(container fenceContainerContext, line string) (int, 
 	return 0, true
 }
 
-func matchesContainerATXHeading(line string, pattern *regexp.Regexp) bool {
-	offset, ok := fenceContentOffset(line)
+func matchesContainerATXHeading(line string, pattern *regexp.Regexp, paragraphOpen bool) bool {
+	offset, ok := headingContentOffset(line, paragraphOpen)
 	if !ok {
 		return false
 	}
 	return pattern.MatchString(line[offset:])
+}
+
+func lineLeavesParagraphOpen(line string) bool {
+	if strings.TrimSpace(line) == "" {
+		return false
+	}
+	if matchesContainerATXHeading(line, atxHeading, false) {
+		return false
+	}
+	container := parseFenceContainerContext(line)
+	if matchesContainerBlockPattern(line, container, setextHeading) ||
+		matchesContainerBlockPattern(line, container, thematicBreak) {
+		return false
+	}
+	if _, _, isFence := fenceDelimiter(line); isFence {
+		return false
+	}
+	return true
 }
 
 func escapedAt(line string, offset int) bool {
@@ -610,15 +637,34 @@ func escapedAt(line string, offset int) bool {
 // fenceContentOffset skips the indentation and block/list container markers
 // that Markdown permits before a fenced code delimiter.
 func fenceContentOffset(line string) (int, bool) {
+	return containerContentOffset(line, false)
+}
+
+// headingContentOffset applies CommonMark's paragraph-interruption rule while
+// stripping block/list containers before an ATX heading. An ordered list whose
+// start is not 1 cannot interrupt a paragraph, so text such as "2. ## literal"
+// remains paragraph content instead of becoming a nested heading.
+func headingContentOffset(line string, paragraphOpen bool) (int, bool) {
+	return containerContentOffset(line, paragraphOpen)
+}
+
+func containerContentOffset(line string, paragraphOpen bool) (int, bool) {
 	offset, ok := skipFenceIndent(line, 0)
 	if !ok {
 		return 0, false
 	}
 	for offset < len(line) {
+		if paragraphOpen && nonInterruptingOrderedListMarker(line, offset) {
+			return offset, true
+		}
 		markerEnd, found := fenceContainerMarkerEnd(line, offset)
 		if !found {
 			return offset, true
 		}
+		// A valid block quote, unordered-list marker, or start-1 ordered marker
+		// interrupts the old paragraph. Nested containers are therefore parsed
+		// in fresh block context.
+		paragraphOpen = false
 		offset = markerEnd
 		var indentOK bool
 		offset, indentOK = skipFenceIndent(line, offset)
@@ -627,6 +673,23 @@ func fenceContentOffset(line string) (int, bool) {
 		}
 	}
 	return offset, true
+}
+
+func nonInterruptingOrderedListMarker(line string, offset int) bool {
+	if offset >= len(line) || line[offset] < '0' || line[offset] > '9' {
+		return false
+	}
+	markerEnd := offset
+	for markerEnd < len(line) && markerEnd-offset < 9 && line[markerEnd] >= '0' && line[markerEnd] <= '9' {
+		markerEnd++
+	}
+	if markerEnd == offset || markerEnd >= len(line) || (line[markerEnd] != '.' && line[markerEnd] != ')') {
+		return false
+	}
+	if _, ok := terminatedListMarkerEnd(line, markerEnd+1); !ok {
+		return false
+	}
+	return string(line[offset:markerEnd]) != "1"
 }
 
 func fenceContainerMarkerEnd(line string, offset int) (int, bool) {
