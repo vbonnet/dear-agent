@@ -200,6 +200,21 @@ func TestValidateNativeSkillCoverageRequiresEverySkillPlugin(t *testing.T) {
 	if err := os.WriteFile(agmEntrypoint, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	negatedWorkflow := strings.Replace(
+		string(data),
+		"1. Read `../../../"+canonicalBySkill["scan-health"]+"` completely.\n2. Follow the canonical workflow and all of its gates.",
+		"1. Do not read `../../../"+canonicalBySkill["scan-health"]+"`; do not follow it.",
+		1,
+	)
+	if err := os.WriteFile(agmEntrypoint, []byte(negatedWorkflow), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateNativeSkillCoverage(root, catalog, surface); err == nil || !strings.Contains(err.Error(), "actionably load and follow") {
+		t.Fatalf("negated canonical workflow unexpectedly passed: %v", err)
+	}
+	if err := os.WriteFile(agmEntrypoint, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Remove(filepath.Join(root, surface.Catalog, "wayfinder", "SKILL.md")); err != nil {
 		t.Fatal(err)
 	}

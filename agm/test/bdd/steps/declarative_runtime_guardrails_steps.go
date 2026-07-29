@@ -357,6 +357,11 @@ type declarativeEvalCase struct {
 	ExpectedChecks []evalExpectedCheck `json:"expected_checks"`
 }
 
+var supportedDeclarativeEvalHarnesses = map[string]struct{}{
+	"claude": {},
+	"codex":  {},
+}
+
 func validateEvalCasesAsset(path string, data []byte) error {
 	var evals struct {
 		Cases []declarativeEvalCase `json:"cases"`
@@ -380,6 +385,9 @@ func validateEvalCase(path string, index int, evalCase declarativeEvalCase) erro
 		evalCase.ShouldTrigger == nil || evalCase.Trials <= 0 || len(evalCase.ExpectedChecks) == 0 {
 		return fmt.Errorf("declarative runtime asset %s eval case %d lacks required fields", path, index)
 	}
+	if err := validateEvalHarnesses(path, index, evalCase.Harness); err != nil {
+		return err
+	}
 	for checkIndex, check := range evalCase.ExpectedChecks {
 		if check.Type == "" || check.Target == "" || check.Pattern == "" {
 			return fmt.Errorf("declarative runtime asset %s eval case %d check %d lacks required fields", path, index, checkIndex)
@@ -392,6 +400,18 @@ func validateEvalCase(path string, index int, evalCase declarativeEvalCase) erro
 		}
 		if _, err := regexp.Compile(check.Pattern); err != nil {
 			return fmt.Errorf("declarative runtime asset %s eval case %d check %d has invalid regex: %w", path, index, checkIndex, err)
+		}
+	}
+	return nil
+}
+
+func validateEvalHarnesses(path string, caseIndex int, harnesses []string) error {
+	for harnessIndex, harness := range harnesses {
+		if strings.TrimSpace(harness) == "" {
+			return fmt.Errorf("declarative runtime asset %s eval case %d harness %d lacks a value", path, caseIndex, harnessIndex)
+		}
+		if _, ok := supportedDeclarativeEvalHarnesses[harness]; !ok {
+			return fmt.Errorf("declarative runtime asset %s eval case %d harness %d has unsupported value %q", path, caseIndex, harnessIndex, harness)
 		}
 	}
 	return nil

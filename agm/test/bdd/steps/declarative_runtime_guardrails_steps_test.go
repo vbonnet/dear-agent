@@ -55,6 +55,18 @@ func TestValidateDeclarativeRuntimeAsset(t *testing.T) {
 			wantErr: "check 0 lacks required fields",
 		},
 		{
+			name:    "eval harness blank",
+			asset:   "evals.json",
+			content: `{"cases":[{"id":"trigger","prompt":"research this","harness":["claude",""],"should_trigger":true,"trials":1,"expected_checks":[{"type":"regex","target":"trace","pattern":"research"}]}]}`,
+			wantErr: "harness 1 lacks a value",
+		},
+		{
+			name:    "eval harness unsupported",
+			asset:   "evals.json",
+			content: `{"cases":[{"id":"trigger","prompt":"research this","harness":["claude","claud"],"should_trigger":true,"trials":1,"expected_checks":[{"type":"regex","target":"trace","pattern":"research"}]}]}`,
+			wantErr: `harness 1 has unsupported value "claud"`,
+		},
+		{
 			name:  "OpenAI interface",
 			asset: "openai.yaml",
 			content: "interface:\n" +

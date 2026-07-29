@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/pkg/skilllint"
@@ -462,20 +464,62 @@ func hasActionableCanonicalWorkflow(markdown, reference string) bool {
 	if workflow, _, found := strings.Cut(section, "\n## "); found {
 		section = workflow
 	}
-	normalized := strings.Join(strings.Fields(section), " ")
-	lower := strings.ToLower(normalized)
 	token := "`" + strings.ToLower(reference) + "`"
-	before, after, ok := strings.Cut(lower, token)
-	if !ok {
-		return false
+	directives := workflowDirectives(section)
+	for index, directive := range directives {
+		lower := strings.ToLower(directive)
+		tokenIndex := strings.Index(lower, token)
+		if tokenIndex < 0 ||
+			(!hasPositiveDirectiveVerb(lower, "read", tokenIndex) &&
+				!hasPositiveDirectiveVerb(lower, "load", tokenIndex)) {
+			continue
+		}
+		for _, following := range directives[index:] {
+			following = strings.ToLower(following)
+			if hasPositiveDirectiveVerb(following, "follow", len(following)) {
+				return true
+			}
+		}
 	}
-	if len(before) > 120 {
-		before = before[len(before)-120:]
+	return false
+}
+
+func workflowDirectives(section string) []string {
+	listItem := regexp.MustCompile(`^\s*(?:\d+[.)]|[-*+])\s+(.*)$`)
+	var directives []string
+	for line := range strings.SplitSeq(section, "\n") {
+		if match := listItem.FindStringSubmatch(line); match != nil {
+			directives = append(directives, strings.TrimSpace(match[1]))
+			continue
+		}
+		if len(directives) > 0 && strings.TrimSpace(line) != "" {
+			directives[len(directives)-1] += " " + strings.TrimSpace(line)
+		}
 	}
-	if !strings.Contains(before, "read") && !strings.Contains(before, "load") {
-		return false
+	return directives
+}
+
+func hasPositiveDirectiveVerb(directive, verb string, before int) bool {
+	locations := regexp.MustCompile(`\b`+regexp.QuoteMeta(verb)+`\b`).FindAllStringIndex(directive[:before], -1)
+	for _, location := range slices.Backward(locations) {
+		clause := directive[:location[0]]
+		if separator := strings.LastIndexAny(clause, ".,;:"); separator >= 0 {
+			clause = clause[separator+1:]
+		}
+		negated := false
+		for _, word := range strings.FieldsFunc(clause, func(r rune) bool {
+			return !unicode.IsLetter(r) && r != '\''
+		}) {
+			switch word {
+			case "not", "never", "avoid", "don't", "cannot", "can't":
+				negated = true
+			}
+		}
+		if !negated {
+			return true
+		}
 	}
-	return strings.Contains(after, "follow")
+	return false
 }
 
 // ExpectedMarketplaceMode returns the executable skill-discovery mode owned by
