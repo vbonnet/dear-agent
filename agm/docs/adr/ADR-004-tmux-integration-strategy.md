@@ -24,5 +24,7 @@ cannot enforce exact session targeting.
 ## Consequences
 
 Local operation depends on tmux and inherits its platform constraints. Durable
-session records and hooks remain separate from pane state. Tests under
-`agm/internal/tmux`, manager, and adapters verify the boundary.
+session records and hooks remain separate from pane state. `session.RealTmux`
+is the one production adapter; tests under `agm/internal/tmux`,
+`agm/internal/session`, shared operations, and harness adapters verify the
+boundary.

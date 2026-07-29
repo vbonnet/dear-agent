@@ -10,6 +10,21 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
+// The production composition root injects *RealTmux directly. Keep every
+// safety-critical optional capability proven on that concrete value so a
+// forwarding adapter cannot silently weaken the runtime contract.
+var (
+	_ TmuxInterface                 = (*RealTmux)(nil)
+	_ TmuxSessionKiller             = (*RealTmux)(nil)
+	_ StrictSessionExistenceChecker = (*RealTmux)(nil)
+	_ HarnessLivenessChecker        = (*RealTmux)(nil)
+	_ HarnessLivenessBatchChecker   = (*RealTmux)(nil)
+	_ HarnessReadinessWaiter        = (*RealTmux)(nil)
+	_ InputReadinessChecker         = (*RealTmux)(nil)
+	_ AtomicInputSender             = (*RealTmux)(nil)
+	_ VerifiedPaneSender            = (*RealTmux)(nil)
+)
+
 // RealTmux wraps the internal/tmux package to provide TmuxInterface implementation
 type RealTmux struct{}
 

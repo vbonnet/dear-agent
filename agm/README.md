@@ -6,9 +6,7 @@ automatic session tracking.
 
 ## Architecture
 
-### C4 Component Diagram
-
-![AGM Component Diagram](diagrams/rendered/c4-component-agm.png)
+### C4 Component Model
 
 **Component Architecture** showing the multi-CLI session coordination system:
 
@@ -18,8 +16,11 @@ automatic session tracking.
 - **CoordinationDaemon**: Background process for session lifecycle management
 - **MessageQueue**: Inter-session communication and event routing
 - **SessionManager**: Central orchestration of session operations
+- **SessionTmuxRuntime**: The single local runtime adapter for strict
+  existence, liveness, readiness, and exact-pane control
 
-**Diagram Source**: `diagrams/c4-component-agm.d2`
+See the code-native [D2 source](diagrams/c4-component-agm.d2). Generated
+renders are intentionally not checked in so they cannot drift from the source.
 
 ## Multi-Agent Quick Start
 
