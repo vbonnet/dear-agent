@@ -8,7 +8,16 @@ description: >
 
 # Research Pipeline
 
-Before taking any pipeline action, read
-`../../../research-pipeline/skills/research-pipeline/SKILL.md` completely and
-follow it as the canonical workflow. This regular native entrypoint exists
-because Codex discovery does not load symlinked skill files.
+This regular-file entrypoint supplies Codex's native repository discovery.
+
+## Workflow
+
+1. Before taking any pipeline action, read
+   `../../../research-pipeline/skills/research-pipeline/SKILL.md` completely.
+2. Follow that canonical workflow without substituting this discovery
+   entrypoint for any of its requirements or gates.
+
+## Verification
+
+Apply the canonical skill's verification and completion criteria. Do not claim
+the pipeline is complete until every required canonical exit condition passes.
