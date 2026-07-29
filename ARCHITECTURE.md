@@ -17,16 +17,16 @@ the lifecycle of AI coding agent sessions across multiple harnesses.
          │                  │                        │
          v                  v                        v
 ┌─────────────────────────────────────────────────────────────────┐
-│              Operations + CLI Lifecycle Logic                    │
+│              Operations + CLI Surface Adapters                   │
 │                                                                 │
-│  internal/ops covers many reusable API operations, while some   │
-│  CLI lifecycle paths still own harness/tmux control directly.   │
+│  internal/ops owns reusable lifecycle transactions; CLI code    │
+│  resolves human input, presents facts, and attaches terminals.  │
 │                                                                 │
 │  Examples in ops: list/get/search/status, health, tag, retry,   │
-│  compact helpers, GC, install, and selected send/create paths.  │
+│  compact helpers, GC, install, send, create, and resume.        │
 │                                                                 │
-│  Examples still leaky in cmd/agm: session new, resume/attach,   │
-│  send msg, and mode/model command dispatch.                     │
+│  Examples still leaky in cmd/agm: selected new-session setup    │
+│  and mode/model command dispatch. Resume attachment stays UI.   │
 ├─────────────────────────────────────────────────────────────────┤
 │                    Concrete Harness Adapters                     │
 │                    (internal/agent/)                             │
@@ -84,7 +84,7 @@ surface. The real split is:
 MCP / JSON-friendly paths  →  internal/ops  → storage / tmux / backend
 Many CLI commands          →  internal/ops  → storage / tmux / backend
 Skills (.md)               →  CLI commands  → whichever path that command uses
-CLI lifecycle paths        →  cmd/agm helpers + harness/tmux switches
+Interactive resume attach  →  cmd/agm adapter after internal/ops returns
 ```
 
 - `OpContext` provides dependency injection for storage, tmux, manager backend,
@@ -95,9 +95,11 @@ CLI lifecycle paths        →  cmd/agm helpers + harness/tmux switches
 - `agm session new` still runs through `agm/cmd/agm/new*.go`, including
   sandbox setup, tmux creation, harness command construction, post-create
   hooks, and attach/detach handling.
-- `agm session resume` still runs through `agm/cmd/agm/resume.go`, including
-  identifier resolution, health checks, tmux recreation, and harness-specific
-  resume command delivery.
+- `agm session resume` resolves identifiers and prompt-file input in
+  `agm/cmd/agm/resume.go`, delegates health checks, tmux recreation,
+  harness-specific readiness, rollback, and persistence to
+  `internal/ops.ResumeSession`, then attaches only after the operation releases
+  the stable-session lock.
 - `agm send msg` still runs through `agm/cmd/agm/send_msg.go`, including
   queueing, safety checks, pending-file writes, tmux delivery, and a legacy
   API-adapter branch for API-based harness names.
@@ -120,8 +122,9 @@ define any behavioral capability interfaces they consume:
 | OpenCode | OpenCode CLI | SSE event streams, server port management |
 
 Adding a new harness starts with a concrete adapter, the metadata contract, and
-the finite constructor/model catalogs. Each operation that needs new behavior
-must define or extend a capability-sized consumer boundary; any still-leaky CLI
+the finite constructor/model catalogs, then the shared create and resume
+operations. Each operation that needs new behavior must define or extend a
+capability-sized consumer boundary; any still-leaky CLI
 lifecycle switches must be audited as well.
 
 ### Session Management (`agm/internal/session/`)
@@ -285,12 +288,12 @@ dear-agent/
 ## Design Principles
 
 1. **Adapter pattern for extensibility** — Harness-specific logic should live
-   in adapters where the current code supports it, but session creation,
-   resume, send, and mode/model dispatch still have command-layer harness
-   switches that must be kept honest.
-2. **Shared operations layer** — `agm/internal/ops` is the target home for
-   reusable API behavior and already backs many surfaces, but not all CLI
-   lifecycle behavior routes through it yet.
+   in adapters where the current code supports it. Shared resume owns its
+   harness policy; remaining command-layer creation and mode/model switches
+   must be kept honest.
+2. **Shared operations layer** — `agm/internal/ops` owns reusable lifecycle
+   transactions, including resume. Surface-only input, output, and interactive
+   attachment remain outside the operation.
 3. **Configuration cascade** — CLI flags → environment variables → config file
    → smart defaults.
 4. **Advisory over enforced** — File reservations warn rather than block,

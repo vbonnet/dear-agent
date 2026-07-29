@@ -34,7 +34,7 @@ func RegisterHarnessSpecGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates harness requirement identifiers and lifecycle ownership$`, agmValidatesHarnessRequirementIdentifiersAndLifecycleOwnership)
 	ctx.Step(`^harness requirement identifiers should be unique$`, harnessRequirementIdentifiersShouldBeUnique)
 	ctx.Step(`^CLI, MCP, and daemon lifecycle surfaces should delegate to shared operations$`, lifecycleSurfacesShouldDelegateToSharedOperations)
-	ctx.Step(`^CLI resume should retain its focused transactional owner$`, cliResumeShouldRetainItsFocusedTransactionalOwner)
+	ctx.Step(`^CLI resume should delegate its transaction to shared operations$`, cliResumeShouldDelegateItsTransactionToSharedOperations)
 	ctx.Step(`^AGM harness adapter contract sources$`, agmHarnessAdapterContractSources)
 	ctx.Step(`^AGM validates harness capability ownership$`, agmValidatesHarnessCapabilityOwnership)
 	ctx.Step(`^harness discovery should expose metadata without a universal lifecycle facade$`, harnessDiscoveryShouldExposeMetadataWithoutAUniversalLifecycleFacade)
@@ -78,9 +78,17 @@ func agmValidatesHarnessRequirementIdentifiersAndLifecycleOwnership(ctx context.
 	state.ownershipErr = requireLifecycleDelegation(root)
 	resumeSource, err := os.ReadFile(filepath.Join(root, "agm", "cmd", "agm", "resume.go"))
 	if err != nil {
-		return fmt.Errorf("read CLI resume owner: %w", err)
+		return fmt.Errorf("read CLI resume adapter: %w", err)
 	}
-	state.resumeOwnerOK = strings.Contains(string(resumeSource), "resumeSessionTransactionWithRuntime(")
+	operationSource, err := os.ReadFile(filepath.Join(root, "agm", "internal", "ops", "session_resume.go"))
+	if err != nil {
+		return fmt.Errorf("read shared resume owner: %w", err)
+	}
+	state.resumeOwnerOK =
+		strings.Count(string(resumeSource), "ops.ResumeSession(") == 1 &&
+			!strings.Contains(string(resumeSource), "resumeSessionTransactionWithRuntime(") &&
+			strings.Contains(string(operationSource), "func ResumeSession(") &&
+			strings.Contains(string(operationSource), "WithSessionLockContext(ctx, req.SessionID")
 	return nil
 }
 
@@ -324,13 +332,13 @@ func lifecycleSurfacesShouldDelegateToSharedOperations(ctx context.Context) erro
 	return state.ownershipErr
 }
 
-func cliResumeShouldRetainItsFocusedTransactionalOwner(ctx context.Context) error {
+func cliResumeShouldDelegateItsTransactionToSharedOperations(ctx context.Context) error {
 	state, err := requireHarnessSpecGuardrailState(ctx)
 	if err != nil {
 		return err
 	}
 	if !state.resumeOwnerOK {
-		return fmt.Errorf("CLI resume no longer exposes its focused transaction owner")
+		return fmt.Errorf("resume lifecycle is not owned by one stable-ID shared operation with a single CLI delegation")
 	}
 	return nil
 }

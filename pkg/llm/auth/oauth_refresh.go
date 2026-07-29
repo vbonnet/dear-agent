@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -51,6 +53,11 @@ const (
 	// maxErrBodyBytes caps how much of a non-2xx response body we read for
 	// diagnostics, so a hostile/oversized error page can't exhaust memory.
 	maxErrBodyBytes = 4 << 10
+
+	// requestBodyCloseWait bounds how long an erroring transport may retain the
+	// refresh-token request body after RoundTrip returns. If closure remains
+	// unresolved, the exchange is conservatively treated as possibly spent.
+	requestBodyCloseWait = 100 * time.Millisecond
 )
 
 // ErrTokenFamilyDead signals an unrecoverable refresh: the OAuth server
@@ -107,14 +114,15 @@ func (r OAuthResolver) readFullCredentials() (fullCredentials, string, bool) {
 
 // credentialsPath returns the resolved credentials file path.
 func (r OAuthResolver) credentialsPath() string {
-	if r.CredentialsPath != "" {
-		return r.CredentialsPath
+	path := r.CredentialsPath
+	if path == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		path = filepath.Join(home, claudeCredentialsRelPath)
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, claudeCredentialsRelPath)
+	return canonicalRefreshCredentialsPath(path)
 }
 
 // nowFn returns the resolver's clock, defaulting to time.Now.
@@ -154,6 +162,14 @@ func (r OAuthResolver) Refresh(ctx context.Context) (string, error) {
 
 	var token string
 	err := withCredentialsLock(ctx, path, r.LockTimeout, func() error {
+		stopped, stopErr := r.RefreshStopped()
+		if stopErr != nil {
+			return stopErr
+		}
+		if stopped {
+			return ErrRefreshStopped
+		}
+
 		// Re-read under the lock: a sibling pane may have just refreshed.
 		creds, _, ok := r.readFullCredentials()
 		if !ok {
@@ -168,10 +184,55 @@ func (r OAuthResolver) Refresh(ctx context.Context) (string, error) {
 			return errors.New("no refresh token available in credentials file")
 		}
 
+		// Refuse to re-present a token an earlier ambiguous refresh may already
+		// have spent. Checked under the lock and against the token we are about
+		// to send, so it self-clears as soon as anyone rotates successfully.
+		if qerr := r.checkQuarantine(creds.ClaudeAIOAuth.RefreshToken); qerr != nil {
+			r.log("oauth.refresh.quarantined", "error", qerr.Error())
+			return qerr
+		}
+
 		r.log("oauth.refresh.attempt", "endpoint", r.endpoint())
 		tok, err := r.exchange(ctx, creds.ClaudeAIOAuth.RefreshToken)
 		if err != nil {
 			r.log("oauth.refresh.failed", "error", err.Error())
+			if errors.Is(err, ErrRefreshOutcomeUnknown) {
+				// The token may be spent. Record it so the next tick refuses to
+				// replay it, which is what revokes the family. The
+				// credential-scoped stop is written even when a caller chose a
+				// custom quarantine path, so every resolver entrypoint sees
+				// the same fail-closed state.
+				stopErr := r.writeRefreshStopForToken(creds.ClaudeAIOAuth.RefreshToken, err.Error())
+				if qerr := r.writeQuarantine(creds.ClaudeAIOAuth.RefreshToken, err.Error()); qerr != nil {
+					// The protection lives in that file, not in this process:
+					// the next tick is a fresh process that reads the marker. A
+					// failed write therefore means the replay WILL happen unless
+					// a human intervenes, so it is escalated rather than logged
+					// and swallowed.
+					r.log("oauth.refresh.quarantine_write_failed", "error", qerr.Error())
+					return errors.Join(
+						fmt.Errorf("%w: %w (original refresh failure: %w)", ErrQuarantineNotPersisted, qerr, err),
+						wrapRefreshStopWriteError(stopErr),
+					)
+				}
+				if r.QuarantinePath == "" {
+					return errors.Join(
+						fmt.Errorf("%w: quarantine is disabled (original refresh failure: %w)", ErrQuarantineNotPersisted, err),
+						wrapRefreshStopWriteError(stopErr),
+					)
+				}
+				if stopErr != nil {
+					// A caller-selected quarantine is not shared protection:
+					// another resolver for these credentials will not inspect
+					// it. Classify the failed credential-scoped stop as
+					// non-persistence so unattended cadence may report safety
+					// only after it independently confirms a canonical marker.
+					return errors.Join(
+						fmt.Errorf("%w: custom quarantine is not a shared refresh stop (original refresh failure: %w)", ErrQuarantineNotPersisted, err),
+						wrapRefreshStopWriteError(stopErr),
+					)
+				}
+			}
 			return err
 		}
 
@@ -192,10 +253,27 @@ func (r OAuthResolver) Refresh(ctx context.Context) (string, error) {
 
 		if werr := atomicWriteCredentials(path, updated); werr != nil {
 			// CRITICAL: the server already rotated the refresh token, but we
-			// could not persist it. Surface loudly — never swallow this, or the
-			// next refresh will use the dead on-disk token and kill the family.
+			// could not persist it. Quarantine the now-spent on-disk token
+			// before returning; every resolver entry point consults that
+			// credential-scoped marker before presenting the token again.
 			r.log("oauth.refresh.persist_failed", "error", werr.Error())
-			return fmt.Errorf("%w: %w", ErrRefreshNotPersisted, werr)
+			reason := fmt.Sprintf("%s: %v", ErrRefreshNotPersisted, werr)
+			qerr := r.writeQuarantine(creds.ClaudeAIOAuth.RefreshToken, reason)
+			// Always write the credential-scoped stop. A caller-selected
+			// quarantine location is not necessarily visible to another
+			// resolver using the same credentials.
+			stopErr := r.writeRefreshStopForToken(creds.ClaudeAIOAuth.RefreshToken, reason)
+			return errors.Join(
+				fmt.Errorf("%w: %w", ErrRefreshNotPersisted, werr),
+				wrapQuarantineWriteError(qerr),
+				wrapRefreshStopWriteError(stopErr),
+			)
+		}
+
+		// The rotation completed and is on disk, so any earlier quarantine is
+		// moot: the token it named is gone.
+		if qerr := r.ClearQuarantine(); qerr != nil {
+			r.log("oauth.refresh.quarantine_clear_failed", "error", qerr.Error())
 		}
 
 		token = tok.AccessToken
@@ -206,6 +284,20 @@ func (r OAuthResolver) Refresh(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return token, nil
+}
+
+func wrapQuarantineWriteError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %w", ErrQuarantineNotPersisted, err)
+}
+
+func wrapRefreshStopWriteError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %w", ErrRefreshStopNotPersisted, err)
 }
 
 // endpoint resolves the token endpoint: explicit field, then env override, then
@@ -252,6 +344,17 @@ func (r OAuthResolver) exchange(ctx context.Context, refreshToken string) (token
 		"scope":         {defaultRefreshScopes},
 	}
 
+	// Observe consumption of the request body synchronously. httptrace's
+	// WroteRequest callback can run concurrently with, or after, Do returns an
+	// error, which makes a false "not transmitted" decision race-prone. The
+	// refresh token is in this non-empty form body: once a transport reads it,
+	// conservatively treat the token as possibly transmitted. This may
+	// quarantine after a locally failed write, but can never retry a token whose
+	// body was already handed to the transport.
+	body := &observedReadCloser{
+		ReadCloser: io.NopCloser(strings.NewReader(form.Encode())),
+		closedCh:   make(chan struct{}),
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.endpoint(), strings.NewReader(form.Encode()))
 	if err != nil {
 		return tokenResponse{}, fmt.Errorf("build token refresh request: %w", err)
@@ -261,9 +364,18 @@ func (r OAuthResolver) exchange(ctx context.Context, refreshToken string) (token
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", r.userAgent())
+	req.Body = body
 
 	resp, err := r.HTTPClient.Do(req)
 	if err != nil {
+		body.waitForClose(ctx)
+		if body.read.Load() || !body.closed.Load() {
+			// The refresh-token body reached the transport and we will never
+			// learn what the server did with it, or a conforming transport is
+			// still consuming/closing the body asynchronously after returning.
+			// Either case is unresolved and must not make the token retryable.
+			return tokenResponse{}, fmt.Errorf("%w: %w", ErrRefreshOutcomeUnknown, err)
+		}
 		return tokenResponse{}, fmt.Errorf("token refresh request failed: %w", err)
 	}
 	defer resp.Body.Close()
@@ -273,17 +385,66 @@ func (r OAuthResolver) exchange(ctx context.Context, refreshToken string) (token
 		if resp.StatusCode == http.StatusBadRequest && bytes.Contains(body, []byte("invalid_grant")) {
 			return tokenResponse{}, fmt.Errorf("%w (status 400)", ErrTokenFamilyDead)
 		}
+		// A 5xx leaves it genuinely open whether the token was consumed before
+		// the server faltered, so it is treated as possibly spent. A 4xx is a
+		// deliberate rejection: no token was issued, so the on-disk one is
+		// untouched and retrying is safe.
+		if resp.StatusCode >= http.StatusInternalServerError {
+			return tokenResponse{}, fmt.Errorf("%w: token refresh returned %d: %s",
+				ErrRefreshOutcomeUnknown, resp.StatusCode, strings.TrimSpace(string(body)))
+		}
 		return tokenResponse{}, fmt.Errorf("token refresh returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
+	// Past this point the server returned 200, so it HAS rotated the refresh
+	// token. Any failure to read the reply means the replacement is lost and the
+	// on-disk token is definitively spent — the same recovery as the ambiguous
+	// case, so it carries the same error.
 	var tok tokenResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tok); err != nil {
-		return tokenResponse{}, fmt.Errorf("decode token response: %w", err)
+		return tokenResponse{}, fmt.Errorf("%w: decode token response: %w", ErrRefreshOutcomeUnknown, err)
 	}
 	if tok.AccessToken == "" {
-		return tokenResponse{}, errors.New("token response contained no access_token")
+		return tokenResponse{}, fmt.Errorf("%w: token response contained no access_token", ErrRefreshOutcomeUnknown)
 	}
 	return tok, nil
+}
+
+type observedReadCloser struct {
+	io.ReadCloser
+	read      atomic.Bool
+	closed    atomic.Bool
+	closeOnce sync.Once
+	closedCh  chan struct{}
+}
+
+func (r *observedReadCloser) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	if n > 0 {
+		r.read.Store(true)
+	}
+	return n, err
+}
+
+func (r *observedReadCloser) Close() error {
+	err := r.ReadCloser.Close()
+	r.closed.Store(true)
+	r.closeOnce.Do(func() {
+		close(r.closedCh)
+	})
+	return err
+}
+
+func (r *observedReadCloser) waitForClose(ctx context.Context) {
+	if r.closed.Load() {
+		return
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, requestBodyCloseWait)
+	defer cancel()
+	select {
+	case <-r.closedCh:
+	case <-waitCtx.Done():
+	}
 }
 
 // backupCredentials copies the credentials file to <path>.bak (mode 0600)
@@ -340,7 +501,16 @@ func atomicWriteCredentials(path string, creds fullCredentials) error {
 // defaultRefreshingResolver is the package-level resolver used by
 // ResolveOAuthToken. It has a real HTTP client so it can perform token refresh.
 var defaultRefreshingResolver = &OAuthResolver{
-	HTTPClient: &http.Client{Timeout: 30 * time.Second},
+	HTTPClient:     &http.Client{Timeout: 30 * time.Second},
+	QuarantinePath: defaultQuarantinePath(),
+}
+
+func defaultQuarantinePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".local", "state", "dear-agent", "refresh-token-quarantine.json")
 }
 
 // resolveWithRefresh is Resolve() plus an automatic, file-locked refresh

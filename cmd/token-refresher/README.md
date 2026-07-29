@@ -23,14 +23,14 @@ stderr), so it composes cleanly with any caller that wants to capture the token.
 
 ## Flags
 
-| Flag | Default | Purpose |
-|------|---------|---------|
-| `-credentials` | `~/.claude/.credentials.json` | credentials file path |
-| `-endpoint` | built-in / `$CLAUDE_OAUTH_TOKEN_ENDPOINT` | OAuth token endpoint |
-| `-client-id` | built-in / `$CLAUDE_OAUTH_CLIENT_ID` | OAuth client ID |
-| `-lock-timeout` | `10s` | max wait for the cross-process credentials lock |
-| `-quiet` | `false` | suppress structured stderr logs |
-| `-audit-log` | `~/.local/state/dear-agent/token-refresher-audit.jsonl` | JSONL audit (empty disables) |
+Run `token-refresher -help` for the current option inventory and defaults.
+Refresh safety state is credential-scoped: the default Claude credentials use
+the managed dear-agent state directory for their quarantine, while a
+non-default credentials file uses `<credentials>.refresh-quarantine.json`.
+Every credential set also has a durable `<credentials>.refresh-stop` marker
+beside its canonical credentials path. That stop is honored by the CLI and
+in-process `auth` callers alike until the operator remediates the persistence
+failure and explicitly clears the quarantine.
 
 ## Exit codes
 
@@ -40,6 +40,63 @@ stderr), so it composes cleanly with any caller that wants to capture the token.
 | `1` | generic / usage error |
 | `2` | token family dead (`invalid_grant`) — re-authenticate (`claude /login` / `claude setup-token`) |
 | `3` | refresh succeeded on the server but could not be persisted (critical — investigate disk/permissions) |
+| `4` | refresh token quarantined — an earlier refresh may have spent it (see below) |
+
+## Refresh-token quarantine
+
+Refresh tokens here are single-use and rotating, so a refresh whose request
+reached the server but whose response did not is genuinely ambiguous: the server
+may have consumed the token and issued a replacement that never arrived. The
+on-disk token then looks valid but is spent, and presenting it again is a replay
+— which rotation treats as proof of theft, revoking the whole family and forcing
+a `claude /login`.
+
+That is exactly how the 2026-07-18 family death happened (ce-77ip.7): a
+`Client.Timeout exceeded while awaiting headers` at 08:58:37Z, then the same
+token presented again at 10:29:06Z.
+
+So the refresher observes whether the transport consumed the refresh-token body
+rather than parsing error text. This is deliberately conservative: consumption
+does not prove bytes reached the server.
+
+- **Request never transmitted** (TLS handshake timeout, connection refused, DNS):
+  the token is untouched. Ordinary retryable error.
+- **Request body consumed, no usable response** (timeout awaiting headers, 5xx, an
+  unreadable 200): the token may be spent. It is **quarantined** — recorded by
+  fingerprint and never presented again automatically.
+
+The mechanism **fails closed** everywhere it can. Only "the marker file is not
+there" counts as no quarantine; a marker that exists but cannot be read or parsed
+blocks the refresh, because it may be naming the token on disk. And if a
+possibly-spent token cannot be *recorded*, that is reported as a critical
+non-persistence failure (exit 3) rather than logged and forgotten — the
+protection lives in that file, not in the running process, so a failed write
+means the next tick would replay the token.
+
+If a server-successful refresh cannot persist the rotated credentials, the
+refresher writes the credential-scoped quarantine before returning the critical
+error. Every shared resolver entry point consults that quarantine, preventing
+another process using `auth.ResolveOAuthToken()` from replaying the token.
+
+A quarantine clears itself as soon as the on-disk token changes, so if any client
+rotates successfully, refreshing resumes with no intervention. To inspect or
+override:
+
+```sh
+# Reuse the exact selectors printed by the failing invocation:
+token-refresher -credentials "/path/to/credentials.json" -quarantine "/path/to/quarantine.json" -check
+token-refresher -credentials "/path/to/credentials.json" -quarantine "/path/to/quarantine.json" -clear-quarantine
+```
+
+For the default credential set and default quarantine path, the selectors may
+be omitted. For any non-default credentials file or explicit quarantine path,
+omitting them inspects or clears a different protection set.
+
+Holding back is the safer failure. If the server did rotate, replaying guarantees
+family revocation and takes down every OAuth client on the host at once;
+quarantining instead lets the current access token live out its expiry while the
+operator is alerted. If the server never processed the request, the cost is one
+stalled refresh cycle.
 
 ## Wiring options
 
