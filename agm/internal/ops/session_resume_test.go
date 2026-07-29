@@ -511,12 +511,13 @@ func TestPrepareResumeLaunchRestoresSandboxCodexPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepareResumeLaunch() error: %v", err)
 	}
-	want := "--add-dir " + shellquote.Quote(extraAddDir)
-	if !strings.Contains(launch.Command, want) {
-		t.Fatalf("prepareResumeLaunch() command = %q, want %q", launch.Command, want)
-	}
-	if !strings.Contains(launch.Command, "--bypass-hook-trust") {
-		t.Fatalf("prepareResumeLaunch() command = %q, want bypass hook trust", launch.Command)
+	for _, want := range []string{
+		"--add-dir " + shellquote.Quote(extraAddDir),
+		"--bypass-hook-trust",
+	} {
+		if !strings.Contains(launch.Command, want) {
+			t.Fatalf("prepareResumeLaunch() command = %q, want %q", launch.Command, want)
+		}
 	}
 
 	uses, err := override.LoadUses(time.Time{})
