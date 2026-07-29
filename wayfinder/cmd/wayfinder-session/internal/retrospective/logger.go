@@ -21,13 +21,6 @@ import (
 //
 // Errors are logged to stderr but don't block rewind operation (fail-gracefully).
 func LogRewindEvent(projectDir string, fromPhase, toPhase string, flags RewindFlags) error {
-	if err := history.New(projectDir).EnsureCurrentFile(); err != nil {
-		if errors.Is(err, history.ErrAmbiguousHistory) {
-			return fmt.Errorf("refuse rewind logging with ambiguous history: %w", err)
-		}
-		fmt.Fprintf(os.Stderr, "Warning: failed to prepare history: %v\n", err)
-	}
-
 	// Wrap in defer/recover to ensure rewind never fails due to logger crash
 	defer func() {
 		if r := recover(); r != nil {
@@ -45,6 +38,13 @@ func LogRewindEvent(projectDir string, fromPhase, toPhase string, flags RewindFl
 	// Skip logging for magnitude 0 (no-op rewind)
 	if magnitude == 0 {
 		return nil
+	}
+
+	if err := history.New(projectDir).EnsureCurrentFile(); err != nil {
+		if errors.Is(err, history.ErrAmbiguousHistory) {
+			return fmt.Errorf("refuse rewind logging with ambiguous history: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Warning: failed to prepare history: %v\n", err)
 	}
 
 	// Read status for context capture

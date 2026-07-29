@@ -71,15 +71,12 @@ func runStartPhase(cmd *cobra.Command, args []string) (retErr error) {
 		}
 	}
 
-	hist := history.New(projectDir)
-	if err := hist.EnsureCurrentFile(); err != nil {
-		return fmt.Errorf("prepare history for phase transition: %w", err)
-	}
-
 	st, err := status.ParseV2FromDir(projectDir)
 	if err != nil {
 		return fmt.Errorf("failed to read canonical status file: %w", err)
 	}
+
+	hist := history.New(projectDir)
 
 	// Validate phase can be started
 	v := validator.NewValidator(st)
@@ -94,6 +91,17 @@ func runStartPhase(cmd *cobra.Command, args []string) (retErr error) {
 		return fmt.Errorf("validation failed: %w", err)
 	}
 
+	// Initialize tracker
+	tr, err := tracker.New(st.GetSessionID())
+	if err != nil {
+		return fmt.Errorf("failed to initialize tracker: %w", err)
+	}
+	defer func() { _ = tr.Close(context.Background()) }()
+
+	if err := hist.EnsureCurrentFile(); err != nil {
+		return fmt.Errorf("prepare history for phase transition: %w", err)
+	}
+
 	// Update phase status
 	st.UpdatePhase(phaseName, status.PhaseStatusInProgress, "")
 	st.SetCurrentPhase(phaseName)
@@ -104,13 +112,6 @@ func runStartPhase(cmd *cobra.Command, args []string) (retErr error) {
 	if shouldEnsureSessionBead(st, phaseName) {
 		ensureSessionBead(cmd.Context(), st)
 	}
-
-	// Initialize tracker
-	tr, err := tracker.New(st.GetSessionID())
-	if err != nil {
-		return fmt.Errorf("failed to initialize tracker: %w", err)
-	}
-	defer func() { _ = tr.Close(context.Background()) }()
 
 	// Publish phase.started event
 	if err := tr.StartPhase(phaseName); err != nil {
