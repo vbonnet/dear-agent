@@ -492,7 +492,7 @@ func TestPrepareResumeLaunchRestoresSandboxCodexPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepareResumeLaunch() error: %v", err)
 	}
-	want := "--add-dir " + launchparity.ShellQuote(extraAddDir)
+	want := "--add-dir " + shellquote.Quote(extraAddDir)
 	if !strings.Contains(launch.Command, want) {
 		t.Fatalf("prepareResumeLaunch() command = %q, want %q", launch.Command, want)
 	}
