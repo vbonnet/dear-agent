@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
-	"github.com/vbonnet/dear-agent/agm/internal/pastevalidate"
 )
 
 // Workdir verification/repair tuning knobs. Package-level vars (not consts) so
@@ -96,7 +95,7 @@ func EnsureSessionWorkDir(sessionName, workDir string) error {
 }
 
 func correctiveWorkDirCommand(workDir string) (string, error) {
-	if err := pastevalidate.Text("workdir", workDir); err != nil {
+	if err := ValidatePastedText("workdir", workDir); err != nil {
 		return "", fmt.Errorf("validate corrective workdir paste: %w", err)
 	}
 	return "cd " + singleQuote(workDir), nil

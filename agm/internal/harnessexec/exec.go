@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
-	"github.com/vbonnet/dear-agent/agm/internal/pastevalidate"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
 
@@ -547,11 +547,11 @@ func validateText(name, value string) error {
 	if value == "" {
 		return fmt.Errorf("invalid harness launch request: %s is required", name)
 	}
-	return pastevalidate.Text(name, value)
+	return tmux.ValidatePastedText(name, value)
 }
 
 func validateOptionalText(name, value string) error {
-	return pastevalidate.Text(name, value)
+	return tmux.ValidatePastedText(name, value)
 }
 
 func validateTextList(name string, values []string) error {

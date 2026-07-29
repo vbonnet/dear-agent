@@ -1,6 +1,4 @@
-// Package pastevalidate owns validation for caller-controlled text that may
-// cross tmux's terminal-paste boundary.
-package pastevalidate
+package tmux
 
 import (
 	"fmt"
@@ -9,10 +7,10 @@ import (
 	"unicode/utf8"
 )
 
-// Text rejects terminal controls and invalid UTF-8. Empty optional fields are
-// permitted so callers can use the same primitive before deciding whether a
-// paste is needed.
-func Text(name, value string) error {
+// ValidatePastedText rejects terminal controls and invalid UTF-8 before a
+// caller-controlled value crosses tmux's terminal-paste boundary. Empty
+// optional fields are permitted.
+func ValidatePastedText(name, value string) error {
 	if value == "" {
 		return nil
 	}
