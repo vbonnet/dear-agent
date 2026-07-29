@@ -101,6 +101,7 @@ func (m *ProcessMonitor) Start(ctx context.Context) {
 	m.cancel = cancel
 	m.done = done
 	m.running = true
+	m.lastCount = 0
 	m.lastCheck = time.Now()
 	m.mu.Unlock()
 
@@ -173,11 +174,9 @@ func (m *ProcessMonitor) check() {
 
 	// Check absolute limit
 	if count > m.limits.MaxProcesses {
-		if m.onAlert != nil {
-			m.onAlert(AlertProcessLimit, fmt.Sprintf(
-				"process count %d exceeds limit %d for PID %d",
-				count, m.limits.MaxProcesses, m.pid))
-		}
+		m.emitAlert(AlertProcessLimit, fmt.Sprintf(
+			"process count %d exceeds limit %d for PID %d",
+			count, m.limits.MaxProcesses, m.pid))
 		// Attempt to kill the process tree
 		killProcessTree(m.pid)
 		return
@@ -189,15 +188,23 @@ func (m *ProcessMonitor) check() {
 		if delta > 0 {
 			rate := float64(delta) / elapsed
 			if rate > float64(m.limits.MaxProcessSpawnRate) {
-				if m.onAlert != nil {
-					m.onAlert(AlertForkBomb, fmt.Sprintf(
-						"fork bomb detected: %.0f procs/sec (limit %d) for PID %d",
-						rate, m.limits.MaxProcessSpawnRate, m.pid))
-				}
+				m.emitAlert(AlertForkBomb, fmt.Sprintf(
+					"fork bomb detected: %.0f procs/sec (limit %d) for PID %d",
+					rate, m.limits.MaxProcessSpawnRate, m.pid))
 				killProcessTree(m.pid)
 			}
 		}
 	}
+}
+
+func (m *ProcessMonitor) emitAlert(alertType AlertType, message string) {
+	if m.onAlert == nil {
+		return
+	}
+	// Alert handlers are external callbacks and may call Stop. Running them on
+	// the monitor loop would make Stop wait for the same goroutine that is
+	// currently executing the callback.
+	go m.onAlert(alertType, message)
 }
 
 // countDescendants walks /proc to count all descendants of a PID.

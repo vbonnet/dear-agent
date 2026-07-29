@@ -98,6 +98,41 @@ func TestProcessMonitorParentCancellationClearsRunningAndAllowsRestart(t *testin
 	assertProcessMonitorStopped(t, m)
 }
 
+func TestProcessMonitorStartResetsProcessCountBaseline(t *testing.T) {
+	m := NewProcessMonitor(os.Getpid(), ProcessLimits{PollInterval: time.Hour}, nil)
+	m.mu.Lock()
+	m.lastCount = 99
+	m.mu.Unlock()
+
+	m.Start(context.Background())
+	m.mu.Lock()
+	lastCount := m.lastCount
+	m.mu.Unlock()
+	m.Stop()
+
+	if lastCount != 0 {
+		t.Fatalf("lastCount after restart = %d, want fresh baseline", lastCount)
+	}
+}
+
+func TestProcessMonitorAlertCallbackCanStopMonitor(t *testing.T) {
+	callbackDone := make(chan struct{})
+	var m *ProcessMonitor
+	m = NewProcessMonitor(os.Getpid(), ProcessLimits{PollInterval: time.Hour}, func(AlertType, string) {
+		m.Stop()
+		close(callbackDone)
+	})
+	m.Start(context.Background())
+	m.emitAlert(AlertProcessLimit, "test alert")
+
+	select {
+	case <-callbackDone:
+	case <-time.After(time.Second):
+		t.Fatal("alert callback deadlocked while stopping monitor")
+	}
+	assertProcessMonitorStopped(t, m)
+}
+
 func TestProcessMonitorConcurrentStartStop(t *testing.T) {
 	m := NewProcessMonitor(os.Getpid(), ProcessLimits{PollInterval: time.Hour}, nil)
 
