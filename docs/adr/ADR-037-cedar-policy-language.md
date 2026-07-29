@@ -149,13 +149,13 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   symlink to an allowed temporary file cannot authorize deletion from a
   protected directory, and a protected referent does not by itself forbid
   removing an otherwise allowed symlink entry.
-- Hard links authorize the source identity plus destination parent/entry; an
-  allowed destination cannot launder a protected inode. Later access carries
-  device/inode into authorization. At startup the privileged boundary scans
-  protected roots that agents cannot mutate, then serializes trusted mutations
-  with atomic catalog updates. An uncorrelated external mutation marks that
-  filesystem catalog incomplete and denies inode-ambiguous access until rescan.
-  With a complete catalog, multiply-linked inodes absent from it remain usable.
+- Hard links authorize the source identity according to the requested follow
+  mode plus destination parent/entry: `ln -L` resolves and pins the referent,
+  while `ln -P` no-follow pins the symlink inode. An allowed destination cannot
+  launder a protected inode. Later access carries device/inode into authorization.
+  The privileged boundary scans immutable protected roots and atomically catalogs
+  trusted mutations; an uncorrelated external mutation makes the catalog
+  incomplete and denies ambiguous access until rescan.
 - The lexical input may be retained only as audit context; policies receive
   the operation-appropriate canonical identities. Failure to obtain every
   required identity is deny, and no per-harness interceptor may evaluate the
@@ -176,10 +176,10 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
 This proposal does not yet supersede the active permission-parity contract.
 Until the Cedar evaluator, migration, and acceptance gates land together,
 `agm/internal/permissionparity/SPEC.md` and the manifest
-`permission_policy` projections remain the authoritative implemented control
-plane. Acceptance of this ADR requires updating that SPEC, its executable
-surface inventory, and the harness BDD contract in the same migration change;
-there must never be two live policy owners.
+`permission_policy` projections, plus `internal/fsguard` policy/configuration and the
+pretool Bash/filesystem guard hooks, SPECs, and tests remain authoritative.
+Acceptance requires updating or retiring that complete inventory and the
+harness BDD contract in one migration; there must never be two policy owners.
 
 ## Implementation acceptance gates
 
@@ -255,11 +255,11 @@ tests must prove all of the following:
     symlink with a protected referent, reject a protected-directory symlink
     with an allowed referent, and cover rename/replacement across independently
     authorized parents. Leaf swaps cannot change pinned entries or parents.
-14. Hard-link tests deny protected-source/allowed-destination and the inverse,
-    plus pre-existing allowed-path aliases of protected inodes. A complete
-    catalog permits allowed-source/allowed-destination aliases; an external
-    uncorrelated link makes it incomplete and fail closed until privileged
-    rescan. Pathname allow never overrides protected-inode identity.
+14. Hard-link tests exercise source symlinks in both modes: `-L` authorizes
+    the referent and `-P` the symlink inode, with outcomes bound to that identity.
+    They deny protected-source/allowed-destination, the inverse, and protected-inode aliases; a complete catalog permits fully allowed aliases.
+    An external uncorrelated link makes it incomplete and fail closed until
+    rescan; pathname allow never overrides protected-inode identity.
 15. Every harness runs an unrecognized binary and runtime-computed shell-read
     and shell-write targets; if every resource cannot be projected and pinned,
     an OS sandbox blocks protected reads and writes or dispatch is denied before
