@@ -2,12 +2,14 @@ package steps
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/cucumber/godog"
+	"gopkg.in/yaml.v3"
 
 	"github.com/vbonnet/dear-agent/internal/earslint"
 )
@@ -42,6 +44,18 @@ var declarativeRuntimeDirs = []string{
 	"research-pipeline/.claude-plugin",
 	"research-pipeline/skills/research-pipeline",
 	"wayfinder/.claude-plugin",
+}
+
+var declarativeRuntimeAssets = map[string][]string{
+	".agents/skills/research-pipeline/agents":    {"openai.yaml"},
+	"research-pipeline/.claude-plugin":           {"plugin.json"},
+	"research-pipeline/skills/research-pipeline": {"SKILL.md", "evals.json"},
+}
+
+var declarativeRuntimeAssetValidators = map[string]func(string, []byte) error{
+	"plugin.json": validatePluginManifestAsset,
+	"evals.json":  validateEvalCasesAsset,
+	"openai.yaml": validateOpenAIInterfaceAsset,
 }
 
 type declarativeRuntimeGuardrailStateKey struct{}
@@ -220,6 +234,72 @@ func validateDeclarativeRuntimeSpecs(ctx context.Context) error {
 		if result.Failed(true) {
 			return fmt.Errorf("declarative runtime SPEC %s fails strict EARS lint: %v", spec, result.Findings)
 		}
+		for _, asset := range declarativeRuntimeAssets[dir] {
+			if err := validateDeclarativeRuntimeAsset(root, dir, asset); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateDeclarativeRuntimeAsset(root, dir, asset string) error {
+	path := filepath.Join(root, filepath.FromSlash(dir), asset)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read declarative runtime asset %s: %w", path, err)
+	}
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return fmt.Errorf("declarative runtime asset %s is empty", path)
+	}
+
+	if validate := declarativeRuntimeAssetValidators[asset]; validate != nil {
+		return validate(path, data)
+	}
+	return nil
+}
+
+func validatePluginManifestAsset(path string, data []byte) error {
+	var manifest struct {
+		Name    string   `json:"name"`
+		Version string   `json:"version"`
+		Skills  []string `json:"skills"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return fmt.Errorf("parse declarative runtime asset %s: %w", path, err)
+	}
+	if manifest.Name == "" || manifest.Version == "" || len(manifest.Skills) == 0 {
+		return fmt.Errorf("declarative runtime asset %s lacks name, version, or skills", path)
+	}
+	return nil
+}
+
+func validateEvalCasesAsset(path string, data []byte) error {
+	var evals struct {
+		Cases []json.RawMessage `json:"cases"`
+	}
+	if err := json.Unmarshal(data, &evals); err != nil {
+		return fmt.Errorf("parse declarative runtime asset %s: %w", path, err)
+	}
+	if len(evals.Cases) == 0 {
+		return fmt.Errorf("declarative runtime asset %s has no eval cases", path)
+	}
+	return nil
+}
+
+func validateOpenAIInterfaceAsset(path string, data []byte) error {
+	var config struct {
+		Interface struct {
+			DisplayName      string `yaml:"display_name"`
+			ShortDescription string `yaml:"short_description"`
+			DefaultPrompt    string `yaml:"default_prompt"`
+		} `yaml:"interface"`
+	}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return fmt.Errorf("parse declarative runtime asset %s: %w", path, err)
+	}
+	if config.Interface.DisplayName == "" || config.Interface.ShortDescription == "" || config.Interface.DefaultPrompt == "" {
+		return fmt.Errorf("declarative runtime asset %s lacks its published interface fields", path)
 	}
 	return nil
 }

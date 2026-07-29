@@ -250,11 +250,6 @@ after this pipeline runs to completion for a given source:
 - `docs/skill-placement.md` — the placement framework that assigned this
   skill to dear-agent (cross-model verification, human gate before
   execution, sized beads — DEAR process discipline, not personal taste).
-- `wayfinder/PHASES.md` and `wayfinder/cmd/wayfinder-session/internal/beads/SPEC.md`
-  — the Beads adapter Stage 4 delegates to for large decompositions.
-- [vbonnet/dear-agent#947](https://github.com/vbonnet/dear-agent/pull/947) —
-  the incorporate-vs-delegate assessment for this pipeline's one real overlap
-  with Wayfinder (decomposition only), landing at
-  `docs/design/research-pipeline-wayfinder-integration.md`. Still open at
-  the time this skill shipped; once #947 merges, prefer the in-repo path
-  over this PR link.
+- `.agents/skills/beads/SKILL.md` — the canonical direct Beads interface Stage
+  4 uses for both small and large decompositions; Wayfinder may orchestrate a
+  later SDLC session but does not own bead filing.
