@@ -185,3 +185,48 @@ func TestValidatePiSkillDiscoveryRejectsSettingsSymlinkOutsideRepository(t *test
 		t.Fatalf("err = %v, want settings containment rejection", err)
 	}
 }
+
+func TestValidateAssetsRejectsSymlinkedAsset(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+
+	assets := []string{
+		"wayfinder/SPEC.md",
+		"wayfinder/SKILL.md",
+		"wayfinder/.claude-plugin/plugin.json",
+		"wayfinder/ARCHITECTURE.md",
+		"wayfinder/cmd/wayfinder-session/SPEC.md",
+		".agents/skills/wayfinder/SKILL.md",
+		".opencode/skills/wayfinder/SKILL.md",
+	}
+	// Everything real except the OpenCode wrapper, which is a repository-local
+	// symlink to a file a clean clone would not carry.
+	for _, rel := range assets[:len(assets)-1] {
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	external := filepath.Join(outside, "SKILL.md")
+	if err := os.WriteFile(external, []byte("# External\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(root, assets[len(assets)-1])
+	if err := os.MkdirAll(filepath.Dir(linked), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, linked); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	err := ValidateAssets(root)
+	if err == nil {
+		t.Fatal("ValidateAssets accepted a symlinked external Wayfinder asset")
+	}
+	if !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("err = %v, want a regular-file rejection", err)
+	}
+}

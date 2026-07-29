@@ -471,6 +471,11 @@ func hasActionableCanonicalWorkflow(markdown, reference string) bool {
 	}
 	token := "`" + strings.ToLower(reference) + "`"
 	directives := workflowDirectives(section)
+	// A later list item can withdraw an earlier valid handoff, so the whole
+	// ordered Workflow must be clean before parity accepts the wrapper.
+	if canonicalWorkflowIsCancelled(directives) {
+		return false
+	}
 	for index, directive := range directives {
 		lower := strings.ToLower(directive)
 		if !hasPositiveCanonicalLoadDirective(lower, token) {
@@ -479,6 +484,22 @@ func hasActionableCanonicalWorkflow(markdown, reference string) bool {
 		for _, following := range directives[index:] {
 			following = strings.ToLower(following)
 			if hasPositiveCanonicalFollowDirective(following) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// canonicalWorkflowIsCancelled reports whether any Workflow directive withdraws
+// the canonical handoff. A negated weakening verb ("do not skip the gates")
+// reinforces the handoff rather than cancelling it, so the verb must itself be
+// positive before the directive counts as an override.
+func canonicalWorkflowIsCancelled(directives []string) bool {
+	for _, directive := range directives {
+		normalized := strings.Join(strings.Fields(strings.ToLower(directive)), " ")
+		for _, match := range canonicalFollowWeakening.FindAllStringIndex(normalized, -1) {
+			if directiveVerbIsPositive(normalized, []int{match[0], match[0]}) {
 				return true
 			}
 		}

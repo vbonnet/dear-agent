@@ -106,8 +106,13 @@ func ValidateActiveHarnessSurfaces() error {
 	return nil
 }
 
-// ValidateAssets verifies shared Wayfinder files and plugin assets exist.
+// ValidateAssets verifies shared Wayfinder files and plugin assets exist as
+// regular files contained in the repository.
 func ValidateAssets(root string) error {
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return fmt.Errorf("resolve repository root for Wayfinder assets: %w", err)
+	}
 	for _, rel := range []string{
 		"wayfinder/SPEC.md",
 		"wayfinder/SKILL.md",
@@ -117,11 +122,34 @@ func ValidateAssets(root string) error {
 		".agents/skills/wayfinder/SKILL.md",
 		".opencode/skills/wayfinder/SKILL.md",
 	} {
-		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
-			return fmt.Errorf("wayfinder asset %s: %w", rel, err)
+		if err := requireContainedRegularFile(resolvedRoot, root, rel); err != nil {
+			return err
 		}
 	}
 	return ValidatePiSkillDiscovery(root)
+}
+
+// requireContainedRegularFile rejects a Wayfinder asset that a clean clone or
+// package would not carry. os.Stat alone follows links, so a repository-local
+// symlink to an external regular file — or a real file reached through an
+// intermediate directory symlink — would otherwise report the asset present.
+func requireContainedRegularFile(resolvedRoot, root, rel string) error {
+	path := filepath.Join(root, rel)
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("wayfinder asset %s: %w", rel, err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("wayfinder asset %s is not a regular file", rel)
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return fmt.Errorf("resolve wayfinder asset %s: %w", rel, err)
+	}
+	if !containedWithin(resolvedRoot, resolved) {
+		return fmt.Errorf("wayfinder asset %s escapes the repository", rel)
+	}
+	return nil
 }
 
 // ValidatePiSkillDiscovery verifies Pi reads the living skill trees instead of
