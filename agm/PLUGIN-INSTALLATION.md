@@ -14,8 +14,8 @@ From a local clone of this repo:
 ```
 
 This registers the marketplace and installs every plugin it declares (`agm`,
-`wayfinder`, `youtube`). It is idempotent — re-running just refreshes the
-marketplace and updates each plugin to the version declared in
+`wayfinder`, `youtube`, `research-pipeline`). It is idempotent — re-running
+just refreshes the marketplace and updates each plugin to the version declared in
 `marketplace.json`. Restart Claude Code afterward to pick up the new commands.
 
 Common flags:
@@ -38,10 +38,11 @@ claude plugin marketplace add ~/src/dear-agent
 claude plugin install agm@dear-agent
 claude plugin install wayfinder@dear-agent
 claude plugin install youtube@dear-agent
+claude plugin install research-pipeline@dear-agent
 
 # Or from GitHub:
 claude plugin marketplace add vbonnet/dear-agent
-claude plugin install agm@dear-agent wayfinder@dear-agent youtube@dear-agent
+claude plugin install agm@dear-agent wayfinder@dear-agent youtube@dear-agent research-pipeline@dear-agent
 ```
 
 ## Available plugins
@@ -57,6 +58,8 @@ After install, the following are exposed:
   workflow); it does not install slash commands.
 - **`youtube@dear-agent`** — `/youtube:youtube` for transcript extraction
   (needs `yt-dlp`).
+- **`research-pipeline@dear-agent`** — the portable `research-pipeline` skill
+  for source collection, evidence synthesis, and Wayfinder handoff.
 
 ## Verification
 

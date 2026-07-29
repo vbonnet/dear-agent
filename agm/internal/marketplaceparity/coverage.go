@@ -28,6 +28,8 @@ var canonicalSkillEntrypoints = map[string]string{
 	"research-pipeline": "research-pipeline/skills/research-pipeline/SKILL.md",
 }
 
+var requiredPluginNames = []string{"agm", "wayfinder", "youtube", "research-pipeline"}
+
 // Owner describes the marketplace owner metadata.
 type Owner struct {
 	Name  string `json:"name"`
@@ -92,12 +94,28 @@ func ValidateCatalog(root string) error {
 	if len(catalog.Plugins) == 0 {
 		return fmt.Errorf("marketplace catalog has no plugins")
 	}
+	if err := validateRequiredPlugins(catalog); err != nil {
+		return err
+	}
 	for _, plugin := range catalog.Plugins {
 		if err := validatePlugin(root, plugin); err != nil {
 			return err
 		}
 	}
 	return ValidateHarnessSurfaces(root)
+}
+
+func validateRequiredPlugins(catalog Catalog) error {
+	present := make(map[string]bool, len(catalog.Plugins))
+	for _, plugin := range catalog.Plugins {
+		present[plugin.Name] = true
+	}
+	for _, name := range requiredPluginNames {
+		if !present[name] {
+			return fmt.Errorf("marketplace catalog missing required plugin %q", name)
+		}
+	}
+	return nil
 }
 
 // ValidateHarnessSurfaces verifies every active harness has a declared
