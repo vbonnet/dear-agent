@@ -40,11 +40,13 @@ type ProcessMonitor struct {
 	limits    ProcessLimits
 	pid       int // root PID to monitor (sandbox entrypoint)
 	cancel    context.CancelFunc
+	done      chan struct{}
 	mu        sync.Mutex
 	running   bool
 	lastCount int
 	lastCheck time.Time
 	onAlert   func(AlertType, string) // callback on alert
+	alerting  bool                    // at most one callback may run at a time
 }
 
 // AlertType classifies the kind of process alert.
@@ -90,28 +92,40 @@ func NewProcessMonitor(pid int, limits ProcessLimits, onAlert func(AlertType, st
 // Returns immediately. Call Stop() to terminate.
 func (m *ProcessMonitor) Start(ctx context.Context) {
 	m.mu.Lock()
-	if m.running {
+	if m.running || m.alerting {
 		m.mu.Unlock()
 		return
 	}
+
+	childCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	m.cancel = cancel
+	m.done = done
 	m.running = true
+	m.lastCount = 0
 	m.lastCheck = time.Now()
 	m.mu.Unlock()
 
-	childCtx, cancel := context.WithCancel(ctx)
-	m.cancel = cancel
-
-	go m.run(childCtx)
+	go m.run(childCtx, done)
 }
 
 // Stop terminates the monitor.
 func (m *ProcessMonitor) Stop() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.cancel != nil {
-		m.cancel()
+	if !m.running {
+		m.mu.Unlock()
+		return
 	}
-	m.running = false
+	cancel := m.cancel
+	done := m.done
+	m.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	if done != nil {
+		<-done
+	}
 }
 
 // CountDescendants returns the number of descendant processes of the root PID.
@@ -120,7 +134,21 @@ func (m *ProcessMonitor) CountDescendants() (int, error) {
 	return countDescendants(m.pid)
 }
 
-func (m *ProcessMonitor) run(ctx context.Context) {
+func (m *ProcessMonitor) run(ctx context.Context, done chan struct{}) {
+	defer func() {
+		m.mu.Lock()
+		if m.done == done && !m.alerting {
+			m.running = false
+			m.cancel = nil
+			m.done = nil
+		}
+		// Close while holding mu so a waiter cannot race a restart ahead of
+		// lifecycle cleanup. If a callback is active, running deliberately
+		// remains true until that callback's defer clears the same run.
+		close(done)
+		m.mu.Unlock()
+	}()
+
 	ticker := time.NewTicker(m.limits.PollInterval)
 	defer ticker.Stop()
 
@@ -150,11 +178,9 @@ func (m *ProcessMonitor) check() {
 
 	// Check absolute limit
 	if count > m.limits.MaxProcesses {
-		if m.onAlert != nil {
-			m.onAlert(AlertProcessLimit, fmt.Sprintf(
-				"process count %d exceeds limit %d for PID %d",
-				count, m.limits.MaxProcesses, m.pid))
-		}
+		m.emitAlert(AlertProcessLimit, fmt.Sprintf(
+			"process count %d exceeds limit %d for PID %d",
+			count, m.limits.MaxProcesses, m.pid))
 		// Attempt to kill the process tree
 		killProcessTree(m.pid)
 		return
@@ -166,15 +192,47 @@ func (m *ProcessMonitor) check() {
 		if delta > 0 {
 			rate := float64(delta) / elapsed
 			if rate > float64(m.limits.MaxProcessSpawnRate) {
-				if m.onAlert != nil {
-					m.onAlert(AlertForkBomb, fmt.Sprintf(
-						"fork bomb detected: %.0f procs/sec (limit %d) for PID %d",
-						rate, m.limits.MaxProcessSpawnRate, m.pid))
-				}
+				m.emitAlert(AlertForkBomb, fmt.Sprintf(
+					"fork bomb detected: %.0f procs/sec (limit %d) for PID %d",
+					rate, m.limits.MaxProcessSpawnRate, m.pid))
 				killProcessTree(m.pid)
 			}
 		}
 	}
+}
+
+func (m *ProcessMonitor) emitAlert(alertType AlertType, message string) {
+	m.mu.Lock()
+	if m.onAlert == nil || m.alerting {
+		m.mu.Unlock()
+		return
+	}
+	callback := m.onAlert
+	alertRunDone := m.done
+	m.alerting = true
+	m.mu.Unlock()
+
+	// Alert handlers are external callbacks and may call Stop. Running them on
+	// the monitor loop would make Stop wait for the same goroutine that is
+	// currently executing the callback. Keep only one callback in flight so a
+	// persistent over-limit process cannot create an unbounded goroutine fanout.
+	go func() {
+		defer func() {
+			m.mu.Lock()
+			m.alerting = false
+			if alertRunDone != nil && m.done == alertRunDone {
+				select {
+				case <-alertRunDone:
+					m.running = false
+					m.cancel = nil
+					m.done = nil
+				default:
+				}
+			}
+			m.mu.Unlock()
+		}()
+		callback(alertType, message)
+	}()
 }
 
 // countDescendants walks /proc to count all descendants of a PID.

@@ -51,7 +51,7 @@ func TestProcessMonitor_ContextCancellation(t *testing.T) {
 	m.Start(ctx)
 	time.Sleep(100 * time.Millisecond)
 	cancel() // Cancel context should stop the monitor
-	time.Sleep(100 * time.Millisecond)
+	waitForProcessMonitorStopped(t, m)
 
 	assert.Equal(t, int32(0), alertCount.Load())
 }
