@@ -59,7 +59,8 @@ After install, the following are exposed:
 - **`youtube@dear-agent`** — `/youtube:youtube` for transcript extraction
   (needs `yt-dlp`).
 - **`research-pipeline@dear-agent`** — the portable `research-pipeline` skill
-  for source collection, evidence synthesis, and Wayfinder handoff.
+  for source collection, evidence synthesis, and a human-approved Beads
+  handoff; Wayfinder may govern later delivery when the target requires it.
 
 ## Verification
 

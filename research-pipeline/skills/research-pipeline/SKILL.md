@@ -132,6 +132,9 @@ owner at the top of the file (so a reader mid-pipeline knows where they are).
 
 **This is the human review gate.** Present the plan before moving to Stage
 4 — decomposition commits real bead/engineering time, verification doesn't.
+Presentation alone is not approval: record an explicit human approval receipt
+(reviewer identity, timestamp, and durable comment/artifact reference) before
+the first bead is created. If no approval arrives, pause at Stage 3.
 
 ## Stage 4 — Decomposition (a third independent model)
 
@@ -144,6 +147,10 @@ straight from plan prose to bead creation without this pass; the plan
 author (Stage 3's model) already spent its independence, and a plan
 that "looks done" is not the same as a plan an adversarial reader
 couldn't break.
+
+Before filing anything, verify that the Stage 3 human approval receipt predates
+the first prospective bead. The independent Stage 4 model review supplements
+that human gate; it does not replace it.
 
 **File every decomposition through the target repository's canonical Beads
 interface.** Check its `AGENTS.md`/equivalent first — e.g. dear-agent itself
@@ -219,9 +226,11 @@ to future work — dogfood the thing you just designed.
   own research is not verification.
 - **Provider routing needs a receipt.** See Stage 1 — a silent fallback
   defeats the entire point of naming a provider.
-- **Human review before execution commits resources.** Stop and surface the
-  Stage 3 plan (and, for large decompositions, the Stage 4 bead list) rather
-  than auto-chaining into Stage 5.
+- **Human approval before decomposition commits resources.** Stop after
+  surfacing the Stage 3 plan until an explicit approval receipt is recorded.
+  Do not create the Stage 4 bead graph merely because the plan was presented;
+  for large decompositions, surface the reviewed bead list again before Stage
+  5 execution.
 - **Ground plans in the real repo, not generic advice.** Stage 3 must cite
   actual files, PRs, or code paths — a plan with no worked example against
   the real codebase is not done.
@@ -251,9 +260,9 @@ after this pipeline runs to completion for a given source:
 - [ ] Every bead filed from Stage 4 has a non-vague acceptance criterion
       (grep for "looks correct", "is complete", "works well" in bead
       descriptions returns zero matches)
-- [ ] The plan was surfaced for human review before any bead moved to
-      Stage 5 execution (no PR merged from this pipeline without a review
-      gate having occurred first)
+- [ ] A durable human approval receipt (reviewer, timestamp, reference)
+      predates the `created_at` time of the first Stage 4 bead; merely
+      surfacing the plan or obtaining approval before Stage 5 does not pass
 - [ ] If Stage 4 review recorded a blocking verdict at any point, a later
       artifact shows the specific corrections applied and a follow-up
       review confirming they're resolved (no bead trail that jumps from

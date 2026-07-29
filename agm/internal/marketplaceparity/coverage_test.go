@@ -267,6 +267,57 @@ func TestNativeSkillEntrypointRejectsCatalogRootOutsideRepository(t *testing.T) 
 	}
 }
 
+func TestNativeSkillEntrypointRejectsPiSettingsOutsideRepository(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		catalog func(*testing.T, string, string) string
+	}{
+		{
+			name: "dot-dot",
+			catalog: func(t *testing.T, root, outside string) string {
+				t.Helper()
+				path := filepath.Join(outside, "settings.json")
+				if err := os.WriteFile(path, []byte(`{"skills":["skills"]}`), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				relative, err := filepath.Rel(root, path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return filepath.ToSlash(relative)
+			},
+		},
+		{
+			name: "symlink",
+			catalog: func(t *testing.T, root, outside string) string {
+				t.Helper()
+				path := filepath.Join(outside, "settings.json")
+				if err := os.WriteFile(path, []byte(`{"skills":["skills"]}`), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				link := filepath.Join(root, "pi-settings.json")
+				if err := os.Symlink(path, link); err != nil {
+					t.Fatal(err)
+				}
+				return "pi-settings.json"
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			outside := t.TempDir()
+			surface := HarnessSurface{
+				Mode:    "native-pi-skill-path",
+				Catalog: test.catalog(t, root, outside),
+			}
+			if _, err := nativeSkillEntrypoint(root, surface, "example", "example"); err == nil ||
+				!strings.Contains(err.Error(), "escapes") {
+				t.Fatalf("nativeSkillEntrypoint() error = %v, want escaping Pi settings rejection", err)
+			}
+		})
+	}
+}
+
 func TestLoadExportedSkillsRejectsPluginSourceOutsideRepository(t *testing.T) {
 	for _, test := range []struct {
 		name   string

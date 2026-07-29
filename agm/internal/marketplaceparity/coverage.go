@@ -196,7 +196,11 @@ func nativeSkillEntrypoint(root string, surface HarnessSurface, pluginName, skil
 		return requireNativeSkillEntrypoint(filepath.Join(declaredRoot, skillName, "SKILL.md"), pluginName, skillName)
 	}
 
-	settingsPath := filepath.Join(root, surface.Catalog)
+	declaredSettingsPath := filepath.Join(root, filepath.FromSlash(surface.Catalog))
+	settingsPath, err := resolvedPathWithin(root, declaredSettingsPath)
+	if err != nil {
+		return "", fmt.Errorf("pi skill settings %q: %w", surface.Catalog, err)
+	}
 	var settings piSettings
 	if err := readJSON(settingsPath, &settings); err != nil {
 		return "", fmt.Errorf("read Pi skill settings: %w", err)
