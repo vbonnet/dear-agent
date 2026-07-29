@@ -674,6 +674,35 @@ func TestCheckFile_DoesNotFlagInvalidStrongClosers(t *testing.T) {
 	}
 }
 
+func TestCheckFile_FlagsStrongFieldsSeparatedByUnicodeSymbols(t *testing.T) {
+	for _, separator := range []string{"|", "+"} {
+		t.Run(separator, func(t *testing.T) {
+			dir := t.TempDir()
+			path := writeTemp(t, dir, "symbol-separated.md", "# Doc\n\n**Status:**"+separator+"**Owner:**\n")
+			violations, err := CheckFile(path)
+			if err != nil {
+				t.Fatalf("CheckFile: %v", err)
+			}
+			if len(violations) != 1 {
+				t.Fatalf("want symbol-separated fields flagged, got %v", violations)
+			}
+		})
+	}
+}
+
+func TestCheckFile_ListNestedBlockquoteFenceEndsWithOuterList(t *testing.T) {
+	const content = "# Doc\n\n- > ```md\n> **Status:** draft · **Owner:** docs\n"
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "list-quote-fence.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 1 || violations[0].Line != 4 {
+		t.Fatalf("want top-level quoted fields visible after list fence ends, got %v", violations)
+	}
+}
+
 func TestCheckFile_DoesNotCloseListFenceWithOverIndentedDelimiter(t *testing.T) {
 	const content = "# Doc\n\n- ```markdown\n      ```\n  **Status:** draft · **Owner:** docs\n  ```\n"
 	dir := t.TempDir()
@@ -863,6 +892,23 @@ func TestCheckFile_MarkedContainerBlankEndsInlineCodeParagraph(t *testing.T) {
 	}
 	if len(violations) != 1 || violations[0].Line != 4 {
 		t.Fatalf("want field violation after marked paragraph break, got %v", violations)
+	}
+}
+
+func TestCheckFile_MarkedBlockquoteBlankClosesParagraphBeforeOrderedHeading(t *testing.T) {
+	const content = "# Doc\n" +
+		"> intro\n" +
+		">\n" +
+		"2. ## Details\n" +
+		"**Status:** draft · **Owner:** docs\n"
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "marked-blank-heading.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("want ordered H2 to end the header zone, got %v", violations)
 	}
 }
 

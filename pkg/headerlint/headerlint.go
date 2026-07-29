@@ -319,10 +319,11 @@ func (s *fenceState) updateListContinuation(line string) {
 }
 
 type fenceContainerContext struct {
-	contentOffset int
-	quoteDepth    int
-	hasList       bool
-	listIndent    int
+	contentOffset   int
+	quoteDepth      int
+	hasList         bool
+	listIndent      int
+	listBeforeQuote bool
 }
 
 func (c fenceContainerContext) contains(line string) bool {
@@ -342,6 +343,13 @@ func (c fenceContainerContext) contentStart(line string) (int, bool) {
 	if c.quoteDepth == 0 && !c.hasList {
 		return 0, true
 	}
+	if c.hasList && c.listBeforeQuote {
+		offset, ok := consumeListIndent(line, 0, c.listIndent)
+		if !ok {
+			return 0, false
+		}
+		return consumeQuotePrefixAt(line, offset, c.quoteDepth)
+	}
 	offset, ok := consumeQuotePrefix(line, c.quoteDepth)
 	if !ok {
 		return 0, false
@@ -349,27 +357,7 @@ func (c fenceContainerContext) contentStart(line string) (int, bool) {
 	if !c.hasList {
 		return offset, true
 	}
-	cursor := offset
-	indent := 0
-	for cursor < len(line) && indent < c.listIndent {
-		switch line[cursor] {
-		case ' ':
-			indent++
-			cursor++
-		case '\t':
-			if indent+4 > c.listIndent {
-				return cursor, true
-			}
-			indent += 4
-			cursor++
-		default:
-			return 0, false
-		}
-	}
-	if indent < c.listIndent {
-		return 0, false
-	}
-	return cursor, true
+	return consumeListIndent(line, offset, c.listIndent)
 }
 
 func (c fenceContainerContext) delimiter(line string) (byte, int, string, bool) {
@@ -385,6 +373,7 @@ func parseFenceContainerContext(line string) fenceContainerContext {
 	if !ok {
 		return fenceContainerContext{}
 	}
+	initialOffset := offset
 	context := fenceContainerContext{contentOffset: offset}
 	for offset < len(line) {
 		marker := line[offset]
@@ -392,28 +381,38 @@ func parseFenceContainerContext(line string) fenceContainerContext {
 		if !found {
 			break
 		}
-		if marker == '>' {
-			context.quoteDepth++
-		} else {
-			context.hasList = true
-		}
 		offset = markerEnd
 		offset, ok = skipFenceIndent(line, offset)
 		if !ok {
 			break
 		}
-		context.contentOffset = offset
+		context.recordMarker(marker, offset, initialOffset)
 	}
 	if context.quoteDepth == 0 && !context.hasList {
 		context.contentOffset = offset
 	}
-	if context.hasList {
+	if context.hasList && !context.listBeforeQuote {
 		quoteOffset, quoteOK := consumeQuotePrefix(line, context.quoteDepth)
 		if quoteOK {
 			context.listIndent = context.contentOffset - quoteOffset
 		}
 	}
 	return context
+}
+
+func (c *fenceContainerContext) recordMarker(marker byte, contentOffset, initialOffset int) {
+	if marker == '>' {
+		c.quoteDepth++
+	} else {
+		if !c.hasList && c.quoteDepth == 0 {
+			c.listBeforeQuote = true
+		}
+		c.hasList = true
+	}
+	if c.hasList && c.listBeforeQuote && c.listIndent == 0 {
+		c.listIndent = contentOffset - initialOffset
+	}
+	c.contentOffset = contentOffset
 }
 
 func fenceDelimiter(line string) (byte, int, bool) {
@@ -458,7 +457,10 @@ func parseFenceDelimiter(line string, offset int) (byte, int, string, bool) {
 }
 
 func consumeQuotePrefix(line string, depth int) (int, bool) {
-	offset := 0
+	return consumeQuotePrefixAt(line, 0, depth)
+}
+
+func consumeQuotePrefixAt(line string, offset, depth int) (int, bool) {
 	for range depth {
 		var ok bool
 		offset, ok = skipFenceIndent(line, offset)
@@ -471,6 +473,30 @@ func consumeQuotePrefix(line string, depth int) (int, bool) {
 		}
 	}
 	return offset, true
+}
+
+func consumeListIndent(line string, offset, required int) (int, bool) {
+	cursor := offset
+	indent := 0
+	for cursor < len(line) && indent < required {
+		switch line[cursor] {
+		case ' ':
+			indent++
+			cursor++
+		case '\t':
+			if indent+4 > required {
+				return cursor, true
+			}
+			indent += 4
+			cursor++
+		default:
+			return 0, false
+		}
+	}
+	if indent < required {
+		return 0, false
+	}
+	return cursor, true
 }
 
 type inlineCodeSpanState struct {
@@ -631,7 +657,7 @@ func unescapedBoldFieldCount(line string) int {
 		}
 		if match[1] < len(line) {
 			next, _ := utf8.DecodeRuneInString(line[match[1]:])
-			if !unicode.IsSpace(next) && !unicode.IsPunct(next) {
+			if !unicode.IsSpace(next) && !unicode.IsPunct(next) && !unicode.IsSymbol(next) {
 				continue
 			}
 		}
@@ -841,13 +867,13 @@ func htmlTagBoundary(value string, offset int) bool {
 }
 
 func lineLeavesParagraphOpen(line string) bool {
-	if strings.TrimSpace(line) == "" {
+	container := parseFenceContainerContext(line)
+	if containerLineIsBlank(line, container) {
 		return false
 	}
 	if matchesContainerATXHeading(line, atxHeading, false) {
 		return false
 	}
-	container := parseFenceContainerContext(line)
 	if matchesContainerBlockPattern(line, container, setextHeading) ||
 		matchesContainerBlockPattern(line, container, thematicBreak) {
 		return false
