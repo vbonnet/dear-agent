@@ -22,12 +22,6 @@ const (
 	ClaudeCatalogPath = ".claude-plugin/marketplace.json"
 )
 
-var canonicalSkillEntrypoints = map[string]string{
-	"agm":               "agm/plugins/agm/SKILL.md",
-	"wayfinder":         "wayfinder/skills/wayfinder/SKILL.md",
-	"research-pipeline": "research-pipeline/skills/research-pipeline/SKILL.md",
-}
-
 var requiredPluginNames = []string{"agm", "wayfinder", "youtube", "research-pipeline"}
 
 // Owner describes the marketplace owner metadata.
@@ -67,6 +61,16 @@ type claudeCatalog struct {
 	Description string        `json:"description"`
 	Owner       Owner         `json:"owner"`
 	Plugins     []PluginEntry `json:"plugins"`
+}
+
+type claudePluginManifest struct {
+	Name   string   `json:"name"`
+	Skills []string `json:"skills"`
+}
+
+type exportedSkill struct {
+	Name          string
+	CanonicalPath string
 }
 
 // LoadCatalog reads the harness-neutral marketplace catalog from root.
@@ -155,65 +159,166 @@ func validateNativeSkillCoverage(root string, catalog Catalog, surface HarnessSu
 		if !slices.Contains(plugin.Capabilities, "skills") {
 			continue
 		}
+		exported, err := loadExportedSkills(root, plugin)
+		if err != nil {
+			return err
+		}
 		entrypointRoot := surface.Catalog
 		if surface.Mode == "agents-md-skill-fallback" {
 			entrypointRoot = ".agents/skills"
 		}
-		entrypoint := filepath.Join(root, entrypointRoot, plugin.Name, "SKILL.md")
-		info, err := os.Lstat(entrypoint)
-		if err != nil {
-			return fmt.Errorf("skill-capable plugin %q missing native entrypoint: %w", plugin.Name, err)
-		}
-		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-			return fmt.Errorf("skill-capable plugin %q native entrypoint %q is not a regular file", plugin.Name, entrypoint)
-		}
-		if err := validateNativeSkillEntrypoint(root, entrypoint, plugin.Name); err != nil {
-			return err
+		for _, skill := range exported {
+			entrypoint := filepath.Join(root, entrypointRoot, skill.Name, "SKILL.md")
+			info, err := os.Lstat(entrypoint)
+			if err != nil {
+				return fmt.Errorf("plugin %q exported skill %q missing native entrypoint: %w", plugin.Name, skill.Name, err)
+			}
+			if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+				return fmt.Errorf("plugin %q exported skill %q native entrypoint %q is not a regular file", plugin.Name, skill.Name, entrypoint)
+			}
+			if err := validateNativeSkillEntrypoint(root, entrypoint, plugin.Name, skill); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-func validateNativeSkillEntrypoint(root, entrypoint, pluginName string) error {
-	violations, err := skilllint.CheckFile(entrypoint)
+func loadExportedSkills(root string, plugin PluginEntry) ([]exportedSkill, error) {
+	source := filepath.Join(root, filepath.FromSlash(plugin.Source))
+	var manifest claudePluginManifest
+	manifestPath := filepath.Join(source, ".claude-plugin", "plugin.json")
+	if err := readJSON(manifestPath, &manifest); err != nil {
+		return nil, fmt.Errorf("skill-capable plugin %q manifest: %w", plugin.Name, err)
+	}
+	if manifest.Name != plugin.Name {
+		return nil, fmt.Errorf("skill-capable plugin %q manifest names %q", plugin.Name, manifest.Name)
+	}
+	if len(manifest.Skills) == 0 {
+		return nil, fmt.Errorf("skill-capable plugin %q manifest exports no skills", plugin.Name)
+	}
+
+	byName := make(map[string]exportedSkill)
+	for _, declared := range manifest.Skills {
+		declaredPath := filepath.Clean(filepath.Join(source, filepath.FromSlash(declared)))
+		relSource, err := filepath.Rel(source, declaredPath)
+		if err != nil || relSource == ".." || strings.HasPrefix(relSource, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("skill-capable plugin %q skill export %q escapes its source", plugin.Name, declared)
+		}
+		info, err := os.Stat(declaredPath)
+		if err != nil {
+			return nil, fmt.Errorf("skill-capable plugin %q skill export %q: %w", plugin.Name, declared, err)
+		}
+		var skillFiles []string
+		if info.IsDir() {
+			err = filepath.WalkDir(declaredPath, func(path string, entry os.DirEntry, walkErr error) error {
+				if walkErr != nil {
+					return walkErr
+				}
+				if !entry.IsDir() && entry.Name() == "SKILL.md" {
+					skillFiles = append(skillFiles, path)
+				}
+				return nil
+			})
+			if err != nil {
+				return nil, fmt.Errorf("walk skill-capable plugin %q export %q: %w", plugin.Name, declared, err)
+			}
+		} else if info.Mode().IsRegular() && filepath.Base(declaredPath) == "SKILL.md" {
+			skillFiles = append(skillFiles, declaredPath)
+		}
+		if len(skillFiles) == 0 {
+			return nil, fmt.Errorf("skill-capable plugin %q skill export %q contains no SKILL.md", plugin.Name, declared)
+		}
+		for _, skillFile := range skillFiles {
+			name, err := readSkillName(skillFile)
+			if err != nil {
+				return nil, fmt.Errorf("skill-capable plugin %q exported skill %q: %w", plugin.Name, skillFile, err)
+			}
+			canonical, err := filepath.Rel(root, skillFile)
+			if err != nil {
+				return nil, fmt.Errorf("resolve plugin %q exported skill %q: %w", plugin.Name, skillFile, err)
+			}
+			if previous, duplicate := byName[name]; duplicate {
+				return nil, fmt.Errorf("skill-capable plugin %q exports duplicate skill name %q from %q and %q", plugin.Name, name, previous.CanonicalPath, filepath.ToSlash(canonical))
+			}
+			byName[name] = exportedSkill{Name: name, CanonicalPath: filepath.ToSlash(canonical)}
+		}
+	}
+
+	names := make([]string, 0, len(byName))
+	for name := range byName {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	exported := make([]exportedSkill, 0, len(names))
+	for _, name := range names {
+		exported = append(exported, byName[name])
+	}
+	return exported, nil
+}
+
+func readSkillName(path string) (string, error) {
+	violations, err := skilllint.CheckFile(path)
 	if err != nil {
-		return fmt.Errorf("skill-capable plugin %q native entrypoint: %w", pluginName, err)
+		return "", err
 	}
 	if len(violations) > 0 {
-		return fmt.Errorf("skill-capable plugin %q native entrypoint invalid: %s", pluginName, violations[0].Reason)
+		return "", fmt.Errorf("invalid skill: %s", violations[0].Reason)
 	}
-	data, err := os.ReadFile(entrypoint)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("read skill-capable plugin %q native entrypoint: %w", pluginName, err)
+		return "", err
 	}
 	var metadata struct {
 		Name string `yaml:"name"`
 	}
 	parts := strings.SplitN(string(data), "\n---", 2)
 	if len(parts) != 2 || !strings.HasPrefix(parts[0], "---\n") {
-		return fmt.Errorf("skill-capable plugin %q native entrypoint has no parseable frontmatter", pluginName)
+		return "", fmt.Errorf("no parseable frontmatter")
 	}
 	if err := yaml.Unmarshal([]byte(strings.TrimPrefix(parts[0], "---\n")), &metadata); err != nil {
-		return fmt.Errorf("parse skill-capable plugin %q native entrypoint metadata: %w", pluginName, err)
+		return "", fmt.Errorf("parse metadata: %w", err)
 	}
-	if metadata.Name != pluginName {
-		return fmt.Errorf("skill-capable plugin %q native entrypoint names %q", pluginName, metadata.Name)
+	if metadata.Name == "" {
+		return "", fmt.Errorf("frontmatter has no name")
 	}
-	canonical, ok := canonicalSkillEntrypoints[pluginName]
-	if !ok {
-		return fmt.Errorf("skill-capable plugin %q has no canonical skill entrypoint mapping", pluginName)
+	return metadata.Name, nil
+}
+
+func validateNativeSkillEntrypoint(root, entrypoint, pluginName string, skill exportedSkill) error {
+	violations, err := skilllint.CheckFile(entrypoint)
+	if err != nil {
+		return fmt.Errorf("plugin %q exported skill %q native entrypoint: %w", pluginName, skill.Name, err)
 	}
-	canonicalPath := filepath.Join(root, filepath.FromSlash(canonical))
+	if len(violations) > 0 {
+		return fmt.Errorf("plugin %q exported skill %q native entrypoint invalid: %s", pluginName, skill.Name, violations[0].Reason)
+	}
+	name, err := readSkillName(entrypoint)
+	if err != nil {
+		return fmt.Errorf("plugin %q exported skill %q native entrypoint metadata: %w", pluginName, skill.Name, err)
+	}
+	if name != skill.Name {
+		return fmt.Errorf("plugin %q exported skill %q native entrypoint names %q", pluginName, skill.Name, name)
+	}
+	canonicalPath := filepath.Join(root, filepath.FromSlash(skill.CanonicalPath))
 	info, err := os.Stat(canonicalPath)
 	if err != nil {
-		return fmt.Errorf("skill-capable plugin %q canonical entrypoint %q: %w", pluginName, canonical, err)
+		return fmt.Errorf("plugin %q exported skill %q canonical entrypoint %q: %w", pluginName, skill.Name, skill.CanonicalPath, err)
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("skill-capable plugin %q canonical entrypoint %q is not a regular file", pluginName, canonical)
+		return fmt.Errorf("plugin %q exported skill %q canonical entrypoint %q is not a regular file", pluginName, skill.Name, skill.CanonicalPath)
 	}
-	wantReference := "../../../" + filepath.ToSlash(canonical)
+	wantReference, err := filepath.Rel(filepath.Dir(entrypoint), canonicalPath)
+	if err != nil {
+		return fmt.Errorf("plugin %q exported skill %q canonical reference: %w", pluginName, skill.Name, err)
+	}
+	wantReference = filepath.ToSlash(wantReference)
+	data, err := os.ReadFile(entrypoint)
+	if err != nil {
+		return fmt.Errorf("read plugin %q exported skill %q native entrypoint: %w", pluginName, skill.Name, err)
+	}
 	if !strings.Contains(string(data), wantReference) {
-		return fmt.Errorf("skill-capable plugin %q native entrypoint does not reference canonical %q", pluginName, canonical)
+		return fmt.Errorf("plugin %q exported skill %q native entrypoint does not reference canonical %q", pluginName, skill.Name, skill.CanonicalPath)
 	}
 	return nil
 }

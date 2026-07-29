@@ -152,7 +152,15 @@ for every invocation; use that exact form here. For a repo with no documented
 policy, respect the operator's configured database through a supported
 `--db <path>` or `-C <path>` database-selection override on the canonical
 invocation instead of hardcoding a path. That fallback is for the *absence*
-of repo policy, not license to skip required flags.
+of repo policy, not license to skip required flags. The portable interface is
+self-contained here: inspect with `ready`, `list --status=open`, and
+`show <id>`; create durable work with
+`create "<title>" --description="<goal and acceptance>" --type=<type>
+--priority=<0-4>`; add dependency edges with `dep add <dependent>
+<dependency>`; and use non-interactive `update`/`close` flags only when the
+target repository's policy authorizes those state changes. Prefer `--json`
+whenever output is parsed, never use interactive edit, and never treat a local
+plan or scratch file as a substitute for the shared Beads record.
 
 For a small decomposition, create the handful of beads directly. For a large
 decomposition, still create the beads directly, then encode its phases,
@@ -257,6 +265,7 @@ after this pipeline runs to completion for a given source:
 - `docs/skill-placement.md` — the placement framework that assigned this
   skill to dear-agent (cross-model verification, human gate before
   execution, sized beads — DEAR process discipline, not personal taste).
-- `.agents/skills/beads/SKILL.md` — the canonical direct Beads interface Stage
-  4 uses for both small and large decompositions; Wayfinder may orchestrate a
-  later SDLC session but does not own bead filing.
+- Stage 4 above contains the portable direct Beads interface shipped with this
+  standalone plugin. A target repository's own `AGENTS.md` or Beads skill may
+  tighten that interface; Wayfinder may orchestrate a later SDLC session but
+  does not own bead filing.
