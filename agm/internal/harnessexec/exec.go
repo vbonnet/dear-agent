@@ -270,8 +270,18 @@ func runCodex(args []string) error {
 		return err
 	}
 	environ := CodexEnvironment(os.Environ(), request.SessionName)
+	if request.BypassHooks && request.HandoffPath == "" {
+		return errors.New("invalid Codex launch request: hook-trust bypass requires a prepared private handoff")
+	}
 	if request.HandoffPath != "" {
-		handoff, handoffErr := consumeHandoff(request.HandoffPath, CodexProtocol)
+		var binding *codexLaunchBinding
+		if request.BypassHooks {
+			bound := bindCodexLaunch(request.launch())
+			binding = &bound
+		}
+		handoff, handoffErr := consumeHandoff(
+			request.HandoffPath, CodexProtocol, request.HookRoot, binding,
+		)
 		if handoffErr != nil {
 			return handoffErr
 		}
@@ -304,7 +314,7 @@ func runClaude(args []string) error {
 	parent := os.Environ()
 	token := ""
 	if request.HandoffPath != "" {
-		handoff, handoffErr := consumeHandoff(request.HandoffPath, ClaudeProtocol)
+		handoff, handoffErr := consumeHandoff(request.HandoffPath, ClaudeProtocol, "")
 		if handoffErr != nil {
 			return handoffErr
 		}
@@ -443,6 +453,22 @@ func (r codexRequest) argv() []string {
 		args = append(args, r.ResumeID)
 	}
 	return args
+}
+
+func (r codexRequest) launch() CodexLaunch {
+	return CodexLaunch{
+		HandoffPath:     r.HandoffPath,
+		SessionName:     r.SessionName,
+		Model:           r.Model,
+		WorkDir:         r.WorkDir,
+		Sandbox:         r.Sandbox,
+		Approval:        r.Approval,
+		AddDirs:         append([]string(nil), r.AddDirs...),
+		ResumeID:        r.ResumeID,
+		Remote:          r.Remote,
+		BypassHookTrust: r.BypassHooks,
+		HookRoot:        r.HookRoot,
+	}
 }
 
 type claudeRequest struct {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -81,11 +82,25 @@ func ResolveSubmission(submissionErr error, cancelUndelivered func() error) (boo
 }
 
 type launchHandoff struct {
-	Version                   int      `json:"version"`
-	Protocol                  string   `json:"protocol"`
-	CreatedAt                 string   `json:"created_at"`
-	DeferredUntilProducerExit bool     `json:"deferred_until_producer_exit,omitempty"`
-	Environment               []string `json:"environment"`
+	Version                   int                 `json:"version"`
+	Protocol                  string              `json:"protocol"`
+	CreatedAt                 string              `json:"created_at"`
+	DeferredUntilProducerExit bool                `json:"deferred_until_producer_exit,omitempty"`
+	Environment               []string            `json:"environment"`
+	CodexHookRoot             string              `json:"codex_hook_root,omitempty"`
+	CodexLaunch               *codexLaunchBinding `json:"codex_launch,omitempty"`
+}
+
+type codexLaunchBinding struct {
+	SessionName string   `json:"session_name"`
+	Model       string   `json:"model"`
+	WorkDir     string   `json:"workdir"`
+	Sandbox     string   `json:"sandbox"`
+	Approval    string   `json:"approval,omitempty"`
+	AddDirs     []string `json:"add_dirs,omitempty"`
+	ResumeID    string   `json:"resume_id,omitempty"`
+	Remote      bool     `json:"remote,omitempty"`
+	HookRoot    string   `json:"hook_root"`
 }
 
 // PrepareCodexCommand snapshots only Codex's documented allowlist from the
@@ -104,7 +119,17 @@ func PrepareCodexCommand(launch CodexLaunch, parent []string) (PreparedCommand, 
 		return PreparedCommand{}, fmt.Errorf("validate Codex pane command: %w", err)
 	}
 	snapshot := removeEnvironment(CodexEnvironment(parent, launch.SessionName), paneRuntimeEnvironment)
-	handoffPath, err := stageHandoff(CodexProtocol, snapshot, launch.DeferUntilProducerExit)
+	if err := validateTrustedHandoffIsolation(launch); err != nil {
+		return PreparedCommand{}, err
+	}
+	var binding *codexLaunchBinding
+	if launch.BypassHookTrust {
+		bound := bindCodexLaunch(launch)
+		binding = &bound
+	}
+	handoffPath, err := stageHandoff(
+		CodexProtocol, snapshot, launch.DeferUntilProducerExit, launch.HookRoot, binding,
+	)
 	if err != nil {
 		return PreparedCommand{}, err
 	}
@@ -153,7 +178,7 @@ func PrepareClaudeCommand(launch ClaudeLaunch, parent []string) (PreparedCommand
 			}
 		}
 	}
-	handoffPath, err := stageHandoff(ClaudeProtocol, forward, launch.DeferUntilProducerExit)
+	handoffPath, err := stageHandoff(ClaudeProtocol, forward, launch.DeferUntilProducerExit, "")
 	if err != nil {
 		return PreparedCommand{}, err
 	}
@@ -188,7 +213,81 @@ func validateCodexPastedValues(launch CodexLaunch) error {
 	if err := validateTextList("add-dir", launch.AddDirs); err != nil {
 		return fmt.Errorf("validate Codex pane command: %w", err)
 	}
+	if launch.BypassHookTrust {
+		if !filepath.IsAbs(launch.HookRoot) || filepath.Clean(launch.HookRoot) != launch.HookRoot {
+			return errors.New("validate Codex pane command: hook root must be a clean absolute path")
+		}
+	} else if launch.HookRoot != "" {
+		return errors.New("validate Codex pane command: hook root requires hook-trust bypass")
+	}
 	return nil
+}
+
+func validateTrustedHandoffIsolation(launch CodexLaunch) error {
+	if !launch.BypassHookTrust {
+		return nil
+	}
+	root, err := trustedHandoffRoot()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return fmt.Errorf("create trusted Codex handoff root: %w", err)
+	}
+	rootInfo, err := os.Lstat(root)
+	if err != nil {
+		return fmt.Errorf("inspect trusted Codex handoff root: %w", err)
+	}
+	if rootInfo.Mode()&os.ModeSymlink != 0 {
+		return errors.New("trusted Codex handoff root must not be a symlink")
+	}
+	root, err = resolveProspectivePath(root)
+	if err != nil {
+		return fmt.Errorf("resolve trusted Codex handoff root: %w", err)
+	}
+	for _, writable := range append([]string{launch.WorkDir}, launch.AddDirs...) {
+		if writable == "" {
+			continue
+		}
+		canonicalWritable, resolveErr := resolveProspectivePath(writable)
+		if resolveErr != nil {
+			return fmt.Errorf("resolve agent-writable root %q: %w", writable, resolveErr)
+		}
+		if pathsOverlap(root, canonicalWritable) {
+			return fmt.Errorf("trusted Codex handoff root %q overlaps agent-writable root %q", root, writable)
+		}
+	}
+	// #nosec G302 -- this is an owner-only directory and needs execute bits.
+	if err := os.Chmod(root, 0o700); err != nil {
+		return fmt.Errorf("secure trusted Codex handoff root: %w", err)
+	}
+	return validateHandoffDirectorySecurity(root)
+}
+
+func bindCodexLaunch(launch CodexLaunch) codexLaunchBinding {
+	return codexLaunchBinding{
+		SessionName: launch.SessionName,
+		Model:       launch.Model,
+		WorkDir:     launch.WorkDir,
+		Sandbox:     launch.Sandbox,
+		Approval:    launch.Approval,
+		AddDirs:     append([]string(nil), launch.AddDirs...),
+		ResumeID:    launch.ResumeID,
+		Remote:      launch.Remote,
+		HookRoot:    launch.HookRoot,
+	}
+}
+
+func (binding codexLaunchBinding) matches(other codexLaunchBinding) bool {
+	return binding.SessionName == other.SessionName &&
+		binding.Model == other.Model &&
+		binding.WorkDir == other.WorkDir &&
+		binding.Sandbox == other.Sandbox &&
+		binding.Approval == other.Approval &&
+		slices.Equal(binding.AddDirs, other.AddDirs) &&
+		binding.ResumeID == other.ResumeID &&
+		binding.Remote == other.Remote &&
+		binding.HookRoot == other.HookRoot
 }
 
 func validateClaudePastedValues(launch ClaudeLaunch) error {
@@ -260,6 +359,9 @@ func startHandoffExpiry(executable, path string, expiresAt time.Time, deferred b
 	// Its isolated process group lets it outlive an AGM caller that exits
 	// immediately after queuing a tmux command.
 	cmd.Env = []string{expiryHelperEnv + "=1"}
+	if stateDir := os.Getenv("AGM_STATE_DIR"); stateDir != "" {
+		cmd.Env = append(cmd.Env, "AGM_STATE_DIR="+stateDir)
+	}
 	cmd.SysProcAttr = procguard.ProcessGroupAttr()
 	if deferred {
 		cmd.ExtraFiles = []*os.File{leaseReader}
@@ -399,8 +501,10 @@ func refreshExpiryTarget(path string, original os.FileInfo, now time.Time) error
 }
 
 func expiryTarget(path string) (os.FileInfo, error) {
-	if err := validatePrivateHandoffLocation(path); err != nil {
-		return nil, err
+	if ordinaryErr := validatePrivateHandoffLocation(path, false); ordinaryErr != nil {
+		if trustedErr := validatePrivateHandoffLocation(path, true); trustedErr != nil {
+			return nil, errors.Join(ordinaryErr, trustedErr)
+		}
 	}
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -451,14 +555,51 @@ func privateExecutable(configured string) string {
 	return "agm"
 }
 
-func stageHandoff(protocol string, environment []string, deferred bool) (string, error) {
+func stageHandoff(
+	protocol string,
+	environment []string,
+	deferred bool,
+	codexHookRoot string,
+	codexLaunch ...*codexLaunchBinding,
+) (string, error) {
 	if err := validateHandoffEnvironment(protocol, environment); err != nil {
 		return "", err
 	}
-	root, err := filepath.Abs(handoffRoot())
+	binding, err := stagedCodexBinding(codexHookRoot, codexLaunch)
+	if err != nil {
+		return "", err
+	}
+	root, err := resolvedHandoffRoot(codexHookRoot != "")
 	if err != nil {
 		return "", fmt.Errorf("resolve private launch handoff directory: %w", err)
 	}
+	return writeHandoff(root, protocol, environment, deferred, codexHookRoot, binding)
+}
+
+func stagedCodexBinding(
+	codexHookRoot string,
+	codexLaunch []*codexLaunchBinding,
+) (*codexLaunchBinding, error) {
+	if len(codexLaunch) > 1 {
+		return nil, errors.New("private launch handoff received multiple Codex launch bindings")
+	}
+	var binding *codexLaunchBinding
+	if len(codexLaunch) == 1 {
+		binding = codexLaunch[0]
+	}
+	if (codexHookRoot == "") != (binding == nil) {
+		return nil, errors.New("private Codex hook capability requires an exact launch binding")
+	}
+	return binding, nil
+}
+
+func writeHandoff(
+	root, protocol string,
+	environment []string,
+	deferred bool,
+	codexHookRoot string,
+	binding *codexLaunchBinding,
+) (string, error) {
 	if err := validateText("private handoff directory", root); err != nil {
 		return "", err
 	}
@@ -491,6 +632,8 @@ func stageHandoff(protocol string, environment []string, deferred bool) (string,
 		CreatedAt:                 time.Now().UTC().Format(time.RFC3339Nano),
 		DeferredUntilProducerExit: deferred,
 		Environment:               append([]string(nil), environment...),
+		CodexHookRoot:             codexHookRoot,
+		CodexLaunch:               binding,
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -513,8 +656,21 @@ func stageHandoff(protocol string, environment []string, deferred bool) (string,
 	return path, nil
 }
 
-func consumeHandoff(path, protocol string) (launchHandoff, error) {
-	file, err := openPrivateHandoff(path)
+func consumeHandoff(
+	path, protocol, expectedCodexHookRoot string,
+	expectedCodexLaunch ...*codexLaunchBinding,
+) (launchHandoff, error) {
+	if len(expectedCodexLaunch) > 1 {
+		return launchHandoff{}, errors.New("private launch handoff received multiple expected Codex launch bindings")
+	}
+	var expectedBinding *codexLaunchBinding
+	if len(expectedCodexLaunch) == 1 {
+		expectedBinding = expectedCodexLaunch[0]
+	}
+	if (expectedCodexHookRoot == "") != (expectedBinding == nil) {
+		return launchHandoff{}, errors.New("private Codex hook capability requires an exact launch binding")
+	}
+	file, err := openPrivateHandoff(path, expectedCodexHookRoot != "")
 	if err != nil {
 		return launchHandoff{}, err
 	}
@@ -536,11 +692,18 @@ func consumeHandoff(path, protocol string) (launchHandoff, error) {
 	if err := validateHandoff(handoff, protocol, time.Now(), info.ModTime()); err != nil {
 		return launchHandoff{}, err
 	}
+	if handoff.CodexHookRoot != expectedCodexHookRoot {
+		return launchHandoff{}, errors.New("private launch handoff does not authorize the requested Codex hook root")
+	}
+	if expectedBinding != nil &&
+		(handoff.CodexLaunch == nil || !handoff.CodexLaunch.matches(*expectedBinding)) {
+		return launchHandoff{}, errors.New("private launch handoff does not authorize the requested Codex launch")
+	}
 	return handoff, nil
 }
 
-func openPrivateHandoff(path string) (*os.File, error) {
-	if err := validatePrivateHandoffLocation(path); err != nil {
+func openPrivateHandoff(path string, trusted bool) (*os.File, error) {
+	if err := validatePrivateHandoffLocation(path, trusted); err != nil {
 		return nil, err
 	}
 	info, err := os.Lstat(path)
@@ -566,7 +729,7 @@ func openPrivateHandoff(path string) (*os.File, error) {
 	return file, nil
 }
 
-func validatePrivateHandoffLocation(path string) error {
+func validatePrivateHandoffLocation(path string, trusted bool) error {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return errors.New("private launch handoff requires a canonical absolute path")
 	}
@@ -585,7 +748,22 @@ func validatePrivateHandoffLocation(path string) error {
 	if filepath.Base(canonicalDirectory) != "private-launch" {
 		return errors.New("private launch handoff directory resolves outside the staging namespace")
 	}
-	directoryInfo, err := os.Stat(canonicalDirectory)
+	expectedDirectory, err := resolvedHandoffRoot(trusted)
+	if err != nil {
+		return fmt.Errorf("resolve expected private launch handoff directory: %w", err)
+	}
+	expectedDirectory, err = filepath.EvalSymlinks(expectedDirectory)
+	if err != nil {
+		return fmt.Errorf("resolve expected private launch handoff identity: %w", err)
+	}
+	if canonicalDirectory != expectedDirectory {
+		return errors.New("private launch handoff is outside the expected staging directory")
+	}
+	return validateHandoffDirectorySecurity(canonicalDirectory)
+}
+
+func validateHandoffDirectorySecurity(directory string) error {
+	directoryInfo, err := os.Stat(directory)
 	if err != nil {
 		return fmt.Errorf("inspect private launch handoff directory: %w", err)
 	}
@@ -637,6 +815,17 @@ func validateHandoff(handoff launchHandoff, protocol string, now, modifiedAt tim
 	if handoff.Version != handoffVersion || handoff.Protocol != protocol {
 		return errors.New("private launch handoff does not match the requested protocol")
 	}
+	if handoff.CodexHookRoot != "" {
+		if protocol != CodexProtocol ||
+			!filepath.IsAbs(handoff.CodexHookRoot) ||
+			filepath.Clean(handoff.CodexHookRoot) != handoff.CodexHookRoot ||
+			handoff.CodexLaunch == nil ||
+			handoff.CodexLaunch.HookRoot != handoff.CodexHookRoot {
+			return errors.New("private launch handoff contains an invalid Codex hook capability")
+		}
+	} else if handoff.CodexLaunch != nil {
+		return errors.New("private launch handoff contains a Codex launch binding without a hook capability")
+	}
 	if err := validateHandoffEnvironment(protocol, handoff.Environment); err != nil {
 		return err
 	}
@@ -681,6 +870,71 @@ func handoffRoot() string {
 		stateDir = fmt.Sprintf("/tmp/agm-%d", os.Getuid())
 	}
 	return filepath.Join(stateDir, "private-launch")
+}
+
+func trustedHandoffRoot() (string, error) {
+	account, err := user.Current()
+	if err != nil {
+		return "", fmt.Errorf("resolve current user for trusted private handoff: %w", err)
+	}
+	if account.HomeDir == "" {
+		return "", errors.New("resolve current user for trusted private handoff: home directory is empty")
+	}
+	return filepath.Join(account.HomeDir, ".local", "share", "dear-agent", "private-launch"), nil
+}
+
+func resolvedHandoffRoot(trusted bool) (string, error) {
+	root := handoffRoot()
+	if trusted {
+		var err error
+		root, err = trustedHandoffRoot()
+		if err != nil {
+			return "", err
+		}
+	}
+	return filepath.Abs(root)
+}
+
+func pathsOverlap(left, right string) bool {
+	left, leftErr := filepath.Abs(left)
+	right, rightErr := filepath.Abs(right)
+	if leftErr != nil || rightErr != nil {
+		return false
+	}
+	return pathWithin(left, right) || pathWithin(right, left)
+}
+
+func resolveProspectivePath(path string) (string, error) {
+	current, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	var missing []string
+	for {
+		if _, lstatErr := os.Lstat(current); lstatErr == nil {
+			resolved, resolveErr := filepath.EvalSymlinks(current)
+			if resolveErr != nil {
+				return "", resolveErr
+			}
+			for _, component := range slices.Backward(missing) {
+				resolved = filepath.Join(resolved, component)
+			}
+			return filepath.Clean(resolved), nil
+		} else if !errors.Is(lstatErr, os.ErrNotExist) {
+			return "", lstatErr
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", fmt.Errorf("no existing ancestor for %s", path)
+		}
+		missing = append(missing, filepath.Base(current))
+		current = parent
+	}
+}
+
+func pathWithin(path, root string) bool {
+	relative, err := filepath.Rel(root, path)
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
 func removeStaleHandoffs(root string, now time.Time) {

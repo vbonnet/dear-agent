@@ -203,7 +203,7 @@ func TestAuditAlertsPerKindAndRanksRepeatedReasons(t *testing.T) {
 	}
 }
 
-func TestGrantAndLedgerUseSeparateTrustRoots(t *testing.T) {
+func TestConfiguredTestGrantAndLedgerUseSeparatePaths(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("AGM_CONFIG_DIR", dir)
 	operatorDir := filepath.Join(dir, "operator-grants")
@@ -216,15 +216,21 @@ func TestGrantAndLedgerUseSeparateTrustRoots(t *testing.T) {
 	}
 }
 
-func TestProductionGrantDirIgnoresAgentConfigDir(t *testing.T) {
+func TestProductionStoresIgnoreAgentConfigDir(t *testing.T) {
 	t.Setenv("AGM_CONFIG_DIR", t.TempDir())
 	oldDir, oldEnforcement := grantDirPath, enforceOperatorOwnership
+	oldLedger, oldLedgerEnforcement := ledgerFilePath, enforceOperatorLedger
 	grantDirPath, enforceOperatorOwnership = operatorGrantDir, true
+	ledgerFilePath, enforceOperatorLedger = operatorLedgerPath, true
 	t.Cleanup(func() {
 		grantDirPath, enforceOperatorOwnership = oldDir, oldEnforcement
+		ledgerFilePath, enforceOperatorLedger = oldLedger, oldLedgerEnforcement
 	})
 	if got := GrantDir(); got != operatorGrantDir {
 		t.Fatalf("GrantDir = %q, want operator-owned %q", got, operatorGrantDir)
+	}
+	if got := LedgerPath(); got != operatorLedgerPath {
+		t.Fatalf("LedgerPath = %q, want operator-owned %q", got, operatorLedgerPath)
 	}
 }
 
@@ -251,6 +257,35 @@ func TestLoadGrantRejectsSameUserJSON(t *testing.T) {
 	}
 }
 
+func TestLoadUsesRejectsSameUserLedger(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("cannot create a non-root-owned fixture while running as root")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ledger.jsonl")
+	oldPath, oldEnforcement := ledgerFilePath, enforceOperatorLedger
+	ledgerFilePath, enforceOperatorLedger = path, true
+	t.Cleanup(func() {
+		ledgerFilePath, enforceOperatorLedger = oldPath, oldEnforcement
+	})
+	if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadUses(time.Time{}); !errors.Is(err, ErrLedgerUntrusted) {
+		t.Fatalf("LoadUses error = %v, want ErrLedgerUntrusted", err)
+	}
+	if err := Record(Use{Kind: KindAdmissionBrake, Reason: "test", AtUTC: time.Now()}); !errors.Is(err, ErrLedgerUntrusted) {
+		t.Fatalf("Record error = %v, want ErrLedgerUntrusted", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "{}\n" {
+		t.Fatalf("same-user ledger changed after rejected append: %q", data)
+	}
+}
+
 func configureTestStore(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
@@ -261,9 +296,13 @@ func configureTestStore(t *testing.T) {
 func configureTestGrantDir(t *testing.T, dir string) {
 	t.Helper()
 	oldDir, oldEnforcement := grantDirPath, enforceOperatorOwnership
+	oldLedger, oldLedgerEnforcement := ledgerFilePath, enforceOperatorLedger
 	grantDirPath, enforceOperatorOwnership = dir, false
+	ledgerFilePath = filepath.Join(filepath.Dir(dir), "overrides", "ledger.jsonl")
+	enforceOperatorLedger = false
 	t.Cleanup(func() {
 		grantDirPath, enforceOperatorOwnership = oldDir, oldEnforcement
+		ledgerFilePath, enforceOperatorLedger = oldLedger, oldLedgerEnforcement
 	})
 }
 

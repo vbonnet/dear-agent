@@ -23,7 +23,7 @@ reason, human approval, ledger, recurring audit**.
 
 **OVR-04** When a human approval exists for one override kind, the system shall not treat it as approval for any other override kind.
 
-**OVR-05** When an override is authorized, the system shall append a ledger record containing the kind, reason, actor, session, and timestamp.
+**OVR-05** When an override is authorized, the system shall durably append a ledger record containing the kind, reason, actor, session, and timestamp through operator-owned storage that the agent user cannot truncate, replace, or remove.
 
 **OVR-06** When the ledger cannot be read or appended, the system shall refuse the override.
 
@@ -36,6 +36,8 @@ reason, human approval, ledger, recurring audit**.
 **OVR-10** When override use is aggregated, the system shall evaluate the alert threshold separately for each override kind.
 
 **OVR-11** When a raw Codex hook-trust bypass is requested outside AGM, the system shall route it through the canonical authorization entry point and shall record the authorized use.
+
+**OVR-12** When AGM's private Codex executor receives a hook-trust bypass, the system shall require a one-shot prepared handoff that binds the exact attested hook root and complete launch request and lives outside the workspace and every agent-writable root.
 
 ## Override kinds
 
@@ -78,8 +80,11 @@ the confirmed bytes to the system `authopen` authorization service; on other
 Unix systems it streams them across the system `sudo` boundary. AGM itself is
 never elevated, so an agent-writable AGM binary is not executed as root. The
 OS authentication and the command's interactive typed confirmation form the
-human boundary. The use ledger remains under `~/.agm/overrides` so the
-scheduled user agent can append and audit it.
+human boundary. Uses append through the same fixed system authorization helper
+to `/var/log/dear-agent-overrides.jsonl`. The file and its parent are
+root-owned, so the scheduled user agent can read the audit while the agent user
+cannot truncate, replace, or remove prior records. AGM synchronizes the
+privileged append before permitting the requested launch.
 
 The recurring audit ships as `deploy/launchd/com.dear-agent.override-audit.plist`
 and is staged with `make install-override-audit-launchagent`.

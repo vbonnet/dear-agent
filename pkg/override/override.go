@@ -74,6 +74,7 @@ var (
 	ErrGrantExpired    = errors.New("human approval for this override has expired")
 	ErrGrantKind       = errors.New("human approval is for a different override kind")
 	ErrGrantUntrusted  = errors.New("override approval is not in operator-owned storage")
+	ErrLedgerUntrusted = errors.New("override ledger is not in operator-owned storage")
 )
 
 // boilerplateReasons are refused outright. A reason that survives this list is
@@ -149,27 +150,17 @@ type Request struct {
 	Now     time.Time
 }
 
-// Dir is the root for the user-owned override ledger. AGM_CONFIG_DIR keeps the
-// ledger beside the rest of AGM's state when the config directory is relocated.
-func Dir() string {
-	if dir := os.Getenv("AGM_CONFIG_DIR"); dir != "" {
-		return filepath.Join(dir, "overrides")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return filepath.Join(".agm", "overrides")
-	}
-	return filepath.Join(home, ".agm", "overrides")
-}
-
 const (
 	operatorGrantDir    = "/etc"
 	operatorGrantPrefix = "dear-agent-override-"
+	operatorLedgerPath  = "/var/log/dear-agent-overrides.jsonl"
 )
 
 var (
 	grantDirPath             = operatorGrantDir
 	enforceOperatorOwnership = true
+	ledgerFilePath           = operatorLedgerPath
+	enforceOperatorLedger    = true
 )
 
 // GrantDir is the operator-owned approval store. It is deliberately outside
@@ -182,8 +173,10 @@ func GrantPath(kind Kind) string {
 	return filepath.Join(GrantDir(), operatorGrantPrefix+string(kind)+".json")
 }
 
-// LedgerPath is the append-only record of authorized overrides.
-func LedgerPath() string { return filepath.Join(Dir(), "ledger.jsonl") }
+// LedgerPath is the operator-owned append-only record of authorized
+// overrides. Authorized uses cross a fixed system helper; the agent user can
+// read the audit but cannot truncate, replace, or remove it.
+func LedgerPath() string { return ledgerFilePath }
 
 // LoadGrant reads the approval for kind. A missing grant is (nil, nil) so the
 // caller can report "not approved" distinctly from "could not tell".
@@ -279,12 +272,60 @@ func RevokeGrant(kind Kind) error {
 // an unrecorded override is an invisible one.
 func Record(use Use) error {
 	path := LedgerPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("create override ledger dir: %w", err)
-	}
 	line, err := json.Marshal(use)
 	if err != nil {
 		return fmt.Errorf("encode override use: %w", err)
+	}
+	line = append(line, '\n')
+	if enforceOperatorLedger {
+		if err := inspectExistingLedger(path); err != nil {
+			return err
+		}
+		if err := appendOperatorLedger(line, path); err != nil {
+			return err
+		}
+		if err := validateLedgerPath(path); err != nil {
+			return err
+		}
+		if err := syncLedger(path); err != nil {
+			return err
+		}
+		return nil
+	}
+	return recordLocalUse(path, line)
+}
+
+func inspectExistingLedger(path string) error {
+	if err := validateLedgerPath(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if _, err := os.ReadFile(path); err != nil {
+		return fmt.Errorf("read existing override ledger before append: %w", err)
+	}
+	return nil
+}
+
+func syncLedger(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open override ledger for durable sync: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		closeErr := file.Close()
+		return errors.Join(fmt.Errorf("sync override ledger: %w", err), closeErr)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close override ledger after durable sync: %w", err)
+	}
+	return nil
+}
+
+func recordLocalUse(path string, line []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create override ledger dir: %w", err)
 	}
 	// O_RDWR is intentional: append authorization must fail when the audit
 	// cannot read the existing ledger, even if a write-only ACL would permit
@@ -293,7 +334,7 @@ func Record(use Use) error {
 	if err != nil {
 		return fmt.Errorf("open override ledger: %w", err)
 	}
-	if _, err := file.Write(append(line, '\n')); err != nil {
+	if _, err := file.Write(line); err != nil {
 		closeErr := file.Close()
 		return errors.Join(fmt.Errorf("append override ledger: %w", err), closeErr)
 	}
@@ -310,6 +351,12 @@ func Record(use Use) error {
 // LoadUses reads recorded uses at or after since. A malformed line is skipped
 // rather than fatal so one bad record cannot blind the whole audit.
 func LoadUses(since time.Time) ([]Use, error) {
+	if err := validateLedgerPath(LedgerPath()); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
 	data, err := os.ReadFile(LedgerPath())
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil

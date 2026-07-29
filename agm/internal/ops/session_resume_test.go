@@ -478,16 +478,15 @@ func TestPrepareResumeLaunchRestoresSandboxCodexPolicy(t *testing.T) {
 	// The override package exhaustively tests root-owned grants. This operation
 	// test isolates the resume invariant: resume must invoke authorization and
 	// persist the returned use instead of inheriting an earlier decision.
+	authorizedUses := 0
 	replaceOverrideAuthorizer(t, func(req override.Request) (override.Use, error) {
+		authorizedUses++
 		use := override.Use{
 			Kind:    req.Kind,
 			Reason:  req.Reason,
 			Actor:   req.Actor,
 			Session: req.Session,
 			AtUTC:   time.Now().UTC(),
-		}
-		if err := override.Record(use); err != nil {
-			return override.Use{}, err
 		}
 		return use, nil
 	})
@@ -530,9 +529,8 @@ func TestPrepareResumeLaunchRestoresSandboxCodexPolicy(t *testing.T) {
 		}
 	}
 
-	uses, err := override.LoadUses(time.Time{})
-	if err != nil || len(uses) != 1 {
-		t.Fatalf("resume did not record the override use: %d use(s), err %v", len(uses), err)
+	if authorizedUses != 1 {
+		t.Fatalf("resume authorization calls = %d, want 1", authorizedUses)
 	}
 }
 

@@ -218,6 +218,172 @@ func TestPreparedCodexCommandCarriesCallerAllowlistAndPreservesPaneRuntime(t *te
 	}
 }
 
+func TestCodexHookBypassRequiresTrustedBoundHandoff(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	originalExecutablePath := executablePath
+	originalLookPathInEnvironment := lookPathInEnvironment
+	originalReplaceProcess := replaceProcess
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		lookPathInEnvironment = originalLookPathInEnvironment
+		replaceProcess = originalReplaceProcess
+	})
+	executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+	lookPathInEnvironment = func(string, []string) (string, error) { return "/fixed/codex", nil }
+
+	const hookRoot = "/trusted/hooks/0123456789abcdef"
+	prepared, err := PrepareCodexCommand(CodexLaunch{
+		SessionName:     "bypass-codex",
+		Model:           "gpt-test",
+		WorkDir:         "/tmp/work",
+		Sandbox:         "workspace-write",
+		BypassHookTrust: true,
+		HookRoot:        hookRoot,
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepare trusted Codex bypass: %v", err)
+	}
+	trustedRoot, err := trustedHandoffRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Dir(prepared.path) != trustedRoot {
+		t.Fatalf("bypass handoff directory = %q, want %q", filepath.Dir(prepared.path), trustedRoot)
+	}
+
+	var childEnvironment []string
+	replaceProcess = func(_ string, _ []string, env []string) error {
+		childEnvironment = append([]string(nil), env...)
+		return nil
+	}
+	err = Run(CodexProtocol, []string{
+		"--handoff", prepared.path,
+		"--session", "bypass-codex",
+		"--model", "gpt-test",
+		"--workdir", "/tmp/work",
+		"--sandbox", "workspace-write",
+		"--bypass-hook-trust",
+		"--hook-root", hookRoot,
+	})
+	if err == nil || !strings.Contains(err.Error(), "returned unexpectedly") {
+		t.Fatalf("run prepared Codex bypass: %v", err)
+	}
+	if got := environmentMap(childEnvironment)["AGM_CODEX_HOOK_ROOT"]; got != hookRoot {
+		t.Fatalf("Codex hook root environment = %q, want %q", got, hookRoot)
+	}
+
+	bound, err := PrepareCodexCommand(CodexLaunch{
+		SessionName:     "bound-bypass",
+		Model:           "gpt-test",
+		WorkDir:         "/tmp/work",
+		Sandbox:         "workspace-write",
+		BypassHookTrust: true,
+		HookRoot:        hookRoot,
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepare bound Codex bypass: %v", err)
+	}
+	err = Run(CodexProtocol, []string{
+		"--handoff", bound.path,
+		"--session", "bound-bypass",
+		"--model", "gpt-test",
+		"--workdir", "/tmp/work",
+		"--sandbox", "workspace-write",
+		"--bypass-hook-trust",
+		"--hook-root", "/trusted/hooks/different",
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not authorize") {
+		t.Fatalf("mismatched Codex hook root error = %v", err)
+	}
+
+	bound, err = PrepareCodexCommand(CodexLaunch{
+		SessionName:     "bound-bypass",
+		Model:           "gpt-test",
+		WorkDir:         "/tmp/work",
+		Sandbox:         "workspace-write",
+		BypassHookTrust: true,
+		HookRoot:        hookRoot,
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepare launch-bound Codex bypass: %v", err)
+	}
+	err = Run(CodexProtocol, []string{
+		"--handoff", bound.path,
+		"--session", "bound-bypass",
+		"--model", "gpt-test",
+		"--workdir", "/tmp",
+		"--sandbox", "workspace-write",
+		"--bypass-hook-trust",
+		"--hook-root", hookRoot,
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not authorize the requested Codex launch") {
+		t.Fatalf("mismatched Codex launch error = %v", err)
+	}
+
+	err = Run(CodexProtocol, []string{
+		"--session", "forged-bypass",
+		"--model", "gpt-test",
+		"--workdir", "/tmp/work",
+		"--sandbox", "workspace-write",
+		"--bypass-hook-trust",
+		"--hook-root", hookRoot,
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires a prepared private handoff") {
+		t.Fatalf("direct Codex bypass error = %v, want prepared-handoff refusal", err)
+	}
+
+	ordinary, err := PrepareCodexCommand(CodexLaunch{
+		SessionName: "ordinary-handoff",
+		Model:       "gpt-test",
+		WorkDir:     "/tmp/work",
+		Sandbox:     "workspace-write",
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepare ordinary Codex handoff: %v", err)
+	}
+	err = Run(CodexProtocol, []string{
+		"--handoff", ordinary.path,
+		"--session", "ordinary-handoff",
+		"--model", "gpt-test",
+		"--workdir", "/tmp/work",
+		"--sandbox", "workspace-write",
+		"--bypass-hook-trust",
+		"--hook-root", hookRoot,
+	})
+	if err == nil || !strings.Contains(err.Error(), "outside the expected staging directory") {
+		t.Fatalf("ordinary handoff bypass error = %v", err)
+	}
+	if err := ordinary.Cancel(); err != nil {
+		t.Fatalf("cancel rejected ordinary handoff: %v", err)
+	}
+
+	if _, err := PrepareCodexCommand(CodexLaunch{
+		SessionName:     "overlapping-bypass",
+		Model:           "gpt-test",
+		WorkDir:         filepath.Dir(trustedRoot),
+		Sandbox:         "workspace-write",
+		BypassHookTrust: true,
+		HookRoot:        hookRoot,
+	}, nil); err == nil || !strings.Contains(err.Error(), "overlaps agent-writable root") {
+		t.Fatalf("overlapping trusted handoff error = %v", err)
+	}
+
+	symlinkedRoot := filepath.Join(t.TempDir(), "trusted-via-symlink")
+	if err := os.Symlink(trustedRoot, symlinkedRoot); err != nil {
+		t.Fatalf("symlink trusted handoff root: %v", err)
+	}
+	if _, err := PrepareCodexCommand(CodexLaunch{
+		SessionName:     "symlink-overlapping-bypass",
+		Model:           "gpt-test",
+		WorkDir:         symlinkedRoot,
+		Sandbox:         "workspace-write",
+		BypassHookTrust: true,
+		HookRoot:        hookRoot,
+	}, nil); err == nil || !strings.Contains(err.Error(), "overlaps agent-writable root") {
+		t.Fatalf("symlink-overlapping trusted handoff error = %v", err)
+	}
+}
+
 func TestPreparedCodexCommandResolvesExecutableFromCallerPATH(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
 	staleBin := t.TempDir()
@@ -596,7 +762,7 @@ func TestPreparedCommandRemovesHandoffWhenExpirationCannotBeScheduled(t *testing
 
 func TestDeferredHandoffRemainsLiveUntilProducerExitThenExpires(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
-	path, err := stageHandoff(CodexProtocol, []string{"OPENAI_API_KEY=deferred-expiry-canary"}, true)
+	path, err := stageHandoff(CodexProtocol, []string{"OPENAI_API_KEY=deferred-expiry-canary"}, true, "")
 	if err != nil {
 		t.Fatalf("stage deferred handoff: %v", err)
 	}
@@ -651,7 +817,7 @@ func TestDeferredHandoffRemainsLiveUntilProducerExitThenExpires(t *testing.T) {
 
 func TestExpiryProtocolRemovesUnconsumedHandoffAtDeadline(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
-	path, err := stageHandoff(CodexProtocol, []string{"OPENAI_API_KEY=expiry-canary"}, false)
+	path, err := stageHandoff(CodexProtocol, []string{"OPENAI_API_KEY=expiry-canary"}, false, "")
 	if err != nil {
 		t.Fatalf("stage handoff: %v", err)
 	}
@@ -669,7 +835,7 @@ func TestExpiryProtocolRemovesUnconsumedHandoffAtDeadline(t *testing.T) {
 
 func TestDetachedExpiryHelperIsReapedAsynchronously(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
-	path, err := stageHandoff(CodexProtocol, nil, false)
+	path, err := stageHandoff(CodexProtocol, nil, false, "")
 	if err != nil {
 		t.Fatalf("stage handoff: %v", err)
 	}
@@ -696,7 +862,7 @@ func TestDetachedExpiryHelperIsReapedAsynchronously(t *testing.T) {
 
 func TestDetachedExpiryHelperInterceptsGoTestBinaryBeforeTestsRun(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
-	path, err := stageHandoff(CodexProtocol, []string{"OPENAI_API_KEY=detached-expiry-canary"}, false)
+	path, err := stageHandoff(CodexProtocol, []string{"OPENAI_API_KEY=detached-expiry-canary"}, false, "")
 	if err != nil {
 		t.Fatalf("stage handoff: %v", err)
 	}
@@ -728,7 +894,7 @@ func TestConsumeHandoffUsesDeferredLeaseFreshnessAndUnlinksRejections(t *testing
 		"deferred": true,
 	} {
 		t.Run(name, func(t *testing.T) {
-			path, err := stageHandoff(CodexProtocol, nil, deferred)
+			path, err := stageHandoff(CodexProtocol, nil, deferred, "")
 			if err != nil {
 				t.Fatalf("stage handoff: %v", err)
 			}
@@ -749,7 +915,7 @@ func TestConsumeHandoffUsesDeferredLeaseFreshnessAndUnlinksRejections(t *testing
 				t.Fatalf("rewrite handoff timestamp: %v", err)
 			}
 
-			_, consumeErr := consumeHandoff(path, CodexProtocol)
+			_, consumeErr := consumeHandoff(path, CodexProtocol, "")
 			if deferred && consumeErr != nil {
 				t.Fatalf("deferred handoff rejected recent producer lease freshness: %v", consumeErr)
 			}
@@ -908,29 +1074,29 @@ func TestExecutorConsumesHandoffBeforeHarnessLookup(t *testing.T) {
 func TestConsumeHandoffRejectsCrossHarnessAndPublicState(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
 
-	if _, err := stageHandoff(CodexProtocol, []string{"ANTHROPIC_API_KEY=must-not-cross"}, false); err == nil {
+	if _, err := stageHandoff(CodexProtocol, []string{"ANTHROPIC_API_KEY=must-not-cross"}, false, ""); err == nil {
 		t.Fatal("Codex staging accepted an Anthropic credential")
 	}
 
-	wrongProtocol, err := stageHandoff(ClaudeProtocol, nil, false)
+	wrongProtocol, err := stageHandoff(ClaudeProtocol, nil, false, "")
 	if err != nil {
 		t.Fatalf("stage wrong-protocol handoff: %v", err)
 	}
-	if _, err := consumeHandoff(wrongProtocol, CodexProtocol); err == nil {
+	if _, err := consumeHandoff(wrongProtocol, CodexProtocol, ""); err == nil {
 		t.Fatal("Codex executor accepted a Claude handoff")
 	}
 	if _, err := os.Stat(wrongProtocol); !os.IsNotExist(err) {
 		t.Fatalf("rejected wrong-protocol handoff still exists: %v", err)
 	}
 
-	public, err := stageHandoff(CodexProtocol, nil, false)
+	public, err := stageHandoff(CodexProtocol, nil, false, "")
 	if err != nil {
 		t.Fatalf("stage public-mode handoff: %v", err)
 	}
 	if err := os.Chmod(public, 0644); err != nil {
 		t.Fatalf("make handoff public: %v", err)
 	}
-	if _, err := consumeHandoff(public, CodexProtocol); err == nil {
+	if _, err := consumeHandoff(public, CodexProtocol, ""); err == nil {
 		t.Fatal("executor accepted a group/world-readable handoff")
 	}
 	if err := os.Remove(public); err != nil {
@@ -956,7 +1122,7 @@ func TestConsumeHandoffPreservesFilesOutsidePrivateStagingNamespace(t *testing.T
 			if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 				t.Fatalf("write protected test file: %v", err)
 			}
-			if _, err := consumeHandoff(path, CodexProtocol); err == nil {
+			if _, err := consumeHandoff(path, CodexProtocol, ""); err == nil {
 				t.Fatal("executor accepted a file outside the private staging namespace")
 			}
 			got, err := os.ReadFile(path)
@@ -978,7 +1144,7 @@ func TestConsumeHandoffRejectsTrailingAndOversizedContent(t *testing.T) {
 		"oversized":     strings.Repeat(" ", handoffMaxSize),
 	} {
 		t.Run(name, func(t *testing.T) {
-			path, err := stageHandoff(CodexProtocol, nil, false)
+			path, err := stageHandoff(CodexProtocol, nil, false, "")
 			if err != nil {
 				t.Fatalf("stage handoff: %v", err)
 			}
@@ -993,7 +1159,7 @@ func TestConsumeHandoffRejectsTrailingAndOversizedContent(t *testing.T) {
 			if err := file.Close(); err != nil {
 				t.Fatalf("close corrupted handoff: %v", err)
 			}
-			if _, err := consumeHandoff(path, CodexProtocol); err == nil {
+			if _, err := consumeHandoff(path, CodexProtocol, ""); err == nil {
 				t.Fatal("executor accepted a corrupted handoff")
 			}
 			if _, err := os.Stat(path); !os.IsNotExist(err) {

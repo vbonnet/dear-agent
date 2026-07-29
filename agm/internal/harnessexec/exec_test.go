@@ -431,7 +431,7 @@ func TestRunUsesFixedExecutablesAndDirectReplacement(t *testing.T) {
 
 	err := Run(CodexProtocol, []string{
 		"--session", "codex-session", "--model", "gpt-test", "--workdir", "/tmp/work",
-		"--sandbox", "workspace-write", "--bypass-hook-trust", "--hook-root", "/trusted/hooks/digest",
+		"--sandbox", "workspace-write",
 	})
 	if err == nil || !strings.Contains(err.Error(), "returned unexpectedly") {
 		t.Fatalf("Codex Run error = %v, want unexpected-return guard", err)
@@ -442,8 +442,8 @@ func TestRunUsesFixedExecutablesAndDirectReplacement(t *testing.T) {
 	if got := environmentMap(gotEnv)["AGM_SESSION_NAME"]; got != "codex-session" {
 		t.Fatalf("Codex replacement session environment = %q", got)
 	}
-	if got := environmentMap(gotEnv)["AGM_CODEX_HOOK_ROOT"]; got != "/trusted/hooks/digest" {
-		t.Fatalf("Codex replacement hook root = %q, want private request value", got)
+	if got := environmentMap(gotEnv)["AGM_CODEX_HOOK_ROOT"]; got != "" {
+		t.Fatalf("ordinary Codex replacement inherited untrusted hook root %q", got)
 	}
 
 	resolveClaudeOAuth = func() string { return "resolved-oauth" }

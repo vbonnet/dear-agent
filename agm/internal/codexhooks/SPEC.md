@@ -27,6 +27,8 @@ reviewed source commit.
 
 **CHOOK-08** When AGM launches or cold-resumes a bypassed Codex session, the private executor shall require a clean absolute attested hook root, inject it as `AGM_CODEX_HOOK_ROOT`, and reject a hook root when the bypass is absent.
 
+**CHOOK-09** When the private executor receives a Codex hook-trust bypass, the system shall reject direct requests and ordinary handoffs, require a one-shot prepared capability bound to the exact hook root and complete launch request, and stage that capability outside the workspace and every agent-writable root.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
