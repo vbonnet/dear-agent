@@ -69,6 +69,7 @@ var (
 	htmlBlockTag      = regexp.MustCompile(`(?i)^</?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t/>]|$)`)
 	htmlType7OpenTag  = regexp.MustCompile(`(?i)^<[a-z][a-z0-9-]*(?:[ \t]+[a-z_:][a-z0-9_.:-]*(?:[ \t]*=[ \t]*(?:"[^"]*"|'[^']*'|[^ \t"'=<>]+))?)*[ \t]*/?>[ \t]*$`)
 	htmlType7CloseTag = regexp.MustCompile(`(?i)^</[a-z][a-z0-9-]*[ \t]*>[ \t]*$`)
+	inlineHTMLTag     = regexp.MustCompile(`(?i)(?:<[a-z][a-z0-9-]*(?:[ \t]+[a-z_:][a-z0-9_.:-]*(?:[ \t]*=[ \t]*(?:"[^"]*"|'[^']*'|[^ \t"'=<>]+))?)*[ \t]*/?>|</[a-z][a-z0-9-]*[ \t]*>)`)
 )
 
 // CheckFile validates one Markdown file. Content defects are returned as
@@ -213,10 +214,10 @@ func checkData(path string, data []byte) []Violation {
 		if lineNo > headerZoneMaxLines {
 			break
 		}
-		if unescapedBoldFieldCount(scannable) >= 2 {
+		if unescapedBoldFieldCount(maskInlineHTMLTags(scannable)) >= 2 {
 			violations = append(violations, Violation{Path: path, Line: lineNo, Text: strings.TrimSpace(line)})
 		}
-		paragraphOpen = lineLeavesParagraphOpen(scannable)
+		paragraphOpen = lineLeavesParagraphOpen(line)
 		if paragraphOpen {
 			paragraphContainer = openerContainer
 		} else {
@@ -664,6 +665,20 @@ func unescapedBoldFieldCount(line string) int {
 		count++
 	}
 	return count
+}
+
+func maskInlineHTMLTags(line string) string {
+	matches := inlineHTMLTag.FindAllStringIndex(line, -1)
+	if len(matches) == 0 {
+		return line
+	}
+	masked := []byte(line)
+	for _, match := range matches {
+		for index := match[0]; index < match[1]; index++ {
+			masked[index] = ' '
+		}
+	}
+	return string(masked)
 }
 
 func sameInlineCodeContainer(container fenceContainerContext, line string) bool {

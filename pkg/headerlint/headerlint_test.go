@@ -690,6 +690,19 @@ func TestCheckFile_FlagsStrongFieldsSeparatedByUnicodeSymbols(t *testing.T) {
 	}
 }
 
+func TestCheckFile_DoesNotFlagBoldShapedTextInsideInlineHTMLTag(t *testing.T) {
+	const content = "# Doc\n\n<span title=\"**Status:** draft · **Owner:** docs\">text</span>\n"
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "inline-html.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("want inline HTML attributes ignored, got %v", violations)
+	}
+}
+
 func TestCheckFile_ListNestedBlockquoteFenceEndsWithOuterList(t *testing.T) {
 	const content = "# Doc\n\n- > ```md\n> **Status:** draft · **Owner:** docs\n"
 	dir := t.TempDir()
@@ -909,6 +922,19 @@ func TestCheckFile_MarkedBlockquoteBlankClosesParagraphBeforeOrderedHeading(t *t
 	}
 	if len(violations) != 0 {
 		t.Fatalf("want ordered H2 to end the header zone, got %v", violations)
+	}
+}
+
+func TestCheckFile_InlineCodeOnlyLinePreservesParagraphState(t *testing.T) {
+	const content = "# Doc\n\n`intro`\n2. ## literal\n**Status:** draft · **Owner:** docs\n"
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "inline-code-paragraph.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 1 || violations[0].Line != 5 {
+		t.Fatalf("want field violation after non-interrupting list text, got %v", violations)
 	}
 }
 
