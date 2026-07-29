@@ -136,13 +136,16 @@ func (m *ProcessMonitor) CountDescendants() (int, error) {
 
 func (m *ProcessMonitor) run(ctx context.Context, done chan struct{}) {
 	defer func() {
-		close(done)
 		m.mu.Lock()
 		if m.done == done && !m.alerting {
 			m.running = false
 			m.cancel = nil
 			m.done = nil
 		}
+		// Close while holding mu so a waiter cannot race a restart ahead of
+		// lifecycle cleanup. If a callback is active, running deliberately
+		// remains true until that callback's defer clears the same run.
+		close(done)
 		m.mu.Unlock()
 	}()
 

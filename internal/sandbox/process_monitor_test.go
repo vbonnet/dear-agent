@@ -115,6 +115,27 @@ func TestProcessMonitorStartResetsProcessCountBaseline(t *testing.T) {
 	}
 }
 
+func TestProcessMonitorStopClearsLifecycleBeforeImmediateRestart(t *testing.T) {
+	m := NewProcessMonitor(os.Getpid(), ProcessLimits{PollInterval: time.Hour}, nil)
+	for range 100 {
+		m.Start(context.Background())
+		m.mu.Lock()
+		oldDone := m.done
+		m.mu.Unlock()
+		m.Stop()
+
+		m.Start(context.Background())
+		m.mu.Lock()
+		newDone := m.done
+		running := m.running
+		m.mu.Unlock()
+		if !running || newDone == nil || newDone == oldDone {
+			t.Fatal("immediate Start did not create a fresh lifecycle after Stop returned")
+		}
+		m.Stop()
+	}
+}
+
 func TestProcessMonitorAlertCallbackCanStopMonitor(t *testing.T) {
 	callbackDone := make(chan struct{})
 	var m *ProcessMonitor
