@@ -1164,6 +1164,24 @@ func TestCheckFile_ConsecutiveTypeSixHTMLDoesNotInterruptParagraph(t *testing.T)
 	}
 }
 
+func TestCheckFile_MultilineHTMLKeepsEveryTagLineNonblank(t *testing.T) {
+	const content = "# Doc\n" +
+		"intro\n" +
+		"<span\n" +
+		" class=\"example\">\n" +
+		"2. ## literal\n" +
+		"**Status:** draft · **Owner:** docs\n"
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "multiline-inline-html.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 1 || violations[0].Line != 6 {
+		t.Fatalf("want field violation after multiline inline HTML, got %v", violations)
+	}
+}
+
 func TestCheckFile_YAMLFrontmatterCannotEndHeaderZone(t *testing.T) {
 	const content = "---\n" +
 		"title: Example\n" +

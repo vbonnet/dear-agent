@@ -301,25 +301,32 @@ func goldmarkAnalysisSource(source []byte) []byte {
 			}
 			stop := htmlBlock.Lines().At(htmlBlock.Lines().Len() - 1).Stop
 			tagEnd := inlineHTMLTagEnd(source, start, stop)
-			if tagEnd < 0 {
-				masked[start] = 'x'
-				changed = true
-				return ast.WalkContinue, nil
-			}
-			for index := start; index < tagEnd; index++ {
-				if masked[index] != '\n' {
-					masked[index] = ' '
-				}
-			}
-			// Keep the downgraded source line nonblank. Otherwise a following
-			// type-6/7 tag can become a new HTML-block opener on the next parse,
-			// even though both tags belonged to the original open paragraph.
-			masked[start] = 'x'
+			maskDowngradedHTMLTag(masked, source, start, tagEnd)
 			changed = true
 			return ast.WalkContinue, nil
 		})
 		if !changed {
 			return masked
+		}
+	}
+}
+
+func maskDowngradedHTMLTag(masked, source []byte, start, tagEnd int) {
+	if tagEnd < 0 {
+		masked[start] = 'x'
+		return
+	}
+	for index := start; index < tagEnd; index++ {
+		if masked[index] != '\n' {
+			masked[index] = ' '
+		}
+	}
+	// Keep every downgraded tag line nonblank. Otherwise a following block
+	// marker can interrupt the open paragraph on the next analysis pass.
+	masked[start] = 'x'
+	for index := start; index+1 < tagEnd; index++ {
+		if source[index] == '\n' {
+			masked[index+1] = 'x'
 		}
 	}
 }
