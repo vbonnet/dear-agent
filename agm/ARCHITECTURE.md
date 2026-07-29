@@ -8,13 +8,11 @@ AGM (Agent Gateway Manager) is a multi-agent session management system that prov
 
 ## Architecture
 
-### C4 Component Diagram
+### C4 Component Model
 
-The following diagram shows the internal component architecture of AGM at the C4 Level 3 (Component) view:
-
-![AGM Component Architecture](diagrams/rendered/c4-component-agm.svg)
-
-[View PNG version](diagrams/rendered/c4-component-agm.png) | [View D2 Source](diagrams/c4-component-agm.d2)
+The code-native [D2 source](diagrams/c4-component-agm.d2) describes AGM at the
+C4 Level 3 component view. Generated renders are not checked in because the
+source is the living artifact.
 
 ### Key Components
 
@@ -69,9 +67,11 @@ they need behavior; they do not depend on a universal lifecycle facade.
 - **Message Queue**: Async communication with retry logic and acknowledgments
 - **State Monitor (Astrocyte)**: Real-time state detection (READY, THINKING, PERMISSION_PROMPT, COMPACTING, OFFLINE)
 
-#### 6. Backend Abstraction
-- **Tmux Backend**: Session management, pane control, key sending
-- **Temporal Backend**: Workflow orchestration, durable execution (future)
+#### 6. Local Runtime Boundary
+- **Session tmux runtime**: One `session.RealTmux` adapter owns session
+  management, strict existence, liveness, readiness, pane control, and input.
+- **Alternative runtimes**: Added only with a production caller and a
+  consumer-sized contract; dormant backend registries are not retained.
 
 #### 7. UI & Presentation Layer
 - **Interactive UI (Huh TUI)**: Session picker, forms, confirmations, fuzzy search
@@ -100,9 +100,9 @@ Generic AGM Operation → Transaction Owner → Required Capability → Harness 
 2. **CLI Validation**: Command layer validates flags and parameters
 3. **UUID Generation**: SessionManager generates unique session ID
 4. **Adapter Selection**: Appropriate adapter chosen based on agent flag
-5. **Agent Startup**: Adapter starts agent CLI via backend
+5. **Agent Startup**: Adapter starts the agent CLI through the session tmux runtime
 6. **Database Persistence**: Dolt adapter inserts session metadata into database
-7. **Backend Attachment**: TmuxBackend attaches to session
+7. **Runtime Attachment**: The session tmux runtime attaches to the exact session
 
 ### Session Hierarchy and Parent-Child Relationships
 
@@ -354,7 +354,7 @@ See [TESTING.md](TESTING.md) for complete test isolation guide.
 
 - [AGM CLI Architecture](../agm-session-lifecycle/agm/cmd/agm/ARCHITECTURE.md) - Detailed CLI architecture
 - [AGM Specification](SPEC.md) - Complete system specification
-- [Backend Implementation](BACKEND_IMPLEMENTATION.md) - Backend abstraction details
+- [ADR-032](docs/adr/ADR-032-single-local-runtime-owner.md) - Single local runtime ownership
 - [Capability Matrix](CAPABILITY-MATRIX.md) - Feature comparison across agents
 - [Testing Guide](TESTING.md) - Test isolation and best practices
 - [ADR-006](cmd/agm/ADR-006-test-isolation-enforcement.md) - Test isolation enforcement decision

@@ -106,8 +106,12 @@ type harnessParityState struct {
 	harnessHealth              agent.HarnessHealth
 	runtimeHelperCommand       string
 	runtimeHelperSpec          string
-	backendImplementation      string
-	backendImplementationSpec  string
+	runtimeMainSource          string
+	runtimeProductionSource    string
+	runtimeOpsSource           string
+	runtimeSendSource          string
+	runtimeTmuxSource          string
+	runtimeExecSource          string
 	cleanupSupportPackage      string
 	cleanupSupportSpec         string
 	archiveCleanupTestOutput   string
@@ -264,9 +268,12 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM runtime helper command "([^"]*)" is configured$`, agmRuntimeHelperCommandIsConfigured)
 	ctx.Step(`^AGM validates runtime helper command coverage$`, agmValidatesRuntimeHelperCommandCoverage)
 	ctx.Step(`^runtime helper command "([^"]*)" should have a co-located SPEC$`, runtimeHelperCommandShouldHaveCoLocatedSPEC)
-	ctx.Step(`^AGM backend implementation "([^"]*)" is configured$`, agmBackendImplementationIsConfigured)
-	ctx.Step(`^AGM validates backend implementation coverage$`, agmValidatesBackendImplementationCoverage)
-	ctx.Step(`^backend implementation "([^"]*)" should have a co-located SPEC$`, backendImplementationShouldHaveCoLocatedSPEC)
+	ctx.Step(`^AGM production local runtime sources$`, agmProductionLocalRuntimeSources)
+	ctx.Step(`^AGM validates single runtime ownership$`, agmValidatesSingleRuntimeOwnership)
+	ctx.Step(`^production should use only the direct session tmux runtime type$`, productionShouldUseOnlyDirectSessionTmuxRuntimeType)
+	ctx.Step(`^shared operations should expose no parallel manager runtime$`, sharedOperationsShouldExposeNoParallelManagerRuntime)
+	ctx.Step(`^the direct tmux runtime should prove its safety capabilities$`, directTmuxRuntimeShouldProveSafetyCapabilities)
+	ctx.Step(`^retired generalized runtimes and selection setting should be absent$`, retiredGeneralizedRuntimesAndSelectionSettingShouldBeAbsent)
 	ctx.Step(`^AGM cleanup support package "([^"]*)" is configured$`, agmCleanupSupportPackageIsConfigured)
 	ctx.Step(`^AGM validates cleanup support package coverage$`, agmValidatesCleanupSupportPackageCoverage)
 	ctx.Step(`^cleanup support package "([^"]*)" should have a co-located SPEC$`, cleanupSupportPackageShouldHaveCoLocatedSPEC)
@@ -620,8 +627,8 @@ func codexResumeSuccessShouldRequireProcessAndComposerReadiness(ctx context.Cont
 	cmd := exec.CommandContext(
 		testCtx,
 		"go", "test",
-		"./agm/internal/tmux", "./agm/internal/state", "./agm/internal/session", "./agm/internal/manager/tmuxbackend",
-		"-run", `^(TestCodexResumeReadiness(RequiresProcessThenComposer|StopsBeforeComposerWithoutProcess)|TestWaitForCodexPrompt(RejectsEchoedLaunchModel|AcceptsCurrentWelcomeGhostComposer)|TestIsCodex(ComposerReady|IdlePreservesCurrentWelcomeGhostStyle)|TestWaitForPrompt(Simple|OrResumeFailure)PreservesCurrentCodexWelcomeGhostStyle|TestSendMultiLinePromptSafePreservesCurrentCodexWelcomeGhostStyle|TestIsProcessReadyWithRuntimePreservesCancellation(Before|During)CodexFallback|TestDetector_CodexReadinessRequiresStructuredComposer|TestStateAndDeliveryPreserveCurrentCodexWelcomeGhostStyle|TestBackendStateAndDeliveryPreserveCurrentCodexWelcomeGhostStyle)$`,
+		"./agm/internal/tmux", "./agm/internal/state", "./agm/internal/session",
+		"-run", `^(TestCodexResumeReadiness(RequiresProcessThenComposer|StopsBeforeComposerWithoutProcess)|TestWaitForCodexPrompt(RejectsEchoedLaunchModel|AcceptsCurrentWelcomeGhostComposer)|TestIsCodex(ComposerReady|IdlePreservesCurrentWelcomeGhostStyle)|TestWaitForPrompt(Simple|OrResumeFailure)PreservesCurrentCodexWelcomeGhostStyle|TestSendMultiLinePromptSafePreservesCurrentCodexWelcomeGhostStyle|TestIsProcessReadyWithRuntimePreservesCancellation(Before|During)CodexFallback|TestDetector_CodexReadinessRequiresStructuredComposer|TestStateAndDeliveryPreserveCurrentCodexWelcomeGhostStyle)$`,
 		"-count=1",
 	)
 	cmd.Dir = bddRepoRoot()
@@ -1115,7 +1122,7 @@ func agmValidatesSlowHarnessStartupReadiness(ctx context.Context) error {
 	harnessState := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
 	testCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(testCtx, "go", "test", "-p", "1", "./agm/cmd/agm", "./agm/cmd/agm-mcp-server", "./agm/internal/agent", "./agm/internal/agent/openai", "./agm/internal/dolt", "./agm/internal/session", "./agm/internal/tmux", "./agm/internal/ops", "-run", `^(TestMCPCreateSessionRuntimeRevalidatesStartupPromptAtomically|TestRealTmux(InputReadinessReportsMissingSession|LogicalANSICaptureJoinsNarrowPaneWraps|ReadinessAdvancesGeminiTrustOnVerifiedPane|ReadinessDetectsManagedPiComposer|ReadinessIdentifiesNodeBackedCodex|ReadinessPinsLivenessAndDeliveryToActivePane|ReadinessPreservesClaudeGhostComposer|ReadinessRejectsSuspendedHarnessWithStaleComposer|WaitForHarnessReadyAllowsSlowProcessStart)|TestCapturePaneLogicalANSIArgsJoinFullExactPaneHistory|TestClassifyHarnessInputRequiresCurrentHarnessComposer|TestClassifyQueuedInputBindsCompleteHeaderToLatestMarker|TestQueuedComposerPayloadPromptGlyphsRemainBoundToPasteAnchor|TestHarnessStartupAdvanceKeys|TestInputDeliveryAllowedOverridesOnlyPositivelyIdentifiedAGMQueue|TestQueuedAGMRecovery(ClearsBeforeReplacement|DoesNotReplaceUntilExactPaneIsEmpty|DoesNotReportReadyWhenReplacementFails)|TestParsePSForegroundTable|TestExpectedHarnessMatcher(RejectsUnrelatedNodeProcess|AcceptsIdentifiedNodeBackedHarness|RequiresForegroundTerminalOwnership)|TestSendMessage_(AcceptsPostRecoveryReadyState|AtomicReadinessAndDeliveryPrecedesGenericManagerCheck|QueuedAGMRecoveryPolicies|ForceDoesNotBypassProtectedInputStates|AutonomousDoesNotBypassProtectedInputStates|PiPermissionPromptBlocksAtomicDelivery|Normalizes(LegacyAgyHarness|PiHarnessAlias)BeforeReadiness)|TestSendMessage(CompletionFailureLeavesHistoryUnchanged|ContextCancelsProviderAndReleasesSessionLock|SerializesIndependentManagersAndCommitsCompleteTurns|RejectsSessionDeletedByIndependentManagerBeforeProvider)|TestDeleteSessionWaitsForCompletedTurnFromIndependentManager|TestOpenAIRequestContextCancelsReconstructionAndReadinessLockWait|TestSendMessageTool_RoutesPureAPIBeforeTmux|TestGetSessionStatusIsTmuxIndependent|TestWithSessionLockContextCancelsContendedWait|TestMetadataUpdatesSerializeAndPreserveIndependentFields|TestSessionHistoryReloadSupportsLargeJSONLRecords|TestImportedOpenAIMessagesUseOneHistoryTransaction|TestAPISessionLockUsesProviderAppropriateWaitPolicy|TestArchiveSessionSerializesWithAPIDeliveryMutationLock|TestSendViaSharedOperations(UsesCallerContext|FailsClosedWhenHarnessIsNotReady|PreservesQueuedAGMRecoveryPolicy)|TestAPIDelivery(PassesCallerContextToReadiness|ReloadsLifecycleInsideStableSessionLock|RejectsReapingLifecycleInsideStableSessionLock|ReservesFullCompletionBudgetAfterPreflight|SerializesReadinessCompletionAndPersistenceByStableSessionID|UsesLockedManifestForAuditArtifact)|TestNewAPISessionDeliveryAdapterRejectsMissingOrNonAPISession|TestDeliverAPISessionMessage(ReloadsCurrentManifestAndUsesContextContracts|RejectsFailedAdapter)|TestAPIRecipientStateSkipsTmuxPersistence|TestClearHistoryPreservesRuntimeConfig|TestDirectAPIDeliveryRejectsArchivedSessionBeforeAdapterConstruction|TestMultiRecipientDelivery(AllowsFullProviderDeadline|UsesSharedAtomicReadiness|RenewsDeadlinePerRecipient)|TestSingleAndMultiRecipientAPIDeliveryUsesAdapterReadiness|TestNewAPISessionDeliveryAdapterReportsPureAPISessionReadyWithoutTmux|TestNewOpenAIAdapterForSession(RestoresPersistedRuntimeConfig|DoesNotScanUnrelatedSessions)|TestNewOpenAIAdapterForLegacySessionUsesManifestFallback|TestOpenAIExecutionModelDocumentsCompatibilityOnlyControlPlane|TestUpdateRuntimeConfigPersistence|TestSessionMetadata_OpenAIRoundTrip|TestDirectCLIDeliveryRejectsUnregisteredTmuxSession|TestCreateSession_NoRuntimeInitialPrompt(RevalidatesAfterRegistration|UsesAtomicExactPaneDelivery)|TestDeliverInitialPrompt(UsesAtomicExactPaneReadiness|FileUsesAtomicExactPaneReadiness|FailsClosedWhenHarnessDoesNotOwnTerminal))$`, "-count=1", "-v")
+	cmd := exec.CommandContext(testCtx, "go", "test", "-p", "1", "./agm/cmd/agm", "./agm/cmd/agm-mcp-server", "./agm/internal/agent", "./agm/internal/agent/openai", "./agm/internal/dolt", "./agm/internal/session", "./agm/internal/tmux", "./agm/internal/ops", "-run", `^(TestMCPCreateSessionRuntimeRevalidatesStartupPromptAtomically|TestRealTmux(InputReadinessReportsMissingSession|LogicalANSICaptureJoinsNarrowPaneWraps|ReadinessAdvancesGeminiTrustOnVerifiedPane|ReadinessDetectsManagedPiComposer|ReadinessIdentifiesNodeBackedCodex|ReadinessPinsLivenessAndDeliveryToActivePane|ReadinessPreservesClaudeGhostComposer|ReadinessRejectsSuspendedHarnessWithStaleComposer|WaitForHarnessReadyAllowsSlowProcessStart)|TestCapturePaneLogicalANSIArgsJoinFullExactPaneHistory|TestClassifyHarnessInputRequiresCurrentHarnessComposer|TestClassifyQueuedInputBindsCompleteHeaderToLatestMarker|TestQueuedComposerPayloadPromptGlyphsRemainBoundToPasteAnchor|TestHarnessStartupAdvanceKeys|TestInputDeliveryAllowedOverridesOnlyPositivelyIdentifiedAGMQueue|TestQueuedAGMRecovery(ClearsBeforeReplacement|DoesNotReplaceUntilExactPaneIsEmpty|DoesNotReportReadyWhenReplacementFails)|TestParsePSForegroundTable|TestExpectedHarnessMatcher(RejectsUnrelatedNodeProcess|AcceptsIdentifiedNodeBackedHarness|RequiresForegroundTerminalOwnership)|TestSendMessage_(AcceptsPostRecoveryReadyState|AtomicReadinessAndDeliveryIsTheLocalRuntimePath|QueuedAGMRecoveryPolicies|ForceDoesNotBypassProtectedInputStates|AutonomousDoesNotBypassProtectedInputStates|PiPermissionPromptBlocksAtomicDelivery|Normalizes(LegacyAgyHarness|PiHarnessAlias)BeforeReadiness)|TestSendMessage(CompletionFailureLeavesHistoryUnchanged|ContextCancelsProviderAndReleasesSessionLock|SerializesIndependentManagersAndCommitsCompleteTurns|RejectsSessionDeletedByIndependentManagerBeforeProvider)|TestDeleteSessionWaitsForCompletedTurnFromIndependentManager|TestOpenAIRequestContextCancelsReconstructionAndReadinessLockWait|TestSendMessageTool_RoutesPureAPIBeforeTmux|TestGetSessionStatusIsTmuxIndependent|TestWithSessionLockContextCancelsContendedWait|TestMetadataUpdatesSerializeAndPreserveIndependentFields|TestSessionHistoryReloadSupportsLargeJSONLRecords|TestImportedOpenAIMessagesUseOneHistoryTransaction|TestAPISessionLockUsesProviderAppropriateWaitPolicy|TestArchiveSessionSerializesWithAPIDeliveryMutationLock|TestSendViaSharedOperations(UsesCallerContext|FailsClosedWhenHarnessIsNotReady|PreservesQueuedAGMRecoveryPolicy)|TestAPIDelivery(PassesCallerContextToReadiness|ReloadsLifecycleInsideStableSessionLock|RejectsReapingLifecycleInsideStableSessionLock|ReservesFullCompletionBudgetAfterPreflight|SerializesReadinessCompletionAndPersistenceByStableSessionID|UsesLockedManifestForAuditArtifact)|TestNewAPISessionDeliveryAdapterRejectsMissingOrNonAPISession|TestDeliverAPISessionMessage(ReloadsCurrentManifestAndUsesContextContracts|RejectsFailedAdapter)|TestAPIRecipientStateSkipsTmuxPersistence|TestClearHistoryPreservesRuntimeConfig|TestDirectAPIDeliveryRejectsArchivedSessionBeforeAdapterConstruction|TestMultiRecipientDelivery(AllowsFullProviderDeadline|UsesSharedAtomicReadiness|RenewsDeadlinePerRecipient)|TestSingleAndMultiRecipientAPIDeliveryUsesAdapterReadiness|TestNewAPISessionDeliveryAdapterReportsPureAPISessionReadyWithoutTmux|TestNewOpenAIAdapterForSession(RestoresPersistedRuntimeConfig|DoesNotScanUnrelatedSessions)|TestNewOpenAIAdapterForLegacySessionUsesManifestFallback|TestOpenAIExecutionModelDocumentsCompatibilityOnlyControlPlane|TestUpdateRuntimeConfigPersistence|TestSessionMetadata_OpenAIRoundTrip|TestDirectCLIDeliveryRejectsUnregisteredTmuxSession|TestCreateSession_NoRuntimeInitialPrompt(RevalidatesAfterRegistration|UsesAtomicExactPaneDelivery)|TestDeliverInitialPrompt(UsesAtomicExactPaneReadiness|FileUsesAtomicExactPaneReadiness|FailsClosedWhenHarnessDoesNotOwnTerminal))$`, "-count=1", "-v")
 	cmd.Dir = bddRepoRoot()
 	if os.Getenv("CI_SKIP_TMUX") != "true" {
 		cmd.Env = append(os.Environ(), "AGM_TEST_TMUX=1")
@@ -1176,7 +1183,7 @@ func sharedInputReadinessShouldRejectStaleClaudeComposerAndUnrelatedNodeProcess(
 		"TestExpectedHarnessMatcherAcceptsIdentifiedNodeBackedHarness",
 		"TestExpectedHarnessMatcherRequiresForegroundTerminalOwnership",
 		"TestParsePSForegroundTable",
-		"TestSendMessage_AtomicReadinessAndDeliveryPrecedesGenericManagerCheck",
+		"TestSendMessage_AtomicReadinessAndDeliveryIsTheLocalRuntimePath",
 		"TestSendMessage_AcceptsPostRecoveryReadyState",
 		"TestSendMessage_PiPermissionPromptBlocksAtomicDelivery",
 		"TestMCPCreateSessionRuntimeRevalidatesStartupPromptAtomically",
@@ -2074,41 +2081,168 @@ func runtimeHelperCommandShouldHaveCoLocatedSPEC(ctx context.Context, command st
 	return nil
 }
 
-func agmBackendImplementationIsConfigured(ctx context.Context, backend string) error {
+func agmProductionLocalRuntimeSources(ctx context.Context) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
 		return err
 	}
-	harnessState.backendImplementation = backend
-	harnessState.backendImplementationSpec = filepath.Join(bddRepoRoot(), "agm", "internal", filepath.FromSlash(backend), "SPEC.md")
+	sources := []struct {
+		path string
+		dst  *string
+	}{
+		{path: filepath.Join("agm", "cmd", "agm", "main.go"), dst: &harnessState.runtimeMainSource},
+		{path: filepath.Join("agm", "internal", "ops", "ops.go"), dst: &harnessState.runtimeOpsSource},
+		{path: filepath.Join("agm", "internal", "ops", "session_send.go"), dst: &harnessState.runtimeSendSource},
+		{path: filepath.Join("agm", "internal", "session", "tmux_real.go"), dst: &harnessState.runtimeTmuxSource},
+		{path: filepath.Join("agm", "internal", "harnessexec", "exec.go"), dst: &harnessState.runtimeExecSource},
+	}
+	for _, source := range sources {
+		data, readErr := os.ReadFile(filepath.Join(bddRepoRoot(), source.path))
+		if readErr != nil {
+			return fmt.Errorf("read runtime ownership source %s: %w", source.path, readErr)
+		}
+		*source.dst = string(data)
+	}
+	var production strings.Builder
+	for _, root := range []string{
+		filepath.Join(bddRepoRoot(), "agm", "cmd"),
+		filepath.Join(bddRepoRoot(), "agm", "internal"),
+	} {
+		if walkErr := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			// #nosec G122 -- path comes from a read-only walk rooted in the
+			// checked-out repository used as this BDD scenario's test fixture.
+			data, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return readErr
+			}
+			production.WriteString("\n// ")
+			production.WriteString(path)
+			production.WriteByte('\n')
+			production.Write(data)
+			return nil
+		}); walkErr != nil {
+			return fmt.Errorf("scan production local runtime sources under %s: %w", root, walkErr)
+		}
+	}
+	harnessState.runtimeProductionSource = production.String()
 	return nil
 }
 
-func agmValidatesBackendImplementationCoverage(ctx context.Context) error {
+func agmValidatesSingleRuntimeOwnership(ctx context.Context) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
 		return err
 	}
-	if harnessState.backendImplementationSpec == "" {
-		return fmt.Errorf("no AGM backend implementation configured")
-	}
-	if _, err := os.Stat(harnessState.backendImplementationSpec); err != nil {
-		return fmt.Errorf("backend implementation SPEC %s: %w", harnessState.backendImplementationSpec, err)
+	if harnessState.runtimeMainSource == "" ||
+		harnessState.runtimeProductionSource == "" ||
+		harnessState.runtimeOpsSource == "" ||
+		harnessState.runtimeSendSource == "" ||
+		harnessState.runtimeTmuxSource == "" ||
+		harnessState.runtimeExecSource == "" {
+		return fmt.Errorf("runtime ownership sources were not loaded")
 	}
 	return nil
 }
 
-func backendImplementationShouldHaveCoLocatedSPEC(ctx context.Context, backend string) error {
+func productionShouldUseOnlyDirectSessionTmuxRuntimeType(ctx context.Context) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
 		return err
 	}
-	if backend != harnessState.backendImplementation {
-		return fmt.Errorf("configured backend implementation = %q, want %q", harnessState.backendImplementation, backend)
+	const construction = "session.NewRealTmux()"
+	if count := strings.Count(harnessState.runtimeProductionSource, construction); count == 0 {
+		return fmt.Errorf("production direct session tmux constructions = %d, want at least 1", count)
 	}
-	wantSuffix := filepath.Join("agm", "internal", filepath.FromSlash(backend), "SPEC.md")
-	if !strings.HasSuffix(harnessState.backendImplementationSpec, wantSuffix) {
-		return fmt.Errorf("backend implementation SPEC = %q, want suffix %q", harnessState.backendImplementationSpec, wantSuffix)
+	for _, retired := range []string{
+		"/internal/backend",
+		"/internal/manager",
+		"managerBackend",
+		"GetDefaultBackendAdapter",
+		"manager.GetDefault",
+	} {
+		if strings.Contains(harnessState.runtimeProductionSource, retired) {
+			return fmt.Errorf("production source still references retired runtime %q", retired)
+		}
+	}
+	return nil
+}
+
+func sharedOperationsShouldExposeNoParallelManagerRuntime(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	for sourceName, source := range map[string]string{
+		"OpContext":   harnessState.runtimeOpsSource,
+		"SendMessage": harnessState.runtimeSendSource,
+	} {
+		for _, retired := range []string{"manager.Backend", "ctx.Manager", "internal/manager"} {
+			if strings.Contains(source, retired) {
+				return fmt.Errorf("%s still references parallel manager runtime %q", sourceName, retired)
+			}
+		}
+	}
+	if !strings.Contains(harnessState.runtimeSendSource, "SendKeysIfInputReady") {
+		return fmt.Errorf("shared local send no longer uses atomic tmux delivery")
+	}
+	return nil
+}
+
+func directTmuxRuntimeShouldProveSafetyCapabilities(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	for _, capability := range []string{
+		"TmuxInterface",
+		"TmuxSessionKiller",
+		"StrictSessionExistenceChecker",
+		"HarnessLivenessChecker",
+		"HarnessLivenessBatchChecker",
+		"HarnessReadinessWaiter",
+		"InputReadinessChecker",
+		"AtomicInputSender",
+		"VerifiedPaneSender",
+	} {
+		assertion := fmt.Sprintf("_ %s", capability)
+		if !strings.Contains(harnessState.runtimeTmuxSource, assertion) {
+			return fmt.Errorf("RealTmux is missing compile-time capability proof %s", capability)
+		}
+	}
+	return nil
+}
+
+func retiredGeneralizedRuntimesAndSelectionSettingShouldBeAbsent(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	for _, dir := range []string{
+		filepath.Join(bddRepoRoot(), "agm", "internal", "backend"),
+		filepath.Join(bddRepoRoot(), "agm", "internal", "manager"),
+	} {
+		if _, statErr := os.Stat(dir); !os.IsNotExist(statErr) {
+			if statErr != nil {
+				return fmt.Errorf("stat retired runtime directory %s: %w", dir, statErr)
+			}
+			return fmt.Errorf("retired runtime directory still exists: %s", dir)
+		}
+	}
+	for sourceName, source := range map[string]string{
+		"main":        harnessState.runtimeMainSource,
+		"OpContext":   harnessState.runtimeOpsSource,
+		"SendMessage": harnessState.runtimeSendSource,
+		"harnessexec": harnessState.runtimeExecSource,
+	} {
+		if strings.Contains(source, "AGM_SESSION_BACKEND") {
+			return fmt.Errorf("%s still references retired AGM_SESSION_BACKEND", sourceName)
+		}
 	}
 	return nil
 }

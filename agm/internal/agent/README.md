@@ -207,7 +207,7 @@ ClaudeAdapter maintains a persistent mapping between UUIDs (SessionID) and tmux 
 This decouples adapter persistence from tmux naming conventions, allowing:
 - Harness-agnostic SessionIDs (UUIDs work across adapters)
 - Tmux session names to change without breaking SessionID references
-- Pure API adapters to use a non-tmux storage locator
+- Pure API sessions to use their provider adapter and non-tmux storage locator
 
 ## Implementation Status
 

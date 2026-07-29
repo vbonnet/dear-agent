@@ -54,7 +54,7 @@ var codexAllowedEnvironment = []string{
 	"OPENAI_API_KEY",
 	"AGM_HOME", "AGM_CONFIG_DIR", "AGM_DB_PATH", "AGM_SESSIONS_DIR",
 	"AGM_STATE_DIR", "AGM_TMUX_SOCKET", "AGM_BUS_SOCKET", "AGM_TEAM",
-	"AGM_SESSION_BACKEND", "WORKSPACE",
+	"WORKSPACE",
 }
 
 // paneRuntimeEnvironment names terminal state that belongs to the target pane,

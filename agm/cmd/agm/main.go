@@ -13,13 +13,11 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/vbonnet/dear-agent/agm/internal/backend"
 	"github.com/vbonnet/dear-agent/agm/internal/cli"
 	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/freshness"
 	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
-	"github.com/vbonnet/dear-agent/agm/internal/manager"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
@@ -30,10 +28,6 @@ import (
 	"github.com/vbonnet/dear-agent/pkg/otelsetup"
 	"github.com/vbonnet/dear-agent/pkg/workspace"
 
-	// Import backends to trigger registration
-	_ "github.com/vbonnet/dear-agent/agm/internal/backend"
-	// Import manager backends to trigger registration
-	_ "github.com/vbonnet/dear-agent/agm/internal/manager/tmuxbackend"
 	// Import workflows to trigger registration
 	_ "github.com/vbonnet/dear-agent/agm/internal/workflow/deepresearch"
 )
@@ -58,7 +52,6 @@ var (
 	detailedMode     bool                  // --detailed: re-enable IDs/full paths/hints in agent-mode
 	outputMode       OutputMode            // resolved once in PersistentPreRunE
 	tmuxClient       session.TmuxInterface // Injected dependency for testing
-	managerBackend   manager.Backend       // New abstraction layer (nil = legacy path)
 	usageTracker     *usage.Tracker
 	commandStartTime time.Time
 	auditLogger      *ops.AuditLogger
@@ -716,23 +709,10 @@ func run() int {
 		}()
 	}
 
-	// Use backend adapter to support multiple backends
-	// The backend is selected via AGM_SESSION_BACKEND env var (defaults to tmux)
-	adapter, err := backend.GetDefaultBackendAdapter()
-	if err != nil {
-		// Fallback to tmux if backend initialization fails
-		fmt.Fprintf(os.Stderr, "Warning: failed to initialize backend, falling back to tmux: %v\n", err)
-		adapter = backend.NewBackendAdapter(backend.NewTmuxBackend())
-	}
-
-	// Initialize the new manager backend abstraction layer
-	mgr, mgrErr := manager.GetDefault("")
-	if mgrErr != nil {
-		fmt.Fprintf(os.Stderr, "Warning: manager backend unavailable: %v\n", mgrErr)
-	}
-	managerBackend = mgr
-
-	if err := ExecuteWithDeps(adapter); err != nil {
+	// Tmux is AGM's one production local runtime. RealTmux adapts the tmux
+	// process once at the composition root while ExecuteWithDeps preserves a
+	// deterministic test seam.
+	if err := ExecuteWithDeps(session.NewRealTmux()); err != nil {
 		// Map the failure onto the exit-code taxonomy so agent consumers can
 		// branch on $? (2=auth, 3=bad-input, 4=state-conflict, 5=not-found)
 		// without parsing stderr. Unmapped errors fall through to 1.
