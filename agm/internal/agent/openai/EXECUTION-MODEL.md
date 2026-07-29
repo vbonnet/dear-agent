@@ -63,7 +63,7 @@ The compatibility adapter remains available for:
 
 - delivery to an already-registered legacy AGM manifest whose harness is
   `openai` or `gpt`; and
-- direct Go callers of the `agent.Agent` interface.
+- direct Go callers of the concrete `*agent.OpenAIAdapter`.
 
 Calling `OpenAIAdapter.CreateSession` directly initializes the adapter's JSONL
 store, but does not register an AGM manifest and is not a CLI entrypoint.
@@ -84,7 +84,7 @@ OpenAIAdapter
 │   ├── Conversation history (JSONL storage)
 │   ├── Metadata (title, model, working directory)
 │   └── Session persistence (~/.agm/openai-sessions/)
-└── Agent Interface Implementation
+└── Concrete Adapter Methods
     ├── CreateSession → Internal Go API: generate UUID + initialize storage
     ├── SendMessage → API call with conversation context
     ├── GetHistory → Load from local storage

@@ -28,7 +28,7 @@ the lifecycle of AI coding agent sessions across multiple harnesses.
 │  Examples still leaky in cmd/agm: selected new-session setup    │
 │  and mode/model command dispatch. Resume attachment stays UI.   │
 ├─────────────────────────────────────────────────────────────────┤
-│                    Harness Adapter Registry                      │
+│                    Concrete Harness Adapters                     │
 │                    (internal/agent/)                             │
 │                                                                 │
 │  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌───────────────┐  │
@@ -36,10 +36,11 @@ the lifecycle of AI coding agent sessions across multiple harnesses.
 │  │  Adapter  │ │  Adapter  │ │  Adapter  │ │   Adapter     │  │
 │  └───────────┘ └───────────┘ └───────────┘ └───────────────┘  │
 │                                                                 │
-│  Each adapter implements the Agent interface:                   │
-│  - Start/stop agent CLI                                        │
-│  - Translate AGM commands to agent-specific actions             │
-│  - Detect agent state (UUID, history, session files)            │
+│  Concrete adapters expose harness-specific mechanisms.          │
+│  Heterogeneous discovery sees only Harness metadata:            │
+│  - Canonical name, adapter version, and capabilities            │
+│  - Lifecycle ordering belongs to operation-specific consumers   │
+│  - No universal adapter lifecycle facade                        │
 ├─────────────────────────────────────────────────────────────────┤
 │                    Backend Abstraction                           │
 │                    (internal/backend/)                           │
@@ -108,18 +109,24 @@ ops/adapter boundary cleanup is tabled separately.
 
 ### Harness Adapters (`agm/internal/agent/`)
 
-The adapter pattern is central to AGM's multi-harness support. Each adapter
-implements the `Agent` interface, encapsulating all harness-specific logic:
+The adapter pattern is central to AGM's multi-harness support. Concrete
+adapters encapsulate harness-specific mechanisms. Heterogeneous discovery and
+conformance see only the metadata-sized `Harness` contract; operation owners
+define any behavioral capability interfaces they consume:
 
 | Adapter | Harness | Key Capabilities |
 |---------|---------|-----------------|
 | Claude | Claude Code | UUID detection, slash commands, history.jsonl parsing |
-| Gemini | Gemini CLI | API integration, session file management |
+| Gemini | Gemini CLI | Deprecated tmux compatibility, session file management |
 | Codex | Codex CLI | CLI launch/resume, composer readiness detection, model alias resolution |
 | OpenCode | OpenCode CLI | SSE event streams, server port management |
+| Agy | Antigravity CLI | Readiness wait after launch, authorized-directory propagation, tmux name-collision refusal |
+| Pi | Pi CLI | Pane-liveness resume classification (preserve vs relaunch), model alias resolution |
 
-Adding a new harness normally starts with the harness registry and its narrow
-capabilities, then shared create and resume operations and any still-leaky CLI
+Adding a new harness starts with a concrete adapter, the metadata contract, and
+the finite constructor/model catalogs, then the shared create and resume
+operations. Each operation that needs new behavior must define or extend a
+capability-sized consumer boundary; any still-leaky CLI
 lifecycle switches must be audited as well.
 
 ### Session Management (`agm/internal/session/`)
@@ -246,7 +253,7 @@ User → Completion verified (no pending work)
 
 | Extension | How |
 |-----------|-----|
-| New AI harness | Implement the `Agent` interface in `agm/internal/agent/` |
+| New AI harness | Add a concrete adapter plus metadata and finite-catalog entries in `agm/internal/agent/` |
 | New backend | Implement the `Backend` interface in `agm/internal/backend/` |
 | New sandbox provider | Implement the `Provider` interface in `internal/sandbox/` |
 | New storage backend | Implement the storage interface in `agm/internal/dolt/` |

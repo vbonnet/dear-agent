@@ -18,7 +18,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
-// PiAdapter implements Agent using Pi's interactive CLI and native JSONL.
+// PiAdapter is the concrete adapter for Pi's interactive CLI and native JSONL.
 type PiAdapter struct {
 	sessionStore SessionStore
 }
@@ -38,7 +38,7 @@ var (
 )
 
 // NewPiAdapter creates a Pi CLI adapter.
-func NewPiAdapter(sessionStore SessionStore) (Agent, error) {
+func NewPiAdapter(sessionStore SessionStore) (*PiAdapter, error) {
 	if sessionStore == nil {
 		store, err := NewJSONSessionStore("")
 		if err != nil {
@@ -341,7 +341,7 @@ func (a *PiAdapter) TerminateSession(sessionID SessionID) error {
 	return a.sessionStore.Delete(sessionID)
 }
 
-// GetSessionStatus projects tmux and Pi managed-state signals into Agent status.
+// GetSessionStatus projects tmux and Pi managed-state signals into shared status.
 func (a *PiAdapter) GetSessionStatus(sessionID SessionID) (Status, error) {
 	metadata, err := a.sessionStore.Get(sessionID)
 	if err != nil {
@@ -388,7 +388,7 @@ func (a *PiAdapter) GetHistory(sessionID SessionID) ([]Message, error) {
 	}
 	messages := make([]Message, 0, len(native))
 	for _, item := range native {
-		// The shared Agent interface intentionally has no tool role. Preserve
+		// The shared message model intentionally has no tool role. Preserve
 		// tool results only in native export instead of mislabeling them as
 		// assistant speech in portable history formats.
 		if item.Role == "tool" {
@@ -513,7 +513,7 @@ func (a *PiAdapter) ImportConversation(data []byte, format ConversationFormat) (
 	return sessionID, nil
 }
 
-// Capabilities reports Pi features exposed through the shared Agent interface.
+// Capabilities reports Pi features exposed through harness discovery.
 func (a *PiAdapter) Capabilities() Capabilities {
 	model, _ := DefaultModelForHarness("pi-cli")
 	return Capabilities{
@@ -524,7 +524,7 @@ func (a *PiAdapter) Capabilities() Capabilities {
 	}
 }
 
-// ExecuteCommand dispatches Agent commands supported by Pi's interactive CLI.
+// ExecuteCommand dispatches generic commands supported by Pi's interactive CLI.
 func (a *PiAdapter) ExecuteCommand(cmd Command) error {
 	sessionID, err := getStringParam(cmd.Params, "session_id")
 	if err != nil {

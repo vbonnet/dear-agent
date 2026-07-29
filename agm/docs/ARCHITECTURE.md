@@ -24,7 +24,7 @@ operator / automation / MCP client
        +---------+----------+
        |                    |
   internal/agent       internal/session
-  harness launch       tmux and state
+ concrete adapters     tmux and state
        |                    |
        +---------+----------+
                  |
@@ -85,8 +85,10 @@ Harness names and lifecycle status come only from
 
 Active harnesses are the parity set. A deprecated harness can remain accepted
 for existing manifests without becoming a default, a new feature target, or an
-active parity promise. Adapters implement `agent.Agent`; the interface does not
-imply that a remote model API is used.
+active parity promise. Adapter constructors return concrete types. Heterogeneous
+discovery and conformance use the metadata-only `agent.Harness` contract
+(`Name`, `Version`, and `Capabilities`); operation consumers define narrower
+behavioral capabilities such as context-aware pure API delivery.
 
 ## Session creation
 
