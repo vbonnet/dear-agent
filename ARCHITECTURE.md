@@ -120,6 +120,8 @@ define any behavioral capability interfaces they consume:
 | Gemini | Gemini CLI | Deprecated tmux compatibility, session file management |
 | Codex | Codex CLI | CLI launch/resume, composer readiness detection, model alias resolution |
 | OpenCode | OpenCode CLI | SSE event streams, server port management |
+| Agy | Antigravity CLI | Readiness wait after launch, authorized-directory propagation, tmux name-collision refusal |
+| Pi | Pi CLI | Pane-liveness resume classification (preserve vs relaunch), model alias resolution |
 
 Adding a new harness starts with a concrete adapter, the metadata contract, and
 the finite constructor/model catalogs, then the shared create and resume
