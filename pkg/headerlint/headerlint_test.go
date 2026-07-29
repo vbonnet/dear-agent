@@ -1,6 +1,7 @@
 package headerlint
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -1252,6 +1253,29 @@ func TestCheckFile_TypeSevenHTMLCannotInterruptLazyContainerParagraph(t *testing
 				t.Fatalf("want lazy container field violation on line 4, got %v", violations)
 			}
 		})
+	}
+}
+
+func TestGoldmarkAnalysisSourceBoundsTypeSevenReparseToHeaderZone(t *testing.T) {
+	const tag = "<custom-element>"
+	var content strings.Builder
+	content.WriteString("# Doc\nintro\n")
+	var lateTagStart int
+	for line := 3; line <= 2000; line++ {
+		if line == headerZoneMaxLines+1 {
+			lateTagStart = content.Len()
+		}
+		content.WriteString(tag + "\n")
+	}
+	source := []byte(content.String())
+	masked := goldmarkAnalysisSource(source)
+
+	if got := headerAnalysisEnd(source); got != lateTagStart {
+		t.Fatalf("headerAnalysisEnd() = %d, want line-16 offset %d", got, lateTagStart)
+	}
+	if !bytes.Equal(masked[lateTagStart:lateTagStart+len(tag)],
+		source[lateTagStart:lateTagStart+len(tag)]) {
+		t.Fatal("type-7 tag after header zone was unnecessarily reparsed")
 	}
 }
 

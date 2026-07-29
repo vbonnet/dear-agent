@@ -285,8 +285,9 @@ func headerBoldFieldCounts(
 
 func goldmarkAnalysisSource(source []byte) []byte {
 	masked := append([]byte(nil), source...)
+	analysisEnd := headerAnalysisEnd(source)
 	for {
-		document := goldmark.DefaultParser().Parse(text.NewReader(masked))
+		document := goldmark.DefaultParser().Parse(text.NewReader(masked[:analysisEnd]))
 		changed := false
 		_ = ast.Walk(document, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
 			htmlBlock, ok := node.(*ast.HTMLBlock)
@@ -316,6 +317,20 @@ func goldmarkAnalysisSource(source []byte) []byte {
 			return masked
 		}
 	}
+}
+
+func headerAnalysisEnd(source []byte) int {
+	line := 1
+	for index, value := range source {
+		if value != '\n' {
+			continue
+		}
+		if line == headerZoneMaxLines {
+			return index + 1
+		}
+		line++
+	}
+	return len(source)
 }
 
 func precedingParagraph(node ast.Node) *ast.Paragraph {
