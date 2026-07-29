@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
@@ -780,7 +781,7 @@ func TestPreparedCommandUsesCoInstalledAGMFromCompanionBinary(t *testing.T) {
 		t.Fatalf("prepare Codex command from companion: %v", err)
 	}
 	t.Cleanup(func() { _ = prepared.Cancel() })
-	if !strings.HasPrefix(prepared.Command, shellQuote(agmPath)+" "+CodexProtocol) {
+	if !strings.HasPrefix(prepared.Command, launchparity.ShellQuote(agmPath)+" "+CodexProtocol) {
 		t.Fatalf("companion command did not pin co-installed AGM: %s", prepared.Command)
 	}
 }
@@ -806,7 +807,7 @@ func TestPreparedCommandUsesMatchingVersionedAGMFromReleaseCompanion(t *testing.
 		t.Fatalf("prepare Claude command from versioned release companion: %v", err)
 	}
 	t.Cleanup(func() { _ = prepared.Cancel() })
-	if !strings.HasPrefix(prepared.Command, shellQuote(agmPath)+" "+ClaudeProtocol) {
+	if !strings.HasPrefix(prepared.Command, launchparity.ShellQuote(agmPath)+" "+ClaudeProtocol) {
 		t.Fatalf("versioned companion command did not pin matching AGM artifact: %s", prepared.Command)
 	}
 }
@@ -870,7 +871,7 @@ func TestPreparedCommandMakesRelativeStateDirectoryAbsolute(t *testing.T) {
 	if !filepath.IsAbs(prepared.path) {
 		t.Fatalf("handoff path = %q, want absolute", prepared.path)
 	}
-	if !strings.Contains(prepared.Command, "--handoff "+shellQuote(prepared.path)) {
+	if !strings.Contains(prepared.Command, "--handoff "+launchparity.ShellQuote(prepared.path)) {
 		t.Fatalf("prepared command omitted absolute handoff path: %s", prepared.Command)
 	}
 }

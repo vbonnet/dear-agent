@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Known harness names. Active parity harnesses come first; deprecated harnesses
@@ -327,6 +328,9 @@ func ValidateSendDirPath(p string) error {
 func ValidateSendKeysText(kind, s string) error {
 	if s == "" {
 		return fmt.Errorf("%s is empty", kind)
+	}
+	if !utf8.ValidString(s) {
+		return fmt.Errorf("%s contains invalid UTF-8", kind)
 	}
 	for _, r := range s {
 		// All C0 controls and DEL are rejected, tab included: in a TUI, tab

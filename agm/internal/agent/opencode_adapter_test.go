@@ -3,6 +3,8 @@ package agent
 import (
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -36,6 +38,25 @@ func TestOpenCodeAdapterImplementsAgentInterface(t *testing.T) {
 
 	// Verify adapter implements Agent interface
 	var _ = adapter
+}
+
+func TestOpenCodeResumeRejectsTerminalControlsBeforeTmux(t *testing.T) {
+	store, err := NewJSONSessionStore(filepath.Join(t.TempDir(), "sessions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID := SessionID("opencode-invalid-resume")
+	if err := store.Set(sessionID, &SessionMetadata{
+		TmuxName:   "must-not-be-created",
+		WorkingDir: "/tmp/safe\x1b[201~\nunsafe",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &OpenCodeAdapter{sessionStore: store}
+	err = adapter.ResumeSession(sessionID)
+	if err == nil || !strings.Contains(err.Error(), "terminal control character") {
+		t.Fatalf("ResumeSession() error = %v, want pre-tmux terminal-control rejection", err)
+	}
 }
 
 // TestOpenCodeAdapterName tests Name() method.

@@ -17,6 +17,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
 
@@ -192,11 +193,7 @@ func appendShellFlag(b *strings.Builder, name, value string) {
 	b.WriteByte(' ')
 	b.WriteString(name)
 	b.WriteByte(' ')
-	b.WriteString(shellQuote(value))
-}
-
-func shellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+	b.WriteString(launchparity.ShellQuote(value))
 }
 
 func privateCommandPrefix(executable, protocol string) string {
@@ -204,7 +201,7 @@ func privateCommandPrefix(executable, protocol string) string {
 	if resolved == "agm" {
 		return "agm " + protocol
 	}
-	return shellQuote(resolved) + " " + protocol
+	return launchparity.ShellQuote(resolved) + " " + protocol
 }
 
 // Run validates a private protocol request and replaces the current AGM

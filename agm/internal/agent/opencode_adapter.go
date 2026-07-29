@@ -188,6 +188,9 @@ func (a *OpenCodeAdapter) ResumeSession(sessionID SessionID) error {
 	if err != nil {
 		return fmt.Errorf("session not found: %w", err)
 	}
+	if err := validatePastedShellValues(metadata.WorkingDir); err != nil {
+		return fmt.Errorf("invalid resume metadata: %w", err)
+	}
 
 	// 2. Check if tmux session exists
 	exists, err := tmux.HasSession(metadata.TmuxName)
