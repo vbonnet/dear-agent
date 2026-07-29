@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
@@ -94,7 +95,7 @@ func deliverThroughAPIAdapter(preflightCtx, deliveryCtx context.Context, current
 	if err != nil {
 		return fmt.Errorf("create API harness adapter for %q: %w", recipient, err)
 	}
-	if adapter == nil {
+	if isNilAPISessionDeliveryAdapter(adapter) {
 		return fmt.Errorf("create API harness adapter for %q: factory returned nil adapter", recipient)
 	}
 	sessionID := agent.SessionID(current.SessionID)
@@ -109,4 +110,19 @@ func deliverThroughAPIAdapter(preflightCtx, deliveryCtx context.Context, current
 		return fmt.Errorf("failed to send message via harness: %w", err)
 	}
 	return nil
+}
+
+func isNilAPISessionDeliveryAdapter(adapter APISessionDeliveryAdapter) bool {
+	if adapter == nil {
+		return true
+	}
+	value := reflect.ValueOf(adapter)
+	kind := value.Kind()
+	canBeNil := kind == reflect.Chan ||
+		kind == reflect.Func ||
+		kind == reflect.Interface ||
+		kind == reflect.Map ||
+		kind == reflect.Pointer ||
+		kind == reflect.Slice
+	return canBeNil && value.IsNil()
 }

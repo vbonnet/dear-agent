@@ -3,7 +3,7 @@
 Complete API reference for developers integrating with or extending AGM.
 
 **Version**: 3.0
-**Last Updated**: 2026-07-27
+**Last Updated**: 2026-02-04
 
 ---
 

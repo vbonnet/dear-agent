@@ -217,6 +217,14 @@ func TestDeliverAPISessionMessageRejectsFailedAdapter(t *testing.T) {
 			want: "factory returned nil adapter",
 		},
 		{
+			name: "typed nil adapter",
+			factory: func(context.Context, *manifest.Manifest) (APISessionDeliveryAdapter, error) {
+				var adapter *apiDeliveryTestAdapter
+				return adapter, nil
+			},
+			want: "factory returned nil adapter",
+		},
+		{
 			name: "readiness failure",
 			factory: func(context.Context, *manifest.Manifest) (APISessionDeliveryAdapter, error) {
 				return &apiDeliveryTestAdapter{statusErr: readinessErr}, nil
