@@ -202,11 +202,11 @@ func nativeSkillEntrypoint(root string, surface HarnessSurface, pluginName, skil
 	}
 	for _, declared := range settings.Skills {
 		skillRoot := filepath.Clean(filepath.Join(filepath.Dir(settingsPath), filepath.FromSlash(declared)))
-		relative, err := filepath.Rel(root, skillRoot)
-		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-			return "", fmt.Errorf("pi skill root %q escapes the repository", declared)
+		resolvedSkillRoot, err := resolvedPathWithin(root, skillRoot)
+		if err != nil {
+			return "", fmt.Errorf("pi skill root %q: %w", declared, err)
 		}
-		entrypoint := filepath.Join(skillRoot, skillName, "SKILL.md")
+		entrypoint := filepath.Join(resolvedSkillRoot, skillName, "SKILL.md")
 		if _, err := os.Lstat(entrypoint); os.IsNotExist(err) {
 			continue
 		}
@@ -320,19 +320,27 @@ func exportedSkillFiles(source, pluginName, declared string) ([]string, error) {
 }
 
 func requireResolvedWithin(root, path string) error {
+	_, err := resolvedPathWithin(root, path)
+	if err != nil {
+		return fmt.Errorf("resolved exported skill path %q: %w", path, err)
+	}
+	return nil
+}
+
+func resolvedPathWithin(root, path string) (string, error) {
 	resolvedRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
-		return fmt.Errorf("resolve source: %w", err)
+		return "", fmt.Errorf("resolve source: %w", err)
 	}
 	resolvedPath, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return fmt.Errorf("resolve exported skill path: %w", err)
+		return "", fmt.Errorf("resolve path: %w", err)
 	}
 	relative, err := filepath.Rel(resolvedRoot, resolvedPath)
 	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("resolved exported skill path %q escapes its source", path)
+		return "", fmt.Errorf("resolved path %q escapes its source", path)
 	}
-	return nil
+	return resolvedPath, nil
 }
 
 func exportedSkillFromFile(root, pluginName, skillFile string) (exportedSkill, error) {

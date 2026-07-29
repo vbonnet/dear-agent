@@ -214,6 +214,38 @@ func TestValidateNativeSkillCoverageRejectsSymlink(t *testing.T) {
 	}
 }
 
+func TestPiConfiguredSkillRootRejectsSymlinkOutsideRepository(t *testing.T) {
+	root := t.TempDir()
+	settingsDir := filepath.Join(root, ".pi")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	entrypoint := filepath.Join(outside, "example", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(entrypoint), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(entrypoint, []byte("# Outside\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "external-skills")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(settingsDir, "settings.json"),
+		[]byte(`{"skills":["../external-skills"]}`),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+	surface := HarnessSurface{Mode: "native-pi-skill-path", Catalog: ".pi/settings.json"}
+	if _, err := nativeSkillEntrypoint(root, surface, "example", "example"); err == nil ||
+		!strings.Contains(err.Error(), "escapes") {
+		t.Fatalf("nativeSkillEntrypoint() error = %v, want escaping Pi root rejection", err)
+	}
+}
+
 func TestExportedSkillFilesRejectsOnlyEscapingSymlinks(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "plugin")
