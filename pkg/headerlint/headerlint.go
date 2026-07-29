@@ -293,8 +293,8 @@ func goldmarkAnalysisSource(source []byte) []byte {
 			if !entering || !ok || htmlBlock.HTMLBlockType != ast.HTMLBlockType7 {
 				return ast.WalkContinue, nil
 			}
-			paragraphBefore, paragraphOK := htmlBlock.PreviousSibling().(*ast.Paragraph)
-			if !paragraphOK || htmlBlock.Lines().Len() == 0 ||
+			paragraphBefore := precedingParagraph(htmlBlock)
+			if paragraphBefore == nil || htmlBlock.Lines().Len() == 0 ||
 				paragraphBefore.Lines().Len() == 0 {
 				return ast.WalkContinue, nil
 			}
@@ -316,6 +316,33 @@ func goldmarkAnalysisSource(source []byte) []byte {
 			return masked
 		}
 	}
+}
+
+func precedingParagraph(node ast.Node) *ast.Paragraph {
+	if paragraph, ok := node.PreviousSibling().(*ast.Paragraph); ok {
+		return paragraph
+	}
+	container := node.PreviousSibling()
+	switch container.(type) {
+	case *ast.Blockquote, *ast.List:
+	default:
+		return nil
+	}
+	var last *ast.Paragraph
+	lastStop := -1
+	_ = ast.Walk(container, func(candidate ast.Node, entering bool) (ast.WalkStatus, error) {
+		paragraph, ok := candidate.(*ast.Paragraph)
+		if !entering || !ok || paragraph.Lines().Len() == 0 {
+			return ast.WalkContinue, nil
+		}
+		stop := paragraph.Lines().At(paragraph.Lines().Len() - 1).Stop
+		if stop > lastStop {
+			last = paragraph
+			lastStop = stop
+		}
+		return ast.WalkContinue, nil
+	})
+	return last
 }
 
 func maskDowngradedHTMLTag(masked, source []byte, start, tagEnd int) {

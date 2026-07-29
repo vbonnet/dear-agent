@@ -1235,6 +1235,26 @@ func TestCheckFile_TypeSevenHTMLMasksHeadingsUntilBlank(t *testing.T) {
 	}
 }
 
+func TestCheckFile_TypeSevenHTMLCannotInterruptLazyContainerParagraph(t *testing.T) {
+	tests := map[string]string{
+		"blockquote": "# Doc\n> intro\n<custom-element />\n**Status:** draft · **Owner:** docs\n",
+		"list":       "# Doc\n- intro\n<custom-element />\n**Status:** draft · **Owner:** docs\n",
+	}
+	for name, content := range tests {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := writeTemp(t, dir, name+"-lazy-type-seven.md", content)
+			violations, err := CheckFile(path)
+			if err != nil {
+				t.Fatalf("CheckFile: %v", err)
+			}
+			if len(violations) != 1 || violations[0].Line != 4 {
+				t.Fatalf("want lazy container field violation on line 4, got %v", violations)
+			}
+		})
+	}
+}
+
 func TestCheckFile_IndentedDelimiterInBlockScalarDoesNotEndFrontmatter(t *testing.T) {
 	// The block scalar legitimately contains an indented `---`. Treating it as
 	// the closing fence unmasks the remaining frontmatter, so the scalar line
