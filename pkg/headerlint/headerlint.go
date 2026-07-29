@@ -625,15 +625,25 @@ func isInterruptingHTMLBlockStart(line string, container fenceContainerContext) 
 	if !ok {
 		return false
 	}
-	content := line[offset:]
+	content, ok := commonMarkBlockContent(line[offset:])
+	if !ok {
+		return false
+	}
+	return isHTMLBlockStart(content)
+}
+
+func commonMarkBlockContent(content string) (string, bool) {
 	indent := 0
 	for indent < len(content) && indent < 4 && content[indent] == ' ' {
 		indent++
 	}
 	if indent > 3 {
-		return false
+		return "", false
 	}
-	content = content[indent:]
+	return content[indent:], true
+}
+
+func isHTMLBlockStart(content string) bool {
 	lower := strings.ToLower(content)
 	for _, tag := range []string{"script", "pre", "style", "textarea"} {
 		prefix := "<" + tag
