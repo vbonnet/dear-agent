@@ -271,6 +271,29 @@ func validatePluginManifestAsset(path string, data []byte) error {
 	if manifest.Name == "" || manifest.Version == "" || len(manifest.Skills) == 0 {
 		return fmt.Errorf("declarative runtime asset %s lacks name, version, or skills", path)
 	}
+	pluginRoot := filepath.Dir(filepath.Dir(path))
+	for _, declared := range manifest.Skills {
+		skillDir := filepath.Clean(filepath.Join(pluginRoot, filepath.FromSlash(declared)))
+		relative, err := filepath.Rel(pluginRoot, skillDir)
+		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("declarative runtime asset %s declares skill path outside its plugin root: %q", path, declared)
+		}
+		candidates := []string{
+			filepath.Join(skillDir, "SKILL.md"),
+			filepath.Join(skillDir, manifest.Name, "SKILL.md"),
+		}
+		found := false
+		for _, candidate := range candidates {
+			info, statErr := os.Stat(candidate)
+			if statErr == nil && !info.IsDir() {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("declarative runtime asset %s skill path %q does not contain canonical %s/SKILL.md", path, declared, manifest.Name)
+		}
+	}
 	return nil
 }
 
@@ -300,6 +323,10 @@ func validateOpenAIInterfaceAsset(path string, data []byte) error {
 	}
 	if config.Interface.DisplayName == "" || config.Interface.ShortDescription == "" || config.Interface.DefaultPrompt == "" {
 		return fmt.Errorf("declarative runtime asset %s lacks its published interface fields", path)
+	}
+	descriptionLength := len([]rune(config.Interface.ShortDescription))
+	if descriptionLength < 25 || descriptionLength > 64 {
+		return fmt.Errorf("declarative runtime asset %s short_description must contain 25-64 characters, got %d", path, descriptionLength)
 	}
 	return nil
 }

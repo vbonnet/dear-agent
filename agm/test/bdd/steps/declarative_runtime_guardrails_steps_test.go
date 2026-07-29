@@ -26,6 +26,12 @@ func TestValidateDeclarativeRuntimeAsset(t *testing.T) {
 			wantErr: "lacks name, version, or skills",
 		},
 		{
+			name:    "plugin manifest missing canonical skill",
+			asset:   "plugin.json",
+			content: `{"name":"research-pipeline","version":"0.1.0","skills":["./missing/"]}`,
+			wantErr: "does not contain canonical research-pipeline/SKILL.md",
+		},
+		{
 			name:    "eval cases",
 			asset:   "evals.json",
 			content: `{"cases":[{"id":"trigger"}]}`,
@@ -41,7 +47,7 @@ func TestValidateDeclarativeRuntimeAsset(t *testing.T) {
 			asset: "openai.yaml",
 			content: "interface:\n" +
 				"  display_name: Research Pipeline\n" +
-				"  short_description: Research and plan\n" +
+				"  short_description: Research, verify, plan, and decompose\n" +
 				"  default_prompt: Use the research pipeline\n",
 		},
 		{
@@ -49,6 +55,24 @@ func TestValidateDeclarativeRuntimeAsset(t *testing.T) {
 			asset:   "openai.yaml",
 			content: "interface:\n  display_name: Research Pipeline\n  short_description: Research and plan\n",
 			wantErr: "lacks its published interface fields",
+		},
+		{
+			name:  "OpenAI interface short description too short",
+			asset: "openai.yaml",
+			content: "interface:\n" +
+				"  display_name: Research Pipeline\n" +
+				"  short_description: Research and plan\n" +
+				"  default_prompt: Use the research pipeline\n",
+			wantErr: "must contain 25-64 characters",
+		},
+		{
+			name:  "OpenAI interface short description too long",
+			asset: "openai.yaml",
+			content: "interface:\n" +
+				"  display_name: Research Pipeline\n" +
+				"  short_description: " + strings.Repeat("x", 65) + "\n" +
+				"  default_prompt: Use the research pipeline\n",
+			wantErr: "must contain 25-64 characters",
 		},
 		{
 			name:    "skill",
@@ -67,8 +91,20 @@ func TestValidateDeclarativeRuntimeAsset(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
 			dir := "published"
+			if tt.asset == "plugin.json" {
+				dir = "published/.claude-plugin"
+			}
 			if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
 				t.Fatal(err)
+			}
+			if tt.name == "plugin manifest" {
+				skillDir := filepath.Join(root, "published", "skills", "research-pipeline")
+				if err := os.MkdirAll(skillDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Research Pipeline\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if err := os.WriteFile(filepath.Join(root, dir, tt.asset), []byte(tt.content), 0o600); err != nil {
 				t.Fatal(err)
