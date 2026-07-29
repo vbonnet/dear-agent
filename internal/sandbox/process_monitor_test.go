@@ -133,6 +133,54 @@ func TestProcessMonitorAlertCallbackCanStopMonitor(t *testing.T) {
 	assertProcessMonitorStopped(t, m)
 }
 
+func TestProcessMonitorSerializesRepeatedAlertCallbacks(t *testing.T) {
+	callbackStarted := make(chan struct{})
+	releaseCallback := make(chan struct{})
+	var calls atomic.Int32
+	m := NewProcessMonitor(os.Getpid(), ProcessLimits{PollInterval: time.Hour}, func(AlertType, string) {
+		if calls.Add(1) == 1 {
+			close(callbackStarted)
+		}
+		<-releaseCallback
+	})
+
+	m.emitAlert(AlertProcessLimit, "first")
+	select {
+	case <-callbackStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first alert callback did not start")
+	}
+	for range 100 {
+		m.emitAlert(AlertProcessLimit, "duplicate")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("concurrent alert callbacks = %d, want 1", got)
+	}
+
+	close(releaseCallback)
+	deadline := time.Now().Add(time.Second)
+	for {
+		m.mu.Lock()
+		alerting := m.alerting
+		m.mu.Unlock()
+		if !alerting {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("alert callback did not release its in-flight slot")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	m.emitAlert(AlertProcessLimit, "next")
+	deadline = time.Now().Add(time.Second)
+	for calls.Load() != 2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("alert callbacks = %d, want a later serialized callback", calls.Load())
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestProcessMonitorConcurrentStartStop(t *testing.T) {
 	m := NewProcessMonitor(os.Getpid(), ProcessLimits{PollInterval: time.Hour}, nil)
 

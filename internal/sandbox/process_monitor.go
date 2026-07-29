@@ -46,6 +46,7 @@ type ProcessMonitor struct {
 	lastCount int
 	lastCheck time.Time
 	onAlert   func(AlertType, string) // callback on alert
+	alerting  bool                    // at most one callback may run at a time
 }
 
 // AlertType classifies the kind of process alert.
@@ -198,13 +199,27 @@ func (m *ProcessMonitor) check() {
 }
 
 func (m *ProcessMonitor) emitAlert(alertType AlertType, message string) {
-	if m.onAlert == nil {
+	m.mu.Lock()
+	if m.onAlert == nil || m.alerting {
+		m.mu.Unlock()
 		return
 	}
+	callback := m.onAlert
+	m.alerting = true
+	m.mu.Unlock()
+
 	// Alert handlers are external callbacks and may call Stop. Running them on
 	// the monitor loop would make Stop wait for the same goroutine that is
-	// currently executing the callback.
-	go m.onAlert(alertType, message)
+	// currently executing the callback. Keep only one callback in flight so a
+	// persistent over-limit process cannot create an unbounded goroutine fanout.
+	go func() {
+		defer func() {
+			m.mu.Lock()
+			m.alerting = false
+			m.mu.Unlock()
+		}()
+		callback(alertType, message)
+	}()
 }
 
 // countDescendants walks /proc to count all descendants of a PID.
