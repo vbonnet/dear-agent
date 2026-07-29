@@ -244,6 +244,18 @@ func TestCheckFile_InlineCodeDoesNotCrossMarkdownBlockBoundaries(t *testing.T) {
 	}
 }
 
+func TestCheckFile_InlineCodeDoesNotCrossBodyHeading(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "format.md", "# Doc\n\nUnmatched ` opener\n## Body `\n**Status:** draft · **Owner:** docs\n")
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("body fields after heading should not be scanned, got %v", violations)
+	}
+}
+
 func TestCheckFile_UnclosedNestedFenceEndsWithItsContainer(t *testing.T) {
 	tests := map[string]string{
 		"blockquote": "# Doc\n\n> ```markdown\n> quoted code\n**Status:** draft · **Owner:** docs\n",

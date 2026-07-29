@@ -59,6 +59,7 @@ var (
 	// zero-to-three leading spaces Markdown permits. A level-1 title does not
 	// end the zone, since the metadata block conventionally follows it.
 	headingH2Plus = regexp.MustCompile(`^ {0,3}#{2,6}([ \t]|$)`)
+	atxHeading    = regexp.MustCompile(`^ {0,3}#{1,6}([ \t]|$)`)
 )
 
 // CheckFile validates one Markdown file. Content defects are returned as
@@ -494,6 +495,9 @@ func hasMatchingBacktickRun(lines []string, length int) bool {
 
 func inlineCodeBlockBoundary(line string) bool {
 	if strings.TrimSpace(line) == "" {
+		return true
+	}
+	if atxHeading.MatchString(line) {
 		return true
 	}
 	if _, _, isFence := fenceDelimiter(line); isFence {
