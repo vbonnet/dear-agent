@@ -94,6 +94,9 @@ func deliverThroughAPIAdapter(preflightCtx, deliveryCtx context.Context, current
 	if err != nil {
 		return fmt.Errorf("create API harness adapter for %q: %w", recipient, err)
 	}
+	if adapter == nil {
+		return fmt.Errorf("create API harness adapter for %q: factory returned nil adapter", recipient)
+	}
 	sessionID := agent.SessionID(current.SessionID)
 	status, err := adapter.GetSessionStatusContext(preflightCtx, sessionID)
 	if err != nil {
