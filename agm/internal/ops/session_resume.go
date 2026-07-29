@@ -20,7 +20,6 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/permissionparity/piadapter"
 	"github.com/vbonnet/dear-agent/agm/internal/pisession"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
-	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	uuidpkg "github.com/vbonnet/dear-agent/agm/internal/uuid"
 )
@@ -737,21 +736,24 @@ func prepareResumeLaunch(store dolt.Storage, m *manifest.Manifest, harnessName s
 			if isAmbiguousLegacyAgyModel(spec.Model) {
 				spec.Model = ""
 			}
-			return BuildAgyResumeCommand(spec, m.Agy.ConversationID), "", nil, nil
+			launch, err := PrepareAgyResumeCommand(spec, m.Agy.ConversationID)
+			return launch, "", nil, err
 		}
 		if spec.Model == "" {
 			spec.Model = agent.HarnessDefaults["agy"]
 		}
-		return BuildHarnessLaunchCommand(spec), "", []string{"No AGY conversation ID found; starting a new AGY session"}, nil
+		launch, err := PrepareHarnessLaunchCommand(spec)
+		return launch, "", []string{"No AGY conversation ID found; starting a new AGY session"}, err
 	case "pi-cli":
 		launchID := launchparity.NewPiLaunchID()
 		launch, err := buildPiResumeLaunch(m, health, launchID)
 		return launch, launchID, nil, err
 	case "opencode-cli":
-		return BuildHarnessLaunchCommand(spec), "", nil, nil
+		launch, err := PrepareHarnessLaunchCommand(spec)
+		return launch, "", nil, err
 	default:
-		command := fmt.Sprintf("cd %s && exit", shellquote.Quote(health.WorktreePath))
-		return HarnessLaunchCommand{Command: command}, "", []string{fmt.Sprintf("Harness %q does not support resume; starting in its working directory", harnessName)}, nil
+		launch, err := PrepareFallbackResumeCommand(health.WorktreePath)
+		return launch, "", []string{fmt.Sprintf("Harness %q does not support resume; starting in its working directory", harnessName)}, err
 	}
 }
 
@@ -855,7 +857,7 @@ func buildPiResumeLaunch(m *manifest.Manifest, health ResumeSessionHealth, launc
 	piMeta := *m.Pi
 	piMeta.CodingAgentDir = codingAgentDir
 	piMeta.CodingAgentDirSet = true
-	return BuildHarnessLaunchCommand(HarnessLaunchSpec{
+	return PrepareHarnessLaunchCommand(HarnessLaunchSpec{
 		Harness:        "pi-cli",
 		Model:          model,
 		SessionName:    health.TmuxSessionName,
@@ -867,5 +869,5 @@ func buildPiResumeLaunch(m *manifest.Manifest, health ResumeSessionHealth, launc
 		PiExtension:    extensionPath,
 		PiPolicyJSON:   policyJSON,
 		PiPolicyFile:   policyFile,
-	}), nil
+	})
 }

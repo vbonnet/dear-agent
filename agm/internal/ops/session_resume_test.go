@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -347,6 +348,49 @@ func TestResumeSessionColdStartCommitsPublicOutcome(t *testing.T) {
 		if !containsString(events, want) {
 			t.Fatalf("events = %v, missing %s", events, want)
 		}
+	}
+}
+
+func TestResumeSessionRejectsTerminalControlWorktreeBeforeSendKeys(t *testing.T) {
+	t.Setenv("AGM_PI_EXTENSION_ROOT", t.TempDir())
+	t.Setenv("PI_CODING_AGENT_DIR", "")
+
+	for _, harness := range []string{"agy", "pi-cli", "opencode-cli", "legacy-harness"} {
+		t.Run(harness, func(t *testing.T) {
+			adapter, m, fakeTmux := setupResumeOperation(t, harness, false)
+			unsafeWorktree := filepath.Join(t.TempDir(), "unsafe\x1b[201~\ncommand")
+			if err := os.Mkdir(unsafeWorktree, 0o700); err != nil {
+				t.Fatalf("create unsafe-path fixture: %v", err)
+			}
+			m.Context.Project = unsafeWorktree
+			switch harness {
+			case "agy":
+				m.Agy = &manifest.Agy{ConversationID: "agy-conversation-id"}
+			case "pi-cli":
+				m.Pi = &manifest.Pi{
+					SessionID:         "pi-native-id",
+					SessionDir:        t.TempDir(),
+					CodingAgentDirSet: true,
+				}
+			}
+			if err := adapter.UpdateSession(m); err != nil {
+				t.Fatalf("UpdateSession() error: %v", err)
+			}
+
+			_, err := ResumeSession(
+				&OpContext{Storage: adapter, Tmux: fakeTmux},
+				&ResumeSessionRequest{SessionID: m.SessionID},
+			)
+			if err == nil || !strings.Contains(err.Error(), "control characters") {
+				t.Fatalf("ResumeSession() error = %v, want terminal-control rejection", err)
+			}
+			if len(fakeTmux.commands) != 0 {
+				t.Fatalf("unsafe resume reached SendKeys: %v", fakeTmux.commands)
+			}
+			if fakeTmux.created != 1 || !fakeTmux.killed {
+				t.Fatalf("unsafe resume rollback = created %d killed %v, want exact runtime rollback", fakeTmux.created, fakeTmux.killed)
+			}
+		})
 	}
 }
 
