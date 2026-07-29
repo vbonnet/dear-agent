@@ -67,16 +67,19 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   `deny > ask > allow`. The mapping is runtime glue, not a third Cedar effect
   or an additional policy source.
 - Keep **authored decisions separate from evaluator health** without
-  weakening hard forbids. If the invocation response's reason set proves that
-  a validated applicable `forbid` contributed to Deny, the interceptor
-  preserves **deny** even when another policy emits diagnostics. Otherwise,
-  diagnostics that prevent a trustworthy mapping produce
-  `policy_unavailable`, not a policy-authored deny. In an interactive harness
-  the interceptor maps that state to an explicit confirmation/escalation path;
-  if confirmation is unavailable, it fails closed with an evaluator-error
-  diagnostic rather than reporting that policy denied the call. A diagnostic
-  can therefore never turn an authored invocation forbid into user-overridable
-  confirmation.
+  weakening default deny or hard forbids. The interceptor advances past the
+  invocation gate only when the response proves a validated applicable
+  `permit` and returns Allow. A proven applicable `forbid` remains **deny**
+  even when another policy emits diagnostics; a Deny with no applicable
+  permit also remains **deny**, regardless of diagnostics. Only after positive
+  invocation authorization may diagnostics that prevent a trustworthy
+  confirmation-free mapping produce `policy_unavailable`. In an interactive
+  harness the interceptor maps that state to an explicit
+  confirmation/escalation path; if confirmation is unavailable, it fails
+  closed with an evaluator-error diagnostic rather than reporting that policy
+  denied the call. A diagnostic can therefore never turn an authored
+  invocation forbid or the absence of an invocation permit into
+  user-overridable confirmation.
 - Publish policy bundles atomically only after they parse, validate against the
   Cedar schema, and pass the deterministic policy fixture suite. A rejected
   candidate never replaces the active bundle. The evaluator retains a durable
@@ -96,11 +99,13 @@ tests must prove all of the following:
 2. Concurrent evaluation during reload observes one whole validated bundle,
    never mixed schema and policy generations.
 3. A Cedar response containing both a proven invocation `forbid` reason and
-   diagnostics remains `deny`; diagnostics with no proven invocation forbid
-   return `policy_unavailable`. Both paths record the bundle version and
-   sanitized diagnostics.
-4. Interactive `policy_unavailable` requests enter the harness confirmation
-   path; non-interactive requests fail closed with a distinct evaluator error.
+   diagnostics remains `deny`; an invocation response with no proven
+   applicable `permit` also remains `deny`. Only diagnostics encountered
+   after positive invocation authorization may return `policy_unavailable`.
+   All paths record the bundle version and sanitized diagnostics.
+4. Positively invocation-authorized interactive `policy_unavailable` requests
+   enter the harness confirmation path; non-interactive requests fail closed
+   with a distinct evaluator error.
 5. Restart restores the last-known-good bundle before the interceptor accepts
    tool calls.
 
