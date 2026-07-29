@@ -85,6 +85,10 @@ step "make lint-adrs"
 make lint-adrs || fail "ADR identity/index/lifecycle contract failed"
 ok "ADR identity/index/lifecycle contract intact"
 
+step "make lint-headers"
+make lint-headers || fail "doc header format validation failed"
+ok "doc header format valid"
+
 step "golangci-lint run ./..."
 if ! command -v golangci-lint >/dev/null 2>&1; then
   fail "golangci-lint not installed. Run: brew install golangci-lint"

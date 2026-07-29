@@ -1,6 +1,7 @@
 # Automated PR code review — Claude + Codex setup
 
-**Status:** authoritative · **Last audited:** 2026-07-23
+- **Status:** authoritative
+- **Last audited:** 2026-07-23
 
 Two independent, advisory (non-blocking) review bots comment on PRs across the
 fleet: Claude (via `anthropics/claude-code-action`) and OpenAI Codex cloud
