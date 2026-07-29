@@ -30,8 +30,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
+
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/text"
 )
 
 // Violation describes one detected header-block line.
@@ -52,13 +54,6 @@ func (v Violation) String() string {
 const headerZoneMaxLines = 15
 
 var (
-	// boldField matches one **Label:** bold-field marker: bold text that ends
-	// with a colon immediately before the closing **. The body is capped at
-	// 60 characters and may not itself contain "*" or ":", so this does not
-	// match arbitrary bold prose that happens to contain a colon somewhere
-	// inside a longer sentence.
-	boldField = regexp.MustCompile(`\*\*[^*\n:]{1,60}:\*\*`)
-
 	// headingH2Plus matches a level-2-through-6 ATX heading, including the
 	// zero-to-three leading spaces Markdown permits. A level-1 title does not
 	// end the zone, since the metadata block conventionally follows it.
@@ -212,7 +207,7 @@ func checkData(path string, data []byte) []Violation {
 			paragraphContainer = fenceContainerContext{}
 			continue
 		}
-		if isIndentedCodeLine(line, paragraphOpen) {
+		if isIndentedCodeLine(line, paragraphOpen, fences.listContinuation) {
 			inlineCode = inlineCodeSpanState{}
 			inlineHTML = inlineHTMLSpanState{}
 			paragraphOpen = false
@@ -668,23 +663,40 @@ func matchesContainerBlockPattern(line string, container fenceContainerContext, 
 }
 
 func unescapedBoldFieldCount(line string) int {
+	// Block-level indentation was classified before this point. Discard it
+	// here so Goldmark parses the remaining physical-line content as inline
+	// Markdown, including list continuations and text after a masked code span.
+	source := []byte(strings.TrimLeft(line, " \t"))
+	document := goldmark.DefaultParser().Parse(text.NewReader(source))
 	count := 0
-	for _, match := range boldField.FindAllStringIndex(line, -1) {
-		if escapedAt(line, match[0]) {
-			continue
+	_ = ast.Walk(document, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		emphasis, ok := node.(*ast.Emphasis)
+		if !entering || !ok || emphasis.Level != 2 {
+			return ast.WalkContinue, nil
 		}
-		first, _ := utf8.DecodeRuneInString(line[match[0]+2:])
-		if unicode.IsSpace(first) {
-			continue
+		var rawLabel strings.Builder
+		for child := emphasis.FirstChild(); child != nil; child = child.NextSibling() {
+			switch inline := child.(type) {
+			case *ast.Text:
+				rawLabel.Write(inline.Segment.Value(source))
+			case *ast.String:
+				rawLabel.Write(inline.Value)
+			default:
+				return ast.WalkContinue, nil
+			}
 		}
-		if match[1] < len(line) {
-			next, _ := utf8.DecodeRuneInString(line[match[1]:])
-			if !unicode.IsSpace(next) && !unicode.IsPunct(next) && !unicode.IsSymbol(next) {
-				continue
+		label := []rune(rawLabel.String())
+		if len(label) < 2 || len(label) > 61 || label[len(label)-1] != ':' {
+			return ast.WalkContinue, nil
+		}
+		for _, character := range label[:len(label)-1] {
+			if character == '*' || character == ':' || character == '\n' || character == '\r' {
+				return ast.WalkContinue, nil
 			}
 		}
 		count++
-	}
+		return ast.WalkContinue, nil
+	})
 	return count
 }
 
@@ -996,19 +1008,29 @@ func paragraphContainerEndsBefore(line string, container fenceContainerContext) 
 		matchesContainerBlockPattern(line, lineContainer, setextHeading) ||
 		matchesContainerBlockPattern(line, lineContainer, thematicBreak) ||
 		isInterruptingHTMLBlockStart(line, lineContainer) ||
-		isIndentedCodeLine(line, false) {
+		isIndentedCodeLine(line, false, fenceContainerContext{}) {
 		return true
 	}
 	_, _, isFence := fenceDelimiterWithParagraph(line, false)
 	return isFence
 }
 
-func isIndentedCodeLine(line string, paragraphOpen bool) bool {
+func isIndentedCodeLine(
+	line string,
+	paragraphOpen bool,
+	listContinuation fenceContainerContext,
+) bool {
 	if paragraphOpen || strings.TrimSpace(line) == "" {
 		return false
 	}
+	offset := 0
+	if listContinuation.hasList {
+		if contentStart, ok := listContinuation.contentStart(line); ok {
+			offset = contentStart
+		}
+	}
 	columns := 0
-	for index := 0; index < len(line); index++ {
+	for index := offset; index < len(line); index++ {
 		switch line[index] {
 		case ' ':
 			columns++

@@ -200,6 +200,31 @@ func TestCheckFile_DoesNotFlagIndentedCodeBlock(t *testing.T) {
 	}
 }
 
+func TestCheckFile_IndentIsRelativeToListContainer(t *testing.T) {
+	tests := map[string]struct {
+		indent         string
+		wantViolations int
+	}{
+		"paragraph":     {indent: "    ", wantViolations: 1},
+		"indented-code": {indent: "      ", wantViolations: 0},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			content := "# Doc\n\n- item\n\n" +
+				test.indent + "**Status:** draft · **Owner:** docs\n"
+			dir := t.TempDir()
+			path := writeTemp(t, dir, "list-indentation.md", content)
+			violations, err := CheckFile(path)
+			if err != nil {
+				t.Fatalf("CheckFile: %v", err)
+			}
+			if len(violations) != test.wantViolations {
+				t.Fatalf("want %d violation(s), got %v", test.wantViolations, violations)
+			}
+		})
+	}
+}
+
 func TestCheckFile_DoesNotCloseLongFenceWithShortOrDifferentDelimiter(t *testing.T) {
 	const content = "# Doc-header format\n" +
 		"\n" +
@@ -759,6 +784,19 @@ func TestCheckFile_DoesNotFlagBoldShapedTextInsideInlineHTMLTag(t *testing.T) {
 	}
 	if len(violations) != 0 {
 		t.Fatalf("want inline HTML attributes ignored, got %v", violations)
+	}
+}
+
+func TestCheckFile_DoesNotFlagBoldShapedTextInsideLinkMetadata(t *testing.T) {
+	const content = "# Doc\n\n[reference](https://example.test \"**Status:** draft · **Owner:** docs\")\n"
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "link-metadata.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("want link metadata ignored, got %v", violations)
 	}
 }
 
