@@ -226,9 +226,11 @@ func TestCheckFile_DoesNotFlagFencesNestedInMarkdownContainers(t *testing.T) {
 
 func TestCheckFile_InlineCodeDoesNotCrossMarkdownBlockBoundaries(t *testing.T) {
 	tests := map[string]string{
-		"blank-line":   "# Doc\n\nUnmatched ` opener\n\n**Status:** draft · **Owner:** docs\n` later\n",
-		"blockquote":   "# Doc\n\nUnmatched ` opener\n> **Status:** draft · **Owner:** docs\n> ` later\n",
-		"fenced-block": "# Doc\n\nUnmatched ` opener\n```text\n`\n```\n**Status:** draft · **Owner:** docs\n",
+		"blank-line":             "# Doc\n\nUnmatched ` opener\n\n**Status:** draft · **Owner:** docs\n` later\n",
+		"blockquote":             "# Doc\n\nUnmatched ` opener\n> **Status:** draft · **Owner:** docs\n> ` later\n",
+		"fenced-block":           "# Doc\n\nUnmatched ` opener\n```text\n`\n```\n**Status:** draft · **Owner:** docs\n",
+		"nested-list-blockquote": "# Doc\n\n- Unmatched ` opener\n  > **Status:** draft · **Owner:** docs `\n",
+		"nested-sublist":         "# Doc\n\n- Unmatched ` opener\n  - **Status:** draft · **Owner:** docs `\n",
 	}
 	for name, content := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -519,6 +521,17 @@ func TestCheckRepository_TrackedFilesOnly(t *testing.T) {
 	}
 	if violations[0].Path != "tracked.md" {
 		t.Fatalf("want tracked.md, got %s", violations[0].Path)
+	}
+
+	if err := os.Remove(filepath.Join(dir, "tracked.md")); err != nil {
+		t.Fatal(err)
+	}
+	violations, err = CheckRepository(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("CheckRepository with unstaged deletion: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("want no violations after unstaged deletion, got %v", violations)
 	}
 }
 

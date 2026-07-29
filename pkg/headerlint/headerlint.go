@@ -20,6 +20,7 @@ package headerlint
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -124,6 +125,11 @@ func CheckRepository(ctx context.Context, root string) ([]Violation, error) {
 		absolute := filepath.Join(repoRoot, filepath.FromSlash(path))
 		data, err := os.ReadFile(absolute)
 		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				// The index still reports an unstaged deletion. Validate the
+				// files that actually remain in the working tree.
+				continue
+			}
 			return nil, fmt.Errorf("read %s: %w", path, err)
 		}
 		violations = append(violations, checkData(filepath.ToSlash(path), data)...)
@@ -531,7 +537,12 @@ func sameInlineCodeContainer(container fenceContainerContext, line string) bool 
 		lineContainer := parseFenceContainerContext(line)
 		return lineContainer.quoteDepth == 0 && !lineContainer.hasList
 	}
-	return container.contains(line)
+	contentStart, ok := container.contentStart(line)
+	if !ok {
+		return false
+	}
+	nested := parseFenceContainerContext(line[contentStart:])
+	return nested.quoteDepth == 0 && !nested.hasList
 }
 
 func matchesContainerATXHeading(line string, pattern *regexp.Regexp) bool {
