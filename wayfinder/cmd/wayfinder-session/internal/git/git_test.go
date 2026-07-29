@@ -2,7 +2,6 @@ package git
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -469,10 +468,10 @@ func TestCommitPhaseStartForceAddsIgnoredCanonicalHistory(t *testing.T) {
 			t.Fatalf("write %s: %v", path, err)
 		}
 	}
-	if err := exec.Command("git", "-C", repoDir, "add", ".gitignore", "README.md").Run(); err != nil {
+	if err := gittest.Command(t, repoDir, "add", ".gitignore", "README.md").Run(); err != nil {
 		t.Fatalf("stage initial files: %v", err)
 	}
-	if err := exec.Command("git", "-C", repoDir, "commit", "-m", "Initial commit").Run(); err != nil {
+	if err := gittest.Command(t, repoDir, "commit", "-m", "Initial commit").Run(); err != nil {
 		t.Fatalf("initial commit: %v", err)
 	}
 
@@ -480,7 +479,7 @@ func TestCommitPhaseStartForceAddsIgnoredCanonicalHistory(t *testing.T) {
 		t.Fatalf("CommitPhaseStart() error = %v", err)
 	}
 
-	names, err := exec.Command("git", "-C", repoDir, "show", "--name-only", "--format=", "HEAD").Output()
+	names, err := gittest.Command(t, repoDir, "show", "--name-only", "--format=", "HEAD").Output()
 	if err != nil {
 		t.Fatalf("git show: %v", err)
 	}
@@ -518,10 +517,10 @@ func TestLifecycleCommitsStageLegacyHistoryDeletion(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := exec.Command("git", "-C", repoDir, "add", ".").Run(); err != nil {
+			if err := gittest.Command(t, repoDir, "add", ".").Run(); err != nil {
 				t.Fatal(err)
 			}
-			if err := exec.Command("git", "-C", repoDir, "commit", "-m", "legacy history").Run(); err != nil {
+			if err := gittest.Command(t, repoDir, "commit", "-m", "legacy history").Run(); err != nil {
 				t.Fatal(err)
 			}
 
@@ -538,14 +537,14 @@ func TestLifecycleCommitsStageLegacyHistoryDeletion(t *testing.T) {
 			if err := commitLifecycle(New(repoDir)); err != nil {
 				t.Fatalf("lifecycle commit: %v", err)
 			}
-			status, err := exec.Command("git", "-C", repoDir, "status", "--porcelain").Output()
+			status, err := gittest.Command(t, repoDir, "status", "--porcelain").Output()
 			if err != nil {
 				t.Fatal(err)
 			}
 			if strings.TrimSpace(string(status)) != "" {
 				t.Fatalf("legacy migration left dirty worktree:\n%s", status)
 			}
-			names, err := exec.Command("git", "-C", repoDir, "show", "--no-renames", "--name-only", "--format=", "HEAD").Output()
+			names, err := gittest.Command(t, repoDir, "show", "--no-renames", "--name-only", "--format=", "HEAD").Output()
 			if err != nil {
 				t.Fatal(err)
 			}

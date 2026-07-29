@@ -26,13 +26,18 @@ func New(dir string) *History {
 // EnsureCurrentFile atomically migrates the legacy JSON Lines filename before
 // the history is read, appended, or archived.
 func (h *History) EnsureCurrentFile() error {
+	legacyPath := filepath.Join(filepath.Dir(h.path), LegacyHistoryFilename)
 	if _, err := os.Stat(h.path); err == nil {
+		if _, legacyErr := os.Stat(legacyPath); legacyErr == nil {
+			return fmt.Errorf("ambiguous history state: both %s and %s exist; reconcile them before continuing", h.path, legacyPath)
+		} else if !os.IsNotExist(legacyErr) {
+			return fmt.Errorf("stat legacy history file: %w", legacyErr)
+		}
 		return nil
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("stat history file: %w", err)
 	}
 
-	legacyPath := filepath.Join(filepath.Dir(h.path), LegacyHistoryFilename)
 	if _, err := os.Stat(legacyPath); err != nil {
 		if os.IsNotExist(err) {
 			return nil
