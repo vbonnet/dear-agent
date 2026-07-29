@@ -1,6 +1,7 @@
 # REVIEW.md — Multi-agent PR review protocol
 
-**Status:** authoritative · **Last updated:** 2026-06-11
+- **Status:** authoritative
+- **Last updated:** 2026-06-11
 
 Every PR against this repo goes through the review protocol below before
 merging. The protocol is designed for a dark-factory loop: an LLM review agent

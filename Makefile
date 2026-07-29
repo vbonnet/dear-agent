@@ -122,6 +122,7 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 .PHONY: lint-skills
 .PHONY: lint-instructions
 .PHONY: lint-adrs
+.PHONY: lint-headers
 
 include mk/install-go-bin.mk
 
@@ -144,6 +145,12 @@ lint-skills:
 # active instruction surfaces.
 lint-instructions:
 	@go run ./tools/instruction-lint -repo .
+
+# Flag the single-line bold metadata "header block" anti-pattern (two or more
+# **Label:** fields crammed onto one physical line near the top of a doc).
+# See docs/doc-header-format.md for the canonical replacement format.
+lint-headers:
+	@go run ./tools/header-lint -repo .
 
 # Validate every declared, Git-tracked ADR scope, aggregate, and index through
 # the repository contract in .dear-agent.yml.
