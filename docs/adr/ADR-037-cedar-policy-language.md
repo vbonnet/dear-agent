@@ -108,18 +108,27 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   the active bundle. The evaluator retains a durable last-known-good bundle
   across restart; reload readers observe either the complete old bundle or the
   complete new bundle, never a partial update.
-- Acquire one immutable bundle snapshot and version for each intercepted tool
-  request before the invocation decision. Reuse that exact snapshot for the
-  confirmation-free decision, even if a validated reload publishes a newer
-  bundle between the two gates. A request never composes authorization results
-  from different policy generations. An `ask` result is not an execution
-  authorization: after confirmation, the dispatcher reacquires the current
-  active snapshot at its final dispatch boundary. If its version differs, the
-  prior confirmation is invalidated and both ordered decisions are rerun
-  against the new snapshot; `deny` stops, `allow` proceeds, and `ask` requires
-  a new confirmation bound to that version. The active generation is checked
-  atomically when the dispatcher consumes that authorization; a concurrent
-  reload restarts the loop instead of permitting a stale confirmed request.
+- Acquire one immutable bundle snapshot and one immutable authorization-input
+  snapshot for each intercepted tool request before the invocation decision.
+  The latter contains the principal, current entity graph/memberships, canonical
+  resource, and every contextual attribute used by Cedar, plus a stable digest
+  or monotonic revision. Reuse those exact snapshots for the confirmation-free
+  decision, even if policy or identity/context state changes between the two
+  gates. A request never composes results from different policy generations or
+  authorization inputs. An `ask` result is not an execution authorization:
+  after confirmation, the dispatcher reacquires both current snapshots at its
+  final dispatch boundary. If either version/digest differs, the prior
+  confirmation is invalidated and both ordered decisions are rerun; `deny`
+  stops, `allow` proceeds, and `ask` requires a new confirmation bound to both
+  snapshots.
+- Serialize the atomic final version/input check and consumption of an
+  authorization against bundle publication and authorization-input revision
+  changes. Do not hold that finalization lease while waiting for a person.
+  If churn invalidates a confirmation repeatedly, stop after a configured
+  finite retry limit and return a distinct retryable `policy_churn` unavailable
+  result that executes nothing. An unbounded restart loop is not conforming:
+  every request must dispatch, deny, or return a typed unavailable result in
+  bounded attempts.
 - Project every path-bearing resource into one canonical filesystem identity
   before Cedar evaluation. The shared projector expands supported home forms,
   anchors relative paths to the interceptor's verified working directory,
@@ -170,7 +179,10 @@ tests must prove all of the following:
 5. A reload that adds an invocation `forbid` while a request waits for
    confirmation invalidates the old confirmation and denies final dispatch.
    A reload at the final dispatch boundary likewise causes reevaluation; tests
-   must prove there is no stale-version check/use window.
+   must prove there is no stale-version check/use window. Separately, changing
+   a principal's role/entity membership or any authorization context without a
+   policy reload invalidates the old confirmation and reruns both decisions
+   against the new input snapshot.
 6. A Cedar response containing both a proven invocation `forbid` reason and
    diagnostics remains `deny`; an invocation response with no proven
    applicable `permit` also remains `deny`. An invocation Allow whose
@@ -200,6 +212,11 @@ tests must prove all of the following:
     operation into a protected tree. Tests must exercise existing targets and
     missing-leaf creation and prove execution consumes the pinned object or
     ancestor rather than reopening the lexical path.
+12. Sustained bundle-publication or authorization-input churn cannot keep a
+    request in an internal retry loop indefinitely. Tests force more
+    invalidations than the configured limit and observe a typed
+    `policy_churn` result, no dispatch, and a bounded evaluation count; a
+    non-churning request still makes progress while publications occur.
 
 The shared evaluator SPEC and per-harness interceptor BDD scenarios must carry
 these cases; unit tests of Cedar Allow/Deny alone do not satisfy this gate.
