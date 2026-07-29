@@ -176,12 +176,21 @@ func checkData(path string, data []byte) []Violation {
 	return violations
 }
 
+// frontmatterDelimiter reports whether a line is a top-level `---` fence.
+// Leading whitespace disqualifies it: an indented `---` inside a YAML block
+// scalar is scalar content, not the closing fence, and treating it as the
+// fence ends the mask early and hands valid scalar lines to the Markdown
+// parser as if they were header-zone prose.
+func frontmatterDelimiter(line string) bool {
+	return strings.TrimRight(line, " \t\r") == "---"
+}
+
 func maskLeadingYAMLFrontmatter(source []byte, lines []string, lineStarts []int) []byte {
-	if len(lines) < 2 || strings.TrimSpace(strings.TrimPrefix(lines[0], "\uFEFF")) != "---" {
+	if len(lines) < 2 || !frontmatterDelimiter(strings.TrimPrefix(lines[0], "\uFEFF")) {
 		return source
 	}
 	for lineIndex := 1; lineIndex < len(lines); lineIndex++ {
-		if strings.TrimSpace(lines[lineIndex]) != "---" {
+		if !frontmatterDelimiter(lines[lineIndex]) {
 			continue
 		}
 		masked := append([]byte(nil), source...)
@@ -408,8 +417,11 @@ func textSegmentIsOnLine(inline *ast.Text, lineStarts []int, lineIndex int) bool
 		sourceLineIndex(lineStarts, max(inline.Segment.Stop-1, inline.Segment.Start)) == lineIndex
 }
 
+// validBoldFieldLabel intentionally imposes no upper length bound. HEADERLINT-01
+// counts every `**Label:**` marker on a line; discarding a long label would let
+// a line carrying two long bold fields slip past the required check.
 func validBoldFieldLabel(label []rune) bool {
-	if len(label) < 2 || len(label) > 61 || label[len(label)-1] != ':' {
+	if len(label) < 2 || label[len(label)-1] != ':' {
 		return false
 	}
 	for _, character := range label[:len(label)-1] {

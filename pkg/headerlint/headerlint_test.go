@@ -1234,3 +1234,57 @@ func TestCheckFile_TypeSevenHTMLMasksHeadingsUntilBlank(t *testing.T) {
 		t.Fatalf("want field violation after type-7 HTML block, got %v", violations)
 	}
 }
+
+func TestCheckFile_IndentedDelimiterInBlockScalarDoesNotEndFrontmatter(t *testing.T) {
+	// The block scalar legitimately contains an indented `---`. Treating it as
+	// the closing fence unmasks the remaining frontmatter, so the scalar line
+	// below would be parsed as header-zone Markdown and wrongly flagged.
+	const content = "---\n" +
+		"title: example\n" +
+		"description: |\n" +
+		"  intro paragraph\n" +
+		"  ---\n" +
+		"  **Status:** draft · **Owner:** docs\n" +
+		"---\n" +
+		"\n" +
+		"# Example\n" +
+		"\n" +
+		"Body text.\n"
+
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "EXAMPLE.md", content)
+
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("want no violations for frontmatter block-scalar content, got %d: %v", len(violations), violations)
+	}
+}
+
+func TestCheckFile_FlagsLongBoldFieldLabels(t *testing.T) {
+	// Two bold-field labels well past 60 runes. A label-length cutoff would
+	// discard both and let the line bypass HEADERLINT-01 entirely.
+	longFirst := strings.Repeat("a", 80)
+	longSecond := strings.Repeat("b", 80)
+	content := "# Title\n" +
+		"\n" +
+		"**" + longFirst + ":** one · **" + longSecond + ":** two\n" +
+		"\n" +
+		"Body text.\n"
+
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "LONG.md", content)
+
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 1 {
+		t.Fatalf("want 1 violation for two long bold fields, got %d: %v", len(violations), violations)
+	}
+	if violations[0].Line != 3 {
+		t.Fatalf("want violation on line 3, got line %d", violations[0].Line)
+	}
+}
