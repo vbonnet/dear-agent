@@ -87,11 +87,10 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   even when another policy emits diagnostics; a Deny with no applicable
   permit also remains **deny**, regardless of diagnostics. Only after positive
   invocation authorization may confirmation-free diagnostics produce
-  `policy_unavailable`. Escalation requires a nonce-bearing approval receipt
-  bound to the request, policy/input digests, authenticated human identity,
-  expiry, and an out-of-band channel that agent tools cannot write. Tmux input,
-  harness UI callbacks, and agent-addressable messages are not proof of human
-  approval; without an integrity-protected channel, confirmation is unavailable and execution fails closed. A harness-independent pre-receipt deadline makes
+  `policy_unavailable`. Escalation requires a nonce-bearing receipt bound to the request, policy/input digests, expiry, authenticated approver identity and
+  capability, and the trusted channel's presentation digest. That channel displays the principal, action, canonical resource, and policy/input versions; any
+  display/request/receipt or approver-scope mismatch denies. Tmux input, harness UI callbacks, and agent-addressable messages cannot prove human approval;
+  without an integrity-protected channel, confirmation is unavailable and execution fails closed. A harness-independent pre-receipt deadline makes
   silence/cancellation return typed `confirmation_timeout`/`confirmation_cancelled`, execute nothing, and release the request; receipt expiry is not that
   bound. Diagnostics never make a forbid or missing permit user-overridable.
 - Bound every evaluator call by a harness-independent deadline. A panic,
@@ -230,9 +229,10 @@ tests must prove all of the following:
    exit, EOF, timeout, and incomplete responses at each gate. Before positive
    invocation authorization these return typed non-confirmable unavailability
    by the deadline and execute nothing; only later confirmation-free failure
-   may escalate. Tests inject terminal keys, callbacks, and agent messages and
-   prove none can mint a human receipt. Authenticated out-of-band approval for
-   each harness's authored-Deny `ask`, with unchanged authorization snapshots,
+   may escalate. Every harness rejects an authenticated but unauthorized signer
+   and any mismatch among displayed canonical inputs, request, and receipt;
+   terminal keys, callbacks, and agent messages cannot mint a human receipt.
+   Trusted out-of-band display and approval for each harness's authored-Deny `ask`, with unchanged authorization snapshots,
    reauthorizes exactly one dispatch; silence/cancellation returns the bounded typed result, releases the wait, and dispatches nothing.
 9. Restart restores the last-known-good bundle before the interceptor accepts
    tool calls.
