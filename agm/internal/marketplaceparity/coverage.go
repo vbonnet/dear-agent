@@ -510,14 +510,9 @@ func hasPositiveDirectiveVerb(directive, verb string, before int) bool {
 }
 
 func hasPositiveCanonicalFollowDirective(directive string) bool {
-	locations := regexp.MustCompile(`\bfollow\b`).FindAllStringIndex(directive, -1)
-	for _, location := range slices.Backward(locations) {
-		if directiveVerbIsPositive(directive, location) &&
-			strings.Contains(directive[location[1]:], "canonical workflow") {
-			return true
-		}
-	}
-	return false
+	normalized := strings.Join(strings.Fields(directive), " ")
+	return strings.HasPrefix(normalized, "follow the canonical workflow") ||
+		strings.HasPrefix(normalized, "follow that canonical workflow")
 }
 
 func directiveVerbIsPositive(directive string, location []int) bool {

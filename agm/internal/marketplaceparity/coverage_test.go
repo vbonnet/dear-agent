@@ -215,6 +215,21 @@ func TestValidateNativeSkillCoverageRequiresEverySkillPlugin(t *testing.T) {
 	if err := os.WriteFile(agmEntrypoint, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	misleadingFollow := strings.Replace(
+		string(data),
+		"2. Follow the canonical workflow and all of its gates.",
+		"2. Follow local rules instead of the canonical workflow.",
+		1,
+	)
+	if err := os.WriteFile(agmEntrypoint, []byte(misleadingFollow), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateNativeSkillCoverage(root, catalog, surface); err == nil || !strings.Contains(err.Error(), "actionably load and follow") {
+		t.Fatalf("misleading canonical follow directive unexpectedly passed: %v", err)
+	}
+	if err := os.WriteFile(agmEntrypoint, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	negatedWorkflow := strings.Replace(
 		string(data),
 		"1. Read `../../../"+canonicalBySkill["scan-health"]+"` completely.\n2. Follow the canonical workflow and all of its gates.",
