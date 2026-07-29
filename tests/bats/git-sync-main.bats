@@ -10,6 +10,7 @@ setup() {
     load '../test_helper/bats-assert/load'
     load '../test_helper/bats-file/load'
 
+    unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS
     export GIT_CONFIG_GLOBAL=/dev/null
     export GIT_CONFIG_SYSTEM=/dev/null
 

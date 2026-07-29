@@ -8,6 +8,7 @@
 # command without paying for a real graph build.
 
 setup() {
+    unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS
     export GIT_CONFIG_GLOBAL=/dev/null
     export GIT_CONFIG_SYSTEM=/dev/null
 

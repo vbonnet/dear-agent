@@ -227,6 +227,15 @@ func DefaultConfig() (*Config, error) {
 }
 
 func defaultConfigAt(workspaceConfigPath string) (*Config, error) {
+	workspace := selectedWorkspaceAt(workspaceConfigPath)
+	if workspace == "" {
+		return nil, fmt.Errorf("WORKSPACE environment variable not set (workspace protocol not activated)\n" +
+			"Hint: Set WORKSPACE=<name> or configure default_workspace in ~/.agm/config.yaml")
+	}
+	return configForWorkspace(workspace)
+}
+
+func selectedWorkspaceAt(workspaceConfigPath string) string {
 	workspace := getEnv("WORKSPACE", "")
 	if testModeEnabled(getEnv("ENGRAM_TEST_MODE", "")) {
 		if testWorkspace := getEnv("ENGRAM_TEST_WORKSPACE", ""); testWorkspace != "" {
@@ -239,6 +248,10 @@ func defaultConfigAt(workspaceConfigPath string) (*Config, error) {
 		// or Cowork where WORKSPACE is not set in the environment).
 		workspace = readDefaultWorkspaceFromConfigAt(workspaceConfigPath)
 	}
+	return workspace
+}
+
+func configForWorkspace(workspace string) (*Config, error) {
 	database := getEnv("DOLT_DATABASE", workspace)
 	if workspace == "" {
 		return nil, fmt.Errorf("WORKSPACE environment variable not set (workspace protocol not activated)\n" +
@@ -297,33 +310,40 @@ func ConfiguredWorkspaceConfigs() ([]*Config, error) {
 // commands after loading their configured workspace registry. Destructive
 // inventory must query the same registry that session creation uses.
 func ConfiguredWorkspaceConfigsAt(workspaceConfigPath string) ([]*Config, error) {
-	base, err := defaultConfigAt(workspaceConfigPath)
-	if err != nil {
-		return nil, err
-	}
-
 	path := expandTilde(workspaceConfigPath)
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
+		base, baseErr := defaultConfigAt(workspaceConfigPath)
+		if baseErr != nil {
+			return nil, baseErr
+		}
 		return []*Config{base}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read AGM workspace config: %w", err)
 	}
-	var cfg struct {
-		Workspaces []struct {
-			Name    string `yaml:"name"`
-			Enabled *bool  `yaml:"enabled"`
-		} `yaml:"workspaces"`
+	enabled, hasRegistryEntries, err := parseEnabledWorkspaceNames(data)
+	if err != nil {
+		return nil, err
 	}
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse AGM workspace config: %w", err)
+	if len(enabled) == 0 {
+		if hasRegistryEntries {
+			return nil, fmt.Errorf("AGM workspace config has no enabled workspaces")
+		}
+		base, baseErr := defaultConfigAt(workspaceConfigPath)
+		if baseErr != nil {
+			return nil, baseErr
+		}
+		return []*Config{base}, nil
 	}
-
+	base, err := configForWorkspace(enabled[0])
+	if err != nil {
+		return nil, err
+	}
 	explicitDatabase, databaseIsExplicit := lookupEnv("DOLT_DATABASE")
 	databaseIsExplicit = databaseIsExplicit && explicitDatabase != ""
-	seen := make(map[string]bool, len(cfg.Workspaces)+1)
-	configs := make([]*Config, 0, len(cfg.Workspaces)+1)
+	seen := make(map[string]bool, len(enabled))
+	configs := make([]*Config, 0, len(enabled))
 	add := func(workspace string) {
 		if workspace == "" || seen[workspace] {
 			return
@@ -338,17 +358,34 @@ func ConfiguredWorkspaceConfigsAt(workspaceConfigPath string) ([]*Config, error)
 		}
 		configs = append(configs, &workspaceConfig)
 	}
+	for _, workspace := range enabled {
+		add(workspace)
+	}
+	return validateConfiguredWorkspaceConfigs(configs, base, explicitDatabase, databaseIsExplicit)
+}
+
+func parseEnabledWorkspaceNames(data []byte) ([]string, bool, error) {
+	var cfg struct {
+		Workspaces []struct {
+			Name    string `yaml:"name"`
+			Enabled *bool  `yaml:"enabled"`
+		} `yaml:"workspaces"`
+	}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, false, fmt.Errorf("parse AGM workspace config: %w", err)
+	}
+	enabled := make([]string, 0, len(cfg.Workspaces))
 	for index, workspace := range cfg.Workspaces {
 		if workspace.Enabled == nil || !*workspace.Enabled {
 			continue
 		}
-		if strings.TrimSpace(workspace.Name) == "" {
-			return nil, fmt.Errorf("AGM workspace config entry %d has no name", index+1)
+		name := strings.TrimSpace(workspace.Name)
+		if name == "" {
+			return nil, true, fmt.Errorf("AGM workspace config entry %d has no name", index+1)
 		}
-		add(workspace.Name)
+		enabled = append(enabled, name)
 	}
-	add(base.Workspace)
-	return validateConfiguredWorkspaceConfigs(configs, base, explicitDatabase, databaseIsExplicit)
+	return enabled, len(cfg.Workspaces) > 0, nil
 }
 
 func validateConfiguredWorkspaceConfigs(configs []*Config, base *Config, explicitDatabase string, databaseIsExplicit bool) ([]*Config, error) {

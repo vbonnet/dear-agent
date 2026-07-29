@@ -2,6 +2,7 @@ package dolt
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -197,6 +198,36 @@ workspaces:
 		if !got[workspace] {
 			t.Errorf("custom registry omitted %q: %#v", workspace, got)
 		}
+	}
+}
+
+func TestConfiguredWorkspaceConfigsAtDoesNotRequireDefaultForEnabledRegistry(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	t.Cleanup(func() { lookupEnv = originalLookupEnv })
+
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`workspaces:
+  - name: personal
+    enabled: true
+  - name: oss
+    enabled: true
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lookupEnv = func(key string) (string, bool) {
+		values := map[string]string{
+			"ENGRAM_TEST_MODE":      "1",
+			"ENGRAM_TEST_WORKSPACE": "personal",
+		}
+		value, ok := values[key]
+		return value, ok
+	}
+	configs, err := ConfiguredWorkspaceConfigsAt(configPath)
+	if err != nil {
+		t.Fatalf("ConfiguredWorkspaceConfigsAt: %v", err)
+	}
+	if len(configs) != 2 || configs[0].Workspace != "personal" || configs[1].Workspace != "oss" {
+		t.Fatalf("configured stores = %#v, want enabled personal and oss", configs)
 	}
 }
 

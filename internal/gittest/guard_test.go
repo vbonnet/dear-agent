@@ -123,9 +123,9 @@ func TestNoUnsandboxedGitInTests(t *testing.T) {
 }
 
 // batsGitCommandLines returns raw Git command lines only when the Bats file
-// does not disable both global and system Git configuration. Shell fixtures
-// cannot use the Go helper, but they must establish the same hooks isolation
-// before creating repositories.
+// does not disable global, system, and command-scope Git configuration. Shell
+// fixtures cannot use the Go helper, but they must establish the same hooks
+// isolation before creating repositories.
 func batsGitCommandLines(path string) ([]int, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -133,7 +133,8 @@ func batsGitCommandLines(path string) ([]int, error) {
 	}
 	source := string(data)
 	if strings.Contains(source, "GIT_CONFIG_GLOBAL=/dev/null") &&
-		strings.Contains(source, "GIT_CONFIG_SYSTEM=/dev/null") {
+		strings.Contains(source, "GIT_CONFIG_SYSTEM=/dev/null") &&
+		strings.Contains(source, "unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS") {
 		return nil, nil
 	}
 
@@ -150,6 +151,34 @@ func batsGitCommandLines(path string) ([]int, error) {
 		}
 	}
 	return lines, nil
+}
+
+func TestBatsGitCommandLinesRequiresCommandScopeIsolation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fixture.bats")
+	source := "export GIT_CONFIG_GLOBAL=/dev/null\n" +
+		"export GIT_CONFIG_SYSTEM=/dev/null\n" +
+		"git init repo\n"
+	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lines, err := batsGitCommandLines(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) != 1 {
+		t.Fatalf("global/system-only isolation returned lines %v, want the Git call", lines)
+	}
+	source = "unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS\n" + source
+	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lines, err = batsGitCommandLines(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) != 0 {
+		t.Fatalf("complete config isolation returned Git lines %v", lines)
+	}
 }
 
 // gitCommandLines returns the lines in path that build a Git command directly
