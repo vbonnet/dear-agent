@@ -576,7 +576,7 @@ func hasMatchingBacktickRun(lines []string, length int, container fenceContainer
 }
 
 func inlineCodeBlockBoundary(line string, container fenceContainerContext) bool {
-	if strings.TrimSpace(line) == "" {
+	if containerLineIsBlank(line, container) {
 		return true
 	}
 	if !sameInlineCodeContainer(container, line) {
@@ -600,6 +600,14 @@ func inlineCodeBlockBoundary(line string, container fenceContainerContext) bool 
 	trimmed := strings.TrimLeft(line, " \t")
 	_, _, _, isFence := parseFenceDelimiter(trimmed, 0)
 	return isFence
+}
+
+func containerLineIsBlank(line string, container fenceContainerContext) bool {
+	offset, ok := container.contentStart(line)
+	if !ok {
+		return strings.TrimSpace(line) == ""
+	}
+	return strings.TrimSpace(line[offset:]) == ""
 }
 
 func matchesContainerBlockPattern(line string, container fenceContainerContext, pattern *regexp.Regexp) bool {
@@ -699,7 +707,7 @@ func (s *htmlBlockState) consume(line string) bool {
 		return true
 	}
 	if s.untilBlank {
-		if strings.TrimSpace(line) == "" {
+		if containerLineIsBlank(line, s.container) {
 			*s = htmlBlockState{}
 		}
 		return true

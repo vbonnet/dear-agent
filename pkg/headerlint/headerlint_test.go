@@ -824,3 +824,36 @@ func TestCheckFile_RetainsContainerForInlineCodeOpenedOnLazyLine(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckFile_MarkedContainerBlankEndsInlineCodeParagraph(t *testing.T) {
+	const content = "# Doc\n" +
+		"> opener `\n" +
+		"> \n" +
+		"> **Status:** draft · **Owner:** docs\n" +
+		"> later`\n"
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "marked-blank-inline.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 1 || violations[0].Line != 4 {
+		t.Fatalf("want field violation after marked paragraph break, got %v", violations)
+	}
+}
+
+func TestCheckFile_MarkedContainerBlankEndsTypeSixHTMLBlock(t *testing.T) {
+	const content = "# Doc\n" +
+		"> <div>\n" +
+		"> \n" +
+		"> **Status:** draft · **Owner:** docs\n"
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "marked-blank-html.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 1 || violations[0].Line != 4 {
+		t.Fatalf("want field violation after marked HTML block break, got %v", violations)
+	}
+}
