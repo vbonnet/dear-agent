@@ -130,14 +130,18 @@ func ValidateHarnessSurfaces(root string) error {
 }
 
 func validateNativeSkillCoverage(root string, catalog Catalog, surface HarnessSurface) error {
-	if surface.Mode != "native-codex-skill" && surface.Mode != "native-opencode-skill" {
+	if surface.Mode != "native-codex-skill" && surface.Mode != "native-opencode-skill" && surface.Mode != "agents-md-skill-fallback" {
 		return nil
 	}
 	for _, plugin := range catalog.Plugins {
 		if !slices.Contains(plugin.Capabilities, "skills") {
 			continue
 		}
-		entrypoint := filepath.Join(root, surface.Catalog, plugin.Name, "SKILL.md")
+		entrypointRoot := surface.Catalog
+		if surface.Mode == "agents-md-skill-fallback" {
+			entrypointRoot = ".agents/skills"
+		}
+		entrypoint := filepath.Join(root, entrypointRoot, plugin.Name, "SKILL.md")
 		info, err := os.Lstat(entrypoint)
 		if err != nil {
 			return fmt.Errorf("skill-capable plugin %q missing native entrypoint: %w", plugin.Name, err)
