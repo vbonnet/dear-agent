@@ -182,6 +182,9 @@ func resumeSessionLocked( //nolint:gocyclo // keeping the ordered transaction an
 	if !health.CanResume {
 		return result, resumeHealthError(m.Name, health.Issues)
 	}
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
 	if err := migrateResumeAgyModel(store, m, harnessName); err != nil {
 		return result, ErrStorageError("session/resume.migrate-agy-model", err)
 	}
