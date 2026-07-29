@@ -420,6 +420,32 @@ func TestPrepareResumeLaunchDefaultsModelLessCodexSession(t *testing.T) {
 	}
 }
 
+func TestPrepareResumeLaunchAuthorizesAgyWorktree(t *testing.T) {
+	worktreePath := filepath.Join(t.TempDir(), "agy worktree")
+	m := &manifest.Manifest{
+		SessionID:      "agy-session",
+		Harness:        "agy",
+		PermissionMode: "auto",
+		Agy:            &manifest.Agy{ConversationID: "agy-conversation"},
+	}
+	launch, _, _, err := prepareResumeLaunch(
+		nil,
+		m,
+		"agy",
+		ResumeSessionHealth{
+			TmuxSessionName: "agy-session",
+			WorktreePath:    worktreePath,
+		},
+	)
+	if err != nil {
+		t.Fatalf("prepareResumeLaunch() error: %v", err)
+	}
+	want := "--add-dir " + launchparity.ShellQuote(worktreePath)
+	if !strings.Contains(launch.Command, want) {
+		t.Fatalf("prepareResumeLaunch() command = %q, want %q", launch.Command, want)
+	}
+}
+
 func TestResumeSessionCanonicalNameFailureRemovesExactColdRuntime(t *testing.T) {
 	adapter, m, fakeTmux := setupResumeOperation(t, "opencode-cli", false)
 	wantErr := errors.New("canonical name write failed")

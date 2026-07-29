@@ -719,6 +719,10 @@ func prepareResumeLaunch(store dolt.Storage, m *manifest.Manifest, harnessName s
 		}
 		return launch, "", warnings, nil
 	case "agy":
+		// AGY cold resume enters the workspace through its native
+		// conversation route, so retain the workspace as an explicitly
+		// authorized add-dir just as session creation does.
+		spec.ExtraAddDirs = []string{health.WorktreePath}
 		if m.Agy != nil && m.Agy.ConversationID != "" {
 			if isAmbiguousLegacyAgyModel(spec.Model) {
 				spec.Model = ""
