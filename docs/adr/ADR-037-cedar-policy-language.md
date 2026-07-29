@@ -222,18 +222,18 @@ tests must prove all of the following:
    symlink into a protected source tree is evaluated as the protected target,
    and a missing leaf beneath a symlinked ancestor is resolved through that
    ancestor. Canonicalization failures deny before Cedar is called.
-8. Positively invocation-authorized interactive `policy_unavailable` requests
-   enter confirmation; non-interactive requests fail closed. Every harness
-   forces panic, crash, signal, nonzero exit, EOF, timeout, and incomplete
-   responses at each gate. Before positive invocation authorization these
-   return typed non-confirmable unavailability by the deadline and execute
-   nothing; only later confirmation-free-gate failure may enter escalation.
-   Tests inject terminal keys, harness callbacks, and agent messages while an
-   `ask` is pending and prove none can mint the required human receipt.
-   A positive end-to-end case proves the authenticated out-of-band human
-   channel can mint that receipt and, with unchanged bundle, input, principal,
-   action, resource, and filesystem snapshots, final reauthorization permits
-   exactly one dispatch. Every harness also proves silence/cancellation returns the bounded typed result, releases the wait, and dispatches nothing.
+8. After positive invocation authorization, every harness drives an authored
+   confirmation-free Deny: interactive mode enters `ask`, while non-interactive
+   mode fails closed and dispatches nothing. Positively authorized interactive
+   `policy_unavailable` requests may also enter confirmation; non-interactive
+   requests fail closed. Every harness forces panic, crash, signal, nonzero
+   exit, EOF, timeout, and incomplete responses at each gate. Before positive
+   invocation authorization these return typed non-confirmable unavailability
+   by the deadline and execute nothing; only later confirmation-free failure
+   may escalate. Tests inject terminal keys, callbacks, and agent messages and
+   prove none can mint a human receipt. Authenticated out-of-band approval for
+   each harness's authored-Deny `ask`, with unchanged authorization snapshots,
+   reauthorizes exactly one dispatch; silence/cancellation returns the bounded typed result, releases the wait, and dispatches nothing.
 9. Restart restores the last-known-good bundle before the interceptor accepts
    tool calls.
 10. For every harness, replacing or removing the interceptor executable or its
@@ -260,10 +260,10 @@ tests must prove all of the following:
     catalog permits allowed-source/allowed-destination aliases; an external
     uncorrelated link makes it incomplete and fail closed until privileged
     rescan. Pathname allow never overrides protected-inode identity.
-15. Every harness runs an unrecognized binary and a runtime-computed shell-write
-    target; if every resource cannot be projected and pinned, an OS sandbox
-    blocks protected writes or dispatch is denied before launch. Raw-string
-    authorization and post-hoc detection do not pass.
+15. Every harness runs an unrecognized binary and runtime-computed shell-read
+    and shell-write targets; if every resource cannot be projected and pinned,
+    an OS sandbox blocks protected reads and writes or dispatch is denied before
+    launch. Raw-string authorization and post-hoc detection do not pass.
 
 The shared evaluator SPEC and per-harness interceptor BDD scenarios must carry
 these cases; unit tests of Cedar Allow/Deny alone do not satisfy this gate.
