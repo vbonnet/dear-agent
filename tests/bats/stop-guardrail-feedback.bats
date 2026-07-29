@@ -16,9 +16,11 @@ setup() {
     command -v jq >/dev/null 2>&1 || skip "hook requires jq, not installed here"
     command -v git >/dev/null 2>&1 || skip "hook requires git, not installed here"
 
-    unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS
+    unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS GIT_TEMPLATE_DIR
     export GIT_CONFIG_GLOBAL=/dev/null
     export GIT_CONFIG_SYSTEM=/dev/null
+    export GIT_TEMPLATE_DIR="$BATS_TEST_TMPDIR/git-template"
+    mkdir -p "$GIT_TEMPLATE_DIR"
 
     REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
     HOOK="$REPO_ROOT/.claude/hooks/stop-guardrail-feedback"

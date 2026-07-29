@@ -135,9 +135,13 @@ func batsGitCommandLines(path string) ([]int, error) {
 		return nil, err
 	}
 	source := string(data)
+	hasTestOwnedTemplate := strings.Contains(source, `export GIT_TEMPLATE_DIR="$TEST_DIR/`) ||
+		strings.Contains(source, `export GIT_TEMPLATE_DIR="$BATS_TEST_TMPDIR/`)
 	if strings.Contains(source, "GIT_CONFIG_GLOBAL=/dev/null") &&
 		strings.Contains(source, "GIT_CONFIG_SYSTEM=/dev/null") &&
-		strings.Contains(source, "unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS") {
+		strings.Contains(source, "unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS GIT_TEMPLATE_DIR") &&
+		hasTestOwnedTemplate &&
+		strings.Contains(source, `mkdir -p "$GIT_TEMPLATE_DIR"`) {
 		return nil, nil
 	}
 
@@ -179,8 +183,21 @@ func TestBatsGitCommandLinesRequiresCommandScopeIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(lines) != 1 {
+		t.Fatalf("config-only isolation returned lines %v, want the Git call", lines)
+	}
+	source = "unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS GIT_TEMPLATE_DIR\n" +
+		"export GIT_TEMPLATE_DIR=\"$TEST_DIR/git-template\"\n" +
+		"mkdir -p \"$GIT_TEMPLATE_DIR\"\n" + source
+	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lines, err = batsGitCommandLines(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(lines) != 0 {
-		t.Fatalf("complete config isolation returned Git lines %v", lines)
+		t.Fatalf("complete config and template isolation returned Git lines %v", lines)
 	}
 }
 

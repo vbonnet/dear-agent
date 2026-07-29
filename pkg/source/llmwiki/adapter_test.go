@@ -93,6 +93,7 @@ func TestAdd_AutoCommitInRealRepo(t *testing.T) {
 			t.Fatalf("git %v: %v (%s)", args, err, string(out))
 		}
 	}
+	gittest.HardenRepo(t, dir)
 	a, err := llmwiki.Open(dir)
 	if err != nil {
 		t.Fatalf("Open: %v", err)

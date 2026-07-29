@@ -159,9 +159,9 @@ func (s *Sandbox) Output(dir string, args ...string) (string, error) {
 	return string(raw), err
 }
 
-// HardenRepo writes the sandbox's empty hooks path into an existing
-// repository's own config and installs the same path in the test process's
-// command-scope Git configuration.
+// HardenRepo writes the sandbox's empty hooks path and test-only author
+// identity into an existing repository's own config and installs the hooks
+// path in the test process's command-scope Git configuration.
 //
 // Env() and Command() only protect commands this package builds. Production
 // Git wrappers build their own *exec.Cmd and leave Cmd.Env unset, so when a
@@ -181,6 +181,8 @@ func (s *Sandbox) HardenRepo(t testing.TB, dir string) {
 	t.Helper()
 	s.hardenProcessGitConfig(t)
 	s.Run(t, dir, "config", "core.hooksPath", s.HooksDir)
+	s.Run(t, dir, "config", "user.name", "dear-agent test")
+	s.Run(t, dir, "config", "user.email", "test@dear-agent.invalid")
 }
 
 func (s *Sandbox) hardenProcessGitConfig(t testing.TB) {

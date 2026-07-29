@@ -10,11 +10,13 @@ setup() {
     load '../test_helper/bats-assert/load'
     load '../test_helper/bats-file/load'
 
-    unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS
+    unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS GIT_TEMPLATE_DIR
     export GIT_CONFIG_GLOBAL=/dev/null
     export GIT_CONFIG_SYSTEM=/dev/null
 
     TEST_DIR="$(mktemp -d)"
+    export GIT_TEMPLATE_DIR="$TEST_DIR/git-template"
+    mkdir -p "$GIT_TEMPLATE_DIR"
     BATS_TEST_DIRNAME="$(cd "$(dirname "$BATS_TEST_FILENAME")" && pwd)"
     PROJECT_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
     SCRIPT="$PROJECT_ROOT/scripts/git-sync-main.sh"

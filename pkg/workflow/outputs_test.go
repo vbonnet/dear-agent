@@ -198,6 +198,7 @@ func TestShellGitCommitterAgainstRealRepo(t *testing.T) {
 			t.Fatalf("git %v: %v %s", c, err, out)
 		}
 	}
+	gittest.HardenRepo(t, dir)
 	target := filepath.Join(dir, "x.md")
 	if err := os.WriteFile(target, []byte("hi"), 0o644); err != nil {
 		t.Fatal(err)

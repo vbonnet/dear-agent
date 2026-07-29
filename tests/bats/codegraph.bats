@@ -8,7 +8,7 @@
 # command without paying for a real graph build.
 
 setup() {
-    unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS
+    unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS GIT_TEMPLATE_DIR
     export GIT_CONFIG_GLOBAL=/dev/null
     export GIT_CONFIG_SYSTEM=/dev/null
 
@@ -17,6 +17,8 @@ setup() {
     load '../test_helper/bats-file/load'
 
     TEST_DIR="$(mktemp -d)"
+    export GIT_TEMPLATE_DIR="$TEST_DIR/git-template"
+    mkdir -p "$GIT_TEMPLATE_DIR"
     export HOME="$TEST_DIR"
 
     BATS_TEST_DIRNAME="$(cd "$(dirname "$BATS_TEST_FILENAME")" && pwd)"
