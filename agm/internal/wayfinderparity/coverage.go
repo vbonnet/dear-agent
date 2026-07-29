@@ -150,10 +150,19 @@ func ValidatePiSkillDiscovery(root string) error {
 	return nil
 }
 
+// containedWithin reports whether path lies inside root. Both arguments must
+// already be resolved when the caller needs symlink-proof containment.
+func containedWithin(root, path string) bool {
+	relative, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+}
+
 func validatePiSkillRoot(root, declared string) error {
 	skillRoot := filepath.Clean(filepath.Join(root, ".pi", filepath.FromSlash(declared)))
-	relative, relErr := filepath.Rel(root, skillRoot)
-	if relErr != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+	if !containedWithin(root, skillRoot) {
 		return fmt.Errorf("pi skill discovery path %q escapes the repository", declared)
 	}
 	// The lexical check above cannot see through an intermediate symlink, so
@@ -168,8 +177,7 @@ func validatePiSkillRoot(root, declared string) error {
 	if err != nil {
 		return fmt.Errorf("pi skill discovery path %q: %w", declared, err)
 	}
-	resolvedRelative, relErr := filepath.Rel(resolvedRoot, resolvedSkillRoot)
-	if relErr != nil || resolvedRelative == ".." || strings.HasPrefix(resolvedRelative, ".."+string(filepath.Separator)) {
+	if !containedWithin(resolvedRoot, resolvedSkillRoot) {
 		return fmt.Errorf("pi skill discovery path %q escapes the repository", declared)
 	}
 	info, err := os.Stat(resolvedSkillRoot)
@@ -185,11 +193,7 @@ func validatePiSkillRoot(root, declared string) error {
 	}
 	for _, entrypoint := range entrypoints {
 		resolvedEntrypoint, resolveErr := filepath.EvalSymlinks(entrypoint)
-		if resolveErr != nil {
-			continue
-		}
-		entrypointRelative, entrypointRelErr := filepath.Rel(resolvedRoot, resolvedEntrypoint)
-		if entrypointRelErr != nil || entrypointRelative == ".." || strings.HasPrefix(entrypointRelative, ".."+string(filepath.Separator)) {
+		if resolveErr != nil || !containedWithin(resolvedRoot, resolvedEntrypoint) {
 			continue
 		}
 		if info, statErr := os.Stat(resolvedEntrypoint); statErr == nil && info.Mode().IsRegular() {
