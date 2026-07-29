@@ -52,9 +52,9 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   "deterministic enforcement over agent judgment" principle already on
   dear-agent's anti-pattern watchlist.
 - Put one versioned, typed **tool-action projector** before Cedar; its shared
-  registry owns aliases/arguments, emits canonical action/resources/context,
-  and forbids raw maps or adapter-local aliases. It distinguishes file read,
-  directory list, search, mutations, process execution, and network access.
+  registry owns aliases/arguments and emits typed action/resource-role pairs
+  plus context. Sources, destinations, and parents retain their operation roles;
+  every pair is separately authorized and all must allow; raw maps and adapter-local aliases are forbidden.
   Network identity includes canonical hostname, resolved IP, and port; every
   DNS answer/redirect is separately authorized and dispatch binds approved
   IP/port at the socket or trusted proxy, preventing rebinding. Pi `find`/`Glob`
@@ -217,13 +217,13 @@ tests must prove all of the following:
    encountered after positive invocation authorization may return
    `policy_unavailable`.
    All paths record the bundle version and sanitized diagnostics.
-7. Every harness produces the same typed action/resources/context for equivalent
-   aliases and inputs. Fixtures cover `find`/`Glob`, `ls`, `path`/`file_path`,
-   and unknown/unsupported/conflicting/missing input failing closed before Cedar.
-   Network fixtures prove a live allowed external endpoint while private and
-   control-plane IP/ports remain denied after DNS, redirect, and rebinding.
-   Equivalent path spellings produce one resource; symlinks into protected
-   source and missing leaves below symlinked ancestors deny before Cedar.
+7. Every harness produces the same typed action/resource-role pairs/context for
+   equivalent aliases and inputs; invalid or missing input fails before Cedar.
+   A copy from a denied source to an allowed destination evaluates both roles
+   and the all-of result denies dispatch. Network fixtures prove a live allowed
+   external endpoint while private/control-plane IP/ports remain denied after
+   DNS, redirect, and rebinding. Equivalent paths unify; protected symlink
+   targets and missing leaves below symlinked ancestors deny before Cedar.
 8. After positive invocation authorization, every harness drives an authored
    confirmation-free Deny: interactive mode enters `ask`, while non-interactive
    mode fails closed and dispatches nothing. Positively authorized interactive
@@ -264,13 +264,13 @@ tests must prove all of the following:
     They deny protected-source/allowed-destination, the inverse, and protected-inode aliases; a complete catalog permits fully allowed aliases.
     An external uncorrelated link makes it incomplete and fail closed until
     rescan; pathname allow never overrides protected-inode identity.
-15. Every harness runs an unrecognized binary, runtime-computed shell targets,
-    and a `cd` reaching protected source; unprojectable/unpinned resources are
-    sandbox-blocked or denied before launch. It also dispatches a projectable,
-    policy-allowed read-only command including `git status --short` in an
-    allowed worktree and observes the result. Raw-string/post-hoc enforcement,
-    classifying every shell call opaque, or rejecting every projected command
-    does not pass.
+15. Every harness runs an unrecognized binary with runtime-computed file and
+    network targets plus a `cd` reaching protected source. Opaque/computed
+    protected reads/writes and private/control-plane connections are blocked by
+    the sandbox/socket/trusted-proxy boundary or denied before launch, while an
+    approved external endpoint proves liveness. A projectable, allowed
+    `git status --short` also dispatches; raw-string/post-hoc, opaque-all, or
+    reject-all enforcement does not pass.
 
 The shared evaluator SPEC and per-harness interceptor BDD scenarios must carry
 these cases; unit tests of Cedar Allow/Deny alone do not satisfy this gate.
