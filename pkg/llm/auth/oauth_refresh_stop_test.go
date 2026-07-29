@@ -142,6 +142,31 @@ func TestClearRefreshProtectionsClearsQuarantineAndDurableStop(t *testing.T) {
 	}
 }
 
+func TestClearRefreshProtectionsKeepsDurableStopWhenQuarantineClearFails(t *testing.T) {
+	credentials := writeFullCreds(t, "stale", staleMillis(), "ambiguous")
+	quarantinePath := filepath.Join(t.TempDir(), "quarantine")
+	if err := os.Mkdir(quarantinePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(quarantinePath, "blocker"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolver := OAuthResolver{
+		CredentialsPath: credentials,
+		QuarantinePath:  quarantinePath,
+	}
+	if err := resolver.WriteRefreshStop("unknown outcome"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := resolver.ClearRefreshProtections(); err == nil {
+		t.Fatal("ClearRefreshProtections() succeeded despite an uncleared quarantine")
+	}
+	if _, err := os.Stat(resolver.RefreshStopPath()); err != nil {
+		t.Fatalf("durable stop was cleared after quarantine failure: %v", err)
+	}
+}
+
 func TestInspectRefreshStopLeavesRotatedMarkerUntouched(t *testing.T) {
 	credentials := writeFullCreds(t, "stale", staleMillis(), "before")
 	resolver := OAuthResolver{CredentialsPath: credentials}

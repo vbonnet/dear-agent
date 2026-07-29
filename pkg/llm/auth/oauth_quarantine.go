@@ -167,7 +167,10 @@ func (r OAuthResolver) ClearQuarantine() error {
 // persisted protections so a caller cannot appear to re-arm refresh while the
 // credential-scoped stop still rejects every entrypoint.
 func (r OAuthResolver) ClearRefreshProtections() error {
-	return errors.Join(r.ClearQuarantine(), r.ClearRefreshStop())
+	if err := r.ClearQuarantine(); err != nil {
+		return err
+	}
+	return r.ClearRefreshStop()
 }
 
 // QuarantineStatus reports whether a quarantine is actually holding back
