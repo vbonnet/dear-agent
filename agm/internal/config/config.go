@@ -150,11 +150,14 @@ type SandboxConfig struct {
 	// blocks startup on "Hooks need review" — every time, unrecoverably, because
 	// the path is different on the next spawn too.
 	//
-	// Enable this ONLY where the hook sources are already vetted (they are copies
-	// of the reviewed golden-repo hooks). It runs every ENABLED hook without
-	// per-path review, so it does not honour per-hook "enabled = false" trust
-	// decisions recorded against the golden path. Off by default: this is an
-	// operator decision, not a default.
+	// Enabling this requires an explicit Repos entry for the reviewed golden
+	// checkout. AGM pins the source commit, reads hooks.json and every
+	// project-referenced hook from immutable Git objects, verifies their
+	// SHA-256 digest against the sandbox copy, and repeats that verification
+	// immediately before each launch and cold resume. Any missing, uncommitted,
+	// symlinked, or changed asset fails closed. It still runs every ENABLED hook
+	// without per-path review, so it does not honour per-hook "enabled = false"
+	// decisions recorded against the golden path. Off by default.
 	BypassCodexHookTrust bool `yaml:"bypass_codex_hook_trust,omitempty"`
 }
 

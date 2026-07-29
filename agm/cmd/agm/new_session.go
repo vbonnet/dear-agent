@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/cli"
+	"github.com/vbonnet/dear-agent/agm/internal/codexhooks"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/git"
@@ -196,6 +197,10 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 		return err
 	}
 	runtime := newCLICreateSessionRuntime(sessionName, exists, trustPreConfigured)
+	bypassCodexHookTrust, err := prepareCodexHookTrustBypass(ctx, sandboxInfo)
+	if err != nil {
+		return err
+	}
 	opCtx := &ops.OpContext{
 		Tmux:            session.NewRealTmux(),
 		CreationRuntime: runtime,
@@ -220,7 +225,7 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 		DisableAutoMode:      noAutoMode,
 		MaxBudgetUSD:         maxBudgetUsd,
 		ExtraAddDirs:         extraAddDirs,
-		BypassCodexHookTrust: sandboxInfo != nil && sandboxInfo.Enabled && cfg.Sandbox.BypassCodexHookTrust,
+		BypassCodexHookTrust: bypassCodexHookTrust,
 		ForwardTelemetry:     true,
 		ForwardClaudeOAuth:   true,
 		AllowEmptyPrompt:     true,
@@ -243,6 +248,26 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 		},
 	})
 	return err
+}
+
+func prepareCodexHookTrustBypass(ctx context.Context, sandboxInfo *manifest.SandboxConfig) (bool, error) {
+	if harnessName != "codex-cli" || !cfg.Sandbox.BypassCodexHookTrust {
+		return false, nil
+	}
+	if sandboxInfo == nil || !sandboxInfo.Enabled {
+		return false, nil
+	}
+	if len(cfg.Sandbox.Repos) == 0 || sandboxInfo.CodexHookSourceRepo == "" {
+		return false, fmt.Errorf("sandbox.bypass_codex_hook_trust requires an explicit sandbox.repos source")
+	}
+	attestation, err := codexhooks.Attest(ctx, sandboxInfo.CodexHookSourceRepo, sandboxInfo.WorkingDir)
+	if err != nil {
+		return false, fmt.Errorf("refusing Codex hook-trust bypass: %w", err)
+	}
+	sandboxInfo.CodexHookSourceRepo = attestation.SourceRepo
+	sandboxInfo.CodexHookSourceCommit = attestation.SourceCommit
+	sandboxInfo.CodexHookDigest = attestation.Digest
+	return true, nil
 }
 
 func resolveCreateLifecyclePrompt(harness, promptText, promptPath string) (string, error) {

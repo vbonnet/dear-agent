@@ -1760,8 +1760,11 @@ func TestBuildCreateSessionManifestPreservesRelationshipMetadata(t *testing.T) {
 
 func TestBuildCreateSessionManifestPersistsSandboxLaunchPolicyWithoutAliasing(t *testing.T) {
 	sandbox := &manifest.SandboxConfig{
-		Enabled: true,
-		ID:      "sandbox-session",
+		Enabled:               true,
+		ID:                    "sandbox-session",
+		CodexHookSourceRepo:   "/src/reviewed",
+		CodexHookSourceCommit: strings.Repeat("a", 40),
+		CodexHookDigest:       strings.Repeat("b", 64),
 	}
 	req := &CreateSessionRequest{
 		Cwd:                  "/tmp/sandbox",
@@ -1779,12 +1782,41 @@ func TestBuildCreateSessionManifestPersistsSandboxLaunchPolicyWithoutAliasing(t 
 	if !got.Sandbox.BypassCodexHookTrust {
 		t.Fatal("BypassCodexHookTrust = false, want true")
 	}
+	if got.Sandbox.CodexHookSourceRepo != sandbox.CodexHookSourceRepo ||
+		got.Sandbox.CodexHookSourceCommit != sandbox.CodexHookSourceCommit ||
+		got.Sandbox.CodexHookDigest != sandbox.CodexHookDigest {
+		t.Fatalf("persisted Codex hook evidence = %#v, want %#v", got.Sandbox, sandbox)
+	}
 	if !slices.Equal(got.Sandbox.ExtraAddDirs, req.ExtraAddDirs) {
 		t.Fatalf("ExtraAddDirs = %v, want %v", got.Sandbox.ExtraAddDirs, req.ExtraAddDirs)
 	}
 	req.ExtraAddDirs[0] = "/tmp/mutated"
 	if got.Sandbox.ExtraAddDirs[0] != "/tmp/worktree" {
 		t.Fatalf("persisted ExtraAddDirs aliases request: %v", got.Sandbox.ExtraAddDirs)
+	}
+}
+
+func TestVerifyCreateCodexHookTrustRechecksSandboxAssets(t *testing.T) {
+	worktreePath, hookTrust := resumeCodexHookFixture(t)
+	req := &CreateSessionRequest{
+		Cwd:                  worktreePath,
+		BypassCodexHookTrust: true,
+		Metadata: CreateSessionMetadata{Sandbox: &manifest.SandboxConfig{
+			Enabled:               true,
+			CodexHookSourceRepo:   hookTrust.SourceRepo,
+			CodexHookSourceCommit: hookTrust.SourceCommit,
+			CodexHookDigest:       hookTrust.Digest,
+		}},
+	}
+	params := &createSessionParams{harness: "codex-cli"}
+	if err := verifyCreateCodexHookTrust(context.Background(), req, params); err != nil {
+		t.Fatalf("verifyCreateCodexHookTrust() error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, ".codex", "hooks.json"), []byte(`{"hooks":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyCreateCodexHookTrust(context.Background(), req, params); err == nil {
+		t.Fatal("verifyCreateCodexHookTrust() error = nil after manifest mutation")
 	}
 }
 

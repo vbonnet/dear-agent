@@ -12,6 +12,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/claude"
+	"github.com/vbonnet/dear-agent/agm/internal/codexhooks"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	gitmanifest "github.com/vbonnet/dear-agent/agm/internal/git"
 	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
@@ -718,7 +719,17 @@ func prepareResumeLaunch(store dolt.Storage, m *manifest.Manifest, harnessName s
 		warnings := []string{}
 		if m.Sandbox != nil && m.Sandbox.Enabled {
 			spec.ExtraAddDirs = append([]string{}, m.Sandbox.ExtraAddDirs...)
-			spec.BypassCodexHookTrust = m.Sandbox.BypassCodexHookTrust
+			if m.Sandbox.BypassCodexHookTrust {
+				err := codexhooks.Verify(context.Background(), codexhooks.Attestation{
+					SourceRepo:   m.Sandbox.CodexHookSourceRepo,
+					SourceCommit: m.Sandbox.CodexHookSourceCommit,
+					Digest:       m.Sandbox.CodexHookDigest,
+				}, health.WorktreePath)
+				if err != nil {
+					return HarnessLaunchCommand{}, "", warnings, fmt.Errorf("revalidate Codex hook trust before resume: %w", err)
+				}
+				spec.BypassCodexHookTrust = true
+			}
 		}
 		if err := agent.EnsureCodexWorkdirTrusted(health.WorktreePath); err != nil {
 			warnings = append(warnings, fmt.Sprintf("Could not pre-trust Codex workdir %s: %v", health.WorktreePath, err))

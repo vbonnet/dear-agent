@@ -13,6 +13,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/codexcontrol"
+	"github.com/vbonnet/dear-agent/agm/internal/codexhooks"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
@@ -380,6 +381,9 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 	if err != nil {
 		return nil, err
 	}
+	if err := verifyCreateCodexHookTrust(callCtx, req, params); err != nil {
+		return nil, err
+	}
 	launchResult, err := launchCreateSession(callCtx, opCtx, buildHarnessLaunchSpec(req, params, sessionID, codexMeta))
 	if err != nil {
 		return nil, err
@@ -434,6 +438,25 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		return nil, err
 	}
 	return createSessionResult(req, params, sessionID), nil
+}
+
+func verifyCreateCodexHookTrust(ctx context.Context, req *CreateSessionRequest, params *createSessionParams) error {
+	if params.harness != "codex-cli" || !req.BypassCodexHookTrust {
+		return nil
+	}
+	sandbox := req.Metadata.Sandbox
+	if sandbox == nil || !sandbox.Enabled {
+		return ErrInvalidInput("bypass_codex_hook_trust", "An enabled sandbox with verified hook evidence is required.")
+	}
+	err := codexhooks.Verify(ctx, codexhooks.Attestation{
+		SourceRepo:   sandbox.CodexHookSourceRepo,
+		SourceCommit: sandbox.CodexHookSourceCommit,
+		Digest:       sandbox.CodexHookDigest,
+	}, req.Cwd)
+	if err != nil {
+		return ErrInvalidInput("bypass_codex_hook_trust", fmt.Sprintf("Hook evidence failed revalidation immediately before launch: %v", err))
+	}
+	return nil
 }
 
 func preparePiCreateRequest(req *CreateSessionRequest, sessionID string) (*CreateSessionRequest, error) {

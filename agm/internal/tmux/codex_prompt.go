@@ -47,6 +47,7 @@ var CodexPromptPatterns = []string{
 }
 
 var codexFooterPattern = regexp.MustCompile(`^gpt-\d[^\n]*\s·\s[^\n]+$`)
+var codexSelectorChoicePattern = regexp.MustCompile(`^[›>]\s+\d+\.`)
 
 // CodexTrustPromptPatterns are substrings that indicate Codex is showing a
 // first-run trust / onboarding consent prompt for the working directory,
@@ -390,10 +391,26 @@ func codexSelectorOwnsInput(content string, patterns []string, requireAll bool) 
 	if requireAll && matched != len(patterns) {
 		return false
 	}
-	return !hasCodexPaneOwnership(styledContentAfterLastLineContaining(
+	return !hasCodexPaneOwnershipAfterSelector(styledContentAfterLastLineContaining(
 		trimmed,
 		strings.ToLower(latestPattern),
 	))
+}
+
+// hasCodexPaneOwnershipAfterSelector distinguishes a selector's highlighted
+// numbered choice from a later Codex composer. Both use the same leading ›
+// glyph, but only the selector form is immediately followed by "N.".
+func hasCodexPaneOwnershipAfterSelector(content string) bool {
+	for line := range strings.SplitSeq(content, "\n") {
+		plain := strings.TrimSpace(stripANSI(line))
+		if codexSelectorChoicePattern.MatchString(plain) {
+			continue
+		}
+		if isCodexComposerAnchor(plain) || codexFooterPattern.MatchString(plain) {
+			return true
+		}
+	}
+	return false
 }
 
 // WaitForCodexPrompt polls the pane until the Codex TUI shows its composer
