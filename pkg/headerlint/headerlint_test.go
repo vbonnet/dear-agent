@@ -180,6 +180,26 @@ func TestCheckFile_DoesNotFlagQuotedExampleInsideFence(t *testing.T) {
 	}
 }
 
+func TestCheckFile_DoesNotFlagIndentedCodeBlock(t *testing.T) {
+	tests := map[string]string{
+		"four-spaces": "    **Status:** draft · **Owner:** docs\n",
+		"tab":         "\t**Status:** draft · **Owner:** docs\n",
+	}
+	for name, code := range tests {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := writeTemp(t, dir, "indented-code.md", "# Doc\n\n"+code)
+			violations, err := CheckFile(path)
+			if err != nil {
+				t.Fatalf("CheckFile: %v", err)
+			}
+			if len(violations) != 0 {
+				t.Fatalf("want indented code ignored, got %v", violations)
+			}
+		})
+	}
+}
+
 func TestCheckFile_DoesNotCloseLongFenceWithShortOrDifferentDelimiter(t *testing.T) {
 	const content = "# Doc-header format\n" +
 		"\n" +
@@ -764,6 +784,22 @@ func TestCheckFile_DoesNotFlagBoldShapedTextInsideInlineHTMLTokens(t *testing.T)
 	}
 }
 
+func TestCheckFile_DoesNotFlagBoldShapedTextInsideMultilineHTMLComment(t *testing.T) {
+	const content = "# Doc\n\n" +
+		"Intro <!-- comment\n" +
+		"**Status:** draft · **Owner:** docs\n" +
+		"-->\n"
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "inline-html-comment.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("want multiline inline HTML comment ignored, got %v", violations)
+	}
+}
+
 func TestCheckFile_ListNestedBlockquoteFenceEndsWithOuterList(t *testing.T) {
 	const content = "# Doc\n\n- > ```md\n> **Status:** draft · **Owner:** docs\n"
 	dir := t.TempDir()
@@ -983,6 +1019,22 @@ func TestCheckFile_MarkedBlockquoteBlankClosesParagraphBeforeOrderedHeading(t *t
 	}
 	if len(violations) != 0 {
 		t.Fatalf("want ordered H2 to end the header zone, got %v", violations)
+	}
+}
+
+func TestCheckFile_LeavingBlockquoteClosesParagraphBeforeOrderedHeading(t *testing.T) {
+	const content = "# Doc\n" +
+		"> quote\n" +
+		"2. ## Details\n" +
+		"**Status:** draft · **Owner:** docs\n"
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "container-end-heading.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("want ordered H2 after blockquote to end the header zone, got %v", violations)
 	}
 }
 
