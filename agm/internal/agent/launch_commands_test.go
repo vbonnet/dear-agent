@@ -289,7 +289,7 @@ func TestPastedLaunchSeamRejectsTerminalControlsBeforeConfiguredSender(t *testin
 		return nil
 	}
 	err := sendPastedShellCommandWith(send, "session", "quoted command", "unsafe\nvalue")
-	if err == nil || !strings.Contains(err.Error(), "terminal control character") {
+	if err == nil || !strings.Contains(err.Error(), "contains control characters") {
 		t.Fatalf("sendPastedShellCommandWith() error = %v, want terminal-control rejection", err)
 	}
 	if called {

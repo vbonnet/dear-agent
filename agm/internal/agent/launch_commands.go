@@ -3,9 +3,8 @@ package agent
 import (
 	"fmt"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
@@ -44,20 +43,9 @@ func sendPastedShellCommandWith(send func(string, string) error, sessionName, co
 
 func validatePastedShellValues(values ...string) error {
 	for index, value := range values {
-		if err := validatePastedShellValue(value); err != nil {
-			return fmt.Errorf("pasted shell value %d: %w", index+1, err)
-		}
-	}
-	return nil
-}
-
-func validatePastedShellValue(value string) error {
-	if !utf8.ValidString(value) {
-		return fmt.Errorf("invalid UTF-8")
-	}
-	for _, r := range value {
-		if unicode.IsControl(r) {
-			return fmt.Errorf("terminal control character %q is not allowed", r)
+		name := fmt.Sprintf("pasted shell value %d", index+1)
+		if err := harnessexec.ValidatePastedText(name, value); err != nil {
+			return err
 		}
 	}
 	return nil

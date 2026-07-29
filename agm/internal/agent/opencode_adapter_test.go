@@ -54,7 +54,7 @@ func TestOpenCodeResumeRejectsTerminalControlsBeforeTmux(t *testing.T) {
 	}
 	adapter := &OpenCodeAdapter{sessionStore: store}
 	err = adapter.ResumeSession(sessionID)
-	if err == nil || !strings.Contains(err.Error(), "terminal control character") {
+	if err == nil || !strings.Contains(err.Error(), "contains control characters") {
 		t.Fatalf("ResumeSession() error = %v, want pre-tmux terminal-control rejection", err)
 	}
 }
