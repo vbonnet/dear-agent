@@ -904,6 +904,7 @@ func TestRestoreResumePermissionUsesVerifiedLiteralKeys(t *testing.T) {
 		{name: "Claude default", harness: "claude-code", mode: "default"},
 		{name: "Claude auto", harness: "claude-code", mode: "auto", want: 1},
 		{name: "Claude plan", harness: "claude-code", mode: "plan", want: 2},
+		{name: "Legacy defaulted Claude auto", harness: "", mode: "auto", want: 1},
 		{name: "Claude invalid", harness: "claude-code", mode: "invalid"},
 		{name: "Codex plan", harness: "codex-cli", mode: "plan"},
 	}
@@ -911,9 +912,14 @@ func TestRestoreResumePermissionUsesVerifiedLiteralKeys(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fakeTmux := &resumeTestTmux{inputReadiness: session.InputReadiness{Ready: true, State: "YES"}}
 			result := &ResumeSessionResult{}
+			resolvedHarness := agent.NormalizeHarnessName(tt.harness)
+			if resolvedHarness == "" {
+				resolvedHarness = "claude-code"
+			}
 			restoreResumePermission(
 				t.Context(),
 				fakeTmux,
+				resolvedHarness,
 				&manifest.Manifest{Harness: tt.harness, PermissionMode: tt.mode},
 				ResumeSessionHealth{TmuxSessionName: "resume-session"},
 				result,

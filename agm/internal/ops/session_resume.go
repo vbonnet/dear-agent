@@ -261,7 +261,7 @@ func resumeSessionLocked( //nolint:gocyclo // keeping the ordered transaction an
 		return result, err
 	}
 	if sendCommand {
-		restoreResumePermission(completionCtx, tmuxAdapter, m, health, result, req)
+		restoreResumePermission(completionCtx, tmuxAdapter, harnessName, m, health, result, req)
 	}
 	if err := completionCtx.Err(); err != nil {
 		if created.owned() {
@@ -589,8 +589,8 @@ func rollbackResumeTmux(
 	return primaryErr
 }
 
-func restoreResumePermission(ctx context.Context, tmuxAdapter session.TmuxInterface, m *manifest.Manifest, health ResumeSessionHealth, result *ResumeSessionResult, req *ResumeSessionRequest) {
-	if agent.NormalizeHarnessName(m.Harness) != "claude-code" || m.PermissionMode == "" || m.PermissionMode == "default" {
+func restoreResumePermission(ctx context.Context, tmuxAdapter session.TmuxInterface, harnessName string, m *manifest.Manifest, health ResumeSessionHealth, result *ResumeSessionResult, req *ResumeSessionRequest) {
+	if harnessName != "claude-code" || m.PermissionMode == "" || m.PermissionMode == "default" {
 		return
 	}
 	count := map[string]int{"auto": 1, "plan": 2}[m.PermissionMode]
