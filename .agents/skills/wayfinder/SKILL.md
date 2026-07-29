@@ -1,6 +1,6 @@
 ---
 name: wayfinder
-description: Use when an AGENTS-compatible harness needs the Wayfinder lifecycle through the repository skill surface.
+description: Use when a change needs explicit discovery, design, requirements, planning, implementation evidence, and a retrospective across the nine-phase Wayfinder workflow.
 ---
 
 # Wayfinder
