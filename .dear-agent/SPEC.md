@@ -16,7 +16,7 @@ for plugins, capabilities, and fallback discovery surfaces.
 
 **DEAR-MARKET-03** When plugins are declared in the neutral marketplace, the system shall include source, version, description, and capability metadata.
 
-**DEAR-MARKET-04** When active non-Claude harnesses consume marketplace data, the system shall declare `agents-md-skill-fallback` discovery surfaces in the neutral catalog.
+**DEAR-MARKET-04** When active non-Claude harnesses consume marketplace data, the system shall declare each harness's supported discovery surface, using native Codex, OpenCode, and Pi skill modes where configured and `agents-md-skill-fallback` only for AGY.
 
 **DEAR-MARKET-05** When Claude Code consumes marketplace data, the system shall declare the native Claude catalog path as `.claude-plugin/marketplace.json`.
 

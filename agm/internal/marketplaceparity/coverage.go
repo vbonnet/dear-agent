@@ -68,6 +68,10 @@ type claudePluginManifest struct {
 	Skills []string `json:"skills"`
 }
 
+type piSettings struct {
+	Skills []string `json:"skills"`
+}
+
 type exportedSkill struct {
 	Name          string
 	CanonicalPath string
@@ -152,7 +156,10 @@ func ValidateHarnessSurfaces(root string) error {
 }
 
 func validateNativeSkillCoverage(root string, catalog Catalog, surface HarnessSurface) error {
-	if surface.Mode != "native-codex-skill" && surface.Mode != "native-opencode-skill" && surface.Mode != "agents-md-skill-fallback" {
+	if surface.Mode != "native-codex-skill" &&
+		surface.Mode != "native-opencode-skill" &&
+		surface.Mode != "native-pi-skill-path" &&
+		surface.Mode != "agents-md-skill-fallback" {
 		return nil
 	}
 	for _, plugin := range catalog.Plugins {
@@ -163,18 +170,10 @@ func validateNativeSkillCoverage(root string, catalog Catalog, surface HarnessSu
 		if err != nil {
 			return err
 		}
-		entrypointRoot := surface.Catalog
-		if surface.Mode == "agents-md-skill-fallback" {
-			entrypointRoot = ".agents/skills"
-		}
 		for _, skill := range exported {
-			entrypoint := filepath.Join(root, entrypointRoot, skill.Name, "SKILL.md")
-			info, err := os.Lstat(entrypoint)
+			entrypoint, err := nativeSkillEntrypoint(root, surface, plugin.Name, skill.Name)
 			if err != nil {
-				return fmt.Errorf("plugin %q exported skill %q missing native entrypoint: %w", plugin.Name, skill.Name, err)
-			}
-			if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-				return fmt.Errorf("plugin %q exported skill %q native entrypoint %q is not a regular file", plugin.Name, skill.Name, entrypoint)
+				return err
 			}
 			if err := validateNativeSkillEntrypoint(root, entrypoint, plugin.Name, skill); err != nil {
 				return err
@@ -182,6 +181,49 @@ func validateNativeSkillCoverage(root string, catalog Catalog, surface HarnessSu
 		}
 	}
 	return nil
+}
+
+func nativeSkillEntrypoint(root string, surface HarnessSurface, pluginName, skillName string) (string, error) {
+	if surface.Mode != "native-pi-skill-path" {
+		entrypointRoot := surface.Catalog
+		if surface.Mode == "agents-md-skill-fallback" {
+			entrypointRoot = ".agents/skills"
+		}
+		return requireNativeSkillEntrypoint(filepath.Join(root, entrypointRoot, skillName, "SKILL.md"), pluginName, skillName)
+	}
+
+	settingsPath := filepath.Join(root, surface.Catalog)
+	var settings piSettings
+	if err := readJSON(settingsPath, &settings); err != nil {
+		return "", fmt.Errorf("read Pi skill settings: %w", err)
+	}
+	if len(settings.Skills) == 0 {
+		return "", fmt.Errorf("pi skill settings %q declare no skill roots", surface.Catalog)
+	}
+	for _, declared := range settings.Skills {
+		skillRoot := filepath.Clean(filepath.Join(filepath.Dir(settingsPath), filepath.FromSlash(declared)))
+		relative, err := filepath.Rel(root, skillRoot)
+		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return "", fmt.Errorf("pi skill root %q escapes the repository", declared)
+		}
+		entrypoint := filepath.Join(skillRoot, skillName, "SKILL.md")
+		if _, err := os.Lstat(entrypoint); os.IsNotExist(err) {
+			continue
+		}
+		return requireNativeSkillEntrypoint(entrypoint, pluginName, skillName)
+	}
+	return "", fmt.Errorf("plugin %q exported skill %q missing from Pi configured skill roots", pluginName, skillName)
+}
+
+func requireNativeSkillEntrypoint(entrypoint, pluginName, skillName string) (string, error) {
+	info, err := os.Lstat(entrypoint)
+	if err != nil {
+		return "", fmt.Errorf("plugin %q exported skill %q missing native entrypoint: %w", pluginName, skillName, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return "", fmt.Errorf("plugin %q exported skill %q native entrypoint %q is not a regular file", pluginName, skillName, entrypoint)
+	}
+	return entrypoint, nil
 }
 
 func loadExportedSkills(root string, plugin PluginEntry) ([]exportedSkill, error) {
@@ -333,6 +375,9 @@ func validateNativeSkillEntrypoint(root, entrypoint, pluginName string, skill ex
 	}
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("plugin %q exported skill %q canonical entrypoint %q is not a regular file", pluginName, skill.Name, skill.CanonicalPath)
+	}
+	if filepath.Clean(entrypoint) == filepath.Clean(canonicalPath) {
+		return nil
 	}
 	wantReference, err := filepath.Rel(filepath.Dir(entrypoint), canonicalPath)
 	if err != nil {
