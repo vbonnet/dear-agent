@@ -575,6 +575,9 @@ func optionalCodexMetadata(callCtx context.Context, opCtx *OpContext, req *Creat
 }
 
 func buildHarnessLaunchSpec(req *CreateSessionRequest, params *createSessionParams, sessionID string, codexMeta *manifest.Codex) HarnessLaunchSpec {
+	bypassCodexHookTrust := req.BypassCodexHookTrust &&
+		req.Metadata.Sandbox != nil &&
+		req.Metadata.Sandbox.Enabled
 	spec := HarnessLaunchSpec{
 		Harness:          params.harness,
 		Model:            params.model,
@@ -589,17 +592,31 @@ func buildHarnessLaunchSpec(req *CreateSessionRequest, params *createSessionPara
 		ExtraAddDirs:     append([]string{}, req.ExtraAddDirs...),
 		ForwardTelemetry: req.ForwardTelemetry,
 
-		BypassCodexHookTrust: req.BypassCodexHookTrust,
-		Codex:            codexMeta,
-		Pi:               req.Metadata.Pi,
-		PiExtension:      req.Metadata.PiExtension,
-		PiPolicyJSON:     req.Metadata.PiPolicyJSON,
-		PiPolicyFile:     req.Metadata.PiPolicyFile,
+		BypassCodexHookTrust: bypassCodexHookTrust,
+		Codex:                codexMeta,
+		Pi:                   req.Metadata.Pi,
+		PiExtension:          req.Metadata.PiExtension,
+		PiPolicyJSON:         req.Metadata.PiPolicyJSON,
+		PiPolicyFile:         req.Metadata.PiPolicyFile,
 	}
 	if params.harness == "pi-cli" {
 		spec.PiLaunchID = launchparity.NewPiLaunchID()
 	}
 	return spec
+}
+
+func cloneCreateSandbox(req *CreateSessionRequest) *manifest.SandboxConfig {
+	if req.Metadata.Sandbox == nil {
+		return nil
+	}
+	sandbox := *req.Metadata.Sandbox
+	sandbox.ExtraAddDirs = nil
+	sandbox.BypassCodexHookTrust = false
+	if sandbox.Enabled {
+		sandbox.ExtraAddDirs = append([]string{}, req.ExtraAddDirs...)
+		sandbox.BypassCodexHookTrust = req.BypassCodexHookTrust
+	}
+	return &sandbox
 }
 
 func prepareCreateManifestDir(req *CreateSessionRequest) (manifestPath string, registrationAllowed, created bool, err error) {
@@ -795,7 +812,7 @@ func buildCreateSessionManifest(req *CreateSessionRequest, params *createSession
 		ModelTier:        req.Metadata.ModelTier,
 		Claude:           manifest.Claude{},
 		PermissionPolicy: cloneCreatePermissionPolicy(req.Metadata.PermissionPolicy),
-		Sandbox:          req.Metadata.Sandbox,
+		Sandbox:          cloneCreateSandbox(req),
 		IsTest:           req.Metadata.IsTest,
 		Disposable:       req.Metadata.Disposable,
 		DisposableTTL:    req.Metadata.DisposableTTL,

@@ -716,6 +716,10 @@ func prepareResumeLaunch(store dolt.Storage, m *manifest.Manifest, harnessName s
 		return HarnessLaunchCommand{Command: prepared.Command, Cancel: prepared.Cancel}, "", warnings, nil
 	case "codex-cli":
 		warnings := []string{}
+		if m.Sandbox != nil && m.Sandbox.Enabled {
+			spec.ExtraAddDirs = append([]string{}, m.Sandbox.ExtraAddDirs...)
+			spec.BypassCodexHookTrust = m.Sandbox.BypassCodexHookTrust
+		}
 		if err := agent.EnsureCodexWorkdirTrusted(health.WorktreePath); err != nil {
 			warnings = append(warnings, fmt.Sprintf("Could not pre-trust Codex workdir %s: %v", health.WorktreePath, err))
 		}

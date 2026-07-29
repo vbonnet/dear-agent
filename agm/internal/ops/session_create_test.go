@@ -1757,3 +1757,58 @@ func TestBuildCreateSessionManifestPreservesRelationshipMetadata(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildCreateSessionManifestPersistsSandboxLaunchPolicyWithoutAliasing(t *testing.T) {
+	sandbox := &manifest.SandboxConfig{
+		Enabled: true,
+		ID:      "sandbox-session",
+	}
+	req := &CreateSessionRequest{
+		Cwd:                  "/tmp/sandbox",
+		ExtraAddDirs:         []string{"/tmp/worktree", "/tmp/beads"},
+		BypassCodexHookTrust: true,
+		Metadata:             CreateSessionMetadata{Sandbox: sandbox},
+	}
+	params := &createSessionParams{name: "sandbox", harness: "codex-cli", model: "gpt-5.5"}
+
+	got := buildCreateSessionManifest(req, params, "sandbox-session", nil)
+
+	if got.Sandbox == sandbox {
+		t.Fatal("Sandbox aliases request metadata")
+	}
+	if !got.Sandbox.BypassCodexHookTrust {
+		t.Fatal("BypassCodexHookTrust = false, want true")
+	}
+	if !slices.Equal(got.Sandbox.ExtraAddDirs, req.ExtraAddDirs) {
+		t.Fatalf("ExtraAddDirs = %v, want %v", got.Sandbox.ExtraAddDirs, req.ExtraAddDirs)
+	}
+	req.ExtraAddDirs[0] = "/tmp/mutated"
+	if got.Sandbox.ExtraAddDirs[0] != "/tmp/worktree" {
+		t.Fatalf("persisted ExtraAddDirs aliases request: %v", got.Sandbox.ExtraAddDirs)
+	}
+}
+
+func TestBuildHarnessLaunchSpecRejectsHookBypassWithoutEnabledSandbox(t *testing.T) {
+	params := &createSessionParams{name: "codex", harness: "codex-cli", model: "gpt-5.5"}
+	for _, tt := range []struct {
+		name    string
+		sandbox *manifest.SandboxConfig
+		want    bool
+	}{
+		{name: "no sandbox"},
+		{name: "disabled sandbox", sandbox: &manifest.SandboxConfig{}},
+		{name: "enabled sandbox", sandbox: &manifest.SandboxConfig{Enabled: true}, want: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &CreateSessionRequest{
+				Cwd:                  "/tmp/work",
+				BypassCodexHookTrust: true,
+				Metadata:             CreateSessionMetadata{Sandbox: tt.sandbox},
+			}
+			got := buildHarnessLaunchSpec(req, params, "session-id", nil)
+			if got.BypassCodexHookTrust != tt.want {
+				t.Fatalf("BypassCodexHookTrust = %v, want %v", got.BypassCodexHookTrust, tt.want)
+			}
+		})
+	}
+}

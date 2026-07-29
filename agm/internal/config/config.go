@@ -332,6 +332,9 @@ func Load(cfgFile string) (*Config, error) {
 	if cfg.Lock.Path != "" {
 		cfg.Lock.Path = expandHome(cfg.Lock.Path)
 	}
+	for i, dir := range cfg.Sandbox.WritableDirs {
+		cfg.Sandbox.WritableDirs[i] = expandHome(dir)
+	}
 
 	// Validate configuration
 	if err := validate(cfg); err != nil {

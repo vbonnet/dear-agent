@@ -424,6 +424,72 @@ func TestPrepareResumeLaunchDefaultsModelLessCodexSession(t *testing.T) {
 	}
 }
 
+func TestPrepareResumeLaunchRestoresSandboxCodexPolicy(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	worktreePath := filepath.Join(t.TempDir(), "sandbox worktree")
+	extraAddDir := filepath.Join(t.TempDir(), "real worktree")
+	m := &manifest.Manifest{
+		SessionID: "sandbox-codex-session",
+		Harness:   "codex-cli",
+		Codex:     &manifest.Codex{SessionID: "native-codex-session"},
+		Sandbox: &manifest.SandboxConfig{
+			Enabled:              true,
+			ExtraAddDirs:         []string{extraAddDir},
+			BypassCodexHookTrust: true,
+		},
+	}
+	launch, _, _, err := prepareResumeLaunch(
+		nil,
+		m,
+		"codex-cli",
+		ResumeSessionHealth{
+			TmuxSessionName: "sandbox-codex",
+			WorktreePath:    worktreePath,
+		},
+	)
+	if err != nil {
+		t.Fatalf("prepareResumeLaunch() error: %v", err)
+	}
+	for _, want := range []string{
+		"--add-dir " + launchparity.ShellQuote(extraAddDir),
+		"--bypass-hook-trust",
+	} {
+		if !strings.Contains(launch.Command, want) {
+			t.Fatalf("prepareResumeLaunch() command = %q, want %q", launch.Command, want)
+		}
+	}
+}
+
+func TestPrepareResumeLaunchDoesNotRestoreCodexPolicyWithoutEnabledSandbox(t *testing.T) {
+	t.Setenv("AGM_STATE_DIR", t.TempDir())
+	m := &manifest.Manifest{
+		SessionID: "unsandboxed-codex-session",
+		Harness:   "codex-cli",
+		Codex:     &manifest.Codex{SessionID: "native-codex-session"},
+		Sandbox: &manifest.SandboxConfig{
+			ExtraAddDirs:         []string{"/tmp/untrusted"},
+			BypassCodexHookTrust: true,
+		},
+	}
+	launch, _, _, err := prepareResumeLaunch(
+		nil,
+		m,
+		"codex-cli",
+		ResumeSessionHealth{
+			TmuxSessionName: "unsandboxed-codex",
+			WorktreePath:    t.TempDir(),
+		},
+	)
+	if err != nil {
+		t.Fatalf("prepareResumeLaunch() error: %v", err)
+	}
+	for _, unexpected := range []string{"--add-dir", "--bypass-hook-trust"} {
+		if strings.Contains(launch.Command, unexpected) {
+			t.Fatalf("prepareResumeLaunch() command = %q, unexpectedly contains %q", launch.Command, unexpected)
+		}
+	}
+}
+
 func TestPrepareResumeLaunchAuthorizesAgyWorktree(t *testing.T) {
 	worktreePath := filepath.Join(t.TempDir(), "agy worktree")
 	m := &manifest.Manifest{
