@@ -62,6 +62,7 @@ var (
 	headingH2Plus = regexp.MustCompile(`^ {0,3}#{2,6}([ \t]|$)`)
 	atxHeading    = regexp.MustCompile(`^ {0,3}#{1,6}([ \t]|$)`)
 	setextHeading = regexp.MustCompile(`^ {0,3}(?:=+|-+)[ \t]*$`)
+	thematicBreak = regexp.MustCompile(`^ {0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$`)
 )
 
 // CheckFile validates one Markdown file. Content defects are returned as
@@ -531,6 +532,9 @@ func inlineCodeBlockBoundary(line string, container fenceContainerContext) bool 
 	if matchesContainerBlockPattern(line, container, setextHeading) {
 		return true
 	}
+	if matchesContainerBlockPattern(line, container, thematicBreak) {
+		return true
+	}
 	if _, _, isFence := fenceDelimiter(line); isFence {
 		return true
 	}
@@ -540,7 +544,7 @@ func inlineCodeBlockBoundary(line string, container fenceContainerContext) bool 
 }
 
 func matchesContainerBlockPattern(line string, container fenceContainerContext, pattern *regexp.Regexp) bool {
-	offset, ok := container.contentStart(line)
+	offset, ok := inlineCodeContentStart(container, line)
 	return ok && pattern.MatchString(line[offset:])
 }
 
@@ -559,12 +563,31 @@ func sameInlineCodeContainer(container fenceContainerContext, line string) bool 
 		lineContainer := parseFenceContainerContext(line)
 		return lineContainer.quoteDepth == 0 && !lineContainer.hasList
 	}
-	contentStart, ok := container.contentStart(line)
+	contentStart, ok := inlineCodeContentStart(container, line)
 	if !ok {
 		return false
 	}
 	nested := parseFenceContainerContext(line[contentStart:])
 	return nested.quoteDepth == 0 && !nested.hasList
+}
+
+// inlineCodeContentStart recognizes both an explicitly repeated container
+// prefix and CommonMark's lazy continuation of a container paragraph. A lazy
+// line may omit the quote marker or list indentation, but it may not introduce
+// a different container. Block starters are rejected separately by
+// inlineCodeBlockBoundary after this returns their content offset.
+func inlineCodeContentStart(container fenceContainerContext, line string) (int, bool) {
+	if offset, ok := container.contentStart(line); ok {
+		return offset, true
+	}
+	if (container.quoteDepth == 0 && !container.hasList) || strings.TrimSpace(line) == "" {
+		return 0, false
+	}
+	lineContainer := parseFenceContainerContext(line)
+	if lineContainer.quoteDepth != 0 || lineContainer.hasList {
+		return 0, false
+	}
+	return 0, true
 }
 
 func matchesContainerATXHeading(line string, pattern *regexp.Regexp) bool {

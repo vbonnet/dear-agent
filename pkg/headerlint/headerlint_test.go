@@ -588,3 +588,40 @@ func TestCheckFile_InlineCodeDoesNotCrossSetextHeading(t *testing.T) {
 		t.Fatalf("want one visible header-field violation, got %v", violations)
 	}
 }
+
+func TestCheckFile_InlineCodeDoesNotCrossThematicBreak(t *testing.T) {
+	for _, delimiter := range []string{"***", "___", "* * *", "_ _ _"} {
+		t.Run(delimiter, func(t *testing.T) {
+			content := "# Doc\n\nUnmatched ` opener\n" + delimiter +
+				"\n**Status:** draft · **Owner:** docs\n` later\n"
+			dir := t.TempDir()
+			path := writeTemp(t, dir, "thematic-break.md", content)
+			violations, err := CheckFile(path)
+			if err != nil {
+				t.Fatalf("CheckFile: %v", err)
+			}
+			if len(violations) != 1 {
+				t.Fatalf("want one visible header-field violation across %q, got %v", delimiter, violations)
+			}
+		})
+	}
+}
+
+func TestCheckFile_PreservesLazyContainerInlineCodeContinuation(t *testing.T) {
+	for name, content := range map[string]string{
+		"blockquote": "# Doc\n\n> old form is `example\n**Status:** draft · **Owner:** docs\n> continues here`\n",
+		"list":       "# Doc\n\n- old form is `example\n**Status:** draft · **Owner:** docs\n  continues here`\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := writeTemp(t, dir, name+".md", content)
+			violations, err := CheckFile(path)
+			if err != nil {
+				t.Fatalf("CheckFile: %v", err)
+			}
+			if len(violations) != 0 {
+				t.Fatalf("want lazy continuation code span ignored, got %v", violations)
+			}
+		})
+	}
+}
