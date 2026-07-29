@@ -217,19 +217,16 @@ func TestRefresh_AsynchronousUntouchedBodyCloseIsOrdinaryError(t *testing.T) {
 	}
 }
 
-func TestRefresh_AsynchronousUntouchedBodyCloseHasNoFixedGraceDeadline(t *testing.T) {
+func TestRefresh_AsynchronousUntouchedBodyCloseBeyondBoundQuarantines(t *testing.T) {
 	r, _, quarPath := quarantineResolver(t, "http://token.invalid", "rt-untouched")
 	r.HTTPClient = &http.Client{Transport: asynchronousUntouchedBodyErrorTransport{closeDelay: 250 * time.Millisecond}}
 
 	_, err := r.Refresh(context.Background())
-	if err == nil {
-		t.Fatal("expected transport error")
+	if !errors.Is(err, ErrRefreshOutcomeUnknown) {
+		t.Fatalf("error = %v, want ErrRefreshOutcomeUnknown after bounded close wait", err)
 	}
-	if errors.Is(err, ErrRefreshOutcomeUnknown) {
-		t.Fatalf("a conforming delayed close of an unread body must remain retryable: %v", err)
-	}
-	if _, statErr := os.Stat(quarPath); !os.IsNotExist(statErr) {
-		t.Fatal("a delayed but untouched body close must not quarantine the token")
+	if _, statErr := os.Stat(quarPath); statErr != nil {
+		t.Fatalf("unresolved asynchronous body close was not quarantined: %v", statErr)
 	}
 }
 

@@ -81,19 +81,30 @@ func (r OAuthResolver) refreshStopped(clearRotated bool) (bool, error) {
 // WriteRefreshStop prevents every resolver entry point using these credentials
 // from presenting the refresh token again until an operator clears the marker.
 func (r OAuthResolver) WriteRefreshStop(reason string) error {
-	path := r.RefreshStopPath()
-	if path == "" {
-		return errors.New("cannot resolve refresh stop path")
-	}
-	if reason == "" {
-		reason = ErrRefreshStopped.Error()
-	}
 	creds, _, ok := r.readFullCredentials()
 	if !ok || creds.ClaudeAIOAuth.RefreshToken == "" {
 		return errors.New("cannot fingerprint credentials for refresh stop")
 	}
+	return r.writeRefreshStopForToken(creds.ClaudeAIOAuth.RefreshToken, reason)
+}
+
+// writeRefreshStopForToken records the exact token whose exchange became
+// ambiguous. The credentials file may have been rotated by another client
+// after that exchange, so rereading it here could stop the replacement token
+// instead of the token that was actually presented.
+func (r OAuthResolver) writeRefreshStopForToken(refreshToken, reason string) error {
+	path := r.RefreshStopPath()
+	if path == "" {
+		return errors.New("cannot resolve refresh stop path")
+	}
+	if refreshToken == "" {
+		return errors.New("cannot fingerprint empty refresh token for refresh stop")
+	}
+	if reason == "" {
+		reason = ErrRefreshStopped.Error()
+	}
 	data, err := json.Marshal(refreshStopRecord{
-		RefreshTokenFP: RefreshTokenFingerprint(creds.ClaudeAIOAuth.RefreshToken),
+		RefreshTokenFP: RefreshTokenFingerprint(refreshToken),
 		Reason:         reason,
 	})
 	if err != nil {

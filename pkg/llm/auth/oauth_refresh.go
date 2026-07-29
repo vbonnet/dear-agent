@@ -53,6 +53,11 @@ const (
 	// maxErrBodyBytes caps how much of a non-2xx response body we read for
 	// diagnostics, so a hostile/oversized error page can't exhaust memory.
 	maxErrBodyBytes = 4 << 10
+
+	// requestBodyCloseWait bounds how long an erroring transport may retain the
+	// refresh-token request body after RoundTrip returns. If closure remains
+	// unresolved, the exchange is conservatively treated as possibly spent.
+	requestBodyCloseWait = 100 * time.Millisecond
 )
 
 // ErrTokenFamilyDead signals an unrecoverable refresh: the OAuth server
@@ -197,7 +202,7 @@ func (r OAuthResolver) Refresh(ctx context.Context) (string, error) {
 				// credential-scoped stop is written even when a caller chose a
 				// custom quarantine path, so every resolver entrypoint sees
 				// the same fail-closed state.
-				stopErr := r.WriteRefreshStop(err.Error())
+				stopErr := r.writeRefreshStopForToken(creds.ClaudeAIOAuth.RefreshToken, err.Error())
 				if qerr := r.writeQuarantine(creds.ClaudeAIOAuth.RefreshToken, err.Error()); qerr != nil {
 					// The protection lives in that file, not in this process:
 					// the next tick is a fresh process that reads the marker. A
@@ -257,7 +262,7 @@ func (r OAuthResolver) Refresh(ctx context.Context) (string, error) {
 			// Always write the credential-scoped stop. A caller-selected
 			// quarantine location is not necessarily visible to another
 			// resolver using the same credentials.
-			stopErr := r.WriteRefreshStop(reason)
+			stopErr := r.writeRefreshStopForToken(creds.ClaudeAIOAuth.RefreshToken, reason)
 			return errors.Join(
 				fmt.Errorf("%w: %w", ErrRefreshNotPersisted, werr),
 				wrapQuarantineWriteError(qerr),
@@ -434,9 +439,11 @@ func (r *observedReadCloser) waitForClose(ctx context.Context) {
 	if r.closed.Load() {
 		return
 	}
+	waitCtx, cancel := context.WithTimeout(ctx, requestBodyCloseWait)
+	defer cancel()
 	select {
 	case <-r.closedCh:
-	case <-ctx.Done():
+	case <-waitCtx.Done():
 	}
 }
 

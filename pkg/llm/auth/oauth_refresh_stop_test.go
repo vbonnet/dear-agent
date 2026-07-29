@@ -94,6 +94,30 @@ func TestRefreshStopSelfClearsAfterCredentialRotation(t *testing.T) {
 	}
 }
 
+func TestRefreshStopFingerprintsAttemptedTokenAfterConcurrentRotation(t *testing.T) {
+	credentials := writeFullCreds(t, "stale", staleMillis(), "attempted")
+	resolver := OAuthResolver{CredentialsPath: credentials}
+
+	data, err := os.ReadFile(credentials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(credentials, []byte(strings.Replace(string(data), "attempted", "rotated", 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := resolver.writeRefreshStopForToken("attempted", "ambiguous exchange"); err != nil {
+		t.Fatal(err)
+	}
+
+	stopped, err := resolver.RefreshStopped()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stopped {
+		t.Fatal("stop for attempted token blocked the concurrently rotated replacement")
+	}
+}
+
 func TestInspectRefreshStopLeavesRotatedMarkerUntouched(t *testing.T) {
 	credentials := writeFullCreds(t, "stale", staleMillis(), "before")
 	resolver := OAuthResolver{CredentialsPath: credentials}
