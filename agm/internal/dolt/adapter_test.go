@@ -108,6 +108,95 @@ func TestDefaultConfig(t *testing.T) {
 	}
 }
 
+func TestConfiguredWorkspaceConfigsIncludesEveryEnabledStore(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	originalAgmConfigPath := agmConfigPath
+	t.Cleanup(func() {
+		lookupEnv = originalLookupEnv
+		agmConfigPath = originalAgmConfigPath
+	})
+
+	configPath := t.TempDir() + "/config.yaml"
+	if err := os.WriteFile(configPath, []byte(`version: 1
+default_workspace: personal
+workspaces:
+  - name: personal
+    enabled: true
+  - name: oss
+    enabled: true
+  - name: retired
+    enabled: false
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agmConfigPath = configPath
+	lookupEnv = func(key string) (string, bool) {
+		values := map[string]string{
+			"ENGRAM_TEST_MODE":      "1",
+			"ENGRAM_TEST_WORKSPACE": "personal",
+			"WORKSPACE":             "personal",
+			"DOLT_PORT":             "3307",
+		}
+		value, ok := values[key]
+		return value, ok
+	}
+
+	configs, err := ConfiguredWorkspaceConfigs()
+	if err != nil {
+		t.Fatalf("ConfiguredWorkspaceConfigs: %v", err)
+	}
+	if len(configs) != 2 {
+		t.Fatalf("configured stores = %d, want 2: %#v", len(configs), configs)
+	}
+	for index, want := range []string{"personal", "oss"} {
+		if configs[index].Workspace != want || configs[index].Database != want {
+			t.Errorf("config[%d] = workspace %q database %q, want %q/%q",
+				index, configs[index].Workspace, configs[index].Database, want, want)
+		}
+	}
+}
+
+func TestConfiguredWorkspaceConfigsPreservesExplicitSharedDatabase(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	originalAgmConfigPath := agmConfigPath
+	t.Cleanup(func() {
+		lookupEnv = originalLookupEnv
+		agmConfigPath = originalAgmConfigPath
+	})
+
+	configPath := t.TempDir() + "/config.yaml"
+	if err := os.WriteFile(configPath, []byte(`default_workspace: personal
+workspaces:
+  - name: personal
+    enabled: true
+  - name: oss
+    enabled: true
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agmConfigPath = configPath
+	lookupEnv = func(key string) (string, bool) {
+		values := map[string]string{
+			"ENGRAM_TEST_MODE":      "1",
+			"ENGRAM_TEST_WORKSPACE": "personal",
+			"WORKSPACE":             "personal",
+			"DOLT_DATABASE":         "agm_test",
+		}
+		value, ok := values[key]
+		return value, ok
+	}
+
+	configs, err := ConfiguredWorkspaceConfigs()
+	if err != nil {
+		t.Fatalf("ConfiguredWorkspaceConfigs: %v", err)
+	}
+	for _, config := range configs {
+		if config.Database != "agm_test" {
+			t.Errorf("workspace %q database = %q, want agm_test", config.Workspace, config.Database)
+		}
+	}
+}
+
 func TestDefaultConfigSelectsExplicitTestWorkspace(t *testing.T) {
 	originalLookupEnv := lookupEnv
 	originalAgmConfigPath := agmConfigPath

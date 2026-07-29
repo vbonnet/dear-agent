@@ -1,13 +1,84 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/internal/gittest"
 )
+
+type fakeActiveSessionStore struct {
+	names []string
+	err   error
+}
+
+func (s *fakeActiveSessionStore) ListActiveSessions(context.Context) ([]string, error) {
+	return s.names, s.err
+}
+
+func (s *fakeActiveSessionStore) Close() error { return nil }
+
+func TestGetActiveSessionsFromDoltAggregatesConfiguredWorkspaces(t *testing.T) {
+	previousConfigs := activeSessionStoreConfigs
+	previousOpen := openActiveSessionStore
+	t.Cleanup(func() {
+		activeSessionStoreConfigs = previousConfigs
+		openActiveSessionStore = previousOpen
+	})
+
+	activeSessionStoreConfigs = func() ([]*dolt.Config, error) {
+		return []*dolt.Config{
+			{Workspace: "personal"},
+			{Workspace: "oss"},
+		}, nil
+	}
+	openActiveSessionStore = func(config *dolt.Config) (activeSessionStore, error) {
+		names := map[string][]string{
+			"personal": {"api-only-personal"},
+			"oss":      {"api-only-oss"},
+		}
+		return &fakeActiveSessionStore{names: names[config.Workspace]}, nil
+	}
+
+	active, err := getActiveSessionsFromDolt(context.Background())
+	if err != nil {
+		t.Fatalf("getActiveSessionsFromDolt: %v", err)
+	}
+	for _, name := range []string{"api-only-personal", "api-only-oss"} {
+		if !active[name] {
+			t.Errorf("aggregated active set omitted %q: %#v", name, active)
+		}
+	}
+}
+
+func TestGetActiveSessionsFromDoltFailsWhenAnyWorkspaceIsUnavailable(t *testing.T) {
+	previousConfigs := activeSessionStoreConfigs
+	previousOpen := openActiveSessionStore
+	t.Cleanup(func() {
+		activeSessionStoreConfigs = previousConfigs
+		openActiveSessionStore = previousOpen
+	})
+
+	activeSessionStoreConfigs = func() ([]*dolt.Config, error) {
+		return []*dolt.Config{{Workspace: "personal"}, {Workspace: "oss"}}, nil
+	}
+	openActiveSessionStore = func(config *dolt.Config) (activeSessionStore, error) {
+		if config.Workspace == "oss" {
+			return nil, errors.New("store offline")
+		}
+		return &fakeActiveSessionStore{names: []string{"personal-live"}}, nil
+	}
+
+	_, err := getActiveSessionsFromDolt(context.Background())
+	if err == nil || !strings.Contains(err.Error(), `workspace "oss"`) {
+		t.Fatalf("getActiveSessionsFromDolt error = %v, want oss workspace failure", err)
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Command registration

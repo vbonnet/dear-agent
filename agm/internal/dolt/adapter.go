@@ -3,6 +3,7 @@ package dolt
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -273,6 +274,70 @@ func DefaultConfig() (*Config, error) {
 		Password:    password,
 		StartScript: startScript,
 	}, nil
+}
+
+// ConfiguredWorkspaceConfigs returns every enabled workspace store that
+// destructive cross-repository maintenance must query before it can treat its
+// active-session set as complete. When DOLT_DATABASE is explicitly set, the
+// configured workspaces share that database and remain separated by the
+// workspace column; otherwise each workspace uses its conventional same-name
+// database.
+func ConfiguredWorkspaceConfigs() ([]*Config, error) {
+	base, err := DefaultConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	path := expandTilde(agmConfigPath)
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return []*Config{base}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read AGM workspace config: %w", err)
+	}
+	var cfg struct {
+		Workspaces []struct {
+			Name    string `yaml:"name"`
+			Enabled *bool  `yaml:"enabled"`
+		} `yaml:"workspaces"`
+	}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse AGM workspace config: %w", err)
+	}
+
+	explicitDatabase, databaseIsExplicit := lookupEnv("DOLT_DATABASE")
+	databaseIsExplicit = databaseIsExplicit && explicitDatabase != ""
+	seen := make(map[string]bool, len(cfg.Workspaces)+1)
+	configs := make([]*Config, 0, len(cfg.Workspaces)+1)
+	add := func(workspace string) {
+		if workspace == "" || seen[workspace] {
+			return
+		}
+		seen[workspace] = true
+		workspaceConfig := *base
+		workspaceConfig.Workspace = workspace
+		if databaseIsExplicit {
+			workspaceConfig.Database = explicitDatabase
+		} else {
+			workspaceConfig.Database = workspace
+		}
+		configs = append(configs, &workspaceConfig)
+	}
+	for index, workspace := range cfg.Workspaces {
+		if workspace.Enabled != nil && !*workspace.Enabled {
+			continue
+		}
+		if strings.TrimSpace(workspace.Name) == "" {
+			return nil, fmt.Errorf("AGM workspace config entry %d has no name", index+1)
+		}
+		add(workspace.Name)
+	}
+	add(base.Workspace)
+	if len(configs) == 0 {
+		return []*Config{base}, nil
+	}
+	return configs, nil
 }
 
 func validateTestExecutionTarget(workspace, database string) error {

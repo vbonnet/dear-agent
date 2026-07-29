@@ -248,27 +248,44 @@ func scanPrunableRefs(repoDirs []string) []orphanedWorktree {
 	return orphans
 }
 
+type activeSessionStore interface {
+	ListActiveSessions(context.Context) ([]string, error)
+	Close() error
+}
+
+var (
+	activeSessionStoreConfigs = dolt.ConfiguredWorkspaceConfigs
+	openActiveSessionStore    = func(config *dolt.Config) (activeSessionStore, error) {
+		return dolt.New(config)
+	}
+)
+
 // getActiveSessionsFromDolt returns the authoritative active-session set.
 // Callers that perform destructive maintenance must use this rather than a
 // process-local fallback, because API-only sessions do not own a tmux pane.
 func getActiveSessionsFromDolt(ctx context.Context) (map[string]bool, error) {
 	active := make(map[string]bool)
 
-	doltConfig, err := dolt.DefaultConfig()
+	configs, err := activeSessionStoreConfigs()
 	if err != nil {
-		return active, fmt.Errorf("load Dolt config: %w", err)
+		return active, fmt.Errorf("load configured Dolt workspace stores: %w", err)
 	}
-	adapter, err := dolt.New(doltConfig)
-	if err != nil {
-		return active, fmt.Errorf("open Dolt session store: %w", err)
-	}
-	defer func() { _ = adapter.Close() }()
-	sessions, err := adapter.ListActiveSessions(ctx)
-	if err != nil {
-		return active, fmt.Errorf("list active sessions from Dolt: %w", err)
-	}
-	for _, s := range sessions {
-		active[s] = true
+	for _, config := range configs {
+		store, err := openActiveSessionStore(config)
+		if err != nil {
+			return active, fmt.Errorf("open Dolt session store for workspace %q: %w", config.Workspace, err)
+		}
+		sessions, listErr := store.ListActiveSessions(ctx)
+		closeErr := store.Close()
+		if listErr != nil {
+			return active, fmt.Errorf("list active sessions from workspace %q: %w", config.Workspace, listErr)
+		}
+		if closeErr != nil {
+			return active, fmt.Errorf("close Dolt session store for workspace %q: %w", config.Workspace, closeErr)
+		}
+		for _, session := range sessions {
+			active[session] = true
+		}
 	}
 	return active, nil
 }

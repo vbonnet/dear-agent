@@ -125,6 +125,8 @@ Provide a production-ready CLI that:
 
 **CLI-47** When `agm worktree sweep` runs without `--execute` and the complete active-session lookup fails, the system shall classify and report normally and shall warn that `--execute` would refuse to run.
 
+**CLI-48** When destructive worktree maintenance scans repositories across the shared worktree base, the system shall aggregate active lifecycle records from every enabled configured workspace store and shall refuse execution if any configured store cannot be queried.
+
 ## Requirements
 
 ### Functional Requirements
