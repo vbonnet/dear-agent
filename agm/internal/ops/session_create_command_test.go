@@ -51,16 +51,24 @@ func TestResolveHarnessLaunchSubmissionPreservesUncertainAndCancelsConfirmedFail
 }
 
 func TestPrepareHarnessLaunchCommandRejectsControlsForSharedHarnesses(t *testing.T) {
-	for _, harness := range []string{"agy", "pi-cli", "opencode-cli"} {
-		t.Run(harness, func(t *testing.T) {
-			_, err := PrepareHarnessLaunchCommand(HarnessLaunchSpec{
-				Harness: harness,
-				WorkDir: "/safe\x1b[201~\nunsafe",
+	for _, value := range []struct {
+		name    string
+		workDir string
+	}{
+		{name: "escape and newline", workDir: "/safe\x1b[201~\nunsafe"},
+		{name: "NUL", workDir: "/safe\x00unsafe"},
+	} {
+		for _, harness := range []string{"agy", "pi-cli", "opencode-cli"} {
+			t.Run(harness+"/"+value.name, func(t *testing.T) {
+				_, err := PrepareHarnessLaunchCommand(HarnessLaunchSpec{
+					Harness: harness,
+					WorkDir: value.workDir,
+				})
+				if err == nil || !strings.Contains(err.Error(), "control characters") {
+					t.Fatalf("PrepareHarnessLaunchCommand() error = %v, want terminal-control rejection", err)
+				}
 			})
-			if err == nil || !strings.Contains(err.Error(), "control characters") {
-				t.Fatalf("PrepareHarnessLaunchCommand() error = %v, want terminal-control rejection", err)
-			}
-		})
+		}
 	}
 }
 
