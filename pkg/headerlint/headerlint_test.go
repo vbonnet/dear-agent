@@ -244,6 +244,58 @@ func TestCheckFile_UnclosedNestedFenceEndsWithItsContainer(t *testing.T) {
 	}
 }
 
+func TestCheckFile_UnclosedListFenceEndsAtSiblingItem(t *testing.T) {
+	const content = "# Doc\n\n" +
+		"- ```markdown\n" +
+		"  quoted code\n" +
+		"- **Status:** draft · **Owner:** docs\n"
+
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "format.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 1 || violations[0].Line != 5 {
+		t.Fatalf("want violation on sibling list item at line 5, got %v", violations)
+	}
+}
+
+func TestCheckFile_DoesNotFlagFourSpaceListFenceContent(t *testing.T) {
+	const content = "# Doc\n\n" +
+		"- ```markdown\n" +
+		"    **Status:** draft · **Owner:** docs\n" +
+		"    ```\n" +
+		"\n## Body\n"
+
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "format.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("want 0 violations, got %d: %v", len(violations), violations)
+	}
+}
+
+func TestCheckFile_DoesNotFlagBoldFieldsInsideInlineCode(t *testing.T) {
+	const content = "# Doc\n\n" +
+		"The old form is `**Status:** draft · **Owner:** docs`.\n" +
+		"A real **Status:** field beside that example is still only one field.\n" +
+		"\n## Body\n"
+
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "format.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("want 0 violations, got %d: %v", len(violations), violations)
+	}
+}
+
 func TestCheckFile_IndentedHeadingEndsHeaderZone(t *testing.T) {
 	const content = "# Design options\n" +
 		"\n" +

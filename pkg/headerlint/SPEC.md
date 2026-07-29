@@ -37,6 +37,8 @@ canonical replacement format and the reasoning behind it, and
 
 **HEADERLINT-09** When a file cannot be read, the system shall return an operational error rather than a violation.
 
+**HEADERLINT-10** When bold-field-shaped text appears inside an inline Markdown code span, the system shall exclude that literal code from header-field counting.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/developer_tool_package_guardrails.feature`

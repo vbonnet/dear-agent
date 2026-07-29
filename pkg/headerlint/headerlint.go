@@ -166,9 +166,9 @@ func checkData(path string, data []byte) []Violation {
 	var fenceContainer fenceContainerContext
 	for i, line := range lines {
 		lineNo := i + 1
-		marker, length, trailing, isFence := fenceDelimiter(line)
 		if fenceByte != 0 {
 			if fenceContainer.contains(line) {
+				marker, length, trailing, isFence := fenceContainer.delimiter(line)
 				if isFence && marker == fenceByte && length >= fenceLength && strings.TrimSpace(trailing) == "" {
 					fenceByte = 0
 					fenceLength = 0
@@ -182,6 +182,7 @@ func checkData(path string, data []byte) []Violation {
 			fenceLength = 0
 			fenceContainer = fenceContainerContext{}
 		}
+		marker, length, _, isFence := fenceDelimiter(line)
 		if isFence {
 			fenceByte = marker
 			fenceLength = length
@@ -194,7 +195,8 @@ func checkData(path string, data []byte) []Violation {
 		if lineNo > headerZoneMaxLines {
 			break
 		}
-		if matches := boldField.FindAllString(line, -1); len(matches) >= 2 {
+		scannable := stripInlineCodeSpans(line)
+		if matches := boldField.FindAllString(scannable, -1); len(matches) >= 2 {
 			violations = append(violations, Violation{Path: path, Line: lineNo, Text: strings.TrimSpace(line)})
 		}
 	}
@@ -205,6 +207,7 @@ type fenceContainerContext struct {
 	contentOffset int
 	quoteDepth    int
 	hasList       bool
+	listIndent    int
 }
 
 func (c fenceContainerContext) contains(line string) bool {
@@ -214,11 +217,47 @@ func (c fenceContainerContext) contains(line string) bool {
 	if strings.TrimSpace(line) == "" {
 		return true
 	}
-	current := parseFenceContainerContext(line)
-	if current.quoteDepth < c.quoteDepth {
-		return false
+	_, ok := c.contentStart(line)
+	return ok
+}
+
+func (c fenceContainerContext) contentStart(line string) (int, bool) {
+	if c.quoteDepth == 0 && !c.hasList {
+		return 0, true
 	}
-	return !c.hasList || current.contentOffset >= c.contentOffset
+	offset, ok := consumeQuotePrefix(line, c.quoteDepth)
+	if !ok {
+		return 0, false
+	}
+	if !c.hasList {
+		return offset, true
+	}
+	cursor := offset
+	indent := 0
+	for cursor < len(line) {
+		switch line[cursor] {
+		case ' ':
+			indent++
+			cursor++
+		case '\t':
+			indent += 4
+			cursor++
+		default:
+			if indent < c.listIndent {
+				return 0, false
+			}
+			return cursor, true
+		}
+	}
+	return len(line), true
+}
+
+func (c fenceContainerContext) delimiter(line string) (byte, int, string, bool) {
+	offset, ok := c.contentStart(line)
+	if !ok {
+		return 0, 0, "", false
+	}
+	return fenceDelimiterAt(line, offset)
 }
 
 func parseFenceContainerContext(line string) fenceContainerContext {
@@ -248,6 +287,12 @@ func parseFenceContainerContext(line string) fenceContainerContext {
 	if context.quoteDepth == 0 && !context.hasList {
 		context.contentOffset = offset
 	}
+	if context.hasList {
+		quoteOffset, quoteOK := consumeQuotePrefix(line, context.quoteDepth)
+		if quoteOK {
+			context.listIndent = context.contentOffset - quoteOffset
+		}
+	}
 	return context
 }
 
@@ -256,6 +301,18 @@ func fenceDelimiter(line string) (byte, int, string, bool) {
 	if !ok || offset == len(line) {
 		return 0, 0, "", false
 	}
+	return parseFenceDelimiter(line, offset)
+}
+
+func fenceDelimiterAt(line string, offset int) (byte, int, string, bool) {
+	offset, ok := skipFenceIndent(line, offset)
+	if !ok || offset == len(line) {
+		return 0, 0, "", false
+	}
+	return parseFenceDelimiter(line, offset)
+}
+
+func parseFenceDelimiter(line string, offset int) (byte, int, string, bool) {
 	marker := line[offset]
 	if marker != '`' && marker != '~' {
 		return 0, 0, "", false
@@ -273,6 +330,75 @@ func fenceDelimiter(line string) (byte, int, string, bool) {
 		return 0, 0, "", false
 	}
 	return marker, length, trailing, true
+}
+
+func consumeQuotePrefix(line string, depth int) (int, bool) {
+	offset := 0
+	for range depth {
+		var ok bool
+		offset, ok = skipFenceIndent(line, offset)
+		if !ok || offset >= len(line) || line[offset] != '>' {
+			return 0, false
+		}
+		offset++
+		if offset < len(line) && (line[offset] == ' ' || line[offset] == '\t') {
+			offset++
+		}
+	}
+	return offset, true
+}
+
+func stripInlineCodeSpans(line string) string {
+	masked := []byte(line)
+	for opener := 0; opener < len(line); {
+		if line[opener] != '`' || escapedAt(line, opener) {
+			opener++
+			continue
+		}
+		runEnd := opener
+		for runEnd < len(line) && line[runEnd] == '`' {
+			runEnd++
+		}
+		runLength := runEnd - opener
+		closer := matchingBacktickRun(line, runEnd, runLength)
+		if closer < 0 {
+			opener = runEnd
+			continue
+		}
+		spanEnd := closer + runLength
+		for index := opener; index < spanEnd; index++ {
+			masked[index] = ' '
+		}
+		opener = spanEnd
+	}
+	return string(masked)
+}
+
+func matchingBacktickRun(line string, offset, length int) int {
+	for offset < len(line) {
+		if line[offset] != '`' || escapedAt(line, offset) {
+			offset++
+			continue
+		}
+		end := offset
+		for end < len(line) && line[end] == '`' {
+			end++
+		}
+		if end-offset == length {
+			return offset
+		}
+		offset = end
+	}
+	return -1
+}
+
+func escapedAt(line string, offset int) bool {
+	backslashes := 0
+	for offset > 0 && line[offset-1] == '\\' {
+		backslashes++
+		offset--
+	}
+	return backslashes%2 == 1
 }
 
 // fenceContentOffset skips the indentation and block/list container markers
