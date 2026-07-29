@@ -24,6 +24,8 @@
 
 **SNDBR-11** When a process monitor emits an alert, the system shall invoke the external alert callback without blocking the monitor loop on callback-owned lifecycle actions.
 
+**SNDBR-12** While a process monitor alert callback is still running, the system shall suppress duplicate alert callback launches and allow a later callback after the in-flight callback completes.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
