@@ -198,7 +198,11 @@ func (r OAuthResolver) Refresh(ctx context.Context) (string, error) {
 			r.log("oauth.refresh.failed", "error", err.Error())
 			if errors.Is(err, ErrRefreshOutcomeUnknown) {
 				// The token may be spent. Record it so the next tick refuses to
-				// replay it, which is what revokes the family.
+				// replay it, which is what revokes the family. The
+				// credential-scoped stop is written even when a caller chose a
+				// custom quarantine path, so every resolver entrypoint sees
+				// the same fail-closed state.
+				stopErr := r.WriteRefreshStop(err.Error())
 				if qerr := r.writeQuarantine(creds.ClaudeAIOAuth.RefreshToken, err.Error()); qerr != nil {
 					// The protection lives in that file, not in this process:
 					// the next tick is a fresh process that reads the marker. A
@@ -206,18 +210,19 @@ func (r OAuthResolver) Refresh(ctx context.Context) (string, error) {
 					// a human intervenes, so it is escalated rather than logged
 					// and swallowed.
 					r.log("oauth.refresh.quarantine_write_failed", "error", qerr.Error())
-					stopErr := r.WriteRefreshStop(err.Error())
 					return errors.Join(
 						fmt.Errorf("%w: %w (original refresh failure: %w)", ErrQuarantineNotPersisted, qerr, err),
 						wrapRefreshStopWriteError(stopErr),
 					)
 				}
 				if r.QuarantinePath == "" {
-					stopErr := r.WriteRefreshStop(err.Error())
 					return errors.Join(
 						fmt.Errorf("%w: quarantine is disabled (original refresh failure: %w)", ErrQuarantineNotPersisted, err),
 						wrapRefreshStopWriteError(stopErr),
 					)
+				}
+				if stopErr != nil {
+					return errors.Join(err, wrapRefreshStopWriteError(stopErr))
 				}
 			}
 			return err
@@ -246,13 +251,10 @@ func (r OAuthResolver) Refresh(ctx context.Context) (string, error) {
 			r.log("oauth.refresh.persist_failed", "error", werr.Error())
 			reason := fmt.Sprintf("%s: %v", ErrRefreshNotPersisted, werr)
 			qerr := r.writeQuarantine(creds.ClaudeAIOAuth.RefreshToken, reason)
-			var stopErr error
-			if qerr != nil {
-				// If the token-specific marker cannot be written, fall back to
-				// the credential-scoped stop so a later resolver cannot replay
-				// the definitely spent on-disk token.
-				stopErr = r.WriteRefreshStop(reason)
-			}
+			// Always write the credential-scoped stop. A caller-selected
+			// quarantine location is not necessarily visible to another
+			// resolver using the same credentials.
+			stopErr := r.WriteRefreshStop(reason)
 			return errors.Join(
 				fmt.Errorf("%w: %w", ErrRefreshNotPersisted, werr),
 				wrapQuarantineWriteError(qerr),

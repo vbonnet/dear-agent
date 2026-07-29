@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
 
 // lostResponseServer accepts the request (so it is definitively transmitted)
@@ -63,6 +65,13 @@ func TestRun_LostResponseQuarantinesAndExits4(t *testing.T) {
 	}
 	if _, err := os.Stat(quar); err != nil {
 		t.Errorf("expected a quarantine marker: %v", err)
+	}
+	stopped, err := (auth.OAuthResolver{CredentialsPath: creds}).RefreshStopped()
+	if err != nil {
+		t.Fatalf("inspect credential-scoped refresh stop: %v", err)
+	}
+	if !stopped {
+		t.Error("ambiguous refresh must stop every resolver entrypoint for these credentials")
 	}
 	if rec := lastAuditRecord(t, audit); rec["outcome"] != "refresh_outcome_unknown" {
 		t.Errorf("audit outcome = %v, want refresh_outcome_unknown", rec["outcome"])
@@ -136,6 +145,27 @@ func TestRun_ClearQuarantineOverride(t *testing.T) {
 	}
 	if _, err := os.Stat(quar); !os.IsNotExist(err) {
 		t.Error("marker should be gone after -clear-quarantine")
+	}
+}
+
+func TestRun_ClearQuarantineKeepsMarkerWhenAlertCannotRearm(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.WriteFile(filepath.Join(home, ".local"), []byte("blocks state directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	quar := tmpQuarantine(t)
+	if err := os.WriteFile(quar, []byte(`{"refresh_token_fp":"abc123def456"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"-clear-quarantine", "-quarantine", quar}, &stdout, &stderr)
+	if code != exitError {
+		t.Fatalf("exit code = %d, want %d", code, exitError)
+	}
+	if _, err := os.Stat(quar); err != nil {
+		t.Fatalf("quarantine marker was removed before alert re-arm succeeded: %v", err)
 	}
 }
 

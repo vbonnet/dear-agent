@@ -139,12 +139,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if *clearQuar {
-		if err := r.ClearQuarantine(); err != nil {
-			fmt.Fprintf(stderr, "token-refresher: could not clear quarantine: %v\n", err)
-			return exitError
-		}
 		if err := clearCadenceSentinel(defaultStateDir(), cadenceSentinelName(*quarPath)); err != nil {
 			fmt.Fprintf(stderr, "token-refresher: could not re-arm cadence alert: %v\n", err)
+			return exitError
+		}
+		if err := r.ClearQuarantine(); err != nil {
+			fmt.Fprintf(stderr, "token-refresher: could not clear quarantine: %v\n", err)
 			return exitError
 		}
 		if err := r.ClearRefreshStop(); err != nil {
