@@ -86,14 +86,14 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   fail open. A proven applicable `forbid` remains **deny**
   even when another policy emits diagnostics; a Deny with no applicable
   permit also remains **deny**, regardless of diagnostics. Only after positive
-  invocation authorization may diagnostics that prevent a trustworthy
-  confirmation-free mapping produce `policy_unavailable`. In an interactive
-  harness the interceptor maps that state to an explicit
-  confirmation/escalation path; if confirmation is unavailable, it fails
-  closed with an evaluator-error diagnostic rather than reporting that policy
-  denied the call. A diagnostic can therefore never turn an authored
-  invocation forbid or the absence of an invocation permit into
-  user-overridable confirmation.
+  invocation authorization may confirmation-free diagnostics produce
+  `policy_unavailable`. Escalation requires a nonce-bearing approval receipt
+  bound to the request, policy/input digests, authenticated human identity,
+  expiry, and an out-of-band channel that agent tools cannot write. Tmux input,
+  harness UI callbacks, and agent-addressable messages are not proof of human
+  approval; without an integrity-protected channel, confirmation is unavailable
+  and execution fails closed. Diagnostics never make a forbid or missing permit
+  user-overridable.
 - Bound every evaluator call by a harness-independent deadline. A panic,
   process crash, signal, nonzero exit, EOF, transport closure, timeout,
   cancellation without a complete decision, or incomplete response is a typed
@@ -116,19 +116,15 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   the active bundle. The evaluator retains a durable last-known-good bundle
   across restart; reload readers observe either the complete old bundle or the
   complete new bundle, never a partial update.
-- Acquire one immutable bundle snapshot and one immutable authorization-input
-  snapshot for each intercepted tool request before the invocation decision.
-  The latter contains the principal, current entity graph/memberships, canonical
-  resource, and every contextual attribute used by Cedar, plus a stable digest
-  or monotonic revision. Reuse those exact snapshots for the confirmation-free
-  decision, even if policy or identity/context state changes between the two
-  gates. A request never composes results from different policy generations or
-  authorization inputs. An `ask` result is not an execution authorization:
-  after confirmation, the dispatcher reacquires both current snapshots at its
-  final dispatch boundary. If either version/digest differs, the prior
-  confirmation is invalidated and both ordered decisions are rerun; `deny`
-  stops, `allow` proceeds, and `ask` requires a new confirmation bound to both
-  snapshots.
+- Acquire immutable bundle and authorization-input snapshots before invocation.
+  Inputs include principal, entity graph/memberships, canonical resources,
+  context, stable revision/digest, and authenticated provenance. Their durable
+  source and writer credentials live outside every agent-writable root;
+  manifests or `~/.agm` state writable by a harness are never authoritative.
+  Reuse the exact snapshots for confirmation-free evaluation. After `ask`, the
+  dispatcher reacquires both at final dispatch; a version, digest, or provenance
+  change invalidates approval and reruns both decisions. `deny` stops, `allow`
+  proceeds, and `ask` needs a new receipt bound to both snapshots.
 - Serialize the atomic final version/input check and consumption of an
   authorization against bundle publication and authorization-input revision
   changes. Do not hold that finalization lease while waiting for a person.
@@ -154,13 +150,13 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   symlink to an allowed temporary file cannot authorize deletion from a
   protected directory, and a protected referent does not by itself forbid
   removing an otherwise allowed symlink entry.
-- Hard links are multi-resource operations. `link`/`ln` authorizes the source
-  referent's stable identity plus the destination parent and entry; an allowed
-  destination cannot launder a protected inode. Later access carries device
-  and inode into authorization, so protected classification is not pathname-only.
-  The privileged boundary maintains an authoritative protected-inode mapping
-  and denies when it cannot disprove aliasing, including aliases that predate
-  the request.
+- Hard links authorize the source identity plus destination parent/entry; an
+  allowed destination cannot launder a protected inode. Later access carries
+  device/inode into authorization. At startup the privileged boundary scans
+  protected roots that agents cannot mutate, then serializes trusted mutations
+  with atomic catalog updates. An uncorrelated external mutation marks that
+  filesystem catalog incomplete and denies inode-ambiguous access until rescan.
+  With a complete catalog, multiply-linked inodes absent from it remain usable.
 - The lexical input may be retained only as audit context; policies receive
   the operation-appropriate canonical identities. Failure to obtain every
   required identity is deny, and no per-harness interceptor may evaluate the
@@ -209,7 +205,9 @@ tests must prove all of the following:
    must prove there is no stale-version check/use window. Separately, changing
    a principal's role/entity membership or any authorization context without a
    policy reload invalidates the old confirmation and reruns both decisions
-   against the new input snapshot.
+   against the new input snapshot. Agent-authored role/context data in a
+   writable manifest is rejected; only authenticated control-plane updates can
+   advance the authoritative input revision.
 6. A Cedar response containing both a proven invocation `forbid` reason and
    diagnostics remains `deny`; an invocation response with no proven
    applicable `permit` also remains `deny`. An invocation Allow whose
@@ -230,6 +228,8 @@ tests must prove all of the following:
    responses at each gate. Before positive invocation authorization these
    return typed non-confirmable unavailability by the deadline and execute
    nothing; only later confirmation-free-gate failure may enter escalation.
+   Tests inject terminal keys, harness callbacks, and agent messages while an
+   `ask` is pending and prove none can mint the required human receipt.
 9. Restart restores the last-known-good bundle before the interceptor accepts
    tool calls.
 10. For every harness, replacing or removing the interceptor executable or its
@@ -251,34 +251,26 @@ tests must prove all of the following:
     symlink with a protected referent, reject a protected-directory symlink
     with an allowed referent, and cover rename/replacement across independently
     authorized parents. Leaf swaps cannot change pinned entries or parents.
-14. Hard-link creation authorizes source inode and destination entry; protected-source/allowed-destination and inverse cases are denied. Reads
-    and writes through pre-existing allowed-path aliases are denied. Tests
-    retain the inode across aliases, include links created outside the harness,
-    and prove pathname allow cannot override protected-inode identity.
+14. Hard-link tests deny protected-source/allowed-destination and the inverse,
+    plus pre-existing allowed-path aliases of protected inodes. A complete
+    catalog permits allowed-source/allowed-destination aliases; an external
+    uncorrelated link makes it incomplete and fail closed until privileged
+    rescan. Pathname allow never overrides protected-inode identity.
 
 The shared evaluator SPEC and per-harness interceptor BDD scenarios must carry
 these cases; unit tests of Cedar Allow/Deny alone do not satisfy this gate.
 
 ## Alternatives
 
-**Rego/OPA** — rejected as the primary choice despite being more mature and
-having the larger third-party agent-guardrail ecosystem, because it is
-general-purpose where Cedar is purpose-built for exactly this
-principal/action/resource/context decision shape, and because the newest,
-most on-point prior art in this exact domain (AWS, Microsoft) chose Cedar
-over it when given the choice between the two.
+**Rego/OPA** — rejected despite greater maturity because Cedar is purpose-built
+for this authorization shape and the newest on-point AWS/Microsoft prior art
+chose Cedar over it.
 
-**CEL** — rejected as the canonical authoring layer; it is an expression
-primitive other systems (Kubernetes admission control, Cerbos) build a
-policy format on top of, not a policy-authoring system on its own. Worth
-reconsidering as the condition/expression language inside a bespoke format
-if Cedar proves insufficient.
+**CEL** — rejected as a canonical authoring layer because it is an expression
+primitive, not a policy system. Reconsider it inside a bespoke format if needed.
 
-**Cerbos** — rejected due to its service-first deployment posture, which
-mismatches an embeddable, in-process-per-harness interception model, despite
-having the strongest out-of-the-box deterministic-testing story of the
-group. Worth revisiting only if a centralized policy service becomes the
-right shape instead of per-harness in-process interception.
+**Cerbos** — rejected because its service-first posture mismatches in-process
+interceptors. Revisit only if a centralized policy service becomes desirable.
 
 **Per-harness native-config codegen** (compile canonical policy directly
 into each harness's own settings format) — rejected; no researched
