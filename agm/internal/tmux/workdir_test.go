@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,12 @@ func TestSingleQuote(t *testing.T) {
 	assert.Equal(t, "'/tmp/plain'", singleQuote("/tmp/plain"))
 	assert.Equal(t, `'/tmp/it'\''s here'`, singleQuote("/tmp/it's here"))
 	assert.Equal(t, "''", singleQuote(""))
+}
+
+func TestEnsureSessionWorkDirRejectsControlsBeforeTmuxAccess(t *testing.T) {
+	err := EnsureSessionWorkDir("unused", "/safe\x1b[201~\nunsafe")
+	require.Error(t, err)
+	assert.True(t, strings.Contains(err.Error(), "control characters"), err)
 }
 
 func TestIsShellCommand(t *testing.T) {

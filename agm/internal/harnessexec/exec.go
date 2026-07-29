@@ -14,10 +14,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
+	"github.com/vbonnet/dear-agent/agm/internal/pastevalidate"
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
 
@@ -548,20 +547,11 @@ func validateText(name, value string) error {
 	if value == "" {
 		return fmt.Errorf("invalid harness launch request: %s is required", name)
 	}
-	if !utf8.ValidString(value) {
-		return fmt.Errorf("invalid harness launch request: %s contains invalid UTF-8", name)
-	}
-	if strings.IndexFunc(value, unicode.IsControl) >= 0 {
-		return fmt.Errorf("invalid harness launch request: %s contains control characters", name)
-	}
-	return nil
+	return pastevalidate.Text(name, value)
 }
 
 func validateOptionalText(name, value string) error {
-	if value == "" {
-		return nil
-	}
-	return validateText(name, value)
+	return pastevalidate.Text(name, value)
 }
 
 func validateTextList(name string, values []string) error {

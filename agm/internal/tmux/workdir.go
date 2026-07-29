@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
+	"github.com/vbonnet/dear-agent/agm/internal/pastevalidate"
 )
 
 // Workdir verification/repair tuning knobs. Package-level vars (not consts) so
@@ -46,6 +47,9 @@ var (
 func EnsureSessionWorkDir(sessionName, workDir string) error {
 	if workDir == "" {
 		return nil
+	}
+	if err := pastevalidate.Text("workdir", workDir); err != nil {
+		return fmt.Errorf("validate corrective workdir paste: %w", err)
 	}
 	// Resolve relative workdirs against the client's cwd up front: the repair
 	// `cd` below runs in the pane's shell, whose cwd is the (dead) server cwd,
