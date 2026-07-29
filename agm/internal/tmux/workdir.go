@@ -48,9 +48,6 @@ func EnsureSessionWorkDir(sessionName, workDir string) error {
 	if workDir == "" {
 		return nil
 	}
-	if err := pastevalidate.Text("workdir", workDir); err != nil {
-		return fmt.Errorf("validate corrective workdir paste: %w", err)
-	}
 	// Resolve relative workdirs against the client's cwd up front: the repair
 	// `cd` below runs in the pane's shell, whose cwd is the (dead) server cwd,
 	// so a relative path would resolve against the wrong base.
@@ -78,7 +75,11 @@ func EnsureSessionWorkDir(sessionName, workDir string) error {
 		// pane's shell may still be starting up.
 		if !repaired && time.Now().After(graceEnd) {
 			debug.Log("⚠️  Pane cwd %q does not match requested workdir %q — sending corrective cd (tmux server cwd likely deleted; ce-5zbg)", lastSeen, workDir)
-			if sendErr := SendCommand(sessionName, "cd "+singleQuote(workDir)); sendErr != nil {
+			command, commandErr := correctiveWorkDirCommand(workDir)
+			if commandErr != nil {
+				return commandErr
+			}
+			if sendErr := SendCommand(sessionName, command); sendErr != nil {
 				return fmt.Errorf("session %q started outside requested workdir %q (pane cwd %q) and corrective cd failed: %w",
 					sessionName, workDir, lastSeen, sendErr)
 			}
@@ -92,6 +93,13 @@ func EnsureSessionWorkDir(sessionName, workDir string) error {
 		"tmux ignored new-session -c, which happens when the tmux server's own working directory has been deleted; "+
 		"restart the agm tmux server from a stable directory (ce-5zbg)",
 		sessionName, workDir, lastSeen)
+}
+
+func correctiveWorkDirCommand(workDir string) (string, error) {
+	if err := pastevalidate.Text("workdir", workDir); err != nil {
+		return "", fmt.Errorf("validate corrective workdir paste: %w", err)
+	}
+	return "cd " + singleQuote(workDir), nil
 }
 
 // PaneCurrentPath returns the current working directory of the session's

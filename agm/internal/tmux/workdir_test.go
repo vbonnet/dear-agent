@@ -18,8 +18,8 @@ func TestSingleQuote(t *testing.T) {
 	assert.Equal(t, "''", singleQuote(""))
 }
 
-func TestEnsureSessionWorkDirRejectsControlsBeforeTmuxAccess(t *testing.T) {
-	err := EnsureSessionWorkDir("unused", "/safe\x1b[201~\nunsafe")
+func TestCorrectiveWorkDirCommandRejectsControls(t *testing.T) {
+	_, err := correctiveWorkDirCommand("/safe\x1b[201~\nunsafe")
 	require.Error(t, err)
 	assert.True(t, strings.Contains(err.Error(), "control characters"), err)
 }
@@ -84,7 +84,8 @@ func TestNewSession_RepairsWorkDirWhenServerCwdDeleted(t *testing.T) {
 
 	// The actual assertion: NewSession must leave the pane in workDir even on
 	// the wedged server (verify + `cd` repair).
-	workDir := t.TempDir()
+	workDir := filepath.Join(t.TempDir(), "valid\tworkdir")
+	require.NoError(t, os.Mkdir(workDir, 0o755))
 	sessionName := "test-workdir-repair"
 	require.NoError(t, NewSession(sessionName, workDir))
 	defer killSession(sessionName)
