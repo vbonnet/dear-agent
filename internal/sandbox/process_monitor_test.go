@@ -130,7 +130,7 @@ func TestProcessMonitorAlertCallbackCanStopMonitor(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("alert callback deadlocked while stopping monitor")
 	}
-	assertProcessMonitorStopped(t, m)
+	waitForProcessMonitorStopped(t, m)
 }
 
 func TestProcessMonitorSerializesRepeatedAlertCallbacks(t *testing.T) {
@@ -179,6 +179,59 @@ func TestProcessMonitorSerializesRepeatedAlertCallbacks(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
+}
+
+func TestProcessMonitorStaleAlertCannotStopRestartedRun(t *testing.T) {
+	callbackStarted := make(chan struct{})
+	releaseCallback := make(chan struct{})
+	callbackDone := make(chan struct{})
+	var m *ProcessMonitor
+	m = NewProcessMonitor(os.Getpid(), ProcessLimits{PollInterval: time.Hour}, func(AlertType, string) {
+		close(callbackStarted)
+		<-releaseCallback
+		m.Stop()
+		close(callbackDone)
+	})
+
+	m.Start(context.Background())
+	m.mu.Lock()
+	oldDone := m.done
+	m.mu.Unlock()
+	m.emitAlert(AlertProcessLimit, "delayed")
+	select {
+	case <-callbackStarted:
+	case <-time.After(time.Second):
+		t.Fatal("alert callback did not start")
+	}
+
+	// Stop the loop from another goroutine while its callback remains active.
+	m.Stop()
+	m.Start(context.Background())
+	m.mu.Lock()
+	currentDone := m.done
+	running := m.running
+	m.mu.Unlock()
+	if !running || currentDone != oldDone {
+		t.Fatal("monitor restarted while an old alert callback was still active")
+	}
+
+	close(releaseCallback)
+	select {
+	case <-callbackDone:
+	case <-time.After(time.Second):
+		t.Fatal("delayed callback did not finish")
+	}
+	waitForProcessMonitorStopped(t, m)
+
+	m.Start(context.Background())
+	m.mu.Lock()
+	restartedDone := m.done
+	m.mu.Unlock()
+	if restartedDone == oldDone {
+		t.Fatal("monitor did not create a fresh lifecycle after callback drained")
+	}
+	m.Stop()
+	assertProcessMonitorStopped(t, m)
 }
 
 func TestProcessMonitorConcurrentStartStop(t *testing.T) {

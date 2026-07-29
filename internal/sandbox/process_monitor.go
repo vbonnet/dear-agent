@@ -92,7 +92,7 @@ func NewProcessMonitor(pid int, limits ProcessLimits, onAlert func(AlertType, st
 // Returns immediately. Call Stop() to terminate.
 func (m *ProcessMonitor) Start(ctx context.Context) {
 	m.mu.Lock()
-	if m.running {
+	if m.running || m.alerting {
 		m.mu.Unlock()
 		return
 	}
@@ -136,14 +136,14 @@ func (m *ProcessMonitor) CountDescendants() (int, error) {
 
 func (m *ProcessMonitor) run(ctx context.Context, done chan struct{}) {
 	defer func() {
+		close(done)
 		m.mu.Lock()
-		if m.done == done {
+		if m.done == done && !m.alerting {
 			m.running = false
 			m.cancel = nil
 			m.done = nil
 		}
 		m.mu.Unlock()
-		close(done)
 	}()
 
 	ticker := time.NewTicker(m.limits.PollInterval)
@@ -205,6 +205,7 @@ func (m *ProcessMonitor) emitAlert(alertType AlertType, message string) {
 		return
 	}
 	callback := m.onAlert
+	alertRunDone := m.done
 	m.alerting = true
 	m.mu.Unlock()
 
@@ -216,6 +217,15 @@ func (m *ProcessMonitor) emitAlert(alertType AlertType, message string) {
 		defer func() {
 			m.mu.Lock()
 			m.alerting = false
+			if alertRunDone != nil && m.done == alertRunDone {
+				select {
+				case <-alertRunDone:
+					m.running = false
+					m.cancel = nil
+					m.done = nil
+				default:
+				}
+			}
 			m.mu.Unlock()
 		}()
 		callback(alertType, message)
