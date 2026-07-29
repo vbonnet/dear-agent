@@ -30,7 +30,7 @@ func RegisterHarnessSpecGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM harness parity specification and lifecycle surfaces$`, agmHarnessParitySpecificationAndLifecycleSurfaces)
 	ctx.Step(`^AGM validates harness requirement identifiers and lifecycle ownership$`, agmValidatesHarnessRequirementIdentifiersAndLifecycleOwnership)
 	ctx.Step(`^harness requirement identifiers should be unique$`, harnessRequirementIdentifiersShouldBeUnique)
-	ctx.Step(`^CLI and MCP lifecycle surfaces should delegate to shared operations$`, cliAndMCPLifecycleSurfacesShouldDelegateToSharedOperations)
+	ctx.Step(`^CLI, MCP, and daemon lifecycle surfaces should delegate to shared operations$`, lifecycleSurfacesShouldDelegateToSharedOperations)
 	ctx.Step(`^CLI resume should retain its focused transactional owner$`, cliResumeShouldRetainItsFocusedTransactionalOwner)
 }
 
@@ -103,6 +103,9 @@ func requireLifecycleDelegation(root string) error {
 			"ops.ArchiveSession(",
 			"ops.SendMessage(",
 		},
+		"agm/internal/daemon/daemon.go": {
+			"deliverDirect: ops.SendMessage",
+		},
 	}
 	for path, required := range checks {
 		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
@@ -112,6 +115,26 @@ func requireLifecycleDelegation(root string) error {
 		for _, call := range required {
 			if !strings.Contains(string(data), call) {
 				return fmt.Errorf("%s does not delegate through %s", path, call)
+			}
+		}
+	}
+	for path, forbidden := range map[string][]string{
+		"agm/cmd/agm/send_msg.go": {
+			"session.CheckSessionDelivery(",
+		},
+		"agm/internal/daemon/daemon.go": {
+			"session.CheckSessionDelivery(",
+			"sendPrompt",
+			"SendMultiLinePromptSafeForHarness",
+		},
+	} {
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+		if err != nil {
+			return fmt.Errorf("read lifecycle surface %s: %w", path, err)
+		}
+		for _, call := range forbidden {
+			if strings.Contains(string(data), call) {
+				return fmt.Errorf("%s retains superseded delivery authority %s", path, call)
 			}
 		}
 	}
@@ -129,7 +152,7 @@ func harnessRequirementIdentifiersShouldBeUnique(ctx context.Context) error {
 	return nil
 }
 
-func cliAndMCPLifecycleSurfacesShouldDelegateToSharedOperations(ctx context.Context) error {
+func lifecycleSurfacesShouldDelegateToSharedOperations(ctx context.Context) error {
 	state, err := requireHarnessSpecGuardrailState(ctx)
 	if err != nil {
 		return err

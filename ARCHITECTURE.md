@@ -155,7 +155,12 @@ up on `archive`.
 AGM supports coordinated parallel agent work through several mechanisms:
 
 - **Coordination Daemon** (`agm/internal/daemon/`) — Background process polling
-  every 30s for pending messages, delivering when target sessions are READY
+  every 30s for pending messages and translating shared direct-delivery
+  outcomes into defer, retry, acknowledgment, and queue bookkeeping
+- **Message Delivery Operation** (`agm/internal/ops/`) — Resolves a recipient,
+  selects API or tmux transport, and couples harness readiness to direct
+  delivery under the stable-session lifecycle lock; CLI, MCP, and daemon
+  callers retain only their distinct policy
 - **Pending Messages** (`agm/internal/messages/`) — File-based inter-agent
   messaging via `~/.agm/pending/{session}/` directories
 - **Advisory File Reservations** (`agm/internal/reservation/`) — Glob-pattern

@@ -878,6 +878,9 @@ func TestSendMessage_Success(t *testing.T) {
 	if result.Recipient != "my-session" {
 		t.Errorf("expected recipient my-session, got %s", result.Recipient)
 	}
+	if result.SessionID != "id-1" {
+		t.Errorf("expected stable session ID id-1, got %s", result.SessionID)
+	}
 	if result.MessageLength != 11 {
 		t.Errorf("expected message length 11, got %d", result.MessageLength)
 	}
@@ -894,6 +897,71 @@ func TestSendMessage_Success(t *testing.T) {
 	}
 	if mt.sent[0].session != "%1" || mt.sent[0].keys != "hello world" {
 		t.Errorf("unexpected send-keys: %+v", mt.sent[0])
+	}
+}
+
+func TestSendMessageSerializesAndReloadsTmuxDeliveryByStableSessionID(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	storage := dolt.NewMockAdapter()
+	original := &manifest.Manifest{
+		SessionID: "stable-send-id",
+		Name:      "old-send-name",
+		Harness:   "claude-code",
+		Tmux:      manifest.Tmux{SessionName: "old-send-tmux"},
+	}
+	if err := storage.CreateSession(original); err != nil {
+		t.Fatalf("CreateSession() error: %v", err)
+	}
+	tmuxClient := newMockTmux("old-send-tmux", "current-send-tmux")
+
+	type outcome struct {
+		result *SendMessageResult
+		err    error
+	}
+	started := make(chan struct{})
+	done := make(chan outcome, 1)
+	err := WithSessionLockContext(t.Context(), original.SessionID, func() error {
+		go func() {
+			close(started)
+			result, sendErr := SendMessage(&OpContext{
+				Context: t.Context(),
+				Storage: storage,
+				Tmux:    tmuxClient,
+			}, &SendMessageRequest{Recipient: original.Name, Message: "hello"})
+			done <- outcome{result: result, err: sendErr}
+		}()
+		<-started
+		select {
+		case <-done:
+			return errors.New("SendMessage crossed the stable-session lock")
+		case <-time.After(100 * time.Millisecond):
+		}
+
+		current, getErr := storage.GetSession(original.SessionID)
+		if getErr != nil {
+			return getErr
+		}
+		current.Name = "current-send-name"
+		current.Tmux.SessionName = "current-send-tmux"
+		return storage.UpdateSession(current)
+	})
+	if err != nil {
+		t.Fatalf("hold stable-session lock: %v", err)
+	}
+
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatalf("SendMessage() error: %v", got.err)
+		}
+		if got.result == nil || got.result.SessionID != original.SessionID || got.result.Recipient != "current-send-name" {
+			t.Fatalf("SendMessage() result = %#v, want stable ID and current name", got.result)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("SendMessage did not continue after stable-session lock released")
+	}
+	if len(tmuxClient.atomicChecks) != 1 || tmuxClient.atomicChecks[0] != "current-send-tmux:claude-code" {
+		t.Fatalf("atomic input checks = %v, want current-send-tmux:claude-code", tmuxClient.atomicChecks)
 	}
 }
 
@@ -1004,6 +1072,25 @@ func TestSendMessage_EmptyRecipient(t *testing.T) {
 	}
 }
 
+func TestSendMessage_RequiresOperationContextAndStorage(t *testing.T) {
+	request := &SendMessageRequest{Recipient: "id-1", Message: "hello"}
+	for _, test := range []struct {
+		name string
+		ctx  *OpContext
+	}{
+		{name: "nil context"},
+		{name: "nil storage", ctx: &OpContext{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := SendMessage(test.ctx, request)
+			opErr := &OpError{}
+			if !errors.As(err, &opErr) || opErr.Code != ErrCodeStorageError {
+				t.Fatalf("SendMessage() error = %v, want %s", err, ErrCodeStorageError)
+			}
+		})
+	}
+}
+
 func TestSendMessage_EmptyMessage(t *testing.T) {
 	ctx := testCtx(nil)
 	_, err := SendMessage(ctx, &SendMessageRequest{Recipient: "id-1", Message: ""})
@@ -1037,5 +1124,20 @@ func TestSendMessage_ArchivedSession(t *testing.T) {
 	}
 	if opErr.Code != ErrCodeSessionArchived {
 		t.Errorf("expected code %s, got %s", ErrCodeSessionArchived, opErr.Code)
+	}
+}
+
+func TestSendMessage_ByReusedNameExcludesArchivedSession(t *testing.T) {
+	archived := newManifest("id-archived", "reused-session", "~/old-project")
+	archived.Lifecycle = manifest.LifecycleArchived
+	active := newManifest("id-active", "reused-session", "~/current-project")
+	ctx := testCtx([]*manifest.Manifest{archived, active}, "reused-session")
+
+	result, err := SendMessage(ctx, &SendMessageRequest{Recipient: "reused-session", Message: "hello"})
+	if err != nil {
+		t.Fatalf("SendMessage() error: %v", err)
+	}
+	if !result.Delivered || result.SessionID != active.SessionID {
+		t.Fatalf("SendMessage() result = %#v, want active reused identity", result)
 	}
 }

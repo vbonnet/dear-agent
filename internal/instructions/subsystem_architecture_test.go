@@ -55,13 +55,16 @@ func TestAGMDaemonArchitectureMatchesDeliveryAuthority(t *testing.T) {
 	doc := readFile(t, filepath.Join(root, "agm/cmd/agm-daemon/ARCHITECTURE.md"))
 	for _, marker := range []string{
 		"slo.Daemon.PollInterval.Duration",
-		"session.CheckSessionDelivery(recipientManifest.Tmux.SessionName)",
+		"deliverDirect: ops.SendMessage",
 	} {
 		if !strings.Contains(source, marker) {
 			t.Fatalf("daemon source missing delivery marker %q", marker)
 		}
 	}
-	for _, fact := range []string{"`session.CheckSessionDelivery` is the sole readiness authority", "`~/.config/agm/message_queue.db`"} {
+	if strings.Contains(source, "session.CheckSessionDelivery(") {
+		t.Fatal("daemon source retains superseded direct-delivery readiness authority")
+	}
+	for _, fact := range []string{"`internal/ops.SendMessage` is the sole direct-delivery authority", "`~/.config/agm/message_queue.db`"} {
 		if !strings.Contains(doc, fact) {
 			t.Errorf("daemon architecture omits runtime fact %q", fact)
 		}

@@ -121,6 +121,22 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-82** When `SendMessage` resolves an `openai` or `gpt` manifest, the system shall route before every configured tmux capability through the shared stable-session-ID API transaction, reload lifecycle under the archive-compatible lock, reconstruct the adapter from persisted non-secret runtime configuration, accept only active or idle adapter status, and require context-aware provider delivery; CLI, MCP, and other callers shall therefore neither inspect nor send to a tmux pane for a pure API session.
 
+**OPS-83** When CLI, MCP, or daemon code attempts direct message delivery, the system shall use `SendMessage` as the operation that resolves the recipient, selects API or tmux transport, decides readiness, and performs the send.
+
+**OPS-84** When direct delivery succeeds, the `SendMessage` operation shall return the stable session ID used by the transaction so callers can perform post-delivery bookkeeping without resolving a mutable name again.
+
+**OPS-85** When `SendMessage` cannot deliver because the recipient is not ready, the system shall return `AGM-016` with the authoritative readiness state.
+
+**OPS-86** When `SendMessage` returns a typed not-ready outcome, the operation shall not have sent input.
+
+**OPS-87** The CLI and daemon direct-delivery paths shall not call `session.CheckSessionDelivery`.
+
+**OPS-88** The daemon direct-delivery path shall not own a separate tmux sender.
+
+**OPS-89** When `SendMessage` returns an outcome, the CLI and daemon adapters shall translate it into presentation, queue, defer, retry, and acknowledgment policy.
+
+**OPS-90** When `SendMessage` resolves a tmux-backed session, the operation shall lock its stable session ID, reload mutable lifecycle and delivery identity, and retain that lifecycle boundary across atomic readiness and exact-pane input.
+
 ### Stall Detection
 
 **OPS-32** When a session has been in `PERMISSION_PROMPT` state for longer than `PermissionTimeout` (default 5 minutes), the stall detector shall classify it as a critical stall.

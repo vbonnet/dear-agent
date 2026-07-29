@@ -18,8 +18,12 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/send"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
-	"github.com/vbonnet/dear-agent/agm/internal/state"
 )
+
+func sendAPIViaSharedOperation(ctx context.Context, recipient, senderName, messageID, formattedMessage, promptFile string, storage dolt.Storage, newAPIAgent apiAgentFactory) error {
+	_, err := sendViaSharedOperationsWithFactory(ctx, recipient, senderName, messageID, formattedMessage, promptFile, false, false, storage, nil, newAPIAgent)
+	return err
+}
 
 func TestIsAutonomousRole(t *testing.T) {
 	cases := []struct {
@@ -110,84 +114,124 @@ func TestSendViaSharedOperationsPreservesQueuedAGMRecoveryPolicy(t *testing.T) {
 	}
 }
 
-func TestBusySingleSendReachesAtomicDeliveryForForceAndAutonomous(t *testing.T) {
-	previousDelegate := msgDelegate
-	msgDelegate = false
-	t.Cleanup(func() { msgDelegate = previousDelegate })
+func TestDispatchSendByOperationOutcome(t *testing.T) {
+	t.Parallel()
 
-	for _, testCase := range []struct {
-		name   string
-		policy cliInputDeliveryPolicy
+	tests := []struct {
+		name         string
+		directErr    error
+		wantQueue    string
+		wantOverlay  bool
+		wantOriginal bool
 	}{
-		{name: "force", policy: cliInputDeliveryPolicy{Force: true}},
-		{name: "autonomous", policy: cliInputDeliveryPolicy{Autonomous: true}},
-	} {
-		t.Run(testCase.name, func(t *testing.T) {
+		{name: "delivered"},
+		{name: "queue", directErr: ops.ErrSessionNotReady("recipient", "QUEUE"), wantQueue: "QUEUE"},
+		{name: "queued AGM", directErr: ops.ErrSessionNotReady("recipient", "QUEUED_AGM"), wantQueue: "QUEUED_AGM"},
+		{name: "permission", directErr: ops.ErrSessionNotReady("recipient", "PERMISSION"), wantQueue: "PERMISSION"},
+		{name: "onboarding", directErr: ops.ErrSessionNotReady("recipient", "ONBOARDING"), wantQueue: "ONBOARDING"},
+		{name: "legacy no", directErr: ops.ErrSessionNotReady("recipient", "NO"), wantQueue: "NO"},
+		{name: "legacy unknown", directErr: ops.ErrSessionNotReady("recipient", "UNKNOWN"), wantQueue: "UNKNOWN"},
+		{name: "overlay", directErr: ops.ErrSessionNotReady("recipient", "OVERLAY"), wantOverlay: true},
+		{name: "not found", directErr: ops.ErrSessionNotReady("recipient", "NOT_FOUND"), wantOriginal: true},
+		{name: "wrong harness", directErr: ops.ErrSessionNotReady("recipient", "WRONG_HARNESS"), wantOriginal: true},
+		{name: "review required", directErr: ops.ErrSessionNotReady("recipient", "REVIEW_REQUIRED"), wantOriginal: true},
+		{name: "unverified pane", directErr: ops.ErrSessionNotReady("recipient", "UNVERIFIED_PANE"), wantOriginal: true},
+		{name: "non operation error", directErr: errors.New("provider unavailable"), wantOriginal: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			directCalls := 0
-			err := dispatchSendByCanReceiveWithDirect(
-				t.Context(),
-				"busy-session",
-				"busy-session-tmux",
-				"sender",
-				"message-id",
-				"formatted message",
-				"message",
-				"working",
-				state.CanReceiveQueue,
-				nil,
-				testCase.policy,
-				true,
-				false,
+			queued := ""
+			overlayCalls := 0
+			err := dispatchSendByOperationOutcome(
 				func() error {
 					directCalls++
+					return test.directErr
+				},
+				func(readiness string) error {
+					queued = readiness
+					return nil
+				},
+				func() error {
+					overlayCalls++
 					return nil
 				},
 			)
-			if err != nil {
-				t.Fatalf("dispatch busy %s send: %v", testCase.name, err)
-			}
 			if directCalls != 1 {
-				t.Fatalf("atomic direct calls = %d, want 1", directCalls)
+				t.Fatalf("direct calls = %d, want 1", directCalls)
+			}
+			if queued != test.wantQueue {
+				t.Fatalf("queued readiness = %q, want %q", queued, test.wantQueue)
+			}
+			if got := overlayCalls == 1; got != test.wantOverlay {
+				t.Fatalf("overlay called = %t, want %t", got, test.wantOverlay)
+			}
+			if test.wantOriginal && !errors.Is(err, test.directErr) {
+				t.Fatalf("dispatch error = %v, want original %v", err, test.directErr)
+			}
+			if !test.wantOriginal && err != nil {
+				t.Fatalf("dispatch error = %v, want nil", err)
 			}
 		})
 	}
 }
 
-func TestAPIDeliveryUsesAdapterReadinessInsteadOfTmuxState(t *testing.T) {
-	previousDelegate := msgDelegate
-	msgDelegate = false
-	t.Cleanup(func() { msgDelegate = previousDelegate })
+func TestOverlayRecoveryRetriesSharedOperation(t *testing.T) {
+	t.Parallel()
 
-	for _, policyCase := range []struct {
-		name   string
-		policy cliInputDeliveryPolicy
-	}{
-		{name: "force", policy: cliInputDeliveryPolicy{Force: true}},
-		{name: "autonomous", policy: cliInputDeliveryPolicy{Autonomous: true}},
-	} {
-		for _, canReceive := range []state.CanReceive{state.CanReceiveQueue, state.CanReceiveNo, state.CanReceiveOverlay, state.CanReceiveNotFound} {
-			t.Run(policyCase.name+"/"+string(canReceive), func(t *testing.T) {
-				directCalls := 0
-				err := dispatchSendByCanReceiveWithDirect(
-					t.Context(), "api-session", "api-session-tmux", "sender", "message-id",
-					"formatted message", "message", "working", canReceive, nil, policyCase.policy, false, true,
-					func() error {
-						directCalls++
-						return nil
-					},
-				)
-				if err != nil {
-					t.Fatalf("API delivery with tmux state %s error = %v", canReceive, err)
-				}
-				if directCalls != 1 {
-					t.Fatalf("API delivery with tmux state %s direct calls = %d, want 1 adapter-status check", canReceive, directCalls)
-				}
-			})
+	t.Run("left dismissal delivers", func(t *testing.T) {
+		leftCalls := 0
+		escapeCalls := 0
+		pauseCalls := 0
+		directCalls := 0
+		err := retryOverlayDelivery(
+			"recipient",
+			func() error { leftCalls++; return nil },
+			func() error { escapeCalls++; return nil },
+			func() { pauseCalls++ },
+			func() error { directCalls++; return nil },
+			func(string) error { t.Fatal("successful retry queued"); return nil },
+		)
+		if err != nil {
+			t.Fatalf("retryOverlayDelivery() error: %v", err)
 		}
-	}
+		if leftCalls != 1 || escapeCalls != 0 || pauseCalls != 1 || directCalls != 1 {
+			t.Fatalf("calls left/escape/pause/direct = %d/%d/%d/%d, want 1/0/1/1", leftCalls, escapeCalls, pauseCalls, directCalls)
+		}
+	})
+
+	t.Run("escape retry translates final readiness", func(t *testing.T) {
+		leftCalls := 0
+		escapeCalls := 0
+		pauseCalls := 0
+		directCalls := 0
+		queued := ""
+		err := retryOverlayDelivery(
+			"recipient",
+			func() error { leftCalls++; return nil },
+			func() error { escapeCalls++; return nil },
+			func() { pauseCalls++ },
+			func() error {
+				directCalls++
+				if directCalls == 1 {
+					return ops.ErrSessionNotReady("recipient", "OVERLAY")
+				}
+				return ops.ErrSessionNotReady("recipient", "PERMISSION")
+			},
+			func(readiness string) error { queued = readiness; return nil },
+		)
+		if err != nil {
+			t.Fatalf("retryOverlayDelivery() error: %v", err)
+		}
+		if leftCalls != 1 || escapeCalls != 1 || pauseCalls != 2 || directCalls != 2 || queued != "PERMISSION" {
+			t.Fatalf("calls left/escape/pause/direct queue = %d/%d/%d/%d %q, want 1/1/2/2 PERMISSION", leftCalls, escapeCalls, pauseCalls, directCalls, queued)
+		}
+	})
 }
 
-func TestEnsureRecipientReadyDoesNotRequireTmuxForPureAPISession(t *testing.T) {
+func TestPrepareRecipientDeliveryDoesNotRequireTmuxForPureAPISession(t *testing.T) {
 	previousConfig := cfg
 	cfg = &config.Config{SessionsDir: t.TempDir()}
 	t.Cleanup(func() { cfg = previousConfig })
@@ -207,9 +251,7 @@ func TestEnsureRecipientReadyDoesNotRequireTmuxForPureAPISession(t *testing.T) {
 				t.Fatalf("create API session: %v", err)
 			}
 
-			if err := ensureRecipientReady("api-no-tmux-"+harnessType, storage); err != nil {
-				t.Fatalf("ensure API recipient ready without tmux: %v", err)
-			}
+			prepareRecipientDelivery("api-no-tmux-"+harnessType, storage)
 		})
 	}
 }
@@ -252,47 +294,8 @@ func TestAPIRecipientStateSkipsTmuxPersistence(t *testing.T) {
 	if stateResolved || statePersisted {
 		t.Fatalf("API recipient used tmux state resolver=%t persistence=%t", stateResolved, statePersisted)
 	}
-	tmuxChecked := false
-	canReceive := recipientCanReceive(harnessType, tmuxName, func(string) state.CanReceive {
-		tmuxChecked = true
-		return state.CanReceiveNotFound
-	})
-	if tmuxChecked || canReceive != state.CanReceiveYes {
-		t.Fatalf("API recipient tmux checked=%t canReceive=%q, want false and YES", tmuxChecked, canReceive)
-	}
-}
-
-func TestFailedAPIAdapterReadinessCreatesNoDelegation(t *testing.T) {
-	homeDir := t.TempDir()
-	t.Setenv("HOME", homeDir)
-	previousDelegate := msgDelegate
-	msgDelegate = true
-	t.Cleanup(func() { msgDelegate = previousDelegate })
-
-	err := dispatchSendByCanReceiveWithDirect(
-		t.Context(), "api-session", "api-session", "sender", "message-id",
-		"formatted message", "message", "working", state.CanReceiveNotFound, nil,
-		cliInputDeliveryPolicy{Force: true}, false, true,
-		func() error { return errors.New("adapter session is terminated") },
-	)
-	if err == nil || !strings.Contains(err.Error(), "adapter session is terminated") {
-		t.Fatalf("failed API adapter readiness error = %v", err)
-	}
-	if _, statErr := os.Stat(filepath.Join(homeDir, ".agm", "delegations")); !os.IsNotExist(statErr) {
-		t.Fatalf("failed API adapter readiness created delegation state: %v", statErr)
-	}
-}
-
-func TestSharedAtomicInputSupportIsCLIOnly(t *testing.T) {
-	for _, harness := range []string{"claude-code", "codex-cli", "agy", "agy-cli", "antigravity", "gemini-cli", "opencode-cli", "pi-cli"} {
-		if !supportsSharedAtomicInput(harness) {
-			t.Errorf("supportsSharedAtomicInput(%q) = false", harness)
-		}
-	}
-	for _, harness := range []string{"openai", "gpt", "", "unknown"} {
-		if supportsSharedAtomicInput(harness) {
-			t.Errorf("supportsSharedAtomicInput(%q) = true", harness)
-		}
+	if tmuxName == "" {
+		t.Fatal("API recipient lost its display-state identity")
 	}
 }
 
@@ -427,7 +430,7 @@ func TestAPIDeliveryReservesFullCompletionBudgetAfterPreflight(t *testing.T) {
 	jobs := []*send.DeliveryJob{{Recipient: m.Name, MessageID: "budget-message"}}
 	var factoryCtx context.Context
 	results := deliverMultiRecipientJobs(t.Context(), jobs, agent.OpenAIDeliveryTimeout, func(deliveryCtx context.Context, _ *send.DeliveryJob) error {
-		return sendToAPIAgentIfReady(deliveryCtx, m, "sender", "budget-message", "message", "", storage, func(ctx context.Context, _ *manifest.Manifest) (agent.Agent, error) {
+		return sendAPIViaSharedOperation(deliveryCtx, m.Name, "sender", "budget-message", "message", "", storage, func(ctx context.Context, _ *manifest.Manifest) (agent.Agent, error) {
 			factoryCtx = ctx
 			timer := time.NewTimer(50 * time.Millisecond)
 			defer timer.Stop()
@@ -589,7 +592,7 @@ func TestAPIDeliverySerializesReadinessCompletionAndPersistenceByStableSessionID
 
 	firstDone := make(chan error, 1)
 	go func() {
-		firstDone <- sendToAPIAgentIfReady(t.Context(), m, "sender", "first-id", "first", "", storage, factory)
+		firstDone <- sendAPIViaSharedOperation(t.Context(), m.SessionID, "sender", "first-id", "first", "", storage, factory)
 	}()
 	select {
 	case call := <-factoryEntered:
@@ -607,7 +610,7 @@ func TestAPIDeliverySerializesReadinessCompletionAndPersistenceByStableSessionID
 
 	secondDone := make(chan error, 1)
 	go func() {
-		secondDone <- sendToAPIAgentIfReady(t.Context(), m, "sender", "second-id", "second", "", storage, factory)
+		secondDone <- sendAPIViaSharedOperation(t.Context(), m.SessionID, "sender", "second-id", "second", "", storage, factory)
 	}()
 	select {
 	case call := <-factoryEntered:
@@ -646,7 +649,7 @@ func TestAPIDeliveryPassesCallerContextToReadiness(t *testing.T) {
 		t.Fatalf("create API session: %v", err)
 	}
 	mockAgent := &mockAgentAdapter{sessionStatus: agent.StatusActive}
-	err := sendToAPIAgentIfReady(wantCtx, m, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+	err := sendAPIViaSharedOperation(wantCtx, m.Name, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
 		return mockAgent, nil
 	})
 	if err != nil {
@@ -711,7 +714,7 @@ func TestAPIDeliveryReloadsLifecycleInsideStableSessionLock(t *testing.T) {
 	}
 
 	factoryCalled := false
-	err = sendToAPIAgentIfReady(t.Context(), staleActive, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+	err = sendAPIViaSharedOperation(t.Context(), staleActive.SessionID, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
 		factoryCalled = true
 		return &mockAgentAdapter{}, nil
 	})
@@ -744,7 +747,7 @@ func TestAPIDeliveryUsesLockedManifestForAuditArtifact(t *testing.T) {
 		t.Fatalf("rename API session: %v", err)
 	}
 
-	err = sendToAPIAgentIfReady(t.Context(), stale, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+	err = sendAPIViaSharedOperation(t.Context(), stale.SessionID, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
 		return &mockAgentAdapter{sessionStatus: agent.StatusActive}, nil
 	})
 	if err != nil {
@@ -779,7 +782,7 @@ func TestAPIDeliveryRejectsReapingLifecycleInsideStableSessionLock(t *testing.T)
 	}
 
 	factoryCalled := false
-	err = sendToAPIAgentIfReady(t.Context(), staleActive, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+	err = sendAPIViaSharedOperation(t.Context(), staleActive.SessionID, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
 		factoryCalled = true
 		return &mockAgentAdapter{}, nil
 	})
@@ -809,7 +812,7 @@ func TestAPIDeliveryRejectsAdapterWithoutContextDelivery(t *testing.T) {
 		agent.ContextSessionStatusGetter
 	}{Agent: legacy, ContextSessionStatusGetter: legacy}
 
-	err := sendToAPIAgentIfReady(t.Context(), m, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+	err := sendAPIViaSharedOperation(t.Context(), m.Name, "sender", "message-id", "message", "", storage, func(context.Context, *manifest.Manifest) (agent.Agent, error) {
 		return legacyAgentOnly, nil
 	})
 	if err == nil || !strings.Contains(err.Error(), "does not support context-aware delivery") {
@@ -882,8 +885,9 @@ func TestDirectCLIDeliveryRejectsUnregisteredTmuxSession(t *testing.T) {
 	tmuxClient.Sessions["legacy-only"] = true
 
 	err = sendDirectlyWithTmux(t.Context(), "legacy-only", "sender", "message-id", "message", "", adapter, tmuxClient)
-	if err == nil || !strings.Contains(err.Error(), "verified delivery") {
-		t.Fatalf("sendDirectlyWithTmux() error = %v, want verified-delivery rejection", err)
+	var opErr *ops.OpError
+	if !errors.As(err, &opErr) || opErr.Code != ops.ErrCodeSessionNotFound {
+		t.Fatalf("sendDirectlyWithTmux() error = %v, want %s", err, ops.ErrCodeSessionNotFound)
 	}
 	if len(tmuxClient.AtomicInputChecks) != 0 || len(tmuxClient.SentCommands) != 0 {
 		t.Fatalf("unregistered delivery reached tmux: checks=%v commands=%v", tmuxClient.AtomicInputChecks, tmuxClient.SentCommands)

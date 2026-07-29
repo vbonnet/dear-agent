@@ -15,7 +15,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestParseSendBlockGuard_HumanTyping(t *testing.T) {
-	// Mirrors the error produced by ensureRecipientReady + CheckResult.Error().
+	// Mirrors a historical pre-operation safety-guard audit entry.
 	errMsg := "safety guard blocked send on session 'worker-1':\n\n  human_typing: Unsent text detected in prompt: \"hello\"\n  -> Wait for the human to finish typing before sending.\n\n"
 	got := parseSendBlockGuard(errMsg)
 	if got != "human_typing" {
@@ -59,6 +59,20 @@ func TestParseSendBlockGuard_GuardBlockedButNoViolationLine(t *testing.T) {
 	got := parseSendBlockGuard(errMsg)
 	if got != "" {
 		t.Errorf("expected empty string when no violation line, got %q", got)
+	}
+}
+
+func TestParseSendBlockGuard_SharedOperationReadiness(t *testing.T) {
+	errMsg := "shared CLI send: [AGM-016] Session is not ready for input: Session \"worker-1\" cannot safely receive input (readiness: WRONG_HARNESS). No input was sent."
+	if got := parseSendBlockGuard(errMsg); got != "readiness_wrong_harness" {
+		t.Fatalf("parseSendBlockGuard() = %q, want readiness_wrong_harness", got)
+	}
+}
+
+func TestParseSendBlockGuard_IgnoresOtherOperationErrors(t *testing.T) {
+	errMsg := "[AGM-001] Session not found: No session matches identifier \"missing\"."
+	if got := parseSendBlockGuard(errMsg); got != "" {
+		t.Fatalf("parseSendBlockGuard() = %q, want empty", got)
 	}
 }
 

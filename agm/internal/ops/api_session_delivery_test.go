@@ -179,6 +179,31 @@ func TestDeliverAPISessionMessageReloadsCurrentManifestAndUsesContextContracts(t
 	}
 }
 
+func TestSendMessageAPIResultIncludesStableSessionID(t *testing.T) {
+	storage, current := newAPIDeliveryTestSession(t, "")
+	base := &apiDeliveryTestAgent{status: agent.StatusActive}
+	adapter := &sendableAPIDeliveryTestAgent{
+		readyAPIDeliveryTestAgent: &readyAPIDeliveryTestAgent{apiDeliveryTestAgent: base},
+	}
+
+	result, err := SendMessage(&OpContext{
+		Context: t.Context(),
+		Storage: storage,
+		APIAgentFactory: func(context.Context, *manifest.Manifest) (agent.Agent, error) {
+			return adapter, nil
+		},
+	}, &SendMessageRequest{
+		Recipient: current.Name,
+		Message:   "shared API delivery",
+	})
+	if err != nil {
+		t.Fatalf("SendMessage() error: %v", err)
+	}
+	if result == nil || !result.Delivered || result.SessionID != current.SessionID {
+		t.Fatalf("SendMessage() result = %#v, want delivered stable ID %q", result, current.SessionID)
+	}
+}
+
 func TestDeliverAPISessionMessageRejectsReloadAndLifecycleChanges(t *testing.T) {
 	t.Run("reload failure", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
