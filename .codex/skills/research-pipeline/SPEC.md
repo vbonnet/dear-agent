@@ -2,7 +2,7 @@
 
 ## Requirements
 
-**CODEX-RESEARCH-01** When the research-pipeline skill is published, the system shall expose the canonical skill through `.codex/skills/research-pipeline/SKILL.md`.
+**CODEX-RESEARCH-01** When the research-pipeline skill is published, the system shall expose the canonical workflow through a regular, discoverable `.codex/skills/research-pipeline/SKILL.md` entrypoint.
 
 ## BDD Traceability
 

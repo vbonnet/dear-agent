@@ -250,6 +250,13 @@ func validateDeclarativeRuntimeSpecs(ctx context.Context) error {
 
 func validateDeclarativeRuntimeAsset(root, dir, asset string) error {
 	path := filepath.Join(root, filepath.FromSlash(dir), asset)
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("stat declarative runtime asset %s: %w", path, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("declarative runtime asset %s must be a regular discoverable file, not a symlink", path)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read declarative runtime asset %s: %w", path, err)
@@ -302,20 +309,24 @@ func validatePluginManifestAsset(path string, data []byte) error {
 	return nil
 }
 
+type evalExpectedCheck struct {
+	Type    string `json:"type"`
+	Target  string `json:"target"`
+	Pattern string `json:"pattern"`
+}
+
+type declarativeEvalCase struct {
+	ID             string              `json:"id"`
+	Prompt         string              `json:"prompt"`
+	Harness        []string            `json:"harness"`
+	ShouldTrigger  *bool               `json:"should_trigger"`
+	Trials         int                 `json:"trials"`
+	ExpectedChecks []evalExpectedCheck `json:"expected_checks"`
+}
+
 func validateEvalCasesAsset(path string, data []byte) error {
 	var evals struct {
-		Cases []struct {
-			ID             string   `json:"id"`
-			Prompt         string   `json:"prompt"`
-			Harness        []string `json:"harness"`
-			ShouldTrigger  *bool    `json:"should_trigger"`
-			Trials         int      `json:"trials"`
-			ExpectedChecks []struct {
-				Type    string `json:"type"`
-				Target  string `json:"target"`
-				Pattern string `json:"pattern"`
-			} `json:"expected_checks"`
-		} `json:"cases"`
+		Cases []declarativeEvalCase `json:"cases"`
 	}
 	if err := json.Unmarshal(data, &evals); err != nil {
 		return fmt.Errorf("parse declarative runtime asset %s: %w", path, err)
@@ -324,18 +335,25 @@ func validateEvalCasesAsset(path string, data []byte) error {
 		return fmt.Errorf("declarative runtime asset %s has no eval cases", path)
 	}
 	for index, evalCase := range evals.Cases {
-		if evalCase.ID == "" || evalCase.Prompt == "" || len(evalCase.Harness) == 0 ||
-			evalCase.ShouldTrigger == nil || evalCase.Trials <= 0 || len(evalCase.ExpectedChecks) == 0 {
-			return fmt.Errorf("declarative runtime asset %s eval case %d lacks required fields", path, index)
+		if err := validateEvalCase(path, index, evalCase); err != nil {
+			return err
 		}
-		for checkIndex, check := range evalCase.ExpectedChecks {
-			if check.Type == "" || check.Target == "" || check.Pattern == "" {
-				return fmt.Errorf("declarative runtime asset %s eval case %d check %d lacks required fields", path, index, checkIndex)
-			}
-			if check.Type == "regex" {
-				if _, err := regexp.Compile(check.Pattern); err != nil {
-					return fmt.Errorf("declarative runtime asset %s eval case %d check %d has invalid regex: %w", path, index, checkIndex, err)
-				}
+	}
+	return nil
+}
+
+func validateEvalCase(path string, index int, evalCase declarativeEvalCase) error {
+	if evalCase.ID == "" || evalCase.Prompt == "" || len(evalCase.Harness) == 0 ||
+		evalCase.ShouldTrigger == nil || evalCase.Trials <= 0 || len(evalCase.ExpectedChecks) == 0 {
+		return fmt.Errorf("declarative runtime asset %s eval case %d lacks required fields", path, index)
+	}
+	for checkIndex, check := range evalCase.ExpectedChecks {
+		if check.Type == "" || check.Target == "" || check.Pattern == "" {
+			return fmt.Errorf("declarative runtime asset %s eval case %d check %d lacks required fields", path, index, checkIndex)
+		}
+		if check.Type == "regex" {
+			if _, err := regexp.Compile(check.Pattern); err != nil {
+				return fmt.Errorf("declarative runtime asset %s eval case %d check %d has invalid regex: %w", path, index, checkIndex, err)
 			}
 		}
 	}
