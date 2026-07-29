@@ -241,7 +241,7 @@ Feature: Harness parity
   Scenario: AGM has one earned local runtime owner
     Given AGM production local runtime sources
     When AGM validates single runtime ownership
-    Then production should inject one direct session tmux runtime
+    Then production should use only the direct session tmux runtime type
     And shared operations should expose no parallel manager runtime
     And the direct tmux runtime should prove its safety capabilities
     And retired generalized runtimes and selection setting should be absent

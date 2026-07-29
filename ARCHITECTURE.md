@@ -42,15 +42,14 @@ the lifecycle of AI coding agent sessions across multiple harnesses.
 │  - Lifecycle ordering belongs to operation-specific consumers   │
 │  - No universal adapter lifecycle facade                        │
 ├─────────────────────────────────────────────────────────────────┤
-│                    Backend Abstraction                           │
-│                    (internal/backend/)                           │
+│                    Local Runtime Boundary                       │
+│                    (internal/session/)                           │
 │                                                                 │
-│  ┌──────────────────────┐  ┌──────────────────────────────┐    │
-│  │   Tmux Backend       │  │   Temporal Backend (planned) │    │
-│  │   Session mgmt,      │  │   Durable execution,         │    │
-│  │   pane control,      │  │   workflow orchestration      │    │
-│  │   key sending        │  │                               │    │
-│  └──────────────────────┘  └──────────────────────────────┘    │
+│  session.RealTmux is the single local-runtime type. It owns     │
+│  session management, exact pane readiness and liveness, pane    │
+│  control, and atomic input. Consumers depend on only the        │
+│  capability-sized tmux interfaces they actually invoke.        │
+│  There is no dormant generalized runtime registry.              │
 ├─────────────────────────────────────────────────────────────────┤
 │                    Storage & Coordination                        │
 │                                                                 │
@@ -81,14 +80,14 @@ paths, but it is not yet the single business-logic funnel for every AGM
 surface. The real split is:
 
 ```
-MCP / JSON-friendly paths  →  internal/ops  → storage / tmux / backend
-Many CLI commands          →  internal/ops  → storage / tmux / backend
+MCP / JSON-friendly paths  →  internal/ops  → storage / session.RealTmux
+Many CLI commands          →  internal/ops  → storage / session.RealTmux
 Skills (.md)               →  CLI commands  → whichever path that command uses
 Interactive resume attach  →  cmd/agm adapter after internal/ops returns
 ```
 
-- `OpContext` provides dependency injection for storage, tmux, manager backend,
-  config, and output preferences where a command uses ops.
+- `OpContext` provides dependency injection for storage, capability-sized tmux
+  behavior, config, and output preferences where a command uses ops.
 - RFC 7807 structured errors with stable error codes (AGM-001 through AGM-100)
 - Field masks via `--fields` for token-efficient output
 - JSON output mode for programmatic consumers
@@ -266,7 +265,7 @@ User → Completion verified (no pending work)
 dear-agent/
 ├── agm/                 # AGM: session management & orchestration
 │   ├── cmd/agm/         #   CLI entry point
-│   ├── internal/        #   Core logic (ops, agent, session, backend, ...)
+│   ├── internal/        #   Core logic (ops, agent, session, ...)
 │   └── docs/            #   ADRs, specs, capability matrix
 ├── engram/              # Engram: persistent memory
 │   ├── cmd/engram/      #   CLI entry point

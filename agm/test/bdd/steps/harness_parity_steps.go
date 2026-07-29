@@ -106,6 +106,7 @@ type harnessParityState struct {
 	runtimeHelperCommand       string
 	runtimeHelperSpec          string
 	runtimeMainSource          string
+	runtimeProductionSource    string
 	runtimeOpsSource           string
 	runtimeSendSource          string
 	runtimeTmuxSource          string
@@ -268,7 +269,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^runtime helper command "([^"]*)" should have a co-located SPEC$`, runtimeHelperCommandShouldHaveCoLocatedSPEC)
 	ctx.Step(`^AGM production local runtime sources$`, agmProductionLocalRuntimeSources)
 	ctx.Step(`^AGM validates single runtime ownership$`, agmValidatesSingleRuntimeOwnership)
-	ctx.Step(`^production should inject one direct session tmux runtime$`, productionShouldInjectOneDirectSessionTmuxRuntime)
+	ctx.Step(`^production should use only the direct session tmux runtime type$`, productionShouldUseOnlyDirectSessionTmuxRuntimeType)
 	ctx.Step(`^shared operations should expose no parallel manager runtime$`, sharedOperationsShouldExposeNoParallelManagerRuntime)
 	ctx.Step(`^the direct tmux runtime should prove its safety capabilities$`, directTmuxRuntimeShouldProveSafetyCapabilities)
 	ctx.Step(`^retired generalized runtimes and selection setting should be absent$`, retiredGeneralizedRuntimesAndSelectionSettingShouldBeAbsent)
@@ -2101,6 +2102,32 @@ func agmProductionLocalRuntimeSources(ctx context.Context) error {
 		}
 		*source.dst = string(data)
 	}
+	var production strings.Builder
+	for _, root := range []string{
+		filepath.Join(bddRepoRoot(), "agm", "cmd"),
+		filepath.Join(bddRepoRoot(), "agm", "internal"),
+	} {
+		if walkErr := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			data, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return readErr
+			}
+			production.WriteString("\n// ")
+			production.WriteString(path)
+			production.WriteByte('\n')
+			production.Write(data)
+			return nil
+		}); walkErr != nil {
+			return fmt.Errorf("scan production local runtime sources under %s: %w", root, walkErr)
+		}
+	}
+	harnessState.runtimeProductionSource = production.String()
 	return nil
 }
 
@@ -2110,6 +2137,7 @@ func agmValidatesSingleRuntimeOwnership(ctx context.Context) error {
 		return err
 	}
 	if harnessState.runtimeMainSource == "" ||
+		harnessState.runtimeProductionSource == "" ||
 		harnessState.runtimeOpsSource == "" ||
 		harnessState.runtimeSendSource == "" ||
 		harnessState.runtimeTmuxSource == "" ||
@@ -2119,24 +2147,24 @@ func agmValidatesSingleRuntimeOwnership(ctx context.Context) error {
 	return nil
 }
 
-func productionShouldInjectOneDirectSessionTmuxRuntime(ctx context.Context) error {
+func productionShouldUseOnlyDirectSessionTmuxRuntimeType(ctx context.Context) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
 		return err
 	}
-	const construction = "ExecuteWithDeps(session.NewRealTmux())"
-	if count := strings.Count(harnessState.runtimeMainSource, construction); count != 1 {
-		return fmt.Errorf("direct production tmux constructions = %d, want 1", count)
+	const construction = "session.NewRealTmux()"
+	if count := strings.Count(harnessState.runtimeProductionSource, construction); count == 0 {
+		return fmt.Errorf("production direct session tmux constructions = %d, want at least 1", count)
 	}
 	for _, retired := range []string{
-		"internal/backend",
-		"internal/manager",
+		"/internal/backend",
+		"/internal/manager",
 		"managerBackend",
 		"GetDefaultBackendAdapter",
 		"manager.GetDefault",
 	} {
-		if strings.Contains(harnessState.runtimeMainSource, retired) {
-			return fmt.Errorf("production composition still references retired runtime %q", retired)
+		if strings.Contains(harnessState.runtimeProductionSource, retired) {
+			return fmt.Errorf("production source still references retired runtime %q", retired)
 		}
 	}
 	return nil
