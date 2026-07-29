@@ -45,6 +45,23 @@ func TestSamePath_ResolvesSymlinks(t *testing.T) {
 	assert.False(t, samePath(target, filepath.Join(dir, "other")))
 }
 
+func TestPaneCurrentPathFromOutputPreservesPathWhitespace(t *testing.T) {
+	tests := map[string]struct {
+		output string
+		want   string
+	}{
+		"plain":            {output: "/tmp/path\n", want: "/tmp/path"},
+		"leading tab":      {output: "\t/tmp/path\n", want: "\t/tmp/path"},
+		"trailing tab":     {output: "/tmp/path\t\n", want: "/tmp/path\t"},
+		"trailing newline": {output: "/tmp/path\n\n", want: "/tmp/path\n"},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, test.want, paneCurrentPathFromOutput([]byte(test.output)))
+		})
+	}
+}
+
 // TestNewSession_RepairsWorkDirWhenServerCwdDeleted is the regression test for
 // ce-5zbg: a tmux server whose own working directory has been deleted silently
 // ignores `new-session -c <dir>` (spawn.c guards the pane chdir behind

@@ -113,7 +113,14 @@ func PaneCurrentPath(sessionName string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to read pane_current_path for %q: %w", sessionName, err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return paneCurrentPathFromOutput(out), nil
+}
+
+// paneCurrentPathFromOutput removes only display-message's record delimiter.
+// Leading or trailing whitespace belongs to the Unix path and must survive so
+// the liveness comparison does not spuriously trigger a corrective paste.
+func paneCurrentPathFromOutput(out []byte) string {
+	return strings.TrimSuffix(string(out), "\n")
 }
 
 // samePath reports whether two paths refer to the same directory, tolerating
