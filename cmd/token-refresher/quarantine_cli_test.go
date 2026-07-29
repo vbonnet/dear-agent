@@ -166,6 +166,28 @@ func TestDefaultQuarantinePathForCredentialSymlink(t *testing.T) {
 	}
 }
 
+func TestCanonicalCredentialsPathResolvesImplicitDefaultSymlink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	target := filepath.Join(t.TempDir(), "credentials.json")
+	if err := os.WriteFile(target, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, defaultCredentialsPath()); err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := canonicalCredentialsPath(""); got != filepath.Clean(want) {
+		t.Errorf("implicit default canonical path = %q, want %q", got, want)
+	}
+}
+
 func TestRun_UnknownOutcomeWithDisabledQuarantineExplainsRetryRisk(t *testing.T) {
 	srv := lostResponseServer(t)
 	defer srv.Close()
@@ -239,6 +261,26 @@ func TestRun_CheckReportsQuarantine(t *testing.T) {
 	out := stderr.String()
 	if !strings.Contains(out, "QUARANTINED") || !strings.Contains(out, fp) {
 		t.Errorf("check should report the quarantine, got: %s", out)
+	}
+}
+
+func TestRun_CheckReportsDurableRefreshStop(t *testing.T) {
+	creds := writeCreds(t, "tok", freshMs(), "rt")
+	if err := os.WriteFile(creds+".refresh-stop", []byte("persistence failed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"-check", "-credentials", creds,
+		"-audit-log", filepath.Join(t.TempDir(), "audit.jsonl"), "-quarantine", tmpQuarantine(t),
+	}, &stdout, &stderr)
+
+	if code != exitOK {
+		t.Errorf("exit code = %d, want %d", code, exitOK)
+	}
+	if !strings.Contains(stderr.String(), "REFRESH STOPPED") {
+		t.Errorf("check should report the durable refresh stop, got: %s", stderr.String())
 	}
 }
 

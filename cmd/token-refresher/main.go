@@ -165,6 +165,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	finish := func(code int) int {
 		if *cadence {
 			if code == exitNotPersisted {
+				if _, _, _, quarantined := r.QuarantineStatus(); quarantined {
+					notifyOperator("Claude auth AT RISK", "Credential persistence failed; the refresh-token quarantine is active. Run token-refresher -clear-quarantine after remediation.")
+					fmt.Fprintln(stderr, "token-refresher: cadence refresh QUARANTINED until -clear-quarantine re-arms it.")
+					return exitOK
+				}
 				stopped, stopErr := r.RefreshStopped()
 				if stopErr == nil && stopped {
 					notifyOperator("Claude auth AT RISK", "Refresh quarantine could not be persisted; the durable refresh stop is active. Run token-refresher -clear-quarantine after remediation.")
@@ -196,6 +201,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 		} else if qfp != "" {
 			fmt.Fprintf(stderr, "token-refresher: stale quarantine marker for %s (token has since rotated); "+
 				"it is inert and the next refresh will remove it.\n", qfp)
+		}
+		stopped, stopErr := r.RefreshStopped()
+		if stopErr != nil {
+			fmt.Fprintf(stderr, "token-refresher: could not inspect durable refresh stop: %v\n", stopErr)
+			return exitError
+		}
+		if stopped {
+			fmt.Fprintln(stderr, "token-refresher: REFRESH STOPPED after a non-persisted refresh outcome.")
+			fmt.Fprintln(stderr, "  Automatic refresh is disabled. Clear with: token-refresher -clear-quarantine")
 		}
 		writeAudit(*auditPath, auditRecord{
 			Mode: "check", Outcome: "ok", Fresh: st.Fresh, ExpiresAt: msOrZero(st.ExpiresAt),
@@ -466,7 +480,7 @@ func defaultCredentialsPath() string {
 
 func canonicalCredentialsPath(path string) string {
 	if path == "" {
-		return defaultCredentialsPath()
+		path = defaultCredentialsPath()
 	}
 	if absolute, err := filepath.Abs(path); err == nil {
 		path = absolute
