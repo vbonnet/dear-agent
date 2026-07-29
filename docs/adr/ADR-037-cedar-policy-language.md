@@ -91,9 +91,9 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   bound to the request, policy/input digests, authenticated human identity,
   expiry, and an out-of-band channel that agent tools cannot write. Tmux input,
   harness UI callbacks, and agent-addressable messages are not proof of human
-  approval; without an integrity-protected channel, confirmation is unavailable
-  and execution fails closed. Diagnostics never make a forbid or missing permit
-  user-overridable.
+  approval; without an integrity-protected channel, confirmation is unavailable and execution fails closed. A harness-independent pre-receipt deadline makes
+  silence/cancellation return typed `confirmation_timeout`/`confirmation_cancelled`, execute nothing, and release the request; receipt expiry is not that
+  bound. Diagnostics never make a forbid or missing permit user-overridable.
 - Bound every evaluator call by a harness-independent deadline. A panic,
   process crash, signal, nonzero exit, EOF, transport closure, timeout,
   cancellation without a complete decision, or incomplete response is a typed
@@ -233,7 +233,7 @@ tests must prove all of the following:
    A positive end-to-end case proves the authenticated out-of-band human
    channel can mint that receipt and, with unchanged bundle, input, principal,
    action, resource, and filesystem snapshots, final reauthorization permits
-   exactly one dispatch.
+   exactly one dispatch. Every harness also proves silence/cancellation returns the bounded typed result, releases the wait, and dispatches nothing.
 9. Restart restores the last-known-good bundle before the interceptor accepts
    tool calls.
 10. For every harness, replacing or removing the interceptor executable or its
@@ -260,6 +260,10 @@ tests must prove all of the following:
     catalog permits allowed-source/allowed-destination aliases; an external
     uncorrelated link makes it incomplete and fail closed until privileged
     rescan. Pathname allow never overrides protected-inode identity.
+15. Every harness runs an unrecognized binary and a runtime-computed shell-write
+    target; if every resource cannot be projected and pinned, an OS sandbox
+    blocks protected writes or dispatch is denied before launch. Raw-string
+    authorization and post-hoc detection do not pass.
 
 The shared evaluator SPEC and per-harness interceptor BDD scenarios must carry
 these cases; unit tests of Cedar Allow/Deny alone do not satisfy this gate.
