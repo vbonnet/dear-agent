@@ -81,7 +81,9 @@ type OAuthResolver struct {
 	// may already be spent, and re-presenting it revokes the whole family
 	// (ce-77ip.7). Setting this makes Refresh record such a token and refuse to
 	// present it again until it changes on disk or the operator clears it.
-	// Empty disables quarantine and restores the prior retry-blindly behavior.
+	// Empty disables only the caller-selected quarantine marker. Ambiguous
+	// outcomes still create a durable marker beside the canonical credentials
+	// file and block future refreshes until ClearRefreshProtections is called.
 	QuarantinePath string
 
 	// Logger, when non-nil, receives structured refresh events (attempt,

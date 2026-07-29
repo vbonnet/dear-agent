@@ -79,6 +79,11 @@ func TestRun_LostResponseQuarantinesAndExits4(t *testing.T) {
 	if !strings.Contains(stderr.String(), "UNKNOWN") {
 		t.Errorf("stderr should explain the unknown outcome, got: %s", stderr.String())
 	}
+	for _, selector := range []string{`-credentials "` + canonicalCredentialsPath(creds) + `"`, `-quarantine "` + quar + `"`} {
+		if !strings.Contains(stderr.String(), selector) {
+			t.Errorf("stderr recovery command missing %s: %s", selector, stderr.String())
+		}
+	}
 }
 
 // The second tick is the one that used to kill the family. It must decline to
