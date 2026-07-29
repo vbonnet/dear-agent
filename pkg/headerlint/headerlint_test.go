@@ -223,6 +223,27 @@ func TestCheckFile_DoesNotFlagFencesNestedInMarkdownContainers(t *testing.T) {
 	}
 }
 
+func TestCheckFile_UnclosedNestedFenceEndsWithItsContainer(t *testing.T) {
+	tests := map[string]string{
+		"blockquote": "# Doc\n\n> ```markdown\n> quoted code\n**Status:** draft · **Owner:** docs\n",
+		"list":       "# Doc\n\n- ~~~markdown\n  listed code\n**Status:** draft · **Owner:** docs\n",
+		"nested":     "# Doc\n\n> - ````markdown\n>   nested code\n**Status:** draft · **Owner:** docs\n",
+	}
+	for name, content := range tests {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := writeTemp(t, dir, "format.md", content)
+			violations, err := CheckFile(path)
+			if err != nil {
+				t.Fatalf("CheckFile: %v", err)
+			}
+			if len(violations) != 1 || violations[0].Line != 5 {
+				t.Fatalf("want violation on line 5, got %v", violations)
+			}
+		})
+	}
+}
+
 func TestCheckFile_IndentedHeadingEndsHeaderZone(t *testing.T) {
 	const content = "# Design options\n" +
 		"\n" +

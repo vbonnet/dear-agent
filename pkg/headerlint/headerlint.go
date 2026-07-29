@@ -163,19 +163,29 @@ func checkData(path string, data []byte) []Violation {
 	lines := strings.Split(string(data), "\n")
 	var fenceByte byte
 	fenceLength := 0
+	var fenceContainer fenceContainerContext
 	for i, line := range lines {
 		lineNo := i + 1
 		marker, length, trailing, isFence := fenceDelimiter(line)
 		if fenceByte != 0 {
-			if isFence && marker == fenceByte && length >= fenceLength && strings.TrimSpace(trailing) == "" {
-				fenceByte = 0
-				fenceLength = 0
+			if fenceContainer.contains(line) {
+				if isFence && marker == fenceByte && length >= fenceLength && strings.TrimSpace(trailing) == "" {
+					fenceByte = 0
+					fenceLength = 0
+					fenceContainer = fenceContainerContext{}
+				}
+				continue
 			}
-			continue
+			// A fenced block nested in a quote or list ends when that
+			// container ends, even if it never supplied a closing fence.
+			fenceByte = 0
+			fenceLength = 0
+			fenceContainer = fenceContainerContext{}
 		}
 		if isFence {
 			fenceByte = marker
 			fenceLength = length
+			fenceContainer = parseFenceContainerContext(line)
 			continue
 		}
 		if headingH2Plus.MatchString(line) {
@@ -189,6 +199,56 @@ func checkData(path string, data []byte) []Violation {
 		}
 	}
 	return violations
+}
+
+type fenceContainerContext struct {
+	contentOffset int
+	quoteDepth    int
+	hasList       bool
+}
+
+func (c fenceContainerContext) contains(line string) bool {
+	if c.quoteDepth == 0 && !c.hasList {
+		return true
+	}
+	if strings.TrimSpace(line) == "" {
+		return true
+	}
+	current := parseFenceContainerContext(line)
+	if current.quoteDepth < c.quoteDepth {
+		return false
+	}
+	return !c.hasList || current.contentOffset >= c.contentOffset
+}
+
+func parseFenceContainerContext(line string) fenceContainerContext {
+	offset, ok := skipFenceIndent(line, 0)
+	if !ok {
+		return fenceContainerContext{}
+	}
+	context := fenceContainerContext{contentOffset: offset}
+	for offset < len(line) {
+		marker := line[offset]
+		markerEnd, found := fenceContainerMarkerEnd(line, offset)
+		if !found {
+			break
+		}
+		if marker == '>' {
+			context.quoteDepth++
+		} else {
+			context.hasList = true
+		}
+		offset = markerEnd
+		offset, ok = skipFenceIndent(line, offset)
+		if !ok {
+			break
+		}
+		context.contentOffset = offset
+	}
+	if context.quoteDepth == 0 && !context.hasList {
+		context.contentOffset = offset
+	}
+	return context
 }
 
 func fenceDelimiter(line string) (byte, int, string, bool) {
@@ -218,7 +278,7 @@ func fenceDelimiter(line string) (byte, int, string, bool) {
 // fenceContentOffset skips the indentation and block/list container markers
 // that Markdown permits before a fenced code delimiter.
 func fenceContentOffset(line string) (int, bool) {
-	offset, ok := skipFenceIndent(line, 0, 3)
+	offset, ok := skipFenceIndent(line, 0)
 	if !ok {
 		return 0, false
 	}
@@ -229,7 +289,7 @@ func fenceContentOffset(line string) (int, bool) {
 		}
 		offset = markerEnd
 		var indentOK bool
-		offset, indentOK = skipFenceIndent(line, offset, 3)
+		offset, indentOK = skipFenceIndent(line, offset)
 		if !indentOK {
 			return 0, false
 		}
@@ -269,13 +329,13 @@ func terminatedListMarkerEnd(line string, markerEnd int) (int, bool) {
 	return markerEnd + 1, true
 }
 
-func skipFenceIndent(line string, offset, maxSpaces int) (int, bool) {
+func skipFenceIndent(line string, offset int) (int, bool) {
 	spaces := 0
 	for offset < len(line) && line[offset] == ' ' {
 		offset++
 		spaces++
 	}
-	return offset, spaces <= maxSpaces
+	return offset, spaces <= 3
 }
 
 func sortViolations(violations []Violation) {

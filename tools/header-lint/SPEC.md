@@ -29,5 +29,5 @@ for the single-line bold metadata "header block" anti-pattern documented in
 
 ## BDD Traceability
 
-No dedicated BDD feature file. Coverage lives in
-`tools/header-lint/main_test.go`.
+- Feature: `agm/test/bdd/features/developer_tool_package_guardrails.feature`
+- Command tests: `tools/header-lint/main_test.go`

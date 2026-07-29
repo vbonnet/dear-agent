@@ -39,8 +39,8 @@ canonical replacement format and the reasoning behind it, and
 
 ## BDD Traceability
 
-No dedicated BDD feature file. Coverage lives in
-`pkg/headerlint/headerlint_test.go`, including the real-world REVIEW.md and
-`docs/code-review-automation-setup.md` header shapes (as fixtures, not by
-reading those files directly) and the prose false-positive case from the
-originating task.
+- Feature: `agm/test/bdd/features/developer_tool_package_guardrails.feature`
+- Package tests: `pkg/headerlint/headerlint_test.go`, including the real-world
+  REVIEW.md and `docs/code-review-automation-setup.md` header shapes (as
+  fixtures, not by reading those files directly) and the prose false-positive
+  case from the originating task.
