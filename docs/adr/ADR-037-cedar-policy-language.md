@@ -134,12 +134,12 @@ matches what Stage 1 already found for Omnigent's Pi adapter (a runtime
   bounded attempts.
 - Project every path-bearing resource into operation-specific canonical
   filesystem identities before Cedar evaluation. The shared projector expands
-  supported home forms, anchors relative paths to the interceptor's verified
-  working directory, cleans traversal components, and makes the path absolute.
-  Operations that consume the target object, such as read or ordinary open,
-  resolve symlinks and authorize the referent. For a missing leaf they resolve
-  the deepest existing ancestor and reattach the missing components, preserving
-  the invariant already enforced by `internal/fsguard`.
+  supported home forms, cleans traversal, and makes paths absolute. A relative
+  path is anchored to the verified effective cwd when its consuming command
+  runs, including prior shell `cd`; the initial interceptor cwd is insufficient.
+  Unprovable cwd/control flow makes the resource unprojectable. Object reads or
+  opens resolve symlinks; missing leaves resolve the deepest existing ancestor
+  and reattach components, preserving the `internal/fsguard` invariant.
 - Directory-entry operations use a no-follow projection instead. `unlink`,
   replacement, and each side of `rename` authorize the canonical parent
   directory plus the leaf entry without resolving the leaf symlink; rename
@@ -260,10 +260,10 @@ tests must prove all of the following:
     They deny protected-source/allowed-destination, the inverse, and protected-inode aliases; a complete catalog permits fully allowed aliases.
     An external uncorrelated link makes it incomplete and fail closed until
     rescan; pathname allow never overrides protected-inode identity.
-15. Every harness runs an unrecognized binary and runtime-computed shell-read
-    and shell-write targets; if every resource cannot be projected and pinned,
-    an OS sandbox blocks protected reads and writes or dispatch is denied before
-    launch. Raw-string authorization and post-hoc detection do not pass.
+15. Every harness runs an unrecognized binary, runtime-computed shell read/write
+    targets, and a `cd` sequence whose relative path reaches a protected tree;
+    when cwd/resources cannot all be projected and pinned, an OS sandbox blocks
+    protected reads/writes or dispatch is denied before launch. Raw-string authorization and post-hoc detection do not pass.
 
 The shared evaluator SPEC and per-harness interceptor BDD scenarios must carry
 these cases; unit tests of Cedar Allow/Deny alone do not satisfy this gate.
