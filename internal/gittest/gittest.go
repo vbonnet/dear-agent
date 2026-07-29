@@ -160,22 +160,35 @@ func (s *Sandbox) Output(dir string, args ...string) (string, error) {
 }
 
 // HardenRepo writes the sandbox's empty hooks path into an existing
-// repository's own config.
+// repository's own config and installs the same path in the test process's
+// command-scope Git configuration.
 //
 // Env() and Command() only protect commands this package builds. Production
 // Git wrappers build their own *exec.Cmd and leave Cmd.Env unset, so when a
 // test points one at a sandboxed repository it still reads the host's global
 // configuration — the same hook hazard, relocated from the test file into the
 // code under test. Repository configuration outranks global configuration, so
-// planting the empty hooks path in the repository closes that path for every
-// process that touches it, whoever spawned it.
+// planting the empty hooks path in the repository closes that path for normal
+// processes that touch it. Command-scope configuration outranks repository
+// configuration, so HardenRepo also replaces inherited GIT_CONFIG_COUNT and
+// GIT_CONFIG_PARAMETERS values. That protects production wrappers under test
+// whose exec.Cmd deliberately inherits the process environment.
 //
 // Command-line configuration still outranks the repository, so a test that
 // needs its own hooks to fire can pass `-c core.hooksPath=...` for that one
 // invocation.
 func (s *Sandbox) HardenRepo(t testing.TB, dir string) {
 	t.Helper()
+	s.hardenProcessGitConfig(t)
 	s.Run(t, dir, "config", "core.hooksPath", s.HooksDir)
+}
+
+func (s *Sandbox) hardenProcessGitConfig(t testing.TB) {
+	t.Helper()
+	t.Setenv("GIT_CONFIG_PARAMETERS", "")
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "core.hooksPath")
+	t.Setenv("GIT_CONFIG_VALUE_0", s.HooksDir)
 }
 
 // InitRepo initializes a sandboxed repository in dir, creating dir if needed,

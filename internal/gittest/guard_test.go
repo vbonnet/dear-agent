@@ -21,8 +21,11 @@ import (
 //
 // Paths are slash-separated and relative to the repository root.
 var allowedUnsandboxedGitTests = map[string]map[int]string{
-	"internal/gittest/gittest_test.go": {75: "positive control: proves host hooks fire for an unisolated repository, " +
-		"without which the isolation assertion would pass vacuously",
+	"internal/gittest/gittest_test.go": {
+		75: "positive control: proves host hooks fire for an unisolated repository, " +
+			"without which the isolation assertion would pass vacuously",
+		209: "positive control: executes a production-style inherited-environment command after HardenRepo " +
+			"to prove command-scope host-hook configuration was replaced",
 	},
 	"agm/cmd/agm/scan_test.go": {118: "read-only capability probe: `git rev-parse --git-dir` decides whether to skip " +
 		"tests that deliberately read the INVOKING repository. Sandboxing the probe would answer a " +

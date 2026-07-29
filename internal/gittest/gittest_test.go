@@ -179,6 +179,43 @@ func TestSandboxEnvironmentDropsHostGitVariables(t *testing.T) {
 	}
 }
 
+func TestHardenRepoOverridesCommandScopeHooksForProductionCommands(t *testing.T) {
+	sandbox := gittest.New(t)
+	repo := sandbox.NewRepo(t)
+	hostHooks := filepath.Join(t.TempDir(), "host-hooks")
+	if err := os.MkdirAll(hostHooks, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	canary := filepath.Join(t.TempDir(), "host-hook-fired")
+	hook := filepath.Join(hostHooks, "post-commit")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\nprintf fired >>"+canary+"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "core.hooksPath")
+	t.Setenv("GIT_CONFIG_VALUE_0", hostHooks)
+	t.Setenv("GIT_CONFIG_PARAMETERS", "'core.hooksPath="+hostHooks+"'")
+	sandbox.HardenRepo(t, repo)
+
+	tracked := filepath.Join(repo, "production-path.txt")
+	if err := os.WriteFile(tracked, []byte("safe\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"-C", repo, "add", "production-path.txt"},
+		{"-C", repo, "commit", "-m", "exercise inherited production environment"},
+	} {
+		output, err := exec.Command("git", args...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("raw production-style git %v failed: %v\n%s", args, err, output)
+		}
+	}
+	if _, err := os.Stat(canary); !os.IsNotExist(err) {
+		t.Fatalf("command-scope host hook executed; stat error = %v", err)
+	}
+}
+
 // TestSandboxRedirectsGlobalConfigWrites proves `git config --global` in a
 // test lands inside the sandbox instead of the developer's ~/.gitconfig.
 func TestSandboxRedirectsGlobalConfigWrites(t *testing.T) {
