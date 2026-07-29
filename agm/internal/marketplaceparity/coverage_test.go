@@ -27,12 +27,25 @@ func TestValidateCatalog(t *testing.T) {
 
 func TestValidateRequiredPluginsRejectsMissingResearchPipeline(t *testing.T) {
 	catalog := Catalog{Plugins: []PluginEntry{
-		{Name: "agm"},
-		{Name: "wayfinder"},
-		{Name: "youtube"},
+		{Name: "agm", Capabilities: []string{"commands", "skills"}},
+		{Name: "wayfinder", Capabilities: []string{"skills"}},
+		{Name: "youtube", Capabilities: []string{"commands"}},
 	}}
 	if err := validateRequiredPlugins(catalog); err == nil || !strings.Contains(err.Error(), "research-pipeline") {
 		t.Fatalf("validateRequiredPlugins() error = %v, want missing research-pipeline", err)
+	}
+}
+
+func TestValidateRequiredPluginsRejectsMissingRequiredCapability(t *testing.T) {
+	catalog := Catalog{Plugins: []PluginEntry{
+		{Name: "agm", Capabilities: []string{"commands", "skills"}},
+		{Name: "wayfinder", Capabilities: []string{"skills"}},
+		{Name: "youtube", Capabilities: []string{"commands"}},
+		{Name: "research-pipeline"},
+	}}
+	err := validateRequiredPlugins(catalog)
+	if err == nil || !strings.Contains(err.Error(), `"research-pipeline" missing capability "skills"`) {
+		t.Fatalf("validateRequiredPlugins() error = %v, want missing skills capability", err)
 	}
 }
 

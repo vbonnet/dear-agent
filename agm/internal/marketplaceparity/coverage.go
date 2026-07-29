@@ -23,6 +23,12 @@ const (
 )
 
 var requiredPluginNames = []string{"agm", "wayfinder", "youtube", "research-pipeline"}
+var requiredPluginCapabilities = map[string][]string{
+	"agm":               {"commands", "skills"},
+	"wayfinder":         {"skills"},
+	"youtube":           {"commands"},
+	"research-pipeline": {"skills"},
+}
 
 // Owner describes the marketplace owner metadata.
 type Owner struct {
@@ -114,13 +120,19 @@ func ValidateCatalog(root string) error {
 }
 
 func validateRequiredPlugins(catalog Catalog) error {
-	present := make(map[string]bool, len(catalog.Plugins))
+	present := make(map[string]PluginEntry, len(catalog.Plugins))
 	for _, plugin := range catalog.Plugins {
-		present[plugin.Name] = true
+		present[plugin.Name] = plugin
 	}
 	for _, name := range requiredPluginNames {
-		if !present[name] {
+		plugin, ok := present[name]
+		if !ok {
 			return fmt.Errorf("marketplace catalog missing required plugin %q", name)
+		}
+		for _, capability := range requiredPluginCapabilities[name] {
+			if !slices.Contains(plugin.Capabilities, capability) {
+				return fmt.Errorf("marketplace catalog required plugin %q missing capability %q", name, capability)
+			}
 		}
 	}
 	return nil
