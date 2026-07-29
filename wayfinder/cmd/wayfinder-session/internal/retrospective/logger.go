@@ -2,6 +2,7 @@ package retrospective
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -20,6 +21,13 @@ import (
 //
 // Errors are logged to stderr but don't block rewind operation (fail-gracefully).
 func LogRewindEvent(projectDir string, fromPhase, toPhase string, flags RewindFlags) error {
+	if err := history.New(projectDir).EnsureCurrentFile(); err != nil {
+		if errors.Is(err, history.ErrAmbiguousHistory) {
+			return fmt.Errorf("refuse rewind logging with ambiguous history: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Warning: failed to prepare history: %v\n", err)
+	}
+
 	// Wrap in defer/recover to ensure rewind never fails due to logger crash
 	defer func() {
 		if r := recover(); r != nil {

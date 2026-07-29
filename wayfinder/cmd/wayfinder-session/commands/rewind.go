@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/archive"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/git"
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/history"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/retrospective"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
@@ -56,6 +57,10 @@ func runRewind(cmd *cobra.Command, args []string) error {
 
 	// Get project directory
 	projectDir := GetProjectDirectory()
+
+	if err := history.New(projectDir).EnsureCurrentFile(); err != nil {
+		return fmt.Errorf("prepare history for rewind: %w", err)
+	}
 
 	// Read existing canonical status from the project directory.
 	st, err := status.ParseV2FromDir(projectDir)

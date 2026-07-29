@@ -3,6 +3,7 @@ package history
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,6 +110,9 @@ func TestAppendEventRejectsAmbiguousDualHistoryFiles(t *testing.T) {
 	err := New(tmpDir).AppendEvent(EventTypePhaseStarted, "PROBLEM", nil)
 	if err == nil || !strings.Contains(err.Error(), "ambiguous history state") {
 		t.Fatalf("AppendEvent() error = %v, want ambiguous history state", err)
+	}
+	if !errors.Is(err, ErrAmbiguousHistory) {
+		t.Fatalf("AppendEvent() error = %v, want ErrAmbiguousHistory", err)
 	}
 	for path, want := range map[string][]byte{currentPath: currentData, legacyPath: legacyData} {
 		got, readErr := os.ReadFile(path)

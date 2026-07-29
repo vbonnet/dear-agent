@@ -69,13 +69,15 @@ func runCompletePhase(cmd *cobra.Command, args []string) (retErr error) {
 	// Get project directory
 	projectDir := GetProjectDirectory()
 
+	hist := history.New(projectDir)
+	if err := hist.EnsureCurrentFile(); err != nil {
+		return fmt.Errorf("prepare history for phase transition: %w", err)
+	}
+
 	st, err := status.ParseV2FromDir(projectDir)
 	if err != nil {
 		return fmt.Errorf("failed to read canonical status file: %w", err)
 	}
-
-	// Initialize history logger
-	hist := history.New(projectDir)
 
 	// Validate phase can be completed
 	v := validator.NewValidator(st)
