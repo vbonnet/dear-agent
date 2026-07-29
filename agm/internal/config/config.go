@@ -134,6 +134,28 @@ type SandboxConfig struct {
 	Repos      []string          `yaml:"repos"`                // Repositories to include as lower dirs
 	Secrets    map[string]string `yaml:"secrets,omitempty"`    // Secrets to inject into sandbox
 	Onboarding OnboardingConfig  `yaml:"onboarding,omitempty"` // Onboarding CLAUDE.md injection
+
+	// WritableDirs are host paths a sandboxed session may write in addition to
+	// its workspace, surfaced to the harness as --add-dir entries. Unlike Repos
+	// these are NOT reflinked into the sandbox as lower dirs: they stay the real
+	// host paths, which is what lets a worker commit to a real worktree or close
+	// a bead in the real Beads DB. Empty by default.
+	WritableDirs []string `yaml:"writable_dirs,omitempty"`
+
+	// BypassCodexHookTrust launches Codex with --dangerously-bypass-hook-trust.
+	//
+	// Codex persists hook trust keyed by the ABSOLUTE path of hooks.json. A
+	// sandboxed session runs from a fresh per-session workspace, so the hooks
+	// reflinked into it always present at a never-before-seen path and Codex
+	// blocks startup on "Hooks need review" — every time, unrecoverably, because
+	// the path is different on the next spawn too.
+	//
+	// Enable this ONLY where the hook sources are already vetted (they are copies
+	// of the reviewed golden-repo hooks). It runs every ENABLED hook without
+	// per-path review, so it does not honour per-hook "enabled = false" trust
+	// decisions recorded against the golden path. Off by default: this is an
+	// operator decision, not a default.
+	BypassCodexHookTrust bool `yaml:"bypass_codex_hook_trust,omitempty"`
 }
 
 // OnboardingConfig controls CLAUDE.md injection into sandboxed sessions

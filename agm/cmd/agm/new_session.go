@@ -219,8 +219,9 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 		PermissionMode:      modeFlagValue,
 		DisableAutoMode:     noAutoMode,
 		MaxBudgetUSD:        maxBudgetUsd,
-		ExtraAddDirs:        extraAddDirs,
-		ForwardTelemetry:    true,
+		ExtraAddDirs:         extraAddDirs,
+		BypassCodexHookTrust: cfg.Sandbox.BypassCodexHookTrust,
+		ForwardTelemetry:     true,
 		ForwardClaudeOAuth:  true,
 		AllowEmptyPrompt:    true,
 		AllowUnsafeTitle:    true,
@@ -435,6 +436,13 @@ func collectExtraAddDirs(sandboxInfo *manifest.SandboxConfig) ([]string, bool) {
 		for _, repoDir := range cfg.Sandbox.Repos {
 			extraAddDirs = append(extraAddDirs, repoDir)
 			debug.Log("Will pre-authorize source repo via --add-dir: %s", repoDir)
+		}
+		// Sandboxed sessions are otherwise confined to their workspace, so any
+		// real worktree or shared task database is read-only to them. Without
+		// these a worker can do the work but cannot land it.
+		for _, dir := range cfg.Sandbox.WritableDirs {
+			extraAddDirs = append(extraAddDirs, dir)
+			debug.Log("Will pre-authorize writable dir via --add-dir: %s", dir)
 		}
 	}
 	return extraAddDirs, true

@@ -78,6 +78,24 @@ var CodexModelUpgradePromptPatterns = []string{
 	"Use existing model",
 }
 
+// CodexUpdatePromptPatterns match Codex's "Update available!" interstitial,
+// which owns input before the composer renders whenever a newer codex-cli has
+// shipped. Captured from a live pane on codex-cli 0.145.0 with 0.146.0 out:
+//
+//	✨ Update available! 0.145.0 -> 0.146.0
+//	› 1. Update now (runs `brew upgrade --cask codex`)
+//	  2. Skip
+//	  3. Skip until next version
+//
+// The highlighted default upgrades the CLI, which would mutate the operator's
+// toolchain mid-dispatch, so AGM selects "Skip" instead. Every phrase is
+// required so ordinary transcript text mentioning updates cannot match.
+var CodexUpdatePromptPatterns = []string{
+	"Update available!",
+	"Update now",
+	"Skip until next version",
+}
+
 // ErrCodexHookReviewRequired marks the security-sensitive Codex startup screen
 // that requires an operator to inspect new or changed executable hooks.
 var ErrCodexHookReviewRequired = errors.New("codex hooks require explicit review")
@@ -348,6 +366,23 @@ func containsCodexModelUpgradePromptPattern(content string) bool {
 	return false
 }
 
+// containsCodexUpdatePromptPattern reports whether the Codex update-available
+// interstitial currently owns input. Every phrase must be present: a release
+// banner or transcript line mentioning an update must not be mistaken for the
+// selector, because answering it sends keystrokes into whatever owns the pane.
+func containsCodexUpdatePromptPattern(content string) bool {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return false
+	}
+	for _, pattern := range CodexUpdatePromptPatterns {
+		if !strings.Contains(trimmed, pattern) {
+			return false
+		}
+	}
+	return true
+}
+
 // WaitForCodexPrompt polls the pane until the Codex TUI shows its composer
 // (ready for input), returning nil on success or a timeout error.
 //
@@ -378,6 +413,7 @@ func WaitForCodexPromptContext(parent context.Context, sessionName string, timeo
 	checkCount := 0
 	trustAccepted := false
 	modelUpgradeAnswered := false
+	updateAnswered := false
 
 	for {
 		if err := ctx.Err(); err != nil {
@@ -441,6 +477,24 @@ func WaitForCodexPromptContext(parent context.Context, sessionName string, timeo
 				debug.Log("⚠️  Failed to confirm existing Codex model: %v", err)
 			} else {
 				modelUpgradeAnswered = true
+			}
+			if err := sleepWithContext(ctx, time.Second); err != nil {
+				continue
+			}
+			continue
+		}
+
+		// A newer codex-cli release blocks startup on an update selector whose
+		// highlighted default would run a package upgrade. Decline it and keep
+		// polling; the composer renders immediately afterwards.
+		if !updateAnswered && containsCodexUpdatePromptPattern(plainContent) {
+			debug.Log("⬇️  Codex update prompt detected (check #%d) — skipping update", checkCount)
+			if err := SendKeys(sessionName, "Down"); err != nil {
+				debug.Log("⚠️  Failed to move to Codex skip-update option: %v", err)
+			} else if err := SendKeys(sessionName, "Enter"); err != nil {
+				debug.Log("⚠️  Failed to confirm skipping Codex update: %v", err)
+			} else {
+				updateAnswered = true
 			}
 			if err := sleepWithContext(ctx, time.Second); err != nil {
 				continue

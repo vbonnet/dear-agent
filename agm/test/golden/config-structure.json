@@ -67,7 +67,9 @@
     "Onboarding": {
       "Enabled": false,
       "TemplatePath": ""
-    }
+    },
+    "WritableDirs": null,
+    "BypassCodexHookTrust": false
   },
   "Budget": {
     "Enabled": false,

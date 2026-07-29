@@ -154,6 +154,7 @@ type CreateSessionRequest struct {
 	DisableAutoMode        bool                  `json:"-"`
 	MaxBudgetUSD           float64               `json:"-"`
 	ExtraAddDirs           []string              `json:"-"`
+	BypassCodexHookTrust   bool                  `json:"-"`
 	ForwardTelemetry       bool                  `json:"-"`
 	ForwardClaudeOAuth     bool                  `json:"-"`
 	AllowEmptyPrompt       bool                  `json:"-"`
@@ -587,6 +588,8 @@ func buildHarnessLaunchSpec(req *CreateSessionRequest, params *createSessionPara
 		MaxBudgetUSD:     req.MaxBudgetUSD,
 		ExtraAddDirs:     append([]string{}, req.ExtraAddDirs...),
 		ForwardTelemetry: req.ForwardTelemetry,
+
+		BypassCodexHookTrust: req.BypassCodexHookTrust,
 		Codex:            codexMeta,
 		Pi:               req.Metadata.Pi,
 		PiExtension:      req.Metadata.PiExtension,

@@ -85,6 +85,7 @@ type CodexLaunch struct {
 	AddDirs                []string
 	ResumeID               string
 	Remote                 bool
+	BypassHookTrust        bool
 	Persistent             bool
 	DeferUntilProducerExit bool
 }
@@ -136,6 +137,9 @@ func BuildCodexCommand(launch CodexLaunch) string {
 	}
 	if launch.Remote {
 		b.WriteString(" --remote")
+	}
+	if launch.BypassHookTrust {
+		b.WriteString(" --bypass-hook-trust")
 	}
 	if !launch.Persistent {
 		b.WriteString(" && exit")
@@ -344,6 +348,7 @@ type codexRequest struct {
 	AddDirs     stringList
 	ResumeID    string
 	Remote      bool
+	BypassHooks bool
 }
 
 func parseCodex(args []string) (codexRequest, error) {
@@ -359,6 +364,7 @@ func parseCodex(args []string) (codexRequest, error) {
 	set.Var(&request.AddDirs, "add-dir", "")
 	set.StringVar(&request.ResumeID, "resume-id", "", "")
 	set.BoolVar(&request.Remote, "remote", false, "")
+	set.BoolVar(&request.BypassHooks, "bypass-hook-trust", false, "")
 	if err := set.Parse(args); err != nil {
 		return codexRequest{}, fmt.Errorf("invalid Codex launch request: %w", err)
 	}
@@ -409,6 +415,11 @@ func (r codexRequest) argv() []string {
 	args = append(args, "-m", r.Model, "-C", r.WorkDir, "-s", r.Sandbox)
 	for _, dir := range r.AddDirs {
 		args = append(args, "--add-dir", dir)
+	}
+	if r.BypassHooks {
+		// Codex keys hook trust by absolute hooks.json path, which is new on
+		// every sandboxed spawn. Without this the TUI never reaches its composer.
+		args = append(args, "--dangerously-bypass-hook-trust")
 	}
 	if r.Approval != "" {
 		args = append(args, "-a", r.Approval)
