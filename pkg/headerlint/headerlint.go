@@ -69,7 +69,7 @@ var (
 	htmlBlockTag      = regexp.MustCompile(`(?i)^</?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t/>]|$)`)
 	htmlType7OpenTag  = regexp.MustCompile(`(?i)^<[a-z][a-z0-9-]*(?:[ \t]+[a-z_:][a-z0-9_.:-]*(?:[ \t]*=[ \t]*(?:"[^"]*"|'[^']*'|[^ \t"'=<>]+))?)*[ \t]*/?>[ \t]*$`)
 	htmlType7CloseTag = regexp.MustCompile(`(?i)^</[a-z][a-z0-9-]*[ \t]*>[ \t]*$`)
-	inlineHTMLTag     = regexp.MustCompile(`(?i)(?:<[a-z][a-z0-9-]*(?:[ \t]+[a-z_:][a-z0-9_.:-]*(?:[ \t]*=[ \t]*(?:"[^"]*"|'[^']*'|[^ \t"'=<>]+))?)*[ \t]*/?>|</[a-z][a-z0-9-]*[ \t]*>)`)
+	inlineHTMLToken   = regexp.MustCompile(`(?:(?i:<[a-z][a-z0-9-]*(?:[ \t]+[a-z_:][a-z0-9_.:-]*(?:[ \t]*=[ \t]*(?:"[^"]*"|'[^']*'|[^ \t"'=<>]+))?)*[ \t]*/?>|</[a-z][a-z0-9-]*[ \t]*>)|<!--.*?-->|<\?.*?\?>|<![A-Z][^>]*>|<!\[CDATA\[.*?\]\]>)`)
 )
 
 // CheckFile validates one Markdown file. Content defects are returned as
@@ -214,10 +214,10 @@ func checkData(path string, data []byte) []Violation {
 		if lineNo > headerZoneMaxLines {
 			break
 		}
-		if unescapedBoldFieldCount(maskInlineHTMLTags(scannable)) >= 2 {
+		if unescapedBoldFieldCount(maskInlineHTMLTokens(scannable)) >= 2 {
 			violations = append(violations, Violation{Path: path, Line: lineNo, Text: strings.TrimSpace(line)})
 		}
-		paragraphOpen = lineLeavesParagraphOpen(line)
+		paragraphOpen = lineLeavesParagraphOpen(line, paragraphOpen)
 		if paragraphOpen {
 			paragraphContainer = openerContainer
 		} else {
@@ -667,8 +667,8 @@ func unescapedBoldFieldCount(line string) int {
 	return count
 }
 
-func maskInlineHTMLTags(line string) string {
-	matches := inlineHTMLTag.FindAllStringIndex(line, -1)
+func maskInlineHTMLTokens(line string) string {
+	matches := inlineHTMLToken.FindAllStringIndex(line, -1)
 	if len(matches) == 0 {
 		return line
 	}
@@ -881,12 +881,12 @@ func htmlTagBoundary(value string, offset int) bool {
 	}
 }
 
-func lineLeavesParagraphOpen(line string) bool {
+func lineLeavesParagraphOpen(line string, paragraphOpen bool) bool {
 	container := parseFenceContainerContext(line)
 	if containerLineIsBlank(line, container) {
 		return false
 	}
-	if matchesContainerATXHeading(line, atxHeading, false) {
+	if matchesContainerATXHeading(line, atxHeading, paragraphOpen) {
 		return false
 	}
 	if matchesContainerBlockPattern(line, container, setextHeading) ||

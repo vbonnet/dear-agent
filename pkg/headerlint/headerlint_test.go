@@ -476,6 +476,25 @@ func TestCheckFile_NonOneOrderedMarkerDoesNotInterruptParagraph(t *testing.T) {
 	}
 }
 
+func TestCheckFile_ConsecutiveNonOneOrderedMarkersPreserveParagraphState(t *testing.T) {
+	const content = "# Design options\n" +
+		"\n" +
+		"Introductory paragraph\n" +
+		"2. ## literal text, not a list heading\n" +
+		"3. ## also literal text, not a list heading\n" +
+		"**Complexity:** Low. **Timeline:** Comparable.\n"
+
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "design.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 1 || violations[0].Line != 6 {
+		t.Fatalf("want violation after consecutive noninterrupting markers, got %v", violations)
+	}
+}
+
 func TestCheckFile_NonOneOrderedListHeadingAfterBlankEndsHeaderZone(t *testing.T) {
 	const content = "# Design options\n" +
 		"\n" +
@@ -700,6 +719,28 @@ func TestCheckFile_DoesNotFlagBoldShapedTextInsideInlineHTMLTag(t *testing.T) {
 	}
 	if len(violations) != 0 {
 		t.Fatalf("want inline HTML attributes ignored, got %v", violations)
+	}
+}
+
+func TestCheckFile_DoesNotFlagBoldShapedTextInsideInlineHTMLTokens(t *testing.T) {
+	tests := map[string]string{
+		"comment":                "<!-- **Status:** draft · **Owner:** docs -->",
+		"processing-instruction": "<?draft **Status:** draft · **Owner:** docs ?>",
+		"declaration":            "<!DRAFT **Status:** draft · **Owner:** docs>",
+		"cdata":                  "<![CDATA[**Status:** draft · **Owner:** docs]]>",
+	}
+	for name, token := range tests {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := writeTemp(t, dir, "inline-html.md", "# Doc\n\nIntro "+token+"\n")
+			violations, err := CheckFile(path)
+			if err != nil {
+				t.Fatalf("CheckFile: %v", err)
+			}
+			if len(violations) != 0 {
+				t.Fatalf("want inline HTML token ignored, got %v", violations)
+			}
+		})
 	}
 }
 
