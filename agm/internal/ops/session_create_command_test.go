@@ -63,3 +63,13 @@ func TestPrepareHarnessLaunchCommandRejectsControlsForSharedHarnesses(t *testing
 		})
 	}
 }
+
+func TestPrepareAgyResumeCommandRejectsConversationControls(t *testing.T) {
+	_, err := PrepareAgyResumeCommand(HarnessLaunchSpec{
+		Harness: "agy",
+		WorkDir: "/safe",
+	}, "conversation\x1b[201~\nunsafe")
+	if err == nil || !strings.Contains(err.Error(), "control characters") {
+		t.Fatalf("PrepareAgyResumeCommand() error = %v, want terminal-control rejection", err)
+	}
+}

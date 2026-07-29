@@ -62,6 +62,10 @@ func (a *GeminiCLIAdapter) CreateSession(ctx SessionContext) (SessionID, error) 
 	if tmuxName == "" {
 		tmuxName = fmt.Sprintf("gemini-%s", time.Now().Format("20060102-150405"))
 	}
+	values := append([]string{ctx.WorkingDirectory}, ctx.AuthorizedDirs...)
+	if err := validatePastedShellValues(values...); err != nil {
+		return "", fmt.Errorf("validate Gemini launch: %w", err)
+	}
 
 	// Check if tmux session already exists
 	exists, err := tmux.HasSession(tmuxName)
@@ -81,7 +85,6 @@ func (a *GeminiCLIAdapter) CreateSession(ctx SessionContext) (SessionID, error) 
 	geminiCmd := buildGeminiStartCommand(ctx.WorkingDirectory, ctx.AuthorizedDirs)
 
 	// Start Gemini CLI in tmux
-	values := append([]string{ctx.WorkingDirectory}, ctx.AuthorizedDirs...)
 	if err := sendPastedShellCommand(tmuxName, geminiCmd, values...); err != nil {
 		// Clean up tmux session on error if we created it
 		if !exists {
@@ -132,6 +135,9 @@ func (a *GeminiCLIAdapter) ResumeSession(sessionID SessionID) error {
 	metadata, err := a.sessionStore.Get(sessionID)
 	if err != nil {
 		return fmt.Errorf("session not found: %w", err)
+	}
+	if err := validatePastedShellValues(metadata.WorkingDir, metadata.UUID); err != nil {
+		return fmt.Errorf("validate Gemini resume: %w", err)
 	}
 
 	// Check if tmux session exists

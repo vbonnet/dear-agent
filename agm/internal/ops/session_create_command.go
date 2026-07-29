@@ -256,6 +256,18 @@ func BuildAgyResumeCommand(spec HarnessLaunchSpec, conversationID string) Harnes
 	return buildAgyCommand(spec, conversationID)
 }
 
+// PrepareAgyResumeCommand validates the terminal-paste inputs used by AGY
+// cold resume before building its canonical command.
+func PrepareAgyResumeCommand(spec HarnessLaunchSpec, conversationID string) (HarnessLaunchCommand, error) {
+	if err := validateHarnessLaunchSpec(spec); err != nil {
+		return HarnessLaunchCommand{}, err
+	}
+	if err := harnessexec.ValidatePastedText("agy conversation id", conversationID); err != nil {
+		return HarnessLaunchCommand{}, fmt.Errorf("validate harness launch: %w", err)
+	}
+	return buildAgyCommand(spec, conversationID), nil
+}
+
 func buildAgyCommand(spec HarnessLaunchSpec, conversationID string) HarnessLaunchCommand {
 	resolvedModel := agent.ResolveModelFullName("agy", spec.Model)
 	command := launchparity.BuildAgyCommand(launchparity.AgyCommandSpec{

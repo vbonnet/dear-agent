@@ -1156,10 +1156,15 @@ func dispatchResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, harnessN
 	var preparedLaunch *ops.HarnessLaunchCommand
 	switch agent.NormalizeHarnessName(harnessName) {
 	case "opencode-cli":
-		fullCmd = ops.BuildHarnessLaunchCommand(ops.HarnessLaunchSpec{
+		launch, err := ops.PrepareHarnessLaunchCommand(ops.HarnessLaunchSpec{
 			Harness: "opencode-cli", Model: m.Model, SessionName: health.TmuxSessionName,
 			WorkDir: health.WorktreePath,
-		}).Command
+		})
+		if err != nil {
+			return fmt.Errorf("prepare OpenCode resume launch: %w", err)
+		}
+		preparedLaunch = &launch
+		fullCmd = launch.Command
 	case "codex-cli":
 		// Pre-trust the workdir so a Codex relaunch does not block on the
 		// interactive trust prompt in non-git sandbox dirs (ce-cmsq).
@@ -1173,7 +1178,12 @@ func dispatchResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, harnessN
 		preparedLaunch = &launch
 		fullCmd = launch.Command
 	case "agy":
-		fullCmd = buildAgyResumeCommand(m, health)
+		launch, err := prepareAgyResumeCommand(m, health)
+		if err != nil {
+			return err
+		}
+		preparedLaunch = &launch
+		fullCmd = launch.Command
 	case "pi-cli":
 		var err error
 		health.piLaunchID = launchparity.NewPiLaunchID()
@@ -1264,13 +1274,17 @@ func buildPiResumeCommand(m *manifest.Manifest, health *HealthStatus, launchID s
 	piMeta := *m.Pi
 	piMeta.CodingAgentDir = codingAgentDir
 	piMeta.CodingAgentDirSet = true
-	return ops.BuildHarnessLaunchCommand(ops.HarnessLaunchSpec{
+	launch, err := ops.PrepareHarnessLaunchCommand(ops.HarnessLaunchSpec{
 		Harness: "pi-cli", Model: model, SessionName: health.TmuxSessionName,
 		SessionID: m.Pi.SessionID, WorkDir: health.WorktreePath,
 		PermissionMode: m.PermissionMode, Pi: &piMeta,
 		PiLaunchID:  launchID,
 		PiExtension: extensionPath, PiPolicyJSON: policyJSON, PiPolicyFile: policyFile,
-	}).Command, nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("prepare Pi resume launch: %w", err)
+	}
+	return launch.Command, nil
 }
 
 func buildCodexResumeCommand(m *manifest.Manifest, health *HealthStatus) string {
@@ -1320,6 +1334,28 @@ func buildAgyResumeCommand(m *manifest.Manifest, health *HealthStatus) string {
 		Harness: "agy", Model: model, SessionName: health.TmuxSessionName,
 		WorkDir: health.WorktreePath, PermissionMode: m.PermissionMode,
 	}).Command
+}
+
+func prepareAgyResumeCommand(m *manifest.Manifest, health *HealthStatus) (ops.HarnessLaunchCommand, error) {
+	model := m.Model
+	if m.Agy != nil && m.Agy.ConversationID != "" {
+		if isAmbiguousLegacyAgyDefault(model) {
+			model = ""
+		}
+		return ops.PrepareAgyResumeCommand(ops.HarnessLaunchSpec{
+			Harness: "agy", Model: model, SessionName: health.TmuxSessionName,
+			WorkDir: health.WorktreePath, PermissionMode: m.PermissionMode,
+			ExtraAddDirs: []string{health.WorktreePath},
+		}, m.Agy.ConversationID)
+	}
+	ui.PrintWarning("No AGY conversation ID found - starting new AGY session")
+	if model == "" {
+		model = agent.HarnessDefaults["agy"]
+	}
+	return ops.PrepareHarnessLaunchCommand(ops.HarnessLaunchSpec{
+		Harness: "agy", Model: model, SessionName: health.TmuxSessionName,
+		WorkDir: health.WorktreePath, PermissionMode: m.PermissionMode,
+	})
 }
 
 func isAmbiguousLegacyAgyDefault(model string) bool {
