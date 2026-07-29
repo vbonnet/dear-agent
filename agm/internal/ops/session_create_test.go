@@ -1551,6 +1551,34 @@ func TestCreateSession_CodexRemoteBootIsBounded(t *testing.T) {
 	}
 }
 
+func TestCreateSession_CodexRejectsUnsafeLaunchInputBeforeRemoteOrTmuxMutation(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Setenv("AGM_CODEX_REMOTE_CONTROL", "1")
+	t.Setenv("AGM_CODEX_REQUIRE_REMOTE_CONTROL", "1")
+	tmuxMock := session.NewMockTmux()
+	remoteCalls := 0
+
+	_, err := CreateSessionWithContext(context.Background(), &OpContext{
+		Tmux: tmuxMock,
+		CodexThreadCreator: func(context.Context, string, string, string) (*manifest.Codex, error) {
+			remoteCalls++
+			return &manifest.Codex{SessionID: "must-not-exist"}, nil
+		},
+	}, &CreateSessionRequest{
+		Cwd: t.TempDir(), Title: "prevalidate", Model: "5.4", Harness: "codex-cli",
+		AllowEmptyPrompt: true, ExtraAddDirs: []string{"/tmp/unsafe\x1bdir"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "validate harness launch") {
+		t.Fatalf("CreateSessionWithContext error = %v, want terminal-control rejection", err)
+	}
+	if remoteCalls != 0 {
+		t.Fatalf("Codex remote thread creations = %d, want 0", remoteCalls)
+	}
+	if tmuxMock.Sessions["prevalidate"] {
+		t.Fatal("unsafe Codex request created a tmux session")
+	}
+}
+
 func TestCreateSession_CLIAndMCPShareCoreContract(t *testing.T) {
 	sharedDir := t.TempDir()
 	type surfaceResult struct {
