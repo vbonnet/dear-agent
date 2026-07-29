@@ -336,10 +336,19 @@ func ConfiguredWorkspaceConfigsAt(workspaceConfigPath string) ([]*Config, error)
 		}
 		return []*Config{base}, nil
 	}
+	return configuredWorkspaceConfigsFromRegistry(enabled, data)
+}
+
+func configuredWorkspaceConfigsFromRegistry(enabled []string, data []byte) ([]*Config, error) {
 	base, err := configForWorkspace(enabled[0])
 	if err != nil {
 		return nil, err
 	}
+	endpoints, err := parseWorkspaceDoltEndpoints(data)
+	if err != nil {
+		return nil, err
+	}
+	_, sharedPortExplicit := lookupEnv("DOLT_PORT")
 	explicitDatabase, databaseIsExplicit := lookupEnv("DOLT_DATABASE")
 	databaseIsExplicit = databaseIsExplicit && explicitDatabase != ""
 	seen := make(map[string]bool, len(enabled))
@@ -351,9 +360,14 @@ func ConfiguredWorkspaceConfigsAt(workspaceConfigPath string) ([]*Config, error)
 		seen[workspace] = true
 		workspaceConfig := *base
 		workspaceConfig.Workspace = workspace
+		if endpoint := endpoints[workspace]; endpoint.Port != "" {
+			applyWorkspaceDoltEndpoint(&workspaceConfig, endpoint)
+		} else if len(enabled) > 1 && !sharedPortExplicit {
+			return
+		}
 		if databaseIsExplicit {
 			workspaceConfig.Database = explicitDatabase
-		} else {
+		} else if endpoints[workspace].Database == "" {
 			workspaceConfig.Database = workspace
 		}
 		configs = append(configs, &workspaceConfig)
@@ -361,7 +375,55 @@ func ConfiguredWorkspaceConfigsAt(workspaceConfigPath string) ([]*Config, error)
 	for _, workspace := range enabled {
 		add(workspace)
 	}
+	if len(configs) != len(enabled) {
+		return nil, fmt.Errorf("multiple enabled workspaces require either an explicit shared DOLT_PORT or a per-workspace dolt.port in the AGM registry")
+	}
 	return validateConfiguredWorkspaceConfigs(configs, base, explicitDatabase, databaseIsExplicit)
+}
+
+func applyWorkspaceDoltEndpoint(config *Config, endpoint workspaceDoltEndpoint) {
+	config.Port = endpoint.Port
+	if endpoint.Host != "" {
+		config.Host = endpoint.Host
+	}
+	if endpoint.User != "" {
+		config.User = endpoint.User
+	}
+	config.Password = endpoint.Password
+	if endpoint.StartScript != "" {
+		config.StartScript = expandTilde(endpoint.StartScript)
+	}
+	if endpoint.Database != "" {
+		config.Database = endpoint.Database
+	}
+}
+
+type workspaceDoltEndpoint struct {
+	Host        string `yaml:"host"`
+	Port        string `yaml:"port"`
+	User        string `yaml:"user"`
+	Password    string `yaml:"password"`
+	StartScript string `yaml:"start_script"`
+	Database    string `yaml:"database"`
+}
+
+func parseWorkspaceDoltEndpoints(data []byte) (map[string]workspaceDoltEndpoint, error) {
+	var cfg struct {
+		Workspaces []struct {
+			Name string                `yaml:"name"`
+			Dolt workspaceDoltEndpoint `yaml:"dolt"`
+		} `yaml:"workspaces"`
+	}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse AGM workspace Dolt endpoints: %w", err)
+	}
+	endpoints := make(map[string]workspaceDoltEndpoint, len(cfg.Workspaces))
+	for _, workspace := range cfg.Workspaces {
+		if name := strings.TrimSpace(workspace.Name); name != "" {
+			endpoints[name] = workspace.Dolt
+		}
+	}
+	return endpoints, nil
 }
 
 func parseEnabledWorkspaceNames(data []byte) ([]string, bool, error) {

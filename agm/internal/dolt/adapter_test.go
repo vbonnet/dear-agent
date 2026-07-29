@@ -181,6 +181,8 @@ workspaces:
 			return "1", true
 		case "ENGRAM_TEST_WORKSPACE":
 			return "custom", true
+		case "DOLT_PORT":
+			return "3307", true
 		default:
 			return "", false
 		}
@@ -218,6 +220,7 @@ func TestConfiguredWorkspaceConfigsAtDoesNotRequireDefaultForEnabledRegistry(t *
 		values := map[string]string{
 			"ENGRAM_TEST_MODE":      "1",
 			"ENGRAM_TEST_WORKSPACE": "personal",
+			"DOLT_PORT":             "3307",
 		}
 		value, ok := values[key]
 		return value, ok
@@ -256,6 +259,7 @@ workspaces:
 			"ENGRAM_TEST_WORKSPACE": "personal",
 			"WORKSPACE":             "personal",
 			"DOLT_DATABASE":         "agm_test",
+			"DOLT_PORT":             "3307",
 		}
 		value, ok := values[key]
 		return value, ok
@@ -264,6 +268,41 @@ workspaces:
 	_, err := ConfiguredWorkspaceConfigs()
 	if err == nil || !strings.Contains(err.Error(), "cannot prove a complete cross-workspace") {
 		t.Fatalf("ConfiguredWorkspaceConfigs error = %v, want explicit-database isolation failure", err)
+	}
+}
+
+func TestConfiguredWorkspaceConfigsAtResolvesPerWorkspaceDoltEndpoints(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	t.Cleanup(func() { lookupEnv = originalLookupEnv })
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`workspaces:
+  - name: personal
+    enabled: true
+    dolt:
+      host: 127.0.0.1
+      port: "3307"
+  - name: oss
+    enabled: true
+    dolt:
+      host: dolt-oss.internal
+      port: "3308"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lookupEnv = func(key string) (string, bool) {
+		values := map[string]string{
+			"ENGRAM_TEST_MODE":      "1",
+			"ENGRAM_TEST_WORKSPACE": "personal",
+		}
+		value, ok := values[key]
+		return value, ok
+	}
+	configs, err := ConfiguredWorkspaceConfigsAt(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(configs) != 2 || configs[0].Port != "3307" || configs[1].Port != "3308" || configs[1].Host != "dolt-oss.internal" {
+		t.Fatalf("workspace endpoints = %#v", configs)
 	}
 }
 
