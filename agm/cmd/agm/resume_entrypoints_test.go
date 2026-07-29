@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestProductionResumeEntryPointsUseLockedResolvedSession(t *testing.T) {
+func TestProductionResumeEntryPointsUseSharedResumeOperation(t *testing.T) {
 	for _, path := range []string{"last.go", "resume_all.go"} {
 		t.Run(path, func(t *testing.T) {
 			file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
@@ -34,7 +34,7 @@ func TestProductionResumeEntryPointsUseLockedResolvedSession(t *testing.T) {
 				return true
 			})
 			if unlockedCalls != 0 || lockedCalls == 0 {
-				t.Fatalf("resume routing in %s = (locked=%d, unlocked=%d), want locked>0 and unlocked=0", path, lockedCalls, unlockedCalls)
+				t.Fatalf("resume routing in %s = (shared=%d, legacy=%d), want shared>0 and legacy=0", path, lockedCalls, unlockedCalls)
 			}
 		})
 	}

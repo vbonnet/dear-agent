@@ -1,6 +1,6 @@
 # AGM architecture
 
-<!-- Last audited at: 2026-07-21 -->
+<!-- Last audited at: 2026-07-27 -->
 
 AGM is a local-first session coordinator for interactive AI command-line
 harnesses. It owns session lifecycle, persistent metadata, tmux process
@@ -42,12 +42,22 @@ daemon callers. The CLI retains formatting, logging, queue choice, overlay
 recovery, and presentation; the daemon retains dequeue scheduling, defer/retry
 accounting, acknowledgments, and durable queue state.
 
+Resume is a shared lifecycle transaction. `internal/ops.ResumeSession` locks the
+stable session ID before reading mutable state, classifies health, owns exact
+tmux creation and compensation, builds and waits for the native harness, commits
+canonical runtime identity, restores persisted mode, submits an optional
+post-resume prompt, and updates activity. The CLI may resolve a human
+identifier, read a prompt file, render operation events, and attach after the
+operation returns; it must not reproduce those lifecycle phases.
+
 ## Source owners
 
 | Concern | Executable owner |
 |---|---|
 | Cobra command tree and generated help | `agm/cmd/agm` |
 | Cross-surface lifecycle operations | `agm/internal/ops` |
+| Resume transaction and rollback | `agm/internal/ops/session_resume.go` |
+| Resume tmux capability adapter | `agm/internal/session/tmux_real.go` |
 | Active and deprecated harness registry | `agm/internal/agent/harnesses.go` |
 | Harness constructors | `agm/internal/agent/factory.go` |
 | Harness adapters | `agm/internal/agent/*_adapter.go` |

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,79 +13,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
-	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
-
-func TestWaitForResumedAgyUsesCallerContext(t *testing.T) {
-	type callerContextKey struct{}
-	callerCtx, cancel := context.WithCancel(context.WithValue(t.Context(), callerContextKey{}, "resume"))
-	cancel()
-
-	err := waitForResumedAgyWithWait(callerCtx, &HealthStatus{TmuxSessionName: "agy-resume"}, func(ctx context.Context, sessionName string, timeout time.Duration) error {
-		if ctx != callerCtx {
-			t.Fatalf("resume wait context identity changed")
-		}
-		if sessionName != "agy-resume" || timeout != 60*time.Second {
-			t.Fatalf("resume wait = %q/%s, want agy-resume/60s", sessionName, timeout)
-		}
-		return ctx.Err()
-	})
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("waitForResumedAgyWithWait error = %v, want context.Canceled", err)
-	}
-}
-
-func TestWaitForResumedAgyPropagatesOnboardingRequired(t *testing.T) {
-	err := waitForResumedAgyWithWait(t.Context(), &HealthStatus{TmuxSessionName: "agy-resume"}, func(context.Context, string, time.Duration) error {
-		return fmt.Errorf("onboarding: %w", tmux.ErrAgyOnboardingRequired)
-	})
-	if !errors.Is(err, tmux.ErrAgyOnboardingRequired) {
-		t.Fatalf("waitForResumedAgyWithWait error = %v, want ErrAgyOnboardingRequired", err)
-	}
-}
-
-func TestWaitForResumedAgyToleratesSlowStartup(t *testing.T) {
-	err := waitForResumedAgyWithWait(t.Context(), &HealthStatus{TmuxSessionName: "agy-resume"}, func(context.Context, string, time.Duration) error {
-		return errors.New("readiness timeout")
-	})
-	if err != nil {
-		t.Fatalf("waitForResumedAgyWithWait error = %v, want slow startup to remain non-fatal", err)
-	}
-}
-
-func TestResumeSessionStopsCancellationAfterManifestRead(t *testing.T) {
-	for _, tmuxExists := range []bool{false, true} {
-		t.Run(map[bool]string{false: "cold-resume", true: "warm-resume"}[tmuxExists], func(t *testing.T) {
-			ctx, cancel := context.WithCancel(t.Context())
-			t.Cleanup(cancel)
-			mutatedTmux := false
-
-			err := resumeSessionWithRuntime(ctx, nil, "agy-session", "", "agy", &HealthStatus{
-				TmuxExists:      tmuxExists,
-				TmuxSessionName: "agy-resume",
-			}, resumeSessionRuntime{
-				loadManifest: func(context.Context, *dolt.Adapter, string, string) (*manifest.Manifest, error) {
-					cancel()
-					return &manifest.Manifest{}, nil
-				},
-				createTmux: func(string, string) (tmux.SessionIdentity, error) {
-					mutatedTmux = true
-					return tmux.SessionIdentity{}, nil
-				},
-				attach: func(string) error {
-					mutatedTmux = true
-					return nil
-				},
-			})
-			if !errors.Is(err, context.Canceled) {
-				t.Fatalf("resumeSessionWithRuntime() error = %v, want context.Canceled", err)
-			}
-			if mutatedTmux {
-				t.Fatal("resume mutated tmux after the manifest read canceled its caller")
-			}
-		})
-	}
-}
 
 func TestWaitForAgyMetadataBackfillUsesCallerContext(t *testing.T) {
 	type callerContextKey struct{}
