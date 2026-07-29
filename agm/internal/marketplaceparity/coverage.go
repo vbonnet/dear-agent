@@ -186,62 +186,26 @@ func validateNativeSkillCoverage(root string, catalog Catalog, surface HarnessSu
 
 func loadExportedSkills(root string, plugin PluginEntry) ([]exportedSkill, error) {
 	source := filepath.Join(root, filepath.FromSlash(plugin.Source))
-	var manifest claudePluginManifest
-	manifestPath := filepath.Join(source, ".claude-plugin", "plugin.json")
-	if err := readJSON(manifestPath, &manifest); err != nil {
-		return nil, fmt.Errorf("skill-capable plugin %q manifest: %w", plugin.Name, err)
-	}
-	if manifest.Name != plugin.Name {
-		return nil, fmt.Errorf("skill-capable plugin %q manifest names %q", plugin.Name, manifest.Name)
-	}
-	if len(manifest.Skills) == 0 {
-		return nil, fmt.Errorf("skill-capable plugin %q manifest exports no skills", plugin.Name)
+	manifest, err := loadClaudePluginManifest(source, plugin.Name)
+	if err != nil {
+		return nil, err
 	}
 
 	byName := make(map[string]exportedSkill)
 	for _, declared := range manifest.Skills {
-		declaredPath := filepath.Clean(filepath.Join(source, filepath.FromSlash(declared)))
-		relSource, err := filepath.Rel(source, declaredPath)
-		if err != nil || relSource == ".." || strings.HasPrefix(relSource, ".."+string(filepath.Separator)) {
-			return nil, fmt.Errorf("skill-capable plugin %q skill export %q escapes its source", plugin.Name, declared)
-		}
-		info, err := os.Stat(declaredPath)
+		skillFiles, err := exportedSkillFiles(source, plugin.Name, declared)
 		if err != nil {
-			return nil, fmt.Errorf("skill-capable plugin %q skill export %q: %w", plugin.Name, declared, err)
-		}
-		var skillFiles []string
-		if info.IsDir() {
-			err = filepath.WalkDir(declaredPath, func(path string, entry os.DirEntry, walkErr error) error {
-				if walkErr != nil {
-					return walkErr
-				}
-				if !entry.IsDir() && entry.Name() == "SKILL.md" {
-					skillFiles = append(skillFiles, path)
-				}
-				return nil
-			})
-			if err != nil {
-				return nil, fmt.Errorf("walk skill-capable plugin %q export %q: %w", plugin.Name, declared, err)
-			}
-		} else if info.Mode().IsRegular() && filepath.Base(declaredPath) == "SKILL.md" {
-			skillFiles = append(skillFiles, declaredPath)
-		}
-		if len(skillFiles) == 0 {
-			return nil, fmt.Errorf("skill-capable plugin %q skill export %q contains no SKILL.md", plugin.Name, declared)
+			return nil, err
 		}
 		for _, skillFile := range skillFiles {
-			name, err := readSkillName(skillFile)
+			skill, err := exportedSkillFromFile(root, plugin.Name, skillFile)
 			if err != nil {
-				return nil, fmt.Errorf("skill-capable plugin %q exported skill %q: %w", plugin.Name, skillFile, err)
+				return nil, err
 			}
-			canonical, err := filepath.Rel(root, skillFile)
-			if err != nil {
-				return nil, fmt.Errorf("resolve plugin %q exported skill %q: %w", plugin.Name, skillFile, err)
+			if previous, duplicate := byName[skill.Name]; duplicate {
+				return nil, fmt.Errorf("skill-capable plugin %q exports duplicate skill name %q from %q and %q", plugin.Name, skill.Name, previous.CanonicalPath, skill.CanonicalPath)
 			}
-			if previous, duplicate := byName[name]; duplicate {
-				return nil, fmt.Errorf("skill-capable plugin %q exports duplicate skill name %q from %q and %q", plugin.Name, name, previous.CanonicalPath, filepath.ToSlash(canonical))
-			}
-			byName[name] = exportedSkill{Name: name, CanonicalPath: filepath.ToSlash(canonical)}
+			byName[skill.Name] = skill
 		}
 	}
 
@@ -255,6 +219,68 @@ func loadExportedSkills(root string, plugin PluginEntry) ([]exportedSkill, error
 		exported = append(exported, byName[name])
 	}
 	return exported, nil
+}
+
+func loadClaudePluginManifest(source, pluginName string) (claudePluginManifest, error) {
+	var manifest claudePluginManifest
+	manifestPath := filepath.Join(source, ".claude-plugin", "plugin.json")
+	if err := readJSON(manifestPath, &manifest); err != nil {
+		return claudePluginManifest{}, fmt.Errorf("skill-capable plugin %q manifest: %w", pluginName, err)
+	}
+	if manifest.Name != pluginName {
+		return claudePluginManifest{}, fmt.Errorf("skill-capable plugin %q manifest names %q", pluginName, manifest.Name)
+	}
+	if len(manifest.Skills) == 0 {
+		return claudePluginManifest{}, fmt.Errorf("skill-capable plugin %q manifest exports no skills", pluginName)
+	}
+	return manifest, nil
+}
+
+func exportedSkillFiles(source, pluginName, declared string) ([]string, error) {
+	declaredPath := filepath.Clean(filepath.Join(source, filepath.FromSlash(declared)))
+	relSource, err := filepath.Rel(source, declaredPath)
+	if err != nil || relSource == ".." || strings.HasPrefix(relSource, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("skill-capable plugin %q skill export %q escapes its source", pluginName, declared)
+	}
+	info, err := os.Stat(declaredPath)
+	if err != nil {
+		return nil, fmt.Errorf("skill-capable plugin %q skill export %q: %w", pluginName, declared, err)
+	}
+	if !info.IsDir() {
+		if info.Mode().IsRegular() && filepath.Base(declaredPath) == "SKILL.md" {
+			return []string{declaredPath}, nil
+		}
+		return nil, fmt.Errorf("skill-capable plugin %q skill export %q contains no SKILL.md", pluginName, declared)
+	}
+
+	var skillFiles []string
+	if err := filepath.WalkDir(declaredPath, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !entry.IsDir() && entry.Name() == "SKILL.md" {
+			skillFiles = append(skillFiles, path)
+		}
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("walk skill-capable plugin %q export %q: %w", pluginName, declared, err)
+	}
+	if len(skillFiles) == 0 {
+		return nil, fmt.Errorf("skill-capable plugin %q skill export %q contains no SKILL.md", pluginName, declared)
+	}
+	return skillFiles, nil
+}
+
+func exportedSkillFromFile(root, pluginName, skillFile string) (exportedSkill, error) {
+	name, err := readSkillName(skillFile)
+	if err != nil {
+		return exportedSkill{}, fmt.Errorf("skill-capable plugin %q exported skill %q: %w", pluginName, skillFile, err)
+	}
+	canonical, err := filepath.Rel(root, skillFile)
+	if err != nil {
+		return exportedSkill{}, fmt.Errorf("resolve plugin %q exported skill %q: %w", pluginName, skillFile, err)
+	}
+	return exportedSkill{Name: name, CanonicalPath: filepath.ToSlash(canonical)}, nil
 }
 
 func readSkillName(path string) (string, error) {
