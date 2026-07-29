@@ -242,6 +242,50 @@ func TestValidateNativeSkillCoverageRejectsSymlink(t *testing.T) {
 	}
 }
 
+func TestNativeSkillEntrypointRejectsSkillDirectorySymlinkOutsideRepository(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		surface HarnessSurface
+		rootDir string
+	}{
+		{
+			name:    "codex",
+			surface: HarnessSurface{Mode: "native-codex-skill", Catalog: ".agents/skills"},
+			rootDir: ".agents/skills",
+		},
+		{
+			name:    "opencode",
+			surface: HarnessSurface{Mode: "native-opencode-skill", Catalog: ".opencode/skills"},
+			rootDir: ".opencode/skills",
+		},
+		{
+			name:    "agy",
+			surface: HarnessSurface{Mode: "agents-md-skill-fallback", Catalog: ".dear-agent/marketplace.json"},
+			rootDir: ".agents/skills",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			nativeRoot := filepath.Join(root, filepath.FromSlash(test.rootDir))
+			if err := os.MkdirAll(nativeRoot, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			outside := t.TempDir()
+			if err := os.WriteFile(filepath.Join(outside, "SKILL.md"), []byte("# Outside\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(outside, filepath.Join(nativeRoot, "example")); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := nativeSkillEntrypoint(root, test.surface, "example", "example"); err == nil ||
+				!strings.Contains(err.Error(), "escapes") {
+				t.Fatalf("nativeSkillEntrypoint() error = %v, want escaping skill directory rejection", err)
+			}
+		})
+	}
+}
+
 func TestNativeSkillEntrypointRejectsCatalogRootOutsideRepository(t *testing.T) {
 	for _, test := range []struct {
 		name    string
@@ -406,6 +450,63 @@ func TestLoadExportedSkillsRejectsPluginSourceOutsideRepository(t *testing.T) {
 			if _, err := loadExportedSkills(root, plugin); err == nil ||
 				!strings.Contains(err.Error(), "escapes") {
 				t.Fatalf("loadExportedSkills() error = %v, want escaping source rejection", err)
+			}
+		})
+	}
+}
+
+func TestLoadExportedSkillsRejectsManifestOutsidePluginSource(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		link func(t *testing.T, source, outside string)
+	}{
+		{
+			name: "manifest-directory-symlink",
+			link: func(t *testing.T, source, outside string) {
+				t.Helper()
+				if err := os.Symlink(outside, filepath.Join(source, ".claude-plugin")); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "manifest-file-symlink",
+			link: func(t *testing.T, source, outside string) {
+				t.Helper()
+				manifestDir := filepath.Join(source, ".claude-plugin")
+				if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join(outside, "plugin.json"), filepath.Join(manifestDir, "plugin.json")); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			source := filepath.Join(root, "plugins", "example")
+			if err := os.MkdirAll(source, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			outside := t.TempDir()
+			if err := os.WriteFile(
+				filepath.Join(outside, "plugin.json"),
+				[]byte(`{"name":"example","skills":["./skills/"]}`),
+				0o644,
+			); err != nil {
+				t.Fatal(err)
+			}
+			test.link(t, source, outside)
+
+			plugin := PluginEntry{
+				Name:         "example",
+				Source:       "./plugins/example",
+				Capabilities: []string{"skills"},
+			}
+			if _, err := loadExportedSkills(root, plugin); err == nil ||
+				!strings.Contains(err.Error(), "escapes") {
+				t.Fatalf("loadExportedSkills() error = %v, want escaping manifest rejection", err)
 			}
 		})
 	}

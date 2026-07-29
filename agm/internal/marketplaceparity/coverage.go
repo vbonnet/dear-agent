@@ -205,7 +205,7 @@ func nativeSkillEntrypoint(root string, surface HarnessSurface, pluginName, skil
 		if _, err := resolvedPathWithin(root, declaredRoot); err != nil {
 			return "", fmt.Errorf("native skill root %q: %w", entrypointRoot, err)
 		}
-		return requireNativeSkillEntrypoint(filepath.Join(declaredRoot, skillName, "SKILL.md"), pluginName, skillName)
+		return requireNativeSkillEntrypoint(root, filepath.Join(declaredRoot, skillName, "SKILL.md"), pluginName, skillName)
 	}
 
 	declaredSettingsPath := filepath.Join(root, filepath.FromSlash(surface.Catalog))
@@ -230,18 +230,21 @@ func nativeSkillEntrypoint(root string, surface HarnessSurface, pluginName, skil
 		if _, err := os.Lstat(entrypoint); os.IsNotExist(err) {
 			continue
 		}
-		return requireNativeSkillEntrypoint(entrypoint, pluginName, skillName)
+		return requireNativeSkillEntrypoint(root, entrypoint, pluginName, skillName)
 	}
 	return "", fmt.Errorf("plugin %q exported skill %q missing from Pi configured skill roots", pluginName, skillName)
 }
 
-func requireNativeSkillEntrypoint(entrypoint, pluginName, skillName string) (string, error) {
+func requireNativeSkillEntrypoint(root, entrypoint, pluginName, skillName string) (string, error) {
 	info, err := os.Lstat(entrypoint)
 	if err != nil {
 		return "", fmt.Errorf("plugin %q exported skill %q missing native entrypoint: %w", pluginName, skillName, err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 		return "", fmt.Errorf("plugin %q exported skill %q native entrypoint %q is not a regular file", pluginName, skillName, entrypoint)
+	}
+	if _, err := resolvedPathWithin(root, entrypoint); err != nil {
+		return "", fmt.Errorf("plugin %q exported skill %q native entrypoint %q: %w", pluginName, skillName, entrypoint, err)
 	}
 	return entrypoint, nil
 }
@@ -289,6 +292,9 @@ func loadExportedSkills(root string, plugin PluginEntry) ([]exportedSkill, error
 func loadClaudePluginManifest(source, pluginName string) (claudePluginManifest, error) {
 	var manifest claudePluginManifest
 	manifestPath := filepath.Join(source, ".claude-plugin", "plugin.json")
+	if _, err := resolvedPathWithin(source, manifestPath); err != nil {
+		return claudePluginManifest{}, fmt.Errorf("skill-capable plugin %q manifest path: %w", pluginName, err)
+	}
 	if err := readJSON(manifestPath, &manifest); err != nil {
 		return claudePluginManifest{}, fmt.Errorf("skill-capable plugin %q manifest: %w", pluginName, err)
 	}
