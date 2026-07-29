@@ -332,6 +332,55 @@ func TestCheckFile_DoesNotFlagBoldFieldsInsideMultilineCodeSpan(t *testing.T) {
 	}
 }
 
+func TestCheckFile_UnmatchedBacktickIsLiteralText(t *testing.T) {
+	const content = "# Doc\n\n" +
+		"The unmatched ` opener\n" +
+		"**Status:** draft · **Owner:** docs\n"
+
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "doc.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 1 || violations[0].Line != 4 {
+		t.Fatalf("want violation on line 4, got %v", violations)
+	}
+}
+
+func TestCheckFile_BackslashDoesNotEscapeCodeSpanCloser(t *testing.T) {
+	const content = "# Doc\n\n" +
+		"`literal \\` **Status:** draft · **Owner:** docs\n"
+
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "doc.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 1 || violations[0].Line != 3 {
+		t.Fatalf("want violation on line 3, got %v", violations)
+	}
+}
+
+func TestCheckFile_UnmarkedBlankEndsQuotedFence(t *testing.T) {
+	const content = "# Doc\n\n" +
+		"> ```markdown\n" +
+		"> quoted code\n" +
+		"\n" +
+		"> **Status:** draft · **Owner:** docs\n"
+
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "doc.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 1 || violations[0].Line != 6 {
+		t.Fatalf("want violation on line 6, got %v", violations)
+	}
+}
+
 func TestCheckFile_IndentedHeadingEndsHeaderZone(t *testing.T) {
 	const content = "# Design options\n" +
 		"\n" +

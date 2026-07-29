@@ -161,53 +161,14 @@ func gitOutput(ctx context.Context, dir string, args ...string) ([]byte, error) 
 func checkData(path string, data []byte) []Violation {
 	var violations []Violation
 	lines := strings.Split(string(data), "\n")
-	var fenceByte byte
-	fenceLength := 0
-	var fenceContainer fenceContainerContext
-	var listContinuation fenceContainerContext
+	var fences fenceState
 	var inlineCode inlineCodeSpanState
 	for i, line := range lines {
 		lineNo := i + 1
-		if fenceByte != 0 {
-			if fenceContainer.contains(line) {
-				marker, length, trailing, isFence := fenceContainer.delimiter(line)
-				if isFence && marker == fenceByte && length >= fenceLength && strings.TrimSpace(trailing) == "" {
-					fenceByte = 0
-					fenceLength = 0
-					fenceContainer = fenceContainerContext{}
-				}
-				continue
-			}
-			// A fenced block nested in a quote or list ends when that
-			// container ends, even if it never supplied a closing fence.
-			fenceByte = 0
-			fenceLength = 0
-			fenceContainer = fenceContainerContext{}
-		}
-		lineContainer := parseFenceContainerContext(line)
-		switch {
-		case lineContainer.hasList:
-			listContinuation = lineContainer
-		case strings.TrimSpace(line) == "":
-			// Blank lines do not end a list container.
-		case listContinuation.hasList:
-			if _, ok := listContinuation.contentStart(line); !ok {
-				listContinuation = fenceContainerContext{}
-			}
-		}
-		marker, length, _, isFence := fenceDelimiter(line)
-		if isFence {
-			fenceByte = marker
-			fenceLength = length
-			fenceContainer = parseFenceContainerContext(line)
-			if !fenceContainer.hasList && listContinuation.hasList {
-				if _, ok := listContinuation.contentStart(line); ok {
-					fenceContainer = listContinuation
-				}
-			}
+		if fences.consume(line) {
 			continue
 		}
-		scannable := stripInlineCodeSpans(line, &inlineCode)
+		scannable := stripInlineCodeSpans(line, lines[i+1:], &inlineCode)
 		if headingH2Plus.MatchString(scannable) {
 			break
 		}
@@ -219,6 +180,60 @@ func checkData(path string, data []byte) []Violation {
 		}
 	}
 	return violations
+}
+
+type fenceState struct {
+	marker           byte
+	length           int
+	container        fenceContainerContext
+	listContinuation fenceContainerContext
+}
+
+func (s *fenceState) consume(line string) bool {
+	if s.marker != 0 {
+		if s.container.contains(line) {
+			marker, length, trailing, isFence := s.container.delimiter(line)
+			if isFence && marker == s.marker && length >= s.length && strings.TrimSpace(trailing) == "" {
+				s.marker = 0
+				s.length = 0
+				s.container = fenceContainerContext{}
+			}
+			return true
+		}
+		// A fenced block nested in a quote or list ends when that container
+		// ends, even if it never supplied a closing fence.
+		s.marker = 0
+		s.length = 0
+		s.container = fenceContainerContext{}
+	}
+	s.updateListContinuation(line)
+	marker, length, _, isFence := fenceDelimiter(line)
+	if !isFence {
+		return false
+	}
+	s.marker = marker
+	s.length = length
+	s.container = parseFenceContainerContext(line)
+	if !s.container.hasList && s.listContinuation.hasList {
+		if _, ok := s.listContinuation.contentStart(line); ok {
+			s.container = s.listContinuation
+		}
+	}
+	return true
+}
+
+func (s *fenceState) updateListContinuation(line string) {
+	lineContainer := parseFenceContainerContext(line)
+	switch {
+	case lineContainer.hasList:
+		s.listContinuation = lineContainer
+	case strings.TrimSpace(line) == "":
+		// Blank lines do not end a list container.
+	case s.listContinuation.hasList:
+		if _, ok := s.listContinuation.contentStart(line); !ok {
+			s.listContinuation = fenceContainerContext{}
+		}
+	}
 }
 
 type fenceContainerContext struct {
@@ -233,7 +248,9 @@ func (c fenceContainerContext) contains(line string) bool {
 		return true
 	}
 	if strings.TrimSpace(line) == "" {
-		return true
+		// An unmarked blank line ends a blockquote container. Blank lines may
+		// remain inside a list container without repeating its indentation.
+		return c.quoteDepth == 0 && c.hasList
 	}
 	_, ok := c.contentStart(line)
 	return ok
@@ -370,7 +387,7 @@ type inlineCodeSpanState struct {
 	delimiterLength int
 }
 
-func stripInlineCodeSpans(line string, state *inlineCodeSpanState) string {
+func stripInlineCodeSpans(line string, followingLines []string, state *inlineCodeSpanState) string {
 	masked := []byte(line)
 	cursor := 0
 	if state.delimiterLength > 0 {
@@ -382,7 +399,7 @@ func stripInlineCodeSpans(line string, state *inlineCodeSpanState) string {
 			return string(masked)
 		}
 		spanEnd := closer + state.delimiterLength
-		for index := 0; index < spanEnd; index++ {
+		for index := range spanEnd {
 			masked[index] = ' '
 		}
 		cursor = spanEnd
@@ -400,6 +417,12 @@ func stripInlineCodeSpans(line string, state *inlineCodeSpanState) string {
 		runLength := runEnd - opener
 		closer := matchingBacktickRun(line, runEnd, runLength)
 		if closer < 0 {
+			if !hasMatchingBacktickRun(followingLines, runLength) {
+				// Without a closer before the inline block ends, CommonMark
+				// treats the opener as literal text.
+				opener = runEnd
+				continue
+			}
 			for index := opener; index < len(masked); index++ {
 				masked[index] = ' '
 			}
@@ -417,7 +440,9 @@ func stripInlineCodeSpans(line string, state *inlineCodeSpanState) string {
 
 func matchingBacktickRun(line string, offset, length int) int {
 	for offset < len(line) {
-		if line[offset] != '`' || escapedAt(line, offset) {
+		// Backslashes have no escaping meaning inside an already-open code
+		// span, so a backslash-prefixed run is still a valid closer.
+		if line[offset] != '`' {
 			offset++
 			continue
 		}
@@ -431,6 +456,15 @@ func matchingBacktickRun(line string, offset, length int) int {
 		offset = end
 	}
 	return -1
+}
+
+func hasMatchingBacktickRun(lines []string, length int) bool {
+	for _, line := range lines {
+		if matchingBacktickRun(line, 0, length) >= 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func escapedAt(line string, offset int) bool {
