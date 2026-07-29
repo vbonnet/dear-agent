@@ -278,10 +278,10 @@ func DefaultConfig() (*Config, error) {
 
 // ConfiguredWorkspaceConfigs returns every enabled workspace store that
 // destructive cross-repository maintenance must query before it can treat its
-// active-session set as complete. When DOLT_DATABASE is explicitly set, the
-// configured workspaces share that database and remain separated by the
-// workspace column; otherwise each workspace uses its conventional same-name
-// database.
+// active-session set as complete. An explicit DOLT_DATABASE is accepted only
+// when it describes a single workspace; applying one database name to multiple
+// workspace configs would silently invent a cross-workspace mapping. Without
+// that override, each workspace uses its conventional same-name database.
 func ConfiguredWorkspaceConfigs() ([]*Config, error) {
 	base, err := DefaultConfig()
 	if err != nil {
@@ -336,6 +336,13 @@ func ConfiguredWorkspaceConfigs() ([]*Config, error) {
 	add(base.Workspace)
 	if len(configs) == 0 {
 		return []*Config{base}, nil
+	}
+	if databaseIsExplicit && len(configs) > 1 {
+		return nil, fmt.Errorf(
+			"DOLT_DATABASE=%q scopes one store but %d enabled workspaces are configured; cannot prove a complete cross-workspace active-session inventory",
+			explicitDatabase,
+			len(configs),
+		)
 	}
 	return configs, nil
 }

@@ -93,9 +93,14 @@ func runAuditResources(cmd *cobra.Command, args []string) error {
 	// Collect repo dirs to check for prunable refs
 	repoDirs := collectRepoDirs(homeDir, arExtraRepos)
 
-	// Get active session names for cross-reference
-	activeSessions, err := getActiveSessions(ctx)
+	// Get active session names for cross-reference. Destructive maintenance
+	// must fail closed if the authoritative Dolt inventory is unavailable;
+	// tmux cannot represent API-only sessions.
+	activeSessions, err := getActiveSessionsForResourceAudit(ctx, arFix)
 	if err != nil {
+		if arFix {
+			return fmt.Errorf("refusing --fix without authoritative active-session inventory: %w", err)
+		}
 		fmt.Fprintf(os.Stderr, "Warning: could not query active sessions (%v); orphan detection will be limited\n", err)
 	}
 
@@ -308,6 +313,13 @@ func getActiveSessions(ctx context.Context) (map[string]bool, error) {
 		active[name] = true
 	}
 	return active, nil
+}
+
+func getActiveSessionsForResourceAudit(ctx context.Context, fix bool) (map[string]bool, error) {
+	if fix {
+		return getActiveSessionsFromDolt(ctx)
+	}
+	return getActiveSessions(ctx)
 }
 
 // collectRepoDirs returns directories under ~/src/ that are git repos,

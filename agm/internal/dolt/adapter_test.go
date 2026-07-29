@@ -156,7 +156,7 @@ workspaces:
 	}
 }
 
-func TestConfiguredWorkspaceConfigsPreservesExplicitSharedDatabase(t *testing.T) {
+func TestConfiguredWorkspaceConfigsRejectsExplicitDatabaseAcrossWorkspaces(t *testing.T) {
 	originalLookupEnv := lookupEnv
 	originalAgmConfigPath := agmConfigPath
 	t.Cleanup(func() {
@@ -186,14 +186,45 @@ workspaces:
 		return value, ok
 	}
 
+	_, err := ConfiguredWorkspaceConfigs()
+	if err == nil || !strings.Contains(err.Error(), "cannot prove a complete cross-workspace") {
+		t.Fatalf("ConfiguredWorkspaceConfigs error = %v, want explicit-database isolation failure", err)
+	}
+}
+
+func TestConfiguredWorkspaceConfigsAllowsExplicitDatabaseForOneWorkspace(t *testing.T) {
+	originalLookupEnv := lookupEnv
+	originalAgmConfigPath := agmConfigPath
+	t.Cleanup(func() {
+		lookupEnv = originalLookupEnv
+		agmConfigPath = originalAgmConfigPath
+	})
+
+	configPath := t.TempDir() + "/config.yaml"
+	if err := os.WriteFile(configPath, []byte(`workspaces:
+  - name: personal
+    enabled: true
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agmConfigPath = configPath
+	lookupEnv = func(key string) (string, bool) {
+		values := map[string]string{
+			"ENGRAM_TEST_MODE":      "1",
+			"ENGRAM_TEST_WORKSPACE": "personal",
+			"WORKSPACE":             "personal",
+			"DOLT_DATABASE":         "agm_test",
+		}
+		value, ok := values[key]
+		return value, ok
+	}
+
 	configs, err := ConfiguredWorkspaceConfigs()
 	if err != nil {
 		t.Fatalf("ConfiguredWorkspaceConfigs: %v", err)
 	}
-	for _, config := range configs {
-		if config.Database != "agm_test" {
-			t.Errorf("workspace %q database = %q, want agm_test", config.Workspace, config.Database)
-		}
+	if len(configs) != 1 || configs[0].Workspace != "personal" || configs[0].Database != "agm_test" {
+		t.Fatalf("configured stores = %#v, want personal/agm_test", configs)
 	}
 }
 

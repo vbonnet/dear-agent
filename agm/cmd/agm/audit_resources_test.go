@@ -80,6 +80,22 @@ func TestGetActiveSessionsFromDoltFailsWhenAnyWorkspaceIsUnavailable(t *testing.
 	}
 }
 
+func TestGetActiveSessionsForResourceAuditFixFailsClosedWithoutDolt(t *testing.T) {
+	previousConfigs := activeSessionStoreConfigs
+	t.Cleanup(func() {
+		activeSessionStoreConfigs = previousConfigs
+	})
+
+	activeSessionStoreConfigs = func() ([]*dolt.Config, error) {
+		return nil, errors.New("authoritative store offline")
+	}
+
+	_, err := getActiveSessionsForResourceAudit(context.Background(), true)
+	if err == nil || !strings.Contains(err.Error(), "authoritative store offline") {
+		t.Fatalf("fix-mode active-session lookup error = %v, want authoritative Dolt failure", err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Command registration
 // ---------------------------------------------------------------------------
