@@ -9,6 +9,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 )
 
 // HarnessLaunchSpec is the harness-neutral launch contract used by every
@@ -79,12 +80,12 @@ func BuildHarnessLaunchCommand(spec HarnessLaunchSpec) HarnessLaunchCommand {
 	case "pi-cli":
 		return buildPiLaunchCommand(spec)
 	case "opencode-cli":
-		return HarnessLaunchCommand{Command: fmt.Sprintf("cd %s && opencode attach%s", launchparity.ShellQuote(spec.WorkDir), exitSuffix)}
+		return HarnessLaunchCommand{Command: fmt.Sprintf("cd %s && opencode attach%s", shellquote.Quote(spec.WorkDir), exitSuffix)}
 	case "gemini-cli":
 		resolvedModel := agent.ResolveModelFullName("gemini-cli", spec.Model)
-		return HarnessLaunchCommand{Command: fmt.Sprintf("gemini -m %s%s", launchparity.ShellQuote(resolvedModel), exitSuffix)}
+		return HarnessLaunchCommand{Command: fmt.Sprintf("gemini -m %s%s", shellquote.Quote(resolvedModel), exitSuffix)}
 	default:
-		return HarnessLaunchCommand{Command: fmt.Sprintf("echo %s && exit 1", launchparity.ShellQuote("Unknown harness: "+spec.Harness))}
+		return HarnessLaunchCommand{Command: fmt.Sprintf("echo %s && exit 1", shellquote.Quote("Unknown harness: "+spec.Harness))}
 	}
 }
 
@@ -93,6 +94,9 @@ func BuildHarnessLaunchCommand(spec HarnessLaunchSpec) HarnessLaunchCommand {
 // absolute current AGM path, validated non-secret metadata, and an opaque
 // owner-only handoff path. Call Cancel only when the command was not delivered.
 func PrepareHarnessLaunchCommand(spec HarnessLaunchSpec) (HarnessLaunchCommand, error) {
+	if err := validateHarnessLaunchSpec(spec); err != nil {
+		return HarnessLaunchCommand{}, err
+	}
 	switch agent.NormalizeHarnessName(spec.Harness) {
 	case "claude-code":
 		launch, modeApplied := claudeLaunch(spec)
@@ -115,6 +119,77 @@ func PrepareHarnessLaunchCommand(spec HarnessLaunchSpec) (HarnessLaunchCommand, 
 	default:
 		return BuildHarnessLaunchCommand(spec), nil
 	}
+}
+
+func validateHarnessLaunchSpec(spec HarnessLaunchSpec) error {
+	type field struct{ name, value string }
+	var fields []field
+	validateAddDirs := false
+	switch agent.NormalizeHarnessName(spec.Harness) {
+	case "claude-code":
+		fields = []field{
+			{"model", spec.Model},
+			{"session name", spec.SessionName},
+			{"session id", spec.SessionID},
+			{"resume id", spec.ResumeID},
+			{"workdir", spec.WorkDir},
+			{"permission mode", spec.PermissionMode},
+		}
+		validateAddDirs = true
+	case "codex-cli":
+		fields = []field{
+			{"model", spec.Model},
+			{"session name", spec.SessionName},
+			{"workdir", spec.WorkDir},
+			{"permission mode", spec.PermissionMode},
+		}
+		if spec.Codex != nil {
+			fields = append(fields, field{"codex session id", spec.Codex.SessionID})
+		}
+		validateAddDirs = true
+	case "agy":
+		fields = []field{
+			{"model", spec.Model},
+			{"workdir", spec.WorkDir},
+			{"permission mode", spec.PermissionMode},
+		}
+		validateAddDirs = true
+	case "pi-cli":
+		fields = []field{
+			{"model", spec.Model},
+			{"session name", spec.SessionName},
+			{"session id", spec.SessionID},
+			{"workdir", spec.WorkDir},
+			{"permission mode", spec.PermissionMode},
+			{"pi launch id", spec.PiLaunchID},
+			{"pi extension", spec.PiExtension},
+			{"pi policy file", spec.PiPolicyFile},
+		}
+		if spec.Pi != nil {
+			fields = append(fields,
+				field{"pi session id", spec.Pi.SessionID},
+				field{"pi session dir", spec.Pi.SessionDir},
+				field{"pi coding-agent dir", spec.Pi.CodingAgentDir},
+			)
+		}
+	case "opencode-cli":
+		fields = []field{{"workdir", spec.WorkDir}}
+	case "gemini-cli":
+		fields = []field{{"model", spec.Model}}
+	default:
+		fields = []field{{"harness", spec.Harness}}
+	}
+	for _, field := range fields {
+		if err := harnessexec.ValidatePastedText(field.name, field.value); err != nil {
+			return fmt.Errorf("validate harness launch: %w", err)
+		}
+	}
+	if validateAddDirs {
+		if err := harnessexec.ValidatePastedTextList("add-dir", spec.ExtraAddDirs); err != nil {
+			return fmt.Errorf("validate harness launch: %w", err)
+		}
+	}
+	return nil
 }
 
 func buildPiLaunchCommand(spec HarnessLaunchSpec) HarnessLaunchCommand {
@@ -217,6 +292,29 @@ func buildAgyLaunchCommand(spec HarnessLaunchSpec, _ string) HarnessLaunchComman
 // model, permission, directory, quoting, and persistence policy used at create.
 func BuildAgyResumeCommand(spec HarnessLaunchSpec, conversationID string) HarnessLaunchCommand {
 	return buildAgyCommand(spec, conversationID)
+}
+
+// PrepareAgyResumeCommand validates the terminal-paste inputs used by AGY
+// cold resume before building its canonical command.
+func PrepareAgyResumeCommand(spec HarnessLaunchSpec, conversationID string) (HarnessLaunchCommand, error) {
+	if err := validateHarnessLaunchSpec(spec); err != nil {
+		return HarnessLaunchCommand{}, err
+	}
+	if err := harnessexec.ValidatePastedText("agy conversation id", conversationID); err != nil {
+		return HarnessLaunchCommand{}, fmt.Errorf("validate harness launch: %w", err)
+	}
+	return buildAgyCommand(spec, conversationID), nil
+}
+
+// PrepareFallbackResumeCommand validates the working directory used by the
+// compatibility path for a stored harness that has no native resume command.
+func PrepareFallbackResumeCommand(workdir string) (HarnessLaunchCommand, error) {
+	if err := harnessexec.ValidatePastedText("workdir", workdir); err != nil {
+		return HarnessLaunchCommand{}, fmt.Errorf("validate fallback resume: %w", err)
+	}
+	return HarnessLaunchCommand{
+		Command: fmt.Sprintf("cd %s && exit", shellquote.Quote(workdir)),
+	}, nil
 }
 
 func buildAgyCommand(spec HarnessLaunchSpec, conversationID string) HarnessLaunchCommand {

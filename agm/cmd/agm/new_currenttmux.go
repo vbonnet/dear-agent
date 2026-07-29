@@ -170,7 +170,10 @@ func queueCurrentTmuxPiWithRuntime(spec ops.HarnessLaunchSpec, runtime currentTm
 	if _, err := runtime.lookPath("pi"); err != nil {
 		return false, fmt.Errorf("pi executable is unavailable: %w", err)
 	}
-	launch := ops.BuildHarnessLaunchCommand(spec)
+	launch, err := ops.PrepareHarnessLaunchCommand(spec)
+	if err != nil {
+		return false, fmt.Errorf("prepare Pi launch: %w", err)
+	}
 	if err := resolveHarnessLaunchSubmission("Pi", launch, runtime.sendCommand(spec.SessionName, launch.Command)); err != nil {
 		ui.PrintError(err,
 			"Failed to queue Pi in current tmux pane",

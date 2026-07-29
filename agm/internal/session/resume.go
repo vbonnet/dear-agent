@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/config"
@@ -25,13 +24,6 @@ var (
 	resumeKillSession          = tmux.KillSessionChecked
 	resumePrepareClaudeCommand = harnessexec.PrepareClaudeCommand
 )
-
-// shellQuote quotes a string for safe use in shell commands
-// This prevents command injection by escaping special characters
-func shellQuote(s string) string {
-	// Simple but secure: wrap in single quotes and escape any single quotes
-	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
-}
 
 // Resume orchestrates the full resume workflow
 func Resume(identifier string, cfg *config.Config, adapter *dolt.Adapter) error {

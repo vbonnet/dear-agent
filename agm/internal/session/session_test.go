@@ -655,26 +655,9 @@ func TestCheckHealth_DefaultHarness(t *testing.T) {
 	}
 }
 
-// TestShellQuote tests shell quoting for safety
-func TestShellQuote(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"simple", "'simple'"},
-		{"with spaces", "'with spaces'"},
-		{"with'quote", "'with'\"'\"'quote'"},
-		{"", "''"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			result := shellQuote(tt.input)
-			if result != tt.expected {
-				t.Errorf("shellQuote(%q) = %q, want %q", tt.input, result, tt.expected)
-			}
-		})
-	}
-}
+// Shell quoting is no longer implemented here — this package's local copy was
+// removed in ce-93lw.1 in favour of shellquote.Quote. Its test moved
+// with it to internal/shellquote/quote_test.go.
 
 // TestDisplayTranscriptContext tests the transcript context display function
 func TestDisplayTranscriptContext(t *testing.T) {

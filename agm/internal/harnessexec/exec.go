@@ -14,8 +14,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"unicode"
 
+	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
 
@@ -191,11 +192,7 @@ func appendShellFlag(b *strings.Builder, name, value string) {
 	b.WriteByte(' ')
 	b.WriteString(name)
 	b.WriteByte(' ')
-	b.WriteString(shellQuote(value))
-}
-
-func shellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+	b.WriteString(shellquote.Quote(value))
 }
 
 func privateCommandPrefix(executable, protocol string) string {
@@ -203,7 +200,7 @@ func privateCommandPrefix(executable, protocol string) string {
 	if resolved == "agm" {
 		return "agm " + protocol
 	}
-	return shellQuote(resolved) + " " + protocol
+	return shellquote.Quote(resolved) + " " + protocol
 }
 
 // Run validates a private protocol request and replaces the current AGM
@@ -550,17 +547,11 @@ func validateText(name, value string) error {
 	if value == "" {
 		return fmt.Errorf("invalid harness launch request: %s is required", name)
 	}
-	if strings.IndexFunc(value, unicode.IsControl) >= 0 {
-		return fmt.Errorf("invalid harness launch request: %s contains control characters", name)
-	}
-	return nil
+	return tmux.ValidatePastedText(name, value)
 }
 
 func validateOptionalText(name, value string) error {
-	if value == "" {
-		return nil
-	}
-	return validateText(name, value)
+	return tmux.ValidatePastedText(name, value)
 }
 
 func validateTextList(name string, values []string) error {
@@ -570,6 +561,18 @@ func validateTextList(name string, values []string) error {
 		}
 	}
 	return nil
+}
+
+// ValidatePastedText rejects terminal controls and invalid UTF-8 before a
+// caller-controlled value is interpolated into a command pasted into tmux.
+// Empty optional fields are permitted.
+func ValidatePastedText(name, value string) error {
+	return validateOptionalText(name, value)
+}
+
+// ValidatePastedTextList applies ValidatePastedText to a repeated field.
+func ValidatePastedTextList(name string, values []string) error {
+	return validateTextList(name, values)
 }
 
 func oneOf(value string, allowed ...string) bool {

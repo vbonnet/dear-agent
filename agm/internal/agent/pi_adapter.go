@@ -121,7 +121,12 @@ func (a *PiAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	}
 	launchID := launchparity.NewPiLaunchID()
 	command := buildPiAdapterCommand(tmuxName, string(sessionID), launchID, sessionDir, codingAgentDir, workDir, model, permissionMode, extensionPath, policyFile)
-	if err := piSendShellCommand(tmuxName, command); err != nil {
+	if err := sendPastedShellCommandWith(
+		piSendShellCommand,
+		tmuxName,
+		command,
+		piPastedShellValues(tmuxName, string(sessionID), launchID, sessionDir, codingAgentDir, workDir, model, permissionMode, extensionPath, policyFile)...,
+	); err != nil {
 		return "", rollbackPiAdapterSession(tmuxName, fmt.Errorf("start Pi in tmux: %w", err))
 	}
 	if err := piWaitForPrompt(context.Background(), tmuxName, launchID, 30*time.Second); err != nil {
@@ -257,7 +262,12 @@ func (a *PiAdapter) ResumeSession(sessionID SessionID) error {
 	if launch {
 		launchID := launchparity.NewPiLaunchID()
 		command := buildPiAdapterCommand(metadata.TmuxName, metadata.UUID, launchID, metadata.NativeSessionDir, codingAgentDir, metadata.WorkingDir, metadata.Model, metadata.PermissionMode, extensionPath, policyFile)
-		if err := piSendShellCommand(metadata.TmuxName, command); err != nil {
+		if err := sendPastedShellCommandWith(
+			piSendShellCommand,
+			metadata.TmuxName,
+			command,
+			piPastedShellValues(metadata.TmuxName, metadata.UUID, launchID, metadata.NativeSessionDir, codingAgentDir, metadata.WorkingDir, metadata.Model, metadata.PermissionMode, extensionPath, policyFile)...,
+		); err != nil {
 			if created {
 				return rollbackPiAdapterSession(metadata.TmuxName, fmt.Errorf("send Pi resume command: %w", err))
 			}
@@ -276,6 +286,21 @@ func (a *PiAdapter) ResumeSession(sessionID SessionID) error {
 		}
 	}
 	return nil
+}
+
+func piPastedShellValues(tmuxName, nativeID, launchID, sessionDir, codingAgentDir, workDir, model, permissionMode, extensionPath, permissionPolicyFile string) []string {
+	return []string{
+		tmuxName,
+		nativeID,
+		launchID,
+		sessionDir,
+		codingAgentDir,
+		workDir,
+		ResolveModelFullName("pi-cli", model),
+		permissionMode,
+		extensionPath,
+		permissionPolicyFile,
+	}
 }
 
 func piResumeTargetState(sessionID SessionID, tmuxName string) (bool, bool, error) {
@@ -515,8 +540,8 @@ func (a *PiAdapter) ExecuteCommand(cmd Command) error {
 		if paramErr != nil {
 			return paramErr
 		}
-		if strings.ContainsAny(name, "\r\n") {
-			return fmt.Errorf("invalid Pi session name")
+		if err := ValidateSendKeysText("session name", name); err != nil {
+			return fmt.Errorf("invalid Pi session name: %w", err)
 		}
 		if err := piSendCommandLiteral(metadata.TmuxName, "/name "+name); err != nil {
 			return err

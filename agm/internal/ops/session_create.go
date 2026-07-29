@@ -325,6 +325,13 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 			return nil, err
 		}
 	}
+	// Validate every request-derived terminal value before acquiring lifecycle
+	// locks or creating either a tmux session or a remote provider thread.
+	// Provider-derived metadata is validated again when the final command is
+	// prepared after remote setup.
+	if err := validateHarnessLaunchSpec(buildHarnessLaunchSpec(req, params, req.SessionID, nil)); err != nil {
+		return nil, ErrStorageError("prepare harness launch", err)
+	}
 	var agyIdentityTracker agysession.CreateIdentityTracker
 	var previousAgyConversationID string
 	var releaseAgyWorkspaceLock func() error
