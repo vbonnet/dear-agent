@@ -1,9 +1,9 @@
 # AGM CLI - Architecture Documentation
 
-<!-- Last audited at: NEEDS-AUDIT -->
+<!-- Last audited at: 2026-07-27 -->
 
 **Version:** 1.0
-**Last Updated:** 2026-02-11
+**Last Updated:** 2026-07-27
 
 ---
 
@@ -138,13 +138,14 @@ This enables:
 ### Component Layers
 
 #### Layer 1: Command Layer (Cobra)
-- **Responsibility**: Parse commands, validate flags, invoke business logic
+- **Responsibility**: Parse commands, validate flags, invoke shared operations,
+  render returned facts, and own interactive terminal attachment
 - **Components**: `rootCmd`, `newCmd`, `resumeCmd`, `sessionCmd`, `agentCmd`, etc.
 - **Pattern**: Each command is a self-contained `*cobra.Command`
 
 #### Layer 2: Business Logic Layer (internal packages)
-- **Responsibility**: Session lifecycle, agent routing, UUID detection
-- **Components**: `internal/session`, `internal/agent`, `internal/detection`
+- **Responsibility**: Session lifecycle transactions, agent routing, UUID detection
+- **Components**: `internal/ops`, `internal/session`, `internal/agent`, `internal/detection`
 - **Pattern**: Service objects with clear interfaces
 
 #### Layer 3: Integration Layer (tmux, manifest)
@@ -169,7 +170,7 @@ cmd/agm/
 ├── version.go              # Version command
 │
 ├── new.go                  # Create new session
-├── resume.go               # Resume existing session
+├── resume.go               # Resolve resume input, call shared operation, attach
 ├── list.go                 # List sessions
 ├── search.go               # Search sessions
 │
@@ -451,22 +452,25 @@ Resolve Identifier
   ├─ Fuzzy name match?
   └─ Interactive picker
   ↓
-Load Manifest
+Read and validate optional prompt-file input
   ↓
-Validate Session State
-  ├─ Check lifecycle (error if archived)
-  ├─ Check agent availability (warn if unavailable)
-  └─ Health check (worktree exists, tmux state)
+Call internal/ops.ResumeSession with stable ID
   ↓
-Create/Attach Tmux Session
+Shared operation acquires stable-ID lifecycle lock
   ↓
-Send 'cd <worktree>' to Tmux
+Reload session and classify lifecycle, worktree, and tmux health
   ↓
-Send '<agent> --resume <uuid>' to Tmux
+Preserve an existing runtime or create one exact tmux identity
   ↓
-Update Manifest Timestamp
+Build native resume launch through the private executor where required
   ↓
-Attach to Tmux Session
+Wait for native process/composer readiness
+  ↓
+Commit canonical identity, mode, optional prompt, and activity
+  ↓
+Return typed facts and release the lock
+  ↓
+Render results and optionally attach to the exact tmux target
 ```
 
 ### Configuration Loading Flow
@@ -512,16 +516,16 @@ tmux.CreateOrAttach(sessionName)
 // Send ordinary commands to the tmux pane
 tmux.SendKeys(sessionName, "cd /path/to/project")
 
-// Resume Claude through the owner-only private executor boundary
-launch, err := prepareClaudeResumeCommand(adapter, session, health)
+// Resume through the shared lifecycle owner. It selects any required private
+// executor and returns before interactive attachment.
+result, err := ops.ResumeSession(opCtx, &ops.ResumeSessionRequest{
+    SessionID: stableSessionID,
+    Prompt: prompt,
+})
 if err != nil {
     return err
 }
-if submissionErr := tmux.SendKeys(sessionName, launch.Command); submissionErr != nil {
-    if _, err := ops.ResolveHarnessLaunchSubmission(launch, submissionErr); err != nil {
-        return err
-    }
-}
+return finishResumeAttachment(ctx, tmuxAdapter, result)
 
 // Check tmux session status
 status := tmux.SessionExists(sessionName)
@@ -896,12 +900,13 @@ Multiple AGM commands can run concurrently:
 ```
 Terminal 1: agm session list       (reads manifests)
 Terminal 2: agm new my-session     (writes new manifest)
-Terminal 3: agm resume other       (reads + updates manifest)
+Terminal 3: agm resume other       (stable-ID locked shared transaction)
 ```
 
 **Safety Guarantees:**
 - Manifest writes are atomic (temp file + rename)
 - Manifest locks prevent concurrent modifications to same file
+- Resume acquires the stable session-ID lifecycle lock before mutable reads
 - Tmux locks prevent concurrent tmux server state changes
 - No global command lock (each command independent)
 
