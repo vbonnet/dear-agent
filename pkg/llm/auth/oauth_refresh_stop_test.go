@@ -94,6 +94,27 @@ func TestRefreshStopSelfClearsAfterCredentialRotation(t *testing.T) {
 	}
 }
 
+func TestInspectRefreshStopLeavesRotatedMarkerUntouched(t *testing.T) {
+	credentials := writeFullCreds(t, "stale", staleMillis(), "before")
+	resolver := OAuthResolver{CredentialsPath: credentials}
+	if err := resolver.WriteRefreshStop("ambiguous refresh"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(credentials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(credentials, []byte(strings.Replace(string(data), "before", "after", 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if stopped, err := resolver.InspectRefreshStop(); err != nil || stopped {
+		t.Fatalf("InspectRefreshStop() after rotation = %v, %v; want false, nil", stopped, err)
+	}
+	if _, err := os.Stat(resolver.RefreshStopPath()); err != nil {
+		t.Fatalf("read-only inspection changed rotated marker: %v", err)
+	}
+}
+
 func TestCredentialsPathCanonicalizesImplicitDefaultSymlink(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

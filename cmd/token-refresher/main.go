@@ -212,7 +212,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "token-refresher: stale quarantine marker for %s (token has since rotated); "+
 				"it is inert and the next refresh will remove it.\n", qfp)
 		}
-		stopped, stopErr := r.RefreshStopped()
+		stopped, stopErr := r.InspectRefreshStop()
 		if stopErr != nil {
 			fmt.Fprintf(stderr, "token-refresher: could not inspect durable refresh stop: %v\n", stopErr)
 			return exitError

@@ -314,6 +314,37 @@ func TestRun_CheckReportsDurableRefreshStop(t *testing.T) {
 	}
 }
 
+func TestRun_CheckLeavesStaleRefreshStopMarkerInReadOnlyDirectory(t *testing.T) {
+	creds := writeCreds(t, "tok", freshMs(), "rt-current")
+	stopPath := creds + ".refresh-stop"
+	marker := `{"refresh_token_fp":"` + auth.RefreshTokenFingerprint("rt-previous") +
+		`","reason":"previous refresh outcome unknown"}` + "\n"
+	if err := os.WriteFile(stopPath, []byte(marker), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Dir(creds)
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"-check", "-credentials", creds,
+		"-audit-log", filepath.Join(t.TempDir(), "audit.jsonl"), "-quarantine", tmpQuarantine(t),
+	}, &stdout, &stderr)
+
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d; stderr: %s", code, exitOK, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "REFRESH STOPPED") {
+		t.Errorf("rotated marker must be reported as inert, got: %s", stderr.String())
+	}
+	if _, err := os.Stat(stopPath); err != nil {
+		t.Fatalf("check mode mutated stale refresh stop marker: %v", err)
+	}
+}
+
 // A marker for a token that has since rotated holds nothing back. Reporting it
 // as active would send the operator to -clear-quarantine for no reason.
 func TestRun_CheckReportsStaleMarkerAsInert(t *testing.T) {

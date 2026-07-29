@@ -34,8 +34,21 @@ func (r OAuthResolver) RefreshStopPath() string {
 	return path + ".refresh-stop"
 }
 
-// RefreshStopped reports whether automatic refresh is durably stopped.
+// RefreshStopped reports whether automatic refresh is durably stopped. A
+// marker scoped to an older refresh token is removed so a real refresh
+// attempt self-cleans obsolete state.
 func (r OAuthResolver) RefreshStopped() (bool, error) {
+	return r.refreshStopped(true)
+}
+
+// InspectRefreshStop reports the same effective stop state without changing
+// the marker. Status-only callers use this path so inspection remains safe
+// when the credentials directory is intentionally read-only.
+func (r OAuthResolver) InspectRefreshStop() (bool, error) {
+	return r.refreshStopped(false)
+}
+
+func (r OAuthResolver) refreshStopped(clearRotated bool) (bool, error) {
 	path := r.RefreshStopPath()
 	if path == "" {
 		return false, errors.New("cannot resolve refresh stop path")
@@ -53,8 +66,10 @@ func (r OAuthResolver) RefreshStopped() (bool, error) {
 		if ok {
 			currentFP := RefreshTokenFingerprint(creds.ClaudeAIOAuth.RefreshToken)
 			if currentFP != "" && currentFP != rec.RefreshTokenFP {
-				if err := r.ClearRefreshStop(); err != nil {
-					return false, fmt.Errorf("clear rotated refresh stop marker %s: %w", path, err)
+				if clearRotated {
+					if err := r.ClearRefreshStop(); err != nil {
+						return false, fmt.Errorf("clear rotated refresh stop marker %s: %w", path, err)
+					}
 				}
 				return false, nil
 			}
