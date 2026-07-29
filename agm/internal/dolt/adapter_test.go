@@ -126,6 +126,7 @@ workspaces:
     enabled: true
   - name: retired
     enabled: false
+  - name: dormant
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}

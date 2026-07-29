@@ -325,7 +325,7 @@ func ConfiguredWorkspaceConfigs() ([]*Config, error) {
 		configs = append(configs, &workspaceConfig)
 	}
 	for index, workspace := range cfg.Workspaces {
-		if workspace.Enabled != nil && !*workspace.Enabled {
+		if workspace.Enabled == nil || !*workspace.Enabled {
 			continue
 		}
 		if strings.TrimSpace(workspace.Name) == "" {
