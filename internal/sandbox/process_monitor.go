@@ -40,6 +40,7 @@ type ProcessMonitor struct {
 	limits    ProcessLimits
 	pid       int // root PID to monitor (sandbox entrypoint)
 	cancel    context.CancelFunc
+	done      chan struct{}
 	mu        sync.Mutex
 	running   bool
 	lastCount int
@@ -94,24 +95,35 @@ func (m *ProcessMonitor) Start(ctx context.Context) {
 		m.mu.Unlock()
 		return
 	}
+
+	childCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	m.cancel = cancel
+	m.done = done
 	m.running = true
 	m.lastCheck = time.Now()
 	m.mu.Unlock()
 
-	childCtx, cancel := context.WithCancel(ctx)
-	m.cancel = cancel
-
-	go m.run(childCtx)
+	go m.run(childCtx, done)
 }
 
 // Stop terminates the monitor.
 func (m *ProcessMonitor) Stop() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.cancel != nil {
-		m.cancel()
+	if !m.running {
+		m.mu.Unlock()
+		return
 	}
-	m.running = false
+	cancel := m.cancel
+	done := m.done
+	m.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	if done != nil {
+		<-done
+	}
 }
 
 // CountDescendants returns the number of descendant processes of the root PID.
@@ -120,7 +132,18 @@ func (m *ProcessMonitor) CountDescendants() (int, error) {
 	return countDescendants(m.pid)
 }
 
-func (m *ProcessMonitor) run(ctx context.Context) {
+func (m *ProcessMonitor) run(ctx context.Context, done chan struct{}) {
+	defer func() {
+		m.mu.Lock()
+		if m.done == done {
+			m.running = false
+			m.cancel = nil
+			m.done = nil
+		}
+		m.mu.Unlock()
+		close(done)
+	}()
+
 	ticker := time.NewTicker(m.limits.PollInterval)
 	defer ticker.Stop()
 

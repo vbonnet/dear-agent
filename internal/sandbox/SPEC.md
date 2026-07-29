@@ -14,6 +14,12 @@
 
 **SNDBR-06** If an explicitly selected sandbox provider cannot materialize a provider-owned isolated workspace, the system shall reject it as unavailable before creating any sandbox directory.
 
+**SNDBR-07** When a process monitor starts, the system shall publish running state, cancellation, and completion tracking atomically before the monitor loop begins.
+
+**SNDBR-08** When a process monitor is stopped, the system shall cancel the active loop, wait for it to exit, and clear active lifecycle state before returning.
+
+**SNDBR-09** When a process monitor parent context is canceled, the system shall clear active lifecycle state so the monitor can be started again.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`

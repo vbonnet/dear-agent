@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -72,6 +73,7 @@ func TestProcessMonitorStartStop(t *testing.T) {
 	if alertCount.Load() > 0 {
 		t.Errorf("unexpected alerts for normal process: %d", alertCount.Load())
 	}
+	assertProcessMonitorStopped(t, m)
 }
 
 func TestProcessMonitorDoubleStart(t *testing.T) {
@@ -80,6 +82,44 @@ func TestProcessMonitorDoubleStart(t *testing.T) {
 	m.Start(ctx)
 	m.Start(ctx) // should be no-op
 	m.Stop()
+	assertProcessMonitorStopped(t, m)
+}
+
+func TestProcessMonitorParentCancellationClearsRunningAndAllowsRestart(t *testing.T) {
+	m := NewProcessMonitor(os.Getpid(), ProcessLimits{PollInterval: time.Hour}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	m.Start(ctx)
+	cancel()
+	waitForProcessMonitorStopped(t, m)
+
+	m.Start(context.Background())
+	m.Stop()
+	assertProcessMonitorStopped(t, m)
+}
+
+func TestProcessMonitorConcurrentStartStop(t *testing.T) {
+	m := NewProcessMonitor(os.Getpid(), ProcessLimits{PollInterval: time.Hour}, nil)
+
+	for range 100 {
+		ctx, cancel := context.WithCancel(context.Background())
+		var wg sync.WaitGroup
+		for range 8 {
+			wg.Add(2)
+			go func() {
+				defer wg.Done()
+				m.Start(ctx)
+			}()
+			go func() {
+				defer wg.Done()
+				m.Stop()
+			}()
+		}
+		wg.Wait()
+		cancel()
+		m.Stop()
+		waitForProcessMonitorStopped(t, m)
+	}
 }
 
 func TestAlertTypeString(t *testing.T) {
@@ -96,4 +136,34 @@ func TestAlertTypeString(t *testing.T) {
 			t.Errorf("AlertType(%d).String() = %q, want %q", tt.at, got, tt.want)
 		}
 	}
+}
+
+func waitForProcessMonitorStopped(t *testing.T, m *ProcessMonitor) {
+	t.Helper()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		if processMonitorStopped(m) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("process monitor did not stop")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func assertProcessMonitorStopped(t *testing.T, m *ProcessMonitor) {
+	t.Helper()
+
+	if !processMonitorStopped(m) {
+		t.Fatal("process monitor still has active lifecycle state")
+	}
+}
+
+func processMonitorStopped(m *ProcessMonitor) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return !m.running && m.cancel == nil && m.done == nil
 }
