@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/cucumber/godog"
@@ -19,10 +20,12 @@ const declarativeRuntimeFeaturePath = "agm/test/bdd/features/declarative_runtime
 var declarativeRuntimeDirs = []string{
 	".agents/skills/beads/agents",
 	".agents/skills/research-pipeline/agents",
+	".codex/skills/research-pipeline",
 	".github",
 	".github/act",
 	".github/rulesets",
 	".github/workflows",
+	".opencode/skills/research-pipeline",
 	"agm/.claude-plugin",
 	"agm/.github/workflows",
 	"agm/agm-plugin/.claude-plugin",
@@ -48,6 +51,8 @@ var declarativeRuntimeDirs = []string{
 
 var declarativeRuntimeAssets = map[string][]string{
 	".agents/skills/research-pipeline/agents":    {"openai.yaml"},
+	".codex/skills/research-pipeline":            {"SKILL.md"},
+	".opencode/skills/research-pipeline":         {"SKILL.md"},
 	"research-pipeline/.claude-plugin":           {"plugin.json"},
 	"research-pipeline/skills/research-pipeline": {"SKILL.md", "evals.json"},
 }
@@ -299,13 +304,40 @@ func validatePluginManifestAsset(path string, data []byte) error {
 
 func validateEvalCasesAsset(path string, data []byte) error {
 	var evals struct {
-		Cases []json.RawMessage `json:"cases"`
+		Cases []struct {
+			ID             string   `json:"id"`
+			Prompt         string   `json:"prompt"`
+			Harness        []string `json:"harness"`
+			ShouldTrigger  *bool    `json:"should_trigger"`
+			Trials         int      `json:"trials"`
+			ExpectedChecks []struct {
+				Type    string `json:"type"`
+				Target  string `json:"target"`
+				Pattern string `json:"pattern"`
+			} `json:"expected_checks"`
+		} `json:"cases"`
 	}
 	if err := json.Unmarshal(data, &evals); err != nil {
 		return fmt.Errorf("parse declarative runtime asset %s: %w", path, err)
 	}
 	if len(evals.Cases) == 0 {
 		return fmt.Errorf("declarative runtime asset %s has no eval cases", path)
+	}
+	for index, evalCase := range evals.Cases {
+		if evalCase.ID == "" || evalCase.Prompt == "" || len(evalCase.Harness) == 0 ||
+			evalCase.ShouldTrigger == nil || evalCase.Trials <= 0 || len(evalCase.ExpectedChecks) == 0 {
+			return fmt.Errorf("declarative runtime asset %s eval case %d lacks required fields", path, index)
+		}
+		for checkIndex, check := range evalCase.ExpectedChecks {
+			if check.Type == "" || check.Target == "" || check.Pattern == "" {
+				return fmt.Errorf("declarative runtime asset %s eval case %d check %d lacks required fields", path, index, checkIndex)
+			}
+			if check.Type == "regex" {
+				if _, err := regexp.Compile(check.Pattern); err != nil {
+					return fmt.Errorf("declarative runtime asset %s eval case %d check %d has invalid regex: %w", path, index, checkIndex, err)
+				}
+			}
+		}
 	}
 	return nil
 }

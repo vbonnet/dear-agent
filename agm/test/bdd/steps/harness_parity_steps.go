@@ -3048,10 +3048,7 @@ func marketplaceDiscoverySurfaceShouldUseExpectedMode(ctx context.Context) error
 	if err != nil {
 		return err
 	}
-	want := "agents-md-skill-fallback"
-	if harnessState.marketplaceSurface.Name == "claude-code" {
-		want = "native-claude-plugin-marketplace"
-	}
+	want := marketplaceparity.ExpectedMarketplaceMode(harnessState.marketplaceSurface.Name)
 	if harnessState.marketplaceSurface.Mode != want {
 		return fmt.Errorf("marketplace mode = %q, want %q", harnessState.marketplaceSurface.Mode, want)
 	}

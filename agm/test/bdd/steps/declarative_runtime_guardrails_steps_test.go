@@ -34,13 +34,25 @@ func TestValidateDeclarativeRuntimeAsset(t *testing.T) {
 		{
 			name:    "eval cases",
 			asset:   "evals.json",
-			content: `{"cases":[{"id":"trigger"}]}`,
+			content: `{"cases":[{"id":"trigger","prompt":"research this","harness":["codex"],"should_trigger":true,"trials":1,"expected_checks":[{"type":"regex","target":"trace","pattern":"research"}]}]}`,
 		},
 		{
 			name:    "eval cases empty",
 			asset:   "evals.json",
 			content: `{"cases":[]}`,
 			wantErr: "has no eval cases",
+		},
+		{
+			name:    "eval case missing schema",
+			asset:   "evals.json",
+			content: `{"cases":[{}]}`,
+			wantErr: "lacks required fields",
+		},
+		{
+			name:    "eval check missing schema",
+			asset:   "evals.json",
+			content: `{"cases":[{"id":"trigger","prompt":"research this","harness":["codex"],"should_trigger":true,"trials":1,"expected_checks":[{}]}]}`,
+			wantErr: "check 0 lacks required fields",
 		},
 		{
 			name:  "OpenAI interface",

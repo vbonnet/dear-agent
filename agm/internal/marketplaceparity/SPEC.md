@@ -33,7 +33,9 @@ marketplace format.
 
 **MKT-08** When Claude Code consumes the catalog, the system shall use `native-claude-plugin-marketplace` mode.
 
-**MKT-09** When Codex CLI, AGY, OpenCode, or Pi consume the catalog, the system shall use an AGENTS.md/SKILL fallback mode.
+**MKT-09** When Codex CLI, OpenCode, or Pi consume the catalog, the system shall declare their native skill discovery paths.
+
+**MKT-11** When AGY consumes the catalog, the system shall use the `.agents/skills` fallback mode.
 
 **MKT-10** When a new active harness is added, the system shall require marketplace parity tests before the harness is considered supported.
 

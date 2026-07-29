@@ -20,6 +20,8 @@ with the repository's harness-neutral guardrails.
 
 **CODEX-DIR-05** When configuration-directory parity is validated, the system shall map the active `codex-cli` harness to `.codex`.
 
+**CODEX-DIR-06** When repository skills are published for Codex, the system shall expose them under `.codex/skills`.
+
 ## BDD Traceability
 
 - `agm/test/bdd/features/harness_config_surface_guardrails.feature` enforces that this directory keeps co-located SPEC coverage.

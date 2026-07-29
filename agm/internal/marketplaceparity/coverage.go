@@ -106,17 +106,32 @@ func ValidateHarnessSurfaces(root string) error {
 		if surface.Mode == "" || surface.Catalog == "" {
 			return fmt.Errorf("active harness %q has incomplete marketplace surface: %+v", harness, surface)
 		}
-		if harness == "claude-code" && surface.Mode != "native-claude-plugin-marketplace" {
-			return fmt.Errorf("claude-code marketplace mode = %q, want native-claude-plugin-marketplace", surface.Mode)
-		}
-		if harness != "claude-code" && surface.Mode != "agents-md-skill-fallback" {
-			return fmt.Errorf("%s marketplace mode = %q, want agents-md-skill-fallback", harness, surface.Mode)
+		wantMode := ExpectedMarketplaceMode(harness)
+		if surface.Mode != wantMode {
+			return fmt.Errorf("%s marketplace mode = %q, want %s", harness, surface.Mode, wantMode)
 		}
 		if _, err := os.Stat(filepath.Join(root, surface.Catalog)); err != nil {
 			return fmt.Errorf("%s marketplace catalog %q: %w", harness, surface.Catalog, err)
 		}
 	}
 	return nil
+}
+
+// ExpectedMarketplaceMode returns the executable skill-discovery mode owned by
+// each active harness.
+func ExpectedMarketplaceMode(harness string) string {
+	switch agent.NormalizeHarnessName(harness) {
+	case "claude-code":
+		return "native-claude-plugin-marketplace"
+	case "codex-cli":
+		return "native-codex-skill"
+	case "opencode-cli":
+		return "native-opencode-skill"
+	case "pi-cli":
+		return "native-pi-skill-path"
+	default:
+		return "agents-md-skill-fallback"
+	}
 }
 
 // SurfaceForHarness returns the marketplace surface for a harness.

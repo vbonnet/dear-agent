@@ -2,6 +2,8 @@
 # RELATED-SPEC: agm/test/coverage/SPEC.md
 # RELATED-SPEC: .agents/skills/beads/agents/SPEC.md
 # RELATED-SPEC: .agents/skills/research-pipeline/agents/SPEC.md
+# RELATED-SPEC: .codex/skills/research-pipeline/SPEC.md
+# RELATED-SPEC: .opencode/skills/research-pipeline/SPEC.md
 # RELATED-SPEC: research-pipeline/.claude-plugin/SPEC.md
 # RELATED-SPEC: research-pipeline/skills/research-pipeline/SPEC.md
 # RELATED-SPEC: .github/SPEC.md
@@ -40,10 +42,12 @@ Feature: Declarative runtime guardrails
       | directory                                                                    |
       | .agents/skills/beads/agents                                                  |
       | .agents/skills/research-pipeline/agents                                      |
+      | .codex/skills/research-pipeline                                              |
       | .github                                                                      |
       | .github/act                                                                  |
       | .github/rulesets                                                             |
       | .github/workflows                                                            |
+      | .opencode/skills/research-pipeline                                           |
       | agm/.claude-plugin                                                           |
       | agm/.github/workflows                                                        |
       | agm/agm-plugin/.claude-plugin                                                |

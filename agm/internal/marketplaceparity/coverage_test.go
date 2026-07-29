@@ -37,11 +37,8 @@ func TestActiveHarnessesHaveMarketplaceSurfaces(t *testing.T) {
 		if surface.Catalog == "" {
 			t.Errorf("%s marketplace surface has empty catalog", harness)
 		}
-		if harness == "claude-code" && surface.Mode != "native-claude-plugin-marketplace" {
-			t.Errorf("claude-code mode = %q, want native-claude-plugin-marketplace", surface.Mode)
-		}
-		if harness != "claude-code" && surface.Mode != "agents-md-skill-fallback" {
-			t.Errorf("%s mode = %q, want agents-md-skill-fallback", harness, surface.Mode)
+		if want := ExpectedMarketplaceMode(harness); surface.Mode != want {
+			t.Errorf("%s mode = %q, want %s", harness, surface.Mode, want)
 		}
 	}
 }
