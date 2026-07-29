@@ -181,6 +181,33 @@ func TestCodexRequestReconstructsValidatedNativeArguments(t *testing.T) {
 		t.Fatalf("Codex argv = %q, want %q", got, want)
 	}
 
+	bypass, err := parseCodex([]string{
+		"--session", "session", "--model", "gpt-test", "--workdir", "/tmp/work",
+		"--sandbox", "workspace-write", "--bypass-hook-trust",
+	})
+	if err != nil {
+		t.Fatalf("parse Codex hook-trust bypass: %v", err)
+	}
+	if got, want := bypass.argv(), []string{
+		"-m", "gpt-test", "-C", "/tmp/work", "-s", "workspace-write",
+		"--dangerously-bypass-hook-trust",
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("bypass Codex argv = %q, want %q", got, want)
+	}
+
+	noBypass, err := parseCodex([]string{
+		"--session", "session", "--model", "gpt-test", "--workdir", "/tmp/work",
+		"--sandbox", "workspace-write",
+	})
+	if err != nil {
+		t.Fatalf("parse Codex without bypass: %v", err)
+	}
+	for _, arg := range noBypass.argv() {
+		if arg == "--dangerously-bypass-hook-trust" {
+			t.Fatal("hook-trust bypass leaked into argv without the flag")
+		}
+	}
+
 	local, err := parseCodex([]string{
 		"--session", "session", "--model", "gpt-test", "--workdir", "/tmp/work",
 		"--sandbox", "read-only", "--resume-id", "thread-456",

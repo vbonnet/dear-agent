@@ -13,6 +13,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/codexcontrol"
+	"github.com/vbonnet/dear-agent/agm/internal/codexhooks"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
@@ -154,6 +155,7 @@ type CreateSessionRequest struct {
 	DisableAutoMode        bool                  `json:"-"`
 	MaxBudgetUSD           float64               `json:"-"`
 	ExtraAddDirs           []string              `json:"-"`
+	BypassCodexHookTrust   bool                  `json:"-"`
 	ForwardTelemetry       bool                  `json:"-"`
 	ForwardClaudeOAuth     bool                  `json:"-"`
 	AllowEmptyPrompt       bool                  `json:"-"`
@@ -386,6 +388,9 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 	if err != nil {
 		return nil, err
 	}
+	if err := verifyCreateCodexHookTrust(callCtx, req, params); err != nil {
+		return nil, err
+	}
 	launchResult, err := launchCreateSession(callCtx, opCtx, buildHarnessLaunchSpec(req, params, sessionID, codexMeta))
 	if err != nil {
 		return nil, err
@@ -440,6 +445,25 @@ func CreateSessionWithContext(callCtx context.Context, opCtx *OpContext, req *Cr
 		return nil, err
 	}
 	return createSessionResult(req, params, sessionID), nil
+}
+
+func verifyCreateCodexHookTrust(ctx context.Context, req *CreateSessionRequest, params *createSessionParams) error {
+	if params.harness != "codex-cli" || !req.BypassCodexHookTrust {
+		return nil
+	}
+	sandbox := req.Metadata.Sandbox
+	if sandbox == nil || !sandbox.Enabled {
+		return ErrInvalidInput("bypass_codex_hook_trust", "An enabled sandbox with verified hook evidence is required.")
+	}
+	err := codexhooks.Verify(ctx, codexhooks.Attestation{
+		SourceRepo:   sandbox.CodexHookSourceRepo,
+		SourceCommit: sandbox.CodexHookSourceCommit,
+		Digest:       sandbox.CodexHookDigest,
+	}, req.Cwd)
+	if err != nil {
+		return ErrInvalidInput("bypass_codex_hook_trust", fmt.Sprintf("Hook evidence failed revalidation immediately before launch: %v", err))
+	}
+	return nil
 }
 
 func preparePiCreateRequest(req *CreateSessionRequest, sessionID string) (*CreateSessionRequest, error) {
@@ -581,6 +605,9 @@ func optionalCodexMetadata(callCtx context.Context, opCtx *OpContext, req *Creat
 }
 
 func buildHarnessLaunchSpec(req *CreateSessionRequest, params *createSessionParams, sessionID string, codexMeta *manifest.Codex) HarnessLaunchSpec {
+	bypassCodexHookTrust := req.BypassCodexHookTrust &&
+		req.Metadata.Sandbox != nil &&
+		req.Metadata.Sandbox.Enabled
 	spec := HarnessLaunchSpec{
 		Harness:          params.harness,
 		Model:            params.model,
@@ -594,11 +621,13 @@ func buildHarnessLaunchSpec(req *CreateSessionRequest, params *createSessionPara
 		MaxBudgetUSD:     req.MaxBudgetUSD,
 		ExtraAddDirs:     append([]string{}, req.ExtraAddDirs...),
 		ForwardTelemetry: req.ForwardTelemetry,
-		Codex:            codexMeta,
-		Pi:               req.Metadata.Pi,
-		PiExtension:      req.Metadata.PiExtension,
-		PiPolicyJSON:     req.Metadata.PiPolicyJSON,
-		PiPolicyFile:     req.Metadata.PiPolicyFile,
+
+		BypassCodexHookTrust: bypassCodexHookTrust,
+		Codex:                codexMeta,
+		Pi:                   req.Metadata.Pi,
+		PiExtension:          req.Metadata.PiExtension,
+		PiPolicyJSON:         req.Metadata.PiPolicyJSON,
+		PiPolicyFile:         req.Metadata.PiPolicyFile,
 	}
 	if params.harness == "pi-cli" {
 		spec.PiLaunchID = launchparity.NewPiLaunchID()
@@ -612,8 +641,10 @@ func cloneCreateSandbox(req *CreateSessionRequest) *manifest.SandboxConfig {
 	}
 	sandbox := *req.Metadata.Sandbox
 	sandbox.ExtraAddDirs = nil
+	sandbox.BypassCodexHookTrust = false
 	if sandbox.Enabled {
 		sandbox.ExtraAddDirs = append([]string{}, req.ExtraAddDirs...)
+		sandbox.BypassCodexHookTrust = req.BypassCodexHookTrust
 	}
 	return &sandbox
 }

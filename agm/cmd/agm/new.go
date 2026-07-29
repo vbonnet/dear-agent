@@ -16,6 +16,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/modelrouter"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
 	"github.com/vbonnet/dear-agent/agm/internal/testcontext"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
@@ -64,6 +65,10 @@ var (
 	disposable         bool
 	disposableTTL      string
 	persistent         bool
+
+	// brakeOverrideReason requests the audited admission-brake override and
+	// states why. Empty means the brake is honoured, which is the default.
+	brakeOverrideReason string
 )
 
 // defaultPermissions are safe, read-only commands that are always pre-approved
@@ -789,10 +794,23 @@ func enforceCircuitBreakers() error {
 	pc := circuitbreaker.DefaultProcCounter()
 	br := circuitbreaker.DefaultBrakeReader()
 
-	result := circuitbreaker.Check(cfg, lr, wc, st, mr,
+	checkOpts := []circuitbreaker.CheckOption{
 		circuitbreaker.WithDiskReader(dr),
 		circuitbreaker.WithProcCounter(pc),
-		circuitbreaker.WithBrakeReader(br))
+		circuitbreaker.WithBrakeReader(br),
+	}
+	// Authorize before checking, never after: the gates must run even if the
+	// brake turns out not to be engaged, so that an unapproved override is
+	// refused rather than quietly succeeding whenever it happens to be moot.
+	if brakeOverrideReason != "" {
+		if err := ops.AuthorizeAdmissionBrakeOverride(brakeOverrideReason, ""); err != nil {
+			ui.PrintError(err, "Admission-brake override refused", ops.AdmissionBrakeRemediation)
+			return err
+		}
+		checkOpts = append(checkOpts, circuitbreaker.WithAuthorizedBrakeOverride(brakeOverrideReason))
+	}
+
+	result := circuitbreaker.Check(cfg, lr, wc, st, mr, checkOpts...)
 
 	// Log DEAR level regardless of outcome
 	debug.Log("Circuit breaker check: level=%s load=%.1f allowed=%v", result.Level, result.Load, result.Allowed)
@@ -916,6 +934,10 @@ func init() {
 	newCmd.Flags().StringVar(&harnessName, "harness", "", "Harness to use (claude-code, codex-cli, agy, opencode-cli, pi-cli; deprecated: gemini-cli) (env: AGM_DEFAULT_HARNESS)")
 	newCmd.Flags().StringVar(&modelName, "model", "", "Model to use (e.g., sonnet, 3.5-flash, 3.5-flash-low, 5.5) (env: AGM_DEFAULT_MODEL)")
 	newCmd.Flags().StringVar(&modelTierFlag, "model-tier", "", "Cost tier for model routing: cheap (70%), mid (20%), expensive (10%)")
+	newCmd.Flags().StringVar(&codexHookTrustBypassReason, "dangerously-bypass-hook-trust", "",
+		"Request the audited Codex hook-trust override, stating why (requires `agm override approve codex-hook-trust`)")
+	newCmd.Flags().StringVar(&brakeOverrideReason, "brake-override", "",
+		"Cross an engaged admission brake once, stating why (requires `agm override approve admission-brake`)")
 	_ = newCmd.RegisterFlagCompletionFunc("model-tier", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return []string{"cheap", "mid", "expensive"}, cobra.ShellCompDirectiveNoFileComp
 	})

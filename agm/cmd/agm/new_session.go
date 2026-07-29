@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/cli"
+	"github.com/vbonnet/dear-agent/agm/internal/codexhooks"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/git"
@@ -206,6 +207,10 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 		return err
 	}
 	runtime := newCLICreateSessionRuntime(sessionName, exists, trustPreConfigured)
+	bypassCodexHookTrust, err := prepareCodexHookTrustBypass(ctx, sandboxInfo, sessionName)
+	if err != nil {
+		return err
+	}
 	opCtx := &ops.OpContext{
 		Tmux:            session.NewRealTmux(),
 		CreationRuntime: runtime,
@@ -218,26 +223,27 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 		},
 	}
 	_, err = ops.CreateSessionWithContext(ctx, opCtx, &ops.CreateSessionRequest{
-		Cwd:                 workDir,
-		Prompt:              createPrompt,
-		Title:               sessionName,
-		Model:               modelName,
-		Harness:             harnessName,
-		Persistent:          persistent,
-		SessionID:           sessionID,
-		Caller:              ops.CreateSessionCaller{Surface: ops.CreateSurfaceCLI},
-		PermissionMode:      modeFlagValue,
-		DisableAutoMode:     noAutoMode,
-		MaxBudgetUSD:        maxBudgetUsd,
-		ExtraAddDirs:        extraAddDirs,
-		ForwardTelemetry:    true,
-		ForwardClaudeOAuth:  true,
-		AllowEmptyPrompt:    true,
-		AllowUnsafeTitle:    true,
-		ReuseExistingTmux:   exists,
-		RequireStorage:      true,
-		ManifestDir:         manifestDir,
-		ManifestDirOptional: true,
+		Cwd:                  workDir,
+		Prompt:               createPrompt,
+		Title:                sessionName,
+		Model:                modelName,
+		Harness:              harnessName,
+		Persistent:           persistent,
+		SessionID:            sessionID,
+		Caller:               ops.CreateSessionCaller{Surface: ops.CreateSurfaceCLI},
+		PermissionMode:       modeFlagValue,
+		DisableAutoMode:      noAutoMode,
+		MaxBudgetUSD:         maxBudgetUsd,
+		ExtraAddDirs:         extraAddDirs,
+		BypassCodexHookTrust: bypassCodexHookTrust,
+		ForwardTelemetry:     true,
+		ForwardClaudeOAuth:   true,
+		AllowEmptyPrompt:     true,
+		AllowUnsafeTitle:     true,
+		ReuseExistingTmux:    exists,
+		RequireStorage:       true,
+		ManifestDir:          manifestDir,
+		ManifestDirOptional:  true,
 		Metadata: ops.CreateSessionMetadata{
 			Workspace:        cfg.Workspace,
 			ModelTier:        modelTierFlag,
@@ -252,6 +258,43 @@ func runCreateSessionLifecycle(ctx context.Context, sessionName, sessionID, work
 		},
 	})
 	return err
+}
+
+// prepareCodexHookTrustBypass runs both controls guarding the hook-trust
+// override. Attestation answers whether the hooks are the reviewed ones;
+// authorization answers whether a human currently agrees to run them
+// unreviewed. Attestation runs first so a refused override never records a use
+// for hooks that were not even the right ones.
+func prepareCodexHookTrustBypass(ctx context.Context, sandboxInfo *manifest.SandboxConfig, sessionName string) (bool, error) {
+	reason := codexHookTrustBypassReason
+	if reason == "" {
+		reason = cfg.Sandbox.BypassCodexHookTrustReason
+	}
+	if harnessName != "codex-cli" || reason == "" {
+		return false, nil
+	}
+	if sandboxInfo == nil || !sandboxInfo.Enabled {
+		// Outside a sandbox the hooks sit at their reviewed golden path, so the
+		// override buys nothing and would only widen what runs unreviewed.
+		return false, nil
+	}
+	if len(cfg.Sandbox.Repos) == 0 || sandboxInfo.CodexHookSourceRepo == "" {
+		return false, fmt.Errorf("the Codex hook-trust override requires an explicit sandbox.repos source")
+	}
+	attestation, err := codexhooks.Attest(ctx, sandboxInfo.CodexHookSourceRepo, sandboxInfo.WorkingDir)
+	if err != nil {
+		return false, fmt.Errorf("refusing Codex hook-trust bypass: %w", err)
+	}
+	if err := ops.AuthorizeCodexHookTrust(reason, sessionName); err != nil {
+		ui.PrintError(err, "Codex hook-trust override refused", ops.CodexHookTrustRemediation)
+		return false, err
+	}
+	sandboxInfo.CodexHookSourceRepo = attestation.SourceRepo
+	sandboxInfo.CodexHookSourceCommit = attestation.SourceCommit
+	sandboxInfo.CodexHookDigest = attestation.Digest
+	sandboxInfo.BypassCodexHookTrustReason = reason
+	ui.PrintSuccess("Codex hook-trust override attested, authorized, and recorded")
+	return true, nil
 }
 
 func resolveCreateLifecyclePrompt(harness, promptText, promptPath string) (string, error) {
@@ -438,6 +481,11 @@ func getWorkDir() (string, error) {
 // collectExtraAddDirs returns the per-session --add-dir entries needed to
 // re-authorize sandbox source-repo paths and a flag indicating whether trust
 // was pre-configured (always true today via --add-dir).
+// codexHookTrustBypassReason is the CLI-supplied justification. The flag takes
+// a reason rather than being a bool: the caller must say why, and that text is
+// what the recurring override audit reads.
+var codexHookTrustBypassReason string
+
 func collectExtraAddDirs(sandboxInfo *manifest.SandboxConfig, requested []string) ([]string, bool) {
 	return collectExtraAddDirsForHarness(sandboxInfo, harnessName, roleName, requested), true
 }

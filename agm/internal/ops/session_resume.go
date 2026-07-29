@@ -12,6 +12,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/claude"
+	"github.com/vbonnet/dear-agent/agm/internal/codexhooks"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	gitmanifest "github.com/vbonnet/dear-agent/agm/internal/git"
 	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
@@ -786,6 +787,25 @@ func prepareResumeLaunch(store dolt.Storage, m *manifest.Manifest, harnessName s
 		warnings := []string{}
 		if m.Sandbox != nil && m.Sandbox.Enabled {
 			spec.ExtraAddDirs = append([]string{}, m.Sandbox.ExtraAddDirs...)
+			// Both controls re-run on resume, and both fail closed. Attestation
+			// proves the hooks are still the reviewed ones; authorization proves
+			// someone currently agrees to run them unreviewed. A persisted launch
+			// policy must not outlive either, or "approve once, resume forever"
+			// reopens the loophole. Failing closed costs a hook-review prompt,
+			// which is the outcome the control is supposed to produce.
+			if m.Sandbox.BypassCodexHookTrust {
+				if err := codexhooks.Verify(context.Background(), codexhooks.Attestation{
+					SourceRepo:   m.Sandbox.CodexHookSourceRepo,
+					SourceCommit: m.Sandbox.CodexHookSourceCommit,
+					Digest:       m.Sandbox.CodexHookDigest,
+				}, health.WorktreePath); err != nil {
+					return HarnessLaunchCommand{}, "", warnings, fmt.Errorf("revalidate Codex hook trust before resume: %w", err)
+				}
+				if err := AuthorizeCodexHookTrust(m.Sandbox.BypassCodexHookTrustReason, m.Name); err != nil {
+					return HarnessLaunchCommand{}, "", warnings, err
+				}
+				spec.BypassCodexHookTrust = true
+			}
 		}
 		if err := agent.EnsureCodexWorkdirTrusted(health.WorktreePath); err != nil {
 			warnings = append(warnings, fmt.Sprintf("Could not pre-trust Codex workdir %s: %v", health.WorktreePath, err))

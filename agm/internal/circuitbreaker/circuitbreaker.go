@@ -287,9 +287,10 @@ type CheckResult struct {
 // existing callers and tests compile unchanged; production wires all three
 // through WithDiskReader / WithProcCounter / WithBrakeReader.
 type checkOptions struct {
-	dr DiskReader
-	pc ProcCounter
-	br BrakeReader
+	dr                  DiskReader
+	pc                  ProcCounter
+	br                  BrakeReader
+	brakeOverrideReason string
 }
 
 // CheckOption injects an optional admission-control reader into Check.
@@ -308,6 +309,22 @@ func WithProcCounter(pc ProcCounter) CheckOption {
 // WithBrakeReader enables the admission-brake gate using br.
 func WithBrakeReader(br BrakeReader) CheckOption {
 	return func(o *checkOptions) { o.br = br }
+}
+
+// WithAuthorizedBrakeOverride passes the admission-brake gate for one check,
+// recording the audited reason in the gate message so the refusal trail shows
+// why the brake was crossed rather than simply going quiet.
+//
+// This option must only be set after pkg/override.Authorize has returned
+// successfully for kind "admission-brake" — that call is what validates the
+// reason, checks the human approval, and writes the ledger entry. Nothing here
+// re-checks it, so wiring this from anywhere else silently removes the gate.
+//
+// It deliberately overrides only the brake. A brake override is an operator
+// saying "I know about this hold"; it is not a claim that the disk has space
+// or that the host has capacity, so the resource gates still apply.
+func WithAuthorizedBrakeOverride(reason string) CheckOption {
+	return func(o *checkOptions) { o.brakeOverrideReason = reason }
 }
 
 // Check evaluates all gates. It returns CheckResult with Allowed=true only if
@@ -380,7 +397,7 @@ func Check(cfg Config, lr LoadReader, wc WorkerCounter, st SpawnTimer, mr MemRea
 
 	// Gate 7: watchdog admission brake (fails closed; runs only when wired)
 	if o.br != nil {
-		brakeGate := checkAdmissionBrake(o.br)
+		brakeGate := checkAdmissionBrake(o.br, o.brakeOverrideReason)
 		result.Gates = append(result.Gates, brakeGate)
 		if !brakeGate.Passed {
 			result.Allowed = false
@@ -625,7 +642,7 @@ func checkAgentProcs(cfg Config, pc ProcCounter) GateResult {
 // and an unreadable brake refuses — and it is not subject to
 // AGM_ADMISSION_ALLOW_UNVERIFIED, because a latch an operator cannot read is
 // cleared by deleting the file, not by overriding the gate that reads it.
-func checkAdmissionBrake(br BrakeReader) GateResult {
+func checkAdmissionBrake(br BrakeReader, overrideReason string) GateResult {
 	brake, err := br.Brake()
 	if err != nil {
 		return GateResult{
@@ -646,11 +663,22 @@ func checkAdmissionBrake(br BrakeReader) GateResult {
 		}
 	}
 
+	if overrideReason != "" {
+		return GateResult{
+			Gate:   "admission_brake",
+			Passed: true,
+			Message: fmt.Sprintf(
+				"admission brake engaged by %s (%s) crossed under an audited override: %s",
+				brake.Source, brake.Reason, overrideReason,
+			),
+		}
+	}
+
 	return GateResult{
 		Gate:   "admission_brake",
 		Passed: false,
 		Message: fmt.Sprintf(
-			"admission brake engaged by %s: %s (set %s ago, expires %s). Spawns resume when the watchdog sees a healthy host, or delete %s to clear it.",
+			"admission brake engaged by %s: %s (set %s ago, expires %s). Spawns resume when the watchdog sees a healthy host; cross it once with an audited override (agm override approve admission-brake, then --brake-override=\"<reason>\"), or delete %s to clear it.",
 			brake.Source,
 			brake.Reason,
 			formatDuration(brake.Age(time.Now().UTC())),

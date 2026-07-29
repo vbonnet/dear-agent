@@ -28,7 +28,10 @@ type HarnessLaunchSpec struct {
 	DisableOAuth     bool
 	MaxBudgetUSD     float64
 	ExtraAddDirs     []string
-	ForwardTelemetry bool
+	// BypassCodexHookTrust launches Codex without per-path hook trust. Only
+	// codex-cli consumes it; other harnesses ignore it.
+	BypassCodexHookTrust bool
+	ForwardTelemetry     bool
 	Codex            *manifest.Codex
 	Pi               *manifest.Pi
 	PiLaunchID       string
@@ -278,6 +281,7 @@ func codexLaunch(spec HarnessLaunchSpec) (harnessexec.CodexLaunch, bool) {
 		AddDirs:                spec.ExtraAddDirs,
 		ResumeID:               resumeID,
 		Remote:                 resumeID != "",
+		BypassHookTrust:        spec.BypassCodexHookTrust,
 		Persistent:             spec.Persistent,
 		DeferUntilProducerExit: spec.DeferredUntilCallerExit,
 	}

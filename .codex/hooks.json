@@ -5,7 +5,7 @@
         "matcher": "Bash",
         "hooks": [
           {
-            "command": "${CLAUDE_PROJECT_DIR}/.codex/hooks/pretool-spawn-routing",
+            "command": ".codex/hooks/pretool-spawn-routing",
             "statusMessage": "Checking AGM/VROOM routing",
             "timeout": 5,
             "type": "command"
@@ -16,7 +16,7 @@
         "matcher": "Bash",
         "hooks": [
           {
-            "command": "${CLAUDE_PROJECT_DIR}/.codex/hooks/pretool-bead-close-guard",
+            "command": ".codex/hooks/pretool-bead-close-guard",
             "statusMessage": "Checking bead Definition of Done",
             "timeout": 30,
             "type": "command"
@@ -27,7 +27,7 @@
         "matcher": "Bash|Write|Edit|MultiEdit|apply_patch",
         "hooks": [
           {
-            "command": "${CLAUDE_PROJECT_DIR}/.codex/hooks/pretool-beads-dir-block",
+            "command": ".codex/hooks/pretool-beads-dir-block",
             "statusMessage": "Checking Beads database targeting",
             "timeout": 5,
             "type": "command"
@@ -38,7 +38,7 @@
         "matcher": "Bash",
         "hooks": [
           {
-            "command": "${CLAUDE_PROJECT_DIR}/.codex/hooks/pretool-bypass-guard",
+            "command": ".codex/hooks/pretool-bypass-guard",
             "statusMessage": "Checking for bypass flags",
             "timeout": 5,
             "type": "command"
@@ -49,8 +49,19 @@
         "matcher": "Bash",
         "hooks": [
           {
-            "command": "${CLAUDE_PROJECT_DIR}/.codex/hooks/pretool-pr-guard",
+            "command": ".codex/hooks/pretool-pr-guard",
             "statusMessage": "Checking PR lifecycle compliance",
+            "timeout": 5,
+            "type": "command"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "command": ".codex/hooks/pretool-dangerous-override-guard",
+            "statusMessage": "Checking dangerous-override approval",
             "timeout": 5,
             "type": "command"
           }
@@ -61,7 +72,7 @@
       {
         "hooks": [
           {
-            "command": "${CLAUDE_PROJECT_DIR}/.codex/hooks/stop-guardrail-feedback",
+            "command": ".codex/hooks/stop-guardrail-feedback",
             "statusMessage": "Running guardrail feedback",
             "timeout": 120,
             "type": "command"
@@ -73,7 +84,7 @@
       {
         "hooks": [
           {
-            "command": "${CLAUDE_PROJECT_DIR}/.codex/hooks/stop-guardrail-feedback",
+            "command": ".codex/hooks/stop-guardrail-feedback",
             "statusMessage": "Running guardrail feedback",
             "timeout": 120,
             "type": "command"

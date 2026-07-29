@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# PreToolUse hook: dangerous overrides require a stated reason and a human approval.
+#
+# WHAT: blocks a Bash tool call that reaches for a dangerous override —
+# Codex's --dangerously-bypass-hook-trust, or AGM's --brake-override — unless
+# the shared override gates would pass: a reason is supplied AND a human has
+# approved that override kind through an interactive terminal.
+#
+# WHY a block, not a nudge: these flags switch off a safety control. An agent
+# that can set one unattended can silently disable the control and nobody finds
+# out until the incident. The gates live in pkg/override; this hook is the
+# tool-call-time surface of the same contract, so an agent shelling out to raw
+# `codex --dangerously-bypass-hook-trust` cannot route around the AGM flag.
+#
+# Fails open (exit 0) on unparseable input, per CODEX-HOOK-05.
+#
+# HOW it blocks: Codex does not treat a non-zero hook exit as a refusal — it
+# logs "PreToolUse Failed" and runs the tool anyway. A refusal must be a
+# structured decision on stdout:
+#   {"hookSpecificOutput":{"hookEventName":"PreToolUse",
+#                          "permissionDecision":"deny",
+#                          "permissionDecisionReason":"..."}}
+# Exiting 2 alone is a no-op here, which is why deny() emits the wire form.
+set -uo pipefail
+
+input="$(cat)"
+command -v jq >/dev/null 2>&1 || exit 0
+
+# deny refuses the tool call in the form Codex actually honours.
+deny() {
+  jq -nc --arg reason "$1" \
+    '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$reason}}'
+  printf '%s\n' "$1" >&2
+  exit 0
+}
+
+tool="$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null || true)"
+[ "$tool" = "Bash" ] || exit 0
+
+cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
+[ -n "$cmd" ] || exit 0
+
+kind=""
+case "$cmd" in
+  *--dangerously-bypass-hook-trust*) kind="codex-hook-trust" ;;
+  *--brake-override*) kind="admission-brake" ;;
+  *) exit 0 ;;
+esac
+
+grants_dir="${AGM_CONFIG_DIR:-$HOME/.agm}/overrides/grants"
+grant="$grants_dir/$kind.json"
+
+if [ ! -f "$grant" ]; then
+  deny "$kind is a dangerous override with no human approval on file. It switches off a safety control, so an agent may not enable it unattended. Ask the operator to run, at an interactive terminal: agm override approve $kind --ttl 1h — then state why in the request itself (--dangerously-bypass-hook-trust=\"<reason>\" or --brake-override=\"<reason>\"). Every authorized use is reviewed by: agm override audit"
+fi
+
+# An approval is time-bounded. Expired is not approved.
+expires="$(jq -r '.expires_utc // empty' "$grant" 2>/dev/null || true)"
+if [ -n "$expires" ]; then
+  now_epoch="$(date -u +%s)"
+  exp_epoch="$(date -u -j -f '%Y-%m-%dT%H:%M:%S' "${expires%%.*}" +%s 2>/dev/null \
+    || date -u -d "$expires" +%s 2>/dev/null || echo 0)"
+  if [ "$exp_epoch" -ne 0 ] && [ "$exp_epoch" -le "$now_epoch" ]; then
+    deny "the human approval for $kind expired at $expires. Re-approve with: agm override approve $kind"
+  fi
+fi
+
+# Approved kinds still need a non-empty reason on the flag itself: the reason is
+# what the recurring audit reads, and a bare flag records nothing.
+if printf '%s' "$cmd" | grep -qE -- '--(dangerously-bypass-hook-trust|brake-override)(\s|$|=(\s|$|"\s*"|'"''"'))'; then
+  deny "$kind requires a reason: --<flag>=\"why you are overriding\". A bare flag leaves the audit nothing to review."
+fi
+
+exit 0

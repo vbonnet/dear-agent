@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd agent for the recurring dangerous-override audit.
+
+  Runs `agm override audit` daily. The audit reads the override ledger
+  (~/.agm/overrides/ledger.jsonl) and reports every use of a dangerous override
+  — the Codex hook-trust bypass and the admission-brake override — grouped by
+  the reason its caller gave.
+
+  WHY it recurs: an override is meant to be an exception. The failure mode is
+  that it quietly becomes routine, and the control it disables is then dead
+  without anyone deciding that. A reason that keeps repeating in this report is
+  the signal to act on: fix the root cause that forces the override, or close
+  the loophole that makes it reachable. Renewing the approval instead is how a
+  safety control decays into a formality.
+
+  It exits 3 when any single kind reaches the threshold, which is what turns
+  this from a report into an alert. A generic non-zero exit would be
+  indistinguishable from a broken job, so 3 is reserved for "used too often".
+
+  The plist is a TEMPLATE: the install target substitutes __HOME__ for the real
+  home directory before staging it into ~/Library/LaunchAgents (launchd does
+  not expand ~ or shell variables).
+
+  Activate (ask-gated host action):
+    launchctl bootstrap gui/$(id -u) \
+      ~/Library/LaunchAgents/com.dear-agent.override-audit.plist
+
+  Trigger an immediate run outside the schedule:
+    launchctl kickstart gui/$(id -u)/com.dear-agent.override-audit
+
+  Remove:
+    launchctl bootout gui/$(id -u)/com.dear-agent.override-audit
+    rm ~/Library/LaunchAgents/com.dear-agent.override-audit.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.dear-agent.override-audit</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__HOME__/go/bin/agm</string>
+    <string>override</string>
+    <string>audit</string>
+    <string>--window</string>
+    <string>168h</string>
+    <string>--threshold</string>
+    <string>5</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>__HOME__/go/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>HOME</key>
+    <string>__HOME__</string>
+  </dict>
+
+  <!-- Daily, mid-morning: a review is only useful if a human is around to read
+       it and decide whether the root cause is worth fixing. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>10</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/.local/state/dear-agent/override-audit.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.local/state/dear-agent/override-audit.err.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <!-- Working dir: user's home. launchd otherwise starts jobs with cwd=/ (ce-k414). -->
+  <key>WorkingDirectory</key>
+  <string>__HOME__</string>
+</dict>
+</plist>

@@ -202,13 +202,21 @@ type OpenCode struct {
 
 // SandboxConfig represents sandbox isolation metadata for a session
 type SandboxConfig struct {
-	Enabled      bool      `yaml:"enabled" json:"enabled"`           // Whether sandbox is enabled for this session
-	ID           string    `yaml:"id,omitempty" json:"id,omitempty"` // Sandbox ID (usually matches SessionID)
-	Provider     string    `yaml:"provider,omitempty" json:"provider,omitempty"`
-	MergedPath   string    `yaml:"merged_path,omitempty" json:"merged_path,omitempty"` // Root and cleanup boundary
-	WorkingDir   string    `yaml:"working_dir,omitempty" json:"working_dir,omitempty"` // Provider-mapped harness directory
-	CreatedAt    time.Time `yaml:"created_at,omitempty" json:"created_at,omitzero"`
-	ExtraAddDirs []string  `yaml:"extra_add_dirs,omitempty" json:"extra_add_dirs,omitempty"`
+	Enabled               bool      `yaml:"enabled" json:"enabled"`           // Whether sandbox is enabled for this session
+	ID                    string    `yaml:"id,omitempty" json:"id,omitempty"` // Sandbox ID (usually matches SessionID)
+	Provider              string    `yaml:"provider,omitempty" json:"provider,omitempty"`
+	MergedPath            string    `yaml:"merged_path,omitempty" json:"merged_path,omitempty"` // Root and cleanup boundary
+	WorkingDir            string    `yaml:"working_dir,omitempty" json:"working_dir,omitempty"` // Provider-mapped harness directory
+	CreatedAt             time.Time `yaml:"created_at,omitempty" json:"created_at,omitzero"`
+	ExtraAddDirs          []string  `yaml:"extra_add_dirs,omitempty" json:"extra_add_dirs,omitempty"`
+	BypassCodexHookTrust  bool      `yaml:"bypass_codex_hook_trust,omitempty" json:"bypass_codex_hook_trust,omitempty"`
+	CodexHookSourceRepo   string    `yaml:"codex_hook_source_repo,omitempty" json:"codex_hook_source_repo,omitempty"`
+	CodexHookSourceCommit string    `yaml:"codex_hook_source_commit,omitempty" json:"codex_hook_source_commit,omitempty"`
+	CodexHookDigest       string    `yaml:"codex_hook_digest,omitempty" json:"codex_hook_digest,omitempty"`
+	// BypassCodexHookTrustReason is the justification the override was granted
+	// against. It is persisted so resume can re-authorize rather than inherit
+	// the decision: a granted override is bounded in time, not forever.
+	BypassCodexHookTrustReason string `yaml:"bypass_codex_hook_trust_reason,omitempty" json:"bypass_codex_hook_trust_reason,omitempty"`
 }
 
 // ResourceManifest records git worktrees and branches created during a session.
