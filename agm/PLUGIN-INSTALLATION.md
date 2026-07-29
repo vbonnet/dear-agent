@@ -88,7 +88,12 @@ work until you also install:
 - **`youtube` plugin** — `yt-dlp` (`brew install yt-dlp` /
   `pipx install yt-dlp`).
 - **`research-pipeline` plugin** — the Beads `bd` CLI on `PATH`; Stage 4 uses
-  it to validate and file the approved decomposition.
+  it to validate and file the approved decomposition. Stage 5 additionally
+  requires a reachable Codex execution surface: either a configured `codex`
+  CLI/account or a repository-approved dispatcher that can launch Codex
+  `/goal` runs. Without that surface, the plugin stops after the reviewed bead
+  graph, reports the external handoff explicitly, and does not claim that
+  implementation ran.
 
 ## See also
 
