@@ -1131,7 +1131,7 @@ func TestCheckFile_MarkedContainerBlankEndsTypeSixHTMLBlock(t *testing.T) {
 	}
 }
 
-func TestCheckFile_TypeSixHTMLDoesNotInterruptParagraph(t *testing.T) {
+func TestCheckFile_TypeSixHTMLInterruptsParagraph(t *testing.T) {
 	const content = "# Doc\n" +
 		"intro\n" +
 		"<div>\n" +
@@ -1142,12 +1142,12 @@ func TestCheckFile_TypeSixHTMLDoesNotInterruptParagraph(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CheckFile: %v", err)
 	}
-	if len(violations) != 1 || violations[0].Line != 4 {
-		t.Fatalf("want type-6 tag retained as paragraph text, got %v", violations)
+	if len(violations) != 0 {
+		t.Fatalf("want field-shaped raw HTML content ignored, got %v", violations)
 	}
 }
 
-func TestCheckFile_ConsecutiveTypeSixHTMLDoesNotInterruptParagraph(t *testing.T) {
+func TestCheckFile_ConsecutiveTypeSixHTMLInterruptsParagraph(t *testing.T) {
 	const content = "# Doc\n" +
 		"intro\n" +
 		"<div>\n" +
@@ -1159,8 +1159,8 @@ func TestCheckFile_ConsecutiveTypeSixHTMLDoesNotInterruptParagraph(t *testing.T)
 	if err != nil {
 		t.Fatalf("CheckFile: %v", err)
 	}
-	if len(violations) != 1 || violations[0].Line != 5 {
-		t.Fatalf("want field violation after consecutive type-6 tags, got %v", violations)
+	if len(violations) != 0 {
+		t.Fatalf("want consecutive type-6 raw HTML content ignored, got %v", violations)
 	}
 }
 

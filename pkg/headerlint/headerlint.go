@@ -290,9 +290,7 @@ func goldmarkAnalysisSource(source []byte) []byte {
 		changed := false
 		_ = ast.Walk(document, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
 			htmlBlock, ok := node.(*ast.HTMLBlock)
-			if !entering || !ok ||
-				(htmlBlock.HTMLBlockType != ast.HTMLBlockType6 &&
-					htmlBlock.HTMLBlockType != ast.HTMLBlockType7) {
+			if !entering || !ok || htmlBlock.HTMLBlockType != ast.HTMLBlockType7 {
 				return ast.WalkContinue, nil
 			}
 			paragraphBefore, paragraphOK := htmlBlock.PreviousSibling().(*ast.Paragraph)
@@ -304,7 +302,7 @@ func goldmarkAnalysisSource(source []byte) []byte {
 			paragraphStop := paragraphBefore.Lines().At(paragraphBefore.Lines().Len() - 1).Stop
 			if bytes.Count(source[paragraphStop:start], []byte{'\n'}) >= 2 {
 				// Goldmark omits blank lines from the sibling list. A real blank
-				// between the paragraph and tag still allows a type-6/7 HTML block
+				// between the paragraph and tag still allows a type-7 HTML block
 				// to interrupt, so preserve the block and everything it contains.
 				return ast.WalkContinue, nil
 			}
