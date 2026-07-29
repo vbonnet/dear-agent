@@ -757,16 +757,11 @@ const (
 ### Test Helpers
 
 ```go
-package testing
+package session
 
-// CreateTestSession creates isolated test session
-func CreateTestSession(t *testing.T, name string) (sessionDir string, cleanup func())
-
-// MockHarness creates metadata-only harness discovery test data
-func MockHarness(t *testing.T, harnessType string) agent.Harness
-
-// MockTmux creates mock tmux environment
-func MockTmux(t *testing.T) (socketPath string, cleanup func())
+// NewMockTmux creates an in-memory tmux client for session and operation tests.
+// Tests configure its exported state and inject it through TmuxInterface.
+func NewMockTmux() *MockTmux
 ```
 
 ### Example Test
@@ -776,15 +771,15 @@ package mypackage_test
 
 import (
     "testing"
-    "github.com/vbonnet/dear-agent/agm/internal/testing"
+
+    "github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
 func TestSessionCreation(t *testing.T) {
-    sessionDir, cleanup := testing.CreateTestSession(t, "test-session")
-    defer cleanup()
+    tmux := session.NewMockTmux()
 
-    // Test session operations
-    // ...
+    // Inject tmux into the operation or backend under test.
+    _ = tmux
 }
 ```
 
