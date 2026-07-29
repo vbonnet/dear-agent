@@ -98,7 +98,7 @@ compatibility.
 
 **AGP-52** When the Pi adapter creates a session, an explicitly present `SessionContext.Environment` coding-agent directory, including an empty native-default value, shall take precedence over the adapter process environment; create and import shall persist coding-agent directory presence even for the native default, and resume shall use the caller environment only for metadata that lacks both a persisted directory and that marker.
 
-**AGP-58** When an adapter or private harness handoff pastes a TUI command, shell launch, or set-directory command into tmux, the system shall reject invalid UTF-8 and terminal control characters in every caller-derived or generated interpolated value before invoking the tmux delivery boundary.
+**AGP-62** When an adapter or private harness handoff pastes a TUI command, shell launch, or set-directory command into tmux, the system shall reject invalid UTF-8 and terminal control characters in every caller-derived or generated interpolated value before invoking the tmux delivery boundary.
 
 ### AGY Model and Adapter Lifecycle
 
