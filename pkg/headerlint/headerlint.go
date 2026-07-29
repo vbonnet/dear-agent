@@ -413,26 +413,9 @@ type inlineCodeSpanState struct {
 
 func stripInlineCodeSpans(line string, followingLines []string, state *inlineCodeSpanState) string {
 	masked := []byte(line)
-	cursor := 0
-	if state.delimiterLength > 0 && inlineCodeBlockBoundary(line, state.container) {
-		state.delimiterLength = 0
-		state.container = fenceContainerContext{}
-	}
-	if state.delimiterLength > 0 {
-		closer := matchingBacktickRun(line, 0, state.delimiterLength)
-		if closer < 0 {
-			for index := range masked {
-				masked[index] = ' '
-			}
-			return string(masked)
-		}
-		spanEnd := closer + state.delimiterLength
-		for index := range spanEnd {
-			masked[index] = ' '
-		}
-		cursor = spanEnd
-		state.delimiterLength = 0
-		state.container = fenceContainerContext{}
+	cursor, fullyMasked := maskCarriedInlineCodeSpan(line, masked, state)
+	if fullyMasked {
+		return string(masked)
 	}
 	for opener := cursor; opener < len(line); {
 		if line[opener] != '`' || escapedAt(line, opener) {
@@ -467,6 +450,30 @@ func stripInlineCodeSpans(line string, followingLines []string, state *inlineCod
 		opener = spanEnd
 	}
 	return string(masked)
+}
+
+func maskCarriedInlineCodeSpan(line string, masked []byte, state *inlineCodeSpanState) (int, bool) {
+	if state.delimiterLength > 0 && inlineCodeBlockBoundary(line, state.container) {
+		state.delimiterLength = 0
+		state.container = fenceContainerContext{}
+	}
+	if state.delimiterLength == 0 {
+		return 0, false
+	}
+	closer := matchingBacktickRun(line, 0, state.delimiterLength)
+	if closer < 0 {
+		for index := range masked {
+			masked[index] = ' '
+		}
+		return 0, true
+	}
+	spanEnd := closer + state.delimiterLength
+	for index := range spanEnd {
+		masked[index] = ' '
+	}
+	state.delimiterLength = 0
+	state.container = fenceContainerContext{}
+	return spanEnd, false
 }
 
 func matchingBacktickRun(line string, offset, length int) int {
