@@ -992,7 +992,10 @@ func orderedListMarkerEnd(line string, offset int) (int, bool) {
 }
 
 func terminatedListMarkerEnd(line string, markerEnd int) (int, bool) {
-	if markerEnd >= len(line) || (line[markerEnd] != ' ' && line[markerEnd] != '\t') {
+	if markerEnd == len(line) {
+		return markerEnd, true
+	}
+	if markerEnd > len(line) || (line[markerEnd] != ' ' && line[markerEnd] != '\t') {
 		return 0, false
 	}
 	return markerEnd + 1, true

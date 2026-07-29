@@ -338,6 +338,26 @@ func TestCheckFile_UnclosedContinuationListFenceEndsAtSiblingItem(t *testing.T) 
 	}
 }
 
+func TestCheckFile_UnclosedFenceAfterEmptyListMarkerEndsAtSiblingItem(t *testing.T) {
+	tests := map[string]string{
+		"bullet":  "-\n  ```markdown\n  quoted code\n- **Status:** draft · **Owner:** docs\n",
+		"ordered": "1.\n   ```markdown\n   quoted code\n2. **Status:** draft · **Owner:** docs\n",
+	}
+	for name, list := range tests {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := writeTemp(t, dir, "list-fence.md", "# Doc\n\n"+list)
+			violations, err := CheckFile(path)
+			if err != nil {
+				t.Fatalf("CheckFile: %v", err)
+			}
+			if len(violations) != 1 || violations[0].Line != 6 {
+				t.Fatalf("want violation on sibling list item at line 6, got %v", violations)
+			}
+		})
+	}
+}
+
 func TestCheckFile_DoesNotFlagFourSpaceListFenceContent(t *testing.T) {
 	const content = "# Doc\n\n" +
 		"- ```markdown\n" +
