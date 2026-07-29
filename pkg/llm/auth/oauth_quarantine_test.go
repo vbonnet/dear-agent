@@ -189,11 +189,13 @@ func TestRefresh_AsynchronousBodyConsumptionIsOutcomeUnknown(t *testing.T) {
 	}
 }
 
-type asynchronousUntouchedBodyErrorTransport struct{}
+type asynchronousUntouchedBodyErrorTransport struct {
+	closeDelay time.Duration
+}
 
-func (asynchronousUntouchedBodyErrorTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (tr asynchronousUntouchedBodyErrorTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	go func() {
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(tr.closeDelay)
 		_ = req.Body.Close()
 	}()
 	return nil, errors.New("connection failed before request body was consumed")
@@ -201,7 +203,7 @@ func (asynchronousUntouchedBodyErrorTransport) RoundTrip(req *http.Request) (*ht
 
 func TestRefresh_AsynchronousUntouchedBodyCloseIsOrdinaryError(t *testing.T) {
 	r, _, quarPath := quarantineResolver(t, "http://token.invalid", "rt-untouched")
-	r.HTTPClient = &http.Client{Transport: asynchronousUntouchedBodyErrorTransport{}}
+	r.HTTPClient = &http.Client{Transport: asynchronousUntouchedBodyErrorTransport{closeDelay: 10 * time.Millisecond}}
 
 	_, err := r.Refresh(context.Background())
 	if err == nil {
@@ -212,6 +214,22 @@ func TestRefresh_AsynchronousUntouchedBodyCloseIsOrdinaryError(t *testing.T) {
 	}
 	if _, statErr := os.Stat(quarPath); !os.IsNotExist(statErr) {
 		t.Fatal("untouched asynchronously closed body must not quarantine the token")
+	}
+}
+
+func TestRefresh_AsynchronousUntouchedBodyCloseHasNoFixedGraceDeadline(t *testing.T) {
+	r, _, quarPath := quarantineResolver(t, "http://token.invalid", "rt-untouched")
+	r.HTTPClient = &http.Client{Transport: asynchronousUntouchedBodyErrorTransport{closeDelay: 250 * time.Millisecond}}
+
+	_, err := r.Refresh(context.Background())
+	if err == nil {
+		t.Fatal("expected transport error")
+	}
+	if errors.Is(err, ErrRefreshOutcomeUnknown) {
+		t.Fatalf("a conforming delayed close of an unread body must remain retryable: %v", err)
+	}
+	if _, statErr := os.Stat(quarPath); !os.IsNotExist(statErr) {
+		t.Fatal("a delayed but untouched body close must not quarantine the token")
 	}
 }
 
@@ -423,6 +441,44 @@ func TestRefresh_QuarantineWriteFailureEscalates(t *testing.T) {
 	// The original cause must survive for the operator.
 	if !errors.Is(err, ErrRefreshOutcomeUnknown) {
 		t.Errorf("the underlying refresh failure should still be reported: %v", err)
+	}
+}
+
+func TestRefresh_CustomQuarantineDoesNotMaskSharedStopWriteFailure(t *testing.T) {
+	r, credentialsPath, quarantinePath := quarantineResolver(t, "http://token.invalid", "rt-maybe-spent")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// RefreshStopped has already completed and the request is in flight.
+		// Block only the stop write that follows this ambiguous exchange.
+		if err := os.Mkdir(credentialsPath+".refresh-stop", 0o700); err != nil {
+			t.Errorf("make refresh-stop blocker: %v", err)
+		}
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Error("no hijack support")
+			return
+		}
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			t.Errorf("hijack: %v", err)
+			return
+		}
+		_ = conn.Close()
+	}))
+	defer srv.Close()
+	r.TokenEndpoint = srv.URL
+
+	_, err := r.Refresh(context.Background())
+	if !errors.Is(err, ErrQuarantineNotPersisted) {
+		t.Fatalf("error = %v, want ErrQuarantineNotPersisted", err)
+	}
+	if !errors.Is(err, ErrRefreshStopNotPersisted) {
+		t.Fatalf("error = %v, want ErrRefreshStopNotPersisted", err)
+	}
+	if !errors.Is(err, ErrRefreshOutcomeUnknown) {
+		t.Fatalf("error = %v, want original ErrRefreshOutcomeUnknown", err)
+	}
+	if _, statErr := os.Stat(quarantinePath); statErr != nil {
+		t.Fatalf("custom quarantine should still record the local protection: %v", statErr)
 	}
 }
 

@@ -266,6 +266,46 @@ func TestRun_CadenceWithDisabledQuarantineConfirmsDurableStop(t *testing.T) {
 	}
 }
 
+func TestRun_CadenceWithCustomQuarantineAndFailedSharedStopEscalates(t *testing.T) {
+	creds := writeCreds(t, "old", staleMs(), "old-rt")
+	quarantine := filepath.Join(t.TempDir(), "custom-quarantine.json")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The preflight stop inspection has completed. Make only the shared
+		// stop write fail while leaving the custom quarantine writable.
+		if err := os.Mkdir(creds+".refresh-stop", 0o700); err != nil {
+			t.Errorf("make refresh-stop blocker: %v", err)
+		}
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Error("test server does not support hijacking")
+			return
+		}
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			t.Errorf("hijack: %v", err)
+			return
+		}
+		_ = conn.Close()
+	}))
+	defer srv.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"-cadence", "-credentials", creds, "-endpoint", srv.URL,
+		"-audit-log", filepath.Join(t.TempDir(), "audit.jsonl"), "-quarantine", quarantine,
+	}, &stdout, &stderr)
+
+	if code != exitNotPersisted {
+		t.Errorf("exit code = %d, want %d when no shared protection is confirmed", code, exitNotPersisted)
+	}
+	if _, err := os.Stat(quarantine); err != nil {
+		t.Fatalf("custom quarantine should remain as caller-local evidence: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "stop was NOT persisted") {
+		t.Errorf("stderr should refuse to report a safe stop, got: %s", stderr.String())
+	}
+}
+
 // -check must surface an active quarantine; it is how an operator finds out why
 // refreshes stopped.
 func TestRun_CheckReportsQuarantine(t *testing.T) {

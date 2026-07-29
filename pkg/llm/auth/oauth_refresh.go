@@ -53,11 +53,6 @@ const (
 	// maxErrBodyBytes caps how much of a non-2xx response body we read for
 	// diagnostics, so a hostile/oversized error page can't exhaust memory.
 	maxErrBodyBytes = 4 << 10
-
-	// A RoundTripper may close a request body asynchronously after RoundTrip
-	// returns an error. Give that conforming close a bounded observation window
-	// before conservatively classifying the refresh outcome as unknown.
-	requestBodyCloseGracePeriod = 100 * time.Millisecond
 )
 
 // ErrTokenFamilyDead signals an unrecoverable refresh: the OAuth server
@@ -222,7 +217,15 @@ func (r OAuthResolver) Refresh(ctx context.Context) (string, error) {
 					)
 				}
 				if stopErr != nil {
-					return errors.Join(err, wrapRefreshStopWriteError(stopErr))
+					// A caller-selected quarantine is not shared protection:
+					// another resolver for these credentials will not inspect
+					// it. Classify the failed credential-scoped stop as
+					// non-persistence so unattended cadence may report safety
+					// only after it independently confirms a canonical marker.
+					return errors.Join(
+						fmt.Errorf("%w: custom quarantine is not a shared refresh stop (original refresh failure: %w)", ErrQuarantineNotPersisted, err),
+						wrapRefreshStopWriteError(stopErr),
+					)
 				}
 			}
 			return err
@@ -431,12 +434,9 @@ func (r *observedReadCloser) waitForClose(ctx context.Context) {
 	if r.closed.Load() {
 		return
 	}
-	timer := time.NewTimer(requestBodyCloseGracePeriod)
-	defer timer.Stop()
 	select {
 	case <-r.closedCh:
 	case <-ctx.Done():
-	case <-timer.C:
 	}
 }
 
