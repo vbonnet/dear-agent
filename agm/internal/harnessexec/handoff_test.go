@@ -414,6 +414,53 @@ func TestPrepareCommandsRejectTerminalControlsBeforeStagingHandoff(t *testing.T)
 	}
 }
 
+func TestPrepareCodexRejectsGeneratedTerminalControlsBeforeBuildingCommand(t *testing.T) {
+	originalExecutablePath := executablePath
+	t.Cleanup(func() { executablePath = originalExecutablePath })
+	launch := CodexLaunch{
+		SessionName: "codex", Model: "gpt-test", WorkDir: "/tmp/work",
+		Sandbox: "workspace-write",
+	}
+
+	t.Run("resolved executable", func(t *testing.T) {
+		stateDir := filepath.Join(t.TempDir(), "must-not-exist")
+		t.Setenv("AGM_STATE_DIR", stateDir)
+		executablePath = func() (string, error) {
+			return "/opt/agm/bin/agm\x1b[201~\x15/quit", nil
+		}
+
+		prepared, err := PrepareCodexCommand(launch, nil)
+		if err == nil {
+			_ = prepared.Cancel()
+			t.Fatal("Prepare command accepted a generated executable with terminal controls")
+		}
+		if prepared.Command != "" || !strings.Contains(err.Error(), "private executable contains control characters") {
+			t.Fatalf("Prepare result = %#v, %v; want generated executable validation", prepared, err)
+		}
+		if _, statErr := os.Stat(stateDir); !os.IsNotExist(statErr) {
+			t.Fatalf("handoff state created before executable validation: %v", statErr)
+		}
+	})
+
+	t.Run("resolved handoff root", func(t *testing.T) {
+		stateDir := filepath.Join(t.TempDir(), "state\x1b[201~\x15/quit")
+		t.Setenv("AGM_STATE_DIR", stateDir)
+		executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+
+		prepared, err := PrepareCodexCommand(launch, nil)
+		if err == nil {
+			_ = prepared.Cancel()
+			t.Fatal("Prepare command accepted a generated handoff path with terminal controls")
+		}
+		if prepared.Command != "" || !strings.Contains(err.Error(), "private handoff directory contains control characters") {
+			t.Fatalf("Prepare result = %#v, %v; want generated handoff validation", prepared, err)
+		}
+		if _, statErr := os.Stat(stateDir); !os.IsNotExist(statErr) {
+			t.Fatalf("unsafe handoff root created before path validation: %v", statErr)
+		}
+	})
+}
+
 func TestPreparedCommandCancelRemovesUndeliveredHandoff(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
 	originalExecutablePath := executablePath

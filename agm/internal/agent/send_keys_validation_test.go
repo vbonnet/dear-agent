@@ -66,7 +66,7 @@ func newRenameTestStore(t *testing.T, tmuxName string) (SessionStore, SessionID)
 	return store, sessionID
 }
 
-// TestRenameRejectsControlCharacters covers SPEC R41 and R43 across all three
+// TestRenameRejectsControlCharacters covers SPEC R41 and R43 across all four
 // adapters that send a rename to a harness TUI.
 //
 // The assertion is on the error *message*, not merely on non-nil. These
@@ -75,7 +75,7 @@ func newRenameTestStore(t *testing.T, tmuxName string) (SessionStore, SessionID)
 // arriving after the injected text had already been written to the pane.
 // Requiring "control character" proves the value was rejected before any send.
 func TestRenameRejectsControlCharacters(t *testing.T) {
-	const hostileName = "innocent\r/quit"
+	const hostileName = "innocent\x1b[201~\x15/quit"
 
 	adapters := []struct {
 		name string
@@ -97,6 +97,12 @@ func TestRenameRejectsControlCharacters(t *testing.T) {
 			name: "agy",
 			exec: func(store SessionStore) func(Command) error {
 				return (&AgyAdapter{sessionStore: store}).ExecuteCommand
+			},
+		},
+		{
+			name: "pi",
+			exec: func(store SessionStore) func(Command) error {
+				return (&PiAdapter{sessionStore: store}).ExecuteCommand
 			},
 		},
 	}

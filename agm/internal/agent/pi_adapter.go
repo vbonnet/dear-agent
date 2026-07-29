@@ -540,8 +540,8 @@ func (a *PiAdapter) ExecuteCommand(cmd Command) error {
 		if paramErr != nil {
 			return paramErr
 		}
-		if strings.ContainsAny(name, "\r\n") {
-			return fmt.Errorf("invalid Pi session name")
+		if err := ValidateSendKeysText("session name", name); err != nil {
+			return fmt.Errorf("invalid Pi session name: %w", err)
 		}
 		if err := piSendCommandLiteral(metadata.TmuxName, "/name "+name); err != nil {
 			return err
