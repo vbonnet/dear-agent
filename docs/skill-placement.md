@@ -79,7 +79,7 @@ skill actually discovers and triggers.
 | Surface | Reaches | Mechanism |
 |---|---|---|
 | `wayfinder/skills/`, `agm/agm-plugin/skills/` | Claude Code sessions with the plugins installed | `.claude-plugin/marketplace.json` → per-plugin `plugin.json` declaring its skills directory |
-| `agm/plugins/`, `wayfinder/skills/` | Pi | `.pi/settings.json` |
+| `agm/plugins/`, `.agents/skills/` | Pi | `.pi/settings.json`; the AGM root supplies its lifecycle skill and the shared tree supplies portable skills |
 | `.agents/skills/` | Codex CLI and AGY | single AGENTS-compatible repository discovery tree; published entrypoints point to their canonical source |
 | `.opencode/skills/` | OpenCode | native repository skill discovery; published skills point to their canonical source |
 | `.claude/skills/` | Claude Code sessions cwd'd in this repo | holds a worked example today; no cross-repo reach |

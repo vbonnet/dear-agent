@@ -63,7 +63,7 @@ func TestValidatePiSkillDiscoveryRequiresConfiguredSharedSkillTree(t *testing.T)
 	if err := os.MkdirAll(filepath.Join(root, ".pi"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	settings := `{"skills":["../.agents/skills"]}`
+	settings := `{"skills":["../.agents/skills","../agm/plugins"]}`
 	if err := os.WriteFile(filepath.Join(root, ".pi", "settings.json"), []byte(settings), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -72,6 +72,13 @@ func TestValidatePiSkillDiscoveryRequiresConfiguredSharedSkillTree(t *testing.T)
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(entrypoint, []byte("# Skill\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	agmEntrypoint := filepath.Join(root, "agm", "plugins", "agm", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(agmEntrypoint), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(agmEntrypoint, []byte("# AGM\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := ValidatePiSkillDiscovery(root); err != nil {

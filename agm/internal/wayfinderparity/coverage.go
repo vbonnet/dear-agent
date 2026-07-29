@@ -137,39 +137,42 @@ func ValidatePiSkillDiscovery(root string) error {
 	if err := json.Unmarshal(data, &settings); err != nil {
 		return fmt.Errorf("parse Pi settings: %w", err)
 	}
-	const sharedSkillRoot = "../.agents/skills"
-	if !slices.Contains(settings.Skills, sharedSkillRoot) {
-		return fmt.Errorf("pi settings missing shared native skill discovery path %q", sharedSkillRoot)
+	for _, required := range []string{"../.agents/skills", "../agm/plugins"} {
+		if !slices.Contains(settings.Skills, required) {
+			return fmt.Errorf("pi settings missing required native skill discovery path %q", required)
+		}
 	}
 	for _, declared := range settings.Skills {
-		skillRoot := filepath.Clean(filepath.Join(root, ".pi", filepath.FromSlash(declared)))
-		relative, relErr := filepath.Rel(root, skillRoot)
-		if relErr != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-			return fmt.Errorf("pi skill discovery path %q escapes the repository", declared)
-		}
-		info, err := os.Stat(skillRoot)
-		if err != nil {
-			return fmt.Errorf("pi skill discovery path %q: %w", declared, err)
-		}
-		if !info.IsDir() {
-			return fmt.Errorf("pi skill discovery path %q is not a directory", declared)
-		}
-		entrypoints, err := filepath.Glob(filepath.Join(skillRoot, "*", "SKILL.md"))
-		if err != nil {
-			return fmt.Errorf("glob Pi skill entrypoints under %q: %w", declared, err)
-		}
-		found := false
-		for _, entrypoint := range entrypoints {
-			if info, statErr := os.Stat(entrypoint); statErr == nil && info.Mode().IsRegular() {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("pi skill discovery path %q contains no skill entrypoint", declared)
+		if err := validatePiSkillRoot(root, declared); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func validatePiSkillRoot(root, declared string) error {
+	skillRoot := filepath.Clean(filepath.Join(root, ".pi", filepath.FromSlash(declared)))
+	relative, relErr := filepath.Rel(root, skillRoot)
+	if relErr != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("pi skill discovery path %q escapes the repository", declared)
+	}
+	info, err := os.Stat(skillRoot)
+	if err != nil {
+		return fmt.Errorf("pi skill discovery path %q: %w", declared, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("pi skill discovery path %q is not a directory", declared)
+	}
+	entrypoints, err := filepath.Glob(filepath.Join(skillRoot, "*", "SKILL.md"))
+	if err != nil {
+		return fmt.Errorf("glob Pi skill entrypoints under %q: %w", declared, err)
+	}
+	for _, entrypoint := range entrypoints {
+		if info, statErr := os.Stat(entrypoint); statErr == nil && info.Mode().IsRegular() {
+			return nil
+		}
+	}
+	return fmt.Errorf("pi skill discovery path %q contains no skill entrypoint", declared)
 }
 
 // ValidateMCPOperations verifies Wayfinder status operations are exposed via
