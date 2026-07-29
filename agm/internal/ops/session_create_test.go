@@ -701,6 +701,27 @@ func TestCreateSession_RejectsRelativeCwd(t *testing.T) {
 	}
 }
 
+func TestCreateSession_RejectsWorkdirControlsBeforeTmuxCreation(t *testing.T) {
+	workdir := filepath.Join(t.TempDir(), "unsafe\x1b[201~\npath")
+	if err := os.Mkdir(workdir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tmuxMock := session.NewMockTmux()
+
+	_, err := CreateSession(&OpContext{Tmux: tmuxMock}, &CreateSessionRequest{
+		Cwd:     workdir,
+		Prompt:  "test",
+		Title:   "safe-title",
+		Harness: "claude-code",
+	})
+	if err == nil || !strings.Contains(err.Error(), "control characters") {
+		t.Fatalf("CreateSession() error = %v, want terminal-control rejection", err)
+	}
+	if len(tmuxMock.CreatedSessions) != 0 {
+		t.Fatalf("tmux sessions created before workdir rejection: %v", tmuxMock.CreatedSessions)
+	}
+}
+
 func TestCreateSession_RejectsEmptyPrompt(t *testing.T) {
 	dir := t.TempDir()
 	ctx := &OpContext{Tmux: session.NewMockTmux(), OutputMode: "json"}
