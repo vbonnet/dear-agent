@@ -28,6 +28,8 @@
 
 **SNDBR-13** While a process monitor alert callback from a prior monitor run is still running, the system shall keep restart attempts on the prior lifecycle until that callback drains.
 
+**SNDBR-14** When a process monitor loop exits without an active alert callback, the system shall publish stopped lifecycle state before unblocking stop callers so an immediate restart creates a fresh lifecycle.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
