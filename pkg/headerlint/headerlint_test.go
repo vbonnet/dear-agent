@@ -550,3 +550,41 @@ func TestViolation_String(t *testing.T) {
 		t.Fatal("want non-empty string")
 	}
 }
+
+func TestCheckFile_DoesNotFlagEscapedBoldFieldExamples(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "escaped.md", "# Doc\n\n\\**Status:** draft · \\**Owner:** docs\n")
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("want escaped markers ignored, got %v", violations)
+	}
+}
+
+func TestCheckFile_DoesNotCloseListFenceWithOverIndentedDelimiter(t *testing.T) {
+	const content = "# Doc\n\n- ```markdown\n      ```\n  **Status:** draft · **Owner:** docs\n  ```\n"
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "list-fence.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("want over-indented delimiter treated as code content, got %v", violations)
+	}
+}
+
+func TestCheckFile_InlineCodeDoesNotCrossSetextHeading(t *testing.T) {
+	const content = "# Doc\n\nUnmatched ` opener\n---\n**Status:** draft · **Owner:** docs\n` later\n"
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "setext.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 1 {
+		t.Fatalf("want one visible header-field violation, got %v", violations)
+	}
+}

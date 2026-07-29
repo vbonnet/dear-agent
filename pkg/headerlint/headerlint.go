@@ -61,6 +61,7 @@ var (
 	// end the zone, since the metadata block conventionally follows it.
 	headingH2Plus = regexp.MustCompile(`^ {0,3}#{2,6}([ \t]|$)`)
 	atxHeading    = regexp.MustCompile(`^ {0,3}#{1,6}([ \t]|$)`)
+	setextHeading = regexp.MustCompile(`^ {0,3}(?:=+|-+)[ \t]*$`)
 )
 
 // CheckFile validates one Markdown file. Content defects are returned as
@@ -186,7 +187,7 @@ func checkData(path string, data []byte) []Violation {
 		if lineNo > headerZoneMaxLines {
 			break
 		}
-		if matches := boldField.FindAllString(scannable, -1); len(matches) >= 2 {
+		if unescapedBoldFieldCount(scannable) >= 2 {
 			violations = append(violations, Violation{Path: path, Line: lineNo, Text: strings.TrimSpace(line)})
 		}
 	}
@@ -297,22 +298,25 @@ func (c fenceContainerContext) contentStart(line string) (int, bool) {
 	}
 	cursor := offset
 	indent := 0
-	for cursor < len(line) {
+	for cursor < len(line) && indent < c.listIndent {
 		switch line[cursor] {
 		case ' ':
 			indent++
 			cursor++
 		case '\t':
+			if indent+4 > c.listIndent {
+				return cursor, true
+			}
 			indent += 4
 			cursor++
 		default:
-			if indent < c.listIndent {
-				return 0, false
-			}
-			return cursor, true
+			return 0, false
 		}
 	}
-	return len(line), true
+	if indent < c.listIndent {
+		return 0, false
+	}
+	return cursor, true
 }
 
 func (c fenceContainerContext) delimiter(line string) (byte, int, string, bool) {
@@ -524,12 +528,30 @@ func inlineCodeBlockBoundary(line string, container fenceContainerContext) bool 
 	if matchesContainerATXHeading(line, atxHeading) {
 		return true
 	}
+	if matchesContainerBlockPattern(line, container, setextHeading) {
+		return true
+	}
 	if _, _, isFence := fenceDelimiter(line); isFence {
 		return true
 	}
 	trimmed := strings.TrimLeft(line, " \t")
 	_, _, _, isFence := parseFenceDelimiter(trimmed, 0)
 	return isFence
+}
+
+func matchesContainerBlockPattern(line string, container fenceContainerContext, pattern *regexp.Regexp) bool {
+	offset, ok := container.contentStart(line)
+	return ok && pattern.MatchString(line[offset:])
+}
+
+func unescapedBoldFieldCount(line string) int {
+	count := 0
+	for _, match := range boldField.FindAllStringIndex(line, -1) {
+		if !escapedAt(line, match[0]) {
+			count++
+		}
+	}
+	return count
 }
 
 func sameInlineCodeContainer(container fenceContainerContext, line string) bool {
