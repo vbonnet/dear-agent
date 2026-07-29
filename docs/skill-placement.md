@@ -1,4 +1,4 @@
-<!-- Last audited at: 2026-07-28 -->
+<!-- Last audited at: 2026-07-29 -->
 
 # Skill Placement — which repo owns a skill, and how it reaches a session
 
@@ -6,9 +6,9 @@ Companion to `docs/skill-tiers.md` (model/effort contract) and
 `docs/skill-verification-criteria.md` (exit-condition contract). Those two say
 what a skill must *declare*. This one says where it must *live*.
 
-Derived from a cross-model pass (synthesis + adversarial review) on a real
-case: a `research-pipeline` orchestrator skill proposed in a private,
-single-operator dotfiles repo.
+Derived from a cross-model pass (synthesis + adversarial review) that moved the
+`research-pipeline` orchestrator out of a private, single-operator dotfiles repo
+and published it as a standalone dear-agent plugin.
 
 ---
 
@@ -114,7 +114,7 @@ followed by a discovery smoke test in each claimed consumer.
 
 | Skill | Rule it enforces | Owner |
 |---|---|---|
-| `research-pipeline` (a candidate skill proposed in a private dotfiles repo) | cross-model verification, human gate before execution, beads sized for one run — DEAR process discipline | **dear-agent** |
+| `research-pipeline` (published standalone plugin) | cross-model verification, human gate before execution, beads sized for one run — DEAR process discipline | **dear-agent** |
 | writing pipeline, `linkedin-cross-post` | Valentin's voice and cadence | dotfiles (+ a Cowork distribution gap to close) |
 | `github-thread-resolver` | verify the fix landed before resolving — generic PR hygiene | dotfiles |
 | a hypothetical `deploy-vbonnet-ai` | vbonnet.ai's release policy (even though it calls `safe-pr`) | vbonnet.ai |
