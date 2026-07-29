@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // The helper is a second race-instrumented test process. Allow enough startup
@@ -24,23 +26,23 @@ func initLinkedWorktree(t *testing.T) (string, string) {
 	base := t.TempDir()
 	repo := filepath.Join(base, "repo")
 	worktree := filepath.Join(base, "worktree")
-	gitTestRun(t, "init", "-q", "-b", "main", repo)
-	gitTestRun(t, "-C", repo, "config", "user.name", "Safe PR Test")
-	gitTestRun(t, "-C", repo, "config", "user.email", "safe-pr@example.invalid")
+	gitTestRun(t, base, "init", "-q", "-b", "main", repo)
 	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("safe-pr test\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	gitTestRun(t, "-C", repo, "add", "README.md")
-	gitTestRun(t, "-C", repo, "commit", "-q", "-m", "initial")
-	gitTestRun(t, "-C", repo, "worktree", "add", "-q", "-b", "feature", worktree)
+	gitTestRun(t, repo, "add", "README.md")
+	gitTestRun(t, repo, "commit", "-q", "-m", "initial")
+	gitTestRun(t, repo, "worktree", "add", "-q", "-b", "feature", worktree)
 	return repo, worktree
 }
 
-func gitTestRun(t *testing.T, args ...string) string {
+func gitTestRun(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", args...)
+	base := gittest.Command(t, dir, args...)
+	cmd := exec.CommandContext(ctx, base.Path, base.Args[1:]...)
+	cmd.Dir, cmd.Env = base.Dir, base.Env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
@@ -62,20 +64,18 @@ func TestCleanupWorktreesScriptPreservesBranchWhenProtectedWorktreeRemovalFails(
 	remote := filepath.Join(base, "remote.git")
 	repo := filepath.Join(base, "repo")
 	worktree := filepath.Join(base, "protected-worktree")
-	gitTestRun(t, "init", "-q", "--bare", remote)
-	gitTestRun(t, "init", "-q", "-b", "main", repo)
-	gitTestRun(t, "-C", repo, "config", "user.name", "Safe PR Test")
-	gitTestRun(t, "-C", repo, "config", "user.email", "safe-pr@example.invalid")
+	gitTestRun(t, base, "init", "-q", "--bare", remote)
+	gitTestRun(t, base, "init", "-q", "-b", "main", repo)
 	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("safe-pr cleanup test\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	gitTestRun(t, "-C", repo, "add", "README.md")
-	gitTestRun(t, "-C", repo, "commit", "-q", "-m", "initial")
-	gitTestRun(t, "-C", repo, "remote", "add", "origin", remote)
-	gitTestRun(t, "-C", repo, "push", "-q", "-u", "origin", "main")
-	gitTestRun(t, "-C", repo, "worktree", "add", "-q", "-b", "protected", worktree)
-	gitTestRun(t, "-C", repo, "push", "-q", "-u", "origin", "protected")
-	gitTestRun(t, "-C", repo, "worktree", "lock", "--reason", "safe-pr transaction", worktree)
+	gitTestRun(t, repo, "add", "README.md")
+	gitTestRun(t, repo, "commit", "-q", "-m", "initial")
+	gitTestRun(t, repo, "remote", "add", "origin", remote)
+	gitTestRun(t, repo, "push", "-q", "-u", "origin", "main")
+	gitTestRun(t, repo, "worktree", "add", "-q", "-b", "protected", worktree)
+	gitTestRun(t, repo, "push", "-q", "-u", "origin", "protected")
+	gitTestRun(t, repo, "worktree", "lock", "--reason", "safe-pr transaction", worktree)
 
 	_, sourceFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -85,6 +85,7 @@ func TestCleanupWorktreesScriptPreservesBranchWhenProtectedWorktreeRemovalFails(
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "bash", script, repo, "--fix", "--max-age", "0")
+	cmd.Env = gittest.Env(t)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
@@ -104,8 +105,8 @@ func TestCleanupWorktreesScriptPreservesBranchWhenProtectedWorktreeRemovalFails(
 	if _, err := os.Stat(worktree); err != nil {
 		t.Fatalf("protected worktree was removed: %v", err)
 	}
-	gitTestRun(t, "-C", repo, "show-ref", "--verify", "refs/heads/protected")
-	gitTestRun(t, "-C", repo, "ls-remote", "--exit-code", "origin", "refs/heads/protected")
+	gitTestRun(t, repo, "show-ref", "--verify", "refs/heads/protected")
+	gitTestRun(t, repo, "ls-remote", "--exit-code", "origin", "refs/heads/protected")
 }
 
 func TestWithWorktreeLockPreservesOrReleasesAcrossOutcomes(t *testing.T) {
@@ -123,7 +124,7 @@ func TestWithWorktreeLockPreservesOrReleasesAcrossOutcomes(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			_, worktree := initLinkedWorktree(t)
 			if test.preexisting {
-				gitTestRun(t, "-C", worktree, "worktree", "lock", "--reason", "manual-owner", worktree)
+				gitTestRun(t, worktree, "worktree", "lock", "--reason", "manual-owner", worktree)
 			}
 
 			err := WithWorktreeLock(worktree, "test transaction", func() error {
@@ -182,8 +183,8 @@ func TestWithWorktreeLockRejectsPrimaryCheckout(t *testing.T) {
 func TestWithWorktreeLockPreservesReplacementOwner(t *testing.T) {
 	_, worktree := initLinkedWorktree(t)
 	err := WithWorktreeLock(worktree, "ownership change", func() error {
-		gitTestRun(t, "-C", worktree, "worktree", "unlock", worktree)
-		gitTestRun(t, "-C", worktree, "worktree", "lock", "--reason", "replacement-owner", worktree)
+		gitTestRun(t, worktree, "worktree", "unlock", worktree)
+		gitTestRun(t, worktree, "worktree", "lock", "--reason", "replacement-owner", worktree)
 		return nil
 	})
 	if err == nil || !strings.Contains(err.Error(), "ownership changed") {
@@ -201,7 +202,7 @@ func TestWithWorktreeLockPreservesReplacementOwner(t *testing.T) {
 func TestWithWorktreeLockReclaimsStaleSafePROwnerDespiteLivePID(t *testing.T) {
 	_, worktree := initLinkedWorktree(t)
 	staleReason := fmt.Sprintf("safe-pr-owned:%d:0011223344556677:interrupted transaction", os.Getpid())
-	gitTestRun(t, "-C", worktree, "worktree", "lock", "--reason", staleReason, worktree)
+	gitTestRun(t, worktree, "worktree", "lock", "--reason", staleReason, worktree)
 
 	called := false
 	if err := WithWorktreeLock(worktree, "replacement transaction", func() error {
@@ -420,7 +421,7 @@ func TestWorktreeTransactionLockOutlivesKilledParentForProtectedChild(t *testing
 	marker := filepath.Join(t.TempDir(), "child-started")
 	release := filepath.Join(t.TempDir(), "release-child")
 	helper := exec.Command(os.Args[0], "-test.run=^TestWorktreeTransactionHelper$")
-	helper.Env = append(os.Environ(),
+	helper.Env = append(gittest.Env(t),
 		"SAFEPR_TRANSACTION_HELPER=1",
 		"SAFEPR_TRANSACTION_WORKTREE="+worktree,
 		"SAFEPR_TRANSACTION_MARKER="+marker,
@@ -534,7 +535,7 @@ func TestWorktreeTransactionLockOutlivesKilledParentForGitHelper(t *testing.T) {
 	}
 
 	helper := exec.Command(os.Args[0], "-test.run=^TestWorktreeGitTransactionHelper$")
-	helper.Env = append(os.Environ(),
+	helper.Env = append(gittest.Env(t),
 		"SAFEPR_GIT_TRANSACTION_HELPER=1",
 		"SAFEPR_GIT_TRANSACTION_DIR="+gitDir,
 		"SAFEPR_GIT_HELPER_MARKER="+marker,

@@ -93,9 +93,14 @@ func runAuditResources(cmd *cobra.Command, args []string) error {
 	// Collect repo dirs to check for prunable refs
 	repoDirs := collectRepoDirs(homeDir, arExtraRepos)
 
-	// Get active session names for cross-reference
-	activeSessions, err := getActiveSessions(ctx)
+	// Get active session names for cross-reference. Destructive maintenance
+	// must fail closed if the authoritative Dolt inventory is unavailable;
+	// tmux cannot represent API-only sessions.
+	activeSessions, err := getActiveSessionsForResourceAudit(ctx, arFix)
 	if err != nil {
+		if arFix {
+			return fmt.Errorf("refusing --fix without authoritative active-session inventory: %w", err)
+		}
 		fmt.Fprintf(os.Stderr, "Warning: could not query active sessions (%v); orphan detection will be limited\n", err)
 	}
 
@@ -248,36 +253,81 @@ func scanPrunableRefs(repoDirs []string) []orphanedWorktree {
 	return orphans
 }
 
-// getActiveSessions returns a set of active session names from Dolt, falling
-// back to tmux session names if Dolt is unavailable.
-func getActiveSessions(ctx context.Context) (map[string]bool, error) {
+type activeSessionStore interface {
+	ListActiveSessions(context.Context) ([]string, error)
+	Close() error
+}
+
+var (
+	activeSessionStoreConfigs = configuredActiveSessionStoreConfigs
+	openActiveSessionStore    = func(config *dolt.Config) (activeSessionStore, error) {
+		return dolt.New(config)
+	}
+)
+
+func configuredActiveSessionStoreConfigs() ([]*dolt.Config, error) {
+	path, err := getWorkspaceConfigPath()
+	if err != nil {
+		return nil, fmt.Errorf("resolve AGM workspace config path: %w", err)
+	}
+	return dolt.ConfiguredWorkspaceConfigsAt(path)
+}
+
+// getActiveSessionsFromDolt returns the authoritative active-session set.
+// Callers that perform destructive maintenance must use this rather than a
+// process-local fallback, because API-only sessions do not own a tmux pane.
+func getActiveSessionsFromDolt(ctx context.Context) (map[string]bool, error) {
 	active := make(map[string]bool)
 
-	// Try Dolt first
-	doltConfig, err := dolt.DefaultConfig()
-	if err == nil {
-		adapter, err := dolt.New(doltConfig)
-		if err == nil {
-			defer func() { _ = adapter.Close() }()
-			sessions, err := adapter.ListActiveSessions(ctx)
-			if err == nil {
-				for _, s := range sessions {
-					active[s] = true
-				}
-				return active, nil
-			}
+	configs, err := activeSessionStoreConfigs()
+	if err != nil {
+		return active, fmt.Errorf("load configured Dolt workspace stores: %w", err)
+	}
+	for _, config := range configs {
+		store, err := openActiveSessionStore(config)
+		if err != nil {
+			return active, fmt.Errorf("open Dolt session store for workspace %q: %w", config.Workspace, err)
 		}
+		sessions, listErr := store.ListActiveSessions(ctx)
+		closeErr := store.Close()
+		if listErr != nil {
+			return active, fmt.Errorf("list active sessions from workspace %q: %w", config.Workspace, listErr)
+		}
+		if closeErr != nil {
+			return active, fmt.Errorf("close Dolt session store for workspace %q: %w", config.Workspace, closeErr)
+		}
+		for _, session := range sessions {
+			active[session] = true
+		}
+	}
+	return active, nil
+}
+
+// getActiveSessions returns a set of active session names from Dolt, falling
+// back to tmux session names if Dolt is unavailable. This is suitable for
+// read-only auditing, but not for destructive maintenance.
+func getActiveSessions(ctx context.Context) (map[string]bool, error) {
+	active, err := getActiveSessionsFromDolt(ctx)
+	if err == nil {
+		return active, nil
 	}
 
 	// Fallback: tmux sessions
 	tmuxSessions, tmuxErr := listTmuxSessionNames()
 	if tmuxErr != nil {
-		return active, fmt.Errorf("dolt unavailable and tmux fallback failed: %w", tmuxErr)
+		return active, fmt.Errorf("dolt active-session lookup failed (%w) and tmux fallback failed: %w", err, tmuxErr)
 	}
 	for _, name := range tmuxSessions {
 		active[name] = true
 	}
 	return active, nil
+}
+
+func getActiveSessionsForResourceAudit(ctx context.Context, fix bool) (map[string]bool, error) {
+	if fix {
+		return getActiveSessionsFromDolt(ctx)
+	}
+	return getActiveSessions(ctx)
 }
 
 // collectRepoDirs returns directories under ~/src/ that are git repos,

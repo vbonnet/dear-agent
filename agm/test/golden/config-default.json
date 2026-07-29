@@ -78,7 +78,8 @@
     "Onboarding": {
       "Enabled": true,
       "TemplatePath": ""
-    }
+    },
+    "WritableDirs": null
   },
   "Budget": {
     "Enabled": false,

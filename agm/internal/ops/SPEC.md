@@ -1,9 +1,9 @@
 # agm/internal/ops — Requirements Specification (EARS)
 
-<!-- Last audited at: 2026-07-21 -->
+<!-- Last audited at: 2026-07-27 -->
 
 **Version**: 1.0
-**Last Updated**: 2026-07-21
+**Last Updated**: 2026-07-27
 **Status**: Baseline (derived from tests + code, not design-forward)
 **Scope**: Shared business-logic layer for AGM CLI, MCP, and Skills surfaces
 
@@ -117,9 +117,25 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-30** When `SendMessage` is called targeting an archived session, the system shall return an error before attempting delivery.
 
-**OPS-31** When a Manager backend is present, the system shall deliver `SendMessage` via `manager.Backend.SendMessage` using the tmux session name as the session identifier.
+**OPS-31** When `SendMessage` targets a local interactive session, the system shall require the injected tmux runtime's atomic input capability and shall combine harness-aware readiness, target ownership, and exact-pane delivery in one mutation boundary without a parallel manager fallback.
 
 **OPS-82** When `SendMessage` resolves an `openai` or `gpt` manifest, the system shall route before every configured tmux capability through the shared stable-session-ID API transaction, reload lifecycle under the archive-compatible lock, reconstruct the adapter from persisted non-secret runtime configuration, accept only active or idle adapter status, and require context-aware provider delivery; CLI, MCP, and other callers shall therefore neither inspect nor send to a tmux pane for a pure API session.
+
+**OPS-83** When CLI, MCP, or daemon code attempts direct message delivery, the system shall use `SendMessage` as the operation that resolves the recipient, selects API or tmux transport, decides readiness, and performs the send.
+
+**OPS-84** When direct delivery succeeds, the `SendMessage` operation shall return the stable session ID used by the transaction so callers can perform post-delivery bookkeeping without resolving a mutable name again.
+
+**OPS-85** When `SendMessage` cannot deliver because the recipient is not ready, the system shall return `AGM-016` with the authoritative readiness state.
+
+**OPS-86** When `SendMessage` returns a typed not-ready outcome, the operation shall not have sent input.
+
+**OPS-87** The CLI and daemon direct-delivery paths shall not call `session.CheckSessionDelivery`.
+
+**OPS-88** The daemon direct-delivery path shall not own a separate tmux sender.
+
+**OPS-89** When `SendMessage` returns an outcome, the CLI and daemon adapters shall translate it into presentation, queue, defer, retry, and acknowledgment policy.
+
+**OPS-90** When `SendMessage` resolves a tmux-backed session, the operation shall lock its stable session ID, reload mutable lifecycle and delivery identity, and retain that lifecycle boundary across atomic readiness and exact-pane input.
 
 ### Stall Detection
 
@@ -173,6 +189,24 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 
 **OPS-82** When `ArchiveSession` reloads sandbox ownership metadata, the system shall authorize sandbox cleanup only for a complete valid record whose ID matches the stable session ID and whose merged boundary is exactly the current host sandbox base's identified `merged` child; incomplete, mismatched, legacy, or out-of-base metadata shall preserve every sandbox path.
 
+### Shared Session Resume Lifecycle
+
+**OPS-83** When `ResumeSession` receives a stable session ID, the operation shall acquire that ID's lifecycle lock before its first mutable storage read, reload the current session under the lock, classify worktree and tmux health before mutation, and reject archived, unhealthy, or unverifiable targets without creating or commanding a tmux session.
+
+**OPS-84** When `ResumeSession` cold-starts a harness, the operation shall create one exact tmux identity, build the native resume command from persisted harness metadata, restore the current harness default when a legacy Codex session has no model, wait for the harness-specific process and composer boundary, and persist the canonical tmux name only after readiness; when the expected runtime already exists, the operation shall preserve it and shall not submit another launch command except for a proven restartable Pi shell.
+
+**OPS-85** If cold resume fails before an irreversible prompt boundary, the operation shall restore only the metadata revision owned by that attempt and remove only its exact tmux creation identity; if metadata compensation is rejected or otherwise unproven, it shall preserve the ready runtime rather than leave canonical metadata pointing at a resource it destroyed.
+
+**OPS-86** When optional Codex prompt submission is confirmed or its final acknowledgement is lost, `ResumeSession` shall treat work as possibly started, complete ownership with a cancellation-independent context, and return success with the uncertainty fact; a positive pre-submission failure shall roll back an owned cold runtime, while the same failure against a pre-existing runtime shall warn and preserve attachment behavior.
+
+**OPS-87** When `ResumeSession` cold-resumes AGY, it shall hold the canonical workspace lifecycle lock across command submission and native readiness, preserve a known stored model and permission mode, and omit an unknown or ambiguous legacy model override; when it evaluates an existing Pi pane, it shall require exact configured-harness liveness or a proven restartable shell.
+
+**OPS-88** When `ResumeSession` reports progress, the system shall provide observer callbacks only read-only lifecycle facts, prevent those callbacks from authorizing, skipping, reordering, or aborting operation phases, and permit interactive terminal attachment only in the caller after the operation returns and releases the stable-session lock.
+
+**OPS-89** While `ResumeSession` remains before its irreversible prompt boundary, the system shall honor caller cancellation before each later lifecycle phase and compensate any owned cold runtime; after work may have started, later cancellation shall not convert the operation into a retryable failure.
+
+**OPS-90** When `ResumeSession` reports a successful lifecycle result, the system shall update durable activity only after native readiness and canonical runtime ownership, and shall return the exact stable ID, harness, tmux name, creation and launch facts, health facts, prompt uncertainty, and warnings needed by non-owning surfaces.
+
 **OPS-76** When a fresh AGY session has a startup prompt, `CreateSessionWithContext` shall deliver that prompt once after native readiness but before identity discovery, discover and register the resulting provider identity while retaining the workspace lock, and mark the prompt consumed so CLI, MCP, and fallback completion paths cannot resend it; bootstrap failure or caller cancellation shall roll back the owned tmux session before registration, and a fresh AGY request without a startup prompt shall fail before mutation.
 
 **OPS-77** When shared session creation launches a harness, the system shall prove the expected harness process and harness-specific prompt or composer readiness after launch and before registration, and shall atomically revalidate the exact pane immediately before initial prompt delivery, regardless of whether a surface `CreateSessionRuntime` is present; a runtime may skip the shared startup observation only by explicitly reporting that it already verified both process and composer ownership, an MCP AGY text-only onboarding wait shall remain unverified, and either readiness failure shall enter the existing creation rollback transaction.
@@ -216,6 +250,10 @@ readiness or completion through the cohesive `CreateSessionRuntime` seam.
 **OPS-76** When a shared operation wraps a typed backend failure in its stable RFC 7807 error envelope, the in-process error chain shall preserve the original cause for `errors.Is` and `errors.As` while JSON and human-readable output retain the stable operation code and actionable detail.
 
 **OPS-47** When a process-liveness scan fails or the tmux backend cannot verify process liveness, status and kill decisions shall fall back to tmux session existence (fail-safe: an unverifiable session is treated as active).
+
+**OPS-48** If `Sweep` is asked to execute without a caller-confirmed active-session set, then the system shall return `ErrActiveSessionsUnknown` before discovering or removing any worktree.
+
+**OPS-49** When `Sweep` runs in dry-run mode without a caller-confirmed active-session set, the system shall still classify every worktree and shall remove nothing.
 
 ---
 

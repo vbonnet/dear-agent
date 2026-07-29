@@ -75,7 +75,7 @@ CLI / MCP Server / Skills
   │ Claude  │ Gemini  │ Codex   │ OpenCode  │
   └─────────┴─────────┴─────────┴───────────┘
         │
-  Backend Abstraction (tmux / temporal)
+  Local Runtime Boundary (session.RealTmux)
         │
   Storage & Coordination (DB, Manifests, Queue, Sandbox)
 ```

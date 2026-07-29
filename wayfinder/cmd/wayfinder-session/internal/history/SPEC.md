@@ -20,6 +20,8 @@
 
 **WAYFINDER-HISTORY-06** When events are filtered by canonical phase or type, the system shall return only matching records in history order.
 
+**WAYFINDER-HISTORY-07** When a project contains only the legacy `WAYFINDER-HISTORY.md` JSON Lines log, the system shall atomically rename it to `WAYFINDER-HISTORY.jsonl` before reading, appending, or archiving so the audit trail remains contiguous.
+
 ## Test Traceability
 
 - Package tests: `wayfinder/cmd/wayfinder-session/internal/history/history_test.go`

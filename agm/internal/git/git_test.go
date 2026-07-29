@@ -3,10 +3,11 @@ package git
 import (
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // TestCommitManifest_NotInGitRepo verifies that CommitManifest
@@ -33,17 +34,18 @@ func TestCommitManifest_NotInGitRepo(t *testing.T) {
 func TestCommitManifest_InGitRepo(t *testing.T) {
 	// Create a temporary git repository
 	tmpDir := t.TempDir()
-	gitInit := exec.Command("git", "init", tmpDir)
+	gitInit := gittest.Command(t, tmpDir, "init", tmpDir)
 	if err := gitInit.Run(); err != nil {
 		t.Fatalf("Failed to init git repo: %v", err)
 	}
+	gittest.HardenRepo(t, tmpDir)
 
 	// Configure git user (required for commits)
-	configUser := exec.Command("git", "-C", tmpDir, "config", "user.name", "Test User")
+	configUser := gittest.Command(t, tmpDir, "config", "user.name", "Test User")
 	if err := configUser.Run(); err != nil {
 		t.Fatalf("Failed to config git user: %v", err)
 	}
-	configEmail := exec.Command("git", "-C", tmpDir, "config", "user.email", "test@example.com")
+	configEmail := gittest.Command(t, tmpDir, "config", "user.email", "test@example.com")
 	if err := configEmail.Run(); err != nil {
 		t.Fatalf("Failed to config git email: %v", err)
 	}
@@ -61,7 +63,7 @@ func TestCommitManifest_InGitRepo(t *testing.T) {
 	}
 
 	// Verify commit was created
-	logCmd := exec.Command("git", "-C", tmpDir, "log", "--oneline")
+	logCmd := gittest.Command(t, tmpDir, "log", "--oneline")
 	output, err := logCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("Failed to get git log: %v", err)
@@ -75,7 +77,7 @@ func TestCommitManifest_InGitRepo(t *testing.T) {
 	}
 
 	// Verify only manifest.yaml is in the commit
-	showCmd := exec.Command("git", "-C", tmpDir, "show", "--name-only", "--format=")
+	showCmd := gittest.Command(t, tmpDir, "show", "--name-only", "--format=")
 	showOutput, err := showCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("Failed to show commit files: %v", err)
@@ -92,17 +94,18 @@ func TestCommitManifest_InGitRepo(t *testing.T) {
 func TestCommitManifest_WithUnstagedFiles(t *testing.T) {
 	// Create a temporary git repository
 	tmpDir := t.TempDir()
-	gitInit := exec.Command("git", "init", tmpDir)
+	gitInit := gittest.Command(t, tmpDir, "init", tmpDir)
 	if err := gitInit.Run(); err != nil {
 		t.Fatalf("Failed to init git repo: %v", err)
 	}
+	gittest.HardenRepo(t, tmpDir)
 
 	// Configure git
-	configUser := exec.Command("git", "-C", tmpDir, "config", "user.name", "Test User")
+	configUser := gittest.Command(t, tmpDir, "config", "user.name", "Test User")
 	if err := configUser.Run(); err != nil {
 		t.Fatalf("Failed to config git user: %v", err)
 	}
-	configEmail := exec.Command("git", "-C", tmpDir, "config", "user.email", "test@example.com")
+	configEmail := gittest.Command(t, tmpDir, "config", "user.email", "test@example.com")
 	if err := configEmail.Run(); err != nil {
 		t.Fatalf("Failed to config git email: %v", err)
 	}
@@ -112,11 +115,11 @@ func TestCommitManifest_WithUnstagedFiles(t *testing.T) {
 	if err := os.WriteFile(readmePath, []byte("# Test\n"), 0600); err != nil {
 		t.Fatalf("Failed to create README: %v", err)
 	}
-	addReadme := exec.Command("git", "-C", tmpDir, "add", "README.md")
+	addReadme := gittest.Command(t, tmpDir, "add", "README.md")
 	if err := addReadme.Run(); err != nil {
 		t.Fatalf("Failed to add README: %v", err)
 	}
-	commitReadme := exec.Command("git", "-C", tmpDir, "commit", "-m", "Initial commit")
+	commitReadme := gittest.Command(t, tmpDir, "commit", "-m", "Initial commit")
 	if err := commitReadme.Run(); err != nil {
 		t.Fatalf("Failed to commit README: %v", err)
 	}
@@ -140,7 +143,7 @@ func TestCommitManifest_WithUnstagedFiles(t *testing.T) {
 	}
 
 	// Verify only manifest.yaml is in the commit
-	showCmd := exec.Command("git", "-C", tmpDir, "show", "--name-only", "--format=")
+	showCmd := gittest.Command(t, tmpDir, "show", "--name-only", "--format=")
 	showOutput, err := showCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("Failed to show commit files: %v", err)
@@ -152,7 +155,7 @@ func TestCommitManifest_WithUnstagedFiles(t *testing.T) {
 	}
 
 	// Verify unstaged.txt is still unstaged
-	statusCmd := exec.Command("git", "-C", tmpDir, "status", "--porcelain")
+	statusCmd := gittest.Command(t, tmpDir, "status", "--porcelain")
 	statusOutput, err := statusCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("Failed to get git status: %v", err)
@@ -169,17 +172,18 @@ func TestCommitManifest_WithUnstagedFiles(t *testing.T) {
 func TestCommitManifest_WithStagedFiles(t *testing.T) {
 	// Create a temporary git repository
 	tmpDir := t.TempDir()
-	gitInit := exec.Command("git", "init", tmpDir)
+	gitInit := gittest.Command(t, tmpDir, "init", tmpDir)
 	if err := gitInit.Run(); err != nil {
 		t.Fatalf("Failed to init git repo: %v", err)
 	}
+	gittest.HardenRepo(t, tmpDir)
 
 	// Configure git
-	configUser := exec.Command("git", "-C", tmpDir, "config", "user.name", "Test User")
+	configUser := gittest.Command(t, tmpDir, "config", "user.name", "Test User")
 	if err := configUser.Run(); err != nil {
 		t.Fatalf("Failed to config git user: %v", err)
 	}
-	configEmail := exec.Command("git", "-C", tmpDir, "config", "user.email", "test@example.com")
+	configEmail := gittest.Command(t, tmpDir, "config", "user.email", "test@example.com")
 	if err := configEmail.Run(); err != nil {
 		t.Fatalf("Failed to config git email: %v", err)
 	}
@@ -189,11 +193,11 @@ func TestCommitManifest_WithStagedFiles(t *testing.T) {
 	if err := os.WriteFile(readmePath, []byte("# Test\n"), 0600); err != nil {
 		t.Fatalf("Failed to create README: %v", err)
 	}
-	addReadme := exec.Command("git", "-C", tmpDir, "add", "README.md")
+	addReadme := gittest.Command(t, tmpDir, "add", "README.md")
 	if err := addReadme.Run(); err != nil {
 		t.Fatalf("Failed to add README: %v", err)
 	}
-	commitReadme := exec.Command("git", "-C", tmpDir, "commit", "-m", "Initial commit")
+	commitReadme := gittest.Command(t, tmpDir, "commit", "-m", "Initial commit")
 	if err := commitReadme.Run(); err != nil {
 		t.Fatalf("Failed to commit README: %v", err)
 	}
@@ -203,7 +207,7 @@ func TestCommitManifest_WithStagedFiles(t *testing.T) {
 	if err := os.WriteFile(stagedPath, []byte("staged content\n"), 0600); err != nil {
 		t.Fatalf("Failed to create staged file: %v", err)
 	}
-	addStaged := exec.Command("git", "-C", tmpDir, "add", "staged.txt")
+	addStaged := gittest.Command(t, tmpDir, "add", "staged.txt")
 	if err := addStaged.Run(); err != nil {
 		t.Fatalf("Failed to stage file: %v", err)
 	}
@@ -221,7 +225,7 @@ func TestCommitManifest_WithStagedFiles(t *testing.T) {
 	}
 
 	// Verify only manifest.yaml is in the latest commit
-	showCmd := exec.Command("git", "-C", tmpDir, "show", "--name-only", "--format=")
+	showCmd := gittest.Command(t, tmpDir, "show", "--name-only", "--format=")
 	showOutput, err := showCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("Failed to show commit files: %v", err)
@@ -233,7 +237,7 @@ func TestCommitManifest_WithStagedFiles(t *testing.T) {
 	}
 
 	// Verify staged.txt is still staged (not committed)
-	statusCmd := exec.Command("git", "-C", tmpDir, "status", "--porcelain")
+	statusCmd := gittest.Command(t, tmpDir, "status", "--porcelain")
 	statusOutput, err := statusCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("Failed to get git status: %v", err)
@@ -250,17 +254,18 @@ func TestCommitManifest_WithStagedFiles(t *testing.T) {
 func TestCommitManifest_NoChanges(t *testing.T) {
 	// Create a temporary git repository
 	tmpDir := t.TempDir()
-	gitInit := exec.Command("git", "init", tmpDir)
+	gitInit := gittest.Command(t, tmpDir, "init", tmpDir)
 	if err := gitInit.Run(); err != nil {
 		t.Fatalf("Failed to init git repo: %v", err)
 	}
+	gittest.HardenRepo(t, tmpDir)
 
 	// Configure git
-	configUser := exec.Command("git", "-C", tmpDir, "config", "user.name", "Test User")
+	configUser := gittest.Command(t, tmpDir, "config", "user.name", "Test User")
 	if err := configUser.Run(); err != nil {
 		t.Fatalf("Failed to config git user: %v", err)
 	}
-	configEmail := exec.Command("git", "-C", tmpDir, "config", "user.email", "test@example.com")
+	configEmail := gittest.Command(t, tmpDir, "config", "user.email", "test@example.com")
 	if err := configEmail.Run(); err != nil {
 		t.Fatalf("Failed to config git email: %v", err)
 	}
@@ -270,11 +275,11 @@ func TestCommitManifest_NoChanges(t *testing.T) {
 	if err := os.WriteFile(manifestPath, []byte("test: data\n"), 0600); err != nil {
 		t.Fatalf("Failed to create test manifest: %v", err)
 	}
-	addManifest := exec.Command("git", "-C", tmpDir, "add", "manifest.yaml")
+	addManifest := gittest.Command(t, tmpDir, "add", "manifest.yaml")
 	if err := addManifest.Run(); err != nil {
 		t.Fatalf("Failed to add manifest: %v", err)
 	}
-	commitManifest := exec.Command("git", "-C", tmpDir, "commit", "-m", "Initial manifest")
+	commitManifest := gittest.Command(t, tmpDir, "commit", "-m", "Initial manifest")
 	if err := commitManifest.Run(); err != nil {
 		t.Fatalf("Failed to commit manifest: %v", err)
 	}
@@ -291,17 +296,18 @@ func TestCommitManifest_NoChanges(t *testing.T) {
 func TestCommitManifest_InSubdirectory(t *testing.T) {
 	// Create a temporary git repository
 	tmpDir := t.TempDir()
-	gitInit := exec.Command("git", "init", tmpDir)
+	gitInit := gittest.Command(t, tmpDir, "init", tmpDir)
 	if err := gitInit.Run(); err != nil {
 		t.Fatalf("Failed to init git repo: %v", err)
 	}
+	gittest.HardenRepo(t, tmpDir)
 
 	// Configure git
-	configUser := exec.Command("git", "-C", tmpDir, "config", "user.name", "Test User")
+	configUser := gittest.Command(t, tmpDir, "config", "user.name", "Test User")
 	if err := configUser.Run(); err != nil {
 		t.Fatalf("Failed to config git user: %v", err)
 	}
-	configEmail := exec.Command("git", "-C", tmpDir, "config", "user.email", "test@example.com")
+	configEmail := gittest.Command(t, tmpDir, "config", "user.email", "test@example.com")
 	if err := configEmail.Run(); err != nil {
 		t.Fatalf("Failed to config git email: %v", err)
 	}
@@ -325,7 +331,7 @@ func TestCommitManifest_InSubdirectory(t *testing.T) {
 	}
 
 	// Verify commit was created
-	logCmd := exec.Command("git", "-C", tmpDir, "log", "--oneline")
+	logCmd := gittest.Command(t, tmpDir, "log", "--oneline")
 	output, err := logCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("Failed to get git log: %v", err)
@@ -338,7 +344,7 @@ func TestCommitManifest_InSubdirectory(t *testing.T) {
 	}
 
 	// Verify correct file path in commit
-	showCmd := exec.Command("git", "-C", tmpDir, "show", "--name-only", "--format=")
+	showCmd := gittest.Command(t, tmpDir, "show", "--name-only", "--format=")
 	showOutput, err := showCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("Failed to show commit files: %v", err)
@@ -361,10 +367,11 @@ func TestFindGitRoot(t *testing.T) {
 	}
 
 	// Test case 2: In git repo root
-	gitInit := exec.Command("git", "init", tmpDir)
+	gitInit := gittest.Command(t, tmpDir, "init", tmpDir)
 	if err := gitInit.Run(); err != nil {
 		t.Fatalf("Failed to init git repo: %v", err)
 	}
+	gittest.HardenRepo(t, tmpDir)
 
 	root, err := findGitRoot(tmpDir)
 	if err != nil {
@@ -391,9 +398,8 @@ func TestFindGitRoot(t *testing.T) {
 
 func TestWorktreeRootResolvesNestedProjectDirectory(t *testing.T) {
 	repo := t.TempDir()
-	if err := exec.Command("git", "init", repo).Run(); err != nil {
-		t.Fatal(err)
-	}
+	gittest.Run(t, "", "init", repo)
+	gittest.HardenRepo(t, repo)
 	nested := filepath.Join(repo, "agm", "cmd", "agm")
 	if err := os.MkdirAll(nested, 0o700); err != nil {
 		t.Fatal(err)
@@ -417,10 +423,11 @@ func TestIsInGitRepo(t *testing.T) {
 	}
 
 	// Test case 2: In git repo
-	gitInit := exec.Command("git", "init", tmpDir)
+	gitInit := gittest.Command(t, tmpDir, "init", tmpDir)
 	if err := gitInit.Run(); err != nil {
 		t.Fatalf("Failed to init git repo: %v", err)
 	}
+	gittest.HardenRepo(t, tmpDir)
 
 	if !IsInGitRepo(tmpDir) {
 		t.Error("Expected true for git directory")

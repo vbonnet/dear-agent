@@ -8,8 +8,9 @@
 computation, tmux abstraction (`TmuxInterface` + real/mock implementations),
 session state detection, and completion verification. It is the boundary
 through which the ops layer observes tmux without importing the tmux package
-directly, including the optional harness-process liveness capability
-(ce-axsr).
+directly. `RealTmux` is the one production local runtime adapter and exposes
+focused strict-existence, liveness, startup-readiness, atomic-input, and
+exact-pane capabilities.
 
 ## EARS Requirements
 
@@ -19,9 +20,9 @@ directly, including the optional harness-process liveness capability
 
 **SESS-03** When batch status is computed for lifecycle decisions, the system shall key results by session ID (not by Name) so shadow manifests sharing a Name cannot hide a live session.
 
-**SESS-04** When a tmux backend provides the `HarnessLivenessChecker` capability, the system shall expose the harness-process verdict (session existence, harness liveness, zombie-writer flag, and pane-tree evidence) from the full pane descendant-tree scan in `agm/internal/tmux`, so callers can distinguish a live session from a zombie pane whose harness has died (ce-axsr).
+**SESS-04** When a tmux runtime provides the `HarnessLivenessChecker` capability, the system shall expose the harness-process verdict (session existence, harness liveness, zombie-writer flag, and pane-tree evidence) from the full pane descendant-tree scan in `agm/internal/tmux`, so callers can distinguish a live session from a zombie pane whose harness has died (ce-axsr).
 
-**SESS-05** When a tmux backend does not implement `HarnessLivenessChecker`, the system shall let callers discover the capability by type assertion so existing `TmuxInterface` implementations keep compiling and fall back to session-existence semantics.
+**SESS-05** When a tmux runtime does not implement `HarnessLivenessChecker`, the system shall let callers discover the capability by type assertion so existing `TmuxInterface` implementations keep compiling and fall back to session-existence semantics.
 
 **SESS-06** When aggregate workspace status is encoded as JSON, the system shall expose stable lower-snake-case keys for the workspace, summary counts, and detailed session fields rather than Go field names.
 
@@ -35,11 +36,18 @@ directly, including the optional harness-process liveness capability
 
 **SESS-11** When legacy Claude resume must create a replacement tmux session, the system shall stage the private launch handoff before allocating tmux; if command delivery then fails, the system shall cancel the handoff, remove only the session created by that attempt, and report any cleanup failure with the primary delivery error.
 
+**SESS-12** When the AGM production composition root initializes local runtime behavior, the system shall construct one `RealTmux` and inject it directly through `TmuxInterface` without a backend adapter round trip.
+
+**SESS-13** When `RealTmux` compiles, the system shall directly satisfy checked kill, strict existence, harness liveness, batch liveness, harness readiness, input readiness, atomic input delivery, and verified exact-pane delivery capabilities.
+
+**SESS-14** When a future non-tmux runtime obtains a production caller, the system shall define the smallest capability seam required by that caller rather than restore a general lifecycle, messaging, and state facade.
+
 ## Key Invariants
 
-- **Capability, not contract widening.** `HarnessLivenessChecker` is a
-  separate optional interface; `TmuxInterface` itself is unchanged so mocks
-  and adapters outside this package are not broken by liveness support.
+- **Capability, not contract widening.** Focused capability interfaces keep
+  `TmuxInterface` testable without granting every caller every mechanism.
+- **One production adapter.** `RealTmux` adapts the tmux process exactly once;
+  forwarding wrappers and parallel runtime registries are not architecture.
 - **Fail-safe liveness.** A failed or unavailable liveness scan proves
   nothing: callers must fall back to tmux session existence, never treat an
   unverifiable session as dead.

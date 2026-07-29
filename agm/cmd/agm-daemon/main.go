@@ -102,17 +102,17 @@ func run() error {
 }
 
 // initDoltAdapter constructs the Dolt adapter and applies migrations. Returns
-// nil (with warnings logged) when Dolt is unavailable so the daemon can fall
-// back to YAML-only session resolution.
+// nil (with warnings logged) when Dolt is unavailable; queued delivery then
+// fails closed through the shared operation and follows daemon retry policy.
 func initDoltAdapter(daemonLogger *slog.Logger) *dolt.Adapter {
 	doltConfig, err := dolt.DefaultConfig()
 	if err != nil {
-		daemonLogger.Warn("Dolt config not available, session resolution will use YAML fallback", "error", err)
+		daemonLogger.Warn("Dolt config not available, queued delivery will retry", "error", err)
 		return nil
 	}
 	adapter, err := dolt.New(doltConfig)
 	if err != nil {
-		daemonLogger.Warn("Dolt connection failed, session resolution will use YAML fallback", "error", err)
+		daemonLogger.Warn("Dolt connection failed, queued delivery will retry", "error", err)
 		return nil
 	}
 	if err := adapter.ApplyMigrations(); err != nil {

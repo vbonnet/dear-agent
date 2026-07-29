@@ -73,8 +73,7 @@ func preserveAgyAdapterSeams(t *testing.T) {
 	})
 }
 
-// TestAgyAdapterImplementsAgentInterface verifies AgyAdapter implements Agent interface.
-func TestAgyAdapterImplementsAgentInterface(t *testing.T) {
+func TestAgyAdapterImplementsHarnessContract(t *testing.T) {
 	// Create adapter with mock store
 	mockStore := &MockSessionStore{
 		sessions: make(map[SessionID]*SessionMetadata),
@@ -85,8 +84,7 @@ func TestAgyAdapterImplementsAgentInterface(t *testing.T) {
 		t.Fatalf("NewAgyAdapter failed: %v", err)
 	}
 
-	// Verify adapter implements Agent interface (type already Agent from NewAgyAdapter)
-	_ = adapter
+	var _ Harness = adapter
 }
 
 // TestAgyAdapterName tests Name() method.
@@ -257,6 +255,62 @@ func TestAgyCreateSessionImportedConversationOmitsUnknownModel(t *testing.T) {
 	}
 	if metadata.Model != "" || metadata.UUID != "imported-native-id" {
 		t.Fatalf("stored model/native ID = %q/%q, want unknown model and imported ID", metadata.Model, metadata.UUID)
+	}
+}
+
+func TestAgyCreateRejectsTerminalControlsBeforeConfiguredTmuxSender(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	agyHasSession = func(string) (bool, error) { return false, nil }
+	agyNewSession = func(string, string) error { return nil }
+	sent := false
+	agySendCommand = func(string, string) error { sent = true; return nil }
+	rolledBack := false
+	agyKillSession = func(string) error { rolledBack = true; return nil }
+
+	_, err := (&AgyAdapter{sessionStore: &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}}).CreateSession(SessionContext{
+		Name:             "agy-terminal-control",
+		WorkingDirectory: t.TempDir(),
+		AuthorizedDirs:   []string{"safe\nunsafe"},
+		Environment:      map[string]string{"AGY_CONVERSATION_ID": "imported-native-id"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "pasted shell value") {
+		t.Fatalf("CreateSession() error = %v, want terminal-control rejection", err)
+	}
+	if sent {
+		t.Fatal("AGY create contacted its configured tmux sender before validation")
+	}
+	if !rolledBack {
+		t.Fatal("AGY create did not roll back the tmux session after validation failure")
+	}
+}
+
+func TestAgyColdResumeRejectsTerminalControlsBeforeConfiguredTmuxSender(t *testing.T) {
+	preserveAgyAdapterSeams(t)
+	t.Setenv("TMUX", "fixture")
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{
+		"agy-id": {
+			TmuxName:       "agy-resume",
+			WorkingDir:     t.TempDir(),
+			UUID:           "imported-native-id",
+			AuthorizedDirs: []string{"safe\nunsafe"},
+		},
+	}}
+	agyHasSession = func(string) (bool, error) { return false, nil }
+	agyNewSession = func(string, string) error { return nil }
+	sent := false
+	agySendCommand = func(string, string) error { sent = true; return nil }
+	rolledBack := false
+	agyKillSession = func(string) error { rolledBack = true; return nil }
+
+	err := (&AgyAdapter{sessionStore: store}).ResumeSession("agy-id")
+	if err == nil || !strings.Contains(err.Error(), "pasted shell value") {
+		t.Fatalf("ResumeSession() error = %v, want terminal-control rejection", err)
+	}
+	if sent {
+		t.Fatal("AGY resume contacted its configured tmux sender before validation")
+	}
+	if !rolledBack {
+		t.Fatal("AGY resume did not roll back the tmux session after validation failure")
 	}
 }
 

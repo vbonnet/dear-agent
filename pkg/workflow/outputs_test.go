@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 type fakeOutputRecorder struct {
@@ -191,12 +193,12 @@ func TestShellGitCommitterAgainstRealRepo(t *testing.T) {
 		{"config", "user.email", "test@example.com"},
 		{"config", "user.name", "test"},
 	} {
-		cmd := exec.Command("git", c...)
-		cmd.Dir = dir
+		cmd := gittest.Command(t, dir, c...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v %s", c, err, out)
 		}
 	}
+	gittest.HardenRepo(t, dir)
 	target := filepath.Join(dir, "x.md")
 	if err := os.WriteFile(target, []byte("hi"), 0o644); err != nil {
 		t.Fatal(err)

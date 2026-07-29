@@ -10,7 +10,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
-// OpenCodeAdapter implements Agent interface for OpenCode.
+// OpenCodeAdapter is the concrete harness adapter for OpenCode.
 //
 // OpenCode uses a client-server architecture where the server (opencode serve)
 // runs independently on localhost:4096, and clients attach via `opencode attach`.
@@ -48,7 +48,7 @@ type OpenCodeConfig struct {
 // If config.ServerURL is empty, uses default http://localhost:4096.
 //
 // Returns error if session store creation fails.
-func NewOpenCodeAdapter(config *OpenCodeConfig) (Agent, error) {
+func NewOpenCodeAdapter(config *OpenCodeConfig) (*OpenCodeAdapter, error) {
 	if config == nil {
 		config = &OpenCodeConfig{}
 	}
@@ -194,6 +194,9 @@ func (a *OpenCodeAdapter) ResumeSession(sessionID SessionID) error {
 	if err != nil {
 		return fmt.Errorf("failed to check tmux session: %w", err)
 	}
+	if err := validateOpenCodeResume(exists, metadata.WorkingDir); err != nil {
+		return err
+	}
 
 	// 3. If tmux session doesn't exist, recreate it
 	sendCommands := false
@@ -209,9 +212,9 @@ func (a *OpenCodeAdapter) ResumeSession(sessionID SessionID) error {
 	if sendCommands {
 		// OpenCode uses simple `opencode attach` (no session-specific resume)
 		// The OpenCode server maintains session state internally
-		fullCmd := fmt.Sprintf("cd '%s' && opencode attach && exit", metadata.WorkingDir)
+		fullCmd := buildOpenCodeResumeCommand(metadata.WorkingDir)
 
-		if err := tmux.SendCommand(metadata.TmuxName, fullCmd); err != nil {
+		if err := sendPastedShellCommand(metadata.TmuxName, fullCmd, metadata.WorkingDir); err != nil {
 			return fmt.Errorf("failed to send attach command: %w", err)
 		}
 	}
@@ -223,6 +226,16 @@ func (a *OpenCodeAdapter) ResumeSession(sessionID SessionID) error {
 		}
 	}
 
+	return nil
+}
+
+func validateOpenCodeResume(existingSession bool, workdir string) error {
+	if existingSession {
+		return nil
+	}
+	if err := validatePastedShellValues(workdir); err != nil {
+		return fmt.Errorf("invalid resume metadata: %w", err)
+	}
 	return nil
 }
 

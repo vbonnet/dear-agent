@@ -1,4 +1,4 @@
-<!-- Last audited at: 2026-07-22 -->
+<!-- Last audited at: 2026-07-28 -->
 
 # Skill Placement — which repo owns a skill, and how it reaches a session
 
@@ -78,16 +78,17 @@ skill actually discovers and triggers.
 
 | Surface | Reaches | Mechanism |
 |---|---|---|
-| `wayfinder/skills/`, `agm/agm-plugin/skills/` | Claude Code, machine-wide | `.claude-plugin/marketplace.json` → per-plugin `plugin.json` declaring `"skills": ["./skills/"]` |
+| `wayfinder/skills/`, `agm/agm-plugin/skills/` | Claude Code sessions with the plugins installed | `.claude-plugin/marketplace.json` → per-plugin `plugin.json` declaring its skills directory |
 | `agm/plugins/`, `wayfinder/skills/` | Pi | `.pi/settings.json` |
-| `.agents/skills/` | **AGY only** | `.agents/SPEC.md` AGENTS-DIR-04 — AGY fallback assets. Not in the Claude plugin manifests, not in `.pi/settings.json`. |
-| `.claude/skills/` | sessions cwd'd in this repo | holds a worked example today; no cross-repo reach |
+| `.agents/skills/` | Codex, AGY, and OpenCode fallback discovery | `.dear-agent/marketplace.json` declares `agents-md-skill-fallback` for those harnesses; `.agents/SPEC.md` owns the fallback assets |
+| `.claude/skills/` | Claude Code sessions cwd'd in this repo | holds a worked example today; no cross-repo reach |
 | `cmd/vroom-dispatch/skills/` | VROOM supervisors | shipped with the dispatcher |
 | Cowork / Desktop Dispatch | **undetermined** | no repository evidence establishes any of the above reaches Cowork. Verify with a live session before promising it. |
 
 `.dear-agent/marketplace.json` is the neutral catalog: it declares
 `native-claude-plugin-marketplace` for Claude Code and `agents-md-skill-fallback`
-for Codex, AGY, OpenCode, and Pi.
+for Codex, AGY, and OpenCode. Pi instead loads only the paths declared in
+`.pi/settings.json`.
 
 ### The canonical packaging pattern
 
@@ -100,10 +101,11 @@ two divergent copies of a skill.
 ### Version skew is real
 
 Source checkout, installed Go binaries, and the installed plugin snapshot are
-independent deployment states. `.claude-plugin/marketplace.json` currently
-declares wayfinder 0.3.0 while the installed plugin cache holds 0.2.0. Merging a
-skill to `main` does not put it in a session. The distribution step includes
-re-installing the plugin and restarting the harness.
+independent deployment states. The repository catalogs and plugin manifests
+agree on their declared versions, but that does not prove any local plugin
+cache is current. Merging a skill to `main` does not put it in a session. The
+distribution step includes reinstalling the plugin and restarting the harness,
+followed by a discovery smoke test in each claimed consumer.
 
 ---
 
@@ -115,6 +117,19 @@ re-installing the plugin and restarting the harness.
 | writing pipeline, `linkedin-cross-post` | Valentin's voice and cadence | dotfiles (+ a Cowork distribution gap to close) |
 | `github-thread-resolver` | verify the fix landed before resolving — generic PR hygiene | dotfiles |
 | a hypothetical `deploy-vbonnet-ai` | vbonnet.ai's release policy (even though it calls `safe-pr`) | vbonnet.ai |
+
+### Research-pipeline workflow boundary
+
+Placement in dear-agent does not make Wayfinder the skill's decomposition
+engine. The research pipeline owns its decomposition contract and creates every
+execution unit through the configured canonical Beads store. Wayfinder's PLAN
+phase records a project plan; its Beads adapter creates project tracking
+identity and does not turn that plan into sized, dependency-linked tasks.
+
+Wayfinder is an optional downstream workflow for an execution unit whose scope
+justifies the full SDLC. When used, its status and history artifacts follow the
+repository routing policy into the configured Engram research store; they do
+not make the temporal research or run record living dear-agent documentation.
 
 ---
 

@@ -47,6 +47,7 @@ var CodexPromptPatterns = []string{
 }
 
 var codexFooterPattern = regexp.MustCompile(`^gpt-\d[^\n]*\s·\s[^\n]+$`)
+var codexSelectorChoicePattern = regexp.MustCompile(`^[›>]\s+\d+\.`)
 
 // CodexTrustPromptPatterns are substrings that indicate Codex is showing a
 // first-run trust / onboarding consent prompt for the working directory,
@@ -76,6 +77,24 @@ var CodexModelUpgradePromptPatterns = []string{
 	"Choose how you'd like Codex to proceed",
 	"Try new model",
 	"Use existing model",
+}
+
+// CodexUpdatePromptPatterns match Codex's "Update available!" interstitial,
+// which owns input before the composer renders whenever a newer codex-cli has
+// shipped. Captured from a live pane on codex-cli 0.145.0 with 0.146.0 out:
+//
+//	✨ Update available! 0.145.0 -> 0.146.0
+//	› 1. Update now (runs `brew upgrade --cask codex`)
+//	  2. Skip
+//	  3. Skip until next version
+//
+// The highlighted default upgrades the CLI, which would mutate the operator's
+// toolchain mid-dispatch, so AGM selects "Skip" instead. Every phrase is
+// required so ordinary transcript text mentioning updates cannot match.
+var CodexUpdatePromptPatterns = []string{
+	"Update available!",
+	"Update now",
+	"Skip until next version",
 }
 
 // ErrCodexHookReviewRequired marks the security-sensitive Codex startup screen
@@ -321,27 +340,73 @@ func IsCodexIdle(sessionName string) (bool, error) {
 // containsCodexTrustPromptPattern reports whether content contains a Codex
 // first-run trust / onboarding consent prompt.
 func containsCodexTrustPromptPattern(content string) bool {
-	trimmed := strings.TrimSpace(content)
-	if trimmed == "" {
-		return false
-	}
-	for _, pattern := range CodexTrustPromptPatterns {
-		if strings.Contains(trimmed, pattern) {
-			return true
-		}
-	}
-	return false
+	return codexSelectorOwnsInput(content, CodexTrustPromptPatterns, false)
 }
 
-// containsCodexModelUpgradePromptPattern reports whether content contains the
-// Codex model-upgrade interstitial.
+// containsCodexModelUpgradePromptPattern reports whether the Codex
+// model-upgrade interstitial currently owns input. A composer or working
+// footer below a retained selector supersedes it.
 func containsCodexModelUpgradePromptPattern(content string) bool {
+	return codexSelectorOwnsInput(content, CodexModelUpgradePromptPatterns, false)
+}
+
+// containsCodexUpdatePromptPattern reports whether the Codex update-available
+// interstitial currently owns input. Every phrase must be present: a release
+// banner or transcript line mentioning an update must not be mistaken for the
+// selector, because answering it sends keystrokes into whatever owns the pane.
+func containsCodexUpdatePromptPattern(content string) bool {
+	return codexSelectorOwnsInput(content, CodexUpdatePromptPatterns, true)
+}
+
+// codexSelectorOwnsInput recognizes an actionable startup selector and rejects
+// retained selector text once newer Codex UI owns the pane. Some selectors
+// have multiple compatible phrasings and match any one; the update prompt
+// requires its complete control set to avoid treating release text as
+// interactive UI.
+func codexSelectorOwnsInput(content string, patterns []string, requireAll bool) bool {
 	trimmed := strings.TrimSpace(content)
 	if trimmed == "" {
 		return false
 	}
-	for _, pattern := range CodexModelUpgradePromptPatterns {
-		if strings.Contains(trimmed, pattern) {
+	latestPattern := ""
+	latestIndex := -1
+	matched := 0
+	for _, pattern := range patterns {
+		index := strings.LastIndex(trimmed, pattern)
+		if index < 0 {
+			if requireAll {
+				return false
+			}
+			continue
+		}
+		matched++
+		if index > latestIndex {
+			latestPattern = pattern
+			latestIndex = index
+		}
+	}
+	if matched == 0 {
+		return false
+	}
+	if requireAll && matched != len(patterns) {
+		return false
+	}
+	return !hasCodexPaneOwnershipAfterSelector(styledContentAfterLastLineContaining(
+		trimmed,
+		strings.ToLower(latestPattern),
+	))
+}
+
+// hasCodexPaneOwnershipAfterSelector distinguishes a selector's highlighted
+// numbered choice from a later Codex composer. Both use the same leading ›
+// glyph, but only the selector form is immediately followed by "N.".
+func hasCodexPaneOwnershipAfterSelector(content string) bool {
+	for line := range strings.SplitSeq(content, "\n") {
+		plain := strings.TrimSpace(stripANSI(line))
+		if codexSelectorChoicePattern.MatchString(plain) {
+			continue
+		}
+		if isCodexComposerAnchor(plain) || codexFooterPattern.MatchString(plain) {
 			return true
 		}
 	}
@@ -378,6 +443,7 @@ func WaitForCodexPromptContext(parent context.Context, sessionName string, timeo
 	checkCount := 0
 	trustAccepted := false
 	modelUpgradeAnswered := false
+	updateAnswered := false
 
 	for {
 		if err := ctx.Err(); err != nil {
@@ -441,6 +507,24 @@ func WaitForCodexPromptContext(parent context.Context, sessionName string, timeo
 				debug.Log("⚠️  Failed to confirm existing Codex model: %v", err)
 			} else {
 				modelUpgradeAnswered = true
+			}
+			if err := sleepWithContext(ctx, time.Second); err != nil {
+				continue
+			}
+			continue
+		}
+
+		// A newer codex-cli release blocks startup on an update selector whose
+		// highlighted default would run a package upgrade. Decline it and keep
+		// polling; the composer renders immediately afterwards.
+		if !updateAnswered && containsCodexUpdatePromptPattern(plainContent) {
+			debug.Log("⬇️  Codex update prompt detected (check #%d) — skipping update", checkCount)
+			if err := SendKeys(sessionName, "Down"); err != nil {
+				debug.Log("⚠️  Failed to move to Codex skip-update option: %v", err)
+			} else if err := SendKeys(sessionName, "Enter"); err != nil {
+				debug.Log("⚠️  Failed to confirm skipping Codex update: %v", err)
+			} else {
+				updateAnswered = true
 			}
 			if err := sleepWithContext(ctx, time.Second); err != nil {
 				continue

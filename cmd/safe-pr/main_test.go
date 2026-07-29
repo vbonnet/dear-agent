@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vbonnet/dear-agent/internal/gittest"
 	"github.com/vbonnet/dear-agent/internal/safepr"
 	"golang.org/x/sys/unix"
 )
@@ -136,9 +137,9 @@ func initGitRepo(t *testing.T, dir, remoteURL string) {
 	t.Helper()
 	for _, args := range [][]string{
 		{"init", "-q", dir},
-		{"-C", dir, "remote", "add", "origin", remoteURL},
+		{"remote", "add", "origin", remoteURL},
 	} {
-		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+		if out, err := gittest.Command(t, dir, args...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}

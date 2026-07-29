@@ -82,7 +82,7 @@ func validateMethodologyFreshness(projectDir, phaseName, hashMismatchReason stri
 		}
 
 		// Override reason provided - log warning but allow completion
-		// TODO: Log hash mismatch to WAYFINDER-HISTORY.md (deferred to future iteration)
+		// TODO: Log hash mismatch to WAYFINDER-HISTORY.jsonl (deferred to future iteration)
 		// For now, just allow completion
 		// In production, this would log: "Phase %s completed with hash mismatch override: %s", phaseName, hashMismatchReason
 	}

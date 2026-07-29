@@ -12,7 +12,6 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/config"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
-	"github.com/vbonnet/dear-agent/agm/internal/manager"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
@@ -24,7 +23,6 @@ type OpContext struct {
 	Context    context.Context
 	Storage    dolt.Storage
 	Tmux       session.TmuxInterface
-	Manager    manager.Backend // New abstraction layer (optional, nil = legacy path)
 	Config     *config.Config
 	DryRun     bool
 	Fields     []string // field mask: if non-empty, only include these fields in output
@@ -50,10 +48,10 @@ type OpContext struct {
 	// conversation while the shared workspace lock is held. Nil selects the
 	// production tracker.
 	AgyCreateIdentityTracker agysession.CreateIdentityTracker
-	// APIAgentFactory reconstructs a pure API adapter from the session's
+	// APIDeliveryFactory reconstructs a pure API adapter from the session's
 	// persisted non-secret runtime configuration. Nil selects the production
 	// factory. Tests and non-CLI surfaces may inject a deterministic adapter.
-	APIAgentFactory APISessionAgentFactory
+	APIDeliveryFactory APISessionDeliveryFactory
 	// archiveSandboxCleaner is an internal archive-boundary seam. Production
 	// uses the host sandbox safety checker; package tests inject the same
 	// allowlist behavior without consulting the real process or mount tables.

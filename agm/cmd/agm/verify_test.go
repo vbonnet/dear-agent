@@ -2,9 +2,10 @@ package main
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestResolveBranch(t *testing.T) {
@@ -153,8 +154,8 @@ func TestGetCommitsOnBranch_NoCommits(t *testing.T) {
 
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = append(os.Environ(),
+	cmd := gittest.Command(t, dir, args...)
+	cmd.Env = append(cmd.Env,
 		"GIT_AUTHOR_DATE=2024-01-01T00:00:00+00:00",
 		"GIT_COMMITTER_DATE=2024-01-01T00:00:00+00:00",
 	)

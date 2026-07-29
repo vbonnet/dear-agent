@@ -18,7 +18,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
-// PiAdapter implements Agent using Pi's interactive CLI and native JSONL.
+// PiAdapter is the concrete adapter for Pi's interactive CLI and native JSONL.
 type PiAdapter struct {
 	sessionStore SessionStore
 }
@@ -38,7 +38,7 @@ var (
 )
 
 // NewPiAdapter creates a Pi CLI adapter.
-func NewPiAdapter(sessionStore SessionStore) (Agent, error) {
+func NewPiAdapter(sessionStore SessionStore) (*PiAdapter, error) {
 	if sessionStore == nil {
 		store, err := NewJSONSessionStore("")
 		if err != nil {
@@ -121,7 +121,12 @@ func (a *PiAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	}
 	launchID := launchparity.NewPiLaunchID()
 	command := buildPiAdapterCommand(tmuxName, string(sessionID), launchID, sessionDir, codingAgentDir, workDir, model, permissionMode, extensionPath, policyFile)
-	if err := piSendShellCommand(tmuxName, command); err != nil {
+	if err := sendPastedShellCommandWith(
+		piSendShellCommand,
+		tmuxName,
+		command,
+		piPastedShellValues(tmuxName, string(sessionID), launchID, sessionDir, codingAgentDir, workDir, model, permissionMode, extensionPath, policyFile)...,
+	); err != nil {
 		return "", rollbackPiAdapterSession(tmuxName, fmt.Errorf("start Pi in tmux: %w", err))
 	}
 	if err := piWaitForPrompt(context.Background(), tmuxName, launchID, 30*time.Second); err != nil {
@@ -257,7 +262,12 @@ func (a *PiAdapter) ResumeSession(sessionID SessionID) error {
 	if launch {
 		launchID := launchparity.NewPiLaunchID()
 		command := buildPiAdapterCommand(metadata.TmuxName, metadata.UUID, launchID, metadata.NativeSessionDir, codingAgentDir, metadata.WorkingDir, metadata.Model, metadata.PermissionMode, extensionPath, policyFile)
-		if err := piSendShellCommand(metadata.TmuxName, command); err != nil {
+		if err := sendPastedShellCommandWith(
+			piSendShellCommand,
+			metadata.TmuxName,
+			command,
+			piPastedShellValues(metadata.TmuxName, metadata.UUID, launchID, metadata.NativeSessionDir, codingAgentDir, metadata.WorkingDir, metadata.Model, metadata.PermissionMode, extensionPath, policyFile)...,
+		); err != nil {
 			if created {
 				return rollbackPiAdapterSession(metadata.TmuxName, fmt.Errorf("send Pi resume command: %w", err))
 			}
@@ -276,6 +286,21 @@ func (a *PiAdapter) ResumeSession(sessionID SessionID) error {
 		}
 	}
 	return nil
+}
+
+func piPastedShellValues(tmuxName, nativeID, launchID, sessionDir, codingAgentDir, workDir, model, permissionMode, extensionPath, permissionPolicyFile string) []string {
+	return []string{
+		tmuxName,
+		nativeID,
+		launchID,
+		sessionDir,
+		codingAgentDir,
+		workDir,
+		ResolveModelFullName("pi-cli", model),
+		permissionMode,
+		extensionPath,
+		permissionPolicyFile,
+	}
 }
 
 func piResumeTargetState(sessionID SessionID, tmuxName string) (bool, bool, error) {
@@ -316,7 +341,7 @@ func (a *PiAdapter) TerminateSession(sessionID SessionID) error {
 	return a.sessionStore.Delete(sessionID)
 }
 
-// GetSessionStatus projects tmux and Pi managed-state signals into Agent status.
+// GetSessionStatus projects tmux and Pi managed-state signals into shared status.
 func (a *PiAdapter) GetSessionStatus(sessionID SessionID) (Status, error) {
 	metadata, err := a.sessionStore.Get(sessionID)
 	if err != nil {
@@ -363,7 +388,7 @@ func (a *PiAdapter) GetHistory(sessionID SessionID) ([]Message, error) {
 	}
 	messages := make([]Message, 0, len(native))
 	for _, item := range native {
-		// The shared Agent interface intentionally has no tool role. Preserve
+		// The shared message model intentionally has no tool role. Preserve
 		// tool results only in native export instead of mislabeling them as
 		// assistant speech in portable history formats.
 		if item.Role == "tool" {
@@ -488,7 +513,7 @@ func (a *PiAdapter) ImportConversation(data []byte, format ConversationFormat) (
 	return sessionID, nil
 }
 
-// Capabilities reports Pi features exposed through the shared Agent interface.
+// Capabilities reports Pi features exposed through harness discovery.
 func (a *PiAdapter) Capabilities() Capabilities {
 	model, _ := DefaultModelForHarness("pi-cli")
 	return Capabilities{
@@ -499,7 +524,7 @@ func (a *PiAdapter) Capabilities() Capabilities {
 	}
 }
 
-// ExecuteCommand dispatches Agent commands supported by Pi's interactive CLI.
+// ExecuteCommand dispatches generic commands supported by Pi's interactive CLI.
 func (a *PiAdapter) ExecuteCommand(cmd Command) error {
 	sessionID, err := getStringParam(cmd.Params, "session_id")
 	if err != nil {
@@ -515,8 +540,8 @@ func (a *PiAdapter) ExecuteCommand(cmd Command) error {
 		if paramErr != nil {
 			return paramErr
 		}
-		if strings.ContainsAny(name, "\r\n") {
-			return fmt.Errorf("invalid Pi session name")
+		if err := ValidateSendKeysText("session name", name); err != nil {
+			return fmt.Errorf("invalid Pi session name: %w", err)
 		}
 		if err := piSendCommandLiteral(metadata.TmuxName, "/name "+name); err != nil {
 			return err

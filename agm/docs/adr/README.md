@@ -27,6 +27,9 @@ identity is independent of zero padding, so records use the three-digit form.
 | [027](ADR-027-bdd-enforcement-policy.md) | Go-native BDD enforcement | Accepted |
 | [028](ADR-028-multi-bot-discord-portal.md) | Multi-bot Discord portal | Accepted |
 | [029](ADR-029-skill-allowed-tools-syntax.md) | Skill permission pattern syntax | Accepted |
+| [030](ADR-030-shared-resume-operation.md) | Shared resume operation | Accepted |
+| [031](ADR-031-consumer-owned-harness-capabilities.md) | Consumer-owned harness capabilities | Accepted |
+| [032](ADR-032-single-local-runtime-owner.md) | One earned local runtime owner | Accepted |
 
 VROOM decisions live in the root decision set; daemon and MCP decisions live
 with their command packages.

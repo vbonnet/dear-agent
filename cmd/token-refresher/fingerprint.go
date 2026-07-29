@@ -1,18 +1,12 @@
 package main
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
-)
 
-// fingerprintLen is how many hex characters of the SHA-256 digest we keep. The
-// fingerprint only ever needs to answer "is this the same token as last tick?",
-// so 12 chars is ample while keeping the audit log readable. A digest prefix is
-// not reversible to the token.
-const fingerprintLen = 12
+	"github.com/vbonnet/dear-agent/pkg/llm/auth"
+)
 
 // credentialsFingerprint returns a short, non-reversible fingerprint of the
 // refresh token currently on disk, plus the file's modification time.
@@ -66,10 +60,7 @@ func credentialsFingerprint(path string) (fp string, modTime string) {
 	if err := json.Unmarshal(data, &creds); err != nil {
 		return "", modTime
 	}
-	if creds.ClaudeAiOauth.RefreshToken == "" {
-		return "", modTime
-	}
-
-	sum := sha256.Sum256([]byte(creds.ClaudeAiOauth.RefreshToken))
-	return hex.EncodeToString(sum[:])[:fingerprintLen], modTime
+	// Shared with the quarantine record so audit lines and quarantine markers
+	// live in the same fingerprint space and a post-mortem can match them up.
+	return auth.RefreshTokenFingerprint(creds.ClaudeAiOauth.RefreshToken), modTime
 }

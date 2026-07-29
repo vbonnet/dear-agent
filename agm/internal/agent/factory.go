@@ -10,28 +10,33 @@ type HarnessInfo struct {
 	Capabilities Capabilities `json:"capabilities"`
 }
 
-// Harness registry maps harness names to constructor functions
-var agentRegistry = map[string]func() (Agent, error){
-	"claude-code": func() (Agent, error) { return NewClaudeAdapter(nil) },
-	"gemini-cli":  func() (Agent, error) { return NewGeminiCLIAdapter(nil) },
-	"codex-cli": func() (Agent, error) {
-		return NewCodexCLIAdapter(nil)
-	},
-	"opencode-cli": func() (Agent, error) {
-		return NewOpenCodeAdapter(nil)
-	},
-	"agy":    func() (Agent, error) { return NewAgyAdapter(nil) },
-	"pi-cli": func() (Agent, error) { return NewPiAdapter(nil) },
+// GetHarness returns a harness adapter instance by name
+func GetHarness(name string) (Harness, error) {
+	return newHarnessWithStore(name, nil)
 }
 
-// GetHarness returns a harness adapter instance by name
-func GetHarness(name string) (Agent, error) {
-	name = NormalizeHarnessName(name)
-	constructor, ok := agentRegistry[name]
-	if !ok {
+// newHarnessWithStore is the single finite constructor catalog used by
+// discovery and conformance. A switch keeps the catalog immutable at runtime.
+func newHarnessWithStore(name string, store SessionStore) (Harness, error) {
+	switch name = NormalizeHarnessName(name); name {
+	case "claude-code":
+		return NewClaudeAdapter(store)
+	case "gemini-cli":
+		return NewGeminiCLIAdapter(store)
+	case "codex-cli":
+		return NewCodexCLIAdapter(store)
+	case "opencode-cli":
+		if store == nil {
+			return NewOpenCodeAdapter(nil)
+		}
+		return NewOpenCodeAdapter(&OpenCodeConfig{SessionStore: store})
+	case "agy":
+		return NewAgyAdapter(store)
+	case "pi-cli":
+		return NewPiAdapter(store)
+	default:
 		return nil, fmt.Errorf("unknown harness: %s", name)
 	}
-	return constructor()
 }
 
 // GetAllHarnesses returns metadata for all known harnesses

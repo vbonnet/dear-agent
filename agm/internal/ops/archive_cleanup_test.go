@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestErrStr(t *testing.T) {
@@ -159,7 +161,7 @@ func TestForceDeleteBranch_UnmergedBranch(t *testing.T) {
 	}
 
 	// Verify branch is gone
-	cmd := exec.Command("git", "-C", repoDir, "branch", "--list", "unmerged-branch")
+	cmd := gittest.Command(t, repoDir, "branch", "--list", "unmerged-branch")
 	output, _ := cmd.Output()
 	if strings.TrimSpace(string(output)) != "" {
 		t.Error("Branch should be deleted after forceDeleteBranch")
@@ -212,13 +214,13 @@ func TestCleanupAfterArchive_SandboxBranchDeletedWithoutInferringSessionBranch(t
 
 	// The system-owned sandbox branch is positively attributed by session ID,
 	// while the merely name-matching session branch must be preserved.
-	cmd := exec.Command("git", "-C", repoDir, "branch", "--list", "my-session")
+	cmd := gittest.Command(t, repoDir, "branch", "--list", "my-session")
 	output, _ := cmd.Output()
 	if strings.TrimSpace(string(output)) == "" {
 		t.Error("Session branch should be preserved without worktree ownership")
 	}
 
-	cmd = exec.Command("git", "-C", repoDir, "branch", "--list", sandboxBranch)
+	cmd = gittest.Command(t, repoDir, "branch", "--list", sandboxBranch)
 	output, _ = cmd.Output()
 	if strings.TrimSpace(string(output)) != "" {
 		t.Error("Sandbox branch should be deleted")
@@ -411,7 +413,7 @@ func TestCleanupAfterArchive_PreservesPrimaryCheckout(t *testing.T) {
 	if _, err := os.Stat(repoDir); err != nil {
 		t.Fatalf("primary checkout was not preserved: %v", err)
 	}
-	cmd := exec.Command("git", "-C", repoDir, "branch", "--list", "primary-session")
+	cmd := gittest.Command(t, repoDir, "branch", "--list", "primary-session")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("list preserved session-named branch: %v\n%s", err, output)
@@ -439,7 +441,7 @@ func TestCleanupAfterArchive_UsesContextProjectWhenWorkingDirectoryMissing(t *te
 	if !result.PrimaryWorktreeKept || result.WorktreesRemoved != 0 || result.BranchDeleted {
 		t.Fatalf("unsafe context-project cleanup result = %+v", result)
 	}
-	cmd := exec.Command("git", "-C", repoDir, "branch", "--list", "context-session")
+	cmd := gittest.Command(t, repoDir, "branch", "--list", "context-session")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatal(err)
@@ -469,7 +471,7 @@ func TestCleanupAfterArchive_PreservesBranchNotOwnedByRemovedWorktree(t *testing
 	if result.WorktreesRemoved != 1 || result.BranchDeleted {
 		t.Fatalf("mismatched ownership cleanup result = %+v", result)
 	}
-	cmd := exec.Command("git", "-C", repoDir, "branch", "--list", "session-name")
+	cmd := gittest.Command(t, repoDir, "branch", "--list", "session-name")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatal(err)
@@ -497,7 +499,7 @@ func TestCleanupAfterArchive_PreservesBranchWhenWorktreeCannotBeClassified(t *te
 	if result.WorktreesRemoved != 0 || result.BranchDeleted {
 		t.Fatalf("unsafe cleanup result = %+v, want worktree and branch preserved", result)
 	}
-	cmd := exec.Command("git", "-C", repoDir, "branch", "--list", "unclassified-session")
+	cmd := gittest.Command(t, repoDir, "branch", "--list", "unclassified-session")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatal(err)
@@ -510,14 +512,7 @@ func TestCleanupAfterArchive_PreservesBranchWhenWorktreeCannotBeClassified(t *te
 // runGit is a test helper that runs a git command in the given directory.
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	allArgs := append([]string{"-C", dir}, args...)
-	cmd := exec.Command("git", allArgs...)
-	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=Test",
-		"GIT_AUTHOR_EMAIL=test@test.com",
-		"GIT_COMMITTER_NAME=Test",
-		"GIT_COMMITTER_EMAIL=test@test.com",
-	)
+	cmd := gittest.Command(t, dir, args...)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v failed: %v\n%s", args, err, string(output))
 	}

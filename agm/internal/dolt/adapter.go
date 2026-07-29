@@ -3,6 +3,7 @@ package dolt
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -196,7 +197,10 @@ var agmConfigPath = "~/.agm/config.yaml"
 // readDefaultWorkspaceFromConfig reads default_workspace from the AGM config file.
 // Returns empty string on any error (file missing, malformed YAML, etc.).
 func readDefaultWorkspaceFromConfig() string {
-	path := agmConfigPath
+	return readDefaultWorkspaceFromConfigAt(agmConfigPath)
+}
+
+func readDefaultWorkspaceFromConfigAt(path string) string {
 	if strings.HasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -219,6 +223,19 @@ func readDefaultWorkspaceFromConfig() string {
 
 // DefaultConfig returns default configuration from environment
 func DefaultConfig() (*Config, error) {
+	return defaultConfigAt(agmConfigPath)
+}
+
+func defaultConfigAt(workspaceConfigPath string) (*Config, error) {
+	workspace := selectedWorkspaceAt(workspaceConfigPath)
+	if workspace == "" {
+		return nil, fmt.Errorf("WORKSPACE environment variable not set (workspace protocol not activated)\n" +
+			"Hint: Set WORKSPACE=<name> or configure default_workspace in ~/.agm/config.yaml")
+	}
+	return configForWorkspace(workspace)
+}
+
+func selectedWorkspaceAt(workspaceConfigPath string) string {
 	workspace := getEnv("WORKSPACE", "")
 	if testModeEnabled(getEnv("ENGRAM_TEST_MODE", "")) {
 		if testWorkspace := getEnv("ENGRAM_TEST_WORKSPACE", ""); testWorkspace != "" {
@@ -229,8 +246,12 @@ func DefaultConfig() (*Config, error) {
 		// Fall back to default_workspace from ~/.agm/config.yaml so the MCP
 		// server works when invoked outside a workspace context (e.g. Dispatch
 		// or Cowork where WORKSPACE is not set in the environment).
-		workspace = readDefaultWorkspaceFromConfig()
+		workspace = readDefaultWorkspaceFromConfigAt(workspaceConfigPath)
 	}
+	return workspace
+}
+
+func configForWorkspace(workspace string) (*Config, error) {
 	database := getEnv("DOLT_DATABASE", workspace)
 	if workspace == "" {
 		return nil, fmt.Errorf("WORKSPACE environment variable not set (workspace protocol not activated)\n" +
@@ -273,6 +294,178 @@ func DefaultConfig() (*Config, error) {
 		Password:    password,
 		StartScript: startScript,
 	}, nil
+}
+
+// ConfiguredWorkspaceConfigs returns every enabled workspace store that
+// destructive cross-repository maintenance must query before it can treat its
+// active-session set as complete. An explicit DOLT_DATABASE is accepted only
+// when it describes a single workspace; applying one database name to multiple
+// workspace configs would silently invent a cross-workspace mapping. Without
+// that override, each workspace uses its conventional same-name database.
+func ConfiguredWorkspaceConfigs() ([]*Config, error) {
+	return ConfiguredWorkspaceConfigsAt(agmConfigPath)
+}
+
+// ConfiguredWorkspaceConfigsAt is the explicit-path variant used by AGM
+// commands after loading their configured workspace registry. Destructive
+// inventory must query the same registry that session creation uses.
+func ConfiguredWorkspaceConfigsAt(workspaceConfigPath string) ([]*Config, error) {
+	path := expandTilde(workspaceConfigPath)
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		base, baseErr := defaultConfigAt(workspaceConfigPath)
+		if baseErr != nil {
+			return nil, baseErr
+		}
+		return []*Config{base}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read AGM workspace config: %w", err)
+	}
+	enabled, hasRegistryEntries, err := parseEnabledWorkspaceNames(data)
+	if err != nil {
+		return nil, err
+	}
+	if len(enabled) == 0 {
+		if hasRegistryEntries {
+			return nil, fmt.Errorf("AGM workspace config has no enabled workspaces")
+		}
+		base, baseErr := defaultConfigAt(workspaceConfigPath)
+		if baseErr != nil {
+			return nil, baseErr
+		}
+		return []*Config{base}, nil
+	}
+	return configuredWorkspaceConfigsFromRegistry(enabled, data)
+}
+
+func configuredWorkspaceConfigsFromRegistry(enabled []string, data []byte) ([]*Config, error) {
+	base, err := configForWorkspace(enabled[0])
+	if err != nil {
+		return nil, err
+	}
+	endpoints, err := parseWorkspaceDoltEndpoints(data)
+	if err != nil {
+		return nil, err
+	}
+	_, sharedPortExplicit := lookupEnv("DOLT_PORT")
+	explicitDatabase, databaseIsExplicit := lookupEnv("DOLT_DATABASE")
+	databaseIsExplicit = databaseIsExplicit && explicitDatabase != ""
+	seen := make(map[string]bool, len(enabled))
+	configs := make([]*Config, 0, len(enabled))
+	add := func(workspace string) {
+		if workspace == "" || seen[workspace] {
+			return
+		}
+		seen[workspace] = true
+		workspaceConfig := *base
+		workspaceConfig.Workspace = workspace
+		endpoint := endpoints[workspace]
+		applyWorkspaceDoltEndpoint(&workspaceConfig, endpoint)
+		if endpoint.Port == "" && len(enabled) > 1 && !sharedPortExplicit {
+			return
+		}
+		if databaseIsExplicit {
+			workspaceConfig.Database = explicitDatabase
+		} else if endpoints[workspace].Database == "" {
+			workspaceConfig.Database = workspace
+		}
+		configs = append(configs, &workspaceConfig)
+	}
+	for _, workspace := range enabled {
+		add(workspace)
+	}
+	if len(configs) != len(enabled) {
+		return nil, fmt.Errorf("multiple enabled workspaces require either an explicit shared DOLT_PORT or a per-workspace dolt.port in the AGM registry")
+	}
+	return validateConfiguredWorkspaceConfigs(configs, base, explicitDatabase, databaseIsExplicit)
+}
+
+func applyWorkspaceDoltEndpoint(config *Config, endpoint workspaceDoltEndpoint) {
+	if endpoint.Port != "" {
+		config.Port = endpoint.Port
+	}
+	if endpoint.Host != "" {
+		config.Host = endpoint.Host
+	}
+	if endpoint.User != "" {
+		config.User = endpoint.User
+	}
+	if endpoint.Password != "" {
+		config.Password = endpoint.Password
+	}
+	if endpoint.StartScript != "" {
+		config.StartScript = expandTilde(endpoint.StartScript)
+	}
+	if endpoint.Database != "" {
+		config.Database = endpoint.Database
+	}
+}
+
+type workspaceDoltEndpoint struct {
+	Host        string `yaml:"host"`
+	Port        string `yaml:"port"`
+	User        string `yaml:"user"`
+	Password    string `yaml:"password"`
+	StartScript string `yaml:"start_script"`
+	Database    string `yaml:"database"`
+}
+
+func parseWorkspaceDoltEndpoints(data []byte) (map[string]workspaceDoltEndpoint, error) {
+	var cfg struct {
+		Workspaces []struct {
+			Name string                `yaml:"name"`
+			Dolt workspaceDoltEndpoint `yaml:"dolt"`
+		} `yaml:"workspaces"`
+	}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse AGM workspace Dolt endpoints: %w", err)
+	}
+	endpoints := make(map[string]workspaceDoltEndpoint, len(cfg.Workspaces))
+	for _, workspace := range cfg.Workspaces {
+		if name := strings.TrimSpace(workspace.Name); name != "" {
+			endpoints[name] = workspace.Dolt
+		}
+	}
+	return endpoints, nil
+}
+
+func parseEnabledWorkspaceNames(data []byte) ([]string, bool, error) {
+	var cfg struct {
+		Workspaces []struct {
+			Name    string `yaml:"name"`
+			Enabled *bool  `yaml:"enabled"`
+		} `yaml:"workspaces"`
+	}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, false, fmt.Errorf("parse AGM workspace config: %w", err)
+	}
+	enabled := make([]string, 0, len(cfg.Workspaces))
+	for index, workspace := range cfg.Workspaces {
+		if workspace.Enabled == nil || !*workspace.Enabled {
+			continue
+		}
+		name := strings.TrimSpace(workspace.Name)
+		if name == "" {
+			return nil, true, fmt.Errorf("AGM workspace config entry %d has no name", index+1)
+		}
+		enabled = append(enabled, name)
+	}
+	return enabled, len(cfg.Workspaces) > 0, nil
+}
+
+func validateConfiguredWorkspaceConfigs(configs []*Config, base *Config, explicitDatabase string, databaseIsExplicit bool) ([]*Config, error) {
+	if len(configs) == 0 {
+		return []*Config{base}, nil
+	}
+	if databaseIsExplicit && len(configs) > 1 {
+		return nil, fmt.Errorf(
+			"DOLT_DATABASE=%q scopes one store but %d enabled workspaces are configured; cannot prove a complete cross-workspace active-session inventory",
+			explicitDatabase,
+			len(configs),
+		)
+	}
+	return configs, nil
 }
 
 func validateTestExecutionTarget(workspace, database string) error {

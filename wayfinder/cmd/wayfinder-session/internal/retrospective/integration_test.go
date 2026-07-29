@@ -2,12 +2,12 @@ package retrospective
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/vbonnet/dear-agent/internal/gittest"
 	wayfinderstatus "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
 
@@ -35,7 +35,7 @@ func TestIntegration_Magnitude0_NoLogging(t *testing.T) {
 	}
 
 	// Verify HISTORY was NOT created
-	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.md")
+	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.jsonl")
 	if _, err := os.Stat(historyPath); !os.IsNotExist(err) {
 		t.Errorf("HISTORY file should not exist for magnitude 0 rewind")
 	}
@@ -83,7 +83,7 @@ func TestIntegration_Magnitude1_WithFlags(t *testing.T) {
 	}
 
 	// Verify HISTORY exists
-	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.md")
+	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.jsonl")
 	historyContent, err := os.ReadFile(historyPath)
 	if err != nil {
 		t.Fatalf("Failed to read HISTORY file: %v", err)
@@ -149,7 +149,7 @@ func TestIntegration_ParallelDualLogging(t *testing.T) {
 
 	// Verify BOTH files exist
 	s11Path := filepath.Join(tmpDir, RetroFilename)
-	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.md")
+	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.jsonl")
 
 	if _, err := os.Stat(s11Path); os.IsNotExist(err) {
 		t.Errorf("RETRO file was not created")
@@ -241,14 +241,10 @@ func TestIntegration_NonInteractiveEnvironment(t *testing.T) {
 func TestIntegration_ContextCaptureCompleteness(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create git repository
-	if err := exec.Command("git", "init", tmpDir).Run(); err != nil {
+	// Create git repository (the sandbox also supplies the commit identity)
+	if err := gittest.Command(t, tmpDir, "init", tmpDir).Run(); err != nil {
 		t.Skipf("Skipping test: git not available")
 	}
-
-	// Configure git
-	exec.Command("git", "-C", tmpDir, "config", "user.email", "test@example.com").Run()
-	exec.Command("git", "-C", tmpDir, "config", "user.name", "Test User").Run()
 
 	// Create deliverable files
 	deliverables := []string{
@@ -262,8 +258,8 @@ func TestIntegration_ContextCaptureCompleteness(t *testing.T) {
 	}
 
 	// Commit files
-	exec.Command("git", "-C", tmpDir, "add", ".").Run()
-	exec.Command("git", "-C", tmpDir, "commit", "-m", "Initial commit").Run()
+	gittest.Command(t, tmpDir, "add", ".").Run()
+	gittest.Command(t, tmpDir, "commit", "-m", "Initial commit").Run()
 
 	// Create STATUS file
 	createStatusFile(t, tmpDir, "RETRO")

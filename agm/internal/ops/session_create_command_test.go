@@ -2,6 +2,7 @@ package ops
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
@@ -46,5 +47,67 @@ func TestResolveHarnessLaunchSubmissionPreservesUncertainAndCancelsConfirmedFail
 				t.Fatalf("cancelled = %v, want %v", cancelled, tc.wantCancel)
 			}
 		})
+	}
+}
+
+func TestPrepareHarnessLaunchCommandRejectsControlsForSharedHarnesses(t *testing.T) {
+	for _, value := range []struct {
+		name    string
+		workDir string
+	}{
+		{name: "escape and newline", workDir: "/safe\x1b[201~\nunsafe"},
+		{name: "NUL", workDir: "/safe\x00unsafe"},
+	} {
+		for _, harness := range []string{"agy", "pi-cli", "opencode-cli"} {
+			t.Run(harness+"/"+value.name, func(t *testing.T) {
+				_, err := PrepareHarnessLaunchCommand(HarnessLaunchSpec{
+					Harness: harness,
+					WorkDir: value.workDir,
+				})
+				if err == nil || !strings.Contains(err.Error(), "control characters") {
+					t.Fatalf("PrepareHarnessLaunchCommand() error = %v, want terminal-control rejection", err)
+				}
+			})
+		}
+	}
+}
+
+func TestPrepareGeminiLaunchCommandValidatesOnlyPastedModel(t *testing.T) {
+	command, err := PrepareHarnessLaunchCommand(HarnessLaunchSpec{
+		Harness: "gemini-cli",
+		Model:   "gemini-2.5-pro",
+		WorkDir: "/unused\x1b[201~\nworkdir",
+	})
+	if err != nil {
+		t.Fatalf("unused Gemini workdir rejected: %v", err)
+	}
+	if strings.Contains(command.Command, "unused") {
+		t.Fatalf("Gemini command unexpectedly contains workdir: %q", command.Command)
+	}
+
+	_, err = PrepareHarnessLaunchCommand(HarnessLaunchSpec{
+		Harness: "gemini-cli",
+		Model:   "gemini-2.5-pro\x1b[201~\nunsafe",
+		WorkDir: "/safe",
+	})
+	if err == nil || !strings.Contains(err.Error(), "control characters") {
+		t.Fatalf("PrepareHarnessLaunchCommand() error = %v, want model control rejection", err)
+	}
+}
+
+func TestPrepareAgyResumeCommandRejectsConversationControls(t *testing.T) {
+	_, err := PrepareAgyResumeCommand(HarnessLaunchSpec{
+		Harness: "agy",
+		WorkDir: "/safe",
+	}, "conversation\x1b[201~\nunsafe")
+	if err == nil || !strings.Contains(err.Error(), "control characters") {
+		t.Fatalf("PrepareAgyResumeCommand() error = %v, want terminal-control rejection", err)
+	}
+}
+
+func TestPrepareFallbackResumeCommandRejectsWorkdirControls(t *testing.T) {
+	_, err := PrepareFallbackResumeCommand("/safe\x1b[201~\nunsafe")
+	if err == nil || !strings.Contains(err.Error(), "control characters") {
+		t.Fatalf("PrepareFallbackResumeCommand() error = %v, want terminal-control rejection", err)
 	}
 }

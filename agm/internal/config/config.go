@@ -134,6 +134,13 @@ type SandboxConfig struct {
 	Repos      []string          `yaml:"repos"`                // Repositories to include as lower dirs
 	Secrets    map[string]string `yaml:"secrets,omitempty"`    // Secrets to inject into sandbox
 	Onboarding OnboardingConfig  `yaml:"onboarding,omitempty"` // Onboarding CLAUDE.md injection
+
+	// WritableDirs are host paths a sandboxed session may write in addition to
+	// its workspace, surfaced to the harness as --add-dir entries. Unlike Repos
+	// these are NOT reflinked into the sandbox as lower dirs: they stay the real
+	// host paths, which is what lets a worker commit to a real worktree or close
+	// a bead in the real Beads DB. Empty by default.
+	WritableDirs []string `yaml:"writable_dirs,omitempty"`
 }
 
 // OnboardingConfig controls CLAUDE.md injection into sandboxed sessions
@@ -309,6 +316,9 @@ func Load(cfgFile string) (*Config, error) {
 	}
 	if cfg.Lock.Path != "" {
 		cfg.Lock.Path = expandHome(cfg.Lock.Path)
+	}
+	for i, dir := range cfg.Sandbox.WritableDirs {
+		cfg.Sandbox.WritableDirs[i] = expandHome(dir)
 	}
 
 	// Validate configuration

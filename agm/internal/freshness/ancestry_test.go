@@ -1,20 +1,20 @@
 package freshness
 
 import (
-	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // gitT runs git in dir and fails the test on error.
 func gitT(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	full := append([]string{"-C", dir}, args...)
-	out, err := exec.Command("git", full...).CombinedOutput()
+	out, err := gittest.Output(t, dir, args...)
 	if err != nil {
 		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, out)
 	}
-	return strings.TrimSpace(string(out))
+	return strings.TrimSpace(out)
 }
 
 // newTrunkRepo builds a repo with a local "origin/main" tracking ref and returns
@@ -28,8 +28,6 @@ func newTrunkRepo(t *testing.T) (repo, onTrunk, offTrunk string) {
 	t.Helper()
 	repo = t.TempDir()
 	gitT(t, repo, "init", "-q", "-b", "main")
-	gitT(t, repo, "config", "user.email", "t@t")
-	gitT(t, repo, "config", "user.name", "t")
 	gitT(t, repo, "commit", "-q", "--allow-empty", "-m", "c1")
 	gitT(t, repo, "commit", "-q", "--allow-empty", "-m", "c2")
 	onTrunk = gitT(t, repo, "rev-parse", "HEAD")
@@ -109,8 +107,6 @@ func TestVerifyAncestry_NoTrunkRef_FailsOpen(t *testing.T) {
 	// Repo with commits but no origin/main tracking ref at all.
 	repo := t.TempDir()
 	gitT(t, repo, "init", "-q", "-b", "main")
-	gitT(t, repo, "config", "user.email", "t@t")
-	gitT(t, repo, "config", "user.name", "t")
 	gitT(t, repo, "commit", "-q", "--allow-empty", "-m", "c1")
 	head := gitT(t, repo, "rev-parse", "HEAD")
 

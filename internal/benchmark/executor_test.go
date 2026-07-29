@@ -1,9 +1,10 @@
 package benchmark
 
 import (
-	"os/exec"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // Helper to set up git repo for testing (same as common package)
@@ -13,13 +14,9 @@ func setupGitRepo(t *testing.T) (string, func()) {
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
 
-	cmd := exec.Command("git", "init")
-	if err := cmd.Run(); err != nil {
+	if err := gittest.Command(t, tmpDir, "init").Run(); err != nil {
 		t.Fatalf("failed to init git repo: %v", err)
 	}
-
-	exec.Command("git", "config", "user.name", "Test User").Run()
-	exec.Command("git", "config", "user.email", "test@example.com").Run()
 
 	cleanup := func() {}
 

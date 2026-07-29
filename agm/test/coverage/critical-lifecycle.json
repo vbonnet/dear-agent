@@ -2,9 +2,9 @@
   "version": 1,
   "packages": [
     {
-      "name": "backend capability forwarding",
-      "package": "./agm/internal/backend",
-      "minimum_statements": 70.0
+      "name": "session tmux runtime",
+      "package": "./agm/internal/session",
+      "minimum_statements": 69.0
     },
     {
       "name": "shared lifecycle operations",

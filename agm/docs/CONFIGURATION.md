@@ -9,7 +9,7 @@ Complete reference for configuring AGM (AI Agent Session Manager).
 - [Environment Variables](#environment-variables)
 - [Config File](#config-file)
 - [Per-Session Configuration](#per-session-configuration)
-- [Backend Configuration](#backend-configuration)
+- [Local Runtime Configuration](#local-runtime-configuration)
 - [Database Configuration](#database-configuration)
 - [Event Bus Configuration](#event-bus-configuration)
 - [Engram Integration](#engram-integration)
@@ -24,7 +24,7 @@ AGM can be configured through multiple mechanisms with clear precedence rules. C
 
 - **Session behavior**: Defaults, thresholds, auto-detection
 - **UI preferences**: Themes, colors, accessibility
-- **Backend selection**: tmux (default) or Temporal workflows
+- **Local runtime**: tmux socket and session behavior
 - **Database**: SQLite storage, FTS5 search indexing
 - **Event bus**: WebSocket server for real-time updates
 - **Integrations**: Engram semantic memory, MCP servers
@@ -96,12 +96,6 @@ export CLOUD_ML_REGION=us-central1
 # For GPT sessions
 export OPENAI_API_KEY=sk-...
 ```
-
-### Backend Selection
-
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `AGM_SESSION_BACKEND` | string | `tmux` | Session backend: `tmux` or `temporal` |
 
 ### Tmux Configuration
 
@@ -334,43 +328,14 @@ agm new my-session \
   --tags feature,security
 ```
 
-## Backend Configuration
+## Local Runtime Configuration
 
-AGM supports multiple session backends via the `AGM_SESSION_BACKEND` environment variable.
+AGM uses tmux as its local interactive runtime. No runtime-selection setting is
+exposed. Tests may isolate the tmux server with:
 
-### Tmux Backend (Default)
-
-```bash
-# Use tmux backend (default)
-export AGM_SESSION_BACKEND=tmux
-agm new my-session
-```
-
-Configuration:
-- No additional config needed
-- Automatically manages tmux sessions
-- Works locally and via SSH
-
-Custom tmux socket (for testing):
 ```bash
 export AGM_TMUX_SOCKET=/tmp/test-tmux.sock
 ```
-
-### Temporal Backend (Experimental)
-
-```bash
-# Use Temporal workflow backend
-export AGM_SESSION_BACKEND=temporal
-agm new my-session
-```
-
-**Note:** Temporal backend is a stub implementation. Full Temporal integration is planned for future releases.
-
-When implemented, it will support:
-- Distributed session management
-- Workflow-based session lifecycle
-- Cloud-native deployments
-- Multi-node coordination
 
 ## Database Configuration
 
@@ -765,20 +730,6 @@ log_level: "debug"                 # Verbose logging
    # Reduce result limit
    export AGM_ENGRAM_LIMIT=5
    ```
-
-### High Availability
-
-For multi-node deployments (future):
-
-```yaml
-# Temporal backend configuration (planned)
-backend:
-  type: temporal
-  temporal:
-    host: "temporal.example.com:7233"
-    namespace: "agm-production"
-    task_queue: "agm-sessions"
-```
 
 ## Troubleshooting
 

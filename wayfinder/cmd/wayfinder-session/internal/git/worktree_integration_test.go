@@ -2,10 +2,11 @@ package git
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // TestIntegration_WorktreeLifecycle tests the complete worktree workflow:
@@ -321,21 +322,14 @@ func TestIntegration_WorktreeConflictPrevention(t *testing.T) {
 
 func initGitRepo(t *testing.T, dir string) {
 	t.Helper()
-	runGit(t, dir, "init", "-b", "main")
-	runGit(t, dir, "config", "user.name", "Test User")
-	runGit(t, dir, "config", "user.email", "test@example.com")
-
-	// Create initial commit (git requires at least one commit)
-	readmeFile := filepath.Join(dir, "README.md")
-	os.WriteFile(readmeFile, []byte("# Test Repo\n"), 0644)
-	runGit(t, dir, "add", "README.md")
-	runGit(t, dir, "commit", "-m", "initial commit")
+	// The sandbox supplies the identity, the default branch and an empty hooks
+	// path, and seeds the repository with one commit.
+	gittest.InitRepo(t, dir)
 }
 
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
+	cmd := gittest.Command(t, dir, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v failed: %v\nOutput: %s", args, err, output)
@@ -344,8 +338,7 @@ func runGit(t *testing.T, dir string, args ...string) {
 
 func runGitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
+	cmd := gittest.Command(t, dir, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v failed: %v\nOutput: %s", args, err, output)

@@ -213,6 +213,11 @@ generated surface metadata, workflow-bus signaling, and accessible operator UIs.
 creation, and terminal state detection.
 
 **Key scenarios:**
+- Harness discovery exposes only name, version, and descriptive capabilities;
+  required behavior is expressed through consumer-owned capability interfaces.
+- Pure API delivery requires context-aware readiness and message delivery at
+  compile time, while adapter constructors return concrete types and the finite
+  discovery catalog has no duplicate mutable runtime registry.
 - A Codex CLI composer pane is detected as `ready` only with an explicit empty
   cursor on both the initial and post-turn forms.
 - An idle Codex composer allows direct delivery.
@@ -302,8 +307,9 @@ creation, and terminal state detection.
 - Active harness adapters satisfy the shared non-I/O conformance suite.
 - The Codex factory uses `CodexCLIAdapter`, while the OpenAI API adapter
   remains independent of Codex tmux state.
-- CLI and MCP create, kill, archive, and message-delivery surfaces delegate to
-  shared operations, while CLI resume retains its focused transaction owner.
+- CLI and MCP lifecycle surfaces delegate to shared operations. Resume uses one
+  stable-ID `internal/ops.ResumeSession` transaction; the CLI retains only
+  identifier and prompt-file input, presentation, and post-operation attach.
 - Harness parity requirement identifiers are unique.
 - Active harness launch commands preserve native startup mode and persistence.
 - Imported AGY conversations preserve unknown native-model provenance through
@@ -399,7 +405,9 @@ creation, and terminal state detection.
   sessions created by a failed operation, and use exact AGY process and native
   transcript truth for status and history.
 - AGM runtime helper commands keep co-located SPEC coverage.
-- AGM backend implementations keep co-located SPEC coverage.
+- AGM production Go sources use the single `session.RealTmux` local-runtime
+  type, expose no parallel manager runtime, and retain its compile-time safety
+  capability proofs.
 - AGM cleanup and process support packages keep co-located SPEC coverage.
 - Supported model families include Anthropic, OpenAI, Gemini, GLM, DeepSeek,
   Nemotron, and Qwen.

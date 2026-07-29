@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -251,6 +252,10 @@ func TestLoad_ExpandHomePaths(t *testing.T) {
 log_file: ~/agm.log
 lock:
   path: ~/agm.lock
+sandbox:
+  writable_dirs:
+    - ~/worktrees
+    - /var/tmp/beads
 `
 	if err := os.WriteFile(configFile, []byte(configContent), 0644); err != nil {
 		t.Fatalf("Failed to write config file: %v", err)
@@ -273,6 +278,10 @@ lock:
 	}
 	if cfg.Lock.Path != filepath.Join(homeDir, "agm.lock") {
 		t.Errorf("Lock.Path not expanded: %s", cfg.Lock.Path)
+	}
+	wantWritableDirs := []string{filepath.Join(homeDir, "worktrees"), "/var/tmp/beads"}
+	if !slices.Equal(cfg.Sandbox.WritableDirs, wantWritableDirs) {
+		t.Errorf("Sandbox.WritableDirs = %v, want %v", cfg.Sandbox.WritableDirs, wantWritableDirs)
 	}
 }
 

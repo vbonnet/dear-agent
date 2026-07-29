@@ -40,7 +40,7 @@ func ValidateActiveHarnessConformance() []HarnessConformanceFinding {
 // ValidateHarnessConformance validates one adapter against the shared
 // harness-neutral contract. It intentionally avoids lifecycle methods that
 // create tmux sessions or call external harness binaries.
-func ValidateHarnessConformance(harness string, adapter Agent) []HarnessConformanceFinding {
+func ValidateHarnessConformance(harness string, adapter Harness) []HarnessConformanceFinding {
 	harness = NormalizeHarnessName(harness)
 	var findings []HarnessConformanceFinding
 
@@ -55,7 +55,7 @@ func ValidateHarnessConformance(harness string, adapter Agent) []HarnessConforma
 	return findings
 }
 
-func validateHarnessIdentity(harness string, adapter Agent) []HarnessConformanceFinding {
+func validateHarnessIdentity(harness string, adapter Harness) []HarnessConformanceFinding {
 	var findings []HarnessConformanceFinding
 	if !slices.Contains(ActiveHarnesses(), harness) {
 		findings = append(findings, HarnessConformanceFinding{
@@ -171,22 +171,8 @@ func validateHarnessModelCoverage(harness string) []HarnessConformanceFinding {
 	return findings
 }
 
-func newConformanceAdapter(harness string) (Agent, error) {
-	store := newMemorySessionStore()
-	switch NormalizeHarnessName(harness) {
-	case "claude-code":
-		return NewClaudeAdapter(store)
-	case "codex-cli":
-		return NewCodexCLIAdapter(store)
-	case "agy":
-		return NewAgyAdapter(store)
-	case "opencode-cli":
-		return NewOpenCodeAdapter(&OpenCodeConfig{SessionStore: store})
-	case "pi-cli":
-		return NewPiAdapter(store)
-	default:
-		return nil, fmt.Errorf("no conformance adapter constructor for %q", harness)
-	}
+func newConformanceAdapter(harness string) (Harness, error) {
+	return newHarnessWithStore(harness, newMemorySessionStore())
 }
 
 type memorySessionStore struct {

@@ -1,8 +1,12 @@
 package history
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -59,6 +63,65 @@ func TestAppendEvent(t *testing.T) {
 	// JSON numbers are unmarshaled as float64
 	if event.Data["num"] != float64(42) {
 		t.Errorf("event.Data[num] = %v, want %v", event.Data["num"], float64(42))
+	}
+}
+
+func TestAppendEventMigratesLegacyHistoryBeforeWriting(t *testing.T) {
+	tmpDir := t.TempDir()
+	legacyPath := filepath.Join(tmpDir, LegacyHistoryFilename)
+	legacy := Event{Timestamp: time.Now(), Type: EventTypeSessionStarted}
+	legacyData, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("json.Marshal() error: %v", err)
+	}
+	if err := os.WriteFile(legacyPath, append(legacyData, '\n'), 0o600); err != nil {
+		t.Fatalf("write legacy history: %v", err)
+	}
+
+	h := New(tmpDir)
+	if err := h.AppendEvent(EventTypePhaseStarted, "PROBLEM", nil); err != nil {
+		t.Fatalf("AppendEvent() error: %v", err)
+	}
+	if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
+		t.Fatalf("legacy history stat error = %v, want not exists", err)
+	}
+	events, err := h.Read()
+	if err != nil {
+		t.Fatalf("Read() error: %v", err)
+	}
+	if len(events) != 2 || events[0].Type != EventTypeSessionStarted || events[1].Type != EventTypePhaseStarted {
+		t.Fatalf("migrated events = %#v, want legacy event followed by appended event", events)
+	}
+}
+
+func TestAppendEventRejectsAmbiguousDualHistoryFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	currentPath := filepath.Join(tmpDir, HistoryFilename)
+	legacyPath := filepath.Join(tmpDir, LegacyHistoryFilename)
+	currentData := []byte("{\"type\":\"current\"}\n")
+	legacyData := []byte("{\"type\":\"legacy\"}\n")
+	if err := os.WriteFile(currentPath, currentData, 0o600); err != nil {
+		t.Fatalf("write current history: %v", err)
+	}
+	if err := os.WriteFile(legacyPath, legacyData, 0o600); err != nil {
+		t.Fatalf("write legacy history: %v", err)
+	}
+
+	err := New(tmpDir).AppendEvent(EventTypePhaseStarted, "PROBLEM", nil)
+	if err == nil || !strings.Contains(err.Error(), "ambiguous history state") {
+		t.Fatalf("AppendEvent() error = %v, want ambiguous history state", err)
+	}
+	if !errors.Is(err, ErrAmbiguousHistory) {
+		t.Fatalf("AppendEvent() error = %v, want ErrAmbiguousHistory", err)
+	}
+	for path, want := range map[string][]byte{currentPath: currentData, legacyPath: legacyData} {
+		got, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatalf("read %s: %v", path, readErr)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("%s changed: got %q, want %q", path, got, want)
+		}
 	}
 }
 

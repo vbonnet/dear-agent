@@ -28,11 +28,6 @@
 # RELATED-SPEC: agm/internal/eventbus/SPEC.md
 # RELATED-SPEC: agm/internal/interrupt/SPEC.md
 # RELATED-SPEC: agm/internal/lifecycle/SPEC.md
-# RELATED-SPEC: agm/internal/backend/SPEC.md
-# RELATED-SPEC: agm/internal/backend/restbackend/SPEC.md
-# RELATED-SPEC: agm/internal/manager/SPEC.md
-# RELATED-SPEC: agm/internal/manager/tmuxbackend/SPEC.md
-# RELATED-SPEC: agm/internal/manager/dockerbackend/SPEC.md
 # RELATED-SPEC: agm/internal/readiness/SPEC.md
 # RELATED-SPEC: agm/internal/send/SPEC.md
 # RELATED-SPEC: agm/internal/manifest/SPEC.md
@@ -131,12 +126,19 @@ Feature: Harness parity
     Then Codex factory should use the Codex CLI adapter
     And OpenAI API status should not inspect Codex tmux state
 
+  Scenario: Harness contracts stay capability-sized
+    Given AGM harness adapter contract sources
+    When AGM validates harness capability ownership
+    Then harness discovery should expose metadata without a universal lifecycle facade
+    And pure API delivery should require only context-aware readiness and message delivery
+    And adapter constructors should return concrete types from one finite discovery catalog
+
   Scenario: Harness lifecycle ownership is explicit and requirement identifiers are unique
     Given AGM harness parity specification and lifecycle surfaces
     When AGM validates harness requirement identifiers and lifecycle ownership
     Then harness requirement identifiers should be unique
-    And CLI and MCP lifecycle surfaces should delegate to shared operations
-    And CLI resume should retain its focused transactional owner
+    And CLI, MCP, and daemon lifecycle surfaces should delegate to shared operations
+    And CLI resume should delegate its transaction to shared operations
 
   Scenario Outline: Active harness launch commands preserve startup mode and persistence
     Given active harness "<harness>" uses startup mode "<mode>"
@@ -236,16 +238,13 @@ Feature: Harness parity
       | agm-statusline         |
       | agm-statusline-capture |
 
-  Scenario Outline: AGM backend implementations declare SPEC coverage
-    Given AGM backend implementation "<backend>" is configured
-    When AGM validates backend implementation coverage
-    Then backend implementation "<backend>" should have a co-located SPEC
-
-    Examples:
-      | backend                         |
-      | backend/restbackend             |
-      | manager/tmuxbackend             |
-      | manager/dockerbackend           |
+  Scenario: AGM has one earned local runtime owner
+    Given AGM production local runtime sources
+    When AGM validates single runtime ownership
+    Then production should use only the direct session tmux runtime type
+    And shared operations should expose no parallel manager runtime
+    And the direct tmux runtime should prove its safety capabilities
+    And retired generalized runtimes and selection setting should be absent
 
   Scenario Outline: AGM cleanup and process support packages declare SPEC coverage
     Given AGM cleanup support package "<package>" is configured
@@ -514,7 +513,7 @@ Feature: Harness parity
 
   Scenario: Failed Codex resume is rolled back before success effects
     Given a stopped Codex CLI session without a tmux pane
-    When AGM validates the Codex resume transaction
+    When AGM validates the shared Codex resume operation
     Then Codex resume, state, and prompt waits should preserve process and styled composer readiness
     And a failed Codex resume should serialize concurrent attempts through every production entry point, release the session lock before attachment, preserve canonical tmux identity from stale full-session updates, reconcile ambiguous metadata commits, compensate owned provisional metadata before removing its creation-specific tmux identity even when tmux ID output is lost, and preserve tmux whenever metadata cleanup is unproven
     And authoritative session renames should serialize with cold resume, fence ambiguous storage writes, preserve both identity names from stale writers, preserve claimed tmux identity across lost replies and server restarts, reject stale identity revisions, and compensate tmux after storage conflicts

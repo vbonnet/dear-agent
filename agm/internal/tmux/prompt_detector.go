@@ -43,6 +43,9 @@ func WaitForClaudePromptContext(parent context.Context, sessionName string, time
 	debug.Log("\n🔍 Starting prompt detection for session: %s (using capture-pane polling)", sessionName)
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	// Find which socket the session is on
 	socketPath := findSessionSocket(sessionName)

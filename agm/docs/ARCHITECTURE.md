@@ -1,6 +1,6 @@
 # AGM architecture
 
-<!-- Last audited at: 2026-07-21 -->
+<!-- Last audited at: 2026-07-27 -->
 
 AGM is a local-first session coordinator for interactive AI command-line
 harnesses. It owns session lifecycle, persistent metadata, tmux process
@@ -24,7 +24,7 @@ operator / automation / MCP client
        +---------+----------+
        |                    |
   internal/agent       internal/session
-  harness launch       tmux and state
+ concrete adapters     tmux and state
        |                    |
        +---------+----------+
                  |
@@ -34,9 +34,21 @@ operator / automation / MCP client
 
 The CLI and MCP server share lifecycle operations through `internal/ops`.
 Surfaces may add presentation or transport concerns, but they must not maintain
-independent create, archive, or kill semantics. Message delivery is not yet a
-shared invariant: the CLI owns readiness, formatting, rate limiting, and queue
-behavior that the MCP operation does not reproduce.
+independent create, archive, kill, or direct-delivery semantics.
+`internal/ops.SendMessage` resolves the recipient, selects API or tmux
+transport, reloads mutable delivery identity under the stable-session lifecycle
+lock, and owns the atomic readiness-plus-send transaction for CLI, MCP, and
+daemon callers. The CLI retains formatting, logging, queue choice, overlay
+recovery, and presentation; the daemon retains dequeue scheduling, defer/retry
+accounting, acknowledgments, and durable queue state.
+
+Resume is a shared lifecycle transaction. `internal/ops.ResumeSession` locks the
+stable session ID before reading mutable state, classifies health, owns exact
+tmux creation and compensation, builds and waits for the native harness, commits
+canonical runtime identity, restores persisted mode, submits an optional
+post-resume prompt, and updates activity. The CLI may resolve a human
+identifier, read a prompt file, render operation events, and attach after the
+operation returns; it must not reproduce those lifecycle phases.
 
 ## Source owners
 
@@ -44,13 +56,16 @@ behavior that the MCP operation does not reproduce.
 |---|---|
 | Cobra command tree and generated help | `agm/cmd/agm` |
 | Cross-surface lifecycle operations | `agm/internal/ops` |
+| Resume transaction and rollback | `agm/internal/ops/session_resume.go` |
+| Resume tmux capability adapter | `agm/internal/session/tmux_real.go` |
 | Active and deprecated harness registry | `agm/internal/agent/harnesses.go` |
 | Harness constructors | `agm/internal/agent/factory.go` |
 | Harness adapters | `agm/internal/agent/*_adapter.go` |
 | Session resolution and runtime state | `agm/internal/session` |
 | Tmux process interaction | `agm/internal/tmux` |
 | Persistent session metadata | `agm/internal/dolt` |
-| Queued inter-session delivery | `agm/internal/messages`, `agm/internal/daemon` |
+| Direct inter-session delivery | `agm/internal/ops.SendMessage` |
+| Queued inter-session scheduling | `agm/internal/messages`, `agm/internal/daemon` |
 | Shared runtime thresholds | `agm/internal/contracts` |
 | Sandbox selection and provisioning | `internal/sandbox`, `agm/cmd/agm/new_sandbox.go` |
 
@@ -70,8 +85,10 @@ Harness names and lifecycle status come only from
 
 Active harnesses are the parity set. A deprecated harness can remain accepted
 for existing manifests without becoming a default, a new feature target, or an
-active parity promise. Adapters implement `agent.Agent`; the interface does not
-imply that a remote model API is used.
+active parity promise. Adapter constructors return concrete types. Heterogeneous
+discovery and conformance use the metadata-only `agent.Harness` contract
+(`Name`, `Version`, and `Capabilities`); operation consumers define narrower
+behavioral capabilities such as context-aware pure API delivery.
 
 ## Session creation
 

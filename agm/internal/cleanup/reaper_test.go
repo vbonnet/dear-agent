@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	gitpkg "github.com/vbonnet/dear-agent/agm/internal/git"
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // fakeReaperGit lets the decision logic be tested without a real repo.
@@ -463,10 +464,10 @@ func TestReap_Integration_RealGit(t *testing.T) {
 	aheadWT := filepath.Join(wtBase, "ahead")
 	humanWT := filepath.Join(wtBase, "human")
 
-	run(t, repo, "git", "worktree", "add", "-b", "claude/clean", cleanWT)
-	run(t, repo, "git", "worktree", "add", "-b", "claude/dirty", dirtyWT)
-	run(t, repo, "git", "worktree", "add", "-b", "claude/ahead", aheadWT)
-	run(t, repo, "git", "worktree", "add", "-b", "feature/human", humanWT)
+	gitRun(t, repo, "worktree", "add", "-b", "claude/clean", cleanWT)
+	gitRun(t, repo, "worktree", "add", "-b", "claude/dirty", dirtyWT)
+	gitRun(t, repo, "worktree", "add", "-b", "claude/ahead", aheadWT)
+	gitRun(t, repo, "worktree", "add", "-b", "feature/human", humanWT)
 
 	// dirty: an untracked file.
 	if err := os.WriteFile(filepath.Join(dirtyWT, "scratch"), []byte("x"), 0600); err != nil {
@@ -476,8 +477,8 @@ func TestReap_Integration_RealGit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(aheadWT, "a.txt"), []byte("a"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	run(t, aheadWT, "git", "add", "a.txt")
-	run(t, aheadWT, "git", "commit", "-m", "work")
+	gitRun(t, aheadWT, "add", "a.txt")
+	gitRun(t, aheadWT, "commit", "-m", "work")
 
 	res := ReapStaleWorktrees(ReaperOptions{
 		RepoPath:      repo,
@@ -515,24 +516,18 @@ func mustMkdir(t *testing.T, p string) {
 
 func gitInit(t *testing.T, repo string) {
 	t.Helper()
-	mustMkdir(t, repo)
-	run(t, "", "git", "init", "-b", "main", repo)
-	run(t, repo, "git", "config", "user.name", "Test")
-	run(t, repo, "git", "config", "user.email", "test@test.com")
+	gittest.Run(t, "", "init", "-b", "main", repo)
+	gittest.HardenRepo(t, repo)
+	gitRun(t, repo, "config", "user.name", "Test")
+	gitRun(t, repo, "config", "user.email", "test@test.com")
 	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("# t\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	run(t, repo, "git", "add", "README.md")
-	run(t, repo, "git", "commit", "-m", "init")
+	gitRun(t, repo, "add", "README.md")
+	gitRun(t, repo, "commit", "-m", "init")
 }
 
-func run(t *testing.T, dir, name string, args ...string) {
+func gitRun(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command(name, args...)
-	if dir != "" {
-		cmd.Dir = dir
-	}
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("%s %v failed: %v\n%s", name, args, err, out)
-	}
+	gittest.Run(t, dir, args...)
 }

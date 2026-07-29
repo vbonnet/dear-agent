@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
@@ -357,6 +358,110 @@ func TestPreparedCodexCommandClearsCallerAbsentPaneCredentials(t *testing.T) {
 	}
 }
 
+func TestPrepareCommandsRejectTerminalControlsBeforeStagingHandoff(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "must-not-exist")
+	t.Setenv("AGM_STATE_DIR", stateDir)
+
+	tests := []struct {
+		name    string
+		prepare func() (PreparedCommand, error)
+	}{
+		{
+			name: "Codex newline in workdir",
+			prepare: func() (PreparedCommand, error) {
+				return PrepareCodexCommand(CodexLaunch{
+					SessionName: "codex", Model: "gpt-test", WorkDir: "/tmp/safe\ninjected",
+					Sandbox: "workspace-write",
+				}, nil)
+			},
+		},
+		{
+			name: "Claude bracketed paste escape in add-dir",
+			prepare: func() (PreparedCommand, error) {
+				return PrepareClaudeCommand(ClaudeLaunch{
+					SessionName: "claude", WorkDir: "/tmp/work",
+					AddDirs: []string{"/tmp/safe\x1b[201~\n"},
+				}, nil)
+			},
+		},
+		{
+			name: "Claude invalid UTF-8 resume ID",
+			prepare: func() (PreparedCommand, error) {
+				return PrepareClaudeCommand(ClaudeLaunch{
+					SessionName: "claude", ResumeID: string([]byte{'i', 'd', 0xff}),
+				}, nil)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prepared, err := tt.prepare()
+			if err == nil {
+				_ = prepared.Cancel()
+				t.Fatal("Prepare command succeeded, want terminal-control rejection")
+			}
+			if prepared.Command != "" {
+				t.Fatalf("prepared pane command %q before validation", prepared.Command)
+			}
+			if !strings.Contains(err.Error(), "invalid harness launch request") {
+				t.Fatalf("Prepare error = %v, want launch validation", err)
+			}
+		})
+	}
+
+	if _, err := os.Stat(stateDir); !os.IsNotExist(err) {
+		t.Fatalf("private handoff state created before validation: %v", err)
+	}
+}
+
+func TestPrepareCodexRejectsGeneratedTerminalControlsBeforeBuildingCommand(t *testing.T) {
+	originalExecutablePath := executablePath
+	t.Cleanup(func() { executablePath = originalExecutablePath })
+	launch := CodexLaunch{
+		SessionName: "codex", Model: "gpt-test", WorkDir: "/tmp/work",
+		Sandbox: "workspace-write",
+	}
+
+	t.Run("resolved executable", func(t *testing.T) {
+		stateDir := filepath.Join(t.TempDir(), "must-not-exist")
+		t.Setenv("AGM_STATE_DIR", stateDir)
+		executablePath = func() (string, error) {
+			return "/opt/agm/bin/agm\x1b[201~\x15/quit", nil
+		}
+
+		prepared, err := PrepareCodexCommand(launch, nil)
+		if err == nil {
+			_ = prepared.Cancel()
+			t.Fatal("Prepare command accepted a generated executable with terminal controls")
+		}
+		if prepared.Command != "" || !strings.Contains(err.Error(), "private executable contains control characters") {
+			t.Fatalf("Prepare result = %#v, %v; want generated executable validation", prepared, err)
+		}
+		if _, statErr := os.Stat(stateDir); !os.IsNotExist(statErr) {
+			t.Fatalf("handoff state created before executable validation: %v", statErr)
+		}
+	})
+
+	t.Run("resolved handoff root", func(t *testing.T) {
+		stateDir := filepath.Join(t.TempDir(), "state\x1b[201~\x15/quit")
+		t.Setenv("AGM_STATE_DIR", stateDir)
+		executablePath = func() (string, error) { return "/opt/agm/bin/agm", nil }
+
+		prepared, err := PrepareCodexCommand(launch, nil)
+		if err == nil {
+			_ = prepared.Cancel()
+			t.Fatal("Prepare command accepted a generated handoff path with terminal controls")
+		}
+		if prepared.Command != "" || !strings.Contains(err.Error(), "private handoff directory contains control characters") {
+			t.Fatalf("Prepare result = %#v, %v; want generated handoff validation", prepared, err)
+		}
+		if _, statErr := os.Stat(stateDir); !os.IsNotExist(statErr) {
+			t.Fatalf("unsafe handoff root created before path validation: %v", statErr)
+		}
+	})
+}
+
 func TestPreparedCommandCancelRemovesUndeliveredHandoff(t *testing.T) {
 	t.Setenv("AGM_STATE_DIR", t.TempDir())
 	originalExecutablePath := executablePath
@@ -676,7 +781,7 @@ func TestPreparedCommandUsesCoInstalledAGMFromCompanionBinary(t *testing.T) {
 		t.Fatalf("prepare Codex command from companion: %v", err)
 	}
 	t.Cleanup(func() { _ = prepared.Cancel() })
-	if !strings.HasPrefix(prepared.Command, shellQuote(agmPath)+" "+CodexProtocol) {
+	if !strings.HasPrefix(prepared.Command, shellquote.Quote(agmPath)+" "+CodexProtocol) {
 		t.Fatalf("companion command did not pin co-installed AGM: %s", prepared.Command)
 	}
 }
@@ -702,7 +807,7 @@ func TestPreparedCommandUsesMatchingVersionedAGMFromReleaseCompanion(t *testing.
 		t.Fatalf("prepare Claude command from versioned release companion: %v", err)
 	}
 	t.Cleanup(func() { _ = prepared.Cancel() })
-	if !strings.HasPrefix(prepared.Command, shellQuote(agmPath)+" "+ClaudeProtocol) {
+	if !strings.HasPrefix(prepared.Command, shellquote.Quote(agmPath)+" "+ClaudeProtocol) {
 		t.Fatalf("versioned companion command did not pin matching AGM artifact: %s", prepared.Command)
 	}
 }
@@ -766,7 +871,7 @@ func TestPreparedCommandMakesRelativeStateDirectoryAbsolute(t *testing.T) {
 	if !filepath.IsAbs(prepared.path) {
 		t.Fatalf("handoff path = %q, want absolute", prepared.path)
 	}
-	if !strings.Contains(prepared.Command, "--handoff "+shellQuote(prepared.path)) {
+	if !strings.Contains(prepared.Command, "--handoff "+shellquote.Quote(prepared.path)) {
 		t.Fatalf("prepared command omitted absolute handoff path: %s", prepared.Command)
 	}
 }

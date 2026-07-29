@@ -92,7 +92,10 @@ func startPiHarnessWithRuntime(ctx context.Context, spec ops.HarnessLaunchSpec, 
 	if spec.PiLaunchID == "" {
 		spec.PiLaunchID = launchparity.NewPiLaunchID()
 	}
-	launch := ops.BuildHarnessLaunchCommand(spec)
+	launch, err := ops.PrepareHarnessLaunchCommand(spec)
+	if err != nil {
+		return false, fmt.Errorf("prepare Pi launch: %w", err)
+	}
 	if err := resolveHarnessLaunchSubmission("Pi", launch, runtime.sendCommand(spec.SessionName, launch.Command)); err != nil {
 		return launch.ModeAppliedAtStartup, fmt.Errorf("start Pi in tmux: %w", err)
 	}
@@ -231,7 +234,10 @@ func startGeminiHarness(ctx context.Context, spec ops.HarnessLaunchSpec) (bool, 
 // optional first-run trust prompt by sending "1<Enter>" if detected.
 func startGeminiDirect(ctx context.Context, spec ops.HarnessLaunchSpec) error {
 	debug.Log("agm-agent-wrapper not found, falling back to direct gemini")
-	launch := ops.BuildHarnessLaunchCommand(spec)
+	launch, err := ops.PrepareHarnessLaunchCommand(spec)
+	if err != nil {
+		return fmt.Errorf("prepare Gemini launch: %w", err)
+	}
 	geminiCmd := launch.Command
 	debug.Log("Sending command: %s", geminiCmd)
 	if err := resolveHarnessLaunchSubmission("Gemini", launch, tmux.SendCommand(spec.SessionName, geminiCmd)); err != nil {
@@ -309,7 +315,10 @@ func startAgyHarnessWithRuntime(ctx context.Context, spec ops.HarnessLaunchSpec,
 		return false, err
 	}
 
-	launch := ops.BuildHarnessLaunchCommand(spec)
+	launch, err := ops.PrepareHarnessLaunchCommand(spec)
+	if err != nil {
+		return false, fmt.Errorf("prepare AGY launch: %w", err)
+	}
 	agyCmd := launch.Command
 	modeAppliedAtStartup := launch.ModeAppliedAtStartup
 	debug.Log("Sending command: %s", agyCmd)
@@ -413,7 +422,10 @@ func validateCodexCredentials() error {
 func startOpenCodeHarness(spec ops.HarnessLaunchSpec) error {
 	debug.Phase("Start OpenCode")
 	debug.Log("OpenCode server validated (health check passed)")
-	launch := ops.BuildHarnessLaunchCommand(spec)
+	launch, err := ops.PrepareHarnessLaunchCommand(spec)
+	if err != nil {
+		return fmt.Errorf("prepare OpenCode launch: %w", err)
+	}
 	opencodeCmd := launch.Command
 	debug.Log("Sending command: %s", opencodeCmd)
 	if err := resolveHarnessLaunchSubmission("OpenCode", launch, tmux.SendCommand(spec.SessionName, opencodeCmd)); err != nil {
