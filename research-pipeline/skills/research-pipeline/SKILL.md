@@ -231,9 +231,13 @@ to future work — dogfood the thing you just designed.
 
 ## Rules
 
-- **Cross-model, not self-review.** Stage 3 must differ from the Stage 2
-  research author; Stage 4 must differ from both the Stage 2 and Stage 3
-  models. A model never verifies an artifact derived from its own pipeline work.
+- **Cross-model, not self-review.** In a full pipeline, Stage 3 must differ
+  from the Stage 2 research author and Stage 4 must differ from both the
+  Stage 2 and Stage 3 models. At a downstream-only entry point, the reviewing
+  model must differ from the author of the supplied input artifact and from
+  every recorded upstream model that exists; an absent out-of-scope stage is
+  not a completion prerequisite. A model never verifies an artifact derived
+  from its own pipeline work.
 - **Provider routing needs a receipt.** See Stage 1 — a silent fallback
   defeats the entire point of naming a provider.
 - **Human approval before decomposition commits resources.** Stop after
@@ -258,28 +262,32 @@ to future work — dogfood the thing you just designed.
 ## Verification Criteria
 
 The DEAR Auditor (or a self-check, when running solo) checks the following
-after this pipeline runs to completion for a given source:
+after the requested stage scope runs to completion. A stage named below is a
+required completion check only when it was in scope; supplied upstream
+artifacts remain inputs whose stated authorship/revision must be verified, not
+a demand to rerun stages the user did not request:
 
-- [ ] The Stage 1 provenance record exists and names the provider actually
+- [ ] If Stage 1 was in scope, its provenance record exists and names the provider actually
       used; if it differs from the provider that best fits the source type,
       the record states why
-- [ ] The Stage 2 research doc exists and every hard factual claim carries
+- [ ] If Stage 2 was in scope, its research doc exists and every hard factual claim carries
       a citation
-- [ ] The Stage 3 plan exists, was authored by a model different from the
-      one that wrote the research doc, and its verification section names
-      at least one correction or explicit confirmation (not silent
-      pass-through)
-- [ ] The Stage 4 review names a model distinct from both the Stage 2 research
-      author and the Stage 3 planner
-- [ ] Every bead filed from Stage 4 has a non-vague acceptance criterion
+- [ ] If Stage 3 was in scope, its plan exists, was authored by a model
+      different from the Stage 2 author when Stage 2 exists, and its
+      verification section names at least one correction or explicit
+      confirmation (not silent pass-through)
+- [ ] If Stage 4 was in scope, its review names a model distinct from the
+      supplied Stage 3 plan author and from every recorded Stage 2 author
+      when that artifact exists
+- [ ] If Stage 4 was in scope, every bead it filed has a non-vague acceptance criterion
       (grep for "looks correct", "is complete", "works well" in bead
       descriptions returns zero matches)
-- [ ] A durable human approval receipt (reviewer, timestamp, reference)
+- [ ] If Stage 4 was in scope, a durable human approval receipt (reviewer, timestamp, reference)
       names the exact plan revision accepted by Stage 4 and predates the
       `created_at` time of the first Stage 4 bead; merely surfacing the plan,
       approving an earlier revision, or obtaining approval before Stage 5 does
       not pass
-- [ ] If Stage 4 review recorded a blocking verdict at any point, a later
+- [ ] If an in-scope Stage 4 review recorded a blocking verdict at any point, a later
       artifact shows the specific corrections applied, a fresh human approval
       receipt bound to the corrected revision, and a follow-up review
       confirming they're resolved (no bead trail that jumps from "blocked"
