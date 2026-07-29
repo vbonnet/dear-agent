@@ -150,3 +150,38 @@ func TestValidatePiSkillDiscoveryRejectsSymlinkedRootOutsideRepository(t *testin
 		t.Fatalf("err = %v, want an escapes-the-repository rejection", err)
 	}
 }
+
+func TestValidatePiSkillDiscoveryRejectsSettingsSymlinkOutsideRepository(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".pi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	externalSettings := filepath.Join(outside, "settings.json")
+	if err := os.WriteFile(externalSettings, []byte(`{"skills":["../.agents/skills","../agm/plugins"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(externalSettings, filepath.Join(root, ".pi", "settings.json")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	for _, entrypoint := range []string{
+		filepath.Join(root, ".agents", "skills", "wayfinder", "SKILL.md"),
+		filepath.Join(root, "agm", "plugins", "agm", "SKILL.md"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(entrypoint), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(entrypoint, []byte("# Skill\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	err := ValidatePiSkillDiscovery(root)
+	if err == nil {
+		t.Fatal("Pi settings symlink escaping the repository was accepted")
+	}
+	if !strings.Contains(err.Error(), "settings escape the repository") {
+		t.Fatalf("err = %v, want settings containment rejection", err)
+	}
+}

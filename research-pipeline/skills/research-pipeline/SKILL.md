@@ -133,8 +133,10 @@ owner at the top of the file (so a reader mid-pipeline knows where they are).
 **This is the human review gate.** Present the plan before moving to Stage
 4 — decomposition commits real bead/engineering time, verification doesn't.
 Presentation alone is not approval: record an explicit human approval receipt
-(reviewer identity, timestamp, and durable comment/artifact reference) before
-the first bead is created. If no approval arrives, pause at Stage 3.
+(reviewer identity, timestamp, durable comment/artifact reference, and the
+approved plan revision's commit SHA or content digest) before the first bead is
+created. If no approval arrives, pause at Stage 3. Approval applies only to the
+identified plan revision; later substantive corrections require a new receipt.
 
 ## Stage 4 — Decomposition (a third independent model)
 
@@ -148,9 +150,10 @@ author (Stage 3's model) already spent its independence, and a plan
 that "looks done" is not the same as a plan an adversarial reader
 couldn't break.
 
-Before filing anything, verify that the Stage 3 human approval receipt predates
-the first prospective bead. The independent Stage 4 model review supplements
-that human gate; it does not replace it.
+Before filing anything, verify that the Stage 3 human approval receipt names
+the exact plan revision under review and predates the first prospective bead.
+The independent Stage 4 model review supplements that human gate; it does not
+replace it.
 
 **File every decomposition through the target repository's canonical Beads
 interface.** Check its `AGENTS.md`/equivalent first — e.g. dear-agent itself
@@ -199,7 +202,11 @@ blocking verdict as a normal outcome, not a pipeline failure. When
 Stage 4's reviewer finds real, blocking defects (stale grounding facts,
 bundled beads, missing dependency edges — not stylistic nitpicks), the
 plan routes **back to Stage 3's author to fix**, then Stage 4 re-reviews
-the fixed plan. Repeat until the reviewer's verdict is an unconditional
+the fixed plan. Because those corrections change what would be decomposed,
+present the corrected revision to the human and record a new approval receipt
+bound to that exact commit SHA or content digest before Stage 4 re-review or
+bead filing. Repeat until the reviewer has assessed the human-approved
+revision and its verdict is an unconditional
 ship (or "ship with inline fixes" the reviewer itself confirms are
 non-blocking edits, not open design questions). Decomposing off a
 rejected plan just to keep momentum produces beads that fail faster than
@@ -228,6 +235,8 @@ to future work — dogfood the thing you just designed.
   defeats the entire point of naming a provider.
 - **Human approval before decomposition commits resources.** Stop after
   surfacing the Stage 3 plan until an explicit approval receipt is recorded.
+  Bind the receipt to the exact plan commit SHA or content digest, and obtain a
+  fresh receipt after any substantive correction to a rejected plan.
   Do not create the Stage 4 bead graph merely because the plan was presented;
   for large decompositions, surface the reviewed bead list again before Stage
   5 execution.
@@ -261,12 +270,15 @@ after this pipeline runs to completion for a given source:
       (grep for "looks correct", "is complete", "works well" in bead
       descriptions returns zero matches)
 - [ ] A durable human approval receipt (reviewer, timestamp, reference)
-      predates the `created_at` time of the first Stage 4 bead; merely
-      surfacing the plan or obtaining approval before Stage 5 does not pass
+      names the exact plan revision accepted by Stage 4 and predates the
+      `created_at` time of the first Stage 4 bead; merely surfacing the plan,
+      approving an earlier revision, or obtaining approval before Stage 5 does
+      not pass
 - [ ] If Stage 4 review recorded a blocking verdict at any point, a later
-      artifact shows the specific corrections applied and a follow-up
-      review confirming they're resolved (no bead trail that jumps from
-      "blocked" straight to bead filing with no fix-and-reverify step)
+      artifact shows the specific corrections applied, a fresh human approval
+      receipt bound to the corrected revision, and a follow-up review
+      confirming they're resolved (no bead trail that jumps from "blocked"
+      straight to bead filing with no fix, reapproval, and reverify step)
 
 ## References
 

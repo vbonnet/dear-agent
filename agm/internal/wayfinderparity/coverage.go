@@ -127,7 +127,26 @@ func ValidateAssets(root string) error {
 // ValidatePiSkillDiscovery verifies Pi reads the living skill trees instead of
 // relying on copied or harness-specific skill definitions.
 func ValidatePiSkillDiscovery(root string) error {
-	data, err := os.ReadFile(filepath.Join(root, ".pi", "settings.json"))
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return fmt.Errorf("resolve repository root for Pi settings: %w", err)
+	}
+	settingsPath := filepath.Join(root, ".pi", "settings.json")
+	resolvedSettings, err := filepath.EvalSymlinks(settingsPath)
+	if err != nil {
+		return fmt.Errorf("resolve Pi settings: %w", err)
+	}
+	if !containedWithin(resolvedRoot, resolvedSettings) {
+		return fmt.Errorf("Pi settings escape the repository")
+	}
+	info, err := os.Stat(resolvedSettings)
+	if err != nil {
+		return fmt.Errorf("stat Pi settings: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("Pi settings are not a regular file")
+	}
+	data, err := os.ReadFile(resolvedSettings)
 	if err != nil {
 		return fmt.Errorf("read Pi settings: %w", err)
 	}
