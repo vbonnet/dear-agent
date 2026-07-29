@@ -31,5 +31,6 @@ directory so a project resource cannot replace the control-plane policy path.
 ## BDD Traceability
 
 - `agm/test/bdd/features/config_directory_parity.feature` validates Pi's active configuration-directory mapping.
-- `agm/test/bdd/features/wayfinder_parity.feature` and `agm/internal/wayfinderparity/coverage_test.go` validate Pi's configured Wayfinder and research-pipeline skill discovery surfaces.
+- `agm/test/bdd/features/wayfinder_parity.feature` and `agm/internal/wayfinderparity/coverage_test.go` validate Pi's configured Wayfinder and required skill roots.
+- `agm/internal/marketplaceparity/coverage_test.go` (`TestValidateCatalog`) inventories every exported skill, including research-pipeline, against Pi's configured roots.
 - `agm/test/bdd/features/permission_parity.feature` validates the separate managed authorization surface.
