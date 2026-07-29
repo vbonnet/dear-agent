@@ -468,10 +468,7 @@ func hasActionableCanonicalWorkflow(markdown, reference string) bool {
 	directives := workflowDirectives(section)
 	for index, directive := range directives {
 		lower := strings.ToLower(directive)
-		tokenIndex := strings.Index(lower, token)
-		if tokenIndex < 0 ||
-			(!hasPositiveDirectiveVerb(lower, "read", tokenIndex) &&
-				!hasPositiveDirectiveVerb(lower, "load", tokenIndex)) {
+		if !hasPositiveCanonicalLoadDirective(lower, token) {
 			continue
 		}
 		for _, following := range directives[index:] {
@@ -499,11 +496,14 @@ func workflowDirectives(section string) []string {
 	return directives
 }
 
-func hasPositiveDirectiveVerb(directive, verb string, before int) bool {
-	locations := regexp.MustCompile(`\b`+regexp.QuoteMeta(verb)+`\b`).FindAllStringIndex(directive[:before], -1)
-	for _, location := range slices.Backward(locations) {
-		if directiveVerbIsPositive(directive, location) {
-			return true
+func hasPositiveCanonicalLoadDirective(directive, token string) bool {
+	for _, verb := range []string{"read", "load"} {
+		pattern := regexp.MustCompile(`\b` + verb + `\s+` + regexp.QuoteMeta(token))
+		for _, match := range pattern.FindAllStringIndex(directive, -1) {
+			verbLocation := []int{match[0], match[0] + len(verb)}
+			if directiveVerbIsPositive(directive, verbLocation) {
+				return true
+			}
 		}
 	}
 	return false

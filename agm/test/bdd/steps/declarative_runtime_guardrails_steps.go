@@ -372,16 +372,21 @@ func validateEvalCasesAsset(path string, data []byte) error {
 	if len(evals.Cases) == 0 {
 		return fmt.Errorf("declarative runtime asset %s has no eval cases", path)
 	}
+	seenIDs := make(map[string]int, len(evals.Cases))
 	for index, evalCase := range evals.Cases {
 		if err := validateEvalCase(path, index, evalCase); err != nil {
 			return err
 		}
+		if previous, exists := seenIDs[evalCase.ID]; exists {
+			return fmt.Errorf("declarative runtime asset %s eval case %d duplicates id %q from case %d", path, index, evalCase.ID, previous)
+		}
+		seenIDs[evalCase.ID] = index
 	}
 	return nil
 }
 
 func validateEvalCase(path string, index int, evalCase declarativeEvalCase) error {
-	if evalCase.ID == "" || evalCase.Prompt == "" || len(evalCase.Harness) == 0 ||
+	if strings.TrimSpace(evalCase.ID) == "" || strings.TrimSpace(evalCase.Prompt) == "" || len(evalCase.Harness) == 0 ||
 		evalCase.ShouldTrigger == nil || evalCase.Trials <= 0 || len(evalCase.ExpectedChecks) == 0 {
 		return fmt.Errorf("declarative runtime asset %s eval case %d lacks required fields", path, index)
 	}
@@ -389,7 +394,7 @@ func validateEvalCase(path string, index int, evalCase declarativeEvalCase) erro
 		return err
 	}
 	for checkIndex, check := range evalCase.ExpectedChecks {
-		if check.Type == "" || check.Target == "" || check.Pattern == "" {
+		if strings.TrimSpace(check.Type) == "" || strings.TrimSpace(check.Target) == "" || strings.TrimSpace(check.Pattern) == "" {
 			return fmt.Errorf("declarative runtime asset %s eval case %d check %d lacks required fields", path, index, checkIndex)
 		}
 		if check.Type != "regex" {

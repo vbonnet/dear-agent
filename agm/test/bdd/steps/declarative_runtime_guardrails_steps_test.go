@@ -49,6 +49,18 @@ func TestValidateDeclarativeRuntimeAsset(t *testing.T) {
 			wantErr: "lacks required fields",
 		},
 		{
+			name:    "eval case whitespace schema",
+			asset:   "evals.json",
+			content: `{"cases":[{"id":" ","prompt":" ","harness":["claude"],"should_trigger":true,"trials":1,"expected_checks":[{"type":"regex","target":"trace","pattern":"research"}]}]}`,
+			wantErr: "lacks required fields",
+		},
+		{
+			name:    "eval case duplicate id",
+			asset:   "evals.json",
+			content: `{"cases":[{"id":"trigger","prompt":"first","harness":["claude"],"should_trigger":true,"trials":1,"expected_checks":[{"type":"regex","target":"trace","pattern":"research"}]},{"id":"trigger","prompt":"second","harness":["codex"],"should_trigger":false,"trials":1,"expected_checks":[{"type":"regex","target":"trace","pattern":"research"}]}]}`,
+			wantErr: `duplicates id "trigger"`,
+		},
+		{
 			name:    "eval check missing schema",
 			asset:   "evals.json",
 			content: `{"cases":[{"id":"trigger","prompt":"research this","harness":["codex"],"should_trigger":true,"trials":1,"expected_checks":[{}]}]}`,
