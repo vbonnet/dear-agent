@@ -166,6 +166,10 @@ func checkData(path string, data []byte) []Violation {
 	for i, line := range lines {
 		lineNo := i + 1
 		if fences.consume(line) {
+			// A fenced block is a Markdown block boundary. An inline-code
+			// opener in earlier prose cannot consume a closer from this block
+			// or retain span state across it.
+			inlineCode = inlineCodeSpanState{}
 			continue
 		}
 		scannable := stripInlineCodeSpans(line, lines[i+1:], &inlineCode)
@@ -207,19 +211,36 @@ func (s *fenceState) consume(line string) bool {
 		s.container = fenceContainerContext{}
 	}
 	s.updateListContinuation(line)
-	marker, length, _, isFence := fenceDelimiter(line)
+	marker, length, container, isFence := s.openingDelimiter(line)
 	if !isFence {
 		return false
 	}
 	s.marker = marker
 	s.length = length
-	s.container = parseFenceContainerContext(line)
-	if !s.container.hasList && s.listContinuation.hasList {
-		if _, ok := s.listContinuation.contentStart(line); ok {
-			s.container = s.listContinuation
-		}
-	}
+	s.container = container
 	return true
+}
+
+func (s *fenceState) openingDelimiter(line string) (byte, int, fenceContainerContext, bool) {
+	marker, length, isFence := fenceDelimiter(line)
+	if isFence {
+		container := parseFenceContainerContext(line)
+		if !container.hasList && s.listContinuation.hasList {
+			if _, ok := s.listContinuation.contentStart(line); ok {
+				container = s.listContinuation
+			}
+		}
+		return marker, length, container, true
+	}
+	if !s.listContinuation.hasList {
+		return 0, 0, fenceContainerContext{}, false
+	}
+	offset, ok := s.listContinuation.contentStart(line)
+	if !ok {
+		return 0, 0, fenceContainerContext{}, false
+	}
+	marker, length, _, isFence = fenceDelimiterAt(line, offset)
+	return marker, length, s.listContinuation, isFence
 }
 
 func (s *fenceState) updateListContinuation(line string) {
@@ -331,12 +352,13 @@ func parseFenceContainerContext(line string) fenceContainerContext {
 	return context
 }
 
-func fenceDelimiter(line string) (byte, int, string, bool) {
+func fenceDelimiter(line string) (byte, int, bool) {
 	offset, ok := fenceContentOffset(line)
 	if !ok || offset == len(line) {
-		return 0, 0, "", false
+		return 0, 0, false
 	}
-	return parseFenceDelimiter(line, offset)
+	marker, length, _, isFence := parseFenceDelimiter(line, offset)
+	return marker, length, isFence
 }
 
 func fenceDelimiterAt(line string, offset int) (byte, int, string, bool) {
@@ -460,11 +482,26 @@ func matchingBacktickRun(line string, offset, length int) int {
 
 func hasMatchingBacktickRun(lines []string, length int) bool {
 	for _, line := range lines {
+		if inlineCodeBlockBoundary(line) {
+			return false
+		}
 		if matchingBacktickRun(line, 0, length) >= 0 {
 			return true
 		}
 	}
 	return false
+}
+
+func inlineCodeBlockBoundary(line string) bool {
+	if strings.TrimSpace(line) == "" {
+		return true
+	}
+	if _, _, isFence := fenceDelimiter(line); isFence {
+		return true
+	}
+	trimmed := strings.TrimLeft(line, " \t")
+	_, _, _, isFence := parseFenceDelimiter(trimmed, 0)
+	return isFence
 }
 
 func escapedAt(line string, offset int) bool {

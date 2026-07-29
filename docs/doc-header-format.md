@@ -82,12 +82,12 @@ put two `**Label:**` fields on the same physical line.
 
 YAML frontmatter (`---\nstatus: authoritative\n---`) is the other reasonable
 fix — it is machine-parseable and is what static-site generators (Jekyll,
-Hugo, Docusaurus) expect. This repo does not run one: docs are read as plain
-Markdown directly on GitHub, which does not render frontmatter specially for
-ordinary repository files — it would show up as a literal `---` block of raw
-text, which is worse than the problem it would fix. Frontmatter would also be
-a much bigger departure from how every other doc in this repo currently
-opens (a level-1 title, then a short human-readable preamble), for a
+Hugo, Docusaurus) expect. GitHub recognizes YAML frontmatter in repository
+Markdown and renders its fields as a metadata table, so rendering is not a
+reason to reject it. The repo still prefers lists because its documents
+consistently open with a level-1 title and short human-readable preamble, and
+none of the current repository tooling consumes frontmatter. Introducing a
+second metadata convention would be a larger migration for a
 machine-parseability benefit nothing here currently needs.
 
 The bullet-list fix is a minimal, surgical change: same bold-label style

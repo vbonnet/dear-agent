@@ -204,9 +204,10 @@ func TestCheckFile_DoesNotCloseLongFenceWithShortOrDifferentDelimiter(t *testing
 
 func TestCheckFile_DoesNotFlagFencesNestedInMarkdownContainers(t *testing.T) {
 	tests := map[string]string{
-		"blockquote": "# Doc\n\n> ```markdown\n> **Status:** draft · **Owner:** docs\n> ```\n\n## Body\n",
-		"list":       "# Doc\n\n- ~~~markdown\n  **Status:** draft · **Owner:** docs\n  ~~~\n\n## Body\n",
-		"nested":     "# Doc\n\n> - ````markdown\n>   **Status:** draft · **Owner:** docs\n>   ````\n\n## Body\n",
+		"blockquote":                    "# Doc\n\n> ```markdown\n> **Status:** draft · **Owner:** docs\n> ```\n\n## Body\n",
+		"list":                          "# Doc\n\n- ~~~markdown\n  **Status:** draft · **Owner:** docs\n  ~~~\n\n## Body\n",
+		"nested":                        "# Doc\n\n> - ````markdown\n>   **Status:** draft · **Owner:** docs\n>   ````\n\n## Body\n",
+		"list-continuation-four-spaces": "# Doc\n\n- example\n    ~~~markdown\n    **Status:** draft · **Owner:** docs\n    ~~~\n\n## Body\n",
 	}
 	for name, content := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -218,6 +219,26 @@ func TestCheckFile_DoesNotFlagFencesNestedInMarkdownContainers(t *testing.T) {
 			}
 			if len(violations) != 0 {
 				t.Fatalf("want 0 violations, got %d: %v", len(violations), violations)
+			}
+		})
+	}
+}
+
+func TestCheckFile_InlineCodeDoesNotCrossMarkdownBlockBoundaries(t *testing.T) {
+	tests := map[string]string{
+		"blank-line":   "# Doc\n\nUnmatched ` opener\n\n**Status:** draft · **Owner:** docs\n` later\n",
+		"fenced-block": "# Doc\n\nUnmatched ` opener\n```text\n`\n```\n**Status:** draft · **Owner:** docs\n",
+	}
+	for name, content := range tests {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := writeTemp(t, dir, "format.md", content)
+			violations, err := CheckFile(path)
+			if err != nil {
+				t.Fatalf("CheckFile: %v", err)
+			}
+			if len(violations) != 1 {
+				t.Fatalf("want one visible header-field violation, got %v", violations)
 			}
 		})
 	}
