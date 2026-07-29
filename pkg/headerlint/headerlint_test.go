@@ -787,6 +787,19 @@ func TestCheckFile_DoesNotFlagBoldShapedTextInsideInlineHTMLTag(t *testing.T) {
 	}
 }
 
+func TestCheckFile_DoesNotFlagBoldShapedTextInsideMultilineHTMLTag(t *testing.T) {
+	const content = "# Doc\n\n<span\n  title=\"**Status:** draft · **Owner:** docs\">\ntext</span>\n"
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "multiline-inline-html.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("want multiline inline HTML attributes ignored, got %v", violations)
+	}
+}
+
 func TestCheckFile_DoesNotFlagBoldShapedTextInsideLinkMetadata(t *testing.T) {
 	const content = "# Doc\n\n[reference](https://example.test \"**Status:** draft · **Owner:** docs\")\n"
 	dir := t.TempDir()

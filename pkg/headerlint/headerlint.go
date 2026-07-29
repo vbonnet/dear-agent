@@ -64,7 +64,6 @@ var (
 	htmlBlockTag      = regexp.MustCompile(`(?i)^</?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t/>]|$)`)
 	htmlType7OpenTag  = regexp.MustCompile(`(?i)^<[a-z][a-z0-9-]*(?:[ \t]+[a-z_:][a-z0-9_.:-]*(?:[ \t]*=[ \t]*(?:"[^"]*"|'[^']*'|[^ \t"'=<>]+))?)*[ \t]*/?>[ \t]*$`)
 	htmlType7CloseTag = regexp.MustCompile(`(?i)^</[a-z][a-z0-9-]*[ \t]*>[ \t]*$`)
-	inlineHTMLTag     = regexp.MustCompile(`(?i)(?:<[a-z][a-z0-9-]*(?:[ \t]+[a-z_:][a-z0-9_.:-]*(?:[ \t]*=[ \t]*(?:"[^"]*"|'[^']*'|[^ \t"'=<>]+))?)*[ \t]*/?>|</[a-z][a-z0-9-]*[ \t]*>)`)
 )
 
 // CheckFile validates one Markdown file. Content defects are returned as
@@ -181,7 +180,7 @@ func checkData(path string, data []byte) []Violation {
 	var fences fenceState
 	var htmlBlocks htmlBlockState
 	var inlineCode inlineCodeSpanState
-	var inlineHTML inlineHTMLSpanState
+	inlineHTMLMasks := parsedInlineHTMLMasks(lines)
 	paragraphOpen := false
 	var paragraphContainer fenceContainerContext
 	for i, line := range lines {
@@ -195,21 +194,18 @@ func checkData(path string, data []byte) []Violation {
 			// opener in earlier prose cannot consume a closer from this block
 			// or retain span state across it.
 			inlineCode = inlineCodeSpanState{}
-			inlineHTML = inlineHTMLSpanState{}
 			paragraphOpen = false
 			paragraphContainer = fenceContainerContext{}
 			continue
 		}
 		if htmlBlocks.consume(line, paragraphOpen) {
 			inlineCode = inlineCodeSpanState{}
-			inlineHTML = inlineHTMLSpanState{}
 			paragraphOpen = false
 			paragraphContainer = fenceContainerContext{}
 			continue
 		}
 		if isIndentedCodeLine(line, paragraphOpen, fences.listContinuation) {
 			inlineCode = inlineCodeSpanState{}
-			inlineHTML = inlineHTMLSpanState{}
 			paragraphOpen = false
 			paragraphContainer = fenceContainerContext{}
 			continue
@@ -223,7 +219,7 @@ func checkData(path string, data []byte) []Violation {
 		if lineNo > headerZoneMaxLines {
 			break
 		}
-		maskedHTML := maskInlineHTMLTokens(scannable, &inlineHTML, openerContainer)
+		maskedHTML := applyParsedInlineHTMLMask(scannable, inlineHTMLMasks[i])
 		if unescapedBoldFieldCount(maskedHTML) >= 2 {
 			violations = append(violations, Violation{Path: path, Line: lineNo, Text: strings.TrimSpace(line)})
 		}
@@ -700,94 +696,36 @@ func unescapedBoldFieldCount(line string) int {
 	return count
 }
 
-type inlineHTMLSpanState struct {
-	endMarker string
-	container fenceContainerContext
+func parsedInlineHTMLMasks(lines []string) []string {
+	source := []byte(strings.Join(lines, "\n"))
+	masked := append([]byte(nil), source...)
+	document := goldmark.DefaultParser().Parse(text.NewReader(source))
+	_ = ast.Walk(document, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		rawHTML, ok := node.(*ast.RawHTML)
+		if !entering || !ok {
+			return ast.WalkContinue, nil
+		}
+		for segmentIndex := range rawHTML.Segments.Len() {
+			segment := rawHTML.Segments.At(segmentIndex)
+			for index := segment.Start; index < segment.Stop && index < len(masked); index++ {
+				if masked[index] != '\n' {
+					masked[index] = 0
+				}
+			}
+		}
+		return ast.WalkSkipChildren, nil
+	})
+	return strings.Split(string(masked), "\n")
 }
 
-func maskInlineHTMLTokens(
-	line string,
-	state *inlineHTMLSpanState,
-	container fenceContainerContext,
-) string {
+func applyParsedInlineHTMLMask(line, mask string) string {
 	masked := []byte(line)
-	cursor := 0
-	if state.endMarker != "" {
-		if inlineCodeBlockBoundary(line, state.container) {
-			*state = inlineHTMLSpanState{}
-		} else if closer := strings.Index(line, state.endMarker); closer < 0 {
-			maskBytes(masked, 0, len(masked))
-			return string(masked)
-		} else {
-			cursor = closer + len(state.endMarker)
-			maskBytes(masked, 0, cursor)
-			*state = inlineHTMLSpanState{}
+	for index := 0; index < len(masked) && index < len(mask); index++ {
+		if mask[index] == 0 {
+			masked[index] = ' '
 		}
-	}
-
-	for cursor < len(line) {
-		relativeStart := strings.IndexByte(line[cursor:], '<')
-		if relativeStart < 0 {
-			break
-		}
-		start := cursor + relativeStart
-		if endMarker, ok := inlineHTMLRawEndMarker(line[start:]); ok {
-			searchStart := start + inlineHTMLRawOpenerLength(line[start:])
-			relativeEnd := strings.Index(line[searchStart:], endMarker)
-			if relativeEnd < 0 {
-				maskBytes(masked, start, len(masked))
-				state.endMarker = endMarker
-				state.container = container
-				break
-			}
-			cursor = searchStart + relativeEnd + len(endMarker)
-			maskBytes(masked, start, cursor)
-			continue
-		}
-		match := inlineHTMLTag.FindStringIndex(line[start:])
-		if match != nil && match[0] == 0 {
-			cursor = start + match[1]
-			maskBytes(masked, start, cursor)
-			continue
-		}
-		cursor = start + 1
 	}
 	return string(masked)
-}
-
-func inlineHTMLRawEndMarker(value string) (string, bool) {
-	switch {
-	case strings.HasPrefix(value, "<!--"):
-		return "-->", true
-	case strings.HasPrefix(value, "<?"):
-		return "?>", true
-	case strings.HasPrefix(value, "<![CDATA["):
-		return "]]>", true
-	case len(value) > 2 && strings.HasPrefix(value, "<!") &&
-		value[2] >= 'A' && value[2] <= 'Z':
-		return ">", true
-	default:
-		return "", false
-	}
-}
-
-func inlineHTMLRawOpenerLength(value string) int {
-	switch {
-	case strings.HasPrefix(value, "<!--"):
-		return len("<!--")
-	case strings.HasPrefix(value, "<?"):
-		return len("<?")
-	case strings.HasPrefix(value, "<![CDATA["):
-		return len("<![CDATA[")
-	default:
-		return len("<!")
-	}
-}
-
-func maskBytes(value []byte, start, end int) {
-	for index := start; index < end; index++ {
-		value[index] = ' '
-	}
 }
 
 func sameInlineCodeContainer(container fenceContainerContext, line string) bool {
