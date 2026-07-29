@@ -334,6 +334,10 @@ func ConfiguredWorkspaceConfigs() ([]*Config, error) {
 		add(workspace.Name)
 	}
 	add(base.Workspace)
+	return validateConfiguredWorkspaceConfigs(configs, base, explicitDatabase, databaseIsExplicit)
+}
+
+func validateConfiguredWorkspaceConfigs(configs []*Config, base *Config, explicitDatabase string, databaseIsExplicit bool) ([]*Config, error) {
 	if len(configs) == 0 {
 		return []*Config{base}, nil
 	}
