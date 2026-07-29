@@ -238,7 +238,9 @@ See [ADR-019](docs/adr/ADR-019-a2a-agent-cards.md) for the full decision record.
 ## Design Principles
 
 ### 1. Adapter Pattern for Multi-CLI Support
-All agent-specific logic is encapsulated in adapters implementing a common interface, enabling seamless multi-agent support.
+Agent-specific logic stays in concrete adapters. Shared operation owners
+define small, consumer-owned capability interfaces for only the behavior they
+invoke; there is no common lifecycle interface across all harnesses.
 
 ### 2. Smart Identifier Resolution
 Multi-strategy resolution algorithm (exact → UUID prefix → fuzzy → interactive) eliminates typing exact names.
