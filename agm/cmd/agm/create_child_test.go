@@ -526,12 +526,6 @@ func TestCreateChildCommand_ErrorHandling(t *testing.T) {
 			resolution:    "Verify parent session exists with 'agm session list'",
 		},
 		{
-			name:          "invalid backend",
-			scenario:      "Backend (tmux) is not available",
-			expectedError: "failed to get backend adapter",
-			resolution:    "Check AGM_SESSION_BACKEND environment variable",
-		},
-		{
 			name:          "session name conflict",
 			scenario:      "Child session name already exists",
 			expectedError: "session already exists",

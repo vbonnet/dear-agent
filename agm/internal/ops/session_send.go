@@ -7,7 +7,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
-	"github.com/vbonnet/dear-agent/agm/internal/manager"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
@@ -45,7 +44,7 @@ type SendMessageResult struct {
 // SendMessage resolves one stable recipient and performs direct delivery.
 // Pure API sessions use their provider transaction. Tmux-backed sessions
 // reload lifecycle and delivery identity under the stable-session lock before
-// coupling harness readiness to exact-pane input.
+// using the injected tmux runtime's atomic readiness-and-exact-pane capability.
 func SendMessage(ctx *OpContext, req *SendMessageRequest) (*SendMessageResult, error) {
 	if req == nil || req.Recipient == "" {
 		return nil, ErrInvalidInput("recipient", "Recipient session identifier is required.")
@@ -169,14 +168,9 @@ func sendResolvedMessage(callCtx context.Context, opCtx *OpContext, m *manifest.
 		return sendResolvedTmuxMessage(callCtx, opCtx, m, req, tmuxName, harness)
 	}
 
-	if opCtx.Manager != nil {
-		return sendResolvedManagerMessage(callCtx, opCtx, m, req, tmuxName)
-	}
-
-	// No delivery mechanism configured at all (neither a manager Backend nor a
-	// Tmux client). Report non-delivery without an error: best-effort callers
-	// such as stall recovery rely on this to surface "could not send" via the
-	// Delivered flag rather than failing the whole operation.
+	// No local runtime was configured. Best-effort callers such as stall
+	// recovery surface non-delivery through the result rather than failing the
+	// whole operation.
 	return newSendMessageResult(m, req, false), nil
 }
 
@@ -207,41 +201,4 @@ func sendResolvedTmuxMessage(callCtx context.Context, opCtx *OpContext, m *manif
 	result := newResult(true)
 	result.ResponsePending = true
 	return result, nil
-}
-
-// sendResolvedManagerMessage is the structured-backend fallback used when a
-// caller does not provide the stronger atomic tmux capability.
-func sendResolvedManagerMessage(callCtx context.Context, opCtx *OpContext, m *manifest.Manifest, req *SendMessageRequest, tmuxName string) (*SendMessageResult, error) {
-	newResult := func(delivered bool) *SendMessageResult {
-		return newSendMessageResult(m, req, delivered)
-	}
-	readiness, err := opCtx.Manager.CheckDelivery(callCtx, manager.SessionID(tmuxName))
-	if err != nil {
-		return newResult(false), ErrStorageError("manager.CheckDelivery", err)
-	}
-	if readiness != manager.CanReceiveYes {
-		return newResult(false), ErrSessionNotReady(m.Name, managerReadinessName(readiness))
-	}
-	if err := callCtx.Err(); err != nil {
-		return newResult(false), ErrStorageError("send_message context", err)
-	}
-	backendResult, err := opCtx.Manager.SendMessage(callCtx, manager.SessionID(tmuxName), req.Message)
-	result := newResult(err == nil && backendResult.Delivered)
-	result.ResponsePending = result.Delivered
-	return result, err
-}
-
-func managerReadinessName(readiness manager.CanReceive) string {
-	switch readiness {
-	case manager.CanReceiveYes:
-		return "YES"
-	case manager.CanReceiveNo:
-		return "NO"
-	case manager.CanReceiveQueue:
-		return "QUEUE"
-	case manager.CanReceiveNotFound:
-		return "NOT_FOUND"
-	default:
-		return "UNKNOWN"
-	}
 }

@@ -161,8 +161,8 @@ not a dashboard.
 │  Claude  │  Gemini   │  Codex    │  OpenCode         │
 │  Adapter │  Adapter  │  Adapter  │  Adapter          │
 ├──────────┴───────────┴───────────┴───────────────────┤
-│              Backend Abstraction                      │
-│  Tmux (current)  ·  Temporal (planned)               │
+│              Local Runtime Boundary                   │
+│  session.RealTmux (strict existence/readiness/input)  │
 ├──────────────────────────────────────────────────────┤
 │              Storage & Coordination                   │
 │  loops.db  ·  runs.db  ·  Manifests  ·  Sandbox     │
