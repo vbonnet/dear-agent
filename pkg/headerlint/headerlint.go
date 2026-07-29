@@ -156,6 +156,7 @@ func gitOutput(ctx context.Context, dir string, args ...string) ([]byte, error) 
 // comment for the header-zone definition and the rationale.
 func checkData(path string, data []byte) []Violation {
 	lines, source, lineStarts := normalizedMarkdown(data)
+	source = maskLeadingYAMLFrontmatter(source, lines, lineStarts)
 	source = goldmarkAnalysisSource(source)
 	document := goldmark.DefaultParser().Parse(text.NewReader(source))
 	headerEndLine := firstATXHeaderEnd(document, source, lines, lineStarts)
@@ -173,6 +174,26 @@ func checkData(path string, data []byte) []Violation {
 	}
 	sortViolations(violations)
 	return violations
+}
+
+func maskLeadingYAMLFrontmatter(source []byte, lines []string, lineStarts []int) []byte {
+	if len(lines) < 2 || strings.TrimSpace(strings.TrimPrefix(lines[0], "\uFEFF")) != "---" {
+		return source
+	}
+	for lineIndex := 1; lineIndex < len(lines); lineIndex++ {
+		if strings.TrimSpace(lines[lineIndex]) != "---" {
+			continue
+		}
+		masked := append([]byte(nil), source...)
+		stop := lineStarts[lineIndex] + len(lines[lineIndex])
+		for index := range stop {
+			if masked[index] != '\n' {
+				masked[index] = ' '
+			}
+		}
+		return masked
+	}
+	return source
 }
 
 func normalizedMarkdown(data []byte) ([]string, []byte, []int) {

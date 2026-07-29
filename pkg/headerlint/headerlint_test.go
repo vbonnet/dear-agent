@@ -1164,6 +1164,23 @@ func TestCheckFile_ConsecutiveTypeSixHTMLDoesNotInterruptParagraph(t *testing.T)
 	}
 }
 
+func TestCheckFile_YAMLFrontmatterCannotEndHeaderZone(t *testing.T) {
+	const content = "---\n" +
+		"title: Example\n" +
+		"## internal YAML comment\n" +
+		"---\n" +
+		"**Status:** draft · **Owner:** docs\n"
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "yaml-frontmatter.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 1 || violations[0].Line != 5 {
+		t.Fatalf("want field violation after YAML frontmatter, got %v", violations)
+	}
+}
+
 func TestCheckFile_TypeSixHTMLAfterBlankRemainsBlock(t *testing.T) {
 	const content = "# Doc\n" +
 		"intro\n" +
