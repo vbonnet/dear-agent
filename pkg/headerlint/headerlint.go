@@ -174,7 +174,7 @@ func checkData(path string, data []byte) []Violation {
 			continue
 		}
 		scannable := stripInlineCodeSpans(line, lines[i+1:], &inlineCode)
-		if headingH2Plus.MatchString(scannable) {
+		if matchesContainerATXHeading(scannable, headingH2Plus) {
 			break
 		}
 		if lineNo > headerZoneMaxLines {
@@ -497,7 +497,7 @@ func inlineCodeBlockBoundary(line string) bool {
 	if strings.TrimSpace(line) == "" {
 		return true
 	}
-	if atxHeading.MatchString(line) {
+	if matchesContainerATXHeading(line, atxHeading) {
 		return true
 	}
 	if _, _, isFence := fenceDelimiter(line); isFence {
@@ -506,6 +506,14 @@ func inlineCodeBlockBoundary(line string) bool {
 	trimmed := strings.TrimLeft(line, " \t")
 	_, _, _, isFence := parseFenceDelimiter(trimmed, 0)
 	return isFence
+}
+
+func matchesContainerATXHeading(line string, pattern *regexp.Regexp) bool {
+	offset, ok := fenceContentOffset(line)
+	if !ok {
+		return false
+	}
+	return pattern.MatchString(line[offset:])
 }
 
 func escapedAt(line string, offset int) bool {
