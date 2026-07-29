@@ -85,10 +85,11 @@
       "id": "research-pipeline-trigger-08",
       "prompt": "Decompose this plan document into wayfinder beads.",
       "harness": ["claude"],
-      "should_trigger": false,
+      "should_trigger": true,
       "trials": 3,
       "expected_checks": [
-        {"type": "regex", "target": "trace", "pattern": "(?i)wayfinder"}
+        {"type": "regex", "target": "trace", "pattern": "(?i)(canonical )?beads|bd (create|--db)"},
+        {"type": "regex", "target": "trace", "pattern": "(?i)wayfinder.{0,80}(does not|is not|cannot|doesn't)"}
       ],
       "judge": null
     },

@@ -176,7 +176,10 @@ plan or scratch file as a substitute for the shared Beads record.
 For a small decomposition, create the handful of beads directly. For a large
 decomposition, still create the beads directly, then encode its phases,
 dependency edges, and parallel work-streams with the canonical Beads
-subcommands. Do not route bead creation to Wayfinder's PLAN phase:
+subcommands. If a request calls the result "Wayfinder beads," correct that
+terminology and continue this Stage 4 flow through canonical Beads; the
+misnomer does not make the request out of scope. Do not route bead creation
+to Wayfinder's PLAN phase:
 `wayfinder-session start_phase` creates a single session-level bead during
 SETUP or BUILD, and PLAN cannot start until SPEC; it is not a research-plan
 decomposition API. After the reviewed bead graph exists, inspect the target
@@ -279,6 +282,11 @@ after this pipeline runs to completion for a given source:
       receipt bound to the corrected revision, and a follow-up review
       confirming they're resolved (no bead trail that jumps from "blocked"
       straight to bead filing with no fix, reapproval, and reverify step)
+- [ ] If the requested scope includes Stage 5, every dispatched bead satisfies
+      the target repository's documented merge, deploy, and real-surface
+      definition of done. A handoff with open PRs, incomplete implementation,
+      or unresolved delivery proof is recorded as a partial Stage 4 stop with
+      the remaining status and blockers, not pipeline completion
 
 ## References
 
