@@ -1814,6 +1814,7 @@ func TestBuildCreateSessionManifestPersistsSandboxLaunchPolicyWithoutAliasing(t 
 		CodexHookSourceRepo:   "/src/reviewed",
 		CodexHookSourceCommit: strings.Repeat("a", 40),
 		CodexHookDigest:       strings.Repeat("b", 64),
+		CodexHookRoot:         "/trusted/hooks/" + strings.Repeat("b", 64),
 	}
 	req := &CreateSessionRequest{
 		Cwd:                  "/tmp/sandbox",
@@ -1833,7 +1834,8 @@ func TestBuildCreateSessionManifestPersistsSandboxLaunchPolicyWithoutAliasing(t 
 	}
 	if got.Sandbox.CodexHookSourceRepo != sandbox.CodexHookSourceRepo ||
 		got.Sandbox.CodexHookSourceCommit != sandbox.CodexHookSourceCommit ||
-		got.Sandbox.CodexHookDigest != sandbox.CodexHookDigest {
+		got.Sandbox.CodexHookDigest != sandbox.CodexHookDigest ||
+		got.Sandbox.CodexHookRoot != sandbox.CodexHookRoot {
 		t.Fatalf("persisted Codex hook evidence = %#v, want %#v", got.Sandbox, sandbox)
 	}
 	if !slices.Equal(got.Sandbox.ExtraAddDirs, req.ExtraAddDirs) {
@@ -1855,6 +1857,7 @@ func TestVerifyCreateCodexHookTrustRechecksSandboxAssets(t *testing.T) {
 			CodexHookSourceRepo:   hookTrust.SourceRepo,
 			CodexHookSourceCommit: hookTrust.SourceCommit,
 			CodexHookDigest:       hookTrust.Digest,
+			CodexHookRoot:         hookTrust.HookRoot,
 		}},
 	}
 	params := &createSessionParams{harness: "codex-cli"}

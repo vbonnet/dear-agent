@@ -12,7 +12,7 @@ import (
 
 func TestAttestAndVerifyUseCommittedHookObjects(t *testing.T) {
 	source, sandbox := hookFixture(t)
-	attestation, err := Attest(context.Background(), source, sandbox)
+	attestation, err := attestForTest(t, source, sandbox, []string{sandbox})
 	if err != nil {
 		t.Fatalf("Attest() error: %v", err)
 	}
@@ -25,6 +25,48 @@ func TestAttestAndVerifyUseCommittedHookObjects(t *testing.T) {
 	writeFile(t, filepath.Join(source, ".codex", "hooks", "guard"), "#!/bin/sh\nexit 99\n", 0o755)
 	if err := Verify(context.Background(), attestation, sandbox); err != nil {
 		t.Fatalf("Verify() after source working-tree edit: %v", err)
+	}
+}
+
+func TestVerifyRejectsMutatedImmutableMaterialization(t *testing.T) {
+	source, sandbox := hookFixture(t)
+	attestation, err := attestForTest(t, source, sandbox, []string{sandbox})
+	if err != nil {
+		t.Fatalf("Attest() error: %v", err)
+	}
+	hooksDir := filepath.Join(attestation.HookRoot, ".codex", "hooks")
+	if err := os.Chmod(attestation.HookRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(attestation.HookRoot, ".codex"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(hooksDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hooksDir, "unexpected"), []byte("#!/bin/sh\n"), 0o500); err != nil {
+		t.Fatal(err)
+	}
+	if err := lockMaterializedDirectories(attestation.HookRoot); err != nil {
+		t.Fatal(err)
+	}
+	if err := Verify(context.Background(), attestation, sandbox); err == nil ||
+		!strings.Contains(err.Error(), "unexpected asset") {
+		t.Fatalf("Verify() error = %v, want unexpected-asset rejection", err)
+	}
+}
+
+func TestAttestRejectsAgentWritableSourceOrStore(t *testing.T) {
+	source, sandbox := hookFixture(t)
+	if _, err := attestForTest(t, source, sandbox, []string{source, sandbox}); err == nil ||
+		!strings.Contains(err.Error(), "hook source repository") {
+		t.Fatalf("Attest() source-overlap error = %v", err)
+	}
+
+	store := filepath.Join(sandbox, "agent-writable-store")
+	if _, err := Attest(context.Background(), source, sandbox, store, []string{sandbox}); err == nil ||
+		!strings.Contains(err.Error(), "trusted hook root") {
+		t.Fatalf("Attest() store-overlap error = %v", err)
 	}
 }
 
@@ -67,7 +109,7 @@ func TestVerifyRejectsMutatedSandboxHookAssets(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			source, sandbox := hookFixture(t)
-			attestation, err := Attest(context.Background(), source, sandbox)
+			attestation, err := attestForTest(t, source, sandbox, []string{sandbox})
 			if err != nil {
 				t.Fatalf("Attest() error: %v", err)
 			}
@@ -88,7 +130,7 @@ func TestVerifyRejectsNestedHookManifestThatCanShadowRoot(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(nestedWorkDir, ".codex", "hooks.json"), []byte(`{"hooks":{}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	attestation, err := Attest(context.Background(), source, sandbox)
+	attestation, err := attestForTest(t, source, sandbox, []string{sandbox})
 	if err != nil {
 		t.Fatalf("Attest() error: %v", err)
 	}
@@ -123,18 +165,39 @@ func TestAttestRejectsUncommittedOrUnsupportedProjectReferences(t *testing.T) {
 			gittest.Run(t, source, "add", ".codex/hooks.json")
 			gittest.Run(t, source, "commit", "-m", "change hook command")
 			writeFile(t, filepath.Join(sandbox, ".codex", "hooks.json"), manifest, 0o644)
-			if _, err := Attest(context.Background(), source, sandbox); err == nil || !strings.Contains(err.Error(), tt.want) {
+			if _, err := attestForTest(t, source, sandbox, []string{sandbox}); err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("Attest() error = %v, want %q", err, tt.want)
 			}
 		})
 	}
 }
 
+func attestForTest(t *testing.T, source, sandbox string, writableRoots []string) (Attestation, error) {
+	t.Helper()
+	attestation, err := Attest(
+		context.Background(), source, sandbox, filepath.Join(t.TempDir(), "store"), writableRoots,
+	)
+	if err == nil {
+		t.Cleanup(func() {
+			_ = filepath.WalkDir(attestation.HookRoot, func(path string, entry os.DirEntry, walkErr error) error {
+				if walkErr != nil {
+					return walkErr
+				}
+				if entry.IsDir() {
+					return os.Chmod(path, 0o700)
+				}
+				return nil
+			})
+		})
+	}
+	return attestation, err
+}
+
 func hookFixture(t *testing.T) (string, string) {
 	t.Helper()
 	source := gittest.NewRepo(t)
 	writeFile(t, filepath.Join(source, ".codex", "hooks.json"),
-		`{"hooks":{"PreToolUse":[{"hooks":[{"command":"${CLAUDE_PROJECT_DIR}/.codex/hooks/guard"},{"command":"tools/relative-guard"}]}]}}`,
+		`{"hooks":{"PreToolUse":[{"hooks":[{"command":"${AGM_CODEX_HOOK_ROOT:-.}/.codex/hooks/guard"},{"command":"tools/relative-guard"}]}]}}`,
 		0o644,
 	)
 	writeFile(t, filepath.Join(source, ".codex", "hooks", "guard"), "#!/bin/sh\nexit 0\n", 0o755)

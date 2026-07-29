@@ -505,6 +505,7 @@ func TestPrepareResumeLaunchRestoresSandboxCodexPolicy(t *testing.T) {
 			CodexHookSourceRepo:        hookTrust.SourceRepo,
 			CodexHookSourceCommit:      hookTrust.SourceCommit,
 			CodexHookDigest:            hookTrust.Digest,
+			CodexHookRoot:              hookTrust.HookRoot,
 		},
 	}
 	launch, _, _, err := prepareResumeLaunch(
@@ -522,6 +523,7 @@ func TestPrepareResumeLaunchRestoresSandboxCodexPolicy(t *testing.T) {
 	for _, want := range []string{
 		"--add-dir " + shellquote.Quote(extraAddDir),
 		"--bypass-hook-trust",
+		"--hook-root " + shellquote.Quote(hookTrust.HookRoot),
 	} {
 		if !strings.Contains(launch.Command, want) {
 			t.Fatalf("prepareResumeLaunch() command = %q, want %q", launch.Command, want)
@@ -558,6 +560,7 @@ func TestPrepareResumeLaunchRefusesUnapprovedCodexHookTrust(t *testing.T) {
 			CodexHookSourceRepo:        hookTrust.SourceRepo,
 			CodexHookSourceCommit:      hookTrust.SourceCommit,
 			CodexHookDigest:            hookTrust.Digest,
+			CodexHookRoot:              hookTrust.HookRoot,
 		},
 	}
 	launch, _, _, err := prepareResumeLaunch(
@@ -598,6 +601,7 @@ func TestPrepareResumeLaunchRejectsChangedSandboxCodexHooks(t *testing.T) {
 			CodexHookSourceRepo:   hookTrust.SourceRepo,
 			CodexHookSourceCommit: hookTrust.SourceCommit,
 			CodexHookDigest:       hookTrust.Digest,
+			CodexHookRoot:         hookTrust.HookRoot,
 		},
 	}
 	_, _, _, err := prepareResumeLaunch(
@@ -621,7 +625,7 @@ func resumeCodexHookFixture(t *testing.T) (string, codexhooks.Attestation) {
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manifestBody := `{"hooks":{"PreToolUse":[{"hooks":[{"command":"${CLAUDE_PROJECT_DIR}/.codex/hooks/guard"}]}]}}`
+	manifestBody := `{"hooks":{"PreToolUse":[{"hooks":[{"command":"${AGM_CODEX_HOOK_ROOT:-.}/.codex/hooks/guard"}]}]}}`
 	if err := os.WriteFile(filepath.Join(source, ".codex", "hooks.json"), []byte(manifestBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -634,10 +638,23 @@ func resumeCodexHookFixture(t *testing.T) (string, codexhooks.Attestation) {
 	sandbox := filepath.Join(t.TempDir(), "sandbox")
 	gittest.Run(t, filepath.Dir(sandbox), "clone", "--no-hardlinks", source, sandbox)
 	gittest.HardenRepo(t, sandbox)
-	attestation, err := codexhooks.Attest(context.Background(), source, sandbox)
+	attestation, err := codexhooks.Attest(
+		context.Background(), source, sandbox, filepath.Join(t.TempDir(), "store"), []string{sandbox},
+	)
 	if err != nil {
 		t.Fatalf("Attest() error: %v", err)
 	}
+	t.Cleanup(func() {
+		_ = filepath.WalkDir(attestation.HookRoot, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				return os.Chmod(path, 0o700)
+			}
+			return nil
+		})
+	})
 	return sandbox, attestation
 }
 

@@ -281,7 +281,14 @@ func prepareCodexHookTrustBypass(ctx context.Context, sandboxInfo *manifest.Sand
 	if len(cfg.Sandbox.Repos) == 0 || sandboxInfo.CodexHookSourceRepo == "" {
 		return false, fmt.Errorf("the Codex hook-trust override requires an explicit sandbox.repos source")
 	}
-	attestation, err := codexhooks.Attest(ctx, sandboxInfo.CodexHookSourceRepo, sandboxInfo.WorkingDir)
+	storeBase, err := codexhooks.DefaultStoreBase()
+	if err != nil {
+		return false, fmt.Errorf("refusing Codex hook-trust bypass: %w", err)
+	}
+	writableRoots := append([]string{sandboxInfo.WorkingDir, sandboxInfo.MergedPath}, cfg.Sandbox.WritableDirs...)
+	attestation, err := codexhooks.Attest(
+		ctx, sandboxInfo.CodexHookSourceRepo, sandboxInfo.WorkingDir, storeBase, writableRoots,
+	)
 	if err != nil {
 		return false, fmt.Errorf("refusing Codex hook-trust bypass: %w", err)
 	}
@@ -292,6 +299,7 @@ func prepareCodexHookTrustBypass(ctx context.Context, sandboxInfo *manifest.Sand
 	sandboxInfo.CodexHookSourceRepo = attestation.SourceRepo
 	sandboxInfo.CodexHookSourceCommit = attestation.SourceCommit
 	sandboxInfo.CodexHookDigest = attestation.Digest
+	sandboxInfo.CodexHookRoot = attestation.HookRoot
 	sandboxInfo.BypassCodexHookTrustReason = reason
 	ui.PrintSuccess("Codex hook-trust override attested, authorized, and recorded")
 	return true, nil
@@ -478,9 +486,10 @@ func getWorkDir() (string, error) {
 	return wd, nil
 }
 
-// collectExtraAddDirs returns the per-session --add-dir entries needed to
-// re-authorize sandbox source-repo paths and a flag indicating whether trust
-// was pre-configured (always true today via --add-dir).
+// collectExtraAddDirs returns the explicitly configured host paths that Codex
+// may modify outside its sandbox workspace. Source repositories are lower
+// layers inside the sandbox and must never be forwarded as writable add-dirs.
+// The second return value reports that trust was pre-configured.
 // codexHookTrustBypassReason is the CLI-supplied justification. The flag takes
 // a reason rather than being a bool: the caller must say why, and that text is
 // what the recurring override audit reads.

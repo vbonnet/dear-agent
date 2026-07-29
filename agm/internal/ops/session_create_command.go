@@ -16,28 +16,29 @@ import (
 // creation surface. Surface adapters may still own interactive readiness and
 // presentation, but they must not assemble a second launch command.
 type HarnessLaunchSpec struct {
-	Harness          string
-	Model            string
-	SessionName      string
-	SessionID        string
-	ResumeID         string
-	WorkDir          string
-	Persistent       bool
-	PermissionMode   string
-	DisableAutoMode  bool
-	DisableOAuth     bool
-	MaxBudgetUSD     float64
-	ExtraAddDirs     []string
+	Harness         string
+	Model           string
+	SessionName     string
+	SessionID       string
+	ResumeID        string
+	WorkDir         string
+	Persistent      bool
+	PermissionMode  string
+	DisableAutoMode bool
+	DisableOAuth    bool
+	MaxBudgetUSD    float64
+	ExtraAddDirs    []string
 	// BypassCodexHookTrust launches Codex without per-path hook trust. Only
 	// codex-cli consumes it; other harnesses ignore it.
 	BypassCodexHookTrust bool
+	CodexHookRoot        string
 	ForwardTelemetry     bool
-	Codex            *manifest.Codex
-	Pi               *manifest.Pi
-	PiLaunchID       string
-	PiExtension      string
-	PiPolicyJSON     string
-	PiPolicyFile     string
+	Codex                *manifest.Codex
+	Pi                   *manifest.Pi
+	PiLaunchID           string
+	PiExtension          string
+	PiPolicyJSON         string
+	PiPolicyFile         string
 	// DeferredUntilCallerExit is set only by current-pane launchers whose
 	// queued command cannot run until the producing AGM process releases tmux.
 	DeferredUntilCallerExit bool
@@ -145,6 +146,7 @@ func validateHarnessLaunchSpec(spec HarnessLaunchSpec) error {
 			{"session name", spec.SessionName},
 			{"workdir", spec.WorkDir},
 			{"permission mode", spec.PermissionMode},
+			{"Codex hook root", spec.CodexHookRoot},
 		}
 		if spec.Codex != nil {
 			fields = append(fields, field{"codex session id", spec.Codex.SessionID})
@@ -282,6 +284,7 @@ func codexLaunch(spec HarnessLaunchSpec) (harnessexec.CodexLaunch, bool) {
 		ResumeID:               resumeID,
 		Remote:                 resumeID != "",
 		BypassHookTrust:        spec.BypassCodexHookTrust,
+		HookRoot:               spec.CodexHookRoot,
 		Persistent:             spec.Persistent,
 		DeferUntilProducerExit: spec.DeferredUntilCallerExit,
 	}

@@ -183,7 +183,7 @@ func TestCodexRequestReconstructsValidatedNativeArguments(t *testing.T) {
 
 	bypass, err := parseCodex([]string{
 		"--session", "session", "--model", "gpt-test", "--workdir", "/tmp/work",
-		"--sandbox", "workspace-write", "--bypass-hook-trust",
+		"--sandbox", "workspace-write", "--bypass-hook-trust", "--hook-root", "/trusted/hooks/digest",
 	})
 	if err != nil {
 		t.Fatalf("parse Codex hook-trust bypass: %v", err)
@@ -409,6 +409,7 @@ func TestEnvironmentContracts(t *testing.T) {
 }
 
 func TestRunUsesFixedExecutablesAndDirectReplacement(t *testing.T) {
+	t.Setenv("AGM_CODEX_HOOK_ROOT", "/attacker/controlled")
 	originalLookPathInEnvironment := lookPathInEnvironment
 	originalReplaceProcess := replaceProcess
 	originalResolveClaudeOAuth := resolveClaudeOAuth
@@ -430,7 +431,7 @@ func TestRunUsesFixedExecutablesAndDirectReplacement(t *testing.T) {
 
 	err := Run(CodexProtocol, []string{
 		"--session", "codex-session", "--model", "gpt-test", "--workdir", "/tmp/work",
-		"--sandbox", "workspace-write",
+		"--sandbox", "workspace-write", "--bypass-hook-trust", "--hook-root", "/trusted/hooks/digest",
 	})
 	if err == nil || !strings.Contains(err.Error(), "returned unexpectedly") {
 		t.Fatalf("Codex Run error = %v, want unexpected-return guard", err)
@@ -440,6 +441,9 @@ func TestRunUsesFixedExecutablesAndDirectReplacement(t *testing.T) {
 	}
 	if got := environmentMap(gotEnv)["AGM_SESSION_NAME"]; got != "codex-session" {
 		t.Fatalf("Codex replacement session environment = %q", got)
+	}
+	if got := environmentMap(gotEnv)["AGM_CODEX_HOOK_ROOT"]; got != "/trusted/hooks/digest" {
+		t.Fatalf("Codex replacement hook root = %q, want private request value", got)
 	}
 
 	resolveClaudeOAuth = func() string { return "resolved-oauth" }
@@ -480,6 +484,9 @@ func TestExecutorRejectsUnvalidatedArguments(t *testing.T) {
 		{name: "tab control character", protocol: CodexProtocol, args: []string{"--session", "s\tnext", "--model", "m", "--workdir", "/tmp", "--sandbox", "workspace-write"}},
 		{name: "escape control character", protocol: ClaudeProtocol, args: []string{"--session", "s\x1bnext", "--model", "m"}},
 		{name: "sandbox", protocol: CodexProtocol, args: []string{"--session", "s", "--model", "m", "--workdir", "/tmp", "--sandbox", "unsafe"}},
+		{name: "bypass without hook root", protocol: CodexProtocol, args: []string{"--session", "s", "--model", "m", "--workdir", "/tmp", "--sandbox", "workspace-write", "--bypass-hook-trust"}},
+		{name: "relative hook root", protocol: CodexProtocol, args: []string{"--session", "s", "--model", "m", "--workdir", "/tmp", "--sandbox", "workspace-write", "--bypass-hook-trust", "--hook-root", "relative"}},
+		{name: "hook root without bypass", protocol: CodexProtocol, args: []string{"--session", "s", "--model", "m", "--workdir", "/tmp", "--sandbox", "workspace-write", "--hook-root", "/trusted/hooks"}},
 		{name: "permission", protocol: ClaudeProtocol, args: []string{"--session", "s", "--model", "m", "--permission", "unsafe"}},
 		{name: "resume control character", protocol: ClaudeProtocol, args: []string{"--session", "s", "--resume-id", "id\nnext"}},
 		{name: "non-finite budget", protocol: ClaudeProtocol, args: []string{"--session", "s", "--model", "m", "--max-budget-usd", "NaN"}},

@@ -798,6 +798,7 @@ func prepareResumeLaunch(store dolt.Storage, m *manifest.Manifest, harnessName s
 					SourceRepo:   m.Sandbox.CodexHookSourceRepo,
 					SourceCommit: m.Sandbox.CodexHookSourceCommit,
 					Digest:       m.Sandbox.CodexHookDigest,
+					HookRoot:     m.Sandbox.CodexHookRoot,
 				}, health.WorktreePath); err != nil {
 					return HarnessLaunchCommand{}, "", warnings, fmt.Errorf("revalidate Codex hook trust before resume: %w", err)
 				}
@@ -805,6 +806,7 @@ func prepareResumeLaunch(store dolt.Storage, m *manifest.Manifest, harnessName s
 					return HarnessLaunchCommand{}, "", warnings, err
 				}
 				spec.BypassCodexHookTrust = true
+				spec.CodexHookRoot = m.Sandbox.CodexHookRoot
 			}
 		}
 		if err := agent.EnsureCodexWorkdirTrusted(health.WorktreePath); err != nil {

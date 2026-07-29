@@ -775,6 +775,7 @@ func TestSQLiteSandboxOwnershipMetadataRoundTripsForArchive(t *testing.T) {
 		CodexHookSourceRepo:   "/reviewed/source",
 		CodexHookSourceCommit: strings.Repeat("a", 40),
 		CodexHookDigest:       strings.Repeat("b", 64),
+		CodexHookRoot:         filepath.Join(sandboxBase, "trusted-hooks", strings.Repeat("b", 64)),
 	}
 	m := &manifest.Manifest{
 		SchemaVersion: manifest.SchemaVersion,
@@ -806,6 +807,7 @@ func TestSQLiteSandboxOwnershipMetadataRoundTripsForArchive(t *testing.T) {
 			got.CodexHookSourceRepo != want.CodexHookSourceRepo ||
 			got.CodexHookSourceCommit != want.CodexHookSourceCommit ||
 			got.CodexHookDigest != want.CodexHookDigest ||
+			got.CodexHookRoot != want.CodexHookRoot ||
 			!got.CreatedAt.Equal(want.CreatedAt) {
 			t.Fatalf("Sandbox = %#v, want %#v", got, want)
 		}

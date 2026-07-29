@@ -22,6 +22,7 @@ const hooksManifestPath = ".codex/hooks.json"
 
 var (
 	projectDirReference = regexp.MustCompile(`(?:\$\{(?:CLAUDE|CODEX)_PROJECT_DIR\}|\$(?:CLAUDE|CODEX)_PROJECT_DIR)/([A-Za-z0-9._/-]+)`)
+	hookRootReference   = regexp.MustCompile(`\$\{AGM_CODEX_HOOK_ROOT:-\.\}/([A-Za-z0-9._/-]+)`)
 	relativePathToken   = regexp.MustCompile(`(?:^|[\s"'()])((?:\./)?[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+)`)
 )
 
@@ -31,6 +32,7 @@ type Attestation struct {
 	SourceRepo   string
 	SourceCommit string
 	Digest       string
+	HookRoot     string
 }
 
 type asset struct {
@@ -44,10 +46,17 @@ type asset struct {
 // sandbox hook manifest and every project-referenced hook are byte-identical
 // to regular files in that commit. Source content is read from Git objects,
 // never from the mutable source working tree.
-func Attest(ctx context.Context, sourceRepo, sandboxWorkDir string) (Attestation, error) {
+func Attest(
+	ctx context.Context,
+	sourceRepo, sandboxWorkDir, storeBase string,
+	writableRoots []string,
+) (Attestation, error) {
 	sourceRoot, err := gitRoot(ctx, sourceRepo)
 	if err != nil {
 		return Attestation{}, fmt.Errorf("resolve hook source repository: %w", err)
+	}
+	if err := rejectWritableOverlap("hook source repository", sourceRoot, writableRoots); err != nil {
+		return Attestation{}, err
 	}
 	commit, err := gitOutput(ctx, sourceRoot, "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil {
@@ -65,6 +74,12 @@ func Attest(ctx context.Context, sourceRepo, sandboxWorkDir string) (Attestation
 	if err := verifySandboxAssets(ctx, attestation, sandboxWorkDir, sourceAssets); err != nil {
 		return Attestation{}, err
 	}
+	hookRoot, err := materializeAssets(storeBase, attestation.Digest, sourceAssets,
+		append(append([]string{}, writableRoots...), sandboxWorkDir))
+	if err != nil {
+		return Attestation{}, fmt.Errorf("materialize immutable Codex hooks: %w", err)
+	}
+	attestation.HookRoot = hookRoot
 	return attestation, nil
 }
 
@@ -72,20 +87,8 @@ func Attest(ctx context.Context, sourceRepo, sandboxWorkDir string) (Attestation
 // It fails closed if the Git objects disappear, the recorded source changes
 // identity, or the sandbox manifest/referenced files no longer match.
 func Verify(ctx context.Context, attestation Attestation, sandboxWorkDir string) error {
-	if !filepath.IsAbs(attestation.SourceRepo) || filepath.Clean(attestation.SourceRepo) != attestation.SourceRepo {
-		return fmt.Errorf("hook source repository must be a clean absolute path")
-	}
-	if len(attestation.SourceCommit) != 40 && len(attestation.SourceCommit) != 64 {
-		return fmt.Errorf("hook source commit is not a full Git object ID")
-	}
-	if _, err := hex.DecodeString(attestation.SourceCommit); err != nil {
-		return fmt.Errorf("hook source commit is not hexadecimal: %w", err)
-	}
-	if len(attestation.Digest) != sha256.Size*2 {
-		return fmt.Errorf("hook digest is not a SHA-256 value")
-	}
-	if _, err := hex.DecodeString(attestation.Digest); err != nil {
-		return fmt.Errorf("hook digest is not hexadecimal: %w", err)
+	if err := validateAttestationShape(attestation); err != nil {
+		return err
 	}
 	sourceRoot, err := gitRoot(ctx, attestation.SourceRepo)
 	if err != nil {
@@ -101,7 +104,35 @@ func Verify(ctx context.Context, attestation Attestation, sandboxWorkDir string)
 	if got := digestAssets(sourceAssets); got != attestation.Digest {
 		return fmt.Errorf("committed hook digest changed: got %s, want %s", got, attestation.Digest)
 	}
+	if err := verifyMaterializedAssets(attestation.HookRoot, attestation.Digest, sourceAssets); err != nil {
+		return err
+	}
 	return verifySandboxAssets(ctx, attestation, sandboxWorkDir, sourceAssets)
+}
+
+func validateAttestationShape(attestation Attestation) error {
+	if !filepath.IsAbs(attestation.SourceRepo) || filepath.Clean(attestation.SourceRepo) != attestation.SourceRepo {
+		return fmt.Errorf("hook source repository must be a clean absolute path")
+	}
+	if len(attestation.SourceCommit) != 40 && len(attestation.SourceCommit) != 64 {
+		return fmt.Errorf("hook source commit is not a full Git object ID")
+	}
+	if _, err := hex.DecodeString(attestation.SourceCommit); err != nil {
+		return fmt.Errorf("hook source commit is not hexadecimal: %w", err)
+	}
+	if len(attestation.Digest) != sha256.Size*2 {
+		return fmt.Errorf("hook digest is not a SHA-256 value")
+	}
+	if _, err := hex.DecodeString(attestation.Digest); err != nil {
+		return fmt.Errorf("hook digest is not hexadecimal: %w", err)
+	}
+	if !filepath.IsAbs(attestation.HookRoot) || filepath.Clean(attestation.HookRoot) != attestation.HookRoot {
+		return fmt.Errorf("materialized hook root must be a clean absolute path")
+	}
+	if filepath.Base(attestation.HookRoot) != attestation.Digest {
+		return fmt.Errorf("materialized hook root is not named for the attested digest")
+	}
+	return nil
 }
 
 func committedAssets(ctx context.Context, attestation Attestation) ([]asset, error) {
@@ -244,7 +275,14 @@ func referencedProjectFiles(manifest []byte) ([]string, error) {
 			}
 			references[clean] = struct{}{}
 		}
-		unmatched := projectDirReference.ReplaceAllString(command, "")
+		for _, match := range hookRootReference.FindAllStringSubmatch(command, -1) {
+			clean, err := cleanProjectPath(match[1])
+			if err != nil {
+				return nil, fmt.Errorf("command %q: %w", command, err)
+			}
+			references[clean] = struct{}{}
+		}
+		unmatched := hookRootReference.ReplaceAllString(projectDirReference.ReplaceAllString(command, ""), "")
 		if strings.Contains(unmatched, "PROJECT_DIR") {
 			return nil, fmt.Errorf("unsupported project-directory reference in command %q", command)
 		}

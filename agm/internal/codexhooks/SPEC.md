@@ -21,6 +21,12 @@ reviewed source commit.
 
 **CHOOK-05** When the mutable source working tree changes after attestation, the system shall continue to verify against the pinned Git objects and shall not treat working-tree bytes as reviewed hook evidence.
 
+**CHOOK-06** When AGM prepares a sandboxed Codex session, the reviewed source repository shall remain outside every agent-writable root and shall not be forwarded to Codex as an `--add-dir`.
+
+**CHOOK-07** When AGM authorizes the hook-trust bypass, the system shall materialize the exact attested manifest and referenced hooks in a content-addressed, read-only directory outside every agent-writable root, reject missing or unexpected assets, and make that immutable root the project-hook execution root for the full Codex process lifetime.
+
+**CHOOK-08** When AGM launches or cold-resumes a bypassed Codex session, the private executor shall require a clean absolute attested hook root, inject it as `AGM_CODEX_HOOK_ROOT`, and reject a hook root when the bypass is absent.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`

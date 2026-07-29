@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -87,6 +88,7 @@ type CodexLaunch struct {
 	ResumeID               string
 	Remote                 bool
 	BypassHookTrust        bool
+	HookRoot               string
 	Persistent             bool
 	DeferUntilProducerExit bool
 }
@@ -141,6 +143,7 @@ func BuildCodexCommand(launch CodexLaunch) string {
 	}
 	if launch.BypassHookTrust {
 		b.WriteString(" --bypass-hook-trust")
+		appendShellFlag(&b, "--hook-root", launch.HookRoot)
 	}
 	if !launch.Persistent {
 		b.WriteString(" && exit")
@@ -279,6 +282,9 @@ func runCodex(args []string) error {
 	// Keep the child's logical working directory aligned with the validated
 	// -C target instead of forwarding a stale caller PWD.
 	environ = overlayEnvironment(environ, []string{"PWD=" + request.WorkDir})
+	if request.BypassHooks {
+		environ = overlayEnvironment(environ, []string{"AGM_CODEX_HOOK_ROOT=" + request.HookRoot})
+	}
 	path, err := lookPathInEnvironment("codex", environ)
 	if err != nil {
 		return fmt.Errorf("resolve codex executable: %w", err)
@@ -346,6 +352,7 @@ type codexRequest struct {
 	ResumeID    string
 	Remote      bool
 	BypassHooks bool
+	HookRoot    string
 }
 
 func parseCodex(args []string) (codexRequest, error) {
@@ -362,6 +369,7 @@ func parseCodex(args []string) (codexRequest, error) {
 	set.StringVar(&request.ResumeID, "resume-id", "", "")
 	set.BoolVar(&request.Remote, "remote", false, "")
 	set.BoolVar(&request.BypassHooks, "bypass-hook-trust", false, "")
+	set.StringVar(&request.HookRoot, "hook-root", "", "")
 	if err := set.Parse(args); err != nil {
 		return codexRequest{}, fmt.Errorf("invalid Codex launch request: %w", err)
 	}
@@ -395,11 +403,18 @@ func validateCodexRequest(request codexRequest) error {
 		return errors.New("invalid Codex launch request: remote resume requires a session id")
 	}
 	for _, field := range []struct{ name, value string }{
-		{"resume-id", request.ResumeID}, {"handoff", request.HandoffPath},
+		{"resume-id", request.ResumeID}, {"handoff", request.HandoffPath}, {"hook-root", request.HookRoot},
 	} {
 		if err := validateOptionalText(field.name, field.value); err != nil {
 			return err
 		}
+	}
+	if request.BypassHooks {
+		if !filepath.IsAbs(request.HookRoot) || filepath.Clean(request.HookRoot) != request.HookRoot {
+			return errors.New("invalid Codex launch request: hook root must be a clean absolute path")
+		}
+	} else if request.HookRoot != "" {
+		return errors.New("invalid Codex launch request: hook root requires hook-trust bypass")
 	}
 	return nil
 }

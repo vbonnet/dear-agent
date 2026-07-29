@@ -459,6 +459,7 @@ func verifyCreateCodexHookTrust(ctx context.Context, req *CreateSessionRequest, 
 		SourceRepo:   sandbox.CodexHookSourceRepo,
 		SourceCommit: sandbox.CodexHookSourceCommit,
 		Digest:       sandbox.CodexHookDigest,
+		HookRoot:     sandbox.CodexHookRoot,
 	}, req.Cwd)
 	if err != nil {
 		return ErrInvalidInput("bypass_codex_hook_trust", fmt.Sprintf("Hook evidence failed revalidation immediately before launch: %v", err))
@@ -608,6 +609,10 @@ func buildHarnessLaunchSpec(req *CreateSessionRequest, params *createSessionPara
 	bypassCodexHookTrust := req.BypassCodexHookTrust &&
 		req.Metadata.Sandbox != nil &&
 		req.Metadata.Sandbox.Enabled
+	codexHookRoot := ""
+	if bypassCodexHookTrust {
+		codexHookRoot = req.Metadata.Sandbox.CodexHookRoot
+	}
 	spec := HarnessLaunchSpec{
 		Harness:          params.harness,
 		Model:            params.model,
@@ -623,6 +628,7 @@ func buildHarnessLaunchSpec(req *CreateSessionRequest, params *createSessionPara
 		ForwardTelemetry: req.ForwardTelemetry,
 
 		BypassCodexHookTrust: bypassCodexHookTrust,
+		CodexHookRoot:        codexHookRoot,
 		Codex:                codexMeta,
 		Pi:                   req.Metadata.Pi,
 		PiExtension:          req.Metadata.PiExtension,

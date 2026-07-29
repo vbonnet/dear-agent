@@ -179,6 +179,7 @@ func validateCodexPastedValues(launch CodexLaunch) error {
 		{"sandbox", launch.Sandbox},
 		{"approval", launch.Approval},
 		{"resume-id", launch.ResumeID},
+		{"hook-root", launch.HookRoot},
 	} {
 		if err := validateOptionalText(field.name, field.value); err != nil {
 			return fmt.Errorf("validate Codex pane command: %w", err)

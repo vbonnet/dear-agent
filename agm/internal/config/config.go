@@ -157,9 +157,13 @@ type SandboxConfig struct {
 	// enabling this requires an explicit Repos entry for the reviewed golden
 	// checkout, and AGM pins the source commit, reads hooks.json and every
 	// project-referenced hook from immutable Git objects, verifies their
-	// SHA-256 digest against the sandbox copy, and repeats that verification
-	// immediately before each launch and cold resume. Any missing, uncommitted,
-	// symlinked, or changed asset fails closed.
+	// SHA-256 digest against the sandbox copy, and materializes those exact
+	// objects in a content-addressed, read-only host directory outside every
+	// agent-writable root. Bypassed sessions execute project hooks only from
+	// that immutable root for their full lifetime. AGM repeats verification
+	// immediately before each launch and cold resume. The reviewed checkout is
+	// never forwarded as a writable Codex add-dir. Any missing, uncommitted,
+	// symlinked, changed, writable, or overlapping asset fails closed.
 	//
 	// Governance asks whether anyone agreed to run them unreviewed. Setting this
 	// is a request, not a grant: the launch still refuses unless a human has
