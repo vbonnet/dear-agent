@@ -93,14 +93,23 @@ type launchHandoff struct {
 // authentication authoritative even when a long-lived tmux server has stale
 // environment state.
 func PrepareCodexCommand(launch CodexLaunch, parent []string) (PreparedCommand, error) {
+	if err := validateCodexPastedValues(launch); err != nil {
+		return PreparedCommand{}, err
+	}
 	executable, err := resolvePrivateExecutable()
 	if err != nil {
 		return PreparedCommand{}, fmt.Errorf("resolve AGM private executor: %w", err)
+	}
+	if err := validateText("private executable", executable); err != nil {
+		return PreparedCommand{}, fmt.Errorf("validate Codex pane command: %w", err)
 	}
 	snapshot := removeEnvironment(CodexEnvironment(parent, launch.SessionName), paneRuntimeEnvironment)
 	handoffPath, err := stageHandoff(CodexProtocol, snapshot, launch.DeferUntilProducerExit)
 	if err != nil {
 		return PreparedCommand{}, err
+	}
+	if err := validateText("private handoff", handoffPath); err != nil {
+		return PreparedCommand{}, cleanupInvalidHandoff(handoffPath, fmt.Errorf("validate Codex pane command: %w", err))
 	}
 	lease, err := scheduleHandoffExpiry(
 		executable, handoffPath, time.Now().Add(handoffMaxAge), launch.DeferUntilProducerExit,
@@ -116,9 +125,15 @@ func PrepareCodexCommand(launch CodexLaunch, parent []string) (PreparedCommand, 
 // PrepareClaudeCommand snapshots the caller's selected authentication and
 // telemetry configuration into an owner-only, one-shot handoff.
 func PrepareClaudeCommand(launch ClaudeLaunch, parent []string) (PreparedCommand, error) {
+	if err := validateClaudePastedValues(launch); err != nil {
+		return PreparedCommand{}, err
+	}
 	executable, err := resolvePrivateExecutable()
 	if err != nil {
 		return PreparedCommand{}, fmt.Errorf("resolve AGM private executor: %w", err)
+	}
+	if err := validateText("private executable", executable); err != nil {
+		return PreparedCommand{}, fmt.Errorf("validate Claude pane command: %w", err)
 	}
 	values := environmentMap(parent)
 	forward := make([]string, 0, 4)
@@ -142,6 +157,9 @@ func PrepareClaudeCommand(launch ClaudeLaunch, parent []string) (PreparedCommand
 	if err != nil {
 		return PreparedCommand{}, err
 	}
+	if err := validateText("private handoff", handoffPath); err != nil {
+		return PreparedCommand{}, cleanupInvalidHandoff(handoffPath, fmt.Errorf("validate Claude pane command: %w", err))
+	}
 	lease, err := scheduleHandoffExpiry(
 		executable, handoffPath, time.Now().Add(handoffMaxAge), launch.DeferUntilProducerExit,
 	)
@@ -153,12 +171,58 @@ func PrepareClaudeCommand(launch ClaudeLaunch, parent []string) (PreparedCommand
 	return PreparedCommand{Command: BuildClaudeCommand(launch), path: handoffPath, lease: lease}, nil
 }
 
+func validateCodexPastedValues(launch CodexLaunch) error {
+	for _, field := range []struct{ name, value string }{
+		{"session", launch.SessionName},
+		{"model", launch.Model},
+		{"workdir", launch.WorkDir},
+		{"sandbox", launch.Sandbox},
+		{"approval", launch.Approval},
+		{"resume-id", launch.ResumeID},
+	} {
+		if err := validateOptionalText(field.name, field.value); err != nil {
+			return fmt.Errorf("validate Codex pane command: %w", err)
+		}
+	}
+	if err := validateTextList("add-dir", launch.AddDirs); err != nil {
+		return fmt.Errorf("validate Codex pane command: %w", err)
+	}
+	return nil
+}
+
+func validateClaudePastedValues(launch ClaudeLaunch) error {
+	for _, field := range []struct{ name, value string }{
+		{"session", launch.SessionName},
+		{"session-id", launch.SessionID},
+		{"resume-id", launch.ResumeID},
+		{"workdir", launch.WorkDir},
+		{"model", launch.Model},
+		{"permission", launch.Permission},
+	} {
+		if err := validateOptionalText(field.name, field.value); err != nil {
+			return fmt.Errorf("validate Claude pane command: %w", err)
+		}
+	}
+	if err := validateTextList("add-dir", launch.AddDirs); err != nil {
+		return fmt.Errorf("validate Claude pane command: %w", err)
+	}
+	return nil
+}
+
 func cleanupFailedHandoff(path string, scheduleErr error) error {
 	removeErr := os.Remove(path)
 	if errors.Is(removeErr, os.ErrNotExist) {
 		removeErr = nil
 	}
 	return errors.Join(fmt.Errorf("schedule private launch handoff expiration: %w", scheduleErr), removeErr)
+}
+
+func cleanupInvalidHandoff(path string, validationErr error) error {
+	removeErr := os.Remove(path)
+	if errors.Is(removeErr, os.ErrNotExist) {
+		removeErr = nil
+	}
+	return errors.Join(validationErr, removeErr)
 }
 
 func startHandoffExpiry(executable, path string, expiresAt time.Time, deferred bool) (io.Closer, error) {
@@ -393,6 +457,9 @@ func stageHandoff(protocol string, environment []string, deferred bool) (string,
 	root, err := filepath.Abs(handoffRoot())
 	if err != nil {
 		return "", fmt.Errorf("resolve private launch handoff directory: %w", err)
+	}
+	if err := validateText("private handoff directory", root); err != nil {
+		return "", err
 	}
 	if err := os.MkdirAll(root, 0700); err != nil {
 		return "", fmt.Errorf("create private launch handoff directory: %w", err)

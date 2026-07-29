@@ -32,6 +32,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/reaper"
 	"github.com/vbonnet/dear-agent/agm/internal/recovery"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
+	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 	"github.com/vbonnet/dear-agent/agm/internal/state"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/wayfinderparity"
@@ -1649,7 +1650,7 @@ func bothPiCommandsShouldForwardCodingAgentDirectory(ctx context.Context) error 
 	if err != nil {
 		return err
 	}
-	want := "PI_CODING_AGENT_DIR=" + launchparity.ShellQuote(state.piCodingAgentDir)
+	want := "PI_CODING_AGENT_DIR=" + shellquote.Quote(state.piCodingAgentDir)
 	for name, command := range map[string]string{"create": state.piCreateCommand, "resume": state.piResumeCommand} {
 		if !strings.Contains(command, want) {
 			return fmt.Errorf("pi %s command omitted %q: %s", name, want, command)

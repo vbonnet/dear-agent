@@ -149,16 +149,17 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	if err := agyNewSession(tmuxName, workDir); err != nil {
 		return "", fmt.Errorf("failed to create tmux session: %w", err)
 	}
-	agyCmd := launchparity.BuildAgyCommand(launchparity.AgyCommandSpec{
+	agySpec := launchparity.AgyCommandSpec{
 		WorkDir:        workDir,
 		ResolvedModel:  resolvedModel,
 		PermissionMode: permissionMode,
 		ConversationID: conversationID,
 		ExtraAddDirs:   ctx.AuthorizedDirs,
-	}).Command
+	}
+	agyCmd := launchparity.BuildAgyCommand(agySpec).Command
 
 	// Start Agy in the tmux session
-	if err := agySendCommand(tmuxName, agyCmd); err != nil {
+	if err := sendPastedShellCommandWith(agySendCommand, tmuxName, agyCmd, agyPastedShellValues(agySpec)...); err != nil {
 		return "", rollbackAgyAdapterSession(tmuxName, fmt.Errorf("failed to start Agy in tmux session: %w", err))
 	}
 
@@ -279,15 +280,16 @@ func resumeAgyAdapterProcess(sessionID SessionID, metadata *SessionMetadata) err
 		}
 		created = true
 	}
-	fullCmd := launchparity.BuildAgyCommand(launchparity.AgyCommandSpec{
+	agySpec := launchparity.AgyCommandSpec{
 		WorkDir:        workDir,
 		ResolvedModel:  resolvedModel,
 		PermissionMode: metadata.PermissionMode,
 		ConversationID: metadata.UUID,
 		ExtraAddDirs:   metadata.AuthorizedDirs,
-	}).Command
+	}
+	fullCmd := launchparity.BuildAgyCommand(agySpec).Command
 
-	if err := agySendCommand(metadata.TmuxName, fullCmd); err != nil {
+	if err := sendPastedShellCommandWith(agySendCommand, metadata.TmuxName, fullCmd, agyPastedShellValues(agySpec)...); err != nil {
 		primaryErr := fmt.Errorf("failed to send resume command: %w", err)
 		if created {
 			return rollbackAgyAdapterSession(metadata.TmuxName, primaryErr)
@@ -303,6 +305,11 @@ func resumeAgyAdapterProcess(sessionID SessionID, metadata *SessionMetadata) err
 		return primaryErr
 	}
 	return nil
+}
+
+func agyPastedShellValues(spec launchparity.AgyCommandSpec) []string {
+	values := []string{spec.WorkDir, spec.ResolvedModel, spec.PermissionMode, spec.ConversationID}
+	return append(values, spec.ExtraAddDirs...)
 }
 
 func resolveAgyResumeInputs(sessionID SessionID, metadata *SessionMetadata) (string, string, error) {
@@ -625,6 +632,10 @@ func (a *AgyAdapter) ExecuteCommand(cmd Command) error {
 			return fmt.Errorf("rename command: %w", err)
 		}
 
+		if err := ValidateSendKeysText("session name", newName); err != nil {
+			return fmt.Errorf("rename command: %w", err)
+		}
+
 		if err := tmux.SendCommand(metadata.TmuxName, fmt.Sprintf("/rename %s\r", newName)); err != nil {
 			return fmt.Errorf("failed to send rename command: %w", err)
 		}
@@ -644,7 +655,7 @@ func (a *AgyAdapter) ExecuteCommand(cmd Command) error {
 		if err := ValidateSendDirPath(newPath); err != nil {
 			return fmt.Errorf("setdir command: %w", err)
 		}
-		if err := tmux.SendCommand(metadata.TmuxName, fmt.Sprintf("cd %s\r", newPath)); err != nil {
+		if err := sendPastedShellCommand(metadata.TmuxName, buildSetDirCommand(newPath), newPath); err != nil {
 			return fmt.Errorf("failed to send cd command: %w", err)
 		}
 		return nil

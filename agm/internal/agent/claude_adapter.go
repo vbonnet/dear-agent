@@ -73,6 +73,16 @@ func (a *ClaudeAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	if workDir == "" {
 		workDir = "."
 	}
+	addDirs := []string{workDir}
+	for _, dir := range ctx.AuthorizedDirs {
+		if dir != workDir {
+			addDirs = append(addDirs, dir)
+		}
+	}
+	launchValues := append([]string{tmuxName, string(sessionID), workDir}, addDirs...)
+	if err := validatePastedShellValues(launchValues...); err != nil {
+		return "", fmt.Errorf("validate Claude launch: %w", err)
+	}
 
 	// Check if tmux session already exists
 	exists, err := claudeHasSession(tmuxName)
@@ -87,12 +97,6 @@ func (a *ClaudeAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 		}
 	}
 
-	addDirs := []string{workDir}
-	for _, dir := range ctx.AuthorizedDirs {
-		if dir != workDir {
-			addDirs = append(addDirs, dir)
-		}
-	}
 	prepared, err := harnessexec.PrepareClaudeCommand(harnessexec.ClaudeLaunch{
 		SessionName: tmuxName, SessionID: string(sessionID), WorkDir: workDir,
 		AddDirs: addDirs, ForwardTelemetry: true,
@@ -184,6 +188,12 @@ func (a *ClaudeAdapter) ResumeSession(sessionID SessionID) error {
 		resumeID := metadata.UUID
 		if resumeID == "" {
 			resumeID = string(sessionID)
+		}
+		if err := validatePastedShellValues(metadata.TmuxName, string(sessionID), resumeID, metadata.WorkingDir); err != nil {
+			if created {
+				warnClaudeCleanup(metadata.TmuxName, claudeSendCommand(metadata.TmuxName, "exit\r"))
+			}
+			return fmt.Errorf("validate Claude resume: %w", err)
 		}
 		prepared, err := harnessexec.PrepareClaudeCommand(harnessexec.ClaudeLaunch{
 			SessionName: metadata.TmuxName, SessionID: string(sessionID),
@@ -453,6 +463,10 @@ func (a *ClaudeAdapter) ExecuteCommand(cmd Command) error {
 			return fmt.Errorf("rename command: %w", err)
 		}
 
+		if err := ValidateSendKeysText("session name", newName); err != nil {
+			return fmt.Errorf("rename command: %w", err)
+		}
+
 		// 1. Send to Claude CLI (updates Claude's internal name)
 		if err := tmux.SendCommand(metadata.TmuxName, fmt.Sprintf("/rename %s\r", newName)); err != nil {
 			return fmt.Errorf("failed to send rename command: %w", err)
@@ -475,7 +489,7 @@ func (a *ClaudeAdapter) ExecuteCommand(cmd Command) error {
 		if err := ValidateSendDirPath(newPath); err != nil {
 			return fmt.Errorf("setdir command: %w", err)
 		}
-		if err := tmux.SendCommand(metadata.TmuxName, fmt.Sprintf("cd %s\r", newPath)); err != nil {
+		if err := sendPastedShellCommand(metadata.TmuxName, buildSetDirCommand(newPath), newPath); err != nil {
 			return fmt.Errorf("failed to send cd command: %w", err)
 		}
 		return nil

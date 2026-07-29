@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
+	"github.com/vbonnet/dear-agent/agm/internal/shellquote"
 )
 
 // Workdir verification/repair tuning knobs. Package-level vars (not consts) so
@@ -74,7 +75,11 @@ func EnsureSessionWorkDir(sessionName, workDir string) error {
 		// pane's shell may still be starting up.
 		if !repaired && time.Now().After(graceEnd) {
 			debug.Log("⚠️  Pane cwd %q does not match requested workdir %q — sending corrective cd (tmux server cwd likely deleted; ce-5zbg)", lastSeen, workDir)
-			if sendErr := SendCommand(sessionName, "cd "+singleQuote(workDir)); sendErr != nil {
+			command, commandErr := correctiveWorkDirCommand(workDir)
+			if commandErr != nil {
+				return commandErr
+			}
+			if sendErr := SendCommand(sessionName, command); sendErr != nil {
 				return fmt.Errorf("session %q started outside requested workdir %q (pane cwd %q) and corrective cd failed: %w",
 					sessionName, workDir, lastSeen, sendErr)
 			}
@@ -90,6 +95,13 @@ func EnsureSessionWorkDir(sessionName, workDir string) error {
 		sessionName, workDir, lastSeen)
 }
 
+func correctiveWorkDirCommand(workDir string) (string, error) {
+	if err := ValidatePastedText("workdir", workDir); err != nil {
+		return "", fmt.Errorf("validate corrective workdir paste: %w", err)
+	}
+	return "cd " + shellquote.Quote(workDir), nil
+}
+
 // PaneCurrentPath returns the current working directory of the session's
 // active pane, as reported by the tmux server.
 func PaneCurrentPath(sessionName string) (string, error) {
@@ -101,7 +113,14 @@ func PaneCurrentPath(sessionName string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to read pane_current_path for %q: %w", sessionName, err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return paneCurrentPathFromOutput(out), nil
+}
+
+// paneCurrentPathFromOutput removes only display-message's record delimiter.
+// Leading or trailing whitespace belongs to the Unix path and must survive so
+// the liveness comparison does not spuriously trigger a corrective paste.
+func paneCurrentPathFromOutput(out []byte) string {
+	return strings.TrimSuffix(string(out), "\n")
 }
 
 // samePath reports whether two paths refer to the same directory, tolerating
@@ -122,10 +141,4 @@ func canonicalPath(p string) string {
 		return filepath.Clean(resolved)
 	}
 	return filepath.Clean(p)
-}
-
-// singleQuote wraps s in single quotes for safe inclusion in a shell command
-// line, escaping embedded single quotes.
-func singleQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

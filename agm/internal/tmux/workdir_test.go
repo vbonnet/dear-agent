@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,10 +12,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSingleQuote(t *testing.T) {
-	assert.Equal(t, "'/tmp/plain'", singleQuote("/tmp/plain"))
-	assert.Equal(t, `'/tmp/it'\''s here'`, singleQuote("/tmp/it's here"))
-	assert.Equal(t, "''", singleQuote(""))
+func TestCorrectiveWorkDirCommandQuotesWorkDir(t *testing.T) {
+	got, err := correctiveWorkDirCommand("/tmp/it's here")
+	require.NoError(t, err)
+	assert.Equal(t, `cd '/tmp/it'"'"'s here'`, got)
+}
+
+func TestCorrectiveWorkDirCommandRejectsControls(t *testing.T) {
+	_, err := correctiveWorkDirCommand("/safe\x1b[201~\nunsafe")
+	require.Error(t, err)
+	assert.True(t, strings.Contains(err.Error(), "control characters"), err)
 }
 
 func TestIsShellCommand(t *testing.T) {
@@ -36,6 +43,23 @@ func TestSamePath_ResolvesSymlinks(t *testing.T) {
 	assert.True(t, samePath(link, target), "symlink and target should compare equal")
 	assert.True(t, samePath(target, target))
 	assert.False(t, samePath(target, filepath.Join(dir, "other")))
+}
+
+func TestPaneCurrentPathFromOutputPreservesPathWhitespace(t *testing.T) {
+	tests := map[string]struct {
+		output string
+		want   string
+	}{
+		"plain":            {output: "/tmp/path\n", want: "/tmp/path"},
+		"leading tab":      {output: "\t/tmp/path\n", want: "\t/tmp/path"},
+		"trailing tab":     {output: "/tmp/path\t\n", want: "/tmp/path\t"},
+		"trailing newline": {output: "/tmp/path\n\n", want: "/tmp/path\n"},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, test.want, paneCurrentPathFromOutput([]byte(test.output)))
+		})
+	}
 }
 
 // TestNewSession_RepairsWorkDirWhenServerCwdDeleted is the regression test for
@@ -96,7 +120,10 @@ func TestNewSession_WorkDirHonored(t *testing.T) {
 	defer cleanup()
 	setupTestState(t)
 
-	workDir := t.TempDir()
+	// A healthy server never needs to paste a corrective `cd`, so a path with
+	// terminal control bytes remains a valid liveness counter-check here.
+	workDir := filepath.Join(t.TempDir(), "valid\tworkdir")
+	require.NoError(t, os.Mkdir(workDir, 0o755))
 	sessionName := "test-workdir-honored"
 	start := time.Now()
 	require.NoError(t, NewSession(sessionName, workDir))
