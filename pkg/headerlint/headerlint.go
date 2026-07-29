@@ -19,6 +19,7 @@
 package headerlint
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -263,11 +264,19 @@ func goldmarkAnalysisSource(source []byte) []byte {
 				htmlBlock.HTMLBlockType != ast.HTMLBlockType7) {
 			return ast.WalkContinue, nil
 		}
-		if _, paragraphBefore := htmlBlock.PreviousSibling().(*ast.Paragraph); !paragraphBefore ||
-			htmlBlock.Lines().Len() == 0 {
+		paragraphBefore, paragraphOK := htmlBlock.PreviousSibling().(*ast.Paragraph)
+		if !paragraphOK || htmlBlock.Lines().Len() == 0 ||
+			paragraphBefore.Lines().Len() == 0 {
 			return ast.WalkContinue, nil
 		}
 		start := htmlBlock.Lines().At(0).Start
+		paragraphStop := paragraphBefore.Lines().At(paragraphBefore.Lines().Len() - 1).Stop
+		if bytes.Count(source[paragraphStop:start], []byte{'\n'}) >= 2 {
+			// Goldmark omits blank lines from the sibling list. A real blank
+			// between the paragraph and tag still allows a type-6/7 HTML block
+			// to interrupt, so preserve the block and everything it contains.
+			return ast.WalkContinue, nil
+		}
 		stop := htmlBlock.Lines().At(htmlBlock.Lines().Len() - 1).Stop
 		tagEnd := inlineHTMLTagEnd(source, start, stop)
 		if tagEnd < 0 {

@@ -1147,6 +1147,25 @@ func TestCheckFile_TypeSixHTMLDoesNotInterruptParagraph(t *testing.T) {
 	}
 }
 
+func TestCheckFile_TypeSixHTMLAfterBlankRemainsBlock(t *testing.T) {
+	const content = "# Doc\n" +
+		"intro\n" +
+		"\n" +
+		"<div>\n" +
+		"## literal raw HTML content\n" +
+		"\n" +
+		"**Status:** draft · **Owner:** docs\n"
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "type-six-after-blank.md", content)
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 1 || violations[0].Line != 7 {
+		t.Fatalf("want field violation after real HTML block, got %v", violations)
+	}
+}
+
 func TestCheckFile_TypeSevenHTMLMasksHeadingsUntilBlank(t *testing.T) {
 	const content = "# Doc\n" +
 		"<custom-element data-value=\"example\">\n" +
