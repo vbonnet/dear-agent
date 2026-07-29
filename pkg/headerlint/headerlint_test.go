@@ -662,6 +662,18 @@ func TestCheckFile_DoesNotFlagInvalidStrongOpeners(t *testing.T) {
 	}
 }
 
+func TestCheckFile_DoesNotFlagInvalidStrongClosers(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTemp(t, dir, "invalid-strong-close.md", "# Doc\n\n**Status:**draft · **Owner:**docs\n")
+	violations, err := CheckFile(path)
+	if err != nil {
+		t.Fatalf("CheckFile: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("want non-right-flanking closing delimiters ignored, got %v", violations)
+	}
+}
+
 func TestCheckFile_DoesNotCloseListFenceWithOverIndentedDelimiter(t *testing.T) {
 	const content = "# Doc\n\n- ```markdown\n      ```\n  **Status:** draft · **Owner:** docs\n  ```\n"
 	dir := t.TempDir()

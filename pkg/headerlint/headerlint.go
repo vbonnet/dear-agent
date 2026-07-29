@@ -629,6 +629,12 @@ func unescapedBoldFieldCount(line string) int {
 		if unicode.IsSpace(first) {
 			continue
 		}
+		if match[1] < len(line) {
+			next, _ := utf8.DecodeRuneInString(line[match[1]:])
+			if !unicode.IsSpace(next) && !unicode.IsPunct(next) {
+				continue
+			}
+		}
 		count++
 	}
 	return count
