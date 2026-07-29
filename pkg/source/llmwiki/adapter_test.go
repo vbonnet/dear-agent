@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vbonnet/dear-agent/internal/gittest"
 	"github.com/vbonnet/dear-agent/pkg/source"
 	"github.com/vbonnet/dear-agent/pkg/source/contract"
 	"github.com/vbonnet/dear-agent/pkg/source/llmwiki"
@@ -87,12 +88,12 @@ func TestAdd_AutoCommitInRealRepo(t *testing.T) {
 		{"config", "user.name", "Test"},
 		{"commit", "--allow-empty", "-m", "init"},
 	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
+		cmd := gittest.Command(t, dir, args...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v (%s)", args, err, string(out))
 		}
 	}
+	gittest.HardenRepo(t, dir)
 	a, err := llmwiki.Open(dir)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -110,8 +111,7 @@ func TestAdd_AutoCommitInRealRepo(t *testing.T) {
 		t.Fatalf("Add: %v", err)
 	}
 	// Two commits: init + the source add.
-	cmd := exec.Command("git", "log", "--oneline")
-	cmd.Dir = dir
+	cmd := gittest.Command(t, dir, "log", "--oneline")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git log: %v", err)

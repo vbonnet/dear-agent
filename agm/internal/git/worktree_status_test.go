@@ -2,9 +2,10 @@ package git
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestHasUncommittedChanges_CleanRepo(t *testing.T) {
@@ -132,8 +133,7 @@ func TestCommitsAhead_NegativeOnError(t *testing.T) {
 
 func mustGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	full := append([]string{"-C", dir}, args...)
-	if out, err := exec.Command("git", full...).CombinedOutput(); err != nil {
+	if out, err := gittest.Output(t, dir, args...); err != nil {
 		t.Fatalf("git %v failed: %v\n%s", args, err, out)
 	}
 }

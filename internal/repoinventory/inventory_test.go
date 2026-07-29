@@ -3,11 +3,12 @@ package repoinventory
 import (
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestScanUsesGitIgnoreRules(t *testing.T) {
@@ -102,9 +103,7 @@ func TestScanReturnsStableRelativePathsAndExecutableMode(t *testing.T) {
 
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := gittest.Output(t, dir, args...); err != nil {
 		t.Fatalf("git %v: %v: %s", args, err, out)
 	}
 }

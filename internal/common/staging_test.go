@@ -2,9 +2,10 @@ package common
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // Helper to create a temporary git repo for testing
@@ -14,18 +15,9 @@ func setupGitRepo(t *testing.T) (string, func()) {
 	tmpDir := t.TempDir()
 	t.Chdir(tmpDir)
 
-	cmd := exec.Command("git", "init")
-	cmd.Dir = tmpDir
-	if err := cmd.Run(); err != nil {
+	if err := gittest.Command(t, tmpDir, "init").Run(); err != nil {
 		t.Fatalf("failed to init git repo: %v", err)
 	}
-
-	gitConfig := exec.Command("git", "config", "user.name", "Test User")
-	gitConfig.Dir = tmpDir
-	gitConfig.Run()
-	gitEmail := exec.Command("git", "config", "user.email", "test@example.com")
-	gitEmail.Dir = tmpDir
-	gitEmail.Run()
 
 	cleanup := func() {}
 

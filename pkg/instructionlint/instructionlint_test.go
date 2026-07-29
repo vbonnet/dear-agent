@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 const testContextFingerprint = "0000000000000000000000000000000000000000000000000000000000000000"
@@ -1725,23 +1727,17 @@ func writeTestFile(t *testing.T, root, relative, content string) {
 
 func runGit(t *testing.T, root string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, output)
-	}
+	gittest.Run(t, root, args...)
 	if len(args) > 0 && args[0] == "init" {
 		for _, identity := range [][2]string{{"user.name", "instructionlint tests"}, {"user.email", "instructionlint@example.invalid"}} {
-			configCmd := exec.Command("git", "-C", root, "config", "--local", identity[0], identity[1])
-			if output, err := configCmd.CombinedOutput(); err != nil {
-				t.Fatalf("git config %s: %v\n%s", identity[0], err, output)
-			}
+			gittest.Run(t, root, "config", "--local", identity[0], identity[1])
 		}
 	}
 }
 
 func runGitOutput(t *testing.T, root string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	cmd := gittest.Command(t, root, args...)
 	output, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("git %v: %v", args, err)

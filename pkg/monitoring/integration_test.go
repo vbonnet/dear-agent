@@ -2,11 +2,11 @@ package monitoring_test
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/vbonnet/dear-agent/internal/gittest"
 	"github.com/vbonnet/dear-agent/pkg/monitoring"
 )
 
@@ -19,9 +19,15 @@ func TestMonitoringIntegration(t *testing.T) {
 	workDir := t.TempDir()
 
 	// Initialize git repo
-	cmd := exec.Command("git", "init", workDir)
+	cmd := gittest.Command(t, workDir, "init", workDir)
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to init git: %v", err)
+	}
+
+	// The sandbox inits from an empty template dir, so .git/hooks is not
+	// created for us; the monitor installs its post-commit hook there.
+	if err := os.MkdirAll(filepath.Join(workDir, ".git", "hooks"), 0o755); err != nil {
+		t.Fatalf("Failed to create hooks dir: %v", err)
 	}
 
 	// Create agent monitor
@@ -50,17 +56,17 @@ func TestMonitoringIntegration(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Simulate git commit
-	cmd = exec.Command("git", "-C", workDir, "add", ".")
+	cmd = gittest.Command(t, workDir, "add", ".")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to git add: %v", err)
 	}
 
-	cmd = exec.Command("git", "-C", workDir, "config", "user.email", "test@test.com")
-	cmd.Run()
-	cmd = exec.Command("git", "-C", workDir, "config", "user.name", "Test User")
-	cmd.Run()
-
-	cmd = exec.Command("git", "-C", workDir, "commit", "-m", "Initial commit")
+	// The monitor installs its post-commit hook into this repo's own
+	// .git/hooks, so point core.hooksPath back at it for this one invocation.
+	// The sandbox's empty hooks dir still shadows any host hook.
+	cmd = gittest.Command(t, workDir,
+		"-c", "core.hooksPath="+filepath.Join(workDir, ".git", "hooks"),
+		"commit", "-m", "Initial commit")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to commit: %v", err)
 	}

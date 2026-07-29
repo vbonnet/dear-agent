@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestParitySurfacesHaveSpecAndBDD(t *testing.T) {
@@ -611,9 +612,7 @@ func TestValidateAllGoPackageSpecsSkipsNestedWorktreesAndOutputs(t *testing.T) {
 func TestRepositoryCoverageExcludesIgnoredAndGeneratedImplementationPaths(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	cmd := exec.Command("git", "init", "-q")
-	cmd.Dir = root
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := gittest.Output(t, root, "init", "-q"); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}
 	writeCoverageFile(t, root, ".gitignore", ".beads/\nagm/agm-plugin/channels/agm-bus/dist/\n*~\n")

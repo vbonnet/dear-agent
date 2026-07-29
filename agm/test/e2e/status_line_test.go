@@ -13,6 +13,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 // TestStatusLineE2E_BasicDisplay tests end-to-end status line display in sandboxed tmux
@@ -490,7 +491,7 @@ func (e *E2EEnvironment) RunStatusLine(sessionName string) (string, error) {
 		"--session", sessionName)
 	// Set environment variables to connect to test Dolt database and tmux socket
 	// Must match GetTestAdapter() configuration and test tmux socket
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(gittest.Env(e.t),
 		"ENGRAM_TEST_MODE=1",
 		"ENGRAM_TEST_WORKSPACE=test",
 		"WORKSPACE=test",
@@ -511,7 +512,7 @@ func (e *E2EEnvironment) RunStatusLineJSON(sessionName string) (string, error) {
 		"--session", sessionName, "--json")
 	// Set environment variables to connect to test Dolt database and tmux socket
 	// Must match GetTestAdapter() configuration and test tmux socket
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(gittest.Env(e.t),
 		"ENGRAM_TEST_MODE=1",
 		"ENGRAM_TEST_WORKSPACE=test",
 		"WORKSPACE=test",
@@ -549,15 +550,13 @@ func (e *E2EEnvironment) CreateGitRepo() *GitRepo {
 	}
 
 	// Initialize git repo
-	cmd := exec.Command("git", "init")
-	cmd.Dir = repoPath
+	cmd := gittest.Command(e.t, repoPath, "init")
 	if err := cmd.Run(); err != nil {
 		e.t.Fatalf("Failed to init git repo: %v", err)
 	}
 
 	// Create initial commit
-	cmd = exec.Command("git", "commit", "--allow-empty", "-m", "Initial commit")
-	cmd.Dir = repoPath
+	cmd = gittest.Command(e.t, repoPath, "commit", "--allow-empty", "-m", "Initial commit")
 	if err := cmd.Run(); err != nil {
 		e.t.Fatalf("Failed to create initial commit: %v", err)
 	}
@@ -611,14 +610,12 @@ func (r *GitRepo) CreateUncommittedFile(filename string, content string) {
 }
 
 func (r *GitRepo) Commit(message string) {
-	cmd := exec.Command("git", "add", ".")
-	cmd.Dir = r.Path
+	cmd := gittest.Command(r.t, r.Path, "add", ".")
 	if err := cmd.Run(); err != nil {
 		r.t.Fatalf("Failed to git add: %v", err)
 	}
 
-	cmd = exec.Command("git", "commit", "-m", message)
-	cmd.Dir = r.Path
+	cmd = gittest.Command(r.t, r.Path, "commit", "-m", message)
 	if err := cmd.Run(); err != nil {
 		r.t.Fatalf("Failed to git commit: %v", err)
 	}

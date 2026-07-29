@@ -5,11 +5,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
-func git(t *testing.T, args ...string) {
+func git(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+	if out, err := gittest.Command(t, dir, args...).CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 }
@@ -28,17 +30,15 @@ func TestRealSweepDeps_Discover(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	git(t, "init", "-b", "main", mainCheckout)
-	git(t, "-C", mainCheckout, "config", "user.email", "t@t.com")
-	git(t, "-C", mainCheckout, "config", "user.name", "t")
+	git(t, base, "init", "-b", "main", mainCheckout)
 	if err := os.WriteFile(filepath.Join(mainCheckout, "f"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	git(t, "-C", mainCheckout, "add", "f")
-	git(t, "-C", mainCheckout, "commit", "-m", "init")
+	git(t, mainCheckout, "add", "f")
+	git(t, mainCheckout, "commit", "-m", "init")
 
 	linked := filepath.Join(repoDir, "feat")
-	git(t, "-C", mainCheckout, "worktree", "add", "-b", "claude/feat", linked)
+	git(t, mainCheckout, "worktree", "add", "-b", "claude/feat", linked)
 
 	got, err := (RealSweepDeps{}).Discover(base)
 	if err != nil {

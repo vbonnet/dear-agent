@@ -51,6 +51,10 @@ that triggered it.
 
 **GITHOOK-17** When build-relevant Wayfinder source changes on the default branch, the system shall serialize activation across checkouts sharing the install directory using the platform lock tool's file-and-command form, make every contender acquire the shared lock before refreshing canonical trunk, and atomically install the Wayfinder binary from that freshly resolved revision.
 
+**GITHOOK-18** If a post-merge hook runs in a repository outside every managed root, then the system shall perform no maintenance stage, because a globally installed hook otherwise acts in throwaway repositories a test suite created.
+
+**GITHOOK-19** When the system decides whether a repository is managed, the system shall resolve symlinks and compare whole path components, so that a temporary directory reached through a symlinked parent and a sibling sharing a textual prefix are both treated as unmanaged.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/hook_parity.feature`

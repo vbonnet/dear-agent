@@ -12,6 +12,7 @@ import (
 // Repo manages a git repository for memory storage
 type Repo struct {
 	dir string
+	env []string
 }
 
 // NewRepo creates a Repo for the given directory
@@ -26,8 +27,7 @@ func (r *Repo) Dir() string {
 
 // IsRepo checks if the directory is a git repository
 func (r *Repo) IsRepo() bool {
-	cmd := exec.Command("git", "rev-parse", "--git-dir")
-	cmd.Dir = r.dir
+	cmd := r.command("rev-parse", "--git-dir")
 	return cmd.Run() == nil
 }
 
@@ -35,12 +35,16 @@ func (r *Repo) IsRepo() bool {
 // Creates the directory, runs git init, sets up .gitignore, and
 // optionally configures a remote.
 func EnsureRepo(dir, remoteName, remoteURL, branch string) (*Repo, error) {
+	return ensureRepoWithEnv(dir, remoteName, remoteURL, branch, nil)
+}
+
+func ensureRepoWithEnv(dir, remoteName, remoteURL, branch string, env []string) (*Repo, error) {
 	// Create directory if needed
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, fmt.Errorf("create directory: %w", err)
 	}
 
-	r := &Repo{dir: dir}
+	r := &Repo{dir: dir, env: env}
 
 	if r.IsRepo() {
 		return r, nil
@@ -110,8 +114,7 @@ func (r *Repo) StageDeleted(paths ...string) error {
 // Commit creates a git commit with the given message.
 // Returns the commit hash or empty string if nothing to commit.
 func (r *Repo) Commit(message string) (string, error) {
-	cmd := exec.Command("git", "commit", "-m", message)
-	cmd.Dir = r.dir
+	cmd := r.command("commit", "-m", message)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		if strings.Contains(string(output), "nothing to commit") {
@@ -125,8 +128,7 @@ func (r *Repo) Commit(message string) (string, error) {
 
 // HeadHash returns the current HEAD commit hash
 func (r *Repo) HeadHash() (string, error) {
-	cmd := exec.Command("git", "rev-parse", "HEAD")
-	cmd.Dir = r.dir
+	cmd := r.command("rev-parse", "HEAD")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git rev-parse: %w", err)
@@ -144,8 +146,7 @@ func (r *Repo) Log(path string, limit int) ([]CommitEntry, error) {
 		args = append(args, "--", path)
 	}
 
-	cmd := exec.Command("git", args...)
-	cmd.Dir = r.dir
+	cmd := r.command(args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("git log: %w", err)
@@ -178,8 +179,7 @@ func (r *Repo) Diff(path, fromRef, toRef string) (string, error) {
 		args = append(args, "--", path)
 	}
 
-	cmd := exec.Command("git", args...)
-	cmd.Dir = r.dir
+	cmd := r.command(args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git diff: %w", err)
@@ -197,8 +197,7 @@ func (r *Repo) Restore(path, commitHash string) error {
 
 // Status returns the git status output
 func (r *Repo) Status() (string, error) {
-	cmd := exec.Command("git", "status", "--porcelain")
-	cmd.Dir = r.dir
+	cmd := r.command("status", "--porcelain")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git status: %w", err)
@@ -219,13 +218,21 @@ func (r *Repo) Push(remoteName, branch string) error {
 
 // run executes a git command in the repo directory
 func (r *Repo) run(args ...string) error {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = r.dir
+	cmd := r.command(args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git %s: %w (output: %s)", strings.Join(args, " "), err, string(output))
 	}
 	return nil
+}
+
+func (r *Repo) command(args ...string) *exec.Cmd {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = r.dir
+	if r.env != nil {
+		cmd.Env = append([]string(nil), r.env...)
+	}
+	return cmd
 }
 
 // CommitEntry represents a single commit in the log

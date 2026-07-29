@@ -2,11 +2,12 @@ package main
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/gittest"
 )
 
 func TestRun_NoSpecFiles(t *testing.T) {
@@ -88,8 +89,7 @@ func TestExpandPaths_MissingFile(t *testing.T) {
 func TestExpandPathsHonorsRepositoryIgnoreAndGeneratedPolicy(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	cmd := exec.Command("git", "init", "-q")
-	cmd.Dir = root
+	cmd := gittest.Command(t, root, "init", "-q")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}
