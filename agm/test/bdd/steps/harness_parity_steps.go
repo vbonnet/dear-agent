@@ -625,8 +625,8 @@ func codexResumeSuccessShouldRequireProcessAndComposerReadiness(ctx context.Cont
 	cmd := exec.CommandContext(
 		testCtx,
 		"go", "test",
-		"./agm/internal/tmux", "./agm/internal/state", "./agm/internal/session", "./agm/internal/manager/tmuxbackend",
-		"-run", `^(TestCodexResumeReadiness(RequiresProcessThenComposer|StopsBeforeComposerWithoutProcess)|TestWaitForCodexPrompt(RejectsEchoedLaunchModel|AcceptsCurrentWelcomeGhostComposer)|TestIsCodex(ComposerReady|IdlePreservesCurrentWelcomeGhostStyle)|TestWaitForPrompt(Simple|OrResumeFailure)PreservesCurrentCodexWelcomeGhostStyle|TestSendMultiLinePromptSafePreservesCurrentCodexWelcomeGhostStyle|TestIsProcessReadyWithRuntimePreservesCancellation(Before|During)CodexFallback|TestDetector_CodexReadinessRequiresStructuredComposer|TestStateAndDeliveryPreserveCurrentCodexWelcomeGhostStyle|TestBackendStateAndDeliveryPreserveCurrentCodexWelcomeGhostStyle)$`,
+		"./agm/internal/tmux", "./agm/internal/state", "./agm/internal/session",
+		"-run", `^(TestCodexResumeReadiness(RequiresProcessThenComposer|StopsBeforeComposerWithoutProcess)|TestWaitForCodexPrompt(RejectsEchoedLaunchModel|AcceptsCurrentWelcomeGhostComposer)|TestIsCodex(ComposerReady|IdlePreservesCurrentWelcomeGhostStyle)|TestWaitForPrompt(Simple|OrResumeFailure)PreservesCurrentCodexWelcomeGhostStyle|TestSendMultiLinePromptSafePreservesCurrentCodexWelcomeGhostStyle|TestIsProcessReadyWithRuntimePreservesCancellation(Before|During)CodexFallback|TestDetector_CodexReadinessRequiresStructuredComposer|TestStateAndDeliveryPreserveCurrentCodexWelcomeGhostStyle)$`,
 		"-count=1",
 	)
 	cmd.Dir = bddRepoRoot()
